@@ -81,7 +81,11 @@ function showIslandMsg(msg, duration = 0) {
 
 function restoreIslandZoom() {
   islZoom.style.color = 'rgba(255,255,255,0)';
-  setTimeout(() => { updateZoomDisplay(); islZoom.style.color = 'rgba(255,255,255,0.38)'; }, 500);
+  setTimeout(() => {
+    _lastZoomPct = -1; // force re-render even if zoom didn't change
+    updateZoomDisplay();
+    islZoom.style.color = 'rgba(255,255,255,0.38)';
+  }, 500);
 }
 
 
@@ -957,7 +961,6 @@ async function openBoard() {
   try {
     const filePath = await window.__TAURI__.core.invoke('open_file_dialog');
     if (!filePath) return;
-    showIslandMsg('Opening');
     const data = JSON.parse(await window.__TAURI__.core.invoke('read_text_file', { path: filePath }));
     applyBoardData(data);
     currentFilePath = filePath;
