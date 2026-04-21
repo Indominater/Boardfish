@@ -592,6 +592,8 @@ function deleteSelected() {
 const ZOOM_MIN = 0.05, ZOOM_MAX = 10;
 
 let _caretTimer = null;
+let _setMode  = null; // 'pan' | 'zoom' | null (null = no active set)
+let _setTimer = null;
 
 let islTab = 'mouse';
 let islLastMouse    = null;
@@ -643,18 +645,27 @@ canvas.addEventListener('wheel', (e) => {
     scheduleTransform();
     return;
   }
-  const abs      = Math.abs(e.deltaY);
-  const sigAbs   = abs < 4;
+  const abs       = Math.abs(e.deltaY);
+  const sigAbs    = abs < 4;
   const sigDeltaX = e.deltaX !== 0;
-  const isPan    = sigAbs || sigDeltaX;
 
-  const snapshot = {
-    sigAbs, sigDeltaX,
-    abs: abs.toFixed(2), deltaX: e.deltaX.toFixed(2),
-  };
-  if (isPan) { islLastTrackpad = snapshot; }
-  else       { islLastMouse    = snapshot; }
-  islRender();
+  // First event of a new set classifies the whole set.
+  // A set ends after 250ms of no wheel events.
+  const isNewSet = _setMode === null;
+  if (isNewSet) {
+    _setMode = (sigAbs || sigDeltaX) ? 'pan' : 'zoom';
+    const snapshot = {
+      sigAbs, sigDeltaX,
+      abs: abs.toFixed(2), deltaX: e.deltaX.toFixed(2),
+    };
+    if (_setMode === 'pan') { islLastTrackpad = snapshot; }
+    else                    { islLastMouse    = snapshot; }
+    islRender();
+  }
+  clearTimeout(_setTimer);
+  _setTimer = setTimeout(() => { _setMode = null; }, 250);
+
+  const isPan = _setMode === 'pan';
 
   if (isPan) {
     panX -= e.deltaX;
