@@ -667,12 +667,13 @@ canvas.addEventListener('wheel', (e) => {
   const sigMode1   = e.deltaMode === 1;
   const sigDeltaX  = e.deltaX !== 0;
   const sigStream  = dt < 25;
+  const sigMicro   = abs < 6;   // too small for any real mouse notch, no stream gate needed
   const sigSmall   = abs < 12;
   const sigVarying = abs !== prevAbs;
 
   if (sigMode1) {
     _wheelPanMode = false;
-  } else if (sigDeltaX || (sigStream && (sigSmall || sigVarying))) {
+  } else if (sigDeltaX || sigMicro || (sigStream && (sigSmall || sigVarying))) {
     _wheelPanMode = true;
   }
   clearTimeout(_wheelPanTimer);
