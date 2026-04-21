@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Boardfish</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #272727;
+      user-select: none;
+      font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+    }
+
+    #canvas {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      contain: paint;
+    }
+
+    #canvas-bg {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      display: block;
+    }
+
+    #canvas.panning    { cursor: grabbing !important; }
+    #canvas.panning    * { cursor: grabbing !important; }
+
+    #world {
+      position: absolute;
+      top: 0; left: 0;
+      transform-origin: 0 0;
+      z-index: 1;
+    }
+
+    .obj { position: absolute; cursor: default; }
+
+    .obj-inner { width: 100%; height: 100%; overflow: hidden; }
+
+    .obj-text .obj-inner pre {
+      width: 100%;
+      height: 100%;
+      font-family: inherit;
+      font-size: 16px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 4px;
+      background: transparent;
+      border: none;
+      outline: none;
+      overflow: hidden;
+      cursor: default;
+      color: #ffffff;
+    }
+
+    .obj-text.editing .obj-inner pre { cursor: text; }
+
+    .obj-image .obj-inner img {
+      width: 100%;
+      height: 100%;
+      object-fit: fill;
+      display: block;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    /* ── Selection overlay ── */
+    #sel-overlay {
+      position: absolute;
+      display: none;
+      border: 1px solid #558ef0;
+      pointer-events: none;
+      z-index: 99998;
+    }
+    #sel-overlay.visible { display: block; }
+    .s-handle {
+      position: absolute;
+      width: 7px;
+      height: 7px;
+      background: #fff;
+      border-radius: 1px;
+      pointer-events: all;
+    }
+    .s-handle[data-dir="nw"] { top: -4px;    left: -4px;   cursor: nw-resize; }
+    .s-handle[data-dir="ne"] { top: -4px;    right: -4px;  cursor: ne-resize; }
+    .s-handle[data-dir="sw"] { bottom: -4px; left: -4px;   cursor: sw-resize; }
+    .s-handle[data-dir="se"] { bottom: -4px; right: -4px;  cursor: se-resize; }
+
+    /* ── Context menu ── */
+    #ctx-menu {
+      position: fixed;
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 2px;
+      box-shadow: 0 12px 32px -8px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.02);
+      z-index: 99999;
+      min-width: 210px;
+      padding: 6px 0;
+      display: none;
+    }
+    #ctx-menu.visible { display: block; }
+
+    .ctx-item {
+      position: relative;
+      display: block;
+      width: 100%;
+      padding: 6px 16px;
+      font-family: inherit;
+      font-size: 13px;
+      color: #d4d4d4;
+      background: transparent;
+      border: none;
+      text-align: left;
+      cursor: default;
+      letter-spacing: -0.01em;
+      transition: background 0.1s, color 0.1s, padding-left 0.1s;
+    }
+    .ctx-item::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 2px;
+      background: #4FC3F7;
+      transform: scaleY(0);
+      opacity: 0;
+      transition: transform 0.15s, opacity 0.15s;
+      transform-origin: center;
+    }
+    .ctx-item:hover {
+      background: #1d1d1d;
+      color: #ffffff;
+      padding-left: 18px;
+    }
+    .ctx-item:hover::before {
+      transform: scaleY(1);
+      opacity: 1;
+    }
+    .ctx-item:active { background: #222222; }
+
+    .ctx-sep {
+      height: 1px;
+      background: #2a2a2a;
+      margin: 5px 8px;
+    }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(12px);
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 2px;
+      color: #d4d4d4;
+      font-family: inherit;
+      font-size: 12px;
+      letter-spacing: -0.01em;
+      padding: 8px 16px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      z-index: 999999;
+      white-space: nowrap;
+      box-shadow: 0 8px 24px -4px rgba(0,0,0,0.5);
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── Unsaved changes dialog ── */
+    #dialog-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 9999999;
+      align-items: center;
+      justify-content: center;
+    }
+    #dialog-overlay.show { display: flex; }
+
+    #dialog {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 2px;
+      box-shadow: 0 12px 40px -8px rgba(0,0,0,0.8), inset 0 0 0 1px rgba(255,255,255,0.02);
+      width: 400px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    #dialog-body { display: flex; flex-direction: column; gap: 8px; }
+
+    #dialog-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #f5f5f5;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    #dialog-msg {
+      font-size: 13px;
+      color: #888888;
+      line-height: 1.5;
+      letter-spacing: -0.01em;
+    }
+
+    #dialog-btns {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    #dialog-btns button {
+      height: 32px;
+      padding: 0 16px;
+      border-radius: 2px;
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: -0.01em;
+      cursor: default;
+      transition: background 0.1s, border-color 0.1s, color 0.1s;
+    }
+
+    #dlg-cancel {
+      background: transparent;
+      border: none;
+      color: #888888;
+    }
+    #dlg-cancel:hover { background: #1f1f1f; color: #e0e0e0; }
+
+    #dlg-discard {
+      background: transparent;
+      border: 1px solid #333333;
+      color: #e0e0e0;
+    }
+    #dlg-discard:hover { border-color: #555555; background: #1a1a1a; }
+
+    #dlg-save {
+      background: #4FC3F7;
+      border: 1px solid transparent;
+      color: #0a0a0a;
+      font-weight: 500;
+      box-shadow: 0 0 16px -4px rgba(79, 195, 247, 0.3);
+    }
+    #dlg-save:hover { background: #78d3fa; }
+    #dlg-save:active { transform: scale(0.98); }
+
+
+    /* ── Controls panel (inside context menu) ── */
+    #controls-panel {
+      position: absolute;
+      left: calc(100% + 4px);
+      top: 0;
+      display: none;
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 2px;
+      box-shadow: 0 12px 32px -8px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.02);
+      min-width: 200px;
+      padding: 6px 14px 8px;
+      white-space: nowrap;
+    }
+    #controls-panel.visible { display: block; }
+    .ctrl-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 3px 0;
+    }
+    .ctrl-action {
+      font-size: 12px;
+      color: #5a5a5a;
+      letter-spacing: -0.01em;
+    }
+    .ctrl-key {
+      font-size: 11px;
+      color: #4FC3F7;
+      background: rgba(79,195,247,0.07);
+      border: 1px solid rgba(79,195,247,0.14);
+      border-radius: 2px;
+      padding: 1px 6px;
+      white-space: nowrap;
+    }
+    .ctrl-sep-inner {
+      height: 1px;
+      background: #1e1e1e;
+      margin: 4px 0;
+    }
+    #btn-controls .ctrl-chevron {
+      position: absolute;
+      right: 16px;
+      font-size: 9px;
+      color: #444;
+      transition: transform 0.15s ease, color 0.15s;
+    }
+    #btn-controls.open .ctrl-chevron {
+      transform: rotate(90deg);
+      color: #4FC3F7;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas">
+    <canvas id="canvas-bg"></canvas>
+    <div id="world"></div>
+    <div id="sel-overlay">
+      <div class="s-handle" data-dir="nw"></div>
+      <div class="s-handle" data-dir="ne"></div>
+      <div class="s-handle" data-dir="sw"></div>
+      <div class="s-handle" data-dir="se"></div>
+    </div>
+  </div>
+
+  <div id="ctx-menu">
+    <button class="ctx-item" id="btn-controls">Controls<span class="ctrl-chevron">›</span></button>
+    <div id="controls-panel">
+      <div class="ctrl-row"><span class="ctrl-action">Zoom</span><span class="ctrl-key">Scroll</span></div>
+      <div class="ctrl-row"><span class="ctrl-action">Pan</span><span class="ctrl-key">Middle drag</span></div>
+      <div class="ctrl-sep-inner"></div>
+      <div class="ctrl-row"><span class="ctrl-action">Undo</span><span class="ctrl-key">Ctrl Z</span></div>
+      <div class="ctrl-row"><span class="ctrl-action">Redo</span><span class="ctrl-key">Ctrl Shift Z</span></div>
+      <div class="ctrl-sep-inner"></div>
+      <div class="ctrl-row"><span class="ctrl-action">Delete</span><span class="ctrl-key">Del</span></div>
+      <div class="ctrl-row"><span class="ctrl-action">Copy image</span><span class="ctrl-key">Ctrl C</span></div>
+      <div class="ctrl-row"><span class="ctrl-action">Paste</span><span class="ctrl-key">Ctrl V</span></div>
+      <div class="ctrl-row"><span class="ctrl-action">Deselect</span><span class="ctrl-key">Esc</span></div>
+    </div>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item" id="btn-add-text">Add Text</button>
+    <button class="ctx-item" id="btn-add-image">Add Image</button>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item" id="btn-save">Save</button>
+    <button class="ctx-item" id="btn-save-as">Save As</button>
+    <button class="ctx-item" id="btn-open">Open</button>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item" id="btn-reset-zoom">Reset Zoom</button>
+  </div>
+
+  <input type="file" id="file-input" accept="image/*" style="display:none" />
+
+  <div id="toast"></div>
+
+  <div id="dialog-overlay">
+    <div id="dialog">
+      <div id="dialog-body">
+        <div id="dialog-title">Unsaved Changes</div>
+        <div id="dialog-msg">This board has unsaved changes.</div>
+      </div>
+      <div id="dialog-btns">
+        <button id="dlg-cancel">Cancel</button>
+        <button id="dlg-discard">Discard</button>
+        <button id="dlg-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+
+  <script src="app.js"></script>
+</body>
+</html>
