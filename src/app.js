@@ -773,7 +773,7 @@ document.getElementById('obj-btn-duplicate').addEventListener('click', () => {
 
 let _dropPos = { x: 0, y: 0 };
 
-canvas.addEventListener('dragover', (e) => {
+document.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
   _dropPos = { x: e.clientX, y: e.clientY };
