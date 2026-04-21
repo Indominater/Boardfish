@@ -9,7 +9,10 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 - **Mac** — download the `.dmg`, drag Boardfish to Applications
 - **Windows** — download the `.msi`, run the installer
 
-> If macOS blocks the app, go to System Settings → Privacy & Security → Open Anyway.
+> **macOS:** If you see "damaged and can't be opened", run this in Terminal after dragging to Applications:
+> ```bash
+> xattr -cr /Applications/Boardfish.app
+> ```
 
 ## Features
 
