@@ -791,11 +791,11 @@ canvas.addEventListener('drop', (e) => {
   }
 });
 
-// Tauri native drop — Rust emits boardfish://file-drop with cursor position in logical px
+// Tauri native drop — place at center of visible canvas (Rust drop position unreliable)
 if (window.__TAURI__) {
   window.__TAURI__.event.listen('boardfish://file-drop', async (event) => {
-    const { paths, x, y } = event.payload;
-    const pos = toWorld(x, y);
+    const { paths } = event.payload;
+    const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
     for (const path of paths) {
       if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) continue;
       try {
@@ -805,7 +805,7 @@ if (window.__TAURI__) {
                    : ext === 'gif' ? 'image/gif'
                    : ext === 'webp' ? 'image/webp'
                    : 'image/png';
-        addImage('data:' + mime + ';base64,' + b64, pos.x, pos.y);
+        addImage('data:' + mime + ';base64,' + b64, center.x, center.y);
       } catch (err) { console.error('Failed to load dropped file:', err); }
     }
   });
