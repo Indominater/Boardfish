@@ -512,7 +512,7 @@ function addText(wx, wy, content = '') {
   if (!content) enterEdit(obj.id);
 }
 
-function addImage(src, wx, wy) {
+function addImage(src, cx, cy) {
   const img = new Image();
   img.onload = () => {
     const MAX = 1000;
@@ -525,7 +525,7 @@ function addImage(src, wx, wy) {
     }
     const before = JSON.parse(JSON.stringify(objects));
     const imgKey = storeImage(src);
-    const obj = { id: newId(), type: 'image', x: wx, y: wy, w, h, z: ++zCounter, data: { imgKey } };
+    const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
     objects.push(obj);
     world.appendChild(buildElement(obj));
     selectObject(obj.id);
@@ -786,16 +786,16 @@ canvas.addEventListener('drop', (e) => {
   for (const file of [...e.dataTransfer.files]) {
     if (!file.type.startsWith('image/')) continue;
     const reader = new FileReader();
-    reader.onload = (ev) => addImage(ev.target.result, pos.x - 100, pos.y - 100);
+    reader.onload = (ev) => addImage(ev.target.result, pos.x, pos.y);
     reader.readAsDataURL(file);
   }
 });
 
-// Tauri native drop — Rust emits boardfish://file-drop with paths; position tracked via dragover
+// Tauri native drop — Rust emits boardfish://file-drop with cursor position in logical px
 if (window.__TAURI__) {
   window.__TAURI__.event.listen('boardfish://file-drop', async (event) => {
-    const { paths } = event.payload;
-    const pos = toWorld(_dropPos.x, _dropPos.y);
+    const { paths, x, y } = event.payload;
+    const pos = toWorld(x, y);
     for (const path of paths) {
       if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) continue;
       try {
@@ -805,7 +805,7 @@ if (window.__TAURI__) {
                    : ext === 'gif' ? 'image/gif'
                    : ext === 'webp' ? 'image/webp'
                    : 'image/png';
-        addImage('data:' + mime + ';base64,' + b64, pos.x - 100, pos.y - 100);
+        addImage('data:' + mime + ';base64,' + b64, pos.x, pos.y);
       } catch (err) { console.error('Failed to load dropped file:', err); }
     }
   });
@@ -1022,7 +1022,7 @@ document.addEventListener('paste', (e) => {
     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
     if (jsClipboard.type === 'image') {
       const src = imageStore[jsClipboard.imgKey];
-      if (src) { addImage(src, center.x - 100, center.y - 100); return; }
+      if (src) { addImage(src, center.x, center.y); return; }
     } else if (jsClipboard.type === 'text') {
       addText(center.x - 100, center.y - 40, jsClipboard.content);
       return;
@@ -1039,7 +1039,7 @@ document.addEventListener('paste', (e) => {
           const reader = new FileReader();
           reader.onload = (ev) => {
             const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-            addImage(ev.target.result, center.x - 150, center.y - 150);
+            addImage(ev.target.result, center.x, center.y);
           };
           reader.readAsDataURL(file);
           return;
