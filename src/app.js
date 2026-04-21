@@ -67,6 +67,25 @@ function updateZoomDisplay() {
   islZoom.textContent = Math.round(zoom * 100) + '%';
 }
 
+let _islMsgTimer = null;
+
+function showIslandMsg(msg, duration = 0) {
+  clearTimeout(_islMsgTimer);
+  islZoom.style.color = 'rgba(255,255,255,0)';
+  setTimeout(() => {
+    islZoom.textContent = msg;
+    islZoom.style.color = 'rgba(255,255,255,0.38)';
+    if (duration > 0) {
+      _islMsgTimer = setTimeout(() => restoreIslandZoom(), duration);
+    }
+  }, 500);
+}
+
+function restoreIslandZoom() {
+  islZoom.style.color = 'rgba(255,255,255,0)';
+  setTimeout(() => { updateZoomDisplay(); islZoom.style.color = 'rgba(255,255,255,0.38)'; }, 500);
+}
+
 
 function applyTransform() {
   updateAllGeom();
@@ -778,17 +797,6 @@ function markSaved() {
   savedHistoryIndex = historyIndex;
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-
-const toast = document.getElementById('toast');
-let toastTimer = null;
-
-function showToast(msg, duration = 2000) {
-  toast.textContent = msg;
-  toast.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), duration);
-}
 
 // ─── Unsaved changes dialog ───────────────────────────────────────────────────
 
@@ -864,20 +872,24 @@ async function saveBoardAs() {
   const tauri = window.__TAURI__;
   if (!tauri) { alert('Save requires the desktop app.'); return false; }
   try {
-    showToast('Saving…');
+    showIslandMsg('Saving');
+    const minTimer = new Promise(r => setTimeout(r, 1500));
     const filePath = await tauri.dialog.save({
       filters: [{ name: 'Boardfish Board', extensions: ['bf'] }],
       defaultPath: currentFilePath || 'board.bf'
     });
-    if (!filePath) { toast.classList.remove('show'); return false; }
-    await tauri.fs.writeTextFile(filePath, await boardJson());
+    if (!filePath) { restoreIslandZoom(); return false; }
+    await Promise.all([
+      tauri.fs.writeTextFile(filePath, await boardJson()),
+      minTimer
+    ]);
     currentFilePath = filePath;
     markSaved();
-    showToast('Saved ✓');
+    showIslandMsg('Saved', 1500);
     return true;
   } catch (err) {
     console.error('Save failed:', err);
-    showToast('Save failed');
+    showIslandMsg('Save failed', 2000);
     return false;
   }
 }
@@ -887,13 +899,17 @@ async function saveBoard() {
     const tauri = window.__TAURI__;
     if (!tauri) return false;
     try {
-      await tauri.fs.writeTextFile(currentFilePath, await boardJson());
+      showIslandMsg('Saving');
+      await Promise.all([
+        (async () => { await tauri.fs.writeTextFile(currentFilePath, await boardJson()); })(),
+        new Promise(r => setTimeout(r, 1500))
+      ]);
       markSaved();
-      showToast('Saved ✓');
+      showIslandMsg('Saved', 1500);
       return true;
     } catch (err) {
       console.error('Save failed:', err);
-      showToast('Save failed');
+      showIslandMsg('Save failed', 2000);
       return false;
     }
   }
@@ -921,12 +937,12 @@ async function openBoard() {
       multiple: false
     });
     if (!filePath) return;
-    showToast('Opening…');
+    showIslandMsg('Opening');
     const data = JSON.parse(await tauri.fs.readTextFile(filePath));
     applyBoardData(data);
     currentFilePath = filePath;
-    showToast('Opened ✓');
-  } catch (err) { console.error('Open failed:', err); showToast('Open failed'); }
+    showIslandMsg('Opened', 1500);
+  } catch (err) { console.error('Open failed:', err); showIslandMsg('Open failed', 2000); }
 }
 
 // ─── Close guard ─────────────────────────────────────────────────────────────
