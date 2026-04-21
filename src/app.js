@@ -629,7 +629,7 @@ canvas.addEventListener('wheel', (e) => {
   const sigDeltaX  = e.deltaX !== 0;
   const sigSmall   = abs < 12;
   const sigVarying = abs !== _prevWheelAbs;
-  const sigMouse   = e.deltaX === 0 && abs > 0 && abs === _prevWheelAbs;
+  const sigMouse   = e.deltaX === 0 && abs >= 12 && abs === _prevWheelAbs;
   const mouseLike  = sigMode1 || sigMouse;
   _prevWheelAbs = abs;
 
