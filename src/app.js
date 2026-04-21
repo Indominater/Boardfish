@@ -596,6 +596,34 @@ let _prevWheelAbs = 0;
 let _wheelPanMode = false;
 let _wheelPanTimer = null;
 
+let islTab = 'mouse';
+let islLastMouse    = null;
+let islLastTrackpad = null;
+
+function islSetTab(tab) {
+  islTab = tab;
+  islRender();
+}
+
+function islRender() {
+  const snap = islTab === 'mouse' ? islLastMouse : islLastTrackpad;
+  const tabM = document.getElementById('tab-mouse');
+  const tabT = document.getElementById('tab-trackpad');
+  tabM.className = 'isl-tab' + (islTab === 'mouse'    ? ' active-mouse'    : '');
+  tabT.className = 'isl-tab' + (islTab === 'trackpad' ? ' active-trackpad' : '');
+  if (!snap) return;
+  function sig(id, active, label) {
+    const el = document.getElementById(id);
+    el.textContent = label;
+    el.classList.toggle('active', active);
+  }
+  sig('sig-mode1',   snap.sigMode1,   `mode=${snap.deltaMode}`);
+  sig('sig-deltax',  snap.sigDeltaX,  `dX=${snap.deltaX}`);
+  sig('sig-small',   snap.sigSmall,   `abs=${snap.abs}`);
+  sig('sig-varying', snap.sigVarying, `Δ=${snap.abs}≠${snap.prevAbs}`);
+  sig('sig-mouse',   snap.sigMouse,   `Δ=${snap.abs}=${snap.prevAbs}`);
+}
+
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (editingId) {
@@ -641,17 +669,15 @@ canvas.addEventListener('wheel', (e) => {
   clearTimeout(_wheelPanTimer);
   _wheelPanTimer = setTimeout(() => { _wheelPanMode = false; }, 100);
 
-  // Update island debug indicator
-  const modeEl = document.getElementById('isl-input-mode');
-  if (modeEl) {
-    modeEl.textContent = _wheelPanMode ? 'Trackpad' : 'Mouse';
-    modeEl.className   = _wheelPanMode ? 'trackpad' : 'mouse';
-    document.getElementById('sig-mode1')  .classList.toggle('active', sigMode1);
-    document.getElementById('sig-deltax') .classList.toggle('active', sigDeltaX);
-    document.getElementById('sig-small')  .classList.toggle('active', sigSmall);
-    document.getElementById('sig-varying').classList.toggle('active', sigVarying);
-    document.getElementById('sig-mouse')  .classList.toggle('active', sigMouse);
-  }
+  // Store snapshot for debug island
+  const snapshot = {
+    sigMode1, sigDeltaX, sigSmall, sigVarying, sigMouse,
+    deltaX: e.deltaX.toFixed(2), abs: abs.toFixed(2),
+    prevAbs: _prevWheelAbs.toFixed(2), deltaMode: e.deltaMode
+  };
+  if (_wheelPanMode) { islLastTrackpad = snapshot; }
+  else               { islLastMouse    = snapshot; }
+  islRender();
 
   if (_wheelPanMode) {
     panX -= e.deltaX;
