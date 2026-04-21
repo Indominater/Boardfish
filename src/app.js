@@ -621,7 +621,6 @@ function islRender() {
   sig('sig-deltax',  snap.sigDeltaX,  `dX=${snap.deltaX}`);
   sig('sig-small',   snap.sigSmall,   `abs=${snap.abs}`);
   sig('sig-varying', snap.sigVarying, `Δ=${snap.abs}≠${snap.prevAbs}`);
-  sig('sig-mouse',   snap.sigMouse,   `Δ=${snap.abs}=${snap.prevAbs}`);
 }
 
 canvas.addEventListener('wheel', (e) => {
@@ -657,11 +656,9 @@ canvas.addEventListener('wheel', (e) => {
   const sigDeltaX  = e.deltaX !== 0;
   const sigSmall   = abs < 12;
   const sigVarying = abs !== _prevWheelAbs;
-  const sigMouse   = e.deltaX === 0 && abs >= 12 && abs === _prevWheelAbs;
-  const mouseLike  = sigMode1 || sigMouse;
   _prevWheelAbs = abs;
 
-  if (mouseLike) {
+  if (sigMode1) {
     _wheelPanMode = false;
   } else if (sigDeltaX || sigSmall || sigVarying) {
     _wheelPanMode = true;
@@ -671,7 +668,7 @@ canvas.addEventListener('wheel', (e) => {
 
   // Store snapshot for debug island
   const snapshot = {
-    sigMode1, sigDeltaX, sigSmall, sigVarying, sigMouse,
+    sigMode1, sigDeltaX, sigSmall, sigVarying,
     deltaX: e.deltaX.toFixed(2), abs: abs.toFixed(2),
     prevAbs: _prevWheelAbs.toFixed(2), deltaMode: e.deltaMode
   };
