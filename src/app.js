@@ -618,10 +618,21 @@ canvas.addEventListener('wheel', (e) => {
     scheduleTransform();
     return;
   }
-  // Two-finger scroll on trackpad (360° freedom) or scroll wheel on mouse → pan
-  panX -= e.deltaX;
-  panY -= e.deltaY;
-  scheduleTransform();
+  // Trackpad two-finger scroll has deltaX; mouse scroll wheel only has deltaY
+  if (Math.abs(e.deltaX) > 1) {
+    // Trackpad: pan in 360°
+    panX -= e.deltaX;
+    panY -= e.deltaY;
+    scheduleTransform();
+  } else {
+    // Mouse scroll wheel: stepped zoom
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
+    panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
+    panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
+    zoom = newZoom;
+    scheduleTransform();
+  }
 }, { passive: false });
 
 // ─── Pan (middle mouse button) ────────────────────────────────────────────────
