@@ -605,8 +605,10 @@ canvas.addEventListener('wheel', (e) => {
     }, 150);
   }
   if (e.ctrlKey) {
-    // Pinch-to-zoom on trackpad, or Ctrl+scroll on mouse
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    // Trackpad pinch sends small continuous deltaY (< 30); mouse Ctrl+scroll sends large discrete steps (~100)
+    const factor = Math.abs(e.deltaY) < 30
+      ? Math.pow(0.995, e.deltaY)          // smooth continuous pinch
+      : e.deltaY < 0 ? 1.1 : 1 / 1.1;    // stepped Ctrl+scroll
     const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
     panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
     panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
