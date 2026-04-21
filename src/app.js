@@ -739,6 +739,11 @@ document.addEventListener('click', () => {
   objCtxMenu.classList.remove('visible');
 });
 
+document.getElementById('obj-btn-copy').addEventListener('click', () => {
+  objCtxMenu.classList.remove('visible');
+  copySelected();
+});
+
 document.getElementById('obj-btn-delete').addEventListener('click', () => {
   objCtxMenu.classList.remove('visible');
   deleteSelected();
