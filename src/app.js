@@ -592,7 +592,7 @@ function deleteSelected() {
 const ZOOM_MIN = 0.05, ZOOM_MAX = 10;
 
 let _caretTimer = null;
-let _prevWheelTime = 0;
+let _prevWheelAbs = 0;
 let _wheelPanMode = false;
 let _wheelPanTimer = null;
 
@@ -622,18 +622,17 @@ canvas.addEventListener('wheel', (e) => {
     return;
   }
   // Distinguish trackpad scroll from mouse wheel:
-  // Trackpad: rapid successive events (dt < 80ms) or small deltas (< 12px) → pan
-  // Mouse wheel: isolated large-delta events → zoom
-  // Once pan mode activates, it stays active for 200ms after the last event
-  const now = performance.now();
-  const dt = now - _prevWheelTime;
-  _prevWheelTime = now;
+  // Mouse wheel: fixed deltaY per notch regardless of speed → zoom
+  // Trackpad: deltaY varies with finger acceleration → pan
+  const abs = Math.abs(e.deltaY);
+  const varyingDelta = _prevWheelAbs > 0 && Math.abs(abs - _prevWheelAbs) > 2;
+  _prevWheelAbs = abs;
 
-  if (Math.abs(e.deltaX) > 1 || dt < 80 || Math.abs(e.deltaY) < 12) {
+  if (Math.abs(e.deltaX) > 1 || abs < 12 || varyingDelta) {
     _wheelPanMode = true;
   }
   clearTimeout(_wheelPanTimer);
-  _wheelPanTimer = setTimeout(() => { _wheelPanMode = false; }, 200);
+  _wheelPanTimer = setTimeout(() => { _wheelPanMode = false; _prevWheelAbs = 0; }, 200);
 
   if (_wheelPanMode) {
     panX -= e.deltaX;
