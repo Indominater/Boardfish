@@ -33,9 +33,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "infoPlist": {
-        "CFBundleDisplayName": "Boardfish"
-      }
+      "infoPlist": "Info.plist"
     }
   }
 }
