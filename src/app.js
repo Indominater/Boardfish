@@ -625,10 +625,10 @@ canvas.addEventListener('wheel', (e) => {
   // Mouse wheel: fixed deltaY per notch regardless of speed → zoom
   // Trackpad: deltaY varies with finger acceleration → pan
   const abs = Math.abs(e.deltaY);
-  const varyingDelta = _prevWheelAbs > 0 && Math.abs(abs - _prevWheelAbs) > 2;
+  const varyingDelta = _prevWheelAbs > 0 && abs !== _prevWheelAbs;
   _prevWheelAbs = abs;
 
-  if (Math.abs(e.deltaX) > 1 || abs < 12 || varyingDelta) {
+  if (e.deltaX !== 0 || abs < 12 || varyingDelta) {
     _wheelPanMode = true;
   }
   clearTimeout(_wheelPanTimer);
