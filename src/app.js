@@ -57,8 +57,12 @@ function saveViewport() {
 }
 
 
+let _lastZoomPct = -1;
 function updateZoomDisplay() {
-  islZoom.textContent = Math.round(zoom * 100) + '%';
+  const pct = Math.round(zoom * 100);
+  if (pct === _lastZoomPct) return;
+  _lastZoomPct = pct;
+  islZoom.textContent = pct + '%';
 }
 
 let _islMsgTimer = null;
@@ -224,6 +228,11 @@ function buildElement(obj) {
     const pre = document.createElement('pre');
     pre.textContent = obj.data.content;
     pre.contentEditable = 'false';
+    pre.addEventListener('paste', (ev) => {
+      ev.preventDefault();
+      const text = ev.clipboardData.getData('text/plain');
+      document.execCommand('insertText', false, text);
+    });
     inner.appendChild(pre);
   } else {
     const img = document.createElement('img');
@@ -565,9 +574,11 @@ function duplicateSelected() {
 function deleteSelected() {
   if (!selectedId || editingId) return;
   const before = JSON.parse(JSON.stringify(objects));
+  const el = document.getElementById(selectedId);
+  if (el) el.remove();
   objects = objects.filter(o => o.id !== selectedId);
   selectedId = null;
-  renderAll();
+  updateSelectionOverlay();
   pushHistory(before);
 }
 
