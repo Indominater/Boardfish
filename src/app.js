@@ -594,8 +594,6 @@ const ZOOM_MIN = 0.05, ZOOM_MAX = 10;
 let _caretTimer = null;
 let _prevWheelAbs = 0;
 let _prevWheelTime = 0;
-let _wheelPanMode = false;
-let _wheelPanTimer = null;
 
 let islTab = 'mouse';
 let islLastMouse    = null;
@@ -671,13 +669,7 @@ canvas.addEventListener('wheel', (e) => {
   const sigSmall   = abs < 12;
   const sigVarying = abs !== prevAbs;
 
-  if (sigMode1) {
-    _wheelPanMode = false;
-  } else if (sigDeltaX || sigMicro || (sigStream && (sigSmall || sigVarying))) {
-    _wheelPanMode = true;
-  }
-  clearTimeout(_wheelPanTimer);
-  _wheelPanTimer = setTimeout(() => { _wheelPanMode = false; }, 100);
+  const isPan = !sigMode1 && (sigDeltaX || sigMicro || (sigStream && (sigSmall || sigVarying)));
 
   // Store snapshot for debug island
   const snapshot = {
@@ -685,11 +677,11 @@ canvas.addEventListener('wheel', (e) => {
     deltaX: e.deltaX.toFixed(2), abs: abs.toFixed(2),
     prevAbs: prevAbs.toFixed(2), dt: dt.toFixed(1), deltaMode: e.deltaMode
   };
-  if (_wheelPanMode) { islLastTrackpad = snapshot; }
-  else               { islLastMouse    = snapshot; }
+  if (isPan) { islLastTrackpad = snapshot; }
+  else       { islLastMouse    = snapshot; }
   islRender();
 
-  if (_wheelPanMode) {
+  if (isPan) {
     panX -= e.deltaX;
     panY -= e.deltaY;
     scheduleTransform();
