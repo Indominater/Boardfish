@@ -214,51 +214,6 @@
       transition: color 0.5s ease;
     }
 
-    #isl-dbg {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 4px;
-    }
-
-    .isl-tab {
-      font-size: 12px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 6px;
-      border: none;
-      background: transparent;
-      color: rgba(255,255,255,0.3);
-      cursor: default;
-      font-family: inherit;
-      letter-spacing: -0.01em;
-      -webkit-font-smoothing: antialiased;
-      transition: background 0.1s, color 0.1s;
-    }
-    .isl-tab.active-mouse    { background: rgba(10,132,255,0.18); color: #0A84FF; }
-    .isl-tab.active-trackpad { background: rgba(48,209,88,0.18);  color: #30D158; }
-
-    #isl-signals {
-      display: flex;
-      align-items: center;
-      gap: 3px;
-    }
-
-    .isl-signal {
-      font-size: 11px;
-      font-family: 'SF Mono', 'Geist Mono', monospace;
-      padding: 2px 5px;
-      border-radius: 4px;
-      white-space: nowrap;
-      color: rgba(255,255,255,0.28);
-      background: rgba(255,255,255,0.06);
-      transition: color 0.1s, background 0.1s;
-    }
-    .isl-signal.active {
-      color: #fff;
-      background: rgba(255,255,255,0.14);
-    }
-
 
 
     /* ── Unsaved changes dialog ── */
@@ -420,16 +375,6 @@
 
   <div id="island">
     <span id="isl-zoom">100%</span>
-    <div class="isl-sep"></div>
-    <div id="isl-dbg">
-      <button class="isl-tab" id="tab-mouse"    onclick="islSetTab('mouse')">Mouse</button>
-      <button class="isl-tab" id="tab-trackpad" onclick="islSetTab('trackpad')">Trackpad</button>
-      <div class="isl-sep"></div>
-      <div id="isl-signals">
-        <span class="isl-signal" id="sig-abs"></span>
-        <span class="isl-signal" id="sig-dx"></span>
-      </div>
-    </div>
   </div>
 
   <script src="app.js"></script>

@@ -595,30 +595,6 @@ let _caretTimer = null;
 let _setMode  = null; // 'pan' | 'zoom' | null (null = no active set)
 let _setTimer = null;
 
-let islTab = 'mouse';
-let islLastMouse    = null;
-let islLastTrackpad = null;
-
-function islSetTab(tab) {
-  islTab = tab;
-  islRender();
-}
-
-function islRender() {
-  const snap = islTab === 'mouse' ? islLastMouse : islLastTrackpad;
-  const tabM = document.getElementById('tab-mouse');
-  const tabT = document.getElementById('tab-trackpad');
-  tabM.className = 'isl-tab' + (islTab === 'mouse'    ? ' active-mouse'    : '');
-  tabT.className = 'isl-tab' + (islTab === 'trackpad' ? ' active-trackpad' : '');
-  if (!snap) return;
-  function sig(id, active, label) {
-    const el = document.getElementById(id);
-    el.textContent = label;
-    el.classList.toggle('active', active);
-  }
-  sig('sig-abs', snap.sigAbs,    `abs=${snap.abs}`);
-  sig('sig-dx',  snap.sigDeltaX, `dX=${snap.deltaX}`);
-}
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -645,22 +621,10 @@ canvas.addEventListener('wheel', (e) => {
     scheduleTransform();
     return;
   }
-  const abs       = Math.abs(e.deltaY);
-  const sigAbs    = abs < 4;
-  const sigDeltaX = e.deltaX !== 0;
-
-  // First event of a new set classifies the whole set.
-  // A set ends after 250ms of no wheel events.
-  const isNewSet = _setMode === null;
-  if (isNewSet) {
-    _setMode = (sigAbs || sigDeltaX) ? 'pan' : 'zoom';
-    const snapshot = {
-      sigAbs, sigDeltaX,
-      abs: abs.toFixed(2), deltaX: e.deltaX.toFixed(2),
-    };
-    if (_setMode === 'pan') { islLastTrackpad = snapshot; }
-    else                    { islLastMouse    = snapshot; }
-    islRender();
+  // First event of a new set classifies the whole set (250ms gap = new set).
+  if (_setMode === null) {
+    const abs = Math.abs(e.deltaY);
+    _setMode = (abs < 4 || e.deltaX !== 0) ? 'pan' : 'zoom';
   }
   clearTimeout(_setTimer);
   _setTimer = setTimeout(() => { _setMode = null; }, 250);
@@ -1089,6 +1053,7 @@ document.addEventListener('paste', (e) => {
 // ─── Keyboard ────────────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'r') { e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key === 'a') { if (!editingId) e.preventDefault(); return; }
 
   if (e.key === 'Escape') { if (editingId) { exitEdit(); return; } deselectAll(); return; }
