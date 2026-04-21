@@ -757,12 +757,9 @@ document.getElementById('obj-btn-duplicate').addEventListener('click', () => {
 
 // ─── Drag and drop images ─────────────────────────────────────────────────────
 
-let _dropPos = { x: 0, y: 0 };
-
 canvas.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
-  _dropPos = { x: e.clientX, y: e.clientY };
 });
 
 // HTML5 drop — works for images dragged from a browser
@@ -777,24 +774,21 @@ canvas.addEventListener('drop', (e) => {
   }
 });
 
-// Tauri native drop — works for images dragged from Finder / Explorer
+// Tauri native drop — Rust emits boardfish://file-drop with paths + cursor position
 if (window.__TAURI__) {
-  window.__TAURI__.event.listen('tauri://file-drop', async (event) => {
-    const paths = event.payload;
-    const pos = toWorld(_dropPos.x, _dropPos.y);
+  window.__TAURI__.event.listen('boardfish://file-drop', async (event) => {
+    const { paths, x, y } = event.payload;
+    const pos = toWorld(x, y);
     for (const path of paths) {
       if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) continue;
       try {
-        const bytes = await window.__TAURI__.fs.readBinaryFile(path);
+        const b64 = await window.__TAURI__.core.invoke('read_binary_file_base64', { path });
         const ext = path.split('.').pop().toLowerCase();
         const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
                    : ext === 'gif' ? 'image/gif'
                    : ext === 'webp' ? 'image/webp'
                    : 'image/png';
-        const blob = new Blob([bytes], { type: mime });
-        const reader = new FileReader();
-        reader.onload = (ev) => addImage(ev.target.result, pos.x - 100, pos.y - 100);
-        reader.readAsDataURL(blob);
+        addImage('data:' + mime + ';base64,' + b64, pos.x - 100, pos.y - 100);
       } catch (err) { console.error('Failed to load dropped file:', err); }
     }
   });
@@ -822,7 +816,7 @@ function updateTitle() {
     ? currentFilePath.split(/[\\/]/).pop().replace(/\.bf$/i, '')
     : 'Untitled';
   const dot = isDirty() ? ' •' : '';
-  window.__TAURI__.window.appWindow.setTitle('Boardfish — ' + name + dot);
+  window.__TAURI__.core.invoke('set_title', { title: 'Boardfish — ' + name + dot });
 }
 
 
@@ -893,15 +887,14 @@ function applyBoardData(data) {
 }
 
 async function saveBoardAs() {
-  const tauri = window.__TAURI__;
-  if (!tauri) { alert('Save requires the desktop app.'); return false; }
+  if (!window.__TAURI__) { alert('Save requires the desktop app.'); return false; }
   try {
-    const filePath = await tauri.dialog.save({
-      filters: [{ name: 'Boardfish Board', extensions: ['bf'] }],
-      defaultPath: currentFilePath || 'board.bf'
-    });
+    const defaultName = currentFilePath
+      ? currentFilePath.split(/[\\/]/).pop()
+      : 'board.bf';
+    const filePath = await window.__TAURI__.core.invoke('save_file_dialog', { defaultName });
     if (!filePath) return false;
-    await tauri.tauri.invoke('save_board', { path: filePath, board: boardData() });
+    await window.__TAURI__.core.invoke('save_board', { path: filePath, board: boardData() });
     currentFilePath = filePath;
     markSaved();
     showIslandMsg('Saved', 1500);
@@ -915,10 +908,9 @@ async function saveBoardAs() {
 
 async function saveBoard() {
   if (currentFilePath) {
-    const tauri = window.__TAURI__;
-    if (!tauri) return false;
+    if (!window.__TAURI__) return false;
     try {
-      await tauri.tauri.invoke('save_board', { path: currentFilePath, board: boardData() });
+      await window.__TAURI__.core.invoke('save_board', { path: currentFilePath, board: boardData() });
       markSaved();
       showIslandMsg('Saved', 1500);
       return true;
@@ -933,10 +925,8 @@ async function saveBoard() {
 
 
 async function openBoard() {
-  const tauri = window.__TAURI__;
-  if (!tauri) { alert('Open requires the desktop app.'); return; }
+  if (!window.__TAURI__) { alert('Open requires the desktop app.'); return; }
 
-  // Check dirty before opening
   if (isDirty()) {
     const choice = await showUnsavedDialog();
     if (choice === 'cancel') return;
@@ -947,13 +937,10 @@ async function openBoard() {
   }
 
   try {
-    const filePath = await tauri.dialog.open({
-      filters: [{ name: 'Boardfish Board', extensions: ['bf'] }],
-      multiple: false
-    });
+    const filePath = await window.__TAURI__.core.invoke('open_file_dialog');
     if (!filePath) return;
     showIslandMsg('Opening');
-    const data = JSON.parse(await tauri.fs.readTextFile(filePath));
+    const data = JSON.parse(await window.__TAURI__.core.invoke('read_text_file', { path: filePath }));
     applyBoardData(data);
     currentFilePath = filePath;
     updateTitle();
@@ -975,7 +962,7 @@ if (window.__TAURI__) {
     }
     // Use process.exit instead of appWindow.close() to avoid re-triggering
     // the CloseRequested event in Rust (which would cause an infinite loop)
-    await window.__TAURI__.process.exit(0);
+    await window.__TAURI__.core.invoke('exit_app');
   });
 }
 
@@ -1003,7 +990,7 @@ async function copySelected() {
     // Also write to system clipboard so user can paste into other apps
     if (window.__TAURI__) {
       try {
-        await window.__TAURI__.tauri.invoke('copy_image_to_clipboard', { dataUrl: getImageSrc(obj) });
+        await window.__TAURI__.core.invoke('copy_image_to_clipboard', { dataUrl: getImageSrc(obj) });
       } catch (err) { console.error('System clipboard write failed:', err); }
     }
   }
@@ -1079,10 +1066,10 @@ updateTitle();
 
 // If opened by double-clicking a .bf file, load it immediately
 if (window.__TAURI__) {
-  window.__TAURI__.tauri.invoke('get_startup_file').then(async (filePath) => {
+  window.__TAURI__.core.invoke('get_startup_file').then(async (filePath) => {
     if (!filePath) return;
     try {
-      const data = JSON.parse(await window.__TAURI__.fs.readTextFile(filePath));
+      const data = JSON.parse(await window.__TAURI__.core.invoke('read_text_file', { path: filePath }));
       applyBoardData(data);
       currentFilePath = filePath;
       updateTitle();
