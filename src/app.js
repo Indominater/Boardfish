@@ -1057,7 +1057,7 @@ document.addEventListener('paste', (e) => {
 // ─── Keyboard ────────────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a') { if (!editingId) e.preventDefault(); return; }
 
   if (e.key === 'Escape') { if (editingId) { exitEdit(); return; } deselectAll(); return; }
 
