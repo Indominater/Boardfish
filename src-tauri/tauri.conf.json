@@ -38,7 +38,6 @@
         "name": "Boardfish Board",
         "description": "Boardfish Board",
         "mimeType": "application/x-boardfish",
-        "icon": "icons/Icon.icns",
         "role": "Editor"
       }
     ],
