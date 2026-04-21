@@ -191,23 +191,11 @@ function redo() { if (historyIndex >= history.length - 1) return; historyIndex++
 // ─── Render ───────────────────────────────────────────────────────────────────
 
 function renderAll() {
-  const liveIds = new Set(objects.map(o => o.id));
-  for (const el of [...world.querySelectorAll('.obj')]) {
-    if (!liveIds.has(el.id)) el.remove();
-  }
+  for (const el of [...world.querySelectorAll('.obj')]) el.remove();
 
   for (const obj of objects) {
-    let el = document.getElementById(obj.id);
-    if (!el) {
-      el = buildElement(obj);
-      world.appendChild(el);
-    } else {
-      setElGeom(el, obj);
-      if (obj.type === 'text') {
-        const pre = el.querySelector('pre');
-        if (pre && pre.contentEditable !== 'true') pre.textContent = obj.data.content;
-      }
-    }
+    const el = buildElement(obj);
+    world.appendChild(el);
   }
 
   const sorted = [...objects].sort((a, b) => a.z - b.z);
