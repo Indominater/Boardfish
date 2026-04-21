@@ -175,6 +175,7 @@ function pushHistory(before) {
   history.push(JSON.parse(JSON.stringify(objects)));
   historyIndex++;
   trimHistory();
+  updateTitle();
 }
 
 function restoreSnapshot(s) {
@@ -188,8 +189,8 @@ function restoreSnapshot(s) {
   renderAll();
 }
 
-function undo() { if (historyIndex <= 0) return; historyIndex--; restoreSnapshot(history[historyIndex]); }
-function redo() { if (historyIndex >= history.length - 1) return; historyIndex++; restoreSnapshot(history[historyIndex]); }
+function undo() { if (historyIndex <= 0) return; historyIndex--; restoreSnapshot(history[historyIndex]); updateTitle(); }
+function redo() { if (historyIndex >= history.length - 1) return; historyIndex++; restoreSnapshot(history[historyIndex]); updateTitle(); }
 
 // ─── Render ───────────────────────────────────────────────────────────────────
 
@@ -554,6 +555,7 @@ async function newBoard() {
   applyTransform();
   snapshot();
   markSaved();
+  updateTitle();
 }
 
 // ─── Duplicate ────────────────────────────────────────────────────────────────
@@ -768,12 +770,21 @@ let savedHistoryIndex = -1;
 let currentFilePath = null;
 
 function isDirty() {
-  // Dirty if board has content and history has changed since last save
   return objects.length > 0 && historyIndex !== savedHistoryIndex;
 }
 
 function markSaved() {
   savedHistoryIndex = historyIndex;
+  updateTitle();
+}
+
+function updateTitle() {
+  if (!window.__TAURI__) return;
+  const name = currentFilePath
+    ? currentFilePath.split(/[\\/]/).pop().replace(/\.bf$/i, '')
+    : 'Untitled';
+  const dot = isDirty() ? ' •' : '';
+  window.__TAURI__.window.appWindow.setTitle('Boardfish — ' + name + dot);
 }
 
 
@@ -907,6 +918,7 @@ async function openBoard() {
     const data = JSON.parse(await tauri.fs.readTextFile(filePath));
     applyBoardData(data);
     currentFilePath = filePath;
+    updateTitle();
     showIslandMsg('Opened', 1500);
   } catch (err) { console.error('Open failed:', err); showIslandMsg('Open failed', 2000); }
 }
@@ -1024,6 +1036,7 @@ if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) 
 
 snapshot();
 updateZoomDisplay();
+updateTitle();
 
 
 // If opened by double-clicking a .bf file, load it immediately
@@ -1034,6 +1047,7 @@ if (window.__TAURI__) {
       const data = JSON.parse(await window.__TAURI__.fs.readTextFile(filePath));
       applyBoardData(data);
       currentFilePath = filePath;
+      updateTitle();
     } catch (err) { console.error('Failed to open startup file:', err); }
   });
 }
