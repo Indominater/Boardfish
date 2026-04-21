@@ -32,6 +32,16 @@
       "icons/Icon.icns",
       "icons/icon.ico"
     ],
+    "fileAssociations": [
+      {
+        "ext": ["bf"],
+        "name": "Boardfish Board",
+        "description": "Boardfish Board",
+        "mimeType": "application/x-boardfish",
+        "icon": "icons/Icon.icns",
+        "role": "Editor"
+      }
+    ],
     "macOS": {
       "infoPlist": "Info.plist"
     }
