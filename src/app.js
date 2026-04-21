@@ -626,7 +626,8 @@ canvas.addEventListener('wheel', (e) => {
   // Trackpad: deltaY varies with finger acceleration → pan
   const abs = Math.abs(e.deltaY);
   const varyingDelta = abs !== _prevWheelAbs;
-  const mouseLike = e.deltaX === 0 && abs > 0 && abs === _prevWheelAbs;
+  const mouseLike = e.deltaMode === 1                              // DOM_DELTA_LINE = physical mouse wheel
+                 || (e.deltaX === 0 && abs > 0 && abs === _prevWheelAbs);
   _prevWheelAbs = abs;
 
   if (mouseLike) {
