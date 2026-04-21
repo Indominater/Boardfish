@@ -6,6 +6,28 @@
   <string>Boardfish</string>
   <key>CFBundleDisplayName</key>
   <string>Boardfish</string>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>com.boardfish.app.bf</string>
+      <key>UTTypeDescription</key>
+      <string>Boardfish Board</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>bf</string>
+        </array>
+      </dict>
+      <key>UTTypeIconFile</key>
+      <string>Icon</string>
+    </dict>
+  </array>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
@@ -21,6 +43,10 @@
       <string>Editor</string>
       <key>LSHandlerRank</key>
       <string>Owner</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>com.boardfish.app.bf</string>
+      </array>
     </dict>
   </array>
 </dict>

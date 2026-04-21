@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "boardfish"
-version = "0.1.3"
+version = "0.3.7"
 dependencies = [
  "arboard",
  "base64 0.21.7",
@@ -176,6 +176,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-shell",
  "tokio",
+ "url",
 ]
 
 [[package]]
