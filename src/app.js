@@ -56,12 +56,6 @@ function saveViewport() {
   }, 400);
 }
 
-function updateAllGeom() {
-  for (const obj of objects) {
-    const el = document.getElementById(obj.id);
-    if (el) setElGeom(el, obj);
-  }
-}
 
 function updateZoomDisplay() {
   islZoom.textContent = Math.round(zoom * 100) + '%';
@@ -88,7 +82,7 @@ function restoreIslandZoom() {
 
 
 function applyTransform() {
-  updateAllGeom();
+  world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
   updateZoomDisplay();
   saveViewport();
   updateSelectionOverlay();
@@ -108,13 +102,7 @@ function toWorld(sx, sy) {
   return { x: (sx - panX) / zoom, y: (sy - panY) / zoom };
 }
 
-function restoreViewport() {
-  try {
-    const s = localStorage.getItem('bf_vp');
-    if (s) { const v = JSON.parse(s); panX = v.panX; panY = v.panY; zoom = v.zoom; }
-  } catch {}
-  world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
-}
+
 
 // ─── Object state ─────────────────────────────────────────────────────────────
 
@@ -252,15 +240,11 @@ function buildElement(obj) {
 }
 
 function setElGeom(el, obj) {
-  el.style.left   = (obj.x * zoom + panX) + 'px';
-  el.style.top    = (obj.y * zoom + panY) + 'px';
-  el.style.width  = (obj.w * zoom) + 'px';
-  el.style.height = (obj.h * zoom) + 'px';
+  el.style.left   = obj.x + 'px';
+  el.style.top    = obj.y + 'px';
+  el.style.width  = obj.w + 'px';
+  el.style.height = obj.h + 'px';
   el.style.zIndex = obj.z;
-  if (obj.type === 'text') {
-    const pre = el.querySelector('pre');
-    if (pre) pre.style.fontSize = (16 * zoom) + 'px';
-  }
 }
 
 // ─── Screen-space selection overlay ──────────────────────────────────────────
@@ -376,7 +360,7 @@ function attachObjectListeners(el, obj) {
         obj.x = ox + dx;
         obj.y = oy + dy;
         const domEl = document.getElementById(obj.id);
-        if (domEl) { domEl.style.left = (obj.x * zoom + panX) + 'px'; domEl.style.top = (obj.y * zoom + panY) + 'px'; }
+        if (domEl) { domEl.style.left = obj.x + 'px'; domEl.style.top = obj.y + 'px'; }
         updateSelectionOverlay();
       }
     }
@@ -1075,6 +1059,7 @@ if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 snapshot();
+world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
 updateZoomDisplay();
 updateTitle();
 
