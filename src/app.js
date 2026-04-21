@@ -771,9 +771,12 @@ document.getElementById('obj-btn-duplicate').addEventListener('click', () => {
 
 // ─── Drag and drop images ─────────────────────────────────────────────────────
 
+let _dropPos = { x: 0, y: 0 };
+
 canvas.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
+  _dropPos = { x: e.clientX, y: e.clientY };
 });
 
 // HTML5 drop — works for images dragged from a browser
@@ -788,11 +791,11 @@ canvas.addEventListener('drop', (e) => {
   }
 });
 
-// Tauri native drop — Rust emits boardfish://file-drop with paths + cursor position
+// Tauri native drop — Rust emits boardfish://file-drop with paths; position tracked via dragover
 if (window.__TAURI__) {
   window.__TAURI__.event.listen('boardfish://file-drop', async (event) => {
-    const { paths, x, y } = event.payload;
-    const pos = toWorld(x, y);
+    const { paths } = event.payload;
+    const pos = toWorld(_dropPos.x, _dropPos.y);
     for (const path of paths) {
       if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) continue;
       try {
