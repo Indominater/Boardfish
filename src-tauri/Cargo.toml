@@ -1,6 +1,6 @@
 [package]
 name = "boardfish"
-version = "0.3.5"
+version = "0.3.6"
 description = "Boardfish"
 authors = []
 license = ""

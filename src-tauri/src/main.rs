@@ -127,17 +127,16 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::Opened { urls } = event {
+        .run(|_app_handle, _event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
                     if url.scheme() == "file" {
                         if let Ok(path) = url.to_file_path() {
                             if let Some(path_str) = path.to_str() {
-                                // Store for cold-launch: JS may not have called get_startup_file yet
-                                let state = app_handle.state::<StartupFile>();
+                                let state = _app_handle.state::<StartupFile>();
                                 *state.0.lock().unwrap() = Some(path_str.to_string());
-                                // Also emit for already-running case
-                                app_handle.emit("boardfish://open-file", path_str).ok();
+                                _app_handle.emit("boardfish://open-file", path_str).ok();
                             }
                         }
                     }
