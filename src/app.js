@@ -515,7 +515,7 @@ function addText(wx, wy, content = '') {
 function addImage(src, cx, cy) {
   const img = new Image();
   img.onload = () => {
-    const MAX = 1000;
+    const MAX = 800;
     let w = img.naturalWidth;
     let h = img.naturalHeight;
     if (w > MAX || h > MAX) {
