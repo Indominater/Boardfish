@@ -746,11 +746,15 @@ document.getElementById('obj-btn-duplicate').addEventListener('click', () => {
 
 // ─── Drag and drop images ─────────────────────────────────────────────────────
 
+let _dropPos = { x: 0, y: 0 };
+
 canvas.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
+  _dropPos = { x: e.clientX, y: e.clientY };
 });
 
+// HTML5 drop — works for images dragged from a browser
 canvas.addEventListener('drop', (e) => {
   e.preventDefault();
   const pos = toWorld(e.clientX, e.clientY);
@@ -761,6 +765,29 @@ canvas.addEventListener('drop', (e) => {
     reader.readAsDataURL(file);
   }
 });
+
+// Tauri native drop — works for images dragged from Finder / Explorer
+if (window.__TAURI__) {
+  window.__TAURI__.event.listen('tauri://file-drop', async (event) => {
+    const paths = event.payload;
+    const pos = toWorld(_dropPos.x, _dropPos.y);
+    for (const path of paths) {
+      if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) continue;
+      try {
+        const bytes = await window.__TAURI__.fs.readBinaryFile(path);
+        const ext = path.split('.').pop().toLowerCase();
+        const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+                   : ext === 'gif' ? 'image/gif'
+                   : ext === 'webp' ? 'image/webp'
+                   : 'image/png';
+        const blob = new Blob([bytes], { type: mime });
+        const reader = new FileReader();
+        reader.onload = (ev) => addImage(ev.target.result, pos.x - 100, pos.y - 100);
+        reader.readAsDataURL(blob);
+      } catch (err) { console.error('Failed to load dropped file:', err); }
+    }
+  });
+}
 
 
 // ─── Dirty tracking ───────────────────────────────────────────────────────────
