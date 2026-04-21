@@ -1136,15 +1136,30 @@ updateZoomDisplay();
 updateTitle();
 
 
-// If opened by double-clicking a .bf file, load it immediately
+// Open a .bf file by path — used for startup file and macOS open events
+async function openFilePath(filePath) {
+  if (isDirty()) {
+    const choice = await showUnsavedDialog();
+    if (choice === 'cancel') return;
+    if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
+  }
+  try {
+    const data = JSON.parse(await window.__TAURI__.core.invoke('read_text_file', { path: filePath }));
+    applyBoardData(data);
+    currentFilePath = filePath;
+    updateTitle();
+    showIslandMsg('Opened', 1500);
+  } catch (err) { console.error('Failed to open file:', err); }
+}
+
 if (window.__TAURI__) {
-  window.__TAURI__.core.invoke('get_startup_file').then(async (filePath) => {
-    if (!filePath) return;
-    try {
-      const data = JSON.parse(await window.__TAURI__.core.invoke('read_text_file', { path: filePath }));
-      applyBoardData(data);
-      currentFilePath = filePath;
-      updateTitle();
-    } catch (err) { console.error('Failed to open startup file:', err); }
+  // macOS double-click (app already running): Rust emits this event
+  window.__TAURI__.event.listen('boardfish://open-file', (event) => {
+    openFilePath(event.payload);
+  });
+
+  // Cold launch: check if Rust stored a file path before JS was ready
+  window.__TAURI__.core.invoke('get_startup_file').then((filePath) => {
+    if (filePath) openFilePath(filePath);
   });
 }

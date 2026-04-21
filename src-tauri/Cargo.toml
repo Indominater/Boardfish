@@ -21,6 +21,7 @@ tokio = { version = "1", features = ["fs"] }
 arboard = "3"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 base64 = "0.21"
+url = "2"
 
 [features]
 default = ["custom-protocol"]
