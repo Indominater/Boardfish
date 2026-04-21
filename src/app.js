@@ -592,8 +592,6 @@ function deleteSelected() {
 const ZOOM_MIN = 0.05, ZOOM_MAX = 10;
 
 let _caretTimer = null;
-let _prevWheelAbs = 0;
-let _prevWheelTime = 0;
 
 let islTab = 'mouse';
 let islLastMouse    = null;
@@ -616,11 +614,8 @@ function islRender() {
     el.textContent = label;
     el.classList.toggle('active', active);
   }
-  sig('sig-mode1',   snap.sigMode1,   `mode=${snap.deltaMode}`);
-  sig('sig-deltax',  snap.sigDeltaX,  `dX=${snap.deltaX}`);
-  sig('sig-stream',  snap.sigStream,  `dt=${snap.dt}ms`);
-  sig('sig-small',   snap.sigSmall,   `abs=${snap.abs}`);
-  sig('sig-varying', snap.sigVarying, `Δ=${snap.abs}≠${snap.prevAbs}`);
+  sig('sig-abs', snap.sigAbs,    `abs=${snap.abs}`);
+  sig('sig-dx',  snap.sigDeltaX, `dX=${snap.deltaX}`);
 }
 
 canvas.addEventListener('wheel', (e) => {
@@ -648,34 +643,14 @@ canvas.addEventListener('wheel', (e) => {
     scheduleTransform();
     return;
   }
-  // Distinguish trackpad scroll from mouse wheel:
-  // Mouse wheel: fixed deltaY per notch regardless of speed → zoom
-  // Trackpad: deltaY varies with finger acceleration → pan
-  const abs = Math.abs(e.deltaY);
-  const now = performance.now();
-  const dt  = now - _prevWheelTime;
-  _prevWheelTime = now;
-  const prevAbs = _prevWheelAbs;
-  _prevWheelAbs = abs;
+  const abs      = Math.abs(e.deltaY);
+  const sigAbs   = abs < 4;
+  const sigDeltaX = e.deltaX !== 0;
+  const isPan    = sigAbs || sigDeltaX;
 
-  // deltaX alone is reliable — always horizontal = trackpad.
-  // sigSmall + sigVarying are unreliable alone (mouse acceleration makes mouse
-  // look the same), so gate them behind dt < 25ms (trackpad streams at 8–16ms;
-  // mechanical mouse notches arrive no faster than ~30ms even at max speed).
-  const sigMode1   = e.deltaMode === 1;
-  const sigDeltaX  = e.deltaX !== 0;
-  const sigStream  = dt < 25;
-  const sigMicro   = abs < 6;   // too small for any real mouse notch, no stream gate needed
-  const sigSmall   = abs < 12;
-  const sigVarying = abs !== prevAbs;
-
-  const isPan = !sigMode1 && (sigDeltaX || sigMicro || (sigStream && (sigSmall || sigVarying)));
-
-  // Store snapshot for debug island
   const snapshot = {
-    sigMode1, sigDeltaX, sigStream, sigSmall, sigVarying,
-    deltaX: e.deltaX.toFixed(2), abs: abs.toFixed(2),
-    prevAbs: prevAbs.toFixed(2), dt: dt.toFixed(1), deltaMode: e.deltaMode
+    sigAbs, sigDeltaX,
+    abs: abs.toFixed(2), deltaX: e.deltaX.toFixed(2),
   };
   if (isPan) { islLastTrackpad = snapshot; }
   else       { islLastMouse    = snapshot; }
