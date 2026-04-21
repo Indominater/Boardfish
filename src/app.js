@@ -490,8 +490,14 @@ function addText(wx, wy, content = '') {
 function addImage(src, wx, wy) {
   const img = new Image();
   img.onload = () => {
-    const w = img.naturalWidth;
-    const h = img.naturalHeight;
+    const MAX = 1000;
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
+    if (w > MAX || h > MAX) {
+      const scale = MAX / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
     const before = JSON.parse(JSON.stringify(objects));
     const imgKey = storeImage(src);
     const obj = { id: newId(), type: 'image', x: wx, y: wy, w, h, z: ++zCounter, data: { imgKey } };
@@ -863,17 +869,17 @@ async function copySelected() {
   const obj = objects.find(o => o.id === selectedId);
   if (!obj || obj.type !== 'image') return;
   try {
-    const res = await fetch(getImageSrc(obj));
-    const blob = await res.blob();
-    let pngBlob = blob;
-    if (blob.type !== 'image/png') {
+    const blobPromise = (async () => {
+      const res = await fetch(getImageSrc(obj));
+      const blob = await res.blob();
+      if (blob.type === 'image/png') return blob;
       const bmp = await createImageBitmap(blob);
       const c = document.createElement('canvas');
       c.width = bmp.width; c.height = bmp.height;
       c.getContext('2d').drawImage(bmp, 0, 0);
-      pngBlob = await new Promise(r => c.toBlob(r, 'image/png'));
-    }
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      return new Promise(r => c.toBlob(r, 'image/png'));
+    })();
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })]);
   } catch (err) { console.error('Copy failed:', err); }
 }
 
