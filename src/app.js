@@ -635,7 +635,7 @@ canvas.addEventListener('wheel', (e) => {
     _wheelPanMode = true;
   }
   clearTimeout(_wheelPanTimer);
-  _wheelPanTimer = setTimeout(() => { _wheelPanMode = false; _prevWheelAbs = 0; }, 200);
+  _wheelPanTimer = setTimeout(() => { _wheelPanMode = false; _prevWheelAbs = 0; }, 100);
 
   if (_wheelPanMode) {
     panX -= e.deltaX;
