@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Boardfish</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -11,9 +14,9 @@
       width: 100vw;
       height: 100vh;
       overflow: hidden;
-      background: #272727;
+      background: #1c1c1e;
       user-select: none;
-      font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+      font-family: 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
     }
 
     #canvas {
@@ -37,7 +40,6 @@
     #world {
       position: absolute;
       top: 0; left: 0;
-      transform-origin: 0 0;
       z-index: 1;
     }
 
@@ -59,9 +61,12 @@
       overflow: hidden;
       cursor: default;
       color: #ffffff;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
     .obj-text.editing .obj-inner pre { cursor: text; }
+    .obj-text.caret-hidden .obj-inner pre { caret-color: transparent; }
 
     .obj-image .obj-inner img {
       width: 100%;
@@ -77,7 +82,7 @@
     #sel-overlay {
       position: absolute;
       display: none;
-      border: 1px solid #558ef0;
+      border: 1px solid rgba(10, 132, 255, 0.9);
       pointer-events: none;
       z-index: 99998;
     }
@@ -95,83 +100,74 @@
     .s-handle[data-dir="sw"] { bottom: -4px; left: -4px;   cursor: sw-resize; }
     .s-handle[data-dir="se"] { bottom: -4px; right: -4px;  cursor: se-resize; }
 
-    /* ── Context menu ── */
+    /* ── Context menu — Liquid Glass ── */
     #ctx-menu {
       position: fixed;
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      border-radius: 2px;
-      box-shadow: 0 12px 32px -8px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.02);
+      background: rgba(26, 26, 28, 0.72);
+      backdrop-filter: blur(48px) saturate(200%);
+      -webkit-backdrop-filter: blur(48px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      box-shadow:
+        0 24px 64px rgba(0,0,0,0.6),
+        0 4px 16px rgba(0,0,0,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.1);
       z-index: 99999;
-      min-width: 210px;
-      padding: 6px 0;
+      min-width: 220px;
+      padding: 5px;
       display: none;
+      overflow: hidden;
     }
     #ctx-menu.visible { display: block; }
 
     .ctx-item {
-      position: relative;
       display: block;
       width: 100%;
-      padding: 6px 16px;
+      padding: 4px 10px;
       font-family: inherit;
       font-size: 13px;
-      color: #d4d4d4;
+      color: rgba(255, 255, 255, 0.88);
       background: transparent;
       border: none;
+      border-radius: 7px;
       text-align: left;
       cursor: default;
       letter-spacing: -0.01em;
-      transition: background 0.1s, color 0.1s, padding-left 0.1s;
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.08s;
     }
-    .ctx-item::before {
-      content: '';
-      position: absolute;
-      left: 0; top: 0; bottom: 0;
-      width: 2px;
-      background: #4FC3F7;
-      transform: scaleY(0);
-      opacity: 0;
-      transition: transform 0.15s, opacity 0.15s;
-      transform-origin: center;
-    }
-    .ctx-item:hover {
-      background: #1d1d1d;
-      color: #ffffff;
-      padding-left: 18px;
-    }
-    .ctx-item:hover::before {
-      transform: scaleY(1);
-      opacity: 1;
-    }
-    .ctx-item:active { background: #222222; }
+    .ctx-item:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .ctx-item:active { background: rgba(255,255,255,0.15); }
 
     .ctx-sep {
       height: 1px;
-      background: #2a2a2a;
-      margin: 5px 8px;
+      background: rgba(255,255,255,0.08);
+      margin: 3px 5px;
     }
 
     /* ── Toast ── */
     #toast {
       position: fixed;
-      bottom: 24px;
+      bottom: 28px;
       left: 50%;
       transform: translateX(-50%) translateY(12px);
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      border-radius: 2px;
-      color: #d4d4d4;
+      background: rgba(26, 26, 28, 0.78);
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 100px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.88);
       font-family: inherit;
-      font-size: 12px;
+      font-size: 12.5px;
       letter-spacing: -0.01em;
-      padding: 8px 16px;
+      -webkit-font-smoothing: antialiased;
+      padding: 8px 18px;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.15s ease, transform 0.15s ease;
+      transition: opacity 0.18s ease, transform 0.18s ease;
       z-index: 999999;
       white-space: nowrap;
-      box-shadow: 0 8px 24px -4px rgba(0,0,0,0.5);
     }
     #toast.show {
       opacity: 1;
@@ -183,7 +179,9 @@
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.55);
+      background: rgba(0,0,0,0.36);
+      backdrop-filter: blur(12px) saturate(150%);
+      -webkit-backdrop-filter: blur(12px) saturate(150%);
       z-index: 9999999;
       align-items: center;
       justify-content: center;
@@ -191,127 +189,90 @@
     #dialog-overlay.show { display: flex; }
 
     #dialog {
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      border-radius: 2px;
-      box-shadow: 0 12px 40px -8px rgba(0,0,0,0.8), inset 0 0 0 1px rgba(255,255,255,0.02);
-      width: 400px;
-      padding: 24px;
+      background: rgba(26, 26, 28, 0.72);
+      backdrop-filter: blur(48px) saturate(200%);
+      -webkit-backdrop-filter: blur(48px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      box-shadow:
+        0 24px 64px rgba(0,0,0,0.6),
+        0 4px 16px rgba(0,0,0,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.1);
+      width: 360px;
+      padding: 22px 22px 18px;
       display: flex;
       flex-direction: column;
       gap: 20px;
     }
 
-    #dialog-body { display: flex; flex-direction: column; gap: 8px; }
+    #dialog-body { display: flex; flex-direction: column; gap: 6px; }
 
     #dialog-title {
-      font-size: 15px;
+      font-size: 13px;
       font-weight: 600;
-      color: #f5f5f5;
+      color: rgba(255,255,255,0.95);
       letter-spacing: -0.02em;
-      line-height: 1;
+      line-height: 1.2;
+      -webkit-font-smoothing: antialiased;
     }
 
     #dialog-msg {
-      font-size: 13px;
-      color: #888888;
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
       line-height: 1.5;
       letter-spacing: -0.01em;
+      -webkit-font-smoothing: antialiased;
     }
 
     #dialog-btns {
       display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #dlg-right {
+      display: flex;
       gap: 8px;
-      justify-content: flex-end;
     }
 
     #dialog-btns button {
-      height: 32px;
-      padding: 0 16px;
-      border-radius: 2px;
+      padding: 4px 14px;
+      border-radius: 7px;
       font-family: inherit;
       font-size: 13px;
+      font-weight: 500;
       letter-spacing: -0.01em;
       cursor: default;
-      transition: background 0.1s, border-color 0.1s, color 0.1s;
-    }
-
-    #dlg-cancel {
-      background: transparent;
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.1s, opacity 0.1s;
       border: none;
-      color: #888888;
     }
-    #dlg-cancel:hover { background: #1f1f1f; color: #e0e0e0; }
 
     #dlg-discard {
-      background: transparent;
-      border: 1px solid #333333;
-      color: #e0e0e0;
+      background: rgba(255, 59, 48, 0.22);
+      border: 1px solid rgba(255, 59, 48, 0.3);
+      color: #FF453A;
     }
-    #dlg-discard:hover { border-color: #555555; background: #1a1a1a; }
+    #dlg-discard:hover { background: rgba(255, 59, 48, 0.32); }
+    #dlg-discard:active { opacity: 0.82; }
+
+    #dlg-cancel {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.88);
+      font-weight: 400;
+    }
+    #dlg-cancel:hover { background: rgba(255,255,255,0.16); }
 
     #dlg-save {
-      background: #4FC3F7;
-      border: 1px solid transparent;
-      color: #0a0a0a;
-      font-weight: 500;
-      box-shadow: 0 0 16px -4px rgba(79, 195, 247, 0.3);
+      background: #0A84FF;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #ffffff;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
     }
-    #dlg-save:hover { background: #78d3fa; }
-    #dlg-save:active { transform: scale(0.98); }
+    #dlg-save:hover { background: #409CFF; }
+    #dlg-save:active { opacity: 0.85; }
 
-
-    /* ── Controls panel (inside context menu) ── */
-    #controls-panel {
-      position: absolute;
-      left: calc(100% + 4px);
-      top: 0;
-      display: none;
-      background: #161616;
-      border: 1px solid #2a2a2a;
-      border-radius: 2px;
-      box-shadow: 0 12px 32px -8px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.02);
-      min-width: 200px;
-      padding: 6px 14px 8px;
-      white-space: nowrap;
-    }
-    #controls-panel.visible { display: block; }
-    .ctrl-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 3px 0;
-    }
-    .ctrl-action {
-      font-size: 12px;
-      color: #5a5a5a;
-      letter-spacing: -0.01em;
-    }
-    .ctrl-key {
-      font-size: 11px;
-      color: #4FC3F7;
-      background: rgba(79,195,247,0.07);
-      border: 1px solid rgba(79,195,247,0.14);
-      border-radius: 2px;
-      padding: 1px 6px;
-      white-space: nowrap;
-    }
-    .ctrl-sep-inner {
-      height: 1px;
-      background: #1e1e1e;
-      margin: 4px 0;
-    }
-    #btn-controls .ctrl-chevron {
-      position: absolute;
-      right: 16px;
-      font-size: 9px;
-      color: #444;
-      transition: transform 0.15s ease, color 0.15s;
-    }
-    #btn-controls.open .ctrl-chevron {
-      transform: rotate(90deg);
-      color: #4FC3F7;
-    }
   </style>
 </head>
 <body>
@@ -327,20 +288,6 @@
   </div>
 
   <div id="ctx-menu">
-    <button class="ctx-item" id="btn-controls">Controls<span class="ctrl-chevron">›</span></button>
-    <div id="controls-panel">
-      <div class="ctrl-row"><span class="ctrl-action">Zoom</span><span class="ctrl-key">Scroll</span></div>
-      <div class="ctrl-row"><span class="ctrl-action">Pan</span><span class="ctrl-key">Middle drag</span></div>
-      <div class="ctrl-sep-inner"></div>
-      <div class="ctrl-row"><span class="ctrl-action">Undo</span><span class="ctrl-key">Ctrl Z</span></div>
-      <div class="ctrl-row"><span class="ctrl-action">Redo</span><span class="ctrl-key">Ctrl Shift Z</span></div>
-      <div class="ctrl-sep-inner"></div>
-      <div class="ctrl-row"><span class="ctrl-action">Delete</span><span class="ctrl-key">Del</span></div>
-      <div class="ctrl-row"><span class="ctrl-action">Copy image</span><span class="ctrl-key">Ctrl C</span></div>
-      <div class="ctrl-row"><span class="ctrl-action">Paste</span><span class="ctrl-key">Ctrl V</span></div>
-      <div class="ctrl-row"><span class="ctrl-action">Deselect</span><span class="ctrl-key">Esc</span></div>
-    </div>
-    <div class="ctx-sep"></div>
     <button class="ctx-item" id="btn-add-text">Add Text</button>
     <button class="ctx-item" id="btn-add-image">Add Image</button>
     <div class="ctx-sep"></div>
@@ -362,9 +309,11 @@
         <div id="dialog-msg">This board has unsaved changes.</div>
       </div>
       <div id="dialog-btns">
-        <button id="dlg-cancel">Cancel</button>
-        <button id="dlg-discard">Discard</button>
-        <button id="dlg-save">Save</button>
+        <button id="dlg-discard">Delete</button>
+        <div id="dlg-right">
+          <button id="dlg-cancel">Cancel</button>
+          <button id="dlg-save">Save</button>
+        </div>
       </div>
     </div>
   </div>

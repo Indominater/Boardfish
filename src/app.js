@@ -20,7 +20,7 @@ function resizeBg() {
 }
 
 function paintBg() {
-  bgCtx.fillStyle = '#272727';
+  bgCtx.fillStyle = '#1c1c1e';
   bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
 }
 
@@ -54,8 +54,15 @@ function saveViewport() {
   }, 400);
 }
 
+function updateAllGeom() {
+  for (const obj of objects) {
+    const el = document.getElementById(obj.id);
+    if (el) setElGeom(el, obj);
+  }
+}
+
 function applyTransform() {
-  world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  updateAllGeom();
   saveViewport();
   updateSelectionOverlay();
   scheduleBgRepaint();
@@ -193,7 +200,6 @@ function buildElement(obj) {
   el.className = 'obj obj-' + obj.type;
   el.id = obj.id;
   el.draggable = false;
-  setElGeom(el, obj);
 
   const inner = document.createElement('div');
   inner.className = 'obj-inner';
@@ -211,17 +217,22 @@ function buildElement(obj) {
   }
 
   el.appendChild(inner);
+  setElGeom(el, obj);
   el.addEventListener('dragstart', e => e.preventDefault());
   attachObjectListeners(el, obj);
   return el;
 }
 
 function setElGeom(el, obj) {
-  el.style.left   = obj.x + 'px';
-  el.style.top    = obj.y + 'px';
-  el.style.width  = obj.w + 'px';
-  el.style.height = obj.h + 'px';
+  el.style.left   = (obj.x * zoom + panX) + 'px';
+  el.style.top    = (obj.y * zoom + panY) + 'px';
+  el.style.width  = (obj.w * zoom) + 'px';
+  el.style.height = (obj.h * zoom) + 'px';
   el.style.zIndex = obj.z;
+  if (obj.type === 'text') {
+    const pre = el.querySelector('pre');
+    if (pre) pre.style.fontSize = (16 * zoom) + 'px';
+  }
 }
 
 // ─── Screen-space selection overlay ──────────────────────────────────────────
@@ -338,7 +349,7 @@ function attachObjectListeners(el, obj) {
         obj.x = ox + dx;
         obj.y = oy + dy;
         const domEl = document.getElementById(obj.id);
-        if (domEl) { domEl.style.left = obj.x + 'px'; domEl.style.top = obj.y + 'px'; }
+        if (domEl) { domEl.style.left = (obj.x * zoom + panX) + 'px'; domEl.style.top = (obj.y * zoom + panY) + 'px'; }
         updateSelectionOverlay();
       }
     }
@@ -507,8 +518,21 @@ function deleteSelected() {
 
 const ZOOM_MIN = 0.05, ZOOM_MAX = 10;
 
+let _caretTimer = null;
+
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  if (editingId) {
+    const editEl = document.getElementById(editingId);
+    if (editEl) editEl.classList.add('caret-hidden');
+    clearTimeout(_caretTimer);
+    _caretTimer = setTimeout(() => {
+      if (editingId) {
+        const editEl = document.getElementById(editingId);
+        if (editEl) editEl.classList.remove('caret-hidden');
+      }
+    }, 150);
+  }
   const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
   const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
   panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
@@ -549,7 +573,37 @@ canvas.addEventListener('mousedown', (e) => {
     return;
   }
 
-  if (e.button === 0 && (e.target === canvas || e.target === world || e.target === canvasBg)) deselectAll();
+  // Left-click on empty space: drag to pan, click to deselect
+  if (e.button === 0 && (e.target === canvas || e.target === world || e.target === canvasBg)) {
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const startPanX = panX, startPanY = panY;
+    let panning = false;
+
+    function onMove(ev) {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!panning && Math.hypot(dx, dy) > 4) {
+        panning = true;
+        canvas.classList.add('panning');
+      }
+      if (panning) {
+        panX = startPanX + dx;
+        panY = startPanY + dy;
+        scheduleTransform();
+      }
+    }
+
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      canvas.classList.remove('panning');
+      if (!panning) deselectAll();
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 }, true);
 
 // Prevent middle-click scroll/autoscroll behavior
@@ -567,8 +621,6 @@ canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   ctxPos = toWorld(e.clientX, e.clientY);
   btnResetZoom.textContent = `Reset Zoom (${Math.round(zoom * 100)}%)`;
-  document.getElementById('controls-panel').classList.remove('visible');
-  document.getElementById('btn-controls').classList.remove('open');
   ctxMenu.style.left = e.clientX + 'px';
   ctxMenu.style.top  = e.clientY + 'px';
   ctxMenu.classList.add('visible');
@@ -613,14 +665,6 @@ btnResetZoom.addEventListener('click', () => {
   applyTransform();
 });
 
-document.getElementById('btn-controls').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const panel = document.getElementById('controls-panel');
-  const btn = document.getElementById('btn-controls');
-  btn.classList.toggle('open');
-  const isOpen = panel.classList.toggle('visible');
-  if (isOpen) panel.style.top = btn.offsetTop + 'px';
-});
 
 fileInput.addEventListener('change', () => {
   const file = fileInput.files[0];
@@ -833,51 +877,52 @@ async function copySelected() {
   } catch (err) { console.error('Copy failed:', err); }
 }
 
-async function pasteFromClipboard() {
-  try {
-    const items = await navigator.clipboard.read();
-    for (const item of items) {
-      const imageType = item.types.find(t => t.startsWith('image/'));
-      if (imageType) {
-        const blob = await item.getType(imageType);
+document.addEventListener('paste', (e) => {
+  if (editingId) return;
+  e.preventDefault();
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of [...items]) {
+    if (item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) {
         const reader = new FileReader();
         reader.onload = (ev) => {
           const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
           addImage(ev.target.result, center.x - 150, center.y - 150);
         };
-        reader.readAsDataURL(blob);
+        reader.readAsDataURL(file);
         return;
       }
     }
-    const text = await navigator.clipboard.readText();
-    if (text && text.trim()) {
-      const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-      addText(center.x - 100, center.y - 40, text);
-    }
-  } catch (err) { console.error('Paste failed:', err); }
-}
+  }
+  const text = e.clipboardData?.getData('text/plain');
+  if (text && text.trim()) {
+    const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+    addText(center.x - 100, center.y - 40, text);
+  }
+});
 
 // ─── Keyboard ────────────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a') { e.preventDefault(); return; }
+
   if (e.key === 'Escape') { if (editingId) { exitEdit(); return; } deselectAll(); return; }
 
   if ((e.key === 'Backspace' || e.key === 'Delete') && selectedId && !editingId) {
     e.preventDefault(); deleteSelected(); return;
   }
 
-  if (e.ctrlKey && e.key === 'c' && !editingId) { copySelected(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !editingId) { copySelected(); return; }
 
-  if (e.ctrlKey && e.key === 'v' && !editingId) { e.preventDefault(); pasteFromClipboard(); return; }
+if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) { e.preventDefault(); redo(); return; }
 
-  if (e.ctrlKey && e.shiftKey && (e.key === 'Z' || e.key === 'z')) { e.preventDefault(); redo(); return; }
-
-  if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
 });
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
-restoreViewport();
 snapshot();
 
 
