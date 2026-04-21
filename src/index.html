@@ -214,6 +214,40 @@
       transition: color 0.5s ease;
     }
 
+    #isl-input {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+    }
+
+    #isl-input-mode {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      -webkit-font-smoothing: antialiased;
+      white-space: nowrap;
+      min-width: 64px;
+    }
+    #isl-input-mode.mouse    { color: #0A84FF; }
+    #isl-input-mode.trackpad { color: #30D158; }
+
+    .isl-signal {
+      font-size: 11px;
+      font-family: 'SF Mono', 'Geist Mono', monospace;
+      padding: 2px 5px;
+      border-radius: 4px;
+      white-space: nowrap;
+      opacity: 0.35;
+      color: #fff;
+      background: rgba(255,255,255,0.08);
+      transition: opacity 0.1s, background 0.1s;
+    }
+    .isl-signal.active {
+      opacity: 1;
+      background: rgba(255,255,255,0.15);
+    }
+
 
 
     /* ── Unsaved changes dialog ── */
@@ -375,6 +409,15 @@
 
   <div id="island">
     <span id="isl-zoom">100%</span>
+    <div class="isl-sep"></div>
+    <div id="isl-input">
+      <span id="isl-input-mode">—</span>
+      <span class="isl-signal" id="sig-mode1">mode=1</span>
+      <span class="isl-signal" id="sig-deltax">deltaX≠0</span>
+      <span class="isl-signal" id="sig-small">abs&lt;12</span>
+      <span class="isl-signal" id="sig-varying">Δ≠prev</span>
+      <span class="isl-signal" id="sig-mouse">Δ=prev</span>
+    </div>
   </div>
 
   <script src="app.js"></script>

@@ -625,18 +625,33 @@ canvas.addEventListener('wheel', (e) => {
   // Mouse wheel: fixed deltaY per notch regardless of speed → zoom
   // Trackpad: deltaY varies with finger acceleration → pan
   const abs = Math.abs(e.deltaY);
-  const varyingDelta = abs !== _prevWheelAbs;
-  const mouseLike = e.deltaMode === 1                              // DOM_DELTA_LINE = physical mouse wheel
-                 || (e.deltaX === 0 && abs > 0 && abs === _prevWheelAbs);
+  const sigMode1   = e.deltaMode === 1;
+  const sigDeltaX  = e.deltaX !== 0;
+  const sigSmall   = abs < 12;
+  const sigVarying = abs !== _prevWheelAbs;
+  const sigMouse   = e.deltaX === 0 && abs > 0 && abs === _prevWheelAbs;
+  const mouseLike  = sigMode1 || sigMouse;
   _prevWheelAbs = abs;
 
   if (mouseLike) {
-    _wheelPanMode = false;  // two identical deltas = confirmed mouse, zoom
-  } else if (e.deltaX !== 0 || abs < 12 || varyingDelta) {
+    _wheelPanMode = false;
+  } else if (sigDeltaX || sigSmall || sigVarying) {
     _wheelPanMode = true;
   }
   clearTimeout(_wheelPanTimer);
   _wheelPanTimer = setTimeout(() => { _wheelPanMode = false; }, 100);
+
+  // Update island debug indicator
+  const modeEl = document.getElementById('isl-input-mode');
+  if (modeEl) {
+    modeEl.textContent = _wheelPanMode ? 'Trackpad' : 'Mouse';
+    modeEl.className   = _wheelPanMode ? 'trackpad' : 'mouse';
+    document.getElementById('sig-mode1')  .classList.toggle('active', sigMode1);
+    document.getElementById('sig-deltax') .classList.toggle('active', sigDeltaX);
+    document.getElementById('sig-small')  .classList.toggle('active', sigSmall);
+    document.getElementById('sig-varying').classList.toggle('active', sigVarying);
+    document.getElementById('sig-mouse')  .classList.toggle('active', sigMouse);
+  }
 
   if (_wheelPanMode) {
     panX -= e.deltaX;
