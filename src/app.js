@@ -353,7 +353,6 @@ function attachObjectListeners(el, obj) {
 
   el.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    if (isPanMode()) return;
     if (editingId === obj.id && e.target.tagName === 'PRE') return;
 
     e.preventDefault();
@@ -392,7 +391,6 @@ function attachObjectListeners(el, obj) {
   });
 
   el.addEventListener('click', (e) => {
-    if (isPanMode()) return;
     e.stopPropagation();
     if (!moved) selectObject(obj.id);
     moved = false;
@@ -400,7 +398,6 @@ function attachObjectListeners(el, obj) {
 
   el.addEventListener('dblclick', (e) => {
     if (obj.type !== 'text') return;
-    if (isPanMode()) return;
     e.stopPropagation();
     selectObject(obj.id);
     enterEdit(obj.id);
@@ -607,17 +604,23 @@ canvas.addEventListener('wheel', (e) => {
       }
     }, 150);
   }
-  const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-  const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
-  panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
-  panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
-  zoom = newZoom;
+  if (e.ctrlKey) {
+    // Pinch-to-zoom on trackpad, or Ctrl+scroll on mouse
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
+    panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
+    panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
+    zoom = newZoom;
+    scheduleTransform();
+    return;
+  }
+  // Two-finger scroll on trackpad (360° freedom) or scroll wheel on mouse → pan
+  panX -= e.deltaX;
+  panY -= e.deltaY;
   scheduleTransform();
 }, { passive: false });
 
 // ─── Pan (middle mouse button) ────────────────────────────────────────────────
-
-function isPanMode() { return false; }
 
 canvas.addEventListener('mousedown', (e) => {
   // Middle mouse button pan
@@ -647,36 +650,10 @@ canvas.addEventListener('mousedown', (e) => {
     return;
   }
 
-  // Left-click on empty space: drag to pan, click to deselect
+  // Left-click on empty space: deselect
   if (e.button === 0 && (e.target === canvas || e.target === world || e.target === canvasBg)) {
     e.preventDefault();
-    const startX = e.clientX, startY = e.clientY;
-    const startPanX = panX, startPanY = panY;
-    let panning = false;
-
-    function onMove(ev) {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      if (!panning && Math.hypot(dx, dy) > 4) {
-        panning = true;
-        canvas.classList.add('panning');
-      }
-      if (panning) {
-        panX = startPanX + dx;
-        panY = startPanY + dy;
-        scheduleTransform();
-      }
-    }
-
-    function onUp() {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      canvas.classList.remove('panning');
-      if (!panning) deselectAll();
-    }
-
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    deselectAll();
   }
 }, true);
 
@@ -827,12 +804,8 @@ function showUnsavedDialog() {
 
 // ─── Save / Open ─────────────────────────────────────────────────────────────
 
-function boardJson() {
-  return new Promise((resolve) => {
-    const worker = new Worker('save-worker.js');
-    worker.onmessage = (e) => { worker.terminate(); resolve(e.data); };
-    worker.postMessage({ version: 2, viewport: { panX, panY, zoom }, imageStore, objects });
-  });
+function boardData() {
+  return { version: 2, viewport: { panX, panY, zoom }, imageStore, objects };
 }
 
 function applyBoardData(data) {
@@ -880,7 +853,7 @@ async function saveBoardAs() {
     });
     if (!filePath) { restoreIslandZoom(); return false; }
     await Promise.all([
-      tauri.fs.writeTextFile(filePath, await boardJson()),
+      tauri.tauri.invoke('save_board', { path: filePath, board: boardData() }),
       minTimer
     ]);
     currentFilePath = filePath;
@@ -901,7 +874,7 @@ async function saveBoard() {
     try {
       showIslandMsg('Saving');
       await Promise.all([
-        (async () => { await tauri.fs.writeTextFile(currentFilePath, await boardJson()); })(),
+        tauri.tauri.invoke('save_board', { path: currentFilePath, board: boardData() }),
         new Promise(r => setTimeout(r, 1500))
       ]);
       markSaved();

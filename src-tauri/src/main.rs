@@ -10,6 +10,12 @@ fn get_startup_file(state: tauri::State<StartupFile>) -> Option<String> {
 }
 
 #[tauri::command]
+async fn save_board(path: String, board: serde_json::Value) -> Result<(), String> {
+    let json = serde_json::to_string(&board).map_err(|e| e.to_string())?;
+    tokio::fs::write(&path, json.as_bytes()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn copy_image_to_clipboard(data_url: String) -> Result<(), String> {
     use base64::{Engine as _, engine::general_purpose};
     let base64_data = data_url.split(',').nth(1).ok_or("invalid data URL")?;
@@ -30,7 +36,7 @@ fn main() {
 
     tauri::Builder::default()
         .manage(StartupFile(Mutex::new(startup_file)))
-        .invoke_handler(tauri::generate_handler![get_startup_file, copy_image_to_clipboard])
+        .invoke_handler(tauri::generate_handler![get_startup_file, copy_image_to_clipboard, save_board])
         .on_window_event(|event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event.event() {
                 api.prevent_close();
