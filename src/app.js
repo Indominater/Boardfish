@@ -845,17 +845,12 @@ async function saveBoardAs() {
   const tauri = window.__TAURI__;
   if (!tauri) { alert('Save requires the desktop app.'); return false; }
   try {
-    showIslandMsg('Saving');
-    const minTimer = new Promise(r => setTimeout(r, 1500));
     const filePath = await tauri.dialog.save({
       filters: [{ name: 'Boardfish Board', extensions: ['bf'] }],
       defaultPath: currentFilePath || 'board.bf'
     });
-    if (!filePath) { restoreIslandZoom(); return false; }
-    await Promise.all([
-      tauri.tauri.invoke('save_board', { path: filePath, board: boardData() }),
-      minTimer
-    ]);
+    if (!filePath) return false;
+    await tauri.tauri.invoke('save_board', { path: filePath, board: boardData() });
     currentFilePath = filePath;
     markSaved();
     showIslandMsg('Saved', 1500);
@@ -872,11 +867,7 @@ async function saveBoard() {
     const tauri = window.__TAURI__;
     if (!tauri) return false;
     try {
-      showIslandMsg('Saving');
-      await Promise.all([
-        tauri.tauri.invoke('save_board', { path: currentFilePath, board: boardData() }),
-        new Promise(r => setTimeout(r, 1500))
-      ]);
+      await tauri.tauri.invoke('save_board', { path: currentFilePath, board: boardData() });
       markSaved();
       showIslandMsg('Saved', 1500);
       return true;
