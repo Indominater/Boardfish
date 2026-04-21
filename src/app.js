@@ -7,6 +7,8 @@ const world      = document.getElementById('world');
 const ctxMenu    = document.getElementById('ctx-menu');
 const fileInput  = document.getElementById('file-input');
 const selOverlay = document.getElementById('sel-overlay');
+const islZoom    = document.getElementById('isl-zoom');
+const objCtxMenu = document.getElementById('obj-ctx-menu');
 
 // ─── Background canvas (eliminates contrails by explicit repaint) ─────────────
 
@@ -61,8 +63,14 @@ function updateAllGeom() {
   }
 }
 
+function updateZoomDisplay() {
+  islZoom.textContent = Math.round(zoom * 100) + '%';
+}
+
+
 function applyTransform() {
   updateAllGeom();
+  updateZoomDisplay();
   saveViewport();
   updateSelectionOverlay();
   scheduleBgRepaint();
@@ -509,6 +517,47 @@ function addImage(src, wx, wy) {
   img.src = src;
 }
 
+// ─── New board ───────────────────────────────────────────────────────────────
+
+async function newBoard() {
+  if (objects.length === 0 && !currentFilePath) return;
+  if (isDirty()) {
+    const choice = await showUnsavedDialog();
+    if (choice === 'cancel') return;
+    if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
+  }
+  if (editingId) exitEdit();
+  selectedId = null;
+  objects = [];
+  currentFilePath = null;
+  panX = 0; panY = 0; zoom = 1;
+  clearImageStore();
+  history = []; historyIndex = -1;
+  idCounter = 1; zCounter = 1;
+  renderAll();
+  applyTransform();
+  snapshot();
+  markSaved();
+}
+
+// ─── Duplicate ────────────────────────────────────────────────────────────────
+
+function duplicateSelected() {
+  if (!selectedId) return;
+  const obj = objects.find(o => o.id === selectedId);
+  if (!obj) return;
+  const before = JSON.parse(JSON.stringify(objects));
+  const newObj = JSON.parse(JSON.stringify(obj));
+  newObj.id = newId();
+  newObj.x += 20;
+  newObj.y += 20;
+  newObj.z = ++zCounter;
+  objects.push(newObj);
+  world.appendChild(buildElement(newObj));
+  selectObject(newObj.id);
+  pushHistory(before);
+}
+
 // ─── Delete ───────────────────────────────────────────────────────────────────
 
 function deleteSelected() {
@@ -618,18 +667,31 @@ canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefaul
 // ─── Context menu ─────────────────────────────────────────────────────────────
 
 let ctxPos = { x: 0, y: 0 };
-const btnResetZoom = document.getElementById('btn-reset-zoom');
 
 const canvasBg = document.getElementById('canvas-bg');
 
 canvas.addEventListener('contextmenu', (e) => {
-  if (e.target !== canvas && e.target !== world && e.target !== canvasBg) { e.preventDefault(); return; }
   e.preventDefault();
+  const objEl = e.target.closest('.obj');
+  if (objEl) {
+    ctxMenu.classList.remove('visible');
+    selectObject(objEl.id);
+    objCtxMenu.style.left = e.clientX + 'px';
+    objCtxMenu.style.top  = e.clientY + 'px';
+    objCtxMenu.classList.add('visible');
+    return;
+  }
+  if (e.target !== canvas && e.target !== world && e.target !== canvasBg) return;
+  objCtxMenu.classList.remove('visible');
   ctxPos = toWorld(e.clientX, e.clientY);
-  btnResetZoom.textContent = `Reset Zoom (${Math.round(zoom * 100)}%)`;
   ctxMenu.style.left = e.clientX + 'px';
   ctxMenu.style.top  = e.clientY + 'px';
   ctxMenu.classList.add('visible');
+});
+
+document.getElementById('btn-new').addEventListener('click', () => {
+  ctxMenu.classList.remove('visible');
+  newBoard();
 });
 
 document.getElementById('btn-add-text').addEventListener('click', () => {
@@ -658,19 +720,6 @@ document.getElementById('btn-open').addEventListener('click', () => {
   openBoard();
 });
 
-btnResetZoom.addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  // Keep the current screen center fixed in world space
-  const cx = window.innerWidth / 2;
-  const cy = window.innerHeight / 2;
-  const worldCX = (cx - panX) / zoom;
-  const worldCY = (cy - panY) / zoom;
-  zoom = 1;
-  panX = cx - worldCX;
-  panY = cy - worldCY;
-  applyTransform();
-});
-
 
 fileInput.addEventListener('change', () => {
   const file = fileInput.files[0];
@@ -680,7 +729,39 @@ fileInput.addEventListener('change', () => {
   reader.readAsDataURL(file);
 });
 
-document.addEventListener('click', () => ctxMenu.classList.remove('visible'));
+document.addEventListener('click', () => {
+  ctxMenu.classList.remove('visible');
+  objCtxMenu.classList.remove('visible');
+});
+
+document.getElementById('obj-btn-delete').addEventListener('click', () => {
+  objCtxMenu.classList.remove('visible');
+  deleteSelected();
+});
+
+document.getElementById('obj-btn-duplicate').addEventListener('click', () => {
+  objCtxMenu.classList.remove('visible');
+  duplicateSelected();
+});
+
+// ─── Drag and drop images ─────────────────────────────────────────────────────
+
+canvas.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+canvas.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const pos = toWorld(e.clientX, e.clientY);
+  for (const file of [...e.dataTransfer.files]) {
+    if (!file.type.startsWith('image/')) continue;
+    const reader = new FileReader();
+    reader.onload = (ev) => addImage(ev.target.result, pos.x - 100, pos.y - 100);
+    reader.readAsDataURL(file);
+  }
+});
+
 
 // ─── Dirty tracking ───────────────────────────────────────────────────────────
 
@@ -739,7 +820,11 @@ function showUnsavedDialog() {
 // ─── Save / Open ─────────────────────────────────────────────────────────────
 
 function boardJson() {
-  return JSON.stringify({ version: 2, viewport: { panX, panY, zoom }, imageStore, objects });
+  return new Promise((resolve) => {
+    const worker = new Worker('save-worker.js');
+    worker.onmessage = (e) => { worker.terminate(); resolve(e.data); };
+    worker.postMessage({ version: 2, viewport: { panX, panY, zoom }, imageStore, objects });
+  });
 }
 
 function applyBoardData(data) {
@@ -785,7 +870,7 @@ async function saveBoardAs() {
       defaultPath: currentFilePath || 'board.bf'
     });
     if (!filePath) { toast.classList.remove('show'); return false; }
-    await tauri.fs.writeTextFile(filePath, boardJson());
+    await tauri.fs.writeTextFile(filePath, await boardJson());
     currentFilePath = filePath;
     markSaved();
     showToast('Saved ✓');
@@ -802,7 +887,7 @@ async function saveBoard() {
     const tauri = window.__TAURI__;
     if (!tauri) return false;
     try {
-      await tauri.fs.writeTextFile(currentFilePath, boardJson());
+      await tauri.fs.writeTextFile(currentFilePath, await boardJson());
       markSaved();
       showToast('Saved ✓');
       return true;
@@ -864,41 +949,65 @@ if (window.__TAURI__) {
 
 // ─── Clipboard ───────────────────────────────────────────────────────────────
 
+let jsClipboard = null; // in-app clipboard, avoids system clipboard format issues
+
+// When the user switches away and copies something else, clear in-app clipboard
+// so the next paste uses whatever is most recent on the system clipboard
+window.addEventListener('focus', () => { jsClipboard = null; });
+
 async function copySelected() {
   if (!selectedId) return;
   const obj = objects.find(o => o.id === selectedId);
-  if (!obj || obj.type !== 'image') return;
-  try {
-    const blobPromise = (async () => {
-      const res = await fetch(getImageSrc(obj));
-      const blob = await res.blob();
-      if (blob.type === 'image/png') return blob;
-      const bmp = await createImageBitmap(blob);
-      const c = document.createElement('canvas');
-      c.width = bmp.width; c.height = bmp.height;
-      c.getContext('2d').drawImage(bmp, 0, 0);
-      return new Promise(r => c.toBlob(r, 'image/png'));
-    })();
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })]);
-  } catch (err) { console.error('Copy failed:', err); }
+  if (!obj) return;
+
+  if (obj.type === 'text') {
+    jsClipboard = { type: 'text', content: obj.data.content };
+    try { await navigator.clipboard.writeText(obj.data.content); } catch {}
+    return;
+  }
+
+  if (obj.type === 'image') {
+    jsClipboard = { type: 'image', imgKey: obj.data.imgKey };
+    // Also write to system clipboard so user can paste into other apps
+    if (window.__TAURI__) {
+      try {
+        await window.__TAURI__.tauri.invoke('copy_image_to_clipboard', { dataUrl: getImageSrc(obj) });
+      } catch (err) { console.error('System clipboard write failed:', err); }
+    }
+  }
 }
 
 document.addEventListener('paste', (e) => {
   if (editingId) return;
   e.preventDefault();
+
+  // In-app clipboard: handles copy/paste within Boardfish without system clipboard format issues
+  if (jsClipboard) {
+    const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+    if (jsClipboard.type === 'image') {
+      const src = imageStore[jsClipboard.imgKey];
+      if (src) { addImage(src, center.x - 100, center.y - 100); return; }
+    } else if (jsClipboard.type === 'text') {
+      addText(center.x - 100, center.y - 40, jsClipboard.content);
+      return;
+    }
+  }
+
+  // System clipboard: handles paste from external sources
   const items = e.clipboardData?.items;
-  if (!items) return;
-  for (const item of [...items]) {
-    if (item.type.startsWith('image/')) {
-      const file = item.getAsFile();
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-          addImage(ev.target.result, center.x - 150, center.y - 150);
-        };
-        reader.readAsDataURL(file);
-        return;
+  if (items) {
+    for (const item of [...items]) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+            addImage(ev.target.result, center.x - 150, center.y - 150);
+          };
+          reader.readAsDataURL(file);
+          return;
+        }
       }
     }
   }
@@ -920,6 +1029,8 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault(); deleteSelected(); return;
   }
 
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveBoard(); return; }
+
   if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !editingId) { copySelected(); return; }
 
 if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) { e.preventDefault(); redo(); return; }
@@ -930,6 +1041,7 @@ if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 snapshot();
+updateZoomDisplay();
 
 
 // If opened by double-clicking a .bf file, load it immediately

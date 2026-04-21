@@ -126,6 +126,25 @@
     }
     #ctx-menu.visible { display: block; }
 
+    #obj-ctx-menu {
+      position: fixed;
+      background: rgba(26, 26, 28, 0.72);
+      backdrop-filter: blur(48px) saturate(200%);
+      -webkit-backdrop-filter: blur(48px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      box-shadow:
+        0 24px 64px rgba(0,0,0,0.6),
+        0 4px 16px rgba(0,0,0,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.1);
+      z-index: 99999;
+      min-width: 160px;
+      padding: 5px;
+      display: none;
+      overflow: hidden;
+    }
+    #obj-ctx-menu.visible { display: block; }
+
     .ctx-item {
       display: block;
       width: 100%;
@@ -151,10 +170,54 @@
       margin: 3px 5px;
     }
 
+    /* ── Island ── */
+    #island {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(26, 26, 28, 0.72);
+      backdrop-filter: blur(48px) saturate(200%);
+      -webkit-backdrop-filter: blur(48px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      box-shadow:
+        0 24px 64px rgba(0,0,0,0.6),
+        0 4px 16px rgba(0,0,0,0.3),
+        inset 0 1px 0 rgba(255,255,255,0.1);
+      padding: 5px;
+      display: flex;
+      align-items: center;
+      z-index: 9000;
+      overflow: hidden;
+    }
+
+    .isl-sep {
+      width: 1px;
+      height: 14px;
+      background: rgba(255,255,255,0.08);
+      margin: 0 3px;
+      flex-shrink: 0;
+    }
+
+    #isl-zoom {
+      padding: 4px 8px;
+      font-family: inherit;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.38);
+      letter-spacing: -0.01em;
+      -webkit-font-smoothing: antialiased;
+      white-space: nowrap;
+      min-width: 44px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+
     /* ── Toast ── */
     #toast {
       position: fixed;
-      bottom: 28px;
+      bottom: 72px;
       left: 50%;
       transform: translateX(-50%) translateY(12px);
       background: rgba(26, 26, 28, 0.78);
@@ -204,28 +267,34 @@
         0 24px 64px rgba(0,0,0,0.6),
         0 4px 16px rgba(0,0,0,0.3),
         inset 0 1px 0 rgba(255,255,255,0.1);
-      width: 360px;
-      padding: 22px 22px 18px;
+      width: 260px;
+      padding: 5px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 0;
+      overflow: hidden;
     }
 
-    #dialog-body { display: flex; flex-direction: column; gap: 6px; }
+    #dialog-body {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 6px 10px 8px;
+    }
 
     #dialog-title {
       font-size: 13px;
       font-weight: 600;
       color: rgba(255,255,255,0.95);
       letter-spacing: -0.02em;
-      line-height: 1.2;
+      line-height: 1.3;
       -webkit-font-smoothing: antialiased;
     }
 
     #dialog-msg {
       font-size: 12px;
       color: rgba(255,255,255,0.4);
-      line-height: 1.5;
+      line-height: 1.4;
       letter-spacing: -0.01em;
       -webkit-font-smoothing: antialiased;
     }
@@ -234,15 +303,16 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      padding: 4px 5px;
     }
 
     #dlg-right {
       display: flex;
-      gap: 8px;
+      gap: 6px;
     }
 
     #dialog-btns button {
-      padding: 4px 14px;
+      padding: 4px 10px;
       border-radius: 7px;
       font-family: inherit;
       font-size: 13px;
@@ -250,7 +320,7 @@
       letter-spacing: -0.01em;
       cursor: default;
       -webkit-font-smoothing: antialiased;
-      transition: background 0.1s, opacity 0.1s;
+      transition: background 0.08s, opacity 0.1s;
       border: none;
     }
 
@@ -294,14 +364,20 @@
   </div>
 
   <div id="ctx-menu">
+    <button class="ctx-item" id="btn-new">New Board</button>
+    <div class="ctx-sep"></div>
     <button class="ctx-item" id="btn-add-text">Add Text</button>
     <button class="ctx-item" id="btn-add-image">Add Image</button>
     <div class="ctx-sep"></div>
     <button class="ctx-item" id="btn-save">Save</button>
     <button class="ctx-item" id="btn-save-as">Save As</button>
     <button class="ctx-item" id="btn-open">Open</button>
+  </div>
+
+  <div id="obj-ctx-menu">
+    <button class="ctx-item" id="obj-btn-duplicate">Duplicate</button>
     <div class="ctx-sep"></div>
-    <button class="ctx-item" id="btn-reset-zoom">Reset Zoom</button>
+    <button class="ctx-item" id="obj-btn-delete">Delete</button>
   </div>
 
   <input type="file" id="file-input" accept="image/*" style="display:none" />
@@ -314,6 +390,7 @@
         <div id="dialog-title">Unsaved Changes</div>
         <div id="dialog-msg">This board has unsaved changes.</div>
       </div>
+      <div class="ctx-sep"></div>
       <div id="dialog-btns">
         <button id="dlg-discard">Delete</button>
         <div id="dlg-right">
@@ -324,6 +401,10 @@
     </div>
   </div>
 
+
+  <div id="island">
+    <span id="isl-zoom">100%</span>
+  </div>
 
   <script src="app.js"></script>
 </body>
