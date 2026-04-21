@@ -1089,7 +1089,6 @@ document.addEventListener('paste', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'R') { e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key === 'a') { if (!editingId) e.preventDefault(); return; }
 
   if (e.key === 'Escape') { if (editingId) { exitEdit(); return; } deselectAll(); return; }
@@ -1105,6 +1104,25 @@ document.addEventListener('keydown', (e) => {
 if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) { e.preventDefault(); redo(); return; }
 
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
+});
+
+// ─── Reload guard ────────────────────────────────────────────────────────────
+
+// Prevent native WebKit context menu (which contains "Reload Page") on any
+// element not already handled by the canvas contextmenu handler.
+document.addEventListener('contextmenu', (e) => {
+  if (!e.defaultPrevented) e.preventDefault();
+});
+
+// Treat page reload the same as New Board: show unsaved-changes dialog if dirty.
+window.addEventListener('beforeunload', (e) => {
+  if (!isDirty()) return;
+  e.preventDefault();
+  e.returnValue = '';
+  setTimeout(async () => {
+    const choice = await showUnsavedDialog();
+    if (choice === 'save') await saveBoard();
+  }, 0);
 });
 
 // ─── Init ────────────────────────────────────────────────────────────────────
