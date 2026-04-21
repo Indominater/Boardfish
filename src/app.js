@@ -721,6 +721,11 @@ document.getElementById('btn-add-image').addEventListener('click', () => {
   fileInput.click();
 });
 
+document.getElementById('btn-paste').addEventListener('click', () => {
+  ctxMenu.classList.remove('visible');
+  pasteAtPos(ctxPos.x, ctxPos.y);
+});
+
 document.getElementById('btn-save').addEventListener('click', () => {
   ctxMenu.classList.remove('visible');
   saveBoard();
@@ -1007,6 +1012,36 @@ async function copySelected() {
       } catch (err) { console.error('System clipboard write failed:', err); }
     }
   }
+}
+
+async function pasteAtPos(wx, wy) {
+  if (jsClipboard) {
+    if (jsClipboard.type === 'image') {
+      const src = imageStore[jsClipboard.imgKey];
+      if (src) { addImage(src, wx, wy); return; }
+    } else if (jsClipboard.type === 'text') {
+      addText(wx - 100, wy - 40, jsClipboard.content);
+      return;
+    }
+  }
+  try {
+    if (navigator.clipboard.read) {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            const reader = new FileReader();
+            reader.onload = (ev) => addImage(ev.target.result, wx, wy);
+            reader.readAsDataURL(blob);
+            return;
+          }
+        }
+      }
+    }
+    const text = await navigator.clipboard.readText();
+    if (text && text.trim()) addText(wx - 100, wy - 40, text);
+  } catch {}
 }
 
 document.addEventListener('paste', (e) => {
