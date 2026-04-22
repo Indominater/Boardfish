@@ -33,11 +33,8 @@
       contain: paint;
     }
 
-    #canvas-bg {
-      position: absolute;
-      inset: 0;
-      z-index: 0;
-      display: block;
+    #canvas {
+      background: #1c1c1e;
     }
 
     #canvas.panning    { cursor: grabbing !important; }
@@ -48,6 +45,7 @@
       top: 0; left: 0;
       z-index: 1;
       transform-origin: 0 0;
+      will-change: transform;
     }
 
     .obj { position: absolute; cursor: default; }
@@ -327,7 +325,6 @@
 </head>
 <body>
   <div id="canvas">
-    <canvas id="canvas-bg"></canvas>
     <div id="world"></div>
     <div id="sel-overlay">
       <div class="s-handle" data-dir="nw"></div>

@@ -10,39 +10,6 @@ const selOverlay = document.getElementById('sel-overlay');
 const islZoom    = document.getElementById('isl-zoom');
 const objCtxMenu = document.getElementById('obj-ctx-menu');
 
-// ─── Background canvas (eliminates contrails by explicit repaint) ─────────────
-
-const bgCanvas = document.getElementById('canvas-bg');
-const bgCtx    = bgCanvas.getContext('2d');
-
-function resizeBg() {
-  bgCanvas.width  = canvas.offsetWidth;
-  bgCanvas.height = canvas.offsetHeight;
-  paintBg();
-}
-
-function paintBg() {
-  bgCtx.fillStyle = '#1c1c1e';
-  bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
-}
-
-let bgFrames = 0;
-let bgRaf    = null;
-
-// After zoom/pan, repaint background for N frames to wipe any contrail pixels
-function scheduleBgRepaint(frames = 8) {
-  bgFrames = frames;
-  if (bgRaf) return;
-  function loop() {
-    paintBg();
-    if (--bgFrames > 0) { bgRaf = requestAnimationFrame(loop); }
-    else { bgRaf = null; }
-  }
-  bgRaf = requestAnimationFrame(loop);
-}
-
-window.addEventListener('resize', resizeBg);
-resizeBg();
 
 // ─── Viewport ─────────────────────────────────────────────────────────────────
 
@@ -94,7 +61,6 @@ function applyTransform() {
   updateZoomDisplay();
   saveViewport();
   updateSelectionOverlay();
-  scheduleBgRepaint();
 }
 
 let _transformRaf = null;
