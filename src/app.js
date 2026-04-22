@@ -84,7 +84,13 @@ let zCounter = 1;
 let selectedId = null;
 let editingId  = null;
 let objects    = [];
+const objectsMap = new Map();
 let idCounter  = 1;
+
+function rebuildObjectsMap() {
+  objectsMap.clear();
+  for (const obj of objects) objectsMap.set(obj.id, obj);
+}
 
 function newId() { return 'obj-' + (idCounter++); }
 
@@ -130,10 +136,8 @@ function snapshot() {
   trimHistory();
 }
 
-function pushHistory(before) {
+function pushHistory() {
   history = history.slice(0, historyIndex + 1);
-  history.push(before);
-  historyIndex++;
   history.push(JSON.parse(JSON.stringify(objects)));
   historyIndex++;
   trimHistory();
@@ -147,7 +151,8 @@ function restoreSnapshot(s) {
     editingId = null;
   }
   objects = JSON.parse(JSON.stringify(s));
-  if (selectedId && !objects.find(o => o.id === selectedId)) selectedId = null;
+  rebuildObjectsMap();
+  if (selectedId && !objectsMap.has(selectedId)) selectedId = null;
   renderAll();
 }
 
@@ -221,7 +226,7 @@ function updateSelectionOverlay() {
     selOverlay.classList.remove('visible');
     return;
   }
-  const obj = objects.find(o => o.id === selectedId);
+  const obj = objectsMap.get(selectedId);
   if (!obj) {
     selOverlay.classList.remove('visible');
     return;
@@ -248,13 +253,14 @@ function updateSelectionOverlay() {
       e.stopPropagation();
 
       if (!selectedId) return;
-      const obj = objects.find(o => o.id === selectedId);
+      const obj = objectsMap.get(selectedId);
       if (!obj) return;
 
+      const el = document.getElementById(obj.id);
+      if (!el) return;
       const dir = handle.dataset.dir;
       const startX = e.clientX, startY = e.clientY;
       const { x: ox, y: oy, w: ow, h: oh } = obj;
-      const before = JSON.parse(JSON.stringify(objects));
       const MIN = 20;
 
       function onMove(ev) {
@@ -280,15 +286,14 @@ function updateSelectionOverlay() {
         }
 
         obj.x = x; obj.y = y; obj.w = w; obj.h = h;
-        const el = document.getElementById(obj.id);
-        if (el) setElGeom(el, obj);
+        setElGeom(el, obj);
         updateSelectionOverlay();
       }
 
       function onUp() {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
-        pushHistory(before);
+        pushHistory();
       }
 
       document.addEventListener('mousemove', onMove);
@@ -301,7 +306,6 @@ function updateSelectionOverlay() {
 
 function attachObjectListeners(el, obj) {
   let moved = false;
-  let before = null;
 
   el.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
@@ -313,21 +317,19 @@ function attachObjectListeners(el, obj) {
     const startX = e.clientX, startY = e.clientY;
     const ox = obj.x, oy = obj.y;
     moved = false;
-    before = null;
 
     function onMove(ev) {
       const dx = (ev.clientX - startX) / zoom;
       const dy = (ev.clientY - startY) / zoom;
       if (!moved && Math.hypot(dx, dy) > 3 / zoom) {
         moved = true;
-        before = JSON.parse(JSON.stringify(objects));
         selectObject(obj.id);
       }
       if (moved) {
         obj.x = ox + dx;
         obj.y = oy + dy;
-        const domEl = document.getElementById(obj.id);
-        if (domEl) { domEl.style.left = obj.x + 'px'; domEl.style.top = obj.y + 'px'; }
+        el.style.left = obj.x + 'px';
+        el.style.top = obj.y + 'px';
         updateSelectionOverlay();
       }
     }
@@ -335,7 +337,7 @@ function attachObjectListeners(el, obj) {
     function onUp() {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      if (moved && before) pushHistory(before);
+      if (moved) pushHistory();
     }
 
     document.addEventListener('mousemove', onMove);
@@ -361,7 +363,7 @@ function attachObjectListeners(el, obj) {
 function selectObject(id) {
   if (editingId && editingId !== id) exitEdit();
   selectedId = id;
-  const obj = objects.find(o => o.id === id);
+  const obj = objectsMap.get(id);
   if (obj) {
     obj.z = ++zCounter;
     const el = document.getElementById(id);
@@ -399,7 +401,6 @@ function enterEdit(id) {
   sel.removeAllRanges();
   sel.addRange(range);
 
-  pre._editBefore = JSON.parse(JSON.stringify(objects));
 }
 
 function exitEdit() {
@@ -414,30 +415,27 @@ function exitEdit() {
   const pre = el.querySelector('pre');
   if (!pre) return;
 
-  const obj = objects.find(o => o.id === id);
+  const obj = objectsMap.get(id);
   if (obj) {
     const newContent = pre.innerText;
     if (newContent.trim() === '') {
-      const before = pre._editBefore || JSON.parse(JSON.stringify(objects));
       objects = objects.filter(o => o.id !== id);
+      objectsMap.delete(id);
       selectedId = null;
       pre.contentEditable = 'false';
-      pre._editBefore = null;
       window.getSelection()?.removeAllRanges();
       renderAll();
-      pushHistory(before);
+      pushHistory();
       return;
     }
     if (newContent !== obj.data.content) {
-      const before = pre._editBefore || JSON.parse(JSON.stringify(objects));
       obj.data.content = newContent;
       pre.textContent = newContent;
-      pushHistory(before);
+      pushHistory();
     }
   }
 
   pre.contentEditable = 'false';
-  pre._editBefore = null;
   window.getSelection()?.removeAllRanges();
 }
 
@@ -454,12 +452,12 @@ function addText(wx, wy, content = '') {
     h = Math.max(Math.round(totalLines * lineH + pad * 2), 40);
   }
 
-  const before = JSON.parse(JSON.stringify(objects));
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data: { content } };
   objects.push(obj);
+  objectsMap.set(obj.id, obj);
   world.appendChild(buildElement(obj));
   selectObject(obj.id);
-  pushHistory(before);
+  pushHistory();
   if (!content) enterEdit(obj.id);
 }
 
@@ -474,13 +472,13 @@ function addImage(src, cx, cy) {
       w = Math.round(w * scale);
       h = Math.round(h * scale);
     }
-    const before = JSON.parse(JSON.stringify(objects));
     const imgKey = storeImage(src);
     const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
     objects.push(obj);
+    objectsMap.set(obj.id, obj);
     world.appendChild(buildElement(obj));
     selectObject(obj.id);
-    pushHistory(before);
+    pushHistory();
   };
   img.src = src;
 }
@@ -497,6 +495,7 @@ async function newBoard() {
   if (editingId) exitEdit();
   selectedId = null;
   objects = [];
+  objectsMap.clear();
   currentFilePath = null;
   panX = 0; panY = 0; zoom = 1;
   clearImageStore();
@@ -513,31 +512,31 @@ async function newBoard() {
 
 function duplicateSelected() {
   if (!selectedId) return;
-  const obj = objects.find(o => o.id === selectedId);
+  const obj = objectsMap.get(selectedId);
   if (!obj) return;
-  const before = JSON.parse(JSON.stringify(objects));
   const newObj = JSON.parse(JSON.stringify(obj));
   newObj.id = newId();
   newObj.x += 20;
   newObj.y += 20;
   newObj.z = ++zCounter;
   objects.push(newObj);
+  objectsMap.set(newObj.id, newObj);
   world.appendChild(buildElement(newObj));
   selectObject(newObj.id);
-  pushHistory(before);
+  pushHistory();
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
 
 function deleteSelected() {
   if (!selectedId || editingId) return;
-  const before = JSON.parse(JSON.stringify(objects));
   const el = document.getElementById(selectedId);
   if (el) el.remove();
   objects = objects.filter(o => o.id !== selectedId);
+  objectsMap.delete(selectedId);
   selectedId = null;
   updateSelectionOverlay();
-  pushHistory(before);
+  pushHistory();
 }
 
 // ─── Zoom ─────────────────────────────────────────────────────────────────────
@@ -629,7 +628,7 @@ canvas.addEventListener('mousedown', (e) => {
   }
 
   // Left-click on empty space: deselect
-  if (e.button === 0 && (e.target === canvas || e.target === world || e.target === canvasBg)) {
+  if (e.button === 0 && (e.target === canvas || e.target === world)) {
     e.preventDefault();
     deselectAll();
   }
@@ -642,8 +641,6 @@ canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefaul
 
 let ctxPos = { x: 0, y: 0 };
 
-const canvasBg = document.getElementById('canvas-bg');
-
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const objEl = e.target.closest('.obj');
@@ -655,7 +652,7 @@ canvas.addEventListener('contextmenu', (e) => {
     objCtxMenu.classList.add('visible');
     return;
   }
-  if (e.target !== canvas && e.target !== world && e.target !== canvasBg) return;
+  if (e.target !== canvas && e.target !== world) return;
   objCtxMenu.classList.remove('visible');
   ctxPos = toWorld(e.clientX, e.clientY);
   ctxMenu.style.left = e.clientX + 'px';
@@ -850,6 +847,7 @@ function applyBoardData(data) {
   if (editingId) exitEdit();
   selectedId = null;
   objects = data.objects || [];
+  rebuildObjectsMap();
   for (const obj of objects) {
     const n = parseInt(obj.id.split('-')[1]);
     if (!isNaN(n) && n >= idCounter) idCounter = n + 1;
@@ -951,7 +949,7 @@ window.addEventListener('focus', () => { jsClipboard = null; });
 
 async function copySelected() {
   if (!selectedId) return;
-  const obj = objects.find(o => o.id === selectedId);
+  const obj = objectsMap.get(selectedId);
   if (!obj) return;
 
   if (obj.type === 'text') {
