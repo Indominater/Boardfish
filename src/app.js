@@ -57,8 +57,7 @@ function restoreIslandZoom() {
 
 
 function applyTransform() {
-  world.style.transform = `translate(${panX}px, ${panY}px)`;
-  world.style.zoom = zoom;
+  world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
   updateZoomDisplay();
   saveViewport();
   updateSelectionOverlay();
@@ -1085,8 +1084,7 @@ window.addEventListener('beforeunload', (e) => {
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 snapshot();
-world.style.transform = `translate(${panX}px, ${panY}px)`;
-world.style.zoom = zoom;
+world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
 updateZoomDisplay();
 updateTitle();
 
