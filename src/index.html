@@ -29,7 +29,7 @@
       position: relative;
       width: 100%;
       height: 100%;
-      overflow: hidden;
+      overflow: clip;
       contain: paint;
     }
 
@@ -40,38 +40,32 @@
     #canvas.panning    { cursor: grabbing !important; }
     #canvas.panning    * { cursor: grabbing !important; }
 
-    #world {
+    #board-canvas {
       position: absolute;
       top: 0; left: 0;
-      z-index: 1;
-      transform-origin: 0 0;
-      will-change: transform;
+      width: 100%; height: 100%;
+      display: block;
     }
 
     .obj { position: absolute; cursor: default; }
 
     .obj-inner { width: 100%; height: 100%; overflow: hidden; }
 
-    .obj-text .obj-inner pre {
-      width: 100%;
-      height: 100%;
-      font-family: inherit;
-      font-size: 16px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      padding: 4px;
+    .obj-text-editor {
+      position: absolute;
       background: transparent;
       border: none;
       outline: none;
-      overflow: hidden;
-      cursor: default;
+      resize: none;
+      font-family: 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
       color: #ffffff;
+      overflow: hidden;
+      cursor: text;
+      white-space: pre-wrap;
+      word-break: break-word;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
-
-    .obj-text.editing .obj-inner pre { cursor: text; }
-    .obj-text.caret-hidden .obj-inner pre { caret-color: transparent; }
 
     .obj-image .obj-inner img {
       width: 100%;
@@ -325,7 +319,7 @@
 </head>
 <body>
   <div id="canvas">
-    <div id="world"></div>
+    <canvas id="board-canvas"></canvas>
     <div id="sel-overlay">
       <div class="s-handle" data-dir="nw"></div>
       <div class="s-handle" data-dir="ne"></div>

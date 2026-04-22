@@ -2,13 +2,14 @@
 
 // ─── Elements ─────────────────────────────────────────────────────────────────
 
-const canvas     = document.getElementById('canvas');
-const world      = document.getElementById('world');
-const ctxMenu    = document.getElementById('ctx-menu');
-const fileInput  = document.getElementById('file-input');
-const selOverlay = document.getElementById('sel-overlay');
-const islZoom    = document.getElementById('isl-zoom');
-const objCtxMenu = document.getElementById('obj-ctx-menu');
+const canvas      = document.getElementById('canvas');
+const boardCanvas = document.getElementById('board-canvas');
+const ctx         = boardCanvas.getContext('2d');
+const ctxMenu     = document.getElementById('ctx-menu');
+const fileInput   = document.getElementById('file-input');
+const selOverlay  = document.getElementById('sel-overlay');
+const islZoom     = document.getElementById('isl-zoom');
+const objCtxMenu  = document.getElementById('obj-ctx-menu');
 
 
 // ─── Viewport ─────────────────────────────────────────────────────────────────
@@ -56,8 +57,97 @@ function restoreIslandZoom() {
 }
 
 
+const FONT_SIZE = 16;
+const LINE_H    = 24;
+const TEXT_PAD  = 4;
+const FONT      = `${FONT_SIZE}px 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif`;
+
+// Hidden span that uses the same CSS engine as the textarea for exact wrap matching
+const _measurer = (() => {
+  const el = document.createElement('span');
+  el.style.cssText = `position:absolute;top:-9999px;left:-9999px;visibility:hidden;pointer-events:none;white-space:pre;font-family:'Geist','Geist Sans',Inter,-apple-system,'Segoe UI',system-ui,sans-serif;font-size:${FONT_SIZE}px`;
+  document.body.appendChild(el);
+  return el;
+})();
+const _mwCache = Object.create(null);
+function measureTextW(text) {
+  if (text in _mwCache) return _mwCache[text];
+  _measurer.textContent = text;
+  return (_mwCache[text] = _measurer.getBoundingClientRect().width);
+}
+
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  boardCanvas.width  = Math.round(window.innerWidth  * dpr);
+  boardCanvas.height = Math.round(window.innerHeight * dpr);
+  drawBoard();
+}
+
+function wrapLine(text, maxW) {
+  if (!text) return [''];
+  const words = text.split(' ');
+  const lines = [];
+  let s = 0;
+  while (s < words.length) {
+    const remaining = words.slice(s).join(' ');
+    if (measureTextW(remaining) <= maxW) { lines.push(remaining); break; }
+    if (measureTextW(words[s]) > maxW) { lines.push(words[s++]); continue; }
+    let lo = 1, hi = words.length - s - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      measureTextW(words.slice(s, s + mid).join(' ')) <= maxW ? lo = mid : hi = mid - 1;
+    }
+    lines.push(words.slice(s, s + lo).join(' '));
+    s += lo;
+  }
+  return lines.length ? lines : [''];
+}
+
+function drawBoard() {
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#1c1c1e';
+  ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+
+  ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+
+  const sorted = [...objects].sort((a, b) => a.z - b.z);
+  for (const obj of sorted) {
+    if (obj.id === editingId) continue;
+    if (obj.type === 'text') {
+      ctx.font = FONT;
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'top';
+      const maxW = obj.w - TEXT_PAD * 2;
+      let lineY = obj.y + TEXT_PAD;
+      for (const rawLine of obj.data.content.split('\n')) {
+        for (const wl of wrapLine(rawLine, maxW)) {
+          ctx.fillText(wl, obj.x + TEXT_PAD, lineY);
+          lineY += LINE_H;
+        }
+      }
+    } else if (obj.type === 'image') {
+      const img = imageCache[obj.data.imgKey];
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+      }
+    }
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  updateEditorOverlay();
+}
+
+function hitTest(wx, wy) {
+  const sorted = [...objects].sort((a, b) => b.z - a.z);
+  for (const obj of sorted) {
+    if (wx >= obj.x && wx <= obj.x + obj.w && wy >= obj.y && wy <= obj.y + obj.h) return obj;
+  }
+  return null;
+}
+
 function applyTransform() {
-  world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  drawBoard();
   updateZoomDisplay();
   saveViewport();
   updateSelectionOverlay();
@@ -97,20 +187,32 @@ function newId() { return 'obj-' + (idCounter++); }
 // ─── Image store (keeps base64 data OUT of history snapshots) ─────────────────
 
 const imageStore = {};
+const imageCache = {}; // key -> HTMLImageElement (decoded, ready for drawImage)
 let imgKeyCounter = 1;
 
 function storeImage(src) {
   const key = 'img-' + (imgKeyCounter++);
   imageStore[key] = src;
+  const img = new Image();
+  img.onload = () => drawBoard();
+  img.src = src;
+  imageCache[key] = img;
   return key;
 }
 
-function getImageSrc(obj) {
-  return imageStore[obj.data.imgKey] || '';
+function getImageSrc(obj) { return imageStore[obj.data.imgKey] || ''; }
+
+function cacheImage(key, src) {
+  if (imageCache[key]) return;
+  const img = new Image();
+  img.onload = () => drawBoard();
+  img.src = src;
+  imageCache[key] = img;
 }
 
 function clearImageStore() {
   for (const k of Object.keys(imageStore)) delete imageStore[k];
+  for (const k of Object.keys(imageCache)) delete imageCache[k];
   imgKeyCounter = 1;
 }
 
@@ -146,9 +248,10 @@ function pushHistory() {
 
 function restoreSnapshot(s) {
   if (editingId) {
-    const el = document.getElementById(editingId);
-    if (el) { const pre = el.querySelector('pre'); if (pre) pre.contentEditable = 'false'; el.classList.remove('editing'); }
+    const ta = document.getElementById('board-editor');
+    if (ta) ta.remove();
     editingId = null;
+    _editEl = null;
   }
   objects = JSON.parse(JSON.stringify(s));
   rebuildObjectsMap();
@@ -162,64 +265,10 @@ function redo() { if (historyIndex >= history.length - 1) return; historyIndex++
 // ─── Render ───────────────────────────────────────────────────────────────────
 
 function renderAll() {
-  for (const el of [...world.querySelectorAll('.obj')]) el.remove();
-
-  const elMap = new Map();
-  for (const obj of objects) {
-    const el = buildElement(obj);
-    world.appendChild(el);
-    elMap.set(obj.id, el);
-  }
-
-  const sorted = [...objects].sort((a, b) => a.z - b.z);
-  for (const obj of sorted) {
-    const el = elMap.get(obj.id);
-    if (el) world.appendChild(el);
-  }
-
+  drawBoard();
   updateSelectionOverlay();
 }
 
-function buildElement(obj) {
-  const el = document.createElement('div');
-  el.className = 'obj obj-' + obj.type;
-  el.id = obj.id;
-  el.draggable = false;
-
-  const inner = document.createElement('div');
-  inner.className = 'obj-inner';
-
-  if (obj.type === 'text') {
-    const pre = document.createElement('pre');
-    pre.textContent = obj.data.content;
-    pre.contentEditable = 'false';
-    pre.addEventListener('paste', (ev) => {
-      ev.preventDefault();
-      const text = ev.clipboardData.getData('text/plain');
-      document.execCommand('insertText', false, text);
-    });
-    inner.appendChild(pre);
-  } else {
-    const img = document.createElement('img');
-    img.src = getImageSrc(obj);
-    img.draggable = false;
-    inner.appendChild(img);
-  }
-
-  el.appendChild(inner);
-  setElGeom(el, obj);
-  el.addEventListener('dragstart', e => e.preventDefault());
-  attachObjectListeners(el, obj);
-  return el;
-}
-
-function setElGeom(el, obj) {
-  el.style.left   = obj.x + 'px';
-  el.style.top    = obj.y + 'px';
-  el.style.width  = obj.w + 'px';
-  el.style.height = obj.h + 'px';
-  el.style.zIndex = obj.z;
-}
 
 // ─── Screen-space selection overlay ──────────────────────────────────────────
 
@@ -258,8 +307,6 @@ function updateSelectionOverlay() {
       const obj = objectsMap.get(selectedId);
       if (!obj) return;
 
-      const el = document.getElementById(obj.id);
-      if (!el) return;
       const dir = handle.dataset.dir;
       const startX = e.clientX, startY = e.clientY;
       const { x: ox, y: oy, w: ow, h: oh } = obj;
@@ -288,7 +335,7 @@ function updateSelectionOverlay() {
         }
 
         obj.x = x; obj.y = y; obj.w = w; obj.h = h;
-        setElGeom(el, obj);
+        drawBoard();
         updateSelectionOverlay();
       }
 
@@ -304,61 +351,6 @@ function updateSelectionOverlay() {
   }
 })();
 
-// ─── Object drag ─────────────────────────────────────────────────────────────
-
-function attachObjectListeners(el, obj) {
-  let moved = false;
-
-  el.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-    if (editingId === obj.id && e.target.tagName === 'PRE') return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    const startX = e.clientX, startY = e.clientY;
-    const ox = obj.x, oy = obj.y;
-    moved = false;
-
-    function onMove(ev) {
-      const dx = (ev.clientX - startX) / zoom;
-      const dy = (ev.clientY - startY) / zoom;
-      if (!moved && Math.hypot(dx, dy) > 3 / zoom) {
-        moved = true;
-        selectObject(obj.id);
-      }
-      if (moved) {
-        obj.x = ox + dx;
-        obj.y = oy + dy;
-        el.style.left = obj.x + 'px';
-        el.style.top = obj.y + 'px';
-        updateSelectionOverlay();
-      }
-    }
-
-    function onUp() {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      if (moved) pushHistory();
-    }
-
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
-
-  el.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!moved) selectObject(obj.id);
-    moved = false;
-  });
-
-  el.addEventListener('dblclick', (e) => {
-    if (obj.type !== 'text') return;
-    e.stopPropagation();
-    selectObject(obj.id);
-    enterEdit(obj.id);
-  });
-}
 
 // ─── Selection ────────────────────────────────────────────────────────────────
 
@@ -366,11 +358,7 @@ function selectObject(id) {
   if (editingId && editingId !== id) exitEdit();
   selectedId = id;
   const obj = objectsMap.get(id);
-  if (obj) {
-    obj.z = ++zCounter;
-    const el = document.getElementById(id);
-    if (el) el.style.zIndex = obj.z;
-  }
+  if (obj) obj.z = ++zCounter;
   updateSelectionOverlay();
 }
 
@@ -382,28 +370,46 @@ function deselectAll() {
 
 // ─── Edit mode ────────────────────────────────────────────────────────────────
 
+function updateEditorOverlay() {
+  if (!editingId) return;
+  const obj = objectsMap.get(editingId);
+  const ta  = document.getElementById('board-editor');
+  if (!obj || !ta) return;
+  const sx = obj.x * zoom + panX;
+  const sy = obj.y * zoom + panY;
+  ta.style.transform = `matrix(${zoom},0,0,${zoom},${sx},${sy})`;
+}
+
 function enterEdit(id) {
   if (editingId === id) return;
   if (editingId) exitEdit();
   editingId = id;
 
-  const el = document.getElementById(id);
-  if (!el) return;
-  _editEl = el;
-  el.classList.add('editing');
+  const obj = objectsMap.get(id);
+  if (!obj) return;
 
-  const pre = el.querySelector('pre');
-  if (!pre) return;
-  pre.contentEditable = 'true';
-  pre.focus();
+  drawBoard(); // hides the object from canvas (editingId check in drawBoard)
 
-  const range = document.createRange();
-  range.selectNodeContents(pre);
-  range.collapse(false);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-
+  const ta = document.createElement('textarea');
+  ta.id = 'board-editor';
+  ta.className = 'obj-text-editor';
+  ta.value = obj.data.content;
+  ta.style.left         = '0';
+  ta.style.top          = '0';
+  ta.style.width        = obj.w + 'px';
+  ta.style.height       = obj.h + 'px';
+  ta.style.fontSize     = FONT_SIZE + 'px';
+  ta.style.lineHeight   = LINE_H + 'px';
+  ta.style.padding      = TEXT_PAD + 'px';
+  ta.style.transformOrigin = '0 0';
+  ta.style.transform    = `matrix(${zoom},0,0,${zoom},${obj.x * zoom + panX},${obj.y * zoom + panY})`;
+  canvas.appendChild(ta);
+  _editEl = ta;
+  ta.focus({ preventScroll: true });
+  // Prevent WebKit scroll-into-view from shifting the canvas div
+  canvas.scrollTop = 0;
+  canvas.scrollLeft = 0;
+  ta.setSelectionRange(ta.value.length, ta.value.length);
 }
 
 function exitEdit() {
@@ -412,34 +418,30 @@ function exitEdit() {
   editingId = null;
   _editEl = null;
 
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.classList.remove('editing');
-
-  const pre = el.querySelector('pre');
-  if (!pre) return;
-
+  const ta  = document.getElementById('board-editor');
   const obj = objectsMap.get(id);
-  if (obj) {
-    const newContent = pre.innerText;
-    if (newContent.trim() === '') {
-      objects = objects.filter(o => o.id !== id);
-      objectsMap.delete(id);
-      selectedId = null;
-      pre.contentEditable = 'false';
-      window.getSelection()?.removeAllRanges();
-      renderAll();
-      pushHistory();
-      return;
-    }
-    if (newContent !== obj.data.content) {
-      obj.data.content = newContent;
-      pre.textContent = newContent;
-      pushHistory();
+
+  if (ta) {
+    const newContent = ta.value;
+    ta.remove();
+    if (obj) {
+      if (newContent.trim() === '') {
+        objects = objects.filter(o => o.id !== id);
+        objectsMap.delete(id);
+        selectedId = null;
+        drawBoard();
+        updateSelectionOverlay();
+        pushHistory();
+        return;
+      }
+      if (newContent !== obj.data.content) {
+        obj.data.content = newContent;
+        pushHistory();
+      }
     }
   }
 
-  pre.contentEditable = 'false';
+  drawBoard();
   window.getSelection()?.removeAllRanges();
 }
 
@@ -459,8 +461,8 @@ function addText(wx, wy, content = '') {
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data: { content } };
   objects.push(obj);
   objectsMap.set(obj.id, obj);
-  world.appendChild(buildElement(obj));
   selectObject(obj.id);
+  drawBoard();
   pushHistory();
   if (!content) enterEdit(obj.id);
 }
@@ -480,8 +482,8 @@ function addImage(src, cx, cy) {
     const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
     objects.push(obj);
     objectsMap.set(obj.id, obj);
-    world.appendChild(buildElement(obj));
     selectObject(obj.id);
+    drawBoard();
     pushHistory();
   };
   img.src = src;
@@ -525,8 +527,8 @@ function duplicateSelected() {
   newObj.z = ++zCounter;
   objects.push(newObj);
   objectsMap.set(newObj.id, newObj);
-  world.appendChild(buildElement(newObj));
   selectObject(newObj.id);
+  drawBoard();
   pushHistory();
 }
 
@@ -534,11 +536,10 @@ function duplicateSelected() {
 
 function deleteSelected() {
   if (!selectedId || editingId) return;
-  const el = document.getElementById(selectedId);
-  if (el) el.remove();
   objects = objects.filter(o => o.id !== selectedId);
   objectsMap.delete(selectedId);
   selectedId = null;
+  drawBoard();
   updateSelectionOverlay();
   pushHistory();
 }
@@ -556,10 +557,10 @@ let _setTimer = null;
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (_editEl) {
-    _editEl.classList.add('caret-hidden');
+    _editEl.style.caretColor = 'transparent';
     clearTimeout(_caretTimer);
     _caretTimer = setTimeout(() => {
-      if (_editEl) _editEl.classList.remove('caret-hidden');
+      if (_editEl) _editEl.style.caretColor = '';
     }, 150);
   }
   if (e.ctrlKey) {
@@ -601,39 +602,61 @@ canvas.addEventListener('wheel', (e) => {
 // ─── Pan (middle mouse button) ────────────────────────────────────────────────
 
 canvas.addEventListener('mousedown', (e) => {
-  // Middle mouse button pan
+  // Middle mouse: pan
   if (e.button === 1) {
     e.preventDefault();
     e.stopPropagation();
     canvas.classList.add('panning');
-
     const startX = e.clientX, startY = e.clientY;
     const startPanX = panX, startPanY = panY;
-
-    function onMove(ev) {
-      panX = startPanX + (ev.clientX - startX);
-      panY = startPanY + (ev.clientY - startY);
-      scheduleTransform();
-    }
-
-    function onUp(ev) {
-      if (ev.button !== 1) return;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      canvas.classList.remove('panning');
-    }
-
+    function onMove(ev) { panX = startPanX + (ev.clientX - startX); panY = startPanY + (ev.clientY - startY); scheduleTransform(); }
+    function onUp(ev) { if (ev.button !== 1) return; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); canvas.classList.remove('panning'); }
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
     return;
   }
 
-  // Left-click on empty space: deselect
-  if (e.button === 0 && (e.target === canvas || e.target === world)) {
-    e.preventDefault();
+  if (e.button !== 0) return;
+
+  // Don't capture clicks on sel-overlay handles
+  if (e.target !== canvas && e.target !== boardCanvas) return;
+
+  e.preventDefault();
+  const wp = toWorld(e.clientX, e.clientY);
+  const obj = hitTest(wp.x, wp.y);
+
+  if (!obj) {
     deselectAll();
+    return;
   }
-}, true);
+
+  if (editingId && editingId !== obj.id) exitEdit();
+
+  const startX = e.clientX, startY = e.clientY;
+  const ox = obj.x, oy = obj.y;
+  let moved = false;
+
+  function onMove(ev) {
+    const dx = (ev.clientX - startX) / zoom;
+    const dy = (ev.clientY - startY) / zoom;
+    if (!moved && Math.hypot(dx, dy) > 3 / zoom) { moved = true; selectObject(obj.id); }
+    if (moved) { obj.x = ox + dx; obj.y = oy + dy; drawBoard(); updateSelectionOverlay(); }
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    if (!moved) selectObject(obj.id);
+    if (moved) pushHistory();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
+
+canvas.addEventListener('dblclick', (e) => {
+  const wp = toWorld(e.clientX, e.clientY);
+  const obj = hitTest(wp.x, wp.y);
+  if (obj && obj.type === 'text') { selectObject(obj.id); enterEdit(obj.id); }
+});
 
 // Prevent middle-click scroll/autoscroll behavior
 canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
@@ -644,18 +667,18 @@ let ctxPos = { x: 0, y: 0 };
 
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
-  const objEl = e.target.closest('.obj');
-  if (objEl) {
+  const wp = toWorld(e.clientX, e.clientY);
+  const obj = hitTest(wp.x, wp.y);
+  if (obj) {
     ctxMenu.classList.remove('visible');
-    selectObject(objEl.id);
+    selectObject(obj.id);
     objCtxMenu.style.left = e.clientX + 'px';
     objCtxMenu.style.top  = e.clientY + 'px';
     objCtxMenu.classList.add('visible');
     return;
   }
-  if (e.target !== canvas && e.target !== world) return;
   objCtxMenu.classList.remove('visible');
-  ctxPos = toWorld(e.clientX, e.clientY);
+  ctxPos = wp;
   ctxMenu.style.left = e.clientX + 'px';
   ctxMenu.style.top  = e.clientY + 'px';
   ctxMenu.classList.add('visible');
@@ -842,6 +865,7 @@ function applyBoardData(data) {
     for (const k of Object.keys(imageStore)) {
       const n = parseInt(k.split('-')[1]);
       if (!isNaN(n) && n >= imgKeyCounter) imgKeyCounter = n + 1;
+      cacheImage(k, imageStore[k]);
     }
   }
 
@@ -1083,8 +1107,9 @@ window.addEventListener('beforeunload', (e) => {
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 snapshot();
-world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
 updateZoomDisplay();
 updateTitle();
 
