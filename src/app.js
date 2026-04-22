@@ -57,7 +57,8 @@ function restoreIslandZoom() {
 
 
 function applyTransform() {
-  world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  world.style.transform = `translate(${panX}px, ${panY}px)`;
+  world.style.zoom = zoom;
   updateZoomDisplay();
   saveViewport();
   updateSelectionOverlay();
@@ -164,14 +165,16 @@ function redo() { if (historyIndex >= history.length - 1) return; historyIndex++
 function renderAll() {
   for (const el of [...world.querySelectorAll('.obj')]) el.remove();
 
+  const elMap = new Map();
   for (const obj of objects) {
     const el = buildElement(obj);
     world.appendChild(el);
+    elMap.set(obj.id, el);
   }
 
   const sorted = [...objects].sort((a, b) => a.z - b.z);
   for (const obj of sorted) {
-    const el = document.getElementById(obj.id);
+    const el = elMap.get(obj.id);
     if (el) world.appendChild(el);
   }
 
@@ -387,6 +390,7 @@ function enterEdit(id) {
 
   const el = document.getElementById(id);
   if (!el) return;
+  _editEl = el;
   el.classList.add('editing');
 
   const pre = el.querySelector('pre');
@@ -407,6 +411,7 @@ function exitEdit() {
   if (!editingId) return;
   const id = editingId;
   editingId = null;
+  _editEl = null;
 
   const el = document.getElementById(id);
   if (!el) return;
@@ -544,21 +549,18 @@ function deleteSelected() {
 const ZOOM_MIN = 0.05, ZOOM_MAX = 10;
 
 let _caretTimer = null;
+let _editEl = null;
 let _setMode  = null; // 'pan' | 'zoom' | null (null = no active set)
 let _setTimer = null;
 
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  if (editingId) {
-    const editEl = document.getElementById(editingId);
-    if (editEl) editEl.classList.add('caret-hidden');
+  if (_editEl) {
+    _editEl.classList.add('caret-hidden');
     clearTimeout(_caretTimer);
     _caretTimer = setTimeout(() => {
-      if (editingId) {
-        const editEl = document.getElementById(editingId);
-        if (editEl) editEl.classList.remove('caret-hidden');
-      }
+      if (_editEl) _editEl.classList.remove('caret-hidden');
     }, 150);
   }
   if (e.ctrlKey) {
@@ -1083,7 +1085,8 @@ window.addEventListener('beforeunload', (e) => {
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 snapshot();
-world.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+world.style.transform = `translate(${panX}px, ${panY}px)`;
+world.style.zoom = zoom;
 updateZoomDisplay();
 updateTitle();
 
