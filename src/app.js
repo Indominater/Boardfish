@@ -274,7 +274,7 @@ function drawBoard() {
             const o0 = h0 - ls, o1 = h1 - ls;
             const x1 = o0 < line.chars.length ? line.chars[o0].x : obj.x + TEXT_PAD + measureTextW(line.text);
             const x2 = o1 < line.chars.length ? line.chars[o1].x : obj.x + TEXT_PAD + measureTextW(line.text);
-            ctx.fillRect(x1, line.y - (IS_WIN ? 3 : 1), x2 - x1, LINE_H);
+            ctx.fillRect(x1, line.y - (IS_WIN ? 5 : 1), x2 - x1, LINE_H);
           }
         }
       }
@@ -296,7 +296,7 @@ function drawBoard() {
           }
         }
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(cx, cy - (IS_WIN ? 3 : 1), 2 / zoom, LINE_H);
+        ctx.fillRect(cx, cy - (IS_WIN ? 5 : 1), 2 / zoom, LINE_H);
       }
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
