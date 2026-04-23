@@ -11,6 +11,7 @@ const selOverlay  = document.getElementById('sel-overlay');
 const multiSelOverlay = document.getElementById('multi-sel-overlay');
 const islZoom     = document.getElementById('isl-zoom');
 const objCtxMenu  = document.getElementById('obj-ctx-menu');
+const copyBtn       = document.getElementById('obj-btn-copy');
 const saveImageBtn  = document.getElementById('obj-btn-save-image');
 const saveImagesBtn = document.getElementById('obj-btn-save-images');
 const exportSep     = document.getElementById('obj-sep-export');
@@ -1277,9 +1278,11 @@ canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefaul
 let ctxPos = { x: 0, y: 0 };
 
 function updateObjMenuActions() {
-  const singleImageSelected = selectedIds.size === 1 && allSelectedAreImages();
-  const multiImagesSelected = selectedIds.size > 1 && allSelectedAreImages();
+  const multi = selectedIds.size > 1;
+  const singleImageSelected = !multi && allSelectedAreImages();
+  const multiImagesSelected = multi && allSelectedAreImages();
   const showExport = singleImageSelected || multiImagesSelected;
+  if (copyBtn) copyBtn.style.display = multi ? 'none' : 'block';
   if (saveImageBtn) saveImageBtn.style.display = singleImageSelected ? 'block' : 'none';
   if (saveImagesBtn) saveImagesBtn.style.display = multiImagesSelected ? 'block' : 'none';
   if (exportSep) exportSep.style.display = showExport ? 'block' : 'none';
@@ -1761,7 +1764,7 @@ async function pasteAtPos(wx, wy) {
 }
 
 document.addEventListener('paste', (e) => {
-  if (editingId) return;
+  if (editingId || selectedIds.size > 1) return;
   e.preventDefault();
 
   // In-app clipboard: handles copy/paste within Boardfish without system clipboard format issues
