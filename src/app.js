@@ -15,10 +15,10 @@ const copyBtn           = document.getElementById('obj-btn-copy');
 const saveImageBtn      = document.getElementById('obj-btn-save-image');
 const saveImagesBtn     = document.getElementById('obj-btn-save-images');
 const exportSep         = document.getElementById('obj-sep-export');
+const rubberBand       = document.getElementById('rubber-band');
 const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
-const IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 
 
@@ -216,8 +216,6 @@ function layoutHitTest(layout, wx, wy) {
 // Draws a single non-editing object onto any canvas context (world coords).
 function drawSingleObj(context, obj) {
   if (obj.type === 'text') {
-    context.font = FONT;
-    context.textBaseline = 'top';
     context.fillStyle = '#ffffff';
     const lines = getWrappedLines(obj);
     for (let i = 0; i < lines.length; i++) {
@@ -244,6 +242,8 @@ function drawBoard() {
       _offCtx.fillStyle = '#1c1c1e';
       _offCtx.fillRect(0, 0, _offscreen.width, _offscreen.height);
       _offCtx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+      _offCtx.font = FONT;
+      _offCtx.textBaseline = 'top';
       for (const obj of objects) {
         if (obj.id === editingId) continue;
         drawSingleObj(_offCtx, obj);
@@ -270,7 +270,7 @@ function drawBoard() {
 
       // Selection highlight
       if (selStart !== selEnd) {
-        ctx.fillStyle = 'rgba(0, 122, 255, 0.3)';
+        ctx.fillStyle = 'rgba(10, 132, 255, 0.3)';
         for (const line of layout) {
           const ls = line.startIndex, le = ls + line.text.length;
           const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, le);
@@ -309,6 +309,8 @@ function drawBoard() {
     ctx.fillStyle = '#1c1c1e';
     ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+    ctx.font = FONT;
+    ctx.textBaseline = 'top';
     for (const obj of objects) {
       drawSingleObj(ctx, obj);
     }
@@ -980,16 +982,17 @@ function addText(wx, wy, content = '') {
   if (!content) enterEdit(obj.id);
 }
 
-function addImage(src, cx, cy) {
+function addImage(src, cx, cy, exactSize = false) {
   const img = new Image();
   img.onload = () => {
-    const MAX = 800;
-    let w = img.naturalWidth;
-    let h = img.naturalHeight;
-    if (w > MAX || h > MAX) {
-      const scale = MAX / Math.max(w, h);
-      w = Math.round(w * scale);
-      h = Math.round(h * scale);
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (!exactSize) {
+      const MAX = 800;
+      if (w > MAX || h > MAX) {
+        const scale = MAX / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
     }
     const imgKey = storeImage(src);
     const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
@@ -1035,22 +1038,18 @@ async function newBoard() {
 function duplicateSelected() {
   const originals = getSelectedObjects();
   if (!originals.length) return;
-  const newIds = [];
-  for (const obj of originals) {
-    const newObj = JSON.parse(JSON.stringify(obj));
-    newObj.id = newId();
-    newObj.x += 20;
-    newObj.y += 20;
-    newObj.z = ++zCounter;
-    objects.push(newObj);
-    objectsMap.set(newObj.id, newObj);
-    newIds.push(newObj.id);
+  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  const cloned = JSON.parse(JSON.stringify(originals));
+  const imageData = {};
+  for (const o of cloned) {
+    if (o.type === 'image') {
+      const src = imageStore[o.data.imgKey];
+      if (src) imageData[o.data.imgKey] = src;
+    }
   }
-  selectedIds.clear();
-  for (const id of newIds) selectedIds.add(id);
-  selectedId = newIds[newIds.length - 1] || null;
-  scheduleRender(true, true);
-  pushHistory();
+  jsClipboard = { type: 'objects', objects: cloned, imageData };
+  _jsClipboardSetAt = Date.now();
+  pasteAtPos(center.x, center.y);
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
@@ -1152,6 +1151,35 @@ canvas.addEventListener('mousedown', (e) => {
 
   if (!obj) {
     if (!additive) deselectAll();
+    const rbStartX = e.clientX, rbStartY = e.clientY;
+    let rbActive = false;
+    function onRbMove(ev) {
+      const dx = ev.clientX - rbStartX, dy = ev.clientY - rbStartY;
+      if (!rbActive && dx*dx + dy*dy > 16) rbActive = true;
+      if (!rbActive) return;
+      const l = Math.min(rbStartX, ev.clientX), t = Math.min(rbStartY, ev.clientY);
+      const w = Math.abs(dx), h = Math.abs(dy);
+      rubberBand.style.cssText = `display:block;left:${l}px;top:${t}px;width:${w}px;height:${h}px`;
+    }
+    function onRbUp(ev) {
+      document.removeEventListener('mousemove', onRbMove);
+      document.removeEventListener('mouseup', onRbUp);
+      rubberBand.style.display = 'none';
+      if (!rbActive) return;
+      const x1 = Math.min(rbStartX, ev.clientX), y1 = Math.min(rbStartY, ev.clientY);
+      const x2 = Math.max(rbStartX, ev.clientX), y2 = Math.max(rbStartY, ev.clientY);
+      const wx1 = (x1 - panX) / zoom, wy1 = (y1 - panY) / zoom;
+      const wx2 = (x2 - panX) / zoom, wy2 = (y2 - panY) / zoom;
+      const hits = objects.filter(o =>
+        o.x < wx2 && o.x + o.w > wx1 && o.y < wy2 && o.y + o.h > wy1
+      );
+      if (!hits.length) return;
+      if (!additive) selectedIds.clear();
+      for (const o of hits) { selectedIds.add(o.id); selectedId = o.id; }
+      scheduleRender(true, true);
+    }
+    document.addEventListener('mousemove', onRbMove);
+    document.addEventListener('mouseup', onRbUp);
     return;
   }
 
@@ -1215,6 +1243,7 @@ canvas.addEventListener('mousedown', (e) => {
     if (o) originById.set(id, { x: o.x, y: o.y });
   }
   let moved = false;
+  const moveThreshold = 9 / (zoom * zoom);
   let lastDx = 0, lastDy = 0;
   let dragRaf = null;
 
@@ -1241,7 +1270,7 @@ canvas.addEventListener('mousedown', (e) => {
   function onMove(ev) {
     const dx = (ev.clientX - startX) / zoom;
     const dy = (ev.clientY - startY) / zoom;
-    if (!moved && Math.hypot(dx, dy) > 3 / zoom) moved = true;
+    if (!moved && dx*dx + dy*dy > moveThreshold) moved = true;
     if (!moved) return;
     lastDx = dx;
     lastDy = dy;
@@ -1282,10 +1311,11 @@ let ctxPos = { x: 0, y: 0 };
 
 function updateObjMenuActions() {
   const multi = selectedIds.size > 1;
-  const singleImageSelected = !multi && allSelectedAreImages();
-  const multiImagesSelected = multi && allSelectedAreImages();
+  const imagesOnly = allSelectedAreImages();
+  const singleImageSelected = !multi && imagesOnly;
+  const multiImagesSelected = multi && imagesOnly;
   const showExport = singleImageSelected || multiImagesSelected;
-  if (copyBtn) copyBtn.style.display = multi ? 'none' : 'block';
+  if (copyBtn) copyBtn.style.display = 'block';
   if (saveImageBtn) saveImageBtn.style.display = singleImageSelected ? 'block' : 'none';
   if (saveImagesBtn) saveImagesBtn.style.display = multiImagesSelected ? 'block' : 'none';
   if (exportSep) exportSep.style.display = showExport ? 'block' : 'none';
@@ -1663,13 +1693,35 @@ window.addEventListener('focus', () => { if (Date.now() - _jsClipboardSetAt > 15
 
 async function copySelected() {
   const selectedObjs = getSelectedObjects();
-  if (!selectedObjs.length || selectedObjs.length > 1) return;
+  if (!selectedObjs.length) return;
+  if (selectedObjs.length > 1) {
+    const clonedObjs = JSON.parse(JSON.stringify(selectedObjs));
+    const imageData = {};
+    for (const o of clonedObjs) {
+      if (o.type === 'image') {
+        const src = imageStore[o.data.imgKey];
+        if (src) imageData[o.data.imgKey] = src;
+      }
+    }
+    jsClipboard = { type: 'objects', objects: clonedObjs, imageData };
+    _jsClipboardSetAt = Date.now();
+    return;
+  }
   const obj = selectedObjs[0];
+
+  // Always store as objects so pasteAtPos has a single branch
+  const cloned = JSON.parse(JSON.stringify(obj));
+  const imgData = {};
+  if (obj.type === 'image') {
+    const src = imageStore[obj.data.imgKey];
+    if (src) imgData[obj.data.imgKey] = src;
+  }
+  jsClipboard = { type: 'objects', objects: [cloned], imageData: imgData };
+  _jsClipboardSetAt = Date.now();
 
   const isTauri = !!window.__TAURI__;
 
   if (obj.type === 'text') {
-    jsClipboard = { type: 'text', content: obj.data.content }; _jsClipboardSetAt = Date.now();
     if (isTauri) {
       try {
         await window.__TAURI__.core.invoke('copy_text_to_clipboard', { text: obj.data.content });
@@ -1687,7 +1739,6 @@ async function copySelected() {
   }
 
   if (obj.type === 'image') {
-    jsClipboard = { type: 'image', imgKey: obj.data.imgKey }; _jsClipboardSetAt = Date.now();
     if (isTauri) {
       try {
         await window.__TAURI__.core.invoke('copy_cached_image_to_clipboard', { imgKey: obj.data.imgKey });
@@ -1836,12 +1887,27 @@ async function exportAllText() {
 
 async function pasteAtPos(wx, wy) {
   if (jsClipboard) {
-    if (jsClipboard.type === 'image') {
-      const src = imageStore[jsClipboard.imgKey];
-      if (src) { addImage(src, wx, wy); return; }
-    } else if (jsClipboard.type === 'text') {
-      addText(wx - 100, wy - 40, jsClipboard.content);
-      return;
+    if (jsClipboard.type === 'objects') {
+      const clones = JSON.parse(JSON.stringify(jsClipboard.objects || []));
+      if (!clones.length) return;
+      // Re-register image data in case we're on a different board
+      const imgData = jsClipboard.imageData || {};
+      for (const [key, src] of Object.entries(imgData)) {
+        if (!imageStore[key]) { imageStore[key] = src; cacheImage(key, src); }
+      }
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const o of clones) {
+        minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
+        maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h);
+      }
+      const dx = wx - (minX + maxX) / 2, dy = wy - (minY + maxY) / 2;
+      selectedIds.clear();
+      for (const o of clones) {
+        o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
+        objects.push(o); objectsMap.set(o.id, o); selectedIds.add(o.id);
+      }
+      selectedId = clones[clones.length - 1].id;
+      scheduleRender(true, true); pushHistory(); return;
     }
   }
   try {
@@ -1865,19 +1931,14 @@ async function pasteAtPos(wx, wy) {
 }
 
 document.addEventListener('paste', (e) => {
-  if (editingId || selectedIds.size > 1) return;
+  if (editingId) return;
   e.preventDefault();
 
   // In-app clipboard: handles copy/paste within Boardfish without system clipboard format issues
   if (jsClipboard) {
     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-    if (jsClipboard.type === 'image') {
-      const src = imageStore[jsClipboard.imgKey];
-      if (src) { addImage(src, center.x, center.y); return; }
-    } else if (jsClipboard.type === 'text') {
-      addText(center.x - 100, center.y - 40, jsClipboard.content);
-      return;
-    }
+    pasteAtPos(center.x, center.y);
+    return;
   }
 
   // System clipboard: handles paste from external sources

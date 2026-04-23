@@ -186,6 +186,15 @@
 
 
 
+    #rubber-band {
+      display: none;
+      position: fixed;
+      border: 1px solid rgba(10, 132, 255, 0.9);
+      background: rgba(10, 132, 255, 0.08);
+      pointer-events: none;
+      z-index: 8000;
+    }
+
     /* ── Unsaved changes dialog ── */
     #dialog-overlay {
       display: none;
@@ -236,7 +245,7 @@
 
     #dialog-msg {
       font-size: 13px;
-      color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.38);
       line-height: 1.4;
       letter-spacing: -0.01em;
       -webkit-font-smoothing: antialiased;
@@ -350,6 +359,8 @@
     </div>
   </div>
 
+
+  <div id="rubber-band"></div>
 
   <div id="island">
     <span id="isl-zoom">100%</span>

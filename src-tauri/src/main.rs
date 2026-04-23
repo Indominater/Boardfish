@@ -173,7 +173,7 @@ async fn save_images_to_folder(
     let base = std::path::PathBuf::from(folder);
     let mut saved_count = 0usize;
 
-    for (_, data_url) in data_urls.iter().enumerate() {
+    for data_url in data_urls.iter() {
         let Some((header, base64_data)) = data_url.split_once(',') else {
             continue;
         };
