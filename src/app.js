@@ -1686,7 +1686,8 @@ async function saveSelectedImage() {
   }
 
   const ext = guessImageExtFromDataUrl(src);
-  const defaultName = `image.${ext}`;
+  const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
+  const defaultName = `image_${hex}.${ext}`;
 
   if (window.__TAURI__) {
     try {

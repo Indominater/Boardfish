@@ -146,7 +146,7 @@ async fn save_images_to_folder(
     let base = std::path::PathBuf::from(folder);
     let mut saved_count = 0usize;
 
-    for (idx, data_url) in data_urls.iter().enumerate() {
+    for (_, data_url) in data_urls.iter().enumerate() {
         let Some((header, base64_data)) = data_url.split_once(',') else {
             continue;
         };
@@ -155,7 +155,14 @@ async fn save_images_to_folder(
             Ok(b) => b,
             Err(_) => continue,
         };
-        let filename = format!("image_{}.{}", idx + 1, ext);
+        let hex = {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos() as u64)
+                .unwrap_or(saved_count as u64);
+            format!("{:06x}", (nanos ^ (saved_count as u64 * 0x9e3779b9)) & 0xFFFFFF)
+        };
+        let filename = format!("image_{}.{}", hex, ext);
         if tokio::fs::write(base.join(filename), &bytes).await.is_ok() {
             saved_count += 1;
         }
