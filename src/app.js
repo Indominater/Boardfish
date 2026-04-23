@@ -15,6 +15,7 @@ const saveImageBtn  = document.getElementById('obj-btn-save-image');
 const saveImagesBtn = document.getElementById('obj-btn-save-images');
 const exportSep     = document.getElementById('obj-sep-export');
 const IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
+const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 
 
 // ─── Viewport ─────────────────────────────────────────────────────────────────
@@ -273,7 +274,7 @@ function drawBoard() {
             const o0 = h0 - ls, o1 = h1 - ls;
             const x1 = o0 < line.chars.length ? line.chars[o0].x : obj.x + TEXT_PAD + measureTextW(line.text);
             const x2 = o1 < line.chars.length ? line.chars[o1].x : obj.x + TEXT_PAD + measureTextW(line.text);
-            ctx.fillRect(x1, line.y, x2 - x1, LINE_H);
+            ctx.fillRect(x1, line.y - (IS_WIN ? 3 : 1), x2 - x1, LINE_H);
           }
         }
       }
@@ -295,7 +296,7 @@ function drawBoard() {
           }
         }
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(cx, cy, 2 / zoom, LINE_H);
+        ctx.fillRect(cx, cy - (IS_WIN ? 3 : 1), 2 / zoom, LINE_H);
       }
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1593,29 +1594,25 @@ if (window.__TAURI__) {
 // ─── Clipboard ───────────────────────────────────────────────────────────────
 
 let jsClipboard = null; // in-app clipboard, avoids system clipboard format issues
+let _jsClipboardSetAt = 0;
 
 // When the user switches away and copies something else, clear in-app clipboard
-// so the next paste uses whatever is most recent on the system clipboard
-window.addEventListener('focus', () => { jsClipboard = null; });
+// so the next paste uses whatever is most recent on the system clipboard.
+// Grace period prevents osascript subprocess focus round-trip from wiping jsClipboard.
+window.addEventListener('focus', () => { if (Date.now() - _jsClipboardSetAt > 1500) jsClipboard = null; });
 
 async function copySelected() {
   const selectedObjs = getSelectedObjects();
-  if (!selectedObjs.length) return;
-  if (selectedObjs.length > 1) {
-    jsClipboard = { type: 'objects', objects: JSON.parse(JSON.stringify(selectedObjs)) };
-    showIslandMsg(`${selectedObjs.length} items copied`, 1500);
-    return;
-  }
+  if (!selectedObjs.length || selectedObjs.length > 1) return;
   const obj = selectedObjs[0];
 
   const isTauri = !!window.__TAURI__;
 
   if (obj.type === 'text') {
-    jsClipboard = { type: 'text', content: obj.data.content };
+    jsClipboard = { type: 'text', content: obj.data.content }; _jsClipboardSetAt = Date.now();
     if (isTauri) {
       try {
         await window.__TAURI__.core.invoke('copy_text_to_clipboard', { text: obj.data.content });
-        showIslandMsg('Text copied', 1500);
       } catch (err) {
         console.error('[copy] copy_text_to_clipboard FAILED:', err);
         showIslandMsg('Copy failed: ' + err, 3000);
@@ -1623,7 +1620,6 @@ async function copySelected() {
     } else {
       try {
         await navigator.clipboard.writeText(obj.data.content);
-        showIslandMsg('Text copied', 1500);
       } catch (err) {
         console.error('[copy] writeText FAILED:', err);
         showIslandMsg('Copy failed: ' + err, 3000);
@@ -1633,7 +1629,7 @@ async function copySelected() {
   }
 
   if (obj.type === 'image') {
-    jsClipboard = { type: 'image', imgKey: obj.data.imgKey };
+    jsClipboard = { type: 'image', imgKey: obj.data.imgKey }; _jsClipboardSetAt = Date.now();
     if (isTauri) {
       try {
         await window.__TAURI__.core.invoke('copy_cached_image_to_clipboard', { imgKey: obj.data.imgKey });
@@ -1736,36 +1732,7 @@ async function saveSelectedImages() {
 
 async function pasteAtPos(wx, wy) {
   if (jsClipboard) {
-    if (jsClipboard.type === 'objects') {
-      const clones = JSON.parse(JSON.stringify(jsClipboard.objects || []));
-      if (!clones.length) return;
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const o of clones) {
-        minX = Math.min(minX, o.x);
-        minY = Math.min(minY, o.y);
-        maxX = Math.max(maxX, o.x + o.w);
-        maxY = Math.max(maxY, o.y + o.h);
-      }
-      const cx = (minX + maxX) / 2;
-      const cy = (minY + maxY) / 2;
-      const dx = wx - cx;
-      const dy = wy - cy;
-
-      selectedIds.clear();
-      for (const o of clones) {
-        o.id = newId();
-        o.x += dx;
-        o.y += dy;
-        o.z = ++zCounter;
-        objects.push(o);
-        objectsMap.set(o.id, o);
-        selectedIds.add(o.id);
-      }
-      selectedId = clones[clones.length - 1].id;
-      scheduleRender(true, true);
-      pushHistory();
-      return;
-    } else if (jsClipboard.type === 'image') {
+    if (jsClipboard.type === 'image') {
       const src = imageStore[jsClipboard.imgKey];
       if (src) { addImage(src, wx, wy); return; }
     } else if (jsClipboard.type === 'text') {
