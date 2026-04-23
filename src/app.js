@@ -20,9 +20,6 @@ const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
-const islCompass      = document.getElementById('isl-compass');
-const islCompassArrow = document.getElementById('isl-compass-arrow');
-const islSep          = document.getElementById('isl-sep');
 
 
 // ─── Viewport ─────────────────────────────────────────────────────────────────
@@ -327,35 +324,10 @@ function hitTest(wx, wy) {
   return null;
 }
 
-function updateCompass() {
-  if (!objects.length) { islCompass.style.display = 'none'; islSep.style.display = 'none'; return; }
-  const vw = window.innerWidth, vh = window.innerHeight;
-  const visible = objects.some(o => {
-    const sx = o.x * zoom + panX, sy = o.y * zoom + panY;
-    return sx + o.w * zoom > 0 && sx < vw && sy + o.h * zoom > 0 && sy < vh;
-  });
-  if (visible) { islCompass.style.display = 'none'; islSep.style.display = 'none'; return; }
-  const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
-  let nearest = null, nearestDist = Infinity;
-  for (const o of objects) {
-    const ox = o.x + o.w / 2, oy = o.y + o.h / 2;
-    const d = (ox - cx) ** 2 + (oy - cy) ** 2;
-    if (d < nearestDist) { nearestDist = d; nearest = o; }
-  }
-  if (!nearest) return;
-  const dx = (nearest.x + nearest.w / 2) - cx;
-  const dy = (nearest.y + nearest.h / 2) - cy;
-  const angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
-  islCompassArrow.style.transform = `rotate(${angle}deg)`;
-  islCompass.style.display = 'inline-flex';
-  islSep.style.display = 'block';
-}
-
 function applyTransform() {
   if (editingId) invalidateOffscreen();
   drawBoard();
   updateZoomDisplay();
-  updateCompass();
   saveViewport();
   updateSelectionOverlay();
 }
@@ -384,7 +356,7 @@ function scheduleFrame() {
       applyTransform();
       return;
     }
-    if (doBoard) { drawBoard(); updateCompass(); }
+    if (doBoard) drawBoard();
     if (doOverlay) updateSelectionOverlay();
   });
 }
@@ -1434,24 +1406,34 @@ document.getElementById('btn-export-all-text').addEventListener('click', () => {
   exportAllText();
 });
 
-islCompass.addEventListener('click', () => {
-  if (!objects.length) return;
+islZoom.addEventListener('click', () => {
   const vw = window.innerWidth, vh = window.innerHeight;
-  const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
-  let nearest = null, nearestDist = Infinity;
-  for (const o of objects) {
-    const d = (o.x + o.w / 2 - cx) ** 2 + (o.y + o.h / 2 - cy) ** 2;
-    if (d < nearestDist) { nearestDist = d; nearest = o; }
+  const anyVisible = objects.some(o => {
+    const sx = o.x * zoom + panX, sy = o.y * zoom + panY;
+    return sx + o.w * zoom > 0 && sx < vw && sy + o.h * zoom > 0 && sy < vh;
+  });
+  const targetZoom = 1;
+  let targetPanX, targetPanY;
+  if (!anyVisible && objects.length) {
+    const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
+    let nearest = null, nearestDist = Infinity;
+    for (const o of objects) {
+      const d = (o.x + o.w / 2 - cx) ** 2 + (o.y + o.h / 2 - cy) ** 2;
+      if (d < nearestDist) { nearestDist = d; nearest = o; }
+    }
+    targetPanX = vw / 2 - (nearest.x + nearest.w / 2) * targetZoom;
+    targetPanY = vh / 2 - (nearest.y + nearest.h / 2) * targetZoom;
+  } else {
+    targetPanX = vw / 2 - (vw / 2 - panX) * (targetZoom / zoom);
+    targetPanY = vh / 2 - (vh / 2 - panY) * (targetZoom / zoom);
   }
-  if (!nearest) return;
-  const targetPanX = vw / 2 - (nearest.x + nearest.w / 2) * zoom;
-  const targetPanY = vh / 2 - (nearest.y + nearest.h / 2) * zoom;
-  const startPanX = panX, startPanY = panY;
+  const startPanX = panX, startPanY = panY, startZoom = zoom;
   const startTime = performance.now();
   const duration = 350;
   function animate(now) {
     const t = Math.min((now - startTime) / duration, 1);
     const e = 1 - Math.pow(1 - t, 3);
+    zoom = startZoom + (targetZoom - startZoom) * e;
     panX = startPanX + (targetPanX - startPanX) * e;
     panY = startPanY + (targetPanY - startPanY) * e;
     applyTransform();

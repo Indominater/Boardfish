@@ -169,10 +169,8 @@
       overflow: hidden;
     }
 
-    #isl-compass path { transition: fill 0.2s ease; }
-    #isl-compass:hover path { fill: rgba(255,255,255,0.7); }
-
     #isl-zoom {
+      cursor: pointer;
       padding: 4px 8px;
       font-family: inherit;
       font-size: 13px;
@@ -355,12 +353,6 @@
 
   <div id="island">
     <span id="isl-zoom">100%</span>
-    <span id="isl-sep" style="display:none;width:1px;height:16px;background:rgba(255,255,255,0.12);margin:0 2px;flex-shrink:0"></span>
-    <span id="isl-compass" style="display:none;padding:4px 6px;cursor:pointer;line-height:0;transition:opacity 0.2s">
-      <svg id="isl-compass-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;transition:transform 0.25s ease">
-        <path d="M7 1L10.5 11L7 9L3.5 11L7 1Z" fill="rgba(255,255,255,0.38)"/>
-      </svg>
-    </span>
   </div>
 
   <script src="app.js"></script>
