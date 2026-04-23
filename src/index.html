@@ -47,36 +47,6 @@
       display: block;
     }
 
-    .obj { position: absolute; cursor: default; }
-
-    .obj-inner { width: 100%; height: 100%; overflow: hidden; }
-
-    .obj-text-editor {
-      position: absolute;
-      background: transparent;
-      border: none;
-      outline: none;
-      resize: none;
-      font-family: 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
-      color: #ffffff;
-      overflow: hidden;
-      cursor: text;
-      white-space: pre-wrap;
-      word-break: break-word;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    .obj-image .obj-inner img {
-      width: 100%;
-      height: 100%;
-      object-fit: fill;
-      display: block;
-      pointer-events: none;
-      user-select: none;
-      -webkit-user-drag: none;
-    }
-
     /* ── Selection overlay ── */
     #sel-overlay {
       position: absolute;
@@ -86,6 +56,20 @@
       z-index: 99998;
     }
     #sel-overlay.visible { display: block; }
+    #sel-overlay.multi .s-handle { display: none; }
+    #multi-sel-overlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      pointer-events: none;
+      z-index: 99997;
+    }
+    #multi-sel-overlay.visible { display: block; }
+    .multi-sel-box {
+      position: absolute;
+      border: 1px solid rgba(10, 132, 255, 0.9);
+      pointer-events: none;
+    }
     .s-handle {
       position: absolute;
       width: 7px;
@@ -183,14 +167,6 @@
       align-items: center;
       z-index: 9000;
       overflow: hidden;
-    }
-
-    .isl-sep {
-      width: 1px;
-      height: 14px;
-      background: rgba(255,255,255,0.08);
-      margin: 0 3px;
-      flex-shrink: 0;
     }
 
     #isl-zoom {
@@ -320,6 +296,7 @@
 <body>
   <div id="canvas">
     <canvas id="board-canvas"></canvas>
+    <div id="multi-sel-overlay"></div>
     <div id="sel-overlay">
       <div class="s-handle" data-dir="nw"></div>
       <div class="s-handle" data-dir="ne"></div>
@@ -343,6 +320,9 @@
   <div id="obj-ctx-menu">
     <button class="ctx-item" id="obj-btn-copy">Copy</button>
     <button class="ctx-item" id="obj-btn-duplicate">Duplicate</button>
+    <div class="ctx-sep" id="obj-sep-export"></div>
+    <button class="ctx-item" id="obj-btn-save-image">Save Image As</button>
+    <button class="ctx-item" id="obj-btn-save-images">Save Images</button>
     <div class="ctx-sep"></div>
     <button class="ctx-item" id="obj-btn-delete">Delete</button>
   </div>

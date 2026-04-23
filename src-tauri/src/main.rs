@@ -1,9 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 struct StartupFile(Mutex<Option<String>>);
+struct ClipboardImageCache(Mutex<HashMap<String, CachedClipboardImage>>);
+
+#[derive(Clone)]
+struct CachedClipboardImage {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
 
 #[tauri::command]
 fn get_startup_file(state: tauri::State<StartupFile>) -> Option<String> {
@@ -62,6 +71,100 @@ async fn save_file_dialog(app: tauri::AppHandle, default_name: Option<String>) -
 }
 
 #[tauri::command]
+async fn save_image_as(
+    app: tauri::AppHandle,
+    data_url: String,
+    default_name: Option<String>,
+) -> Result<bool, String> {
+    use base64::{Engine as _, engine::general_purpose};
+    use tauri_plugin_dialog::DialogExt;
+
+    let (_, base64_data) = data_url.split_once(',').ok_or("invalid data URL")?;
+    let path = tokio::task::spawn_blocking(move || {
+        let mut builder = app
+            .dialog()
+            .file()
+            .add_filter("Image", &["png", "jpg", "jpeg", "gif", "webp"]);
+        if let Some(name) = default_name {
+            builder = builder.set_file_name(name);
+        }
+        builder.blocking_save_file().map(|p| p.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(path) = path else {
+        return Ok(false);
+    };
+
+    let bytes = general_purpose::STANDARD
+        .decode(base64_data)
+        .map_err(|e| e.to_string())?;
+    tokio::fs::write(path, &bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+fn ext_from_data_url_header(header: &str) -> &'static str {
+    if header.starts_with("data:image/jpeg") {
+        "jpg"
+    } else if header.starts_with("data:image/gif") {
+        "gif"
+    } else if header.starts_with("data:image/webp") {
+        "webp"
+    } else {
+        "png"
+    }
+}
+
+#[tauri::command]
+async fn save_images_to_folder(
+    app: tauri::AppHandle,
+    data_urls: Vec<String>,
+) -> Result<usize, String> {
+    use base64::{Engine as _, engine::general_purpose};
+    use tauri_plugin_dialog::DialogExt;
+
+    if data_urls.len() < 2 {
+        return Ok(0);
+    }
+
+    let folder = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .blocking_pick_folder()
+            .map(|p| p.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(folder) = folder else {
+        return Ok(0);
+    };
+
+    let base = std::path::PathBuf::from(folder);
+    let mut saved_count = 0usize;
+
+    for (idx, data_url) in data_urls.iter().enumerate() {
+        let Some((header, base64_data)) = data_url.split_once(',') else {
+            continue;
+        };
+        let ext = ext_from_data_url_header(header);
+        let bytes = match general_purpose::STANDARD.decode(base64_data) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let filename = format!("image_{}.{}", idx + 1, ext);
+        if tokio::fs::write(base.join(filename), &bytes).await.is_ok() {
+            saved_count += 1;
+        }
+    }
+
+    Ok(saved_count)
+}
+
+#[tauri::command]
 fn set_title(window: tauri::Window, title: String) {
     window.set_title(&title).ok();
 }
@@ -72,7 +175,19 @@ fn exit_app(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn copy_image_to_clipboard(data_url: String) -> Result<(), String> {
+fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .map_err(|e| e.to_string())?
+        .set_text(text)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cache_image_for_clipboard(
+    state: tauri::State<ClipboardImageCache>,
+    img_key: String,
+    data_url: String,
+) -> Result<(), String> {
     use base64::{Engine as _, engine::general_purpose};
     let base64_data = data_url.split(',').nth(1).ok_or("invalid data URL")?;
     let bytes = general_purpose::STANDARD
@@ -81,14 +196,83 @@ fn copy_image_to_clipboard(data_url: String) -> Result<(), String> {
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
+    state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(
+            img_key,
+            CachedClipboardImage {
+                width,
+                height,
+                rgba: rgba.into_raw(),
+            },
+        );
+    Ok(())
+}
+
+#[tauri::command]
+fn copy_cached_image_to_clipboard(
+    state: tauri::State<ClipboardImageCache>,
+    img_key: String,
+) -> Result<(), String> {
+    let cached = state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .get(&img_key)
+        .cloned()
+        .ok_or("clipboard image cache miss")?;
+    write_rgba_to_clipboard(cached.width, cached.height, cached.rgba)
+}
+
+#[tauri::command]
+fn clear_clipboard_image_cache(state: tauri::State<ClipboardImageCache>) -> Result<(), String> {
+    state.0.lock().map_err(|e| e.to_string())?.clear();
+    Ok(())
+}
+
+fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Vec<u8>) -> Result<(), String> {
+    // Fast path: in-memory clipboard write (no disk I/O or subprocess).
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    clipboard
+    if clipboard
         .set_image(arboard::ImageData {
             width: width as usize,
             height: height as usize,
-            bytes: rgba.into_raw().into(),
+            bytes: std::borrow::Cow::Borrowed(&rgba),
         })
-        .map_err(|e| e.to_string())
+        .is_ok()
+    {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Fallback for systems where direct image clipboard APIs are unreliable.
+        let tmp_path = std::env::temp_dir().join("boardfish_clipboard.png");
+        let img = image::RgbaImage::from_raw(width, height, rgba)
+            .ok_or("invalid RGBA buffer dimensions")?;
+        let dyn_img = image::DynamicImage::ImageRgba8(img);
+        dyn_img
+            .save_with_format(&tmp_path, image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+
+        let script = format!(
+            "set the clipboard to (read POSIX file \"{}\" as «class PNGf»)",
+            tmp_path.to_string_lossy()
+        );
+        std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("image clipboard write failed".to_string())
+    }
 }
 
 fn main() {
@@ -96,8 +280,8 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
         .manage(StartupFile(Mutex::new(startup_file)))
+        .manage(ClipboardImageCache(Mutex::new(HashMap::new())))
         .invoke_handler(tauri::generate_handler![
             get_startup_file,
             save_board,
@@ -105,25 +289,35 @@ fn main() {
             read_binary_file_base64,
             open_file_dialog,
             save_file_dialog,
+            save_image_as,
+            save_images_to_folder,
             set_title,
             exit_app,
-            copy_image_to_clipboard
+            copy_text_to_clipboard,
+            cache_image_for_clipboard,
+            copy_cached_image_to_clipboard,
+            clear_clipboard_image_cache
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 window.emit("boardfish://close-requested", ()).unwrap();
             }
-            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, position }) => {
-                let scale = window.scale_factor().unwrap_or(1.0);
+            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                 let payload = serde_json::json!({
-                    "paths": paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
-                    "x": position.x / scale,
-                    "y": position.y / scale
+                    "paths": paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>()
                 });
                 window.emit("boardfish://file-drop", payload).unwrap();
             }
             _ => {}
+        })
+        .setup(|app| {
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title_bar_style(tauri::TitleBarStyle::Visible);
+            }
+
+            Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
