@@ -11,12 +11,18 @@ const selOverlay  = document.getElementById('sel-overlay');
 const multiSelOverlay = document.getElementById('multi-sel-overlay');
 const islZoom     = document.getElementById('isl-zoom');
 const objCtxMenu  = document.getElementById('obj-ctx-menu');
-const copyBtn       = document.getElementById('obj-btn-copy');
-const saveImageBtn  = document.getElementById('obj-btn-save-image');
-const saveImagesBtn = document.getElementById('obj-btn-save-images');
-const exportSep     = document.getElementById('obj-sep-export');
+const copyBtn           = document.getElementById('obj-btn-copy');
+const saveImageBtn      = document.getElementById('obj-btn-save-image');
+const saveImagesBtn     = document.getElementById('obj-btn-save-images');
+const exportSep         = document.getElementById('obj-sep-export');
+const exportAllImageBtn = document.getElementById('btn-export-all-images');
+const exportAllTextBtn  = document.getElementById('btn-export-all-text');
+const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
+const islCompass      = document.getElementById('isl-compass');
+const islCompassArrow = document.getElementById('isl-compass-arrow');
+const islSep          = document.getElementById('isl-sep');
 
 
 // ─── Viewport ─────────────────────────────────────────────────────────────────
@@ -321,10 +327,35 @@ function hitTest(wx, wy) {
   return null;
 }
 
+function updateCompass() {
+  if (!objects.length) { islCompass.style.display = 'none'; islSep.style.display = 'none'; return; }
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const visible = objects.some(o => {
+    const sx = o.x * zoom + panX, sy = o.y * zoom + panY;
+    return sx + o.w * zoom > 0 && sx < vw && sy + o.h * zoom > 0 && sy < vh;
+  });
+  if (visible) { islCompass.style.display = 'none'; islSep.style.display = 'none'; return; }
+  const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
+  let nearest = null, nearestDist = Infinity;
+  for (const o of objects) {
+    const ox = o.x + o.w / 2, oy = o.y + o.h / 2;
+    const d = (ox - cx) ** 2 + (oy - cy) ** 2;
+    if (d < nearestDist) { nearestDist = d; nearest = o; }
+  }
+  if (!nearest) return;
+  const dx = (nearest.x + nearest.w / 2) - cx;
+  const dy = (nearest.y + nearest.h / 2) - cy;
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI + 90;
+  islCompassArrow.style.transform = `rotate(${angle}deg)`;
+  islCompass.style.display = 'inline-flex';
+  islSep.style.display = 'block';
+}
+
 function applyTransform() {
   if (editingId) invalidateOffscreen();
   drawBoard();
   updateZoomDisplay();
+  updateCompass();
   saveViewport();
   updateSelectionOverlay();
 }
@@ -353,7 +384,7 @@ function scheduleFrame() {
       applyTransform();
       return;
     }
-    if (doBoard) drawBoard();
+    if (doBoard) { drawBoard(); updateCompass(); }
     if (doOverlay) updateSelectionOverlay();
   });
 }
@@ -1288,6 +1319,15 @@ function updateObjMenuActions() {
   if (exportSep) exportSep.style.display = showExport ? 'block' : 'none';
 }
 
+function updateCtxMenuActions() {
+  const hasImages = objects.some((o) => o.type === 'image');
+  const hasText   = objects.some((o) => o.type === 'text');
+  const show = hasImages || hasText;
+  if (exportAllTextBtn) exportAllTextBtn.style.display = hasText ? 'block' : 'none';
+  if (exportAllImageBtn) exportAllImageBtn.style.display = hasImages ? 'block' : 'none';
+  if (exportAllSep) exportAllSep.style.display = show ? 'block' : 'none';
+}
+
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const wp = toWorld(e.clientX, e.clientY);
@@ -1303,6 +1343,7 @@ canvas.addEventListener('contextmenu', (e) => {
   }
   objCtxMenu.classList.remove('visible');
   ctxPos = wp;
+  updateCtxMenuActions();
   ctxMenu.style.left = e.clientX + 'px';
   ctxMenu.style.top  = e.clientY + 'px';
   ctxMenu.classList.add('visible');
@@ -1381,6 +1422,42 @@ document.getElementById('obj-btn-save-image').addEventListener('click', () => {
 document.getElementById('obj-btn-save-images').addEventListener('click', () => {
   objCtxMenu.classList.remove('visible');
   saveSelectedImages();
+});
+
+document.getElementById('btn-export-all-images').addEventListener('click', () => {
+  ctxMenu.classList.remove('visible');
+  exportAllImages();
+});
+
+document.getElementById('btn-export-all-text').addEventListener('click', () => {
+  ctxMenu.classList.remove('visible');
+  exportAllText();
+});
+
+islCompass.addEventListener('click', () => {
+  if (!objects.length) return;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
+  let nearest = null, nearestDist = Infinity;
+  for (const o of objects) {
+    const d = (o.x + o.w / 2 - cx) ** 2 + (o.y + o.h / 2 - cy) ** 2;
+    if (d < nearestDist) { nearestDist = d; nearest = o; }
+  }
+  if (!nearest) return;
+  const targetPanX = vw / 2 - (nearest.x + nearest.w / 2) * zoom;
+  const targetPanY = vh / 2 - (nearest.y + nearest.h / 2) * zoom;
+  const startPanX = panX, startPanY = panY;
+  const startTime = performance.now();
+  const duration = 350;
+  function animate(now) {
+    const t = Math.min((now - startTime) / duration, 1);
+    const e = 1 - Math.pow(1 - t, 3);
+    panX = startPanX + (targetPanX - startPanX) * e;
+    panY = startPanY + (targetPanY - startPanY) * e;
+    applyTransform();
+    if (t < 1) requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
 });
 
 // ─── Drag and drop images ─────────────────────────────────────────────────────
@@ -1530,7 +1607,6 @@ async function saveBoardAs() {
     return true;
   } catch (err) {
     console.error('Save failed:', err);
-    showIslandMsg('Save failed', 2000);
     return false;
   }
 }
@@ -1545,7 +1621,6 @@ async function saveBoard() {
       return true;
     } catch (err) {
       console.error('Save failed:', err);
-      showIslandMsg('Save failed', 2000);
       return false;
     }
   }
@@ -1573,7 +1648,7 @@ async function openBoard() {
     currentFilePath = filePath;
     updateTitle();
     showIslandMsg('Opened', 1500);
-  } catch (err) { console.error('Open failed:', err); showIslandMsg('Open failed', 2000); }
+  } catch (err) { console.error('Open failed:', err); }
 }
 
 // ─── Close guard ─────────────────────────────────────────────────────────────
@@ -1618,14 +1693,12 @@ async function copySelected() {
         await window.__TAURI__.core.invoke('copy_text_to_clipboard', { text: obj.data.content });
       } catch (err) {
         console.error('[copy] copy_text_to_clipboard FAILED:', err);
-        showIslandMsg('Copy failed: ' + err, 3000);
       }
     } else {
       try {
         await navigator.clipboard.writeText(obj.data.content);
       } catch (err) {
         console.error('[copy] writeText FAILED:', err);
-        showIslandMsg('Copy failed: ' + err, 3000);
       }
     }
     return;
@@ -1644,7 +1717,6 @@ async function copySelected() {
           await window.__TAURI__.core.invoke('copy_cached_image_to_clipboard', { imgKey: obj.data.imgKey });
         } catch (cacheErr) {
           console.error('[copy] copy_cached_image_to_clipboard FAILED:', cacheErr);
-          showIslandMsg('Copy failed: ' + cacheErr, 3000);
         }
       }
     } else {
@@ -1660,7 +1732,6 @@ async function copySelected() {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
       } catch (err) {
         console.error('[copy] clipboard.write FAILED:', err);
-        showIslandMsg('Copy failed: ' + err, 3000);
       }
     }
   }
@@ -1679,10 +1750,7 @@ async function saveSelectedImage() {
   if (!obj || obj.type !== 'image') return;
 
   const src = getImageSrc(obj);
-  if (!src) {
-    showIslandMsg('Save failed', 2000);
-    return;
-  }
+  if (!src) return;
 
   const ext = guessImageExtFromDataUrl(src);
   const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
@@ -1691,10 +1759,9 @@ async function saveSelectedImage() {
   if (window.__TAURI__) {
     try {
       const saved = await window.__TAURI__.core.invoke('save_image_as', { dataUrl: src, defaultName });
-      if (saved) showIslandMsg('Image Saved', 1500);
+      if (saved) showIslandMsg('Image Exported', 1500);
     } catch (err) {
       console.error('Save image failed:', err);
-      showIslandMsg('Save failed', 2000);
     }
     return;
   }
@@ -1714,10 +1781,9 @@ async function saveSelectedImages() {
     if (dataUrls.length < 2) return;
     try {
       const savedCount = await window.__TAURI__.core.invoke('save_images_to_folder', { dataUrls });
-      if (savedCount > 0) showIslandMsg(`${savedCount} Images Saved`, 1500);
+      if (savedCount > 0) showIslandMsg(`${savedCount} Images Exported`, 1500);
     } catch (err) {
       console.error('Save images failed:', err);
-      showIslandMsg('Save failed', 2000);
     }
     return;
   }
@@ -1731,6 +1797,59 @@ async function saveSelectedImages() {
     a.download = `image_${i + 1}.${ext}`;
     a.click();
   }
+}
+
+async function exportAllImages() {
+  const imageObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'image');
+  if (!imageObjs.length) return;
+
+  if (window.__TAURI__) {
+    const dataUrls = imageObjs.map((o) => getImageSrc(o)).filter(Boolean);
+    if (!dataUrls.length) return;
+    try {
+      const savedCount = await window.__TAURI__.core.invoke('save_images_to_folder', { dataUrls });
+      if (savedCount > 0) showIslandMsg(`${savedCount} Images Exported`, 1500);
+    } catch (err) {
+      console.error('Export all images failed:', err);
+    }
+    return;
+  }
+
+  for (let i = 0; i < imageObjs.length; i++) {
+    const src = getImageSrc(imageObjs[i]);
+    if (!src) continue;
+    const ext = guessImageExtFromDataUrl(src);
+    const a = document.createElement('a');
+    a.href = src;
+    a.download = `image_${i + 1}.${ext}`;
+    a.click();
+  }
+}
+
+async function exportAllText() {
+  const textObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'text');
+  if (!textObjs.length) return;
+
+  const combined = textObjs.map((o) => o.data.content).join('\n\n');
+
+  if (window.__TAURI__) {
+    try {
+      const saved = await window.__TAURI__.core.invoke('save_text_as', { text: combined });
+      if (saved) showIslandMsg('Text Exported', 1500);
+    } catch (err) {
+      console.error('Export all text failed:', err);
+    }
+    return;
+  }
+
+  const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
+  const blob = new Blob([combined], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `text_${hex}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function pasteAtPos(wx, wy) {

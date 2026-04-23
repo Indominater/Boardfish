@@ -169,6 +169,9 @@
       overflow: hidden;
     }
 
+    #isl-compass path { transition: fill 0.2s ease; }
+    #isl-compass:hover path { fill: rgba(255,255,255,0.7); }
+
     #isl-zoom {
       padding: 4px 8px;
       font-family: inherit;
@@ -315,14 +318,17 @@
     <button class="ctx-item" id="btn-save">Save</button>
     <button class="ctx-item" id="btn-save-as">Save As</button>
     <button class="ctx-item" id="btn-open">Open</button>
+    <div class="ctx-sep" id="ctx-sep-export-all"></div>
+    <button class="ctx-item" id="btn-export-all-text">Export All Text</button>
+    <button class="ctx-item" id="btn-export-all-images">Export All Images</button>
   </div>
 
   <div id="obj-ctx-menu">
     <button class="ctx-item" id="obj-btn-copy">Copy</button>
     <button class="ctx-item" id="obj-btn-duplicate">Duplicate</button>
     <div class="ctx-sep" id="obj-sep-export"></div>
-    <button class="ctx-item" id="obj-btn-save-image">Save Image As</button>
-    <button class="ctx-item" id="obj-btn-save-images">Save Images</button>
+    <button class="ctx-item" id="obj-btn-save-image">Export Image</button>
+    <button class="ctx-item" id="obj-btn-save-images">Export Images</button>
     <div class="ctx-sep"></div>
     <button class="ctx-item" id="obj-btn-delete">Delete</button>
   </div>
@@ -349,6 +355,12 @@
 
   <div id="island">
     <span id="isl-zoom">100%</span>
+    <span id="isl-sep" style="display:none;width:1px;height:16px;background:rgba(255,255,255,0.12);margin:0 2px;flex-shrink:0"></span>
+    <span id="isl-compass" style="display:none;padding:4px 6px;cursor:pointer;line-height:0;transition:opacity 0.2s">
+      <svg id="isl-compass-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;transition:transform 0.25s ease">
+        <path d="M7 1L10.5 11L7 9L3.5 11L7 1Z" fill="rgba(255,255,255,0.38)"/>
+      </svg>
+    </span>
   </div>
 
   <script src="app.js"></script>
