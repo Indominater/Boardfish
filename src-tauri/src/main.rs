@@ -27,7 +27,8 @@ fn macos_cancel_termination() {
 
 #[cfg(target_os = "macos")]
 unsafe fn setup_termination_intercept(app_handle: tauri::AppHandle) {
-    use std::ffi::c_void;
+    use std::ffi::{c_void, CStr};
+    use std::os::raw::c_char;
     use objc2::runtime::{AnyObject, Sel};
     use objc2::{msg_send, sel, MainThreadMarker};
     use objc2_app_kit::NSApplication;
@@ -36,7 +37,11 @@ unsafe fn setup_termination_intercept(app_handle: tauri::AppHandle) {
 
     extern "C" {
         fn class_getInstanceMethod(cls: *const c_void, sel: Sel) -> *mut c_void;
+        fn class_addMethod(cls: *const c_void, sel: Sel, imp: *const c_void, types: *const c_char) -> bool;
         fn method_setImplementation(m: *mut c_void, imp: *const c_void) -> *const c_void;
+        fn object_getClassName(obj: *const c_void) -> *const c_char;
+        fn class_getSuperclass(cls: *const c_void) -> *const c_void;
+        fn class_getName(cls: *const c_void) -> *const c_char;
     }
 
     unsafe extern "C" fn our_should_terminate(
@@ -45,33 +50,63 @@ unsafe fn setup_termination_intercept(app_handle: tauri::AppHandle) {
         _sender: *mut AnyObject,
     ) -> std::os::raw::c_ulong {
         use std::sync::atomic::Ordering;
-        dbg_log("applicationShouldTerminate: intercepted");
+        dbg_log("our_should_terminate CALLED — Dock quit intercepted successfully");
         PENDING_TERMINATION.store(true, Ordering::SeqCst);
         if let Some(app) = APP_HANDLE_FOR_TERMINATE.get() {
             emit_close_request(app);
         }
-        2 // NSTerminateLater — tells macOS to wait for replyToApplicationShouldTerminate:
+        2 // NSTerminateLater
     }
 
     let mtm = MainThreadMarker::new_unchecked();
     let ns_app = NSApplication::sharedApplication(mtm);
 
+    // Log NSApp class
+    let app_cls_name = object_getClassName(&*ns_app as *const _ as *const c_void);
+    dbg_log(&format!("NSApp class: {}", CStr::from_ptr(app_cls_name).to_string_lossy()));
+
     let delegate: *mut AnyObject = msg_send![&*ns_app, delegate];
     if delegate.is_null() {
-        dbg_log("setup_termination_intercept: delegate is null");
+        dbg_log("ERROR: NSApp delegate is null — cannot intercept Dock quit");
         return;
     }
+
+    let delegate_cls = object_getClassName(delegate as *const c_void);
+    dbg_log(&format!("NSApp delegate class: {}", CStr::from_ptr(delegate_cls).to_string_lossy()));
 
     let cls = (*delegate).class() as *const _ as *const c_void;
-    let sel = sel!(applicationShouldTerminate:);
-    let method = class_getInstanceMethod(cls, sel);
-    if method.is_null() {
-        dbg_log("setup_termination_intercept: applicationShouldTerminate: not found on delegate");
-        return;
+
+    // Walk superclass chain and log each class
+    let mut walk_cls = cls;
+    let mut depth = 0;
+    while !walk_cls.is_null() && depth < 10 {
+        let name = CStr::from_ptr(class_getName(walk_cls)).to_string_lossy();
+        let has_method = !class_getInstanceMethod(walk_cls, sel!(applicationShouldTerminate:)).is_null();
+        dbg_log(&format!("  superclass[{}]: {} — applicationShouldTerminate: present={}", depth, name, has_method));
+        walk_cls = class_getSuperclass(walk_cls);
+        depth += 1;
     }
 
-    method_setImplementation(method, our_should_terminate as *const c_void);
-    dbg_log("setup_termination_intercept: swizzled applicationShouldTerminate: successfully");
+    // Try to find applicationShouldTerminate: anywhere in the hierarchy
+    let sel = sel!(applicationShouldTerminate:);
+    let method = class_getInstanceMethod(cls, sel);
+
+    if !method.is_null() {
+        dbg_log("applicationShouldTerminate: found — replacing with method_setImplementation");
+        method_setImplementation(method, our_should_terminate as *const c_void);
+        dbg_log("method_setImplementation done");
+    } else {
+        // Method doesn't exist on this delegate — add it
+        // Type encoding: Q=NSUInteger(return)  @=id(self)  :=SEL(_cmd)  @=id(sender)
+        let types = b"Q@:@\0";
+        dbg_log("applicationShouldTerminate: not found — adding with class_addMethod");
+        let added = class_addMethod(cls, sel, our_should_terminate as *const c_void, types.as_ptr() as *const c_char);
+        dbg_log(&format!("class_addMethod result: {}", added));
+
+        // Verify it was added
+        let verify = class_getInstanceMethod(cls, sel);
+        dbg_log(&format!("post-add verification — method present: {}", !verify.is_null()));
+    }
 }
 
 use tauri::menu::{
