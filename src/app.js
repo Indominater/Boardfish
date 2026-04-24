@@ -827,6 +827,19 @@ function deselectAll() {
   scheduleRender(false, true);
 }
 
+function selectAllObjects() {
+  if (editingId || !objects.length) return;
+  selectedIds.clear();
+  for (const obj of objects) selectedIds.add(obj.id);
+  selectedId = objects[objects.length - 1].id;
+  scheduleRender(false, true);
+}
+
+function hideMenus() {
+  ctxMenu.classList.remove('visible');
+  objCtxMenu.classList.remove('visible');
+}
+
 // ─── Edit mode ────────────────────────────────────────────────────────────────
 
 function pushEditHistoryIfChanged(id) {
@@ -1728,8 +1741,12 @@ async function openBoard() {
 
 // ─── Close guard ─────────────────────────────────────────────────────────────
 
-if (window.__TAURI__) {
-  window.__TAURI__.event.listen('boardfish://close-requested', async () => {
+let _closeGuardRunning = false;
+
+async function requestAppClose() {
+  if (!window.__TAURI__ || _closeGuardRunning) return;
+  _closeGuardRunning = true;
+  try {
     if (isDirty()) {
       const choice = await showUnsavedDialog();
       if (choice === 'cancel') return;
@@ -1741,7 +1758,13 @@ if (window.__TAURI__) {
     // Use process.exit instead of appWindow.close() to avoid re-triggering
     // the CloseRequested event in Rust (which would cause an infinite loop)
     await window.__TAURI__.core.invoke('exit_app');
-  });
+  } finally {
+    _closeGuardRunning = false;
+  }
+}
+
+if (window.__TAURI__) {
+  window.__TAURI__.event.listen('boardfish://close-requested', requestAppClose);
 }
 
 // ─── Clipboard ───────────────────────────────────────────────────────────────
@@ -2043,19 +2066,74 @@ document.addEventListener('paste', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'a') { if (!editingId) e.preventDefault(); return; }
 
-  if (e.key === 'Escape') { if (editingId) { exitEdit(); return; } deselectAll(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    if (!editingId) {
+      e.preventDefault();
+      selectAllObjects();
+    }
+    return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'q' || e.key.toLowerCase() === 'w')) {
+    if (window.__TAURI__) {
+      e.preventDefault();
+      requestAppClose();
+    }
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    hideMenus();
+    if (editingId) {
+      exitEdit();
+      selectedId = null;
+      selectedIds.clear();
+      scheduleRender(false, true);
+      return;
+    }
+    deselectAll();
+    return;
+  }
 
   if ((e.key === 'Backspace' || e.key === 'Delete') && hasSelection() && !editingId) {
     e.preventDefault(); deleteSelected(); return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n' && !editingId) {
+    e.preventDefault();
+    newBoard();
+    return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o' && !editingId) {
+    e.preventDefault();
+    openBoard();
+    return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    saveBoardAs();
+    return;
   }
 
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveBoard(); return; }
 
   if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !editingId) { e.preventDefault(); copySelected(); return; }
 
-if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) { e.preventDefault(); redo(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && !editingId) {
+    e.preventDefault();
+    (async () => {
+      await copySelected();
+      deleteSelected();
+    })();
+    return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) { e.preventDefault(); redo(); return; }
+
+  if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
 
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
 
