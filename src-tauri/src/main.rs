@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
+static HANDLING_QUIT: AtomicBool = AtomicBool::new(false);
 use tauri::menu::{
     AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
     WINDOW_SUBMENU_ID,
@@ -220,6 +221,11 @@ fn exit_app(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn cancel_quit() {
+    HANDLING_QUIT.store(false, Ordering::SeqCst);
+}
+
+#[tauri::command]
 fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     arboard::Clipboard::new()
         .map_err(|e| e.to_string())?
@@ -321,7 +327,12 @@ fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(
 }
 
 fn emit_close_request(app: &tauri::AppHandle) {
+    if HANDLING_QUIT.swap(true, Ordering::SeqCst) {
+        return; // already handling a quit, don't double-emit
+    }
     if let Some(window) = app.get_webview_window("main") {
+        window.show().ok();
+        window.set_focus().ok();
         window.emit("boardfish://close-requested", ()).ok();
     }
 }
@@ -345,6 +356,7 @@ fn main() {
             save_images_to_folder,
             set_title,
             exit_app,
+            cancel_quit,
             copy_text_to_clipboard,
             cache_image_for_clipboard,
             copy_cached_image_to_clipboard,
