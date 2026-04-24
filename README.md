@@ -29,13 +29,20 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 
 | Action | Mac | Windows |
 |--------|-----|---------|
+| New board | Cmd+N | Ctrl+N |
+| Open board | Cmd+O | Ctrl+O |
 | Save | Cmd+S | Ctrl+S |
+| Save As | Cmd+Shift+S | Ctrl+Shift+S |
+| Select all objects | Cmd+A | Ctrl+A |
 | Copy | Cmd+C | Ctrl+C |
+| Cut | Cmd+X | Ctrl+X |
 | Paste | Cmd+V | Ctrl+V |
+| Duplicate selected | Cmd+D | Ctrl+D |
 | Undo | Cmd+Z | Ctrl+Z |
-| Redo | Cmd+Shift+Z | Ctrl+Shift+Z |
+| Redo | Cmd+Shift+Z | Ctrl+Shift+Z / Ctrl+Y |
 | Delete selected | Backspace / Delete | Backspace / Delete |
-| Deselect / exit edit | Esc | Esc |
+| Deselect / exit edit / close menus | Esc | Esc |
+| Quit / close | Cmd+Q / Cmd+W | Ctrl+Q / Ctrl+W |
 
 ## Building from Source
 
