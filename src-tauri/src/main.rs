@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 use tauri::menu::{
     AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
     WINDOW_SUBMENU_ID,
@@ -212,6 +215,7 @@ fn set_title(window: tauri::Window, title: String) {
 
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
+    ALLOW_EXIT.store(true, Ordering::SeqCst);
     app.exit(0);
 }
 
@@ -479,9 +483,11 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
-                api.prevent_exit();
-                emit_close_request(app_handle);
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                if !ALLOW_EXIT.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                    emit_close_request(app_handle);
+                }
                 return;
             }
 
