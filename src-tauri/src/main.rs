@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 struct StartupFile(Mutex<Option<String>>);
@@ -11,7 +11,7 @@ struct ClipboardImageCache(Mutex<HashMap<String, CachedClipboardImage>>);
 struct CachedClipboardImage {
     width: u32,
     height: u32,
-    rgba: Vec<u8>,
+    rgba: Arc<[u8]>,
 }
 
 #[tauri::command]
@@ -239,7 +239,7 @@ fn cache_image_for_clipboard(
             CachedClipboardImage {
                 width,
                 height,
-                rgba: rgba.into_raw(),
+                rgba: Arc::from(rgba.into_raw()),
             },
         );
     Ok(())
@@ -266,7 +266,7 @@ fn clear_clipboard_image_cache(state: tauri::State<ClipboardImageCache>) -> Resu
     Ok(())
 }
 
-fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Vec<u8>) -> Result<(), String> {
+fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(), String> {
     // Fast path: in-memory clipboard write (no disk I/O or subprocess).
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     if clipboard
@@ -284,7 +284,7 @@ fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Vec<u8>) -> Result<(),
     {
         // Fallback for systems where direct image clipboard APIs are unreliable.
         let tmp_path = std::env::temp_dir().join("boardfish_clipboard.png");
-        let img = image::RgbaImage::from_raw(width, height, rgba)
+        let img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
             .ok_or("invalid RGBA buffer dimensions")?;
         let dyn_img = image::DynamicImage::ImageRgba8(img);
         dyn_img

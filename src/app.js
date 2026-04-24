@@ -200,6 +200,18 @@ function calculateTextLayout(obj) {
   });
 }
 
+function getTextLayout(obj) {
+  if (obj._layoutCache) return obj._layoutCache;
+  obj._layoutCache = calculateTextLayout(obj);
+  return obj._layoutCache;
+}
+
+function lineEndX(line, obj) {
+  if (!line.chars.length) return obj.x + TEXT_PAD;
+  const last = line.chars[line.chars.length - 1];
+  return last.x + last.w;
+}
+
 function layoutHitTest(layout, wx, wy) {
   if (!layout.length) return 0;
   let line = layout[layout.length - 1];
@@ -265,8 +277,7 @@ function drawBoard() {
 
       const selStart = _editEl ? _editEl.selectionStart : 0;
       const selEnd   = _editEl ? _editEl.selectionEnd   : 0;
-      const layout = calculateTextLayout(obj);
-      obj._layoutCache = layout;
+      const layout = getTextLayout(obj);
 
       // Selection highlight
       if (selStart !== selEnd) {
@@ -276,8 +287,9 @@ function drawBoard() {
           const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, le);
           if (h0 < h1) {
             const o0 = h0 - ls, o1 = h1 - ls;
-            const x1 = o0 < line.chars.length ? line.chars[o0].x : obj.x + TEXT_PAD + measureTextW(line.text);
-            const x2 = o1 < line.chars.length ? line.chars[o1].x : obj.x + TEXT_PAD + measureTextW(line.text);
+            const endX = lineEndX(line, obj);
+            const x1 = o0 < line.chars.length ? line.chars[o0].x : endX;
+            const x2 = o1 < line.chars.length ? line.chars[o1].x : endX;
             ctx.fillRect(x1, line.y - (IS_WIN ? 5 : 1), x2 - x1, LINE_H);
           }
         }
@@ -294,7 +306,7 @@ function drawBoard() {
           const ls = line.startIndex, le = ls + line.text.length;
           if (selStart >= ls && selStart <= le) {
             const off = selStart - ls;
-            cx = off < line.chars.length ? line.chars[off].x : obj.x + TEXT_PAD + measureTextW(line.text);
+            cx = off < line.chars.length ? line.chars[off].x : lineEndX(line, obj);
             cy = line.y;
             break;
           }
@@ -393,6 +405,28 @@ function rebuildObjectsMap() {
 
 function newId() { return 'obj-' + (idCounter++); }
 
+function cloneObject(obj) {
+  const data = obj.type === 'image'
+    ? { imgKey: obj.data.imgKey }
+    : { content: obj.data.content };
+  return {
+    id: obj.id,
+    type: obj.type,
+    x: obj.x,
+    y: obj.y,
+    w: obj.w,
+    h: obj.h,
+    z: obj.z,
+    data,
+  };
+}
+
+function cloneObjects(list) {
+  const clones = new Array(list.length);
+  for (let i = 0; i < list.length; i++) clones[i] = cloneObject(list[i]);
+  return clones;
+}
+
 function bringObjectToFront(id) {
   const idx = objects.findIndex((o) => o.id === id);
   if (idx < 0 || idx === objects.length - 1) return;
@@ -412,13 +446,21 @@ function isSelected(id) {
   return selectedIds.has(id);
 }
 
-function getSelectedObjects() {
-  return [...selectedIds].map((id) => objectsMap.get(id)).filter(Boolean);
+function getFirstSelectedObject() {
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (obj) return obj;
+  }
+  return null;
 }
 
 function allSelectedAreImages() {
-  const objs = getSelectedObjects();
-  return objs.length > 0 && objs.every((o) => o.type === 'image');
+  if (!selectedIds.size) return false;
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj || obj.type !== 'image') return false;
+  }
+  return true;
 }
 
 // ─── Image store (keeps base64 data OUT of history snapshots) ─────────────────
@@ -467,16 +509,16 @@ const MAX_HISTORY = 20;
 function trimHistory() {
   if (history.length > MAX_HISTORY) {
     const trim = history.length - MAX_HISTORY;
-    history = history.slice(trim);
-    historyIndex = history.length - 1;
+    history.splice(0, trim);
+    historyIndex = Math.max(-1, historyIndex - trim);
     savedHistoryIndex = Math.max(-1, savedHistoryIndex - trim);
   }
 }
 
 function snapshot() {
-  history = history.slice(0, historyIndex + 1);
+  history.length = historyIndex + 1;
   history.push({
-    objects: JSON.parse(JSON.stringify(objects)),
+    objects: cloneObjects(objects),
     editState: captureEditState(),
   });
   historyIndex = history.length - 1;
@@ -488,13 +530,14 @@ function snapshot() {
 // Unchanged objects share the previous snapshot's reference (safe since
 // restoreSnapshot always deep-clones before mutating).
 function pushHistory() {
-  history = history.slice(0, historyIndex + 1);
+  history.length = historyIndex + 1;
   const prevEntry = historyIndex >= 0 ? history[historyIndex] : [];
   const prevObjects = Array.isArray(prevEntry) ? prevEntry : (prevEntry.objects || []);
-  const prevMap = new Map(prevObjects.map(o => [o.id, o]));
+  const prevMap = new Map();
+  for (const o of prevObjects) prevMap.set(o.id, o);
   const entry = objects.map(o =>
     (_dirtyIds.has(o.id) || !prevMap.has(o.id))
-      ? JSON.parse(JSON.stringify(o))
+      ? cloneObject(o)
       : prevMap.get(o.id)
   );
   _dirtyIds.clear();
@@ -524,7 +567,7 @@ function restoreSnapshot(s) {
   }
   const snapshotObjects = Array.isArray(s) ? s : (s?.objects || []);
   const editState = Array.isArray(s) ? null : (s?.editState || null);
-  objects = JSON.parse(JSON.stringify(snapshotObjects));
+  objects = cloneObjects(snapshotObjects);
   _dirtyIds.clear();
   _linesCacheMap.clear();
   _prefixCache.clear();
@@ -587,8 +630,9 @@ function renderAll() {
 // ─── Screen-space selection overlay ──────────────────────────────────────────
 
 const _multiSelBoxes = [];
-const _selOverlayStyleState = { left: '', top: '', width: '', height: '' };
+const _selOverlayStyleState = { transform: '', width: '', height: '' };
 const _multiSelStyleState = new WeakMap();
+const _rubberBandStyleState = { display: '', left: '', top: '', width: '', height: '' };
 
 function _setStyleIfChanged(el, prop, value, state) {
   if (state[prop] === value) return;
@@ -618,8 +662,8 @@ function updateSelectionOverlay() {
     return;
   }
 
-  const selectedObjs = getSelectedObjects();
-  if (!selectedObjs.length) {
+  const firstSelectedObj = getFirstSelectedObject();
+  if (!firstSelectedObj) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     selectedId = null;
     selectedIds.clear();
@@ -630,26 +674,28 @@ function updateSelectionOverlay() {
   if (isMultiSelected()) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     if (!multiSelOverlay) return;
-    while (_multiSelBoxes.length < selectedObjs.length) {
+    while (_multiSelBoxes.length < selectedIds.size) {
       const box = document.createElement('div');
       box.className = 'multi-sel-box';
       _multiSelBoxes.push(box);
-      _multiSelStyleState.set(box, { display: '', left: '', top: '', width: '', height: '' });
+      _multiSelStyleState.set(box, { display: '', transform: '', width: '', height: '' });
       multiSelOverlay.appendChild(box);
     }
 
-    for (let i = 0; i < _multiSelBoxes.length; i++) {
-      const box = _multiSelBoxes[i];
-      if (i >= selectedObjs.length) {
-        _setDisplayIfChanged(box, 'none');
-        continue;
-      }
-      const obj = selectedObjs[i];
+    let selectedIdx = 0;
+    for (const id of selectedIds) {
+      const obj = objectsMap.get(id);
+      if (!obj) continue;
+      const box = _multiSelBoxes[selectedIdx++];
       const state = _setDisplayIfChanged(box, 'block');
-      _setStyleIfChanged(box, 'left', (obj.x * zoom + panX) + 'px', state);
-      _setStyleIfChanged(box, 'top', (obj.y * zoom + panY) + 'px', state);
+      _setStyleIfChanged(box, 'transform', `translate(${obj.x * zoom + panX}px,${obj.y * zoom + panY}px)`, state);
       _setStyleIfChanged(box, 'width', (obj.w * zoom) + 'px', state);
       _setStyleIfChanged(box, 'height', (obj.h * zoom) + 'px', state);
+    }
+
+    for (let i = selectedIdx; i < _multiSelBoxes.length; i++) {
+      const box = _multiSelBoxes[i];
+      _setDisplayIfChanged(box, 'none');
     }
 
     if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
@@ -658,14 +704,13 @@ function updateSelectionOverlay() {
 
   hideMultiSelectionOverlay();
 
-  const obj = selectedObjs[0];
+  const obj = firstSelectedObj;
   const sx = obj.x * zoom + panX;
   const sy = obj.y * zoom + panY;
   const sw = obj.w * zoom;
   const sh = obj.h * zoom;
 
-  _setStyleIfChanged(selOverlay, 'left', sx + 'px', _selOverlayStyleState);
-  _setStyleIfChanged(selOverlay, 'top', sy + 'px', _selOverlayStyleState);
+  _setStyleIfChanged(selOverlay, 'transform', `translate(${sx}px,${sy}px)`, _selOverlayStyleState);
   _setStyleIfChanged(selOverlay, 'width', sw + 'px', _selOverlayStyleState);
   _setStyleIfChanged(selOverlay, 'height', sh + 'px', _selOverlayStyleState);
   if (selOverlay.classList.contains('multi')) selOverlay.classList.remove('multi');
@@ -825,6 +870,7 @@ function enterEdit(id) {
   proxy.addEventListener('input', () => {
     markDirty(id);
     obj.data.content = proxy.value;
+    delete obj._layoutCache;
     scheduleEditHistoryCheckpoint(id);
     scheduleRender(true, false);
   });
@@ -836,7 +882,7 @@ function enterEdit(id) {
     // and compute line navigation from the canvas layout instead.
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
-      const layout = obj._layoutCache || calculateTextLayout(obj);
+      const layout = getTextLayout(obj);
       if (!layout.length) { scheduleRender(true, false); return; }
 
       const isUp = e.key === 'ArrowUp';
@@ -939,7 +985,8 @@ function exitEdit() {
   const obj = objectsMap.get(id);
   if (obj) {
     if (obj.data.content.trim() === '') {
-      objects = objects.filter(o => o.id !== id);
+      const idx = objects.findIndex((o) => o.id === id);
+      if (idx >= 0) objects.splice(idx, 1);
       objectsMap.delete(id);
       _linesCacheMap.delete(id);
       selectedIds.delete(id);
@@ -1036,17 +1083,21 @@ async function newBoard() {
 // ─── Duplicate ────────────────────────────────────────────────────────────────
 
 function duplicateSelected() {
-  const originals = getSelectedObjects();
-  if (!originals.length) return;
+  if (!selectedIds.size) return;
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  const cloned = JSON.parse(JSON.stringify(originals));
+  const cloned = [];
   const imageData = {};
-  for (const o of cloned) {
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj) continue;
+    const o = cloneObject(obj);
     if (o.type === 'image') {
       const src = imageStore[o.data.imgKey];
       if (src) imageData[o.data.imgKey] = src;
     }
+    cloned.push(o);
   }
+  if (!cloned.length) return;
   jsClipboard = { type: 'objects', objects: cloned, imageData };
   _jsClipboardSetAt = Date.now();
   pasteAtPos(center.x, center.y);
@@ -1056,12 +1107,17 @@ function duplicateSelected() {
 
 function deleteSelected() {
   if (!hasSelection() || editingId) return;
-  const deleted = new Set(selectedIds);
-  objects = objects.filter(o => !deleted.has(o.id));
-  for (const id of deleted) {
-    objectsMap.delete(id);
-    _linesCacheMap.delete(id);
+  let write = 0;
+  for (let read = 0; read < objects.length; read++) {
+    const obj = objects[read];
+    if (selectedIds.has(obj.id)) {
+      objectsMap.delete(obj.id);
+      _linesCacheMap.delete(obj.id);
+      continue;
+    }
+    objects[write++] = obj;
   }
+  objects.length = write;
   selectedId = null;
   selectedIds.clear();
   scheduleRender(true, true);
@@ -1159,23 +1215,31 @@ canvas.addEventListener('mousedown', (e) => {
       if (!rbActive) return;
       const l = Math.min(rbStartX, ev.clientX), t = Math.min(rbStartY, ev.clientY);
       const w = Math.abs(dx), h = Math.abs(dy);
-      rubberBand.style.cssText = `display:block;left:${l}px;top:${t}px;width:${w}px;height:${h}px`;
+      _setStyleIfChanged(rubberBand, 'display', 'block', _rubberBandStyleState);
+      _setStyleIfChanged(rubberBand, 'left', l + 'px', _rubberBandStyleState);
+      _setStyleIfChanged(rubberBand, 'top', t + 'px', _rubberBandStyleState);
+      _setStyleIfChanged(rubberBand, 'width', w + 'px', _rubberBandStyleState);
+      _setStyleIfChanged(rubberBand, 'height', h + 'px', _rubberBandStyleState);
     }
     function onRbUp(ev) {
       document.removeEventListener('mousemove', onRbMove);
       document.removeEventListener('mouseup', onRbUp);
-      rubberBand.style.display = 'none';
+      _setStyleIfChanged(rubberBand, 'display', 'none', _rubberBandStyleState);
       if (!rbActive) return;
       const x1 = Math.min(rbStartX, ev.clientX), y1 = Math.min(rbStartY, ev.clientY);
       const x2 = Math.max(rbStartX, ev.clientX), y2 = Math.max(rbStartY, ev.clientY);
       const wx1 = (x1 - panX) / zoom, wy1 = (y1 - panY) / zoom;
       const wx2 = (x2 - panX) / zoom, wy2 = (y2 - panY) / zoom;
-      const hits = objects.filter(o =>
-        o.x < wx2 && o.x + o.w > wx1 && o.y < wy2 && o.y + o.h > wy1
-      );
-      if (!hits.length) return;
       if (!additive) selectedIds.clear();
-      for (const o of hits) { selectedIds.add(o.id); selectedId = o.id; }
+      let hitCount = 0;
+      for (const o of objects) {
+        if (o.x < wx2 && o.x + o.w > wx1 && o.y < wy2 && o.y + o.h > wy1) {
+          selectedIds.add(o.id);
+          selectedId = o.id;
+          hitCount++;
+        }
+      }
+      if (!hitCount) return;
       scheduleRender(true, true);
     }
     document.addEventListener('mousemove', onRbMove);
@@ -1186,7 +1250,10 @@ canvas.addEventListener('mousedown', (e) => {
   if (additive) {
     if (isSelected(obj.id)) {
       selectedIds.delete(obj.id);
-      if (selectedId === obj.id) selectedId = [...selectedIds].at(-1) || null;
+      if (selectedId === obj.id) {
+        selectedId = null;
+        for (const id of selectedIds) selectedId = id;
+      }
       if (editingId && !isSelected(editingId)) exitEdit();
     } else {
       if (editingId && editingId !== obj.id) exitEdit();
@@ -1205,7 +1272,7 @@ canvas.addEventListener('mousedown', (e) => {
 
   // Click inside the currently edited text object: position caret / start drag-select
   if (editingId && obj.id === editingId && selectedIds.size === 1) {
-    const layout = obj._layoutCache || calculateTextLayout(obj);
+    const layout = getTextLayout(obj);
     const clickIdx = layoutHitTest(layout, wp.x, wp.y);
     if (_editEl) {
       _editEl.focus({ preventScroll: true });
@@ -1236,11 +1303,10 @@ canvas.addEventListener('mousedown', (e) => {
   if (!isSelected(obj.id)) selectObject(obj.id);
 
   const startX = e.clientX, startY = e.clientY;
-  const dragIds = [...selectedIds];
-  const originById = new Map();
-  for (const id of dragIds) {
+  const dragItems = [];
+  for (const id of selectedIds) {
     const o = objectsMap.get(id);
-    if (o) originById.set(id, { x: o.x, y: o.y });
+    if (o) dragItems.push({ obj: o, startX: o.x, startY: o.y });
   }
   let moved = false;
   const moveThreshold = 9 / (zoom * zoom);
@@ -1248,12 +1314,9 @@ canvas.addEventListener('mousedown', (e) => {
   let dragRaf = null;
 
   function applyDrag(dx, dy) {
-    for (const id of dragIds) {
-      const start = originById.get(id);
-      const o = objectsMap.get(id);
-      if (!start || !o) continue;
-      o.x = start.x + dx;
-      o.y = start.y + dy;
+    for (const item of dragItems) {
+      item.obj.x = item.startX + dx;
+      item.obj.y = item.startY + dy;
     }
     drawBoard();
     updateSelectionOverlay();
@@ -1288,7 +1351,7 @@ canvas.addEventListener('mousedown', (e) => {
       dragRaf = null;
     }
     applyDrag(lastDx, lastDy);
-    for (const id of dragIds) markDirty(id);
+    for (const item of dragItems) markDirty(item.obj.id);
     pushHistory();
   }
   document.addEventListener('mousemove', onMove);
@@ -1692,25 +1755,30 @@ let _jsClipboardSetAt = 0;
 window.addEventListener('focus', () => { if (Date.now() - _jsClipboardSetAt > 1500) jsClipboard = null; });
 
 async function copySelected() {
-  const selectedObjs = getSelectedObjects();
-  if (!selectedObjs.length) return;
-  if (selectedObjs.length > 1) {
-    const clonedObjs = JSON.parse(JSON.stringify(selectedObjs));
+  if (!selectedIds.size) return;
+  if (selectedIds.size > 1) {
+    const clonedObjs = [];
     const imageData = {};
-    for (const o of clonedObjs) {
-      if (o.type === 'image') {
-        const src = imageStore[o.data.imgKey];
-        if (src) imageData[o.data.imgKey] = src;
+    for (const id of selectedIds) {
+      const obj = objectsMap.get(id);
+      if (!obj) continue;
+      const cloned = cloneObject(obj);
+      if (cloned.type === 'image') {
+        const src = imageStore[cloned.data.imgKey];
+        if (src) imageData[cloned.data.imgKey] = src;
       }
+      clonedObjs.push(cloned);
     }
+    if (!clonedObjs.length) return;
     jsClipboard = { type: 'objects', objects: clonedObjs, imageData };
     _jsClipboardSetAt = Date.now();
     return;
   }
-  const obj = selectedObjs[0];
+  const obj = getFirstSelectedObject();
+  if (!obj) return;
 
   // Always store as objects so pasteAtPos has a single branch
-  const cloned = JSON.parse(JSON.stringify(obj));
+  const cloned = cloneObject(obj);
   const imgData = {};
   if (obj.type === 'image') {
     const src = imageStore[obj.data.imgKey];
@@ -1806,8 +1874,13 @@ async function saveSelectedImage() {
 }
 
 async function saveSelectedImages() {
-  const selectedObjs = getSelectedObjects().filter((o) => o.type === 'image');
-  if (selectedObjs.length < 2 || selectedObjs.length !== selectedIds.size) return;
+  const selectedObjs = [];
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj || obj.type !== 'image') return;
+    selectedObjs.push(obj);
+  }
+  if (selectedObjs.length < 2) return;
 
   if (window.__TAURI__) {
     const dataUrls = selectedObjs.map((o) => getImageSrc(o)).filter(Boolean);
@@ -1888,7 +1961,7 @@ async function exportAllText() {
 async function pasteAtPos(wx, wy) {
   if (jsClipboard) {
     if (jsClipboard.type === 'objects') {
-      const clones = JSON.parse(JSON.stringify(jsClipboard.objects || []));
+      const clones = cloneObjects(jsClipboard.objects || []);
       if (!clones.length) return;
       // Re-register image data in case we're on a different board
       const imgData = jsClipboard.imageData || {};
@@ -1985,6 +2058,8 @@ document.addEventListener('keydown', (e) => {
 if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) { e.preventDefault(); redo(); return; }
 
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
+
+  if ((e.ctrlKey || e.metaKey) && e.key === 'd' && !editingId) { e.preventDefault(); duplicateSelected(); return; }
 });
 
 // ─── Reload guard ────────────────────────────────────────────────────────────
