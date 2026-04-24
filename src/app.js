@@ -1744,6 +1744,7 @@ async function openBoard() {
 let _closeGuardRunning = false;
 
 async function requestAppClose() {
+  window.__TAURI__.core.invoke('dbg_log_js', { msg: 'requestAppClose called, dirty=' + isDirty() + ' guardRunning=' + _closeGuardRunning }).catch(() => {});
   if (!window.__TAURI__ || _closeGuardRunning) return;
   _closeGuardRunning = true;
   try {

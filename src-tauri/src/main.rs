@@ -224,7 +224,13 @@ fn set_title(window: tauri::Window, title: String) {
 
 #[tauri::command]
 fn exit_app() {
+    dbg_log("exit_app called");
     std::process::exit(0);
+}
+
+#[tauri::command]
+fn dbg_log_js(msg: String) {
+    dbg_log(&format!("[JS] {}", msg));
 }
 
 
@@ -329,11 +335,23 @@ fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(
     }
 }
 
+fn dbg_log(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/boardfish_quit.log") {
+        let _ = writeln!(f, "[{}] {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(), msg);
+    }
+}
+
 fn emit_close_request(app: &tauri::AppHandle) {
+    dbg_log("emit_close_request called");
     if let Some(window) = app.get_webview_window("main") {
+        dbg_log("window found, showing and emitting");
         window.show().ok();
         window.set_focus().ok();
-        window.emit("boardfish://close-requested", ()).ok();
+        let result = window.emit("boardfish://close-requested", ());
+        dbg_log(&format!("emit result: {:?}", result));
+    } else {
+        dbg_log("ERROR: window not found");
     }
 }
 
@@ -356,6 +374,7 @@ fn main() {
             save_images_to_folder,
             set_title,
             exit_app,
+            dbg_log_js,
             copy_text_to_clipboard,
             cache_image_for_clipboard,
             copy_cached_image_to_clipboard,
@@ -495,13 +514,19 @@ fn main() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                dbg_log("ExitRequested fired");
                 api.prevent_exit();
-                // Tell macOS to cancel termination so the window stays alive.
-                // Without this, macOS force-kills the app before the dialog appears.
+                dbg_log("prevent_exit called");
                 #[cfg(target_os = "macos")]
-                macos_cancel_termination();
+                {
+                    macos_cancel_termination();
+                    dbg_log("macos_cancel_termination called");
+                }
                 emit_close_request(app_handle);
                 return;
+            }
+            if let tauri::RunEvent::Exit = event {
+                dbg_log("RunEvent::Exit fired (loop exiting)");
             }
 
             #[cfg(target_os = "macos")]
