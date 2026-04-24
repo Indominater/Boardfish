@@ -1750,10 +1750,16 @@ async function requestAppClose() {
   try {
     if (isDirty()) {
       const choice = await showUnsavedDialog();
-      if (choice === 'cancel') return;
+      if (choice === 'cancel') {
+        window.__TAURI__.core.invoke('cancel_pending_termination').catch(() => {});
+        return;
+      }
       if (choice === 'save') {
         const saved = await saveBoard();
-        if (!saved) return;
+        if (!saved) {
+          window.__TAURI__.core.invoke('cancel_pending_termination').catch(() => {});
+          return;
+        }
       }
     }
     // Use process.exit instead of appWindow.close() to avoid re-triggering

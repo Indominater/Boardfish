@@ -4,14 +4,74 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "macos")]
+static PENDING_TERMINATION: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+static APP_HANDLE_FOR_TERMINATE: std::sync::OnceLock<tauri::AppHandle> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "macos")]
 fn macos_cancel_termination() {
+    use std::sync::atomic::Ordering;
     use objc2_app_kit::NSApplication;
     use objc2::MainThreadMarker;
-    unsafe {
-        let mtm = MainThreadMarker::new_unchecked();
-        let app = NSApplication::sharedApplication(mtm);
-        app.replyToApplicationShouldTerminate(false);
+    if PENDING_TERMINATION.swap(false, Ordering::SeqCst) {
+        unsafe {
+            let mtm = MainThreadMarker::new_unchecked();
+            let app = NSApplication::sharedApplication(mtm);
+            app.replyToApplicationShouldTerminate(false);
+        }
     }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn setup_termination_intercept(app_handle: tauri::AppHandle) {
+    use std::ffi::c_void;
+    use objc2::runtime::{AnyObject, Sel};
+    use objc2::{msg_send, sel, MainThreadMarker};
+    use objc2_app_kit::NSApplication;
+
+    APP_HANDLE_FOR_TERMINATE.set(app_handle).ok();
+
+    extern "C" {
+        fn class_getInstanceMethod(cls: *const c_void, sel: Sel) -> *mut c_void;
+        fn method_setImplementation(m: *mut c_void, imp: *const c_void) -> *const c_void;
+    }
+
+    unsafe extern "C" fn our_should_terminate(
+        _this: *mut AnyObject,
+        _sel: Sel,
+        _sender: *mut AnyObject,
+    ) -> std::os::raw::c_ulong {
+        use std::sync::atomic::Ordering;
+        dbg_log("applicationShouldTerminate: intercepted");
+        PENDING_TERMINATION.store(true, Ordering::SeqCst);
+        if let Some(app) = APP_HANDLE_FOR_TERMINATE.get() {
+            emit_close_request(app);
+        }
+        2 // NSTerminateLater — tells macOS to wait for replyToApplicationShouldTerminate:
+    }
+
+    let mtm = MainThreadMarker::new_unchecked();
+    let ns_app = NSApplication::sharedApplication(mtm);
+
+    let delegate: *mut AnyObject = msg_send![&*ns_app, delegate];
+    if delegate.is_null() {
+        dbg_log("setup_termination_intercept: delegate is null");
+        return;
+    }
+
+    let cls = (*delegate).class() as *const _ as *const c_void;
+    let sel = sel!(applicationShouldTerminate:);
+    let method = class_getInstanceMethod(cls, sel);
+    if method.is_null() {
+        dbg_log("setup_termination_intercept: applicationShouldTerminate: not found on delegate");
+        return;
+    }
+
+    method_setImplementation(method, our_should_terminate as *const c_void);
+    dbg_log("setup_termination_intercept: swizzled applicationShouldTerminate: successfully");
 }
 
 use tauri::menu::{
@@ -229,6 +289,13 @@ fn exit_app() {
 }
 
 #[tauri::command]
+fn cancel_pending_termination() {
+    dbg_log("cancel_pending_termination called");
+    #[cfg(target_os = "macos")]
+    macos_cancel_termination();
+}
+
+#[tauri::command]
 fn dbg_log_js(msg: String) {
     dbg_log(&format!("[JS] {}", msg));
 }
@@ -374,6 +441,7 @@ fn main() {
             save_images_to_folder,
             set_title,
             exit_app,
+            cancel_pending_termination,
             dbg_log_js,
             copy_text_to_clipboard,
             cache_image_for_clipboard,
@@ -506,6 +574,11 @@ fn main() {
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title_bar_style(tauri::TitleBarStyle::Visible);
+            }
+
+            #[cfg(target_os = "macos")]
+            unsafe {
+                setup_termination_intercept(app_handle.clone());
             }
 
             Ok(())
