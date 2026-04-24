@@ -1,10 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+fn macos_cancel_termination() {
+    use objc2_app_kit::NSApplication;
+    use objc2::MainThreadMarker;
+    unsafe {
+        let mtm = MainThreadMarker::new_unchecked();
+        let app = NSApplication::sharedApplication(mtm);
+        app.replyToApplicationShouldTerminate(false);
+    }
+}
+
 use tauri::menu::{
     AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
     WINDOW_SUBMENU_ID,
@@ -214,9 +223,8 @@ fn set_title(window: tauri::Window, title: String) {
 }
 
 #[tauri::command]
-fn exit_app(app: tauri::AppHandle) {
-    ALLOW_EXIT.store(true, Ordering::SeqCst);
-    app.exit(0);
+fn exit_app() {
+    std::process::exit(0);
 }
 
 
@@ -322,10 +330,10 @@ fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(
 }
 
 fn emit_close_request(app: &tauri::AppHandle) {
-    // Used by menu close-window items; routes through window.close() so that
-    // the CloseRequested handler (which reliably prevents close) takes over.
     if let Some(window) = app.get_webview_window("main") {
-        window.close().ok();
+        window.show().ok();
+        window.set_focus().ok();
+        window.emit("boardfish://close-requested", ()).ok();
     }
 }
 
@@ -487,15 +495,12 @@ fn main() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                if !ALLOW_EXIT.load(Ordering::SeqCst) {
-                    api.prevent_exit();
-                    // Route through CloseRequested (which we know prevents close correctly)
-                    // rather than emitting directly — CloseRequested + prevent_close() is
-                    // the path that reliably keeps the window alive for the JS dialog.
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        window.close().ok();
-                    }
-                }
+                api.prevent_exit();
+                // Tell macOS to cancel termination so the window stays alive.
+                // Without this, macOS force-kills the app before the dialog appears.
+                #[cfg(target_os = "macos")]
+                macos_cancel_termination();
+                emit_close_request(app_handle);
                 return;
             }
 
