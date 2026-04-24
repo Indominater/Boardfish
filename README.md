@@ -4,6 +4,8 @@ Have you ever wanted a fast, non-destructive way to visualize your ideas?
 
 Meet Boardfish: a lightweight, open-source canvas for Windows and macOS. It provides an infinite, freeform space for visual research, moodboards, and snippets—a frictionless place for your thoughts to land.
 
+<img src="src-tauri/icons/image_1f8957.png" alt="Boardfish canvas screenshot" width="900">
+
 ## Download
 
 Grab the latest installer from the [Releases](../../releases/latest) page.
@@ -39,8 +41,6 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 - Your board stays local
 - Images keep their original quality
 - Export existing images quickly instead of digging through folders or screenshots
-
-Boardfish is for collecting ideas before they become polished documents: visual research, moodboards, snippets, references, notes, and anything else that needs a frictionless place to land.
 
 ## Keyboard Shortcuts
 
