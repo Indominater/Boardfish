@@ -1,13 +1,15 @@
 # Boardfish
 
-A minimal, fast canvas app for Mac and Windows. Drop text and images onto an infinite board, arrange them freely, and save your work as a single file.
+Have you ever wanted a fast, non-destructive way to visualize your ideas?
+
+Meet Boardfish: a lightweight, open-source canvas for Windows and macOS. It provides an infinite, freeform space for visual research, moodboards, and snippets—a frictionless place for your thoughts to land.
 
 ## Download
 
 Grab the latest installer from the [Releases](../../releases/latest) page.
 
-- **Mac** — download the `.dmg`, drag Boardfish to Applications
-- **Windows** — download the `.msi`, run the installer
+- **Windows** — download the `.exe`, run the installer
+- **macOS** — download the `.dmg`, drag Boardfish to Applications
 
 > **macOS:** If you see "damaged and can't be opened", run this in Terminal after dragging to Applications:
 > ```bash
@@ -16,14 +18,29 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 
 ## Features
 
+- Minimal dark UI designed to disappear
 - Infinite canvas with smooth pan and zoom
-- Add text and images — paste, drag and drop, or use the context menu
-- Resize objects with drag handles
-- Copy and paste within the app or from external sources
-- Undo / redo
-- Save boards as a single `.bf` file
-- Right-click canvas for quick actions
-- Right-click any object to duplicate or delete
+- Paste text and images directly from your clipboard
+- Drag and drop images from your desktop or browser
+- Lossless image scaling and movement on the board
+- Multi-select objects and move them together
+- Resize images and text blocks with drag handles
+- Copy images back to your clipboard at original resolution
+- Export one image, selected images, or all images in one action
+- Export all text into a single `.txt` file
+- Undo, redo, duplicate, cut, copy, paste, and delete
+- Save everything locally as one portable `.bf` file
+
+## Why Boardfish?
+
+- No layout engine fighting you
+- No formatting rules boxing you in
+- No cloud account required
+- Your board stays local
+- Images keep their original quality
+- Export existing images quickly instead of digging through folders or screenshots
+
+Boardfish is for collecting ideas before they become polished documents: visual research, moodboards, snippets, references, notes, and anything else that needs a frictionless place to land.
 
 ## Keyboard Shortcuts
 

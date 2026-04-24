@@ -2,7 +2,14 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tauri::menu::{
+    AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
+    WINDOW_SUBMENU_ID,
+};
 use tauri::{Emitter, Manager};
+
+const CLOSE_WINDOW_MENU_ID: &str = "boardfish-close-window";
+const WINDOW_CLOSE_MENU_ID: &str = "boardfish-window-close";
 
 struct StartupFile(Mutex<Option<String>>);
 struct ClipboardImageCache(Mutex<HashMap<String, CachedClipboardImage>>);
@@ -309,6 +316,12 @@ fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(
     }
 }
 
+fn emit_close_request(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        window.emit("boardfish://close-requested", ()).ok();
+    }
+}
+
 fn main() {
     let startup_file: Option<String> = std::env::args().nth(1);
 
@@ -347,6 +360,115 @@ fn main() {
             _ => {}
         })
         .setup(|app| {
+            let app_handle = app.handle().clone();
+
+            let pkg_info = app_handle.package_info();
+            let config = app_handle.config();
+            let about_metadata = AboutMetadata {
+                name: Some(pkg_info.name.clone()),
+                version: Some(pkg_info.version.to_string()),
+                copyright: config.bundle.copyright.clone(),
+                authors: config.bundle.publisher.clone().map(|p| vec![p]),
+                ..Default::default()
+            };
+
+            let close_window =
+                MenuItem::with_id(&app_handle, CLOSE_WINDOW_MENU_ID, "Close Window", true, Some("CmdOrCtrl+W"))?;
+            let window_close =
+                MenuItem::with_id(&app_handle, WINDOW_CLOSE_MENU_ID, "Close Window", true, None::<&str>)?;
+            let window_menu = Submenu::with_id_and_items(
+                &app_handle,
+                WINDOW_SUBMENU_ID,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(&app_handle, None)?,
+                    &PredefinedMenuItem::maximize(&app_handle, None)?,
+                    #[cfg(target_os = "macos")]
+                    &PredefinedMenuItem::separator(&app_handle)?,
+                    &window_close,
+                ],
+            )?;
+            let help_menu = Submenu::with_id_and_items(
+                &app_handle,
+                HELP_SUBMENU_ID,
+                "Help",
+                true,
+                &[
+                    #[cfg(not(target_os = "macos"))]
+                    &PredefinedMenuItem::about(&app_handle, None, Some(about_metadata.clone()))?,
+                ],
+            )?;
+            let menu = Menu::with_items(
+                &app_handle,
+                &[
+                    #[cfg(target_os = "macos")]
+                    &Submenu::with_items(
+                        &app_handle,
+                        pkg_info.name.clone(),
+                        true,
+                        &[
+                            &PredefinedMenuItem::about(&app_handle, None, Some(about_metadata))?,
+                            &PredefinedMenuItem::separator(&app_handle)?,
+                            &PredefinedMenuItem::services(&app_handle, None)?,
+                            &PredefinedMenuItem::separator(&app_handle)?,
+                            &PredefinedMenuItem::hide(&app_handle, None)?,
+                            &PredefinedMenuItem::hide_others(&app_handle, None)?,
+                            &PredefinedMenuItem::separator(&app_handle)?,
+                            &PredefinedMenuItem::quit(&app_handle, None)?,
+                        ],
+                    )?,
+                    #[cfg(not(any(
+                        target_os = "linux",
+                        target_os = "dragonfly",
+                        target_os = "freebsd",
+                        target_os = "netbsd",
+                        target_os = "openbsd"
+                    )))]
+                    &Submenu::with_items(
+                        &app_handle,
+                        "File",
+                        true,
+                        &[
+                            &close_window,
+                            #[cfg(not(target_os = "macos"))]
+                            &PredefinedMenuItem::quit(&app_handle, None)?,
+                        ],
+                    )?,
+                    &Submenu::with_items(
+                        &app_handle,
+                        "Edit",
+                        true,
+                        &[
+                            &PredefinedMenuItem::undo(&app_handle, None)?,
+                            &PredefinedMenuItem::redo(&app_handle, None)?,
+                            &PredefinedMenuItem::separator(&app_handle)?,
+                            &PredefinedMenuItem::cut(&app_handle, None)?,
+                            &PredefinedMenuItem::copy(&app_handle, None)?,
+                            &PredefinedMenuItem::paste(&app_handle, None)?,
+                            &PredefinedMenuItem::select_all(&app_handle, None)?,
+                        ],
+                    )?,
+                    #[cfg(target_os = "macos")]
+                    &Submenu::with_items(
+                        &app_handle,
+                        "View",
+                        true,
+                        &[&PredefinedMenuItem::fullscreen(&app_handle, None)?],
+                    )?,
+                    &window_menu,
+                    &help_menu,
+                ],
+            )?;
+            app.set_menu(menu)?;
+
+            app.on_menu_event(|app, event| {
+                let id = event.id().0.as_str();
+                if id == CLOSE_WINDOW_MENU_ID || id == WINDOW_CLOSE_MENU_ID {
+                    emit_close_request(app);
+                }
+            });
+
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title_bar_style(tauri::TitleBarStyle::Visible);
@@ -359,9 +481,7 @@ fn main() {
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
                 api.prevent_exit();
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    window.emit("boardfish://close-requested", ()).ok();
-                }
+                emit_close_request(app_handle);
                 return;
             }
 
