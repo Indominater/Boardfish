@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
-static HANDLING_QUIT: AtomicBool = AtomicBool::new(false);
 use tauri::menu::{
     AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, HELP_SUBMENU_ID,
     WINDOW_SUBMENU_ID,
@@ -220,10 +219,6 @@ fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-#[tauri::command]
-fn cancel_quit() {
-    HANDLING_QUIT.store(false, Ordering::SeqCst);
-}
 
 #[tauri::command]
 fn copy_text_to_clipboard(text: String) -> Result<(), String> {
@@ -327,13 +322,10 @@ fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(
 }
 
 fn emit_close_request(app: &tauri::AppHandle) {
-    if HANDLING_QUIT.swap(true, Ordering::SeqCst) {
-        return; // already handling a quit, don't double-emit
-    }
+    // Used by menu close-window items; routes through window.close() so that
+    // the CloseRequested handler (which reliably prevents close) takes over.
     if let Some(window) = app.get_webview_window("main") {
-        window.show().ok();
-        window.set_focus().ok();
-        window.emit("boardfish://close-requested", ()).ok();
+        window.close().ok();
     }
 }
 
@@ -356,7 +348,6 @@ fn main() {
             save_images_to_folder,
             set_title,
             exit_app,
-            cancel_quit,
             copy_text_to_clipboard,
             cache_image_for_clipboard,
             copy_cached_image_to_clipboard,
@@ -498,7 +489,12 @@ fn main() {
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
                 if !ALLOW_EXIT.load(Ordering::SeqCst) {
                     api.prevent_exit();
-                    emit_close_request(app_handle);
+                    // Route through CloseRequested (which we know prevents close correctly)
+                    // rather than emitting directly — CloseRequested + prevent_close() is
+                    // the path that reliably keeps the window alive for the JS dialog.
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        window.close().ok();
+                    }
                 }
                 return;
             }
