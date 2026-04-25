@@ -22,15 +22,15 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 
 - Minimal dark UI designed to disappear
 - Infinite canvas with smooth pan and zoom
-- Paste text and images directly from your clipboard
-- Drag and drop images from your desktop or browser
-- Lossless image scaling and movement on the board
-- Multi-select objects and move them together
-- Resize images and text blocks with drag handles
+- Add text and images from your clipboard, drag and drop, or the file picker
+- Lossless image scaling, movement, and flipping on the board
+- Single and multi-select with a unified resize handle — scale everything proportionally
+- Right-click context menu on any selection for quick actions
+- Send objects to back, duplicate, copy, paste, cut, and delete
 - Copy images back to your clipboard at original resolution
-- Export one image, selected images, or all images in one action
+- Export one image, all selected images, or all images in one action
 - Export all text into a single `.txt` file
-- Undo, redo, duplicate, cut, copy, paste, and delete
+- Undo and redo — selection is preserved across undo steps
 - Save everything locally as one portable `.bf` file
 
 ## Why Boardfish?

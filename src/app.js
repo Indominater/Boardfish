@@ -15,6 +15,9 @@ const copyBtn           = document.getElementById('obj-btn-copy');
 const saveImageBtn      = document.getElementById('obj-btn-save-image');
 const saveImagesBtn     = document.getElementById('obj-btn-save-images');
 const exportSep         = document.getElementById('obj-sep-export');
+const imageActionsSep   = document.getElementById('obj-sep-image-actions');
+const flipHorizontalBtn = document.getElementById('obj-btn-flip-horizontal');
+const flipVerticalBtn   = document.getElementById('obj-btn-flip-vertical');
 const rubberBand       = document.getElementById('rubber-band');
 const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
@@ -70,20 +73,27 @@ function restoreIslandZoom() {
 const FONT_SIZE = 16;
 const LINE_H    = 24;
 const TEXT_PAD  = 4;
+const NEW_TEXT_EDIT_MIN_LINES = 3;
 const FONT      = `${FONT_SIZE}px 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif`;
 
-// Hidden span uses same CSS engine as the textarea for exact wrap matching
-const _measurer = (() => {
-  const el = document.createElement('span');
-  el.style.cssText = `position:absolute;top:-9999px;left:-9999px;visibility:hidden;pointer-events:none;white-space:pre;font-family:'Geist','Geist Sans',Inter,-apple-system,'Segoe UI',system-ui,sans-serif;font-size:${FONT_SIZE}px`;
-  document.body.appendChild(el);
-  return el;
-})();
+const _measureCanvas = document.createElement('canvas');
+const _measureCtx = _measureCanvas.getContext('2d');
+_measureCtx.font = FONT;
 const _mwCache = Object.create(null);
 function measureTextW(text) {
   if (text in _mwCache) return _mwCache[text];
-  _measurer.textContent = text;
-  return (_mwCache[text] = _measurer.getBoundingClientRect().width);
+  _measureCtx.font = FONT;
+  return (_mwCache[text] = _measureCtx.measureText(text).width);
+}
+
+function clearTextMeasurementCaches() {
+  for (const k of Object.keys(_mwCache)) delete _mwCache[k];
+  _linesCacheMap.clear();
+  _prefixCache.clear();
+  for (const obj of objects) delete obj._layoutCache;
+  syncAllTextAutoHeights();
+  invalidateOffscreen();
+  scheduleRender(true, true);
 }
 
 // ─── Offscreen buffer ─────────────────────────────────────────────────────────
@@ -182,21 +192,42 @@ function getWrappedLines(obj) {
   return result;
 }
 
-// Per-character layout for the editing object (world coords).
-// Uses full-prefix measurements (not per-char accumulation) so kerning is
-// accounted for and caret positions match the actual rendered glyphs exactly.
-// Prefix strings are cached in _mwCache so repeated frames are O(n) lookups.
-// Each entry: { text, startIndex, y, chars: [{char, x, w, index}] }
+function getTextAutoHeight(obj, minLines = 1) {
+  return Math.max(minLines * LINE_H + TEXT_PAD * 2, getWrappedLines(obj).length * LINE_H + TEXT_PAD * 2);
+}
+
+function syncTextAutoHeight(obj, minLines = 1) {
+  if (!obj || obj.type !== 'text') return false;
+  const h = getTextAutoHeight(obj, minLines);
+  if (obj.h === h) return false;
+  obj.h = h;
+  return true;
+}
+
+function getTextMinLines(obj) {
+  return obj && obj.id === editingId ? (obj._editMinLines || 1) : 1;
+}
+
+function syncAllTextAutoHeights() {
+  let changed = false;
+  for (const obj of objects) {
+    if (syncTextAutoHeight(obj)) {
+      markDirty(obj.id);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// Per-line layout for the editing object (world coords).
+// Prefix widths keep caret positions aligned with rendered glyphs without
+// allocating one object per character.
+// Each entry: { text, startIndex, y, prefixWidths }
 function calculateTextLayout(obj) {
   const lines = getWrappedLines(obj);
   return lines.map((line, i) => {
     const y = obj.y + TEXT_PAD + i * LINE_H;
-    const pw = getPrefixWidths(line.text); // O(1) after first call for this string
-    const chars = [];
-    for (let j = 0; j < line.text.length; j++) {
-      chars.push({ char: line.text[j], x: obj.x + TEXT_PAD + pw[j], w: pw[j + 1] - pw[j], index: line.startIndex + j });
-    }
-    return { text: line.text, startIndex: line.startIndex, y, chars };
+    return { text: line.text, startIndex: line.startIndex, y, prefixWidths: getPrefixWidths(line.text) };
   });
 }
 
@@ -206,21 +237,25 @@ function getTextLayout(obj) {
   return obj._layoutCache;
 }
 
-function lineEndX(line, obj) {
-  if (!line.chars.length) return obj.x + TEXT_PAD;
-  const last = line.chars[line.chars.length - 1];
-  return last.x + last.w;
+function lineXAtOffset(line, obj, offset) {
+  return obj.x + TEXT_PAD + line.prefixWidths[Math.max(0, Math.min(offset, line.text.length))];
 }
 
-function layoutHitTest(layout, wx, wy) {
+function lineEndX(line, obj) {
+  return lineXAtOffset(line, obj, line.text.length);
+}
+
+function layoutHitTest(layout, wx, wy, obj) {
   if (!layout.length) return 0;
   let line = layout[layout.length - 1];
   for (let i = 0; i < layout.length; i++) {
     if (wy < layout[i].y + LINE_H) { line = layout[i]; break; }
   }
-  if (!line.chars.length) return line.startIndex;
-  for (const ch of line.chars) {
-    if (wx < ch.x + ch.w / 2) return ch.index;
+  if (!line.text.length) return line.startIndex;
+  const baseX = obj.x + TEXT_PAD;
+  const pw = line.prefixWidths;
+  for (let j = 0; j < line.text.length; j++) {
+    if (wx < baseX + pw[j] + (pw[j + 1] - pw[j]) / 2) return line.startIndex + j;
   }
   return line.startIndex + line.text.length;
 }
@@ -236,7 +271,17 @@ function drawSingleObj(context, obj) {
   } else if (obj.type === 'image') {
     const img = imageCache[obj.data.imgKey];
     if (img && img.complete && img.naturalWidth > 0) {
-      context.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+      const flipX = !!obj.data.flipX;
+      const flipY = !!obj.data.flipY;
+      if (flipX || flipY) {
+        context.save();
+        context.translate(obj.x + (flipX ? obj.w : 0), obj.y + (flipY ? obj.h : 0));
+        context.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+        context.drawImage(img, 0, 0, obj.w, obj.h);
+        context.restore();
+      } else {
+        context.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+      }
     }
   }
 }
@@ -288,8 +333,8 @@ function drawBoard() {
           if (h0 < h1) {
             const o0 = h0 - ls, o1 = h1 - ls;
             const endX = lineEndX(line, obj);
-            const x1 = o0 < line.chars.length ? line.chars[o0].x : endX;
-            const x2 = o1 < line.chars.length ? line.chars[o1].x : endX;
+            const x1 = o0 < line.text.length ? lineXAtOffset(line, obj, o0) : endX;
+            const x2 = o1 < line.text.length ? lineXAtOffset(line, obj, o1) : endX;
             ctx.fillRect(x1, line.y - (IS_WIN ? 5 : 1), x2 - x1, LINE_H);
           }
         }
@@ -306,7 +351,7 @@ function drawBoard() {
           const ls = line.startIndex, le = ls + line.text.length;
           if (selStart >= ls && selStart <= le) {
             const off = selStart - ls;
-            cx = off < line.chars.length ? line.chars[off].x : lineEndX(line, obj);
+            cx = off < line.text.length ? lineXAtOffset(line, obj, off) : lineEndX(line, obj);
             cy = line.y;
             break;
           }
@@ -407,7 +452,7 @@ function newId() { return 'obj-' + (idCounter++); }
 
 function cloneObject(obj) {
   const data = obj.type === 'image'
-    ? { imgKey: obj.data.imgKey }
+    ? { imgKey: obj.data.imgKey, flipX: !!obj.data.flipX, flipY: !!obj.data.flipY }
     : { content: obj.data.content };
   return {
     id: obj.id,
@@ -432,6 +477,33 @@ function bringObjectToFront(id) {
   if (idx < 0 || idx === objects.length - 1) return;
   const [obj] = objects.splice(idx, 1);
   objects.push(obj);
+}
+
+function sendSelectedToBack() {
+  if (!selectedIds.size) return;
+  // Pull out selected objects (preserving their relative order), prepend to front
+  const selected = [], rest = [];
+  for (const o of objects) (selectedIds.has(o.id) ? selected : rest).push(o);
+  objects.length = 0;
+  objects.push(...selected, ...rest);
+  scheduleRender(true, true);
+  pushHistory();
+}
+
+function flipSelectedImages(axis) {
+  let flipped = false;
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj || obj.type !== 'image') continue;
+    if (axis === 'x') obj.data.flipX = !obj.data.flipX;
+    else obj.data.flipY = !obj.data.flipY;
+    markDirty(obj.id);
+    flipped = true;
+  }
+  if (!flipped) return;
+  invalidateOffscreen();
+  scheduleRender(true, true);
+  pushHistory();
 }
 
 function isMultiSelected() {
@@ -472,21 +544,56 @@ let imgKeyCounter = 1;
 function storeImage(src) {
   const key = 'img-' + (imgKeyCounter++);
   imageStore[key] = src;
-  const img = new Image();
-  img.onload = () => { invalidateOffscreen(); scheduleRender(true, false); };
-  img.src = src;
-  imageCache[key] = img;
+  cacheImage(key, src);
   return key;
 }
 
 function getImageSrc(obj) { return imageStore[obj.data.imgKey] || ''; }
 
+function imageNeedsRendering(obj) {
+  return !!(obj?.data?.flipX || obj?.data?.flipY);
+}
+
+function renderImageToCanvas(obj) {
+  const img = imageCache[obj.data.imgKey];
+  if (!img || !img.complete || !img.naturalWidth) return null;
+  const tmp = document.createElement('canvas');
+  tmp.width = img.naturalWidth;
+  tmp.height = img.naturalHeight;
+  const tctx = tmp.getContext('2d');
+  const flipX = !!obj.data.flipX;
+  const flipY = !!obj.data.flipY;
+  tctx.save();
+  tctx.translate(flipX ? tmp.width : 0, flipY ? tmp.height : 0);
+  tctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+  tctx.drawImage(img, 0, 0);
+  tctx.restore();
+  return tmp;
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+}
+
+async function getRenderedImageDataUrl(obj) {
+  const src = getImageSrc(obj);
+  if (!src || !imageNeedsRendering(obj)) return src;
+  const canvas = renderImageToCanvas(obj);
+  return canvas ? canvas.toDataURL('image/png') : '';
+}
+
 function cacheImage(key, src) {
-  if (imageCache[key]) return;
-  const img = new Image();
-  img.onload = () => { invalidateOffscreen(); scheduleRender(true, false); };
-  img.src = src;
-  imageCache[key] = img;
+  if (!imageCache[key]) {
+    const img = new Image();
+    img.onload = () => { invalidateOffscreen(); scheduleRender(true, false); };
+    img.src = src;
+    imageCache[key] = img;
+  }
+  // Pre-cache in Rust clipboard cache for both new imports and board-loaded images.
+  if (window.__TAURI__) {
+    window.__TAURI__.core.invoke('cache_image_for_clipboard', { imgKey: key, dataUrl: src })
+      .catch(() => {});
+  }
 }
 
 function clearImageStore() {
@@ -504,7 +611,7 @@ function clearImageStore() {
 
 let history = [];
 let historyIndex = -1;
-const MAX_HISTORY = 20;
+const MAX_HISTORY = 50;
 
 function trimHistory() {
   if (history.length > MAX_HISTORY) {
@@ -517,9 +624,11 @@ function trimHistory() {
 
 function snapshot() {
   history.length = historyIndex + 1;
+  const objectsSnapshot = cloneObjects(objects);
+  const editState = captureEditState();
   history.push({
-    objects: cloneObjects(objects),
-    editState: captureEditState(),
+    objects: objectsSnapshot,
+    editState,
   });
   historyIndex = history.length - 1;
   _dirtyIds.clear();
@@ -541,9 +650,10 @@ function pushHistory() {
       : prevMap.get(o.id)
   );
   _dirtyIds.clear();
+  const editState = captureEditState();
   history.push({
     objects: entry,
-    editState: captureEditState(),
+    editState,
   });
   historyIndex++;
   trimHistory();
@@ -565,6 +675,7 @@ function restoreSnapshot(s) {
     editingId = null;
     _editEl = null;
   }
+  const prevSelectedIds = new Set(selectedIds);
   const snapshotObjects = Array.isArray(s) ? s : (s?.objects || []);
   const editState = Array.isArray(s) ? null : (s?.editState || null);
   objects = cloneObjects(snapshotObjects);
@@ -572,9 +683,14 @@ function restoreSnapshot(s) {
   _linesCacheMap.clear();
   _prefixCache.clear();
   rebuildObjectsMap();
+  syncAllTextAutoHeights();
   invalidateOffscreen();
+  // Preserve selection for objects that still exist in the restored state
   selectedId = null;
   selectedIds.clear();
+  for (const id of prevSelectedIds) {
+    if (objectsMap.has(id)) { selectedIds.add(id); selectedId = id; }
+  }
   renderAll();
 
   if (!editState || !editState.id) return;
@@ -629,8 +745,8 @@ function renderAll() {
 
 // ─── Screen-space selection overlay ──────────────────────────────────────────
 
-const _multiSelBoxes = [];
 const _selOverlayStyleState = { transform: '', width: '', height: '' };
+const _multiSelBoxes = [];
 const _multiSelStyleState = new WeakMap();
 const _rubberBandStyleState = { display: '', left: '', top: '', width: '', height: '' };
 
@@ -640,22 +756,55 @@ function _setStyleIfChanged(el, prop, value, state) {
   el.style[prop] = value;
 }
 
-function _setDisplayIfChanged(el, value) {
+function _setMultiBoxDisplayIfChanged(el, value) {
   let state = _multiSelStyleState.get(el);
   if (!state) {
-    state = { display: '', left: '', top: '', width: '', height: '' };
+    state = { display: '', transform: '', width: '', height: '' };
     _multiSelStyleState.set(el, state);
   }
   _setStyleIfChanged(el, 'display', value, state);
   return state;
 }
 
-function updateSelectionOverlay() {
-  function hideMultiSelectionOverlay() {
-    if (!multiSelOverlay) return;
-    if (multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.remove('visible');
+function hideMultiSelectionOverlay() {
+  if (!multiSelOverlay) return;
+  if (multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.remove('visible');
+  for (const box of _multiSelBoxes) _setMultiBoxDisplayIfChanged(box, 'none');
+}
+
+function updateMultiSelectionOverlay() {
+  if (!multiSelOverlay || !isMultiSelected()) {
+    hideMultiSelectionOverlay();
+    return;
   }
 
+  while (_multiSelBoxes.length < selectedIds.size) {
+    const box = document.createElement('div');
+    box.className = 'multi-sel-box';
+    _multiSelBoxes.push(box);
+    _multiSelStyleState.set(box, { display: '', transform: '', width: '', height: '' });
+    multiSelOverlay.appendChild(box);
+  }
+
+  let selectedIdx = 0;
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj) continue;
+    const box = _multiSelBoxes[selectedIdx++];
+    const state = _setMultiBoxDisplayIfChanged(box, 'block');
+    _setStyleIfChanged(box, 'transform', `translate(${obj.x * zoom + panX}px,${obj.y * zoom + panY}px)`, state);
+    _setStyleIfChanged(box, 'width', (obj.w * zoom) + 'px', state);
+    _setStyleIfChanged(box, 'height', (obj.h * zoom) + 'px', state);
+  }
+
+  for (let i = selectedIdx; i < _multiSelBoxes.length; i++) {
+    _setMultiBoxDisplayIfChanged(_multiSelBoxes[i], 'none');
+  }
+
+  if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
+}
+
+function updateSelectionOverlay() {
   if (!hasSelection()) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
@@ -665,59 +814,49 @@ function updateSelectionOverlay() {
   const firstSelectedObj = getFirstSelectedObject();
   if (!firstSelectedObj) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
+    hideMultiSelectionOverlay();
     selectedId = null;
     selectedIds.clear();
-    hideMultiSelectionOverlay();
     return;
   }
 
-  if (isMultiSelected()) {
-    if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
-    if (!multiSelOverlay) return;
-    while (_multiSelBoxes.length < selectedIds.size) {
-      const box = document.createElement('div');
-      box.className = 'multi-sel-box';
-      _multiSelBoxes.push(box);
-      _multiSelStyleState.set(box, { display: '', transform: '', width: '', height: '' });
-      multiSelOverlay.appendChild(box);
-    }
-
-    let selectedIdx = 0;
-    for (const id of selectedIds) {
-      const obj = objectsMap.get(id);
-      if (!obj) continue;
-      const box = _multiSelBoxes[selectedIdx++];
-      const state = _setDisplayIfChanged(box, 'block');
-      _setStyleIfChanged(box, 'transform', `translate(${obj.x * zoom + panX}px,${obj.y * zoom + panY}px)`, state);
-      _setStyleIfChanged(box, 'width', (obj.w * zoom) + 'px', state);
-      _setStyleIfChanged(box, 'height', (obj.h * zoom) + 'px', state);
-    }
-
-    for (let i = selectedIdx; i < _multiSelBoxes.length; i++) {
-      const box = _multiSelBoxes[i];
-      _setDisplayIfChanged(box, 'none');
-    }
-
-    if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
-    return;
+  // Compute bounding box (works for both single and multi-select)
+  let bx1 = Infinity, by1 = Infinity, bx2 = -Infinity, by2 = -Infinity;
+  for (const id of selectedIds) {
+    const o = objectsMap.get(id);
+    if (!o) continue;
+    bx1 = Math.min(bx1, o.x); by1 = Math.min(by1, o.y);
+    bx2 = Math.max(bx2, o.x + o.w); by2 = Math.max(by2, o.y + o.h);
   }
 
-  hideMultiSelectionOverlay();
-
-  const obj = firstSelectedObj;
-  const sx = obj.x * zoom + panX;
-  const sy = obj.y * zoom + panY;
-  const sw = obj.w * zoom;
-  const sh = obj.h * zoom;
+  const sx = bx1 * zoom + panX;
+  const sy = by1 * zoom + panY;
+  const sw = (bx2 - bx1) * zoom;
+  const sh = (by2 - by1) * zoom;
 
   _setStyleIfChanged(selOverlay, 'transform', `translate(${sx}px,${sy}px)`, _selOverlayStyleState);
   _setStyleIfChanged(selOverlay, 'width', sw + 'px', _selOverlayStyleState);
   _setStyleIfChanged(selOverlay, 'height', sh + 'px', _selOverlayStyleState);
-  if (selOverlay.classList.contains('multi')) selOverlay.classList.remove('multi');
+  if (isMultiSelected()) {
+    if (!selOverlay.classList.contains('multi')) selOverlay.classList.add('multi');
+  } else {
+    if (selOverlay.classList.contains('multi')) selOverlay.classList.remove('multi');
+  }
+  if (editingId) {
+    if (!selOverlay.classList.contains('editing')) selOverlay.classList.add('editing');
+  } else {
+    if (selOverlay.classList.contains('editing')) selOverlay.classList.remove('editing');
+  }
+  if (!isMultiSelected() && firstSelectedObj.type === 'text') {
+    if (!selOverlay.classList.contains('text-resize')) selOverlay.classList.add('text-resize');
+  } else {
+    if (selOverlay.classList.contains('text-resize')) selOverlay.classList.remove('text-resize');
+  }
+  updateMultiSelectionOverlay();
   if (!selOverlay.classList.contains('visible')) selOverlay.classList.add('visible');
 }
 
-// Init overlay handle listeners once — they always operate on selectedId
+// Init overlay handle listeners once — they always operate on selectedId / selectedIds
 (function initOverlayHandles() {
   for (const handle of selOverlay.querySelectorAll('.s-handle')) {
     handle.addEventListener('mousedown', (e) => {
@@ -725,12 +864,95 @@ function updateSelectionOverlay() {
       e.preventDefault();
       e.stopPropagation();
 
-      if (!selectedId || isMultiSelected()) return;
+      const dir = handle.dataset.dir;
+      const startX = e.clientX, startY = e.clientY;
+
+      // ── Multi-select: scale non-text objects proportionally within bounding box ──
+      if (isMultiSelected()) {
+        let bx1 = Infinity, by1 = Infinity, bx2 = -Infinity, by2 = -Infinity;
+        for (const id of selectedIds) {
+          const o = objectsMap.get(id);
+          if (!o) continue;
+          bx1 = Math.min(bx1, o.x); by1 = Math.min(by1, o.y);
+          bx2 = Math.max(bx2, o.x + o.w); by2 = Math.max(by2, o.y + o.h);
+        }
+        const origBX = bx1, origBY = by1, origBW = bx2 - bx1, origBH = by2 - by1;
+        const ratio = origBW / origBH;
+
+        const snapshots = [];
+        for (const id of selectedIds) {
+          const o = objectsMap.get(id);
+          if (!o || o.type === 'text') continue;
+          snapshots.push({
+            id,
+            relX: (o.x - origBX) / origBW, relY: (o.y - origBY) / origBH,
+            relW: o.w / origBW, relH: o.h / origBH,
+          });
+        }
+        if (!snapshots.length) return;
+
+        const MIN_B = 20;
+        let resizeRaf = null, hasPendingResize = false, pendingState = null;
+
+        function applyMultiResize({ bx, by, bw, bh }) {
+          for (const snap of snapshots) {
+            const o = objectsMap.get(snap.id);
+            if (!o) continue;
+            o.x = bx + snap.relX * bw; o.y = by + snap.relY * bh;
+            o.w = snap.relW * bw; o.h = snap.relH * bh;
+          }
+          scheduleRender(true, true);
+        }
+
+        function scheduleMultiResizeFrame() {
+          if (resizeRaf) return;
+          resizeRaf = requestAnimationFrame(() => {
+            resizeRaf = null;
+            if (!hasPendingResize) return;
+            hasPendingResize = false;
+            applyMultiResize(pendingState);
+          });
+        }
+
+        function onMultiMove(ev) {
+          const dx = (ev.clientX - startX) / zoom;
+          const dy = (ev.clientY - startY) / zoom;
+          const useX = Math.abs(dx) >= Math.abs(dy);
+          let bw = origBW, bh = origBH, bx = origBX, by = origBY;
+
+          if (dir === 'se') { bw = Math.max(MIN_B, useX ? origBW + dx : (origBH + dy) * ratio); }
+          else if (dir === 'sw') { bw = Math.max(MIN_B, useX ? origBW - dx : (origBH + dy) * ratio); }
+          else if (dir === 'ne') { bw = Math.max(MIN_B, useX ? origBW + dx : (origBH - dy) * ratio); }
+          else if (dir === 'nw') { bw = Math.max(MIN_B, useX ? origBW - dx : (origBH - dy) * ratio); }
+          bh = bw / ratio;
+
+          if (dir.includes('w')) bx = origBX + origBW - bw;
+          if (dir.includes('n')) by = origBY + origBH - bh;
+
+          pendingState = { bx, by, bw, bh };
+          hasPendingResize = true;
+          scheduleMultiResizeFrame();
+        }
+
+        function onMultiUp() {
+          document.removeEventListener('mousemove', onMultiMove);
+          document.removeEventListener('mouseup', onMultiUp);
+          if (resizeRaf) { cancelAnimationFrame(resizeRaf); resizeRaf = null; }
+          if (hasPendingResize) { hasPendingResize = false; applyMultiResize(pendingState); }
+          for (const snap of snapshots) markDirty(snap.id);
+          pushHistory();
+        }
+
+        document.addEventListener('mousemove', onMultiMove);
+        document.addEventListener('mouseup', onMultiUp);
+        return;
+      }
+
+      // ── Single select ──
+      if (!selectedId) return;
       const obj = objectsMap.get(selectedId);
       if (!obj) return;
 
-      const dir = handle.dataset.dir;
-      const startX = e.clientX, startY = e.clientY;
       const { x: ox, y: oy, w: ow, h: oh } = obj;
       const MIN = 20;
       let resizeRaf = null;
@@ -742,6 +964,10 @@ function updateSelectionOverlay() {
         obj.y = state.y;
         obj.w = state.w;
         obj.h = state.h;
+        if (obj.type === 'text') {
+          delete obj._layoutCache;
+          syncTextAutoHeight(obj, getTextMinLines(obj));
+        }
         scheduleRender(true, true);
       }
 
@@ -772,9 +998,8 @@ function updateSelectionOverlay() {
           if (dir.includes('n')) y = oy + oh - h;
         } else {
           if (dir.includes('e')) w = Math.max(MIN, ow + dx);
-          if (dir.includes('s')) h = Math.max(MIN, oh + dy);
+          h = oh;
           if (dir.includes('w')) { w = Math.max(MIN, ow - dx); x = ox + ow - w; }
-          if (dir.includes('n')) { h = Math.max(MIN, oh - dy); y = oy + oh - h; }
         }
 
         pendingResize = { x, y, w, h };
@@ -869,6 +1094,8 @@ function enterEdit(id) {
   const obj = objectsMap.get(id);
   if (!obj) return;
   obj._editStartContent = obj.data.content;
+  obj._editMinLines = obj.data.content ? 1 : NEW_TEXT_EDIT_MIN_LINES;
+  syncTextAutoHeight(obj, obj._editMinLines);
   _editHistoryLastContent = obj.data.content;
   clearTimeout(_editHistoryTimer);
   _editHistoryTimer = null;
@@ -884,8 +1111,9 @@ function enterEdit(id) {
     markDirty(id);
     obj.data.content = proxy.value;
     delete obj._layoutCache;
+    const heightChanged = syncTextAutoHeight(obj, obj._editMinLines || 1);
     scheduleEditHistoryCheckpoint(id);
-    scheduleRender(true, false);
+    scheduleRender(true, heightChanged);
   });
   proxy.addEventListener('keydown', (e) => {
     _caretVisible = true;
@@ -921,11 +1149,7 @@ function enterEdit(id) {
 
       // Caret world-x in the reference line
       const off = refPos - refLine.startIndex;
-      const caretX = off < refLine.chars.length
-        ? refLine.chars[off].x
-        : refLine.chars.length > 0
-          ? refLine.chars[refLine.chars.length - 1].x + refLine.chars[refLine.chars.length - 1].w
-          : obj.x + TEXT_PAD;
+      const caretX = lineXAtOffset(refLine, obj, off);
 
       // Find nearest position in the target line
       const targetIdx = isUp ? refLineIdx - 1 : refLineIdx + 1;
@@ -935,7 +1159,7 @@ function enterEdit(id) {
       } else if (targetIdx >= layout.length) {
         newPos = proxy.value.length;
       } else {
-        newPos = layoutHitTest([layout[targetIdx]], caretX, layout[targetIdx].y);
+        newPos = layoutHitTest([layout[targetIdx]], caretX, layout[targetIdx].y, obj);
       }
 
       if (e.shiftKey) {
@@ -972,7 +1196,7 @@ function enterEdit(id) {
 
   proxy.focus({ preventScroll: true });
   proxy.setSelectionRange(proxy.value.length, proxy.value.length);
-  scheduleRender(true, false);
+  scheduleRender(true, true);
 }
 
 function exitEdit() {
@@ -1005,35 +1229,40 @@ function exitEdit() {
       selectedIds.delete(id);
       selectedId = null;
       delete obj._editStartContent;
+      delete obj._editMinLines;
       _editHistoryLastContent = null;
       scheduleRender(true, true);
       pushHistory();
       return;
     }
-    pushEditHistoryIfChanged(id);
-    delete obj._editStartContent;
     delete obj._layoutCache;
+    const heightChanged = syncTextAutoHeight(obj);
+    if (heightChanged) markDirty(id);
+    const contentChanged = obj.data.content !== _editHistoryLastContent;
+    pushEditHistoryIfChanged(id);
+    if (heightChanged && !contentChanged) pushHistory();
+    delete obj._editStartContent;
+    delete obj._editMinLines;
   }
 
   _editHistoryLastContent = null;
-  scheduleRender(true, false);
+  scheduleRender(true, true);
   window.getSelection()?.removeAllRanges();
 }
 
 // ─── Add objects ─────────────────────────────────────────────────────────────
 
 function addText(wx, wy, content = '') {
-  let w = 200, h = 80;
+  let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
   if (content) {
     const lines = content.split('\n');
-    const charW = 9.2, lineH = 24, pad = 8;
+    const charW = 9.2, pad = 8;
     const maxLineLen = Math.max(...lines.map(l => l.length), 1);
     w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
-    const totalLines = lines.reduce((acc, line) => acc + Math.max(1, Math.ceil((line.length * charW) / (w - pad * 2))), 0);
-    h = Math.max(Math.round(totalLines * lineH + pad * 2), 40);
   }
 
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data: { content } };
+  syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
   objects.push(obj);
   objectsMap.set(obj.id, obj);
   selectObject(obj.id);
@@ -1113,6 +1342,8 @@ function duplicateSelected() {
   if (!cloned.length) return;
   jsClipboard = { type: 'objects', objects: cloned, imageData };
   _jsClipboardSetAt = Date.now();
+  _jsCbFingerprint = 'skip';
+  _blurredSinceCopy = false;
   pasteAtPos(center.x, center.y);
 }
 
@@ -1147,9 +1378,7 @@ let _caretBlinkInterval = null;
 let _selChangeListener = null;
 let _editHistoryTimer = null;
 let _editHistoryLastContent = null;
-const EDIT_HISTORY_DEBOUNCE_MS = 350;
-let _setMode  = null; // 'pan' | 'zoom' | null (null = no active set)
-let _setTimer = null;
+const EDIT_HISTORY_DEBOUNCE_MS = 500;
 
 
 canvas.addEventListener('wheel', (e) => {
@@ -1157,7 +1386,7 @@ canvas.addEventListener('wheel', (e) => {
   if (editingId) {
     _caretVisible = true;
   }
-  if (e.ctrlKey) {
+  if (e.ctrlKey || e.metaKey) {
     const factor = Math.abs(e.deltaY) < 30
       ? Math.pow(0.995, e.deltaY)
       : e.deltaY < 0 ? 1.1 : 1 / 1.1;
@@ -1168,27 +1397,10 @@ canvas.addEventListener('wheel', (e) => {
     scheduleTransform();
     return;
   }
-  if (_setMode === null) {
-    const abs = Math.abs(e.deltaY);
-    _setMode = (abs < 4 || e.deltaX !== 0) ? 'pan' : 'zoom';
-  }
-  clearTimeout(_setTimer);
-  _setTimer = setTimeout(() => { _setMode = null; }, 250);
 
-  const isPan = _setMode === 'pan';
-
-  if (isPan) {
-    panX -= e.deltaX;
-    panY -= e.deltaY;
-    scheduleTransform();
-  } else {
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
-    panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
-    panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
-    zoom = newZoom;
-    scheduleTransform();
-  }
+  panX -= e.deltaX;
+  panY -= e.deltaY;
+  scheduleTransform();
 }, { passive: false });
 
 // ─── Pan (middle mouse button) ────────────────────────────────────────────────
@@ -1217,6 +1429,49 @@ canvas.addEventListener('mousedown', (e) => {
   const wp = toWorld(e.clientX, e.clientY);
   const obj = hitTest(wp.x, wp.y);
   const additive = e.metaKey || e.ctrlKey;
+
+  // Multi-select: any click inside the bounding box (object or empty space) → drag group
+  if (isMultiSelected() && !additive) {
+    let bx1 = Infinity, by1 = Infinity, bx2 = -Infinity, by2 = -Infinity;
+    for (const id of selectedIds) {
+      const o = objectsMap.get(id);
+      if (!o) continue;
+      bx1 = Math.min(bx1, o.x); by1 = Math.min(by1, o.y);
+      bx2 = Math.max(bx2, o.x + o.w); by2 = Math.max(by2, o.y + o.h);
+    }
+    if (wp.x >= bx1 && wp.x <= bx2 && wp.y >= by1 && wp.y <= by2) {
+      const grpStartX = e.clientX, grpStartY = e.clientY;
+      const grpItems = [];
+      for (const id of selectedIds) {
+        const o = objectsMap.get(id);
+        if (o) grpItems.push({ obj: o, startX: o.x, startY: o.y });
+      }
+      let grpMoved = false;
+      const grpThreshold = 9 / (zoom * zoom);
+      let grpLastDx = 0, grpLastDy = 0, grpRaf = null;
+      function applyGrpDrag(dx, dy) {
+        for (const item of grpItems) { item.obj.x = item.startX + dx; item.obj.y = item.startY + dy; }
+        drawBoard(); updateSelectionOverlay();
+      }
+      function onGrpMove(ev) {
+        const dx = (ev.clientX - grpStartX) / zoom, dy = (ev.clientY - grpStartY) / zoom;
+        if (!grpMoved && dx*dx + dy*dy > grpThreshold) grpMoved = true;
+        if (!grpMoved) return;
+        grpLastDx = dx; grpLastDy = dy;
+        if (grpRaf) return;
+        grpRaf = requestAnimationFrame(() => { grpRaf = null; applyGrpDrag(grpLastDx, grpLastDy); });
+      }
+      function onGrpUp() {
+        document.removeEventListener('mousemove', onGrpMove);
+        document.removeEventListener('mouseup', onGrpUp);
+        if (grpRaf) { cancelAnimationFrame(grpRaf); grpRaf = null; }
+        if (grpMoved) { applyGrpDrag(grpLastDx, grpLastDy); for (const item of grpItems) markDirty(item.obj.id); pushHistory(); }
+      }
+      document.addEventListener('mousemove', onGrpMove);
+      document.addEventListener('mouseup', onGrpUp);
+      return;
+    }
+  }
 
   if (!obj) {
     if (!additive) deselectAll();
@@ -1286,7 +1541,7 @@ canvas.addEventListener('mousedown', (e) => {
   // Click inside the currently edited text object: position caret / start drag-select
   if (editingId && obj.id === editingId && selectedIds.size === 1) {
     const layout = getTextLayout(obj);
-    const clickIdx = layoutHitTest(layout, wp.x, wp.y);
+    const clickIdx = layoutHitTest(layout, wp.x, wp.y, obj);
     if (_editEl) {
       _editEl.focus({ preventScroll: true });
       _editEl.setSelectionRange(clickIdx, clickIdx);
@@ -1295,7 +1550,7 @@ canvas.addEventListener('mousedown', (e) => {
     }
     function onSelMove(ev) {
       const wp2 = toWorld(ev.clientX, ev.clientY);
-      const endIdx = layoutHitTest(obj._layoutCache || layout, wp2.x, wp2.y);
+      const endIdx = layoutHitTest(obj._layoutCache || layout, wp2.x, wp2.y, obj);
       if (_editEl) {
         _editEl.setSelectionRange(Math.min(clickIdx, endIdx), Math.max(clickIdx, endIdx));
         _caretVisible = true;
@@ -1356,7 +1611,7 @@ canvas.addEventListener('mousedown', (e) => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
     if (!moved) {
-      if (!isSelected(obj.id) || selectedIds.size > 1) selectObject(obj.id);
+      if (!isSelected(obj.id)) selectObject(obj.id);
       return;
     }
     if (dragRaf) {
@@ -1386,15 +1641,18 @@ canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefaul
 let ctxPos = { x: 0, y: 0 };
 
 function updateObjMenuActions() {
-  const multi = selectedIds.size > 1;
-  const imagesOnly = allSelectedAreImages();
-  const singleImageSelected = !multi && imagesOnly;
-  const multiImagesSelected = multi && imagesOnly;
-  const showExport = singleImageSelected || multiImagesSelected;
+  let imageCount = 0;
+  for (const id of selectedIds) {
+    const o = objectsMap.get(id);
+    if (o && o.type === 'image') imageCount++;
+  }
   if (copyBtn) copyBtn.style.display = 'block';
-  if (saveImageBtn) saveImageBtn.style.display = singleImageSelected ? 'block' : 'none';
-  if (saveImagesBtn) saveImagesBtn.style.display = multiImagesSelected ? 'block' : 'none';
-  if (exportSep) exportSep.style.display = showExport ? 'block' : 'none';
+  if (imageActionsSep) imageActionsSep.style.display = imageCount >= 1 ? 'block' : 'none';
+  if (flipHorizontalBtn) flipHorizontalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
+  if (flipVerticalBtn) flipVerticalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
+  if (saveImageBtn) saveImageBtn.style.display = imageCount === 1 ? 'block' : 'none';
+  if (saveImagesBtn) saveImagesBtn.style.display = imageCount >= 2 ? 'block' : 'none';
+  if (exportSep) exportSep.style.display = imageCount >= 1 ? 'block' : 'none';
 }
 
 function updateCtxMenuActions() {
@@ -1409,6 +1667,26 @@ function updateCtxMenuActions() {
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const wp = toWorld(e.clientX, e.clientY);
+
+  // Multi-select: right-click anywhere inside bounding box shows obj menu
+  if (isMultiSelected()) {
+    let bx1 = Infinity, by1 = Infinity, bx2 = -Infinity, by2 = -Infinity;
+    for (const id of selectedIds) {
+      const o = objectsMap.get(id);
+      if (!o) continue;
+      bx1 = Math.min(bx1, o.x); by1 = Math.min(by1, o.y);
+      bx2 = Math.max(bx2, o.x + o.w); by2 = Math.max(by2, o.y + o.h);
+    }
+    if (wp.x >= bx1 && wp.x <= bx2 && wp.y >= by1 && wp.y <= by2) {
+      updateObjMenuActions();
+      ctxMenu.classList.remove('visible');
+      objCtxMenu.style.left = e.clientX + 'px';
+      objCtxMenu.style.top  = e.clientY + 'px';
+      objCtxMenu.classList.add('visible');
+      return;
+    }
+  }
+
   const obj = hitTest(wp.x, wp.y);
   if (obj) {
     if (!isSelected(obj.id)) selectObject(obj.id);
@@ -1492,6 +1770,21 @@ document.getElementById('obj-btn-duplicate').addEventListener('click', () => {
   duplicateSelected();
 });
 
+document.getElementById('obj-btn-move-to-back').addEventListener('click', () => {
+  objCtxMenu.classList.remove('visible');
+  sendSelectedToBack();
+});
+
+document.getElementById('obj-btn-flip-horizontal').addEventListener('click', () => {
+  objCtxMenu.classList.remove('visible');
+  flipSelectedImages('x');
+});
+
+document.getElementById('obj-btn-flip-vertical').addEventListener('click', () => {
+  objCtxMenu.classList.remove('visible');
+  flipSelectedImages('y');
+});
+
 document.getElementById('obj-btn-save-image').addEventListener('click', () => {
   objCtxMenu.classList.remove('visible');
   saveSelectedImage();
@@ -1513,6 +1806,7 @@ document.getElementById('btn-export-all-text').addEventListener('click', () => {
 });
 
 islZoom.addEventListener('click', () => {
+  deselectAll();
   const vw = window.innerWidth, vh = window.innerHeight;
   const anyVisible = objects.some(o => {
     const sx = o.x * zoom + panX, sy = o.y * zoom + panY;
@@ -1668,6 +1962,7 @@ function applyBoardData(data) {
   selectedIds.clear();
   objects = data.objects || [];
   rebuildObjectsMap();
+  syncAllTextAutoHeights();
   invalidateOffscreen();
   for (const obj of objects) {
     const n = parseInt(obj.id.split('-')[1]);
@@ -1735,7 +2030,6 @@ async function openBoard() {
     applyBoardData(data);
     currentFilePath = filePath;
     updateTitle();
-    showIslandMsg('Opened', 1500);
   } catch (err) { console.error('Open failed:', err); }
 }
 
@@ -1775,16 +2069,53 @@ if (window.__TAURI__) {
 
 // ─── Clipboard ───────────────────────────────────────────────────────────────
 
-let jsClipboard = null; // in-app clipboard, avoids system clipboard format issues
+let jsClipboard = null;
 let _jsClipboardSetAt = 0;
+// Fingerprint of what Boardfish wrote to the system clipboard, used to detect
+// external writes (e.g. screenshots) when the app regains focus.
+// 'skip' = internal duplicate, never verify. null = write not yet complete.
+let _jsCbFingerprint = null;
+// Set to true when the window blurs after a copy — only then is an external
+// clipboard write possible, so we only pay the verification cost in that case.
+let _blurredSinceCopy = false;
 
-// When the user switches away and copies something else, clear in-app clipboard
-// so the next paste uses whatever is most recent on the system clipboard.
-// Grace period prevents osascript subprocess focus round-trip from wiping jsClipboard.
+window.addEventListener('blur', () => { if (jsClipboard) _blurredSinceCopy = true; });
 window.addEventListener('focus', () => { if (Date.now() - _jsClipboardSetAt > 1500) jsClipboard = null; });
+
+// Read current system clipboard and store fingerprint (multi-select: nothing
+// was written, so we snapshot whatever is there to detect later changes).
+
+// Returns false if system clipboard has changed since copy — caller should drop jsClipboard.
+// Only runs when the app has blurred since the copy (external write is otherwise impossible).
+async function jsClipboardStillValid() {
+  if (!_jsCbFingerprint || _jsCbFingerprint === 'skip') return true;
+  if (!_blurredSinceCopy) return true; // app never left — clipboard can't have changed externally
+  try {
+    if (_jsCbFingerprint.type === 'text') {
+      const t = await navigator.clipboard.readText().catch(() => null);
+      return t === null || t === _jsCbFingerprint.value;
+    }
+    if (_jsCbFingerprint.type === 'image') {
+      if (!navigator.clipboard?.read) return true;
+      const items = await navigator.clipboard.read().catch(() => null);
+      if (!items) return true;
+      for (const item of items) {
+        const imgType = item.types.find(t => t.startsWith('image/'));
+        if (imgType) {
+          const blob = await item.getType(imgType);
+          const r = blob.size / _jsCbFingerprint.size;
+          return r > 0.8 && r < 1.2;
+        }
+      }
+      return false; // expected image, none found
+    }
+  } catch { return true; }
+  return true;
+}
 
 async function copySelected() {
   if (!selectedIds.size) return;
+
   if (selectedIds.size > 1) {
     const clonedObjs = [];
     const imageData = {};
@@ -1801,67 +2132,75 @@ async function copySelected() {
     if (!clonedObjs.length) return;
     jsClipboard = { type: 'objects', objects: clonedObjs, imageData };
     _jsClipboardSetAt = Date.now();
+    _blurredSinceCopy = false;
+    _jsCbFingerprint = null;
     return;
   }
+
   const obj = getFirstSelectedObject();
   if (!obj) return;
 
-  // Always store as objects so pasteAtPos has a single branch
   const cloned = cloneObject(obj);
   const imgData = {};
   if (obj.type === 'image') {
     const src = imageStore[obj.data.imgKey];
     if (src) imgData[obj.data.imgKey] = src;
   }
-  jsClipboard = { type: 'objects', objects: [cloned], imageData: imgData };
-  _jsClipboardSetAt = Date.now();
-
   const isTauri = !!window.__TAURI__;
 
+  jsClipboard = { type: 'objects', objects: [cloned], imageData: imgData };
+  _jsClipboardSetAt = Date.now();
+  _blurredSinceCopy = false;
+
   if (obj.type === 'text') {
+    _jsCbFingerprint = { type: 'text', value: obj.data.content };
     if (isTauri) {
-      try {
-        await window.__TAURI__.core.invoke('copy_text_to_clipboard', { text: obj.data.content });
-      } catch (err) {
-        console.error('[copy] copy_text_to_clipboard FAILED:', err);
-      }
+      window.__TAURI__.core.invoke('copy_text_to_clipboard', { text: obj.data.content })
+        .catch(err => console.error('[copy] copy_text_to_clipboard FAILED:', err));
     } else {
-      try {
-        await navigator.clipboard.writeText(obj.data.content);
-      } catch (err) {
-        console.error('[copy] writeText FAILED:', err);
-      }
+      navigator.clipboard.writeText(obj.data.content)
+        .catch(err => console.error('[copy] writeText FAILED:', err));
     }
     return;
   }
 
   if (obj.type === 'image') {
-    if (isTauri) {
-      try {
-        await window.__TAURI__.core.invoke('copy_cached_image_to_clipboard', { imgKey: obj.data.imgKey });
-      } catch (err) {
-        try {
-          const src = getImageSrc(obj);
-          if (!src) throw new Error('missing image source');
-          await window.__TAURI__.core.invoke('cache_image_for_clipboard', { imgKey: obj.data.imgKey, dataUrl: src });
-          await window.__TAURI__.core.invoke('copy_cached_image_to_clipboard', { imgKey: obj.data.imgKey });
-        } catch (cacheErr) {
-          console.error('[copy] copy_cached_image_to_clipboard FAILED:', cacheErr);
-        }
+    if (isTauri && !imageNeedsRendering(obj)) {
+      const src = imageStore[obj.data.imgKey];
+      if (src) {
+        const comma = src.indexOf(',');
+        _jsCbFingerprint = { type: 'image', size: Math.floor((src.length - comma - 1) * 0.75) };
       }
+      window.__TAURI__.core.invoke('copy_cached_image_to_clipboard', { imgKey: obj.data.imgKey })
+        .catch(async () => {
+          // Cache miss fallback: render to canvas and send as data URL
+          const fallbackCanvas = renderImageToCanvas(obj) || (() => {
+            const im = imageCache[obj.data.imgKey];
+            if (!im || !im.complete || !im.naturalWidth) return null;
+            const tmp = document.createElement('canvas');
+            tmp.width = im.naturalWidth; tmp.height = im.naturalHeight;
+            tmp.getContext('2d').drawImage(im, 0, 0);
+            return tmp;
+          })();
+          if (!fallbackCanvas) return;
+          const fallbackBlob = await canvasToPngBlob(fallbackCanvas);
+          if (!fallbackBlob) return;
+          _jsCbFingerprint = { type: 'image', size: fallbackBlob.size };
+          window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: fallbackCanvas.toDataURL('image/png') })
+            .catch(err => console.error('[copy] fallback copy_image_data_url_to_clipboard FAILED:', err));
+        });
     } else {
-      const img = imageCache[obj.data.imgKey];
-      if (!img || !img.complete || !img.naturalWidth) { console.warn('[copy] image not ready'); return; }
-      const tmp = document.createElement('canvas');
-      tmp.width = img.naturalWidth;
-      tmp.height = img.naturalHeight;
-      tmp.getContext('2d').drawImage(img, 0, 0);
-      const pngBlob = await new Promise(res => tmp.toBlob(res, 'image/png'));
-      if (!pngBlob) { console.warn('[copy] toBlob returned null'); return; }
-      try {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
-      } catch (err) {
-        console.error('[copy] clipboard.write FAILED:', err);
+      const canvas = renderImageToCanvas(obj);
+      if (!canvas) return;
+      const pngBlob = await canvasToPngBlob(canvas);
+      if (!pngBlob) return;
+      _jsCbFingerprint = { type: 'image', size: pngBlob.size };
+      if (isTauri) {
+        window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: canvas.toDataURL('image/png') })
+          .catch(err => console.error('[copy] copy_image_data_url_to_clipboard FAILED:', err));
+      } else {
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
+          .catch(err => console.error('[copy] clipboard.write FAILED:', err));
       }
     }
   }
@@ -1879,7 +2218,7 @@ async function saveSelectedImage() {
   const obj = objectsMap.get(selectedId);
   if (!obj || obj.type !== 'image') return;
 
-  const src = getImageSrc(obj);
+  const src = await getRenderedImageDataUrl(obj);
   if (!src) return;
 
   const ext = guessImageExtFromDataUrl(src);
@@ -1912,7 +2251,7 @@ async function saveSelectedImages() {
   if (selectedObjs.length < 2) return;
 
   if (window.__TAURI__) {
-    const dataUrls = selectedObjs.map((o) => getImageSrc(o)).filter(Boolean);
+    const dataUrls = (await Promise.all(selectedObjs.map((o) => getRenderedImageDataUrl(o)))).filter(Boolean);
     if (dataUrls.length < 2) return;
     try {
       const savedCount = await window.__TAURI__.core.invoke('save_images_to_folder', { dataUrls });
@@ -1924,7 +2263,7 @@ async function saveSelectedImages() {
   }
 
   for (let i = 0; i < selectedObjs.length; i++) {
-    const src = getImageSrc(selectedObjs[i]);
+    const src = await getRenderedImageDataUrl(selectedObjs[i]);
     if (!src) continue;
     const ext = guessImageExtFromDataUrl(src);
     const a = document.createElement('a');
@@ -1939,7 +2278,7 @@ async function exportAllImages() {
   if (!imageObjs.length) return;
 
   if (window.__TAURI__) {
-    const dataUrls = imageObjs.map((o) => getImageSrc(o)).filter(Boolean);
+    const dataUrls = (await Promise.all(imageObjs.map((o) => getRenderedImageDataUrl(o)))).filter(Boolean);
     if (!dataUrls.length) return;
     try {
       const savedCount = await window.__TAURI__.core.invoke('save_images_to_folder', { dataUrls });
@@ -1951,7 +2290,7 @@ async function exportAllImages() {
   }
 
   for (let i = 0; i < imageObjs.length; i++) {
-    const src = getImageSrc(imageObjs[i]);
+    const src = await getRenderedImageDataUrl(imageObjs[i]);
     if (!src) continue;
     const ext = guessImageExtFromDataUrl(src);
     const a = document.createElement('a');
@@ -1988,6 +2327,10 @@ async function exportAllText() {
 }
 
 async function pasteAtPos(wx, wy) {
+  if (jsClipboard && !(await jsClipboardStillValid())) {
+    jsClipboard = null;
+    _jsCbFingerprint = null;
+  }
   if (jsClipboard) {
     if (jsClipboard.type === 'objects') {
       const clones = cloneObjects(jsClipboard.objects || []);
@@ -2035,38 +2378,10 @@ async function pasteAtPos(wx, wy) {
 document.addEventListener('paste', (e) => {
   if (editingId) return;
   e.preventDefault();
-
-  // In-app clipboard: handles copy/paste within Boardfish without system clipboard format issues
-  if (jsClipboard) {
-    const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-    pasteAtPos(center.x, center.y);
-    return;
-  }
-
-  // System clipboard: handles paste from external sources
-  const items = e.clipboardData?.items;
-  if (items) {
-    for (const item of [...items]) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-            addImage(ev.target.result, center.x, center.y);
-          };
-          reader.readAsDataURL(file);
-          return;
-        }
-      }
-    }
-  }
-  const text = e.clipboardData?.getData('text/plain');
-  if (text && text.trim()) {
-    const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-    addText(center.x - 100, center.y - 40, text);
-  }
+  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  pasteAtPos(center.x, center.y);
 });
+
 
 // ─── Keyboard ────────────────────────────────────────────────────────────────
 
@@ -2168,6 +2483,7 @@ window.addEventListener('beforeunload', (e) => {
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 window.addEventListener('resize', resizeCanvas);
+document.fonts?.ready.then(clearTextMeasurementCaches).catch(() => {});
 resizeCanvas();
 snapshot();
 updateZoomDisplay();
@@ -2186,7 +2502,6 @@ async function openFilePath(filePath) {
     applyBoardData(data);
     currentFilePath = filePath;
     updateTitle();
-    showIslandMsg('Opened', 1500);
   } catch (err) { console.error('Failed to open file:', err); }
 }
 

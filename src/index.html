@@ -52,26 +52,26 @@
       position: absolute;
       top: 0; left: 0;
       display: none;
-      border: 1px solid rgba(10, 132, 255, 0.9);
+      box-sizing: border-box;
+      border: 0;
+      box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.9);
       pointer-events: none;
       z-index: 99998;
     }
     #sel-overlay.visible { display: block; }
-    #sel-overlay.multi .s-handle { display: none; }
-    #multi-sel-overlay {
-      position: absolute;
-      inset: 0;
-      display: none;
-      pointer-events: none;
-      z-index: 99997;
+    #sel-overlay.multi {
+      border: 1px dashed rgba(10, 132, 255, 0.9);
+      box-shadow: none;
     }
-    #multi-sel-overlay.visible { display: block; }
-    .multi-sel-box {
-      position: absolute;
-      top: 0; left: 0;
-      border: 1px solid rgba(10, 132, 255, 0.9);
-      pointer-events: none;
-    }
+    #sel-overlay.editing .s-handle { display: none; }
+    #sel-overlay .s-handle[data-dir="w"],
+    #sel-overlay .s-handle[data-dir="e"] { display: none; }
+    #sel-overlay.text-resize .s-handle[data-dir="nw"],
+    #sel-overlay.text-resize .s-handle[data-dir="ne"],
+    #sel-overlay.text-resize .s-handle[data-dir="sw"],
+    #sel-overlay.text-resize .s-handle[data-dir="se"] { display: none; }
+    #sel-overlay.text-resize .s-handle[data-dir="w"],
+    #sel-overlay.text-resize .s-handle[data-dir="e"] { display: block; }
     .s-handle {
       position: absolute;
       width: 7px;
@@ -84,6 +84,23 @@
     .s-handle[data-dir="ne"] { top: -4px;    right: -4px;  cursor: ne-resize; }
     .s-handle[data-dir="sw"] { bottom: -4px; left: -4px;   cursor: sw-resize; }
     .s-handle[data-dir="se"] { bottom: -4px; right: -4px;  cursor: se-resize; }
+    .s-handle[data-dir="w"]  { top: 50%; left: -4px; transform: translateY(-50%); cursor: ew-resize; }
+    .s-handle[data-dir="e"]  { top: 50%; right: -4px; transform: translateY(-50%); cursor: ew-resize; }
+
+    #multi-sel-overlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      pointer-events: none;
+      z-index: 99997;
+    }
+    #multi-sel-overlay.visible { display: block; }
+    .multi-sel-box {
+      position: absolute;
+      box-sizing: border-box;
+      box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.9);
+      pointer-events: none;
+    }
 
     /* ── Context menu — Liquid Glass ── */
     #ctx-menu {
@@ -173,6 +190,8 @@
 
     #isl-zoom {
       cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
       padding: 4px 8px;
       font-family: inherit;
       font-size: 13px;
@@ -314,6 +333,8 @@
       <div class="s-handle" data-dir="ne"></div>
       <div class="s-handle" data-dir="sw"></div>
       <div class="s-handle" data-dir="se"></div>
+      <div class="s-handle" data-dir="w"></div>
+      <div class="s-handle" data-dir="e"></div>
     </div>
   </div>
 
@@ -335,6 +356,11 @@
   <div id="obj-ctx-menu">
     <button class="ctx-item" id="obj-btn-copy">Copy</button>
     <button class="ctx-item" id="obj-btn-duplicate">Duplicate</button>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item" id="obj-btn-move-to-back">Move to Back</button>
+    <div class="ctx-sep" id="obj-sep-image-actions"></div>
+    <button class="ctx-item" id="obj-btn-flip-horizontal">Flip Horizontal</button>
+    <button class="ctx-item" id="obj-btn-flip-vertical">Flip Vertical</button>
     <div class="ctx-sep" id="obj-sep-export"></div>
     <button class="ctx-item" id="obj-btn-save-image">Export Image</button>
     <button class="ctx-item" id="obj-btn-save-images">Export Images</button>
