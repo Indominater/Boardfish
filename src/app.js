@@ -545,6 +545,11 @@ function storeImage(src) {
   const key = 'img-' + (imgKeyCounter++);
   imageStore[key] = src;
   cacheImage(key, src);
+  // Pre-cache in Rust immediately for newly imported images so first copy is instant.
+  if (window.__TAURI__) {
+    window.__TAURI__.core.invoke('cache_image_for_clipboard', { imgKey: key, dataUrl: src })
+      .catch(() => {});
+  }
   return key;
 }
 
@@ -583,17 +588,11 @@ async function getRenderedImageDataUrl(obj) {
 }
 
 function cacheImage(key, src) {
-  if (!imageCache[key]) {
-    const img = new Image();
-    img.onload = () => { invalidateOffscreen(); scheduleRender(true, false); };
-    img.src = src;
-    imageCache[key] = img;
-  }
-  // Pre-cache in Rust clipboard cache for both new imports and board-loaded images.
-  if (window.__TAURI__) {
-    window.__TAURI__.core.invoke('cache_image_for_clipboard', { imgKey: key, dataUrl: src })
-      .catch(() => {});
-  }
+  if (imageCache[key]) return;
+  const img = new Image();
+  img.onload = () => { invalidateOffscreen(); scheduleRender(true, false); };
+  img.src = src;
+  imageCache[key] = img;
 }
 
 function clearImageStore() {
@@ -2186,7 +2185,13 @@ async function copySelected() {
           const fallbackBlob = await canvasToPngBlob(fallbackCanvas);
           if (!fallbackBlob) return;
           _jsCbFingerprint = { type: 'image', size: fallbackBlob.size };
-          window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: fallbackCanvas.toDataURL('image/png') })
+          const fallbackDataUrl = fallbackCanvas.toDataURL('image/png');
+          window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: fallbackDataUrl })
+            .then(() => {
+              // Populate cache so subsequent copies use the fast path
+              window.__TAURI__.core.invoke('cache_image_for_clipboard', { imgKey: obj.data.imgKey, dataUrl: imageStore[obj.data.imgKey] || fallbackDataUrl })
+                .catch(() => {});
+            })
             .catch(err => console.error('[copy] fallback copy_image_data_url_to_clipboard FAILED:', err));
         });
     } else {
