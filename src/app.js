@@ -1047,7 +1047,7 @@ function addImage(src, cx, cy, exactSize = false) {
   img.onload = () => {
     let w = img.naturalWidth, h = img.naturalHeight;
     if (!exactSize) {
-      const MAX = 800;
+      const MAX = 600;
       if (w > MAX || h > MAX) {
         const scale = MAX / Math.max(w, h);
         w = Math.round(w * scale);
