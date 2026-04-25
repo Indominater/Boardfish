@@ -20,27 +20,22 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 
 ## Features
 
-- Minimal dark UI designed to disappear
-- Infinite canvas with smooth pan and zoom
+- Minimal dark UI with infinite canvas
+- Right-click context menu for quick actions
 - Add text and images from your clipboard, drag and drop, or the file picker
-- Lossless image scaling, movement, and flipping on the board
-- Single and multi-select with a unified resize handle — scale everything proportionally
-- Right-click context menu on any selection for quick actions
-- Send objects to back, duplicate, copy, paste, cut, and delete
+- Send objects to back, duplicate, copy, paste, cut, delete, undo and redo
 - Copy images back to your clipboard at original resolution
+- Multi-select with lossless scaling, translation, flipping and exporting
 - Export one image, all selected images, or all images in one action
 - Export all text into a single `.txt` file
-- Undo and redo — selection is preserved across undo steps
 - Save everything locally as one portable `.bf` file
 
 ## Why Boardfish?
 
-- No layout engine fighting you
-- No formatting rules boxing you in
-- No cloud account required
-- Your board stays local
+- No layout engine or formatting rules
 - Images keep their original quality
-- Export existing images quickly instead of digging through folders or screenshots
+- Insert, transform and export images quickly
+- Everything stays local
 
 ## Keyboard Shortcuts
 
