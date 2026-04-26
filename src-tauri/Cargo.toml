@@ -1,6 +1,6 @@
 [package]
 name = "boardfish"
-version = "0.5.3"
+version = "0.6.0"
 description = "Boardfish"
 authors = []
 license = ""
@@ -18,9 +18,10 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tokio = { version = "1", features = ["fs"] }
 arboard = "3"
-image = { version = "0.24", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
 base64 = "0.21"
 url = "2"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"

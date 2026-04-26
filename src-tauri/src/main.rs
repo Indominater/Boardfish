@@ -97,13 +97,23 @@ const WINDOW_CLOSE_MENU_ID: &str = "boardfish-window-close";
 
 struct StartupFile(Mutex<Option<String>>);
 struct ClipboardImageCache(Mutex<HashMap<String, CachedClipboardImage>>);
+struct ImageSourceCache(Mutex<HashMap<String, CachedImageSource>>);
 static CLIPBOARD_DEBUG: AtomicBool = AtomicBool::new(false);
+static SAVE_DEBUG: AtomicBool = AtomicBool::new(false);
+static OPEN_DEBUG: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
 struct CachedClipboardImage {
     width: u32,
     height: u32,
     rgba: Arc<[u8]>,
+}
+
+#[derive(Clone)]
+struct CachedImageSource {
+    mime: String,
+    ext: String,
+    bytes: Arc<[u8]>,
 }
 
 fn clipboard_debug(label: &str, start: std::time::Instant) {
@@ -116,17 +126,256 @@ fn clipboard_debug(label: &str, start: std::time::Instant) {
     }
 }
 
+fn save_debug(label: &str, start: std::time::Instant) {
+    if SAVE_DEBUG.load(Ordering::Relaxed) {
+        eprintln!(
+            "[boardfish save] {} {:.2}ms",
+            label,
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}
+
+fn open_debug(label: &str, start: std::time::Instant) {
+    if OPEN_DEBUG.load(Ordering::Relaxed) {
+        eprintln!(
+            "[boardfish open] {} {:.2}ms",
+            label,
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}
+
+struct BoardWriteStats {
+    json_bytes: usize,
+    image_bytes: usize,
+    image_count: usize,
+    serialize_ms: f64,
+    write_ms: f64,
+    zip_ms: f64,
+}
+
+fn write_board_container(
+    path: &str,
+    board: serde_json::Value,
+    sources: Vec<(String, CachedImageSource)>,
+) -> Result<BoardWriteStats, String> {
+    use std::io::Write;
+    use zip::write::FileOptions;
+
+    let zip_start = std::time::Instant::now();
+    let serialize_start = std::time::Instant::now();
+    let board_json = serde_json::to_vec(&board).map_err(|e| e.to_string())?;
+    let serialize_ms = serialize_start.elapsed().as_secs_f64() * 1000.0;
+    save_debug("container serialize board.json", serialize_start);
+
+    let write_start = std::time::Instant::now();
+    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+    let json_options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file("board.json", json_options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(&board_json).map_err(|e| e.to_string())?;
+
+    let image_options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let mut image_bytes = 0usize;
+    for (key, source) in sources {
+        let path = format!("images/{}.{}", key, source.ext);
+        zip.start_file(path, image_options)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(&source.bytes).map_err(|e| e.to_string())?;
+        image_bytes += source.bytes.len();
+    }
+    zip.finish().map_err(|e| e.to_string())?;
+    let write_ms = write_start.elapsed().as_secs_f64() * 1000.0;
+    save_debug("container write zip", write_start);
+
+    Ok(BoardWriteStats {
+        json_bytes: board_json.len(),
+        image_bytes,
+        image_count: board
+            .get("imageStore")
+            .and_then(|v| v.as_object())
+            .map(|o| o.len())
+            .unwrap_or(0),
+        serialize_ms,
+        write_ms,
+        zip_ms: zip_start.elapsed().as_secs_f64() * 1000.0,
+    })
+}
+
+#[derive(Default)]
+struct BoardReadStats {
+    file_bytes: usize,
+    read_ms: f64,
+    zip_open_ms: f64,
+    board_json_bytes: usize,
+    board_json_read_ms: f64,
+    board_json_parse_ms: f64,
+    image_count: usize,
+    image_bytes: usize,
+    image_read_ms: f64,
+    base64_ms: f64,
+    total_ms: f64,
+}
+
+struct BoardReadResult {
+    board: serde_json::Value,
+    sources: Vec<(String, CachedImageSource)>,
+    stats: BoardReadStats,
+}
+
+fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
+    use std::io::Read;
+
+    let total_start = std::time::Instant::now();
+    let mut stats = BoardReadStats::default();
+
+    let read_start = std::time::Instant::now();
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    stats.read_ms = read_start.elapsed().as_secs_f64() * 1000.0;
+    stats.file_bytes = bytes.len();
+    open_debug("read file bytes", read_start);
+
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return Err("unsupported legacy Boardfish file; expected container .bf".to_string());
+    }
+
+    let zip_start = std::time::Instant::now();
+    let reader = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
+    stats.zip_open_ms = zip_start.elapsed().as_secs_f64() * 1000.0;
+    open_debug("open zip archive", zip_start);
+
+    let mut board: serde_json::Value = {
+        let json_read_start = std::time::Instant::now();
+        let mut board_file = archive.by_name("board.json").map_err(|e| e.to_string())?;
+        let mut board_json = String::new();
+        board_file
+            .read_to_string(&mut board_json)
+            .map_err(|e| e.to_string())?;
+        stats.board_json_read_ms = json_read_start.elapsed().as_secs_f64() * 1000.0;
+        stats.board_json_bytes = board_json.len();
+        open_debug("read board.json", json_read_start);
+
+        let parse_start = std::time::Instant::now();
+        let parsed = serde_json::from_str(&board_json).map_err(|e| e.to_string())?;
+        stats.board_json_parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
+        open_debug("parse board.json", parse_start);
+        parsed
+    };
+
+    let entries = board
+        .get("imageStore")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let mut image_store = serde_json::Map::new();
+    let mut sources = Vec::with_capacity(entries.len());
+    for (key, meta) in entries {
+        let entry_path = meta
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                let ext = meta.get("ext").and_then(|v| v.as_str()).unwrap_or("png");
+                format!("images/{}.{}", key, ext)
+            });
+        let mime = meta
+            .get("mime")
+            .and_then(|v| v.as_str())
+            .unwrap_or("image/png")
+            .to_string();
+        let ext = meta
+            .get("ext")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| if mime == "image/jpeg" { "jpg" } else { "png" })
+            .to_string();
+
+        let image_read_start = std::time::Instant::now();
+        let mut image_file = archive.by_name(&entry_path).map_err(|e| e.to_string())?;
+        let mut image_bytes = Vec::with_capacity(image_file.size() as usize);
+        image_file
+            .read_to_end(&mut image_bytes)
+            .map_err(|e| e.to_string())?;
+        stats.image_read_ms += image_read_start.elapsed().as_secs_f64() * 1000.0;
+        stats.image_count += 1;
+        stats.image_bytes += image_bytes.len();
+
+        let source = CachedImageSource {
+            mime: mime.clone(),
+            ext: ext.clone(),
+            bytes: Arc::from(image_bytes),
+        };
+        image_store.insert(
+            key.clone(),
+            serde_json::json!({
+                "native": true,
+                "path": entry_path,
+                "mime": mime,
+                "ext": ext,
+            }),
+        );
+        sources.push((key, source));
+    }
+    board["imageStore"] = serde_json::Value::Object(image_store);
+    open_debug("read all images", total_start);
+    stats.total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+    Ok(BoardReadResult {
+        board,
+        sources,
+        stats,
+    })
+}
+
 #[tauri::command]
 fn get_startup_file(state: tauri::State<StartupFile>) -> Option<String> {
     state.0.lock().unwrap().take()
 }
 
 #[tauri::command]
-async fn save_board(path: String, board: serde_json::Value) -> Result<(), String> {
-    let json = serde_json::to_string(&board).map_err(|e| e.to_string())?;
-    tokio::fs::write(&path, json.as_bytes())
+async fn save_board(
+    state: tauri::State<'_, ImageSourceCache>,
+    path: String,
+    board: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let total_start = std::time::Instant::now();
+    let image_keys = board
+        .get("imageStore")
+        .and_then(|v| v.as_object())
+        .map(|store| store.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    let sources = {
+        let cache = state.0.lock().map_err(|e| e.to_string())?;
+        let mut sources = Vec::with_capacity(image_keys.len());
+        for key in &image_keys {
+            let source = cache
+                .get(key)
+                .cloned()
+                .ok_or_else(|| format!("image source cache missing for {key}"))?;
+            sources.push((key.clone(), source));
+        }
+        sources
+    };
+
+    let result = tokio::task::spawn_blocking(move || write_board_container(&path, board, sources))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())??;
+
+    let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+    save_debug("total", total_start);
+
+    Ok(serde_json::json!({
+        "format": "container",
+        "json_bytes": result.json_bytes,
+        "image_bytes": result.image_bytes,
+        "image_count": result.image_count,
+        "serialize_ms": result.serialize_ms,
+        "write_ms": result.write_ms,
+        "zip_ms": result.zip_ms,
+        "total_ms": total_ms,
+    }))
 }
 
 #[tauri::command]
@@ -137,10 +386,65 @@ async fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn read_board(
+    state: tauri::State<'_, ImageSourceCache>,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    let result = tokio::task::spawn_blocking(move || read_board_file(&path))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    {
+        let mut cache = state.0.lock().map_err(|e| e.to_string())?;
+        for (key, source) in result.sources {
+            cache.insert(key, source);
+        }
+    }
+
+    Ok(serde_json::json!({
+        "board": result.board,
+        "debug": {
+            "format": "container",
+            "file_bytes": result.stats.file_bytes,
+            "read_ms": result.stats.read_ms,
+            "zip_open_ms": result.stats.zip_open_ms,
+            "board_json_bytes": result.stats.board_json_bytes,
+            "board_json_read_ms": result.stats.board_json_read_ms,
+            "board_json_parse_ms": result.stats.board_json_parse_ms,
+            "image_count": result.stats.image_count,
+            "image_bytes": result.stats.image_bytes,
+            "image_read_ms": result.stats.image_read_ms,
+            "base64_ms": result.stats.base64_ms,
+            "total_ms": result.stats.total_ms,
+        }
+    }))
+}
+
+#[tauri::command]
 async fn read_binary_file_base64(path: String) -> Result<String, String> {
     use base64::{engine::general_purpose, Engine as _};
     let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
     Ok(general_purpose::STANDARD.encode(&bytes))
+}
+
+#[tauri::command]
+fn get_cached_image_data_url(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_key: String,
+) -> Result<String, String> {
+    use base64::{engine::general_purpose, Engine as _};
+    let source = state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .get(&img_key)
+        .cloned()
+        .ok_or_else(|| format!("image source cache missing for {img_key}"))?;
+    Ok(format!(
+        "data:{};base64,{}",
+        source.mime,
+        general_purpose::STANDARD.encode(&source.bytes)
+    ))
 }
 
 #[tauri::command]
@@ -218,7 +522,7 @@ async fn save_image_as(
         let mut builder = app
             .dialog()
             .file()
-            .add_filter("Image", &["png", "jpg", "jpeg", "gif", "webp"]);
+            .add_filter("Image", &["png", "jpg", "jpeg"]);
         if let Some(name) = default_name {
             builder = builder.set_file_name(name);
         }
@@ -243,13 +547,57 @@ async fn save_image_as(
 fn ext_from_data_url_header(header: &str) -> &'static str {
     if header.starts_with("data:image/jpeg") {
         "jpg"
-    } else if header.starts_with("data:image/gif") {
-        "gif"
-    } else if header.starts_with("data:image/webp") {
-        "webp"
     } else {
         "png"
     }
+}
+
+fn mime_from_data_url_header(header: &str) -> &'static str {
+    if header.starts_with("data:image/jpeg") {
+        "image/jpeg"
+    } else {
+        "image/png"
+    }
+}
+
+fn cached_source_from_data_url(data_url: &str) -> Result<CachedImageSource, String> {
+    use base64::{engine::general_purpose, Engine as _};
+    let (header, base64_data) = data_url.split_once(',').ok_or("invalid data URL")?;
+    Ok(CachedImageSource {
+        mime: mime_from_data_url_header(header).to_string(),
+        ext: ext_from_data_url_header(header).to_string(),
+        bytes: Arc::from(
+            general_purpose::STANDARD
+                .decode(base64_data)
+                .map_err(|e| e.to_string())?,
+        ),
+    })
+}
+
+#[tauri::command]
+async fn register_image_source(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_key: String,
+    data_url: String,
+) -> Result<serde_json::Value, String> {
+    let total = std::time::Instant::now();
+    let source = tokio::task::spawn_blocking(move || cached_source_from_data_url(&data_url))
+        .await
+        .map_err(|e| e.to_string())??;
+    let bytes = source.bytes.len();
+    let mime = source.mime.clone();
+    let ext = source.ext.clone();
+    state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(img_key, source);
+    save_debug("register_image_source total", total);
+    Ok(serde_json::json!({
+        "bytes": bytes,
+        "mime": mime,
+        "ext": ext,
+    }))
 }
 
 #[tauri::command]
@@ -365,6 +713,16 @@ fn set_clipboard_debug(enabled: bool) {
 }
 
 #[tauri::command]
+fn set_save_debug(enabled: bool) {
+    SAVE_DEBUG.store(enabled, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn set_open_debug(enabled: bool) {
+    OPEN_DEBUG.store(enabled, Ordering::Relaxed);
+}
+
+#[tauri::command]
 fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     let total = std::time::Instant::now();
     arboard::Clipboard::new()
@@ -378,10 +736,12 @@ fn copy_text_to_clipboard(text: String) -> Result<(), String> {
 #[tauri::command]
 async fn cache_image_for_clipboard(
     state: tauri::State<'_, ClipboardImageCache>,
+    source_state: tauri::State<'_, ImageSourceCache>,
     img_key: String,
     data_url: String,
 ) -> Result<(), String> {
     let total = std::time::Instant::now();
+    let source_data_url = data_url.clone();
     let cached = tokio::task::spawn_blocking(move || {
         let decode = std::time::Instant::now();
         let result = decode_data_url_to_cached_image(&data_url);
@@ -395,8 +755,16 @@ async fn cache_image_for_clipboard(
         .0
         .lock()
         .map_err(|e| e.to_string())?
-        .insert(img_key, cached);
+        .insert(img_key.clone(), cached);
     clipboard_debug("cache_image_for_clipboard lock+insert", lock);
+
+    if let Ok(source) = cached_source_from_data_url(&source_data_url) {
+        source_state
+            .0
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(img_key, source);
+    }
     clipboard_debug("cache_image_for_clipboard total", total);
     Ok(())
 }
@@ -560,10 +928,11 @@ async fn read_image_from_clipboard() -> Result<String, String> {
 #[tauri::command]
 async fn read_image_from_clipboard_cached(
     state: tauri::State<'_, ClipboardImageCache>,
+    source_state: tauri::State<'_, ImageSourceCache>,
     img_key: String,
 ) -> Result<String, String> {
     let total = std::time::Instant::now();
-    let (data_url, cached) = tokio::task::spawn_blocking(|| {
+    let (data_url, cached, source) = tokio::task::spawn_blocking(|| {
         use base64::{engine::general_purpose, Engine as _};
         let read = std::time::Instant::now();
         let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
@@ -590,12 +959,18 @@ async fn read_image_from_clipboard_cached(
             )
             .map_err(|e| e.to_string())?;
         clipboard_debug("read_image_from_clipboard_cached png encode", encode);
+        let source = CachedImageSource {
+            mime: "image/png".to_string(),
+            ext: "png".to_string(),
+            bytes: Arc::from(png_bytes.clone()),
+        };
         Ok::<_, String>((
             format!(
                 "data:image/png;base64,{}",
                 general_purpose::STANDARD.encode(&png_bytes)
             ),
             cached,
+            source,
         ))
     })
     .await
@@ -606,7 +981,12 @@ async fn read_image_from_clipboard_cached(
         .0
         .lock()
         .map_err(|e| e.to_string())?
-        .insert(img_key, cached);
+        .insert(img_key.clone(), cached);
+    source_state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(img_key, source);
     clipboard_debug("read_image_from_clipboard_cached lock+insert", lock);
     clipboard_debug("read_image_from_clipboard_cached total", total);
     Ok(data_url)
@@ -628,8 +1008,12 @@ async fn read_text_from_clipboard() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn clear_clipboard_image_cache(state: tauri::State<ClipboardImageCache>) -> Result<(), String> {
+fn clear_clipboard_image_cache(
+    state: tauri::State<ClipboardImageCache>,
+    source_state: tauri::State<ImageSourceCache>,
+) -> Result<(), String> {
     state.0.lock().map_err(|e| e.to_string())?.clear();
+    source_state.0.lock().map_err(|e| e.to_string())?.clear();
     Ok(())
 }
 
@@ -698,12 +1082,15 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(StartupFile(Mutex::new(startup_file)))
         .manage(ClipboardImageCache(Mutex::new(HashMap::new())))
+        .manage(ImageSourceCache(Mutex::new(HashMap::new())))
         .invoke_handler(tauri::generate_handler![
             get_startup_file,
             save_board,
             save_text_as,
+            read_board,
             read_text_file,
             read_binary_file_base64,
+            get_cached_image_data_url,
             open_file_dialog,
             save_file_dialog,
             save_image_as,
@@ -714,6 +1101,9 @@ fn main() {
             copy_text_to_clipboard,
             clipboard_sequence,
             set_clipboard_debug,
+            set_save_debug,
+            set_open_debug,
+            register_image_source,
             cache_image_for_clipboard,
             copy_cached_image_to_clipboard,
             copy_cached_image_to_clipboard_transformed,

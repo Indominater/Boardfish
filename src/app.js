@@ -9,7 +9,9 @@ const ctxMenu     = document.getElementById('ctx-menu');
 const fileInput   = document.getElementById('file-input');
 const selOverlay  = document.getElementById('sel-overlay');
 const multiSelOverlay = document.getElementById('multi-sel-overlay');
-const islZoom     = document.getElementById('isl-zoom');
+const islZoom        = document.getElementById('isl-zoom');
+const islMeasure     = document.getElementById('isl-measure');
+const openingShield  = document.getElementById('opening-shield');
 const objCtxMenu  = document.getElementById('obj-ctx-menu');
 const copyBtn           = document.getElementById('obj-btn-copy');
 const saveImageBtn      = document.getElementById('obj-btn-save-image');
@@ -27,9 +29,9 @@ const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent)
 // ─── Clipboard / image debugger ──────────────────────────────────────────────
 
 const ClipDebug = (() => {
-  const STORAGE_KEY = 'bf_debug_clipboard';
+
   const MAX_EVENTS = 600;
-  let enabled = localStorage.getItem(STORAGE_KEY) === '1';
+  let enabled = false;
   let nextOpId = 1;
   const events = [];
 
@@ -63,14 +65,14 @@ const ClipDebug = (() => {
 
   function enable() {
     enabled = true;
-    localStorage.setItem(STORAGE_KEY, '1');
+
     setRustDebug(true);
     console.info('Boardfish clipboard debugger enabled. Use BoardfishDebug.clipboard.dump() or .summary().');
   }
 
   function disable() {
     enabled = false;
-    localStorage.removeItem(STORAGE_KEY);
+
     setRustDebug(false);
     console.info('Boardfish clipboard debugger disabled.');
   }
@@ -137,11 +139,606 @@ const ClipDebug = (() => {
 
   function clear() { events.length = 0; }
 
-  if (enabled) setRustDebug(true);
+
   return { enable, disable, start, step, end, invoke, dump, summary, clear, get events() { return events.slice(); } };
 })();
 
 window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { clipboard: ClipDebug });
+
+const ViewportDebug = (() => {
+  const MAX_EVENTS = 900;
+  let enabled = false;
+  let verbose = false;
+  let nextOpId = 1;
+  const events = [];
+  const stats = {
+    wheel: 0,
+    wheelPan: 0,
+    wheelZoom: 0,
+    mousePanMoves: 0,
+    scheduledFrames: 0,
+    coalescedFrames: 0,
+    transformFrames: 0,
+    boardFrames: 0,
+    overlayFrames: 0,
+    slowFrames: 0,
+    maxFrameMs: 0,
+    maxQueueMs: 0,
+    lastRafGapMs: 0,
+    maxRafGapMs: 0,
+    imageAdds: 0,
+    imageLoads: 0,
+    imageDecodes: 0,
+    imageBitmaps: 0,
+    imageBitmapFailures: 0,
+    clipboardPrecacheStarts: 0,
+    clipboardPrecacheFailures: 0,
+    maxImageAddMs: 0,
+    maxImageLoadMs: 0,
+    maxImageDecodeMs: 0,
+    maxImageBitmapMs: 0,
+    maxClipboardPrecacheMs: 0,
+  };
+  let lastRafAt = 0;
+
+  function sanitize(value) {
+    if (!value || typeof value !== 'object') return value;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (/dataUrl|src|base64/i.test(k) && typeof v === 'string') {
+        out[k + 'Len'] = v.length;
+        const comma = v.indexOf(',');
+        out.mime = comma > 0 ? v.slice(0, comma) : v.slice(0, 48);
+      } else {
+        out[k] = typeof v === 'number' ? Math.round(v * 100) / 100 : v;
+      }
+    }
+    return out;
+  }
+
+  function push(evt) {
+    if (!enabled) return;
+    const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    if (verbose) console.debug('[Boardfish viewport]', entry);
+  }
+
+  function enable(options = {}) {
+    enabled = true;
+
+    if (options.verbose === true) setVerbose(true);
+    console.info('Boardfish viewport debugger enabled. Events are buffered without per-event console logging. Use BoardfishDebug.viewport.summary(), .dump(), .setVerbose(true), or .reset().');
+  }
+
+  function disable() {
+    enabled = false;
+
+    console.info('Boardfish viewport debugger disabled.');
+  }
+
+  function setVerbose(value) {
+    verbose = !!value;
+
+    console.info(`Boardfish viewport verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
+
+  function start(op, meta = {}) {
+    if (!enabled) return null;
+    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
+    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
+    return ctx;
+  }
+
+  function step(ctx, stepName, meta = {}) {
+    if (!enabled || !ctx) return;
+    const now = performance.now();
+    push({
+      id: ctx.id,
+      op: ctx.op,
+      step: stepName,
+      dt: Math.round((now - ctx.last) * 100) / 100,
+      total: Math.round((now - ctx.t0) * 100) / 100,
+      meta: sanitize(meta),
+    });
+    ctx.last = now;
+  }
+
+  function end(ctx, meta = {}) {
+    if (!enabled || !ctx) return;
+    step(ctx, 'end', meta);
+  }
+
+  function count(name, amount = 1) {
+    if (!enabled) return;
+    stats[name] = (stats[name] || 0) + amount;
+  }
+
+  function max(name, value) {
+    if (!enabled) return;
+    stats[name] = Math.max(stats[name] || 0, value || 0);
+  }
+
+  function frameStart(queueMs) {
+    if (!enabled) return null;
+    const now = performance.now();
+    const rafGap = lastRafAt ? now - lastRafAt : 0;
+    lastRafAt = now;
+    stats.lastRafGapMs = rafGap;
+    stats.maxRafGapMs = Math.max(stats.maxRafGapMs, rafGap);
+    stats.maxQueueMs = Math.max(stats.maxQueueMs, queueMs || 0);
+    return start('frame', { queueMs, rafGap, panX, panY, zoom });
+  }
+
+  function frameEnd(ctx, meta = {}) {
+    if (!enabled || !ctx) return;
+    const total = performance.now() - ctx.t0;
+    stats.maxFrameMs = Math.max(stats.maxFrameMs, total);
+    if (total > 16.7) stats.slowFrames++;
+    end(ctx, { ...meta, frameMs: total, slow: total > 16.7 });
+  }
+
+  function summary() {
+    const rows = [
+      { metric: 'wheel', value: stats.wheel },
+      { metric: 'wheelPan', value: stats.wheelPan },
+      { metric: 'wheelZoom', value: stats.wheelZoom },
+      { metric: 'mousePanMoves', value: stats.mousePanMoves },
+      { metric: 'scheduledFrames', value: stats.scheduledFrames },
+      { metric: 'coalescedFrames', value: stats.coalescedFrames },
+      { metric: 'transformFrames', value: stats.transformFrames },
+      { metric: 'boardFrames', value: stats.boardFrames },
+      { metric: 'overlayFrames', value: stats.overlayFrames },
+      { metric: 'slowFramesOver16ms', value: stats.slowFrames },
+      { metric: 'maxFrameMs', value: Math.round(stats.maxFrameMs * 100) / 100 },
+      { metric: 'maxQueueMs', value: Math.round(stats.maxQueueMs * 100) / 100 },
+      { metric: 'maxRafGapMs', value: Math.round(stats.maxRafGapMs * 100) / 100 },
+      { metric: 'imageAdds', value: stats.imageAdds },
+      { metric: 'imageLoads', value: stats.imageLoads },
+      { metric: 'imageDecodes', value: stats.imageDecodes },
+      { metric: 'imageBitmaps', value: stats.imageBitmaps },
+      { metric: 'imageBitmapFailures', value: stats.imageBitmapFailures },
+      { metric: 'clipboardPrecacheStarts', value: stats.clipboardPrecacheStarts },
+      { metric: 'clipboardPrecacheFailures', value: stats.clipboardPrecacheFailures },
+      { metric: 'maxImageAddMs', value: Math.round(stats.maxImageAddMs * 100) / 100 },
+      { metric: 'maxImageLoadMs', value: Math.round(stats.maxImageLoadMs * 100) / 100 },
+      { metric: 'maxImageDecodeMs', value: Math.round(stats.maxImageDecodeMs * 100) / 100 },
+      { metric: 'maxImageBitmapMs', value: Math.round(stats.maxImageBitmapMs * 100) / 100 },
+      { metric: 'maxClipboardPrecacheMs', value: Math.round(stats.maxClipboardPrecacheMs * 100) / 100 },
+    ];
+    console.table(rows);
+    return rows;
+  }
+
+  function dump() {
+    const flat = events.map(({ meta, ...rest }) => {
+      if (!meta) return rest;
+      const { rust, ...other } = meta;
+      return rust && typeof rust === 'object' ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) } : { ...rest, ...other };
+    });
+    console.table(flat);
+    return events.slice();
+  }
+
+  function reset() {
+    events.length = 0;
+    for (const key of Object.keys(stats)) stats[key] = 0;
+    lastRafAt = 0;
+  }
+
+  return { enable, disable, setVerbose, start, step, end, count, max, frameStart, frameEnd, summary, dump, reset, get events() { return events.slice(); }, get stats() { return { ...stats }; } };
+})();
+
+window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { viewport: ViewportDebug });
+
+// ─── Save debugger ───────────────────────────────────────────────────────────
+
+const SaveDebug = (() => {
+  const MAX_EVENTS = 300;
+  let enabled = false;
+  let verbose = false;
+  let nextOpId = 1;
+  const events = [];
+
+  function sanitize(value) {
+    if (!value || typeof value !== 'object') return value;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (/dataUrl|src|base64|imageStore/i.test(k) && typeof v === 'string') {
+        out[k + 'Len'] = v.length;
+        const comma = v.indexOf(',');
+        out.mime = comma > 0 ? v.slice(0, comma) : v.slice(0, 48);
+      } else {
+        out[k] = typeof v === 'number' ? Math.round(v * 100) / 100 : v;
+      }
+    }
+    return out;
+  }
+
+  function push(evt) {
+    if (!enabled) return;
+    const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    if (verbose) console.debug('[Boardfish save]', entry);
+  }
+
+  function setRustDebug(value) {
+    if (!window.__TAURI__) return;
+    window.__TAURI__.core.invoke('set_save_debug', { enabled: value }).catch(() => {});
+  }
+
+  function enable(options = {}) {
+    enabled = true;
+
+    if (options.verbose === true) setVerbose(true);
+    setRustDebug(true);
+    console.info('Boardfish save debugger enabled. Use BoardfishDebug.save.summary(), .dump(), or .reset().');
+  }
+
+  function disable() {
+    enabled = false;
+
+    setRustDebug(false);
+    console.info('Boardfish save debugger disabled.');
+  }
+
+  function setVerbose(value) {
+    verbose = !!value;
+
+    console.info(`Boardfish save verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
+
+  function start(op, meta = {}) {
+    if (!enabled) return null;
+    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
+    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
+    return ctx;
+  }
+
+  function step(ctx, stepName, meta = {}) {
+    if (!enabled || !ctx) return;
+    const now = performance.now();
+    push({
+      id: ctx.id,
+      op: ctx.op,
+      step: stepName,
+      dt: Math.round((now - ctx.last) * 100) / 100,
+      total: Math.round((now - ctx.t0) * 100) / 100,
+      meta: sanitize(meta),
+    });
+    ctx.last = now;
+  }
+
+  function end(ctx, meta = {}) {
+    if (!enabled || !ctx) return;
+    step(ctx, 'end', meta);
+  }
+
+  async function invoke(ctx, command, args = {}, meta = {}) {
+    if (!window.__TAURI__) throw new Error('Tauri is unavailable');
+    if (!enabled) return window.__TAURI__.core.invoke(command, args);
+    const t0 = performance.now();
+    step(ctx, 'invoke:start', { command, ...meta });
+    try {
+      const result = await window.__TAURI__.core.invoke(command, args);
+      step(ctx, 'invoke:ok', { command, ms: performance.now() - t0, rust: result || null });
+      return result;
+    } catch (err) {
+      step(ctx, 'invoke:error', { command, ms: performance.now() - t0, error: String(err) });
+      throw err;
+    }
+  }
+
+  function dump() {
+    const flat = events.map(({ meta, ...rest }) => {
+      if (!meta) return rest;
+      const { rust, ...other } = meta;
+      return rust && typeof rust === 'object'
+        ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) }
+        : { ...rest, ...other };
+    });
+    console.table(flat);
+    return events.slice();
+  }
+
+  function summary() {
+    const rows = events.filter(e => e.step && e.step !== 'start').map(e => ({
+      id: e.id,
+      op: e.op,
+      step: e.step,
+      dt: e.dt,
+      total: e.total,
+      command: e.meta?.command || '',
+      objectCount: e.meta?.objectCount ?? '',
+      imageCount: e.meta?.imageCount ?? '',
+      imageStoreBytes: e.meta?.imageStoreBytes ?? '',
+      rawImageStoreBytes: e.meta?.rawImageStoreBytes ?? '',
+      jsonBytes: e.meta?.jsonBytes ?? '',
+      rustSerializeMs: e.meta?.rust?.serialize_ms ?? '',
+      rustWriteMs: e.meta?.rust?.write_ms ?? '',
+      rustImageBytes: e.meta?.rust?.image_bytes ?? '',
+      rustTotalMs: e.meta?.rust?.total_ms ?? '',
+      error: e.meta?.error || '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function reset() { events.length = 0; }
+
+
+  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
+})();
+
+window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { save: SaveDebug });
+
+// ─── Open debugger ───────────────────────────────────────────────────────────
+
+const OpenDebug = (() => {
+  const MAX_EVENTS = 300;
+  let enabled = false;
+  let verbose = false;
+  let nextOpId = 1;
+  const events = [];
+
+  function sanitize(value) {
+    if (!value || typeof value !== 'object') return value;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (/dataUrl|src|base64|imageStore/i.test(k) && typeof v === 'string') {
+        out[k + 'Len'] = v.length;
+        const comma = v.indexOf(',');
+        out.mime = comma > 0 ? v.slice(0, comma) : v.slice(0, 48);
+      } else {
+        out[k] = typeof v === 'number' ? Math.round(v * 100) / 100 : v;
+      }
+    }
+    return out;
+  }
+
+  function push(evt) {
+    if (!enabled) return;
+    const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    if (verbose) console.debug('[Boardfish open]', entry);
+  }
+
+  function setRustDebug(value) {
+    if (!window.__TAURI__) return;
+    window.__TAURI__.core.invoke('set_open_debug', { enabled: value }).catch(() => {});
+  }
+
+  function enable(options = {}) {
+    enabled = true;
+
+    if (options.verbose === true) setVerbose(true);
+    setRustDebug(true);
+    console.info('Boardfish open debugger enabled. Use BoardfishDebug.open.summary(), .dump(), or .reset().');
+  }
+
+  function disable() {
+    enabled = false;
+
+    setRustDebug(false);
+    console.info('Boardfish open debugger disabled.');
+  }
+
+  function setVerbose(value) {
+    verbose = !!value;
+
+    console.info(`Boardfish open verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
+
+  function start(op, meta = {}) {
+    if (!enabled) return null;
+    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
+    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
+    return ctx;
+  }
+
+  function step(ctx, stepName, meta = {}) {
+    if (!enabled || !ctx) return;
+    const now = performance.now();
+    push({
+      id: ctx.id,
+      op: ctx.op,
+      step: stepName,
+      dt: Math.round((now - ctx.last) * 100) / 100,
+      total: Math.round((now - ctx.t0) * 100) / 100,
+      meta: sanitize(meta),
+    });
+    ctx.last = now;
+  }
+
+  function end(ctx, meta = {}) {
+    if (!enabled || !ctx) return;
+    step(ctx, 'end', meta);
+  }
+
+  async function invoke(ctx, command, args = {}, meta = {}) {
+    if (!window.__TAURI__) throw new Error('Tauri is unavailable');
+    if (!enabled) return window.__TAURI__.core.invoke(command, args);
+    const t0 = performance.now();
+    step(ctx, 'invoke:start', { command, ...meta });
+    try {
+      const result = await window.__TAURI__.core.invoke(command, args);
+      step(ctx, 'invoke:ok', { command, ms: performance.now() - t0, rust: result?.debug || result || null });
+      return result;
+    } catch (err) {
+      step(ctx, 'invoke:error', { command, ms: performance.now() - t0, error: String(err) });
+      throw err;
+    }
+  }
+
+  function dump() {
+    const flat = events.map(({ meta, ...rest }) => {
+      if (!meta) return rest;
+      const { rust, ...other } = meta;
+      return rust && typeof rust === 'object'
+        ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) }
+        : { ...rest, ...other };
+    });
+    console.table(flat);
+    return events.slice();
+  }
+
+  function summary() {
+    const rows = events.filter(e => e.step && e.step !== 'start').map(e => ({
+      id: e.id,
+      op: e.op,
+      step: e.step,
+      dt: e.dt,
+      total: e.total,
+      command: e.meta?.command || '',
+      objectCount: e.meta?.objectCount ?? '',
+      imageCount: e.meta?.imageCount ?? '',
+      imageObjectCount: e.meta?.imageObjectCount ?? '',
+      imageStoreBytes: e.meta?.imageStoreBytes ?? '',
+      fileBytes: e.meta?.rust?.file_bytes ?? '',
+      rustReadMs: e.meta?.rust?.read_ms ?? '',
+      rustZipOpenMs: e.meta?.rust?.zip_open_ms ?? '',
+      rustBoardJsonReadMs: e.meta?.rust?.board_json_read_ms ?? '',
+      rustBoardJsonParseMs: e.meta?.rust?.board_json_parse_ms ?? '',
+      rustImageReadMs: e.meta?.rust?.image_read_ms ?? '',
+      rustBase64Ms: e.meta?.rust?.base64_ms ?? '',
+      rustImageBytes: e.meta?.rust?.image_bytes ?? '',
+      rustTotalMs: e.meta?.rust?.total_ms ?? '',
+      error: e.meta?.error || '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function reset() { events.length = 0; }
+
+
+  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
+})();
+
+window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { open: OpenDebug });
+
+// ─── Export debugger ─────────────────────────────────────────────────────────
+const ExportDebug = (() => {
+  const MAX_EVENTS = 300;
+  let enabled = false;
+  let verbose = false;
+  let nextOpId = 1;
+  const events = [];
+
+  function sanitize(value) {
+    if (!value || typeof value !== 'object') return value;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (/dataUrl|src|base64/i.test(k) && typeof v === 'string') {
+        out[k + 'Len'] = v.length;
+        const comma = v.indexOf(',');
+        out.mime = comma > 0 ? v.slice(0, comma) : v.slice(0, 48);
+      } else {
+        out[k] = typeof v === 'number' ? Math.round(v * 100) / 100 : v;
+      }
+    }
+    return out;
+  }
+
+  function push(evt) {
+    if (!enabled) return;
+    const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    if (verbose) console.debug('[Boardfish export]', entry);
+  }
+
+  function enable(options = {}) {
+    enabled = true;
+
+    if (options.verbose === true) setVerbose(true);
+    console.info('Boardfish export debugger enabled. Use BoardfishDebug.export.summary(), .dump(), or .reset().');
+  }
+
+  function disable() {
+    enabled = false;
+
+    console.info('Boardfish export debugger disabled.');
+  }
+
+  function setVerbose(value) {
+    verbose = !!value;
+
+    console.info(`Boardfish export verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
+
+  function start(op, meta = {}) {
+    if (!enabled) return null;
+    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
+    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
+    return ctx;
+  }
+
+  function step(ctx, stepName, meta = {}) {
+    if (!enabled || !ctx) return;
+    const now = performance.now();
+    push({
+      id: ctx.id,
+      op: ctx.op,
+      step: stepName,
+      dt: Math.round((now - ctx.last) * 100) / 100,
+      total: Math.round((now - ctx.t0) * 100) / 100,
+      meta: sanitize(meta),
+    });
+    ctx.last = now;
+  }
+
+  function end(ctx, meta = {}) {
+    if (!enabled || !ctx) return;
+    step(ctx, 'end', meta);
+  }
+
+  async function invoke(ctx, command, args = {}, meta = {}) {
+    if (!window.__TAURI__) throw new Error('Tauri is unavailable');
+    if (!enabled) return window.__TAURI__.core.invoke(command, args);
+    step(ctx, 'invoke:start', { command, ...sanitize(meta) });
+    const t0 = performance.now();
+    try {
+      const result = await window.__TAURI__.core.invoke(command, args);
+      step(ctx, 'invoke:ok', { command, ms: Math.round((performance.now() - t0) * 100) / 100, result });
+      return result;
+    } catch (err) {
+      step(ctx, 'invoke:error', { command, ms: Math.round((performance.now() - t0) * 100) / 100, error: String(err) });
+      throw err;
+    }
+  }
+
+  function dump() {
+    const flat = events.map(({ meta, ...rest }) => ({ ...rest, ...(meta || {}) }));
+    console.table(flat);
+    return events.slice();
+  }
+
+  function summary() {
+    const rows = events.filter(e => e.step && e.step !== 'start').map(e => ({
+      id: e.id,
+      op: e.op,
+      step: e.step,
+      dt: e.dt,
+      total: e.total,
+      imageCount: e.meta?.imageCount ?? '',
+      dataUrlCount: e.meta?.dataUrlCount ?? '',
+      command: e.meta?.command || '',
+      result: e.meta?.result ?? '',
+      error: e.meta?.error || '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function reset() { events.length = 0; }
+
+  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
+})();
+
+window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { export: ExportDebug });
 
 
 // ─── Viewport ─────────────────────────────────────────────────────────────────
@@ -157,22 +754,37 @@ function saveViewport() {
 }
 
 
+function islSetWidth(text) {
+  islMeasure.textContent = text;
+  islZoom.style.width = islMeasure.offsetWidth + 'px';
+}
+
 let _lastZoomPct = -1;
+let _islMsgActive = false;
 function updateZoomDisplay() {
+  if (_islMsgActive) return;
   const pct = Math.round(zoom * 100);
   if (pct === _lastZoomPct) return;
   _lastZoomPct = pct;
-  islZoom.textContent = pct + '%';
+  const text = pct + '%';
+  islZoom.textContent = text;
+  islSetWidth(text);
 }
 
 let _islMsgTimer = null;
+let _islFadeTimer = null;
 
 function showIslandMsg(msg, duration = 0) {
   clearTimeout(_islMsgTimer);
+  clearTimeout(_islFadeTimer);
+  _islMsgActive = true;
   islZoom.style.color = 'rgba(255,255,255,0)';
-  setTimeout(() => {
+  islZoom.style.pointerEvents = 'none';
+  islZoom.style.cursor = 'default';
+  islSetWidth(msg);
+  _islFadeTimer = setTimeout(() => {
     islZoom.textContent = msg;
-    islZoom.style.color = 'rgba(255,255,255,0.38)';
+    islZoom.style.color = 'rgba(255,255,255,0.5)';
     if (duration > 0) {
       _islMsgTimer = setTimeout(() => restoreIslandZoom(), duration);
     }
@@ -181,10 +793,15 @@ function showIslandMsg(msg, duration = 0) {
 
 function restoreIslandZoom() {
   islZoom.style.color = 'rgba(255,255,255,0)';
+  const pct = Math.round(zoom * 100) + '%';
+  islSetWidth(pct);
   setTimeout(() => {
+    _islMsgActive = false;
     _lastZoomPct = -1;
     updateZoomDisplay();
-    islZoom.style.color = 'rgba(255,255,255,0.38)';
+    islZoom.style.color = 'rgba(255,255,255,0.5)';
+    islZoom.style.pointerEvents = '';
+    islZoom.style.cursor = '';
   }, 500);
 }
 
@@ -220,8 +837,67 @@ function clearTextMeasurementCaches() {
 const _offscreen = document.createElement('canvas');
 const _offCtx    = _offscreen.getContext('2d');
 let _offscreenDirty = true;
+let _offscreenRebuilding = false;
+let _offscreenVersion = 0;
 function invalidateOffscreen() {
   _offscreenDirty = true;
+  _offscreenVersion++;
+}
+
+async function _rebuildOffscreenAsync() {
+  if (_offscreenRebuilding) return;
+  _offscreenRebuilding = true;
+  const snapshotEditingId = editingId;
+  const rebuildVersion = _offscreenVersion;
+  const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length, editingId: snapshotEditingId, version: rebuildVersion });
+
+  // Ensure all images have GPU-resident ImageBitmap before drawing
+  const bitmapPromises = [];
+  for (const obj of objects) {
+    if (obj.id === snapshotEditingId || obj.type !== 'image') continue;
+    const key = obj.data?.imgKey;
+    if (!key || imageBitmapCache[key]) continue;
+    const img = imageCache[key];
+    if (!img || !img.complete) continue;
+    bitmapPromises.push(
+      img.decode()
+        .then(() => createImageBitmap(img))
+        .then(bm => { imageBitmapCache[key] = bm; })
+        .catch(() => { imageBitmapFailed.add(key); ViewportDebug.count('imageBitmapFailures'); })
+    );
+  }
+  const bitmapStart = performance.now();
+  await Promise.all(bitmapPromises);
+  ViewportDebug.step(dbg, 'ensure-bitmaps', { count: bitmapPromises.length, ms: performance.now() - bitmapStart });
+
+  // Bail if edit mode or viewport content changed while we were awaiting.
+  if (!editingId || editingId !== snapshotEditingId || rebuildVersion !== _offscreenVersion) {
+    _offscreenRebuilding = false;
+    ViewportDebug.end(dbg, { stale: true, currentVersion: _offscreenVersion });
+    if (editingId && _offscreenDirty) scheduleRender(true, false, 'offscreen-stale');
+    return;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  _offscreen.width  = boardCanvas.width;
+  _offscreen.height = boardCanvas.height;
+  _offCtx.setTransform(1, 0, 0, 1, 0, 0);
+  _offCtx.fillStyle = '#1c1c1e';
+  _offCtx.fillRect(0, 0, _offscreen.width, _offscreen.height);
+  _offCtx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+  _offCtx.font = FONT;
+  _offCtx.textBaseline = 'top';
+  for (const obj of objects) {
+    if (obj.id === editingId) continue;
+    drawSingleObj(_offCtx, obj);
+  }
+  _offCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+  _offscreenRebuilding = false;
+  if (rebuildVersion === _offscreenVersion) _offscreenDirty = false;
+  // Re-render to display the fresh offscreen (caret/selection on top)
+  scheduleRender(true, false, 'offscreen-ready');
+  ViewportDebug.end(dbg, { stale: false });
 }
 
 // External line layout cache: id -> {content, w, lines: [{text, startIndex}]}
@@ -388,8 +1064,9 @@ function drawSingleObj(context, obj) {
       context.fillText(lines[i].text, obj.x + TEXT_PAD, obj.y + TEXT_PAD + i * LINE_H);
     }
   } else if (obj.type === 'image') {
-    const img = imageCache[obj.data.imgKey];
-    if (img && img.complete && img.naturalWidth > 0) {
+    const bitmap = imageBitmapCache[obj.data.imgKey];
+    const img = bitmap || (imageBitmapFailed.has(obj.data.imgKey) ? imageCache[obj.data.imgKey] : null);
+    if (img && (bitmap || (img.complete && img.naturalWidth > 0))) {
       const flipX = !!obj.data.flipX;
       const flipY = !!obj.data.flipY;
       if (flipX || flipY) {
@@ -407,30 +1084,37 @@ function drawSingleObj(context, obj) {
 
 
 function drawBoard() {
+  const dbg = ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId, offscreenDirty: _offscreenDirty });
+  if (_boardOpening) {
+    ViewportDebug.end(dbg, { skipped: 'board-opening' });
+    return;
+  }
+  let drawnImages = 0;
+  let drawnText = 0;
   const dpr = window.devicePixelRatio || 1;
 
   if (editingId) {
-    // Rebuild offscreen (all non-editing objects) only when dirty
     if (_offscreenDirty) {
-      _offscreen.width  = boardCanvas.width;
-      _offscreen.height = boardCanvas.height;
-      _offCtx.setTransform(1, 0, 0, 1, 0, 0);
-      _offCtx.fillStyle = '#1c1c1e';
-      _offCtx.fillRect(0, 0, _offscreen.width, _offscreen.height);
-      _offCtx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
-      _offCtx.font = FONT;
-      _offCtx.textBaseline = 'top';
+      // Kick off async rebuild (pre-decodes images to avoid GPU stall).
+      // Draw all objects directly this frame while the rebuild is pending.
+      _rebuildOffscreenAsync();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#1c1c1e';
+      ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+      ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+      ctx.font = FONT;
+      ctx.textBaseline = 'top';
       for (const obj of objects) {
         if (obj.id === editingId) continue;
-        drawSingleObj(_offCtx, obj);
+        drawSingleObj(ctx, obj);
+        if (obj.type === 'image') drawnImages++;
+        else if (obj.type === 'text') drawnText++;
       }
-      _offCtx.setTransform(1, 0, 0, 1, 0, 0);
-      _offscreenDirty = false;
+    } else {
+      // Blit cached offscreen (background + all non-editing objects)
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(_offscreen, 0, 0);
     }
-
-    // Blit offscreen (background + all other objects)
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(_offscreen, 0, 0);
 
     // Draw editing object on top
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
@@ -489,9 +1173,12 @@ function drawBoard() {
     ctx.textBaseline = 'top';
     for (const obj of objects) {
       drawSingleObj(ctx, obj);
+      if (obj.type === 'image') drawnImages++;
+      else if (obj.type === 'text') drawnText++;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
+  ViewportDebug.end(dbg, { drawnImages, drawnText });
 }
 
 function hitTest(wx, wy) {
@@ -503,11 +1190,26 @@ function hitTest(wx, wy) {
 }
 
 function applyTransform() {
+  const dbg = ViewportDebug.start('applyTransform', { editing: !!editingId, panX, panY, zoom, objectCount: objects.length, selectedCount: selectedIds.size });
+  if (_boardOpening) {
+    ViewportDebug.end(dbg, { skipped: 'board-opening' });
+    return;
+  }
   if (editingId) invalidateOffscreen();
+  const drawStart = performance.now();
   drawBoard();
+  ViewportDebug.step(dbg, 'drawBoard', { ms: performance.now() - drawStart });
+  const zoomStart = performance.now();
   updateZoomDisplay();
+  ViewportDebug.step(dbg, 'updateZoomDisplay', { ms: performance.now() - zoomStart });
+  const saveStart = performance.now();
   saveViewport();
+  ViewportDebug.step(dbg, 'saveViewport', { ms: performance.now() - saveStart });
+  const overlayStart = performance.now();
   updateSelectionOverlay();
+  ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
+  scheduleVisibleHydrationAfterIdle();
+  ViewportDebug.end(dbg);
 }
 
 function toWorld(sx, sy) {
@@ -518,10 +1220,33 @@ let _frameRaf = null;
 let _needTransform = false;
 let _needBoardRender = false;
 let _needOverlayRender = false;
+let _frameScheduledAt = 0;
+let _frameSources = [];
+let _activeRenderSource = 'direct';
 
-function scheduleFrame() {
-  if (_frameRaf) return;
+function withRenderSource(source, fn) {
+  const prev = _activeRenderSource;
+  _activeRenderSource = source || prev;
+  try {
+    return fn();
+  } finally {
+    _activeRenderSource = prev;
+  }
+}
+
+function scheduleFrame(source = 'unknown') {
+  if (source) _frameSources.push(source);
+  if (_frameRaf) {
+    ViewportDebug.count('coalescedFrames');
+    return;
+  }
+  _frameScheduledAt = performance.now();
+  ViewportDebug.count('scheduledFrames');
   _frameRaf = requestAnimationFrame(() => {
+    const sources = [...new Set(_frameSources)];
+    _frameSources = [];
+    const frameDbg = ViewportDebug.frameStart(performance.now() - _frameScheduledAt);
+    ViewportDebug.step(frameDbg, 'sources', { sources: sources.join(',') });
     _frameRaf = null;
     const doTransform = _needTransform;
     const doBoard = _needBoardRender;
@@ -531,23 +1256,34 @@ function scheduleFrame() {
     _needOverlayRender = false;
 
     if (doTransform) {
-      applyTransform();
+      ViewportDebug.count('transformFrames');
+      withRenderSource(sources.join(',') || 'transform', () => applyTransform());
+      ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay });
       return;
     }
-    if (doBoard) drawBoard();
-    if (doOverlay) updateSelectionOverlay();
+    if (doBoard) {
+      ViewportDebug.count('boardFrames');
+      withRenderSource(sources.join(',') || 'board', () => drawBoard());
+    }
+    if (doOverlay) {
+      const overlayStart = performance.now();
+      ViewportDebug.count('overlayFrames');
+      updateSelectionOverlay();
+      ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
+    }
+    ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay });
   });
 }
 
-function scheduleTransform() {
+function scheduleTransform(source = 'transform') {
   _needTransform = true;
-  scheduleFrame();
+  scheduleFrame(source);
 }
 
-function scheduleRender(board = true, overlay = true) {
+function scheduleRender(board = true, overlay = true, source = 'render') {
   if (board) _needBoardRender = true;
   if (overlay) _needOverlayRender = true;
-  scheduleFrame();
+  scheduleFrame(source);
 }
 
 
@@ -561,6 +1297,7 @@ let editingId  = null;
 let objects    = [];
 const objectsMap = new Map();
 let idCounter  = 1;
+let _boardOpening = false;
 
 function rebuildObjectsMap() {
   objectsMap.clear();
@@ -662,17 +1399,59 @@ function allSelectedAreImages() {
 // ─── Image store (keeps base64 data OUT of history snapshots) ─────────────────
 
 const imageStore = {};
-const imageCache = {}; // key -> HTMLImageElement (decoded, ready for drawImage)
+const imageCache = {}; // key -> HTMLImageElement (for clipboard/metadata operations)
+const imageBitmapCache = {}; // key -> ImageBitmap (GPU-resident, never evicted by WebKit)
+const imageBitmapFailed = new Set();
+const imageSourceCachePromises = new Map();
 const imageClipboardCachePromises = new Map();
+const imageHydrationPromises = new Map();
 let imgKeyCounter = 1;
+let _skipImageSourceRegistration = false;
+let _imageStoreGeneration = 0;
 
 function newImgKey() { return 'img-' + (imgKeyCounter++); }
 
+function isNativeImageRef(src) {
+  return !!(src && typeof src === 'object' && src.native);
+}
+
+function imageStoreBytesEstimate(src) {
+  if (typeof src === 'string') return src.length;
+  if (isNativeImageRef(src)) return JSON.stringify(src).length;
+  return 0;
+}
+
+function cacheImageSourceForSave(key, src, dbg = null) {
+  if (!window.__TAURI__ || !src || isNativeImageRef(src)) return Promise.resolve();
+  const existing = imageSourceCachePromises.get(key);
+  if (existing) return existing;
+  const promise = SaveDebug.invoke(dbg, 'register_image_source', { imgKey: key, dataUrl: src }, { imgKey: key, dataUrl: src })
+    .finally(() => imageSourceCachePromises.delete(key));
+  imageSourceCachePromises.set(key, promise);
+  return promise;
+}
+
 function cacheImageForClipboard(key, src, dbg = null) {
-  if (!window.__TAURI__ || !src) return Promise.resolve();
+  if (!window.__TAURI__ || !src || isNativeImageRef(src)) return Promise.resolve();
   const existing = imageClipboardCachePromises.get(key);
   if (existing) return existing;
+  const vpDbg = ViewportDebug.start('clipboardPrecache', { key, src });
+  const t0 = performance.now();
+  ViewportDebug.count('clipboardPrecacheStarts');
   const promise = ClipDebug.invoke(dbg, 'cache_image_for_clipboard', { imgKey: key, dataUrl: src }, { imgKey: key, dataUrl: src })
+    .then((result) => {
+      const ms = performance.now() - t0;
+      ViewportDebug.max('maxClipboardPrecacheMs', ms);
+      ViewportDebug.end(vpDbg, { ok: true, ms });
+      return result;
+    })
+    .catch((err) => {
+      const ms = performance.now() - t0;
+      ViewportDebug.count('clipboardPrecacheFailures');
+      ViewportDebug.max('maxClipboardPrecacheMs', ms);
+      ViewportDebug.end(vpDbg, { ok: false, ms, error: String(err) });
+      throw err;
+    })
     .finally(() => imageClipboardCachePromises.delete(key));
   imageClipboardCachePromises.set(key, promise);
   return promise;
@@ -690,20 +1469,23 @@ function storeImage(src) {
   return key;
 }
 
-function getImageSrc(obj) { return imageStore[obj.data.imgKey] || ''; }
+function getImageSrc(obj) {
+  const src = imageStore[obj.data.imgKey];
+  return typeof src === 'string' ? src : '';
+}
 
 function imageNeedsRendering(obj) {
   return !!(obj?.data?.flipX || obj?.data?.flipY);
 }
 
-function renderImageToCanvas(obj) {
+function renderImageToCanvas(obj, sourceImg = null) {
   const dbg = ClipDebug.start('renderImageToCanvas', {
     id: obj?.id,
     imgKey: obj?.data?.imgKey,
     flipX: !!obj?.data?.flipX,
     flipY: !!obj?.data?.flipY,
   });
-  const img = imageCache[obj.data.imgKey];
+  const img = sourceImg || imageCache[obj.data.imgKey];
   if (!img || !img.complete || !img.naturalWidth) {
     ClipDebug.end(dbg, { ready: false });
     return null;
@@ -734,27 +1516,153 @@ function canvasToPngBlob(canvas) {
 }
 
 async function getRenderedImageDataUrl(obj) {
-  const src = getImageSrc(obj);
+  const src = await ensureImageDataUrl(obj.data.imgKey);
   if (!src || !imageNeedsRendering(obj)) return src;
-  const canvas = renderImageToCanvas(obj);
+  let img = imageCache[obj.data.imgKey];
+  if (!img || !img.complete || !img.naturalWidth) {
+    img = await loadImageElement(src).catch(() => null);
+  }
+  const canvas = renderImageToCanvas(obj, img);
   return canvas ? canvas.toDataURL('image/png') : '';
 }
 
-function cacheImage(key, src, dbg = null, preCacheClipboard = true) {
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('image load failed'));
+    img.src = src;
+  });
+}
+
+async function ensureImageDataUrl(key, dbg = null) {
+  const src = imageStore[key];
+  if (typeof src === 'string') return src;
+  if (!isNativeImageRef(src) || !window.__TAURI__) return '';
+  const existing = imageHydrationPromises.get(key);
+  if (existing) return existing;
+  const generation = _imageStoreGeneration;
+  const promise = OpenDebug.invoke(dbg, 'get_cached_image_data_url', { imgKey: key }, { imgKey: key })
+    .then((dataUrl) => {
+      if (generation === _imageStoreGeneration && isNativeImageRef(imageStore[key])) imageStore[key] = dataUrl;
+      return dataUrl;
+    })
+    .finally(() => imageHydrationPromises.delete(key));
+  imageHydrationPromises.set(key, promise);
+  return promise;
+}
+
+let _imageHydrationScheduled = false;
+const _imageHydrationQueue = [];
+const _imageHydrationQueued = new Set();
+
+function queueImageHydration(key, dbg = null) {
+  if (!isNativeImageRef(imageStore[key]) || imageCache[key] || _imageHydrationQueued.has(key)) return;
+  _imageHydrationQueued.add(key);
+  _imageHydrationQueue.push({ key, dbg });
+  scheduleImageHydration();
+}
+
+function scheduleImageHydration() {
+  if (_imageHydrationScheduled) return;
+  _imageHydrationScheduled = true;
+  requestAnimationFrame(processImageHydrationQueue);
+}
+
+function processImageHydrationQueue() {
+  _imageHydrationScheduled = false;
+  const batchStart = performance.now();
+  let count = 0;
+  while (_imageHydrationQueue.length && count < 1 && performance.now() - batchStart < 6) {
+    const { key, dbg } = _imageHydrationQueue.shift();
+    _imageHydrationQueued.delete(key);
+    if (!isNativeImageRef(imageStore[key]) || imageCache[key]) continue;
+    count++;
+    ensureImageDataUrl(key, dbg)
+      .then((dataUrl) => {
+        if (dataUrl && !imageCache[key]) cacheImage(key, dataUrl, null, false);
+      })
+      .catch((err) => OpenDebug.step(dbg, 'hydrate-image:error', { imgKey: key, error: String(err) }));
+  }
+  if (_imageHydrationQueue.length) scheduleImageHydration();
+}
+
+function cacheImage(key, src, dbg = null, preCacheClipboard = true, loadedImg = null) {
   if (imageCache[key]) return;
-  const img = new Image();
-  img.onload = () => { invalidateOffscreen(); scheduleRender(true, false); };
-  img.src = src;
+  if (isNativeImageRef(src)) return;
+  if (typeof src !== 'string' || !src) return;
+  imageBitmapFailed.delete(key);
+  const vpDbg = ViewportDebug.start('cacheImage', { key, src, preCacheClipboard, reusedLoadedImage: !!loadedImg });
+  const img = loadedImg || new Image();
+  // decode() ensures the image is GPU-decoded before the first drawImage call,
+  // preventing a synchronous main-thread decode stall (can be 100s of ms for large images).
+  // We also defer invalidateOffscreen/scheduleRender until decode completes so that
+  // multiple concurrent image loads coalesce into fewer render calls.
+  const loadStart = performance.now();
+  function finishLoad() {
+    const loadMs = performance.now() - loadStart;
+    ViewportDebug.count('imageLoads');
+    ViewportDebug.max('maxImageLoadMs', loadMs);
+    ViewportDebug.step(vpDbg, 'load', { width: img.naturalWidth, height: img.naturalHeight, ms: loadMs });
+
+    const decodeStart = performance.now();
+    img.decode()
+      .then(() => {
+        const decodeMs = performance.now() - decodeStart;
+        ViewportDebug.count('imageDecodes');
+        ViewportDebug.max('maxImageDecodeMs', decodeMs);
+        ViewportDebug.step(vpDbg, 'decode', { ms: decodeMs });
+        const bitmapStart = performance.now();
+        return createImageBitmap(img).then(bitmap => {
+          const bitmapMs = performance.now() - bitmapStart;
+          imageBitmapCache[key] = bitmap;
+          ViewportDebug.count('imageBitmaps');
+          ViewportDebug.max('maxImageBitmapMs', bitmapMs);
+          ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs });
+        });
+      })
+      .catch((err) => {
+        imageBitmapFailed.add(key);
+        ViewportDebug.count('imageBitmapFailures');
+        ViewportDebug.step(vpDbg, 'decode-or-bitmap-error', { error: String(err) });
+      })
+      .finally(() => {
+        invalidateOffscreen();
+        scheduleRender(true, false, 'image-load');
+        ViewportDebug.end(vpDbg, { key, bitmapReady: !!imageBitmapCache[key] });
+      });
+  }
+  img.onload = finishLoad;
+  img.onerror = () => {
+    imageBitmapFailed.add(key);
+    ViewportDebug.end(vpDbg, { key, error: 'image load failed' });
+  };
   imageCache[key] = img;
+  if (loadedImg) {
+    ViewportDebug.step(vpDbg, 'reuse-loaded-image', { width: img.naturalWidth, height: img.naturalHeight });
+    finishLoad();
+  } else {
+    img.src = src;
+    ViewportDebug.step(vpDbg, 'set-src', { src });
+  }
+  if (!_skipImageSourceRegistration) cacheImageSourceForSave(key, src).catch(() => {});
   if (preCacheClipboard) cacheImageForClipboard(key, src, dbg).catch(() => {});
 }
 
-function clearImageStore() {
+function clearImageStore(clearNativeCaches = true) {
+  _imageStoreGeneration++;
   for (const k of Object.keys(imageStore)) delete imageStore[k];
   for (const k of Object.keys(imageCache)) delete imageCache[k];
+  for (const k of Object.keys(imageBitmapCache)) { imageBitmapCache[k].close(); delete imageBitmapCache[k]; }
+  imageBitmapFailed.clear();
+  imageSourceCachePromises.clear();
   imageClipboardCachePromises.clear();
+  imageHydrationPromises.clear();
+  _imageHydrationQueue.length = 0;
+  _imageHydrationQueued.clear();
+  _imageHydrationScheduled = false;
   imgKeyCounter = 1;
-  if (window.__TAURI__) {
+  if (clearNativeCaches && window.__TAURI__) {
     window.__TAURI__.core
       .invoke('clear_clipboard_image_cache')
       .catch((err) => console.warn('[clipboard-cache] clear_clipboard_image_cache failed:', err));
@@ -893,7 +1801,7 @@ function redo() {
 // ─── Render ───────────────────────────────────────────────────────────────────
 
 function renderAll() {
-  scheduleRender(true, true);
+  scheduleRender(true, true, 'renderAll');
 }
 
 
@@ -1334,15 +2242,24 @@ function enterEdit(id) {
     scheduleRender(true, false);
   });
 
+  let _prevSelStart = -1, _prevSelEnd = -1;
   _selChangeListener = () => {
-    if (document.activeElement === proxy) { _caretVisible = true; scheduleRender(true, false); }
+    if (document.activeElement !== proxy) return;
+    const s = proxy.selectionStart, e = proxy.selectionEnd;
+    if (s === _prevSelStart && e === _prevSelEnd && _caretVisible) return;
+    _prevSelStart = s; _prevSelEnd = e;
+    _caretVisible = true;
+    scheduleRender(true, false);
   };
   document.addEventListener('selectionchange', _selChangeListener);
 
   _caretVisible = true;
   _caretBlinkInterval = setInterval(() => {
+    if (!editingId) return;
+    const hasSelection = proxy.selectionStart !== proxy.selectionEnd;
+    if (hasSelection) { _caretVisible = true; return; }
     _caretVisible = !_caretVisible;
-    if (editingId) scheduleRender(true, false);
+    scheduleRender(true, false, 'caret-blink');
   }, 500);
 
   // Offscreen is now stale: it was built with this object; now we exclude it
@@ -1425,9 +2342,24 @@ function addText(wx, wy, content = '') {
   if (!content) enterEdit(obj.id);
 }
 
+let _pasteShieldCount = 0;
+function showPasteShield() {
+  _pasteShieldCount++;
+  openingShield.classList.add('active');
+}
+function hidePasteShield() {
+  _pasteShieldCount = Math.max(0, _pasteShieldCount - 1);
+  if (_pasteShieldCount === 0 && !_boardOpening) openingShield.classList.remove('active');
+}
+
 function addImage(src, cx, cy, exactSize = false, existingImgKey = null, preCacheClipboard = true) {
+  const dbg = ViewportDebug.start('addImage', { src, cx, cy, exactSize, existingImgKey, preCacheClipboard });
+  const t0 = performance.now();
+  ViewportDebug.count('imageAdds');
+  if (!_boardOpening) showPasteShield();
   const img = new Image();
   img.onload = () => {
+    ViewportDebug.step(dbg, 'load', { width: img.naturalWidth, height: img.naturalHeight, ms: performance.now() - t0 });
     let w = img.naturalWidth, h = img.naturalHeight;
     if (!exactSize) {
       const MAX = 600;
@@ -1437,19 +2369,30 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, preCach
         h = Math.round(h * scale);
       }
     }
-    const imgKey = existingImgKey || storeImage(src);
-    if (existingImgKey) {
-      imageStore[existingImgKey] = src;
-      cacheImage(existingImgKey, src, null, preCacheClipboard);
-    }
+    ViewportDebug.step(dbg, 'size-object', { w, h });
+    const imgKey = existingImgKey || newImgKey();
+    imageStore[imgKey] = src;
+    cacheImage(imgKey, src, null, preCacheClipboard, img);
+    ViewportDebug.step(dbg, 'cache-registered', { imgKey });
     const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
     objects.push(obj);
     objectsMap.set(obj.id, obj);
     selectObject(obj.id);
-    scheduleRender(true, false);
+    scheduleRender(true, false, 'add-image');
     pushHistory();
+    const total = performance.now() - t0;
+    ViewportDebug.max('maxImageAddMs', total);
+    ViewportDebug.end(dbg, { id: obj.id, imgKey, total });
+    if (!_boardOpening) hidePasteShield();
+  };
+  img.onerror = () => {
+    const total = performance.now() - t0;
+    ViewportDebug.max('maxImageAddMs', total);
+    ViewportDebug.end(dbg, { error: 'image load failed', total });
+    if (!_boardOpening) hidePasteShield();
   };
   img.src = src;
+  ViewportDebug.step(dbg, 'set-src', { src });
 }
 
 // ─── New board ───────────────────────────────────────────────────────────────
@@ -1471,7 +2414,7 @@ async function newBoard() {
   invalidateOffscreen();
   currentFilePath = null;
   panX = 0; panY = 0; zoom = 1;
-  clearImageStore();
+  clearImageStore(!sourcesCached);
   history = []; historyIndex = -1;
   idCounter = 1; zCounter = 1;
   applyTransform();
@@ -1525,7 +2468,7 @@ function deleteSelected() {
 
 // ─── Zoom ─────────────────────────────────────────────────────────────────────
 
-const ZOOM_MIN = 0.05, ZOOM_MAX = 10;
+const ZOOM_MIN = 0.1, ZOOM_MAX = 10;
 
 let _editEl = null;
 let _caretVisible = true;
@@ -1537,11 +2480,14 @@ const EDIT_HISTORY_DEBOUNCE_MS = 500;
 
 
 canvas.addEventListener('wheel', (e) => {
+  const dbg = ViewportDebug.start('wheel', { deltaX: e.deltaX, deltaY: e.deltaY, ctrlKey: e.ctrlKey, metaKey: e.metaKey, panX, panY, zoom });
+  ViewportDebug.count('wheel');
   e.preventDefault();
   if (editingId) {
     _caretVisible = true;
   }
   if (e.ctrlKey || e.metaKey) {
+    ViewportDebug.count('wheelZoom');
     const factor = Math.abs(e.deltaY) < 30
       ? Math.pow(0.995, e.deltaY)
       : e.deltaY < 0 ? 1.1 : 1 / 1.1;
@@ -1549,13 +2495,16 @@ canvas.addEventListener('wheel', (e) => {
     panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
     panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
     zoom = newZoom;
-    scheduleTransform();
+    scheduleTransform('wheel-zoom');
+    ViewportDebug.end(dbg, { mode: 'zoom', newZoom, panX, panY });
     return;
   }
 
+  ViewportDebug.count('wheelPan');
   panX -= e.deltaX;
   panY -= e.deltaY;
-  scheduleTransform();
+  scheduleTransform('wheel-pan');
+  ViewportDebug.end(dbg, { mode: 'pan', panX, panY });
 }, { passive: false });
 
 // ─── Pan (middle mouse button) ────────────────────────────────────────────────
@@ -1563,13 +2512,25 @@ canvas.addEventListener('wheel', (e) => {
 canvas.addEventListener('mousedown', (e) => {
   // Middle mouse: pan
   if (e.button === 1) {
+    const panDbg = ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, panX, panY, zoom });
     e.preventDefault();
     e.stopPropagation();
     canvas.classList.add('panning');
     const startX = e.clientX, startY = e.clientY;
     const startPanX = panX, startPanY = panY;
-    function onMove(ev) { panX = startPanX + (ev.clientX - startX); panY = startPanY + (ev.clientY - startY); scheduleTransform(); }
-    function onUp(ev) { if (ev.button !== 1) return; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); canvas.classList.remove('panning'); }
+    function onMove(ev) {
+      ViewportDebug.count('mousePanMoves');
+      panX = startPanX + (ev.clientX - startX);
+      panY = startPanY + (ev.clientY - startY);
+      scheduleTransform('mouse-pan');
+    }
+    function onUp(ev) {
+      if (ev.button !== 1) return;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      canvas.classList.remove('panning');
+      ViewportDebug.end(panDbg, { endX: ev.clientX, endY: ev.clientY, panX, panY });
+    }
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
     return;
@@ -1606,7 +2567,8 @@ canvas.addEventListener('mousedown', (e) => {
       let grpLastDx = 0, grpLastDy = 0, grpRaf = null;
       function applyGrpDrag(dx, dy) {
         for (const item of grpItems) { item.obj.x = item.startX + dx; item.obj.y = item.startY + dy; }
-        drawBoard(); updateSelectionOverlay();
+        withRenderSource('group-drag', () => drawBoard());
+        updateSelectionOverlay();
       }
       function onGrpMove(ev) {
         const dx = (ev.clientX - grpStartX) / zoom, dy = (ev.clientY - grpStartY) / zoom;
@@ -1741,7 +2703,9 @@ canvas.addEventListener('mousedown', (e) => {
       item.obj.x = item.startX + dx;
       item.obj.y = item.startY + dy;
     }
-    drawBoard();
+    const dragDbg = ViewportDebug.start('dragFrame', { items: dragItems.length });
+    withRenderSource('object-drag', () => drawBoard());
+    ViewportDebug.end(dragDbg);
     updateSelectionOverlay();
   }
 
@@ -1960,7 +2924,9 @@ document.getElementById('btn-export-all-text').addEventListener('click', () => {
   exportAllText();
 });
 
+islZoom.addEventListener('mousedown', e => e.preventDefault());
 islZoom.addEventListener('click', () => {
+  const dbg = ViewportDebug.start('zoomReset', { panX, panY, zoom, objectCount: objects.length });
   deselectAll();
   const vw = window.innerWidth, vh = window.innerHeight;
   const anyVisible = objects.some(o => {
@@ -1991,8 +2957,10 @@ islZoom.addEventListener('click', () => {
     zoom = startZoom + (targetZoom - startZoom) * e;
     panX = startPanX + (targetPanX - startPanX) * e;
     panY = startPanY + (targetPanY - startPanY) * e;
+    ViewportDebug.step(dbg, 'animate', { t, panX, panY, zoom });
     applyTransform();
     if (t < 1) requestAnimationFrame(animate);
+    else ViewportDebug.end(dbg, { panX, panY, zoom });
   }
   requestAnimationFrame(animate);
 });
@@ -2009,7 +2977,7 @@ canvas.addEventListener('drop', (e) => {
   e.preventDefault();
   const pos = toWorld(e.clientX, e.clientY);
   for (const file of [...e.dataTransfer.files]) {
-    if (!file.type.startsWith('image/')) continue;
+    if (file.type !== 'image/png' && file.type !== 'image/jpeg') continue;
     const reader = new FileReader();
     reader.onload = (ev) => addImage(ev.target.result, pos.x, pos.y);
     reader.readAsDataURL(file);
@@ -2022,14 +2990,11 @@ if (window.__TAURI__) {
     const { paths } = event.payload;
     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
     for (const path of paths) {
-      if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) continue;
+      if (!/\.(png|jpe?g)$/i.test(path)) continue;
       try {
         const b64 = await window.__TAURI__.core.invoke('read_binary_file_base64', { path });
         const ext = path.split('.').pop().toLowerCase();
-        const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
-                   : ext === 'gif' ? 'image/gif'
-                   : ext === 'webp' ? 'image/webp'
-                   : 'image/png';
+        const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
         addImage('data:' + mime + ';base64,' + b64, center.x, center.y);
       } catch (err) { console.error('Failed to load dropped file:', err); }
     }
@@ -2093,25 +3058,271 @@ function boardData() {
   return { version: 2, viewport: { panX, panY, zoom }, imageStore, objects };
 }
 
-function applyBoardData(data) {
-  clearImageStore();
-  if (data.version === 1) {
-    // Migrate v1: inline src -> imageStore
-    for (const obj of (data.objects || [])) {
-      if (obj.type === 'image' && obj.data && obj.data.src) {
-        const key = storeImage(obj.data.src);
-        obj.data = { imgKey: key };
-      }
+function getImageMetaForBoardFile(imgKey, src = '') {
+  if (isNativeImageRef(src)) return { path: src.path, mime: src.mime, ext: src.ext };
+  const comma = typeof src === 'string' ? src.indexOf(',') : -1;
+  const header = comma > 0 ? src.slice(0, comma) : '';
+  const ext = guessImageExtFromDataUrl(src);
+  const mime = header.startsWith('data:image/jpeg') ? 'image/jpeg' : 'image/png';
+  return { path: `images/${imgKey}.${ext}`, mime, ext };
+}
+
+function boardDataForSave() {
+  const imageManifest = {};
+  for (const [key, src] of Object.entries(imageStore)) {
+    imageManifest[key] = getImageMetaForBoardFile(key, src);
+  }
+  return {
+    version: 3,
+    format: 'boardfish-container',
+    viewport: { panX, panY, zoom },
+    imageStore: imageManifest,
+    objects,
+  };
+}
+
+function getBoardSaveMetrics(data) {
+  let imageCount = 0;
+  let imageStoreBytes = 0;
+  let largestImageKey = '';
+  let largestImageBytes = 0;
+  for (const [key, src] of Object.entries(data.imageStore || {})) {
+    imageCount++;
+    const bytes = imageStoreBytesEstimate(src);
+    imageStoreBytes += bytes;
+    if (bytes > largestImageBytes) {
+      largestImageBytes = bytes;
+      largestImageKey = key;
     }
-  } else {
-    Object.assign(imageStore, data.imageStore || {});
+  }
+  return {
+    objectCount: data.objects?.length || 0,
+    imageCount,
+    imageObjectCount: (data.objects || []).filter((o) => o.type === 'image').length,
+    textObjectCount: (data.objects || []).filter((o) => o.type === 'text').length,
+    imageStoreBytes,
+    rawImageStoreBytes: Object.values(imageStore).reduce((sum, src) => sum + imageStoreBytesEstimate(src), 0),
+    largestImageKey,
+    largestImageBytes,
+    historyLength: history.length,
+    historyIndex,
+    dirty: isDirty(),
+  };
+}
+
+function getBoardOpenMetrics(data) {
+  let imageCount = 0;
+  let imageStoreBytes = 0;
+  let largestImageKey = '';
+  let largestImageBytes = 0;
+  for (const [key, src] of Object.entries(data?.imageStore || {})) {
+    imageCount++;
+    const bytes = imageStoreBytesEstimate(src);
+    imageStoreBytes += bytes;
+    if (bytes > largestImageBytes) {
+      largestImageBytes = bytes;
+      largestImageKey = key;
+    }
+  }
+  return {
+    objectCount: data?.objects?.length || 0,
+    imageCount,
+    imageObjectCount: (data?.objects || []).filter((o) => o.type === 'image').length,
+    textObjectCount: (data?.objects || []).filter((o) => o.type === 'text').length,
+    imageStoreBytes,
+    largestImageKey,
+    largestImageBytes,
+  };
+}
+
+function measureBoardJsonForSaveDebug(dbg, data) {
+  if (!SaveDebug.enabled) return;
+  const t0 = performance.now();
+  try {
+    const json = JSON.stringify(data);
+    SaveDebug.step(dbg, 'json-stringify', {
+      ms: performance.now() - t0,
+      jsonBytes: json.length,
+    });
+  } catch (err) {
+    SaveDebug.step(dbg, 'json-stringify:error', { error: String(err) });
+  }
+}
+
+function scheduleSaveFrameProbe(dbg, label) {
+  if (!SaveDebug.enabled) return null;
+  const scheduledAt = performance.now();
+  let done = false;
+  requestAnimationFrame(() => {
+    done = true;
+    SaveDebug.step(dbg, label, { queueMs: performance.now() - scheduledAt });
+  });
+  return () => {
+    if (!done) SaveDebug.step(dbg, `${label}:pending`, { elapsedMs: performance.now() - scheduledAt });
+  };
+}
+
+async function invokeSaveBoard(path, dbg) {
+  const dataStart = performance.now();
+  const data = window.__TAURI__ ? boardDataForSave() : boardData();
+  SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...getBoardSaveMetrics(data) });
+  measureBoardJsonForSaveDebug(dbg, data);
+  if (window.__TAURI__) {
+    const pendingSources = Object.keys(data.imageStore || {})
+      .map((key) => imageSourceCachePromises.get(key))
+      .filter(Boolean);
+    if (pendingSources.length) {
+      const sourceStart = performance.now();
+      SaveDebug.step(dbg, 'await-image-source-cache:start', { count: pendingSources.length });
+      await Promise.allSettled(pendingSources);
+      SaveDebug.step(dbg, 'await-image-source-cache:end', { count: pendingSources.length, ms: performance.now() - sourceStart });
+    }
+  }
+  const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
+  const result = await SaveDebug.invoke(dbg, 'save_board', { path, board: data }, { path, ...getBoardSaveMetrics(data) });
+  if (frameProbe) frameProbe();
+  return result;
+}
+
+async function invokeReadBoard(path, dbg) {
+  const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
+  const result = await OpenDebug.invoke(dbg, 'read_board', { path }, { path });
+  if (frameProbe) frameProbe();
+  if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug });
+  return result?.board || result;
+}
+
+function scheduleOpenFrameProbe(dbg, label) {
+  if (!OpenDebug.enabled) return null;
+  const scheduledAt = performance.now();
+  let done = false;
+  requestAnimationFrame(() => {
+    done = true;
+    OpenDebug.step(dbg, label, { queueMs: performance.now() - scheduledAt });
+  });
+  return () => {
+    if (!done) OpenDebug.step(dbg, `${label}:pending`, { elapsedMs: performance.now() - scheduledAt });
+  };
+}
+
+function getVisibleWorldBounds() {
+  return {
+    x1: -panX / zoom,
+    y1: -panY / zoom,
+    x2: (window.innerWidth - panX) / zoom,
+    y2: (window.innerHeight - panY) / zoom,
+  };
+}
+
+function objIntersectsBounds(obj, b) {
+  return obj.x < b.x2 && obj.x + obj.w > b.x1 && obj.y < b.y2 && obj.y + obj.h > b.y1;
+}
+
+function getVisibleImageKeys(limit = Infinity) {
+  const b = getVisibleWorldBounds();
+  const keys = [];
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    if (obj.type !== 'image') continue;
+    if (!objIntersectsBounds(obj, b)) continue;
+    const key = obj.data.imgKey;
+    if (!isNativeImageRef(imageStore[key]) || imageCache[key]) continue;
+    keys.push(key);
+    if (keys.length >= limit) break;
+  }
+  return keys;
+}
+
+async function hydrateImageForDisplay(key, dbg = null) {
+  if (imageCache[key] || !isNativeImageRef(imageStore[key])) return false;
+  const t0 = performance.now();
+  const dataUrl = await ensureImageDataUrl(key, dbg);
+  const img = await loadImageElement(dataUrl);
+  imageCache[key] = img;
+  try {
+    imageBitmapCache[key] = await createImageBitmap(img);
+  } catch {
+    imageBitmapFailed.add(key);
+  }
+  OpenDebug.step(dbg, 'hydrate-visible-image', { imgKey: key, ms: performance.now() - t0, bitmapReady: !!imageBitmapCache[key] });
+  return true;
+}
+
+async function hydrateVisibleImagesForOpen(dbg = null) {
+  const keys = getVisibleImageKeys();
+  OpenDebug.step(dbg, 'hydrate-visible:start', { count: keys.length });
+  const t0 = performance.now();
+  let hydrated = 0;
+  for (const key of keys) {
+    if (await hydrateImageForDisplay(key, dbg).catch((err) => {
+      OpenDebug.step(dbg, 'hydrate-visible:error', { imgKey: key, error: String(err) });
+      return false;
+    })) hydrated++;
+  }
+  OpenDebug.step(dbg, 'hydrate-visible:end', { count: keys.length, hydrated, ms: performance.now() - t0 });
+  if (hydrated) invalidateOffscreen();
+}
+
+async function hydrateAllImagesForOpen(dbg = null) {
+  const keys = Object.keys(imageStore).filter((key) => isNativeImageRef(imageStore[key]) && !imageCache[key]);
+  OpenDebug.step(dbg, 'hydrate-all:start', { count: keys.length });
+  const t0 = performance.now();
+  let hydrated = 0;
+  for (const key of keys) {
+    if (await hydrateImageForDisplay(key, dbg).catch((err) => {
+      OpenDebug.step(dbg, 'hydrate-all:error', { imgKey: key, error: String(err) });
+      return false;
+    })) hydrated++;
+  }
+  OpenDebug.step(dbg, 'hydrate-all:end', { count: keys.length, hydrated, ms: performance.now() - t0 });
+  if (hydrated) invalidateOffscreen();
+}
+
+function queueVisibleImageHydration(limit = 3, dbg = null) {
+  for (const key of getVisibleImageKeys(limit)) queueImageHydration(key, dbg);
+}
+
+let _visibleHydrationTimer = null;
+function scheduleVisibleHydrationAfterIdle() {
+  if (!window.__TAURI__ || _boardOpening) return;
+  clearTimeout(_visibleHydrationTimer);
+  _visibleHydrationTimer = setTimeout(() => queueVisibleImageHydration(1), 180);
+}
+
+async function finishOpenedBoard(dbg, data) {
+  await hydrateAllImagesForOpen(dbg);
+  _boardOpening = false; openingShield.classList.remove('active');
+  const renderStart = performance.now();
+  applyTransform();
+  OpenDebug.step(dbg, 'initial-applyTransform', { ms: performance.now() - renderStart });
+  OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
+}
+
+function applyBoardData(data, options = {}) {
+  const dbg = options.dbg || null;
+  const sourcesCached = !!options.sourcesCached;
+  const deferRender = !!options.deferRender;
+  const endDebug = options.endDebug !== false;
+  OpenDebug.step(dbg, 'applyBoardData:start', getBoardOpenMetrics(data));
+  const t0 = performance.now();
+  clearImageStore(!sourcesCached);
+  OpenDebug.step(dbg, 'clearImageStore', { ms: performance.now() - t0 });
+
+  const imageStart = performance.now();
+  Object.assign(imageStore, data.imageStore || {});
+  _skipImageSourceRegistration = sourcesCached;
+  try {
     for (const k of Object.keys(imageStore)) {
       const n = parseInt(k.split('-')[1]);
       if (!isNaN(n) && n >= imgKeyCounter) imgKeyCounter = n + 1;
-      cacheImage(k, imageStore[k]);
+      if (!sourcesCached || !isNativeImageRef(imageStore[k])) cacheImage(k, imageStore[k], null, !sourcesCached);
     }
+  } finally {
+    _skipImageSourceRegistration = false;
   }
+  OpenDebug.step(dbg, 'cacheImage:start-all', { ms: performance.now() - imageStart, sourcesCached, imageCount: Object.keys(imageStore).length });
 
+  const stateStart = performance.now();
   if (editingId) exitEdit();
   selectedId = null;
   selectedIds.clear();
@@ -2119,32 +3330,50 @@ function applyBoardData(data) {
   rebuildObjectsMap();
   syncAllTextAutoHeights();
   invalidateOffscreen();
+  OpenDebug.step(dbg, 'apply-state', { ms: performance.now() - stateStart, objectCount: objects.length });
+
+  const countersStart = performance.now();
   for (const obj of objects) {
     const n = parseInt(obj.id.split('-')[1]);
     if (!isNaN(n) && n >= idCounter) idCounter = n + 1;
     if (obj.z >= zCounter) zCounter = obj.z + 1;
   }
   if (data.viewport) { panX = data.viewport.panX; panY = data.viewport.panY; zoom = data.viewport.zoom; }
-  applyTransform();
+  OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });
+
+  if (!deferRender) {
+    const renderStart = performance.now();
+    applyTransform();
+    OpenDebug.step(dbg, 'applyTransform', { ms: performance.now() - renderStart });
+  }
+
+  const historyStart = performance.now();
   history = []; historyIndex = -1; snapshot();
   markSaved();
+  OpenDebug.step(dbg, 'reset-history-markSaved', { ms: performance.now() - historyStart, historyLength: history.length, historyIndex });
+  if (endDebug) OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
 }
 
 async function saveBoardAs() {
   if (!window.__TAURI__) { alert('Save requires the desktop app.'); return false; }
+  const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
   try {
     const defaultName = currentFilePath
       ? currentFilePath.split(/[\\/]/).pop()
       : 'board.bf';
-    const filePath = await window.__TAURI__.core.invoke('save_file_dialog', { defaultName });
-    if (!filePath) return false;
-    await window.__TAURI__.core.invoke('save_board', { path: filePath, board: boardData() });
+    const filePath = await SaveDebug.invoke(dbg, 'save_file_dialog', { defaultName }, { defaultName });
+    if (!filePath) { SaveDebug.end(dbg, { cancelled: true }); return false; }
+    await invokeSaveBoard(filePath, dbg);
     currentFilePath = filePath;
+    SaveDebug.step(dbg, 'markSaved:start');
     markSaved();
+    SaveDebug.step(dbg, 'markSaved:end');
     showIslandMsg('Saved', 1500);
+    SaveDebug.end(dbg, { saved: true, path: filePath });
     return true;
   } catch (err) {
     console.error('Save failed:', err);
+    SaveDebug.end(dbg, { saved: false, error: String(err) });
     return false;
   }
 }
@@ -2152,13 +3381,18 @@ async function saveBoardAs() {
 async function saveBoard() {
   if (currentFilePath) {
     if (!window.__TAURI__) return false;
+    const dbg = SaveDebug.start('saveBoard', { path: currentFilePath, objectCount: objects.length });
     try {
-      await window.__TAURI__.core.invoke('save_board', { path: currentFilePath, board: boardData() });
+      await invokeSaveBoard(currentFilePath, dbg);
+      SaveDebug.step(dbg, 'markSaved:start');
       markSaved();
+      SaveDebug.step(dbg, 'markSaved:end');
       showIslandMsg('Saved', 1500);
+      SaveDebug.end(dbg, { saved: true, path: currentFilePath });
       return true;
     } catch (err) {
       console.error('Save failed:', err);
+      SaveDebug.end(dbg, { saved: false, error: String(err) });
       return false;
     }
   }
@@ -2168,24 +3402,37 @@ async function saveBoard() {
 
 async function openBoard() {
   if (!window.__TAURI__) { alert('Open requires the desktop app.'); return; }
+  const dbg = OpenDebug.start('openBoard', { currentFilePath, objectCount: objects.length });
 
   if (isDirty()) {
+    OpenDebug.step(dbg, 'dirty-dialog:start');
     const choice = await showUnsavedDialog();
-    if (choice === 'cancel') return;
+    OpenDebug.step(dbg, 'dirty-dialog:end', { choice });
+    if (choice === 'cancel') { OpenDebug.end(dbg, { cancelled: true }); return; }
     if (choice === 'save') {
       const saved = await saveBoard();
-      if (!saved) return;
+      OpenDebug.step(dbg, 'dirty-dialog:save-result', { saved });
+      if (!saved) { OpenDebug.end(dbg, { cancelled: true, reason: 'save-failed' }); return; }
     }
   }
 
   try {
-    const filePath = await window.__TAURI__.core.invoke('open_file_dialog');
-    if (!filePath) return;
-    const data = JSON.parse(await window.__TAURI__.core.invoke('read_text_file', { path: filePath }));
-    applyBoardData(data);
+    const filePath = await OpenDebug.invoke(dbg, 'open_file_dialog');
+    if (!filePath) { OpenDebug.end(dbg, { cancelled: true }); return; }
+    showIslandMsg('Opening');
+    _boardOpening = true; openingShield.classList.add('active');
+    const data = await invokeReadBoard(filePath, dbg);
+    applyBoardData(data, { dbg, sourcesCached: true, deferRender: true, endDebug: false });
+    await finishOpenedBoard(dbg, data);
     currentFilePath = filePath;
     updateTitle();
-  } catch (err) { console.error('Open failed:', err); }
+    restoreIslandZoom();
+  } catch (err) {
+    console.error('Open failed:', err);
+    _boardOpening = false; openingShield.classList.remove('active');
+    restoreIslandZoom();
+    OpenDebug.end(dbg, { opened: false, error: String(err) });
+  }
 }
 
 // ─── Close guard ─────────────────────────────────────────────────────────────
@@ -2293,6 +3540,58 @@ async function jsClipboardStillCurrent(dbg = null) {
   return current;
 }
 
+function readClipboardImageDataUrlFromEvent(clipboardData, dbg = null) {
+  if (!clipboardData) return null;
+  const items = [...(clipboardData.items || [])];
+  const files = [...(clipboardData.files || [])];
+  const isSupportedImageType = (type) => type === 'image/png' || type === 'image/jpeg';
+  const imageItem = items.find((item) => item.kind === 'file' && isSupportedImageType(item.type));
+  const imageFile = imageItem?.getAsFile?.() || files.find((file) => isSupportedImageType(file.type));
+  if (!imageFile) return null;
+  ClipDebug.step(dbg, 'event-image-blob', { type: imageFile.type, blobSize: imageFile.size });
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => resolve(ev.target.result);
+    reader.onerror = () => reject(reader.error || new Error('failed to read clipboard image'));
+    reader.readAsDataURL(imageFile);
+  });
+}
+
+function readClipboardTextFromEvent(clipboardData) {
+  if (!clipboardData) return '';
+  return clipboardData.getData?.('text/plain') || clipboardData.getData?.('text') || '';
+}
+
+function describeClipboardData(clipboardData) {
+  if (!clipboardData) return null;
+  return {
+    itemTypes: [...(clipboardData.items || [])].map((item) => item.type || item.kind || ''),
+    fileTypes: [...(clipboardData.files || [])].map((file) => file.type || ''),
+    types: [...(clipboardData.types || [])],
+  };
+}
+
+async function readClipboardImageDataUrlFromBrowser(dbg = null) {
+  if (!navigator.clipboard?.read) return null;
+  ClipDebug.step(dbg, 'browser-clipboard-read:start');
+  const items = await navigator.clipboard.read();
+  ClipDebug.step(dbg, 'browser-clipboard-read:ok', { itemCount: items.length });
+  for (const item of items) {
+    for (const type of item.types) {
+      if (type !== 'image/png' && type !== 'image/jpeg') continue;
+      const blob = await item.getType(type);
+      ClipDebug.step(dbg, 'browser-image-blob', { type, blobSize: blob.size });
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target.result);
+        reader.onerror = () => reject(reader.error || new Error('failed to read browser clipboard image'));
+        reader.readAsDataURL(blob);
+      });
+    }
+  }
+  return null;
+}
+
 async function copySelected() {
   const dbg = ClipDebug.start('copySelected', { selectedCount: selectedIds.size });
   if (!selectedIds.size) { ClipDebug.end(dbg, { skipped: 'empty-selection' }); return; }
@@ -2358,7 +3657,7 @@ async function copySelected() {
       copyCached()
         .catch(async (err) => {
           ClipDebug.step(dbg, 'cache-miss-fallback', { imgKey, flipX, flipY, error: String(err) });
-          const src = imageStore[obj.data.imgKey];
+          const src = await ensureImageDataUrl(obj.data.imgKey, dbg);
           if (!src) return;
           const pendingCache = imageClipboardCachePromises.get(imgKey);
           if (pendingCache) {
@@ -2394,18 +3693,19 @@ async function copySelected() {
 
 function guessImageExtFromDataUrl(dataUrl) {
   if (dataUrl.startsWith('data:image/jpeg')) return 'jpg';
-  if (dataUrl.startsWith('data:image/gif')) return 'gif';
-  if (dataUrl.startsWith('data:image/webp')) return 'webp';
   return 'png';
 }
 
 async function saveSelectedImage() {
-  if (selectedIds.size !== 1) return;
-  const obj = objectsMap.get(selectedId);
-  if (!obj || obj.type !== 'image') return;
+  const dbg = ExportDebug.start('exportImage', { selectedCount: selectedIds.size });
+  const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
+  if (imageObjs.length !== 1) { ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length }); return; }
+  const obj = imageObjs[0];
 
+  ExportDebug.step(dbg, 'render:start');
   const src = await getRenderedImageDataUrl(obj);
-  if (!src) return;
+  ExportDebug.step(dbg, 'render:done', { hasDataUrl: !!src });
+  if (!src) { ExportDebug.end(dbg, { skipped: true, reason: 'no-dataurl' }); return; }
 
   const ext = guessImageExtFromDataUrl(src);
   const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
@@ -2413,9 +3713,11 @@ async function saveSelectedImage() {
 
   if (window.__TAURI__) {
     try {
-      const saved = await window.__TAURI__.core.invoke('save_image_as', { dataUrl: src, defaultName });
-      if (saved) showIslandMsg('Image Exported', 1500);
+      const saved = await ExportDebug.invoke(dbg, 'save_image_as', { dataUrl: src, defaultName }, { defaultName });
+      ExportDebug.end(dbg, { saved });
+      if (saved) showIslandMsg(selectedIds.size > 1 ? '1 Image Exported' : 'Image Exported', 1500);
     } catch (err) {
+      ExportDebug.end(dbg, { error: String(err) });
       console.error('Save image failed:', err);
     }
     return;
@@ -2425,24 +3727,30 @@ async function saveSelectedImage() {
   a.href = src;
   a.download = defaultName;
   a.click();
+  ExportDebug.end(dbg, { saved: true, method: 'download' });
 }
 
 async function saveSelectedImages() {
+  const dbg = ExportDebug.start('exportImages', { selectedCount: selectedIds.size });
   const selectedObjs = [];
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
-    if (!obj || obj.type !== 'image') return;
+    if (!obj || obj.type !== 'image') continue;
     selectedObjs.push(obj);
   }
-  if (selectedObjs.length < 2) return;
+  if (selectedObjs.length < 2) { ExportDebug.end(dbg, { skipped: true, imageCount: selectedObjs.length }); return; }
+  ExportDebug.step(dbg, 'render:start', { imageCount: selectedObjs.length });
 
   if (window.__TAURI__) {
     const dataUrls = (await Promise.all(selectedObjs.map((o) => getRenderedImageDataUrl(o)))).filter(Boolean);
-    if (dataUrls.length < 2) return;
+    ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.length });
+    if (dataUrls.length < 2) { ExportDebug.end(dbg, { skipped: true, reason: 'too-few-dataUrls' }); return; }
     try {
-      const savedCount = await window.__TAURI__.core.invoke('save_images_to_folder', { dataUrls });
-      if (savedCount > 0) showIslandMsg(`${savedCount} Images Exported`, 1500);
+      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
+      ExportDebug.end(dbg, { savedCount });
+      if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500);
     } catch (err) {
+      ExportDebug.end(dbg, { error: String(err) });
       console.error('Save images failed:', err);
     }
     return;
@@ -2457,19 +3765,25 @@ async function saveSelectedImages() {
     a.download = `image_${i + 1}.${ext}`;
     a.click();
   }
+  ExportDebug.end(dbg, { saved: true, method: 'download', imageCount: selectedObjs.length });
 }
 
 async function exportAllImages() {
+  const dbg = ExportDebug.start('exportAllImages', { objectCount: objects.length });
   const imageObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'image');
-  if (!imageObjs.length) return;
+  if (!imageObjs.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-images' }); return; }
+  ExportDebug.step(dbg, 'render:start', { imageCount: imageObjs.length });
 
   if (window.__TAURI__) {
     const dataUrls = (await Promise.all(imageObjs.map((o) => getRenderedImageDataUrl(o)))).filter(Boolean);
-    if (!dataUrls.length) return;
+    ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.length });
+    if (!dataUrls.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-dataUrls' }); return; }
     try {
-      const savedCount = await window.__TAURI__.core.invoke('save_images_to_folder', { dataUrls });
-      if (savedCount > 0) showIslandMsg(`${savedCount} Images Exported`, 1500);
+      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
+      ExportDebug.end(dbg, { savedCount });
+      if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500);
     } catch (err) {
+      ExportDebug.end(dbg, { error: String(err) });
       console.error('Export all images failed:', err);
     }
     return;
@@ -2484,19 +3798,24 @@ async function exportAllImages() {
     a.download = `image_${i + 1}.${ext}`;
     a.click();
   }
+  ExportDebug.end(dbg, { saved: true, method: 'download', imageCount: imageObjs.length });
 }
 
 async function exportAllText() {
+  const dbg = ExportDebug.start('exportAllText', { objectCount: objects.length });
   const textObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'text');
-  if (!textObjs.length) return;
+  if (!textObjs.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-text' }); return; }
 
   const combined = textObjs.map((o) => o.data.content).join('\n\n');
+  ExportDebug.step(dbg, 'combined', { textCount: textObjs.length, combinedLen: combined.length });
 
   if (window.__TAURI__) {
     try {
-      const saved = await window.__TAURI__.core.invoke('save_text_as', { text: combined });
+      const saved = await ExportDebug.invoke(dbg, 'save_text_as', { text: combined }, { textCount: textObjs.length });
+      ExportDebug.end(dbg, { saved });
       if (saved) showIslandMsg('Text Exported', 1500);
     } catch (err) {
+      ExportDebug.end(dbg, { error: String(err) });
       console.error('Export all text failed:', err);
     }
     return;
@@ -2510,10 +3829,17 @@ async function exportAllText() {
   a.download = `text_${hex}.txt`;
   a.click();
   URL.revokeObjectURL(url);
+  ExportDebug.end(dbg, { saved: true, method: 'download', textCount: textObjs.length });
 }
 
-async function pasteAtPos(wx, wy) {
-  const dbg = ClipDebug.start('pasteAtPos', { wx, wy, hasJsClipboard: !!jsClipboard, jsClipboardType: jsClipboard?.type });
+async function pasteAtPos(wx, wy, clipboardData = null) {
+  const dbg = ClipDebug.start('pasteAtPos', {
+    wx,
+    wy,
+    hasJsClipboard: !!jsClipboard,
+    jsClipboardType: jsClipboard?.type,
+    clipboardData: describeClipboardData(clipboardData),
+  });
   if (jsClipboard && !(await jsClipboardStillCurrent(dbg))) {
     ClipDebug.step(dbg, 'clear-stale-jsClipboard', { expectedSequence: _jsClipboardSequence });
     clearJsClipboard();
@@ -2545,15 +3871,51 @@ async function pasteAtPos(wx, wy) {
       return;
     }
   }
+  const eventImageRead = readClipboardImageDataUrlFromEvent(clipboardData, dbg);
+  if (eventImageRead) {
+    try {
+      const imgKey = newImgKey();
+      const dataUrl = await eventImageRead;
+      ClipDebug.step(dbg, 'event-image-read', { dataUrl });
+      addImage(dataUrl, wx, wy, false, imgKey);
+      ClipDebug.end(dbg, { path: 'event-image' });
+      return;
+    } catch (err) {
+      ClipDebug.step(dbg, 'event-image-miss', { error: String(err) });
+    }
+  }
+  const eventText = readClipboardTextFromEvent(clipboardData);
+  if (eventText && eventText.trim()) {
+    addText(wx - 100, wy - 40, eventText);
+    ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length });
+    return;
+  }
+  if (!window.__TAURI__) {
+    try {
+      const imgKey = newImgKey();
+      const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
+      if (dataUrl) {
+        ClipDebug.step(dbg, 'browser-image-read', { dataUrl });
+        addImage(dataUrl, wx, wy, false, imgKey);
+        ClipDebug.end(dbg, { path: 'browser-image' });
+        return;
+      }
+    } catch (err) {
+      ClipDebug.step(dbg, 'browser-image-miss', { error: String(err) });
+    }
+  }
   if (window.__TAURI__) {
     try {
       const imgKey = newImgKey();
+      showPasteShield();
       const dataUrl = await ClipDebug.invoke(dbg, 'read_image_from_clipboard_cached', { imgKey }, { imgKey });
+      hidePasteShield();
       ClipDebug.step(dbg, 'native-image-read', { dataUrl });
       addImage(dataUrl, wx, wy, false, imgKey, false);
       ClipDebug.end(dbg, { path: 'native-image' });
       return;
     } catch (err) {
+      hidePasteShield();
       ClipDebug.step(dbg, 'native-image-miss', { error: String(err) });
       try {
         const text = await ClipDebug.invoke(dbg, 'read_text_from_clipboard');
@@ -2567,25 +3929,11 @@ async function pasteAtPos(wx, wy) {
     }
   }
   try {
-    if (navigator.clipboard.read) {
-      ClipDebug.step(dbg, 'web-clipboard-read:start');
-      const items = await navigator.clipboard.read();
-      ClipDebug.step(dbg, 'web-clipboard-read:ok', { itemCount: items.length });
-      for (const item of items) {
-        for (const type of item.types) {
-          if (type.startsWith('image/')) {
-            const blob = await item.getType(type);
-            ClipDebug.step(dbg, 'web-image-blob', { type, blobSize: blob.size });
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              addImage(ev.target.result, wx, wy);
-              ClipDebug.end(dbg, { path: 'web-image', dataUrlLen: ev.target.result?.length || 0 });
-            };
-            reader.readAsDataURL(blob);
-            return;
-          }
-        }
-      }
+    const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
+    if (dataUrl) {
+      addImage(dataUrl, wx, wy);
+      ClipDebug.end(dbg, { path: 'web-image', dataUrlLen: dataUrl.length });
+      return;
     }
     const text = await navigator.clipboard.readText();
     if (text && text.trim()) addText(wx - 100, wy - 40, text);
@@ -2599,7 +3947,7 @@ document.addEventListener('paste', (e) => {
   if (editingId) return;
   e.preventDefault();
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  pasteAtPos(center.x, center.y);
+  pasteAtPos(center.x, center.y, e.clipboardData);
 });
 
 
@@ -2706,23 +4054,40 @@ window.addEventListener('resize', resizeCanvas);
 document.fonts?.ready.then(clearTextMeasurementCaches).catch(() => {});
 resizeCanvas();
 snapshot();
+islSetWidth('100%');
 updateZoomDisplay();
 updateTitle();
 
 
 // Open a .bf file by path — used for startup file and macOS open events
 async function openFilePath(filePath) {
+  const dbg = OpenDebug.start('openFilePath', { path: filePath, currentFilePath, objectCount: objects.length });
   if (isDirty()) {
+    OpenDebug.step(dbg, 'dirty-dialog:start');
     const choice = await showUnsavedDialog();
-    if (choice === 'cancel') return;
-    if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
+    OpenDebug.step(dbg, 'dirty-dialog:end', { choice });
+    if (choice === 'cancel') { OpenDebug.end(dbg, { cancelled: true }); return; }
+    if (choice === 'save') {
+      const saved = await saveBoard();
+      OpenDebug.step(dbg, 'dirty-dialog:save-result', { saved });
+      if (!saved) { OpenDebug.end(dbg, { cancelled: true, reason: 'save-failed' }); return; }
+    }
   }
   try {
-    const data = JSON.parse(await window.__TAURI__.core.invoke('read_text_file', { path: filePath }));
-    applyBoardData(data);
+    showIslandMsg('Opening');
+    _boardOpening = true; openingShield.classList.add('active');
+    const data = await invokeReadBoard(filePath, dbg);
+    applyBoardData(data, { dbg, sourcesCached: true, deferRender: true, endDebug: false });
+    await finishOpenedBoard(dbg, data);
     currentFilePath = filePath;
     updateTitle();
-  } catch (err) { console.error('Failed to open file:', err); }
+    restoreIslandZoom();
+  } catch (err) {
+    console.error('Failed to open file:', err);
+    _boardOpening = false; openingShield.classList.remove('active');
+    restoreIslandZoom();
+    OpenDebug.end(dbg, { opened: false, error: String(err) });
+  }
 }
 
 if (window.__TAURI__) {

@@ -26,7 +26,7 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 - Send objects to back, duplicate, copy, paste, cut, delete, undo and redo
 - Copy images back to your clipboard at original resolution
 - Multi-select with lossless scaling, translation, flipping and exporting
-- Export one image, all selected images, or all images in one action
+- Export one image, selected images, or all images in one action
 - Export all text into a single `.txt` file
 - Save everything locally as one portable `.bf` file
 

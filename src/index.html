@@ -108,7 +108,7 @@
       background: rgba(26, 26, 28, 0.72);
       backdrop-filter: blur(48px) saturate(200%);
       -webkit-backdrop-filter: blur(48px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 12px;
       box-shadow:
         0 24px 64px rgba(0,0,0,0.6),
@@ -127,7 +127,7 @@
       background: rgba(26, 26, 28, 0.72);
       backdrop-filter: blur(48px) saturate(200%);
       -webkit-backdrop-filter: blur(48px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 12px;
       box-shadow:
         0 24px 64px rgba(0,0,0,0.6),
@@ -147,7 +147,7 @@
       padding: 4px 10px;
       font-family: inherit;
       font-size: 13px;
-      color: rgba(255, 255, 255, 0.88);
+      color: rgba(255, 255, 255, 1);
       background: transparent;
       border: none;
       border-radius: 7px;
@@ -158,11 +158,11 @@
       transition: background 0.08s;
     }
     .ctx-item:hover { background: rgba(255,255,255,0.1); color: #fff; }
-    .ctx-item:active { background: rgba(255,255,255,0.15); }
+    .ctx-item:active { background: rgba(255,255,255,0.2); }
 
     .ctx-sep {
       height: 1px;
-      background: rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.1);
       margin: 3px 5px;
     }
 
@@ -172,10 +172,12 @@
       bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
+      user-select: none;
+      -webkit-user-select: none;
       background: rgba(26, 26, 28, 0.72);
       backdrop-filter: blur(48px) saturate(200%);
       -webkit-backdrop-filter: blur(48px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 12px;
       box-shadow:
         0 24px 64px rgba(0,0,0,0.6),
@@ -192,26 +194,50 @@
       cursor: pointer;
       user-select: none;
       -webkit-user-select: none;
-      padding: 4px 8px;
+      padding: 4px 10px;
       font-family: inherit;
       font-size: 13px;
-      color: rgba(255, 255, 255, 0.38);
+      color: rgba(255, 255, 255, 0.5);
       letter-spacing: -0.01em;
       -webkit-font-smoothing: antialiased;
       white-space: nowrap;
       min-width: 44px;
       text-align: center;
       font-variant-numeric: tabular-nums;
-      transition: color 0.5s ease;
+      transition: color 0.5s ease, width 0.5s ease;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    #isl-measure {
+      position: absolute;
+      visibility: hidden;
+      pointer-events: none;
+      padding: 4px 10px;
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      box-sizing: border-box;
     }
 
 
+
+    #opening-shield {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 99998;
+      cursor: default;
+    }
+    #opening-shield.active { display: block; }
 
     #rubber-band {
       display: none;
       position: fixed;
       border: 1px solid rgba(10, 132, 255, 0.9);
-      background: rgba(10, 132, 255, 0.08);
+      background: transparent;
       pointer-events: none;
       z-index: 8000;
     }
@@ -234,7 +260,7 @@
       background: rgba(26, 26, 28, 0.72);
       backdrop-filter: blur(48px) saturate(200%);
       -webkit-backdrop-filter: blur(48px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 12px;
       box-shadow:
         0 24px 64px rgba(0,0,0,0.6),
@@ -258,7 +284,7 @@
     #dialog-title {
       font-size: 13px;
       font-weight: 600;
-      color: rgba(255,255,255,0.95);
+      color: rgba(255,255,255,1);
       letter-spacing: -0.02em;
       line-height: 1.3;
       -webkit-font-smoothing: antialiased;
@@ -266,7 +292,7 @@
 
     #dialog-msg {
       font-size: 13px;
-      color: rgba(255,255,255,0.38);
+      color: rgba(255,255,255,0.5);
       line-height: 1.4;
       letter-spacing: -0.01em;
       -webkit-font-smoothing: antialiased;
@@ -289,7 +315,6 @@
       border-radius: 7px;
       font-family: inherit;
       font-size: 13px;
-      font-weight: 500;
       letter-spacing: -0.01em;
       cursor: default;
       -webkit-font-smoothing: antialiased;
@@ -299,7 +324,7 @@
 
     #dlg-discard {
       background: rgba(255, 59, 48, 0.22);
-      border: 1px solid rgba(255, 59, 48, 0.3);
+      border: none;
       color: #FF453A;
     }
     #dlg-discard:hover { background: rgba(255, 59, 48, 0.32); }
@@ -307,17 +332,17 @@
 
     #dlg-cancel {
       background: rgba(255,255,255,0.1);
-      border: 1px solid rgba(255,255,255,0.08);
-      color: rgba(255,255,255,0.88);
+      border: none;
+      color: rgba(255,255,255,1);
       font-weight: 400;
     }
     #dlg-cancel:hover { background: rgba(255,255,255,0.16); }
 
     #dlg-save {
       background: #0A84FF;
-      border: 1px solid rgba(255,255,255,0.15);
+      border: none;
       color: #ffffff;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+      box-shadow: none;
     }
     #dlg-save:hover { background: #409CFF; }
     #dlg-save:active { opacity: 0.85; }
@@ -368,13 +393,13 @@
     <button class="ctx-item" id="obj-btn-delete">Delete</button>
   </div>
 
-  <input type="file" id="file-input" accept="image/*" style="display:none" />
+  <input type="file" id="file-input" accept="image/png,image/jpeg" style="display:none" />
 
   <div id="dialog-overlay">
     <div id="dialog">
       <div id="dialog-body">
         <div id="dialog-title">Unsaved Changes</div>
-        <div id="dialog-msg">This board has unsaved changes.</div>
+        <div id="dialog-msg">Your changes will be lost.</div>
       </div>
       <div class="ctx-sep"></div>
       <div id="dialog-btns">
@@ -389,10 +414,12 @@
 
 
   <div id="rubber-band"></div>
+  <div id="opening-shield"></div>
 
   <div id="island">
     <span id="isl-zoom">100%</span>
   </div>
+  <span id="isl-measure" aria-hidden="true"></span>
 
   <script src="app.js"></script>
 </body>
