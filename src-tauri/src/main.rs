@@ -348,6 +348,19 @@ fn copy_cached_image_to_clipboard(
 }
 
 #[tauri::command]
+fn copy_image_data_url_to_clipboard(data_url: String) -> Result<(), String> {
+    use base64::{Engine as _, engine::general_purpose};
+    let base64_data = data_url.split(',').nth(1).ok_or("invalid data URL")?;
+    let bytes = general_purpose::STANDARD
+        .decode(base64_data)
+        .map_err(|e| e.to_string())?;
+    let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    write_rgba_to_clipboard(width, height, Arc::from(rgba.into_raw()))
+}
+
+#[tauri::command]
 fn clear_clipboard_image_cache(state: tauri::State<ClipboardImageCache>) -> Result<(), String> {
     state.0.lock().map_err(|e| e.to_string())?.clear();
     Ok(())
@@ -427,6 +440,7 @@ fn main() {
             copy_text_to_clipboard,
             cache_image_for_clipboard,
             copy_cached_image_to_clipboard,
+            copy_image_data_url_to_clipboard,
             clear_clipboard_image_cache
         ])
         .on_window_event(|window, event| match event {

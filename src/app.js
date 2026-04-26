@@ -602,7 +602,7 @@ function clearImageStore() {
   if (window.__TAURI__) {
     window.__TAURI__.core
       .invoke('clear_clipboard_image_cache')
-      .catch((err) => console.warn('[clipboard-cache] clear_clipboard_image_cache failed:', err));
+      .catch(() => {});
   }
 }
 
@@ -1270,16 +1270,21 @@ function addText(wx, wy, content = '') {
   if (!content) enterEdit(obj.id);
 }
 
-function addImage(src, cx, cy, exactSize = false) {
+function addImage(src, cx, cy, exactSize = false, fixedSize = null) {
   const img = new Image();
   img.onload = () => {
-    let w = img.naturalWidth, h = img.naturalHeight;
-    if (!exactSize) {
-      const MAX = 600;
-      if (w > MAX || h > MAX) {
-        const scale = MAX / Math.max(w, h);
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
+    let w, h;
+    if (fixedSize) {
+      w = fixedSize.w; h = fixedSize.h;
+    } else {
+      w = img.naturalWidth; h = img.naturalHeight;
+      if (!exactSize) {
+        const MAX = 600;
+        if (w > MAX || h > MAX) {
+          const scale = MAX / Math.max(w, h);
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
       }
     }
     const imgKey = storeImage(src);
@@ -1326,24 +1331,32 @@ async function newBoard() {
 function duplicateSelected() {
   if (!selectedIds.size) return;
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  const cloned = [];
-  const imageData = {};
+  const clones = [];
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
     const o = cloneObject(obj);
-    if (o.type === 'image') {
-      const src = imageStore[o.data.imgKey];
-      if (src) imageData[o.data.imgKey] = src;
-    }
-    cloned.push(o);
+    o.id = newId();
+    o.z = ++zCounter;
+    clones.push(o);
   }
-  if (!cloned.length) return;
-  jsClipboard = { type: 'objects', objects: cloned, imageData };
-  _jsClipboardSetAt = Date.now();
-  _jsCbFingerprint = 'skip';
-  _blurredSinceCopy = false;
-  pasteAtPos(center.x, center.y);
+  if (!clones.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const o of clones) {
+    minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
+    maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h);
+  }
+  const dx = center.x - (minX + maxX) / 2, dy = center.y - (minY + maxY) / 2;
+  selectedIds.clear();
+  for (const o of clones) {
+    o.x += dx; o.y += dy;
+    objects.push(o);
+    objectsMap.set(o.id, o);
+    selectedIds.add(o.id);
+  }
+  selectedId = clones[clones.length - 1].id;
+  scheduleRender(true, true);
+  pushHistory();
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
@@ -1645,7 +1658,7 @@ function updateObjMenuActions() {
     const o = objectsMap.get(id);
     if (o && o.type === 'image') imageCount++;
   }
-  if (copyBtn) copyBtn.style.display = 'block';
+  if (copyBtn) copyBtn.style.display = selectedIds.size === 1 ? 'block' : 'none';
   if (imageActionsSep) imageActionsSep.style.display = imageCount >= 1 ? 'block' : 'none';
   if (flipHorizontalBtn) flipHorizontalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
   if (flipVerticalBtn) flipVerticalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
@@ -2068,111 +2081,30 @@ if (window.__TAURI__) {
 
 // ─── Clipboard ───────────────────────────────────────────────────────────────
 
-let jsClipboard = null;
-let _jsClipboardSetAt = 0;
-// Fingerprint of what Boardfish wrote to the system clipboard, used to detect
-// external writes (e.g. screenshots) when the app regains focus.
-// 'skip' = internal duplicate, never verify. null = write not yet complete.
-let _jsCbFingerprint = null;
-// Set to true when the window blurs after a copy — only then is an external
-// clipboard write possible, so we only pay the verification cost in that case.
-let _blurredSinceCopy = false;
-
-window.addEventListener('blur', () => { if (jsClipboard) _blurredSinceCopy = true; });
-window.addEventListener('focus', () => { if (Date.now() - _jsClipboardSetAt > 1500) jsClipboard = null; });
-
-// Read current system clipboard and store fingerprint (multi-select: nothing
-// was written, so we snapshot whatever is there to detect later changes).
-
-// Returns false if system clipboard has changed since copy — caller should drop jsClipboard.
-// Only runs when the app has blurred since the copy (external write is otherwise impossible).
-async function jsClipboardStillValid() {
-  if (!_jsCbFingerprint || _jsCbFingerprint === 'skip') return true;
-  if (!_blurredSinceCopy) return true; // app never left — clipboard can't have changed externally
-  try {
-    if (_jsCbFingerprint.type === 'text') {
-      const t = await navigator.clipboard.readText().catch(() => null);
-      return t === null || t === _jsCbFingerprint.value;
-    }
-    if (_jsCbFingerprint.type === 'image') {
-      if (!navigator.clipboard?.read) return true;
-      const items = await navigator.clipboard.read().catch(() => null);
-      if (!items) return true;
-      for (const item of items) {
-        const imgType = item.types.find(t => t.startsWith('image/'));
-        if (imgType) {
-          const blob = await item.getType(imgType);
-          const r = blob.size / _jsCbFingerprint.size;
-          return r > 0.8 && r < 1.2;
-        }
-      }
-      return false; // expected image, none found
-    }
-  } catch { return true; }
-  return true;
-}
+let _copiedSize = null;
 
 async function copySelected() {
-  if (!selectedIds.size) return;
-
-  if (selectedIds.size > 1) {
-    const clonedObjs = [];
-    const imageData = {};
-    for (const id of selectedIds) {
-      const obj = objectsMap.get(id);
-      if (!obj) continue;
-      const cloned = cloneObject(obj);
-      if (cloned.type === 'image') {
-        const src = imageStore[cloned.data.imgKey];
-        if (src) imageData[cloned.data.imgKey] = src;
-      }
-      clonedObjs.push(cloned);
-    }
-    if (!clonedObjs.length) return;
-    jsClipboard = { type: 'objects', objects: clonedObjs, imageData };
-    _jsClipboardSetAt = Date.now();
-    _blurredSinceCopy = false;
-    _jsCbFingerprint = null;
-    return;
-  }
-
+  if (selectedIds.size !== 1) return;
   const obj = getFirstSelectedObject();
   if (!obj) return;
 
-  const cloned = cloneObject(obj);
-  const imgData = {};
-  if (obj.type === 'image') {
-    const src = imageStore[obj.data.imgKey];
-    if (src) imgData[obj.data.imgKey] = src;
-  }
+  _copiedSize = obj.type === 'image' ? { w: obj.w, h: obj.h } : null;
+
   const isTauri = !!window.__TAURI__;
 
-  jsClipboard = { type: 'objects', objects: [cloned], imageData: imgData };
-  _jsClipboardSetAt = Date.now();
-  _blurredSinceCopy = false;
-
   if (obj.type === 'text') {
-    _jsCbFingerprint = { type: 'text', value: obj.data.content };
     if (isTauri) {
-      window.__TAURI__.core.invoke('copy_text_to_clipboard', { text: obj.data.content })
-        .catch(err => console.error('[copy] copy_text_to_clipboard FAILED:', err));
+      window.__TAURI__.core.invoke('copy_text_to_clipboard', { text: obj.data.content }).catch(() => {});
     } else {
-      navigator.clipboard.writeText(obj.data.content)
-        .catch(err => console.error('[copy] writeText FAILED:', err));
+      navigator.clipboard.writeText(obj.data.content).catch(() => {});
     }
     return;
   }
 
   if (obj.type === 'image') {
     if (isTauri && !imageNeedsRendering(obj)) {
-      const src = imageStore[obj.data.imgKey];
-      if (src) {
-        const comma = src.indexOf(',');
-        _jsCbFingerprint = { type: 'image', size: Math.floor((src.length - comma - 1) * 0.75) };
-      }
       window.__TAURI__.core.invoke('copy_cached_image_to_clipboard', { imgKey: obj.data.imgKey })
         .catch(async () => {
-          // Cache miss fallback: render to canvas and send as data URL
           const fallbackCanvas = renderImageToCanvas(obj) || (() => {
             const im = imageCache[obj.data.imgKey];
             if (!im || !im.complete || !im.naturalWidth) return null;
@@ -2182,30 +2114,23 @@ async function copySelected() {
             return tmp;
           })();
           if (!fallbackCanvas) return;
-          const fallbackBlob = await canvasToPngBlob(fallbackCanvas);
-          if (!fallbackBlob) return;
-          _jsCbFingerprint = { type: 'image', size: fallbackBlob.size };
           const fallbackDataUrl = fallbackCanvas.toDataURL('image/png');
           window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: fallbackDataUrl })
             .then(() => {
-              // Populate cache so subsequent copies use the fast path
               window.__TAURI__.core.invoke('cache_image_for_clipboard', { imgKey: obj.data.imgKey, dataUrl: imageStore[obj.data.imgKey] || fallbackDataUrl })
                 .catch(() => {});
             })
-            .catch(err => console.error('[copy] fallback copy_image_data_url_to_clipboard FAILED:', err));
+            .catch(() => {});
         });
     } else {
       const canvas = renderImageToCanvas(obj);
       if (!canvas) return;
       const pngBlob = await canvasToPngBlob(canvas);
       if (!pngBlob) return;
-      _jsCbFingerprint = { type: 'image', size: pngBlob.size };
       if (isTauri) {
-        window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: canvas.toDataURL('image/png') })
-          .catch(err => console.error('[copy] copy_image_data_url_to_clipboard FAILED:', err));
+        window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: canvas.toDataURL('image/png') }).catch(() => {});
       } else {
-        navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
-          .catch(err => console.error('[copy] clipboard.write FAILED:', err));
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]).catch(() => {});
       }
     }
   }
@@ -2332,34 +2257,6 @@ async function exportAllText() {
 }
 
 async function pasteAtPos(wx, wy) {
-  if (jsClipboard && !(await jsClipboardStillValid())) {
-    jsClipboard = null;
-    _jsCbFingerprint = null;
-  }
-  if (jsClipboard) {
-    if (jsClipboard.type === 'objects') {
-      const clones = cloneObjects(jsClipboard.objects || []);
-      if (!clones.length) return;
-      // Re-register image data in case we're on a different board
-      const imgData = jsClipboard.imageData || {};
-      for (const [key, src] of Object.entries(imgData)) {
-        if (!imageStore[key]) { imageStore[key] = src; cacheImage(key, src); }
-      }
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const o of clones) {
-        minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
-        maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h);
-      }
-      const dx = wx - (minX + maxX) / 2, dy = wy - (minY + maxY) / 2;
-      selectedIds.clear();
-      for (const o of clones) {
-        o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
-        objects.push(o); objectsMap.set(o.id, o); selectedIds.add(o.id);
-      }
-      selectedId = clones[clones.length - 1].id;
-      scheduleRender(true, true); pushHistory(); return;
-    }
-  }
   try {
     if (navigator.clipboard.read) {
       const items = await navigator.clipboard.read();
@@ -2367,8 +2264,10 @@ async function pasteAtPos(wx, wy) {
         for (const type of item.types) {
           if (type.startsWith('image/')) {
             const blob = await item.getType(type);
+            const size = _copiedSize;
+            _copiedSize = null;
             const reader = new FileReader();
-            reader.onload = (ev) => addImage(ev.target.result, wx, wy);
+            reader.onload = (ev) => addImage(ev.target.result, wx, wy, false, size);
             reader.readAsDataURL(blob);
             return;
           }
