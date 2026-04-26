@@ -24,6 +24,125 @@ const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 
+// ─── Clipboard / image debugger ──────────────────────────────────────────────
+
+const ClipDebug = (() => {
+  const STORAGE_KEY = 'bf_debug_clipboard';
+  const MAX_EVENTS = 600;
+  let enabled = localStorage.getItem(STORAGE_KEY) === '1';
+  let nextOpId = 1;
+  const events = [];
+
+  function sanitize(value) {
+    if (!value || typeof value !== 'object') return value;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (/dataUrl|src|base64/i.test(k) && typeof v === 'string') {
+        out[k + 'Len'] = v.length;
+        const comma = v.indexOf(',');
+        out.mime = comma > 0 ? v.slice(0, comma) : v.slice(0, 48);
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
+  }
+
+  function push(evt) {
+    if (!enabled) return;
+    const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    console.debug('[Boardfish clipboard]', entry);
+  }
+
+  function setRustDebug(value) {
+    if (!window.__TAURI__) return;
+    window.__TAURI__.core.invoke('set_clipboard_debug', { enabled: value }).catch(() => {});
+  }
+
+  function enable() {
+    enabled = true;
+    localStorage.setItem(STORAGE_KEY, '1');
+    setRustDebug(true);
+    console.info('Boardfish clipboard debugger enabled. Use BoardfishDebug.clipboard.dump() or .summary().');
+  }
+
+  function disable() {
+    enabled = false;
+    localStorage.removeItem(STORAGE_KEY);
+    setRustDebug(false);
+    console.info('Boardfish clipboard debugger disabled.');
+  }
+
+  function start(op, meta = {}) {
+    if (!enabled) return null;
+    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
+    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
+    return ctx;
+  }
+
+  function step(ctx, stepName, meta = {}) {
+    if (!enabled || !ctx) return;
+    const now = performance.now();
+    push({
+      id: ctx.id,
+      op: ctx.op,
+      step: stepName,
+      dt: Math.round((now - ctx.last) * 100) / 100,
+      total: Math.round((now - ctx.t0) * 100) / 100,
+      meta: sanitize(meta),
+    });
+    ctx.last = now;
+  }
+
+  function end(ctx, meta = {}) {
+    if (!enabled || !ctx) return;
+    step(ctx, 'end', meta);
+  }
+
+  async function invoke(ctx, command, args = {}, meta = {}) {
+    if (!window.__TAURI__) throw new Error('Tauri is unavailable');
+    if (!enabled) return window.__TAURI__.core.invoke(command, args);
+    const t0 = performance.now();
+    step(ctx, 'invoke:start', { command, ...meta });
+    try {
+      const result = await window.__TAURI__.core.invoke(command, args);
+      step(ctx, 'invoke:ok', { command, ms: Math.round((performance.now() - t0) * 100) / 100 });
+      return result;
+    } catch (err) {
+      step(ctx, 'invoke:error', { command, ms: Math.round((performance.now() - t0) * 100) / 100, error: String(err) });
+      throw err;
+    }
+  }
+
+  function dump() {
+    console.table(events);
+    return events.slice();
+  }
+
+  function summary() {
+    const rows = events.filter(e => e.step && e.step !== 'start').map(e => ({
+      id: e.id,
+      op: e.op,
+      step: e.step,
+      dt: e.dt,
+      total: e.total,
+      command: e.meta?.command || '',
+      error: e.meta?.error || '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function clear() { events.length = 0; }
+
+  if (enabled) setRustDebug(true);
+  return { enable, disable, start, step, end, invoke, dump, summary, clear, get events() { return events.slice(); } };
+})();
+
+window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { clipboard: ClipDebug });
+
 
 // ─── Viewport ─────────────────────────────────────────────────────────────────
 
@@ -491,19 +610,24 @@ function sendSelectedToBack() {
 }
 
 function flipSelectedImages(axis) {
+  const dbg = ClipDebug.start('flipSelectedImages', { axis, selectedCount: selectedIds.size });
   let flipped = false;
+  let imageCount = 0;
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj || obj.type !== 'image') continue;
+    imageCount++;
     if (axis === 'x') obj.data.flipX = !obj.data.flipX;
     else obj.data.flipY = !obj.data.flipY;
     markDirty(obj.id);
     flipped = true;
   }
-  if (!flipped) return;
+  ClipDebug.step(dbg, 'toggle-flags', { imageCount, flipped });
+  if (!flipped) { ClipDebug.end(dbg, { skipped: true }); return; }
   invalidateOffscreen();
   scheduleRender(true, true);
   pushHistory();
+  ClipDebug.end(dbg, { historyIndex });
 }
 
 function isMultiSelected() {
@@ -539,17 +663,30 @@ function allSelectedAreImages() {
 
 const imageStore = {};
 const imageCache = {}; // key -> HTMLImageElement (decoded, ready for drawImage)
+const imageClipboardCachePromises = new Map();
 let imgKeyCounter = 1;
 
+function newImgKey() { return 'img-' + (imgKeyCounter++); }
+
+function cacheImageForClipboard(key, src, dbg = null) {
+  if (!window.__TAURI__ || !src) return Promise.resolve();
+  const existing = imageClipboardCachePromises.get(key);
+  if (existing) return existing;
+  const promise = ClipDebug.invoke(dbg, 'cache_image_for_clipboard', { imgKey: key, dataUrl: src }, { imgKey: key, dataUrl: src })
+    .finally(() => imageClipboardCachePromises.delete(key));
+  imageClipboardCachePromises.set(key, promise);
+  return promise;
+}
+
 function storeImage(src) {
-  const key = 'img-' + (imgKeyCounter++);
+  const dbg = ClipDebug.start('storeImage', { src });
+  const key = newImgKey();
   imageStore[key] = src;
-  cacheImage(key, src);
-  // Pre-cache in Rust immediately for newly imported images so first copy is instant.
-  if (window.__TAURI__) {
-    window.__TAURI__.core.invoke('cache_image_for_clipboard', { imgKey: key, dataUrl: src })
-      .catch(() => {});
-  }
+  cacheImage(key, src, dbg);
+  ClipDebug.step(dbg, 'registered-js-image', { key });
+  const cachePromise = imageClipboardCachePromises.get(key);
+  if (cachePromise) cachePromise.catch(() => {}).finally(() => ClipDebug.end(dbg, { key }));
+  else ClipDebug.end(dbg, { key });
   return key;
 }
 
@@ -560,8 +697,17 @@ function imageNeedsRendering(obj) {
 }
 
 function renderImageToCanvas(obj) {
+  const dbg = ClipDebug.start('renderImageToCanvas', {
+    id: obj?.id,
+    imgKey: obj?.data?.imgKey,
+    flipX: !!obj?.data?.flipX,
+    flipY: !!obj?.data?.flipY,
+  });
   const img = imageCache[obj.data.imgKey];
-  if (!img || !img.complete || !img.naturalWidth) return null;
+  if (!img || !img.complete || !img.naturalWidth) {
+    ClipDebug.end(dbg, { ready: false });
+    return null;
+  }
   const tmp = document.createElement('canvas');
   tmp.width = img.naturalWidth;
   tmp.height = img.naturalHeight;
@@ -573,11 +719,18 @@ function renderImageToCanvas(obj) {
   tctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
   tctx.drawImage(img, 0, 0);
   tctx.restore();
+  ClipDebug.end(dbg, { ready: true, width: tmp.width, height: tmp.height });
   return tmp;
 }
 
 function canvasToPngBlob(canvas) {
-  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  const dbg = ClipDebug.start('canvasToPngBlob', { width: canvas?.width, height: canvas?.height });
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      ClipDebug.end(dbg, { blobSize: blob?.size || 0 });
+      resolve(blob);
+    }, 'image/png');
+  });
 }
 
 async function getRenderedImageDataUrl(obj) {
@@ -587,22 +740,24 @@ async function getRenderedImageDataUrl(obj) {
   return canvas ? canvas.toDataURL('image/png') : '';
 }
 
-function cacheImage(key, src) {
+function cacheImage(key, src, dbg = null, preCacheClipboard = true) {
   if (imageCache[key]) return;
   const img = new Image();
   img.onload = () => { invalidateOffscreen(); scheduleRender(true, false); };
   img.src = src;
   imageCache[key] = img;
+  if (preCacheClipboard) cacheImageForClipboard(key, src, dbg).catch(() => {});
 }
 
 function clearImageStore() {
   for (const k of Object.keys(imageStore)) delete imageStore[k];
   for (const k of Object.keys(imageCache)) delete imageCache[k];
+  imageClipboardCachePromises.clear();
   imgKeyCounter = 1;
   if (window.__TAURI__) {
     window.__TAURI__.core
       .invoke('clear_clipboard_image_cache')
-      .catch(() => {});
+      .catch((err) => console.warn('[clipboard-cache] clear_clipboard_image_cache failed:', err));
   }
 }
 
@@ -1270,24 +1425,23 @@ function addText(wx, wy, content = '') {
   if (!content) enterEdit(obj.id);
 }
 
-function addImage(src, cx, cy, exactSize = false, fixedSize = null) {
+function addImage(src, cx, cy, exactSize = false, existingImgKey = null, preCacheClipboard = true) {
   const img = new Image();
   img.onload = () => {
-    let w, h;
-    if (fixedSize) {
-      w = fixedSize.w; h = fixedSize.h;
-    } else {
-      w = img.naturalWidth; h = img.naturalHeight;
-      if (!exactSize) {
-        const MAX = 600;
-        if (w > MAX || h > MAX) {
-          const scale = MAX / Math.max(w, h);
-          w = Math.round(w * scale);
-          h = Math.round(h * scale);
-        }
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (!exactSize) {
+      const MAX = 600;
+      if (w > MAX || h > MAX) {
+        const scale = MAX / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
       }
     }
-    const imgKey = storeImage(src);
+    const imgKey = existingImgKey || storeImage(src);
+    if (existingImgKey) {
+      imageStore[existingImgKey] = src;
+      cacheImage(existingImgKey, src, null, preCacheClipboard);
+    }
     const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
     objects.push(obj);
     objectsMap.set(obj.id, obj);
@@ -1331,32 +1485,21 @@ async function newBoard() {
 function duplicateSelected() {
   if (!selectedIds.size) return;
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  const clones = [];
+  const cloned = [];
+  const imageData = {};
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
     const o = cloneObject(obj);
-    o.id = newId();
-    o.z = ++zCounter;
-    clones.push(o);
+    if (o.type === 'image') {
+      const src = imageStore[o.data.imgKey];
+      if (src) imageData[o.data.imgKey] = src;
+    }
+    cloned.push(o);
   }
-  if (!clones.length) return;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const o of clones) {
-    minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
-    maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h);
-  }
-  const dx = center.x - (minX + maxX) / 2, dy = center.y - (minY + maxY) / 2;
-  selectedIds.clear();
-  for (const o of clones) {
-    o.x += dx; o.y += dy;
-    objects.push(o);
-    objectsMap.set(o.id, o);
-    selectedIds.add(o.id);
-  }
-  selectedId = clones[clones.length - 1].id;
-  scheduleRender(true, true);
-  pushHistory();
+  if (!cloned.length) return;
+  setJsClipboard({ type: 'objects', objects: cloned, imageData });
+  pasteAtPos(center.x, center.y);
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
@@ -1658,7 +1801,7 @@ function updateObjMenuActions() {
     const o = objectsMap.get(id);
     if (o && o.type === 'image') imageCount++;
   }
-  if (copyBtn) copyBtn.style.display = selectedIds.size === 1 ? 'block' : 'none';
+  if (copyBtn) copyBtn.style.display = 'block';
   if (imageActionsSep) imageActionsSep.style.display = imageCount >= 1 ? 'block' : 'none';
   if (flipHorizontalBtn) flipHorizontalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
   if (flipVerticalBtn) flipVerticalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
@@ -2081,57 +2224,170 @@ if (window.__TAURI__) {
 
 // ─── Clipboard ───────────────────────────────────────────────────────────────
 
-let _copiedSize = null;
+let jsClipboard = null;
+let _jsClipboardSetAt = 0;
+let _jsClipboardSequence = null;
+let _jsClipboardSequencePromise = null;
+let _jsClipboardNativeWritePending = false;
+let _jsClipboardToken = 0;
+
+async function getNativeClipboardSequence(dbg = null) {
+  if (!window.__TAURI__) return null;
+  try {
+    return await ClipDebug.invoke(dbg, 'clipboard_sequence');
+  } catch {
+    return null;
+  }
+}
+
+function markJsClipboardSequence(token = _jsClipboardToken, dbg = null) {
+  const promise = (async () => {
+    const seq = await getNativeClipboardSequence(dbg);
+    if (seq !== null && jsClipboard && token === _jsClipboardToken) _jsClipboardSequence = seq;
+    ClipDebug.step(dbg, 'mark-js-clipboard-sequence', { seq, token, currentToken: _jsClipboardToken, accepted: seq !== null && token === _jsClipboardToken });
+    return seq;
+  })();
+  if (token === _jsClipboardToken) _jsClipboardSequencePromise = promise;
+  return promise;
+}
+
+function finishNativeClipboardWrite(token, dbg = null) {
+  return markJsClipboardSequence(token, dbg).finally(() => {
+    if (token === _jsClipboardToken) _jsClipboardNativeWritePending = false;
+  });
+}
+
+function setJsClipboard(value, trackNative = false, nativeWritePending = false) {
+  jsClipboard = value;
+  _jsClipboardSetAt = Date.now();
+  _jsClipboardSequence = null;
+  _jsClipboardSequencePromise = null;
+  _jsClipboardNativeWritePending = nativeWritePending;
+  const token = ++_jsClipboardToken;
+  if (trackNative) markJsClipboardSequence(token);
+  return token;
+}
+
+function clearJsClipboard() {
+  jsClipboard = null;
+  _jsClipboardSequence = null;
+  _jsClipboardSequencePromise = null;
+  _jsClipboardNativeWritePending = false;
+  _jsClipboardToken++;
+}
+
+async function jsClipboardStillCurrent(dbg = null) {
+  if (!jsClipboard) return false;
+  if (_jsClipboardSequence === null && _jsClipboardSequencePromise) {
+    await _jsClipboardSequencePromise.catch(() => null);
+  }
+  if (_jsClipboardSequence === null) {
+    const age = Date.now() - _jsClipboardSetAt;
+    const current = !window.__TAURI__ || _jsClipboardNativeWritePending || age < 750;
+    ClipDebug.step(dbg, 'validate-js-clipboard-untracked', { current, nativeWritePending: _jsClipboardNativeWritePending, age });
+    return current;
+  }
+  const seq = await getNativeClipboardSequence(dbg);
+  const current = seq === null || seq === _jsClipboardSequence;
+  ClipDebug.step(dbg, 'validate-js-clipboard', { seq, expected: _jsClipboardSequence, current });
+  return current;
+}
 
 async function copySelected() {
-  if (selectedIds.size !== 1) return;
+  const dbg = ClipDebug.start('copySelected', { selectedCount: selectedIds.size });
+  if (!selectedIds.size) { ClipDebug.end(dbg, { skipped: 'empty-selection' }); return; }
+
+  if (selectedIds.size > 1) {
+    const clonedObjs = [];
+    const imageData = {};
+    for (const id of selectedIds) {
+      const obj = objectsMap.get(id);
+      if (!obj) continue;
+      const cloned = cloneObject(obj);
+      if (cloned.type === 'image') {
+        const src = imageStore[cloned.data.imgKey];
+        if (src) imageData[cloned.data.imgKey] = src;
+      }
+      clonedObjs.push(cloned);
+    }
+    if (!clonedObjs.length) { ClipDebug.end(dbg, { skipped: 'no-clones' }); return; }
+    setJsClipboard({ type: 'objects', objects: clonedObjs, imageData }, true);
+    ClipDebug.end(dbg, { path: 'multi-jsClipboard', objectCount: clonedObjs.length, imageCount: Object.keys(imageData).length });
+    return;
+  }
+
   const obj = getFirstSelectedObject();
-  if (!obj) return;
+  if (!obj) { ClipDebug.end(dbg, { skipped: 'missing-object' }); return; }
 
-  _copiedSize = obj.type === 'image' ? { w: obj.w, h: obj.h } : null;
-
+  const cloned = cloneObject(obj);
+  const imgData = {};
+  if (obj.type === 'image') {
+    const src = imageStore[obj.data.imgKey];
+    if (src) imgData[obj.data.imgKey] = src;
+  }
   const isTauri = !!window.__TAURI__;
+
+  const clipboardToken = setJsClipboard({ type: 'objects', objects: [cloned], imageData: imgData }, false, isTauri);
+  ClipDebug.step(dbg, 'set-jsClipboard', { type: obj.type, isTauri, imgKey: obj.data?.imgKey, imageNeedsRendering: obj.type === 'image' ? imageNeedsRendering(obj) : false });
 
   if (obj.type === 'text') {
     if (isTauri) {
-      window.__TAURI__.core.invoke('copy_text_to_clipboard', { text: obj.data.content }).catch(() => {});
+      ClipDebug.invoke(dbg, 'copy_text_to_clipboard', { text: obj.data.content }, { textLen: obj.data.content.length })
+        .catch(err => console.error('[copy] copy_text_to_clipboard FAILED:', err))
+        .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
+        .finally(() => ClipDebug.end(dbg, { path: 'text-tauri' }));
     } else {
-      navigator.clipboard.writeText(obj.data.content).catch(() => {});
+      navigator.clipboard.writeText(obj.data.content)
+        .catch(err => console.error('[copy] writeText FAILED:', err))
+        .finally(() => ClipDebug.end(dbg, { path: 'text-web' }));
     }
     return;
   }
 
   if (obj.type === 'image') {
-    if (isTauri && !imageNeedsRendering(obj)) {
-      window.__TAURI__.core.invoke('copy_cached_image_to_clipboard', { imgKey: obj.data.imgKey })
-        .catch(async () => {
-          const fallbackCanvas = renderImageToCanvas(obj) || (() => {
-            const im = imageCache[obj.data.imgKey];
-            if (!im || !im.complete || !im.naturalWidth) return null;
-            const tmp = document.createElement('canvas');
-            tmp.width = im.naturalWidth; tmp.height = im.naturalHeight;
-            tmp.getContext('2d').drawImage(im, 0, 0);
-            return tmp;
-          })();
-          if (!fallbackCanvas) return;
-          const fallbackDataUrl = fallbackCanvas.toDataURL('image/png');
-          window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: fallbackDataUrl })
+    if (isTauri) {
+      const imgKey = obj.data.imgKey;
+      const flipX = !!obj.data.flipX;
+      const flipY = !!obj.data.flipY;
+      const copyCached = () => ClipDebug.invoke(
+        dbg,
+        'copy_cached_image_to_clipboard_transformed',
+        { imgKey, flipX, flipY },
+        { imgKey, flipX, flipY }
+      );
+      copyCached()
+        .catch(async (err) => {
+          ClipDebug.step(dbg, 'cache-miss-fallback', { imgKey, flipX, flipY, error: String(err) });
+          const src = imageStore[obj.data.imgKey];
+          if (!src) return;
+          const pendingCache = imageClipboardCachePromises.get(imgKey);
+          if (pendingCache) {
+            ClipDebug.step(dbg, 'await-existing-cache', { imgKey });
+            await pendingCache.catch(() => {});
+            return copyCached();
+          }
+          return ClipDebug.invoke(
+            dbg,
+            'copy_image_data_url_to_clipboard_transformed',
+            { dataUrl: src, flipX, flipY },
+            { imgKey, flipX, flipY, dataUrl: src }
+          )
             .then(() => {
-              window.__TAURI__.core.invoke('cache_image_for_clipboard', { imgKey: obj.data.imgKey, dataUrl: imageStore[obj.data.imgKey] || fallbackDataUrl })
-                .catch(() => {});
+              // Populate cache so subsequent copies use the fast path
+              cacheImageForClipboard(imgKey, src, dbg).catch(() => {});
             })
-            .catch(() => {});
-        });
+            .catch(err => console.error('[copy] fallback copy_image_data_url_to_clipboard_transformed FAILED:', err));
+        })
+        .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
+        .finally(() => ClipDebug.end(dbg, { path: 'image-tauri-cached-transform', flipX, flipY }));
     } else {
       const canvas = renderImageToCanvas(obj);
-      if (!canvas) return;
+      if (!canvas) { ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' }); return; }
       const pngBlob = await canvasToPngBlob(canvas);
-      if (!pngBlob) return;
-      if (isTauri) {
-        window.__TAURI__.core.invoke('copy_image_data_url_to_clipboard', { dataUrl: canvas.toDataURL('image/png') }).catch(() => {});
-      } else {
-        navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]).catch(() => {});
-      }
+      if (!pngBlob) { ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'blob-null' }); return; }
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
+        .catch(err => console.error('[copy] clipboard.write FAILED:', err))
+        .finally(() => ClipDebug.end(dbg, { path: 'image-web-rendered', blobSize: pngBlob.size }));
     }
   }
 }
@@ -2257,33 +2513,74 @@ async function exportAllText() {
 }
 
 async function pasteAtPos(wx, wy) {
+  const dbg = ClipDebug.start('pasteAtPos', { wx, wy, hasJsClipboard: !!jsClipboard, jsClipboardType: jsClipboard?.type });
+  if (jsClipboard && !(await jsClipboardStillCurrent(dbg))) {
+    ClipDebug.step(dbg, 'clear-stale-jsClipboard', { expectedSequence: _jsClipboardSequence });
+    clearJsClipboard();
+  }
+  if (jsClipboard) {
+    if (jsClipboard.type === 'objects') {
+      const clones = cloneObjects(jsClipboard.objects || []);
+      if (!clones.length) { ClipDebug.end(dbg, { skipped: 'empty-jsClipboard' }); return; }
+      // Re-register image data in case we're on a different board
+      const imgData = jsClipboard.imageData || {};
+      let registeredImages = 0;
+      for (const [key, src] of Object.entries(imgData)) {
+        if (!imageStore[key]) { imageStore[key] = src; cacheImage(key, src); registeredImages++; }
+      }
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const o of clones) {
+        minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
+        maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h);
+      }
+      const dx = wx - (minX + maxX) / 2, dy = wy - (minY + maxY) / 2;
+      selectedIds.clear();
+      for (const o of clones) {
+        o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
+        objects.push(o); objectsMap.set(o.id, o); selectedIds.add(o.id);
+      }
+      selectedId = clones[clones.length - 1].id;
+      scheduleRender(true, true); pushHistory();
+      ClipDebug.end(dbg, { path: 'jsClipboard', objectCount: clones.length, registeredImages, historyIndex });
+      return;
+    }
+  }
   if (window.__TAURI__) {
     try {
-      const dataUrl = await window.__TAURI__.core.invoke('read_image_from_clipboard');
-      const size = _copiedSize;
-      _copiedSize = null;
-      addImage(dataUrl, wx, wy, false, size);
+      const imgKey = newImgKey();
+      const dataUrl = await ClipDebug.invoke(dbg, 'read_image_from_clipboard_cached', { imgKey }, { imgKey });
+      ClipDebug.step(dbg, 'native-image-read', { dataUrl });
+      addImage(dataUrl, wx, wy, false, imgKey, false);
+      ClipDebug.end(dbg, { path: 'native-image' });
       return;
-    } catch {
-      _copiedSize = null;
+    } catch (err) {
+      ClipDebug.step(dbg, 'native-image-miss', { error: String(err) });
       try {
-        const text = await window.__TAURI__.core.invoke('read_text_from_clipboard');
+        const text = await ClipDebug.invoke(dbg, 'read_text_from_clipboard');
         if (text && text.trim()) addText(wx - 100, wy - 40, text);
-      } catch {}
+        ClipDebug.end(dbg, { path: 'native-text', textLen: text?.length || 0 });
+        return;
+      } catch (textErr) {
+        ClipDebug.end(dbg, { path: 'native-empty', error: String(textErr) });
+      }
       return;
     }
   }
   try {
     if (navigator.clipboard.read) {
+      ClipDebug.step(dbg, 'web-clipboard-read:start');
       const items = await navigator.clipboard.read();
+      ClipDebug.step(dbg, 'web-clipboard-read:ok', { itemCount: items.length });
       for (const item of items) {
         for (const type of item.types) {
           if (type.startsWith('image/')) {
             const blob = await item.getType(type);
-            const size = _copiedSize;
-            _copiedSize = null;
+            ClipDebug.step(dbg, 'web-image-blob', { type, blobSize: blob.size });
             const reader = new FileReader();
-            reader.onload = (ev) => addImage(ev.target.result, wx, wy, false, size);
+            reader.onload = (ev) => {
+              addImage(ev.target.result, wx, wy);
+              ClipDebug.end(dbg, { path: 'web-image', dataUrlLen: ev.target.result?.length || 0 });
+            };
             reader.readAsDataURL(blob);
             return;
           }
@@ -2292,7 +2589,10 @@ async function pasteAtPos(wx, wy) {
     }
     const text = await navigator.clipboard.readText();
     if (text && text.trim()) addText(wx - 100, wy - 40, text);
-  } catch {}
+    ClipDebug.end(dbg, { path: 'web-text', textLen: text?.length || 0 });
+  } catch (err) {
+    ClipDebug.end(dbg, { path: 'web-empty', error: String(err) });
+  }
 }
 
 document.addEventListener('paste', (e) => {
