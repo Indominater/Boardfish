@@ -754,6 +754,33 @@ function saveViewport() {
 }
 
 
+// ─── Pill debugger ───────────────────────────────────────────────────────────
+const PillDebug = (() => {
+  let enabled = false;
+  const events = [];
+  const t0 = performance.now();
+
+  function log(event, data = {}) {
+    if (!enabled) return;
+    const entry = { t: Math.round(performance.now() - t0), event, ...data };
+    events.push(entry);
+    console.log('[pill]', entry.t + 'ms', event, data);
+  }
+
+  function enable() {
+    enabled = true;
+    events.length = 0;
+    console.log('[pill] PillDebug enabled. Use BoardfishDebug.pill.summary()');
+  }
+  function disable() { enabled = false; }
+  function reset() { events.length = 0; }
+  function dump() { return events.slice(); }
+  function summary() { console.table(events); return events.slice(); }
+
+  return { enable, disable, reset, dump, summary, log, get enabled() { return enabled; } };
+})();
+window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { pill: PillDebug });
+
 function islSetWidth(text) {
   islMeasure.textContent = text;
   islZoom.style.width = islMeasure.offsetWidth + 'px';
@@ -778,30 +805,45 @@ function showIslandMsg(msg, duration = 0) {
   clearTimeout(_islMsgTimer);
   clearTimeout(_islFadeTimer);
   _islMsgActive = true;
-  islZoom.style.color = 'rgba(255,255,255,0)';
   islZoom.style.pointerEvents = 'none';
   islZoom.style.cursor = 'default';
   islSetWidth(msg);
-  _islFadeTimer = setTimeout(() => {
-    islZoom.textContent = msg;
-    islZoom.style.color = 'rgba(255,255,255,0.5)';
-    if (duration > 0) {
-      _islMsgTimer = setTimeout(() => restoreIslandZoom(), duration);
-    }
-  }, 500);
+  islZoom.style.color = 'rgba(255,255,255,0)';
+  PillDebug.log('showIslandMsg:fadeOut', { msg, colorAfter: islZoom.style.color, computedColor: getComputedStyle(islZoom).color, transition: getComputedStyle(islZoom).transition });
+  return new Promise(resolve => {
+    const timerStart = performance.now();
+    _islFadeTimer = setTimeout(() => {
+      PillDebug.log('showIslandMsg:fadeIn', { msg, timerActualMs: Math.round(performance.now() - timerStart), computedColorBefore: getComputedStyle(islZoom).color });
+      islZoom.textContent = msg;
+      islZoom.style.color = 'rgba(255,255,255,0.5)';
+      PillDebug.log('showIslandMsg:fadeInSet', { computedColorAfter: getComputedStyle(islZoom).color });
+      if (duration > 0) {
+        _islMsgTimer = setTimeout(() => restoreIslandZoom(), duration);
+      }
+      setTimeout(resolve, 500);
+    }, 500);
+  });
 }
 
 function restoreIslandZoom() {
+  clearTimeout(_islMsgTimer);
+  clearTimeout(_islFadeTimer);
+  PillDebug.log('restoreIslandZoom:fadeOut');
   islZoom.style.color = 'rgba(255,255,255,0)';
-  const pct = Math.round(zoom * 100) + '%';
-  islSetWidth(pct);
-  setTimeout(() => {
+  _islFadeTimer = setTimeout(() => {
+    const pct = Math.round(zoom * 100) + '%';
     _islMsgActive = false;
     _lastZoomPct = -1;
-    updateZoomDisplay();
-    islZoom.style.color = 'rgba(255,255,255,0.5)';
-    islZoom.style.pointerEvents = '';
-    islZoom.style.cursor = '';
+    islSetWidth(pct);
+    islZoom.textContent = pct;
+    PillDebug.log('restoreIslandZoom:fadeIn', { pct });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        islZoom.style.color = 'rgba(255,255,255,0.5)';
+        islZoom.style.pointerEvents = '';
+        islZoom.style.cursor = '';
+      });
+    });
   }, 500);
 }
 
@@ -2404,7 +2446,12 @@ async function newBoard() {
     if (choice === 'cancel') return;
     if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
   }
+  const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
+  _boardOpening = true; openingShield.classList.add('active');
+  const openingStart = performance.now();
+  await showIslandMsg('Opening');
   if (editingId) exitEdit();
+  OpenDebug.step(dbg, 'exitEdit', {});
   selectedId = null;
   selectedIds.clear();
   objects = [];
@@ -2412,15 +2459,22 @@ async function newBoard() {
   _linesCacheMap.clear();
   _prefixCache.clear();
   invalidateOffscreen();
+  OpenDebug.step(dbg, 'clearState', {});
   currentFilePath = null;
   panX = 0; panY = 0; zoom = 1;
-  clearImageStore(!sourcesCached);
+  clearImageStore(true);
+  OpenDebug.step(dbg, 'clearImageStore', {});
   history = []; historyIndex = -1;
   idCounter = 1; zCounter = 1;
-  applyTransform();
   snapshot();
   markSaved();
   updateTitle();
+  const elapsed = performance.now() - openingStart;
+  OpenDebug.step(dbg, 'workDone', { elapsed });
+  _boardOpening = false; openingShield.classList.remove('active');
+  applyTransform();
+  restoreIslandZoom();
+  OpenDebug.end(dbg, { totalMs: elapsed });
 }
 
 // ─── Duplicate ────────────────────────────────────────────────────────────────
@@ -2507,15 +2561,31 @@ canvas.addEventListener('wheel', (e) => {
   ViewportDebug.end(dbg, { mode: 'pan', panX, panY });
 }, { passive: false });
 
-// ─── Pan (middle mouse button) ────────────────────────────────────────────────
+// ─── Pan (spacebar + left click) ─────────────────────────────────────────────
+
+let _spaceDown = false;
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !editingId && !e.repeat) {
+    e.preventDefault();
+    _spaceDown = true;
+    canvas.classList.add('panning');
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') {
+    _spaceDown = false;
+    canvas.classList.remove('panning');
+  }
+});
 
 canvas.addEventListener('mousedown', (e) => {
-  // Middle mouse: pan
-  if (e.button === 1) {
+  // Spacebar pan
+  if (e.button === 0 && _spaceDown) {
     const panDbg = ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, panX, panY, zoom });
     e.preventDefault();
     e.stopPropagation();
-    canvas.classList.add('panning');
     const startX = e.clientX, startY = e.clientY;
     const startPanX = panX, startPanY = panY;
     function onMove(ev) {
@@ -2525,10 +2595,9 @@ canvas.addEventListener('mousedown', (e) => {
       scheduleTransform('mouse-pan');
     }
     function onUp(ev) {
-      if (ev.button !== 1) return;
+      if (ev.button !== 0) return;
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      canvas.classList.remove('panning');
       ViewportDebug.end(panDbg, { endX: ev.clientX, endY: ev.clientY, panX, panY });
     }
     document.addEventListener('mousemove', onMove);
@@ -2752,8 +2821,6 @@ canvas.addEventListener('dblclick', (e) => {
   if (obj && obj.type === 'text') { selectObject(obj.id); enterEdit(obj.id); }
 });
 
-// Prevent middle-click scroll/autoscroll behavior
-canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
 
@@ -2862,11 +2929,13 @@ document.getElementById('btn-open').addEventListener('click', () => {
 
 
 fileInput.addEventListener('change', () => {
-  const file = fileInput.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => addImage(ev.target.result, ctxPos.x, ctxPos.y);
-  reader.readAsDataURL(file);
+  const files = [...fileInput.files];
+  if (!files.length) return;
+  for (const file of files) {
+    const reader = new FileReader();
+    reader.onload = (ev) => addImage(ev.target.result, ctxPos.x, ctxPos.y);
+    reader.readAsDataURL(file);
+  }
 });
 
 document.addEventListener('click', () => {
@@ -2978,8 +3047,10 @@ canvas.addEventListener('drop', (e) => {
   const pos = toWorld(e.clientX, e.clientY);
   for (const file of [...e.dataTransfer.files]) {
     if (file.type !== 'image/png' && file.type !== 'image/jpeg') continue;
+    showPasteShield();
     const reader = new FileReader();
-    reader.onload = (ev) => addImage(ev.target.result, pos.x, pos.y);
+    reader.onload = (ev) => { hidePasteShield(); addImage(ev.target.result, pos.x, pos.y); };
+    reader.onerror = () => hidePasteShield();
     reader.readAsDataURL(file);
   }
 });
@@ -2991,12 +3062,17 @@ if (window.__TAURI__) {
     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
     for (const path of paths) {
       if (!/\.(png|jpe?g)$/i.test(path)) continue;
+      showPasteShield();
       try {
         const b64 = await window.__TAURI__.core.invoke('read_binary_file_base64', { path });
         const ext = path.split('.').pop().toLowerCase();
         const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+        hidePasteShield();
         addImage('data:' + mime + ';base64,' + b64, center.x, center.y);
-      } catch (err) { console.error('Failed to load dropped file:', err); }
+      } catch (err) {
+        hidePasteShield();
+        console.error('Failed to load dropped file:', err);
+      }
     }
   });
 }
@@ -3252,13 +3328,13 @@ async function hydrateVisibleImagesForOpen(dbg = null) {
   const keys = getVisibleImageKeys();
   OpenDebug.step(dbg, 'hydrate-visible:start', { count: keys.length });
   const t0 = performance.now();
-  let hydrated = 0;
-  for (const key of keys) {
-    if (await hydrateImageForDisplay(key, dbg).catch((err) => {
+  const results = await Promise.all(keys.map((key) =>
+    hydrateImageForDisplay(key, dbg).catch((err) => {
       OpenDebug.step(dbg, 'hydrate-visible:error', { imgKey: key, error: String(err) });
       return false;
-    })) hydrated++;
-  }
+    })
+  ));
+  const hydrated = results.filter(Boolean).length;
   OpenDebug.step(dbg, 'hydrate-visible:end', { count: keys.length, hydrated, ms: performance.now() - t0 });
   if (hydrated) invalidateOffscreen();
 }
@@ -3267,13 +3343,13 @@ async function hydrateAllImagesForOpen(dbg = null) {
   const keys = Object.keys(imageStore).filter((key) => isNativeImageRef(imageStore[key]) && !imageCache[key]);
   OpenDebug.step(dbg, 'hydrate-all:start', { count: keys.length });
   const t0 = performance.now();
-  let hydrated = 0;
-  for (const key of keys) {
-    if (await hydrateImageForDisplay(key, dbg).catch((err) => {
+  const results = await Promise.all(keys.map((key) =>
+    hydrateImageForDisplay(key, dbg).catch((err) => {
       OpenDebug.step(dbg, 'hydrate-all:error', { imgKey: key, error: String(err) });
       return false;
-    })) hydrated++;
-  }
+    })
+  ));
+  const hydrated = results.filter(Boolean).length;
   OpenDebug.step(dbg, 'hydrate-all:end', { count: keys.length, hydrated, ms: performance.now() - t0 });
   if (hydrated) invalidateOffscreen();
 }
@@ -3291,10 +3367,12 @@ function scheduleVisibleHydrationAfterIdle() {
 
 async function finishOpenedBoard(dbg, data) {
   await hydrateAllImagesForOpen(dbg);
-  _boardOpening = false; openingShield.classList.remove('active');
+  _boardOpening = false;
   const renderStart = performance.now();
   applyTransform();
   OpenDebug.step(dbg, 'initial-applyTransform', { ms: performance.now() - renderStart });
+  openingShield.classList.remove('active');
+  restoreIslandZoom();
   OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
 }
 
@@ -3419,14 +3497,14 @@ async function openBoard() {
   try {
     const filePath = await OpenDebug.invoke(dbg, 'open_file_dialog');
     if (!filePath) { OpenDebug.end(dbg, { cancelled: true }); return; }
-    showIslandMsg('Opening');
     _boardOpening = true; openingShield.classList.add('active');
+
+    await showIslandMsg('Opening');
     const data = await invokeReadBoard(filePath, dbg);
     applyBoardData(data, { dbg, sourcesCached: true, deferRender: true, endDebug: false });
     await finishOpenedBoard(dbg, data);
     currentFilePath = filePath;
     updateTitle();
-    restoreIslandZoom();
   } catch (err) {
     console.error('Open failed:', err);
     _boardOpening = false; openingShield.classList.remove('active');
@@ -3928,8 +4006,10 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       return;
     }
   }
+  showPasteShield();
   try {
     const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
+    hidePasteShield();
     if (dataUrl) {
       addImage(dataUrl, wx, wy);
       ClipDebug.end(dbg, { path: 'web-image', dataUrlLen: dataUrl.length });
@@ -3939,6 +4019,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     if (text && text.trim()) addText(wx - 100, wy - 40, text);
     ClipDebug.end(dbg, { path: 'web-text', textLen: text?.length || 0 });
   } catch (err) {
+    hidePasteShield();
     ClipDebug.end(dbg, { path: 'web-empty', error: String(err) });
   }
 }
@@ -3954,6 +4035,7 @@ document.addEventListener('paste', (e) => {
 // ─── Keyboard ────────────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Alt') { e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); return; }
 
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
@@ -4074,14 +4156,14 @@ async function openFilePath(filePath) {
     }
   }
   try {
-    showIslandMsg('Opening');
     _boardOpening = true; openingShield.classList.add('active');
+
+    await showIslandMsg('Opening');
     const data = await invokeReadBoard(filePath, dbg);
     applyBoardData(data, { dbg, sourcesCached: true, deferRender: true, endDebug: false });
     await finishOpenedBoard(dbg, data);
     currentFilePath = filePath;
     updateTitle();
-    restoreIslandZoom();
   } catch (err) {
     console.error('Failed to open file:', err);
     _boardOpening = false; openingShield.classList.remove('active');

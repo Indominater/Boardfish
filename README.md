@@ -2,7 +2,7 @@
 
 Have you ever wanted a fast, non-destructive way to visualize your ideas?
 
-Meet Boardfish: a lightweight, open-source canvas for Windows and macOS. It provides an infinite, freeform space for visual research, moodboards, and snippets—a frictionless place for your thoughts to land.
+Meet Boardfish: an ultra-lightweight, open-source canvas for Windows and macOS. It provides an infinite, freeform space for visual research, moodboards, and snippets.
 
 <img src="src-tauri/icons/image_e4de38.png" alt="Boardfish canvas screenshot" width="900">
 
@@ -21,11 +21,10 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 ## Features
 
 - Minimal dark UI with infinite canvas
-- Right-click context menu for quick actions
+- Right-click for quick actions
 - Add text and images from your clipboard, drag and drop, or the file picker
-- Send objects to back, duplicate, copy, paste, cut, delete, undo and redo
 - Copy images back to your clipboard at original resolution
-- Multi-select with lossless scaling, translation, flipping and exporting
+- Multi-select scaling, translation, flipping
 - Export one image, selected images, or all images in one action
 - Export all text into a single `.txt` file
 - Save everything locally as one portable `.bf` file
@@ -53,6 +52,7 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 | Undo | Cmd+Z | Ctrl+Z |
 | Redo | Cmd+Shift+Z | Ctrl+Shift+Z / Ctrl+Y |
 | Delete selected | Backspace / Delete | Backspace / Delete |
+| Pan canvas | Space + drag | Space + drag |
 | Deselect / exit edit / close menus | Esc | Esc |
 | Quit / close | Cmd+Q / Cmd+W | Ctrl+Q / Ctrl+W |
 
