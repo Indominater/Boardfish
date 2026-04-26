@@ -801,7 +801,7 @@ function updateZoomDisplay() {
 let _islMsgTimer = null;
 let _islFadeTimer = null;
 
-function showIslandMsg(msg, duration = 0) {
+function showIslandMsg(msg, duration = 0, onRestore = null) {
   clearTimeout(_islMsgTimer);
   clearTimeout(_islFadeTimer);
   _islMsgActive = true;
@@ -818,7 +818,7 @@ function showIslandMsg(msg, duration = 0) {
       islZoom.style.color = 'rgba(255,255,255,0.5)';
       PillDebug.log('showIslandMsg:fadeInSet', { computedColorAfter: getComputedStyle(islZoom).color });
       if (duration > 0) {
-        _islMsgTimer = setTimeout(() => restoreIslandZoom(), duration);
+        _islMsgTimer = setTimeout(() => { if (onRestore) onRestore(); restoreIslandZoom(); }, duration);
       }
       setTimeout(resolve, 500);
     }, 500);
@@ -2980,11 +2980,13 @@ document.getElementById('obj-btn-save-image').addEventListener('click', () => {
 
 document.getElementById('obj-btn-save-images').addEventListener('click', () => {
   objCtxMenu.classList.remove('visible');
+  showPasteShield();
   saveSelectedImages();
 });
 
 document.getElementById('btn-export-all-images').addEventListener('click', () => {
   ctxMenu.classList.remove('visible');
+  showPasteShield();
   exportAllImages();
 });
 
@@ -3808,6 +3810,24 @@ async function saveSelectedImage() {
   ExportDebug.end(dbg, { saved: true, method: 'download' });
 }
 
+const _isMacOS = navigator.platform.startsWith('Mac') || /Macintosh/.test(navigator.userAgent);
+
+async function saveDataUrlsToFolder(dataUrls, dbg) {
+  if (_isMacOS) {
+    return await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
+  }
+  const folder = await ExportDebug.invoke(dbg, 'pick_save_folder', {}, {});
+  if (!folder) return null;
+  let savedCount = 0;
+  for (let i = 0; i < dataUrls.length; i++) {
+    if (!dataUrls[i]) continue;
+    const ok = await window.__TAURI__.core.invoke('save_image_to_folder_path', { folder, dataUrl: dataUrls[i], index: i });
+    if (ok) savedCount++;
+  }
+  return savedCount;
+}
+
+
 async function saveSelectedImages() {
   const dbg = ExportDebug.start('exportImages', { selectedCount: selectedIds.size });
   const selectedObjs = [];
@@ -3816,18 +3836,20 @@ async function saveSelectedImages() {
     if (!obj || obj.type !== 'image') continue;
     selectedObjs.push(obj);
   }
-  if (selectedObjs.length < 2) { ExportDebug.end(dbg, { skipped: true, imageCount: selectedObjs.length }); return; }
+  if (selectedObjs.length < 2) { ExportDebug.end(dbg, { skipped: true, imageCount: selectedObjs.length }); hidePasteShield(); return; }
   ExportDebug.step(dbg, 'render:start', { imageCount: selectedObjs.length });
 
   if (window.__TAURI__) {
-    const dataUrls = (await Promise.all(selectedObjs.map((o) => getRenderedImageDataUrl(o)))).filter(Boolean);
-    ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.length });
-    if (dataUrls.length < 2) { ExportDebug.end(dbg, { skipped: true, reason: 'too-few-dataUrls' }); return; }
     try {
-      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
+      const dataUrls = await Promise.all(selectedObjs.map(o => getRenderedImageDataUrl(o)));
+      ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.filter(Boolean).length });
+      const savedCount = await saveDataUrlsToFolder(dataUrls.filter(Boolean), dbg);
+      if (savedCount === null) { hidePasteShield(); ExportDebug.end(dbg, { cancelled: true }); return; }
       ExportDebug.end(dbg, { savedCount });
-      if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500);
+      if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
+      else hidePasteShield();
     } catch (err) {
+      hidePasteShield();
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Save images failed:', err);
     }
@@ -3849,18 +3871,20 @@ async function saveSelectedImages() {
 async function exportAllImages() {
   const dbg = ExportDebug.start('exportAllImages', { objectCount: objects.length });
   const imageObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'image');
-  if (!imageObjs.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-images' }); return; }
+  if (!imageObjs.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-images' }); hidePasteShield(); return; }
   ExportDebug.step(dbg, 'render:start', { imageCount: imageObjs.length });
 
   if (window.__TAURI__) {
-    const dataUrls = (await Promise.all(imageObjs.map((o) => getRenderedImageDataUrl(o)))).filter(Boolean);
-    ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.length });
-    if (!dataUrls.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-dataUrls' }); return; }
     try {
-      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
+      const dataUrls = await Promise.all(imageObjs.map(o => getRenderedImageDataUrl(o)));
+      ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.filter(Boolean).length });
+      const savedCount = await saveDataUrlsToFolder(dataUrls.filter(Boolean), dbg);
+      if (savedCount === null) { hidePasteShield(); ExportDebug.end(dbg, { cancelled: true }); return; }
       ExportDebug.end(dbg, { savedCount });
-      if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500);
+      if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
+      else hidePasteShield();
     } catch (err) {
+      hidePasteShield();
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Export all images failed:', err);
     }
