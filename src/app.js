@@ -2257,6 +2257,22 @@ async function exportAllText() {
 }
 
 async function pasteAtPos(wx, wy) {
+  if (window.__TAURI__) {
+    try {
+      const dataUrl = await window.__TAURI__.core.invoke('read_image_from_clipboard');
+      const size = _copiedSize;
+      _copiedSize = null;
+      addImage(dataUrl, wx, wy, false, size);
+      return;
+    } catch {
+      _copiedSize = null;
+      try {
+        const text = await window.__TAURI__.core.invoke('read_text_from_clipboard');
+        if (text && text.trim()) addText(wx - 100, wy - 40, text);
+      } catch {}
+      return;
+    }
+  }
   try {
     if (navigator.clipboard.read) {
       const items = await navigator.clipboard.read();

@@ -361,6 +361,32 @@ fn copy_image_data_url_to_clipboard(data_url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn read_image_from_clipboard() -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose};
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    let img = clipboard.get_image().map_err(|e| e.to_string())?;
+    let rgba = image::RgbaImage::from_raw(
+        img.width as u32,
+        img.height as u32,
+        img.bytes.into_owned(),
+    )
+    .ok_or("invalid image dimensions")?;
+    let mut png_bytes: Vec<u8> = Vec::new();
+    image::DynamicImage::ImageRgba8(rgba)
+        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .map_err(|e| e.to_string())?;
+    Ok(format!("data:image/png;base64,{}", general_purpose::STANDARD.encode(&png_bytes)))
+}
+
+#[tauri::command]
+fn read_text_from_clipboard() -> Result<String, String> {
+    arboard::Clipboard::new()
+        .map_err(|e| e.to_string())?
+        .get_text()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn clear_clipboard_image_cache(state: tauri::State<ClipboardImageCache>) -> Result<(), String> {
     state.0.lock().map_err(|e| e.to_string())?.clear();
     Ok(())
@@ -441,6 +467,8 @@ fn main() {
             cache_image_for_clipboard,
             copy_cached_image_to_clipboard,
             copy_image_data_url_to_clipboard,
+            read_image_from_clipboard,
+            read_text_from_clipboard,
             clear_clipboard_image_cache
         ])
         .on_window_event(|window, event| match event {
