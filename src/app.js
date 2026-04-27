@@ -2302,7 +2302,7 @@ async function _rebuildOffscreenAsync() {
   _offscreen.width  = boardCanvas.width;
   _offscreen.height = boardCanvas.height;
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
-  _offCtx.fillStyle = '#282828';
+  _offCtx.fillStyle = '#232322';
   _offCtx.fillRect(0, 0, _offscreen.width, _offscreen.height);
   _offCtx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
   setCanvasImageQuality(_offCtx);
@@ -2568,7 +2568,7 @@ function drawBoard() {
       // Draw all objects directly this frame while the rebuild is pending.
       _rebuildOffscreenAsync();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#282828';
+      ctx.fillStyle = '#232322';
       ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
       ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
       setCanvasImageQuality(ctx);
@@ -2637,7 +2637,7 @@ function drawBoard() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   } else {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#282828';
+    ctx.fillStyle = '#232322';
     ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
     setCanvasImageQuality(ctx);
