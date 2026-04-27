@@ -12,7 +12,7 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     outputs:
-      release_id: ${{ steps.create.outputs.id }}
+      release_id: ${{ steps.create.outputs.result }}
     steps:
       - name: Create draft release
         id: create

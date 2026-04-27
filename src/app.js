@@ -25,7 +25,7 @@ const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
-const DEBUG_TOOLS_ENABLED = true;
+const DEBUG_TOOLS_ENABLED = false;
 
 function exposeDebug(tools) {
   if (!DEBUG_TOOLS_ENABLED) return;
@@ -2883,15 +2883,6 @@ function getFirstSelectedObject() {
   return null;
 }
 
-function allSelectedAreImages() {
-  if (!selectedIds.size) return false;
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (!obj || obj.type !== 'image') return false;
-  }
-  return true;
-}
-
 // ─── Image store (keeps base64 data OUT of history snapshots) ─────────────────
 
 const imageStore = {};
@@ -2965,11 +2956,6 @@ function storeImage(src) {
   if (cachePromise) cachePromise.catch(() => {}).finally(() => ClipDebug.end(dbg, { key }));
   else ClipDebug.end(dbg, { key });
   return key;
-}
-
-function getImageSrc(obj) {
-  const src = imageStore[obj.data.imgKey];
-  return typeof src === 'string' ? src : '';
 }
 
 function imageNeedsRendering(obj) {
