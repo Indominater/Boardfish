@@ -25,6 +25,19 @@ const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
+const DEBUG_TOOLS_ENABLED = (() => {
+  try {
+    return localStorage.getItem('BoardfishDebug') === '1' ||
+      new URLSearchParams(window.location.search).has('debug');
+  } catch {
+    return false;
+  }
+})();
+
+function exposeDebug(tools) {
+  if (!DEBUG_TOOLS_ENABLED) return;
+  window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, tools);
+}
 
 // ─── Clipboard / image debugger ──────────────────────────────────────────────
 
@@ -32,6 +45,7 @@ const ClipDebug = (() => {
 
   const MAX_EVENTS = 600;
   let enabled = false;
+  let verbose = false;
   let nextOpId = 1;
   const events = [];
 
@@ -55,7 +69,7 @@ const ClipDebug = (() => {
     const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
     events.push(entry);
     if (events.length > MAX_EVENTS) events.shift();
-    console.debug('[Boardfish clipboard]', entry);
+    if (verbose) console.debug('[Boardfish clipboard]', entry);
   }
 
   function setRustDebug(value) {
@@ -63,11 +77,12 @@ const ClipDebug = (() => {
     window.__TAURI__.core.invoke('set_clipboard_debug', { enabled: value }).catch(() => {});
   }
 
-  function enable() {
+  function enable(options = {}) {
     enabled = true;
 
+    if (options.verbose === true) setVerbose(true);
     setRustDebug(true);
-    console.info('Boardfish clipboard debugger enabled. Use BoardfishDebug.clipboard.dump() or .summary().');
+    console.info('Boardfish clipboard debugger enabled. Events are buffered. Use BoardfishDebug.clipboard.phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
   }
 
   function disable() {
@@ -75,6 +90,11 @@ const ClipDebug = (() => {
 
     setRustDebug(false);
     console.info('Boardfish clipboard debugger disabled.');
+  }
+
+  function setVerbose(value) {
+    verbose = !!value;
+    console.info(`Boardfish clipboard verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
   }
 
   function start(op, meta = {}) {
@@ -87,6 +107,8 @@ const ClipDebug = (() => {
   function step(ctx, stepName, meta = {}) {
     if (!enabled || !ctx) return;
     const now = performance.now();
+    if (!ctx.steps) ctx.steps = {};
+    ctx.steps[stepName] = { ms: now - ctx.last, total: now - ctx.t0, meta: sanitize(meta) };
     push({
       id: ctx.id,
       op: ctx.op,
@@ -131,26 +153,64 @@ const ClipDebug = (() => {
       dt: e.dt,
       total: e.total,
       command: e.meta?.command || '',
+      path: e.meta?.path || '',
+      selectedCount: e.meta?.selectedCount ?? '',
+      objectCount: e.meta?.objectCount ?? '',
+      imageCount: e.meta?.imageCount ?? '',
+      imgKey: e.meta?.imgKey || '',
+      dataUrlLen: e.meta?.dataUrlLen ?? '',
+      blobSize: e.meta?.blobSize ?? '',
+      textLen: e.meta?.textLen ?? '',
+      seq: e.meta?.seq ?? '',
+      expected: e.meta?.expected ?? '',
+      current: e.meta?.current ?? '',
       error: e.meta?.error || '',
     }));
     console.table(rows);
     return rows;
   }
 
-  function clear() { events.length = 0; }
+  function phaseSummary() {
+    const rows = events.filter(e => e.step && e.step !== 'start').map(e => ({
+      step: e.step,
+      total: e.total,
+      dt: e.dt,
+      command: e.meta?.command || '',
+      path: e.meta?.path || '',
+      selectedCount: e.meta?.selectedCount ?? '',
+      objectCount: e.meta?.objectCount ?? '',
+      imageCount: e.meta?.imageCount ?? '',
+      imgKey: e.meta?.imgKey || '',
+      dataUrlLen: e.meta?.dataUrlLen ?? '',
+      blobSize: e.meta?.blobSize ?? '',
+      textLen: e.meta?.textLen ?? '',
+      seq: e.meta?.seq ?? '',
+      expected: e.meta?.expected ?? '',
+      current: e.meta?.current ?? '',
+      skipped: e.meta?.skipped ?? '',
+      error: e.meta?.error || '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function reset() { events.length = 0; }
+  const clear = reset;
 
 
-  return { enable, disable, start, step, end, invoke, dump, summary, clear, get events() { return events.slice(); } };
+  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, phaseSummary, reset, clear, get events() { return events.slice(); } };
 })();
 
-window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { clipboard: ClipDebug });
+exposeDebug({ clipboard: ClipDebug });
 
 const ViewportDebug = (() => {
   const MAX_EVENTS = 900;
+  const MAX_SLOW_RECORDS = 100;
   let enabled = false;
   let verbose = false;
   let nextOpId = 1;
   const events = [];
+  const slowRecords = [];
   const stats = {
     wheel: 0,
     wheelPan: 0,
@@ -166,6 +226,12 @@ const ViewportDebug = (() => {
     maxQueueMs: 0,
     lastRafGapMs: 0,
     maxRafGapMs: 0,
+    wheelHandlerCount: 0,
+    wheelHandlerTotalMs: 0,
+    maxWheelHandlerMs: 0,
+    mousePanHandlerCount: 0,
+    mousePanHandlerTotalMs: 0,
+    maxMousePanHandlerMs: 0,
     imageAdds: 0,
     imageLoads: 0,
     imageDecodes: 0,
@@ -173,6 +239,9 @@ const ViewportDebug = (() => {
     imageBitmapFailures: 0,
     clipboardPrecacheStarts: 0,
     clipboardPrecacheFailures: 0,
+    culledImages: 0,
+    culledText: 0,
+    croppedImages: 0,
     maxImageAddMs: 0,
     maxImageLoadMs: 0,
     maxImageDecodeMs: 0,
@@ -233,6 +302,12 @@ const ViewportDebug = (() => {
   function step(ctx, stepName, meta = {}) {
     if (!enabled || !ctx) return;
     const now = performance.now();
+    if (!ctx.steps) ctx.steps = {};
+    ctx.steps[stepName] = {
+      ms: meta?.ms ?? (now - ctx.last),
+      total: now - ctx.t0,
+      meta: sanitize(meta),
+    };
     push({
       id: ctx.id,
       op: ctx.op,
@@ -259,6 +334,17 @@ const ViewportDebug = (() => {
     stats[name] = Math.max(stats[name] || 0, value || 0);
   }
 
+  function timing(name, value) {
+    if (!enabled) return;
+    const ms = value || 0;
+    stats[`${name}Count`] = (stats[`${name}Count`] || 0) + 1;
+    stats[`${name}TotalMs`] = (stats[`${name}TotalMs`] || 0) + ms;
+    stats[`max${name[0].toUpperCase()}${name.slice(1)}Ms`] = Math.max(
+      stats[`max${name[0].toUpperCase()}${name.slice(1)}Ms`] || 0,
+      ms
+    );
+  }
+
   function frameStart(queueMs) {
     if (!enabled) return null;
     const now = performance.now();
@@ -267,14 +353,27 @@ const ViewportDebug = (() => {
     stats.lastRafGapMs = rafGap;
     stats.maxRafGapMs = Math.max(stats.maxRafGapMs, rafGap);
     stats.maxQueueMs = Math.max(stats.maxQueueMs, queueMs || 0);
-    return start('frame', { queueMs, rafGap, panX, panY, zoom });
+    const meta = { queueMs, rafGap, panX, panY, zoom };
+    const ctx = start('frame', meta);
+    if (ctx) ctx.startMeta = meta;
+    return ctx;
   }
 
   function frameEnd(ctx, meta = {}) {
     if (!enabled || !ctx) return;
     const total = performance.now() - ctx.t0;
     stats.maxFrameMs = Math.max(stats.maxFrameMs, total);
-    if (total > 16.7) stats.slowFrames++;
+    if (total > 16.7) {
+      stats.slowFrames++;
+      slowRecords.push({
+        id: ctx.id,
+        frameMs: Math.round(total * 100) / 100,
+        ...(ctx.startMeta || {}),
+        steps: ctx.steps || {},
+        ...sanitize(meta),
+      });
+      if (slowRecords.length > MAX_SLOW_RECORDS) slowRecords.shift();
+    }
     end(ctx, { ...meta, frameMs: total, slow: total > 16.7 });
   }
 
@@ -293,6 +392,10 @@ const ViewportDebug = (() => {
       { metric: 'maxFrameMs', value: Math.round(stats.maxFrameMs * 100) / 100 },
       { metric: 'maxQueueMs', value: Math.round(stats.maxQueueMs * 100) / 100 },
       { metric: 'maxRafGapMs', value: Math.round(stats.maxRafGapMs * 100) / 100 },
+      { metric: 'avgWheelHandlerMs', value: stats.wheelHandlerCount ? Math.round(stats.wheelHandlerTotalMs / stats.wheelHandlerCount * 100) / 100 : 0 },
+      { metric: 'maxWheelHandlerMs', value: Math.round(stats.maxWheelHandlerMs * 100) / 100 },
+      { metric: 'avgMousePanHandlerMs', value: stats.mousePanHandlerCount ? Math.round(stats.mousePanHandlerTotalMs / stats.mousePanHandlerCount * 100) / 100 : 0 },
+      { metric: 'maxMousePanHandlerMs', value: Math.round(stats.maxMousePanHandlerMs * 100) / 100 },
       { metric: 'imageAdds', value: stats.imageAdds },
       { metric: 'imageLoads', value: stats.imageLoads },
       { metric: 'imageDecodes', value: stats.imageDecodes },
@@ -300,6 +403,9 @@ const ViewportDebug = (() => {
       { metric: 'imageBitmapFailures', value: stats.imageBitmapFailures },
       { metric: 'clipboardPrecacheStarts', value: stats.clipboardPrecacheStarts },
       { metric: 'clipboardPrecacheFailures', value: stats.clipboardPrecacheFailures },
+      { metric: 'culledImages', value: stats.culledImages },
+      { metric: 'culledText', value: stats.culledText },
+      { metric: 'croppedImages', value: stats.croppedImages },
       { metric: 'maxImageAddMs', value: Math.round(stats.maxImageAddMs * 100) / 100 },
       { metric: 'maxImageLoadMs', value: Math.round(stats.maxImageLoadMs * 100) / 100 },
       { metric: 'maxImageDecodeMs', value: Math.round(stats.maxImageDecodeMs * 100) / 100 },
@@ -308,6 +414,110 @@ const ViewportDebug = (() => {
     ];
     console.table(rows);
     return rows;
+  }
+
+  function frameSummary() {
+    const starts = new Map();
+    for (const e of events) {
+      if (e.op === 'frame' && e.step === 'start') starts.set(e.id, e.meta || {});
+    }
+    const frames = events
+      .filter(e => e.op === 'frame' && e.step === 'end')
+      .map(e => ({ ...(starts.get(e.id) || {}), ...(e.meta || {}) }));
+    const sum = (field) => frames.reduce((n, row) => n + (Number(row[field]) || 0), 0);
+    const max = (field) => frames.reduce((n, row) => Math.max(n, Number(row[field]) || 0), 0);
+    const out = {
+      frames: frames.length,
+      slowFramesOver16ms: frames.filter(row => row.slow).length,
+      avgFrameMs: frames.length ? Math.round(sum('frameMs') / frames.length * 100) / 100 : 0,
+      maxFrameMs: Math.round(max('frameMs') * 100) / 100,
+      avgQueueMs: frames.length ? Math.round(sum('queueMs') / frames.length * 100) / 100 : 0,
+      maxQueueMs: Math.round(max('queueMs') * 100) / 100,
+      maxRafGapMs: Math.round(max('rafGap') * 100) / 100,
+      transformFrames: frames.filter(row => row.doTransform).length,
+      boardFrames: frames.filter(row => row.doBoard).length,
+      overlayFrames: frames.filter(row => row.doOverlay).length,
+    };
+    console.table([out]);
+    return out;
+  }
+
+  function drawSummary() {
+    const draws = events
+      .filter(e => e.op === 'drawBoard' && e.step === 'end' && !e.meta?.skipped)
+      .map(e => ({ ms: e.total, ...(e.meta || {}) }));
+    const sum = (field) => draws.reduce((n, row) => n + (Number(row[field]) || 0), 0);
+    const max = (field) => draws.reduce((n, row) => Math.max(n, Number(row[field]) || 0), 0);
+    const out = {
+      draws: draws.length,
+      avgDrawMs: draws.length ? Math.round(sum('ms') / draws.length * 100) / 100 : 0,
+      maxDrawMs: Math.round(max('ms') * 100) / 100,
+      avgDrawnImages: draws.length ? Math.round(sum('drawnImages') / draws.length * 100) / 100 : 0,
+      maxDrawnImages: max('drawnImages'),
+      avgCulledImages: draws.length ? Math.round(sum('culledImages') / draws.length * 100) / 100 : 0,
+      maxCulledImages: max('culledImages'),
+      avgBitmapImages: draws.length ? Math.round(sum('bitmapImages') / draws.length * 100) / 100 : 0,
+      avgElementImages: draws.length ? Math.round(sum('elementImages') / draws.length * 100) / 100 : 0,
+      avgCroppedImages: draws.length ? Math.round(sum('croppedImages') / draws.length * 100) / 100 : 0,
+      avgDrawnText: draws.length ? Math.round(sum('drawnText') / draws.length * 100) / 100 : 0,
+      avgCulledText: draws.length ? Math.round(sum('culledText') / draws.length * 100) / 100 : 0,
+    };
+    console.table([out]);
+    return out;
+  }
+
+  function slowFrames(limit = 20) {
+    const rows = slowRecords
+      .map(e => ({
+        id: e.id,
+        frameMs: e.frameMs ?? '',
+        queueMs: e.queueMs ?? '',
+        rafGap: e.rafGap ?? '',
+        sources: e.sources ?? '',
+        doTransform: e.doTransform ?? '',
+        doBoard: e.doBoard ?? '',
+        doOverlay: e.doOverlay ?? '',
+        applyTransformCallMs: e.steps?.applyTransformCall?.ms ?? '',
+        drawBoardMs: e.steps?.drawBoard?.ms ?? '',
+        updateSelectionOverlayMs: e.steps?.updateSelectionOverlay?.ms ?? '',
+      }))
+      .sort((a, b) => (b.frameMs || 0) - (a.frameMs || 0))
+      .slice(0, limit);
+    console.table(rows);
+    return rows;
+  }
+
+  function transformSummary() {
+    const stepsById = new Map();
+    const starts = new Map();
+    for (const e of events) {
+      if (e.op !== 'applyTransform') continue;
+      if (e.step === 'start') starts.set(e.id, e.meta || {});
+      else if (e.step !== 'end') {
+        if (!stepsById.has(e.id)) stepsById.set(e.id, {});
+        stepsById.get(e.id)[e.step] = e.meta?.ms ?? e.total ?? 0;
+      }
+    }
+    const rows = events
+      .filter(e => e.op === 'applyTransform' && e.step === 'end' && !e.meta?.skipped)
+      .map(e => ({ ...(starts.get(e.id) || {}), ...(stepsById.get(e.id) || {}), totalMs: e.total }));
+    const sum = (field) => rows.reduce((n, row) => n + (Number(row[field]) || 0), 0);
+    const max = (field) => rows.reduce((n, row) => Math.max(n, Number(row[field]) || 0), 0);
+    const out = {
+      transforms: rows.length,
+      avgTotalMs: rows.length ? Math.round(sum('totalMs') / rows.length * 100) / 100 : 0,
+      maxTotalMs: Math.round(max('totalMs') * 100) / 100,
+      avgDrawBoardMs: rows.length ? Math.round(sum('drawBoard') / rows.length * 100) / 100 : 0,
+      maxDrawBoardMs: Math.round(max('drawBoard') * 100) / 100,
+      avgZoomDisplayMs: rows.length ? Math.round(sum('updateZoomDisplay') / rows.length * 100) / 100 : 0,
+      maxZoomDisplayMs: Math.round(max('updateZoomDisplay') * 100) / 100,
+      avgSaveViewportMs: rows.length ? Math.round(sum('saveViewport') / rows.length * 100) / 100 : 0,
+      maxSaveViewportMs: Math.round(max('saveViewport') * 100) / 100,
+      avgOverlayMs: rows.length ? Math.round(sum('updateSelectionOverlay') / rows.length * 100) / 100 : 0,
+      maxOverlayMs: Math.round(max('updateSelectionOverlay') * 100) / 100,
+    };
+    console.table([out]);
+    return out;
   }
 
   function dump() {
@@ -322,14 +532,36 @@ const ViewportDebug = (() => {
 
   function reset() {
     events.length = 0;
+    slowRecords.length = 0;
     for (const key of Object.keys(stats)) stats[key] = 0;
     lastRafAt = 0;
   }
 
-  return { enable, disable, setVerbose, start, step, end, count, max, frameStart, frameEnd, summary, dump, reset, get events() { return events.slice(); }, get stats() { return { ...stats }; } };
+  return {
+    enable,
+    disable,
+    setVerbose,
+    start,
+    step,
+    end,
+    count,
+    max,
+    timing,
+    frameStart,
+    frameEnd,
+    summary,
+    frameSummary,
+    drawSummary,
+    transformSummary,
+    slowFrames,
+    dump,
+    reset,
+    get events() { return events.slice(); },
+    get stats() { return { ...stats }; },
+  };
 })();
 
-window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { viewport: ViewportDebug });
+exposeDebug({ viewport: ViewportDebug });
 
 // ─── Save debugger ───────────────────────────────────────────────────────────
 
@@ -452,12 +684,18 @@ const SaveDebug = (() => {
       command: e.meta?.command || '',
       objectCount: e.meta?.objectCount ?? '',
       imageCount: e.meta?.imageCount ?? '',
+      imageObjectCount: e.meta?.imageObjectCount ?? '',
       imageStoreBytes: e.meta?.imageStoreBytes ?? '',
       rawImageStoreBytes: e.meta?.rawImageStoreBytes ?? '',
+      largestImageBytes: e.meta?.largestImageBytes ?? '',
       jsonBytes: e.meta?.jsonBytes ?? '',
+      queueMs: e.meta?.queueMs ?? '',
+      elapsedMs: e.meta?.elapsedMs ?? '',
       rustSerializeMs: e.meta?.rust?.serialize_ms ?? '',
       rustWriteMs: e.meta?.rust?.write_ms ?? '',
+      rustZipMs: e.meta?.rust?.zip_ms ?? '',
       rustImageBytes: e.meta?.rust?.image_bytes ?? '',
+      rustImageCount: e.meta?.rust?.image_count ?? '',
       rustTotalMs: e.meta?.rust?.total_ms ?? '',
       error: e.meta?.error || '',
     }));
@@ -465,20 +703,59 @@ const SaveDebug = (() => {
     return rows;
   }
 
+  function phaseSummary() {
+    const rows = events
+      .filter(e => (
+        e.step === 'boardData' ||
+        e.step === 'json-stringify' ||
+        e.step.startsWith('await-image-source-cache') ||
+        e.step.startsWith('save-frame-probe') ||
+        (e.step === 'invoke:ok' && e.meta?.command === 'save_board') ||
+        e.step === 'markSaved:end' ||
+        e.step === 'end' ||
+        e.step === 'invoke:error'
+      ))
+      .map(e => ({
+        step: e.step,
+        total: e.total,
+        dt: e.dt,
+        command: e.meta?.command || '',
+        objectCount: e.meta?.objectCount ?? '',
+        imageCount: e.meta?.imageCount ?? '',
+        imageObjectCount: e.meta?.imageObjectCount ?? '',
+        imageStoreBytes: e.meta?.imageStoreBytes ?? '',
+        rawImageStoreBytes: e.meta?.rawImageStoreBytes ?? '',
+        jsonBytes: e.meta?.jsonBytes ?? e.meta?.rust?.json_bytes ?? '',
+        queueMs: e.meta?.queueMs ?? '',
+        elapsedMs: e.meta?.elapsedMs ?? '',
+        rustSerializeMs: e.meta?.rust?.serialize_ms ?? '',
+        rustWriteMs: e.meta?.rust?.write_ms ?? '',
+        rustZipMs: e.meta?.rust?.zip_ms ?? '',
+        rustImageBytes: e.meta?.rust?.image_bytes ?? '',
+        rustImageCount: e.meta?.rust?.image_count ?? '',
+        rustTotalMs: e.meta?.rust?.total_ms ?? '',
+        error: e.meta?.error || '',
+      }));
+    console.table(rows);
+    return rows;
+  }
+
   function reset() { events.length = 0; }
 
 
-  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
+  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, phaseSummary, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
 })();
 
-window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { save: SaveDebug });
+exposeDebug({ save: SaveDebug });
 
 // ─── Open debugger ───────────────────────────────────────────────────────────
 
 const OpenDebug = (() => {
-  const MAX_EVENTS = 300;
+  const MAX_EVENTS = 5000;
   let enabled = false;
   let verbose = false;
+  let hydrationMode = 'all-before-open';
+  let hydrationConcurrency = 8;
   let nextOpId = 1;
   const events = [];
 
@@ -529,6 +806,24 @@ const OpenDebug = (() => {
     verbose = !!value;
 
     console.info(`Boardfish open verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
+
+  function setHydrationMode(mode) {
+    const allowed = new Set(['all-before-open', 'visible-first']);
+    if (!allowed.has(mode)) {
+      console.warn(`[Boardfish open] Unknown hydration mode "${mode}". Use "all-before-open" or "visible-first".`);
+      return hydrationMode;
+    }
+    hydrationMode = mode;
+    console.info(`[Boardfish open] hydration mode set to ${hydrationMode}`);
+    return hydrationMode;
+  }
+
+  function setHydrationConcurrency(value) {
+    const n = Math.max(1, Math.min(32, Math.floor(Number(value) || hydrationConcurrency)));
+    hydrationConcurrency = n;
+    console.info(`[Boardfish open] hydration concurrency set to ${hydrationConcurrency}`);
+    return hydrationConcurrency;
   }
 
   function start(op, meta = {}) {
@@ -602,6 +897,7 @@ const OpenDebug = (() => {
       rustBoardJsonReadMs: e.meta?.rust?.board_json_read_ms ?? '',
       rustBoardJsonParseMs: e.meta?.rust?.board_json_parse_ms ?? '',
       rustImageReadMs: e.meta?.rust?.image_read_ms ?? '',
+      rustCacheInsertMs: e.meta?.rust?.cache_insert_ms ?? '',
       rustBase64Ms: e.meta?.rust?.base64_ms ?? '',
       rustImageBytes: e.meta?.rust?.image_bytes ?? '',
       rustTotalMs: e.meta?.rust?.total_ms ?? '',
@@ -611,13 +907,108 @@ const OpenDebug = (() => {
     return rows;
   }
 
+  function phaseSummary() {
+    const interesting = new Set([
+      'read-board-debug',
+      'apply-state',
+      'hydrate-initial-policy',
+      'hydrate-visible:end',
+      'hydrate-all:end',
+      'hydrate-background:done',
+      'initial-applyTransform',
+      'end',
+    ]);
+    const rows = events.filter(e => (
+      interesting.has(e.step) ||
+      (e.step === 'invoke:ok' && e.meta?.command && e.meta.command !== 'get_cached_image_data_url')
+    )).map(e => ({
+      step: e.step,
+      total: e.total,
+      dt: e.dt,
+      command: e.meta?.command || '',
+      objectCount: e.meta?.objectCount ?? '',
+      imageCount: e.meta?.imageCount ?? '',
+      count: e.meta?.count ?? '',
+      hydrated: e.meta?.hydrated ?? '',
+      remaining: e.meta?.remaining ?? '',
+      rustTotalMs: e.meta?.rust?.total_ms ?? '',
+      rustImageReadMs: e.meta?.rust?.image_read_ms ?? '',
+      rustCacheInsertMs: e.meta?.rust?.cache_insert_ms ?? '',
+      ms: e.meta?.ms ?? '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function hydrationSummary() {
+    const rows = events.filter(e => e.step === 'hydrate-image').map(e => e.meta || {});
+    const sum = (field) => rows.reduce((n, row) => n + (Number(row[field]) || 0), 0);
+    const max = (field) => rows.reduce((n, row) => Math.max(n, Number(row[field]) || 0), 0);
+    const countSource = (source) => rows.filter((row) => row.source === source).length;
+    const out = {
+      imageCount: rows.length,
+      assetImages: countSource('asset'),
+      fallbackDataUrlImages: countSource('data-url-fallback'),
+      totalDataUrlMB: Math.round(sum('dataUrlLen') / 1024 / 1024 * 100) / 100,
+      totalImageHydrateMs: Math.round(sum('ms') * 100) / 100,
+      totalFetchMs: Math.round(sum('fetchMs') * 100) / 100,
+      totalLoadMs: Math.round(sum('loadMs') * 100) / 100,
+      totalBitmapMs: Math.round(sum('bitmapMs') * 100) / 100,
+      maxImageMs: Math.round(max('ms') * 100) / 100,
+      maxFetchMs: Math.round(max('fetchMs') * 100) / 100,
+      concurrency: hydrationConcurrency,
+      mode: hydrationMode,
+    };
+    console.table([out]);
+    return out;
+  }
+
+  function slowImages(limit = 20) {
+    const rows = events
+      .filter(e => e.step === 'hydrate-image')
+      .map(e => ({
+        imgKey: e.meta?.imgKey || '',
+        totalMs: e.meta?.ms ?? '',
+        fetchMs: e.meta?.fetchMs ?? '',
+        loadMs: e.meta?.loadMs ?? '',
+        bitmapMs: e.meta?.bitmapMs ?? '',
+        dataUrlLen: e.meta?.dataUrlLen ?? '',
+        source: e.meta?.source ?? '',
+        bitmapReady: e.meta?.bitmapReady ?? '',
+      }))
+      .sort((a, b) => (b.totalMs || 0) - (a.totalMs || 0))
+      .slice(0, limit);
+    console.table(rows);
+    return rows;
+  }
+
   function reset() { events.length = 0; }
 
 
-  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
+  return {
+    enable,
+    disable,
+    setVerbose,
+    setHydrationMode,
+    setHydrationConcurrency,
+    start,
+    step,
+    end,
+    invoke,
+    dump,
+    summary,
+    phaseSummary,
+    hydrationSummary,
+    slowImages,
+    reset,
+    get enabled() { return enabled; },
+    get hydrationMode() { return hydrationMode; },
+    get hydrationConcurrency() { return hydrationConcurrency; },
+    get events() { return events.slice(); },
+  };
 })();
 
-window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { open: OpenDebug });
+exposeDebug({ open: OpenDebug });
 
 // ─── Export debugger ─────────────────────────────────────────────────────────
 const ExportDebug = (() => {
@@ -725,6 +1116,9 @@ const ExportDebug = (() => {
       total: e.total,
       imageCount: e.meta?.imageCount ?? '',
       dataUrlCount: e.meta?.dataUrlCount ?? '',
+      keyCount: e.meta?.keyCount ?? '',
+      tempKeyCount: e.meta?.tempKeyCount ?? '',
+      savedCount: e.meta?.savedCount ?? '',
       command: e.meta?.command || '',
       result: e.meta?.result ?? '',
       error: e.meta?.error || '',
@@ -733,12 +1127,492 @@ const ExportDebug = (() => {
     return rows;
   }
 
+  function phaseSummary() {
+    const rows = events
+      .filter(e => e.step && e.step !== 'start')
+      .map(e => ({
+        step: e.step,
+        total: e.total,
+        dt: e.dt,
+        command: e.meta?.command || '',
+        imageCount: e.meta?.imageCount ?? '',
+        keyCount: e.meta?.keyCount ?? '',
+        tempKeyCount: e.meta?.tempKeyCount ?? '',
+        dataUrlLen: e.meta?.dataUrlLen ?? '',
+        savedCount: e.meta?.savedCount ?? e.meta?.result ?? '',
+        result: e.meta?.result ?? '',
+        error: e.meta?.error || '',
+      }));
+    console.table(rows);
+    return rows;
+  }
+
   function reset() { events.length = 0; }
 
-  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
+  return { enable, disable, setVerbose, start, step, end, invoke, dump, summary, phaseSummary, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
 })();
 
-window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { export: ExportDebug });
+exposeDebug({ export: ExportDebug });
+
+const InsertDebug = (() => {
+  const MAX_EVENTS = 300;
+  let enabled = false;
+  let verbose = false;
+  let nextOpId = 1;
+  const events = [];
+
+  function round(value) { return Math.round((value || 0) * 100) / 100; }
+  function sanitize(meta = {}) {
+    const out = {};
+    for (const [key, value] of Object.entries(meta || {})) {
+      if (typeof value === 'string' && /dataUrl|src|base64/i.test(key)) out[`${key}Len`] = value.length;
+      else out[key] = value;
+    }
+    return out;
+  }
+  function push(evt) {
+    if (!enabled) return;
+    const entry = { at: round(performance.now()), ...evt };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    if (verbose) console.debug('[Boardfish insert]', entry);
+  }
+  function enable(options = {}) {
+    enabled = true;
+    if (options.verbose === true) setVerbose(true);
+    console.info('Boardfish insert debugger enabled. Use BoardfishDebug.insert.phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
+  }
+  function disable() {
+    enabled = false;
+    console.info('Boardfish insert debugger disabled.');
+  }
+  function setVerbose(value) {
+    verbose = !!value;
+    console.info(`Boardfish insert verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
+  function start(op, meta = {}) {
+    if (!enabled) return null;
+    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
+    push({ id: ctx.id, op, step: 'start', total: 0, dt: 0, meta: sanitize(meta) });
+    return ctx;
+  }
+  function step(ctx, stepName, meta = {}) {
+    if (!enabled || !ctx) return;
+    const now = performance.now();
+    push({ id: ctx.id, op: ctx.op, step: stepName, total: round(now - ctx.t0), dt: round(now - ctx.last), meta: sanitize(meta) });
+    ctx.last = now;
+  }
+  function end(ctx, meta = {}) {
+    if (!enabled || !ctx) return;
+    const now = performance.now();
+    push({ id: ctx.id, op: ctx.op, step: 'end', total: round(now - ctx.t0), dt: round(now - ctx.last), meta: sanitize(meta) });
+  }
+  function rows(filterStart = false) {
+    return events
+      .filter(e => !filterStart || e.step !== 'start')
+      .map(e => ({
+        id: e.id,
+        op: e.op,
+        step: e.step,
+        total: e.total,
+        dt: e.dt,
+        source: e.meta?.source || '',
+        fileCount: e.meta?.fileCount ?? '',
+        fileName: e.meta?.fileName || '',
+        fileSize: e.meta?.fileSize ?? '',
+        fileType: e.meta?.fileType || '',
+        dataUrlLen: e.meta?.dataUrlLen ?? '',
+        added: e.meta?.added ?? '',
+        skipped: e.meta?.skipped ?? '',
+        error: e.meta?.error || '',
+      }));
+  }
+  function phaseSummary() {
+    const out = rows(true);
+    console.table(out);
+    return out;
+  }
+  function summary() {
+    const out = rows(false);
+    console.table(out);
+    return out;
+  }
+  function dump() {
+    const flat = events.map(({ meta, ...rest }) => ({ ...rest, ...(meta || {}) }));
+    console.table(flat);
+    return events.slice();
+  }
+  function reset() { events.length = 0; }
+
+  return { enable, disable, setVerbose, start, step, end, phaseSummary, summary, dump, reset, get events() { return events.slice(); } };
+})();
+
+exposeDebug({ insert: InsertDebug });
+
+// ─── Export-all diagnostic ────────────────────────────────────────────────────
+// Usage (DevTools console):
+//   await BoardfishDebug.exportAllDiag.run()
+//
+// Probes why "Export All Images" silently fails on Windows with many images.
+// Suspected cause: Tauri IPC (WebView2 postMessage) has a lower effective payload
+// limit than macOS WKWebView. All data URLs are sent in a single invoke() call.
+//
+// The diagnostic runs in 3 phases without blocking your real board:
+//   Phase 1 — renders each image, measures individual + total payload size
+//   Phase 2 — JS-side JSON serialization probe (no side-effects, measures limits)
+//   Phase 3 — live IPC binary-search: sends doubling batches to save_images_to_folder
+//             (opens the folder picker ONCE; cancel to skip phase 3)
+const ExportAllDiag = (() => {
+  const WARN_MB  = 10;   // yellow warning
+  const FATAL_MB = 50;   // likely fatal on Windows WebView2
+
+  let _last = null;
+
+  function mb(bytes) { return Math.round(bytes / 1024 / 1024 * 100) / 100; }
+  function ms(t0)    { return Math.round((performance.now() - t0) * 10) / 10; }
+
+  async function run() {
+    if (!window.__TAURI__) {
+      console.warn('[exportAllDiag] Not inside Tauri — aborting.');
+      return null;
+    }
+
+    const imageObjs = (typeof objects !== 'undefined')
+      ? [...objects].filter(o => o.type === 'image')
+      : [];
+
+    if (!imageObjs.length) {
+      console.warn('[exportAllDiag] No image objects on this board.');
+      return null;
+    }
+
+    console.group(`%c[exportAllDiag] Diagnosing export of ${imageObjs.length} image(s) — IS_WIN=${IS_WIN}`,
+      'font-weight:bold');
+
+    // ── Phase 1: render + measure ──────────────────────────────────────────────
+    console.group('Phase 1: render each image, measure payload size');
+    const perImage = [];
+    let totalBytes = 0;
+
+    for (let i = 0; i < imageObjs.length; i++) {
+      const obj = imageObjs[i];
+      const t0 = performance.now();
+      let dataUrl = null, renderErr = null;
+      try { dataUrl = await getRenderedImageDataUrl(obj); }
+      catch (e) { renderErr = String(e); }
+      const renderMs = ms(t0);
+      const bytes = dataUrl ? dataUrl.length : 0;
+      const kb = Math.round(bytes / 1024 * 10) / 10;
+      totalBytes += bytes;
+
+      const row = { index: i, imgKey: obj.data?.imgKey ?? '?', renderMs, kb, ok: !!dataUrl && !renderErr, error: renderErr ?? undefined };
+      perImage.push({ ...row, dataUrl });
+      const style = row.ok ? '' : 'color:red';
+      console.log(`%c  [${i}] imgKey=${row.imgKey}  render=${renderMs}ms  ${kb}KB  ok=${row.ok}${renderErr ? '  ERR:'+renderErr : ''}`, style);
+    }
+
+    const totalMB = mb(totalBytes);
+    const validUrls = perImage.filter(r => r.ok).map(r => r.dataUrl);
+    const severity = totalMB > FATAL_MB ? 'FATAL' : totalMB > WARN_MB ? 'WARN' : 'OK';
+    const severityStyle = severity === 'FATAL' ? 'color:red;font-weight:bold' : severity === 'WARN' ? 'color:orange;font-weight:bold' : 'color:green';
+    console.log(`%cTotal payload: ${totalMB} MB | ${validUrls.length} renderable | severity=${severity}`, severityStyle);
+    if (severity === 'FATAL') console.error('[exportAllDiag] Payload almost certainly exceeds Tauri/WebView2 IPC limit on Windows');
+    else if (severity === 'WARN') console.warn('[exportAllDiag] Payload is large — may intermittently hit IPC limits on Windows');
+    console.groupEnd();
+
+    // ── Phase 2: JS-side JSON serialization probe (no side-effects) ───────────
+    // Measures whether stringify itself lags or throws, and confirms the payload
+    // sizes that will cross the wire. No Tauri calls, no folder pickers.
+    console.group('Phase 2: JS-side serialization probe (no side-effects)');
+    const serializeProbe = [];
+    let probeSize = 1;
+    while (probeSize <= validUrls.length) {
+      const batch = validUrls.slice(0, probeSize);
+      const batchBytes = batch.reduce((s, u) => s + u.length, 0);
+      const batchMB = mb(batchBytes);
+      const t0 = performance.now();
+      let jsOk = false, serErr = null;
+      try { JSON.stringify({ dataUrls: batch }); jsOk = true; }
+      catch (e) { serErr = String(e); }
+      const serMs = ms(t0);
+      serializeProbe.push({ count: probeSize, payloadMB: batchMB, serializeMs: serMs, jsOk, error: serErr ?? '' });
+      console.log(`  count=${probeSize}  payload=${batchMB}MB  serialize=${serMs}ms  jsOk=${jsOk}${serErr ? '  ERR:'+serErr : ''}`);
+      if (!jsOk) break;
+      probeSize = probeSize < validUrls.length ? Math.min(probeSize * 2, validUrls.length) : validUrls.length + 1;
+    }
+    console.groupEnd();
+
+    // ── Phase 3: live IPC binary-search ───────────────────────────────────────
+    // Calls save_images_to_folder with doubling batch sizes to find the exact
+    // count at which the IPC call fails. Opens the folder picker once per call.
+    // Press Cancel in the folder picker to abort phase 3 early (savedCount = 0
+    // on cancel, so we treat cancel as "user aborted" and stop probing).
+    console.group('Phase 3: live IPC binary-search (folder picker will open for each batch — cancel to skip)');
+    const ipcProbe = [];
+    let ipcSize = 1;
+    let ipcAborted = false;
+    while (!ipcAborted && ipcSize <= validUrls.length) {
+      const batch = validUrls.slice(0, ipcSize);
+      const batchMB = mb(batch.reduce((s, u) => s + u.length, 0));
+      console.log(`  Probing batch size=${ipcSize} (${batchMB} MB) — open folder picker…`);
+      const t0 = performance.now();
+      let savedCount = null, ipcOk = false, ipcErr = null;
+      try {
+        savedCount = await window.__TAURI__.core.invoke('save_images_to_folder', { dataUrls: batch });
+        ipcOk = true;
+        if (savedCount === 0) {
+          // User cancelled folder picker
+          console.log('  Folder picker cancelled — stopping phase 3.');
+          ipcAborted = true;
+        }
+      } catch (e) {
+        ipcErr = String(e);
+      }
+      const invokeMs = ms(t0);
+      const row = { count: ipcSize, payloadMB: batchMB, invokeMs, savedCount: savedCount ?? 0, ipcOk, error: ipcErr ?? '' };
+      ipcProbe.push(row);
+      const style = ipcOk ? '' : 'color:red;font-weight:bold';
+      console.log(`%c  → count=${ipcSize}  ${batchMB}MB  ${invokeMs}ms  savedCount=${savedCount}  ok=${ipcOk}${ipcErr ? '  ERR:'+ipcErr : ''}`, style);
+      if (!ipcOk || ipcAborted) break;
+      ipcSize = ipcSize < validUrls.length ? Math.min(ipcSize * 2, validUrls.length) : validUrls.length + 1;
+    }
+    if (!ipcAborted && ipcProbe.length) {
+      const lastOk = [...ipcProbe].reverse().find(r => r.ipcOk && r.savedCount > 0);
+      const firstFail = ipcProbe.find(r => !r.ipcOk);
+      if (firstFail) {
+        console.error(`%c[exportAllDiag] IPC FAILED at count=${firstFail.count} (${firstFail.payloadMB}MB): ${firstFail.error}`, 'color:red;font-weight:bold');
+        if (lastOk) console.log(`%c  Last successful batch: count=${lastOk.count} (${lastOk.payloadMB}MB)`, 'color:green');
+      } else {
+        console.log(`%c[exportAllDiag] All ${ipcProbe[ipcProbe.length-1].count} images exported successfully via IPC.`, 'color:green;font-weight:bold');
+      }
+    }
+    console.groupEnd();
+
+    // ── Report ─────────────────────────────────────────────────────────────────
+    const report = {
+      isWindows: IS_WIN,
+      imageCount: imageObjs.length,
+      renderableCount: validUrls.length,
+      totalPayloadMB: totalMB,
+      payloadSeverity: severity,
+      perImage: perImage.map(({ dataUrl: _, ...r }) => r),
+      serializeProbe,
+      ipcProbe,
+    };
+    console.group('Full report');
+    console.table(report.perImage);
+    console.table(report.serializeProbe);
+    if (ipcProbe.length) console.table(report.ipcProbe);
+    console.log('Full report → BoardfishDebug.exportAllDiag.last');
+    console.groupEnd();
+    console.groupEnd(); // top group
+
+    _last = report;
+    return report;
+  }
+
+  return {
+    run,
+    get last() { return _last; },
+  };
+})();
+
+exposeDebug({ exportAllDiag: ExportAllDiag });
+
+// ─── Text selection debugger ──────────────────────────────────────────────────
+// Diagnoses Windows text selection offset bugs.
+// Usage:
+//   BoardfishDebug.textSel.enable()      — start logging
+//   BoardfishDebug.textSel.summary()     — table of hit-test + draw events
+//   BoardfishDebug.textSel.report()      — line ranges + selected text with whitespace visible
+//   BoardfishDebug.textSel.selectAll()   — force select-all in the active text object
+//   BoardfishDebug.textSel.measure()     — measure current editing obj chars
+//   BoardfishDebug.textSel.reset()
+//   BoardfishDebug.textSel.disable()
+let _textSelDebugEnabled = false;
+const TextSelDebug = (() => {
+  const MAX = 400;
+  const events = [];
+  let nextId = 1;
+
+  function push(evt) {
+    if (!_textSelDebugEnabled) return;
+    events.push({ id: nextId++, at: Math.round(performance.now() * 10) / 10, ...evt });
+    if (events.length > MAX) events.shift();
+  }
+
+  function enable() {
+    _textSelDebugEnabled = true;
+    console.info(
+      '[textSel] enabled. Double-click a text object to edit it, then drag to select.' +
+      '\nUse BoardfishDebug.textSel.report(), .summary(), .measure(), .reset(), .disable()'
+    );
+  }
+  function disable() { _textSelDebugEnabled = false; console.info('[textSel] disabled.'); }
+
+  function summary() {
+    const rows = events.map(e => ({
+      id: e.id,
+      type: e.type,
+      wx: e.wx?.toFixed(2) ?? '',
+      baseX: e.baseX?.toFixed(2) ?? '',
+      wx_minus_baseX: e.wx != null && e.baseX != null ? (e.wx - e.baseX).toFixed(2) : '',
+      hitLine: e.hitLine ?? '',
+      returnedIdx: e.returnedIdx ?? '',
+      selStart: e.selStart ?? '',
+      selEnd: e.selEnd ?? '',
+      x1: e.x1?.toFixed(2) ?? '',
+      x2: e.x2?.toFixed(2) ?? '',
+      lineText: e.lineText ? e.lineText.slice(0, 30) : '',
+      note: e.note ?? '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function showWhitespace(text) {
+    return String(text ?? '')
+      .replace(/ /g, '·')
+      .replace(/\t/g, '→')
+      .replace(/\r/g, '\\r')
+      .replace(/\n/g, '\\n\n');
+  }
+
+  function report() {
+    if (typeof editingId === 'undefined' || !editingId) {
+      console.warn('[textSel] No text object being edited. Double-click a text object first.');
+      return null;
+    }
+    const obj = (typeof objectsMap !== 'undefined') && objectsMap.get(editingId);
+    if (!obj) { console.warn('[textSel] Editing object not found.'); return null; }
+    const value = _editEl?.value ?? obj.data.content ?? '';
+    const selStart = _editEl?.selectionStart ?? 0;
+    const selEnd = _editEl?.selectionEnd ?? 0;
+    const lines = getTextLayout(obj);
+    const rows = lines.map((line, i) => {
+      const textEnd = line.startIndex + line.text.length;
+      const nextStart = line.nextStartIndex ?? textEnd;
+      const skipped = value.slice(textEnd, nextStart);
+      return {
+        line: i,
+        start: line.startIndex,
+        textEnd,
+        nextStart,
+        selected: selEnd > line.startIndex && selStart < textEnd,
+        text: showWhitespace(line.text),
+        skippedAfter: showWhitespace(skipped),
+        width: Math.round(line.prefixWidths[line.text.length] * 100) / 100,
+      };
+    });
+    const payload = {
+      valueLength: value.length,
+      selectionStart: selStart,
+      selectionEnd: selEnd,
+      selectionDirection: _editEl?.selectionDirection || 'none',
+      selectedText: value.slice(selStart, selEnd),
+      visibleSelectedText: showWhitespace(value.slice(selStart, selEnd)),
+      rows,
+    };
+    console.group('[textSel] report');
+    console.log('selection', {
+      start: payload.selectionStart,
+      end: payload.selectionEnd,
+      direction: payload.selectionDirection,
+      selectedText: payload.visibleSelectedText,
+    });
+    console.table(rows);
+    console.groupEnd();
+    return payload;
+  }
+
+  function selectAll() {
+    if (typeof editingId === 'undefined' || !editingId || !_editEl) {
+      console.warn('[textSel] No text object being edited. Double-click a text object first.');
+      return null;
+    }
+    _editEl.focus({ preventScroll: true });
+    _editEl.setSelectionRange(0, _editEl.value.length, 'none');
+    _caretVisible = true;
+    _logSelection('debug-select-all', _editEl);
+    scheduleRender(true, false);
+    return report();
+  }
+
+  // Measure every character in the currently-edited object and report
+  // measured prefix widths vs what you'd expect from toWorld(mouse)
+  function measure() {
+    if (typeof editingId === 'undefined' || !editingId) {
+      console.warn('[textSel] No text object being edited. Double-click a text object first.');
+      return null;
+    }
+    const obj = (typeof objectsMap !== 'undefined') && objectsMap.get(editingId);
+    if (!obj) { console.warn('[textSel] Editing object not found.'); return null; }
+
+    const dpr = window.devicePixelRatio || 1;
+    const zm  = (typeof zoom !== 'undefined') ? zoom : 1;
+    console.group(`[textSel] measure() — obj.id=${obj.id}  dpr=${dpr}  zoom=${zm}`);
+    console.log(`obj.x=${obj.x}  obj.y=${obj.y}  obj.w=${obj.w}  TEXT_PAD=${TEXT_PAD}`);
+    console.log(`baseX (world) = obj.x + TEXT_PAD = ${obj.x + TEXT_PAD}`);
+    console.log(`baseX (screen) = baseX*zoom+panX = ${(obj.x + TEXT_PAD) * zm + (typeof panX !== 'undefined' ? panX : 0)}`);
+
+    const lines = (typeof getWrappedLines !== 'undefined') ? getWrappedLines(obj) : [];
+    for (const line of lines) {
+      const pw = (typeof getPrefixWidths !== 'undefined') ? getPrefixWidths(line.text) : null;
+      console.group(`line: "${line.text.slice(0,40)}${line.text.length>40?'…':''}" startIndex=${line.startIndex}`);
+      if (pw) {
+        const rows = Array.from({ length: line.text.length }, (_, i) => ({
+          char: JSON.stringify(line.text[i]),
+          charIndex: line.startIndex + i,
+          pw_start: pw[i].toFixed(3),
+          pw_end: pw[i+1].toFixed(3),
+          char_width: (pw[i+1] - pw[i]).toFixed(3),
+          midpoint_world: (obj.x + TEXT_PAD + pw[i] + (pw[i+1]-pw[i])/2).toFixed(3),
+          midpoint_screen: ((obj.x + TEXT_PAD + pw[i] + (pw[i+1]-pw[i])/2) * zm + (typeof panX !== 'undefined' ? panX : 0)).toFixed(3),
+        }));
+        console.table(rows);
+        console.log(`Total measured line width: ${pw[line.text.length].toFixed(3)} world px`);
+        console.log(`measureText full line: ${(typeof measureTextW !== 'undefined') ? measureTextW(line.text).toFixed(3) : '?'} world px`);
+      }
+      console.groupEnd();
+    }
+    console.groupEnd();
+    return lines;
+  }
+
+  function reset() { events.length = 0; nextId = 1; }
+
+  return { enable, disable, summary, report, selectAll, measure, reset, showWhitespace,
+    get enabled() { return _textSelDebugEnabled; },
+    get events() { return events.slice(); },
+    // Internal: called by layoutHitTest
+    _logHit(wx, wy, obj, line, returnedIdx, pw) {
+      if (!_textSelDebugEnabled) return;
+      const baseX = obj.x + TEXT_PAD;
+      push({ type: 'hit', wx, wy, baseX, hitLine: line?.text?.slice(0,30), returnedIdx,
+        pw0: pw?.[0], pw1: pw?.[1], pw2: pw?.[2], pw3: pw?.[3],
+        note: `wx-baseX=${(wx-baseX).toFixed(2)}` });
+    },
+    // Internal: called by selection draw
+    _logDraw(line, selStart, selEnd, x1, x2) {
+      if (!_textSelDebugEnabled) return;
+      push({ type: 'draw', lineText: line?.text?.slice(0,30), selStart, selEnd, x1, x2,
+        note: `width=${(x2-x1).toFixed(2)}` });
+    },
+    _logSelection(label, proxy) {
+      if (!_textSelDebugEnabled || !proxy) return;
+      const selStart = proxy.selectionStart ?? 0;
+      const selEnd = proxy.selectionEnd ?? 0;
+      push({
+        type: 'selection',
+        selStart,
+        selEnd,
+        note: `${label}: "${showWhitespace(proxy.value.slice(selStart, selEnd)).slice(0, 80)}"`,
+      });
+    },
+  };
+})();
+
+exposeDebug({ textSel: TextSelDebug });
 
 
 // ─── Viewport ─────────────────────────────────────────────────────────────────
@@ -779,7 +1653,7 @@ const PillDebug = (() => {
 
   return { enable, disable, reset, dump, summary, log, get enabled() { return enabled; } };
 })();
-window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, { pill: PillDebug });
+exposeDebug({ pill: PillDebug });
 
 function islSetWidth(text) {
   islMeasure.textContent = text;
@@ -788,10 +1662,19 @@ function islSetWidth(text) {
 
 let _lastZoomPct = -1;
 let _islMsgActive = false;
-function updateZoomDisplay() {
+let _lastZoomDisplayAt = 0;
+let _zoomDisplayTimer = null;
+function updateZoomDisplay(force = false) {
   if (_islMsgActive) return;
   const pct = Math.round(zoom * 100);
   if (pct === _lastZoomPct) return;
+  const now = performance.now();
+  if (!force && now - _lastZoomDisplayAt < 80) {
+    clearTimeout(_zoomDisplayTimer);
+    _zoomDisplayTimer = setTimeout(() => updateZoomDisplay(true), 90);
+    return;
+  }
+  _lastZoomDisplayAt = now;
   _lastZoomPct = pct;
   const text = pct + '%';
   islZoom.textContent = text;
@@ -853,6 +1736,10 @@ const LINE_H    = 24;
 const TEXT_PAD  = 4;
 const NEW_TEXT_EDIT_MIN_LINES = 3;
 const FONT      = `${FONT_SIZE}px 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif`;
+
+function normalizeTextContent(value) {
+  return String(value ?? '').replace(/\r\n?/g, '\n');
+}
 
 const _measureCanvas = document.createElement('canvas');
 const _measureCtx = _measureCanvas.getContext('2d');
@@ -927,6 +1814,7 @@ async function _rebuildOffscreenAsync() {
   _offCtx.fillStyle = '#1c1c1e';
   _offCtx.fillRect(0, 0, _offscreen.width, _offscreen.height);
   _offCtx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+  setCanvasImageQuality(_offCtx);
   _offCtx.font = FONT;
   _offCtx.textBaseline = 'top';
   for (const obj of objects) {
@@ -977,52 +1865,75 @@ function resizeCanvas() {
 
 // Wraps obj.data.content into lines with character-index tracking.
 // Cached by (id, content, w) — auto-invalidates on any change, never hits JSON.stringify.
-// Returns [{text: string, startIndex: number}]
+// Returns [{text: string, startIndex: number, endIndex: number, nextStartIndex: number}]
 function getWrappedLines(obj) {
   const cached = _linesCacheMap.get(obj.id);
   if (cached && cached.content === obj.data.content && cached.w === obj.w) return cached.lines;
 
   const maxW = obj.w - TEXT_PAD * 2;
   const result = [];
-  const paragraphs = obj.data.content.split('\n');
+
+  const isWrapSpace = (ch) => ch === ' ' || ch === '\t';
+  const pushLine = (start, end, nextStart = end) => {
+    result.push({
+      text: obj.data.content.slice(start, end),
+      startIndex: start,
+      endIndex: end,
+      nextStartIndex: nextStart,
+    });
+  };
+
   let paraStart = 0;
-  const spaceW = measureTextW(' ');
+  while (paraStart <= obj.data.content.length) {
+    const newlineAt = obj.data.content.indexOf('\n', paraStart);
+    const paraEnd = newlineAt === -1 ? obj.data.content.length : newlineAt;
 
-  for (const para of paragraphs) {
-    if (!para) {
-      result.push({ text: '', startIndex: paraStart });
-      paraStart++;
-      continue;
-    }
-    const words = para.split(' ');
-    // Prefix sums: pw[i] = width of words[0..i) joined with spaces
-    const pw = new Array(words.length + 1);
-    pw[0] = 0;
-    for (let i = 0; i < words.length; i++) {
-      pw[i + 1] = pw[i] + (i > 0 ? spaceW : 0) + measureTextW(words[i]);
-    }
-    // Width of words[s..e) joined with spaces (O(1), no allocation)
-    const rangeW = (s, e) => pw[e] - pw[s] - (s > 0 ? spaceW : 0);
-
-    let s = 0, withinPara = 0;
-    while (s < words.length) {
-      let lineText;
-      if (rangeW(s, words.length) <= maxW) {
-        lineText = words.slice(s).join(' '); s = words.length;
-      } else if (pw[s + 1] - pw[s] > maxW) {
-        lineText = words[s]; s++;
-      } else {
-        let lo = 1, hi = words.length - s - 1;
-        while (lo < hi) {
-          const mid = (lo + hi + 1) >> 1;
-          rangeW(s, s + mid) <= maxW ? lo = mid : hi = mid - 1;
+    if (paraStart === paraEnd) {
+      result.push({ text: '', startIndex: paraStart, endIndex: paraStart, nextStartIndex: paraStart });
+    } else {
+      let lineStart = paraStart;
+      while (lineStart < paraEnd) {
+        let lo = lineStart + 1;
+        let hi = paraEnd;
+        if (measureTextW(obj.data.content.slice(lineStart, lo)) > maxW) {
+          pushLine(lineStart, lo);
+          lineStart = lo;
+          continue;
         }
-        lineText = words.slice(s, s + lo).join(' '); s += lo;
+        while (lo < hi) {
+          const mid = Math.ceil((lo + hi + 1) / 2);
+          if (measureTextW(obj.data.content.slice(lineStart, mid)) <= maxW) lo = mid;
+          else hi = mid - 1;
+        }
+
+        let lineEnd = lo;
+        let nextStart = lineEnd;
+        if (lineEnd < paraEnd) {
+          let breakAt = -1;
+          for (let i = lineEnd; i > lineStart; i--) {
+            if (isWrapSpace(obj.data.content[i - 1])) {
+              breakAt = i - 1;
+              break;
+            }
+          }
+          if (breakAt > lineStart) {
+            lineEnd = breakAt;
+            nextStart = breakAt;
+            while (nextStart < paraEnd && isWrapSpace(obj.data.content[nextStart])) nextStart++;
+          }
+        }
+
+        if (lineEnd <= lineStart) {
+          lineEnd = Math.min(lineStart + 1, paraEnd);
+          nextStart = lineEnd;
+        }
+        pushLine(lineStart, lineEnd, nextStart);
+        lineStart = nextStart;
       }
-      result.push({ text: lineText, startIndex: paraStart + withinPara });
-      withinPara += lineText.length + 1;
     }
-    paraStart += para.length + 1;
+
+    if (newlineAt === -1) break;
+    paraStart = newlineAt + 1;
   }
 
   _linesCacheMap.set(obj.id, { content: obj.data.content, w: obj.w, lines: result });
@@ -1059,12 +1970,19 @@ function syncAllTextAutoHeights() {
 // Per-line layout for the editing object (world coords).
 // Prefix widths keep caret positions aligned with rendered glyphs without
 // allocating one object per character.
-// Each entry: { text, startIndex, y, prefixWidths }
+// Each entry: { text, startIndex, endIndex, nextStartIndex, y, prefixWidths }
 function calculateTextLayout(obj) {
   const lines = getWrappedLines(obj);
   return lines.map((line, i) => {
     const y = obj.y + TEXT_PAD + i * LINE_H;
-    return { text: line.text, startIndex: line.startIndex, y, prefixWidths: getPrefixWidths(line.text) };
+    return {
+      text: line.text,
+      startIndex: line.startIndex,
+      endIndex: line.endIndex,
+      nextStartIndex: line.nextStartIndex,
+      y,
+      prefixWidths: getPrefixWidths(line.text),
+    };
   });
 }
 
@@ -1092,13 +2010,32 @@ function layoutHitTest(layout, wx, wy, obj) {
   const baseX = obj.x + TEXT_PAD;
   const pw = line.prefixWidths;
   for (let j = 0; j < line.text.length; j++) {
-    if (wx < baseX + pw[j] + (pw[j + 1] - pw[j]) / 2) return line.startIndex + j;
+    if (wx < baseX + pw[j] + (pw[j + 1] - pw[j]) / 2) {
+      TextSelDebug._logHit(wx, wy, obj, line, line.startIndex + j, pw);
+      return line.startIndex + j;
+    }
   }
+  TextSelDebug._logHit(wx, wy, obj, line, line.startIndex + line.text.length, pw);
   return line.startIndex + line.text.length;
 }
 
+function drawImageObj(context, obj, img) {
+  const flipX = !!obj.data.flipX;
+  const flipY = !!obj.data.flipY;
+  if (flipX || flipY) {
+    context.save();
+    context.translate(obj.x + (flipX ? obj.w : 0), obj.y + (flipY ? obj.h : 0));
+    context.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+    context.drawImage(img, 0, 0, obj.w, obj.h);
+    context.restore();
+    return;
+  }
+
+  context.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+}
+
 // Draws a single non-editing object onto any canvas context (world coords).
-function drawSingleObj(context, obj) {
+function drawSingleObj(context, obj, counters = null) {
   if (obj.type === 'text') {
     context.fillStyle = '#ffffff';
     const lines = getWrappedLines(obj);
@@ -1106,20 +2043,15 @@ function drawSingleObj(context, obj) {
       context.fillText(lines[i].text, obj.x + TEXT_PAD, obj.y + TEXT_PAD + i * LINE_H);
     }
   } else if (obj.type === 'image') {
-    const bitmap = imageBitmapCache[obj.data.imgKey];
+    const key = obj.data.imgKey;
+    const bitmap = imageBitmapCache[key];
     const img = bitmap || (imageBitmapFailed.has(obj.data.imgKey) ? imageCache[obj.data.imgKey] : null);
     if (img && (bitmap || (img.complete && img.naturalWidth > 0))) {
-      const flipX = !!obj.data.flipX;
-      const flipY = !!obj.data.flipY;
-      if (flipX || flipY) {
-        context.save();
-        context.translate(obj.x + (flipX ? obj.w : 0), obj.y + (flipY ? obj.h : 0));
-        context.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-        context.drawImage(img, 0, 0, obj.w, obj.h);
-        context.restore();
-      } else {
-        context.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+      if (counters) {
+        if (bitmap) counters.bitmapImages++;
+        else counters.elementImages++;
       }
+      drawImageObj(context, obj, img);
     }
   }
 }
@@ -1133,6 +2065,7 @@ function drawBoard() {
   }
   let drawnImages = 0;
   let drawnText = 0;
+  const counters = { bitmapImages: 0, elementImages: 0, croppedImages: 0 };
   const dpr = window.devicePixelRatio || 1;
 
   if (editingId) {
@@ -1144,11 +2077,12 @@ function drawBoard() {
       ctx.fillStyle = '#1c1c1e';
       ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
       ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+      setCanvasImageQuality(ctx);
       ctx.font = FONT;
       ctx.textBaseline = 'top';
       for (const obj of objects) {
         if (obj.id === editingId) continue;
-        drawSingleObj(ctx, obj);
+        drawSingleObj(ctx, obj, counters);
         if (obj.type === 'image') drawnImages++;
         else if (obj.type === 'text') drawnText++;
       }
@@ -1173,13 +2107,14 @@ function drawBoard() {
       if (selStart !== selEnd) {
         ctx.fillStyle = 'rgba(10, 132, 255, 0.3)';
         for (const line of layout) {
-          const ls = line.startIndex, le = ls + line.text.length;
-          const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, le);
+          const ls = line.startIndex, textEnd = ls + line.text.length;
+          const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
           if (h0 < h1) {
             const o0 = h0 - ls, o1 = h1 - ls;
             const endX = lineEndX(line, obj);
             const x1 = o0 < line.text.length ? lineXAtOffset(line, obj, o0) : endX;
             const x2 = o1 < line.text.length ? lineXAtOffset(line, obj, o1) : endX;
+            TextSelDebug._logDraw(line, selStart, selEnd, x1, x2);
             ctx.fillRect(x1, line.y - (IS_WIN ? 5 : 1), x2 - x1, LINE_H);
           }
         }
@@ -1193,7 +2128,7 @@ function drawBoard() {
       if (selStart === selEnd && _caretVisible) {
         let cx = obj.x + TEXT_PAD, cy = obj.y + TEXT_PAD;
         for (const line of layout) {
-          const ls = line.startIndex, le = ls + line.text.length;
+          const ls = line.startIndex, le = line.endIndex ?? (ls + line.text.length);
           if (selStart >= ls && selStart <= le) {
             const off = selStart - ls;
             cx = off < line.text.length ? lineXAtOffset(line, obj, off) : lineEndX(line, obj);
@@ -1211,16 +2146,18 @@ function drawBoard() {
     ctx.fillStyle = '#1c1c1e';
     ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+    setCanvasImageQuality(ctx);
     ctx.font = FONT;
     ctx.textBaseline = 'top';
     for (const obj of objects) {
-      drawSingleObj(ctx, obj);
+      drawSingleObj(ctx, obj, counters);
       if (obj.type === 'image') drawnImages++;
       else if (obj.type === 'text') drawnText++;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
-  ViewportDebug.end(dbg, { drawnImages, drawnText });
+  ViewportDebug.count('croppedImages', counters.croppedImages);
+  ViewportDebug.end(dbg, { drawnImages, drawnText, culledImages: 0, culledText: 0, ...counters });
 }
 
 function hitTest(wx, wy) {
@@ -1231,7 +2168,7 @@ function hitTest(wx, wy) {
   return null;
 }
 
-function applyTransform() {
+function applyTransform(frameDbg = null) {
   const dbg = ViewportDebug.start('applyTransform', { editing: !!editingId, panX, panY, zoom, objectCount: objects.length, selectedCount: selectedIds.size });
   if (_boardOpening) {
     ViewportDebug.end(dbg, { skipped: 'board-opening' });
@@ -1240,16 +2177,24 @@ function applyTransform() {
   if (editingId) invalidateOffscreen();
   const drawStart = performance.now();
   drawBoard();
-  ViewportDebug.step(dbg, 'drawBoard', { ms: performance.now() - drawStart });
+  const drawMs = performance.now() - drawStart;
+  ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs });
+  ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs });
   const zoomStart = performance.now();
   updateZoomDisplay();
-  ViewportDebug.step(dbg, 'updateZoomDisplay', { ms: performance.now() - zoomStart });
+  const zoomMs = performance.now() - zoomStart;
+  ViewportDebug.step(dbg, 'updateZoomDisplay', { ms: zoomMs });
+  ViewportDebug.step(frameDbg, 'updateZoomDisplay', { ms: zoomMs });
   const saveStart = performance.now();
   saveViewport();
-  ViewportDebug.step(dbg, 'saveViewport', { ms: performance.now() - saveStart });
+  const saveMs = performance.now() - saveStart;
+  ViewportDebug.step(dbg, 'saveViewport', { ms: saveMs });
+  ViewportDebug.step(frameDbg, 'saveViewport', { ms: saveMs });
   const overlayStart = performance.now();
   updateSelectionOverlay();
-  ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
+  const overlayMs = performance.now() - overlayStart;
+  ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: overlayMs });
+  ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs });
   scheduleVisibleHydrationAfterIdle();
   ViewportDebug.end(dbg);
 }
@@ -1265,6 +2210,11 @@ let _needOverlayRender = false;
 let _frameScheduledAt = 0;
 let _frameSources = [];
 let _activeRenderSource = 'direct';
+
+function setCanvasImageQuality(context) {
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+}
 
 function withRenderSource(source, fn) {
   const prev = _activeRenderSource;
@@ -1299,8 +2249,10 @@ function scheduleFrame(source = 'unknown') {
 
     if (doTransform) {
       ViewportDebug.count('transformFrames');
-      withRenderSource(sources.join(',') || 'transform', () => applyTransform());
-      ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay });
+      const transformStart = performance.now();
+      withRenderSource(sources.join(',') || 'transform', () => applyTransform(frameDbg));
+      ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
+      ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sources.join(',') });
       return;
     }
     if (doBoard) {
@@ -1313,7 +2265,7 @@ function scheduleFrame(source = 'unknown') {
       updateSelectionOverlay();
       ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
     }
-    ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay });
+    ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sources.join(',') });
   });
 }
 
@@ -1351,7 +2303,7 @@ function newId() { return 'obj-' + (idCounter++); }
 function cloneObject(obj) {
   const data = obj.type === 'image'
     ? { imgKey: obj.data.imgKey, flipX: !!obj.data.flipX, flipY: !!obj.data.flipY }
-    : { content: obj.data.content };
+    : { content: normalizeTextContent(obj.data.content) };
   return {
     id: obj.id,
     type: obj.type,
@@ -1442,11 +2394,13 @@ function allSelectedAreImages() {
 
 const imageStore = {};
 const imageCache = {}; // key -> HTMLImageElement (for clipboard/metadata operations)
+const imageAssetUrlCache = {}; // key -> Tauri asset URL for display-only native images
 const imageBitmapCache = {}; // key -> ImageBitmap (GPU-resident, never evicted by WebKit)
 const imageBitmapFailed = new Set();
 const imageSourceCachePromises = new Map();
 const imageClipboardCachePromises = new Map();
 const imageHydrationPromises = new Map();
+const imageAssetMaterializePromises = new Map();
 let imgKeyCounter = 1;
 let _skipImageSourceRegistration = false;
 let _imageStoreGeneration = 0;
@@ -1577,6 +2531,57 @@ function loadImageElement(src) {
   });
 }
 
+function convertTauriFileSrc(path) {
+  if (window.__TAURI__?.core?.convertFileSrc) return window.__TAURI__.core.convertFileSrc(path);
+  if (window.__TAURI_INTERNALS__?.convertFileSrc) return window.__TAURI_INTERNALS__.convertFileSrc(path, 'asset');
+  return path;
+}
+
+async function materializeImageAssets(keys, dbg = null) {
+  const pending = keys.filter((key) => isNativeImageRef(imageStore[key]) && !imageAssetUrlCache[key]);
+  if (!pending.length || !window.__TAURI__) return 0;
+  const promiseKey = pending.slice().sort().join('|');
+  const existing = imageAssetMaterializePromises.get(promiseKey);
+  if (existing) return existing;
+  const generation = _imageStoreGeneration;
+  const promise = OpenDebug.invoke(
+    dbg,
+    'materialize_cached_image_sources',
+    { imgKeys: pending },
+    { count: pending.length }
+  )
+    .then((entries) => {
+      let count = 0;
+      if (generation !== _imageStoreGeneration) return 0;
+      for (const entry of entries || []) {
+        const key = entry.img_key || entry.imgKey;
+        if (!key || !entry.path || !isNativeImageRef(imageStore[key])) continue;
+        imageAssetUrlCache[key] = convertTauriFileSrc(entry.path);
+        count++;
+      }
+      OpenDebug.step(dbg, 'materialize-image-assets', { requested: pending.length, count });
+      return count;
+    })
+    .finally(() => imageAssetMaterializePromises.delete(promiseKey));
+  imageAssetMaterializePromises.set(promiseKey, promise);
+  return promise;
+}
+
+async function ensureImageDisplaySrc(key, dbg = null) {
+  if (imageAssetUrlCache[key]) return { src: imageAssetUrlCache[key], source: 'asset', dataUrlLen: 0 };
+  const stored = imageStore[key];
+  if (typeof stored === 'string') return { src: stored, source: 'data-url', dataUrlLen: stored.length };
+  if (!isNativeImageRef(stored)) return { src: '', source: 'missing', dataUrlLen: 0 };
+  try {
+    await materializeImageAssets([key], dbg);
+    if (imageAssetUrlCache[key]) return { src: imageAssetUrlCache[key], source: 'asset', dataUrlLen: 0 };
+  } catch (err) {
+    OpenDebug.step(dbg, 'materialize-image-assets:error', { imgKey: key, error: String(err) });
+  }
+  const dataUrl = await ensureImageDataUrl(key, dbg);
+  return { src: dataUrl, source: 'data-url-fallback', dataUrlLen: dataUrl?.length || 0 };
+}
+
 async function ensureImageDataUrl(key, dbg = null) {
   const src = imageStore[key];
   if (typeof src === 'string') return src;
@@ -1661,6 +2666,7 @@ function cacheImage(key, src, dbg = null, preCacheClipboard = true, loadedImg = 
           ViewportDebug.count('imageBitmaps');
           ViewportDebug.max('maxImageBitmapMs', bitmapMs);
           ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs });
+          return ensureImagePreviewBitmap(key, img, dbg);
         });
       })
       .catch((err) => {
@@ -1695,11 +2701,13 @@ function clearImageStore(clearNativeCaches = true) {
   _imageStoreGeneration++;
   for (const k of Object.keys(imageStore)) delete imageStore[k];
   for (const k of Object.keys(imageCache)) delete imageCache[k];
+  for (const k of Object.keys(imageAssetUrlCache)) delete imageAssetUrlCache[k];
   for (const k of Object.keys(imageBitmapCache)) { imageBitmapCache[k].close(); delete imageBitmapCache[k]; }
   imageBitmapFailed.clear();
   imageSourceCachePromises.clear();
   imageClipboardCachePromises.clear();
   imageHydrationPromises.clear();
+  imageAssetMaterializePromises.clear();
   _imageHydrationQueue.length = 0;
   _imageHydrationQueued.clear();
   _imageHydrationScheduled = false;
@@ -1783,6 +2791,9 @@ function restoreSnapshot(s) {
   const snapshotObjects = Array.isArray(s) ? s : (s?.objects || []);
   const editState = Array.isArray(s) ? null : (s?.editState || null);
   objects = cloneObjects(snapshotObjects);
+  for (const obj of objects) {
+    if (obj?.type === 'text') obj.data.content = normalizeTextContent(obj.data?.content);
+  }
   _dirtyIds.clear();
   _linesCacheMap.clear();
   _prefixCache.clear();
@@ -2197,6 +3208,13 @@ function enterEdit(id) {
 
   const obj = objectsMap.get(id);
   if (!obj) return;
+  const normalized = normalizeTextContent(obj.data.content);
+  if (normalized !== obj.data.content) {
+    obj.data.content = normalized;
+    delete obj._layoutCache;
+    _linesCacheMap.delete(obj.id);
+    markDirty(obj.id);
+  }
   obj._editStartContent = obj.data.content;
   obj._editMinLines = obj.data.content ? 1 : NEW_TEXT_EDIT_MIN_LINES;
   syncTextAutoHeight(obj, obj._editMinLines);
@@ -2213,7 +3231,14 @@ function enterEdit(id) {
 
   proxy.addEventListener('input', () => {
     markDirty(id);
-    obj.data.content = proxy.value;
+    obj.data.content = normalizeTextContent(proxy.value);
+    if (proxy.value !== obj.data.content) {
+      const start = proxy.selectionStart;
+      const end = proxy.selectionEnd;
+      const direction = proxy.selectionDirection || 'none';
+      proxy.value = obj.data.content;
+      proxy.setSelectionRange(start, end, direction);
+    }
     delete obj._layoutCache;
     const heightChanged = syncTextAutoHeight(obj, obj._editMinLines || 1);
     scheduleEditHistoryCheckpoint(id);
@@ -2221,6 +3246,14 @@ function enterEdit(id) {
   });
   proxy.addEventListener('keydown', (e) => {
     _caretVisible = true;
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      proxy.setSelectionRange(0, proxy.value.length, 'none');
+      TextSelDebug._logSelection('select-all', proxy);
+      scheduleRender(true, false);
+      return;
+    }
 
     // The 1px-wide proxy treats all content as a single column, so the browser's
     // own up/down logic navigates char-by-char instead of line-by-line. Intercept
@@ -2245,7 +3278,7 @@ function enterEdit(id) {
       let refLineIdx = layout.length - 1;
       for (let i = 0; i < layout.length; i++) {
         const ln = layout[i];
-        if (refPos >= ln.startIndex && refPos <= ln.startIndex + ln.text.length) {
+        if (refPos >= ln.startIndex && refPos <= (ln.endIndex ?? (ln.startIndex + ln.text.length))) {
           refLineIdx = i; break;
         }
       }
@@ -2290,6 +3323,7 @@ function enterEdit(id) {
     const s = proxy.selectionStart, e = proxy.selectionEnd;
     if (s === _prevSelStart && e === _prevSelEnd && _caretVisible) return;
     _prevSelStart = s; _prevSelEnd = e;
+    TextSelDebug._logSelection('selectionchange', proxy);
     _caretVisible = true;
     scheduleRender(true, false);
   };
@@ -2366,6 +3400,7 @@ function exitEdit() {
 // ─── Add objects ─────────────────────────────────────────────────────────────
 
 function addText(wx, wy, content = '') {
+  content = normalizeTextContent(content);
   let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
   if (content) {
     const lines = content.split('\n');
@@ -2395,46 +3430,50 @@ function hidePasteShield() {
 }
 
 function addImage(src, cx, cy, exactSize = false, existingImgKey = null, preCacheClipboard = true) {
-  const dbg = ViewportDebug.start('addImage', { src, cx, cy, exactSize, existingImgKey, preCacheClipboard });
-  const t0 = performance.now();
-  ViewportDebug.count('imageAdds');
-  if (!_boardOpening) showPasteShield();
-  const img = new Image();
-  img.onload = () => {
-    ViewportDebug.step(dbg, 'load', { width: img.naturalWidth, height: img.naturalHeight, ms: performance.now() - t0 });
-    let w = img.naturalWidth, h = img.naturalHeight;
-    if (!exactSize) {
-      const MAX = 600;
-      if (w > MAX || h > MAX) {
-        const scale = MAX / Math.max(w, h);
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
+  return new Promise((resolve) => {
+    const dbg = ViewportDebug.start('addImage', { src, cx, cy, exactSize, existingImgKey, preCacheClipboard });
+    const t0 = performance.now();
+    ViewportDebug.count('imageAdds');
+    if (!_boardOpening) showPasteShield();
+    const img = new Image();
+    img.onload = () => {
+      ViewportDebug.step(dbg, 'load', { width: img.naturalWidth, height: img.naturalHeight, ms: performance.now() - t0 });
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (!exactSize) {
+        const MAX = 600;
+        if (w > MAX || h > MAX) {
+          const scale = MAX / Math.max(w, h);
+          w = Math.round(w * scale);
+          h = Math.round(h * scale);
+        }
       }
-    }
-    ViewportDebug.step(dbg, 'size-object', { w, h });
-    const imgKey = existingImgKey || newImgKey();
-    imageStore[imgKey] = src;
-    cacheImage(imgKey, src, null, preCacheClipboard, img);
-    ViewportDebug.step(dbg, 'cache-registered', { imgKey });
-    const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
-    objects.push(obj);
-    objectsMap.set(obj.id, obj);
-    selectObject(obj.id);
-    scheduleRender(true, false, 'add-image');
-    pushHistory();
-    const total = performance.now() - t0;
-    ViewportDebug.max('maxImageAddMs', total);
-    ViewportDebug.end(dbg, { id: obj.id, imgKey, total });
-    if (!_boardOpening) hidePasteShield();
-  };
-  img.onerror = () => {
-    const total = performance.now() - t0;
-    ViewportDebug.max('maxImageAddMs', total);
-    ViewportDebug.end(dbg, { error: 'image load failed', total });
-    if (!_boardOpening) hidePasteShield();
-  };
-  img.src = src;
-  ViewportDebug.step(dbg, 'set-src', { src });
+      ViewportDebug.step(dbg, 'size-object', { w, h });
+      const imgKey = existingImgKey || newImgKey();
+      imageStore[imgKey] = src;
+      cacheImage(imgKey, src, null, preCacheClipboard, img);
+      ViewportDebug.step(dbg, 'cache-registered', { imgKey });
+      const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
+      objects.push(obj);
+      objectsMap.set(obj.id, obj);
+      selectObject(obj.id);
+      scheduleRender(true, false, 'add-image');
+      pushHistory();
+      const total = performance.now() - t0;
+      ViewportDebug.max('maxImageAddMs', total);
+      ViewportDebug.end(dbg, { id: obj.id, imgKey, total });
+      if (!_boardOpening) hidePasteShield();
+      resolve(obj);
+    };
+    img.onerror = () => {
+      const total = performance.now() - t0;
+      ViewportDebug.max('maxImageAddMs', total);
+      ViewportDebug.end(dbg, { error: 'image load failed', total });
+      if (!_boardOpening) hidePasteShield();
+      resolve(null);
+    };
+    img.src = src;
+    ViewportDebug.step(dbg, 'set-src', { src });
+  });
 }
 
 // ─── New board ───────────────────────────────────────────────────────────────
@@ -2534,31 +3573,36 @@ const EDIT_HISTORY_DEBOUNCE_MS = 500;
 
 
 canvas.addEventListener('wheel', (e) => {
+  const handlerStart = performance.now();
   const dbg = ViewportDebug.start('wheel', { deltaX: e.deltaX, deltaY: e.deltaY, ctrlKey: e.ctrlKey, metaKey: e.metaKey, panX, panY, zoom });
-  ViewportDebug.count('wheel');
-  e.preventDefault();
-  if (editingId) {
-    _caretVisible = true;
-  }
+  try {
+    ViewportDebug.count('wheel');
+    e.preventDefault();
+    if (editingId) {
+      _caretVisible = true;
+    }
   if (e.ctrlKey || e.metaKey) {
-    ViewportDebug.count('wheelZoom');
-    const factor = Math.abs(e.deltaY) < 30
-      ? Math.pow(0.995, e.deltaY)
-      : e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
-    panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
-    panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
-    zoom = newZoom;
-    scheduleTransform('wheel-zoom');
-    ViewportDebug.end(dbg, { mode: 'zoom', newZoom, panX, panY });
-    return;
-  }
+      ViewportDebug.count('wheelZoom');
+      const factor = Math.abs(e.deltaY) < 30
+        ? Math.pow(0.995, e.deltaY)
+        : e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
+      panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
+      panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
+      zoom = newZoom;
+      scheduleTransform('wheel-zoom');
+      ViewportDebug.end(dbg, { mode: 'zoom', newZoom, panX, panY });
+      return;
+    }
 
-  ViewportDebug.count('wheelPan');
-  panX -= e.deltaX;
-  panY -= e.deltaY;
-  scheduleTransform('wheel-pan');
-  ViewportDebug.end(dbg, { mode: 'pan', panX, panY });
+    ViewportDebug.count('wheelPan');
+    panX -= e.deltaX;
+    panY -= e.deltaY;
+    scheduleTransform('wheel-pan');
+    ViewportDebug.end(dbg, { mode: 'pan', panX, panY });
+  } finally {
+    ViewportDebug.timing('wheelHandler', performance.now() - handlerStart);
+  }
 }, { passive: false });
 
 // ─── Pan (spacebar + left click) ─────────────────────────────────────────────
@@ -2589,10 +3633,15 @@ canvas.addEventListener('mousedown', (e) => {
     const startX = e.clientX, startY = e.clientY;
     const startPanX = panX, startPanY = panY;
     function onMove(ev) {
-      ViewportDebug.count('mousePanMoves');
-      panX = startPanX + (ev.clientX - startX);
-      panY = startPanY + (ev.clientY - startY);
-      scheduleTransform('mouse-pan');
+      const handlerStart = performance.now();
+      try {
+        ViewportDebug.count('mousePanMoves');
+        panX = startPanX + (ev.clientX - startX);
+        panY = startPanY + (ev.clientY - startY);
+        scheduleTransform('mouse-pan');
+      } finally {
+        ViewportDebug.timing('mousePanHandler', performance.now() - handlerStart);
+      }
     }
     function onUp(ev) {
       if (ev.button !== 0) return;
@@ -2731,6 +3780,7 @@ canvas.addEventListener('mousedown', (e) => {
     if (_editEl) {
       _editEl.focus({ preventScroll: true });
       _editEl.setSelectionRange(clickIdx, clickIdx);
+      TextSelDebug._logSelection('mouse-down', _editEl);
       _caretVisible = true;
       scheduleRender(true, false);
     }
@@ -2739,6 +3789,7 @@ canvas.addEventListener('mousedown', (e) => {
       const endIdx = layoutHitTest(obj._layoutCache || layout, wp2.x, wp2.y, obj);
       if (_editEl) {
         _editEl.setSelectionRange(Math.min(clickIdx, endIdx), Math.max(clickIdx, endIdx));
+        TextSelDebug._logSelection('mouse-drag', _editEl);
         _caretVisible = true;
         scheduleRender(true, false);
       }
@@ -2928,15 +3979,49 @@ document.getElementById('btn-open').addEventListener('click', () => {
 });
 
 
-fileInput.addEventListener('change', () => {
+fileInput.addEventListener('change', async () => {
   const files = [...fileInput.files];
-  if (!files.length) return;
-  for (const file of files) {
-    const reader = new FileReader();
-    reader.onload = (ev) => addImage(ev.target.result, ctxPos.x, ctxPos.y);
-    reader.readAsDataURL(file);
-  }
+  await insertImageFiles(files, ctxPos.x, ctxPos.y, 'file-input');
 });
+
+async function insertDataUrlImage(dataUrl, x, y, dbg, options = {}) {
+  const addPromise = addImage(dataUrl, x, y, false, null, options.preCacheClipboard ?? true);
+  hidePasteShield();
+  const obj = await addPromise;
+  showPasteShield();
+  InsertDebug.end(dbg, { added: !!obj, ...(options.endMeta || {}) });
+  return obj;
+}
+
+async function insertImageFiles(files, x, y, source = 'file-input') {
+  const dbg = InsertDebug.start('insertImages', { source, fileCount: files.length });
+  if (!files.length) { InsertDebug.end(dbg, { source, skipped: 'no-files' }); return; }
+  let added = 0;
+  showPasteShield();
+  try {
+    for (const file of files) {
+      if (file.type !== 'image/png' && file.type !== 'image/jpeg') continue;
+      const fileDbg = InsertDebug.start('insertImage', { source, fileName: file.name, fileSize: file.size, fileType: file.type });
+      try {
+        InsertDebug.step(fileDbg, 'read:start', { source, fileName: file.name, fileSize: file.size, fileType: file.type });
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onerror = () => reject(reader.error || new Error('failed to read image file'));
+          reader.readAsDataURL(file);
+        });
+        InsertDebug.step(fileDbg, 'read:end', { source, dataUrl });
+        const obj = await insertDataUrlImage(dataUrl, x, y, fileDbg, { endMeta: { source } });
+        if (obj) added++;
+      } catch (err) {
+        InsertDebug.end(fileDbg, { source, error: String(err) });
+      }
+    }
+    InsertDebug.end(dbg, { source, fileCount: files.length, added });
+  } finally {
+    hidePasteShield();
+  }
+}
 
 document.addEventListener('click', () => {
   ctxMenu.classList.remove('visible');
@@ -3047,14 +4132,7 @@ document.addEventListener('dragover', (e) => {
 canvas.addEventListener('drop', (e) => {
   e.preventDefault();
   const pos = toWorld(e.clientX, e.clientY);
-  for (const file of [...e.dataTransfer.files]) {
-    if (file.type !== 'image/png' && file.type !== 'image/jpeg') continue;
-    showPasteShield();
-    const reader = new FileReader();
-    reader.onload = (ev) => { hidePasteShield(); addImage(ev.target.result, pos.x, pos.y); };
-    reader.onerror = () => hidePasteShield();
-    reader.readAsDataURL(file);
-  }
+  insertImageFiles([...e.dataTransfer.files], pos.x, pos.y, 'browser-drop');
 });
 
 // Tauri native drop — place at center of visible canvas (Rust drop position unreliable)
@@ -3062,20 +4140,28 @@ if (window.__TAURI__) {
   window.__TAURI__.event.listen('boardfish://file-drop', async (event) => {
     const { paths } = event.payload;
     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+    const dbg = InsertDebug.start('insertImages', { source: 'native-drop', fileCount: paths.length });
+    let added = 0;
+    showPasteShield();
     for (const path of paths) {
       if (!/\.(png|jpe?g)$/i.test(path)) continue;
-      showPasteShield();
+      const fileDbg = InsertDebug.start('insertImage', { source: 'native-drop', fileName: path });
       try {
+        InsertDebug.step(fileDbg, 'read:start', { source: 'native-drop', fileName: path });
         const b64 = await window.__TAURI__.core.invoke('read_binary_file_base64', { path });
         const ext = path.split('.').pop().toLowerCase();
         const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
-        hidePasteShield();
-        addImage('data:' + mime + ';base64,' + b64, center.x, center.y);
+        const dataUrl = 'data:' + mime + ';base64,' + b64;
+        InsertDebug.step(fileDbg, 'read:end', { source: 'native-drop', dataUrl });
+        const obj = await insertDataUrlImage(dataUrl, center.x, center.y, fileDbg, { endMeta: { source: 'native-drop' } });
+        if (obj) added++;
       } catch (err) {
-        hidePasteShield();
+        InsertDebug.end(fileDbg, { source: 'native-drop', error: String(err) });
         console.error('Failed to load dropped file:', err);
       }
     }
+    hidePasteShield();
+    InsertDebug.end(dbg, { source: 'native-drop', fileCount: paths.length, added });
   });
 }
 
@@ -3100,9 +4186,7 @@ function updateTitle() {
   const name = currentFilePath
     ? currentFilePath.split(/[\\/]/).pop().replace(/\.bf$/i, '')
     : 'Untitled';
-  const dot = isDirty() ? ' •' : '';
-  const title = 'Boardfish — ' + name + dot;
-  window.__TAURI__.core.invoke('set_title', { title });
+  window.__TAURI__.core.invoke('set_title', { title: `Boardfish — ${name}` });
 }
 
 
@@ -3311,49 +4395,118 @@ function getVisibleImageKeys(limit = Infinity) {
   return keys;
 }
 
+function getPendingNativeImageKeys(limit = Infinity, exclude = new Set()) {
+  const keys = [];
+  for (const key of Object.keys(imageStore)) {
+    if (exclude.has(key)) continue;
+    if (!isNativeImageRef(imageStore[key]) || imageCache[key]) continue;
+    keys.push(key);
+    if (keys.length >= limit) break;
+  }
+  return keys;
+}
+
 async function hydrateImageForDisplay(key, dbg = null) {
   if (imageCache[key] || !isNativeImageRef(imageStore[key])) return false;
   const t0 = performance.now();
-  const dataUrl = await ensureImageDataUrl(key, dbg);
-  const img = await loadImageElement(dataUrl);
+  const fetchStart = performance.now();
+  const display = await ensureImageDisplaySrc(key, dbg);
+  const fetchMs = performance.now() - fetchStart;
+  if (!display.src) return false;
+  const loadStart = performance.now();
+  const img = await loadImageElement(display.src);
+  const loadMs = performance.now() - loadStart;
   imageCache[key] = img;
+  let bitmapMs = 0;
+  let bitmapReady = false;
   try {
+    const bitmapStart = performance.now();
     imageBitmapCache[key] = await createImageBitmap(img);
+    bitmapMs = performance.now() - bitmapStart;
+    bitmapReady = true;
   } catch {
     imageBitmapFailed.add(key);
   }
-  OpenDebug.step(dbg, 'hydrate-visible-image', { imgKey: key, ms: performance.now() - t0, bitmapReady: !!imageBitmapCache[key] });
+  OpenDebug.step(dbg, 'hydrate-image', {
+    imgKey: key,
+    ms: performance.now() - t0,
+    fetchMs,
+    loadMs,
+    bitmapMs,
+    dataUrlLen: display.dataUrlLen,
+    source: display.source,
+    bitmapReady,
+  });
   return true;
+}
+
+async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDebug.hydrationConcurrency) {
+  OpenDebug.step(dbg, `${label}:start`, { count: keys.length, concurrency });
+  const t0 = performance.now();
+  await materializeImageAssets(keys, dbg).catch((err) => {
+    OpenDebug.step(dbg, `${label}:materialize-error`, { error: String(err) });
+  });
+  let cursor = 0;
+  let hydrated = 0;
+  async function worker() {
+    while (cursor < keys.length) {
+      const key = keys[cursor++];
+      try {
+        if (await hydrateImageForDisplay(key, dbg)) hydrated++;
+      } catch (err) {
+        OpenDebug.step(dbg, `${label}:error`, { imgKey: key, error: String(err) });
+      }
+    }
+  }
+  const workerCount = Math.min(concurrency, keys.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0 });
+  if (hydrated) invalidateOffscreen();
+  return hydrated;
 }
 
 async function hydrateVisibleImagesForOpen(dbg = null) {
   const keys = getVisibleImageKeys();
-  OpenDebug.step(dbg, 'hydrate-visible:start', { count: keys.length });
-  const t0 = performance.now();
-  const results = await Promise.all(keys.map((key) =>
-    hydrateImageForDisplay(key, dbg).catch((err) => {
-      OpenDebug.step(dbg, 'hydrate-visible:error', { imgKey: key, error: String(err) });
-      return false;
-    })
-  ));
-  const hydrated = results.filter(Boolean).length;
-  OpenDebug.step(dbg, 'hydrate-visible:end', { count: keys.length, hydrated, ms: performance.now() - t0 });
-  if (hydrated) invalidateOffscreen();
+  await hydrateImageKeysWithLimit(keys, dbg, 'hydrate-visible', OpenDebug.hydrationConcurrency);
+  return keys;
+}
+
+async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch') {
+  return hydrateImageKeysWithLimit(keys, dbg, label, OpenDebug.hydrationConcurrency);
 }
 
 async function hydrateAllImagesForOpen(dbg = null) {
-  const keys = Object.keys(imageStore).filter((key) => isNativeImageRef(imageStore[key]) && !imageCache[key]);
-  OpenDebug.step(dbg, 'hydrate-all:start', { count: keys.length });
-  const t0 = performance.now();
-  const results = await Promise.all(keys.map((key) =>
-    hydrateImageForDisplay(key, dbg).catch((err) => {
-      OpenDebug.step(dbg, 'hydrate-all:error', { imgKey: key, error: String(err) });
-      return false;
-    })
-  ));
-  const hydrated = results.filter(Boolean).length;
-  OpenDebug.step(dbg, 'hydrate-all:end', { count: keys.length, hydrated, ms: performance.now() - t0 });
-  if (hydrated) invalidateOffscreen();
+  const keys = getPendingNativeImageKeys();
+  return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
+}
+
+let _backgroundOpenHydrationRunning = false;
+async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
+  if (_backgroundOpenHydrationRunning) return;
+  _backgroundOpenHydrationRunning = true;
+  const generation = _imageStoreGeneration;
+  const totalStart = performance.now();
+  let batchCount = 0;
+  let hydratedTotal = 0;
+  try {
+    while (!_boardOpening && generation === _imageStoreGeneration) {
+      const keys = getPendingNativeImageKeys(batchSize);
+      if (!keys.length) break;
+      batchCount++;
+      hydratedTotal += await hydrateImageBatchForOpen(keys, dbg, 'hydrate-background');
+      scheduleRender(true, false, 'open-background-hydration');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  } finally {
+    _backgroundOpenHydrationRunning = false;
+    OpenDebug.step(dbg, 'hydrate-background:done', {
+      batchCount,
+      hydrated: hydratedTotal,
+      remaining: getPendingNativeImageKeys().length,
+      stale: generation !== _imageStoreGeneration,
+      ms: performance.now() - totalStart,
+    });
+  }
 }
 
 function queueVisibleImageHydration(limit = 3, dbg = null) {
@@ -3368,7 +4521,20 @@ function scheduleVisibleHydrationAfterIdle() {
 }
 
 async function finishOpenedBoard(dbg, data) {
-  await hydrateAllImagesForOpen(dbg);
+  if (OpenDebug.hydrationMode === 'visible-first') {
+    const visibleKeys = await hydrateVisibleImagesForOpen(dbg);
+    OpenDebug.step(dbg, 'hydrate-initial-policy', {
+      mode: 'visible-first',
+      visibleCount: visibleKeys?.length || 0,
+      pendingNativeImages: getPendingNativeImageKeys().length,
+    });
+  } else {
+    OpenDebug.step(dbg, 'hydrate-initial-policy', {
+      mode: 'all-before-open',
+      pendingNativeImages: getPendingNativeImageKeys().length,
+    });
+    await hydrateAllImagesForOpen(dbg);
+  }
   _boardOpening = false;
   const renderStart = performance.now();
   applyTransform();
@@ -3376,6 +4542,11 @@ async function finishOpenedBoard(dbg, data) {
   openingShield.classList.remove('active');
   restoreIslandZoom();
   OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
+  if (OpenDebug.hydrationMode === 'visible-first') {
+    setTimeout(() => hydrateRemainingImagesForOpen(dbg).catch((err) => {
+      OpenDebug.step(dbg, 'hydrate-background:error', { error: String(err) });
+    }), 80);
+  }
 }
 
 function applyBoardData(data, options = {}) {
@@ -3407,8 +4578,17 @@ function applyBoardData(data, options = {}) {
   selectedId = null;
   selectedIds.clear();
   objects = data.objects || [];
+  const normalizeStart = performance.now();
+  for (const obj of objects) {
+    if (obj?.type === 'text') obj.data.content = normalizeTextContent(obj.data?.content);
+  }
+  OpenDebug.step(dbg, 'normalize-text', { ms: performance.now() - normalizeStart });
+  const mapStart = performance.now();
   rebuildObjectsMap();
+  OpenDebug.step(dbg, 'rebuildObjectsMap', { ms: performance.now() - mapStart, objectCount: objects.length });
+  const heightStart = performance.now();
   syncAllTextAutoHeights();
+  OpenDebug.step(dbg, 'syncTextAutoHeights', { ms: performance.now() - heightStart });
   invalidateOffscreen();
   OpenDebug.step(dbg, 'apply-state', { ms: performance.now() - stateStart, objectCount: objects.length });
 
@@ -3557,6 +4737,7 @@ let _jsClipboardSequence = null;
 let _jsClipboardSequencePromise = null;
 let _jsClipboardNativeWritePending = false;
 let _jsClipboardToken = 0;
+let _pasteInProgress = false;
 
 async function getNativeClipboardSequence(dbg = null) {
   if (!window.__TAURI__) return null;
@@ -3810,6 +4991,32 @@ async function saveSelectedImage() {
   ExportDebug.end(dbg, { saved: true, method: 'download' });
 }
 
+// Resolves a list of image objects to img_keys for save_images_to_folder_by_keys.
+// Flipped images are rendered to a data URL, registered in the Rust image cache
+// under a temp key, and that temp key is used instead — keeping IPC payload tiny.
+async function resolveExportKeys(imageObjs, dbg) {
+  const tempKeys = [];
+  let renderedCount = 0;
+  const keys = await Promise.all(imageObjs.map(async (obj) => {
+    if (!imageNeedsRendering(obj)) return obj.data.imgKey;
+    const dataUrl = await getRenderedImageDataUrl(obj);
+    if (!dataUrl) return null;
+    const tempKey = `__export_tmp_${obj.id}`;
+    tempKeys.push(tempKey);
+    renderedCount++;
+    await ExportDebug.invoke(dbg, 'register_image_source', { imgKey: tempKey, dataUrl }, { imgKey: tempKey });
+    return tempKey;
+  }));
+  return { keys: keys.filter(Boolean), tempKeys, renderedCount };
+}
+
+function cleanupExportTempKeys(tempKeys) {
+  if (!tempKeys?.length || !window.__TAURI__) return;
+  window.__TAURI__.core
+    .invoke('remove_cached_image_sources', { imgKeys: tempKeys })
+    .catch((err) => console.warn('[export] remove_cached_image_sources failed:', err));
+}
+
 async function saveSelectedImages() {
   const dbg = ExportDebug.start('exportImages', { selectedCount: selectedIds.size });
   const selectedObjs = [];
@@ -3822,11 +5029,14 @@ async function saveSelectedImages() {
   ExportDebug.step(dbg, 'render:start', { imageCount: selectedObjs.length });
 
   if (window.__TAURI__) {
+    let tempKeys = [];
     try {
-      const dataUrls = (await Promise.all(selectedObjs.map(o => getRenderedImageDataUrl(o)))).filter(Boolean);
-      ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.length });
-      if (dataUrls.length < 2) { hidePasteShield(); ExportDebug.end(dbg, { skipped: true, reason: 'too-few-dataUrls' }); return; }
-      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
+      const resolved = await resolveExportKeys(selectedObjs, dbg);
+      const keys = resolved.keys;
+      tempKeys = resolved.tempKeys;
+      ExportDebug.step(dbg, 'render:done', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
+      if (keys.length < 2) { hidePasteShield(); ExportDebug.end(dbg, { skipped: true, reason: 'too-few-keys' }); return; }
+      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder_by_keys', { imgKeys: keys }, { keyCount: keys.length });
       ExportDebug.end(dbg, { savedCount });
       if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
       else hidePasteShield();
@@ -3834,6 +5044,8 @@ async function saveSelectedImages() {
       hidePasteShield();
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Save images failed:', err);
+    } finally {
+      cleanupExportTempKeys(tempKeys);
     }
     return;
   }
@@ -3857,11 +5069,14 @@ async function exportAllImages() {
   ExportDebug.step(dbg, 'render:start', { imageCount: imageObjs.length });
 
   if (window.__TAURI__) {
+    let tempKeys = [];
     try {
-      const dataUrls = (await Promise.all(imageObjs.map(o => getRenderedImageDataUrl(o)))).filter(Boolean);
-      ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.length });
-      if (!dataUrls.length) { hidePasteShield(); ExportDebug.end(dbg, { skipped: true, reason: 'no-dataUrls' }); return; }
-      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
+      const resolved = await resolveExportKeys(imageObjs, dbg);
+      const keys = resolved.keys;
+      tempKeys = resolved.tempKeys;
+      ExportDebug.step(dbg, 'render:done', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
+      if (!keys.length) { hidePasteShield(); ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' }); return; }
+      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder_by_keys', { imgKeys: keys }, { keyCount: keys.length });
       ExportDebug.end(dbg, { savedCount });
       if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
       else hidePasteShield();
@@ -3869,6 +5084,8 @@ async function exportAllImages() {
       hidePasteShield();
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Export all images failed:', err);
+    } finally {
+      cleanupExportTempKeys(tempKeys);
     }
     return;
   }
@@ -3924,109 +5141,124 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     jsClipboardType: jsClipboard?.type,
     clipboardData: describeClipboardData(clipboardData),
   });
-  if (jsClipboard && !(await jsClipboardStillCurrent(dbg))) {
-    ClipDebug.step(dbg, 'clear-stale-jsClipboard', { expectedSequence: _jsClipboardSequence });
-    clearJsClipboard();
-  }
-  if (jsClipboard) {
-    if (jsClipboard.type === 'objects') {
-      const clones = cloneObjects(jsClipboard.objects || []);
-      if (!clones.length) { ClipDebug.end(dbg, { skipped: 'empty-jsClipboard' }); return; }
-      // Re-register image data in case we're on a different board
-      const imgData = jsClipboard.imageData || {};
-      let registeredImages = 0;
-      for (const [key, src] of Object.entries(imgData)) {
-        if (!imageStore[key]) { imageStore[key] = src; cacheImage(key, src); registeredImages++; }
-      }
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const o of clones) {
-        minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
-        maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h);
-      }
-      const dx = wx - (minX + maxX) / 2, dy = wy - (minY + maxY) / 2;
-      selectedIds.clear();
-      for (const o of clones) {
-        o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
-        objects.push(o); objectsMap.set(o.id, o); selectedIds.add(o.id);
-      }
-      selectedId = clones[clones.length - 1].id;
-      scheduleRender(true, true); pushHistory();
-      ClipDebug.end(dbg, { path: 'jsClipboard', objectCount: clones.length, registeredImages, historyIndex });
-      return;
-    }
-  }
-  const eventImageRead = readClipboardImageDataUrlFromEvent(clipboardData, dbg);
-  if (eventImageRead) {
-    try {
-      const imgKey = newImgKey();
-      const dataUrl = await eventImageRead;
-      ClipDebug.step(dbg, 'event-image-read', { dataUrl });
-      addImage(dataUrl, wx, wy, false, imgKey);
-      ClipDebug.end(dbg, { path: 'event-image' });
-      return;
-    } catch (err) {
-      ClipDebug.step(dbg, 'event-image-miss', { error: String(err) });
-    }
-  }
-  const eventText = readClipboardTextFromEvent(clipboardData);
-  if (eventText && eventText.trim()) {
-    addText(wx - 100, wy - 40, eventText);
-    ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length });
+  if (_pasteInProgress) {
+    ClipDebug.end(dbg, { path: 'paste-busy', skipped: 'paste-in-progress' });
     return;
   }
-  if (!window.__TAURI__) {
-    try {
-      const imgKey = newImgKey();
-      const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
-      if (dataUrl) {
-        ClipDebug.step(dbg, 'browser-image-read', { dataUrl });
-        addImage(dataUrl, wx, wy, false, imgKey);
-        ClipDebug.end(dbg, { path: 'browser-image' });
-        return;
-      }
-    } catch (err) {
-      ClipDebug.step(dbg, 'browser-image-miss', { error: String(err) });
-    }
-  }
-  if (window.__TAURI__) {
-    try {
-      const imgKey = newImgKey();
-      showPasteShield();
-      const dataUrl = await ClipDebug.invoke(dbg, 'read_image_from_clipboard_cached', { imgKey }, { imgKey });
-      hidePasteShield();
-      ClipDebug.step(dbg, 'native-image-read', { dataUrl });
-      addImage(dataUrl, wx, wy, false, imgKey, false);
-      ClipDebug.end(dbg, { path: 'native-image' });
-      return;
-    } catch (err) {
-      hidePasteShield();
-      ClipDebug.step(dbg, 'native-image-miss', { error: String(err) });
-      try {
-        const text = await ClipDebug.invoke(dbg, 'read_text_from_clipboard');
-        if (text && text.trim()) addText(wx - 100, wy - 40, text);
-        ClipDebug.end(dbg, { path: 'native-text', textLen: text?.length || 0 });
-        return;
-      } catch (textErr) {
-        ClipDebug.end(dbg, { path: 'native-empty', error: String(textErr) });
-      }
-      return;
-    }
-  }
-  showPasteShield();
+  _pasteInProgress = true;
   try {
-    const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
-    hidePasteShield();
-    if (dataUrl) {
-      addImage(dataUrl, wx, wy);
-      ClipDebug.end(dbg, { path: 'web-image', dataUrlLen: dataUrl.length });
+    if (jsClipboard && !(await jsClipboardStillCurrent(dbg))) {
+      ClipDebug.step(dbg, 'clear-stale-jsClipboard', { expectedSequence: _jsClipboardSequence });
+      clearJsClipboard();
+    }
+    if (jsClipboard) {
+      if (jsClipboard.type === 'objects') {
+        const clones = cloneObjects(jsClipboard.objects || []);
+        if (!clones.length) { ClipDebug.end(dbg, { skipped: 'empty-jsClipboard' }); return; }
+        // Re-register image data in case we're on a different board
+        const imgData = jsClipboard.imageData || {};
+        let registeredImages = 0;
+        for (const [key, src] of Object.entries(imgData)) {
+          if (!imageStore[key]) { imageStore[key] = src; cacheImage(key, src); registeredImages++; }
+        }
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const o of clones) {
+          minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
+          maxX = Math.max(maxX, o.x + o.w); maxY = Math.max(maxY, o.y + o.h);
+        }
+        const dx = wx - (minX + maxX) / 2, dy = wy - (minY + maxY) / 2;
+        selectedIds.clear();
+        for (const o of clones) {
+          o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
+          objects.push(o); objectsMap.set(o.id, o); selectedIds.add(o.id);
+        }
+        selectedId = clones[clones.length - 1].id;
+        scheduleRender(true, true); pushHistory();
+        ClipDebug.end(dbg, { path: 'jsClipboard', objectCount: clones.length, registeredImages, historyIndex });
+        return;
+      }
+    }
+    const eventImage = readClipboardImageDataUrlFromEvent(clipboardData, dbg);
+    if (eventImage) {
+      try {
+        const imgKey = newImgKey();
+        showPasteShield();
+        const dataUrl = await eventImage;
+        ClipDebug.step(dbg, 'event-image-read', { dataUrl });
+        const addPromise = addImage(dataUrl, wx, wy, false, imgKey);
+        hidePasteShield();
+        await addPromise;
+        ClipDebug.end(dbg, { path: 'event-image' });
+        return;
+      } catch (err) {
+        hidePasteShield();
+        ClipDebug.step(dbg, 'event-image-miss', { error: String(err) });
+      }
+    }
+    const eventText = readClipboardTextFromEvent(clipboardData);
+    if (eventText && eventText.trim()) {
+      addText(wx - 100, wy - 40, eventText);
+      ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length });
       return;
     }
-    const text = await navigator.clipboard.readText();
-    if (text && text.trim()) addText(wx - 100, wy - 40, text);
-    ClipDebug.end(dbg, { path: 'web-text', textLen: text?.length || 0 });
-  } catch (err) {
-    hidePasteShield();
-    ClipDebug.end(dbg, { path: 'web-empty', error: String(err) });
+    if (!window.__TAURI__) {
+      try {
+        const imgKey = newImgKey();
+        const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
+        if (dataUrl) {
+          ClipDebug.step(dbg, 'browser-image-read', { dataUrl });
+          await addImage(dataUrl, wx, wy, false, imgKey);
+          ClipDebug.end(dbg, { path: 'browser-image' });
+          return;
+        }
+      } catch (err) {
+        ClipDebug.step(dbg, 'browser-image-miss', { error: String(err) });
+      }
+    }
+    if (window.__TAURI__) {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const imgKey = newImgKey();
+        showPasteShield();
+        const dataUrl = await ClipDebug.invoke(dbg, 'read_image_from_clipboard_cached', { imgKey }, { imgKey });
+        ClipDebug.step(dbg, 'native-image-read', { dataUrl });
+        const addPromise = addImage(dataUrl, wx, wy, false, imgKey, false);
+        hidePasteShield();
+        await addPromise;
+        ClipDebug.end(dbg, { path: 'native-image' });
+        return;
+      } catch (err) {
+        hidePasteShield();
+        ClipDebug.step(dbg, 'native-image-miss', { error: String(err) });
+        try {
+          const text = await ClipDebug.invoke(dbg, 'read_text_from_clipboard');
+          if (text && text.trim()) addText(wx - 100, wy - 40, text);
+          ClipDebug.end(dbg, { path: 'native-text', textLen: text?.length || 0 });
+          return;
+        } catch (textErr) {
+          ClipDebug.end(dbg, { path: 'native-empty', error: String(textErr) });
+        }
+        return;
+      }
+    }
+    showPasteShield();
+    try {
+      const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
+      hidePasteShield();
+      if (dataUrl) {
+        await addImage(dataUrl, wx, wy);
+        ClipDebug.end(dbg, { path: 'web-image', dataUrlLen: dataUrl.length });
+        return;
+      }
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) addText(wx - 100, wy - 40, text);
+      ClipDebug.end(dbg, { path: 'web-text', textLen: text?.length || 0 });
+    } catch (err) {
+      hidePasteShield();
+      ClipDebug.end(dbg, { path: 'web-empty', error: String(err) });
+    }
+  } finally {
+    _pasteInProgress = false;
   }
 }
 
@@ -4125,16 +5357,40 @@ document.addEventListener('contextmenu', (e) => {
   if (!e.defaultPrevented) e.preventDefault();
 });
 
-// Treat page reload the same as New Board: show unsaved-changes dialog if dirty.
+// Native unload handlers cannot wait for the custom async save dialog.
 window.addEventListener('beforeunload', (e) => {
   if (!isDirty()) return;
   e.preventDefault();
   e.returnValue = '';
-  setTimeout(async () => {
-    const choice = await showUnsavedDialog();
-    if (choice === 'save') await saveBoard();
-  }, 0);
 });
+
+function recoverWindowPaint(reason = 'resume') {
+  if (!_boardOpening && _pasteShieldCount === 0) openingShield.classList.remove('active');
+  if (dialogOverlay.classList.contains('show') && !_dialogResolve) dialogOverlay.classList.remove('show');
+  hideMenus();
+  document.body.style.display = 'none';
+  void document.body.offsetHeight;
+  document.body.style.display = '';
+  requestAnimationFrame(() => {
+    resizeCanvas();
+    updateZoomDisplay(true);
+    scheduleRender(true, true, reason);
+    requestAnimationFrame(() => {
+      applyTransform();
+      updateSelectionOverlay();
+    });
+  });
+}
+
+window.addEventListener('pageshow', () => recoverWindowPaint('pageshow'));
+window.addEventListener('focus', () => recoverWindowPaint('focus'));
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) recoverWindowPaint('visibility');
+});
+boardCanvas.addEventListener('contextlost', (event) => {
+  event.preventDefault();
+});
+boardCanvas.addEventListener('contextrestored', () => recoverWindowPaint('canvas-contextrestored'));
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -4143,7 +5399,7 @@ document.fonts?.ready.then(clearTextMeasurementCaches).catch(() => {});
 resizeCanvas();
 snapshot();
 islSetWidth('100%');
-updateZoomDisplay();
+updateZoomDisplay(true);
 updateTitle();
 
 

@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "macos")]
@@ -101,6 +101,7 @@ struct ImageSourceCache(Mutex<HashMap<String, CachedImageSource>>);
 static CLIPBOARD_DEBUG: AtomicBool = AtomicBool::new(false);
 static SAVE_DEBUG: AtomicBool = AtomicBool::new(false);
 static OPEN_DEBUG: AtomicBool = AtomicBool::new(false);
+static IMAGE_ASSET_BATCH_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 struct CachedClipboardImage {
@@ -215,6 +216,7 @@ struct BoardReadStats {
     image_count: usize,
     image_bytes: usize,
     image_read_ms: f64,
+    cache_insert_ms: f64,
     base64_ms: f64,
     total_ms: f64,
 }
@@ -390,15 +392,17 @@ async fn read_board(
     state: tauri::State<'_, ImageSourceCache>,
     path: String,
 ) -> Result<serde_json::Value, String> {
-    let result = tokio::task::spawn_blocking(move || read_board_file(&path))
+    let mut result = tokio::task::spawn_blocking(move || read_board_file(&path))
         .await
         .map_err(|e| e.to_string())??;
 
     {
+        let cache_start = std::time::Instant::now();
         let mut cache = state.0.lock().map_err(|e| e.to_string())?;
-        for (key, source) in result.sources {
+        for (key, source) in result.sources.drain(..) {
             cache.insert(key, source);
         }
+        result.stats.cache_insert_ms = cache_start.elapsed().as_secs_f64() * 1000.0;
     }
 
     Ok(serde_json::json!({
@@ -414,6 +418,7 @@ async fn read_board(
             "image_count": result.stats.image_count,
             "image_bytes": result.stats.image_bytes,
             "image_read_ms": result.stats.image_read_ms,
+            "cache_insert_ms": result.stats.cache_insert_ms,
             "base64_ms": result.stats.base64_ms,
             "total_ms": result.stats.total_ms,
         }
@@ -445,6 +450,79 @@ fn get_cached_image_data_url(
         source.mime,
         general_purpose::STANDARD.encode(&source.bytes)
     ))
+}
+
+fn sanitize_image_cache_key(key: &str) -> String {
+    key.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn image_source_cache_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("boardfish-image-cache")
+}
+
+fn image_source_batch_dir() -> std::path::PathBuf {
+    let batch = IMAGE_ASSET_BATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    image_source_cache_dir().join(format!("{}-{millis}-{batch}", std::process::id()))
+}
+
+fn image_source_file_path(
+    dir: &std::path::Path,
+    key: &str,
+    source: &CachedImageSource,
+) -> std::path::PathBuf {
+    let key = sanitize_image_cache_key(key);
+    let ext = sanitize_image_cache_key(&source.ext);
+    dir.join(format!("{key}.{ext}"))
+}
+
+#[tauri::command]
+async fn materialize_cached_image_sources(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_keys: Vec<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let sources = {
+        let cache = state.0.lock().map_err(|e| e.to_string())?;
+        let mut sources = Vec::with_capacity(img_keys.len());
+        for key in img_keys {
+            let source = cache
+                .get(&key)
+                .cloned()
+                .ok_or_else(|| format!("image source cache missing for {key}"))?;
+            sources.push((key, source));
+        }
+        sources
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let dir = image_source_batch_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let mut result = Vec::with_capacity(sources.len());
+        for (key, source) in sources {
+            let path = image_source_file_path(&dir, &key, &source);
+            std::fs::write(&path, &source.bytes).map_err(|e| e.to_string())?;
+            result.push(serde_json::json!({
+                "img_key": key,
+                "path": path.to_string_lossy(),
+                "mime": source.mime,
+                "bytes": source.bytes.len(),
+            }));
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -601,6 +679,21 @@ async fn register_image_source(
 }
 
 #[tauri::command]
+fn remove_cached_image_sources(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_keys: Vec<String>,
+) -> Result<usize, String> {
+    let mut cache = state.0.lock().map_err(|e| e.to_string())?;
+    let mut removed = 0usize;
+    for key in img_keys {
+        if cache.remove(&key).is_some() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
 async fn save_images_to_folder(
     app: tauri::AppHandle,
     data_urls: Vec<String>,
@@ -649,6 +742,78 @@ async fn save_images_to_folder(
         };
         let filename = format!("image_{}.{}", hex, ext);
         if tokio::fs::write(base.join(filename), &bytes).await.is_ok() {
+            saved_count += 1;
+        }
+    }
+
+    Ok(saved_count)
+}
+
+#[tauri::command]
+async fn save_images_to_folder_by_keys(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, ImageSourceCache>,
+    img_keys: Vec<String>,
+) -> Result<usize, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    if img_keys.is_empty() {
+        return Ok(0);
+    }
+
+    let sources: Vec<(String, CachedImageSource)> = {
+        let cache = state.0.lock().map_err(|e| e.to_string())?;
+        let mut sources = Vec::with_capacity(img_keys.len());
+        let mut missing = Vec::new();
+        for key in &img_keys {
+            if let Some(source) = cache.get(key) {
+                sources.push((key.clone(), source.clone()));
+            } else {
+                missing.push(key.clone());
+            }
+        }
+        if !missing.is_empty() {
+            return Err(format!(
+                "image source cache missing for {}",
+                missing.join(", ")
+            ));
+        }
+        sources
+    };
+
+    if sources.is_empty() {
+        return Ok(0);
+    }
+
+    let folder = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .blocking_pick_folder()
+            .map(|p| p.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(folder) = folder else {
+        return Ok(0);
+    };
+
+    let base = std::path::PathBuf::from(folder);
+    let mut saved_count = 0usize;
+
+    for (i, (_key, source)) in sources.iter().enumerate() {
+        let hex = {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos() as u64)
+                .unwrap_or(i as u64);
+            format!("{:06x}", (nanos ^ (i as u64 * 0x9e3779b9)) & 0xFFFFFF)
+        };
+        let filename = format!("image_{}.{}", hex, source.ext);
+        if tokio::fs::write(base.join(filename), &*source.bytes)
+            .await
+            .is_ok()
+        {
             saved_count += 1;
         }
     }
@@ -1091,10 +1256,12 @@ fn main() {
             read_text_file,
             read_binary_file_base64,
             get_cached_image_data_url,
+            materialize_cached_image_sources,
             open_file_dialog,
             save_file_dialog,
             save_image_as,
             save_images_to_folder,
+            save_images_to_folder_by_keys,
             set_title,
             exit_app,
             cancel_pending_termination,
@@ -1104,6 +1271,7 @@ fn main() {
             set_save_debug,
             set_open_debug,
             register_image_source,
+            remove_cached_image_sources,
             cache_image_for_clipboard,
             copy_cached_image_to_clipboard,
             copy_cached_image_to_clipboard_transformed,
@@ -1128,10 +1296,12 @@ fn main() {
             _ => {}
         })
         .setup(|app| {
-            let app_handle = app.handle().clone();
+            #[cfg(not(target_os = "macos"))]
+            let _ = app;
 
             #[cfg(target_os = "macos")]
             {
+                let app_handle = app.handle().clone();
                 let pkg_info = app_handle.package_info();
                 let config = app_handle.config();
                 let about_metadata = AboutMetadata {
