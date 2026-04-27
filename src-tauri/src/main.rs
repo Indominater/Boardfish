@@ -1300,8 +1300,10 @@ fn main() {
             let _ = app;
 
             #[cfg(target_os = "macos")]
+            let app_handle = app.handle().clone();
+
+            #[cfg(target_os = "macos")]
             {
-                let app_handle = app.handle().clone();
                 let pkg_info = app_handle.package_info();
                 let config = app_handle.config();
                 let about_metadata = AboutMetadata {
@@ -1401,6 +1403,7 @@ fn main() {
 
             #[cfg(target_os = "macos")]
             unsafe {
+                // Keep the close confirmation path alive for Cmd+Q and dock quits.
                 setup_termination_intercept(app_handle.clone());
             }
 
