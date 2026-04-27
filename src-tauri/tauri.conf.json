@@ -15,7 +15,8 @@
         "title": "Boardfish",
         "width": 1280,
         "height": 800,
-        "theme": "Dark"
+        "theme": "Dark",
+        "backgroundColor": "#1c1c1e"
       }
     ],
     "security": {
