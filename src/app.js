@@ -25,7 +25,13 @@ const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
-const DEBUG_TOOLS_ENABLED = false;
+const DEBUG_TOOLS_ENABLED = (() => {
+  try {
+    return localStorage.getItem('bf_debug_tools') === '1';
+  } catch (_) {
+    return false;
+  }
+})();
 
 function exposeDebug(tools) {
   if (!DEBUG_TOOLS_ENABLED) return;
@@ -1864,17 +1870,101 @@ const PillDebug = (() => {
         width: e.offsetWidth,
         styleWidth: e.styleWidth,
         color: e.color,
+        propertyName: e.propertyName ?? '',
+        elapsedTime: e.elapsedTime ?? '',
+        reason: e.reason ?? '',
+        sampleMs: e.sampleMs ?? '',
+        sampleWidth: e.sampleWidth ?? '',
+        targetWidth: e.targetWidth ?? '',
         longTaskMs: e.longTaskMs ?? '',
       });
     }
     console.table(rows);
     return rows;
   }
+
+  function widthSamples() {
+    const rows = events
+      .filter(e => e.event === 'pill-sample')
+      .map(e => ({
+        label: e.label,
+        sampleMs: e.sampleMs,
+        sampleWidth: e.sampleWidth,
+        startWidth: e.startWidth,
+        targetWidth: e.targetWidth,
+        textAlpha: e.textAlpha,
+        text: e.text,
+        color: e.color,
+      }));
+    console.table(rows);
+    return rows;
+  }
+
+  function animationSamples() {
+    const rows = events
+      .filter(e => (
+        e.event === 'pill-sample' ||
+        e.event === 'pill-frame-ready' ||
+        e.event === 'pill-frame-wait-timeout' ||
+        e.event === 'transitionstart' ||
+        e.event === 'transitionend' ||
+        e.event === 'transitioncancel'
+      ))
+      .map(e => ({
+        t: e.t,
+        event: e.event,
+        label: e.label ?? '',
+        propertyName: e.propertyName ?? '',
+        sampleMs: e.sampleMs ?? '',
+        frameGapMs: e.frameGapMs ?? '',
+        stableFrames: e.stableFrames ?? '',
+        width: e.sampleWidth ?? e.offsetWidth,
+        startWidth: e.startWidth ?? '',
+        targetWidth: e.targetWidth ?? '',
+        textAlpha: e.textAlpha ?? '',
+        text: e.text,
+        color: e.color,
+      }));
+    console.table(rows);
+    return rows;
+  }
+
+  function samplePillAnimation(label, durationMs = 1100) {
+    if (!enabled) return;
+    const start = performance.now();
+    const startWidth = islZoom.getBoundingClientRect().width;
+    const targetWidth = parseFloat(islZoom.style.width) || parseFloat(getComputedStyle(islZoom).width) || startWidth;
+    const tick = () => {
+      if (!enabled) return;
+      const now = performance.now();
+      const sampleMs = now - start;
+      push('pill-sample', {
+        label,
+        sampleMs,
+        sampleWidth: islZoom.getBoundingClientRect().width,
+        startWidth,
+        targetWidth,
+        textAlpha: islandTextAlpha(),
+      });
+      if (sampleMs < durationMs) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  function largestSampleGap(label = null) {
+    const samples = events.filter(e => e.event === 'pill-sample' && (!label || e.label === label));
+    let largest = 0;
+    for (let i = 1; i < samples.length; i++) {
+      largest = Math.max(largest, Number(samples[i].sampleMs) - Number(samples[i - 1].sampleMs));
+    }
+    return round(largest);
+  }
+
   function diagnose() {
     const longTasks = events.filter(e => e.event === 'longtask');
     const bigLongTasks = longTasks.filter(e => Number(e.longTaskMs) >= 100);
     const restoreStart = events.find(e => e.event === 'restoreIslandZoom:start');
-    const restoreWidth = events.find(e => e.event === 'restoreIslandZoom:width-text-set');
+    const restoreWidth = events.find(e => e.event === 'restoreIslandZoom:text-set');
     const restoreShown = events.find(e => e.event === 'restoreIslandZoom:shown');
     const forcedTransparent = events.find(e => e.event === 'forceIslandTextTransparent');
     const openingRender = events.find(e => e.event === 'open:initial-applyTransform:end');
@@ -1889,6 +1979,10 @@ const PillDebug = (() => {
 
     if (bigLongTasks.length) {
       findings.push(`${bigLongTasks.length} long main-thread task(s) over 100ms occurred while the pill was animating or opening.`);
+    }
+    const restoreGap = largestSampleGap('restoreIslandZoom');
+    if (restoreGap >= 80) {
+      findings.push(`Restore animation missed frames; largest sample gap was ${restoreGap}ms.`);
     }
     if (openingRender && Number(openingRender.phaseMs) >= 100) {
       findings.push(`Initial board render took ${openingRender.phaseMs}ms before the pill restored to zoom.`);
@@ -1909,6 +2003,7 @@ const PillDebug = (() => {
       eventCount: events.length,
       longTaskCount: longTasks.length,
       maxLongTaskMs: longTasks.reduce((n, e) => Math.max(n, Number(e.longTaskMs) || 0), 0),
+      restoreLargestSampleGapMs: restoreGap,
     };
     console.table(report.findings.map(finding => ({ finding })));
     return report;
@@ -1931,7 +2026,7 @@ const PillDebug = (() => {
     }
   }
 
-  return { enable, disable, setVerbose, reset, dump, summary, timeline, diagnose, log, get enabled() { return enabled; } };
+  return { enable, disable, setVerbose, reset, dump, summary, timeline, widthSamples, animationSamples, diagnose, log, samplePillAnimation, largestSampleGap, get enabled() { return enabled; } };
 })();
 exposeDebug({ pill: PillDebug });
 
@@ -2070,9 +2165,14 @@ exposeDebug({ menu: MenuDebug });
 
 function islSetWidth(text) {
   PillDebug.log('islSetWidth:before', { text });
+  const measuredWidth = measureIslandTextWidth(text);
+  islZoom.style.width = measuredWidth + 'px';
+  PillDebug.log('islSetWidth:after', { text, measuredWidth });
+}
+
+function measureIslandTextWidth(text) {
   islMeasure.textContent = text;
-  islZoom.style.width = islMeasure.offsetWidth + 'px';
-  PillDebug.log('islSetWidth:after', { text, measuredWidth: islMeasure.offsetWidth });
+  return islMeasure.offsetWidth;
 }
 
 let _lastZoomPct = -1;
@@ -2109,11 +2209,10 @@ function islandTextAlpha() {
   return parts.length >= 4 ? Number(parts[3]) || 0 : 1;
 }
 
-function waitForIslandTransition(propertyName, timeoutMs = 700, isComplete = null) {
+function waitForIslandTransition(propertyName, timeoutMs = 700) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (reason) => {
-      if (isComplete && !isComplete(reason)) return;
       if (done) return;
       done = true;
       clearTimeout(timer);
@@ -2142,6 +2241,33 @@ function forceIslandTextTransparent() {
   PillDebug.log('forceIslandTextTransparent');
 }
 
+function waitForPillFrameReady({ stableFramesNeeded = 4, maxFrameGapMs = 34, minWaitMs = 120, timeoutMs = 1800 } = {}) {
+  const start = performance.now();
+  let lastFrame = start;
+  let stableFrames = 0;
+  return new Promise((resolve) => {
+    const tick = (now) => {
+      const elapsed = now - start;
+      const frameGapMs = now - lastFrame;
+      lastFrame = now;
+      if (frameGapMs <= maxFrameGapMs) stableFrames += 1;
+      else stableFrames = 0;
+      if (elapsed >= minWaitMs && stableFrames >= stableFramesNeeded) {
+        PillDebug.log('pill-frame-ready', { elapsed, frameGapMs, stableFrames });
+        resolve('stable');
+        return;
+      }
+      if (elapsed >= timeoutMs) {
+        PillDebug.log('pill-frame-wait-timeout', { elapsed, frameGapMs, stableFrames });
+        resolve('timeout');
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
 function showIslandMsg(msg, duration = 0, onRestore = null) {
   const token = ++_islAnimToken;
   PillDebug.log('showIslandMsg:start', { msg, duration });
@@ -2151,6 +2277,7 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
   islZoom.style.pointerEvents = 'none';
   islZoom.style.cursor = 'default';
   islSetWidth(msg);
+  PillDebug.samplePillAnimation('showIslandMsg');
   islZoom.style.color = 'rgba(255,255,255,0)';
   PillDebug.log('showIslandMsg:fadeOut', { msg, colorAfter: islZoom.style.color, computedColor: getComputedStyle(islZoom).color, transition: getComputedStyle(islZoom).transition });
   return new Promise(resolve => {
@@ -2178,25 +2305,35 @@ async function restoreIslandZoom() {
   PillDebug.log('restoreIslandZoom:start');
   clearTimeout(_islMsgTimer);
   clearTimeout(_islFadeTimer);
-  PillDebug.log('restoreIslandZoom:fadeOut');
-  const fadeOut = waitForIslandTransition('color', 700, (reason) => (
-    reason === 'timeout' || islandTextAlpha() <= 0.05
-  ));
-  islZoom.style.color = 'rgba(255,255,255,0)';
-  const fadeReason = await fadeOut;
+  const pct = Math.round(zoom * 100) + '%';
+  const frameReadyReason = await waitForPillFrameReady();
   if (token !== _islAnimToken) return;
-  PillDebug.log('restoreIslandZoom:fadeOutComplete', { reason: fadeReason });
+  PillDebug.log('restoreIslandZoom:frame-ready', { reason: frameReadyReason });
+  const currentWidth = islZoom.getBoundingClientRect().width;
+  const targetWidth = measureIslandTextWidth(pct);
+  const widthDone = Math.abs(currentWidth - targetWidth) < 0.5
+    ? Promise.resolve('same-width')
+    : waitForIslandTransition('width', 1400);
+  islSetWidth(pct);
+  PillDebug.samplePillAnimation('restoreIslandZoom', 1800);
+  PillDebug.log('restoreIslandZoom:width-set', { pct });
+  PillDebug.log('restoreIslandZoom:fadeOut');
+  islZoom.style.color = 'rgba(255,255,255,0)';
+  const [widthReason] = await Promise.all([
+    widthDone,
+    new Promise((resolve) => setTimeout(resolve, 500)),
+  ]);
+  if (token !== _islAnimToken) return;
+  PillDebug.log('restoreIslandZoom:widthComplete', { reason: widthReason });
+  PillDebug.log('restoreIslandZoom:fadeOutComplete', { reason: 'width-and-timer' });
   if (islandTextAlpha() > 0.05) {
     forceIslandTextTransparent();
-    await new Promise((resolve) => requestAnimationFrame(resolve));
     if (token !== _islAnimToken) return;
   }
-  const pct = Math.round(zoom * 100) + '%';
   _islMsgActive = false;
   _lastZoomPct = -1;
-  islSetWidth(pct);
   islZoom.textContent = pct;
-  PillDebug.log('restoreIslandZoom:width-text-set', { pct });
+  PillDebug.log('restoreIslandZoom:text-set', { pct });
   requestAnimationFrame(() => {
     if (token !== _islAnimToken) return;
     PillDebug.log('restoreIslandZoom:raf1', { pct });
