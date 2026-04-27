@@ -1,8 +1,6 @@
 # Boardfish
 
-Have you ever wanted a fast, non-destructive way to visualize your ideas?
-
-Meet Boardfish: an ultra-lightweight, open-source canvas for Windows and macOS. It provides an infinite, freeform space for visual research, moodboards, and snippets.
+Boardfish is an open-source infinite canvas for fast, non-destructive ideation. Designed for Windows and macOS, it provides an ultra-lightweight environment for visual research, moodboarding, and snippets.
 
 <img src="src-tauri/icons/image_e4de38.png" alt="Boardfish canvas screenshot" width="900">
 
@@ -20,14 +18,14 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 
 ## Features
 
-- Minimal UI on a infinite canvas free from formatting rules
-- Pan and zoom through huge visual boards with up to 1 GB of images without lag
-- Multi-select, translate, scale, horizontal/vertical flip, copy, paste and duplicate
-- Losslessly add images and text from your clipboard, drag and drop, or the file picker
+- An infinite canvas free from formatting rules
+- Lag-free navigation across massive visual boards supporting up to 1 GB of images and text
+- Multi-select, translate, scale, flip, copy, paste, and duplicate
+- Losslessly add images and text via clipboard, drag and drop, or the file picker
 - Losslessly copy images back to your clipboard
 - Export one image, selected images, or all images in a single click
 - Export all text into a single `.txt` file
-- Save everything locally as one portable `.bf` file
+- Save everything locally as a portable `.bf` file
 
 ## Keyboard Shortcuts
 
