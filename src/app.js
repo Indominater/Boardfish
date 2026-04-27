@@ -3810,24 +3810,6 @@ async function saveSelectedImage() {
   ExportDebug.end(dbg, { saved: true, method: 'download' });
 }
 
-const _isMacOS = navigator.platform.startsWith('Mac') || /Macintosh/.test(navigator.userAgent);
-
-async function saveDataUrlsToFolder(dataUrls, dbg) {
-  if (_isMacOS) {
-    return await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
-  }
-  const folder = await ExportDebug.invoke(dbg, 'pick_save_folder', {}, {});
-  if (!folder) return null;
-  let savedCount = 0;
-  for (let i = 0; i < dataUrls.length; i++) {
-    if (!dataUrls[i]) continue;
-    const ok = await window.__TAURI__.core.invoke('save_image_to_folder_path', { folder, dataUrl: dataUrls[i], index: i });
-    if (ok) savedCount++;
-  }
-  return savedCount;
-}
-
-
 async function saveSelectedImages() {
   const dbg = ExportDebug.start('exportImages', { selectedCount: selectedIds.size });
   const selectedObjs = [];
@@ -3841,10 +3823,10 @@ async function saveSelectedImages() {
 
   if (window.__TAURI__) {
     try {
-      const dataUrls = await Promise.all(selectedObjs.map(o => getRenderedImageDataUrl(o)));
-      ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.filter(Boolean).length });
-      const savedCount = await saveDataUrlsToFolder(dataUrls.filter(Boolean), dbg);
-      if (savedCount === null) { hidePasteShield(); ExportDebug.end(dbg, { cancelled: true }); return; }
+      const dataUrls = (await Promise.all(selectedObjs.map(o => getRenderedImageDataUrl(o)))).filter(Boolean);
+      ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.length });
+      if (dataUrls.length < 2) { hidePasteShield(); ExportDebug.end(dbg, { skipped: true, reason: 'too-few-dataUrls' }); return; }
+      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
       ExportDebug.end(dbg, { savedCount });
       if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
       else hidePasteShield();
@@ -3876,10 +3858,10 @@ async function exportAllImages() {
 
   if (window.__TAURI__) {
     try {
-      const dataUrls = await Promise.all(imageObjs.map(o => getRenderedImageDataUrl(o)));
-      ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.filter(Boolean).length });
-      const savedCount = await saveDataUrlsToFolder(dataUrls.filter(Boolean), dbg);
-      if (savedCount === null) { hidePasteShield(); ExportDebug.end(dbg, { cancelled: true }); return; }
+      const dataUrls = (await Promise.all(imageObjs.map(o => getRenderedImageDataUrl(o)))).filter(Boolean);
+      ExportDebug.step(dbg, 'render:done', { dataUrlCount: dataUrls.length });
+      if (!dataUrls.length) { hidePasteShield(); ExportDebug.end(dbg, { skipped: true, reason: 'no-dataUrls' }); return; }
+      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder', { dataUrls }, { dataUrlCount: dataUrls.length });
       ExportDebug.end(dbg, { savedCount });
       if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
       else hidePasteShield();
