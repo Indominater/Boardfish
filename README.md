@@ -24,8 +24,8 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 - Pan and zoom through huge visual boards with up to 1 GB of images without lag
 - Multi-select, translate, scale, horizontal/vertical flip, copy, paste and duplicate
 - Losslessly add images and text from your clipboard, drag and drop, or the file picker
-- Copy images back to your clipboard at original resolution
-- Export one image, selected images, or every image on the board in a single click
+- Losslessly copy images back to your clipboard
+- Export one image, selected images, or all images in a single click
 - Export all text into a single `.txt` file
 - Save everything locally as one portable `.bf` file
 
