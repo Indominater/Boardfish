@@ -11,6 +11,9 @@ static PENDING_TERMINATION: std::sync::atomic::AtomicBool =
 #[cfg(target_os = "macos")]
 static APP_HANDLE_FOR_TERMINATE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
 
+static CLOSE_REQUEST_SEQ: AtomicU64 = AtomicU64::new(1);
+static CLOSE_ACK_SEQ: AtomicU64 = AtomicU64::new(0);
+
 #[cfg(target_os = "macos")]
 fn macos_cancel_termination() {
     use objc2::MainThreadMarker;
@@ -837,6 +840,11 @@ fn cancel_pending_termination() {
     macos_cancel_termination();
 }
 
+#[tauri::command]
+fn acknowledge_close_request(seq: u64) {
+    CLOSE_ACK_SEQ.fetch_max(seq, Ordering::SeqCst);
+}
+
 #[cfg(target_os = "macos")]
 fn native_clipboard_sequence() -> u64 {
     use objc2::runtime::AnyObject;
@@ -1234,9 +1242,16 @@ fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(
 
 fn emit_close_request(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let seq = CLOSE_REQUEST_SEQ.fetch_add(1, Ordering::SeqCst);
         window.show().ok();
         window.set_focus().ok();
-        window.emit("boardfish://close-requested", ()).ok();
+        window.emit("boardfish://close-requested", seq).ok();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            if CLOSE_ACK_SEQ.load(Ordering::SeqCst) < seq {
+                std::process::exit(0);
+            }
+        });
     }
 }
 
@@ -1265,6 +1280,7 @@ fn main() {
             set_title,
             exit_app,
             cancel_pending_termination,
+            acknowledge_close_request,
             copy_text_to_clipboard,
             clipboard_sequence,
             set_clipboard_debug,
@@ -1285,7 +1301,14 @@ fn main() {
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
-                window.emit("boardfish://close-requested", ()).unwrap();
+                let seq = CLOSE_REQUEST_SEQ.fetch_add(1, Ordering::SeqCst);
+                window.emit("boardfish://close-requested", seq).ok();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    if CLOSE_ACK_SEQ.load(Ordering::SeqCst) < seq {
+                        std::process::exit(0);
+                    }
+                });
             }
             tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
                 let payload = serde_json::json!({
@@ -1412,6 +1435,12 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            if let tauri::RunEvent::Resumed = &event {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    window.emit("boardfish://app-resumed", ()).ok();
+                }
+            }
+
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
                 api.prevent_exit();
                 #[cfg(target_os = "macos")]

@@ -25,7 +25,7 @@ const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
-const DEBUG_TOOLS_ENABLED = false;
+const DEBUG_TOOLS_ENABLED = true;
 
 function exposeDebug(tools) {
   if (!DEBUG_TOOLS_ENABLED) return;
@@ -1765,35 +1765,314 @@ function saveViewport() {
 
 // ─── Pill debugger ───────────────────────────────────────────────────────────
 const PillDebug = (() => {
+  const MAX_EVENTS = 1000;
   let enabled = false;
+  let verbose = true;
   const events = [];
   const t0 = performance.now();
+  let longTaskObserver = null;
+
+  function round(value) {
+    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
+  }
+
+  function snapshot() {
+    const style = getComputedStyle(islZoom);
+    return {
+      text: islZoom.textContent,
+      styleWidth: islZoom.style.width,
+      offsetWidth: islZoom.offsetWidth,
+      computedWidth: style.width,
+      color: style.color,
+      opacity: style.opacity,
+      transition: style.transition,
+      msgActive: _islMsgActive,
+      boardOpening: _boardOpening,
+      zoomPct: Math.round(zoom * 100) + '%',
+    };
+  }
+
+  function push(event, data = {}) {
+    if (!enabled) return null;
+    const entry = {
+      t: round(performance.now() - t0),
+      event,
+      ...snapshot(),
+      ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, round(v)])),
+    };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    if (verbose) console.debug('[pill]', entry);
+    return entry;
+  }
 
   function log(event, data = {}) {
-    if (!enabled) return;
-    const entry = { t: Math.round(performance.now() - t0), event, ...data };
-    events.push(entry);
-    console.log('[pill]', entry.t + 'ms', event, data);
+    return push(event, data);
   }
 
   function enable() {
     if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
     events.length = 0;
-    console.log('[pill] PillDebug enabled. Use BoardfishDebug.pill.summary()');
+    startLongTaskObserver();
+    console.info('Boardfish pill debugger enabled. Use BoardfishDebug.pill.summary(), .timeline(), .diagnose(), .dump(), or .reset().');
   }
-  function disable() { enabled = false; }
+  function disable() {
+    enabled = false;
+    if (longTaskObserver) {
+      longTaskObserver.disconnect();
+      longTaskObserver = null;
+    }
+  }
+  function setVerbose(value) {
+    verbose = !!value;
+    console.info(`Boardfish pill verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
   function reset() { events.length = 0; }
-  function dump() { return events.slice(); }
-  function summary() { console.table(events); return events.slice(); }
+  function dump() {
+    console.table(events);
+    return events.slice();
+  }
+  function summary() {
+    const rows = events.map(e => ({
+      t: e.t,
+      event: e.event,
+      text: e.text,
+      styleWidth: e.styleWidth,
+      offsetWidth: e.offsetWidth,
+      msgActive: e.msgActive,
+      boardOpening: e.boardOpening,
+      duration: e.duration ?? '',
+      elapsed: e.elapsed ?? '',
+      reason: e.reason ?? '',
+      longTaskMs: e.longTaskMs ?? '',
+      phaseMs: e.phaseMs ?? '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+  function timeline() {
+    const rows = [];
+    for (let i = 0; i < events.length; i++) {
+      const prev = events[i - 1];
+      const e = events[i];
+      rows.push({
+        dt: prev ? round(e.t - prev.t) : 0,
+        t: e.t,
+        event: e.event,
+        text: e.text,
+        width: e.offsetWidth,
+        styleWidth: e.styleWidth,
+        color: e.color,
+        longTaskMs: e.longTaskMs ?? '',
+      });
+    }
+    console.table(rows);
+    return rows;
+  }
+  function diagnose() {
+    const longTasks = events.filter(e => e.event === 'longtask');
+    const bigLongTasks = longTasks.filter(e => Number(e.longTaskMs) >= 100);
+    const restoreStart = events.find(e => e.event === 'restoreIslandZoom:start');
+    const restoreWidth = events.find(e => e.event === 'restoreIslandZoom:width-text-set');
+    const restoreShown = events.find(e => e.event === 'restoreIslandZoom:shown');
+    const forcedTransparent = events.find(e => e.event === 'forceIslandTextTransparent');
+    const openingRender = events.find(e => e.event === 'open:initial-applyTransform:end');
+    const findings = [];
+    const textAlpha = (entry) => {
+      const match = String(entry?.color || '').match(/rgba?\(([^)]+)\)/);
+      if (!match) return 1;
+      const parts = match[1].split(',').map((part) => part.trim());
+      return parts.length >= 4 ? Number(parts[3]) || 0 : 1;
+    };
+    const widthSwapVisible = textAlpha(restoreWidth) > 0.05;
 
-  return { enable, disable, reset, dump, summary, log, get enabled() { return enabled; } };
+    if (bigLongTasks.length) {
+      findings.push(`${bigLongTasks.length} long main-thread task(s) over 100ms occurred while the pill was animating or opening.`);
+    }
+    if (openingRender && Number(openingRender.phaseMs) >= 100) {
+      findings.push(`Initial board render took ${openingRender.phaseMs}ms before the pill restored to zoom.`);
+    }
+    if (restoreStart && restoreWidth && restoreWidth.t - restoreStart.t > 650 && widthSwapVisible) {
+      findings.push(`Restore width/text update was delayed by ${round(restoreWidth.t - restoreStart.t)}ms after restore started.`);
+    }
+    if (restoreWidth && restoreShown && restoreShown.t - restoreWidth.t < 32 && widthSwapVisible) {
+      findings.push('Width/text and visible color were applied too close together for a visible transition.');
+    }
+    if (forcedTransparent && restoreWidth && !widthSwapVisible) {
+      findings.push('Fallback transparency path was used; width/text swap was hidden.');
+    }
+    if (!findings.length) findings.push('No obvious pill animation stall found in the current buffer.');
+
+    const report = {
+      findings,
+      eventCount: events.length,
+      longTaskCount: longTasks.length,
+      maxLongTaskMs: longTasks.reduce((n, e) => Math.max(n, Number(e.longTaskMs) || 0), 0),
+    };
+    console.table(report.findings.map(finding => ({ finding })));
+    return report;
+  }
+
+  function startLongTaskObserver() {
+    if (longTaskObserver || typeof PerformanceObserver === 'undefined') return;
+    try {
+      longTaskObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          push('longtask', {
+            longTaskMs: entry.duration,
+            startTime: entry.startTime,
+          });
+        }
+      });
+      longTaskObserver.observe({ entryTypes: ['longtask'] });
+    } catch (_) {
+      longTaskObserver = null;
+    }
+  }
+
+  return { enable, disable, setVerbose, reset, dump, summary, timeline, diagnose, log, get enabled() { return enabled; } };
 })();
 exposeDebug({ pill: PillDebug });
 
+// ─── Context menu debugger ───────────────────────────────────────────────────
+const MenuDebug = (() => {
+  const MAX_EVENTS = 500;
+  let enabled = false;
+  let verbose = false;
+  let nextId = 1;
+  const events = [];
+
+  function round(value) {
+    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
+  }
+
+  function elementLabel(el) {
+    if (!el) return '';
+    if (el === window) return 'window';
+    if (el === document) return 'document';
+    if (el === document.body) return 'body';
+    const id = el.id ? `#${el.id}` : '';
+    const cls = el.className && typeof el.className === 'string'
+      ? '.' + el.className.trim().replace(/\s+/g, '.')
+      : '';
+    return `${el.tagName?.toLowerCase() || String(el)}${id}${cls}`;
+  }
+
+  function menuState() {
+    const active = document.activeElement;
+    const point = lastPointerEvent
+      ? document.elementFromPoint(lastPointerEvent.clientX, lastPointerEvent.clientY)
+      : null;
+    return {
+      ctxVisible: ctxMenu.classList.contains('visible'),
+      objVisible: objCtxMenu.classList.contains('visible'),
+      ctxDisplay: getComputedStyle(ctxMenu).display,
+      objDisplay: getComputedStyle(objCtxMenu).display,
+      shieldActive: openingShield.classList.contains('active'),
+      pasteShieldCount: _pasteShieldCount,
+      boardOpening: _boardOpening,
+      active: elementLabel(active),
+      elementAtPointer: elementLabel(point),
+    };
+  }
+
+  let lastPointerEvent = null;
+
+  function push(event, data = {}) {
+    if (!enabled) return null;
+    const entry = {
+      id: nextId++,
+      t: round(performance.now()),
+      event,
+      ...menuState(),
+      ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, round(v)])),
+    };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    if (verbose) console.debug('[Boardfish menu]', entry);
+    return entry;
+  }
+
+  function enable(options = {}) {
+    enabled = true;
+    verbose = !!options.verbose;
+    events.length = 0;
+    nextId = 1;
+    console.info('Boardfish menu debugger enabled. Use BoardfishDebug.menu.summary(), .events(), .last(), .setVerbose(true), or .reset().');
+  }
+
+  function disable() { enabled = false; }
+  function setVerbose(value) {
+    verbose = !!value;
+    console.info(`Boardfish menu verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
+  function reset() { events.length = 0; nextId = 1; }
+  function eventsCopy() { console.table(events); return events.slice(); }
+  function last(limit = 30) {
+    const rows = events.slice(-limit);
+    console.table(rows);
+    return rows;
+  }
+  function summary() {
+    const rows = events.map(e => ({
+      id: e.id,
+      event: e.event,
+      type: e.type ?? '',
+      phase: e.phase ?? '',
+      target: e.target ?? '',
+      currentTarget: e.currentTarget ?? '',
+      button: e.button ?? '',
+      x: e.x ?? '',
+      y: e.y ?? '',
+      command: e.command ?? '',
+      ctxVisible: e.ctxVisible,
+      objVisible: e.objVisible,
+      shieldActive: e.shieldActive,
+      defaultPrevented: e.defaultPrevented ?? '',
+      propagationStopped: e.propagationStopped ?? '',
+      elementAtPointer: e.elementAtPointer,
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function log(event, data = {}) { return push(event, data); }
+
+  function logDomEvent(label, event) {
+    lastPointerEvent = event;
+    push(label, {
+      type: event.type,
+      phase: event.eventPhase,
+      target: elementLabel(event.target),
+      currentTarget: elementLabel(event.currentTarget),
+      button: event.button,
+      x: event.clientX,
+      y: event.clientY,
+      defaultPrevented: event.defaultPrevented,
+    });
+  }
+
+  return {
+    enable,
+    disable,
+    setVerbose,
+    reset,
+    events: eventsCopy,
+    last,
+    summary,
+    log,
+    logDomEvent,
+    get enabled() { return enabled; },
+  };
+})();
+exposeDebug({ menu: MenuDebug });
+
 function islSetWidth(text) {
+  PillDebug.log('islSetWidth:before', { text });
   islMeasure.textContent = text;
   islZoom.style.width = islMeasure.offsetWidth + 'px';
+  PillDebug.log('islSetWidth:after', { text, measuredWidth: islMeasure.offsetWidth });
 }
 
 let _lastZoomPct = -1;
@@ -1813,14 +2092,59 @@ function updateZoomDisplay(force = false) {
   _lastZoomDisplayAt = now;
   _lastZoomPct = pct;
   const text = pct + '%';
+  PillDebug.log('updateZoomDisplay:set', { force, text });
   islZoom.textContent = text;
   islSetWidth(text);
 }
 
 let _islMsgTimer = null;
 let _islFadeTimer = null;
+let _islAnimToken = 0;
+
+function islandTextAlpha() {
+  const color = getComputedStyle(islZoom).color;
+  const match = color.match(/rgba?\(([^)]+)\)/);
+  if (!match) return 1;
+  const parts = match[1].split(',').map((part) => part.trim());
+  return parts.length >= 4 ? Number(parts[3]) || 0 : 1;
+}
+
+function waitForIslandTransition(propertyName, timeoutMs = 700, isComplete = null) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (reason) => {
+      if (isComplete && !isComplete(reason)) return;
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      islZoom.removeEventListener('transitionend', onEnd);
+      islZoom.removeEventListener('transitioncancel', onCancel);
+      resolve(reason);
+    };
+    const onEnd = (event) => {
+      if (event.target === islZoom && event.propertyName === propertyName) finish('transitionend');
+    };
+    const onCancel = (event) => {
+      if (event.target === islZoom && event.propertyName === propertyName) finish('transitioncancel');
+    };
+    const timer = setTimeout(() => finish('timeout'), timeoutMs);
+    islZoom.addEventListener('transitionend', onEnd);
+    islZoom.addEventListener('transitioncancel', onCancel);
+  });
+}
+
+function forceIslandTextTransparent() {
+  const transition = islZoom.style.transition;
+  islZoom.style.transition = 'none';
+  islZoom.style.color = 'rgba(255,255,255,0)';
+  void islZoom.offsetWidth;
+  islZoom.style.transition = transition;
+  PillDebug.log('forceIslandTextTransparent');
+}
 
 function showIslandMsg(msg, duration = 0, onRestore = null) {
+  const token = ++_islAnimToken;
+  PillDebug.log('showIslandMsg:start', { msg, duration });
   clearTimeout(_islMsgTimer);
   clearTimeout(_islFadeTimer);
   _islMsgActive = true;
@@ -1832,6 +2156,7 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
   return new Promise(resolve => {
     const timerStart = performance.now();
     _islFadeTimer = setTimeout(() => {
+      if (token !== _islAnimToken) { resolve(); return; }
       PillDebug.log('showIslandMsg:fadeIn', { msg, timerActualMs: Math.round(performance.now() - timerStart), computedColorBefore: getComputedStyle(islZoom).color });
       islZoom.textContent = msg;
       islZoom.style.color = 'rgba(255,255,255,0.5)';
@@ -1839,32 +2164,62 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
       if (duration > 0) {
         _islMsgTimer = setTimeout(() => { if (onRestore) onRestore(); restoreIslandZoom(); }, duration);
       }
-      setTimeout(resolve, 500);
+      setTimeout(() => {
+        if (token !== _islAnimToken) { resolve(); return; }
+        PillDebug.log('showIslandMsg:resolved', { msg, elapsed: performance.now() - timerStart });
+        resolve();
+      }, 500);
     }, 500);
   });
 }
 
-function restoreIslandZoom() {
+async function restoreIslandZoom() {
+  const token = ++_islAnimToken;
+  PillDebug.log('restoreIslandZoom:start');
   clearTimeout(_islMsgTimer);
   clearTimeout(_islFadeTimer);
   PillDebug.log('restoreIslandZoom:fadeOut');
+  const fadeOut = waitForIslandTransition('color', 700, (reason) => (
+    reason === 'timeout' || islandTextAlpha() <= 0.05
+  ));
   islZoom.style.color = 'rgba(255,255,255,0)';
-  _islFadeTimer = setTimeout(() => {
-    const pct = Math.round(zoom * 100) + '%';
-    _islMsgActive = false;
-    _lastZoomPct = -1;
-    islSetWidth(pct);
-    islZoom.textContent = pct;
-    PillDebug.log('restoreIslandZoom:fadeIn', { pct });
+  const fadeReason = await fadeOut;
+  if (token !== _islAnimToken) return;
+  PillDebug.log('restoreIslandZoom:fadeOutComplete', { reason: fadeReason });
+  if (islandTextAlpha() > 0.05) {
+    forceIslandTextTransparent();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (token !== _islAnimToken) return;
+  }
+  const pct = Math.round(zoom * 100) + '%';
+  _islMsgActive = false;
+  _lastZoomPct = -1;
+  islSetWidth(pct);
+  islZoom.textContent = pct;
+  PillDebug.log('restoreIslandZoom:width-text-set', { pct });
+  requestAnimationFrame(() => {
+    if (token !== _islAnimToken) return;
+    PillDebug.log('restoreIslandZoom:raf1', { pct });
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        islZoom.style.color = 'rgba(255,255,255,0.5)';
-        islZoom.style.pointerEvents = '';
-        islZoom.style.cursor = '';
-      });
+      if (token !== _islAnimToken) return;
+      PillDebug.log('restoreIslandZoom:raf2', { pct });
+      islZoom.style.color = 'rgba(255,255,255,0.5)';
+      islZoom.style.pointerEvents = '';
+      islZoom.style.cursor = '';
+      PillDebug.log('restoreIslandZoom:shown', { pct });
     });
-  }, 500);
+  });
 }
+
+islZoom.addEventListener('transitionstart', (event) => {
+  PillDebug.log('transitionstart', { propertyName: event.propertyName, elapsedTime: event.elapsedTime });
+});
+islZoom.addEventListener('transitionend', (event) => {
+  PillDebug.log('transitionend', { propertyName: event.propertyName, elapsedTime: event.elapsedTime });
+});
+islZoom.addEventListener('transitioncancel', (event) => {
+  PillDebug.log('transitioncancel', { propertyName: event.propertyName, elapsedTime: event.elapsedTime });
+});
 
 
 const FONT_SIZE = 16;
@@ -1993,8 +2348,11 @@ function markDirty(id) { _dirtyIds.add(id); }
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
-  boardCanvas.width  = Math.round(window.innerWidth  * dpr);
-  boardCanvas.height = Math.round(window.innerHeight * dpr);
+  const width = Math.round(window.innerWidth * dpr);
+  const height = Math.round(window.innerHeight * dpr);
+  if (boardCanvas.width === width && boardCanvas.height === height) return;
+  boardCanvas.width = width;
+  boardCanvas.height = height;
   invalidateOffscreen();
   scheduleRender(true, false);
 }
@@ -3381,6 +3739,7 @@ function selectAllObjects() {
 }
 
 function hideMenus() {
+  MenuDebug.log('hideMenus', { reason: 'generic' });
   ctxMenu.classList.remove('visible');
   objCtxMenu.classList.remove('visible');
 }
@@ -4082,6 +4441,99 @@ canvas.addEventListener('dblclick', (e) => {
 
 let ctxPos = { x: 0, y: 0 };
 
+for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
+  document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:capture`, e), true);
+  document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:bubble`, e), false);
+  ctxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`ctx-menu:${type}`, e));
+  objCtxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`obj-ctx-menu:${type}`, e));
+}
+
+function closeCtxMenu(reason) {
+  MenuDebug.log('ctx-menu:close', { reason });
+  ctxMenu.classList.remove('visible');
+}
+
+function closeObjCtxMenu(reason) {
+  MenuDebug.log('obj-ctx-menu:close', { reason });
+  objCtxMenu.classList.remove('visible');
+}
+
+let _menuPointerCommand = null;
+let _lastPointerMenuCommandAt = 0;
+
+function menuCommandFromButton(button) {
+  switch (button?.id) {
+    case 'btn-new': return () => { closeCtxMenu('command:new'); newBoard(); };
+    case 'btn-add-text': return () => { closeCtxMenu('command:add-text'); addText(ctxPos.x, ctxPos.y); };
+    case 'btn-add-image': return () => { closeCtxMenu('command:add-image'); fileInput.value = ''; fileInput.click(); };
+    case 'btn-paste': return () => { closeCtxMenu('command:paste'); pasteAtPos(ctxPos.x, ctxPos.y); };
+    case 'btn-save': return () => { closeCtxMenu('command:save'); saveBoard(); };
+    case 'btn-save-as': return () => { closeCtxMenu('command:save-as'); saveBoardAs(); };
+    case 'btn-open': return () => { closeCtxMenu('command:open'); openBoard(); };
+    case 'btn-export-all-images': return () => { closeCtxMenu('command:export-all-images'); showPasteShield(); exportAllImages(); };
+    case 'btn-export-all-text': return () => { closeCtxMenu('command:export-all-text'); exportAllText(); };
+    case 'obj-btn-copy': return () => { closeObjCtxMenu('command:copy'); copySelected(); };
+    case 'obj-btn-delete': return () => { closeObjCtxMenu('command:delete'); deleteSelected(); };
+    case 'obj-btn-duplicate': return () => { closeObjCtxMenu('command:duplicate'); duplicateSelected(); };
+    case 'obj-btn-move-to-back': return () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); };
+    case 'obj-btn-flip-horizontal': return () => { closeObjCtxMenu('command:flip-horizontal'); flipSelectedImages('x'); };
+    case 'obj-btn-flip-vertical': return () => { closeObjCtxMenu('command:flip-vertical'); flipSelectedImages('y'); };
+    case 'obj-btn-save-image': return () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); };
+    case 'obj-btn-save-images': return () => { closeObjCtxMenu('command:save-images'); showPasteShield(); saveSelectedImages(); };
+    default: return null;
+  }
+}
+
+function menuCommandName(button) {
+  return button?.id ? button.id.replace(/^(btn|obj-btn)-/, '') : '';
+}
+
+function runMenuCommand(button, source) {
+  const run = menuCommandFromButton(button);
+  if (!run) return false;
+  if (source === 'click' && performance.now() - _lastPointerMenuCommandAt < 800) {
+    MenuDebug.log('menu:click-command:suppressed', { command: menuCommandName(button) });
+    return true;
+  }
+  MenuDebug.log(button.id.startsWith('obj-') ? 'obj-ctx-menu:command' : 'ctx-menu:command', {
+    command: menuCommandName(button),
+    source,
+  });
+  if (source === 'pointerup') _lastPointerMenuCommandAt = performance.now();
+  if (source === 'pointerup') {
+    setTimeout(run, 0);
+  } else {
+    run();
+  }
+  return true;
+}
+
+function onMenuPointerDown(e) {
+  const button = e.target.closest?.('.ctx-item');
+  if (!button || e.button !== 0) return;
+  _menuPointerCommand = button;
+  MenuDebug.log('menu:pointer-command:start', { command: menuCommandName(button), target: button.id });
+}
+
+function onMenuPointerUp(e) {
+  if (!_menuPointerCommand || e.button !== 0) return;
+  const button = e.target.closest?.('.ctx-item');
+  const started = _menuPointerCommand;
+  _menuPointerCommand = null;
+  if (button !== started) {
+    MenuDebug.log('menu:pointer-command:cancel', { started: started.id, ended: button?.id || '' });
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  runMenuCommand(button, 'pointerup');
+}
+
+ctxMenu.addEventListener('pointerdown', onMenuPointerDown);
+ctxMenu.addEventListener('pointerup', onMenuPointerUp);
+objCtxMenu.addEventListener('pointerdown', onMenuPointerDown);
+objCtxMenu.addEventListener('pointerup', onMenuPointerUp);
+
 function updateObjMenuActions() {
   let imageCount = 0;
   for (const id of selectedIds) {
@@ -4109,6 +4561,7 @@ function updateCtxMenuActions() {
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const wp = toWorld(e.clientX, e.clientY);
+  MenuDebug.log('canvas:contextmenu', { x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
 
   // Multi-select: right-click anywhere inside bounding box shows obj menu
   if (isMultiSelected()) {
@@ -4121,10 +4574,11 @@ canvas.addEventListener('contextmenu', (e) => {
     }
     if (wp.x >= bx1 && wp.x <= bx2 && wp.y >= by1 && wp.y <= by2) {
       updateObjMenuActions();
-      ctxMenu.classList.remove('visible');
+      closeCtxMenu('show-obj-menu:multi');
       objCtxMenu.style.left = e.clientX + 'px';
       objCtxMenu.style.top  = e.clientY + 'px';
       objCtxMenu.classList.add('visible');
+      MenuDebug.log('obj-ctx-menu:open', { reason: 'multi', x: e.clientX, y: e.clientY });
       return;
     }
   }
@@ -4133,54 +4587,48 @@ canvas.addEventListener('contextmenu', (e) => {
   if (obj) {
     if (!isSelected(obj.id)) selectObject(obj.id);
     updateObjMenuActions();
-    ctxMenu.classList.remove('visible');
+    closeCtxMenu('show-obj-menu:object');
     objCtxMenu.style.left = e.clientX + 'px';
     objCtxMenu.style.top  = e.clientY + 'px';
     objCtxMenu.classList.add('visible');
+    MenuDebug.log('obj-ctx-menu:open', { reason: 'object', objectId: obj.id, objectType: obj.type, x: e.clientX, y: e.clientY });
     return;
   }
-  objCtxMenu.classList.remove('visible');
+  closeObjCtxMenu('show-canvas-menu');
   ctxPos = wp;
   updateCtxMenuActions();
   ctxMenu.style.left = e.clientX + 'px';
   ctxMenu.style.top  = e.clientY + 'px';
   ctxMenu.classList.add('visible');
+  MenuDebug.log('ctx-menu:open', { x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
 });
 
 document.getElementById('btn-new').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  newBoard();
+  runMenuCommand(document.getElementById('btn-new'), 'click');
 });
 
 document.getElementById('btn-add-text').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  addText(ctxPos.x, ctxPos.y);
+  runMenuCommand(document.getElementById('btn-add-text'), 'click');
 });
 
 document.getElementById('btn-add-image').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  fileInput.value = '';
-  fileInput.click();
+  runMenuCommand(document.getElementById('btn-add-image'), 'click');
 });
 
 document.getElementById('btn-paste').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  pasteAtPos(ctxPos.x, ctxPos.y);
+  runMenuCommand(document.getElementById('btn-paste'), 'click');
 });
 
 document.getElementById('btn-save').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  saveBoard();
+  runMenuCommand(document.getElementById('btn-save'), 'click');
 });
 
 document.getElementById('btn-save-as').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  saveBoardAs();
+  runMenuCommand(document.getElementById('btn-save-as'), 'click');
 });
 
 document.getElementById('btn-open').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  openBoard();
+  runMenuCommand(document.getElementById('btn-open'), 'click');
 });
 
 
@@ -4228,61 +4676,53 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
   }
 }
 
-document.addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  objCtxMenu.classList.remove('visible');
+document.addEventListener('click', (e) => {
+  if (ctxMenu.contains(e.target) || objCtxMenu.contains(e.target)) {
+    MenuDebug.log('document-click:inside-menu');
+    return;
+  }
+  closeCtxMenu('document-click');
+  closeObjCtxMenu('document-click');
 });
 
 document.getElementById('obj-btn-copy').addEventListener('click', () => {
-  objCtxMenu.classList.remove('visible');
-  copySelected();
+  runMenuCommand(document.getElementById('obj-btn-copy'), 'click');
 });
 
 document.getElementById('obj-btn-delete').addEventListener('click', () => {
-  objCtxMenu.classList.remove('visible');
-  deleteSelected();
+  runMenuCommand(document.getElementById('obj-btn-delete'), 'click');
 });
 
 document.getElementById('obj-btn-duplicate').addEventListener('click', () => {
-  objCtxMenu.classList.remove('visible');
-  duplicateSelected();
+  runMenuCommand(document.getElementById('obj-btn-duplicate'), 'click');
 });
 
 document.getElementById('obj-btn-move-to-back').addEventListener('click', () => {
-  objCtxMenu.classList.remove('visible');
-  sendSelectedToBack();
+  runMenuCommand(document.getElementById('obj-btn-move-to-back'), 'click');
 });
 
 document.getElementById('obj-btn-flip-horizontal').addEventListener('click', () => {
-  objCtxMenu.classList.remove('visible');
-  flipSelectedImages('x');
+  runMenuCommand(document.getElementById('obj-btn-flip-horizontal'), 'click');
 });
 
 document.getElementById('obj-btn-flip-vertical').addEventListener('click', () => {
-  objCtxMenu.classList.remove('visible');
-  flipSelectedImages('y');
+  runMenuCommand(document.getElementById('obj-btn-flip-vertical'), 'click');
 });
 
 document.getElementById('obj-btn-save-image').addEventListener('click', () => {
-  objCtxMenu.classList.remove('visible');
-  saveSelectedImage();
+  runMenuCommand(document.getElementById('obj-btn-save-image'), 'click');
 });
 
 document.getElementById('obj-btn-save-images').addEventListener('click', () => {
-  objCtxMenu.classList.remove('visible');
-  showPasteShield();
-  saveSelectedImages();
+  runMenuCommand(document.getElementById('obj-btn-save-images'), 'click');
 });
 
 document.getElementById('btn-export-all-images').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  showPasteShield();
-  exportAllImages();
+  runMenuCommand(document.getElementById('btn-export-all-images'), 'click');
 });
 
 document.getElementById('btn-export-all-text').addEventListener('click', () => {
-  ctxMenu.classList.remove('visible');
-  exportAllText();
+  runMenuCommand(document.getElementById('btn-export-all-text'), 'click');
 });
 
 islZoom.addEventListener('mousedown', e => e.preventDefault());
@@ -4726,8 +5166,11 @@ function scheduleVisibleHydrationAfterIdle() {
 }
 
 async function finishOpenedBoard(dbg, data) {
+  PillDebug.log('open:finishOpenedBoard:start', getBoardOpenMetrics(data));
   if (OpenDebug.hydrationMode === 'visible-first') {
+    const hydrateStart = performance.now();
     const visibleKeys = await hydrateVisibleImagesForOpen(dbg);
+    PillDebug.log('open:hydrate-visible:end', { phaseMs: performance.now() - hydrateStart, visibleCount: visibleKeys?.length || 0 });
     OpenDebug.step(dbg, 'hydrate-initial-policy', {
       mode: 'visible-first',
       visibleCount: visibleKeys?.length || 0,
@@ -4738,13 +5181,19 @@ async function finishOpenedBoard(dbg, data) {
       mode: 'all-before-open',
       pendingNativeImages: getPendingNativeImageKeys().length,
     });
+    const hydrateStart = performance.now();
     await hydrateAllImagesForOpen(dbg);
+    PillDebug.log('open:hydrate-all:end', { phaseMs: performance.now() - hydrateStart, pendingNativeImages: getPendingNativeImageKeys().length });
   }
   _boardOpening = false;
   const renderStart = performance.now();
+  PillDebug.log('open:initial-applyTransform:start');
   applyTransform();
-  OpenDebug.step(dbg, 'initial-applyTransform', { ms: performance.now() - renderStart });
+  const renderMs = performance.now() - renderStart;
+  PillDebug.log('open:initial-applyTransform:end', { phaseMs: renderMs });
+  OpenDebug.step(dbg, 'initial-applyTransform', { ms: renderMs });
   openingShield.classList.remove('active');
+  PillDebug.log('open:openingShield:removed');
   restoreIslandZoom();
   OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
   if (OpenDebug.hydrationMode === 'visible-first') {
@@ -4759,6 +5208,7 @@ function applyBoardData(data, options = {}) {
   const sourcesCached = !!options.sourcesCached;
   const deferRender = !!options.deferRender;
   const endDebug = options.endDebug !== false;
+  PillDebug.log('open:applyBoardData:start', getBoardOpenMetrics(data));
   OpenDebug.step(dbg, 'applyBoardData:start', getBoardOpenMetrics(data));
   const t0 = performance.now();
   clearImageStore(!sourcesCached);
@@ -4816,6 +5266,7 @@ function applyBoardData(data, options = {}) {
   history = []; historyIndex = -1; snapshot();
   markSaved();
   OpenDebug.step(dbg, 'reset-history-markSaved', { ms: performance.now() - historyStart, historyLength: history.length, historyIndex });
+  PillDebug.log('open:applyBoardData:end', getBoardOpenMetrics(data));
   if (endDebug) OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
 }
 
@@ -4904,10 +5355,14 @@ async function openBoard() {
 
 let _closeGuardRunning = false;
 
-async function requestAppClose() {
-  if (!window.__TAURI__ || _closeGuardRunning) return;
+async function requestAppClose(event = null) {
+  if (!window.__TAURI__) return;
+  const seq = Number(event?.payload || 0);
+  if (seq) window.__TAURI__.core.invoke('acknowledge_close_request', { seq }).catch(() => {});
+  if (_closeGuardRunning) return;
   _closeGuardRunning = true;
   try {
+    recoverWindowPaint('close-request', false);
     if (isDirty()) {
       const choice = await showUnsavedDialog();
       if (choice === 'cancel') {
@@ -4932,6 +5387,10 @@ async function requestAppClose() {
 
 if (window.__TAURI__) {
   window.__TAURI__.event.listen('boardfish://close-requested', requestAppClose);
+  window.__TAURI__.event.listen('boardfish://app-resumed', () => {
+    recoverWindowPaint('app-resumed');
+    setTimeout(() => recoverBlankUi('app-resumed-followup'), 250);
+  });
 }
 
 // ─── Clipboard ───────────────────────────────────────────────────────────────
@@ -5569,13 +6028,28 @@ window.addEventListener('beforeunload', (e) => {
   e.returnValue = '';
 });
 
-function recoverWindowPaint(reason = 'resume') {
+function recoverWindowPaint(reason = 'resume', hardRepaint = false) {
+  document.documentElement.style.display = '';
+  document.documentElement.style.visibility = '';
+  document.documentElement.style.opacity = '';
+  document.body.style.display = '';
+  document.body.style.visibility = '';
+  document.body.style.opacity = '';
+  canvas.style.display = '';
+  boardCanvas.style.display = '';
+  islZoom.style.display = '';
   if (!_boardOpening && _pasteShieldCount === 0) openingShield.classList.remove('active');
   if (dialogOverlay.classList.contains('show') && !_dialogResolve) dialogOverlay.classList.remove('show');
-  hideMenus();
-  document.body.style.display = 'none';
-  void document.body.offsetHeight;
-  document.body.style.display = '';
+  if (!ctxMenu.classList.contains('visible') && !objCtxMenu.classList.contains('visible')) {
+    hideMenus();
+  } else {
+    MenuDebug.log('recoverWindowPaint:keep-open-menu', { reason });
+  }
+  if (hardRepaint) {
+    document.body.style.display = 'none';
+    void document.body.offsetHeight;
+    document.body.style.display = '';
+  }
   requestAnimationFrame(() => {
     resizeCanvas();
     updateZoomDisplay(true);
@@ -5587,15 +6061,39 @@ function recoverWindowPaint(reason = 'resume') {
   });
 }
 
-window.addEventListener('pageshow', () => recoverWindowPaint('pageshow'));
+function recoverBlankUi(reason = 'watchdog') {
+  if (document.hidden) return;
+  const bodyStyle = getComputedStyle(document.body);
+  const canvasStyle = getComputedStyle(boardCanvas);
+  const islandStyle = getComputedStyle(islZoom);
+  const canvasMissing = boardCanvas.width === 0 || boardCanvas.height === 0;
+  const hidden =
+    bodyStyle.display === 'none' ||
+    bodyStyle.visibility === 'hidden' ||
+    bodyStyle.opacity === '0' ||
+    canvasStyle.display === 'none' ||
+    canvasStyle.visibility === 'hidden' ||
+    islandStyle.display === 'none' ||
+    islandStyle.visibility === 'hidden';
+
+  if (!hidden && !canvasMissing) return;
+  recoverWindowPaint(`blank-ui:${reason}`, hidden);
+}
+
+window.addEventListener('pageshow', (event) => recoverWindowPaint('pageshow', event.persisted));
 window.addEventListener('focus', () => recoverWindowPaint('focus'));
+window.addEventListener('blur', () => setTimeout(() => recoverBlankUi('blur-followup'), 250));
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) recoverWindowPaint('visibility');
+  if (!document.hidden) {
+    recoverWindowPaint('visibility');
+    setTimeout(() => recoverBlankUi('visibility-followup'), 250);
+  }
 });
+setInterval(() => recoverBlankUi('interval'), 2000);
 boardCanvas.addEventListener('contextlost', (event) => {
   event.preventDefault();
 });
-boardCanvas.addEventListener('contextrestored', () => recoverWindowPaint('canvas-contextrestored'));
+boardCanvas.addEventListener('contextrestored', () => recoverWindowPaint('canvas-contextrestored', true));
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
