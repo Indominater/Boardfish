@@ -25,14 +25,7 @@ const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
-const DEBUG_TOOLS_ENABLED = (() => {
-  try {
-    return localStorage.getItem('BoardfishDebug') === '1' ||
-      new URLSearchParams(window.location.search).has('debug');
-  } catch {
-    return false;
-  }
-})();
+const DEBUG_TOOLS_ENABLED = false;
 
 function exposeDebug(tools) {
   if (!DEBUG_TOOLS_ENABLED) return;
@@ -78,6 +71,7 @@ const ClipDebug = (() => {
   }
 
   function enable(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
@@ -203,6 +197,141 @@ const ClipDebug = (() => {
 
 exposeDebug({ clipboard: ClipDebug });
 
+// ─── History debugger ───────────────────────────────────────────────────────
+
+const HistoryDebug = (() => {
+  const MAX_EVENTS = 500;
+  let enabled = false;
+  let verbose = false;
+  let nextOpId = 1;
+  const events = [];
+  const stats = {
+    snapshots: 0,
+    pushHistory: 0,
+    restores: 0,
+    undo: 0,
+    redo: 0,
+    cloneObjectCalls: 0,
+    cloneObjectsCalls: 0,
+    clonedObjects: 0,
+    reusedObjects: 0,
+    maxSnapshotMs: 0,
+    maxPushHistoryMs: 0,
+    maxRestoreMs: 0,
+    maxCloneObjectsMs: 0,
+  };
+
+  function round(value) {
+    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
+  }
+
+  function sanitize(value) {
+    if (!value || typeof value !== 'object') return value;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = round(v);
+    return out;
+  }
+
+  function push(evt) {
+    if (!enabled) return;
+    const entry = { at: round(performance.now()), ...evt };
+    events.push(entry);
+    if (events.length > MAX_EVENTS) events.shift();
+    if (verbose) console.debug('[Boardfish history]', entry);
+  }
+
+  function enable(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) return;
+    enabled = true;
+    if (options.verbose === true) setVerbose(true);
+    console.info('Boardfish history debugger enabled. Use BoardfishDebug.history.summary(), .dump(), .setVerbose(true), or .reset().');
+  }
+
+  function disable() {
+    enabled = false;
+    console.info('Boardfish history debugger disabled.');
+  }
+
+  function setVerbose(value) {
+    verbose = !!value;
+    console.info(`Boardfish history verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
+  }
+
+  function start(op, meta = {}) {
+    if (!enabled) return null;
+    const now = performance.now();
+    const ctx = { id: nextOpId++, op, t0: now, last: now };
+    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
+    return ctx;
+  }
+
+  function step(ctx, stepName, meta = {}) {
+    if (!enabled || !ctx) return;
+    const now = performance.now();
+    push({
+      id: ctx.id,
+      op: ctx.op,
+      step: stepName,
+      dt: round(now - ctx.last),
+      total: round(now - ctx.t0),
+      meta: sanitize(meta),
+    });
+    ctx.last = now;
+  }
+
+  function end(ctx, meta = {}) {
+    if (!enabled || !ctx) return;
+    step(ctx, 'end', meta);
+  }
+
+  function count(key, amount = 1) {
+    if (!enabled) return;
+    if (!Object.hasOwn(stats, key)) stats[key] = 0;
+    stats[key] += amount;
+  }
+
+  function max(key, value) {
+    if (!enabled) return;
+    if (!Object.hasOwn(stats, key)) stats[key] = 0;
+    stats[key] = Math.max(stats[key], value || 0);
+  }
+
+  function summary() {
+    const rows = events.filter(e => e.step && e.step !== 'start').map(e => ({
+      id: e.id,
+      op: e.op,
+      step: e.step,
+      dt: e.dt,
+      total: e.total,
+      objectCount: e.meta?.objectCount ?? '',
+      historyLength: e.meta?.historyLength ?? '',
+      historyIndex: e.meta?.historyIndex ?? '',
+      cloned: e.meta?.cloned ?? '',
+      reused: e.meta?.reused ?? '',
+      dirtyCount: e.meta?.dirtyCount ?? '',
+      selectedCount: e.meta?.selectedCount ?? '',
+      editState: e.meta?.editState ?? '',
+      ms: e.meta?.ms ?? '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function dump() {
+    console.table(events);
+    return events.slice();
+  }
+
+  function reset() {
+    events.length = 0;
+    for (const key of Object.keys(stats)) stats[key] = 0;
+  }
+
+  return { enable, disable, setVerbose, start, step, end, count, max, summary, dump, reset, clear: reset, get events() { return events.slice(); }, get stats() { return { ...stats }; } };
+})();
+
+exposeDebug({ history: HistoryDebug });
+
 const ViewportDebug = (() => {
   const MAX_EVENTS = 900;
   const MAX_SLOW_RECORDS = 100;
@@ -274,6 +403,7 @@ const ViewportDebug = (() => {
   }
 
   function enable(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
@@ -601,6 +731,7 @@ const SaveDebug = (() => {
   }
 
   function enable(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
@@ -788,6 +919,7 @@ const OpenDebug = (() => {
   }
 
   function enable(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
@@ -1042,6 +1174,7 @@ const ExportDebug = (() => {
   }
 
   function enable(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
@@ -1178,6 +1311,7 @@ const InsertDebug = (() => {
     if (verbose) console.debug('[Boardfish insert]', entry);
   }
   function enable(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
     if (options.verbose === true) setVerbose(true);
     console.info('Boardfish insert debugger enabled. Use BoardfishDebug.insert.phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
@@ -1442,6 +1576,7 @@ const TextSelDebug = (() => {
   }
 
   function enable() {
+    if (!DEBUG_TOOLS_ENABLED) return;
     _textSelDebugEnabled = true;
     console.info(
       '[textSel] enabled. Double-click a text object to edit it, then drag to select.' +
@@ -1642,6 +1777,7 @@ const PillDebug = (() => {
   }
 
   function enable() {
+    if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
     events.length = 0;
     console.log('[pill] PillDebug enabled. Use BoardfishDebug.pill.summary()');
@@ -1811,7 +1947,7 @@ async function _rebuildOffscreenAsync() {
   _offscreen.width  = boardCanvas.width;
   _offscreen.height = boardCanvas.height;
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
-  _offCtx.fillStyle = '#1c1c1e';
+  _offCtx.fillStyle = '#282828';
   _offCtx.fillRect(0, 0, _offscreen.width, _offscreen.height);
   _offCtx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
   setCanvasImageQuality(_offCtx);
@@ -2074,7 +2210,7 @@ function drawBoard() {
       // Draw all objects directly this frame while the rebuild is pending.
       _rebuildOffscreenAsync();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#1c1c1e';
+      ctx.fillStyle = '#282828';
       ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
       ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
       setCanvasImageQuality(ctx);
@@ -2143,7 +2279,7 @@ function drawBoard() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   } else {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#1c1c1e';
+    ctx.fillStyle = '#282828';
     ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
     setCanvasImageQuality(ctx);
@@ -2301,6 +2437,7 @@ function rebuildObjectsMap() {
 function newId() { return 'obj-' + (idCounter++); }
 
 function cloneObject(obj) {
+  HistoryDebug.count('cloneObjectCalls');
   const data = obj.type === 'image'
     ? { imgKey: obj.data.imgKey, flipX: !!obj.data.flipX, flipY: !!obj.data.flipY }
     : { content: normalizeTextContent(obj.data.content) };
@@ -2317,8 +2454,15 @@ function cloneObject(obj) {
 }
 
 function cloneObjects(list) {
+  const dbg = HistoryDebug.start('cloneObjects', { objectCount: list.length });
+  const t0 = performance.now();
+  HistoryDebug.count('cloneObjectsCalls');
+  HistoryDebug.count('clonedObjects', list.length);
   const clones = new Array(list.length);
   for (let i = 0; i < list.length; i++) clones[i] = cloneObject(list[i]);
+  const ms = performance.now() - t0;
+  HistoryDebug.max('maxCloneObjectsMs', ms);
+  HistoryDebug.end(dbg, { objectCount: list.length, ms });
   return clones;
 }
 
@@ -2735,9 +2879,14 @@ function trimHistory() {
 }
 
 function snapshot() {
+  const dbg = HistoryDebug.start('snapshot', { objectCount: objects.length, historyLength: history.length, historyIndex });
+  const t0 = performance.now();
+  HistoryDebug.count('snapshots');
   history.length = historyIndex + 1;
   const objectsSnapshot = cloneObjects(objects);
+  HistoryDebug.step(dbg, 'cloneObjects', { objectCount: objectsSnapshot.length });
   const editState = captureEditState();
+  HistoryDebug.step(dbg, 'captureEditState', { editState: !!editState });
   history.push({
     objects: objectsSnapshot,
     editState,
@@ -2745,24 +2894,42 @@ function snapshot() {
   historyIndex = history.length - 1;
   _dirtyIds.clear();
   trimHistory();
+  const ms = performance.now() - t0;
+  HistoryDebug.max('maxSnapshotMs', ms);
+  HistoryDebug.end(dbg, { ms, historyLength: history.length, historyIndex });
 }
 
 // Delta push: only deep-clones objects that changed since last snapshot.
 // Unchanged objects share the previous snapshot's reference (safe since
 // restoreSnapshot always deep-clones before mutating).
 function pushHistory() {
+  const dbg = HistoryDebug.start('pushHistory', {
+    objectCount: objects.length,
+    dirtyCount: _dirtyIds.size,
+    historyLength: history.length,
+    historyIndex,
+  });
+  const t0 = performance.now();
+  HistoryDebug.count('pushHistory');
   history.length = historyIndex + 1;
   const prevEntry = historyIndex >= 0 ? history[historyIndex] : [];
   const prevObjects = Array.isArray(prevEntry) ? prevEntry : (prevEntry.objects || []);
   const prevMap = new Map();
   for (const o of prevObjects) prevMap.set(o.id, o);
+  HistoryDebug.step(dbg, 'build-prev-map', { objectCount: prevObjects.length });
+  let cloned = 0;
+  let reused = 0;
   const entry = objects.map(o =>
     (_dirtyIds.has(o.id) || !prevMap.has(o.id))
-      ? cloneObject(o)
-      : prevMap.get(o.id)
+      ? (cloned++, cloneObject(o))
+      : (reused++, prevMap.get(o.id))
   );
+  HistoryDebug.count('clonedObjects', cloned);
+  HistoryDebug.count('reusedObjects', reused);
+  HistoryDebug.step(dbg, 'clone-dirty-objects', { cloned, reused, objectCount: entry.length });
   _dirtyIds.clear();
   const editState = captureEditState();
+  HistoryDebug.step(dbg, 'captureEditState', { editState: !!editState });
   history.push({
     objects: entry,
     editState,
@@ -2770,9 +2937,24 @@ function pushHistory() {
   historyIndex++;
   trimHistory();
   updateTitle();
+  const ms = performance.now() - t0;
+  HistoryDebug.max('maxPushHistoryMs', ms);
+  HistoryDebug.end(dbg, { ms, cloned, reused, historyLength: history.length, historyIndex });
 }
 
 function restoreSnapshot(s) {
+  const snapshotObjects = Array.isArray(s) ? s : (s?.objects || []);
+  const editState = Array.isArray(s) ? null : (s?.editState || null);
+  const hadEditing = !!editingId;
+  const dbg = HistoryDebug.start('restoreSnapshot', {
+    objectCount: snapshotObjects.length,
+    historyLength: history.length,
+    historyIndex,
+    selectedCount: selectedIds.size,
+    editState: !!editState,
+  });
+  const t0 = performance.now();
+  HistoryDebug.count('restores');
   if (editingId) {
     clearInterval(_caretBlinkInterval);
     _caretBlinkInterval = null;
@@ -2787,18 +2969,21 @@ function restoreSnapshot(s) {
     editingId = null;
     _editEl = null;
   }
+  HistoryDebug.step(dbg, 'clear-editing', { hadEditing });
   const prevSelectedIds = new Set(selectedIds);
-  const snapshotObjects = Array.isArray(s) ? s : (s?.objects || []);
-  const editState = Array.isArray(s) ? null : (s?.editState || null);
   objects = cloneObjects(snapshotObjects);
+  HistoryDebug.step(dbg, 'clone-snapshot', { objectCount: objects.length });
   for (const obj of objects) {
     if (obj?.type === 'text') obj.data.content = normalizeTextContent(obj.data?.content);
   }
+  HistoryDebug.step(dbg, 'normalize-text', { objectCount: objects.length });
   _dirtyIds.clear();
   _linesCacheMap.clear();
   _prefixCache.clear();
   rebuildObjectsMap();
+  HistoryDebug.step(dbg, 'rebuild-caches', { objectCount: objectsMap.size });
   syncAllTextAutoHeights();
+  HistoryDebug.step(dbg, 'sync-text-heights');
   invalidateOffscreen();
   // Preserve selection for objects that still exist in the restored state
   selectedId = null;
@@ -2807,10 +2992,21 @@ function restoreSnapshot(s) {
     if (objectsMap.has(id)) { selectedIds.add(id); selectedId = id; }
   }
   renderAll();
+  HistoryDebug.step(dbg, 'renderAll', { selectedCount: selectedIds.size });
 
-  if (!editState || !editState.id) return;
+  if (!editState || !editState.id) {
+    const ms = performance.now() - t0;
+    HistoryDebug.max('maxRestoreMs', ms);
+    HistoryDebug.end(dbg, { ms, objectCount: objects.length, selectedCount: selectedIds.size });
+    return;
+  }
   const obj = objectsMap.get(editState.id);
-  if (!obj || obj.type !== 'text') return;
+  if (!obj || obj.type !== 'text') {
+    const ms = performance.now() - t0;
+    HistoryDebug.max('maxRestoreMs', ms);
+    HistoryDebug.end(dbg, { ms, skippedEditRestore: true });
+    return;
+  }
 
   selectedId = obj.id;
   selectedIds.clear();
@@ -2824,6 +3020,9 @@ function restoreSnapshot(s) {
   _editEl.setSelectionRange(start, end, editState.selectionDirection || 'none');
   _caretVisible = true;
   scheduleRender(true, true);
+  const ms = performance.now() - t0;
+  HistoryDebug.max('maxRestoreMs', ms);
+  HistoryDebug.end(dbg, { ms, objectCount: objects.length, selectedCount: selectedIds.size, restoredEdit: true });
 }
 
 function captureEditState() {
@@ -2839,16 +3038,22 @@ function captureEditState() {
 
 function undo() {
   if (historyIndex <= 0) return;
+  HistoryDebug.count('undo');
+  const dbg = HistoryDebug.start('undo', { historyLength: history.length, historyIndex });
   historyIndex--;
   restoreSnapshot(history[historyIndex]);
   updateTitle();
+  HistoryDebug.end(dbg, { historyLength: history.length, historyIndex });
 }
 
 function redo() {
   if (historyIndex >= history.length - 1) return;
+  HistoryDebug.count('redo');
+  const dbg = HistoryDebug.start('redo', { historyLength: history.length, historyIndex });
   historyIndex++;
   restoreSnapshot(history[historyIndex]);
   updateTitle();
+  HistoryDebug.end(dbg, { historyLength: history.length, historyIndex });
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────────
