@@ -160,6 +160,9 @@ const ClipDebug = (() => {
       objectCount: e.meta?.objectCount ?? '',
       imageCount: e.meta?.imageCount ?? '',
       imgKey: e.meta?.imgKey || '',
+      added: e.meta?.added ?? '',
+      bitmapReady: e.meta?.bitmapReady ?? '',
+      fallbackReady: e.meta?.fallbackReady ?? '',
       dataUrlLen: e.meta?.dataUrlLen ?? '',
       blobSize: e.meta?.blobSize ?? '',
       textLen: e.meta?.textLen ?? '',
@@ -183,6 +186,9 @@ const ClipDebug = (() => {
       objectCount: e.meta?.objectCount ?? '',
       imageCount: e.meta?.imageCount ?? '',
       imgKey: e.meta?.imgKey || '',
+      added: e.meta?.added ?? '',
+      bitmapReady: e.meta?.bitmapReady ?? '',
+      fallbackReady: e.meta?.fallbackReady ?? '',
       dataUrlLen: e.meta?.dataUrlLen ?? '',
       blobSize: e.meta?.blobSize ?? '',
       textLen: e.meta?.textLen ?? '',
@@ -396,6 +402,9 @@ const ViewportDebug = (() => {
     imageBitmapFailures: 0,
     imagePreviewPrepared: 0,
     imagePreviewFailures: 0,
+    imageDrawMissing: 0,
+    imageDrawFallback: 0,
+    imageDrawErrors: 0,
     clipboardPrecacheStarts: 0,
     clipboardPrecacheFailures: 0,
     culledImages: 0,
@@ -438,7 +447,7 @@ const ViewportDebug = (() => {
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish viewport debugger enabled. Events are buffered without per-event console logging. Use BoardfishDebug.viewport.summary(), .dump(), .setVerbose(true), or .reset().');
+    console.info('Boardfish viewport debugger enabled. Events are buffered without per-event console logging. Use BoardfishDebug.viewport.summary(), .drawSummary(), .imageHealth(), .dump(), .setVerbose(true), or .reset().');
   }
 
   function disable() {
@@ -568,6 +577,9 @@ const ViewportDebug = (() => {
       { metric: 'imageBitmapFailures', value: stats.imageBitmapFailures },
       { metric: 'imagePreviewPrepared', value: stats.imagePreviewPrepared },
       { metric: 'imagePreviewFailures', value: stats.imagePreviewFailures },
+      { metric: 'imageDrawMissing', value: stats.imageDrawMissing },
+      { metric: 'imageDrawFallback', value: stats.imageDrawFallback },
+      { metric: 'imageDrawErrors', value: stats.imageDrawErrors },
       { metric: 'clipboardPrecacheStarts', value: stats.clipboardPrecacheStarts },
       { metric: 'clipboardPrecacheFailures', value: stats.clipboardPrecacheFailures },
       { metric: 'culledImages', value: stats.culledImages },
@@ -626,9 +638,78 @@ const ViewportDebug = (() => {
       maxCulledImages: max('culledImages'),
       avgBitmapImages: draws.length ? Math.round(sum('bitmapImages') / draws.length * 100) / 100 : 0,
       avgElementImages: draws.length ? Math.round(sum('elementImages') / draws.length * 100) / 100 : 0,
+      avgMissingImages: draws.length ? Math.round(sum('missingImages') / draws.length * 100) / 100 : 0,
+      maxMissingImages: max('missingImages'),
+      avgErroredImages: draws.length ? Math.round(sum('erroredImages') / draws.length * 100) / 100 : 0,
       avgCroppedImages: draws.length ? Math.round(sum('croppedImages') / draws.length * 100) / 100 : 0,
       avgDrawnText: draws.length ? Math.round(sum('drawnText') / draws.length * 100) / 100 : 0,
       avgCulledText: draws.length ? Math.round(sum('culledText') / draws.length * 100) / 100 : 0,
+    };
+    console.table([out]);
+    return out;
+  }
+
+  function imageHealth(limit = 40) {
+    const rows = (typeof objects === 'undefined' ? [] : objects)
+      .filter(obj => obj.type === 'image')
+      .map(obj => {
+        const key = obj.data?.imgKey || '';
+        const img = key ? imageCache[key] : null;
+        const bitmap = key ? imageBitmapCache[key] : null;
+        const src = key ? imageStore[key] : null;
+        const assetUrl = key ? imageAssetUrlCache[key] : '';
+        const ready = key ? imageReadyPromises.get(key) : null;
+        let status = 'ok';
+        if (!key) status = 'missing-key';
+        else if (!src) status = 'missing-store';
+        else if (!assetUrl && isNativeImageRef(src)) status = 'missing-asset-url';
+        else if (!img) status = 'missing-image-element';
+        else if (imageBitmapFailed.has(key) && img.complete && img.naturalWidth > 0) status = 'fallback-ok';
+        else if (imageBitmapFailed.has(key)) status = 'bitmap-failed-no-fallback';
+        else if (!bitmap) status = img.complete && img.naturalWidth > 0 ? 'loaded-no-bitmap' : 'not-loaded';
+        return {
+          id: obj.id,
+          key,
+          status,
+          x: Math.round(obj.x),
+          y: Math.round(obj.y),
+          w: Math.round(obj.w),
+          h: Math.round(obj.h),
+          native: !!src?.native,
+          bytes: src?.bytes ?? '',
+          hasAssetUrl: !!assetUrl,
+          hasImg: !!img,
+          complete: !!img?.complete,
+          naturalW: img?.naturalWidth || 0,
+          naturalH: img?.naturalHeight || 0,
+          hasBitmap: !!bitmap,
+          bitmapFailed: key ? imageBitmapFailed.has(key) : false,
+          hasReadyPromise: !!ready,
+        };
+      });
+    const bad = rows.filter(row => row.status !== 'ok' && row.status !== 'fallback-ok');
+    console.table((bad.length ? bad : rows).slice(0, limit));
+    return { total: rows.length, badCount: bad.length, bad, rows };
+  }
+
+  function imageHealthSummary() {
+    const health = imageHealth(0);
+    const counts = health.rows.reduce((acc, row) => {
+      acc[row.status] = (acc[row.status] || 0) + 1;
+      return acc;
+    }, {});
+    const out = {
+      total: health.total,
+      badCount: health.badCount,
+      ok: counts.ok || 0,
+      missingKey: counts['missing-key'] || 0,
+      missingStore: counts['missing-store'] || 0,
+      missingAssetUrl: counts['missing-asset-url'] || 0,
+      missingImageElement: counts['missing-image-element'] || 0,
+      fallbackOk: counts['fallback-ok'] || 0,
+      bitmapFailedNoFallback: counts['bitmap-failed-no-fallback'] || 0,
+      loadedNoBitmap: counts['loaded-no-bitmap'] || 0,
+      notLoaded: counts['not-loaded'] || 0,
     };
     console.table([out]);
     return out;
@@ -720,6 +801,8 @@ const ViewportDebug = (() => {
     summary,
     frameSummary,
     drawSummary,
+    imageHealth,
+    imageHealthSummary,
     transformSummary,
     slowFrames,
     dump,
@@ -1476,9 +1559,6 @@ exposeDebug({ insert: InsertDebug });
 //   2) images are resolved to native cache keys sequentially
 //   3) save_images_to_existing_folder_by_keys writes those keys to the picked folder
 //
-// Usage (DevTools console):
-//   await BoardfishDebug.exportAllDiag.run()                 // live new-flow probe
-//   await BoardfishDebug.exportAllDiag.run({ legacy: true }) // old data URL IPC probe
 const ExportAllDiag = (() => {
   const WARN_MB  = 10;   // yellow warning
   const FATAL_MB = 50;   // likely fatal on Windows WebView2
@@ -1488,7 +1568,7 @@ const ExportAllDiag = (() => {
   function mb(bytes) { return Math.round(bytes / 1024 / 1024 * 100) / 100; }
   function ms(t0)    { return Math.round((performance.now() - t0) * 10) / 10; }
 
-  async function run(options = {}) {
+  async function run() {
     if (!window.__TAURI__) {
       console.warn('[exportAllDiag] Not inside Tauri — aborting.');
       return null;
@@ -1506,10 +1586,7 @@ const ExportAllDiag = (() => {
     console.group(`%c[exportAllDiag] Diagnosing export of ${imageObjs.length} image(s) — IS_WIN=${IS_WIN}`,
       'font-weight:bold');
 
-    // ── Phase 1: classify only in the default flow ────────────────────────────
-    console.group(options.legacy
-      ? 'Phase 1: render each image and measure legacy payload size'
-      : 'Phase 1: classify images without rendering');
+    console.group('Phase 1: classify images without rendering');
     const perImage = [];
     let totalBytes = 0;
 
@@ -1517,214 +1594,113 @@ const ExportAllDiag = (() => {
       const obj = imageObjs[i];
       const imgKey = obj.data?.imgKey ?? '?';
       const needsRender = imageNeedsRendering(obj);
-      const t0 = performance.now();
-      let dataUrl = null, renderErr = null;
-      if (options.legacy) {
-        try { dataUrl = await getRenderedImageDataUrl(obj); }
-        catch (e) { renderErr = String(e); }
-      }
-      const renderMs = ms(t0);
-      const bytes = dataUrl ? dataUrl.length : imageStoreBytesEstimate(imageStore[obj.data?.imgKey]);
+      const bytes = imageStoreBytesEstimate(imageStore[obj.data?.imgKey]);
       const kb = Math.round(bytes / 1024 * 10) / 10;
       totalBytes += bytes;
 
-      const row = { index: i, imgKey, needsRender, renderMs: options.legacy ? renderMs : 0, kb, ok: options.legacy ? !!dataUrl && !renderErr : true, error: renderErr ?? undefined };
-      perImage.push({ ...row, dataUrl });
+      const row = { index: i, imgKey, needsRender, renderMs: 0, kb, ok: true, error: undefined };
+      perImage.push(row);
       const style = row.ok ? '' : 'color:red';
-      console.log(`%c  [${i}] imgKey=${row.imgKey}  needsRender=${needsRender}  ${options.legacy ? `render=${renderMs}ms  ` : ''}${kb}KB  ok=${row.ok}${renderErr ? '  ERR:'+renderErr : ''}`, style);
+      console.log(`%c  [${i}] imgKey=${row.imgKey}  needsRender=${needsRender}  ${kb}KB  ok=${row.ok}`, style);
     }
 
     const totalMB = mb(totalBytes);
-    const validUrls = perImage.filter(r => r.ok && r.dataUrl).map(r => r.dataUrl);
     const severity = totalMB > FATAL_MB ? 'FATAL' : totalMB > WARN_MB ? 'WARN' : 'OK';
     const severityStyle = severity === 'FATAL' ? 'color:red;font-weight:bold' : severity === 'WARN' ? 'color:orange;font-weight:bold' : 'color:green';
-    console.log(`%cTotal payload: ${totalMB} MB | ${validUrls.length} renderable | severity=${severity}`, severityStyle);
+    console.log(`%cEstimated stored payload: ${totalMB} MB | severity=${severity}`, severityStyle);
     if (severity === 'FATAL') console.error('[exportAllDiag] Payload almost certainly exceeds Tauri/WebView2 IPC limit on Windows');
     else if (severity === 'WARN') console.warn('[exportAllDiag] Payload is large — may intermittently hit IPC limits on Windows');
     console.groupEnd();
 
-    if (!options.legacy) {
-      console.group('Phase 2: pick folder first');
-      const pickStart = performance.now();
-      let folder = null, pickOk = false, pickErr = null;
-      try {
-        folder = await window.__TAURI__.core.invoke('pick_folder');
-        pickOk = true;
-      } catch (e) {
-        pickErr = String(e);
-      }
-      const pickMs = ms(pickStart);
-      console.log(`  pick_folder completed in ${pickMs}ms  ok=${pickOk}  picked=${!!folder}${pickErr ? '  ERR:'+pickErr : ''}`);
-      console.groupEnd();
+    console.group('Phase 2: pick folder first');
+    const pickStart = performance.now();
+    let folder = null, pickOk = false, pickErr = null;
+    try {
+      folder = await window.__TAURI__.core.invoke('pick_folder');
+      pickOk = true;
+    } catch (e) {
+      pickErr = String(e);
+    }
+    const pickMs = ms(pickStart);
+    console.log(`  pick_folder completed in ${pickMs}ms  ok=${pickOk}  picked=${!!folder}${pickErr ? '  ERR:'+pickErr : ''}`);
+    console.groupEnd();
 
-      const keyProbe = [];
-      const tempKeys = [];
-      let renderedCount = 0;
-      let saveProbe = null;
-      if (pickOk && folder) {
-        console.group('Phase 3: sequential key resolution');
-        const keys = [];
-        for (let i = 0; i < imageObjs.length; i++) {
-          const obj = imageObjs[i];
-          const imgKey = obj.data?.imgKey;
-          const needsRender = imageNeedsRendering(obj);
-          const t0 = performance.now();
-          let key = null, ok = false, err = null;
-          try {
-            if (needsRender) {
-              const dataUrl = await getRenderedImageDataUrl(obj);
-              if (dataUrl) {
-                key = `__export_diag_tmp_${obj.id}`;
-                tempKeys.push(key);
-                renderedCount++;
-                await window.__TAURI__.core.invoke('register_image_source', { imgKey: key, dataUrl });
-              }
-            } else {
-              await cacheImageSourceForSave(imgKey, imageStore[imgKey]);
-              key = imgKey;
-            }
-            ok = !!key;
-            if (key) keys.push(key);
-          } catch (e) {
-            err = String(e);
-          }
-          const row = { index: i, imgKey, key, needsRender, ms: ms(t0), ok, error: err ?? '' };
-          keyProbe.push(row);
-          console.log(`  [${i}] imgKey=${imgKey} needsRender=${needsRender} key=${key || '-'} ${row.ms}ms ok=${ok}${err ? ' ERR:'+err : ''}`);
-        }
-        console.groupEnd();
-
-        console.group('Phase 4: save picked folder by keys');
-        const saveStart = performance.now();
-        let savedCount = 0, saveOk = false, saveErr = null;
+    const keyProbe = [];
+    const tempKeys = [];
+    let renderedCount = 0;
+    let saveProbe = null;
+    if (pickOk && folder) {
+      console.group('Phase 3: sequential key resolution');
+      const keys = [];
+      for (let i = 0; i < imageObjs.length; i++) {
+        const obj = imageObjs[i];
+        const imgKey = obj.data?.imgKey;
+        const needsRender = imageNeedsRendering(obj);
+        const t0 = performance.now();
+        let key = null, ok = false, err = null;
         try {
-          savedCount = await window.__TAURI__.core.invoke('save_images_to_existing_folder_by_keys', { folder, imgKeys: keys });
-          saveOk = true;
+          if (needsRender) {
+            const dataUrl = await getRenderedImageDataUrl(obj);
+            if (dataUrl) {
+              key = `__export_diag_tmp_${obj.id}`;
+              tempKeys.push(key);
+              renderedCount++;
+              await window.__TAURI__.core.invoke('register_image_source', { imgKey: key, dataUrl });
+            }
+          } else {
+            await cacheImageSourceForSave(imgKey, imageStore[imgKey]);
+            key = imgKey;
+          }
+          ok = !!key;
+          if (key) keys.push(key);
         } catch (e) {
-          saveErr = String(e);
-        } finally {
-          cleanupExportTempKeys(tempKeys);
+          err = String(e);
         }
-        saveProbe = { keyCount: keys.length, savedCount, saveMs: ms(saveStart), saveOk, error: saveErr ?? '' };
-        console.log(`  save_images_to_existing_folder_by_keys keyCount=${keys.length} saved=${savedCount} ${saveProbe.saveMs}ms ok=${saveOk}${saveErr ? ' ERR:'+saveErr : ''}`);
-        console.groupEnd();
-      } else {
-        console.warn('[exportAllDiag] Folder picker was cancelled or failed; skipped key resolution and saving.');
+        const row = { index: i, imgKey, key, needsRender, ms: ms(t0), ok, error: err ?? '' };
+        keyProbe.push(row);
+        console.log(`  [${i}] imgKey=${imgKey} needsRender=${needsRender} key=${key || '-'} ${row.ms}ms ok=${ok}${err ? ' ERR:'+err : ''}`);
       }
-
-      const report = {
-        mode: 'keyed-folder-first',
-        isWindows: IS_WIN,
-        imageCount: imageObjs.length,
-        renderableCount: options.legacy ? validUrls.length : null,
-        totalLegacyPayloadMB: totalMB,
-        payloadSeverity: severity,
-        folderPickedBeforeKeyResolution: !!folder,
-        pickProbe: { pickMs, pickOk, picked: !!folder, error: pickErr ?? '' },
-        keyProbe,
-        renderedCount,
-        tempKeyCount: tempKeys.length,
-        saveProbe,
-        perImage: perImage.map(({ dataUrl: _, ...r }) => r),
-      };
-      console.group('Full report');
-      console.table(report.perImage);
-      console.table(report.keyProbe);
-      if (report.saveProbe) console.table([report.saveProbe]);
-      console.log('Full report → BoardfishDebug.exportAllDiag.last');
-      console.groupEnd();
       console.groupEnd();
 
-      _last = report;
-      return report;
-    }
-
-    // ── Legacy Phase 2: JS-side JSON serialization probe ──────────────────────
-    // Measures whether stringify itself lags or throws, and confirms the payload
-    // sizes that will cross the wire. No Tauri calls, no folder pickers.
-    console.group('Phase 2: JS-side serialization probe (no side-effects)');
-    const serializeProbe = [];
-    let probeSize = 1;
-    while (probeSize <= validUrls.length) {
-      const batch = validUrls.slice(0, probeSize);
-      const batchBytes = batch.reduce((s, u) => s + u.length, 0);
-      const batchMB = mb(batchBytes);
-      const t0 = performance.now();
-      let jsOk = false, serErr = null;
-      try { JSON.stringify({ dataUrls: batch }); jsOk = true; }
-      catch (e) { serErr = String(e); }
-      const serMs = ms(t0);
-      serializeProbe.push({ count: probeSize, payloadMB: batchMB, serializeMs: serMs, jsOk, error: serErr ?? '' });
-      console.log(`  count=${probeSize}  payload=${batchMB}MB  serialize=${serMs}ms  jsOk=${jsOk}${serErr ? '  ERR:'+serErr : ''}`);
-      if (!jsOk) break;
-      probeSize = probeSize < validUrls.length ? Math.min(probeSize * 2, validUrls.length) : validUrls.length + 1;
-    }
-    console.groupEnd();
-
-    // ── Phase 3: live IPC binary-search ───────────────────────────────────────
-    // Calls save_images_to_folder with doubling batch sizes to find the exact
-    // count at which the IPC call fails. Opens the folder picker once per call.
-    // Press Cancel in the folder picker to abort phase 3 early (savedCount = 0
-    // on cancel, so we treat cancel as "user aborted" and stop probing).
-    console.group('Phase 3: live IPC binary-search (folder picker will open for each batch — cancel to skip)');
-    const ipcProbe = [];
-    let ipcSize = 1;
-    let ipcAborted = false;
-    while (!ipcAborted && ipcSize <= validUrls.length) {
-      const batch = validUrls.slice(0, ipcSize);
-      const batchMB = mb(batch.reduce((s, u) => s + u.length, 0));
-      console.log(`  Probing batch size=${ipcSize} (${batchMB} MB) — open folder picker…`);
-      const t0 = performance.now();
-      let savedCount = null, ipcOk = false, ipcErr = null;
+      console.group('Phase 4: save picked folder by keys');
+      const saveStart = performance.now();
+      let savedCount = 0, saveOk = false, saveErr = null;
       try {
-        savedCount = await window.__TAURI__.core.invoke('save_images_to_folder', { dataUrls: batch });
-        ipcOk = true;
-        if (savedCount === 0) {
-          // User cancelled folder picker
-          console.log('  Folder picker cancelled — stopping phase 3.');
-          ipcAborted = true;
-        }
+        savedCount = await window.__TAURI__.core.invoke('save_images_to_existing_folder_by_keys', { folder, imgKeys: keys });
+        saveOk = true;
       } catch (e) {
-        ipcErr = String(e);
+        saveErr = String(e);
+      } finally {
+        cleanupExportTempKeys(tempKeys);
       }
-      const invokeMs = ms(t0);
-      const row = { count: ipcSize, payloadMB: batchMB, invokeMs, savedCount: savedCount ?? 0, ipcOk, error: ipcErr ?? '' };
-      ipcProbe.push(row);
-      const style = ipcOk ? '' : 'color:red;font-weight:bold';
-      console.log(`%c  → count=${ipcSize}  ${batchMB}MB  ${invokeMs}ms  savedCount=${savedCount}  ok=${ipcOk}${ipcErr ? '  ERR:'+ipcErr : ''}`, style);
-      if (!ipcOk || ipcAborted) break;
-      ipcSize = ipcSize < validUrls.length ? Math.min(ipcSize * 2, validUrls.length) : validUrls.length + 1;
+      saveProbe = { keyCount: keys.length, savedCount, saveMs: ms(saveStart), saveOk, error: saveErr ?? '' };
+      console.log(`  save_images_to_existing_folder_by_keys keyCount=${keys.length} saved=${savedCount} ${saveProbe.saveMs}ms ok=${saveOk}${saveErr ? ' ERR:'+saveErr : ''}`);
+      console.groupEnd();
+    } else {
+      console.warn('[exportAllDiag] Folder picker was cancelled or failed; skipped key resolution and saving.');
     }
-    if (!ipcAborted && ipcProbe.length) {
-      const lastOk = [...ipcProbe].reverse().find(r => r.ipcOk && r.savedCount > 0);
-      const firstFail = ipcProbe.find(r => !r.ipcOk);
-      if (firstFail) {
-        console.error(`%c[exportAllDiag] IPC FAILED at count=${firstFail.count} (${firstFail.payloadMB}MB): ${firstFail.error}`, 'color:red;font-weight:bold');
-        if (lastOk) console.log(`%c  Last successful batch: count=${lastOk.count} (${lastOk.payloadMB}MB)`, 'color:green');
-      } else {
-        console.log(`%c[exportAllDiag] All ${ipcProbe[ipcProbe.length-1].count} images exported successfully via IPC.`, 'color:green;font-weight:bold');
-      }
-    }
-    console.groupEnd();
 
-    // ── Report ─────────────────────────────────────────────────────────────────
     const report = {
+      mode: 'keyed-folder-first',
       isWindows: IS_WIN,
       imageCount: imageObjs.length,
-      renderableCount: validUrls.length,
-      totalPayloadMB: totalMB,
+      totalStoredPayloadMB: totalMB,
       payloadSeverity: severity,
-      perImage: perImage.map(({ dataUrl: _, ...r }) => r),
-      serializeProbe,
-      ipcProbe,
+      folderPickedBeforeKeyResolution: !!folder,
+      pickProbe: { pickMs, pickOk, picked: !!folder, error: pickErr ?? '' },
+      keyProbe,
+      renderedCount,
+      tempKeyCount: tempKeys.length,
+      saveProbe,
+      perImage,
     };
     console.group('Full report');
     console.table(report.perImage);
-    console.table(report.serializeProbe);
-    if (ipcProbe.length) console.table(report.ipcProbe);
+    console.table(report.keyProbe);
+    if (report.saveProbe) console.table([report.saveProbe]);
     console.log('Full report → BoardfishDebug.exportAllDiag.last');
     console.groupEnd();
-    console.groupEnd(); // top group
+    console.groupEnd();
 
     _last = report;
     return report;
@@ -2852,18 +2828,49 @@ function drawSingleObj(context, obj, counters = null) {
     for (let i = 0; i < lines.length; i++) {
       context.fillText(lines[i].text, obj.x + TEXT_PAD, obj.y + TEXT_PAD + i * LINE_H);
     }
+    return true;
   } else if (obj.type === 'image') {
     const key = obj.data.imgKey;
     const bitmap = imageBitmapCache[key];
-    const img = bitmap || (imageBitmapFailed.has(obj.data.imgKey) ? imageCache[obj.data.imgKey] : null);
+    const failed = imageBitmapFailed.has(key);
+    const img = bitmap || (failed ? imageCache[key] : null);
     if (img && (bitmap || (img.complete && img.naturalWidth > 0))) {
       if (counters) {
         if (bitmap) counters.bitmapImages++;
-        else counters.elementImages++;
+        else {
+          counters.elementImages++;
+          counters.fallbackImages++;
+        }
       }
-      drawImageObj(context, obj, img);
+      try {
+        drawImageObj(context, obj, img);
+        return true;
+      } catch (err) {
+        if (counters) {
+          counters.erroredImages++;
+          counters.lastDrawError = String(err);
+          counters.lastDrawErrorKey = key;
+          counters.lastDrawErrorId = obj.id;
+        }
+        return false;
+      }
     }
+    if (counters) {
+      counters.missingImages++;
+      counters.lastMissingKey = key;
+      counters.lastMissingId = obj.id;
+      counters.lastMissingReason = !key ? 'missing-key'
+        : !imageStore[key] ? 'missing-store'
+          : !imageCache[key] ? 'missing-image-element'
+            : failed ? 'failed-but-not-drawable'
+              : !imageCache[key].complete ? 'not-complete'
+                : imageCache[key].naturalWidth <= 0 ? 'zero-natural-width'
+                  : !bitmap ? 'missing-bitmap'
+                    : 'unknown';
+    }
+    return false;
   }
+  return false;
 }
 
 
@@ -2875,7 +2882,7 @@ function drawBoard() {
   }
   let drawnImages = 0;
   let drawnText = 0;
-  const counters = { bitmapImages: 0, elementImages: 0, croppedImages: 0 };
+  const counters = { bitmapImages: 0, elementImages: 0, fallbackImages: 0, missingImages: 0, erroredImages: 0, croppedImages: 0 };
   const dpr = window.devicePixelRatio || 1;
 
   if (editingId) {
@@ -2892,8 +2899,8 @@ function drawBoard() {
       ctx.textBaseline = 'top';
       for (const obj of objects) {
         if (obj.id === editingId) continue;
-        drawSingleObj(ctx, obj, counters);
-        if (obj.type === 'image') drawnImages++;
+        const drawn = drawSingleObj(ctx, obj, counters);
+        if (obj.type === 'image' && drawn) drawnImages++;
         else if (obj.type === 'text') drawnText++;
       }
     } else {
@@ -2960,13 +2967,16 @@ function drawBoard() {
     ctx.font = FONT;
     ctx.textBaseline = 'top';
     for (const obj of objects) {
-      drawSingleObj(ctx, obj, counters);
-      if (obj.type === 'image') drawnImages++;
+      const drawn = drawSingleObj(ctx, obj, counters);
+      if (obj.type === 'image' && drawn) drawnImages++;
       else if (obj.type === 'text') drawnText++;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
   ViewportDebug.count('croppedImages', counters.croppedImages);
+  ViewportDebug.count('imageDrawMissing', counters.missingImages);
+  ViewportDebug.count('imageDrawFallback', counters.fallbackImages);
+  ViewportDebug.count('imageDrawErrors', counters.erroredImages);
   ViewportDebug.end(dbg, { drawnImages, drawnText, culledImages: 0, culledText: 0, ...counters });
 }
 
@@ -3526,11 +3536,12 @@ function cacheImage(key, src, dbg = null, preCacheClipboard = true, loadedImg = 
         await img.decode();
       } catch (err) {
         const decodeMs = performance.now() - decodeStart;
+        imageBitmapFailed.add(key);
         ViewportDebug.count('imageDecodeFailures');
         ViewportDebug.max('maxImageDecodeMs', decodeMs);
-        ViewportDebug.step(vpDbg, 'decode:error', { ms: decodeMs, error: String(err) });
+        ViewportDebug.step(vpDbg, 'decode:error', { key, ms: decodeMs, error: String(err) });
         scheduleImageReadyRender('image-load');
-        ViewportDebug.end(vpDbg, { key, decodeReady: false, bitmapReady: false, error: String(err) });
+        ViewportDebug.end(vpDbg, { key, decodeReady: false, bitmapReady: false, fallbackReady: img.complete && img.naturalWidth > 0, error: String(err) });
         resolveReady();
         return;
       }
@@ -5192,6 +5203,31 @@ async function insertDataUrlImage(dataUrl, x, y, dbg, options = {}) {
   return obj;
 }
 
+async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {}) {
+  showPasteShield();
+  try {
+    ClipDebug.step(dbg, 'paste-image:add-start', { path, imgKey });
+    const obj = await addImage(dataUrl, x, y, false, imgKey, options.preCacheClipboard ?? true);
+    if (!obj) {
+      ClipDebug.end(dbg, { path, added: false, imgKey });
+      return null;
+    }
+    ClipDebug.step(dbg, 'paste-image:ready-wait-start', { path, imgKey: obj.data?.imgKey });
+    await imageReadyPromiseForKey(obj.data.imgKey);
+    ClipDebug.step(dbg, 'paste-image:ready-wait-end', { path, imgKey: obj.data?.imgKey });
+    ClipDebug.end(dbg, {
+      path,
+      added: true,
+      imgKey: obj.data?.imgKey,
+      bitmapReady: !!imageBitmapCache[obj.data?.imgKey],
+      fallbackReady: imageBitmapFailed.has(obj.data?.imgKey) && !!imageCache[obj.data?.imgKey]?.complete,
+    });
+    return obj;
+  } finally {
+    hidePasteShield();
+  }
+}
+
 async function insertImageFiles(files, x, y, source = 'file-input') {
   const dbg = InsertDebug.start('insertImages', { source, fileCount: files.length });
   if (!files.length) { InsertDebug.end(dbg, { source, skipped: 'no-files' }); return; }
@@ -6451,13 +6487,9 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     if (eventImage) {
       try {
         const imgKey = newImgKey();
-        showPasteShield();
         const dataUrl = await eventImage;
-        ClipDebug.step(dbg, 'event-image-read', { dataUrl });
-        const addPromise = addImage(dataUrl, wx, wy, false, imgKey);
-        hidePasteShield();
-        await addPromise;
-        ClipDebug.end(dbg, { path: 'event-image' });
+        ClipDebug.step(dbg, 'event-image-read', { imgKey, dataUrl });
+        await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'event-image', dbg);
         return;
       } catch (err) {
         hidePasteShield();
@@ -6475,9 +6507,8 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         const imgKey = newImgKey();
         const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
         if (dataUrl) {
-          ClipDebug.step(dbg, 'browser-image-read', { dataUrl });
-          await addImage(dataUrl, wx, wy, false, imgKey);
-          ClipDebug.end(dbg, { path: 'browser-image' });
+          ClipDebug.step(dbg, 'browser-image-read', { imgKey, dataUrl });
+          await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'browser-image', dbg);
           return;
         }
       } catch (err) {
@@ -6488,13 +6519,9 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       try {
         await new Promise(resolve => setTimeout(resolve, 50));
         const imgKey = newImgKey();
-        showPasteShield();
         const dataUrl = await ClipDebug.invoke(dbg, 'read_image_from_clipboard_cached', { imgKey }, { imgKey });
-        ClipDebug.step(dbg, 'native-image-read', { dataUrl });
-        const addPromise = addImage(dataUrl, wx, wy, false, imgKey, false);
-        hidePasteShield();
-        await addPromise;
-        ClipDebug.end(dbg, { path: 'native-image' });
+        ClipDebug.step(dbg, 'native-image-read', { imgKey, dataUrl });
+        await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'native-image', dbg, { preCacheClipboard: false });
         return;
       } catch (err) {
         hidePasteShield();
@@ -6513,12 +6540,14 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     showPasteShield();
     try {
       const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
-      hidePasteShield();
       if (dataUrl) {
-        await addImage(dataUrl, wx, wy);
-        ClipDebug.end(dbg, { path: 'web-image', dataUrlLen: dataUrl.length });
+        const imgKey = newImgKey();
+        ClipDebug.step(dbg, 'web-image-read', { imgKey, dataUrl });
+        hidePasteShield();
+        await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'web-image', dbg);
         return;
       }
+      hidePasteShield();
       const text = await navigator.clipboard.readText();
       if (text && text.trim()) addText(wx - 100, wy - 40, text);
       ClipDebug.end(dbg, { path: 'web-text', textLen: text?.length || 0 });

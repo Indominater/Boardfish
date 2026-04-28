@@ -243,7 +243,7 @@ fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
     open_debug("read file bytes", read_start);
 
     if !bytes.starts_with(b"PK\x03\x04") {
-        return Err("unsupported legacy Boardfish file; expected container .bf".to_string());
+        return Err("unsupported Boardfish file; expected container .bf".to_string());
     }
 
     let zip_start = std::time::Instant::now();
@@ -426,13 +426,6 @@ async fn read_board(
             "total_ms": result.stats.total_ms,
         }
     }))
-}
-
-#[tauri::command]
-async fn read_binary_file_base64(path: String) -> Result<String, String> {
-    use base64::{engine::general_purpose, Engine as _};
-    let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
-    Ok(general_purpose::STANDARD.encode(&bytes))
 }
 
 fn image_mime_ext_from_path(path: &str) -> (&'static str, &'static str) {
@@ -766,62 +759,6 @@ fn remove_cached_image_sources(
         }
     }
     Ok(removed)
-}
-
-#[tauri::command]
-async fn save_images_to_folder(
-    app: tauri::AppHandle,
-    data_urls: Vec<String>,
-) -> Result<usize, String> {
-    use base64::{engine::general_purpose, Engine as _};
-    use tauri_plugin_dialog::DialogExt;
-
-    if data_urls.is_empty() {
-        return Ok(0);
-    }
-
-    let folder = tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .blocking_pick_folder()
-            .map(|p| p.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let Some(folder) = folder else {
-        return Ok(0);
-    };
-
-    let base = std::path::PathBuf::from(folder);
-    let mut saved_count = 0usize;
-
-    for data_url in data_urls.iter() {
-        let Some((header, base64_data)) = data_url.split_once(',') else {
-            continue;
-        };
-        let ext = ext_from_data_url_header(header);
-        let bytes = match general_purpose::STANDARD.decode(base64_data) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let hex = {
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.subsec_nanos() as u64)
-                .unwrap_or(saved_count as u64);
-            format!(
-                "{:06x}",
-                (nanos ^ (saved_count as u64 * 0x9e3779b9)) & 0xFFFFFF
-            )
-        };
-        let filename = format!("image_{}.{}", hex, ext);
-        if tokio::fs::write(base.join(filename), &bytes).await.is_ok() {
-            saved_count += 1;
-        }
-    }
-
-    Ok(saved_count)
 }
 
 #[tauri::command]
@@ -1335,7 +1272,6 @@ fn main() {
             save_text_as,
             read_board,
             read_text_file,
-            read_binary_file_base64,
             register_image_file_source,
             get_cached_image_data_url,
             materialize_cached_image_sources,
@@ -1343,7 +1279,6 @@ fn main() {
             pick_image_files,
             save_file_dialog,
             save_image_as,
-            save_images_to_folder,
             pick_folder,
             save_images_to_existing_folder_by_keys,
             set_title,
