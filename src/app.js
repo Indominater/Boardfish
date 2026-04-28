@@ -27,7 +27,9 @@ const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 const DEBUG_TOOLS_ENABLED = (() => {
   try {
-    return localStorage.getItem('bf_debug_tools') === '1';
+    const host = window.location?.hostname || '';
+    const isDevHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    return isDevHost && localStorage.getItem('bf_debug_tools') === '1';
   } catch (_) {
     return false;
   }
@@ -1257,7 +1259,9 @@ const ExportDebug = (() => {
       dataUrlCount: e.meta?.dataUrlCount ?? '',
       keyCount: e.meta?.keyCount ?? '',
       tempKeyCount: e.meta?.tempKeyCount ?? '',
+      renderedCount: e.meta?.renderedCount ?? '',
       savedCount: e.meta?.savedCount ?? '',
+      cancelled: e.meta?.cancelled ?? '',
       command: e.meta?.command || '',
       result: e.meta?.result ?? '',
       error: e.meta?.error || '',
@@ -1277,8 +1281,10 @@ const ExportDebug = (() => {
         imageCount: e.meta?.imageCount ?? '',
         keyCount: e.meta?.keyCount ?? '',
         tempKeyCount: e.meta?.tempKeyCount ?? '',
+        renderedCount: e.meta?.renderedCount ?? '',
         dataUrlLen: e.meta?.dataUrlLen ?? '',
         savedCount: e.meta?.savedCount ?? e.meta?.result ?? '',
+        cancelled: e.meta?.cancelled ?? '',
         result: e.meta?.result ?? '',
         error: e.meta?.error || '',
       }));
@@ -1393,15 +1399,15 @@ exposeDebug({ insert: InsertDebug });
 // Usage (DevTools console):
 //   await BoardfishDebug.exportAllDiag.run()
 //
-// Probes why "Export All Images" silently fails on Windows with many images.
-// Suspected cause: Tauri IPC (WebView2 postMessage) has a lower effective payload
-// limit than macOS WKWebView. All data URLs are sent in a single invoke() call.
+// Probes the Windows-safe Export All Images flow.
+// The expected order is:
+//   1) pick_folder opens before image rendering/cache registration
+//   2) images are resolved to native cache keys sequentially
+//   3) save_images_to_existing_folder_by_keys writes those keys to the picked folder
 //
-// The diagnostic runs in 3 phases without blocking your real board:
-//   Phase 1 — renders each image, measures individual + total payload size
-//   Phase 2 — JS-side JSON serialization probe (no side-effects, measures limits)
-//   Phase 3 — live IPC binary-search: sends doubling batches to save_images_to_folder
-//             (opens the folder picker ONCE; cancel to skip phase 3)
+// Usage (DevTools console):
+//   await BoardfishDebug.exportAllDiag.run()                 // live new-flow probe
+//   await BoardfishDebug.exportAllDiag.run({ legacy: true }) // old data URL IPC probe
 const ExportAllDiag = (() => {
   const WARN_MB  = 10;   // yellow warning
   const FATAL_MB = 50;   // likely fatal on Windows WebView2
@@ -1411,7 +1417,7 @@ const ExportAllDiag = (() => {
   function mb(bytes) { return Math.round(bytes / 1024 / 1024 * 100) / 100; }
   function ms(t0)    { return Math.round((performance.now() - t0) * 10) / 10; }
 
-  async function run() {
+  async function run(options = {}) {
     if (!window.__TAURI__) {
       console.warn('[exportAllDiag] Not inside Tauri — aborting.');
       return null;
@@ -1429,30 +1435,36 @@ const ExportAllDiag = (() => {
     console.group(`%c[exportAllDiag] Diagnosing export of ${imageObjs.length} image(s) — IS_WIN=${IS_WIN}`,
       'font-weight:bold');
 
-    // ── Phase 1: render + measure ──────────────────────────────────────────────
-    console.group('Phase 1: render each image, measure payload size');
+    // ── Phase 1: classify only in the default flow ────────────────────────────
+    console.group(options.legacy
+      ? 'Phase 1: render each image and measure legacy payload size'
+      : 'Phase 1: classify images without rendering');
     const perImage = [];
     let totalBytes = 0;
 
     for (let i = 0; i < imageObjs.length; i++) {
       const obj = imageObjs[i];
+      const imgKey = obj.data?.imgKey ?? '?';
+      const needsRender = imageNeedsRendering(obj);
       const t0 = performance.now();
       let dataUrl = null, renderErr = null;
-      try { dataUrl = await getRenderedImageDataUrl(obj); }
-      catch (e) { renderErr = String(e); }
+      if (options.legacy) {
+        try { dataUrl = await getRenderedImageDataUrl(obj); }
+        catch (e) { renderErr = String(e); }
+      }
       const renderMs = ms(t0);
-      const bytes = dataUrl ? dataUrl.length : 0;
+      const bytes = dataUrl ? dataUrl.length : imageStoreBytesEstimate(imageStore[obj.data?.imgKey]);
       const kb = Math.round(bytes / 1024 * 10) / 10;
       totalBytes += bytes;
 
-      const row = { index: i, imgKey: obj.data?.imgKey ?? '?', renderMs, kb, ok: !!dataUrl && !renderErr, error: renderErr ?? undefined };
+      const row = { index: i, imgKey, needsRender, renderMs: options.legacy ? renderMs : 0, kb, ok: options.legacy ? !!dataUrl && !renderErr : true, error: renderErr ?? undefined };
       perImage.push({ ...row, dataUrl });
       const style = row.ok ? '' : 'color:red';
-      console.log(`%c  [${i}] imgKey=${row.imgKey}  render=${renderMs}ms  ${kb}KB  ok=${row.ok}${renderErr ? '  ERR:'+renderErr : ''}`, style);
+      console.log(`%c  [${i}] imgKey=${row.imgKey}  needsRender=${needsRender}  ${options.legacy ? `render=${renderMs}ms  ` : ''}${kb}KB  ok=${row.ok}${renderErr ? '  ERR:'+renderErr : ''}`, style);
     }
 
     const totalMB = mb(totalBytes);
-    const validUrls = perImage.filter(r => r.ok).map(r => r.dataUrl);
+    const validUrls = perImage.filter(r => r.ok && r.dataUrl).map(r => r.dataUrl);
     const severity = totalMB > FATAL_MB ? 'FATAL' : totalMB > WARN_MB ? 'WARN' : 'OK';
     const severityStyle = severity === 'FATAL' ? 'color:red;font-weight:bold' : severity === 'WARN' ? 'color:orange;font-weight:bold' : 'color:green';
     console.log(`%cTotal payload: ${totalMB} MB | ${validUrls.length} renderable | severity=${severity}`, severityStyle);
@@ -1460,7 +1472,103 @@ const ExportAllDiag = (() => {
     else if (severity === 'WARN') console.warn('[exportAllDiag] Payload is large — may intermittently hit IPC limits on Windows');
     console.groupEnd();
 
-    // ── Phase 2: JS-side JSON serialization probe (no side-effects) ───────────
+    if (!options.legacy) {
+      console.group('Phase 2: pick folder first');
+      const pickStart = performance.now();
+      let folder = null, pickOk = false, pickErr = null;
+      try {
+        folder = await window.__TAURI__.core.invoke('pick_folder');
+        pickOk = true;
+      } catch (e) {
+        pickErr = String(e);
+      }
+      const pickMs = ms(pickStart);
+      console.log(`  pick_folder completed in ${pickMs}ms  ok=${pickOk}  picked=${!!folder}${pickErr ? '  ERR:'+pickErr : ''}`);
+      console.groupEnd();
+
+      const keyProbe = [];
+      const tempKeys = [];
+      let renderedCount = 0;
+      let saveProbe = null;
+      if (pickOk && folder) {
+        console.group('Phase 3: sequential key resolution');
+        const keys = [];
+        for (let i = 0; i < imageObjs.length; i++) {
+          const obj = imageObjs[i];
+          const imgKey = obj.data?.imgKey;
+          const needsRender = imageNeedsRendering(obj);
+          const t0 = performance.now();
+          let key = null, ok = false, err = null;
+          try {
+            if (needsRender) {
+              const dataUrl = await getRenderedImageDataUrl(obj);
+              if (dataUrl) {
+                key = `__export_diag_tmp_${obj.id}`;
+                tempKeys.push(key);
+                renderedCount++;
+                await window.__TAURI__.core.invoke('register_image_source', { imgKey: key, dataUrl });
+              }
+            } else {
+              await cacheImageSourceForSave(imgKey, imageStore[imgKey]);
+              key = imgKey;
+            }
+            ok = !!key;
+            if (key) keys.push(key);
+          } catch (e) {
+            err = String(e);
+          }
+          const row = { index: i, imgKey, key, needsRender, ms: ms(t0), ok, error: err ?? '' };
+          keyProbe.push(row);
+          console.log(`  [${i}] imgKey=${imgKey} needsRender=${needsRender} key=${key || '-'} ${row.ms}ms ok=${ok}${err ? ' ERR:'+err : ''}`);
+        }
+        console.groupEnd();
+
+        console.group('Phase 4: save picked folder by keys');
+        const saveStart = performance.now();
+        let savedCount = 0, saveOk = false, saveErr = null;
+        try {
+          savedCount = await window.__TAURI__.core.invoke('save_images_to_existing_folder_by_keys', { folder, imgKeys: keys });
+          saveOk = true;
+        } catch (e) {
+          saveErr = String(e);
+        } finally {
+          cleanupExportTempKeys(tempKeys);
+        }
+        saveProbe = { keyCount: keys.length, savedCount, saveMs: ms(saveStart), saveOk, error: saveErr ?? '' };
+        console.log(`  save_images_to_existing_folder_by_keys keyCount=${keys.length} saved=${savedCount} ${saveProbe.saveMs}ms ok=${saveOk}${saveErr ? ' ERR:'+saveErr : ''}`);
+        console.groupEnd();
+      } else {
+        console.warn('[exportAllDiag] Folder picker was cancelled or failed; skipped key resolution and saving.');
+      }
+
+      const report = {
+        mode: 'keyed-folder-first',
+        isWindows: IS_WIN,
+        imageCount: imageObjs.length,
+        renderableCount: options.legacy ? validUrls.length : null,
+        totalLegacyPayloadMB: totalMB,
+        payloadSeverity: severity,
+        folderPickedBeforeKeyResolution: !!folder,
+        pickProbe: { pickMs, pickOk, picked: !!folder, error: pickErr ?? '' },
+        keyProbe,
+        renderedCount,
+        tempKeyCount: tempKeys.length,
+        saveProbe,
+        perImage: perImage.map(({ dataUrl: _, ...r }) => r),
+      };
+      console.group('Full report');
+      console.table(report.perImage);
+      console.table(report.keyProbe);
+      if (report.saveProbe) console.table([report.saveProbe]);
+      console.log('Full report → BoardfishDebug.exportAllDiag.last');
+      console.groupEnd();
+      console.groupEnd();
+
+      _last = report;
+      return report;
+    }
+
+    // ── Legacy Phase 2: JS-side JSON serialization probe ──────────────────────
     // Measures whether stringify itself lags or throws, and confirms the payload
     // sizes that will cross the wire. No Tauri calls, no folder pickers.
     console.group('Phase 2: JS-side serialization probe (no side-effects)');
@@ -5778,23 +5886,33 @@ async function saveSelectedImage() {
   ExportDebug.end(dbg, { saved: true, method: 'download' });
 }
 
-// Resolves a list of image objects to img_keys for save_images_to_folder_by_keys.
+// Resolves a list of image objects to img_keys for native folder export.
 // Flipped images are rendered to a data URL, registered in the Rust image cache
-// under a temp key, and that temp key is used instead — keeping IPC payload tiny.
+// under a temp key, and that temp key is used instead, keeping IPC payload tiny.
 async function resolveExportKeys(imageObjs, dbg) {
   const tempKeys = [];
   let renderedCount = 0;
-  const keys = await Promise.all(imageObjs.map(async (obj) => {
-    if (!imageNeedsRendering(obj)) return obj.data.imgKey;
+  const keys = [];
+  for (const obj of imageObjs) {
+    const imgKey = obj.data.imgKey;
+    if (!imageNeedsRendering(obj)) {
+      await cacheImageSourceForSave(imgKey, imageStore[imgKey], dbg);
+      keys.push(imgKey);
+      continue;
+    }
     const dataUrl = await getRenderedImageDataUrl(obj);
-    if (!dataUrl) return null;
+    if (!dataUrl) continue;
     const tempKey = `__export_tmp_${obj.id}`;
     tempKeys.push(tempKey);
     renderedCount++;
     await ExportDebug.invoke(dbg, 'register_image_source', { imgKey: tempKey, dataUrl }, { imgKey: tempKey });
-    return tempKey;
-  }));
+    keys.push(tempKey);
+  }
   return { keys: keys.filter(Boolean), tempKeys, renderedCount };
+}
+
+async function pickExportFolder(dbg) {
+  return ExportDebug.invoke(dbg, 'pick_folder', {}, {});
 }
 
 function cleanupExportTempKeys(tempKeys) {
@@ -5813,17 +5931,19 @@ async function saveSelectedImages() {
     selectedObjs.push(obj);
   }
   if (selectedObjs.length < 2) { ExportDebug.end(dbg, { skipped: true, imageCount: selectedObjs.length }); hidePasteShield(); return; }
-  ExportDebug.step(dbg, 'render:start', { imageCount: selectedObjs.length });
+  ExportDebug.step(dbg, 'images:found', { imageCount: selectedObjs.length });
 
   if (window.__TAURI__) {
     let tempKeys = [];
     try {
+      const folder = await pickExportFolder(dbg);
+      if (!folder) { hidePasteShield(); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
       const resolved = await resolveExportKeys(selectedObjs, dbg);
       const keys = resolved.keys;
       tempKeys = resolved.tempKeys;
-      ExportDebug.step(dbg, 'render:done', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
+      ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
       if (keys.length < 2) { hidePasteShield(); ExportDebug.end(dbg, { skipped: true, reason: 'too-few-keys' }); return; }
-      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder_by_keys', { imgKeys: keys }, { keyCount: keys.length });
+      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_existing_folder_by_keys', { folder, imgKeys: keys }, { keyCount: keys.length });
       ExportDebug.end(dbg, { savedCount });
       if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
       else hidePasteShield();
@@ -5853,17 +5973,19 @@ async function exportAllImages() {
   const dbg = ExportDebug.start('exportAllImages', { objectCount: objects.length });
   const imageObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'image');
   if (!imageObjs.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-images' }); hidePasteShield(); return; }
-  ExportDebug.step(dbg, 'render:start', { imageCount: imageObjs.length });
+  ExportDebug.step(dbg, 'images:found', { imageCount: imageObjs.length });
 
   if (window.__TAURI__) {
     let tempKeys = [];
     try {
+      const folder = await pickExportFolder(dbg);
+      if (!folder) { hidePasteShield(); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
       const resolved = await resolveExportKeys(imageObjs, dbg);
       const keys = resolved.keys;
       tempKeys = resolved.tempKeys;
-      ExportDebug.step(dbg, 'render:done', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
+      ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
       if (!keys.length) { hidePasteShield(); ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' }); return; }
-      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_folder_by_keys', { imgKeys: keys }, { keyCount: keys.length });
+      const savedCount = await ExportDebug.invoke(dbg, 'save_images_to_existing_folder_by_keys', { folder, imgKeys: keys }, { keyCount: keys.length });
       ExportDebug.end(dbg, { savedCount });
       if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
       else hidePasteShield();

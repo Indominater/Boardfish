@@ -753,13 +753,24 @@ async fn save_images_to_folder(
 }
 
 #[tauri::command]
-async fn save_images_to_folder_by_keys(
-    app: tauri::AppHandle,
+async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .blocking_pick_folder()
+            .map(|p| p.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_images_to_existing_folder_by_keys(
     state: tauri::State<'_, ImageSourceCache>,
+    folder: String,
     img_keys: Vec<String>,
 ) -> Result<usize, String> {
-    use tauri_plugin_dialog::DialogExt;
-
     if img_keys.is_empty() {
         return Ok(0);
     }
@@ -782,23 +793,6 @@ async fn save_images_to_folder_by_keys(
             ));
         }
         sources
-    };
-
-    if sources.is_empty() {
-        return Ok(0);
-    }
-
-    let folder = tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .blocking_pick_folder()
-            .map(|p| p.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let Some(folder) = folder else {
-        return Ok(0);
     };
 
     let base = std::path::PathBuf::from(folder);
@@ -1276,7 +1270,8 @@ fn main() {
             save_file_dialog,
             save_image_as,
             save_images_to_folder,
-            save_images_to_folder_by_keys,
+            pick_folder,
+            save_images_to_existing_folder_by_keys,
             set_title,
             exit_app,
             cancel_pending_termination,
