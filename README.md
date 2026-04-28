@@ -19,7 +19,7 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 ## Features
 
 - An infinite canvas free from formatting rules
-- Lag-free navigation across massive visual boards supporting 1 GB+ of images and text
+- Lag-free navigation across massive boards supporting 1 GB+ of images and text
 - Multi-select, translate, scale, flip, copy, paste, and duplicate
 - Losslessly add images and text via clipboard, drag and drop, or the file picker
 - Losslessly copy images back to your clipboard
