@@ -435,6 +435,63 @@ async fn read_binary_file_base64(path: String) -> Result<String, String> {
     Ok(general_purpose::STANDARD.encode(&bytes))
 }
 
+fn image_mime_ext_from_path(path: &str) -> (&'static str, &'static str) {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => ("image/jpeg", "jpg"),
+        _ => ("image/png", "png"),
+    }
+}
+
+#[tauri::command]
+async fn register_image_file_source(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_key: String,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    let total = std::time::Instant::now();
+    let (source, width, height) = tokio::task::spawn_blocking(move || {
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        let (mime, ext) = image_mime_ext_from_path(&path);
+        let dimensions = image::io::Reader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .map_err(|e| e.to_string())?
+            .into_dimensions()
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>((
+            CachedImageSource {
+                mime: mime.to_string(),
+                ext: ext.to_string(),
+                bytes: Arc::from(bytes),
+            },
+            dimensions.0,
+            dimensions.1,
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let bytes = source.bytes.len();
+    let mime = source.mime.clone();
+    let ext = source.ext.clone();
+    state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(img_key, source);
+    save_debug("register_image_file_source total", total);
+    Ok(serde_json::json!({
+        "bytes": bytes,
+        "mime": mime,
+        "ext": ext,
+        "width": width,
+        "height": height,
+    }))
+}
+
 #[tauri::command]
 fn get_cached_image_data_url(
     state: tauri::State<'_, ImageSourceCache>,
@@ -541,6 +598,21 @@ async fn open_file_dialog(app: tauri::AppHandle) -> Option<String> {
     .await
     .ok()
     .flatten()
+}
+
+#[tauri::command]
+async fn pick_image_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Images", &["png", "jpg", "jpeg"])
+            .blocking_pick_files()
+            .map(|paths| paths.into_iter().map(|p| p.to_string()).collect())
+            .unwrap_or_default()
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1264,9 +1336,11 @@ fn main() {
             read_board,
             read_text_file,
             read_binary_file_base64,
+            register_image_file_source,
             get_cached_image_data_url,
             materialize_cached_image_sources,
             open_file_dialog,
+            pick_image_files,
             save_file_dialog,
             save_image_as,
             save_images_to_folder,

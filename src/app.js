@@ -252,7 +252,7 @@ const HistoryDebug = (() => {
     if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish history debugger enabled. Use BoardfishDebug.history.summary(), .dump(), .setVerbose(true), or .reset().');
+    console.info('Boardfish history debugger enabled. Use BoardfishDebug.history.pushes(), .summary(), .dump(), .setVerbose(true), or .reset().');
   }
 
   function disable() {
@@ -319,6 +319,22 @@ const HistoryDebug = (() => {
       dirtyCount: e.meta?.dirtyCount ?? '',
       selectedCount: e.meta?.selectedCount ?? '',
       editState: e.meta?.editState ?? '',
+      reason: e.meta?.reason ?? '',
+      ms: e.meta?.ms ?? '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function pushes() {
+    const rows = events.filter(e => e.op === 'pushHistory' && e.step === 'end').map(e => ({
+      id: e.id,
+      objectCount: e.meta?.objectCount ?? '',
+      historyLength: e.meta?.historyLength ?? '',
+      historyIndex: e.meta?.historyIndex ?? '',
+      cloned: e.meta?.cloned ?? '',
+      reused: e.meta?.reused ?? '',
+      reason: e.meta?.reason ?? '',
       ms: e.meta?.ms ?? '',
     }));
     console.table(rows);
@@ -335,7 +351,7 @@ const HistoryDebug = (() => {
     for (const key of Object.keys(stats)) stats[key] = 0;
   }
 
-  return { enable, disable, setVerbose, start, step, end, count, max, summary, dump, reset, clear: reset, get events() { return events.slice(); }, get stats() { return { ...stats }; } };
+  return { enable, disable, setVerbose, start, step, end, count, max, summary, pushes, dump, reset, clear: reset, get events() { return events.slice(); }, get stats() { return { ...stats }; } };
 })();
 
 exposeDebug({ history: HistoryDebug });
@@ -370,10 +386,16 @@ const ViewportDebug = (() => {
     mousePanHandlerTotalMs: 0,
     maxMousePanHandlerMs: 0,
     imageAdds: 0,
+    nativeImageAdds: 0,
     imageLoads: 0,
+    imageDecodeQueued: 0,
+    maxImageDecodeQueueDepth: 0,
     imageDecodes: 0,
+    imageDecodeFailures: 0,
     imageBitmaps: 0,
     imageBitmapFailures: 0,
+    imagePreviewPrepared: 0,
+    imagePreviewFailures: 0,
     clipboardPrecacheStarts: 0,
     clipboardPrecacheFailures: 0,
     culledImages: 0,
@@ -383,6 +405,7 @@ const ViewportDebug = (() => {
     maxImageLoadMs: 0,
     maxImageDecodeMs: 0,
     maxImageBitmapMs: 0,
+    maxImagePreviewMs: 0,
     maxClipboardPrecacheMs: 0,
   };
   let lastRafAt = 0;
@@ -535,10 +558,16 @@ const ViewportDebug = (() => {
       { metric: 'avgMousePanHandlerMs', value: stats.mousePanHandlerCount ? Math.round(stats.mousePanHandlerTotalMs / stats.mousePanHandlerCount * 100) / 100 : 0 },
       { metric: 'maxMousePanHandlerMs', value: Math.round(stats.maxMousePanHandlerMs * 100) / 100 },
       { metric: 'imageAdds', value: stats.imageAdds },
+      { metric: 'nativeImageAdds', value: stats.nativeImageAdds },
       { metric: 'imageLoads', value: stats.imageLoads },
+      { metric: 'imageDecodeQueued', value: stats.imageDecodeQueued },
+      { metric: 'maxImageDecodeQueueDepth', value: stats.maxImageDecodeQueueDepth },
       { metric: 'imageDecodes', value: stats.imageDecodes },
+      { metric: 'imageDecodeFailures', value: stats.imageDecodeFailures },
       { metric: 'imageBitmaps', value: stats.imageBitmaps },
       { metric: 'imageBitmapFailures', value: stats.imageBitmapFailures },
+      { metric: 'imagePreviewPrepared', value: stats.imagePreviewPrepared },
+      { metric: 'imagePreviewFailures', value: stats.imagePreviewFailures },
       { metric: 'clipboardPrecacheStarts', value: stats.clipboardPrecacheStarts },
       { metric: 'clipboardPrecacheFailures', value: stats.clipboardPrecacheFailures },
       { metric: 'culledImages', value: stats.culledImages },
@@ -548,6 +577,7 @@ const ViewportDebug = (() => {
       { metric: 'maxImageLoadMs', value: Math.round(stats.maxImageLoadMs * 100) / 100 },
       { metric: 'maxImageDecodeMs', value: Math.round(stats.maxImageDecodeMs * 100) / 100 },
       { metric: 'maxImageBitmapMs', value: Math.round(stats.maxImageBitmapMs * 100) / 100 },
+      { metric: 'maxImagePreviewMs', value: Math.round(stats.maxImagePreviewMs * 100) / 100 },
       { metric: 'maxClipboardPrecacheMs', value: Math.round(stats.maxClipboardPrecacheMs * 100) / 100 },
     ];
     console.table(rows);
@@ -1326,7 +1356,7 @@ const InsertDebug = (() => {
     if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish insert debugger enabled. Use BoardfishDebug.insert.phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
+    console.info('Boardfish insert debugger enabled. Use BoardfishDebug.insert.report(), .phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
   }
   function disable() {
     enabled = false;
@@ -1364,11 +1394,16 @@ const InsertDebug = (() => {
         dt: e.dt,
         source: e.meta?.source || '',
         fileCount: e.meta?.fileCount ?? '',
+        readyCount: e.meta?.readyCount ?? e.meta?.count ?? '',
+        droppedFileCount: e.meta?.droppedFileCount ?? '',
         fileName: e.meta?.fileName || '',
         fileSize: e.meta?.fileSize ?? '',
         fileType: e.meta?.fileType || '',
+        imgKey: e.meta?.imgKey || '',
+        native: e.meta?.native ?? '',
         dataUrlLen: e.meta?.dataUrlLen ?? '',
         added: e.meta?.added ?? '',
+        historyAdded: e.meta?.historyAdded ?? '',
         skipped: e.meta?.skipped ?? '',
         error: e.meta?.error || '',
       }));
@@ -1388,9 +1423,45 @@ const InsertDebug = (() => {
     console.table(flat);
     return events.slice();
   }
+  function report() {
+    const insertEnds = events.filter(e => e.op === 'insertImages' && e.step === 'end');
+    const last = insertEnds[insertEnds.length - 1];
+    if (!last) {
+      const empty = { runs: 0 };
+      console.table([empty]);
+      return empty;
+    }
+    const id = last.id;
+    const run = events.filter(e => e.id === id);
+    const findStep = (stepName) => run.find(e => e.step === stepName);
+    const imageEnds = events.filter(e => e.op === 'insertImage' && e.step === 'end' && e.meta?.source === last.meta?.source);
+    const registerEnds = events.filter(e => e.op === 'insertImage' && e.step === 'register:end' && e.meta?.source === last.meta?.source);
+    const maxRegisterMs = registerEnds.reduce((n, e) => Math.max(n, Number(e.dt) || 0), 0);
+    const maxRegister = registerEnds.find(e => (Number(e.dt) || 0) === maxRegisterMs);
+    const readyStart = findStep('ready:wait-start');
+    const readyEnd = findStep('ready:wait-end');
+    const bulkEnd = findStep('bulk:end');
+    const registerMs = readyStart ? readyStart.total : (bulkEnd ? bulkEnd.total : last.total);
+    const out = {
+      source: last.meta?.source || '',
+      added: last.meta?.added ?? imageEnds.filter(e => e.meta?.added).length,
+      fileCount: last.meta?.fileCount ?? '',
+      droppedFileCount: last.meta?.droppedFileCount ?? '',
+      totalMs: last.total ?? '',
+      registerMs,
+      readyWaitMs: readyStart && readyEnd ? round(readyEnd.total - readyStart.total) : 0,
+      readyCount: readyStart?.meta?.readyCount ?? '',
+      historyAdded: bulkEnd?.meta?.historyAdded ?? '',
+      maxRegisterMs: round(maxRegisterMs),
+      maxRegisterFile: maxRegister?.meta?.fileName || '',
+      errors: imageEnds.filter(e => e.meta?.error).length,
+    };
+    console.table([out]);
+    return out;
+  }
   function reset() { events.length = 0; }
 
-  return { enable, disable, setVerbose, start, step, end, phaseSummary, summary, dump, reset, get events() { return events.slice(); } };
+  return { enable, disable, setVerbose, start, step, end, report, phaseSummary, summary, dump, reset, get events() { return events.slice(); } };
 })();
 
 exposeDebug({ insert: InsertDebug });
@@ -3031,6 +3102,10 @@ let objects    = [];
 const objectsMap = new Map();
 let idCounter  = 1;
 let _boardOpening = false;
+let _bulkImageInsertDepth = 0;
+let _bulkImageInsertAdded = 0;
+let _bulkImageInsertLastRender = 0;
+let _imageReadyLastRender = 0;
 
 function rebuildObjectsMap() {
   objectsMap.clear();
@@ -3084,7 +3159,7 @@ function sendSelectedToBack() {
   objects.length = 0;
   objects.push(...selected, ...rest);
   scheduleRender(true, true);
-  pushHistory();
+  pushHistory('send-selected-to-back');
 }
 
 function flipSelectedImages(axis) {
@@ -3104,7 +3179,7 @@ function flipSelectedImages(axis) {
   if (!flipped) { ClipDebug.end(dbg, { skipped: true }); return; }
   invalidateOffscreen();
   scheduleRender(true, true);
-  pushHistory();
+  pushHistory(`flip-image-${axis}`);
   ClipDebug.end(dbg, { historyIndex });
 }
 
@@ -3142,6 +3217,11 @@ const imageAssetMaterializePromises = new Map();
 let imgKeyCounter = 1;
 let _skipImageSourceRegistration = false;
 let _imageStoreGeneration = 0;
+const _imageDecodeQueue = [];
+let _imageDecodeActive = 0;
+let _imageDecodeScheduled = false;
+const MAX_IMAGE_DECODE_ACTIVE = 1;
+const imageReadyPromises = new Map();
 
 function newImgKey() { return 'img-' + (imgKeyCounter++); }
 
@@ -3270,6 +3350,17 @@ function convertTauriFileSrc(path) {
   return path;
 }
 
+function scheduleImageReadyRender(source = 'image-load') {
+  invalidateOffscreen();
+  const now = performance.now();
+  if (now - _imageReadyLastRender > 120) {
+    _imageReadyLastRender = now;
+    scheduleRender(true, false, source);
+  } else {
+    scheduleRender(false, true, `${source}-overlay`);
+  }
+}
+
 async function materializeImageAssets(keys, dbg = null) {
   const pending = keys.filter((key) => isNativeImageRef(imageStore[key]) && !imageAssetUrlCache[key]);
   if (!pending.length || !window.__TAURI__) return 0;
@@ -3367,13 +3458,57 @@ function processImageHydrationQueue() {
   if (_imageHydrationQueue.length) scheduleImageHydration();
 }
 
-function cacheImage(key, src, dbg = null, preCacheClipboard = true, loadedImg = null) {
-  if (imageCache[key]) return;
+function enqueueImageDecode(task) {
+  _imageDecodeQueue.push(task);
+  ViewportDebug.count('imageDecodeQueued');
+  ViewportDebug.max('maxImageDecodeQueueDepth', _imageDecodeQueue.length + _imageDecodeActive);
+  scheduleImageDecodeQueue();
+}
+
+function scheduleImageDecodeQueue() {
+  if (_imageDecodeScheduled) return;
+  _imageDecodeScheduled = true;
+  requestAnimationFrame(processImageDecodeQueue);
+}
+
+function processImageDecodeQueue() {
+  _imageDecodeScheduled = false;
+  while (_imageDecodeActive < MAX_IMAGE_DECODE_ACTIVE && _imageDecodeQueue.length) {
+    const task = _imageDecodeQueue.shift();
+    _imageDecodeActive++;
+    task()
+      .catch(() => {})
+      .finally(() => {
+        _imageDecodeActive = Math.max(0, _imageDecodeActive - 1);
+        if (_imageDecodeQueue.length) scheduleImageDecodeQueue();
+      });
+  }
+}
+
+function imageReadyPromiseForKey(key) {
+  return imageReadyPromises.get(key) || Promise.resolve();
+}
+
+async function ensureImagePreviewBitmap(key, img, dbg = null) {
+  const t0 = performance.now();
+  // Placeholder hook for future lower-resolution previews. The timing is kept
+  // separate from ImageBitmap creation so readiness reports show the true stage.
+  ViewportDebug.count('imagePreviewPrepared');
+  const ms = performance.now() - t0;
+  ViewportDebug.max('maxImagePreviewMs', ms);
+  if (dbg) ViewportDebug.step(dbg, 'previewBitmap', { key, ms, skipped: true });
+}
+
+function cacheImage(key, src, dbg = null, preCacheClipboard = true, loadedImg = null, options = {}) {
+  if (imageCache[key]) return imageReadyPromiseForKey(key);
   if (isNativeImageRef(src)) return;
   if (typeof src !== 'string' || !src) return;
   imageBitmapFailed.delete(key);
   const vpDbg = ViewportDebug.start('cacheImage', { key, src, preCacheClipboard, reusedLoadedImage: !!loadedImg });
   const img = loadedImg || new Image();
+  let resolveReady;
+  const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+  imageReadyPromises.set(key, readyPromise);
   // decode() ensures the image is GPU-decoded before the first drawImage call,
   // preventing a synchronous main-thread decode stall (can be 100s of ms for large images).
   // We also defer invalidateOffscreen/scheduleRender until decode completes so that
@@ -3385,38 +3520,69 @@ function cacheImage(key, src, dbg = null, preCacheClipboard = true, loadedImg = 
     ViewportDebug.max('maxImageLoadMs', loadMs);
     ViewportDebug.step(vpDbg, 'load', { width: img.naturalWidth, height: img.naturalHeight, ms: loadMs });
 
-    const decodeStart = performance.now();
-    img.decode()
-      .then(() => {
+    enqueueImageDecode(async () => {
+      const decodeStart = performance.now();
+      try {
+        await img.decode();
+      } catch (err) {
         const decodeMs = performance.now() - decodeStart;
-        ViewportDebug.count('imageDecodes');
+        ViewportDebug.count('imageDecodeFailures');
         ViewportDebug.max('maxImageDecodeMs', decodeMs);
-        ViewportDebug.step(vpDbg, 'decode', { ms: decodeMs });
-        const bitmapStart = performance.now();
-        return createImageBitmap(img).then(bitmap => {
-          const bitmapMs = performance.now() - bitmapStart;
-          imageBitmapCache[key] = bitmap;
-          ViewportDebug.count('imageBitmaps');
-          ViewportDebug.max('maxImageBitmapMs', bitmapMs);
-          ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs });
-          return ensureImagePreviewBitmap(key, img, dbg);
-        });
-      })
-      .catch((err) => {
+        ViewportDebug.step(vpDbg, 'decode:error', { ms: decodeMs, error: String(err) });
+        scheduleImageReadyRender('image-load');
+        ViewportDebug.end(vpDbg, { key, decodeReady: false, bitmapReady: false, error: String(err) });
+        resolveReady();
+        return;
+      }
+      const decodeMs = performance.now() - decodeStart;
+      ViewportDebug.count('imageDecodes');
+      ViewportDebug.max('maxImageDecodeMs', decodeMs);
+      ViewportDebug.step(vpDbg, 'decode', { ms: decodeMs });
+
+      const bitmapStart = performance.now();
+      try {
+        const bitmap = await createImageBitmap(img);
+        const bitmapMs = performance.now() - bitmapStart;
+        imageBitmapCache[key] = bitmap;
+        ViewportDebug.count('imageBitmaps');
+        ViewportDebug.max('maxImageBitmapMs', bitmapMs);
+        ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs });
+      } catch (err) {
+        const bitmapMs = performance.now() - bitmapStart;
         imageBitmapFailed.add(key);
         ViewportDebug.count('imageBitmapFailures');
-        ViewportDebug.step(vpDbg, 'decode-or-bitmap-error', { error: String(err) });
-      })
-      .finally(() => {
-        invalidateOffscreen();
-        scheduleRender(true, false, 'image-load');
-        ViewportDebug.end(vpDbg, { key, bitmapReady: !!imageBitmapCache[key] });
-      });
+        ViewportDebug.max('maxImageBitmapMs', bitmapMs);
+        ViewportDebug.step(vpDbg, 'createImageBitmap:error', { ms: bitmapMs, error: String(err) });
+      }
+
+      const previewStart = performance.now();
+      try {
+        await ensureImagePreviewBitmap(key, img, dbg);
+        const previewMs = performance.now() - previewStart;
+        ViewportDebug.max('maxImagePreviewMs', previewMs);
+        ViewportDebug.step(vpDbg, 'previewBitmap', { ms: previewMs });
+      } catch (err) {
+        const previewMs = performance.now() - previewStart;
+        ViewportDebug.count('imagePreviewFailures');
+        ViewportDebug.max('maxImagePreviewMs', previewMs);
+        ViewportDebug.step(vpDbg, 'previewBitmap:error', { ms: previewMs, error: String(err) });
+      } finally {
+        scheduleImageReadyRender('image-load');
+        ViewportDebug.end(vpDbg, {
+          key,
+          decodeReady: true,
+          bitmapReady: !!imageBitmapCache[key],
+          bitmapFailed: imageBitmapFailed.has(key),
+        });
+        resolveReady();
+      }
+    });
   }
   img.onload = finishLoad;
   img.onerror = () => {
     imageBitmapFailed.add(key);
     ViewportDebug.end(vpDbg, { key, error: 'image load failed' });
+    resolveReady();
   };
   imageCache[key] = img;
   if (loadedImg) {
@@ -3426,8 +3592,9 @@ function cacheImage(key, src, dbg = null, preCacheClipboard = true, loadedImg = 
     img.src = src;
     ViewportDebug.step(vpDbg, 'set-src', { src });
   }
-  if (!_skipImageSourceRegistration) cacheImageSourceForSave(key, src).catch(() => {});
+  if (!_skipImageSourceRegistration && !options.skipSourceRegistration) cacheImageSourceForSave(key, src).catch(() => {});
   if (preCacheClipboard) cacheImageForClipboard(key, src, dbg).catch(() => {});
+  return readyPromise;
 }
 
 function clearImageStore(clearNativeCaches = true) {
@@ -3439,11 +3606,16 @@ function clearImageStore(clearNativeCaches = true) {
   imageBitmapFailed.clear();
   imageSourceCachePromises.clear();
   imageClipboardCachePromises.clear();
+  imageReadyPromises.clear();
   imageHydrationPromises.clear();
   imageAssetMaterializePromises.clear();
   _imageHydrationQueue.length = 0;
   _imageHydrationQueued.clear();
   _imageHydrationScheduled = false;
+  _imageDecodeQueue.length = 0;
+  _imageDecodeActive = 0;
+  _imageDecodeScheduled = false;
+  _imageReadyLastRender = 0;
   imgKeyCounter = 1;
   if (clearNativeCaches && window.__TAURI__) {
     window.__TAURI__.core
@@ -3491,8 +3663,9 @@ function snapshot() {
 // Delta push: only deep-clones objects that changed since last snapshot.
 // Unchanged objects share the previous snapshot's reference (safe since
 // restoreSnapshot always deep-clones before mutating).
-function pushHistory() {
+function pushHistory(reason = '') {
   const dbg = HistoryDebug.start('pushHistory', {
+    reason,
     objectCount: objects.length,
     dirtyCount: _dirtyIds.size,
     historyLength: history.length,
@@ -3528,7 +3701,7 @@ function pushHistory() {
   updateTitle();
   const ms = performance.now() - t0;
   HistoryDebug.max('maxPushHistoryMs', ms);
-  HistoryDebug.end(dbg, { ms, cloned, reused, historyLength: history.length, historyIndex });
+  HistoryDebug.end(dbg, { reason, ms, cloned, reused, historyLength: history.length, historyIndex });
 }
 
 function restoreSnapshot(s) {
@@ -3714,6 +3887,11 @@ function updateMultiSelectionOverlay() {
 }
 
 function updateSelectionOverlay() {
+  if (isBoardInputBlocked()) {
+    if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
+    hideMultiSelectionOverlay();
+    return;
+  }
   if (!hasSelection()) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
@@ -3849,7 +4027,7 @@ function updateSelectionOverlay() {
           if (resizeRaf) { cancelAnimationFrame(resizeRaf); resizeRaf = null; }
           if (hasPendingResize) { hasPendingResize = false; applyMultiResize(pendingState); }
           for (const snap of snapshots) markDirty(snap.id);
-          pushHistory();
+          pushHistory('multi-resize');
         }
 
         document.addEventListener('mousemove', onMultiMove);
@@ -3928,7 +4106,7 @@ function updateSelectionOverlay() {
           applyResize(pendingResize);
         }
         markDirty(obj.id);
-        pushHistory();
+        pushHistory('resize');
       }
 
       document.addEventListener('mousemove', onMove);
@@ -3983,7 +4161,7 @@ function pushEditHistoryIfChanged(id) {
   if (_editHistoryLastContent === null) _editHistoryLastContent = obj.data.content;
   if (obj.data.content === _editHistoryLastContent) return;
   markDirty(id);
-  pushHistory();
+  pushHistory('text-edit-checkpoint');
   _editHistoryLastContent = obj.data.content;
 }
 
@@ -4174,7 +4352,7 @@ function exitEdit() {
       delete obj._editMinLines;
       _editHistoryLastContent = null;
       scheduleRender(true, true);
-      pushHistory();
+      pushHistory('delete-empty-text');
       return;
     }
     delete obj._layoutCache;
@@ -4182,7 +4360,7 @@ function exitEdit() {
     if (heightChanged) markDirty(id);
     const contentChanged = obj.data.content !== _editHistoryLastContent;
     pushEditHistoryIfChanged(id);
-    if (heightChanged && !contentChanged) pushHistory();
+    if (heightChanged && !contentChanged) pushHistory('text-height-change');
     delete obj._editStartContent;
     delete obj._editMinLines;
   }
@@ -4210,7 +4388,7 @@ function addText(wx, wy, content = '') {
   objectsMap.set(obj.id, obj);
   selectObject(obj.id);
   scheduleRender(true, false);
-  pushHistory();
+  pushHistory('add-text');
   if (!content) enterEdit(obj.id);
 }
 
@@ -4224,7 +4402,32 @@ function hidePasteShield() {
   if (_pasteShieldCount === 0 && !_boardOpening) openingShield.classList.remove('active');
 }
 
-function addImage(src, cx, cy, exactSize = false, existingImgKey = null, preCacheClipboard = true) {
+function isBoardInputBlocked() {
+  return _boardOpening || _pasteShieldCount > 0 || openingShield.classList.contains('active');
+}
+
+function beginBulkImageInsert() {
+  _bulkImageInsertDepth++;
+  _bulkImageInsertAdded = 0;
+  _bulkImageInsertLastRender = 0;
+}
+
+function finishBulkImageInsert({ pushHistoryEntry = true } = {}) {
+  if (_bulkImageInsertDepth > 0) _bulkImageInsertDepth--;
+  if (_bulkImageInsertDepth === 0 && _bulkImageInsertAdded > 0) {
+    invalidateOffscreen();
+    scheduleRender(true, true, 'bulk-image-insert');
+    if (pushHistoryEntry) pushHistory('bulk-image-insert');
+  }
+  const added = _bulkImageInsertAdded;
+  if (_bulkImageInsertDepth === 0) {
+    _bulkImageInsertAdded = 0;
+    _bulkImageInsertLastRender = 0;
+  }
+  return added;
+}
+
+function addImage(src, cx, cy, exactSize = false, existingImgKey = null, preCacheClipboard = true, options = {}) {
   return new Promise((resolve) => {
     const dbg = ViewportDebug.start('addImage', { src, cx, cy, exactSize, existingImgKey, preCacheClipboard });
     const t0 = performance.now();
@@ -4250,9 +4453,27 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, preCach
       const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
       objects.push(obj);
       objectsMap.set(obj.id, obj);
-      selectObject(obj.id);
-      scheduleRender(true, false, 'add-image');
-      pushHistory();
+      const deferHistory = options.deferHistory ?? _bulkImageInsertDepth > 0;
+      if (deferHistory) {
+        if (editingId) exitEdit();
+        selectedIds.clear();
+        selectedIds.add(obj.id);
+        selectedId = obj.id;
+        _bulkImageInsertAdded++;
+        if (!options.suppressProgressRender) {
+          const now = performance.now();
+          if (now - _bulkImageInsertLastRender > 120) {
+            _bulkImageInsertLastRender = now;
+            scheduleRender(true, true, 'add-image-bulk-progress');
+          } else {
+            scheduleRender(false, true, 'add-image-bulk-overlay');
+          }
+        }
+      } else {
+        selectObject(obj.id);
+        scheduleRender(true, false, 'add-image');
+        pushHistory('add-image');
+      }
       const total = performance.now() - t0;
       ViewportDebug.max('maxImageAddMs', total);
       ViewportDebug.end(dbg, { id: obj.id, imgKey, total });
@@ -4269,6 +4490,66 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, preCach
     img.src = src;
     ViewportDebug.step(dbg, 'set-src', { src });
   });
+}
+
+async function addNativeImageFile(path, cx, cy, options = {}) {
+  const dbg = ViewportDebug.start('addNativeImageFile', { path, cx, cy });
+  const t0 = performance.now();
+  ViewportDebug.count('imageAdds');
+  ViewportDebug.count('nativeImageAdds');
+  const imgKey = options.imgKey || newImgKey();
+  const meta = await window.__TAURI__.core.invoke('register_image_file_source', { imgKey, path });
+  const naturalW = Number(meta.width) || 1;
+  const naturalH = Number(meta.height) || 1;
+  let w = naturalW;
+  let h = naturalH;
+  if (!options.exactSize) {
+    const MAX = 600;
+    if (w > MAX || h > MAX) {
+      const scale = MAX / Math.max(w, h);
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+    }
+  }
+  imageStore[imgKey] = {
+    native: true,
+    mime: meta.mime || '',
+    ext: meta.ext || '',
+    bytes: meta.bytes || 0,
+  };
+  if (options.materializeAsset) {
+    await materializeImageAssets([imgKey]);
+  }
+  if (!imageAssetUrlCache[imgKey]) imageAssetUrlCache[imgKey] = convertTauriFileSrc(path);
+  cacheImage(imgKey, imageAssetUrlCache[imgKey], null, false, null, { skipSourceRegistration: true });
+  const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
+  objects.push(obj);
+  objectsMap.set(obj.id, obj);
+  const deferHistory = options.deferHistory ?? _bulkImageInsertDepth > 0;
+  if (deferHistory) {
+    if (editingId) exitEdit();
+    selectedIds.clear();
+    selectedIds.add(obj.id);
+    selectedId = obj.id;
+    _bulkImageInsertAdded++;
+    if (!options.suppressProgressRender) {
+      const now = performance.now();
+      if (now - _bulkImageInsertLastRender > 120) {
+        _bulkImageInsertLastRender = now;
+        scheduleRender(true, true, 'add-native-image-bulk-progress');
+      } else {
+        scheduleRender(false, true, 'add-native-image-bulk-overlay');
+      }
+    }
+  } else {
+    selectObject(obj.id);
+    scheduleRender(true, false, 'add-native-image');
+    pushHistory('add-native-image');
+  }
+  const total = performance.now() - t0;
+  ViewportDebug.max('maxImageAddMs', total);
+  ViewportDebug.end(dbg, { id: obj.id, imgKey, width: naturalW, height: naturalH, bytes: meta.bytes || 0, total });
+  return obj;
 }
 
 // ─── New board ───────────────────────────────────────────────────────────────
@@ -4351,7 +4632,7 @@ function deleteSelected() {
   selectedId = null;
   selectedIds.clear();
   scheduleRender(true, true);
-  pushHistory();
+  pushHistory('delete-selected');
 }
 
 // ─── Zoom ─────────────────────────────────────────────────────────────────────
@@ -4405,6 +4686,10 @@ canvas.addEventListener('wheel', (e) => {
 let _spaceDown = false;
 
 document.addEventListener('keydown', (e) => {
+  if (isBoardInputBlocked()) {
+    if (e.code === 'Space') e.preventDefault();
+    return;
+  }
   if (e.code === 'Space' && !editingId && !e.repeat) {
     e.preventDefault();
     _spaceDown = true;
@@ -4420,6 +4705,11 @@ document.addEventListener('keyup', (e) => {
 });
 
 canvas.addEventListener('mousedown', (e) => {
+  if (isBoardInputBlocked()) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   // Spacebar pan
   if (e.button === 0 && _spaceDown) {
     const panDbg = ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, panX, panY, zoom });
@@ -4495,7 +4785,7 @@ canvas.addEventListener('mousedown', (e) => {
         document.removeEventListener('mousemove', onGrpMove);
         document.removeEventListener('mouseup', onGrpUp);
         if (grpRaf) { cancelAnimationFrame(grpRaf); grpRaf = null; }
-        if (grpMoved) { applyGrpDrag(grpLastDx, grpLastDy); for (const item of grpItems) markDirty(item.obj.id); pushHistory(); }
+        if (grpMoved) { applyGrpDrag(grpLastDx, grpLastDy); for (const item of grpItems) markDirty(item.obj.id); pushHistory('group-drag'); }
       }
       document.addEventListener('mousemove', onGrpMove);
       document.addEventListener('mouseup', onGrpUp);
@@ -4654,13 +4944,18 @@ canvas.addEventListener('mousedown', (e) => {
     }
     applyDrag(lastDx, lastDy);
     for (const item of dragItems) markDirty(item.obj.id);
-    pushHistory();
+    pushHistory('drag');
   }
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 });
 
 canvas.addEventListener('dblclick', (e) => {
+  if (isBoardInputBlocked()) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   if (isMultiSelected()) return;
   const wp = toWorld(e.clientX, e.clientY);
   const obj = hitTest(wp.x, wp.y);
@@ -4696,7 +4991,7 @@ function menuCommandFromButton(button) {
   switch (button?.id) {
     case 'btn-new': return () => { closeCtxMenu('command:new'); newBoard(); };
     case 'btn-add-text': return () => { closeCtxMenu('command:add-text'); addText(ctxPos.x, ctxPos.y); };
-    case 'btn-add-image': return () => { closeCtxMenu('command:add-image'); fileInput.value = ''; fileInput.click(); };
+    case 'btn-add-image': return () => { closeCtxMenu('command:add-image'); pickAndInsertImages(ctxPos.x, ctxPos.y); };
     case 'btn-paste': return () => { closeCtxMenu('command:paste'); pasteAtPos(ctxPos.x, ctxPos.y); };
     case 'btn-save': return () => { closeCtxMenu('command:save'); saveBoard(); };
     case 'btn-save-as': return () => { closeCtxMenu('command:save-as'); saveBoardAs(); };
@@ -4868,11 +5163,31 @@ fileInput.addEventListener('change', async () => {
   await insertImageFiles(files, ctxPos.x, ctxPos.y, 'file-input');
 });
 
+async function pickAndInsertImages(x, y) {
+  if (window.__TAURI__) {
+    const dbg = InsertDebug.start('pickImages', { source: 'file-picker-native' });
+    try {
+      const paths = await window.__TAURI__.core.invoke('pick_image_files');
+      InsertDebug.end(dbg, { source: 'file-picker-native', fileCount: paths?.length || 0, cancelled: !paths?.length });
+      if (paths?.length) await insertNativeImagePaths(paths, x, y, 'file-picker-native');
+    } catch (err) {
+      InsertDebug.end(dbg, { source: 'file-picker-native', error: String(err) });
+      console.error('Failed to pick images:', err);
+    }
+    return;
+  }
+  fileInput.value = '';
+  fileInput.click();
+}
+
 async function insertDataUrlImage(dataUrl, x, y, dbg, options = {}) {
-  const addPromise = addImage(dataUrl, x, y, false, null, options.preCacheClipboard ?? true);
-  hidePasteShield();
+  const addPromise = addImage(dataUrl, x, y, false, null, options.preCacheClipboard ?? true, {
+    deferHistory: options.deferHistory,
+    suppressProgressRender: options.suppressProgressRender,
+  });
+  if (!options.holdShield) hidePasteShield();
   const obj = await addPromise;
-  showPasteShield();
+  if (!options.holdShield) showPasteShield();
   InsertDebug.end(dbg, { added: !!obj, ...(options.endMeta || {}) });
   return obj;
 }
@@ -4881,7 +5196,13 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
   const dbg = InsertDebug.start('insertImages', { source, fileCount: files.length });
   if (!files.length) { InsertDebug.end(dbg, { source, skipped: 'no-files' }); return; }
   let added = 0;
+  const readyPromises = [];
+  const bulk = files.length > 1;
   showPasteShield();
+  if (bulk) {
+    beginBulkImageInsert();
+    InsertDebug.step(dbg, 'bulk:start', { source, fileCount: files.length });
+  }
   try {
     for (const file of files) {
       if (file.type !== 'image/png' && file.type !== 'image/jpeg') continue;
@@ -4895,15 +5216,32 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
           reader.readAsDataURL(file);
         });
         InsertDebug.step(fileDbg, 'read:end', { source, dataUrl });
-        const obj = await insertDataUrlImage(dataUrl, x, y, fileDbg, { endMeta: { source } });
-        if (obj) added++;
+        const obj = await insertDataUrlImage(dataUrl, x, y, fileDbg, {
+          deferHistory: bulk,
+          holdShield: true,
+          suppressProgressRender: bulk,
+          endMeta: { source },
+        });
+        if (obj) {
+          added++;
+          readyPromises.push(imageReadyPromiseForKey(obj.data.imgKey));
+        }
       } catch (err) {
         InsertDebug.end(fileDbg, { source, error: String(err) });
       }
     }
-    InsertDebug.end(dbg, { source, fileCount: files.length, added });
   } finally {
+    if (readyPromises.length) {
+      InsertDebug.step(dbg, 'ready:wait-start', { source, added, readyCount: readyPromises.length });
+      await Promise.allSettled(readyPromises);
+      InsertDebug.step(dbg, 'ready:wait-end', { source, added, readyCount: readyPromises.length });
+    }
+    if (bulk) {
+      const historyAdded = finishBulkImageInsert({ pushHistoryEntry: added > 0 });
+      InsertDebug.step(dbg, 'bulk:end', { source, added, historyAdded });
+    }
     hidePasteShield();
+    InsertDebug.end(dbg, { source, fileCount: files.length, added });
   }
 }
 
@@ -4997,47 +5335,69 @@ islZoom.addEventListener('click', () => {
   requestAnimationFrame(animate);
 });
 
-// ─── Drag and drop images ─────────────────────────────────────────────────────
+// ─── Native drag and drop images ─────────────────────────────────────────────
 
-document.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-});
-
-// HTML5 drop — works for images dragged from a browser
-canvas.addEventListener('drop', (e) => {
-  e.preventDefault();
-  const pos = toWorld(e.clientX, e.clientY);
-  insertImageFiles([...e.dataTransfer.files], pos.x, pos.y, 'browser-drop');
-});
+async function insertNativeImagePaths(paths, x, y, source = 'native-drop') {
+  const dbg = InsertDebug.start('insertImages', { source, fileCount: paths.length });
+  let added = 0;
+  const readyPromises = [];
+  const imagePaths = paths.filter((path) => /\.(png|jpe?g)$/i.test(path));
+  const bulk = imagePaths.length > 1;
+  showPasteShield();
+  if (bulk) {
+    beginBulkImageInsert();
+    InsertDebug.step(dbg, 'bulk:start', { source, fileCount: imagePaths.length });
+  }
+  try {
+    for (const path of imagePaths) {
+      const fileDbg = InsertDebug.start('insertImage', { source, fileName: path });
+      try {
+        InsertDebug.step(fileDbg, 'register:start', { source, fileName: path });
+        const obj = await addNativeImageFile(path, x, y, {
+          deferHistory: bulk,
+          materializeAsset: source === 'file-picker-native',
+          suppressProgressRender: bulk,
+        });
+        const imgRef = obj ? imageStore[obj.data.imgKey] : null;
+        InsertDebug.step(fileDbg, 'register:end', {
+          source,
+          fileName: path,
+          imgKey: obj?.data?.imgKey,
+          native: true,
+          fileSize: imgRef?.bytes || '',
+          fileType: imgRef?.mime || '',
+        });
+        InsertDebug.end(fileDbg, { source, added: !!obj, imgKey: obj?.data?.imgKey, native: true });
+        if (obj) {
+          added++;
+          readyPromises.push(imageReadyPromiseForKey(obj.data.imgKey));
+        }
+      } catch (err) {
+        InsertDebug.end(fileDbg, { source, error: String(err) });
+        console.error('Failed to load image file:', err);
+      }
+    }
+  } finally {
+    if (readyPromises.length) {
+      InsertDebug.step(dbg, 'ready:wait-start', { source, added, readyCount: readyPromises.length });
+      await Promise.allSettled(readyPromises);
+      InsertDebug.step(dbg, 'ready:wait-end', { source, added, readyCount: readyPromises.length });
+    }
+    if (bulk) {
+      const historyAdded = finishBulkImageInsert({ pushHistoryEntry: added > 0 });
+      InsertDebug.step(dbg, 'bulk:end', { source, fileCount: imagePaths.length, added, historyAdded });
+    }
+    hidePasteShield();
+    InsertDebug.end(dbg, { source, fileCount: imagePaths.length, droppedFileCount: paths.length, added });
+  }
+}
 
 // Tauri native drop — place at center of visible canvas (Rust drop position unreliable)
 if (window.__TAURI__) {
   window.__TAURI__.event.listen('boardfish://file-drop', async (event) => {
     const { paths } = event.payload;
     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-    const dbg = InsertDebug.start('insertImages', { source: 'native-drop', fileCount: paths.length });
-    let added = 0;
-    showPasteShield();
-    for (const path of paths) {
-      if (!/\.(png|jpe?g)$/i.test(path)) continue;
-      const fileDbg = InsertDebug.start('insertImage', { source: 'native-drop', fileName: path });
-      try {
-        InsertDebug.step(fileDbg, 'read:start', { source: 'native-drop', fileName: path });
-        const b64 = await window.__TAURI__.core.invoke('read_binary_file_base64', { path });
-        const ext = path.split('.').pop().toLowerCase();
-        const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
-        const dataUrl = 'data:' + mime + ';base64,' + b64;
-        InsertDebug.step(fileDbg, 'read:end', { source: 'native-drop', dataUrl });
-        const obj = await insertDataUrlImage(dataUrl, center.x, center.y, fileDbg, { endMeta: { source: 'native-drop' } });
-        if (obj) added++;
-      } catch (err) {
-        InsertDebug.end(fileDbg, { source: 'native-drop', error: String(err) });
-        console.error('Failed to load dropped file:', err);
-      }
-    }
-    hidePasteShield();
-    InsertDebug.end(dbg, { source: 'native-drop', fileCount: paths.length, added });
+    await insertNativeImagePaths(paths, center.x, center.y, 'native-drop');
   });
 }
 
@@ -6082,7 +6442,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           objects.push(o); objectsMap.set(o.id, o); selectedIds.add(o.id);
         }
         selectedId = clones[clones.length - 1].id;
-        scheduleRender(true, true); pushHistory();
+        scheduleRender(true, true); pushHistory('paste-objects');
         ClipDebug.end(dbg, { path: 'jsClipboard', objectCount: clones.length, registeredImages, historyIndex });
         return;
       }
@@ -6174,6 +6534,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
 document.addEventListener('paste', (e) => {
   if (editingId) return;
   e.preventDefault();
+  if (isBoardInputBlocked()) return;
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
   pasteAtPos(center.x, center.y, e.clipboardData);
 });
@@ -6184,6 +6545,7 @@ document.addEventListener('paste', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Alt') { e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); return; }
+  if (isBoardInputBlocked()) { e.preventDefault(); return; }
 
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
     if (!editingId) {
