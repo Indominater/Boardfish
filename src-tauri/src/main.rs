@@ -120,6 +120,37 @@ struct CachedImageSource {
     bytes: Arc<[u8]>,
 }
 
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipboardCopyTiming {
+    path: String,
+    cache_hit: bool,
+    flipped: bool,
+    width: u32,
+    height: u32,
+    pixels: u64,
+    rgba_mb: f64,
+    total_ms: f64,
+    lookup_ms: Option<f64>,
+    decode_ms: Option<f64>,
+    base64_ms: Option<f64>,
+    image_decode_ms: Option<f64>,
+    rgba_convert_ms: Option<f64>,
+    transform_ms: Option<f64>,
+    clipboard_write_ms: Option<f64>,
+    arboard_ms: Option<f64>,
+    macos_fallback_ms: Option<f64>,
+}
+
+fn elapsed_ms(start: std::time::Instant) -> f64 {
+    (start.elapsed().as_secs_f64() * 1000.0 * 100.0).round() / 100.0
+}
+
+fn rgba_mb(width: u32, height: u32) -> f64 {
+    let bytes = width as f64 * height as f64 * 4.0;
+    (bytes / 1024.0 / 1024.0 * 100.0).round() / 100.0
+}
+
 fn clipboard_debug(label: &str, start: std::time::Instant) {
     if CLIPBOARD_DEBUG.load(Ordering::Relaxed) {
         eprintln!(
@@ -127,6 +158,12 @@ fn clipboard_debug(label: &str, start: std::time::Instant) {
             label,
             start.elapsed().as_secs_f64() * 1000.0
         );
+    }
+}
+
+fn clipboard_debug_msg(message: &str) {
+    if CLIPBOARD_DEBUG.load(Ordering::Relaxed) {
+        eprintln!("[boardfish clipboard] {}", message);
     }
 }
 
@@ -381,13 +418,6 @@ async fn save_board(
         "zip_ms": result.zip_ms,
         "total_ms": total_ms,
     }))
-}
-
-#[tauri::command]
-async fn read_text_file(path: String) -> Result<String, String> {
-    tokio::fs::read_to_string(&path)
-        .await
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -779,15 +809,22 @@ async fn save_images_to_existing_folder_by_keys(
     state: tauri::State<'_, ImageSourceCache>,
     folder: String,
     img_keys: Vec<String>,
-) -> Result<usize, String> {
+) -> Result<serde_json::Value, String> {
+    let total_start = std::time::Instant::now();
     if img_keys.is_empty() {
-        return Ok(0);
+        return Ok(serde_json::json!({
+            "savedCount": 0usize,
+            "failedCount": 0usize,
+            "missingCount": 0usize,
+            "bytes": 0usize,
+            "errors": [],
+        }));
     }
 
+    let mut missing = Vec::new();
     let sources: Vec<(String, CachedImageSource)> = {
         let cache = state.0.lock().map_err(|e| e.to_string())?;
         let mut sources = Vec::with_capacity(img_keys.len());
-        let mut missing = Vec::new();
         for key in &img_keys {
             if let Some(source) = cache.get(key) {
                 sources.push((key.clone(), source.clone()));
@@ -795,17 +832,14 @@ async fn save_images_to_existing_folder_by_keys(
                 missing.push(key.clone());
             }
         }
-        if !missing.is_empty() {
-            return Err(format!(
-                "image source cache missing for {}",
-                missing.join(", ")
-            ));
-        }
         sources
     };
 
     let base = std::path::PathBuf::from(folder);
     let mut saved_count = 0usize;
+    let mut failed_count = 0usize;
+    let mut bytes_written = 0usize;
+    let mut errors: Vec<String> = Vec::new();
 
     for (i, (_key, source)) in sources.iter().enumerate() {
         let hex = {
@@ -816,15 +850,32 @@ async fn save_images_to_existing_folder_by_keys(
             format!("{:06x}", (nanos ^ (i as u64 * 0x9e3779b9)) & 0xFFFFFF)
         };
         let filename = format!("image_{}.{}", hex, source.ext);
-        if tokio::fs::write(base.join(filename), &*source.bytes)
-            .await
-            .is_ok()
-        {
-            saved_count += 1;
+        let path = base.join(&filename);
+        match tokio::fs::write(&path, &*source.bytes).await {
+            Ok(_) => {
+                saved_count += 1;
+                bytes_written += source.bytes.len();
+            }
+            Err(err) => {
+                failed_count += 1;
+                if errors.len() < 10 {
+                    errors.push(format!("{}: {}", filename, err));
+                }
+            }
         }
     }
 
-    Ok(saved_count)
+    save_debug("save_images_to_existing_folder_by_keys total", total_start);
+    Ok(serde_json::json!({
+        "savedCount": saved_count,
+        "failedCount": failed_count,
+        "missingCount": missing.len(),
+        "requestedCount": img_keys.len(),
+        "sourceCount": sources.len(),
+        "bytes": bytes_written,
+        "errors": errors,
+        "missing": missing.iter().take(10).collect::<Vec<_>>(),
+    }))
 }
 
 #[tauri::command]
@@ -910,108 +961,42 @@ fn copy_text_to_clipboard(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn cache_image_for_clipboard(
-    state: tauri::State<'_, ClipboardImageCache>,
-    source_state: tauri::State<'_, ImageSourceCache>,
-    img_key: String,
-    data_url: String,
-) -> Result<(), String> {
-    let total = std::time::Instant::now();
-    let source_data_url = data_url.clone();
-    let cached = tokio::task::spawn_blocking(move || {
-        let decode = std::time::Instant::now();
-        let result = decode_data_url_to_cached_image(&data_url);
-        clipboard_debug("cache_image_for_clipboard decode worker", decode);
-        result
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    let lock = std::time::Instant::now();
-    state
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(img_key.clone(), cached);
-    clipboard_debug("cache_image_for_clipboard lock+insert", lock);
-
-    if let Ok(source) = cached_source_from_data_url(&source_data_url) {
-        source_state
-            .0
-            .lock()
-            .map_err(|e| e.to_string())?
-            .insert(img_key, source);
-    }
-    clipboard_debug("cache_image_for_clipboard total", total);
-    Ok(())
-}
-
-#[tauri::command]
-async fn copy_cached_image_to_clipboard(
-    state: tauri::State<'_, ClipboardImageCache>,
-    img_key: String,
-) -> Result<(), String> {
-    copy_cached_image_to_clipboard_transformed(state, img_key, false, false).await
-}
-
-#[tauri::command]
-async fn copy_cached_image_to_clipboard_transformed(
-    state: tauri::State<'_, ClipboardImageCache>,
-    img_key: String,
-    flip_x: bool,
-    flip_y: bool,
-) -> Result<(), String> {
-    let total = std::time::Instant::now();
-    let lookup = std::time::Instant::now();
-    let cached = state
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .get(&img_key)
-        .cloned()
-        .ok_or("clipboard image cache miss")?;
-    clipboard_debug("copy_cached_image_to_clipboard_transformed lookup", lookup);
-    let result = tokio::task::spawn_blocking(move || {
-        let transform = std::time::Instant::now();
-        let rgba = transform_rgba(cached.width, cached.height, cached.rgba, flip_x, flip_y);
-        clipboard_debug(
-            "copy_cached_image_to_clipboard_transformed transform worker",
-            transform,
-        );
-        let write = std::time::Instant::now();
-        let result = write_rgba_to_clipboard(cached.width, cached.height, rgba);
-        clipboard_debug(
-            "copy_cached_image_to_clipboard_transformed write worker",
-            write,
-        );
-        result
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    clipboard_debug("copy_cached_image_to_clipboard_transformed total", total);
-    result
-}
-
-#[tauri::command]
-async fn copy_image_data_url_to_clipboard(data_url: String) -> Result<(), String> {
-    copy_image_data_url_to_clipboard_transformed(data_url, false, false).await
-}
-
-#[tauri::command]
 async fn copy_image_data_url_to_clipboard_transformed(
     data_url: String,
     flip_x: bool,
     flip_y: bool,
-) -> Result<(), String> {
+) -> Result<ClipboardCopyTiming, String> {
     let total = std::time::Instant::now();
     let result = tokio::task::spawn_blocking(move || {
-        let cached = decode_data_url_to_cached_image(&data_url)?;
+        let (cached, decode_timing) = decode_data_url_to_cached_image_timed(&data_url)?;
         let transform = std::time::Instant::now();
         let rgba = transform_rgba(cached.width, cached.height, cached.rgba, flip_x, flip_y);
+        let transform_ms = elapsed_ms(transform);
         clipboard_debug(
             "copy_image_data_url_to_clipboard_transformed transform worker",
             transform,
         );
-        write_rgba_to_clipboard(cached.width, cached.height, rgba)
+        let write_timing = write_rgba_to_clipboard(cached.width, cached.height, rgba)?;
+        let mut timing = ClipboardCopyTiming {
+            path: "data-url-rgba".to_string(),
+            cache_hit: false,
+            flipped: flip_x || flip_y,
+            width: cached.width,
+            height: cached.height,
+            pixels: cached.width as u64 * cached.height as u64,
+            rgba_mb: rgba_mb(cached.width, cached.height),
+            decode_ms: decode_timing.decode_ms,
+            base64_ms: decode_timing.base64_ms,
+            image_decode_ms: decode_timing.image_decode_ms,
+            rgba_convert_ms: decode_timing.rgba_convert_ms,
+            transform_ms: Some(transform_ms),
+            clipboard_write_ms: write_timing.clipboard_write_ms,
+            arboard_ms: write_timing.arboard_ms,
+            macos_fallback_ms: write_timing.macos_fallback_ms,
+            ..Default::default()
+        };
+        timing.total_ms = elapsed_ms(total);
+        Ok::<_, String>(timing)
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -1045,7 +1030,9 @@ fn transform_rgba(
     Arc::from(out)
 }
 
-fn decode_data_url_to_cached_image(data_url: &str) -> Result<CachedClipboardImage, String> {
+fn decode_data_url_to_cached_image_timed(
+    data_url: &str,
+) -> Result<(CachedClipboardImage, ClipboardCopyTiming), String> {
     use base64::{engine::general_purpose, Engine as _};
     let total = std::time::Instant::now();
     let base64_data = data_url.split(',').nth(1).ok_or("invalid data URL")?;
@@ -1053,52 +1040,38 @@ fn decode_data_url_to_cached_image(data_url: &str) -> Result<CachedClipboardImag
     let bytes = general_purpose::STANDARD
         .decode(base64_data)
         .map_err(|e| e.to_string())?;
+    let base64_ms = elapsed_ms(base64_decode);
     clipboard_debug("decode_data_url base64", base64_decode);
     let image_decode = std::time::Instant::now();
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+    let image_decode_ms = elapsed_ms(image_decode);
     clipboard_debug("decode_data_url image decode", image_decode);
     let rgba_convert = std::time::Instant::now();
     let rgba = img.to_rgba8();
+    let rgba_convert_ms = elapsed_ms(rgba_convert);
     clipboard_debug("decode_data_url rgba convert", rgba_convert);
     let (width, height) = rgba.dimensions();
+    let decode_ms = elapsed_ms(total);
     clipboard_debug("decode_data_url total", total);
-    Ok(CachedClipboardImage {
+    let cached = CachedClipboardImage {
         width,
         height,
         rgba: Arc::from(rgba.into_raw()),
-    })
-}
-
-#[tauri::command]
-async fn read_image_from_clipboard() -> Result<String, String> {
-    let total = std::time::Instant::now();
-    let result = tokio::task::spawn_blocking(|| {
-        use base64::{engine::general_purpose, Engine as _};
-        let read = std::time::Instant::now();
-        let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-        let img = clipboard.get_image().map_err(|e| e.to_string())?;
-        clipboard_debug("read_image_from_clipboard get_image", read);
-        let encode = std::time::Instant::now();
-        let rgba =
-            image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())
-                .ok_or("invalid image dimensions")?;
-        let mut png_bytes: Vec<u8> = Vec::new();
-        image::DynamicImage::ImageRgba8(rgba)
-            .write_to(
-                &mut std::io::Cursor::new(&mut png_bytes),
-                image::ImageFormat::Png,
-            )
-            .map_err(|e| e.to_string())?;
-        clipboard_debug("read_image_from_clipboard png encode", encode);
-        Ok(format!(
-            "data:image/png;base64,{}",
-            general_purpose::STANDARD.encode(&png_bytes)
-        ))
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    clipboard_debug("read_image_from_clipboard total", total);
-    result
+    };
+    Ok((
+        cached,
+        ClipboardCopyTiming {
+            width,
+            height,
+            pixels: width as u64 * height as u64,
+            rgba_mb: rgba_mb(width, height),
+            decode_ms: Some(decode_ms),
+            base64_ms: Some(base64_ms),
+            image_decode_ms: Some(image_decode_ms),
+            rgba_convert_ms: Some(rgba_convert_ms),
+            ..Default::default()
+        },
+    ))
 }
 
 #[tauri::command]
@@ -1193,23 +1166,29 @@ fn clear_clipboard_image_cache(
     Ok(())
 }
 
-fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(), String> {
-    // Fast path: in-memory clipboard write (no disk I/O or subprocess).
+fn write_rgba_to_clipboard(
+    width: u32,
+    height: u32,
+    rgba: Arc<[u8]>,
+) -> Result<ClipboardCopyTiming, String> {
     let total = std::time::Instant::now();
     let arboard_write = std::time::Instant::now();
-    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    if clipboard
-        .set_image(arboard::ImageData {
+    let result = arboard::Clipboard::new().map_err(|e| e.to_string()).and_then(|mut cb| {
+        cb.set_image(arboard::ImageData {
             width: width as usize,
             height: height as usize,
             bytes: std::borrow::Cow::Borrowed(&rgba),
         })
-        .is_ok()
-    {
-        clipboard_debug("write_rgba_to_clipboard arboard set_image", arboard_write);
+        .map_err(|e| e.to_string())
+    });
+    let arboard_ms = elapsed_ms(arboard_write);
+    clipboard_debug("write_rgba_to_clipboard arboard set_image", arboard_write);
+    if let Err(ref e) = result {
+        clipboard_debug_msg(&format!("write_rgba_to_clipboard failed error={e}"));
+    } else {
         clipboard_debug("write_rgba_to_clipboard total", total);
-        return Ok(());
     }
+    result?;
 
     #[cfg(target_os = "macos")]
     {
@@ -1232,14 +1211,34 @@ fn write_rgba_to_clipboard(width: u32, height: u32, rgba: Arc<[u8]>) -> Result<(
             .arg(&script)
             .output()
             .map_err(|e| e.to_string())?;
+        let macos_fallback_ms = elapsed_ms(fallback);
         clipboard_debug("write_rgba_to_clipboard macos fallback", fallback);
         clipboard_debug("write_rgba_to_clipboard total", total);
-        Ok(())
+        Ok(ClipboardCopyTiming {
+            path: "write-rgba".to_string(),
+            width,
+            height,
+            pixels: width as u64 * height as u64,
+            rgba_mb: rgba_mb(width, height),
+            clipboard_write_ms: Some(elapsed_ms(total)),
+            arboard_ms: Some(arboard_ms),
+            macos_fallback_ms: Some(macos_fallback_ms),
+            ..Default::default()
+        })
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        Err("image clipboard write failed".to_string())
+        Ok(ClipboardCopyTiming {
+            path: "write-rgba".to_string(),
+            width,
+            height,
+            pixels: width as u64 * height as u64,
+            rgba_mb: rgba_mb(width, height),
+            clipboard_write_ms: Some(elapsed_ms(total)),
+            arboard_ms: Some(arboard_ms),
+            ..Default::default()
+        })
     }
 }
 
@@ -1271,7 +1270,6 @@ fn main() {
             save_board,
             save_text_as,
             read_board,
-            read_text_file,
             register_image_file_source,
             get_cached_image_data_url,
             materialize_cached_image_sources,
@@ -1292,12 +1290,7 @@ fn main() {
             set_open_debug,
             register_image_source,
             remove_cached_image_sources,
-            cache_image_for_clipboard,
-            copy_cached_image_to_clipboard,
-            copy_cached_image_to_clipboard_transformed,
-            copy_image_data_url_to_clipboard,
             copy_image_data_url_to_clipboard_transformed,
-            read_image_from_clipboard,
             read_image_from_clipboard_cached,
             read_text_from_clipboard,
             clear_clipboard_image_cache
