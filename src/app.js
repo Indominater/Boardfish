@@ -20,17 +20,18 @@ const exportSep         = document.getElementById('obj-sep-export');
 const imageActionsSep   = document.getElementById('obj-sep-image-actions');
 const flipHorizontalBtn = document.getElementById('obj-btn-flip-horizontal');
 const flipVerticalBtn   = document.getElementById('obj-btn-flip-vertical');
+const rotateBtn         = document.getElementById('obj-btn-rotate');
 const rubberBand       = document.getElementById('rubber-band');
 const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
-const DEBUG_TOOLS_RELEASE_ENABLED = false;
+const DEBUG_TOOLS_RELEASE_ENABLED = true;
 const DEBUG_TOOLS_ENABLED = (() => {
   if (!DEBUG_TOOLS_RELEASE_ENABLED) return false;
   try {
     const host = window.location?.hostname || '';
-    const isDevHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    const isDevHost = host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '[::1]';
     return isDevHost && localStorage.getItem('bf_debug_tools') === '1';
   } catch (_) {
     return false;
@@ -913,8 +914,7 @@ const ViewportDebug = (() => {
           visibleImages++;
           const key = obj.data?.imgKey;
           const bitmap = key ? imageBitmapCache[key] : null;
-          const failed = key ? imageBitmapFailed.has(key) : false;
-          const fullSource = bitmap || (failed ? imageCache[key] : null);
+          const fullSource = bitmap || imageCache[key] || null;
           const targetScale = fullSource ? chooseImageScaleForDraw(obj, fullSource) : 1;
           if (targetScale < 1) {
             const sourceW = fullSource?.width || fullSource?.naturalWidth || 0;
@@ -1429,6 +1429,24 @@ const OpenDebug = (() => {
     return rows;
   }
 
+  function status() {
+    const last = events[events.length - 1] || null;
+    const rows = [{
+      lastStep: last?.step || '',
+      op: last?.op || '',
+      totalMs: last?.total ?? '',
+      imageCount: last?.meta?.imageCount ?? last?.meta?.imageObjectCount ?? '',
+      objectCount: last?.meta?.objectCount ?? '',
+      hydrated: last?.meta?.hydrated ?? '',
+      remaining: last?.meta?.remaining ?? '',
+      error: last?.meta?.error || '',
+      hydrationMode,
+      hydrationConcurrency,
+    }];
+    console.table(rows);
+    return rows;
+  }
+
   function hydrationSummary() {
     const rows = events.filter(e => e.step === 'hydrate-image').map(e => e.meta || {});
     const sum = (field) => rows.reduce((n, row) => n + (Number(row[field]) || 0), 0);
@@ -1449,6 +1467,57 @@ const OpenDebug = (() => {
       mode: hydrationMode,
     };
     console.table([out]);
+    return out;
+  }
+
+  function stepSummary(prefix = '') {
+    const rows = events
+      .filter(e => !prefix || e.step?.startsWith(prefix))
+      .map(e => ({
+        step: e.step,
+        total: e.total,
+        dt: e.dt,
+        command: e.meta?.command || '',
+        count: e.meta?.count ?? '',
+        hydrated: e.meta?.hydrated ?? '',
+        pendingNativeImages: e.meta?.pendingNativeImages ?? '',
+        nativeRefs: e.meta?.nativeRefs ?? '',
+        manifestRefs: e.meta?.manifestRefs ?? '',
+        dataUrlRefs: e.meta?.dataUrlRefs ?? '',
+        missingStoreRefs: e.meta?.missingStoreRefs ?? '',
+        cachedImages: e.meta?.cachedImages ?? '',
+        assetUrls: e.meta?.assetUrls ?? '',
+        bitmapReady: e.meta?.bitmapReady ?? '',
+        reason: e.meta?.reason || '',
+        error: e.meta?.error || '',
+      }));
+    console.table(rows);
+    return rows;
+  }
+
+  function imageStoreSummary() {
+    const out = getOpenImageRuntimeMetrics();
+    console.table([out]);
+    return out;
+  }
+
+  function imageStoreSample(limit = 20) {
+    const rows = getImageStoreOpenDebugSample(limit);
+    console.table(rows);
+    return rows;
+  }
+
+  function hydrationCandidates() {
+    const pending = getPendingNativeImageKeys();
+    const visible = getVisibleImageKeys();
+    const out = {
+      pendingNativeCount: pending.length,
+      visibleNativeCount: visible.length,
+      pendingDebug: getPendingNativeImageKeys.lastDebug,
+      visibleDebug: getVisibleImageKeys.lastDebug,
+      ...getOpenImageRuntimeMetrics(),
+    };
+    console.log(out);
     return out;
   }
 
@@ -1487,7 +1556,12 @@ const OpenDebug = (() => {
     dump,
     summary,
     phaseSummary,
+    status,
     hydrationSummary,
+    stepSummary,
+    imageStoreSummary,
+    imageStoreSample,
+    hydrationCandidates,
     slowImages,
     reset,
     get enabled() { return enabled; },
@@ -1502,10 +1576,12 @@ exposeDebug({ open: OpenDebug });
 // ─── Export debugger ─────────────────────────────────────────────────────────
 const ExportDebug = (() => {
   const MAX_EVENTS = 2000;
+  const MAX_MASSIVE_SAMPLES = 8;
   let enabled = false;
   let verbose = false;
   let nextOpId = 1;
   const events = [];
+  let massive = null;
 
   function sanitize(value) {
     if (!value || typeof value !== 'object') return value;
@@ -1541,7 +1617,7 @@ const ExportDebug = (() => {
 
     if (options.verbose === true) setVerbose(true);
     setRustDebug(true);
-    console.info('Boardfish export debugger enabled. Use BoardfishDebug.export.summary(), .dump(), or .reset().');
+    console.info('Boardfish export debugger enabled. For progress issues use BoardfishDebug.export.progressReport(); for massive boards use .massiveReport(); also available: .status(), .slowImageReport(), .summary(), .dump(), .reset().');
   }
 
   function disable() {
@@ -1583,6 +1659,368 @@ const ExportDebug = (() => {
     step(ctx, 'end', meta);
   }
 
+  function pushTop(list, row, scoreKey, limit = MAX_MASSIVE_SAMPLES) {
+    list.push(row);
+    list.sort((a, b) => Number(b[scoreKey] || 0) - Number(a[scoreKey] || 0));
+    if (list.length > limit) list.length = limit;
+  }
+
+  function pushSample(list, row, limit = MAX_MASSIVE_SAMPLES) {
+    if (list.length < limit) list.push(row);
+  }
+
+  function startMassive(op, imageObjs = []) {
+    if (!enabled) return null;
+    const seen = new Map();
+    const countsBySourceKind = { nativeRef: 0, dataUrl: 0, missing: 0, other: 0 };
+    let storedBytes = 0;
+    let transformedCount = 0;
+    let duplicateObjectCount = 0;
+    let missingSourceCount = 0;
+    const largestStored = [];
+    const duplicateKeys = [];
+    const missingSourceSamples = [];
+
+    imageObjs.forEach((obj, index) => {
+      const imgKey = obj?.data?.imgKey || '';
+      const source = imgKey ? imageStore[imgKey] : null;
+      const bytes = imageStoreBytesEstimate(source);
+      storedBytes += bytes;
+      if (imageNeedsRendering(obj)) transformedCount++;
+      if (isNativeImageRef(source)) countsBySourceKind.nativeRef++;
+      else if (typeof source === 'string') countsBySourceKind.dataUrl++;
+      else if (!source) {
+        countsBySourceKind.missing++;
+        missingSourceCount++;
+        pushSample(missingSourceSamples, { index, objectId: obj?.id || '', imgKey });
+      } else countsBySourceKind.other++;
+
+      if (imgKey) {
+        const prev = seen.get(imgKey) || 0;
+        if (prev === 1) duplicateKeys.push(imgKey);
+        if (prev >= 1) duplicateObjectCount++;
+        seen.set(imgKey, prev + 1);
+      }
+
+      pushTop(largestStored, {
+        index,
+        objectId: obj?.id || '',
+        imgKey,
+        storedMB: Math.round(bytes / 1024 / 1024 * 100) / 100,
+        needsRender: imageNeedsRendering(obj),
+      }, 'storedMB');
+    });
+
+    massive = {
+      op,
+      startedAt: new Date().toISOString(),
+      startedPerf: performance.now(),
+      totalMs: 0,
+      imageCount: imageObjs.length,
+      transformedCount,
+      passthroughCount: imageObjs.length - transformedCount,
+      countsBySourceKind,
+      storedPayloadMB: Math.round(storedBytes / 1024 / 1024 * 100) / 100,
+      duplicateKeyCount: duplicateKeys.length,
+      duplicateObjectCount,
+      duplicateKeySamples: duplicateKeys.slice(0, MAX_MASSIVE_SAMPLES),
+      missingSourceCount,
+      missingSourceSamples,
+      resolve: {
+        startedAtMs: null,
+        completedAtMs: null,
+        durationMs: 0,
+        processed: 0,
+        keyCount: 0,
+        tempKeyCount: 0,
+        renderedCount: 0,
+        nativeTransformCount: 0,
+        fallbackRenderCount: 0,
+        skippedCount: 0,
+        errorCount: 0,
+        progressUpdates: 0,
+        lastProgressAt: 0,
+        lastProcessed: 0,
+        lastKeyCount: 0,
+        slowest: [],
+        errors: [],
+      },
+      save: {
+        startedAtMs: null,
+        completedAtMs: null,
+        durationMs: 0,
+        batchSize: 0,
+        lastBatchSize: 0,
+        batchCount: 0,
+        batchesDone: 0,
+        savedCount: 0,
+        failedCount: 0,
+        missingCount: 0,
+        bytesMB: 0,
+        slowestBatches: [],
+        errors: [],
+      },
+      progressUi: {
+        updates: 0,
+        currentText: '',
+        firstText: '',
+        firstNonZeroText: '',
+        firstNonZeroAtMs: null,
+        zeroHoldMs: null,
+        samples: [],
+      },
+      largestStored,
+      lastStep: 'start',
+      lastError: '',
+    };
+    return massive;
+  }
+
+  function massiveStep(stepName, meta = {}) {
+    if (!massive) return;
+    massive.lastStep = stepName;
+    massive.totalMs = Math.round((performance.now() - massive.startedPerf) * 100) / 100;
+    if (meta.error) massive.lastError = String(meta.error);
+  }
+
+  function massiveElapsedMs() {
+    return massive ? Math.round((performance.now() - massive.startedPerf) * 100) / 100 : 0;
+  }
+
+  function recordResolveStart(meta = {}) {
+    if (!massive) return;
+    massive.resolve.startedAtMs = massiveElapsedMs();
+    massiveStep('resolve-start', meta);
+  }
+
+  function recordResolveProgress(meta = {}) {
+    if (!massive) return;
+    const r = massive.resolve;
+    r.progressUpdates++;
+    r.lastProcessed = meta.processed ?? r.lastProcessed;
+    r.lastKeyCount = meta.keyCount ?? r.lastKeyCount;
+    massiveStep('resolve-progress', meta);
+  }
+
+  function recordResolveDone(meta = {}) {
+    if (!massive) return;
+    const r = massive.resolve;
+    r.completedAtMs = massiveElapsedMs();
+    r.durationMs = r.startedAtMs == null ? 0 : Math.round((r.completedAtMs - r.startedAtMs) * 100) / 100;
+    r.lastProcessed = meta.processed ?? r.processed;
+    r.lastKeyCount = meta.keyCount ?? r.keyCount;
+    massiveStep('resolve-done', meta);
+  }
+
+  function recordResolve(meta = {}) {
+    if (!massive) return;
+    const r = massive.resolve;
+    r.processed++;
+    if (meta.key) r.keyCount++;
+    if (meta.tempKey) r.tempKeyCount++;
+    if (meta.rendered) r.renderedCount++;
+    if (meta.nativeTransform) r.nativeTransformCount++;
+    if (meta.fallbackRender) r.fallbackRenderCount++;
+    if (meta.skipped) r.skippedCount++;
+    if (meta.error) {
+      r.errorCount++;
+      pushSample(r.errors, {
+        index: meta.index ?? '',
+        objectId: meta.objectId || '',
+        imgKey: meta.imgKey || '',
+        phase: meta.phase || '',
+        error: String(meta.error).slice(0, 240),
+      });
+      massive.lastError = String(meta.error);
+    }
+    pushTop(r.slowest, {
+      index: meta.index ?? '',
+      objectId: meta.objectId || '',
+      imgKey: meta.imgKey || '',
+      phase: meta.phase || '',
+      ms: Math.round((meta.ms || 0) * 100) / 100,
+      nativeTransform: !!meta.nativeTransform,
+      fallbackRender: !!meta.fallbackRender,
+    }, 'ms');
+    r.lastProgressAt = performance.now();
+    massiveStep('resolve');
+  }
+
+  function recordSaveStart(meta = {}) {
+    if (!massive) return;
+    massive.save.startedAtMs = massiveElapsedMs();
+    massive.save.batchCount = meta.batchCount || massive.save.batchCount;
+    massive.save.batchSize = meta.batchSize || massive.save.batchSize;
+    massiveStep('save-start', meta);
+  }
+
+  function recordSaveBatch(meta = {}) {
+    if (!massive) return;
+    const s = massive.save;
+    s.lastBatchSize = meta.batchSize || s.lastBatchSize;
+    s.batchCount = meta.batchCount || s.batchCount;
+    s.batchesDone++;
+    s.savedCount += Number(meta.savedCount) || 0;
+    s.failedCount += Number(meta.failedCount) || 0;
+    s.missingCount += Number(meta.missingCount) || 0;
+    s.bytesMB = Math.round((s.bytesMB + (Number(meta.bytesMB) || 0)) * 100) / 100;
+    if (meta.error) {
+      pushSample(s.errors, {
+        batchIndex: meta.batchIndex ?? '',
+        error: String(meta.error).slice(0, 240),
+      });
+      massive.lastError = String(meta.error);
+    }
+    pushTop(s.slowestBatches, {
+      batchIndex: meta.batchIndex ?? '',
+      keyCount: meta.keyCount ?? '',
+      savedCount: meta.savedCount ?? '',
+      failedCount: meta.failedCount ?? '',
+      missingCount: meta.missingCount ?? '',
+      ms: Math.round((meta.ms || 0) * 100) / 100,
+    }, 'ms');
+    massiveStep('save');
+  }
+
+  function recordSaveDone(meta = {}) {
+    if (!massive) return;
+    const s = massive.save;
+    s.completedAtMs = massiveElapsedMs();
+    s.durationMs = s.startedAtMs == null ? 0 : Math.round((s.completedAtMs - s.startedAtMs) * 100) / 100;
+    massiveStep('save-done', meta);
+  }
+
+  function recordProgressUi(meta = {}) {
+    if (!massive) return;
+    const p = massive.progressUi;
+    const text = String(meta.text || '');
+    const elapsedMs = massiveElapsedMs();
+    p.updates++;
+    p.currentText = text;
+    if (!p.firstText) p.firstText = text;
+    const finishedCount = Number(meta.finishedCount) || 0;
+    if (finishedCount > 0 && p.firstNonZeroAtMs == null) {
+      p.firstNonZeroAtMs = elapsedMs;
+      p.zeroHoldMs = elapsedMs;
+      p.firstNonZeroText = text;
+    }
+    pushSample(p.samples, {
+      atMs: elapsedMs,
+      phase: meta.phase || '',
+      text,
+      finishedCount,
+      preparedCount: meta.preparedCount ?? '',
+      totalCount: meta.totalCount ?? '',
+      batchIndex: meta.batchIndex ?? '',
+      batchCount: meta.batchCount ?? '',
+      savedKeyCount: meta.savedKeyCount ?? '',
+    });
+    massiveStep('ui-progress', meta);
+  }
+
+  function massiveReport() {
+    const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
+    if (!report) {
+      console.warn('[Boardfish export] No massive export report yet. Enable export debug, then run an export.');
+      return null;
+    }
+    const headline = {
+      op: report.op,
+      imageCount: report.imageCount,
+      storedPayloadMB: report.storedPayloadMB,
+      transformedCount: report.transformedCount,
+      passthroughCount: report.passthroughCount,
+      nativeRefs: report.countsBySourceKind.nativeRef,
+      dataUrls: report.countsBySourceKind.dataUrl,
+      missingSources: report.missingSourceCount,
+      duplicateKeys: report.duplicateKeyCount,
+      lastStep: report.lastStep,
+      lastError: report.lastError,
+      resolved: report.resolve.keyCount,
+      resolveErrors: report.resolve.errorCount,
+      saved: report.save.savedCount,
+      saveFailed: report.save.failedCount,
+      saveMissing: report.save.missingCount,
+      batches: `${report.save.batchesDone}/${report.save.batchCount || 0}`,
+      writtenMB: report.save.bytesMB,
+      resolveDurationMs: report.resolve.durationMs,
+      saveDurationMs: report.save.durationMs,
+      uiCurrentText: report.progressUi.currentText,
+      uiFirstNonZeroAtMs: report.progressUi.firstNonZeroAtMs,
+      uiZeroHoldMs: report.progressUi.zeroHoldMs,
+    };
+    console.group('[Boardfish export] massive report');
+    console.table([headline]);
+    console.table([report.progressUi]);
+    console.table([{
+      resolveStartedAtMs: report.resolve.startedAtMs,
+      resolveCompletedAtMs: report.resolve.completedAtMs,
+      resolveDurationMs: report.resolve.durationMs,
+      resolveProgressUpdates: report.resolve.progressUpdates,
+      resolveLastProcessed: report.resolve.lastProcessed,
+      resolveLastKeyCount: report.resolve.lastKeyCount,
+      saveStartedAtMs: report.save.startedAtMs,
+      saveCompletedAtMs: report.save.completedAtMs,
+      saveDurationMs: report.save.durationMs,
+    }]);
+    console.table(report.progressUi.samples);
+    console.table(report.largestStored);
+    console.table(report.resolve.slowest);
+    console.table(report.resolve.errors);
+    console.table(report.save.slowestBatches);
+    console.table(report.save.errors);
+    console.groupEnd();
+    return { headline, report };
+  }
+
+  function progressReport() {
+    const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
+    if (!report) {
+      console.warn('[Boardfish export] No progress report yet. Enable export debug, then run an export.');
+      return null;
+    }
+    const totalMs = Number(report.totalMs) || 0;
+    const phaseRows = [
+      {
+        phase: 'resolve/register',
+        startedAtMs: report.resolve.startedAtMs,
+        completedAtMs: report.resolve.completedAtMs,
+        durationMs: report.resolve.durationMs,
+        pctOfTotal: totalMs ? Math.round(report.resolve.durationMs / totalMs * 1000) / 10 : '',
+        processed: report.resolve.processed,
+        keyCount: report.resolve.keyCount,
+        updates: report.resolve.progressUpdates,
+      },
+      {
+        phase: 'save/write',
+        startedAtMs: report.save.startedAtMs,
+        completedAtMs: report.save.completedAtMs,
+        durationMs: report.save.durationMs,
+        pctOfTotal: totalMs ? Math.round(report.save.durationMs / totalMs * 1000) / 10 : '',
+        processed: report.save.savedCount + report.save.failedCount + report.save.missingCount,
+        keyCount: report.imageCount,
+        updates: report.progressUi.updates,
+      },
+    ];
+    const uiRows = [{
+      firstText: report.progressUi.firstText,
+      firstNonZeroText: report.progressUi.firstNonZeroText,
+      currentText: report.progressUi.currentText,
+      firstNonZeroAtMs: report.progressUi.firstNonZeroAtMs,
+      zeroHoldMs: report.progressUi.zeroHoldMs,
+      zeroHoldPctOfTotal: totalMs && report.progressUi.zeroHoldMs != null ? Math.round(report.progressUi.zeroHoldMs / totalMs * 1000) / 10 : '',
+      uiUpdates: report.progressUi.updates,
+      saveStartedAtMs: report.save.startedAtMs,
+      saveDurationMs: report.save.durationMs,
+    }];
+    console.group('[Boardfish export] progress report');
+    console.table(phaseRows);
+    console.table(uiRows);
+    console.table(report.progressUi.samples);
+    console.groupEnd();
+    return { phaseRows, uiRows, samples: report.progressUi.samples, report };
+  }
+
   function watch(ctx, phase, meta = {}, intervalMs = 2000) {
     if (!enabled || !ctx) return () => {};
     const startedAt = performance.now();
@@ -1620,7 +2058,7 @@ const ExportDebug = (() => {
     const t0 = performance.now();
     try {
       const result = await window.__TAURI__.core.invoke(command, args);
-      step(ctx, 'invoke:ok', { command, ms: Math.round((performance.now() - t0) * 100) / 100, result });
+      step(ctx, 'invoke:ok', { command, ...sanitize(meta), ms: Math.round((performance.now() - t0) * 100) / 100, result });
       return result;
     } catch (err) {
       step(ctx, 'invoke:error', { command, ms: Math.round((performance.now() - t0) * 100) / 100, error: String(err) });
@@ -1698,6 +2136,85 @@ const ExportDebug = (() => {
     return rows;
   }
 
+  function slowImageReport() {
+    const renderRows = events
+      .filter(e => e.step === 'render:done')
+      .map(e => ({
+        id: e.id,
+        op: e.op,
+        imgKey: e.meta?.imgKey ?? '',
+        objectId: e.meta?.objectId ?? '',
+        flipX: e.meta?.flipX ?? '',
+        flipY: e.meta?.flipY ?? '',
+        rotation: e.meta?.rotation ?? '',
+        sourceKind: e.meta?.sourceKind ?? '',
+        sourceMs: e.meta?.sourceMs ?? '',
+        loadMs: e.meta?.loadMs ?? '',
+        drawMs: e.meta?.drawMs ?? '',
+        encodeMs: e.meta?.encodeMs ?? '',
+        totalRenderMs: e.meta?.totalRenderMs ?? e.meta?.ms ?? '',
+        width: e.meta?.width ?? '',
+        height: e.meta?.height ?? '',
+        megapixels: e.meta?.megapixels ?? '',
+        dataUrlMB: e.meta?.dataUrlMB ?? '',
+        ok: e.meta?.hasDataUrl ?? e.meta?.ok ?? '',
+        error: e.meta?.error || '',
+      }))
+      .sort((a, b) => Number(b.totalRenderMs || 0) - Number(a.totalRenderMs || 0));
+
+    const registerRows = events
+      .filter(e => e.step === 'invoke:ok' && (e.meta?.command === 'register_image_source' || e.meta?.command === 'register_transformed_image_source'))
+      .map(e => ({
+        id: e.id,
+        op: e.op,
+        command: e.meta?.command || '',
+        imgKey: e.meta?.result?.tempKey ?? e.meta?.result?.imgKey ?? e.meta?.imgKey ?? '',
+        registerMs: e.meta?.ms ?? '',
+        nativeDecodeMs: e.meta?.result?.decodeMs ?? '',
+        nativeTransformMs: e.meta?.result?.transformMs ?? '',
+        nativeEncodeMs: e.meta?.result?.encodeMs ?? '',
+        bytesMB: e.meta?.result?.bytes ? Math.round(e.meta.result.bytes / 1024 / 1024 * 100) / 100 : '',
+        mime: e.meta?.result?.mime ?? '',
+        ext: e.meta?.result?.ext ?? '',
+      }))
+      .sort((a, b) => Number(b.registerMs || 0) - Number(a.registerMs || 0));
+
+    const saveRows = events
+      .filter(e => e.step === 'save:batch-result' || (e.step === 'invoke:ok' && e.meta?.command === 'save_images_to_existing_folder_by_keys'))
+      .map(e => ({
+        id: e.id,
+        op: e.op,
+        step: e.step,
+        batchIndex: e.meta?.batchIndex ?? '',
+        batchCount: e.meta?.batchCount ?? '',
+        keyCount: e.meta?.keyCount ?? e.meta?.result?.requestedCount ?? '',
+        savedCount: e.meta?.savedCount ?? e.meta?.result?.savedCount ?? '',
+        missingCount: e.meta?.missingCount ?? e.meta?.result?.missingCount ?? '',
+        failedCount: e.meta?.failedCount ?? e.meta?.result?.failedCount ?? '',
+        bytesMB: e.meta?.bytesMB ?? (e.meta?.result?.bytes ? Math.round(e.meta.result.bytes / 1024 / 1024 * 100) / 100 : ''),
+        ms: e.meta?.ms ?? e.dt ?? '',
+        error: e.meta?.error || '',
+      }));
+
+    const totals = {
+      renderCount: renderRows.length,
+      slowestRenderMs: renderRows[0]?.totalRenderMs ?? '',
+      renderMsTotal: Math.round(renderRows.reduce((n, r) => n + (Number(r.totalRenderMs) || 0), 0) * 100) / 100,
+      encodeMsTotal: Math.round(renderRows.reduce((n, r) => n + (Number(r.encodeMs) || 0), 0) * 100) / 100,
+      registerMsTotal: Math.round(registerRows.reduce((n, r) => n + (Number(r.registerMs) || 0), 0) * 100) / 100,
+      nativeTransformMsTotal: Math.round(registerRows.reduce((n, r) => n + (Number(r.nativeTransformMs) || 0), 0) * 100) / 100,
+      saveMsTotal: Math.round(saveRows.reduce((n, r) => n + (Number(r.ms) || 0), 0) * 100) / 100,
+    };
+
+    console.group('[Boardfish export] slow image report');
+    console.table([totals]);
+    console.table(renderRows);
+    console.table(registerRows);
+    console.table(saveRows);
+    console.groupEnd();
+    return { totals, renderRows, registerRows, saveRows, events: events.slice() };
+  }
+
   function status() {
     const last = events[events.length - 1];
     const batchResults = events.filter(e => e.step === 'save:batch-result');
@@ -1719,15 +2236,20 @@ const ExportDebug = (() => {
       failedCount: done?.meta?.failedCount ?? batchResults.reduce((n, e) => n + (Number(e.meta?.failedCount) || 0), 0),
       missingCount: done?.meta?.missingCount ?? batchResults.reduce((n, e) => n + (Number(e.meta?.missingCount) || 0), 0),
       bytesMB: done?.meta?.bytesMB ?? Math.round(batchResults.reduce((n, e) => n + (Number(e.meta?.bytesMB) || 0), 0) * 100) / 100,
+      uiText: massive?.progressUi?.currentText ?? '',
+      uiFirstNonZeroAtMs: massive?.progressUi?.firstNonZeroAtMs ?? '',
+      resolveProcessed: massive?.resolve?.processed ?? '',
+      resolveDurationMs: massive?.resolve?.durationMs ?? '',
+      saveDurationMs: massive?.save?.durationMs ?? '',
       error: last?.meta?.error || '',
     };
     console.table([out]);
     return out;
   }
 
-  function reset() { events.length = 0; }
+  function reset() { events.length = 0; massive = null; }
 
-  return { enable, disable, setVerbose, start, step, end, watch, invoke, dump, summary, phaseSummary, status, reset, get enabled() { return enabled; }, get events() { return events.slice(); } };
+  return { enable, disable, setVerbose, start, step, end, watch, invoke, startMassive, recordResolveStart, recordResolveProgress, recordResolveDone, recordResolve, recordSaveStart, recordSaveBatch, recordSaveDone, recordProgressUi, massiveReport, progressReport, dump, summary, phaseSummary, slowImageReport, status, reset, get enabled() { return enabled; }, get events() { return events.slice(); }, get massive() { return massive ? JSON.parse(JSON.stringify(massive)) : null; } };
 })();
 
 exposeDebug({ export: ExportDebug });
@@ -1887,8 +2409,18 @@ const ExportAllDiag = (() => {
 
   function mb(bytes) { return Math.round(bytes / 1024 / 1024 * 100) / 100; }
   function ms(t0)    { return Math.round((performance.now() - t0) * 10) / 10; }
+  function pushTop(list, row, scoreKey, limit) {
+    list.push(row);
+    list.sort((a, b) => Number(b[scoreKey] || 0) - Number(a[scoreKey] || 0));
+    if (list.length > limit) list.length = limit;
+  }
+  function pushSample(list, row, limit) {
+    if (list.length < limit) list.push(row);
+  }
 
-  async function run() {
+  async function run(options = {}) {
+    const sampleLimit = Math.max(1, Math.min(25, Number(options.sampleLimit) || 8));
+    const full = options.full === true;
     if (!window.__TAURI__) {
       console.warn('[exportAllDiag] Not inside Tauri — aborting.');
       return null;
@@ -1907,7 +2439,14 @@ const ExportAllDiag = (() => {
       'font-weight:bold');
 
     console.group('Phase 1: classify images without rendering');
-    const perImage = [];
+    const perImage = full ? [] : undefined;
+    const largestStored = [];
+    const missingSources = [];
+    const duplicateKeys = [];
+    const seenKeys = new Map();
+    let nativeRefCount = 0;
+    let dataUrlCount = 0;
+    let needsRenderCount = 0;
     let totalBytes = 0;
 
     for (let i = 0; i < imageObjs.length; i++) {
@@ -1917,11 +2456,19 @@ const ExportAllDiag = (() => {
       const bytes = imageStoreBytesEstimate(imageStore[obj.data?.imgKey]);
       const kb = Math.round(bytes / 1024 * 10) / 10;
       totalBytes += bytes;
+      if (needsRender) needsRenderCount++;
+      if (isNativeImageRef(imageStore[obj.data?.imgKey])) nativeRefCount++;
+      else if (typeof imageStore[obj.data?.imgKey] === 'string') dataUrlCount++;
+      else pushSample(missingSources, { index: i, objectId: obj.id, imgKey }, sampleLimit);
+      if (imgKey) {
+        const prev = seenKeys.get(imgKey) || 0;
+        if (prev === 1) pushSample(duplicateKeys, imgKey, sampleLimit);
+        seenKeys.set(imgKey, prev + 1);
+      }
 
       const row = { index: i, imgKey, needsRender, renderMs: 0, kb, ok: true, error: undefined };
-      perImage.push(row);
-      const style = row.ok ? '' : 'color:red';
-      console.log(`%c  [${i}] imgKey=${row.imgKey}  needsRender=${needsRender}  ${kb}KB  ok=${row.ok}`, style);
+      if (full) perImage.push(row);
+      pushTop(largestStored, { index: i, objectId: obj.id, imgKey, needsRender, storedMB: mb(bytes) }, 'storedMB', sampleLimit);
     }
 
     const totalMB = mb(totalBytes);
@@ -1930,6 +2477,18 @@ const ExportAllDiag = (() => {
     console.log(`%cEstimated stored payload: ${totalMB} MB | severity=${severity}`, severityStyle);
     if (severity === 'FATAL') console.error('[exportAllDiag] Payload almost certainly exceeds Tauri/WebView2 IPC limit on Windows');
     else if (severity === 'WARN') console.warn('[exportAllDiag] Payload is large — may intermittently hit IPC limits on Windows');
+    console.table([{
+      imageCount: imageObjs.length,
+      needsRenderCount,
+      passthroughCount: imageObjs.length - needsRenderCount,
+      nativeRefCount,
+      dataUrlCount,
+      missingSourceSamples: missingSources.length,
+      duplicateKeySamples: duplicateKeys.length,
+      totalMB,
+      severity,
+    }]);
+    console.table(largestStored);
     console.groupEnd();
 
     console.group('Phase 2: pick folder first');
@@ -1945,7 +2504,9 @@ const ExportAllDiag = (() => {
     console.log(`  pick_folder completed in ${pickMs}ms  ok=${pickOk}  picked=${!!folder}${pickErr ? '  ERR:'+pickErr : ''}`);
     console.groupEnd();
 
-    const keyProbe = [];
+    const keyProbe = full ? [] : undefined;
+    const keyProbeSlowest = [];
+    const keyProbeErrors = [];
     const tempKeys = [];
     let renderedCount = 0;
     let saveProbe = null;
@@ -1960,7 +2521,7 @@ const ExportAllDiag = (() => {
         let key = null, ok = false, err = null;
         try {
           if (needsRender) {
-            const dataUrl = await getRenderedImageDataUrl(obj);
+            const dataUrl = await getRenderedImageDataUrl(obj, null);
             if (dataUrl) {
               key = `__export_diag_tmp_${obj.id}`;
               tempKeys.push(key);
@@ -1977,9 +2538,15 @@ const ExportAllDiag = (() => {
           err = String(e);
         }
         const row = { index: i, imgKey, key, needsRender, ms: ms(t0), ok, error: err ?? '' };
-        keyProbe.push(row);
-        console.log(`  [${i}] imgKey=${imgKey} needsRender=${needsRender} key=${key || '-'} ${row.ms}ms ok=${ok}${err ? ' ERR:'+err : ''}`);
+        if (full) keyProbe.push(row);
+        pushTop(keyProbeSlowest, row, 'ms', sampleLimit);
+        if (err || !ok) pushSample(keyProbeErrors, row, sampleLimit);
+        if ((i + 1) % 50 === 0 || i === imageObjs.length - 1) {
+          console.log(`  resolved ${i + 1}/${imageObjs.length}; keys=${keys.length}; rendered=${renderedCount}; errors=${keyProbeErrors.length}`);
+        }
       }
+      console.table(keyProbeSlowest);
+      if (keyProbeErrors.length) console.table(keyProbeErrors);
       console.groupEnd();
 
       console.group('Phase 4: save picked folder by keys');
@@ -2006,17 +2573,29 @@ const ExportAllDiag = (() => {
       imageCount: imageObjs.length,
       totalStoredPayloadMB: totalMB,
       payloadSeverity: severity,
+      compact: !full,
       folderPickedBeforeKeyResolution: !!folder,
       pickProbe: { pickMs, pickOk, picked: !!folder, error: pickErr ?? '' },
       keyProbe,
+      keyProbeSlowest,
+      keyProbeErrors,
       renderedCount,
       tempKeyCount: tempKeys.length,
       saveProbe,
       perImage,
+      largestStored,
+      missingSources,
+      duplicateKeys,
     };
     console.group('Full report');
-    console.table(report.perImage);
-    console.table(report.keyProbe);
+    if (full) {
+      console.table(report.perImage);
+      console.table(report.keyProbe);
+    } else {
+      console.table(report.largestStored);
+      console.table(report.keyProbeSlowest);
+      if (report.keyProbeErrors.length) console.table(report.keyProbeErrors);
+    }
     if (report.saveProbe) console.table([report.saveProbe]);
     console.log('Full report → BoardfishDebug.exportAllDiag.last');
     console.groupEnd();
@@ -2540,7 +3119,7 @@ const MenuDebug = (() => {
       ctxDisplay: getComputedStyle(ctxMenu).display,
       objDisplay: getComputedStyle(objCtxMenu).display,
       shieldActive: openingShield.classList.contains('active'),
-      pasteShieldCount: _pasteShieldCount,
+      inputShieldCount: _inputShieldCount,
       boardOpening: _boardOpening,
       active: elementLabel(active),
       elementAtPointer: elementLabel(point),
@@ -2717,6 +3296,32 @@ function forceIslandTextTransparent() {
   PillDebug.log('forceIslandTextTransparent');
 }
 
+function startIslandBusyMsg(text) {
+  const token = ++_islAnimToken;
+  clearTimeout(_islMsgTimer);
+  clearTimeout(_islFadeTimer);
+  _islMsgActive = true;
+  islZoom.style.pointerEvents = 'none';
+  islZoom.style.cursor = 'default';
+  islZoom.style.color = 'rgba(255,255,255,0.5)';
+  islSetWidth(text);
+  islZoom.textContent = text;
+  PillDebug.samplePillAnimation('busyIslandMsg');
+
+  return {
+    update(nextText) {
+      if (token !== _islAnimToken) return;
+      islSetWidth(nextText);
+      islZoom.textContent = nextText;
+    },
+    done(finalMsg = null, duration = 1500, onRestore = null) {
+      if (token !== _islAnimToken) return;
+      if (finalMsg) showIslandMsg(finalMsg, duration, onRestore);
+      else restoreIslandZoom();
+    },
+  };
+}
+
 function waitForPillFrameReady({ stableFramesNeeded = 4, maxFrameGapMs = 34, minWaitMs = 120, timeoutMs = 1800 } = {}) {
   const start = performance.now();
   let lastFrame = start;
@@ -2838,6 +3443,7 @@ islZoom.addEventListener('transitioncancel', (event) => {
 const FONT_SIZE = 16;
 const LINE_H    = 24;
 const TEXT_PAD  = 4;
+const TEXT_DRAW_Y_OFFSET = (LINE_H - FONT_SIZE) / 2;
 const NEW_TEXT_EDIT_MIN_LINES = 3;
 const FONT      = `${FONT_SIZE}px 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif`;
 
@@ -2957,7 +3563,11 @@ function getPrefixWidths(text) {
 // ─── History delta tracking ───────────────────────────────────────────────────
 
 const _dirtyIds = new Set();
-function markDirty(id) { _dirtyIds.add(id); }
+function markDirty(id) {
+  const wasDirty = isDirty();
+  _dirtyIds.add(id);
+  if (!wasDirty) updateTitle();
+}
 
 // ─── Canvas resize ────────────────────────────────────────────────────────────
 
@@ -3079,7 +3689,7 @@ function syncAllTextAutoHeights() {
 // Per-line layout for the editing object (world coords).
 // Prefix widths keep caret positions aligned with rendered glyphs without
 // allocating one object per character.
-// Each entry: { text, startIndex, endIndex, nextStartIndex, y, prefixWidths }
+// Each entry: { text, startIndex, endIndex, nextStartIndex, y, textY, prefixWidths }
 function calculateTextLayout(obj) {
   const lines = getWrappedLines(obj);
   return lines.map((line, i) => {
@@ -3090,6 +3700,7 @@ function calculateTextLayout(obj) {
       endIndex: line.endIndex,
       nextStartIndex: line.nextStartIndex,
       y,
+      textY: y + TEXT_DRAW_Y_OFFSET,
       prefixWidths: getPrefixWidths(line.text),
     };
   });
@@ -3131,11 +3742,16 @@ function layoutHitTest(layout, wx, wy, obj) {
 function drawImageObj(context, obj, img) {
   const flipX = !!obj.data.flipX;
   const flipY = !!obj.data.flipY;
-  if (flipX || flipY) {
+  const rotation = ((obj.data.rotation || 0) % 360 + 360) % 360;
+  if (flipX || flipY || rotation) {
+    const sideways = rotation === 90 || rotation === 270;
+    const drawW = sideways ? obj.h : obj.w;
+    const drawH = sideways ? obj.w : obj.h;
     context.save();
-    context.translate(obj.x + (flipX ? obj.w : 0), obj.y + (flipY ? obj.h : 0));
+    context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
+    if (rotation) context.rotate((rotation * Math.PI) / 180);
     context.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-    context.drawImage(img, 0, 0, obj.w, obj.h);
+    context.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
     context.restore();
     return;
   }
@@ -3428,14 +4044,13 @@ function drawSingleObj(context, obj, counters = null) {
     context.fillStyle = '#ffffff';
     const lines = getWrappedLines(obj);
     for (let i = 0; i < lines.length; i++) {
-      context.fillText(lines[i].text, obj.x + TEXT_PAD, obj.y + TEXT_PAD + i * LINE_H);
+      context.fillText(lines[i].text, obj.x + TEXT_PAD, obj.y + TEXT_PAD + TEXT_DRAW_Y_OFFSET + i * LINE_H);
     }
     return true;
   } else if (obj.type === 'image') {
     const key = obj.data.imgKey;
     const bitmap = imageBitmapCache[key];
-    const failed = imageBitmapFailed.has(key);
-    const fullImg = bitmap || (failed ? imageCache[key] : null);
+    const fullImg = bitmap || imageCache[key] || null;
     const selected = fullImg ? selectImageSourceForDraw(key, obj, fullImg) : null;
     const img = selected?.source || null;
     if (isDrawableImageSource(img)) {
@@ -3473,11 +4088,10 @@ function drawSingleObj(context, obj, counters = null) {
       counters.lastMissingReason = !key ? 'missing-key'
         : !imageStore[key] ? 'missing-store'
           : !imageCache[key] ? 'missing-image-element'
-            : failed ? 'failed-but-not-drawable'
-              : !imageCache[key].complete ? 'not-complete'
-                : imageCache[key].naturalWidth <= 0 ? 'zero-natural-width'
-                  : !bitmap ? 'missing-bitmap'
-                    : 'unknown';
+            : !imageCache[key].complete ? 'not-complete'
+              : imageCache[key].naturalWidth <= 0 ? 'zero-natural-width'
+                : !bitmap ? 'missing-bitmap'
+                  : 'unknown';
     }
     return false;
   }
@@ -3561,14 +4175,14 @@ function drawBoard() {
             const x1 = o0 < line.text.length ? lineXAtOffset(line, obj, o0) : endX;
             const x2 = o1 < line.text.length ? lineXAtOffset(line, obj, o1) : endX;
             TextSelDebug._logDraw(line, selStart, selEnd, x1, x2);
-            ctx.fillRect(x1, line.y - (IS_WIN ? 5 : 1), x2 - x1, LINE_H);
+            ctx.fillRect(x1, line.y, x2 - x1, LINE_H);
           }
         }
       }
 
       // Text
       ctx.fillStyle = '#ffffff';
-      for (const line of layout) ctx.fillText(line.text, obj.x + TEXT_PAD, line.y);
+      for (const line of layout) ctx.fillText(line.text, obj.x + TEXT_PAD, line.textY);
 
       // Caret
       if (selStart === selEnd && _caretVisible) {
@@ -3583,7 +4197,7 @@ function drawBoard() {
           }
         }
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(cx, cy - (IS_WIN ? 5 : 1), 2 / zoom, LINE_H);
+        ctx.fillRect(cx, cy, 2 / zoom, LINE_H);
       }
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -3827,6 +4441,30 @@ function flipSelectedImages(axis) {
   ClipDebug.end(dbg, { historyIndex });
 }
 
+function rotateSelectedImages(dir) {
+  let rotated = false;
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj || obj.type !== 'image') continue;
+    const current = obj.data.rotation || 0;
+    obj.data.rotation = (current + (dir === 'cw' ? 90 : 270)) % 360;
+    const cx = obj.x + obj.w / 2;
+    const cy = obj.y + obj.h / 2;
+    const nextW = obj.h;
+    const nextH = obj.w;
+    obj.w = nextW;
+    obj.h = nextH;
+    obj.x = cx - nextW / 2;
+    obj.y = cy - nextH / 2;
+    markDirty(obj.id);
+    rotated = true;
+  }
+  if (!rotated) return;
+  invalidateOffscreen();
+  scheduleRender(true, true);
+  pushHistory(`rotate-image-${dir}`);
+}
+
 function isMultiSelected() {
   return selectedIds.size > 1;
 }
@@ -3912,31 +4550,37 @@ function storeImage(src) {
 }
 
 function imageNeedsRendering(obj) {
-  return !!(obj?.data?.flipX || obj?.data?.flipY);
+  return !!(obj?.data?.flipX || obj?.data?.flipY || obj?.data?.rotation);
 }
 
 function renderImageToCanvas(obj, sourceImg = null) {
+  const rotation = ((obj?.data?.rotation || 0) % 360 + 360) % 360;
   const dbg = ClipDebug.start('renderImageToCanvas', {
     id: obj?.id,
     imgKey: obj?.data?.imgKey,
     flipX: !!obj?.data?.flipX,
     flipY: !!obj?.data?.flipY,
+    rotation,
   });
   const img = sourceImg || imageCache[obj.data.imgKey];
   if (!img || !img.complete || !img.naturalWidth) {
     ClipDebug.end(dbg, { ready: false });
     return null;
   }
+  const sourceW = img.naturalWidth;
+  const sourceH = img.naturalHeight;
+  const sideways = rotation === 90 || rotation === 270;
   const tmp = document.createElement('canvas');
-  tmp.width = img.naturalWidth;
-  tmp.height = img.naturalHeight;
+  tmp.width = sideways ? sourceH : sourceW;
+  tmp.height = sideways ? sourceW : sourceH;
   const tctx = tmp.getContext('2d');
   const flipX = !!obj.data.flipX;
   const flipY = !!obj.data.flipY;
   tctx.save();
-  tctx.translate(flipX ? tmp.width : 0, flipY ? tmp.height : 0);
+  tctx.translate(tmp.width / 2, tmp.height / 2);
+  if (rotation) tctx.rotate((rotation * Math.PI) / 180);
   tctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-  tctx.drawImage(img, 0, 0);
+  tctx.drawImage(img, -sourceW / 2, -sourceH / 2, sourceW, sourceH);
   tctx.restore();
   ClipDebug.end(dbg, { ready: true, width: tmp.width, height: tmp.height });
   return tmp;
@@ -3952,22 +4596,114 @@ function canvasToPngBlob(canvas) {
   });
 }
 
-async function getRenderedImageDataUrl(obj) {
-  const src = await ensureImageDataUrl(obj.data.imgKey);
-  if (!src || !imageNeedsRendering(obj)) return src;
-  let img = imageCache[obj.data.imgKey];
-  if (!img || !img.complete || !img.naturalWidth) {
-    img = await loadImageElement(src).catch(() => null);
+async function getRenderedImageDataUrl(obj, dbg = null) {
+  const imgKey = obj?.data?.imgKey;
+  const rotation = ((obj?.data?.rotation || 0) % 360 + 360) % 360;
+  const baseMeta = {
+    objectId: obj?.id,
+    imgKey,
+    flipX: !!obj?.data?.flipX,
+    flipY: !!obj?.data?.flipY,
+    rotation,
+    needsRender: imageNeedsRendering(obj),
+    storedKind: isNativeImageRef(imageStore[imgKey]) ? 'native-ref' : typeof imageStore[imgKey],
+    storedMB: Math.round(imageStoreBytesEstimate(imageStore[imgKey]) / 1024 / 1024 * 100) / 100,
+  };
+  const totalStart = performance.now();
+  const sourceStart = performance.now();
+  const src = await ensureImageDataUrl(imgKey);
+  const sourceMs = performance.now() - sourceStart;
+  const sourceKind = baseMeta.storedKind === 'native-ref'
+    ? 'hydrated-native-ref'
+    : (typeof imageStore[imgKey] === 'string' ? 'data-url' : baseMeta.storedKind);
+  if (!src || !imageNeedsRendering(obj)) {
+    ExportDebug.step(dbg, 'render:done', {
+      ...baseMeta,
+      sourceKind,
+      sourceMs,
+      totalRenderMs: performance.now() - totalStart,
+      hasDataUrl: !!src,
+      passthrough: true,
+      dataUrlLen: src?.length || 0,
+      dataUrlMB: Math.round((src?.length || 0) / 1024 / 1024 * 100) / 100,
+    });
+    return src;
   }
+
+  const loadStart = performance.now();
+  const img = await loadImageElement(src).catch((err) => {
+    ExportDebug.step(dbg, 'render:image-load-error', { ...baseMeta, sourceMs, error: String(err) });
+    return null;
+  });
+  const loadMs = performance.now() - loadStart;
+  if (!img) {
+    ExportDebug.step(dbg, 'render:done', {
+      ...baseMeta,
+      sourceKind,
+      sourceMs,
+      loadMs,
+      totalRenderMs: performance.now() - totalStart,
+      hasDataUrl: false,
+      ok: false,
+      error: 'image load failed',
+    });
+    return '';
+  }
+
+  const drawStart = performance.now();
   const canvas = renderImageToCanvas(obj, img);
-  return canvas ? canvas.toDataURL('image/png') : '';
+  const drawMs = performance.now() - drawStart;
+  if (!canvas) {
+    ExportDebug.step(dbg, 'render:done', {
+      ...baseMeta,
+      sourceKind,
+      sourceMs,
+      loadMs,
+      drawMs,
+      totalRenderMs: performance.now() - totalStart,
+      hasDataUrl: false,
+      ok: false,
+      error: 'canvas render failed',
+    });
+    return '';
+  }
+
+  const encodeStart = performance.now();
+  const dataUrl = canvas.toDataURL('image/png');
+  const encodeMs = performance.now() - encodeStart;
+  ExportDebug.step(dbg, 'render:done', {
+    ...baseMeta,
+    sourceKind,
+    sourceMs,
+    loadMs,
+    drawMs,
+    encodeMs,
+    totalRenderMs: performance.now() - totalStart,
+    width: canvas.width,
+    height: canvas.height,
+    megapixels: Math.round(canvas.width * canvas.height / 10000) / 100,
+    hasDataUrl: !!dataUrl,
+    ok: !!dataUrl,
+    dataUrlLen: dataUrl.length,
+    dataUrlMB: Math.round(dataUrl.length / 1024 / 1024 * 100) / 100,
+  });
+  return dataUrl;
 }
 
-function loadImageElement(src) {
+function loadImageElement(src, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('image load failed'));
+    let settled = false;
+    const done = (fn) => (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timeout = () => reject(new Error('image load timed out'));
+    const timer = setTimeout(() => done(timeout)(), timeoutMs);
+    img.onload = done(() => resolve(img));
+    img.onerror = done(() => reject(new Error('image load failed')));
     img.src = src;
   });
 }
@@ -3991,7 +4727,10 @@ function scheduleImageReadyRender(source = 'image-load') {
 
 async function materializeImageAssets(keys, dbg = null) {
   const pending = keys.filter((key) => isNativeImageRef(imageStore[key]) && !imageAssetUrlCache[key]);
-  if (!pending.length || !window.__TAURI__) return 0;
+  if (!pending.length || !window.__TAURI__) {
+    OpenDebug.step(dbg, 'materialize-image-assets:skip', { requested: keys.length, pending: pending.length, tauri: !!window.__TAURI__ });
+    return 0;
+  }
   const promiseKey = pending.slice().sort().join('|');
   const existing = imageAssetMaterializePromises.get(promiseKey);
   if (existing) return existing;
@@ -4004,14 +4743,18 @@ async function materializeImageAssets(keys, dbg = null) {
   )
     .then((entries) => {
       let count = 0;
+      let skipped = 0;
       if (generation !== _imageStoreGeneration) return 0;
       for (const entry of entries || []) {
         const key = entry.img_key || entry.imgKey;
-        if (!key || !entry.path || !isNativeImageRef(imageStore[key])) continue;
+        if (!key || !entry.path || !isNativeImageRef(imageStore[key])) {
+          skipped++;
+          continue;
+        }
         imageAssetUrlCache[key] = convertTauriFileSrc(entry.path);
         count++;
       }
-      OpenDebug.step(dbg, 'materialize-image-assets', { requested: pending.length, count });
+      OpenDebug.step(dbg, 'materialize-image-assets', { requested: pending.length, returned: entries?.length || 0, count, skipped });
       return count;
     })
     .finally(() => imageAssetMaterializePromises.delete(promiseKey));
@@ -4023,7 +4766,10 @@ async function ensureImageDisplaySrc(key, dbg = null) {
   if (imageAssetUrlCache[key]) return { src: imageAssetUrlCache[key], source: 'asset', dataUrlLen: 0 };
   const stored = imageStore[key];
   if (typeof stored === 'string') return { src: stored, source: 'data-url', dataUrlLen: stored.length };
-  if (!isNativeImageRef(stored)) return { src: '', source: 'missing', dataUrlLen: 0 };
+  if (!isNativeImageRef(stored)) {
+    OpenDebug.step(dbg, 'ensure-image-display-src:missing', { imgKey: key, kind: imageRefKind(stored), hasStore: !!stored });
+    return { src: '', source: 'missing', dataUrlLen: 0 };
+  }
   try {
     await materializeImageAssets([key], dbg);
     if (imageAssetUrlCache[key]) return { src: imageAssetUrlCache[key], source: 'asset', dataUrlLen: 0 };
@@ -4461,19 +5207,55 @@ const _multiSelStyleState = new WeakMap();
 const _rubberBandStyleState = { display: '', left: '', top: '', width: '', height: '' };
 let _rubberBandDragActive = false;
 
-function blockShieldRightClick(e) {
-  if (!isBoardInputBlocked()) return;
-  const isRightClick = e.button === 2 || e.type === 'contextmenu';
-  if (!isRightClick) return;
-  e.preventDefault();
+function beginRubberBandDrag() {
+  if (_rubberBandDragActive) return;
+  _rubberBandDragActive = true;
+  _rubberBandShieldRelease = acquireInputShield('pointermove', 'pointerup:0', 'mousemove', 'mouseup:0');
+}
+
+function finishRubberBandDrag() {
+  if (!_rubberBandDragActive) return;
+  _rubberBandDragActive = false;
+  if (_rubberBandShieldRelease) {
+    _rubberBandShieldRelease();
+    _rubberBandShieldRelease = null;
+  }
+}
+
+let _rubberBandShieldRelease = null;
+
+function inputNameFromEvent(e) {
+  if (e.type === 'keydown' || e.type === 'keyup') {
+    return e.key ? `key:${e.key.toLowerCase()}` : e.type;
+  }
+  return e.type;
+}
+
+function isUnsavedDialogOpen() {
+  return !!document.getElementById('dialog-overlay')?.classList.contains('show');
+}
+
+function isShieldInputAllowed(e) {
+  if (isUnsavedDialogOpen()) return true;
+  if (_boardOpening) return false;
+  if (_inputShieldStack.length === 0) return true;
+  const input = inputNameFromEvent(e);
+  const buttonInput = typeof e.button === 'number' ? `${e.type}:${e.button}` : '';
+  return _inputShieldStack.every(({ allow }) => (
+    allow.has(input) || (buttonInput && allow.has(buttonInput))
+  ));
+}
+
+function blockShieldInput(e) {
+  if (isShieldInputAllowed(e)) return;
+  if (e.cancelable) e.preventDefault();
   e.stopPropagation();
 }
 
-document.addEventListener('pointerdown', blockShieldRightClick, true);
-document.addEventListener('mousedown', blockShieldRightClick, true);
-document.addEventListener('mouseup', blockShieldRightClick, true);
-document.addEventListener('auxclick', blockShieldRightClick, true);
-document.addEventListener('contextmenu', blockShieldRightClick, true);
+const INPUT_SHIELD_EVENT_OPTIONS = { capture: true, passive: false };
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu', 'wheel', 'keydown', 'keyup', 'beforeinput', 'input', 'paste', 'drop', 'dragover']) {
+  document.addEventListener(type, blockShieldInput, INPUT_SHIELD_EVENT_OPTIONS);
+}
 
 function _setStyleIfChanged(el, prop, value, state) {
   if (state[prop] === value) return;
@@ -5035,18 +5817,58 @@ function addText(wx, wy, content = '') {
   if (!content) enterEdit(obj.id);
 }
 
-let _pasteShieldCount = 0;
-function showPasteShield() {
-  _pasteShieldCount++;
-  openingShield.classList.add('active');
+let _inputShieldCount = 0;
+const _inputShieldStack = [];
+const _inputShieldReleases = [];
+
+function updateInputShieldVisual() {
+  if (isUnsavedDialogOpen()) openingShield.classList.remove('active');
+  else if (_boardOpening || _inputShieldStack.some((token) => token.visual !== false)) openingShield.classList.add('active');
+  else openingShield.classList.remove('active');
 }
-function hidePasteShield() {
-  _pasteShieldCount = Math.max(0, _pasteShieldCount - 1);
-  if (_pasteShieldCount === 0 && !_boardOpening) openingShield.classList.remove('active');
+
+function acquireInputShield(...allowedInputs) {
+  let options = {};
+  if (
+    allowedInputs.length &&
+    allowedInputs[allowedInputs.length - 1] &&
+    typeof allowedInputs[allowedInputs.length - 1] === 'object' &&
+    !Array.isArray(allowedInputs[allowedInputs.length - 1])
+  ) {
+    options = allowedInputs.pop();
+  }
+  const token = {
+    allow: new Set(allowedInputs.flat().filter(Boolean)),
+    visual: options.visual !== false,
+    released: false,
+  };
+  _inputShieldStack.push(token);
+  _inputShieldCount = _inputShieldStack.length;
+  updateInputShieldVisual();
+  return () => {
+    if (token.released) return;
+    token.released = true;
+    const index = _inputShieldStack.indexOf(token);
+    if (index !== -1) _inputShieldStack.splice(index, 1);
+    _inputShieldCount = _inputShieldStack.length;
+    updateInputShieldVisual();
+  };
+}
+
+function showInputShield() {
+  _inputShieldReleases.push(acquireInputShield());
+}
+function hideInputShield() {
+  const release = _inputShieldReleases.pop();
+  if (release) release();
+  else {
+    _inputShieldCount = Math.max(0, _inputShieldCount - 1);
+    updateInputShieldVisual();
+  }
 }
 
 function isBoardInputBlocked() {
-  return _boardOpening || _pasteShieldCount > 0 || openingShield.classList.contains('active');
+  return _boardOpening || _inputShieldStack.length > 0 || openingShield.classList.contains('active');
 }
 
 function beginBulkImageInsert() {
@@ -5075,7 +5897,7 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options
     const dbg = ViewportDebug.start('addImage', { src, cx, cy, exactSize, existingImgKey });
     const t0 = performance.now();
     ViewportDebug.count('imageAdds');
-    if (!_boardOpening) showPasteShield();
+    if (!_boardOpening) showInputShield();
     const img = new Image();
     img.onload = () => {
       ViewportDebug.step(dbg, 'load', { width: img.naturalWidth, height: img.naturalHeight, ms: performance.now() - t0 });
@@ -5120,14 +5942,14 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options
       const total = performance.now() - t0;
       ViewportDebug.max('maxImageAddMs', total);
       ViewportDebug.end(dbg, { id: obj.id, imgKey, total });
-      if (!_boardOpening) hidePasteShield();
+      if (!_boardOpening) hideInputShield();
       resolve(obj);
     };
     img.onerror = () => {
       const total = performance.now() - t0;
       ViewportDebug.max('maxImageAddMs', total);
       ViewportDebug.end(dbg, { error: 'image load failed', total });
-      if (!_boardOpening) hidePasteShield();
+      if (!_boardOpening) hideInputShield();
       resolve(null);
     };
     img.src = src;
@@ -5447,8 +6269,7 @@ canvas.addEventListener('mousedown', (e) => {
   if (!obj) {
     if (!additive) deselectAll();
     const rbStartX = e.clientX, rbStartY = e.clientY;
-    _rubberBandDragActive = true;
-    showPasteShield();
+    beginRubberBandDrag();
     let rbActive = false;
     function onRbMove(ev) {
       const dx = ev.clientX - rbStartX, dy = ev.clientY - rbStartY;
@@ -5465,8 +6286,7 @@ canvas.addEventListener('mousedown', (e) => {
     function onRbUp(ev) {
       document.removeEventListener('mousemove', onRbMove);
       document.removeEventListener('mouseup', onRbUp);
-      _rubberBandDragActive = false;
-      hidePasteShield();
+      finishRubberBandDrag();
       _setStyleIfChanged(rubberBand, 'display', 'none', _rubberBandStyleState);
       if (!rbActive) return;
       const x1 = Math.min(rbStartX, ev.clientX), y1 = Math.min(rbStartY, ev.clientY);
@@ -5652,16 +6472,17 @@ function menuCommandFromButton(button) {
     case 'btn-save': return () => { closeCtxMenu('command:save'); saveBoard(); };
     case 'btn-save-as': return () => { closeCtxMenu('command:save-as'); saveBoardAs(); };
     case 'btn-open': return () => { closeCtxMenu('command:open'); openBoard(); };
-    case 'btn-export-all-images': return () => { closeCtxMenu('command:export-all-images'); showPasteShield(); exportAllImages(); };
+    case 'btn-export-all-images': return () => { closeCtxMenu('command:export-all-images'); showInputShield(); exportAllImages(); };
     case 'btn-export-all-text': return () => { closeCtxMenu('command:export-all-text'); exportAllText(); };
     case 'obj-btn-copy': return () => { closeObjCtxMenu('command:copy'); copySelected(); };
     case 'obj-btn-delete': return () => { closeObjCtxMenu('command:delete'); deleteSelected(); };
     case 'obj-btn-duplicate': return () => { closeObjCtxMenu('command:duplicate'); duplicateSelected(); };
     case 'obj-btn-move-to-back': return () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); };
-    case 'obj-btn-flip-horizontal': return () => { closeObjCtxMenu('command:flip-horizontal'); flipSelectedImages('x'); };
-    case 'obj-btn-flip-vertical': return () => { closeObjCtxMenu('command:flip-vertical'); flipSelectedImages('y'); };
+    case 'obj-btn-flip-horizontal': return () => { flipSelectedImages('x'); };
+    case 'obj-btn-flip-vertical': return () => { flipSelectedImages('y'); };
+    case 'obj-btn-rotate': return () => { rotateSelectedImages('cw'); };
     case 'obj-btn-save-image': return () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); };
-    case 'obj-btn-save-images': return () => { closeObjCtxMenu('command:save-images'); showPasteShield(); saveSelectedImages(); };
+    case 'obj-btn-save-images': return () => { closeObjCtxMenu('command:save-images'); showInputShield(); saveSelectedImages(); };
     default: return null;
   }
 }
@@ -5726,6 +6547,7 @@ function updateObjMenuActions() {
   if (imageActionsSep) imageActionsSep.style.display = imageCount >= 1 ? 'block' : 'none';
   if (flipHorizontalBtn) flipHorizontalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
   if (flipVerticalBtn) flipVerticalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
+  if (rotateBtn) rotateBtn.style.display = imageCount >= 1 ? 'block' : 'none';
   if (saveImageBtn) saveImageBtn.style.display = imageCount === 1 ? 'block' : 'none';
   if (saveImagesBtn) saveImagesBtn.style.display = imageCount >= 2 ? 'block' : 'none';
   if (exportSep) exportSep.style.display = imageCount >= 1 ? 'block' : 'none';
@@ -5855,15 +6677,15 @@ async function insertDataUrlImage(dataUrl, x, y, dbg, options = {}) {
     deferHistory: options.deferHistory,
     suppressProgressRender: options.suppressProgressRender,
   });
-  if (!options.holdShield) hidePasteShield();
+  if (!options.holdShield) hideInputShield();
   const obj = await addPromise;
-  if (!options.holdShield) showPasteShield();
+  if (!options.holdShield) showInputShield();
   InsertDebug.end(dbg, { added: !!obj, ...(options.endMeta || {}) });
   return obj;
 }
 
 async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {}) {
-  showPasteShield();
+  showInputShield();
   try {
     ClipDebug.step(dbg, 'paste-image:add-start', { path, imgKey });
     const obj = await addImage(dataUrl, x, y, false, imgKey);
@@ -5883,7 +6705,7 @@ async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {})
     });
     return obj;
   } finally {
-    hidePasteShield();
+    hideInputShield();
   }
 }
 
@@ -5893,7 +6715,7 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
   let added = 0;
   const readyPromises = [];
   const bulk = files.length > 1;
-  showPasteShield();
+  showInputShield();
   if (bulk) {
     beginBulkImageInsert();
     InsertDebug.step(dbg, 'bulk:start', { source, fileCount: files.length });
@@ -5935,7 +6757,7 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
       const historyAdded = finishBulkImageInsert({ pushHistoryEntry: added > 0 });
       InsertDebug.step(dbg, 'bulk:end', { source, added, historyAdded });
     }
-    hidePasteShield();
+    hideInputShield();
     InsertDebug.end(dbg, { source, fileCount: files.length, added });
   }
 }
@@ -5971,6 +6793,10 @@ document.getElementById('obj-btn-flip-horizontal').addEventListener('click', () 
 
 document.getElementById('obj-btn-flip-vertical').addEventListener('click', () => {
   runMenuCommand(document.getElementById('obj-btn-flip-vertical'), 'click');
+});
+
+document.getElementById('obj-btn-rotate').addEventListener('click', () => {
+  runMenuCommand(document.getElementById('obj-btn-rotate'), 'click');
 });
 
 document.getElementById('obj-btn-save-image').addEventListener('click', () => {
@@ -6038,7 +6864,7 @@ async function insertNativeImagePaths(paths, x, y, source = 'native-drop') {
   const readyPromises = [];
   const imagePaths = paths.filter((path) => /\.(png|jpe?g)$/i.test(path));
   const bulk = imagePaths.length > 1;
-  showPasteShield();
+  showInputShield();
   if (bulk) {
     beginBulkImageInsert();
     InsertDebug.step(dbg, 'bulk:start', { source, fileCount: imagePaths.length });
@@ -6082,7 +6908,7 @@ async function insertNativeImagePaths(paths, x, y, source = 'native-drop') {
       const historyAdded = finishBulkImageInsert({ pushHistoryEntry: added > 0 });
       InsertDebug.step(dbg, 'bulk:end', { source, fileCount: imagePaths.length, added, historyAdded });
     }
-    hidePasteShield();
+    hideInputShield();
     InsertDebug.end(dbg, { source, fileCount: imagePaths.length, droppedFileCount: paths.length, added });
   }
 }
@@ -6104,10 +6930,11 @@ let savedHistoryIndex = -1;
 let currentFilePath = null;
 
 function isDirty() {
-  return objects.length > 0 && historyIndex !== savedHistoryIndex;
+  return objects.length > 0 && (historyIndex !== savedHistoryIndex || _dirtyIds.size > 0);
 }
 
 function markSaved() {
+  _dirtyIds.clear();
   savedHistoryIndex = historyIndex;
   updateTitle();
 }
@@ -6117,7 +6944,10 @@ function updateTitle() {
   const name = currentFilePath
     ? currentFilePath.split(/[\\/]/).pop().replace(/\.bf$/i, '')
     : 'Untitled';
-  window.__TAURI__.core.invoke('set_title', { title: `Boardfish — ${name}` });
+  const dirtyIndicator = isDirty() ? ' •' : '';
+  const title = `Boardfish — ${name}${dirtyIndicator}`;
+  document.title = title;
+  window.__TAURI__.core.invoke('set_title', { title });
 }
 
 
@@ -6128,6 +6958,7 @@ let _dialogResolve = null;
 
 function _dialogClose(result) {
   dialogOverlay.classList.remove('show');
+  updateInputShieldVisual();
   const r = _dialogResolve;
   _dialogResolve = null;
   if (r) r(result);
@@ -6142,6 +6973,7 @@ function showUnsavedDialog() {
   return new Promise((resolve) => {
     _dialogResolve = resolve;
     dialogOverlay.classList.add('show');
+    updateInputShieldVisual();
   });
 }
 
@@ -6208,10 +7040,18 @@ function getBoardOpenMetrics(data) {
   let imageStoreBytes = 0;
   let largestImageKey = '';
   let largestImageBytes = 0;
+  let nativeRefs = 0;
+  let manifestRefs = 0;
+  let dataUrlRefs = 0;
+  let otherRefs = 0;
   for (const [key, src] of Object.entries(data?.imageStore || {})) {
     imageCount++;
     const bytes = imageStoreBytesEstimate(src);
     imageStoreBytes += bytes;
+    if (isNativeImageRef(src)) nativeRefs++;
+    else if (typeof src === 'string') dataUrlRefs++;
+    else if (src && typeof src === 'object' && (src.path || src.mime || src.ext)) manifestRefs++;
+    else otherRefs++;
     if (bytes > largestImageBytes) {
       largestImageBytes = bytes;
       largestImageKey = key;
@@ -6225,6 +7065,72 @@ function getBoardOpenMetrics(data) {
     imageStoreBytes,
     largestImageKey,
     largestImageBytes,
+    nativeRefs,
+    manifestRefs,
+    dataUrlRefs,
+    otherRefs,
+  };
+}
+
+function imageRefKind(src) {
+  if (isNativeImageRef(src)) return 'native';
+  if (typeof src === 'string') return src.startsWith('data:') ? 'data-url' : 'string';
+  if (src && typeof src === 'object' && (src.path || src.mime || src.ext)) return 'manifest';
+  if (src == null) return 'missing';
+  return typeof src;
+}
+
+function getImageStoreOpenDebugSample(limit = 12) {
+  const rows = [];
+  for (const [key, src] of Object.entries(imageStore)) {
+    rows.push({
+      key,
+      kind: imageRefKind(src),
+      native: !!src?.native,
+      path: typeof src?.path === 'string' ? src.path : '',
+      mime: typeof src?.mime === 'string' ? src.mime : '',
+      ext: typeof src?.ext === 'string' ? src.ext : '',
+      bytes: src?.bytes ?? '',
+      cachedImage: !!imageCache[key],
+      assetUrl: !!imageAssetUrlCache[key],
+      bitmap: !!imageBitmapCache[key],
+      bitmapFailed: imageBitmapFailed.has(key),
+    });
+    if (rows.length >= limit) break;
+  }
+  return rows;
+}
+
+function getOpenImageRuntimeMetrics() {
+  let nativeRefs = 0;
+  let manifestRefs = 0;
+  let dataUrlRefs = 0;
+  let otherRefs = 0;
+  let cachedImages = 0;
+  let assetUrls = 0;
+  let bitmaps = 0;
+  let bitmapFailures = 0;
+  for (const [key, src] of Object.entries(imageStore)) {
+    const kind = imageRefKind(src);
+    if (kind === 'native') nativeRefs++;
+    else if (kind === 'manifest') manifestRefs++;
+    else if (kind === 'data-url' || kind === 'string') dataUrlRefs++;
+    else otherRefs++;
+    if (imageCache[key]) cachedImages++;
+    if (imageAssetUrlCache[key]) assetUrls++;
+    if (imageBitmapCache[key]) bitmaps++;
+    if (imageBitmapFailed.has(key)) bitmapFailures++;
+  }
+  return {
+    imageCount: Object.keys(imageStore).length,
+    nativeRefs,
+    manifestRefs,
+    dataUrlRefs,
+    otherRefs,
+    cachedImages,
+    assetUrls,
+    bitmaps,
+    bitmapFailures,
   };
 }
 
@@ -6281,8 +7187,10 @@ async function invokeReadBoard(path, dbg) {
   const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
   const result = await OpenDebug.invoke(dbg, 'read_board', { path }, { path });
   if (frameProbe) frameProbe();
-  if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug });
-  return result?.board || result;
+  const board = result?.board || result;
+  if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...getBoardOpenMetrics(board) });
+  OpenDebug.step(dbg, 'read-board-shape', getBoardOpenMetrics(board));
+  return board;
 }
 
 function scheduleOpenFrameProbe(dbg, label) {
@@ -6314,28 +7222,37 @@ function objIntersectsBounds(obj, b) {
 function getVisibleImageKeys(limit = Infinity) {
   const b = getVisibleWorldBounds();
   const keys = [];
+  const skipped = { nonImage: 0, outside: 0, missingKey: 0, nonNative: 0, cached: 0 };
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
-    if (obj.type !== 'image') continue;
-    if (!objIntersectsBounds(obj, b)) continue;
+    if (obj.type !== 'image') { skipped.nonImage++; continue; }
+    if (!objIntersectsBounds(obj, b)) { skipped.outside++; continue; }
     const key = obj.data.imgKey;
-    if (!isNativeImageRef(imageStore[key]) || imageCache[key]) continue;
+    if (!key || !imageStore[key]) { skipped.missingKey++; continue; }
+    if (!isNativeImageRef(imageStore[key])) { skipped.nonNative++; continue; }
+    if (imageCache[key]) { skipped.cached++; continue; }
     keys.push(key);
     if (keys.length >= limit) break;
   }
+  getVisibleImageKeys.lastDebug = { visibleBounds: b, selected: keys.length, skipped };
   return keys;
 }
+getVisibleImageKeys.lastDebug = null;
 
 function getPendingNativeImageKeys(limit = Infinity, exclude = new Set()) {
   const keys = [];
+  const skipped = { excluded: 0, nonNative: 0, cached: 0 };
   for (const key of Object.keys(imageStore)) {
-    if (exclude.has(key)) continue;
-    if (!isNativeImageRef(imageStore[key]) || imageCache[key]) continue;
+    if (exclude.has(key)) { skipped.excluded++; continue; }
+    if (!isNativeImageRef(imageStore[key])) { skipped.nonNative++; continue; }
+    if (imageCache[key]) { skipped.cached++; continue; }
     keys.push(key);
     if (keys.length >= limit) break;
   }
+  getPendingNativeImageKeys.lastDebug = { selected: keys.length, skipped };
   return keys;
 }
+getPendingNativeImageKeys.lastDebug = null;
 
 async function hydrateImageForDisplay(key, dbg = null) {
   if (imageCache[key] || !isNativeImageRef(imageStore[key])) return false;
@@ -6343,9 +7260,18 @@ async function hydrateImageForDisplay(key, dbg = null) {
   const fetchStart = performance.now();
   const display = await ensureImageDisplaySrc(key, dbg);
   const fetchMs = performance.now() - fetchStart;
-  if (!display.src) return false;
+  if (!display.src) {
+    OpenDebug.step(dbg, 'hydrate-image:skip', { imgKey: key, reason: 'no-display-src', storeKind: imageRefKind(imageStore[key]) });
+    return false;
+  }
   const loadStart = performance.now();
-  const img = await loadImageElement(display.src);
+  let img;
+  try {
+    img = await loadImageElement(display.src);
+  } catch (err) {
+    OpenDebug.step(dbg, 'hydrate-image:load-error', { imgKey: key, source: display.source, error: String(err), srcPrefix: String(display.src).slice(0, 80) });
+    throw err;
+  }
   const loadMs = performance.now() - loadStart;
   imageCache[key] = img;
   let bitmapMs = 0;
@@ -6355,8 +7281,9 @@ async function hydrateImageForDisplay(key, dbg = null) {
     imageBitmapCache[key] = await createImageBitmap(img);
     bitmapMs = performance.now() - bitmapStart;
     bitmapReady = true;
-  } catch {
+  } catch (err) {
     imageBitmapFailed.add(key);
+    OpenDebug.step(dbg, 'hydrate-image:bitmap-error', { imgKey: key, source: display.source, error: String(err), complete: !!img?.complete, naturalW: img?.naturalWidth || 0, naturalH: img?.naturalHeight || 0 });
   }
   OpenDebug.step(dbg, 'hydrate-image', {
     imgKey: key,
@@ -6372,7 +7299,7 @@ async function hydrateImageForDisplay(key, dbg = null) {
 }
 
 async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDebug.hydrationConcurrency) {
-  OpenDebug.step(dbg, `${label}:start`, { count: keys.length, concurrency });
+  OpenDebug.step(dbg, `${label}:start`, { count: keys.length, concurrency, ...getOpenImageRuntimeMetrics() });
   const t0 = performance.now();
   await materializeImageAssets(keys, dbg).catch((err) => {
     OpenDebug.step(dbg, `${label}:materialize-error`, { error: String(err) });
@@ -6391,13 +7318,14 @@ async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDeb
   }
   const workerCount = Math.min(concurrency, keys.length);
   await Promise.all(Array.from({ length: workerCount }, worker));
-  OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0 });
+  OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0, ...getOpenImageRuntimeMetrics() });
   if (hydrated) invalidateOffscreen();
   return hydrated;
 }
 
 async function hydrateVisibleImagesForOpen(dbg = null) {
   const keys = getVisibleImageKeys();
+  OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: keys.length, ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() });
   await hydrateImageKeysWithLimit(keys, dbg, 'hydrate-visible', OpenDebug.hydrationConcurrency);
   return keys;
 }
@@ -6408,6 +7336,7 @@ async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch
 
 async function hydrateAllImagesForOpen(dbg = null) {
   const keys = getPendingNativeImageKeys();
+  OpenDebug.step(dbg, 'hydrate-all:candidates', { count: keys.length, ...(getPendingNativeImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() });
   return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
 }
 
@@ -6512,7 +7441,8 @@ function applyBoardData(data, options = {}) {
   } finally {
     _skipImageSourceRegistration = false;
   }
-  OpenDebug.step(dbg, 'cacheImage:start-all', { ms: performance.now() - imageStart, sourcesCached, imageCount: Object.keys(imageStore).length });
+  OpenDebug.step(dbg, 'cacheImage:start-all', { ms: performance.now() - imageStart, sourcesCached, ...getOpenImageRuntimeMetrics() });
+  OpenDebug.step(dbg, 'image-store-sample', { sample: getImageStoreOpenDebugSample() });
 
   const stateStart = performance.now();
   if (editingId) exitEdit();
@@ -6559,21 +7489,26 @@ function applyBoardData(data, options = {}) {
 async function saveBoardAs() {
   if (!window.__TAURI__) { alert('Save requires the desktop app.'); return false; }
   const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
+  let busyPill = null;
+  const releaseInputShield = acquireInputShield();
   try {
     const defaultName = currentFilePath
       ? currentFilePath.split(/[\\/]/).pop()
       : 'board.bf';
     const filePath = await SaveDebug.invoke(dbg, 'save_file_dialog', { defaultName }, { defaultName });
-    if (!filePath) { SaveDebug.end(dbg, { cancelled: true }); return false; }
+    if (!filePath) { SaveDebug.end(dbg, { cancelled: true }); releaseInputShield(); return false; }
+    busyPill = startIslandBusyMsg('Saving');
     await invokeSaveBoard(filePath, dbg);
     currentFilePath = filePath;
     SaveDebug.step(dbg, 'markSaved:start');
     markSaved();
     SaveDebug.step(dbg, 'markSaved:end');
-    showIslandMsg('Saved', 1500);
+    busyPill.done('Saved', 1500, releaseInputShield);
     SaveDebug.end(dbg, { saved: true, path: filePath });
     return true;
   } catch (err) {
+    if (busyPill) busyPill.done();
+    releaseInputShield();
     console.error('Save failed:', err);
     SaveDebug.end(dbg, { saved: false, error: String(err) });
     return false;
@@ -6584,15 +7519,19 @@ async function saveBoard() {
   if (currentFilePath) {
     if (!window.__TAURI__) return false;
     const dbg = SaveDebug.start('saveBoard', { path: currentFilePath, objectCount: objects.length });
+    const releaseInputShield = acquireInputShield();
+    const busyPill = startIslandBusyMsg('Saving');
     try {
       await invokeSaveBoard(currentFilePath, dbg);
       SaveDebug.step(dbg, 'markSaved:start');
       markSaved();
       SaveDebug.step(dbg, 'markSaved:end');
-      showIslandMsg('Saved', 1500);
+      busyPill.done('Saved', 1500, releaseInputShield);
       SaveDebug.end(dbg, { saved: true, path: currentFilePath });
       return true;
     } catch (err) {
+      busyPill.done();
+      releaseInputShield();
       console.error('Save failed:', err);
       SaveDebug.end(dbg, { saved: false, error: String(err) });
       return false;
@@ -6974,19 +7913,18 @@ async function copySelected() {
           { imgKey, flipX, flipY, dataUrl: src }
         );
       };
-      showIslandMsg('Copying');
       enqueueNativeClipboardWrite(async () => {
         if (clipboardToken !== _jsClipboardToken) {
           ClipDebug.step(dbg, 'native-copy-stale-skip', { type: 'image', imgKey, token: clipboardToken, currentToken: _jsClipboardToken });
           return;
         }
         await copyDataUrlFallback('native-unique-copy');
+        showIslandMsg('Copied', 1500);
       }, dbg, { type: 'image', imgKey, flipX, flipY })
         .catch((err) => {
           ClipDebug.step(dbg, 'copy:image-error', { imgKey, flipX, flipY, error: String(err) });
           console.error('[copy] image clipboard write FAILED:', err);
         })
-        .finally(() => restoreIslandZoom())
         .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
         .finally(() => ClipDebug.end(dbg, { path: 'image-tauri-cached-transform', imgKey, flipX, flipY }));
     } else {
@@ -7011,11 +7949,13 @@ async function saveSelectedImage() {
   const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
   if (imageObjs.length !== 1) { ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length }); return; }
   const obj = imageObjs[0];
+  const releaseInputShield = acquireInputShield();
+  const busyPill = window.__TAURI__ ? startIslandBusyMsg('Exporting Image') : null;
 
   ExportDebug.step(dbg, 'render:start');
-  const src = await getRenderedImageDataUrl(obj);
-  ExportDebug.step(dbg, 'render:done', { hasDataUrl: !!src });
-  if (!src) { ExportDebug.end(dbg, { skipped: true, reason: 'no-dataurl' }); return; }
+  const src = await getRenderedImageDataUrl(obj, dbg);
+  ExportDebug.step(dbg, 'render:complete', { hasDataUrl: !!src });
+  if (!src) { if (busyPill) busyPill.done(); releaseInputShield(); ExportDebug.end(dbg, { skipped: true, reason: 'no-dataurl' }); return; }
 
   const ext = guessImageExtFromDataUrl(src);
   const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
@@ -7025,8 +7965,11 @@ async function saveSelectedImage() {
     try {
       const saved = await ExportDebug.invoke(dbg, 'save_image_as', { dataUrl: src, defaultName }, { defaultName });
       ExportDebug.end(dbg, { saved });
-      if (saved) showIslandMsg(selectedIds.size > 1 ? '1 Image Exported' : 'Image Exported', 1500);
+      if (saved) busyPill.done('Image Exported', 1500, releaseInputShield);
+      else { busyPill.done(); releaseInputShield(); }
     } catch (err) {
+      busyPill.done();
+      releaseInputShield();
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Save image failed:', err);
     }
@@ -7037,39 +7980,231 @@ async function saveSelectedImage() {
   a.href = src;
   a.download = defaultName;
   a.click();
+  releaseInputShield();
   ExportDebug.end(dbg, { saved: true, method: 'download' });
 }
 
+async function mapWithConcurrency(items, limit, worker) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      out[index] = await worker(items[index], index);
+    }
+  }));
+  return out;
+}
+
+function exportProgressText(totalCount, preparedCount) {
+  const n = Math.max(1, Number(totalCount) || 1);
+  const value = Math.max(0, Math.min(n, Number(preparedCount) || 0));
+  return `${value}/${n}`;
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function createExportProgressUpdater(totalCount, busyPill) {
+  let progressText = exportProgressText(totalCount, 0);
+  ExportDebug.recordProgressUi({
+    phase: 'resolve-start',
+    text: progressText,
+    finishedCount: 0,
+    preparedCount: 0,
+    totalCount,
+  });
+
+  return (phase, preparedCount, extra = {}, force = false) => {
+    const text = exportProgressText(totalCount, preparedCount);
+    if (!force && text === progressText) return;
+    progressText = text;
+    busyPill.update(text);
+    ExportDebug.recordProgressUi({
+      phase,
+      text,
+      finishedCount: Number(text.split('/')[0]) || 0,
+      preparedCount,
+      totalCount,
+      ...extra,
+    });
+  };
+}
+
 // Resolves a list of image objects to img_keys for native folder export.
-// Flipped images are rendered to a data URL, registered in the Rust image cache
-// under a temp key, and that temp key is used instead, keeping IPC payload tiny.
-async function resolveExportKeys(imageObjs, dbg) {
-  const tempKeys = [];
-  let renderedCount = 0;
-  const keys = [];
+// Transformed native images stay in Rust: the existing cached source is decoded,
+// transformed into a temp cache key, and saved by key without JS base64/canvas IPC.
+async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
+  const nativeConcurrency = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1));
   let processed = 0;
-  for (const obj of imageObjs) {
-    processed++;
-    const imgKey = obj.data.imgKey;
-    if (processed === 1 || processed % 10 === 0 || processed === imageObjs.length) {
-      ExportDebug.step(dbg, 'keys:progress', { processed, imageCount: imageObjs.length, keyCount: keys.length, renderedCount });
-    }
+  let keyCount = 0;
+  let renderedCount = 0;
+  ExportDebug.recordResolveStart({ imageCount: imageObjs.length, concurrency: nativeConcurrency });
+
+  const results = await mapWithConcurrency(imageObjs, nativeConcurrency, async (obj, index) => {
+    const imgKey = obj.data?.imgKey;
+    const progress = (meta = {}) => {
+      processed++;
+      ExportDebug.recordResolveProgress({
+        processed,
+        imageCount: imageObjs.length,
+        keyCount,
+        renderedCount,
+        concurrency: nativeConcurrency,
+        ...meta,
+      });
+      if (onProgress) {
+        onProgress({
+          phase: 'prepare-progress',
+          preparedCount: processed,
+          totalCount: imageObjs.length,
+        });
+      }
+      if (processed === 1 || processed % 10 === 0 || processed === imageObjs.length) {
+        ExportDebug.step(dbg, 'keys:progress', {
+          processed,
+          imageCount: imageObjs.length,
+          keyCount,
+          renderedCount,
+          concurrency: nativeConcurrency,
+          ...meta,
+        });
+      }
+    };
+
     if (!imageNeedsRendering(obj)) {
+      const itemStart = performance.now();
       await cacheImageSourceForExport(imgKey, imageStore[imgKey], dbg);
-      keys.push(imgKey);
-      continue;
+      keyCount++;
+      ExportDebug.recordResolve({
+        index,
+        objectId: obj.id,
+        imgKey,
+        key: imgKey,
+        ms: performance.now() - itemStart,
+        phase: 'passthrough',
+      });
+      progress({ index, imgKey, nativeTransform: false });
+      return { key: imgKey, tempKey: null, rendered: false };
     }
-    const renderStart = performance.now();
-    const dataUrl = await getRenderedImageDataUrl(obj);
-    ExportDebug.step(dbg, 'rendered-image', { imgKey, ms: performance.now() - renderStart, hasDataUrl: !!dataUrl });
-    if (!dataUrl) continue;
+
     const tempKey = `__export_tmp_${obj.id}`;
-    tempKeys.push(tempKey);
-    renderedCount++;
-    await ExportDebug.invoke(dbg, 'register_image_source', { imgKey: tempKey, dataUrl }, { imgKey: tempKey });
-    keys.push(tempKey);
-  }
-  return { keys: keys.filter(Boolean), tempKeys, renderedCount };
+    if (window.__TAURI__ && isNativeImageRef(imageStore[imgKey])) {
+      const nativeStart = performance.now();
+      try {
+        const result = await ExportDebug.invoke(
+          dbg,
+          'register_transformed_image_source',
+          {
+            imgKey,
+            tempKey,
+            flipX: !!obj.data.flipX,
+            flipY: !!obj.data.flipY,
+            rotation: ((obj.data.rotation || 0) % 360 + 360) % 360,
+          },
+          {
+            imgKey,
+            tempKey,
+            flipX: !!obj.data.flipX,
+            flipY: !!obj.data.flipY,
+            rotation: ((obj.data.rotation || 0) % 360 + 360) % 360,
+          }
+        );
+        keyCount++;
+        renderedCount++;
+        ExportDebug.recordResolve({
+          index,
+          objectId: obj.id,
+          imgKey,
+          key: tempKey,
+          tempKey,
+          rendered: true,
+          nativeTransform: true,
+          phase: 'native-transform',
+          ms: performance.now() - nativeStart,
+        });
+        ExportDebug.step(dbg, 'native-transform-image', {
+          index,
+          imgKey,
+          tempKey,
+          ms: performance.now() - nativeStart,
+          bytesMB: result?.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : '',
+          width: result?.width ?? '',
+          height: result?.height ?? '',
+          decodeMs: result?.decodeMs ?? '',
+          transformMs: result?.transformMs ?? '',
+          encodeMs: result?.encodeMs ?? '',
+        });
+        progress({ index, imgKey, nativeTransform: true });
+        return { key: tempKey, tempKey, rendered: true };
+      } catch (err) {
+        ExportDebug.step(dbg, 'native-transform-image:error', { index, imgKey, tempKey, ms: performance.now() - nativeStart, error: String(err) });
+      }
+    }
+
+    const renderStart = performance.now();
+    try {
+      const dataUrl = await getRenderedImageDataUrl(obj, dbg);
+      ExportDebug.step(dbg, 'rendered-image', { imgKey, ms: performance.now() - renderStart, hasDataUrl: !!dataUrl, dataUrlLen: dataUrl?.length || 0 });
+      if (!dataUrl) {
+        ExportDebug.recordResolve({
+          index,
+          objectId: obj.id,
+          imgKey,
+          fallbackRender: true,
+          skipped: true,
+          phase: 'fallback-render',
+          ms: performance.now() - renderStart,
+          error: 'render returned empty data URL',
+        });
+        progress({ index, imgKey, fallbackRender: true, skipped: true });
+        return null;
+      }
+      await ExportDebug.invoke(dbg, 'register_image_source', { imgKey: tempKey, dataUrl }, { imgKey: tempKey, dataUrlLen: dataUrl.length });
+      keyCount++;
+      renderedCount++;
+      ExportDebug.recordResolve({
+        index,
+        objectId: obj.id,
+        imgKey,
+        key: tempKey,
+        tempKey,
+        rendered: true,
+        fallbackRender: true,
+        phase: 'fallback-render',
+        ms: performance.now() - renderStart,
+      });
+      progress({ index, imgKey, fallbackRender: true });
+      return { key: tempKey, tempKey, rendered: true };
+    } catch (err) {
+      ExportDebug.step(dbg, 'rendered-image:error', { imgKey, ms: performance.now() - renderStart, error: String(err) });
+      ExportDebug.recordResolve({
+        index,
+        objectId: obj.id,
+        imgKey,
+        fallbackRender: true,
+        phase: 'fallback-render',
+        ms: performance.now() - renderStart,
+        error: String(err),
+      });
+      progress({ index, imgKey, fallbackRender: true, error: String(err) });
+      return null;
+    }
+  });
+
+  const keys = results.map(r => r?.key).filter(Boolean);
+  const tempKeys = results.map(r => r?.tempKey).filter(Boolean);
+  const finalRenderedCount = results.filter(r => r?.rendered).length;
+  ExportDebug.recordResolveDone({
+    processed,
+    imageCount: imageObjs.length,
+    keyCount: keys.length,
+    tempKeyCount: tempKeys.length,
+    renderedCount: finalRenderedCount,
+  });
+  return { keys, tempKeys, renderedCount: finalRenderedCount };
 }
 
 async function pickExportFolder(dbg) {
@@ -7102,8 +8237,9 @@ function normalizeExportSaveResult(result) {
   };
 }
 
-async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 10) {
+async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 10, onProgress = null) {
   const stopWatch = ExportDebug.watch(dbg, 'save-batches', { keyCount: keys.length, batchSize });
+  ExportDebug.recordSaveStart({ keyCount: keys.length, batchSize, batchCount: Math.ceil(keys.length / batchSize) });
   let savedCount = 0;
   let failedCount = 0;
   let missingCount = 0;
@@ -7121,6 +8257,7 @@ async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 10
         keyCount: keys.length,
         batchSize: batch.length,
       });
+      const batchStart = performance.now();
       const result = await ExportDebug.invoke(
         dbg,
         'save_images_to_existing_folder_by_keys',
@@ -7140,9 +8277,29 @@ async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 10
         keyCount: keys.length,
         ...normalized,
       });
+      ExportDebug.recordSaveBatch({
+        batchIndex,
+        batchCount,
+        batchSize: batch.length,
+        keyCount: batch.length,
+        ms: performance.now() - batchStart,
+        ...normalized,
+      });
+      if (onProgress) {
+        onProgress({
+          finishedCount: savedCount + failedCount + missingCount,
+          savedCount,
+          failedCount,
+          missingCount,
+          totalCount: keys.length,
+          batchIndex,
+          batchCount,
+        });
+      }
     }
   } finally {
     stopWatch({ savedCount, failedCount, missingCount, bytesMB: Math.round(bytes / 1024 / 1024 * 100) / 100 });
+    ExportDebug.recordSaveDone({ savedCount, failedCount, missingCount, bytesMB: Math.round(bytes / 1024 / 1024 * 100) / 100 });
   }
   return {
     savedCount,
@@ -7162,30 +8319,41 @@ async function saveSelectedImages() {
     if (!obj || obj.type !== 'image') continue;
     selectedObjs.push(obj);
   }
-  if (selectedObjs.length < 2) { stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, imageCount: selectedObjs.length }); hidePasteShield(); return; }
+  if (selectedObjs.length < 2) { stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, imageCount: selectedObjs.length }); hideInputShield(); return; }
   ExportDebug.step(dbg, 'images:found', { imageCount: selectedObjs.length });
+  ExportDebug.startMassive('exportImages', selectedObjs);
 
   if (window.__TAURI__) {
     let tempKeys = [];
+    let busyPill = null;
     try {
       const folder = await pickExportFolder(dbg);
       ExportDebug.step(dbg, 'folder:selected', { folder });
-      if (!folder) { hidePasteShield(); stopTotalWatch({ cancelled: true }); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
+      if (!folder) { hideInputShield(); stopTotalWatch({ cancelled: true }); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
+      busyPill = startIslandBusyMsg(`0/${selectedObjs.length}`);
+      const updateProgress = createExportProgressUpdater(selectedObjs.length, busyPill);
       const stopResolveWatch = ExportDebug.watch(dbg, 'resolve-keys', { imageCount: selectedObjs.length });
-      const resolved = await resolveExportKeys(selectedObjs, dbg).finally(() => stopResolveWatch());
+      const resolved = await resolveExportKeys(selectedObjs, dbg, ({ preparedCount }) => {
+        updateProgress('prepare-progress', preparedCount);
+      }).finally(() => stopResolveWatch());
       const keys = resolved.keys;
       tempKeys = resolved.tempKeys;
       ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
-      if (keys.length < 2) { hidePasteShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'too-few-keys' }); return; }
-      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg);
+      if (keys.length < 2) { busyPill.done(); hideInputShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'too-few-keys' }); return; }
+      updateProgress('save-start', selectedObjs.length, {}, true);
+      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 10, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
+        updateProgress('save-progress', selectedObjs.length, { batchIndex, batchCount, savedKeyCount: finishedCount, keyCount: totalCount });
+      });
       const savedCount = typeof saveResult === 'number' ? saveResult : (saveResult?.savedCount || 0);
       ExportDebug.step(dbg, 'save:result', normalizeExportSaveResult(saveResult));
       stopTotalWatch({ savedCount });
       ExportDebug.end(dbg, { savedCount, ...normalizeExportSaveResult(saveResult) });
-      if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
-      else hidePasteShield();
+      await delay(2000);
+      if (savedCount > 0) busyPill.done(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hideInputShield);
+      else { busyPill.done(); hideInputShield(); }
     } catch (err) {
-      hidePasteShield();
+      if (busyPill) busyPill.done();
+      hideInputShield();
       stopTotalWatch({ error: String(err) });
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Save images failed:', err);
@@ -7196,7 +8364,7 @@ async function saveSelectedImages() {
   }
 
   for (let i = 0; i < selectedObjs.length; i++) {
-    const src = await getRenderedImageDataUrl(selectedObjs[i]);
+    const src = await getRenderedImageDataUrl(selectedObjs[i], dbg);
     if (!src) continue;
     const ext = guessImageExtFromDataUrl(src);
     const a = document.createElement('a');
@@ -7212,30 +8380,41 @@ async function exportAllImages() {
   const dbg = ExportDebug.start('exportAllImages', { objectCount: objects.length });
   const stopTotalWatch = ExportDebug.watch(dbg, 'export-total', { mode: 'all' }, 5000);
   const imageObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'image');
-  if (!imageObjs.length) { stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'no-images' }); hidePasteShield(); return; }
+  if (!imageObjs.length) { stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'no-images' }); hideInputShield(); return; }
   ExportDebug.step(dbg, 'images:found', { imageCount: imageObjs.length });
+  ExportDebug.startMassive('exportAllImages', imageObjs);
 
   if (window.__TAURI__) {
     let tempKeys = [];
+    let busyPill = null;
     try {
       const folder = await pickExportFolder(dbg);
       ExportDebug.step(dbg, 'folder:selected', { folder });
-      if (!folder) { hidePasteShield(); stopTotalWatch({ cancelled: true }); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
+      if (!folder) { hideInputShield(); stopTotalWatch({ cancelled: true }); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
+      busyPill = startIslandBusyMsg(`0/${imageObjs.length}`);
+      const updateProgress = createExportProgressUpdater(imageObjs.length, busyPill);
       const stopResolveWatch = ExportDebug.watch(dbg, 'resolve-keys', { imageCount: imageObjs.length });
-      const resolved = await resolveExportKeys(imageObjs, dbg).finally(() => stopResolveWatch());
+      const resolved = await resolveExportKeys(imageObjs, dbg, ({ preparedCount }) => {
+        updateProgress('prepare-progress', preparedCount);
+      }).finally(() => stopResolveWatch());
       const keys = resolved.keys;
       tempKeys = resolved.tempKeys;
       ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
-      if (!keys.length) { hidePasteShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' }); return; }
-      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg);
+      if (!keys.length) { busyPill.done(); hideInputShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' }); return; }
+      updateProgress('save-start', imageObjs.length, {}, true);
+      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 10, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
+        updateProgress('save-progress', imageObjs.length, { batchIndex, batchCount, savedKeyCount: finishedCount, keyCount: totalCount });
+      });
       const savedCount = typeof saveResult === 'number' ? saveResult : (saveResult?.savedCount || 0);
       ExportDebug.step(dbg, 'save:result', normalizeExportSaveResult(saveResult));
       stopTotalWatch({ savedCount });
       ExportDebug.end(dbg, { savedCount, ...normalizeExportSaveResult(saveResult) });
-      if (savedCount > 0) showIslandMsg(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hidePasteShield);
-      else hidePasteShield();
+      await delay(2000);
+      if (savedCount > 0) busyPill.done(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hideInputShield);
+      else { busyPill.done(); hideInputShield(); }
     } catch (err) {
-      hidePasteShield();
+      if (busyPill) busyPill.done();
+      hideInputShield();
       stopTotalWatch({ error: String(err) });
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Export all images failed:', err);
@@ -7246,7 +8425,7 @@ async function exportAllImages() {
   }
 
   for (let i = 0; i < imageObjs.length; i++) {
-    const src = await getRenderedImageDataUrl(imageObjs[i]);
+    const src = await getRenderedImageDataUrl(imageObjs[i], dbg);
     if (!src) continue;
     const ext = guessImageExtFromDataUrl(src);
     const a = document.createElement('a');
@@ -7262,16 +8441,32 @@ async function exportAllText() {
   const dbg = ExportDebug.start('exportAllText', { objectCount: objects.length });
   const textObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'text');
   if (!textObjs.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-text' }); return; }
+  const releaseInputShield = acquireInputShield();
 
   const combined = textObjs.map((o) => o.data.content).join('\n\n');
   ExportDebug.step(dbg, 'combined', { textCount: textObjs.length, combinedLen: combined.length });
 
   if (window.__TAURI__) {
+    let busyPill = null;
     try {
-      const saved = await ExportDebug.invoke(dbg, 'save_text_as', { text: combined }, { textCount: textObjs.length });
-      ExportDebug.end(dbg, { saved });
-      if (saved) showIslandMsg('Text Exported', 1500);
+      const path = await ExportDebug.invoke(dbg, 'save_text_file_dialog', {}, { textCount: textObjs.length });
+      ExportDebug.step(dbg, 'text:path-selected', { selected: !!path });
+      if (!path) {
+        releaseInputShield();
+        ExportDebug.end(dbg, { saved: false, cancelled: true });
+        return;
+      }
+      busyPill = startIslandBusyMsg('Exporting Text');
+      await ExportDebug.invoke(dbg, 'write_text_file', { path, text: combined }, { textCount: textObjs.length, textLen: combined.length });
+      ExportDebug.end(dbg, { saved: true });
+      busyPill.done('Text Exported', 1500, releaseInputShield);
     } catch (err) {
+      if (busyPill) {
+        busyPill.done();
+        releaseInputShield();
+      } else {
+        releaseInputShield();
+      }
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Export all text failed:', err);
     }
@@ -7286,6 +8481,7 @@ async function exportAllText() {
   a.download = `text_${hex}.txt`;
   a.click();
   URL.revokeObjectURL(url);
+  releaseInputShield();
   ExportDebug.end(dbg, { saved: true, method: 'download', textCount: textObjs.length });
 }
 
@@ -7372,7 +8568,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'event-image', dbg);
         return;
       } catch (err) {
-        hidePasteShield();
+        hideInputShield();
         ClipDebug.step(dbg, 'event-image-miss', { error: String(err) });
       }
     }
@@ -7404,7 +8600,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'native-image', dbg);
         return;
       } catch (err) {
-        hidePasteShield();
+        hideInputShield();
         ClipDebug.step(dbg, 'native-image-miss', { error: String(err) });
         try {
           const text = await ClipDebug.invoke(dbg, 'read_text_from_clipboard');
@@ -7417,22 +8613,22 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         return;
       }
     }
-    showPasteShield();
+    showInputShield();
     try {
       const dataUrl = await readClipboardImageDataUrlFromBrowser(dbg);
       if (dataUrl) {
         const imgKey = newImgKey();
         ClipDebug.step(dbg, 'web-image-read', { imgKey, dataUrl });
-        hidePasteShield();
+        hideInputShield();
         await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'web-image', dbg);
         return;
       }
-      hidePasteShield();
+      hideInputShield();
       const text = await navigator.clipboard.readText();
       if (text && text.trim()) addText(wx - 100, wy - 40, text);
       ClipDebug.end(dbg, { path: 'web-text', textLen: text?.length || 0 });
     } catch (err) {
-      hidePasteShield();
+      hideInputShield();
       ClipDebug.end(dbg, { path: 'web-empty', error: String(err) });
     }
   } finally {
@@ -7454,6 +8650,20 @@ document.addEventListener('paste', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Alt') { e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); return; }
+
+  if (e.key === 'Escape') {
+    hideMenus();
+    if (editingId) {
+      exitEdit();
+      selectedId = null;
+      selectedIds.clear();
+      scheduleRender(false, true);
+      return;
+    }
+    deselectAll();
+    return;
+  }
+
   if (isBoardInputBlocked()) { e.preventDefault(); return; }
 
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
@@ -7469,19 +8679,6 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       requestAppClose();
     }
-    return;
-  }
-
-  if (e.key === 'Escape') {
-    hideMenus();
-    if (editingId) {
-      exitEdit();
-      selectedId = null;
-      selectedIds.clear();
-      scheduleRender(false, true);
-      return;
-    }
-    deselectAll();
     return;
   }
 
@@ -7558,7 +8755,7 @@ function recoverWindowPaint(reason = 'resume', hardRepaint = false) {
   canvas.style.display = '';
   boardCanvas.style.display = '';
   islZoom.style.display = '';
-  if (!_boardOpening && _pasteShieldCount === 0) openingShield.classList.remove('active');
+  updateInputShieldVisual();
   if (dialogOverlay.classList.contains('show') && !_dialogResolve) dialogOverlay.classList.remove('show');
   if (!ctxMenu.classList.contains('visible') && !objCtxMenu.classList.contains('visible')) {
     hideMenus();

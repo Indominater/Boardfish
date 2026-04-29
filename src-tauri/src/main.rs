@@ -685,6 +685,36 @@ async fn save_text_as(app: tauri::AppHandle, text: String) -> Result<bool, Strin
 }
 
 #[tauri::command]
+async fn save_text_file_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let hex = {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos() as u64)
+            .unwrap_or(0);
+        format!("{:06x}", nanos & 0xFFFFFF)
+    };
+    let default_name = format!("text_{}.txt", hex);
+    tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Text", &["txt"])
+            .set_file_name(default_name)
+            .blocking_save_file()
+            .map(|p| p.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn write_text_file(path: String, text: String) -> Result<(), String> {
+    tokio::fs::write(path, text.as_bytes())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn save_image_as(
     app: tauri::AppHandle,
     data_url: String,
@@ -774,6 +804,102 @@ async fn register_image_source(
         "mime": mime,
         "ext": ext,
     }))
+}
+
+#[tauri::command]
+async fn register_transformed_image_source(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_key: String,
+    temp_key: String,
+    flip_x: bool,
+    flip_y: bool,
+    rotation: u32,
+) -> Result<serde_json::Value, String> {
+    let total = std::time::Instant::now();
+    let source = {
+        let cache = state.0.lock().map_err(|e| e.to_string())?;
+        cache
+            .get(&img_key)
+            .cloned()
+            .ok_or_else(|| format!("image source cache missing for {img_key}"))?
+    };
+
+    let normalized_rotation = rotation % 360;
+    let result = tokio::task::spawn_blocking(move || {
+        let decode_start = std::time::Instant::now();
+        let mut img = image::load_from_memory(&source.bytes).map_err(|e| e.to_string())?;
+        let decode_ms = elapsed_ms(decode_start);
+
+        let transform_start = std::time::Instant::now();
+        if flip_x {
+            img = img.fliph();
+        }
+        if flip_y {
+            img = img.flipv();
+        }
+        img = match normalized_rotation {
+            90 => img.rotate90(),
+            180 => img.rotate180(),
+            270 => img.rotate270(),
+            _ => img,
+        };
+        let width = img.width();
+        let height = img.height();
+        let transform_ms = elapsed_ms(transform_start);
+
+        let encode_start = std::time::Instant::now();
+        let rgba = img.to_rgba8();
+        let mut png_bytes = Vec::new();
+        {
+            use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+            use image::{ColorType, ImageEncoder};
+            let encoder = PngEncoder::new_with_quality(
+                &mut png_bytes,
+                CompressionType::Fast,
+                FilterType::NoFilter,
+            );
+            encoder
+                .write_image(rgba.as_raw(), width, height, ColorType::Rgba8)
+                .map_err(|e| e.to_string())?;
+        }
+        let encode_ms = elapsed_ms(encode_start);
+        let bytes = png_bytes.len();
+
+        Ok::<_, String>((
+            CachedImageSource {
+                mime: "image/png".to_string(),
+                ext: "png".to_string(),
+                bytes: Arc::from(png_bytes),
+            },
+            serde_json::json!({
+                "bytes": bytes,
+                "mime": "image/png",
+                "ext": "png",
+                "width": width,
+                "height": height,
+                "flipX": flip_x,
+                "flipY": flip_y,
+                "rotation": normalized_rotation,
+                "decodeMs": decode_ms,
+                "transformMs": transform_ms,
+                "encodeMs": encode_ms,
+            }),
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let (transformed_source, mut debug) = result;
+    state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(temp_key.clone(), transformed_source);
+    debug["imgKey"] = serde_json::Value::String(img_key);
+    debug["tempKey"] = serde_json::Value::String(temp_key);
+    debug["totalMs"] = serde_json::Value::from(elapsed_ms(total));
+    save_debug("register_transformed_image_source total", total);
+    Ok(debug)
 }
 
 #[tauri::command]
@@ -1269,6 +1395,8 @@ fn main() {
             get_startup_file,
             save_board,
             save_text_as,
+            save_text_file_dialog,
+            write_text_file,
             read_board,
             register_image_file_source,
             get_cached_image_data_url,
@@ -1289,6 +1417,7 @@ fn main() {
             set_save_debug,
             set_open_debug,
             register_image_source,
+            register_transformed_image_source,
             remove_cached_image_sources,
             copy_image_data_url_to_clipboard_transformed,
             read_image_from_clipboard_cached,
