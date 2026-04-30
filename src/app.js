@@ -28,6 +28,7 @@ const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 const IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 if (IS_MAC) document.body.classList.add('is-macos');
+const TRANSPARENT_TEXT_COLOR = 'rgba(255,255,255,0)';
 const DEBUG_TOOLS_RELEASE_ENABLED = false;
 const DEBUG_TOOLS_ENABLED = (() => {
   if (!DEBUG_TOOLS_RELEASE_ENABLED) return false;
@@ -43,6 +44,31 @@ const DEBUG_TOOLS_ENABLED = (() => {
 function exposeDebug(tools) {
   if (!DEBUG_TOOLS_ENABLED) return;
   window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, tools);
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.body).getPropertyValue(name).trim();
+}
+
+function boardBg() {
+  return cssVar('--canvas-bg') || '#d6d8da';
+}
+
+function canvasTextColor() {
+  return cssVar('--canvas-text') || '#111418';
+}
+
+function islandTextColor() {
+  return cssVar('--island-text') || 'rgba(13,17,23,0.58)';
+}
+
+function islandStatusTextColor() {
+  return cssVar('--island-status-text') || 'rgba(13,17,23,0.68)';
+}
+
+function fillBoardBackground(context, width, height) {
+  context.fillStyle = boardBg();
+  context.fillRect(0, 0, width, height);
 }
 
 // ─── Clipboard / image debugger ──────────────────────────────────────────────
@@ -189,14 +215,12 @@ const ClipDebug = (() => {
       dataUrlLen: e.meta?.dataUrlLen ?? '',
       blobSize: e.meta?.blobSize ?? '',
       nativePath: timing(e.meta, 'path'),
-      cacheHit: timing(e.meta, 'cacheHit'),
       flipped: timing(e.meta, 'flipped'),
       width: timing(e.meta, 'width'),
       height: timing(e.meta, 'height'),
       pixels: timing(e.meta, 'pixels'),
       rgbaMB: timing(e.meta, 'rgbaMb'),
       nativeTotalMs: timing(e.meta, 'totalMs'),
-      lookupMs: timing(e.meta, 'lookupMs'),
       decodeMs: timing(e.meta, 'decodeMs'),
       base64Ms: timing(e.meta, 'base64Ms'),
       imageDecodeMs: timing(e.meta, 'imageDecodeMs'),
@@ -240,14 +264,12 @@ const ClipDebug = (() => {
       dataUrlLen: e.meta?.dataUrlLen ?? '',
       blobSize: e.meta?.blobSize ?? '',
       nativePath: timing(e.meta, 'path'),
-      cacheHit: timing(e.meta, 'cacheHit'),
       flipped: timing(e.meta, 'flipped'),
       width: timing(e.meta, 'width'),
       height: timing(e.meta, 'height'),
       pixels: timing(e.meta, 'pixels'),
       rgbaMB: timing(e.meta, 'rgbaMb'),
       nativeTotalMs: timing(e.meta, 'totalMs'),
-      lookupMs: timing(e.meta, 'lookupMs'),
       decodeMs: timing(e.meta, 'decodeMs'),
       base64Ms: timing(e.meta, 'base64Ms'),
       imageDecodeMs: timing(e.meta, 'imageDecodeMs'),
@@ -275,14 +297,12 @@ const ClipDebug = (() => {
         command: e.meta?.command || '',
         imgKey: e.meta?.imgKey || '',
         nativePath: timing(e.meta, 'path'),
-        cacheHit: timing(e.meta, 'cacheHit'),
         flipped: timing(e.meta, 'flipped'),
         width: timing(e.meta, 'width'),
         height: timing(e.meta, 'height'),
         rgbaMB: timing(e.meta, 'rgbaMb'),
         invokeMs: e.meta?.ms ?? '',
         nativeTotalMs: timing(e.meta, 'totalMs'),
-        lookupMs: timing(e.meta, 'lookupMs'),
         decodeMs: timing(e.meta, 'decodeMs'),
         base64Ms: timing(e.meta, 'base64Ms'),
         imageDecodeMs: timing(e.meta, 'imageDecodeMs'),
@@ -1396,7 +1416,6 @@ const OpenDebug = (() => {
       rustBoardJsonParseMs: e.meta?.rust?.board_json_parse_ms ?? '',
       rustImageReadMs: e.meta?.rust?.image_read_ms ?? '',
       rustCacheInsertMs: e.meta?.rust?.cache_insert_ms ?? '',
-      rustBase64Ms: e.meta?.rust?.base64_ms ?? '',
       rustImageBytes: e.meta?.rust?.image_bytes ?? '',
       rustTotalMs: e.meta?.rust?.total_ms ?? '',
       error: e.meta?.error || '',
@@ -3317,7 +3336,7 @@ function waitForIslandTransition(propertyName, timeoutMs = 700) {
 function forceIslandTextTransparent() {
   const transition = islZoom.style.transition;
   islZoom.style.transition = 'none';
-  islZoom.style.color = 'rgba(255,255,255,0)';
+  islZoom.style.color = TRANSPARENT_TEXT_COLOR;
   void islZoom.offsetWidth;
   islZoom.style.transition = transition;
   PillDebug.log('forceIslandTextTransparent');
@@ -3329,7 +3348,7 @@ function startIslandBusyMsg(text) {
   clearTimeout(_islFadeTimer);
   _islMsgActive = true;
   applyIslandInteractionState();
-  islZoom.style.color = 'rgba(255,255,255,0.5)';
+  islZoom.style.color = islandStatusTextColor();
   islSetWidth(text);
   islZoom.textContent = text;
   PillDebug.samplePillAnimation('busyIslandMsg');
@@ -3384,7 +3403,7 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
   applyIslandInteractionState();
   islSetWidth(msg);
   PillDebug.samplePillAnimation('showIslandMsg');
-  islZoom.style.color = 'rgba(255,255,255,0)';
+  islZoom.style.color = TRANSPARENT_TEXT_COLOR;
   PillDebug.log('showIslandMsg:fadeOut', { msg, colorAfter: islZoom.style.color, computedColor: getComputedStyle(islZoom).color, transition: getComputedStyle(islZoom).transition });
   return new Promise(resolve => {
     const timerStart = performance.now();
@@ -3392,7 +3411,7 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
       if (token !== _islAnimToken) { resolve(); return; }
       PillDebug.log('showIslandMsg:fadeIn', { msg, timerActualMs: Math.round(performance.now() - timerStart), computedColorBefore: getComputedStyle(islZoom).color });
       islZoom.textContent = msg;
-      islZoom.style.color = 'rgba(255,255,255,0.5)';
+      islZoom.style.color = islandStatusTextColor();
       PillDebug.log('showIslandMsg:fadeInSet', { computedColorAfter: getComputedStyle(islZoom).color });
       if (duration > 0) {
         _islMsgTimer = setTimeout(() => { if (onRestore) onRestore(); restoreIslandZoom(); }, duration);
@@ -3424,7 +3443,7 @@ async function restoreIslandZoom() {
   PillDebug.samplePillAnimation('restoreIslandZoom', 1800);
   PillDebug.log('restoreIslandZoom:width-set', { pct });
   PillDebug.log('restoreIslandZoom:fadeOut');
-  islZoom.style.color = 'rgba(255,255,255,0)';
+  islZoom.style.color = TRANSPARENT_TEXT_COLOR;
   const [widthReason] = await Promise.all([
     widthDone,
     new Promise((resolve) => setTimeout(resolve, 500)),
@@ -3446,7 +3465,7 @@ async function restoreIslandZoom() {
     requestAnimationFrame(() => {
       if (token !== _islAnimToken) return;
       PillDebug.log('restoreIslandZoom:raf2', { pct });
-      islZoom.style.color = 'rgba(255,255,255,0.5)';
+      islZoom.style.color = islandTextColor();
       applyIslandInteractionState();
       PillDebug.log('restoreIslandZoom:shown', { pct });
     });
@@ -3467,9 +3486,9 @@ islZoom.addEventListener('transitioncancel', (event) => {
 const FONT_SIZE = 16;
 const LINE_H    = 24;
 const TEXT_PAD  = 4;
-const TEXT_DRAW_Y_OFFSET = (LINE_H - FONT_SIZE) / 2;
 const NEW_TEXT_EDIT_MIN_LINES = 3;
-const FONT      = `${FONT_SIZE}px 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif`;
+const FONT      = `${FONT_SIZE}px 'Geist Sans', 'Geist', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif`;
+let TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
 
 function normalizeTextContent(value) {
   return String(value ?? '').replace(/\r\n?/g, '\n');
@@ -3478,6 +3497,7 @@ function normalizeTextContent(value) {
 const _measureCanvas = document.createElement('canvas');
 const _measureCtx = _measureCanvas.getContext('2d');
 _measureCtx.font = FONT;
+refreshTextMetrics();
 const _mwCache = Object.create(null);
 function measureTextW(text) {
   if (text in _mwCache) return _mwCache[text];
@@ -3485,7 +3505,19 @@ function measureTextW(text) {
   return (_mwCache[text] = _measureCtx.measureText(text).width);
 }
 
+function refreshTextMetrics() {
+  _measureCtx.font = FONT;
+  _measureCtx.textBaseline = 'alphabetic';
+  const metrics = _measureCtx.measureText('Hgjpqy');
+  const measuredAscent = metrics.actualBoundingBoxAscent;
+  const measuredDescent = metrics.actualBoundingBoxDescent;
+  const ascent = Number.isFinite(measuredAscent) && measuredAscent > 0 ? measuredAscent : FONT_SIZE * 0.8;
+  const descent = Number.isFinite(measuredDescent) && measuredDescent > 0 ? measuredDescent : FONT_SIZE * 0.2;
+  TEXT_BASELINE_Y_OFFSET = (LINE_H - ascent - descent) / 2 + ascent;
+}
+
 function clearTextMeasurementCaches() {
+  refreshTextMetrics();
   for (const k of Object.keys(_mwCache)) delete _mwCache[k];
   _linesCacheMap.clear();
   _prefixCache.clear();
@@ -3545,12 +3577,11 @@ async function _rebuildOffscreenAsync() {
   _offscreen.width  = boardCanvas.width;
   _offscreen.height = boardCanvas.height;
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
-  _offCtx.fillStyle = '#1c1c1e';
-  _offCtx.fillRect(0, 0, _offscreen.width, _offscreen.height);
+  fillBoardBackground(_offCtx, _offscreen.width, _offscreen.height);
   _offCtx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
   setCanvasImageQuality(_offCtx);
   _offCtx.font = FONT;
-  _offCtx.textBaseline = 'top';
+  _offCtx.textBaseline = 'alphabetic';
   const viewportRect = currentViewportWorldRect();
   for (const obj of objects) {
     if (obj.id === editingId) continue;
@@ -3724,7 +3755,7 @@ function calculateTextLayout(obj) {
       endIndex: line.endIndex,
       nextStartIndex: line.nextStartIndex,
       y,
-      textY: y + TEXT_DRAW_Y_OFFSET,
+      textY: y + TEXT_BASELINE_Y_OFFSET,
       prefixWidths: getPrefixWidths(line.text),
     };
   });
@@ -4102,10 +4133,11 @@ function countCulledObject(obj, counters = null) {
 // Draws a single non-editing object onto any canvas context (world coords).
 function drawSingleObj(context, obj, counters = null) {
   if (obj.type === 'text') {
-    context.fillStyle = '#ffffff';
+    context.fillStyle = canvasTextColor();
+    context.textBaseline = 'alphabetic';
     const lines = getWrappedLines(obj);
     for (let i = 0; i < lines.length; i++) {
-      context.fillText(lines[i].text, obj.x + TEXT_PAD, obj.y + TEXT_PAD + TEXT_DRAW_Y_OFFSET + i * LINE_H);
+      context.fillText(lines[i].text, obj.x + TEXT_PAD, obj.y + TEXT_PAD + TEXT_BASELINE_Y_OFFSET + i * LINE_H);
     }
     return true;
   } else if (obj.type === 'image') {
@@ -4191,12 +4223,11 @@ function drawBoard() {
       // Draw all objects directly this frame while the rebuild is pending.
       _rebuildOffscreenAsync();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#1c1c1e';
-      ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+      fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
       ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
       setCanvasImageQuality(ctx);
       ctx.font = FONT;
-      ctx.textBaseline = 'top';
+      ctx.textBaseline = 'alphabetic';
       for (const obj of objects) {
         if (obj.id === editingId) continue;
         if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) {
@@ -4218,7 +4249,7 @@ function drawBoard() {
     const obj = objectsMap.get(editingId);
     if (obj && obj.type === 'text') {
       ctx.font = FONT;
-      ctx.textBaseline = 'top';
+      ctx.textBaseline = 'alphabetic';
 
       const selStart = _editEl ? _editEl.selectionStart : 0;
       const selEnd   = _editEl ? _editEl.selectionEnd   : 0;
@@ -4242,7 +4273,7 @@ function drawBoard() {
       }
 
       // Text
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = canvasTextColor();
       for (const line of layout) ctx.fillText(line.text, obj.x + TEXT_PAD, line.textY);
 
       // Caret
@@ -4257,19 +4288,18 @@ function drawBoard() {
             break;
           }
         }
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = canvasTextColor();
         ctx.fillRect(cx, cy, 2 / zoom, LINE_H);
       }
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   } else {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#1c1c1e';
-    ctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+    fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
     setCanvasImageQuality(ctx);
     ctx.font = FONT;
-    ctx.textBaseline = 'top';
+    ctx.textBaseline = 'alphabetic';
     for (const obj of objects) {
       if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) {
         countCulledObject(obj, counters);
@@ -6501,6 +6531,12 @@ canvas.addEventListener('dblclick', (e) => {
 
 let ctxPos = { x: 0, y: 0 };
 
+function openMenuAt(menu, x, y) {
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.classList.add('visible');
+}
+
 if (DEBUG_TOOLS_ENABLED) {
   for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
     document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:capture`, e), true);
@@ -6647,9 +6683,7 @@ canvas.addEventListener('contextmenu', (e) => {
     if (wp.x >= bx1 && wp.x <= bx2 && wp.y >= by1 && wp.y <= by2) {
       updateObjMenuActions();
       closeCtxMenu('show-obj-menu:multi');
-      objCtxMenu.style.left = e.clientX + 'px';
-      objCtxMenu.style.top  = e.clientY + 'px';
-      objCtxMenu.classList.add('visible');
+      openMenuAt(objCtxMenu, e.clientX, e.clientY);
       MenuDebug.log('obj-ctx-menu:open', { reason: 'multi', x: e.clientX, y: e.clientY });
       return;
     }
@@ -6670,18 +6704,14 @@ canvas.addEventListener('contextmenu', (e) => {
     if (!isSelected(obj.id)) selectObject(obj.id);
     updateObjMenuActions();
     closeCtxMenu('show-obj-menu:object');
-    objCtxMenu.style.left = e.clientX + 'px';
-    objCtxMenu.style.top  = e.clientY + 'px';
-    objCtxMenu.classList.add('visible');
+    openMenuAt(objCtxMenu, e.clientX, e.clientY);
     MenuDebug.log('obj-ctx-menu:open', { reason: 'object', objectId: obj.id, objectType: obj.type, x: e.clientX, y: e.clientY });
     return;
   }
   closeObjCtxMenu('show-canvas-menu');
   ctxPos = wp;
   updateCtxMenuActions();
-  ctxMenu.style.left = e.clientX + 'px';
-  ctxMenu.style.top  = e.clientY + 'px';
-  ctxMenu.classList.add('visible');
+  openMenuAt(ctxMenu, e.clientX, e.clientY);
   MenuDebug.log('ctx-menu:open', { x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
 });
 

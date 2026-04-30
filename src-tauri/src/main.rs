@@ -127,7 +127,6 @@ const CLOSE_WINDOW_MENU_ID: &str = "boardfish-close-window";
 const WINDOW_CLOSE_MENU_ID: &str = "boardfish-window-close";
 
 struct StartupFile(Mutex<Option<String>>);
-struct ClipboardImageCache(Mutex<HashMap<String, CachedClipboardImage>>);
 struct ImageSourceCache(Mutex<HashMap<String, CachedImageSource>>);
 static CLIPBOARD_DEBUG: AtomicBool = AtomicBool::new(false);
 static SAVE_DEBUG: AtomicBool = AtomicBool::new(false);
@@ -152,14 +151,12 @@ struct CachedImageSource {
 #[serde(rename_all = "camelCase")]
 struct ClipboardCopyTiming {
     path: String,
-    cache_hit: bool,
     flipped: bool,
     width: u32,
     height: u32,
     pixels: u64,
     rgba_mb: f64,
     total_ms: f64,
-    lookup_ms: Option<f64>,
     decode_ms: Option<f64>,
     base64_ms: Option<f64>,
     image_decode_ms: Option<f64>,
@@ -285,7 +282,6 @@ struct BoardReadStats {
     image_bytes: usize,
     image_read_ms: f64,
     cache_insert_ms: f64,
-    base64_ms: f64,
     total_ms: f64,
 }
 
@@ -480,7 +476,6 @@ async fn read_board(
             "image_bytes": result.stats.image_bytes,
             "image_read_ms": result.stats.image_read_ms,
             "cache_insert_ms": result.stats.cache_insert_ms,
-            "base64_ms": result.stats.base64_ms,
             "total_ms": result.stats.total_ms,
         }
     }))
@@ -1114,7 +1109,6 @@ async fn copy_image_data_url_to_clipboard_transformed(
         let write_timing = write_rgba_to_clipboard(width, height, rgba)?;
         let mut timing = ClipboardCopyTiming {
             path: "data-url-rgba".to_string(),
-            cache_hit: false,
             flipped: flip_x || flip_y,
             width,
             height,
@@ -1217,12 +1211,11 @@ fn decode_data_url_to_cached_image_timed(
 
 #[tauri::command]
 async fn read_image_from_clipboard_cached(
-    state: tauri::State<'_, ClipboardImageCache>,
     source_state: tauri::State<'_, ImageSourceCache>,
     img_key: String,
 ) -> Result<String, String> {
     let total = std::time::Instant::now();
-    let (data_url, cached, source) = tokio::task::spawn_blocking(|| {
+    let (data_url, source) = tokio::task::spawn_blocking(|| {
         use base64::{engine::general_purpose, Engine as _};
         let read = std::time::Instant::now();
         let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
@@ -1232,11 +1225,6 @@ async fn read_image_from_clipboard_cached(
         let width = img.width as u32;
         let height = img.height as u32;
         let rgba_bytes = img.bytes.into_owned();
-        let cached = CachedClipboardImage {
-            width,
-            height,
-            rgba: Arc::from(rgba_bytes.clone()),
-        };
 
         let encode = std::time::Instant::now();
         let rgba = image::RgbaImage::from_raw(width, height, rgba_bytes)
@@ -1259,7 +1247,6 @@ async fn read_image_from_clipboard_cached(
                 "data:image/png;base64,{}",
                 general_purpose::STANDARD.encode(&png_bytes)
             ),
-            cached,
             source,
         ))
     })
@@ -1267,11 +1254,6 @@ async fn read_image_from_clipboard_cached(
     .map_err(|e| e.to_string())??;
 
     let lock = std::time::Instant::now();
-    state
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(img_key.clone(), cached);
     source_state
         .0
         .lock()
@@ -1299,10 +1281,8 @@ async fn read_text_from_clipboard() -> Result<String, String> {
 
 #[tauri::command]
 fn clear_clipboard_image_cache(
-    state: tauri::State<ClipboardImageCache>,
     source_state: tauri::State<ImageSourceCache>,
 ) -> Result<(), String> {
-    state.0.lock().map_err(|e| e.to_string())?.clear();
     source_state.0.lock().map_err(|e| e.to_string())?.clear();
     Ok(())
 }
@@ -1406,7 +1386,6 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(StartupFile(Mutex::new(startup_file)))
-        .manage(ClipboardImageCache(Mutex::new(HashMap::new())))
         .manage(ImageSourceCache(Mutex::new(HashMap::new())))
         .invoke_handler(tauri::generate_handler![
             get_startup_file,

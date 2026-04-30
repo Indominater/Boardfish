@@ -6,6 +6,13 @@
   <title>Boardfish</title>
   <style>
     @font-face {
+      font-family: 'Geist Sans';
+      font-style: normal;
+      font-weight: 300 700;
+      font-display: swap;
+      src: url('fonts/Geist.woff2') format('woff2');
+    }
+    @font-face {
       font-family: 'Geist';
       font-style: normal;
       font-weight: 300 700;
@@ -14,15 +21,66 @@
     }
   </style>
   <style>
+    :root {
+      --canvas-bg: #eceae4;
+      --glass-bg: rgba(255,255,255,0.30);
+      --glass-filter: blur(26px) saturate(165%) contrast(106%) brightness(1.08);
+      --glass-border: rgba(255,255,255,0.72);
+      --glass-radius: 13px;
+      --glass-outer-padding: 4px;
+      --menu-item-block-padding: 4px;
+      --menu-content-inline-padding: 10px;
+      --glass-shadow:
+        0 18px 40px rgba(15,23,42,0.11),
+        0 5px 16px rgba(15,23,42,0.09),
+        0 0 0 0.5px rgba(65,70,76,0.30);
+      --glass-sheen:
+        radial-gradient(
+          140% 100% at 18% 0%,
+          rgba(255,255,255,0.55),
+          rgba(255,255,255,0.14) 36%,
+          transparent 64%
+        ),
+        linear-gradient(
+          180deg,
+          rgba(255,255,255,0.20),
+          rgba(255,255,255,0.06) 50%,
+          rgba(0,0,0,0.035)
+      );
+      --menu-text: rgba(13,17,23,0.84);
+      --menu-text-active: rgba(13,17,23,0.96);
+      --text-muted: rgba(13,17,23,0.52);
+      --island-text: var(--menu-text);
+      --island-status-text: rgba(13,17,23,0.72);
+      --canvas-text: #111418;
+      --dialog-overlay-bg: rgba(255,255,255,0.28);
+      --dialog-cancel-bg: rgba(0,0,0,0.08);
+      --dialog-cancel-bg-hover: rgba(0,0,0,0.12);
+      --dialog-cancel-text: rgba(13,17,23,0.88);
+      --selection-handle-bg: #f8fafc;
+      --selection-handle-shadow: 0 1px 3px rgba(0,0,0,0.28);
+      --menu-hover-bg: rgba(248,251,255,0.34);
+      --menu-hover-shadow:
+        0 1px 3px rgba(15,23,42,0.08),
+        inset 0 1px 0 rgba(255,255,255,0.78),
+        inset 0 -1px 0 rgba(15,23,42,0.045),
+        inset 0 0 0 0.5px rgba(15,23,42,0.12);
+      --separator: rgba(0,0,0,0.11);
+      --glass-ui-letter-spacing: 0;
+      --glass-ui-font-weight: 450;
+      --dialog-title-font-weight: 650;
+      --dialog-button-shadow: inset 0 1px 0 rgba(255,255,255,0.58);
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       width: 100vw;
       height: 100vh;
       overflow: hidden;
-      background: #1c1c1e;
+      background: var(--canvas-bg);
       user-select: none;
-      font-family: 'Geist', 'Geist Sans', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
+      font-family: 'Geist Sans', 'Geist', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
     }
 
     #canvas {
@@ -34,7 +92,7 @@
     }
 
     #canvas {
-      background: #1c1c1e;
+      background: var(--canvas-bg);
     }
 
     #canvas.panning    { cursor: grabbing !important; }
@@ -45,6 +103,7 @@
       top: 0; left: 0;
       width: 100%; height: 100%;
       display: block;
+      z-index: 0;
     }
 
     #mac-titlebar {
@@ -96,8 +155,9 @@
       position: absolute;
       width: 7px;
       height: 7px;
-      background: #fff;
+      background: var(--selection-handle-bg);
       border-radius: 1px;
+      box-shadow: var(--selection-handle-shadow);
       pointer-events: all;
     }
     .s-handle[data-dir="nw"] { top: -4px;    left: -4px;   cursor: nw-resize; }
@@ -125,20 +185,22 @@
     /* ── Context menu — Liquid Glass ── */
     #ctx-menu {
       position: fixed;
-      background: rgba(28, 28, 30, 0.72);
-      backdrop-filter: blur(48px) saturate(200%);
-      -webkit-backdrop-filter: blur(48px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      border-radius: 12px;
-      box-shadow:
-        0 24px 64px rgba(0,0,0,0.4),
-        0 4px 16px rgba(0,0,0,0.2),
-        inset 0 1px 0 rgba(255,255,255,0.1);
+      background: var(--glass-bg);
+      backdrop-filter: var(--glass-filter);
+      -webkit-backdrop-filter: var(--glass-filter);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--glass-radius);
+      clip-path: none;
+      box-shadow: var(--glass-shadow);
+      filter: none;
       z-index: 99999;
-      min-width: 220px;
-      padding: 5px;
+      min-width: 200px;
+      padding: var(--glass-outer-padding);
       display: none;
       overflow: hidden;
+      isolation: isolate;
+      transform: translateZ(0);
+      -webkit-mask-image: -webkit-radial-gradient(white, black);
       user-select: none;
       -webkit-user-select: none;
     }
@@ -150,20 +212,22 @@
 
     #obj-ctx-menu {
       position: fixed;
-      background: rgba(28, 28, 30, 0.72);
-      backdrop-filter: blur(48px) saturate(200%);
-      -webkit-backdrop-filter: blur(48px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      border-radius: 12px;
-      box-shadow:
-        0 24px 64px rgba(0,0,0,0.4),
-        0 4px 16px rgba(0,0,0,0.2),
-        inset 0 1px 0 rgba(255,255,255,0.1);
+      background: var(--glass-bg);
+      backdrop-filter: var(--glass-filter);
+      -webkit-backdrop-filter: var(--glass-filter);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--glass-radius);
+      clip-path: none;
+      box-shadow: var(--glass-shadow);
+      filter: none;
       z-index: 99999;
       min-width: 160px;
-      padding: 5px;
+      padding: var(--glass-outer-padding);
       display: none;
       overflow: hidden;
+      isolation: isolate;
+      transform: translateZ(0);
+      -webkit-mask-image: -webkit-radial-gradient(white, black);
       user-select: none;
       -webkit-user-select: none;
     }
@@ -173,31 +237,61 @@
       -webkit-user-select: none;
     }
 
+    #ctx-menu::before,
+    #obj-ctx-menu::before,
+    #dialog::before,
+    #island::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      background: var(--glass-sheen);
+    }
+
+    #ctx-menu::after,
+    #obj-ctx-menu::after {
+      content: none;
+    }
+
+    #ctx-menu > *,
+    #obj-ctx-menu > *,
+    #dialog > *,
+    #island > * {
+      position: relative;
+      z-index: 1;
+    }
+
     .ctx-item {
       display: block;
       width: 100%;
-      padding: 4px 10px;
+      padding: var(--menu-item-block-padding) var(--menu-content-inline-padding);
       font-family: inherit;
       font-size: 13px;
-      color: rgba(255, 255, 255, 1);
+      font-weight: var(--glass-ui-font-weight);
+      color: var(--menu-text);
       background: transparent;
       border: none;
       border-radius: 7px;
       text-align: left;
       cursor: default;
-      letter-spacing: -0.01em;
+      letter-spacing: var(--glass-ui-letter-spacing);
       -webkit-font-smoothing: antialiased;
       user-select: none;
       -webkit-user-select: none;
-      transition: background 0.08s;
+      box-shadow: none;
+      transform: translateY(0);
+      transition: background 0.08s, box-shadow 0.08s, color 0.08s, transform 0.08s;
     }
-    .ctx-item:hover { background: rgba(255,255,255,0.1); color: #fff; }
-    .ctx-item:active { background: rgba(255,255,255,0.2); }
-
+    .ctx-item:hover {
+      background: var(--menu-hover-bg);
+      box-shadow: var(--menu-hover-shadow);
+      color: var(--menu-text-active);
+    }
     .ctx-sep {
       height: 1px;
-      background: rgba(255,255,255,0.1);
-      margin: 3px 5px;
+      background: var(--separator);
+      margin: 3px 10px;
       pointer-events: none;
       user-select: none;
       -webkit-user-select: none;
@@ -211,16 +305,15 @@
       transform: translateX(-50%);
       user-select: none;
       -webkit-user-select: none;
-      background: rgba(28, 28, 30, 0.72);
-      backdrop-filter: blur(48px) saturate(200%);
-      -webkit-backdrop-filter: blur(48px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      border-radius: 12px;
+      background: var(--glass-bg);
+      backdrop-filter: var(--glass-filter);
+      -webkit-backdrop-filter: var(--glass-filter);
+      border: 1px solid var(--glass-border);
+      border-radius: 999px;
       box-shadow:
-        0 24px 64px rgba(0,0,0,0.4),
-        0 4px 16px rgba(0,0,0,0.2),
-        inset 0 1px 0 rgba(255,255,255,0.1);
-      padding: 5px;
+        0 18px 40px rgba(15,23,42,0.11),
+        0 5px 16px rgba(15,23,42,0.09);
+      padding: 4px;
       display: flex;
       align-items: center;
       z-index: 9000;
@@ -234,8 +327,9 @@
       padding: 4px 10px;
       font-family: inherit;
       font-size: 13px;
-      color: rgba(255, 255, 255, 0.5);
-      letter-spacing: -0.01em;
+      font-weight: var(--glass-ui-font-weight);
+      color: var(--island-text);
+      letter-spacing: var(--glass-ui-letter-spacing);
       -webkit-font-smoothing: antialiased;
       white-space: nowrap;
       min-width: 44px;
@@ -253,7 +347,8 @@
       padding: 4px 10px;
       font-family: inherit;
       font-size: 13px;
-      letter-spacing: -0.01em;
+      font-weight: var(--glass-ui-font-weight);
+      letter-spacing: var(--glass-ui-letter-spacing);
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
       box-sizing: border-box;
@@ -284,7 +379,7 @@
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.36);
+      background: var(--dialog-overlay-bg);
       backdrop-filter: blur(12px) saturate(150%);
       -webkit-backdrop-filter: blur(12px) saturate(150%);
       z-index: 9999999;
@@ -300,17 +395,15 @@
     }
 
     #dialog {
-      background: rgba(28, 28, 30, 0.72);
-      backdrop-filter: blur(48px) saturate(200%);
-      -webkit-backdrop-filter: blur(48px) saturate(200%);
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      border-radius: 12px;
-      box-shadow:
-        0 24px 64px rgba(0,0,0,0.4),
-        0 4px 16px rgba(0,0,0,0.2),
-        inset 0 1px 0 rgba(255,255,255,0.1);
-      width: 260px;
-      padding: 5px;
+      position: relative;
+      background: var(--glass-bg);
+      backdrop-filter: var(--glass-filter);
+      -webkit-backdrop-filter: var(--glass-filter);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--glass-radius);
+      box-shadow: var(--glass-shadow);
+      width: 250px;
+      padding: var(--glass-outer-padding);
       display: flex;
       flex-direction: column;
       gap: 0;
@@ -320,24 +413,28 @@
     #dialog-body {
       display: flex;
       flex-direction: column;
-      gap: 3px;
-      padding: 6px 10px 8px;
+      gap: 0;
+      padding: 0;
+    }
+
+    #dialog-title,
+    #dialog-msg {
+      padding: var(--menu-item-block-padding) var(--menu-content-inline-padding);
+      font-size: 13px;
+      color: var(--menu-text);
+      line-height: normal;
+      letter-spacing: var(--glass-ui-letter-spacing);
+      pointer-events: none;
     }
 
     #dialog-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: rgba(255,255,255,1);
-      letter-spacing: -0.02em;
-      line-height: 1.3;
+      font-weight: var(--dialog-title-font-weight);
       -webkit-font-smoothing: antialiased;
     }
 
     #dialog-msg {
-      font-size: 13px;
-      color: rgba(255,255,255,0.5);
-      line-height: 1.4;
-      letter-spacing: -0.01em;
+      font-weight: var(--glass-ui-font-weight);
+      color: var(--text-muted);
       -webkit-font-smoothing: antialiased;
     }
 
@@ -345,24 +442,28 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 4px 5px;
+      padding: 0;
     }
 
     #dlg-right {
       display: flex;
-      gap: 6px;
+      gap: var(--glass-outer-padding);
     }
 
     #dialog-btns button {
-      padding: 4px 10px;
+      width: auto;
+      padding: var(--menu-item-block-padding) var(--menu-content-inline-padding);
       border-radius: 7px;
       font-family: inherit;
       font-size: 13px;
-      letter-spacing: -0.01em;
+      font-weight: var(--glass-ui-font-weight);
+      letter-spacing: var(--glass-ui-letter-spacing);
       cursor: default;
       -webkit-font-smoothing: antialiased;
-      transition: background 0.08s, opacity 0.1s;
+      box-shadow: var(--dialog-button-shadow);
+      transition: background 0.08s, opacity 0.1s, box-shadow 0.08s;
       border: none;
+      text-align: center;
     }
 
     #dlg-discard {
@@ -374,21 +475,21 @@
     #dlg-discard:active { opacity: 0.82; }
 
     #dlg-cancel {
-      background: rgba(255,255,255,0.1);
+      background: var(--dialog-cancel-bg);
       border: none;
-      color: rgba(255,255,255,1);
-      font-weight: 400;
+      color: var(--dialog-cancel-text);
+      font-weight: var(--glass-ui-font-weight);
     }
-    #dlg-cancel:hover { background: rgba(255,255,255,0.16); }
+    #dlg-cancel:hover { background: var(--dialog-cancel-bg-hover); }
 
     #dlg-save {
       background: #0A84FF;
       border: none;
       color: #ffffff;
-      box-shadow: none;
+      box-shadow: var(--dialog-button-shadow);
     }
     #dlg-save:hover { background: #409CFF; }
-    #dlg-save:active { opacity: 0.85; }
+    #dialog-btns button:active { opacity: 0.85; }
 
   </style>
 </head>
