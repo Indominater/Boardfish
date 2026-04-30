@@ -67,19 +67,6 @@
       -webkit-user-select: none;
     }
 
-    #mac-titlebar-title {
-      max-width: calc(100vw - 220px);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      pointer-events: none;
-      font-size: 13px;
-      font-weight: 400;
-      letter-spacing: -0.01em;
-      color: rgba(255, 255, 255, 0.5);
-      -webkit-font-smoothing: antialiased;
-    }
-
     /* ── Selection overlay ── */
     #sel-overlay {
       position: absolute;
@@ -152,8 +139,14 @@
       padding: 5px;
       display: none;
       overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
     }
     #ctx-menu.visible { display: block; }
+    #ctx-menu * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
 
     #obj-ctx-menu {
       position: fixed;
@@ -171,8 +164,14 @@
       padding: 5px;
       display: none;
       overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
     }
     #obj-ctx-menu.visible { display: block; }
+    #obj-ctx-menu * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
 
     .ctx-item {
       display: block;
@@ -188,6 +187,8 @@
       cursor: default;
       letter-spacing: -0.01em;
       -webkit-font-smoothing: antialiased;
+      user-select: none;
+      -webkit-user-select: none;
       transition: background 0.08s;
     }
     .ctx-item:hover { background: rgba(255,255,255,0.1); color: #fff; }
@@ -197,6 +198,9 @@
       height: 1px;
       background: rgba(255,255,255,0.1);
       margin: 3px 5px;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     /* ── Island ── */
@@ -286,8 +290,14 @@
       z-index: 9999999;
       align-items: center;
       justify-content: center;
+      user-select: none;
+      -webkit-user-select: none;
     }
     #dialog-overlay.show { display: flex; }
+    #dialog-overlay * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
 
     #dialog {
       background: rgba(28, 28, 30, 0.72);
@@ -383,9 +393,7 @@
   </style>
 </head>
 <body>
-  <div id="mac-titlebar" data-tauri-drag-region>
-    <div id="mac-titlebar-title">Boardfish — Untitled</div>
-  </div>
+  <div id="mac-titlebar" data-tauri-drag-region></div>
 
   <div id="canvas">
     <canvas id="board-canvas"></canvas>
