@@ -8052,6 +8052,18 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function nextAnimationFrame() {
+  return new Promise(resolve => requestAnimationFrame(() => resolve()));
+}
+
+async function letExportUiPaint(dbg, phase) {
+  const t0 = performance.now();
+  ExportDebug.step(dbg, 'ui:paint-wait:start', { phase });
+  await nextAnimationFrame();
+  await nextAnimationFrame();
+  ExportDebug.step(dbg, 'ui:paint-wait:end', { phase, ms: performance.now() - t0 });
+}
+
 function createExportProgressUpdater(totalCount, busyPill) {
   let progressText = exportProgressText(totalCount, 0);
   ExportDebug.recordProgressUi({
@@ -8078,19 +8090,27 @@ function createExportProgressUpdater(totalCount, busyPill) {
   };
 }
 
+function exportResolveConcurrency() {
+  return 3;
+}
+
 // Resolves a list of image objects to img_keys for native folder export.
 // Transformed native images stay in Rust: the existing cached source is decoded,
 // transformed into a temp cache key, and saved by key without JS base64/canvas IPC.
 async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
-  const nativeConcurrency = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1));
+  const nativeConcurrency = exportResolveConcurrency();
   let processed = 0;
   let keyCount = 0;
   let renderedCount = 0;
-  ExportDebug.recordResolveStart({ imageCount: imageObjs.length, concurrency: nativeConcurrency });
+  ExportDebug.recordResolveStart({
+    imageCount: imageObjs.length,
+    concurrency: nativeConcurrency,
+    hardwareConcurrency: navigator.hardwareConcurrency || '',
+  });
 
   const results = await mapWithConcurrency(imageObjs, nativeConcurrency, async (obj, index) => {
     const imgKey = obj.data?.imgKey;
-    const progress = (meta = {}) => {
+    const progress = async (meta = {}) => {
       processed++;
       ExportDebug.recordResolveProgress({
         processed,
@@ -8117,6 +8137,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
           ...meta,
         });
       }
+      if (processed % 3 === 0 || processed === imageObjs.length) await delay(0);
     };
 
     if (!imageNeedsRendering(obj)) {
@@ -8131,7 +8152,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
         ms: performance.now() - itemStart,
         phase: 'passthrough',
       });
-      progress({ index, imgKey, nativeTransform: false });
+      await progress({ index, imgKey, nativeTransform: false });
       return { key: imgKey, tempKey: null, rendered: false };
     }
 
@@ -8182,7 +8203,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
           transformMs: result?.transformMs ?? '',
           encodeMs: result?.encodeMs ?? '',
         });
-        progress({ index, imgKey, nativeTransform: true });
+        await progress({ index, imgKey, nativeTransform: true });
         return { key: tempKey, tempKey, rendered: true };
       } catch (err) {
         ExportDebug.step(dbg, 'native-transform-image:error', { index, imgKey, tempKey, ms: performance.now() - nativeStart, error: String(err) });
@@ -8204,7 +8225,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
           ms: performance.now() - renderStart,
           error: 'render returned empty data URL',
         });
-        progress({ index, imgKey, fallbackRender: true, skipped: true });
+        await progress({ index, imgKey, fallbackRender: true, skipped: true });
         return null;
       }
       await ExportDebug.invoke(dbg, 'register_image_source', { imgKey: tempKey, dataUrl }, { imgKey: tempKey, dataUrlLen: dataUrl.length });
@@ -8221,7 +8242,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
         phase: 'fallback-render',
         ms: performance.now() - renderStart,
       });
-      progress({ index, imgKey, fallbackRender: true });
+      await progress({ index, imgKey, fallbackRender: true });
       return { key: tempKey, tempKey, rendered: true };
     } catch (err) {
       ExportDebug.step(dbg, 'rendered-image:error', { imgKey, ms: performance.now() - renderStart, error: String(err) });
@@ -8234,7 +8255,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
         ms: performance.now() - renderStart,
         error: String(err),
       });
-      progress({ index, imgKey, fallbackRender: true, error: String(err) });
+      await progress({ index, imgKey, fallbackRender: true, error: String(err) });
       return null;
     }
   });
@@ -8282,7 +8303,7 @@ function normalizeExportSaveResult(result) {
   };
 }
 
-async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 10, onProgress = null) {
+async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 3, onProgress = null) {
   const stopWatch = ExportDebug.watch(dbg, 'save-batches', { keyCount: keys.length, batchSize });
   ExportDebug.recordSaveStart({ keyCount: keys.length, batchSize, batchCount: Math.ceil(keys.length / batchSize) });
   let savedCount = 0;
@@ -8377,6 +8398,7 @@ async function saveSelectedImages() {
       if (!folder) { hideInputShield(); stopTotalWatch({ cancelled: true }); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
       busyPill = startIslandBusyMsg(`0/${selectedObjs.length}`);
       const updateProgress = createExportProgressUpdater(selectedObjs.length, busyPill);
+      await letExportUiPaint(dbg, 'before-resolve-keys');
       const stopResolveWatch = ExportDebug.watch(dbg, 'resolve-keys', { imageCount: selectedObjs.length });
       const resolved = await resolveExportKeys(selectedObjs, dbg, ({ preparedCount }) => {
         updateProgress('prepare-progress', preparedCount);
@@ -8386,7 +8408,7 @@ async function saveSelectedImages() {
       ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
       if (keys.length < 2) { busyPill.done(); hideInputShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'too-few-keys' }); return; }
       updateProgress('save-start', selectedObjs.length, {}, true);
-      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 10, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
+      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 3, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
         updateProgress('save-progress', selectedObjs.length, { batchIndex, batchCount, savedKeyCount: finishedCount, keyCount: totalCount });
       });
       const savedCount = typeof saveResult === 'number' ? saveResult : (saveResult?.savedCount || 0);
@@ -8438,6 +8460,7 @@ async function exportAllImages() {
       if (!folder) { hideInputShield(); stopTotalWatch({ cancelled: true }); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
       busyPill = startIslandBusyMsg(`0/${imageObjs.length}`);
       const updateProgress = createExportProgressUpdater(imageObjs.length, busyPill);
+      await letExportUiPaint(dbg, 'before-resolve-keys');
       const stopResolveWatch = ExportDebug.watch(dbg, 'resolve-keys', { imageCount: imageObjs.length });
       const resolved = await resolveExportKeys(imageObjs, dbg, ({ preparedCount }) => {
         updateProgress('prepare-progress', preparedCount);
@@ -8447,7 +8470,7 @@ async function exportAllImages() {
       ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
       if (!keys.length) { busyPill.done(); hideInputShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' }); return; }
       updateProgress('save-start', imageObjs.length, {}, true);
-      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 10, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
+      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 3, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
         updateProgress('save-progress', imageObjs.length, { batchIndex, batchCount, savedKeyCount: finishedCount, keyCount: totalCount });
       });
       const savedCount = typeof saveResult === 'number' ? saveResult : (saveResult?.savedCount || 0);
