@@ -6578,13 +6578,17 @@ function updateObjMenuActions() {
     const o = objectsMap.get(id);
     if (o && o.type === 'image') imageCount++;
   }
+  const multiSelected = isMultiSelected();
   if (copyBtn) copyBtn.style.display = 'block';
   if (imageActionsSep) imageActionsSep.style.display = imageCount >= 1 ? 'block' : 'none';
   if (flipHorizontalBtn) flipHorizontalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
   if (flipVerticalBtn) flipVerticalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
   if (rotateBtn) rotateBtn.style.display = imageCount >= 1 ? 'block' : 'none';
-  if (saveImageBtn) saveImageBtn.style.display = imageCount === 1 ? 'block' : 'none';
-  if (saveImagesBtn) saveImagesBtn.style.display = imageCount >= 2 ? 'block' : 'none';
+  if (saveImageBtn) saveImageBtn.style.display = !multiSelected && imageCount === 1 ? 'block' : 'none';
+  if (saveImagesBtn) {
+    saveImagesBtn.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
+    saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? 'block' : 'none';
+  }
   if (exportSep) exportSep.style.display = imageCount >= 1 ? 'block' : 'none';
 }
 
@@ -7985,12 +7989,11 @@ async function saveSelectedImage() {
   if (imageObjs.length !== 1) { ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length }); return; }
   const obj = imageObjs[0];
   const releaseInputShield = acquireInputShield();
-  const busyPill = window.__TAURI__ ? startIslandBusyMsg('Exporting Image') : null;
 
   ExportDebug.step(dbg, 'render:start');
   const src = await getRenderedImageDataUrl(obj, dbg);
   ExportDebug.step(dbg, 'render:complete', { hasDataUrl: !!src });
-  if (!src) { if (busyPill) busyPill.done(); releaseInputShield(); ExportDebug.end(dbg, { skipped: true, reason: 'no-dataurl' }); return; }
+  if (!src) { releaseInputShield(); ExportDebug.end(dbg, { skipped: true, reason: 'no-dataurl' }); return; }
 
   const ext = guessImageExtFromDataUrl(src);
   const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
@@ -7998,12 +8001,17 @@ async function saveSelectedImage() {
 
   if (window.__TAURI__) {
     try {
-      const saved = await ExportDebug.invoke(dbg, 'save_image_as', { dataUrl: src, defaultName }, { defaultName });
-      ExportDebug.end(dbg, { saved });
-      if (saved) busyPill.done('Image Exported', 1500, releaseInputShield);
-      else { busyPill.done(); releaseInputShield(); }
+      const path = await ExportDebug.invoke(dbg, 'save_image_file_dialog', { defaultName }, { defaultName });
+      ExportDebug.step(dbg, 'image:path-selected', { selected: !!path });
+      if (!path) {
+        releaseInputShield();
+        ExportDebug.end(dbg, { saved: false, cancelled: true });
+        return;
+      }
+      await ExportDebug.invoke(dbg, 'write_image_file', { path, dataUrl: src }, { defaultName, dataUrlLen: src.length });
+      ExportDebug.end(dbg, { saved: true });
+      showIslandMsg('Image Exported', 1500, releaseInputShield);
     } catch (err) {
-      busyPill.done();
       releaseInputShield();
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Save image failed:', err);
@@ -8369,13 +8377,14 @@ async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 3,
 async function saveSelectedImages() {
   const dbg = ExportDebug.start('exportImages', { selectedCount: selectedIds.size });
   const stopTotalWatch = ExportDebug.watch(dbg, 'export-total', { mode: 'selected' }, 5000);
+  const multiSelection = isMultiSelected();
   const selectedObjs = [];
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj || obj.type !== 'image') continue;
     selectedObjs.push(obj);
   }
-  if (selectedObjs.length < 2) { stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, imageCount: selectedObjs.length }); hideInputShield(); return; }
+  if (!multiSelection || selectedObjs.length < 1) { stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, imageCount: selectedObjs.length, multiSelection }); hideInputShield(); return; }
   ExportDebug.step(dbg, 'images:found', { imageCount: selectedObjs.length });
   ExportDebug.startMassive('exportImages', selectedObjs);
 
@@ -8396,7 +8405,7 @@ async function saveSelectedImages() {
       const keys = resolved.keys;
       tempKeys = resolved.tempKeys;
       ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
-      if (keys.length < 2) { busyPill.done(); hideInputShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'too-few-keys' }); return; }
+      if (!keys.length) { busyPill.done(); hideInputShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' }); return; }
       updateProgress('save-start', selectedObjs.length, {}, true);
       const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 3, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
         updateProgress('save-progress', selectedObjs.length, { batchIndex, batchCount, savedKeyCount: finishedCount, keyCount: totalCount });
@@ -8505,7 +8514,6 @@ async function exportAllText() {
   ExportDebug.step(dbg, 'combined', { textCount: textObjs.length, combinedLen: combined.length });
 
   if (window.__TAURI__) {
-    let busyPill = null;
     try {
       const path = await ExportDebug.invoke(dbg, 'save_text_file_dialog', {}, { textCount: textObjs.length });
       ExportDebug.step(dbg, 'text:path-selected', { selected: !!path });
@@ -8514,17 +8522,11 @@ async function exportAllText() {
         ExportDebug.end(dbg, { saved: false, cancelled: true });
         return;
       }
-      busyPill = startIslandBusyMsg('Exporting Text');
       await ExportDebug.invoke(dbg, 'write_text_file', { path, text: combined }, { textCount: textObjs.length, textLen: combined.length });
       ExportDebug.end(dbg, { saved: true });
-      busyPill.done('Text Exported', 1500, releaseInputShield);
+      showIslandMsg('Text Exported', 1500, releaseInputShield);
     } catch (err) {
-      if (busyPill) {
-        busyPill.done();
-        releaseInputShield();
-      } else {
-        releaseInputShield();
-      }
+      releaseInputShield();
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Export all text failed:', err);
     }

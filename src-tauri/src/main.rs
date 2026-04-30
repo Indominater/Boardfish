@@ -90,6 +90,22 @@ unsafe fn setup_termination_intercept(app_handle: tauri::AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
+unsafe fn center_macos_title_bar(window: &tauri::WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let Ok(ns_window_ptr) = window.ns_window() else {
+        return;
+    };
+    let ns_window = &*(ns_window_ptr as *mut AnyObject);
+    let style_mask: usize = msg_send![ns_window, styleMask];
+    let centered_style_mask = style_mask & !(1usize << 15);
+    let _: () = msg_send![ns_window, setStyleMask: centered_style_mask];
+    let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: false];
+    let _: () = msg_send![ns_window, setTitleVisibility: 0isize];
+}
+
+#[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID};
 use tauri::{Emitter, Manager};
 
@@ -684,16 +700,13 @@ async fn write_text_file(path: String, text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn save_image_as(
+async fn save_image_file_dialog(
     app: tauri::AppHandle,
-    data_url: String,
     default_name: Option<String>,
-) -> Result<bool, String> {
-    use base64::{engine::general_purpose, Engine as _};
+) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
-    let (_, base64_data) = data_url.split_once(',').ok_or("invalid data URL")?;
-    let path = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let mut builder = app
             .dialog()
             .file()
@@ -704,19 +717,21 @@ async fn save_image_as(
         builder.blocking_save_file().map(|p| p.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
 
-    let Some(path) = path else {
-        return Ok(false);
-    };
+#[tauri::command]
+async fn write_image_file(path: String, data_url: String) -> Result<(), String> {
+    use base64::{engine::general_purpose, Engine as _};
 
+    let (_, base64_data) = data_url.split_once(',').ok_or("invalid data URL")?;
     let bytes = general_purpose::STANDARD
         .decode(base64_data)
         .map_err(|e| e.to_string())?;
     tokio::fs::write(path, &bytes)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(true)
+    Ok(())
 }
 
 fn ext_from_data_url_header(header: &str) -> &'static str {
@@ -1372,7 +1387,8 @@ fn main() {
             open_file_dialog,
             pick_image_files,
             save_file_dialog,
-            save_image_as,
+            save_image_file_dialog,
+            write_image_file,
             pick_folder,
             save_images_to_existing_folder_by_keys,
             set_title,
@@ -1516,6 +1532,9 @@ fn main() {
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title_bar_style(tauri::TitleBarStyle::Visible);
+                unsafe {
+                    center_macos_title_bar(&window);
+                }
             }
 
             #[cfg(target_os = "macos")]
