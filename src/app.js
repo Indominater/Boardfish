@@ -26,6 +26,7 @@ const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
+const IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 const DEBUG_TOOLS_RELEASE_ENABLED = true;
 const DEBUG_TOOLS_ENABLED = (() => {
   if (!DEBUG_TOOLS_RELEASE_ENABLED) return false;
@@ -689,6 +690,9 @@ const ViewportDebug = (() => {
   function summary() {
     const rows = [
       { metric: 'wheel', value: stats.wheel },
+      { metric: 'perfMode', value: viewportPerfModeSummary().label },
+      { metric: 'cullingEnabled', value: viewportCullingEnabled },
+      { metric: 'scaling025Enabled', value: viewportImageScalingEnabled },
       { metric: 'wheelPan', value: stats.wheelPan },
       { metric: 'wheelZoom', value: stats.wheelZoom },
       { metric: 'mousePanMoves', value: stats.mousePanMoves },
@@ -891,6 +895,7 @@ const ViewportDebug = (() => {
       evictions: imageScaledVariantEvictionCount,
       memorySkips: imageScaledVariantMemorySkipCount,
       levels: IMAGE_SCALE_LEVELS.join(','),
+      enabled: viewportImageScalingEnabled,
       qualityBuffer: IMAGE_SCALE_QUALITY_BUFFER,
     };
     console.table([out]);
@@ -931,6 +936,7 @@ const ViewportDebug = (() => {
     }
     const out = {
       paddingPx: VIEWPORT_CULL_PADDING_PX,
+      enabled: viewportCullingEnabled,
       zoom: Math.round(zoom * 1000) / 1000,
       padWorld: Math.round((VIEWPORT_CULL_PADDING_PX / Math.max(zoom, 0.001)) * 100) / 100,
       visibleImages,
@@ -1039,6 +1045,8 @@ const ViewportDebug = (() => {
     imageHealthSummary,
     imageScaleCacheSummary,
     cullingSummary,
+    setPerfMode: setViewportPerfMode,
+    perfMode: viewportPerfModeSummary,
     transformSummary,
     slowFrames,
     dump,
@@ -3530,7 +3538,7 @@ async function _rebuildOffscreenAsync() {
   const viewportRect = currentViewportWorldRect();
   for (const obj of objects) {
     if (obj.id === editingId) continue;
-    if (!objectIntersectsRect(obj, viewportRect)) continue;
+    if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) continue;
     drawSingleObj(_offCtx, obj);
   }
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -3768,6 +3776,12 @@ function isDrawableImageSource(source) {
 const IMAGE_SCALE_LEVELS = [0.25];
 const IMAGE_SCALE_QUALITY_BUFFER = 1;
 const IMAGE_VARIANT_MEMORY_LIMIT = 512 * 1024 * 1024;
+const VIEWPORT_PERF_MODES = {
+  '1': { label: 'culling + 0.25', culling: true, scaling: true },
+  '2': { label: '0.25 only', culling: false, scaling: true },
+  '3': { label: 'culling only', culling: true, scaling: false },
+  '4': { label: 'none', culling: false, scaling: false },
+};
 const imageScaledBitmapCache = new Map(); // key -> Map(scale -> { bitmap, bytes, lastUsed })
 const imageScaledBitmapPending = new Set();
 const imageScaledBitmapPendingBytes = new Map();
@@ -3786,6 +3800,8 @@ let imageScaledVariantResizeBitmapCount = 0;
 let imageScaledVariantCanvasFallbackCount = 0;
 let imageScaledVariantEvictionCount = 0;
 let imageScaledVariantMemorySkipCount = 0;
+let viewportCullingEnabled = true;
+let viewportImageScalingEnabled = !IS_MAC;
 
 function bitmapByteSize(bitmap) {
   return (bitmap?.width || 0) * (bitmap?.height || 0) * 4;
@@ -3999,6 +4015,7 @@ function queueScaledImageVariant(key, source, scale) {
 }
 
 function selectImageSourceForDraw(key, obj, fullSource) {
+  if (!viewportImageScalingEnabled) return { source: fullSource, scale: 1, targetScale: 1, disabled: true };
   const targetScale = chooseImageScaleForDraw(obj, fullSource);
   const map = imageScaledBitmapCache.get(key);
   if (map && targetScale < 1) {
@@ -4013,6 +4030,34 @@ function selectImageSourceForDraw(key, obj, fullSource) {
   }
   queueScaledImageVariant(key, fullSource, targetScale);
   return { source: fullSource, scale: 1, targetScale };
+}
+
+function setViewportPerfMode(modeKey) {
+  const mode = VIEWPORT_PERF_MODES[String(modeKey)];
+  if (!mode) return null;
+  viewportCullingEnabled = !!mode.culling;
+  viewportImageScalingEnabled = !!mode.scaling;
+  if (!viewportImageScalingEnabled) clearScaledImageVariants();
+  invalidateOffscreen();
+  scheduleRender(true, false, `viewport-perf-mode-${modeKey}`);
+  const out = viewportPerfModeSummary(modeKey);
+  console.info(`[Boardfish viewport] mode ${modeKey}: ${mode.label}`);
+  return out;
+}
+
+function viewportPerfModeSummary(modeKey = null) {
+  const active = Object.entries(VIEWPORT_PERF_MODES).find(([, mode]) => (
+    mode.culling === viewportCullingEnabled && mode.scaling === viewportImageScalingEnabled
+  ));
+  const key = modeKey || active?.[0] || '';
+  const mode = VIEWPORT_PERF_MODES[key] || active?.[1] || {};
+  return {
+    key,
+    label: mode.label || 'custom',
+    culling: viewportCullingEnabled,
+    scaling025: viewportImageScalingEnabled,
+    scaleLevels: viewportImageScalingEnabled ? IMAGE_SCALE_LEVELS.join(',') : 'off',
+  };
 }
 
 const VIEWPORT_CULL_PADDING_PX = 256;
@@ -4138,7 +4183,7 @@ function drawBoard() {
       ctx.textBaseline = 'top';
       for (const obj of objects) {
         if (obj.id === editingId) continue;
-        if (!objectIntersectsRect(obj, viewportRect)) {
+        if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) {
           countCulledObject(obj, counters);
           continue;
         }
@@ -4210,7 +4255,7 @@ function drawBoard() {
     ctx.font = FONT;
     ctx.textBaseline = 'top';
     for (const obj of objects) {
-      if (!objectIntersectsRect(obj, viewportRect)) {
+      if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) {
         countCulledObject(obj, counters);
         continue;
       }
