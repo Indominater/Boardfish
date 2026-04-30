@@ -8054,12 +8054,59 @@ function guessImageExtFromDataUrl(dataUrl) {
   return 'png';
 }
 
+function guessImageExtForObjectExport(obj) {
+  if (imageNeedsRendering(obj)) return 'png';
+  const src = imageStore[obj?.data?.imgKey];
+  if (isNativeImageRef(src)) return src.ext === 'jpeg' ? 'jpg' : (src.ext || 'png');
+  if (typeof src === 'string') return guessImageExtFromDataUrl(src);
+  return 'png';
+}
+
 async function saveSelectedImage() {
   const dbg = ExportDebug.start('exportImage', { selectedCount: selectedIds.size });
   const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
   if (imageObjs.length !== 1) { ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length }); return; }
   const obj = imageObjs[0];
   const releaseInputShield = acquireInputShield();
+
+  if (window.__TAURI__) {
+    let tempKeys = [];
+    try {
+      const ext = guessImageExtForObjectExport(obj);
+      const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
+      const defaultName = `image_${hex}.${ext}`;
+      ExportDebug.step(dbg, 'keys:resolve-start', { imageCount: 1, defaultName });
+      const resolved = await resolveExportKeys([obj], dbg);
+      tempKeys = resolved.tempKeys;
+      const key = resolved.keys[0];
+      ExportDebug.step(dbg, 'keys:ready', { keyCount: resolved.keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
+      if (!key) {
+        releaseInputShield();
+        ExportDebug.end(dbg, { skipped: true, reason: 'no-key' });
+        return;
+      }
+
+      const path = await ExportDebug.invoke(dbg, 'save_image_file_dialog', { defaultName }, { defaultName });
+      ExportDebug.step(dbg, 'image:path-selected', { selected: !!path });
+      if (!path) {
+        releaseInputShield();
+        ExportDebug.end(dbg, { saved: false, cancelled: true });
+        return;
+      }
+
+      const result = await ExportDebug.invoke(dbg, 'write_image_file_by_key', { path, imgKey: key }, { imgKey: key, path });
+      ExportDebug.end(dbg, { saved: true, bytesMB: result?.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : 0 });
+      showIslandMsg('Image Exported', 1500);
+      releaseInputShield();
+    } catch (err) {
+      releaseInputShield();
+      ExportDebug.end(dbg, { error: String(err) });
+      console.error('Save image failed:', err);
+    } finally {
+      cleanupExportTempKeys(tempKeys);
+    }
+    return;
+  }
 
   ExportDebug.step(dbg, 'render:start');
   const src = await getRenderedImageDataUrl(obj, dbg);
@@ -8069,26 +8116,6 @@ async function saveSelectedImage() {
   const ext = guessImageExtFromDataUrl(src);
   const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
   const defaultName = `image_${hex}.${ext}`;
-
-  if (window.__TAURI__) {
-    try {
-      const path = await ExportDebug.invoke(dbg, 'save_image_file_dialog', { defaultName }, { defaultName });
-      ExportDebug.step(dbg, 'image:path-selected', { selected: !!path });
-      if (!path) {
-        releaseInputShield();
-        ExportDebug.end(dbg, { saved: false, cancelled: true });
-        return;
-      }
-      await ExportDebug.invoke(dbg, 'write_image_file', { path, dataUrl: src }, { defaultName, dataUrlLen: src.length });
-      ExportDebug.end(dbg, { saved: true });
-      showIslandMsg('Image Exported', 1500, releaseInputShield);
-    } catch (err) {
-      releaseInputShield();
-      ExportDebug.end(dbg, { error: String(err) });
-      console.error('Save image failed:', err);
-    }
-    return;
-  }
 
   const a = document.createElement('a');
   a.href = src;

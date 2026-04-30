@@ -741,6 +741,32 @@ async fn write_image_file(path: String, data_url: String) -> Result<(), String> 
     Ok(())
 }
 
+#[tauri::command]
+async fn write_image_file_by_key(
+    state: tauri::State<'_, ImageSourceCache>,
+    path: String,
+    img_key: String,
+) -> Result<serde_json::Value, String> {
+    let source = {
+        let cache = state.0.lock().map_err(|e| e.to_string())?;
+        cache
+            .get(&img_key)
+            .cloned()
+            .ok_or_else(|| format!("image source cache missing for {img_key}"))?
+    };
+    let bytes = source.bytes.len();
+    let mime = source.mime.clone();
+    let ext = source.ext.clone();
+    tokio::fs::write(path, &*source.bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "bytes": bytes,
+        "mime": mime,
+        "ext": ext,
+    }))
+}
+
 fn ext_from_data_url_header(header: &str) -> &'static str {
     if header.starts_with("data:image/jpeg") {
         "jpg"
@@ -1401,6 +1427,7 @@ fn main() {
             save_file_dialog,
             save_image_file_dialog,
             write_image_file,
+            write_image_file_by_key,
             pick_folder,
             save_images_to_existing_folder_by_keys,
             set_title,
