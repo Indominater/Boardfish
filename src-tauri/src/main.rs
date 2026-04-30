@@ -90,19 +90,35 @@ unsafe fn setup_termination_intercept(app_handle: tauri::AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn center_macos_title_bar(window: &tauri::WebviewWindow) {
+unsafe fn center_macos_ns_title_bar(ns_window_ptr: *mut std::ffi::c_void) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
-    let Ok(ns_window_ptr) = window.ns_window() else {
+    if ns_window_ptr.is_null() {
         return;
-    };
+    }
+
     let ns_window = &*(ns_window_ptr as *mut AnyObject);
     let style_mask: usize = msg_send![ns_window, styleMask];
     let centered_style_mask = style_mask & !(1usize << 15);
     let _: () = msg_send![ns_window, setStyleMask: centered_style_mask];
     let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: false];
+    let _: () = msg_send![ns_window, setToolbarStyle: 1isize];
     let _: () = msg_send![ns_window, setTitleVisibility: 0isize];
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn center_macos_window_title_bar(window: &tauri::Window) {
+    if let Ok(ns_window_ptr) = window.ns_window() {
+        center_macos_ns_title_bar(ns_window_ptr);
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn center_macos_webview_title_bar(window: &tauri::WebviewWindow) {
+    if let Ok(ns_window_ptr) = window.ns_window() {
+        center_macos_ns_title_bar(ns_window_ptr);
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -991,6 +1007,10 @@ async fn save_images_to_existing_folder_by_keys(
 #[tauri::command]
 fn set_title(window: tauri::Window, title: String) {
     window.set_title(&title).ok();
+    #[cfg(target_os = "macos")]
+    unsafe {
+        center_macos_window_title_bar(&window);
+    }
 }
 
 #[tauri::command]
@@ -1531,9 +1551,8 @@ fn main() {
 
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_title_bar_style(tauri::TitleBarStyle::Visible);
                 unsafe {
-                    center_macos_title_bar(&window);
+                    center_macos_webview_title_bar(&window);
                 }
             }
 
