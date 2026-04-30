@@ -27,7 +27,7 @@ const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 const IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
-const DEBUG_TOOLS_RELEASE_ENABLED = true;
+const DEBUG_TOOLS_RELEASE_ENABLED = false;
 const DEBUG_TOOLS_ENABLED = (() => {
   if (!DEBUG_TOOLS_RELEASE_ENABLED) return false;
   try {
@@ -4582,16 +4582,6 @@ function cacheImageSourceForExport(key, src, dbg = null) {
     .finally(() => imageSourceCachePromises.delete(key));
   imageSourceCachePromises.set(key, promise);
   return promise;
-}
-
-function storeImage(src) {
-  const dbg = ClipDebug.start('storeImage', { src });
-  const key = newImgKey();
-  imageStore[key] = src;
-  cacheImage(key, src, dbg);
-  ClipDebug.step(dbg, 'registered-js-image', { key });
-  ClipDebug.end(dbg, { key });
-  return key;
 }
 
 function imageNeedsRendering(obj) {
