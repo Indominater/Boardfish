@@ -3758,8 +3758,8 @@ function drawImageObj(context, obj, img) {
     const drawH = sideways ? obj.w : obj.h;
     context.save();
     context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
-    if (rotation) context.rotate((rotation * Math.PI) / 180);
     context.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+    if (rotation) context.rotate((rotation * Math.PI) / 180);
     context.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
     context.restore();
     return;
@@ -4421,7 +4421,12 @@ function newId() { return 'obj-' + (idCounter++); }
 function cloneObject(obj) {
   HistoryDebug.count('cloneObjectCalls');
   const data = obj.type === 'image'
-    ? { imgKey: obj.data.imgKey, flipX: !!obj.data.flipX, flipY: !!obj.data.flipY }
+    ? {
+        imgKey: obj.data.imgKey,
+        flipX: !!obj.data.flipX,
+        flipY: !!obj.data.flipY,
+        rotation: ((obj.data.rotation || 0) % 360 + 360) % 360,
+      }
     : { content: normalizeTextContent(obj.data.content) };
   return {
     id: obj.id,
@@ -4492,8 +4497,10 @@ function rotateSelectedImages(dir) {
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj || obj.type !== 'image') continue;
-    const current = obj.data.rotation || 0;
-    obj.data.rotation = (current + (dir === 'cw' ? 90 : 270)) % 360;
+    const current = ((obj.data.rotation || 0) % 360 + 360) % 360;
+    const oddFlip = !!obj.data.flipX !== !!obj.data.flipY;
+    const delta = (dir === 'cw') !== oddFlip ? 90 : 270;
+    obj.data.rotation = (current + delta) % 360;
     const cx = obj.x + obj.w / 2;
     const cy = obj.y + obj.h / 2;
     const nextW = obj.h;
@@ -4614,8 +4621,8 @@ function renderImageToCanvas(obj, sourceImg = null) {
   const flipY = !!obj.data.flipY;
   tctx.save();
   tctx.translate(tmp.width / 2, tmp.height / 2);
-  if (rotation) tctx.rotate((rotation * Math.PI) / 180);
   tctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+  if (rotation) tctx.rotate((rotation * Math.PI) / 180);
   tctx.drawImage(img, -sourceW / 2, -sourceH / 2, sourceW, sourceH);
   tctx.restore();
   ClipDebug.end(dbg, { ready: true, width: tmp.width, height: tmp.height });
@@ -7934,6 +7941,7 @@ async function copySelected() {
       const imgKey = obj.data.imgKey;
       const flipX = !!obj.data.flipX;
       const flipY = !!obj.data.flipY;
+      const rotation = ((obj.data.rotation || 0) % 360 + 360) % 360;
       const copyDataUrlFallback = async (reason) => {
         const sourceStart = performance.now();
         ClipDebug.step(dbg, 'copy:source-start', { imgKey, reason, storedType: typeof imageStore[obj.data.imgKey], nativeRef: isNativeImageRef(imageStore[obj.data.imgKey]) });
@@ -7945,12 +7953,12 @@ async function copySelected() {
           ms: Math.round((performance.now() - sourceStart) * 100) / 100,
           dataUrl: src,
         });
-        ClipDebug.step(dbg, 'copy:data-url-fallback', { imgKey, flipX, flipY, reason, dataUrl: src });
+        ClipDebug.step(dbg, 'copy:data-url-fallback', { imgKey, flipX, flipY, rotation, reason, dataUrl: src });
         await ClipDebug.invoke(
           dbg,
           'copy_image_data_url_to_clipboard_transformed',
-          { dataUrl: src, flipX, flipY },
-          { imgKey, flipX, flipY, dataUrl: src }
+          { dataUrl: src, flipX, flipY, rotation },
+          { imgKey, flipX, flipY, rotation, dataUrl: src }
         );
       };
       enqueueNativeClipboardWrite(async () => {
@@ -7960,13 +7968,13 @@ async function copySelected() {
         }
         await copyDataUrlFallback('native-unique-copy');
         showIslandMsg('Copied', 1500);
-      }, dbg, { type: 'image', imgKey, flipX, flipY })
+      }, dbg, { type: 'image', imgKey, flipX, flipY, rotation })
         .catch((err) => {
-          ClipDebug.step(dbg, 'copy:image-error', { imgKey, flipX, flipY, error: String(err) });
+          ClipDebug.step(dbg, 'copy:image-error', { imgKey, flipX, flipY, rotation, error: String(err) });
           console.error('[copy] image clipboard write FAILED:', err);
         })
         .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
-        .finally(() => ClipDebug.end(dbg, { path: 'image-tauri-cached-transform', imgKey, flipX, flipY }));
+        .finally(() => ClipDebug.end(dbg, { path: 'image-tauri-cached-transform', imgKey, flipX, flipY, rotation }));
     } else {
       const canvas = renderImageToCanvas(obj);
       if (!canvas) { ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' }); return; }

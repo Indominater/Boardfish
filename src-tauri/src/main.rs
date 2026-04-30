@@ -827,18 +827,18 @@ async fn register_transformed_image_source(
         let decode_ms = elapsed_ms(decode_start);
 
         let transform_start = std::time::Instant::now();
-        if flip_x {
-            img = img.fliph();
-        }
-        if flip_y {
-            img = img.flipv();
-        }
         img = match normalized_rotation {
             90 => img.rotate90(),
             180 => img.rotate180(),
             270 => img.rotate270(),
             _ => img,
         };
+        if flip_x {
+            img = img.fliph();
+        }
+        if flip_y {
+            img = img.flipv();
+        }
         let width = img.width();
         let height = img.height();
         let transform_ms = elapsed_ms(transform_start);
@@ -1091,26 +1091,35 @@ async fn copy_image_data_url_to_clipboard_transformed(
     data_url: String,
     flip_x: bool,
     flip_y: bool,
+    rotation: u32,
 ) -> Result<ClipboardCopyTiming, String> {
     let total = std::time::Instant::now();
     let result = tokio::task::spawn_blocking(move || {
         let (cached, decode_timing) = decode_data_url_to_cached_image_timed(&data_url)?;
+        let normalized_rotation = rotation % 360;
         let transform = std::time::Instant::now();
-        let rgba = transform_rgba(cached.width, cached.height, cached.rgba, flip_x, flip_y);
+        let (width, height, rgba) = transform_rgba(
+            cached.width,
+            cached.height,
+            cached.rgba,
+            flip_x,
+            flip_y,
+            normalized_rotation,
+        )?;
         let transform_ms = elapsed_ms(transform);
         clipboard_debug(
             "copy_image_data_url_to_clipboard_transformed transform worker",
             transform,
         );
-        let write_timing = write_rgba_to_clipboard(cached.width, cached.height, rgba)?;
+        let write_timing = write_rgba_to_clipboard(width, height, rgba)?;
         let mut timing = ClipboardCopyTiming {
             path: "data-url-rgba".to_string(),
             cache_hit: false,
             flipped: flip_x || flip_y,
-            width: cached.width,
-            height: cached.height,
-            pixels: cached.width as u64 * cached.height as u64,
-            rgba_mb: rgba_mb(cached.width, cached.height),
+            width,
+            height,
+            pixels: width as u64 * height as u64,
+            rgba_mb: rgba_mb(width, height),
             decode_ms: decode_timing.decode_ms,
             base64_ms: decode_timing.base64_ms,
             image_decode_ms: decode_timing.image_decode_ms,
@@ -1136,24 +1145,30 @@ fn transform_rgba(
     rgba: Arc<[u8]>,
     flip_x: bool,
     flip_y: bool,
-) -> Arc<[u8]> {
-    if !flip_x && !flip_y {
-        return rgba;
+    rotation: u32,
+) -> Result<(u32, u32, Arc<[u8]>), String> {
+    let normalized_rotation = rotation % 360;
+    if !flip_x && !flip_y && normalized_rotation == 0 {
+        return Ok((width, height, rgba));
     }
 
-    let width = width as usize;
-    let height = height as usize;
-    let mut out = vec![0u8; width * height * 4];
-    for y in 0..height {
-        let src_y = if flip_y { height - 1 - y } else { y };
-        for x in 0..width {
-            let src_x = if flip_x { width - 1 - x } else { x };
-            let src = (src_y * width + src_x) * 4;
-            let dst = (y * width + x) * 4;
-            out[dst..dst + 4].copy_from_slice(&rgba[src..src + 4]);
-        }
+    let mut img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
+        .ok_or("invalid RGBA buffer dimensions")?;
+    img = match normalized_rotation {
+        90 => image::imageops::rotate90(&img),
+        180 => image::imageops::rotate180(&img),
+        270 => image::imageops::rotate270(&img),
+        _ => img,
+    };
+    if flip_x {
+        image::imageops::flip_horizontal_in_place(&mut img);
     }
-    Arc::from(out)
+    if flip_y {
+        image::imageops::flip_vertical_in_place(&mut img);
+    }
+    let width = img.width();
+    let height = img.height();
+    Ok((width, height, Arc::from(img.into_raw())))
 }
 
 fn decode_data_url_to_cached_image_timed(
@@ -1299,14 +1314,16 @@ fn write_rgba_to_clipboard(
 ) -> Result<ClipboardCopyTiming, String> {
     let total = std::time::Instant::now();
     let arboard_write = std::time::Instant::now();
-    let result = arboard::Clipboard::new().map_err(|e| e.to_string()).and_then(|mut cb| {
-        cb.set_image(arboard::ImageData {
-            width: width as usize,
-            height: height as usize,
-            bytes: std::borrow::Cow::Borrowed(&rgba),
-        })
+    let result = arboard::Clipboard::new()
         .map_err(|e| e.to_string())
-    });
+        .and_then(|mut cb| {
+            cb.set_image(arboard::ImageData {
+                width: width as usize,
+                height: height as usize,
+                bytes: std::borrow::Cow::Borrowed(&rgba),
+            })
+            .map_err(|e| e.to_string())
+        });
     let arboard_ms = elapsed_ms(arboard_write);
     clipboard_debug("write_rgba_to_clipboard arboard set_image", arboard_write);
     if let Err(ref e) = result {
