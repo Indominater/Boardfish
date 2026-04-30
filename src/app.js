@@ -3241,8 +3241,26 @@ function measureIslandTextWidth(text) {
 
 let _lastZoomPct = -1;
 let _islMsgActive = false;
+let _imageCopyInFlight = 0;
 let _lastZoomDisplayAt = 0;
 let _zoomDisplayTimer = null;
+
+function applyIslandInteractionState() {
+  const disabled = _islMsgActive || _imageCopyInFlight > 0;
+  islZoom.style.pointerEvents = disabled ? 'none' : '';
+  islZoom.style.cursor = disabled ? 'default' : '';
+}
+
+function beginImageCopyInteractionLock() {
+  _imageCopyInFlight += 1;
+  applyIslandInteractionState();
+}
+
+function endImageCopyInteractionLock() {
+  _imageCopyInFlight = Math.max(0, _imageCopyInFlight - 1);
+  applyIslandInteractionState();
+}
+
 function updateZoomDisplay(force = false) {
   if (_islMsgActive) return;
   const pct = Math.round(zoom * 100);
@@ -3310,8 +3328,7 @@ function startIslandBusyMsg(text) {
   clearTimeout(_islMsgTimer);
   clearTimeout(_islFadeTimer);
   _islMsgActive = true;
-  islZoom.style.pointerEvents = 'none';
-  islZoom.style.cursor = 'default';
+  applyIslandInteractionState();
   islZoom.style.color = 'rgba(255,255,255,0.5)';
   islSetWidth(text);
   islZoom.textContent = text;
@@ -3364,8 +3381,7 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
   clearTimeout(_islMsgTimer);
   clearTimeout(_islFadeTimer);
   _islMsgActive = true;
-  islZoom.style.pointerEvents = 'none';
-  islZoom.style.cursor = 'default';
+  applyIslandInteractionState();
   islSetWidth(msg);
   PillDebug.samplePillAnimation('showIslandMsg');
   islZoom.style.color = 'rgba(255,255,255,0)';
@@ -3431,8 +3447,7 @@ async function restoreIslandZoom() {
       if (token !== _islAnimToken) return;
       PillDebug.log('restoreIslandZoom:raf2', { pct });
       islZoom.style.color = 'rgba(255,255,255,0.5)';
-      islZoom.style.pointerEvents = '';
-      islZoom.style.cursor = '';
+      applyIslandInteractionState();
       PillDebug.log('restoreIslandZoom:shown', { pct });
     });
   });
@@ -6486,11 +6501,13 @@ canvas.addEventListener('dblclick', (e) => {
 
 let ctxPos = { x: 0, y: 0 };
 
-for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
-  document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:capture`, e), true);
-  document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:bubble`, e), false);
-  ctxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`ctx-menu:${type}`, e));
-  objCtxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`obj-ctx-menu:${type}`, e));
+if (DEBUG_TOOLS_ENABLED) {
+  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
+    document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:capture`, e), true);
+    document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:bubble`, e), false);
+    ctxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`ctx-menu:${type}`, e));
+    objCtxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`obj-ctx-menu:${type}`, e));
+  }
 }
 
 function closeCtxMenu(reason) {
@@ -6864,6 +6881,7 @@ document.getElementById('btn-export-all-text').addEventListener('click', () => {
 
 islZoom.addEventListener('mousedown', e => e.preventDefault());
 islZoom.addEventListener('click', () => {
+  if (_imageCopyInFlight > 0) return;
   const dbg = ViewportDebug.start('zoomReset', { panX, panY, zoom, objectCount: objects.length });
   deselectAll();
   const vw = window.innerWidth, vh = window.innerHeight;
@@ -7937,6 +7955,7 @@ async function copySelected() {
   }
 
   if (obj.type === 'image') {
+    beginImageCopyInteractionLock();
     if (isTauri) {
       const imgKey = obj.data.imgKey;
       const flipX = !!obj.data.flipX;
@@ -7973,16 +7992,29 @@ async function copySelected() {
           ClipDebug.step(dbg, 'copy:image-error', { imgKey, flipX, flipY, rotation, error: String(err) });
           console.error('[copy] image clipboard write FAILED:', err);
         })
+        .finally(() => endImageCopyInteractionLock())
         .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
         .finally(() => ClipDebug.end(dbg, { path: 'image-tauri-cached-transform', imgKey, flipX, flipY, rotation }));
     } else {
-      const canvas = renderImageToCanvas(obj);
-      if (!canvas) { ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' }); return; }
-      const pngBlob = await canvasToPngBlob(canvas);
-      if (!pngBlob) { ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'blob-null' }); return; }
-      navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
-        .catch(err => console.error('[copy] clipboard.write FAILED:', err))
-        .finally(() => ClipDebug.end(dbg, { path: 'image-web-rendered', blobSize: pngBlob.size }));
+      let pngBlob = null;
+      try {
+        const canvas = renderImageToCanvas(obj);
+        if (!canvas) {
+          ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' });
+          return;
+        }
+        pngBlob = await canvasToPngBlob(canvas);
+        if (!pngBlob) {
+          ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'blob-null' });
+          return;
+        }
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      } catch (err) {
+        console.error('[copy] clipboard.write FAILED:', err);
+      } finally {
+        endImageCopyInteractionLock();
+        if (pngBlob) ClipDebug.end(dbg, { path: 'image-web-rendered', blobSize: pngBlob.size });
+      }
     }
   }
 }
