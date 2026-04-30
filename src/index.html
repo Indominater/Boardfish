@@ -47,6 +47,39 @@
       display: block;
     }
 
+    #mac-titlebar {
+      display: none;
+    }
+
+    body.is-macos #mac-titlebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9001;
+      pointer-events: auto;
+      cursor: default;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #mac-titlebar-title {
+      max-width: calc(100vw - 220px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      pointer-events: none;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1;
+      color: rgba(255, 255, 255, 0.58);
+      -webkit-font-smoothing: antialiased;
+    }
+
     /* ── Selection overlay ── */
     #sel-overlay {
       position: absolute;
@@ -350,6 +383,10 @@
   </style>
 </head>
 <body>
+  <div id="mac-titlebar" data-tauri-drag-region>
+    <div id="mac-titlebar-title">Boardfish — Untitled</div>
+  </div>
+
   <div id="canvas">
     <canvas id="board-canvas"></canvas>
     <div id="multi-sel-overlay"></div>

@@ -25,8 +25,10 @@ const rubberBand       = document.getElementById('rubber-band');
 const exportAllImageBtn = document.getElementById('btn-export-all-images');
 const exportAllTextBtn  = document.getElementById('btn-export-all-text');
 const exportAllSep      = document.getElementById('ctx-sep-export-all');
+const macTitlebarTitle  = document.getElementById('mac-titlebar-title');
 const IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 const IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
+if (IS_MAC) document.body.classList.add('is-macos');
 const DEBUG_TOOLS_RELEASE_ENABLED = false;
 const DEBUG_TOOLS_ENABLED = (() => {
   if (!DEBUG_TOOLS_RELEASE_ENABLED) return false;
@@ -6986,6 +6988,7 @@ function updateTitle() {
   const dirtyIndicator = isDirty() ? ' •' : '';
   const title = `Boardfish — ${name}${dirtyIndicator}`;
   document.title = title;
+  if (macTitlebarTitle) macTitlebarTitle.textContent = title;
   window.__TAURI__.core.invoke('set_title', { title });
 }
 

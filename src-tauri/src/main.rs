@@ -90,7 +90,7 @@ unsafe fn setup_termination_intercept(app_handle: tauri::AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn center_macos_ns_title_bar(ns_window_ptr: *mut std::ffi::c_void) {
+unsafe fn configure_macos_ns_title_bar(ns_window_ptr: *mut std::ffi::c_void) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -99,25 +99,21 @@ unsafe fn center_macos_ns_title_bar(ns_window_ptr: *mut std::ffi::c_void) {
     }
 
     let ns_window = &*(ns_window_ptr as *mut AnyObject);
-    let style_mask: usize = msg_send![ns_window, styleMask];
-    let centered_style_mask = style_mask & !(1usize << 15);
-    let _: () = msg_send![ns_window, setStyleMask: centered_style_mask];
-    let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: false];
-    let _: () = msg_send![ns_window, setToolbarStyle: 1isize];
-    let _: () = msg_send![ns_window, setTitleVisibility: 0isize];
+    let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: true];
+    let _: () = msg_send![ns_window, setTitleVisibility: 1isize];
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn center_macos_window_title_bar(window: &tauri::Window) {
+unsafe fn configure_macos_window_title_bar(window: &tauri::Window) {
     if let Ok(ns_window_ptr) = window.ns_window() {
-        center_macos_ns_title_bar(ns_window_ptr);
+        configure_macos_ns_title_bar(ns_window_ptr);
     }
 }
 
 #[cfg(target_os = "macos")]
-unsafe fn center_macos_webview_title_bar(window: &tauri::WebviewWindow) {
+unsafe fn configure_macos_webview_title_bar(window: &tauri::WebviewWindow) {
     if let Ok(ns_window_ptr) = window.ns_window() {
-        center_macos_ns_title_bar(ns_window_ptr);
+        configure_macos_ns_title_bar(ns_window_ptr);
     }
 }
 
@@ -1009,7 +1005,7 @@ fn set_title(window: tauri::Window, title: String) {
     window.set_title(&title).ok();
     #[cfg(target_os = "macos")]
     unsafe {
-        center_macos_window_title_bar(&window);
+        configure_macos_window_title_bar(&window);
     }
 }
 
@@ -1551,8 +1547,9 @@ fn main() {
 
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title_bar_style(tauri::TitleBarStyle::Overlay);
                 unsafe {
-                    center_macos_webview_title_bar(&window);
+                    configure_macos_webview_title_bar(&window);
                 }
             }
 
