@@ -12,6 +12,11 @@
     return Number.isFinite(value) ? value : fallback;
   }
 
+  function normalizeBoardRotation(value) {
+    if (typeof root.normalizeRotation === 'function') return root.normalizeRotation(value);
+    return ((Number(value) || 0) % 360 + 360) % 360;
+  }
+
   function normalizeViewport(viewport = {}) {
     return {
       panX: finiteNumber(viewport.panX),
@@ -48,7 +53,7 @@
       normalized.data.imgKey = data.imgKey;
       normalized.data.flipX = !!data.flipX;
       normalized.data.flipY = !!data.flipY;
-      normalized.data.rotation = ((finiteNumber(data.rotation) % 360) + 360) % 360;
+      normalized.data.rotation = normalizeBoardRotation(finiteNumber(data.rotation));
     }
     return normalized;
   }

@@ -48,6 +48,7 @@ function isEventInsideVisibleContextMenu(e) {
 function isShieldInputAllowed(e) {
   if (isUnsavedDialogOpen()) return isEventInsideUnsavedDialog(e);
   if (isEventInsideVisibleContextMenu(e)) return true;
+  if (openingShield.classList.contains('active') && !_inputShieldStack.length) return false;
   if (_boardOpening) return false;
   if (_inputShieldStack.length === 0) return true;
   const input = inputNameFromEvent(e);
@@ -209,8 +210,6 @@ function updateSelectionOverlay() {
         if (!snapshots.length) return;
 
         const MIN_B = 20;
-        let resizeRaf = null, hasPendingResize = false, pendingState = null;
-
         function applyMultiResize({ bx, by, bw, bh }) {
           for (const snap of snapshots) {
             const o = objectsMap.get(snap.id);
@@ -220,16 +219,7 @@ function updateSelectionOverlay() {
           }
           scheduleRender(true, true);
         }
-
-        function scheduleMultiResizeFrame() {
-          if (resizeRaf) return;
-          resizeRaf = requestAnimationFrame(() => {
-            resizeRaf = null;
-            if (!hasPendingResize) return;
-            hasPendingResize = false;
-            applyMultiResize(pendingState);
-          });
-        }
+        const resizeCommitter = createRafCommitter(applyMultiResize);
 
         function onMultiMove(ev) {
           const dx = (ev.clientX - startX) / zoom;
@@ -246,22 +236,17 @@ function updateSelectionOverlay() {
           if (dir.includes('w')) bx = origBX + origBW - bw;
           if (dir.includes('n')) by = origBY + origBH - bh;
 
-          pendingState = { bx, by, bw, bh };
-          hasPendingResize = true;
-          scheduleMultiResizeFrame();
+          resizeCommitter.schedule({ bx, by, bw, bh });
         }
 
-        function onMultiUp() {
-          document.removeEventListener('mousemove', onMultiMove);
-          document.removeEventListener('mouseup', onMultiUp);
-          if (resizeRaf) { cancelAnimationFrame(resizeRaf); resizeRaf = null; }
-          if (hasPendingResize) { hasPendingResize = false; applyMultiResize(pendingState); }
-          for (const snap of snapshots) markDirty(snap.id);
-          pushHistory('multi-resize');
-        }
-
-        document.addEventListener('mousemove', onMultiMove);
-        document.addEventListener('mouseup', onMultiUp);
+        beginDocumentDrag({
+          move: onMultiMove,
+          up() {
+            resizeCommitter.flush();
+            for (const snap of snapshots) markDirty(snap.id);
+            pushHistory('multi-resize');
+          },
+        });
         return;
       }
 
@@ -272,9 +257,6 @@ function updateSelectionOverlay() {
 
       const { x: ox, y: oy, w: ow, h: oh } = obj;
       const MIN = 20;
-      let resizeRaf = null;
-      let hasPendingResize = false;
-      let pendingResize = { x: ox, y: oy, w: ow, h: oh };
 
       function applyResize(state) {
         obj.x = state.x;
@@ -287,16 +269,7 @@ function updateSelectionOverlay() {
         }
         scheduleRender(true, true);
       }
-
-      function scheduleResizeFrame() {
-        if (resizeRaf) return;
-        resizeRaf = requestAnimationFrame(() => {
-          resizeRaf = null;
-          if (!hasPendingResize) return;
-          hasPendingResize = false;
-          applyResize(pendingResize);
-        });
-      }
+      const resizeCommitter = createRafCommitter(applyResize);
 
       function onMove(ev) {
         const dx = (ev.clientX - startX) / zoom;
@@ -319,28 +292,17 @@ function updateSelectionOverlay() {
           if (dir.includes('w')) { w = Math.max(MIN, ow - dx); x = ox + ow - w; }
         }
 
-        pendingResize = { x, y, w, h };
-        hasPendingResize = true;
-        scheduleResizeFrame();
+        resizeCommitter.schedule({ x, y, w, h });
       }
 
-      function onUp() {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        if (resizeRaf) {
-          cancelAnimationFrame(resizeRaf);
-          resizeRaf = null;
-        }
-        if (hasPendingResize) {
-          hasPendingResize = false;
-          applyResize(pendingResize);
-        }
-        markDirty(obj.id);
-        pushHistory('resize');
-      }
-
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      beginDocumentDrag({
+        move: onMove,
+        up() {
+          resizeCommitter.flush();
+          markDirty(obj.id);
+          pushHistory('resize');
+        },
+      });
     });
   }
 })();

@@ -1,0 +1,44 @@
+{
+  "version": 3,
+  "format": "boardfish-container",
+  "viewport": {
+    "panX": 10,
+    "panY": -5,
+    "zoom": 2
+  },
+  "imageStore": {
+    "img-1": {
+      "native": true,
+      "path": "images/img-1.png",
+      "mime": "image/png",
+      "ext": "png"
+    }
+  },
+  "objects": [
+    {
+      "id": "obj-1",
+      "type": "text",
+      "x": 1,
+      "y": 2,
+      "w": 120,
+      "h": 40,
+      "z": 3,
+      "data": {
+        "content": "hello"
+      }
+    },
+    {
+      "id": "obj-2",
+      "type": "image",
+      "x": 4,
+      "y": 5,
+      "w": 200,
+      "h": 100,
+      "z": 6,
+      "data": {
+        "imgKey": "img-1",
+        "rotation": -90
+      }
+    }
+  ]
+}

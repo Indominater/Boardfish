@@ -163,6 +163,27 @@ fn image_mime_ext_from_path(path: &str) -> (&'static str, &'static str) {
     }
 }
 
+pub(crate) fn transform_dynamic_image(
+    mut img: image::DynamicImage,
+    flip_x: bool,
+    flip_y: bool,
+    rotation: u32,
+) -> image::DynamicImage {
+    img = match rotation % 360 {
+        90 => img.rotate90(),
+        180 => img.rotate180(),
+        270 => img.rotate270(),
+        _ => img,
+    };
+    if flip_x {
+        img = img.fliph();
+    }
+    if flip_y {
+        img = img.flipv();
+    }
+    img
+}
+
 #[tauri::command]
 pub(crate) async fn register_image_file_source(
     state: tauri::State<'_, ImageSourceCache>,
@@ -281,20 +302,6 @@ pub(crate) async fn materialize_cached_image_sources(
 }
 
 #[tauri::command]
-pub(crate) async fn write_image_file(path: String, data_url: String) -> Result<(), String> {
-    use base64::{engine::general_purpose, Engine as _};
-
-    let (_, base64_data) = data_url.split_once(',').ok_or("invalid data URL")?;
-    let bytes = general_purpose::STANDARD
-        .decode(base64_data)
-        .map_err(|e| e.to_string())?;
-    tokio::fs::write(path, &bytes)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
 pub(crate) async fn write_image_file_by_key(
     state: tauri::State<'_, ImageSourceCache>,
     path: String,
@@ -377,18 +384,7 @@ pub(crate) async fn register_transformed_image_source(
         let decode_ms = elapsed_ms(decode_start);
 
         let transform_start = std::time::Instant::now();
-        img = match normalized_rotation {
-            90 => img.rotate90(),
-            180 => img.rotate180(),
-            270 => img.rotate270(),
-            _ => img,
-        };
-        if flip_x {
-            img = img.fliph();
-        }
-        if flip_y {
-            img = img.flipv();
-        }
+        img = transform_dynamic_image(img, flip_x, flip_y, normalized_rotation);
         let width = img.width();
         let height = img.height();
         let transform_ms = elapsed_ms(transform_start);

@@ -2,19 +2,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const BoardSchema = require('../src/js/board_schema.js');
 
-test('normalizes valid board data', () => {
-  const board = BoardSchema.normalizeBoardData({
-    version: 3,
-    format: 'boardfish-container',
-    viewport: { panX: 10, panY: -5, zoom: 2 },
-    imageStore: { 'img-1': { native: true, path: 'images/img-1.png' } },
-    objects: [
-      { id: 'obj-1', type: 'text', x: 1, y: 2, w: 120, h: 40, z: 3, data: { content: 'hello' } },
-      { id: 'obj-2', type: 'image', x: 4, y: 5, w: 200, h: 100, z: 6, data: { imgKey: 'img-1', rotation: -90 } },
-    ],
-  });
+function readFixture(name) {
+  return JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
+}
+
+test('normalizes valid board data from shared v3 fixture', () => {
+  const board = BoardSchema.normalizeBoardData(readFixture('valid_v3_board.json'));
 
   assert.equal(board.viewport.zoom, 2);
   assert.equal(board.objects[1].data.rotation, 270);

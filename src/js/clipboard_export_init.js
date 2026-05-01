@@ -270,11 +270,15 @@ async function copySelected() {
 
   if (obj.type === 'image') {
     beginImageCopyInteractionLock();
+    let imageCopyInteractionReleased = false;
+    const releaseImageCopyInteractionLock = () => {
+      if (imageCopyInteractionReleased) return;
+      imageCopyInteractionReleased = true;
+      endImageCopyInteractionLock();
+    };
     if (isTauri) {
       const imgKey = obj.data.imgKey;
-      const flipX = !!obj.data.flipX;
-      const flipY = !!obj.data.flipY;
-      const rotation = ((obj.data.rotation || 0) % 360 + 360) % 360;
+      const { flipX, flipY, rotation } = imageTransformFromObject(obj);
       const copyDataUrlFallback = async (reason) => {
         const sourceStart = performance.now();
         ClipDebug.step(dbg, 'copy:source-start', { imgKey, reason, storedType: typeof imageStore[obj.data.imgKey], nativeRef: isNativeImageRef(imageStore[obj.data.imgKey]) });
@@ -300,13 +304,16 @@ async function copySelected() {
           return;
         }
         await copyDataUrlFallback('native-unique-copy');
-        showIslandMsg('Copied', 1500);
+        finishPillTransition({
+          beforeTransition: releaseImageCopyInteractionLock,
+          finalMsg: 'Copied',
+        });
       }, dbg, { type: 'image', imgKey, flipX, flipY, rotation })
         .catch((err) => {
           ClipDebug.step(dbg, 'copy:image-error', { imgKey, flipX, flipY, rotation, error: String(err) });
           console.error('[copy] image clipboard write FAILED:', err);
         })
-        .finally(() => endImageCopyInteractionLock())
+        .finally(() => releaseImageCopyInteractionLock())
         .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
         .finally(() => ClipDebug.end(dbg, { path: 'image-tauri-cached-transform', imgKey, flipX, flipY, rotation }));
     } else {
@@ -326,7 +333,7 @@ async function copySelected() {
       } catch (err) {
         console.error('[copy] clipboard.write FAILED:', err);
       } finally {
-        endImageCopyInteractionLock();
+        releaseImageCopyInteractionLock();
         if (pngBlob) ClipDebug.end(dbg, { path: 'image-web-rendered', blobSize: pngBlob.size });
       }
     }
@@ -380,8 +387,7 @@ async function saveSelectedImage() {
 
       const result = await ExportDebug.invoke(dbg, 'write_image_file_by_key', { path, imgKey: key }, { imgKey: key, path });
       ExportDebug.end(dbg, { saved: true, bytesMB: result?.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : 0 });
-      showIslandMsg('Image Exported', 1500);
-      releaseInputShield();
+      finishPillTransition({ beforeTransition: releaseInputShield, finalMsg: 'Image Exported' });
     } catch (err) {
       releaseInputShield();
       ExportDebug.end(dbg, { error: String(err) });
@@ -407,19 +413,6 @@ async function saveSelectedImage() {
   a.click();
   releaseInputShield();
   ExportDebug.end(dbg, { saved: true, method: 'download' });
-}
-
-async function mapWithConcurrency(items, limit, worker) {
-  const out = new Array(items.length);
-  let next = 0;
-  const workerCount = Math.max(1, Math.min(limit, items.length));
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      out[index] = await worker(items[index], index);
-    }
-  }));
-  return out;
 }
 
 function exportProgressText(totalCount, preparedCount) {
@@ -458,7 +451,7 @@ function createExportProgressUpdater(totalCount, busyPill) {
     const text = exportProgressText(totalCount, preparedCount);
     if (!force && text === progressText) return;
     progressText = text;
-    busyPill.update(text);
+    updatePillTask(busyPill, text);
     ExportDebug.recordProgressUi({
       phase,
       text,
@@ -546,16 +539,12 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
           {
             imgKey,
             tempKey,
-            flipX: !!obj.data.flipX,
-            flipY: !!obj.data.flipY,
-            rotation: ((obj.data.rotation || 0) % 360 + 360) % 360,
+            ...imageTransformFromObject(obj),
           },
           {
             imgKey,
             tempKey,
-            flipX: !!obj.data.flipX,
-            flipY: !!obj.data.flipY,
-            rotation: ((obj.data.rotation || 0) % 360 + 360) % 360,
+            ...imageTransformFromObject(obj),
           }
         );
         keyCount++;
@@ -809,7 +798,7 @@ async function exportImageBatch({
       const folder = await pickExportFolder(dbg);
       ExportDebug.step(dbg, 'folder:selected', { folder });
       if (!folder) { hideInputShield(); stopTotalWatch({ cancelled: true }); ExportDebug.end(dbg, { savedCount: 0, cancelled: true }); return; }
-      busyPill = startIslandBusyMsg(`0/${imageObjs.length}`);
+      busyPill = startPillTask({ message: `0/${imageObjs.length}`, progress: true });
       const updateProgress = createExportProgressUpdater(imageObjs.length, busyPill);
       await letExportUiPaint(dbg, 'before-resolve-keys');
       const stopResolveWatch = ExportDebug.watch(dbg, 'resolve-keys', { imageCount: imageObjs.length });
@@ -819,7 +808,12 @@ async function exportImageBatch({
       const keys = resolved.keys;
       tempKeys = resolved.tempKeys;
       ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
-      if (!keys.length) { busyPill.done(); hideInputShield(); stopTotalWatch({ skipped: true }); ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' }); return; }
+      if (!keys.length) {
+        finishPillTransition({ beforeTransition: hideInputShield, busyPill });
+        stopTotalWatch({ skipped: true });
+        ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' });
+        return;
+      }
       updateProgress('save-start', imageObjs.length, {}, true);
       const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 3, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
         updateProgress('save-progress', imageObjs.length, { batchIndex, batchCount, savedKeyCount: finishedCount, keyCount: totalCount });
@@ -828,15 +822,19 @@ async function exportImageBatch({
       ExportDebug.step(dbg, 'save:result', normalizeExportSaveResult(saveResult));
       stopTotalWatch({ savedCount });
       ExportDebug.end(dbg, { savedCount, ...normalizeExportSaveResult(saveResult) });
-      if (savedCount > 0) busyPill.done(
-        savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`,
-        1500,
-        () => finishImageExportInputShield(clearSelectionAfter)
-      );
-      else { busyPill.done(); hideInputShield(); }
+      if (savedCount > 0) {
+        finishPillTransition({
+          beforeTransition: () => finishImageExportInputShield(clearSelectionAfter),
+          busyPill,
+          finalMsg: savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`,
+        });
+      }
+      else {
+        finishPillTransition({ beforeTransition: hideInputShield, busyPill });
+      }
     } catch (err) {
-      if (busyPill) busyPill.done();
-      hideInputShield();
+      if (busyPill) finishPillTransition({ beforeTransition: hideInputShield, busyPill });
+      else hideInputShield();
       stopTotalWatch({ error: String(err) });
       ExportDebug.end(dbg, { error: String(err) });
       console.error(errorLabel, err);
@@ -897,9 +895,12 @@ async function exportAllText() {
         ExportDebug.end(dbg, { saved: false, cancelled: true });
         return;
       }
-      await ExportDebug.invoke(dbg, 'write_text_file', { path, text: combined }, { textCount: textObjs.length, textLen: combined.length });
+      await runShieldedPillTask({
+        releaseInputShield,
+        successMessage: 'Text Exported',
+        task: () => ExportDebug.invoke(dbg, 'write_text_file', { path, text: combined }, { textCount: textObjs.length, textLen: combined.length }),
+      });
       ExportDebug.end(dbg, { saved: true });
-      showIslandMsg('Text Exported', 1500, releaseInputShield);
     } catch (err) {
       releaseInputShield();
       ExportDebug.end(dbg, { error: String(err) });
@@ -1113,7 +1114,7 @@ async function openBoardFromPath(filePath, dbg, errorLabel) {
   try {
     _boardOpening = true;
     openingShield.classList.add('active');
-    await showIslandMsg('Opening');
+    await startPillTask({ message: 'Opening' });
     const data = await invokeReadBoard(filePath, dbg);
     applyBoardData(data, { dbg, sourcesCached: true, deferRender: true, endDebug: false });
     await finishOpenedBoard(dbg, data);
@@ -1127,8 +1128,9 @@ async function openBoardFromPath(filePath, dbg, errorLabel) {
 function finishFailedOpen(dbg, err, errorLabel) {
   console.error(errorLabel, err);
   _boardOpening = false;
-  openingShield.classList.remove('active');
-  restoreIslandZoom();
+  finishPillTransition({
+    beforeTransition: () => openingShield.classList.remove('active'),
+  });
   OpenDebug.end(dbg, { opened: false, error: String(err) });
 }
 

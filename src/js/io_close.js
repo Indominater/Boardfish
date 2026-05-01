@@ -377,20 +377,14 @@ async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDeb
   await materializeImageAssets(keys, dbg).catch((err) => {
     OpenDebug.step(dbg, `${label}:materialize-error`, { error: String(err) });
   });
-  let cursor = 0;
   let hydrated = 0;
-  async function worker() {
-    while (cursor < keys.length) {
-      const key = keys[cursor++];
-      try {
-        if (await hydrateImageForDisplay(key, dbg)) hydrated++;
-      } catch (err) {
-        OpenDebug.step(dbg, `${label}:error`, { imgKey: key, error: String(err) });
-      }
+  await mapWithConcurrency(keys, concurrency, async (key) => {
+    try {
+      if (await hydrateImageForDisplay(key, dbg)) hydrated++;
+    } catch (err) {
+      OpenDebug.step(dbg, `${label}:error`, { imgKey: key, error: String(err) });
     }
-  }
-  const workerCount = Math.min(concurrency, keys.length);
-  await Promise.all(Array.from({ length: workerCount }, worker));
+  });
   OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0, ...getOpenImageRuntimeMetrics() });
   if (hydrated) invalidateOffscreen();
   return hydrated;
@@ -478,9 +472,13 @@ async function finishOpenedBoard(dbg, data) {
   const renderMs = performance.now() - renderStart;
   PillDebug.log('open:initial-applyTransform:end', { phaseMs: renderMs });
   OpenDebug.step(dbg, 'initial-applyTransform', { ms: renderMs });
-  const zoomRestoreReason = await restoreIslandZoom();
-  openingShield.classList.remove('active');
-  PillDebug.log('open:openingShield:removed', { zoomRestoreReason });
+  const zoomRestoreReason = await finishPillTransition({
+    beforeTransition: () => {
+      openingShield.classList.remove('active');
+      PillDebug.log('open:openingShield:removed', { reason: 'before-zoom-restore' });
+    },
+  });
+  PillDebug.log('open:restoreIslandZoom:end', { zoomRestoreReason });
   OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
   if (OpenDebug.hydrationMode === 'visible-first') {
     setTimeout(() => hydrateRemainingImagesForOpen(dbg).catch((err) => {
@@ -568,17 +566,21 @@ async function saveBoardAs() {
       : 'board.bf';
     const filePath = await SaveDebug.invoke(dbg, 'save_file_dialog', { defaultName }, { defaultName });
     if (!filePath) { SaveDebug.end(dbg, { cancelled: true }); releaseInputShield(); return false; }
-    showIslandMsg('Saving');
-    await invokeSaveBoard(filePath, dbg);
-    currentFilePath = filePath;
-    SaveDebug.step(dbg, 'markSaved:start');
-    markSaved();
-    SaveDebug.step(dbg, 'markSaved:end');
-    showIslandMsg('Saved', 1500, releaseInputShield);
+    await runShieldedPillTask({
+      releaseInputShield,
+      startMessage: 'Saving',
+      successMessage: 'Saved',
+      task: async () => {
+        await invokeSaveBoard(filePath, dbg);
+        currentFilePath = filePath;
+        SaveDebug.step(dbg, 'markSaved:start');
+        markSaved();
+        SaveDebug.step(dbg, 'markSaved:end');
+      },
+    });
     SaveDebug.end(dbg, { saved: true, path: filePath });
     return true;
   } catch (err) {
-    restoreIslandZoom();
     releaseInputShield();
     console.error('Save failed:', err);
     SaveDebug.end(dbg, { saved: false, error: String(err) });
@@ -592,16 +594,20 @@ async function saveBoard() {
     const dbg = SaveDebug.start('saveBoard', { path: currentFilePath, objectCount: objects.length });
     const releaseInputShield = acquireInputShield();
     try {
-      showIslandMsg('Saving');
-      await invokeSaveBoard(currentFilePath, dbg);
-      SaveDebug.step(dbg, 'markSaved:start');
-      markSaved();
-      SaveDebug.step(dbg, 'markSaved:end');
-      showIslandMsg('Saved', 1500, releaseInputShield);
+      await runShieldedPillTask({
+        releaseInputShield,
+        startMessage: 'Saving',
+        successMessage: 'Saved',
+        task: async () => {
+          await invokeSaveBoard(currentFilePath, dbg);
+          SaveDebug.step(dbg, 'markSaved:start');
+          markSaved();
+          SaveDebug.step(dbg, 'markSaved:end');
+        },
+      });
       SaveDebug.end(dbg, { saved: true, path: currentFilePath });
       return true;
     } catch (err) {
-      restoreIslandZoom();
       releaseInputShield();
       console.error('Save failed:', err);
       SaveDebug.end(dbg, { saved: false, error: String(err) });

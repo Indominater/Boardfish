@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::image_sources::{CachedImageSource, ImageSourceCache};
+use crate::image_sources::{transform_dynamic_image, CachedImageSource, ImageSourceCache};
 use crate::{elapsed_ms, rgba_mb};
 
 static CLIPBOARD_DEBUG: AtomicBool = AtomicBool::new(false);
@@ -165,20 +165,15 @@ fn transform_rgba(
         return Ok((width, height, rgba));
     }
 
-    let mut img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
+    let img = image::RgbaImage::from_raw(width, height, rgba.to_vec())
         .ok_or("invalid RGBA buffer dimensions")?;
-    img = match normalized_rotation {
-        90 => image::imageops::rotate90(&img),
-        180 => image::imageops::rotate180(&img),
-        270 => image::imageops::rotate270(&img),
-        _ => img,
-    };
-    if flip_x {
-        image::imageops::flip_horizontal_in_place(&mut img);
-    }
-    if flip_y {
-        image::imageops::flip_vertical_in_place(&mut img);
-    }
+    let img = transform_dynamic_image(
+        image::DynamicImage::ImageRgba8(img),
+        flip_x,
+        flip_y,
+        normalized_rotation,
+    )
+    .to_rgba8();
     let width = img.width();
     let height = img.height();
     Ok((width, height, Arc::from(img.into_raw())))

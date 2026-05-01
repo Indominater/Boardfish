@@ -80,6 +80,23 @@ function shouldKeepSelectionOverlayWhileBlocked() {
   return !_boardOpening && _inputShieldStack.some((token) => token.keepSelectionOverlay);
 }
 
+async function runShieldedPillTask({
+  releaseInputShield,
+  startMessage = null,
+  successMessage = null,
+  task,
+}) {
+  try {
+    if (startMessage) startPillTask({ message: startMessage });
+    const result = await task();
+    finishPillTransition({ beforeTransition: releaseInputShield, finalMsg: successMessage });
+    return result;
+  } catch (err) {
+    finishPillTransition({ beforeTransition: releaseInputShield });
+    throw err;
+  }
+}
+
 // ─── New board ───────────────────────────────────────────────────────────────
 
 async function newBoard() {
@@ -92,7 +109,7 @@ async function newBoard() {
   const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
   _boardOpening = true; openingShield.classList.add('active');
   const openingStart = performance.now();
-  await showIslandMsg('Opening');
+  await startPillTask({ message: 'Opening' });
   if (editingId) exitEdit();
   OpenDebug.step(dbg, 'exitEdit', {});
   selectedId = null;
@@ -114,9 +131,11 @@ async function newBoard() {
   updateTitle();
   const elapsed = performance.now() - openingStart;
   OpenDebug.step(dbg, 'workDone', { elapsed });
-  _boardOpening = false; openingShield.classList.remove('active');
+  _boardOpening = false;
   applyTransform();
-  restoreIslandZoom();
+  finishPillTransition({
+    beforeTransition: () => openingShield.classList.remove('active'),
+  });
   OpenDebug.end(dbg, { totalMs: elapsed });
 }
 

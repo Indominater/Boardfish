@@ -2,79 +2,41 @@
 var ClipDebug = (() => {
 
   const MAX_EVENTS = 2000;
-  let enabled = false;
-  let verbose = false;
-  let nextOpId = 1;
-  const events = [];
 
   function sanitize(value) {
     return sanitizeDebugMeta(value);
-  }
-
-  function push(evt) {
-    if (!enabled) return;
-    const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
-    events.push(entry);
-    if (events.length > MAX_EVENTS) events.shift();
-    if (verbose) console.debug('[Boardfish clipboard]', entry);
   }
 
   function setRustDebug(value) {
     setNativeDebug('set_clipboard_debug', value);
   }
 
-  function enable(options = {}) {
-    if (!DEBUG_TOOLS_ENABLED) return;
-    enabled = true;
+  const core = createDebugRecorder({
+    maxEvents: MAX_EVENTS,
+    label: '[Boardfish clipboard]',
+    sanitize,
+    onEnable: () => setRustDebug(true),
+    onDisable: () => setRustDebug(false),
+  });
+  const events = core._events;
 
-    if (options.verbose === true) setVerbose(true);
-    setRustDebug(true);
-    console.info('Boardfish clipboard debugger enabled. Events are buffered. Use BoardfishDebug.clipboard.phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
+  function enable(options = {}) {
+    core.enable(options);
+    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Events are buffered. Use BoardfishDebug.clipboard.phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
   }
 
   function disable() {
-    enabled = false;
-
-    setRustDebug(false);
+    core.disable();
     console.info('Boardfish clipboard debugger disabled.');
   }
-
-  function setVerbose(value) {
-    verbose = !!value;
-    console.info(`Boardfish clipboard verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
-  }
-
-  function start(op, meta = {}) {
-    if (!enabled) return null;
-    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
-    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
-    return ctx;
-  }
-
-  function step(ctx, stepName, meta = {}) {
-    if (!enabled || !ctx) return;
-    const now = performance.now();
-    if (!ctx.steps) ctx.steps = {};
-    ctx.steps[stepName] = { ms: now - ctx.last, total: now - ctx.t0, meta: sanitize(meta) };
-    push({
-      id: ctx.id,
-      op: ctx.op,
-      step: stepName,
-      dt: Math.round((now - ctx.last) * 100) / 100,
-      total: Math.round((now - ctx.t0) * 100) / 100,
-      meta: sanitize(meta),
-    });
-    ctx.last = now;
-  }
-
-  function end(ctx, meta = {}) {
-    if (!enabled || !ctx) return;
-    step(ctx, 'end', meta);
-  }
+  const setVerbose = core.setVerbose;
+  const start = core.start;
+  const step = core.step;
+  const end = core.end;
 
   async function invoke(ctx, command, args = {}, meta = {}) {
     if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!enabled) return tauriInvoke(command, args);
+    if (!core.enabled) return tauriInvoke(command, args);
     const t0 = performance.now();
     step(ctx, 'invoke:start', { command, ...meta });
     try {
@@ -221,7 +183,7 @@ var ClipDebug = (() => {
     return out;
   }
 
-  function reset() { events.length = 0; }
+  function reset() { core.reset(); }
   const clear = reset;
 
 
@@ -254,10 +216,6 @@ exposeDebug({ clipboard: ClipDebug });
 // ─── History debugger ───────────────────────────────────────────────────────
 var HistoryDebug = (() => {
   const MAX_EVENTS = 500;
-  let enabled = false;
-  let verbose = false;
-  let nextOpId = 1;
-  const events = [];
   const stats = {
     snapshots: 0,
     pushHistory: 0,
@@ -281,67 +239,35 @@ var HistoryDebug = (() => {
   function sanitize(value) {
     return sanitizeDebugMeta(value, { redactPattern: null, roundNumbers: true });
   }
-
-  function push(evt) {
-    if (!enabled) return;
-    const entry = { at: round(performance.now()), ...evt };
-    events.push(entry);
-    if (events.length > MAX_EVENTS) events.shift();
-    if (verbose) console.debug('[Boardfish history]', entry);
-  }
+  const core = createDebugRecorder({
+    maxEvents: MAX_EVENTS,
+    label: '[Boardfish history]',
+    sanitize,
+  });
+  const events = core._events;
 
   function enable(options = {}) {
-    if (!DEBUG_TOOLS_ENABLED) return;
-    enabled = true;
-    if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish history debugger enabled. Use BoardfishDebug.history.pushes(), .summary(), .dump(), .setVerbose(true), or .reset().');
+    core.enable(options);
+    if (core.enabled) console.info('Boardfish history debugger enabled. Use BoardfishDebug.history.pushes(), .summary(), .dump(), .setVerbose(true), or .reset().');
   }
 
   function disable() {
-    enabled = false;
+    core.disable();
     console.info('Boardfish history debugger disabled.');
   }
-
-  function setVerbose(value) {
-    verbose = !!value;
-    console.info(`Boardfish history verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
-  }
-
-  function start(op, meta = {}) {
-    if (!enabled) return null;
-    const now = performance.now();
-    const ctx = { id: nextOpId++, op, t0: now, last: now };
-    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
-    return ctx;
-  }
-
-  function step(ctx, stepName, meta = {}) {
-    if (!enabled || !ctx) return;
-    const now = performance.now();
-    push({
-      id: ctx.id,
-      op: ctx.op,
-      step: stepName,
-      dt: round(now - ctx.last),
-      total: round(now - ctx.t0),
-      meta: sanitize(meta),
-    });
-    ctx.last = now;
-  }
-
-  function end(ctx, meta = {}) {
-    if (!enabled || !ctx) return;
-    step(ctx, 'end', meta);
-  }
+  const setVerbose = core.setVerbose;
+  const start = core.start;
+  const step = core.step;
+  const end = core.end;
 
   function count(key, amount = 1) {
-    if (!enabled) return;
+    if (!core.enabled) return;
     if (!Object.hasOwn(stats, key)) stats[key] = 0;
     stats[key] += amount;
   }
 
   function max(key, value) {
-    if (!enabled) return;
+    if (!core.enabled) return;
     if (!Object.hasOwn(stats, key)) stats[key] = 0;
     stats[key] = Math.max(stats[key], value || 0);
   }
@@ -389,7 +315,7 @@ var HistoryDebug = (() => {
   }
 
   function reset() {
-    events.length = 0;
+    core.reset();
     for (const key of Object.keys(stats)) stats[key] = 0;
   }
 
@@ -1082,50 +1008,36 @@ exposeDebug({ save: SaveDebug });
 // ─── Open debugger ───────────────────────────────────────────────────────────
 var OpenDebug = (() => {
   const MAX_EVENTS = 5000;
-  let enabled = false;
-  let verbose = false;
   let hydrationMode = 'all-before-open';
   let hydrationConcurrency = 8;
-  let nextOpId = 1;
-  const events = [];
 
   function sanitize(value) {
     return sanitizeDebugMeta(value, { redactPattern: /dataUrl|src|base64|imageStore/i, roundNumbers: true });
-  }
-
-  function push(evt) {
-    if (!enabled) return;
-    const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
-    events.push(entry);
-    if (events.length > MAX_EVENTS) events.shift();
-    if (verbose) console.debug('[Boardfish open]', entry);
   }
 
   function setRustDebug(value) {
     setNativeDebug('set_open_debug', value);
   }
 
-  function enable(options = {}) {
-    if (!DEBUG_TOOLS_ENABLED) return;
-    enabled = true;
+  const core = createDebugRecorder({
+    maxEvents: MAX_EVENTS,
+    label: '[Boardfish open]',
+    sanitize,
+    onEnable: () => setRustDebug(true),
+    onDisable: () => setRustDebug(false),
+  });
+  const events = core._events;
 
-    if (options.verbose === true) setVerbose(true);
-    setRustDebug(true);
-    console.info('Boardfish open debugger enabled. Use BoardfishDebug.open.summary(), .dump(), or .reset().');
+  function enable(options = {}) {
+    core.enable(options);
+    if (core.enabled) console.info('Boardfish open debugger enabled. Use BoardfishDebug.open.summary(), .dump(), or .reset().');
   }
 
   function disable() {
-    enabled = false;
-
-    setRustDebug(false);
+    core.disable();
     console.info('Boardfish open debugger disabled.');
   }
-
-  function setVerbose(value) {
-    verbose = !!value;
-
-    console.info(`Boardfish open verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
-  }
+  const setVerbose = core.setVerbose;
 
   function setHydrationMode(mode) {
     const allowed = new Set(['all-before-open', 'visible-first']);
@@ -1145,35 +1057,13 @@ var OpenDebug = (() => {
     return hydrationConcurrency;
   }
 
-  function start(op, meta = {}) {
-    if (!enabled) return null;
-    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
-    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
-    return ctx;
-  }
-
-  function step(ctx, stepName, meta = {}) {
-    if (!enabled || !ctx) return;
-    const now = performance.now();
-    push({
-      id: ctx.id,
-      op: ctx.op,
-      step: stepName,
-      dt: Math.round((now - ctx.last) * 100) / 100,
-      total: Math.round((now - ctx.t0) * 100) / 100,
-      meta: sanitize(meta),
-    });
-    ctx.last = now;
-  }
-
-  function end(ctx, meta = {}) {
-    if (!enabled || !ctx) return;
-    step(ctx, 'end', meta);
-  }
+  const start = core.start;
+  const step = core.step;
+  const end = core.end;
 
   async function invoke(ctx, command, args = {}, meta = {}) {
     if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!enabled) return tauriInvoke(command, args);
+    if (!core.enabled) return tauriInvoke(command, args);
     const t0 = performance.now();
     step(ctx, 'invoke:start', { command, ...meta });
     try {
@@ -1369,7 +1259,7 @@ var OpenDebug = (() => {
     return rows;
   }
 
-  function reset() { events.length = 0; }
+  function reset() { core.reset(); }
 
 
   return {
@@ -1393,7 +1283,7 @@ var OpenDebug = (() => {
     hydrationCandidates,
     slowImages,
     reset,
-    get enabled() { return enabled; },
+    get enabled() { return core.enabled; },
     get hydrationMode() { return hydrationMode; },
     get hydrationConcurrency() { return hydrationConcurrency; },
     get events() { return events.slice(); },
@@ -1406,75 +1296,38 @@ exposeDebug({ open: OpenDebug });
 var ExportDebug = (() => {
   const MAX_EVENTS = 2000;
   const MAX_MASSIVE_SAMPLES = 8;
-  let enabled = false;
-  let verbose = false;
-  let nextOpId = 1;
-  const events = [];
   let massive = null;
 
   function sanitize(value) {
     return sanitizeDebugMeta(value, { roundNumbers: true });
   }
 
-  function push(evt) {
-    if (!enabled) return;
-    const entry = { at: Math.round(performance.now() * 100) / 100, ...evt };
-    events.push(entry);
-    if (events.length > MAX_EVENTS) events.shift();
-    if (verbose) console.debug('[Boardfish export]', entry);
-  }
-
   function setRustDebug(value) {
     setNativeDebug('set_save_debug', value);
   }
 
-  function enable(options = {}) {
-    if (!DEBUG_TOOLS_ENABLED) return;
-    enabled = true;
+  const core = createDebugRecorder({
+    maxEvents: MAX_EVENTS,
+    label: '[Boardfish export]',
+    sanitize,
+    onEnable: () => setRustDebug(true),
+    onDisable: () => setRustDebug(false),
+  });
+  const events = core._events;
 
-    if (options.verbose === true) setVerbose(true);
-    setRustDebug(true);
-    console.info('Boardfish export debugger enabled. For progress issues use BoardfishDebug.export.progressReport(); for massive boards use .massiveReport(); also available: .status(), .slowImageReport(), .summary(), .dump(), .reset().');
+  function enable(options = {}) {
+    core.enable(options);
+    if (core.enabled) console.info('Boardfish export debugger enabled. For progress issues use BoardfishDebug.export.progressReport(); for massive boards use .massiveReport(); also available: .status(), .slowImageReport(), .summary(), .dump(), .reset().');
   }
 
   function disable() {
-    enabled = false;
-
-    setRustDebug(false);
+    core.disable();
     console.info('Boardfish export debugger disabled.');
   }
-
-  function setVerbose(value) {
-    verbose = !!value;
-
-    console.info(`Boardfish export verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
-  }
-
-  function start(op, meta = {}) {
-    if (!enabled) return null;
-    const ctx = { id: nextOpId++, op, t0: performance.now(), last: performance.now() };
-    push({ id: ctx.id, op, step: 'start', meta: sanitize(meta) });
-    return ctx;
-  }
-
-  function step(ctx, stepName, meta = {}) {
-    if (!enabled || !ctx) return;
-    const now = performance.now();
-    push({
-      id: ctx.id,
-      op: ctx.op,
-      step: stepName,
-      dt: Math.round((now - ctx.last) * 100) / 100,
-      total: Math.round((now - ctx.t0) * 100) / 100,
-      meta: sanitize(meta),
-    });
-    ctx.last = now;
-  }
-
-  function end(ctx, meta = {}) {
-    if (!enabled || !ctx) return;
-    step(ctx, 'end', meta);
-  }
+  const setVerbose = core.setVerbose;
+  const start = core.start;
+  const step = core.step;
+  const end = core.end;
 
   function pushTop(list, row, scoreKey, limit = MAX_MASSIVE_SAMPLES) {
     list.push(row);
@@ -1487,7 +1340,7 @@ var ExportDebug = (() => {
   }
 
   function startMassive(op, imageObjs = []) {
-    if (!enabled) return null;
+    if (!core.enabled) return null;
     const seen = new Map();
     const countsBySourceKind = { nativeRef: 0, dataUrl: 0, missing: 0, other: 0 };
     let storedBytes = 0;
@@ -1839,7 +1692,7 @@ var ExportDebug = (() => {
   }
 
   function watch(ctx, phase, meta = {}, intervalMs = 2000) {
-    if (!enabled || !ctx) return () => {};
+    if (!core.enabled || !ctx) return () => {};
     const startedAt = performance.now();
     let tick = 0;
     let expectedAt = startedAt + intervalMs;
@@ -1870,7 +1723,7 @@ var ExportDebug = (() => {
 
   async function invoke(ctx, command, args = {}, meta = {}) {
     if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!enabled) return tauriInvoke(command, args);
+    if (!core.enabled) return tauriInvoke(command, args);
     step(ctx, 'invoke:start', { command, ...sanitize(meta) });
     const t0 = performance.now();
     try {
@@ -2064,9 +1917,9 @@ var ExportDebug = (() => {
     return out;
   }
 
-  function reset() { events.length = 0; massive = null; }
+  function reset() { core.reset(); massive = null; }
 
-  return { enable, disable, setVerbose, start, step, end, watch, invoke, startMassive, recordResolveStart, recordResolveProgress, recordResolveDone, recordResolve, recordSaveStart, recordSaveBatch, recordSaveDone, recordProgressUi, massiveReport, progressReport, dump, summary, phaseSummary, slowImageReport, status, reset, get enabled() { return enabled; }, get events() { return events.slice(); }, get massive() { return massive ? JSON.parse(JSON.stringify(massive)) : null; } };
+  return { enable, disable, setVerbose, start, step, end, watch, invoke, startMassive, recordResolveStart, recordResolveProgress, recordResolveDone, recordResolve, recordSaveStart, recordSaveBatch, recordSaveDone, recordProgressUi, massiveReport, progressReport, dump, summary, phaseSummary, slowImageReport, status, reset, get enabled() { return core.enabled; }, get events() { return events.slice(); }, get massive() { return massive ? JSON.parse(JSON.stringify(massive)) : null; } };
 })();
 
 exposeDebug({ export: ExportDebug });

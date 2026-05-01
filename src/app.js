@@ -124,14 +124,14 @@ function createDebugRecorder({
   function step(ctx, stepName, meta = {}) {
     if (!enabled || !ctx) return;
     const now = performance.now();
+    if (!ctx.steps) ctx.steps = {};
+    ctx.steps[stepName] = { ms: now - ctx.last, total: now - ctx.t0, meta: sanitize(meta) };
     push({ id: ctx.id, op: ctx.op, step: stepName, total: round(now - ctx.t0), dt: round(now - ctx.last), meta: sanitize(meta) });
     ctx.last = now;
   }
 
   function end(ctx, meta = {}) {
-    if (!enabled || !ctx) return;
-    const now = performance.now();
-    push({ id: ctx.id, op: ctx.op, step: 'end', total: round(now - ctx.t0), dt: round(now - ctx.last), meta: sanitize(meta) });
+    step(ctx, 'end', meta);
   }
 
   function reset() {
@@ -152,6 +152,102 @@ function createDebugRecorder({
     get events() { return events.slice(); },
     _events: events,
   };
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workerCount = Math.max(1, Math.min(Number(limit) || 1, items.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      out[index] = await worker(items[index], index);
+    }
+  }));
+  return out;
+}
+
+function normalizeRotation(value) {
+  return ((Number(value) || 0) % 360 + 360) % 360;
+}
+
+function imageTransformFromData(data = {}) {
+  return {
+    flipX: !!data.flipX,
+    flipY: !!data.flipY,
+    rotation: normalizeRotation(data.rotation),
+  };
+}
+
+function imageTransformFromObject(obj) {
+  return imageTransformFromData(obj?.data || {});
+}
+
+function imageTransformNeedsRendering(transform) {
+  return !!(transform?.flipX || transform?.flipY || transform?.rotation);
+}
+
+function isSidewaysRotation(rotation) {
+  const normalized = normalizeRotation(rotation);
+  return normalized === 90 || normalized === 270;
+}
+
+function createRafCommitter(apply) {
+  let raf = null;
+  let pending = false;
+  let state = null;
+
+  function flush() {
+    if (!pending) return;
+    const nextState = state;
+    pending = false;
+    state = null;
+    apply(nextState);
+  }
+
+  return {
+    schedule(nextState) {
+      state = nextState;
+      pending = true;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        flush();
+      });
+    },
+    flush() {
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = null;
+      }
+      flush();
+    },
+    cancel() {
+      if (raf) cancelAnimationFrame(raf);
+      raf = null;
+      pending = false;
+      state = null;
+    },
+    get pending() { return pending; },
+  };
+}
+
+function beginDocumentDrag({ move, up, moveEvent = 'mousemove', upEvent = 'mouseup' }) {
+  let active = true;
+  const cleanup = (event = null) => {
+    if (!active) return;
+    active = false;
+    document.removeEventListener(moveEvent, onMove);
+    document.removeEventListener(upEvent, onUp);
+    if (up) up(event);
+  };
+  const onMove = (event) => {
+    if (move) move(event);
+  };
+  const onUp = (event) => cleanup(event);
+  document.addEventListener(moveEvent, onMove);
+  document.addEventListener(upEvent, onUp);
+  return cleanup;
 }
 
 function cssVar(name) {

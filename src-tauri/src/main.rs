@@ -24,8 +24,8 @@ use dialogs::{
 use image_sources::{
     clear_image_source_cache, get_cached_image_data_url, materialize_cached_image_sources,
     register_image_file_source, register_image_source, register_transformed_image_source,
-    remove_cached_image_sources, save_images_to_existing_folder_by_keys, write_image_file,
-    write_image_file_by_key, ImageSourceCache,
+    remove_cached_image_sources, save_images_to_existing_folder_by_keys, write_image_file_by_key,
+    ImageSourceCache,
 };
 
 static CLOSE_REQUEST_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -261,7 +261,6 @@ fn main() {
             pick_image_files,
             save_file_dialog,
             save_image_file_dialog,
-            write_image_file,
             write_image_file_by_key,
             pick_folder,
             save_images_to_existing_folder_by_keys,

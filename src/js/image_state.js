@@ -52,17 +52,15 @@ function cacheImageSourceForExport(key, src, dbg = null) {
 }
 
 function imageNeedsRendering(obj) {
-  return !!(obj?.data?.flipX || obj?.data?.flipY || obj?.data?.rotation);
+  return imageTransformNeedsRendering(imageTransformFromObject(obj));
 }
 
 function renderImageToCanvas(obj, sourceImg = null) {
-  const rotation = ((obj?.data?.rotation || 0) % 360 + 360) % 360;
+  const transform = imageTransformFromObject(obj);
   const dbg = ClipDebug.start('renderImageToCanvas', {
     id: obj?.id,
     imgKey: obj?.data?.imgKey,
-    flipX: !!obj?.data?.flipX,
-    flipY: !!obj?.data?.flipY,
-    rotation,
+    ...transform,
   });
   const img = sourceImg || imageCache[obj.data.imgKey];
   if (!img || !img.complete || !img.naturalWidth) {
@@ -71,17 +69,15 @@ function renderImageToCanvas(obj, sourceImg = null) {
   }
   const sourceW = img.naturalWidth;
   const sourceH = img.naturalHeight;
-  const sideways = rotation === 90 || rotation === 270;
+  const sideways = isSidewaysRotation(transform.rotation);
   const tmp = document.createElement('canvas');
   tmp.width = sideways ? sourceH : sourceW;
   tmp.height = sideways ? sourceW : sourceH;
   const tctx = tmp.getContext('2d');
-  const flipX = !!obj.data.flipX;
-  const flipY = !!obj.data.flipY;
   tctx.save();
   tctx.translate(tmp.width / 2, tmp.height / 2);
-  tctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-  if (rotation) tctx.rotate((rotation * Math.PI) / 180);
+  tctx.scale(transform.flipX ? -1 : 1, transform.flipY ? -1 : 1);
+  if (transform.rotation) tctx.rotate((transform.rotation * Math.PI) / 180);
   tctx.drawImage(img, -sourceW / 2, -sourceH / 2, sourceW, sourceH);
   tctx.restore();
   ClipDebug.end(dbg, { ready: true, width: tmp.width, height: tmp.height });
@@ -100,13 +96,11 @@ function canvasToPngBlob(canvas) {
 
 async function getRenderedImageDataUrl(obj, dbg = null) {
   const imgKey = obj?.data?.imgKey;
-  const rotation = ((obj?.data?.rotation || 0) % 360 + 360) % 360;
+  const transform = imageTransformFromObject(obj);
   const baseMeta = {
     objectId: obj?.id,
     imgKey,
-    flipX: !!obj?.data?.flipX,
-    flipY: !!obj?.data?.flipY,
-    rotation,
+    ...transform,
     needsRender: imageNeedsRendering(obj),
     storedKind: isNativeImageRef(imageStore[imgKey]) ? 'native-ref' : typeof imageStore[imgKey],
     storedMB: Math.round(imageStoreBytesEstimate(imageStore[imgKey]) / 1024 / 1024 * 100) / 100,

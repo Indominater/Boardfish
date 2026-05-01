@@ -24,9 +24,7 @@ function cloneObject(obj) {
   const data = obj.type === 'image'
     ? {
         imgKey: obj.data.imgKey,
-        flipX: !!obj.data.flipX,
-        flipY: !!obj.data.flipY,
-        rotation: ((obj.data.rotation || 0) % 360 + 360) % 360,
+        ...imageTransformFromObject(obj),
       }
     : { content: normalizeTextContent(obj.data.content) };
   return {
@@ -98,8 +96,9 @@ function rotateSelectedImages(dir) {
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj || obj.type !== 'image') continue;
-    const current = ((obj.data.rotation || 0) % 360 + 360) % 360;
-    const oddFlip = !!obj.data.flipX !== !!obj.data.flipY;
+    const transform = imageTransformFromObject(obj);
+    const current = transform.rotation;
+    const oddFlip = transform.flipX !== transform.flipY;
     const delta = (dir === 'cw') !== oddFlip ? 90 : 270;
     obj.data.rotation = (current + delta) % 360;
     const cx = obj.x + obj.w / 2;

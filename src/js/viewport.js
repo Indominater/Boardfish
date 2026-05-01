@@ -547,10 +547,37 @@ function startIslandBusyMsg(text) {
     },
     done(finalMsg = null, duration = 1500, onRestore = null) {
       if (token !== _islAnimToken) return;
-      if (finalMsg) showIslandMsg(finalMsg, duration, onRestore);
-      else restoreIslandZoom();
+      if (finalMsg) return showIslandMsg(finalMsg, duration, onRestore);
+      return restoreIslandZoom();
     },
   };
+}
+
+function startPillTask({
+  message = null,
+  beforeStart = null,
+  progress = false,
+} = {}) {
+  if (beforeStart) beforeStart();
+  if (!message) return null;
+  return progress ? startIslandBusyMsg(message) : showIslandMsg(message);
+}
+
+function updatePillTask(busyPill, nextText) {
+  if (!busyPill) return;
+  busyPill.update(nextText);
+}
+
+function finishPillTransition({
+  beforeTransition = null,
+  busyPill = null,
+  finalMsg = null,
+  duration = 1500,
+} = {}) {
+  if (beforeTransition) beforeTransition();
+  if (busyPill) return busyPill.done(finalMsg, duration);
+  if (finalMsg) return showIslandMsg(finalMsg, duration);
+  return restoreIslandZoom();
 }
 
 function waitForPillFrameReady({ stableFramesNeeded = 4, maxFrameGapMs = 34, minWaitMs = 120, timeoutMs = 1800 } = {}) {
@@ -753,17 +780,15 @@ function resizeCanvas() {
 }
 
 function drawImageObj(context, obj, img) {
-  const flipX = !!obj.data.flipX;
-  const flipY = !!obj.data.flipY;
-  const rotation = ((obj.data.rotation || 0) % 360 + 360) % 360;
-  if (flipX || flipY || rotation) {
-    const sideways = rotation === 90 || rotation === 270;
+  const transform = imageTransformFromObject(obj);
+  if (imageTransformNeedsRendering(transform)) {
+    const sideways = isSidewaysRotation(transform.rotation);
     const drawW = sideways ? obj.h : obj.w;
     const drawH = sideways ? obj.w : obj.h;
     context.save();
     context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
-    context.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-    if (rotation) context.rotate((rotation * Math.PI) / 180);
+    context.scale(transform.flipX ? -1 : 1, transform.flipY ? -1 : 1);
+    if (transform.rotation) context.rotate((transform.rotation * Math.PI) / 180);
     context.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
     context.restore();
     return;

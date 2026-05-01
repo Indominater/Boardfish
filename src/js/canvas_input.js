@@ -113,28 +113,27 @@ function startGroupDrag(e) {
   const grpItems = dragItemsForSelection();
   let grpMoved = false;
   const grpThreshold = 9 / (zoom * zoom);
-  let grpLastDx = 0, grpLastDy = 0, grpRaf = null;
   function applyGrpDrag(dx, dy) {
     for (const item of grpItems) { item.obj.x = item.startX + dx; item.obj.y = item.startY + dy; }
     withRenderSource('group-drag', () => drawBoard());
     updateSelectionOverlay();
   }
+  const dragCommitter = createRafCommitter(({ dx, dy }) => applyGrpDrag(dx, dy));
   function onGrpMove(ev) {
     const dx = (ev.clientX - grpStartX) / zoom, dy = (ev.clientY - grpStartY) / zoom;
     if (!grpMoved && dx*dx + dy*dy > grpThreshold) grpMoved = true;
     if (!grpMoved) return;
-    grpLastDx = dx; grpLastDy = dy;
-    if (grpRaf) return;
-    grpRaf = requestAnimationFrame(() => { grpRaf = null; applyGrpDrag(grpLastDx, grpLastDy); });
+    dragCommitter.schedule({ dx, dy });
   }
-  function onGrpUp() {
-    document.removeEventListener('mousemove', onGrpMove);
-    document.removeEventListener('mouseup', onGrpUp);
-    if (grpRaf) { cancelAnimationFrame(grpRaf); grpRaf = null; }
-    if (grpMoved) { applyGrpDrag(grpLastDx, grpLastDy); for (const item of grpItems) markDirty(item.obj.id); pushHistory('group-drag'); }
-  }
-  document.addEventListener('mousemove', onGrpMove);
-  document.addEventListener('mouseup', onGrpUp);
+  beginDocumentDrag({
+    move: onGrpMove,
+    up() {
+      if (!grpMoved) return;
+      dragCommitter.flush();
+      for (const item of grpItems) markDirty(item.obj.id);
+      pushHistory('group-drag');
+    },
+  });
 }
 
 function startRubberBandSelection(e, additive) {
@@ -155,8 +154,6 @@ function startRubberBandSelection(e, additive) {
     _setStyleIfChanged(rubberBand, 'height', h + 'px', _rubberBandStyleState);
   }
   function onRbUp(ev) {
-    document.removeEventListener('mousemove', onRbMove);
-    document.removeEventListener('mouseup', onRbUp);
     finishRubberBandDrag();
     _setStyleIfChanged(rubberBand, 'display', 'none', _rubberBandStyleState);
     if (!rbActive) return;
@@ -180,8 +177,7 @@ function startRubberBandSelection(e, additive) {
     if (!hitCount) return;
     scheduleRender(true, true);
   }
-  document.addEventListener('mousemove', onRbMove);
-  document.addEventListener('mouseup', onRbUp);
+  beginDocumentDrag({ move: onRbMove, up: onRbUp });
 }
 
 function toggleAdditiveSelection(obj) {
@@ -226,12 +222,7 @@ function startTextSelectionDrag(e, obj, wp) {
       scheduleRender(true, false);
     }
   }
-  function onSelUp() {
-    document.removeEventListener('mousemove', onSelMove);
-    document.removeEventListener('mouseup', onSelUp);
-  }
-  document.addEventListener('mousemove', onSelMove);
-  document.addEventListener('mouseup', onSelUp);
+  beginDocumentDrag({ move: onSelMove });
 }
 
 function startObjectDrag(e, obj) {
@@ -242,8 +233,6 @@ function startObjectDrag(e, obj) {
   const dragItems = dragItemsForSelection();
   let moved = false;
   const moveThreshold = 9 / (zoom * zoom);
-  let lastDx = 0, lastDy = 0;
-  let dragRaf = null;
 
   function applyDrag(dx, dy) {
     for (const item of dragItems) {
@@ -255,41 +244,25 @@ function startObjectDrag(e, obj) {
     ViewportDebug.end(dragDbg);
     updateSelectionOverlay();
   }
-
-  function scheduleDragFrame() {
-    if (dragRaf) return;
-    dragRaf = requestAnimationFrame(() => {
-      dragRaf = null;
-      applyDrag(lastDx, lastDy);
-    });
-  }
+  const dragCommitter = createRafCommitter(({ dx, dy }) => applyDrag(dx, dy));
 
   function onMove(ev) {
     const dx = (ev.clientX - startX) / zoom;
     const dy = (ev.clientY - startY) / zoom;
     if (!moved && dx*dx + dy*dy > moveThreshold) moved = true;
     if (!moved) return;
-    lastDx = dx;
-    lastDy = dy;
-    scheduleDragFrame();
+    dragCommitter.schedule({ dx, dy });
   }
   function onUp() {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
     if (!moved) {
       if (!isSelected(obj.id)) selectObject(obj.id);
       return;
     }
-    if (dragRaf) {
-      cancelAnimationFrame(dragRaf);
-      dragRaf = null;
-    }
-    applyDrag(lastDx, lastDy);
+    dragCommitter.flush();
     for (const item of dragItems) markDirty(item.obj.id);
     pushHistory('drag');
   }
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
+  beginDocumentDrag({ move: onMove, up: onUp });
 }
 
 canvas.addEventListener('mousedown', (e) => {
