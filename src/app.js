@@ -167,11 +167,11 @@ function canvasTextColor() {
 }
 
 function islandTextColor() {
-  return cssVar('--island-text') || 'rgba(13,17,23,0.58)';
+  return cssVar('--firefox-menu-text') || '#f7f7fb';
 }
 
 function islandStatusTextColor() {
-  return cssVar('--island-status-text') || 'rgba(13,17,23,0.68)';
+  return cssVar('--firefox-menu-text') || '#f7f7fb';
 }
 
 function fillBoardBackground(context, width, height) {

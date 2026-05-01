@@ -568,7 +568,7 @@ async function saveBoardAs() {
       : 'board.bf';
     const filePath = await SaveDebug.invoke(dbg, 'save_file_dialog', { defaultName }, { defaultName });
     if (!filePath) { SaveDebug.end(dbg, { cancelled: true }); releaseInputShield(); return false; }
-    await showIslandMsg('Saving');
+    showIslandMsg('Saving');
     await invokeSaveBoard(filePath, dbg);
     currentFilePath = filePath;
     SaveDebug.step(dbg, 'markSaved:start');
@@ -592,7 +592,7 @@ async function saveBoard() {
     const dbg = SaveDebug.start('saveBoard', { path: currentFilePath, objectCount: objects.length });
     const releaseInputShield = acquireInputShield();
     try {
-      await showIslandMsg('Saving');
+      showIslandMsg('Saving');
       await invokeSaveBoard(currentFilePath, dbg);
       SaveDebug.step(dbg, 'markSaved:start');
       markSaved();
