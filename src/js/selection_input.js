@@ -122,7 +122,7 @@ function updateMultiSelectionOverlay() {
 }
 
 function updateSelectionOverlay() {
-  if (isBoardInputBlocked()) {
+  if (isBoardInputBlocked() && !shouldKeepSelectionOverlayWhileBlocked()) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
     return;

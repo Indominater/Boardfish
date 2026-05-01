@@ -351,7 +351,7 @@ async function saveSelectedImage() {
   const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
   if (imageObjs.length !== 1) { ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length }); return; }
   const obj = imageObjs[0];
-  const releaseInputShield = acquireInputShield();
+  const releaseInputShield = acquireInputShield({ keepSelectionOverlay: true });
 
   if (hasTauri()) {
     let tempKeys = [];
@@ -776,6 +776,11 @@ function selectedImageObjects() {
   return selectedObjs;
 }
 
+function finishImageExportInputShield(clearSelection) {
+  hideInputShield();
+  if (clearSelection) deselectAll();
+}
+
 async function exportImageBatch({
   op,
   mode,
@@ -783,6 +788,7 @@ async function exportImageBatch({
   startMeta,
   skipMeta = null,
   errorLabel,
+  clearSelectionAfter = false,
 }) {
   const dbg = ExportDebug.start(op, startMeta);
   const stopTotalWatch = ExportDebug.watch(dbg, 'export-total', { mode }, 5000);
@@ -822,8 +828,11 @@ async function exportImageBatch({
       ExportDebug.step(dbg, 'save:result', normalizeExportSaveResult(saveResult));
       stopTotalWatch({ savedCount });
       ExportDebug.end(dbg, { savedCount, ...normalizeExportSaveResult(saveResult) });
-      await delay(2000);
-      if (savedCount > 0) busyPill.done(savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`, 1500, hideInputShield);
+      if (savedCount > 0) busyPill.done(
+        savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`,
+        1500,
+        () => finishImageExportInputShield(clearSelectionAfter)
+      );
       else { busyPill.done(); hideInputShield(); }
     } catch (err) {
       if (busyPill) busyPill.done();
@@ -840,7 +849,7 @@ async function exportImageBatch({
   await downloadImageObjects(imageObjs, dbg);
   stopTotalWatch({ saved: true, method: 'download' });
   ExportDebug.end(dbg, { saved: true, method: 'download', imageCount: imageObjs.length });
-  hideInputShield();
+  finishImageExportInputShield(clearSelectionAfter && imageObjs.length);
 }
 
 async function saveSelectedImages() {
@@ -857,6 +866,7 @@ async function saveSelectedImages() {
 }
 
 async function exportAllImages() {
+  deselectAll();
   const imageObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'image');
   return exportImageBatch({
     op: 'exportAllImages',
@@ -865,6 +875,7 @@ async function exportAllImages() {
     startMeta: { objectCount: objects.length },
     skipMeta: imageObjs.length ? null : { reason: 'no-images' },
     errorLabel: 'Export all images failed:',
+    clearSelectionAfter: true,
   });
 }
 

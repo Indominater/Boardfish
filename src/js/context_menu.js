@@ -46,7 +46,7 @@ var MENU_COMMANDS = {
   'obj-btn-flip-vertical': () => { flipSelectedImages('y'); },
   'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
   'obj-btn-save-image': () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); },
-  'obj-btn-save-images': () => { closeObjCtxMenu('command:save-images'); showInputShield(); saveSelectedImages(); },
+  'obj-btn-save-images': () => { closeObjCtxMenu('command:save-images'); showInputShield({ keepSelectionOverlay: true }); saveSelectedImages(); },
 };
 
 function menuCommandFromButton(button) {

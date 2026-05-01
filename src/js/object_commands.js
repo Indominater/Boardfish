@@ -41,6 +41,7 @@ function acquireInputShield(...allowedInputs) {
   }
   const token = {
     allow: new Set(allowedInputs.flat().filter(Boolean)),
+    keepSelectionOverlay: options.keepSelectionOverlay === true,
     visual: options.visual !== false,
     released: false,
   };
@@ -54,11 +55,12 @@ function acquireInputShield(...allowedInputs) {
     if (index !== -1) _inputShieldStack.splice(index, 1);
     _inputShieldCount = _inputShieldStack.length;
     updateInputShieldVisual();
+    if (!_inputShieldStack.length && !_boardOpening) scheduleRender(false, true, 'input-shield-release');
   };
 }
 
-function showInputShield() {
-  _inputShieldReleases.push(acquireInputShield());
+function showInputShield(...allowedInputs) {
+  _inputShieldReleases.push(acquireInputShield(...allowedInputs));
 }
 function hideInputShield() {
   const release = _inputShieldReleases.pop();
@@ -66,11 +68,16 @@ function hideInputShield() {
   else {
     _inputShieldCount = Math.max(0, _inputShieldCount - 1);
     updateInputShieldVisual();
+    if (!_inputShieldStack.length && !_boardOpening) scheduleRender(false, true, 'input-shield-release');
   }
 }
 
 function isBoardInputBlocked() {
   return _boardOpening || _inputShieldStack.length > 0 || openingShield.classList.contains('active');
+}
+
+function shouldKeepSelectionOverlayWhileBlocked() {
+  return !_boardOpening && _inputShieldStack.some((token) => token.keepSelectionOverlay);
 }
 
 // ─── New board ───────────────────────────────────────────────────────────────

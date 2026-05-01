@@ -624,7 +624,7 @@ async function restoreIslandZoom() {
   const targetWidth = measureIslandTextWidth(pct);
   const widthDone = Math.abs(currentWidth - targetWidth) < 0.5
     ? Promise.resolve('same-width')
-    : waitForIslandTransition('width', 1400);
+    : waitForIslandTransition('width', 700);
   islSetWidth(pct);
   PillDebug.samplePillAnimation('restoreIslandZoom', 1800);
   PillDebug.log('restoreIslandZoom:width-set', { pct });
