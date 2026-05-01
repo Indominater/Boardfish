@@ -4,7 +4,7 @@ var FONT_SIZE = 16;
 var LINE_H    = 24;
 var TEXT_PAD  = 4;
 var NEW_TEXT_EDIT_MIN_LINES = 3;
-var FONT      = `${FONT_SIZE}px 'Geist Sans', 'Geist', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif`;
+var FONT      = `${FONT_SIZE}px 'Geist Sans', system-ui`;
 var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
 
 function normalizeTextContent(value) {
@@ -213,4 +213,3 @@ function layoutHitTest(layout, wx, wy, obj) {
   TextSelDebug._logHit(wx, wy, obj, line, line.startIndex + line.text.length, pw);
   return line.startIndex + line.text.length;
 }
-

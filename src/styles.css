@@ -64,7 +64,7 @@ body {
   overflow: hidden;
   background: var(--canvas-bg);
   user-select: none;
-  font-family: 'Geist Sans', 'Geist', Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Geist Sans', system-ui;
 }
 
 #canvas {
