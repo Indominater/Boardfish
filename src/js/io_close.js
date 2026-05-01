@@ -16,11 +16,7 @@ function markSaved() {
 
 function updateTitle() {
   if (!hasTauri()) return;
-  const name = currentFilePath
-    ? currentFilePath.split(/[\\/]/).pop().replace(/\.bf$/i, '')
-    : 'Untitled';
-  const dirtyIndicator = isDirty() ? ' •' : '';
-  const title = `Boardfish — ${name}${dirtyIndicator}`;
+  const title = '';
   document.title = title;
   tauriInvoke('set_title', { title });
 }
@@ -495,6 +491,7 @@ function applyBoardData(data, options = {}) {
   const endDebug = options.endDebug !== false;
   PillDebug.log('open:applyBoardData:start', getBoardOpenMetrics(data));
   OpenDebug.step(dbg, 'applyBoardData:start', getBoardOpenMetrics(data));
+  clearJsClipboard();
   const t0 = performance.now();
   clearImageStore(!sourcesCached);
   OpenDebug.step(dbg, 'clearImageStore', { ms: performance.now() - t0 });
@@ -658,6 +655,7 @@ async function requestAppClose(event = null) {
         }
       }
     }
+    clearJsClipboard();
     // Use process.exit instead of appWindow.close() to avoid re-triggering
     // the CloseRequested event in Rust (which would cause an infinite loop)
     await tauriInvoke('exit_app');

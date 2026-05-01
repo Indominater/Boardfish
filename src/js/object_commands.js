@@ -112,6 +112,7 @@ async function newBoard() {
   await startPillTask({ message: 'Opening' });
   if (editingId) exitEdit();
   OpenDebug.step(dbg, 'exitEdit', {});
+  clearJsClipboard();
   selectedId = null;
   selectedIds.clear();
   objects = [];

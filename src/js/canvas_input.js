@@ -7,6 +7,28 @@ var _selChangeListener = null;
 var _editHistoryTimer = null;
 var _editHistoryLastContent = null;
 var EDIT_HISTORY_DEBOUNCE_MS = 500;
+var _wheelPanRaf = null;
+var _wheelPanDX = 0;
+var _wheelPanDY = 0;
+
+function flushWheelPan() {
+  _wheelPanRaf = null;
+  if (!_wheelPanDX && !_wheelPanDY) return;
+  const dx = _wheelPanDX;
+  const dy = _wheelPanDY;
+  _wheelPanDX = 0;
+  _wheelPanDY = 0;
+  panX -= dx;
+  panY -= dy;
+  scheduleTransform('wheel-pan');
+}
+
+function scheduleWheelPan(dx, dy) {
+  _wheelPanDX += dx;
+  _wheelPanDY += dy;
+  if (_wheelPanRaf) return;
+  _wheelPanRaf = requestAnimationFrame(flushWheelPan);
+}
 
 
 canvas.addEventListener('wheel', (e) => {
@@ -37,10 +59,8 @@ canvas.addEventListener('wheel', (e) => {
     }
 
     ViewportDebug.count('wheelPan');
-    panX -= e.deltaX;
-    panY -= e.deltaY;
-    scheduleTransform('wheel-pan');
-    ViewportDebug.end(dbg, { mode: 'pan', panX, panY });
+    scheduleWheelPan(e.deltaX, e.deltaY);
+    ViewportDebug.end(dbg, { mode: 'pan', pendingDX: _wheelPanDX, pendingDY: _wheelPanDY, panX, panY });
   } finally {
     ViewportDebug.timing('wheelHandler', performance.now() - handlerStart);
   }

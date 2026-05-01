@@ -26,6 +26,9 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSApplication"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Graphics_Dwm"] }
+
 
 [features]
 default = ["custom-protocol"]

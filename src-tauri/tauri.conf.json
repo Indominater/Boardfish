@@ -12,12 +12,12 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "Boardfish",
+        "title": "",
         "width": 1280,
         "height": 800,
         "theme": "Light",
         "backgroundColor": "#e7eaed",
-        "zoomHotkeysEnabled": true
+        "zoomHotkeysEnabled": false
       }
     ],
     "security": {

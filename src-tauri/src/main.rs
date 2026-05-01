@@ -10,6 +10,8 @@ mod dialogs;
 mod image_sources;
 #[cfg(target_os = "macos")]
 mod platform_macos;
+#[cfg(target_os = "windows")]
+mod platform_windows;
 
 use board_io::{read_board_file, write_board_container};
 use board_types::validate_board_value;
@@ -194,6 +196,10 @@ fn set_title(window: tauri::Window, title: String) {
     unsafe {
         platform_macos::configure_window_title_bar(&window);
     }
+    #[cfg(target_os = "windows")]
+    unsafe {
+        platform_windows::configure_window_title_bar(&window);
+    }
 }
 
 #[tauri::command]
@@ -316,6 +322,15 @@ fn main() {
                 unsafe {
                     // Keep the close confirmation path alive for Cmd+Q and dock quits.
                     platform_macos::setup_termination_intercept(app_handle);
+                }
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    unsafe {
+                        platform_windows::configure_webview_title_bar(&window);
+                    }
                 }
             }
 

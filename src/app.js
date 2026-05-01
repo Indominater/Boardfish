@@ -8,6 +8,7 @@ var ctxMenu     = document.getElementById('ctx-menu');
 var fileInput   = document.getElementById('file-input');
 var selOverlay  = document.getElementById('sel-overlay');
 var multiSelOverlay = document.getElementById('multi-sel-overlay');
+var island       = document.getElementById('island');
 var islZoom        = document.getElementById('isl-zoom');
 var islMeasure     = document.getElementById('isl-measure');
 var openingShield  = document.getElementById('opening-shield');

@@ -245,6 +245,10 @@ document.addEventListener('click', (e) => {
 });
 
 islZoom.addEventListener('mousedown', e => e.preventDefault());
+island.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+}, { capture: true, passive: false });
 islZoom.addEventListener('click', () => {
   if (_imageCopyInFlight > 0) return;
   const dbg = ViewportDebug.start('zoomReset', { panX, panY, zoom, objectCount: objects.length });
