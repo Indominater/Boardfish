@@ -1,8 +1,13 @@
 'use strict';
 
+function isShortcutKey(e, letter) {
+  const normalizedLetter = letter.toLowerCase();
+  return e.key.toLowerCase() === normalizedLetter || e.code === `Key${normalizedLetter.toUpperCase()}`;
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Alt') { e.preventDefault(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); return; }
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'r')) { e.preventDefault(); return; }
 
   if (e.key === 'Escape') {
     hideMenus();
@@ -19,7 +24,7 @@ document.addEventListener('keydown', (e) => {
 
   if (isBoardInputBlocked()) { e.preventDefault(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'a')) {
     if (!editingId) {
       e.preventDefault();
       selectAllObjects();
@@ -27,7 +32,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'q' || e.key.toLowerCase() === 'w')) {
+  if ((e.ctrlKey || e.metaKey) && (isShortcutKey(e, 'q') || isShortcutKey(e, 'w'))) {
     if (hasTauri()) {
       e.preventDefault();
       requestAppClose();
@@ -39,29 +44,29 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault(); deleteSelected(); return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n' && !editingId) {
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'n') && !editingId) {
     e.preventDefault();
     newBoard();
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o' && !editingId) {
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'o') && !editingId) {
     e.preventDefault();
     openBoard();
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && isShortcutKey(e, 's')) {
     e.preventDefault();
     saveBoardAs();
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveBoard(); return; }
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 's')) { e.preventDefault(); saveBoard(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !editingId) { e.preventDefault(); copySelected(); return; }
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'c') && !editingId) { e.preventDefault(); copySelected(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && !editingId) {
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'x') && !editingId) {
     e.preventDefault();
     (async () => {
       await copySelected();
@@ -70,12 +75,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'Z' || e.key === 'z')) { e.preventDefault(); redo(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && isShortcutKey(e, 'z')) { e.preventDefault(); redo(); return; }
 
-  if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+  if (e.ctrlKey && !e.metaKey && isShortcutKey(e, 'y')) { e.preventDefault(); redo(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'z')) { e.preventDefault(); undo(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && e.key === 'd' && !editingId) { e.preventDefault(); duplicateSelected(); return; }
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'd') && !editingId) { e.preventDefault(); duplicateSelected(); return; }
 });
-
