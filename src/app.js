@@ -5343,8 +5343,13 @@ function isUnsavedDialogOpen() {
   return !!document.getElementById('dialog-overlay')?.classList.contains('show');
 }
 
+function isEventInsideUnsavedDialog(e) {
+  const dialog = document.getElementById('dialog');
+  return !!dialog && e.target instanceof Node && dialog.contains(e.target);
+}
+
 function isShieldInputAllowed(e) {
-  if (isUnsavedDialogOpen()) return true;
+  if (isUnsavedDialogOpen()) return isEventInsideUnsavedDialog(e);
   if (_boardOpening) return false;
   if (_inputShieldStack.length === 0) return true;
   const input = inputNameFromEvent(e);
