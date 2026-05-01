@@ -1,0 +1,157 @@
+// ─── Add objects ─────────────────────────────────────────────────────────────
+
+function addText(wx, wy, content = '') {
+  content = normalizeTextContent(content);
+  let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
+  if (content) {
+    const lines = content.split('\n');
+    const charW = 9.2, pad = 8;
+    const maxLineLen = Math.max(...lines.map(l => l.length), 1);
+    w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
+  }
+
+  const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data: { content } };
+  syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
+  objects.push(obj);
+  objectsMap.set(obj.id, obj);
+  selectObject(obj.id);
+  scheduleRender(true, false);
+  pushHistory('add-text');
+  if (!content) enterEdit(obj.id);
+}
+var _inputShieldCount = 0;
+var _inputShieldStack = [];
+var _inputShieldReleases = [];
+
+function updateInputShieldVisual() {
+  if (isUnsavedDialogOpen()) openingShield.classList.remove('active');
+  else if (_boardOpening || _inputShieldStack.some((token) => token.visual !== false)) openingShield.classList.add('active');
+  else openingShield.classList.remove('active');
+}
+
+function acquireInputShield(...allowedInputs) {
+  let options = {};
+  if (
+    allowedInputs.length &&
+    allowedInputs[allowedInputs.length - 1] &&
+    typeof allowedInputs[allowedInputs.length - 1] === 'object' &&
+    !Array.isArray(allowedInputs[allowedInputs.length - 1])
+  ) {
+    options = allowedInputs.pop();
+  }
+  const token = {
+    allow: new Set(allowedInputs.flat().filter(Boolean)),
+    visual: options.visual !== false,
+    released: false,
+  };
+  _inputShieldStack.push(token);
+  _inputShieldCount = _inputShieldStack.length;
+  updateInputShieldVisual();
+  return () => {
+    if (token.released) return;
+    token.released = true;
+    const index = _inputShieldStack.indexOf(token);
+    if (index !== -1) _inputShieldStack.splice(index, 1);
+    _inputShieldCount = _inputShieldStack.length;
+    updateInputShieldVisual();
+  };
+}
+
+function showInputShield() {
+  _inputShieldReleases.push(acquireInputShield());
+}
+function hideInputShield() {
+  const release = _inputShieldReleases.pop();
+  if (release) release();
+  else {
+    _inputShieldCount = Math.max(0, _inputShieldCount - 1);
+    updateInputShieldVisual();
+  }
+}
+
+function isBoardInputBlocked() {
+  return _boardOpening || _inputShieldStack.length > 0 || openingShield.classList.contains('active');
+}
+
+// ─── New board ───────────────────────────────────────────────────────────────
+
+async function newBoard() {
+  if (objects.length === 0 && !currentFilePath) return;
+  if (isDirty()) {
+    const choice = await showUnsavedDialog();
+    if (choice === 'cancel') return;
+    if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
+  }
+  const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
+  _boardOpening = true; openingShield.classList.add('active');
+  const openingStart = performance.now();
+  await showIslandMsg('Opening');
+  if (editingId) exitEdit();
+  OpenDebug.step(dbg, 'exitEdit', {});
+  selectedId = null;
+  selectedIds.clear();
+  objects = [];
+  objectsMap.clear();
+  _linesCacheMap.clear();
+  _prefixCache.clear();
+  invalidateOffscreen();
+  OpenDebug.step(dbg, 'clearState', {});
+  currentFilePath = null;
+  panX = 0; panY = 0; zoom = 1;
+  clearImageStore(true);
+  OpenDebug.step(dbg, 'clearImageStore', {});
+  boardHistory = []; historyIndex = -1;
+  idCounter = 1; zCounter = 1;
+  snapshot();
+  markSaved();
+  updateTitle();
+  const elapsed = performance.now() - openingStart;
+  OpenDebug.step(dbg, 'workDone', { elapsed });
+  _boardOpening = false; openingShield.classList.remove('active');
+  applyTransform();
+  restoreIslandZoom();
+  OpenDebug.end(dbg, { totalMs: elapsed });
+}
+
+// ─── Duplicate ────────────────────────────────────────────────────────────────
+
+function duplicateSelected() {
+  if (!selectedIds.size) return;
+  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  const cloned = [];
+  const imageData = {};
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj) continue;
+    const o = cloneObject(obj);
+    if (o.type === 'image') {
+      const src = imageStore[o.data.imgKey];
+      if (src) imageData[o.data.imgKey] = src;
+    }
+    cloned.push(o);
+  }
+  if (!cloned.length) return;
+  setJsClipboard({ type: 'objects', objects: cloned, imageData });
+  pasteAtPos(center.x, center.y);
+}
+
+// ─── Delete ───────────────────────────────────────────────────────────────────
+
+function deleteSelected() {
+  if (!hasSelection() || editingId) return;
+  let write = 0;
+  for (let read = 0; read < objects.length; read++) {
+    const obj = objects[read];
+    if (selectedIds.has(obj.id)) {
+      objectsMap.delete(obj.id);
+      _linesCacheMap.delete(obj.id);
+      continue;
+    }
+    objects[write++] = obj;
+  }
+  objects.length = write;
+  selectedId = null;
+  selectedIds.clear();
+  scheduleRender(true, true);
+  pushHistory('delete-selected');
+}

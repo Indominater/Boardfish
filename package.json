@@ -1,11 +1,12 @@
 {
   "name": "boardfish",
   "private": true,
-  "version": "0.7.4",
+  "version": "0.7.5",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "test": "node --test"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
