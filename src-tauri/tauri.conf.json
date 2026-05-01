@@ -16,7 +16,8 @@
         "width": 1280,
         "height": 800,
         "theme": "Light",
-        "backgroundColor": "#e7eaed"
+        "backgroundColor": "#e7eaed",
+        "zoomHotkeysEnabled": true
       }
     ],
     "security": {
