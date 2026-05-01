@@ -35,7 +35,7 @@
   --menu-text-active: rgba(13,17,23,0.96);
   --text-muted: rgba(13,17,23,0.52);
   --island-text: var(--menu-text);
-  --island-status-text: rgba(13,17,23,0.72);
+  --island-status-text: rgba(13,17,23,0.84);
   --canvas-text: #111418;
   --dialog-overlay-bg: rgba(255,255,255,0.28);
   --dialog-cancel-bg: rgba(0,0,0,0.08);

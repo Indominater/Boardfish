@@ -561,7 +561,6 @@ function applyBoardData(data, options = {}) {
 async function saveBoardAs() {
   if (!hasTauri()) { alert('Save requires the desktop app.'); return false; }
   const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
-  let busyPill = null;
   const releaseInputShield = acquireInputShield();
   try {
     const defaultName = currentFilePath
@@ -569,17 +568,17 @@ async function saveBoardAs() {
       : 'board.bf';
     const filePath = await SaveDebug.invoke(dbg, 'save_file_dialog', { defaultName }, { defaultName });
     if (!filePath) { SaveDebug.end(dbg, { cancelled: true }); releaseInputShield(); return false; }
-    busyPill = startIslandBusyMsg('Saving');
+    await showIslandMsg('Saving');
     await invokeSaveBoard(filePath, dbg);
     currentFilePath = filePath;
     SaveDebug.step(dbg, 'markSaved:start');
     markSaved();
     SaveDebug.step(dbg, 'markSaved:end');
-    busyPill.done('Saved', 1500, releaseInputShield);
+    showIslandMsg('Saved', 1500, releaseInputShield);
     SaveDebug.end(dbg, { saved: true, path: filePath });
     return true;
   } catch (err) {
-    if (busyPill) busyPill.done();
+    restoreIslandZoom();
     releaseInputShield();
     console.error('Save failed:', err);
     SaveDebug.end(dbg, { saved: false, error: String(err) });
@@ -592,17 +591,17 @@ async function saveBoard() {
     if (!hasTauri()) return false;
     const dbg = SaveDebug.start('saveBoard', { path: currentFilePath, objectCount: objects.length });
     const releaseInputShield = acquireInputShield();
-    const busyPill = startIslandBusyMsg('Saving');
     try {
+      await showIslandMsg('Saving');
       await invokeSaveBoard(currentFilePath, dbg);
       SaveDebug.step(dbg, 'markSaved:start');
       markSaved();
       SaveDebug.step(dbg, 'markSaved:end');
-      busyPill.done('Saved', 1500, releaseInputShield);
+      showIslandMsg('Saved', 1500, releaseInputShield);
       SaveDebug.end(dbg, { saved: true, path: currentFilePath });
       return true;
     } catch (err) {
-      busyPill.done();
+      restoreIslandZoom();
       releaseInputShield();
       console.error('Save failed:', err);
       SaveDebug.end(dbg, { saved: false, error: String(err) });
