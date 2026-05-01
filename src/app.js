@@ -3342,6 +3342,31 @@ function forceIslandTextTransparent() {
   PillDebug.log('forceIslandTextTransparent');
 }
 
+function waitForIslandFrames(count = 1, token = _islAnimToken) {
+  return new Promise((resolve) => {
+    const step = (remaining) => {
+      requestAnimationFrame(() => {
+        if (token !== _islAnimToken) { resolve('stale'); return; }
+        if (remaining <= 1) { resolve('frames'); return; }
+        step(remaining - 1);
+      });
+    };
+    step(Math.max(1, count));
+  });
+}
+
+async function fadeIslandTextTo(color, { token = _islAnimToken, timeoutMs = 700, skipTransparent = false } = {}) {
+  if (token !== _islAnimToken) return 'stale';
+  const alreadyTransparent = skipTransparent && color === TRANSPARENT_TEXT_COLOR && islandTextAlpha() <= 0.05;
+  const done = alreadyTransparent
+    ? Promise.resolve('already-transparent')
+    : waitForIslandTransition('color', timeoutMs);
+  islZoom.style.color = color;
+  const reason = await done;
+  if (token !== _islAnimToken) return 'stale';
+  return reason;
+}
+
 function startIslandBusyMsg(text) {
   const token = ++_islAnimToken;
   clearTimeout(_islMsgTimer);
@@ -3394,7 +3419,7 @@ function waitForPillFrameReady({ stableFramesNeeded = 4, maxFrameGapMs = 34, min
   });
 }
 
-function showIslandMsg(msg, duration = 0, onRestore = null) {
+async function showIslandMsg(msg, duration = 0, onRestore = null) {
   const token = ++_islAnimToken;
   PillDebug.log('showIslandMsg:start', { msg, duration });
   clearTimeout(_islMsgTimer);
@@ -3403,26 +3428,26 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
   applyIslandInteractionState();
   islSetWidth(msg);
   PillDebug.samplePillAnimation('showIslandMsg');
-  islZoom.style.color = TRANSPARENT_TEXT_COLOR;
-  PillDebug.log('showIslandMsg:fadeOut', { msg, colorAfter: islZoom.style.color, computedColor: getComputedStyle(islZoom).color, transition: getComputedStyle(islZoom).transition });
-  return new Promise(resolve => {
-    const timerStart = performance.now();
-    _islFadeTimer = setTimeout(() => {
-      if (token !== _islAnimToken) { resolve(); return; }
-      PillDebug.log('showIslandMsg:fadeIn', { msg, timerActualMs: Math.round(performance.now() - timerStart), computedColorBefore: getComputedStyle(islZoom).color });
-      islZoom.textContent = msg;
-      islZoom.style.color = islandStatusTextColor();
-      PillDebug.log('showIslandMsg:fadeInSet', { computedColorAfter: getComputedStyle(islZoom).color });
-      if (duration > 0) {
-        _islMsgTimer = setTimeout(() => { if (onRestore) onRestore(); restoreIslandZoom(); }, duration);
-      }
-      setTimeout(() => {
-        if (token !== _islAnimToken) { resolve(); return; }
-        PillDebug.log('showIslandMsg:resolved', { msg, elapsed: performance.now() - timerStart });
-        resolve();
-      }, 500);
-    }, 500);
-  });
+  const timerStart = performance.now();
+  PillDebug.log('showIslandMsg:fadeOut', { msg, computedColor: getComputedStyle(islZoom).color, transition: getComputedStyle(islZoom).transition });
+  const fadeOutReason = await fadeIslandTextTo(TRANSPARENT_TEXT_COLOR, { token, skipTransparent: true });
+  if (token !== _islAnimToken) return 'stale';
+  PillDebug.log('showIslandMsg:fadeOutComplete', { msg, reason: fadeOutReason, elapsed: performance.now() - timerStart });
+  PillDebug.log('showIslandMsg:fadeIn', { msg, computedColorBefore: getComputedStyle(islZoom).color });
+  islZoom.textContent = msg;
+  const fadeInReason = await fadeIslandTextTo(islandStatusTextColor(), { token });
+  PillDebug.log('showIslandMsg:fadeInSet', { computedColorAfter: getComputedStyle(islZoom).color });
+  if (token !== _islAnimToken) return 'stale';
+  PillDebug.log('showIslandMsg:resolved', { msg, reason: fadeInReason, elapsed: performance.now() - timerStart });
+  if (duration > 0) {
+    _islMsgTimer = setTimeout(async () => {
+      if (token !== _islAnimToken) return;
+      const zoomRestoreReason = await restoreIslandZoom();
+      if (onRestore) onRestore();
+      PillDebug.log('showIslandMsg:onRestore', { msg, zoomRestoreReason });
+    }, duration);
+  }
+  return fadeInReason;
 }
 
 async function restoreIslandZoom() {
@@ -3443,14 +3468,13 @@ async function restoreIslandZoom() {
   PillDebug.samplePillAnimation('restoreIslandZoom', 1800);
   PillDebug.log('restoreIslandZoom:width-set', { pct });
   PillDebug.log('restoreIslandZoom:fadeOut');
-  islZoom.style.color = TRANSPARENT_TEXT_COLOR;
-  const [widthReason] = await Promise.all([
+  const [widthReason, fadeOutReason] = await Promise.all([
     widthDone,
-    new Promise((resolve) => setTimeout(resolve, 500)),
+    fadeIslandTextTo(TRANSPARENT_TEXT_COLOR, { token, skipTransparent: true }),
   ]);
   if (token !== _islAnimToken) return;
   PillDebug.log('restoreIslandZoom:widthComplete', { reason: widthReason });
-  PillDebug.log('restoreIslandZoom:fadeOutComplete', { reason: 'width-and-timer' });
+  PillDebug.log('restoreIslandZoom:fadeOutComplete', { reason: fadeOutReason });
   if (islandTextAlpha() > 0.05) {
     forceIslandTextTransparent();
     if (token !== _islAnimToken) return;
@@ -3459,17 +3483,13 @@ async function restoreIslandZoom() {
   _lastZoomPct = -1;
   islZoom.textContent = pct;
   PillDebug.log('restoreIslandZoom:text-set', { pct });
-  requestAnimationFrame(() => {
-    if (token !== _islAnimToken) return;
-    PillDebug.log('restoreIslandZoom:raf1', { pct });
-    requestAnimationFrame(() => {
-      if (token !== _islAnimToken) return;
-      PillDebug.log('restoreIslandZoom:raf2', { pct });
-      islZoom.style.color = islandTextColor();
-      applyIslandInteractionState();
-      PillDebug.log('restoreIslandZoom:shown', { pct });
-    });
-  });
+  const frameReason = await waitForIslandFrames(2, token);
+  if (token !== _islAnimToken) return 'stale';
+  PillDebug.log('restoreIslandZoom:frames-ready', { pct, reason: frameReason });
+  const colorReason = await fadeIslandTextTo(islandTextColor(), { token });
+  applyIslandInteractionState();
+  PillDebug.log('restoreIslandZoom:shown', { pct, colorReason });
+  return colorReason;
 }
 
 islZoom.addEventListener('transitionstart', (event) => {
@@ -7502,9 +7522,9 @@ async function finishOpenedBoard(dbg, data) {
   const renderMs = performance.now() - renderStart;
   PillDebug.log('open:initial-applyTransform:end', { phaseMs: renderMs });
   OpenDebug.step(dbg, 'initial-applyTransform', { ms: renderMs });
+  const zoomRestoreReason = await restoreIslandZoom();
   openingShield.classList.remove('active');
-  PillDebug.log('open:openingShield:removed');
-  restoreIslandZoom();
+  PillDebug.log('open:openingShield:removed', { zoomRestoreReason });
   OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
   if (OpenDebug.hydrationMode === 'visible-first') {
     setTimeout(() => hydrateRemainingImagesForOpen(dbg).catch((err) => {
