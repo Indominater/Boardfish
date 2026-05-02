@@ -9,6 +9,12 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Alt') { e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'r')) { e.preventDefault(); return; }
 
+  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'l')) {
+    e.preventDefault();
+    toggleAppTheme();
+    return;
+  }
+
   if (e.key === 'Escape') {
     hideMenus();
     if (editingId) {

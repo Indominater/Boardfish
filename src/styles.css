@@ -7,6 +7,7 @@
 }
 :root {
   --canvas-bg: rgb(224, 224, 227);
+  --canvas-bg-dark: #1c1b22;
   --firefox-menu-bg: #42414d;
   --firefox-menu-border: #777681;
   --firefox-menu-text: #fbfbfe;
@@ -30,6 +31,11 @@
   --selection-handle-bg: #f8fafc;
   --selection-handle-shadow: 0 1px 3px rgba(0,0,0,0.28);
   --menu-active-bg: var(--firefox-menu-active-bg);
+}
+
+body[data-theme="dark"] {
+  --canvas-bg: var(--canvas-bg-dark);
+  --canvas-text: #fbfbfe;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -95,6 +101,7 @@ body.is-macos #mac-titlebar {
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
+  background: var(--canvas-bg);
 }
 
 /* ── Selection overlay ── */

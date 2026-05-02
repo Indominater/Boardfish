@@ -25,6 +25,11 @@
     };
   }
 
+  function normalizePreferences(preferences = {}) {
+    const theme = String(preferences.theme || '').toLowerCase() === 'dark' ? 'dark' : 'light';
+    return { theme };
+  }
+
   function normalizeObject(obj, index) {
     if (!isObject(obj)) throw new Error(`object ${index} is not an object`);
     if (obj.type !== 'text' && obj.type !== 'image') {
@@ -89,6 +94,7 @@
       ...data,
       version: Number(data.version || 3),
       viewport: normalizeViewport(data.viewport),
+      preferences: normalizePreferences(data.preferences),
       imageStore,
       objects,
     };

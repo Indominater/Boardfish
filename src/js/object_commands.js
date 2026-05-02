@@ -123,6 +123,7 @@ async function newBoard() {
   OpenDebug.step(dbg, 'clearState', {});
   currentFilePath = null;
   panX = 0; panY = 0; zoom = 1;
+  applyAppTheme('light');
   clearImageStore(true);
   OpenDebug.step(dbg, 'clearImageStore', {});
   boardHistory = []; historyIndex = -1;

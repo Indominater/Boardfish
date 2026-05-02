@@ -32,7 +32,10 @@ use image_sources::{
 
 static CLOSE_REQUEST_SEQ: AtomicU64 = AtomicU64::new(1);
 static CLOSE_ACK_SEQ: AtomicU64 = AtomicU64::new(0);
+static DARK_THEME: AtomicBool = AtomicBool::new(false);
 
+use tauri::window::Color;
+use tauri::Theme;
 use tauri::{Emitter, Manager};
 
 struct StartupFile(Mutex<Option<String>>);
@@ -198,8 +201,38 @@ fn set_title(window: tauri::Window, title: String) {
     }
     #[cfg(target_os = "windows")]
     unsafe {
-        platform_windows::configure_window_title_bar(&window);
+        platform_windows::configure_window_title_bar(&window, DARK_THEME.load(Ordering::Relaxed));
     }
+}
+
+#[tauri::command]
+fn set_app_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), String> {
+    let dark = theme.eq_ignore_ascii_case("dark");
+    DARK_THEME.store(dark, Ordering::Relaxed);
+    let native_theme = if dark { Theme::Dark } else { Theme::Light };
+    let color = if dark {
+        Color(0x1c, 0x1b, 0x22, 0xff)
+    } else {
+        Color(0xe0, 0xe0, 0xe3, 0xff)
+    };
+
+    window
+        .set_theme(Some(native_theme))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_background_color(Some(color))
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        platform_windows::configure_webview_title_bar(&window, dark);
+    }
+    #[cfg(target_os = "macos")]
+    unsafe {
+        platform_macos::configure_webview_title_bar(&window);
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -271,6 +304,7 @@ fn main() {
             pick_folder,
             save_images_to_existing_folder_by_keys,
             set_title,
+            set_app_theme,
             exit_app,
             cancel_pending_termination,
             acknowledge_close_request,
@@ -329,7 +363,10 @@ fn main() {
             {
                 if let Some(window) = app.get_webview_window("main") {
                     unsafe {
-                        platform_windows::configure_webview_title_bar(&window);
+                        platform_windows::configure_webview_title_bar(
+                            &window,
+                            DARK_THEME.load(Ordering::Relaxed),
+                        );
                     }
                 }
             }

@@ -29,6 +29,16 @@ var IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 var IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 if (IS_MAC) document.body.classList.add('is-macos');
 var TRANSPARENT_TEXT_COLOR = 'rgba(255,255,255,0)';
+var APP_THEMES = {
+  light: {
+    native: 'Light',
+  },
+  dark: {
+    native: 'Dark',
+  },
+};
+var appTheme = 'light';
+var _preferencesDirty = false;
 var DEBUG_TOOLS_ENABLED = (() => {
   try {
     const params = new URLSearchParams(window.location?.search || '');
@@ -56,6 +66,41 @@ function setNativeDebug(command, enabled) {
   if (!hasTauri()) return;
   tauriInvoke(command, { enabled }).catch(() => {});
 }
+
+function normalizeAppTheme(value) {
+  return String(value || '').toLowerCase() === 'dark' ? 'dark' : 'light';
+}
+
+function boardPreferences() {
+  return { theme: appTheme };
+}
+
+function applyNativeAppTheme() {
+  if (!hasTauri()) return;
+  tauriInvoke('set_app_theme', { theme: APP_THEMES[appTheme].native }).catch(() => {});
+}
+
+function applyAppTheme(theme, { dirty = false, native = true } = {}) {
+  const nextTheme = normalizeAppTheme(theme);
+  const changed = appTheme !== nextTheme;
+  appTheme = nextTheme;
+  document.body.dataset.theme = appTheme;
+  if (native) applyNativeAppTheme();
+  if (changed || dirty) {
+    invalidateOffscreen();
+    scheduleRender(true, false, 'theme-change');
+  }
+  if (dirty) {
+    _preferencesDirty = true;
+    updateTitle();
+  }
+}
+
+function toggleAppTheme() {
+  applyAppTheme(appTheme === 'dark' ? 'light' : 'dark', { dirty: true });
+}
+
+applyAppTheme(appTheme);
 
 function round2(value) {
   return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
