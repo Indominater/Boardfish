@@ -1,0 +1,39 @@
+Boardfish Source-Available License
+Version 1.0
+
+Copyright (c) 2026 Indominater
+
+This license governs use of the Boardfish source code, binaries, assets,
+documentation, and related materials in this repository (the "Software").
+
+Permission is granted to view, download, copy, build, and modify the Software
+for personal, educational, research, evaluation, and other non-commercial uses,
+subject to the restrictions below.
+
+You may not, without prior written permission from the copyright holder:
+
+- sell, rent, lease, sublicense, or otherwise commercialize the Software;
+- distribute the Software, modified or unmodified, as part of a paid product,
+  paid service, subscription, marketplace listing, bundle, or commercial
+  offering;
+- use the Software for commercial, business, studio, agency, enterprise, or
+  revenue-generating work;
+- remove or alter copyright notices, license notices, or attribution;
+- use the name "Boardfish", associated logos, icons, or branding to promote a
+  fork, derivative work, or unrelated product in a way that suggests official
+  endorsement.
+
+Non-commercial forks and modifications are permitted for personal learning,
+experimentation, and contribution back to the project, provided this license
+and copyright notice remain included.
+
+Commercial licenses, redistribution permission, and business use permission may
+be available from the copyright holder.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, NONINFRINGEMENT, AND AVAILABILITY. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES,
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE,
+ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.

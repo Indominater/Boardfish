@@ -1,12 +1,14 @@
 # Boardfish
 
-Boardfish is an open-source infinite canvas for fast, non-destructive ideation. Designed for Windows and macOS, it provides an ultra-lightweight environment for visual research, moodboarding, and snippets.
+Boardfish is a fast, local-first infinite canvas for visual research, moodboards, image references, and text snippets.
+
+It is built for people who collect lots of visual material and want a lightweight place to arrange, inspect, save, and export it without hassle.
 
 <img src="src-tauri/icons/image_e4de38.png" alt="Boardfish canvas screenshot" width="900">
 
 ## Download
 
-Grab the latest installer from the [Releases](../../releases/latest) page.
+Grab the latest Windows and macOS installers from the [Releases](https://github.com/Indominater/Boardfish/releases/latest) page.
 
 - **Windows** — download the `.exe`, run the installer
 - **macOS** — download the `.dmg`, drag Boardfish to Applications
@@ -15,6 +17,25 @@ Grab the latest installer from the [Releases](../../releases/latest) page.
 > ```bash
 > xattr -cr /Applications/Boardfish.app
 > ```
+
+## Why Boardfish?
+
+- **Local-first:** your boards stay on your machine
+- **Fast with image-heavy boards:** built for large collections of images and text
+- **Lossless image workflow:** import, transform, copy, and export without degrading originals
+- **No account required:** no workspaces, subscriptions, sync setup, or team features to get through
+- **Portable projects:** save everything into a local `.bf` file
+- **Simple extraction:** export selected images, all images, or all text when you need the raw material back
+
+Boardfish is not a team whiteboard. It is a private, lightweight canvas for collecting and arranging visual material quickly.
+
+## Who It's For
+
+- Artists and illustrators building reference boards
+- Designers collecting visual inspiration
+- Students organizing screenshots, formulas, and notes
+- Writers, game developers, and worldbuilders gathering research
+- Anyone who wants a quiet local canvas instead of a browser-based whiteboard
 
 ## Features
 
@@ -63,3 +84,9 @@ To build a release installer:
 ```bash
 npm run tauri build
 ```
+
+## License
+
+Boardfish is source-available under the [Boardfish Source-Available License](LICENSE).
+
+The source code is available for personal, educational, research, evaluation, and other non-commercial use. Commercial use, resale, redistribution as part of a paid product or service, and business/studio/enterprise use require prior written permission.
