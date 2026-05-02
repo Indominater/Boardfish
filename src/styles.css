@@ -22,7 +22,7 @@
   --menu-item-padding: 0 8px;
   --menu-item-radius: 4px;
   --menu-item-font-size: 13px;
-  --menu-item-font-weight: 600;
+  --menu-item-font-weight: 500;
   --menu-item-letter-spacing: 0;
   --menu-item-line-height: 32px;
   --canvas-text: #111418;
@@ -165,7 +165,7 @@ body.is-macos #mac-titlebar {
   border-radius: var(--menu-shell-radius);
   box-shadow: var(--firefox-menu-shadow);
   color: var(--firefox-menu-text);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: inherit;
   padding: var(--menu-shell-padding);
   overflow: hidden;
   user-select: none;
