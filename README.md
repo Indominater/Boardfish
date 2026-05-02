@@ -2,7 +2,7 @@
 
 Boardfish is a fast, local-first infinite canvas for visual research, moodboards, image references, and text snippets.
 
-It is built for people who collect lots of visual material and want a lightweight place to arrange, inspect, save, and export it without hassle.
+It is built for people who collect lots of visual material and want a lightweight place to arrange, inspect, save, and export without hassle.
 
 <img src="src-tauri/icons/image_e4de38.png" alt="Boardfish canvas screenshot" width="900">
 
