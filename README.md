@@ -19,7 +19,7 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 ## Features
 
 - **Local-first:** your boards stay on your machine
-- **Fast infinite canvas:** pan, zoom, select, multi-select, and arrange large boards of images and text
+- **Fast infinite canvas:** pan, zoom, select, multi-select, and arrange massive boards of images and text
 - **Flexible input:** add PNG/JPEG images and text from menus, shortcuts, clipboard, file picker, or drag and drop
 - **Image tools:** copy, resize, reorder, flip, rotate, export, and sample colors with the eyedropper
 - **Dark mode:** saved app preference with matching native window styling
