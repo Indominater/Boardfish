@@ -1,10 +1,14 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{elapsed_ms, save_debug};
 
 static IMAGE_ASSET_BATCH_COUNTER: AtomicU64 = AtomicU64::new(1);
+static IMAGE_ASSET_SESSION_MILLIS: OnceLock<u128> = OnceLock::new();
+const STALE_IMAGE_CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone)]
 pub(crate) struct CachedImageSource {
@@ -13,8 +17,13 @@ pub(crate) struct CachedImageSource {
     pub(crate) bytes: Arc<[u8]>,
 }
 
+struct CachedImageSourceEntry {
+    source: CachedImageSource,
+    materialized_paths: Vec<PathBuf>,
+}
+
 #[derive(Default)]
-pub(crate) struct ImageSourceCache(Mutex<HashMap<String, CachedImageSource>>);
+pub(crate) struct ImageSourceCache(Mutex<HashMap<String, CachedImageSourceEntry>>);
 
 impl ImageSourceCache {
     pub(crate) fn get(&self, key: &str) -> Result<CachedImageSource, String> {
@@ -22,7 +31,7 @@ impl ImageSourceCache {
             .lock()
             .map_err(|e| e.to_string())?
             .get(key)
-            .cloned()
+            .map(|entry| entry.source.clone())
             .ok_or_else(|| format!("image source cache missing for {key}"))
     }
 
@@ -35,7 +44,7 @@ impl ImageSourceCache {
         for key in keys {
             let source = cache
                 .get(key)
-                .cloned()
+                .map(|entry| entry.source.clone())
                 .ok_or_else(|| format!("image source cache missing for {key}"))?;
             sources.push((key.clone(), source));
         }
@@ -50,8 +59,8 @@ impl ImageSourceCache {
         let mut sources = Vec::with_capacity(keys.len());
         let mut missing = Vec::new();
         for key in keys {
-            if let Some(source) = cache.get(key) {
-                sources.push((key.clone(), source.clone()));
+            if let Some(entry) = cache.get(key) {
+                sources.push((key.clone(), entry.source.clone()));
             } else {
                 missing.push(key.clone());
             }
@@ -60,39 +69,100 @@ impl ImageSourceCache {
     }
 
     pub(crate) fn insert(&self, key: String, source: CachedImageSource) -> Result<(), String> {
-        self.0
+        let stale_paths = self
+            .0
             .lock()
             .map_err(|e| e.to_string())?
-            .insert(key, source);
+            .insert(
+                key,
+                CachedImageSourceEntry {
+                    source,
+                    materialized_paths: Vec::new(),
+                },
+            )
+            .map(|entry| entry.materialized_paths)
+            .unwrap_or_default();
+        cleanup_materialized_paths(stale_paths);
         Ok(())
     }
 
-    pub(crate) fn insert_many(
+    pub(crate) fn replace_all(
         &self,
         sources: Vec<(String, CachedImageSource)>,
     ) -> Result<(), String> {
         let mut cache = self.0.lock().map_err(|e| e.to_string())?;
+        let stale_paths = drain_materialized_paths(&mut cache);
+        cache.clear();
         for (key, source) in sources {
-            cache.insert(key, source);
+            cache.insert(
+                key,
+                CachedImageSourceEntry {
+                    source,
+                    materialized_paths: Vec::new(),
+                },
+            );
         }
+        drop(cache);
+        cleanup_materialized_paths(stale_paths);
+        Ok(())
+    }
+
+    fn record_materialized(&self, paths: Vec<(String, PathBuf)>) -> Result<(), String> {
+        let mut orphaned_paths = Vec::new();
+        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
+        for (key, path) in paths {
+            if let Some(entry) = cache.get_mut(&key) {
+                entry.materialized_paths.push(path);
+            } else {
+                orphaned_paths.push(path);
+            }
+        }
+        drop(cache);
+        cleanup_materialized_paths(orphaned_paths);
         Ok(())
     }
 
     fn remove_many(&self, keys: Vec<String>) -> Result<usize, String> {
         let mut cache = self.0.lock().map_err(|e| e.to_string())?;
         let mut removed = 0usize;
+        let mut stale_paths = Vec::new();
         for key in keys {
-            if cache.remove(&key).is_some() {
+            if let Some(entry) = cache.remove(&key) {
+                stale_paths.extend(entry.materialized_paths);
                 removed += 1;
             }
         }
+        drop(cache);
+        cleanup_materialized_paths(stale_paths);
         Ok(removed)
     }
 
-    fn clear(&self) -> Result<(), String> {
-        self.0.lock().map_err(|e| e.to_string())?.clear();
+    pub(crate) fn clear(&self) -> Result<(), String> {
+        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
+        let stale_paths = drain_materialized_paths(&mut cache);
+        cache.clear();
+        drop(cache);
+        cleanup_materialized_paths(stale_paths);
         Ok(())
     }
+}
+
+impl Drop for ImageSourceCache {
+    fn drop(&mut self) {
+        if let Ok(mut cache) = self.0.lock() {
+            let stale_paths = drain_materialized_paths(&mut cache);
+            cache.clear();
+            cleanup_materialized_paths(stale_paths);
+        }
+    }
+}
+
+fn drain_materialized_paths(cache: &mut HashMap<String, CachedImageSourceEntry>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for entry in cache.values_mut() {
+        paths.append(&mut entry.materialized_paths);
+    }
+    paths
 }
 
 #[derive(serde::Serialize)]
@@ -255,13 +325,22 @@ fn image_source_cache_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("boardfish-image-cache")
 }
 
+fn current_time_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn image_source_session_dir() -> PathBuf {
+    let millis = *IMAGE_ASSET_SESSION_MILLIS.get_or_init(current_time_millis);
+    image_source_cache_dir().join(format!("{}-{millis}", std::process::id()))
+}
+
 fn image_source_batch_dir() -> std::path::PathBuf {
     let batch = IMAGE_ASSET_BATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    image_source_cache_dir().join(format!("{}-{millis}-{batch}", std::process::id()))
+    let millis = current_time_millis();
+    image_source_session_dir().join(format!("batch-{millis}-{batch}"))
 }
 
 fn image_source_file_path(
@@ -274,6 +353,117 @@ fn image_source_file_path(
     dir.join(format!("{key}.{ext}"))
 }
 
+fn remove_empty_cache_dirs_from(dir: &Path, root: &Path) {
+    let mut current = dir.to_path_buf();
+    while current.starts_with(root) && current != root {
+        match std::fs::remove_dir(&current) {
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => break,
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+}
+
+fn cleanup_materialized_paths(mut paths: Vec<PathBuf>) {
+    if paths.is_empty() {
+        return;
+    }
+
+    let root = image_source_cache_dir();
+    paths.sort();
+    paths.dedup();
+    for path in paths {
+        if !path.starts_with(&root) {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => eprintln!(
+                "[boardfish image cache] remove materialized file failed: {}: {err}",
+                path.display()
+            ),
+        }
+        if let Some(parent) = path.parent() {
+            remove_empty_cache_dirs_from(parent, &root);
+        }
+    }
+}
+
+fn metadata_age(metadata: &std::fs::Metadata, now: SystemTime) -> Option<Duration> {
+    metadata
+        .modified()
+        .ok()
+        .or_else(|| metadata.created().ok())
+        .and_then(|time| now.duration_since(time).ok())
+}
+
+fn cleanup_stale_image_source_cache_inner(
+    root: &Path,
+    current_session: &Path,
+) -> Result<(usize, usize), String> {
+    if !root.exists() {
+        return Ok((0, 0));
+    }
+
+    let now = SystemTime::now();
+    let mut removed = 0usize;
+    let mut errors = 0usize;
+    for entry_result in std::fs::read_dir(root).map_err(|e| e.to_string())? {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(_) => {
+                errors += 1;
+                continue;
+            }
+        };
+        let path = entry.path();
+        if path == current_session {
+            continue;
+        }
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                errors += 1;
+                continue;
+            }
+        };
+        let Some(age) = metadata_age(&metadata, now) else {
+            continue;
+        };
+        if age < STALE_IMAGE_CACHE_MAX_AGE {
+            continue;
+        }
+        let result = if metadata.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        match result {
+            Ok(_) => removed += 1,
+            Err(_) => errors += 1,
+        }
+    }
+    Ok((removed, errors))
+}
+
+pub(crate) fn cleanup_stale_image_source_cache() {
+    let root = image_source_cache_dir();
+    let current_session = image_source_session_dir();
+    std::thread::spawn(move || {
+        match cleanup_stale_image_source_cache_inner(&root, &current_session) {
+            Ok((removed, errors)) if removed > 0 || errors > 0 => eprintln!(
+                "[boardfish image cache] stale cleanup removed {removed} entries with {errors} errors"
+            ),
+            Ok(_) => {}
+            Err(err) => eprintln!("[boardfish image cache] stale cleanup failed: {err}"),
+        }
+    });
+}
+
 #[tauri::command]
 pub(crate) async fn materialize_cached_image_sources(
     state: tauri::State<'_, ImageSourceCache>,
@@ -281,24 +471,39 @@ pub(crate) async fn materialize_cached_image_sources(
 ) -> Result<Vec<MaterializedImageSource>, String> {
     let sources = state.get_many(&img_keys)?;
 
-    tokio::task::spawn_blocking(move || {
+    let materialized = tokio::task::spawn_blocking(move || {
         let dir = image_source_batch_dir();
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let mut result = Vec::with_capacity(sources.len());
         for (key, source) in sources {
             let path = image_source_file_path(&dir, &key, &source);
             std::fs::write(&path, &source.bytes).map_err(|e| e.to_string())?;
-            result.push(MaterializedImageSource {
-                img_key: key,
-                path: path.to_string_lossy().to_string(),
-                mime: source.mime,
-                bytes: source.bytes.len(),
-            });
+            result.push((
+                MaterializedImageSource {
+                    img_key: key,
+                    path: path.to_string_lossy().to_string(),
+                    mime: source.mime,
+                    bytes: source.bytes.len(),
+                },
+                path,
+            ));
         }
-        Ok(result)
+        Ok::<_, String>(result)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+
+    state.record_materialized(
+        materialized
+            .iter()
+            .map(|(entry, path)| (entry.img_key.clone(), path.clone()))
+            .collect(),
+    )?;
+
+    Ok(materialized
+        .into_iter()
+        .map(|(entry, _path)| entry)
+        .collect())
 }
 
 #[tauri::command]

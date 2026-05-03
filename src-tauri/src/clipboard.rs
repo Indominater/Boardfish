@@ -85,11 +85,6 @@ pub(crate) fn clipboard_sequence() -> Result<u64, String> {
 }
 
 #[tauri::command]
-pub(crate) fn set_clipboard_debug(enabled: bool) {
-    CLIPBOARD_DEBUG.store(enabled, Ordering::Relaxed);
-}
-
-#[tauri::command]
 pub(crate) fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     let total = std::time::Instant::now();
     arboard::Clipboard::new()

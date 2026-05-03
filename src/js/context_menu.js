@@ -1,10 +1,23 @@
 // ─── Context menu ─────────────────────────────────────────────────────────────
 var ctxPos = { x: 0, y: 0 };
 
+function clampMenuCoord(value, size, margin = 12) {
+  const max = Math.max(margin, window.innerWidth - size - margin);
+  return Math.max(margin, Math.min(max, value));
+}
+
+function clampMenuTop(value, size, margin = 12) {
+  const max = Math.max(margin, window.innerHeight - size - margin);
+  return Math.max(margin, Math.min(max, value));
+}
+
 function openMenuAt(menu, x, y) {
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   menu.classList.add('visible');
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.round(clampMenuCoord(x, rect.width))}px`;
+  menu.style.top = `${Math.round(clampMenuTop(y, rect.height))}px`;
 }
 
 function menuGapPx() {
@@ -37,12 +50,11 @@ function openCtxMenuAt(x, y) {
   const gap = menuGapPx();
   const menuRect = ctxMenu.getBoundingClientRect();
   const actionRect = ctxActions.getBoundingClientRect();
-  const maxLeft = window.innerWidth - actionRect.width - 12;
-  const left = Math.max(12, Math.min(maxLeft, x));
-  let top = y - actionRect.height - gap;
-  if (top < 12) top = Math.min(window.innerHeight - actionRect.height - 12, y + menuRect.height + gap);
+  const left = clampMenuCoord(menuRect.left, actionRect.width);
+  let top = menuRect.top - actionRect.height - gap;
+  if (top < 12) top = menuRect.bottom + gap;
   ctxActions.style.left = `${Math.round(left)}px`;
-  ctxActions.style.top = `${Math.round(Math.max(12, top))}px`;
+  ctxActions.style.top = `${Math.round(clampMenuTop(top, actionRect.height))}px`;
 }
 
 if (ctxActions) {
@@ -155,6 +167,14 @@ function runAddImagesCommandFromShortcut() {
   runMenuCommand(addImageBtn, 'shortcut');
 }
 
+function runAddTextCommandFromShortcut() {
+  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  const defaultW = 200;
+  const defaultH = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
+  ctxPos = { x: center.x - defaultW / 2, y: center.y - defaultH / 2 };
+  runMenuCommand(addTextBtn, 'shortcut');
+}
+
 function onMenuPointerDown(e) {
   const button = e.target.closest?.('.ctx-item');
   if (!button || button.disabled || e.button !== 0) return;
@@ -240,10 +260,10 @@ function updateObjMenuActions() {
 function updateCtxMenuActions() {
   const hasImages = objects.some((o) => o.type === 'image');
   const hasText   = objects.some((o) => o.type === 'text');
-  const show = hasImages || hasText;
+  const show = !eyedropperEnabled && (hasImages || hasText);
   updateEyedropperCommandState();
-  if (exportAllTextBtn) exportAllTextBtn.style.display = hasText ? '' : 'none';
-  if (exportAllImageBtn) exportAllImageBtn.style.display = hasImages ? '' : 'none';
+  if (exportAllTextBtn) exportAllTextBtn.style.display = show && hasText ? '' : 'none';
+  if (exportAllImageBtn) exportAllImageBtn.style.display = show && hasImages ? '' : 'none';
   if (exportAllSep) exportAllSep.style.display = show ? 'block' : 'none';
 }
 

@@ -7,16 +7,10 @@ var ClipDebug = (() => {
     return sanitizeDebugMeta(value);
   }
 
-  function setRustDebug(value) {
-    setNativeDebug('set_clipboard_debug', value);
-  }
-
   const core = createDebugRecorder({
     maxEvents: MAX_EVENTS,
     label: '[Boardfish clipboard]',
     sanitize,
-    onEnable: () => setRustDebug(true),
-    onDisable: () => setRustDebug(false),
   });
   const events = core._events;
 
@@ -394,7 +388,7 @@ var ViewportDebug = (() => {
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish viewport debugger enabled. Events are buffered without per-event console logging. Use BoardfishDebug.viewport.summary(), .drawSummary(), .imageHealth(), .dump(), .setVerbose(true), or .reset().');
+    console.info('Boardfish viewport debugger enabled. Events are buffered without per-event console logging. Use BoardfishDebug.viewport.report(), .summary(), .drawSummary(), .slowFrames(), .imageHealth(), .dump(), .setVerbose(true), or .reset().');
   }
 
   function disable() {
@@ -581,6 +575,18 @@ var ViewportDebug = (() => {
       maxDrawMs: Math.round(max('ms') * 100) / 100,
       avgDrawnImages: draws.length ? Math.round(sum('drawnImages') / draws.length * 100) / 100 : 0,
       maxDrawnImages: max('drawnImages'),
+      avgTestedObjects: draws.length ? Math.round(sum('testedObjects') / draws.length * 100) / 100 : 0,
+      maxTestedObjects: max('testedObjects'),
+      avgVisibleObjects: draws.length ? Math.round(sum('visibleObjects') / draws.length * 100) / 100 : 0,
+      maxVisibleObjects: max('visibleObjects'),
+      avgObjectLoopMs: draws.length ? Math.round(sum('objectLoopMs') / draws.length * 100) / 100 : 0,
+      maxObjectLoopMs: Math.round(max('objectLoopMs') * 100) / 100,
+      avgBackgroundSetupMs: draws.length ? Math.round(sum('backgroundSetupMs') / draws.length * 100) / 100 : 0,
+      maxBackgroundSetupMs: Math.round(max('backgroundSetupMs') * 100) / 100,
+      avgOffscreenBlitMs: draws.length ? Math.round(sum('offscreenBlitMs') / draws.length * 100) / 100 : 0,
+      maxOffscreenBlitMs: Math.round(max('offscreenBlitMs') * 100) / 100,
+      avgEditingOverlayMs: draws.length ? Math.round(sum('editingOverlayMs') / draws.length * 100) / 100 : 0,
+      maxEditingOverlayMs: Math.round(max('editingOverlayMs') * 100) / 100,
       avgCulledImages: draws.length ? Math.round(sum('culledImages') / draws.length * 100) / 100 : 0,
       maxCulledImages: max('culledImages'),
       avgBitmapImages: draws.length ? Math.round(sum('bitmapImages') / draws.length * 100) / 100 : 0,
@@ -588,6 +594,10 @@ var ViewportDebug = (() => {
       avgScaledImages: draws.length ? Math.round(sum('scaledImages') / draws.length * 100) / 100 : 0,
       maxScaledImages: max('scaledImages'),
       avgScaledFallbackFull: draws.length ? Math.round(sum('scaledFallbackFull') / draws.length * 100) / 100 : 0,
+      avgScaledVariantPendingImages: draws.length ? Math.round(sum('scaledVariantPendingImages') / draws.length * 100) / 100 : 0,
+      maxScaledVariantPendingImages: max('scaledVariantPendingImages'),
+      avgEyedropperWarmedScaledImages: draws.length ? Math.round(sum('eyedropperWarmedScaledImages') / draws.length * 100) / 100 : 0,
+      maxEyedropperWarmedScaledImages: max('eyedropperWarmedScaledImages'),
       avgScaledImageScale: sum('scaledImages') ? Math.round(sum('scaledImageScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgTargetImageScale: sum('scaledImages') ? Math.round(sum('scaledImageTargetScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgMissingImages: draws.length ? Math.round(sum('missingImages') / draws.length * 100) / 100 : 0,
@@ -701,9 +711,15 @@ var ViewportDebug = (() => {
       canvasFallbackBuilds: imageScaledVariantCanvasFallbackCount,
       evictions: imageScaledVariantEvictionCount,
       memorySkips: imageScaledVariantMemorySkipCount,
+      prewarmRuns: imageScaledVariantPrewarmRunCount,
+      prewarmCandidates: imageScaledVariantPrewarmCandidateCount,
+      prewarmReady: imageScaledVariantPrewarmReadyCount,
+      prewarmQueued: imageScaledVariantPrewarmQueuedCount,
+      prewarmNoSource: imageScaledVariantPrewarmNoSourceCount,
+      prewarmPending: !!imageScaledVariantPrewarmTimer,
+      prewarmPadPx: IMAGE_VARIANT_PREWARM_PAD_PX,
       levels: IMAGE_SCALE_LEVELS.join(','),
       enabled: viewportImageScalingEnabled,
-      qualityBuffer: IMAGE_SCALE_QUALITY_BUFFER,
     };
     console.table([out]);
     if (rows.length) console.table(rows);
@@ -775,11 +791,66 @@ var ViewportDebug = (() => {
         doOverlay: e.doOverlay ?? '',
         applyTransformCallMs: e.steps?.applyTransformCall?.ms ?? '',
         drawBoardMs: e.steps?.drawBoard?.ms ?? '',
+        objectLoopMs: e.steps?.drawBoard?.meta?.objectLoopMs ?? '',
+        backgroundSetupMs: e.steps?.drawBoard?.meta?.backgroundSetupMs ?? '',
+        offscreenBlitMs: e.steps?.drawBoard?.meta?.offscreenBlitMs ?? '',
+        editingOverlayMs: e.steps?.drawBoard?.meta?.editingOverlayMs ?? '',
+        testedObjects: e.steps?.drawBoard?.meta?.testedObjects ?? '',
+        visibleObjects: e.steps?.drawBoard?.meta?.visibleObjects ?? '',
+        drawnImages: e.steps?.drawBoard?.meta?.drawnImages ?? '',
+        drawnText: e.steps?.drawBoard?.meta?.drawnText ?? '',
+        bitmapImages: e.steps?.drawBoard?.meta?.bitmapImages ?? '',
+        elementImages: e.steps?.drawBoard?.meta?.elementImages ?? '',
+        scaledImages: e.steps?.drawBoard?.meta?.scaledImages ?? '',
+        scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? '',
+        scaledVariantPendingImages: e.steps?.drawBoard?.meta?.scaledVariantPendingImages ?? '',
+        eyedropperWarmedScaledImages: e.steps?.drawBoard?.meta?.eyedropperWarmedScaledImages ?? '',
+        fullScaleImages: e.steps?.drawBoard?.meta?.fullScaleImages ?? '',
+        missingImages: e.steps?.drawBoard?.meta?.missingImages ?? '',
+        culledImages: e.steps?.drawBoard?.meta?.culledImages ?? '',
+        culledText: e.steps?.drawBoard?.meta?.culledText ?? '',
+        canvasW: e.steps?.drawBoard?.meta?.canvasW ?? '',
+        canvasH: e.steps?.drawBoard?.meta?.canvasH ?? '',
+        zoom: e.steps?.drawBoard?.meta?.zoom ?? e.zoom ?? '',
         updateSelectionOverlayMs: e.steps?.updateSelectionOverlay?.ms ?? '',
       }))
       .sort((a, b) => (b.frameMs || 0) - (a.frameMs || 0))
       .slice(0, limit);
     console.table(rows);
+    return rows;
+  }
+
+  function slowFrameDetails(limit = 5) {
+    const rows = slowRecords
+      .slice()
+      .sort((a, b) => (b.frameMs || 0) - (a.frameMs || 0))
+      .slice(0, limit)
+      .map(e => ({
+        id: e.id,
+        frameMs: e.frameMs ?? '',
+        queueMs: e.queueMs ?? '',
+        rafGap: e.rafGap ?? '',
+        sources: e.sources ?? '',
+        start: {
+          panX: e.panX,
+          panY: e.panY,
+          zoom: e.zoom,
+        },
+        flags: {
+          doTransform: e.doTransform,
+          doBoard: e.doBoard,
+          doOverlay: e.doOverlay,
+        },
+        steps: Object.fromEntries(Object.entries(e.steps || {}).map(([name, step]) => ([
+          name,
+          {
+            ms: Math.round((step.ms || 0) * 100) / 100,
+            total: Math.round((step.total || 0) * 100) / 100,
+            meta: step.meta || {},
+          },
+        ]))),
+      }));
+    console.log(rows);
     return rows;
   }
 
@@ -816,6 +887,21 @@ var ViewportDebug = (() => {
     return out;
   }
 
+  function report(options = {}) {
+    const out = {
+      summary: summary(),
+      frameSummary: frameSummary(),
+      drawSummary: drawSummary(),
+      transformSummary: transformSummary(),
+      slowFrames: slowFrames(options.slowFrames ?? options.limit ?? 20),
+      imageScaleCache: imageScaleCacheSummary(),
+      culling: cullingSummary(),
+    };
+    if (options.details !== false) out.slowFrameDetails = slowFrameDetails(options.detailLimit ?? 3);
+    if (options.log !== false) console.log(out);
+    return out;
+  }
+
   function dump() {
     const flat = events.map(({ meta, ...rest }) => {
       if (!meta) return rest;
@@ -845,6 +931,7 @@ var ViewportDebug = (() => {
     timing,
     frameStart,
     frameEnd,
+    report,
     summary,
     frameSummary,
     drawSummary,
@@ -860,6 +947,7 @@ var ViewportDebug = (() => {
     ),
     transformSummary,
     slowFrames,
+    slowFrameDetails,
     dump,
     reset,
     get events() { return events.slice(); },
@@ -868,6 +956,121 @@ var ViewportDebug = (() => {
 })();
 
 exposeDebug({ viewport: ViewportDebug });
+
+// ─── Manual performance debugger ─────────────────────────────────────────────
+var ManualPerfDebug = (() => {
+  let lastReport = null;
+  let lastJson = '';
+
+  function imageCount() {
+    return (typeof objects === 'undefined' ? [] : objects).filter(obj => obj?.type === 'image').length;
+  }
+
+  function headline(report) {
+    const viewport = report.viewport || {};
+    const eyedropper = report.eyedropper?.totals || {};
+    return {
+      imageCount: report.imageCount,
+      viewportFrames: viewport.frameSummary?.frames ?? '',
+      viewportSlowFrames: viewport.frameSummary?.slowFramesOver16ms ?? '',
+      viewportMaxFrameMs: viewport.frameSummary?.maxFrameMs ?? '',
+      viewportMaxDrawMs: viewport.drawSummary?.maxDrawMs ?? '',
+      viewportMaxTestedObjects: viewport.drawSummary?.maxTestedObjects ?? '',
+      eyedropperSamples: eyedropper.samples ?? '',
+      eyedropperSlowSamples: eyedropper.slowSamples ?? '',
+      eyedropperMaxSampleMs: eyedropper.maxSampleMs ?? '',
+      eyedropperMaxPrewarmMs: eyedropper.maxPrewarmMs ?? '',
+      samplesWithPendingImages: eyedropper.samplesWithPendingImages ?? '',
+      samplesWithMissingImages: eyedropper.samplesWithMissingImages ?? '',
+    };
+  }
+
+  function begin(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    BoardfishDebug.viewport.enable({ verbose: false });
+    BoardfishDebug.eyedropper.enable({ verbose: false });
+    BoardfishDebug.viewport.reset();
+    BoardfishDebug.eyedropper.reset();
+    const out = {
+      startedAt: new Date().toISOString(),
+      imageCount: imageCount(),
+      objectCount: objects.length,
+    };
+    console.info('[Boardfish perf] Manual session started. Move the cursor yourself, then run BoardfishDebug.perf.report().');
+    console.table([out]);
+    return out;
+  }
+
+  function report(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    const eyedropperReport = BoardfishDebug.eyedropper.report({
+      log: false,
+      samples: options.samples ?? options.sampleLimit ?? 60,
+      slow: options.slow ?? options.slowLimit ?? 60,
+      failures: options.failures ?? options.failureLimit ?? 20,
+    });
+    const out = {
+      label: 'manual-eyedropper-viewport-perf',
+      reportedAt: new Date().toISOString(),
+      imageCount: imageCount(),
+      objectCount: objects.length,
+      viewport: BoardfishDebug.viewport.report({ log: false, details: options.details === true, limit: options.limit || 12 }),
+      eyedropper: eyedropperReport,
+    };
+    out.headline = headline(out);
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    console.group('[Boardfish perf] manual eyedropper + viewport');
+    console.table([out.headline]);
+    console.log(out);
+    console.groupEnd();
+    if (options.copy !== false) void copyLast();
+    return out;
+  }
+
+  function json() {
+    if (!lastReport) {
+      console.warn('[Boardfish perf] No report yet. Run BoardfishDebug.perf.report() first.');
+      return '';
+    }
+    lastJson = JSON.stringify(lastReport, null, 2);
+    console.log(lastJson);
+    return lastJson;
+  }
+
+  async function copyLast() {
+    if (!lastReport) {
+      console.warn('[Boardfish perf] No report yet. Run BoardfishDebug.perf.report() first.');
+      return false;
+    }
+    const text = json();
+    try {
+      await navigator.clipboard.writeText(text);
+      console.info(`[Boardfish perf] Copied ${text.length} chars to clipboard.`);
+      return true;
+    } catch (err) {
+      console.warn('[Boardfish perf] Clipboard copy failed. JSON was printed above and is available at BoardfishDebug.perf.lastJson.', err);
+      return text;
+    }
+  }
+
+  return {
+    begin,
+    report,
+    json,
+    copyLast,
+    get last() { return lastReport; },
+    get lastJson() { return lastJson; },
+  };
+})();
+
+exposeDebug({ perf: ManualPerfDebug });
 
 // ─── Save debugger ───────────────────────────────────────────────────────────
 var SaveDebug = (() => {
@@ -879,8 +1082,6 @@ var SaveDebug = (() => {
     maxEvents: 300,
     label: '[Boardfish save]',
     sanitize,
-    onEnable: () => setNativeDebug('set_save_debug', true),
-    onDisable: () => setNativeDebug('set_save_debug', false),
   });
 
   function enable(options = {}) {
@@ -1015,16 +1216,10 @@ var OpenDebug = (() => {
     return sanitizeDebugMeta(value, { redactPattern: /dataUrl|src|base64|imageStore/i, roundNumbers: true });
   }
 
-  function setRustDebug(value) {
-    setNativeDebug('set_open_debug', value);
-  }
-
   const core = createDebugRecorder({
     maxEvents: MAX_EVENTS,
     label: '[Boardfish open]',
     sanitize,
-    onEnable: () => setRustDebug(true),
-    onDisable: () => setRustDebug(false),
   });
   const events = core._events;
 
@@ -1302,16 +1497,10 @@ var ExportDebug = (() => {
     return sanitizeDebugMeta(value, { roundNumbers: true });
   }
 
-  function setRustDebug(value) {
-    setNativeDebug('set_save_debug', value);
-  }
-
   const core = createDebugRecorder({
     maxEvents: MAX_EVENTS,
     label: '[Boardfish export]',
     sanitize,
-    onEnable: () => setRustDebug(true),
-    onDisable: () => setRustDebug(false),
   });
   const events = core._events;
 

@@ -18,17 +18,17 @@ use board_io::{read_board_file, write_board_container};
 use board_types::validate_board_value;
 use clipboard::{
     clipboard_sequence, copy_image_data_url_to_clipboard_transformed, copy_text_to_clipboard,
-    read_image_from_clipboard_cached, read_text_from_clipboard, set_clipboard_debug,
+    read_image_from_clipboard_cached, read_text_from_clipboard,
 };
 use dialogs::{
     open_file_dialog, pick_folder, pick_image_files, save_file_dialog, save_image_file_dialog,
     save_text_file_dialog,
 };
 use image_sources::{
-    clear_image_source_cache, get_cached_image_data_url, materialize_cached_image_sources,
-    register_image_file_source, register_image_source, register_transformed_image_source,
-    remove_cached_image_sources, save_images_to_existing_folder_by_keys, write_image_file_by_key,
-    ImageSourceCache,
+    cleanup_stale_image_source_cache, clear_image_source_cache, get_cached_image_data_url,
+    materialize_cached_image_sources, register_image_file_source, register_image_source,
+    register_transformed_image_source, remove_cached_image_sources,
+    save_images_to_existing_folder_by_keys, write_image_file_by_key, ImageSourceCache,
 };
 
 static CLOSE_REQUEST_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -170,7 +170,7 @@ async fn read_board(
 
     {
         let cache_start = std::time::Instant::now();
-        state.insert_many(result.sources.drain(..).collect())?;
+        state.replace_all(result.sources.drain(..).collect())?;
         result.stats.cache_insert_ms = cache_start.elapsed().as_secs_f64() * 1000.0;
     }
 
@@ -345,7 +345,10 @@ fn schedule_startup_show_fallback(window: tauri::WebviewWindow) {
 }
 
 #[tauri::command]
-fn exit_app() {
+fn exit_app(source_state: tauri::State<ImageSourceCache>) {
+    if let Err(error) = source_state.clear() {
+        eprintln!("[boardfish image cache] exit cleanup failed: {error}");
+    }
     std::process::exit(0);
 }
 
@@ -358,16 +361,6 @@ fn cancel_pending_termination() {
 #[tauri::command]
 fn acknowledge_close_request(seq: u64) {
     CLOSE_ACK_SEQ.fetch_max(seq, Ordering::SeqCst);
-}
-
-#[tauri::command]
-fn set_save_debug(enabled: bool) {
-    SAVE_DEBUG.store(enabled, Ordering::Relaxed);
-}
-
-#[tauri::command]
-fn set_open_debug(enabled: bool) {
-    OPEN_DEBUG.store(enabled, Ordering::Relaxed);
 }
 
 fn emit_close_request(app: &tauri::AppHandle) {
@@ -391,6 +384,7 @@ fn schedule_close_fallback(seq: u64) {
 
 fn main() {
     let startup_file: Option<String> = std::env::args().nth(1);
+    cleanup_stale_image_source_cache();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -420,9 +414,6 @@ fn main() {
             acknowledge_close_request,
             copy_text_to_clipboard,
             clipboard_sequence,
-            set_clipboard_debug,
-            set_save_debug,
-            set_open_debug,
             register_image_source,
             register_transformed_image_source,
             remove_cached_image_sources,

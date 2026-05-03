@@ -1,8 +1,6 @@
 # Boardfish
 
-Boardfish is a fast, local-first infinite canvas for visual research, moodboards, image references, and text snippets.
-
-It is built for people who collect lots of visual material and want a lightweight place to arrange, inspect, save, and export without hassle.
+Boardfish is a fast, local-first infinite canvas for visual research, moodboards, and image references.
 
 <img src="src-tauri/icons/image_e4de38.png" alt="Boardfish canvas screenshot" width="900">
 
@@ -18,16 +16,24 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 > xattr -cr /Applications/Boardfish.app
 > ```
 
-## Why Boardfish?
+## Features
 
 - **Local-first:** your boards stay on your machine
-- **Fast with image-heavy boards:** built for large collections of images and text
-- **Lossless image workflow:** import, transform, copy, and export without degrading originals
-- **No account required:** no workspaces, subscriptions, sync setup, or team features to get through
-- **Portable projects:** save everything into a local `.bf` file
+- **Fast infinite canvas:** pan, zoom, select, multi-select, and arrange large boards of images and text
+- **Flexible input:** add PNG/JPEG images and text from menus, shortcuts, clipboard, file picker, or drag and drop
+- **Image tools:** copy, resize, reorder, flip, rotate, export, and sample colors with the eyedropper
+- **Dark mode:** saved app preference with matching native window styling
+- **Portable projects:** save and reopen local `.bf` files with viewport, image, text, and transform state
 - **Simple extraction:** export selected images, all images, or all text when you need the raw material back
+- **No account required:** no workspaces, subscriptions, sync setup, or team features to get through
 
-Boardfish is not a team whiteboard. It is a private, lightweight canvas for collecting and arranging visual material quickly.
+## Basic Use
+
+- Right-click the canvas to add text/images, paste, save/open boards, export content, toggle dark mode, or enable the eyedropper
+- Right-click selected objects to copy, cut, duplicate, move to back, transform images, export images, or delete
+- Drag selected objects to move them; drag selection handles to resize them
+- Double-click a text object to edit it
+- Click the zoom pill to return to 100%
 
 ## Who It's For
 
@@ -45,6 +51,8 @@ Boardfish is not a team whiteboard. It is a private, lightweight canvas for coll
 | Open board | Cmd+O | Ctrl+O |
 | Save | Cmd+S | Ctrl+S |
 | Save As | Cmd+Shift+S | Ctrl+Shift+S |
+| Add text | Cmd+T | Ctrl+T |
+| Add images | Cmd+I | Ctrl+I |
 | Select all objects | Cmd+A | Ctrl+A |
 | Copy | Cmd+C | Ctrl+C |
 | Cut | Cmd+X | Ctrl+X |
@@ -53,7 +61,10 @@ Boardfish is not a team whiteboard. It is a private, lightweight canvas for coll
 | Undo | Cmd+Z | Ctrl+Z |
 | Redo | Cmd+Shift+Z | Ctrl+Shift+Z / Ctrl+Y |
 | Delete selected | Backspace / Delete | Backspace / Delete |
+| Toggle eyedropper | I | I |
 | Pan canvas | Space + drag | Space + drag |
+| Pan with wheel / trackpad | Scroll | Scroll |
+| Zoom around cursor | Cmd+scroll | Ctrl+scroll |
 | Deselect / exit edit / close menus | Esc | Esc |
 | Quit / close | Cmd+Q / Cmd+W | Ctrl+Q / Ctrl+W |
 

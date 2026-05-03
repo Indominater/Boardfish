@@ -1,7 +1,6 @@
 'use strict';
 
 var IMAGE_SCALE_LEVELS = [0.25];
-var IMAGE_SCALE_QUALITY_BUFFER = 1;
 var IMAGE_VARIANT_MEMORY_LIMIT = 512 * 1024 * 1024;
 var VIEWPORT_PERF_MODES = {
   '1': { label: 'culling + 0.25', culling: true, scaling: true },
@@ -20,6 +19,7 @@ var imageScaledVariantQueue = [];
 var imageScaledVariantQueueScheduled = false;
 var lastViewportInputAt = 0;
 var IMAGE_VARIANT_INPUT_IDLE_MS = 180;
+var IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS = 24;
 var imageScaledVariantBuildCount = 0;
 var imageScaledVariantBuildTotalMs = 0;
 var imageScaledVariantBuildMaxMs = 0;
@@ -27,6 +27,13 @@ var imageScaledVariantResizeBitmapCount = 0;
 var imageScaledVariantCanvasFallbackCount = 0;
 var imageScaledVariantEvictionCount = 0;
 var imageScaledVariantMemorySkipCount = 0;
+var imageScaledVariantPrewarmTimer = null;
+var imageScaledVariantPrewarmRunCount = 0;
+var imageScaledVariantPrewarmCandidateCount = 0;
+var imageScaledVariantPrewarmQueuedCount = 0;
+var imageScaledVariantPrewarmReadyCount = 0;
+var imageScaledVariantPrewarmNoSourceCount = 0;
+var IMAGE_VARIANT_PREWARM_PAD_PX = 768;
 var viewportCullingEnabled = true;
 var viewportImageScalingEnabled = !IS_MAC;
 
@@ -35,7 +42,7 @@ function bitmapByteSize(bitmap) {
 }
 
 function scaledVariantEstimatedBytes(sourceW, sourceH, scale) {
-  return Math.max(1, Math.round(sourceW * scale)) * Math.max(1, Math.round(sourceH * scale)) * 4;
+  return Math.max(1, Math.ceil(sourceW * scale)) * Math.max(1, Math.ceil(sourceH * scale)) * 4;
 }
 
 function pendingScaledVariantBytes() {
@@ -91,6 +98,13 @@ function clearScaledImageVariants(key = null) {
   imageScaledVariantCanvasFallbackCount = 0;
   imageScaledVariantEvictionCount = 0;
   imageScaledVariantMemorySkipCount = 0;
+  imageScaledVariantPrewarmRunCount = 0;
+  imageScaledVariantPrewarmCandidateCount = 0;
+  imageScaledVariantPrewarmQueuedCount = 0;
+  imageScaledVariantPrewarmReadyCount = 0;
+  imageScaledVariantPrewarmNoSourceCount = 0;
+  clearTimeout(imageScaledVariantPrewarmTimer);
+  imageScaledVariantPrewarmTimer = null;
 }
 
 function pruneScaledImageVariants() {
@@ -145,7 +159,10 @@ function scheduleScaledVariantQueue() {
   const run = () => {
     imageScaledVariantQueueScheduled = false;
     const inputIdleMs = performance.now() - lastViewportInputAt;
-    if (inputIdleMs < IMAGE_VARIANT_INPUT_IDLE_MS) {
+    const idleThresholdMs = typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled
+      ? IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS
+      : IMAGE_VARIANT_INPUT_IDLE_MS;
+    if (inputIdleMs < idleThresholdMs) {
       scheduleScaledVariantQueue();
       return;
     }
@@ -158,22 +175,26 @@ function scheduleScaledVariantQueue() {
       });
   };
   const inputIdleMs = performance.now() - lastViewportInputAt;
-  const delay = inputIdleMs < IMAGE_VARIANT_INPUT_IDLE_MS ? IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs : 32;
+  const idleThresholdMs = typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled
+    ? IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS
+    : IMAGE_VARIANT_INPUT_IDLE_MS;
+  const delay = inputIdleMs < idleThresholdMs ? idleThresholdMs - inputIdleMs : 16;
   setTimeout(run, delay);
 }
 
-function chooseImageScaleForDraw(obj, source) {
+function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }) {
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
   if (!sourceW || !sourceH) return 1;
-  const dpr = window.devicePixelRatio || 1;
-  const neededW = Math.max(1, obj.w * zoom * dpr * IMAGE_SCALE_QUALITY_BUFFER);
-  const neededH = Math.max(1, obj.h * zoom * dpr * IMAGE_SCALE_QUALITY_BUFFER);
-  let chosen = 1;
-  for (const scale of IMAGE_SCALE_LEVELS) {
-    if (sourceW * scale >= neededW && sourceH * scale >= neededH) chosen = scale;
+  const viewZoom = Math.max(view?.zoom || zoom || 1, 0.0001);
+  const dpr = view?.dpr || window.devicePixelRatio || 1;
+  const neededW = obj.w * viewZoom * dpr;
+  const neededH = obj.h * viewZoom * dpr;
+  const scaleLevels = IMAGE_SCALE_LEVELS.slice().sort((a, b) => a - b);
+  for (const scale of scaleLevels) {
+    if (sourceW * scale >= neededW && sourceH * scale >= neededH) return scale;
   }
-  return chosen;
+  return 1;
 }
 
 function queueScaledImageVariant(key, source, scale) {
@@ -195,8 +216,8 @@ function queueScaledImageVariant(key, source, scale) {
   enqueueScaledVariantTask(async () => {
     const buildStart = performance.now();
     try {
-      const w = Math.max(1, Math.round(sourceW * scale));
-      const h = Math.max(1, Math.round(sourceH * scale));
+      const w = Math.max(1, Math.ceil(sourceW * scale));
+      const h = Math.max(1, Math.ceil(sourceH * scale));
       let bitmap;
       try {
         bitmap = await createImageBitmap(source, {
@@ -241,9 +262,72 @@ function queueScaledImageVariant(key, source, scale) {
   });
 }
 
-function selectImageSourceForDraw(key, obj, fullSource) {
+function hasScaledImageVariant(key, scale) {
+  return !!imageScaledBitmapCache.get(key)?.has(scale);
+}
+
+function isScaledImageVariantPending(key, scale) {
+  return imageScaledBitmapPending.has(`${key}:${scale}`);
+}
+
+function prewarmVisibleScaledImageVariants(options = {}) {
+  if (!viewportImageScalingEnabled || _boardOpening) return { skipped: 'disabled-or-opening' };
+  const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.25;
+  if (!(scale > 0 && scale < 1)) return { skipped: 'invalid-scale' };
+  const padPx = Number.isFinite(options.padPx) ? options.padPx : IMAGE_VARIANT_PREWARM_PAD_PX;
+  const rect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(padPx) : null;
+  if (!rect) return { skipped: 'no-viewport' };
+
+  let candidates = 0;
+  let ready = 0;
+  let queued = 0;
+  let noSource = 0;
+  for (const obj of objects) {
+    if (obj?.type !== 'image' || !obj.data?.imgKey || !objectIntersectsRect(obj, rect)) continue;
+    candidates++;
+    const key = obj.data.imgKey;
+    if (hasScaledImageVariant(key, scale) || isScaledImageVariantPending(key, scale)) {
+      ready++;
+      continue;
+    }
+    const source = imageBitmapCache[key] || imageCache[key] || null;
+    if (!isDrawableImageSource(source)) {
+      noSource++;
+      continue;
+    }
+    queueScaledImageVariant(key, source, scale);
+    queued++;
+  }
+
+  imageScaledVariantPrewarmRunCount++;
+  imageScaledVariantPrewarmCandidateCount += candidates;
+  imageScaledVariantPrewarmReadyCount += ready;
+  imageScaledVariantPrewarmQueuedCount += queued;
+  imageScaledVariantPrewarmNoSourceCount += noSource;
+  return { candidates, ready, queued, noSource, scale, padPx };
+}
+
+function scheduleVisibleScaledVariantPrewarmAfterIdle(reason = 'viewport-settled', options = {}) {
+  if (!viewportImageScalingEnabled || _boardOpening) return;
+  clearTimeout(imageScaledVariantPrewarmTimer);
+  const delay = Number.isFinite(options.delayMs) ? options.delayMs : IMAGE_VARIANT_INPUT_IDLE_MS;
+  imageScaledVariantPrewarmTimer = setTimeout(() => {
+    imageScaledVariantPrewarmTimer = null;
+    const inputIdleMs = performance.now() - lastViewportInputAt;
+    if (inputIdleMs < IMAGE_VARIANT_INPUT_IDLE_MS) {
+      scheduleVisibleScaledVariantPrewarmAfterIdle(reason, {
+        ...options,
+        delayMs: IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs,
+      });
+      return;
+    }
+    prewarmVisibleScaledImageVariants({ ...options, reason });
+  }, Math.max(0, delay));
+}
+
+function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }) {
   if (!viewportImageScalingEnabled) return { source: fullSource, scale: 1, targetScale: 1, disabled: true };
-  const targetScale = chooseImageScaleForDraw(obj, fullSource);
+  const targetScale = chooseImageScaleForDraw(obj, fullSource, view);
   const map = imageScaledBitmapCache.get(key);
   if (map && targetScale < 1) {
     const selectedScale = IMAGE_SCALE_LEVELS
@@ -254,6 +338,10 @@ function selectImageSourceForDraw(key, obj, fullSource) {
       entry.lastUsed = imageScaledBitmapUseCounter++;
       return { source: entry.bitmap, scale: selectedScale, targetScale };
     }
+  }
+  if (typeof selectEyedropperWarmedScaledImageForViewport === 'function') {
+    const warmed = selectEyedropperWarmedScaledImageForViewport(key, targetScale);
+    if (warmed) return warmed;
   }
   queueScaledImageVariant(key, fullSource, targetScale);
   return { source: fullSource, scale: 1, targetScale };

@@ -403,11 +403,6 @@ var MenuDebug = (() => {
   };
 })();
 exposeDebug({ menu: MenuDebug });
-try {
-  if (DEBUG_TOOLS_ENABLED && localStorage.getItem('bf_debug_menu') === '1') {
-    MenuDebug.enable({ verbose: localStorage.getItem('bf_debug_menu_verbose') === '1' });
-  }
-} catch (_) {}
 
 function islSetWidth(text) {
   PillDebug.log('islSetWidth:before', { text });
@@ -804,8 +799,8 @@ function isDrawableImageSource(source) {
 }
 var VIEWPORT_CULL_PADDING_PX = 256;
 
-function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX) {
-  return viewportWorldRect(padScreenPx);
+function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view = { panX, panY, zoom }) {
+  return viewportWorldRect(padScreenPx, view);
 }
 
 function countCulledObject(obj, counters = null) {
@@ -815,7 +810,7 @@ function countCulledObject(obj, counters = null) {
 }
 
 // Draws a single non-editing object onto any canvas context (world coords).
-function drawSingleObj(context, obj, counters = null) {
+function drawSingleObj(context, obj, counters = null, { view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null } = {}) {
   if (obj.type === 'text') {
     context.fillStyle = canvasTextColor();
     context.textBaseline = 'alphabetic';
@@ -828,7 +823,9 @@ function drawSingleObj(context, obj, counters = null) {
     const key = obj.data.imgKey;
     const bitmap = imageBitmapCache[key];
     const fullImg = bitmap || imageCache[key] || null;
-    const selected = fullImg ? selectImageSourceForDraw(key, obj, fullImg) : null;
+    const selected = imageSourceResolver
+      ? imageSourceResolver(key, obj, view, counters)
+      : fullImg ? selectImageSourceForDraw(key, obj, fullImg, view) : null;
     const img = selected?.source || null;
     if (isDrawableImageSource(img)) {
       if (counters) {
@@ -838,8 +835,12 @@ function drawSingleObj(context, obj, counters = null) {
           counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
         } else if (selected?.targetScale < 1) {
           counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
+        } else if (selected?.scale === 1 && selected?.targetScale === 1) {
+          counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
         }
-        if (bitmap || selected?.scale < 1) counters.bitmapImages++;
+        if (selected?.readbackSafe) counters.readbackSafeImages = (counters.readbackSafeImages || 0) + 1;
+        if (selected?.warmedEyedropper) counters.eyedropperWarmedScaledImages = (counters.eyedropperWarmedScaledImages || 0) + 1;
+        if (bitmap || selected?.scale < 1 || selected?.readbackSafe) counters.bitmapImages++;
         else {
           counters.elementImages++;
           counters.fallbackImages++;
@@ -859,10 +860,13 @@ function drawSingleObj(context, obj, counters = null) {
       }
     }
     if (counters) {
-      counters.missingImages++;
+      if (selected?.scaledVariantPending) counters.scaledVariantPendingImages = (counters.scaledVariantPendingImages || 0) + 1;
+      else counters.missingImages++;
       counters.lastMissingKey = key;
       counters.lastMissingId = obj.id;
-      counters.lastMissingReason = !key ? 'missing-key'
+      counters.lastMissingReason = selected?.scaledVariantPending ? 'scaled-variant-pending-active-input'
+        : imageSourceResolver ? 'readback-safe-source-pending'
+        : !key ? 'missing-key'
         : !imageStore[key] ? 'missing-store'
           : !imageCache[key] ? 'missing-image-element'
             : !imageCache[key].complete ? 'not-complete'
@@ -878,6 +882,8 @@ function drawSingleObj(context, obj, counters = null) {
 
 function createDrawCounters() {
   return {
+    testedObjects: 0,
+    visibleObjects: 0,
     bitmapImages: 0,
     elementImages: 0,
     fallbackImages: 0,
@@ -886,6 +892,12 @@ function createDrawCounters() {
     croppedImages: 0,
     scaledImages: 0,
     scaledFallbackFull: 0,
+    scaledVariantPendingImages: 0,
+    fullScaleImages: 0,
+    readbackSafeImages: 0,
+    readbackSafePendingImages: 0,
+    readbackSafeScaledImages: 0,
+    eyedropperWarmedScaledImages: 0,
     scaledImageScaleTotal: 0,
     scaledImageTargetScaleTotal: 0,
     culledImages: 0,
@@ -897,23 +909,25 @@ function resetCanvasToScreen(context) {
   context.setTransform(1, 0, 0, 1, 0, 0);
 }
 
-function setWorldCanvasTransform(context, dpr = window.devicePixelRatio || 1) {
-  context.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
+function setWorldCanvasTransform(context, dpr = window.devicePixelRatio || 1, view = { zoom, panX, panY }) {
+  context.setTransform(view.zoom * dpr, 0, 0, view.zoom * dpr, view.panX * dpr, view.panY * dpr);
   setCanvasImageQuality(context);
   context.font = FONT;
   context.textBaseline = 'alphabetic';
 }
 
-function drawVisibleObjects(context, counters, { skipId = null, viewportRect = currentViewportWorldRect() } = {}) {
+function drawVisibleObjects(context, counters, { skipId = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 } } = {}) {
   let drawnImages = 0;
   let drawnText = 0;
   for (const obj of objects) {
+    if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
     if (obj.id === skipId) continue;
     if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) {
       countCulledObject(obj, counters);
       continue;
     }
-    const drawn = drawSingleObj(context, obj, counters);
+    if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
+    const drawn = drawSingleObj(context, obj, counters, { view });
     if (obj.type === 'image' && drawn) drawnImages++;
     else if (obj.type === 'text') drawnText++;
   }
@@ -977,6 +991,8 @@ function drawBoard() {
     ViewportDebug.end(dbg, { skipped: 'board-opening' });
     return;
   }
+  const drawStart = performance.now();
+  const drawPhases = {};
   const counters = createDrawCounters();
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = currentViewportWorldRect();
@@ -988,35 +1004,73 @@ function drawBoard() {
       // Kick off async rebuild (pre-decodes images to avoid GPU stall).
       // Draw all objects directly this frame while the rebuild is pending.
       _rebuildOffscreenAsync();
+      const setupStart = performance.now();
       resetCanvasToScreen(ctx);
       fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
       setWorldCanvasTransform(ctx, dpr);
+      drawPhases.backgroundSetupMs = performance.now() - setupStart;
+      const objectsStart = performance.now();
       const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, viewportRect });
+      drawPhases.objectLoopMs = performance.now() - objectsStart;
       drawnImages += drawn.drawnImages;
       drawnText += drawn.drawnText;
     } else {
       // Blit cached offscreen (background + all non-editing objects)
+      const blitStart = performance.now();
       resetCanvasToScreen(ctx);
       ctx.drawImage(_offscreen, 0, 0);
+      drawPhases.offscreenBlitMs = performance.now() - blitStart;
     }
 
+    const editStart = performance.now();
     setWorldCanvasTransform(ctx, dpr);
     drawEditingTextOverlay(ctx);
     resetCanvasToScreen(ctx);
+    drawPhases.editingOverlayMs = performance.now() - editStart;
   } else {
+    const setupStart = performance.now();
     resetCanvasToScreen(ctx);
     fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
     setWorldCanvasTransform(ctx, dpr);
+    drawPhases.backgroundSetupMs = performance.now() - setupStart;
+    const objectsStart = performance.now();
     const drawn = drawVisibleObjects(ctx, counters, { viewportRect });
+    drawPhases.objectLoopMs = performance.now() - objectsStart;
     drawnImages = drawn.drawnImages;
     drawnText = drawn.drawnText;
+    const resetStart = performance.now();
     resetCanvasToScreen(ctx);
+    drawPhases.resetMs = performance.now() - resetStart;
   }
   ViewportDebug.count('croppedImages', counters.croppedImages);
   ViewportDebug.count('imageDrawMissing', counters.missingImages);
   ViewportDebug.count('imageDrawFallback', counters.fallbackImages);
   ViewportDebug.count('imageDrawErrors', counters.erroredImages);
-  ViewportDebug.end(dbg, { drawnImages, drawnText, ...counters });
+  const drawMeta = {
+    source: _activeRenderSource,
+    drawnImages,
+    drawnText,
+    dpr,
+    zoom,
+    panX,
+    panY,
+    canvasW: boardCanvas.width,
+    canvasH: boardCanvas.height,
+    viewportX1: viewportRect.x1,
+    viewportY1: viewportRect.y1,
+    viewportX2: viewportRect.x2,
+    viewportY2: viewportRect.y2,
+    viewportW: viewportRect.x2 - viewportRect.x1,
+    viewportH: viewportRect.y2 - viewportRect.y1,
+    editing: !!editingId,
+    offscreenDirty: !!_offscreenDirty,
+    objectCount: objects.length,
+    totalMeasuredMs: performance.now() - drawStart,
+    ...drawPhases,
+    ...counters,
+  };
+  _lastDrawBoardMeta = drawMeta;
+  ViewportDebug.end(dbg, drawMeta);
 }
 
 function hitTest(wx, wy) {
@@ -1037,8 +1091,8 @@ function applyTransform(frameDbg = null) {
   const drawStart = performance.now();
   drawBoard();
   const drawMs = performance.now() - drawStart;
-  ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs });
-  ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs });
+  ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
+  ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
   const zoomStart = performance.now();
   updateZoomDisplay();
   const zoomMs = performance.now() - zoomStart;
@@ -1055,6 +1109,12 @@ function applyTransform(frameDbg = null) {
   ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: overlayMs });
   ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs });
   scheduleVisibleHydrationAfterIdle();
+  if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
+    scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
+  }
+  if (typeof handleEyedropperViewportChanged === 'function') {
+    handleEyedropperViewportChanged(_activeRenderSource || 'transform');
+  }
   ViewportDebug.end(dbg);
 }
 
@@ -1068,6 +1128,7 @@ var _needOverlayRender = false;
 var _frameScheduledAt = 0;
 var _frameSources = [];
 var _activeRenderSource = 'direct';
+var _lastDrawBoardMeta = null;
 
 function setCanvasImageQuality(context) {
   context.imageSmoothingEnabled = true;
@@ -1115,7 +1176,9 @@ function scheduleFrame(source = 'unknown') {
     }
     if (doBoard) {
       ViewportDebug.count('boardFrames');
+      const drawStart = performance.now();
       withRenderSource(sources.join(',') || 'board', () => drawBoard());
+      ViewportDebug.step(frameDbg, 'drawBoard', { ms: performance.now() - drawStart, ...(_lastDrawBoardMeta || {}) });
     }
     if (doOverlay) {
       const overlayStart = performance.now();

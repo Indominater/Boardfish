@@ -439,7 +439,12 @@ var _visibleHydrationTimer = null;
 function scheduleVisibleHydrationAfterIdle() {
   if (!hasTauri() || _boardOpening) return;
   clearTimeout(_visibleHydrationTimer);
-  _visibleHydrationTimer = setTimeout(() => queueVisibleImageHydration(1), 180);
+  _visibleHydrationTimer = setTimeout(() => {
+    queueVisibleImageHydration(1);
+    if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
+      scheduleVisibleScaledVariantPrewarmAfterIdle('visible-hydration');
+    }
+  }, 180);
 }
 
 async function finishOpenedBoard(dbg, data) {

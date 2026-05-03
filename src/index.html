@@ -35,7 +35,7 @@
   <div id="ctx-menu">
     <button class="ctx-item" id="btn-new"><span class="ctx-label">New Board</span><span class="ctx-shortcut" data-shortcut="new-board"></span></button>
     <div class="ctx-sep"></div>
-    <button class="ctx-item" id="btn-add-text"><span class="ctx-label">Add Text</span></button>
+    <button class="ctx-item" id="btn-add-text"><span class="ctx-label">Add Text</span><span class="ctx-shortcut" data-shortcut="add-text"></span></button>
     <button class="ctx-item" id="btn-add-image"><span class="ctx-label">Add Images</span><span class="ctx-shortcut" data-shortcut="add-images"></span></button>
     <button class="ctx-item" id="btn-paste"><span class="ctx-label">Paste</span><span class="ctx-shortcut" data-shortcut="paste"></span></button>
     <div class="ctx-sep"></div>
@@ -97,14 +97,15 @@
       </div>
     </div>
     <div id="eyedropper-values">
-      <div class="ctx-item eyedropper-value-row eyedropper-copy-row" role="button" tabindex="0" data-copy-target="eyedropper-hex" aria-label="Copy HEX color">
-        <span class="eyedropper-value-text"><span class="eyedropper-value-label">HEX:</span> <span id="eyedropper-hex">#000000</span></span>
+      <div class="ctx-item eyedropper-value-row eyedropper-hex-row">
+        <span class="eyedropper-value-text"><span>HEX:</span> <span id="eyedropper-hex">#000000</span></span>
+        <span class="material-symbols-outlined eyedropper-copy-icon" role="button" tabindex="0" data-copy-target="eyedropper-hex" aria-label="Copy HEX color">content_copy</span>
       </div>
       <div class="ctx-item eyedropper-value-row">
-        <span class="eyedropper-value-text"><span class="eyedropper-value-label">HSL:</span> <span id="eyedropper-hsl">0 0% 0%</span></span>
+        <span class="eyedropper-value-text"><span>HSL:</span> <span id="eyedropper-hsl">0 0% 0%</span></span>
       </div>
       <div class="ctx-item eyedropper-value-row">
-        <span class="eyedropper-value-text"><span class="eyedropper-value-label">RGB:</span> <span id="eyedropper-rgb">0 0 0</span></span>
+        <span class="eyedropper-value-text"><span>RGB:</span> <span id="eyedropper-rgb">0 0 0</span></span>
       </div>
       <span id="eyedropper-swatch"></span>
     </div>

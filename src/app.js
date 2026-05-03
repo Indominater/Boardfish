@@ -38,6 +38,7 @@ var COMMAND_KEY_LABEL = IS_MAC ? '\u2318' : 'Ctrl';
 var SHIFT_KEY_LABEL = IS_MAC ? '\u21e7' : 'Shift';
 var MENU_SHORTCUTS = {
   'new-board': [COMMAND_KEY_LABEL, 'N'],
+  'add-text': [COMMAND_KEY_LABEL, 'T'],
   'add-images': [COMMAND_KEY_LABEL, 'I'],
   paste: [COMMAND_KEY_LABEL, 'V'],
   save: [COMMAND_KEY_LABEL, 'S'],
@@ -214,7 +215,7 @@ var StartupDebug = (() => {
     }
     console.log(copied
       ? `Copied ${label} JSON to clipboard.`
-      : `Copy command returned false. Result is available as BoardfishStartupDebug.lastJson and BoardfishStartupDebug.lastResult.`);
+      : `Copy command returned false.`);
     return copied;
   }
 
@@ -677,15 +678,7 @@ var StartupDebug = (() => {
   const api = { record, sample, sampleFrames, report, toggleStress, topBandScan, toggleBandStress, toggleNativeSkewStress, events, samples, expectedCanvasBg, lastResult, lastJson };
   return api;
 })();
-window.BoardfishStartupDebug = StartupDebug;
-var DEBUG_TOOLS_ENABLED = (() => {
-  try {
-    const params = new URLSearchParams(window.location?.search || '');
-    return localStorage.getItem('bf_debug_tools') === '1' || params.get('bf_debug_tools') === '1';
-  } catch (_) {
-    return false;
-  }
-})();
+const DEBUG_TOOLS_ENABLED = false;
 
 function exposeDebug(tools) {
   if (!DEBUG_TOOLS_ENABLED) return;
@@ -704,6 +697,7 @@ function tauriInvoke(command, args = {}) {
 
 function logStartupStep(step, detail = {}) {
   StartupDebug.record(step, detail);
+  if (!DEBUG_TOOLS_ENABLED) return;
   try {
     console.info('[Boardfish startup]', step, detail);
   } catch (_) {}
@@ -711,6 +705,7 @@ function logStartupStep(step, detail = {}) {
 
 function logStartupError(step, error) {
   StartupDebug.record(step, { error: String(error) });
+  if (!DEBUG_TOOLS_ENABLED) return;
   try {
     console.error('[Boardfish startup]', step, error);
   } catch (_) {}

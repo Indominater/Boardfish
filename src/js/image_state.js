@@ -186,9 +186,12 @@ async function getRenderedImageDataUrl(obj, dbg = null) {
   return dataUrl;
 }
 
-function loadImageElement(src, timeoutMs = 10000) {
+function loadImageElement(src, options = {}) {
+  const timeoutMs = typeof options === 'number' ? options : (options.timeoutMs || 10000);
   return new Promise((resolve, reject) => {
     const img = new Image();
+    const crossOrigin = typeof options === 'object' ? options.crossOrigin : '';
+    if (crossOrigin) img.crossOrigin = crossOrigin;
     let settled = false;
     const done = (fn) => (value) => {
       if (settled) return;
@@ -438,6 +441,9 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
         ViewportDebug.step(vpDbg, 'previewBitmap:error', { ms: previewMs, error: String(err) });
       } finally {
         scheduleImageReadyRender('image-load');
+        if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
+          scheduleVisibleScaledVariantPrewarmAfterIdle('image-ready');
+        }
         ViewportDebug.end(vpDbg, {
           key,
           decodeReady: true,
@@ -473,6 +479,7 @@ function clearImageStore(clearNativeCaches = true) {
   for (const k of Object.keys(imageAssetUrlCache)) delete imageAssetUrlCache[k];
   for (const k of Object.keys(imageBitmapCache)) { imageBitmapCache[k].close(); delete imageBitmapCache[k]; }
   clearScaledImageVariants();
+  if (typeof clearEyedropperSafeImageCache === 'function') clearEyedropperSafeImageCache();
   imageBitmapFailed.clear();
   imageSourceCachePromises.clear();
   imageReadyPromises.clear();

@@ -13,6 +13,19 @@ function hasNoShortcutModifiers(e) {
   return !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
 }
 
+function isNativeFindShortcut(e) {
+  const commandFind = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'f');
+  const findNext = e.key === 'F3' || e.code === 'F3';
+  return commandFind || findNext;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (isNativeFindShortcut(e)) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}, true);
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Alt') { e.preventDefault(); return; }
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) { e.preventDefault(); return; }
@@ -27,6 +40,12 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     setEyedropperEnabled(!eyedropperEnabled);
     updateCtxActionStates();
+    return;
+  }
+
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 't') && !editingId) {
+    e.preventDefault();
+    runAddTextCommandFromShortcut();
     return;
   }
 

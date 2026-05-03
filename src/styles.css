@@ -501,33 +501,45 @@ body.eyedropper-enabled #multi-sel-overlay {
 }
 .eyedropper-value-row {
   grid-column: 1;
-  gap: var(--menu-shell-padding);
-  font-variant-numeric: tabular-nums;
-  color: #fbfbfe;
-  text-shadow:
-    0 1px 2px rgba(0,0,0,0.72),
-    0 0 1px rgba(0,0,0,0.85);
 }
 .eyedropper-value-row:hover,
 .eyedropper-value-row:active {
   background: transparent;
 }
-.eyedropper-copy-row:hover,
-.eyedropper-copy-row:focus-visible {
-  background: var(--firefox-menu-hover-bg);
-  outline: none;
-}
-.eyedropper-copy-row:active {
-  background: var(--menu-active-bg);
+.eyedropper-hex-row {
+  padding-right: var(--menu-item-height);
 }
 .eyedropper-value-text {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.eyedropper-value-label {
-  text-transform: uppercase;
+.eyedropper-copy-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--menu-item-height);
+  height: var(--menu-item-height);
+  padding: 0;
+  font-size: 18px;
+  line-height: 18px;
+  color: var(--firefox-menu-text);
+  background: transparent;
+  border-radius: var(--menu-item-radius);
+  box-sizing: border-box;
+  cursor: default;
+  text-shadow: none;
+  transition: background 0.08s, color 0.08s;
+}
+.eyedropper-copy-icon:hover,
+.eyedropper-copy-icon:focus-visible {
+  background: var(--firefox-menu-hover-bg);
+  outline: none;
+}
+.eyedropper-copy-icon:active {
+  background: var(--menu-active-bg);
 }
 #eyedropper-swatch {
   display: block;
