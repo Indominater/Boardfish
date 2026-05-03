@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Boardfish</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=colorize,content_copy,dark_mode" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -22,35 +23,45 @@
     </div>
   </div>
 
+  <div id="ctx-actions">
+    <button class="ctx-action-item ctx-action-icon" id="ctx-btn-eyedropper" type="button" aria-label="Eyedropper" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">colorize</span>
+    </button>
+    <button class="ctx-action-item ctx-action-icon" id="ctx-btn-dark-mode" type="button" aria-label="Dark Mode" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">dark_mode</span>
+    </button>
+  </div>
+
   <div id="ctx-menu">
-    <button class="ctx-item" id="btn-new">New Board</button>
+    <button class="ctx-item" id="btn-new"><span class="ctx-label">New Board</span><span class="ctx-shortcut" data-shortcut="new-board"></span></button>
     <div class="ctx-sep"></div>
-    <button class="ctx-item" id="btn-add-text">Add Text</button>
-    <button class="ctx-item" id="btn-add-image">Add Images</button>
-    <button class="ctx-item" id="btn-paste">Paste</button>
+    <button class="ctx-item" id="btn-add-text"><span class="ctx-label">Add Text</span></button>
+    <button class="ctx-item" id="btn-add-image"><span class="ctx-label">Add Images</span><span class="ctx-shortcut" data-shortcut="add-images"></span></button>
+    <button class="ctx-item" id="btn-paste"><span class="ctx-label">Paste</span><span class="ctx-shortcut" data-shortcut="paste"></span></button>
     <div class="ctx-sep"></div>
-    <button class="ctx-item" id="btn-save">Save</button>
-    <button class="ctx-item" id="btn-save-as">Save As</button>
-    <button class="ctx-item" id="btn-open">Open</button>
+    <button class="ctx-item" id="btn-save"><span class="ctx-label">Save</span><span class="ctx-shortcut" data-shortcut="save"></span></button>
+    <button class="ctx-item" id="btn-save-as"><span class="ctx-label">Save As</span><span class="ctx-shortcut" data-shortcut="save-as"></span></button>
+    <button class="ctx-item" id="btn-open"><span class="ctx-label">Open</span><span class="ctx-shortcut" data-shortcut="open"></span></button>
     <div class="ctx-sep" id="ctx-sep-export-all"></div>
-    <button class="ctx-item" id="btn-export-all-text">Export All Text</button>
-    <button class="ctx-item" id="btn-export-all-images">Export All Images</button>
+    <button class="ctx-item" id="btn-export-all-text"><span class="ctx-label">Export All Text</span></button>
+    <button class="ctx-item" id="btn-export-all-images"><span class="ctx-label">Export All Images</span></button>
   </div>
 
   <div id="obj-ctx-menu">
-    <button class="ctx-item" id="obj-btn-copy">Copy</button>
-    <button class="ctx-item" id="obj-btn-duplicate">Duplicate</button>
+    <button class="ctx-item" id="obj-btn-copy"><span class="ctx-label">Copy</span><span class="ctx-shortcut" data-shortcut="copy"></span></button>
+    <button class="ctx-item" id="obj-btn-cut"><span class="ctx-label">Cut</span><span class="ctx-shortcut" data-shortcut="cut"></span></button>
+    <button class="ctx-item" id="obj-btn-duplicate"><span class="ctx-label">Duplicate</span><span class="ctx-shortcut" data-shortcut="duplicate"></span></button>
     <div class="ctx-sep" id="obj-sep-image-actions"></div>
-    <button class="ctx-item" id="obj-btn-flip-horizontal">Flip Horizontal</button>
-    <button class="ctx-item" id="obj-btn-flip-vertical">Flip Vertical</button>
-    <button class="ctx-item" id="obj-btn-rotate">Rotate</button>
+    <button class="ctx-item" id="obj-btn-flip-horizontal"><span class="ctx-label">Flip Horizontal</span></button>
+    <button class="ctx-item" id="obj-btn-flip-vertical"><span class="ctx-label">Flip Vertical</span></button>
+    <button class="ctx-item" id="obj-btn-rotate"><span class="ctx-label">Rotate</span></button>
     <div class="ctx-sep"></div>
-    <button class="ctx-item" id="obj-btn-move-to-back">Move to Back</button>
+    <button class="ctx-item" id="obj-btn-move-to-back"><span class="ctx-label">Move to Back</span></button>
     <div class="ctx-sep" id="obj-sep-export"></div>
-    <button class="ctx-item" id="obj-btn-save-image">Export Image</button>
-    <button class="ctx-item" id="obj-btn-save-images">Export Images</button>
+    <button class="ctx-item" id="obj-btn-save-image"><span class="ctx-label">Export Image</span></button>
+    <button class="ctx-item" id="obj-btn-save-images"><span class="ctx-label">Export Images</span></button>
     <div class="ctx-sep"></div>
-    <button class="ctx-item" id="obj-btn-delete">Delete</button>
+    <button class="ctx-item" id="obj-btn-delete"><span class="ctx-label">Delete</span><span class="ctx-shortcut" data-shortcut="delete"></span></button>
   </div>
 
   <input type="file" id="file-input" accept="image/png,image/jpeg" multiple />
@@ -79,6 +90,25 @@
     <span id="isl-zoom">100%</span>
   </div>
   <span id="isl-measure" aria-hidden="true"></span>
+  <div id="eyedropper-loupe" aria-hidden="true">
+    <div id="eyedropper-top">
+      <div id="eyedropper-preview">
+        <canvas id="eyedropper-canvas"></canvas>
+      </div>
+    </div>
+    <div id="eyedropper-values">
+      <div class="ctx-item eyedropper-value-row eyedropper-copy-row" role="button" tabindex="0" data-copy-target="eyedropper-hex" aria-label="Copy HEX color">
+        <span class="eyedropper-value-text"><span class="eyedropper-value-label">HEX:</span> <span id="eyedropper-hex">#000000</span></span>
+      </div>
+      <div class="ctx-item eyedropper-value-row">
+        <span class="eyedropper-value-text"><span class="eyedropper-value-label">HSL:</span> <span id="eyedropper-hsl">0 0% 0%</span></span>
+      </div>
+      <div class="ctx-item eyedropper-value-row">
+        <span class="eyedropper-value-text"><span class="eyedropper-value-label">RGB:</span> <span id="eyedropper-rgb">0 0 0</span></span>
+      </div>
+      <span id="eyedropper-swatch"></span>
+    </div>
+  </div>
 
   <script src="app.js"></script>
   <script src="js/geometry.js"></script>
@@ -93,6 +123,7 @@
   <script src="js/selection_input.js"></script>
   <script src="js/text_editor.js"></script>
   <script src="js/object_commands.js"></script>
+  <script src="js/eyedropper.js"></script>
   <script src="js/canvas_input.js"></script>
   <script src="js/context_menu.js"></script>
   <script src="js/image_insert.js"></script>

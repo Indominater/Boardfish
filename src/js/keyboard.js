@@ -5,18 +5,38 @@ function isShortcutKey(e, letter) {
   return e.key.toLowerCase() === normalizedLetter || e.code === `Key${normalizedLetter.toUpperCase()}`;
 }
 
+function hasExactCommandModifier(e, { shift = false, alt = false } = {}) {
+  return e.ctrlKey !== e.metaKey && e.shiftKey === shift && e.altKey === alt;
+}
+
+function hasNoShortcutModifiers(e) {
+  return !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Alt') { e.preventDefault(); return; }
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'r')) { e.preventDefault(); return; }
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) { e.preventDefault(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'l')) {
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'i') && !editingId) {
     e.preventDefault();
-    toggleAppTheme();
+    runAddImagesCommandFromShortcut();
+    return;
+  }
+
+  if (hasNoShortcutModifiers(e) && isShortcutKey(e, 'i') && !editingId) {
+    e.preventDefault();
+    setEyedropperEnabled(!eyedropperEnabled);
+    updateCtxActionStates();
     return;
   }
 
   if (e.key === 'Escape') {
     hideMenus();
+    if (isEyedropperSampleVisible()) {
+      e.preventDefault();
+      hideEyedropperSample();
+      return;
+    }
     if (editingId) {
       exitEdit();
       selectedId = null;
@@ -28,9 +48,23 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'o') && !editingId) {
+    e.preventDefault();
+    openBoard();
+    return;
+  }
+
+  if (hasExactCommandModifier(e, { shift: true }) && isShortcutKey(e, 's')) {
+    e.preventDefault();
+    saveBoardAs();
+    return;
+  }
+
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 's')) { e.preventDefault(); saveBoard(); return; }
+
   if (isBoardInputBlocked()) { e.preventDefault(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'a')) {
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'a')) {
     if (!editingId) {
       e.preventDefault();
       selectAllObjects();
@@ -38,7 +72,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && (isShortcutKey(e, 'q') || isShortcutKey(e, 'w'))) {
+  if (hasExactCommandModifier(e) && (isShortcutKey(e, 'q') || isShortcutKey(e, 'w'))) {
     if (hasTauri()) {
       e.preventDefault();
       requestAppClose();
@@ -46,33 +80,19 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if ((e.key === 'Backspace' || e.key === 'Delete') && hasSelection() && !editingId) {
+  if (hasNoShortcutModifiers(e) && (e.key === 'Backspace' || e.key === 'Delete') && hasSelection() && !editingId) {
     e.preventDefault(); deleteSelected(); return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'n') && !editingId) {
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'n') && !editingId) {
     e.preventDefault();
     newBoard();
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'o') && !editingId) {
-    e.preventDefault();
-    openBoard();
-    return;
-  }
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'c') && !editingId) { e.preventDefault(); copySelected(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && isShortcutKey(e, 's')) {
-    e.preventDefault();
-    saveBoardAs();
-    return;
-  }
-
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 's')) { e.preventDefault(); saveBoard(); return; }
-
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'c') && !editingId) { e.preventDefault(); copySelected(); return; }
-
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'x') && !editingId) {
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'x') && !editingId) {
     e.preventDefault();
     (async () => {
       await copySelected();
@@ -81,11 +101,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && isShortcutKey(e, 'z')) { e.preventDefault(); redo(); return; }
+  if (hasExactCommandModifier(e, { shift: true }) && isShortcutKey(e, 'z')) { e.preventDefault(); redo(); return; }
 
-  if (e.ctrlKey && !e.metaKey && isShortcutKey(e, 'y')) { e.preventDefault(); redo(); return; }
+  if (e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && isShortcutKey(e, 'y')) { e.preventDefault(); redo(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'z')) { e.preventDefault(); undo(); return; }
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'z')) { e.preventDefault(); undo(); return; }
 
-  if ((e.ctrlKey || e.metaKey) && isShortcutKey(e, 'd') && !editingId) { e.preventDefault(); duplicateSelected(); return; }
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'd') && !editingId) { e.preventDefault(); duplicateSelected(); return; }
 });

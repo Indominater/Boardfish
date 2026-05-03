@@ -15,6 +15,7 @@
         "title": "",
         "width": 1280,
         "height": 800,
+        "visible": false,
         "theme": "Light",
         "backgroundColor": "#e0e0e3",
         "zoomHotkeysEnabled": false

@@ -5,12 +5,12 @@ var savedHistoryIndex = -1;
 var currentFilePath = null;
 
 function isDirty() {
-  return _preferencesDirty || (objects.length > 0 && (historyIndex !== savedHistoryIndex || _dirtyIds.size > 0));
+  if (objects.length === 0) return false;
+  return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0;
 }
 
 function markSaved() {
   _dirtyIds.clear();
-  _preferencesDirty = false;
   savedHistoryIndex = historyIndex;
   updateTitle();
 }
@@ -51,7 +51,7 @@ function showUnsavedDialog() {
 // ─── Save / Open ─────────────────────────────────────────────────────────────
 
 function boardData() {
-  return { version: 2, viewport: { panX, panY, zoom }, preferences: boardPreferences(), imageStore, objects };
+  return { version: 2, viewport: { panX, panY, zoom }, imageStore, objects };
 }
 
 function getImageMetaForBoardFile(imgKey, src = '') {
@@ -72,7 +72,6 @@ function boardDataForSave() {
     version: 3,
     format: 'boardfish-container',
     viewport: { panX, panY, zoom },
-    preferences: boardPreferences(),
     imageStore: imageManifest,
     objects,
   };
@@ -540,7 +539,7 @@ function applyBoardData(data, options = {}) {
     if (obj.z >= zCounter) zCounter = obj.z + 1;
   }
   if (data.viewport) { panX = data.viewport.panX; panY = data.viewport.panY; zoom = data.viewport.zoom; }
-  applyAppTheme(data.preferences?.theme || 'light', { native: !deferRender });
+  if (!deferRender) applyNativeAppTheme();
   OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });
 
   if (!deferRender) {

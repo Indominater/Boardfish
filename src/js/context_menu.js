@@ -7,6 +7,49 @@ function openMenuAt(menu, x, y) {
   menu.classList.add('visible');
 }
 
+function menuGapPx() {
+  const value = parseFloat(cssVar('--menu-shell-padding'));
+  return Number.isFinite(value) ? value : 8;
+}
+
+function updateCtxActionStates() {
+  if (darkModeMenuBtn) darkModeMenuBtn.setAttribute('aria-pressed', appTheme === 'dark' ? 'true' : 'false');
+  if (eyedropperMenuBtn) eyedropperMenuBtn.setAttribute('aria-pressed', eyedropperEnabled ? 'true' : 'false');
+  updateEyedropperCommandState();
+}
+
+function closeCtxActions(reason) {
+  MenuDebug.log('ctx-actions:close', { reason });
+  ctxActions?.classList.remove('visible');
+}
+
+function syncCtxActionsWithMenu(reason) {
+  if (ctxMenu.classList.contains('visible')) return;
+  closeCtxActions(reason);
+}
+
+function openCtxMenuAt(x, y) {
+  openMenuAt(ctxMenu, x, y);
+  if (!ctxActions) return;
+
+  updateCtxActionStates();
+  ctxActions.classList.add('visible');
+  const gap = menuGapPx();
+  const menuRect = ctxMenu.getBoundingClientRect();
+  const actionRect = ctxActions.getBoundingClientRect();
+  const maxLeft = window.innerWidth - actionRect.width - 12;
+  const left = Math.max(12, Math.min(maxLeft, x));
+  let top = y - actionRect.height - gap;
+  if (top < 12) top = Math.min(window.innerHeight - actionRect.height - 12, y + menuRect.height + gap);
+  ctxActions.style.left = `${Math.round(left)}px`;
+  ctxActions.style.top = `${Math.round(Math.max(12, top))}px`;
+}
+
+if (ctxActions) {
+  new MutationObserver(() => syncCtxActionsWithMenu('ctx-menu-visibility-sync'))
+    .observe(ctxMenu, { attributes: true, attributeFilter: ['class'] });
+}
+
 if (DEBUG_TOOLS_ENABLED) {
   for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
     document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:capture`, e), true);
@@ -19,6 +62,7 @@ if (DEBUG_TOOLS_ENABLED) {
 function closeCtxMenu(reason) {
   MenuDebug.log('ctx-menu:close', { reason });
   ctxMenu.classList.remove('visible');
+  closeCtxActions(reason);
 }
 
 function closeObjCtxMenu(reason) {
@@ -39,6 +83,13 @@ var MENU_COMMANDS = {
   'btn-export-all-images': () => { closeCtxMenu('command:export-all-images'); showInputShield(); exportAllImages(); },
   'btn-export-all-text': () => { closeCtxMenu('command:export-all-text'); exportAllText(); },
   'obj-btn-copy': () => { closeObjCtxMenu('command:copy'); copySelected(); },
+  'obj-btn-cut': () => {
+    closeObjCtxMenu('command:cut');
+    (async () => {
+      await copySelected();
+      deleteSelected();
+    })();
+  },
   'obj-btn-delete': () => { closeObjCtxMenu('command:delete'); deleteSelected(); },
   'obj-btn-duplicate': () => { closeObjCtxMenu('command:duplicate'); duplicateSelected(); },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
@@ -60,6 +111,10 @@ function menuCommandName(button) {
 function runMenuCommand(button, source) {
   const run = menuCommandFromButton(button);
   const command = menuCommandName(button);
+  if (button?.disabled || isCommandBlockedByEyedropper(button?.id || '')) {
+    MenuDebug.log('menu:command:blocked', { command, source, reason: 'eyedropper' });
+    return true;
+  }
   if (!run) {
     MenuDebug.log('menu:command:missing', { command, source, target: button?.id || '' });
     return false;
@@ -91,9 +146,18 @@ function runMenuCommand(button, source) {
   return true;
 }
 
+function runAddImagesCommandFromShortcut() {
+  if (ctxMenu.classList.contains('visible')) {
+    runMenuCommand(addImageBtn, 'shortcut');
+    return;
+  }
+  ctxPos = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  runMenuCommand(addImageBtn, 'shortcut');
+}
+
 function onMenuPointerDown(e) {
   const button = e.target.closest?.('.ctx-item');
-  if (!button || e.button !== 0) return;
+  if (!button || button.disabled || e.button !== 0) return;
   e.stopPropagation();
   _menuPointerCommand = button;
   MenuDebug.log('menu:pointer-command:start', { command: menuCommandName(button), target: button.id });
@@ -115,7 +179,7 @@ function onMenuPointerUp(e) {
 
 function onMenuMouseDown(e) {
   const button = e.target.closest?.('.ctx-item');
-  if (!button || e.button !== 0) return;
+  if (!button || button.disabled || e.button !== 0) return;
   _menuMouseCommand = button;
   MenuDebug.log('menu:mouse-command:start', { command: menuCommandName(button), target: button.id });
 }
@@ -142,7 +206,7 @@ ctxMenu.addEventListener('mousedown', onMenuMouseDown);
 ctxMenu.addEventListener('mouseup', onMenuMouseUp);
 objCtxMenu.addEventListener('mousedown', onMenuMouseDown);
 objCtxMenu.addEventListener('mouseup', onMenuMouseUp);
-for (const menu of [ctxMenu, objCtxMenu]) {
+for (const menu of [ctxMenu, objCtxMenu, ctxActions].filter(Boolean)) {
   for (const type of ['click', 'contextmenu']) {
     menu.addEventListener(type, (e) => {
       e.stopPropagation();
@@ -158,15 +222,17 @@ function updateObjMenuActions() {
     if (o && o.type === 'image') imageCount++;
   }
   const multiSelected = isMultiSelected();
-  if (copyBtn) copyBtn.style.display = 'block';
+  if (copyBtn) copyBtn.style.display = '';
   if (imageActionsSep) imageActionsSep.style.display = imageCount >= 1 ? 'block' : 'none';
-  if (flipHorizontalBtn) flipHorizontalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
-  if (flipVerticalBtn) flipVerticalBtn.style.display = imageCount >= 1 ? 'block' : 'none';
-  if (rotateBtn) rotateBtn.style.display = imageCount >= 1 ? 'block' : 'none';
-  if (saveImageBtn) saveImageBtn.style.display = !multiSelected && imageCount === 1 ? 'block' : 'none';
+  if (flipHorizontalBtn) flipHorizontalBtn.style.display = imageCount >= 1 ? '' : 'none';
+  if (flipVerticalBtn) flipVerticalBtn.style.display = imageCount >= 1 ? '' : 'none';
+  if (rotateBtn) rotateBtn.style.display = imageCount >= 1 ? '' : 'none';
+  if (saveImageBtn) saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
   if (saveImagesBtn) {
-    saveImagesBtn.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
-    saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? 'block' : 'none';
+    const label = saveImagesBtn.querySelector?.('.ctx-label');
+    if (label) label.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
+    else saveImagesBtn.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
+    saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';
   }
   if (exportSep) exportSep.style.display = imageCount >= 1 ? 'block' : 'none';
 }
@@ -175,8 +241,9 @@ function updateCtxMenuActions() {
   const hasImages = objects.some((o) => o.type === 'image');
   const hasText   = objects.some((o) => o.type === 'text');
   const show = hasImages || hasText;
-  if (exportAllTextBtn) exportAllTextBtn.style.display = hasText ? 'block' : 'none';
-  if (exportAllImageBtn) exportAllImageBtn.style.display = hasImages ? 'block' : 'none';
+  updateEyedropperCommandState();
+  if (exportAllTextBtn) exportAllTextBtn.style.display = hasText ? '' : 'none';
+  if (exportAllImageBtn) exportAllImageBtn.style.display = hasImages ? '' : 'none';
   if (exportAllSep) exportAllSep.style.display = show ? 'block' : 'none';
 }
 
@@ -188,6 +255,16 @@ canvas.addEventListener('contextmenu', (e) => {
   }
   const wp = toWorld(e.clientX, e.clientY);
   MenuDebug.log('canvas:contextmenu', { x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
+
+  if (eyedropperEnabled) {
+    hideEyedropperSample();
+    closeObjCtxMenu('show-canvas-menu:eyedropper');
+    ctxPos = wp;
+    updateCtxMenuActions();
+    openCtxMenuAt(e.clientX, e.clientY);
+    MenuDebug.log('ctx-menu:open', { reason: 'eyedropper', x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
+    return;
+  }
 
   // Multi-select: right-click anywhere inside bounding box shows obj menu
   if (isMultiSelected()) {
@@ -222,7 +299,7 @@ canvas.addEventListener('contextmenu', (e) => {
   closeObjCtxMenu('show-canvas-menu');
   ctxPos = wp;
   updateCtxMenuActions();
-  openMenuAt(ctxMenu, e.clientX, e.clientY);
+  openCtxMenuAt(e.clientX, e.clientY);
   MenuDebug.log('ctx-menu:open', { x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
 });
 
@@ -236,12 +313,84 @@ for (const id of Object.keys(MENU_COMMANDS)) {
 
 
 document.addEventListener('click', (e) => {
-  if (ctxMenu.contains(e.target) || objCtxMenu.contains(e.target)) {
+  if (ctxMenu.contains(e.target) || objCtxMenu.contains(e.target) || ctxActions?.contains(e.target)) {
     MenuDebug.log('document-click:inside-menu');
     return;
   }
   closeCtxMenu('document-click');
   closeObjCtxMenu('document-click');
+});
+
+function ctxActionHotspotRect(button) {
+  const rect = button.getBoundingClientRect();
+  const inset = parseFloat(cssVar('--menu-shell-padding')) || 0;
+  if (!button.classList.contains('ctx-action-icon')) {
+    return {
+      left: rect.left + inset,
+      top: rect.top + inset,
+      right: rect.right - inset,
+      bottom: rect.bottom - inset,
+    };
+  }
+  const size = parseFloat(cssVar('--menu-item-height')) || Math.max(0, rect.height - inset * 2);
+  const cx = rect.left + rect.width / 2;
+  return {
+    left: cx - size / 2,
+    top: rect.top + inset,
+    right: cx + size / 2,
+    bottom: rect.bottom - inset,
+  };
+}
+
+function isCtxActionHotspotEvent(e, button) {
+  if (!button) return false;
+  if (!e.detail && e.clientX === 0 && e.clientY === 0) return true;
+  const hot = ctxActionHotspotRect(button);
+  return e.clientX >= hot.left && e.clientX <= hot.right && e.clientY >= hot.top && e.clientY <= hot.bottom;
+}
+
+function updateCtxActionHotspotState(e, active = false) {
+  const button = e.target.closest?.('.ctx-action-item');
+  for (const item of ctxActions?.querySelectorAll('.ctx-action-item') || []) {
+    const hot = item === button && isCtxActionHotspotEvent(e, item);
+    item.classList.toggle('hotspot-hover', hot);
+    item.classList.toggle('hotspot-active', active && hot);
+  }
+}
+
+function clearCtxActionHotspotState() {
+  for (const item of ctxActions?.querySelectorAll('.ctx-action-item') || []) {
+    item.classList.remove('hotspot-hover', 'hotspot-active');
+  }
+}
+
+ctxActions?.addEventListener('pointermove', (e) => updateCtxActionHotspotState(e));
+ctxActions?.addEventListener('pointerdown', (e) => {
+  const button = e.target.closest?.('.ctx-action-item');
+  if (!isCtxActionHotspotEvent(e, button)) {
+    e.preventDefault();
+    e.stopPropagation();
+    clearCtxActionHotspotState();
+    return;
+  }
+  updateCtxActionHotspotState(e, true);
+});
+ctxActions?.addEventListener('pointerup', clearCtxActionHotspotState);
+ctxActions?.addEventListener('pointerleave', clearCtxActionHotspotState);
+
+darkModeMenuBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!isCtxActionHotspotEvent(e, e.currentTarget)) return;
+  Promise.resolve(toggleAppTheme()).finally(updateCtxActionStates);
+});
+
+eyedropperMenuBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!isCtxActionHotspotEvent(e, e.currentTarget)) return;
+  setEyedropperEnabled(!eyedropperEnabled);
+  updateCtxActionStates();
 });
 
 islZoom.addEventListener('mousedown', e => e.preventDefault());

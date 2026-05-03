@@ -25,11 +25,6 @@
     };
   }
 
-  function normalizePreferences(preferences = {}) {
-    const theme = String(preferences.theme || '').toLowerCase() === 'dark' ? 'dark' : 'light';
-    return { theme };
-  }
-
   function normalizeObject(obj, index) {
     if (!isObject(obj)) throw new Error(`object ${index} is not an object`);
     if (obj.type !== 'text' && obj.type !== 'image') {
@@ -90,11 +85,11 @@
         throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);
       }
     }
+    const { preferences: _preferences, ...boardFields } = data;
     return {
-      ...data,
+      ...boardFields,
       version: Number(data.version || 3),
       viewport: normalizeViewport(data.viewport),
-      preferences: normalizePreferences(data.preferences),
       imageStore,
       objects,
     };

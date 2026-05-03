@@ -6,7 +6,6 @@ struct BoardDocument {
     version: Option<u64>,
     format: Option<String>,
     viewport: Option<Viewport>,
-    preferences: Option<BoardPreferences>,
     image_store: HashMap<String, serde_json::Value>,
     objects: Vec<BoardObject>,
 }
@@ -17,11 +16,6 @@ struct Viewport {
     pan_x: f64,
     pan_y: f64,
     zoom: f64,
-}
-
-#[derive(serde::Deserialize)]
-struct BoardPreferences {
-    theme: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -80,13 +74,6 @@ pub(crate) fn validate_board_value(value: &serde_json::Value) -> Result<(), Stri
         if !viewport.pan_x.is_finite() || !viewport.pan_y.is_finite() || !viewport.zoom.is_finite()
         {
             return Err("viewport contains non-finite values".to_string());
-        }
-    }
-    if let Some(preferences) = &document.preferences {
-        if let Some(theme) = &preferences.theme {
-            if theme != "light" && theme != "dark" {
-                return Err(format!("unsupported board theme {theme}"));
-            }
         }
     }
     for object in &document.objects {

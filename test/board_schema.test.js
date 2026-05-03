@@ -15,6 +15,19 @@ test('normalizes valid board data from shared v3 fixture', () => {
 
   assert.equal(board.viewport.zoom, 2);
   assert.equal(board.objects[1].data.rotation, 270);
+  assert.equal(Object.hasOwn(board, 'preferences'), false);
+});
+
+test('ignores legacy board theme preferences', () => {
+  const board = BoardSchema.normalizeBoardData({
+    version: 3,
+    format: 'boardfish-container',
+    preferences: { theme: 'dark' },
+    imageStore: {},
+    objects: [],
+  });
+
+  assert.equal(Object.hasOwn(board, 'preferences'), false);
 });
 
 test('rejects image objects with missing image sources', () => {

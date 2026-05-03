@@ -161,6 +161,14 @@ function readClipboardTextFromEvent(clipboardData) {
   return clipboardData.getData?.('text/plain') || clipboardData.getData?.('text') || '';
 }
 
+async function copyTextToClipboard(text, dbg = null, meta = {}) {
+  if (hasTauri()) {
+    await ClipDebug.invoke(dbg, 'copy_text_to_clipboard', { text }, { textLen: text.length, ...meta });
+    return;
+  }
+  await navigator.clipboard.writeText(text);
+}
+
 function describeClipboardData(clipboardData) {
   if (!clipboardData) return null;
   return {
@@ -255,13 +263,13 @@ async function copySelected() {
           ClipDebug.step(dbg, 'native-copy-external-change-skip', { type: 'text', startSeq, currentSeq });
           return;
         }
-        await ClipDebug.invoke(dbg, 'copy_text_to_clipboard', { text: obj.data.content }, { textLen: obj.data.content.length });
+        await copyTextToClipboard(obj.data.content, dbg);
       }, dbg, { type: 'text', token: clipboardToken })
         .catch(err => console.error('[copy] copy_text_to_clipboard FAILED:', err))
         .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
         .finally(() => ClipDebug.end(dbg, { path: 'text-tauri' }));
     } else {
-      navigator.clipboard.writeText(obj.data.content)
+      copyTextToClipboard(obj.data.content, dbg)
         .catch(err => console.error('[copy] writeText FAILED:', err))
         .finally(() => ClipDebug.end(dbg, { path: 'text-web' }));
     }
@@ -922,6 +930,7 @@ async function exportAllText() {
 }
 
 async function pasteAtPos(wx, wy, clipboardData = null) {
+  if (eyedropperEnabled) return;
   const dbg = ClipDebug.start('pasteAtPos', {
     wx,
     wy,

@@ -1,6 +1,7 @@
 // ─── Add objects ─────────────────────────────────────────────────────────────
 
 function addText(wx, wy, content = '') {
+  if (eyedropperEnabled) return;
   content = normalizeTextContent(content);
   let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
   if (content) {
@@ -41,6 +42,7 @@ function acquireInputShield(...allowedInputs) {
   }
   const token = {
     allow: new Set(allowedInputs.flat().filter(Boolean)),
+    allowBoardNavigation: options.allowBoardNavigation === true,
     keepSelectionOverlay: options.keepSelectionOverlay === true,
     visual: options.visual !== false,
     released: false,
@@ -74,6 +76,13 @@ function hideInputShield() {
 
 function isBoardInputBlocked() {
   return _boardOpening || _inputShieldStack.length > 0 || openingShield.classList.contains('active');
+}
+
+function isBoardNavigationAllowedWhileBlocked() {
+  return !_boardOpening &&
+    !openingShield.classList.contains('active') &&
+    _inputShieldStack.length > 0 &&
+    _inputShieldStack.every((token) => token.allowBoardNavigation);
 }
 
 function shouldKeepSelectionOverlayWhileBlocked() {
@@ -123,7 +132,6 @@ async function newBoard() {
   OpenDebug.step(dbg, 'clearState', {});
   currentFilePath = null;
   panX = 0; panY = 0; zoom = 1;
-  applyAppTheme('light');
   clearImageStore(true);
   OpenDebug.step(dbg, 'clearImageStore', {});
   boardHistory = []; historyIndex = -1;

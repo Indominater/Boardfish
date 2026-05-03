@@ -41,20 +41,30 @@ function isEventInsideVisibleContextMenu(e) {
   if (!(e.target instanceof Node)) return false;
   return (
     (ctxMenu.classList.contains('visible') && ctxMenu.contains(e.target)) ||
-    (objCtxMenu.classList.contains('visible') && objCtxMenu.contains(e.target))
+    (objCtxMenu.classList.contains('visible') && objCtxMenu.contains(e.target)) ||
+    (ctxActions?.classList.contains('visible') && ctxActions.contains(e.target))
   );
+}
+
+function isEventInsideIsland(e) {
+  return !!(island && e.target instanceof Node && island.contains(e.target));
 }
 
 function isShieldInputAllowed(e) {
   if (isUnsavedDialogOpen()) return isEventInsideUnsavedDialog(e);
   if (isEventInsideVisibleContextMenu(e)) return true;
+  if (typeof isEventInsideVisibleEyedropperLoupe === 'function' && isEventInsideVisibleEyedropperLoupe(e)) return true;
+  if (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled && isEventInsideIsland(e)) return true;
   if (openingShield.classList.contains('active') && !_inputShieldStack.length) return false;
   if (_boardOpening) return false;
   if (_inputShieldStack.length === 0) return true;
   const input = inputNameFromEvent(e);
+  const codeInput = e.type === 'keydown' || e.type === 'keyup'
+    ? `code:${String(e.code || '').toLowerCase()}`
+    : '';
   const buttonInput = typeof e.button === 'number' ? `${e.type}:${e.button}` : '';
   return _inputShieldStack.every(({ allow }) => (
-    allow.has(input) || (buttonInput && allow.has(buttonInput))
+    allow.has(input) || (codeInput && allow.has(codeInput)) || (buttonInput && allow.has(buttonInput))
   ));
 }
 
@@ -342,6 +352,7 @@ function selectAllObjects() {
 function hideMenus() {
   MenuDebug.log('hideMenus', { reason: 'generic' });
   ctxMenu.classList.remove('visible');
+  ctxActions?.classList.remove('visible');
   objCtxMenu.classList.remove('visible');
 }
 

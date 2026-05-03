@@ -126,11 +126,16 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
 }
 
 fileInput.addEventListener('change', async () => {
+  if (eyedropperEnabled) {
+    fileInput.value = '';
+    return;
+  }
   const files = [...fileInput.files];
   await insertImageFiles(files, ctxPos.x, ctxPos.y, 'file-input');
 });
 
 async function pickAndInsertImages(x, y) {
+  if (eyedropperEnabled) return;
   if (hasTauri()) {
     const dbg = InsertDebug.start('pickImages', { source: 'file-picker-native' });
     try {

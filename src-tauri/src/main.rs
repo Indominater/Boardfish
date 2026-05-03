@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -79,6 +80,13 @@ struct ReadBoardResponse {
 #[derive(Clone, serde::Serialize)]
 struct FileDropPayload {
     paths: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ThemeApplyResponse {
+    theme: &'static str,
+    color: &'static str,
+    ms: f64,
 }
 
 pub(crate) fn elapsed_ms(start: std::time::Instant) -> f64 {
@@ -206,15 +214,19 @@ fn set_title(window: tauri::Window, title: String) {
 }
 
 #[tauri::command]
-fn set_app_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), String> {
+fn set_app_theme(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    theme: String,
+) -> Result<ThemeApplyResponse, String> {
+    let start = std::time::Instant::now();
     let dark = theme.eq_ignore_ascii_case("dark");
     DARK_THEME.store(dark, Ordering::Relaxed);
+    if let Err(error) = write_stored_app_theme(&app, dark) {
+        eprintln!("[boardfish startup] store theme failed: {error}");
+    }
     let native_theme = if dark { Theme::Dark } else { Theme::Light };
-    let color = if dark {
-        Color(0x1c, 0x1b, 0x22, 0xff)
-    } else {
-        Color(0xe0, 0xe0, 0xe3, 0xff)
-    };
+    let color = app_theme_color(dark);
 
     window
         .set_theme(Some(native_theme))
@@ -232,7 +244,104 @@ fn set_app_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), Stri
         platform_macos::configure_webview_title_bar(&window);
     }
 
-    Ok(())
+    Ok(ThemeApplyResponse {
+        theme: app_theme_name(dark),
+        color: app_theme_hex(dark),
+        ms: elapsed_ms(start),
+    })
+}
+
+#[tauri::command]
+fn show_app_window(window: tauri::WebviewWindow) {
+    show_startup_window(&window);
+}
+
+fn app_theme_color(dark: bool) -> Color {
+    if dark {
+        Color(0x1c, 0x1b, 0x22, 0xff)
+    } else {
+        Color(0xe0, 0xe0, 0xe3, 0xff)
+    }
+}
+
+fn app_theme_name(dark: bool) -> &'static str {
+    if dark {
+        "dark"
+    } else {
+        "light"
+    }
+}
+
+fn app_theme_hex(dark: bool) -> &'static str {
+    if dark {
+        "#1c1b22"
+    } else {
+        "#e0e0e3"
+    }
+}
+
+fn app_theme_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|dir| dir.join("theme.txt"))
+        .map_err(|e| e.to_string())
+}
+
+fn read_stored_app_theme(app: &tauri::AppHandle) -> bool {
+    let Ok(path) = app_theme_path(app) else {
+        return false;
+    };
+    std::fs::read_to_string(path)
+        .map(|value| value.trim().eq_ignore_ascii_case("dark"))
+        .unwrap_or(false)
+}
+
+fn write_stored_app_theme(app: &tauri::AppHandle, dark: bool) -> Result<(), String> {
+    let path = app_theme_path(app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, app_theme_name(dark)).map_err(|e| e.to_string())
+}
+
+fn configure_startup_theme(window: &tauri::WebviewWindow, dark: bool) {
+    DARK_THEME.store(dark, Ordering::Relaxed);
+    let _ = window.set_theme(Some(if dark { Theme::Dark } else { Theme::Light }));
+    let _ = window.set_background_color(Some(app_theme_color(dark)));
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        platform_windows::configure_webview_title_bar(window, dark);
+    }
+    #[cfg(target_os = "macos")]
+    unsafe {
+        platform_macos::configure_webview_title_bar(window);
+    }
+
+    eprintln!(
+        "[boardfish startup] configured native theme: {}",
+        app_theme_name(dark)
+    );
+}
+
+fn show_startup_window(window: &tauri::WebviewWindow) {
+    eprintln!("[boardfish startup] showing main window");
+    if let Err(error) = window.show() {
+        eprintln!("[boardfish startup] show failed: {error}");
+    }
+    if let Err(error) = window.set_focus() {
+        eprintln!("[boardfish startup] set_focus failed: {error}");
+    }
+}
+
+fn schedule_startup_show_fallback(window: tauri::WebviewWindow) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        if !window.is_visible().unwrap_or(false) {
+            eprintln!("[boardfish startup] frontend show timed out; using native fallback");
+            show_startup_window(&window);
+        }
+    });
 }
 
 #[tauri::command]
@@ -305,6 +414,7 @@ fn main() {
             save_images_to_existing_folder_by_keys,
             set_title,
             set_app_theme,
+            show_app_window,
             exit_app,
             cancel_pending_termination,
             acknowledge_close_request,
@@ -340,7 +450,7 @@ fn main() {
             _ => {}
         })
         .setup(|app| {
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
             let _ = app;
 
             #[cfg(target_os = "macos")]
@@ -348,10 +458,10 @@ fn main() {
                 let app_handle = app.handle().clone();
                 platform_macos::setup_menu(app)?;
                 if let Some(window) = app.get_webview_window("main") {
+                    let dark = read_stored_app_theme(&app_handle);
+                    configure_startup_theme(&window, dark);
                     let _ = window.set_title_bar_style(tauri::TitleBarStyle::Overlay);
-                    unsafe {
-                        platform_macos::configure_webview_title_bar(&window);
-                    }
+                    schedule_startup_show_fallback(window);
                 }
                 unsafe {
                     // Keep the close confirmation path alive for Cmd+Q and dock quits.
@@ -362,12 +472,9 @@ fn main() {
             #[cfg(target_os = "windows")]
             {
                 if let Some(window) = app.get_webview_window("main") {
-                    unsafe {
-                        platform_windows::configure_webview_title_bar(
-                            &window,
-                            DARK_THEME.load(Ordering::Relaxed),
-                        );
-                    }
+                    let dark = read_stored_app_theme(app.handle());
+                    configure_startup_theme(&window, dark);
+                    schedule_startup_show_fallback(window);
                 }
             }
 

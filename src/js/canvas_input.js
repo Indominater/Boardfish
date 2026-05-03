@@ -70,7 +70,7 @@ canvas.addEventListener('wheel', (e) => {
 var _spaceDown = false;
 
 document.addEventListener('keydown', (e) => {
-  if (isBoardInputBlocked()) {
+  if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.code === 'Space')) {
     if (e.code === 'Space') e.preventDefault();
     return;
   }
@@ -286,7 +286,7 @@ function startObjectDrag(e, obj) {
 }
 
 canvas.addEventListener('mousedown', (e) => {
-  if (isBoardInputBlocked()) {
+  if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.button === 0 && _spaceDown)) {
     e.preventDefault();
     e.stopPropagation();
     return;
