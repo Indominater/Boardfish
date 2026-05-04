@@ -326,6 +326,9 @@ canvas.addEventListener('mousedown', (e) => {
   if (e.target !== canvas && e.target !== boardCanvas) return;
 
   e.preventDefault();
+  BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
+    preserveIds: editingId ? [editingId] : [],
+  });
   const wp = toWorld(e.clientX, e.clientY);
   const obj = hitTest(wp.x, wp.y);
   const additive = e.metaKey || e.ctrlKey;

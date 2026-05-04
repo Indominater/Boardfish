@@ -165,8 +165,8 @@ function exitEdit() {
 
   const obj = objectsMap.get(id);
   if (obj) {
-    if (obj.data.content.trim() === '') {
-      BoardfishEditorState.removeObjectsById([id]);
+    if (isTextContentEmpty(obj.data.content)) {
+      BoardfishEditorState.removeEmptyTextObjects({ ids: [id] });
       delete obj._editStartContent;
       delete obj._editMinLines;
       _editHistoryLastContent = null;

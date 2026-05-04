@@ -11,6 +11,10 @@ function normalizeTextContent(value) {
   return String(value ?? '').replace(/\r\n?/g, '\n');
 }
 
+function isTextContentEmpty(value) {
+  return normalizeTextContent(value).replace(/[\u200B-\u200D\uFEFF]/g, '').trim() === '';
+}
+
 var _measureCanvas = document.createElement('canvas');
 var _measureCtx = _measureCanvas.getContext('2d');
 _measureCtx.font = FONT;

@@ -54,6 +54,27 @@
     return removeObjectsById([...selectedIds]);
   }
 
+  function removeEmptyTextObjects({
+    ids = null,
+    preserveIds = [],
+  } = {}) {
+    const candidateIds = ids ? new Set(ids) : null;
+    const preserved = new Set(preserveIds.filter(Boolean));
+    const idsToRemove = [];
+    for (const obj of objects) {
+      if (!obj || obj.type !== 'text') continue;
+      if (candidateIds && !candidateIds.has(obj.id)) continue;
+      if (preserved.has(obj.id)) continue;
+      if (!isTextContentEmpty(obj.data?.content)) continue;
+      idsToRemove.push(obj.id);
+    }
+    return removeObjectsById(idsToRemove);
+  }
+
+  function deleteEmptyTextObjects(reason = 'delete-empty-text', options = {}) {
+    return commitMutation(reason, () => removeEmptyTextObjects(options) > 0);
+  }
+
   function clearTextLayoutState() {
     _linesCacheMap.clear();
     _prefixCache.clear();
@@ -141,6 +162,8 @@
     clearSelection: clearSelectionState,
     clearTextLayoutState,
     commitMutation,
+    deleteEmptyTextObjects,
+    removeEmptyTextObjects,
     removeObjectsById,
     removeSelectedObjects,
     replaceBoardObjects,
