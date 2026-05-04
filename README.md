@@ -1,6 +1,6 @@
 # Boardfish
 
-Boardfish is a fast, local-first infinite canvas for visual research, moodboards, and image references.
+Boardfish is an infinite canvas for fast, non-destructive ideation. Designed for Windows and macOS, it provides an ultra-lightweight environment for visual research, moodboarding, and snippets.
 
 <img src="src-tauri/icons/image_e4de38.png" alt="Boardfish canvas screenshot" width="900">
 
@@ -16,24 +16,17 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 > xattr -cr /Applications/Boardfish.app
 > ```
 
-## Features
+## Features and Basic Use
 
-- **Local-first:** your boards stay on your machine
-- **Fast infinite canvas:** pan, zoom, select, multi-select, and arrange massive boards of images and text
-- **Flexible input:** add PNG/JPEG images and text from menus, shortcuts, clipboard, file picker, or drag and drop
-- **Image tools:** copy, resize, reorder, flip, rotate, export, and sample colors with the eyedropper
-- **Dark mode:** saved app preference with matching native window styling
-- **Portable projects:** save and reopen local `.bf` files with viewport, image, text, and transform state
-- **Simple extraction:** export selected images, all images, or all text when you need the raw material back
-- **No account required:** no workspaces, subscriptions, sync setup, or team features to get through
-
-## Basic Use
-
-- Right-click the canvas to add text/images, paste, save/open boards, export content, toggle dark mode, or enable the eyedropper
-- Right-click selected objects to copy, cut, duplicate, move to back, transform images, export images, or delete
-- Drag selected objects to move them; drag selection handles to resize them
-- Double-click a text object to edit it
-- Click the zoom pill to return to 100%
+- An infinite canvas free from formatting rules
+- Lag-free navigation across massive boards supporting 1 GB+ of images and text
+- Multi-select, translate, scale, flip, rotate, copy, paste, and duplicate
+- Sample colors using eyedropper with zoomed preview and HEX/RGB values
+- Losslessly add images and text via clipboard, drag and drop, or the file picker
+- Losslessly copy images back to your clipboard
+- Export one image, selected images, or all images in a single click
+- Export all text into a single `.txt` file
+- Save everything locally as a portable `.bf` file
 
 ## Who It's For
 
