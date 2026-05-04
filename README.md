@@ -16,25 +16,16 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 > xattr -cr /Applications/Boardfish.app
 > ```
 
-## Features and Basic Use
+## Features
 
 - An infinite canvas free from formatting rules
 - Lag-free navigation across massive boards supporting 1 GB+ of images and text
 - Multi-select, translate, scale, flip, rotate, copy, paste, and duplicate
-- Sample colors using eyedropper with zoomed preview and HEX/RGB values
+- Sample colors with the eyedropper's zoomed preview and HEX/RGB readout
 - Losslessly add images and text via clipboard, drag and drop, or the file picker
 - Losslessly copy images back to your clipboard
-- Export one image, selected images, or all images in a single click
-- Export all text into a single `.txt` file
+- Export one image, selected images, all images, or all text
 - Save everything locally as a portable `.bf` file
-
-## Who It's For
-
-- Artists and illustrators building reference boards
-- Designers collecting visual inspiration
-- Students organizing screenshots, formulas, and notes
-- Writers, game developers, and worldbuilders gathering research
-- Anyone who wants a quiet local canvas instead of a browser-based whiteboard
 
 ## Keyboard Shortcuts
 
