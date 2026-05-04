@@ -184,3 +184,64 @@ pub(crate) fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
         stats,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{read_board_file, write_board_container};
+    use crate::image_sources::CachedImageSource;
+
+    fn temp_board_path() -> std::path::PathBuf {
+        let name = format!(
+            "boardfish-board-io-test-{}-{}.bf",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        std::env::temp_dir().join(name)
+    }
+
+    #[test]
+    fn board_container_round_trips_embedded_images() {
+        let path = temp_board_path();
+        let board = serde_json::json!({
+            "version": 3,
+            "format": "boardfish-container",
+            "viewport": { "panX": 1.0, "panY": 2.0, "zoom": 1.5 },
+            "imageStore": {
+                "img-1": { "native": true, "path": "images/img-1.png", "mime": "image/png", "ext": "png" }
+            },
+            "objects": [
+                { "id": "obj-1", "type": "image", "x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0, "z": 1.0, "data": { "imgKey": "img-1" } }
+            ]
+        });
+        let source = CachedImageSource {
+            mime: "image/png".to_string(),
+            ext: "png".to_string(),
+            bytes: Arc::from([1_u8, 2, 3, 4]),
+        };
+
+        let write_stats = write_board_container(
+            path.to_str().unwrap(),
+            board,
+            vec![("img-1".to_string(), source)],
+        )
+        .unwrap();
+        assert_eq!(write_stats.image_count, 1);
+        assert_eq!(write_stats.image_bytes, 4);
+
+        let result = read_board_file(path.to_str().unwrap()).unwrap();
+        assert_eq!(result.sources.len(), 1);
+        assert_eq!(result.sources[0].0, "img-1");
+        assert_eq!(&*result.sources[0].1.bytes, &[1, 2, 3, 4]);
+        assert_eq!(
+            result.board["imageStore"]["img-1"]["native"],
+            serde_json::Value::Bool(true)
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+}

@@ -1,16 +1,17 @@
 'use strict';
 
 (function initBoardSchema(root) {
-  const BOARD_FORMAT = 'boardfish-container';
-  const SUPPORTED_VERSIONS = new Set([2, 3]);
-
-  function isObject(value) {
-    return !!value && typeof value === 'object' && !Array.isArray(value);
-  }
-
-  function finiteNumber(value, fallback = 0) {
-    return Number.isFinite(value) ? value : fallback;
-  }
+  const BoardTypes = root.BoardfishBoardTypes ||
+    (typeof require === 'function' ? require('./board_types.js') : null);
+  const {
+    BOARD_FORMAT,
+    OBJECT_TYPES,
+    clampZoom,
+    finiteNumber,
+    isBoardObjectType,
+    isObject,
+    isSupportedBoardVersion,
+  } = BoardTypes;
 
   function normalizeBoardRotation(value) {
     if (typeof root.normalizeRotation === 'function') return root.normalizeRotation(value);
@@ -21,13 +22,13 @@
     return {
       panX: finiteNumber(viewport.panX),
       panY: finiteNumber(viewport.panY),
-      zoom: Math.max(0.1, Math.min(10, finiteNumber(viewport.zoom, 1))),
+      zoom: clampZoom(viewport.zoom),
     };
   }
 
   function normalizeObject(obj, index) {
     if (!isObject(obj)) throw new Error(`object ${index} is not an object`);
-    if (obj.type !== 'text' && obj.type !== 'image') {
+    if (!isBoardObjectType(obj.type)) {
       throw new Error(`object ${index} has unsupported type`);
     }
     if (typeof obj.id !== 'string' || !obj.id) {
@@ -44,7 +45,7 @@
       z: finiteNumber(obj.z),
       data: {},
     };
-    if (obj.type === 'text') {
+    if (obj.type === OBJECT_TYPES.TEXT) {
       normalized.data.content = typeof data.content === 'string' ? data.content : '';
     } else {
       if (typeof data.imgKey !== 'string' || !data.imgKey) {
@@ -69,7 +70,7 @@
 
   function normalizeBoardData(data) {
     if (!isObject(data)) throw new Error('board data must be an object');
-    if (data.version != null && !SUPPORTED_VERSIONS.has(Number(data.version))) {
+    if (data.version != null && !isSupportedBoardVersion(data.version)) {
       throw new Error(`unsupported board version ${data.version}`);
     }
     if (data.format != null && data.format !== BOARD_FORMAT) {
@@ -81,7 +82,7 @@
       ? data.objects.map((obj, index) => normalizeObject(obj, index))
       : [];
     for (const obj of objects) {
-      if (obj.type === 'image' && !Object.prototype.hasOwnProperty.call(imageStore, obj.data.imgKey)) {
+      if (obj.type === OBJECT_TYPES.IMAGE && !Object.prototype.hasOwnProperty.call(imageStore, obj.data.imgKey)) {
         throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);
       }
     }
@@ -102,6 +103,7 @@
 
   const api = {
     BOARD_FORMAT,
+    OBJECT_TYPES,
     normalizeBoardData,
     validateBoardData,
   };

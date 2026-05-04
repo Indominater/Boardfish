@@ -1,4 +1,23 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BoardContract {
+    format: String,
+    versions: BoardContractVersions,
+}
+
+#[derive(serde::Deserialize)]
+struct BoardContractVersions {
+    legacy: u64,
+    container: u64,
+}
+
+static BOARD_CONTRACT: LazyLock<BoardContract> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../src/shared/board_contract.json"))
+        .expect("shared board contract must be valid JSON")
+});
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,12 +80,13 @@ pub(crate) fn validate_board_value(value: &serde_json::Value) -> Result<(), Stri
     let document: BoardDocument =
         serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
     if let Some(version) = document.version {
-        if version != 2 && version != 3 {
+        if version != BOARD_CONTRACT.versions.legacy && version != BOARD_CONTRACT.versions.container
+        {
             return Err(format!("unsupported board version {version}"));
         }
     }
     if let Some(format) = &document.format {
-        if format != "boardfish-container" {
+        if format != &BOARD_CONTRACT.format {
             return Err(format!("unsupported board format {format}"));
         }
     }
@@ -146,6 +166,22 @@ fn validate_common(id: &str, x: f64, y: f64, w: f64, h: f64, z: f64) -> Result<(
 mod tests {
     use super::validate_board_value;
 
+    fn shared_contract() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../src/shared/board_contract.json")).unwrap()
+    }
+
+    #[test]
+    fn matches_shared_board_contract() {
+        let contract = shared_contract();
+        assert_eq!(contract["format"], "boardfish-container");
+        assert_eq!(contract["versions"]["legacy"], 2);
+        assert_eq!(contract["versions"]["container"], 3);
+        assert_eq!(contract["objectTypes"][0], "image");
+        assert_eq!(contract["objectTypes"][1], "text");
+        assert_eq!(contract["viewport"]["minZoom"], 0.1);
+        assert_eq!(contract["viewport"]["maxZoom"], 10);
+    }
+
     #[test]
     fn accepts_valid_board() {
         let value: serde_json::Value =
@@ -168,5 +204,43 @@ mod tests {
         assert!(validate_board_value(&value)
             .unwrap_err()
             .contains("references missing image"));
+    }
+
+    #[test]
+    fn rejects_unsupported_version_and_format() {
+        let version = serde_json::json!({
+            "version": 99,
+            "imageStore": {},
+            "objects": []
+        });
+        assert!(validate_board_value(&version)
+            .unwrap_err()
+            .contains("unsupported board version"));
+
+        let format = serde_json::json!({
+            "version": 3,
+            "format": "other",
+            "imageStore": {},
+            "objects": []
+        });
+        assert!(validate_board_value(&format)
+            .unwrap_err()
+            .contains("unsupported board format"));
+    }
+
+    #[test]
+    fn rejects_invalid_object_dimensions() {
+        let value = serde_json::json!({
+            "version": 3,
+            "format": "boardfish-container",
+            "imageStore": {},
+            "objects": [
+                { "id": "obj-1", "type": "text", "x": 0.0, "y": 0.0, "w": 0.0, "h": 10.0, "z": 1.0, "data": { "content": "" } }
+            ]
+        });
+
+        assert!(validate_board_value(&value)
+            .unwrap_err()
+            .contains("invalid dimensions"));
     }
 }

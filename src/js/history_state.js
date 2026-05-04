@@ -106,26 +106,15 @@ function restoreSnapshot(s) {
   }
   HistoryDebug.step(dbg, 'clear-editing', { hadEditing });
   const prevSelectedIds = new Set(selectedIds);
-  objects = cloneObjects(snapshotObjects);
+  BoardfishEditorState.replaceBoardObjects(cloneObjects(snapshotObjects));
   HistoryDebug.step(dbg, 'clone-snapshot', { objectCount: objects.length });
-  for (const obj of objects) {
-    if (obj?.type === 'text') obj.data.content = normalizeTextContent(obj.data?.content);
-  }
   HistoryDebug.step(dbg, 'normalize-text', { objectCount: objects.length });
   _dirtyIds.clear();
-  _linesCacheMap.clear();
-  _prefixCache.clear();
-  rebuildObjectsMap();
   HistoryDebug.step(dbg, 'rebuild-caches', { objectCount: objectsMap.size });
-  syncAllTextAutoHeights();
   HistoryDebug.step(dbg, 'sync-text-heights');
   invalidateOffscreen();
   // Preserve selection for objects that still exist in the restored state
-  selectedId = null;
-  selectedIds.clear();
-  for (const id of prevSelectedIds) {
-    if (objectsMap.has(id)) { selectedIds.add(id); selectedId = id; }
-  }
+  BoardfishEditorState.setSelection([...prevSelectedIds], { exitEditing: false });
   renderAll();
   HistoryDebug.step(dbg, 'renderAll', { selectedCount: selectedIds.size });
 
@@ -143,9 +132,7 @@ function restoreSnapshot(s) {
     return;
   }
 
-  selectedId = obj.id;
-  selectedIds.clear();
-  selectedIds.add(obj.id);
+  BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
   enterEdit(obj.id);
 
   if (!_editEl) return;

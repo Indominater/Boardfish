@@ -19,7 +19,7 @@ function updateTitle() {
   if (!hasTauri()) return;
   const title = '';
   document.title = title;
-  tauriInvoke('set_title', { title });
+  BoardfishTauri.setTitle(title);
 }
 
 
@@ -50,167 +50,72 @@ function showUnsavedDialog() {
 
 // ─── Save / Open ─────────────────────────────────────────────────────────────
 
-function boardData() {
-  return { version: 2, viewport: { panX, panY, zoom }, imageStore, objects };
-}
-
-function getImageMetaForBoardFile(imgKey, src = '') {
-  if (isNativeImageRef(src)) return { path: src.path, mime: src.mime, ext: src.ext };
-  const comma = typeof src === 'string' ? src.indexOf(',') : -1;
-  const header = comma > 0 ? src.slice(0, comma) : '';
-  const ext = guessImageExtFromDataUrl(src);
-  const mime = header.startsWith('data:image/jpeg') ? 'image/jpeg' : 'image/png';
-  return { path: `images/${imgKey}.${ext}`, mime, ext };
-}
-
-function boardDataForSave() {
-  const imageManifest = {};
-  for (const [key, src] of Object.entries(imageStore)) {
-    imageManifest[key] = getImageMetaForBoardFile(key, src);
-  }
-  const data = {
-    version: 3,
-    format: 'boardfish-container',
-    viewport: { panX, panY, zoom },
-    imageStore: imageManifest,
-    objects,
-  };
-  BoardSchema.validateBoardData(data);
-  return data;
-}
-
-function summarizeImageStore(store = {}, { includeRuntime = false } = {}) {
-  let imageCount = 0;
-  let imageStoreBytes = 0;
-  let largestImageKey = '';
-  let largestImageBytes = 0;
-  let nativeRefs = 0;
-  let manifestRefs = 0;
-  let dataUrlRefs = 0;
-  let otherRefs = 0;
-  let cachedImages = 0;
-  let assetUrls = 0;
-  let bitmaps = 0;
-  let bitmapFailures = 0;
-  for (const [key, src] of Object.entries(store || {})) {
-    imageCount++;
-    const bytes = imageStoreBytesEstimate(src);
-    imageStoreBytes += bytes;
-    const kind = imageRefKind(src);
-    if (kind === 'native') nativeRefs++;
-    else if (kind === 'manifest') manifestRefs++;
-    else if (kind === 'data-url' || kind === 'string') dataUrlRefs++;
-    else otherRefs++;
-    if (includeRuntime) {
-      if (imageCache[key]) cachedImages++;
-      if (imageAssetUrlCache[key]) assetUrls++;
-      if (imageBitmapCache[key]) bitmaps++;
-      if (imageBitmapFailed.has(key)) bitmapFailures++;
-    }
-    if (bytes > largestImageBytes) {
-      largestImageBytes = bytes;
-      largestImageKey = key;
-    }
-  }
+function boardDocumentDeps() {
   return {
-    imageCount,
-    imageStoreBytes,
-    largestImageKey,
-    largestImageBytes,
-    nativeRefs,
-    manifestRefs,
-    dataUrlRefs,
-    otherRefs,
-    ...(includeRuntime ? { cachedImages, assetUrls, bitmaps, bitmapFailures } : {}),
-  };
-}
-
-function getObjectTypeCounts(objectsList = []) {
-  let imageObjectCount = 0;
-  let textObjectCount = 0;
-  for (const obj of objectsList) {
-    if (obj?.type === 'image') imageObjectCount++;
-    else if (obj?.type === 'text') textObjectCount++;
-  }
-  return { imageObjectCount, textObjectCount };
-}
-
-function getBoardSaveMetrics(data) {
-  const imageSummary = summarizeImageStore(data.imageStore || {});
-  const objectCounts = getObjectTypeCounts(data.objects || []);
-  return {
-    objectCount: data.objects?.length || 0,
-    imageCount: imageSummary.imageCount,
-    ...objectCounts,
-    imageStoreBytes: imageSummary.imageStoreBytes,
-    rawImageStoreBytes: Object.values(imageStore).reduce((sum, src) => sum + imageStoreBytesEstimate(src), 0),
-    largestImageKey: imageSummary.largestImageKey,
-    largestImageBytes: imageSummary.largestImageBytes,
+    schema: BoardSchema,
+    isNativeImageRef,
+    guessImageExtFromDataUrl: BoardfishExportUtils.guessImageExtFromDataUrl,
+    imageStoreBytesEstimate,
+    imageRefKind,
+    rawImageStore: imageStore,
     historyLength: boardHistory.length,
     historyIndex,
     dirty: isDirty(),
+    runtime: {
+      imageCache,
+      imageAssetUrlCache,
+      imageBitmapCache,
+      imageBitmapFailed,
+    },
   };
+}
+
+function boardData() {
+  return BoardfishBoardDocument.createLegacyBoardData({
+    viewport: { panX, panY, zoom },
+    imageStore,
+    objects,
+  });
+}
+
+function getImageMetaForBoardFile(imgKey, src = '') {
+  return BoardfishBoardDocument.imageMetaForBoardFile(imgKey, src, boardDocumentDeps());
+}
+
+function boardDataForSave() {
+  return BoardfishBoardDocument.createBoardDataForSave({
+    viewport: { panX, panY, zoom },
+    imageStore,
+    objects,
+  }, boardDocumentDeps());
+}
+
+function summarizeImageStore(store = {}, { includeRuntime = false } = {}) {
+  return BoardfishBoardDocument.summarizeImageStore(store, boardDocumentDeps(), { includeRuntime });
+}
+
+function getObjectTypeCounts(objectsList = []) {
+  return BoardfishBoardDocument.getObjectTypeCounts(objectsList);
+}
+
+function getBoardSaveMetrics(data) {
+  return BoardfishBoardDocument.getBoardSaveMetrics(data, boardDocumentDeps());
 }
 
 function getBoardOpenMetrics(data) {
-  const imageSummary = summarizeImageStore(data?.imageStore || {});
-  const objectCounts = getObjectTypeCounts(data?.objects || []);
-  return {
-    objectCount: data?.objects?.length || 0,
-    imageCount: imageSummary.imageCount,
-    ...objectCounts,
-    imageStoreBytes: imageSummary.imageStoreBytes,
-    largestImageKey: imageSummary.largestImageKey,
-    largestImageBytes: imageSummary.largestImageBytes,
-    nativeRefs: imageSummary.nativeRefs,
-    manifestRefs: imageSummary.manifestRefs,
-    dataUrlRefs: imageSummary.dataUrlRefs,
-    otherRefs: imageSummary.otherRefs,
-  };
+  return BoardfishBoardDocument.getBoardOpenMetrics(data, boardDocumentDeps());
 }
 
 function imageRefKind(src) {
-  if (isNativeImageRef(src)) return 'native';
-  if (typeof src === 'string') return src.startsWith('data:') ? 'data-url' : 'string';
-  if (src && typeof src === 'object' && (src.path || src.mime || src.ext)) return 'manifest';
-  if (src == null) return 'missing';
-  return typeof src;
+  return BoardfishBoardDocument.defaultImageRefKind(src, isNativeImageRef);
 }
 
 function getImageStoreOpenDebugSample(limit = 12) {
-  const rows = [];
-  for (const [key, src] of Object.entries(imageStore)) {
-    rows.push({
-      key,
-      kind: imageRefKind(src),
-      native: !!src?.native,
-      path: typeof src?.path === 'string' ? src.path : '',
-      mime: typeof src?.mime === 'string' ? src.mime : '',
-      ext: typeof src?.ext === 'string' ? src.ext : '',
-      bytes: src?.bytes ?? '',
-      cachedImage: !!imageCache[key],
-      assetUrl: !!imageAssetUrlCache[key],
-      bitmap: !!imageBitmapCache[key],
-      bitmapFailed: imageBitmapFailed.has(key),
-    });
-    if (rows.length >= limit) break;
-  }
-  return rows;
+  return BoardfishBoardDocument.getImageStoreDebugSample(imageStore, boardDocumentDeps(), limit);
 }
 
 function getOpenImageRuntimeMetrics() {
-  const imageSummary = summarizeImageStore(imageStore, { includeRuntime: true });
-  return {
-    imageCount: imageSummary.imageCount,
-    nativeRefs: imageSummary.nativeRefs,
-    manifestRefs: imageSummary.manifestRefs,
-    dataUrlRefs: imageSummary.dataUrlRefs,
-    otherRefs: imageSummary.otherRefs,
-    cachedImages: imageSummary.cachedImages,
-    assetUrls: imageSummary.assetUrls,
-    bitmaps: imageSummary.bitmaps,
-    bitmapFailures: imageSummary.bitmapFailures,
-  };
+  return BoardfishBoardDocument.getImageRuntimeMetrics(imageStore, boardDocumentDeps());
 }
 
 function measureBoardJsonForSaveDebug(dbg, data) {
@@ -257,14 +162,14 @@ async function invokeSaveBoard(path, dbg) {
     }
   }
   const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
-  const result = await SaveDebug.invoke(dbg, 'save_board', { path, board: data }, { path, ...getBoardSaveMetrics(data) });
+  const result = await SaveDebug.wrap(dbg, TAURI_COMMANDS.SAVE_BOARD, () => BoardfishTauri.saveBoard(path, data), { path, ...getBoardSaveMetrics(data) });
   if (frameProbe) frameProbe();
   return result;
 }
 
 async function invokeReadBoard(path, dbg) {
   const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
-  const result = await OpenDebug.invoke(dbg, 'read_board', { path }, { path });
+  const result = await OpenDebug.wrap(dbg, TAURI_COMMANDS.READ_BOARD, () => BoardfishTauri.readBoard(path), { path });
   if (frameProbe) frameProbe();
   const board = result?.board || result;
   if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...getBoardOpenMetrics(board) });
@@ -298,9 +203,10 @@ function getVisibleImageKeys(limit = Infinity) {
     if (obj.type !== 'image') { skipped.nonImage++; continue; }
     if (!objectIntersectsRect(obj, b)) { skipped.outside++; continue; }
     const key = obj.data.imgKey;
-    if (!key || !imageStore[key]) { skipped.missingKey++; continue; }
-    if (!isNativeImageRef(imageStore[key])) { skipped.nonNative++; continue; }
-    if (imageCache[key]) { skipped.cached++; continue; }
+    const source = BoardfishImageStore.getSource(key);
+    if (!key || !source) { skipped.missingKey++; continue; }
+    if (!isNativeImageRef(source)) { skipped.nonNative++; continue; }
+    if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
     keys.push(key);
     if (keys.length >= limit) break;
   }
@@ -312,10 +218,10 @@ getVisibleImageKeys.lastDebug = null;
 function getPendingNativeImageKeys(limit = Infinity, exclude = new Set()) {
   const keys = [];
   const skipped = { excluded: 0, nonNative: 0, cached: 0 };
-  for (const key of Object.keys(imageStore)) {
+  for (const key of BoardfishImageStore.sourceKeys()) {
     if (exclude.has(key)) { skipped.excluded++; continue; }
-    if (!isNativeImageRef(imageStore[key])) { skipped.nonNative++; continue; }
-    if (imageCache[key]) { skipped.cached++; continue; }
+    if (!isNativeImageRef(BoardfishImageStore.getSource(key))) { skipped.nonNative++; continue; }
+    if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
     keys.push(key);
     if (keys.length >= limit) break;
   }
@@ -325,13 +231,13 @@ function getPendingNativeImageKeys(limit = Infinity, exclude = new Set()) {
 getPendingNativeImageKeys.lastDebug = null;
 
 async function hydrateImageForDisplay(key, dbg = null) {
-  if (imageCache[key] || !isNativeImageRef(imageStore[key])) return false;
+  if (BoardfishImageStore.hasDisplayImage(key) || !isNativeImageRef(BoardfishImageStore.getSource(key))) return false;
   const t0 = performance.now();
   const fetchStart = performance.now();
   const display = await ensureImageDisplaySrc(key, dbg);
   const fetchMs = performance.now() - fetchStart;
   if (!display.src) {
-    OpenDebug.step(dbg, 'hydrate-image:skip', { imgKey: key, reason: 'no-display-src', storeKind: imageRefKind(imageStore[key]) });
+    OpenDebug.step(dbg, 'hydrate-image:skip', { imgKey: key, reason: 'no-display-src', storeKind: imageRefKind(BoardfishImageStore.getSource(key)) });
     return false;
   }
   const loadStart = performance.now();
@@ -343,7 +249,7 @@ async function hydrateImageForDisplay(key, dbg = null) {
     throw err;
   }
   const loadMs = performance.now() - loadStart;
-  imageCache[key] = img;
+  BoardfishImageStore.setDisplayImage(key, img);
   let bitmapMs = 0;
   let bitmapReady = false;
   try {
@@ -437,7 +343,7 @@ function queueVisibleImageHydration(limit = 3, dbg = null) {
 }
 var _visibleHydrationTimer = null;
 function scheduleVisibleHydrationAfterIdle() {
-  if (!hasTauri() || _boardOpening) return;
+  if (!hasTauri() || _boardOpening || (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled)) return;
   clearTimeout(_visibleHydrationTimer);
   _visibleHydrationTimer = setTimeout(() => {
     queueVisibleImageHydration(1);
@@ -504,13 +410,14 @@ function applyBoardData(data, options = {}) {
   OpenDebug.step(dbg, 'clearImageStore', { ms: performance.now() - t0 });
 
   const imageStart = performance.now();
-  Object.assign(imageStore, data.imageStore || {});
+  BoardfishImageStore.setSources(data.imageStore || {});
   _skipImageSourceRegistration = sourcesCached;
   try {
-    for (const k of Object.keys(imageStore)) {
+    for (const k of BoardfishImageStore.sourceKeys()) {
+      const source = BoardfishImageStore.getSource(k);
       const n = parseInt(k.split('-')[1]);
       if (!isNaN(n) && n >= imgKeyCounter) imgKeyCounter = n + 1;
-      if (!sourcesCached || !isNativeImageRef(imageStore[k])) cacheImage(k, imageStore[k]);
+      if (!sourcesCached || !isNativeImageRef(source)) cacheImage(k, source);
     }
   } finally {
     _skipImageSourceRegistration = false;
@@ -520,30 +427,16 @@ function applyBoardData(data, options = {}) {
 
   const stateStart = performance.now();
   if (editingId) exitEdit();
-  selectedId = null;
-  selectedIds.clear();
-  objects = data.objects || [];
-  const normalizeStart = performance.now();
-  for (const obj of objects) {
-    if (obj?.type === 'text') obj.data.content = normalizeTextContent(obj.data?.content);
-  }
-  OpenDebug.step(dbg, 'normalize-text', { ms: performance.now() - normalizeStart });
-  const mapStart = performance.now();
-  rebuildObjectsMap();
-  OpenDebug.step(dbg, 'rebuildObjectsMap', { ms: performance.now() - mapStart, objectCount: objects.length });
-  const heightStart = performance.now();
-  syncAllTextAutoHeights();
-  OpenDebug.step(dbg, 'syncTextAutoHeights', { ms: performance.now() - heightStart });
+  BoardfishEditorState.clearSelection();
+  const replaceStart = performance.now();
+  BoardfishEditorState.replaceBoardObjects(data.objects || [], { restoreCounters: false });
+  OpenDebug.step(dbg, 'replaceBoardObjects', { ms: performance.now() - replaceStart, objectCount: objects.length });
   invalidateOffscreen();
   OpenDebug.step(dbg, 'apply-state', { ms: performance.now() - stateStart, objectCount: objects.length });
 
   const countersStart = performance.now();
-  for (const obj of objects) {
-    const n = parseInt(obj.id.split('-')[1]);
-    if (!isNaN(n) && n >= idCounter) idCounter = n + 1;
-    if (obj.z >= zCounter) zCounter = obj.z + 1;
-  }
-  if (data.viewport) { panX = data.viewport.panX; panY = data.viewport.panY; zoom = data.viewport.zoom; }
+  BoardfishEditorState.restoreObjectCountersFromObjects(objects);
+  BoardfishEditorState.setViewport(data.viewport);
   if (!deferRender) applyNativeAppTheme();
   OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });
 
@@ -569,7 +462,7 @@ async function saveBoardAs() {
     const defaultName = currentFilePath
       ? currentFilePath.split(/[\\/]/).pop()
       : 'board.bf';
-    const filePath = await SaveDebug.invoke(dbg, 'save_file_dialog', { defaultName }, { defaultName });
+    const filePath = await SaveDebug.wrap(dbg, TAURI_COMMANDS.SAVE_FILE_DIALOG, () => BoardfishTauri.saveFileDialog(defaultName), { defaultName });
     if (!filePath) { SaveDebug.end(dbg, { cancelled: true }); releaseInputShield(); return false; }
     await runShieldedPillTask({
       releaseInputShield,
@@ -630,7 +523,7 @@ async function openBoard() {
   if (!(await confirmDirtyBeforeOpen(dbg))) return;
 
   try {
-    const filePath = await OpenDebug.invoke(dbg, 'open_file_dialog');
+    const filePath = await OpenDebug.wrap(dbg, TAURI_COMMANDS.OPEN_FILE_DIALOG, () => BoardfishTauri.openFileDialog());
     if (!filePath) { OpenDebug.end(dbg, { cancelled: true }); return; }
     await openBoardFromPath(filePath, dbg, 'Open failed:');
   } catch (err) {
@@ -644,7 +537,7 @@ var _closeGuardRunning = false;
 async function requestAppClose(event = null) {
   if (!hasTauri()) return;
   const seq = Number(event?.payload || 0);
-  if (seq) tauriInvoke('acknowledge_close_request', { seq }).catch(() => {});
+  if (seq) BoardfishTauri.acknowledgeCloseRequest(seq).catch(() => {});
   if (_closeGuardRunning) return;
   _closeGuardRunning = true;
   try {
@@ -652,13 +545,13 @@ async function requestAppClose(event = null) {
     if (isDirty()) {
       const choice = await showUnsavedDialog();
       if (choice === 'cancel') {
-        tauriInvoke('cancel_pending_termination').catch(() => {});
+        BoardfishTauri.cancelPendingTermination().catch(() => {});
         return;
       }
       if (choice === 'save') {
         const saved = await saveBoard();
         if (!saved) {
-          tauriInvoke('cancel_pending_termination').catch(() => {});
+          BoardfishTauri.cancelPendingTermination().catch(() => {});
           return;
         }
       }
@@ -666,15 +559,15 @@ async function requestAppClose(event = null) {
     clearJsClipboard();
     // Use process.exit instead of appWindow.close() to avoid re-triggering
     // the CloseRequested event in Rust (which would cause an infinite loop)
-    await tauriInvoke('exit_app');
+    await BoardfishTauri.exitApp();
   } finally {
     _closeGuardRunning = false;
   }
 }
 
 if (hasTauri()) {
-  window.__TAURI__.event.listen('boardfish://close-requested', requestAppClose);
-  window.__TAURI__.event.listen('boardfish://app-resumed', () => {
+  tauriListen('boardfish://close-requested', requestAppClose);
+  tauriListen('boardfish://app-resumed', () => {
     recoverWindowPaint('app-resumed');
     setTimeout(() => recoverBlankUi('app-resumed-followup'), 250);
   });

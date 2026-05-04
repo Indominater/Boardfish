@@ -148,8 +148,7 @@ function updateSelectionOverlay() {
   if (!firstSelectedObj) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
-    selectedId = null;
-    selectedIds.clear();
+    BoardfishEditorState.clearSelection();
     return;
   }
 
@@ -157,8 +156,7 @@ function updateSelectionOverlay() {
   if (!bounds) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
-    selectedId = null;
-    selectedIds.clear();
+    BoardfishEditorState.clearSelection();
     return;
   }
 
@@ -322,9 +320,7 @@ function updateSelectionOverlay() {
 
 function selectObject(id) {
   if (editingId && editingId !== id) exitEdit();
-  selectedIds.clear();
-  selectedIds.add(id);
-  selectedId = id;
+  BoardfishEditorState.setSelection([id], { primaryId: id, exitEditing: false });
   const obj = objectsMap.get(id);
   if (obj) {
     bringObjectToFront(id);
@@ -336,16 +332,16 @@ function selectObject(id) {
 
 function deselectAll() {
   if (editingId) exitEdit();
-  selectedId = null;
-  selectedIds.clear();
+  BoardfishEditorState.clearSelection();
   scheduleRender(false, true);
 }
 
 function selectAllObjects() {
   if (editingId || !objects.length) return;
-  selectedIds.clear();
-  for (const obj of objects) selectedIds.add(obj.id);
-  selectedId = objects[objects.length - 1].id;
+  BoardfishEditorState.setSelection(objects.map((obj) => obj.id), {
+    primaryId: objects[objects.length - 1].id,
+    exitEditing: false,
+  });
   scheduleRender(false, true);
 }
 

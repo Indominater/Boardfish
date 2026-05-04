@@ -61,61 +61,61 @@ function bringObjectToFront(id) {
 
 function sendSelectedToBack() {
   if (!selectedIds.size) return;
-  // Pull out selected objects (preserving their relative order), prepend to front
-  const selected = [], rest = [];
-  for (const o of objects) (selectedIds.has(o.id) ? selected : rest).push(o);
-  objects.length = 0;
-  objects.push(...selected, ...rest);
-  scheduleRender(true, true);
-  pushHistory('send-selected-to-back');
+  BoardfishEditorState.commitMutation('send-selected-to-back', () => {
+    // Pull out selected objects (preserving their relative order), prepend to front
+    const selected = [], rest = [];
+    for (const o of objects) (selectedIds.has(o.id) ? selected : rest).push(o);
+    objects.length = 0;
+    objects.push(...selected, ...rest);
+    return true;
+  });
 }
 
 function flipSelectedImages(axis) {
   const dbg = ClipDebug.start('flipSelectedImages', { axis, selectedCount: selectedIds.size });
-  let flipped = false;
   let imageCount = 0;
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (!obj || obj.type !== 'image') continue;
-    imageCount++;
-    if (axis === 'x') obj.data.flipX = !obj.data.flipX;
-    else obj.data.flipY = !obj.data.flipY;
-    markDirty(obj.id);
-    flipped = true;
-  }
+  const flipped = BoardfishEditorState.commitMutation(`flip-image-${axis}`, () => {
+    let didFlip = false;
+    for (const id of selectedIds) {
+      const obj = objectsMap.get(id);
+      if (!obj || obj.type !== 'image') continue;
+      imageCount++;
+      if (axis === 'x') obj.data.flipX = !obj.data.flipX;
+      else obj.data.flipY = !obj.data.flipY;
+      markDirty(obj.id);
+      didFlip = true;
+    }
+    return didFlip;
+  }, { invalidate: true });
   ClipDebug.step(dbg, 'toggle-flags', { imageCount, flipped });
   if (!flipped) { ClipDebug.end(dbg, { skipped: true }); return; }
-  invalidateOffscreen();
-  scheduleRender(true, true);
-  pushHistory(`flip-image-${axis}`);
   ClipDebug.end(dbg, { historyIndex });
 }
 
 function rotateSelectedImages(dir) {
-  let rotated = false;
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (!obj || obj.type !== 'image') continue;
-    const transform = imageTransformFromObject(obj);
-    const current = transform.rotation;
-    const oddFlip = transform.flipX !== transform.flipY;
-    const delta = (dir === 'cw') !== oddFlip ? 90 : 270;
-    obj.data.rotation = (current + delta) % 360;
-    const cx = obj.x + obj.w / 2;
-    const cy = obj.y + obj.h / 2;
-    const nextW = obj.h;
-    const nextH = obj.w;
-    obj.w = nextW;
-    obj.h = nextH;
-    obj.x = cx - nextW / 2;
-    obj.y = cy - nextH / 2;
-    markDirty(obj.id);
-    rotated = true;
-  }
-  if (!rotated) return;
-  invalidateOffscreen();
-  scheduleRender(true, true);
-  pushHistory(`rotate-image-${dir}`);
+  BoardfishEditorState.commitMutation(`rotate-image-${dir}`, () => {
+    let rotated = false;
+    for (const id of selectedIds) {
+      const obj = objectsMap.get(id);
+      if (!obj || obj.type !== 'image') continue;
+      const transform = imageTransformFromObject(obj);
+      const current = transform.rotation;
+      const oddFlip = transform.flipX !== transform.flipY;
+      const delta = (dir === 'cw') !== oddFlip ? 90 : 270;
+      obj.data.rotation = (current + delta) % 360;
+      const cx = obj.x + obj.w / 2;
+      const cy = obj.y + obj.h / 2;
+      const nextW = obj.h;
+      const nextH = obj.w;
+      obj.w = nextW;
+      obj.h = nextH;
+      obj.x = cx - nextW / 2;
+      obj.y = cy - nextH / 2;
+      markDirty(obj.id);
+      rotated = true;
+    }
+    return rotated;
+  }, { invalidate: true });
 }
 
 function isMultiSelected() {

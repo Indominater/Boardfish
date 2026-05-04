@@ -1,14 +1,13 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
+use crate::image_data_url::cached_source_from_data_url;
+use crate::image_source_files::{
+    cleanup_materialized_paths, image_source_batch_dir, image_source_file_path,
+};
+use crate::image_transform::transform_dynamic_image;
 use crate::{elapsed_ms, save_debug};
-
-static IMAGE_ASSET_BATCH_COUNTER: AtomicU64 = AtomicU64::new(1);
-static IMAGE_ASSET_SESSION_MILLIS: OnceLock<u128> = OnceLock::new();
-const STALE_IMAGE_CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone)]
 pub(crate) struct CachedImageSource {
@@ -21,6 +20,9 @@ struct CachedImageSourceEntry {
     source: CachedImageSource,
     materialized_paths: Vec<PathBuf>,
 }
+
+type CachedImageSources = Vec<(String, CachedImageSource)>;
+type CachedImageSourcesWithMissing = (CachedImageSources, Vec<String>);
 
 #[derive(Default)]
 pub(crate) struct ImageSourceCache(Mutex<HashMap<String, CachedImageSourceEntry>>);
@@ -35,10 +37,7 @@ impl ImageSourceCache {
             .ok_or_else(|| format!("image source cache missing for {key}"))
     }
 
-    pub(crate) fn get_many(
-        &self,
-        keys: &[String],
-    ) -> Result<Vec<(String, CachedImageSource)>, String> {
+    pub(crate) fn get_many(&self, keys: &[String]) -> Result<CachedImageSources, String> {
         let cache = self.0.lock().map_err(|e| e.to_string())?;
         let mut sources = Vec::with_capacity(keys.len());
         for key in keys {
@@ -54,7 +53,7 @@ impl ImageSourceCache {
     fn get_many_with_missing(
         &self,
         keys: &[String],
-    ) -> Result<(Vec<(String, CachedImageSource)>, Vec<String>), String> {
+    ) -> Result<CachedImageSourcesWithMissing, String> {
         let cache = self.0.lock().map_err(|e| e.to_string())?;
         let mut sources = Vec::with_capacity(keys.len());
         let mut missing = Vec::new();
@@ -233,27 +232,6 @@ fn image_mime_ext_from_path(path: &str) -> (&'static str, &'static str) {
     }
 }
 
-pub(crate) fn transform_dynamic_image(
-    mut img: image::DynamicImage,
-    flip_x: bool,
-    flip_y: bool,
-    rotation: u32,
-) -> image::DynamicImage {
-    img = match rotation % 360 {
-        90 => img.rotate90(),
-        180 => img.rotate180(),
-        270 => img.rotate270(),
-        _ => img,
-    };
-    if flip_x {
-        img = img.fliph();
-    }
-    if flip_y {
-        img = img.flipv();
-    }
-    img
-}
-
 #[tauri::command]
 pub(crate) async fn register_image_file_source(
     state: tauri::State<'_, ImageSourceCache>,
@@ -309,161 +287,6 @@ pub(crate) fn get_cached_image_data_url(
     ))
 }
 
-fn sanitize_image_cache_key(key: &str) -> String {
-    key.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-fn image_source_cache_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join("boardfish-image-cache")
-}
-
-fn current_time_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
-}
-
-fn image_source_session_dir() -> PathBuf {
-    let millis = *IMAGE_ASSET_SESSION_MILLIS.get_or_init(current_time_millis);
-    image_source_cache_dir().join(format!("{}-{millis}", std::process::id()))
-}
-
-fn image_source_batch_dir() -> std::path::PathBuf {
-    let batch = IMAGE_ASSET_BATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let millis = current_time_millis();
-    image_source_session_dir().join(format!("batch-{millis}-{batch}"))
-}
-
-fn image_source_file_path(
-    dir: &std::path::Path,
-    key: &str,
-    source: &CachedImageSource,
-) -> std::path::PathBuf {
-    let key = sanitize_image_cache_key(key);
-    let ext = sanitize_image_cache_key(&source.ext);
-    dir.join(format!("{key}.{ext}"))
-}
-
-fn remove_empty_cache_dirs_from(dir: &Path, root: &Path) {
-    let mut current = dir.to_path_buf();
-    while current.starts_with(root) && current != root {
-        match std::fs::remove_dir(&current) {
-            Ok(_) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => break,
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-}
-
-fn cleanup_materialized_paths(mut paths: Vec<PathBuf>) {
-    if paths.is_empty() {
-        return;
-    }
-
-    let root = image_source_cache_dir();
-    paths.sort();
-    paths.dedup();
-    for path in paths {
-        if !path.starts_with(&root) {
-            continue;
-        }
-        match std::fs::remove_file(&path) {
-            Ok(_) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => eprintln!(
-                "[boardfish image cache] remove materialized file failed: {}: {err}",
-                path.display()
-            ),
-        }
-        if let Some(parent) = path.parent() {
-            remove_empty_cache_dirs_from(parent, &root);
-        }
-    }
-}
-
-fn metadata_age(metadata: &std::fs::Metadata, now: SystemTime) -> Option<Duration> {
-    metadata
-        .modified()
-        .ok()
-        .or_else(|| metadata.created().ok())
-        .and_then(|time| now.duration_since(time).ok())
-}
-
-fn cleanup_stale_image_source_cache_inner(
-    root: &Path,
-    current_session: &Path,
-) -> Result<(usize, usize), String> {
-    if !root.exists() {
-        return Ok((0, 0));
-    }
-
-    let now = SystemTime::now();
-    let mut removed = 0usize;
-    let mut errors = 0usize;
-    for entry_result in std::fs::read_dir(root).map_err(|e| e.to_string())? {
-        let entry = match entry_result {
-            Ok(entry) => entry,
-            Err(_) => {
-                errors += 1;
-                continue;
-            }
-        };
-        let path = entry.path();
-        if path == current_session {
-            continue;
-        }
-        let metadata = match std::fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                errors += 1;
-                continue;
-            }
-        };
-        let Some(age) = metadata_age(&metadata, now) else {
-            continue;
-        };
-        if age < STALE_IMAGE_CACHE_MAX_AGE {
-            continue;
-        }
-        let result = if metadata.is_dir() {
-            std::fs::remove_dir_all(&path)
-        } else {
-            std::fs::remove_file(&path)
-        };
-        match result {
-            Ok(_) => removed += 1,
-            Err(_) => errors += 1,
-        }
-    }
-    Ok((removed, errors))
-}
-
-pub(crate) fn cleanup_stale_image_source_cache() {
-    let root = image_source_cache_dir();
-    let current_session = image_source_session_dir();
-    std::thread::spawn(move || {
-        match cleanup_stale_image_source_cache_inner(&root, &current_session) {
-            Ok((removed, errors)) if removed > 0 || errors > 0 => eprintln!(
-                "[boardfish image cache] stale cleanup removed {removed} entries with {errors} errors"
-            ),
-            Ok(_) => {}
-            Err(err) => eprintln!("[boardfish image cache] stale cleanup failed: {err}"),
-        }
-    });
-}
-
 #[tauri::command]
 pub(crate) async fn materialize_cached_image_sources(
     state: tauri::State<'_, ImageSourceCache>,
@@ -476,7 +299,7 @@ pub(crate) async fn materialize_cached_image_sources(
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let mut result = Vec::with_capacity(sources.len());
         for (key, source) in sources {
-            let path = image_source_file_path(&dir, &key, &source);
+            let path = image_source_file_path(&dir, &key, &source.ext);
             std::fs::write(&path, &source.bytes).map_err(|e| e.to_string())?;
             result.push((
                 MaterializedImageSource {
@@ -520,36 +343,6 @@ pub(crate) async fn write_image_file_by_key(
         .await
         .map_err(|e| e.to_string())?;
     Ok(ImageSourceResponse { bytes, mime, ext })
-}
-
-fn ext_from_data_url_header(header: &str) -> &'static str {
-    if header.starts_with("data:image/jpeg") {
-        "jpg"
-    } else {
-        "png"
-    }
-}
-
-fn mime_from_data_url_header(header: &str) -> &'static str {
-    if header.starts_with("data:image/jpeg") {
-        "image/jpeg"
-    } else {
-        "image/png"
-    }
-}
-
-pub(crate) fn cached_source_from_data_url(data_url: &str) -> Result<CachedImageSource, String> {
-    use base64::{engine::general_purpose, Engine as _};
-    let (header, base64_data) = data_url.split_once(',').ok_or("invalid data URL")?;
-    Ok(CachedImageSource {
-        mime: mime_from_data_url_header(header).to_string(),
-        ext: ext_from_data_url_header(header).to_string(),
-        bytes: Arc::from(
-            general_purpose::STANDARD
-                .decode(base64_data)
-                .map_err(|e| e.to_string())?,
-        ),
-    })
 }
 
 #[tauri::command]

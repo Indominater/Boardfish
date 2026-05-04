@@ -58,8 +58,7 @@ document.addEventListener('keydown', (e) => {
     }
     if (editingId) {
       exitEdit();
-      selectedId = null;
-      selectedIds.clear();
+      BoardfishEditorState.clearSelection();
       scheduleRender(false, true);
       return;
     }

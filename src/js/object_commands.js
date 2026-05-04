@@ -13,8 +13,7 @@ function addText(wx, wy, content = '') {
 
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data: { content } };
   syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
-  objects.push(obj);
-  objectsMap.set(obj.id, obj);
+  BoardfishEditorState.addObject(obj);
   selectObject(obj.id);
   scheduleRender(true, false);
   pushHistory('add-text');
@@ -116,26 +115,20 @@ async function newBoard() {
     if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
   }
   const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
-  _boardOpening = true; openingShield.classList.add('active');
+  BoardfishEditorState.setBoardOpening(true);
+  openingShield.classList.add('active');
   const openingStart = performance.now();
   await startPillTask({ message: 'Opening' });
-  if (editingId) exitEdit();
+  BoardfishEditorState.resetBoardObjectState();
   OpenDebug.step(dbg, 'exitEdit', {});
   clearJsClipboard();
-  selectedId = null;
-  selectedIds.clear();
-  objects = [];
-  objectsMap.clear();
-  _linesCacheMap.clear();
-  _prefixCache.clear();
   invalidateOffscreen();
   OpenDebug.step(dbg, 'clearState', {});
   currentFilePath = null;
-  panX = 0; panY = 0; zoom = 1;
+  BoardfishViewportState.reset();
   clearImageStore(true);
   OpenDebug.step(dbg, 'clearImageStore', {});
   boardHistory = []; historyIndex = -1;
-  idCounter = 1; zCounter = 1;
   snapshot();
   markSaved();
   updateTitle();
@@ -161,7 +154,7 @@ function duplicateSelected() {
     if (!obj) continue;
     const o = cloneObject(obj);
     if (o.type === 'image') {
-      const src = imageStore[o.data.imgKey];
+      const src = BoardfishImageStore.getSource(o.data.imgKey);
       if (src) imageData[o.data.imgKey] = src;
     }
     cloned.push(o);
@@ -175,19 +168,8 @@ function duplicateSelected() {
 
 function deleteSelected() {
   if (!hasSelection() || editingId) return;
-  let write = 0;
-  for (let read = 0; read < objects.length; read++) {
-    const obj = objects[read];
-    if (selectedIds.has(obj.id)) {
-      objectsMap.delete(obj.id);
-      _linesCacheMap.delete(obj.id);
-      continue;
-    }
-    objects[write++] = obj;
-  }
-  objects.length = write;
-  selectedId = null;
-  selectedIds.clear();
+  BoardfishEditorState.removeSelectedObjects();
+  BoardfishEditorState.clearSelection();
   scheduleRender(true, true);
   pushHistory('delete-selected');
 }

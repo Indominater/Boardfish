@@ -37,14 +37,11 @@ function fitImageSize(naturalW, naturalH, exactSize = false) {
 
 function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-image') {
   const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
-  objects.push(obj);
-  objectsMap.set(obj.id, obj);
+  BoardfishEditorState.addObject(obj);
   const deferHistory = options.deferHistory ?? _bulkImageInsertDepth > 0;
   if (deferHistory) {
     if (editingId) exitEdit();
-    selectedIds.clear();
-    selectedIds.add(obj.id);
-    selectedId = obj.id;
+    BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
     _bulkImageInsertAdded++;
     if (!options.suppressProgressRender) {
       const now = performance.now();
@@ -75,7 +72,7 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options
       const { w, h } = fitImageSize(img.naturalWidth, img.naturalHeight, exactSize);
       ViewportDebug.step(dbg, 'size-object', { w, h });
       const imgKey = existingImgKey || newImgKey();
-      imageStore[imgKey] = src;
+      BoardfishImageStore.setSource(imgKey, src);
       cacheImage(imgKey, src, null, img);
       ViewportDebug.step(dbg, 'cache-registered', { imgKey });
       const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-image');
@@ -103,16 +100,16 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
   ViewportDebug.count('imageAdds');
   ViewportDebug.count('nativeImageAdds');
   const imgKey = options.imgKey || newImgKey();
-  const meta = await tauriInvoke('register_image_file_source', { imgKey, path });
+  const meta = await BoardfishTauri.registerImageFileSource(imgKey, path);
   const naturalW = Number(meta.width) || 1;
   const naturalH = Number(meta.height) || 1;
   const { w, h } = fitImageSize(naturalW, naturalH, options.exactSize);
-  imageStore[imgKey] = {
+  BoardfishImageStore.setSource(imgKey, {
     native: true,
     mime: meta.mime || '',
     ext: meta.ext || '',
     bytes: meta.bytes || 0,
-  };
+  });
   if (options.materializeAsset) {
     await materializeImageAssets([imgKey]);
   }
@@ -139,7 +136,7 @@ async function pickAndInsertImages(x, y) {
   if (hasTauri()) {
     const dbg = InsertDebug.start('pickImages', { source: 'file-picker-native' });
     try {
-      const paths = await tauriInvoke('pick_image_files');
+      const paths = await BoardfishTauri.pickImageFiles();
       InsertDebug.end(dbg, { source: 'file-picker-native', fileCount: paths?.length || 0, cancelled: !paths?.length });
       if (paths?.length) await insertNativeImagePaths(paths, x, y, 'file-picker-native');
     } catch (err) {
@@ -181,7 +178,7 @@ async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {})
       added: true,
       imgKey: obj.data?.imgKey,
       bitmapReady: !!imageBitmapCache[obj.data?.imgKey],
-      fallbackReady: imageBitmapFailed.has(obj.data?.imgKey) && !!imageCache[obj.data?.imgKey]?.complete,
+      fallbackReady: imageBitmapFailed.has(obj.data?.imgKey) && !!BoardfishImageStore.getDisplayImage(obj.data?.imgKey)?.complete,
     });
     return obj;
   } finally {
@@ -263,7 +260,7 @@ async function insertNativeImagePaths(paths, x, y, source = 'native-drop') {
           materializeAsset: source === 'file-picker-native',
           suppressProgressRender: bulk,
         });
-        const imgRef = obj ? imageStore[obj.data.imgKey] : null;
+        const imgRef = obj ? BoardfishImageStore.getSource(obj.data.imgKey) : null;
         InsertDebug.step(fileDbg, 'register:end', {
           source,
           fileName: path,
@@ -298,10 +295,9 @@ async function insertNativeImagePaths(paths, x, y, source = 'native-drop') {
 }
 
 if (hasTauri()) {
-  window.__TAURI__.event.listen('boardfish://file-drop', async (event) => {
+  tauriListen('boardfish://file-drop', async (event) => {
     const { paths } = event.payload;
     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
     await insertNativeImagePaths(paths, center.x, center.y, 'native-drop');
   });
 }
-

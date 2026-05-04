@@ -99,10 +99,6 @@
     <div id="eyedropper-values">
       <div class="ctx-item eyedropper-value-row eyedropper-hex-row">
         <span class="eyedropper-value-text"><span>HEX:</span> <span id="eyedropper-hex">#000000</span></span>
-        <span class="material-symbols-outlined eyedropper-copy-icon" role="button" tabindex="0" data-copy-target="eyedropper-hex" aria-label="Copy HEX color">content_copy</span>
-      </div>
-      <div class="ctx-item eyedropper-value-row">
-        <span class="eyedropper-value-text"><span>HSL:</span> <span id="eyedropper-hsl">0 0% 0%</span></span>
       </div>
       <div class="ctx-item eyedropper-value-row">
         <span class="eyedropper-value-text"><span>RGB:</span> <span id="eyedropper-rgb">0 0 0</span></span>
@@ -111,26 +107,61 @@
     </div>
   </div>
 
+  <script type="application/json" id="boardfish-board-contract">
+{"format":"boardfish-container","versions":{"legacy":2,"container":3},"objectTypes":["image","text"],"viewport":{"minZoom":0.1,"maxZoom":10}}
+  </script>
+  <script src="js/dom_registry.js"></script>
+  <script src="js/tauri_bridge.js"></script>
+  <script src="js/bitmap_cache.js"></script>
+  <script src="js/startup_debug.js"></script>
+  <script src="js/image_transform.js"></script>
+  <script src="js/object_geometry.js"></script>
+  <script src="js/interaction_utils.js"></script>
+  <script src="js/board_types.js"></script>
   <script src="app.js"></script>
+  <script src="js/debug_core.js"></script>
   <script src="js/geometry.js"></script>
+  <script src="js/clipboard_state.js"></script>
+  <script src="js/clipboard_io.js"></script>
   <script src="js/debug.js"></script>
+  <script src="js/debug_save.js"></script>
+  <script src="js/debug_open.js"></script>
+  <script src="js/debug_export.js"></script>
+  <script src="js/debug_manual_perf.js"></script>
+  <script src="js/debug_insert.js"></script>
+  <script src="js/debug_export_all_diag.js"></script>
+  <script src="js/debug_text_selection.js"></script>
+  <script src="js/export_utils.js"></script>
   <script src="js/text_layout.js"></script>
   <script src="js/image_variants.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/viewport_debug_ui.js"></script>
   <script src="js/viewport.js"></script>
+  <script src="js/viewport_state.js"></script>
   <script src="js/state.js"></script>
   <script src="js/image_state.js"></script>
+  <script src="js/image_store_boundary.js"></script>
+  <script src="js/editor_state_boundary.js"></script>
   <script src="js/history_state.js"></script>
   <script src="js/board_schema.js"></script>
+  <script src="js/board_document.js"></script>
   <script src="js/selection_input.js"></script>
   <script src="js/text_editor.js"></script>
   <script src="js/object_commands.js"></script>
+  <script src="js/eyedropper_color.js"></script>
+  <script src="js/eyedropper_geometry.js"></script>
+  <script src="js/eyedropper_debug.js"></script>
+  <script src="js/eyedropper_state.js"></script>
   <script src="js/eyedropper.js"></script>
   <script src="js/canvas_input.js"></script>
   <script src="js/context_menu.js"></script>
   <script src="js/image_insert.js"></script>
   <script src="js/io_close.js"></script>
   <script src="js/window_recovery.js"></script>
+  <script src="js/image_export.js"></script>
+  <script src="js/text_export.js"></script>
   <script src="js/clipboard_export_init.js"></script>
   <script src="js/keyboard.js"></script>
+  <script src="js/app_bootstrap.js"></script>
 </body>
 </html>

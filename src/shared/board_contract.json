@@ -1,0 +1,12 @@
+{
+  "format": "boardfish-container",
+  "versions": {
+    "legacy": 2,
+    "container": 3
+  },
+  "objectTypes": ["image", "text"],
+  "viewport": {
+    "minZoom": 0.1,
+    "maxZoom": 10
+  }
+}

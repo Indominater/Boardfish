@@ -14,12 +14,16 @@ var _wheelPanDY = 0;
 function flushWheelPan() {
   _wheelPanRaf = null;
   if (!_wheelPanDX && !_wheelPanDY) return;
+  if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling) {
+    _wheelPanDX = 0;
+    _wheelPanDY = 0;
+    return;
+  }
   const dx = _wheelPanDX;
   const dy = _wheelPanDY;
   _wheelPanDX = 0;
   _wheelPanDY = 0;
-  panX -= dx;
-  panY -= dy;
+  BoardfishViewportState.panBy(-dx, -dy);
   scheduleTransform('wheel-pan');
 }
 
@@ -30,9 +34,17 @@ function scheduleWheelPan(dx, dy) {
   _wheelPanRaf = requestAnimationFrame(flushWheelPan);
 }
 
+function cancelWheelPan() {
+  if (_wheelPanRaf) cancelAnimationFrame(_wheelPanRaf);
+  _wheelPanRaf = null;
+  _wheelPanDX = 0;
+  _wheelPanDY = 0;
+}
+
 
 canvas.addEventListener('wheel', (e) => {
-  const handlerStart = performance.now();
+  const collectDebug = ViewportDebug.isEnabled();
+  const handlerStart = collectDebug ? performance.now() : 0;
   const dbg = ViewportDebug.start('wheel', { deltaX: e.deltaX, deltaY: e.deltaY, ctrlKey: e.ctrlKey, metaKey: e.metaKey, panX, panY, zoom });
   try {
     ViewportDebug.count('wheel');
@@ -41,28 +53,33 @@ canvas.addEventListener('wheel', (e) => {
       ViewportDebug.end(dbg, { mode: 'blocked-rubber-band', panX, panY, zoom });
       return;
     }
+    if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling) {
+      cancelWheelPan();
+      ViewportDebug.end(dbg, { mode: 'blocked-eyedropper-sampling', panX, panY, zoom });
+      return;
+    }
     if (editingId) {
       _caretVisible = true;
     }
     if (e.ctrlKey || e.metaKey) {
+      if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('wheel-zoom');
       ViewportDebug.count('wheelZoom');
       const factor = Math.abs(e.deltaY) < 30
         ? Math.pow(0.995, e.deltaY)
         : e.deltaY < 0 ? 1.1 : 1 / 1.1;
       const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
-      panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
-      panY = e.clientY - (e.clientY - panY) * (newZoom / zoom);
-      zoom = newZoom;
+      BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, newZoom);
       scheduleTransform('wheel-zoom');
       ViewportDebug.end(dbg, { mode: 'zoom', newZoom, panX, panY });
       return;
     }
 
+    if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('wheel-pan');
     ViewportDebug.count('wheelPan');
     scheduleWheelPan(e.deltaX, e.deltaY);
     ViewportDebug.end(dbg, { mode: 'pan', pendingDX: _wheelPanDX, pendingDY: _wheelPanDY, panX, panY });
   } finally {
-    ViewportDebug.timing('wheelHandler', performance.now() - handlerStart);
+    if (collectDebug) ViewportDebug.timing('wheelHandler', performance.now() - handlerStart);
   }
 }, { passive: false });
 
@@ -70,6 +87,10 @@ canvas.addEventListener('wheel', (e) => {
 var _spaceDown = false;
 
 document.addEventListener('keydown', (e) => {
+  if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling && e.code === 'Space') {
+    e.preventDefault();
+    return;
+  }
   if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.code === 'Space')) {
     if (e.code === 'Space') e.preventDefault();
     return;
@@ -82,6 +103,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     _spaceDown = true;
     canvas.classList.add('panning');
+    if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('space');
   }
 });
 
@@ -103,19 +125,21 @@ function dragItemsForSelection() {
 
 function startMousePan(e) {
   const panDbg = ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, panX, panY, zoom });
+  if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('mouse-pan', 240);
   e.preventDefault();
   e.stopPropagation();
   const startX = e.clientX, startY = e.clientY;
   const startPanX = panX, startPanY = panY;
   function onMove(ev) {
-    const handlerStart = performance.now();
+    const collectDebug = ViewportDebug.isEnabled();
+    const handlerStart = collectDebug ? performance.now() : 0;
     try {
       ViewportDebug.count('mousePanMoves');
-      panX = startPanX + (ev.clientX - startX);
-      panY = startPanY + (ev.clientY - startY);
+      if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('mouse-pan', 240);
+      BoardfishViewportState.setPan(startPanX + (ev.clientX - startX), startPanY + (ev.clientY - startY));
       scheduleTransform('mouse-pan');
     } finally {
-      ViewportDebug.timing('mousePanHandler', performance.now() - handlerStart);
+      if (collectDebug) ViewportDebug.timing('mousePanHandler', performance.now() - handlerStart);
     }
   }
   function onUp(ev) {
@@ -185,33 +209,27 @@ function startRubberBandSelection(e, additive) {
       x2: (x2 - panX) / zoom,
       y2: (y2 - panY) / zoom,
     };
-    if (!additive) selectedIds.clear();
-    let hitCount = 0;
+    const nextSelection = additive ? new Set(selectedIds) : new Set();
     for (const o of objects) {
       if (objectIntersectsRect(o, rbRect)) {
-        selectedIds.add(o.id);
-        selectedId = o.id;
-        hitCount++;
+        nextSelection.add(o.id);
       }
     }
-    if (!hitCount) return;
+    if (nextSelection.size === selectedIds.size && [...nextSelection].every((id) => selectedIds.has(id))) return;
+    BoardfishEditorState.setSelection([...nextSelection]);
     scheduleRender(true, true);
   }
   beginDocumentDrag({ move: onRbMove, up: onRbUp });
 }
 
 function toggleAdditiveSelection(obj) {
+  const nextSelection = new Set(selectedIds);
   if (isSelected(obj.id)) {
-    selectedIds.delete(obj.id);
-    if (selectedId === obj.id) {
-      selectedId = null;
-      for (const id of selectedIds) selectedId = id;
-    }
-    if (editingId && !isSelected(editingId)) exitEdit();
+    nextSelection.delete(obj.id);
+    BoardfishEditorState.setSelection([...nextSelection]);
   } else {
-    if (editingId && editingId !== obj.id) exitEdit();
-    selectedIds.add(obj.id);
-    selectedId = obj.id;
+    nextSelection.add(obj.id);
+    BoardfishEditorState.setSelection([...nextSelection], { primaryId: obj.id });
     const addedObj = objectsMap.get(obj.id);
     if (addedObj) {
       bringObjectToFront(obj.id);
@@ -286,6 +304,11 @@ function startObjectDrag(e, obj) {
 }
 
 canvas.addEventListener('mousedown', (e) => {
+  if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.button === 0 && _spaceDown)) {
     e.preventDefault();
     e.stopPropagation();

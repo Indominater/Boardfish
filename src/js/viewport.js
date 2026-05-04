@@ -1,6 +1,7 @@
 // ─── Viewport ─────────────────────────────────────────────────────────────────
 var panX = 0, panY = 0, zoom = 1;
 var _vpSaveTimer = null;
+var BoardRenderer = null;
 function saveViewport() {
   clearTimeout(_vpSaveTimer);
   _vpSaveTimer = setTimeout(() => {
@@ -9,400 +10,7 @@ function saveViewport() {
 }
 
 
-// ─── Pill debugger ───────────────────────────────────────────────────────────
-var PillDebug = (() => {
-  const MAX_EVENTS = 1000;
-  let enabled = false;
-  let verbose = true;
-  const events = [];
-  const t0 = performance.now();
-  let longTaskObserver = null;
-
-  function round(value) {
-    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
-  }
-
-  function snapshot() {
-    const style = getComputedStyle(islZoom);
-    return {
-      text: islZoom.textContent,
-      styleWidth: islZoom.style.width,
-      offsetWidth: islZoom.offsetWidth,
-      computedWidth: style.width,
-      color: style.color,
-      opacity: style.opacity,
-      transition: style.transition,
-      msgActive: _islMsgActive,
-      boardOpening: _boardOpening,
-      zoomPct: Math.round(zoom * 100) + '%',
-    };
-  }
-
-  function push(event, data = {}) {
-    if (!enabled) return null;
-    const entry = {
-      t: round(performance.now() - t0),
-      event,
-      ...snapshot(),
-      ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, round(v)])),
-    };
-    events.push(entry);
-    if (events.length > MAX_EVENTS) events.shift();
-    if (verbose) console.debug('[pill]', entry);
-    return entry;
-  }
-
-  function log(event, data = {}) {
-    return push(event, data);
-  }
-
-  function enable() {
-    if (!DEBUG_TOOLS_ENABLED) return;
-    enabled = true;
-    events.length = 0;
-    startLongTaskObserver();
-    console.info('Boardfish pill debugger enabled. Use BoardfishDebug.pill.summary(), .timeline(), .diagnose(), .dump(), or .reset().');
-  }
-  function disable() {
-    enabled = false;
-    if (longTaskObserver) {
-      longTaskObserver.disconnect();
-      longTaskObserver = null;
-    }
-  }
-  function setVerbose(value) {
-    verbose = !!value;
-    console.info(`Boardfish pill verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
-  }
-  function reset() { events.length = 0; }
-  function dump() {
-    console.table(events);
-    return events.slice();
-  }
-  function summary() {
-    const rows = events.map(e => ({
-      t: e.t,
-      event: e.event,
-      text: e.text,
-      styleWidth: e.styleWidth,
-      offsetWidth: e.offsetWidth,
-      msgActive: e.msgActive,
-      boardOpening: e.boardOpening,
-      duration: e.duration ?? '',
-      elapsed: e.elapsed ?? '',
-      reason: e.reason ?? '',
-      longTaskMs: e.longTaskMs ?? '',
-      phaseMs: e.phaseMs ?? '',
-    }));
-    console.table(rows);
-    return rows;
-  }
-  function timeline() {
-    const rows = [];
-    for (let i = 0; i < events.length; i++) {
-      const prev = events[i - 1];
-      const e = events[i];
-      rows.push({
-        dt: prev ? round(e.t - prev.t) : 0,
-        t: e.t,
-        event: e.event,
-        text: e.text,
-        width: e.offsetWidth,
-        styleWidth: e.styleWidth,
-        color: e.color,
-        propertyName: e.propertyName ?? '',
-        elapsedTime: e.elapsedTime ?? '',
-        reason: e.reason ?? '',
-        sampleMs: e.sampleMs ?? '',
-        sampleWidth: e.sampleWidth ?? '',
-        targetWidth: e.targetWidth ?? '',
-        longTaskMs: e.longTaskMs ?? '',
-      });
-    }
-    console.table(rows);
-    return rows;
-  }
-
-  function widthSamples() {
-    const rows = events
-      .filter(e => e.event === 'pill-sample')
-      .map(e => ({
-        label: e.label,
-        sampleMs: e.sampleMs,
-        sampleWidth: e.sampleWidth,
-        startWidth: e.startWidth,
-        targetWidth: e.targetWidth,
-        textAlpha: e.textAlpha,
-        text: e.text,
-        color: e.color,
-      }));
-    console.table(rows);
-    return rows;
-  }
-
-  function animationSamples() {
-    const rows = events
-      .filter(e => (
-        e.event === 'pill-sample' ||
-        e.event === 'pill-frame-ready' ||
-        e.event === 'pill-frame-wait-timeout' ||
-        e.event === 'transitionstart' ||
-        e.event === 'transitionend' ||
-        e.event === 'transitioncancel'
-      ))
-      .map(e => ({
-        t: e.t,
-        event: e.event,
-        label: e.label ?? '',
-        propertyName: e.propertyName ?? '',
-        sampleMs: e.sampleMs ?? '',
-        frameGapMs: e.frameGapMs ?? '',
-        stableFrames: e.stableFrames ?? '',
-        width: e.sampleWidth ?? e.offsetWidth,
-        startWidth: e.startWidth ?? '',
-        targetWidth: e.targetWidth ?? '',
-        textAlpha: e.textAlpha ?? '',
-        text: e.text,
-        color: e.color,
-      }));
-    console.table(rows);
-    return rows;
-  }
-
-  function samplePillAnimation(label, durationMs = 1100) {
-    if (!enabled) return;
-    const start = performance.now();
-    const startWidth = islZoom.getBoundingClientRect().width;
-    const targetWidth = parseFloat(islZoom.style.width) || parseFloat(getComputedStyle(islZoom).width) || startWidth;
-    const tick = () => {
-      if (!enabled) return;
-      const now = performance.now();
-      const sampleMs = now - start;
-      push('pill-sample', {
-        label,
-        sampleMs,
-        sampleWidth: islZoom.getBoundingClientRect().width,
-        startWidth,
-        targetWidth,
-        textAlpha: islandTextAlpha(),
-      });
-      if (sampleMs < durationMs) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }
-
-  function largestSampleGap(label = null) {
-    const samples = events.filter(e => e.event === 'pill-sample' && (!label || e.label === label));
-    let largest = 0;
-    for (let i = 1; i < samples.length; i++) {
-      largest = Math.max(largest, Number(samples[i].sampleMs) - Number(samples[i - 1].sampleMs));
-    }
-    return round(largest);
-  }
-
-  function diagnose() {
-    const longTasks = events.filter(e => e.event === 'longtask');
-    const bigLongTasks = longTasks.filter(e => Number(e.longTaskMs) >= 100);
-    const restoreStart = events.find(e => e.event === 'restoreIslandZoom:start');
-    const restoreWidth = events.find(e => e.event === 'restoreIslandZoom:text-set');
-    const restoreShown = events.find(e => e.event === 'restoreIslandZoom:shown');
-    const forcedTransparent = events.find(e => e.event === 'forceIslandTextTransparent');
-    const openingRender = events.find(e => e.event === 'open:initial-applyTransform:end');
-    const findings = [];
-    const textAlpha = (entry) => {
-      const match = String(entry?.color || '').match(/rgba?\(([^)]+)\)/);
-      if (!match) return 1;
-      const parts = match[1].split(',').map((part) => part.trim());
-      return parts.length >= 4 ? Number(parts[3]) || 0 : 1;
-    };
-    const widthSwapVisible = textAlpha(restoreWidth) > 0.05;
-
-    if (bigLongTasks.length) {
-      findings.push(`${bigLongTasks.length} long main-thread task(s) over 100ms occurred while the pill was animating or opening.`);
-    }
-    const restoreGap = largestSampleGap('restoreIslandZoom');
-    if (restoreGap >= 80) {
-      findings.push(`Restore animation missed frames; largest sample gap was ${restoreGap}ms.`);
-    }
-    if (openingRender && Number(openingRender.phaseMs) >= 100) {
-      findings.push(`Initial board render took ${openingRender.phaseMs}ms before the pill restored to zoom.`);
-    }
-    if (restoreStart && restoreWidth && restoreWidth.t - restoreStart.t > 650 && widthSwapVisible) {
-      findings.push(`Restore width/text update was delayed by ${round(restoreWidth.t - restoreStart.t)}ms after restore started.`);
-    }
-    if (restoreWidth && restoreShown && restoreShown.t - restoreWidth.t < 32 && widthSwapVisible) {
-      findings.push('Width/text and visible color were applied too close together for a visible transition.');
-    }
-    if (forcedTransparent && restoreWidth && !widthSwapVisible) {
-      findings.push('Fallback transparency path was used; width/text swap was hidden.');
-    }
-    if (!findings.length) findings.push('No obvious pill animation stall found in the current buffer.');
-
-    const report = {
-      findings,
-      eventCount: events.length,
-      longTaskCount: longTasks.length,
-      maxLongTaskMs: longTasks.reduce((n, e) => Math.max(n, Number(e.longTaskMs) || 0), 0),
-      restoreLargestSampleGapMs: restoreGap,
-    };
-    console.table(report.findings.map(finding => ({ finding })));
-    return report;
-  }
-
-  function startLongTaskObserver() {
-    if (longTaskObserver || typeof PerformanceObserver === 'undefined') return;
-    try {
-      longTaskObserver = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) {
-          push('longtask', {
-            longTaskMs: entry.duration,
-            startTime: entry.startTime,
-          });
-        }
-      });
-      longTaskObserver.observe({ entryTypes: ['longtask'] });
-    } catch (_) {
-      longTaskObserver = null;
-    }
-  }
-
-  return { enable, disable, setVerbose, reset, dump, summary, timeline, widthSamples, animationSamples, diagnose, log, samplePillAnimation, largestSampleGap, get enabled() { return enabled; } };
-})();
-exposeDebug({ pill: PillDebug });
-
-// ─── Context menu debugger ───────────────────────────────────────────────────
-var MenuDebug = (() => {
-  const MAX_EVENTS = 500;
-  let enabled = false;
-  let verbose = false;
-  let nextId = 1;
-  const events = [];
-
-  function round(value) {
-    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
-  }
-
-  function elementLabel(el) {
-    if (!el) return '';
-    if (el === window) return 'window';
-    if (el === document) return 'document';
-    if (el === document.body) return 'body';
-    const id = el.id ? `#${el.id}` : '';
-    const cls = el.className && typeof el.className === 'string'
-      ? '.' + el.className.trim().replace(/\s+/g, '.')
-      : '';
-    return `${el.tagName?.toLowerCase() || String(el)}${id}${cls}`;
-  }
-
-  function menuState() {
-    const active = document.activeElement;
-    const point = lastPointerEvent
-      ? document.elementFromPoint(lastPointerEvent.clientX, lastPointerEvent.clientY)
-      : null;
-    return {
-      ctxVisible: ctxMenu.classList.contains('visible'),
-      objVisible: objCtxMenu.classList.contains('visible'),
-      ctxDisplay: getComputedStyle(ctxMenu).display,
-      objDisplay: getComputedStyle(objCtxMenu).display,
-      shieldActive: openingShield.classList.contains('active'),
-      inputShieldCount: _inputShieldCount,
-      boardOpening: _boardOpening,
-      active: elementLabel(active),
-      elementAtPointer: elementLabel(point),
-    };
-  }
-
-  let lastPointerEvent = null;
-
-  function push(event, data = {}) {
-    if (!enabled) return null;
-    const entry = {
-      id: nextId++,
-      t: round(performance.now()),
-      event,
-      ...menuState(),
-      ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, round(v)])),
-    };
-    events.push(entry);
-    if (events.length > MAX_EVENTS) events.shift();
-    if (verbose) console.debug('[Boardfish menu]', entry);
-    return entry;
-  }
-
-  function enable(options = {}) {
-    if (!DEBUG_TOOLS_ENABLED) return;
-    enabled = true;
-    verbose = !!options.verbose;
-    events.length = 0;
-    nextId = 1;
-    console.info('Boardfish menu debugger enabled. Use BoardfishDebug.menu.summary(), .events(), .last(), .setVerbose(true), or .reset().');
-  }
-
-  function disable() { enabled = false; }
-  function setVerbose(value) {
-    verbose = !!value;
-    console.info(`Boardfish menu verbose logging ${verbose ? 'enabled' : 'disabled'}.`);
-  }
-  function reset() { events.length = 0; nextId = 1; }
-  function eventsCopy() { console.table(events); return events.slice(); }
-  function last(limit = 30) {
-    const rows = events.slice(-limit);
-    console.table(rows);
-    return rows;
-  }
-  function summary() {
-    const rows = events.map(e => ({
-      id: e.id,
-      event: e.event,
-      type: e.type ?? '',
-      phase: e.phase ?? '',
-      target: e.target ?? '',
-      currentTarget: e.currentTarget ?? '',
-      button: e.button ?? '',
-      x: e.x ?? '',
-      y: e.y ?? '',
-      command: e.command ?? '',
-      ctxVisible: e.ctxVisible,
-      objVisible: e.objVisible,
-      shieldActive: e.shieldActive,
-      defaultPrevented: e.defaultPrevented ?? '',
-      propagationStopped: e.propagationStopped ?? '',
-      elementAtPointer: e.elementAtPointer,
-    }));
-    console.table(rows);
-    return rows;
-  }
-
-  function log(event, data = {}) { return push(event, data); }
-
-  function logDomEvent(label, event) {
-    lastPointerEvent = event;
-    push(label, {
-      type: event.type,
-      phase: event.eventPhase,
-      target: elementLabel(event.target),
-      currentTarget: elementLabel(event.currentTarget),
-      button: event.button,
-      x: event.clientX,
-      y: event.clientY,
-      defaultPrevented: event.defaultPrevented,
-    });
-  }
-
-  return {
-    enable,
-    disable,
-    setVerbose,
-    reset,
-    events: eventsCopy,
-    last,
-    summary,
-    log,
-    logDomEvent,
-    get enabled() { return enabled; },
-  };
-})();
-exposeDebug({ menu: MenuDebug });
+// PillDebug and MenuDebug are initialized by js/viewport_debug_ui.js.
 
 function islSetWidth(text) {
   PillDebug.log('islSetWidth:before', { text });
@@ -775,27 +383,11 @@ function resizeCanvas() {
 }
 
 function drawImageObj(context, obj, img) {
-  const transform = imageTransformFromObject(obj);
-  if (imageTransformNeedsRendering(transform)) {
-    const sideways = isSidewaysRotation(transform.rotation);
-    const drawW = sideways ? obj.h : obj.w;
-    const drawH = sideways ? obj.w : obj.h;
-    context.save();
-    context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
-    context.scale(transform.flipX ? -1 : 1, transform.flipY ? -1 : 1);
-    if (transform.rotation) context.rotate((transform.rotation * Math.PI) / 180);
-    context.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
-    context.restore();
-    return;
-  }
-
-  context.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+  return BoardRenderer.drawImageObj(context, obj, img);
 }
 
 function isDrawableImageSource(source) {
-  if (!source) return false;
-  if (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) return true;
-  return !!(source.complete && source.naturalWidth > 0);
+  return BoardRenderer.isDrawableImageSource(source);
 }
 var VIEWPORT_CULL_PADDING_PX = 256;
 
@@ -804,134 +396,29 @@ function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view =
 }
 
 function countCulledObject(obj, counters = null) {
-  if (!counters) return;
-  if (obj.type === 'image') counters.culledImages = (counters.culledImages || 0) + 1;
-  else if (obj.type === 'text') counters.culledText = (counters.culledText || 0) + 1;
+  return BoardRenderer.countCulledObject(obj, counters);
 }
 
 // Draws a single non-editing object onto any canvas context (world coords).
 function drawSingleObj(context, obj, counters = null, { view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null } = {}) {
-  if (obj.type === 'text') {
-    context.fillStyle = canvasTextColor();
-    context.textBaseline = 'alphabetic';
-    const lines = getWrappedLines(obj);
-    for (let i = 0; i < lines.length; i++) {
-      context.fillText(lines[i].text, obj.x + TEXT_PAD, obj.y + TEXT_PAD + TEXT_BASELINE_Y_OFFSET + i * LINE_H);
-    }
-    return true;
-  } else if (obj.type === 'image') {
-    const key = obj.data.imgKey;
-    const bitmap = imageBitmapCache[key];
-    const fullImg = bitmap || imageCache[key] || null;
-    const selected = imageSourceResolver
-      ? imageSourceResolver(key, obj, view, counters)
-      : fullImg ? selectImageSourceForDraw(key, obj, fullImg, view) : null;
-    const img = selected?.source || null;
-    if (isDrawableImageSource(img)) {
-      if (counters) {
-        if (selected?.scale < 1) {
-          counters.scaledImages = (counters.scaledImages || 0) + 1;
-          counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
-          counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
-        } else if (selected?.targetScale < 1) {
-          counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
-        } else if (selected?.scale === 1 && selected?.targetScale === 1) {
-          counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
-        }
-        if (selected?.readbackSafe) counters.readbackSafeImages = (counters.readbackSafeImages || 0) + 1;
-        if (selected?.warmedEyedropper) counters.eyedropperWarmedScaledImages = (counters.eyedropperWarmedScaledImages || 0) + 1;
-        if (bitmap || selected?.scale < 1 || selected?.readbackSafe) counters.bitmapImages++;
-        else {
-          counters.elementImages++;
-          counters.fallbackImages++;
-        }
-      }
-      try {
-        drawImageObj(context, obj, img);
-        return true;
-      } catch (err) {
-        if (counters) {
-          counters.erroredImages++;
-          counters.lastDrawError = String(err);
-          counters.lastDrawErrorKey = key;
-          counters.lastDrawErrorId = obj.id;
-        }
-        return false;
-      }
-    }
-    if (counters) {
-      if (selected?.scaledVariantPending) counters.scaledVariantPendingImages = (counters.scaledVariantPendingImages || 0) + 1;
-      else counters.missingImages++;
-      counters.lastMissingKey = key;
-      counters.lastMissingId = obj.id;
-      counters.lastMissingReason = selected?.scaledVariantPending ? 'scaled-variant-pending-active-input'
-        : imageSourceResolver ? 'readback-safe-source-pending'
-        : !key ? 'missing-key'
-        : !imageStore[key] ? 'missing-store'
-          : !imageCache[key] ? 'missing-image-element'
-            : !imageCache[key].complete ? 'not-complete'
-              : imageCache[key].naturalWidth <= 0 ? 'zero-natural-width'
-                : !bitmap ? 'missing-bitmap'
-                  : 'unknown';
-    }
-    return false;
-  }
-  return false;
+  return BoardRenderer.drawSingleObj(context, obj, counters, { view, imageSourceResolver });
 }
 
 
 function createDrawCounters() {
-  return {
-    testedObjects: 0,
-    visibleObjects: 0,
-    bitmapImages: 0,
-    elementImages: 0,
-    fallbackImages: 0,
-    missingImages: 0,
-    erroredImages: 0,
-    croppedImages: 0,
-    scaledImages: 0,
-    scaledFallbackFull: 0,
-    scaledVariantPendingImages: 0,
-    fullScaleImages: 0,
-    readbackSafeImages: 0,
-    readbackSafePendingImages: 0,
-    readbackSafeScaledImages: 0,
-    eyedropperWarmedScaledImages: 0,
-    scaledImageScaleTotal: 0,
-    scaledImageTargetScaleTotal: 0,
-    culledImages: 0,
-    culledText: 0,
-  };
+  return BoardRenderer.createDrawCounters();
 }
 
 function resetCanvasToScreen(context) {
-  context.setTransform(1, 0, 0, 1, 0, 0);
+  return BoardRenderer.resetCanvasToScreen(context);
 }
 
 function setWorldCanvasTransform(context, dpr = window.devicePixelRatio || 1, view = { zoom, panX, panY }) {
-  context.setTransform(view.zoom * dpr, 0, 0, view.zoom * dpr, view.panX * dpr, view.panY * dpr);
-  setCanvasImageQuality(context);
-  context.font = FONT;
-  context.textBaseline = 'alphabetic';
+  return BoardRenderer.setWorldCanvasTransform(context, dpr, view);
 }
 
-function drawVisibleObjects(context, counters, { skipId = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 } } = {}) {
-  let drawnImages = 0;
-  let drawnText = 0;
-  for (const obj of objects) {
-    if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-    if (obj.id === skipId) continue;
-    if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) {
-      countCulledObject(obj, counters);
-      continue;
-    }
-    if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
-    const drawn = drawSingleObj(context, obj, counters, { view });
-    if (obj.type === 'image' && drawn) drawnImages++;
-    else if (obj.type === 'text') drawnText++;
-  }
-  return { drawnImages, drawnText };
+function drawVisibleObjects(context, counters, { skipId = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null } = {}) {
+  return BoardRenderer.drawVisibleObjects(context, counters, { skipId, viewportRect, view, imageSourceResolver });
 }
 
 function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd) {
@@ -991,7 +478,8 @@ function drawBoard() {
     ViewportDebug.end(dbg, { skipped: 'board-opening' });
     return;
   }
-  const drawStart = performance.now();
+  const collectDrawDebug = ViewportDebug.isEnabled();
+  const drawStart = collectDrawDebug ? performance.now() : 0;
   const drawPhases = {};
   const counters = createDrawCounters();
   const dpr = window.devicePixelRatio || 1;
@@ -1004,81 +492,82 @@ function drawBoard() {
       // Kick off async rebuild (pre-decodes images to avoid GPU stall).
       // Draw all objects directly this frame while the rebuild is pending.
       _rebuildOffscreenAsync();
-      const setupStart = performance.now();
+      const setupStart = collectDrawDebug ? performance.now() : 0;
       resetCanvasToScreen(ctx);
       fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
       setWorldCanvasTransform(ctx, dpr);
-      drawPhases.backgroundSetupMs = performance.now() - setupStart;
-      const objectsStart = performance.now();
+      if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
+      const objectsStart = collectDrawDebug ? performance.now() : 0;
       const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, viewportRect });
-      drawPhases.objectLoopMs = performance.now() - objectsStart;
+      if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
       drawnImages += drawn.drawnImages;
       drawnText += drawn.drawnText;
     } else {
       // Blit cached offscreen (background + all non-editing objects)
-      const blitStart = performance.now();
+      const blitStart = collectDrawDebug ? performance.now() : 0;
       resetCanvasToScreen(ctx);
       ctx.drawImage(_offscreen, 0, 0);
-      drawPhases.offscreenBlitMs = performance.now() - blitStart;
+      if (collectDrawDebug) drawPhases.offscreenBlitMs = performance.now() - blitStart;
     }
 
-    const editStart = performance.now();
+    const editStart = collectDrawDebug ? performance.now() : 0;
     setWorldCanvasTransform(ctx, dpr);
     drawEditingTextOverlay(ctx);
     resetCanvasToScreen(ctx);
-    drawPhases.editingOverlayMs = performance.now() - editStart;
+    if (collectDrawDebug) drawPhases.editingOverlayMs = performance.now() - editStart;
   } else {
-    const setupStart = performance.now();
+    const setupStart = collectDrawDebug ? performance.now() : 0;
     resetCanvasToScreen(ctx);
     fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
     setWorldCanvasTransform(ctx, dpr);
-    drawPhases.backgroundSetupMs = performance.now() - setupStart;
-    const objectsStart = performance.now();
+    if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
+    const objectsStart = collectDrawDebug ? performance.now() : 0;
     const drawn = drawVisibleObjects(ctx, counters, { viewportRect });
-    drawPhases.objectLoopMs = performance.now() - objectsStart;
+    if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
     drawnImages = drawn.drawnImages;
     drawnText = drawn.drawnText;
-    const resetStart = performance.now();
+    const resetStart = collectDrawDebug ? performance.now() : 0;
     resetCanvasToScreen(ctx);
-    drawPhases.resetMs = performance.now() - resetStart;
+    if (collectDrawDebug) drawPhases.resetMs = performance.now() - resetStart;
   }
   ViewportDebug.count('croppedImages', counters.croppedImages);
   ViewportDebug.count('imageDrawMissing', counters.missingImages);
   ViewportDebug.count('imageDrawFallback', counters.fallbackImages);
   ViewportDebug.count('imageDrawErrors', counters.erroredImages);
-  const drawMeta = {
-    source: _activeRenderSource,
-    drawnImages,
-    drawnText,
-    dpr,
-    zoom,
-    panX,
-    panY,
-    canvasW: boardCanvas.width,
-    canvasH: boardCanvas.height,
-    viewportX1: viewportRect.x1,
-    viewportY1: viewportRect.y1,
-    viewportX2: viewportRect.x2,
-    viewportY2: viewportRect.y2,
-    viewportW: viewportRect.x2 - viewportRect.x1,
-    viewportH: viewportRect.y2 - viewportRect.y1,
-    editing: !!editingId,
-    offscreenDirty: !!_offscreenDirty,
-    objectCount: objects.length,
-    totalMeasuredMs: performance.now() - drawStart,
-    ...drawPhases,
-    ...counters,
-  };
-  _lastDrawBoardMeta = drawMeta;
-  ViewportDebug.end(dbg, drawMeta);
+  if (collectDrawDebug) {
+    const drawMeta = {
+      source: _activeRenderSource,
+      drawnImages,
+      drawnText,
+      dpr,
+      zoom,
+      panX,
+      panY,
+      canvasW: boardCanvas.width,
+      canvasH: boardCanvas.height,
+      viewportX1: viewportRect.x1,
+      viewportY1: viewportRect.y1,
+      viewportX2: viewportRect.x2,
+      viewportY2: viewportRect.y2,
+      viewportW: viewportRect.x2 - viewportRect.x1,
+      viewportH: viewportRect.y2 - viewportRect.y1,
+      editing: !!editingId,
+      offscreenDirty: !!_offscreenDirty,
+      objectCount: objects.length,
+      totalMeasuredMs: performance.now() - drawStart,
+      ...drawPhases,
+      ...counters,
+    };
+    _lastDrawBoardMeta = drawMeta;
+    ViewportDebug.end(dbg, drawMeta);
+  } else {
+    _lastDrawBoardMeta = null;
+    ViewportDebug.end(dbg);
+  }
 }
 
 function hitTest(wx, wy) {
-  for (let i = objects.length - 1; i >= 0; i--) {
-    const obj = objects[i];
-    if (wx >= obj.x && wx <= obj.x + obj.w && wy >= obj.y && wy <= obj.y + obj.h) return obj;
-  }
-  return null;
+  return BoardObjectGeometry.topObjectAtWorldPoint({ x: wx, y: wy });
 }
 
 function applyTransform(frameDbg = null) {
@@ -1088,26 +577,35 @@ function applyTransform(frameDbg = null) {
     return;
   }
   if (editingId) invalidateOffscreen();
-  const drawStart = performance.now();
+  const collectTransformDebug = ViewportDebug.isEnabled();
+  const drawStart = collectTransformDebug ? performance.now() : 0;
   drawBoard();
-  const drawMs = performance.now() - drawStart;
-  ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
-  ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
-  const zoomStart = performance.now();
+  const drawMs = collectTransformDebug ? performance.now() - drawStart : 0;
+  if (collectTransformDebug) {
+    ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
+    ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
+  }
+  const zoomStart = collectTransformDebug ? performance.now() : 0;
   updateZoomDisplay();
-  const zoomMs = performance.now() - zoomStart;
-  ViewportDebug.step(dbg, 'updateZoomDisplay', { ms: zoomMs });
-  ViewportDebug.step(frameDbg, 'updateZoomDisplay', { ms: zoomMs });
-  const saveStart = performance.now();
+  const zoomMs = collectTransformDebug ? performance.now() - zoomStart : 0;
+  if (collectTransformDebug) {
+    ViewportDebug.step(dbg, 'updateZoomDisplay', { ms: zoomMs });
+    ViewportDebug.step(frameDbg, 'updateZoomDisplay', { ms: zoomMs });
+  }
+  const saveStart = collectTransformDebug ? performance.now() : 0;
   saveViewport();
-  const saveMs = performance.now() - saveStart;
-  ViewportDebug.step(dbg, 'saveViewport', { ms: saveMs });
-  ViewportDebug.step(frameDbg, 'saveViewport', { ms: saveMs });
-  const overlayStart = performance.now();
+  const saveMs = collectTransformDebug ? performance.now() - saveStart : 0;
+  if (collectTransformDebug) {
+    ViewportDebug.step(dbg, 'saveViewport', { ms: saveMs });
+    ViewportDebug.step(frameDbg, 'saveViewport', { ms: saveMs });
+  }
+  const overlayStart = collectTransformDebug ? performance.now() : 0;
   updateSelectionOverlay();
-  const overlayMs = performance.now() - overlayStart;
-  ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: overlayMs });
-  ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs });
+  const overlayMs = collectTransformDebug ? performance.now() - overlayStart : 0;
+  if (collectTransformDebug) {
+    ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: overlayMs });
+    ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs });
+  }
   scheduleVisibleHydrationAfterIdle();
   if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
     scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
@@ -1135,6 +633,37 @@ function setCanvasImageQuality(context) {
   context.imageSmoothingQuality = 'high';
 }
 
+BoardRenderer = BoardfishRenderer.createBoardRenderer({
+  objects: () => objects,
+  imageStore: () => imageStore,
+  imageCache: () => imageCache,
+  imageBitmapCache: () => imageBitmapCache,
+  viewportCullingEnabled: () => viewportCullingEnabled,
+  zoom: () => zoom,
+  panX: () => panX,
+  panY: () => panY,
+  dpr: () => window.devicePixelRatio || 1,
+  font: FONT,
+  textPad: TEXT_PAD,
+  textBaselineYOffset: TEXT_BASELINE_Y_OFFSET,
+  lineHeight: LINE_H,
+  canvasTextColor,
+  currentViewportWorldRect,
+  getWrappedLines,
+  imageTransformFromObject,
+  imageTransformNeedsRendering,
+  isSidewaysRotation,
+  objectIntersectsRect,
+  selectImageSourceForDraw,
+  setCanvasImageQuality,
+});
+
+const BoardObjectGeometry = BoardfishObjectGeometry.createObjectGeometry({
+  imageTransformFromObject,
+  isSidewaysRotation,
+  objects: () => objects,
+});
+
 function withRenderSource(source, fn) {
   const prev = _activeRenderSource;
   _activeRenderSource = source || prev;
@@ -1151,12 +680,13 @@ function scheduleFrame(source = 'unknown') {
     ViewportDebug.count('coalescedFrames');
     return;
   }
-  _frameScheduledAt = performance.now();
+  const collectDebug = ViewportDebug.isEnabled();
+  _frameScheduledAt = collectDebug ? performance.now() : 0;
   ViewportDebug.count('scheduledFrames');
   _frameRaf = requestAnimationFrame(() => {
     const sources = [...new Set(_frameSources)];
     _frameSources = [];
-    const frameDbg = ViewportDebug.frameStart(performance.now() - _frameScheduledAt);
+    const frameDbg = collectDebug ? ViewportDebug.frameStart(performance.now() - _frameScheduledAt) : null;
     ViewportDebug.step(frameDbg, 'sources', { sources: sources.join(',') });
     _frameRaf = null;
     const doTransform = _needTransform;
@@ -1168,23 +698,23 @@ function scheduleFrame(source = 'unknown') {
 
     if (doTransform) {
       ViewportDebug.count('transformFrames');
-      const transformStart = performance.now();
+      const transformStart = collectDebug ? performance.now() : 0;
       withRenderSource(sources.join(',') || 'transform', () => applyTransform(frameDbg));
-      ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
+      if (collectDebug) ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
       ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sources.join(',') });
       return;
     }
     if (doBoard) {
       ViewportDebug.count('boardFrames');
-      const drawStart = performance.now();
+      const drawStart = collectDebug ? performance.now() : 0;
       withRenderSource(sources.join(',') || 'board', () => drawBoard());
-      ViewportDebug.step(frameDbg, 'drawBoard', { ms: performance.now() - drawStart, ...(_lastDrawBoardMeta || {}) });
+      if (collectDebug) ViewportDebug.step(frameDbg, 'drawBoard', { ms: performance.now() - drawStart, ...(_lastDrawBoardMeta || {}) });
     }
     if (doOverlay) {
-      const overlayStart = performance.now();
+      const overlayStart = collectDebug ? performance.now() : 0;
       ViewportDebug.count('overlayFrames');
       updateSelectionOverlay();
-      ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
+      if (collectDebug) ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
     }
     ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sources.join(',') });
   });

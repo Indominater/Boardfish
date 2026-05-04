@@ -1,50 +1,32 @@
 'use strict';
 
-var eyedropperLoupe = document.getElementById('eyedropper-loupe');
-var eyedropperPreview = document.getElementById('eyedropper-preview');
-var eyedropperCanvas = document.getElementById('eyedropper-canvas');
-var eyedropperSwatch = document.getElementById('eyedropper-swatch');
-var eyedropperHex = document.getElementById('eyedropper-hex');
-var eyedropperHsl = document.getElementById('eyedropper-hsl');
-var eyedropperRgb = document.getElementById('eyedropper-rgb');
-var eyedropperCtx = eyedropperCanvas?.getContext('2d', { willReadFrequently: true });
-var eyedropperRenderedSampleCanvas = document.createElement('canvas');
-var eyedropperRenderedSampleCtx = eyedropperRenderedSampleCanvas.getContext('2d', { willReadFrequently: true });
-var eyedropperEnabled = false;
-var eyedropperSampling = false;
-var _eyedropperLastSampleEvent = null;
-var _eyedropperPendingSampleEvent = null;
-var _eyedropperSampleRaf = null;
-var _eyedropperShieldRelease = null;
-var eyedropperSafeImageCache = new Map();
-var eyedropperSafeImagePromises = new Map();
-var eyedropperSafeDisplayReloadPromises = new Map();
-var eyedropperSafeScaledBitmapCache = new Map();
-var eyedropperSafeScaledBitmapPending = new Set();
-var eyedropperSafeScaledBitmapPendingBytes = new Map();
-var eyedropperSafeScaledBitmapBytes = 0;
-var eyedropperSafeScaledBitmapUseCounter = 1;
-var eyedropperSafeDisplayProbeFailures = new Map();
-var eyedropperNativeSourceSkipLogged = new Set();
-var eyedropperReadbackProbeCanvas = document.createElement('canvas');
-var eyedropperReadbackProbeCtx = eyedropperReadbackProbeCanvas.getContext('2d', { willReadFrequently: true });
-var _eyedropperPrewarmRaf = null;
-var _eyedropperPendingPrewarmEvent = null;
-var _eyedropperViewportPrewarmRaf = null;
-var _eyedropperViewportPrewarmScheduled = false;
-var _eyedropperLoupeHorizontalSide = 'right';
-var EYEDROPPER_PREWARM_LIMIT = 16;
-var EYEDROPPER_VIEWPORT_PREWARM_LIMIT = Number.POSITIVE_INFINITY;
-var EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT = 256 * 1024 * 1024;
-var EYEDROPPER_PREWARM_PAD_CSS = 220;
-var EYEDROPPER_PREVIEW_ZOOM_SCALE = 3;
-var EYEDROPPER_PREVIEW_CSS = 96;
-var EYEDROPPER_MENU_CSS_WIDTH = 280;
-var EYEDROPPER_MENU_CSS_HEIGHT = 392;
+const EyedropperGeometry = BoardfishEyedropperGeometry.createEyedropperGeometry({
+  boardCanvas: () => boardCanvas,
+  canvasBackgroundColor: () => getComputedStyle(canvas).backgroundColor,
+  imageTransformFromObject,
+  isSidewaysRotation,
+  objects: () => objects,
+  parseCssColor,
+  toWorld: () => (typeof toWorld === 'function' ? toWorld : null),
+  view: () => ({ panX, panY, zoom }),
+});
+globalThis.boardBackgroundPixel = EyedropperGeometry.boardBackgroundPixel;
+globalThis.clientToBoardScreenPoint = EyedropperGeometry.clientToBoardScreenPoint;
+globalThis.clientToBoardWorldPoint = EyedropperGeometry.clientToBoardWorldPoint;
+globalThis.displayedBoardSourcePoint = EyedropperGeometry.displayedBoardSourcePoint;
+globalThis.objectContainsWorldPoint = EyedropperGeometry.objectContainsWorldPoint;
+globalThis.screenToBoardWorldPoint = EyedropperGeometry.screenToBoardWorldPoint;
+globalThis.topObjectAtWorldPoint = EyedropperGeometry.topObjectAtWorldPoint;
+globalThis.worldPointToImageLocalUnit = EyedropperGeometry.worldPointToImageLocalUnit;
 
 function cssPx(value) {
   const px = Number.parseFloat(value);
   return Number.isFinite(px) ? px : 0;
+}
+
+function eyedropperLoupeCssWidth(style = eyedropperLoupe ? getComputedStyle(eyedropperLoupe) : null) {
+  if (!style) return 0;
+  return cssPx(style.width) || cssPx(style.getPropertyValue('--eyedropper-loupe-width'));
 }
 
 function eyedropperPreviewCssSize() {
@@ -55,7 +37,7 @@ function eyedropperPreviewCssSize() {
   if (!style) return EYEDROPPER_PREVIEW_CSS;
 
   const borderX = cssPx(style.borderLeftWidth) + cssPx(style.borderRightWidth);
-  const declaredWidth = cssPx(style.width) || EYEDROPPER_MENU_CSS_WIDTH;
+  const declaredWidth = eyedropperLoupeCssWidth(style) || EYEDROPPER_PREVIEW_CSS;
   const viewportMax = Math.max(1, window.innerWidth - 24);
   const outerWidth = Math.min(declaredWidth, viewportMax);
   // The preview wrapper has negative horizontal margins that bleed through the
@@ -71,859 +53,136 @@ function eyedropperPreviewDrawSize(dpr = window.devicePixelRatio || 1) {
   return Math.max(1, Math.round(eyedropperPreviewCssSize() * dpr));
 }
 
-var EyedropperDebug = (() => {
-  const core = createDebugRecorder({
-    maxEvents: 500,
-    label: '[Boardfish eyedropper]',
-    sanitize: (value) => sanitizeDebugMeta(value, { roundNumbers: true }),
-  });
-  const events = core._events;
-  let lastSample = null;
-  const MAX_SLOW_SAMPLES = 80;
-  const SLOW_SAMPLE_MS = 16.7;
-  const slowSamples = [];
-  const phaseStats = {};
-  const perfStats = {
-    sampleMoves: 0,
-    sampleCommits: 0,
-    sampleCoalescedMoves: 0,
-    prewarmScheduled: 0,
-    prewarmCoalesced: 0,
-    prewarmRunsTimed: 0,
-    slowSamples: 0,
-    maxSampleMs: 0,
-    maxPrewarmMs: 0,
-  };
-  const stats = {
-    readbackFailures: 0,
-    fallbackSamples: 0,
-    unsafeImageSkips: 0,
-    safeDisplayImages: 0,
-    safeDisplayProbeFailures: 0,
-    safeDisplayCorsLoads: 0,
-    safeDisplayCorsPending: 0,
-    safeDisplayCorsFailures: 0,
-    safeDataUrlImages: 0,
-    safeDataUrlLoads: 0,
-    safeDataUrlPending: 0,
-    nativeSourceHydrationSkipped: 0,
-    prewarmRuns: 0,
-    prewarmCandidates: 0,
-    prewarmReady: 0,
-    viewportPrewarmRuns: 0,
-    viewportPrewarmCandidates: 0,
-    viewportPrewarmReady: 0,
-    viewportScalePrewarmReady: 0,
-    viewportScalePrewarmQueued: 0,
-    safeScaledEvictions: 0,
-    safeScaledMemorySkips: 0,
-  };
+function inputEventAgeMs(e, now = performance.now()) {
+  const timeStamp = Number(e?.timeStamp);
+  if (!Number.isFinite(timeStamp) || timeStamp <= 0) return null;
+  if (timeStamp > now + 100000 && typeof Date.now === 'function') return Math.max(0, Date.now() - timeStamp);
+  return Math.max(0, now - timeStamp);
+}
 
-  function statKey(where) {
-    return String(where || 'unknown').replace(/[^a-z0-9]+(.)?/gi, (_, ch) => ch ? ch.toUpperCase() : '');
-  }
-
-  function countStat(key, amount = 1) {
-    if (!core.enabled) return;
-    stats[key] = (stats[key] || 0) + amount;
-  }
-
-  function roundMs(value) {
-    return Math.round((Number(value) || 0) * 100) / 100;
-  }
-
-  function recordPhase(name, ms) {
-    if (!core.enabled || !name) return;
-    const value = Number(ms) || 0;
-    const stat = phaseStats[name] || { count: 0, totalMs: 0, maxMs: 0 };
-    stat.count++;
-    stat.totalMs += value;
-    stat.maxMs = Math.max(stat.maxMs, value);
-    phaseStats[name] = stat;
-  }
-
-  function recordPhases(timings = {}) {
-    if (!core.enabled) return;
-    for (const [name, ms] of Object.entries(timings)) {
-      if (name.endsWith('Changed')) continue;
-      recordPhase(name, ms);
-    }
-  }
-
-  function compactTimings(timings = {}) {
-    const out = {};
-    for (const [name, ms] of Object.entries(timings)) out[name] = roundMs(ms);
-    return out;
-  }
-
-  function recordSampleTiming(clientX, clientY, previewSample = null, timings = {}) {
-    if (!core.enabled) return;
-    perfStats.sampleCommits++;
-    recordPhases(timings);
-    const sampleMs = Number(timings.total || 0);
-    perfStats.maxSampleMs = Math.max(perfStats.maxSampleMs, sampleMs);
-    if (sampleMs > SLOW_SAMPLE_MS) {
-      perfStats.slowSamples++;
-      slowSamples.push({
-        at: roundMs(performance.now()),
-        clientX,
-        clientY,
-        sampleMs: roundMs(sampleMs),
-        topObjectId: previewSample?.topObjectId || '',
-        drawnImages: previewSample?.drawnImages ?? '',
-        drawnText: previewSample?.drawnText ?? '',
-        testedObjects: previewSample?.testedObjects ?? '',
-        intersectingObjects: previewSample?.intersectingObjects ?? '',
-        missingImages: previewSample?.counters?.missingImages ?? '',
-        pendingImages: previewSample?.counters?.readbackSafePendingImages ?? '',
-        timings: compactTimings(timings),
-      });
-      if (slowSamples.length > MAX_SLOW_SAMPLES) slowSamples.shift();
-    }
-  }
-
-  function recordPrewarmTiming(summary = {}, ms = 0) {
-    if (!core.enabled) return;
-    perfStats.prewarmRunsTimed++;
-    perfStats.maxPrewarmMs = Math.max(perfStats.maxPrewarmMs, Number(ms) || 0);
-    recordPhase('prewarm', ms);
-    if (ms > SLOW_SAMPLE_MS) {
-      slowSamples.push({
-        at: roundMs(performance.now()),
-        kind: 'prewarm',
-        sampleMs: roundMs(ms),
-        candidates: summary?.candidates ?? '',
-        ready: summary?.ready ?? '',
-        pending: summary?.pending ?? '',
-        displayReused: summary?.displayReused ?? '',
-        dataUrlReady: summary?.dataUrlReady ?? '',
-      });
-      if (slowSamples.length > MAX_SLOW_SAMPLES) slowSamples.shift();
-    }
-  }
-
-  function countPerf(name, amount = 1) {
-    if (!core.enabled) return;
-    perfStats[name] = (perfStats[name] || 0) + amount;
-  }
-
-  function debugLimit(options = {}, fallback = 25) {
-    const raw = typeof options === 'number' ? options : options?.limit;
-    return Math.max(1, Math.min(200, Number(raw) || fallback));
-  }
-
-  function recentRows(rows, options = {}, fallback = 25) {
-    const limit = debugLimit(options, fallback);
-    return rows.slice(Math.max(0, rows.length - limit));
-  }
-
-  function compactPixel(value) {
-    return value || '';
-  }
-
-  function sampleRow(e) {
-    return {
-      at: e.at,
-      x: e.meta?.clientX ?? '',
-      y: e.meta?.clientY ?? '',
-      zoom: e.meta?.zoom ?? '',
-      previewZoom: e.meta?.previewZoom ?? '',
-      previewCssSize: e.meta?.previewCssSize ?? '',
-      previewRectWidth: e.meta?.previewRectWidth ?? '',
-      previewDrawSize: e.meta?.previewDrawSize ?? '',
-      top: e.meta?.topObjectId || '',
-      topType: e.meta?.topObjectType || '',
-      center: compactPixel(e.meta?.centerPixel),
-      drawnImages: e.meta?.drawnImages ?? '',
-      missingImages: e.meta?.missingImages ?? '',
-      pendingImages: e.meta?.readbackSafePendingImages ?? '',
-      safeDisplayImages: e.meta?.safeDisplayImages ?? '',
-      safeDisplayCorsImages: e.meta?.safeDisplayCorsImages ?? '',
-      safeDataUrlImages: e.meta?.safeDataUrlImages ?? '',
-      nativeSkipped: e.meta?.nativeSourceHydrationSkipped ?? '',
-      lastMissingKey: e.meta?.lastMissingKey || '',
-      lastMissingReason: e.meta?.lastMissingReason || '',
-    };
-  }
-
-  function failureRow(e) {
-    return {
-      at: e.at,
-      step: e.step,
-      where: e.meta?.where || '',
-      objectId: e.meta?.objectId || '',
-      imgKey: e.meta?.imgKey || '',
-      source: e.meta?.source || '',
-      cacheSource: e.meta?.cacheSource || '',
-      reason: e.meta?.reason || '',
-      error: e.meta?.error || '',
-    };
-  }
-
-  function compactLastSample(sample = lastSample) {
-    if (!sample) return null;
-    return {
-      clientX: sample.clientX,
-      clientY: sample.clientY,
-      worldX: sample.worldX,
-      worldY: sample.worldY,
-      zoom: sample.zoom,
-      previewZoom: sample.previewZoom,
-      previewCssSize: sample.previewCssSize,
-      previewRectWidth: sample.previewRectWidth,
-      previewDrawSize: sample.previewDrawSize,
-      topObjectId: sample.topObjectId,
-      topObjectType: sample.topObjectType,
-      centerPixel: sample.centerPixel,
-      previewPixel: sample.previewPixel,
-      readoutSource: sample.readoutSource,
-      readoutReason: sample.readoutReason,
-      readoutObjectId: sample.readoutObjectId,
-      readoutObjectType: sample.readoutObjectType,
-      readoutSourcePixel: sample.readoutSourcePixel,
-      readoutSourceRgba: sample.readoutSourceRgba,
-      readoutSourceX: sample.readoutSourceX,
-      readoutSourceY: sample.readoutSourceY,
-      readoutSourceW: sample.readoutSourceW,
-      readoutSourceH: sample.readoutSourceH,
-      readoutLayers: sample.readoutLayers,
-      drawnImages: sample.drawnImages,
-      drawnText: sample.drawnText,
-      missingImages: sample.missingImages,
-      readbackSafePendingImages: sample.readbackSafePendingImages,
-      safeDisplayImages: sample.safeDisplayImages,
-      safeDisplayCorsImages: sample.safeDisplayCorsImages,
-      safeDataUrlImages: sample.safeDataUrlImages,
-      nativeSourceHydrationSkipped: sample.nativeSourceHydrationSkipped,
-      lastMissingKey: sample.lastMissingKey,
-      lastMissingReason: sample.lastMissingReason,
-      textHits: Array.isArray(sample.textHits) ? sample.textHits.length : sample.textHits,
-    };
-  }
-
-  function rectRow(rect, prefix) {
-    if (!rect) return {};
-    return {
-      [`${prefix}X1`]: rect.x1,
-      [`${prefix}Y1`]: rect.y1,
-      [`${prefix}X2`]: rect.x2,
-      [`${prefix}Y2`]: rect.y2,
-      [`${prefix}W`]: rect.x2 - rect.x1,
-      [`${prefix}H`]: rect.y2 - rect.y1,
-    };
-  }
-
-  function textInkBounds(obj) {
-    if (!obj || obj.type !== 'text') return null;
-    const lines = getWrappedLines(obj);
-    let x2 = obj.x + TEXT_PAD;
-    for (const line of lines) x2 = Math.max(x2, obj.x + TEXT_PAD + measureTextW(line.text));
-    return {
-      x1: obj.x + TEXT_PAD,
-      y1: obj.y + TEXT_PAD,
-      x2,
-      y2: obj.y + TEXT_PAD + Math.max(lines.length, 1) * LINE_H,
-      lines: lines.length,
-      maxLineW: x2 - obj.x - TEXT_PAD,
-    };
-  }
-
-  function textLineAtPoint(obj, point) {
-    const lines = getWrappedLines(obj);
-    const localX = point.x - obj.x;
-    const localY = point.y - obj.y;
-    let activeLine = null;
-    let lineIndex = -1;
-    for (let i = 0; i < lines.length; i++) {
-      const y1 = TEXT_PAD + i * LINE_H;
-      const y2 = y1 + LINE_H;
-      if (localY >= y1 && localY <= y2) {
-        activeLine = lines[i];
-        lineIndex = i;
-        break;
-      }
-    }
-    if (!activeLine && lines.length) {
-      lineIndex = localY < TEXT_PAD ? 0 : lines.length - 1;
-      activeLine = lines[lineIndex];
-    }
-    const lineText = activeLine?.text || '';
-    const lineW = measureTextW(lineText);
-    const lineX = localX - TEXT_PAD;
-    const lineY = localY - (TEXT_PAD + Math.max(0, lineIndex) * LINE_H);
-    return {
-      centerLocalX: localX,
-      centerLocalY: localY,
-      lineIndex,
-      lineText: lineText.slice(0, 60),
-      lineX,
-      lineY,
-      lineW,
-      lineH: LINE_H,
-      lineBaselineY: TEXT_BASELINE_Y_OFFSET,
-      insideLineTextWidth: lineX >= 0 && lineX <= lineW,
-      insideLineBox: lineY >= 0 && lineY <= LINE_H,
-    };
-  }
-
-  function textNearPoint(point, padWorld = 2) {
-    const rows = [];
-    for (let i = objects.length - 1; i >= 0; i--) {
-      const obj = objects[i];
-      if (obj?.type !== 'text') continue;
-      const saved = { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h };
-      const ink = textInkBounds(obj);
-      const inSaved = rectContainsPoint(saved, point);
-      const inInk = rectContainsPoint({
-        x1: ink.x1 - padWorld,
-        y1: ink.y1 - padWorld,
-        x2: ink.x2 + padWorld,
-        y2: ink.y2 + padWorld,
-      }, point);
-      if (!inSaved && !inInk) continue;
-      rows.push({
-        id: obj.id,
-        z: obj.z,
-        inSaved,
-        inInk,
-        content: String(obj.data?.content || '').slice(0, 60),
-        savedW: obj.w,
-        savedH: obj.h,
-        inkW: ink.maxLineW,
-        inkH: ink.y2 - ink.y1,
-        overflowRight: Math.max(0, ink.x2 - saved.x2),
-        overflowBottom: Math.max(0, ink.y2 - saved.y2),
-        lines: ink.lines,
-        ...textLineAtPoint(obj, point),
-        ...rectRow(saved, 'saved'),
-        ...rectRow(ink, 'ink'),
-      });
-    }
-    return rows;
-  }
-
-  function sampleSnapshot(clientX, clientY, previewSample = null, centerPixel = null, readoutSampleInfo = null) {
-    const point = clientToBoardWorldPoint(clientX, clientY);
-    const topObject = topObjectAtWorldPoint(point);
-    const dpr = window.devicePixelRatio || 1;
-    const previewRect = eyedropperCanvas?.getBoundingClientRect();
-    const drawSize = previewSample?.drawSize || eyedropperPreviewDrawSize(dpr);
-    const previewCssSize = previewSample?.previewCssSize || (drawSize / dpr);
-    const previewZoom = Math.max(zoom || 1, 0.0001) * EYEDROPPER_PREVIEW_ZOOM_SCALE;
-    const renderCssSize = drawSize / dpr;
-    const halfWorld = renderCssSize / (2 * previewZoom);
-    const previewWorldRect = previewSample?.viewportRect || {
-      x1: point.x - halfWorld,
-      y1: point.y - halfWorld,
-      x2: point.x + halfWorld,
-      y2: point.y + halfWorld,
-    };
-    const counters = previewSample?.counters || {};
-    const readoutSample = displayedBoardPixelSampleInfo(clientX, clientY, { logFailures: false });
-    return {
-      clientX,
-      clientY,
-      worldX: point.x,
-      worldY: point.y,
-      zoom,
-      dpr,
-      previewCssSize,
-      previewRectWidth: previewRect?.width || '',
-      previewDrawSize: drawSize,
-      previewZoom: previewSample?.previewZoom ?? previewZoom,
-      topObjectId: topObject?.id || '',
-      topObjectType: topObject?.type || '',
-      previewPainted: !!previewSample?.painted,
-      previewFallback: !!previewSample?.usedFallback,
-      exactCenterCanvasX: previewSample?.centerX ?? '',
-      exactCenterCanvasY: previewSample?.centerY ?? '',
-      previewPixel: rgbaToHex(previewSample?.pixel),
-      centerPixel: rgbaToHex(centerPixel),
-      readoutSource: readoutSampleInfo?.source || '',
-      readoutReason: readoutSampleInfo?.reason || '',
-      readoutObjectId: readoutSampleInfo?.objectId || '',
-      readoutObjectType: readoutSampleInfo?.objectType || '',
-      readoutSourcePixel: rgbaToHex(readoutSampleInfo?.sourcePixel),
-      readoutSourceRgba: readoutSampleInfo?.sourcePixel ? readoutSampleInfo.sourcePixel.join(' ') : '',
-      readoutSourceX: readoutSampleInfo?.sourceX ?? '',
-      readoutSourceY: readoutSampleInfo?.sourceY ?? '',
-      readoutSourceW: readoutSampleInfo?.sourceW ?? '',
-      readoutSourceH: readoutSampleInfo?.sourceH ?? '',
-      readoutLayers: readoutSampleInfo?.layers?.length ?? '',
-      readoutPixel: rgbaToHex(readoutSample.pixel),
-      readoutRgba: readoutSample.rgbaText,
-      readoutCanvasX: readoutSample.sourceX ?? '',
-      readoutCanvasY: readoutSample.sourceY ?? '',
-      readoutReason: readoutSample.reason || '',
-      readoutInBounds: readoutSample.inBounds ?? '',
-      readoutCanvasW: readoutSample.canvasW ?? '',
-      readoutCanvasH: readoutSample.canvasH ?? '',
-      readoutRectW: readoutSample.rectW ?? '',
-      readoutRectH: readoutSample.rectH ?? '',
-      readoutScaleX: readoutSample.scaleX ?? '',
-      readoutScaleY: readoutSample.scaleY ?? '',
-      displayedHex: eyedropperHex?.textContent || '',
-      displayedRgb: eyedropperRgb?.textContent || '',
-      drawnImages: previewSample?.drawnImages ?? '',
-      drawnText: previewSample?.drawnText ?? '',
-      testedObjects: previewSample?.testedObjects ?? '',
-      intersectingObjects: previewSample?.intersectingObjects ?? '',
-      sampleMs: previewSample?.timings?.total ?? '',
-      paintMs: previewSample?.timings?.paintPreview ?? '',
-      objectLoopMs: previewSample?.timings?.objectLoop ?? '',
-      readbackMs: previewSample?.timings?.readback ?? '',
-      previewReadbackMs: previewSample?.timings?.previewReadback ?? '',
-      canvasReadoutMs: previewSample?.timings?.canvasReadout ?? '',
-      blitMs: previewSample?.timings?.blit ?? '',
-      sizeMs: previewSample?.timings?.drawSize ?? '',
-      resizeMs: previewSample?.timings?.resizeVisible ?? '',
-      dotMs: previewSample?.timings?.dot ?? '',
-      readoutMs: previewSample?.timings?.readout ?? '',
-      positionMs: previewSample?.timings?.position ?? '',
-      bitmapImages: counters.bitmapImages ?? '',
-      elementImages: counters.elementImages ?? '',
-      fallbackImages: counters.fallbackImages ?? '',
-      safeDisplayImages: counters.safeDisplayImages ?? '',
-      safeDisplayCorsImages: counters.safeDisplayCorsImages ?? '',
-      safeDataUrlImages: counters.safeDataUrlImages ?? '',
-      nativeSourceHydrationSkipped: counters.nativeSourceHydrationSkipped ?? '',
-      readbackSafeImages: counters.readbackSafeImages ?? '',
-      readbackSafePendingImages: counters.readbackSafePendingImages ?? '',
-      readbackSafeScaledImages: counters.readbackSafeScaledImages ?? '',
-      missingImages: counters.missingImages ?? '',
-      erroredImages: counters.erroredImages ?? '',
-      scaledImages: counters.scaledImages ?? '',
-      scaledFallbackFull: counters.scaledFallbackFull ?? '',
-      fullScaleImages: counters.fullScaleImages ?? '',
-      culledImages: counters.culledImages ?? '',
-      culledText: counters.culledText ?? '',
-      avgScale: counters.scaledImages ? counters.scaledImageScaleTotal / counters.scaledImages : '',
-      avgTargetScale: counters.scaledImages ? counters.scaledImageTargetScaleTotal / counters.scaledImages : '',
-      lastImageTargetScale: counters.lastImageTargetScale ?? '',
-      lastImageSelectedScale: counters.lastImageSelectedScale ?? '',
-      lastImageSourceW: counters.lastImageSourceW ?? '',
-      lastImageSourceH: counters.lastImageSourceH ?? '',
-      lastImageNeededW: counters.lastImageNeededW ?? '',
-      lastImageNeededH: counters.lastImageNeededH ?? '',
-      lastImageDpr: counters.lastImageDpr ?? '',
-      lastImageZoom: counters.lastImageZoom ?? '',
-      lastMissingKey: counters.lastMissingKey || '',
-      lastMissingId: counters.lastMissingId || '',
-      lastMissingReason: counters.lastMissingReason || '',
-      lastDrawErrorKey: counters.lastDrawErrorKey || '',
-      lastDrawErrorId: counters.lastDrawErrorId || '',
-      lastDrawError: counters.lastDrawError || '',
-      textHits: textNearPoint(point),
-      ...rectRow(previewWorldRect, 'preview'),
-    };
-  }
-
-  function logSample(clientX, clientY, previewSample = null, centerPixel = null, readoutSampleInfo = null) {
-    if (!core.enabled) return;
-    lastSample = sampleSnapshot(clientX, clientY, previewSample, centerPixel, readoutSampleInfo);
-    core.push({
-      step: 'sample',
-      meta: {
-        ...lastSample,
-        textHits: lastSample.textHits.length,
-        textHitIds: lastSample.textHits.map(row => `${row.id}:${row.inSaved ? 'saved' : 'ink-only'}`).join(','),
-      },
-    });
-  }
-
-  function logReadbackFailure(where, meta = {}) {
-    if (!core.enabled) return;
-    countStat('readbackFailures');
-    countStat(`${statKey(where)}ReadbackFailures`);
-    core.push({
-      step: 'readback-fail',
-      meta: { where, ...meta },
-    });
-  }
-
-  function logFallbackSample(meta = {}) {
-    if (!core.enabled) return;
-    countStat('fallbackSamples');
-    core.push({ step: 'fallback-sample', meta });
-  }
-
-  function logUnsafeImageSkip(meta = {}) {
-    if (!core.enabled) return;
-    countStat('unsafeImageSkips');
-    core.push({ step: 'unsafe-image-skip', meta });
-  }
-
-  function count(name, amount = 1) {
-    countStat(name, amount);
-  }
-
-  function enable(options = {}) {
-    core.enable(options);
-    if (core.enabled) console.info('Boardfish eyedropper debugger enabled. Use BoardfishDebug.eyedropper.report() for compact JSON, plus .timingSummary(), .slowSampleSummary(), .status(), .imageSummary({ limit }), .safeImageCacheSummary(), .prewarmAt(clientX, clientY), .readbackFailures({ limit }), .last(), .summary({ limit }), .sampleAt(clientX, clientY), .textBoundsReport(), or .reset().');
-  }
-
-  function disable() {
-    core.disable();
-    console.info('Boardfish eyedropper debugger disabled.');
-  }
-
-  function summary(options = {}) {
-    const rows = recentRows(events.map((e) => ({
-      at: e.at,
-      step: e.step,
-      where: e.meta?.where || '',
-      x: e.meta?.clientX ?? '',
-      y: e.meta?.clientY ?? '',
-      wx: e.meta?.worldX ?? '',
-      wy: e.meta?.worldY ?? '',
-      zoom: e.meta?.zoom ?? '',
-      top: e.meta?.topObjectId || '',
-      topType: e.meta?.topObjectType || '',
-      center: e.meta?.centerPixel || '',
-      readoutSource: e.meta?.readoutSource || '',
-      readoutReason: e.meta?.readoutReason || '',
-      readoutObjectId: e.meta?.readoutObjectId || '',
-      readoutSourcePixel: e.meta?.readoutSourcePixel || '',
-      fallback: e.meta?.previewFallback ?? '',
-      previewZoom: e.meta?.previewZoom ?? '',
-      previewCssSize: e.meta?.previewCssSize ?? '',
-      previewRectWidth: e.meta?.previewRectWidth ?? '',
-      previewDrawSize: e.meta?.previewDrawSize ?? '',
-      drawnImages: e.meta?.drawnImages ?? '',
-      drawnText: e.meta?.drawnText ?? '',
-      testedObjects: e.meta?.testedObjects ?? '',
-      intersectingObjects: e.meta?.intersectingObjects ?? '',
-      sampleMs: e.meta?.sampleMs ?? '',
-      paintMs: e.meta?.paintMs ?? '',
-      objectLoopMs: e.meta?.objectLoopMs ?? '',
-      readbackMs: e.meta?.readbackMs ?? '',
-      previewReadbackMs: e.meta?.previewReadbackMs ?? '',
-      canvasReadoutMs: e.meta?.canvasReadoutMs ?? '',
-      blitMs: e.meta?.blitMs ?? '',
-      missingImages: e.meta?.missingImages ?? '',
-      erroredImages: e.meta?.erroredImages ?? '',
-      scaledImages: e.meta?.scaledImages ?? '',
-      scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
-      fullScaleImages: e.meta?.fullScaleImages ?? '',
-      safeDisplayImages: e.meta?.safeDisplayImages ?? '',
-      safeDisplayCorsImages: e.meta?.safeDisplayCorsImages ?? '',
-      safeDataUrlImages: e.meta?.safeDataUrlImages ?? '',
-      nativeSourceHydrationSkipped: e.meta?.nativeSourceHydrationSkipped ?? '',
-      readbackSafeImages: e.meta?.readbackSafeImages ?? '',
-      readbackSafePendingImages: e.meta?.readbackSafePendingImages ?? '',
-      readbackSafeScaledImages: e.meta?.readbackSafeScaledImages ?? '',
-      centerCanvasX: e.meta?.exactCenterCanvasX ?? '',
-      centerCanvasY: e.meta?.exactCenterCanvasY ?? '',
-      textHits: e.meta?.textHits ?? '',
-      textHitIds: e.meta?.textHitIds || '',
-      objectId: e.meta?.objectId || '',
-      imgKey: e.meta?.imgKey || '',
-      reason: e.meta?.reason || '',
-      error: e.meta?.error || '',
-    })), options, 30);
-    console.table(rows);
-    return rows;
-  }
-
-  function imageSummary(options = {}) {
-    const rows = recentRows(events
-      .filter(e => e.step === 'sample')
-      .map(e => ({
-        at: e.at,
-        x: e.meta?.clientX ?? '',
-        y: e.meta?.clientY ?? '',
-        zoom: e.meta?.zoom ?? '',
-        previewZoom: e.meta?.previewZoom ?? '',
-        previewCssSize: e.meta?.previewCssSize ?? '',
-        previewRectWidth: e.meta?.previewRectWidth ?? '',
-        previewDrawSize: e.meta?.previewDrawSize ?? '',
-        top: e.meta?.topObjectId || '',
-        topType: e.meta?.topObjectType || '',
-        center: e.meta?.centerPixel || '',
-        readback: e.meta?.previewFallback ? 'fallback' : 'ok',
-        drawnImages: e.meta?.drawnImages ?? '',
-        drawnText: e.meta?.drawnText ?? '',
-        testedObjects: e.meta?.testedObjects ?? '',
-        intersectingObjects: e.meta?.intersectingObjects ?? '',
-        sampleMs: e.meta?.sampleMs ?? '',
-        paintMs: e.meta?.paintMs ?? '',
-        objectLoopMs: e.meta?.objectLoopMs ?? '',
-        readbackMs: e.meta?.readbackMs ?? '',
-        previewReadbackMs: e.meta?.previewReadbackMs ?? '',
-        canvasReadoutMs: e.meta?.canvasReadoutMs ?? '',
-        blitMs: e.meta?.blitMs ?? '',
-        bitmapImages: e.meta?.bitmapImages ?? '',
-        elementImages: e.meta?.elementImages ?? '',
-        fallbackImages: e.meta?.fallbackImages ?? '',
-        safeDisplayImages: e.meta?.safeDisplayImages ?? '',
-        safeDisplayCorsImages: e.meta?.safeDisplayCorsImages ?? '',
-        safeDataUrlImages: e.meta?.safeDataUrlImages ?? '',
-        nativeSourceHydrationSkipped: e.meta?.nativeSourceHydrationSkipped ?? '',
-        readbackSafeImages: e.meta?.readbackSafeImages ?? '',
-        readbackSafePendingImages: e.meta?.readbackSafePendingImages ?? '',
-        readbackSafeScaledImages: e.meta?.readbackSafeScaledImages ?? '',
-        scaledImages: e.meta?.scaledImages ?? '',
-        scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
-        fullScaleImages: e.meta?.fullScaleImages ?? '',
-        avgScale: e.meta?.avgScale ?? '',
-        avgTargetScale: e.meta?.avgTargetScale ?? '',
-        lastImageTargetScale: e.meta?.lastImageTargetScale ?? '',
-        lastImageSelectedScale: e.meta?.lastImageSelectedScale ?? '',
-        lastImageSourceW: e.meta?.lastImageSourceW ?? '',
-        lastImageSourceH: e.meta?.lastImageSourceH ?? '',
-        lastImageNeededW: e.meta?.lastImageNeededW ?? '',
-        lastImageNeededH: e.meta?.lastImageNeededH ?? '',
-        lastImageDpr: e.meta?.lastImageDpr ?? '',
-        lastImageZoom: e.meta?.lastImageZoom ?? '',
-        missingImages: e.meta?.missingImages ?? '',
-        erroredImages: e.meta?.erroredImages ?? '',
-        lastMissingKey: e.meta?.lastMissingKey || '',
-        lastMissingReason: e.meta?.lastMissingReason || '',
-        lastDrawErrorKey: e.meta?.lastDrawErrorKey || '',
-        lastDrawError: e.meta?.lastDrawError || '',
-      })), options, 30);
-    console.table(rows);
-    return rows;
-  }
-
-  function readbackFailures(options = {}) {
-    const rows = recentRows(events
-      .filter(e => e.step === 'readback-fail' || e.step === 'fallback-sample' || e.step === 'unsafe-image-skip')
-      .map(e => ({
-        at: e.at,
-        step: e.step,
-        where: e.meta?.where || '',
-        objectId: e.meta?.objectId || '',
-        objectType: e.meta?.objectType || '',
-        imgKey: e.meta?.imgKey || '',
-        source: e.meta?.source || '',
-        cacheSource: e.meta?.cacheSource || '',
-        x: e.meta?.sourceX ?? e.meta?.x ?? '',
-        y: e.meta?.sourceY ?? e.meta?.y ?? '',
-        w: e.meta?.width ?? '',
-        h: e.meta?.height ?? '',
-        reason: e.meta?.reason || '',
-        error: e.meta?.error || '',
-      })), options, 25);
-    console.table(rows);
-    return rows;
-  }
-
-  function status() {
-    const out = { ...stats, ...perfStats };
-    console.table([out]);
-    return out;
-  }
-
-  function timingSummary(options = {}) {
-    const rows = Object.entries(phaseStats)
-      .map(([phase, stat]) => ({
-        phase,
-        count: stat.count,
-        avgMs: stat.count ? roundMs(stat.totalMs / stat.count) : 0,
-        maxMs: roundMs(stat.maxMs),
-        totalMs: roundMs(stat.totalMs),
-      }))
-      .sort((a, b) => b.totalMs - a.totalMs);
-    if (options.table !== false) console.table(rows);
-    return rows;
-  }
-
-  function slowSampleSummary(options = {}) {
-    const rows = recentRows(slowSamples, options, 25);
-    console.table(rows);
-    return rows;
-  }
-
-  function sampleAt(clientX, clientY) {
-    const x = Number(clientX);
-    const y = Number(clientY);
-    const dpr = window.devicePixelRatio || 1;
-    const drawSize = eyedropperPreviewDrawSize(dpr);
-    if (eyedropperCanvas && drawSize > 0) {
-      if (eyedropperCanvas.width !== drawSize) eyedropperCanvas.width = drawSize;
-      if (eyedropperCanvas.height !== drawSize) eyedropperCanvas.height = drawSize;
-    }
-    const previewSample = paintZoomedBoardPreview(x, y, drawSize);
-    const readoutSample = sampleEyedropperReadoutPixel(x, y, previewSample);
-    const centerPixel = readoutSample?.pixel;
-    const snapshot = sampleSnapshot(x, y, previewSample, centerPixel, readoutSample);
-    if (core.enabled) logSample(x, y, previewSample, centerPixel, readoutSample);
-    console.log(snapshot);
-    if (snapshot.textHits.length) console.table(snapshot.textHits);
-    return snapshot;
-  }
-
-  function readoutAt(clientX, clientY) {
-    const x = Number(clientX);
-    const y = Number(clientY);
-    const out = displayedBoardPixelSampleInfo(x, y, { logFailures: true });
-    console.table([out]);
-    return out;
-  }
-
-  function textBoundsReport() {
-    const rows = objects
-      .filter(obj => obj?.type === 'text')
-      .map((obj) => {
-        const ink = textInkBounds(obj);
-        return {
-          id: obj.id,
-          z: obj.z,
-          content: String(obj.data?.content || '').slice(0, 60),
-          savedW: obj.w,
-          savedH: obj.h,
-          inkW: ink.maxLineW,
-          inkH: ink.y2 - ink.y1,
-          overflowRight: Math.max(0, ink.x2 - (obj.x + obj.w)),
-          overflowBottom: Math.max(0, ink.y2 - (obj.y + obj.h)),
-          lines: ink.lines,
-        };
-      })
-      .sort((a, b) => (b.overflowRight + b.overflowBottom) - (a.overflowRight + a.overflowBottom));
-    console.table(rows);
-    return rows;
-  }
-
-  function safeImageCacheSummary(options = {}) {
-    const bySource = {};
-    for (const entry of eyedropperSafeImageCache.values()) {
-      const source = entry?.sourceKind || 'unknown';
-      bySource[source] = (bySource[source] || 0) + 1;
-    }
-    let scaledCount = 0;
-    let scaledBytes = 0;
-    for (const map of eyedropperSafeScaledBitmapCache.values()) {
-      for (const entry of map.values()) {
-        scaledCount++;
-        scaledBytes += entry?.bytes || 0;
-      }
-    }
-    let scaledPendingBytes = 0;
-    for (const bytes of eyedropperSafeScaledBitmapPendingBytes.values()) scaledPendingBytes += bytes || 0;
-    const out = {
-      cached: eyedropperSafeImageCache.size,
-      pendingLoads: eyedropperSafeImagePromises.size,
-      scaledCaches: eyedropperSafeScaledBitmapCache.size,
-      scaledVariants: scaledCount,
-      scaledMB: roundMs(scaledBytes / 1024 / 1024),
-      scaledLimitMB: roundMs(EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT / 1024 / 1024),
-      scaledPending: eyedropperSafeScaledBitmapPending.size,
-      scaledPendingMB: roundMs(scaledPendingBytes / 1024 / 1024),
-      scaledEvictions: stats.safeScaledEvictions,
-      scaledMemorySkips: stats.safeScaledMemorySkips,
-      displayProbeFailures: eyedropperSafeDisplayProbeFailures.size,
-      displayReloadPending: eyedropperSafeDisplayReloadPromises.size,
-      nativeSourceSkipsLogged: eyedropperNativeSourceSkipLogged.size,
-      ...bySource,
-    };
-    if (options.table !== false) console.table([out]);
-    return out;
-  }
-
-  function report(options = {}) {
-    const sampleEvents = events.filter(e => e.step === 'sample');
-    const failureEvents = events.filter(e => e.step === 'readback-fail' || e.step === 'fallback-sample' || e.step === 'unsafe-image-skip');
-    const sampleLimit = debugLimit(options?.samples ?? options, 12);
-    const failureLimit = debugLimit(options?.failures ?? options, 12);
-    const totals = {
-      events: events.length,
-      samples: sampleEvents.length,
-      failures: failureEvents.length,
-      sampleMoves: perfStats.sampleMoves,
-      sampleCommits: perfStats.sampleCommits,
-      coalescedMoves: perfStats.sampleCoalescedMoves,
-      prewarmScheduled: perfStats.prewarmScheduled,
-      prewarmCoalesced: perfStats.prewarmCoalesced,
-      prewarmRunsTimed: perfStats.prewarmRunsTimed,
-      viewportPrewarmRuns: stats.viewportPrewarmRuns,
-      viewportPrewarmCandidates: stats.viewportPrewarmCandidates,
-      viewportPrewarmReady: stats.viewportPrewarmReady,
-      slowSamples: perfStats.slowSamples,
-      maxSampleMs: roundMs(perfStats.maxSampleMs),
-      maxPrewarmMs: roundMs(perfStats.maxPrewarmMs),
-      samplesWithMissingImages: sampleEvents.filter(e => Number(e.meta?.missingImages) > 0).length,
-      samplesWithPendingImages: sampleEvents.filter(e => Number(e.meta?.readbackSafePendingImages) > 0).length,
-      samplesWithNativeSkips: sampleEvents.filter(e => Number(e.meta?.nativeSourceHydrationSkipped) > 0).length,
-      samplesUsingDisplayCache: sampleEvents.filter(e => Number(e.meta?.safeDisplayImages) > 0).length,
-      samplesUsingDisplayCorsCache: sampleEvents.filter(e => Number(e.meta?.safeDisplayCorsImages) > 0).length,
-      samplesUsingDataUrlCache: sampleEvents.filter(e => Number(e.meta?.safeDataUrlImages) > 0).length,
-    };
-    const out = {
-      stats: { ...stats },
-      perf: { ...perfStats },
-      timings: timingSummary({ table: false }),
-      safeCache: safeImageCacheSummary({ table: false }),
-      totals,
-      recentSamples: recentRows(sampleEvents.map(sampleRow), sampleLimit, sampleLimit),
-      slowSamples: recentRows(slowSamples, options?.slow ?? options, 12),
-      recentFailures: recentRows(failureEvents.map(failureRow), failureLimit, failureLimit),
-      last: compactLastSample(),
-    };
-    if (options.log !== false) console.log(out);
-    return out;
-  }
-
-  function prewarmAt(clientX, clientY, options = {}) {
-    const result = prewarmEyedropperSafeImages(Number(clientX), Number(clientY), options);
-    console.table([result.summary]);
-    if (result.rows.length) console.table(result.rows);
-    return result;
-  }
-
-  function last(options = {}) {
-    const compact = options?.compact !== false;
-    const out = compact ? compactLastSample() : lastSample;
-    console.log(out);
-    if (!compact && lastSample?.textHits?.length) console.table(lastSample.textHits);
-    return out;
-  }
-
-  function reset() {
-    core.reset();
-    lastSample = null;
-    for (const key of Object.keys(stats)) stats[key] = 0;
-    for (const key of Object.keys(perfStats)) perfStats[key] = 0;
-    for (const key of Object.keys(phaseStats)) delete phaseStats[key];
-    slowSamples.length = 0;
-  }
-
+function eyedropperPointerDebugEvent(e, receivedAt = performance.now()) {
   return {
-    enable,
-    disable,
-    setVerbose: core.setVerbose,
-    reset,
-    summary,
-    imageSummary,
-    safeImageCacheSummary,
-    report,
-    timingSummary,
-    slowSampleSummary,
-    readbackFailures,
-    status,
-    sampleAt,
-    readoutAt,
-    prewarmAt,
-    textBoundsReport,
-    last,
-    get enabled() { return core.enabled; },
-    get events() { return events.slice(); },
-    get stats() { return { ...stats }; },
-    _logSample: logSample,
-    _logReadbackFailure: logReadbackFailure,
-    _logFallbackSample: logFallbackSample,
-    _logUnsafeImageSkip: logUnsafeImageSkip,
-    _count: count,
-    _countPerf: countPerf,
-    _recordSampleTiming: recordSampleTiming,
-    _recordPrewarmTiming: recordPrewarmTiming,
+    clientX: e.clientX,
+    clientY: e.clientY,
+    timeStamp: Number(e.timeStamp) || 0,
+    receivedAt,
+    inputAgeAtReceiveMs: inputEventAgeMs(e, receivedAt),
+    coalescedMoves: 0,
   };
-})();
+}
 
-exposeDebug({ eyedropper: EyedropperDebug });
+function analyzeEyedropperPreviewSurface(previewSample = null, expectedPixel = null) {
+  const rect = eyedropperCanvas?.getBoundingClientRect?.();
+  const out = {
+    readable: false,
+    readError: '',
+    centerHex: '',
+    expectedHex: rgbaToHex(expectedPixel),
+    centerMatches: '',
+    suspectedBlank: false,
+    uniform: '',
+    opaqueSamples: '',
+    uniqueColors: '',
+    loupeVisible: !!eyedropperLoupe?.classList.contains('visible'),
+    canvasW: eyedropperCanvas?.width || 0,
+    canvasH: eyedropperCanvas?.height || 0,
+    rectW: rect?.width || 0,
+    rectH: rect?.height || 0,
+    painted: !!previewSample?.painted,
+    drawnImages: previewSample?.drawnImages ?? '',
+    drawnText: previewSample?.drawnText ?? '',
+  };
+  if (!eyedropperCtx || !out.canvasW || !out.canvasH) {
+    out.readError = 'missing-preview-canvas';
+    out.suspectedBlank = true;
+    return out;
+  }
+  if (eyedropperWallpaperCanRead === false) {
+    out.readError = 'wallpaper-readback-unsafe';
+    out.suspectedBlank = !previewSample?.painted ||
+      (!previewSample?.drawnImages && !previewSample?.drawnText && !!expectedPixel);
+    return out;
+  }
+  if (previewSample?.readbackUnsafe) {
+    out.readError = 'preview-readback-unsafe';
+    out.suspectedBlank = !previewSample?.painted ||
+      (!previewSample?.drawnImages && !previewSample?.drawnText && !!expectedPixel);
+    return out;
+  }
+
+  const cx = Math.max(0, Math.min(out.canvasW - 1, Math.floor(out.canvasW / 2)));
+  const cy = Math.max(0, Math.min(out.canvasH - 1, Math.floor(out.canvasH / 2)));
+  const step = Math.max(1, Math.floor(Math.min(out.canvasW, out.canvasH) / 6));
+  const points = [
+    [cx, cy],
+    [cx - step, cy],
+    [cx + step, cy],
+    [cx, cy - step],
+    [cx, cy + step],
+    [cx - step, cy - step],
+    [cx + step, cy + step],
+    [cx - step, cy + step],
+    [cx + step, cy - step],
+  ].map(([x, y]) => [
+    Math.max(0, Math.min(out.canvasW - 1, x)),
+    Math.max(0, Math.min(out.canvasH - 1, y)),
+  ]);
+
+  try {
+    const colors = [];
+    let opaqueSamples = 0;
+    for (const [x, y] of points) {
+      const data = eyedropperCtx.getImageData(x, y, 1, 1).data;
+      const color = [data[0], data[1], data[2], data[3]];
+      if (color[3] > 0) opaqueSamples++;
+      colors.push(rgbaToHex(color));
+    }
+    out.readable = true;
+    out.centerHex = colors[0] || '';
+    out.centerMatches = !!out.expectedHex && out.centerHex === out.expectedHex;
+    out.opaqueSamples = opaqueSamples;
+    out.uniqueColors = new Set(colors).size;
+    out.uniform = out.uniqueColors <= 1;
+    out.suspectedBlank = !previewSample?.painted || opaqueSamples === 0 ||
+      (out.uniform && !out.centerMatches && (previewSample?.drawnImages || previewSample?.drawnText));
+  } catch (err) {
+    out.readError = String(err?.message || err || 'preview-readback-failed').slice(0, 160);
+    out.suspectedBlank = !previewSample?.painted ||
+      (!previewSample?.drawnImages && !previewSample?.drawnText && !!expectedPixel);
+  }
+  return out;
+}
+
+function setEyedropperPreviewDiagnosticsEnabled(enabled) {
+  _eyedropperPreviewDiagnosticsEnabled = !!enabled;
+}
+
+// EyedropperDebug is initialized by js/eyedropper_debug.js.
 
 function setEyedropperEnabled(enabled) {
-  eyedropperEnabled = !!enabled;
+  const requestedEnabled = !!enabled;
+  const toggleStart = performance.now();
+  const toggleMeta = {
+    requested: requestedEnabled,
+    before: eyedropperEnabled,
+  };
+  const recordPhase = (name, start) => {
+    toggleMeta[`${name}Ms`] = Math.round((performance.now() - start) * 100) / 100;
+  };
+
+  let phaseStart = performance.now();
+  eyedropperEnabled = requestedEnabled;
+  recordPhase('assign', phaseStart);
+
+  phaseStart = performance.now();
+  if (eyedropperEnabled) prepareEyedropperWallpaper();
+  else {
+    restoreEyedropperViewportScaling();
+    resetEyedropperWallpaper();
+  }
+  recordPhase('wallpaper', phaseStart);
+
+  phaseStart = performance.now();
   if (eyedropperEnabled && !_eyedropperShieldRelease) {
     _eyedropperShieldRelease = acquireInputShield(
       'pointerdown:0',
@@ -947,16 +206,56 @@ function setEyedropperEnabled(enabled) {
     _eyedropperShieldRelease();
     _eyedropperShieldRelease = null;
   }
+  recordPhase('shield', phaseStart);
+
+  phaseStart = performance.now();
   if (eyedropperMenuBtn) eyedropperMenuBtn.setAttribute('aria-pressed', eyedropperEnabled ? 'true' : 'false');
+  recordPhase('button', phaseStart);
+
+  phaseStart = performance.now();
   document.body.classList.toggle('eyedropper-enabled', eyedropperEnabled);
+  recordPhase('bodyClass', phaseStart);
+
+  phaseStart = performance.now();
   updateEyedropperCommandState();
+  recordPhase('commandState', phaseStart);
+
+  phaseStart = performance.now();
   if (typeof updateCtxMenuActions === 'function') updateCtxMenuActions();
+  recordPhase('ctxActions', phaseStart);
+
   if (eyedropperEnabled) {
-    scheduleEyedropperViewportPrewarm('enable', { afterFrame: false });
+    phaseStart = performance.now();
+    recordPhase('prewarmSchedule', phaseStart);
   } else {
+    phaseStart = performance.now();
     hideEyedropperSample();
+    recordPhase('hideSample', phaseStart);
   }
+
+  phaseStart = performance.now();
   updateSelectionOverlay();
+  recordPhase('selectionOverlay', phaseStart);
+
+  toggleMeta.after = eyedropperEnabled;
+  toggleMeta.totalMs = Math.round((performance.now() - toggleStart) * 100) / 100;
+  Object.assign(toggleMeta, EyedropperDebug.state({ table: false }));
+  EyedropperDebug._logToggle(toggleMeta);
+  if (eyedropperEnabled) EyedropperDebug._startFrameProbe();
+  else EyedropperDebug._stopFrameProbe();
+
+  if (EyedropperDebug.enabled) {
+    const frameStart = performance.now();
+    requestAnimationFrame(() => {
+      EyedropperDebug._logToggle({
+        requested: requestedEnabled,
+        before: toggleMeta.before,
+        after: eyedropperEnabled,
+        nextFrameMs: Math.round((performance.now() - frameStart) * 100) / 100,
+        ...EyedropperDebug.state({ table: false }),
+      });
+    });
+  }
 }
 
 function isEyedropperShieldActive() {
@@ -980,12 +279,267 @@ function updateEyedropperCommandState() {
   if (creationGroupTrailingSep) creationGroupTrailingSep.style.display = eyedropperEnabled ? 'none' : '';
 }
 
+function resetEyedropperWallpaper() {
+  eyedropperWallpaperReady = false;
+  eyedropperWallpaperCanRead = null;
+  eyedropperZoomWallpaperReady = false;
+  _eyedropperSnapshotDirty = false;
+  _eyedropperSnapshotDirtyAfterSample = false;
+  _eyedropperNavigationBlockUntil = 0;
+  if (_eyedropperNavigationBlockTimer) clearTimeout(_eyedropperNavigationBlockTimer);
+  _eyedropperNavigationBlockTimer = null;
+  if (eyedropperWallpaperCanvas) {
+    eyedropperWallpaperCanvas.width = 1;
+    eyedropperWallpaperCanvas.height = 1;
+  }
+  if (eyedropperZoomWallpaperCanvas) {
+    eyedropperZoomWallpaperCanvas.width = 1;
+    eyedropperZoomWallpaperCanvas.height = 1;
+  }
+}
+
+function eyedropperSnapshotCanvasSize(scale = 1) {
+  if (!boardCanvas) return null;
+  return {
+    width: Math.max(1, Math.round(boardCanvas.width * scale)),
+    height: Math.max(1, Math.round(boardCanvas.height * scale)),
+  };
+}
+
+function eyedropperSnapshotView(scale = 1) {
+  const dpr = window.devicePixelRatio || 1;
+  return {
+    zoom: Math.max(zoom || 1, 0.0001) * scale,
+    panX: panX * scale,
+    panY: panY * scale,
+    dpr,
+  };
+}
+
+function renderEyedropperSnapshot(targetCanvas, targetCtx, scale = 1) {
+  const size = eyedropperSnapshotCanvasSize(scale);
+  if (!size || !targetCanvas || !targetCtx) return null;
+  const view = eyedropperSnapshotView(scale);
+  const counters = typeof createDrawCounters === 'function' ? createDrawCounters() : {};
+  const previousViewportCullingEnabled = typeof viewportCullingEnabled !== 'undefined'
+    ? viewportCullingEnabled
+    : null;
+  try {
+    targetCanvas.width = size.width;
+    targetCanvas.height = size.height;
+    resetCanvasToScreen(targetCtx);
+    fillBoardBackground(targetCtx, size.width, size.height);
+    setWorldCanvasTransform(targetCtx, view.dpr, view);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = true;
+    const drawn = drawVisibleObjects(targetCtx, counters, {
+      viewportRect: currentViewportWorldRect(EYEDROPPER_PREWARM_PAD_CSS),
+      view,
+      imageSourceResolver: selectEyedropperSafeImageSourceForDraw,
+    });
+    resetCanvasToScreen(targetCtx);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
+    return {
+      width: size.width,
+      height: size.height,
+      counters,
+      drawnImages: drawn?.drawnImages || 0,
+      drawnText: drawn?.drawnText || 0,
+      pendingImages: counters.readbackSafePendingImages || 0,
+      missingImages: counters.missingImages || 0,
+    };
+  } catch (err) {
+    resetCanvasToScreen(targetCtx);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
+    EyedropperDebug._logReadbackFailure('eyedropper-snapshot-render', {
+      scale,
+      width: size.width,
+      height: size.height,
+      error: String(err),
+    });
+    return null;
+  }
+}
+
+function captureEyedropperReadbackWallpaper() {
+  if (!boardCanvas || !eyedropperWallpaperCtx) {
+    resetEyedropperWallpaper();
+    return false;
+  }
+  const normal = renderEyedropperSnapshot(eyedropperWallpaperCanvas, eyedropperWallpaperCtx, 1);
+  if (!normal) {
+    resetEyedropperWallpaper();
+    return false;
+  }
+  eyedropperWallpaperReady = true;
+  eyedropperWallpaperCanRead = null;
+  _eyedropperSnapshotDirty = false;
+  return true;
+}
+
+function captureEyedropperZoomWallpaper(geometry, renderSize) {
+  if (!geometry || !boardCanvas || !eyedropperZoomWallpaperCtx || !Number.isFinite(renderSize) || renderSize <= 0) {
+    eyedropperZoomWallpaperReady = false;
+    return null;
+  }
+  const size = Math.max(1, Math.round(renderSize));
+  const counters = typeof createDrawCounters === 'function' ? createDrawCounters() : {};
+  const previousViewportCullingEnabled = typeof viewportCullingEnabled !== 'undefined'
+    ? viewportCullingEnabled
+    : null;
+  try {
+    eyedropperZoomWallpaperCanvas.width = size;
+    eyedropperZoomWallpaperCanvas.height = size;
+    resetCanvasToScreen(eyedropperZoomWallpaperCtx);
+    fillBoardBackground(eyedropperZoomWallpaperCtx, size, size);
+    setWorldCanvasTransform(eyedropperZoomWallpaperCtx, geometry.view.dpr, geometry.view);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = true;
+    const drawn = drawVisibleObjects(eyedropperZoomWallpaperCtx, counters, {
+      viewportRect: geometry.viewportRect,
+      view: geometry.view,
+      imageSourceResolver: selectEyedropperPreviewImageSourceForDraw,
+    });
+    resetCanvasToScreen(eyedropperZoomWallpaperCtx);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
+    eyedropperZoomWallpaperReady = true;
+    return {
+      width: size,
+      height: size,
+      counters,
+      drawnImages: drawn?.drawnImages || 0,
+      drawnText: drawn?.drawnText || 0,
+      pendingImages: counters.readbackSafePendingImages || 0,
+      missingImages: counters.missingImages || 0,
+    };
+  } catch (err) {
+    resetCanvasToScreen(eyedropperZoomWallpaperCtx);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
+    eyedropperZoomWallpaperReady = false;
+    EyedropperDebug._logReadbackFailure('eyedropper-local-zoom-render', {
+      width: size,
+      height: size,
+      error: String(err),
+    });
+    return null;
+  }
+}
+
+function captureEyedropperWallpaper(options = {}) {
+  const readbackReady = captureEyedropperReadbackWallpaper();
+  if (!readbackReady) return false;
+  if (options.includeZoom === true) return false;
+  eyedropperZoomWallpaperReady = false;
+  return true;
+}
+
+function markEyedropperSnapshotDirty() {
+  _eyedropperSnapshotDirty = true;
+  eyedropperWallpaperReady = false;
+  eyedropperZoomWallpaperReady = false;
+  eyedropperWallpaperCanRead = null;
+}
+
+function cancelEyedropperSnapshotRefresh() {
+  if (_eyedropperSnapshotRefreshTimer) clearTimeout(_eyedropperSnapshotRefreshTimer);
+  if (_eyedropperSnapshotRefreshRaf) cancelAnimationFrame(_eyedropperSnapshotRefreshRaf);
+  _eyedropperSnapshotRefreshTimer = null;
+  _eyedropperSnapshotRefreshRaf = null;
+}
+
+function scheduleEyedropperSnapshotRefresh(reason = 'viewport', options = {}) {
+  if (!eyedropperEnabled) return;
+  if (eyedropperSampling) {
+    _eyedropperSnapshotDirtyAfterSample = true;
+    EyedropperDebug._recordPrewarmTiming({
+      reason: `snapshot-deferred:${reason}`,
+      ready: false,
+      deferred: true,
+    }, 0);
+    return;
+  }
+  markEyedropperSnapshotDirty();
+  cancelEyedropperSnapshotRefresh();
+  EyedropperDebug._recordPrewarmTiming({
+    reason: `snapshot-dirty:${reason}`,
+    ready: false,
+    deferred: true,
+  }, 0);
+}
+
+function eyedropperZoomedWallpaperGeometry(clientX, clientY, renderSize, dpr = window.devicePixelRatio || 1) {
+  const worldPoint = clientToBoardWorldPoint(clientX, clientY);
+  if (!worldPoint || !Number.isFinite(worldPoint.x) || !Number.isFinite(worldPoint.y)) return null;
+  const sampleDot = eyedropperSampleDotCanvasPoint(renderSize);
+  const sampleDotCenterX = sampleDot.x + 0.5;
+  const sampleDotCenterY = sampleDot.y + 0.5;
+  const previewZoom = Math.max(zoom || 1, 0.0001) * EYEDROPPER_PREVIEW_ZOOM_SCALE;
+  const previewCssSize = renderSize / dpr;
+  const view = {
+    zoom: previewZoom,
+    panX: sampleDotCenterX / dpr - worldPoint.x * previewZoom,
+    panY: sampleDotCenterY / dpr - worldPoint.y * previewZoom,
+    dpr,
+  };
+  const viewportRect = {
+    x1: -view.panX / previewZoom,
+    y1: -view.panY / previewZoom,
+    x2: (previewCssSize - view.panX) / previewZoom,
+    y2: (previewCssSize - view.panY) / previewZoom,
+  };
+  return {
+    worldPoint,
+    sampleDot,
+    sampleDotCenterX,
+    sampleDotCenterY,
+    previewZoom,
+    previewCssSize,
+    view,
+    viewportRect,
+  };
+}
+
+function captureEyedropperZoomedWallpaper(clientX, clientY, renderSize, options = {}) {
+  if (!eyedropperZoomWallpaperCtx || !Number.isFinite(renderSize) || renderSize <= 0) return null;
+  const geometry = options.geometry || eyedropperZoomedWallpaperGeometry(clientX, clientY, renderSize);
+  if (!geometry) return null;
+  const rendered = captureEyedropperZoomWallpaper(geometry, renderSize);
+  if (!rendered) return null;
+  return { geometry, rendered };
+}
+
+function prepareEyedropperWallpaper() {
+  cancelEyedropperSnapshotRefresh();
+  const shouldForceFullImageRender = typeof IS_WIN !== 'undefined' && IS_WIN &&
+    typeof viewportImageScalingEnabled !== 'undefined' &&
+    viewportImageScalingEnabled;
+  if (shouldForceFullImageRender) {
+    eyedropperPreviousImageScalingEnabled = viewportImageScalingEnabled;
+    viewportImageScalingEnabled = false;
+    if (typeof invalidateOffscreen === 'function') invalidateOffscreen();
+    if (typeof withRenderSource === 'function' && typeof drawBoard === 'function') {
+      withRenderSource('eyedropper-full-render', () => drawBoard());
+    } else if (typeof drawBoard === 'function') {
+      drawBoard();
+    }
+  } else if (eyedropperPreviousImageScalingEnabled == null) {
+    eyedropperPreviousImageScalingEnabled = null;
+  }
+  markEyedropperSnapshotDirty();
+}
+
+function restoreEyedropperViewportScaling() {
+  if (eyedropperPreviousImageScalingEnabled == null || typeof viewportImageScalingEnabled === 'undefined') return;
+  viewportImageScalingEnabled = eyedropperPreviousImageScalingEnabled;
+  eyedropperPreviousImageScalingEnabled = null;
+  if (typeof invalidateOffscreen === 'function') invalidateOffscreen();
+  if (typeof scheduleRender === 'function') scheduleRender(true, false, 'eyedropper-restore-scaling');
+}
+
 function positionEyedropperLoupe(clientX, clientY) {
   const margin = 18;
   const gap = 22;
   const rect = eyedropperLoupe.getBoundingClientRect();
   const previewRect = eyedropperPreview?.getBoundingClientRect();
-  const width = rect.width || EYEDROPPER_MENU_CSS_WIDTH;
+  const width = rect.width || eyedropperLoupeCssWidth();
   const height = rect.height || EYEDROPPER_MENU_CSS_HEIGHT;
   const previewHeight = previewRect?.height || width;
   const previewTopOffset = previewRect?.height ? previewRect.top - rect.top : 0;
@@ -1005,54 +559,10 @@ function positionEyedropperLoupe(clientX, clientY) {
   eyedropperLoupe.style.transform = `translate(${Math.round(left)}px,${Math.round(top)}px)`;
 }
 
-function rgbaToCss(pixel) {
-  if (!pixel) return 'transparent';
-  return `rgba(${pixel[0]},${pixel[1]},${pixel[2]},${Math.round((pixel[3] / 255) * 1000) / 1000})`;
-}
-
-function colorByteToHex(value) {
-  return Number(value || 0).toString(16).padStart(2, '0').toUpperCase();
-}
-
-function rgbaToHex(pixel) {
-  if (!pixel) return '#000000';
-  const hex = `#${colorByteToHex(pixel[0])}${colorByteToHex(pixel[1])}${colorByteToHex(pixel[2])}`;
-  return pixel[3] === 255 ? hex : `${hex}${colorByteToHex(pixel[3])}`;
-}
-
-function rgbaToRgbText(pixel) {
-  if (!pixel) return '0 0 0';
-  return `${pixel[0]} ${pixel[1]} ${pixel[2]}`;
-}
-
-function rgbaToHslText(pixel) {
-  if (!pixel) return '0 0% 0%';
-  const r = pixel[0] / 255;
-  const g = pixel[1] / 255;
-  const b = pixel[2] / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const lightness = (max + min) / 2;
-  let hue = 0;
-  let saturation = 0;
-
-  if (max !== min) {
-    const delta = max - min;
-    saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
-    if (max === r) hue = (g - b) / delta + (g < b ? 6 : 0);
-    else if (max === g) hue = (b - r) / delta + 2;
-    else hue = (r - g) / delta + 4;
-    hue *= 60;
-  }
-
-  return `${Math.round(hue)} ${Math.round(saturation * 100)}% ${Math.round(lightness * 100)}%`;
-}
-
 function updateEyedropperColorReadout(pixel) {
   const cssColor = rgbaToCss(pixel);
   if (eyedropperSwatch) eyedropperSwatch.style.background = cssColor;
   if (eyedropperHex) eyedropperHex.textContent = rgbaToHex(pixel);
-  if (eyedropperHsl) eyedropperHsl.textContent = rgbaToHslText(pixel);
   if (eyedropperRgb) eyedropperRgb.textContent = rgbaToRgbText(pixel);
 }
 
@@ -1073,6 +583,378 @@ function sampleCanvasPixel(context, sourceX, sourceY, meta = {}) {
     }
     return null;
   }
+}
+
+function sampleEyedropperWallpaperPixel(sourceX, sourceY) {
+  if (!eyedropperWallpaperCtx || eyedropperWallpaperCanRead === false) return null;
+  const pixel = sampleCanvasPixel(eyedropperWallpaperCtx, sourceX, sourceY, {
+    where: 'eyedropper-wallpaper-readout',
+    source: 'sampleEyedropperReadoutPixel',
+    logFailures: false,
+  });
+  eyedropperWallpaperCanRead = !!pixel;
+  if (!pixel) {
+    EyedropperDebug._logReadbackFailure('eyedropper-wallpaper-readout', {
+      x: sourceX,
+      y: sourceY,
+      width: eyedropperWallpaperCanvas?.width ?? '',
+      height: eyedropperWallpaperCanvas?.height ?? '',
+      reason: 'canvas-tainted-or-unreadable',
+    });
+  }
+  return pixel;
+}
+
+function renderEyedropperLocalReadoutPixel(clientX, clientY) {
+  if (!eyedropperReadoutCtx || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const cssSize = 1 / Math.max(dpr, 1);
+  const z = Math.max(zoom || 1, 0.0001);
+  const view = {
+    zoom: z,
+    panX: panX - clientX,
+    panY: panY - clientY,
+    dpr,
+  };
+  const viewportRect = {
+    x1: (clientX - panX) / z,
+    y1: (clientY - panY) / z,
+    x2: (clientX + cssSize - panX) / z,
+    y2: (clientY + cssSize - panY) / z,
+  };
+  const counters = typeof createDrawCounters === 'function' ? createDrawCounters() : {};
+  const previousViewportCullingEnabled = typeof viewportCullingEnabled !== 'undefined'
+    ? viewportCullingEnabled
+    : null;
+  try {
+    eyedropperReadoutCanvas.width = 1;
+    eyedropperReadoutCanvas.height = 1;
+    resetCanvasToScreen(eyedropperReadoutCtx);
+    eyedropperReadoutCtx.fillStyle = rgbaToCss(boardBackgroundPixel());
+    eyedropperReadoutCtx.fillRect(0, 0, 1, 1);
+    setWorldCanvasTransform(eyedropperReadoutCtx, dpr, view);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = true;
+    drawVisibleObjects(eyedropperReadoutCtx, counters, {
+      viewportRect,
+      view,
+      imageSourceResolver: selectEyedropperSafeImageSourceForDraw,
+    });
+    resetCanvasToScreen(eyedropperReadoutCtx);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
+    const pixel = sampleCanvasPixel(eyedropperReadoutCtx, 0, 0, {
+      where: 'eyedropper-local-readout',
+      source: 'sampleEyedropperReadoutPixel',
+      logFailures: false,
+    });
+    return {
+      pixel,
+      counters,
+      viewportRect,
+      sourceX: 0,
+      sourceY: 0,
+      sourceW: 1,
+      sourceH: 1,
+    };
+  } catch (err) {
+    resetCanvasToScreen(eyedropperReadoutCtx);
+    if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
+    EyedropperDebug._logReadbackFailure('eyedropper-local-readout', {
+      x: clientX,
+      y: clientY,
+      error: String(err),
+    });
+    return null;
+  }
+}
+
+function imageSourceSize(source) {
+  return {
+    width: source?.width || source?.naturalWidth || 0,
+    height: source?.height || source?.naturalHeight || 0,
+  };
+}
+
+function scheduleIdleTask(callback) {
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(callback, { timeout: 250 });
+  } else {
+    setTimeout(callback, 0);
+  }
+}
+
+function eyedropperTileCacheKey(key, tileX, tileY, tileSize = EYEDROPPER_SAFE_TILE_SIZE) {
+  return `${key}:${tileSize}:${tileX}:${tileY}`;
+}
+
+function removeEyedropperSafeTileCache(cacheKey) {
+  const existing = eyedropperSafeTileCache.get(cacheKey);
+  if (!existing) return;
+  eyedropperSafeTileCacheBytes -= existing.bytes || existing.data?.byteLength || 0;
+  eyedropperSafeTileCache.delete(cacheKey);
+  eyedropperSafeTileCacheBytes = Math.max(0, eyedropperSafeTileCacheBytes);
+}
+
+function removeEyedropperSafeTileCacheForImage(key) {
+  if (!key) return;
+  for (const cacheKey of [...eyedropperSafeTileCache.keys()]) {
+    if (cacheKey.startsWith(`${key}:`)) removeEyedropperSafeTileCache(cacheKey);
+  }
+  for (const cacheKey of [...eyedropperSafeTileCachePending]) {
+    if (cacheKey.startsWith(`${key}:`)) eyedropperSafeTileCachePending.delete(cacheKey);
+  }
+}
+
+function trimEyedropperSafeTileCache(protectedKey = '') {
+  while (eyedropperSafeTileCacheBytes > EYEDROPPER_SAFE_TILE_MEMORY_LIMIT && eyedropperSafeTileCache.size > 1) {
+    let oldestKey = '';
+    let oldestUse = Number.POSITIVE_INFINITY;
+    for (const [cacheKey, entry] of eyedropperSafeTileCache.entries()) {
+      if (cacheKey === protectedKey) continue;
+      const lastUsed = entry?.lastUsed || 0;
+      if (lastUsed < oldestUse) {
+        oldestUse = lastUsed;
+        oldestKey = cacheKey;
+      }
+    }
+    if (!oldestKey) break;
+    removeEyedropperSafeTileCache(oldestKey);
+  }
+}
+
+function removeEyedropperSafePixelCache(key) {
+  const existing = eyedropperSafePixelCache.get(key);
+  if (!existing) return;
+  eyedropperSafePixelCacheBytes -= existing.bytes || existing.data?.byteLength || 0;
+  eyedropperSafePixelCache.delete(key);
+  eyedropperSafePixelCacheBytes = Math.max(0, eyedropperSafePixelCacheBytes);
+}
+
+function trimEyedropperSafePixelCache(protectedKey = '') {
+  while (eyedropperSafePixelCacheBytes > EYEDROPPER_SAFE_PIXEL_MEMORY_LIMIT && eyedropperSafePixelCache.size > 1) {
+    let oldestKey = '';
+    let oldestUse = Number.POSITIVE_INFINITY;
+    for (const [key, entry] of eyedropperSafePixelCache.entries()) {
+      if (key === protectedKey) continue;
+      const lastUsed = entry?.lastUsed || 0;
+      if (lastUsed < oldestUse) {
+        oldestUse = lastUsed;
+        oldestKey = key;
+      }
+    }
+    if (!oldestKey) break;
+    removeEyedropperSafePixelCache(oldestKey);
+  }
+}
+
+function scheduleEyedropperSafePixelCache(key, token, source) {
+  const { width, height } = imageSourceSize(source);
+  if (!key || !token || !isDrawableImageSource(source) || width <= 0 || height <= 0) return;
+  const existing = eyedropperSafePixelCache.get(key);
+  if (existing?.token === token) return;
+  if (eyedropperSafePixelCachePending.has(key)) return;
+  eyedropperSafePixelCachePending.add(key);
+  scheduleIdleTask(() => {
+    eyedropperSafePixelCachePending.delete(key);
+    const latest = eyedropperSafeImageCache.get(key);
+    if (latest?.token !== token || latest.source !== source || latest.sourceKind !== 'data-url') return;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const pixelCtx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!pixelCtx) return;
+      pixelCtx.drawImage(source, 0, 0, width, height);
+      const imageData = pixelCtx.getImageData(0, 0, width, height);
+      removeEyedropperSafePixelCache(key);
+      const bytes = imageData.data.byteLength;
+      eyedropperSafePixelCache.set(key, {
+        token,
+        width,
+        height,
+        data: imageData.data,
+        bytes,
+        lastUsed: eyedropperSafePixelCacheUseCounter++,
+      });
+      eyedropperSafePixelCacheBytes += bytes;
+      trimEyedropperSafePixelCache(key);
+    } catch (err) {
+      EyedropperDebug._logReadbackFailure('safe-pixel-cache-build', {
+        imgKey: key,
+        width,
+        height,
+        error: String(err),
+      });
+    }
+  });
+}
+
+function sampleEyedropperSafePixelCache(key, token, sourceX, sourceY) {
+  const cached = eyedropperSafePixelCache.get(key);
+  if (!cached || cached.token !== token) return null;
+  cached.lastUsed = eyedropperSafePixelCacheUseCounter++;
+  const x = Math.max(0, Math.min(cached.width - 1, Math.floor(sourceX)));
+  const y = Math.max(0, Math.min(cached.height - 1, Math.floor(sourceY)));
+  const index = (y * cached.width + x) * 4;
+  const data = cached.data;
+  return [data[index], data[index + 1], data[index + 2], data[index + 3]];
+}
+
+function buildEyedropperSafeTileCache(key, token, source, sourceX, sourceY, options = {}) {
+  const { width, height } = imageSourceSize(source);
+  if (!key || !token || !isDrawableImageSource(source) || width <= 0 || height <= 0) return null;
+  const tileSize = Math.max(1, Number(options.tileSize) || EYEDROPPER_SAFE_TILE_SIZE);
+  const x = Math.max(0, Math.min(width - 1, Math.floor(sourceX)));
+  const y = Math.max(0, Math.min(height - 1, Math.floor(sourceY)));
+  const tileX = Math.floor(x / tileSize) * tileSize;
+  const tileY = Math.floor(y / tileSize) * tileSize;
+  const tileW = Math.max(1, Math.min(tileSize, width - tileX));
+  const tileH = Math.max(1, Math.min(tileSize, height - tileY));
+  const cacheKey = eyedropperTileCacheKey(key, tileX, tileY, tileSize);
+  const cached = eyedropperSafeTileCache.get(cacheKey);
+  if (cached?.token === token) {
+    cached.lastUsed = eyedropperSafeTileCacheUseCounter++;
+    return cached;
+  }
+  if (options.sync === false && eyedropperSafeTileCachePending.has(cacheKey)) return null;
+
+  const build = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = tileW;
+      canvas.height = tileH;
+      const tileCtx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!tileCtx) return null;
+      tileCtx.drawImage(source, tileX, tileY, tileW, tileH, 0, 0, tileW, tileH);
+      const imageData = tileCtx.getImageData(0, 0, tileW, tileH);
+      removeEyedropperSafeTileCache(cacheKey);
+      const entry = {
+        token,
+        data: imageData.data,
+        width: tileW,
+        height: tileH,
+        tileX,
+        tileY,
+        tileSize,
+        sourceW: width,
+        sourceH: height,
+        bytes: imageData.data.byteLength,
+        lastUsed: eyedropperSafeTileCacheUseCounter++,
+      };
+      eyedropperSafeTileCache.set(cacheKey, entry);
+      eyedropperSafeTileCacheBytes += entry.bytes;
+      trimEyedropperSafeTileCache(cacheKey);
+      return entry;
+    } catch (err) {
+      EyedropperDebug._logReadbackFailure('safe-tile-cache-build', {
+        imgKey: key,
+        sourceX,
+        sourceY,
+        tileX,
+        tileY,
+        tileW,
+        tileH,
+        error: String(err),
+      });
+      return null;
+    }
+  };
+
+  if (options.sync === false) {
+    eyedropperSafeTileCachePending.add(cacheKey);
+    scheduleIdleTask(() => {
+      eyedropperSafeTileCachePending.delete(cacheKey);
+      const latest = eyedropperSafeImageCache.get(key);
+      if (latest?.token !== token || latest.source !== source) return;
+      build();
+    });
+    return null;
+  }
+
+  return build();
+}
+
+function sampleEyedropperSafeTileCache(key, token, source, sourceX, sourceY, options = {}) {
+  const { width, height } = imageSourceSize(source);
+  if (width <= 0 || height <= 0) return null;
+  const tileSize = Math.max(1, Number(options.tileSize) || EYEDROPPER_SAFE_TILE_SIZE);
+  const x = Math.max(0, Math.min(width - 1, Math.floor(sourceX)));
+  const y = Math.max(0, Math.min(height - 1, Math.floor(sourceY)));
+  const tileX = Math.floor(x / tileSize) * tileSize;
+  const tileY = Math.floor(y / tileSize) * tileSize;
+  const cacheKey = eyedropperTileCacheKey(key, tileX, tileY, tileSize);
+  let cached = eyedropperSafeTileCache.get(cacheKey);
+  if (!cached || cached.token !== token) {
+    cached = buildEyedropperSafeTileCache(key, token, source, sourceX, sourceY, options);
+  }
+  if (!cached || cached.token !== token) return null;
+  cached.lastUsed = eyedropperSafeTileCacheUseCounter++;
+  const localX = Math.max(0, Math.min(cached.width - 1, x - cached.tileX));
+  const localY = Math.max(0, Math.min(cached.height - 1, y - cached.tileY));
+  const index = (localY * cached.width + localX) * 4;
+  const data = cached.data;
+  return {
+    pixel: [data[index], data[index + 1], data[index + 2], data[index + 3]],
+    tile: cached,
+    sourceX: x,
+    sourceY: y,
+  };
+}
+
+function sampleEyedropperCachedPixelAt(clientX, clientY) {
+  const point = clientToBoardWorldPoint(clientX, clientY);
+  const topObject = topObjectAtWorldPoint(point);
+  if (!topObject) {
+    return {
+      pixel: boardBackgroundPixel(),
+      source: 'background',
+      reason: 'empty-board',
+      objectId: '',
+      objectType: '',
+      layers: [],
+    };
+  }
+  if (topObject.type !== 'image') return null;
+  const key = topObject.data?.imgKey;
+  const local = worldPointToImageLocalUnit(topObject, point);
+  const cached = key ? eyedropperSafePixelCache.get(key) : null;
+  const safeEntry = key ? eyedropperSafeImageCache.get(key) : null;
+  const token = safeEntry?.token || (key ? eyedropperSafeImageToken(key) : '');
+  if (!key || !local || !token) return null;
+  let sourceW = cached?.width || 0;
+  let sourceH = cached?.height || 0;
+  let sourceX = local.u * Math.max(0, sourceW - 1);
+  let sourceY = local.v * Math.max(0, sourceH - 1);
+  let pixel = cached?.token === token ? sampleEyedropperSafePixelCache(key, token, sourceX, sourceY) : null;
+  if (!pixel) {
+    if (safeEntry?.token === token && isDrawableImageSource(safeEntry.source)) {
+      const size = imageSourceSize(safeEntry.source);
+      sourceW = size.width;
+      sourceH = size.height;
+      sourceX = local.u * Math.max(0, sourceW - 1);
+      sourceY = local.v * Math.max(0, sourceH - 1);
+      const tileSample = sampleEyedropperSafeTileCache(key, token, safeEntry.source, sourceX, sourceY);
+      pixel = tileSample?.pixel || null;
+      sourceX = tileSample?.sourceX ?? sourceX;
+      sourceY = tileSample?.sourceY ?? sourceY;
+    } else {
+      resolveEyedropperSafeImageSource(key);
+      return null;
+    }
+  }
+  if (!pixel) return null;
+  return {
+    pixel,
+    source: 'pixel-cache',
+    reason: cached?.token === token ? 'cached-image-pixel' : 'cached-image-tile',
+    objectId: topObject.id || '',
+    objectType: topObject.type || '',
+    sourceX,
+    sourceY,
+    sourceW,
+    sourceH,
+    inBounds: true,
+    layers: [],
+  };
 }
 
 function displayedBoardPixelSampleInfo(clientX, clientY, options = {}) {
@@ -1144,128 +1026,66 @@ function sampleDisplayedBoardPixel(clientX, clientY) {
   return displayedBoardPixelSampleInfo(clientX, clientY).pixel;
 }
 
-function parseRgbColor(value, fallback = [0, 0, 0, 255]) {
-  const match = String(value || '').match(/rgba?\(([^)]+)\)/);
-  if (!match) return fallback;
-  const parts = match[1].split(/[,\s/]+/).filter(Boolean);
-  const alpha = parts[3] == null ? 1 : Number(parts[3]);
-  return [
-    Math.max(0, Math.min(255, Math.round(Number(parts[0]) || 0))),
-    Math.max(0, Math.min(255, Math.round(Number(parts[1]) || 0))),
-    Math.max(0, Math.min(255, Math.round(Number(parts[2]) || 0))),
-    Math.max(0, Math.min(255, Math.round((Number.isFinite(alpha) ? alpha : 1) * 255))),
-  ];
+function eyedropperWallpaperSourcePoint(clientX, clientY) {
+  return displayedBoardSourcePoint(clientX, clientY, eyedropperWallpaperCanvas);
 }
 
-function parseHexColor(value, fallback = [0, 0, 0, 255]) {
-  const hex = String(value || '').trim().replace(/^#/, '');
-  if (!/^[0-9a-f]{3,8}$/i.test(hex)) return fallback;
-  const full = hex.length === 3 || hex.length === 4
-    ? hex.split('').map((part) => part + part).join('')
-    : hex;
-  return [
-    parseInt(full.slice(0, 2), 16),
-    parseInt(full.slice(2, 4), 16),
-    parseInt(full.slice(4, 6), 16),
-    full.length >= 8 ? parseInt(full.slice(6, 8), 16) : 255,
-  ];
-}
-
-function parseCssColor(value, fallback = [0, 0, 0, 255]) {
-  return String(value || '').trim().startsWith('#')
-    ? parseHexColor(value, fallback)
-    : parseRgbColor(value, fallback);
-}
-
-function boardBackgroundPixel() {
-  return parseCssColor(getComputedStyle(canvas).backgroundColor, [224, 224, 227, 255]);
-}
-
-function clientToBoardScreenPoint(clientX, clientY) {
-  const rect = boardCanvas.getBoundingClientRect();
-  return { x: clientX - rect.left, y: clientY - rect.top };
-}
-
-function screenToBoardWorldPoint(screenPoint) {
-  const safeZoom = Math.max(zoom || 1, 0.0001);
-  return { x: (screenPoint.x - panX) / safeZoom, y: (screenPoint.y - panY) / safeZoom };
-}
-
-function clientToBoardWorldPoint(clientX, clientY) {
-  if (typeof toWorld === 'function') return toWorld(clientX, clientY);
-  return screenToBoardWorldPoint(clientToBoardScreenPoint(clientX, clientY));
-}
-
-function worldPointToImageLocalUnit(obj, worldPoint) {
-  if (!obj || obj.type !== 'image' || !worldPoint || obj.w <= 0 || obj.h <= 0) return null;
-  const transform = imageTransformFromObject(obj);
-  const rotation = ((transform.rotation || 0) * Math.PI) / 180;
-  const sideways = isSidewaysRotation(transform.rotation);
-  const drawW = sideways ? obj.h : obj.w;
-  const drawH = sideways ? obj.w : obj.h;
-  if (drawW <= 0 || drawH <= 0) return null;
-
-  const dx = worldPoint.x - (obj.x + obj.w / 2);
-  const dy = worldPoint.y - (obj.y + obj.h / 2);
-  const unflippedX = transform.flipX ? -dx : dx;
-  const unflippedY = transform.flipY ? -dy : dy;
-  const cos = Math.cos(-rotation);
-  const sin = Math.sin(-rotation);
-  const localX = unflippedX * cos - unflippedY * sin;
-  const localY = unflippedX * sin + unflippedY * cos;
-  const u = (localX + drawW / 2) / drawW;
-  const v = (localY + drawH / 2) / drawH;
-  const epsilon = 1e-9;
-  if (u < -epsilon || u > 1 + epsilon || v < -epsilon || v > 1 + epsilon) return null;
-  return {
-    u: Math.max(0, Math.min(1, u)),
-    v: Math.max(0, Math.min(1, v)),
-  };
-}
-
-function objectContainsWorldPoint(obj, point) {
-  if (!obj || !point) return false;
-  if (obj.type === 'image') return !!worldPointToImageLocalUnit(obj, point);
-  return point.x >= obj.x && point.x <= obj.x + obj.w && point.y >= obj.y && point.y <= obj.y + obj.h;
-}
-
-function topObjectAtWorldPoint(point) {
-  for (let i = objects.length - 1; i >= 0; i--) {
-    const obj = objects[i];
-    if (objectContainsWorldPoint(obj, point)) return obj;
-  }
-  return null;
-}
-
-function sampleEyedropperReadoutLayer(worldPoint, previewSample = null, startIndex = objects.length - 1, layers = []) {
-  for (let i = startIndex; i >= 0; i--) {
-    const obj = objects[i];
-    if (!objectContainsWorldPoint(obj, worldPoint)) continue;
-    const pixel = previewSample?.pixel || boardBackgroundPixel();
-    layers.push({ objectId: obj.id, objectType: obj.type, source: 'preview-render', reason: 'visible-canvas' });
-    return {
-      pixel,
-      source: 'preview-render',
-      reason: 'visible-canvas',
-      objectId: obj.id,
-      objectType: obj.type,
-      layers,
-    };
-  }
-
-  return {
-    pixel: boardBackgroundPixel(),
-    source: 'background',
-    reason: 'no-object',
-    objectId: '',
-    objectType: '',
-    layers,
-  };
+function eyedropperZoomWallpaperSourcePoint(clientX, clientY) {
+  return displayedBoardSourcePoint(clientX, clientY, eyedropperZoomWallpaperCanvas);
 }
 
 function sampleEyedropperReadoutPixel(clientX, clientY, previewSample = null) {
-  const worldPoint = clientToBoardWorldPoint(clientX, clientY);
-  return sampleEyedropperReadoutLayer(worldPoint, previewSample);
+  const cachedPixel = sampleEyedropperCachedPixelAt(clientX, clientY);
+  if (cachedPixel) return cachedPixel;
+  if (previewSample?.painted && previewSample.centerX != null && previewSample.centerY != null && !previewSample.readbackUnsafe) {
+    const previewPixel = sampleCanvasPixel(eyedropperRenderedSampleCtx, previewSample.centerX, previewSample.centerY, {
+      where: 'zoomed-preview-center-readout',
+      source: 'sampleEyedropperReadoutPixel',
+      logFailures: false,
+    });
+    if (previewPixel) {
+      previewSample.pixel = previewPixel;
+      return {
+        pixel: previewPixel,
+        source: 'preview-center',
+        reason: 'rendered-preview-center',
+        objectId: '',
+        objectType: '',
+        sourceX: previewSample.centerX,
+        sourceY: previewSample.centerY,
+        sourceW: eyedropperRenderedSampleCanvas?.width || '',
+        sourceH: eyedropperRenderedSampleCanvas?.height || '',
+        inBounds: true,
+        counters: previewSample.counters || {},
+        layers: [],
+      };
+    }
+  }
+  const local = renderEyedropperLocalReadoutPixel(clientX, clientY);
+  if (!local) {
+    return {
+      pixel: previewSample?.pixel || boardBackgroundPixel(),
+      source: 'background',
+      reason: 'local-readout-failed',
+      objectId: '',
+      objectType: '',
+      layers: [],
+    };
+  }
+  return {
+    pixel: local.pixel || previewSample?.pixel || boardBackgroundPixel(),
+    source: local.pixel ? 'local-readout' : 'background',
+    reason: local.pixel ? 'local-rendered-canvas' : 'local-readback-failed',
+    objectId: '',
+    objectType: '',
+    sourceX: local.sourceX,
+    sourceY: local.sourceY,
+    sourceW: local.sourceW,
+    sourceH: local.sourceH,
+    inBounds: !!local.pixel,
+    counters: local.counters,
+    layers: [],
+  };
 }
 
 function eyedropperSampleDotCanvasPoint(drawSize) {
@@ -1277,19 +1097,22 @@ function eyedropperSampleDotCanvasPoint(drawSize) {
   };
 }
 
-function drawEyedropperSampleDot(drawSize) {
+function drawEyedropperSampleDot(drawSize, dpr = window.devicePixelRatio || 1) {
   const dot = eyedropperSampleDotCanvasPoint(drawSize);
   const cx = dot.x + 0.5;
   const cy = dot.y + 0.5;
+  const displayScale = Math.max(1, Number(dpr) || 1);
+  const outerRadius = 3 * displayScale;
+  const innerRadius = 2 * displayScale;
 
   eyedropperCtx.save();
   eyedropperCtx.setTransform(1, 0, 0, 1, 0, 0);
   eyedropperCtx.beginPath();
-  eyedropperCtx.arc(cx, cy, 3, 0, Math.PI * 2);
+  eyedropperCtx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
   eyedropperCtx.fillStyle = 'rgba(0,0,0,0.9)';
   eyedropperCtx.fill();
   eyedropperCtx.beginPath();
-  eyedropperCtx.arc(cx, cy, 2, 0, Math.PI * 2);
+  eyedropperCtx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
   eyedropperCtx.fillStyle = 'rgba(255,255,255,1)';
   eyedropperCtx.fill();
   eyedropperCtx.restore();
@@ -1301,13 +1124,14 @@ function resetEyedropperRenderedSampleSize(width, height) {
 }
 
 function refreshEyedropperAfterSafeImageReady() {
-  if (!eyedropperSampling || !_eyedropperLastSampleEvent) return;
-  updateEyedropperSample(_eyedropperLastSampleEvent);
+  if (!eyedropperEnabled) return;
+  scheduleEyedropperSnapshotRefresh('safe-image-ready', { delayMs: 40 });
+  if (eyedropperSampling && _eyedropperLastSampleEvent) updateEyedropperSample(_eyedropperLastSampleEvent);
 }
 
 function refreshEyedropperViewportAfterSafeImageReady() {
   if (!eyedropperEnabled) return;
-  scheduleEyedropperViewportPrewarm('safe-image-ready', { afterFrame: true });
+  scheduleEyedropperSnapshotRefresh('safe-image-ready', { delayMs: 40 });
 }
 
 function eyedropperSafeImageToken(key, dataUrl = null) {
@@ -1337,26 +1161,23 @@ function closeEyedropperSafeImageEntry(entry) {
 }
 
 function closeEyedropperSafeScaledImages(key) {
-  const map = eyedropperSafeScaledBitmapCache.get(key);
-  if (!map) return;
-  for (const entry of map.values()) {
-    closeEyedropperImageSource(entry?.bitmap);
-    eyedropperSafeScaledBitmapBytes -= entry?.bytes || 0;
-  }
-  eyedropperSafeScaledBitmapCache.delete(key);
-  eyedropperSafeScaledBitmapBytes = Math.max(0, eyedropperSafeScaledBitmapBytes);
+  eyedropperSafeScaledBitmapStore.removeGroup(key);
 }
 
 function clearEyedropperSafeImageCache() {
   for (const entry of eyedropperSafeImageCache.values()) closeEyedropperSafeImageEntry(entry);
-  for (const key of eyedropperSafeScaledBitmapCache.keys()) closeEyedropperSafeScaledImages(key);
+  eyedropperSafeScaledBitmapStore.clear();
   eyedropperSafeImageCache.clear();
   eyedropperSafeImagePromises.clear();
   eyedropperSafeDisplayReloadPromises.clear();
-  eyedropperSafeScaledBitmapCache.clear();
   eyedropperSafeScaledBitmapPending.clear();
   eyedropperSafeScaledBitmapPendingBytes.clear();
-  eyedropperSafeScaledBitmapBytes = 0;
+  eyedropperSafePixelCache.clear();
+  eyedropperSafePixelCachePending.clear();
+  eyedropperSafePixelCacheBytes = 0;
+  eyedropperSafeTileCache.clear();
+  eyedropperSafeTileCachePending.clear();
+  eyedropperSafeTileCacheBytes = 0;
   eyedropperSafeDisplayProbeFailures.clear();
   eyedropperNativeSourceSkipLogged.clear();
 }
@@ -1366,6 +1187,8 @@ function storeEyedropperSafeImage(key, token, source, options = {}) {
   if (existing && existing.token !== token) {
     closeEyedropperSafeImageEntry(existing);
     closeEyedropperSafeScaledImages(key);
+    removeEyedropperSafePixelCache(key);
+    removeEyedropperSafeTileCacheForImage(key);
   }
   eyedropperSafeImageCache.set(key, {
     token,
@@ -1416,13 +1239,16 @@ function isEyedropperReadbackSafeDisplaySource(key, token, source, sourceKind, c
 }
 
 function resolveEyedropperDisplayCacheSource(key, token, counters = null) {
+  if (isNativeImageRef(imageStore[key])) return null;
+  if (imageAssetUrlCache[key]) return null;
+
   const displayImg = imageCache[key];
   if (isDrawableImageSource(displayImg) && isEyedropperReadbackSafeDisplaySource(key, token, displayImg, 'imageCache', counters)) {
     storeEyedropperSafeImage(key, token, displayImg, { owned: false, sourceKind: 'display-cache' });
     countEyedropperCounter(counters, 'safeDisplayImages');
     return displayImg;
   }
-  return resolveEyedropperCorsDisplaySource(key, token, counters);
+  return null;
 }
 
 function resolveEyedropperCorsDisplaySource(key, token, counters = null) {
@@ -1443,10 +1269,6 @@ function resolveEyedropperCorsDisplaySource(key, token, counters = null) {
 
   const promise = loadImageElement(assetSrc, { crossOrigin: 'anonymous' })
     .then((img) => {
-      if (!isEyedropperReadbackSafeDisplaySource(key, token, img, 'display-cors', counters)) {
-        countEyedropperCounter(counters, 'safeDisplayCorsFailures');
-        return null;
-      }
       storeEyedropperSafeImage(key, token, img, { owned: false, sourceKind: 'display-cors' });
       EyedropperDebug._count('safeDisplayCorsLoads');
       refreshEyedropperAfterSafeImageReady();
@@ -1484,6 +1306,55 @@ function logEyedropperNativeSourceHydrationSkip(key, counters = null) {
   });
 }
 
+function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
+  if (typeof ensureImageDataUrl !== 'function') {
+    logEyedropperNativeSourceHydrationSkip(key, counters);
+    return null;
+  }
+
+  if (eyedropperSafeImagePromises.has(key)) {
+    countEyedropperCounter(counters, 'readbackSafePendingImages');
+    countEyedropperCounter(counters, 'safeDataUrlPending');
+    return null;
+  }
+
+  const promise = ensureImageDataUrl(key)
+    .then((dataUrl) => {
+      if (!dataUrl) return null;
+      const dataToken = eyedropperSafeImageToken(key, dataUrl);
+      const latest = eyedropperSafeImageCache.get(key);
+      if (latest?.token === dataToken && isDrawableImageSource(latest.source)) return latest.source;
+      return loadImageElement(dataUrl)
+        .then(async (img) => {
+          let source = img;
+          if (typeof createImageBitmap === 'function') {
+            try {
+              source = await createImageBitmap(img);
+            } catch (_) {}
+          }
+          storeEyedropperSafeImage(key, dataToken, source, { owned: source !== img, sourceKind: 'data-url' });
+          EyedropperDebug._count('safeDataUrlLoads');
+          refreshEyedropperAfterSafeImageReady();
+          refreshEyedropperViewportAfterSafeImageReady();
+          return source;
+        });
+    })
+    .catch((err) => {
+      if (counters) {
+        counters.erroredImages = (counters.erroredImages || 0) + 1;
+        counters.lastDrawErrorKey = key;
+        counters.lastDrawError = String(err);
+      }
+      return null;
+    })
+    .finally(() => eyedropperSafeImagePromises.delete(key));
+
+  eyedropperSafeImagePromises.set(key, promise);
+  countEyedropperCounter(counters, 'readbackSafePendingImages');
+  countEyedropperCounter(counters, 'safeDataUrlPending');
+  return null;
+}
+
 function countEyedropperSafeSourceUse(entry, counters = null) {
   if (!entry) return;
   if (entry.sourceKind === 'display-cache') countEyedropperCounter(counters, 'safeDisplayImages');
@@ -1510,8 +1381,7 @@ function resolveEyedropperSafeImageSource(key, counters = null) {
 
   const stored = imageStore[key];
   if (isNativeImageRef(stored)) {
-    logEyedropperNativeSourceHydrationSkip(key, counters);
-    return null;
+    return resolveEyedropperNativeDataUrlSource(key, token, counters);
   }
 
   if (eyedropperSafeImagePromises.has(key)) {
@@ -1564,8 +1434,11 @@ function eyedropperSafeScaleDecision(obj, source, view) {
   const sourceH = source?.height || source?.naturalHeight || 0;
   const viewZoom = Math.max(view?.zoom || zoom || 1, 0.0001);
   const dpr = view?.dpr || window.devicePixelRatio || 1;
+  const scaleVariantsEnabled = typeof isViewportImageScalingActive === 'function'
+    ? isViewportImageScalingActive()
+    : typeof viewportImageScalingEnabled !== 'undefined' && viewportImageScalingEnabled;
   return {
-    targetScale: chooseImageScaleForDraw(obj, source, view),
+    targetScale: scaleVariantsEnabled ? chooseImageScaleForDraw(obj, source, view) : 1,
     sourceW,
     sourceH,
     neededW: obj.w * viewZoom * dpr,
@@ -1576,12 +1449,7 @@ function eyedropperSafeScaleDecision(obj, source, view) {
 }
 
 function getEyedropperSafeScaledMap(key) {
-  let map = eyedropperSafeScaledBitmapCache.get(key);
-  if (!map) {
-    map = new Map();
-    eyedropperSafeScaledBitmapCache.set(key, map);
-  }
-  return map;
+  return eyedropperSafeScaledBitmapStore.getGroup(key);
 }
 
 function eyedropperBitmapByteSize(bitmap) {
@@ -1601,21 +1469,7 @@ function eyedropperSafeScaledPendingBytes() {
 }
 
 function pruneEyedropperSafeScaledImages() {
-  if (eyedropperSafeScaledBitmapBytes <= EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT) return;
-  const entries = [];
-  for (const [key, map] of eyedropperSafeScaledBitmapCache.entries()) {
-    for (const [scale, entry] of map.entries()) entries.push({ key, map, scale, entry });
-  }
-  entries.sort((a, b) => (a.entry.lastUsed || 0) - (b.entry.lastUsed || 0));
-  for (const item of entries) {
-    if (eyedropperSafeScaledBitmapBytes <= EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT) break;
-    closeEyedropperImageSource(item.entry?.bitmap);
-    eyedropperSafeScaledBitmapBytes -= item.entry?.bytes || 0;
-    item.map.delete(item.scale);
-    EyedropperDebug._count('safeScaledEvictions');
-    if (!item.map.size) eyedropperSafeScaledBitmapCache.delete(item.key);
-  }
-  eyedropperSafeScaledBitmapBytes = Math.max(0, eyedropperSafeScaledBitmapBytes);
+  eyedropperSafeScaledBitmapStore.prune();
 }
 
 function queueEyedropperSafeScaledImage(key, source, scale) {
@@ -1627,7 +1481,7 @@ function queueEyedropperSafeScaledImage(key, source, scale) {
   const sourceH = source?.height || source?.naturalHeight || 0;
   if (!sourceW || !sourceH) return;
   const estimatedBytes = eyedropperScaledVariantEstimatedBytes(sourceW, sourceH, scale);
-  if (eyedropperSafeScaledBitmapBytes + eyedropperSafeScaledPendingBytes() + estimatedBytes > EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT) {
+  if (eyedropperSafeScaledBitmapStore.bytes + eyedropperSafeScaledPendingBytes() + estimatedBytes > EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT) {
     EyedropperDebug._count('safeScaledMemorySkips');
     return;
   }
@@ -1639,15 +1493,8 @@ function queueEyedropperSafeScaledImage(key, source, scale) {
     const h = Math.max(1, Math.ceil(sourceH * scale));
     createImageBitmap(source, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' })
       .then((bitmap) => {
-        const latest = getEyedropperSafeScaledMap(key);
-        const existing = latest.get(scale);
-        if (existing?.bitmap) {
-          closeEyedropperImageSource(existing.bitmap);
-          eyedropperSafeScaledBitmapBytes -= existing.bytes || 0;
-        }
         const bytes = eyedropperBitmapByteSize(bitmap);
-        latest.set(scale, { bitmap, bytes, lastUsed: eyedropperSafeScaledBitmapUseCounter++ });
-        eyedropperSafeScaledBitmapBytes += bytes;
+        eyedropperSafeScaledBitmapStore.set(key, scale, { bitmap, bytes });
         pruneEyedropperSafeScaledImages();
         refreshEyedropperAfterSafeImageReady();
       })
@@ -1666,7 +1513,7 @@ function selectEyedropperSafeImageSourceForDraw(key, obj, view, counters = null)
   let source = fullSource;
   let selectedScale = 1;
 
-  if (viewportImageScalingEnabled && decision.targetScale < 1) {
+  if (decision.targetScale < 1) {
     const map = eyedropperSafeScaledBitmapCache.get(key);
     const scaleLevels = Array.isArray(IMAGE_SCALE_LEVELS) ? IMAGE_SCALE_LEVELS : [];
     const availableScale = scaleLevels
@@ -1674,8 +1521,7 @@ function selectEyedropperSafeImageSourceForDraw(key, obj, view, counters = null)
       .reduce((best, scale) => Math.min(best, scale), 1);
     if (availableScale < 1) {
       selectedScale = availableScale;
-      const entry = map.get(availableScale);
-      entry.lastUsed = eyedropperSafeScaledBitmapUseCounter++;
+      const entry = eyedropperSafeScaledBitmapStore.get(key, availableScale);
       source = entry.bitmap;
     } else {
       queueEyedropperSafeScaledImage(key, fullSource, decision.targetScale);
@@ -1697,8 +1543,37 @@ function selectEyedropperSafeImageSourceForDraw(key, obj, view, counters = null)
   return {
     source,
     scale: selectedScale,
-    targetScale: viewportImageScalingEnabled ? decision.targetScale : 1,
+    targetScale: decision.targetScale,
     readbackSafe: true,
+  };
+}
+
+function selectEyedropperPreviewImageSourceForDraw(key, obj, view, counters = null) {
+  const cached = eyedropperSafeImageCache.get(key);
+  if (cached?.token && isDrawableImageSource(cached.source)) {
+    countEyedropperSafeSourceUse(cached, counters);
+    const decision = eyedropperSafeScaleDecision(obj, cached.source, view);
+    return {
+      source: cached.source,
+      scale: 1,
+      targetScale: decision.targetScale,
+      readbackSafe: true,
+    };
+  }
+
+  const fallbackSource = imageBitmapCache[key] || imageCache[key] || null;
+  if (!isDrawableImageSource(fallbackSource)) {
+    resolveEyedropperSafeImageSource(key, counters);
+    return null;
+  }
+
+  if (counters) counters.previewUnsafeImages = (counters.previewUnsafeImages || 0) + 1;
+  return {
+    source: fallbackSource,
+    scale: 1,
+    targetScale: 1,
+    readbackSafe: false,
+    visualFallback: true,
   };
 }
 
@@ -1711,10 +1586,9 @@ function selectEyedropperWarmedScaledImageForViewport(key, targetScale) {
     .filter((scale) => scale >= targetScale && map.has(scale))
     .reduce((best, scale) => Math.min(best, scale), 1);
   if (!(availableScale < 1)) return null;
-  const bitmap = map.get(availableScale)?.bitmap;
+  const entry = eyedropperSafeScaledBitmapStore.get(key, availableScale);
+  const bitmap = entry?.bitmap;
   if (!isDrawableImageSource(bitmap)) return null;
-  const entry = map.get(availableScale);
-  entry.lastUsed = eyedropperSafeScaledBitmapUseCounter++;
   return { source: bitmap, scale: availableScale, targetScale, readbackSafe: true, warmedEyedropper: true };
 }
 
@@ -1803,6 +1677,9 @@ function getViewportScaledVariantForEyedropperPrewarm(key, targetScale) {
 
 function prewarmViewportScaledVariantForEyedropper(obj, view) {
   const key = obj?.data?.imgKey;
+  if (typeof isViewportImageScalingActive === 'function' && !isViewportImageScalingActive()) {
+    return { ready: true, queued: false, targetScale: 1, skipped: 'scaling-disabled' };
+  }
   if (!key || typeof chooseImageScaleForDraw !== 'function') return { ready: false, queued: false };
   const fullSource = imageBitmapCache[key] || imageCache[key] || null;
   if (!isDrawableImageSource(fullSource)) return { ready: false, queued: false };
@@ -1819,6 +1696,9 @@ function prewarmViewportScaledVariantForEyedropper(obj, view) {
 }
 
 function prewarmEyedropperSafeImages(clientX, clientY, options = {}) {
+  if (eyedropperEnabled) {
+    return { summary: { skipped: 'eyedropper-snapshot-only' }, rows: [] };
+  }
   if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
     return { summary: { skipped: 'invalid-point' }, rows: [] };
   }
@@ -1869,6 +1749,27 @@ function collectEyedropperViewportPrewarmCandidates(limit = EYEDROPPER_VIEWPORT_
 }
 
 function prewarmEyedropperVisibleImages(options = {}) {
+  if (eyedropperEnabled) {
+    EyedropperDebug._count('viewportPrewarmRuns');
+    return {
+      summary: {
+        skipped: 'eyedropper-snapshot-only',
+        candidates: 0,
+        ready: 0,
+        viewportScaleReady: 0,
+        viewportScaleQueued: 0,
+        pending: 0,
+        scaledPending: 0,
+        nativeSkipped: 0,
+        displayReused: 0,
+        displayCorsReused: 0,
+        displayCorsPending: 0,
+        dataUrlReady: 0,
+        probeFailures: 0,
+      },
+      rows: [],
+    };
+  }
   const { candidates } = collectEyedropperViewportPrewarmCandidates(options.limit);
   const view = eyedropperPreviewScaleView();
   const viewportView = eyedropperViewportScaleView();
@@ -1906,38 +1807,79 @@ function prewarmEyedropperVisibleImages(options = {}) {
   };
 }
 
+function prewarmEyedropperCenterTile(clientX, clientY, options = {}) {
+  if (!eyedropperEnabled || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+  const point = clientToBoardWorldPoint(clientX, clientY);
+  const topObject = topObjectAtWorldPoint(point);
+  if (!topObject || topObject.type !== 'image') return false;
+  const key = topObject.data?.imgKey;
+  const safeEntry = key ? eyedropperSafeImageCache.get(key) : null;
+  const token = safeEntry?.token || (key ? eyedropperSafeImageToken(key) : '');
+  const local = worldPointToImageLocalUnit(topObject, point);
+  if (!key || !token || !local) return false;
+
+  if (!safeEntry || safeEntry.token !== token || !isDrawableImageSource(safeEntry.source)) {
+    resolveEyedropperSafeImageSource(key);
+    return false;
+  }
+
+  const { width, height } = imageSourceSize(safeEntry.source);
+  if (width <= 0 || height <= 0) return false;
+  const sourceX = local.u * Math.max(0, width - 1);
+  const sourceY = local.v * Math.max(0, height - 1);
+  buildEyedropperSafeTileCache(key, token, safeEntry.source, sourceX, sourceY, {
+    sync: options.sync !== false,
+  });
+  return true;
+}
+
+function scheduleEyedropperHoverTilePrewarm(e) {
+  if (!eyedropperEnabled || eyedropperSampling || !e || e.clientX == null || e.clientY == null) return;
+  _eyedropperPendingHoverTileEvent = { clientX: e.clientX, clientY: e.clientY };
+  if (_eyedropperHoverTilePrewarmRaf) return;
+  _eyedropperHoverTilePrewarmRaf = requestAnimationFrame(() => {
+    _eyedropperHoverTilePrewarmRaf = null;
+    const event = _eyedropperPendingHoverTileEvent;
+    _eyedropperPendingHoverTileEvent = null;
+    if (!event) return;
+    prewarmEyedropperCenterTile(event.clientX, event.clientY, { sync: false });
+  });
+}
+
 function scheduleEyedropperViewportPrewarm(reason = 'viewport', options = {}) {
   if (!eyedropperEnabled) return;
-  _eyedropperViewportPrewarmScheduled = true;
-  const run = () => {
-    _eyedropperViewportPrewarmRaf = null;
-    if (!eyedropperEnabled || !_eyedropperViewportPrewarmScheduled) return;
-    _eyedropperViewportPrewarmScheduled = false;
-    const started = performance.now();
-    const result = prewarmEyedropperVisibleImages(options);
-    EyedropperDebug._recordPrewarmTiming(
-      { ...(result?.summary || {}), reason: `viewport:${reason}` },
-      performance.now() - started,
-    );
-  };
-  if (_eyedropperViewportPrewarmRaf) return;
-  if (options.afterFrame === false) {
-    run();
-    return;
-  }
-  _eyedropperViewportPrewarmRaf = requestAnimationFrame(run);
+  EyedropperDebug._count('viewportPrewarmRuns');
+}
+
+function noteEyedropperNavigationActive(reason = 'viewport', durationMs = 180) {
+  if (!eyedropperEnabled) return;
+  const now = performance.now();
+  _eyedropperNavigationBlockUntil = Math.max(_eyedropperNavigationBlockUntil, now + Math.max(0, durationMs));
+  if (_eyedropperNavigationBlockTimer) clearTimeout(_eyedropperNavigationBlockTimer);
+  _eyedropperNavigationBlockTimer = setTimeout(() => {
+    _eyedropperNavigationBlockTimer = null;
+    if (performance.now() >= _eyedropperNavigationBlockUntil) _eyedropperNavigationBlockUntil = 0;
+  }, Math.max(0, durationMs) + 16);
+  EyedropperDebug._count(`navigation:${reason}`);
+}
+
+function isEyedropperNavigationActive() {
+  return eyedropperEnabled && performance.now() < _eyedropperNavigationBlockUntil;
 }
 
 function handleEyedropperViewportChanged(reason = 'viewport') {
   if (!eyedropperEnabled) return;
-  scheduleEyedropperViewportPrewarm(reason, { afterFrame: true });
-  if (eyedropperSampling && isEyedropperSampleVisible() && _eyedropperLastSampleEvent) {
-    commitEyedropperSample(_eyedropperLastSampleEvent, { force: true });
-  }
+  if (eyedropperSampling) hideEyedropperSample();
+  scheduleEyedropperSnapshotRefresh(reason);
 }
 
-function scheduleEyedropperSafeImagePrewarm(e) {
+function scheduleEyedropperSafeImagePrewarm(e, options = {}) {
+  if (eyedropperEnabled) return;
   if (!e || e.clientX == null || e.clientY == null) return;
+  if (eyedropperSampling && !options.allowDuringSampling) {
+    EyedropperDebug._count('prewarmDeferredDuringSampling');
+    return;
+  }
   _eyedropperPendingPrewarmEvent = { clientX: e.clientX, clientY: e.clientY };
   EyedropperDebug._countPerf('prewarmScheduled');
   if (_eyedropperPrewarmRaf) {
@@ -1956,34 +1898,32 @@ function scheduleEyedropperSafeImagePrewarm(e) {
   });
 }
 
-function paintZoomedBoardPreview(clientX, clientY, drawSize, options = {}) {
-  if (!eyedropperRenderedSampleCtx) return { painted: false, pixel: null };
+function cancelEyedropperBackgroundPrewarm() {
+  if (_eyedropperPrewarmRaf) cancelAnimationFrame(_eyedropperPrewarmRaf);
+  if (_eyedropperViewportPrewarmRaf) cancelAnimationFrame(_eyedropperViewportPrewarmRaf);
+  cancelEyedropperSnapshotRefresh();
+  _eyedropperPrewarmRaf = null;
+  _eyedropperViewportPrewarmRaf = null;
+  _eyedropperPendingPrewarmEvent = null;
+  _eyedropperViewportPrewarmScheduled = false;
+}
 
+function paintEyedropperWallpaperPreview(clientX, clientY, drawSize, options = {}) {
+  if (!eyedropperRenderedSampleCtx) return null;
   const timingStart = performance.now();
   const timings = {};
   const dpr = window.devicePixelRatio || 1;
   const renderSize = Math.max(1, Math.round(drawSize));
-  const previewCssSize = renderSize / dpr;
-  const sampleDot = eyedropperSampleDotCanvasPoint(renderSize);
-  const sampleDotCenterX = sampleDot.x + 0.5;
-  const sampleDotCenterY = sampleDot.y + 0.5;
-  const worldPoint = clientToBoardWorldPoint(clientX, clientY);
-  timings.geometry = performance.now() - timingStart;
-  const previewZoom = Math.max(zoom || 1, 0.0001) * EYEDROPPER_PREVIEW_ZOOM_SCALE;
-  const worldPerCanvasPixel = 1 / (previewZoom * dpr);
+  const geometry = eyedropperZoomedWallpaperGeometry(clientX, clientY, renderSize, dpr);
+  if (!geometry) return null;
+  const { previewCssSize, sampleDot, previewZoom, viewportRect } = geometry;
   const background = boardBackgroundPixel();
-  const previewView = {
-    zoom: previewZoom,
-    panX: sampleDotCenterX / dpr - worldPoint.x * previewZoom,
-    panY: sampleDotCenterY / dpr - worldPoint.y * previewZoom,
-    dpr,
-  };
-  const viewportRect = {
-    x1: worldPoint.x - sampleDotCenterX * worldPerCanvasPixel,
-    y1: worldPoint.y - sampleDotCenterY * worldPerCanvasPixel,
-    x2: worldPoint.x + (renderSize - sampleDotCenterX) * worldPerCanvasPixel,
-    y2: worldPoint.y + (renderSize - sampleDotCenterY) * worldPerCanvasPixel,
-  };
+  timings.geometry = performance.now() - timingStart;
+
+  const wallpaperStart = performance.now();
+  const wallpaper = captureEyedropperZoomedWallpaper(clientX, clientY, renderSize, { geometry });
+  timings.wallpaperRender = performance.now() - wallpaperStart;
+  if (!wallpaper || !eyedropperZoomWallpaperReady) return null;
 
   const setupStart = performance.now();
   const resizeRenderedStart = performance.now();
@@ -1997,108 +1937,57 @@ function paintZoomedBoardPreview(clientX, clientY, drawSize, options = {}) {
   eyedropperRenderedSampleCtx.imageSmoothingQuality = 'high';
   eyedropperRenderedSampleCtx.fillStyle = rgbaToCss(background);
   eyedropperRenderedSampleCtx.fillRect(0, 0, renderSize, renderSize);
-  setWorldCanvasTransform(eyedropperRenderedSampleCtx, dpr, previewView);
   timings.paintSetup = performance.now() - setupStart;
 
-  const counters = typeof createDrawCounters === 'function' ? createDrawCounters() : null;
-  let drawnImages = 0;
-  let drawnText = 0;
-  let testedObjects = 0;
-  let intersectingObjects = 0;
   const objectLoopStart = performance.now();
-  for (const obj of objects) {
-    testedObjects++;
-    if (!objectIntersectsRect(obj, viewportRect)) continue;
-    intersectingObjects++;
-    if (obj.id === editingId) continue;
-    const drawn = drawSingleObj(eyedropperRenderedSampleCtx, obj, counters, {
-      view: previewView,
-      imageSourceResolver: selectEyedropperSafeImageSourceForDraw,
-    });
-    if (obj.type === 'image' && drawn) drawnImages++;
-    else if (obj.type === 'text' && drawn) drawnText++;
-  }
-  if (editingId) drawEditingTextOverlay(eyedropperRenderedSampleCtx);
-  timings.objectLoop = performance.now() - objectLoopStart;
-
+  eyedropperRenderedSampleCtx.drawImage(
+    eyedropperZoomWallpaperCanvas,
+    0,
+    0,
+    renderSize,
+    renderSize,
+    0,
+    0,
+    renderSize,
+    renderSize,
+  );
   eyedropperRenderedSampleCtx.setTransform(1, 0, 0, 1, 0, 0);
-  let usedFallback = false;
-  let pixel = null;
-  if (options.sampleCenter !== false) {
-    const readbackStart = performance.now();
-    pixel = sampleCanvasPixel(eyedropperRenderedSampleCtx, sampleDot.x, sampleDot.y, {
-      where: 'zoomed-preview-center',
-      source: 'paintZoomedBoardPreview',
-    });
-    timings.readback = performance.now() - readbackStart;
-    if (!pixel) {
-      usedFallback = true;
-      pixel = background;
-      EyedropperDebug._logFallbackSample({
-        where: 'zoomed-preview-center',
-        reason: 'center-readback-failed-background-only',
-        clientX,
-        clientY,
-      });
-    }
-  } else {
-    timings.readback = 0;
-    timings.previewReadbackSkipped = 1;
-  }
+  timings.objectLoop = performance.now() - objectLoopStart;
+  timings.readback = 0;
+  timings.previewReadbackSkipped = options.sampleCenter === false ? 1 : 0;
+  timings.wallpaperReadout = 0;
 
-  try {
-    const blitStart = performance.now();
-    eyedropperCtx.imageSmoothingEnabled = false;
-    eyedropperCtx.drawImage(
-      eyedropperRenderedSampleCanvas,
-      0,
-      0,
-      renderSize,
-      renderSize,
-      0,
-      0,
-      renderSize,
-      renderSize,
-    );
-    timings.blit = performance.now() - blitStart;
-    timings.paintPreview = performance.now() - timingStart;
-    return {
-      painted: true,
-      pixel,
-      centerX: sampleDot.x,
-      centerY: sampleDot.y,
-      usedFallback,
-      previewCssSize,
-      drawSize: renderSize,
-      previewZoom,
-      viewportRect,
-      counters,
-      drawnImages,
-      drawnText,
-      testedObjects,
-      intersectingObjects,
-      timings,
-    };
-  } catch (_) {
-    timings.paintPreview = performance.now() - timingStart;
-    return {
-      painted: false,
-      pixel: null,
-      centerX: sampleDot.x,
-      centerY: sampleDot.y,
-      usedFallback,
-      previewCssSize,
-      drawSize: renderSize,
-      previewZoom,
-      viewportRect,
-      counters,
-      drawnImages,
-      drawnText,
-      testedObjects,
-      intersectingObjects,
-      timings,
-    };
-  }
+  const blitStart = performance.now();
+  eyedropperCtx.imageSmoothingEnabled = false;
+  eyedropperCtx.drawImage(eyedropperRenderedSampleCanvas, 0, 0, renderSize, renderSize, 0, 0, renderSize, renderSize);
+  timings.blit = performance.now() - blitStart;
+  timings.paintPreview = performance.now() - timingStart;
+  return {
+    painted: true,
+    pixel: null,
+    centerX: sampleDot.x,
+    centerY: sampleDot.y,
+    usedFallback: false,
+    previewCssSize,
+    drawSize: renderSize,
+    previewZoom,
+    viewportRect,
+    counters: wallpaper.rendered.counters,
+    drawnImages: wallpaper.rendered.drawnImages || 0,
+    drawnText: wallpaper.rendered.drawnText || 0,
+    testedObjects: wallpaper.rendered.counters?.testedObjects || 0,
+    intersectingObjects: wallpaper.rendered.counters?.visibleObjects || 0,
+    wallpaper: true,
+    readbackUnsafe: !!wallpaper.rendered.counters?.previewUnsafeImages,
+    timings,
+  };
+}
+
+function paintZoomedBoardPreview(clientX, clientY, drawSize, options = {}) {
+  if (!eyedropperRenderedSampleCtx) return { painted: false, pixel: null };
+  const wallpaperSample = paintEyedropperWallpaperPreview(clientX, clientY, drawSize, options);
+  if (wallpaperSample) return wallpaperSample;
+  return { painted: false, pixel: null, reason: 'missing-wallpaper' };
 }
 
 function commitEyedropperSample(e, options = {}) {
@@ -2107,6 +1996,19 @@ function commitEyedropperSample(e, options = {}) {
 
   const totalStart = performance.now();
   const timings = {};
+  const inputAgeAtCommitMs = inputEventAgeMs(e, totalStart);
+  const receivedAt = Number(e.receivedAt ?? e._debugReceivedAt);
+  const latestPointer = _eyedropperLatestPointerEvent;
+  const pointerDeltaPx = latestPointer?.clientX != null && latestPointer?.clientY != null
+    ? Math.hypot(latestPointer.clientX - e.clientX, latestPointer.clientY - e.clientY)
+    : 0;
+  const latency = {
+    inputAgeAtReceiveMs: e.inputAgeAtReceiveMs ?? '',
+    inputAgeAtCommitMs: inputAgeAtCommitMs == null ? '' : Math.round(inputAgeAtCommitMs * 100) / 100,
+    queueDelayMs: Number.isFinite(receivedAt) ? Math.round(Math.max(0, totalStart - receivedAt) * 100) / 100 : '',
+    pointerDeltaPx: Math.round(pointerDeltaPx * 100) / 100,
+    frameCoalescedMoves: e.coalescedMoves ?? 0,
+  };
   const dpr = window.devicePixelRatio || 1;
   const drawSizeStart = performance.now();
   const drawSize = eyedropperPreviewDrawSize(dpr);
@@ -2127,6 +2029,8 @@ function commitEyedropperSample(e, options = {}) {
   timings.clearVisible = performance.now() - clearStart;
 
   const previewSample = paintZoomedBoardPreview(e.clientX, e.clientY, drawSize, { sampleCenter: false });
+  if (previewSample) previewSample.firstSample = !!options.first;
+  if (previewSample) previewSample.latency = latency;
   Object.assign(timings, previewSample?.timings || {});
   const canvasReadoutStart = performance.now();
   let readoutSample = sampleEyedropperReadoutPixel(e.clientX, e.clientY, previewSample);
@@ -2134,7 +2038,7 @@ function commitEyedropperSample(e, options = {}) {
   let centerPixel = readoutSample?.pixel;
   timings.previewReadback = 0;
   if (previewSample?.painted && previewSample.centerX != null && previewSample.centerY != null &&
-    (!centerPixel || readoutSample?.source === 'preview-render')) {
+    !previewSample.readbackUnsafe && (!centerPixel || readoutSample?.source === 'preview-render')) {
     const previewReadbackStart = performance.now();
     const previewPixel = sampleCanvasPixel(eyedropperRenderedSampleCtx, previewSample.centerX, previewSample.centerY, {
       where: 'zoomed-preview-center-fallback',
@@ -2152,11 +2056,17 @@ function commitEyedropperSample(e, options = {}) {
       };
     }
   }
+  timings.previewDiagnostics = 0;
+  if (previewSample && _eyedropperPreviewDiagnosticsEnabled) {
+    const diagnosticsStart = performance.now();
+    previewSample.previewDiagnostics = analyzeEyedropperPreviewSurface(previewSample, centerPixel);
+    timings.previewDiagnostics = performance.now() - diagnosticsStart;
+  }
   timings.totalBeforeReadout = performance.now() - totalStart;
   timings.total = timings.totalBeforeReadout;
   if (previewSample) previewSample.timings = timings;
   const dotStart = performance.now();
-  drawEyedropperSampleDot(drawSize);
+  drawEyedropperSampleDot(drawSize, dpr);
   timings.dot = performance.now() - dotStart;
   const readoutStart = performance.now();
   if (centerPixel) updateEyedropperColorReadout(centerPixel);
@@ -2164,11 +2074,46 @@ function commitEyedropperSample(e, options = {}) {
   const visibleStart = performance.now();
   if (!eyedropperLoupe.classList.contains('visible')) eyedropperLoupe.classList.add('visible');
   timings.showLoupe = performance.now() - visibleStart;
+  const visibleAt = performance.now();
+  const clickToPreviewVisibleMs = Number.isFinite(receivedAt) ? Math.max(0, visibleAt - receivedAt) : 0;
+  const eventToPreviewVisibleMs = inputEventAgeMs(e, visibleAt);
+  latency.clickToPreviewVisibleMs = Math.round(clickToPreviewVisibleMs * 100) / 100;
+  latency.eventToPreviewVisibleMs = eventToPreviewVisibleMs == null ? '' : Math.round(eventToPreviewVisibleMs * 100) / 100;
   const positionStart = performance.now();
   positionEyedropperLoupe(e.clientX, e.clientY);
   timings.position = performance.now() - positionStart;
   timings.total = performance.now() - totalStart;
   if (previewSample) previewSample.timings = timings;
+  if (previewSample) {
+    const presentMeta = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      firstSample: !!options.first,
+      clickToPreviewVisibleMs: latency.clickToPreviewVisibleMs,
+      eventToPreviewVisibleMs: latency.eventToPreviewVisibleMs,
+      sampleMs: timings.total,
+      inputAgeAtReceiveMs: latency.inputAgeAtReceiveMs,
+      inputAgeAtCommitMs: latency.inputAgeAtCommitMs,
+      queueDelayMs: latency.queueDelayMs,
+      previewPainted: !!previewSample.painted,
+      drawnImages: previewSample.drawnImages ?? '',
+      drawnText: previewSample.drawnText ?? '',
+      previewReadable: previewSample.previewDiagnostics?.readable ?? '',
+      previewSuspectedBlank: previewSample.previewDiagnostics?.suspectedBlank ?? '',
+    };
+    requestAnimationFrame(() => {
+      const frameAt = performance.now();
+      const clickToPreviewFrameMs = Number.isFinite(receivedAt) ? Math.max(0, frameAt - receivedAt) : 0;
+      const eventToPreviewFrameMs = inputEventAgeMs(e, frameAt);
+      latency.clickToPreviewFrameMs = Math.round(clickToPreviewFrameMs * 100) / 100;
+      latency.eventToPreviewFrameMs = eventToPreviewFrameMs == null ? '' : Math.round(eventToPreviewFrameMs * 100) / 100;
+      EyedropperDebug._logPreviewPresent({
+        ...presentMeta,
+        clickToPreviewFrameMs: latency.clickToPreviewFrameMs,
+        eventToPreviewFrameMs: latency.eventToPreviewFrameMs,
+      });
+    });
+  }
   EyedropperDebug._logSample(e.clientX, e.clientY, previewSample, centerPixel, readoutSample);
   EyedropperDebug._recordSampleTiming(e.clientX, e.clientY, previewSample, timings);
 }
@@ -2176,9 +2121,14 @@ function commitEyedropperSample(e, options = {}) {
 function updateEyedropperSample(e) {
   if (!eyedropperSampling || !e) return;
   EyedropperDebug._countPerf('sampleMoves');
-  _eyedropperPendingSampleEvent = { clientX: e.clientX, clientY: e.clientY };
+  const pointerEvent = eyedropperPointerDebugEvent(e);
+  _eyedropperLatestPointerEvent = pointerEvent;
+  if (_eyedropperSampleRaf) {
+    _eyedropperPendingSampleCoalesced++;
+    pointerEvent.coalescedMoves = _eyedropperPendingSampleCoalesced;
+  }
+  _eyedropperPendingSampleEvent = pointerEvent;
   _eyedropperLastSampleEvent = _eyedropperPendingSampleEvent;
-  scheduleEyedropperSafeImagePrewarm(e);
   if (_eyedropperSampleRaf) {
     EyedropperDebug._countPerf('sampleCoalescedMoves');
     return;
@@ -2187,6 +2137,7 @@ function updateEyedropperSample(e) {
     _eyedropperSampleRaf = null;
     const sampleEvent = _eyedropperPendingSampleEvent;
     _eyedropperPendingSampleEvent = null;
+    _eyedropperPendingSampleCoalesced = 0;
     if (sampleEvent) commitEyedropperSample(sampleEvent);
   });
 }
@@ -2194,23 +2145,46 @@ function updateEyedropperSample(e) {
 function cancelPendingEyedropperSample() {
   if (_eyedropperSampleRaf) cancelAnimationFrame(_eyedropperSampleRaf);
   if (_eyedropperPrewarmRaf) cancelAnimationFrame(_eyedropperPrewarmRaf);
+  if (_eyedropperHoverTilePrewarmRaf) cancelAnimationFrame(_eyedropperHoverTilePrewarmRaf);
   if (_eyedropperViewportPrewarmRaf) cancelAnimationFrame(_eyedropperViewportPrewarmRaf);
   _eyedropperSampleRaf = null;
   _eyedropperPrewarmRaf = null;
+  _eyedropperHoverTilePrewarmRaf = null;
   _eyedropperViewportPrewarmRaf = null;
   _eyedropperPendingSampleEvent = null;
+  _eyedropperPendingSampleCoalesced = 0;
   _eyedropperPendingPrewarmEvent = null;
+  _eyedropperPendingHoverTileEvent = null;
   _eyedropperViewportPrewarmScheduled = false;
 }
 
+function stopEyedropperPointerTracking() {
+  if (_eyedropperTrackingRelease) _eyedropperTrackingRelease();
+  _eyedropperTrackingRelease = null;
+  _eyedropperActivePointerId = null;
+}
+
 function endEyedropperSample(e = null) {
+  stopEyedropperPointerTracking();
   if (eyedropperSampling && e?.clientX != null && e?.clientY != null) {
     cancelPendingEyedropperSample();
-    commitEyedropperSample({ clientX: e.clientX, clientY: e.clientY });
+    const pointerEvent = eyedropperPointerDebugEvent(e);
+    _eyedropperLatestPointerEvent = pointerEvent;
+    commitEyedropperSample(pointerEvent);
+    eyedropperSampling = false;
+    if (_eyedropperSnapshotDirtyAfterSample) {
+      _eyedropperSnapshotDirtyAfterSample = false;
+      markEyedropperSnapshotDirty();
+    }
+    return;
   } else {
     cancelPendingEyedropperSample();
   }
   eyedropperSampling = false;
+  if (_eyedropperSnapshotDirtyAfterSample) {
+    _eyedropperSnapshotDirtyAfterSample = false;
+    markEyedropperSnapshotDirty();
+  }
 }
 
 function isEyedropperSampleVisible() {
@@ -2222,6 +2196,12 @@ function hideEyedropperSample() {
   _eyedropperLastSampleEvent = null;
   _eyedropperLoupeHorizontalSide = 'right';
   if (eyedropperLoupe) eyedropperLoupe.classList.remove('visible');
+}
+
+function hideInactiveEyedropperSampleForNavigation() {
+  if (!eyedropperEnabled || eyedropperSampling || !isEyedropperSampleVisible()) return false;
+  hideEyedropperSample();
+  return true;
 }
 
 function isPointInsideVisibleEyedropperLoupe(clientX, clientY) {
@@ -2242,9 +2222,61 @@ async function copyEyedropperValue(targetId) {
   const value = document.getElementById(targetId)?.textContent || '';
   if (!value) return;
   try {
-    await copyTextToClipboard(value);
+    await BoardfishClipboardIO.copyTextToClipboard(value);
     showEyedropperCopiedMessage();
   } catch (_) {}
+}
+
+function eyedropperEventTargetName(e) {
+  const target = e?.target;
+  if (!(target instanceof Element)) return '';
+  return target.id ? `#${target.id}` : target.tagName.toLowerCase();
+}
+
+function logEyedropperInteraction(e, allowed, reason) {
+  EyedropperDebug._logInteraction({
+    eventType: e?.type || '',
+    pointerType: e?.pointerType || '',
+    pointerId: e?.pointerId ?? '',
+    button: e?.button ?? '',
+    buttons: e?.buttons ?? '',
+    clientX: e?.clientX ?? '',
+    clientY: e?.clientY ?? '',
+    target: eyedropperEventTargetName(e),
+    allowed: !!allowed,
+    reason,
+    enabled: eyedropperEnabled,
+    sampling: eyedropperSampling,
+    activePointerId: _eyedropperActivePointerId ?? '',
+    shieldActive: isEyedropperShieldActive(),
+  });
+}
+
+function beginEyedropperPointerTracking(e) {
+  stopEyedropperPointerTracking();
+  const supportsPointerTracking = e?.type === 'pointerdown' && e.pointerId != null;
+  const moveEvent = supportsPointerTracking ? 'pointermove' : 'mousemove';
+  const upEvent = supportsPointerTracking ? 'pointerup' : 'mouseup';
+  if (supportsPointerTracking) {
+    _eyedropperActivePointerId = e.pointerId;
+    _eyedropperLastPointerStartAt = performance.now();
+  }
+
+  const onMove = (moveEvent) => {
+    if (supportsPointerTracking && _eyedropperActivePointerId != null && moveEvent.pointerId !== _eyedropperActivePointerId) return;
+    updateEyedropperSample(moveEvent);
+  };
+  const onUp = (upEvent) => {
+    if (supportsPointerTracking && _eyedropperActivePointerId != null && upEvent.pointerId !== _eyedropperActivePointerId) return;
+    endEyedropperSample(upEvent);
+    logEyedropperInteraction(upEvent, true, 'sample-released');
+  };
+  document.addEventListener(moveEvent, onMove, true);
+  document.addEventListener(upEvent, onUp, true);
+  _eyedropperTrackingRelease = () => {
+    document.removeEventListener(moveEvent, onMove, true);
+    document.removeEventListener(upEvent, onUp, true);
+  };
 }
 
 eyedropperLoupe?.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -2267,39 +2299,86 @@ eyedropperLoupe?.addEventListener('keydown', (e) => {
 });
 
 function startEyedropperSample(e) {
-  if (!eyedropperEnabled || e.button !== 0) return false;
-  if (typeof _spaceDown !== 'undefined' && _spaceDown) return false;
-  if (_boardOpening || (isBoardInputBlocked() && !isEyedropperShieldActive())) return false;
+  if (typeof _spaceDown !== 'undefined' && _spaceDown) {
+    logEyedropperInteraction(e, false, 'space-pan');
+    return false;
+  }
+  if (e.type === 'mousedown' && performance.now() - _eyedropperLastPointerStartAt < 700) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    logEyedropperInteraction(e, false, 'mouse-after-pointer');
+    return true;
+  }
+  if (!eyedropperEnabled) {
+    logEyedropperInteraction(e, false, 'disabled');
+    return false;
+  }
+  if (e.button !== 0) {
+    logEyedropperInteraction(e, false, 'non-primary-button');
+    return false;
+  }
+  if (e.type === 'pointerdown' && _eyedropperActivePointerId != null && _eyedropperActivePointerId !== e.pointerId) {
+    logEyedropperInteraction(e, false, 'different-active-pointer');
+    return true;
+  }
+  if (e.type === 'pointerdown') _eyedropperLastPointerStartAt = performance.now();
+  if (isEyedropperNavigationActive()) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    logEyedropperInteraction(e, false, 'navigation-active');
+    return true;
+  }
+  if (_boardOpening || (isBoardInputBlocked() && !isEyedropperShieldActive())) {
+    logEyedropperInteraction(e, false, _boardOpening ? 'board-opening' : 'input-blocked');
+    return false;
+  }
   if (isPointInsideVisibleEyedropperLoupe(e.clientX, e.clientY)) {
     e.preventDefault();
     e.stopImmediatePropagation();
+    logEyedropperInteraction(e, true, 'inside-loupe');
     return true;
   }
-  if (!(e.target instanceof Node) || !canvas.contains(e.target)) return false;
-  if (isEventInsideVisibleContextMenu(e)) return false;
+  if (!(e.target instanceof Node) || !canvas.contains(e.target)) {
+    logEyedropperInteraction(e, false, 'outside-canvas');
+    return false;
+  }
+  if (isEventInsideVisibleContextMenu(e)) {
+    logEyedropperInteraction(e, false, 'inside-menu');
+    return false;
+  }
   if (ctxMenu.classList.contains('visible') || objCtxMenu.classList.contains('visible') || ctxActions?.classList.contains('visible')) {
     e.preventDefault();
     e.stopImmediatePropagation();
     hideMenus();
-    return true;
+    logEyedropperInteraction(e, true, 'closed-menu-before-sample');
   }
-  if (!eyedropperSampling && isEyedropperSampleVisible()) {
+  if (eyedropperSampling) {
     e.preventDefault();
     e.stopImmediatePropagation();
-    hideEyedropperSample();
+    endEyedropperSample(e);
+    logEyedropperInteraction(e, true, 'sample-set');
     return true;
+  }
+  if (isEyedropperSampleVisible()) {
+    hideEyedropperSample();
+    logEyedropperInteraction(e, true, 'restart-visible-sample');
   }
 
   e.preventDefault();
   e.stopImmediatePropagation();
   hideMenus();
   eyedropperSampling = true;
-  commitEyedropperSample(e);
-  beginDocumentDrag({
-    move: updateEyedropperSample,
-    up: endEyedropperSample,
-  });
+  if (typeof cancelWheelPan === 'function') cancelWheelPan();
+  cancelEyedropperBackgroundPrewarm();
+  const pointerEvent = eyedropperPointerDebugEvent(e);
+  _eyedropperLatestPointerEvent = pointerEvent;
+  commitEyedropperSample(pointerEvent, { first: true });
+  beginEyedropperPointerTracking(e);
+  logEyedropperInteraction(e, true, 'sample-started');
   return true;
 }
 
+canvas.addEventListener('pointerdown', startEyedropperSample, true);
 canvas.addEventListener('mousedown', startEyedropperSample, true);
+document.addEventListener('pointermove', scheduleEyedropperHoverTilePrewarm, true);
+document.addEventListener('mousemove', scheduleEyedropperHoverTilePrewarm, true);

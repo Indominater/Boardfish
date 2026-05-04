@@ -32,7 +32,7 @@ function cacheImageSourceForSave(key, src, dbg = null) {
   if (!hasTauri() || !src || isNativeImageRef(src)) return Promise.resolve();
   const existing = imageSourceCachePromises.get(key);
   if (existing) return existing;
-  const promise = SaveDebug.invoke(dbg, 'register_image_source', { imgKey: key, dataUrl: src }, { imgKey: key, dataUrl: src })
+  const promise = SaveDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src), { imgKey: key, dataUrl: src })
     .finally(() => imageSourceCachePromises.delete(key));
   imageSourceCachePromises.set(key, promise);
   return promise;
@@ -45,7 +45,7 @@ function cacheImageSourceForExport(key, src, dbg = null) {
     ExportDebug.step(dbg, 'register:reuse-pending', { imgKey: key });
     return existing;
   }
-  const promise = ExportDebug.invoke(dbg, 'register_image_source', { imgKey: key, dataUrl: src }, { imgKey: key })
+  const promise = ExportDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src), { imgKey: key })
     .finally(() => imageSourceCachePromises.delete(key));
   imageSourceCachePromises.set(key, promise);
   return promise;
@@ -208,9 +208,7 @@ function loadImageElement(src, options = {}) {
 }
 
 function convertTauriFileSrc(path) {
-  if (window.__TAURI__?.core?.convertFileSrc) return window.__TAURI__.core.convertFileSrc(path);
-  if (window.__TAURI_INTERNALS__?.convertFileSrc) return window.__TAURI_INTERNALS__.convertFileSrc(path, 'asset');
-  return path;
+  return tauriConvertFileSrc(path);
 }
 
 function scheduleImageReadyRender(source = 'image-load') {
@@ -234,10 +232,10 @@ async function materializeImageAssets(keys, dbg = null) {
   const existing = imageAssetMaterializePromises.get(promiseKey);
   if (existing) return existing;
   const generation = _imageStoreGeneration;
-  const promise = OpenDebug.invoke(
+  const promise = OpenDebug.wrap(
     dbg,
-    'materialize_cached_image_sources',
-    { imgKeys: pending },
+    TAURI_COMMANDS.MATERIALIZE_CACHED_IMAGE_SOURCES,
+    () => BoardfishTauri.materializeCachedImageSources(pending),
     { count: pending.length }
   )
     .then((entries) => {
@@ -286,7 +284,7 @@ async function ensureImageDataUrl(key, dbg = null) {
   const existing = imageHydrationPromises.get(key);
   if (existing) return existing;
   const generation = _imageStoreGeneration;
-  const promise = OpenDebug.invoke(dbg, 'get_cached_image_data_url', { imgKey: key }, { imgKey: key })
+  const promise = OpenDebug.wrap(dbg, TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL, () => BoardfishTauri.getCachedImageDataUrl(key), { imgKey: key })
     .then((dataUrl) => {
       if (generation === _imageStoreGeneration && isNativeImageRef(imageStore[key])) imageStore[key] = dataUrl;
       return dataUrl;
@@ -494,7 +492,7 @@ function clearImageStore(clearNativeCaches = true) {
   _imageReadyLastRender = 0;
   imgKeyCounter = 1;
   if (clearNativeCaches && hasTauri()) {
-    tauriInvoke('clear_image_source_cache')
+    BoardfishTauri.clearImageSourceCache()
       .catch((err) => console.warn('[image-source-cache] clear_image_source_cache failed:', err));
   }
 }

@@ -402,6 +402,7 @@ darkModeMenuBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   if (!isCtxActionHotspotEvent(e, e.currentTarget)) return;
+  closeCtxMenu('command:dark-mode');
   Promise.resolve(toggleAppTheme()).finally(updateCtxActionStates);
 });
 
@@ -409,6 +410,7 @@ eyedropperMenuBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   if (!isCtxActionHotspotEvent(e, e.currentTarget)) return;
+  closeCtxMenu('command:eyedropper');
   setEyedropperEnabled(!eyedropperEnabled);
   updateCtxActionStates();
 });
@@ -448,9 +450,11 @@ islZoom.addEventListener('click', () => {
   function animate(now) {
     const t = Math.min((now - startTime) / duration, 1);
     const e = 1 - Math.pow(1 - t, 3);
-    zoom = startZoom + (targetZoom - startZoom) * e;
-    panX = startPanX + (targetPanX - startPanX) * e;
-    panY = startPanY + (targetPanY - startPanY) * e;
+    BoardfishViewportState.setZoomPan(
+      startZoom + (targetZoom - startZoom) * e,
+      startPanX + (targetPanX - startPanX) * e,
+      startPanY + (targetPanY - startPanY) * e,
+    );
     ViewportDebug.step(dbg, 'animate', { t, panX, panY, zoom });
     applyTransform();
     if (t < 1) requestAnimationFrame(animate);

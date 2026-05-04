@@ -1,7 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::image_sources::{transform_dynamic_image, CachedImageSource, ImageSourceCache};
+use crate::image_sources::{CachedImageSource, ImageSourceCache};
+use crate::image_transform::transform_dynamic_image;
 use crate::{elapsed_ms, rgba_mb};
 
 static CLIPBOARD_DEBUG: AtomicBool = AtomicBool::new(false);

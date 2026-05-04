@@ -166,12 +166,7 @@ function exitEdit() {
   const obj = objectsMap.get(id);
   if (obj) {
     if (obj.data.content.trim() === '') {
-      const idx = objects.findIndex((o) => o.id === id);
-      if (idx >= 0) objects.splice(idx, 1);
-      objectsMap.delete(id);
-      _linesCacheMap.delete(id);
-      selectedIds.delete(id);
-      selectedId = null;
+      BoardfishEditorState.removeObjectsById([id]);
       delete obj._editStartContent;
       delete obj._editMinLines;
       _editHistoryLastContent = null;
