@@ -536,7 +536,7 @@ function restoreEyedropperViewportScaling() {
 
 function positionEyedropperLoupe(clientX, clientY) {
   const margin = 18;
-  const gap = 22;
+  const gap = 24;
   const rect = eyedropperLoupe.getBoundingClientRect();
   const previewRect = eyedropperPreview?.getBoundingClientRect();
   const width = rect.width || eyedropperLoupeCssWidth();
