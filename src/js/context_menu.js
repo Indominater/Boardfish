@@ -1,12 +1,12 @@
 // ─── Context menu ─────────────────────────────────────────────────────────────
 var ctxPos = { x: 0, y: 0 };
 
-function clampMenuCoord(value, size, margin = 12) {
+function clampMenuCoord(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
   const max = Math.max(margin, window.innerWidth - size - margin);
   return Math.max(margin, Math.min(max, value));
 }
 
-function clampMenuTop(value, size, margin = 12) {
+function clampMenuTop(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
   const max = Math.max(margin, window.innerHeight - size - margin);
   return Math.max(margin, Math.min(max, value));
 }
@@ -52,7 +52,7 @@ function openCtxMenuAt(x, y) {
   const actionRect = ctxActions.getBoundingClientRect();
   const left = clampMenuCoord(menuRect.left, actionRect.width);
   let top = menuRect.top - actionRect.height - gap;
-  if (top < 12) top = menuRect.bottom + gap;
+  if (top < MENU_VIEWPORT_EDGE_MARGIN) top = menuRect.bottom + gap;
   ctxActions.style.left = `${Math.round(left)}px`;
   ctxActions.style.top = `${Math.round(clampMenuTop(top, actionRect.height))}px`;
 }
