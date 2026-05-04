@@ -1,6 +1,6 @@
 # Boardfish
 
-Boardfish is an infinite canvas for fast, non-destructive ideation. Designed for Windows and macOS, it provides an ultra-lightweight environment for visual research, moodboarding, and snippets.
+Boardfish is an infinite canvas for fast, non-destructive ideation. Designed for Windows and macOS, it provides a lightweight environment for visual research, moodboarding, and snippets.
 
 <img src="src-tauri/icons/image_e4de38.png" alt="Boardfish canvas screenshot" width="900">
 
