@@ -95,12 +95,6 @@ function logStartupError(step, error) {
   } catch (_) {}
 }
 
-function setNativeDebug(command, enabled) {
-  if (!DEBUG_TOOLS_ENABLED) return;
-  if (!hasTauri()) return;
-  BoardfishTauri.setNativeDebug(command, enabled).catch(() => {});
-}
-
 function normalizeAppTheme(value) {
   return String(value || '').toLowerCase() === 'dark' ? 'dark' : 'light';
 }

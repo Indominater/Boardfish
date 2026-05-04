@@ -1,7 +1,6 @@
 use crate::board_io::{read_board_file, write_board_container, BoardReadStats, BoardWriteStats};
 use crate::board_types::validate_board_value;
 use crate::image_sources::ImageSourceCache;
-use crate::save_debug;
 
 #[derive(serde::Serialize)]
 pub(crate) struct SaveBoardResponse {
@@ -92,7 +91,6 @@ pub(crate) async fn save_board(
         .map_err(|e| e.to_string())??;
 
     let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
-    save_debug("total", total_start);
 
     Ok(SaveBoardResponse::from_stats(result, total_ms))
 }

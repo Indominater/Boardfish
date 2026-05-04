@@ -247,7 +247,6 @@ test('eyedropper preview uses only the rendered-board wallpaper while active', (
   assert.doesNotMatch(source, /renderEyedropperSnapshot\(eyedropperZoomWallpaperCanvas, eyedropperZoomWallpaperCtx, EYEDROPPER_PREVIEW_ZOOM_SCALE\)/);
   assert.match(source, /readbackUnsafe: !!wallpaper\.rendered\.counters\?\.previewUnsafeImages/);
   assert.match(source, /!previewSample\.readbackUnsafe && \(!centerPixel \|\| readoutSample\?\.source === 'preview-render'\)/);
-  assert.doesNotMatch(source, /scheduleEyedropperViewportPrewarm\('enable', \{ afterPaint: true \}\)/);
   assert.doesNotMatch(source, /eyedropperWallpaperCanRead === false\) scheduleEyedropperSafeImagePrewarm/);
   assert.match(source, /viewportImageScalingEnabled = false;/);
   assert.match(source, /restoreEyedropperViewportScaling\(\)/);
@@ -309,7 +308,6 @@ test('eyedropper debugger exposes compact reports for JSON copying', () => {
   assert.match(source, /EyedropperDebug\._logToggle\(toggleMeta\)/);
   assert.match(source, /EyedropperDebug\._logPreviewPresent/);
   assert.match(source, /wallpaperMs: e\.meta\?\.wallpaperMs/);
-  assert.doesNotMatch(source, /scheduleEyedropperViewportPrewarm\('enable', \{ afterPaint: true \}\)/);
   assert.match(source, /function cancelEyedropperBackgroundPrewarm\(\)/);
   assert.match(source, /cancelEyedropperBackgroundPrewarm\(\);/);
   assert.match(source, /prewarmDeferredDuringSampling/);
@@ -362,7 +360,7 @@ test('eyedropper hover readout does not use image or object references', () => {
   assert.match(source, /paintZoomedBoardPreview\(e\.clientX, e\.clientY, drawSize, \{ sampleCenter: false \}\)/);
   assert.match(source, /sampleEyedropperReadoutPixel\(e\.clientX, e\.clientY, previewSample\)/);
   assert.match(source, /function renderEyedropperLocalReadoutPixel\(clientX, clientY\)/);
-  assert.match(source, /sampleEyedropperSafePixelCache\(key, token, sourceX, sourceY\)/);
+  assert.match(source, /sampleEyedropperSafeTileCache\(key, token, safeEntry\.source, sourceX, sourceY\)/);
   assert.match(source, /sampleCanvasPixel\(eyedropperRenderedSampleCtx, previewSample\.centerX, previewSample\.centerY,/);
   assert.match(source, /sampleCanvasPixel\(eyedropperReadoutCtx, 0, 0,/);
   assert.doesNotMatch(source, /function sampleImageSourcePixelForEyedropper/);

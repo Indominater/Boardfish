@@ -688,8 +688,6 @@ var EyedropperDebug = (() => {
             sampleActive: eyedropperSampling,
             enabled: eyedropperEnabled,
             safeImagePending: eyedropperSafeImagePromises.size,
-            pixelCachePending: eyedropperSafePixelCachePending.size,
-            pixelCacheMB: roundMs(eyedropperSafePixelCacheBytes / 1024 / 1024),
           });
           if (longTasks.length > MAX_LONG_TASKS) longTasks.shift();
         }
@@ -713,7 +711,6 @@ var EyedropperDebug = (() => {
       loupeVisible: isEyedropperSampleVisible(),
       sampleRafActive: !!_eyedropperSampleRaf,
       prewarmRafActive: !!_eyedropperPrewarmRaf,
-      viewportPrewarmRafActive: !!_eyedropperViewportPrewarmRaf,
       pendingSampleEvent: !!_eyedropperPendingSampleEvent,
       pendingPrewarmEvent: !!_eyedropperPendingPrewarmEvent,
       pendingCoalescedMoves: _eyedropperPendingSampleCoalesced,
@@ -721,7 +718,6 @@ var EyedropperDebug = (() => {
         ? roundMs(Math.max(0, performance.now() - _eyedropperLatestPointerEvent.receivedAt))
         : '',
       safeImagePending: eyedropperSafeImagePromises.size,
-      pixelCachePending: eyedropperSafePixelCachePending.size,
       visibility: document.visibilityState || '',
       hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : '',
     });
@@ -1004,8 +1000,6 @@ var EyedropperDebug = (() => {
       bodyClassEnabled: !!document.body?.classList.contains('eyedropper-enabled'),
       sampleRafActive: !!_eyedropperSampleRaf,
       prewarmRafActive: !!_eyedropperPrewarmRaf,
-      viewportPrewarmRafActive: !!_eyedropperViewportPrewarmRaf,
-      viewportPrewarmScheduled: !!_eyedropperViewportPrewarmScheduled,
       pendingSampleEvent: !!_eyedropperPendingSampleEvent,
       pendingPrewarmEvent: !!_eyedropperPendingPrewarmEvent,
       activePointerId: _eyedropperActivePointerId ?? '',
@@ -1199,10 +1193,6 @@ var EyedropperDebug = (() => {
       scaledMemorySkips: stats.safeScaledMemorySkips,
       displayProbeFailures: eyedropperSafeDisplayProbeFailures.size,
       displayReloadPending: eyedropperSafeDisplayReloadPromises.size,
-      pixelCaches: eyedropperSafePixelCache.size,
-      pixelCachePending: eyedropperSafePixelCachePending.size,
-      pixelCacheMB: roundMs(eyedropperSafePixelCacheBytes / 1024 / 1024),
-      pixelCacheLimitMB: roundMs(EYEDROPPER_SAFE_PIXEL_MEMORY_LIMIT / 1024 / 1024),
       tileCaches: eyedropperSafeTileCache.size,
       tileCachePending: eyedropperSafeTileCachePending.size,
       tileCacheMB: roundMs(eyedropperSafeTileCacheBytes / 1024 / 1024),
@@ -1367,5 +1357,4 @@ var EyedropperDebug = (() => {
 })();
 
 exposeDebug({ eyedropper: EyedropperDebug });
-
 

@@ -78,10 +78,6 @@ function boardData() {
   });
 }
 
-function getImageMetaForBoardFile(imgKey, src = '') {
-  return BoardfishBoardDocument.imageMetaForBoardFile(imgKey, src, boardDocumentDeps());
-}
-
 function boardDataForSave() {
   return BoardfishBoardDocument.createBoardDataForSave({
     viewport: { panX, panY, zoom },

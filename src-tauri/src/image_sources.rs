@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::elapsed_ms;
 use crate::image_data_url::cached_source_from_data_url;
 use crate::image_source_files::{
     cleanup_materialized_paths, image_source_batch_dir, image_source_file_path,
 };
 use crate::image_transform::transform_dynamic_image;
-use crate::{elapsed_ms, save_debug};
 
 #[derive(Clone)]
 pub(crate) struct CachedImageSource {
@@ -238,7 +238,6 @@ pub(crate) async fn register_image_file_source(
     img_key: String,
     path: String,
 ) -> Result<ImageFileSourceResponse, String> {
-    let total = std::time::Instant::now();
     let (source, width, height) = tokio::task::spawn_blocking(move || {
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         let (mime, ext) = image_mime_ext_from_path(&path);
@@ -263,7 +262,6 @@ pub(crate) async fn register_image_file_source(
     let mime = source.mime.clone();
     let ext = source.ext.clone();
     state.insert(img_key, source)?;
-    save_debug("register_image_file_source total", total);
     Ok(ImageFileSourceResponse {
         bytes,
         mime,
@@ -351,7 +349,6 @@ pub(crate) async fn register_image_source(
     img_key: String,
     data_url: String,
 ) -> Result<ImageSourceResponse, String> {
-    let total = std::time::Instant::now();
     let source = tokio::task::spawn_blocking(move || cached_source_from_data_url(&data_url))
         .await
         .map_err(|e| e.to_string())??;
@@ -359,7 +356,6 @@ pub(crate) async fn register_image_source(
     let mime = source.mime.clone();
     let ext = source.ext.clone();
     state.insert(img_key, source)?;
-    save_debug("register_image_source total", total);
     Ok(ImageSourceResponse { bytes, mime, ext })
 }
 
@@ -419,7 +415,6 @@ pub(crate) async fn register_transformed_image_source(
 
     let (transformed_source, (bytes, width, height, decode_ms, transform_ms, encode_ms)) = result;
     state.insert(temp_key.clone(), transformed_source)?;
-    save_debug("register_transformed_image_source total", total);
     Ok(TransformedImageSourceResponse {
         bytes,
         mime: "image/png",
@@ -452,7 +447,6 @@ pub(crate) async fn save_images_to_existing_folder_by_keys(
     folder: String,
     img_keys: Vec<String>,
 ) -> Result<SaveImagesResponse, String> {
-    let total_start = std::time::Instant::now();
     if img_keys.is_empty() {
         return Ok(SaveImagesResponse {
             saved_count: 0,
@@ -498,7 +492,6 @@ pub(crate) async fn save_images_to_existing_folder_by_keys(
         }
     }
 
-    save_debug("save_images_to_existing_folder_by_keys total", total_start);
     Ok(SaveImagesResponse {
         saved_count,
         failed_count,

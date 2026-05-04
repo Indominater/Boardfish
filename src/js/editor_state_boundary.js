@@ -29,11 +29,6 @@
     return obj;
   }
 
-  function addObjects(nextObjects = []) {
-    for (const obj of nextObjects) addObject(obj);
-    return nextObjects;
-  }
-
   function removeObjectsById(ids = []) {
     const idsToRemove = new Set(ids);
     let write = 0;
@@ -129,16 +124,6 @@
     return result;
   }
 
-  function snapshotObjectsMap(objectsSnapshot) {
-    const map = new Map();
-    for (const obj of objectsSnapshot) map.set(obj.id, obj);
-    return map;
-  }
-
-  function snapshotImageStore() {
-    return BoardfishImageStore.snapshotSources();
-  }
-
   function snapshotSelection() {
     return {
       selectedId,
@@ -151,22 +136,8 @@
     return BoardfishViewportState.snapshot();
   }
 
-  function snapshotBoardState() {
-    const objectsSnapshot = cloneObjects(objects);
-    return {
-      objects: objectsSnapshot,
-      objectsMap: snapshotObjectsMap(objectsSnapshot),
-      imageStore: snapshotImageStore(),
-      imageCacheKeys: BoardfishImageStore.cacheKeys(),
-      history: { boardHistory, historyIndex },
-      selection: snapshotSelection(),
-      viewport: snapshotViewport(),
-    };
-  }
-
   root.BoardfishEditorState = Object.freeze({
     addObject,
-    addObjects,
     clearSelection: clearSelectionState,
     clearTextLayoutState,
     commitMutation,
@@ -179,7 +150,6 @@
     setSelection: setSelectionState,
     setBoardOpening,
     setViewport: setViewportState,
-    snapshotBoardState,
     snapshotSelection,
     snapshotViewport,
   });

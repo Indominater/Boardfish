@@ -28,8 +28,6 @@
     SAVE_IMAGES_TO_EXISTING_FOLDER_BY_KEYS: 'save_images_to_existing_folder_by_keys',
     SAVE_TEXT_FILE_DIALOG: 'save_text_file_dialog',
     SET_APP_THEME: 'set_app_theme',
-    SET_OPEN_DEBUG: 'set_open_debug',
-    SET_SAVE_DEBUG: 'set_save_debug',
     SET_TITLE: 'set_title',
     SHOW_APP_WINDOW: 'show_app_window',
     WRITE_IMAGE_FILE_BY_KEY: 'write_image_file_by_key',
@@ -129,9 +127,6 @@
     },
     setAppTheme(theme) {
       return tauriInvoke(TAURI_COMMANDS.SET_APP_THEME, { theme });
-    },
-    setNativeDebug(command, enabled) {
-      return tauriInvoke(command, { enabled });
     },
     setTitle(title) {
       return tauriInvoke(TAURI_COMMANDS.SET_TITLE, { title });

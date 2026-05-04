@@ -20,10 +20,6 @@
     return imageStore;
   }
 
-  function clearSources() {
-    for (const key of Object.keys(imageStore)) delete imageStore[key];
-  }
-
   function getDisplayImage(key) {
     return imageCache[key] || null;
   }
@@ -38,35 +34,11 @@
     return !!imageCache[key];
   }
 
-  function getBitmap(key) {
-    return imageBitmapCache[key] || null;
-  }
-
-  function getBestDisplaySource(key) {
-    return imageBitmapCache[key] || imageCache[key] || null;
-  }
-
-  function snapshotSources() {
-    const store = {};
-    for (const [key, src] of Object.entries(imageStore || {})) {
-      store[key] = src && typeof src === 'object' ? { ...src } : src;
-    }
-    return store;
-  }
-
   function sourceKeys() {
     return Object.keys(imageStore || {});
   }
 
-  function cacheKeys() {
-    return Object.keys(imageCache || {});
-  }
-
   root.BoardfishImageStore = Object.freeze({
-    cacheKeys,
-    clearSources,
-    getBestDisplaySource,
-    getBitmap,
     getDisplayImage,
     getSource,
     hasDisplayImage,
@@ -74,7 +46,6 @@
     setDisplayImage,
     setSource,
     setSources,
-    snapshotSources,
     sourceKeys,
     get generation() { return _imageStoreGeneration; },
   });

@@ -95,17 +95,16 @@ test('frontend Tauri event and asset URL access stay behind the shared bridge', 
   }
 });
 
-test('frontend command catalog covers every Rust command plus native debug toggles', () => {
+test('frontend command catalog covers every Rust command', () => {
   const catalog = new Set(tauriCommandValues());
   const rustCommands = registeredRustCommands();
-  const expectedExtra = new Set(['set_save_debug', 'set_open_debug']);
 
   for (const command of rustCommands) {
     assert.ok(catalog.has(command), `TAURI_COMMANDS is missing ${command}`);
   }
 
   for (const command of catalog) {
-    assert.ok(rustCommands.includes(command) || expectedExtra.has(command), `${command} is not a registered Rust command`);
+    assert.ok(rustCommands.includes(command), `${command} is not a registered Rust command`);
   }
 });
 

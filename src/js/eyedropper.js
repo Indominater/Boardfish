@@ -585,26 +585,6 @@ function sampleCanvasPixel(context, sourceX, sourceY, meta = {}) {
   }
 }
 
-function sampleEyedropperWallpaperPixel(sourceX, sourceY) {
-  if (!eyedropperWallpaperCtx || eyedropperWallpaperCanRead === false) return null;
-  const pixel = sampleCanvasPixel(eyedropperWallpaperCtx, sourceX, sourceY, {
-    where: 'eyedropper-wallpaper-readout',
-    source: 'sampleEyedropperReadoutPixel',
-    logFailures: false,
-  });
-  eyedropperWallpaperCanRead = !!pixel;
-  if (!pixel) {
-    EyedropperDebug._logReadbackFailure('eyedropper-wallpaper-readout', {
-      x: sourceX,
-      y: sourceY,
-      width: eyedropperWallpaperCanvas?.width ?? '',
-      height: eyedropperWallpaperCanvas?.height ?? '',
-      reason: 'canvas-tainted-or-unreadable',
-    });
-  }
-  return pixel;
-}
-
 function renderEyedropperLocalReadoutPixel(clientX, clientY) {
   if (!eyedropperReadoutCtx || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
   const dpr = window.devicePixelRatio || 1;
@@ -719,84 +699,6 @@ function trimEyedropperSafeTileCache(protectedKey = '') {
     if (!oldestKey) break;
     removeEyedropperSafeTileCache(oldestKey);
   }
-}
-
-function removeEyedropperSafePixelCache(key) {
-  const existing = eyedropperSafePixelCache.get(key);
-  if (!existing) return;
-  eyedropperSafePixelCacheBytes -= existing.bytes || existing.data?.byteLength || 0;
-  eyedropperSafePixelCache.delete(key);
-  eyedropperSafePixelCacheBytes = Math.max(0, eyedropperSafePixelCacheBytes);
-}
-
-function trimEyedropperSafePixelCache(protectedKey = '') {
-  while (eyedropperSafePixelCacheBytes > EYEDROPPER_SAFE_PIXEL_MEMORY_LIMIT && eyedropperSafePixelCache.size > 1) {
-    let oldestKey = '';
-    let oldestUse = Number.POSITIVE_INFINITY;
-    for (const [key, entry] of eyedropperSafePixelCache.entries()) {
-      if (key === protectedKey) continue;
-      const lastUsed = entry?.lastUsed || 0;
-      if (lastUsed < oldestUse) {
-        oldestUse = lastUsed;
-        oldestKey = key;
-      }
-    }
-    if (!oldestKey) break;
-    removeEyedropperSafePixelCache(oldestKey);
-  }
-}
-
-function scheduleEyedropperSafePixelCache(key, token, source) {
-  const { width, height } = imageSourceSize(source);
-  if (!key || !token || !isDrawableImageSource(source) || width <= 0 || height <= 0) return;
-  const existing = eyedropperSafePixelCache.get(key);
-  if (existing?.token === token) return;
-  if (eyedropperSafePixelCachePending.has(key)) return;
-  eyedropperSafePixelCachePending.add(key);
-  scheduleIdleTask(() => {
-    eyedropperSafePixelCachePending.delete(key);
-    const latest = eyedropperSafeImageCache.get(key);
-    if (latest?.token !== token || latest.source !== source || latest.sourceKind !== 'data-url') return;
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const pixelCtx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!pixelCtx) return;
-      pixelCtx.drawImage(source, 0, 0, width, height);
-      const imageData = pixelCtx.getImageData(0, 0, width, height);
-      removeEyedropperSafePixelCache(key);
-      const bytes = imageData.data.byteLength;
-      eyedropperSafePixelCache.set(key, {
-        token,
-        width,
-        height,
-        data: imageData.data,
-        bytes,
-        lastUsed: eyedropperSafePixelCacheUseCounter++,
-      });
-      eyedropperSafePixelCacheBytes += bytes;
-      trimEyedropperSafePixelCache(key);
-    } catch (err) {
-      EyedropperDebug._logReadbackFailure('safe-pixel-cache-build', {
-        imgKey: key,
-        width,
-        height,
-        error: String(err),
-      });
-    }
-  });
-}
-
-function sampleEyedropperSafePixelCache(key, token, sourceX, sourceY) {
-  const cached = eyedropperSafePixelCache.get(key);
-  if (!cached || cached.token !== token) return null;
-  cached.lastUsed = eyedropperSafePixelCacheUseCounter++;
-  const x = Math.max(0, Math.min(cached.width - 1, Math.floor(sourceX)));
-  const y = Math.max(0, Math.min(cached.height - 1, Math.floor(sourceY)));
-  const index = (y * cached.width + x) * 4;
-  const data = cached.data;
-  return [data[index], data[index + 1], data[index + 2], data[index + 3]];
 }
 
 function buildEyedropperSafeTileCache(key, token, source, sourceX, sourceY, options = {}) {
@@ -916,36 +818,25 @@ function sampleEyedropperCachedPixelAt(clientX, clientY) {
   if (topObject.type !== 'image') return null;
   const key = topObject.data?.imgKey;
   const local = worldPointToImageLocalUnit(topObject, point);
-  const cached = key ? eyedropperSafePixelCache.get(key) : null;
   const safeEntry = key ? eyedropperSafeImageCache.get(key) : null;
   const token = safeEntry?.token || (key ? eyedropperSafeImageToken(key) : '');
   if (!key || !local || !token) return null;
-  let sourceW = cached?.width || 0;
-  let sourceH = cached?.height || 0;
+  if (safeEntry?.token !== token || !isDrawableImageSource(safeEntry.source)) {
+    resolveEyedropperSafeImageSource(key);
+    return null;
+  }
+  const { width: sourceW, height: sourceH } = imageSourceSize(safeEntry.source);
   let sourceX = local.u * Math.max(0, sourceW - 1);
   let sourceY = local.v * Math.max(0, sourceH - 1);
-  let pixel = cached?.token === token ? sampleEyedropperSafePixelCache(key, token, sourceX, sourceY) : null;
-  if (!pixel) {
-    if (safeEntry?.token === token && isDrawableImageSource(safeEntry.source)) {
-      const size = imageSourceSize(safeEntry.source);
-      sourceW = size.width;
-      sourceH = size.height;
-      sourceX = local.u * Math.max(0, sourceW - 1);
-      sourceY = local.v * Math.max(0, sourceH - 1);
-      const tileSample = sampleEyedropperSafeTileCache(key, token, safeEntry.source, sourceX, sourceY);
-      pixel = tileSample?.pixel || null;
-      sourceX = tileSample?.sourceX ?? sourceX;
-      sourceY = tileSample?.sourceY ?? sourceY;
-    } else {
-      resolveEyedropperSafeImageSource(key);
-      return null;
-    }
-  }
+  const tileSample = sampleEyedropperSafeTileCache(key, token, safeEntry.source, sourceX, sourceY);
+  const pixel = tileSample?.pixel || null;
+  sourceX = tileSample?.sourceX ?? sourceX;
+  sourceY = tileSample?.sourceY ?? sourceY;
   if (!pixel) return null;
   return {
     pixel,
     source: 'pixel-cache',
-    reason: cached?.token === token ? 'cached-image-pixel' : 'cached-image-tile',
+    reason: 'cached-image-tile',
     objectId: topObject.id || '',
     objectType: topObject.type || '',
     sourceX,
@@ -1024,14 +915,6 @@ function displayedBoardPixelSampleInfo(clientX, clientY, options = {}) {
 
 function sampleDisplayedBoardPixel(clientX, clientY) {
   return displayedBoardPixelSampleInfo(clientX, clientY).pixel;
-}
-
-function eyedropperWallpaperSourcePoint(clientX, clientY) {
-  return displayedBoardSourcePoint(clientX, clientY, eyedropperWallpaperCanvas);
-}
-
-function eyedropperZoomWallpaperSourcePoint(clientX, clientY) {
-  return displayedBoardSourcePoint(clientX, clientY, eyedropperZoomWallpaperCanvas);
 }
 
 function sampleEyedropperReadoutPixel(clientX, clientY, previewSample = null) {
@@ -1172,9 +1055,6 @@ function clearEyedropperSafeImageCache() {
   eyedropperSafeDisplayReloadPromises.clear();
   eyedropperSafeScaledBitmapPending.clear();
   eyedropperSafeScaledBitmapPendingBytes.clear();
-  eyedropperSafePixelCache.clear();
-  eyedropperSafePixelCachePending.clear();
-  eyedropperSafePixelCacheBytes = 0;
   eyedropperSafeTileCache.clear();
   eyedropperSafeTileCachePending.clear();
   eyedropperSafeTileCacheBytes = 0;
@@ -1731,82 +1611,6 @@ function prewarmEyedropperSafeImages(clientX, clientY, options = {}) {
   };
 }
 
-function collectEyedropperViewportPrewarmCandidates(limit = EYEDROPPER_VIEWPORT_PREWARM_LIMIT) {
-  const rect = typeof currentViewportWorldRect === 'function'
-    ? currentViewportWorldRect(EYEDROPPER_PREWARM_PAD_CSS)
-    : null;
-  if (!rect) return { point: null, rect: null, candidates: [] };
-  const point = {
-    x: (rect.x1 + rect.x2) / 2,
-    y: (rect.y1 + rect.y2) / 2,
-  };
-  const candidates = objects
-    .filter(obj => obj?.type === 'image' && obj.data?.imgKey && objectIntersectsRect(obj, rect))
-    .map(obj => ({ obj, distanceSq: distanceSqToObject(point, obj) }))
-    .sort((a, b) => a.distanceSq - b.distanceSq)
-    .slice(0, Math.max(1, Number(limit) || EYEDROPPER_VIEWPORT_PREWARM_LIMIT));
-  return { point, rect, candidates };
-}
-
-function prewarmEyedropperVisibleImages(options = {}) {
-  if (eyedropperEnabled) {
-    EyedropperDebug._count('viewportPrewarmRuns');
-    return {
-      summary: {
-        skipped: 'eyedropper-snapshot-only',
-        candidates: 0,
-        ready: 0,
-        viewportScaleReady: 0,
-        viewportScaleQueued: 0,
-        pending: 0,
-        scaledPending: 0,
-        nativeSkipped: 0,
-        displayReused: 0,
-        displayCorsReused: 0,
-        displayCorsPending: 0,
-        dataUrlReady: 0,
-        probeFailures: 0,
-      },
-      rows: [],
-    };
-  }
-  const { candidates } = collectEyedropperViewportPrewarmCandidates(options.limit);
-  const view = eyedropperPreviewScaleView();
-  const viewportView = eyedropperViewportScaleView();
-  const counters = typeof createDrawCounters === 'function' ? createDrawCounters() : {};
-  const { rows, ready } = runEyedropperPrewarmCandidates(candidates, view, counters);
-  let viewportScaleReady = 0;
-  let viewportScaleQueued = 0;
-  for (const { obj } of candidates) {
-    selectEyedropperSafeImageSourceForDraw(obj.data.imgKey, obj, viewportView, counters);
-    const scaleWarm = prewarmViewportScaledVariantForEyedropper(obj, viewportView);
-    if (scaleWarm.ready) viewportScaleReady++;
-    if (scaleWarm.queued) viewportScaleQueued++;
-  }
-  EyedropperDebug._count('viewportPrewarmRuns');
-  EyedropperDebug._count('viewportPrewarmCandidates', rows.length);
-  EyedropperDebug._count('viewportPrewarmReady', ready);
-  EyedropperDebug._count('viewportScalePrewarmReady', viewportScaleReady);
-  EyedropperDebug._count('viewportScalePrewarmQueued', viewportScaleQueued);
-  return {
-    summary: {
-      candidates: rows.length,
-      ready,
-      viewportScaleReady,
-      viewportScaleQueued,
-      pending: rows.filter(row => row.pendingAfter).length,
-      scaledPending: rows.filter(row => row.scaledPending).length,
-      nativeSkipped: counters.nativeSourceHydrationSkipped || 0,
-      displayReused: counters.safeDisplayImages || 0,
-      displayCorsReused: counters.safeDisplayCorsImages || 0,
-      displayCorsPending: counters.safeDisplayCorsPending || 0,
-      dataUrlReady: counters.safeDataUrlImages || 0,
-      probeFailures: counters.safeDisplayProbeFailures || 0,
-    },
-    rows,
-  };
-}
-
 function prewarmEyedropperCenterTile(clientX, clientY, options = {}) {
   if (!eyedropperEnabled || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
   const point = clientToBoardWorldPoint(clientX, clientY);
@@ -1844,11 +1648,6 @@ function scheduleEyedropperHoverTilePrewarm(e) {
     if (!event) return;
     prewarmEyedropperCenterTile(event.clientX, event.clientY, { sync: false });
   });
-}
-
-function scheduleEyedropperViewportPrewarm(reason = 'viewport', options = {}) {
-  if (!eyedropperEnabled) return;
-  EyedropperDebug._count('viewportPrewarmRuns');
 }
 
 function noteEyedropperNavigationActive(reason = 'viewport', durationMs = 180) {
@@ -1900,12 +1699,9 @@ function scheduleEyedropperSafeImagePrewarm(e, options = {}) {
 
 function cancelEyedropperBackgroundPrewarm() {
   if (_eyedropperPrewarmRaf) cancelAnimationFrame(_eyedropperPrewarmRaf);
-  if (_eyedropperViewportPrewarmRaf) cancelAnimationFrame(_eyedropperViewportPrewarmRaf);
   cancelEyedropperSnapshotRefresh();
   _eyedropperPrewarmRaf = null;
-  _eyedropperViewportPrewarmRaf = null;
   _eyedropperPendingPrewarmEvent = null;
-  _eyedropperViewportPrewarmScheduled = false;
 }
 
 function paintEyedropperWallpaperPreview(clientX, clientY, drawSize, options = {}) {
@@ -2146,16 +1942,13 @@ function cancelPendingEyedropperSample() {
   if (_eyedropperSampleRaf) cancelAnimationFrame(_eyedropperSampleRaf);
   if (_eyedropperPrewarmRaf) cancelAnimationFrame(_eyedropperPrewarmRaf);
   if (_eyedropperHoverTilePrewarmRaf) cancelAnimationFrame(_eyedropperHoverTilePrewarmRaf);
-  if (_eyedropperViewportPrewarmRaf) cancelAnimationFrame(_eyedropperViewportPrewarmRaf);
   _eyedropperSampleRaf = null;
   _eyedropperPrewarmRaf = null;
   _eyedropperHoverTilePrewarmRaf = null;
-  _eyedropperViewportPrewarmRaf = null;
   _eyedropperPendingSampleEvent = null;
   _eyedropperPendingSampleCoalesced = 0;
   _eyedropperPendingPrewarmEvent = null;
   _eyedropperPendingHoverTileEvent = null;
-  _eyedropperViewportPrewarmScheduled = false;
 }
 
 function stopEyedropperPointerTracking() {
@@ -2196,12 +1989,6 @@ function hideEyedropperSample() {
   _eyedropperLastSampleEvent = null;
   _eyedropperLoupeHorizontalSide = 'right';
   if (eyedropperLoupe) eyedropperLoupe.classList.remove('visible');
-}
-
-function hideInactiveEyedropperSampleForNavigation() {
-  if (!eyedropperEnabled || eyedropperSampling || !isEyedropperSampleVisible()) return false;
-  hideEyedropperSample();
-  return true;
 }
 
 function isPointInsideVisibleEyedropperLoupe(clientX, clientY) {

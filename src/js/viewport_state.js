@@ -36,11 +36,6 @@
     return snapshot();
   }
 
-  function screenToWorld(clientX, clientY) {
-    const currentZoom = Math.max(zoom || 1, 0.0001);
-    return { x: (clientX - panX) / currentZoom, y: (clientY - panY) / currentZoom };
-  }
-
   function setPan(nextPanX, nextPanY) {
     panX = Number.isFinite(nextPanX) ? nextPanX : panX;
     panY = Number.isFinite(nextPanY) ? nextPanY : panY;
@@ -57,7 +52,6 @@
   root.BoardfishViewportState = Object.freeze({
     panBy,
     reset,
-    screenToWorld,
     setPan,
     setViewport,
     setZoomPan,

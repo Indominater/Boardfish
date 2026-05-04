@@ -1,7 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 mod app_lifecycle;
 mod app_theme;
 mod board_commands;
@@ -40,9 +38,6 @@ use image_sources::{
     ImageSourceCache,
 };
 
-static SAVE_DEBUG: AtomicBool = AtomicBool::new(false);
-static OPEN_DEBUG: AtomicBool = AtomicBool::new(false);
-
 pub(crate) fn elapsed_ms(start: std::time::Instant) -> f64 {
     (start.elapsed().as_secs_f64() * 1000.0 * 100.0).round() / 100.0
 }
@@ -50,26 +45,6 @@ pub(crate) fn elapsed_ms(start: std::time::Instant) -> f64 {
 pub(crate) fn rgba_mb(width: u32, height: u32) -> f64 {
     let bytes = width as f64 * height as f64 * 4.0;
     (bytes / 1024.0 / 1024.0 * 100.0).round() / 100.0
-}
-
-pub(crate) fn save_debug(label: &str, start: std::time::Instant) {
-    if SAVE_DEBUG.load(Ordering::Relaxed) {
-        eprintln!(
-            "[boardfish save] {} {:.2}ms",
-            label,
-            start.elapsed().as_secs_f64() * 1000.0
-        );
-    }
-}
-
-pub(crate) fn open_debug(label: &str, start: std::time::Instant) {
-    if OPEN_DEBUG.load(Ordering::Relaxed) {
-        eprintln!(
-            "[boardfish open] {} {:.2}ms",
-            label,
-            start.elapsed().as_secs_f64() * 1000.0
-        );
-    }
 }
 
 fn main() {

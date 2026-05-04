@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::image_sources::CachedImageSource;
-use crate::{open_debug, save_debug};
 
 pub(crate) struct BoardWriteStats {
     pub(crate) json_bytes: usize,
@@ -24,7 +23,6 @@ pub(crate) fn write_board_container(
     let serialize_start = std::time::Instant::now();
     let board_json = serde_json::to_vec(&board).map_err(|e| e.to_string())?;
     let serialize_ms = serialize_start.elapsed().as_secs_f64() * 1000.0;
-    save_debug("container serialize board.json", serialize_start);
 
     let write_start = std::time::Instant::now();
     let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
@@ -45,7 +43,6 @@ pub(crate) fn write_board_container(
     }
     zip.finish().map_err(|e| e.to_string())?;
     let write_ms = write_start.elapsed().as_secs_f64() * 1000.0;
-    save_debug("container write zip", write_start);
 
     Ok(BoardWriteStats {
         json_bytes: board_json.len(),
@@ -92,7 +89,6 @@ pub(crate) fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     stats.read_ms = read_start.elapsed().as_secs_f64() * 1000.0;
     stats.file_bytes = bytes.len();
-    open_debug("read file bytes", read_start);
 
     if !bytes.starts_with(b"PK\x03\x04") {
         return Err("unsupported Boardfish file; expected container .bf".to_string());
@@ -102,7 +98,6 @@ pub(crate) fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
     let reader = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
     stats.zip_open_ms = zip_start.elapsed().as_secs_f64() * 1000.0;
-    open_debug("open zip archive", zip_start);
 
     let mut board: serde_json::Value = {
         let json_read_start = std::time::Instant::now();
@@ -113,12 +108,10 @@ pub(crate) fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
             .map_err(|e| e.to_string())?;
         stats.board_json_read_ms = json_read_start.elapsed().as_secs_f64() * 1000.0;
         stats.board_json_bytes = board_json.len();
-        open_debug("read board.json", json_read_start);
 
         let parse_start = std::time::Instant::now();
         let parsed = serde_json::from_str(&board_json).map_err(|e| e.to_string())?;
         stats.board_json_parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
-        open_debug("parse board.json", parse_start);
         parsed
     };
 
@@ -176,7 +169,6 @@ pub(crate) fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
         sources.push((key, source));
     }
     board["imageStore"] = serde_json::Value::Object(image_store);
-    open_debug("read all images", total_start);
     stats.total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
     Ok(BoardReadResult {
         board,
