@@ -60,7 +60,6 @@ var _eyedropperSnapshotDirtyAfterSample = false;
 var _eyedropperNavigationBlockTimer = null;
 var _eyedropperNavigationBlockUntil = 0;
 var _eyedropperPreviewDiagnosticsEnabled = false;
-var _eyedropperLoupeHorizontalSide = 'right';
 var EYEDROPPER_PREWARM_LIMIT = 16;
 var EYEDROPPER_SAFE_TILE_SIZE = 32;
 var EYEDROPPER_SAFE_TILE_MEMORY_LIMIT = 32 * 1024 * 1024;

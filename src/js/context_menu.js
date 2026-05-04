@@ -267,22 +267,21 @@ function updateCtxMenuActions() {
   if (exportAllSep) exportAllSep.style.display = show ? 'block' : 'none';
 }
 
-canvas.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
+function showCanvasContextMenuAt(clientX, clientY) {
   if (_rubberBandDragActive) {
-    MenuDebug.log('canvas:contextmenu:blocked-rubber-band', { x: e.clientX, y: e.clientY });
+    MenuDebug.log('canvas:contextmenu:blocked-rubber-band', { x: clientX, y: clientY });
     return;
   }
-  const wp = toWorld(e.clientX, e.clientY);
-  MenuDebug.log('canvas:contextmenu', { x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
+  const wp = toWorld(clientX, clientY);
+  MenuDebug.log('canvas:contextmenu', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
 
   if (eyedropperEnabled) {
     hideEyedropperSample();
     closeObjCtxMenu('show-canvas-menu:eyedropper');
     ctxPos = wp;
     updateCtxMenuActions();
-    openCtxMenuAt(e.clientX, e.clientY);
-    MenuDebug.log('ctx-menu:open', { reason: 'eyedropper', x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
+    openCtxMenuAt(clientX, clientY);
+    MenuDebug.log('ctx-menu:open', { reason: 'eyedropper', x: clientX, y: clientY, wx: wp.x, wy: wp.y });
     return;
   }
 
@@ -291,8 +290,8 @@ canvas.addEventListener('contextmenu', (e) => {
     if (rectContainsPoint(selectedBounds(), wp)) {
       updateObjMenuActions();
       closeCtxMenu('show-obj-menu:multi');
-      openMenuAt(objCtxMenu, e.clientX, e.clientY);
-      MenuDebug.log('obj-ctx-menu:open', { reason: 'multi', x: e.clientX, y: e.clientY });
+      openMenuAt(objCtxMenu, clientX, clientY);
+      MenuDebug.log('obj-ctx-menu:open', { reason: 'multi', x: clientX, y: clientY });
       return;
     }
   }
@@ -303,8 +302,8 @@ canvas.addEventListener('contextmenu', (e) => {
     objectId: obj?.id || '',
     objectType: obj?.type || '',
     selectedCount: selectedIds.size,
-    x: e.clientX,
-    y: e.clientY,
+    x: clientX,
+    y: clientY,
     wx: wp.x,
     wy: wp.y,
   });
@@ -312,15 +311,20 @@ canvas.addEventListener('contextmenu', (e) => {
     if (!isSelected(obj.id)) selectObject(obj.id);
     updateObjMenuActions();
     closeCtxMenu('show-obj-menu:object');
-    openMenuAt(objCtxMenu, e.clientX, e.clientY);
-    MenuDebug.log('obj-ctx-menu:open', { reason: 'object', objectId: obj.id, objectType: obj.type, x: e.clientX, y: e.clientY });
+    openMenuAt(objCtxMenu, clientX, clientY);
+    MenuDebug.log('obj-ctx-menu:open', { reason: 'object', objectId: obj.id, objectType: obj.type, x: clientX, y: clientY });
     return;
   }
   closeObjCtxMenu('show-canvas-menu');
   ctxPos = wp;
   updateCtxMenuActions();
-  openCtxMenuAt(e.clientX, e.clientY);
-  MenuDebug.log('ctx-menu:open', { x: e.clientX, y: e.clientY, wx: wp.x, wy: wp.y });
+  openCtxMenuAt(clientX, clientY);
+  MenuDebug.log('ctx-menu:open', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
+}
+
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  showCanvasContextMenuAt(e.clientX, e.clientY);
 });
 
 for (const id of Object.keys(MENU_COMMANDS)) {

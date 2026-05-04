@@ -536,24 +536,15 @@ function restoreEyedropperViewportScaling() {
 
 function positionEyedropperLoupe(clientX, clientY) {
   const margin = MENU_VIEWPORT_EDGE_MARGIN;
-  const gap = 24;
+  const gap = 12;
   const rect = eyedropperLoupe.getBoundingClientRect();
   const previewRect = eyedropperPreview?.getBoundingClientRect();
   const width = rect.width || eyedropperLoupeCssWidth();
   const height = rect.height || EYEDROPPER_MENU_CSS_HEIGHT;
   const previewHeight = previewRect?.height || width;
   const previewTopOffset = previewRect?.height ? previewRect.top - rect.top : 0;
-  const rightSideLeft = clientX + gap;
-  const leftSideLeft = clientX - width - gap;
   const unclampedTop = clientY - previewTopOffset - (previewHeight / 2);
-  if (_eyedropperLoupeHorizontalSide === 'right') {
-    if (rightSideLeft + width + margin > window.innerWidth) {
-      _eyedropperLoupeHorizontalSide = 'left';
-    }
-  } else if (leftSideLeft < margin) {
-    _eyedropperLoupeHorizontalSide = 'right';
-  }
-  let left = _eyedropperLoupeHorizontalSide === 'left' ? leftSideLeft : rightSideLeft;
+  let left = clientX + gap;
   left = Math.max(margin, Math.min(window.innerWidth - width - margin, left));
   const top = Math.max(margin, Math.min(window.innerHeight - height - margin, unclampedTop));
   eyedropperLoupe.style.transform = `translate(${Math.round(left)}px,${Math.round(top)}px)`;
@@ -1987,7 +1978,6 @@ function isEyedropperSampleVisible() {
 function hideEyedropperSample() {
   endEyedropperSample();
   _eyedropperLastSampleEvent = null;
-  _eyedropperLoupeHorizontalSide = 'right';
   if (eyedropperLoupe) eyedropperLoupe.classList.remove('visible');
 }
 
@@ -2070,6 +2060,11 @@ eyedropperLoupe?.addEventListener('pointerdown', (e) => e.stopPropagation());
 eyedropperLoupe?.addEventListener('mousedown', (e) => {
   e.preventDefault();
   e.stopPropagation();
+});
+eyedropperLoupe?.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof showCanvasContextMenuAt === 'function') showCanvasContextMenuAt(e.clientX, e.clientY);
 });
 eyedropperLoupe?.addEventListener('click', (e) => {
   e.preventDefault();
