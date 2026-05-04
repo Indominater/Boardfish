@@ -400,6 +400,7 @@ function applyBoardData(data, options = {}) {
   const endDebug = options.endDebug !== false;
   PillDebug.log('open:applyBoardData:start', getBoardOpenMetrics(data));
   OpenDebug.step(dbg, 'applyBoardData:start', getBoardOpenMetrics(data));
+  setEyedropperEnabled(false);
   clearJsClipboard();
   const t0 = performance.now();
   clearImageStore(!sourcesCached);

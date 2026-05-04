@@ -108,7 +108,10 @@ async function runShieldedPillTask({
 // ─── New board ───────────────────────────────────────────────────────────────
 
 async function newBoard() {
-  if (objects.length === 0 && !currentFilePath) return;
+  if (objects.length === 0 && !currentFilePath) {
+    setEyedropperEnabled(false);
+    return;
+  }
   if (isDirty()) {
     const choice = await showUnsavedDialog();
     if (choice === 'cancel') return;
@@ -119,6 +122,7 @@ async function newBoard() {
   openingShield.classList.add('active');
   const openingStart = performance.now();
   await startPillTask({ message: 'Opening' });
+  setEyedropperEnabled(false);
   BoardfishEditorState.resetBoardObjectState();
   OpenDebug.step(dbg, 'exitEdit', {});
   clearJsClipboard();

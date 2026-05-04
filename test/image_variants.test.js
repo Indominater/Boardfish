@@ -406,3 +406,12 @@ test('eyedropper snapshots are lazy after navigation and pinning', () => {
   assert.doesNotMatch(source, /const ready = captureEyedropperWallpaper\(\);/);
   assert.match(source, /markEyedropperSnapshotDirty\(\);/);
 });
+
+test('new and opened boards reset eyedropper mode to disabled', () => {
+  const openSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'io_close.js'), 'utf8');
+  const objectSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'object_commands.js'), 'utf8');
+
+  assert.match(openSource, /function applyBoardData\(data, options = \{\}\) \{[\s\S]*setEyedropperEnabled\(false\);[\s\S]*clearJsClipboard\(\);/);
+  assert.match(objectSource, /if \(objects\.length === 0 && !currentFilePath\) \{\s*setEyedropperEnabled\(false\);\s*return;\s*\}/);
+  assert.match(objectSource, /await startPillTask\(\{ message: 'Opening' \}\);\s*setEyedropperEnabled\(false\);\s*BoardfishEditorState\.resetBoardObjectState\(\);/);
+});
