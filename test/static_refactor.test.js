@@ -42,14 +42,13 @@ function lineCount(relativePath) {
 
 function scriptOrder() {
   const indexSource = readSource('src/index.html');
-  const bodyScripts = [...indexSource.matchAll(/<script\s+src="([^"]+)"><\/script>/g)]
-    .map((item) => item[1])
-    .filter((src) => src === 'app.js' || src.startsWith('js/'));
-  assert.ok(bodyScripts.length > 0, 'ordered frontend scripts are missing from index.html');
-  return bodyScripts.map((src) => {
-    if (src === 'app.js') return '../app.js';
-    return src.replace(/^js\//, '');
-  });
+  assert.match(indexSource, /<script type="module" src="js\/main\.mjs"><\/script>/);
+  const mainSource = readSource('src/js/main.mjs');
+  const moduleImports = [...mainSource.matchAll(/^import '\.\/([^']+)';$/gm)].map((item) => item[1]);
+  const legacyMatch = mainSource.match(/const LEGACY_CONTROLLER_SCRIPTS = \[([\s\S]*?)\];/);
+  assert.ok(legacyMatch, 'LEGACY_CONTROLLER_SCRIPTS is missing');
+  const legacyScripts = [...legacyMatch[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+  return [...moduleImports, ...legacyScripts];
 }
 
 function boardContract() {
