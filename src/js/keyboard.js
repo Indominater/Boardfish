@@ -15,8 +15,9 @@ function hasNoShortcutModifiers(e) {
 
 function isNativeFindShortcut(e) {
   const commandFind = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'f');
+  const findByLetter = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'g') && !e.altKey;
   const findNext = e.key === 'F3' || e.code === 'F3';
-  return commandFind || findNext;
+  return commandFind || findByLetter || findNext;
 }
 
 document.addEventListener('keydown', (e) => {
