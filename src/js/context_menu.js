@@ -27,7 +27,6 @@ function menuGapPx() {
 
 function updateCtxActionStates() {
   if (darkModeMenuBtn) darkModeMenuBtn.setAttribute('aria-pressed', appTheme === 'dark' ? 'true' : 'false');
-  if (eyedropperMenuBtn) eyedropperMenuBtn.setAttribute('aria-pressed', eyedropperEnabled ? 'true' : 'false');
   updateEyedropperCommandState();
 }
 

@@ -7,7 +7,6 @@ var ctx         = BoardfishDOM.ctx;
 var ctxMenu     = BoardfishDOM.ctxMenu;
 var ctxActions  = document.getElementById('ctx-actions');
 var darkModeMenuBtn = BoardfishDOM.darkModeMenuBtn;
-var eyedropperMenuBtn = document.getElementById('ctx-btn-eyedropper');
 var fileInput   = BoardfishDOM.fileInput;
 var selOverlay  = BoardfishDOM.selOverlay;
 var multiSelOverlay = BoardfishDOM.multiSelOverlay;

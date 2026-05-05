@@ -1,5 +1,7 @@
 'use strict';
 
+// Intentionally false in release builds. The debug implementations below are dormant
+// unless this flag is flipped during local diagnostics.
 const DEBUG_TOOLS_ENABLED = false;
 
 function createNoopStartupDebug() {

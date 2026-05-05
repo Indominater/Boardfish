@@ -107,8 +107,6 @@ var ManualPerfDebug = (() => {
       ctxMenuVisible: !!ctxMenu?.classList.contains('visible'),
       objCtxMenuVisible: !!objCtxMenu?.classList.contains('visible'),
       ctxActionsVisible: !!ctxActions?.classList.contains('visible'),
-      eyedropperButtonPressed: eyedropperMenuBtn?.getAttribute('aria-pressed') || '',
-      eyedropperButtonDisabled: !!eyedropperMenuBtn?.disabled,
       bodyEyedropperClass: !!document.body?.classList.contains('eyedropper-enabled'),
       activeElement: document.activeElement?.id || document.activeElement?.tagName || '',
       zoom,

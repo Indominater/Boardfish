@@ -106,12 +106,6 @@ function analyzeEyedropperPreviewSurface(previewSample = null, expectedPixel = n
     out.suspectedBlank = true;
     return out;
   }
-  if (eyedropperWallpaperCanRead === false) {
-    out.readError = 'wallpaper-readback-unsafe';
-    out.suspectedBlank = !previewSample?.painted ||
-      (!previewSample?.drawnImages && !previewSample?.drawnText && !!expectedPixel);
-    return out;
-  }
   if (previewSample?.readbackUnsafe) {
     out.readError = 'preview-readback-unsafe';
     out.suspectedBlank = !previewSample?.painted ||
@@ -213,10 +207,6 @@ function setEyedropperEnabled(enabled, options = {}) {
   recordPhase('shield', phaseStart);
 
   phaseStart = performance.now();
-  if (eyedropperMenuBtn) eyedropperMenuBtn.setAttribute('aria-pressed', eyedropperEnabled ? 'true' : 'false');
-  recordPhase('button', phaseStart);
-
-  phaseStart = performance.now();
   document.body.classList.toggle('eyedropper-enabled', eyedropperEnabled);
   recordPhase('bodyClass', phaseStart);
 
@@ -285,100 +275,15 @@ function updateEyedropperCommandState() {
 }
 
 function resetEyedropperWallpaper() {
-  eyedropperWallpaperReady = false;
-  eyedropperWallpaperCanRead = null;
   eyedropperZoomWallpaperReady = false;
-  _eyedropperSnapshotDirty = false;
   _eyedropperSnapshotDirtyAfterSample = false;
   _eyedropperNavigationBlockUntil = 0;
   if (_eyedropperNavigationBlockTimer) clearTimeout(_eyedropperNavigationBlockTimer);
   _eyedropperNavigationBlockTimer = null;
-  if (eyedropperWallpaperCanvas) {
-    eyedropperWallpaperCanvas.width = 1;
-    eyedropperWallpaperCanvas.height = 1;
-  }
   if (eyedropperZoomWallpaperCanvas) {
     eyedropperZoomWallpaperCanvas.width = 1;
     eyedropperZoomWallpaperCanvas.height = 1;
   }
-}
-
-function eyedropperSnapshotCanvasSize(scale = 1) {
-  if (!boardCanvas) return null;
-  return {
-    width: Math.max(1, Math.round(boardCanvas.width * scale)),
-    height: Math.max(1, Math.round(boardCanvas.height * scale)),
-  };
-}
-
-function eyedropperSnapshotView(scale = 1) {
-  const dpr = window.devicePixelRatio || 1;
-  return {
-    zoom: Math.max(zoom || 1, 0.0001) * scale,
-    panX: panX * scale,
-    panY: panY * scale,
-    dpr,
-  };
-}
-
-function renderEyedropperSnapshot(targetCanvas, targetCtx, scale = 1) {
-  const size = eyedropperSnapshotCanvasSize(scale);
-  if (!size || !targetCanvas || !targetCtx) return null;
-  const view = eyedropperSnapshotView(scale);
-  const counters = typeof createDrawCounters === 'function' ? createDrawCounters() : {};
-  const previousViewportCullingEnabled = typeof viewportCullingEnabled !== 'undefined'
-    ? viewportCullingEnabled
-    : null;
-  try {
-    targetCanvas.width = size.width;
-    targetCanvas.height = size.height;
-    resetCanvasToScreen(targetCtx);
-    fillBoardBackground(targetCtx, size.width, size.height);
-    setWorldCanvasTransform(targetCtx, view.dpr, view);
-    if (previousViewportCullingEnabled === false) viewportCullingEnabled = true;
-    const drawn = drawVisibleObjects(targetCtx, counters, {
-      viewportRect: currentViewportWorldRect(EYEDROPPER_PREWARM_PAD_CSS),
-      view,
-      imageSourceResolver: selectEyedropperSafeImageSourceForDraw,
-    });
-    resetCanvasToScreen(targetCtx);
-    if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
-    return {
-      width: size.width,
-      height: size.height,
-      counters,
-      drawnImages: drawn?.drawnImages || 0,
-      drawnText: drawn?.drawnText || 0,
-      pendingImages: counters.readbackSafePendingImages || 0,
-      missingImages: counters.missingImages || 0,
-    };
-  } catch (err) {
-    resetCanvasToScreen(targetCtx);
-    if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
-    EyedropperDebug._logReadbackFailure('eyedropper-snapshot-render', {
-      scale,
-      width: size.width,
-      height: size.height,
-      error: String(err),
-    });
-    return null;
-  }
-}
-
-function captureEyedropperReadbackWallpaper() {
-  if (!boardCanvas || !eyedropperWallpaperCtx) {
-    resetEyedropperWallpaper();
-    return false;
-  }
-  const normal = renderEyedropperSnapshot(eyedropperWallpaperCanvas, eyedropperWallpaperCtx, 1);
-  if (!normal) {
-    resetEyedropperWallpaper();
-    return false;
-  }
-  eyedropperWallpaperReady = true;
-  eyedropperWallpaperCanRead = null;
-  _eyedropperSnapshotDirty = false;
-  return true;
 }
 
 function captureEyedropperZoomWallpaper(geometry, renderSize) {
@@ -428,19 +333,8 @@ function captureEyedropperZoomWallpaper(geometry, renderSize) {
   }
 }
 
-function captureEyedropperWallpaper(options = {}) {
-  const readbackReady = captureEyedropperReadbackWallpaper();
-  if (!readbackReady) return false;
-  if (options.includeZoom === true) return false;
-  eyedropperZoomWallpaperReady = false;
-  return true;
-}
-
 function markEyedropperSnapshotDirty() {
-  _eyedropperSnapshotDirty = true;
-  eyedropperWallpaperReady = false;
   eyedropperZoomWallpaperReady = false;
-  eyedropperWallpaperCanRead = null;
 }
 
 function cancelEyedropperSnapshotRefresh() {
@@ -913,10 +807,6 @@ function displayedBoardPixelSampleInfo(clientX, clientY, options = {}) {
   return out;
 }
 
-function sampleDisplayedBoardPixel(clientX, clientY) {
-  return displayedBoardPixelSampleInfo(clientX, clientY).pixel;
-}
-
 function sampleEyedropperReadoutPixel(clientX, clientY, previewSample = null) {
   const cachedPixel = sampleEyedropperCachedPixelAt(clientX, clientY);
   if (cachedPixel) return cachedPixel;
@@ -1131,49 +1021,6 @@ function resolveEyedropperDisplayCacheSource(key, token, counters = null) {
   return null;
 }
 
-function resolveEyedropperCorsDisplaySource(key, token, counters = null) {
-  const assetSrc = imageAssetUrlCache[key];
-  if (!assetSrc || typeof loadImageElement !== 'function') return null;
-
-  const cached = eyedropperSafeImageCache.get(key);
-  if (cached?.token === token && cached.sourceKind === 'display-cors' && isDrawableImageSource(cached.source)) {
-    countEyedropperCounter(counters, 'safeDisplayCorsImages');
-    return cached.source;
-  }
-
-  if (eyedropperSafeDisplayReloadPromises.has(key)) {
-    countEyedropperCounter(counters, 'readbackSafePendingImages');
-    countEyedropperCounter(counters, 'safeDisplayCorsPending');
-    return null;
-  }
-
-  const promise = loadImageElement(assetSrc, { crossOrigin: 'anonymous' })
-    .then((img) => {
-      storeEyedropperSafeImage(key, token, img, { owned: false, sourceKind: 'display-cors' });
-      EyedropperDebug._count('safeDisplayCorsLoads');
-      refreshEyedropperAfterSafeImageReady();
-      refreshEyedropperViewportAfterSafeImageReady();
-      return img;
-    })
-    .catch((err) => {
-      countEyedropperCounter(counters, 'safeDisplayCorsFailures');
-      EyedropperDebug._logUnsafeImageSkip({
-        where: 'display-cors-reload',
-        imgKey: key,
-        cacheSource: 'display-cors',
-        reason: 'display-cors-load-failed',
-        error: String(err),
-      });
-      return null;
-    })
-    .finally(() => eyedropperSafeDisplayReloadPromises.delete(key));
-
-  eyedropperSafeDisplayReloadPromises.set(key, promise);
-  countEyedropperCounter(counters, 'readbackSafePendingImages');
-  countEyedropperCounter(counters, 'safeDisplayCorsPending');
-  return null;
-}
-
 function logEyedropperNativeSourceHydrationSkip(key, counters = null) {
   countEyedropperCounter(counters, 'nativeSourceHydrationSkipped');
   if (eyedropperNativeSourceSkipLogged.has(key)) return;
@@ -1238,7 +1085,6 @@ function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
 function countEyedropperSafeSourceUse(entry, counters = null) {
   if (!entry) return;
   if (entry.sourceKind === 'display-cache') countEyedropperCounter(counters, 'safeDisplayImages');
-  else if (entry.sourceKind === 'display-cors') countEyedropperCounter(counters, 'safeDisplayCorsImages');
   else if (entry.sourceKind === 'data-url') countEyedropperCounter(counters, 'safeDataUrlImages');
 }
 
@@ -1509,16 +1355,6 @@ function eyedropperPreviewScaleView() {
   };
 }
 
-function eyedropperViewportScaleView() {
-  const dpr = window.devicePixelRatio || 1;
-  return {
-    zoom: Math.max(zoom || 1, 0.0001),
-    panX,
-    panY,
-    dpr,
-  };
-}
-
 function runEyedropperPrewarmCandidates(candidates, view, counters) {
   const rows = [];
   let ready = 0;
@@ -1542,37 +1378,6 @@ function runEyedropperPrewarmCandidates(candidates, view, counters) {
     });
   }
   return { rows, ready };
-}
-
-function getViewportScaledVariantForEyedropperPrewarm(key, targetScale) {
-  if (!key || !(targetScale < 1) || typeof imageScaledBitmapCache === 'undefined') return null;
-  const map = imageScaledBitmapCache.get(key);
-  if (!map) return null;
-  const scaleLevels = Array.isArray(IMAGE_SCALE_LEVELS) ? IMAGE_SCALE_LEVELS : [];
-  const selectedScale = scaleLevels
-    .filter((scale) => scale >= targetScale && map.has(scale))
-    .reduce((best, scale) => Math.min(best, scale), 1);
-  return selectedScale < 1 ? map.get(selectedScale) : null;
-}
-
-function prewarmViewportScaledVariantForEyedropper(obj, view) {
-  const key = obj?.data?.imgKey;
-  if (typeof isViewportImageScalingActive === 'function' && !isViewportImageScalingActive()) {
-    return { ready: true, queued: false, targetScale: 1, skipped: 'scaling-disabled' };
-  }
-  if (!key || typeof chooseImageScaleForDraw !== 'function') return { ready: false, queued: false };
-  const fullSource = imageBitmapCache[key] || imageCache[key] || null;
-  if (!isDrawableImageSource(fullSource)) return { ready: false, queued: false };
-  const targetScale = chooseImageScaleForDraw(obj, fullSource, view);
-  if (!(targetScale < 1)) return { ready: true, queued: false, targetScale };
-  if (getViewportScaledVariantForEyedropperPrewarm(key, targetScale)) {
-    return { ready: true, queued: false, targetScale };
-  }
-  if (typeof queueScaledImageVariant === 'function') {
-    queueScaledImageVariant(key, fullSource, targetScale);
-    return { ready: false, queued: true, targetScale };
-  }
-  return { ready: false, queued: false, targetScale };
 }
 
 function prewarmEyedropperSafeImages(clientX, clientY, options = {}) {
@@ -1602,8 +1407,6 @@ function prewarmEyedropperSafeImages(clientX, clientY, options = {}) {
       pending: rows.filter(row => row.pendingAfter).length,
       nativeSkipped: counters.nativeSourceHydrationSkipped || 0,
       displayReused: counters.safeDisplayImages || 0,
-      displayCorsReused: counters.safeDisplayCorsImages || 0,
-      displayCorsPending: counters.safeDisplayCorsPending || 0,
       dataUrlReady: counters.safeDataUrlImages || 0,
       probeFailures: counters.safeDisplayProbeFailures || 0,
     },
@@ -1662,46 +1465,14 @@ function noteEyedropperNavigationActive(reason = 'viewport', durationMs = 180) {
   EyedropperDebug._count(`navigation:${reason}`);
 }
 
-function isEyedropperNavigationActive() {
-  return (eyedropperEnabled || isEyedropperSampleVisible()) && performance.now() < _eyedropperNavigationBlockUntil;
-}
-
 function handleEyedropperViewportChanged(reason = 'viewport') {
   if (!eyedropperEnabled) return;
   if (eyedropperSampling) hideEyedropperSample();
   scheduleEyedropperSnapshotRefresh(reason);
 }
 
-function scheduleEyedropperSafeImagePrewarm(e, options = {}) {
-  if (eyedropperEnabled) return;
-  if (!e || e.clientX == null || e.clientY == null) return;
-  if (eyedropperSampling && !options.allowDuringSampling) {
-    EyedropperDebug._count('prewarmDeferredDuringSampling');
-    return;
-  }
-  _eyedropperPendingPrewarmEvent = { clientX: e.clientX, clientY: e.clientY };
-  EyedropperDebug._countPerf('prewarmScheduled');
-  if (_eyedropperPrewarmRaf) {
-    EyedropperDebug._countPerf('prewarmCoalesced');
-    return;
-  }
-  _eyedropperPrewarmRaf = requestAnimationFrame(() => {
-    _eyedropperPrewarmRaf = null;
-    const event = _eyedropperPendingPrewarmEvent;
-    _eyedropperPendingPrewarmEvent = null;
-    if (eyedropperSampling && event) {
-      const prewarmStart = performance.now();
-      const result = prewarmEyedropperSafeImages(event.clientX, event.clientY);
-      EyedropperDebug._recordPrewarmTiming(result?.summary, performance.now() - prewarmStart);
-    }
-  });
-}
-
 function cancelEyedropperBackgroundPrewarm() {
-  if (_eyedropperPrewarmRaf) cancelAnimationFrame(_eyedropperPrewarmRaf);
   cancelEyedropperSnapshotRefresh();
-  _eyedropperPrewarmRaf = null;
-  _eyedropperPendingPrewarmEvent = null;
 }
 
 function paintEyedropperWallpaperPreview(clientX, clientY, drawSize, options = {}) {
@@ -1944,14 +1715,11 @@ function updateEyedropperSample(e) {
 
 function cancelPendingEyedropperSample() {
   if (_eyedropperSampleRaf) cancelAnimationFrame(_eyedropperSampleRaf);
-  if (_eyedropperPrewarmRaf) cancelAnimationFrame(_eyedropperPrewarmRaf);
   if (_eyedropperHoverTilePrewarmRaf) cancelAnimationFrame(_eyedropperHoverTilePrewarmRaf);
   _eyedropperSampleRaf = null;
-  _eyedropperPrewarmRaf = null;
   _eyedropperHoverTilePrewarmRaf = null;
   _eyedropperPendingSampleEvent = null;
   _eyedropperPendingSampleCoalesced = 0;
-  _eyedropperPendingPrewarmEvent = null;
   _eyedropperPendingHoverTileEvent = null;
 }
 
@@ -2018,12 +1786,6 @@ function hideEyedropperSample() {
 function noteEyedropperMouseEvent(e) {
   if (!e || e.clientX == null || e.clientY == null) return;
   _eyedropperLastMouseEvent = eyedropperPointerDebugEvent(e);
-}
-
-function isPointInsideVisibleEyedropperLoupe(clientX, clientY) {
-  if (!isEyedropperSampleVisible()) return false;
-  const rect = eyedropperLoupe.getBoundingClientRect();
-  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
 }
 
 function isEventInsideVisibleEyedropperLoupe(e) {
@@ -2152,15 +1914,6 @@ eyedropperLoupe?.addEventListener('contextmenu', (e) => {
 eyedropperLoupe?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  const target = e.target.closest?.('.eyedropper-copy-icon');
-  if (target) copyEyedropperValue(target.dataset.copyTarget);
-});
-eyedropperLoupe?.addEventListener('keydown', (e) => {
-  const target = e.target.closest?.('.eyedropper-copy-icon');
-  if (!target || (e.key !== 'Enter' && e.key !== ' ')) return;
-  e.preventDefault();
-  e.stopPropagation();
-  copyEyedropperValue(target.dataset.copyTarget);
 });
 
 eyedropperCopyHexBtn?.addEventListener('click', (e) => {

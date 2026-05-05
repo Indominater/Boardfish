@@ -168,11 +168,9 @@ test('eyedropper preview does not resolve per-object scaled variants while activ
 
   assert.match(source, /paintEyedropperWallpaperPreview\(clientX, clientY, drawSize, options\)/);
   assert.match(source, /eyedropperRenderedSampleCtx\.drawImage\(\s*eyedropperZoomWallpaperCanvas,/);
-  assert.match(source, /function renderEyedropperSnapshot\(targetCanvas, targetCtx, scale = 1\)/);
   assert.match(source, /imageSourceResolver: selectEyedropperSafeImageSourceForDraw/);
   assert.match(source, /const scaleVariantsEnabled = typeof isViewportImageScalingActive === 'function'/);
   assert.match(source, /targetScale: scaleVariantsEnabled \? chooseImageScaleForDraw\(obj, source, view\) : 1/);
-  assert.match(source, /skipped: 'scaling-disabled'/);
 });
 
 test('eyedropper readout samples rendered canvas-visible pixels', () => {
@@ -243,11 +241,9 @@ test('eyedropper preview uses only the rendered-board wallpaper while active', (
   assert.doesNotMatch(source, /const sourceCropSize = renderSize;/);
   assert.match(source, /reason: 'missing-wallpaper'/);
   assert.doesNotMatch(source, /drawSingleObj\(eyedropperRenderedSampleCtx, obj, counters, \{ view: previewView \}\)/);
-  assert.doesNotMatch(source, /drawVisibleObjects\(eyedropperWallpaperCtx/);
-  assert.doesNotMatch(source, /renderEyedropperSnapshot\(eyedropperZoomWallpaperCanvas, eyedropperZoomWallpaperCtx, EYEDROPPER_PREVIEW_ZOOM_SCALE\)/);
+  assert.doesNotMatch(source, /function renderEyedropperSnapshot/);
   assert.match(source, /readbackUnsafe: !!wallpaper\.rendered\.counters\?\.previewUnsafeImages/);
   assert.match(source, /!previewSample\.readbackUnsafe && \(!centerPixel \|\| readoutSample\?\.source === 'preview-render'\)/);
-  assert.doesNotMatch(source, /eyedropperWallpaperCanRead === false\) scheduleEyedropperSafeImagePrewarm/);
   assert.match(source, /viewportImageScalingEnabled = false;/);
   assert.match(source, /restoreEyedropperViewportScaling\(\)/);
 });
@@ -259,8 +255,6 @@ test('eyedropper hover preview does not hydrate native references while active',
   ].join('\n');
 
   assert.match(source, /if \(eyedropperEnabled\) \{\s*return \{ summary: \{ skipped: 'eyedropper-snapshot-only' \}, rows: \[\] \};\s*\}/);
-  assert.match(source, /if \(eyedropperEnabled\) return;/);
-  assert.doesNotMatch(source, /previewSample\?\.readbackUnsafe && readoutSample\?\.source === 'preview-render'[\s\S]*?scheduleEyedropperSafeImagePrewarm/);
   assert.match(source, /prewarmAt\(clientX, clientY/);
 });
 
@@ -311,7 +305,6 @@ test('eyedropper debugger exposes compact reports for JSON copying', () => {
   assert.match(source, /wallpaperMs: e\.meta\?\.wallpaperMs/);
   assert.match(source, /function cancelEyedropperBackgroundPrewarm\(\)/);
   assert.match(source, /cancelEyedropperBackgroundPrewarm\(\);/);
-  assert.match(source, /prewarmDeferredDuringSampling/);
   assert.doesNotMatch(source, /closed-menu-before-sample/);
   assert.doesNotMatch(source, /logEyedropperInteraction\(e, true, 'closed-menu'\);\s*return true;/);
   assert.doesNotMatch(source, /logEyedropperInteraction\(e, true, 'restart-visible-sample'\);/);
@@ -329,13 +322,13 @@ test('eyedropper avoids asset display probes for readback-safe sampling', () => 
   const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
   const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
 
-  assert.match(eyedropperSource, /function resolveEyedropperCorsDisplaySource/);
+  assert.doesNotMatch(eyedropperSource, /function resolveEyedropperCorsDisplaySource/);
   assert.match(eyedropperSource, /if \(isNativeImageRef\(imageStore\[key\]\)\) return null;/);
   assert.match(eyedropperSource, /if \(imageAssetUrlCache\[key\]\) return null;/);
   assert.match(eyedropperSource, /return resolveEyedropperNativeDataUrlSource\(key, token, counters\);/);
   assert.match(eyedropperSource, /imageAssetUrlCache\[key\]/);
-  assert.match(eyedropperSource, /loadImageElement\(assetSrc, \{ crossOrigin: 'anonymous' \}\)/);
-  assert.match(eyedropperSource, /sourceKind: 'display-cors'/);
+  assert.doesNotMatch(eyedropperSource, /loadImageElement\(assetSrc, \{ crossOrigin: 'anonymous' \}\)/);
+  assert.doesNotMatch(eyedropperSource, /sourceKind: 'display-cors'/);
   assert.match(imageStateSource, /img\.crossOrigin = crossOrigin/);
 });
 
@@ -382,7 +375,7 @@ test('eyedropper sampling and navigation are mutually exclusive', () => {
   const inputSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'canvas_input.js'), 'utf8');
 
   assert.match(eyedropperSource, /function noteEyedropperNavigationActive\(reason = 'viewport', durationMs = 180\)/);
-  assert.match(eyedropperSource, /function isEyedropperNavigationActive\(\)/);
+  assert.doesNotMatch(eyedropperSource, /function isEyedropperNavigationActive\(\)/);
   assert.doesNotMatch(eyedropperSource, /function startEyedropperSample\(/);
   assert.doesNotMatch(eyedropperSource, /beginEyedropperPointerTracking/);
   assert.doesNotMatch(eyedropperSource, /allowBoardNavigation: true/);
@@ -398,17 +391,15 @@ test('eyedropper sampling and navigation are mutually exclusive', () => {
   assert.match(inputSource, /noteEyedropperNavigationActive\('mouse-pan', 240\)/);
 });
 
-test('eyedropper snapshots are lazy after navigation and pinning', () => {
+test('eyedropper zoom wallpaper is lazy after navigation and pinning', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 
-  assert.match(source, /function captureEyedropperReadbackWallpaper\(\)/);
+  assert.doesNotMatch(source, /function captureEyedropperReadbackWallpaper\(\)/);
   assert.match(source, /function captureEyedropperZoomWallpaper\(geometry, renderSize\)/);
-  assert.match(source, /function captureEyedropperWallpaper\(options = \{\}\)/);
-  assert.match(source, /if \(options\.includeZoom === true\) return false;/);
+  assert.doesNotMatch(source, /function captureEyedropperWallpaper\(options = \{\}\)/);
   assert.match(source, /eyedropperZoomWallpaperReady = false;/);
   assert.match(source, /const rendered = captureEyedropperZoomWallpaper\(geometry, renderSize\);/);
   assert.match(source, /reason: `snapshot-dirty:\$\{reason\}`/);
-  assert.doesNotMatch(source, /const ready = captureEyedropperWallpaper\(\);/);
   assert.match(source, /markEyedropperSnapshotDirty\(\);/);
 });
 
