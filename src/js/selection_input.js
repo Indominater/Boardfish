@@ -347,6 +347,10 @@ function selectAllObjects() {
 
 function hideMenus() {
   MenuDebug.log('hideMenus', { reason: 'generic' });
+  if (typeof closeOpenMenusExcept === 'function') {
+    closeOpenMenusExcept('', 'hideMenus');
+    return;
+  }
   ctxMenu.classList.remove('visible');
   ctxActions?.classList.remove('visible');
   objCtxMenu.classList.remove('visible');

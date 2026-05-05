@@ -301,8 +301,9 @@ test('eyedropper debugger exposes compact reports for JSON copying', () => {
   assert.match(source, /previewBlankSamples/);
   assert.match(source, /previewCenterMatches/);
   assert.match(source, /maxFirstSampleMs/);
-  assert.match(source, /const pointerEvent = eyedropperPointerDebugEvent\(e\);/);
-  assert.match(source, /commitEyedropperSample\(pointerEvent, \{ first: true \}\)/);
+  assert.match(source, /function beginEyedropperHoldSample\(e = null\)/);
+  assert.match(source, /const sourceEvent = e\?\.clientX != null && e\?\.clientY != null[\s\S]*: _eyedropperLastMouseEvent;/);
+  assert.match(source, /commitEyedropperSample\(sourceEvent, \{ first: true \}\)/);
   assert.match(source, /function toggleReport\(options = \{\}\)/);
   assert.match(source, /function toggleSummary\(options = \{\}\)/);
   assert.match(source, /EyedropperDebug\._logToggle\(toggleMeta\)/);
@@ -311,10 +312,10 @@ test('eyedropper debugger exposes compact reports for JSON copying', () => {
   assert.match(source, /function cancelEyedropperBackgroundPrewarm\(\)/);
   assert.match(source, /cancelEyedropperBackgroundPrewarm\(\);/);
   assert.match(source, /prewarmDeferredDuringSampling/);
-  assert.match(source, /closed-menu-before-sample/);
+  assert.doesNotMatch(source, /closed-menu-before-sample/);
   assert.doesNotMatch(source, /logEyedropperInteraction\(e, true, 'closed-menu'\);\s*return true;/);
-  assert.match(source, /logEyedropperInteraction\(e, true, 'restart-visible-sample'\);/);
-  assert.match(source, /logEyedropperInteraction\(upEvent, true, 'sample-released'\);/);
+  assert.doesNotMatch(source, /logEyedropperInteraction\(e, true, 'restart-visible-sample'\);/);
+  assert.doesNotMatch(source, /logEyedropperInteraction\(upEvent, true, 'sample-released'\);/);
   assert.doesNotMatch(source, /logEyedropperInteraction\(e, true, 'hide-visible-sample'\);/);
   assert.match(source, /recentSamples:/);
   assert.match(source, /recentFailures:/);
@@ -382,7 +383,11 @@ test('eyedropper sampling and navigation are mutually exclusive', () => {
 
   assert.match(eyedropperSource, /function noteEyedropperNavigationActive\(reason = 'viewport', durationMs = 180\)/);
   assert.match(eyedropperSource, /function isEyedropperNavigationActive\(\)/);
-  assert.match(eyedropperSource, /logEyedropperInteraction\(e, false, 'navigation-active'\)/);
+  assert.doesNotMatch(eyedropperSource, /function startEyedropperSample\(/);
+  assert.doesNotMatch(eyedropperSource, /beginEyedropperPointerTracking/);
+  assert.doesNotMatch(eyedropperSource, /allowBoardNavigation: true/);
+  assert.match(eyedropperSource, /function updateEyedropperHoldSample\(e\) \{[\s\S]*if \(!_eyedropperHoldActive \|\| !eyedropperEnabled\) return;[\s\S]*updateEyedropperSample\(e\);[\s\S]*\}/);
+  assert.match(eyedropperSource, /function scheduleEyedropperHoverTilePrewarm\(e\) \{\s*if \(!eyedropperEnabled \|\| eyedropperSampling/);
   assert.match(eyedropperSource, /if \(eyedropperSampling\) hideEyedropperSample\(\);/);
   assert.doesNotMatch(eyedropperSource, /eyedropperSampling \|\| isEyedropperSampleVisible\(\)\) hideEyedropperSample\(\)/);
 

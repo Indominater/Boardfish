@@ -4,6 +4,7 @@ var imageCache = {}; // key -> HTMLImageElement (for clipboard/metadata operatio
 var imageAssetUrlCache = {}; // key -> Tauri asset URL for display-only native images
 var imageBitmapCache = {}; // key -> ImageBitmap (GPU-resident, never evicted by WebKit)
 var imageBitmapFailed = new Set();
+var imageReadbackSafeSourceCache = new Map();
 var imageSourceCachePromises = new Map();
 var imageHydrationPromises = new Map();
 var imageAssetMaterializePromises = new Map();
@@ -207,6 +208,42 @@ function loadImageElement(src, options = {}) {
   });
 }
 
+function imageReadbackProbeKey(src) {
+  if (typeof src !== 'string') return '';
+  return src.length > 512 ? `${src.length}:${src.slice(0, 256)}:${src.slice(-128)}` : src;
+}
+
+function probeImageCanvasReadback(img, src = '') {
+  if (!img || !img.naturalWidth || !img.naturalHeight) return false;
+  const cacheKey = imageReadbackProbeKey(src);
+  if (cacheKey && imageReadbackSafeSourceCache.has(cacheKey)) {
+    return imageReadbackSafeSourceCache.get(cacheKey);
+  }
+  let safe = false;
+  try {
+    const probe = document.createElement('canvas');
+    probe.width = 1;
+    probe.height = 1;
+    const probeCtx = probe.getContext('2d', { willReadFrequently: true });
+    probeCtx.drawImage(img, 0, 0, 1, 1);
+    probeCtx.getImageData(0, 0, 1, 1);
+    safe = true;
+  } catch (_) {
+    safe = false;
+  }
+  if (cacheKey) imageReadbackSafeSourceCache.set(cacheKey, safe);
+  return safe;
+}
+
+async function ensureCanvasSafeNativeImageDataUrl(key, unsafeSrc = '', dbg = null) {
+  if (!hasTauri() || !isNativeImageRef(imageStore[key])) return '';
+  if (imageAssetUrlCache[key] === unsafeSrc) delete imageAssetUrlCache[key];
+  ViewportDebug.step(dbg, 'readback-fallback:start', { key, from: unsafeSrc ? 'unsafe-display-src' : 'native-ref' });
+  const dataUrl = await ensureImageDataUrl(key, dbg);
+  ViewportDebug.step(dbg, 'readback-fallback:end', { key, dataUrlLen: dataUrl?.length || 0 });
+  return dataUrl;
+}
+
 function convertTauriFileSrc(path) {
   return tauriConvertFileSrc(path);
 }
@@ -375,7 +412,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   if (typeof src !== 'string' || !src) return;
   imageBitmapFailed.delete(key);
   const vpDbg = ViewportDebug.start('cacheImage', { key, src, reusedLoadedImage: !!loadedImg });
-  const img = loadedImg || new Image();
+  let img = loadedImg || new Image();
   let resolveReady;
   const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
   imageReadyPromises.set(key, readyPromise);
@@ -384,16 +421,37 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   // We also defer invalidateOffscreen/scheduleRender until decode completes so that
   // multiple concurrent image loads coalesce into fewer render calls.
   const loadStart = performance.now();
-  function finishLoad() {
+  function finishLoadForImage(loaded, loadedSrc, reusedLoadedImage = false) {
     const loadMs = performance.now() - loadStart;
     ViewportDebug.count('imageLoads');
     ViewportDebug.max('maxImageLoadMs', loadMs);
-    ViewportDebug.step(vpDbg, 'load', { width: img.naturalWidth, height: img.naturalHeight, ms: loadMs });
+    ViewportDebug.step(vpDbg, 'load', { width: loaded.naturalWidth, height: loaded.naturalHeight, ms: loadMs, src: loadedSrc, reusedLoadedImage });
+
+    const readbackSafe = probeImageCanvasReadback(loaded, loadedSrc);
+    ViewportDebug.step(vpDbg, 'readback-probe', { key, safe: readbackSafe, src: loadedSrc });
+    if (!readbackSafe) {
+      ViewportDebug.count('imageReadbackUnsafeDisplaySources');
+      ensureCanvasSafeNativeImageDataUrl(key, loadedSrc, vpDbg)
+        .then(async (safeSrc) => {
+          if (!safeSrc || safeSrc === loadedSrc) throw new Error('no safe fallback image source');
+          const safeImg = await loadImageElement(safeSrc);
+          finishLoadForImage(safeImg, safeSrc, false);
+        })
+        .catch((err) => {
+          imageBitmapFailed.add(key);
+          ViewportDebug.end(vpDbg, { key, error: 'image readback probe failed', fallbackError: String(err) });
+          resolveReady();
+        });
+      return;
+    }
+
+    img = loaded;
+    imageCache[key] = loaded;
 
     enqueueImageDecode(async () => {
       const decodeStart = performance.now();
       try {
-        await img.decode();
+        await loaded.decode();
       } catch (err) {
         const decodeMs = performance.now() - decodeStart;
         imageBitmapFailed.add(key);
@@ -401,7 +459,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
         ViewportDebug.max('maxImageDecodeMs', decodeMs);
         ViewportDebug.step(vpDbg, 'decode:error', { key, ms: decodeMs, error: String(err) });
         scheduleImageReadyRender('image-load');
-        ViewportDebug.end(vpDbg, { key, decodeReady: false, bitmapReady: false, fallbackReady: img.complete && img.naturalWidth > 0, error: String(err) });
+        ViewportDebug.end(vpDbg, { key, decodeReady: false, bitmapReady: false, fallbackReady: loaded.complete && loaded.naturalWidth > 0, readbackSafe, error: String(err) });
         resolveReady();
         return;
       }
@@ -412,7 +470,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
 
       const bitmapStart = performance.now();
       try {
-        const bitmap = await createImageBitmap(img);
+        const bitmap = await createImageBitmap(loaded);
         const bitmapMs = performance.now() - bitmapStart;
         imageBitmapCache[key] = bitmap;
         ViewportDebug.count('imageBitmaps');
@@ -428,7 +486,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
 
       const previewStart = performance.now();
       try {
-        await ensureImagePreviewBitmap(key, img, dbg);
+        await ensureImagePreviewBitmap(key, loaded, dbg);
         const previewMs = performance.now() - previewStart;
         ViewportDebug.max('maxImagePreviewMs', previewMs);
         ViewportDebug.step(vpDbg, 'previewBitmap', { ms: previewMs });
@@ -447,21 +505,21 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
           decodeReady: true,
           bitmapReady: !!imageBitmapCache[key],
           bitmapFailed: imageBitmapFailed.has(key),
+          readbackSafe,
         });
         resolveReady();
       }
     });
   }
-  img.onload = finishLoad;
+  img.onload = () => finishLoadForImage(img, src, !!loadedImg);
   img.onerror = () => {
     imageBitmapFailed.add(key);
     ViewportDebug.end(vpDbg, { key, error: 'image load failed' });
     resolveReady();
   };
-  imageCache[key] = img;
   if (loadedImg) {
     ViewportDebug.step(vpDbg, 'reuse-loaded-image', { width: img.naturalWidth, height: img.naturalHeight });
-    finishLoad();
+    finishLoadForImage(img, src, true);
   } else {
     img.src = src;
     ViewportDebug.step(vpDbg, 'set-src', { src });
@@ -479,6 +537,7 @@ function clearImageStore(clearNativeCaches = true) {
   clearScaledImageVariants();
   if (typeof clearEyedropperSafeImageCache === 'function') clearEyedropperSafeImageCache();
   imageBitmapFailed.clear();
+  imageReadbackSafeSourceCache.clear();
   imageSourceCachePromises.clear();
   imageReadyPromises.clear();
   imageHydrationPromises.clear();

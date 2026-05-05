@@ -45,7 +45,7 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 | Undo | Cmd+Z | Ctrl+Z |
 | Redo | Cmd+Shift+Z | Ctrl+Shift+Z / Ctrl+Y |
 | Delete selected | Backspace / Delete | Backspace / Delete |
-| Toggle eyedropper | I | I |
+| Hold eyedropper | E | E |
 | Pan canvas | Space + drag | Space + drag |
 | Pan with wheel / trackpad | Scroll | Scroll |
 | Zoom around cursor | Cmd+scroll | Ctrl+scroll |

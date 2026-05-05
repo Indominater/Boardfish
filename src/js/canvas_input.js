@@ -42,7 +42,7 @@ function cancelWheelPan() {
 }
 
 
-canvas.addEventListener('wheel', (e) => {
+function handleViewportWheel(e) {
   const collectDebug = ViewportDebug.isEnabled();
   const handlerStart = collectDebug ? performance.now() : 0;
   const dbg = ViewportDebug.start('wheel', { deltaX: e.deltaX, deltaY: e.deltaY, ctrlKey: e.ctrlKey, metaKey: e.metaKey, panX, panY, zoom });
@@ -81,7 +81,10 @@ canvas.addEventListener('wheel', (e) => {
   } finally {
     if (collectDebug) ViewportDebug.timing('wheelHandler', performance.now() - handlerStart);
   }
-}, { passive: false });
+}
+
+canvas.addEventListener('wheel', handleViewportWheel, { passive: false });
+eyedropperLoupe?.addEventListener('wheel', handleViewportWheel, { passive: false });
 
 // ─── Pan (spacebar + left click) ─────────────────────────────────────────────
 var _spaceDown = false;
@@ -151,6 +154,10 @@ function startMousePan(e) {
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
+
+eyedropperLoupe?.addEventListener('mousedown', (e) => {
+  if (e.button === 0 && _spaceDown) startMousePan(e);
+});
 
 function startGroupDrag(e) {
   const grpStartX = e.clientX, grpStartY = e.clientY;

@@ -245,29 +245,23 @@ async function hydrateImageForDisplay(key, dbg = null) {
     throw err;
   }
   const loadMs = performance.now() - loadStart;
-  BoardfishImageStore.setDisplayImage(key, img);
-  let bitmapMs = 0;
-  let bitmapReady = false;
-  try {
-    const bitmapStart = performance.now();
-    imageBitmapCache[key] = await createImageBitmap(img);
-    bitmapMs = performance.now() - bitmapStart;
-    bitmapReady = true;
-  } catch (err) {
-    imageBitmapFailed.add(key);
-    OpenDebug.step(dbg, 'hydrate-image:bitmap-error', { imgKey: key, source: display.source, error: String(err), complete: !!img?.complete, naturalW: img?.naturalWidth || 0, naturalH: img?.naturalHeight || 0 });
-  }
+  const readyStart = performance.now();
+  await cacheImage(key, display.src, dbg, img, { skipSourceRegistration: true });
+  const readyMs = performance.now() - readyStart;
+  const bitmapReady = !!imageBitmapCache[key];
+  const displayReady = BoardfishImageStore.hasDisplayImage(key);
   OpenDebug.step(dbg, 'hydrate-image', {
     imgKey: key,
     ms: performance.now() - t0,
     fetchMs,
     loadMs,
-    bitmapMs,
+    readyMs,
     dataUrlLen: display.dataUrlLen,
     source: display.source,
     bitmapReady,
+    displayReady,
   });
-  return true;
+  return displayReady;
 }
 
 async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDebug.hydrationConcurrency) {

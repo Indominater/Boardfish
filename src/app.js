@@ -5,9 +5,9 @@ var canvas      = BoardfishDOM.canvas;
 var boardCanvas = BoardfishDOM.boardCanvas;
 var ctx         = BoardfishDOM.ctx;
 var ctxMenu     = BoardfishDOM.ctxMenu;
-var ctxActions  = BoardfishDOM.ctxActions;
+var ctxActions  = document.getElementById('ctx-actions');
 var darkModeMenuBtn = BoardfishDOM.darkModeMenuBtn;
-var eyedropperMenuBtn = BoardfishDOM.eyedropperMenuBtn;
+var eyedropperMenuBtn = document.getElementById('ctx-btn-eyedropper');
 var fileInput   = BoardfishDOM.fileInput;
 var selOverlay  = BoardfishDOM.selOverlay;
 var multiSelOverlay = BoardfishDOM.multiSelOverlay;
@@ -46,7 +46,6 @@ var MENU_SHORTCUTS = {
   'save-as': IS_MAC ? [SHIFT_KEY_LABEL, COMMAND_KEY_LABEL, 'S'] : [COMMAND_KEY_LABEL, SHIFT_KEY_LABEL, 'S'],
   open: [COMMAND_KEY_LABEL, 'O'],
   copy: [COMMAND_KEY_LABEL, 'C'],
-  cut: [COMMAND_KEY_LABEL, 'X'],
   duplicate: [COMMAND_KEY_LABEL, 'D'],
   delete: ['Delete'],
 };

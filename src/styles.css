@@ -83,6 +83,11 @@ body {
 #canvas.panning    { cursor: grabbing !important; }
 #canvas.panning    * { cursor: grabbing !important; }
 
+body.eyedropper-hold-active,
+body.eyedropper-hold-active * {
+  cursor: none !important;
+}
+
 #board-canvas {
   position: absolute;
   top: 0; left: 0;
@@ -180,6 +185,8 @@ body.eyedropper-enabled #multi-sel-overlay {
 /* ── Context menu ── */
 #ctx-menu,
 #obj-ctx-menu,
+#eyedropper-ctx-menu,
+#eyedropper-loupe,
 #dialog,
 #island {
   background: var(--firefox-menu-bg);
@@ -198,6 +205,7 @@ body.eyedropper-enabled #multi-sel-overlay {
 
 #ctx-menu,
 #obj-ctx-menu,
+#eyedropper-ctx-menu,
 #ctx-actions {
   position: fixed;
   clip-path: none;
@@ -219,12 +227,19 @@ body.eyedropper-enabled #multi-sel-overlay {
   max-width: calc(100vw - 24px);
 }
 
+#eyedropper-ctx-menu {
+  width: 172px;
+  max-width: calc(100vw - 24px);
+}
+
 #ctx-menu.visible,
 #obj-ctx-menu.visible,
+#eyedropper-ctx-menu.visible,
 #ctx-actions.visible { display: block; }
 
 #ctx-menu *,
 #obj-ctx-menu *,
+#eyedropper-ctx-menu *,
 #ctx-actions * {
   user-select: none;
   -webkit-user-select: none;
@@ -269,7 +284,6 @@ body.eyedropper-enabled #multi-sel-overlay {
   -webkit-font-smoothing: antialiased;
   white-space: nowrap;
   text-align: left;
-  transition: background 0.08s, box-shadow 0.08s, color 0.08s;
   isolation: isolate;
   contain: paint;
   overflow: hidden;
@@ -282,7 +296,6 @@ body.eyedropper-enabled #multi-sel-overlay {
   background: transparent;
   pointer-events: none;
   z-index: 0;
-  transition: background 0.08s, box-shadow 0.08s;
 }
 .ctx-action-item.hotspot-hover::before { background: var(--firefox-menu-hover-bg); }
 .ctx-action-item.hotspot-active::before,
@@ -342,7 +355,6 @@ body.eyedropper-enabled #multi-sel-overlay {
   -webkit-user-select: none;
   box-shadow: none;
   transform: translateY(0);
-  transition: background 0.08s, box-shadow 0.08s, color 0.08s, transform 0.08s;
 }
 .ctx-label {
   min-width: 0;
@@ -444,22 +456,16 @@ body.eyedropper-enabled #multi-sel-overlay {
   max-width: calc(100vw - 24px);
   z-index: 99990;
   pointer-events: auto;
-  padding: var(--menu-shell-padding);
-  border: 1px solid var(--firefox-menu-border);
-  border-radius: var(--menu-shell-radius);
-  background: var(--firefox-menu-bg);
-  box-shadow: var(--firefox-menu-shadow);
-  color: var(--firefox-menu-text);
-  font-family: inherit;
   font-size: var(--menu-item-font-size);
   font-weight: var(--menu-item-font-weight);
   letter-spacing: var(--menu-item-letter-spacing);
   -webkit-font-smoothing: antialiased;
-  overflow: hidden;
-  user-select: none;
-  -webkit-user-select: none;
 }
 #eyedropper-loupe.visible { display: block; }
+#eyedropper-loupe.pinned,
+#eyedropper-loupe.dragging { cursor: pointer; }
+#eyedropper-loupe.pinned *,
+#eyedropper-loupe.dragging * { cursor: pointer; }
 #eyedropper-top {
   display: grid;
   grid-template-columns: 1fr;

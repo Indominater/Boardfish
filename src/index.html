@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Boardfish</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=colorize,content_copy,dark_mode" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=dark_mode" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -23,15 +23,6 @@
     </div>
   </div>
 
-  <div id="ctx-actions">
-    <button class="ctx-action-item ctx-action-icon" id="ctx-btn-eyedropper" type="button" aria-label="Eyedropper" aria-pressed="false">
-      <span class="material-symbols-outlined" aria-hidden="true">colorize</span>
-    </button>
-    <button class="ctx-action-item ctx-action-icon" id="ctx-btn-dark-mode" type="button" aria-label="Dark Mode" aria-pressed="false">
-      <span class="material-symbols-outlined" aria-hidden="true">dark_mode</span>
-    </button>
-  </div>
-
   <div id="ctx-menu">
     <button class="ctx-item" id="btn-new"><span class="ctx-label">New Board</span><span class="ctx-shortcut" data-shortcut="new-board"></span></button>
     <div class="ctx-sep"></div>
@@ -47,9 +38,14 @@
     <button class="ctx-item" id="btn-export-all-images"><span class="ctx-label">Export All Images</span></button>
   </div>
 
+  <div id="ctx-actions">
+    <button class="ctx-action-item ctx-action-icon" id="ctx-btn-dark-mode" type="button" aria-label="Dark Mode" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">dark_mode</span>
+    </button>
+  </div>
+
   <div id="obj-ctx-menu">
     <button class="ctx-item" id="obj-btn-copy"><span class="ctx-label">Copy</span><span class="ctx-shortcut" data-shortcut="copy"></span></button>
-    <button class="ctx-item" id="obj-btn-cut"><span class="ctx-label">Cut</span><span class="ctx-shortcut" data-shortcut="cut"></span></button>
     <button class="ctx-item" id="obj-btn-duplicate"><span class="ctx-label">Duplicate</span><span class="ctx-shortcut" data-shortcut="duplicate"></span></button>
     <div class="ctx-sep" id="obj-sep-image-actions"></div>
     <button class="ctx-item" id="obj-btn-flip-horizontal"><span class="ctx-label">Flip Horizontal</span></button>
@@ -90,6 +86,11 @@
     <span id="isl-zoom">100%</span>
   </div>
   <span id="isl-measure" aria-hidden="true"></span>
+  <div id="eyedropper-ctx-menu">
+    <button class="ctx-item" id="eyedropper-btn-copy-hex"><span class="ctx-label">Copy HEX</span></button>
+    <div class="ctx-sep"></div>
+    <button class="ctx-item" id="eyedropper-btn-delete"><span class="ctx-label">Delete</span></button>
+  </div>
   <div id="eyedropper-loupe" aria-hidden="true">
     <div id="eyedropper-top">
       <div id="eyedropper-preview">
@@ -103,7 +104,7 @@
       <div class="ctx-item eyedropper-value-row">
         <span class="eyedropper-value-text"><span>RGB:</span> <span id="eyedropper-rgb">0 0 0</span></span>
       </div>
-      <span id="eyedropper-swatch"></span>
+      <span id="eyedropper-swatch" aria-hidden="true"></span>
     </div>
   </div>
 

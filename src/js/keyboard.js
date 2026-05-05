@@ -13,6 +13,12 @@ function hasNoShortcutModifiers(e) {
   return !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
 }
 
+function isShiftOnlyKey(e) {
+  return e.key === 'Shift' && !e.ctrlKey && !e.metaKey && !e.altKey;
+}
+
+const activeKeyboardKeys = new Set();
+
 function isNativeFindShortcut(e) {
   const commandFind = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'f');
   const findByLetter = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'g') && !e.altKey;
@@ -28,6 +34,10 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 document.addEventListener('keydown', (e) => {
+  const keyId = e.code || e.key;
+  const hasOtherKeyDown = [...activeKeyboardKeys].some((activeKey) => activeKey !== keyId);
+  activeKeyboardKeys.add(keyId);
+
   if (e.key === 'Alt') { e.preventDefault(); return; }
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) { e.preventDefault(); return; }
 
@@ -37,10 +47,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasNoShortcutModifiers(e) && isShortcutKey(e, 'i') && !editingId) {
-    e.preventDefault();
-    setEyedropperEnabled(!eyedropperEnabled);
-    updateCtxActionStates();
+  if (isShiftOnlyKey(e) && !editingId) {
+    if (!e.repeat && !hasOtherKeyDown) {
+      e.preventDefault();
+      setEyedropperEnabled(true);
+      beginEyedropperHoldSample(e);
+      updateCtxActionStates();
+    }
     return;
   }
 
@@ -52,7 +65,7 @@ document.addEventListener('keydown', (e) => {
 
   if (e.key === 'Escape') {
     hideMenus();
-    if (isEyedropperSampleVisible()) {
+    if (isEyedropperSampleVisible() && (typeof isEyedropperSamplePinned !== 'function' || !isEyedropperSamplePinned())) {
       e.preventDefault();
       hideEyedropperSample();
       return;
@@ -127,4 +140,16 @@ document.addEventListener('keydown', (e) => {
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'z')) { e.preventDefault(); undo(); return; }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'd') && !editingId) { e.preventDefault(); duplicateSelected(); return; }
+});
+
+document.addEventListener('keyup', (e) => {
+  activeKeyboardKeys.delete(e.code || e.key);
+  if (e.key === 'Shift' && !editingId && typeof _eyedropperHoldActive !== 'undefined' && _eyedropperHoldActive) {
+    e.preventDefault();
+    endEyedropperHoldSample(e);
+  }
+});
+
+window.addEventListener('blur', () => {
+  activeKeyboardKeys.clear();
 });

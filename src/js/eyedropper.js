@@ -53,6 +53,15 @@ function eyedropperPreviewDrawSize(dpr = window.devicePixelRatio || 1) {
   return Math.max(1, Math.round(eyedropperPreviewCssSize() * dpr));
 }
 
+function eyedropperSampleDotCssCenter(drawSize, dpr = window.devicePixelRatio || 1) {
+  const dot = eyedropperSampleDotCanvasPoint(drawSize);
+  const scale = Math.max(1, Number(dpr) || 1);
+  return {
+    x: (dot.x + 0.5) / scale,
+    y: (dot.y + 0.5) / scale,
+  };
+}
+
 function inputEventAgeMs(e, now = performance.now()) {
   const timeStamp = Number(e?.timeStamp);
   if (!Number.isFinite(timeStamp) || timeStamp <= 0) return null;
@@ -159,7 +168,7 @@ function setEyedropperPreviewDiagnosticsEnabled(enabled) {
 
 // EyedropperDebug is initialized by js/eyedropper_debug.js.
 
-function setEyedropperEnabled(enabled) {
+function setEyedropperEnabled(enabled, options = {}) {
   const requestedEnabled = !!enabled;
   const toggleStart = performance.now();
   const toggleMeta = {
@@ -185,26 +194,21 @@ function setEyedropperEnabled(enabled) {
   phaseStart = performance.now();
   if (eyedropperEnabled && !_eyedropperShieldRelease) {
     _eyedropperShieldRelease = acquireInputShield(
-      'pointerdown:0',
       'pointermove',
-      'pointerup:0',
-      'mousedown:0',
       'mousemove',
-      'mouseup:0',
-      'contextmenu',
-      'wheel',
       'key:escape',
-      'key:i',
-      'key:o',
-      'key:s',
-      'code:keyo',
-      'code:keys',
-      'code:space',
-      { visual: false, allowBoardNavigation: true },
+      'key:shift',
+      'code:shiftleft',
+      'code:shiftright',
+      { visual: false },
     );
   } else if (!eyedropperEnabled && _eyedropperShieldRelease) {
     _eyedropperShieldRelease();
     _eyedropperShieldRelease = null;
+  }
+  if (!eyedropperEnabled) {
+    _eyedropperHoldActive = false;
+    document.body.classList.remove('eyedropper-hold-active');
   }
   recordPhase('shield', phaseStart);
 
@@ -229,7 +233,8 @@ function setEyedropperEnabled(enabled) {
     recordPhase('prewarmSchedule', phaseStart);
   } else {
     phaseStart = performance.now();
-    hideEyedropperSample();
+    if (options.keepSample) endEyedropperSample();
+    else hideEyedropperSample();
     recordPhase('hideSample', phaseStart);
   }
 
@@ -536,18 +541,22 @@ function restoreEyedropperViewportScaling() {
 
 function positionEyedropperLoupe(clientX, clientY) {
   const margin = MENU_VIEWPORT_EDGE_MARGIN;
-  const gap = 12;
   const rect = eyedropperLoupe.getBoundingClientRect();
   const previewRect = eyedropperPreview?.getBoundingClientRect();
   const width = rect.width || eyedropperLoupeCssWidth();
   const height = rect.height || EYEDROPPER_MENU_CSS_HEIGHT;
-  const previewHeight = previewRect?.height || width;
+  const dpr = window.devicePixelRatio || 1;
+  const drawSize = eyedropperPreviewDrawSize(dpr);
+  const sampleCenter = eyedropperSampleDotCssCenter(drawSize, dpr);
+  const previewWidth = previewRect?.width || eyedropperPreviewCssSize();
   const previewTopOffset = previewRect?.height ? previewRect.top - rect.top : 0;
-  const unclampedTop = clientY - previewTopOffset - (previewHeight / 2);
-  let left = clientX + gap;
-  left = Math.max(margin, Math.min(window.innerWidth - width - margin, left));
+  const previewLeftOffset = previewRect?.width ? previewRect.left - rect.left : 0;
+  const unclampedLeft = clientX - previewLeftOffset - Math.min(sampleCenter.x, previewWidth);
+  const unclampedTop = clientY - previewTopOffset - sampleCenter.y;
+  const left = Math.max(margin, Math.min(window.innerWidth - width - margin, unclampedLeft));
   const top = Math.max(margin, Math.min(window.innerHeight - height - margin, unclampedTop));
   eyedropperLoupe.style.transform = `translate(${Math.round(left)}px,${Math.round(top)}px)`;
+  _eyedropperPinnedPosition = { left: Math.round(left), top: Math.round(top) };
 }
 
 function updateEyedropperColorReadout(pixel) {
@@ -1642,7 +1651,7 @@ function scheduleEyedropperHoverTilePrewarm(e) {
 }
 
 function noteEyedropperNavigationActive(reason = 'viewport', durationMs = 180) {
-  if (!eyedropperEnabled) return;
+  if (!eyedropperEnabled && !isEyedropperSampleVisible()) return;
   const now = performance.now();
   _eyedropperNavigationBlockUntil = Math.max(_eyedropperNavigationBlockUntil, now + Math.max(0, durationMs));
   if (_eyedropperNavigationBlockTimer) clearTimeout(_eyedropperNavigationBlockTimer);
@@ -1654,7 +1663,7 @@ function noteEyedropperNavigationActive(reason = 'viewport', durationMs = 180) {
 }
 
 function isEyedropperNavigationActive() {
-  return eyedropperEnabled && performance.now() < _eyedropperNavigationBlockUntil;
+  return (eyedropperEnabled || isEyedropperSampleVisible()) && performance.now() < _eyedropperNavigationBlockUntil;
 }
 
 function handleEyedropperViewportChanged(reason = 'viewport') {
@@ -1779,6 +1788,7 @@ function paintZoomedBoardPreview(clientX, clientY, drawSize, options = {}) {
 
 function commitEyedropperSample(e, options = {}) {
   if ((!eyedropperSampling && !options.force) || !eyedropperLoupe || !eyedropperCanvas || !eyedropperCtx) return;
+  eyedropperLoupe.classList.remove('pinned');
   _eyedropperLastSampleEvent = { clientX: e.clientX, clientY: e.clientY };
 
   const totalStart = performance.now();
@@ -1859,7 +1869,10 @@ function commitEyedropperSample(e, options = {}) {
   if (centerPixel) updateEyedropperColorReadout(centerPixel);
   timings.readout = performance.now() - readoutStart;
   const visibleStart = performance.now();
-  if (!eyedropperLoupe.classList.contains('visible')) eyedropperLoupe.classList.add('visible');
+  if (!eyedropperLoupe.classList.contains('visible')) {
+    if (typeof closeOpenMenusExcept === 'function') closeOpenMenusExcept('eyedropper-loupe', 'open-eyedropper-loupe');
+    eyedropperLoupe.classList.add('visible');
+  }
   timings.showLoupe = performance.now() - visibleStart;
   const visibleAt = performance.now();
   const clickToPreviewVisibleMs = Number.isFinite(receivedAt) ? Math.max(0, visibleAt - receivedAt) : 0;
@@ -1942,20 +1955,14 @@ function cancelPendingEyedropperSample() {
   _eyedropperPendingHoverTileEvent = null;
 }
 
-function stopEyedropperPointerTracking() {
-  if (_eyedropperTrackingRelease) _eyedropperTrackingRelease();
-  _eyedropperTrackingRelease = null;
-  _eyedropperActivePointerId = null;
-}
-
 function endEyedropperSample(e = null) {
-  stopEyedropperPointerTracking();
   if (eyedropperSampling && e?.clientX != null && e?.clientY != null) {
     cancelPendingEyedropperSample();
     const pointerEvent = eyedropperPointerDebugEvent(e);
     _eyedropperLatestPointerEvent = pointerEvent;
     commitEyedropperSample(pointerEvent);
     eyedropperSampling = false;
+    if (isEyedropperSampleVisible()) eyedropperLoupe?.classList.add('pinned');
     if (_eyedropperSnapshotDirtyAfterSample) {
       _eyedropperSnapshotDirtyAfterSample = false;
       markEyedropperSnapshotDirty();
@@ -1965,6 +1972,7 @@ function endEyedropperSample(e = null) {
     cancelPendingEyedropperSample();
   }
   eyedropperSampling = false;
+  if (isEyedropperSampleVisible()) eyedropperLoupe?.classList.add('pinned');
   if (_eyedropperSnapshotDirtyAfterSample) {
     _eyedropperSnapshotDirtyAfterSample = false;
     markEyedropperSnapshotDirty();
@@ -1975,10 +1983,41 @@ function isEyedropperSampleVisible() {
   return !!eyedropperLoupe?.classList.contains('visible');
 }
 
+function isEyedropperSamplePinned() {
+  return isEyedropperSampleVisible() && !eyedropperSampling;
+}
+
+function closeEyedropperContextMenu(reason = 'close') {
+  if (typeof MenuDebug !== 'undefined') MenuDebug.log?.('eyedropper-ctx-menu:close', { reason });
+  eyedropperCtxMenu?.classList.remove('visible');
+}
+
+function openEyedropperContextMenuAt(clientX, clientY) {
+  if (!isEyedropperSamplePinned() || !eyedropperCtxMenu) return;
+  if (typeof closeOpenMenusExcept === 'function') closeOpenMenusExcept('eyedropper-ctx-menu', 'open-eyedropper-menu');
+  if (typeof openMenuAt === 'function') openMenuAt(eyedropperCtxMenu, clientX, clientY);
+  else {
+    eyedropperCtxMenu.style.left = `${clientX}px`;
+    eyedropperCtxMenu.style.top = `${clientY}px`;
+    eyedropperCtxMenu.classList.add('visible');
+  }
+  if (typeof MenuDebug !== 'undefined') MenuDebug.log?.('eyedropper-ctx-menu:open', { x: clientX, y: clientY });
+}
+
 function hideEyedropperSample() {
   endEyedropperSample();
   _eyedropperLastSampleEvent = null;
+  _eyedropperLoupeHorizontalSide = 'right';
+  _eyedropperPinnedPosition = null;
+  _eyedropperDragState = null;
+  eyedropperLoupe?.classList.remove('pinned', 'dragging');
+  closeEyedropperContextMenu('hide-sample');
   if (eyedropperLoupe) eyedropperLoupe.classList.remove('visible');
+}
+
+function noteEyedropperMouseEvent(e) {
+  if (!e || e.clientX == null || e.clientY == null) return;
+  _eyedropperLastMouseEvent = eyedropperPointerDebugEvent(e);
 }
 
 function isPointInsideVisibleEyedropperLoupe(clientX, clientY) {
@@ -2004,67 +2043,111 @@ async function copyEyedropperValue(targetId) {
   } catch (_) {}
 }
 
-function eyedropperEventTargetName(e) {
-  const target = e?.target;
-  if (!(target instanceof Element)) return '';
-  return target.id ? `#${target.id}` : target.tagName.toLowerCase();
+function deleteEyedropperSample() {
+  hideEyedropperSample();
 }
 
-function logEyedropperInteraction(e, allowed, reason) {
-  EyedropperDebug._logInteraction({
-    eventType: e?.type || '',
-    pointerType: e?.pointerType || '',
-    pointerId: e?.pointerId ?? '',
-    button: e?.button ?? '',
-    buttons: e?.buttons ?? '',
-    clientX: e?.clientX ?? '',
-    clientY: e?.clientY ?? '',
-    target: eyedropperEventTargetName(e),
-    allowed: !!allowed,
-    reason,
-    enabled: eyedropperEnabled,
-    sampling: eyedropperSampling,
-    activePointerId: _eyedropperActivePointerId ?? '',
-    shieldActive: isEyedropperShieldActive(),
-  });
+function beginEyedropperHoldSample(e = null) {
+  if (!eyedropperEnabled || _eyedropperHoldActive) return false;
+  _eyedropperHoldActive = true;
+  document.body.classList.add('eyedropper-hold-active');
+  eyedropperSampling = true;
+  const sourceEvent = e?.clientX != null && e?.clientY != null
+    ? eyedropperPointerDebugEvent(e)
+    : _eyedropperLastMouseEvent;
+  if (!sourceEvent) return true;
+  if (typeof cancelWheelPan === 'function') cancelWheelPan();
+  cancelEyedropperBackgroundPrewarm();
+  _eyedropperLatestPointerEvent = sourceEvent;
+  commitEyedropperSample(sourceEvent, { first: true });
+  return true;
 }
 
-function beginEyedropperPointerTracking(e) {
-  stopEyedropperPointerTracking();
-  const supportsPointerTracking = e?.type === 'pointerdown' && e.pointerId != null;
-  const moveEvent = supportsPointerTracking ? 'pointermove' : 'mousemove';
-  const upEvent = supportsPointerTracking ? 'pointerup' : 'mouseup';
-  if (supportsPointerTracking) {
-    _eyedropperActivePointerId = e.pointerId;
-    _eyedropperLastPointerStartAt = performance.now();
+function endEyedropperHoldSample(e = null) {
+  if (!_eyedropperHoldActive) return false;
+  _eyedropperHoldActive = false;
+  document.body.classList.remove('eyedropper-hold-active');
+  if (eyedropperSampling && e?.clientX != null && e?.clientY != null) noteEyedropperMouseEvent(e);
+  endEyedropperSample(_eyedropperLastMouseEvent);
+  setEyedropperEnabled(false, { keepSample: true });
+  if (typeof updateCtxActionStates === 'function') updateCtxActionStates();
+  return true;
+}
+
+function updateEyedropperHoldSample(e) {
+  noteEyedropperMouseEvent(e);
+  if (!_eyedropperHoldActive || !eyedropperEnabled) return;
+  updateEyedropperSample(e);
+}
+
+function dragEyedropperLoupeTo(clientX, clientY) {
+  if (!_eyedropperDragState || !eyedropperLoupe) return;
+  const rect = eyedropperLoupe.getBoundingClientRect();
+  const margin = MENU_VIEWPORT_EDGE_MARGIN;
+  const left = Math.max(margin, Math.min(window.innerWidth - rect.width - margin, _eyedropperDragState.startLeft + clientX - _eyedropperDragState.startX));
+  const top = Math.max(margin, Math.min(window.innerHeight - rect.height - margin, _eyedropperDragState.startTop + clientY - _eyedropperDragState.startY));
+  _eyedropperPinnedPosition = { left: Math.round(left), top: Math.round(top) };
+  eyedropperLoupe.style.transform = `translate(${_eyedropperPinnedPosition.left}px,${_eyedropperPinnedPosition.top}px)`;
+}
+
+function startEyedropperLoupeDrag(e) {
+  if (!isEyedropperSamplePinned() || e.button !== 0 || !eyedropperLoupe) return false;
+  const rect = eyedropperLoupe.getBoundingClientRect();
+  closeEyedropperContextMenu('drag-start');
+  _eyedropperDragState = {
+    pointerId: e.pointerId,
+    startX: e.clientX,
+    startY: e.clientY,
+    startLeft: rect.left,
+    startTop: rect.top,
+  };
+  eyedropperLoupe.classList.add('dragging');
+  eyedropperLoupe.setPointerCapture?.(e.pointerId);
+  return true;
+}
+
+function endEyedropperLoupeDrag(e, commit = true) {
+  if (!_eyedropperDragState || _eyedropperDragState.pointerId !== e.pointerId) return false;
+  if (commit) dragEyedropperLoupeTo(e.clientX, e.clientY);
+  eyedropperLoupe?.releasePointerCapture?.(e.pointerId);
+  eyedropperLoupe?.classList.remove('dragging');
+  _eyedropperDragState = null;
+  return true;
+}
+
+eyedropperLoupe?.addEventListener('pointerdown', (e) => {
+  if (startEyedropperLoupeDrag(e)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
   }
-
-  const onMove = (moveEvent) => {
-    if (supportsPointerTracking && _eyedropperActivePointerId != null && moveEvent.pointerId !== _eyedropperActivePointerId) return;
-    updateEyedropperSample(moveEvent);
-  };
-  const onUp = (upEvent) => {
-    if (supportsPointerTracking && _eyedropperActivePointerId != null && upEvent.pointerId !== _eyedropperActivePointerId) return;
-    endEyedropperSample(upEvent);
-    logEyedropperInteraction(upEvent, true, 'sample-released');
-  };
-  document.addEventListener(moveEvent, onMove, true);
-  document.addEventListener(upEvent, onUp, true);
-  _eyedropperTrackingRelease = () => {
-    document.removeEventListener(moveEvent, onMove, true);
-    document.removeEventListener(upEvent, onUp, true);
-  };
-}
-
-eyedropperLoupe?.addEventListener('pointerdown', (e) => e.stopPropagation());
-eyedropperLoupe?.addEventListener('mousedown', (e) => {
+  e.stopPropagation();
+});
+eyedropperLoupe?.addEventListener('pointermove', (e) => {
+  if (!_eyedropperDragState || _eyedropperDragState.pointerId !== e.pointerId) return;
   e.preventDefault();
   e.stopPropagation();
+  dragEyedropperLoupeTo(e.clientX, e.clientY);
+});
+eyedropperLoupe?.addEventListener('pointerup', (e) => {
+  if (!endEyedropperLoupeDrag(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+});
+eyedropperLoupe?.addEventListener('pointercancel', (e) => {
+  if (!endEyedropperLoupeDrag(e, false)) return;
+  e.preventDefault();
+  e.stopPropagation();
+});
+eyedropperLoupe?.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  if (isEyedropperSamplePinned() && e.button === 0) e.stopImmediatePropagation();
+  else e.stopPropagation();
 });
 eyedropperLoupe?.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  if (typeof showCanvasContextMenuAt === 'function') showCanvasContextMenuAt(e.clientX, e.clientY);
+  openEyedropperContextMenuAt(e.clientX, e.clientY);
 });
 eyedropperLoupe?.addEventListener('click', (e) => {
   e.preventDefault();
@@ -2080,87 +2163,19 @@ eyedropperLoupe?.addEventListener('keydown', (e) => {
   copyEyedropperValue(target.dataset.copyTarget);
 });
 
-function startEyedropperSample(e) {
-  if (typeof _spaceDown !== 'undefined' && _spaceDown) {
-    logEyedropperInteraction(e, false, 'space-pan');
-    return false;
-  }
-  if (e.type === 'mousedown' && performance.now() - _eyedropperLastPointerStartAt < 700) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    logEyedropperInteraction(e, false, 'mouse-after-pointer');
-    return true;
-  }
-  if (!eyedropperEnabled) {
-    logEyedropperInteraction(e, false, 'disabled');
-    return false;
-  }
-  if (e.button !== 0) {
-    logEyedropperInteraction(e, false, 'non-primary-button');
-    return false;
-  }
-  if (e.type === 'pointerdown' && _eyedropperActivePointerId != null && _eyedropperActivePointerId !== e.pointerId) {
-    logEyedropperInteraction(e, false, 'different-active-pointer');
-    return true;
-  }
-  if (e.type === 'pointerdown') _eyedropperLastPointerStartAt = performance.now();
-  if (isEyedropperNavigationActive()) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    logEyedropperInteraction(e, false, 'navigation-active');
-    return true;
-  }
-  if (_boardOpening || (isBoardInputBlocked() && !isEyedropperShieldActive())) {
-    logEyedropperInteraction(e, false, _boardOpening ? 'board-opening' : 'input-blocked');
-    return false;
-  }
-  if (isPointInsideVisibleEyedropperLoupe(e.clientX, e.clientY)) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    logEyedropperInteraction(e, true, 'inside-loupe');
-    return true;
-  }
-  if (!(e.target instanceof Node) || !canvas.contains(e.target)) {
-    logEyedropperInteraction(e, false, 'outside-canvas');
-    return false;
-  }
-  if (isEventInsideVisibleContextMenu(e)) {
-    logEyedropperInteraction(e, false, 'inside-menu');
-    return false;
-  }
-  if (ctxMenu.classList.contains('visible') || objCtxMenu.classList.contains('visible') || ctxActions?.classList.contains('visible')) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    hideMenus();
-    logEyedropperInteraction(e, true, 'closed-menu-before-sample');
-  }
-  if (eyedropperSampling) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    endEyedropperSample(e);
-    logEyedropperInteraction(e, true, 'sample-set');
-    return true;
-  }
-  if (isEyedropperSampleVisible()) {
-    hideEyedropperSample();
-    logEyedropperInteraction(e, true, 'restart-visible-sample');
-  }
-
+eyedropperCopyHexBtn?.addEventListener('click', (e) => {
   e.preventDefault();
-  e.stopImmediatePropagation();
-  hideMenus();
-  eyedropperSampling = true;
-  if (typeof cancelWheelPan === 'function') cancelWheelPan();
-  cancelEyedropperBackgroundPrewarm();
-  const pointerEvent = eyedropperPointerDebugEvent(e);
-  _eyedropperLatestPointerEvent = pointerEvent;
-  commitEyedropperSample(pointerEvent, { first: true });
-  beginEyedropperPointerTracking(e);
-  logEyedropperInteraction(e, true, 'sample-started');
-  return true;
-}
+  e.stopPropagation();
+  copyEyedropperValue('eyedropper-hex');
+  closeEyedropperContextMenu('command:copy-hex');
+});
+eyedropperDeleteBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  deleteEyedropperSample();
+});
 
-canvas.addEventListener('pointerdown', startEyedropperSample, true);
-canvas.addEventListener('mousedown', startEyedropperSample, true);
+document.addEventListener('pointermove', updateEyedropperHoldSample, true);
+document.addEventListener('mousemove', updateEyedropperHoldSample, true);
 document.addEventListener('pointermove', scheduleEyedropperHoverTilePrewarm, true);
 document.addEventListener('mousemove', scheduleEyedropperHoverTilePrewarm, true);

@@ -42,8 +42,9 @@ function syncCtxActionsWithMenu(reason) {
 }
 
 function openCtxMenuAt(x, y) {
+  closeOpenMenusExcept('ctx-menu', 'open-ctx-menu');
   openMenuAt(ctxMenu, x, y);
-  if (!ctxActions) return;
+  if (!ctxActions || !ctxActions.querySelector('.ctx-action-item')) return;
 
   updateCtxActionStates();
   ctxActions.classList.add('visible');
@@ -81,6 +82,26 @@ function closeObjCtxMenu(reason) {
   MenuDebug.log('obj-ctx-menu:close', { reason });
   objCtxMenu.classList.remove('visible');
 }
+
+function menuSurfaces() {
+  return [
+    { id: 'ctx-menu', close: closeCtxMenu },
+    { id: 'obj-ctx-menu', close: closeObjCtxMenu },
+    { id: 'eyedropper-ctx-menu', close: typeof closeEyedropperContextMenu === 'function' ? closeEyedropperContextMenu : null },
+  ];
+}
+
+function closeOpenMenusExcept(activeMenuId = '', reason = 'menu-switch') {
+  for (const surface of menuSurfaces()) {
+    if (surface.id === activeMenuId || typeof surface.close !== 'function') continue;
+    surface.close(`${reason}:switch`);
+  }
+}
+
+function openExclusiveMenuAt(menu, menuId, x, y, reason) {
+  closeOpenMenusExcept(menuId, reason);
+  openMenuAt(menu, x, y);
+}
 var _menuPointerCommand = null;
 var _menuMouseCommand = null;
 var _lastPointerMenuCommandAt = 0;
@@ -95,13 +116,6 @@ var MENU_COMMANDS = {
   'btn-export-all-images': () => { closeCtxMenu('command:export-all-images'); showInputShield(); exportAllImages(); },
   'btn-export-all-text': () => { closeCtxMenu('command:export-all-text'); exportAllText(); },
   'obj-btn-copy': () => { closeObjCtxMenu('command:copy'); copySelected(); },
-  'obj-btn-cut': () => {
-    closeObjCtxMenu('command:cut');
-    (async () => {
-      await copySelected();
-      deleteSelected();
-    })();
-  },
   'obj-btn-delete': () => { closeObjCtxMenu('command:delete'); deleteSelected(); },
   'obj-btn-duplicate': () => { closeObjCtxMenu('command:duplicate'); duplicateSelected(); },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
@@ -226,7 +240,7 @@ ctxMenu.addEventListener('mousedown', onMenuMouseDown);
 ctxMenu.addEventListener('mouseup', onMenuMouseUp);
 objCtxMenu.addEventListener('mousedown', onMenuMouseDown);
 objCtxMenu.addEventListener('mouseup', onMenuMouseUp);
-for (const menu of [ctxMenu, objCtxMenu, ctxActions].filter(Boolean)) {
+for (const menu of [ctxMenu, objCtxMenu, eyedropperCtxMenu, ctxActions].filter(Boolean)) {
   for (const type of ['click', 'contextmenu']) {
     menu.addEventListener(type, (e) => {
       e.stopPropagation();
@@ -276,8 +290,6 @@ function showCanvasContextMenuAt(clientX, clientY) {
   MenuDebug.log('canvas:contextmenu', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
 
   if (eyedropperEnabled) {
-    hideEyedropperSample();
-    closeObjCtxMenu('show-canvas-menu:eyedropper');
     ctxPos = wp;
     updateCtxMenuActions();
     openCtxMenuAt(clientX, clientY);
@@ -289,8 +301,7 @@ function showCanvasContextMenuAt(clientX, clientY) {
   if (isMultiSelected()) {
     if (rectContainsPoint(selectedBounds(), wp)) {
       updateObjMenuActions();
-      closeCtxMenu('show-obj-menu:multi');
-      openMenuAt(objCtxMenu, clientX, clientY);
+      openExclusiveMenuAt(objCtxMenu, 'obj-ctx-menu', clientX, clientY, 'show-obj-menu:multi');
       MenuDebug.log('obj-ctx-menu:open', { reason: 'multi', x: clientX, y: clientY });
       return;
     }
@@ -310,12 +321,10 @@ function showCanvasContextMenuAt(clientX, clientY) {
   if (obj) {
     if (!isSelected(obj.id)) selectObject(obj.id);
     updateObjMenuActions();
-    closeCtxMenu('show-obj-menu:object');
-    openMenuAt(objCtxMenu, clientX, clientY);
+    openExclusiveMenuAt(objCtxMenu, 'obj-ctx-menu', clientX, clientY, 'show-obj-menu:object');
     MenuDebug.log('obj-ctx-menu:open', { reason: 'object', objectId: obj.id, objectType: obj.type, x: clientX, y: clientY });
     return;
   }
-  closeObjCtxMenu('show-canvas-menu');
   ctxPos = wp;
   updateCtxMenuActions();
   openCtxMenuAt(clientX, clientY);
@@ -337,12 +346,11 @@ for (const id of Object.keys(MENU_COMMANDS)) {
 
 
 document.addEventListener('click', (e) => {
-  if (ctxMenu.contains(e.target) || objCtxMenu.contains(e.target) || ctxActions?.contains(e.target)) {
+  if (ctxMenu.contains(e.target) || objCtxMenu.contains(e.target) || eyedropperCtxMenu?.contains(e.target) || ctxActions?.contains(e.target)) {
     MenuDebug.log('document-click:inside-menu');
     return;
   }
-  closeCtxMenu('document-click');
-  closeObjCtxMenu('document-click');
+  closeOpenMenusExcept('', 'document-click');
 });
 
 function ctxActionHotspotRect(button) {
@@ -405,18 +413,9 @@ ctxActions?.addEventListener('pointerleave', clearCtxActionHotspotState);
 darkModeMenuBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  if (!isCtxActionHotspotEvent(e, e.currentTarget)) return;
+  if (ctxActions?.contains(e.currentTarget) && !isCtxActionHotspotEvent(e, e.currentTarget)) return;
   closeCtxMenu('command:dark-mode');
   Promise.resolve(toggleAppTheme()).finally(updateCtxActionStates);
-});
-
-eyedropperMenuBtn?.addEventListener('click', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  if (!isCtxActionHotspotEvent(e, e.currentTarget)) return;
-  closeCtxMenu('command:eyedropper');
-  setEyedropperEnabled(!eyedropperEnabled);
-  updateCtxActionStates();
 });
 
 islZoom.addEventListener('mousedown', e => e.preventDefault());
@@ -450,7 +449,7 @@ islZoom.addEventListener('click', () => {
   }
   const startPanX = panX, startPanY = panY, startZoom = zoom;
   const startTime = performance.now();
-  const duration = 350;
+  const duration = 500;
   function animate(now) {
     const t = Math.min((now - startTime) / duration, 1);
     const e = 1 - Math.pow(1 - t, 3);

@@ -1002,8 +1002,6 @@ var EyedropperDebug = (() => {
       prewarmRafActive: !!_eyedropperPrewarmRaf,
       pendingSampleEvent: !!_eyedropperPendingSampleEvent,
       pendingPrewarmEvent: !!_eyedropperPendingPrewarmEvent,
-      activePointerId: _eyedropperActivePointerId ?? '',
-      lastPointerStartAgeMs: _eyedropperLastPointerStartAt ? Math.round(now - _eyedropperLastPointerStartAt) : '',
       safeImagePending: eyedropperSafeImagePromises.size,
       safeDisplayReloadPending: eyedropperSafeDisplayReloadPromises.size,
       safeScaledPending: eyedropperSafeScaledBitmapPending.size,
