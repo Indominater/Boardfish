@@ -58,14 +58,15 @@ function boardContract() {
 test('release startup debugger is gated before initialization', () => {
   const startupDebugSource = readSource('src/js/startup_debug.js');
   const order = scriptOrder();
-  const flagIndex = startupDebugSource.indexOf('const DEBUG_TOOLS_ENABLED = false;');
+  const flagIndex = startupDebugSource.indexOf('const DEBUG_TOOLS_ENABLED = true;');
   const startupIndex = startupDebugSource.indexOf('var StartupDebug = DEBUG_TOOLS_ENABLED ?');
   const noopIndex = startupDebugSource.indexOf('function createNoopStartupDebug()');
 
   assert.ok(flagIndex >= 0, 'debug flag is missing');
   assert.ok(noopIndex > flagIndex, 'noop startup debugger should be declared after the flag');
   assert.ok(startupIndex > noopIndex, 'StartupDebug should use the noop gate');
-  assert.equal(startupDebugSource.includes('const DEBUG_TOOLS_ENABLED = true;'), false);
+  assert.match(startupDebugSource, /AGENTS: Set this to true only while running local diagnostics\/debug tests\./);
+  assert.match(startupDebugSource, /Before making a new build or release, set it back to false\./);
   assert.ok(order.indexOf('startup_debug.js') < order.indexOf('../app.js'), 'startup debug must load before app startup code');
 });
 
@@ -228,6 +229,9 @@ test('shared abstractions own DOM lookup, Tauri invoke, rendering helpers, bitma
   assert.match(readSource('src/js/tauri_bridge.js'), /function tauriListen\(eventName, handler\)/);
   assert.match(readSource('src/js/tauri_bridge.js'), /function tauriConvertFileSrc\(path\)/);
   assert.match(readSource('src/js/debug_core.js'), /BoardfishDebugCore/);
+  assert.match(readSource('src/js/startup_debug.js'), /async function beginDebug\(spec = \{\}\)/);
+  assert.match(readSource('src/js/startup_debug.js'), /async function finishDebug\(spec = \{\}\)/);
+  assert.match(readSource('src/js/app_bootstrap.js'), /registerDebugCommand\('openFilePath', openFilePath\)/);
   assert.doesNotMatch(readSource('src/app.js'), /^function createDebugRecorder/gm);
   assert.doesNotMatch(readSource('src/app.js'), /^async function mapWithConcurrency/gm);
   assert.match(readSource('src/js/debug_save.js'), /var SaveDebug = \(\(\) =>/);

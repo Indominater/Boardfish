@@ -12,6 +12,30 @@ function trimHistory() {
   }
 }
 
+function collectImageKeysFromObjects(sourceObjects, out) {
+  for (const obj of sourceObjects || []) {
+    const key = obj?.type === 'image' ? obj.data?.imgKey : '';
+    if (key) out.add(key);
+  }
+}
+
+function retainedImageKeysForCurrentAndHistory() {
+  const keys = new Set();
+  collectImageKeysFromObjects(objects, keys);
+  for (const entry of boardHistory) {
+    collectImageKeysFromObjects(Array.isArray(entry) ? entry : entry?.objects, keys);
+  }
+  return keys;
+}
+
+function pruneEyedropperCachesAfterHistoryChange(reason = 'history-change') {
+  if (typeof pruneEyedropperSafeImagesToKeys !== 'function') return;
+  const result = pruneEyedropperSafeImagesToKeys(retainedImageKeysForCurrentAndHistory());
+  if (result?.removed && typeof HistoryDebug !== 'undefined') {
+    HistoryDebug.step(null, 'eyedropper-cache-prune', { reason, ...result });
+  }
+}
+
 function snapshot() {
   const dbg = HistoryDebug.start('snapshot', { objectCount: objects.length, historyLength: boardHistory.length, historyIndex });
   const t0 = performance.now();
@@ -28,6 +52,7 @@ function snapshot() {
   historyIndex = boardHistory.length - 1;
   _dirtyIds.clear();
   trimHistory();
+  pruneEyedropperCachesAfterHistoryChange('snapshot');
   const ms = performance.now() - t0;
   HistoryDebug.max('maxSnapshotMs', ms);
   HistoryDebug.end(dbg, { ms, historyLength: boardHistory.length, historyIndex });
@@ -71,6 +96,7 @@ function pushHistory(reason = '') {
   });
   historyIndex++;
   trimHistory();
+  pruneEyedropperCachesAfterHistoryChange(reason || 'pushHistory');
   updateTitle();
   const ms = performance.now() - t0;
   HistoryDebug.max('maxPushHistoryMs', ms);

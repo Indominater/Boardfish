@@ -739,7 +739,7 @@ var EyedropperDebug = (() => {
     core.enable(options);
     observeLongTasks();
     startFrameProbe();
-    if (core.enabled) console.info('Boardfish eyedropper debugger enabled. Use BoardfishDebug.eyedropper.report() for compact JSON, plus .coldReset(), .frameGapSummary(), .longTaskSummary(), .firstSampleSummary(), .previewMismatchSummary(), .toggleReport(), .toggleSummary(), .timingSummary(), .slowSampleSummary(), .status(), .imageSummary({ limit }), .safeImageCacheSummary(), .prewarmAt(clientX, clientY), .readbackFailures({ limit }), .last(), .summary({ limit }), .sampleAt(clientX, clientY), .textBoundsReport(), or .reset().');
+    if (core.enabled) console.info('Boardfish eyedropper debugger enabled. Use finishDebug({ eyedropper: ["report", "summary", "status"] }) to collect compact results.');
   }
 
   function disable() {
@@ -1331,4 +1331,3 @@ var EyedropperDebug = (() => {
 })();
 
 exposeDebug({ eyedropper: EyedropperDebug });
-

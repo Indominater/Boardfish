@@ -1,8 +1,8 @@
 'use strict';
 
-// Intentionally false in release builds. The debug implementations below are dormant
-// unless this flag is flipped during local diagnostics.
-const DEBUG_TOOLS_ENABLED = false;
+// AGENTS: Set this to true only while running local diagnostics/debug tests.
+// Before making a new build or release, set it back to false.
+const DEBUG_TOOLS_ENABLED = true;
 
 function createNoopStartupDebug() {
   const events = [];
@@ -633,15 +633,469 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
   return api;
 })() : createNoopStartupDebug();
 
-function exposeDebug(tools) {
-  if (!DEBUG_TOOLS_ENABLED) {
-    try {
-      delete window.BoardfishDebug;
-    } catch (_) {
-      window.BoardfishDebug = undefined;
-    }
-    return;
+// DevTools diagnostics are intentionally funneled through beginDebug() and
+// finishDebug(). Agents should give developers those two calls, not raw
+// BoardfishDebug.* commands, because finishDebug() captures console output,
+// table inputs, function results, and writes one JSON artifact.
+(function initBoardfishDebugConsole() {
+let initializingDebugConsole = true;
+const BoardfishDebugConsole = (() => {
+  const namespaces = {};
+  const commands = {};
+  const publicDebug = {};
+  const guardCache = new WeakMap();
+  const directCallStackPattern = /\/(?:src\/)?(?:js\/(?!startup_debug\.js)|app\.js)/;
+  const reservedSpecKeys = new Set(['calls', 'commands', 'label', 'filename', 'download']);
+  const consoleMethods = ['log', 'info', 'warn', 'error', 'debug', 'table', 'group', 'groupCollapsed', 'groupEnd'];
+  const debugGlobalNames = {
+    startup: 'StartupDebug',
+    clipboard: 'ClipDebug',
+    history: 'HistoryDebug',
+    viewport: 'ViewportDebug',
+    save: 'SaveDebug',
+    open: 'OpenDebug',
+    export: 'ExportDebug',
+    perf: 'ManualPerfDebug',
+    insert: 'InsertDebug',
+    exportAllDiag: 'ExportAllDiag',
+    textSel: 'TextSelDebug',
+    pill: 'PillDebug',
+    menu: 'MenuDebug',
+    eyedropper: 'EyedropperDebug',
+  };
+
+  let activeDepth = 0;
+  let activeSession = null;
+  let consoleCapture = null;
+  let originalConsole = null;
+  let nextSessionId = 1;
+
+  function resetPublicDebug() {
+    for (const key of Object.keys(publicDebug)) delete publicDebug[key];
   }
-  window.BoardfishDebug = Object.assign(window.BoardfishDebug || {}, tools);
+
+  function guardMessage(path) {
+    return `[Boardfish debug] Direct console call "${path}" is disabled. Use beginDebug()/finishDebug() so logs, tables, and results are captured in one JSON file.`;
+  }
+
+  function isAllowedCaller() {
+    if (activeDepth > 0) return true;
+    const stack = new Error().stack || '';
+    return directCallStackPattern.test(stack);
+  }
+
+  function guardValue(value, path) {
+    if (!value || (typeof value !== 'object' && typeof value !== 'function')) return value;
+    if (guardCache.has(value)) return guardCache.get(value);
+    if (typeof value === 'function') {
+      const guarded = function guardedDebugFunction(...args) {
+        if (!isAllowedCaller()) throw new Error(guardMessage(path));
+        return value.apply(this, args);
+      };
+      guardCache.set(value, guarded);
+      return guarded;
+    }
+
+    const proxy = new Proxy(value, {
+      get(target, prop, receiver) {
+        const raw = Reflect.get(target, prop, receiver);
+        if (typeof prop === 'symbol') return raw;
+        return guardValue(raw, `${path}.${String(prop)}`);
+      },
+      set(target, prop, nextValue, receiver) {
+        if (!isAllowedCaller()) throw new Error(guardMessage(`${path}.${String(prop)}`));
+        return Reflect.set(target, prop, nextValue, receiver);
+      },
+    });
+    guardCache.set(value, proxy);
+    return proxy;
+  }
+
+  function publish() {
+    resetPublicDebug();
+    for (const [name, api] of Object.entries(namespaces)) {
+      publicDebug[name] = guardValue(api, `BoardfishDebug.${name}`);
+      const globalName = debugGlobalNames[name];
+      if (globalName && window[globalName] === api) window[globalName] = publicDebug[name];
+    }
+    publicDebug.beginDebug = beginDebug;
+    publicDebug.finishDebug = finishDebug;
+    window.BoardfishDebug = publicDebug;
+    window.beginDebug = beginDebug;
+    window.finishDebug = finishDebug;
+  }
+
+  function expose(tools) {
+    if (!initializingDebugConsole && !isAllowedCaller()) throw new Error('[Boardfish debug] exposeDebug() is internal. Use beginDebug()/finishDebug() from the console.');
+    if (!DEBUG_TOOLS_ENABLED) {
+      try {
+        delete window.BoardfishDebug;
+        delete window.beginDebug;
+        delete window.finishDebug;
+      } catch (_) {
+        window.BoardfishDebug = undefined;
+        window.beginDebug = undefined;
+        window.finishDebug = undefined;
+      }
+      return;
+    }
+    Object.assign(namespaces, tools);
+    publish();
+  }
+
+  function registerCommand(name, fn) {
+    if (!DEBUG_TOOLS_ENABLED || typeof fn !== 'function') return;
+    if (!isAllowedCaller()) throw new Error('[Boardfish debug] registerDebugCommand() is for codebase-owned test actions. Use beginDebug()/finishDebug() from the console.');
+    commands[name] = fn;
+  }
+
+  function serializeDebugValue(value, seen = new WeakSet(), depth = 0) {
+    const type = typeof value;
+    if (value == null || type === 'number' || type === 'boolean') return value;
+    if (type === 'string') {
+      if (/^data:/i.test(value)) {
+        const comma = value.indexOf(',');
+        return { type: 'data-url', length: value.length, mime: comma > 0 ? value.slice(0, comma) : value.slice(0, 80) };
+      }
+      if (value.length > 500000) return { type: 'string', length: value.length, preview: value.slice(0, 2000) };
+      return value;
+    }
+    if (type === 'bigint') return value.toString();
+    if (type === 'undefined') return { type: 'undefined' };
+    if (type === 'function') return `[Function ${value.name || 'anonymous'}]`;
+    if (depth > 8) return '[MaxDepth]';
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+
+    if (value instanceof Error) {
+      return { name: value.name, message: value.message, stack: value.stack || '' };
+    }
+    if (value instanceof Element) {
+      return {
+        node: value.tagName.toLowerCase(),
+        id: value.id || '',
+        className: typeof value.className === 'string' ? value.className : '',
+        text: (value.textContent || '').slice(0, 200),
+      };
+    }
+    if (Array.isArray(value)) {
+      const max = 10000;
+      const out = value.slice(0, max).map((item) => serializeDebugValue(item, seen, depth + 1));
+      if (value.length > max) out.push({ truncated: value.length - max });
+      return out;
+    }
+    if (value instanceof Map) {
+      return {
+        type: 'Map',
+        entries: Array.from(value.entries()).slice(0, 1000)
+          .map(([key, item]) => [serializeDebugValue(key, seen, depth + 1), serializeDebugValue(item, seen, depth + 1)]),
+        size: value.size,
+      };
+    }
+    if (value instanceof Set) {
+      return {
+        type: 'Set',
+        values: Array.from(value.values()).slice(0, 1000).map((item) => serializeDebugValue(item, seen, depth + 1)),
+        size: value.size,
+      };
+    }
+
+    const out = {};
+    for (const key of Object.keys(value).slice(0, 1000)) {
+      try {
+        out[key] = serializeDebugValue(value[key], seen, depth + 1);
+      } catch (error) {
+        out[key] = { error: String(error) };
+      }
+    }
+    return out;
+  }
+
+  function startConsoleCapture(sessionId) {
+    if (consoleCapture) return consoleCapture;
+    originalConsole = {};
+    consoleCapture = { sessionId, startedAt: new Date().toISOString(), entries: [] };
+    for (const method of consoleMethods) {
+      const original = console[method];
+      if (typeof original !== 'function') continue;
+      originalConsole[method] = original;
+      console[method] = function capturedConsoleMethod(...args) {
+        try {
+          consoleCapture.entries.push({
+            at: Math.round(performance.now() * 100) / 100,
+            method,
+            args: args.map((arg) => serializeDebugValue(arg)),
+            stack: (new Error().stack || '').split('\n').slice(2, 7),
+          });
+        } catch (_) {
+          // Capture must never interfere with the diagnostic action being tested.
+        }
+        return original.apply(this, args);
+      };
+    }
+    return consoleCapture;
+  }
+
+  function stopConsoleCapture() {
+    if (!originalConsole) return null;
+    for (const [method, original] of Object.entries(originalConsole)) {
+      console[method] = original;
+    }
+    const stopped = consoleCapture;
+    originalConsole = null;
+    consoleCapture = null;
+    return stopped;
+  }
+
+  function normalizePath(path) {
+    return String(path || '').replace(/^BoardfishDebug\./, '');
+  }
+
+  function argsFromValue(value) {
+    if (value === true || value == null) return [];
+    return Array.isArray(value) ? value : [value];
+  }
+
+  function addCall(calls, path, args = []) {
+    calls.push({ path: normalizePath(path), args: Array.isArray(args) ? args : [args] });
+  }
+
+  function normalizeCallEntry(entry, calls, prefix = '') {
+    if (typeof entry === 'string') {
+      addCall(calls, prefix ? `${prefix}.${entry}` : entry);
+      return;
+    }
+    if (Array.isArray(entry)) {
+      const [path, ...args] = entry;
+      addCall(calls, prefix && !String(path).includes('.') ? `${prefix}.${path}` : path, args);
+      return;
+    }
+    if (!entry || typeof entry !== 'object') return;
+    const path = entry.path || entry.fn || entry.name || entry.call;
+    if (path) {
+      addCall(calls, prefix && !String(path).includes('.') ? `${prefix}.${path}` : path, argsFromValue(entry.args));
+      return;
+    }
+    for (const [method, value] of Object.entries(entry)) {
+      addCall(calls, prefix ? `${prefix}.${method}` : method, argsFromValue(value));
+    }
+  }
+
+  function normalizeNamespaceCalls(namespace, value, calls) {
+    if (value === true) {
+      addCall(calls, `${namespace}.enable`);
+      addCall(calls, `${namespace}.reset`);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) normalizeCallEntry(item, calls, namespace);
+      return;
+    }
+    if (typeof value === 'string') {
+      addCall(calls, `${namespace}.${value}`);
+      return;
+    }
+    if (value && typeof value === 'object') {
+      for (const [method, args] of Object.entries(value)) addCall(calls, `${namespace}.${method}`, argsFromValue(args));
+    }
+  }
+
+  function normalizeSpec(spec) {
+    const calls = [];
+    const options = {};
+    if (spec == null) return { calls, options };
+    if (typeof spec === 'string' || Array.isArray(spec)) {
+      const items = Array.isArray(spec) ? spec : [spec];
+      for (const item of items) normalizeCallEntry(item, calls);
+      return { calls, options };
+    }
+    if (typeof spec !== 'object') return { calls, options };
+    for (const key of ['label', 'filename', 'download']) {
+      if (Object.prototype.hasOwnProperty.call(spec, key)) options[key] = spec[key];
+    }
+    for (const item of spec.calls || []) normalizeCallEntry(item, calls);
+    for (const item of spec.commands || []) normalizeCallEntry(item, calls);
+    for (const [key, value] of Object.entries(spec)) {
+      if (reservedSpecKeys.has(key)) continue;
+      if (namespaces[key]) normalizeNamespaceCalls(key, value, calls);
+      else if (commands[key]) addCall(calls, key, argsFromValue(value));
+      else if (key.includes('.')) addCall(calls, key, argsFromValue(value));
+      else throw new Error(`[Boardfish debug] Unknown debug target "${key}". Register it with registerDebugCommand() or exposeDebug().`);
+    }
+    return { calls, options };
+  }
+
+  function resolveCall(path) {
+    const normalized = normalizePath(path);
+    if (commands[normalized]) return commands[normalized];
+    const parts = normalized.split('.');
+    let current = namespaces[parts.shift()];
+    for (const part of parts) current = current?.[part];
+    if (typeof current !== 'function') throw new Error(`[Boardfish debug] "${normalized}" is not a registered debug function.`);
+    return current;
+  }
+
+  async function runCalls(calls, phase) {
+    const results = [];
+    for (const call of calls) {
+      const startedAt = performance.now();
+      const row = { phase, path: call.path, args: serializeDebugValue(call.args), ok: false, ms: 0 };
+      try {
+        const fn = resolveCall(call.path);
+        activeDepth++;
+        try {
+          row.result = serializeDebugValue(await fn(...call.args));
+        } finally {
+          activeDepth--;
+        }
+        row.ok = true;
+      } catch (error) {
+        row.error = serializeDebugValue(error);
+        console.error(`[Boardfish debug] ${call.path} failed`, error);
+      }
+      row.ms = Math.round((performance.now() - startedAt) * 100) / 100;
+      results.push(row);
+      if (phase === 'begin' && call.path.endsWith('.enable') && activeSession) {
+        activeSession.enabledNamespaces.add(call.path.split('.')[0]);
+      }
+    }
+    return results;
+  }
+
+  function defaultFinishCalls() {
+    const calls = [];
+    if (!activeSession) return calls;
+    for (const namespace of activeSession.enabledNamespaces) {
+      const api = namespaces[namespace];
+      for (const method of ['summary', 'dump']) {
+        if (typeof api?.[method] === 'function') addCall(calls, `${namespace}.${method}`);
+      }
+    }
+    return calls;
+  }
+
+  function debugFileName(label = '') {
+    const safeLabel = String(label || '').trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `boardfish-debug${safeLabel ? '-' + safeLabel : ''}-${stamp}.json`;
+  }
+
+  function browserDownload(filename, json) {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return { method: 'browser-download', filename, bytes: json.length };
+  }
+
+  async function persistPayload(payload, options) {
+    const filename = options.filename || debugFileName(options.label || payload.label || '');
+    const json = JSON.stringify(payload, null, 2);
+    if (options.download === false) return { method: 'disabled', filename, bytes: json.length };
+    try {
+      if (typeof hasTauri === 'function' && hasTauri() && typeof BoardfishTauri !== 'undefined' && typeof BoardfishTauri.writeDebugLogFile === 'function') {
+        const path = await BoardfishTauri.writeDebugLogFile(filename, json);
+        return { method: 'tauri-downloads-dir', filename, path, bytes: json.length };
+      }
+    } catch (error) {
+      console.warn('[Boardfish debug] Native Downloads write failed; falling back to browser download.', error);
+    }
+    return browserDownload(filename, json);
+  }
+
+  async function beginDebug(spec = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish debug] Debug tools are disabled in this build.');
+      return null;
+    }
+    if (activeSession) {
+      stopConsoleCapture();
+      activeSession = null;
+    }
+    const { calls, options } = normalizeSpec(spec);
+    const id = `debug-${nextSessionId++}`;
+    activeSession = {
+      id,
+      label: options.label || '',
+      startedAt: new Date().toISOString(),
+      beginSpec: serializeDebugValue(spec),
+      beginCalls: [],
+      finishCalls: [],
+      enabledNamespaces: new Set(),
+    };
+    startConsoleCapture(id);
+    console.info(`[Boardfish debug] Session ${id} started. Run the test, then call finishDebug(...).`);
+    activeSession.beginCalls = await runCalls(calls, 'begin');
+    return {
+      sessionId: id,
+      startedAt: activeSession.startedAt,
+      calls: activeSession.beginCalls,
+    };
+  }
+
+  async function finishDebug(spec = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish debug] Debug tools are disabled in this build.');
+      return null;
+    }
+    if (!activeSession) {
+      const id = `debug-${nextSessionId++}`;
+      activeSession = {
+        id,
+        label: '',
+        startedAt: new Date().toISOString(),
+        beginSpec: null,
+        beginCalls: [],
+        finishCalls: [],
+        enabledNamespaces: new Set(),
+      };
+      startConsoleCapture(id);
+    }
+    const { calls, options } = normalizeSpec(spec);
+    const finishCalls = calls.length ? calls : defaultFinishCalls();
+    activeSession.finishSpec = serializeDebugValue(spec);
+    activeSession.finishCalls = await runCalls(finishCalls, 'finish');
+    const stoppedCapture = stopConsoleCapture() || { entries: [] };
+    const finishedAt = new Date().toISOString();
+    const payload = {
+      schemaVersion: 1,
+      app: 'Boardfish',
+      sessionId: activeSession.id,
+      label: options.label || activeSession.label || '',
+      startedAt: activeSession.startedAt,
+      finishedAt,
+      durationMs: Math.round((new Date(finishedAt).getTime() - new Date(activeSession.startedAt).getTime()) * 100) / 100,
+      location: window.location.href,
+      userAgent: navigator.userAgent,
+      beginSpec: activeSession.beginSpec,
+      finishSpec: activeSession.finishSpec,
+      beginCalls: activeSession.beginCalls,
+      finishCalls: activeSession.finishCalls,
+      console: stoppedCapture.entries,
+    };
+    const persistResult = await persistPayload(payload, options);
+    activeSession = null;
+    console.info(`[Boardfish debug] Wrote ${persistResult.bytes} bytes to ${persistResult.path || persistResult.filename}.`);
+    return { sessionId: payload.sessionId, file: persistResult, finishCalls: payload.finishCalls };
+  }
+
+  return { expose, registerCommand, beginDebug, finishDebug };
+})();
+
+function exposeDebug(tools) {
+  BoardfishDebugConsole.expose(tools);
 }
+
+function registerDebugCommand(name, fn) {
+  BoardfishDebugConsole.registerCommand(name, fn);
+}
+window.exposeDebug = exposeDebug;
+window.registerDebugCommand = registerDebugCommand;
 exposeDebug({ startup: StartupDebug });
+initializingDebugConsole = false;
+})();

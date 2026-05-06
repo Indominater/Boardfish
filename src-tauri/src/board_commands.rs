@@ -1,6 +1,7 @@
 use crate::board_io::{read_board_file, write_board_container, BoardReadStats, BoardWriteStats};
 use crate::board_types::validate_board_value;
 use crate::image_sources::ImageSourceCache;
+use tauri::Manager;
 
 #[derive(serde::Serialize)]
 pub(crate) struct SaveBoardResponse {
@@ -122,4 +123,58 @@ pub(crate) async fn write_text_file(path: String, text: String) -> Result<(), St
     tokio::fs::write(path, text.as_bytes())
         .await
         .map_err(|e| e.to_string())
+}
+
+fn safe_debug_filename(filename: &str) -> String {
+    let mut out: String = filename
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '_' | '-' => ch,
+            _ => '-',
+        })
+        .collect();
+    while out.contains("..") {
+        out = out.replace("..", ".");
+    }
+    if !out.ends_with(".json") {
+        out.push_str(".json");
+    }
+    if out.is_empty() || out == ".json" {
+        "boardfish-debug.json".to_string()
+    } else {
+        out
+    }
+}
+
+fn fallback_downloads_dir() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("USERPROFILE").map(|home| std::path::PathBuf::from(home).join("Downloads"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Downloads"))
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn write_debug_log_file(
+    app: tauri::AppHandle,
+    filename: String,
+    json: String,
+) -> Result<String, String> {
+    let downloads = app
+        .path()
+        .download_dir()
+        .ok()
+        .or_else(fallback_downloads_dir)
+        .ok_or_else(|| "Downloads directory not available".to_string())?;
+    tokio::fs::create_dir_all(&downloads)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = downloads.join(safe_debug_filename(&filename));
+    tokio::fs::write(&path, json.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
 }

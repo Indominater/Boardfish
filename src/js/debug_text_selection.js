@@ -3,13 +3,10 @@
 // ─── Text selection debugger ──────────────────────────────────────────────────
 // Diagnoses Windows text selection offset bugs.
 // Usage:
-//   BoardfishDebug.textSel.enable()      — start logging
-//   BoardfishDebug.textSel.summary()     — table of hit-test + draw events
-//   BoardfishDebug.textSel.report()      — line ranges + selected text with whitespace visible
-//   BoardfishDebug.textSel.selectAll()   — force select-all in the active text object
-//   BoardfishDebug.textSel.measure()     — measure current editing obj chars
-//   BoardfishDebug.textSel.reset()
-//   BoardfishDebug.textSel.disable()
+//   await beginDebug({ textSel: ["enable"] })
+//   await finishDebug({ textSel: ["summary", "report", "measure"] })
+// Direct BoardfishDebug.textSel.* console calls are intentionally guarded so
+// agents collect one downloadable JSON file instead of fragmented console output.
 var _textSelDebugEnabled = false;
 var TextSelDebug = (() => {
   const MAX = 400;
@@ -27,7 +24,7 @@ var TextSelDebug = (() => {
     _textSelDebugEnabled = true;
     console.info(
       '[textSel] enabled. Double-click a text object to edit it, then drag to select.' +
-      '\nUse BoardfishDebug.textSel.report(), .summary(), .measure(), .reset(), .disable()'
+      '\nUse finishDebug({ textSel: ["report", "summary", "measure"] }) to collect results.'
     );
   }
   function disable() {

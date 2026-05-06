@@ -31,6 +31,7 @@
     SET_TITLE: 'set_title',
     SHOW_APP_WINDOW: 'show_app_window',
     WRITE_IMAGE_FILE_BY_KEY: 'write_image_file_by_key',
+    WRITE_DEBUG_LOG_FILE: 'write_debug_log_file',
     WRITE_TEXT_FILE: 'write_text_file',
   });
 
@@ -136,6 +137,9 @@
     },
     writeImageFileByKey(path, imgKey) {
       return tauriInvoke(TAURI_COMMANDS.WRITE_IMAGE_FILE_BY_KEY, { path, imgKey });
+    },
+    writeDebugLogFile(filename, json) {
+      return tauriInvoke(TAURI_COMMANDS.WRITE_DEBUG_LOG_FILE, { filename, json });
     },
     writeTextFile(path, text) {
       return tauriInvoke(TAURI_COMMANDS.WRITE_TEXT_FILE, { path, text });

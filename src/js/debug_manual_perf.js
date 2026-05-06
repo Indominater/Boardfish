@@ -53,7 +53,7 @@ var ManualPerfDebug = (() => {
       imageCount: imageCount(),
       objectCount: objects.length,
     };
-    console.info('[Boardfish perf] Manual session started. Move the cursor yourself, then run BoardfishDebug.perf.report().');
+    console.info('[Boardfish perf] Manual session started. Move the cursor yourself, then run finishDebug({ perf: ["report"] }).');
     console.table([out]);
     return out;
   }
@@ -168,7 +168,7 @@ var ManualPerfDebug = (() => {
 
   function json() {
     if (!lastReport) {
-      console.warn('[Boardfish perf] No report yet. Run BoardfishDebug.perf.report() first.');
+      console.warn('[Boardfish perf] No report yet. Run finishDebug({ perf: ["report"] }) first.');
       return '';
     }
     lastJson = JSON.stringify(lastReport, null, 2);
@@ -178,7 +178,7 @@ var ManualPerfDebug = (() => {
 
   async function copyLast() {
     if (!lastReport) {
-      console.warn('[Boardfish perf] No report yet. Run BoardfishDebug.perf.report() first.');
+      console.warn('[Boardfish perf] No report yet. Run finishDebug({ perf: ["report"] }) first.');
       return false;
     }
     const text = json();
@@ -187,7 +187,7 @@ var ManualPerfDebug = (() => {
       console.info(`[Boardfish perf] Copied ${text.length} chars to clipboard.`);
       return true;
     } catch (err) {
-      console.warn('[Boardfish perf] Clipboard copy failed. JSON was printed above and is available at BoardfishDebug.perf.lastJson.', err);
+      console.warn('[Boardfish perf] Clipboard copy failed. JSON was printed above and finishDebug() will include perf.lastJson.', err);
       return text;
     }
   }

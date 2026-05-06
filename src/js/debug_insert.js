@@ -10,7 +10,7 @@ var InsertDebug = (() => {
     label: '[Boardfish insert]',
     sanitize,
     onEnable() {
-      console.info('Boardfish insert debugger enabled. Use BoardfishDebug.insert.report(), .phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
+      console.info('Boardfish insert debugger enabled. Use finishDebug({ insert: ["report", "phaseSummary", "summary", "dump"] }) to collect results.');
     },
     onDisable() {
       if (DEBUG_TOOLS_ENABLED) console.info('Boardfish insert debugger disabled.');

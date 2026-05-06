@@ -2,7 +2,8 @@
 
 // ─── Export-all diagnostic ────────────────────────────────────────────────────
 // Usage (DevTools console):
-//   await BoardfishDebug.exportAllDiag.run()
+//   await beginDebug()
+//   await finishDebug({ exportAllDiag: ["run"] })
 //
 // Probes the Windows-safe Export All Images flow.
 // The expected order is:
@@ -206,7 +207,7 @@ var ExportAllDiag = (() => {
       if (report.keyProbeErrors.length) console.table(report.keyProbeErrors);
     }
     if (report.saveProbe) console.table([report.saveProbe]);
-    console.log('Full report → BoardfishDebug.exportAllDiag.last');
+    console.log('Full report captured by finishDebug({ exportAllDiag: ["run"] }).');
     console.groupEnd();
     console.groupEnd();
 

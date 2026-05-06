@@ -23,9 +23,48 @@
     return { path: `images/${imgKey}.${ext}`, mime, ext };
   }
 
-  function createBoardDataForSave({ viewport, imageStore, objects }, deps = {}) {
-    const imageManifest = {};
+  function referencedImageKeys(objects = []) {
+    const keys = new Set();
+    for (const obj of objects || []) {
+      const key = obj?.type === BoardTypes.OBJECT_TYPES.IMAGE ? obj.data?.imgKey : '';
+      if (key) keys.add(key);
+    }
+    return keys;
+  }
+
+  function pruneImageStoreForObjects(imageStore = {}, objects = []) {
+    const referenced = referencedImageKeys(objects);
+    const pruned = {};
+    let removed = 0;
     for (const [key, src] of Object.entries(imageStore || {})) {
+      if (referenced.has(key)) pruned[key] = src;
+      else removed++;
+    }
+    return {
+      imageStore: pruned,
+      removed,
+      kept: Object.keys(pruned).length,
+      referenced: referenced.size,
+    };
+  }
+
+  function pruneBoardDataImageStore(data = {}) {
+    const result = pruneImageStoreForObjects(data.imageStore || {}, data.objects || []);
+    return {
+      data: {
+        ...data,
+        imageStore: result.imageStore,
+      },
+      removed: result.removed,
+      kept: result.kept,
+      referenced: result.referenced,
+    };
+  }
+
+  function createBoardDataForSave({ viewport, imageStore, objects }, deps = {}) {
+    const prune = pruneImageStoreForObjects(imageStore || {}, objects || []);
+    const imageManifest = {};
+    for (const [key, src] of Object.entries(prune.imageStore || {})) {
       imageManifest[key] = imageMetaForBoardFile(key, src, deps);
     }
     const data = {
@@ -182,6 +221,9 @@
     getImageStoreDebugSample,
     getObjectTypeCounts,
     imageMetaForBoardFile,
+    pruneBoardDataImageStore,
+    pruneImageStoreForObjects,
+    referencedImageKeys,
     summarizeImageStore,
   });
 

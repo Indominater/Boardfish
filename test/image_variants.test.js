@@ -186,6 +186,9 @@ test('eyedropper readout samples rendered canvas-visible pixels', () => {
   assert.match(source, /source: 'preview-center'/);
   assert.match(source, /reason: 'rendered-preview-center'/);
   assert.match(source, /where: 'eyedropper-local-readout'/);
+  assert.match(source, /\(counters\.previewUnsafeImages \|\| 0\) > 0/);
+  assert.match(source, /\(counters\.readbackSafePendingImages \|\| 0\) > 0/);
+  assert.match(source, /pendingSafeImage: \(counters\.readbackSafePendingImages \|\| 0\) > 0/);
   assert.match(source, /source: local\.pixel \? 'local-readout' : 'background'/);
   assert.match(source, /reason: local\.pixel \? 'local-rendered-canvas' : 'local-readback-failed'/);
   assert.match(source, /let readoutSample = sampleEyedropperReadoutPixel\(e\.clientX, e\.clientY, previewSample\);/);
@@ -243,7 +246,8 @@ test('eyedropper preview uses only the rendered-board wallpaper while active', (
   assert.doesNotMatch(source, /drawSingleObj\(eyedropperRenderedSampleCtx, obj, counters, \{ view: previewView \}\)/);
   assert.doesNotMatch(source, /function renderEyedropperSnapshot/);
   assert.match(source, /readbackUnsafe: !!wallpaper\.rendered\.counters\?\.previewUnsafeImages/);
-  assert.match(source, /!previewSample\.readbackUnsafe && \(!centerPixel \|\| readoutSample\?\.source === 'preview-render'\)/);
+  assert.match(source, /pendingSafeImage: !!wallpaper\.rendered\.counters\?\.readbackSafePendingImages/);
+  assert.match(source, /!previewSample\.readbackUnsafe && !previewSample\.pendingSafeImage && \(!centerPixel \|\| readoutSample\?\.source === 'preview-render'\)/);
   assert.match(source, /viewportImageScalingEnabled = false;/);
   assert.match(source, /restoreEyedropperViewportScaling\(\)/);
 });
@@ -274,8 +278,9 @@ test('eyedropper debugger exposes compact reports for JSON copying', () => {
   assert.match(source, /function coldReset\(\)/);
   assert.match(source, /clearEyedropperSafeImageCache\(\)/);
   assert.match(source, /function analyzeEyedropperPreviewSurface\(previewSample = null, expectedPixel = null\)/);
-  assert.match(source, /if \(previewSample\?\.readbackUnsafe\) \{/);
+  assert.match(source, /if \(previewSample\?\.readbackUnsafe \|\| previewSample\?\.pendingSafeImage\) \{/);
   assert.match(source, /preview-readback-unsafe/);
+  assert.match(source, /preview-readback-safe-image-pending/);
   assert.match(source, /function inputEventAgeMs\(e, now = performance\.now\(\)\)/);
   assert.match(source, /function eyedropperPointerDebugEvent\(e, receivedAt = performance\.now\(\)\)/);
   assert.match(source, /firstSamples:/);
@@ -330,6 +335,59 @@ test('eyedropper avoids asset display probes for readback-safe sampling', () => 
   assert.doesNotMatch(eyedropperSource, /loadImageElement\(assetSrc, \{ crossOrigin: 'anonymous' \}\)/);
   assert.doesNotMatch(eyedropperSource, /sourceKind: 'display-cors'/);
   assert.match(imageStateSource, /img\.crossOrigin = crossOrigin/);
+});
+
+test('image cache skips readback probes during normal display hydration', () => {
+  const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
+
+  assert.match(imageStateSource, /function shouldSkipReadbackProbeForNativeDisplaySource\(key, src\)/);
+  assert.match(imageStateSource, /if \(!isNativeImageRef\(imageStore\[key\]\)\) return false;/);
+  assert.match(imageStateSource, /return !!src && imageAssetUrlCache\[key\] === src;/);
+  assert.match(imageStateSource, /const needsReadbackSafe = options\.requireReadbackSafe === true;/);
+  assert.match(imageStateSource, /const skipReadbackProbe = !needsReadbackSafe \|\| shouldSkipReadbackProbeForNativeDisplaySource\(key, loadedSrc\);/);
+  assert.match(imageStateSource, /skipped: skipReadbackProbe/);
+});
+
+test('image bitmap queue does not wait for animation frames during board open', () => {
+  const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
+
+  assert.match(imageStateSource, /if \(typeof _boardOpening !== 'undefined' && _boardOpening\) \{/);
+  assert.match(imageStateSource, /setTimeout\(processImageDecodeQueue, 0\);/);
+  assert.match(imageStateSource, /requestAnimationFrame\(processImageDecodeQueue\);/);
+});
+
+test('opened boards prewarm eyedropper-safe images after render hydration', () => {
+  const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+  const ioCloseSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'io_close.js'), 'utf8');
+
+  assert.match(eyedropperSource, /function schedulePostOpenEyedropperSafeImagePrewarm\(reason = 'open', options = \{\}\)/);
+  assert.match(eyedropperSource, /const limit = Math\.max\(1, Number\(options\.limit\) \|\| 8\);/);
+  assert.match(eyedropperSource, /const batchSize = Math\.max\(1, Math\.min\(4, Number\(options\.batchSize\) \|\| 1\)\);/);
+  assert.match(eyedropperSource, /visibleRank/);
+  assert.match(eyedropperSource, /resolveEyedropperSafeImageSource\(keys\[index\]\)/);
+  assert.match(eyedropperSource, /scheduleIdleTask\(runBatch\)/);
+  assert.match(ioCloseSource, /schedulePostOpenEyedropperSafeImagePrewarm\('open-all-hydrated'\)/);
+  assert.match(ioCloseSource, /eyedropper-prewarm:scheduled/);
+});
+
+test('new image and undo-history lifecycle manage eyedropper-safe warming', () => {
+  const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+  const imageInsertSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_insert.js'), 'utf8');
+  const historySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'history_state.js'), 'utf8');
+
+  assert.match(eyedropperSource, /var NEW_IMAGE_EYEDROPPER_PREWARM_LIMIT = 8;/);
+  assert.match(eyedropperSource, /function scheduleNewImageEyedropperSafePrewarm\(imgKey, reason = 'image-added'\)/);
+  assert.match(eyedropperSource, /resolveEyedropperSafeImageSource\(item\.imgKey\)/);
+  assert.match(eyedropperSource, /_newImageEyedropperPrewarmQueue\.length = 0;/);
+  assert.match(eyedropperSource, /_newImageEyedropperPrewarmQueued\.clear\(\);/);
+  assert.match(eyedropperSource, /function pruneEyedropperSafeImagesToKeys\(retainedKeys = new Set\(\)\)/);
+  assert.match(eyedropperSource, /removeEyedropperSafeImageKey\(key\)/);
+  assert.match(imageInsertSource, /scheduleNewImageEyedropperSafePrewarm\(imgKey, 'add-image'\)/);
+  assert.match(imageInsertSource, /scheduleNewImageEyedropperSafePrewarm\(imgKey, 'add-native-image'\)/);
+  assert.match(historySource, /function retainedImageKeysForCurrentAndHistory\(\)/);
+  assert.match(historySource, /collectImageKeysFromObjects\(objects, keys\)/);
+  assert.match(historySource, /for \(const entry of boardHistory\)/);
+  assert.match(historySource, /pruneEyedropperSafeImagesToKeys\(retainedImageKeysForCurrentAndHistory\(\)\)/);
 });
 
 test('low-zoom drawing preserves visibility until scaled variants are ready', () => {

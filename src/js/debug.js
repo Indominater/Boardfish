@@ -16,7 +16,7 @@ var ClipDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Events are buffered. Use BoardfishDebug.clipboard.phaseSummary(), .summary(), .dump(), .setVerbose(true), or .reset().');
+    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Use finishDebug({ clipboard: ["phaseSummary", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -264,7 +264,7 @@ var HistoryDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish history debugger enabled. Use BoardfishDebug.history.pushes(), .summary(), .dump(), .setVerbose(true), or .reset().');
+    if (core.enabled) console.info('Boardfish history debugger enabled. Use finishDebug({ history: ["pushes", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -410,7 +410,7 @@ var ViewportDebug = (() => {
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish viewport debugger enabled. Events are buffered without per-event console logging. Use BoardfishDebug.viewport.report(), .summary(), .drawSummary(), .slowFrames(), .imageHealth(), .dump(), .setVerbose(true), or .reset().');
+    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["report", "summary", "drawSummary", "slowFrames", "imageHealth", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -1065,4 +1065,3 @@ exposeDebug({ viewport: ViewportDebug });
 // ─── Open debugger ───────────────────────────────────────────────────────────
 
 // ─── Export debugger ─────────────────────────────────────────────────────────
-

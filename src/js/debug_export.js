@@ -18,7 +18,7 @@ var ExportDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish export debugger enabled. For progress issues use BoardfishDebug.export.progressReport(); for massive boards use .massiveReport(); also available: .status(), .slowImageReport(), .summary(), .dump(), .reset().');
+    if (core.enabled) console.info('Boardfish export debugger enabled. Use finishDebug({ export: ["progressReport", "massiveReport", "status", "slowImageReport", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {

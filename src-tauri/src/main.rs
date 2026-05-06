@@ -21,7 +21,7 @@ use app_lifecycle::{
     handle_run_event, handle_window_event, set_title, show_app_window, startup_file_state,
 };
 use app_theme::set_app_theme;
-use board_commands::{read_board, save_board, write_text_file};
+use board_commands::{read_board, save_board, write_debug_log_file, write_text_file};
 use clipboard::{
     clipboard_sequence, copy_image_data_url_to_clipboard_transformed, copy_text_to_clipboard,
     read_image_from_clipboard_cached, read_text_from_clipboard,
@@ -60,6 +60,7 @@ fn main() {
             save_board,
             save_text_file_dialog,
             write_text_file,
+            write_debug_log_file,
             read_board,
             register_image_file_source,
             get_cached_image_data_url,

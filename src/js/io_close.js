@@ -211,6 +211,29 @@ function getVisibleImageKeys(limit = Infinity) {
 }
 getVisibleImageKeys.lastDebug = null;
 
+function getReferencedNativeImageKeys(limit = Infinity, exclude = new Set()) {
+  const keys = [];
+  const seen = new Set();
+  const skipped = { excluded: 0, nonImage: 0, missingKey: 0, missingStore: 0, nonNative: 0, cached: 0, duplicate: 0 };
+  for (const obj of objects) {
+    if (obj.type !== 'image') { skipped.nonImage++; continue; }
+    const key = obj.data?.imgKey;
+    if (!key) { skipped.missingKey++; continue; }
+    if (seen.has(key)) { skipped.duplicate++; continue; }
+    seen.add(key);
+    if (exclude.has(key)) { skipped.excluded++; continue; }
+    const source = BoardfishImageStore.getSource(key);
+    if (!source) { skipped.missingStore++; continue; }
+    if (!isNativeImageRef(source)) { skipped.nonNative++; continue; }
+    if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
+    keys.push(key);
+    if (keys.length >= limit) break;
+  }
+  getReferencedNativeImageKeys.lastDebug = { selected: keys.length, skipped };
+  return keys;
+}
+getReferencedNativeImageKeys.lastDebug = null;
+
 function getPendingNativeImageKeys(limit = Infinity, exclude = new Set()) {
   const keys = [];
   const skipped = { excluded: 0, nonNative: 0, cached: 0 };
@@ -246,7 +269,7 @@ async function hydrateImageForDisplay(key, dbg = null) {
   }
   const loadMs = performance.now() - loadStart;
   const readyStart = performance.now();
-  await cacheImage(key, display.src, dbg, img, { skipSourceRegistration: true });
+  const cacheMetrics = await cacheImage(key, display.src, dbg, img, { skipSourceRegistration: true });
   const readyMs = performance.now() - readyStart;
   const bitmapReady = !!imageBitmapCache[key];
   const displayReady = BoardfishImageStore.hasDisplayImage(key);
@@ -256,6 +279,7 @@ async function hydrateImageForDisplay(key, dbg = null) {
     fetchMs,
     loadMs,
     readyMs,
+    ...(cacheMetrics || {}),
     dataUrlLen: display.dataUrlLen,
     source: display.source,
     bitmapReady,
@@ -295,8 +319,13 @@ async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch
 }
 
 async function hydrateAllImagesForOpen(dbg = null) {
-  const keys = getPendingNativeImageKeys();
-  OpenDebug.step(dbg, 'hydrate-all:candidates', { count: keys.length, ...(getPendingNativeImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() });
+  const keys = getReferencedNativeImageKeys();
+  OpenDebug.step(dbg, 'hydrate-all:candidates', {
+    count: keys.length,
+    ...(getReferencedNativeImageKeys.lastDebug || {}),
+    pendingNativeImages: getPendingNativeImageKeys().length,
+    ...getOpenImageRuntimeMetrics(),
+  });
   return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
 }
 var _backgroundOpenHydrationRunning = false;
@@ -343,9 +372,21 @@ function scheduleVisibleHydrationAfterIdle() {
   }, 180);
 }
 
+var openHydrationMode = 'all-before-open';
+function setOpenHydrationMode(mode) {
+  const allowed = new Set(['all-before-open', 'visible-first']);
+  if (!allowed.has(mode)) return openHydrationMode;
+  openHydrationMode = mode;
+  return openHydrationMode;
+}
+function getOpenHydrationMode() {
+  return openHydrationMode;
+}
+
 async function finishOpenedBoard(dbg, data) {
   PillDebug.log('open:finishOpenedBoard:start', getBoardOpenMetrics(data));
-  if (OpenDebug.hydrationMode === 'visible-first') {
+  const hydrationMode = getOpenHydrationMode();
+  if (hydrationMode === 'visible-first') {
     const hydrateStart = performance.now();
     const visibleKeys = await hydrateVisibleImagesForOpen(dbg);
     PillDebug.log('open:hydrate-visible:end', { phaseMs: performance.now() - hydrateStart, visibleCount: visibleKeys?.length || 0 });
@@ -379,21 +420,33 @@ async function finishOpenedBoard(dbg, data) {
   });
   PillDebug.log('open:restoreIslandZoom:end', { zoomRestoreReason });
   OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
-  if (OpenDebug.hydrationMode === 'visible-first') {
+  if (hydrationMode === 'visible-first') {
     setTimeout(() => hydrateRemainingImagesForOpen(dbg).catch((err) => {
       OpenDebug.step(dbg, 'hydrate-background:error', { error: String(err) });
     }), 80);
+  } else if (typeof schedulePostOpenEyedropperSafeImagePrewarm === 'function') {
+    setTimeout(() => {
+      const result = schedulePostOpenEyedropperSafeImagePrewarm('open-all-hydrated');
+      OpenDebug.step(dbg, 'eyedropper-prewarm:scheduled', result || { scheduled: false });
+    }, 80);
   }
 }
 
 function applyBoardData(data, options = {}) {
   data = BoardSchema.normalizeBoardData(data);
+  const prune = BoardfishBoardDocument.pruneBoardDataImageStore(data);
+  data = prune.data;
   const dbg = options.dbg || null;
   const sourcesCached = !!options.sourcesCached;
   const deferRender = !!options.deferRender;
   const endDebug = options.endDebug !== false;
   PillDebug.log('open:applyBoardData:start', getBoardOpenMetrics(data));
   OpenDebug.step(dbg, 'applyBoardData:start', getBoardOpenMetrics(data));
+  OpenDebug.step(dbg, 'prune-unreferenced-images', {
+    removed: prune.removed,
+    kept: prune.kept,
+    referenced: prune.referenced,
+  });
   setEyedropperEnabled(false);
   clearJsClipboard();
   const t0 = performance.now();

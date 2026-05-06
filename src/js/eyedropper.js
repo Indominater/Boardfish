@@ -106,8 +106,10 @@ function analyzeEyedropperPreviewSurface(previewSample = null, expectedPixel = n
     out.suspectedBlank = true;
     return out;
   }
-  if (previewSample?.readbackUnsafe) {
-    out.readError = 'preview-readback-unsafe';
+  if (previewSample?.readbackUnsafe || previewSample?.pendingSafeImage) {
+    out.readError = previewSample?.pendingSafeImage
+      ? 'preview-readback-safe-image-pending'
+      : 'preview-readback-unsafe';
     out.suspectedBlank = !previewSample?.painted ||
       (!previewSample?.drawnImages && !previewSample?.drawnText && !!expectedPixel);
     return out;
@@ -515,6 +517,19 @@ function renderEyedropperLocalReadoutPixel(clientX, clientY) {
     });
     resetCanvasToScreen(eyedropperReadoutCtx);
     if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
+    if ((counters.previewUnsafeImages || 0) > 0 || (counters.readbackSafePendingImages || 0) > 0) {
+      return {
+        pixel: null,
+        counters,
+        viewportRect,
+        sourceX: 0,
+        sourceY: 0,
+        sourceW: 1,
+        sourceH: 1,
+        readbackUnsafe: (counters.previewUnsafeImages || 0) > 0,
+        pendingSafeImage: (counters.readbackSafePendingImages || 0) > 0,
+      };
+    }
     const pixel = sampleCanvasPixel(eyedropperReadoutCtx, 0, 0, {
       where: 'eyedropper-local-readout',
       source: 'sampleEyedropperReadoutPixel',
@@ -810,7 +825,12 @@ function displayedBoardPixelSampleInfo(clientX, clientY, options = {}) {
 function sampleEyedropperReadoutPixel(clientX, clientY, previewSample = null) {
   const cachedPixel = sampleEyedropperCachedPixelAt(clientX, clientY);
   if (cachedPixel) return cachedPixel;
-  if (previewSample?.painted && previewSample.centerX != null && previewSample.centerY != null && !previewSample.readbackUnsafe) {
+  const previewReadbackSafe = previewSample?.painted &&
+    previewSample.centerX != null &&
+    previewSample.centerY != null &&
+    !previewSample.readbackUnsafe &&
+    !previewSample.pendingSafeImage;
+  if (previewReadbackSafe) {
     const previewPixel = sampleCanvasPixel(eyedropperRenderedSampleCtx, previewSample.centerX, previewSample.centerY, {
       where: 'zoomed-preview-center-readout',
       source: 'sampleEyedropperReadoutPixel',
@@ -937,6 +957,28 @@ function closeEyedropperSafeScaledImages(key) {
   eyedropperSafeScaledBitmapStore.removeGroup(key);
 }
 
+function removeEyedropperSafeImageKey(key) {
+  if (!key) return false;
+  const existing = eyedropperSafeImageCache.get(key);
+  if (existing) closeEyedropperSafeImageEntry(existing);
+  eyedropperSafeImageCache.delete(key);
+  eyedropperSafeImagePromises.delete(key);
+  eyedropperSafeDisplayReloadPromises.delete(key);
+  closeEyedropperSafeScaledImages(key);
+  removeEyedropperSafeTileCacheForImage(key);
+  if (typeof removeEyedropperSafePixelCache === 'function') removeEyedropperSafePixelCache(key);
+  for (const pendingKey of [...eyedropperSafeScaledBitmapPending]) {
+    if (pendingKey.startsWith(`${key}:`)) {
+      eyedropperSafeScaledBitmapPending.delete(pendingKey);
+      eyedropperSafeScaledBitmapPendingBytes.delete(pendingKey);
+    }
+  }
+  eyedropperSafeDisplayProbeFailures.delete(eyedropperDisplayProbeFailureKey(key, 'imageCache'));
+  eyedropperSafeDisplayProbeFailures.delete(eyedropperDisplayProbeFailureKey(key, 'display-cache'));
+  eyedropperNativeSourceSkipLogged.delete(key);
+  return !!existing;
+}
+
 function clearEyedropperSafeImageCache() {
   for (const entry of eyedropperSafeImageCache.values()) closeEyedropperSafeImageEntry(entry);
   eyedropperSafeScaledBitmapStore.clear();
@@ -950,6 +992,22 @@ function clearEyedropperSafeImageCache() {
   eyedropperSafeTileCacheBytes = 0;
   eyedropperSafeDisplayProbeFailures.clear();
   eyedropperNativeSourceSkipLogged.clear();
+  _newImageEyedropperPrewarmQueue.length = 0;
+  _newImageEyedropperPrewarmQueued.clear();
+  _newImageEyedropperPrewarmScheduled = false;
+}
+
+function pruneEyedropperSafeImagesToKeys(retainedKeys = new Set()) {
+  if (!retainedKeys || typeof retainedKeys.has !== 'function') return { removed: 0, retained: eyedropperSafeImageCache.size };
+  let removed = 0;
+  for (const key of [...eyedropperSafeImageCache.keys()]) {
+    if (retainedKeys.has(key)) continue;
+    if (removeEyedropperSafeImageKey(key)) removed++;
+  }
+  if (removed) {
+    EyedropperDebug._count('safeImageCachePruned', removed);
+  }
+  return { removed, retained: eyedropperSafeImageCache.size };
 }
 
 function storeEyedropperSafeImage(key, token, source, options = {}) {
@@ -957,7 +1015,7 @@ function storeEyedropperSafeImage(key, token, source, options = {}) {
   if (existing && existing.token !== token) {
     closeEyedropperSafeImageEntry(existing);
     closeEyedropperSafeScaledImages(key);
-    removeEyedropperSafePixelCache(key);
+    if (typeof removeEyedropperSafePixelCache === 'function') removeEyedropperSafePixelCache(key);
     removeEyedropperSafeTileCacheForImage(key);
   }
   eyedropperSafeImageCache.set(key, {
@@ -1453,6 +1511,80 @@ function scheduleEyedropperHoverTilePrewarm(e) {
   });
 }
 
+var _postOpenEyedropperPrewarmToken = 0;
+var _newImageEyedropperPrewarmQueue = [];
+var _newImageEyedropperPrewarmQueued = new Set();
+var _newImageEyedropperPrewarmScheduled = false;
+var NEW_IMAGE_EYEDROPPER_PREWARM_LIMIT = 8;
+
+function scheduleNewImageEyedropperSafePrewarm(imgKey, reason = 'image-added') {
+  if (!imgKey || typeof resolveEyedropperSafeImageSource !== 'function') return { scheduled: false, reason: 'missing-key' };
+  if (_newImageEyedropperPrewarmQueued.has(imgKey) || eyedropperSafeImageCache.has(imgKey)) {
+    return { scheduled: false, reason: 'already-queued-or-warm', imgKey };
+  }
+  if (_newImageEyedropperPrewarmQueue.length >= NEW_IMAGE_EYEDROPPER_PREWARM_LIMIT) {
+    return { scheduled: false, reason: 'queue-limit', imgKey };
+  }
+  _newImageEyedropperPrewarmQueued.add(imgKey);
+  _newImageEyedropperPrewarmQueue.push({ imgKey, reason });
+  if (!_newImageEyedropperPrewarmScheduled) {
+    _newImageEyedropperPrewarmScheduled = true;
+    scheduleIdleTask(runNewImageEyedropperSafePrewarm);
+  }
+  return { scheduled: true, reason, imgKey, queued: _newImageEyedropperPrewarmQueue.length };
+}
+
+function runNewImageEyedropperSafePrewarm() {
+  _newImageEyedropperPrewarmScheduled = false;
+  const item = _newImageEyedropperPrewarmQueue.shift();
+  if (!item) return;
+  _newImageEyedropperPrewarmQueued.delete(item.imgKey);
+  resolveEyedropperSafeImageSource(item.imgKey);
+  EyedropperDebug._count('newImagePrewarmRuns');
+  if (_newImageEyedropperPrewarmQueue.length) {
+    _newImageEyedropperPrewarmScheduled = true;
+    scheduleIdleTask(runNewImageEyedropperSafePrewarm);
+  }
+}
+
+function schedulePostOpenEyedropperSafeImagePrewarm(reason = 'open', options = {}) {
+  if (!objects?.length || typeof resolveEyedropperSafeImageSource !== 'function') return null;
+  const token = ++_postOpenEyedropperPrewarmToken;
+  const limit = Math.max(1, Number(options.limit) || 8);
+  const batchSize = Math.max(1, Math.min(4, Number(options.batchSize) || 1));
+  const seen = new Set();
+  const candidates = [];
+  const visible = typeof viewportWorldRect === 'function' ? viewportWorldRect() : null;
+  const center = visible
+    ? { x: (visible.x1 + visible.x2) / 2, y: (visible.y1 + visible.y2) / 2 }
+    : { x: panX || 0, y: panY || 0 };
+
+  for (const obj of objects) {
+    const key = obj?.type === 'image' ? obj.data?.imgKey : '';
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const visibleRank = visible && objectIntersectsRect(obj, visible) ? 0 : 1;
+    candidates.push({ key, visibleRank, distanceSq: distanceSqToObject(center, obj) });
+  }
+  candidates.sort((a, b) => a.visibleRank - b.visibleRank || a.distanceSq - b.distanceSq);
+  const keys = candidates.slice(0, limit).map((item) => item.key);
+  if (!keys.length) return { scheduled: false, reason: 'no-image-keys' };
+
+  let index = 0;
+  const runBatch = () => {
+    if (token !== _postOpenEyedropperPrewarmToken) return;
+    const end = Math.min(keys.length, index + batchSize);
+    for (; index < end; index++) resolveEyedropperSafeImageSource(keys[index]);
+    if (index < keys.length) scheduleIdleTask(runBatch);
+    else {
+      EyedropperDebug._count('postOpenPrewarmRuns');
+      EyedropperDebug._count('postOpenPrewarmCandidates', keys.length);
+    }
+  };
+  scheduleIdleTask(runBatch);
+  return { scheduled: true, reason, count: keys.length, batchSize };
+}
+
 function noteEyedropperNavigationActive(reason = 'viewport', durationMs = 180) {
   if (!eyedropperEnabled && !isEyedropperSampleVisible()) return;
   const now = performance.now();
@@ -1546,6 +1678,7 @@ function paintEyedropperWallpaperPreview(clientX, clientY, drawSize, options = {
     intersectingObjects: wallpaper.rendered.counters?.visibleObjects || 0,
     wallpaper: true,
     readbackUnsafe: !!wallpaper.rendered.counters?.previewUnsafeImages,
+    pendingSafeImage: !!wallpaper.rendered.counters?.readbackSafePendingImages,
     timings,
   };
 }
@@ -1606,7 +1739,7 @@ function commitEyedropperSample(e, options = {}) {
   let centerPixel = readoutSample?.pixel;
   timings.previewReadback = 0;
   if (previewSample?.painted && previewSample.centerX != null && previewSample.centerY != null &&
-    !previewSample.readbackUnsafe && (!centerPixel || readoutSample?.source === 'preview-render')) {
+    !previewSample.readbackUnsafe && !previewSample.pendingSafeImage && (!centerPixel || readoutSample?.source === 'preview-render')) {
     const previewReadbackStart = performance.now();
     const previewPixel = sampleCanvasPixel(eyedropperRenderedSampleCtx, previewSample.centerX, previewSample.centerY, {
       where: 'zoomed-preview-center-fallback',

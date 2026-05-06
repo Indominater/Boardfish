@@ -52,7 +52,7 @@ var PillDebug = (() => {
     enabled = true;
     events.length = 0;
     startLongTaskObserver();
-    console.info('Boardfish pill debugger enabled. Use BoardfishDebug.pill.summary(), .timeline(), .diagnose(), .dump(), or .reset().');
+    console.info('Boardfish pill debugger enabled. Use finishDebug({ pill: ["summary", "dump"] }) to collect results.');
   }
   function disable() {
     enabled = false;
@@ -327,7 +327,7 @@ var MenuDebug = (() => {
     verbose = !!options.verbose;
     events.length = 0;
     nextId = 1;
-    console.info('Boardfish menu debugger enabled. Use BoardfishDebug.menu.summary(), .events(), .last(), .setVerbose(true), or .reset().');
+    console.info('Boardfish menu debugger enabled. Use finishDebug({ menu: ["summary", "events", "last"] }) to collect results.');
   }
 
   function disable() { enabled = false; }
@@ -396,5 +396,4 @@ var MenuDebug = (() => {
   };
 })();
 exposeDebug({ menu: MenuDebug });
-
 

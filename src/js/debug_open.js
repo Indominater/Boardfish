@@ -18,7 +18,7 @@ var OpenDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish open debugger enabled. Use BoardfishDebug.open.summary(), .dump(), or .reset().');
+    if (core.enabled) console.info('Boardfish open debugger enabled. Use finishDebug({ open: ["summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -34,6 +34,7 @@ var OpenDebug = (() => {
       return hydrationMode;
     }
     hydrationMode = mode;
+    if (typeof setOpenHydrationMode === 'function') setOpenHydrationMode(mode);
     console.info(`[Boardfish open] hydration mode set to ${hydrationMode}`);
     return hydrationMode;
   }
@@ -192,6 +193,85 @@ var OpenDebug = (() => {
     return out;
   }
 
+  function cacheImageBreakdown(limit = 50) {
+    const totals = new Map();
+    for (const event of events) {
+      const key = event.meta?.imgKey || event.meta?.key;
+      if (!key || !event.step?.startsWith('cache-image:')) continue;
+      if (!totals.has(key)) totals.set(key, {
+        imgKey: key,
+        totalMs: 0,
+        queueWaitMs: 0,
+        bitmapMs: 0,
+        previewMs: 0,
+        renderScheduleMs: 0,
+        loadMs: 0,
+        readbackProbeMs: 0,
+        bitmapReady: '',
+        bitmapFailed: '',
+        readbackSafe: '',
+        skippedReadbackProbe: '',
+        requiredReadbackSafe: '',
+        error: '',
+      });
+      const row = totals.get(key);
+      const meta = event.meta || {};
+      if (event.step === 'cache-image:done') {
+        row.totalMs = meta.ms ?? row.totalMs;
+        row.bitmapReady = meta.bitmapReady ?? row.bitmapReady;
+        row.bitmapFailed = meta.bitmapFailed ?? row.bitmapFailed;
+        row.readbackSafe = meta.readbackSafe ?? row.readbackSafe;
+      } else if (event.step === 'cache-image:decode-queue:start') {
+        row.queueWaitMs = meta.queueWaitMs ?? row.queueWaitMs;
+      } else if (event.step === 'cache-image:createImageBitmap') {
+        row.bitmapMs = meta.ms ?? row.bitmapMs;
+      } else if (event.step === 'cache-image:previewBitmap') {
+        row.previewMs = meta.ms ?? row.previewMs;
+      } else if (event.step === 'cache-image:schedule-render') {
+        row.renderScheduleMs = meta.ms ?? row.renderScheduleMs;
+      } else if (event.step === 'cache-image:load') {
+        row.loadMs = meta.ms ?? row.loadMs;
+      } else if (event.step === 'cache-image:readback-probe') {
+        row.readbackProbeMs = meta.ms ?? row.readbackProbeMs;
+        row.skippedReadbackProbe = meta.skipped ?? '';
+        row.requiredReadbackSafe = meta.required ?? '';
+      } else if (event.step.endsWith(':error')) {
+        row.error = meta.error || row.error;
+      }
+    }
+    const rows = [...totals.values()]
+      .sort((a, b) => (b.totalMs || 0) - (a.totalMs || 0))
+      .slice(0, limit);
+    console.table(rows);
+    return rows;
+  }
+
+  function hydrationBreakdown(limit = 50) {
+    const rows = events
+      .filter(e => e.step === 'hydrate-image')
+      .map(e => ({
+        imgKey: e.meta?.imgKey || '',
+        totalMs: e.meta?.ms ?? '',
+        fetchMs: e.meta?.fetchMs ?? '',
+        loadMs: e.meta?.loadMs ?? '',
+        readyMs: e.meta?.readyMs ?? '',
+        cacheTotalMs: e.meta?.cacheTotalMs ?? '',
+        cacheQueueWaitMs: e.meta?.cacheQueueWaitMs ?? '',
+        cacheBitmapMs: e.meta?.cacheBitmapMs ?? '',
+        cachePreviewMs: e.meta?.cachePreviewMs ?? '',
+        cacheRenderScheduleMs: e.meta?.cacheRenderScheduleMs ?? '',
+        cacheReadbackProbeMs: e.meta?.cacheReadbackProbeMs ?? '',
+        skippedReadbackProbe: e.meta?.skippedReadbackProbe ?? '',
+        source: e.meta?.source ?? '',
+        bitmapReady: e.meta?.bitmapReady ?? '',
+        displayReady: e.meta?.displayReady ?? '',
+      }))
+      .sort((a, b) => (b.totalMs || 0) - (a.totalMs || 0))
+      .slice(0, limit);
+    console.table(rows);
+    return rows;
+  }
+
   function stepSummary(prefix = '') {
     const rows = events
       .filter(e => !prefix || e.step?.startsWith(prefix))
@@ -210,6 +290,13 @@ var OpenDebug = (() => {
         cachedImages: e.meta?.cachedImages ?? '',
         assetUrls: e.meta?.assetUrls ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
+        imgKey: e.meta?.imgKey || e.meta?.key || '',
+        ms: e.meta?.ms ?? '',
+        queueWaitMs: e.meta?.queueWaitMs ?? '',
+        bitmapMs: e.meta?.bitmapMs ?? '',
+        previewMs: e.meta?.previewMs ?? '',
+        skipped: e.meta?.skipped ?? '',
+        required: e.meta?.required ?? '',
         reason: e.meta?.reason || '',
         error: e.meta?.error || '',
       }));
@@ -281,6 +368,8 @@ var OpenDebug = (() => {
     phaseSummary,
     status,
     hydrationSummary,
+    hydrationBreakdown,
+    cacheImageBreakdown,
     stepSummary,
     imageStoreSummary,
     imageStoreSample,

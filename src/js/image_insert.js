@@ -74,6 +74,9 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options
       const imgKey = existingImgKey || newImgKey();
       BoardfishImageStore.setSource(imgKey, src);
       cacheImage(imgKey, src, null, img);
+      if (typeof scheduleNewImageEyedropperSafePrewarm === 'function') {
+        scheduleNewImageEyedropperSafePrewarm(imgKey, 'add-image');
+      }
       ViewportDebug.step(dbg, 'cache-registered', { imgKey });
       const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-image');
       const total = performance.now() - t0;
@@ -115,6 +118,9 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
   }
   if (!imageAssetUrlCache[imgKey]) imageAssetUrlCache[imgKey] = convertTauriFileSrc(path);
   cacheImage(imgKey, imageAssetUrlCache[imgKey], null, null, { skipSourceRegistration: true });
+  if (typeof scheduleNewImageEyedropperSafePrewarm === 'function') {
+    scheduleNewImageEyedropperSafePrewarm(imgKey, 'add-native-image');
+  }
   const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-image');
   const total = performance.now() - t0;
   ViewportDebug.max('maxImageAddMs', total);

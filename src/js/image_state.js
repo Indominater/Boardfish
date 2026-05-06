@@ -14,7 +14,7 @@ var _imageStoreGeneration = 0;
 var _imageDecodeQueue = [];
 var _imageDecodeActive = 0;
 var _imageDecodeScheduled = false;
-var MAX_IMAGE_DECODE_ACTIVE = 1;
+var MAX_IMAGE_DECODE_ACTIVE = 2;
 var imageReadyPromises = new Map();
 
 function newImgKey() { return 'img-' + (imgKeyCounter++); }
@@ -235,6 +235,11 @@ function probeImageCanvasReadback(img, src = '') {
   return safe;
 }
 
+function shouldSkipReadbackProbeForNativeDisplaySource(key, src) {
+  if (!isNativeImageRef(imageStore[key])) return false;
+  return !!src && imageAssetUrlCache[key] === src;
+}
+
 async function ensureCanvasSafeNativeImageDataUrl(key, unsafeSrc = '', dbg = null) {
   if (!hasTauri() || !isNativeImageRef(imageStore[key])) return '';
   if (imageAssetUrlCache[key] === unsafeSrc) delete imageAssetUrlCache[key];
@@ -375,7 +380,11 @@ function enqueueImageDecode(task) {
 function scheduleImageDecodeQueue() {
   if (_imageDecodeScheduled) return;
   _imageDecodeScheduled = true;
-  requestAnimationFrame(processImageDecodeQueue);
+  if (typeof _boardOpening !== 'undefined' && _boardOpening) {
+    setTimeout(processImageDecodeQueue, 0);
+  } else {
+    requestAnimationFrame(processImageDecodeQueue);
+  }
 }
 
 function processImageDecodeQueue() {
@@ -411,36 +420,72 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   if (isNativeImageRef(src)) return;
   if (typeof src !== 'string' || !src) return;
   imageBitmapFailed.delete(key);
+  const cacheStart = performance.now();
+  const cacheMetrics = {
+    cacheTotalMs: 0,
+    cacheQueueWaitMs: 0,
+    cacheBitmapMs: 0,
+    cachePreviewMs: 0,
+    cacheRenderScheduleMs: 0,
+    cacheReadbackProbeMs: 0,
+    skippedReadbackProbe: '',
+    requiredReadbackSafe: options.requireReadbackSafe === true,
+    readbackSafe: '',
+  };
   const vpDbg = ViewportDebug.start('cacheImage', { key, src, reusedLoadedImage: !!loadedImg });
   let img = loadedImg || new Image();
   let resolveReady;
   const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
   imageReadyPromises.set(key, readyPromise);
-  // decode() ensures the image is GPU-decoded before the first drawImage call,
-  // preventing a synchronous main-thread decode stall (can be 100s of ms for large images).
-  // We also defer invalidateOffscreen/scheduleRender until decode completes so that
-  // multiple concurrent image loads coalesce into fewer render calls.
+  // ImageBitmap creation handles decode work for the renderer. Keeping this in a
+  // bounded queue avoids serializing large-image hydration while still limiting
+  // memory pressure during board open.
   const loadStart = performance.now();
   function finishLoadForImage(loaded, loadedSrc, reusedLoadedImage = false) {
     const loadMs = performance.now() - loadStart;
     ViewportDebug.count('imageLoads');
     ViewportDebug.max('maxImageLoadMs', loadMs);
     ViewportDebug.step(vpDbg, 'load', { width: loaded.naturalWidth, height: loaded.naturalHeight, ms: loadMs, src: loadedSrc, reusedLoadedImage });
+    OpenDebug.step(dbg, 'cache-image:load', {
+      imgKey: key,
+      ms: loadMs,
+      width: loaded.naturalWidth,
+      height: loaded.naturalHeight,
+      reusedLoadedImage,
+    });
 
-    const readbackSafe = probeImageCanvasReadback(loaded, loadedSrc);
-    ViewportDebug.step(vpDbg, 'readback-probe', { key, safe: readbackSafe, src: loadedSrc });
-    if (!readbackSafe) {
+    const needsReadbackSafe = options.requireReadbackSafe === true;
+    const readbackProbeStart = performance.now();
+    const skipReadbackProbe = !needsReadbackSafe || shouldSkipReadbackProbeForNativeDisplaySource(key, loadedSrc);
+    const readbackSafe = skipReadbackProbe ? !needsReadbackSafe : probeImageCanvasReadback(loaded, loadedSrc);
+    const readbackProbeMs = performance.now() - readbackProbeStart;
+    cacheMetrics.cacheReadbackProbeMs += readbackProbeMs;
+    cacheMetrics.skippedReadbackProbe = skipReadbackProbe;
+    cacheMetrics.readbackSafe = readbackSafe;
+    ViewportDebug.step(vpDbg, 'readback-probe', { key, safe: readbackSafe, skipped: skipReadbackProbe, required: needsReadbackSafe, src: loadedSrc });
+    OpenDebug.step(dbg, 'cache-image:readback-probe', {
+      imgKey: key,
+      ms: readbackProbeMs,
+      safe: readbackSafe,
+      skipped: skipReadbackProbe,
+      required: needsReadbackSafe,
+    });
+    if (needsReadbackSafe && !readbackSafe) {
       ViewportDebug.count('imageReadbackUnsafeDisplaySources');
+      OpenDebug.step(dbg, 'cache-image:readback-fallback:start', { imgKey: key });
       ensureCanvasSafeNativeImageDataUrl(key, loadedSrc, vpDbg)
         .then(async (safeSrc) => {
           if (!safeSrc || safeSrc === loadedSrc) throw new Error('no safe fallback image source');
+          OpenDebug.step(dbg, 'cache-image:readback-fallback:loaded-src', { imgKey: key, dataUrlLen: safeSrc.length });
           const safeImg = await loadImageElement(safeSrc);
           finishLoadForImage(safeImg, safeSrc, false);
         })
         .catch((err) => {
           imageBitmapFailed.add(key);
+          cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
           ViewportDebug.end(vpDbg, { key, error: 'image readback probe failed', fallbackError: String(err) });
-          resolveReady();
+          OpenDebug.step(dbg, 'cache-image:readback-fallback:error', { imgKey: key, ms: cacheMetrics.cacheTotalMs, error: String(err) });
+          resolveReady(cacheMetrics);
         });
       return;
     }
@@ -448,58 +493,60 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     img = loaded;
     imageCache[key] = loaded;
 
+    const queuedAt = performance.now();
+    OpenDebug.step(dbg, 'cache-image:decode-queue:queued', { imgKey: key, active: _imageDecodeActive, queued: _imageDecodeQueue.length });
     enqueueImageDecode(async () => {
-      const decodeStart = performance.now();
-      try {
-        await loaded.decode();
-      } catch (err) {
-        const decodeMs = performance.now() - decodeStart;
-        imageBitmapFailed.add(key);
-        ViewportDebug.count('imageDecodeFailures');
-        ViewportDebug.max('maxImageDecodeMs', decodeMs);
-        ViewportDebug.step(vpDbg, 'decode:error', { key, ms: decodeMs, error: String(err) });
-        scheduleImageReadyRender('image-load');
-        ViewportDebug.end(vpDbg, { key, decodeReady: false, bitmapReady: false, fallbackReady: loaded.complete && loaded.naturalWidth > 0, readbackSafe, error: String(err) });
-        resolveReady();
-        return;
-      }
-      const decodeMs = performance.now() - decodeStart;
+      const queueWaitMs = performance.now() - queuedAt;
+      cacheMetrics.cacheQueueWaitMs = queueWaitMs;
+      OpenDebug.step(dbg, 'cache-image:decode-queue:start', { imgKey: key, queueWaitMs, active: _imageDecodeActive, queued: _imageDecodeQueue.length });
       ViewportDebug.count('imageDecodes');
-      ViewportDebug.max('maxImageDecodeMs', decodeMs);
-      ViewportDebug.step(vpDbg, 'decode', { ms: decodeMs });
+      ViewportDebug.step(vpDbg, 'decode', { skipped: true, reason: 'createImageBitmap' });
+      OpenDebug.step(dbg, 'cache-image:decode', { imgKey: key, skipped: true, reason: 'createImageBitmap' });
 
       const bitmapStart = performance.now();
       try {
         const bitmap = await createImageBitmap(loaded);
         const bitmapMs = performance.now() - bitmapStart;
+        cacheMetrics.cacheBitmapMs = bitmapMs;
         imageBitmapCache[key] = bitmap;
         ViewportDebug.count('imageBitmaps');
         ViewportDebug.max('maxImageBitmapMs', bitmapMs);
         ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs });
+        OpenDebug.step(dbg, 'cache-image:createImageBitmap', { imgKey: key, ms: bitmapMs, ok: true });
       } catch (err) {
         const bitmapMs = performance.now() - bitmapStart;
+        cacheMetrics.cacheBitmapMs = bitmapMs;
         imageBitmapFailed.add(key);
         ViewportDebug.count('imageBitmapFailures');
         ViewportDebug.max('maxImageBitmapMs', bitmapMs);
         ViewportDebug.step(vpDbg, 'createImageBitmap:error', { ms: bitmapMs, error: String(err) });
+        OpenDebug.step(dbg, 'cache-image:createImageBitmap:error', { imgKey: key, ms: bitmapMs, error: String(err) });
       }
 
       const previewStart = performance.now();
       try {
         await ensureImagePreviewBitmap(key, loaded, dbg);
         const previewMs = performance.now() - previewStart;
+        cacheMetrics.cachePreviewMs = previewMs;
         ViewportDebug.max('maxImagePreviewMs', previewMs);
         ViewportDebug.step(vpDbg, 'previewBitmap', { ms: previewMs });
+        OpenDebug.step(dbg, 'cache-image:previewBitmap', { imgKey: key, ms: previewMs, ok: true });
       } catch (err) {
         const previewMs = performance.now() - previewStart;
+        cacheMetrics.cachePreviewMs = previewMs;
         ViewportDebug.count('imagePreviewFailures');
         ViewportDebug.max('maxImagePreviewMs', previewMs);
         ViewportDebug.step(vpDbg, 'previewBitmap:error', { ms: previewMs, error: String(err) });
+        OpenDebug.step(dbg, 'cache-image:previewBitmap:error', { imgKey: key, ms: previewMs, error: String(err) });
       } finally {
+        const renderScheduleStart = performance.now();
         scheduleImageReadyRender('image-load');
         if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
           scheduleVisibleScaledVariantPrewarmAfterIdle('image-ready');
         }
+        cacheMetrics.cacheRenderScheduleMs = performance.now() - renderScheduleStart;
+        cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
+        OpenDebug.step(dbg, 'cache-image:schedule-render', { imgKey: key, ms: cacheMetrics.cacheRenderScheduleMs });
         ViewportDebug.end(vpDbg, {
           key,
           decodeReady: true,
@@ -507,22 +554,40 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
           bitmapFailed: imageBitmapFailed.has(key),
           readbackSafe,
         });
-        resolveReady();
+        OpenDebug.step(dbg, 'cache-image:done', {
+          imgKey: key,
+          ms: cacheMetrics.cacheTotalMs,
+          queueWaitMs: cacheMetrics.cacheQueueWaitMs,
+          bitmapMs: cacheMetrics.cacheBitmapMs,
+          previewMs: cacheMetrics.cachePreviewMs,
+          renderScheduleMs: cacheMetrics.cacheRenderScheduleMs,
+          readbackProbeMs: cacheMetrics.cacheReadbackProbeMs,
+          skippedReadbackProbe: cacheMetrics.skippedReadbackProbe,
+          requiredReadbackSafe: cacheMetrics.requiredReadbackSafe,
+          readbackSafe,
+          bitmapReady: !!imageBitmapCache[key],
+          bitmapFailed: imageBitmapFailed.has(key),
+        });
+        resolveReady(cacheMetrics);
       }
     });
   }
   img.onload = () => finishLoadForImage(img, src, !!loadedImg);
   img.onerror = () => {
     imageBitmapFailed.add(key);
+    cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
     ViewportDebug.end(vpDbg, { key, error: 'image load failed' });
-    resolveReady();
+    OpenDebug.step(dbg, 'cache-image:load-error', { imgKey: key, ms: cacheMetrics.cacheTotalMs, error: 'image load failed' });
+    resolveReady(cacheMetrics);
   };
   if (loadedImg) {
     ViewportDebug.step(vpDbg, 'reuse-loaded-image', { width: img.naturalWidth, height: img.naturalHeight });
+    OpenDebug.step(dbg, 'cache-image:reuse-loaded-image', { imgKey: key, width: img.naturalWidth, height: img.naturalHeight });
     finishLoadForImage(img, src, true);
   } else {
     img.src = src;
     ViewportDebug.step(vpDbg, 'set-src', { src });
+    OpenDebug.step(dbg, 'cache-image:set-src', { imgKey: key });
   }
   if (!_skipImageSourceRegistration && !options.skipSourceRegistration) cacheImageSourceForSave(key, src).catch(() => {});
   return readyPromise;

@@ -13,7 +13,7 @@ var SaveDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish save debugger enabled. Use BoardfishDebug.save.summary(), .dump(), or .reset().');
+    if (core.enabled) console.info('Boardfish save debugger enabled. Use finishDebug({ save: ["summary", "dump"] }) to collect results.');
   }
 
   function disable() {

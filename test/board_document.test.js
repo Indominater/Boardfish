@@ -37,6 +37,36 @@ test('creates v3 board save data with image manifest refs', () => {
   });
 });
 
+test('prunes unreferenced image store entries from saved board data', () => {
+  const imageStore = {
+    'img-1': 'data:image/png;base64,abc',
+    'img-2': 'data:image/png;base64,def',
+    'img-unused': 'data:image/png;base64,unused',
+  };
+  const objects = [
+    { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 20, z: 1, data: { imgKey: 'img-1' } },
+    { id: 'obj-2', type: 'text', x: 0, y: 0, w: 10, h: 20, z: 2, data: { text: 'hello' } },
+    { id: 'obj-3', type: 'image', x: 5, y: 5, w: 20, h: 10, z: 3, data: { imgKey: 'img-2' } },
+  ];
+
+  const prune = BoardDocument.pruneImageStoreForObjects(imageStore, objects);
+  assert.deepEqual(Object.keys(prune.imageStore).sort(), ['img-1', 'img-2']);
+  assert.equal(prune.removed, 1);
+  assert.equal(prune.kept, 2);
+  assert.equal(prune.referenced, 2);
+
+  const data = BoardDocument.createBoardDataForSave({
+    viewport: { panX: 0, panY: 0, zoom: 1 },
+    imageStore,
+    objects,
+  }, {
+    schema: BoardSchema,
+    guessImageExtFromDataUrl: () => 'png',
+  });
+
+  assert.deepEqual(Object.keys(data.imageStore).sort(), ['img-1', 'img-2']);
+});
+
 test('summarizes image store without runtime globals', () => {
   const summary = BoardDocument.summarizeImageStore({
     'img-1': 'data:image/png;base64,abc',

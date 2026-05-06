@@ -315,12 +315,11 @@ async function _rebuildOffscreenAsync() {
   for (const obj of objects) {
     if (obj.id === snapshotEditingId || obj.type !== 'image') continue;
     const key = obj.data?.imgKey;
-    if (!key || imageBitmapCache[key]) continue;
+    if (!key || imageBitmapCache[key] || imageBitmapFailed.has(key)) continue;
     const img = imageCache[key];
     if (!img || !img.complete) continue;
     bitmapPromises.push(
-      img.decode()
-        .then(() => createImageBitmap(img))
+      createImageBitmap(img)
         .then(bm => { imageBitmapCache[key] = bm; })
         .catch(() => { imageBitmapFailed.add(key); ViewportDebug.count('imageBitmapFailures'); })
     );
