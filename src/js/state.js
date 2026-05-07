@@ -35,6 +35,7 @@ function cloneObject(obj) {
     w: obj.w,
     h: obj.h,
     z: obj.z,
+    locked: obj.locked === true,
     data,
   };
 }
@@ -59,14 +60,81 @@ function bringObjectToFront(id) {
   objects.push(obj);
 }
 
+const isObjectLocked = (objOrId) => {
+  const obj = typeof objOrId === 'string' ? objectsMap.get(objOrId) : objOrId;
+  return obj?.locked === true;
+};
+
+const selectedLockSummary = () => {
+  let total = 0;
+  let locked = 0;
+  let unlocked = 0;
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj) continue;
+    total++;
+    if (isObjectLocked(obj)) locked++;
+    else unlocked++;
+  }
+  return {
+    total,
+    locked,
+    unlocked,
+    anyLocked: locked > 0,
+    allLocked: total > 0 && unlocked === 0,
+    anyUnlocked: unlocked > 0,
+  };
+};
+
+const selectedHasLockedObjects = () => {
+  return selectedLockSummary().anyLocked;
+};
+
+const selectedUnlockedObjectIds = () => {
+  const ids = [];
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (obj && !isObjectLocked(obj)) ids.push(id);
+  }
+  return ids;
+};
+
+const toggleSelectedLock = () => {
+  if (!selectedIds.size) return false;
+  const summary = selectedLockSummary();
+  if (!summary.total) return false;
+  const unlockSingle = summary.total === 1 && summary.locked === 1;
+  const targetIds = unlockSingle ? [...selectedIds] : selectedUnlockedObjectIds();
+  if (!targetIds.length) return false;
+  const nextLocked = !unlockSingle;
+  return BoardfishEditorState.commitMutation(nextLocked ? 'lock-selected' : 'unlock-selected', () => {
+    let changed = false;
+    if (editingId && selectedIds.has(editingId)) exitEdit();
+    for (const id of targetIds) {
+      const obj = objectsMap.get(id);
+      if (!obj || obj.locked === nextLocked) continue;
+      obj.locked = nextLocked;
+      markDirty(obj.id);
+      changed = true;
+    }
+    if (changed && nextLocked) BoardfishEditorState.clearSelection();
+    return changed;
+  });
+};
+
 function sendSelectedToBack() {
   if (!selectedIds.size) return;
   BoardfishEditorState.commitMutation('send-selected-to-back', () => {
-    // Pull out selected objects (preserving their relative order), prepend to front
+    // Pull out movable selected objects (preserving their relative order), prepend to front.
     const selected = [], rest = [];
-    for (const o of objects) (selectedIds.has(o.id) ? selected : rest).push(o);
+    for (const o of objects) {
+      if (selectedIds.has(o.id) && !isObjectLocked(o)) selected.push(o);
+      else rest.push(o);
+    }
+    if (!selected.length) return false;
     objects.length = 0;
     objects.push(...selected, ...rest);
+    for (const obj of selected) markDirty(obj.id);
     return true;
   });
 }
@@ -78,7 +146,7 @@ function flipSelectedImages(axis) {
     let didFlip = false;
     for (const id of selectedIds) {
       const obj = objectsMap.get(id);
-      if (!obj || obj.type !== 'image') continue;
+      if (!obj || obj.type !== 'image' || isObjectLocked(obj)) continue;
       imageCount++;
       if (axis === 'x') obj.data.flipX = !obj.data.flipX;
       else obj.data.flipY = !obj.data.flipY;
@@ -97,7 +165,7 @@ function rotateSelectedImages(dir) {
     let rotated = false;
     for (const id of selectedIds) {
       const obj = objectsMap.get(id);
-      if (!obj || obj.type !== 'image') continue;
+      if (!obj || obj.type !== 'image' || isObjectLocked(obj)) continue;
       const transform = imageTransformFromObject(obj);
       const current = transform.rotation;
       const oddFlip = transform.flipX !== transform.flipY;

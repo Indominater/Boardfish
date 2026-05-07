@@ -45,6 +45,8 @@ const LEGACY_CONTROLLER_SCRIPTS = [
   'eyedropper_debug.js',
   'eyedropper_state.js',
   'eyedropper.js',
+  'eyedropper_card_previews.js',
+  'eyedropper_decode_warmers.js',
   'canvas_input.js',
   'context_menu.js',
   'image_insert.js',

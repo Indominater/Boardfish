@@ -35,6 +35,14 @@ function fitImageSize(naturalW, naturalH, exactSize = false) {
   return { w, h };
 }
 
+var NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD = 2 * 1024 * 1024;
+
+var isImageDataUrl = (src) => typeof src === 'string' && /^data:image\/(?:png|jpeg);base64,/i.test(src);
+
+function shouldUseNativeDataUrlImageCache(src) {
+  return hasTauri() && isImageDataUrl(src) && src.length >= NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD;
+}
+
 function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-image') {
   const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
   BoardfishEditorState.addObject(obj);
@@ -60,7 +68,68 @@ function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-
   return obj;
 }
 
+async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, existingImgKey = null, options = {}) {
+  const dbg = ViewportDebug.start('addImage', {
+    src,
+    cx,
+    cy,
+    exactSize,
+    existingImgKey,
+    path: 'native-data-url-cache',
+  });
+  const t0 = performance.now();
+  ViewportDebug.count('imageAdds');
+  ViewportDebug.count('nativeImageAdds');
+  if (!_boardOpening) showInputShield();
+  const imgKey = existingImgKey || newImgKey();
+  try {
+    ViewportDebug.step(dbg, 'native-data-url-register:start', { imgKey, dataUrl: src });
+    const meta = await BoardfishTauri.registerImageSource(imgKey, src);
+    const naturalW = Number(meta?.width) || 1;
+    const naturalH = Number(meta?.height) || 1;
+    BoardfishImageStore.setSource(imgKey, {
+      native: true,
+      mime: meta?.mime || 'image/png',
+      ext: meta?.ext || 'png',
+      bytes: meta?.bytes || 0,
+    });
+    ViewportDebug.step(dbg, 'native-data-url-register:end', {
+      imgKey,
+      width: naturalW,
+      height: naturalH,
+      bytes: meta?.bytes || 0,
+      mime: meta?.mime || '',
+      ext: meta?.ext || '',
+    });
+
+    await materializeImageAssets([imgKey], dbg);
+    if (!imageAssetUrlCache[imgKey]) throw new Error('native data URL image materialization failed');
+    cacheImage(imgKey, imageAssetUrlCache[imgKey], dbg, null, { skipSourceRegistration: true });
+
+    const { w, h } = fitImageSize(naturalW, naturalH, exactSize);
+    ViewportDebug.step(dbg, 'size-object', { w, h });
+    const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-data-url-image');
+    if (typeof scheduleEyedropperNativeDecodePrewarm === 'function') {
+      scheduleEyedropperNativeDecodePrewarm('add-native-data-url-image');
+    }
+    const total = performance.now() - t0;
+    ViewportDebug.max('maxImageAddMs', total);
+    ViewportDebug.end(dbg, { id: obj.id, imgKey, total, path: 'native-data-url-cache' });
+    return obj;
+  } catch (err) {
+    const total = performance.now() - t0;
+    ViewportDebug.max('maxImageAddMs', total);
+    ViewportDebug.end(dbg, { imgKey, total, path: 'native-data-url-cache', error: String(err) });
+    return null;
+  } finally {
+    if (!_boardOpening) hideInputShield();
+  }
+}
+
 function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options = {}) {
+  if (shouldUseNativeDataUrlImageCache(src)) {
+    return addDataUrlImageViaNativeCache(src, cx, cy, exactSize, existingImgKey, options);
+  }
   return new Promise((resolve) => {
     const dbg = ViewportDebug.start('addImage', { src, cx, cy, exactSize, existingImgKey });
     const t0 = performance.now();
@@ -74,9 +143,6 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options
       const imgKey = existingImgKey || newImgKey();
       BoardfishImageStore.setSource(imgKey, src);
       cacheImage(imgKey, src, null, img);
-      if (typeof scheduleNewImageEyedropperSafePrewarm === 'function') {
-        scheduleNewImageEyedropperSafePrewarm(imgKey, 'add-image');
-      }
       ViewportDebug.step(dbg, 'cache-registered', { imgKey });
       const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-image');
       const total = performance.now() - t0;
@@ -118,10 +184,10 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
   }
   if (!imageAssetUrlCache[imgKey]) imageAssetUrlCache[imgKey] = convertTauriFileSrc(path);
   cacheImage(imgKey, imageAssetUrlCache[imgKey], null, null, { skipSourceRegistration: true });
-  if (typeof scheduleNewImageEyedropperSafePrewarm === 'function') {
-    scheduleNewImageEyedropperSafePrewarm(imgKey, 'add-native-image');
-  }
   const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-image');
+  if (typeof scheduleEyedropperNativeDecodePrewarm === 'function') {
+    scheduleEyedropperNativeDecodePrewarm('add-native-image');
+  }
   const total = performance.now() - t0;
   ViewportDebug.max('maxImageAddMs', total);
   ViewportDebug.end(dbg, { id: obj.id, imgKey, width: naturalW, height: naturalH, bytes: meta.bytes || 0, total });
@@ -169,11 +235,12 @@ async function insertDataUrlImage(dataUrl, x, y, dbg, options = {}) {
 
 async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {}) {
   showInputShield();
+  const objectCountBefore = objects.length;
   try {
     ClipDebug.step(dbg, 'paste-image:add-start', { path, imgKey });
     const obj = await addImage(dataUrl, x, y, false, imgKey);
     if (!obj) {
-      ClipDebug.end(dbg, { path, added: false, imgKey });
+      ClipDebug.end(dbg, { path, added: false, imgKey, objectCountBefore, objectCountAfter: objects.length });
       return null;
     }
     ClipDebug.step(dbg, 'paste-image:ready-wait-start', { path, imgKey: obj.data?.imgKey });
@@ -185,6 +252,66 @@ async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {})
       imgKey: obj.data?.imgKey,
       bitmapReady: !!imageBitmapCache[obj.data?.imgKey],
       fallbackReady: imageBitmapFailed.has(obj.data?.imgKey) && !!BoardfishImageStore.getDisplayImage(obj.data?.imgKey)?.complete,
+      objectCountBefore,
+      objectCountAfter: objects.length,
+    });
+    return obj;
+  } finally {
+    hideInputShield();
+  }
+}
+
+async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg) {
+  showInputShield();
+  const objectCountBefore = objects.length;
+  try {
+    const naturalW = Number(meta?.width) || 1;
+    const naturalH = Number(meta?.height) || 1;
+    const bytes = Number(meta?.bytes) || 0;
+    ClipDebug.step(dbg, 'paste-native-cache:source-registered', {
+      path,
+      imgKey,
+      width: naturalW,
+      height: naturalH,
+      pixels: Number(meta?.pixels) || naturalW * naturalH,
+      rgbaMB: meta?.rgbaMb ?? '',
+      bytes,
+      mime: meta?.mime || '',
+      ext: meta?.ext || '',
+    });
+    BoardfishImageStore.setSource(imgKey, {
+      native: true,
+      mime: meta?.mime || 'image/png',
+      ext: meta?.ext || 'png',
+      bytes,
+    });
+
+    const materializeStart = performance.now();
+    ClipDebug.step(dbg, 'paste-native-cache:materialize-start', { path, imgKey });
+    await materializeImageAssets([imgKey], dbg);
+    ClipDebug.step(dbg, 'paste-native-cache:materialize-end', {
+      path,
+      imgKey,
+      ms: Math.round((performance.now() - materializeStart) * 100) / 100,
+      assetReady: !!imageAssetUrlCache[imgKey],
+    });
+
+    if (!imageAssetUrlCache[imgKey]) throw new Error('native clipboard image materialization failed');
+    cacheImage(imgKey, imageAssetUrlCache[imgKey], dbg, null, { skipSourceRegistration: true });
+    const { w, h } = fitImageSize(naturalW, naturalH, false);
+    const obj = addImageObject(imgKey, x, y, w, h, {}, 'paste-native-image');
+    ClipDebug.step(dbg, 'paste-native-cache:add-object', { path, imgKey, objectId: obj.id, w, h });
+    ClipDebug.step(dbg, 'paste-image:ready-wait-start', { path, imgKey });
+    await imageReadyPromiseForKey(imgKey);
+    ClipDebug.step(dbg, 'paste-image:ready-wait-end', { path, imgKey });
+    ClipDebug.end(dbg, {
+      path,
+      added: true,
+      imgKey,
+      bitmapReady: !!imageBitmapCache[imgKey],
+      fallbackReady: imageBitmapFailed.has(imgKey) && !!BoardfishImageStore.getDisplayImage(imgKey)?.complete,
+      objectCountBefore,
+      objectCountAfter: objects.length,
     });
     return obj;
   } finally {

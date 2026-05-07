@@ -20,12 +20,13 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 
 - An infinite canvas free from formatting rules
 - Lag-free navigation across massive boards supporting 1 GB+ of images and text
-- Multi-select, translate, scale, flip, rotate, copy, paste, and duplicate
-- Sample colors with the eyedropper's zoomed preview and HEX/RGB readout
+- Multi-select, translate, scale, flip, rotate, lock, copy, paste, and duplicate
+- Sample colors with pinned eyedropper cards
 - Losslessly add images and text via clipboard, drag and drop, or the file picker
 - Losslessly copy images back to your clipboard
 - Export one image, selected images, all images, or all text
 - Save everything locally as a portable `.bf` file
+- Switch between light and dark mode
 
 ## Keyboard Shortcuts
 
@@ -38,6 +39,8 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 | Add text | Cmd+T | Ctrl+T |
 | Add images | Cmd+I | Ctrl+I |
 | Select all objects | Cmd+A | Ctrl+A |
+| Add/remove object from selection | Cmd+click | Ctrl+click |
+| Additive marquee selection | Cmd+drag empty canvas | Ctrl+drag empty canvas |
 | Copy | Cmd+C | Ctrl+C |
 | Cut | Cmd+X | Ctrl+X |
 | Paste | Cmd+V | Ctrl+V |
@@ -45,10 +48,12 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 | Undo | Cmd+Z | Ctrl+Z |
 | Redo | Cmd+Shift+Z | Ctrl+Shift+Z / Ctrl+Y |
 | Delete selected | Backspace / Delete | Backspace / Delete |
-| Hold eyedropper | E | E |
+| Edit text | Double-click | Double-click |
+| Hold eyedropper | Shift | Shift |
 | Pan canvas | Space + drag | Space + drag |
 | Pan with wheel / trackpad | Scroll | Scroll |
 | Zoom around cursor | Cmd+scroll | Ctrl+scroll |
+| Reset zoom to nearest object | Cmd+0 | Ctrl+0 |
 | Deselect / exit edit / close menus | Esc | Esc |
 | Quit / close | Cmd+Q / Cmd+W | Ctrl+Q / Ctrl+W |
 

@@ -22,10 +22,8 @@ var PillDebug = (() => {
       computedWidth: style.width,
       color: style.color,
       opacity: style.opacity,
-      transition: style.transition,
       msgActive: _islMsgActive,
       boardOpening: _boardOpening,
-      zoomPct: Math.round(zoom * 100) + '%',
     };
   }
 
@@ -102,12 +100,7 @@ var PillDebug = (() => {
         width: e.offsetWidth,
         styleWidth: e.styleWidth,
         color: e.color,
-        propertyName: e.propertyName ?? '',
-        elapsedTime: e.elapsedTime ?? '',
         reason: e.reason ?? '',
-        sampleMs: e.sampleMs ?? '',
-        sampleWidth: e.sampleWidth ?? '',
-        targetWidth: e.targetWidth ?? '',
         longTaskMs: e.longTaskMs ?? '',
       });
     }
@@ -115,127 +108,25 @@ var PillDebug = (() => {
     return rows;
   }
 
-  function widthSamples() {
-    const rows = events
-      .filter(e => e.event === 'pill-sample')
-      .map(e => ({
-        label: e.label,
-        sampleMs: e.sampleMs,
-        sampleWidth: e.sampleWidth,
-        startWidth: e.startWidth,
-        targetWidth: e.targetWidth,
-        textAlpha: e.textAlpha,
-        text: e.text,
-        color: e.color,
-      }));
-    console.table(rows);
-    return rows;
-  }
-
-  function animationSamples() {
-    const rows = events
-      .filter(e => (
-        e.event === 'pill-sample' ||
-        e.event === 'pill-frame-ready' ||
-        e.event === 'pill-frame-wait-timeout' ||
-        e.event === 'transitionstart' ||
-        e.event === 'transitionend' ||
-        e.event === 'transitioncancel'
-      ))
-      .map(e => ({
-        t: e.t,
-        event: e.event,
-        label: e.label ?? '',
-        propertyName: e.propertyName ?? '',
-        sampleMs: e.sampleMs ?? '',
-        frameGapMs: e.frameGapMs ?? '',
-        stableFrames: e.stableFrames ?? '',
-        width: e.sampleWidth ?? e.offsetWidth,
-        startWidth: e.startWidth ?? '',
-        targetWidth: e.targetWidth ?? '',
-        textAlpha: e.textAlpha ?? '',
-        text: e.text,
-        color: e.color,
-      }));
-    console.table(rows);
-    return rows;
-  }
-
-  function samplePillAnimation(label, durationMs = 1100) {
-    if (!enabled) return;
-    const start = performance.now();
-    const startWidth = islZoom.getBoundingClientRect().width;
-    const targetWidth = parseFloat(islZoom.style.width) || parseFloat(getComputedStyle(islZoom).width) || startWidth;
-    const tick = () => {
-      if (!enabled) return;
-      const now = performance.now();
-      const sampleMs = now - start;
-      push('pill-sample', {
-        label,
-        sampleMs,
-        sampleWidth: islZoom.getBoundingClientRect().width,
-        startWidth,
-        targetWidth,
-        textAlpha: islandTextAlpha(),
-      });
-      if (sampleMs < durationMs) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }
-
-  function largestSampleGap(label = null) {
-    const samples = events.filter(e => e.event === 'pill-sample' && (!label || e.label === label));
-    let largest = 0;
-    for (let i = 1; i < samples.length; i++) {
-      largest = Math.max(largest, Number(samples[i].sampleMs) - Number(samples[i - 1].sampleMs));
-    }
-    return round(largest);
-  }
-
   function diagnose() {
     const longTasks = events.filter(e => e.event === 'longtask');
     const bigLongTasks = longTasks.filter(e => Number(e.longTaskMs) >= 100);
-    const restoreStart = events.find(e => e.event === 'restoreIslandZoom:start');
-    const restoreWidth = events.find(e => e.event === 'restoreIslandZoom:text-set');
-    const restoreShown = events.find(e => e.event === 'restoreIslandZoom:shown');
-    const forcedTransparent = events.find(e => e.event === 'forceIslandTextTransparent');
     const openingRender = events.find(e => e.event === 'open:initial-applyTransform:end');
     const findings = [];
-    const textAlpha = (entry) => {
-      const match = String(entry?.color || '').match(/rgba?\(([^)]+)\)/);
-      if (!match) return 1;
-      const parts = match[1].split(',').map((part) => part.trim());
-      return parts.length >= 4 ? Number(parts[3]) || 0 : 1;
-    };
-    const widthSwapVisible = textAlpha(restoreWidth) > 0.05;
 
     if (bigLongTasks.length) {
-      findings.push(`${bigLongTasks.length} long main-thread task(s) over 100ms occurred while the pill was animating or opening.`);
-    }
-    const restoreGap = largestSampleGap('restoreIslandZoom');
-    if (restoreGap >= 80) {
-      findings.push(`Restore animation missed frames; largest sample gap was ${restoreGap}ms.`);
+      findings.push(`${bigLongTasks.length} long main-thread task(s) over 100ms occurred while the pill was visible or opening.`);
     }
     if (openingRender && Number(openingRender.phaseMs) >= 100) {
-      findings.push(`Initial board render took ${openingRender.phaseMs}ms before the pill restored to zoom.`);
+      findings.push(`Initial board render took ${openingRender.phaseMs}ms while the pill was active.`);
     }
-    if (restoreStart && restoreWidth && restoreWidth.t - restoreStart.t > 650 && widthSwapVisible) {
-      findings.push(`Restore width/text update was delayed by ${round(restoreWidth.t - restoreStart.t)}ms after restore started.`);
-    }
-    if (restoreWidth && restoreShown && restoreShown.t - restoreWidth.t < 32 && widthSwapVisible) {
-      findings.push('Width/text and visible color were applied too close together for a visible transition.');
-    }
-    if (forcedTransparent && restoreWidth && !widthSwapVisible) {
-      findings.push('Fallback transparency path was used; width/text swap was hidden.');
-    }
-    if (!findings.length) findings.push('No obvious pill animation stall found in the current buffer.');
+    if (!findings.length) findings.push('No obvious pill status stall found in the current buffer.');
 
     const report = {
       findings,
       eventCount: events.length,
       longTaskCount: longTasks.length,
       maxLongTaskMs: longTasks.reduce((n, e) => Math.max(n, Number(e.longTaskMs) || 0), 0),
-      restoreLargestSampleGapMs: restoreGap,
     };
     console.table(report.findings.map(finding => ({ finding })));
     return report;
@@ -258,7 +149,7 @@ var PillDebug = (() => {
     }
   }
 
-  return { enable, disable, setVerbose, reset, dump, summary, timeline, widthSamples, animationSamples, diagnose, log, samplePillAnimation, largestSampleGap, get enabled() { return enabled; } };
+  return { enable, disable, setVerbose, reset, dump, summary, timeline, diagnose, log, get enabled() { return enabled; } };
 })();
 exposeDebug({ pill: PillDebug });
 
@@ -396,4 +287,3 @@ var MenuDebug = (() => {
   };
 })();
 exposeDebug({ menu: MenuDebug });
-

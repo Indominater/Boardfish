@@ -175,23 +175,47 @@ test('eyedropper preview does not resolve per-object scaled variants while activ
 
 test('eyedropper readout samples rendered canvas-visible pixels', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+  const decodeWarmersSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_decode_warmers.js'), 'utf8');
+  const stateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_state.js'), 'utf8');
 
-  assert.match(source, /function sampleEyedropperReadoutPixel\(clientX, clientY, previewSample = null\)/);
+  assert.match(source, /function sampleEyedropperReadoutPixel\(clientX, clientY, previewSample = null, options = \{\}\)/);
   assert.match(source, /function renderEyedropperLocalReadoutPixel\(clientX, clientY\)/);
   assert.match(source, /function sampleEyedropperCachedPixelAt\(clientX, clientY\)/);
   assert.match(source, /function sampleEyedropperSafeTileCache\(key, token, source, sourceX, sourceY, options = \{\}\)/);
+  assert.match(source, /function resolveEyedropperNativePixelTargetAt\(clientX, clientY, timings = null\)/);
+  assert.match(source, /function requestEyedropperNativePixel\(\)/);
+  assert.match(decodeWarmersSource, /function scheduleEyedropperNativeDecodePrewarm\(reason = 'viewport'\)/);
+  assert.match(stateSource, /d1: \{ id: 'd1', mode: 'nearest-pointer'/);
+  assert.match(stateSource, /d2: \{ id: 'd2', mode: 'largest-cost'/);
+  assert.match(stateSource, /d3: \{ id: 'd3', mode: 'sampler-pointer'/);
+  assert.match(decodeWarmersSource, /function findEyedropperBackgroundDecodeCandidate\(decoderId\)/);
+  assert.match(decodeWarmersSource, /function findEyedropperSamplerDecodeCandidate\(\)/);
+  assert.match(decodeWarmersSource, /return naturalWidth \* naturalHeight \* formatMultiplier;/);
+  assert.match(decodeWarmersSource, /BoardfishTauri\.prewarmCachedImagePixels\(key\)/);
+  assert.match(source, /native-pixel-wait-decode-prewarm/);
+  assert.match(source, /if \(!eyedropperNativeDecodePrewarm\.ready\.has\(target\.key\)\)/);
+  assert.match(source, /BoardfishTauri\.sampleCachedImagePixel\(target\.key, target\.sourceX, target\.sourceY\)/);
   assert.match(source, /source: 'pixel-cache'/);
   assert.match(source, /'cached-image-tile'/);
-  assert.match(source, /where: 'zoomed-preview-center-readout'/);
-  assert.match(source, /source: 'preview-center'/);
-  assert.match(source, /reason: 'rendered-preview-center'/);
+  assert.match(source, /updateEyedropperColorReadout\(pixel\);/);
+  assert.match(source, /reason: 'native-pixel-pending'/);
+  assert.match(source, /noReadoutUpdate: true/);
+  assert.doesNotMatch(source, /matchingEyedropperNativePixel/);
+  assert.doesNotMatch(source, /reason: 'native-image-pixel'/);
+  assert.match(source, /if \(isNativeImageRef\(imageStore\[key\]\)\) \{[\s\S]*requestEyedropperNativePixel\(\);[\s\S]*cachedPixelImageMissReason = 'native-pixel-pending';[\s\S]*return null;[\s\S]*\}/);
+  assert.match(source, /if \(timings\.cachedPixelImageMissReason === 'native-pixel-pending'\) \{[\s\S]*noReadoutUpdate: true,[\s\S]*\}\s*if \(timings\.cachedPixelImageMiss && options\.localImageFallback !== true\)/);
+  assert.doesNotMatch(source, new RegExp('sampleCachedImage' + 'Tile'));
+  assert.doesNotMatch(source, new RegExp('native' + '-tile'));
+  assert.match(source, /timings\.previewCenterReadbackSkipped = 1/);
+  assert.doesNotMatch(source, /where: 'zoomed-preview-center-readout'/);
+  assert.doesNotMatch(source, /source: 'preview-center'/);
   assert.match(source, /where: 'eyedropper-local-readout'/);
   assert.match(source, /\(counters\.previewUnsafeImages \|\| 0\) > 0/);
   assert.match(source, /\(counters\.readbackSafePendingImages \|\| 0\) > 0/);
   assert.match(source, /pendingSafeImage: \(counters\.readbackSafePendingImages \|\| 0\) > 0/);
   assert.match(source, /source: local\.pixel \? 'local-readout' : 'background'/);
   assert.match(source, /reason: local\.pixel \? 'local-rendered-canvas' : 'local-readback-failed'/);
-  assert.match(source, /let readoutSample = sampleEyedropperReadoutPixel\(e\.clientX, e\.clientY, previewSample\);/);
+  assert.match(source, /let readoutSample = sampleEyedropperReadoutPixel\(e\.clientX, e\.clientY, previewSample, \{\s*localImageFallback: options\.first === true,\s*\}\);/);
   assert.doesNotMatch(source, /function sampleImageObjectSourcePixelForEyedropper/);
   assert.doesNotMatch(source, /function sampleEyedropperReadoutLayer/);
   assert.doesNotMatch(source, /sampleImageSourcePixelForReadout/);
@@ -222,6 +246,19 @@ test('eyedropper center dot scales to the display density', () => {
   assert.match(source, /drawEyedropperSampleDot\(drawSize, dpr\);/);
 });
 
+test('eyedropper card previews save and restore the center reticle', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+  const stateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_state.js'), 'utf8');
+  const previewsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_card_previews.js'), 'utf8');
+
+  assert.match(stateSource, /function drawEyedropperCanvasReticle\(context, width, height = width, dpr = window\.devicePixelRatio \|\| 1\)/);
+  assert.match(source, /captureEyedropperCanvasPreview\(card\?\.canvas, 'card-preview-save', \{\s*reticle: true,/);
+  assert.match(source, /captureEyedropperCanvasPreview\(canvas, 'card-preview-rendered-sample', \{\s*reticle: true,/);
+  assert.match(source, /drawEyedropperCardReticle\(card\);[\s\S]*if \(!cardData\.previewDataUrl\)/);
+  assert.match(source, /card\.ctx\.drawImage\(img, 0, 0, card\.canvas\.width, card\.canvas\.height\);[\s\S]*drawEyedropperCardReticle\(card\);/);
+  assert.match(previewsSource, /captureEyedropperCanvasPreview\(canvas, 'card-preview-safe-render', \{\s*reticle: true,/);
+});
+
 test('eyedropper preview uses only the rendered-board wallpaper while active', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 
@@ -247,19 +284,24 @@ test('eyedropper preview uses only the rendered-board wallpaper while active', (
   assert.doesNotMatch(source, /function renderEyedropperSnapshot/);
   assert.match(source, /readbackUnsafe: !!wallpaper\.rendered\.counters\?\.previewUnsafeImages/);
   assert.match(source, /pendingSafeImage: !!wallpaper\.rendered\.counters\?\.readbackSafePendingImages/);
-  assert.match(source, /!previewSample\.readbackUnsafe && !previewSample\.pendingSafeImage && \(!centerPixel \|\| readoutSample\?\.source === 'preview-render'\)/);
+  assert.match(source, /timings\.previewReadbackSkipped = 1/);
+  assert.doesNotMatch(source, /zoomed-preview-center-fallback/);
   assert.match(source, /viewportImageScalingEnabled = false;/);
   assert.match(source, /restoreEyedropperViewportScaling\(\)/);
 });
 
-test('eyedropper hover preview does not hydrate native references while active', () => {
+test('eyedropper legacy sampler image warmup paths are removed', () => {
   const source = [
     fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_debug.js'), 'utf8'),
     fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8'),
   ].join('\n');
 
-  assert.match(source, /if \(eyedropperEnabled\) \{\s*return \{ summary: \{ skipped: 'eyedropper-snapshot-only' \}, rows: \[\] \};\s*\}/);
-  assert.match(source, /prewarmAt\(clientX, clientY/);
+  assert.doesNotMatch(source, /prewarmAt\(clientX, clientY/);
+  assert.doesNotMatch(source, /prewarmEyedropperSafeImages/);
+  assert.doesNotMatch(source, /prewarmEyedropperCenterTile/);
+  assert.doesNotMatch(source, /scheduleEyedropperHoverTilePrewarm/);
+  assert.doesNotMatch(source, /selectEyedropperWarmedScaledImageForViewport/);
+  assert.doesNotMatch(source, /EYEDROPPER_PREWARM_/);
 });
 
 test('eyedropper debugger exposes compact reports for JSON copying', () => {
@@ -308,8 +350,8 @@ test('eyedropper debugger exposes compact reports for JSON copying', () => {
   assert.match(source, /EyedropperDebug\._logToggle\(toggleMeta\)/);
   assert.match(source, /EyedropperDebug\._logPreviewPresent/);
   assert.match(source, /wallpaperMs: e\.meta\?\.wallpaperMs/);
-  assert.match(source, /function cancelEyedropperBackgroundPrewarm\(\)/);
-  assert.match(source, /cancelEyedropperBackgroundPrewarm\(\);/);
+  assert.doesNotMatch(source, /function cancelEyedropperBackgroundPrewarm\(\)/);
+  assert.doesNotMatch(source, /cancelEyedropperBackgroundPrewarm\(\);/);
   assert.doesNotMatch(source, /closed-menu-before-sample/);
   assert.doesNotMatch(source, /logEyedropperInteraction\(e, true, 'closed-menu'\);\s*return true;/);
   assert.doesNotMatch(source, /logEyedropperInteraction\(e, true, 'restart-visible-sample'\);/);
@@ -356,34 +398,34 @@ test('image bitmap queue does not wait for animation frames during board open', 
   assert.match(imageStateSource, /requestAnimationFrame\(processImageDecodeQueue\);/);
 });
 
-test('opened boards prewarm eyedropper-safe images after render hydration', () => {
+test('eyedropper decode warming uses two background decoders after board open', () => {
   const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+  const decodeWarmersSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_decode_warmers.js'), 'utf8');
   const ioCloseSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'io_close.js'), 'utf8');
 
-  assert.match(eyedropperSource, /function schedulePostOpenEyedropperSafeImagePrewarm\(reason = 'open', options = \{\}\)/);
-  assert.match(eyedropperSource, /const limit = Math\.max\(1, Number\(options\.limit\) \|\| 8\);/);
-  assert.match(eyedropperSource, /const batchSize = Math\.max\(1, Math\.min\(4, Number\(options\.batchSize\) \|\| 1\)\);/);
-  assert.match(eyedropperSource, /visibleRank/);
-  assert.match(eyedropperSource, /resolveEyedropperSafeImageSource\(keys\[index\]\)/);
-  assert.match(eyedropperSource, /scheduleIdleTask\(runBatch\)/);
-  assert.match(ioCloseSource, /schedulePostOpenEyedropperSafeImagePrewarm\('open-all-hydrated'\)/);
-  assert.match(ioCloseSource, /eyedropper-prewarm:scheduled/);
+  assert.match(eyedropperSource, /function requestEyedropperSampleSafeImage\(key, counters = null, reason = 'sample'\)/);
+  assert.match(eyedropperSource, /return resolveEyedropperSafeImageSource\(key, counters\);/);
+  assert.match(eyedropperSource, /requestEyedropperSampleSafeImage\(key, counters, 'readout'\)/);
+  assert.match(eyedropperSource, /requestEyedropperSampleSafeImage\(key, counters, 'preview-fallback'\)/);
+  assert.doesNotMatch(eyedropperSource, /requestEyedropperSampleSafeImage\(key, null, 'hover-tile'\)/);
+  assert.doesNotMatch(eyedropperSource, /schedulePostOpenEyedropperSafeImagePrewarm/);
+  assert.doesNotMatch(eyedropperSource, /POST_OPEN_EYEDROPPER_PREWARM/);
+  assert.doesNotMatch(eyedropperSource, /scheduleNewImageEyedropperSafePrewarm/);
+  assert.doesNotMatch(eyedropperSource, /NEW_IMAGE_EYEDROPPER_PREWARM/);
+  assert.match(ioCloseSource, /scheduleEyedropperNativeDecodePrewarm\('board-loaded'\)/);
+  assert.match(decodeWarmersSource, /pumpEyedropperDecodeWarmer\('d1', reason\)/);
+  assert.match(decodeWarmersSource, /pumpEyedropperDecodeWarmer\('d2', reason\)/);
+  assert.doesNotMatch(ioCloseSource, /schedulePostOpenEyedropperSafeImagePrewarm\('open-all-hydrated'\)/);
 });
 
-test('new image and undo-history lifecycle manage eyedropper-safe warming', () => {
+test('undo-history lifecycle prunes only existing eyedropper-safe cache entries', () => {
   const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
   const imageInsertSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_insert.js'), 'utf8');
   const historySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'history_state.js'), 'utf8');
 
-  assert.match(eyedropperSource, /var NEW_IMAGE_EYEDROPPER_PREWARM_LIMIT = 8;/);
-  assert.match(eyedropperSource, /function scheduleNewImageEyedropperSafePrewarm\(imgKey, reason = 'image-added'\)/);
-  assert.match(eyedropperSource, /resolveEyedropperSafeImageSource\(item\.imgKey\)/);
-  assert.match(eyedropperSource, /_newImageEyedropperPrewarmQueue\.length = 0;/);
-  assert.match(eyedropperSource, /_newImageEyedropperPrewarmQueued\.clear\(\);/);
   assert.match(eyedropperSource, /function pruneEyedropperSafeImagesToKeys\(retainedKeys = new Set\(\)\)/);
   assert.match(eyedropperSource, /removeEyedropperSafeImageKey\(key\)/);
-  assert.match(imageInsertSource, /scheduleNewImageEyedropperSafePrewarm\(imgKey, 'add-image'\)/);
-  assert.match(imageInsertSource, /scheduleNewImageEyedropperSafePrewarm\(imgKey, 'add-native-image'\)/);
+  assert.doesNotMatch(imageInsertSource, /scheduleNewImageEyedropperSafePrewarm/);
   assert.match(historySource, /function retainedImageKeysForCurrentAndHistory\(\)/);
   assert.match(historySource, /collectImageKeysFromObjects\(objects, keys\)/);
   assert.match(historySource, /for \(const entry of boardHistory\)/);
@@ -410,10 +452,10 @@ test('eyedropper hover readout does not use image or object references', () => {
   const keyboardSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'keyboard.js'), 'utf8');
 
   assert.match(source, /paintZoomedBoardPreview\(e\.clientX, e\.clientY, drawSize, \{ sampleCenter: false \}\)/);
-  assert.match(source, /sampleEyedropperReadoutPixel\(e\.clientX, e\.clientY, previewSample\)/);
+  assert.match(source, /sampleEyedropperReadoutPixel\(e\.clientX, e\.clientY, previewSample, \{\s*localImageFallback: options\.first === true,\s*\}\)/);
   assert.match(source, /function renderEyedropperLocalReadoutPixel\(clientX, clientY\)/);
-  assert.match(source, /sampleEyedropperSafeTileCache\(key, token, safeEntry\.source, sourceX, sourceY\)/);
-  assert.match(source, /sampleCanvasPixel\(eyedropperRenderedSampleCtx, previewSample\.centerX, previewSample\.centerY,/);
+  assert.match(source, /sampleEyedropperSafeTileCache\(key, token, safeEntry\.source, sourceX, sourceY, \{\s*timings,\s*sync: options\.syncTileBuild === true,\s*\}\)/);
+  assert.doesNotMatch(source, /sampleCanvasPixel\(eyedropperRenderedSampleCtx, previewSample\.centerX, previewSample\.centerY,/);
   assert.match(source, /sampleCanvasPixel\(eyedropperReadoutCtx, 0, 0,/);
   assert.doesNotMatch(source, /function sampleImageSourcePixelForEyedropper/);
   assert.doesNotMatch(source, /function sampleImageObjectSourcePixelForEyedropper/);
@@ -438,7 +480,7 @@ test('eyedropper sampling and navigation are mutually exclusive', () => {
   assert.doesNotMatch(eyedropperSource, /beginEyedropperPointerTracking/);
   assert.doesNotMatch(eyedropperSource, /allowBoardNavigation: true/);
   assert.match(eyedropperSource, /function updateEyedropperHoldSample\(e\) \{[\s\S]*if \(!_eyedropperHoldActive \|\| !eyedropperEnabled\) return;[\s\S]*updateEyedropperSample\(e\);[\s\S]*\}/);
-  assert.match(eyedropperSource, /function scheduleEyedropperHoverTilePrewarm\(e\) \{\s*if \(!eyedropperEnabled \|\| eyedropperSampling/);
+  assert.doesNotMatch(eyedropperSource, /function scheduleEyedropperHoverTilePrewarm/);
   assert.match(eyedropperSource, /if \(eyedropperSampling\) hideEyedropperSample\(\);/);
   assert.doesNotMatch(eyedropperSource, /eyedropperSampling \|\| isEyedropperSampleVisible\(\)\) hideEyedropperSample\(\)/);
 
@@ -447,6 +489,37 @@ test('eyedropper sampling and navigation are mutually exclusive', () => {
   assert.match(inputSource, /noteEyedropperNavigationActive\('wheel-zoom'\)/);
   assert.match(inputSource, /noteEyedropperNavigationActive\('wheel-pan'\)/);
   assert.match(inputSource, /noteEyedropperNavigationActive\('mouse-pan', 240\)/);
+});
+
+test('shift eyedropper shortcut self-heals stale keyboard state', () => {
+  const keyboardSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'keyboard.js'), 'utf8');
+
+  assert.match(keyboardSource, /const activeKeyboardKeys = new Set\(\);/);
+  assert.match(keyboardSource, /const activeKeyboardKeyTimes = new Map\(\);/);
+  assert.match(keyboardSource, /function pruneActiveKeyboardKeys\(now = performance\.now\(\)\) \{/);
+  assert.match(keyboardSource, /function reconcileModifierKeyboardState\(e\) \{/);
+  assert.match(keyboardSource, /pruneActiveKeyboardKeys\(keyDownAt\);\s*reconcileModifierKeyboardState\(e\);\s*const hasOtherKeyDown = \[\.\.\.activeKeyboardKeys\]/);
+  assert.match(keyboardSource, /if \(isModifierKeyId\(keyId\)\) clearNonModifierActiveKeyboardKeys\(\);/);
+  assert.match(keyboardSource, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(document\.visibilityState !== 'visible'\) clearActiveKeyboardKeys\(\);/);
+  assert.match(keyboardSource, /if \(isShiftOnlyKey\(e\) && !editingId\) \{[\s\S]*setEyedropperEnabled\(true\);[\s\S]*beginEyedropperHoldSample\(e\);/);
+});
+
+test('eyedropper mode suppresses context menus instead of reducing them', () => {
+  const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+  const contextMenuSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'context_menu.js'), 'utf8');
+  const keyboardSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'keyboard.js'), 'utf8');
+  const source = [eyedropperSource, contextMenuSource, keyboardSource].join('\n');
+
+  assert.match(eyedropperSource, /function hideMenusForEyedropperMode\(\) \{[\s\S]*closeOpenMenusExcept\('', 'eyedropper-enabled'\)/);
+  assert.match(eyedropperSource, /hideMenusForEyedropperMode\(\);/);
+  assert.match(contextMenuSource, /if \(eyedropperEnabled\) \{\s*closeOpenMenusExcept\('', 'canvas-contextmenu:eyedropper'\);[\s\S]*canvas:contextmenu:blocked-eyedropper/);
+  assert.doesNotMatch(source, /updateEyedropperCommandState/);
+  assert.doesNotMatch(source, /isCommandBlockedByEyedropper/);
+  assert.doesNotMatch(source, /_eyedropperPinnedPosition/);
+  assert.doesNotMatch(source, /_eyedropperLoupeHorizontalSide/);
+  assert.doesNotMatch(source, /EYEDROPPER_MENU_CSS_HEIGHT/);
+  assert.doesNotMatch(contextMenuSource, /ctx-menu:open', \{ reason: 'eyedropper'/);
+  assert.doesNotMatch(keyboardSource, /updateCtxActionStates\(\);/);
 });
 
 test('eyedropper zoom wallpaper is lazy after navigation and pinning', () => {

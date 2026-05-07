@@ -1,10 +1,13 @@
 {
   "identifier": "default",
   "description": "Default capabilities",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
-    "core:default",
     "core:app:allow-set-app-theme",
+    "core:event:allow-listen",
+    "core:webview:deny-internal-toggle-devtools",
     "core:window:allow-start-dragging",
     "dialog:default"
   ]

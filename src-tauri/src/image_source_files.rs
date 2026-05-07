@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::image_source_process::process_is_running;
+
 static IMAGE_ASSET_BATCH_COUNTER: AtomicU64 = AtomicU64::new(1);
 static IMAGE_ASSET_SESSION_MILLIS: OnceLock<u128> = OnceLock::new();
 const STALE_IMAGE_CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -95,6 +97,19 @@ fn metadata_age(metadata: &std::fs::Metadata, now: SystemTime) -> Option<Duratio
         .and_then(|time| now.duration_since(time).ok())
 }
 
+fn cache_session_pid(path: &Path) -> Option<u32> {
+    path.file_name()?.to_str()?.split_once('-')?.0.parse().ok()
+}
+
+fn should_remove_cache_entry(path: &Path, metadata: &std::fs::Metadata, now: SystemTime) -> bool {
+    if let Some(pid) = cache_session_pid(path) {
+        if pid != std::process::id() && !process_is_running(pid) {
+            return true;
+        }
+    }
+    matches!(metadata_age(metadata, now), Some(age) if age >= STALE_IMAGE_CACHE_MAX_AGE)
+}
+
 fn cleanup_stale_image_source_cache_inner(
     root: &Path,
     current_session: &Path,
@@ -125,10 +140,7 @@ fn cleanup_stale_image_source_cache_inner(
                 continue;
             }
         };
-        let Some(age) = metadata_age(&metadata, now) else {
-            continue;
-        };
-        if age < STALE_IMAGE_CACHE_MAX_AGE {
+        if !should_remove_cache_entry(&path, &metadata, now) {
             continue;
         }
         let result = if metadata.is_dir() {
@@ -157,3 +169,22 @@ pub(crate) fn cleanup_stale_image_source_cache() {
         }
     });
 }
+
+fn cleanup_image_source_session_dir(root: &Path, session: &Path) -> Result<bool, String> {
+    if session == root || !session.starts_with(root) || !session.exists() {
+        return Ok(false);
+    }
+    std::fs::remove_dir_all(session).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+pub(crate) fn cleanup_current_image_source_session_cache() {
+    match cleanup_image_source_session_dir(&image_source_cache_dir(), &image_source_session_dir()) {
+        Ok(true) => eprintln!("[boardfish image cache] removed current session cache"),
+        Ok(false) => {}
+        Err(err) => eprintln!("[boardfish image cache] current session cleanup failed: {err}"),
+    }
+}
+
+#[cfg(test)]
+mod tests;

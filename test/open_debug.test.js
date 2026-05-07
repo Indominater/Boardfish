@@ -96,7 +96,7 @@ test('open-board helpers used by io_close are shared across legacy scripts', () 
   }
 });
 
-test('open-board loading does not wait for pill animation before reading the file', () => {
+test('open-board loading does not wait for pill status update before reading the file', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
 
   assert.match(bootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard/);

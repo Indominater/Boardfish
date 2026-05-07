@@ -9,6 +9,7 @@ mod clipboard;
 mod dialogs;
 mod image_data_url;
 mod image_source_files;
+mod image_source_process;
 mod image_sources;
 mod image_transform;
 #[cfg(target_os = "macos")]
@@ -33,9 +34,9 @@ use dialogs::{
 use image_source_files::cleanup_stale_image_source_cache;
 use image_sources::{
     clear_image_source_cache, get_cached_image_data_url, materialize_cached_image_sources,
-    register_image_file_source, register_image_source, register_transformed_image_source,
-    remove_cached_image_sources, save_images_to_existing_folder_by_keys, write_image_file_by_key,
-    ImageSourceCache,
+    prewarm_cached_image_pixels, register_image_file_source, register_image_source,
+    register_transformed_image_source, remove_cached_image_sources, sample_cached_image_pixel,
+    save_images_to_existing_folder_by_keys, write_image_file_by_key, ImageSourceCache,
 };
 
 pub(crate) fn elapsed_ms(start: std::time::Instant) -> f64 {
@@ -47,11 +48,23 @@ pub(crate) fn rgba_mb(width: u32, height: u32) -> f64 {
     (bytes / 1024.0 / 1024.0 * 100.0).round() / 100.0
 }
 
+fn debug_tools_enabled() -> bool {
+    option_env!("BOARDFISH_DEBUG_TOOLS_ENABLED") == Some("true")
+}
+
+fn debug_tools_initialization_script() -> String {
+    format!(
+        "Object.defineProperty(globalThis, '__BOARDFISH_DEBUG_TOOLS_ENABLED__', {{ value: {}, writable: false, configurable: false }});",
+        debug_tools_enabled()
+    )
+}
+
 fn main() {
     let startup_file: Option<String> = std::env::args().nth(1);
     cleanup_stale_image_source_cache();
 
     tauri::Builder::default()
+        .append_invoke_initialization_script(debug_tools_initialization_script())
         .plugin(tauri_plugin_dialog::init())
         .manage(startup_file_state(startup_file))
         .manage(ImageSourceCache::default())
@@ -64,6 +77,8 @@ fn main() {
             read_board,
             register_image_file_source,
             get_cached_image_data_url,
+            prewarm_cached_image_pixels,
+            sample_cached_image_pixel,
             materialize_cached_image_sources,
             open_file_dialog,
             pick_image_files,

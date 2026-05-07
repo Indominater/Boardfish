@@ -27,7 +27,6 @@ function menuGapPx() {
 
 function updateCtxActionStates() {
   if (darkModeMenuBtn) darkModeMenuBtn.setAttribute('aria-pressed', appTheme === 'dark' ? 'true' : 'false');
-  updateEyedropperCommandState();
 }
 
 function closeCtxActions(reason) {
@@ -86,7 +85,6 @@ function menuSurfaces() {
   return [
     { id: 'ctx-menu', close: closeCtxMenu },
     { id: 'obj-ctx-menu', close: closeObjCtxMenu },
-    { id: 'eyedropper-ctx-menu', close: typeof closeEyedropperContextMenu === 'function' ? closeEyedropperContextMenu : null },
   ];
 }
 
@@ -109,6 +107,7 @@ var MENU_COMMANDS = {
   'btn-add-text': () => { closeCtxMenu('command:add-text'); addText(ctxPos.x, ctxPos.y); },
   'btn-add-image': () => { closeCtxMenu('command:add-image'); pickAndInsertImages(ctxPos.x, ctxPos.y); },
   'btn-paste': () => { closeCtxMenu('command:paste'); pasteAtPos(ctxPos.x, ctxPos.y); },
+  'btn-reset-zoom': () => { closeCtxMenu('command:reset-zoom'); resetZoomToClosestObject(); },
   'btn-save': () => { closeCtxMenu('command:save'); saveBoard(); },
   'btn-save-as': () => { closeCtxMenu('command:save-as'); saveBoardAs(); },
   'btn-open': () => { closeCtxMenu('command:open'); openBoard(); },
@@ -117,6 +116,7 @@ var MENU_COMMANDS = {
   'obj-btn-copy': () => { closeObjCtxMenu('command:copy'); copySelected(); },
   'obj-btn-delete': () => { closeObjCtxMenu('command:delete'); deleteSelected(); },
   'obj-btn-duplicate': () => { closeObjCtxMenu('command:duplicate'); duplicateSelected(); },
+  'obj-btn-lock': () => { closeObjCtxMenu('command:lock'); toggleSelectedLock(); },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
   'obj-btn-flip-horizontal': () => { flipSelectedImages('x'); },
   'obj-btn-flip-vertical': () => { flipSelectedImages('y'); },
@@ -136,8 +136,8 @@ function menuCommandName(button) {
 function runMenuCommand(button, source) {
   const run = menuCommandFromButton(button);
   const command = menuCommandName(button);
-  if (button?.disabled || isCommandBlockedByEyedropper(button?.id || '')) {
-    MenuDebug.log('menu:command:blocked', { command, source, reason: 'eyedropper' });
+  if (button?.disabled) {
+    MenuDebug.log('menu:command:blocked', { command, source, reason: 'disabled' });
     return true;
   }
   if (!run) {
@@ -186,6 +186,60 @@ function runAddTextCommandFromShortcut() {
   const defaultH = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
   ctxPos = { x: center.x - defaultW / 2, y: center.y - defaultH / 2 };
   runMenuCommand(addTextBtn, 'shortcut');
+}
+
+function pointToObjectCenterDistanceSq(point, obj) {
+  const dx = point.x - (obj.x + obj.w / 2);
+  const dy = point.y - (obj.y + obj.h / 2);
+  return dx * dx + dy * dy;
+}
+
+function closestResetZoomObjectToViewportCenter() {
+  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  const hasImages = objects.some((obj) => obj?.type === 'image');
+  const targetType = hasImages ? 'image' : 'text';
+  let closest = null;
+  let closestDistanceSq = Infinity;
+  for (const obj of objects) {
+    if (obj?.type !== targetType) continue;
+    const distanceSq = pointToObjectCenterDistanceSq(center, obj);
+    if (distanceSq < closestDistanceSq) {
+      closest = obj;
+      closestDistanceSq = distanceSq;
+    }
+  }
+  return { object: closest, targetType, distanceSq: closestDistanceSq, center };
+}
+
+function resetZoomToClosestObject() {
+  const dbg = ViewportDebug.start('resetZoom', { panX, panY, zoom, objectCount: objects.length });
+  const { object, targetType, distanceSq, center } = closestResetZoomObjectToViewportCenter();
+  if (!object) {
+    ViewportDebug.end(dbg, { skipped: 'no-reset-target' });
+    return false;
+  }
+  const targetZoom = 1;
+  const objectCenterX = object.x + object.w / 2;
+  const objectCenterY = object.y + object.h / 2;
+  BoardfishViewportState.setZoomPan(
+    targetZoom,
+    window.innerWidth / 2 - objectCenterX * targetZoom,
+    window.innerHeight / 2 - objectCenterY * targetZoom,
+  );
+  scheduleTransform('reset-zoom');
+  ViewportDebug.end(dbg, {
+    objectId: object.id,
+    objectType: targetType,
+    distanceSq,
+    centerX: center.x,
+    centerY: center.y,
+    objectCenterX,
+    objectCenterY,
+    panX,
+    panY,
+    zoom,
+  });
+  return true;
 }
 
 function onMenuPointerDown(e) {
@@ -239,7 +293,7 @@ ctxMenu.addEventListener('mousedown', onMenuMouseDown);
 ctxMenu.addEventListener('mouseup', onMenuMouseUp);
 objCtxMenu.addEventListener('mousedown', onMenuMouseDown);
 objCtxMenu.addEventListener('mouseup', onMenuMouseUp);
-for (const menu of [ctxMenu, objCtxMenu, eyedropperCtxMenu, ctxActions].filter(Boolean)) {
+for (const menu of [ctxMenu, objCtxMenu, ctxActions].filter(Boolean)) {
   for (const type of ['click', 'contextmenu']) {
     menu.addEventListener(type, (e) => {
       e.stopPropagation();
@@ -250,16 +304,33 @@ for (const menu of [ctxMenu, objCtxMenu, eyedropperCtxMenu, ctxActions].filter(B
 
 function updateObjMenuActions() {
   let imageCount = 0;
+  let unlockedImageCount = 0;
   for (const id of selectedIds) {
     const o = objectsMap.get(id);
-    if (o && o.type === 'image') imageCount++;
+    if (!o) continue;
+    if (o.type === 'image') {
+      imageCount++;
+      if (!isObjectLocked(o)) unlockedImageCount++;
+    }
   }
+  const lockSummary = selectedLockSummary();
   const multiSelected = isMultiSelected();
   if (copyBtn) copyBtn.style.display = '';
-  if (imageActionsSep) imageActionsSep.style.display = imageCount >= 1 ? 'block' : 'none';
-  if (flipHorizontalBtn) flipHorizontalBtn.style.display = imageCount >= 1 ? '' : 'none';
-  if (flipVerticalBtn) flipVerticalBtn.style.display = imageCount >= 1 ? '' : 'none';
-  if (rotateBtn) rotateBtn.style.display = imageCount >= 1 ? '' : 'none';
+  if (lockBtn) {
+    const label = lockBtn.querySelector?.('.ctx-label');
+    const canUnlockSingle = lockSummary.total === 1 && lockSummary.locked === 1;
+    const canLock = lockSummary.anyUnlocked;
+    const text = canUnlockSingle ? 'Unlock' : 'Lock';
+    if (label) label.textContent = text;
+    else lockBtn.textContent = text;
+    lockBtn.style.display = canUnlockSingle || canLock ? '' : 'none';
+  }
+  if (imageActionsSep) imageActionsSep.style.display = unlockedImageCount >= 1 ? 'block' : 'none';
+  if (flipHorizontalBtn) flipHorizontalBtn.style.display = unlockedImageCount >= 1 ? '' : 'none';
+  if (flipVerticalBtn) flipVerticalBtn.style.display = unlockedImageCount >= 1 ? '' : 'none';
+  if (rotateBtn) rotateBtn.style.display = unlockedImageCount >= 1 ? '' : 'none';
+  if (layerActionsSep) layerActionsSep.style.display = lockSummary.anyUnlocked ? 'block' : 'none';
+  if (moveToBackBtn) moveToBackBtn.style.display = lockSummary.anyUnlocked ? '' : 'none';
   if (saveImageBtn) saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
   if (saveImagesBtn) {
     const label = saveImagesBtn.querySelector?.('.ctx-label');
@@ -268,13 +339,16 @@ function updateObjMenuActions() {
     saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';
   }
   if (exportSep) exportSep.style.display = imageCount >= 1 ? 'block' : 'none';
+  if (deleteSep) deleteSep.style.display = lockSummary.anyUnlocked ? 'block' : 'none';
+  if (deleteBtn) deleteBtn.style.display = lockSummary.anyUnlocked ? '' : 'none';
 }
 
 function updateCtxMenuActions() {
   const hasImages = objects.some((o) => o.type === 'image');
   const hasText   = objects.some((o) => o.type === 'text');
-  const show = !eyedropperEnabled && (hasImages || hasText);
-  updateEyedropperCommandState();
+  const show = hasImages || hasText;
+  if (resetZoomSep) resetZoomSep.style.display = show ? 'block' : 'none';
+  if (resetZoomBtn) resetZoomBtn.style.display = show ? '' : 'none';
   if (exportAllTextBtn) exportAllTextBtn.style.display = show && hasText ? '' : 'none';
   if (exportAllImageBtn) exportAllImageBtn.style.display = show && hasImages ? '' : 'none';
   if (exportAllSep) exportAllSep.style.display = show ? 'block' : 'none';
@@ -289,16 +363,17 @@ function showCanvasContextMenuAt(clientX, clientY) {
   MenuDebug.log('canvas:contextmenu', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
 
   if (eyedropperEnabled) {
-    ctxPos = wp;
-    updateCtxMenuActions();
-    openCtxMenuAt(clientX, clientY);
-    MenuDebug.log('ctx-menu:open', { reason: 'eyedropper', x: clientX, y: clientY, wx: wp.x, wy: wp.y });
+    closeOpenMenusExcept('', 'canvas-contextmenu:eyedropper');
+    MenuDebug.log('canvas:contextmenu:blocked-eyedropper', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
     return;
   }
 
-  // Multi-select: right-click anywhere inside bounding box shows obj menu
+  const obj = hitTest(wp.x, wp.y, { includeLocked: true });
+
+  // Multi-select: right-click anywhere inside the selected bounding box shows
+  // the group menu unless the user directly targets an unselected locked object.
   if (isMultiSelected()) {
-    if (rectContainsPoint(selectedBounds(), wp)) {
+    if (rectContainsPoint(selectedBounds(), wp) && (!obj || isSelected(obj.id))) {
       updateObjMenuActions();
       openExclusiveMenuAt(objCtxMenu, 'obj-ctx-menu', clientX, clientY, 'show-obj-menu:multi');
       MenuDebug.log('obj-ctx-menu:open', { reason: 'multi', x: clientX, y: clientY });
@@ -306,7 +381,6 @@ function showCanvasContextMenuAt(clientX, clientY) {
     }
   }
 
-  const obj = hitTest(wp.x, wp.y);
   MenuDebug.log('canvas:contextmenu-hit', {
     hit: !!obj,
     objectId: obj?.id || '',
@@ -345,7 +419,7 @@ for (const id of Object.keys(MENU_COMMANDS)) {
 
 
 document.addEventListener('click', (e) => {
-  if (ctxMenu.contains(e.target) || objCtxMenu.contains(e.target) || eyedropperCtxMenu?.contains(e.target) || ctxActions?.contains(e.target)) {
+  if (ctxMenu.contains(e.target) || objCtxMenu.contains(e.target) || ctxActions?.contains(e.target)) {
     MenuDebug.log('document-click:inside-menu');
     return;
   }
@@ -415,52 +489,4 @@ darkModeMenuBtn?.addEventListener('click', (e) => {
   if (ctxActions?.contains(e.currentTarget) && !isCtxActionHotspotEvent(e, e.currentTarget)) return;
   closeCtxMenu('command:dark-mode');
   Promise.resolve(toggleAppTheme()).finally(updateCtxActionStates);
-});
-
-islZoom.addEventListener('mousedown', e => e.preventDefault());
-island.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-}, { capture: true, passive: false });
-islZoom.addEventListener('click', () => {
-  if (_imageCopyInFlight > 0) return;
-  const dbg = ViewportDebug.start('zoomReset', { panX, panY, zoom, objectCount: objects.length });
-  deselectAll();
-  const vw = window.innerWidth, vh = window.innerHeight;
-  const anyVisible = objects.some(o => {
-    const sx = o.x * zoom + panX, sy = o.y * zoom + panY;
-    return sx + o.w * zoom > 0 && sx < vw && sy + o.h * zoom > 0 && sy < vh;
-  });
-  const targetZoom = 1;
-  let targetPanX, targetPanY;
-  if (!anyVisible && objects.length) {
-    const cx = (vw / 2 - panX) / zoom, cy = (vh / 2 - panY) / zoom;
-    let nearest = null, nearestDist = Infinity;
-    for (const o of objects) {
-      const d = (o.x + o.w / 2 - cx) ** 2 + (o.y + o.h / 2 - cy) ** 2;
-      if (d < nearestDist) { nearestDist = d; nearest = o; }
-    }
-    targetPanX = vw / 2 - (nearest.x + nearest.w / 2) * targetZoom;
-    targetPanY = vh / 2 - (nearest.y + nearest.h / 2) * targetZoom;
-  } else {
-    targetPanX = vw / 2 - (vw / 2 - panX) * (targetZoom / zoom);
-    targetPanY = vh / 2 - (vh / 2 - panY) * (targetZoom / zoom);
-  }
-  const startPanX = panX, startPanY = panY, startZoom = zoom;
-  const startTime = performance.now();
-  const duration = 500;
-  function animate(now) {
-    const t = Math.min((now - startTime) / duration, 1);
-    const e = 1 - Math.pow(1 - t, 3);
-    BoardfishViewportState.setZoomPan(
-      startZoom + (targetZoom - startZoom) * e,
-      startPanX + (targetPanX - startPanX) * e,
-      startPanY + (targetPanY - startPanY) * e,
-    );
-    ViewportDebug.step(dbg, 'animate', { t, panX, panY, zoom });
-    applyTransform();
-    if (t < 1) requestAnimationFrame(animate);
-    else ViewportDebug.end(dbg, { panX, panY, zoom });
-  }
-  requestAnimationFrame(animate);
 });

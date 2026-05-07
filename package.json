@@ -1,11 +1,12 @@
 {
   "name": "boardfish",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.8.2",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
+    "pretest": "node scripts/sync-debug-tools.mjs",
     "test": "node --test",
     "check:js-syntax": "find src test \\( -name '*.js' -o -name '*.mjs' \\) -print0 | xargs -0 -n1 node --check",
     "check:static": "node --test test/static_refactor.test.js",

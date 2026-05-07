@@ -1,8 +1,8 @@
 'use strict';
 
-// AGENTS: Set this to true only while running local diagnostics/debug tests.
-// Before making a new build or release, set it back to false.
-const DEBUG_TOOLS_ENABLED = true;
+// Tauri injects this from the Cargo build profile before frontend scripts run.
+// Browser/file loads without that injection stay release-safe.
+const DEBUG_TOOLS_ENABLED = globalThis.__BOARDFISH_DEBUG_TOOLS_ENABLED__ === true;
 
 function createNoopStartupDebug() {
   const events = [];

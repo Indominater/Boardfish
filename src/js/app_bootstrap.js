@@ -8,8 +8,6 @@ var finishFailedOpen;
   document.fonts?.ready.then(clearTextMeasurementCaches).catch(() => {});
   resizeCanvas();
   snapshot();
-  islSetWidth('100%');
-  updateZoomDisplay(true);
   updateTitle();
 
   confirmDirtyBeforeOpen = async function confirmDirtyBeforeOpen(dbg) {
@@ -34,10 +32,12 @@ var finishFailedOpen;
   openBoardFromPath = async function openBoardFromPath(filePath, dbg, errorLabel) {
     try {
       _boardOpening = true;
-      openingShield.classList.add('active');
+      if (typeof beginOpeningFreeze === 'function') beginOpeningFreeze();
+      else openingShield.classList.add('active');
       startPillTask({ message: 'Opening' });
       const data = await invokeReadBoard(filePath, dbg);
-      applyBoardData(data, { dbg, sourcesCached: true, deferRender: true, endDebug: false });
+      const applied = applyBoardData(data, { dbg, sourcesCached: true, deferRender: true, endDebug: false });
+      await applied?.eyedropperCardsReady;
       await finishOpenedBoard(dbg, data);
       currentFilePath = filePath;
       updateTitle();
@@ -49,8 +49,11 @@ var finishFailedOpen;
   finishFailedOpen = function finishFailedOpen(dbg, err, errorLabel) {
     console.error(errorLabel, err);
     _boardOpening = false;
-    finishPillTransition({
-      beforeTransition: () => openingShield.classList.remove('active'),
+    finishPillTask({
+      beforeFinish: () => {
+        if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
+        else openingShield.classList.remove('active');
+      },
     });
     OpenDebug.end(dbg, { opened: false, error: String(err) });
   };

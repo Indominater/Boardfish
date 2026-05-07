@@ -57,6 +57,7 @@ test('hit-tests rotated image objects in local unit coordinates', () => {
   };
   assert.deepEqual(geometry.worldPointToImageLocalUnit(image, { x: 50, y: 25 }), { u: 0.5, v: 0.5 });
   assert.equal(geometry.worldPointToImageLocalUnit(image, { x: 120, y: 25 }), null);
+  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint(image, { x: 120, y: 25 }), 400);
 });
 
 test('finds the topmost object containing a world point', () => {

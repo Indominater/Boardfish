@@ -10,6 +10,8 @@
     COPY_TEXT_TO_CLIPBOARD: 'copy_text_to_clipboard',
     EXIT_APP: 'exit_app',
     GET_CACHED_IMAGE_DATA_URL: 'get_cached_image_data_url',
+    PREWARM_CACHED_IMAGE_PIXELS: 'prewarm_cached_image_pixels',
+    SAMPLE_CACHED_IMAGE_PIXEL: 'sample_cached_image_pixel',
     GET_STARTUP_FILE: 'get_startup_file',
     MATERIALIZE_CACHED_IMAGE_SOURCES: 'materialize_cached_image_sources',
     OPEN_FILE_DIALOG: 'open_file_dialog',
@@ -77,6 +79,12 @@
     },
     getCachedImageDataUrl(imgKey) {
       return tauriInvoke(TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL, { imgKey });
+    },
+    prewarmCachedImagePixels(imgKey) {
+      return tauriInvoke(TAURI_COMMANDS.PREWARM_CACHED_IMAGE_PIXELS, { imgKey });
+    },
+    sampleCachedImagePixel(imgKey, sourceX, sourceY) {
+      return tauriInvoke(TAURI_COMMANDS.SAMPLE_CACHED_IMAGE_PIXEL, { imgKey, sourceX, sourceY });
     },
     materializeCachedImageSources(imgKeys) {
       return tauriInvoke(TAURI_COMMANDS.MATERIALIZE_CACHED_IMAGE_SOURCES, { imgKeys });

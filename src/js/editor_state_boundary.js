@@ -26,6 +26,9 @@
   function addObject(obj) {
     objects.push(obj);
     objectsMap.set(obj.id, obj);
+    if (typeof noteEyedropperBoardContentChanged === 'function') {
+      noteEyedropperBoardContentChanged('object-added');
+    }
     return obj;
   }
 
@@ -47,6 +50,9 @@
     }
     objects.length = write;
     if (selectedId && !selectedIds.has(selectedId)) selectedId = null;
+    if (removed && typeof noteEyedropperBoardContentChanged === 'function') {
+      noteEyedropperBoardContentChanged('objects-removed');
+    }
     return removed;
   }
 
@@ -113,6 +119,9 @@
     rebuildObjectsMap();
     if (syncTextHeights) syncAllTextAutoHeights();
     if (restoreCounters) restoreObjectCountersFromObjects(objects);
+    if (typeof noteEyedropperBoardContentChanged === 'function') {
+      noteEyedropperBoardContentChanged('objects-replaced');
+    }
     return objects;
   }
 
@@ -139,6 +148,9 @@
   } = {}) {
     const result = typeof mutate === 'function' ? mutate() : undefined;
     if (!result) return result;
+    if (typeof noteEyedropperBoardContentChanged === 'function') {
+      noteEyedropperBoardContentChanged(reason || 'mutation');
+    }
     if (invalidate && typeof invalidateOffscreen === 'function') invalidateOffscreen();
     if (typeof scheduleRender === 'function') scheduleRender(renderBoard, renderOverlay, renderSource);
     if (history && typeof pushHistory === 'function') pushHistory(reason);

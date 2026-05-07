@@ -11,147 +11,47 @@ function saveViewport() {
 
 
 // PillDebug and MenuDebug are initialized by js/viewport_debug_ui.js.
-
-function islSetWidth(text) {
-  PillDebug.log('islSetWidth:before', { text });
-  const measuredWidth = measureIslandTextWidth(text);
-  islZoom.style.width = measuredWidth + 'px';
-  PillDebug.log('islSetWidth:after', { text, measuredWidth });
-}
-
-function measureIslandTextWidth(text) {
-  islMeasure.textContent = text;
-  return islMeasure.offsetWidth;
-}
-var _lastZoomPct = -1;
 var _islMsgActive = false;
-var _imageCopyInFlight = 0;
-var _lastZoomDisplayAt = 0;
-var _zoomDisplayTimer = null;
-
-function applyIslandInteractionState() {
-  const disabled = _islMsgActive || _imageCopyInFlight > 0;
-  islZoom.style.pointerEvents = disabled ? 'none' : '';
-  islZoom.style.cursor = disabled ? 'default' : '';
-}
-
-function beginImageCopyInteractionLock() {
-  _imageCopyInFlight += 1;
-  applyIslandInteractionState();
-}
-
-function endImageCopyInteractionLock() {
-  _imageCopyInFlight = Math.max(0, _imageCopyInFlight - 1);
-  applyIslandInteractionState();
-}
-
-function updateZoomDisplay(force = false) {
-  if (_islMsgActive) return;
-  const pct = Math.round(zoom * 100);
-  if (pct === _lastZoomPct) return;
-  const now = performance.now();
-  if (!force && now - _lastZoomDisplayAt < 80) {
-    clearTimeout(_zoomDisplayTimer);
-    _zoomDisplayTimer = setTimeout(() => updateZoomDisplay(true), 90);
-    return;
-  }
-  _lastZoomDisplayAt = now;
-  _lastZoomPct = pct;
-  const text = pct + '%';
-  PillDebug.log('updateZoomDisplay:set', { force, text });
-  islZoom.textContent = text;
-  islSetWidth(text);
-}
 var _islMsgTimer = null;
-var _islFadeTimer = null;
-var _islAnimToken = 0;
+var _islMsgToken = 0;
 
-function islandTextAlpha() {
-  const color = getComputedStyle(islZoom).color;
-  const match = color.match(/rgba?\(([^)]+)\)/);
-  if (!match) return 1;
-  const parts = match[1].split(',').map((part) => part.trim());
-  return parts.length >= 4 ? Number(parts[3]) || 0 : 1;
+function setIslandVisible(visible) {
+  island.classList.toggle('visible', visible);
+  island.setAttribute('aria-hidden', visible ? 'false' : 'true');
 }
 
-function waitForIslandTransition(propertyName, timeoutMs = 700) {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (reason) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      islZoom.removeEventListener('transitionend', onEnd);
-      islZoom.removeEventListener('transitioncancel', onCancel);
-      resolve(reason);
-    };
-    const onEnd = (event) => {
-      if (event.target === islZoom && event.propertyName === propertyName) finish('transitionend');
-    };
-    const onCancel = (event) => {
-      if (event.target === islZoom && event.propertyName === propertyName) finish('transitioncancel');
-    };
-    const timer = setTimeout(() => finish('timeout'), timeoutMs);
-    islZoom.addEventListener('transitionend', onEnd);
-    islZoom.addEventListener('transitioncancel', onCancel);
-  });
+function showIslandForMessage(text) {
+  islZoom.textContent = text;
+  setIslandVisible(true);
 }
 
-function forceIslandTextTransparent() {
-  const transition = islZoom.style.transition;
-  islZoom.style.transition = 'none';
-  islZoom.style.color = TRANSPARENT_TEXT_COLOR;
-  void islZoom.offsetWidth;
-  islZoom.style.transition = transition;
-  PillDebug.log('forceIslandTextTransparent');
-}
-
-function waitForIslandFrames(count = 1, token = _islAnimToken) {
-  return new Promise((resolve) => {
-    const step = (remaining) => {
-      requestAnimationFrame(() => {
-        if (token !== _islAnimToken) { resolve('stale'); return; }
-        if (remaining <= 1) { resolve('frames'); return; }
-        step(remaining - 1);
-      });
-    };
-    step(Math.max(1, count));
-  });
-}
-
-async function fadeIslandTextTo(color, { token = _islAnimToken, timeoutMs = 700, skipTransparent = false } = {}) {
-  if (token !== _islAnimToken) return 'stale';
-  const alreadyTransparent = skipTransparent && color === TRANSPARENT_TEXT_COLOR && islandTextAlpha() <= 0.05;
-  const done = alreadyTransparent
-    ? Promise.resolve('already-transparent')
-    : waitForIslandTransition('color', timeoutMs);
-  islZoom.style.color = color;
-  const reason = await done;
-  if (token !== _islAnimToken) return 'stale';
+function hideIsland(reason = 'hide') {
+  ++_islMsgToken;
+  clearTimeout(_islMsgTimer);
+  _islMsgActive = false;
+  islZoom.textContent = '';
+  setIslandVisible(false);
+  PillDebug.log('hideIsland', { reason });
   return reason;
 }
 
 function startIslandBusyMsg(text) {
-  const token = ++_islAnimToken;
+  const token = ++_islMsgToken;
   clearTimeout(_islMsgTimer);
-  clearTimeout(_islFadeTimer);
   _islMsgActive = true;
-  applyIslandInteractionState();
-  islZoom.style.color = islandStatusTextColor();
-  islSetWidth(text);
-  islZoom.textContent = text;
-  PillDebug.samplePillAnimation('busyIslandMsg');
+  showIslandForMessage(text);
+  PillDebug.log('busyIslandMsg:shown', { text });
 
   return {
     update(nextText) {
-      if (token !== _islAnimToken) return;
-      islSetWidth(nextText);
+      if (token !== _islMsgToken) return;
       islZoom.textContent = nextText;
+      PillDebug.log('busyIslandMsg:update', { text: nextText });
     },
     done(finalMsg = null, duration = 1500, onRestore = null) {
-      if (token !== _islAnimToken) return;
+      if (token !== _islMsgToken) return;
       if (finalMsg) return showIslandMsg(finalMsg, duration, onRestore);
-      return restoreIslandZoom();
+      return hideIsland('busy-done');
     },
   };
 }
@@ -171,127 +71,35 @@ function updatePillTask(busyPill, nextText) {
   busyPill.update(nextText);
 }
 
-function finishPillTransition({
-  beforeTransition = null,
+function finishPillTask({
+  beforeFinish = null,
   busyPill = null,
   finalMsg = null,
   duration = 1500,
 } = {}) {
-  if (beforeTransition) beforeTransition();
+  if (beforeFinish) beforeFinish();
   if (busyPill) return busyPill.done(finalMsg, duration);
   if (finalMsg) return showIslandMsg(finalMsg, duration);
-  return restoreIslandZoom();
+  return hideIsland('pill-finished');
 }
 
-function waitForPillFrameReady({ stableFramesNeeded = 4, maxFrameGapMs = 34, minWaitMs = 120, timeoutMs = 1800 } = {}) {
-  const start = performance.now();
-  let lastFrame = start;
-  let stableFrames = 0;
-  return new Promise((resolve) => {
-    const tick = (now) => {
-      const elapsed = now - start;
-      const frameGapMs = now - lastFrame;
-      lastFrame = now;
-      if (frameGapMs <= maxFrameGapMs) stableFrames += 1;
-      else stableFrames = 0;
-      if (elapsed >= minWaitMs && stableFrames >= stableFramesNeeded) {
-        PillDebug.log('pill-frame-ready', { elapsed, frameGapMs, stableFrames });
-        resolve('stable');
-        return;
-      }
-      if (elapsed >= timeoutMs) {
-        PillDebug.log('pill-frame-wait-timeout', { elapsed, frameGapMs, stableFrames });
-        resolve('timeout');
-        return;
-      }
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-}
-
-async function showIslandMsg(msg, duration = 0, onRestore = null) {
-  const token = ++_islAnimToken;
+function showIslandMsg(msg, duration = 0, onRestore = null) {
+  const token = ++_islMsgToken;
   PillDebug.log('showIslandMsg:start', { msg, duration });
   clearTimeout(_islMsgTimer);
-  clearTimeout(_islFadeTimer);
   _islMsgActive = true;
-  applyIslandInteractionState();
-  islSetWidth(msg);
-  PillDebug.samplePillAnimation('showIslandMsg');
-  const timerStart = performance.now();
-  PillDebug.log('showIslandMsg:fadeOut', { msg, computedColor: getComputedStyle(islZoom).color, transition: getComputedStyle(islZoom).transition });
-  const fadeOutReason = await fadeIslandTextTo(TRANSPARENT_TEXT_COLOR, { token, skipTransparent: true });
-  if (token !== _islAnimToken) return 'stale';
-  PillDebug.log('showIslandMsg:fadeOutComplete', { msg, reason: fadeOutReason, elapsed: performance.now() - timerStart });
-  PillDebug.log('showIslandMsg:fadeIn', { msg, computedColorBefore: getComputedStyle(islZoom).color });
-  islZoom.textContent = msg;
-  const fadeInReason = await fadeIslandTextTo(islandStatusTextColor(), { token });
-  PillDebug.log('showIslandMsg:fadeInSet', { computedColorAfter: getComputedStyle(islZoom).color });
-  if (token !== _islAnimToken) return 'stale';
-  PillDebug.log('showIslandMsg:resolved', { msg, reason: fadeInReason, elapsed: performance.now() - timerStart });
+  showIslandForMessage(msg);
+  PillDebug.log('showIslandMsg:shown', { msg });
   if (duration > 0) {
-    _islMsgTimer = setTimeout(async () => {
-      if (token !== _islAnimToken) return;
-      const zoomRestoreReason = await restoreIslandZoom();
+    _islMsgTimer = setTimeout(() => {
+      if (token !== _islMsgToken) return;
+      const hideReason = hideIsland('message-timeout');
       if (onRestore) onRestore();
-      PillDebug.log('showIslandMsg:onRestore', { msg, zoomRestoreReason });
+      PillDebug.log('showIslandMsg:onHide', { msg, hideReason });
     }, duration);
   }
-  return fadeInReason;
+  return 'shown';
 }
-
-async function restoreIslandZoom() {
-  const token = ++_islAnimToken;
-  PillDebug.log('restoreIslandZoom:start');
-  clearTimeout(_islMsgTimer);
-  clearTimeout(_islFadeTimer);
-  const pct = Math.round(zoom * 100) + '%';
-  const frameReadyReason = await waitForPillFrameReady();
-  if (token !== _islAnimToken) return;
-  PillDebug.log('restoreIslandZoom:frame-ready', { reason: frameReadyReason });
-  const currentWidth = islZoom.getBoundingClientRect().width;
-  const targetWidth = measureIslandTextWidth(pct);
-  const widthDone = Math.abs(currentWidth - targetWidth) < 0.5
-    ? Promise.resolve('same-width')
-    : waitForIslandTransition('width', 700);
-  islSetWidth(pct);
-  PillDebug.samplePillAnimation('restoreIslandZoom', 1800);
-  PillDebug.log('restoreIslandZoom:width-set', { pct });
-  PillDebug.log('restoreIslandZoom:fadeOut');
-  const [widthReason, fadeOutReason] = await Promise.all([
-    widthDone,
-    fadeIslandTextTo(TRANSPARENT_TEXT_COLOR, { token, skipTransparent: true }),
-  ]);
-  if (token !== _islAnimToken) return;
-  PillDebug.log('restoreIslandZoom:widthComplete', { reason: widthReason });
-  PillDebug.log('restoreIslandZoom:fadeOutComplete', { reason: fadeOutReason });
-  if (islandTextAlpha() > 0.05) {
-    forceIslandTextTransparent();
-    if (token !== _islAnimToken) return;
-  }
-  _islMsgActive = false;
-  _lastZoomPct = -1;
-  islZoom.textContent = pct;
-  PillDebug.log('restoreIslandZoom:text-set', { pct });
-  const frameReason = await waitForIslandFrames(2, token);
-  if (token !== _islAnimToken) return 'stale';
-  PillDebug.log('restoreIslandZoom:frames-ready', { pct, reason: frameReason });
-  const colorReason = await fadeIslandTextTo(islandTextColor(), { token });
-  applyIslandInteractionState();
-  PillDebug.log('restoreIslandZoom:shown', { pct, colorReason });
-  return colorReason;
-}
-
-islZoom.addEventListener('transitionstart', (event) => {
-  PillDebug.log('transitionstart', { propertyName: event.propertyName, elapsedTime: event.elapsedTime });
-});
-islZoom.addEventListener('transitionend', (event) => {
-  PillDebug.log('transitionend', { propertyName: event.propertyName, elapsedTime: event.elapsedTime });
-});
-islZoom.addEventListener('transitioncancel', (event) => {
-  PillDebug.log('transitioncancel', { propertyName: event.propertyName, elapsedTime: event.elapsedTime });
-});
 // ─── Offscreen buffer ─────────────────────────────────────────────────────────
 var _offscreen = document.createElement('canvas');
 var _offCtx    = _offscreen.getContext('2d');
@@ -365,6 +173,9 @@ var _dirtyIds = new Set();
 function markDirty(id) {
   const wasDirty = isDirty();
   _dirtyIds.add(id);
+  if (typeof noteEyedropperBoardContentChanged === 'function') {
+    noteEyedropperBoardContentChanged('object-dirty');
+  }
   if (!wasDirty) updateTitle();
 }
 
@@ -379,6 +190,9 @@ function resizeCanvas() {
   boardCanvas.height = height;
   invalidateOffscreen();
   scheduleRender(true, false);
+  if (typeof handleEyedropperViewportChanged === 'function') {
+    handleEyedropperViewportChanged('resize');
+  }
 }
 
 function drawImageObj(context, obj, img) {
@@ -565,8 +379,10 @@ function drawBoard() {
   }
 }
 
-function hitTest(wx, wy) {
-  return BoardObjectGeometry.topObjectAtWorldPoint({ x: wx, y: wy });
+function hitTest(wx, wy, { includeLocked = false } = {}) {
+  const obj = BoardObjectGeometry.topObjectAtWorldPoint({ x: wx, y: wy });
+  if (!obj || (!includeLocked && isObjectLocked(obj))) return null;
+  return obj;
 }
 
 function applyTransform(frameDbg = null) {
@@ -583,13 +399,6 @@ function applyTransform(frameDbg = null) {
   if (collectTransformDebug) {
     ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
     ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
-  }
-  const zoomStart = collectTransformDebug ? performance.now() : 0;
-  updateZoomDisplay();
-  const zoomMs = collectTransformDebug ? performance.now() - zoomStart : 0;
-  if (collectTransformDebug) {
-    ViewportDebug.step(dbg, 'updateZoomDisplay', { ms: zoomMs });
-    ViewportDebug.step(frameDbg, 'updateZoomDisplay', { ms: zoomMs });
   }
   const saveStart = collectTransformDebug ? performance.now() : 0;
   saveViewport();

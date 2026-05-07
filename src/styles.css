@@ -28,6 +28,7 @@
   --menu-item-line-height: 32px;
   --context-menu-width: 228px;
   --eyedropper-loupe-width: 228px;
+  --eyedropper-card-base-z: 99990;
   --canvas-text: #111418;
   --dialog-overlay-bg: rgba(0,0,0,0.18);
   --selection-handle-bg: #f8fafc;
@@ -138,6 +139,7 @@ body.is-macos #mac-titlebar {
   box-shadow: none;
 }
 #sel-overlay.editing .s-handle { display: none; }
+#sel-overlay.locked .s-handle { display: none !important; }
 #sel-overlay .s-handle[data-dir="w"],
 #sel-overlay .s-handle[data-dir="e"] { display: none; }
 #sel-overlay.text-resize .s-handle[data-dir="nw"],
@@ -185,8 +187,8 @@ body.eyedropper-enabled #multi-sel-overlay {
 /* ── Context menu ── */
 #ctx-menu,
 #obj-ctx-menu,
-#eyedropper-ctx-menu,
 #eyedropper-loupe,
+.eyedropper-loupe,
 #dialog,
 #island {
   background: var(--firefox-menu-bg);
@@ -205,7 +207,6 @@ body.eyedropper-enabled #multi-sel-overlay {
 
 #ctx-menu,
 #obj-ctx-menu,
-#eyedropper-ctx-menu,
 #ctx-actions {
   position: fixed;
   clip-path: none;
@@ -227,19 +228,12 @@ body.eyedropper-enabled #multi-sel-overlay {
   max-width: calc(100vw - 24px);
 }
 
-#eyedropper-ctx-menu {
-  width: 172px;
-  max-width: calc(100vw - 24px);
-}
-
 #ctx-menu.visible,
 #obj-ctx-menu.visible,
-#eyedropper-ctx-menu.visible,
 #ctx-actions.visible { display: block; }
 
 #ctx-menu *,
 #obj-ctx-menu *,
-#eyedropper-ctx-menu *,
 #ctx-actions * {
   user-select: none;
   -webkit-user-select: none;
@@ -397,13 +391,18 @@ body.eyedropper-enabled #multi-sel-overlay {
   bottom: 5%;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
+  display: none;
   align-items: center;
   z-index: 9000;
+  pointer-events: none;
+}
+
+#island.visible {
+  display: flex;
 }
 
 #isl-zoom {
-  cursor: pointer;
+  cursor: default;
   user-select: none;
   -webkit-user-select: none;
   height: var(--menu-item-height);
@@ -425,55 +424,45 @@ body.eyedropper-enabled #multi-sel-overlay {
   text-align: center;
   box-sizing: border-box;
   font-variant-numeric: tabular-nums;
-  transition: background 0.08s, color 0.5s ease, width 0.5s ease;
   overflow: hidden;
-}
-#isl-zoom:hover { background: var(--firefox-menu-hover-bg); }
-#isl-zoom:active { background: var(--menu-active-bg); }
-
-#isl-measure {
-  position: absolute;
-  visibility: hidden;
   pointer-events: none;
-  height: var(--menu-item-height);
-  padding: var(--menu-item-padding);
-  font-family: inherit;
-  font-size: var(--menu-item-font-size);
-  font-weight: var(--menu-item-font-weight);
-  line-height: var(--menu-item-line-height);
-  letter-spacing: var(--menu-item-letter-spacing);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  box-sizing: border-box;
 }
 
-#eyedropper-loupe {
+#eyedropper-loupe,
+.eyedropper-loupe {
   position: fixed;
   top: 0;
   left: 0;
   display: none;
   width: var(--eyedropper-loupe-width);
   max-width: calc(100vw - 24px);
-  z-index: 99990;
+  z-index: var(--eyedropper-card-z, var(--eyedropper-card-base-z));
   pointer-events: auto;
   font-size: var(--menu-item-font-size);
   font-weight: var(--menu-item-font-weight);
   letter-spacing: var(--menu-item-letter-spacing);
   -webkit-font-smoothing: antialiased;
 }
-#eyedropper-loupe.visible { display: block; }
+#eyedropper-loupe.visible,
+.eyedropper-loupe.visible { display: block; }
 #eyedropper-loupe.pinned,
-#eyedropper-loupe.dragging { cursor: pointer; }
+#eyedropper-loupe.dragging,
+.eyedropper-loupe.pinned,
+.eyedropper-loupe.dragging { cursor: pointer; }
 #eyedropper-loupe.pinned *,
-#eyedropper-loupe.dragging * { cursor: pointer; }
-#eyedropper-top {
+#eyedropper-loupe.dragging *,
+.eyedropper-loupe.pinned *,
+.eyedropper-loupe.dragging * { cursor: pointer; }
+#eyedropper-top,
+.eyedropper-top {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
   height: auto;
   margin: calc(var(--menu-shell-padding) * -1) calc(var(--menu-shell-padding) * -1) 0;
 }
-#eyedropper-preview {
+#eyedropper-preview,
+.eyedropper-preview {
   position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -484,13 +473,50 @@ body.eyedropper-enabled #multi-sel-overlay {
   overflow: hidden;
   background: var(--canvas-bg);
 }
-#eyedropper-canvas {
+#eyedropper-canvas,
+.eyedropper-canvas {
   width: 100%;
   height: 100%;
   display: block;
   image-rendering: pixelated;
 }
-#eyedropper-values {
+#eyedropper-close,
+.eyedropper-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--firefox-menu-text);
+  background: var(--firefox-menu-bg);
+  border: 1px solid var(--firefox-menu-border);
+  border-radius: var(--menu-shell-radius);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.24);
+  cursor: default;
+  -webkit-font-smoothing: antialiased;
+}
+#eyedropper-loupe.pinned #eyedropper-close,
+.eyedropper-loupe.pinned .eyedropper-close { display: flex; }
+#eyedropper-close:hover,
+.eyedropper-close:hover { background: var(--firefox-menu-hover-bg); }
+#eyedropper-close:active,
+.eyedropper-close:active { background: var(--firefox-menu-active-bg); }
+#eyedropper-close .material-symbols-outlined,
+.eyedropper-close .material-symbols-outlined {
+  display: block;
+  width: 18px;
+  height: 18px;
+  font-size: 18px;
+  line-height: 18px;
+  pointer-events: none;
+}
+#eyedropper-values,
+.eyedropper-values {
   --eyedropper-readout-height: calc((var(--menu-item-height) * 2) + (var(--menu-shell-padding) * 2));
   position: relative;
   width: calc(100% + (var(--menu-shell-padding) * 2));
@@ -504,7 +530,8 @@ body.eyedropper-enabled #multi-sel-overlay {
   background: var(--firefox-menu-bg);
   box-shadow: none;
 }
-#eyedropper-values::before {
+#eyedropper-values::before,
+.eyedropper-values::before {
   content: "RGB: 255 255 255";
   grid-column: 1;
   grid-row: 2;
@@ -535,7 +562,8 @@ body.eyedropper-enabled #multi-sel-overlay {
   min-width: 0;
   white-space: nowrap;
 }
-#eyedropper-swatch {
+#eyedropper-swatch,
+.eyedropper-swatch {
   display: block;
   grid-column: 2;
   grid-row: 1 / -1;
@@ -565,6 +593,23 @@ body.eyedropper-enabled #multi-sel-overlay {
   cursor: default;
 }
 #opening-shield.active { display: block; }
+#opening-shield.opening-freeze {
+  overflow: hidden;
+  background: var(--canvas-bg);
+}
+#opening-shield.opening-freeze *,
+#opening-shield.opening-freeze *::before,
+#opening-shield.opening-freeze *::after {
+  animation: none !important;
+  transition: none !important;
+}
+.opening-freeze-canvas {
+  position: absolute;
+  display: block;
+}
+.opening-freeze-card {
+  pointer-events: none !important;
+}
 
 #rubber-band {
   display: none;

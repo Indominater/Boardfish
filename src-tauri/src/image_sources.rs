@@ -16,9 +16,17 @@ pub(crate) struct CachedImageSource {
     pub(crate) bytes: Arc<[u8]>,
 }
 
+#[derive(Clone)]
+struct DecodedImageSource {
+    width: u32,
+    height: u32,
+    rgba: Arc<[u8]>,
+}
+
 struct CachedImageSourceEntry {
     source: CachedImageSource,
     materialized_paths: Vec<PathBuf>,
+    decoded: Option<DecodedImageSource>,
 }
 
 type CachedImageSources = Vec<(String, CachedImageSource)>;
@@ -35,6 +43,30 @@ impl ImageSourceCache {
             .get(key)
             .map(|entry| entry.source.clone())
             .ok_or_else(|| format!("image source cache missing for {key}"))
+    }
+
+    fn get_decoded(&self, key: &str) -> Result<Option<DecodedImageSource>, String> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get(key)
+            .and_then(|entry| entry.decoded.clone()))
+    }
+
+    fn cache_decoded(
+        &self,
+        key: &str,
+        source_bytes: &Arc<[u8]>,
+        decoded: DecodedImageSource,
+    ) -> Result<DecodedImageSource, String> {
+        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
+        if let Some(entry) = cache.get_mut(key) {
+            if Arc::ptr_eq(&entry.source.bytes, source_bytes) {
+                entry.decoded = Some(decoded.clone());
+            }
+        }
+        Ok(decoded)
     }
 
     pub(crate) fn get_many(&self, keys: &[String]) -> Result<CachedImageSources, String> {
@@ -77,6 +109,7 @@ impl ImageSourceCache {
                 CachedImageSourceEntry {
                     source,
                     materialized_paths: Vec::new(),
+                    decoded: None,
                 },
             )
             .map(|entry| entry.materialized_paths)
@@ -98,6 +131,7 @@ impl ImageSourceCache {
                 CachedImageSourceEntry {
                     source,
                     materialized_paths: Vec::new(),
+                    decoded: None,
                 },
             );
         }
@@ -169,15 +203,33 @@ pub(crate) struct ImageSourceResponse {
     bytes: usize,
     mime: String,
     ext: String,
+    width: u32,
+    height: u32,
 }
 
 #[derive(serde::Serialize)]
-pub(crate) struct ImageFileSourceResponse {
-    bytes: usize,
-    mime: String,
-    ext: String,
-    width: u32,
-    height: u32,
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SampledImagePixelResponse {
+    img_key: String,
+    source_w: u32,
+    source_h: u32,
+    source_x: u32,
+    source_y: u32,
+    rgba: Vec<u8>,
+    decode_ms: f64,
+    sample_ms: f64,
+    total_ms: f64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DecodedImageSourceResponse {
+    img_key: String,
+    source_w: u32,
+    source_h: u32,
+    cached: bool,
+    decode_ms: f64,
+    total_ms: f64,
 }
 
 #[derive(serde::Serialize)]
@@ -232,20 +284,24 @@ fn image_mime_ext_from_path(path: &str) -> (&'static str, &'static str) {
     }
 }
 
+fn image_dimensions_from_bytes(bytes: &[u8]) -> Result<(u32, u32), String> {
+    image::io::Reader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?
+        .into_dimensions()
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub(crate) async fn register_image_file_source(
     state: tauri::State<'_, ImageSourceCache>,
     img_key: String,
     path: String,
-) -> Result<ImageFileSourceResponse, String> {
+) -> Result<ImageSourceResponse, String> {
     let (source, width, height) = tokio::task::spawn_blocking(move || {
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         let (mime, ext) = image_mime_ext_from_path(&path);
-        let dimensions = image::io::Reader::new(std::io::Cursor::new(&bytes))
-            .with_guessed_format()
-            .map_err(|e| e.to_string())?
-            .into_dimensions()
-            .map_err(|e| e.to_string())?;
+        let dimensions = image_dimensions_from_bytes(&bytes)?;
         Ok::<_, String>((
             CachedImageSource {
                 mime: mime.to_string(),
@@ -262,7 +318,7 @@ pub(crate) async fn register_image_file_source(
     let mime = source.mime.clone();
     let ext = source.ext.clone();
     state.insert(img_key, source)?;
-    Ok(ImageFileSourceResponse {
+    Ok(ImageSourceResponse {
         bytes,
         mime,
         ext,
@@ -285,6 +341,91 @@ pub(crate) fn get_cached_image_data_url(
     ))
 }
 
+async fn decoded_cached_image_source(
+    state: &ImageSourceCache,
+    img_key: &str,
+) -> Result<(DecodedImageSource, bool, f64), String> {
+    if let Some(decoded) = state.get_decoded(img_key)? {
+        return Ok((decoded, true, 0.0));
+    }
+
+    let source = state.get(img_key)?;
+    let source_bytes = source.bytes.clone();
+    let decode_start = std::time::Instant::now();
+    let decoded = tokio::task::spawn_blocking(move || {
+        let image = image::load_from_memory(&source_bytes).map_err(|e| e.to_string())?;
+        let rgba = image.to_rgba8();
+        Ok::<_, String>(DecodedImageSource {
+            width: rgba.width(),
+            height: rgba.height(),
+            rgba: Arc::from(rgba.into_raw()),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let decode_ms = elapsed_ms(decode_start);
+    let decoded = state.cache_decoded(img_key, &source.bytes, decoded)?;
+    Ok((decoded, false, decode_ms))
+}
+
+#[tauri::command]
+pub(crate) async fn prewarm_cached_image_pixels(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_key: String,
+) -> Result<DecodedImageSourceResponse, String> {
+    let total_start = std::time::Instant::now();
+    let (decoded, cached, decode_ms) = decoded_cached_image_source(&state, &img_key).await?;
+
+    if decoded.width == 0 || decoded.height == 0 {
+        return Err(format!("decoded image has empty dimensions for {img_key}"));
+    }
+
+    Ok(DecodedImageSourceResponse {
+        img_key,
+        source_w: decoded.width,
+        source_h: decoded.height,
+        cached,
+        decode_ms,
+        total_ms: elapsed_ms(total_start),
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn sample_cached_image_pixel(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_key: String,
+    source_x: u32,
+    source_y: u32,
+) -> Result<SampledImagePixelResponse, String> {
+    let total_start = std::time::Instant::now();
+    let decoded = state
+        .get_decoded(&img_key)?
+        .ok_or_else(|| format!("decoded image source missing for {img_key}"))?;
+    let decode_ms = 0.0;
+
+    if decoded.width == 0 || decoded.height == 0 {
+        return Err(format!("decoded image has empty dimensions for {img_key}"));
+    }
+
+    let sample_start = std::time::Instant::now();
+    let source_x = source_x.min(decoded.width - 1);
+    let source_y = source_y.min(decoded.height - 1);
+    let index = ((source_y as usize * decoded.width as usize) + source_x as usize) * 4;
+    let rgba = decoded.rgba[index..index + 4].to_vec();
+
+    Ok(SampledImagePixelResponse {
+        img_key,
+        source_w: decoded.width,
+        source_h: decoded.height,
+        source_x,
+        source_y,
+        rgba,
+        decode_ms,
+        sample_ms: elapsed_ms(sample_start),
+        total_ms: elapsed_ms(total_start),
+    })
+}
+
 #[tauri::command]
 pub(crate) async fn materialize_cached_image_sources(
     state: tauri::State<'_, ImageSourceCache>,
@@ -296,9 +437,14 @@ pub(crate) async fn materialize_cached_image_sources(
         let dir = image_source_batch_dir();
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let mut result = Vec::with_capacity(sources.len());
+        let mut written_paths = Vec::with_capacity(sources.len());
         for (key, source) in sources {
             let path = image_source_file_path(&dir, &key, &source.ext);
-            std::fs::write(&path, &source.bytes).map_err(|e| e.to_string())?;
+            if let Err(err) = std::fs::write(&path, &source.bytes) {
+                cleanup_materialized_paths(written_paths);
+                return Err(err.to_string());
+            }
+            written_paths.push(path.clone());
             result.push((
                 MaterializedImageSource {
                     img_key: key,
@@ -340,7 +486,13 @@ pub(crate) async fn write_image_file_by_key(
     tokio::fs::write(path, &*source.bytes)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(ImageSourceResponse { bytes, mime, ext })
+    Ok(ImageSourceResponse {
+        bytes,
+        mime,
+        ext,
+        width: 0,
+        height: 0,
+    })
 }
 
 #[tauri::command]
@@ -349,14 +501,24 @@ pub(crate) async fn register_image_source(
     img_key: String,
     data_url: String,
 ) -> Result<ImageSourceResponse, String> {
-    let source = tokio::task::spawn_blocking(move || cached_source_from_data_url(&data_url))
-        .await
-        .map_err(|e| e.to_string())??;
+    let (source, width, height) = tokio::task::spawn_blocking(move || {
+        let source = cached_source_from_data_url(&data_url)?;
+        let (width, height) = image_dimensions_from_bytes(&source.bytes)?;
+        Ok::<_, String>((source, width, height))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let bytes = source.bytes.len();
     let mime = source.mime.clone();
     let ext = source.ext.clone();
     state.insert(img_key, source)?;
-    Ok(ImageSourceResponse { bytes, mime, ext })
+    Ok(ImageSourceResponse {
+        bytes,
+        mime,
+        ext,
+        width,
+        height,
+    })
 }
 
 #[tauri::command]

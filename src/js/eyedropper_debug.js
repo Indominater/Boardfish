@@ -2,7 +2,7 @@
 
 var EyedropperDebug = (() => {
   const core = createDebugRecorder({
-    maxEvents: 500,
+    maxEvents: 2500,
     label: '[Boardfish eyedropper]',
     sanitize: (value) => sanitizeDebugMeta(value, { roundNumbers: true }),
   });
@@ -15,6 +15,7 @@ var EyedropperDebug = (() => {
   const MAX_PREVIEW_PRESENT_SAMPLES = 80;
   const MAX_LONG_TASKS = 80;
   const MAX_FRAME_GAPS = 80;
+  const STUTTER_FRAME_GAP_MS = 120;
   const slowSamples = [];
   const firstSamples = [];
   const previewMismatchSamples = [];
@@ -25,6 +26,7 @@ var EyedropperDebug = (() => {
   let longTaskObserver = null;
   let frameProbeRaf = null;
   let lastFrameProbeAt = 0;
+  let lastSamplingEvent = null;
   const phaseStats = {};
   const perfStats = {
     sampleMoves: 0,
@@ -52,6 +54,9 @@ var EyedropperDebug = (() => {
     maxLongTaskMs: 0,
     frameGaps: 0,
     maxFrameGapMs: 0,
+    stuttersOver120ms: 0,
+    stuttersOver200ms: 0,
+    stuttersOver300ms: 0,
   };
   const stats = {
     interactionEvents: 0,
@@ -66,14 +71,13 @@ var EyedropperDebug = (() => {
     safeDataUrlLoads: 0,
     safeDataUrlPending: 0,
     nativeSourceHydrationSkipped: 0,
-    prewarmRuns: 0,
-    prewarmCandidates: 0,
-    prewarmReady: 0,
-    viewportPrewarmRuns: 0,
-    viewportPrewarmCandidates: 0,
-    viewportPrewarmReady: 0,
     safeScaledEvictions: 0,
     safeScaledMemorySkips: 0,
+    nativePixelRequests: 0,
+    nativePixelReady: 0,
+    nativePixelResolveMisses: 0,
+    nativePixelBusySkips: 0,
+    nativePixelReadoutPending: 0,
   };
 
   function statKey(where) {
@@ -216,6 +220,22 @@ var EyedropperDebug = (() => {
     }
   }
 
+  function logSamplingEvent(event, meta = {}) {
+    if (!core.enabled) return;
+    lastSamplingEvent = {
+      at: roundMs(performance.now()),
+      event,
+      clientX: meta.clientX ?? '',
+      clientY: meta.clientY ?? '',
+      sampleMs: roundMs(meta.sampleMs),
+      inputAgeMs: meta.inputAgeAtReceiveMs ?? meta.inputAgeAtCommitMs ?? '',
+      queueDelayMs: meta.queueDelayMs ?? '',
+      coalescedMoves: meta.coalescedMoves ?? meta.frameCoalescedMoves ?? '',
+      pendingCoalescedMoves: meta.pendingCoalescedMoves ?? '',
+    };
+    core.push({ step: 'sample-event', meta: { event, ...meta } });
+  }
+
   function recordPrewarmTiming(summary = {}, ms = 0) {
     if (!core.enabled) return;
     perfStats.prewarmRunsTimed++;
@@ -243,7 +263,7 @@ var EyedropperDebug = (() => {
 
   function debugLimit(options = {}, fallback = 25) {
     const raw = typeof options === 'number' ? options : options?.limit;
-    return Math.max(1, Math.min(200, Number(raw) || fallback));
+    return Math.max(1, Math.min(1000, Number(raw) || fallback));
   }
 
   function recentRows(rows, options = {}, fallback = 25) {
@@ -290,6 +310,54 @@ var EyedropperDebug = (() => {
       nativeSkipped: e.meta?.nativeSourceHydrationSkipped ?? '',
       lastMissingKey: e.meta?.lastMissingKey || '',
       lastMissingReason: e.meta?.lastMissingReason || '',
+    };
+  }
+
+  function sampleEventRow(e) {
+    return {
+      at: e.at,
+      event: e.meta?.event || e.step || '',
+      first: e.meta?.firstSample ?? '',
+      x: e.meta?.clientX ?? '',
+      y: e.meta?.clientY ?? '',
+      imgKey: e.meta?.imgKey ?? '',
+      sourceKind: e.meta?.sourceKind ?? '',
+      sourceX: e.meta?.sourceX ?? '',
+      sourceY: e.meta?.sourceY ?? '',
+      durationMs: e.meta?.durationMs ?? '',
+      stageMs: e.meta?.stageMs ?? '',
+      inputAgeMs: e.meta?.inputAgeAtReceiveMs ?? e.meta?.inputAgeAtCommitMs ?? '',
+      queueDelayMs: e.meta?.queueDelayMs ?? '',
+      coalescedMoves: e.meta?.coalescedMoves ?? e.meta?.frameCoalescedMoves ?? '',
+      pendingCoalescedMoves: e.meta?.pendingCoalescedMoves ?? '',
+      sampleRafActive: e.meta?.sampleRafActive ?? '',
+      sampleMs: e.meta?.sampleMs ?? '',
+      paintMs: e.meta?.paintMs ?? '',
+      readoutMs: e.meta?.readoutMs ?? '',
+      positionMs: e.meta?.positionMs ?? '',
+      previewPainted: e.meta?.previewPainted ?? '',
+      drawnImages: e.meta?.drawnImages ?? '',
+      pendingImages: e.meta?.readbackSafePendingImages ?? '',
+      safeImagePending: e.meta?.safeImagePending ?? '',
+      missingImages: e.meta?.missingImages ?? '',
+      inFlight: e.meta?.inFlight ?? '',
+      hasPointer: e.meta?.hasPointer ?? '',
+      latestX: e.meta?.latestClientX ?? '',
+      latestY: e.meta?.latestClientY ?? '',
+      latestAgeMs: e.meta?.latestPointerAgeMs ?? '',
+      objectId: e.meta?.objectId ?? e.meta?.topObjectId ?? '',
+      objectType: e.meta?.objectType ?? e.meta?.topObjectType ?? '',
+      reason: e.meta?.reason ?? '',
+      targetKey: e.meta?.targetKey ?? '',
+      targetX: e.meta?.targetSourceX ?? '',
+      targetY: e.meta?.targetSourceY ?? '',
+      lastKey: e.meta?.lastKey ?? '',
+      lastX: e.meta?.lastSourceX ?? '',
+      lastY: e.meta?.lastSourceY ?? '',
+      clickToPreviewVisibleMs: e.meta?.clickToPreviewVisibleMs ?? '',
+      eventToPreviewVisibleMs: e.meta?.eventToPreviewVisibleMs ?? '',
+      clickToPreviewFrameMs: e.meta?.clickToPreviewFrameMs ?? '',
+      eventToPreviewFrameMs: e.meta?.eventToPreviewFrameMs ?? '',
     };
   }
 
@@ -689,12 +757,17 @@ var EyedropperDebug = (() => {
 
   function recordFrameGap(frameAt, previousFrameAt) {
     const gapMs = frameAt - previousFrameAt;
-    if (gapMs <= 250) return;
+    if (gapMs <= STUTTER_FRAME_GAP_MS) return;
     perfStats.frameGaps++;
+    perfStats.stuttersOver120ms++;
+    if (gapMs > 200) perfStats.stuttersOver200ms++;
+    if (gapMs > 300) perfStats.stuttersOver300ms++;
     perfStats.maxFrameGapMs = Math.max(perfStats.maxFrameGapMs, gapMs);
     frameGaps.push({
       at: roundMs(frameAt),
       gapMs: roundMs(gapMs),
+      severity: gapMs > 300 ? 'major' : gapMs > 200 ? 'visible' : 'minor',
+      thresholdMs: STUTTER_FRAME_GAP_MS,
       enabled: eyedropperEnabled,
       sampling: eyedropperSampling,
       loupeVisible: isEyedropperSampleVisible(),
@@ -705,6 +778,10 @@ var EyedropperDebug = (() => {
         ? roundMs(Math.max(0, performance.now() - _eyedropperLatestPointerEvent.receivedAt))
         : '',
       safeImagePending: eyedropperSafeImagePromises.size,
+      safeScaledPending: eyedropperSafeScaledBitmapPending.size,
+      tileCachePending: eyedropperSafeTileCachePending.size,
+      tileCacheSize: eyedropperSafeTileCache.size,
+      lastSamplingEvent,
       visibility: document.visibilityState || '',
       hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : '',
     });
@@ -927,10 +1004,8 @@ var EyedropperDebug = (() => {
         assignMs: e.meta?.assignMs ?? '',
         wallpaperMs: e.meta?.wallpaperMs ?? '',
         shieldMs: e.meta?.shieldMs ?? '',
-        buttonMs: e.meta?.buttonMs ?? '',
         bodyClassMs: e.meta?.bodyClassMs ?? '',
-        commandStateMs: e.meta?.commandStateMs ?? '',
-        ctxActionsMs: e.meta?.ctxActionsMs ?? '',
+        hideMenusMs: e.meta?.hideMenusMs ?? '',
         prewarmScheduleMs: e.meta?.prewarmScheduleMs ?? '',
         hideSampleMs: e.meta?.hideSampleMs ?? '',
         selectionOverlayMs: e.meta?.selectionOverlayMs ?? '',
@@ -938,8 +1013,6 @@ var EyedropperDebug = (() => {
         shieldActive: e.meta?.shieldActive ?? '',
         loupeVisible: e.meta?.loupeVisible ?? '',
         safeImagePending: e.meta?.safeImagePending ?? '',
-        viewportPrewarmScheduled: e.meta?.viewportPrewarmScheduled ?? '',
-        viewportPrewarmRafActive: e.meta?.viewportPrewarmRafActive ?? '',
         viewportScaleQueueLength: e.meta?.viewportScaleQueueLength ?? '',
       })), options, 20);
   }
@@ -1065,6 +1138,7 @@ var EyedropperDebug = (() => {
       slowPreviewPresentSamples.push(row);
       if (slowPreviewPresentSamples.length > MAX_PREVIEW_PRESENT_SAMPLES) slowPreviewPresentSamples.shift();
     }
+    core.push({ step: 'preview-present', meta: row });
   }
 
   function slowPreviewPresentSummary(options = {}) {
@@ -1089,6 +1163,87 @@ var EyedropperDebug = (() => {
     const rows = recentRows(frameGaps, options, 25);
     console.table(rows);
     return rows;
+  }
+
+  function stutterSummary(options = {}) {
+    const rows = recentRows(frameGaps.map(row => ({
+      at: row.at,
+      gapMs: row.gapMs,
+      severity: row.severity,
+      sampling: row.sampling,
+      loupeVisible: row.loupeVisible,
+      sampleRafActive: row.sampleRafActive,
+      pendingSampleEvent: row.pendingSampleEvent,
+      pendingCoalescedMoves: row.pendingCoalescedMoves,
+      latestPointerAgeMs: row.latestPointerAgeMs,
+      safeImagePending: row.safeImagePending,
+      safeScaledPending: row.safeScaledPending,
+      tileCachePending: row.tileCachePending,
+      tileCacheSize: row.tileCacheSize,
+      lastEvent: row.lastSamplingEvent?.event || '',
+      lastEventAgeMs: row.lastSamplingEvent?.at ? roundMs(row.at - row.lastSamplingEvent.at) : '',
+      lastEventSampleMs: row.lastSamplingEvent?.sampleMs ?? '',
+      lastEventQueueDelayMs: row.lastSamplingEvent?.queueDelayMs ?? '',
+      visibility: row.visibility,
+      hasFocus: row.hasFocus,
+    })), options, 40);
+    console.table(rows);
+    return rows;
+  }
+
+  function eventTimeline(options = {}) {
+    const rows = recentRows(events
+      .filter(e => e.step === 'sample-event' || e.step === 'preview-present')
+      .map(sampleEventRow), options, 80);
+    console.table(rows);
+    return rows;
+  }
+
+  function safeImageTimeline(options = {}) {
+    const rows = recentRows(events
+      .filter(e => e.step === 'sample-event' && String(e.meta?.event || '').startsWith('safe-image'))
+      .map(sampleEventRow), options, 80);
+    console.table(rows);
+    return rows;
+  }
+
+  function nativePixelTimeline(options = {}) {
+    const rows = recentRows(events
+      .filter(e => e.step === 'sample-event' && String(e.meta?.event || '').startsWith('native-pixel'))
+      .map(sampleEventRow), options, 120);
+    console.table(rows);
+    return rows;
+  }
+
+  function nativePixelSummary(options = {}) {
+    const nativeEvents = events.filter(e => e.step === 'sample-event' && String(e.meta?.event || '').startsWith('native-pixel'));
+    const byEvent = {};
+    const byReason = {};
+    for (const entry of nativeEvents) {
+      const event = entry.meta?.event || '';
+      const reason = entry.meta?.reason || '';
+      byEvent[event] = (byEvent[event] || 0) + 1;
+      if (reason) byReason[reason] = (byReason[reason] || 0) + 1;
+    }
+    const out = {
+      totals: {
+        events: nativeEvents.length,
+        requests: byEvent['native-pixel-request-start'] || 0,
+        ready: byEvent['native-pixel-ready'] || 0,
+        resolveMisses: byEvent['native-pixel-resolve-miss'] || 0,
+        busySkips: byEvent['native-pixel-queue-busy'] || 0,
+        readoutPending: byEvent['native-pixel-readout-pending'] || 0,
+        discarded: byEvent['native-pixel-discarded'] || 0,
+      },
+      byEvent,
+      byReason,
+      recent: recentRows(nativeEvents.map(sampleEventRow), options, 40),
+    };
+    if (options.table !== false) {
+      console.table([out.totals]);
+      console.table(out.recent);
+    }
+    return out;
   }
 
   function sampleAt(clientX, clientY) {
@@ -1184,6 +1339,7 @@ var EyedropperDebug = (() => {
   function report(options = {}) {
     const sampleEvents = events.filter(e => e.step === 'sample');
     const failureEvents = events.filter(e => e.step === 'readback-fail' || e.step === 'fallback-sample' || e.step === 'unsafe-image-skip');
+    const timelineEvents = events.filter(e => e.step === 'sample-event' || e.step === 'preview-present');
     const sampleLimit = debugLimit(options?.samples ?? options, 12);
     const failureLimit = debugLimit(options?.failures ?? options, 12);
     const totals = {
@@ -1195,9 +1351,6 @@ var EyedropperDebug = (() => {
       firstSamples: perfStats.firstSamples,
       coalescedMoves: perfStats.sampleCoalescedMoves,
       prewarmRunsTimed: perfStats.prewarmRunsTimed,
-      viewportPrewarmRuns: stats.viewportPrewarmRuns,
-      viewportPrewarmCandidates: stats.viewportPrewarmCandidates,
-      viewportPrewarmReady: stats.viewportPrewarmReady,
       slowSamples: perfStats.slowSamples,
       maxSampleMs: roundMs(perfStats.maxSampleMs),
       maxFirstSampleMs: roundMs(perfStats.maxFirstSampleMs),
@@ -1220,8 +1373,12 @@ var EyedropperDebug = (() => {
       previewPresent: recentRows(previewPresentSamples, options?.present ?? options, 12),
       slowPreviewPresent: recentRows(slowPreviewPresentSamples, options?.slowPresent ?? options, 12),
       previewMismatches: recentRows(previewMismatchSamples, options?.preview ?? options, 12),
+      eventTimeline: recentRows(timelineEvents.map(sampleEventRow), options?.timeline ?? options, 30),
+      safeImageTimeline: safeImageTimeline({ table: false, limit: debugLimit(options?.safeImages ?? options, 80) }),
+      nativePixel: nativePixelSummary({ table: false, limit: debugLimit(options?.nativePixel ?? options, 40) }),
       longTasks: recentRows(longTasks, options?.longTasks ?? options, 12),
       frameGaps: recentRows(frameGaps, options?.frameGaps ?? options, 12),
+      stutters: stutterSummary({ table: false, limit: debugLimit(options?.stutters ?? options, 12) }),
       recentFailures: recentRows(failureEvents.map(failureRow), failureLimit, failureLimit),
       recentInteractions: recentRows(events.filter(e => e.step === 'interaction').map(e => ({
         at: e.at,
@@ -1240,13 +1397,6 @@ var EyedropperDebug = (() => {
     return out;
   }
 
-  function prewarmAt(clientX, clientY, options = {}) {
-    const result = prewarmEyedropperSafeImages(Number(clientX), Number(clientY), options);
-    console.table([result.summary]);
-    if (result.rows.length) console.table(result.rows);
-    return result;
-  }
-
   function last(options = {}) {
     const compact = options?.compact !== false;
     const out = compact ? compactLastSample() : lastSample;
@@ -1261,6 +1411,7 @@ var EyedropperDebug = (() => {
     for (const key of Object.keys(stats)) stats[key] = 0;
     for (const key of Object.keys(perfStats)) perfStats[key] = 0;
     for (const key of Object.keys(phaseStats)) delete phaseStats[key];
+    lastSamplingEvent = null;
     slowSamples.length = 0;
     firstSamples.length = 0;
     previewPresentSamples.length = 0;
@@ -1302,13 +1453,17 @@ var EyedropperDebug = (() => {
     previewMismatchSummary,
     longTaskSummary,
     frameGapSummary,
+    stutterSummary,
+    eventTimeline,
+    safeImageTimeline,
+    nativePixelTimeline,
+    nativePixelSummary,
     slowSampleSummary,
     readbackFailures,
     status,
     state: runtimeState,
     sampleAt,
     readoutAt,
-    prewarmAt,
     textBoundsReport,
     last,
     get enabled() { return core.enabled; },
@@ -1320,6 +1475,7 @@ var EyedropperDebug = (() => {
     _logUnsafeImageSkip: logUnsafeImageSkip,
     _logInteraction: logInteraction,
     _logToggle: logToggle,
+    _logSamplingEvent: logSamplingEvent,
     _logPreviewPresent: logPreviewPresent,
     _startFrameProbe: startFrameProbe,
     _stopFrameProbe: stopFrameProbe,

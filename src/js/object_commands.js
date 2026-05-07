@@ -97,10 +97,10 @@ async function runShieldedPillTask({
   try {
     if (startMessage) startPillTask({ message: startMessage });
     const result = await task();
-    finishPillTransition({ beforeTransition: releaseInputShield, finalMsg: successMessage });
+    finishPillTask({ beforeFinish: releaseInputShield, finalMsg: successMessage });
     return result;
   } catch (err) {
-    finishPillTransition({ beforeTransition: releaseInputShield });
+    finishPillTask({ beforeFinish: releaseInputShield });
     throw err;
   }
 }
@@ -119,11 +119,15 @@ async function newBoard() {
   }
   const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
   BoardfishEditorState.setBoardOpening(true);
-  openingShield.classList.add('active');
+  if (typeof beginOpeningFreeze === 'function') beginOpeningFreeze();
+  else openingShield.classList.add('active');
   const openingStart = performance.now();
   await startPillTask({ message: 'Opening' });
   setEyedropperEnabled(false);
   BoardfishEditorState.resetBoardObjectState();
+  if (typeof clearEyedropperCardsForBoard === 'function') {
+    clearEyedropperCardsForBoard({ markDirty: false });
+  }
   OpenDebug.step(dbg, 'exitEdit', {});
   clearJsClipboard();
   invalidateOffscreen();
@@ -140,8 +144,11 @@ async function newBoard() {
   OpenDebug.step(dbg, 'workDone', { elapsed });
   _boardOpening = false;
   applyTransform();
-  finishPillTransition({
-    beforeTransition: () => openingShield.classList.remove('active'),
+  finishPillTask({
+    beforeFinish: () => {
+      if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
+      else openingShield.classList.remove('active');
+    },
   });
   OpenDebug.end(dbg, { totalMs: elapsed });
 }
@@ -172,8 +179,15 @@ function duplicateSelected() {
 
 function deleteSelected() {
   if (!hasSelection() || editingId) return;
-  BoardfishEditorState.removeSelectedObjects();
-  BoardfishEditorState.clearSelection();
+  const idsToDelete = selectedUnlockedObjectIds();
+  if (!idsToDelete.length) return;
+  BoardfishEditorState.removeObjectsById(idsToDelete);
+  if (selectedIds.size) {
+    const remaining = [...selectedIds];
+    BoardfishEditorState.setSelection(remaining, { primaryId: remaining[remaining.length - 1], exitEditing: false });
+  } else {
+    BoardfishEditorState.clearSelection();
+  }
   scheduleRender(true, true);
   pushHistory('delete-selected');
 }

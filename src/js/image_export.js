@@ -44,7 +44,7 @@ async function saveSelectedImage() {
         { imgKey: key, path }
       );
       ExportDebug.end(dbg, { saved: true, bytesMB: result?.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : 0 });
-      finishPillTransition({ beforeTransition: releaseInputShield, finalMsg: 'Image Exported' });
+      finishPillTask({ beforeFinish: releaseInputShield, finalMsg: 'Image Exported' });
     } catch (err) {
       releaseInputShield();
       ExportDebug.end(dbg, { error: String(err) });
@@ -380,7 +380,7 @@ async function exportImageBatch({
       tempKeys = resolved.tempKeys;
       ExportDebug.step(dbg, 'keys:ready', { keyCount: keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
       if (!keys.length) {
-        finishPillTransition({ beforeTransition: hideInputShield, busyPill });
+        finishPillTask({ beforeFinish: hideInputShield, busyPill });
         stopTotalWatch({ skipped: true });
         ExportDebug.end(dbg, { skipped: true, reason: 'no-keys' });
         return;
@@ -394,17 +394,17 @@ async function exportImageBatch({
       stopTotalWatch({ savedCount });
       ExportDebug.end(dbg, { savedCount, ...BoardfishExportUtils.normalizeSaveResult(saveResult) });
       if (savedCount > 0) {
-        finishPillTransition({
-          beforeTransition: () => BoardfishExportUtils.finishImageExportInputShield(clearSelectionAfter),
+        finishPillTask({
+          beforeFinish: () => BoardfishExportUtils.finishImageExportInputShield(clearSelectionAfter),
           busyPill,
           finalMsg: savedCount === 1 ? '1 Image Exported' : `${savedCount} Images Exported`,
         });
       }
       else {
-        finishPillTransition({ beforeTransition: hideInputShield, busyPill });
+        finishPillTask({ beforeFinish: hideInputShield, busyPill });
       }
     } catch (err) {
-      if (busyPill) finishPillTransition({ beforeTransition: hideInputShield, busyPill });
+      if (busyPill) finishPillTask({ beforeFinish: hideInputShield, busyPill });
       else hideInputShield();
       stopTotalWatch({ error: String(err) });
       ExportDebug.end(dbg, { error: String(err) });

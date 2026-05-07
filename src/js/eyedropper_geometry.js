@@ -48,6 +48,7 @@
       clientToBoardScreenPoint,
       clientToBoardWorldPoint,
       displayedBoardSourcePoint,
+      imageBoundsDistanceSqToWorldPoint: objectGeometry.imageBoundsDistanceSqToWorldPoint,
       objectContainsWorldPoint: objectGeometry.objectContainsWorldPoint,
       screenToBoardWorldPoint,
       topObjectAtWorldPoint: objectGeometry.topObjectAtWorldPoint,

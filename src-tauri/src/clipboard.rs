@@ -34,6 +34,24 @@ pub(crate) struct ClipboardCopyTiming {
     macos_fallback_ms: Option<f64>,
 }
 
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClipboardReadImageResponse {
+    img_key: String,
+    path: String,
+    width: u32,
+    height: u32,
+    pixels: u64,
+    rgba_mb: f64,
+    bytes: usize,
+    mime: String,
+    ext: String,
+    total_ms: f64,
+    read_ms: Option<f64>,
+    png_encode_ms: Option<f64>,
+    cache_insert_ms: Option<f64>,
+}
+
 fn clipboard_debug(label: &str, start: std::time::Instant) {
     if CLIPBOARD_DEBUG.load(Ordering::Relaxed) {
         eprintln!(
@@ -223,13 +241,14 @@ fn decode_data_url_to_cached_image_timed(
 pub(crate) async fn read_image_from_clipboard_cached(
     source_state: tauri::State<'_, ImageSourceCache>,
     img_key: String,
-) -> Result<String, String> {
+) -> Result<ClipboardReadImageResponse, String> {
     let total = std::time::Instant::now();
-    let (data_url, source) = tokio::task::spawn_blocking(|| {
-        use base64::{engine::general_purpose, Engine as _};
+    let img_key_for_worker = img_key.clone();
+    let (source, mut response) = tokio::task::spawn_blocking(move || {
         let read = std::time::Instant::now();
         let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
         let img = clipboard.get_image().map_err(|e| e.to_string())?;
+        let read_ms = elapsed_ms(read);
         clipboard_debug("read_image_from_clipboard_cached get_image", read);
 
         let width = img.width as u32;
@@ -246,28 +265,40 @@ pub(crate) async fn read_image_from_clipboard_cached(
                 image::ImageFormat::Png,
             )
             .map_err(|e| e.to_string())?;
+        let png_encode_ms = elapsed_ms(encode);
         clipboard_debug("read_image_from_clipboard_cached png encode", encode);
+        let bytes = png_bytes.len();
         let source = CachedImageSource {
             mime: "image/png".to_string(),
             ext: "png".to_string(),
-            bytes: Arc::from(png_bytes.clone()),
+            bytes: Arc::from(png_bytes),
         };
-        Ok::<_, String>((
-            format!(
-                "data:image/png;base64,{}",
-                general_purpose::STANDARD.encode(&png_bytes)
-            ),
-            source,
-        ))
+        let response = ClipboardReadImageResponse {
+            img_key: img_key_for_worker,
+            path: "native-image-cache".to_string(),
+            width,
+            height,
+            pixels: width as u64 * height as u64,
+            rgba_mb: rgba_mb(width, height),
+            bytes,
+            mime: "image/png".to_string(),
+            ext: "png".to_string(),
+            read_ms: Some(read_ms),
+            png_encode_ms: Some(png_encode_ms),
+            ..Default::default()
+        };
+        Ok::<_, String>((source, response))
     })
     .await
     .map_err(|e| e.to_string())??;
 
     let lock = std::time::Instant::now();
     source_state.insert(img_key, source)?;
+    response.cache_insert_ms = Some(elapsed_ms(lock));
+    response.total_ms = elapsed_ms(total);
     clipboard_debug("read_image_from_clipboard_cached lock+insert", lock);
     clipboard_debug("read_image_from_clipboard_cached total", total);
-    Ok(data_url)
+    Ok(response)
 }
 
 #[tauri::command]

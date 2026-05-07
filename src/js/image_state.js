@@ -29,11 +29,31 @@ function imageStoreBytesEstimate(src) {
   return 0;
 }
 
+function imageSourceDebugInfo(src) {
+  if (typeof src !== 'string') {
+    return {
+      kind: isNativeImageRef(src) ? 'native-ref' : typeof src,
+      length: '',
+      prefix: '',
+    };
+  }
+  const comma = src.indexOf(',');
+  return {
+    kind: src.startsWith('data:') ? 'data-url' : src.startsWith('asset:') ? 'asset-url' : 'string',
+    length: src.length,
+    prefix: comma > 0 ? src.slice(0, comma) : src.slice(0, 96),
+  };
+}
+
 function cacheImageSourceForSave(key, src, dbg = null) {
   if (!hasTauri() || !src || isNativeImageRef(src)) return Promise.resolve();
   const existing = imageSourceCachePromises.get(key);
   if (existing) return existing;
   const promise = SaveDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src), { imgKey: key, dataUrl: src })
+    .then((result) => {
+      if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-source-ready');
+      return result;
+    })
     .finally(() => imageSourceCachePromises.delete(key));
   imageSourceCachePromises.set(key, promise);
   return promise;
@@ -47,6 +67,10 @@ function cacheImageSourceForExport(key, src, dbg = null) {
     return existing;
   }
   const promise = ExportDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src), { imgKey: key })
+    .then((result) => {
+      if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-source-ready');
+      return result;
+    })
     .finally(() => imageSourceCachePromises.delete(key));
   imageSourceCachePromises.set(key, promise);
   return promise;
@@ -250,6 +274,15 @@ async function ensureCanvasSafeNativeImageDataUrl(key, unsafeSrc = '', dbg = nul
 }
 
 function convertTauriFileSrc(path) {
+  if (typeof path === 'string' && path.startsWith('data:')) {
+    const info = imageSourceDebugInfo(path);
+    console.warn('[Boardfish image] convertTauriFileSrc received data URL', info);
+    if (typeof ClipDebug !== 'undefined') {
+      const dbg = ClipDebug.start('convertTauriFileSrc', info);
+      ClipDebug.end(dbg, { error: 'data-url-used-as-file-src', ...info });
+    }
+    return path;
+  }
   return tauriConvertFileSrc(path);
 }
 
@@ -290,7 +323,37 @@ async function materializeImageAssets(keys, dbg = null) {
           skipped++;
           continue;
         }
+        const pathInfo = imageSourceDebugInfo(entry.path);
+        OpenDebug.step(dbg, 'materialize-image-assets:entry', {
+          imgKey: key,
+          pathKind: pathInfo.kind,
+          pathLen: pathInfo.length,
+          pathPrefix: pathInfo.prefix,
+        });
+        if (typeof ClipDebug !== 'undefined') {
+          ClipDebug.step(dbg, 'materialize-image-assets:entry', {
+            imgKey: key,
+            pathKind: pathInfo.kind,
+            pathLen: pathInfo.length,
+            pathPrefix: pathInfo.prefix,
+          });
+        }
         imageAssetUrlCache[key] = convertTauriFileSrc(entry.path);
+        const assetInfo = imageSourceDebugInfo(imageAssetUrlCache[key]);
+        OpenDebug.step(dbg, 'materialize-image-assets:asset-url', {
+          imgKey: key,
+          assetKind: assetInfo.kind,
+          assetLen: assetInfo.length,
+          assetPrefix: assetInfo.prefix,
+        });
+        if (typeof ClipDebug !== 'undefined') {
+          ClipDebug.step(dbg, 'materialize-image-assets:asset-url', {
+            imgKey: key,
+            assetKind: assetInfo.kind,
+            assetLen: assetInfo.length,
+            assetPrefix: assetInfo.prefix,
+          });
+        }
         count++;
       }
       OpenDebug.step(dbg, 'materialize-image-assets', { requested: pending.length, returned: entries?.length || 0, count, skipped });
@@ -433,6 +496,23 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     readbackSafe: '',
   };
   const vpDbg = ViewportDebug.start('cacheImage', { key, src, reusedLoadedImage: !!loadedImg });
+  const srcInfo = imageSourceDebugInfo(src);
+  OpenDebug.step(dbg, 'cache-image:source', {
+    imgKey: key,
+    sourceKind: srcInfo.kind,
+    sourceLen: srcInfo.length,
+    sourcePrefix: srcInfo.prefix,
+    skipSourceRegistration: options.skipSourceRegistration === true,
+  });
+  if (typeof ClipDebug !== 'undefined') {
+    ClipDebug.step(dbg, 'cache-image:source', {
+      imgKey: key,
+      sourceKind: srcInfo.kind,
+      sourceLen: srcInfo.length,
+      sourcePrefix: srcInfo.prefix,
+      skipSourceRegistration: options.skipSourceRegistration === true,
+    });
+  }
   let img = loadedImg || new Image();
   let resolveReady;
   const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
@@ -492,6 +572,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
 
     img = loaded;
     imageCache[key] = loaded;
+    if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-load');
 
     const queuedAt = performance.now();
     OpenDebug.step(dbg, 'cache-image:decode-queue:queued', { imgKey: key, active: _imageDecodeActive, queued: _imageDecodeQueue.length });
@@ -577,7 +658,24 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     imageBitmapFailed.add(key);
     cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
     ViewportDebug.end(vpDbg, { key, error: 'image load failed' });
-    OpenDebug.step(dbg, 'cache-image:load-error', { imgKey: key, ms: cacheMetrics.cacheTotalMs, error: 'image load failed' });
+    OpenDebug.step(dbg, 'cache-image:load-error', {
+      imgKey: key,
+      ms: cacheMetrics.cacheTotalMs,
+      error: 'image load failed',
+      sourceKind: srcInfo.kind,
+      sourceLen: srcInfo.length,
+      sourcePrefix: srcInfo.prefix,
+    });
+    if (typeof ClipDebug !== 'undefined') {
+      ClipDebug.step(dbg, 'cache-image:load-error', {
+        imgKey: key,
+        ms: cacheMetrics.cacheTotalMs,
+        error: 'image load failed',
+        sourceKind: srcInfo.kind,
+        sourceLen: srcInfo.length,
+        sourcePrefix: srcInfo.prefix,
+      });
+    }
     resolveReady(cacheMetrics);
   };
   if (loadedImg) {
@@ -587,7 +685,20 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   } else {
     img.src = src;
     ViewportDebug.step(vpDbg, 'set-src', { src });
-    OpenDebug.step(dbg, 'cache-image:set-src', { imgKey: key });
+    OpenDebug.step(dbg, 'cache-image:set-src', {
+      imgKey: key,
+      sourceKind: srcInfo.kind,
+      sourceLen: srcInfo.length,
+      sourcePrefix: srcInfo.prefix,
+    });
+    if (typeof ClipDebug !== 'undefined') {
+      ClipDebug.step(dbg, 'cache-image:set-src', {
+        imgKey: key,
+        sourceKind: srcInfo.kind,
+        sourceLen: srcInfo.length,
+        sourcePrefix: srcInfo.prefix,
+      });
+    }
   }
   if (!_skipImageSourceRegistration && !options.skipSourceRegistration) cacheImageSourceForSave(key, src).catch(() => {});
   return readyPromise;

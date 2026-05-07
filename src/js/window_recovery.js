@@ -26,7 +26,6 @@ function recoverWindowPaint(reason = 'resume', hardRepaint = false) {
   document.body.style.opacity = '';
   canvas.style.display = '';
   boardCanvas.style.display = '';
-  islZoom.style.display = '';
   updateInputShieldVisual();
   if (dialogOverlay.classList.contains('show') && !_dialogResolve) dialogOverlay.classList.remove('show');
   if (!ctxMenu.classList.contains('visible') && !objCtxMenu.classList.contains('visible')) {
@@ -41,7 +40,6 @@ function recoverWindowPaint(reason = 'resume', hardRepaint = false) {
   }
   requestAnimationFrame(() => {
     resizeCanvas();
-    updateZoomDisplay(true);
     scheduleRender(true, true, reason);
     requestAnimationFrame(() => {
       applyTransform();
@@ -54,16 +52,13 @@ function recoverBlankUi(reason = 'watchdog') {
   if (document.hidden) return;
   const bodyStyle = getComputedStyle(document.body);
   const canvasStyle = getComputedStyle(boardCanvas);
-  const islandStyle = getComputedStyle(islZoom);
   const canvasMissing = boardCanvas.width === 0 || boardCanvas.height === 0;
   const hidden =
     bodyStyle.display === 'none' ||
     bodyStyle.visibility === 'hidden' ||
     bodyStyle.opacity === '0' ||
     canvasStyle.display === 'none' ||
-    canvasStyle.visibility === 'hidden' ||
-    islandStyle.display === 'none' ||
-    islandStyle.visibility === 'hidden';
+    canvasStyle.visibility === 'hidden';
 
   if (!hidden && !canvasMissing) return;
   recoverWindowPaint(`blank-ui:${reason}`, hidden);
@@ -83,4 +78,3 @@ boardCanvas.addEventListener('contextlost', (event) => {
   event.preventDefault();
 });
 boardCanvas.addEventListener('contextrestored', () => recoverWindowPaint('canvas-contextrestored', true));
-

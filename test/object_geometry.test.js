@@ -28,6 +28,21 @@ test('maps image world points into local unit coordinates', () => {
   assert.equal(geometry.worldPointToImageLocalUnit(image, { x: 120, y: 25 }), null);
 });
 
+test('measures world-point distance to transformed image bounds', () => {
+  const geometry = createGeometry();
+  const image = {
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 100,
+    h: 50,
+    data: { flipX: false, flipY: false, rotation: 0 },
+  };
+  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint(image, { x: 50, y: 25 }), 0);
+  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint(image, { x: 120, y: 25 }), 400);
+  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint({ ...image, w: 0 }, { x: 50, y: 25 }), Infinity);
+});
+
 test('hit-tests rotated image objects by rendered shape', () => {
   const geometry = createGeometry();
   const image = {
@@ -40,6 +55,7 @@ test('hit-tests rotated image objects by rendered shape', () => {
   };
   assert.equal(geometry.objectContainsWorldPoint(image, { x: 50, y: 25 }), true);
   assert.equal(geometry.objectContainsWorldPoint(image, { x: -10, y: 25 }), false);
+  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint(image, { x: 50, y: 100 }), 2500);
 });
 
 test('finds topmost object using shared hit-testing rules', () => {

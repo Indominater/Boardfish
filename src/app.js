@@ -12,14 +12,18 @@ var selOverlay  = BoardfishDOM.selOverlay;
 var multiSelOverlay = BoardfishDOM.multiSelOverlay;
 var island       = BoardfishDOM.island;
 var islZoom        = BoardfishDOM.islZoom;
-var islMeasure     = BoardfishDOM.islMeasure;
 var openingShield  = BoardfishDOM.openingShield;
 var objCtxMenu  = BoardfishDOM.objCtxMenu;
 var copyBtn           = BoardfishDOM.copyBtn;
+var lockBtn           = BoardfishDOM.lockBtn;
+var moveToBackBtn     = BoardfishDOM.moveToBackBtn;
+var deleteBtn         = BoardfishDOM.deleteBtn;
 var saveImageBtn      = BoardfishDOM.saveImageBtn;
 var saveImagesBtn     = BoardfishDOM.saveImagesBtn;
 var exportSep         = BoardfishDOM.exportSep;
 var imageActionsSep   = BoardfishDOM.imageActionsSep;
+var layerActionsSep   = BoardfishDOM.layerActionsSep;
+var deleteSep         = BoardfishDOM.deleteSep;
 var flipHorizontalBtn = BoardfishDOM.flipHorizontalBtn;
 var flipVerticalBtn   = BoardfishDOM.flipVerticalBtn;
 var rotateBtn         = BoardfishDOM.rotateBtn;
@@ -27,6 +31,8 @@ var rubberBand       = BoardfishDOM.rubberBand;
 var addTextBtn       = BoardfishDOM.addTextBtn;
 var addImageBtn      = BoardfishDOM.addImageBtn;
 var pasteBtn         = BoardfishDOM.pasteBtn;
+var resetZoomBtn     = BoardfishDOM.resetZoomBtn;
+var resetZoomSep     = BoardfishDOM.resetZoomSep;
 var exportAllImageBtn = BoardfishDOM.exportAllImageBtn;
 var exportAllTextBtn  = BoardfishDOM.exportAllTextBtn;
 var exportAllSep      = BoardfishDOM.exportAllSep;
@@ -41,6 +47,7 @@ var MENU_SHORTCUTS = {
   'add-text': [COMMAND_KEY_LABEL, 'T'],
   'add-images': [COMMAND_KEY_LABEL, 'I'],
   paste: [COMMAND_KEY_LABEL, 'V'],
+  'reset-zoom': [COMMAND_KEY_LABEL, '0'],
   save: [COMMAND_KEY_LABEL, 'S'],
   'save-as': IS_MAC ? [SHIFT_KEY_LABEL, COMMAND_KEY_LABEL, 'S'] : [COMMAND_KEY_LABEL, SHIFT_KEY_LABEL, 'S'],
   open: [COMMAND_KEY_LABEL, 'O'],
@@ -60,7 +67,6 @@ function syncPlatformShortcutLabels() {
   }
 }
 syncPlatformShortcutLabels();
-var TRANSPARENT_TEXT_COLOR = 'rgba(255,255,255,0)';
 var APP_THEMES = {
   light: {
     native: 'Light',
@@ -275,14 +281,6 @@ function boardBg() {
 
 function canvasTextColor() {
   return cssVar('--canvas-text') || '#111418';
-}
-
-function islandTextColor() {
-  return cssVar('--firefox-menu-text') || '#f7f7fb';
-}
-
-function islandStatusTextColor() {
-  return cssVar('--firefox-menu-text') || '#f7f7fb';
 }
 
 function fillBoardBackground(context, width, height) {

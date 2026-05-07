@@ -5,12 +5,14 @@ var savedHistoryIndex = -1;
 var currentFilePath = null;
 
 function isDirty() {
-  if (objects.length === 0) return false;
-  return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0;
+  const cardsDirty = typeof eyedropperCardsDirty !== 'undefined' && eyedropperCardsDirty;
+  if (objects.length === 0 && !cardsDirty) return false;
+  return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0 || cardsDirty;
 }
 
 function markSaved() {
   _dirtyIds.clear();
+  if (typeof markEyedropperCardsSaved === 'function') markEyedropperCardsSaved();
   savedHistoryIndex = historyIndex;
   updateTitle();
 }
@@ -48,6 +50,71 @@ function showUnsavedDialog() {
   });
 }
 
+const stripOpeningFreezeIds = (node) => {
+  node?.removeAttribute?.('id');
+  for (const child of node?.querySelectorAll?.('[id]') || []) child.removeAttribute('id');
+};
+
+const copyOpeningFreezeCanvas = (sourceCanvas, cloneCanvas) => {
+  if (!sourceCanvas || !cloneCanvas) return false;
+  cloneCanvas.width = sourceCanvas.width || 1;
+  cloneCanvas.height = sourceCanvas.height || 1;
+  try {
+    cloneCanvas.getContext('2d')?.drawImage(sourceCanvas, 0, 0);
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
+
+const appendOpeningFreezeBoard = () => {
+  const rect = boardCanvas?.getBoundingClientRect?.();
+  if (!rect || rect.width <= 0 || rect.height <= 0) return;
+  const clone = document.createElement('canvas');
+  copyOpeningFreezeCanvas(boardCanvas, clone);
+  clone.className = 'opening-freeze-canvas';
+  Object.assign(clone.style, {
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+  });
+  openingShield.appendChild(clone);
+};
+
+const appendOpeningFreezeCards = () => {
+  if (!Array.isArray(eyedropperCards)) return;
+  for (const card of eyedropperCards) {
+    if (!card?.el?.classList.contains('visible')) continue;
+    const clone = card.el.cloneNode(true);
+    stripOpeningFreezeIds(clone);
+    clone.classList.add('opening-freeze-card');
+    clone.setAttribute('aria-hidden', 'true');
+    const sourceCanvases = card.el.querySelectorAll('canvas');
+    const cloneCanvases = clone.querySelectorAll('canvas');
+    for (let i = 0; i < sourceCanvases.length; i++) {
+      copyOpeningFreezeCanvas(sourceCanvases[i], cloneCanvases[i]);
+    }
+    openingShield.appendChild(clone);
+  }
+};
+
+const beginOpeningFreeze = () => {
+  if (!openingShield) return;
+  openingShield.replaceChildren();
+  openingShield.style.background = canvas ? getComputedStyle(canvas).backgroundColor : '';
+  openingShield.classList.add('opening-freeze', 'active');
+  appendOpeningFreezeBoard();
+  appendOpeningFreezeCards();
+};
+
+const endOpeningFreeze = () => {
+  if (!openingShield) return;
+  openingShield.classList.remove('active', 'opening-freeze');
+  openingShield.replaceChildren();
+  openingShield.style.background = '';
+};
+
 // ─── Save / Open ─────────────────────────────────────────────────────────────
 
 function boardDocumentDeps() {
@@ -75,6 +142,9 @@ function boardData() {
     viewport: { panX, panY, zoom },
     imageStore,
     objects,
+    eyedropperCards: typeof serializeEyedropperCardsForBoard === 'function'
+      ? serializeEyedropperCardsForBoard()
+      : [],
   });
 }
 
@@ -83,6 +153,9 @@ function boardDataForSave() {
     viewport: { panX, panY, zoom },
     imageStore,
     objects,
+    eyedropperCards: typeof serializeEyedropperCardsForBoard === 'function'
+      ? serializeEyedropperCardsForBoard()
+      : [],
   }, boardDocumentDeps());
 }
 
@@ -142,6 +215,11 @@ function scheduleSaveFrameProbe(dbg, label) {
 }
 
 async function invokeSaveBoard(path, dbg) {
+  if (typeof prepareEyedropperCardPreviewsForSave === 'function') {
+    const previewStart = performance.now();
+    const previewResult = await prepareEyedropperCardPreviewsForSave();
+    SaveDebug.step(dbg, 'eyedropper-card-previews', { ms: performance.now() - previewStart, ...(previewResult || {}) });
+  }
   const dataStart = performance.now();
   const data = hasTauri() ? boardDataForSave() : boardData();
   SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...getBoardSaveMetrics(data) });
@@ -411,24 +489,24 @@ async function finishOpenedBoard(dbg, data) {
   const renderMs = performance.now() - renderStart;
   PillDebug.log('open:initial-applyTransform:end', { phaseMs: renderMs });
   OpenDebug.step(dbg, 'initial-applyTransform', { ms: renderMs });
-  const zoomRestoreReason = await finishPillTransition({
-    beforeTransition: () => {
+  const prewarmResult = typeof scheduleEyedropperNativeDecodePrewarm === 'function'
+    ? scheduleEyedropperNativeDecodePrewarm('board-loaded')
+    : { scheduled: false, reason: 'unavailable' };
+  OpenDebug.step(dbg, 'eyedropper-prewarm:scheduled', prewarmResult || { scheduled: false });
+  const pillFinishReason = await finishPillTask({
+    beforeFinish: () => {
       applyNativeAppTheme();
-      openingShield.classList.remove('active');
-      PillDebug.log('open:openingShield:removed', { reason: 'before-zoom-restore' });
+      if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
+      else openingShield.classList.remove('active');
+      PillDebug.log('open:openingShield:removed', { reason: 'before-pill-hide' });
     },
   });
-  PillDebug.log('open:restoreIslandZoom:end', { zoomRestoreReason });
+  PillDebug.log('open:pillFinish:end', { pillFinishReason });
   OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
   if (hydrationMode === 'visible-first') {
     setTimeout(() => hydrateRemainingImagesForOpen(dbg).catch((err) => {
       OpenDebug.step(dbg, 'hydrate-background:error', { error: String(err) });
     }), 80);
-  } else if (typeof schedulePostOpenEyedropperSafeImagePrewarm === 'function') {
-    setTimeout(() => {
-      const result = schedulePostOpenEyedropperSafeImagePrewarm('open-all-hydrated');
-      OpenDebug.step(dbg, 'eyedropper-prewarm:scheduled', result || { scheduled: false });
-    }, 80);
   }
 }
 
@@ -449,6 +527,9 @@ function applyBoardData(data, options = {}) {
   });
   setEyedropperEnabled(false);
   clearJsClipboard();
+  if (typeof clearEyedropperCardsForBoard === 'function') {
+    clearEyedropperCardsForBoard({ markDirty: false });
+  }
   const t0 = performance.now();
   clearImageStore(!sourcesCached);
   OpenDebug.step(dbg, 'clearImageStore', { ms: performance.now() - t0 });
@@ -481,6 +562,10 @@ function applyBoardData(data, options = {}) {
   const countersStart = performance.now();
   BoardfishEditorState.restoreObjectCountersFromObjects(objects);
   BoardfishEditorState.setViewport(data.viewport);
+  let eyedropperCardsReady = Promise.resolve();
+  if (typeof restoreEyedropperCards === 'function') {
+    eyedropperCardsReady = restoreEyedropperCards(data.eyedropperCards || []) || Promise.resolve();
+  }
   if (!deferRender) applyNativeAppTheme();
   OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });
 
@@ -496,6 +581,7 @@ function applyBoardData(data, options = {}) {
   OpenDebug.step(dbg, 'reset-boardHistory-markSaved', { ms: performance.now() - historyStart, historyLength: boardHistory.length, historyIndex });
   PillDebug.log('open:applyBoardData:end', getBoardOpenMetrics(data));
   if (endDebug) OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
+  return { eyedropperCardsReady };
 }
 
 async function saveBoardAs() {

@@ -30,6 +30,51 @@ test('ignores legacy board theme preferences', () => {
   assert.equal(Object.hasOwn(board, 'preferences'), false);
 });
 
+test('normalizes saved eyedropper cards', () => {
+  const board = BoardSchema.normalizeBoardData({
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {},
+    objects: [],
+    eyedropperCards: [
+      {
+        rgba: [254.2, 224.4, 198.1],
+        left: 30,
+        top: 20,
+        order: 1,
+        canvasWidth: 96,
+        canvasHeight: 96,
+        previewDataUrl: 'data:image/png;base64,abc',
+      },
+    ],
+  });
+
+  assert.deepEqual(board.eyedropperCards[0], {
+    rgba: [254, 224, 198, 255],
+    left: 30,
+    top: 20,
+    order: 1,
+    canvasWidth: 96,
+    canvasHeight: 96,
+    previewDataUrl: 'data:image/png;base64,abc',
+  });
+});
+
+test('normalizes object lock state', () => {
+  const board = BoardSchema.normalizeBoardData({
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {},
+    objects: [
+      { id: 'obj-1', type: 'text', x: 0, y: 0, w: 100, h: 40, z: 1, locked: true, data: { content: 'locked' } },
+      { id: 'obj-2', type: 'text', x: 0, y: 50, w: 100, h: 40, z: 2, locked: 'yes', data: { content: 'unlocked' } },
+    ],
+  });
+
+  assert.equal(board.objects[0].locked, true);
+  assert.equal(board.objects[1].locked, false);
+});
+
 test('rejects image objects with missing image sources', () => {
   assert.throws(
     () => BoardSchema.normalizeBoardData({

@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 use crate::app_theme::{configure_startup_theme, read_stored_app_theme};
+use crate::image_source_files::cleanup_current_image_source_session_cache;
 use crate::image_sources::ImageSourceCache;
 
 static CLOSE_REQUEST_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -68,10 +69,15 @@ fn schedule_startup_show_fallback(window: tauri::WebviewWindow) {
 
 #[tauri::command]
 pub(crate) fn exit_app(source_state: tauri::State<ImageSourceCache>) {
+    cleanup_image_source_cache_for_exit(source_state.inner());
+    std::process::exit(0);
+}
+
+fn cleanup_image_source_cache_for_exit(source_state: &ImageSourceCache) {
     if let Err(error) = source_state.clear() {
         eprintln!("[boardfish image cache] exit cleanup failed: {error}");
     }
-    std::process::exit(0);
+    cleanup_current_image_source_session_cache();
 }
 
 #[tauri::command]
@@ -91,14 +97,16 @@ pub(crate) fn emit_close_request(app: &tauri::AppHandle) {
         window.show().ok();
         window.set_focus().ok();
         window.emit("boardfish://close-requested", seq).ok();
-        schedule_close_fallback(seq);
+        schedule_close_fallback(seq, app.clone());
     }
 }
 
-fn schedule_close_fallback(seq: u64) {
+fn schedule_close_fallback(seq: u64, app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(1500));
         if CLOSE_ACK_SEQ.load(Ordering::SeqCst) < seq {
+            let source_state = app_handle.state::<ImageSourceCache>();
+            cleanup_image_source_cache_for_exit(source_state.inner());
             std::process::exit(0);
         }
     });
@@ -110,7 +118,7 @@ pub(crate) fn handle_window_event(window: &tauri::Window, event: &tauri::WindowE
             api.prevent_close();
             let seq = CLOSE_REQUEST_SEQ.fetch_add(1, Ordering::SeqCst);
             window.emit("boardfish://close-requested", seq).ok();
-            schedule_close_fallback(seq);
+            schedule_close_fallback(seq, window.app_handle().clone());
         }
         tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
             let payload = FileDropPayload {

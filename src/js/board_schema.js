@@ -26,6 +26,50 @@
     };
   }
 
+  function finitePositiveNumber(value, fallback = 1) {
+    const number = finiteNumber(value, fallback);
+    return number > 0 ? number : fallback;
+  }
+
+  function normalizeColorByte(value, fallback = 0) {
+    const number = Number(value);
+    return Math.max(0, Math.min(255, Math.round(Number.isFinite(number) ? number : fallback)));
+  }
+
+  function normalizeEyedropperRgba(value, index) {
+    if (!Array.isArray(value) || value.length < 3) {
+      throw new Error(`eyedropper card ${index} is missing rgba`);
+    }
+    return [
+      normalizeColorByte(value[0]),
+      normalizeColorByte(value[1]),
+      normalizeColorByte(value[2]),
+      normalizeColorByte(value[3], 255),
+    ];
+  }
+
+  function normalizeEyedropperCard(card, index) {
+    if (!isObject(card)) throw new Error(`eyedropper card ${index} is not an object`);
+    const normalized = {
+      rgba: normalizeEyedropperRgba(card.rgba, index),
+      left: finiteNumber(card.left),
+      top: finiteNumber(card.top),
+      order: finiteNumber(card.order, index + 1),
+    };
+    if (card.canvasWidth != null) normalized.canvasWidth = finitePositiveNumber(card.canvasWidth);
+    if (card.canvasHeight != null) normalized.canvasHeight = finitePositiveNumber(card.canvasHeight);
+    if (typeof card.previewDataUrl === 'string' && card.previewDataUrl.startsWith('data:image/')) {
+      normalized.previewDataUrl = card.previewDataUrl;
+    }
+    return normalized;
+  }
+
+  function normalizeEyedropperCards(cards = []) {
+    if (cards == null) return [];
+    if (!Array.isArray(cards)) throw new Error('eyedropperCards must be an array');
+    return cards.slice(0, 5).map((card, index) => normalizeEyedropperCard(card, index));
+  }
+
   function normalizeObject(obj, index) {
     if (!isObject(obj)) throw new Error(`object ${index} is not an object`);
     if (!isBoardObjectType(obj.type)) {
@@ -43,6 +87,7 @@
       w: Math.max(1, finiteNumber(obj.w, 1)),
       h: Math.max(1, finiteNumber(obj.h, 1)),
       z: finiteNumber(obj.z),
+      locked: obj.locked === true,
       data: {},
     };
     if (obj.type === OBJECT_TYPES.TEXT) {
@@ -86,14 +131,17 @@
         throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);
       }
     }
-    const { preferences: _preferences, ...boardFields } = data;
-    return {
+    const eyedropperCards = normalizeEyedropperCards(data.eyedropperCards);
+    const { preferences: _preferences, eyedropperCards: _eyedropperCards, ...boardFields } = data;
+    const normalized = {
       ...boardFields,
       version: Number(data.version || 3),
       viewport: normalizeViewport(data.viewport),
       imageStore,
       objects,
     };
+    if (eyedropperCards.length) normalized.eyedropperCards = eyedropperCards;
+    return normalized;
   }
 
   function validateBoardData(data) {
@@ -105,6 +153,7 @@
     BOARD_FORMAT,
     OBJECT_TYPES,
     normalizeBoardData,
+    normalizeEyedropperCards,
     validateBoardData,
   };
 

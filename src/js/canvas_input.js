@@ -84,7 +84,10 @@ function handleViewportWheel(e) {
 }
 
 canvas.addEventListener('wheel', handleViewportWheel, { passive: false });
-eyedropperLoupe?.addEventListener('wheel', handleViewportWheel, { passive: false });
+document.addEventListener('wheel', (e) => {
+  if (typeof isEventInsideVisibleEyedropperLoupe !== 'function' || !isEventInsideVisibleEyedropperLoupe(e)) return;
+  handleViewportWheel(e);
+}, { capture: true, passive: false });
 
 // ─── Pan (spacebar + left click) ─────────────────────────────────────────────
 var _spaceDown = false;
@@ -121,7 +124,7 @@ function dragItemsForSelection() {
   const items = [];
   for (const id of selectedIds) {
     const o = objectsMap.get(id);
-    if (o) items.push({ obj: o, startX: o.x, startY: o.y });
+    if (o && !isObjectLocked(o)) items.push({ obj: o, startX: o.x, startY: o.y });
   }
   return items;
 }
@@ -155,13 +158,15 @@ function startMousePan(e) {
   document.addEventListener('mouseup', onUp);
 }
 
-eyedropperLoupe?.addEventListener('mousedown', (e) => {
+document.addEventListener('mousedown', (e) => {
+  if (typeof isEventInsideVisibleEyedropperLoupe !== 'function' || !isEventInsideVisibleEyedropperLoupe(e)) return;
   if (e.button === 0 && _spaceDown) startMousePan(e);
-});
+}, true);
 
 function startGroupDrag(e) {
   const grpStartX = e.clientX, grpStartY = e.clientY;
   const grpItems = dragItemsForSelection();
+  if (!grpItems.length) return false;
   let grpMoved = false;
   const grpThreshold = 9 / (zoom * zoom);
   function applyGrpDrag(dx, dy) {
@@ -185,6 +190,7 @@ function startGroupDrag(e) {
       pushHistory('group-drag');
     },
   });
+  return true;
 }
 
 function startRubberBandSelection(e, additive) {
@@ -216,9 +222,9 @@ function startRubberBandSelection(e, additive) {
       x2: (x2 - panX) / zoom,
       y2: (y2 - panY) / zoom,
     };
-    const nextSelection = additive ? new Set(selectedIds) : new Set();
+    const nextSelection = additive ? new Set(selectedUnlockedObjectIds()) : new Set();
     for (const o of objects) {
-      if (objectIntersectsRect(o, rbRect)) {
+      if (!isObjectLocked(o) && objectIntersectsRect(o, rbRect)) {
         nextSelection.add(o.id);
       }
     }
@@ -230,7 +236,8 @@ function startRubberBandSelection(e, additive) {
 }
 
 function toggleAdditiveSelection(obj) {
-  const nextSelection = new Set(selectedIds);
+  if (isObjectLocked(obj)) return;
+  const nextSelection = new Set(selectedUnlockedObjectIds());
   if (isSelected(obj.id)) {
     nextSelection.delete(obj.id);
     BoardfishEditorState.setSelection([...nextSelection]);
@@ -271,6 +278,7 @@ function startTextSelectionDrag(e, obj, wp) {
 }
 
 function startObjectDrag(e, obj) {
+  if (isObjectLocked(obj)) return false;
   if (editingId && editingId !== obj.id) exitEdit();
   if (!isSelected(obj.id)) selectObject(obj.id);
 
@@ -308,6 +316,7 @@ function startObjectDrag(e, obj) {
     pushHistory('drag');
   }
   beginDocumentDrag({ move: onMove, up: onUp });
+  return true;
 }
 
 canvas.addEventListener('mousedown', (e) => {
@@ -343,7 +352,8 @@ canvas.addEventListener('mousedown', (e) => {
   // Multi-select: any click inside the bounding box (object or empty space) → drag group
   if (isMultiSelected() && !additive) {
     if (rectContainsPoint(selectedBounds(), wp)) {
-      startGroupDrag(e);
+      if (startGroupDrag(e)) return;
+      if (selectedHasLockedObjects()) return;
       return;
     }
   }

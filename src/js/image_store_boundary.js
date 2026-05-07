@@ -12,11 +12,17 @@
   function setSource(key, source) {
     if (!key) return false;
     imageStore[key] = source;
+    if (typeof noteEyedropperImageSourceChanged === 'function') {
+      noteEyedropperImageSourceChanged(key, 'image-source');
+    }
     return true;
   }
 
   function setSources(nextSources = {}) {
     Object.assign(imageStore, nextSources || {});
+    if (typeof noteEyedropperBoardContentChanged === 'function') {
+      noteEyedropperBoardContentChanged('image-sources');
+    }
     return imageStore;
   }
 

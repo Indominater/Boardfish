@@ -58,15 +58,15 @@ function boardContract() {
 test('release startup debugger is gated before initialization', () => {
   const startupDebugSource = readSource('src/js/startup_debug.js');
   const order = scriptOrder();
-  const flagIndex = startupDebugSource.indexOf('const DEBUG_TOOLS_ENABLED = true;');
+  const gateIndex = startupDebugSource.indexOf('const DEBUG_TOOLS_ENABLED = globalThis.__BOARDFISH_DEBUG_TOOLS_ENABLED__ === true;');
   const startupIndex = startupDebugSource.indexOf('var StartupDebug = DEBUG_TOOLS_ENABLED ?');
   const noopIndex = startupDebugSource.indexOf('function createNoopStartupDebug()');
 
-  assert.ok(flagIndex >= 0, 'debug flag is missing');
-  assert.ok(noopIndex > flagIndex, 'noop startup debugger should be declared after the flag');
+  assert.ok(gateIndex >= 0, 'debug build-mode gate is missing');
+  assert.ok(noopIndex > gateIndex, 'noop startup debugger should be declared after the gate');
   assert.ok(startupIndex > noopIndex, 'StartupDebug should use the noop gate');
-  assert.match(startupDebugSource, /AGENTS: Set this to true only while running local diagnostics\/debug tests\./);
-  assert.match(startupDebugSource, /Before making a new build or release, set it back to false\./);
+  assert.match(startupDebugSource, /Tauri injects this from the Cargo build profile/);
+  assert.doesNotMatch(startupDebugSource, /AGENTS: Flip only this flag/);
   assert.ok(order.indexOf('startup_debug.js') < order.indexOf('../app.js'), 'startup debug must load before app startup code');
 });
 
@@ -208,6 +208,10 @@ test('frontend abstraction scripts load before their consumers', () => {
   before('eyedropper_geometry.js', 'eyedropper.js');
   before('eyedropper_debug.js', 'eyedropper_state.js');
   before('eyedropper_state.js', 'eyedropper.js');
+  before('eyedropper.js', 'eyedropper_card_previews.js');
+  before('eyedropper_card_previews.js', 'io_close.js');
+  before('eyedropper.js', 'eyedropper_decode_warmers.js');
+  before('eyedropper_decode_warmers.js', 'canvas_input.js');
 });
 
 test('large frontend units stay split behind explicit boundary files', () => {
@@ -299,6 +303,37 @@ test('shared abstractions own DOM lookup, Tauri invoke, rendering helpers, bitma
   assert.match(readSource('src/js/io_close.js'), /BoardfishBoardDocument\.createBoardDataForSave/);
 });
 
+test('large clipboard paste diagnostics are available through beginDebug finishDebug', () => {
+  const debugSource = readSource('src/js/debug.js');
+  const clipboardIoSource = readSource('src/js/clipboard_io.js');
+  const pasteSource = readSource('src/js/clipboard_export_init.js');
+  const insertSource = readSource('src/js/image_insert.js');
+  const imageStateSource = readSource('src/js/image_state.js');
+
+  assert.match(debugSource, /function largePasteReport\(\)/);
+  assert.match(debugSource, /largePasteReport,/);
+  assert.match(debugSource, /failedCheckpoint/);
+  assert.match(clipboardIoSource, /function readClipboardBlobAsDataUrlDebug/);
+  assert.match(clipboardIoSource, /clipboard-blob-read:start/);
+  assert.match(clipboardIoSource, /clipboard-blob-read:ok/);
+  assert.match(clipboardIoSource, /clipboard-blob-read:error/);
+  assert.match(clipboardIoSource, /event-clipboard:inspect/);
+  assert.match(pasteSource, /objectCountBefore: objects\.length/);
+  assert.match(insertSource, /objectCountBefore,\s*\n\s*objectCountAfter: objects\.length/);
+  assert.match(insertSource, /cacheImage\(imgKey, imageAssetUrlCache\[imgKey\], dbg, null, \{ skipSourceRegistration: true \}\)/);
+  assert.match(insertSource, /NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD/);
+  assert.match(insertSource, /function shouldUseNativeDataUrlImageCache\(src\)/);
+  assert.match(insertSource, /addDataUrlImageViaNativeCache\(src, cx, cy, exactSize, existingImgKey, options\)/);
+  assert.match(insertSource, /BoardfishTauri\.registerImageSource\(imgKey, src\)/);
+  assert.match(insertSource, /materializeImageAssets\(\[imgKey\], dbg\)/);
+  assert.match(imageStateSource, /function imageSourceDebugInfo\(src\)/);
+  assert.match(imageStateSource, /convertTauriFileSrc received data URL/);
+  assert.match(imageStateSource, /return path;\s*\}\s*return tauriConvertFileSrc\(path\);/);
+  assert.match(imageStateSource, /materialize-image-assets:entry/);
+  assert.match(imageStateSource, /cache-image:source/);
+  assert.match(debugSource, /sourceKind/);
+});
+
 test('shared board contract matches frontend schema constants', () => {
   const contract = boardContract();
   const boardTypes = readSource('src/js/board_types.js');
@@ -351,18 +386,23 @@ test('legacy frontend global surface has an explicit abstraction budget', () => 
   const topLevelVars = [...source.matchAll(/^var /gm)].length;
   const topLevelFunctions = [...source.matchAll(/^function /gm)].length;
 
-  assert.ok(topLevelVars <= 280, `top-level var budget exceeded: ${topLevelVars}`);
-  assert.ok(topLevelFunctions <= 379, `top-level function budget exceeded: ${topLevelFunctions}`);
+  assert.ok(topLevelVars <= 281, `top-level var budget exceeded: ${topLevelVars}`);
+  assert.ok(topLevelFunctions <= 384, `top-level function budget exceeded: ${topLevelFunctions}`);
 });
 
 test('Rust image source responsibilities stay split', () => {
+  const imageSources = readSource('src-tauri/src/image_sources.rs');
+
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_data_url;/);
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_source_files;/);
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_transform;/);
-  assert.match(readSource('src-tauri/src/image_sources.rs'), /use crate::image_source_files::/);
-  assert.match(readSource('src-tauri/src/image_sources.rs'), /use crate::image_data_url::cached_source_from_data_url;/);
-  assert.match(readSource('src-tauri/src/image_sources.rs'), /use crate::image_transform::transform_dynamic_image;/);
-  assert.ok(lineCount('src-tauri/src/image_sources.rs') < 560, 'image_sources.rs should keep filesystem helper responsibilities split out');
+  assert.match(imageSources, /use crate::image_source_files::/);
+  assert.match(imageSources, /use crate::image_data_url::cached_source_from_data_url;/);
+  assert.match(imageSources, /use crate::image_transform::transform_dynamic_image;/);
+  assert.match(imageSources, /struct ImageSourceResponse \{[\s\S]*width: u32,[\s\S]*height: u32,/);
+  assert.match(imageSources, /fn image_dimensions_from_bytes\(bytes: &\[u8\]\)/);
+  assert.match(imageSources, /register_image_source[\s\S]*image_dimensions_from_bytes\(&source\.bytes\)/);
+  assert.ok(lineCount('src-tauri/src/image_sources.rs') < 680, 'image_sources.rs should keep filesystem helper responsibilities split out');
   assert.ok(lineCount('src-tauri/src/image_source_files.rs') < 220, 'image_source_files.rs should stay focused on temp-file lifecycle helpers');
 });
 

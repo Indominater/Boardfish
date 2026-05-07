@@ -18,6 +18,74 @@ function isShiftOnlyKey(e) {
 }
 
 const activeKeyboardKeys = new Set();
+const activeKeyboardKeyTimes = new Map();
+const STALE_ACTIVE_KEY_MS = 1200;
+const MODIFIER_KEY_IDS = new Set([
+  'Alt',
+  'AltLeft',
+  'AltRight',
+  'Control',
+  'ControlLeft',
+  'ControlRight',
+  'Meta',
+  'MetaLeft',
+  'MetaRight',
+  'Shift',
+  'ShiftLeft',
+  'ShiftRight',
+]);
+
+function isModifierKeyId(keyId) {
+  return MODIFIER_KEY_IDS.has(keyId);
+}
+
+function clearActiveKeyboardKeys() {
+  activeKeyboardKeys.clear();
+  activeKeyboardKeyTimes.clear();
+}
+
+function deleteActiveKeyboardKey(keyId) {
+  activeKeyboardKeys.delete(keyId);
+  activeKeyboardKeyTimes.delete(keyId);
+}
+
+function pruneActiveKeyboardKeys(now = performance.now()) {
+  for (const keyId of activeKeyboardKeys) {
+    const pressedAt = activeKeyboardKeyTimes.get(keyId) || 0;
+    if (!isModifierKeyId(keyId) && now - pressedAt > STALE_ACTIVE_KEY_MS) {
+      deleteActiveKeyboardKey(keyId);
+    }
+  }
+}
+
+function clearNonModifierActiveKeyboardKeys() {
+  for (const keyId of [...activeKeyboardKeys]) {
+    if (!isModifierKeyId(keyId)) deleteActiveKeyboardKey(keyId);
+  }
+}
+
+function reconcileModifierKeyboardState(e) {
+  if (!e.altKey) {
+    deleteActiveKeyboardKey('Alt');
+    deleteActiveKeyboardKey('AltLeft');
+    deleteActiveKeyboardKey('AltRight');
+  }
+  if (!e.ctrlKey) {
+    deleteActiveKeyboardKey('Control');
+    deleteActiveKeyboardKey('ControlLeft');
+    deleteActiveKeyboardKey('ControlRight');
+  }
+  if (!e.metaKey) {
+    deleteActiveKeyboardKey('Meta');
+    deleteActiveKeyboardKey('MetaLeft');
+    deleteActiveKeyboardKey('MetaRight');
+  }
+  if (!e.shiftKey && e.key !== 'Shift') {
+    deleteActiveKeyboardKey('Shift');
+    deleteActiveKeyboardKey('ShiftLeft');
+    deleteActiveKeyboardKey('ShiftRight');
+  }
+}
 
 function isNativeFindShortcut(e) {
   const commandFind = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'f');
@@ -35,8 +103,12 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('keydown', (e) => {
   const keyId = e.code || e.key;
+  const keyDownAt = performance.now();
+  pruneActiveKeyboardKeys(keyDownAt);
+  reconcileModifierKeyboardState(e);
   const hasOtherKeyDown = [...activeKeyboardKeys].some((activeKey) => activeKey !== keyId);
   activeKeyboardKeys.add(keyId);
+  activeKeyboardKeyTimes.set(keyId, keyDownAt);
 
   if (e.key === 'Alt') { e.preventDefault(); return; }
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) { e.preventDefault(); return; }
@@ -52,7 +124,6 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       setEyedropperEnabled(true);
       beginEyedropperHoldSample(e);
-      updateCtxActionStates();
     }
     return;
   }
@@ -93,6 +164,12 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 's')) { e.preventDefault(); saveBoard(); return; }
+
+  if (hasExactCommandModifier(e) && (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0') && !editingId) {
+    e.preventDefault();
+    resetZoomToClosestObject();
+    return;
+  }
 
   if (isBoardInputBlocked()) { e.preventDefault(); return; }
 
@@ -143,7 +220,10 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keyup', (e) => {
-  activeKeyboardKeys.delete(e.code || e.key);
+  const keyId = e.code || e.key;
+  deleteActiveKeyboardKey(keyId);
+  if (isModifierKeyId(keyId)) clearNonModifierActiveKeyboardKeys();
+  reconcileModifierKeyboardState(e);
   if (e.key === 'Shift' && !editingId && typeof _eyedropperHoldActive !== 'undefined' && _eyedropperHoldActive) {
     e.preventDefault();
     endEyedropperHoldSample(e);
@@ -151,5 +231,8 @@ document.addEventListener('keyup', (e) => {
 });
 
 window.addEventListener('blur', () => {
-  activeKeyboardKeys.clear();
+  clearActiveKeyboardKeys();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') clearActiveKeyboardKeys();
 });

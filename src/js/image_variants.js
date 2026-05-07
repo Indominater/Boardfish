@@ -317,10 +317,6 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
       return { source: entry.bitmap, scale: selectedScale, targetScale };
     }
   }
-  if (typeof selectEyedropperWarmedScaledImageForViewport === 'function') {
-    const warmed = selectEyedropperWarmedScaledImageForViewport(key, targetScale);
-    if (warmed) return warmed;
-  }
   queueScaledImageVariant(key, fullSource, targetScale);
   return { source: fullSource, scale: 1, targetScale };
 }

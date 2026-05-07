@@ -99,6 +99,13 @@ var ClipDebug = (() => {
       fallbackReady: e.meta?.fallbackReady ?? '',
       dataUrlLen: e.meta?.dataUrlLen ?? '',
       blobSize: e.meta?.blobSize ?? '',
+      blobType: e.meta?.blobType || e.meta?.type || '',
+      source: e.meta?.source || '',
+      sourceKind: e.meta?.sourceKind || e.meta?.pathKind || e.meta?.assetKind || '',
+      sourceLen: e.meta?.sourceLen ?? e.meta?.pathLen ?? e.meta?.assetLen ?? '',
+      sourcePrefix: e.meta?.sourcePrefix || e.meta?.pathPrefix || e.meta?.assetPrefix || '',
+      bytes: e.meta?.bytes ?? timing(e.meta, 'bytes'),
+      assetReady: e.meta?.assetReady ?? '',
       nativePath: timing(e.meta, 'path'),
       flipped: timing(e.meta, 'flipped'),
       width: timing(e.meta, 'width'),
@@ -107,6 +114,9 @@ var ClipDebug = (() => {
       rgbaMB: timing(e.meta, 'rgbaMb'),
       nativeTotalMs: timing(e.meta, 'totalMs'),
       decodeMs: timing(e.meta, 'decodeMs'),
+      readMs: timing(e.meta, 'readMs'),
+      pngEncodeMs: timing(e.meta, 'pngEncodeMs'),
+      cacheInsertMs: timing(e.meta, 'cacheInsertMs'),
       base64Ms: timing(e.meta, 'base64Ms'),
       imageDecodeMs: timing(e.meta, 'imageDecodeMs'),
       rgbaConvertMs: timing(e.meta, 'rgbaConvertMs'),
@@ -151,10 +161,14 @@ var ClipDebug = (() => {
         flipped: timing(e.meta, 'flipped'),
         width: timing(e.meta, 'width'),
         height: timing(e.meta, 'height'),
+        bytes: timing(e.meta, 'bytes'),
         rgbaMB: timing(e.meta, 'rgbaMb'),
         invokeMs: e.meta?.ms ?? '',
         nativeTotalMs: timing(e.meta, 'totalMs'),
         decodeMs: timing(e.meta, 'decodeMs'),
+        readMs: timing(e.meta, 'readMs'),
+        pngEncodeMs: timing(e.meta, 'pngEncodeMs'),
+        cacheInsertMs: timing(e.meta, 'cacheInsertMs'),
         base64Ms: timing(e.meta, 'base64Ms'),
         imageDecodeMs: timing(e.meta, 'imageDecodeMs'),
         rgbaConvertMs: timing(e.meta, 'rgbaConvertMs'),
@@ -165,6 +179,97 @@ var ClipDebug = (() => {
       }));
     console.table(rows);
     return rows;
+  }
+
+  function memorySnapshotFromEvent(e) {
+    const meta = e?.meta || {};
+    const bytes = Number(meta.blobSize ?? meta.bytes ?? timing(meta, 'bytes')) || 0;
+    const dataUrlLen = Number(meta.dataUrlLen) || 0;
+    const width = Number(meta.width ?? timing(meta, 'width')) || 0;
+    const height = Number(meta.height ?? timing(meta, 'height')) || 0;
+    const pixels = Number(meta.pixels ?? timing(meta, 'pixels')) || (width && height ? width * height : 0);
+    return {
+      blobMB: bytes ? Math.round(bytes / 1024 / 1024 * 100) / 100 : '',
+      dataUrlMB: dataUrlLen ? Math.round(dataUrlLen / 1024 / 1024 * 100) / 100 : '',
+      rgbaMB: pixels ? Math.round(pixels * 4 / 1024 / 1024 * 100) / 100 : '',
+      width: width || '',
+      height: height || '',
+      pixels: pixels || '',
+    };
+  }
+
+  function largePasteReport() {
+    const pasteStarts = events.filter(e => e.op === 'pasteAtPos' && e.step === 'start');
+    const pasteStart = pasteStarts[pasteStarts.length - 1];
+    if (!pasteStart) {
+      const empty = { pasteRuns: 0, verdict: 'no pasteAtPos events captured' };
+      console.table([empty]);
+      return empty;
+    }
+    const run = events.filter(e => e.id === pasteStart.id);
+    const stepNames = new Set(run.map(e => e.step));
+    const latest = (stepName) => [...run].reverse().find(e => e.step === stepName);
+    const firstError = run.find(e => /(?:error|miss|empty)$/i.test(e.step) || e.meta?.error);
+    const blobEvent = latest('event-image-blob') || latest('browser-image-blob');
+    const blobReadOk = latest('clipboard-blob-read:ok');
+    const nativeRead = latest('native-image-read');
+    const nativeReadCommand = typeof TAURI_COMMANDS !== 'undefined'
+      ? TAURI_COMMANDS.READ_IMAGE_FROM_CLIPBOARD_CACHED
+      : 'read_image_from_clipboard_cached';
+    const nativeInvokeOk = run.find(e => e.step === 'invoke:ok' && e.meta?.command === nativeReadCommand);
+    const materializeEnd = latest('paste-native-cache:materialize-end');
+    const addObject = latest('paste-native-cache:add-object') || latest('paste-image:ready-wait-start');
+    const end = latest('end');
+    const objectCountBefore = pasteStart?.meta?.objectCountBefore ?? '';
+    const objectCountAfter = end?.meta?.objectCountAfter ?? '';
+    const objectDelta = typeof objectCountBefore === 'number' && typeof objectCountAfter === 'number'
+      ? objectCountAfter - objectCountBefore
+      : '';
+    const nativeReadAttempted = run.some(e => e.meta?.command === nativeReadCommand);
+    const pathDetected = blobReadOk
+      ? 'event-or-browser-blob'
+      : nativeReadAttempted
+        ? 'native-cache'
+        : stepNames.has('browser-clipboard-read:start')
+          ? 'browser-read'
+          : stepNames.has('event-clipboard:inspect')
+            ? 'paste-event'
+            : 'unknown';
+    const checkpoints = [
+      ['pasteStarted', true],
+      ['eventInspected', stepNames.has('event-clipboard:inspect') || !pasteStart.meta?.clipboardData],
+      ['imagePayloadFound', !!blobEvent || nativeReadAttempted],
+      ['imagePayloadRead', !!blobReadOk || !!nativeRead || !!nativeInvokeOk],
+      ['nativeMaterialized', pathDetected !== 'native-cache' || !!materializeEnd?.meta?.assetReady],
+      ['objectAddStarted', !!addObject],
+      ['pasteEndedAdded', end?.meta?.added === true || objectDelta > 0],
+    ];
+    const failedCheckpoint = checkpoints.find(([, ok]) => !ok);
+    const sizeEvent = nativeRead || nativeInvokeOk || blobReadOk || blobEvent;
+    const out = {
+      pasteRuns: pasteStarts.length,
+      totalMs: end?.total ?? run.at(-1)?.total ?? '',
+      path: end?.meta?.path || '',
+      added: end?.meta?.added ?? '',
+      objectCountBefore,
+      objectCountAfter,
+      objectDelta,
+      pathDetected,
+      imageSource: blobEvent?.meta?.type || blobReadOk?.meta?.blobType || nativeRead?.meta?.mime || '',
+      blobSize: blobEvent?.meta?.blobSize ?? blobReadOk?.meta?.blobSize ?? '',
+      bytes: nativeRead?.meta?.bytes ?? timing(nativeInvokeOk?.meta, 'bytes') ?? '',
+      dataUrlLen: blobReadOk?.meta?.dataUrlLen ?? '',
+      ...memorySnapshotFromEvent(sizeEvent),
+      failedCheckpoint: failedCheckpoint ? failedCheckpoint[0] : '',
+      firstErrorStep: firstError?.step || '',
+      firstError: firstError?.meta?.error || '',
+      verdict: failedCheckpoint
+        ? `inspect ${failedCheckpoint[0]} and surrounding rows`
+        : 'all paste checkpoints reached in captured run',
+    };
+    console.table([out]);
+    console.table(checkpoints.map(([checkpoint, ok]) => ({ checkpoint, ok })));
+    return { summary: out, checkpoints: checkpoints.map(([checkpoint, ok]) => ({ checkpoint, ok })), rows: run.map(e => debugRow(e, { includeId: true, includeSkipped: true })) };
   }
 
   function status() {
@@ -192,6 +297,8 @@ var ClipDebug = (() => {
       processed: pasteProgress?.meta?.processed ?? copyProgress?.meta?.processed ?? '',
       registeredImages: pasteEnd?.meta?.registeredImages ?? pasteProgress?.meta?.registeredImages ?? '',
       historyIndex: pasteEnd?.meta?.historyIndex ?? '',
+      objectCountBefore: pasteEnd?.meta?.objectCountBefore ?? '',
+      objectCountAfter: pasteEnd?.meta?.objectCountAfter ?? '',
       error: last?.meta?.error || '',
     };
     console.table([out]);
@@ -215,6 +322,7 @@ var ClipDebug = (() => {
     summary,
     phaseSummary,
     copyBreakdown,
+    largePasteReport,
     status,
     waitForNative: (timeoutMs) => (
       typeof waitForNativeClipboardIdle === 'function'
@@ -973,8 +1081,6 @@ var ViewportDebug = (() => {
       maxTotalMs: Math.round(max('totalMs') * 100) / 100,
       avgDrawBoardMs: rows.length ? Math.round(sum('drawBoard') / rows.length * 100) / 100 : 0,
       maxDrawBoardMs: Math.round(max('drawBoard') * 100) / 100,
-      avgZoomDisplayMs: rows.length ? Math.round(sum('updateZoomDisplay') / rows.length * 100) / 100 : 0,
-      maxZoomDisplayMs: Math.round(max('updateZoomDisplay') * 100) / 100,
       avgSaveViewportMs: rows.length ? Math.round(sum('saveViewport') / rows.length * 100) / 100 : 0,
       maxSaveViewportMs: Math.round(max('saveViewport') * 100) / 100,
       avgOverlayMs: rows.length ? Math.round(sum('updateSelectionOverlay') / rows.length * 100) / 100 : 0,

@@ -31,8 +31,6 @@ var ManualPerfDebug = (() => {
       samplesWithMissingImages: eyedropper.samplesWithMissingImages ?? '',
       eyedropperEnabled: report.eyedropper?.runtime?.enabled ?? '',
       eyedropperSampling: report.eyedropper?.runtime?.sampling ?? '',
-      viewportPrewarmRafActive: report.eyedropper?.runtime?.viewportPrewarmRafActive ?? '',
-      viewportPrewarmScheduled: report.eyedropper?.runtime?.viewportPrewarmScheduled ?? '',
       viewportScaleQueueLength: report.eyedropper?.runtime?.viewportScaleQueueLength ?? '',
       viewportScalePending: report.eyedropper?.runtime?.viewportScalePending ?? '',
     };
@@ -48,10 +46,14 @@ var ManualPerfDebug = (() => {
     BoardfishDebug.viewport.reset();
     BoardfishDebug.eyedropper.reset();
     markers.length = 0;
+    if (typeof setEyedropperPreviewDiagnosticsEnabled === 'function') {
+      setEyedropperPreviewDiagnosticsEnabled(options.previewDiagnostics === true);
+    }
     const out = {
       startedAt: new Date().toISOString(),
       imageCount: imageCount(),
       objectCount: objects.length,
+      previewDiagnostics: options.previewDiagnostics === true,
     };
     console.info('[Boardfish perf] Manual session started. Move the cursor yourself, then run finishDebug({ perf: ["report"] }).');
     console.table([out]);
@@ -163,6 +165,9 @@ var ManualPerfDebug = (() => {
     console.log(out);
     console.groupEnd();
     if (options.copy !== false) void copyLast();
+    if (options.previewDiagnostics === false && typeof setEyedropperPreviewDiagnosticsEnabled === 'function') {
+      setEyedropperPreviewDiagnosticsEnabled(false);
+    }
     return out;
   }
 
@@ -315,12 +320,107 @@ var ManualPerfDebug = (() => {
     return out;
   }
 
+  async function eyedropperContinuousPreviewTest(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    BoardfishDebug.viewport.enable({ verbose: false });
+    BoardfishDebug.eyedropper.enable({ verbose: false });
+    BoardfishDebug.viewport.reset();
+    BoardfishDebug.eyedropper.reset();
+    markers.length = 0;
+    if (typeof setEyedropperPreviewDiagnosticsEnabled === 'function') {
+      setEyedropperPreviewDiagnosticsEnabled(options.previewDiagnostics === true);
+    }
+    if (!eyedropperEnabled && typeof setEyedropperEnabled === 'function') setEyedropperEnabled(true);
+    if (typeof hideEyedropperSample === 'function') hideEyedropperSample();
+    await animationFrame();
+
+    const moves = Math.max(1, Math.min(240, Number(options.moves) || 48));
+    const pointerId = Number(options.pointerId) || 9401;
+    const start = eyedropperTestPoint({
+      ...options,
+      xRatio: Number.isFinite(options.startXRatio) ? options.startXRatio : 0.35,
+      yRatio: Number.isFinite(options.startYRatio) ? options.startYRatio : 0.45,
+    });
+    const end = eyedropperTestPoint({
+      ...options,
+      xRatio: Number.isFinite(options.endXRatio) ? options.endXRatio : 0.65,
+      yRatio: Number.isFinite(options.endYRatio) ? options.endYRatio : 0.55,
+    });
+    const points = [];
+    const startedAt = performance.now();
+    dispatchEyedropperPointer('pointerdown', start, { ...options, pointerId });
+    await animationFrame();
+    for (let index = 0; index < moves; index++) {
+      const t = moves <= 1 ? 1 : index / (moves - 1);
+      const wave = Math.sin(t * Math.PI * 2) * (Number(options.waveCss) || 18);
+      const point = {
+        x: Math.round(start.x + (end.x - start.x) * t),
+        y: Math.round(start.y + (end.y - start.y) * t + wave),
+      };
+      points.push(point);
+      dispatchEyedropperPointer('pointermove', point, { ...options, pointerId });
+      if (options.framePerMove !== false) await animationFrame();
+    }
+    await animationFrame();
+    if (options.release !== false) dispatchEyedropperPointer('pointerup', points.at(-1) || end, { ...options, pointerId });
+    await animationFrame();
+    await animationFrame();
+
+    const eyedropperReport = BoardfishDebug.eyedropper.report({
+      log: false,
+      samples: options.samples ?? Math.max(60, moves + 4),
+      first: options.first ?? 12,
+      present: options.present ?? Math.max(60, moves + 4),
+      slow: options.slow ?? 60,
+      timeline: options.timeline ?? Math.max(120, moves * 3),
+    });
+    const out = {
+      label: 'eyedropper-continuous-preview-test',
+      reportedAt: new Date().toISOString(),
+      moves,
+      framePerMove: options.framePerMove !== false,
+      start,
+      end,
+      elapsedMs: Math.round((performance.now() - startedAt) * 100) / 100,
+      eyedropper: eyedropperReport,
+      viewport: BoardfishDebug.viewport.report({ log: false, details: false, limit: options.limit || 12 }),
+    };
+    out.headline = {
+      samples: eyedropperReport.totals?.samples ?? '',
+      firstSamples: eyedropperReport.totals?.firstSamples ?? '',
+      slowSamples: eyedropperReport.totals?.slowSamples ?? '',
+      maxSampleMs: eyedropperReport.totals?.maxSampleMs ?? '',
+      maxClickToPreviewVisibleMs: eyedropperReport.perf?.maxClickToPreviewVisibleMs ?? '',
+      maxClickToPreviewFrameMs: eyedropperReport.perf?.maxClickToPreviewFrameMs ?? '',
+      maxEventToPreviewFrameMs: eyedropperReport.perf?.maxEventToPreviewFrameMs ?? '',
+      coalescedMoves: eyedropperReport.totals?.coalescedMoves ?? '',
+      samplesWithPendingImages: eyedropperReport.totals?.samplesWithPendingImages ?? '',
+      samplesWithMissingImages: eyedropperReport.totals?.samplesWithMissingImages ?? '',
+    };
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] eyedropper continuous preview test');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    if (typeof setEyedropperPreviewDiagnosticsEnabled === 'function') {
+      setEyedropperPreviewDiagnosticsEnabled(false);
+    }
+    return out;
+  }
+
   return {
     begin,
     mark,
     resetPhase,
     report,
     eyedropperInitialPreviewTest,
+    eyedropperContinuousPreviewTest,
     colorpickerZoomReport,
     state,
     json,
