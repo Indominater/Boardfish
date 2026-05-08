@@ -53,6 +53,9 @@ var MENU_SHORTCUTS = {
   open: [COMMAND_KEY_LABEL, 'O'],
   copy: [COMMAND_KEY_LABEL, 'C'],
   duplicate: [COMMAND_KEY_LABEL, 'D'],
+  'move-to-back': [COMMAND_KEY_LABEL, '['],
+  'export-image': [COMMAND_KEY_LABEL, 'E'],
+  'export-images': [COMMAND_KEY_LABEL, 'E'],
   delete: ['Delete'],
 };
 

@@ -1,6 +1,6 @@
 # Boardfish
 
-Boardfish is a fast, lossless infinite canvas for visual ideation.
+Boardfish is a fast, lossless infinite canvas for visual ideation. Designed for Windows and macOS, it provides a lightweight environment for visual research, moodboarding, and snippets.
 
 <img src="src-tauri/icons/image_e4de38.png" alt="Boardfish canvas screenshot" width="900">
 
@@ -21,7 +21,7 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 - An infinite canvas free from formatting rules
 - Lag-free navigation across massive boards supporting 1 GB+ of images and text
 - Multi-select, translate, scale, flip, rotate, lock, copy, paste, and duplicate
-- Sample colors with pinned eyedropper cards
+- Sample colors with a pinned eyedropper card
 - Losslessly add images and text via clipboard, drag and drop, or the file picker
 - Losslessly copy images back to your clipboard
 - Export one image, selected images, all images, or all text

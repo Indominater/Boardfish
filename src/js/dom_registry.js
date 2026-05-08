@@ -15,6 +15,8 @@
     objCtxMenu: 'obj-ctx-menu',
     copyBtn: 'obj-btn-copy',
     lockBtn: 'obj-btn-lock',
+    lockBeforeSep: 'obj-sep-lock-before',
+    lockAfterSep: 'obj-sep-lock-after',
     moveToBackBtn: 'obj-btn-move-to-back',
     deleteBtn: 'obj-btn-delete',
     saveImageBtn: 'obj-btn-save-image',

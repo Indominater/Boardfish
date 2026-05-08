@@ -1246,6 +1246,82 @@ var EyedropperDebug = (() => {
     return out;
   }
 
+  function hexEqual(a, b) {
+    return String(a || '').toUpperCase() === String(b || '').toUpperCase();
+  }
+
+  function backgroundReadoutRow(e, backgroundHex) {
+    const displayedIsBackground = hexEqual(e.meta?.displayedHex, backgroundHex);
+    const readoutIsBackground = hexEqual(e.meta?.readoutPixel, backgroundHex);
+    const centerIsBackground = hexEqual(e.meta?.centerPixel, backgroundHex);
+    const previewIsBackground = hexEqual(e.meta?.previewPixel, backgroundHex);
+    return {
+      at: e.at,
+      x: e.meta?.clientX ?? '',
+      y: e.meta?.clientY ?? '',
+      top: e.meta?.topObjectId || '',
+      topType: e.meta?.topObjectType || '',
+      source: e.meta?.readoutSource || '',
+      reason: e.meta?.readoutReason || '',
+      displayedHex: e.meta?.displayedHex || '',
+      readoutPixel: e.meta?.readoutPixel || '',
+      centerPixel: e.meta?.centerPixel || '',
+      previewPixel: e.meta?.previewPixel || '',
+      displayedIsBackground,
+      readoutIsBackground,
+      centerIsBackground,
+      previewIsBackground,
+      pendingImages: e.meta?.readbackSafePendingImages ?? '',
+      missingImages: e.meta?.missingImages ?? '',
+      nativeSkipped: e.meta?.nativeSourceHydrationSkipped ?? '',
+      lastMissingReason: e.meta?.lastMissingReason || '',
+      sampleMs: e.meta?.sampleMs ?? '',
+      inputAgeMs: e.meta?.inputAgeAtCommitMs ?? '',
+      queueDelayMs: e.meta?.queueDelayMs ?? '',
+      frameCoalescedMoves: e.meta?.frameCoalescedMoves ?? '',
+    };
+  }
+
+  function backgroundReadoutReport(options = {}) {
+    const backgroundHex = rgbaToHex(boardBackgroundPixel());
+    const sampleEvents = events.filter(e => e.step === 'sample');
+    const imageSamples = sampleEvents.filter(e => e.meta?.topObjectType === 'image');
+    const rows = imageSamples
+      .map(e => backgroundReadoutRow(e, backgroundHex))
+      .filter(row => row.displayedIsBackground || row.readoutIsBackground || row.centerIsBackground || row.previewIsBackground);
+    const displayedRows = rows.filter(row => row.displayedIsBackground);
+    const readoutRows = rows.filter(row => row.readoutIsBackground || row.centerIsBackground);
+    const byReason = {};
+    const bySource = {};
+    for (const row of rows) {
+      const reason = row.reason || 'unknown';
+      const source = row.source || 'unknown';
+      byReason[reason] = (byReason[reason] || 0) + 1;
+      bySource[source] = (bySource[source] || 0) + 1;
+    }
+    const out = {
+      backgroundHex,
+      totals: {
+        samples: sampleEvents.length,
+        imageSamples: imageSamples.length,
+        imageSamplesWithAnyBackground: rows.length,
+        imageSamplesDisplayingBackground: displayedRows.length,
+        imageSamplesReadoutBackground: readoutRows.length,
+      },
+      byReason,
+      bySource,
+      recent: recentRows(rows, options, 80),
+      recentDisplayedBackground: recentRows(displayedRows, options?.displayed ?? options, 40),
+      recentReadoutBackground: recentRows(readoutRows, options?.readout ?? options, 40),
+      nativePixel: nativePixelSummary({ table: false, limit: debugLimit(options?.nativePixel ?? options, 80) }),
+    };
+    if (options.table !== false) {
+      console.table([out.totals]);
+      console.table(out.recent);
+    }
+    return out;
+  }
+
   function sampleAt(clientX, clientY) {
     const x = Number(clientX);
     const y = Number(clientY);
@@ -1458,6 +1534,7 @@ var EyedropperDebug = (() => {
     safeImageTimeline,
     nativePixelTimeline,
     nativePixelSummary,
+    backgroundReadoutReport,
     slowSampleSummary,
     readbackFailures,
     status,

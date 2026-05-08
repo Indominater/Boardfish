@@ -315,22 +315,30 @@ function updateObjMenuActions() {
   }
   const lockSummary = selectedLockSummary();
   const multiSelected = isMultiSelected();
+  const canUnlockSingle = lockSummary.total === 1 && lockSummary.locked === 1;
+  const canLock = lockSummary.anyUnlocked;
+  const showLock = canUnlockSingle || canLock;
+  const showImageActions = unlockedImageCount >= 1;
+  const showLayerActions = lockSummary.anyUnlocked;
+  const showExport = imageCount >= 1;
+  const showDelete = lockSummary.anyUnlocked;
+  const showAfterLockSep = showLock && (showImageActions || showLayerActions || showExport || showDelete);
   if (copyBtn) copyBtn.style.display = '';
   if (lockBtn) {
     const label = lockBtn.querySelector?.('.ctx-label');
-    const canUnlockSingle = lockSummary.total === 1 && lockSummary.locked === 1;
-    const canLock = lockSummary.anyUnlocked;
     const text = canUnlockSingle ? 'Unlock' : 'Lock';
     if (label) label.textContent = text;
     else lockBtn.textContent = text;
-    lockBtn.style.display = canUnlockSingle || canLock ? '' : 'none';
+    lockBtn.style.display = showLock ? '' : 'none';
+    BoardfishDOM.lockBeforeSep.style.display = showLock ? 'block' : 'none';
+    BoardfishDOM.lockAfterSep.style.display = showAfterLockSep ? 'block' : 'none';
   }
-  if (imageActionsSep) imageActionsSep.style.display = unlockedImageCount >= 1 ? 'block' : 'none';
-  if (flipHorizontalBtn) flipHorizontalBtn.style.display = unlockedImageCount >= 1 ? '' : 'none';
-  if (flipVerticalBtn) flipVerticalBtn.style.display = unlockedImageCount >= 1 ? '' : 'none';
-  if (rotateBtn) rotateBtn.style.display = unlockedImageCount >= 1 ? '' : 'none';
-  if (layerActionsSep) layerActionsSep.style.display = lockSummary.anyUnlocked ? 'block' : 'none';
-  if (moveToBackBtn) moveToBackBtn.style.display = lockSummary.anyUnlocked ? '' : 'none';
+  if (imageActionsSep) imageActionsSep.style.display = showImageActions && !showAfterLockSep ? 'block' : 'none';
+  if (flipHorizontalBtn) flipHorizontalBtn.style.display = showImageActions ? '' : 'none';
+  if (flipVerticalBtn) flipVerticalBtn.style.display = showImageActions ? '' : 'none';
+  if (rotateBtn) rotateBtn.style.display = showImageActions ? '' : 'none';
+  if (layerActionsSep) layerActionsSep.style.display = showLayerActions && showImageActions ? 'block' : 'none';
+  if (moveToBackBtn) moveToBackBtn.style.display = showLayerActions ? '' : 'none';
   if (saveImageBtn) saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
   if (saveImagesBtn) {
     const label = saveImagesBtn.querySelector?.('.ctx-label');
@@ -338,9 +346,12 @@ function updateObjMenuActions() {
     else saveImagesBtn.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
     saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';
   }
-  if (exportSep) exportSep.style.display = imageCount >= 1 ? 'block' : 'none';
-  if (deleteSep) deleteSep.style.display = lockSummary.anyUnlocked ? 'block' : 'none';
-  if (deleteBtn) deleteBtn.style.display = lockSummary.anyUnlocked ? '' : 'none';
+  if (exportSep) {
+    const lockSepAlreadyBeforeExport = showAfterLockSep && !showImageActions && !showLayerActions;
+    exportSep.style.display = showExport && !lockSepAlreadyBeforeExport ? 'block' : 'none';
+  }
+  if (deleteSep) deleteSep.style.display = showDelete ? 'block' : 'none';
+  if (deleteBtn) deleteBtn.style.display = showDelete ? '' : 'none';
 }
 
 function updateCtxMenuActions() {

@@ -60,6 +60,22 @@ test('normalizes saved eyedropper cards', () => {
   });
 });
 
+test('limits saved eyedropper cards to one', () => {
+  const board = BoardSchema.normalizeBoardData({
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {},
+    objects: [],
+    eyedropperCards: [
+      { rgba: [1, 2, 3], left: 10, top: 20, order: 1 },
+      { rgba: [4, 5, 6], left: 30, top: 40, order: 2 },
+    ],
+  });
+
+  assert.equal(board.eyedropperCards.length, 1);
+  assert.deepEqual(board.eyedropperCards[0].rgba, [1, 2, 3, 255]);
+});
+
 test('normalizes object lock state', () => {
   const board = BoardSchema.normalizeBoardData({
     version: 3,

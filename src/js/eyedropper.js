@@ -189,7 +189,6 @@ function useEyedropperCard(card) {
   if (!card) return null;
   eyedropperActiveCard = card;
   eyedropperLoupe = card.el;
-  eyedropperCloseBtn = card.closeBtn;
   eyedropperPreview = card.preview;
   eyedropperCanvas = card.canvas;
   eyedropperSwatch = card.swatch;
@@ -266,7 +265,6 @@ function createEyedropperCard() {
 
   const card = {
     el,
-    closeBtn: null,
     preview: null,
     canvas: null,
     swatch: null,
@@ -282,7 +280,6 @@ function createEyedropperCard() {
     order: ++eyedropperCardZCounter,
     bound: false,
   };
-  card.closeBtn = cardPart(card, 'eyedropper-close', 'eyedropper-close');
   card.preview = cardPart(card, 'eyedropper-preview', 'eyedropper-preview');
   card.canvas = cardPart(card, 'eyedropper-canvas', 'eyedropper-canvas');
   card.swatch = cardPart(card, 'eyedropper-swatch', 'eyedropper-swatch');
@@ -313,10 +310,13 @@ function pinnedEyedropperCards() {
 }
 
 function prepareEyedropperSamplingCard() {
-  let card = ensureEyedropperCard();
-  if (!card || card.el.classList.contains('visible')) card = hiddenEyedropperCard() || createEyedropperCard();
+  const card = eyedropperCards[0] || ensureEyedropperCard() || createEyedropperCard();
+  for (const item of eyedropperCards) if (item !== card) { if (_eyedropperDragState?.card === item) _eyedropperDragState = null; item.el?.remove?.(); }
+  eyedropperCards = [card];
   useEyedropperCard(card);
+  card.wasPersistedBeforeSample = isPersistedEyedropperCard(card);
   card.el.classList.remove('visible', 'pinned', 'dragging');
+  resetEyedropperCardPreviewState(card);
   bringEyedropperCardToFront(card);
   return card;
 }
@@ -341,8 +341,10 @@ function finishEyedropperSampleCard(shouldPin = true) {
   const card = ensureEyedropperCard();
   if (!card?.el?.classList.contains('visible')) return;
   card.el.classList.remove('dragging');
+  const replacedPersisted = !!card.wasPersistedBeforeSample; card.wasPersistedBeforeSample = false;
   if (shouldPin && pinEyedropperCard(card)) return;
   hideEyedropperCard(card);
+  if (replacedPersisted) markEyedropperCardsDirty('card-replaced');
 }
 
 function closeEyedropperCard(card) {
@@ -481,13 +483,8 @@ const resetEyedropperCardVisual = (card) => {
   card.el.classList.remove('visible', 'pinned', 'dragging');
   card.el.style.transform = '';
   card.el.style.removeProperty('--eyedropper-card-z');
-  card.previewToken = '';
-  card.previewDataUrl = '';
-  card.previewCanvasWidth = 0;
-  card.previewCanvasHeight = 0;
-  card.pendingPreviewDataUrl = '';
-  card.pendingPreviewCanvasWidth = 0;
-  card.pendingPreviewCanvasHeight = 0;
+  resetEyedropperCardPreviewState(card);
+  card.wasPersistedBeforeSample = false;
   card.order = 0;
   if (card.hex) card.hex.textContent = '#000000';
   if (card.rgb) card.rgb.textContent = '0 0 0';
@@ -1562,12 +1559,13 @@ function sampleEyedropperReadoutPixel(clientX, clientY, previewSample = null, op
   }
   if (timings.cachedPixelImageMiss && options.localImageFallback !== true) {
     return {
-      pixel: previewSample?.pixel || boardBackgroundPixel(),
-      source: 'background',
+      pixel: null,
+      source: 'pixel-cache',
       reason: timings.cachedPixelImageMissReason || 'image-cache-pending',
       objectId: '',
       objectType: 'image',
       inBounds: false,
+      noReadoutUpdate: true,
       counters: previewSample?.counters || {},
       layers: [],
       timings,
@@ -2668,25 +2666,14 @@ function bindEyedropperCardEvents(card) {
     else e.stopPropagation();
   });
   card.el.addEventListener('contextmenu', (e) => {
+    const eventCard = eyedropperCardFromEvent(e) || card;
     e.preventDefault();
-    e.stopPropagation();
+    e.stopImmediatePropagation();
+    if (!eyedropperSampling && isPersistedEyedropperCard(eventCard)) closeEyedropperCard(eventCard);
   });
   card.el.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-  });
-  card.closeBtn?.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    closeEyedropperCard(card);
-  });
-  card.closeBtn?.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  });
-  card.closeBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopImmediatePropagation();
   });
 }
 

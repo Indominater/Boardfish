@@ -67,7 +67,7 @@
   function normalizeEyedropperCards(cards = []) {
     if (cards == null) return [];
     if (!Array.isArray(cards)) throw new Error('eyedropperCards must be an array');
-    return cards.slice(0, 5).map((card, index) => normalizeEyedropperCard(card, index));
+    return cards.slice(0, 1).map((card, index) => normalizeEyedropperCard(card, index));
   }
 
   function normalizeObject(obj, index) {

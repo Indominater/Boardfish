@@ -203,7 +203,8 @@ test('eyedropper readout samples rendered canvas-visible pixels', () => {
   assert.doesNotMatch(source, /matchingEyedropperNativePixel/);
   assert.doesNotMatch(source, /reason: 'native-image-pixel'/);
   assert.match(source, /if \(isNativeImageRef\(imageStore\[key\]\)\) \{[\s\S]*requestEyedropperNativePixel\(\);[\s\S]*cachedPixelImageMissReason = 'native-pixel-pending';[\s\S]*return null;[\s\S]*\}/);
-  assert.match(source, /if \(timings\.cachedPixelImageMissReason === 'native-pixel-pending'\) \{[\s\S]*noReadoutUpdate: true,[\s\S]*\}\s*if \(timings\.cachedPixelImageMiss && options\.localImageFallback !== true\)/);
+  assert.match(source, /if \(timings\.cachedPixelImageMissReason === 'native-pixel-pending'\) \{[\s\S]*noReadoutUpdate: true,[\s\S]*\}\s*if \(timings\.cachedPixelImageMiss && options\.localImageFallback !== true\) \{[\s\S]*pixel: null,[\s\S]*source: 'pixel-cache',[\s\S]*noReadoutUpdate: true,/);
+  assert.doesNotMatch(source, /pixel: previewSample\?\.pixel \|\| boardBackgroundPixel\(\),\s*source: 'background',\s*reason: timings\.cachedPixelImageMissReason/);
   assert.doesNotMatch(source, new RegExp('sampleCachedImage' + 'Tile'));
   assert.doesNotMatch(source, new RegExp('native' + '-tile'));
   assert.match(source, /timings\.previewCenterReadbackSkipped = 1/);

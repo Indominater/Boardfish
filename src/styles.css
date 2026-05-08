@@ -480,41 +480,6 @@ body.eyedropper-enabled #multi-sel-overlay {
   display: block;
   image-rendering: pixelated;
 }
-#eyedropper-close,
-.eyedropper-close {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 2;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  color: var(--firefox-menu-text);
-  background: var(--firefox-menu-bg);
-  border: 1px solid var(--firefox-menu-border);
-  border-radius: var(--menu-shell-radius);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.24);
-  cursor: default;
-  -webkit-font-smoothing: antialiased;
-}
-#eyedropper-loupe.pinned #eyedropper-close,
-.eyedropper-loupe.pinned .eyedropper-close { display: flex; }
-#eyedropper-close:hover,
-.eyedropper-close:hover { background: var(--firefox-menu-hover-bg); }
-#eyedropper-close:active,
-.eyedropper-close:active { background: var(--firefox-menu-active-bg); }
-#eyedropper-close .material-symbols-outlined,
-.eyedropper-close .material-symbols-outlined {
-  display: block;
-  width: 18px;
-  height: 18px;
-  font-size: 18px;
-  line-height: 18px;
-  pointer-events: none;
-}
 #eyedropper-values,
 .eyedropper-values {
   --eyedropper-readout-height: calc((var(--menu-item-height) * 2) + (var(--menu-shell-padding) * 2));

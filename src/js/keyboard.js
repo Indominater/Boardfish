@@ -201,6 +201,25 @@ document.addEventListener('keydown', (e) => {
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'c') && !editingId) { e.preventDefault(); copySelected(); return; }
 
+  if (hasExactCommandModifier(e) && (e.code === 'BracketLeft' || e.key === '[') && !editingId) {
+    e.preventDefault();
+    sendSelectedToBack();
+    return;
+  }
+
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'e') && !editingId) {
+    const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
+    if (imageObjs.length) {
+      e.preventDefault();
+      if (imageObjs.length === 1) saveSelectedImage();
+      else {
+        showInputShield({ keepSelectionOverlay: true });
+        saveSelectedImages();
+      }
+    }
+    return;
+  }
+
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'x') && !editingId) {
     e.preventDefault();
     (async () => {

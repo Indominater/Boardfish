@@ -45,6 +45,7 @@ const rememberEyedropperCardPreviewScene = (card, previewSample = null, options 
   if (!card || !previewSample?.painted || !previewSample.viewportRect || !previewSample.view) return false;
   const drawSize = Math.max(1, Math.round(Number(previewSample.drawSize) || eyedropperPreviewDrawSize()));
   const viewportRect = cloneEyedropperPreviewRect(previewSample.viewportRect);
+  card.previewStateVersion = (card.previewStateVersion || 0) + 1;
   card.previewScene = {
     drawSize,
     canvasWidth: drawSize,
@@ -156,9 +157,12 @@ const renderEyedropperCardPreviewScene = async (card, reason = 'scene') => {
 const scheduleEyedropperCardPreviewSnapshot = (card, reason = 'scene') => {
   if (!card?.previewScene) return Promise.resolve(false);
   if (card.previewSnapshotPromise) return card.previewSnapshotPromise;
+  const scene = card.previewScene;
+  const previewStateVersion = card.previewStateVersion || 0;
   const promise = renderEyedropperCardPreviewScene(card, reason)
     .then((dataUrl) => {
       if (!dataUrl) return false;
+      if (card.previewScene !== scene || (card.previewStateVersion || 0) !== previewStateVersion) return false;
       card.previewDataUrl = dataUrl;
       card.previewCanvasWidth = card.previewScene?.canvasWidth || card.previewScene?.drawSize || 0;
       card.previewCanvasHeight = card.previewScene?.canvasHeight || card.previewScene?.drawSize || 0;

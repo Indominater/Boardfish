@@ -1,7 +1,6 @@
 'use strict';
 
 var eyedropperLoupe = document.getElementById('eyedropper-loupe');
-var eyedropperCloseBtn = document.getElementById('eyedropper-close');
 var eyedropperPreview = document.getElementById('eyedropper-preview');
 var eyedropperCanvas = document.getElementById('eyedropper-canvas');
 var eyedropperSwatch = document.getElementById('eyedropper-swatch');
@@ -79,7 +78,14 @@ var EYEDROPPER_SAFE_TILE_MEMORY_LIMIT = 32 * 1024 * 1024;
 var EYEDROPPER_PREVIEW_ZOOM_SCALE = 3;
 var EYEDROPPER_PREVIEW_CSS = 96;
 var EYEDROPPER_LOUPE_CSS_HEIGHT = 392;
-var EYEDROPPER_MAX_PINNED_CARDS = 5;
+var EYEDROPPER_MAX_PINNED_CARDS = 1;
+
+const resetEyedropperCardPreviewState = (card) => card && Object.assign(card, {
+  previewStateVersion: (card.previewStateVersion || 0) + 1,
+  previewToken: '', previewDataUrl: '', previewCanvasWidth: 0, previewCanvasHeight: 0,
+  pendingPreviewDataUrl: '', pendingPreviewCanvasWidth: 0, pendingPreviewCanvasHeight: 0,
+  previewScene: null, previewSnapshotPromise: null,
+});
 
 function eyedropperReticleDisplayScaleForCard(card, canvas = card?.canvas) {
   const width = Number(canvas?.width) || 0;
