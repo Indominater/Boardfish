@@ -67,8 +67,8 @@
   }
 
   function cleanupTempKeys(tempKeys) {
-    if (!tempKeys?.length || !hasTauri()) return;
-    BoardfishTauri.removeCachedImageSources(tempKeys)
+    if (!tempKeys?.length || !hasTauri()) return Promise.resolve(0);
+    return BoardfishTauri.removeCachedImageSources(tempKeys)
       .catch((err) => console.warn('[export] remove_cached_image_sources failed:', err));
   }
 

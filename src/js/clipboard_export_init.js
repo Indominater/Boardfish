@@ -252,12 +252,19 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       try {
         await new Promise(resolve => setTimeout(resolve, 50));
         const imgKey = newImgKey();
+        const generation = _imageStoreGeneration;
+        const sourceToken = createImageSourceToken(imgKey);
         const meta = await ClipDebug.wrap(
           dbg,
           TAURI_COMMANDS.READ_IMAGE_FROM_CLIPBOARD_CACHED,
-          () => BoardfishTauri.readImageFromClipboardCached(imgKey),
+          () => BoardfishTauri.readImageFromClipboardCached(imgKey, sourceToken),
           { imgKey }
         );
+        if (generation !== _imageStoreGeneration) {
+          cleanupNativeImageSourceToken(imgKey, sourceToken);
+          ClipDebug.step(dbg, 'native-image-stale-skip', { imgKey });
+          return;
+        }
         ClipDebug.step(dbg, 'native-image-read', {
           imgKey,
           width: meta?.width,
@@ -267,7 +274,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           mime: meta?.mime,
           ext: meta?.ext,
         });
-        await pasteNativeCachedImage(meta, wx, wy, imgKey, 'native-image-cache', dbg);
+        await pasteNativeCachedImage(meta, wx, wy, imgKey, 'native-image-cache', dbg, sourceToken);
         return;
       } catch (err) {
         hideInputShield();

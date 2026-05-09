@@ -420,18 +420,40 @@ test('eyedropper decode warming uses two background decoders after board open', 
   assert.doesNotMatch(ioCloseSource, /schedulePostOpenEyedropperSafeImagePrewarm\('open-all-hydrated'\)/);
 });
 
-test('undo-history lifecycle prunes only existing eyedropper-safe cache entries', () => {
+test('undo-history lifecycle prunes image caches to current board, history, and clipboard keys', () => {
   const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
   const imageInsertSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_insert.js'), 'utf8');
   const historySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'history_state.js'), 'utf8');
+  const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
 
   assert.match(eyedropperSource, /function pruneEyedropperSafeImagesToKeys\(retainedKeys = new Set\(\)\)/);
   assert.match(eyedropperSource, /removeEyedropperSafeImageKey\(key\)/);
   assert.doesNotMatch(imageInsertSource, /scheduleNewImageEyedropperSafePrewarm/);
+  assert.match(imageStateSource, /const pruneImageCachesToKeys = \(retainedKeys = new Set\(\)\) =>/);
+  assert.match(imageStateSource, /BoardfishTauri\.removeCachedImageSources\(removedSourceKeys\)/);
   assert.match(historySource, /function retainedImageKeysForCurrentAndHistory\(\)/);
   assert.match(historySource, /collectImageKeysFromObjects\(objects, keys\)/);
   assert.match(historySource, /for \(const entry of boardHistory\)/);
-  assert.match(historySource, /pruneEyedropperSafeImagesToKeys\(retainedImageKeysForCurrentAndHistory\(\)\)/);
+  assert.match(historySource, /collectImageKeysFromObjects\(jsClipboard\?\.objects, keys\)/);
+  assert.match(historySource, /Object\.keys\(jsClipboard\?\.imageData \|\| \{\}\)/);
+  assert.match(historySource, /pruneImageCachesToKeys\(retainedKeys\)/);
+  assert.match(historySource, /pruneEyedropperSafeImagesToKeys\(retainedKeys\)/);
+});
+
+test('async image cache writes use tokens and generation guards', () => {
+  const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
+  const bridgeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'tauri_bridge.js'), 'utf8');
+  const imageInsertSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_insert.js'), 'utf8');
+
+  assert.match(bridgeSource, /removeCachedImageSources\(imgKeys, sourceTokens = null\)/);
+  assert.match(bridgeSource, /registerImageSource\(imgKey, dataUrl, sourceToken = null\)/);
+  assert.match(imageStateSource, /const createImageSourceToken = \(key\) =>/);
+  assert.match(imageStateSource, /const cleanupNativeImageSourceToken = \(key, sourceToken\) =>/);
+  assert.match(imageStateSource, /BoardfishTauri\.removeCachedImageSources\(\[key\], \[sourceToken\]\)/);
+  assert.match(imageStateSource, /const isImageDisplayCacheRequestCurrent = \(key, src, generation\) =>/);
+  assert.match(imageStateSource, /if \(!isImageDisplayCacheRequestCurrent\(key, loadedSrc, generation\)\)/);
+  assert.match(imageInsertSource, /const sourceToken = createImageSourceToken\(imgKey\)/);
+  assert.match(imageInsertSource, /cleanupNativeImageSourceToken\(imgKey, sourceToken\)/);
 });
 
 test('low-zoom drawing preserves visibility until scaled variants are ready', () => {

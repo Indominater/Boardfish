@@ -1,202 +1,13 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::elapsed_ms;
 use crate::image_data_url::cached_source_from_data_url;
+use crate::image_source_cache::DecodedImageSource;
+pub(crate) use crate::image_source_cache::{CachedImageSource, ImageSourceCache};
 use crate::image_source_files::{
     cleanup_materialized_paths, image_source_batch_dir, image_source_file_path,
 };
 use crate::image_transform::transform_dynamic_image;
-
-#[derive(Clone)]
-pub(crate) struct CachedImageSource {
-    pub(crate) mime: String,
-    pub(crate) ext: String,
-    pub(crate) bytes: Arc<[u8]>,
-}
-
-#[derive(Clone)]
-struct DecodedImageSource {
-    width: u32,
-    height: u32,
-    rgba: Arc<[u8]>,
-}
-
-struct CachedImageSourceEntry {
-    source: CachedImageSource,
-    materialized_paths: Vec<PathBuf>,
-    decoded: Option<DecodedImageSource>,
-}
-
-type CachedImageSources = Vec<(String, CachedImageSource)>;
-type CachedImageSourcesWithMissing = (CachedImageSources, Vec<String>);
-
-#[derive(Default)]
-pub(crate) struct ImageSourceCache(Mutex<HashMap<String, CachedImageSourceEntry>>);
-
-impl ImageSourceCache {
-    pub(crate) fn get(&self, key: &str) -> Result<CachedImageSource, String> {
-        self.0
-            .lock()
-            .map_err(|e| e.to_string())?
-            .get(key)
-            .map(|entry| entry.source.clone())
-            .ok_or_else(|| format!("image source cache missing for {key}"))
-    }
-
-    fn get_decoded(&self, key: &str) -> Result<Option<DecodedImageSource>, String> {
-        Ok(self
-            .0
-            .lock()
-            .map_err(|e| e.to_string())?
-            .get(key)
-            .and_then(|entry| entry.decoded.clone()))
-    }
-
-    fn cache_decoded(
-        &self,
-        key: &str,
-        source_bytes: &Arc<[u8]>,
-        decoded: DecodedImageSource,
-    ) -> Result<DecodedImageSource, String> {
-        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
-        if let Some(entry) = cache.get_mut(key) {
-            if Arc::ptr_eq(&entry.source.bytes, source_bytes) {
-                entry.decoded = Some(decoded.clone());
-            }
-        }
-        Ok(decoded)
-    }
-
-    pub(crate) fn get_many(&self, keys: &[String]) -> Result<CachedImageSources, String> {
-        let cache = self.0.lock().map_err(|e| e.to_string())?;
-        let mut sources = Vec::with_capacity(keys.len());
-        for key in keys {
-            let source = cache
-                .get(key)
-                .map(|entry| entry.source.clone())
-                .ok_or_else(|| format!("image source cache missing for {key}"))?;
-            sources.push((key.clone(), source));
-        }
-        Ok(sources)
-    }
-
-    fn get_many_with_missing(
-        &self,
-        keys: &[String],
-    ) -> Result<CachedImageSourcesWithMissing, String> {
-        let cache = self.0.lock().map_err(|e| e.to_string())?;
-        let mut sources = Vec::with_capacity(keys.len());
-        let mut missing = Vec::new();
-        for key in keys {
-            if let Some(entry) = cache.get(key) {
-                sources.push((key.clone(), entry.source.clone()));
-            } else {
-                missing.push(key.clone());
-            }
-        }
-        Ok((sources, missing))
-    }
-
-    pub(crate) fn insert(&self, key: String, source: CachedImageSource) -> Result<(), String> {
-        let stale_paths = self
-            .0
-            .lock()
-            .map_err(|e| e.to_string())?
-            .insert(
-                key,
-                CachedImageSourceEntry {
-                    source,
-                    materialized_paths: Vec::new(),
-                    decoded: None,
-                },
-            )
-            .map(|entry| entry.materialized_paths)
-            .unwrap_or_default();
-        cleanup_materialized_paths(stale_paths);
-        Ok(())
-    }
-
-    pub(crate) fn replace_all(
-        &self,
-        sources: Vec<(String, CachedImageSource)>,
-    ) -> Result<(), String> {
-        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
-        let stale_paths = drain_materialized_paths(&mut cache);
-        cache.clear();
-        for (key, source) in sources {
-            cache.insert(
-                key,
-                CachedImageSourceEntry {
-                    source,
-                    materialized_paths: Vec::new(),
-                    decoded: None,
-                },
-            );
-        }
-        drop(cache);
-        cleanup_materialized_paths(stale_paths);
-        Ok(())
-    }
-
-    fn record_materialized(&self, paths: Vec<(String, PathBuf)>) -> Result<(), String> {
-        let mut orphaned_paths = Vec::new();
-        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
-        for (key, path) in paths {
-            if let Some(entry) = cache.get_mut(&key) {
-                entry.materialized_paths.push(path);
-            } else {
-                orphaned_paths.push(path);
-            }
-        }
-        drop(cache);
-        cleanup_materialized_paths(orphaned_paths);
-        Ok(())
-    }
-
-    fn remove_many(&self, keys: Vec<String>) -> Result<usize, String> {
-        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
-        let mut removed = 0usize;
-        let mut stale_paths = Vec::new();
-        for key in keys {
-            if let Some(entry) = cache.remove(&key) {
-                stale_paths.extend(entry.materialized_paths);
-                removed += 1;
-            }
-        }
-        drop(cache);
-        cleanup_materialized_paths(stale_paths);
-        Ok(removed)
-    }
-
-    pub(crate) fn clear(&self) -> Result<(), String> {
-        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
-        let stale_paths = drain_materialized_paths(&mut cache);
-        cache.clear();
-        drop(cache);
-        cleanup_materialized_paths(stale_paths);
-        Ok(())
-    }
-}
-
-impl Drop for ImageSourceCache {
-    fn drop(&mut self) {
-        if let Ok(mut cache) = self.0.lock() {
-            let stale_paths = drain_materialized_paths(&mut cache);
-            cache.clear();
-            cleanup_materialized_paths(stale_paths);
-        }
-    }
-}
-
-fn drain_materialized_paths(cache: &mut HashMap<String, CachedImageSourceEntry>) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    for entry in cache.values_mut() {
-        paths.append(&mut entry.materialized_paths);
-    }
-    paths
-}
 
 #[derive(serde::Serialize)]
 pub(crate) struct ImageSourceResponse {
@@ -297,6 +108,7 @@ pub(crate) async fn register_image_file_source(
     state: tauri::State<'_, ImageSourceCache>,
     img_key: String,
     path: String,
+    source_token: Option<String>,
 ) -> Result<ImageSourceResponse, String> {
     let (source, width, height) = tokio::task::spawn_blocking(move || {
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
@@ -317,7 +129,7 @@ pub(crate) async fn register_image_file_source(
     let bytes = source.bytes.len();
     let mime = source.mime.clone();
     let ext = source.ext.clone();
-    state.insert(img_key, source)?;
+    state.insert(img_key, source, source_token)?;
     Ok(ImageSourceResponse {
         bytes,
         mime,
@@ -500,6 +312,7 @@ pub(crate) async fn register_image_source(
     state: tauri::State<'_, ImageSourceCache>,
     img_key: String,
     data_url: String,
+    source_token: Option<String>,
 ) -> Result<ImageSourceResponse, String> {
     let (source, width, height) = tokio::task::spawn_blocking(move || {
         let source = cached_source_from_data_url(&data_url)?;
@@ -511,7 +324,7 @@ pub(crate) async fn register_image_source(
     let bytes = source.bytes.len();
     let mime = source.mime.clone();
     let ext = source.ext.clone();
-    state.insert(img_key, source)?;
+    state.insert(img_key, source, source_token)?;
     Ok(ImageSourceResponse {
         bytes,
         mime,
@@ -529,6 +342,7 @@ pub(crate) async fn register_transformed_image_source(
     flip_x: bool,
     flip_y: bool,
     rotation: u32,
+    source_token: Option<String>,
 ) -> Result<TransformedImageSourceResponse, String> {
     let total = std::time::Instant::now();
     let source = state.get(&img_key)?;
@@ -576,7 +390,7 @@ pub(crate) async fn register_transformed_image_source(
     .map_err(|e| e.to_string())??;
 
     let (transformed_source, (bytes, width, height, decode_ms, transform_ms, encode_ms)) = result;
-    state.insert(temp_key.clone(), transformed_source)?;
+    state.insert(temp_key.clone(), transformed_source, source_token)?;
     Ok(TransformedImageSourceResponse {
         bytes,
         mime: "image/png",
@@ -599,8 +413,9 @@ pub(crate) async fn register_transformed_image_source(
 pub(crate) fn remove_cached_image_sources(
     state: tauri::State<'_, ImageSourceCache>,
     img_keys: Vec<String>,
+    source_tokens: Option<Vec<String>>,
 ) -> Result<usize, String> {
-    state.remove_many(img_keys)
+    state.remove_many(img_keys, source_tokens)
 }
 
 #[tauri::command]

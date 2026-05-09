@@ -168,7 +168,7 @@ var ExportAllDiag = (() => {
       } catch (e) {
         saveErr = String(e);
       } finally {
-        BoardfishExportUtils.cleanupTempKeys(tempKeys);
+        await BoardfishExportUtils.cleanupTempKeys(tempKeys);
       }
       saveProbe = { keyCount: keys.length, savedCount, saveMs: ms(saveStart), saveOk, error: saveErr ?? '' };
       console.log(`  save_images_to_existing_folder_by_keys keyCount=${keys.length} saved=${savedCount} ${saveProbe.saveMs}ms ok=${saveOk}${saveErr ? ' ERR:'+saveErr : ''}`);

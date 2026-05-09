@@ -8,6 +8,7 @@ mod board_types;
 mod clipboard;
 mod dialogs;
 mod image_data_url;
+mod image_source_cache;
 mod image_source_files;
 mod image_source_process;
 mod image_sources;

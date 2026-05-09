@@ -16,6 +16,7 @@ var _imageDecodeActive = 0;
 var _imageDecodeScheduled = false;
 var MAX_IMAGE_DECODE_ACTIVE = 2;
 var imageReadyPromises = new Map();
+var imageSourceRequestCounter = 1;
 
 function newImgKey() { return 'img-' + (imgKeyCounter++); }
 
@@ -45,12 +46,40 @@ function imageSourceDebugInfo(src) {
   };
 }
 
+const createImageSourceToken = (key) => {
+  return `${key || 'img'}:${Date.now().toString(36)}:${imageSourceRequestCounter++}`;
+};
+
+const cleanupNativeImageSourceToken = (key, sourceToken) => {
+  if (!key || !sourceToken || !hasTauri()) return;
+  BoardfishTauri.removeCachedImageSources([key], [sourceToken])
+    .catch((err) => console.warn('[image-source-cache] stale source cleanup failed:', err));
+};
+
+const isImageSourceRequestCurrent = (key, expectedSource, generation) => {
+  return generation === _imageStoreGeneration && imageStore[key] === expectedSource;
+};
+
+const isImageDisplayCacheRequestCurrent = (key, src, generation) => {
+  if (generation !== _imageStoreGeneration) return false;
+  const stored = imageStore[key];
+  if (typeof stored === 'string') return stored === src;
+  if (isNativeImageRef(stored)) return !!src && imageAssetUrlCache[key] === src;
+  return false;
+};
+
 function cacheImageSourceForSave(key, src, dbg = null) {
   if (!hasTauri() || !src || isNativeImageRef(src)) return Promise.resolve();
   const existing = imageSourceCachePromises.get(key);
   if (existing) return existing;
-  const promise = SaveDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src), { imgKey: key, dataUrl: src })
+  const generation = _imageStoreGeneration;
+  const sourceToken = createImageSourceToken(key);
+  const promise = SaveDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), { imgKey: key, dataUrl: src })
     .then((result) => {
+      if (!isImageSourceRequestCurrent(key, src, generation)) {
+        cleanupNativeImageSourceToken(key, sourceToken);
+        return result;
+      }
       if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-source-ready');
       return result;
     })
@@ -66,8 +95,14 @@ function cacheImageSourceForExport(key, src, dbg = null) {
     ExportDebug.step(dbg, 'register:reuse-pending', { imgKey: key });
     return existing;
   }
-  const promise = ExportDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src), { imgKey: key })
+  const generation = _imageStoreGeneration;
+  const sourceToken = createImageSourceToken(key);
+  const promise = ExportDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), { imgKey: key })
     .then((result) => {
+      if (!isImageSourceRequestCurrent(key, src, generation)) {
+        cleanupNativeImageSourceToken(key, sourceToken);
+        return result;
+      }
       if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-source-ready');
       return result;
     })
@@ -482,6 +517,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   if (imageCache[key]) return imageReadyPromiseForKey(key);
   if (isNativeImageRef(src)) return;
   if (typeof src !== 'string' || !src) return;
+  const generation = _imageStoreGeneration;
   imageBitmapFailed.delete(key);
   const cacheStart = performance.now();
   const cacheMetrics = {
@@ -522,6 +558,13 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   // memory pressure during board open.
   const loadStart = performance.now();
   function finishLoadForImage(loaded, loadedSrc, reusedLoadedImage = false) {
+    if (!isImageDisplayCacheRequestCurrent(key, loadedSrc, generation)) {
+      cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
+      ViewportDebug.end(vpDbg, { key, stale: true });
+      OpenDebug.step(dbg, 'cache-image:stale', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
+      resolveReady(cacheMetrics);
+      return;
+    }
     const loadMs = performance.now() - loadStart;
     ViewportDebug.count('imageLoads');
     ViewportDebug.max('maxImageLoadMs', loadMs);
@@ -561,10 +604,15 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
           finishLoadForImage(safeImg, safeSrc, false);
         })
         .catch((err) => {
-          imageBitmapFailed.add(key);
           cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
-          ViewportDebug.end(vpDbg, { key, error: 'image readback probe failed', fallbackError: String(err) });
-          OpenDebug.step(dbg, 'cache-image:readback-fallback:error', { imgKey: key, ms: cacheMetrics.cacheTotalMs, error: String(err) });
+          if (generation === _imageStoreGeneration && imageStore[key]) {
+            imageBitmapFailed.add(key);
+            ViewportDebug.end(vpDbg, { key, error: 'image readback probe failed', fallbackError: String(err) });
+            OpenDebug.step(dbg, 'cache-image:readback-fallback:error', { imgKey: key, ms: cacheMetrics.cacheTotalMs, error: String(err) });
+          } else {
+            ViewportDebug.end(vpDbg, { key, stale: true, fallbackError: String(err) });
+            OpenDebug.step(dbg, 'cache-image:readback-fallback:stale', { imgKey: key, ms: cacheMetrics.cacheTotalMs, error: String(err) });
+          }
           resolveReady(cacheMetrics);
         });
       return;
@@ -589,19 +637,33 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
         const bitmap = await createImageBitmap(loaded);
         const bitmapMs = performance.now() - bitmapStart;
         cacheMetrics.cacheBitmapMs = bitmapMs;
-        imageBitmapCache[key] = bitmap;
-        ViewportDebug.count('imageBitmaps');
-        ViewportDebug.max('maxImageBitmapMs', bitmapMs);
-        ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs });
-        OpenDebug.step(dbg, 'cache-image:createImageBitmap', { imgKey: key, ms: bitmapMs, ok: true });
+        if (!isImageDisplayCacheRequestCurrent(key, loadedSrc, generation)) {
+          bitmap.close();
+          ViewportDebug.step(vpDbg, 'createImageBitmap:stale', { ms: bitmapMs });
+          OpenDebug.step(dbg, 'cache-image:createImageBitmap:stale', { imgKey: key, ms: bitmapMs });
+        } else {
+          imageBitmapCache[key] = bitmap;
+          ViewportDebug.count('imageBitmaps');
+          ViewportDebug.max('maxImageBitmapMs', bitmapMs);
+          ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs });
+          OpenDebug.step(dbg, 'cache-image:createImageBitmap', { imgKey: key, ms: bitmapMs, ok: true });
+        }
       } catch (err) {
         const bitmapMs = performance.now() - bitmapStart;
         cacheMetrics.cacheBitmapMs = bitmapMs;
-        imageBitmapFailed.add(key);
+        if (isImageDisplayCacheRequestCurrent(key, loadedSrc, generation)) imageBitmapFailed.add(key);
         ViewportDebug.count('imageBitmapFailures');
         ViewportDebug.max('maxImageBitmapMs', bitmapMs);
         ViewportDebug.step(vpDbg, 'createImageBitmap:error', { ms: bitmapMs, error: String(err) });
         OpenDebug.step(dbg, 'cache-image:createImageBitmap:error', { imgKey: key, ms: bitmapMs, error: String(err) });
+      }
+
+      if (!isImageDisplayCacheRequestCurrent(key, loadedSrc, generation)) {
+        cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
+        ViewportDebug.end(vpDbg, { key, stale: true });
+        OpenDebug.step(dbg, 'cache-image:stale', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
+        resolveReady(cacheMetrics);
+        return;
       }
 
       const previewStart = performance.now();
@@ -655,6 +717,13 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   }
   img.onload = () => finishLoadForImage(img, src, !!loadedImg);
   img.onerror = () => {
+    if (!isImageDisplayCacheRequestCurrent(key, src, generation)) {
+      cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
+      ViewportDebug.end(vpDbg, { key, stale: true, error: 'image load failed' });
+      OpenDebug.step(dbg, 'cache-image:stale-load-error', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
+      resolveReady(cacheMetrics);
+      return;
+    }
     imageBitmapFailed.add(key);
     cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
     ViewportDebug.end(vpDbg, { key, error: 'image load failed' });
@@ -703,6 +772,78 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   if (!_skipImageSourceRegistration && !options.skipSourceRegistration) cacheImageSourceForSave(key, src).catch(() => {});
   return readyPromise;
 }
+
+const removeImageRuntimeCachesForKey = (key) => {
+  let removed = {
+    displayImages: 0,
+    assetUrls: 0,
+    bitmaps: 0,
+    bitmapFailures: 0,
+    scaledVariants: 0,
+  };
+  if (imageCache[key]) {
+    delete imageCache[key];
+    removed.displayImages++;
+  }
+  if (imageAssetUrlCache[key]) {
+    delete imageAssetUrlCache[key];
+    removed.assetUrls++;
+  }
+  if (imageBitmapCache[key]) {
+    try { imageBitmapCache[key].close(); } catch (_) {}
+    delete imageBitmapCache[key];
+    removed.bitmaps++;
+  }
+  if (imageBitmapFailed.delete(key)) removed.bitmapFailures++;
+  imageReadyPromises.delete(key);
+  imageHydrationPromises.delete(key);
+  clearScaledImageVariants(key);
+  return removed;
+};
+
+const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
+  if (!retainedKeys || typeof retainedKeys.has !== 'function') {
+    return { removedSources: 0, removedNativeSources: 0 };
+  }
+  const keys = new Set([
+    ...Object.keys(imageStore),
+    ...Object.keys(imageCache),
+    ...Object.keys(imageAssetUrlCache),
+    ...Object.keys(imageBitmapCache),
+    ...imageBitmapFailed,
+  ]);
+  const removedSourceKeys = [];
+  const result = {
+    removedSources: 0,
+    removedDisplayImages: 0,
+    removedAssetUrls: 0,
+    removedBitmaps: 0,
+    removedBitmapFailures: 0,
+    requestedNativeRemovals: 0,
+  };
+  for (const key of keys) {
+    if (retainedKeys.has(key)) continue;
+    if (Object.hasOwn(imageStore, key)) {
+      delete imageStore[key];
+      removedSourceKeys.push(key);
+      result.removedSources++;
+    }
+    const removed = removeImageRuntimeCachesForKey(key);
+    result.removedDisplayImages += removed.displayImages;
+    result.removedAssetUrls += removed.assetUrls;
+    result.removedBitmaps += removed.bitmaps;
+    result.removedBitmapFailures += removed.bitmapFailures;
+  }
+  if (removedSourceKeys.length) {
+    _imageStoreGeneration++;
+    if (hasTauri()) {
+      result.requestedNativeRemovals = removedSourceKeys.length;
+      BoardfishTauri.removeCachedImageSources(removedSourceKeys)
+        .catch((err) => console.warn('[image-source-cache] prune remove_cached_image_sources failed:', err));
+    }
+  }
+  return result;
+};
 
 function clearImageStore(clearNativeCaches = true) {
   _imageStoreGeneration++;

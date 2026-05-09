@@ -98,26 +98,26 @@
     pickFolder() {
       return tauriInvoke(TAURI_COMMANDS.PICK_FOLDER);
     },
-    removeCachedImageSources(imgKeys) {
-      return tauriInvoke(TAURI_COMMANDS.REMOVE_CACHED_IMAGE_SOURCES, { imgKeys });
+    removeCachedImageSources(imgKeys, sourceTokens = null) {
+      return tauriInvoke(TAURI_COMMANDS.REMOVE_CACHED_IMAGE_SOURCES, { imgKeys, sourceTokens });
     },
     readBoard(path) {
       return tauriInvoke(TAURI_COMMANDS.READ_BOARD, { path });
     },
-    readImageFromClipboardCached(imgKey) {
-      return tauriInvoke(TAURI_COMMANDS.READ_IMAGE_FROM_CLIPBOARD_CACHED, { imgKey });
+    readImageFromClipboardCached(imgKey, sourceToken = null) {
+      return tauriInvoke(TAURI_COMMANDS.READ_IMAGE_FROM_CLIPBOARD_CACHED, { imgKey, sourceToken });
     },
     readTextFromClipboard() {
       return tauriInvoke(TAURI_COMMANDS.READ_TEXT_FROM_CLIPBOARD);
     },
-    registerImageFileSource(imgKey, path) {
-      return tauriInvoke(TAURI_COMMANDS.REGISTER_IMAGE_FILE_SOURCE, { imgKey, path });
+    registerImageFileSource(imgKey, path, sourceToken = null) {
+      return tauriInvoke(TAURI_COMMANDS.REGISTER_IMAGE_FILE_SOURCE, { imgKey, path, sourceToken });
     },
-    registerImageSource(imgKey, dataUrl) {
-      return tauriInvoke(TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, { imgKey, dataUrl });
+    registerImageSource(imgKey, dataUrl, sourceToken = null) {
+      return tauriInvoke(TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, { imgKey, dataUrl, sourceToken });
     },
-    registerTransformedImageSource({ imgKey, tempKey, flipX, flipY, rotation }) {
-      return tauriInvoke(TAURI_COMMANDS.REGISTER_TRANSFORMED_IMAGE_SOURCE, { imgKey, tempKey, flipX, flipY, rotation });
+    registerTransformedImageSource({ imgKey, tempKey, flipX, flipY, rotation, sourceToken = null }) {
+      return tauriInvoke(TAURI_COMMANDS.REGISTER_TRANSFORMED_IMAGE_SOURCE, { imgKey, tempKey, flipX, flipY, rotation, sourceToken });
     },
     saveBoard(path, board) {
       return tauriInvoke(TAURI_COMMANDS.SAVE_BOARD, { path, board });

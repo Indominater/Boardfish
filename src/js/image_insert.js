@@ -82,9 +82,15 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
   ViewportDebug.count('nativeImageAdds');
   if (!_boardOpening) showInputShield();
   const imgKey = existingImgKey || newImgKey();
+  const generation = _imageStoreGeneration;
+  const sourceToken = createImageSourceToken(imgKey);
   try {
     ViewportDebug.step(dbg, 'native-data-url-register:start', { imgKey, dataUrl: src });
-    const meta = await BoardfishTauri.registerImageSource(imgKey, src);
+    const meta = await BoardfishTauri.registerImageSource(imgKey, src, sourceToken);
+    if (generation !== _imageStoreGeneration) {
+      cleanupNativeImageSourceToken(imgKey, sourceToken);
+      return null;
+    }
     const naturalW = Number(meta?.width) || 1;
     const naturalH = Number(meta?.height) || 1;
     BoardfishImageStore.setSource(imgKey, {
@@ -169,7 +175,13 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
   ViewportDebug.count('imageAdds');
   ViewportDebug.count('nativeImageAdds');
   const imgKey = options.imgKey || newImgKey();
-  const meta = await BoardfishTauri.registerImageFileSource(imgKey, path);
+  const generation = _imageStoreGeneration;
+  const sourceToken = createImageSourceToken(imgKey);
+  const meta = await BoardfishTauri.registerImageFileSource(imgKey, path, sourceToken);
+  if (generation !== _imageStoreGeneration) {
+    cleanupNativeImageSourceToken(imgKey, sourceToken);
+    return null;
+  }
   const naturalW = Number(meta.width) || 1;
   const naturalH = Number(meta.height) || 1;
   const { w, h } = fitImageSize(naturalW, naturalH, options.exactSize);
@@ -261,7 +273,7 @@ async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {})
   }
 }
 
-async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg) {
+async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken = null) {
   showInputShield();
   const objectCountBefore = objects.length;
   try {
@@ -314,6 +326,9 @@ async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg) {
       objectCountAfter: objects.length,
     });
     return obj;
+  } catch (err) {
+    cleanupNativeImageSourceToken(imgKey, sourceToken);
+    throw err;
   } finally {
     hideInputShield();
   }

@@ -241,6 +241,7 @@ fn decode_data_url_to_cached_image_timed(
 pub(crate) async fn read_image_from_clipboard_cached(
     source_state: tauri::State<'_, ImageSourceCache>,
     img_key: String,
+    source_token: Option<String>,
 ) -> Result<ClipboardReadImageResponse, String> {
     let total = std::time::Instant::now();
     let img_key_for_worker = img_key.clone();
@@ -293,7 +294,7 @@ pub(crate) async fn read_image_from_clipboard_cached(
     .map_err(|e| e.to_string())??;
 
     let lock = std::time::Instant::now();
-    source_state.insert(img_key, source)?;
+    source_state.insert(img_key, source, source_token)?;
     response.cache_insert_ms = Some(elapsed_ms(lock));
     response.total_ms = elapsed_ms(total);
     clipboard_debug("read_image_from_clipboard_cached lock+insert", lock);

@@ -50,7 +50,7 @@ async function saveSelectedImage() {
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Save image failed:', err);
     } finally {
-      BoardfishExportUtils.cleanupTempKeys(tempKeys);
+      await BoardfishExportUtils.cleanupTempKeys(tempKeys);
     }
     return;
   }
@@ -81,6 +81,7 @@ function exportResolveConcurrency() {
 // transformed into a temp cache key, and saved by key without JS base64/canvas IPC.
 async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
   const nativeConcurrency = exportResolveConcurrency();
+  const exportRunToken = `${Date.now().toString(36)}_${Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0')}`;
   let processed = 0;
   let keyCount = 0;
   let renderedCount = 0;
@@ -138,9 +139,10 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
       return { key: imgKey, tempKey: null, rendered: false };
     }
 
-    const tempKey = `__export_tmp_${obj.id}`;
+    const tempKey = `__export_tmp_${exportRunToken}_${index}_${obj.id}`;
     if (hasTauri() && isNativeImageRef(BoardfishImageStore.getSource(imgKey))) {
       const nativeStart = performance.now();
+      const sourceToken = createImageSourceToken(tempKey);
       try {
         const result = await ExportDebug.wrap(
           dbg,
@@ -149,6 +151,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
             imgKey,
             tempKey,
             ...imageTransformFromObject(obj),
+            sourceToken,
           }),
           {
             imgKey,
@@ -206,10 +209,11 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
         await progress({ index, imgKey, fallbackRender: true, skipped: true });
         return null;
       }
+      const sourceToken = createImageSourceToken(tempKey);
       await ExportDebug.wrap(
         dbg,
         TAURI_COMMANDS.REGISTER_IMAGE_SOURCE,
-        () => BoardfishTauri.registerImageSource(tempKey, dataUrl),
+        () => BoardfishTauri.registerImageSource(tempKey, dataUrl, sourceToken),
         { imgKey: tempKey, dataUrlLen: dataUrl.length }
       );
       keyCount++;
@@ -410,7 +414,7 @@ async function exportImageBatch({
       ExportDebug.end(dbg, { error: String(err) });
       console.error(errorLabel, err);
     } finally {
-      BoardfishExportUtils.cleanupTempKeys(tempKeys);
+      await BoardfishExportUtils.cleanupTempKeys(tempKeys);
     }
     return;
   }

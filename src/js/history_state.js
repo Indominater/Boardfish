@@ -25,14 +25,34 @@ function retainedImageKeysForCurrentAndHistory() {
   for (const entry of boardHistory) {
     collectImageKeysFromObjects(Array.isArray(entry) ? entry : entry?.objects, keys);
   }
+  collectImageKeysFromObjects(jsClipboard?.objects, keys);
+  for (const key of Object.keys(jsClipboard?.imageData || {})) {
+    if (key) keys.add(key);
+  }
   return keys;
 }
 
-function pruneEyedropperCachesAfterHistoryChange(reason = 'history-change') {
-  if (typeof pruneEyedropperSafeImagesToKeys !== 'function') return;
-  const result = pruneEyedropperSafeImagesToKeys(retainedImageKeysForCurrentAndHistory());
-  if (result?.removed && typeof HistoryDebug !== 'undefined') {
-    HistoryDebug.step(null, 'eyedropper-cache-prune', { reason, ...result });
+function pruneImageCachesAfterHistoryChange(reason = 'history-change') {
+  const retainedKeys = retainedImageKeysForCurrentAndHistory();
+  let imageResult = null;
+  if (typeof pruneImageCachesToKeys === 'function') {
+    imageResult = pruneImageCachesToKeys(retainedKeys);
+  }
+  const eyedropperResult = typeof pruneEyedropperSafeImagesToKeys === 'function'
+    ? pruneEyedropperSafeImagesToKeys(retainedKeys)
+    : null;
+  const removedImageCaches = (imageResult?.removedSources || 0) +
+    (imageResult?.removedDisplayImages || 0) +
+    (imageResult?.removedAssetUrls || 0) +
+    (imageResult?.removedBitmaps || 0) +
+    (imageResult?.removedBitmapFailures || 0);
+  if ((removedImageCaches || eyedropperResult?.removed) && typeof HistoryDebug !== 'undefined') {
+    HistoryDebug.step(null, 'image-cache-prune', {
+      reason,
+      ...(imageResult || {}),
+      eyedropperRemoved: eyedropperResult?.removed || 0,
+      retained: retainedKeys.size,
+    });
   }
 }
 
@@ -52,7 +72,7 @@ function snapshot() {
   historyIndex = boardHistory.length - 1;
   _dirtyIds.clear();
   trimHistory();
-  pruneEyedropperCachesAfterHistoryChange('snapshot');
+  pruneImageCachesAfterHistoryChange('snapshot');
   const ms = performance.now() - t0;
   HistoryDebug.max('maxSnapshotMs', ms);
   HistoryDebug.end(dbg, { ms, historyLength: boardHistory.length, historyIndex });
@@ -96,7 +116,7 @@ function pushHistory(reason = '') {
   });
   historyIndex++;
   trimHistory();
-  pruneEyedropperCachesAfterHistoryChange(reason || 'pushHistory');
+  pruneImageCachesAfterHistoryChange(reason || 'pushHistory');
   updateTitle();
   const ms = performance.now() - t0;
   HistoryDebug.max('maxPushHistoryMs', ms);

@@ -324,7 +324,7 @@ test('large clipboard paste diagnostics are available through beginDebug finishD
   assert.match(insertSource, /NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD/);
   assert.match(insertSource, /function shouldUseNativeDataUrlImageCache\(src\)/);
   assert.match(insertSource, /addDataUrlImageViaNativeCache\(src, cx, cy, exactSize, existingImgKey, options\)/);
-  assert.match(insertSource, /BoardfishTauri\.registerImageSource\(imgKey, src\)/);
+  assert.match(insertSource, /BoardfishTauri\.registerImageSource\(imgKey, src, sourceToken\)/);
   assert.match(insertSource, /materializeImageAssets\(\[imgKey\], dbg\)/);
   assert.match(imageStateSource, /function imageSourceDebugInfo\(src\)/);
   assert.match(imageStateSource, /convertTauriFileSrc received data URL/);
@@ -394,8 +394,12 @@ test('Rust image source responsibilities stay split', () => {
   const imageSources = readSource('src-tauri/src/image_sources.rs');
 
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_data_url;/);
+  assert.match(readSource('src-tauri/src/main.rs'), /mod image_source_cache;/);
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_source_files;/);
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_transform;/);
+  assert.match(readSource('src-tauri/src/image_source_cache.rs'), /DECODED_IMAGE_CACHE_MAX_BYTES/);
+  assert.match(readSource('src-tauri/src/image_source_cache.rs'), /source_token: Option<String>/);
+  assert.match(readSource('src-tauri/src/image_source_cache.rs'), /fn prune_decoded_cache_locked/);
   assert.match(imageSources, /use crate::image_source_files::/);
   assert.match(imageSources, /use crate::image_data_url::cached_source_from_data_url;/);
   assert.match(imageSources, /use crate::image_transform::transform_dynamic_image;/);
@@ -403,6 +407,7 @@ test('Rust image source responsibilities stay split', () => {
   assert.match(imageSources, /fn image_dimensions_from_bytes\(bytes: &\[u8\]\)/);
   assert.match(imageSources, /register_image_source[\s\S]*image_dimensions_from_bytes\(&source\.bytes\)/);
   assert.ok(lineCount('src-tauri/src/image_sources.rs') < 680, 'image_sources.rs should keep filesystem helper responsibilities split out');
+  assert.ok(lineCount('src-tauri/src/image_source_cache.rs') < 340, 'image_source_cache.rs should stay focused on native cache state');
   assert.ok(lineCount('src-tauri/src/image_source_files.rs') < 220, 'image_source_files.rs should stay focused on temp-file lifecycle helpers');
 });
 
