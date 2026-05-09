@@ -7,12 +7,8 @@ var eyedropperSwatch = document.getElementById('eyedropper-swatch');
 var eyedropperHex = document.getElementById('eyedropper-hex');
 var eyedropperRgb = document.getElementById('eyedropper-rgb');
 var eyedropperCtx = eyedropperCanvas?.getContext('2d', { willReadFrequently: true });
-var eyedropperCards = [];
+var eyedropperCard = null;
 var eyedropperActiveCard = null;
-var eyedropperCardCounter = 1;
-var eyedropperCardZCounter = 0;
-var eyedropperCardsDirty = false;
-var _eyedropperRestoringCards = false;
 var eyedropperRenderedSampleCanvas = document.createElement('canvas');
 var eyedropperRenderedSampleCtx = eyedropperRenderedSampleCanvas.getContext('2d', { willReadFrequently: true });
 var eyedropperZoomWallpaperCanvas = document.createElement('canvas');
@@ -78,7 +74,6 @@ var EYEDROPPER_SAFE_TILE_MEMORY_LIMIT = 32 * 1024 * 1024;
 var EYEDROPPER_PREVIEW_ZOOM_SCALE = 3;
 var EYEDROPPER_PREVIEW_CSS = 96;
 var EYEDROPPER_LOUPE_CSS_HEIGHT = 392;
-var EYEDROPPER_MAX_PINNED_CARDS = 1;
 
 const resetEyedropperCardPreviewState = (card) => card && Object.assign(card, {
   previewStateVersion: (card.previewStateVersion || 0) + 1,

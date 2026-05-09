@@ -72,12 +72,6 @@ var SaveDebug = (() => {
       total: e.total,
       command: e.meta?.command || '',
       objectCount: e.meta?.objectCount ?? '',
-      eyedropperCardCount: e.meta?.eyedropperCardCount ?? '',
-      eyedropperCardPreviewCount: e.meta?.eyedropperCardPreviewCount ?? '',
-      eyedropperCardPreviewBytes: e.meta?.eyedropperCardPreviewBytes ?? '',
-      cardPreviewCount: e.meta?.count ?? '',
-      cardPreviewReady: e.meta?.ready ?? '',
-      cardPreviewFailed: e.meta?.failed ?? '',
       imageCount: e.meta?.imageCount ?? '',
       imageObjectCount: e.meta?.imageObjectCount ?? '',
       imageStoreBytes: e.meta?.imageStoreBytes ?? '',
@@ -102,7 +96,6 @@ var SaveDebug = (() => {
     const rows = core.events
       .filter(e => (
         e.step === 'boardData' ||
-        e.step === 'eyedropper-card-previews' ||
         e.step === 'json-stringify' ||
         e.step.startsWith('await-image-source-cache') ||
         e.step.startsWith('save-frame-probe') ||
@@ -117,12 +110,6 @@ var SaveDebug = (() => {
         dt: e.dt,
         command: e.meta?.command || '',
         objectCount: e.meta?.objectCount ?? '',
-        eyedropperCardCount: e.meta?.eyedropperCardCount ?? '',
-        eyedropperCardPreviewCount: e.meta?.eyedropperCardPreviewCount ?? '',
-        eyedropperCardPreviewBytes: e.meta?.eyedropperCardPreviewBytes ?? '',
-        cardPreviewCount: e.meta?.count ?? '',
-        cardPreviewReady: e.meta?.ready ?? '',
-        cardPreviewFailed: e.meta?.failed ?? '',
         imageCount: e.meta?.imageCount ?? '',
         imageObjectCount: e.meta?.imageObjectCount ?? '',
         imageStoreBytes: e.meta?.imageStoreBytes ?? '',

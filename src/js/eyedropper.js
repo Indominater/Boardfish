@@ -198,29 +198,7 @@ function useEyedropperCard(card) {
   return card;
 }
 
-const syncEyedropperCardZOrder = () => {
-  const visible = eyedropperCards
-    .filter((card) => card?.el?.classList.contains('visible'))
-    .sort((a, b) => (a.order || 0) - (b.order || 0));
-  const baseZ = Number.parseInt(typeof cssVar === 'function' ? cssVar('--eyedropper-card-base-z') : '', 10) || 99990;
-  for (let i = 0; i < visible.length; i++) {
-    visible[i].el.style.setProperty('--eyedropper-card-z', String(baseZ + i));
-  }
-};
-
-const markEyedropperCardsDirty = (reason = 'eyedropper-card') => {
-  if (_eyedropperRestoringCards) return;
-  const wasDirty = typeof isDirty === 'function' ? isDirty() : eyedropperCardsDirty;
-  eyedropperCardsDirty = true;
-  if (!wasDirty && typeof updateTitle === 'function') updateTitle();
-  EyedropperDebug._logSamplingEvent('card-dirty', { reason });
-};
-
-const markEyedropperCardsSaved = () => {
-  eyedropperCardsDirty = false;
-};
-
-const isPersistedEyedropperCard = (card) => {
+const isPinnedEyedropperCard = (card) => {
   return !!(card?.el?.classList.contains('visible') && card.el.classList.contains('pinned'));
 };
 
@@ -241,27 +219,12 @@ const applyEyedropperCardPosition = (card, left, top) => {
   card.el.style.transform = `translate(${position.left}px,${position.top}px)`;
 };
 
-function bringEyedropperCardToFront(card) {
-  if (!card) return;
-  const persisted = isPersistedEyedropperCard(card);
-  card.order = ++eyedropperCardZCounter;
-  syncEyedropperCardZOrder();
-  if (persisted) markEyedropperCardsDirty('card-z-order');
-}
-
 function createEyedropperCard() {
-  const template = eyedropperCards[0]?.el || eyedropperLoupe;
-  if (!template) return null;
-  const useInitial = !eyedropperCards.length && template === eyedropperLoupe;
-  const el = useInitial ? template : template.cloneNode(true);
-  if (!useInitial) {
-    el.removeAttribute('id');
-    for (const node of el.querySelectorAll('[id]')) node.removeAttribute('id');
-    document.body.appendChild(el);
-  }
+  if (eyedropperCard) return useEyedropperCard(eyedropperCard);
+  const el = eyedropperLoupe || document.getElementById('eyedropper-loupe');
+  if (!el) return null;
   el.classList.add('eyedropper-loupe');
   el.classList.remove('visible', 'pinned', 'dragging');
-  el.dataset.eyedropperCardId = String(eyedropperCardCounter++);
 
   const card = {
     el,
@@ -277,7 +240,6 @@ function createEyedropperCard() {
     pendingPreviewDataUrl: '',
     pendingPreviewCanvasWidth: 0,
     pendingPreviewCanvasHeight: 0,
-    order: ++eyedropperCardZCounter,
     bound: false,
   };
   card.preview = cardPart(card, 'eyedropper-preview', 'eyedropper-preview');
@@ -286,7 +248,7 @@ function createEyedropperCard() {
   card.hex = cardPart(card, 'eyedropper-hex', 'eyedropper-hex');
   card.rgb = cardPart(card, 'eyedropper-rgb', 'eyedropper-rgb');
   card.ctx = card.canvas?.getContext('2d', { willReadFrequently: true });
-  eyedropperCards.push(card);
+  eyedropperCard = card;
   bindEyedropperCardEvents(card);
   return useEyedropperCard(card);
 }
@@ -298,26 +260,14 @@ function ensureEyedropperCard() {
 
 function eyedropperCardFromEvent(e) {
   const el = e?.target?.closest?.('.eyedropper-loupe');
-  return eyedropperCards.find((card) => card.el === el) || null;
-}
-
-function hiddenEyedropperCard() {
-  return eyedropperCards.find((card) => !card.el.classList.contains('visible')) || null;
-}
-
-function pinnedEyedropperCards() {
-  return eyedropperCards.filter((card) => card.el.classList.contains('visible') && card.el.classList.contains('pinned'));
+  return eyedropperCard?.el === el ? eyedropperCard : null;
 }
 
 function prepareEyedropperSamplingCard() {
-  const card = eyedropperCards[0] || ensureEyedropperCard() || createEyedropperCard();
-  for (const item of eyedropperCards) if (item !== card) { if (_eyedropperDragState?.card === item) _eyedropperDragState = null; item.el?.remove?.(); }
-  eyedropperCards = [card];
+  const card = ensureEyedropperCard() || createEyedropperCard();
   useEyedropperCard(card);
-  card.wasPersistedBeforeSample = isPersistedEyedropperCard(card);
   card.el.classList.remove('visible', 'pinned', 'dragging');
   resetEyedropperCardPreviewState(card);
-  bringEyedropperCardToFront(card);
   return card;
 }
 
@@ -325,15 +275,12 @@ function hideEyedropperCard(card) {
   if (!card) return;
   if (_eyedropperDragState?.card === card) _eyedropperDragState = null;
   card.el.classList.remove('visible', 'pinned', 'dragging');
-  syncEyedropperCardZOrder();
 }
 
 function pinEyedropperCard(card) {
   if (!card?.el?.classList.contains('visible')) return false;
-  if (!card.el.classList.contains('pinned') && pinnedEyedropperCards().length >= EYEDROPPER_MAX_PINNED_CARDS) return false;
   card.el.classList.add('pinned');
   updateEyedropperCardPreviewSnapshot(card, 'pin');
-  bringEyedropperCardToFront(card);
   return true;
 }
 
@@ -341,49 +288,18 @@ function finishEyedropperSampleCard(shouldPin = true) {
   const card = ensureEyedropperCard();
   if (!card?.el?.classList.contains('visible')) return;
   card.el.classList.remove('dragging');
-  const replacedPersisted = !!card.wasPersistedBeforeSample; card.wasPersistedBeforeSample = false;
   if (shouldPin && pinEyedropperCard(card)) return;
   hideEyedropperCard(card);
-  if (replacedPersisted) markEyedropperCardsDirty('card-replaced');
 }
 
 function closeEyedropperCard(card) {
   if (!card) return;
-  const persisted = isPersistedEyedropperCard(card);
-  const closingInitial = card === eyedropperCards[0];
   const closingActive = card === eyedropperActiveCard;
   hideEyedropperCard(card);
-  if (!closingInitial) {
-    eyedropperCards = eyedropperCards.filter((item) => item !== card);
-    card.el.remove();
-  }
-  if (closingActive) useEyedropperCard(hiddenEyedropperCard() || eyedropperCards[0] || createEyedropperCard());
-  syncEyedropperCardZOrder();
-  if (persisted) markEyedropperCardsDirty('card-closed');
+  if (closingActive) useEyedropperCard(eyedropperCard || createEyedropperCard());
 }
 
-const eyedropperCardRgba = (card) => {
-  const swatchColor = card?.swatch?.style?.background || '';
-  const fromSwatch = parseCssColor(swatchColor, null);
-  if (fromSwatch) return fromSwatch;
-  const fromHex = parseCssColor(card?.hex?.textContent || '', null);
-  if (fromHex) return fromHex;
-  const rgbParts = String(card?.rgb?.textContent || '')
-    .trim()
-    .split(/\s+/)
-    .map((part) => Number(part));
-  if (rgbParts.length >= 3 && rgbParts.slice(0, 3).every(Number.isFinite)) {
-    return [
-      Math.max(0, Math.min(255, Math.round(rgbParts[0]))),
-      Math.max(0, Math.min(255, Math.round(rgbParts[1]))),
-      Math.max(0, Math.min(255, Math.round(rgbParts[2]))),
-      255,
-    ];
-  }
-  return [0, 0, 0, 255];
-};
-
-const captureEyedropperCanvasPreview = (canvas, where = 'card-preview-save', options = {}) => {
+const captureEyedropperCanvasPreview = (canvas, where = 'card-preview-capture', options = {}) => {
   if (!canvas?.width || !canvas.height || typeof canvas.toDataURL !== 'function') return '';
   try {
     let captureCanvas = canvas;
@@ -407,7 +323,7 @@ const captureEyedropperCanvasPreview = (canvas, where = 'card-preview-save', opt
 };
 
 const captureEyedropperCardPreview = (card) => {
-  return captureEyedropperCanvasPreview(card?.canvas, 'card-preview-save', {
+  return captureEyedropperCanvasPreview(card?.canvas, 'card-preview-capture', {
     reticle: true,
     dpr: eyedropperReticleDisplayScaleForCard(card),
   });
@@ -456,36 +372,11 @@ const rememberEyedropperPendingCardPreviewSnapshot = (card, canvas, reason = 'sa
   return true;
 };
 
-const serializeEyedropperCardsForBoard = () => {
-  return pinnedEyedropperCards()
-    .sort((a, b) => (a.order || 0) - (b.order || 0))
-    .slice(0, EYEDROPPER_MAX_PINNED_CARDS)
-    .map((card, index) => {
-      const rect = card.el.getBoundingClientRect();
-      const snapshot = {
-        rgba: eyedropperCardRgba(card),
-        left: Math.round(rect.left),
-        top: Math.round(rect.top),
-        order: index + 1,
-        canvasWidth: card.previewCanvasWidth || card.canvas?.width || 0,
-        canvasHeight: card.previewCanvasHeight || card.canvas?.height || 0,
-      };
-      if (!card.previewDataUrl) updateEyedropperCardPreviewSnapshot(card, 'save');
-      const previewDataUrl = card.previewDataUrl || captureEyedropperCardPreview(card);
-      if (previewDataUrl) snapshot.previewDataUrl = previewDataUrl;
-      else EyedropperDebug._logSamplingEvent('card-preview-missing-at-save', { index, rgba: snapshot.rgba.join(' ') });
-      return snapshot;
-    });
-};
-
 const resetEyedropperCardVisual = (card) => {
   if (!card?.el) return;
   card.el.classList.remove('visible', 'pinned', 'dragging');
   card.el.style.transform = '';
-  card.el.style.removeProperty('--eyedropper-card-z');
   resetEyedropperCardPreviewState(card);
-  card.wasPersistedBeforeSample = false;
-  card.order = 0;
   if (card.hex) card.hex.textContent = '#000000';
   if (card.rgb) card.rgb.textContent = '0 0 0';
   if (card.swatch) card.swatch.style.background = 'transparent';
@@ -497,96 +388,16 @@ const resetEyedropperCardVisual = (card) => {
   }
 };
 
-const clearEyedropperCardsForBoard = (options = {}) => {
-  const hadPersisted = pinnedEyedropperCards().length > 0;
+const clearEyedropperCardForBoard = () => {
   if (_eyedropperDragState) _eyedropperDragState = null;
   cancelPendingEyedropperSample();
   eyedropperSampling = false;
   _eyedropperLastSampleEvent = null;
   _eyedropperLatestPointerEvent = null;
   _eyedropperPendingSampleEvent = null;
-  const initial = eyedropperCards[0] || null;
-  for (const card of eyedropperCards.slice(1)) card.el?.remove?.();
-  eyedropperCards = initial ? [initial] : [];
-  if (initial) resetEyedropperCardVisual(initial);
+  if (eyedropperCard) resetEyedropperCardVisual(eyedropperCard);
   eyedropperActiveCard = null;
-  useEyedropperCard(initial || createEyedropperCard());
-  eyedropperCardZCounter = 0;
-  if (options.markDirty !== false && hadPersisted) markEyedropperCardsDirty('cards-cleared');
-};
-
-const restoreEyedropperCardPreview = (card, cardData, rgba) => {
-  if (!card?.canvas || !card.ctx) return Promise.resolve(false);
-  const width = Math.max(1, Math.round(Number(cardData.canvasWidth) || eyedropperPreviewDrawSize()));
-  const height = Math.max(1, Math.round(Number(cardData.canvasHeight) || width));
-  const token = `${Date.now()}:${Math.random()}`;
-  card.previewToken = token;
-  card.previewDataUrl = typeof cardData.previewDataUrl === 'string' ? cardData.previewDataUrl : '';
-  card.previewCanvasWidth = width;
-  card.previewCanvasHeight = height;
-  card.canvas.width = width;
-  card.canvas.height = height;
-  card.ctx.setTransform(1, 0, 0, 1, 0, 0);
-  card.ctx.fillStyle = rgbaToCss(rgba);
-  card.ctx.fillRect(0, 0, width, height);
-  drawEyedropperCardReticle(card);
-  if (!cardData.previewDataUrl) {
-    const dataUrl = captureEyedropperCardPreview(card);
-    if (dataUrl) card.previewDataUrl = dataUrl;
-    return Promise.resolve(false);
-  }
-
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      if (card.previewToken === token) {
-        card.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        card.ctx.clearRect(0, 0, card.canvas.width, card.canvas.height);
-        card.ctx.drawImage(img, 0, 0, card.canvas.width, card.canvas.height);
-        drawEyedropperCardReticle(card);
-        const dataUrl = captureEyedropperCardPreview(card);
-        if (dataUrl) card.previewDataUrl = dataUrl;
-      }
-      resolve(true);
-    };
-    img.onerror = () => resolve(false);
-    img.src = cardData.previewDataUrl;
-  });
-};
-
-const restoreEyedropperCards = (cardDataList = []) => {
-  const previousRestoring = _eyedropperRestoringCards;
-  _eyedropperRestoringCards = true;
-  const previewPromises = [];
-  try {
-    clearEyedropperCardsForBoard({ markDirty: false });
-    const list = Array.isArray(cardDataList) ? cardDataList.slice(0, EYEDROPPER_MAX_PINNED_CARDS) : [];
-    let maxOrder = 0;
-    for (let i = 0; i < list.length; i++) {
-      const cardData = list[i] || {};
-      const card = hiddenEyedropperCard() || createEyedropperCard();
-      if (!card) continue;
-      useEyedropperCard(card);
-      const rgba = Array.isArray(cardData.rgba) && cardData.rgba.length >= 3
-        ? [cardData.rgba[0], cardData.rgba[1], cardData.rgba[2], cardData.rgba[3] ?? 255]
-        : [0, 0, 0, 255];
-      if (card.hex) card.hex.textContent = rgbaToHex(rgba);
-      if (card.rgb) card.rgb.textContent = rgbaToRgbText(rgba);
-      if (card.swatch) card.swatch.style.background = rgbaToCss(rgba);
-      card.order = Math.max(1, Math.round(Number(cardData.order) || i + 1));
-      maxOrder = Math.max(maxOrder, card.order);
-      card.el.classList.add('visible', 'pinned');
-      card.el.classList.remove('dragging');
-      applyEyedropperCardPosition(card, cardData.left, cardData.top);
-      previewPromises.push(restoreEyedropperCardPreview(card, cardData, rgba));
-    }
-    eyedropperCardZCounter = Math.max(eyedropperCardZCounter, maxOrder);
-    syncEyedropperCardZOrder();
-    eyedropperCardsDirty = false;
-    return Promise.allSettled(previewPromises);
-  } finally {
-    _eyedropperRestoringCards = previousRestoring;
-  }
+  useEyedropperCard(eyedropperCard || createEyedropperCard());
 };
 
 function setEyedropperEnabled(enabled, options = {}) {
@@ -725,7 +536,6 @@ function captureEyedropperZoomWallpaper(geometry, renderSize) {
     const drawn = drawVisibleObjects(eyedropperZoomWallpaperCtx, counters, {
       viewportRect: geometry.viewportRect,
       view: geometry.view,
-      imageSourceResolver: selectEyedropperPreviewImageSourceForDraw,
     });
     resetCanvasToScreen(eyedropperZoomWallpaperCtx);
     if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
@@ -876,9 +686,6 @@ function updateEyedropperColorReadout(pixel) {
   if (eyedropperSwatch) eyedropperSwatch.style.background = cssColor;
   if (eyedropperHex) eyedropperHex.textContent = rgbaToHex(pixel);
   if (eyedropperRgb) eyedropperRgb.textContent = rgbaToRgbText(pixel);
-  if (isPersistedEyedropperCard(eyedropperActiveCard)) {
-    markEyedropperCardsDirty('card-color');
-  }
 }
 
 function sampleCanvasPixel(context, sourceX, sourceY, meta = {}) {
@@ -2150,36 +1957,6 @@ function selectEyedropperSafeImageSourceForDraw(key, obj, view, counters = null)
   };
 }
 
-function selectEyedropperPreviewImageSourceForDraw(key, obj, view, counters = null) {
-  const cached = eyedropperSafeImageCache.get(key);
-  if (cached?.token && isDrawableImageSource(cached.source)) {
-    countEyedropperSafeSourceUse(cached, counters);
-    const decision = eyedropperSafeScaleDecision(obj, cached.source, view);
-    return {
-      source: cached.source,
-      scale: 1,
-      targetScale: decision.targetScale,
-      readbackSafe: true,
-    };
-  }
-
-  const fallbackSource = imageBitmapCache[key] || imageCache[key] || null;
-  if (!isDrawableImageSource(fallbackSource)) {
-    requestEyedropperSampleSafeImage(key, counters, 'preview-missing-display');
-    return null;
-  }
-
-  requestEyedropperSampleSafeImage(key, counters, 'preview-fallback');
-  if (counters) counters.previewUnsafeImages = (counters.previewUnsafeImages || 0) + 1;
-  return {
-    source: fallbackSource,
-    scale: 1,
-    targetScale: 1,
-    readbackSafe: false,
-    visualFallback: true,
-  };
-}
-
 function noteEyedropperNavigationActive(reason = 'viewport', durationMs = 180) {
   if (!eyedropperEnabled && !isEyedropperSampleVisible()) return;
   const now = performance.now();
@@ -2287,7 +2064,6 @@ function commitEyedropperSample(e, options = {}) {
   ensureEyedropperCard();
   if ((!eyedropperSampling && !options.force) || !eyedropperLoupe || !eyedropperCanvas || !eyedropperCtx) return;
   eyedropperLoupe.classList.remove('pinned', 'dragging');
-  bringEyedropperCardToFront(eyedropperActiveCard);
   _eyedropperLastSampleEvent = { clientX: e.clientX, clientY: e.clientY };
 
   const totalStart = performance.now();
@@ -2336,12 +2112,6 @@ function commitEyedropperSample(e, options = {}) {
   Object.assign(timings, previewSample?.timings || {});
   if (previewSample?.painted && (options.first || options.final || options.capturePreview)) {
     rememberEyedropperPendingCardPreviewSnapshot(eyedropperActiveCard, eyedropperRenderedSampleCanvas, options.final ? 'final-sample' : 'first-sample');
-    if (typeof rememberEyedropperCardPreviewScene === 'function') {
-      rememberEyedropperCardPreviewScene(eyedropperActiveCard, previewSample, {
-        reason: options.final ? 'final-sample' : 'first-sample',
-        schedule: options.final || options.capturePreview,
-      });
-    }
   }
   const canvasReadoutStart = performance.now();
   let readoutSample = sampleEyedropperReadoutPixel(e.clientX, e.clientY, previewSample, {
@@ -2374,7 +2144,6 @@ function commitEyedropperSample(e, options = {}) {
     if (typeof closeOpenMenusExcept === 'function') closeOpenMenusExcept('eyedropper-loupe', 'open-eyedropper-loupe');
     eyedropperLoupe.classList.add('visible');
   }
-  syncEyedropperCardZOrder();
   timings.showLoupe = performance.now() - visibleStart;
   const visibleAt = performance.now();
   const clickToPreviewVisibleMs = Number.isFinite(receivedAt) ? Math.max(0, visibleAt - receivedAt) : 0;
@@ -2523,7 +2292,7 @@ function endEyedropperSample(e = null, options = {}) {
 }
 
 function isEyedropperSampleVisible() {
-  return eyedropperCards.some((card) => card.el.classList.contains('visible'));
+  return !!eyedropperCard?.el?.classList.contains('visible');
 }
 
 function isEyedropperSamplePinned() {
@@ -2546,9 +2315,9 @@ function noteEyedropperMouseEvent(e) {
 }
 
 function isEventInsideVisibleEyedropperLoupe(e) {
-  return !!(e?.target instanceof Node && eyedropperCards.some((card) => (
-    card.el.classList.contains('visible') && card.el.contains(e.target)
-  )));
+  return !!(e?.target instanceof Node &&
+    eyedropperCard?.el?.classList.contains('visible') &&
+    eyedropperCard.el.contains(e.target));
 }
 
 function beginEyedropperHoldSample(e = null) {
@@ -2603,7 +2372,6 @@ function dragEyedropperLoupeTo(clientX, clientY) {
 function startEyedropperLoupeDrag(e, card = eyedropperActiveCard) {
   if (!card?.el?.classList.contains('pinned') || eyedropperSampling || e.button !== 0) return false;
   useEyedropperCard(card);
-  bringEyedropperCardToFront(card);
   const rect = card.el.getBoundingClientRect();
   _eyedropperDragState = {
     card,
@@ -2625,7 +2393,6 @@ function endEyedropperLoupeDrag(e, commit = true) {
   card?.el?.releasePointerCapture?.(e.pointerId);
   card?.el?.classList.remove('dragging');
   _eyedropperDragState = null;
-  if (commit && isPersistedEyedropperCard(card)) markEyedropperCardsDirty('card-position');
   return true;
 }
 
@@ -2635,7 +2402,6 @@ function bindEyedropperCardEvents(card) {
   card.el.addEventListener('pointerdown', (e) => {
     const eventCard = eyedropperCardFromEvent(e) || card;
     useEyedropperCard(eventCard);
-    bringEyedropperCardToFront(eventCard);
     if (startEyedropperLoupeDrag(e, eventCard)) {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -2669,7 +2435,7 @@ function bindEyedropperCardEvents(card) {
     const eventCard = eyedropperCardFromEvent(e) || card;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!eyedropperSampling && isPersistedEyedropperCard(eventCard)) closeEyedropperCard(eventCard);
+    if (!eyedropperSampling && isPinnedEyedropperCard(eventCard)) closeEyedropperCard(eventCard);
   });
   card.el.addEventListener('click', (e) => {
     e.preventDefault();

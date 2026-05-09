@@ -30,7 +30,7 @@ test('ignores legacy board theme preferences', () => {
   assert.equal(Object.hasOwn(board, 'preferences'), false);
 });
 
-test('normalizes saved eyedropper cards', () => {
+test('strips legacy saved eyedropper cards', () => {
   const board = BoardSchema.normalizeBoardData({
     version: 3,
     format: 'boardfish-container',
@@ -49,31 +49,19 @@ test('normalizes saved eyedropper cards', () => {
     ],
   });
 
-  assert.deepEqual(board.eyedropperCards[0], {
-    rgba: [254, 224, 198, 255],
-    left: 30,
-    top: 20,
-    order: 1,
-    canvasWidth: 96,
-    canvasHeight: 96,
-    previewDataUrl: 'data:image/png;base64,abc',
-  });
+  assert.equal(Object.hasOwn(board, 'eyedropperCards'), false);
 });
 
-test('limits saved eyedropper cards to one', () => {
+test('ignores invalid legacy eyedropper card data', () => {
   const board = BoardSchema.normalizeBoardData({
     version: 3,
     format: 'boardfish-container',
     imageStore: {},
     objects: [],
-    eyedropperCards: [
-      { rgba: [1, 2, 3], left: 10, top: 20, order: 1 },
-      { rgba: [4, 5, 6], left: 30, top: 40, order: 2 },
-    ],
+    eyedropperCards: 'not-used',
   });
 
-  assert.equal(board.eyedropperCards.length, 1);
-  assert.deepEqual(board.eyedropperCards[0].rgba, [1, 2, 3, 255]);
+  assert.equal(Object.hasOwn(board, 'eyedropperCards'), false);
 });
 
 test('normalizes object lock state', () => {

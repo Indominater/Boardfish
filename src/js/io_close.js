@@ -5,14 +5,12 @@ var savedHistoryIndex = -1;
 var currentFilePath = null;
 
 function isDirty() {
-  const cardsDirty = typeof eyedropperCardsDirty !== 'undefined' && eyedropperCardsDirty;
-  if (objects.length === 0 && !cardsDirty) return false;
-  return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0 || cardsDirty;
+  if (objects.length === 0) return false;
+  return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0;
 }
 
 function markSaved() {
   _dirtyIds.clear();
-  if (typeof markEyedropperCardsSaved === 'function') markEyedropperCardsSaved();
   savedHistoryIndex = historyIndex;
   updateTitle();
 }
@@ -83,20 +81,18 @@ const appendOpeningFreezeBoard = () => {
 };
 
 const appendOpeningFreezeCards = () => {
-  if (!Array.isArray(eyedropperCards)) return;
-  for (const card of eyedropperCards) {
-    if (!card?.el?.classList.contains('visible')) continue;
-    const clone = card.el.cloneNode(true);
-    stripOpeningFreezeIds(clone);
-    clone.classList.add('opening-freeze-card');
-    clone.setAttribute('aria-hidden', 'true');
-    const sourceCanvases = card.el.querySelectorAll('canvas');
-    const cloneCanvases = clone.querySelectorAll('canvas');
-    for (let i = 0; i < sourceCanvases.length; i++) {
-      copyOpeningFreezeCanvas(sourceCanvases[i], cloneCanvases[i]);
-    }
-    openingShield.appendChild(clone);
+  const card = typeof eyedropperCard !== 'undefined' ? eyedropperCard : null;
+  if (!card?.el?.classList.contains('visible')) return;
+  const clone = card.el.cloneNode(true);
+  stripOpeningFreezeIds(clone);
+  clone.classList.add('opening-freeze-card');
+  clone.setAttribute('aria-hidden', 'true');
+  const sourceCanvases = card.el.querySelectorAll('canvas');
+  const cloneCanvases = clone.querySelectorAll('canvas');
+  for (let i = 0; i < sourceCanvases.length; i++) {
+    copyOpeningFreezeCanvas(sourceCanvases[i], cloneCanvases[i]);
   }
+  openingShield.appendChild(clone);
 };
 
 const beginOpeningFreeze = () => {
@@ -142,9 +138,6 @@ function boardData() {
     viewport: { panX, panY, zoom },
     imageStore,
     objects,
-    eyedropperCards: typeof serializeEyedropperCardsForBoard === 'function'
-      ? serializeEyedropperCardsForBoard()
-      : [],
   });
 }
 
@@ -153,9 +146,6 @@ function boardDataForSave() {
     viewport: { panX, panY, zoom },
     imageStore,
     objects,
-    eyedropperCards: typeof serializeEyedropperCardsForBoard === 'function'
-      ? serializeEyedropperCardsForBoard()
-      : [],
   }, boardDocumentDeps());
 }
 
@@ -215,11 +205,6 @@ function scheduleSaveFrameProbe(dbg, label) {
 }
 
 async function invokeSaveBoard(path, dbg) {
-  if (typeof prepareEyedropperCardPreviewsForSave === 'function') {
-    const previewStart = performance.now();
-    const previewResult = await prepareEyedropperCardPreviewsForSave();
-    SaveDebug.step(dbg, 'eyedropper-card-previews', { ms: performance.now() - previewStart, ...(previewResult || {}) });
-  }
   const dataStart = performance.now();
   const data = hasTauri() ? boardDataForSave() : boardData();
   SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...getBoardSaveMetrics(data) });
@@ -527,8 +512,8 @@ function applyBoardData(data, options = {}) {
   });
   setEyedropperEnabled(false);
   clearJsClipboard();
-  if (typeof clearEyedropperCardsForBoard === 'function') {
-    clearEyedropperCardsForBoard({ markDirty: false });
+  if (typeof clearEyedropperCardForBoard === 'function') {
+    clearEyedropperCardForBoard();
   }
   const t0 = performance.now();
   clearImageStore(!sourcesCached);
@@ -562,10 +547,6 @@ function applyBoardData(data, options = {}) {
   const countersStart = performance.now();
   BoardfishEditorState.restoreObjectCountersFromObjects(objects);
   BoardfishEditorState.setViewport(data.viewport);
-  let eyedropperCardsReady = Promise.resolve();
-  if (typeof restoreEyedropperCards === 'function') {
-    eyedropperCardsReady = restoreEyedropperCards(data.eyedropperCards || []) || Promise.resolve();
-  }
   if (!deferRender) applyNativeAppTheme();
   OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });
 
@@ -581,7 +562,6 @@ function applyBoardData(data, options = {}) {
   OpenDebug.step(dbg, 'reset-boardHistory-markSaved', { ms: performance.now() - historyStart, historyLength: boardHistory.length, historyIndex });
   PillDebug.log('open:applyBoardData:end', getBoardOpenMetrics(data));
   if (endDebug) OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
-  return { eyedropperCardsReady };
 }
 
 async function saveBoardAs() {

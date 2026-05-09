@@ -8,10 +8,8 @@
     return BoardTypes.imageRefKind(src, isNativeImageRef);
   }
 
-  function createLegacyBoardData({ viewport, imageStore, objects, eyedropperCards = [] }) {
-    const data = { version: BoardTypes.BOARD_VERSION_LEGACY, viewport, imageStore, objects };
-    if (Array.isArray(eyedropperCards) && eyedropperCards.length) data.eyedropperCards = eyedropperCards;
-    return data;
+  function createLegacyBoardData({ viewport, imageStore, objects }) {
+    return { version: BoardTypes.BOARD_VERSION_LEGACY, viewport, imageStore, objects };
   }
 
   function imageMetaForBoardFile(imgKey, src = '', deps = {}) {
@@ -63,7 +61,7 @@
     };
   }
 
-  function createBoardDataForSave({ viewport, imageStore, objects, eyedropperCards = [] }, deps = {}) {
+  function createBoardDataForSave({ viewport, imageStore, objects }, deps = {}) {
     const prune = pruneImageStoreForObjects(imageStore || {}, objects || []);
     const imageManifest = {};
     for (const [key, src] of Object.entries(prune.imageStore || {})) {
@@ -76,7 +74,6 @@
       imageStore: imageManifest,
       objects,
     };
-    if (Array.isArray(eyedropperCards) && eyedropperCards.length) data.eyedropperCards = eyedropperCards;
     if (deps.schema?.validateBoardData) deps.schema.validateBoardData(data);
     return data;
   }
@@ -140,32 +137,13 @@
     return { imageObjectCount, textObjectCount };
   }
 
-  function summarizeEyedropperCards(cards = []) {
-    const list = Array.isArray(cards) ? cards : [];
-    let previewCount = 0;
-    let previewBytes = 0;
-    for (const card of list) {
-      const preview = typeof card?.previewDataUrl === 'string' ? card.previewDataUrl : '';
-      if (!preview) continue;
-      previewCount++;
-      previewBytes += preview.length;
-    }
-    return {
-      eyedropperCardCount: list.length,
-      eyedropperCardPreviewCount: previewCount,
-      eyedropperCardPreviewBytes: previewBytes,
-    };
-  }
-
   function getBoardSaveMetrics(data, deps = {}) {
     const imageSummary = summarizeImageStore(data.imageStore || {}, deps);
     const objectCounts = getObjectTypeCounts(data.objects || []);
-    const eyedropperSummary = summarizeEyedropperCards(data.eyedropperCards || []);
     const rawImageStore = deps.rawImageStore || {};
     const imageStoreBytesEstimate = deps.imageStoreBytesEstimate || (() => 0);
     return {
       objectCount: data.objects?.length || 0,
-      ...eyedropperSummary,
       imageCount: imageSummary.imageCount,
       ...objectCounts,
       imageStoreBytes: imageSummary.imageStoreBytes,
@@ -181,10 +159,8 @@
   function getBoardOpenMetrics(data, deps = {}) {
     const imageSummary = summarizeImageStore(data?.imageStore || {}, deps);
     const objectCounts = getObjectTypeCounts(data?.objects || []);
-    const eyedropperSummary = summarizeEyedropperCards(data?.eyedropperCards || []);
     return {
       objectCount: data?.objects?.length || 0,
-      ...eyedropperSummary,
       imageCount: imageSummary.imageCount,
       ...objectCounts,
       imageStoreBytes: imageSummary.imageStoreBytes,
@@ -248,7 +224,6 @@
     pruneBoardDataImageStore,
     pruneImageStoreForObjects,
     referencedImageKeys,
-    summarizeEyedropperCards,
     summarizeImageStore,
   });
 

@@ -187,18 +187,3 @@ const scheduleEyedropperCardPreviewSnapshot = (card, reason = 'scene') => {
   card.previewSnapshotPromise = promise;
   return promise;
 };
-
-const prepareEyedropperCardPreviewsForSave = async () => {
-  const cards = typeof pinnedEyedropperCards === 'function' ? pinnedEyedropperCards() : [];
-  const results = await Promise.allSettled(cards.map((card) => {
-    if (!card) return Promise.resolve(false);
-    if (card.previewSnapshotPromise) return card.previewSnapshotPromise;
-    if (card.previewScene) return scheduleEyedropperCardPreviewSnapshot(card, 'save');
-    if (typeof updateEyedropperCardPreviewSnapshot === 'function') updateEyedropperCardPreviewSnapshot(card, 'save-before-async');
-    if (card.previewDataUrl) return Promise.resolve(true);
-    return scheduleEyedropperCardPreviewSnapshot(card, 'save');
-  }));
-  const ready = cards.filter((card) => !!card.previewDataUrl).length;
-  const failed = results.filter((result) => result.status === 'rejected' || result.value !== true).length;
-  return { count: cards.length, ready, failed };
-};

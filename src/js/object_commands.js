@@ -125,8 +125,8 @@ async function newBoard() {
   await startPillTask({ message: 'Opening' });
   setEyedropperEnabled(false);
   BoardfishEditorState.resetBoardObjectState();
-  if (typeof clearEyedropperCardsForBoard === 'function') {
-    clearEyedropperCardsForBoard({ markDirty: false });
+  if (typeof clearEyedropperCardForBoard === 'function') {
+    clearEyedropperCardForBoard();
   }
   OpenDebug.step(dbg, 'exitEdit', {});
   clearJsClipboard();

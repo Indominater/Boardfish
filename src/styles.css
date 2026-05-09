@@ -436,7 +436,7 @@ body.eyedropper-enabled #multi-sel-overlay {
   display: none;
   width: var(--eyedropper-loupe-width);
   max-width: calc(100vw - 24px);
-  z-index: var(--eyedropper-card-z, var(--eyedropper-card-base-z));
+  z-index: var(--eyedropper-card-base-z);
   pointer-events: auto;
   font-size: var(--menu-item-font-size);
   font-weight: var(--menu-item-font-weight);

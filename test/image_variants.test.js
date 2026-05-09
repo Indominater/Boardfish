@@ -163,11 +163,10 @@ test('mac platform keeps scaled image variants disabled even if a scaling mode i
   assert.equal(selected.disabled, true);
 });
 
-test('eyedropper preview does not resolve per-object scaled variants while active', () => {
+test('eyedropper readout resolves safe scaled variants independently of the preview', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 
-  assert.match(source, /paintEyedropperWallpaperPreview\(clientX, clientY, drawSize, options\)/);
-  assert.match(source, /eyedropperRenderedSampleCtx\.drawImage\(\s*eyedropperZoomWallpaperCanvas,/);
+  assert.match(source, /function renderEyedropperLocalReadoutPixel\(clientX, clientY\)/);
   assert.match(source, /imageSourceResolver: selectEyedropperSafeImageSourceForDraw/);
   assert.match(source, /const scaleVariantsEnabled = typeof isViewportImageScalingActive === 'function'/);
   assert.match(source, /targetScale: scaleVariantsEnabled \? chooseImageScaleForDraw\(obj, source, view\) : 1/);
@@ -247,20 +246,22 @@ test('eyedropper center dot scales to the display density', () => {
   assert.match(source, /drawEyedropperSampleDot\(drawSize, dpr\);/);
 });
 
-test('eyedropper card previews save and restore the center reticle', () => {
+test('eyedropper card previews are transient and keep the center reticle', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
   const stateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_state.js'), 'utf8');
   const previewsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_card_previews.js'), 'utf8');
 
   assert.match(stateSource, /function drawEyedropperCanvasReticle\(context, width, height = width, dpr = window\.devicePixelRatio \|\| 1\)/);
-  assert.match(source, /captureEyedropperCanvasPreview\(card\?\.canvas, 'card-preview-save', \{\s*reticle: true,/);
+  assert.match(source, /captureEyedropperCanvasPreview\(card\?\.canvas, 'card-preview-capture', \{\s*reticle: true,/);
   assert.match(source, /captureEyedropperCanvasPreview\(canvas, 'card-preview-rendered-sample', \{\s*reticle: true,/);
-  assert.match(source, /drawEyedropperCardReticle\(card\);[\s\S]*if \(!cardData\.previewDataUrl\)/);
-  assert.match(source, /card\.ctx\.drawImage\(img, 0, 0, card\.canvas\.width, card\.canvas\.height\);[\s\S]*drawEyedropperCardReticle\(card\);/);
+  assert.doesNotMatch(source, /rememberEyedropperCardPreviewScene/);
+  assert.doesNotMatch(source, /serializeEyedropperCardsForBoard/);
+  assert.doesNotMatch(source, /restoreEyedropperCards/);
+  assert.doesNotMatch(source, /syncEyedropperCardZOrder/);
   assert.match(previewsSource, /captureEyedropperCanvasPreview\(canvas, 'card-preview-safe-render', \{\s*reticle: true,/);
 });
 
-test('eyedropper preview uses only the rendered-board wallpaper while active', () => {
+test('eyedropper preview uses viewport-style rendered-board wallpaper while active', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 
   assert.match(source, /function prepareEyedropperWallpaper\(\)/);
@@ -272,10 +273,10 @@ test('eyedropper preview uses only the rendered-board wallpaper while active', (
   assert.match(source, /panY: sampleDotCenterY \/ dpr - worldPoint\.y \* previewZoom/);
   assert.match(source, /const wallpaper = captureEyedropperZoomedWallpaper\(clientX, clientY, renderSize, \{ geometry \}\)/);
   assert.match(source, /function captureEyedropperZoomWallpaper\(geometry, renderSize\)/);
-  assert.match(source, /viewportRect: geometry\.viewportRect/);
-  assert.match(source, /view: geometry\.view/);
-  assert.match(source, /selectEyedropperPreviewImageSourceForDraw/);
-  assert.match(source, /visualFallback: true/);
+  assert.match(source, /drawVisibleObjects\(eyedropperZoomWallpaperCtx, counters, \{\s*viewportRect: geometry\.viewportRect,\s*view: geometry\.view,\s*\}\)/);
+  assert.doesNotMatch(source, /function selectEyedropperPreviewImageSourceForDraw/);
+  assert.doesNotMatch(source, /imageSourceResolver: selectEyedropperPreviewImageSourceForDraw/);
+  assert.doesNotMatch(source, /visualFallback: true/);
   assert.match(source, /eyedropperRenderedSampleCtx\.drawImage\(\s*eyedropperZoomWallpaperCanvas,/);
   assert.doesNotMatch(source, /const sourceScale = EYEDROPPER_PREVIEW_ZOOM_SCALE/);
   assert.doesNotMatch(source, /clippedSrcW \* sourceScale/);
@@ -407,7 +408,7 @@ test('eyedropper decode warming uses two background decoders after board open', 
   assert.match(eyedropperSource, /function requestEyedropperSampleSafeImage\(key, counters = null, reason = 'sample'\)/);
   assert.match(eyedropperSource, /return resolveEyedropperSafeImageSource\(key, counters\);/);
   assert.match(eyedropperSource, /requestEyedropperSampleSafeImage\(key, counters, 'readout'\)/);
-  assert.match(eyedropperSource, /requestEyedropperSampleSafeImage\(key, counters, 'preview-fallback'\)/);
+  assert.doesNotMatch(eyedropperSource, /requestEyedropperSampleSafeImage\(key, counters, 'preview-fallback'\)/);
   assert.doesNotMatch(eyedropperSource, /requestEyedropperSampleSafeImage\(key, null, 'hover-tile'\)/);
   assert.doesNotMatch(eyedropperSource, /schedulePostOpenEyedropperSafeImagePrewarm/);
   assert.doesNotMatch(eyedropperSource, /POST_OPEN_EYEDROPPER_PREWARM/);

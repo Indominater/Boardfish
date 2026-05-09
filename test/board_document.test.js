@@ -67,7 +67,7 @@ test('prunes unreferenced image store entries from saved board data', () => {
   assert.deepEqual(Object.keys(data.imageStore).sort(), ['img-1', 'img-2']);
 });
 
-test('includes saved eyedropper cards in board data', () => {
+test('omits transient eyedropper card data from board data', () => {
   const data = BoardDocument.createBoardDataForSave({
     viewport: { panX: 0, panY: 0, zoom: 1 },
     imageStore: {},
@@ -88,23 +88,8 @@ test('includes saved eyedropper cards in board data', () => {
     guessImageExtFromDataUrl: () => 'png',
   });
 
-  assert.deepEqual(data.eyedropperCards, [
-    {
-      rgba: [254, 224, 198, 255],
-      left: 30,
-      top: 20,
-      order: 1,
-      canvasWidth: 96,
-      canvasHeight: 96,
-      previewDataUrl: 'data:image/png;base64,abc',
-    },
-  ]);
-  assert.deepEqual(BoardDocument.summarizeEyedropperCards(data.eyedropperCards), {
-    eyedropperCardCount: 1,
-    eyedropperCardPreviewCount: 1,
-    eyedropperCardPreviewBytes: 'data:image/png;base64,abc'.length,
-  });
-  assert.equal(BoardDocument.getBoardSaveMetrics(data).eyedropperCardPreviewCount, 1);
+  assert.equal(Object.hasOwn(data, 'eyedropperCards'), false);
+  assert.equal(Object.hasOwn(BoardDocument.getBoardSaveMetrics(data), 'eyedropperCardPreviewCount'), false);
 });
 
 test('summarizes image store without runtime globals', () => {
