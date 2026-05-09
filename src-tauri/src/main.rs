@@ -20,7 +20,8 @@ mod platform_windows;
 
 use app_lifecycle::{
     acknowledge_close_request, cancel_pending_termination, exit_app, get_startup_file,
-    handle_run_event, handle_window_event, set_title, show_app_window, startup_file_state,
+    get_window_maximized, handle_run_event, handle_window_event, minimize_window,
+    request_window_close, set_title, show_app_window, startup_file_state, toggle_maximize_window,
 };
 use app_theme::set_app_theme;
 use board_commands::{read_board, save_board, write_debug_log_file, write_text_file};
@@ -71,6 +72,7 @@ fn main() {
         .manage(ImageSourceCache::default())
         .invoke_handler(tauri::generate_handler![
             get_startup_file,
+            get_window_maximized,
             save_board,
             save_text_file_dialog,
             write_text_file,
@@ -91,6 +93,9 @@ fn main() {
             set_title,
             set_app_theme,
             show_app_window,
+            minimize_window,
+            toggle_maximize_window,
+            request_window_close,
             exit_app,
             cancel_pending_termination,
             acknowledge_close_request,

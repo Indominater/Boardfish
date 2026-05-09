@@ -105,8 +105,9 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'Space') e.preventDefault();
     return;
   }
-  if (e.code === 'Space' && !editingId && !e.repeat) {
+  if (e.code === 'Space' && !editingId) {
     e.preventDefault();
+    if (e.repeat) return;
     _spaceDown = true;
     canvas.classList.add('panning');
     if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('space');
@@ -115,6 +116,7 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('keyup', (e) => {
   if (e.code === 'Space') {
+    if (_spaceDown || !editingId) e.preventDefault();
     _spaceDown = false;
     canvas.classList.remove('panning');
   }

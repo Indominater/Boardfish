@@ -17,6 +17,11 @@ struct FileDropPayload {
     paths: Vec<String>,
 }
 
+#[derive(Clone, serde::Serialize)]
+pub(crate) struct WindowMaximizedState {
+    maximized: bool,
+}
+
 pub(crate) fn startup_file_state(path: Option<String>) -> StartupFile {
     StartupFile(Mutex::new(path))
 }
@@ -45,6 +50,40 @@ pub(crate) fn set_title(window: tauri::Window, title: String) {
 #[tauri::command]
 pub(crate) fn show_app_window(window: tauri::WebviewWindow) {
     show_startup_window(&window);
+}
+
+#[tauri::command]
+pub(crate) fn minimize_window(window: tauri::Window) -> Result<(), String> {
+    window.minimize().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn toggle_maximize_window(
+    window: tauri::Window,
+) -> Result<WindowMaximizedState, String> {
+    let maximized = window.is_maximized().map_err(|error| error.to_string())?;
+    let next_maximized = !maximized;
+    if next_maximized {
+        window.maximize().map_err(|error| error.to_string())?;
+    } else {
+        window.unmaximize().map_err(|error| error.to_string())?;
+    }
+    Ok(WindowMaximizedState {
+        maximized: next_maximized,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn get_window_maximized(window: tauri::Window) -> Result<WindowMaximizedState, String> {
+    window
+        .is_maximized()
+        .map(|maximized| WindowMaximizedState { maximized })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn request_window_close(window: tauri::Window) {
+    emit_close_request_for_window(&window);
 }
 
 fn show_startup_window(window: &tauri::WebviewWindow) {
@@ -112,13 +151,17 @@ fn schedule_close_fallback(seq: u64, app_handle: tauri::AppHandle) {
     });
 }
 
+fn emit_close_request_for_window(window: &tauri::Window) {
+    let seq = CLOSE_REQUEST_SEQ.fetch_add(1, Ordering::SeqCst);
+    window.emit("boardfish://close-requested", seq).ok();
+    schedule_close_fallback(seq, window.app_handle().clone());
+}
+
 pub(crate) fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            let seq = CLOSE_REQUEST_SEQ.fetch_add(1, Ordering::SeqCst);
-            window.emit("boardfish://close-requested", seq).ok();
-            schedule_close_fallback(seq, window.app_handle().clone());
+            emit_close_request_for_window(window);
         }
         tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
             let payload = FileDropPayload {
@@ -159,6 +202,7 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     {
         if let Some(window) = app.get_webview_window("main") {
             let dark = read_stored_app_theme(app.handle());
+            let _ = window.set_decorations(false);
             configure_startup_theme(&window, dark);
             schedule_startup_show_fallback(window);
         }
@@ -179,7 +223,6 @@ pub(crate) fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunE
         #[cfg(target_os = "macos")]
         crate::platform_macos::cancel_termination();
         emit_close_request(app_handle);
-        return;
     }
 
     #[cfg(target_os = "macos")]

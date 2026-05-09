@@ -214,6 +214,21 @@ test('frontend abstraction scripts load before their consumers', () => {
   before('eyedropper_decode_warmers.js', 'canvas_input.js');
 });
 
+test('spacebar pan consumes held and released Space events', () => {
+  const source = readSource('src/js/canvas_input.js');
+
+  assert.match(
+    source,
+    /if \(e\.code === 'Space' && !editingId\) \{\s*e\.preventDefault\(\);\s*if \(e\.repeat\) return;\s*_spaceDown = true;/,
+    'Space repeat keydown events must stay canceled so focused buttons cannot activate on release',
+  );
+  assert.match(
+    source,
+    /document\.addEventListener\('keyup', \(e\) => \{[\s\S]*?if \(e\.code === 'Space'\) \{\s*if \(_spaceDown \|\| !editingId\) e\.preventDefault\(\);\s*_spaceDown = false;/,
+    'Space keyup must be canceled after a pan hold so native button activation is suppressed',
+  );
+});
+
 test('large frontend units stay split behind explicit boundary files', () => {
   assert.ok(lineCount('src/app.js') < 700, 'app.js should stay below the startup/orchestration split ceiling');
   assert.ok(lineCount('src/js/viewport.js') < 900, 'viewport.js should keep debug UI split out');

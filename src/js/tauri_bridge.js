@@ -9,17 +9,20 @@
     COPY_IMAGE_DATA_URL_TO_CLIPBOARD_TRANSFORMED: 'copy_image_data_url_to_clipboard_transformed',
     COPY_TEXT_TO_CLIPBOARD: 'copy_text_to_clipboard',
     EXIT_APP: 'exit_app',
+    GET_WINDOW_MAXIMIZED: 'get_window_maximized',
     GET_CACHED_IMAGE_DATA_URL: 'get_cached_image_data_url',
     PREWARM_CACHED_IMAGE_PIXELS: 'prewarm_cached_image_pixels',
     SAMPLE_CACHED_IMAGE_PIXEL: 'sample_cached_image_pixel',
     GET_STARTUP_FILE: 'get_startup_file',
     MATERIALIZE_CACHED_IMAGE_SOURCES: 'materialize_cached_image_sources',
+    MINIMIZE_WINDOW: 'minimize_window',
     OPEN_FILE_DIALOG: 'open_file_dialog',
     PICK_FOLDER: 'pick_folder',
     PICK_IMAGE_FILES: 'pick_image_files',
     READ_BOARD: 'read_board',
     READ_IMAGE_FROM_CLIPBOARD_CACHED: 'read_image_from_clipboard_cached',
     READ_TEXT_FROM_CLIPBOARD: 'read_text_from_clipboard',
+    REQUEST_WINDOW_CLOSE: 'request_window_close',
     REGISTER_IMAGE_FILE_SOURCE: 'register_image_file_source',
     REGISTER_IMAGE_SOURCE: 'register_image_source',
     REGISTER_TRANSFORMED_IMAGE_SOURCE: 'register_transformed_image_source',
@@ -32,6 +35,7 @@
     SET_APP_THEME: 'set_app_theme',
     SET_TITLE: 'set_title',
     SHOW_APP_WINDOW: 'show_app_window',
+    TOGGLE_MAXIMIZE_WINDOW: 'toggle_maximize_window',
     WRITE_IMAGE_FILE_BY_KEY: 'write_image_file_by_key',
     WRITE_DEBUG_LOG_FILE: 'write_debug_log_file',
     WRITE_TEXT_FILE: 'write_text_file',
@@ -77,6 +81,9 @@
     getStartupFile() {
       return tauriInvoke(TAURI_COMMANDS.GET_STARTUP_FILE);
     },
+    getWindowMaximized() {
+      return tauriInvoke(TAURI_COMMANDS.GET_WINDOW_MAXIMIZED);
+    },
     getCachedImageDataUrl(imgKey) {
       return tauriInvoke(TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL, { imgKey });
     },
@@ -88,6 +95,9 @@
     },
     materializeCachedImageSources(imgKeys) {
       return tauriInvoke(TAURI_COMMANDS.MATERIALIZE_CACHED_IMAGE_SOURCES, { imgKeys });
+    },
+    minimizeWindow() {
+      return tauriInvoke(TAURI_COMMANDS.MINIMIZE_WINDOW);
     },
     openFileDialog() {
       return tauriInvoke(TAURI_COMMANDS.OPEN_FILE_DIALOG);
@@ -109,6 +119,9 @@
     },
     readTextFromClipboard() {
       return tauriInvoke(TAURI_COMMANDS.READ_TEXT_FROM_CLIPBOARD);
+    },
+    requestWindowClose() {
+      return tauriInvoke(TAURI_COMMANDS.REQUEST_WINDOW_CLOSE);
     },
     registerImageFileSource(imgKey, path, sourceToken = null) {
       return tauriInvoke(TAURI_COMMANDS.REGISTER_IMAGE_FILE_SOURCE, { imgKey, path, sourceToken });
@@ -142,6 +155,9 @@
     },
     showAppWindow() {
       return tauriInvoke(TAURI_COMMANDS.SHOW_APP_WINDOW);
+    },
+    toggleMaximizeWindow() {
+      return tauriInvoke(TAURI_COMMANDS.TOGGLE_MAXIMIZE_WINDOW);
     },
     writeImageFileByKey(path, imgKey) {
       return tauriInvoke(TAURI_COMMANDS.WRITE_IMAGE_FILE_BY_KEY, { path, imgKey });

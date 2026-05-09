@@ -40,12 +40,12 @@ unsafe fn configure_hwnd(hwnd: *mut c_void, dark: bool) {
 
 pub(crate) unsafe fn configure_window_title_bar(window: &tauri::Window, dark: bool) {
     if let Ok(hwnd) = window.hwnd() {
-        configure_hwnd(hwnd.0 as *mut c_void, dark);
+        configure_hwnd(hwnd.0, dark);
     }
 }
 
 pub(crate) unsafe fn configure_webview_title_bar(window: &tauri::WebviewWindow, dark: bool) {
     if let Ok(hwnd) = window.hwnd() {
-        configure_hwnd(hwnd.0 as *mut c_void, dark);
+        configure_hwnd(hwnd.0, dark);
     }
 }

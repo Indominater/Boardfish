@@ -29,6 +29,18 @@
   --context-menu-width: 228px;
   --eyedropper-loupe-width: 228px;
   --eyedropper-card-base-z: 99990;
+  --window-titlebar-height: 28px;
+  --window-control-width: 48px;
+  --window-control-radius: 6px;
+  --window-control-icon-size: 18px;
+  --window-titlebar-bg: transparent;
+  --window-control-bg: transparent;
+  --window-control-separator: transparent;
+  --window-control-fg: rgba(17, 20, 24, 0.78);
+  --window-control-accent: rgba(17, 20, 24, 0.28);
+  --window-control-hover-bg: rgba(17, 20, 24, 0.08);
+  --window-control-press-bg: rgba(17, 20, 24, 0.14);
+  --window-control-close-hover-bg: rgba(232, 17, 35, 0.82);
   --canvas-text: #111418;
   --dialog-overlay-bg: rgba(0,0,0,0.18);
   --selection-handle-bg: #f8fafc;
@@ -39,6 +51,10 @@
 body[data-theme="dark"] {
   --canvas-bg: var(--canvas-bg-dark);
   --canvas-text: #fbfbfe;
+  --window-control-fg: rgba(251, 251, 254, 0.88);
+  --window-control-accent: rgba(251, 251, 254, 0.32);
+  --window-control-hover-bg: rgba(251, 251, 254, 0.10);
+  --window-control-press-bg: rgba(251, 251, 254, 0.16);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -106,6 +122,10 @@ body.eyedropper-hold-active * {
   display: none;
 }
 
+#windows-titlebar {
+  display: none;
+}
+
 body.is-macos #mac-titlebar {
   position: fixed;
   top: 0;
@@ -120,6 +140,150 @@ body.is-macos #mac-titlebar {
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
+}
+
+body.is-windows #windows-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--window-titlebar-height);
+  display: block;
+  z-index: 9001;
+  pointer-events: none;
+  background: var(--window-titlebar-bg);
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#windows-titlebar-drag {
+  position: absolute;
+  inset: 0 calc(var(--window-control-width) * 3) 0 0;
+  height: var(--window-titlebar-height);
+  pointer-events: auto;
+  cursor: default;
+}
+
+#windows-titlebar-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: stretch;
+  width: calc(var(--window-control-width) * 3);
+  height: var(--window-titlebar-height);
+  margin-left: auto;
+  flex: 0 0 auto;
+  pointer-events: auto;
+}
+
+.window-control {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--window-control-width);
+  height: var(--window-titlebar-height);
+  min-width: var(--window-control-width);
+  padding: 0;
+  color: var(--window-control-fg);
+  background: var(--window-control-bg);
+  border: 0;
+  border-left: 0;
+  border-radius: 0 0 var(--window-control-radius) var(--window-control-radius);
+  box-shadow: none;
+  cursor: default;
+  appearance: none;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.window-control::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid transparent;
+  border-top-width: 1px;
+  border-bottom-left-radius: var(--window-control-radius);
+  border-bottom-right-radius: var(--window-control-radius);
+  pointer-events: none;
+}
+
+.window-control:hover {
+  background: var(--window-control-hover-bg);
+}
+
+.window-control:hover::after {
+  border-color: var(--window-control-accent);
+}
+
+.window-control:active {
+  background: var(--window-control-press-bg);
+}
+
+.window-control-close:hover,
+body[data-theme="dark"] .window-control-close:hover {
+  background: var(--window-control-close-hover-bg);
+}
+
+.window-control-close:hover::after,
+body[data-theme="dark"] .window-control-close:hover::after {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.window-control-close:active,
+body[data-theme="dark"] .window-control-close:active {
+  color: #ffffff;
+  background: #c50f1f;
+}
+
+.window-control-icon {
+  position: relative;
+  display: block;
+  width: var(--window-control-icon-size);
+  height: var(--window-control-icon-size);
+  pointer-events: none;
+}
+
+.window-control-minimize .window-control-icon::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 8px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.window-control-maximize .window-control-icon::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border: 3px solid currentColor;
+  border-radius: 1px;
+}
+
+.window-control-close .window-control-icon::before,
+.window-control-close .window-control-icon::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: var(--window-control-icon-size);
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: center;
+}
+
+.window-control-close .window-control-icon::before {
+  transform: rotate(45deg);
+}
+
+.window-control-close .window-control-icon::after {
+  transform: rotate(-45deg);
 }
 
 /* ── Selection overlay ── */
@@ -216,6 +380,7 @@ body.eyedropper-enabled #multi-sel-overlay {
   isolation: isolate;
   transform: translateZ(0);
   -webkit-mask-image: -webkit-radial-gradient(white, black);
+  mask-image: radial-gradient(white, black);
 }
 
 #ctx-menu {

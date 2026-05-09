@@ -2,6 +2,7 @@
 
 import './dom_registry.js';
 import './tauri_bridge.js';
+import './window_titlebar.js';
 import './bitmap_cache.js';
 import './image_transform.js';
 import './object_geometry.js';
