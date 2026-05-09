@@ -30,12 +30,6 @@
     return imageCache[key] || null;
   }
 
-  function setDisplayImage(key, img) {
-    if (!key) return false;
-    imageCache[key] = img;
-    return true;
-  }
-
   function hasDisplayImage(key) {
     return !!imageCache[key];
   }
@@ -49,10 +43,8 @@
     getSource,
     hasDisplayImage,
     hasSource,
-    setDisplayImage,
     setSource,
     setSources,
     sourceKeys,
-    get generation() { return _imageStoreGeneration; },
   });
 })(typeof window !== 'undefined' ? window : globalThis);

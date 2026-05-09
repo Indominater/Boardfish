@@ -235,6 +235,21 @@ test('eyedropper preview uses the final CSS size before the loupe is visible', (
   assert.doesNotMatch(source, /const previewSize = previewRect\.width \|\| EYEDROPPER_PREVIEW_CSS/);
 });
 
+test('eyedropper sampler keeps edge gap while Windows titlebar controls layer above it', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.html'), 'utf8');
+
+  assert.match(styles, /--window-titlebar-z: 99991;/);
+  assert.match(styles, /body\.is-windows #windows-titlebar \{[\s\S]*z-index: 9001;/);
+  assert.match(styles, /#windows-titlebar-controls \{[\s\S]*position: fixed;[\s\S]*z-index: var\(--window-titlebar-z\);/);
+  assert.match(styles, /body\.is-windows #windows-titlebar-controls \{[\s\S]*display: flex;/);
+  assert.match(html, /<\/div>\s*<div id="windows-titlebar-controls">/);
+  assert.doesNotMatch(source, /eyedropperViewportMinTop/);
+  assert.match(source, /top: Math\.round\(Math\.max\(margin,/);
+  assert.match(source, /const top = Math\.max\(margin,/);
+});
+
 test('eyedropper center dot scales to the display density', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 
@@ -249,7 +264,6 @@ test('eyedropper center dot scales to the display density', () => {
 test('eyedropper card previews are transient and keep the center reticle', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
   const stateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_state.js'), 'utf8');
-  const previewsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_card_previews.js'), 'utf8');
 
   assert.match(stateSource, /function drawEyedropperCanvasReticle\(context, width, height = width, dpr = window\.devicePixelRatio \|\| 1\)/);
   assert.match(source, /captureEyedropperCanvasPreview\(card\?\.canvas, 'card-preview-capture', \{\s*reticle: true,/);
@@ -258,7 +272,7 @@ test('eyedropper card previews are transient and keep the center reticle', () =>
   assert.doesNotMatch(source, /serializeEyedropperCardsForBoard/);
   assert.doesNotMatch(source, /restoreEyedropperCards/);
   assert.doesNotMatch(source, /syncEyedropperCardZOrder/);
-  assert.match(previewsSource, /captureEyedropperCanvasPreview\(canvas, 'card-preview-safe-render', \{\s*reticle: true,/);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_card_previews.js')), false);
 });
 
 test('eyedropper preview uses viewport-style rendered-board wallpaper while active', () => {

@@ -30,6 +30,7 @@
   --eyedropper-loupe-width: 228px;
   --eyedropper-card-base-z: 99990;
   --window-titlebar-height: 28px;
+  --window-titlebar-z: 99991;
   --window-control-width: 48px;
   --window-control-radius: 6px;
   --window-control-icon-size: 18px;
@@ -126,6 +127,10 @@ body.eyedropper-hold-active * {
   display: none;
 }
 
+#windows-titlebar-controls {
+  display: none;
+}
+
 body.is-macos #mac-titlebar {
   position: fixed;
   top: 0;
@@ -166,16 +171,20 @@ body.is-windows #windows-titlebar {
 }
 
 #windows-titlebar-controls {
-  position: absolute;
+  position: fixed;
   top: 0;
   right: 0;
-  display: flex;
   align-items: stretch;
   width: calc(var(--window-control-width) * 3);
   height: var(--window-titlebar-height);
+  z-index: var(--window-titlebar-z);
   margin-left: auto;
   flex: 0 0 auto;
   pointer-events: auto;
+}
+
+body.is-windows #windows-titlebar-controls {
+  display: flex;
 }
 
 .window-control {

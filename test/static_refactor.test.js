@@ -208,8 +208,6 @@ test('frontend abstraction scripts load before their consumers', () => {
   before('eyedropper_geometry.js', 'eyedropper.js');
   before('eyedropper_debug.js', 'eyedropper_state.js');
   before('eyedropper_state.js', 'eyedropper.js');
-  before('eyedropper.js', 'eyedropper_card_previews.js');
-  before('eyedropper_card_previews.js', 'io_close.js');
   before('eyedropper.js', 'eyedropper_decode_warmers.js');
   before('eyedropper_decode_warmers.js', 'canvas_input.js');
 });
@@ -307,7 +305,7 @@ test('shared abstractions own DOM lookup, Tauri invoke, rendering helpers, bitma
   assert.match(readSource('src/js/editor_state_boundary.js'), /function addObject/);
   assert.match(readSource('src/js/editor_state_boundary.js'), /function commitMutation/);
   assert.match(readSource('src/js/state.js'), /BoardfishEditorState\.commitMutation/);
-  assert.match(readSource('src/js/editor_state_boundary.js'), /function removeSelectedObjects/);
+  assert.doesNotMatch(readSource('src/js/editor_state_boundary.js'), /function removeSelectedObjects/);
   assert.match(readSource('src/js/image_insert.js'), /BoardfishEditorState\.addObject/);
   assert.match(readSource('src/js/clipboard_state.js'), /function jsClipboardStillCurrent/);
   assert.doesNotMatch(readSource('src/js/clipboard_export_init.js'), /^var _nativeClipboardWriteQueue/gm);

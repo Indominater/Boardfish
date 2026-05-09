@@ -56,10 +56,6 @@
     return removed;
   }
 
-  function removeSelectedObjects() {
-    return removeObjectsById([...selectedIds]);
-  }
-
   function removeEmptyTextObjects({
     ids = null,
     preserveIds = [],
@@ -157,18 +153,6 @@
     return result;
   }
 
-  function snapshotSelection() {
-    return {
-      selectedId,
-      selectedIds: [...selectedIds],
-      editingId,
-    };
-  }
-
-  function snapshotViewport() {
-    return BoardfishViewportState.snapshot();
-  }
-
   root.BoardfishEditorState = Object.freeze({
     addObject,
     clearSelection: clearSelectionState,
@@ -177,7 +161,6 @@
     deleteEmptyTextObjects,
     removeEmptyTextObjects,
     removeObjectsById,
-    removeSelectedObjects,
     replaceBoardObjects,
     resetBoardObjectState,
     resetObjectCounters,
@@ -185,7 +168,5 @@
     setSelection: setSelectionState,
     setBoardOpening,
     setViewport: setViewportState,
-    snapshotSelection,
-    snapshotViewport,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

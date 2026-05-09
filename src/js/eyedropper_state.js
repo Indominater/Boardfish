@@ -119,13 +119,3 @@ function drawEyedropperCanvasReticle(context, width, height = width, dpr = windo
     2 * displayScale,
   );
 }
-
-function drawEyedropperCardReticle(card) {
-  if (!card?.ctx || !card.canvas) return false;
-  return drawEyedropperCanvasReticle(
-    card.ctx,
-    card.canvas.width,
-    card.canvas.height,
-    eyedropperReticleDisplayScaleForCard(card),
-  );
-}
