@@ -195,7 +195,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         ClipDebug.step(dbg, 'paste:objects-add-start', { objectCount: clones.length });
         for (const o of clones) {
           processedObjects++;
-          o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter; o.locked = false;
+          o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
           BoardfishEditorState.addObject(o);
           pastedIds.push(o.id);
           if (processedObjects === 1 || processedObjects % 50 === 0 || processedObjects === clones.length) {

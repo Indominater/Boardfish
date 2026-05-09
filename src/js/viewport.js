@@ -379,10 +379,8 @@ function drawBoard() {
   }
 }
 
-function hitTest(wx, wy, { includeLocked = false } = {}) {
-  const obj = BoardObjectGeometry.topObjectAtWorldPoint({ x: wx, y: wy });
-  if (!obj || (!includeLocked && isObjectLocked(obj))) return null;
-  return obj;
+function hitTest(wx, wy) {
+  return BoardObjectGeometry.topObjectAtWorldPoint({ x: wx, y: wy });
 }
 
 function applyTransform(frameDbg = null) {

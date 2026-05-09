@@ -126,7 +126,7 @@ function dragItemsForSelection() {
   const items = [];
   for (const id of selectedIds) {
     const o = objectsMap.get(id);
-    if (o && !isObjectLocked(o)) items.push({ obj: o, startX: o.x, startY: o.y });
+    if (o) items.push({ obj: o, startX: o.x, startY: o.y });
   }
   return items;
 }
@@ -224,9 +224,9 @@ function startRubberBandSelection(e, additive) {
       x2: (x2 - panX) / zoom,
       y2: (y2 - panY) / zoom,
     };
-    const nextSelection = additive ? new Set(selectedUnlockedObjectIds()) : new Set();
+    const nextSelection = additive ? new Set(selectedIds) : new Set();
     for (const o of objects) {
-      if (!isObjectLocked(o) && objectIntersectsRect(o, rbRect)) {
+      if (objectIntersectsRect(o, rbRect)) {
         nextSelection.add(o.id);
       }
     }
@@ -238,8 +238,7 @@ function startRubberBandSelection(e, additive) {
 }
 
 function toggleAdditiveSelection(obj) {
-  if (isObjectLocked(obj)) return;
-  const nextSelection = new Set(selectedUnlockedObjectIds());
+  const nextSelection = new Set(selectedIds);
   if (isSelected(obj.id)) {
     nextSelection.delete(obj.id);
     BoardfishEditorState.setSelection([...nextSelection]);
@@ -280,7 +279,6 @@ function startTextSelectionDrag(e, obj, wp) {
 }
 
 function startObjectDrag(e, obj) {
-  if (isObjectLocked(obj)) return false;
   if (editingId && editingId !== obj.id) exitEdit();
   const wasSelected = isSelected(obj.id);
   const canClickToEditText = obj.type === 'text' && wasSelected && selectedIds.size === 1;
@@ -370,7 +368,6 @@ canvas.addEventListener('mousedown', (e) => {
   if (isMultiSelected() && !additive) {
     if (rectContainsPoint(selectedBounds(), wp)) {
       if (startGroupDrag(e)) return;
-      if (selectedHasLockedObjects()) return;
       return;
     }
   }
@@ -393,4 +390,3 @@ canvas.addEventListener('mousedown', (e) => {
 
   startObjectDrag(e, obj);
 });
-

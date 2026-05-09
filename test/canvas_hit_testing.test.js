@@ -14,7 +14,7 @@ function readSource(relativePath) {
 
 function loadViewportHitTest() {
   const source = readSource('src/js/viewport.js');
-  const match = source.match(/function hitTest\(wx, wy, \{ includeLocked = false \} = \{\}\) \{[\s\S]*?\n\}/);
+  const match = source.match(/function hitTest\(wx, wy\) \{[\s\S]*?\n\}/);
   assert.ok(match, 'viewport hitTest function is missing');
 
   const context = {
@@ -25,35 +25,24 @@ function loadViewportHitTest() {
         return context.nextObject;
       },
     },
-    isObjectLocked(obj) {
-      return obj?.locked === true;
-    },
   };
   vm.createContext(context);
   vm.runInContext(`${match[0]}\nthis.hitTest = hitTest;`, context);
   return context;
 }
 
-test('locked topmost objects behave like board background for normal hits', () => {
+test('hitTest returns the top object at the world point', () => {
   const context = loadViewportHitTest();
-  const lockedObject = { id: 'locked', locked: true };
-  const unlockedObject = { id: 'unlocked', locked: false };
+  const object = { id: 'obj-1' };
 
-  context.nextObject = lockedObject;
-  assert.equal(context.hitTest(10, 20), null);
-  assert.equal(context.hitTest(10, 20, { includeLocked: true }), lockedObject);
-
-  context.nextObject = unlockedObject;
-  assert.equal(context.hitTest(10, 20), unlockedObject);
+  context.nextObject = object;
+  assert.equal(context.hitTest(10, 20), object);
   assert.equal(context.lastPoint.x, 10);
   assert.equal(context.lastPoint.y, 20);
 });
 
-test('only the context menu opts normal canvas interaction into locked hits', () => {
-  const inputSource = readSource('src/js/canvas_input.js');
+test('canvas and context menu use regular hit testing', () => {
   const contextMenuSource = readSource('src/js/context_menu.js');
 
-  assert.doesNotMatch(inputSource, /includeLocked:\s*true/);
-  assert.doesNotMatch(inputSource, /lockedHit/);
-  assert.match(contextMenuSource, /hitTest\(wp\.x, wp\.y, \{ includeLocked: true \}\)/);
+  assert.match(contextMenuSource, /hitTest\(wp\.x, wp\.y\)/);
 });

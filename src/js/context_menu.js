@@ -116,7 +116,6 @@ var MENU_COMMANDS = {
   'obj-btn-copy': () => { closeObjCtxMenu('command:copy'); copySelected(); },
   'obj-btn-delete': () => { closeObjCtxMenu('command:delete'); deleteSelected(); },
   'obj-btn-duplicate': () => { closeObjCtxMenu('command:duplicate'); duplicateSelected(); },
-  'obj-btn-lock': () => { closeObjCtxMenu('command:lock'); toggleSelectedLock(); },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
   'obj-btn-flip-horizontal': () => { flipSelectedImages('x'); },
   'obj-btn-flip-vertical': () => { flipSelectedImages('y'); },
@@ -304,40 +303,24 @@ for (const menu of [ctxMenu, objCtxMenu, ctxActions].filter(Boolean)) {
 
 function updateObjMenuActions() {
   let imageCount = 0;
-  let unlockedImageCount = 0;
+  let selectedCount = 0;
   for (const id of selectedIds) {
     const o = objectsMap.get(id);
     if (!o) continue;
-    if (o.type === 'image') {
-      imageCount++;
-      if (!isObjectLocked(o)) unlockedImageCount++;
-    }
+    selectedCount++;
+    if (o.type === 'image') imageCount++;
   }
-  const lockSummary = selectedLockSummary();
   const multiSelected = isMultiSelected();
-  const canUnlockSingle = lockSummary.total === 1 && lockSummary.locked === 1;
-  const canLock = lockSummary.anyUnlocked;
-  const showLock = canUnlockSingle || canLock;
-  const showImageActions = unlockedImageCount >= 1;
-  const showLayerActions = lockSummary.anyUnlocked;
+  const showImageActions = imageCount >= 1;
+  const showLayerActions = selectedCount >= 1;
   const showExport = imageCount >= 1;
-  const showDelete = lockSummary.anyUnlocked;
-  const showAfterLockSep = showLock && (showImageActions || showLayerActions || showExport || showDelete);
+  const showDelete = selectedCount >= 1;
   if (copyBtn) copyBtn.style.display = '';
-  if (lockBtn) {
-    const label = lockBtn.querySelector?.('.ctx-label');
-    const text = canUnlockSingle ? 'Unlock' : 'Lock';
-    if (label) label.textContent = text;
-    else lockBtn.textContent = text;
-    lockBtn.style.display = showLock ? '' : 'none';
-    BoardfishDOM.lockBeforeSep.style.display = showLock ? 'block' : 'none';
-    BoardfishDOM.lockAfterSep.style.display = showAfterLockSep ? 'block' : 'none';
-  }
-  if (imageActionsSep) imageActionsSep.style.display = showImageActions && !showAfterLockSep ? 'block' : 'none';
+  if (imageActionsSep) imageActionsSep.style.display = showImageActions ? 'block' : 'none';
   if (flipHorizontalBtn) flipHorizontalBtn.style.display = showImageActions ? '' : 'none';
   if (flipVerticalBtn) flipVerticalBtn.style.display = showImageActions ? '' : 'none';
   if (rotateBtn) rotateBtn.style.display = showImageActions ? '' : 'none';
-  if (layerActionsSep) layerActionsSep.style.display = showLayerActions && showImageActions ? 'block' : 'none';
+  if (layerActionsSep) layerActionsSep.style.display = showLayerActions ? 'block' : 'none';
   if (moveToBackBtn) moveToBackBtn.style.display = showLayerActions ? '' : 'none';
   if (saveImageBtn) saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
   if (saveImagesBtn) {
@@ -346,10 +329,7 @@ function updateObjMenuActions() {
     else saveImagesBtn.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
     saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';
   }
-  if (exportSep) {
-    const lockSepAlreadyBeforeExport = showAfterLockSep && !showImageActions && !showLayerActions;
-    exportSep.style.display = showExport && !lockSepAlreadyBeforeExport ? 'block' : 'none';
-  }
+  if (exportSep) exportSep.style.display = showExport ? 'block' : 'none';
   if (deleteSep) deleteSep.style.display = showDelete ? 'block' : 'none';
   if (deleteBtn) deleteBtn.style.display = showDelete ? '' : 'none';
 }
@@ -379,10 +359,10 @@ function showCanvasContextMenuAt(clientX, clientY) {
     return;
   }
 
-  const obj = hitTest(wp.x, wp.y, { includeLocked: true });
+  const obj = hitTest(wp.x, wp.y);
 
   // Multi-select: right-click anywhere inside the selected bounding box shows
-  // the group menu unless the user directly targets an unselected locked object.
+  // the group menu.
   if (isMultiSelected()) {
     if (rectContainsPoint(selectedBounds(), wp) && (!obj || isSelected(obj.id))) {
       updateObjMenuActions();

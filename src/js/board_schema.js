@@ -43,7 +43,6 @@
       w: Math.max(1, finiteNumber(obj.w, 1)),
       h: Math.max(1, finiteNumber(obj.h, 1)),
       z: finiteNumber(obj.z),
-      locked: obj.locked === true,
       data: {},
     };
     if (obj.type === OBJECT_TYPES.TEXT) {

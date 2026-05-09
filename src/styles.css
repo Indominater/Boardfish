@@ -303,7 +303,6 @@ body[data-theme="dark"] .window-control-close:active {
   box-shadow: none;
 }
 #sel-overlay.editing .s-handle { display: none; }
-#sel-overlay.locked .s-handle { display: none !important; }
 #sel-overlay .s-handle[data-dir="w"],
 #sel-overlay .s-handle[data-dir="e"] { display: none; }
 #sel-overlay.text-resize .s-handle[data-dir="nw"],

@@ -15,7 +15,6 @@ var islZoom        = BoardfishDOM.islZoom;
 var openingShield  = BoardfishDOM.openingShield;
 var objCtxMenu  = BoardfishDOM.objCtxMenu;
 var copyBtn           = BoardfishDOM.copyBtn;
-var lockBtn           = BoardfishDOM.lockBtn;
 var moveToBackBtn     = BoardfishDOM.moveToBackBtn;
 var deleteBtn         = BoardfishDOM.deleteBtn;
 var saveImageBtn      = BoardfishDOM.saveImageBtn;

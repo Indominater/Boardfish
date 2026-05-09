@@ -20,7 +20,7 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 
 - An infinite canvas free from formatting rules
 - Lag-free navigation across massive boards supporting 1 GB+ of images and text
-- Multi-select, translate, scale, flip, rotate, lock, copy, paste, and duplicate
+- Multi-select, translate, scale, flip, rotate, copy, paste, and duplicate
 - Sample colors with a pinned eyedropper card
 - Losslessly add images and text via clipboard, drag and drop, or the file picker
 - Losslessly copy images back to your clipboard

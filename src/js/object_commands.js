@@ -179,7 +179,7 @@ function duplicateSelected() {
 
 function deleteSelected() {
   if (!hasSelection() || editingId) return;
-  const idsToDelete = selectedUnlockedObjectIds();
+  const idsToDelete = [...selectedIds];
   if (!idsToDelete.length) return;
   BoardfishEditorState.removeObjectsById(idsToDelete);
   if (selectedIds.size) {

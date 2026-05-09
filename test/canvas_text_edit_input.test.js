@@ -25,7 +25,6 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     renders: [],
     logs: [],
     obj,
-    isObjectLocked(target) { return target?.locked === true; },
     isSelected(id) { return selectedIds.has(id); },
     selectObject(id) { selectedIds.clear(); selectedIds.add(id); },
     exitEdit() {},

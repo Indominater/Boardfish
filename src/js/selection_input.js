@@ -183,11 +183,6 @@ function updateSelectionOverlay() {
   } else {
     if (selOverlay.classList.contains('text-resize')) selOverlay.classList.remove('text-resize');
   }
-  if (selectedHasLockedObjects()) {
-    if (!selOverlay.classList.contains('locked')) selOverlay.classList.add('locked');
-  } else {
-    if (selOverlay.classList.contains('locked')) selOverlay.classList.remove('locked');
-  }
   updateMultiSelectionOverlay();
   if (!selOverlay.classList.contains('visible')) selOverlay.classList.add('visible');
 }
@@ -199,7 +194,6 @@ function updateSelectionOverlay() {
       if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
-      if (selectedHasLockedObjects()) return;
 
       const dir = handle.dataset.dir;
       const startX = e.clientX, startY = e.clientY;
@@ -214,7 +208,7 @@ function updateSelectionOverlay() {
         const snapshots = [];
         for (const id of selectedIds) {
           const o = objectsMap.get(id);
-          if (!o || o.type === 'text' || isObjectLocked(o)) continue;
+          if (!o || o.type === 'text') continue;
           snapshots.push({
             id,
             relX: (o.x - origBX) / origBW, relY: (o.y - origBY) / origBH,
@@ -267,7 +261,7 @@ function updateSelectionOverlay() {
       // ── Single select ──
       if (!selectedId) return;
       const obj = objectsMap.get(selectedId);
-      if (!obj || isObjectLocked(obj)) return;
+      if (!obj) return;
 
       const { x: ox, y: oy, w: ow, h: oh } = obj;
       const MIN = 20;
@@ -328,7 +322,7 @@ function selectObject(id) {
   if (editingId && editingId !== id) exitEdit();
   BoardfishEditorState.setSelection([id], { primaryId: id, exitEditing: false });
   const obj = objectsMap.get(id);
-  if (obj && !isObjectLocked(obj)) {
+  if (obj) {
     bringObjectToFront(id);
     markDirty(id);
     obj.z = ++zCounter;
@@ -344,14 +338,8 @@ function deselectAll() {
 
 function selectAllObjects() {
   if (editingId || !objects.length) return;
-  const unlocked = objects.filter((obj) => !isObjectLocked(obj));
-  if (!unlocked.length) {
-    BoardfishEditorState.clearSelection();
-    scheduleRender(false, true);
-    return;
-  }
-  BoardfishEditorState.setSelection(unlocked.map((obj) => obj.id), {
-    primaryId: unlocked[unlocked.length - 1].id,
+  BoardfishEditorState.setSelection(objects.map((obj) => obj.id), {
+    primaryId: objects[objects.length - 1].id,
     exitEditing: false,
   });
   scheduleRender(false, true);
