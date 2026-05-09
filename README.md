@@ -45,6 +45,8 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 | Cut | Cmd+X | Ctrl+X |
 | Paste | Cmd+V | Ctrl+V |
 | Duplicate selected | Cmd+D | Ctrl+D |
+| Move selected to back | Cmd+[ | Ctrl+[ |
+| Export selected image(s) | Cmd+E | Ctrl+E |
 | Undo | Cmd+Z | Ctrl+Z |
 | Redo | Cmd+Shift+Z | Ctrl+Shift+Z / Ctrl+Y |
 | Delete selected | Backspace / Delete | Backspace / Delete |
