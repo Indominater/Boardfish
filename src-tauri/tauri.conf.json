@@ -36,7 +36,8 @@
     "targets": "all",
     "icon": [
       "icons/Icon.icns",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.png"
     ],
     "macOS": {
       "infoPlist": "Info.plist"

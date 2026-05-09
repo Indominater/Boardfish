@@ -3,9 +3,13 @@ use std::{env, fs, path::Path};
 const CAPABILITY_PATH: &str = "capabilities/default.json";
 const GENERATED_CAPABILITY_PATH: &str = "target/generated-capabilities/default.json";
 const GENERATED_CAPABILITY_GLOB: &str = "./target/generated-capabilities/**/*";
+const ICON_PATHS: [&str; 3] = ["icons/Icon.icns", "icons/icon.ico", "icons/icon.png"];
 
 fn main() {
     println!("cargo:rerun-if-changed={CAPABILITY_PATH}");
+    for icon_path in ICON_PATHS {
+        println!("cargo:rerun-if-changed={icon_path}");
+    }
     println!("cargo:rerun-if-env-changed=PROFILE");
     let debug_tools_enabled = debug_tools_enabled();
     println!("cargo:rustc-env=BOARDFISH_DEBUG_TOOLS_ENABLED={debug_tools_enabled}");
