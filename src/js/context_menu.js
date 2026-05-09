@@ -39,6 +39,28 @@ function syncCtxActionsWithMenu(reason) {
   closeCtxActions(reason);
 }
 
+function alignCtxActionsToMenuRow(actionRect, gap) {
+  let menuRect = ctxMenu.getBoundingClientRect();
+  const margin = MENU_VIEWPORT_EDGE_MARGIN;
+  const maxRight = window.innerWidth - margin;
+  const desiredRight = menuRect.right + gap + actionRect.width;
+
+  if (desiredRight > maxRight) {
+    const menuLeft = Math.max(margin, maxRight - menuRect.width - gap - actionRect.width);
+    ctxMenu.style.left = `${Math.round(menuLeft)}px`;
+    menuRect = ctxMenu.getBoundingClientRect();
+  }
+
+  let left = menuRect.right + gap;
+  if (left + actionRect.width > maxRight) {
+    const leftOfMenu = menuRect.left - gap - actionRect.width;
+    left = leftOfMenu >= margin ? leftOfMenu : clampMenuCoord(left, actionRect.width);
+  }
+
+  ctxActions.style.left = `${Math.round(left)}px`;
+  ctxActions.style.top = `${Math.round(clampMenuTop(menuRect.top, actionRect.height))}px`;
+}
+
 function openCtxMenuAt(x, y) {
   closeOpenMenusExcept('ctx-menu', 'open-ctx-menu');
   openMenuAt(ctxMenu, x, y);
@@ -47,13 +69,8 @@ function openCtxMenuAt(x, y) {
   updateCtxActionStates();
   ctxActions.classList.add('visible');
   const gap = menuGapPx();
-  const menuRect = ctxMenu.getBoundingClientRect();
   const actionRect = ctxActions.getBoundingClientRect();
-  const left = clampMenuCoord(menuRect.left, actionRect.width);
-  let top = menuRect.top - actionRect.height - gap;
-  if (top < MENU_VIEWPORT_EDGE_MARGIN) top = menuRect.bottom + gap;
-  ctxActions.style.left = `${Math.round(left)}px`;
-  ctxActions.style.top = `${Math.round(clampMenuTop(top, actionRect.height))}px`;
+  alignCtxActionsToMenuRow(actionRect, gap);
 }
 
 if (ctxActions) {
