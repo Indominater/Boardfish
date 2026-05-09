@@ -280,7 +280,9 @@ function startTextSelectionDrag(e, obj, wp) {
 function startObjectDrag(e, obj) {
   if (isObjectLocked(obj)) return false;
   if (editingId && editingId !== obj.id) exitEdit();
-  if (!isSelected(obj.id)) selectObject(obj.id);
+  const wasSelected = isSelected(obj.id);
+  const canClickToEditText = obj.type === 'text' && wasSelected && selectedIds.size === 1;
+  if (!wasSelected) selectObject(obj.id);
 
   const startX = e.clientX, startY = e.clientY;
   const dragItems = dragItemsForSelection();
@@ -306,9 +308,22 @@ function startObjectDrag(e, obj) {
     if (!moved) return;
     dragCommitter.schedule({ dx, dy });
   }
-  function onUp() {
+  function onUp(ev) {
     if (!moved) {
       if (!isSelected(obj.id)) selectObject(obj.id);
+      if (canClickToEditText) {
+        enterEdit(obj.id);
+        if (_editEl && ev) {
+          const upPoint = toWorld(ev.clientX, ev.clientY);
+          const layout = getTextLayout(obj);
+          const clickIdx = layoutHitTest(layout, upPoint.x, upPoint.y, obj);
+          _editEl.focus({ preventScroll: true });
+          _editEl.setSelectionRange(clickIdx, clickIdx);
+          TextSelDebug._logSelection('click-to-edit', _editEl);
+          _caretVisible = true;
+          scheduleRender(true, false);
+        }
+      }
       return;
     }
     dragCommitter.flush();
@@ -377,14 +392,3 @@ canvas.addEventListener('mousedown', (e) => {
   startObjectDrag(e, obj);
 });
 
-canvas.addEventListener('dblclick', (e) => {
-  if (isBoardInputBlocked()) {
-    e.preventDefault();
-    e.stopPropagation();
-    return;
-  }
-  if (isMultiSelected()) return;
-  const wp = toWorld(e.clientX, e.clientY);
-  const obj = hitTest(wp.x, wp.y);
-  if (obj && obj.type === 'text') { selectObject(obj.id); enterEdit(obj.id); }
-});

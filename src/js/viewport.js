@@ -453,7 +453,7 @@ BoardRenderer = BoardfishRenderer.createBoardRenderer({
   dpr: () => window.devicePixelRatio || 1,
   font: FONT,
   textPad: TEXT_PAD,
-  textBaselineYOffset: TEXT_BASELINE_Y_OFFSET,
+  textBaselineYOffset: () => TEXT_BASELINE_Y_OFFSET,
   lineHeight: LINE_H,
   canvasTextColor,
   currentViewportWorldRect,

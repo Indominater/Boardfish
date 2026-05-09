@@ -71,6 +71,12 @@
     context.textBaseline = 'alphabetic';
   }
 
+  function resolveTextBaselineYOffset(deps) {
+    return typeof deps.textBaselineYOffset === 'function'
+      ? deps.textBaselineYOffset()
+      : deps.textBaselineYOffset;
+  }
+
   function createBoardRenderer(deps) {
     function viewDefaults() {
       return {
@@ -88,8 +94,9 @@
         context.fillStyle = deps.canvasTextColor();
         context.textBaseline = 'alphabetic';
         const lines = deps.getWrappedLines(obj);
+        const textBaselineYOffset = resolveTextBaselineYOffset(deps);
         for (let i = 0; i < lines.length; i++) {
-          context.fillText(lines[i].text, obj.x + deps.textPad, obj.y + deps.textPad + deps.textBaselineYOffset + i * deps.lineHeight);
+          context.fillText(lines[i].text, obj.x + deps.textPad, obj.y + deps.textPad + textBaselineYOffset + i * deps.lineHeight);
         }
         return true;
       }
