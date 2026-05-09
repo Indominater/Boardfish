@@ -52,6 +52,7 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 | Delete selected | Backspace / Delete | Backspace / Delete |
 | Edit text | Double-click | Double-click |
 | Hold eyedropper | Shift | Shift |
+| Close pinned eyedropper | Right-click card | Right-click card |
 | Pan canvas | Space + drag | Space + drag |
 | Pan with wheel / trackpad | Scroll | Scroll |
 | Zoom around cursor | Cmd+scroll | Ctrl+scroll |
