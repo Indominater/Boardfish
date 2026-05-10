@@ -18,15 +18,14 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 
 ## Features
 
-- An infinite canvas free from formatting rules
-- Lag-free navigation across massive boards supporting 1 GB+ of images and text
-- Multi-select, translate, scale, flip, rotate, copy, paste, and duplicate
-- Sample colors with a pinned eyedropper card
-- Losslessly add images and text via clipboard, drag and drop, or the file picker
-- Losslessly copy images back to your clipboard
-- Export one image, selected images, all images, or all text
-- Save everything locally as a portable `.bf` file
-- Switch between light and dark mode
+- drag/drop or paste PNG/JPEG images and text
+- pan/zoom large image-heavy boards
+- preserve images losslessly
+- save everything locally as a portable `.bf` file
+- multi-select, resize, flip, rotate, duplicate, copy/paste
+- sample colors with a pinned eyedropper card
+- export selected images, all images, or all text
+- light/dark mode
 
 ## Keyboard Shortcuts
 
