@@ -540,15 +540,19 @@ test('eyedropper mode keeps selected object outlines visible', () => {
 
 test('shift eyedropper shortcut self-heals stale keyboard state', () => {
   const keyboardSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'keyboard.js'), 'utf8');
+  const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 
   assert.match(keyboardSource, /const activeKeyboardKeys = new Set\(\);/);
   assert.match(keyboardSource, /const activeKeyboardKeyTimes = new Map\(\);/);
   assert.match(keyboardSource, /function pruneActiveKeyboardKeys\(now = performance\.now\(\)\) \{/);
   assert.match(keyboardSource, /function reconcileModifierKeyboardState\(e\) \{/);
-  assert.match(keyboardSource, /pruneActiveKeyboardKeys\(keyDownAt\);\s*reconcileModifierKeyboardState\(e\);\s*const hasOtherKeyDown = \[\.\.\.activeKeyboardKeys\]/);
+  assert.match(keyboardSource, /function endEyedropperHoldIfActive\(e = null\) \{/);
+  assert.match(keyboardSource, /pruneActiveKeyboardKeys\(keyDownAt\);\s*reconcileModifierKeyboardState\(e\);\s*reconcileEyedropperHoldModifierState\(e\);\s*const hasOtherKeyDown = \[\.\.\.activeKeyboardKeys\]/);
   assert.match(keyboardSource, /if \(isModifierKeyId\(keyId\)\) clearNonModifierActiveKeyboardKeys\(\);/);
-  assert.match(keyboardSource, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(document\.visibilityState !== 'visible'\) clearActiveKeyboardKeys\(\);/);
+  assert.match(keyboardSource, /window\.addEventListener\('blur', \(\) => \{\s*clearActiveKeyboardKeys\(\);\s*endEyedropperHoldIfActive\(\);/);
+  assert.match(keyboardSource, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(document\.visibilityState !== 'visible'\) \{\s*clearActiveKeyboardKeys\(\);\s*endEyedropperHoldIfActive\(\);/);
   assert.match(keyboardSource, /if \(isShiftOnlyKey\(e\) && !editingId\) \{[\s\S]*setEyedropperEnabled\(true\);[\s\S]*beginEyedropperHoldSample\(e\);/);
+  assert.match(eyedropperSource, /if \(e && e\.shiftKey === false\) \{\s*endEyedropperHoldSample\(e\);/);
 });
 
 test('eyedropper mode suppresses context menus instead of reducing them', () => {

@@ -64,6 +64,24 @@ function clearNonModifierActiveKeyboardKeys() {
   }
 }
 
+function endEyedropperHoldIfActive(e = null) {
+  if (
+    typeof _eyedropperHoldActive !== 'undefined' &&
+    _eyedropperHoldActive &&
+    typeof endEyedropperHoldSample === 'function'
+  ) {
+    if (e?.cancelable) e.preventDefault();
+    endEyedropperHoldSample(e);
+    return true;
+  }
+  return false;
+}
+
+function reconcileEyedropperHoldModifierState(e) {
+  if (!e || e.shiftKey || e.key === 'Shift') return false;
+  return endEyedropperHoldIfActive(e);
+}
+
 function reconcileModifierKeyboardState(e) {
   if (!e.altKey) {
     deleteActiveKeyboardKey('Alt');
@@ -106,6 +124,7 @@ document.addEventListener('keydown', (e) => {
   const keyDownAt = performance.now();
   pruneActiveKeyboardKeys(keyDownAt);
   reconcileModifierKeyboardState(e);
+  reconcileEyedropperHoldModifierState(e);
   const hasOtherKeyDown = [...activeKeyboardKeys].some((activeKey) => activeKey !== keyId);
   activeKeyboardKeys.add(keyId);
   activeKeyboardKeyTimes.set(keyId, keyDownAt);
@@ -243,15 +262,17 @@ document.addEventListener('keyup', (e) => {
   deleteActiveKeyboardKey(keyId);
   if (isModifierKeyId(keyId)) clearNonModifierActiveKeyboardKeys();
   reconcileModifierKeyboardState(e);
-  if (e.key === 'Shift' && !editingId && typeof _eyedropperHoldActive !== 'undefined' && _eyedropperHoldActive) {
-    e.preventDefault();
-    endEyedropperHoldSample(e);
-  }
+  if (e.key === 'Shift' && endEyedropperHoldIfActive(e)) return;
+  reconcileEyedropperHoldModifierState(e);
 });
 
 window.addEventListener('blur', () => {
   clearActiveKeyboardKeys();
+  endEyedropperHoldIfActive();
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') clearActiveKeyboardKeys();
+  if (document.visibilityState !== 'visible') {
+    clearActiveKeyboardKeys();
+    endEyedropperHoldIfActive();
+  }
 });

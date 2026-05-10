@@ -2371,6 +2371,10 @@ function endEyedropperHoldSample(e = null) {
 function updateEyedropperHoldSample(e) {
   noteEyedropperMouseEvent(e);
   if (!_eyedropperHoldActive || !eyedropperEnabled) return;
+  if (e && e.shiftKey === false) {
+    endEyedropperHoldSample(e);
+    return;
+  }
   updateEyedropperSample(e);
 }
 
