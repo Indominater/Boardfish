@@ -186,7 +186,9 @@ function calculateTextLayout(obj) {
 }
 
 function getTextLayout(obj) {
-  if (obj._layoutCache) return obj._layoutCache;
+  const cacheKey = `${obj.data.content}\n${obj.w}\n${obj.y}`;
+  if (obj._layoutCache && obj._layoutCacheKey === cacheKey) return obj._layoutCache;
+  obj._layoutCacheKey = cacheKey;
   obj._layoutCache = calculateTextLayout(obj);
   return obj._layoutCache;
 }

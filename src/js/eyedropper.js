@@ -432,7 +432,7 @@ function setEyedropperEnabled(enabled, options = {}) {
       'key:shift',
       'code:shiftleft',
       'code:shiftright',
-      { visual: false },
+      { visual: false, keepSelectionOverlay: true },
     );
   } else if (!eyedropperEnabled && _eyedropperShieldRelease) {
     _eyedropperShieldRelease();
@@ -2320,6 +2320,21 @@ function isEventInsideVisibleEyedropperLoupe(e) {
     eyedropperCard.el.contains(e.target));
 }
 
+function activatePinnedEyedropperCardInteraction(card, reason = 'pinned-card-interaction') {
+  if (!isPinnedEyedropperCard(card) || eyedropperSampling) return false;
+  useEyedropperCard(card);
+  if (typeof activateInteractiveSurface === 'function') {
+    activateInteractiveSurface({
+      kind: 'pinned-eyedropper-card',
+      reason,
+      closeMenus: true,
+      clearObjectSelection: false,
+      exitTextEdit: false,
+    });
+  }
+  return true;
+}
+
 function beginEyedropperHoldSample(e = null) {
   if (!eyedropperEnabled || _eyedropperHoldActive) return false;
   _eyedropperHoldActive = true;
@@ -2402,6 +2417,7 @@ function bindEyedropperCardEvents(card) {
   card.el.addEventListener('pointerdown', (e) => {
     const eventCard = eyedropperCardFromEvent(e) || card;
     useEyedropperCard(eventCard);
+    activatePinnedEyedropperCardInteraction(eventCard, 'eyedropper-card:pointerdown');
     if (startEyedropperLoupeDrag(e, eventCard)) {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -2426,7 +2442,9 @@ function bindEyedropperCardEvents(card) {
     e.stopPropagation();
   });
   card.el.addEventListener('mousedown', (e) => {
-    useEyedropperCard(eyedropperCardFromEvent(e) || card);
+    const eventCard = eyedropperCardFromEvent(e) || card;
+    useEyedropperCard(eventCard);
+    activatePinnedEyedropperCardInteraction(eventCard, 'eyedropper-card:mousedown');
     e.preventDefault();
     if (isEyedropperSamplePinned() && e.button === 0) e.stopImmediatePropagation();
     else e.stopPropagation();
@@ -2435,6 +2453,7 @@ function bindEyedropperCardEvents(card) {
     const eventCard = eyedropperCardFromEvent(e) || card;
     e.preventDefault();
     e.stopImmediatePropagation();
+    activatePinnedEyedropperCardInteraction(eventCard, 'eyedropper-card:contextmenu');
     if (!eyedropperSampling && isPinnedEyedropperCard(eventCard)) closeEyedropperCard(eventCard);
   });
   card.el.addEventListener('click', (e) => {

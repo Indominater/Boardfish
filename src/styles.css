@@ -351,11 +351,6 @@ body[data-theme="dark"] .window-control-close:active {
   pointer-events: none;
 }
 
-body.eyedropper-enabled #sel-overlay,
-body.eyedropper-enabled #multi-sel-overlay {
-  display: none !important;
-}
-
 /* ── Context menu ── */
 #ctx-menu,
 #obj-ctx-menu,

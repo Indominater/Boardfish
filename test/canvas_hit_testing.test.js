@@ -46,3 +46,9 @@ test('canvas and context menu use regular hit testing', () => {
 
   assert.match(contextMenuSource, /hitTest\(wp\.x, wp\.y\)/);
 });
+
+test('background context menu clears object selection before opening', () => {
+  const contextMenuSource = readSource('src/js/context_menu.js');
+
+  assert.match(contextMenuSource, /if \(obj\) \{[\s\S]*obj-ctx-menu:open[\s\S]*return;[\s\S]*\}\s*if \(selectedIds\.size\) deselectAll\(\);\s*ctxPos = wp;\s*updateCtxMenuActions\(\);\s*openCtxMenuAt\(clientX, clientY\);/);
+});

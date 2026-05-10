@@ -94,6 +94,47 @@ function _setMultiBoxDisplayIfChanged(el, value) {
   return state;
 }
 
+const oppositeSelectionDir = function oppositeSelectionDir(dir) {
+  if (dir === 'nw') return 'se';
+  if (dir === 'ne') return 'sw';
+  if (dir === 'se') return 'nw';
+  if (dir === 'sw') return 'ne';
+  return '';
+};
+
+const boundsCornerPoint = function boundsCornerPoint(bounds, dir) {
+  if (!bounds || !dir) return null;
+  return {
+    x: dir.includes('e') ? bounds.x2 : bounds.x1,
+    y: dir.includes('s') ? bounds.y2 : bounds.y1,
+  };
+};
+
+const proportionalCornerResizeSize = function proportionalCornerResizeSize(dir, startW, startH, dx, dy, minScale) {
+  if (![startW, startH, dx, dy, minScale].every(Number.isFinite) || startW <= 0 || startH <= 0) {
+    return { w: startW, h: startH };
+  }
+  const candidateW = dir.includes('e') ? startW + dx : startW - dx;
+  const candidateH = dir.includes('s') ? startH + dy : startH - dy;
+  const scaleW = candidateW / startW;
+  const scaleH = candidateH / startH;
+  const scale = Math.max(minScale, Math.min(scaleW, scaleH));
+  return { w: startW * scale, h: startH * scale };
+};
+
+const proportionalScaleFromHandleDrag = function proportionalScaleFromHandleDrag(anchor, handlePoint, dx, dy, minScale) {
+  if (!anchor || !handlePoint || ![dx, dy, minScale].every(Number.isFinite)) return 1;
+  const vx = handlePoint.x - anchor.x;
+  const vy = handlePoint.y - anchor.y;
+  const pointerX = handlePoint.x + dx;
+  const pointerY = handlePoint.y + dy;
+  const scales = [];
+  if (Math.abs(vx) > 1e-9) scales.push((pointerX - anchor.x) / vx);
+  if (Math.abs(vy) > 1e-9) scales.push((pointerY - anchor.y) / vy);
+  if (!scales.length) return 1;
+  return Math.max(minScale, Math.min(...scales.filter(Number.isFinite)));
+};
+
 function hideMultiSelectionOverlay() {
   if (!multiSelOverlay) return;
   if (multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.remove('visible');
@@ -187,10 +228,7 @@ function updateSelectionOverlay() {
   if (!selOverlay.classList.contains('visible')) selOverlay.classList.add('visible');
 }
 
-// Init overlay handle listeners once — they always operate on selectedId / selectedIds
-(function initOverlayHandles() {
-  for (const handle of selOverlay.querySelectorAll('.s-handle')) {
-    handle.addEventListener('mousedown', (e) => {
+const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
       if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
@@ -198,32 +236,44 @@ function updateSelectionOverlay() {
       const dir = handle.dataset.dir;
       const startX = e.clientX, startY = e.clientY;
 
-      // ── Multi-select: scale non-text objects proportionally within bounding box ──
+      // ── Multi-select: scale non-text objects proportionally within the bounding box ──
       if (isMultiSelected()) {
         const bounds = selectedBounds();
         if (!bounds) return;
-        const origBX = bounds.x1, origBY = bounds.y1, origBW = bounds.x2 - bounds.x1, origBH = bounds.y2 - bounds.y1;
-        const ratio = origBW / origBH;
+        const origBW = bounds.x2 - bounds.x1, origBH = bounds.y2 - bounds.y1;
+        if (origBW <= 0 || origBH <= 0) return;
+        const handlePoint = boundsCornerPoint(bounds, dir);
+        const anchorPoint = boundsCornerPoint(bounds, oppositeSelectionDir(dir));
+        if (!handlePoint || !anchorPoint) return;
 
         const snapshots = [];
         for (const id of selectedIds) {
           const o = objectsMap.get(id);
           if (!o || o.type === 'text') continue;
+          if (![o.x, o.y, o.w, o.h].every(Number.isFinite) || o.w <= 0 || o.h <= 0) continue;
           snapshots.push({
             id,
-            relX: (o.x - origBX) / origBW, relY: (o.y - origBY) / origBH,
-            relW: o.w / origBW, relH: o.h / origBH,
+            x: o.x,
+            y: o.y,
+            w: o.w, h: o.h,
           });
         }
         if (!snapshots.length) return;
 
-        const MIN_B = 20;
-        function applyMultiResize({ bx, by, bw, bh }) {
+        const MIN_OBJECT_SIZE = 100;
+        let minObjectScale = 0;
+        for (const snap of snapshots) {
+          minObjectScale = Math.max(minObjectScale, MIN_OBJECT_SIZE / snap.w, MIN_OBJECT_SIZE / snap.h);
+        }
+        minObjectScale = Math.min(1, minObjectScale);
+        function applyMultiResize({ scale }) {
           for (const snap of snapshots) {
             const o = objectsMap.get(snap.id);
             if (!o) continue;
-            o.x = bx + snap.relX * bw; o.y = by + snap.relY * bh;
-            o.w = snap.relW * bw; o.h = snap.relH * bh;
+            o.x = anchorPoint.x + (snap.x - anchorPoint.x) * scale;
+            o.y = anchorPoint.y + (snap.y - anchorPoint.y) * scale;
+            o.w = snap.w * scale;
+            o.h = snap.h * scale;
           }
           scheduleRender(true, true);
         }
@@ -232,19 +282,8 @@ function updateSelectionOverlay() {
         function onMultiMove(ev) {
           const dx = (ev.clientX - startX) / zoom;
           const dy = (ev.clientY - startY) / zoom;
-          const useX = Math.abs(dx) >= Math.abs(dy);
-          let bw = origBW, bh = origBH, bx = origBX, by = origBY;
-
-          if (dir === 'se') { bw = Math.max(MIN_B, useX ? origBW + dx : (origBH + dy) * ratio); }
-          else if (dir === 'sw') { bw = Math.max(MIN_B, useX ? origBW - dx : (origBH + dy) * ratio); }
-          else if (dir === 'ne') { bw = Math.max(MIN_B, useX ? origBW + dx : (origBH - dy) * ratio); }
-          else if (dir === 'nw') { bw = Math.max(MIN_B, useX ? origBW - dx : (origBH - dy) * ratio); }
-          bh = bw / ratio;
-
-          if (dir.includes('w')) bx = origBX + origBW - bw;
-          if (dir.includes('n')) by = origBY + origBH - bh;
-
-          resizeCommitter.schedule({ bx, by, bw, bh });
+          const scale = proportionalScaleFromHandleDrag(anchorPoint, handlePoint, dx, dy, minObjectScale);
+          resizeCommitter.schedule({ scale });
         }
 
         beginDocumentDrag({
@@ -264,7 +303,7 @@ function updateSelectionOverlay() {
       if (!obj) return;
 
       const { x: ox, y: oy, w: ow, h: oh } = obj;
-      const MIN = 20;
+      const MIN = 100;
 
       function applyResize(state) {
         obj.x = state.x;
@@ -285,13 +324,10 @@ function updateSelectionOverlay() {
         let x = ox, y = oy, w = ow, h = oh;
 
         if (obj.type === 'image') {
-          const ratio = ow / oh;
-          const useX = Math.abs(dx) >= Math.abs(dy);
-          if (dir.includes('e') && dir.includes('s')) { w = Math.max(MIN, useX ? ow + dx : (oh + dy) * ratio); }
-          else if (dir.includes('w') && dir.includes('s')) { w = Math.max(MIN, useX ? ow - dx : (oh + dy) * ratio); }
-          else if (dir.includes('e') && dir.includes('n')) { w = Math.max(MIN, useX ? ow + dx : (oh - dy) * ratio); }
-          else if (dir.includes('w') && dir.includes('n')) { w = Math.max(MIN, useX ? ow - dx : (oh - dy) * ratio); }
-          h = w / ratio;
+          const minScale = Math.min(1, Math.max(MIN / ow, MIN / oh));
+          const size = proportionalCornerResizeSize(dir, ow, oh, dx, dy, minScale);
+          w = size.w;
+          h = size.h;
           if (dir.includes('w')) x = ox + ow - w;
           if (dir.includes('n')) y = oy + oh - h;
         } else {
@@ -311,7 +347,12 @@ function updateSelectionOverlay() {
           pushHistory('resize');
         },
       });
-    });
+};
+
+// Init overlay handle listeners once — they always operate on selectedId / selectedIds
+(function initOverlayHandles() {
+  for (const handle of selOverlay.querySelectorAll('.s-handle')) {
+    handle.addEventListener('mousedown', (e) => beginSelectionHandleDrag(handle, e));
   }
 })();
 

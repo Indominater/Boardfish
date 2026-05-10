@@ -529,6 +529,15 @@ test('eyedropper sampling and navigation are mutually exclusive', () => {
   assert.match(inputSource, /noteEyedropperNavigationActive\('mouse-pan', 240\)/);
 });
 
+test('eyedropper mode keeps selected object outlines visible', () => {
+  const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8');
+
+  assert.match(eyedropperSource, /acquireInputShield\([\s\S]*\{ visual: false, keepSelectionOverlay: true \},[\s\S]*\)/);
+  assert.doesNotMatch(styles, /body\.eyedropper-enabled\s+#sel-overlay/);
+  assert.doesNotMatch(styles, /body\.eyedropper-enabled\s+#multi-sel-overlay/);
+});
+
 test('shift eyedropper shortcut self-heals stale keyboard state', () => {
   const keyboardSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'keyboard.js'), 'utf8');
 
@@ -558,6 +567,25 @@ test('eyedropper mode suppresses context menus instead of reducing them', () => 
   assert.doesNotMatch(source, /EYEDROPPER_MENU_CSS_HEIGHT/);
   assert.doesNotMatch(contextMenuSource, /ctx-menu:open', \{ reason: 'eyedropper'/);
   assert.doesNotMatch(keyboardSource, /updateCtxActionStates\(\);/);
+});
+
+test('pinned eyedropper card interaction closes menus without clearing object selection', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+
+  assert.match(source, /function activatePinnedEyedropperCardInteraction\(card, reason = 'pinned-card-interaction'\) \{/);
+  assert.match(source, /if \(!isPinnedEyedropperCard\(card\) \|\| eyedropperSampling\) return false;/);
+  assert.match(source, /activateInteractiveSurface\(\{\s*kind: 'pinned-eyedropper-card',\s*reason,\s*closeMenus: true,\s*clearObjectSelection: false,\s*exitTextEdit: false,/);
+  assert.match(source, /activatePinnedEyedropperCardInteraction\(eventCard, 'eyedropper-card:pointerdown'\);/);
+  assert.match(source, /activatePinnedEyedropperCardInteraction\(eventCard, 'eyedropper-card:mousedown'\);/);
+  assert.match(source, /activatePinnedEyedropperCardInteraction\(eventCard, 'eyedropper-card:contextmenu'\);/);
+});
+
+test('context menus close on outside press before release', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'context_menu.js'), 'utf8');
+
+  assert.match(source, /function isContextMenuSurfaceEvent\(e\) \{/);
+  assert.match(source, /document\.addEventListener\('pointerdown', \(e\) => \{[\s\S]*closeOpenMenusExcept\('', 'document-pointerdown'\);[\s\S]*\}\);/);
+  assert.match(source, /document\.addEventListener\('click', \(e\) => \{[\s\S]*isContextMenuSurfaceEvent\(e\)[\s\S]*closeOpenMenusExcept\('', 'document-click'\);[\s\S]*\}\);/);
 });
 
 test('eyedropper zoom wallpaper is lazy after navigation and pinning', () => {

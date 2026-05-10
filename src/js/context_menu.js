@@ -318,6 +318,14 @@ for (const menu of [ctxMenu, objCtxMenu, ctxActions].filter(Boolean)) {
   }
 }
 
+function isContextMenuSurfaceEvent(e) {
+  return !!(e?.target instanceof Node && (
+    ctxMenu.contains(e.target) ||
+    objCtxMenu.contains(e.target) ||
+    ctxActions?.contains(e.target)
+  ));
+}
+
 function updateObjMenuActions() {
   let imageCount = 0;
   let selectedCount = 0;
@@ -406,6 +414,7 @@ function showCanvasContextMenuAt(clientX, clientY) {
     MenuDebug.log('obj-ctx-menu:open', { reason: 'object', objectId: obj.id, objectType: obj.type, x: clientX, y: clientY });
     return;
   }
+  if (selectedIds.size) deselectAll();
   ctxPos = wp;
   updateCtxMenuActions();
   openCtxMenuAt(clientX, clientY);
@@ -426,8 +435,16 @@ for (const id of Object.keys(MENU_COMMANDS)) {
 }
 
 
+document.addEventListener('pointerdown', (e) => {
+  if (isContextMenuSurfaceEvent(e)) {
+    MenuDebug.log('document-pointerdown:inside-menu');
+    return;
+  }
+  closeOpenMenusExcept('', 'document-pointerdown');
+});
+
 document.addEventListener('click', (e) => {
-  if (ctxMenu.contains(e.target) || objCtxMenu.contains(e.target) || ctxActions?.contains(e.target)) {
+  if (isContextMenuSurfaceEvent(e)) {
     MenuDebug.log('document-click:inside-menu');
     return;
   }
