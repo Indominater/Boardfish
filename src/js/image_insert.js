@@ -44,6 +44,7 @@ function shouldUseNativeDataUrlImageCache(src) {
 }
 
 function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-image') {
+  if (!BoardfishWebLimits.canAddObjects(1)) return null;
   const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z: ++zCounter, data: { imgKey } };
   BoardfishEditorState.addObject(obj);
   const deferHistory = options.deferHistory ?? _bulkImageInsertDepth > 0;
@@ -132,9 +133,13 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
   }
 }
 
-function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options = {}) {
+async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options = {}) {
   if (shouldUseNativeDataUrlImageCache(src)) {
     return addDataUrlImageViaNativeCache(src, cx, cy, exactSize, existingImgKey, options);
+  }
+  if (!hasTauri() && !options.webValidated && isImageDataUrl(src)) {
+    const valid = await BoardfishWebLimits.validateDataUrlImage(src, 'image');
+    if (!valid) return null;
   }
   return new Promise((resolve) => {
     const dbg = ViewportDebug.start('addImage', { src, cx, cy, exactSize, existingImgKey });
@@ -153,7 +158,7 @@ function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options
       const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-image');
       const total = performance.now() - t0;
       ViewportDebug.max('maxImageAddMs', total);
-      ViewportDebug.end(dbg, { id: obj.id, imgKey, total });
+      ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, total, added: !!obj });
       if (!_boardOpening) hideInputShield();
       resolve(obj);
     };
@@ -212,11 +217,16 @@ fileInput.addEventListener('change', async () => {
     return;
   }
   const files = [...fileInput.files];
-  await insertImageFiles(files, ctxPos.x, ctxPos.y, 'file-input');
+  try {
+    await insertImageFiles(files, ctxPos.x, ctxPos.y, 'file-input');
+  } finally {
+    fileInput.value = '';
+  }
 });
 
 async function pickAndInsertImages(x, y) {
   if (eyedropperEnabled) return;
+  if (!BoardfishWebLimits.canAddObjects(1)) return;
   if (hasTauri()) {
     const dbg = InsertDebug.start('pickImages', { source: 'file-picker-native' });
     try {
@@ -237,6 +247,7 @@ async function insertDataUrlImage(dataUrl, x, y, dbg, options = {}) {
   const addPromise = addImage(dataUrl, x, y, false, null, {
     deferHistory: options.deferHistory,
     suppressProgressRender: options.suppressProgressRender,
+    webValidated: options.webValidated,
   });
   if (!options.holdShield) hideInputShield();
   const obj = await addPromise;
@@ -340,6 +351,10 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
   let added = 0;
   const readyPromises = [];
   const bulk = files.length > 1;
+  if (!BoardfishWebLimits.canAddObjects(1)) {
+    InsertDebug.end(dbg, { source, skipped: 'web-object-limit', fileCount: files.length });
+    return;
+  }
   showInputShield();
   if (bulk) {
     beginBulkImageInsert();
@@ -348,8 +363,14 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
   try {
     for (const file of files) {
       if (file.type !== 'image/png' && file.type !== 'image/jpeg') continue;
+      if (!BoardfishWebLimits.canAddObjects(1)) break;
       const fileDbg = InsertDebug.start('insertImage', { source, fileName: file.name, fileSize: file.size, fileType: file.type });
       try {
+        const webValidation = await BoardfishWebLimits.validateImageFile(file);
+        if (!webValidation) {
+          InsertDebug.end(fileDbg, { source, skipped: 'web-content-limit', fileName: file.name, fileSize: file.size, fileType: file.type });
+          continue;
+        }
         InsertDebug.step(fileDbg, 'read:start', { source, fileName: file.name, fileSize: file.size, fileType: file.type });
         const dataUrl = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -362,6 +383,7 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
           deferHistory: bulk,
           holdShield: true,
           suppressProgressRender: bulk,
+          webValidated: true,
           endMeta: { source },
         });
         if (obj) {
@@ -447,5 +469,23 @@ if (hasTauri()) {
     const { paths } = event.payload;
     const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
     await insertNativeImagePaths(paths, center.x, center.y, 'native-drop');
+  });
+} else {
+  canvas.addEventListener('dragover', (event) => {
+    if (![...(event.dataTransfer?.items || [])].some((item) => item.kind === 'file')) return;
+    event.preventDefault();
+  });
+
+  canvas.addEventListener('drop', async (event) => {
+    const files = [...(event.dataTransfer?.files || [])];
+    if (!files.length) return;
+    event.preventDefault();
+    const boardFile = files.find((file) => /\.bf$/i.test(file.name || ''));
+    if (boardFile && typeof openBoardFileRef === 'function') {
+      await openBoardFileRef(BoardfishRuntime.fileRefFromFile(boardFile));
+      return;
+    }
+    const wp = toWorld(event.clientX, event.clientY);
+    await insertImageFiles(files, wp.x, wp.y, 'web-drop');
   });
 }

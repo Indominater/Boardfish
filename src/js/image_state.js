@@ -24,13 +24,41 @@ function isNativeImageRef(src) {
   return !!(src && typeof src === 'object' && src.native);
 }
 
+const isWebImageRef = (src) => {
+  return typeof BoardfishWebBoardContainer !== 'undefined' &&
+    !!BoardfishWebBoardContainer?.isWebImageRef?.(src);
+};
+
+const webImageDisplaySrc = (src) => {
+  if (!isWebImageRef(src)) return '';
+  return BoardfishWebBoardContainer.displaySrcForImageSource?.(src) || '';
+};
+
+const webImageDataUrl = (src) => {
+  if (!isWebImageRef(src)) return '';
+  return BoardfishWebBoardContainer.dataUrlForImageSource?.(src) || '';
+};
+
+const revokeWebImageSource = (src) => {
+  if (!isWebImageRef(src)) return false;
+  return BoardfishWebBoardContainer.revokeImageSource?.(src) || false;
+};
+
 function imageStoreBytesEstimate(src) {
   if (typeof src === 'string') return src.length;
+  if (isWebImageRef(src)) return Number(src.bytes || 0) || 0;
   if (isNativeImageRef(src)) return JSON.stringify(src).length;
   return 0;
 }
 
 function imageSourceDebugInfo(src) {
+  if (isWebImageRef(src)) {
+    return {
+      kind: 'web-ref',
+      length: Number(src.bytes || 0) || '',
+      prefix: webImageDisplaySrc(src).slice(0, 96) || src.path || '',
+    };
+  }
   if (typeof src !== 'string') {
     return {
       kind: isNativeImageRef(src) ? 'native-ref' : typeof src,
@@ -65,6 +93,7 @@ const isImageDisplayCacheRequestCurrent = (key, src, generation) => {
   const stored = imageStore[key];
   if (typeof stored === 'string') return stored === src;
   if (isNativeImageRef(stored)) return !!src && imageAssetUrlCache[key] === src;
+  if (isWebImageRef(stored)) return !!src && webImageDisplaySrc(stored) === src;
   return false;
 };
 
@@ -403,6 +432,7 @@ async function ensureImageDisplaySrc(key, dbg = null) {
   if (imageAssetUrlCache[key]) return { src: imageAssetUrlCache[key], source: 'asset', dataUrlLen: 0 };
   const stored = imageStore[key];
   if (typeof stored === 'string') return { src: stored, source: 'data-url', dataUrlLen: stored.length };
+  if (isWebImageRef(stored)) return { src: webImageDisplaySrc(stored), source: 'web-blob', dataUrlLen: 0 };
   if (!isNativeImageRef(stored)) {
     OpenDebug.step(dbg, 'ensure-image-display-src:missing', { imgKey: key, kind: imageRefKind(stored), hasStore: !!stored });
     return { src: '', source: 'missing', dataUrlLen: 0 };
@@ -420,6 +450,7 @@ async function ensureImageDisplaySrc(key, dbg = null) {
 async function ensureImageDataUrl(key, dbg = null) {
   const src = imageStore[key];
   if (typeof src === 'string') return src;
+  if (isWebImageRef(src)) return webImageDataUrl(src);
   if (!isNativeImageRef(src) || !hasTauri()) return '';
   const existing = imageHydrationPromises.get(key);
   if (existing) return existing;
@@ -516,7 +547,8 @@ async function ensureImagePreviewBitmap(key, img, dbg = null) {
 function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   if (imageCache[key]) return imageReadyPromiseForKey(key);
   if (isNativeImageRef(src)) return;
-  if (typeof src !== 'string' || !src) return;
+  const displaySrc = isWebImageRef(src) ? webImageDisplaySrc(src) : src;
+  if (typeof displaySrc !== 'string' || !displaySrc) return;
   const generation = _imageStoreGeneration;
   imageBitmapFailed.delete(key);
   const cacheStart = performance.now();
@@ -531,7 +563,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     requiredReadbackSafe: options.requireReadbackSafe === true,
     readbackSafe: '',
   };
-  const vpDbg = ViewportDebug.start('cacheImage', { key, src, reusedLoadedImage: !!loadedImg });
+  const vpDbg = ViewportDebug.start('cacheImage', { key, src: displaySrc, reusedLoadedImage: !!loadedImg });
   const srcInfo = imageSourceDebugInfo(src);
   OpenDebug.step(dbg, 'cache-image:source', {
     imgKey: key,
@@ -715,9 +747,9 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
       }
     });
   }
-  img.onload = () => finishLoadForImage(img, src, !!loadedImg);
+  img.onload = () => finishLoadForImage(img, displaySrc, !!loadedImg);
   img.onerror = () => {
-    if (!isImageDisplayCacheRequestCurrent(key, src, generation)) {
+    if (!isImageDisplayCacheRequestCurrent(key, displaySrc, generation)) {
       cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
       ViewportDebug.end(vpDbg, { key, stale: true, error: 'image load failed' });
       OpenDebug.step(dbg, 'cache-image:stale-load-error', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
@@ -750,10 +782,10 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   if (loadedImg) {
     ViewportDebug.step(vpDbg, 'reuse-loaded-image', { width: img.naturalWidth, height: img.naturalHeight });
     OpenDebug.step(dbg, 'cache-image:reuse-loaded-image', { imgKey: key, width: img.naturalWidth, height: img.naturalHeight });
-    finishLoadForImage(img, src, true);
+    finishLoadForImage(img, displaySrc, true);
   } else {
-    img.src = src;
-    ViewportDebug.step(vpDbg, 'set-src', { src });
+    img.src = displaySrc;
+    ViewportDebug.step(vpDbg, 'set-src', { src: displaySrc });
     OpenDebug.step(dbg, 'cache-image:set-src', {
       imgKey: key,
       sourceKind: srcInfo.kind,
@@ -824,6 +856,7 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
   for (const key of keys) {
     if (retainedKeys.has(key)) continue;
     if (Object.hasOwn(imageStore, key)) {
+      revokeWebImageSource(imageStore[key]);
       delete imageStore[key];
       removedSourceKeys.push(key);
       result.removedSources++;
@@ -847,7 +880,10 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
 
 function clearImageStore(clearNativeCaches = true) {
   _imageStoreGeneration++;
-  for (const k of Object.keys(imageStore)) delete imageStore[k];
+  for (const k of Object.keys(imageStore)) {
+    revokeWebImageSource(imageStore[k]);
+    delete imageStore[k];
+  }
   for (const k of Object.keys(imageCache)) delete imageCache[k];
   for (const k of Object.keys(imageAssetUrlCache)) delete imageAssetUrlCache[k];
   for (const k of Object.keys(imageBitmapCache)) { imageBitmapCache[k].close(); delete imageBitmapCache[k]; }

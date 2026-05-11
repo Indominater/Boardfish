@@ -66,7 +66,6 @@ var OpenDebug = (() => {
   }
 
   async function wrap(ctx, command, call, meta = {}) {
-    if (!hasTauri()) throw new Error('Tauri is unavailable');
     if (!core.enabled) return call();
     const t0 = performance.now();
     step(ctx, 'invoke:start', { command, ...meta });
@@ -282,7 +281,7 @@ var OpenDebug = (() => {
         command: e.meta?.command || '',
         count: e.meta?.count ?? '',
         hydrated: e.meta?.hydrated ?? '',
-        pendingNativeImages: e.meta?.pendingNativeImages ?? '',
+        pendingImages: e.meta?.pendingImages ?? e.meta?.pendingNativeImages ?? '',
         nativeRefs: e.meta?.nativeRefs ?? '',
         manifestRefs: e.meta?.manifestRefs ?? '',
         dataUrlRefs: e.meta?.dataUrlRefs ?? '',
@@ -317,12 +316,12 @@ var OpenDebug = (() => {
   }
 
   function hydrationCandidates() {
-    const pending = getPendingNativeImageKeys();
+    const pending = getPendingHydratableImageKeys();
     const visible = getVisibleImageKeys();
     const out = {
-      pendingNativeCount: pending.length,
-      visibleNativeCount: visible.length,
-      pendingDebug: getPendingNativeImageKeys.lastDebug,
+      pendingImageCount: pending.length,
+      visibleImageCount: visible.length,
+      pendingDebug: getPendingHydratableImageKeys.lastDebug,
       visibleDebug: getVisibleImageKeys.lastDebug,
       ...getOpenImageRuntimeMetrics(),
     };

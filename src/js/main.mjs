@@ -2,6 +2,9 @@
 
 import './dom_registry.js';
 import './tauri_bridge.js';
+import './web_board_container.js';
+import './web_limits.js';
+import './web_runtime.js';
 import './window_titlebar.js';
 import './bitmap_cache.js';
 import './image_transform.js';
@@ -14,6 +17,25 @@ import './board_schema.js';
 import './board_document.js';
 import './eyedropper_color.js';
 import './eyedropper_geometry.js';
+
+const shouldEnableWebDebugTools = () => {
+  if (Object.prototype.hasOwnProperty.call(globalThis, '__BOARDFISH_DEBUG_TOOLS_ENABLED__')) return null;
+  if (globalThis.__TAURI__) return false;
+  const params = new URLSearchParams(globalThis.location?.search || '');
+  const host = String(globalThis.location?.hostname || '').toLowerCase();
+  const localHost = host === '127.0.0.1' || host === 'localhost' || host === '[::1]';
+  const stored = globalThis.localStorage?.getItem?.('bf_debug_tools') === 'true';
+  return localHost || stored || params.get('debug') === '1' || params.get('debug') === 'true';
+};
+
+const webDebugToolsEnabled = shouldEnableWebDebugTools();
+if (webDebugToolsEnabled != null) {
+  Object.defineProperty(globalThis, '__BOARDFISH_DEBUG_TOOLS_ENABLED__', {
+    value: webDebugToolsEnabled,
+    writable: false,
+    configurable: false,
+  });
+}
 
 const LEGACY_CONTROLLER_SCRIPTS = [
   'startup_debug.js',

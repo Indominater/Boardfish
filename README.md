@@ -27,6 +27,16 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 - export selected images, all images, or all text
 - light/dark mode
 
+## Boardfish Web
+
+The same frontend can run in Chromium browsers:
+
+```bash
+npm run web
+```
+
+Boardfish Web reads and writes the same `.bf` container format as desktop. The web runtime is intentionally capped at 100 objects, 512 MB total board content, 32 MB per image file, and 64 MP per image. The desktop Tauri app remains the full-power runtime.
+
 ## Keyboard Shortcuts
 
 | Action | Mac | Windows |
@@ -35,7 +45,7 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 | Open board | Cmd+O | Ctrl+O |
 | Save | Cmd+S | Ctrl+S |
 | Save As | Cmd+Shift+S | Ctrl+Shift+S |
-| Add text | Cmd+T | Ctrl+T |
+| Add text | T | T |
 | Add images | Cmd+I | Ctrl+I |
 | Select all objects | Cmd+A | Ctrl+A |
 | Add/remove object from selection | Cmd+click | Ctrl+click |

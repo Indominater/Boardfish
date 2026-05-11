@@ -132,7 +132,7 @@ test('frontend feature code uses typed Tauri facade instead of raw invoke', () =
     assert.doesNotMatch(source, /\btauriInvoke\(/, `${relativePath} should use BoardfishTauri or a debug wrapper`);
   }
   assert.match(readSource('src/js/tauri_bridge.js'), /var BoardfishTauri = Object\.freeze/);
-  assert.match(readSource('src/js/io_close.js'), /BoardfishTauri\.saveBoard/);
+  assert.match(readSource('src/js/io_close.js'), /BoardfishRuntime\.saveBoard/);
   assert.match(readSource('src/js/image_insert.js'), /BoardfishTauri\.registerImageFileSource/);
 });
 
@@ -162,6 +162,9 @@ test('frontend abstraction scripts load before their consumers', () => {
 
   before('dom_registry.js', '../app.js');
   before('tauri_bridge.js', '../app.js');
+  before('web_runtime.js', 'io_close.js');
+  before('web_limits.js', 'image_insert.js');
+  before('web_board_container.js', 'web_runtime.js');
   before('bitmap_cache.js', 'image_variants.js');
   before('bitmap_cache.js', 'eyedropper.js');
   before('clipboard_state.js', 'clipboard_io.js');
@@ -363,6 +366,16 @@ test('shared board contract matches frontend schema constants', () => {
   assert.match(boardTypes, /TEXT: BOARD_CONTRACT\.objectTypes\[1\]/);
   assert.match(boardTypes, /MIN_ZOOM: BOARD_CONTRACT\.viewport\.minZoom/);
   assert.match(boardTypes, /MAX_ZOOM: BOARD_CONTRACT\.viewport\.maxZoom/);
+});
+
+test('web app tab uses the Boardfish icon', () => {
+  const indexSource = readSource('src/index.html');
+  const iconPath = path.join(root, 'src', 'boardfish-icon.png');
+
+  assert.match(indexSource, /<link rel="icon" type="image\/png" sizes="512x512" href="boardfish-icon\.png" \/>/);
+  assert.match(indexSource, /<link rel="apple-touch-icon" href="boardfish-icon\.png" \/>/);
+  assert.ok(fs.existsSync(iconPath), 'web favicon image is missing');
+  assert.ok(fs.statSync(iconPath).size > 0, 'web favicon image is empty');
 });
 
 test('viewport and image-store mutations stay behind boundary modules', () => {

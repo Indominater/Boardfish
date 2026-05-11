@@ -11,6 +11,8 @@ function saveViewport() {
 
 
 // PillDebug and MenuDebug are initialized by js/viewport_debug_ui.js.
+var short_message = 1500;
+var long_message = 3 * short_message;
 var _islMsgActive = false;
 var _islMsgTimer = null;
 var _islMsgToken = 0;
@@ -48,7 +50,7 @@ function startIslandBusyMsg(text) {
       islZoom.textContent = nextText;
       PillDebug.log('busyIslandMsg:update', { text: nextText });
     },
-    done(finalMsg = null, duration = 1500, onRestore = null) {
+    done(finalMsg = null, duration = short_message, onRestore = null) {
       if (token !== _islMsgToken) return;
       if (finalMsg) return showIslandMsg(finalMsg, duration, onRestore);
       return hideIsland('busy-done');
@@ -75,7 +77,7 @@ function finishPillTask({
   beforeFinish = null,
   busyPill = null,
   finalMsg = null,
-  duration = 1500,
+  duration = short_message,
 } = {}) {
   if (beforeFinish) beforeFinish();
   if (busyPill) return busyPill.done(finalMsg, duration);

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::image_sources::CachedImageSource;
 
 fn ext_from_data_url_header(header: &str) -> &'static str {
-    if header.starts_with("data:image/jpeg") {
+    if header.starts_with("data:image/jpeg") || header.starts_with("data:image/jpg") {
         "jpg"
     } else {
         "png"
@@ -11,7 +11,7 @@ fn ext_from_data_url_header(header: &str) -> &'static str {
 }
 
 fn mime_from_data_url_header(header: &str) -> &'static str {
-    if header.starts_with("data:image/jpeg") {
+    if header.starts_with("data:image/jpeg") || header.starts_with("data:image/jpg") {
         "image/jpeg"
     } else {
         "image/png"

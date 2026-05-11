@@ -3,6 +3,7 @@
 // historyIndex at last save (or open). -1 means never saved.
 var savedHistoryIndex = -1;
 var currentFilePath = null;
+var currentFileRef = null;
 
 function isDirty() {
   if (objects.length === 0) return false;
@@ -16,10 +17,10 @@ function markSaved() {
 }
 
 function updateTitle() {
-  if (!hasTauri()) return;
-  const title = '';
+  const fileName = BoardfishRuntime?.fileNameFromRef?.(currentFileRef || currentFilePath, '') || '';
+  const title = fileName ? `${isDirty() ? '* ' : ''}${fileName}` : 'Boardfish';
   document.title = title;
-  BoardfishTauri.setTitle(title);
+  if (hasTauri()) BoardfishTauri.setTitle('');
 }
 
 
@@ -204,9 +205,13 @@ function scheduleSaveFrameProbe(dbg, label) {
   };
 }
 
-async function invokeSaveBoard(path, dbg) {
+async function invokeSaveBoard(fileRef, dbg) {
+  const path = BoardfishRuntime.describeFileRef(fileRef);
+  if (typeof flushEditHistoryCheckpoint === 'function' && flushEditHistoryCheckpoint()) {
+    SaveDebug.step(dbg, 'flush-edit-history', { path, historyIndex });
+  }
   const dataStart = performance.now();
-  const data = hasTauri() ? boardDataForSave() : boardData();
+  const data = boardDataForSave();
   SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...getBoardSaveMetrics(data) });
   measureBoardJsonForSaveDebug(dbg, data);
   if (hasTauri()) {
@@ -221,14 +226,22 @@ async function invokeSaveBoard(path, dbg) {
     }
   }
   const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
-  const result = await SaveDebug.wrap(dbg, TAURI_COMMANDS.SAVE_BOARD, () => BoardfishTauri.saveBoard(path, data), { path, ...getBoardSaveMetrics(data) });
+  const command = hasTauri() ? TAURI_COMMANDS.SAVE_BOARD : BoardfishRuntime.WEB_COMMANDS.SAVE_BOARD;
+  const result = await SaveDebug.wrap(
+    dbg,
+    command,
+    () => BoardfishRuntime.saveBoard(fileRef, data, { imageStore }),
+    { path, ...getBoardSaveMetrics(data) }
+  );
   if (frameProbe) frameProbe();
   return result;
 }
 
-async function invokeReadBoard(path, dbg) {
+async function invokeReadBoard(fileRef, dbg) {
+  const path = BoardfishRuntime.describeFileRef(fileRef);
   const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
-  const result = await OpenDebug.wrap(dbg, TAURI_COMMANDS.READ_BOARD, () => BoardfishTauri.readBoard(path), { path });
+  const command = hasTauri() ? TAURI_COMMANDS.READ_BOARD : BoardfishRuntime.WEB_COMMANDS.READ_BOARD;
+  const result = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.readBoard(fileRef), { path });
   if (frameProbe) frameProbe();
   const board = result?.board || result;
   if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...getBoardOpenMetrics(board) });
@@ -253,10 +266,14 @@ function getVisibleWorldBounds() {
   return viewportWorldRect();
 }
 
+const isOpenHydratableImageSource = (source) => {
+  return typeof source === 'string' || isNativeImageRef(source) || isWebImageRef(source);
+};
+
 function getVisibleImageKeys(limit = Infinity) {
   const b = getVisibleWorldBounds();
   const keys = [];
-  const skipped = { nonImage: 0, outside: 0, missingKey: 0, nonNative: 0, cached: 0 };
+  const skipped = { nonImage: 0, outside: 0, missingKey: 0, nonHydratable: 0, cached: 0 };
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
     if (obj.type !== 'image') { skipped.nonImage++; continue; }
@@ -264,7 +281,7 @@ function getVisibleImageKeys(limit = Infinity) {
     const key = obj.data.imgKey;
     const source = BoardfishImageStore.getSource(key);
     if (!key || !source) { skipped.missingKey++; continue; }
-    if (!isNativeImageRef(source)) { skipped.nonNative++; continue; }
+    if (!isOpenHydratableImageSource(source)) { skipped.nonHydratable++; continue; }
     if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
     keys.push(key);
     if (keys.length >= limit) break;
@@ -274,10 +291,10 @@ function getVisibleImageKeys(limit = Infinity) {
 }
 getVisibleImageKeys.lastDebug = null;
 
-function getReferencedNativeImageKeys(limit = Infinity, exclude = new Set()) {
+function getReferencedHydratableImageKeys(limit = Infinity, exclude = new Set()) {
   const keys = [];
   const seen = new Set();
-  const skipped = { excluded: 0, nonImage: 0, missingKey: 0, missingStore: 0, nonNative: 0, cached: 0, duplicate: 0 };
+  const skipped = { excluded: 0, nonImage: 0, missingKey: 0, missingStore: 0, nonHydratable: 0, cached: 0, duplicate: 0 };
   for (const obj of objects) {
     if (obj.type !== 'image') { skipped.nonImage++; continue; }
     const key = obj.data?.imgKey;
@@ -287,33 +304,39 @@ function getReferencedNativeImageKeys(limit = Infinity, exclude = new Set()) {
     if (exclude.has(key)) { skipped.excluded++; continue; }
     const source = BoardfishImageStore.getSource(key);
     if (!source) { skipped.missingStore++; continue; }
-    if (!isNativeImageRef(source)) { skipped.nonNative++; continue; }
+    if (!isOpenHydratableImageSource(source)) { skipped.nonHydratable++; continue; }
     if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
     keys.push(key);
     if (keys.length >= limit) break;
   }
-  getReferencedNativeImageKeys.lastDebug = { selected: keys.length, skipped };
+  getReferencedHydratableImageKeys.lastDebug = { selected: keys.length, skipped };
   return keys;
 }
-getReferencedNativeImageKeys.lastDebug = null;
+getReferencedHydratableImageKeys.lastDebug = null;
 
-function getPendingNativeImageKeys(limit = Infinity, exclude = new Set()) {
+function getPendingHydratableImageKeys(limit = Infinity, exclude = new Set()) {
   const keys = [];
-  const skipped = { excluded: 0, nonNative: 0, cached: 0 };
+  const skipped = { excluded: 0, nonHydratable: 0, cached: 0 };
   for (const key of BoardfishImageStore.sourceKeys()) {
     if (exclude.has(key)) { skipped.excluded++; continue; }
-    if (!isNativeImageRef(BoardfishImageStore.getSource(key))) { skipped.nonNative++; continue; }
+    if (!isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) { skipped.nonHydratable++; continue; }
     if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
     keys.push(key);
     if (keys.length >= limit) break;
   }
-  getPendingNativeImageKeys.lastDebug = { selected: keys.length, skipped };
+  getPendingHydratableImageKeys.lastDebug = { selected: keys.length, skipped };
   return keys;
 }
-getPendingNativeImageKeys.lastDebug = null;
+getPendingHydratableImageKeys.lastDebug = null;
 
 async function hydrateImageForDisplay(key, dbg = null) {
-  if (BoardfishImageStore.hasDisplayImage(key) || !isNativeImageRef(BoardfishImageStore.getSource(key))) return false;
+  const source = BoardfishImageStore.getSource(key);
+  if (BoardfishImageStore.hasDisplayImage(key) || !isOpenHydratableImageSource(source)) return false;
+  const pendingReady = imageReadyPromises.get(key);
+  if (pendingReady) {
+    await pendingReady;
+    return BoardfishImageStore.hasDisplayImage(key);
+  }
   const t0 = performance.now();
   const fetchStart = performance.now();
   const display = await ensureImageDisplaySrc(key, dbg);
@@ -382,11 +405,11 @@ async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch
 }
 
 async function hydrateAllImagesForOpen(dbg = null) {
-  const keys = getReferencedNativeImageKeys();
+  const keys = getReferencedHydratableImageKeys();
   OpenDebug.step(dbg, 'hydrate-all:candidates', {
     count: keys.length,
-    ...(getReferencedNativeImageKeys.lastDebug || {}),
-    pendingNativeImages: getPendingNativeImageKeys().length,
+    ...(getReferencedHydratableImageKeys.lastDebug || {}),
+    pendingImages: getPendingHydratableImageKeys().length,
     ...getOpenImageRuntimeMetrics(),
   });
   return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
@@ -401,7 +424,7 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
   let hydratedTotal = 0;
   try {
     while (!_boardOpening && generation === _imageStoreGeneration) {
-      const keys = getPendingNativeImageKeys(batchSize);
+      const keys = getPendingHydratableImageKeys(batchSize);
       if (!keys.length) break;
       batchCount++;
       hydratedTotal += await hydrateImageBatchForOpen(keys, dbg, 'hydrate-background');
@@ -413,7 +436,7 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
     OpenDebug.step(dbg, 'hydrate-background:done', {
       batchCount,
       hydrated: hydratedTotal,
-      remaining: getPendingNativeImageKeys().length,
+      remaining: getPendingHydratableImageKeys().length,
       stale: generation !== _imageStoreGeneration,
       ms: performance.now() - totalStart,
     });
@@ -456,16 +479,16 @@ async function finishOpenedBoard(dbg, data) {
     OpenDebug.step(dbg, 'hydrate-initial-policy', {
       mode: 'visible-first',
       visibleCount: visibleKeys?.length || 0,
-      pendingNativeImages: getPendingNativeImageKeys().length,
+      pendingImages: getPendingHydratableImageKeys().length,
     });
   } else {
     OpenDebug.step(dbg, 'hydrate-initial-policy', {
       mode: 'all-before-open',
-      pendingNativeImages: getPendingNativeImageKeys().length,
+      pendingImages: getPendingHydratableImageKeys().length,
     });
     const hydrateStart = performance.now();
     await hydrateAllImagesForOpen(dbg);
-    PillDebug.log('open:hydrate-all:end', { phaseMs: performance.now() - hydrateStart, pendingNativeImages: getPendingNativeImageKeys().length });
+    PillDebug.log('open:hydrate-all:end', { phaseMs: performance.now() - hydrateStart, pendingImages: getPendingHydratableImageKeys().length });
   }
   _boardOpening = false;
   const renderStart = performance.now();
@@ -497,6 +520,7 @@ async function finishOpenedBoard(dbg, data) {
 
 function applyBoardData(data, options = {}) {
   data = BoardSchema.normalizeBoardData(data);
+  if (!hasTauri()) BoardfishWebLimits.assertBoardDataAllowed(data);
   const prune = BoardfishBoardDocument.pruneBoardDataImageStore(data);
   data = prune.data;
   const dbg = options.dbg || null;
@@ -565,28 +589,27 @@ function applyBoardData(data, options = {}) {
 }
 
 async function saveBoardAs() {
-  if (!hasTauri()) { alert('Save requires the desktop app.'); return false; }
   const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
   const releaseInputShield = acquireInputShield();
   try {
-    const defaultName = currentFilePath
-      ? currentFilePath.split(/[\\/]/).pop()
-      : 'board.bf';
-    const filePath = await SaveDebug.wrap(dbg, TAURI_COMMANDS.SAVE_FILE_DIALOG, () => BoardfishTauri.saveFileDialog(defaultName), { defaultName });
-    if (!filePath) { SaveDebug.end(dbg, { cancelled: true }); releaseInputShield(); return false; }
+    const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
+    const command = hasTauri() ? TAURI_COMMANDS.SAVE_FILE_DIALOG : BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG;
+    const fileRef = await SaveDebug.wrap(dbg, command, () => BoardfishRuntime.saveFileDialog(defaultName), { defaultName });
+    if (!fileRef) { SaveDebug.end(dbg, { cancelled: true }); releaseInputShield(); return false; }
     await runShieldedPillTask({
       releaseInputShield,
       startMessage: 'Saving',
       successMessage: 'Saved',
       task: async () => {
-        await invokeSaveBoard(filePath, dbg);
-        currentFilePath = filePath;
+        await invokeSaveBoard(fileRef, dbg);
+        currentFileRef = fileRef;
+        currentFilePath = BoardfishRuntime.describeFileRef(fileRef);
         SaveDebug.step(dbg, 'markSaved:start');
         markSaved();
         SaveDebug.step(dbg, 'markSaved:end');
       },
     });
-    SaveDebug.end(dbg, { saved: true, path: filePath });
+    SaveDebug.end(dbg, { saved: true, path: currentFilePath });
     return true;
   } catch (err) {
     releaseInputShield();
@@ -597,9 +620,12 @@ async function saveBoardAs() {
 }
 
 async function saveBoard() {
-  if (currentFilePath) {
-    if (!hasTauri()) return false;
-    const dbg = SaveDebug.start('saveBoard', { path: currentFilePath, objectCount: objects.length });
+  const target = BoardfishRuntime.canSaveToExistingTarget(currentFileRef)
+    ? currentFileRef
+    : (hasTauri() && currentFilePath ? currentFilePath : null);
+  if (target) {
+    const path = BoardfishRuntime.describeFileRef(target);
+    const dbg = SaveDebug.start('saveBoard', { path, objectCount: objects.length });
     const releaseInputShield = acquireInputShield();
     try {
       await runShieldedPillTask({
@@ -607,13 +633,13 @@ async function saveBoard() {
         startMessage: 'Saving',
         successMessage: 'Saved',
         task: async () => {
-          await invokeSaveBoard(currentFilePath, dbg);
+          await invokeSaveBoard(target, dbg);
           SaveDebug.step(dbg, 'markSaved:start');
           markSaved();
           SaveDebug.step(dbg, 'markSaved:end');
         },
       });
-      SaveDebug.end(dbg, { saved: true, path: currentFilePath });
+      SaveDebug.end(dbg, { saved: true, path });
       return true;
     } catch (err) {
       releaseInputShield();
@@ -626,16 +652,23 @@ async function saveBoard() {
 }
 
 
+async function openBoardFileRef(fileRef) {
+  const path = BoardfishRuntime.describeFileRef(fileRef);
+  const dbg = OpenDebug.start('openBoardFileRef', { path, currentFilePath, objectCount: objects.length });
+  if (!(await confirmDirtyBeforeOpen(dbg))) return;
+  await openBoardFromPath(fileRef, dbg, 'Open failed:');
+}
+
 async function openBoard() {
-  if (!hasTauri()) { alert('Open requires the desktop app.'); return; }
   const dbg = OpenDebug.start('openBoard', { currentFilePath, objectCount: objects.length });
 
   if (!(await confirmDirtyBeforeOpen(dbg))) return;
 
   try {
-    const filePath = await OpenDebug.wrap(dbg, TAURI_COMMANDS.OPEN_FILE_DIALOG, () => BoardfishTauri.openFileDialog());
-    if (!filePath) { OpenDebug.end(dbg, { cancelled: true }); return; }
-    await openBoardFromPath(filePath, dbg, 'Open failed:');
+    const command = hasTauri() ? TAURI_COMMANDS.OPEN_FILE_DIALOG : BoardfishRuntime.WEB_COMMANDS.OPEN_FILE_DIALOG;
+    const fileRef = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.openFileDialog());
+    if (!fileRef) { OpenDebug.end(dbg, { cancelled: true }); return; }
+    await openBoardFromPath(fileRef, dbg, 'Open failed:');
   } catch (err) {
     finishFailedOpen(dbg, err, 'Open failed:');
   }
@@ -680,5 +713,11 @@ if (hasTauri()) {
   tauriListen('boardfish://app-resumed', () => {
     recoverWindowPaint('app-resumed');
     setTimeout(() => recoverBlankUi('app-resumed-followup'), 250);
+  });
+} else {
+  window.addEventListener('beforeunload', (event) => {
+    if (!isDirty()) return;
+    event.preventDefault();
+    event.returnValue = '';
   });
 }

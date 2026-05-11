@@ -65,7 +65,9 @@ function loadKeyboardHarness() {
       context.calls.push(['end', e?.type || null]);
     },
     runAddImagesCommandFromShortcut() {},
-    runAddTextCommandFromShortcut() {},
+    runAddTextCommandFromShortcut() {
+      context.calls.push(['add-text']);
+    },
     hideMenus() {},
     isEyedropperSampleVisible: () => false,
     hideEyedropperSample() {},
@@ -159,4 +161,29 @@ test('shift eyedropper hold ends when later keydown reports shift released', () 
   assert.equal(harness.context.eyedropperEnabled, false);
   assert.equal(event.defaultPrevented, true);
   assert.deepEqual(harness.context.calls.at(-1), ['end', 'keydown']);
+});
+
+test('plain T adds text without command modifier', () => {
+  const harness = loadKeyboardHarness();
+
+  const event = harness.documentEvent('keydown', {
+    key: 't',
+    code: 'KeyT',
+  });
+
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(harness.context.calls.at(-1), ['add-text']);
+});
+
+test('command T no longer adds text', () => {
+  const harness = loadKeyboardHarness();
+
+  const event = harness.documentEvent('keydown', {
+    key: 't',
+    code: 'KeyT',
+    ctrlKey: true,
+  });
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(harness.context.calls.some((call) => call[0] === 'add-text'), false);
 });

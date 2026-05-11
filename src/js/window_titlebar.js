@@ -4,8 +4,6 @@
   const isWindows = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
   if (!isWindows) return;
 
-  document.body.classList.add('is-windows');
-
   const titlebar = document.getElementById('windows-titlebar');
   const dragRegion = document.getElementById('windows-titlebar-drag');
   const minimizeButton = document.getElementById('win-btn-minimize');
@@ -18,6 +16,10 @@
   function hasNativeWindow() {
     return typeof root.hasTauri === 'function' && root.hasTauri() && root.BoardfishTauri;
   }
+
+  if (!hasNativeWindow()) return;
+
+  document.body.classList.add('is-windows');
 
   function reportWindowControlError(action, error) {
     try {

@@ -563,6 +563,7 @@ body[data-theme="dark"] .window-control-close:active {
   align-items: center;
   z-index: 9000;
   pointer-events: none;
+  max-width: calc(100vw - 32px);
 }
 
 #island.visible {
@@ -573,19 +574,20 @@ body[data-theme="dark"] .window-control-close:active {
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
-  height: var(--menu-item-height);
+  min-height: var(--menu-item-height);
   padding: var(--menu-item-padding);
   font-family: inherit;
   font-size: var(--menu-item-font-size);
   font-weight: var(--menu-item-font-weight);
-  line-height: var(--menu-item-line-height);
+  line-height: 18px;
   color: var(--firefox-menu-text);
   background: transparent;
   border-radius: var(--menu-item-radius);
   letter-spacing: var(--menu-item-letter-spacing);
   -webkit-font-smoothing: antialiased;
-  white-space: nowrap;
+  white-space: normal;
   min-width: 44px;
+  max-width: min(680px, calc(100vw - 56px));
   display: inline-flex;
   align-items: center;
   justify-content: center;

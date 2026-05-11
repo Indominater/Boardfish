@@ -401,12 +401,22 @@ function hideMenus() {
 
 function pushEditHistoryIfChanged(id) {
   const obj = objectsMap.get(id);
-  if (!obj) return;
+  if (!obj) return false;
   if (_editHistoryLastContent === null) _editHistoryLastContent = obj.data.content;
-  if (obj.data.content === _editHistoryLastContent) return;
+  if (obj.data.content === _editHistoryLastContent) return false;
   markDirty(id);
   pushHistory('text-edit-checkpoint');
   _editHistoryLastContent = obj.data.content;
+  return true;
+}
+
+function flushEditHistoryCheckpoint() {
+  if (_editHistoryTimer) {
+    clearTimeout(_editHistoryTimer);
+    _editHistoryTimer = null;
+  }
+  if (!editingId) return false;
+  return pushEditHistoryIfChanged(editingId);
 }
 
 function scheduleEditHistoryCheckpoint(id) {

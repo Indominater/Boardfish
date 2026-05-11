@@ -147,7 +147,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 't') && !editingId) {
+  if (hasNoShortcutModifiers(e) && isShortcutKey(e, 't') && !editingId && !e.repeat) {
     e.preventDefault();
     runAddTextCommandFromShortcut();
     return;

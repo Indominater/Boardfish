@@ -363,6 +363,9 @@ function updateCtxMenuActions() {
   const hasImages = objects.some((o) => o.type === 'image');
   const hasText   = objects.some((o) => o.type === 'text');
   const show = hasImages || hasText;
+  const canAddObject = BoardfishWebLimits.canAddObjects(1, { notifyUser: false });
+  if (addTextBtn) addTextBtn.disabled = !canAddObject;
+  if (addImageBtn) addImageBtn.disabled = !canAddObject;
   if (resetZoomSep) resetZoomSep.style.display = show ? 'block' : 'none';
   if (resetZoomBtn) resetZoomBtn.style.display = show ? '' : 'none';
   if (exportAllTextBtn) exportAllTextBtn.style.display = show && hasText ? '' : 'none';

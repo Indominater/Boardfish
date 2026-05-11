@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "boardfish"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "arboard",
  "base64 0.21.7",

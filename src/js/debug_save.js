@@ -37,7 +37,6 @@ var SaveDebug = (() => {
   }
 
   async function wrap(ctx, command, call, meta = {}) {
-    if (!hasTauri()) throw new Error('Tauri is unavailable');
     if (!core.enabled) return call();
     const t0 = performance.now();
     core.step(ctx, 'invoke:start', { command, ...meta });

@@ -1,6 +1,48 @@
 'use strict';
 
 (function initClipboardIO(root) {
+  const BOARDFISH_CLIPBOARD_TOKEN_RE = /<!--\s*boardfish-clipboard:([A-Za-z0-9._:-]+)\s*-->/i;
+
+  function createBoardfishClipboardMarker(token) {
+    return token ? `<!--boardfish-clipboard:${token}-->` : '';
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function textToClipboardHtml(text, token) {
+    const marker = createBoardfishClipboardMarker(token);
+    const html = escapeHtml(text).replace(/\r\n|\r|\n/g, '<br>');
+    return `${marker}<div>${html}</div>`;
+  }
+
+  function boardfishTokenClipboardHtml(token) {
+    return `${createBoardfishClipboardMarker(token)}<span></span>`;
+  }
+
+  function readBoardfishClipboardTokenFromHtml(html = '') {
+    return BOARDFISH_CLIPBOARD_TOKEN_RE.exec(String(html || ''))?.[1] || '';
+  }
+
+  function readBoardfishClipboardTokenFromEvent(clipboardData) {
+    if (!clipboardData) return '';
+    return readBoardfishClipboardTokenFromHtml(clipboardData.getData?.('text/html') || '');
+  }
+
+  function supportsRichClipboardWrite() {
+    return !!navigator.clipboard?.write && typeof ClipboardItem !== 'undefined' && typeof Blob !== 'undefined';
+  }
+
+  async function writeClipboardItem(parts) {
+    await navigator.clipboard.write([new ClipboardItem(parts)]);
+  }
+
   function readClipboardBlobAsDataUrl(blob, errorMessage) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -73,7 +115,19 @@
       );
       return;
     }
+    if (meta.boardfishToken && supportsRichClipboardWrite()) {
+      try {
+        await writeClipboardItem({
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+          'text/html': new Blob([textToClipboardHtml(text, meta.boardfishToken)], { type: 'text/html' }),
+        });
+        return { boardfishTokenWritten: true };
+      } catch (err) {
+        ClipDebug.step(dbg, 'web-clipboard-rich-text-miss', { error: String(err) });
+      }
+    }
     await navigator.clipboard.writeText(text);
+    return { boardfishTokenWritten: false };
   }
 
   function describeClipboardData(clipboardData) {
@@ -111,9 +165,59 @@
     return null;
   }
 
+  async function readBoardfishClipboardTokenFromBrowser(dbg = null) {
+    if (!navigator.clipboard?.read) return { checked: false, token: '' };
+    ClipDebug.step(dbg, 'browser-clipboard-token-read:start');
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      if (!item.types?.includes?.('text/html')) continue;
+      const blob = await item.getType('text/html');
+      const html = await blob.text();
+      const token = readBoardfishClipboardTokenFromHtml(html);
+      ClipDebug.step(dbg, 'browser-clipboard-token-read:ok', { tokenFound: !!token });
+      return { checked: true, token };
+    }
+    ClipDebug.step(dbg, 'browser-clipboard-token-read:ok', { tokenFound: false });
+    return { checked: true, token: '' };
+  }
+
+  async function copyBoardfishTokenToClipboard(token, dbg = null, meta = {}) {
+    if (!token || !supportsRichClipboardWrite()) return { boardfishTokenWritten: false };
+    try {
+      await writeClipboardItem({
+        'text/plain': new Blob([''], { type: 'text/plain' }),
+        'text/html': new Blob([boardfishTokenClipboardHtml(token)], { type: 'text/html' }),
+      });
+      return { boardfishTokenWritten: true };
+    } catch (err) {
+      ClipDebug.step(dbg, 'web-clipboard-token-write-miss', { ...meta, error: String(err) });
+      return { boardfishTokenWritten: false };
+    }
+  }
+
+  async function copyImageBlobToClipboard(blob, token = '', dbg = null) {
+    if (token && supportsRichClipboardWrite()) {
+      try {
+        await writeClipboardItem({
+          'image/png': blob,
+          'text/html': new Blob([boardfishTokenClipboardHtml(token)], { type: 'text/html' }),
+        });
+        return { boardfishTokenWritten: true };
+      } catch (err) {
+        ClipDebug.step(dbg, 'web-clipboard-rich-image-miss', { error: String(err) });
+      }
+    }
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    return { boardfishTokenWritten: false };
+  }
+
   root.BoardfishClipboardIO = Object.freeze({
+    copyBoardfishTokenToClipboard,
+    copyImageBlobToClipboard,
     copyTextToClipboard,
     describeClipboardData,
+    readBoardfishClipboardTokenFromBrowser,
+    readBoardfishClipboardTokenFromEvent,
     readClipboardImageDataUrlFromBrowser,
     readClipboardImageDataUrlFromEvent,
     readClipboardTextFromEvent,

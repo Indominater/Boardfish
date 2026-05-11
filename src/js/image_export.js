@@ -55,21 +55,39 @@ async function saveSelectedImage() {
     return;
   }
 
-  ExportDebug.step(dbg, 'render:start');
-  const src = await getRenderedImageDataUrl(obj, dbg);
-  ExportDebug.step(dbg, 'render:complete', { hasDataUrl: !!src });
-  if (!src) { releaseInputShield(); ExportDebug.end(dbg, { skipped: true, reason: 'no-dataurl' }); return; }
-
-  const ext = BoardfishExportUtils.guessImageExtFromDataUrl(src);
+  const ext = BoardfishExportUtils.guessImageExtForObjectExport(obj);
   const hex = BoardfishExportUtils.randomHex();
   const defaultName = `image_${hex}.${ext}`;
 
-  const a = document.createElement('a');
-  a.href = src;
-  a.download = defaultName;
-  a.click();
-  releaseInputShield();
-  ExportDebug.end(dbg, { saved: true, method: 'download' });
+  let busyPill = null;
+  try {
+    const downloadResult = await BoardfishExportUtils.downloadImageObjects([obj], dbg, {
+      filename: defaultName,
+      targetMode: 'file',
+      onStart: () => {
+        busyPill = startPillTask({ message: 'Exporting', progress: true });
+        updatePillTask(busyPill, 'Exporting');
+        ExportDebug.step(dbg, 'web-export:pill-start', { imageCount: 1 });
+      },
+      onProgress: ({ phase, preparedCount, finishedCount }) => {
+        if (phase === 'save-progress') updatePillTask(busyPill, `${finishedCount || preparedCount || 1}/1`);
+      },
+    });
+    const saved = (downloadResult?.downloadedCount || 0) > 0;
+    ExportDebug.end(dbg, { saved, ...downloadResult });
+    if (saved) {
+      finishPillTask({ beforeFinish: releaseInputShield, busyPill, finalMsg: '1 Image Exported' });
+    } else if (busyPill) {
+      finishPillTask({ beforeFinish: releaseInputShield, busyPill });
+    } else {
+      releaseInputShield();
+    }
+  } catch (err) {
+    if (busyPill) finishPillTask({ beforeFinish: releaseInputShield, busyPill });
+    else releaseInputShield();
+    ExportDebug.end(dbg, { saved: false, error: String(err) });
+    console.error('Save image failed:', err);
+  }
 }
 
 function exportResolveConcurrency() {
@@ -419,10 +437,46 @@ async function exportImageBatch({
     return;
   }
 
-  await BoardfishExportUtils.downloadImageObjects(imageObjs, dbg);
-  stopTotalWatch({ saved: true, method: 'download' });
-  ExportDebug.end(dbg, { saved: true, method: 'download', imageCount: imageObjs.length });
-  BoardfishExportUtils.finishImageExportInputShield(clearSelectionAfter && imageObjs.length);
+  let busyPill = null;
+  let updateProgress = null;
+  try {
+    const downloadResult = await BoardfishExportUtils.downloadImageObjects(imageObjs, dbg, {
+      targetMode: 'folder',
+      onStart: () => {
+        busyPill = startPillTask({ message: `0/${imageObjs.length}`, progress: true });
+        updateProgress = BoardfishExportUtils.createProgressUpdater(imageObjs.length, busyPill);
+        ExportDebug.step(dbg, 'web-export:pill-start', { imageCount: imageObjs.length });
+      },
+      onProgress: ({ phase, preparedCount, finishedCount, totalCount, force }) => {
+        if (!updateProgress) return;
+        updateProgress(phase || 'prepare-progress', preparedCount ?? finishedCount ?? imageObjs.length, {
+          finishedCount: finishedCount ?? '',
+          totalCount: totalCount ?? imageObjs.length,
+        }, force === true);
+      },
+    });
+    const downloadedCount = downloadResult?.downloadedCount || 0;
+    const saved = downloadedCount > 0;
+    stopTotalWatch({ saved, ...downloadResult });
+    ExportDebug.end(dbg, { saved, imageCount: imageObjs.length, ...downloadResult });
+    if (downloadedCount > 0) {
+      finishPillTask({
+        beforeFinish: () => BoardfishExportUtils.finishImageExportInputShield(clearSelectionAfter && imageObjs.length),
+        busyPill,
+        finalMsg: downloadedCount === 1 ? '1 Image Exported' : `${downloadedCount} Images Exported`,
+      });
+    } else if (busyPill) {
+      finishPillTask({ beforeFinish: hideInputShield, busyPill });
+    } else {
+      hideInputShield();
+    }
+  } catch (err) {
+    if (busyPill) finishPillTask({ beforeFinish: hideInputShield, busyPill });
+    else hideInputShield();
+    stopTotalWatch({ error: String(err) });
+    ExportDebug.end(dbg, { saved: false, imageCount: imageObjs.length, error: String(err) });
+    console.error(errorLabel, err);
+  }
 }
 
 async function saveSelectedImages() {

@@ -11,6 +11,9 @@
 
   function setSource(key, source) {
     if (!key) return false;
+    if (imageStore[key] && imageStore[key] !== source && typeof BoardfishWebBoardContainer !== 'undefined') {
+      BoardfishWebBoardContainer.revokeImageSource?.(imageStore[key]);
+    }
     imageStore[key] = source;
     if (typeof noteEyedropperImageSourceChanged === 'function') {
       noteEyedropperImageSourceChanged(key, 'image-source');
@@ -19,6 +22,11 @@
   }
 
   function setSources(nextSources = {}) {
+    for (const [key, source] of Object.entries(nextSources || {})) {
+      if (imageStore[key] && imageStore[key] !== source && typeof BoardfishWebBoardContainer !== 'undefined') {
+        BoardfishWebBoardContainer.revokeImageSource?.(imageStore[key]);
+      }
+    }
     Object.assign(imageStore, nextSources || {});
     if (typeof noteEyedropperBoardContentChanged === 'function') {
       noteEyedropperBoardContentChanged('image-sources');

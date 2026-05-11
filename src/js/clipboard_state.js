@@ -7,6 +7,10 @@ var _jsClipboardSequence = null;
 var _jsClipboardSequencePromise = null;
 var _jsClipboardNativeWritePending = false;
 var _jsClipboardToken = 0;
+var _jsClipboardWebToken = '';
+var _jsClipboardWebTokenOnNative = false;
+var _jsClipboardWebMaybeStale = false;
+var _jsClipboardWebTokenCounter = 0;
 var _pasteInProgress = false;
 var _nativeClipboardWriteQueue = Promise.resolve();
 var _nativeClipboardPendingCount = 0;
@@ -55,6 +59,35 @@ function clipboardSequenceChangedExternally(startSeq, currentSeq) {
   if (startSeq === null || currentSeq === null || startSeq === undefined || currentSeq === undefined) return false;
   return currentSeq !== startSeq && !_nativeClipboardOwnedSequences.has(currentSeq);
 }
+
+const createJsClipboardWebToken = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `bf-${crypto.randomUUID()}`;
+  }
+  _jsClipboardWebTokenCounter++;
+  return `bf-${Date.now().toString(36)}-${_jsClipboardWebTokenCounter.toString(36)}`;
+};
+
+const getJsClipboardWebToken = () => _jsClipboardWebToken;
+
+const markJsClipboardWebTokenOnNative = (token = _jsClipboardWebToken, dbg = null) => {
+  const accepted = !!token && token === _jsClipboardWebToken && !!jsClipboard;
+  if (accepted) {
+    _jsClipboardWebTokenOnNative = true;
+    _jsClipboardWebMaybeStale = false;
+  }
+  ClipDebug.step(dbg, 'mark-js-clipboard-web-token', {
+    token,
+    currentToken: _jsClipboardWebToken,
+    accepted,
+  });
+  return accepted;
+};
+
+const markJsClipboardMaybeStaleFromWebBlur = () => {
+  if (!jsClipboard || hasTauri()) return;
+  _jsClipboardWebMaybeStale = true;
+};
 
 function enqueueNativeClipboardWrite(task, dbg = null, meta = {}) {
   const queuedAt = performance.now();
@@ -111,6 +144,9 @@ function setJsClipboard(value, trackNative = false, nativeWritePending = false) 
   _jsClipboardSequence = null;
   _jsClipboardSequencePromise = null;
   _jsClipboardNativeWritePending = nativeWritePending;
+  _jsClipboardWebToken = createJsClipboardWebToken();
+  _jsClipboardWebTokenOnNative = false;
+  _jsClipboardWebMaybeStale = false;
   const token = ++_jsClipboardToken;
   if (trackNative) markJsClipboardSequence(token);
   return token;
@@ -121,11 +157,36 @@ function clearJsClipboard() {
   _jsClipboardSequence = null;
   _jsClipboardSequencePromise = null;
   _jsClipboardNativeWritePending = false;
+  _jsClipboardWebToken = '';
+  _jsClipboardWebTokenOnNative = false;
+  _jsClipboardWebMaybeStale = false;
   _jsClipboardToken++;
 }
 
-async function jsClipboardStillCurrent(dbg = null) {
+async function jsClipboardStillCurrent(dbg = null, options = {}) {
   if (!jsClipboard) return false;
+  if (!hasTauri()) {
+    const clipboardTokenChecked = options.webClipboardTokenChecked === true;
+    const clipboardToken = options.webClipboardToken || '';
+    if (clipboardTokenChecked && (_jsClipboardWebTokenOnNative || clipboardToken)) {
+      const current = !!clipboardToken && clipboardToken === _jsClipboardWebToken;
+      ClipDebug.step(dbg, 'validate-js-clipboard-web-token', {
+        clipboardToken,
+        expected: _jsClipboardWebToken,
+        tokenOnNative: _jsClipboardWebTokenOnNative,
+        current,
+      });
+      return current;
+    }
+    const age = Date.now() - _jsClipboardSetAt;
+    const current = !_jsClipboardWebMaybeStale || age < 750;
+    ClipDebug.step(dbg, 'validate-js-clipboard-web-untracked', {
+      current,
+      maybeStale: _jsClipboardWebMaybeStale,
+      age,
+    });
+    return current;
+  }
   if (_jsClipboardSequence === null && _jsClipboardSequencePromise) {
     await _jsClipboardSequencePromise.catch(() => null);
   }
@@ -139,4 +200,19 @@ async function jsClipboardStillCurrent(dbg = null) {
   const current = seq === null || seq === _jsClipboardSequence;
   ClipDebug.step(dbg, 'validate-js-clipboard', { seq, expected: _jsClipboardSequence, current });
   return current;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('blur', markJsClipboardMaybeStaleFromWebBlur);
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') markJsClipboardMaybeStaleFromWebBlur();
+  });
+}
+if (typeof globalThis !== 'undefined') {
+  Object.assign(globalThis, {
+    getJsClipboardWebToken,
+    markJsClipboardWebTokenOnNative,
+  });
 }

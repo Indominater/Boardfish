@@ -1,14 +1,15 @@
 {
   "name": "boardfish",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.1.0",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
+    "web": "node scripts/serve-web.mjs",
     "build": "tauri build",
     "pretest": "node scripts/sync-debug-tools.mjs",
     "test": "node --test",
-    "check:js-syntax": "find src test \\( -name '*.js' -o -name '*.mjs' \\) -print0 | xargs -0 -n1 node --check",
+    "check:js-syntax": "node scripts/check-js-syntax.mjs",
     "check:static": "node --test test/static_refactor.test.js",
     "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",
     "check": "npm run check:js-syntax && npm test && npm run check:static && npm run check:rust"

@@ -54,6 +54,8 @@ function loadSelectionInputHarness(objects, options = {}) {
       createElement: () => createElement(),
       addEventListener() {},
     },
+    clearTimeout() {},
+    setTimeout() { return 1; },
     Node: function Node() {},
     selOverlay: createElement('sel-overlay'),
     multiSelOverlay: createElement('multi-sel-overlay'),
@@ -108,7 +110,8 @@ function loadSelectionInputHarness(objects, options = {}) {
   vm.runInContext(
     `${source}\n` +
       'globalThis.beginSelectionHandleDrag = beginSelectionHandleDrag;\n' +
-      'globalThis.proportionalCornerResizeSize = proportionalCornerResizeSize;\n',
+      'globalThis.proportionalCornerResizeSize = proportionalCornerResizeSize;\n' +
+      'globalThis.flushEditHistoryCheckpoint = flushEditHistoryCheckpoint;\n',
     context,
   );
   return context;
@@ -258,4 +261,18 @@ test('single text horizontal resize anchors the opposite side after auto-height 
   assert.equal(text.y, 0);
   assert.equal(text.w, 240);
   assert.equal(text.h, 80);
+});
+
+test('save flushes a pending text edit checkpoint into the saved baseline', () => {
+  const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'after' } };
+  const context = loadSelectionInputHarness([text]);
+  context.editingId = text.id;
+  context._editHistoryTimer = 42;
+  context._editHistoryLastContent = 'before';
+
+  assert.equal(context.flushEditHistoryCheckpoint(), true);
+  assert.equal(context._editHistoryTimer, null);
+  assert.equal(context._editHistoryLastContent, 'after');
+  assert.deepEqual(context.dirty, [text.id]);
+  assert.deepEqual(context.history, ['text-edit-checkpoint']);
 });

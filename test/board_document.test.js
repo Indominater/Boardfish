@@ -12,10 +12,12 @@ test('creates v3 board save data with image manifest refs', () => {
     imageStore: {
       'img-1': 'data:image/jpeg;base64,abc',
       'img-2': { native: true, path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
+      'img-3': { web: true, path: 'images/img-3.webp', mime: 'image/webp', ext: 'webp', bytes: 12 },
     },
     objects: [
       { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 20, z: 1, data: { imgKey: 'img-1' } },
       { id: 'obj-2', type: 'image', x: 5, y: 5, w: 20, h: 10, z: 2, data: { imgKey: 'img-2' } },
+      { id: 'obj-3', type: 'image', x: 10, y: 10, w: 30, h: 15, z: 3, data: { imgKey: 'img-3' } },
     ],
   }, {
     schema: BoardSchema,
@@ -34,6 +36,11 @@ test('creates v3 board save data with image manifest refs', () => {
     path: 'images/img-2.png',
     mime: 'image/png',
     ext: 'png',
+  });
+  assert.deepEqual(data.imageStore['img-3'], {
+    path: 'images/img-3.webp',
+    mime: 'image/webp',
+    ext: 'webp',
   });
 });
 

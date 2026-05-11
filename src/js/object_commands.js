@@ -2,6 +2,9 @@
 
 function addText(wx, wy, content = '') {
   if (eyedropperEnabled) return;
+  if (!BoardfishWebLimits.canAddObjects(1)) return;
+  const textBytes = typeof TextEncoder === 'function' ? new TextEncoder().encode(String(content || '')).length : String(content || '').length;
+  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1)) return;
   content = normalizeTextContent(content);
   let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
   if (content) {
@@ -133,6 +136,7 @@ async function newBoard() {
   invalidateOffscreen();
   OpenDebug.step(dbg, 'clearState', {});
   currentFilePath = null;
+  currentFileRef = null;
   BoardfishViewportState.reset();
   clearImageStore(true);
   OpenDebug.step(dbg, 'clearImageStore', {});

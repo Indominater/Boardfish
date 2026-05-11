@@ -12,14 +12,45 @@
     return { version: BoardTypes.BOARD_VERSION_LEGACY, viewport, imageStore, objects };
   }
 
+  function extForMime(mime = '') {
+    const value = String(mime || '').toLowerCase();
+    if (value === 'image/jpeg' || value === 'image/jpg') return 'jpg';
+    if (value === 'image/webp') return 'webp';
+    if (value === 'image/gif') return 'gif';
+    return 'png';
+  }
+
+  function mimeForExt(ext = '') {
+    const value = String(ext || '').replace(/^\./, '').toLowerCase();
+    if (value === 'jpg' || value === 'jpeg') return 'image/jpeg';
+    if (value === 'webp') return 'image/webp';
+    if (value === 'gif') return 'image/gif';
+    return 'image/png';
+  }
+
+  function normalizeImageExt(ext = '', mime = '') {
+    const value = String(ext || '').replace(/^\./, '').toLowerCase();
+    return value || extForMime(mime);
+  }
+
+  function mimeFromDataUrl(dataUrl = '') {
+    return /^data:([^;,]+);base64,/i.exec(String(dataUrl || ''))?.[1] || 'image/png';
+  }
+
   function imageMetaForBoardFile(imgKey, src = '', deps = {}) {
     const isNativeImageRef = deps.isNativeImageRef || (() => false);
     const guessImageExtFromDataUrl = deps.guessImageExtFromDataUrl || (() => 'png');
     if (isNativeImageRef(src)) return { path: src.path, mime: src.mime, ext: src.ext };
+    if (src && typeof src === 'object' && (src.path || src.mime || src.ext)) {
+      const ext = normalizeImageExt(src.ext, src.mime);
+      const mime = src.mime || mimeForExt(ext);
+      const path = src.path || `images/${imgKey}.${ext}`;
+      return { path, mime, ext };
+    }
     const comma = typeof src === 'string' ? src.indexOf(',') : -1;
     const header = comma > 0 ? src.slice(0, comma) : '';
     const ext = guessImageExtFromDataUrl(src);
-    const mime = header.startsWith('data:image/jpeg') ? 'image/jpeg' : 'image/png';
+    const mime = header ? mimeFromDataUrl(src) : mimeForExt(ext);
     return { path: `images/${imgKey}.${ext}`, mime, ext };
   }
 

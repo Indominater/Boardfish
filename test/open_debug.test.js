@@ -33,9 +33,13 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /var openHydrationMode = 'all-before-open';/);
   assert.match(openIo, /function getOpenHydrationMode\(\)/);
   assert.match(openIo, /const hydrationMode = getOpenHydrationMode\(\);/);
-  assert.match(openIo, /function getReferencedNativeImageKeys\(limit = Infinity, exclude = new Set\(\)\)/);
-  assert.match(openIo, /const keys = getReferencedNativeImageKeys\(\);/);
-  assert.match(openIo, /pendingNativeImages: getPendingNativeImageKeys\(\)\.length/);
+  assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
+  assert.match(openIo, /typeof source === 'string' \|\| isNativeImageRef\(source\) \|\| isWebImageRef\(source\)/);
+  assert.match(openIo, /function getReferencedHydratableImageKeys\(limit = Infinity, exclude = new Set\(\)\)/);
+  assert.match(openIo, /const keys = getReferencedHydratableImageKeys\(\);/);
+  assert.match(openIo, /pendingImages: getPendingHydratableImageKeys\(\)\.length/);
+  assert.doesNotMatch(openIo, /pendingNativeImages: getPendingNativeImageKeys\(\)\.length/);
+  assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*await pendingReady;/);
 
   for (const phase of [
     'read-board-debug',
@@ -96,9 +100,39 @@ test('open-board helpers used by io_close are shared across legacy scripts', () 
   }
 });
 
+test('open-board failures show a readable pill message', () => {
+  const bootstrap = readSource('src/js/app_bootstrap.js');
+  const styles = readSource('src/styles.css');
+
+  assert.match(bootstrap, /function openFailureIslandMessage\(errorLabel, err\)/);
+  assert.match(bootstrap, /function openFailureUserDetail\(detail, err\)/);
+  assert.match(bootstrap, /Permission was not granted/);
+  assert.match(bootstrap, /Unsupported Boardfish file/);
+  assert.match(bootstrap, /Boardfish file is missing board data/);
+  assert.match(bootstrap, /Boardfish file is missing image data/);
+  assert.match(bootstrap, /Boardfish file is invalid/);
+  assert.match(bootstrap, /This browser cannot open compressed Boardfish files/);
+  assert.match(bootstrap, /one image is/);
+  assert.match(bootstrap, /OpenDebug\.step\(dbg, 'open-failed:message'/);
+  assert.match(bootstrap, /finalMsg: message/);
+  assert.match(bootstrap, /duration: long_message/);
+  assert.doesNotMatch(bootstrap, /Failed to open file:/);
+  assert.match(styles, /#island \{[\s\S]*max-width: calc\(100vw - 32px\);/);
+  assert.match(styles, /#isl-zoom \{[\s\S]*white-space: normal;/);
+});
+
 test('open-board loading does not wait for pill status update before reading the file', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
 
   assert.match(bootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard/);
   assert.doesNotMatch(bootstrap, /await startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard/);
+});
+
+test('open-board title target updates as soon as board data is applied', () => {
+  const bootstrap = readSource('src/js/app_bootstrap.js');
+
+  assert.match(
+    bootstrap,
+    /applyBoardData\(data,[\s\S]*?\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);\s*await finishOpenedBoard\(dbg, data\);/,
+  );
 });
