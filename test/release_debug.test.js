@@ -84,3 +84,27 @@ test('release sources do not contain enabled debugger switches', () => {
     assert.doesNotMatch(source, /\btoggle_devtools\s*\(/, `${file} toggles devtools`);
   }
 });
+
+test('web release preview keeps debug tools off on localhost', () => {
+  const mainSource = readSource('src/js/main.mjs');
+  const webEnvSource = readSource('src/js/web_env.js');
+  const serverSource = readSource('scripts/serve-web.mjs');
+  const packageJson = readJson('package.json');
+
+  assert.match(mainSource, /import '\.\/web_env\.js';/);
+  assert.match(mainSource, /return globalThis\.__BOARDFISH_WEB_DEV_MODE__ === true;/);
+  assert.doesNotMatch(mainSource, /bf_debug_tools/);
+  assert.doesNotMatch(mainSource, /params\.get\('debug'\)/);
+  assert.doesNotMatch(mainSource, /localHost \|\|/);
+
+  assert.match(webEnvSource, /'__BOARDFISH_WEB_DEV_MODE__'/);
+  assert.match(webEnvSource, /value: false/);
+
+  assert.match(serverSource, /const devMode = args\.has\('--dev'\);/);
+  assert.match(serverSource, /devMode \? 5173 : 4173/);
+  assert.match(serverSource, /value: \$\{devMode \? 'true' : 'false'\}/);
+
+  assert.equal(packageJson.scripts.web, 'node scripts/serve-web.mjs --preview');
+  assert.equal(packageJson.scripts['web:preview'], 'node scripts/serve-web.mjs --preview');
+  assert.equal(packageJson.scripts['web:dev'], 'node scripts/serve-web.mjs --dev');
+});

@@ -5,7 +5,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
-const port = Number(process.env.PORT || 4173);
+const args = new Set(process.argv.slice(2));
+const devMode = args.has('--dev');
+const port = Number(process.env.PORT || (devMode ? 5173 : 4173));
+const webEnvRelativePath = path.join('js', 'web_env.js');
 
 const types = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -25,10 +28,31 @@ function safePath(urlPath) {
   return resolved;
 }
 
+function webEnvSource() {
+  return `'use strict';
+
+(function initBoardfishWebEnv(root) {
+  Object.defineProperty(root, '__BOARDFISH_WEB_DEV_MODE__', {
+    value: ${devMode ? 'true' : 'false'},
+    writable: false,
+    configurable: false,
+  });
+}(globalThis));
+`;
+}
+
 const server = http.createServer(async (req, res) => {
   const filePath = safePath(req.url || '/');
   if (!filePath) {
     res.writeHead(403).end('Forbidden');
+    return;
+  }
+  if (devMode && path.relative(root, filePath) === webEnvRelativePath) {
+    res.writeHead(200, {
+      'Content-Type': types.get('.js'),
+      'Cache-Control': 'no-store',
+    });
+    res.end(webEnvSource());
     return;
   }
   try {
@@ -45,5 +69,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, '127.0.0.1', () => {
-  console.log(`Boardfish Web: http://127.0.0.1:${port}`);
+  const mode = devMode ? 'dev' : 'release preview';
+  console.log(`Boardfish Web (${mode}): http://127.0.0.1:${port}`);
 });

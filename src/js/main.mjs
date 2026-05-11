@@ -1,5 +1,6 @@
 'use strict';
 
+import './web_env.js';
 import './dom_registry.js';
 import './tauri_bridge.js';
 import './web_board_container.js';
@@ -21,11 +22,7 @@ import './eyedropper_geometry.js';
 const shouldEnableWebDebugTools = () => {
   if (Object.prototype.hasOwnProperty.call(globalThis, '__BOARDFISH_DEBUG_TOOLS_ENABLED__')) return null;
   if (globalThis.__TAURI__) return false;
-  const params = new URLSearchParams(globalThis.location?.search || '');
-  const host = String(globalThis.location?.hostname || '').toLowerCase();
-  const localHost = host === '127.0.0.1' || host === 'localhost' || host === '[::1]';
-  const stored = globalThis.localStorage?.getItem?.('bf_debug_tools') === 'true';
-  return localHost || stored || params.get('debug') === '1' || params.get('debug') === 'true';
+  return globalThis.__BOARDFISH_WEB_DEV_MODE__ === true;
 };
 
 const webDebugToolsEnabled = shouldEnableWebDebugTools();

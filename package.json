@@ -5,7 +5,9 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "web": "node scripts/serve-web.mjs",
+    "web": "node scripts/serve-web.mjs --preview",
+    "web:preview": "node scripts/serve-web.mjs --preview",
+    "web:dev": "node scripts/serve-web.mjs --dev",
     "build": "tauri build",
     "pretest": "node scripts/sync-debug-tools.mjs",
     "test": "node --test",

@@ -35,6 +35,8 @@ The same frontend can run in Chromium browsers:
 npm run web
 ```
 
+`npm run web` serves the release-preview build at `http://127.0.0.1:4173/`, matching the public GitHub Pages web app behavior. Use `npm run web:dev` for the debug-enabled local web runtime at `http://127.0.0.1:5173/`.
+
 Boardfish Web reads and writes the same `.bf` container format as desktop. The web runtime is intentionally capped at 100 objects, 512 MB total board content, 32 MB per image file, and 64 MP per image. The desktop Tauri app remains the full-power runtime.
 
 ## Keyboard Shortcuts
