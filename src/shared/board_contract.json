@@ -7,6 +7,6 @@
   "objectTypes": ["image", "text"],
   "viewport": {
     "minZoom": 0.001,
-    "maxZoom": 100
+    "maxZoom": 1000
   }
 }

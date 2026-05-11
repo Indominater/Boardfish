@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(contract["objectTypes"][0], "image");
         assert_eq!(contract["objectTypes"][1], "text");
         assert_eq!(contract["viewport"]["minZoom"], 0.001);
-        assert_eq!(contract["viewport"]["maxZoom"], 100);
+        assert_eq!(contract["viewport"]["maxZoom"], 1000);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 // ─── Zoom ─────────────────────────────────────────────────────────────────────
-var ZOOM_MIN = 0.001, ZOOM_MAX = 100;
+var ZOOM_MIN = 0.001, ZOOM_MAX = 1000;
 var _editEl = null;
 var _caretVisible = true;
 var _caretBlinkInterval = null;
