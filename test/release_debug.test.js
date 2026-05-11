@@ -86,25 +86,40 @@ test('release sources do not contain enabled debugger switches', () => {
 });
 
 test('web release preview keeps debug tools off on localhost', () => {
-  const mainSource = readSource('src/js/main.mjs');
+  const webDevSource = readSource('src/js/main.web.dev.mjs');
+  const manifestSource = readSource('src/js/startup_manifest.mjs');
+  const buildSource = readSource('scripts/build-runtime-assets.mjs');
   const webEnvSource = readSource('src/js/web_env.js');
   const serverSource = readSource('scripts/serve-web.mjs');
+  const workflowSource = readSource('.github/workflows/web.yml');
   const packageJson = readJson('package.json');
 
-  assert.match(mainSource, /import '\.\/web_env\.js';/);
-  assert.match(mainSource, /return globalThis\.__BOARDFISH_WEB_DEV_MODE__ === true;/);
-  assert.doesNotMatch(mainSource, /bf_debug_tools/);
-  assert.doesNotMatch(mainSource, /params\.get\('debug'\)/);
-  assert.doesNotMatch(mainSource, /localHost \|\|/);
+  assert.match(webDevSource, /loadScripts\(\['web_env\.js'\]\)/);
+  assert.match(webDevSource, /setDefaultDebugFlag\(globalThis\.__BOARDFISH_WEB_DEV_MODE__ === true\)/);
+  assert.doesNotMatch(webDevSource, /bf_debug_tools/);
+  assert.doesNotMatch(webDevSource, /params\.get\('debug'\)/);
+  assert.doesNotMatch(webDevSource, /localHost \|\|/);
+
+  assert.match(manifestSource, /WEB_PREVIEW_SCRIPTS[\s\S]*'runtime_debug_noop\.js'/);
+  assert.doesNotMatch(
+    manifestSource.match(/export const WEB_PREVIEW_SCRIPTS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1] || '',
+    /'debug(?:_|\.|')|'startup_debug\.js'|'viewport_debug_ui\.js'|'eyedropper_debug\.js'/,
+  );
+  assert.match(buildSource, /'web-preview'[\s\S]*bundle: 'assets\/boardfish-web-preview\.min\.js'/);
 
   assert.match(webEnvSource, /'__BOARDFISH_WEB_DEV_MODE__'/);
   assert.match(webEnvSource, /value: false/);
 
   assert.match(serverSource, /const devMode = args\.has\('--dev'\);/);
+  assert.match(serverSource, /devMode \? 'src' : 'dist-web'/);
   assert.match(serverSource, /devMode \? 5173 : 4173/);
   assert.match(serverSource, /value: \$\{devMode \? 'true' : 'false'\}/);
 
-  assert.equal(packageJson.scripts.web, 'node scripts/serve-web.mjs --preview');
-  assert.equal(packageJson.scripts['web:preview'], 'node scripts/serve-web.mjs --preview');
+  assert.match(workflowSource, /npm run web:build/);
+  assert.match(workflowSource, /path: dist-web/);
+
+  assert.equal(packageJson.scripts.web, 'npm run web:preview');
+  assert.equal(packageJson.scripts['web:preview'], 'npm run web:build && node scripts/serve-web.mjs --preview');
   assert.equal(packageJson.scripts['web:dev'], 'node scripts/serve-web.mjs --dev');
+  assert.equal(packageJson.scripts['web:build'], 'node scripts/build-runtime-assets.mjs web-preview');
 });

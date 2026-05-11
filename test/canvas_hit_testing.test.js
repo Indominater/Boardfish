@@ -52,3 +52,9 @@ test('background context menu clears object selection before opening', () => {
 
   assert.match(contextMenuSource, /if \(obj\) \{[\s\S]*obj-ctx-menu:open[\s\S]*return;[\s\S]*\}\s*if \(selectedIds\.size\) deselectAll\(\);\s*ctxPos = wp;\s*updateCtxMenuActions\(\);\s*openCtxMenuAt\(clientX, clientY\);/);
 });
+
+test('wheel zoom over visible context menus uses the viewport wheel handler', () => {
+  const inputSource = readSource('src/js/canvas_input.js');
+
+  assert.match(inputSource, /document\.addEventListener\('wheel', \(e\) => \{[\s\S]*isEventInsideVisibleContextMenu[\s\S]*isEventInsideVisibleEyedropperLoupe[\s\S]*if \(!insideContextMenu && !insideEyedropperLoupe\) return;\s*handleViewportWheel\(e\);[\s\S]*\}, \{ capture: true, passive: false \}\);/);
+});

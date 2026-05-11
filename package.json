@@ -5,9 +5,12 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "web": "node scripts/serve-web.mjs --preview",
-    "web:preview": "node scripts/serve-web.mjs --preview",
+    "web": "npm run web:preview",
+    "web:preview": "npm run web:build && node scripts/serve-web.mjs --preview",
     "web:dev": "node scripts/serve-web.mjs --dev",
+    "web:build": "node scripts/build-runtime-assets.mjs web-preview",
+    "desktop:build": "node scripts/build-runtime-assets.mjs desktop-release",
+    "desktop:dev:build": "node scripts/build-runtime-assets.mjs desktop-dev",
     "build": "tauri build",
     "pretest": "node scripts/sync-debug-tools.mjs",
     "test": "node --test",
@@ -17,6 +20,7 @@
     "check": "npm run check:js-syntax && npm test && npm run check:static && npm run check:rust"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "esbuild": "^0.25.12"
   }
 }

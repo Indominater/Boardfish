@@ -4,9 +4,10 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const args = new Set(process.argv.slice(2));
 const devMode = args.has('--dev');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.join(repoRoot, devMode ? 'src' : 'dist-web');
 const port = Number(process.env.PORT || (devMode ? 5173 : 4173));
 const webEnvRelativePath = path.join('js', 'web_env.js');
 

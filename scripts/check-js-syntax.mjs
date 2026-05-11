@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sourceDirs = ['src', 'test'];
+const sourceDirs = ['src', 'scripts', 'test'];
 const extensions = new Set(['.js', '.mjs']);
 
 function collectFiles(dir, out = []) {

@@ -40,15 +40,17 @@ function lineCount(relativePath) {
   return readSource(relativePath).split('\n').length;
 }
 
-function scriptOrder() {
+function manifestScripts(name) {
+  const manifestSource = readSource('src/js/startup_manifest.mjs');
+  const match = manifestSource.match(new RegExp(`export const ${name} = Object\\.freeze\\(\\[([\\s\\S]*?)\\]\\);`));
+  assert.ok(match, `${name} is missing from startup_manifest.mjs`);
+  return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+}
+
+function scriptOrder(name = 'WEB_DEV_SCRIPTS') {
   const indexSource = readSource('src/index.html');
-  assert.match(indexSource, /<script type="module" src="js\/main\.mjs"><\/script>/);
-  const mainSource = readSource('src/js/main.mjs');
-  const moduleImports = [...mainSource.matchAll(/^import '\.\/([^']+)';$/gm)].map((item) => item[1]);
-  const legacyMatch = mainSource.match(/const LEGACY_CONTROLLER_SCRIPTS = \[([\s\S]*?)\];/);
-  assert.ok(legacyMatch, 'LEGACY_CONTROLLER_SCRIPTS is missing');
-  const legacyScripts = [...legacyMatch[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
-  return [...moduleImports, ...legacyScripts];
+  assert.match(indexSource, /<script type="module" src="js\/main\.web\.dev\.mjs"><\/script>/);
+  return manifestScripts(name);
 }
 
 function boardContract() {
@@ -57,7 +59,7 @@ function boardContract() {
 
 test('release startup debugger is gated before initialization', () => {
   const startupDebugSource = readSource('src/js/startup_debug.js');
-  const order = scriptOrder();
+  const order = scriptOrder('WEB_DEV_SCRIPTS');
   const gateIndex = startupDebugSource.indexOf('const DEBUG_TOOLS_ENABLED = globalThis.__BOARDFISH_DEBUG_TOOLS_ENABLED__ === true;');
   const startupIndex = startupDebugSource.indexOf('var StartupDebug = DEBUG_TOOLS_ENABLED ?');
   const noopIndex = startupDebugSource.indexOf('function createNoopStartupDebug()');
@@ -68,6 +70,45 @@ test('release startup debugger is gated before initialization', () => {
   assert.match(startupDebugSource, /Tauri injects this from the Cargo build profile/);
   assert.doesNotMatch(startupDebugSource, /AGENTS: Flip only this flag/);
   assert.ok(order.indexOf('startup_debug.js') < order.indexOf('../app.js'), 'startup debug must load before app startup code');
+});
+
+test('startup variants strip debug and runtime-specific code from release surfaces', () => {
+  const webPreview = manifestScripts('WEB_PREVIEW_SCRIPTS');
+  const desktopRelease = manifestScripts('DESKTOP_RELEASE_SCRIPTS');
+  const webDev = manifestScripts('WEB_DEV_SCRIPTS');
+  const desktopDev = manifestScripts('DESKTOP_DEV_SCRIPTS');
+
+  for (const list of [webPreview, desktopRelease]) {
+    assert.ok(list.includes('runtime_debug_noop.js'), 'release variants must load the no-op debug shim');
+    for (const file of [
+      'startup_debug.js',
+      'debug_core.js',
+      'debug.js',
+      'debug_save.js',
+      'debug_open.js',
+      'debug_export.js',
+      'debug_manual_perf.js',
+      'debug_insert.js',
+      'debug_export_all_diag.js',
+      'debug_text_selection.js',
+      'viewport_debug_ui.js',
+      'eyedropper_debug.js',
+    ]) {
+      assert.ok(!list.includes(file), `${file} should not load in release variants`);
+    }
+  }
+
+  for (const file of ['tauri_bridge.js', 'window_titlebar.js', 'window_recovery.js']) {
+    assert.ok(!webPreview.includes(file), `${file} should not load in web preview`);
+  }
+  for (const file of ['web_env.js', 'web_board_container.js', 'web_limits.js', 'web_runtime.js']) {
+    assert.ok(!desktopRelease.includes(file), `${file} should not load in desktop release`);
+  }
+
+  assert.ok(webDev.includes('debug.js'), 'web dev keeps debug tooling');
+  assert.ok(webDev.includes('runtime_web_native.js'), 'web dev uses the web native shim');
+  assert.ok(desktopDev.includes('debug.js'), 'desktop dev keeps debug tooling');
+  assert.ok(desktopDev.includes('tauri_bridge.js'), 'desktop dev keeps the native bridge');
 });
 
 test('frontend invokes Tauri through the shared wrapper and command catalog', () => {
@@ -124,6 +165,7 @@ test('frontend feature code uses typed Tauri facade instead of raw invoke', () =
     'src/js/debug_export_all_diag.js',
     'src/js/debug_open.js',
     'src/js/debug_save.js',
+    'src/js/runtime_web_native.js',
     'src/js/tauri_bridge.js',
   ]);
   for (const relativePath of frontendSources()) {
@@ -157,11 +199,11 @@ test('typed Tauri facade covers feature command groups', () => {
 });
 
 test('frontend abstraction scripts load before their consumers', () => {
-  const order = scriptOrder();
+  const order = scriptOrder('WEB_DEV_SCRIPTS');
   const before = (a, b) => assert.ok(order.indexOf(a) >= 0 && order.indexOf(a) < order.indexOf(b), `${a} must load before ${b}`);
 
   before('dom_registry.js', '../app.js');
-  before('tauri_bridge.js', '../app.js');
+  before('runtime_web_native.js', '../app.js');
   before('web_runtime.js', 'io_close.js');
   before('web_limits.js', 'image_insert.js');
   before('web_board_container.js', 'web_runtime.js');
@@ -376,6 +418,31 @@ test('web app tab uses the Boardfish icon', () => {
   assert.match(indexSource, /<link rel="apple-touch-icon" href="boardfish-icon\.png" \/>/);
   assert.ok(fs.existsSync(iconPath), 'web favicon image is missing');
   assert.ok(fs.statSync(iconPath).size > 0, 'web favicon image is empty');
+});
+
+test('context action rail links to the Boardfish GitHub page', () => {
+  const indexSource = readSource('src/index.html');
+  const styles = readSource('src/styles.css');
+
+  assert.match(indexSource, /icon_names=dark_mode/);
+  assert.match(indexSource, /id="ctx-btn-dark-mode" type="button" aria-label="Dark Mode" title="Dark Mode" aria-pressed="false"/);
+  assert.match(indexSource, /<span class="material-symbols-outlined" aria-hidden="true">dark_mode<\/span>/);
+  assert.match(indexSource, /id="ctx-btn-github" href="https:\/\/github\.com\/Indominater\/Boardfish" target="_blank" rel="noopener noreferrer" aria-label="GitHub" title="GitHub"/);
+  assert.match(indexSource, /<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">/);
+  assert.match(indexSource, /<div class="ctx-sep ctx-action-sep" aria-hidden="true"><\/div>/);
+  assert.match(styles, /#ctx-menu,\s*#obj-ctx-menu,\s*#ctx-actions,/);
+  assert.match(styles, /#ctx-actions \{[\s\S]*width: calc\(var\(--menu-item-height\) \+ \(var\(--menu-shell-padding\) \* 2\) \+ 2px\);/);
+  assert.match(styles, /#ctx-actions\.visible \{[\s\S]*flex-direction: column;/);
+  assert.match(styles, /\.ctx-action-item \{[\s\S]*height: var\(--menu-item-height\);/);
+  assert.match(styles, /\.ctx-action-icon \.material-symbols-outlined,\s*\.ctx-action-icon svg \{/);
+  assert.match(styles, /\.ctx-action-icon \.material-symbols-outlined \{[\s\S]*'FILL' 0,/);
+});
+
+test('context action rail treats dark mode as the enabled theme state', () => {
+  const contextMenuSource = readSource('src/js/context_menu.js');
+
+  assert.match(contextMenuSource, /darkModeMenuBtn\.setAttribute\('aria-pressed', appTheme === 'dark' \? 'true' : 'false'\)/);
+  assert.match(contextMenuSource, /closeCtxMenu\('command:dark-mode'\)/);
 });
 
 test('viewport and image-store mutations stay behind boundary modules', () => {

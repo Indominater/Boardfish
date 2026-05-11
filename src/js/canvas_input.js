@@ -1,5 +1,5 @@
 // ─── Zoom ─────────────────────────────────────────────────────────────────────
-var ZOOM_MIN = 0.1, ZOOM_MAX = 10;
+var ZOOM_MIN = 0.001, ZOOM_MAX = 100;
 var _editEl = null;
 var _caretVisible = true;
 var _caretBlinkInterval = null;
@@ -85,7 +85,13 @@ function handleViewportWheel(e) {
 
 canvas.addEventListener('wheel', handleViewportWheel, { passive: false });
 document.addEventListener('wheel', (e) => {
-  if (typeof isEventInsideVisibleEyedropperLoupe !== 'function' || !isEventInsideVisibleEyedropperLoupe(e)) return;
+  const insideContextMenu =
+    typeof isEventInsideVisibleContextMenu === 'function' &&
+    isEventInsideVisibleContextMenu(e);
+  const insideEyedropperLoupe =
+    typeof isEventInsideVisibleEyedropperLoupe === 'function' &&
+    isEventInsideVisibleEyedropperLoupe(e);
+  if (!insideContextMenu && !insideEyedropperLoupe) return;
   handleViewportWheel(e);
 }, { capture: true, passive: false });
 

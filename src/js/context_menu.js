@@ -456,6 +456,14 @@ document.addEventListener('click', (e) => {
 
 function ctxActionHotspotRect(button) {
   const rect = button.getBoundingClientRect();
+  if (ctxActions?.contains(button)) {
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+    };
+  }
   const inset = parseFloat(cssVar('--menu-shell-padding')) || 0;
   if (!button.classList.contains('ctx-action-icon')) {
     return {

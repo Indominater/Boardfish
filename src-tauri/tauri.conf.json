@@ -4,7 +4,9 @@
   "version": "1.1.0",
   "identifier": "com.boardfish.desktop",
   "build": {
-    "frontendDist": "../src"
+    "beforeDevCommand": "npm run desktop:dev:build",
+    "beforeBuildCommand": "npm run desktop:build",
+    "frontendDist": "../dist-desktop"
   },
   "app": {
     "withGlobalTauri": true,

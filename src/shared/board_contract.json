@@ -6,7 +6,7 @@
   },
   "objectTypes": ["image", "text"],
   "viewport": {
-    "minZoom": 0.1,
-    "maxZoom": 10
+    "minZoom": 0.001,
+    "maxZoom": 100
   }
 }

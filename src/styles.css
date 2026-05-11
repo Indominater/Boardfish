@@ -354,6 +354,7 @@ body[data-theme="dark"] .window-control-close:active {
 /* ── Context menu ── */
 #ctx-menu,
 #obj-ctx-menu,
+#ctx-actions,
 #eyedropper-loupe,
 .eyedropper-loupe,
 #dialog,
@@ -409,37 +410,34 @@ body[data-theme="dark"] .window-control-close:active {
 
 #ctx-actions {
   display: none;
-  width: auto;
+  width: calc(var(--menu-item-height) + (var(--menu-shell-padding) * 2) + 2px);
   max-width: calc(100vw - 24px);
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: var(--firefox-menu-shadow);
-  overflow: visible;
+  box-sizing: border-box;
 }
 
 #ctx-actions.visible {
   display: flex;
-  gap: var(--menu-shell-padding);
+  flex-direction: column;
+  gap: 0;
 }
 
 .ctx-action-item {
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
   align-items: center;
-  min-width: 98px;
-  height: calc(var(--menu-item-height) + (var(--menu-shell-padding) * 2));
-  padding: var(--menu-shell-padding);
+  justify-content: center;
+  min-width: var(--menu-item-height);
+  width: var(--menu-item-height);
+  height: var(--menu-item-height);
+  padding: 0;
   font-family: inherit;
   font-size: var(--menu-item-font-size);
   font-weight: var(--menu-item-font-weight);
   line-height: var(--menu-item-line-height);
   color: var(--firefox-menu-text);
-  background: var(--firefox-menu-bg);
-  border: 1px solid var(--firefox-menu-border);
-  border-radius: var(--menu-shell-radius);
+  background: transparent;
+  border: 0;
+  border-radius: var(--menu-item-radius);
   box-shadow: none;
   cursor: default;
   letter-spacing: var(--menu-item-letter-spacing);
@@ -449,11 +447,12 @@ body[data-theme="dark"] .window-control-close:active {
   isolation: isolate;
   contain: paint;
   overflow: hidden;
+  text-decoration: none;
 }
 .ctx-action-item::before {
   content: "";
   position: absolute;
-  inset: var(--menu-shell-padding);
+  inset: 0;
   border-radius: var(--menu-item-radius);
   background: transparent;
   pointer-events: none;
@@ -463,26 +462,29 @@ body[data-theme="dark"] .window-control-close:active {
 .ctx-action-item.hotspot-active::before,
 .ctx-action-item[aria-pressed="true"]::before { background: var(--menu-active-bg); }
 .ctx-action-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: calc(var(--menu-item-height) + (var(--menu-shell-padding) * 2));
-  width: calc(var(--menu-item-height) + (var(--menu-shell-padding) * 2));
+  min-width: var(--menu-item-height);
+  width: var(--menu-item-height);
 }
 .ctx-action-icon::before {
-  left: 50%;
-  right: auto;
-  width: var(--menu-item-height);
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  width: auto;
+  transform: none;
 }
-.ctx-action-icon .material-symbols-outlined {
+.ctx-action-icon .material-symbols-outlined,
+.ctx-action-icon svg {
   position: relative;
   z-index: 1;
   display: block;
-  width: 18px;
-  height: 18px;
-  font-size: 18px;
-  line-height: 18px;
+  width: 20px;
+  height: 20px;
+}
+.ctx-action-icon svg {
+  fill: currentColor;
+}
+.ctx-action-icon .material-symbols-outlined {
+  font-size: 20px;
+  line-height: 20px;
   font-variation-settings:
     'FILL' 0,
     'wght' 400,
@@ -491,6 +493,10 @@ body[data-theme="dark"] .window-control-close:active {
   pointer-events: none;
   contain: paint;
   transform: translateZ(0);
+}
+
+.ctx-action-sep {
+  width: 100%;
 }
 
 .ctx-item {

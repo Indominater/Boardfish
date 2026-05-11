@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/web.yml'
       - 'src/**'
+      - 'scripts/build-runtime-assets.mjs'
       - 'scripts/check-js-syntax.mjs'
       - 'package.json'
       - 'package-lock.json'
@@ -41,13 +42,16 @@ jobs:
       - name: Check web source syntax
         run: npm run check:js-syntax
 
+      - name: Build web preview
+        run: npm run web:build
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload web app
         uses: actions/upload-pages-artifact@v3
         with:
-          path: src
+          path: dist-web
 
       - name: Deploy
         id: deployment

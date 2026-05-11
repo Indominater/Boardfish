@@ -27,8 +27,8 @@
 
   function zoomAroundClient(clientX, clientY, nextZoom) {
     const currentZoom = Math.max(zoom || 1, 0.0001);
-    const minZoom = typeof ZOOM_MIN === 'number' ? ZOOM_MIN : 0.1;
-    const maxZoom = typeof ZOOM_MAX === 'number' ? ZOOM_MAX : 10;
+    const minZoom = typeof ZOOM_MIN === 'number' ? ZOOM_MIN : 0.001;
+    const maxZoom = typeof ZOOM_MAX === 'number' ? ZOOM_MAX : 100;
     const normalizedZoom = Math.min(maxZoom, Math.max(minZoom, nextZoom));
     panX = clientX - (clientX - panX) * (normalizedZoom / currentZoom);
     panY = clientY - (clientY - panY) * (normalizedZoom / currentZoom);
