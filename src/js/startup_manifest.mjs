@@ -1,5 +1,6 @@
 export const WEB_DEV_SCRIPTS = Object.freeze([
   'web_env.js',
+  'analytics.js',
   'runtime_web_native.js',
   'dom_registry.js',
   'web_board_container.js',
@@ -60,6 +61,7 @@ export const WEB_DEV_SCRIPTS = Object.freeze([
 
 export const WEB_PREVIEW_SCRIPTS = Object.freeze([
   'web_env.js',
+  'analytics.js',
   'runtime_web_native.js',
   'dom_registry.js',
   'web_board_container.js',

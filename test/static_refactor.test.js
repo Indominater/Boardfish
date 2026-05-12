@@ -117,6 +117,25 @@ test('macOS titlebar drag region is native-only', () => {
   assert.doesNotMatch(source, /if \(IS_MAC\) document\.body\.classList\.add\('is-macos'\);/);
 });
 
+test('privacy-friendly analytics load only in web builds', () => {
+  const webPreview = manifestScripts('WEB_PREVIEW_SCRIPTS');
+  const desktopRelease = manifestScripts('DESKTOP_RELEASE_SCRIPTS');
+  const webDev = manifestScripts('WEB_DEV_SCRIPTS');
+  const desktopDev = manifestScripts('DESKTOP_DEV_SCRIPTS');
+  const analyticsSource = readSource('src/js/analytics.js');
+
+  assert.ok(webDev.includes('analytics.js'), 'web dev should load analytics support');
+  assert.ok(webPreview.includes('analytics.js'), 'web preview should load analytics support');
+  assert.ok(!desktopDev.includes('analytics.js'), 'desktop dev should not load web analytics');
+  assert.ok(!desktopRelease.includes('analytics.js'), 'desktop release should not load web analytics');
+  assert.ok(webPreview.indexOf('analytics.js') < webPreview.indexOf('../app.js'), 'analytics should load before app startup');
+  assert.match(analyticsSource, /https:\/\/plausible\.io\/js\/script\.js/);
+  assert.match(analyticsSource, /doNotTrack/);
+  assert.doesNotMatch(analyticsSource, /clipboard|imageStore|objects|currentFilePath/);
+  assert.match(readSource('src/js/app_bootstrap.js'), /BoardfishAnalytics\?\.track\('app_open'\)/);
+  assert.match(readSource('src/js/context_menu.js'), /BoardfishAnalytics\?\.track\('menu_command', \{ command, source \}\)/);
+});
+
 test('frontend invokes Tauri through the shared wrapper and command catalog', () => {
   for (const relativePath of frontendSources()) {
     const source = readSource(relativePath);

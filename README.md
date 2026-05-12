@@ -70,6 +70,10 @@ cd Boardfish
 npm install
 ```
 
+## Privacy
+
+The hosted web app uses anonymous analytics to count visits and broad UI events. Boardfish does not send board contents, images, text, file names, clipboard data, or other user-created canvas data to analytics.
+
 ## License
 
 Boardfish is source-available under the [Boardfish Source-Available License](LICENSE).
