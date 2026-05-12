@@ -4,26 +4,17 @@ async function saveSelectedImage() {
   const dbg = ExportDebug.start('exportImage', { selectedCount: selectedIds.size });
   const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
   if (imageObjs.length !== 1) { ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length }); return; }
+  ExportDebug.startMassive('exportImage', imageObjs);
   const obj = imageObjs[0];
   const releaseInputShield = acquireInputShield({ keepSelectionOverlay: true });
 
   if (hasTauri()) {
     let tempKeys = [];
+    let busyPill = null;
     try {
       const ext = BoardfishExportUtils.guessImageExtForObjectExport(obj);
       const hex = BoardfishExportUtils.randomHex();
       const defaultName = `image_${hex}.${ext}`;
-      ExportDebug.step(dbg, 'keys:resolve-start', { imageCount: 1, defaultName });
-      const resolved = await resolveExportKeys([obj], dbg);
-      tempKeys = resolved.tempKeys;
-      const key = resolved.keys[0];
-      ExportDebug.step(dbg, 'keys:ready', { keyCount: resolved.keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
-      if (!key) {
-        releaseInputShield();
-        ExportDebug.end(dbg, { skipped: true, reason: 'no-key' });
-        return;
-      }
-
       const path = await ExportDebug.wrap(
         dbg,
         TAURI_COMMANDS.SAVE_IMAGE_FILE_DIALOG,
@@ -37,16 +28,35 @@ async function saveSelectedImage() {
         return;
       }
 
+      busyPill = startPillTask({ message: '0/1', progress: true });
+      const updateProgress = BoardfishExportUtils.createProgressUpdater(1, busyPill);
+      await BoardfishExportUtils.letUiPaint(dbg, 'before-resolve-key');
+      ExportDebug.step(dbg, 'keys:resolve-start', { imageCount: 1, defaultName });
+      const resolved = await resolveExportKeys([obj], dbg, ({ preparedCount }) => {
+        updateProgress('prepare-progress', preparedCount);
+      });
+      tempKeys = resolved.tempKeys;
+      const key = resolved.keys[0];
+      ExportDebug.step(dbg, 'keys:ready', { keyCount: resolved.keys.length, tempKeyCount: tempKeys.length, renderedCount: resolved.renderedCount });
+      if (!key) {
+        finishPillTask({ beforeFinish: releaseInputShield, busyPill });
+        ExportDebug.end(dbg, { skipped: true, reason: 'no-key' });
+        return;
+      }
+
+      updateProgress('save-start', 1, {}, true);
       const result = await ExportDebug.wrap(
         dbg,
         TAURI_COMMANDS.WRITE_IMAGE_FILE_BY_KEY,
         () => BoardfishTauri.writeImageFileByKey(path, key),
         { imgKey: key, path }
       );
+      updateProgress('save-progress', 1, { finishedCount: 1, totalCount: 1 }, true);
       ExportDebug.end(dbg, { saved: true, bytesMB: result?.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : 0 });
-      finishPillTask({ beforeFinish: releaseInputShield, finalMsg: 'Image Exported' });
+      finishPillTask({ beforeFinish: releaseInputShield, busyPill, finalMsg: 'Image Exported' });
     } catch (err) {
-      releaseInputShield();
+      if (busyPill) finishPillTask({ beforeFinish: releaseInputShield, busyPill });
+      else releaseInputShield();
       ExportDebug.end(dbg, { error: String(err) });
       console.error('Save image failed:', err);
     } finally {
@@ -94,12 +104,37 @@ function exportResolveConcurrency() {
   return 3;
 }
 
+const exportSaveBatchSize = (keyCount) => {
+  if (keyCount >= 80) return 8;
+  if (keyCount >= 24) return 6;
+  return 3;
+};
+
+const exportSourceKind = (src) => {
+  if (isNativeImageRef(src)) return 'native-ref';
+  if (typeof isWebImageRef === 'function' && isWebImageRef(src)) return 'web-ref';
+  if (typeof src === 'string') return src.startsWith('data:') ? 'data-url' : 'string';
+  if (!src) return 'missing';
+  return typeof src;
+};
+
+const exportTransformSignature = (obj) => {
+  const transform = imageTransformFromObject(obj);
+  return [
+    obj?.data?.imgKey || '',
+    transform.flipX ? 1 : 0,
+    transform.flipY ? 1 : 0,
+    normalizeRotation(transform.rotation),
+  ].join(':');
+};
+
 // Resolves a list of image objects to img_keys for native folder export.
 // Transformed native images stay in Rust: the existing cached source is decoded,
 // transformed into a temp cache key, and saved by key without JS base64/canvas IPC.
 async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
   const nativeConcurrency = exportResolveConcurrency();
   const exportRunToken = `${Date.now().toString(36)}_${Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0')}`;
+  const resolvePromises = new Map();
   let processed = 0;
   let keyCount = 0;
   let renderedCount = 0;
@@ -109,11 +144,25 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
     hardwareConcurrency: navigator.hardwareConcurrency || '',
   });
 
-  const results = await mapWithConcurrency(imageObjs, nativeConcurrency, async (obj, index) => {
-    const imgKey = obj.data?.imgKey;
-    const progress = async (meta = {}) => {
-      processed++;
-      ExportDebug.recordResolveProgress({
+  const noteProgress = async (meta = {}) => {
+    processed++;
+    ExportDebug.recordResolveProgress({
+      processed,
+      imageCount: imageObjs.length,
+      keyCount,
+      renderedCount,
+      concurrency: nativeConcurrency,
+      ...meta,
+    });
+    if (onProgress) {
+      onProgress({
+        phase: 'prepare-progress',
+        preparedCount: processed,
+        totalCount: imageObjs.length,
+      });
+    }
+    if (processed === 1 || processed % 10 === 0 || processed === imageObjs.length) {
+      ExportDebug.step(dbg, 'keys:progress', {
         processed,
         imageCount: imageObjs.length,
         keyCount,
@@ -121,45 +170,79 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
         concurrency: nativeConcurrency,
         ...meta,
       });
-      if (onProgress) {
-        onProgress({
-          phase: 'prepare-progress',
-          preparedCount: processed,
-          totalCount: imageObjs.length,
-        });
-      }
-      if (processed === 1 || processed % 10 === 0 || processed === imageObjs.length) {
-        ExportDebug.step(dbg, 'keys:progress', {
-          processed,
-          imageCount: imageObjs.length,
-          keyCount,
-          renderedCount,
-          concurrency: nativeConcurrency,
-          ...meta,
-        });
-      }
-      if (processed % 3 === 0 || processed === imageObjs.length) await BoardfishExportUtils.delay(0);
-    };
+    }
+    if (processed % 3 === 0 || processed === imageObjs.length) {
+      await BoardfishExportUtils.yieldToEventLoop(dbg, 'resolve-keys', { processed, imageCount: imageObjs.length });
+    }
+  };
+
+  const recordResolvedObject = async (obj, index, result, meta = {}) => {
+    if (result?.key) keyCount++;
+    if (result?.rendered) renderedCount++;
+    ExportDebug.recordResolve({
+      index,
+      objectId: obj?.id || '',
+      imgKey: obj?.data?.imgKey || '',
+      key: result?.key || '',
+      tempKey: result?.tempKey || '',
+      rendered: !!result?.rendered,
+      nativeTransform: !!result?.nativeTransform,
+      fallbackRender: !!result?.fallbackRender,
+      phase: meta.phase || result?.phase || '',
+      sourceKind: result?.sourceKind || meta.sourceKind || '',
+      bytesMB: result?.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : '',
+      ms: meta.ms,
+      deduped: !!meta.deduped,
+      reusedTempKey: !!meta.reusedTempKey,
+      skipped: !!result?.skipped,
+      error: result?.error || '',
+    });
+    await noteProgress({
+      index,
+      imgKey: obj?.data?.imgKey,
+      phase: meta.phase || result?.phase,
+      deduped: !!meta.deduped,
+      nativeTransform: !!result?.nativeTransform,
+      fallbackRender: !!result?.fallbackRender,
+      skipped: !!result?.skipped,
+    });
+  };
+
+  const resolveUniqueObject = async (obj, index) => {
+    const imgKey = obj?.data?.imgKey;
+    const source = BoardfishImageStore.getSource(imgKey);
+    const sourceKind = exportSourceKind(source);
+    if (!imgKey || !source) {
+      return {
+        key: '',
+        tempKey: null,
+        rendered: false,
+        skipped: true,
+        phase: 'missing-source',
+        sourceKind,
+        error: !imgKey ? 'missing imgKey' : 'missing image source',
+      };
+    }
 
     if (!imageNeedsRendering(obj)) {
       const itemStart = performance.now();
-      await cacheImageSourceForExport(imgKey, BoardfishImageStore.getSource(imgKey), dbg);
-      keyCount++;
-      ExportDebug.recordResolve({
-        index,
-        objectId: obj.id,
-        imgKey,
+      await cacheImageSourceForExport(imgKey, source, dbg);
+      return {
         key: imgKey,
-        ms: performance.now() - itemStart,
+        tempKey: null,
+        rendered: false,
+        nativeTransform: false,
+        fallbackRender: false,
         phase: 'passthrough',
-      });
-      await progress({ index, imgKey, nativeTransform: false });
-      return { key: imgKey, tempKey: null, rendered: false };
+        sourceKind,
+        ms: performance.now() - itemStart,
+      };
     }
 
     const tempKey = `__export_tmp_${exportRunToken}_${index}_${obj.id}`;
-    if (hasTauri() && isNativeImageRef(BoardfishImageStore.getSource(imgKey))) {
+    if (hasTauri() && isNativeImageRef(source)) {
       const nativeStart = performance.now();
+      const transform = imageTransformFromObject(obj);
       const sourceToken = createImageSourceToken(tempKey);
       try {
         const result = await ExportDebug.wrap(
@@ -168,42 +251,40 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
           () => BoardfishTauri.registerTransformedImageSource({
             imgKey,
             tempKey,
-            ...imageTransformFromObject(obj),
+            ...transform,
             sourceToken,
           }),
           {
             imgKey,
             tempKey,
-            ...imageTransformFromObject(obj),
+            ...transform,
           }
         );
-        keyCount++;
-        renderedCount++;
-        ExportDebug.recordResolve({
-          index,
-          objectId: obj.id,
-          imgKey,
-          key: tempKey,
-          tempKey,
-          rendered: true,
-          nativeTransform: true,
-          phase: 'native-transform',
-          ms: performance.now() - nativeStart,
-        });
+        const ms = performance.now() - nativeStart;
         ExportDebug.step(dbg, 'native-transform-image', {
           index,
           imgKey,
           tempKey,
-          ms: performance.now() - nativeStart,
+          ms,
           bytesMB: result?.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : '',
           width: result?.width ?? '',
           height: result?.height ?? '',
           decodeMs: result?.decodeMs ?? '',
           transformMs: result?.transformMs ?? '',
           encodeMs: result?.encodeMs ?? '',
+          totalMs: result?.totalMs ?? '',
         });
-        await progress({ index, imgKey, nativeTransform: true });
-        return { key: tempKey, tempKey, rendered: true };
+        return {
+          key: tempKey,
+          tempKey,
+          rendered: true,
+          nativeTransform: true,
+          fallbackRender: false,
+          phase: 'native-transform',
+          sourceKind,
+          bytes: result?.bytes || 0,
+          ms,
+        };
       } catch (err) {
         ExportDebug.step(dbg, 'native-transform-image:error', { index, imgKey, tempKey, ms: performance.now() - nativeStart, error: String(err) });
       }
@@ -214,59 +295,81 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
       const dataUrl = await getRenderedImageDataUrl(obj, dbg);
       ExportDebug.step(dbg, 'rendered-image', { imgKey, ms: performance.now() - renderStart, hasDataUrl: !!dataUrl, dataUrlLen: dataUrl?.length || 0 });
       if (!dataUrl) {
-        ExportDebug.recordResolve({
-          index,
-          objectId: obj.id,
-          imgKey,
+        return {
+          key: '',
+          tempKey: null,
+          rendered: false,
           fallbackRender: true,
           skipped: true,
           phase: 'fallback-render',
+          sourceKind,
           ms: performance.now() - renderStart,
           error: 'render returned empty data URL',
-        });
-        await progress({ index, imgKey, fallbackRender: true, skipped: true });
-        return null;
+        };
       }
       const sourceToken = createImageSourceToken(tempKey);
-      await ExportDebug.wrap(
+      const registerResult = await ExportDebug.wrap(
         dbg,
         TAURI_COMMANDS.REGISTER_IMAGE_SOURCE,
         () => BoardfishTauri.registerImageSource(tempKey, dataUrl, sourceToken),
         { imgKey: tempKey, dataUrlLen: dataUrl.length }
       );
-      keyCount++;
-      renderedCount++;
-      ExportDebug.recordResolve({
-        index,
-        objectId: obj.id,
-        imgKey,
+      return {
         key: tempKey,
         tempKey,
         rendered: true,
+        nativeTransform: false,
         fallbackRender: true,
         phase: 'fallback-render',
+        sourceKind,
+        bytes: registerResult?.bytes || 0,
         ms: performance.now() - renderStart,
-      });
-      await progress({ index, imgKey, fallbackRender: true });
-      return { key: tempKey, tempKey, rendered: true };
+      };
     } catch (err) {
       ExportDebug.step(dbg, 'rendered-image:error', { imgKey, ms: performance.now() - renderStart, error: String(err) });
-      ExportDebug.recordResolve({
-        index,
-        objectId: obj.id,
-        imgKey,
+      return {
+        key: '',
+        tempKey: null,
+        rendered: false,
         fallbackRender: true,
         phase: 'fallback-render',
+        sourceKind,
         ms: performance.now() - renderStart,
         error: String(err),
-      });
-      await progress({ index, imgKey, fallbackRender: true, error: String(err) });
-      return null;
+      };
     }
+  };
+
+  const results = await mapWithConcurrency(imageObjs, nativeConcurrency, async (obj, index) => {
+    const imgKey = obj.data?.imgKey;
+    const source = BoardfishImageStore.getSource(imgKey);
+    const dedupeKey = imageNeedsRendering(obj)
+      ? `render:${exportTransformSignature(obj)}`
+      : `passthrough:${imgKey || ''}:${exportSourceKind(source)}`;
+    const itemStart = performance.now();
+    const existing = resolvePromises.get(dedupeKey);
+    if (existing) {
+      const result = await existing;
+      const reused = result ? { ...result } : null;
+      await recordResolvedObject(obj, index, reused, {
+        ms: performance.now() - itemStart,
+        deduped: true,
+        reusedTempKey: !!reused?.tempKey,
+        phase: reused?.phase ? `${reused.phase}:deduped` : 'deduped',
+      });
+      return reused;
+    }
+
+    const promise = resolveUniqueObject(obj, index);
+    resolvePromises.set(dedupeKey, promise);
+    const result = await promise;
+    if (result?.ms == null) result.ms = performance.now() - itemStart;
+    await recordResolvedObject(obj, index, result, { ms: result?.ms });
+    return result;
   });
 
   const keys = results.map(r => r?.key).filter(Boolean);
-  const tempKeys = results.map(r => r?.tempKey).filter(Boolean);
+  const tempKeys = [...new Set(results.map(r => r?.tempKey).filter(Boolean))];
   const finalRenderedCount = results.filter(r => r?.rendered).length;
   ExportDebug.recordResolveDone({
     processed,
@@ -408,7 +511,9 @@ async function exportImageBatch({
         return;
       }
       updateProgress('save-start', imageObjs.length, {}, true);
-      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, 3, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
+      const saveBatchSize = exportSaveBatchSize(keys.length);
+      ExportDebug.step(dbg, 'save:batch-plan', { keyCount: keys.length, batchSize: saveBatchSize });
+      const saveResult = await saveExportKeysToFolderInBatches(folder, keys, dbg, saveBatchSize, ({ finishedCount, totalCount, batchIndex, batchCount }) => {
         updateProgress('save-progress', imageObjs.length, { batchIndex, batchCount, savedKeyCount: finishedCount, keyCount: totalCount });
       });
       const savedCount = typeof saveResult === 'number' ? saveResult : (saveResult?.savedCount || 0);

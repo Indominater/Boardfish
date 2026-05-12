@@ -44,3 +44,18 @@ test('writes and reads Boardfish .bf containers in browser format', async () => 
 test('measures data URL payload bytes without base64 inflation', () => {
   assert.equal(WebContainer.dataUrlByteLength('data:image/png;base64,AQIDBA=='), 4);
 });
+
+test('creates byte-backed web image refs for inserted files', async () => {
+  const source = WebContainer.createWebImageRef({
+    path: 'images/img-2.jpg',
+    mime: 'image/jpeg',
+    ext: 'jpg',
+    bytes: new Uint8Array([1, 2, 3, 4, 5]),
+  });
+
+  assert.equal(WebContainer.isWebImageRef(source), true);
+  assert.equal(source.bytes, 5);
+  assert.equal(source.dataUrl ? source.dataUrl.startsWith('data:image/jpeg;base64,') : true, true);
+  assert.equal(WebContainer.bytesForImageSource(source).length, 5);
+  assert.equal(WebContainer.dataUrlForImageSource(source), 'data:image/jpeg;base64,AQIDBAU=');
+});

@@ -7,38 +7,9 @@ var _selChangeListener = null;
 var _editHistoryTimer = null;
 var _editHistoryLastContent = null;
 var EDIT_HISTORY_DEBOUNCE_MS = 500;
-var _wheelPanRaf = null;
-var _wheelPanDX = 0;
-var _wheelPanDY = 0;
-
-function flushWheelPan() {
-  _wheelPanRaf = null;
-  if (!_wheelPanDX && !_wheelPanDY) return;
-  if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling) {
-    _wheelPanDX = 0;
-    _wheelPanDY = 0;
-    return;
-  }
-  const dx = _wheelPanDX;
-  const dy = _wheelPanDY;
-  _wheelPanDX = 0;
-  _wheelPanDY = 0;
-  BoardfishViewportState.panBy(-dx, -dy);
-  scheduleTransform('wheel-pan');
-}
-
-function scheduleWheelPan(dx, dy) {
-  _wheelPanDX += dx;
-  _wheelPanDY += dy;
-  if (_wheelPanRaf) return;
-  _wheelPanRaf = requestAnimationFrame(flushWheelPan);
-}
 
 function cancelWheelPan() {
-  if (_wheelPanRaf) cancelAnimationFrame(_wheelPanRaf);
-  _wheelPanRaf = null;
-  _wheelPanDX = 0;
-  _wheelPanDY = 0;
+  // Wheel panning is applied immediately and coalesced by the shared render RAF.
 }
 
 
@@ -69,15 +40,16 @@ function handleViewportWheel(e) {
         : e.deltaY < 0 ? 1.1 : 1 / 1.1;
       const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
       BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, newZoom);
-      scheduleTransform('wheel-zoom');
+      scheduleTransform('wheel-zoom', e);
       ViewportDebug.end(dbg, { mode: 'zoom', newZoom, panX, panY });
       return;
     }
 
     if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('wheel-pan');
     ViewportDebug.count('wheelPan');
-    scheduleWheelPan(e.deltaX, e.deltaY);
-    ViewportDebug.end(dbg, { mode: 'pan', pendingDX: _wheelPanDX, pendingDY: _wheelPanDY, panX, panY });
+    BoardfishViewportState.panBy(-e.deltaX, -e.deltaY);
+    scheduleTransform('wheel-pan', e);
+    ViewportDebug.end(dbg, { mode: 'pan', appliedDX: e.deltaX, appliedDY: e.deltaY, panX, panY });
   } finally {
     if (collectDebug) ViewportDebug.timing('wheelHandler', performance.now() - handlerStart);
   }
@@ -151,7 +123,7 @@ function startMousePan(e) {
       ViewportDebug.count('mousePanMoves');
       if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('mouse-pan', 240);
       BoardfishViewportState.setPan(startPanX + (ev.clientX - startX), startPanY + (ev.clientY - startY));
-      scheduleTransform('mouse-pan');
+      scheduleTransform('mouse-pan', ev);
     } finally {
       if (collectDebug) ViewportDebug.timing('mousePanHandler', performance.now() - handlerStart);
     }

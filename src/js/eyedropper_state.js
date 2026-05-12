@@ -30,7 +30,7 @@ var _eyedropperLastMouseEvent = null;
 var eyedropperSafeImageCache = new Map();
 var eyedropperSafeImagePromises = new Map();
 var eyedropperSafeDisplayReloadPromises = new Map();
-var EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT = 256 * 1024 * 1024;
+var EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT = 1024 * 1024 * 1024;
 var eyedropperSafeScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
   memoryLimit: EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT,
   onEvict() { EyedropperDebug._count('safeScaledEvictions'); },
@@ -74,6 +74,20 @@ var EYEDROPPER_SAFE_TILE_MEMORY_LIMIT = 32 * 1024 * 1024;
 var EYEDROPPER_PREVIEW_ZOOM_SCALE = 3;
 var EYEDROPPER_PREVIEW_CSS = 96;
 var EYEDROPPER_LOUPE_CSS_HEIGHT = 392;
+
+const hasEyedropperNativePixelCacheSource = (key) => {
+  if (!key) return false;
+  return !!(
+    isNativeImageRef(imageStore[key]) ||
+    imageAssetUrlCache[key] ||
+    eyedropperNativeDecodePrewarm.active.has(key) ||
+    eyedropperNativeDecodePrewarm.ready.has(key)
+  );
+};
+
+Object.assign(globalThis, {
+  hasEyedropperNativePixelCacheSource,
+});
 
 const resetEyedropperCardPreviewState = (card) => card && Object.assign(card, {
   previewStateVersion: (card.previewStateVersion || 0) + 1,

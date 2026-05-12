@@ -41,18 +41,18 @@
   }
 
   function canEyedropperDecodeCachedPixels(key) {
-    if (!key || typeof hasTauri !== 'function' || !hasTauri() || !BoardfishTauri?.prewarmCachedImagePixels) return false;
-    if (!isNativeImageRef(imageStore[key])) return false;
+    if (!key) return false;
+    if (typeof hasTauri !== 'function' || !hasTauri() || !BoardfishTauri?.prewarmCachedImagePixels) return false;
+    if (!globalThis.hasEyedropperNativePixelCacheSource?.(key)) return false;
     if (imageSourceCachePromises.has(key)) return false;
     const size = eyedropperDecodeImageSize(key);
     return size.width > 0 && size.height > 0;
   }
 
-  function isEyedropperDecodeCandidate(obj, visibleRect) {
+  function isEyedropperDecodeCandidate(obj) {
     const key = obj?.data?.imgKey;
     return !!(obj?.type === 'image' &&
       key &&
-      objectIntersectsRect(obj, visibleRect) &&
       canEyedropperDecodeCachedPixels(key) &&
       !eyedropperNativeDecodePrewarm.active.has(key) &&
       !eyedropperNativeDecodePrewarm.ready.has(key) &&
@@ -70,15 +70,13 @@
   }
 
   function findEyedropperBackgroundDecodeCandidate(decoderId) {
-    const visibleRect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(0) : null;
-    if (!visibleRect) return null;
     const pointer = decoderId === 'd1' ? currentEyedropperPointerWorldPoint() : null;
     if (decoderId === 'd1' && !pointer) return null;
 
     let best = null;
     for (let i = 0; i < objects.length; i++) {
       const obj = objects[i];
-      if (!isEyedropperDecodeCandidate(obj, visibleRect)) continue;
+      if (!isEyedropperDecodeCandidate(obj)) continue;
       const key = obj.data.imgKey;
       const candidate = {
         key,
@@ -101,8 +99,7 @@
     const point = clientToBoardWorldPoint(event.clientX, event.clientY);
     const topObject = topObjectAtWorldPoint(point);
     if (topObject?.type !== 'image') return null;
-    const visibleRect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(0) : null;
-    if (!isEyedropperDecodeCandidate(topObject, visibleRect)) return null;
+    if (!isEyedropperDecodeCandidate(topObject)) return null;
     const key = topObject.data.imgKey;
     return {
       key,

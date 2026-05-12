@@ -15,6 +15,7 @@ var _imageDecodeQueue = [];
 var _imageDecodeActive = 0;
 var _imageDecodeScheduled = false;
 var MAX_IMAGE_DECODE_ACTIVE = 2;
+const MAX_OPEN_IMAGE_DECODE_ACTIVE = 8;
 var imageReadyPromises = new Map();
 var imageSourceRequestCounter = 1;
 
@@ -350,10 +351,16 @@ function convertTauriFileSrc(path) {
   return tauriConvertFileSrc(path);
 }
 
-function scheduleImageReadyRender(source = 'image-load') {
+const IMAGE_READY_RENDER_INTERVAL_MS = 120;
+const BULK_IMAGE_READY_RENDER_INTERVAL_MS = 450;
+
+function scheduleImageReadyRender(source = 'image-load', options = {}) {
   invalidateOffscreen();
   const now = performance.now();
-  if (now - _imageReadyLastRender > 120) {
+  const intervalMs = Number(options.minIntervalMs) > 0
+    ? Number(options.minIntervalMs)
+    : (_bulkImageInsertDepth > 0 ? BULK_IMAGE_READY_RENDER_INTERVAL_MS : IMAGE_READY_RENDER_INTERVAL_MS);
+  if (now - _imageReadyLastRender > intervalMs) {
     _imageReadyLastRender = now;
     scheduleRender(true, false, source);
   } else {
@@ -518,7 +525,10 @@ function scheduleImageDecodeQueue() {
 
 function processImageDecodeQueue() {
   _imageDecodeScheduled = false;
-  while (_imageDecodeActive < MAX_IMAGE_DECODE_ACTIVE && _imageDecodeQueue.length) {
+  const activeLimit = (typeof _boardOpening !== 'undefined' && _boardOpening)
+    ? MAX_OPEN_IMAGE_DECODE_ACTIVE
+    : MAX_IMAGE_DECODE_ACTIVE;
+  while (_imageDecodeActive < activeLimit && _imageDecodeQueue.length) {
     const task = _imageDecodeQueue.shift();
     _imageDecodeActive++;
     task()
@@ -559,6 +569,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     cachePreviewMs: 0,
     cacheRenderScheduleMs: 0,
     cacheReadbackProbeMs: 0,
+    cacheReadyStage: '',
     skippedReadbackProbe: '',
     requiredReadbackSafe: options.requireReadbackSafe === true,
     readbackSafe: '',
@@ -583,8 +594,16 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   }
   let img = loadedImg || new Image();
   let resolveReady;
+  let readyResolved = false;
   const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
   imageReadyPromises.set(key, readyPromise);
+  function resolveReadyOnce(stage) {
+    if (readyResolved) return;
+    readyResolved = true;
+    cacheMetrics.cacheReadyStage = stage;
+    cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
+    resolveReady({ ...cacheMetrics });
+  }
   // ImageBitmap creation handles decode work for the renderer. Keeping this in a
   // bounded queue avoids serializing large-image hydration while still limiting
   // memory pressure during board open.
@@ -594,7 +613,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
       cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
       ViewportDebug.end(vpDbg, { key, stale: true });
       OpenDebug.step(dbg, 'cache-image:stale', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
-      resolveReady(cacheMetrics);
+      resolveReadyOnce('stale');
       return;
     }
     const loadMs = performance.now() - loadStart;
@@ -645,7 +664,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
             ViewportDebug.end(vpDbg, { key, stale: true, fallbackError: String(err) });
             OpenDebug.step(dbg, 'cache-image:readback-fallback:stale', { imgKey: key, ms: cacheMetrics.cacheTotalMs, error: String(err) });
           }
-          resolveReady(cacheMetrics);
+          resolveReadyOnce('error');
         });
       return;
     }
@@ -653,6 +672,23 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     img = loaded;
     imageCache[key] = loaded;
     if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-load');
+    if (options.resolveOnLoad === true) {
+      const displayRenderScheduleStart = performance.now();
+      scheduleImageReadyRender('image-display-ready', {
+        minIntervalMs: options.readyRenderMinIntervalMs,
+      });
+      if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
+        scheduleVisibleScaledVariantPrewarmAfterIdle('image-display-ready');
+      }
+      cacheMetrics.cacheRenderScheduleMs += performance.now() - displayRenderScheduleStart;
+      OpenDebug.step(dbg, 'cache-image:display-ready', {
+        imgKey: key,
+        ms: performance.now() - cacheStart,
+        renderScheduleMs: cacheMetrics.cacheRenderScheduleMs,
+        readyStage: 'display',
+      });
+      resolveReadyOnce('display');
+    }
 
     const queuedAt = performance.now();
     OpenDebug.step(dbg, 'cache-image:decode-queue:queued', { imgKey: key, active: _imageDecodeActive, queued: _imageDecodeQueue.length });
@@ -694,7 +730,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
         cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
         ViewportDebug.end(vpDbg, { key, stale: true });
         OpenDebug.step(dbg, 'cache-image:stale', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
-        resolveReady(cacheMetrics);
+        resolveReadyOnce('stale');
         return;
       }
 
@@ -715,7 +751,9 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
         OpenDebug.step(dbg, 'cache-image:previewBitmap:error', { imgKey: key, ms: previewMs, error: String(err) });
       } finally {
         const renderScheduleStart = performance.now();
-        scheduleImageReadyRender('image-load');
+        scheduleImageReadyRender('image-load', {
+          minIntervalMs: options.readyRenderMinIntervalMs,
+        });
         if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
           scheduleVisibleScaledVariantPrewarmAfterIdle('image-ready');
         }
@@ -743,7 +781,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
           bitmapReady: !!imageBitmapCache[key],
           bitmapFailed: imageBitmapFailed.has(key),
         });
-        resolveReady(cacheMetrics);
+        resolveReadyOnce('bitmap');
       }
     });
   }
@@ -753,7 +791,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
       cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
       ViewportDebug.end(vpDbg, { key, stale: true, error: 'image load failed' });
       OpenDebug.step(dbg, 'cache-image:stale-load-error', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
-      resolveReady(cacheMetrics);
+      resolveReadyOnce('stale');
       return;
     }
     imageBitmapFailed.add(key);
@@ -777,7 +815,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
         sourcePrefix: srcInfo.prefix,
       });
     }
-    resolveReady(cacheMetrics);
+    resolveReadyOnce('error');
   };
   if (loadedImg) {
     ViewportDebug.step(vpDbg, 'reuse-loaded-image', { width: img.naturalWidth, height: img.naturalHeight });

@@ -67,8 +67,44 @@
   function crc32(bytes) {
     if (!crcTable) crcTable = makeCrcTable();
     let crc = 0xFFFFFFFF;
-    for (let i = 0; i < bytes.length; i++) {
+    crc = crc32Update(crc, bytes, 0, bytes.length);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function crc32Update(crc, bytes, start = 0, end = bytes.length) {
+    if (!crcTable) crcTable = makeCrcTable();
+    for (let i = start; i < end; i++) {
       crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return crc >>> 0;
+  }
+
+  function nowMs() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+  }
+
+  function yieldToEventLoop() {
+    if (root.scheduler?.yield) return root.scheduler.yield();
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  async function maybeYield(state) {
+    if (!state || state.everyMs <= 0) return;
+    const now = nowMs();
+    if (now - state.lastYieldAt < state.everyMs) return;
+    state.lastYieldAt = now;
+    await yieldToEventLoop();
+  }
+
+  async function crc32Async(bytes, yieldState = null) {
+    if (!crcTable) crcTable = makeCrcTable();
+    let crc = 0xFFFFFFFF;
+    const chunkSize = 1024 * 1024;
+    for (let start = 0; start < bytes.length; start += chunkSize) {
+      crc = crc32Update(crc, bytes, start, Math.min(bytes.length, start + chunkSize));
+      await maybeYield(yieldState);
     }
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
@@ -167,6 +203,43 @@
     const central = concatBytes(centralParts);
     const eocd = endOfCentralDirectory(normalized.length, central.length, centralOffset);
     return concatBytes([...localParts, central, eocd]);
+  }
+
+  async function createZipBlob(entries, options = {}) {
+    const normalized = entries.map((entry) => ({
+      name: entry.name,
+      data: entry.data instanceof Uint8Array ? entry.data : new Uint8Array(entry.data || []),
+      date: entry.date || new Date(),
+    }));
+    const yieldState = {
+      everyMs: Number(options.yieldEveryMs) || 48,
+      lastYieldAt: nowMs(),
+    };
+    for (const entry of normalized) entry.crc = await crc32Async(entry.data, yieldState);
+
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+    for (const entry of normalized) {
+      const local = localFileHeader(entry, offset);
+      localParts.push(local.bytes, entry.data);
+      offset += local.bytes.length + entry.data.length;
+      centralParts.push(centralDirectoryHeader(entry, local));
+    }
+    const centralOffset = offset;
+    const central = concatBytes(centralParts);
+    const eocd = endOfCentralDirectory(normalized.length, central.length, centralOffset);
+    const parts = [...localParts, central, eocd];
+    const byteLength = offset + central.length + eocd.length;
+    const blob = new Blob(parts, { type: 'application/octet-stream' });
+    const keepBytesBelow = Number(options.keepBytesBelow) || 8 * 1024 * 1024;
+    const bytes = byteLength <= keepBytesBelow ? new Uint8Array(await blob.arrayBuffer()) : null;
+    return {
+      blob,
+      bytes,
+      byteLength,
+      mode: bytes ? 'blob-parts+materialized-small' : 'blob-parts',
+    };
   }
 
   async function blobToBytes(blob) {
@@ -427,21 +500,19 @@
     return entries;
   }
 
-  function blobFromBytes(bytes, type = 'application/octet-stream') {
-    return new Blob([bytes], { type });
-  }
-
   async function createBoardContainerBlob(board, rawImageStore = {}) {
     const boardJson = JSON.stringify(board);
     const boardBytes = utf8Encode(boardJson);
     const imageEntries = buildImageEntries(board, rawImageStore);
-    const zipBytes = createZip([
+    const zip = await createZipBlob([
       { name: 'board.json', data: boardBytes },
       ...imageEntries.map((entry) => ({ name: entry.path, data: entry.bytes })),
     ]);
     return {
-      blob: blobFromBytes(zipBytes, 'application/octet-stream'),
-      bytes: zipBytes,
+      blob: zip.blob,
+      bytes: zip.bytes,
+      zipBytes: zip.byteLength,
+      zipMode: zip.mode,
       boardJsonBytes: boardBytes.length,
       imageBytes: imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0),
       imageCount: imageEntries.length,
@@ -501,7 +572,9 @@
 
   const api = Object.freeze({
     createBoardContainerBlob,
+    createWebImageRef,
     createZip,
+    createZipBlob,
     crc32,
     dataUrlByteLength,
     dataUrlForImageSource,

@@ -43,6 +43,15 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  async function yieldToEventLoop(dbg, phase, meta = {}) {
+    const t0 = performance.now();
+    await delay(0);
+    const ms = performance.now() - t0;
+    ExportDebug.step(dbg, 'ui:event-loop-yield', { phase, ms, ...meta });
+    ExportDebug.recordEventLoopYield?.({ phase, ms, ...meta });
+    return ms;
+  }
+
   function nextAnimationFrame() {
     return new Promise(resolve => requestAnimationFrame(() => resolve()));
   }
@@ -52,7 +61,9 @@
     ExportDebug.step(dbg, 'ui:paint-wait:start', { phase });
     await nextAnimationFrame();
     await nextAnimationFrame();
-    ExportDebug.step(dbg, 'ui:paint-wait:end', { phase, ms: performance.now() - t0 });
+    const ms = performance.now() - t0;
+    ExportDebug.step(dbg, 'ui:paint-wait:end', { phase, ms });
+    ExportDebug.recordEventLoopYield?.({ phase, ms, kind: 'paint-wait' });
   }
 
   function createProgressUpdater(totalCount, busyPill) {
@@ -94,6 +105,10 @@
       failedCount: result.failedCount ?? result.failed_count ?? 0,
       missingCount: result.missingCount ?? result.missing_count ?? 0,
       bytesMB: result.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : 0,
+      requestedCount: result.requestedCount ?? result.requested_count ?? '',
+      sourceCount: result.sourceCount ?? result.source_count ?? '',
+      writeConcurrency: result.writeConcurrency ?? result.write_concurrency ?? '',
+      writeMs: result.writeMs ?? result.write_ms ?? '',
       error: result.errors?.length ? result.errors.slice(0, 3).join(' | ') : '',
     };
   }
@@ -132,6 +147,15 @@
       name: options.filename || `image_${index + 1}.png`,
       data,
       mime: 'image/png',
+      debug: {
+        phase: 'web-rendered',
+        rendered: true,
+        fallbackRender: true,
+        sourceKind: imageSourceKind(source),
+        bytes: data.length,
+        width,
+        height,
+      },
     };
   }
 
@@ -144,18 +168,56 @@
           name: withImageExtension(name, ext),
           data,
           mime: source.mime || mimeForImageExt(ext),
+          debug: {
+            phase: 'web-original',
+            rendered: false,
+            sourceKind: 'web-ref',
+            bytes: data.length,
+          },
         };
       } catch (_) {}
     }
     if (typeof source === 'string' && source.startsWith('data:') && root.BoardfishWebBoardContainer?.dataUrlToBytes) {
       const ext = guessImageExtFromDataUrl(source);
+      const data = root.BoardfishWebBoardContainer.dataUrlToBytes(source);
       return {
         name: withImageExtension(name, ext),
-        data: root.BoardfishWebBoardContainer.dataUrlToBytes(source),
+        data,
         mime: dataUrlMime(source),
+        debug: {
+          phase: 'web-original',
+          rendered: false,
+          sourceKind: 'data-url',
+          bytes: data.length,
+        },
       };
     }
     return null;
+  }
+
+  function imageSourceKind(source) {
+    if (typeof isNativeImageRef === 'function' && isNativeImageRef(source)) return 'native-ref';
+    if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return 'web-ref';
+    if (typeof source === 'string') return source.startsWith('data:') ? 'data-url' : 'string';
+    if (!source) return 'missing';
+    return typeof source;
+  }
+
+  function recordWebResolveEntry(dbg, obj, index, entry, ms, extra = {}) {
+    ExportDebug.recordResolve?.({
+      index,
+      objectId: obj?.id || '',
+      imgKey: obj?.data?.imgKey || '',
+      key: entry?.name || '',
+      rendered: !!entry?.debug?.rendered,
+      fallbackRender: !!entry?.debug?.fallbackRender,
+      phase: entry?.debug?.phase || extra.phase || '',
+      sourceKind: entry?.debug?.sourceKind || imageSourceKind(BoardfishImageStore.getSource(obj?.data?.imgKey)),
+      bytesMB: entry?.debug?.bytes ? Math.round(entry.debug.bytes / 1024 / 1024 * 100) / 100 : '',
+      ms,
+      skipped: !entry,
+      error: extra.error || '',
+    });
   }
 
   async function downloadImageObjects(imageObjs, dbg, options = {}) {
@@ -171,15 +233,32 @@
     const downloads = [];
     const usedNames = new Set();
     let skippedCount = 0;
+    let renderedCount = 0;
+    ExportDebug.recordResolveStart?.({
+      imageCount: imageObjs.length,
+      method: target?.handle ? 'file-picker' : (canZip ? 'zip' : 'download'),
+      targetMode: options.targetMode || 'auto',
+    });
     for (let i = 0; i < imageObjs.length; i++) {
+      const itemStart = performance.now();
       const entry = await imageObjectDownloadEntry(imageObjs[i], i, dbg, {
         filename: imageObjs.length === 1 ? options.filename : uniqueImageExportName(imageObjs[i], usedNames),
       });
       if (!entry) {
         skippedCount++;
+        recordWebResolveEntry(dbg, imageObjs[i], i, null, performance.now() - itemStart, { phase: 'web-skipped' });
         continue;
       }
       downloads.push(entry);
+      if (entry.debug?.rendered) renderedCount++;
+      recordWebResolveEntry(dbg, imageObjs[i], i, entry, performance.now() - itemStart);
+      ExportDebug.recordResolveProgress?.({
+        processed: i + 1,
+        imageCount: imageObjs.length,
+        keyCount: downloads.length,
+        renderedCount,
+        skippedCount,
+      });
       if (typeof options.onProgress === 'function') {
         options.onProgress({
           phase: 'prepare-progress',
@@ -187,18 +266,40 @@
           totalCount: imageObjs.length,
         });
       }
-      if (i % 2 === 1 || i === imageObjs.length - 1) await delay(0);
+      if (i % 2 === 1 || i === imageObjs.length - 1) await yieldToEventLoop(dbg, 'web-prepare', { processed: i + 1, imageCount: imageObjs.length });
     }
+    ExportDebug.recordResolveDone?.({
+      processed: imageObjs.length,
+      imageCount: imageObjs.length,
+      keyCount: downloads.length,
+      renderedCount,
+      skippedCount,
+    });
 
     if (!downloads.length) return { downloadedCount: 0, skippedCount, method: 'none' };
 
     if (downloads.length === 1 || !canZip) {
       const item = downloads[0];
       const blob = new Blob([item.data], { type: item.mime || 'image/png' });
+      ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 1, method: target?.handle ? 'file-picker' : 'download' });
       if (typeof options.onProgress === 'function') {
         options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length, force: true });
       }
+      const saveStart = performance.now();
       await saveExportBlob(blob, target, item.name);
+      ExportDebug.recordSaveBatch?.({
+        batchIndex: 1,
+        batchCount: 1,
+        batchSize: downloads.length,
+        keyCount: downloads.length,
+        savedCount: downloads.length,
+        failedCount: 0,
+        missingCount: 0,
+        bytesMB: Math.round(blob.size / 1024 / 1024 * 100) / 100,
+        ms: performance.now() - saveStart,
+        method: target?.handle ? 'file-picker' : 'download',
+      });
+      ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round(blob.size / 1024 / 1024 * 100) / 100 });
       if (typeof options.onProgress === 'function') {
         options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length, force: true });
       }
@@ -209,14 +310,44 @@
       name: item.name,
       data: item.data,
     }));
-    await delay(0);
+    ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 2, method: target?.handle ? 'zip-file-picker' : 'zip' });
+    await yieldToEventLoop(dbg, 'web-before-zip', { entryCount: zipEntries.length });
+    const zipStart = performance.now();
+    ExportDebug.step(dbg, 'web-export:zip-start', { entryCount: zipEntries.length });
     const zipBytes = root.BoardfishWebBoardContainer.createZip(zipEntries);
+    const zipMs = performance.now() - zipStart;
+    ExportDebug.step(dbg, 'web-export:zip-done', { entryCount: zipEntries.length, bytes: zipBytes.length, ms: zipMs });
+    ExportDebug.recordSaveBatch?.({
+      batchIndex: 1,
+      batchCount: 2,
+      batchSize: downloads.length,
+      keyCount: downloads.length,
+      savedCount: 0,
+      failedCount: 0,
+      missingCount: 0,
+      ms: zipMs,
+      method: 'zip-build',
+    });
     const blob = new Blob([zipBytes], { type: 'application/zip' });
     const filename = target?.filename || `images_${randomHex()}.zip`;
     if (typeof options.onProgress === 'function') {
       options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length, force: true });
     }
+    const saveStart = performance.now();
     await saveExportBlob(blob, target, filename);
+    ExportDebug.recordSaveBatch?.({
+      batchIndex: 2,
+      batchCount: 2,
+      batchSize: 1,
+      keyCount: downloads.length,
+      savedCount: downloads.length,
+      failedCount: 0,
+      missingCount: 0,
+      bytesMB: Math.round(zipBytes.length / 1024 / 1024 * 100) / 100,
+      ms: performance.now() - saveStart,
+      method: target?.handle ? 'zip-file-picker' : 'zip-download',
+    });
+    ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round(zipBytes.length / 1024 / 1024 * 100) / 100 });
     if (typeof options.onProgress === 'function') {
       options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length, force: true });
     }
@@ -297,14 +428,18 @@
     let savedCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
+    let renderedCount = 0;
     let bytes = 0;
     const errors = [];
+    ExportDebug.recordResolveStart?.({ imageCount: imageObjs.length, method: 'directory-picker', targetMode: options.targetMode || 'folder' });
     ExportDebug.recordSaveStart({ keyCount: imageObjs.length, batchSize: 1, batchCount: imageObjs.length, method: 'directory-picker' });
     for (let i = 0; i < imageObjs.length; i++) {
       const name = uniqueImageExportName(imageObjs[i], usedNames);
+      const itemStart = performance.now();
       const entry = await imageObjectDownloadEntry(imageObjs[i], i, dbg, { filename: name });
       if (!entry) {
         skippedCount++;
+        recordWebResolveEntry(dbg, imageObjs[i], i, null, performance.now() - itemStart, { phase: 'web-skipped' });
         if (typeof options.onProgress === 'function') {
           options.onProgress({
             phase: 'prepare-progress',
@@ -314,6 +449,15 @@
         }
         continue;
       }
+      if (entry.debug?.rendered) renderedCount++;
+      recordWebResolveEntry(dbg, imageObjs[i], i, entry, performance.now() - itemStart);
+      ExportDebug.recordResolveProgress?.({
+        processed: i + 1,
+        imageCount: imageObjs.length,
+        keyCount: savedCount + failedCount + 1,
+        renderedCount,
+        skippedCount,
+      });
       if (typeof options.onProgress === 'function') {
         options.onProgress({
           phase: 'prepare-progress',
@@ -324,10 +468,12 @@
       const writeStart = performance.now();
       let batchSaved = 0;
       let batchFailed = 0;
+      let writtenBytes = 0;
       try {
         const written = await writeEntryToDirectory(directoryHandle, entry);
         savedCount++;
         batchSaved = 1;
+        writtenBytes = written;
         bytes += written;
         ExportDebug.step(dbg, 'web-export:folder-write', { name: entry.name, bytes: written });
       } catch (err) {
@@ -344,7 +490,7 @@
         savedCount: batchSaved,
         failedCount: batchFailed,
         missingCount: 0,
-        bytesMB: Math.round(bytes / 1024 / 1024 * 100) / 100,
+        bytesMB: Math.round(writtenBytes / 1024 / 1024 * 100) / 100,
         ms: performance.now() - writeStart,
         error: errors[errors.length - 1] || '',
       });
@@ -357,8 +503,15 @@
           force: true,
         });
       }
-      if (i % 2 === 1 || i === imageObjs.length - 1) await delay(0);
+      if (i % 2 === 1 || i === imageObjs.length - 1) await yieldToEventLoop(dbg, 'web-directory-save', { processed: i + 1, imageCount: imageObjs.length });
     }
+    ExportDebug.recordResolveDone?.({
+      processed: imageObjs.length,
+      imageCount: imageObjs.length,
+      keyCount: savedCount + failedCount,
+      renderedCount,
+      skippedCount,
+    });
     ExportDebug.recordSaveDone({
       savedCount,
       failedCount,
@@ -474,5 +627,6 @@
     randomHex,
     selectedImageObjects,
     letUiPaint,
+    yieldToEventLoop,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

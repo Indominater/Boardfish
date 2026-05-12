@@ -73,11 +73,28 @@ const StartupDebug = {
   lastJson: '',
 };
 
-const ClipDebug = createNoopDebugApi();
+const ClipDebug = createNoopDebugApi({
+  largePasteReport: () => null,
+  pasteBreakdown: () => null,
+});
 const HistoryDebug = createNoopDebugApi();
 const ViewportDebug = createNoopDebugApi();
-const SaveDebug = createNoopDebugApi();
-const OpenDebug = createNoopDebugApi({ hydrationConcurrency: 8 });
+const SaveDebug = createNoopDebugApi({
+  report: () => null,
+});
+const OpenDebug = createNoopDebugApi({
+  hydrationConcurrency: 8,
+  hydrationSummary: () => null,
+  hydrationBreakdown: () => [],
+  cacheImageBreakdown: () => [],
+  imageStoreSummary: () => null,
+  imageStoreSample: () => [],
+  hydrationCandidates: () => null,
+  slowImages: () => [],
+  report: () => null,
+  setHydrationMode: noop,
+  setHydrationConcurrency: noop,
+});
 const ExportDebug = createNoopDebugApi({
   startMassive: noop,
   recordResolveStart: noop,
@@ -88,9 +105,15 @@ const ExportDebug = createNoopDebugApi({
   recordSaveBatch: noop,
   recordSaveDone: noop,
   recordProgressUi: noop,
+  recordEventLoopYield: noop,
+  smoothnessReport: () => null,
 });
 const ManualPerfDebug = createNoopDebugApi();
-const InsertDebug = createNoopDebugApi();
+const InsertDebug = createNoopDebugApi({
+  report: () => null,
+  imageBreakdown: () => [],
+  nativeBreakdown: () => [],
+});
 const ExportAllDiag = createNoopDebugApi();
 const TextSelDebug = createNoopDebugApi({
   _logDraw: noop,

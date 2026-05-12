@@ -16,7 +16,7 @@ var ClipDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Use finishDebug({ clipboard: ["phaseSummary", "summary", "dump"] }) to collect results.');
+    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Use finishDebug({ clipboard: ["pasteBreakdown", "largePasteReport", "phaseSummary", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -95,11 +95,19 @@ var ClipDebug = (() => {
       signature: e.meta?.signature || '',
       imgKey: e.meta?.imgKey || '',
       added: e.meta?.added ?? '',
+      displayReady: e.meta?.displayReady ?? '',
+      readyStage: e.meta?.readyStage || '',
       bitmapReady: e.meta?.bitmapReady ?? '',
       fallbackReady: e.meta?.fallbackReady ?? '',
+      cacheTotalMs: e.meta?.cacheTotalMs ?? '',
+      cacheQueueWaitMs: e.meta?.cacheQueueWaitMs ?? '',
+      cacheBitmapMs: e.meta?.cacheBitmapMs ?? '',
+      objectDelta: e.meta?.objectDelta ?? '',
       dataUrlLen: e.meta?.dataUrlLen ?? '',
       blobSize: e.meta?.blobSize ?? '',
       blobType: e.meta?.blobType || e.meta?.type || '',
+      fileName: e.meta?.fileName || '',
+      fileSize: e.meta?.fileSize ?? '',
       source: e.meta?.source || '',
       sourceKind: e.meta?.sourceKind || e.meta?.pathKind || e.meta?.assetKind || '',
       sourceLen: e.meta?.sourceLen ?? e.meta?.pathLen ?? e.meta?.assetLen ?? '',
@@ -218,7 +226,8 @@ var ClipDebug = (() => {
       : 'read_image_from_clipboard_cached';
     const nativeInvokeOk = run.find(e => e.step === 'invoke:ok' && e.meta?.command === nativeReadCommand);
     const materializeEnd = latest('paste-native-cache:materialize-end');
-    const addObject = latest('paste-native-cache:add-object') || latest('paste-image:ready-wait-start');
+    const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
+    const addObject = latest('paste-native-cache:add-object') || latest('paste-image:add-object') || webInsertEnd;
     const end = latest('end');
     const objectCountBefore = pasteStart?.meta?.objectCountBefore ?? '';
     const objectCountAfter = end?.meta?.objectCountAfter ?? '';
@@ -226,7 +235,9 @@ var ClipDebug = (() => {
       ? objectCountAfter - objectCountBefore
       : '';
     const nativeReadAttempted = run.some(e => e.meta?.command === nativeReadCommand);
-    const pathDetected = blobReadOk
+    const pathDetected = webInsertEnd
+      ? end?.meta?.path || 'web-paste-blob'
+      : blobReadOk
       ? 'event-or-browser-blob'
       : nativeReadAttempted
         ? 'native-cache'
@@ -239,7 +250,7 @@ var ClipDebug = (() => {
       ['pasteStarted', true],
       ['eventInspected', stepNames.has('event-clipboard:inspect') || !pasteStart.meta?.clipboardData],
       ['imagePayloadFound', !!blobEvent || nativeReadAttempted],
-      ['imagePayloadRead', !!blobReadOk || !!nativeRead || !!nativeInvokeOk],
+      ['imagePayloadRead', !!blobReadOk || !!nativeRead || !!nativeInvokeOk || !!webInsertEnd],
       ['nativeMaterialized', pathDetected !== 'native-cache' || !!materializeEnd?.meta?.assetReady],
       ['objectAddStarted', !!addObject],
       ['pasteEndedAdded', end?.meta?.added === true || objectDelta > 0],
@@ -251,6 +262,9 @@ var ClipDebug = (() => {
       totalMs: end?.total ?? run.at(-1)?.total ?? '',
       path: end?.meta?.path || '',
       added: end?.meta?.added ?? '',
+      displayReady: end?.meta?.displayReady ?? (webInsertEnd ? true : ''),
+      readyStage: end?.meta?.readyStage || '',
+      bitmapReady: end?.meta?.bitmapReady ?? '',
       objectCountBefore,
       objectCountAfter,
       objectDelta,
@@ -270,6 +284,67 @@ var ClipDebug = (() => {
     console.table([out]);
     console.table(checkpoints.map(([checkpoint, ok]) => ({ checkpoint, ok })));
     return { summary: out, checkpoints: checkpoints.map(([checkpoint, ok]) => ({ checkpoint, ok })), rows: run.map(e => debugRow(e, { includeId: true, includeSkipped: true })) };
+  }
+
+  function pasteBreakdown() {
+    const pasteStarts = events.filter(e => e.op === 'pasteAtPos' && e.step === 'start');
+    const pasteStart = pasteStarts[pasteStarts.length - 1];
+    if (!pasteStart) {
+      const empty = { pasteRuns: 0, verdict: 'no pasteAtPos events captured' };
+      console.table([empty]);
+      return empty;
+    }
+    const run = events.filter(e => e.id === pasteStart.id);
+    const latest = (stepName) => [...run].reverse().find(e => e.step === stepName);
+    const first = (stepName) => run.find(e => e.step === stepName);
+    const nativeReadCommand = typeof TAURI_COMMANDS !== 'undefined'
+      ? TAURI_COMMANDS.READ_IMAGE_FROM_CLIPBOARD_CACHED
+      : 'read_image_from_clipboard_cached';
+    const nativeInvokeOk = run.find(e => e.step === 'invoke:ok' && e.meta?.command === nativeReadCommand);
+    const blobEvent = latest('event-image-blob') || latest('browser-image-blob');
+    const blobReadOk = latest('clipboard-blob-read:ok');
+    const nativeRead = latest('native-image-read');
+    const materializeEnd = latest('paste-native-cache:materialize-end');
+    const objectAdd = latest('paste-native-cache:add-object') || latest('paste-image:add-object');
+    const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
+    const readyEnd = latest('paste-image:ready-wait-end');
+    const settleEnd = latest('native-clipboard-settle:end');
+    const settleSkip = latest('native-clipboard-settle:skip');
+    const end = latest('end');
+    const imageReadAt = blobReadOk?.total ?? nativeRead?.total ?? nativeInvokeOk?.total ?? webInsertEnd?.total ?? '';
+    const objectAt = objectAdd?.total ?? webInsertEnd?.total ?? '';
+    const displayAt = readyEnd?.total ?? webInsertEnd?.total ?? '';
+    const out = {
+      pasteRuns: pasteStarts.length,
+      path: end?.meta?.path || '',
+      totalMs: end?.total ?? run.at(-1)?.total ?? '',
+      nativeSettleMs: settleEnd?.meta?.ms ?? (settleSkip ? 0 : ''),
+      imagePayloadAtMs: imageReadAt,
+      objectAtMs: objectAt,
+      displayReadyAtMs: displayAt,
+      objectToDisplayMs: typeof objectAt === 'number' && typeof displayAt === 'number' ? Math.round((displayAt - objectAt) * 100) / 100 : '',
+      materializeMs: materializeEnd?.meta?.ms ?? '',
+      nativeInvokeMs: nativeInvokeOk?.meta?.ms ?? '',
+      nativeReadMs: timing(nativeInvokeOk?.meta, 'readMs') || '',
+      nativePngEncodeMs: timing(nativeInvokeOk?.meta, 'pngEncodeMs') || '',
+      blobReadMs: blobReadOk?.meta?.ms ?? '',
+      blobSize: blobEvent?.meta?.blobSize ?? blobReadOk?.meta?.blobSize ?? '',
+      dataUrlLen: blobReadOk?.meta?.dataUrlLen ?? '',
+      readyStage: readyEnd?.meta?.readyStage || end?.meta?.readyStage || '',
+      cacheTotalMs: readyEnd?.meta?.cacheTotalMs ?? '',
+      cacheQueueWaitMs: readyEnd?.meta?.cacheQueueWaitMs ?? '',
+      cacheBitmapMs: readyEnd?.meta?.cacheBitmapMs ?? '',
+      displayReady: end?.meta?.displayReady ?? (webInsertEnd ? true : ''),
+      bitmapReady: end?.meta?.bitmapReady ?? '',
+      added: end?.meta?.added ?? '',
+      objectDelta: webInsertEnd?.meta?.objectDelta ?? '',
+      firstPayloadStep: first('event-image-blob')?.step || first('browser-image-blob')?.step || (nativeInvokeOk ? 'native-image-read' : ''),
+      verdict: end?.meta?.added || webInsertEnd?.meta?.added
+        ? 'paste produced a drawable object'
+        : 'paste did not add an image; inspect rows',
+    };
+    console.table([out]);
+    return { summary: out, rows: run.map(e => debugRow(e, { includeId: true, includeSkipped: true })) };
   }
 
   function status() {
@@ -323,6 +398,7 @@ var ClipDebug = (() => {
     phaseSummary,
     copyBreakdown,
     largePasteReport,
+    pasteBreakdown,
     status,
     waitForNative: (timeoutMs) => (
       typeof waitForNativeClipboardIdle === 'function'
@@ -460,14 +536,21 @@ var ViewportDebug = (() => {
     wheelPan: 0,
     wheelZoom: 0,
     mousePanMoves: 0,
+    frameCount: 0,
+    frameTotalMs: 0,
+    frameQueueTotalMs: 0,
+    inputFrameCount: 0,
+    inputAgeTotalMs: 0,
     scheduledFrames: 0,
     coalescedFrames: 0,
     transformFrames: 0,
     boardFrames: 0,
     overlayFrames: 0,
+    selectionOverlaySkipped: 0,
     slowFrames: 0,
     maxFrameMs: 0,
     maxQueueMs: 0,
+    maxInputAgeMs: 0,
     lastRafGapMs: 0,
     maxRafGapMs: 0,
     wheelHandlerCount: 0,
@@ -518,7 +601,7 @@ var ViewportDebug = (() => {
     enabled = true;
 
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["report", "summary", "drawSummary", "slowFrames", "imageHealth", "dump"] }) to collect results.');
+    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["report", "summary", "frameSummary", "wheelSummary", "drawSummary", "slowFrames", "imageHealth", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -586,15 +669,17 @@ var ViewportDebug = (() => {
     );
   }
 
-  function frameStart(queueMs) {
+  function frameStart(queueMs, extra = {}) {
     if (!enabled) return null;
     const now = performance.now();
     const rafGap = lastRafAt ? now - lastRafAt : 0;
     lastRafAt = now;
+    const inputAgeMs = Number(extra.inputAgeMs) || 0;
     stats.lastRafGapMs = rafGap;
     stats.maxRafGapMs = Math.max(stats.maxRafGapMs, rafGap);
     stats.maxQueueMs = Math.max(stats.maxQueueMs, queueMs || 0);
-    const meta = { queueMs, rafGap, panX, panY, zoom };
+    stats.maxInputAgeMs = Math.max(stats.maxInputAgeMs, inputAgeMs);
+    const meta = { queueMs, rafGap, inputAgeMs, inputSource: extra.inputSource || '', panX, panY, zoom };
     const ctx = start('frame', meta);
     if (ctx) ctx.startMeta = meta;
     return ctx;
@@ -603,6 +688,17 @@ var ViewportDebug = (() => {
   function frameEnd(ctx, meta = {}) {
     if (!enabled || !ctx) return;
     const total = performance.now() - ctx.t0;
+    const startMeta = ctx.startMeta || {};
+    const queueMs = Number(startMeta.queueMs) || 0;
+    const inputAgeMs = Number(startMeta.inputAgeMs) || 0;
+    const hasInput = !!startMeta.inputSource || inputAgeMs > 0;
+    stats.frameCount++;
+    stats.frameTotalMs += total;
+    stats.frameQueueTotalMs += queueMs;
+    if (hasInput) {
+      stats.inputFrameCount++;
+      stats.inputAgeTotalMs += inputAgeMs;
+    }
     stats.maxFrameMs = Math.max(stats.maxFrameMs, total);
     if (total > 16.7) {
       stats.slowFrames++;
@@ -623,18 +719,24 @@ var ViewportDebug = (() => {
       { metric: 'wheel', value: stats.wheel },
       { metric: 'perfMode', value: viewportPerfModeSummary().label },
       { metric: 'cullingEnabled', value: viewportCullingEnabled },
-      { metric: 'scaling025Enabled', value: viewportImageScalingEnabled },
+      { metric: 'imageScalingSupported', value: VIEWPORT_IMAGE_SCALING_SUPPORTED },
+      { metric: 'imageScalingEnabled', value: viewportImageScalingEnabled },
+      { metric: 'imageScaleLevels', value: IMAGE_SCALE_LEVELS.join(',') },
       { metric: 'wheelPan', value: stats.wheelPan },
       { metric: 'wheelZoom', value: stats.wheelZoom },
       { metric: 'mousePanMoves', value: stats.mousePanMoves },
+      { metric: 'frames', value: stats.frameCount },
+      { metric: 'inputFrames', value: stats.inputFrameCount },
       { metric: 'scheduledFrames', value: stats.scheduledFrames },
       { metric: 'coalescedFrames', value: stats.coalescedFrames },
       { metric: 'transformFrames', value: stats.transformFrames },
       { metric: 'boardFrames', value: stats.boardFrames },
       { metric: 'overlayFrames', value: stats.overlayFrames },
+      { metric: 'selectionOverlaySkipped', value: stats.selectionOverlaySkipped },
       { metric: 'slowFramesOver16ms', value: stats.slowFrames },
       { metric: 'maxFrameMs', value: Math.round(stats.maxFrameMs * 100) / 100 },
       { metric: 'maxQueueMs', value: Math.round(stats.maxQueueMs * 100) / 100 },
+      { metric: 'maxInputAgeMs', value: Math.round(stats.maxInputAgeMs * 100) / 100 },
       { metric: 'maxRafGapMs', value: Math.round(stats.maxRafGapMs * 100) / 100 },
       { metric: 'avgWheelHandlerMs', value: stats.wheelHandlerCount ? Math.round(stats.wheelHandlerTotalMs / stats.wheelHandlerCount * 100) / 100 : 0 },
       { metric: 'maxWheelHandlerMs', value: Math.round(stats.maxWheelHandlerMs * 100) / 100 },
@@ -675,19 +777,28 @@ var ViewportDebug = (() => {
     const frames = events
       .filter(e => e.op === 'frame' && e.step === 'end')
       .map(e => ({ ...(starts.get(e.id) || {}), ...(e.meta || {}) }));
-    const sum = (field) => frames.reduce((n, row) => n + (Number(row[field]) || 0), 0);
+    const inputFrames = frames.filter(row => row.inputSource || Number(row.inputAgeMs) > 0);
     const max = (field) => frames.reduce((n, row) => Math.max(n, Number(row[field]) || 0), 0);
     const out = {
-      frames: frames.length,
-      slowFramesOver16ms: frames.filter(row => row.slow).length,
-      avgFrameMs: frames.length ? Math.round(sum('frameMs') / frames.length * 100) / 100 : 0,
-      maxFrameMs: Math.round(max('frameMs') * 100) / 100,
-      avgQueueMs: frames.length ? Math.round(sum('queueMs') / frames.length * 100) / 100 : 0,
-      maxQueueMs: Math.round(max('queueMs') * 100) / 100,
-      maxRafGapMs: Math.round(max('rafGap') * 100) / 100,
-      transformFrames: frames.filter(row => row.doTransform).length,
-      boardFrames: frames.filter(row => row.doBoard).length,
-      overlayFrames: frames.filter(row => row.doOverlay).length,
+      frames: stats.frameCount,
+      recentFrames: frames.length,
+      inputFrames: stats.inputFrameCount,
+      recentInputFrames: inputFrames.length,
+      slowFramesOver16ms: stats.slowFrames,
+      recentSlowFramesOver16ms: frames.filter(row => row.slow).length,
+      avgFrameMs: stats.frameCount ? Math.round(stats.frameTotalMs / stats.frameCount * 100) / 100 : 0,
+      maxFrameMs: Math.round(stats.maxFrameMs * 100) / 100,
+      recentMaxFrameMs: Math.round(max('frameMs') * 100) / 100,
+      avgQueueMs: stats.frameCount ? Math.round(stats.frameQueueTotalMs / stats.frameCount * 100) / 100 : 0,
+      maxQueueMs: Math.round(stats.maxQueueMs * 100) / 100,
+      avgInputAgeMs: stats.inputFrameCount ? Math.round(stats.inputAgeTotalMs / stats.inputFrameCount * 100) / 100 : 0,
+      maxInputAgeMs: Math.round(stats.maxInputAgeMs * 100) / 100,
+      recentMaxInputAgeMs: Math.round(max('inputAgeMs') * 100) / 100,
+      maxRafGapMs: Math.round(stats.maxRafGapMs * 100) / 100,
+      recentMaxRafGapMs: Math.round(max('rafGap') * 100) / 100,
+      transformFrames: stats.transformFrames,
+      boardFrames: stats.boardFrames,
+      overlayFrames: stats.overlayFrames,
     };
     console.table([out]);
     return out;
@@ -769,12 +880,28 @@ var ViewportDebug = (() => {
     const draws = events
       .filter(e => e.op === 'drawBoard' && e.step === 'end' && !e.meta?.skipped)
       .map(e => ({ ms: e.total, ...(e.meta || {}) }));
+    const retainedSlowDraws = slowRecords
+      .map(e => ({
+        frameMs: e.frameMs,
+        drawMs: e.steps?.drawBoard?.ms ?? e.steps?.drawBoard?.meta?.totalMeasuredMs ?? 0,
+        objectLoopMs: e.steps?.drawBoard?.meta?.objectLoopMs ?? 0,
+        croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? 0,
+      }))
+      .filter(row => Number(row.drawMs) > 0);
     const sum = (field) => draws.reduce((n, row) => n + (Number(row[field]) || 0), 0);
     const max = (field) => draws.reduce((n, row) => Math.max(n, Number(row[field]) || 0), 0);
+    const slowMax = (field) => retainedSlowDraws.reduce((n, row) => Math.max(n, Number(row[field]) || 0), 0);
+    const recentMaxDrawMs = Math.round(max('ms') * 100) / 100;
+    const retainedMaxSlowDrawMs = Math.round(slowMax('drawMs') * 100) / 100;
+    const recentMaxObjectLoopMs = Math.round(max('objectLoopMs') * 100) / 100;
+    const retainedMaxSlowObjectLoopMs = Math.round(slowMax('objectLoopMs') * 100) / 100;
     const out = {
       draws: draws.length,
+      retainedSlowDraws: retainedSlowDraws.length,
       avgDrawMs: draws.length ? Math.round(sum('ms') / draws.length * 100) / 100 : 0,
-      maxDrawMs: Math.round(max('ms') * 100) / 100,
+      maxDrawMs: Math.max(recentMaxDrawMs, retainedMaxSlowDrawMs),
+      recentMaxDrawMs,
+      retainedMaxSlowDrawMs,
       avgDrawnImages: draws.length ? Math.round(sum('drawnImages') / draws.length * 100) / 100 : 0,
       maxDrawnImages: max('drawnImages'),
       avgTestedObjects: draws.length ? Math.round(sum('testedObjects') / draws.length * 100) / 100 : 0,
@@ -782,7 +909,9 @@ var ViewportDebug = (() => {
       avgVisibleObjects: draws.length ? Math.round(sum('visibleObjects') / draws.length * 100) / 100 : 0,
       maxVisibleObjects: max('visibleObjects'),
       avgObjectLoopMs: draws.length ? Math.round(sum('objectLoopMs') / draws.length * 100) / 100 : 0,
-      maxObjectLoopMs: Math.round(max('objectLoopMs') * 100) / 100,
+      maxObjectLoopMs: Math.max(recentMaxObjectLoopMs, retainedMaxSlowObjectLoopMs),
+      recentMaxObjectLoopMs,
+      retainedMaxSlowObjectLoopMs,
       avgBackgroundSetupMs: draws.length ? Math.round(sum('backgroundSetupMs') / draws.length * 100) / 100 : 0,
       maxBackgroundSetupMs: Math.round(max('backgroundSetupMs') * 100) / 100,
       avgOffscreenBlitMs: draws.length ? Math.round(sum('offscreenBlitMs') / draws.length * 100) / 100 : 0,
@@ -806,6 +935,7 @@ var ViewportDebug = (() => {
       maxMissingImages: max('missingImages'),
       avgErroredImages: draws.length ? Math.round(sum('erroredImages') / draws.length * 100) / 100 : 0,
       avgCroppedImages: draws.length ? Math.round(sum('croppedImages') / draws.length * 100) / 100 : 0,
+      maxRetainedSlowCroppedImages: slowMax('croppedImages'),
       avgDrawnText: draws.length ? Math.round(sum('drawnText') / draws.length * 100) / 100 : 0,
       avgCulledText: draws.length ? Math.round(sum('culledText') / draws.length * 100) / 100 : 0,
     };
@@ -906,6 +1036,7 @@ var ViewportDebug = (() => {
       renderBatchCount: imageScaledVariantRenderCount,
       inputIdleMs: Math.round((performance.now() - lastViewportInputAt) * 10) / 10,
       inputIdleThresholdMs: IMAGE_VARIANT_INPUT_IDLE_MS,
+      activeInputQueueDelayMs: IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS,
       builds: imageScaledVariantBuildCount,
       avgBuildMs: imageScaledVariantBuildCount ? Math.round(imageScaledVariantBuildTotalMs / imageScaledVariantBuildCount * 10) / 10 : 0,
       maxBuildMs: Math.round(imageScaledVariantBuildMaxMs * 10) / 10,
@@ -921,6 +1052,7 @@ var ViewportDebug = (() => {
       prewarmPending: !!imageScaledVariantPrewarmTimer,
       prewarmPadPx: IMAGE_VARIANT_PREWARM_PAD_PX,
       levels: IMAGE_SCALE_LEVELS.join(','),
+      supported: VIEWPORT_IMAGE_SCALING_SUPPORTED,
       enabled: viewportImageScalingEnabled,
     };
     console.table([out]);
@@ -989,6 +1121,8 @@ var ViewportDebug = (() => {
         id: e.id,
         frameMs: e.frameMs ?? '',
         queueMs: e.queueMs ?? '',
+        inputAgeMs: e.inputAgeMs ?? '',
+        inputSource: e.inputSource ?? '',
         rafGap: e.rafGap ?? '',
         sources: e.sources ?? '',
         doTransform: e.doTransform ?? '',
@@ -1012,6 +1146,7 @@ var ViewportDebug = (() => {
         eyedropperWarmedScaledImages: e.steps?.drawBoard?.meta?.eyedropperWarmedScaledImages ?? '',
         fullScaleImages: e.steps?.drawBoard?.meta?.fullScaleImages ?? '',
         missingImages: e.steps?.drawBoard?.meta?.missingImages ?? '',
+        croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? '',
         culledImages: e.steps?.drawBoard?.meta?.culledImages ?? '',
         culledText: e.steps?.drawBoard?.meta?.culledText ?? '',
         canvasW: e.steps?.drawBoard?.meta?.canvasW ?? '',
@@ -1034,6 +1169,8 @@ var ViewportDebug = (() => {
         id: e.id,
         frameMs: e.frameMs ?? '',
         queueMs: e.queueMs ?? '',
+        inputAgeMs: e.inputAgeMs ?? '',
+        inputSource: e.inputSource ?? '',
         rafGap: e.rafGap ?? '',
         sources: e.sources ?? '',
         start: {

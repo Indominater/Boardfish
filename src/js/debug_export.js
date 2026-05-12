@@ -18,7 +18,7 @@ var ExportDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish export debugger enabled. Use finishDebug({ export: ["progressReport", "massiveReport", "status", "slowImageReport", "summary", "dump"] }) to collect results.');
+    if (core.enabled) console.info('Boardfish export debugger enabled. Use finishDebug({ export: ["progressReport", "massiveReport", "smoothnessReport", "status", "slowImageReport", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -107,6 +107,7 @@ var ExportDebug = (() => {
         renderedCount: 0,
         nativeTransformCount: 0,
         fallbackRenderCount: 0,
+        dedupedCount: 0,
         skippedCount: 0,
         errorCount: 0,
         progressUpdates: 0,
@@ -131,10 +132,19 @@ var ExportDebug = (() => {
         slowestBatches: [],
         errors: [],
       },
+      smoothness: {
+        eventLoopYields: 0,
+        paintWaits: 0,
+        totalYieldMs: 0,
+        maxYieldMs: 0,
+        slowYieldCount: 0,
+        slowestYields: [],
+      },
       progressUi: {
         updates: 0,
         currentText: '',
         firstText: '',
+        firstTextAtMs: null,
         firstNonZeroText: '',
         firstNonZeroAtMs: null,
         zeroHoldMs: null,
@@ -188,10 +198,11 @@ var ExportDebug = (() => {
     const r = massive.resolve;
     r.processed++;
     if (meta.key) r.keyCount++;
-    if (meta.tempKey) r.tempKeyCount++;
+    if (meta.tempKey && !meta.reusedTempKey) r.tempKeyCount++;
     if (meta.rendered) r.renderedCount++;
     if (meta.nativeTransform) r.nativeTransformCount++;
     if (meta.fallbackRender) r.fallbackRenderCount++;
+    if (meta.deduped) r.dedupedCount++;
     if (meta.skipped) r.skippedCount++;
     if (meta.error) {
       r.errorCount++;
@@ -212,9 +223,33 @@ var ExportDebug = (() => {
       ms: Math.round((meta.ms || 0) * 100) / 100,
       nativeTransform: !!meta.nativeTransform,
       fallbackRender: !!meta.fallbackRender,
+      deduped: !!meta.deduped,
+      sourceKind: meta.sourceKind || '',
+      bytesMB: meta.bytesMB ?? '',
     }, 'ms');
     r.lastProgressAt = performance.now();
     massiveStep('resolve');
+  }
+
+  function recordEventLoopYield(meta = {}) {
+    if (!massive) return;
+    const s = massive.smoothness;
+    const ms = Number(meta.ms) || 0;
+    s.eventLoopYields++;
+    if (meta.kind === 'paint-wait') s.paintWaits++;
+    s.totalYieldMs += ms;
+    s.maxYieldMs = Math.max(s.maxYieldMs, ms);
+    if (ms > 50) s.slowYieldCount++;
+    pushTop(s.slowestYields, {
+      atMs: massiveElapsedMs(),
+      phase: meta.phase || '',
+      kind: meta.kind || 'timer',
+      ms: Math.round(ms * 100) / 100,
+      processed: meta.processed ?? '',
+      imageCount: meta.imageCount ?? '',
+      entryCount: meta.entryCount ?? '',
+    }, 'ms');
+    massiveStep('event-loop-yield', meta);
   }
 
   function recordSaveStart(meta = {}) {
@@ -248,6 +283,9 @@ var ExportDebug = (() => {
       savedCount: meta.savedCount ?? '',
       failedCount: meta.failedCount ?? '',
       missingCount: meta.missingCount ?? '',
+      method: meta.method || '',
+      writeConcurrency: meta.writeConcurrency ?? '',
+      writeMs: meta.writeMs ?? '',
       ms: Math.round((meta.ms || 0) * 100) / 100,
     }, 'ms');
     massiveStep('save');
@@ -268,11 +306,14 @@ var ExportDebug = (() => {
     const elapsedMs = massiveElapsedMs();
     p.updates++;
     p.currentText = text;
-    if (!p.firstText) p.firstText = text;
+    if (!p.firstText) {
+      p.firstText = text;
+      p.firstTextAtMs = elapsedMs;
+    }
     const finishedCount = Number(meta.finishedCount) || 0;
     if (finishedCount > 0 && p.firstNonZeroAtMs == null) {
       p.firstNonZeroAtMs = elapsedMs;
-      p.zeroHoldMs = elapsedMs;
+      p.zeroHoldMs = Math.round((elapsedMs - (p.firstTextAtMs ?? elapsedMs)) * 100) / 100;
       p.firstNonZeroText = text;
     }
     pushSample(p.samples, {
@@ -309,6 +350,7 @@ var ExportDebug = (() => {
       lastError: report.lastError,
       resolved: report.resolve.keyCount,
       resolveErrors: report.resolve.errorCount,
+      deduped: report.resolve.dedupedCount,
       saved: report.save.savedCount,
       saveFailed: report.save.failedCount,
       saveMissing: report.save.missingCount,
@@ -316,6 +358,8 @@ var ExportDebug = (() => {
       writtenMB: report.save.bytesMB,
       resolveDurationMs: report.resolve.durationMs,
       saveDurationMs: report.save.durationMs,
+      eventLoopYields: report.smoothness.eventLoopYields,
+      maxYieldMs: report.smoothness.maxYieldMs,
       uiCurrentText: report.progressUi.currentText,
       uiFirstNonZeroAtMs: report.progressUi.firstNonZeroAtMs,
       uiZeroHoldMs: report.progressUi.zeroHoldMs,
@@ -330,10 +374,16 @@ var ExportDebug = (() => {
       resolveProgressUpdates: report.resolve.progressUpdates,
       resolveLastProcessed: report.resolve.lastProcessed,
       resolveLastKeyCount: report.resolve.lastKeyCount,
+      resolveDeduped: report.resolve.dedupedCount,
       saveStartedAtMs: report.save.startedAtMs,
       saveCompletedAtMs: report.save.completedAtMs,
       saveDurationMs: report.save.durationMs,
+      eventLoopYields: report.smoothness.eventLoopYields,
+      maxYieldMs: report.smoothness.maxYieldMs,
+      slowYieldCount: report.smoothness.slowYieldCount,
     }]);
+    console.table([report.smoothness]);
+    console.table(report.smoothness.slowestYields);
     console.table(report.progressUi.samples);
     console.table(report.largestStored);
     console.table(report.resolve.slowest);
@@ -360,6 +410,8 @@ var ExportDebug = (() => {
         pctOfTotal: totalMs ? Math.round(report.resolve.durationMs / totalMs * 1000) / 10 : '',
         processed: report.resolve.processed,
         keyCount: report.resolve.keyCount,
+        deduped: report.resolve.dedupedCount,
+        skipped: report.resolve.skippedCount,
         updates: report.resolve.progressUpdates,
       },
       {
@@ -375,6 +427,7 @@ var ExportDebug = (() => {
     ];
     const uiRows = [{
       firstText: report.progressUi.firstText,
+      firstTextAtMs: report.progressUi.firstTextAtMs,
       firstNonZeroText: report.progressUi.firstNonZeroText,
       currentText: report.progressUi.currentText,
       firstNonZeroAtMs: report.progressUi.firstNonZeroAtMs,
@@ -383,6 +436,9 @@ var ExportDebug = (() => {
       uiUpdates: report.progressUi.updates,
       saveStartedAtMs: report.save.startedAtMs,
       saveDurationMs: report.save.durationMs,
+      eventLoopYields: report.smoothness.eventLoopYields,
+      maxYieldMs: Math.round(report.smoothness.maxYieldMs * 100) / 100,
+      slowYieldCount: report.smoothness.slowYieldCount,
     }];
     console.group('[Boardfish export] progress report');
     console.table(phaseRows);
@@ -390,6 +446,36 @@ var ExportDebug = (() => {
     console.table(report.progressUi.samples);
     console.groupEnd();
     return { phaseRows, uiRows, samples: report.progressUi.samples, report };
+  }
+
+  function smoothnessReport() {
+    const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
+    if (!report) {
+      console.warn('[Boardfish export] No smoothness report yet. Enable export debug, then run an export.');
+      return null;
+    }
+    const out = {
+      eventLoopYields: report.smoothness.eventLoopYields,
+      paintWaits: report.smoothness.paintWaits,
+      avgYieldMs: report.smoothness.eventLoopYields ? Math.round(report.smoothness.totalYieldMs / report.smoothness.eventLoopYields * 100) / 100 : 0,
+      maxYieldMs: Math.round(report.smoothness.maxYieldMs * 100) / 100,
+      slowYieldCount: report.smoothness.slowYieldCount,
+      progressUiUpdates: report.progressUi.updates,
+      firstText: report.progressUi.firstText,
+      firstTextAtMs: report.progressUi.firstTextAtMs,
+      firstNonZeroText: report.progressUi.firstNonZeroText,
+      firstNonZeroAtMs: report.progressUi.firstNonZeroAtMs,
+      zeroHoldMs: report.progressUi.zeroHoldMs,
+      resolveDeduped: report.resolve.dedupedCount,
+      resolveDurationMs: report.resolve.durationMs,
+      saveDurationMs: report.save.durationMs,
+    };
+    console.group('[Boardfish export] smoothness report');
+    console.table([out]);
+    console.table(report.smoothness.slowestYields);
+    console.table(report.progressUi.samples);
+    console.groupEnd();
+    return { summary: out, slowestYields: report.smoothness.slowestYields, progressSamples: report.progressUi.samples, report };
   }
 
   function watch(ctx, phase, meta = {}, intervalMs = 2000) {
@@ -473,10 +559,12 @@ var ExportDebug = (() => {
       batchCount: e.meta?.batchCount ?? '',
       tempKeyCount: e.meta?.tempKeyCount ?? '',
       renderedCount: e.meta?.renderedCount ?? '',
+      deduped: e.meta?.deduped ?? '',
       savedCount: e.meta?.savedCount ?? '',
       failedCount: e.meta?.failedCount ?? '',
       missingCount: e.meta?.missingCount ?? '',
       bytesMB: e.meta?.bytesMB ?? '',
+      method: e.meta?.method || '',
       cancelled: e.meta?.cancelled ?? '',
       phase: e.meta?.phase || '',
       tick: e.meta?.tick ?? '',
@@ -510,6 +598,9 @@ var ExportDebug = (() => {
         failedCount: e.meta?.failedCount ?? '',
         missingCount: e.meta?.missingCount ?? '',
         bytesMB: e.meta?.bytesMB ?? '',
+        method: e.meta?.method || '',
+        deduped: e.meta?.deduped ?? '',
+        sourceKind: e.meta?.sourceKind || '',
         cancelled: e.meta?.cancelled ?? '',
         phase: e.meta?.phase || '',
         tick: e.meta?.tick ?? '',
@@ -524,25 +615,27 @@ var ExportDebug = (() => {
 
   function slowImageReport() {
     const renderRows = events
-      .filter(e => e.step === 'render:done')
+      .filter(e => e.step === 'render:done' || e.step === 'web-export:rendered-blob')
       .map(e => ({
         id: e.id,
         op: e.op,
+        step: e.step,
         imgKey: e.meta?.imgKey ?? '',
         objectId: e.meta?.objectId ?? '',
         flipX: e.meta?.flipX ?? '',
         flipY: e.meta?.flipY ?? '',
         rotation: e.meta?.rotation ?? '',
         sourceKind: e.meta?.sourceKind ?? '',
+        deduped: e.meta?.deduped ?? '',
         sourceMs: e.meta?.sourceMs ?? '',
         loadMs: e.meta?.loadMs ?? '',
         drawMs: e.meta?.drawMs ?? '',
         encodeMs: e.meta?.encodeMs ?? '',
-        totalRenderMs: e.meta?.totalRenderMs ?? e.meta?.ms ?? '',
+        totalRenderMs: e.meta?.totalRenderMs ?? e.meta?.ms ?? e.dt ?? '',
         width: e.meta?.width ?? '',
         height: e.meta?.height ?? '',
         megapixels: e.meta?.megapixels ?? '',
-        dataUrlMB: e.meta?.dataUrlMB ?? '',
+        dataUrlMB: e.meta?.dataUrlMB ?? (e.meta?.bytes ? Math.round(e.meta.bytes / 1024 / 1024 * 100) / 100 : ''),
         ok: e.meta?.hasDataUrl ?? e.meta?.ok ?? '',
         error: e.meta?.error || '',
       }))
@@ -566,7 +659,7 @@ var ExportDebug = (() => {
       .sort((a, b) => Number(b.registerMs || 0) - Number(a.registerMs || 0));
 
     const saveRows = events
-      .filter(e => e.step === 'save:batch-result' || (e.step === 'invoke:ok' && e.meta?.command === TAURI_COMMANDS.SAVE_IMAGES_TO_EXISTING_FOLDER_BY_KEYS))
+      .filter(e => e.step === 'save:batch-result' || e.step === 'web-export:folder-write' || e.step === 'web-export:zip-done' || (e.step === 'invoke:ok' && e.meta?.command === TAURI_COMMANDS.SAVE_IMAGES_TO_EXISTING_FOLDER_BY_KEYS))
       .map(e => ({
         id: e.id,
         op: e.op,
@@ -577,7 +670,10 @@ var ExportDebug = (() => {
         savedCount: e.meta?.savedCount ?? e.meta?.result?.savedCount ?? '',
         missingCount: e.meta?.missingCount ?? e.meta?.result?.missingCount ?? '',
         failedCount: e.meta?.failedCount ?? e.meta?.result?.failedCount ?? '',
-        bytesMB: e.meta?.bytesMB ?? (e.meta?.result?.bytes ? Math.round(e.meta.result.bytes / 1024 / 1024 * 100) / 100 : ''),
+        bytesMB: e.meta?.bytesMB ?? (e.meta?.bytes ? Math.round(e.meta.bytes / 1024 / 1024 * 100) / 100 : (e.meta?.result?.bytes ? Math.round(e.meta.result.bytes / 1024 / 1024 * 100) / 100 : '')),
+        method: e.meta?.method || '',
+        writeConcurrency: e.meta?.writeConcurrency ?? e.meta?.result?.writeConcurrency ?? '',
+        writeMs: e.meta?.writeMs ?? e.meta?.result?.writeMs ?? '',
         ms: e.meta?.ms ?? e.dt ?? '',
         error: e.meta?.error || '',
       }));
@@ -626,7 +722,10 @@ var ExportDebug = (() => {
       uiFirstNonZeroAtMs: massive?.progressUi?.firstNonZeroAtMs ?? '',
       resolveProcessed: massive?.resolve?.processed ?? '',
       resolveDurationMs: massive?.resolve?.durationMs ?? '',
+      resolveDeduped: massive?.resolve?.dedupedCount ?? '',
       saveDurationMs: massive?.save?.durationMs ?? '',
+      eventLoopYields: massive?.smoothness?.eventLoopYields ?? '',
+      maxYieldMs: massive?.smoothness?.maxYieldMs ?? '',
       error: last?.meta?.error || '',
     };
     console.table([out]);
@@ -635,7 +734,7 @@ var ExportDebug = (() => {
 
   function reset() { core.reset(); massive = null; }
 
-  return { enable, disable, setVerbose, start, step, end, watch, invoke, wrap, startMassive, recordResolveStart, recordResolveProgress, recordResolveDone, recordResolve, recordSaveStart, recordSaveBatch, recordSaveDone, recordProgressUi, massiveReport, progressReport, dump, summary, phaseSummary, slowImageReport, status, reset, get enabled() { return core.enabled; }, get events() { return events.slice(); }, get massive() { return massive ? JSON.parse(JSON.stringify(massive)) : null; } };
+  return { enable, disable, setVerbose, start, step, end, watch, invoke, wrap, startMassive, recordResolveStart, recordResolveProgress, recordResolveDone, recordResolve, recordSaveStart, recordSaveBatch, recordSaveDone, recordProgressUi, recordEventLoopYield, massiveReport, progressReport, smoothnessReport, dump, summary, phaseSummary, slowImageReport, status, reset, get enabled() { return core.enabled; }, get events() { return events.slice(); }, get massive() { return massive ? JSON.parse(JSON.stringify(massive)) : null; } };
 })();
 
 exposeDebug({ export: ExportDebug });

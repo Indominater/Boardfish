@@ -2,7 +2,7 @@
 
 var OpenDebug = (() => {
   const MAX_EVENTS = 5000;
-  let hydrationMode = 'all-before-open';
+  let hydrationMode = 'visible-first';
   let hydrationConcurrency = 8;
 
   function sanitize(value) {
@@ -18,7 +18,7 @@ var OpenDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish open debugger enabled. Use finishDebug({ open: ["summary", "dump"] }) to collect results.');
+    if (core.enabled) console.info('Boardfish open debugger enabled. Use finishDebug({ open: ["report", "phaseSummary", "hydrationSummary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -119,9 +119,13 @@ var OpenDebug = (() => {
   }
 
   function phaseSummary() {
+    const dataUrlCommand = typeof TAURI_COMMANDS !== 'undefined'
+      ? TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL
+      : 'get_cached_image_data_url';
     const interesting = new Set([
       'read-board-debug',
       'apply-state',
+      'hydrate-visible:bitmap-settle',
       'hydrate-initial-policy',
       'hydrate-visible:end',
       'hydrate-all:end',
@@ -131,7 +135,7 @@ var OpenDebug = (() => {
     ]);
     const rows = events.filter(e => (
       interesting.has(e.step) ||
-      (e.step === 'invoke:ok' && e.meta?.command && e.meta.command !== TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL)
+      (e.step === 'invoke:ok' && e.meta?.command && e.meta.command !== dataUrlCommand)
     )).map(e => ({
       step: e.step,
       total: e.total,
@@ -142,6 +146,9 @@ var OpenDebug = (() => {
       count: e.meta?.count ?? '',
       hydrated: e.meta?.hydrated ?? '',
       remaining: e.meta?.remaining ?? '',
+      visibleBitmapsReady: e.meta?.visibleBitmapsReady ?? e.meta?.after ?? '',
+      visibleBitmapsFailed: e.meta?.visibleBitmapsFailed ?? e.meta?.failed ?? '',
+      visibleBitmapsMissing: e.meta?.visibleBitmapsMissing ?? e.meta?.missing ?? '',
       rustTotalMs: e.meta?.rust?.total_ms ?? '',
       rustImageReadMs: e.meta?.rust?.image_read_ms ?? '',
       rustCacheInsertMs: e.meta?.rust?.cache_insert_ms ?? '',
@@ -182,7 +189,7 @@ var OpenDebug = (() => {
       totalImageHydrateMs: Math.round(sum('ms') * 100) / 100,
       totalFetchMs: Math.round(sum('fetchMs') * 100) / 100,
       totalLoadMs: Math.round(sum('loadMs') * 100) / 100,
-      totalBitmapMs: Math.round(sum('bitmapMs') * 100) / 100,
+      totalBitmapMs: Math.round(sum('cacheBitmapMs') * 100) / 100,
       maxImageMs: Math.round(max('ms') * 100) / 100,
       maxFetchMs: Math.round(max('fetchMs') * 100) / 100,
       concurrency: hydrationConcurrency,
@@ -254,6 +261,7 @@ var OpenDebug = (() => {
         fetchMs: e.meta?.fetchMs ?? '',
         loadMs: e.meta?.loadMs ?? '',
         readyMs: e.meta?.readyMs ?? '',
+        cacheReadyStage: e.meta?.cacheReadyStage ?? '',
         cacheTotalMs: e.meta?.cacheTotalMs ?? '',
         cacheQueueWaitMs: e.meta?.cacheQueueWaitMs ?? '',
         cacheBitmapMs: e.meta?.cacheBitmapMs ?? '',
@@ -282,15 +290,34 @@ var OpenDebug = (() => {
         count: e.meta?.count ?? '',
         hydrated: e.meta?.hydrated ?? '',
         pendingImages: e.meta?.pendingImages ?? e.meta?.pendingNativeImages ?? '',
+        visibleBitmapsReady: e.meta?.visibleBitmapsReady ?? e.meta?.after ?? '',
+        visibleBitmapsFailed: e.meta?.visibleBitmapsFailed ?? e.meta?.failed ?? '',
+        visibleBitmapsMissing: e.meta?.visibleBitmapsMissing ?? e.meta?.missing ?? '',
+        visibleBitmapSettleMs: e.meta?.visibleBitmapSettleMs ?? '',
         nativeRefs: e.meta?.nativeRefs ?? '',
         manifestRefs: e.meta?.manifestRefs ?? '',
         dataUrlRefs: e.meta?.dataUrlRefs ?? '',
         missingStoreRefs: e.meta?.missingStoreRefs ?? '',
         cachedImages: e.meta?.cachedImages ?? '',
         assetUrls: e.meta?.assetUrls ?? '',
+        deferredInitialCacheImages: e.meta?.deferredInitialCacheImages ?? '',
+        visibleFirstOpen: e.meta?.visibleFirstOpen ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
+        readyStage: e.meta?.cacheReadyStage ?? '',
         imgKey: e.meta?.imgKey || e.meta?.key || '',
         ms: e.meta?.ms ?? '',
+        totalMeasuredMs: e.meta?.totalMeasuredMs ?? '',
+        drawMs: e.meta?.drawMs ?? '',
+        saveViewportMs: e.meta?.saveViewportMs ?? '',
+        overlayMs: e.meta?.overlayMs ?? '',
+        drawBoardTotalMs: e.meta?.drawBoardTotalMs ?? '',
+        objectLoopMs: e.meta?.objectLoopMs ?? '',
+        drawnImages: e.meta?.drawnImages ?? '',
+        bitmapImages: e.meta?.bitmapImages ?? '',
+        elementImages: e.meta?.elementImages ?? '',
+        scaledImages: e.meta?.scaledImages ?? '',
+        scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
+        culledImages: e.meta?.culledImages ?? '',
         queueWaitMs: e.meta?.queueWaitMs ?? '',
         bitmapMs: e.meta?.bitmapMs ?? '',
         previewMs: e.meta?.previewMs ?? '',
@@ -337,7 +364,8 @@ var OpenDebug = (() => {
         totalMs: e.meta?.ms ?? '',
         fetchMs: e.meta?.fetchMs ?? '',
         loadMs: e.meta?.loadMs ?? '',
-        bitmapMs: e.meta?.bitmapMs ?? '',
+        cacheReadyStage: e.meta?.cacheReadyStage ?? '',
+        bitmapMs: e.meta?.cacheBitmapMs ?? '',
         dataUrlLen: e.meta?.dataUrlLen ?? '',
         source: e.meta?.source ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
@@ -346,6 +374,93 @@ var OpenDebug = (() => {
       .slice(0, limit);
     console.table(rows);
     return rows;
+  }
+
+  function latestOpenEvents() {
+    const starts = events.filter(e => e.step === 'start' && /^open/.test(e.op || ''));
+    const lastStart = starts[starts.length - 1];
+    if (!lastStart) return [];
+    return events.filter(e => e.id === lastStart.id);
+  }
+
+  function report() {
+    const rows = latestOpenEvents();
+    const findStep = (step) => rows.find(e => e.step === step) || null;
+    const findLastStep = (step) => [...rows].reverse().find(e => e.step === step) || null;
+    const findInvoke = (command) => rows.find(e => e.step === 'invoke:ok' && e.meta?.command === command) || null;
+    const initialPolicy = findStep('hydrate-initial-policy');
+    const visibleHydrate = findStep('hydrate-visible:end');
+    const allHydrate = findStep('hydrate-all:end');
+    const bitmapSettle = findStep('hydrate-visible:bitmap-settle');
+    const backgroundDone = findLastStep('hydrate-background:done');
+    const initialRender = findStep('initial-applyTransform');
+    const endEvent = findLastStep('end');
+    const read = findInvoke(typeof TAURI_COMMANDS !== 'undefined' ? TAURI_COMMANDS.READ_BOARD : 'read_board') ||
+      rows.find(e => e.step === 'invoke:ok' && /read_board|web_read_board/.test(e.meta?.command || '')) ||
+      null;
+    const shape = findStep('read-board-shape');
+    const applyState = findStep('apply-state');
+    const cacheStartAll = findStep('cacheImage:start-all');
+    const openingShieldRemoved = findStep('opening-shield:removed');
+    const hydrationEnd = visibleHydrate || allHydrate;
+    const summaryRow = {
+      mode: initialPolicy?.meta?.mode || hydrationMode,
+      objectCount: shape?.meta?.objectCount ?? endEvent?.meta?.objectCount ?? '',
+      imageCount: shape?.meta?.imageCount ?? endEvent?.meta?.imageCount ?? '',
+      readInvokeMs: read?.meta?.ms ?? read?.dt ?? '',
+      rustTotalMs: read?.meta?.rust?.total_ms ?? '',
+      rustImageReadMs: read?.meta?.rust?.image_read_ms ?? '',
+      applyStateMs: applyState?.meta?.ms ?? '',
+      cacheStartAllMs: cacheStartAll?.meta?.ms ?? '',
+      deferredInitialCacheImages: cacheStartAll?.meta?.deferredInitialCacheImages ?? '',
+      initialHydrationMs: hydrationEnd?.meta?.ms ?? '',
+      initialHydratedImages: hydrationEnd?.meta?.hydrated ?? '',
+      visibleBitmapSettleMs: bitmapSettle?.meta?.ms ?? '',
+      visibleBitmapsBeforeSettle: bitmapSettle?.meta?.before ?? '',
+      visibleBitmapsAfterSettle: bitmapSettle?.meta?.after ?? '',
+      visibleBitmapsFailedAfterSettle: bitmapSettle?.meta?.failed ?? '',
+      visibleBitmapsMissingAfterSettle: bitmapSettle?.meta?.missing ?? '',
+      pendingAfterInitial: initialPolicy?.meta?.pendingImages ?? '',
+      initialRenderMs: initialRender?.meta?.ms ?? '',
+      initialTransformMeasuredMs: initialRender?.meta?.totalMeasuredMs ?? '',
+      initialDrawMs: initialRender?.meta?.drawMs ?? '',
+      initialSaveViewportMs: initialRender?.meta?.saveViewportMs ?? '',
+      initialOverlayMs: initialRender?.meta?.overlayMs ?? '',
+      initialDrawBoardMs: initialRender?.meta?.drawBoardTotalMs ?? '',
+      initialObjectLoopMs: initialRender?.meta?.objectLoopMs ?? '',
+      initialDrawnImages: initialRender?.meta?.drawnImages ?? '',
+      initialBitmapImages: initialRender?.meta?.bitmapImages ?? '',
+      initialElementImages: initialRender?.meta?.elementImages ?? '',
+      initialScaledImages: initialRender?.meta?.scaledImages ?? '',
+      initialScaledFallbackFull: initialRender?.meta?.scaledFallbackFull ?? '',
+      initialCulledImages: initialRender?.meta?.culledImages ?? '',
+      timeToInitialRenderMs: initialRender?.total ?? '',
+      shieldRemoveMs: openingShieldRemoved?.meta?.ms ?? '',
+      timeToOpenEndMs: endEvent?.total ?? '',
+      backgroundHydrationMs: backgroundDone?.meta?.ms ?? '',
+      backgroundHydratedImages: backgroundDone?.meta?.hydrated ?? '',
+      backgroundRemainingImages: backgroundDone?.meta?.remaining ?? '',
+    };
+    const findings = [];
+    if (summaryRow.mode === 'all-before-open' && Number(summaryRow.imageCount) > Number(summaryRow.initialHydratedImages || 0)) {
+      findings.push('The open waited for non-visible image hydration; visible-first avoids that critical-path work.');
+    }
+    if (Number(summaryRow.rustImageReadMs) > Number(summaryRow.initialHydrationMs || 0)) {
+      findings.push('Native image extraction is the largest measured open phase.');
+    }
+    if (Number(summaryRow.initialRenderMs) > 50) {
+      if (Number(summaryRow.initialSaveViewportMs) > 50 && Number(summaryRow.initialSaveViewportMs) > Number(summaryRow.initialDrawMs || 0)) {
+        findings.push('Initial render is over budget due mostly to viewport persistence.');
+      } else if (Number(summaryRow.initialDrawMs) > 50 || Number(summaryRow.initialDrawBoardMs) > 50) {
+        findings.push('Initial render is over budget due mostly to first canvas draw.');
+      } else {
+        findings.push('Initial render is over budget; inspect initial applyTransform breakdown fields.');
+      }
+    }
+    if (!findings.length) findings.push('No single open phase dominates the current capture.');
+    console.table([summaryRow]);
+    console.table(findings.map(finding => ({ finding })));
+    return { summary: summaryRow, findings, events: rows };
   }
 
   function reset() { core.reset(); }
@@ -374,6 +489,7 @@ var OpenDebug = (() => {
     imageStoreSample,
     hydrationCandidates,
     slowImages,
+    report,
     reset,
     get enabled() { return core.enabled; },
     get hydrationMode() { return hydrationMode; },

@@ -9,6 +9,8 @@ pub(crate) struct SaveBoardResponse {
     json_bytes: usize,
     image_bytes: usize,
     image_count: usize,
+    validate_ms: f64,
+    source_lookup_ms: f64,
     serialize_ms: f64,
     write_ms: f64,
     zip_ms: f64,
@@ -38,12 +40,19 @@ pub(crate) struct ReadBoardResponse {
 }
 
 impl SaveBoardResponse {
-    fn from_stats(stats: BoardWriteStats, total_ms: f64) -> Self {
+    fn from_stats(
+        stats: BoardWriteStats,
+        total_ms: f64,
+        validate_ms: f64,
+        source_lookup_ms: f64,
+    ) -> Self {
         Self {
             format: "container",
             json_bytes: stats.json_bytes,
             image_bytes: stats.image_bytes,
             image_count: stats.image_count,
+            validate_ms,
+            source_lookup_ms,
             serialize_ms: stats.serialize_ms,
             write_ms: stats.write_ms,
             zip_ms: stats.zip_ms,
@@ -78,7 +87,11 @@ pub(crate) async fn save_board(
     board: serde_json::Value,
 ) -> Result<SaveBoardResponse, String> {
     let total_start = std::time::Instant::now();
+    let validate_start = std::time::Instant::now();
     validate_board_value(&board)?;
+    let validate_ms = validate_start.elapsed().as_secs_f64() * 1000.0;
+
+    let source_lookup_start = std::time::Instant::now();
     let image_keys = board
         .get("imageStore")
         .and_then(|v| v.as_object())
@@ -86,6 +99,7 @@ pub(crate) async fn save_board(
         .unwrap_or_default();
 
     let sources = state.get_many(&image_keys)?;
+    let source_lookup_ms = source_lookup_start.elapsed().as_secs_f64() * 1000.0;
 
     let result = tokio::task::spawn_blocking(move || write_board_container(&path, board, sources))
         .await
@@ -93,7 +107,12 @@ pub(crate) async fn save_board(
 
     let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
 
-    Ok(SaveBoardResponse::from_stats(result, total_ms))
+    Ok(SaveBoardResponse::from_stats(
+        result,
+        total_ms,
+        validate_ms,
+        source_lookup_ms,
+    ))
 }
 
 #[tauri::command]

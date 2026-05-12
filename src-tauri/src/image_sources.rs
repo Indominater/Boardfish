@@ -79,9 +79,13 @@ pub(crate) struct SaveImagesResponse {
     requested_count: usize,
     source_count: usize,
     bytes: usize,
+    write_concurrency: usize,
+    write_ms: f64,
     errors: Vec<String>,
     missing: Vec<String>,
 }
+
+const EXPORT_WRITE_CONCURRENCY: usize = 8;
 
 fn image_mime_ext_from_path(path: &str) -> (&'static str, &'static str) {
     let ext = std::path::Path::new(path)
@@ -432,6 +436,8 @@ pub(crate) async fn save_images_to_existing_folder_by_keys(
             requested_count: 0,
             source_count: 0,
             bytes: 0,
+            write_concurrency: 0,
+            write_ms: 0.0,
             errors: Vec::new(),
             missing: Vec::new(),
         });
@@ -444,30 +450,51 @@ pub(crate) async fn save_images_to_existing_folder_by_keys(
     let mut failed_count = 0usize;
     let mut bytes_written = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let write_start = std::time::Instant::now();
+    let write_concurrency = sources.len().clamp(1, EXPORT_WRITE_CONCURRENCY);
 
-    for (i, (_key, source)) in sources.iter().enumerate() {
-        let hex = {
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.subsec_nanos() as u64)
-                .unwrap_or(i as u64);
-            format!("{:06x}", (nanos ^ (i as u64 * 0x9e3779b9)) & 0xFFFFFF)
-        };
-        let filename = format!("image_{}.{}", hex, source.ext);
-        let path = base.join(&filename);
-        match tokio::fs::write(&path, &*source.bytes).await {
-            Ok(_) => {
-                saved_count += 1;
-                bytes_written += source.bytes.len();
-            }
-            Err(err) => {
-                failed_count += 1;
-                if errors.len() < 10 {
-                    errors.push(format!("{}: {}", filename, err));
+    for chunk_start in (0..sources.len()).step_by(write_concurrency) {
+        let chunk_end = (chunk_start + write_concurrency).min(sources.len());
+        let mut handles = Vec::with_capacity(chunk_end - chunk_start);
+
+        for (offset, (_key, source)) in sources[chunk_start..chunk_end].iter().enumerate() {
+            let index = chunk_start + offset;
+            let hex = {
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.subsec_nanos() as u64)
+                    .unwrap_or(index as u64);
+                format!("{:06x}", (nanos ^ (index as u64 * 0x9e3779b9)) & 0xFFFFFF)
+            };
+            let filename = format!("image_{}.{}", hex, source.ext);
+            let path = base.join(&filename);
+            let bytes = source.bytes.clone();
+
+            handles.push(tokio::spawn(async move {
+                let byte_count = bytes.len();
+                match tokio::fs::write(&path, &*bytes).await {
+                    Ok(_) => Ok(byte_count),
+                    Err(err) => Err(format!("{}: {}", filename, err)),
+                }
+            }));
+        }
+
+        for handle in handles {
+            match handle.await.map_err(|e| e.to_string())? {
+                Ok(byte_count) => {
+                    saved_count += 1;
+                    bytes_written += byte_count;
+                }
+                Err(err) => {
+                    failed_count += 1;
+                    if errors.len() < 10 {
+                        errors.push(err);
+                    }
                 }
             }
         }
     }
+    let write_ms = elapsed_ms(write_start);
 
     Ok(SaveImagesResponse {
         saved_count,
@@ -476,6 +503,8 @@ pub(crate) async fn save_images_to_existing_folder_by_keys(
         requested_count: img_keys.len(),
         source_count: sources.len(),
         bytes: bytes_written,
+        write_concurrency,
+        write_ms,
         errors,
         missing: missing.into_iter().take(10).collect(),
     })

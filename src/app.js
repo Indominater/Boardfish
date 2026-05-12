@@ -37,7 +37,7 @@ var exportAllTextBtn  = BoardfishDOM.exportAllTextBtn;
 var exportAllSep      = BoardfishDOM.exportAllSep;
 var IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 var IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
-if (IS_MAC) document.body.classList.add('is-macos');
+if (IS_MAC && typeof hasTauri === 'function' && hasTauri()) document.body.classList.add('is-macos');
 var COMMAND_KEY_LABEL = IS_MAC ? '\u2318' : 'Ctrl';
 var SHIFT_KEY_LABEL = IS_MAC ? '\u21e7' : 'Shift';
 var MENU_VIEWPORT_EDGE_MARGIN = 12;

@@ -1,10 +1,10 @@
 'use strict';
 
-var IMAGE_SCALE_LEVELS = [0.25];
-var IMAGE_VARIANT_MEMORY_LIMIT = 512 * 1024 * 1024;
+var IMAGE_SCALE_LEVELS = [0.5];
+var IMAGE_VARIANT_MEMORY_LIMIT = 1024 * 1024 * 1024;
 var VIEWPORT_PERF_MODES = {
-  '1': { label: 'culling + 0.25', culling: true, scaling: true },
-  '2': { label: '0.25 only', culling: false, scaling: true },
+  '1': { label: 'culling + scaled images', culling: true, scaling: true },
+  '2': { label: 'scaled images only', culling: false, scaling: true },
   '3': { label: 'culling only', culling: true, scaling: false },
   '4': { label: 'none', culling: false, scaling: false },
 };
@@ -23,7 +23,8 @@ var imageScaledVariantQueue = [];
 var imageScaledVariantQueueScheduled = false;
 var lastViewportInputAt = 0;
 var IMAGE_VARIANT_INPUT_IDLE_MS = 180;
-var IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS = 24;
+var IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS = 24,
+    IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS = 16;
 var imageScaledVariantBuildCount = 0;
 var imageScaledVariantBuildTotalMs = 0;
 var imageScaledVariantBuildMaxMs = 0;
@@ -39,7 +40,7 @@ var imageScaledVariantPrewarmReadyCount = 0;
 var imageScaledVariantPrewarmNoSourceCount = 0;
 var IMAGE_VARIANT_PREWARM_PAD_PX = 768;
 var viewportCullingEnabled = true;
-var VIEWPORT_IMAGE_SCALING_SUPPORTED = !IS_MAC;
+var VIEWPORT_IMAGE_SCALING_SUPPORTED = typeof createImageBitmap === 'function';
 var viewportImageScalingEnabled = VIEWPORT_IMAGE_SCALING_SUPPORTED;
 
 function isViewportImageScalingActive() {
@@ -137,12 +138,14 @@ function enqueueScaledVariantTask(task) {
 function scheduleScaledVariantQueue() {
   if (imageScaledVariantQueueScheduled) return;
   imageScaledVariantQueueScheduled = true;
+  const activeInputQueueDelayMs = Math.max(0, Number(IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS) || 0);
   const run = () => {
     imageScaledVariantQueueScheduled = false;
     const inputIdleMs = performance.now() - lastViewportInputAt;
-    const idleThresholdMs = typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled
+    const eyedropperActive = typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled;
+    const idleThresholdMs = eyedropperActive
       ? IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS
-      : IMAGE_VARIANT_INPUT_IDLE_MS;
+      : activeInputQueueDelayMs;
     if (inputIdleMs < idleThresholdMs) {
       scheduleScaledVariantQueue();
       return;
@@ -156,9 +159,10 @@ function scheduleScaledVariantQueue() {
       });
   };
   const inputIdleMs = performance.now() - lastViewportInputAt;
-  const idleThresholdMs = typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled
+  const eyedropperActive = typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled;
+  const idleThresholdMs = eyedropperActive
     ? IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS
-    : IMAGE_VARIANT_INPUT_IDLE_MS;
+    : activeInputQueueDelayMs;
   const delay = inputIdleMs < idleThresholdMs ? idleThresholdMs - inputIdleMs : 16;
   setTimeout(run, delay);
 }
@@ -179,7 +183,7 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
 }
 
 function queueScaledImageVariant(key, source, scale) {
-  if (!isViewportImageScalingActive() || !key || !source || scale >= 1) return;
+  if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key || !source || scale >= 1) return;
   const pendingKey = `${key}:${scale}`;
   const map = getImageVariantMap(key);
   if (map.has(scale) || imageScaledBitmapPending.has(pendingKey)) return;
@@ -249,7 +253,7 @@ function isScaledImageVariantPending(key, scale) {
 function prewarmVisibleScaledImageVariants(options = {}) {
   if (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled) return { skipped: 'eyedropper' };
   if (!isViewportImageScalingActive() || _boardOpening) return { skipped: 'disabled-or-opening' };
-  const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.25;
+  const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.5;
   if (!(scale > 0 && scale < 1)) return { skipped: 'invalid-scale' };
   const padPx = Number.isFinite(options.padPx) ? options.padPx : IMAGE_VARIANT_PREWARM_PAD_PX;
   const rect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(padPx) : null;
@@ -344,7 +348,7 @@ function viewportPerfModeSummary(modeKey = null) {
     key,
     label: mode.label || 'custom',
     culling: viewportCullingEnabled,
-    scaling025: viewportImageScalingEnabled,
+    scalingEnabled: viewportImageScalingEnabled,
     scaleLevels: viewportImageScalingEnabled ? IMAGE_SCALE_LEVELS.join(',') : 'off',
   };
 }

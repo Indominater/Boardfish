@@ -100,6 +100,21 @@
     return readClipboardBlobAsDataUrlDebug(imageFile, 'failed to read clipboard image', dbg, { source: 'paste-event' });
   }
 
+  function readClipboardImageFileFromEvent(clipboardData, dbg = null) {
+    if (!clipboardData) {
+      ClipDebug.step(dbg, 'event-clipboard:none');
+      return null;
+    }
+    ClipDebug.step(dbg, 'event-clipboard:inspect', describeClipboardData(clipboardData));
+    const imageFile = supportedClipboardImageFile(clipboardData.items || [], clipboardData.files || []);
+    if (!imageFile) {
+      ClipDebug.step(dbg, 'event-image:none');
+      return null;
+    }
+    ClipDebug.step(dbg, 'event-image-blob', { type: imageFile.type, blobSize: imageFile.size, fileName: imageFile.name || '' });
+    return imageFile;
+  }
+
   function readClipboardTextFromEvent(clipboardData) {
     if (!clipboardData) return '';
     return clipboardData.getData?.('text/plain') || clipboardData.getData?.('text') || '';
@@ -165,6 +180,22 @@
     return null;
   }
 
+  async function readClipboardImageBlobFromBrowser(dbg = null) {
+    if (!navigator.clipboard?.read) return null;
+    ClipDebug.step(dbg, 'browser-clipboard-read:start');
+    const items = await navigator.clipboard.read();
+    ClipDebug.step(dbg, 'browser-clipboard-read:ok', { itemCount: items.length });
+    for (const item of items) {
+      for (const type of item.types) {
+        if (type !== 'image/png' && type !== 'image/jpeg') continue;
+        const blob = await item.getType(type);
+        ClipDebug.step(dbg, 'browser-image-blob', { type, blobSize: blob.size });
+        return blob;
+      }
+    }
+    return null;
+  }
+
   async function readBoardfishClipboardTokenFromBrowser(dbg = null) {
     if (!navigator.clipboard?.read) return { checked: false, token: '' };
     ClipDebug.step(dbg, 'browser-clipboard-token-read:start');
@@ -218,8 +249,10 @@
     describeClipboardData,
     readBoardfishClipboardTokenFromBrowser,
     readBoardfishClipboardTokenFromEvent,
+    readClipboardImageBlobFromBrowser,
     readClipboardImageDataUrlFromBrowser,
     readClipboardImageDataUrlFromEvent,
+    readClipboardImageFileFromEvent,
     readClipboardTextFromEvent,
   });
   if (typeof module !== 'undefined' && module.exports) {

@@ -228,6 +228,8 @@
       serialize_ms: serializeMs,
       write_ms: performance.now() - writeStart,
       zip_ms: serializeMs,
+      zip_mode: payload.zipMode,
+      zip_bytes: payload.zipBytes,
       total_ms: performance.now() - totalStart,
     };
   }

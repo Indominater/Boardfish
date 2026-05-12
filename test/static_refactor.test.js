@@ -111,6 +111,12 @@ test('startup variants strip debug and runtime-specific code from release surfac
   assert.ok(desktopDev.includes('tauri_bridge.js'), 'desktop dev keeps the native bridge');
 });
 
+test('macOS titlebar drag region is native-only', () => {
+  const source = readSource('src/app.js');
+  assert.match(source, /if \(IS_MAC && typeof hasTauri === 'function' && hasTauri\(\)\) document\.body\.classList\.add\('is-macos'\);/);
+  assert.doesNotMatch(source, /if \(IS_MAC\) document\.body\.classList\.add\('is-macos'\);/);
+});
+
 test('frontend invokes Tauri through the shared wrapper and command catalog', () => {
   for (const relativePath of frontendSources()) {
     const source = readSource(relativePath);
@@ -369,16 +375,26 @@ test('large clipboard paste diagnostics are available through beginDebug finishD
   const imageStateSource = readSource('src/js/image_state.js');
 
   assert.match(debugSource, /function largePasteReport\(\)/);
+  assert.match(debugSource, /function pasteBreakdown\(\)/);
   assert.match(debugSource, /largePasteReport,/);
+  assert.match(debugSource, /pasteBreakdown,/);
   assert.match(debugSource, /failedCheckpoint/);
   assert.match(clipboardIoSource, /function readClipboardBlobAsDataUrlDebug/);
+  assert.match(clipboardIoSource, /function readClipboardImageFileFromEvent/);
+  assert.match(clipboardIoSource, /async function readClipboardImageBlobFromBrowser/);
   assert.match(clipboardIoSource, /clipboard-blob-read:start/);
   assert.match(clipboardIoSource, /clipboard-blob-read:ok/);
   assert.match(clipboardIoSource, /clipboard-blob-read:error/);
   assert.match(clipboardIoSource, /event-clipboard:inspect/);
+  assert.match(pasteSource, /async function pasteWebImageBlob/);
+  assert.match(pasteSource, /BoardfishClipboardIO\.readClipboardImageFileFromEvent/);
+  assert.match(pasteSource, /BoardfishClipboardIO\.readClipboardImageBlobFromBrowser/);
+  assert.match(pasteSource, /native-clipboard-settle:skip/);
+  assert.doesNotMatch(pasteSource, /setTimeout\(resolve, 50\)/);
   assert.match(pasteSource, /objectCountBefore: objects\.length/);
   assert.match(insertSource, /objectCountBefore,\s*\n\s*objectCountAfter: objects\.length/);
-  assert.match(insertSource, /cacheImage\(imgKey, imageAssetUrlCache\[imgKey\], dbg, null, \{ skipSourceRegistration: true \}\)/);
+  assert.match(insertSource, /cacheImage\(imgKey, imageAssetUrlCache\[imgKey\], dbg, null, \{\s*skipSourceRegistration: true,\s*resolveOnLoad: true,/);
+  assert.match(insertSource, /readyStage === 'display'/);
   assert.match(insertSource, /NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD/);
   assert.match(insertSource, /function shouldUseNativeDataUrlImageCache\(src\)/);
   assert.match(insertSource, /addDataUrlImageViaNativeCache\(src, cx, cy, exactSize, existingImgKey, options\)/);
@@ -390,6 +406,91 @@ test('large clipboard paste diagnostics are available through beginDebug finishD
   assert.match(imageStateSource, /materialize-image-assets:entry/);
   assert.match(imageStateSource, /cache-image:source/);
   assert.match(debugSource, /sourceKind/);
+});
+
+test('right-click image insert path has display-ready timing and bounded native concurrency diagnostics', () => {
+  const insertSource = readSource('src/js/image_insert.js');
+  const imageStateSource = readSource('src/js/image_state.js');
+  const debugInsertSource = readSource('src/js/debug_insert.js');
+  const noopSource = readSource('src/js/runtime_debug_noop.js');
+
+  assert.match(insertSource, /const NATIVE_IMAGE_INSERT_CONCURRENCY = 3;/);
+  assert.match(insertSource, /const WEB_IMAGE_INSERT_CONCURRENCY = 3;/);
+  assert.match(insertSource, /const nativeImageInsertConcurrency = \(count\) =>/);
+  assert.match(insertSource, /const webImageInsertConcurrency = \(count\) =>/);
+  assert.match(insertSource, /readAsArrayBuffer\(file\)/);
+  assert.doesNotMatch(insertSource, /readAsDataURL\(file\)/);
+  assert.match(insertSource, /createWebImageSourceFromBytes\(file, imgKey, bytes\)/);
+  assert.match(insertSource, /BoardfishWebBoardContainer\.createWebImageRef/);
+  assert.match(insertSource, /await mapWithConcurrency\(accepted, concurrency, async \(\{ file, acceptedIndex \}\) =>/);
+  assert.match(insertSource, /await mapWithConcurrency\(imagePaths, concurrency, async \(path, index\) =>/);
+  assert.match(insertSource, /z: bulkZBase == null \? undefined : bulkZBase \+ index/);
+  assert.match(insertSource, /z: bulkZBase == null \? undefined : bulkZBase \+ acceptedIndex/);
+  assert.match(insertSource, /resolveOnLoad: true/);
+  assert.match(insertSource, /InsertDebug\.step\(insertDbg, 'native-register:end'/);
+  assert.match(insertSource, /InsertDebug\.step\(insertDbg, 'materialize:end'/);
+  assert.match(insertSource, /InsertDebug\.step\(insertDbg, 'object:add'/);
+  assert.match(insertSource, /cacheReadyStage: metrics\?\.cacheReadyStage/);
+  assert.match(imageStateSource, /BULK_IMAGE_READY_RENDER_INTERVAL_MS = 450/);
+  assert.match(imageStateSource, /scheduleImageReadyRender\('image-display-ready'/);
+  assert.match(imageStateSource, /resolveReadyOnce\('display'\)/);
+  assert.match(debugInsertSource, /const MAX_EVENTS = 5000;/);
+  assert.match(debugInsertSource, /const BREAKDOWN_LIMIT = 200;/);
+  assert.match(debugInsertSource, /timeToFirstObjectMs/);
+  assert.match(debugInsertSource, /timeToFirstDisplayMs/);
+  assert.match(debugInsertSource, /readMsTotal/);
+  assert.match(debugInsertSource, /materializeMsTotal/);
+  assert.match(debugInsertSource, /function imageBreakdown\(limit = BREAKDOWN_LIMIT\)/);
+  assert.match(debugInsertSource, /function nativeBreakdown\(limit = BREAKDOWN_LIMIT\)/);
+  assert.match(noopSource, /nativeBreakdown: \(\) => \[\]/);
+});
+
+test('viewport navigation diagnostics measure input latency without an extra wheel RAF', () => {
+  const inputSource = readSource('src/js/canvas_input.js');
+  const viewportSource = readSource('src/js/viewport.js');
+  const debugSource = readSource('src/js/debug.js');
+  const perfSource = readSource('src/js/debug_manual_perf.js');
+
+  assert.match(inputSource, /BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, newZoom\);\s*scheduleTransform\('wheel-zoom', e\);/);
+  assert.match(inputSource, /BoardfishViewportState\.panBy\(-e\.deltaX, -e\.deltaY\);\s*scheduleTransform\('wheel-pan', e\);/);
+  assert.doesNotMatch(inputSource, /requestAnimationFrame\(flushWheelPan\)/);
+  assert.match(inputSource, /scheduleTransform\('mouse-pan', ev\)/);
+  assert.match(viewportSource, /function viewportEventTime\(event = null\)/);
+  assert.match(viewportSource, /ViewportDebug\.frameStart\(performance\.now\(\) - _frameScheduledAt, frameMeta\)/);
+  assert.match(viewportSource, /function flushViewportSave\(\)/);
+  assert.match(viewportSource, /BoardRenderer\.drawSingleObj\(context, obj, counters, \{ view, imageSourceResolver, viewportRect \}\)/);
+  assert.match(debugSource, /maxInputAgeMs/);
+  assert.match(debugSource, /inputFrames/);
+  assert.match(debugSource, /wheelSummary/);
+  assert.match(perfSource, /function panningReport\(options = \{\}\)/);
+  assert.match(perfSource, /function wheelPanTest\(options = \{\}\)/);
+  assert.match(perfSource, /function mousePanTest\(options = \{\}\)/);
+  assert.match(perfSource, /function zoomReport\(options = \{\}\)/);
+  assert.match(perfSource, /function wheelZoomTest\(options = \{\}\)/);
+});
+
+test('image export diagnostics cover deduped resolve work and smoothness timing', () => {
+  const imageExportSource = readSource('src/js/image_export.js');
+  const exportUtilsSource = readSource('src/js/export_utils.js');
+  const debugExportSource = readSource('src/js/debug_export.js');
+  const noopSource = readSource('src/js/runtime_debug_noop.js');
+  const rustSource = readSource('src-tauri/src/image_sources.rs');
+
+  assert.match(imageExportSource, /const exportTransformSignature = \(obj\) =>/);
+  assert.match(imageExportSource, /const resolvePromises = new Map\(\)/);
+  assert.match(imageExportSource, /deduped: true/);
+  assert.match(imageExportSource, /const exportSaveBatchSize = \(keyCount\) =>/);
+  assert.match(imageExportSource, /SAVE_IMAGE_FILE_DIALOG[\s\S]*before-resolve-key/);
+  assert.match(exportUtilsSource, /async function yieldToEventLoop\(dbg, phase, meta = \{\}\)/);
+  assert.match(exportUtilsSource, /recordResolveStart\?\.\(/);
+  assert.match(exportUtilsSource, /web-export:zip-done/);
+  assert.match(debugExportSource, /function recordEventLoopYield\(meta = \{\}\)/);
+  assert.match(debugExportSource, /function smoothnessReport\(\)/);
+  assert.match(debugExportSource, /firstTextAtMs/);
+  assert.match(debugExportSource, /p\.zeroHoldMs = Math\.round\(\(elapsedMs - \(p\.firstTextAtMs \?\? elapsedMs\)\) \* 100\) \/ 100/);
+  assert.match(noopSource, /recordEventLoopYield: noop/);
+  assert.match(rustSource, /const EXPORT_WRITE_CONCURRENCY: usize = 8/);
+  assert.match(rustSource, /tokio::spawn/);
 });
 
 test('shared board contract matches frontend schema constants', () => {

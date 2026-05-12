@@ -29,6 +29,48 @@ const readWebClipboardTokenForPaste = async (clipboardData, dbg = null) => {
   }
 };
 
+const clipboardImageBlobName = (blob, fallback = 'clipboard-image') => {
+  if (blob?.name) return blob.name;
+  const ext = blob?.type === 'image/jpeg' ? 'jpg' : 'png';
+  return `${fallback}.${ext}`;
+};
+
+const normalizeClipboardImageBlob = (blob, fallback = 'clipboard-image') => {
+  if (!blob) return null;
+  if (typeof File === 'function' && !(blob instanceof File)) {
+    return new File([blob], clipboardImageBlobName(blob, fallback), { type: blob.type || 'image/png' });
+  }
+  return blob;
+};
+
+async function pasteWebImageBlob(blob, wx, wy, dbg, source) {
+  const file = normalizeClipboardImageBlob(blob, source);
+  if (!file) return false;
+  const objectCountBefore = objects.length;
+  ClipDebug.step(dbg, `${source}:insert-start`, {
+    fileName: clipboardImageBlobName(file, source),
+    fileSize: file.size ?? '',
+    fileType: file.type || '',
+    objectCountBefore,
+  });
+  await insertImageFiles([file], wx, wy, source);
+  const objectCountAfter = objects.length;
+  const added = objectCountAfter > objectCountBefore;
+  ClipDebug.step(dbg, `${source}:insert-end`, {
+    added,
+    objectCountBefore,
+    objectCountAfter,
+    objectDelta: objectCountAfter - objectCountBefore,
+  });
+  ClipDebug.end(dbg, {
+    path: source,
+    added,
+    objectCountBefore,
+    objectCountAfter,
+  });
+  return added;
+}
+
 async function copySelected() {
   const dbg = ClipDebug.start('copySelected', { selectedCount: selectedIds.size });
   if (!selectedIds.size) { ClipDebug.end(dbg, { skipped: 'empty-selection' }); return; }
@@ -274,13 +316,22 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         return;
       }
     }
-    const eventImage = BoardfishClipboardIO.readClipboardImageDataUrlFromEvent(clipboardData, dbg);
+    if (!hasTauri()) {
+      const eventImageFile = BoardfishClipboardIO.readClipboardImageFileFromEvent(clipboardData, dbg);
+      if (eventImageFile) {
+        await pasteWebImageBlob(eventImageFile, wx, wy, dbg, 'web-paste-event');
+        return;
+      }
+    }
+    const eventImage = hasTauri()
+      ? BoardfishClipboardIO.readClipboardImageDataUrlFromEvent(clipboardData, dbg)
+      : null;
     if (eventImage) {
       try {
         const imgKey = newImgKey();
         const dataUrl = await eventImage;
         ClipDebug.step(dbg, 'event-image-read', { imgKey, dataUrl });
-        await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'event-image', dbg);
+        await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'event-image', dbg, { resolveOnLoad: true });
         return;
       } catch (err) {
         hideInputShield();
@@ -293,22 +344,21 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length });
       return;
     }
-    if (!hasTauri()) {
-      try {
-        const imgKey = newImgKey();
-        const dataUrl = await BoardfishClipboardIO.readClipboardImageDataUrlFromBrowser(dbg);
-        if (dataUrl) {
-          ClipDebug.step(dbg, 'browser-image-read', { imgKey, dataUrl });
-          await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'browser-image', dbg);
-          return;
-        }
-      } catch (err) {
-        ClipDebug.step(dbg, 'browser-image-miss', { error: String(err) });
-      }
-    }
     if (hasTauri()) {
       try {
-        await new Promise(resolve => setTimeout(resolve, 50));
+        if (nativeClipboardPendingCount() > 0) {
+          const settleStart = performance.now();
+          ClipDebug.step(dbg, 'native-clipboard-settle:start', { nativePending: nativeClipboardPendingCount() });
+          const settle = await waitForNativeClipboardIdle(250);
+          ClipDebug.step(dbg, 'native-clipboard-settle:end', {
+            nativePending: nativeClipboardPendingCount(),
+            ready: settle?.ready ?? '',
+            error: settle?.error || '',
+            ms: Math.round((performance.now() - settleStart) * 100) / 100,
+          });
+        } else {
+          ClipDebug.step(dbg, 'native-clipboard-settle:skip', { reason: 'no-pending-native-write' });
+        }
         const imgKey = newImgKey();
         const generation = _imageStoreGeneration;
         const sourceToken = createImageSourceToken(imgKey);
@@ -354,12 +404,10 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     }
     showInputShield();
     try {
-      const dataUrl = await BoardfishClipboardIO.readClipboardImageDataUrlFromBrowser(dbg);
-      if (dataUrl) {
-        const imgKey = newImgKey();
-        ClipDebug.step(dbg, 'web-image-read', { imgKey, dataUrl });
+      const imageBlob = await BoardfishClipboardIO.readClipboardImageBlobFromBrowser(dbg);
+      if (imageBlob) {
         hideInputShield();
-        await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'web-image', dbg);
+        await pasteWebImageBlob(imageBlob, wx, wy, dbg, 'web-paste-browser');
         return;
       }
       hideInputShield();

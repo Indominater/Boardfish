@@ -1,12 +1,21 @@
 // ─── Viewport ─────────────────────────────────────────────────────────────────
 var panX = 0, panY = 0, zoom = 1;
 var _vpSaveTimer = null;
+var _vpSaveDueAt = 0;
 var BoardRenderer = null;
 function saveViewport() {
-  clearTimeout(_vpSaveTimer);
-  _vpSaveTimer = setTimeout(() => {
+  _vpSaveDueAt = performance.now() + 400;
+  if (_vpSaveTimer) return;
+  function flushViewportSave() {
+    const remainingMs = _vpSaveDueAt - performance.now();
+    if (remainingMs > 1) {
+      _vpSaveTimer = setTimeout(flushViewportSave, remainingMs);
+      return;
+    }
+    _vpSaveTimer = null;
     localStorage.setItem('bf_vp', JSON.stringify({ panX, panY, zoom }));
-  }, 400);
+  }
+  _vpSaveTimer = setTimeout(flushViewportSave, 400);
 }
 
 
@@ -17,6 +26,43 @@ var _islMsgActive = false;
 var _islMsgTimer = null;
 var _islMsgToken = 0;
 
+const isOpeningFreezeActive = () => {
+  return !!openingShield?.classList.contains('active') && openingShield.classList.contains('opening-freeze');
+};
+
+const getOpeningShieldPill = () => {
+  const pill = openingShield?.querySelector?.('.opening-shield-pill') || null;
+  return pill?.parentNode === openingShield ? pill : null;
+};
+
+const hideOpeningShieldPill = () => {
+  getOpeningShieldPill()?.remove();
+};
+
+const ensureOpeningShieldPill = () => {
+  if (!isOpeningFreezeActive()) {
+    hideOpeningShieldPill();
+    return null;
+  }
+  const existing = getOpeningShieldPill();
+  if (existing) return existing;
+  const pill = document.createElement('div');
+  pill.className = 'opening-shield-pill';
+  pill.setAttribute('aria-hidden', 'true');
+  const text = document.createElement('span');
+  text.className = 'opening-shield-pill-text';
+  pill.appendChild(text);
+  openingShield.appendChild(pill);
+  return pill;
+};
+
+const syncOpeningShieldPill = (text = islZoom.textContent) => {
+  const pill = ensureOpeningShieldPill();
+  if (!pill) return;
+  pill.firstElementChild.textContent = text;
+  pill.classList.toggle('visible', !!text);
+};
+
 function setIslandVisible(visible) {
   island.classList.toggle('visible', visible);
   island.setAttribute('aria-hidden', visible ? 'false' : 'true');
@@ -25,6 +71,7 @@ function setIslandVisible(visible) {
 function showIslandForMessage(text) {
   islZoom.textContent = text;
   setIslandVisible(true);
+  syncOpeningShieldPill(text);
 }
 
 function hideIsland(reason = 'hide') {
@@ -33,6 +80,7 @@ function hideIsland(reason = 'hide') {
   _islMsgActive = false;
   islZoom.textContent = '';
   setIslandVisible(false);
+  hideOpeningShieldPill();
   PillDebug.log('hideIsland', { reason });
   return reason;
 }
@@ -48,6 +96,7 @@ function startIslandBusyMsg(text) {
     update(nextText) {
       if (token !== _islMsgToken) return;
       islZoom.textContent = nextText;
+      syncOpeningShieldPill(nextText);
       PillDebug.log('busyIslandMsg:update', { text: nextText });
     },
     done(finalMsg = null, duration = short_message, onRestore = null) {
@@ -155,11 +204,11 @@ async function _rebuildOffscreenAsync() {
   setCanvasImageQuality(_offCtx);
   _offCtx.font = FONT;
   _offCtx.textBaseline = 'alphabetic';
-  const viewportRect = currentViewportWorldRect();
+  const viewportRect = currentViewportWorldRect(0);
   for (const obj of objects) {
     if (obj.id === editingId) continue;
     if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) continue;
-    drawSingleObj(_offCtx, obj);
+    drawSingleObj(_offCtx, obj, null, { viewportRect, view: { zoom, dpr } });
   }
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -215,8 +264,8 @@ function countCulledObject(obj, counters = null) {
 }
 
 // Draws a single non-editing object onto any canvas context (world coords).
-function drawSingleObj(context, obj, counters = null, { view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null } = {}) {
-  return BoardRenderer.drawSingleObj(context, obj, counters, { view, imageSourceResolver });
+function drawSingleObj(context, obj, counters = null, { view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null, viewportRect = null } = {}) {
+  return BoardRenderer.drawSingleObj(context, obj, counters, { view, imageSourceResolver, viewportRect });
 }
 
 
@@ -298,7 +347,7 @@ function drawBoard() {
   const drawPhases = {};
   const counters = createDrawCounters();
   const dpr = window.devicePixelRatio || 1;
-  const viewportRect = currentViewportWorldRect();
+  const viewportRect = currentViewportWorldRect(0);
   let drawnImages = 0;
   let drawnText = 0;
 
@@ -388,31 +437,37 @@ function hitTest(wx, wy) {
 function applyTransform(frameDbg = null) {
   const dbg = ViewportDebug.start('applyTransform', { editing: !!editingId, panX, panY, zoom, objectCount: objects.length, selectedCount: selectedIds.size });
   if (_boardOpening) {
+    getLastApplyTransformMeta.last = { skipped: 'board-opening', panX, panY, zoom, objectCount: objects.length };
     ViewportDebug.end(dbg, { skipped: 'board-opening' });
     return;
   }
   if (editingId) invalidateOffscreen();
   const collectTransformDebug = ViewportDebug.isEnabled();
-  const drawStart = collectTransformDebug ? performance.now() : 0;
+  const transformStart = performance.now();
+  const drawStart = performance.now();
   drawBoard();
-  const drawMs = collectTransformDebug ? performance.now() - drawStart : 0;
+  const drawMs = performance.now() - drawStart;
   if (collectTransformDebug) {
     ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
     ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
   }
-  const saveStart = collectTransformDebug ? performance.now() : 0;
+  const saveStart = performance.now();
   saveViewport();
-  const saveMs = collectTransformDebug ? performance.now() - saveStart : 0;
+  const saveMs = performance.now() - saveStart;
   if (collectTransformDebug) {
     ViewportDebug.step(dbg, 'saveViewport', { ms: saveMs });
     ViewportDebug.step(frameDbg, 'saveViewport', { ms: saveMs });
   }
-  const overlayStart = collectTransformDebug ? performance.now() : 0;
-  updateSelectionOverlay();
-  const overlayMs = collectTransformDebug ? performance.now() - overlayStart : 0;
+  const overlayStart = performance.now();
+  const needsOverlayUpdate = hasSelection()
+    || selOverlay.classList.contains('visible')
+    || multiSelOverlay.classList.contains('visible');
+  if (needsOverlayUpdate) updateSelectionOverlay();
+  else ViewportDebug.count('selectionOverlaySkipped');
+  const overlayMs = performance.now() - overlayStart;
   if (collectTransformDebug) {
-    ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: overlayMs });
-    ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs });
+    ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: overlayMs, skipped: !needsOverlayUpdate });
+    ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs, skipped: !needsOverlayUpdate });
   }
   scheduleVisibleHydrationAfterIdle();
   if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
@@ -421,7 +476,33 @@ function applyTransform(frameDbg = null) {
   if (typeof handleEyedropperViewportChanged === 'function') {
     handleEyedropperViewportChanged(_activeRenderSource || 'transform');
   }
+  getLastApplyTransformMeta.last = {
+    totalMeasuredMs: performance.now() - transformStart,
+    drawMs,
+    saveViewportMs: saveMs,
+    overlayMs,
+    overlaySkipped: !needsOverlayUpdate,
+    source: _activeRenderSource,
+    editing: !!editingId,
+    panX,
+    panY,
+    zoom,
+    objectCount: objects.length,
+    selectedCount: selectedIds.size,
+    drawBoard: _lastDrawBoardMeta ? { ..._lastDrawBoardMeta } : null,
+  };
   ViewportDebug.end(dbg);
+}
+
+function getLastApplyTransformMeta() {
+  const last = getLastApplyTransformMeta.last;
+  if (!last) return null;
+  return {
+    ...last,
+    drawBoard: last.drawBoard
+      ? { ...last.drawBoard }
+      : null,
+  };
 }
 
 function toWorld(sx, sy) {
@@ -435,6 +516,8 @@ var _frameScheduledAt = 0;
 var _frameSources = [];
 var _activeRenderSource = 'direct';
 var _lastDrawBoardMeta = null;
+var _frameInputAt = 0;
+var _frameInputSource = '';
 
 function setCanvasImageQuality(context) {
   context.imageSmoothingEnabled = true;
@@ -482,6 +565,12 @@ function withRenderSource(source, fn) {
   }
 }
 
+function viewportEventTime(event = null) {
+  const timestamp = Number(event?.timeStamp);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return performance.now();
+  return timestamp > performance.timeOrigin ? timestamp - performance.timeOrigin : timestamp;
+}
+
 function scheduleFrame(source = 'unknown') {
   if (source) _frameSources.push(source);
   if (_frameRaf) {
@@ -494,15 +583,25 @@ function scheduleFrame(source = 'unknown') {
   _frameRaf = requestAnimationFrame(() => {
     const sources = [...new Set(_frameSources)];
     _frameSources = [];
-    const frameDbg = collectDebug ? ViewportDebug.frameStart(performance.now() - _frameScheduledAt) : null;
-    ViewportDebug.step(frameDbg, 'sources', { sources: sources.join(',') });
-    _frameRaf = null;
     const doTransform = _needTransform;
     const doBoard = _needBoardRender;
     const doOverlay = _needOverlayRender;
+    const inputAt = doTransform ? _frameInputAt : 0;
+    const inputSource = doTransform ? _frameInputSource : '';
+    const frameMeta = inputAt ? {
+      inputAgeMs: Math.max(0, performance.now() - inputAt),
+      inputSource,
+    } : {};
+    const frameDbg = collectDebug ? ViewportDebug.frameStart(performance.now() - _frameScheduledAt, frameMeta) : null;
+    ViewportDebug.step(frameDbg, 'sources', { sources: sources.join(',') });
+    _frameRaf = null;
     _needTransform = false;
     _needBoardRender = false;
     _needOverlayRender = false;
+    if (doTransform) {
+      _frameInputAt = 0;
+      _frameInputSource = '';
+    }
 
     if (doTransform) {
       ViewportDebug.count('transformFrames');
@@ -528,8 +627,10 @@ function scheduleFrame(source = 'unknown') {
   });
 }
 
-function scheduleTransform(source = 'transform') {
+function scheduleTransform(source = 'transform', inputEvent = null) {
   lastViewportInputAt = performance.now();
+  _frameInputAt = viewportEventTime(inputEvent);
+  _frameInputSource = source;
   _needTransform = true;
   scheduleFrame(source);
 }

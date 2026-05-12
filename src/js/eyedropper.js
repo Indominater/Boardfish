@@ -25,16 +25,35 @@ function cssPx(value) {
   return Number.isFinite(px) ? px : 0;
 }
 
+const resizeEyedropperCanvasBackingStore = (canvas, width, height = width) => {
+  if (!canvas) return false;
+  const nextWidth = Math.max(1, Math.round(Number(width) || 1));
+  const nextHeight = Math.max(1, Math.round(Number(height) || nextWidth));
+  let changed = false;
+  if (canvas.width !== nextWidth) {
+    canvas.width = nextWidth;
+    changed = true;
+  }
+  if (canvas.height !== nextHeight) {
+    canvas.height = nextHeight;
+    changed = true;
+  }
+  EyedropperDebug._countPerf(changed ? 'backingStoreResizes' : 'backingStoreResizeSkips');
+  return changed;
+};
+
 function eyedropperLoupeCssWidth(style = eyedropperLoupe ? getComputedStyle(eyedropperLoupe) : null) {
   if (!style) return 0;
   return cssPx(style.width) || cssPx(style.getPropertyValue('--eyedropper-loupe-width'));
 }
 
 function eyedropperPreviewCssSize() {
-  const rect = eyedropperPreview?.getBoundingClientRect();
+  const styleArg = arguments[0] || null;
+  const rectArg = arguments[1] || null;
+  const rect = rectArg || eyedropperPreview?.getBoundingClientRect();
   if (rect?.width > 0) return rect.width;
 
-  const style = eyedropperLoupe ? getComputedStyle(eyedropperLoupe) : null;
+  const style = styleArg || (eyedropperLoupe ? getComputedStyle(eyedropperLoupe) : null);
   if (!style) return EYEDROPPER_PREVIEW_CSS;
 
   const borderX = cssPx(style.borderLeftWidth) + cssPx(style.borderRightWidth);
@@ -51,8 +70,60 @@ function eyedropperPreviewCssSize() {
 }
 
 function eyedropperPreviewDrawSize(dpr = window.devicePixelRatio || 1) {
+  const metrics = arguments[1] || null;
+  if (metrics?.drawSize) return metrics.drawSize;
   return Math.max(1, Math.round(eyedropperPreviewCssSize() * dpr));
 }
+
+const invalidateEyedropperLayoutMetrics = () => {
+  if (eyedropperActiveCard) eyedropperActiveCard.layoutMetrics = null;
+  if (eyedropperCard && eyedropperCard !== eyedropperActiveCard) eyedropperCard.layoutMetrics = null;
+};
+
+const measureEyedropperLayoutMetrics = (dpr = window.devicePixelRatio || 1) => {
+  const style = eyedropperLoupe ? getComputedStyle(eyedropperLoupe) : null;
+  const loupeRect = eyedropperLoupe?.getBoundingClientRect?.() || null;
+  const previewRect = eyedropperPreview?.getBoundingClientRect?.() || null;
+  const previewCssSize = eyedropperPreviewCssSize(style, previewRect);
+  const drawSize = Math.max(1, Math.round(previewCssSize * dpr));
+  const hasLoupeRect = !!(loupeRect?.width && loupeRect?.height);
+  const hasPreviewRect = !!(previewRect?.width && previewRect?.height);
+  const hasVisibleRects = hasLoupeRect && hasPreviewRect;
+  const width = hasLoupeRect ? loupeRect.width : (eyedropperLoupeCssWidth(style) || EYEDROPPER_PREVIEW_CSS);
+  const height = hasLoupeRect ? loupeRect.height : EYEDROPPER_LOUPE_CSS_HEIGHT;
+  const metrics = {
+    card: eyedropperActiveCard,
+    dpr,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    visible: !!eyedropperLoupe?.classList.contains('visible'),
+    hasVisibleRects,
+    width,
+    height,
+    previewCssSize,
+    previewWidth: hasPreviewRect ? previewRect.width : previewCssSize,
+    previewTopOffset: hasVisibleRects ? previewRect.top - loupeRect.top : 0,
+    previewLeftOffset: hasVisibleRects ? previewRect.left - loupeRect.left : 0,
+    drawSize,
+  };
+  if (eyedropperActiveCard) eyedropperActiveCard.layoutMetrics = metrics;
+  EyedropperDebug._countPerf('layoutCacheMisses');
+  return metrics;
+};
+
+const getEyedropperLayoutMetrics = (dpr = window.devicePixelRatio || 1, options = {}) => {
+  const metrics = eyedropperActiveCard?.layoutMetrics || null;
+  if (metrics &&
+      metrics.card === eyedropperActiveCard &&
+      metrics.dpr === dpr &&
+      metrics.viewportWidth === window.innerWidth &&
+      metrics.viewportHeight === window.innerHeight &&
+      (!options.requireVisibleRects || metrics.hasVisibleRects)) {
+    EyedropperDebug._countPerf('layoutCacheHits');
+    return metrics;
+  }
+  return measureEyedropperLayoutMetrics(dpr);
+};
 
 function eyedropperSampleDotCssCenter(drawSize, dpr = window.devicePixelRatio || 1) {
   const dot = eyedropperSampleDotCanvasPoint(drawSize);
@@ -187,6 +258,7 @@ const cardPart = (card, className, id) => {
 
 function useEyedropperCard(card) {
   if (!card) return null;
+  if (eyedropperActiveCard !== card) invalidateEyedropperLayoutMetrics();
   eyedropperActiveCard = card;
   eyedropperLoupe = card.el;
   eyedropperPreview = card.preview;
@@ -240,6 +312,10 @@ function createEyedropperCard() {
     pendingPreviewDataUrl: '',
     pendingPreviewCanvasWidth: 0,
     pendingPreviewCanvasHeight: 0,
+    layoutMetrics: null,
+    lastSwatchCss: '',
+    lastHex: '',
+    lastRgb: '',
     bound: false,
   };
   card.preview = cardPart(card, 'eyedropper-preview', 'eyedropper-preview');
@@ -267,6 +343,7 @@ function prepareEyedropperSamplingCard() {
   const card = ensureEyedropperCard() || createEyedropperCard();
   useEyedropperCard(card);
   card.el.classList.remove('visible', 'pinned', 'dragging');
+  invalidateEyedropperLayoutMetrics();
   resetEyedropperCardPreviewState(card);
   return card;
 }
@@ -275,6 +352,7 @@ function hideEyedropperCard(card) {
   if (!card) return;
   if (_eyedropperDragState?.card === card) _eyedropperDragState = null;
   card.el.classList.remove('visible', 'pinned', 'dragging');
+  invalidateEyedropperLayoutMetrics();
 }
 
 function pinEyedropperCard(card) {
@@ -380,12 +458,19 @@ const resetEyedropperCardVisual = (card) => {
   if (card.hex) card.hex.textContent = '#000000';
   if (card.rgb) card.rgb.textContent = '0 0 0';
   if (card.swatch) card.swatch.style.background = 'transparent';
+  card.lastSwatchCss = '';
+  card.lastHex = '';
+  card.lastRgb = '';
   if (card.canvas && card.ctx) {
-    card.canvas.width = Math.max(1, card.canvas.width || 1);
-    card.canvas.height = Math.max(1, card.canvas.height || 1);
+    resizeEyedropperCanvasBackingStore(
+      card.canvas,
+      Math.max(1, card.canvas.width || 1),
+      Math.max(1, card.canvas.height || 1),
+    );
     card.ctx.setTransform(1, 0, 0, 1, 0, 0);
     card.ctx.clearRect(0, 0, card.canvas.width, card.canvas.height);
   }
+  invalidateEyedropperLayoutMetrics();
 };
 
 const clearEyedropperCardForBoard = () => {
@@ -511,9 +596,9 @@ function resetEyedropperWallpaper() {
   if (_eyedropperNavigationBlockTimer) clearTimeout(_eyedropperNavigationBlockTimer);
   _eyedropperNavigationBlockTimer = null;
   if (eyedropperZoomWallpaperCanvas) {
-    eyedropperZoomWallpaperCanvas.width = 1;
-    eyedropperZoomWallpaperCanvas.height = 1;
+    resizeEyedropperCanvasBackingStore(eyedropperZoomWallpaperCanvas, 1, 1);
   }
+  invalidateEyedropperLayoutMetrics();
 }
 
 function captureEyedropperZoomWallpaper(geometry, renderSize) {
@@ -527,8 +612,7 @@ function captureEyedropperZoomWallpaper(geometry, renderSize) {
     ? viewportCullingEnabled
     : null;
   try {
-    eyedropperZoomWallpaperCanvas.width = size;
-    eyedropperZoomWallpaperCanvas.height = size;
+    resizeEyedropperCanvasBackingStore(eyedropperZoomWallpaperCanvas, size, size);
     resetCanvasToScreen(eyedropperZoomWallpaperCtx);
     fillBoardBackground(eyedropperZoomWallpaperCtx, size, size);
     setWorldCanvasTransform(eyedropperZoomWallpaperCtx, geometry.view.dpr, geometry.view);
@@ -664,28 +748,51 @@ function restoreEyedropperViewportScaling() {
 
 function positionEyedropperLoupe(clientX, clientY) {
   const margin = MENU_VIEWPORT_EDGE_MARGIN;
-  const rect = eyedropperLoupe.getBoundingClientRect();
-  const previewRect = eyedropperPreview?.getBoundingClientRect();
-  const width = rect.width || eyedropperLoupeCssWidth();
-  const height = rect.height || EYEDROPPER_LOUPE_CSS_HEIGHT;
-  const dpr = window.devicePixelRatio || 1;
-  const drawSize = eyedropperPreviewDrawSize(dpr);
+  const layoutArg = arguments[2] || null;
+  const dpr = layoutArg?.dpr || window.devicePixelRatio || 1;
+  const layout = layoutArg?.hasVisibleRects
+    ? layoutArg
+    : getEyedropperLayoutMetrics(dpr, { requireVisibleRects: true });
+  const width = layout.width || eyedropperLoupeCssWidth();
+  const height = layout.height || EYEDROPPER_LOUPE_CSS_HEIGHT;
+  const drawSize = eyedropperPreviewDrawSize(dpr, layout);
   const sampleCenter = eyedropperSampleDotCssCenter(drawSize, dpr);
-  const previewWidth = previewRect?.width || eyedropperPreviewCssSize();
-  const previewTopOffset = previewRect?.height ? previewRect.top - rect.top : 0;
-  const previewLeftOffset = previewRect?.width ? previewRect.left - rect.left : 0;
+  const previewWidth = layout.previewWidth || eyedropperPreviewCssSize();
+  const previewTopOffset = layout.previewTopOffset || 0;
+  const previewLeftOffset = layout.previewLeftOffset || 0;
   const unclampedLeft = clientX - previewLeftOffset - Math.min(sampleCenter.x, previewWidth);
   const unclampedTop = clientY - previewTopOffset - sampleCenter.y;
   const left = Math.max(margin, Math.min(window.innerWidth - width - margin, unclampedLeft));
   const top = Math.max(margin, Math.min(window.innerHeight - height - margin, unclampedTop));
   eyedropperLoupe.style.transform = `translate(${Math.round(left)}px,${Math.round(top)}px)`;
+  return layout;
 }
 
 function updateEyedropperColorReadout(pixel) {
   const cssColor = rgbaToCss(pixel);
-  if (eyedropperSwatch) eyedropperSwatch.style.background = cssColor;
-  if (eyedropperHex) eyedropperHex.textContent = rgbaToHex(pixel);
-  if (eyedropperRgb) eyedropperRgb.textContent = rgbaToRgbText(pixel);
+  const hex = rgbaToHex(pixel);
+  const rgb = rgbaToRgbText(pixel);
+  const card = eyedropperActiveCard;
+  let changed = false;
+  if (eyedropperSwatch && card?.lastSwatchCss !== cssColor) {
+    eyedropperSwatch.style.background = cssColor;
+    changed = true;
+  }
+  if (eyedropperHex && card?.lastHex !== hex) {
+    eyedropperHex.textContent = hex;
+    changed = true;
+  }
+  if (eyedropperRgb && card?.lastRgb !== rgb) {
+    eyedropperRgb.textContent = rgb;
+    changed = true;
+  }
+  if (card) {
+    card.lastSwatchCss = cssColor;
+    card.lastHex = hex;
+    card.lastRgb = rgb;
+  }
+  EyedropperDebug._countPerf(changed ? 'colorReadoutDomWrites' : 'colorReadoutDomSkips');
+  return changed;
 }
 
 function sampleCanvasPixel(context, sourceX, sourceY, meta = {}) {
@@ -733,8 +840,7 @@ function renderEyedropperLocalReadoutPixel(clientX, clientY) {
     : null;
   try {
     const setupStart = performance.now();
-    eyedropperReadoutCanvas.width = 1;
-    eyedropperReadoutCanvas.height = 1;
+    timings.localReadoutResizeChanged = resizeEyedropperCanvasBackingStore(eyedropperReadoutCanvas, 1, 1) ? 1 : 0;
     resetCanvasToScreen(eyedropperReadoutCtx);
     eyedropperReadoutCtx.fillStyle = rgbaToCss(boardBackgroundPixel());
     eyedropperReadoutCtx.fillRect(0, 0, 1, 1);
@@ -1019,7 +1125,7 @@ function resolveEyedropperNativePixelTargetAt(clientX, clientY, timings = null) 
   if (!key) return miss('missing-img-key', { objectId: topObject.id || '', objectType: topObject.type || '' });
   if (!local) return miss('missing-local-image-point', { imgKey: key, objectId: topObject.id || '', objectType: topObject.type || '' });
   if (!token) return miss('missing-image-token', { imgKey: key, objectId: topObject.id || '', objectType: topObject.type || '' });
-  if (!isNativeImageRef(imageStore[key])) return miss('not-native-image-ref', {
+  if (!globalThis.hasEyedropperNativePixelCacheSource?.(key)) return miss('missing-native-pixel-cache-source', {
     imgKey: key,
     objectId: topObject.id || '',
     objectType: topObject.type || '',
@@ -1232,7 +1338,7 @@ function sampleEyedropperCachedPixelAt(clientX, clientY) {
     clearEyedropperNativePixelTarget();
     return null;
   }
-  if (isNativeImageRef(imageStore[key])) {
+  if (globalThis.hasEyedropperNativePixelCacheSource?.(key)) {
     requestEyedropperNativePixel();
     timings.cachedPixelImageMiss = 1;
     timings.cachedPixelImageMissReason = 'native-pixel-pending';
@@ -1438,8 +1544,7 @@ function drawEyedropperSampleDot(drawSize, dpr = window.devicePixelRatio || 1) {
 }
 
 function resetEyedropperRenderedSampleSize(width, height) {
-  eyedropperRenderedSampleCanvas.width = width;
-  eyedropperRenderedSampleCanvas.height = height;
+  return resizeEyedropperCanvasBackingStore(eyedropperRenderedSampleCanvas, width, height);
 }
 
 function refreshEyedropperAfterSafeImageReady() {
@@ -1578,16 +1683,14 @@ function isEyedropperReadbackSafeDisplaySource(key, token, source, sourceKind, c
   if (!isDrawableImageSource(source) || !eyedropperReadbackProbeCtx) return false;
   if (eyedropperSafeDisplayProbeFailures.get(eyedropperDisplayProbeFailureKey(key, sourceKind)) === token) return false;
   try {
-    eyedropperReadbackProbeCanvas.width = 1;
-    eyedropperReadbackProbeCanvas.height = 1;
+    resizeEyedropperCanvasBackingStore(eyedropperReadbackProbeCanvas, 1, 1);
     eyedropperReadbackProbeCtx.setTransform(1, 0, 0, 1, 0, 0);
     eyedropperReadbackProbeCtx.clearRect(0, 0, 1, 1);
     eyedropperReadbackProbeCtx.drawImage(source, 0, 0, 1, 1);
     eyedropperReadbackProbeCtx.getImageData(0, 0, 1, 1);
     return true;
   } catch (err) {
-    eyedropperReadbackProbeCanvas.width = 1;
-    eyedropperReadbackProbeCanvas.height = 1;
+    resizeEyedropperCanvasBackingStore(eyedropperReadbackProbeCanvas, 1, 1);
     countEyedropperCounter(counters, 'safeDisplayProbeFailures');
     rememberEyedropperUnsafeDisplaySource(key, token, sourceKind, err);
     return false;
@@ -1970,6 +2073,7 @@ function noteEyedropperNavigationActive(reason = 'viewport', durationMs = 180) {
 }
 
 function handleEyedropperViewportChanged(reason = 'viewport') {
+  invalidateEyedropperLayoutMetrics();
   scheduleEyedropperNativeDecodePrewarm(reason);
   if (!eyedropperEnabled) return;
   if (eyedropperSampling) hideEyedropperSample();
@@ -2088,16 +2192,15 @@ function commitEyedropperSample(e, options = {}) {
     ...latency,
   });
   const dpr = window.devicePixelRatio || 1;
+  const layoutStart = performance.now();
+  let layoutMetrics = getEyedropperLayoutMetrics(dpr);
+  timings.layout = performance.now() - layoutStart;
   const drawSizeStart = performance.now();
-  const drawSize = eyedropperPreviewDrawSize(dpr);
+  const drawSize = eyedropperPreviewDrawSize(dpr, layoutMetrics);
   timings.drawSize = performance.now() - drawSizeStart;
 
   const resizeStart = performance.now();
-  if (eyedropperCanvas.width !== drawSize || eyedropperCanvas.height !== drawSize) {
-    eyedropperCanvas.width = drawSize;
-    eyedropperCanvas.height = drawSize;
-    timings.resizeVisibleChanged = 1;
-  }
+  timings.resizeVisibleChanged = resizeEyedropperCanvasBackingStore(eyedropperCanvas, drawSize, drawSize) ? 1 : 0;
   timings.resizeVisible = performance.now() - resizeStart;
 
   const clearStart = performance.now();
@@ -2137,12 +2240,14 @@ function commitEyedropperSample(e, options = {}) {
   drawEyedropperSampleDot(drawSize, dpr);
   timings.dot = performance.now() - dotStart;
   const readoutStart = performance.now();
-  if (centerPixel) updateEyedropperColorReadout(centerPixel);
+  timings.readoutChanged = centerPixel && updateEyedropperColorReadout(centerPixel) ? 1 : 0;
   timings.readout = performance.now() - readoutStart;
   const visibleStart = performance.now();
   if (!eyedropperLoupe.classList.contains('visible')) {
     if (typeof closeOpenMenusExcept === 'function') closeOpenMenusExcept('eyedropper-loupe', 'open-eyedropper-loupe');
     eyedropperLoupe.classList.add('visible');
+    invalidateEyedropperLayoutMetrics();
+    layoutMetrics = null;
   }
   timings.showLoupe = performance.now() - visibleStart;
   const visibleAt = performance.now();
@@ -2151,7 +2256,7 @@ function commitEyedropperSample(e, options = {}) {
   latency.clickToPreviewVisibleMs = Math.round(clickToPreviewVisibleMs * 100) / 100;
   latency.eventToPreviewVisibleMs = eventToPreviewVisibleMs == null ? '' : Math.round(eventToPreviewVisibleMs * 100) / 100;
   const positionStart = performance.now();
-  positionEyedropperLoupe(e.clientX, e.clientY);
+  layoutMetrics = positionEyedropperLoupe(e.clientX, e.clientY, layoutMetrics);
   timings.position = performance.now() - positionStart;
   timings.total = performance.now() - totalStart;
   if (previewSample) previewSample.timings = timings;
@@ -2308,6 +2413,40 @@ function hideEyedropperSample() {
   hideEyedropperCard(eyedropperActiveCard);
 }
 
+const shouldProcessEyedropperMoveEvent = (e) => {
+  if (!e) return false;
+  const now = performance.now();
+  const eventType = String(e.type || '');
+  if (eventType === 'pointermove') {
+    eyedropperNativeDecodePrewarm.lastPointerMoveForDedupe = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      timeStamp: Number(e.timeStamp) || 0,
+      pointerType: e.pointerType || 'mouse',
+      seenAt: now,
+    };
+    return true;
+  }
+  if (eventType !== 'mousemove') return true;
+  const last = eyedropperNativeDecodePrewarm.lastPointerMoveForDedupe;
+  if (!last) return true;
+  const samePoint = last.clientX === e.clientX && last.clientY === e.clientY;
+  const timeStamp = Number(e.timeStamp) || 0;
+  const sameNativeEvent = samePoint && Math.abs(timeStamp - last.timeStamp) <= 1;
+  const immediateCompatibilityEvent = samePoint && now - last.seenAt < 24;
+  if (sameNativeEvent || immediateCompatibilityEvent) {
+    EyedropperDebug._countPerf('duplicateMouseMovesSkipped');
+    EyedropperDebug._logSamplingEvent('sample-mousemove-duplicate-skipped', {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerType: last.pointerType,
+      inputAgeAtReceiveMs: inputEventAgeMs(e, now),
+    });
+    return false;
+  }
+  return true;
+};
+
 function noteEyedropperMouseEvent(e) {
   if (!e || e.clientX == null || e.clientY == null) return;
   _eyedropperLastMouseEvent = eyedropperPointerDebugEvent(e);
@@ -2369,6 +2508,7 @@ function endEyedropperHoldSample(e = null) {
 }
 
 function updateEyedropperHoldSample(e) {
+  if (!shouldProcessEyedropperMoveEvent(e)) return;
   noteEyedropperMouseEvent(e);
   if (!_eyedropperHoldActive || !eyedropperEnabled) return;
   if (e && e.shiftKey === false) {

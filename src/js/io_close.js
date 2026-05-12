@@ -162,6 +162,10 @@ function getBoardSaveMetrics(data) {
   return BoardfishBoardDocument.getBoardSaveMetrics(data, boardDocumentDeps());
 }
 
+const getBoardSaveDebugMetrics = (dbg, data) => (
+  SaveDebug.enabled && dbg ? getBoardSaveMetrics(data) : {}
+);
+
 function getBoardOpenMetrics(data) {
   return BoardfishBoardDocument.getBoardOpenMetrics(data, boardDocumentDeps());
 }
@@ -212,7 +216,8 @@ async function invokeSaveBoard(fileRef, dbg) {
   }
   const dataStart = performance.now();
   const data = boardDataForSave();
-  SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...getBoardSaveMetrics(data) });
+  const metrics = getBoardSaveDebugMetrics(dbg, data);
+  SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...metrics });
   measureBoardJsonForSaveDebug(dbg, data);
   if (hasTauri()) {
     const pendingSources = Object.keys(data.imageStore || {})
@@ -231,7 +236,7 @@ async function invokeSaveBoard(fileRef, dbg) {
     dbg,
     command,
     () => BoardfishRuntime.saveBoard(fileRef, data, { imageStore }),
-    { path, ...getBoardSaveMetrics(data) }
+    { path, ...metrics }
   );
   if (frameProbe) frameProbe();
   return result;
@@ -273,14 +278,18 @@ const isOpenHydratableImageSource = (source) => {
 function getVisibleImageKeys(limit = Infinity) {
   const b = getVisibleWorldBounds();
   const keys = [];
-  const skipped = { nonImage: 0, outside: 0, missingKey: 0, nonHydratable: 0, cached: 0 };
+  const seen = new Set();
+  const skipped = { nonImage: 0, outside: 0, missingKey: 0, nonHydratable: 0, cached: 0, duplicate: 0 };
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
     if (obj.type !== 'image') { skipped.nonImage++; continue; }
     if (!objectIntersectsRect(obj, b)) { skipped.outside++; continue; }
     const key = obj.data.imgKey;
+    if (!key) { skipped.missingKey++; continue; }
+    if (seen.has(key)) { skipped.duplicate++; continue; }
+    seen.add(key);
     const source = BoardfishImageStore.getSource(key);
-    if (!key || !source) { skipped.missingKey++; continue; }
+    if (!source) { skipped.missingKey++; continue; }
     if (!isOpenHydratableImageSource(source)) { skipped.nonHydratable++; continue; }
     if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
     keys.push(key);
@@ -334,8 +343,22 @@ async function hydrateImageForDisplay(key, dbg = null) {
   if (BoardfishImageStore.hasDisplayImage(key) || !isOpenHydratableImageSource(source)) return false;
   const pendingReady = imageReadyPromises.get(key);
   if (pendingReady) {
-    await pendingReady;
-    return BoardfishImageStore.hasDisplayImage(key);
+    const t0 = performance.now();
+    const cacheMetrics = await pendingReady;
+    const displayReady = BoardfishImageStore.hasDisplayImage(key);
+    OpenDebug.step(dbg, 'hydrate-image', {
+      imgKey: key,
+      ms: performance.now() - t0,
+      fetchMs: 0,
+      loadMs: 0,
+      readyMs: performance.now() - t0,
+      ...(cacheMetrics || {}),
+      dataUrlLen: 0,
+      source: 'pending-cache',
+      bitmapReady: !!imageBitmapCache[key],
+      displayReady,
+    });
+    return displayReady;
   }
   const t0 = performance.now();
   const fetchStart = performance.now();
@@ -355,7 +378,10 @@ async function hydrateImageForDisplay(key, dbg = null) {
   }
   const loadMs = performance.now() - loadStart;
   const readyStart = performance.now();
-  const cacheMetrics = await cacheImage(key, display.src, dbg, img, { skipSourceRegistration: true });
+  const cacheMetrics = await cacheImage(key, display.src, dbg, img, {
+    skipSourceRegistration: true,
+    resolveOnLoad: true,
+  });
   const readyMs = performance.now() - readyStart;
   const bitmapReady = !!imageBitmapCache[key];
   const displayReady = BoardfishImageStore.hasDisplayImage(key);
@@ -398,6 +424,75 @@ async function hydrateVisibleImagesForOpen(dbg = null) {
   OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: keys.length, ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() });
   await hydrateImageKeysWithLimit(keys, dbg, 'hydrate-visible', OpenDebug.hydrationConcurrency);
   return keys;
+}
+
+function countVisibleImageBitmapSettle(keys) {
+  const visibleKeys = Array.isArray(keys) ? keys.filter(Boolean) : [];
+  let ready = 0;
+  let failed = 0;
+  let missingStore = 0;
+  for (const key of visibleKeys) {
+    if (imageBitmapCache[key]) {
+      ready++;
+    } else if (imageBitmapFailed.has(key)) {
+      failed++;
+    } else if (!BoardfishImageStore.hasSource(key)) {
+      missingStore++;
+    }
+  }
+  const count = visibleKeys.length;
+  const settled = ready + failed + missingStore;
+  return {
+    count,
+    ready,
+    failed,
+    missingStore,
+    settled,
+    pending: Math.max(0, count - settled),
+  };
+}
+
+async function settleVisibleImageBitmapsForOpen(keys, dbg = null) {
+  const visibleKeys = Array.isArray(keys) ? keys.filter(Boolean) : [];
+  const count = visibleKeys.length;
+  let state = countVisibleImageBitmapSettle(visibleKeys);
+  const before = state.ready;
+  if (!count || state.settled >= count) {
+    OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', {
+      count,
+      before,
+      after: state.ready,
+      failed: state.failed,
+      missingStore: state.missingStore,
+      pending: state.pending,
+      settled: state.settled,
+      missing: Math.max(0, count - state.ready),
+      ms: 0,
+      skipped: !count ? 'no-visible-images' : 'already-ready',
+      target: count,
+    });
+    return { count, before, after: state.ready, failed: state.failed, missingStore: state.missingStore, pending: state.pending, settled: state.settled, missing: Math.max(0, count - state.ready), target: count, ms: 0, skipped: true };
+  }
+
+  const startedAt = performance.now();
+  while (state.settled < count) {
+    await new Promise((resolve) => setTimeout(resolve, 12));
+    state = countVisibleImageBitmapSettle(visibleKeys);
+  }
+  const ms = performance.now() - startedAt;
+  OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', {
+    count,
+    before,
+    after: state.ready,
+    failed: state.failed,
+    missingStore: state.missingStore,
+    pending: state.pending,
+    settled: state.settled,
+    missing: Math.max(0, count - state.ready),
+    target: count,
+    ms,
+  });
+  return { count, before, after: state.ready, failed: state.failed, missingStore: state.missingStore, pending: state.pending, settled: state.settled, missing: Math.max(0, count - state.ready), target: count, ms };
 }
 
 async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch') {
@@ -458,7 +553,7 @@ function scheduleVisibleHydrationAfterIdle() {
   }, 180);
 }
 
-var openHydrationMode = 'all-before-open';
+var openHydrationMode = 'visible-first';
 function setOpenHydrationMode(mode) {
   const allowed = new Set(['all-before-open', 'visible-first']);
   if (!allowed.has(mode)) return openHydrationMode;
@@ -476,9 +571,15 @@ async function finishOpenedBoard(dbg, data) {
     const hydrateStart = performance.now();
     const visibleKeys = await hydrateVisibleImagesForOpen(dbg);
     PillDebug.log('open:hydrate-visible:end', { phaseMs: performance.now() - hydrateStart, visibleCount: visibleKeys?.length || 0 });
+    const bitmapSettle = await settleVisibleImageBitmapsForOpen(visibleKeys, dbg);
+    PillDebug.log('open:hydrate-visible:bitmap-settle', { phaseMs: bitmapSettle.ms, before: bitmapSettle.before, after: bitmapSettle.after, failed: bitmapSettle.failed, pending: bitmapSettle.pending, missing: bitmapSettle.missing });
     OpenDebug.step(dbg, 'hydrate-initial-policy', {
       mode: 'visible-first',
       visibleCount: visibleKeys?.length || 0,
+      visibleBitmapsReady: bitmapSettle.after,
+      visibleBitmapsFailed: bitmapSettle.failed,
+      visibleBitmapsMissing: bitmapSettle.missing,
+      visibleBitmapSettleMs: bitmapSettle.ms,
       pendingImages: getPendingHydratableImageKeys().length,
     });
   } else {
@@ -495,17 +596,46 @@ async function finishOpenedBoard(dbg, data) {
   PillDebug.log('open:initial-applyTransform:start');
   applyTransform();
   const renderMs = performance.now() - renderStart;
+  const renderBreakdown = typeof getLastApplyTransformMeta === 'function'
+    ? getLastApplyTransformMeta()
+    : null;
+  const drawBreakdown = renderBreakdown?.drawBoard || null;
   PillDebug.log('open:initial-applyTransform:end', { phaseMs: renderMs });
-  OpenDebug.step(dbg, 'initial-applyTransform', { ms: renderMs });
+  OpenDebug.step(dbg, 'initial-applyTransform', {
+    ms: renderMs,
+    totalMeasuredMs: renderBreakdown?.totalMeasuredMs ?? '',
+    drawMs: renderBreakdown?.drawMs ?? '',
+    saveViewportMs: renderBreakdown?.saveViewportMs ?? '',
+    overlayMs: renderBreakdown?.overlayMs ?? '',
+    overlaySkipped: renderBreakdown?.overlaySkipped ?? '',
+    drawBoardTotalMs: drawBreakdown?.totalMeasuredMs ?? '',
+    backgroundSetupMs: drawBreakdown?.backgroundSetupMs ?? '',
+    objectLoopMs: drawBreakdown?.objectLoopMs ?? '',
+    resetMs: drawBreakdown?.resetMs ?? '',
+    drawnImages: drawBreakdown?.drawnImages ?? '',
+    drawnText: drawBreakdown?.drawnText ?? '',
+    visibleObjects: drawBreakdown?.visibleObjects ?? '',
+    testedObjects: drawBreakdown?.testedObjects ?? '',
+    culledImages: drawBreakdown?.culledImages ?? '',
+    culledText: drawBreakdown?.culledText ?? '',
+    bitmapImages: drawBreakdown?.bitmapImages ?? '',
+    elementImages: drawBreakdown?.elementImages ?? '',
+    scaledImages: drawBreakdown?.scaledImages ?? '',
+    scaledFallbackFull: drawBreakdown?.scaledFallbackFull ?? '',
+    scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',
+    croppedImages: drawBreakdown?.croppedImages ?? '',
+  });
   const prewarmResult = typeof scheduleEyedropperNativeDecodePrewarm === 'function'
     ? scheduleEyedropperNativeDecodePrewarm('board-loaded')
     : { scheduled: false, reason: 'unavailable' };
   OpenDebug.step(dbg, 'eyedropper-prewarm:scheduled', prewarmResult || { scheduled: false });
   const pillFinishReason = await finishPillTask({
     beforeFinish: () => {
+      const shieldStart = performance.now();
       applyNativeAppTheme();
       if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
       else openingShield.classList.remove('active');
+      OpenDebug.step(dbg, 'opening-shield:removed', { ms: performance.now() - shieldStart });
       PillDebug.log('open:openingShield:removed', { reason: 'before-pill-hide' });
     },
   });
@@ -545,18 +675,32 @@ function applyBoardData(data, options = {}) {
 
   const imageStart = performance.now();
   BoardfishImageStore.setSources(data.imageStore || {});
+  const visibleFirstOpen = deferRender &&
+    typeof getOpenHydrationMode === 'function' &&
+    getOpenHydrationMode() === 'visible-first';
+  let deferredInitialCacheImages = 0;
   _skipImageSourceRegistration = sourcesCached;
   try {
     for (const k of BoardfishImageStore.sourceKeys()) {
       const source = BoardfishImageStore.getSource(k);
       const n = parseInt(k.split('-')[1]);
       if (!isNaN(n) && n >= imgKeyCounter) imgKeyCounter = n + 1;
+      if (visibleFirstOpen && isOpenHydratableImageSource(source)) {
+        deferredInitialCacheImages++;
+        continue;
+      }
       if (!sourcesCached || !isNativeImageRef(source)) cacheImage(k, source);
     }
   } finally {
     _skipImageSourceRegistration = false;
   }
-  OpenDebug.step(dbg, 'cacheImage:start-all', { ms: performance.now() - imageStart, sourcesCached, ...getOpenImageRuntimeMetrics() });
+  OpenDebug.step(dbg, 'cacheImage:start-all', {
+    ms: performance.now() - imageStart,
+    sourcesCached,
+    deferredInitialCacheImages,
+    visibleFirstOpen,
+    ...getOpenImageRuntimeMetrics(),
+  });
   OpenDebug.step(dbg, 'image-store-sample', { sample: getImageStoreOpenDebugSample() });
 
   const stateStart = performance.now();
@@ -588,9 +732,24 @@ function applyBoardData(data, options = {}) {
   if (endDebug) OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
 }
 
-async function saveBoardAs() {
+const runExclusiveBoardSave = (op, run) => {
+  if (runExclusiveBoardSave.inFlight) {
+    const dbg = SaveDebug.start(`${op}:coalesced`, { reason: 'save-in-flight' });
+    SaveDebug.end(dbg, { reused: true });
+    return runExclusiveBoardSave.inFlight;
+  }
+  const promise = Promise.resolve().then(run);
+  const tracked = promise.finally(() => {
+    if (runExclusiveBoardSave.inFlight === tracked) runExclusiveBoardSave.inFlight = null;
+  });
+  runExclusiveBoardSave.inFlight = tracked;
+  return tracked;
+};
+runExclusiveBoardSave.inFlight = null;
+
+const saveBoardAsImpl = async () => {
   const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
-  const releaseInputShield = acquireInputShield();
+  const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
   try {
     const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
     const command = hasTauri() ? TAURI_COMMANDS.SAVE_FILE_DIALOG : BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG;
@@ -617,16 +776,20 @@ async function saveBoardAs() {
     SaveDebug.end(dbg, { saved: false, error: String(err) });
     return false;
   }
+};
+
+async function saveBoardAs() {
+  return runExclusiveBoardSave('saveBoardAs', saveBoardAsImpl);
 }
 
-async function saveBoard() {
+const saveBoardImpl = async () => {
   const target = BoardfishRuntime.canSaveToExistingTarget(currentFileRef)
     ? currentFileRef
     : (hasTauri() && currentFilePath ? currentFilePath : null);
   if (target) {
     const path = BoardfishRuntime.describeFileRef(target);
     const dbg = SaveDebug.start('saveBoard', { path, objectCount: objects.length });
-    const releaseInputShield = acquireInputShield();
+    const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
     try {
       await runShieldedPillTask({
         releaseInputShield,
@@ -648,7 +811,11 @@ async function saveBoard() {
       return false;
     }
   }
-  return saveBoardAs();
+  return saveBoardAsImpl();
+};
+
+async function saveBoard() {
+  return runExclusiveBoardSave('saveBoard', saveBoardImpl);
 }
 
 

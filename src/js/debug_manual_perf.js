@@ -55,7 +55,7 @@ var ManualPerfDebug = (() => {
       objectCount: objects.length,
       previewDiagnostics: options.previewDiagnostics === true,
     };
-    console.info('[Boardfish perf] Manual session started. Move the cursor yourself, then run finishDebug({ perf: ["report"] }).');
+    console.info('[Boardfish perf] Manual session started. Run the interaction, then call finishDebug({ perf: ["report"] }), finishDebug({ perf: ["zoomReport"] }), or finishDebug({ perf: ["panningReport"] }).');
     console.table([out]);
     return out;
   }
@@ -414,6 +414,288 @@ var ManualPerfDebug = (() => {
     return out;
   }
 
+  function viewportNavigationHeadline(viewportReport = {}) {
+    const frame = viewportReport.frameSummary || {};
+    const wheel = viewportReport.wheelSummary || {};
+    const draw = viewportReport.drawSummary || {};
+    const transform = viewportReport.transformSummary || {};
+    return {
+      frames: frame.frames ?? '',
+      inputFrames: frame.inputFrames ?? '',
+      transformFrames: frame.transformFrames ?? '',
+      slowFramesOver16ms: frame.slowFramesOver16ms ?? '',
+      maxFrameMs: frame.maxFrameMs ?? '',
+      avgInputAgeMs: frame.avgInputAgeMs ?? '',
+      maxInputAgeMs: frame.maxInputAgeMs ?? '',
+      maxQueueMs: frame.maxQueueMs ?? '',
+      wheelEvents: wheel.bufferedWheelEvents ?? '',
+      wheelPanEvents: wheel.panEvents ?? '',
+      wheelZoomEvents: wheel.zoomEvents ?? '',
+      maxWheelGapMs: wheel.maxWheelGapMs ?? '',
+      avgZoomStepPct: wheel.avgZoomStepPct ?? '',
+      maxZoomStepPct: wheel.maxZoomStepPct ?? '',
+      avgDrawMs: draw.avgDrawMs ?? '',
+      maxDrawMs: draw.maxDrawMs ?? '',
+      maxObjectLoopMs: draw.maxObjectLoopMs ?? '',
+      avgTransformMs: transform.avgTotalMs ?? '',
+      maxTransformMs: transform.maxTotalMs ?? '',
+    };
+  }
+
+  function panningHeadline(viewportReport = {}) {
+    return viewportNavigationHeadline(viewportReport);
+  }
+
+  function zoomingHeadline(viewportReport = {}) {
+    return viewportNavigationHeadline(viewportReport);
+  }
+
+  function panningReport(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    const viewport = BoardfishDebug.viewport.report({
+      log: false,
+      details: options.details === true,
+      limit: options.limit || 20,
+    });
+    const out = {
+      label: options.label || 'viewport-panning-perf',
+      reportedAt: new Date().toISOString(),
+      imageCount: imageCount(),
+      objectCount: objects.length,
+      viewport,
+      markers: markers.slice(),
+    };
+    out.headline = panningHeadline(viewport);
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] viewport panning');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  function panningTestPoint(options = {}) {
+    const rect = (boardCanvas || canvas)?.getBoundingClientRect?.();
+    if (!rect) return { x: Math.round(window.innerWidth / 2), y: Math.round(window.innerHeight / 2) };
+    return {
+      x: Math.round(rect.left + rect.width * (Number.isFinite(options.xRatio) ? options.xRatio : 0.5)),
+      y: Math.round(rect.top + rect.height * (Number.isFinite(options.yRatio) ? options.yRatio : 0.5)),
+    };
+  }
+
+  function dispatchPanWheel(point, deltaX, deltaY, options = {}) {
+    const target = boardCanvas || canvas || document.body;
+    const EventCtor = window.WheelEvent || MouseEvent;
+    target.dispatchEvent(new EventCtor('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: point.x,
+      clientY: point.y,
+      deltaX,
+      deltaY,
+      deltaMode: options.deltaMode || 0,
+      ctrlKey: !!options.ctrlKey,
+      metaKey: !!options.metaKey,
+    }));
+  }
+
+  async function wheelPanTest(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    BoardfishDebug.viewport.enable({ verbose: false });
+    BoardfishDebug.viewport.reset();
+    markers.length = 0;
+    const events = Math.max(1, Math.min(360, Number(options.events) || 90));
+    const deltaX = Number.isFinite(options.deltaX) ? options.deltaX : 4;
+    const deltaY = Number.isFinite(options.deltaY) ? options.deltaY : 7;
+    const point = panningTestPoint(options);
+    const startedAt = performance.now();
+    await animationFrame();
+    for (let index = 0; index < events; index++) {
+      const wave = Math.sin(index / Math.max(1, events - 1) * Math.PI * 2);
+      dispatchPanWheel(point, deltaX + wave * (Number(options.waveX) || 0), deltaY + wave * (Number(options.waveY) || 0), options);
+      if (options.framePerWheel !== false) await animationFrame();
+    }
+    await animationFrame();
+    await animationFrame();
+    const out = panningReport({ ...options, label: 'synthetic-wheel-pan', log: false });
+    out.events = events;
+    out.deltaX = deltaX;
+    out.deltaY = deltaY;
+    out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
+    out.testPoint = point;
+    out.headline = panningHeadline(out.viewport);
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] synthetic wheel pan');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  function zoomReport(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    const viewport = BoardfishDebug.viewport.report({
+      log: false,
+      details: options.details === true,
+      limit: options.limit || 20,
+    });
+    const out = {
+      label: options.label || 'viewport-zoom-perf',
+      reportedAt: new Date().toISOString(),
+      imageCount: imageCount(),
+      objectCount: objects.length,
+      zoom,
+      panX,
+      panY,
+      viewport,
+      markers: markers.slice(),
+    };
+    out.headline = zoomingHeadline(viewport);
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] viewport zoom');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  async function wheelZoomTest(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    BoardfishDebug.viewport.enable({ verbose: false });
+    BoardfishDebug.viewport.reset();
+    markers.length = 0;
+    const events = Math.max(1, Math.min(360, Number(options.events) || 90));
+    const deltaY = Number.isFinite(options.deltaY) ? options.deltaY : -4;
+    const point = panningTestPoint(options);
+    const startedAt = performance.now();
+    await animationFrame();
+    for (let index = 0; index < events; index++) {
+      const wave = Math.sin(index / Math.max(1, events - 1) * Math.PI * 2);
+      dispatchPanWheel(point, 0, deltaY + wave * (Number(options.waveY) || 0), {
+        ...options,
+        ctrlKey: options.metaKey !== true,
+        metaKey: options.metaKey === true,
+      });
+      if (options.framePerWheel !== false) await animationFrame();
+    }
+    await animationFrame();
+    await animationFrame();
+    const out = zoomReport({ ...options, label: 'synthetic-wheel-zoom', log: false });
+    out.events = events;
+    out.deltaY = deltaY;
+    out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
+    out.testPoint = point;
+    out.headline = zoomingHeadline(out.viewport);
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] synthetic wheel zoom');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  function dispatchPanKey(type) {
+    document.dispatchEvent(new KeyboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      key: ' ',
+      code: 'Space',
+      keyCode: 32,
+      which: 32,
+    }));
+  }
+
+  function dispatchPanMouse(type, point, options = {}) {
+    const target = type === 'mousedown' ? (boardCanvas || canvas || document.body) : document;
+    target.dispatchEvent(new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: point.x,
+      clientY: point.y,
+      button: 0,
+      buttons: type === 'mouseup' ? 0 : 1,
+      shiftKey: !!options.shiftKey,
+    }));
+  }
+
+  async function mousePanTest(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    BoardfishDebug.viewport.enable({ verbose: false });
+    BoardfishDebug.viewport.reset();
+    markers.length = 0;
+    const moves = Math.max(1, Math.min(360, Number(options.moves) || 90));
+    const start = panningTestPoint({
+      ...options,
+      xRatio: Number.isFinite(options.startXRatio) ? options.startXRatio : 0.35,
+      yRatio: Number.isFinite(options.startYRatio) ? options.startYRatio : 0.45,
+    });
+    const end = panningTestPoint({
+      ...options,
+      xRatio: Number.isFinite(options.endXRatio) ? options.endXRatio : 0.65,
+      yRatio: Number.isFinite(options.endYRatio) ? options.endYRatio : 0.55,
+    });
+    const startedAt = performance.now();
+    dispatchPanKey('keydown');
+    dispatchPanMouse('mousedown', start, options);
+    await animationFrame();
+    for (let index = 0; index < moves; index++) {
+      const t = moves <= 1 ? 1 : index / (moves - 1);
+      const wave = Math.sin(t * Math.PI * 2) * (Number(options.waveCss) || 18);
+      const point = {
+        x: Math.round(start.x + (end.x - start.x) * t),
+        y: Math.round(start.y + (end.y - start.y) * t + wave),
+      };
+      dispatchPanMouse('mousemove', point, options);
+      if (options.framePerMove !== false) await animationFrame();
+    }
+    dispatchPanMouse('mouseup', end, options);
+    dispatchPanKey('keyup');
+    await animationFrame();
+    await animationFrame();
+    const out = panningReport({ ...options, label: 'synthetic-mouse-pan', log: false });
+    out.moves = moves;
+    out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
+    out.start = start;
+    out.end = end;
+    out.headline = panningHeadline(out.viewport);
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] synthetic mouse pan');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
   return {
     begin,
     mark,
@@ -422,6 +704,11 @@ var ManualPerfDebug = (() => {
     eyedropperInitialPreviewTest,
     eyedropperContinuousPreviewTest,
     colorpickerZoomReport,
+    panningReport,
+    wheelPanTest,
+    mousePanTest,
+    zoomReport,
+    wheelZoomTest,
     state,
     json,
     copyLast,

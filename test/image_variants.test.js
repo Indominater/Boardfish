@@ -34,7 +34,7 @@ function loadImageVariants() {
   return context;
 }
 
-function loadImageVariantsForPlatform(isMac) {
+function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
   const context = {
     IS_MAC: isMac,
     window: { devicePixelRatio: 1 },
@@ -55,6 +55,9 @@ function loadImageVariantsForPlatform(isMac) {
     invalidateOffscreen() {},
     scheduleRender() {},
   };
+  if (supportsCreateImageBitmap) {
+    context.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
+  }
 
   vm.createContext(context);
   vm.runInContext(
@@ -78,7 +81,7 @@ function scaleFor(context, options) {
   );
 }
 
-test('chooses 0.25 only at the exact display-pixel threshold', () => {
+test('chooses the smallest scaled variant that preserves display-pixel detail', () => {
   const context = loadImageVariants();
 
   assert.equal(scaleFor(context, {
@@ -88,7 +91,7 @@ test('chooses 0.25 only at the exact display-pixel threshold', () => {
     objH: 50,
     zoom: 1,
     dpr: 1,
-  }), 0.25);
+  }), 0.5);
 
   assert.equal(scaleFor(context, {
     sourceW: 400,
@@ -97,13 +100,22 @@ test('chooses 0.25 only at the exact display-pixel threshold', () => {
     objH: 50,
     zoom: 1,
     dpr: 1,
-  }), 1);
+  }), 0.5);
 
   assert.equal(scaleFor(context, {
     sourceW: 400,
     sourceH: 200,
     objW: 100,
     objH: 50.01,
+    zoom: 1,
+    dpr: 1,
+  }), 0.5);
+
+  assert.equal(scaleFor(context, {
+    sourceW: 400,
+    sourceH: 200,
+    objW: 200.01,
+    objH: 100,
     zoom: 1,
     dpr: 1,
   }), 1);
@@ -133,22 +145,29 @@ test('does not add a one-device-pixel floor to the threshold', () => {
     objH: 1,
     zoom: 0.1,
     dpr: 1,
-  }), 0.25);
+  }), 0.5);
 });
 
 test('scaled variants round up so the bitmap is not below the qualifying size', () => {
   const context = loadImageVariants();
 
-  assert.equal(context.scaledVariantEstimatedBytes(101, 17, 0.25), 26 * 5 * 4);
+  assert.equal(context.scaledVariantEstimatedBytes(101, 17, 0.5), 51 * 9 * 4);
 });
 
-test('mac platform keeps scaled image variants disabled even if a scaling mode is selected', () => {
+test('scaled image variant cache stays bounded with a larger desktop headroom cap', () => {
+  const context = loadImageVariants();
+
+  assert.equal(context.IMAGE_VARIANT_MEMORY_LIMIT, 1024 * 1024 * 1024);
+});
+
+test('scaled image variants are platform-independent when createImageBitmap is available', () => {
   const context = loadImageVariantsForPlatform(true);
 
-  assert.equal(context.viewportImageScalingEnabled, false);
-  assert.equal(context.isViewportImageScalingActive(), false);
-  assert.equal(context.setViewportPerfMode('1').scaling025, false);
-  assert.equal(context.isViewportImageScalingActive(), false);
+  assert.equal(context.VIEWPORT_IMAGE_SCALING_SUPPORTED, true);
+  assert.equal(context.viewportImageScalingEnabled, true);
+  assert.equal(context.isViewportImageScalingActive(), true);
+  assert.equal(context.setViewportPerfMode('1').scalingEnabled, true);
+  assert.equal(context.isViewportImageScalingActive(), true);
 
   const fullSource = { width: 100, height: 100 };
   const selected = context.selectImageSourceForDraw(
@@ -159,8 +178,18 @@ test('mac platform keeps scaled image variants disabled even if a scaling mode i
   );
   assert.equal(selected.source, fullSource);
   assert.equal(selected.scale, 1);
-  assert.equal(selected.targetScale, 1);
-  assert.equal(selected.disabled, true);
+  assert.equal(selected.targetScale, 0.5);
+  assert.equal(selected.disabled, undefined);
+});
+
+test('scaled image variants stay disabled when createImageBitmap is unavailable', () => {
+  const context = loadImageVariantsForPlatform(false, false);
+
+  assert.equal(context.VIEWPORT_IMAGE_SCALING_SUPPORTED, false);
+  assert.equal(context.viewportImageScalingEnabled, false);
+  assert.equal(context.isViewportImageScalingActive(), false);
+  assert.equal(context.setViewportPerfMode('1').scalingEnabled, false);
+  assert.equal(context.isViewportImageScalingActive(), false);
 });
 
 test('eyedropper readout resolves safe scaled variants independently of the preview', () => {
@@ -189,6 +218,8 @@ test('eyedropper readout samples rendered canvas-visible pixels', () => {
   assert.match(stateSource, /d3: \{ id: 'd3', mode: 'sampler-pointer'/);
   assert.match(decodeWarmersSource, /function findEyedropperBackgroundDecodeCandidate\(decoderId\)/);
   assert.match(decodeWarmersSource, /function findEyedropperSamplerDecodeCandidate\(\)/);
+  assert.match(decodeWarmersSource, /function isEyedropperDecodeCandidate\(obj\)/);
+  assert.doesNotMatch(decodeWarmersSource, /objectIntersectsRect\(obj, visibleRect\)/);
   assert.match(decodeWarmersSource, /return naturalWidth \* naturalHeight \* formatMultiplier;/);
   assert.match(decodeWarmersSource, /BoardfishTauri\.prewarmCachedImagePixels\(key\)/);
   assert.match(source, /native-pixel-wait-decode-prewarm/);
@@ -201,7 +232,7 @@ test('eyedropper readout samples rendered canvas-visible pixels', () => {
   assert.match(source, /noReadoutUpdate: true/);
   assert.doesNotMatch(source, /matchingEyedropperNativePixel/);
   assert.doesNotMatch(source, /reason: 'native-image-pixel'/);
-  assert.match(source, /if \(isNativeImageRef\(imageStore\[key\]\)\) \{[\s\S]*requestEyedropperNativePixel\(\);[\s\S]*cachedPixelImageMissReason = 'native-pixel-pending';[\s\S]*return null;[\s\S]*\}/);
+  assert.match(source, /if \(globalThis\.hasEyedropperNativePixelCacheSource\?\.\(key\)\) \{[\s\S]*requestEyedropperNativePixel\(\);[\s\S]*cachedPixelImageMissReason = 'native-pixel-pending';[\s\S]*return null;[\s\S]*\}/);
   assert.match(source, /if \(timings\.cachedPixelImageMissReason === 'native-pixel-pending'\) \{[\s\S]*noReadoutUpdate: true,[\s\S]*\}\s*if \(timings\.cachedPixelImageMiss && options\.localImageFallback !== true\) \{[\s\S]*pixel: null,[\s\S]*source: 'pixel-cache',[\s\S]*noReadoutUpdate: true,/);
   assert.doesNotMatch(source, /pixel: previewSample\?\.pixel \|\| boardBackgroundPixel\(\),\s*source: 'background',\s*reason: timings\.cachedPixelImageMissReason/);
   assert.doesNotMatch(source, new RegExp('sampleCachedImage' + 'Tile'));
@@ -231,8 +262,31 @@ test('eyedropper preview uses the final CSS size before the loupe is visible', (
   assert.match(source, /outerWidth - borderX/);
   assert.doesNotMatch(source, /outerWidth - paddingX - borderX/);
   assert.match(source, /function eyedropperPreviewDrawSize\(dpr = window\.devicePixelRatio \|\| 1\)/);
-  assert.match(source, /const drawSize = eyedropperPreviewDrawSize\(dpr\);/);
+  assert.match(source, /const drawSize = eyedropperPreviewDrawSize\(dpr, layoutMetrics\);/);
   assert.doesNotMatch(source, /const previewSize = previewRect\.width \|\| EYEDROPPER_PREVIEW_CSS/);
+});
+
+test('eyedropper sampler removes avoidable per-frame work', () => {
+  const source = [
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_debug.js'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper_state.js'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8'),
+  ].join('\n');
+
+  assert.match(source, /const resizeEyedropperCanvasBackingStore = \(canvas, width, height = width\) =>/);
+  assert.match(source, /resizeEyedropperCanvasBackingStore\(eyedropperZoomWallpaperCanvas, size, size\)/);
+  assert.match(source, /resizeEyedropperCanvasBackingStore\(eyedropperRenderedSampleCanvas, width, height\)/);
+  assert.match(source, /resizeEyedropperCanvasBackingStore\(eyedropperReadoutCanvas, 1, 1\)/);
+  assert.match(source, /const getEyedropperLayoutMetrics = \(dpr = window\.devicePixelRatio \|\| 1, options = \{\}\) =>/);
+  assert.match(source, /layoutCacheHits/);
+  assert.match(source, /layoutCacheMisses/);
+  assert.match(source, /const shouldProcessEyedropperMoveEvent = \(e\) =>/);
+  assert.match(source, /sample-mousemove-duplicate-skipped/);
+  assert.match(source, /duplicateMouseMovesSkipped/);
+  assert.match(source, /colorReadoutDomWrites/);
+  assert.match(source, /colorReadoutDomSkips/);
+  assert.match(source, /card\.lastSwatchCss = cssColor;/);
+  assert.match(source, /EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT = 1024 \* 1024 \* 1024/);
 });
 
 test('eyedropper sampler keeps edge gap while Windows titlebar controls layer above it', () => {
@@ -431,6 +485,7 @@ test('eyedropper decode warming uses two background decoders after board open', 
   assert.match(ioCloseSource, /scheduleEyedropperNativeDecodePrewarm\('board-loaded'\)/);
   assert.match(decodeWarmersSource, /pumpEyedropperDecodeWarmer\('d1', reason\)/);
   assert.match(decodeWarmersSource, /pumpEyedropperDecodeWarmer\('d2', reason\)/);
+  assert.doesNotMatch(decodeWarmersSource, /currentViewportWorldRect\(0\)[\s\S]*findEyedropperBackgroundDecodeCandidate/);
   assert.doesNotMatch(ioCloseSource, /schedulePostOpenEyedropperSafeImagePrewarm\('open-all-hydrated'\)/);
 });
 

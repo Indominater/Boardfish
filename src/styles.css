@@ -358,7 +358,8 @@ body[data-theme="dark"] .window-control-close:active {
 #eyedropper-loupe,
 .eyedropper-loupe,
 #dialog,
-#island {
+#island,
+.opening-shield-pill {
   background: var(--firefox-menu-bg);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -572,11 +573,62 @@ body[data-theme="dark"] .window-control-close:active {
   max-width: calc(100vw - 32px);
 }
 
-#island.visible {
+.opening-shield-pill {
+  position: fixed;
+  bottom: 5%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  z-index: 100000;
+  pointer-events: none;
+  max-width: calc(100vw - 32px);
+}
+
+#island,
+#island *,
+.opening-shield-pill,
+.opening-shield-pill * {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#island.visible,
+.opening-shield-pill.visible {
   display: flex;
 }
 
 #isl-zoom {
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  min-height: var(--menu-item-height);
+  padding: var(--menu-item-padding);
+  font-family: inherit;
+  font-size: var(--menu-item-font-size);
+  font-weight: var(--menu-item-font-weight);
+  line-height: 18px;
+  color: var(--firefox-menu-text);
+  background: transparent;
+  border-radius: var(--menu-item-radius);
+  letter-spacing: var(--menu-item-letter-spacing);
+  -webkit-font-smoothing: antialiased;
+  white-space: normal;
+  min-width: 44px;
+  max-width: min(680px, calc(100vw - 56px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.opening-shield-pill-text {
   cursor: default;
   user-select: none;
   -webkit-user-select: none;

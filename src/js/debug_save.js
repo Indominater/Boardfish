@@ -13,7 +13,7 @@ var SaveDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish save debugger enabled. Use finishDebug({ save: ["summary", "dump"] }) to collect results.');
+    if (core.enabled) console.info('Boardfish save debugger enabled. Use finishDebug({ save: ["report", "phaseSummary", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -80,8 +80,12 @@ var SaveDebug = (() => {
       queueMs: e.meta?.queueMs ?? '',
       elapsedMs: e.meta?.elapsedMs ?? '',
       rustSerializeMs: e.meta?.rust?.serialize_ms ?? '',
+      rustValidateMs: e.meta?.rust?.validate_ms ?? '',
+      rustSourceLookupMs: e.meta?.rust?.source_lookup_ms ?? '',
       rustWriteMs: e.meta?.rust?.write_ms ?? '',
       rustZipMs: e.meta?.rust?.zip_ms ?? '',
+      zipMode: e.meta?.rust?.zip_mode ?? '',
+      zipBytes: e.meta?.rust?.zip_bytes ?? '',
       rustImageBytes: e.meta?.rust?.image_bytes ?? '',
       rustImageCount: e.meta?.rust?.image_count ?? '',
       rustTotalMs: e.meta?.rust?.total_ms ?? '',
@@ -98,7 +102,7 @@ var SaveDebug = (() => {
         e.step === 'json-stringify' ||
         e.step.startsWith('await-image-source-cache') ||
         e.step.startsWith('save-frame-probe') ||
-        (e.step === 'invoke:ok' && e.meta?.command === TAURI_COMMANDS.SAVE_BOARD) ||
+        (e.step === 'invoke:ok' && /save_board|web_save_board/.test(e.meta?.command || '')) ||
         e.step === 'markSaved:end' ||
         e.step === 'end' ||
         e.step === 'invoke:error'
@@ -117,8 +121,12 @@ var SaveDebug = (() => {
         queueMs: e.meta?.queueMs ?? '',
         elapsedMs: e.meta?.elapsedMs ?? '',
         rustSerializeMs: e.meta?.rust?.serialize_ms ?? '',
+        rustValidateMs: e.meta?.rust?.validate_ms ?? '',
+        rustSourceLookupMs: e.meta?.rust?.source_lookup_ms ?? '',
         rustWriteMs: e.meta?.rust?.write_ms ?? '',
         rustZipMs: e.meta?.rust?.zip_ms ?? '',
+        zipMode: e.meta?.rust?.zip_mode ?? '',
+        zipBytes: e.meta?.rust?.zip_bytes ?? '',
         rustImageBytes: e.meta?.rust?.image_bytes ?? '',
         rustImageCount: e.meta?.rust?.image_count ?? '',
         rustTotalMs: e.meta?.rust?.total_ms ?? '',
@@ -126,6 +134,56 @@ var SaveDebug = (() => {
       }));
     console.table(rows);
     return rows;
+  }
+
+  function latestRun() {
+    const starts = core.events.filter(e => e.step === 'start' && /^saveBoard/.test(e.op || ''));
+    const start = starts[starts.length - 1];
+    if (!start) return [];
+    return core.events.filter(e => e.id === start.id);
+  }
+
+  function report() {
+    const run = latestRun();
+    if (!run.length) {
+      const empty = { saveRuns: 0, verdict: 'no saveBoard events captured' };
+      console.table([empty]);
+      return empty;
+    }
+    const find = (step) => run.find(e => e.step === step);
+    const findPrefix = (prefix) => run.find(e => e.step?.startsWith(prefix));
+    const invokeOk = run.find(e => e.step === 'invoke:ok' && /save_board|web_save_board/.test(e.meta?.command || ''));
+    const frame = find('save-frame-probe');
+    const pendingFrame = find('save-frame-probe:pending');
+    const end = find('end') || run[run.length - 1];
+    const rust = invokeOk?.meta?.rust || {};
+    const row = {
+      saveRuns: 1,
+      op: run[0]?.op || '',
+      totalMs: end?.total ?? '',
+      boardDataMs: find('boardData')?.meta?.ms ?? '',
+      jsonStringifyMs: find('json-stringify')?.meta?.ms ?? '',
+      imageSourceWaitMs: find('await-image-source-cache:end')?.meta?.ms ?? '',
+      invokeMs: invokeOk?.meta?.ms ?? '',
+      rustValidateMs: rust.validate_ms ?? '',
+      rustSourceLookupMs: rust.source_lookup_ms ?? '',
+      rustSerializeMs: rust.serialize_ms ?? '',
+      rustWriteMs: rust.write_ms ?? '',
+      rustZipMs: rust.zip_ms ?? '',
+      zipMode: rust.zip_mode ?? '',
+      zipBytes: rust.zip_bytes ?? '',
+      rustTotalMs: rust.total_ms ?? '',
+      jsonBytes: invokeOk?.meta?.rust?.json_bytes ?? find('json-stringify')?.meta?.jsonBytes ?? '',
+      imageBytes: rust.image_bytes ?? '',
+      imageCount: rust.image_count ?? find('boardData')?.meta?.imageCount ?? '',
+      frameProbeQueueMs: frame?.meta?.queueMs ?? '',
+      frameProbePendingMs: pendingFrame?.meta?.elapsedMs ?? '',
+      frameProbePending: !!pendingFrame,
+      coalesced: /coalesced/.test(run[0]?.op || ''),
+      error: findPrefix('invoke:error')?.meta?.error || end?.meta?.error || '',
+    };
+    console.table([row]);
+    return row;
   }
 
   return {
@@ -140,6 +198,7 @@ var SaveDebug = (() => {
     dump,
     summary,
     phaseSummary,
+    report,
     reset: core.reset,
     get enabled() { return core.enabled; },
     get events() { return core.events; },

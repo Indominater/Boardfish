@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::LazyLock;
 
 #[derive(serde::Deserialize)]
@@ -19,134 +18,157 @@ static BOARD_CONTRACT: LazyLock<BoardContract> = LazyLock::new(|| {
         .expect("shared board contract must be valid JSON")
 });
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BoardDocument {
-    version: Option<u64>,
-    format: Option<String>,
-    viewport: Option<Viewport>,
-    image_store: HashMap<String, serde_json::Value>,
-    objects: Vec<BoardObject>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Viewport {
-    pan_x: f64,
-    pan_y: f64,
-    zoom: f64,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(tag = "type")]
-enum BoardObject {
-    #[serde(rename = "text")]
-    Text {
-        id: String,
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-        z: f64,
-        data: TextData,
-    },
-    #[serde(rename = "image")]
-    Image {
-        id: String,
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-        z: f64,
-        data: ImageData,
-    },
-}
-
-#[derive(serde::Deserialize)]
-struct TextData {
-    content: String,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ImageData {
-    img_key: String,
-    flip_x: Option<bool>,
-    flip_y: Option<bool>,
-    rotation: Option<f64>,
-}
-
 pub(crate) fn validate_board_value(value: &serde_json::Value) -> Result<(), String> {
-    let document: BoardDocument =
-        serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
-    if let Some(version) = document.version {
+    let document = value
+        .as_object()
+        .ok_or_else(|| "board data must be an object".to_string())?;
+    if let Some(version_value) = document.get("version") {
+        let version = version_value
+            .as_u64()
+            .ok_or_else(|| "board version must be an unsigned integer".to_string())?;
         if version != BOARD_CONTRACT.versions.legacy && version != BOARD_CONTRACT.versions.container
         {
             return Err(format!("unsupported board version {version}"));
         }
     }
-    if let Some(format) = &document.format {
-        if format != &BOARD_CONTRACT.format {
+    if let Some(format_value) = document.get("format") {
+        let format = format_value
+            .as_str()
+            .ok_or_else(|| "board format must be a string".to_string())?;
+        if format != BOARD_CONTRACT.format.as_str() {
             return Err(format!("unsupported board format {format}"));
         }
     }
-    if let Some(viewport) = &document.viewport {
-        if !viewport.pan_x.is_finite() || !viewport.pan_y.is_finite() || !viewport.zoom.is_finite()
-        {
-            return Err("viewport contains non-finite values".to_string());
-        }
+
+    if let Some(viewport) = document.get("viewport") {
+        validate_viewport(viewport)?;
     }
-    for object in &document.objects {
-        validate_object(object, &document.image_store)?;
+
+    let image_store = document
+        .get("imageStore")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "imageStore must be an object".to_string())?;
+    let objects = document
+        .get("objects")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "objects must be an array".to_string())?;
+    for object in objects {
+        validate_object(object, image_store)?;
+    }
+    Ok(())
+}
+
+fn validate_viewport(viewport: &serde_json::Value) -> Result<(), String> {
+    let viewport = viewport
+        .as_object()
+        .ok_or_else(|| "viewport must be an object".to_string())?;
+    let pan_x = required_f64(viewport, "panX", "viewport")?;
+    let pan_y = required_f64(viewport, "panY", "viewport")?;
+    let zoom = required_f64(viewport, "zoom", "viewport")?;
+    if !pan_x.is_finite() || !pan_y.is_finite() || !zoom.is_finite() {
+        return Err("viewport contains non-finite values".to_string());
     }
     Ok(())
 }
 
 fn validate_object(
-    object: &BoardObject,
-    image_store: &HashMap<String, serde_json::Value>,
+    object: &serde_json::Value,
+    image_store: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
-    match object {
-        BoardObject::Text {
-            id,
-            x,
-            y,
-            w,
-            h,
-            z,
-            data,
-        } => {
-            validate_common(id, *x, *y, *w, *h, *z)?;
-            let _ = &data.content;
+    let object = object
+        .as_object()
+        .ok_or_else(|| "object is not an object".to_string())?;
+    let object_type = required_str(object, "type", "object")?;
+    let id = required_str(object, "id", "object")?;
+    let x = required_f64(object, "x", id)?;
+    let y = required_f64(object, "y", id)?;
+    let w = required_f64(object, "w", id)?;
+    let h = required_f64(object, "h", id)?;
+    let z = required_f64(object, "z", id)?;
+    validate_common(id, x, y, w, h, z)?;
+
+    let data = object
+        .get("data")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| format!("object {id} is missing data"))?;
+
+    match object_type {
+        "text" => {
+            let _ = required_str(data, "content", id)?;
         }
-        BoardObject::Image {
-            id,
-            x,
-            y,
-            w,
-            h,
-            z,
-            data,
-        } => {
-            validate_common(id, *x, *y, *w, *h, *z)?;
-            if data.img_key.is_empty() {
+        "image" => {
+            let img_key = required_str(data, "imgKey", id)?;
+            if img_key.is_empty() {
                 return Err(format!("image object {id} is missing imgKey"));
             }
-            if !image_store.contains_key(&data.img_key) {
+            if !image_store.contains_key(img_key) {
                 return Err(format!(
-                    "image object {id} references missing image {}",
-                    data.img_key
+                    "image object {id} references missing image {img_key}",
                 ));
             }
-            if let Some(rotation) = data.rotation {
+            optional_bool(data, "flipX", id)?;
+            optional_bool(data, "flipY", id)?;
+            if let Some(rotation) = optional_f64(data, "rotation", id)? {
                 if !rotation.is_finite() {
                     return Err(format!("image object {id} has non-finite rotation"));
                 }
             }
-            let _ = (data.flip_x, data.flip_y);
         }
+        _ => return Err(format!("object {id} has unsupported type")),
     }
     Ok(())
+}
+
+fn required_str<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<&'a str, String> {
+    object
+        .get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("{label}.{key} must be a string"))
+}
+
+fn required_f64(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<f64, String> {
+    object
+        .get(key)
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| format!("{label}.{key} must be a number"))
+}
+
+fn optional_f64(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<Option<f64>, String> {
+    object
+        .get(key)
+        .map(|value| {
+            value
+                .as_f64()
+                .ok_or_else(|| format!("{label}.{key} must be a number"))
+        })
+        .transpose()
+}
+
+fn optional_bool(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<Option<bool>, String> {
+    object
+        .get(key)
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| format!("{label}.{key} must be a boolean"))
+        })
+        .transpose()
 }
 
 fn validate_common(id: &str, x: f64, y: f64, w: f64, h: f64, z: f64) -> Result<(), String> {

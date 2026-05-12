@@ -14,6 +14,8 @@ function readSource(relativePath) {
 test('open-board debugger covers the slow open phases developers need to inspect', () => {
   const openDebug = readSource('src/js/debug_open.js');
   const openIo = readSource('src/js/io_close.js');
+  const imageState = readSource('src/js/image_state.js');
+  const viewport = readSource('src/js/viewport.js');
 
   for (const method of [
     'phaseSummary',
@@ -26,20 +28,37 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'cacheImageBreakdown',
     'setHydrationMode',
     'setHydrationConcurrency',
+    'report',
   ]) {
     assert.match(openDebug, new RegExp(`\\b${method}\\b`), `OpenDebug is missing ${method}`);
   }
-  assert.match(openDebug, /let hydrationMode = 'all-before-open';/);
-  assert.match(openIo, /var openHydrationMode = 'all-before-open';/);
+  assert.match(openDebug, /let hydrationMode = 'visible-first';/);
+  assert.match(openIo, /var openHydrationMode = 'visible-first';/);
   assert.match(openIo, /function getOpenHydrationMode\(\)/);
   assert.match(openIo, /const hydrationMode = getOpenHydrationMode\(\);/);
+  assert.match(openIo, /const visibleFirstOpen = deferRender &&/);
+  assert.match(openIo, /deferredInitialCacheImages\+\+;/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
   assert.match(openIo, /typeof source === 'string' \|\| isNativeImageRef\(source\) \|\| isWebImageRef\(source\)/);
   assert.match(openIo, /function getReferencedHydratableImageKeys\(limit = Infinity, exclude = new Set\(\)\)/);
   assert.match(openIo, /const keys = getReferencedHydratableImageKeys\(\);/);
   assert.match(openIo, /pendingImages: getPendingHydratableImageKeys\(\)\.length/);
   assert.doesNotMatch(openIo, /pendingNativeImages: getPendingNativeImageKeys\(\)\.length/);
-  assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*await pendingReady;/);
+  assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
+  assert.match(openIo, /source: 'pending-cache'/);
+  assert.match(openIo, /async function settleVisibleImageBitmapsForOpen/);
+  assert.match(openIo, /while \(state\.settled < count\)/);
+  assert.doesNotMatch(openIo, /const maxMs = Number\.isFinite\(options\.maxMs\)/);
+  assert.match(openIo, /hydrate-visible:bitmap-settle/);
+  assert.match(openDebug, /visibleBitmapSettleMs/);
+  assert.match(openDebug, /visibleBitmapsFailed/);
+  assert.match(imageState, /var MAX_IMAGE_DECODE_ACTIVE = 2;/);
+  assert.match(imageState, /const MAX_OPEN_IMAGE_DECODE_ACTIVE = 8;/);
+  assert.match(imageState, /_boardOpening[\s\S]*MAX_OPEN_IMAGE_DECODE_ACTIVE[\s\S]*MAX_IMAGE_DECODE_ACTIVE/);
+  assert.match(viewport, /function getLastApplyTransformMeta\(\)/);
+  assert.match(openIo, /const renderBreakdown = typeof getLastApplyTransformMeta === 'function'/);
+  assert.match(openIo, /drawBoardTotalMs: drawBreakdown\?\.totalMeasuredMs/);
+  assert.match(openDebug, /initialDrawMs: initialRender\?\.meta\?\.drawMs/);
 
   for (const phase of [
     'read-board-debug',
@@ -60,10 +79,10 @@ test('open-board debugger covers the slow open phases developers need to inspect
     assert.match(openIo, new RegExp(phase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `open flow is missing ${phase}`);
   }
 
-  const imageState = readSource('src/js/image_state.js');
   for (const phase of [
     'cache-image:load',
     'cache-image:readback-probe',
+    'cache-image:display-ready',
     'cache-image:decode-queue:queued',
     'cache-image:decode-queue:start',
     'cache-image:createImageBitmap',
