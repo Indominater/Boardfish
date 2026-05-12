@@ -4,12 +4,17 @@ Boardfish is a fast, lossless infinite canvas for visual ideation. Designed for 
 
 <img src="src-tauri/icons/image_f55a65.png" alt="Boardfish canvas screenshot" width="900">
 
-## Download
+## Use Boardfish
 
-Grab the latest Windows and macOS installers from the [Releases](https://github.com/Indominater/Boardfish/releases/latest) page.
+- **Web app:** https://indominater.github.io/Boardfish/
+- **Desktop app:** download the latest Windows and macOS installers from [Releases](https://github.com/Indominater/Boardfish/releases/latest)
 
-- **Windows** — download the `.exe`, run the installer
-- **macOS** — download the `.dmg`, drag Boardfish to Applications
+The web app runs locally in your browser and uses the same portable `.bf` board files as the desktop app.
+
+Desktop installers:
+
+- **Windows:** download the `.exe` and run the installer
+- **macOS:** download the `.dmg` and drag Boardfish to Applications
 
 > **macOS:** If you see "damaged and can't be opened", run this in Terminal after dragging to Applications:
 > ```bash
@@ -61,19 +66,10 @@ Grab the latest Windows and macOS installers from the [Releases](https://github.
 
 ## Building from Source
 
-**Prerequisites:** [Node.js](https://nodejs.org) 18+ and [Rust](https://rustup.rs)
-
 ```bash
 git clone https://github.com/Indominater/Boardfish.git
 cd Boardfish
 npm install
-npm run tauri dev
-```
-
-To build a release installer:
-
-```bash
-npm run tauri build
 ```
 
 ## License
