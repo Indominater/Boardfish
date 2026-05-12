@@ -5,7 +5,6 @@ var openBoardFromPath;
 var finishFailedOpen;
 
 {
-  globalThis.BoardfishAnalytics?.track('app_open');
   document.fonts?.ready.then(clearTextMeasurementCaches).catch(() => {});
   resizeCanvas();
   snapshot();

@@ -168,7 +168,6 @@ function runMenuCommand(button, source) {
     command,
     source,
   });
-  globalThis.BoardfishAnalytics?.track('menu_command', { command, source });
   if (source === 'pointerup' || source === 'mouseup') _lastPointerMenuCommandAt = performance.now();
   const runWithDebug = () => {
     MenuDebug.log('menu:command:start', { command, source });

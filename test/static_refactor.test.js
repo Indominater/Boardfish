@@ -117,7 +117,7 @@ test('macOS titlebar drag region is native-only', () => {
   assert.doesNotMatch(source, /if \(IS_MAC\) document\.body\.classList\.add\('is-macos'\);/);
 });
 
-test('privacy-friendly analytics load only in web builds', () => {
+test('Cloudflare analytics load only in web builds', () => {
   const webPreview = manifestScripts('WEB_PREVIEW_SCRIPTS');
   const desktopRelease = manifestScripts('DESKTOP_RELEASE_SCRIPTS');
   const webDev = manifestScripts('WEB_DEV_SCRIPTS');
@@ -129,11 +129,13 @@ test('privacy-friendly analytics load only in web builds', () => {
   assert.ok(!desktopDev.includes('analytics.js'), 'desktop dev should not load web analytics');
   assert.ok(!desktopRelease.includes('analytics.js'), 'desktop release should not load web analytics');
   assert.ok(webPreview.indexOf('analytics.js') < webPreview.indexOf('../app.js'), 'analytics should load before app startup');
-  assert.match(analyticsSource, /https:\/\/plausible\.io\/js\/script\.js/);
+  assert.match(analyticsSource, /https:\/\/static\.cloudflareinsights\.com\/beacon\.min\.js/);
+  assert.match(analyticsSource, /b0d33f7dee1b4308b72b231c46ef1faa/);
+  assert.match(analyticsSource, /data-cf-beacon/);
   assert.match(analyticsSource, /doNotTrack/);
-  assert.doesNotMatch(analyticsSource, /clipboard|imageStore|objects|currentFilePath/);
-  assert.match(readSource('src/js/app_bootstrap.js'), /BoardfishAnalytics\?\.track\('app_open'\)/);
-  assert.match(readSource('src/js/context_menu.js'), /BoardfishAnalytics\?\.track\('menu_command', \{ command, source \}\)/);
+  assert.doesNotMatch(analyticsSource, /plausible|clipboard|imageStore|objects|currentFilePath/);
+  assert.doesNotMatch(readSource('src/js/app_bootstrap.js'), /BoardfishAnalytics\?\.track\('app_open'\)/);
+  assert.doesNotMatch(readSource('src/js/context_menu.js'), /BoardfishAnalytics\?\.track\('menu_command', \{ command, source \}\)/);
 });
 
 test('frontend invokes Tauri through the shared wrapper and command catalog', () => {
