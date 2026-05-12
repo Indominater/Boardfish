@@ -6,7 +6,7 @@ Boardfish is a fast, lossless infinite canvas for visual ideation. Designed for 
 
 ## Use Boardfish
 
-- **Web app (Chromium browser is recommended):** https://indominater.github.io/Boardfish/
+- **Web app (Chromium browser recommended):** https://indominater.github.io/Boardfish/
 - **Desktop app:** download the latest Windows and macOS installers from [Releases](https://github.com/Indominater/Boardfish/releases/latest)
 
 The web app runs locally in your browser and uses the same portable `.bf` board files as the desktop app.
