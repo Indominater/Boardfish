@@ -273,15 +273,18 @@ function resetZoomToClosestObject() {
 const resetZoomFromPill = (e) => {
   e.preventDefault();
   e.stopPropagation();
+  if (document.activeElement === island) island.blur();
   closeOpenMenusExcept('', 'pill-reset-zoom');
   resetZoomToClosestObject();
 };
 
+const suppressZoomPillContextMenu = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+};
+
 island?.addEventListener('click', resetZoomFromPill);
-island?.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  resetZoomFromPill(e);
-});
+island?.addEventListener('contextmenu', suppressZoomPillContextMenu);
 
 function onMenuPointerDown(e) {
   const button = e.target.closest?.('.ctx-item');

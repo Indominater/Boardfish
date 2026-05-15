@@ -630,8 +630,7 @@ body[data-theme="dark"] .window-control-close:active {
   display: flex;
 }
 
-#island:hover #isl-zoom,
-#island:focus-visible #isl-zoom {
+#island:hover #isl-zoom {
   background: var(--firefox-menu-hover-bg);
 }
 

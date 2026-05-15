@@ -83,9 +83,6 @@ const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
   islZoom.textContent = zoomText;
   _lastIslandZoomText = zoomText;
   island.dataset.mode = 'zoom';
-  island.setAttribute('role', 'button');
-  island.setAttribute('tabindex', '0');
-  island.setAttribute('aria-label', `Reset zoom (${zoomText})`);
   island.title = 'Reset Zoom';
   setIslandVisible(true);
   if (changed) PillDebug.log('zoomIsland:shown', { reason, zoom, text: zoomText });
@@ -94,9 +91,6 @@ const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
 function showIslandForMessage(text) {
   islZoom.textContent = text;
   island.dataset.mode = 'message';
-  island.setAttribute('role', 'button');
-  island.setAttribute('tabindex', '0');
-  island.setAttribute('aria-label', `${text}. Reset zoom`);
   island.title = 'Reset Zoom';
   setIslandVisible(true);
   syncOpeningShieldPill(text);

@@ -182,6 +182,42 @@ test('wheel zoom over visible floating UI uses the viewport wheel handler', () =
   assert.match(styles, /#island \{[\s\S]*overscroll-behavior: none;[\s\S]*touch-action: none;/);
 });
 
+test('zoom pill stays out of keyboard focus and Space reset paths', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const contextMenuSource = readSource('src/js/context_menu.js');
+  const styles = readSource('src/styles.css');
+
+  assert.match(styles, /#island:hover #isl-zoom\s*\{[\s\S]*background: var\(--firefox-menu-hover-bg\);[\s\S]*\}/);
+  assert.doesNotMatch(styles, /#island:hover #isl-zoom,\s*#island:focus-visible #isl-zoom/);
+  assert.doesNotMatch(styles, /#island:focus-visible #isl-zoom/);
+  assert.doesNotMatch(viewportSource, /island\.setAttribute\('tabindex', '0'\)/);
+  assert.doesNotMatch(viewportSource, /island\.setAttribute\('role', 'button'\)/);
+  assert.doesNotMatch(contextMenuSource, /island\?\.addEventListener\('keydown'/);
+  assert.match(contextMenuSource, /if \(document\.activeElement === island\) island\.blur\(\);/);
+});
+
+test('zoom pill suppresses browser context menu without resetting zoom', () => {
+  const contextMenuSource = readSource('src/js/context_menu.js');
+  const handlerBlock = contextMenuSource.match(/const suppressZoomPillContextMenu = \(e\) => \{[\s\S]*?\n\};/);
+
+  assert.ok(handlerBlock, 'zoom pill contextmenu suppressor is missing');
+  assert.match(handlerBlock[0], /e\.preventDefault\(\);/);
+  assert.match(handlerBlock[0], /e\.stopPropagation\(\);/);
+  assert.doesNotMatch(handlerBlock[0], /resetZoom|closeOpenMenus/);
+  assert.match(contextMenuSource, /island\?\.addEventListener\('contextmenu', suppressZoomPillContextMenu\);/);
+});
+
+test('unsaved changes dialog suppresses browser context menu without closing', () => {
+  const ioCloseSource = readSource('src/js/io_close.js');
+  const handlerBlock = ioCloseSource.match(/unsavedDialog\.addEventListener\('contextmenu', \(e\) => \{[\s\S]*?\n\}\);/);
+
+  assert.ok(handlerBlock, 'dialog contextmenu suppressor is missing');
+  assert.match(ioCloseSource, /var unsavedDialog = document\.getElementById\('dialog'\);/);
+  assert.match(handlerBlock[0], /e\.preventDefault\(\);/);
+  assert.match(handlerBlock[0], /e\.stopPropagation\(\);/);
+  assert.doesNotMatch(handlerBlock[0], /_dialogClose|classList\.remove/);
+});
+
 test('global capture wheel zoom over the zoom pill is handled once by the board', () => {
   const context = loadCanvasWheelHarness();
   const windowWheel = context.listeners.window.find((entry) => entry.type === 'wheel');

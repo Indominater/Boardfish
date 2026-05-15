@@ -26,6 +26,7 @@ function updateTitle() {
 
 // ─── Unsaved changes dialog ───────────────────────────────────────────────────
 var dialogOverlay = document.getElementById('dialog-overlay');
+var unsavedDialog = document.getElementById('dialog');
 var _dialogResolve = null;
 
 function _dialogClose(result) {
@@ -36,6 +37,10 @@ function _dialogClose(result) {
   if (r) r(result);
 }
 
+unsavedDialog.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+});
 document.getElementById('dlg-save').addEventListener('click', () => _dialogClose('save'));
 document.getElementById('dlg-discard').addEventListener('click', () => _dialogClose('discard'));
 document.getElementById('dlg-cancel').addEventListener('click', () => _dialogClose('cancel'));
