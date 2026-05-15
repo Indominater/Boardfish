@@ -105,7 +105,12 @@ test('web release preview keeps debug tools off on localhost', () => {
     manifestSource.match(/export const WEB_PREVIEW_SCRIPTS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1] || '',
     /'debug(?:_|\.|')|'startup_debug\.js'|'viewport_debug_ui\.js'|'eyedropper_debug\.js'/,
   );
-  assert.match(buildSource, /'web-preview'[\s\S]*bundle: 'assets\/boardfish-web-preview\.min\.js'/);
+  assert.match(buildSource, /'web-preview'[\s\S]*bundle: 'assets\/boardfish-web-preview\.min\.js'[\s\S]*cacheBust: true/);
+  assert.match(buildSource, /import \{ createHash \} from 'node:crypto';/);
+  assert.match(buildSource, /function cacheBustedBundlePath\(bundle, code\)/);
+  assert.match(buildSource, /createHash\('sha256'\)\.update\(code\)\.digest\('hex'\)\.slice\(0, 12\)/);
+  assert.match(buildSource, /const bundle = config\.cacheBust \? cacheBustedBundlePath\(config\.bundle, result\.code\) : config\.bundle;/);
+  assert.match(buildSource, /writeIndex\(config\.outDir, `<script src="\$\{bundle\}"><\/script>`\)/);
 
   assert.match(webEnvSource, /'__BOARDFISH_WEB_DEV_MODE__'/);
   assert.match(webEnvSource, /value: false/);

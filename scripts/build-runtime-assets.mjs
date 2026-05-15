@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile, copyFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,7 @@ const variants = {
     outDir: path.join(root, 'dist-web'),
     scripts: VARIANT_SCRIPTS['web-preview'],
     bundle: 'assets/boardfish-web-preview.min.js',
+    cacheBust: true,
     mode: 'bundle',
   },
   'desktop-release': {
@@ -89,6 +91,11 @@ async function writeIndex(outDir, scriptTag) {
   await writeFile(path.join(outDir, 'index.html'), next);
 }
 
+function cacheBustedBundlePath(bundle, code) {
+  const hash = createHash('sha256').update(code).digest('hex').slice(0, 12);
+  return bundle.replace(/(?:\.min)?\.js$/, `.${hash}.min.js`);
+}
+
 async function buildBundle(variantName, config) {
   await resetDir(config.outDir);
   await mkdir(path.join(config.outDir, 'assets'), { recursive: true });
@@ -100,13 +107,14 @@ async function buildBundle(variantName, config) {
     legalComments: 'none',
     target: 'es2020',
   });
-  const outPath = path.join(config.outDir, config.bundle);
+  const bundle = config.cacheBust ? cacheBustedBundlePath(config.bundle, result.code) : config.bundle;
+  const outPath = path.join(config.outDir, bundle);
   await writeFile(outPath, result.code);
-  await writeIndex(config.outDir, `<script src="${config.bundle}"></script>`);
+  await writeIndex(config.outDir, `<script src="${bundle}"></script>`);
 
   const rawKb = Math.round(result.code.length / 1024 * 10) / 10;
   const gzipKb = Math.round(gzipSync(result.code).length / 1024 * 10) / 10;
-  console.log(`${variantName}: ${config.bundle} ${rawKb} KB raw, ${gzipKb} KB gzip`);
+  console.log(`${variantName}: ${bundle} ${rawKb} KB raw, ${gzipKb} KB gzip`);
 }
 
 async function buildCopy(variantName, config) {
