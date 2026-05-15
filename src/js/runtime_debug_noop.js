@@ -67,7 +67,7 @@ const StartupDebug = {
   events: [],
   samples: [],
   expectedCanvasBg(theme = 'light') {
-    return theme === 'dark' ? '#1c1b22' : 'rgb(224, 224, 227)';
+    return theme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
   },
   lastResult: null,
   lastJson: '',

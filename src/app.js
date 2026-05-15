@@ -282,7 +282,7 @@ function boardBg() {
 }
 
 function canvasTextColor() {
-  return cssVar('--canvas-text') || '#111418';
+  return cssVar('--canvas-text') || '#15141A';
 }
 
 function fillBoardBackground(context, width, height) {

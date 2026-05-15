@@ -4,10 +4,12 @@ use windows_sys::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
 };
 
-const LIGHT_CANVAS_BG: u32 = colorref(0xe0, 0xe0, 0xe3);
-const LIGHT_TITLE_TEXT: u32 = colorref(0x11, 0x14, 0x18);
+const LIGHT_CANVAS_BG: u32 = colorref(0xea, 0xea, 0xed);
 const DARK_CANVAS_BG: u32 = colorref(0x1c, 0x1b, 0x22);
-const DARK_TITLE_TEXT: u32 = colorref(0xfb, 0xfb, 0xfe);
+const BLACK_FONT: u32 = colorref(0x15, 0x14, 0x1a);
+const WHITE_FONT: u32 = colorref(0xfb, 0xfb, 0xfe);
+const LIGHT_TITLE_TEXT: u32 = BLACK_FONT;
+const DARK_TITLE_TEXT: u32 = WHITE_FONT;
 
 const fn colorref(red: u8, green: u8, blue: u8) -> u32 {
     red as u32 | ((green as u32) << 8) | ((blue as u32) << 16)

@@ -25,7 +25,7 @@ pub(crate) fn app_theme_color(dark: bool) -> Color {
     if dark {
         Color(0x1c, 0x1b, 0x22, 0xff)
     } else {
-        Color(0xe0, 0xe0, 0xe3, 0xff)
+        Color(0xea, 0xea, 0xed, 0xff)
     }
 }
 
@@ -41,7 +41,7 @@ fn app_theme_hex(dark: bool) -> &'static str {
     if dark {
         "#1c1b22"
     } else {
-        "#e0e0e3"
+        "#eaeaed"
     }
 }
 

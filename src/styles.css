@@ -6,14 +6,22 @@
   src: url('fonts/Geist.woff2') format('woff2');
 }
 :root {
-  --canvas-bg: rgb(224, 224, 227);
+  --canvas-bg: rgb(234, 234, 237);
   --canvas-bg-dark: #1c1b22;
+  --regular_text: 400;
+  --bold_text: 400;
+  --black_font: #15141A;
+  --black_font_rgb: 21, 20, 26;
+  --white_font: #fbfbfe;
+  --white_font_rgb: 251, 251, 254;
   --firefox-menu-bg: #42414d;
   --firefox-menu-border: #777681;
-  --firefox-menu-text: #fbfbfe;
-  --firefox-menu-hover-bg: #5b5a66;
-  --firefox-menu-active-bg: #646370;
-  --firefox-menu-separator: #5b5a66;
+  --firefox-menu-text: var(--white_font);
+  --menu_hover_bg: #5e5d69;
+  --menu_pressed_bg: #7b7a84;
+  --firefox-menu-hover-bg: var(--menu_hover_bg);
+  --firefox-menu-active-bg: var(--menu_pressed_bg);
+  --firefox-menu-separator: var(--menu_hover_bg);
   --firefox-menu-shadow:
     0 8px 24px rgba(0,0,0,0.32),
     0 0 0 1px rgba(0,0,0,0.10);
@@ -23,7 +31,6 @@
   --menu-item-padding: 0 8px;
   --menu-item-radius: 4px;
   --menu-item-font-size: 13px;
-  --menu-item-font-weight: 500;
   --menu-item-letter-spacing: 0;
   --menu-item-line-height: 32px;
   --context-menu-width: 228px;
@@ -37,12 +44,12 @@
   --window-titlebar-bg: transparent;
   --window-control-bg: transparent;
   --window-control-separator: transparent;
-  --window-control-fg: rgba(17, 20, 24, 0.78);
-  --window-control-accent: rgba(17, 20, 24, 0.28);
-  --window-control-hover-bg: rgba(17, 20, 24, 0.08);
-  --window-control-press-bg: rgba(17, 20, 24, 0.14);
+  --window-control-fg: rgba(var(--black_font_rgb), 0.78);
+  --window-control-accent: rgba(var(--black_font_rgb), 0.28);
+  --window-control-hover-bg: rgba(var(--black_font_rgb), 0.08);
+  --window-control-press-bg: rgba(var(--black_font_rgb), 0.14);
   --window-control-close-hover-bg: rgba(232, 17, 35, 0.82);
-  --canvas-text: #111418;
+  --canvas-text: var(--black_font);
   --dialog-overlay-bg: rgba(0,0,0,0.18);
   --selection-handle-bg: #f8fafc;
   --selection-handle-shadow: 0 1px 3px rgba(0,0,0,0.28);
@@ -51,11 +58,11 @@
 
 body[data-theme="dark"] {
   --canvas-bg: var(--canvas-bg-dark);
-  --canvas-text: #fbfbfe;
-  --window-control-fg: rgba(251, 251, 254, 0.88);
-  --window-control-accent: rgba(251, 251, 254, 0.32);
-  --window-control-hover-bg: rgba(251, 251, 254, 0.10);
-  --window-control-press-bg: rgba(251, 251, 254, 0.16);
+  --canvas-text: var(--white_font);
+  --window-control-fg: rgba(var(--white_font_rgb), 0.88);
+  --window-control-accent: rgba(var(--white_font_rgb), 0.32);
+  --window-control-hover-bg: rgba(var(--white_font_rgb), 0.10);
+  --window-control-press-bg: rgba(var(--white_font_rgb), 0.16);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -85,6 +92,7 @@ body {
   overscroll-behavior: none;
   touch-action: none;
   font-family: 'Geist Sans', system-ui;
+  font-weight: var(--regular_text);
 }
 
 #canvas {
@@ -433,7 +441,7 @@ body[data-theme="dark"] .window-control-close:active {
   padding: 0;
   font-family: inherit;
   font-size: var(--menu-item-font-size);
-  font-weight: var(--menu-item-font-weight);
+  font-weight: var(--bold_text);
   line-height: var(--menu-item-line-height);
   color: var(--firefox-menu-text);
   background: transparent;
@@ -488,7 +496,7 @@ body[data-theme="dark"] .window-control-close:active {
   line-height: 20px;
   font-variation-settings:
     'FILL' 0,
-    'wght' 400,
+    'wght' var(--regular_text),
     'GRAD' 0,
     'opsz' 24;
   pointer-events: none;
@@ -510,7 +518,7 @@ body[data-theme="dark"] .window-control-close:active {
   padding: var(--menu-item-padding);
   font-family: inherit;
   font-size: var(--menu-item-font-size);
-  font-weight: var(--menu-item-font-weight);
+  font-weight: var(--bold_text);
   line-height: var(--menu-item-line-height);
   color: var(--firefox-menu-text);
   background: transparent;
@@ -532,9 +540,9 @@ body[data-theme="dark"] .window-control-close:active {
   white-space: nowrap;
 }
 .ctx-shortcut {
-  color: rgba(251,251,254,0.72);
+  color: rgba(var(--white_font_rgb), 0.72);
   font-size: inherit;
-  font-weight: 400;
+  font-weight: var(--regular_text);
   justify-self: end;
   white-space: nowrap;
 }
@@ -608,7 +616,7 @@ body[data-theme="dark"] .window-control-close:active {
   padding: var(--menu-item-padding);
   font-family: inherit;
   font-size: var(--menu-item-font-size);
-  font-weight: var(--menu-item-font-weight);
+  font-weight: var(--bold_text);
   line-height: 18px;
   color: var(--firefox-menu-text);
   background: transparent;
@@ -636,7 +644,7 @@ body[data-theme="dark"] .window-control-close:active {
   padding: var(--menu-item-padding);
   font-family: inherit;
   font-size: var(--menu-item-font-size);
-  font-weight: var(--menu-item-font-weight);
+  font-weight: var(--bold_text);
   line-height: 18px;
   color: var(--firefox-menu-text);
   background: transparent;
@@ -667,7 +675,7 @@ body[data-theme="dark"] .window-control-close:active {
   z-index: var(--eyedropper-card-base-z);
   pointer-events: auto;
   font-size: var(--menu-item-font-size);
-  font-weight: var(--menu-item-font-weight);
+  font-weight: var(--bold_text);
   letter-spacing: var(--menu-item-letter-spacing);
   -webkit-font-smoothing: antialiased;
 }
@@ -771,7 +779,7 @@ body[data-theme="dark"] .window-control-close:active {
 .material-symbols-outlined {
   font-variation-settings:
     'FILL' 0,
-    'wght' 400,
+    'wght' var(--regular_text),
     'GRAD' 0,
     'opsz' 24;
 }

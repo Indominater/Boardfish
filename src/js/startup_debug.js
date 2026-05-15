@@ -20,7 +20,7 @@ function createNoopStartupDebug() {
     events,
     samples,
     expectedCanvasBg(theme = appTheme) {
-      return theme === 'dark' ? '#1c1b22' : 'rgb(224, 224, 227)';
+      return theme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
     },
     lastResult: null,
     lastJson: '',
@@ -48,7 +48,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
   }
 
   function expectedCanvasBg(theme = appTheme) {
-    return theme === 'dark' ? colorToRgb('#1c1b22') : colorToRgb('rgb(224, 224, 227)');
+    return theme === 'dark' ? colorToRgb('#1c1b22') : colorToRgb('rgb(234, 234, 237)');
   }
 
   function parseRgb(value) {
@@ -576,7 +576,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
       const bodyEvent = latestSince('body-theme-applied', eventStart);
       const nativeEvent = latestSince('apply-native-theme:done', eventStart);
       const sampleRow = sample(`toggle-${index}-settled`);
-      const expectedNativeColor = targetTheme === 'dark' ? '#1c1b22' : '#e0e0e3';
+      const expectedNativeColor = targetTheme === 'dark' ? '#1c1b22' : '#eaeaed';
       const mismatchMs = bodyEvent && nativeEvent ? round(nativeEvent.t - bodyEvent.t) : '';
       rows.push({
         index,

@@ -23,7 +23,7 @@
     }
 
     function boardBackgroundPixel() {
-      return deps.parseCssColor(deps.canvasBackgroundColor(), [224, 224, 227, 255]);
+      return deps.parseCssColor(deps.canvasBackgroundColor(), [234, 234, 237, 255]);
     }
 
     function clientToBoardScreenPoint(clientX, clientY) {
