@@ -37,18 +37,35 @@ function isEventInsideUnsavedDialog(e) {
   return !!dialog && e.target instanceof Node && dialog.contains(e.target);
 }
 
-function isEventInsideVisibleContextMenu(e) {
-  if (!(e.target instanceof Node)) return false;
+const isEventInsideVisibleSurface = (e, surface) => {
+  if (!surface || !surface.classList.contains('visible')) return false;
+  if (e.target instanceof Node && surface.contains(e.target)) return true;
+  const x = Number(e?.clientX);
+  const y = Number(e?.clientY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  const pointed = document.elementFromPoint(x, y);
+  return pointed instanceof Node && surface.contains(pointed);
+};
+
+const isEventInsideVisibleContextMenu = (e) => {
   return (
-    (ctxMenu.classList.contains('visible') && ctxMenu.contains(e.target)) ||
-    (objCtxMenu.classList.contains('visible') && objCtxMenu.contains(e.target)) ||
-    (ctxActions?.classList.contains('visible') && ctxActions.contains(e.target))
+    isEventInsideVisibleSurface(e, ctxMenu) ||
+    isEventInsideVisibleSurface(e, objCtxMenu) ||
+    isEventInsideVisibleSurface(e, ctxActions)
   );
-}
+};
 
 function isEventInsideIsland(e) {
   return !!(island && e.target instanceof Node && island.contains(e.target));
 }
+
+const isEventInsideVisibleIsland = (e) => {
+  return isEventInsideVisibleSurface(e, island);
+};
+
+const isEventInsideViewportWheelSurface = (e) => {
+  return isEventInsideVisibleContextMenu(e) || isEventInsideVisibleIsland(e);
+};
 
 function isShieldInputAllowed(e) {
   if (isUnsavedDialogOpen()) return isEventInsideUnsavedDialog(e);

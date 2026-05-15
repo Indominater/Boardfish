@@ -18,6 +18,26 @@ test('normalizes valid board data from shared v3 fixture', () => {
   assert.equal(Object.hasOwn(board, 'preferences'), false);
 });
 
+test('clamps viewport zoom to 1.0 percent through 10000 percent', () => {
+  const belowMin = BoardSchema.normalizeBoardData({
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {},
+    objects: [],
+    viewport: { panX: 0, panY: 0, zoom: 0.001 },
+  });
+  const aboveMax = BoardSchema.normalizeBoardData({
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {},
+    objects: [],
+    viewport: { panX: 0, panY: 0, zoom: 1000 },
+  });
+
+  assert.equal(belowMin.viewport.zoom, 0.01);
+  assert.equal(aboveMax.viewport.zoom, 100);
+});
+
 test('ignores legacy board theme preferences', () => {
   const board = BoardSchema.normalizeBoardData({
     version: 3,

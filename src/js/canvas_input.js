@@ -1,5 +1,5 @@
 // ─── Zoom ─────────────────────────────────────────────────────────────────────
-var ZOOM_MIN = 0.001, ZOOM_MAX = 1000;
+var ZOOM_MIN = 0.01, ZOOM_MAX = 100;
 var _editEl = null;
 var _caretVisible = true;
 var _caretBlinkInterval = null;
@@ -14,6 +14,8 @@ function cancelWheelPan() {
 
 
 function handleViewportWheel(e) {
+  if (e.__boardfishViewportWheelHandled) return;
+  try { e.__boardfishViewportWheelHandled = true; } catch (_) {}
   const collectDebug = ViewportDebug.isEnabled();
   const handlerStart = collectDebug ? performance.now() : 0;
   const dbg = ViewportDebug.start('wheel', { deltaX: e.deltaX, deltaY: e.deltaY, ctrlKey: e.ctrlKey, metaKey: e.metaKey, panX, panY, zoom });
@@ -56,16 +58,31 @@ function handleViewportWheel(e) {
 }
 
 canvas.addEventListener('wheel', handleViewportWheel, { passive: false });
-document.addEventListener('wheel', (e) => {
-  const insideContextMenu =
-    typeof isEventInsideVisibleContextMenu === 'function' &&
-    isEventInsideVisibleContextMenu(e);
+for (const surface of [
+  typeof ctxMenu !== 'undefined' ? ctxMenu : null,
+  typeof objCtxMenu !== 'undefined' ? objCtxMenu : null,
+  typeof ctxActions !== 'undefined' ? ctxActions : null,
+  typeof island !== 'undefined' ? island : null,
+].filter(Boolean)) {
+  surface.addEventListener('wheel', handleViewportWheel, { passive: false });
+}
+
+function handleGlobalViewportWheel(e) {
+  if (e.__boardfishViewportWheelHandled) return;
+  const viewportZoomGesture = e.ctrlKey || e.metaKey;
+  const insideViewportWheelSurface =
+    typeof isEventInsideViewportWheelSurface === 'function' &&
+    isEventInsideViewportWheelSurface(e);
   const insideEyedropperLoupe =
     typeof isEventInsideVisibleEyedropperLoupe === 'function' &&
     isEventInsideVisibleEyedropperLoupe(e);
-  if (!insideContextMenu && !insideEyedropperLoupe) return;
+  if (!viewportZoomGesture && !insideViewportWheelSurface && !insideEyedropperLoupe) return;
   handleViewportWheel(e);
-}, { capture: true, passive: false });
+}
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('wheel', handleGlobalViewportWheel, { capture: true, passive: false });
+}
+document.addEventListener('wheel', handleGlobalViewportWheel, { capture: true, passive: false });
 
 // ─── Pan (spacebar + left click) ─────────────────────────────────────────────
 var _spaceDown = false;

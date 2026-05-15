@@ -25,6 +25,14 @@ var long_message = 3 * short_message;
 var _islMsgActive = false;
 var _islMsgTimer = null;
 var _islMsgToken = 0;
+var _lastIslandZoomText = '';
+
+const formatZoomPercent = (value = zoom) => {
+  const pct = Math.max(0, (Number.isFinite(value) ? value : 1) * 100);
+  if (pct >= 10) return `${Math.round(pct)}%`;
+  if (pct >= 1) return `${(Math.round(pct * 10) / 10).toFixed(1)}%`;
+  return `${Math.max(0.1, Math.round(pct * 10) / 10)}%`;
+};
 
 const isOpeningFreezeActive = () => {
   return !!openingShield?.classList.contains('active') && openingShield.classList.contains('opening-freeze');
@@ -68,8 +76,28 @@ function setIslandVisible(visible) {
   island.setAttribute('aria-hidden', visible ? 'false' : 'true');
 }
 
+const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
+  if (_islMsgActive) return;
+  const zoomText = formatZoomPercent();
+  const changed = island.dataset.mode !== 'zoom' || _lastIslandZoomText !== zoomText || !island.classList.contains('visible');
+  islZoom.textContent = zoomText;
+  _lastIslandZoomText = zoomText;
+  island.dataset.mode = 'zoom';
+  island.setAttribute('role', 'button');
+  island.setAttribute('tabindex', '0');
+  island.setAttribute('aria-label', `Reset zoom (${zoomText})`);
+  island.title = 'Reset Zoom';
+  setIslandVisible(true);
+  if (changed) PillDebug.log('zoomIsland:shown', { reason, zoom, text: zoomText });
+};
+
 function showIslandForMessage(text) {
   islZoom.textContent = text;
+  island.dataset.mode = 'message';
+  island.setAttribute('role', 'button');
+  island.setAttribute('tabindex', '0');
+  island.setAttribute('aria-label', `${text}. Reset zoom`);
+  island.title = 'Reset Zoom';
   setIslandVisible(true);
   syncOpeningShieldPill(text);
 }
@@ -79,8 +107,8 @@ function hideIsland(reason = 'hide') {
   clearTimeout(_islMsgTimer);
   _islMsgActive = false;
   islZoom.textContent = '';
-  setIslandVisible(false);
   hideOpeningShieldPill();
+  syncIslandZoomDisplay(reason);
   PillDebug.log('hideIsland', { reason });
   return reason;
 }
@@ -151,6 +179,7 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
   }
   return 'shown';
 }
+syncIslandZoomDisplay('init');
 // ─── Offscreen buffer ─────────────────────────────────────────────────────────
 var _offscreen = document.createElement('canvas');
 var _offCtx    = _offscreen.getContext('2d');
@@ -476,6 +505,7 @@ function applyTransform(frameDbg = null) {
   if (typeof handleEyedropperViewportChanged === 'function') {
     handleEyedropperViewportChanged(_activeRenderSource || 'transform');
   }
+  syncIslandZoomDisplay(_activeRenderSource || 'transform');
   getLastApplyTransformMeta.last = {
     totalMeasuredMs: performance.now() - transformStart,
     drawMs,
@@ -632,6 +662,7 @@ function scheduleTransform(source = 'transform', inputEvent = null) {
   _frameInputAt = viewportEventTime(inputEvent);
   _frameInputSource = source;
   _needTransform = true;
+  syncIslandZoomDisplay(source);
   scheduleFrame(source);
 }
 

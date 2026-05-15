@@ -124,7 +124,6 @@ var MENU_COMMANDS = {
   'btn-add-text': () => { closeCtxMenu('command:add-text'); addText(ctxPos.x, ctxPos.y); },
   'btn-add-image': () => { closeCtxMenu('command:add-image'); pickAndInsertImages(ctxPos.x, ctxPos.y); },
   'btn-paste': () => { closeCtxMenu('command:paste'); pasteAtPos(ctxPos.x, ctxPos.y); },
-  'btn-reset-zoom': () => { closeCtxMenu('command:reset-zoom'); resetZoomToClosestObject(); },
   'btn-save': () => { closeCtxMenu('command:save'); saveBoard(); },
   'btn-save-as': () => { closeCtxMenu('command:save-as'); saveBoardAs(); },
   'btn-open': () => { closeCtxMenu('command:open'); openBoard(); },
@@ -230,11 +229,24 @@ function closestResetZoomObjectToViewportCenter() {
 function resetZoomToClosestObject() {
   const dbg = ViewportDebug.start('resetZoom', { panX, panY, zoom, objectCount: objects.length });
   const { object, targetType, distanceSq, center } = closestResetZoomObjectToViewportCenter();
-  if (!object) {
-    ViewportDebug.end(dbg, { skipped: 'no-reset-target' });
-    return false;
-  }
   const targetZoom = 1;
+  if (!object) {
+    BoardfishViewportState.setZoomPan(
+      targetZoom,
+      window.innerWidth / 2 - center.x * targetZoom,
+      window.innerHeight / 2 - center.y * targetZoom,
+    );
+    scheduleTransform('reset-zoom');
+    ViewportDebug.end(dbg, {
+      mode: 'empty-board-center',
+      centerX: center.x,
+      centerY: center.y,
+      panX,
+      panY,
+      zoom,
+    });
+    return true;
+  }
   const objectCenterX = object.x + object.w / 2;
   const objectCenterY = object.y + object.h / 2;
   BoardfishViewportState.setZoomPan(
@@ -257,6 +269,19 @@ function resetZoomToClosestObject() {
   });
   return true;
 }
+
+const resetZoomFromPill = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  closeOpenMenusExcept('', 'pill-reset-zoom');
+  resetZoomToClosestObject();
+};
+
+island?.addEventListener('click', resetZoomFromPill);
+island?.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  resetZoomFromPill(e);
+});
 
 function onMenuPointerDown(e) {
   const button = e.target.closest?.('.ctx-item');
@@ -366,8 +391,6 @@ function updateCtxMenuActions() {
   const canAddObject = BoardfishWebLimits.canAddObjects(1, { notifyUser: false });
   if (addTextBtn) addTextBtn.disabled = !canAddObject;
   if (addImageBtn) addImageBtn.disabled = !canAddObject;
-  if (resetZoomSep) resetZoomSep.style.display = show ? 'block' : 'none';
-  if (resetZoomBtn) resetZoomBtn.style.display = show ? '' : 'none';
   if (exportAllTextBtn) exportAllTextBtn.style.display = show && hasText ? '' : 'none';
   if (exportAllImageBtn) exportAllImageBtn.style.display = show && hasImages ? '' : 'none';
   if (exportAllSep) exportAllSep.style.display = show ? 'block' : 'none';

@@ -45,8 +45,6 @@
     <button class="ctx-item" id="btn-add-text"><span class="ctx-label">Add Text</span><span class="ctx-shortcut" data-shortcut="add-text"></span></button>
     <button class="ctx-item" id="btn-add-image"><span class="ctx-label">Add Images</span><span class="ctx-shortcut" data-shortcut="add-images"></span></button>
     <button class="ctx-item" id="btn-paste"><span class="ctx-label">Paste</span><span class="ctx-shortcut" data-shortcut="paste"></span></button>
-    <div class="ctx-sep" id="ctx-sep-reset-zoom"></div>
-    <button class="ctx-item" id="btn-reset-zoom"><span class="ctx-label">Reset Zoom</span><span class="ctx-shortcut" data-shortcut="reset-zoom"></span></button>
     <div class="ctx-sep"></div>
     <button class="ctx-item" id="btn-save"><span class="ctx-label">Save</span><span class="ctx-shortcut" data-shortcut="save"></span></button>
     <button class="ctx-item" id="btn-save-as"><span class="ctx-label">Save As</span><span class="ctx-shortcut" data-shortcut="save-as"></span></button>
@@ -127,7 +125,7 @@
   </div>
 
   <script type="application/json" id="boardfish-board-contract">
-{"format":"boardfish-container","versions":{"legacy":2,"container":3},"objectTypes":["image","text"],"viewport":{"minZoom":0.001,"maxZoom":1000}}
+{"format":"boardfish-container","versions":{"legacy":2,"container":3},"objectTypes":["image","text"],"viewport":{"minZoom":0.01,"maxZoom":100}}
   </script>
   <script type="module" src="js/main.web.dev.mjs"></script>
 </body>

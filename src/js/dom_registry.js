@@ -29,8 +29,6 @@
     addTextBtn: 'btn-add-text',
     addImageBtn: 'btn-add-image',
     pasteBtn: 'btn-paste',
-    resetZoomBtn: 'btn-reset-zoom',
-    resetZoomSep: 'ctx-sep-reset-zoom',
     exportAllImageBtn: 'btn-export-all-images',
     exportAllTextBtn: 'btn-export-all-text',
     exportAllSep: 'ctx-sep-export-all',

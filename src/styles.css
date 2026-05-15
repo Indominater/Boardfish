@@ -25,11 +25,12 @@
   --firefox-menu-shadow:
     0 8px 24px rgba(0,0,0,0.32),
     0 0 0 1px rgba(0,0,0,0.10);
-  --menu-shell-radius: 8px;
+  --ui-radius: 25px;
+  --menu-shell-radius: var(--ui-radius);
   --menu-shell-padding: 8px;
   --menu-item-height: 32px;
   --menu-item-padding: 0 8px;
-  --menu-item-radius: 4px;
+  --menu-item-radius: var(--ui-radius);
   --menu-item-font-size: 13px;
   --menu-item-letter-spacing: 0;
   --menu-item-line-height: 32px;
@@ -39,7 +40,7 @@
   --window-titlebar-height: 28px;
   --window-titlebar-z: 99991;
   --window-control-width: 48px;
-  --window-control-radius: 6px;
+  --window-control-radius: var(--ui-radius);
   --window-control-icon-size: 18px;
   --window-titlebar-bg: transparent;
   --window-control-bg: transparent;
@@ -333,7 +334,7 @@ body[data-theme="dark"] .window-control-close:active {
   width: 7px;
   height: 7px;
   background: var(--selection-handle-bg);
-  border-radius: 1px;
+  border-radius: var(--ui-radius);
   box-shadow: var(--selection-handle-shadow);
   pointer-events: all;
 }
@@ -577,8 +578,16 @@ body[data-theme="dark"] .window-control-close:active {
   display: none;
   align-items: center;
   z-index: 9000;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
+  overscroll-behavior: none;
+  touch-action: none;
   max-width: calc(100vw - 32px);
+}
+
+#island:focus,
+#island:focus-visible {
+  outline: none;
 }
 
 .opening-shield-pill {
@@ -594,18 +603,40 @@ body[data-theme="dark"] .window-control-close:active {
 }
 
 #island,
+.opening-shield-pill {
+  border-radius: var(--ui-radius);
+}
+
+#island,
 #island *,
 .opening-shield-pill,
 .opening-shield-pill * {
-  pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
 
+#island * {
+  pointer-events: none;
+}
+
+.opening-shield-pill,
+.opening-shield-pill * {
+  pointer-events: none;
+}
+
 #island.visible,
 .opening-shield-pill.visible {
   display: flex;
+}
+
+#island:hover #isl-zoom,
+#island:focus-visible #isl-zoom {
+  background: var(--firefox-menu-hover-bg);
+}
+
+#island:active #isl-zoom {
+  background: var(--menu-active-bg);
 }
 
 #isl-zoom {
@@ -620,7 +651,7 @@ body[data-theme="dark"] .window-control-close:active {
   line-height: 18px;
   color: var(--firefox-menu-text);
   background: transparent;
-  border-radius: var(--menu-item-radius);
+  border-radius: var(--ui-radius);
   letter-spacing: var(--menu-item-letter-spacing);
   -webkit-font-smoothing: antialiased;
   white-space: normal;
@@ -648,7 +679,7 @@ body[data-theme="dark"] .window-control-close:active {
   line-height: 18px;
   color: var(--firefox-menu-text);
   background: transparent;
-  border-radius: var(--menu-item-radius);
+  border-radius: var(--ui-radius);
   letter-spacing: var(--menu-item-letter-spacing);
   -webkit-font-smoothing: antialiased;
   white-space: normal;
@@ -702,7 +733,7 @@ body[data-theme="dark"] .window-control-close:active {
   position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
-  border-radius: 0;
+  border-radius: var(--ui-radius) var(--ui-radius) 0 0;
   border: 0;
   outline: 0;
   box-shadow: none;
