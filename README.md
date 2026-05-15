@@ -22,7 +22,7 @@ Desktop installers:
 ## Features
 
 - drag/drop or paste PNG/JPEG images and text
-- pan/zoom large image-heavy boards
+- smoothly pan/zoom boards with 500+ MB of images
 - preserve images losslessly
 - save everything locally as a portable `.bf` file
 - multi-select, resize, flip, rotate, duplicate, copy/paste
@@ -69,10 +69,6 @@ git clone https://github.com/Indominater/Boardfish.git
 cd Boardfish
 npm install
 ```
-
-## Privacy
-
-The hosted web app uses anonymous analytics to count visits and broad UI events. Boardfish does not send board contents, images, text, file names, clipboard data, or other user-created canvas data to analytics.
 
 ## License
 
