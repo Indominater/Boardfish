@@ -5,7 +5,7 @@ var LINE_H    = 24;
 var TEXT_PAD  = 4;
 var NEW_TEXT_EDIT_MIN_LINES = 3;
 const regular_text = 400;
-const bold_text = 400;
+const bold_text = 500;
 var FONT      = `${regular_text} ${FONT_SIZE}px 'Geist Sans', system-ui`;
 var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
 
