@@ -128,3 +128,45 @@ test('web release preview keeps debug tools off on localhost', () => {
   assert.equal(packageJson.scripts['web:dev'], 'node scripts/serve-web.mjs --dev');
   assert.equal(packageJson.scripts['web:build'], 'node scripts/build-runtime-assets.mjs web-preview');
 });
+
+test('release no-op debug shim covers web preview runtime hooks', () => {
+  const noopSource = readSource('src/js/runtime_debug_noop.js');
+  const manifestSource = readSource('src/js/startup_manifest.mjs');
+  const previewScripts = [
+    ...(manifestSource.match(/export const WEB_PREVIEW_SCRIPTS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1] || '')
+      .matchAll(/'([^']+)'/g),
+  ].map((match) => match[1]);
+  const runtimeSource = previewScripts
+    .map((script) => readSource(path.join('src/js', script)))
+    .join('\n');
+  const baseDebugApi = noopSource.match(/const createNoopDebugApi[\s\S]*?return \{([\s\S]*?)\s+\.\.\.extra,/)[1];
+  const baseHooks = new Set([
+    ...[...baseDebugApi.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*:/g)].map((match) => match[1]),
+    ...[...baseDebugApi.matchAll(/\bget\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)].map((match) => match[1]),
+  ]);
+  const debugCalls = [
+    ...runtimeSource.matchAll(/\b([A-Za-z][A-Za-z0-9]*Debug)\.([A-Za-z_$][A-Za-z0-9_$]*)/g),
+  ].map((match) => ({ api: match[1], hook: match[2] }));
+
+  const apiHooks = (api) => {
+    const hooks = new Set();
+    if (new RegExp(`const ${api} = createNoopDebugApi\\(`).test(noopSource)) {
+      for (const hook of baseHooks) hooks.add(hook);
+    }
+    const createMatch = noopSource.match(new RegExp(`const ${api} = createNoopDebugApi\\(\\{([\\s\\S]*?)\\}\\);`));
+    const objectMatch = noopSource.match(new RegExp(`const ${api} = \\{([\\s\\S]*?)\\n\\};`));
+    const body = createMatch?.[1] || objectMatch?.[1] || '';
+    for (const match of body.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*:/g)) hooks.add(match[1]);
+    for (const match of body.matchAll(/\bget\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)) hooks.add(match[1]);
+    return hooks;
+  };
+
+  const missing = debugCalls.filter(({ api, hook }) => !apiHooks(api).has(hook));
+  assert.deepEqual(
+    missing,
+    [],
+    `runtime_debug_noop.js is missing release hooks: ${
+      missing.map(({ api, hook }) => `${api}.${hook}`).join(', ')
+    }`,
+  );
+});

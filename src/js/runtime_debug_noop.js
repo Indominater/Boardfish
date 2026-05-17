@@ -128,6 +128,7 @@ const EyedropperDebug = createNoopDebugApi({
   _countPerf: noop,
   _logPreviewPresent: noop,
   _logReadbackFailure: noop,
+  _logReadoutUpdate: noop,
   _logSample: noop,
   _logSamplingEvent: noop,
   _logToggle: noop,
