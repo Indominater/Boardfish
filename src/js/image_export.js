@@ -3,7 +3,7 @@
 async function saveSelectedImage() {
   const dbg = ExportDebug.start('exportImage', { selectedCount: selectedIds.size });
   globalThis.BoardfishMotion?.applyActionAnimation?.('export-selected-image');
-  const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
+  const imageObjs = BoardfishExportUtils.selectedImageObjects();
   if (imageObjs.length !== 1) { ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length }); return; }
   ExportDebug.startMassive('exportImage', imageObjs);
   const obj = imageObjs[0];
@@ -370,9 +370,15 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
     return result;
   });
 
-  const keys = results.map(r => r?.key).filter(Boolean);
-  const tempKeys = [...new Set(results.map(r => r?.tempKey).filter(Boolean))];
-  const finalRenderedCount = results.filter(r => r?.rendered).length;
+  const keys = [];
+  const tempKeySet = new Set();
+  let finalRenderedCount = 0;
+  for (const result of results) {
+    if (result?.key) keys.push(result.key);
+    if (result?.tempKey) tempKeySet.add(result.tempKey);
+    if (result?.rendered) finalRenderedCount++;
+  }
+  const tempKeys = [...tempKeySet];
   ExportDebug.recordResolveDone({
     processed,
     imageCount: imageObjs.length,
@@ -603,7 +609,7 @@ async function saveSelectedImages() {
 async function exportAllImages() {
   globalThis.BoardfishMotion?.applyActionAnimation?.('export-all-images');
   deselectAll();
-  const imageObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'image');
+  const imageObjs = objects.filter((o) => o.type === 'image').sort((a, b) => b.z - a.z);
   return exportImageBatch({
     op: 'exportAllImages',
     mode: 'all',

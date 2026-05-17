@@ -225,8 +225,8 @@ const readTextClipboardForEditMenu = async () => {
   return '';
 };
 
-const writeTextClipboardFromEditMenu = async (text) => {
-  if (!text) return false;
+const writeTextClipboardFromEditMenu = async (text, { allowEmpty = false } = {}) => {
+  if (!text && !allowEmpty) return false;
   clearJsClipboard();
   try {
     await BoardfishClipboardIO.copyTextToClipboard(text);
@@ -237,14 +237,18 @@ const writeTextClipboardFromEditMenu = async (text) => {
   }
 };
 
-const replaceTextEditSelection = (text) => {
+const replaceTextEditSelection = (text, { immediateHistory = false } = {}) => {
   const selection = getTextEditSelectionState();
   if (!selection || !_editEl) return false;
   const normalizedText = normalizeTextContent(text);
+  if (immediateHistory) {
+    beginTextEditHistoryAction(editingId, selection, { splitPending: true });
+  }
   _editEl.setSelectionRange(selection.start, selection.end, selection.direction);
   _editEl.setRangeText(normalizedText, selection.start, selection.end, 'end');
   _caretVisible = true;
   _editEl.dispatchEvent(new Event('input', { bubbles: true }));
+  if (immediateHistory) flushEditHistoryCheckpoint();
   focusTextEditProxy();
   scheduleRender(true, false);
   return true;
@@ -252,7 +256,10 @@ const replaceTextEditSelection = (text) => {
 
 const copyTextEditSelection = async () => {
   const selection = getTextEditSelectionState();
-  const copied = await writeTextClipboardFromEditMenu(selectedTextForEditMenu());
+  const selectedText = selectedTextForEditMenu();
+  const copied = await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
+    allowEmpty: !!selectedText,
+  });
   if (copied) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
       textSelection: {
@@ -271,9 +278,9 @@ const cutTextEditSelection = async () => {
     focusTextEditProxy();
     return;
   }
-  if (await writeTextClipboardFromEditMenu(text)) {
+  if (await writeTextClipboardFromEditMenu(textSelectionForClipboard(text), { allowEmpty: true })) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-cut');
-    replaceTextEditSelection('');
+    replaceTextEditSelection('', { immediateHistory: true });
   }
   else focusTextEditProxy();
 };
@@ -284,7 +291,7 @@ const deleteTextEditSelection = () => {
     return;
   }
   globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-delete');
-  replaceTextEditSelection('');
+  replaceTextEditSelection('', { immediateHistory: true });
 };
 
 const pasteTextIntoEditSelection = async () => {
@@ -295,7 +302,7 @@ const pasteTextIntoEditSelection = async () => {
   }
   clearJsClipboard();
   globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-paste');
-  replaceTextEditSelection(text);
+  replaceTextEditSelection(text, { immediateHistory: true });
 };
 
 function menuCommandFromButton(button) {
@@ -392,6 +399,7 @@ function closestResetZoomObjectToViewportCenter() {
 
 function resetZoomToClosestObject() {
   const dbg = ViewportDebug.start('resetZoom', { panX, panY, zoom, objectCount: objects.length });
+  if (selectedIds.size || editingId) deselectAll();
   globalThis.BoardfishMotion?.applyActionAnimation?.('board-reset-zoom');
   const { object, targetType, distanceSq, center } = closestResetZoomObjectToViewportCenter();
   const targetZoom = 1;

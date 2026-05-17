@@ -3,9 +3,9 @@
 function addText(wx, wy, content = '', options = {}) {
   if (eyedropperEnabled) return;
   if (!BoardfishWebLimits.canAddObjects(1)) return;
-  const textBytes = typeof TextEncoder === 'function' ? new TextEncoder().encode(String(content || '')).length : String(content || '').length;
+  content = textForTextObjectPaste(content);
+  const textBytes = typeof TextEncoder === 'function' ? new TextEncoder().encode(content).length : content.length;
   if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1)) return;
-  content = normalizeTextContent(content);
   let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
   if (content) {
     const lines = content.split('\n');

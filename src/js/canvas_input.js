@@ -4,9 +4,9 @@ var _editEl = null;
 var _caretVisible = true;
 var _caretBlinkInterval = null;
 var _selChangeListener = null;
-var _editHistoryTimer = null;
-var _editHistoryLastContent = null;
+var _editHistoryTimer = null, _editHistoryLastContent = null;
 var EDIT_HISTORY_DEBOUNCE_MS = 500;
+var _textInputSelectionHistorySuppress = null, _editHistoryActionStartState = null;
 
 function cancelWheelPan() {
   // Wheel panning is applied immediately and coalesced by the shared render RAF.
@@ -273,6 +273,7 @@ function toggleAdditiveSelection(obj) {
 }
 
 function startTextSelectionDrag(e, obj, wp) {
+  if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
   const layout = getTextLayout(obj);
   const clickIdx = layoutHitTest(layout, wp.x, wp.y, obj);
   if (_editEl) {

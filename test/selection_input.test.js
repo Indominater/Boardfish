@@ -54,8 +54,12 @@ function loadSelectionInputHarness(objects, options = {}) {
       createElement: () => createElement(),
       addEventListener() {},
     },
-    clearTimeout() {},
-    setTimeout() { return 1; },
+    clearTimeout(id) { context.clearedTimeouts.push(id); },
+    setTimeout(handler, delay) {
+      context.timeoutHandler = handler;
+      context.timeoutDelay = delay;
+      return 1;
+    },
     Node: function Node() {},
     selOverlay: createElement('sel-overlay'),
     multiSelOverlay: createElement('multi-sel-overlay'),
@@ -74,6 +78,15 @@ function loadSelectionInputHarness(objects, options = {}) {
     panY: 0,
     dirty: [],
     history: [],
+    historyOptions: [],
+    _editEl: null,
+    _editHistoryTimer: null,
+    _editHistoryLastContent: null,
+    _editHistoryActionStartState: null,
+    clearedTimeouts: [],
+    timeoutDelay: null,
+    timeoutHandler: null,
+    EDIT_HISTORY_DEBOUNCE_MS: 500,
     renders: [],
     syncedTextIds: [],
     motionPulses: [],
@@ -104,7 +117,10 @@ function loadSelectionInputHarness(objects, options = {}) {
     },
     getTextMinLines: () => 1,
     markDirty(id) { context.dirty.push(id); },
-    pushHistory(reason) { context.history.push(reason); },
+    pushHistory(reason, historyOptions = {}) {
+      context.history.push(reason);
+      context.historyOptions.push(historyOptions);
+    },
     BoardfishMotion: {
       applyActionAnimation(_action, payload = {}, options = {}) {
         if (!payload.selection) return false;
@@ -122,7 +138,9 @@ function loadSelectionInputHarness(objects, options = {}) {
     `${source}\n` +
       'globalThis.beginSelectionHandleDrag = beginSelectionHandleDrag;\n' +
       'globalThis.proportionalCornerResizeSize = proportionalCornerResizeSize;\n' +
-      'globalThis.flushEditHistoryCheckpoint = flushEditHistoryCheckpoint;\n',
+      'globalThis.flushEditHistoryCheckpoint = flushEditHistoryCheckpoint;\n' +
+      'globalThis.beginTextEditHistoryAction = beginTextEditHistoryAction;\n' +
+      'globalThis.recordTextEditInputHistory = recordTextEditInputHistory;\n',
     context,
   );
   return context;
@@ -291,4 +309,57 @@ test('save flushes a pending text edit checkpoint into the saved baseline', () =
   assert.equal(context._editHistoryLastContent, 'after');
   assert.deepEqual(context.dirty, [text.id]);
   assert.deepEqual(context.history, ['text-edit-checkpoint']);
+});
+
+test('continuous text edits debounce into a 500ms checkpoint', () => {
+  const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'after' } };
+  const context = loadSelectionInputHarness([text]);
+  context.editingId = text.id;
+  context._editEl = {
+    value: 'before',
+    selectionStart: 3,
+    selectionEnd: 3,
+    selectionDirection: 'none',
+  };
+  context._editHistoryLastContent = 'before';
+  context.beginTextEditHistoryAction(text.id, {
+    start: 3,
+    end: 3,
+    direction: 'none',
+  });
+
+  assert.equal(context.recordTextEditInputHistory(text.id, {
+    inputType: 'deleteContentBackward',
+    hadSelection: false,
+  }), false);
+
+  assert.equal(context.timeoutDelay, 500);
+  assert.deepEqual(context.history, []);
+  context.timeoutHandler();
+  assert.equal(context._editHistoryTimer, null);
+  assert.deepEqual(context.history, ['text-edit-checkpoint']);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.historyOptions[0].beforeEditState)), {
+    id: text.id,
+    selectionStart: 3,
+    selectionEnd: 3,
+    selectionDirection: 'none',
+  });
+});
+
+test('selection replace and paste text edits commit without debounce', () => {
+  for (const meta of [
+    { inputType: 'deleteContentBackward', hadSelection: true },
+    { inputType: 'insertFromPaste', hadSelection: false },
+  ]) {
+    const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'after' } };
+    const context = loadSelectionInputHarness([text]);
+    context.editingId = text.id;
+    context._editHistoryTimer = 42;
+    context._editHistoryLastContent = 'before';
+
+    assert.equal(context.recordTextEditInputHistory(text.id, meta), true);
+    assert.equal(context._editHistoryTimer, null);
+    assert.equal(context.timeoutDelay, null);
+    assert.deepEqual(context.history, ['text-edit-checkpoint']);
+  }
 });

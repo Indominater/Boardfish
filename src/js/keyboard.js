@@ -183,7 +183,7 @@ document.addEventListener('keydown', (e) => {
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 's')) { e.preventDefault(); saveBoard(); return; }
 
-  if (hasExactCommandModifier(e) && (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0') && !editingId) {
+  if (hasExactCommandModifier(e) && (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0')) {
     e.preventDefault();
     resetZoomToClosestObject();
     return;
@@ -226,7 +226,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'e') && !editingId) {
-    const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
+    const imageObjs = BoardfishExportUtils.selectedImageObjects();
     if (imageObjs.length) {
       e.preventDefault();
       if (imageObjs.length === 1) saveSelectedImage();

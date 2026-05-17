@@ -6,7 +6,30 @@ const textEditActionFromInputType = (inputType = '') => {
   return 'text-edit-type';
 };
 
-function enterEdit(id) {
+const textEditNavigationKeys = new Set([
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+]);
+
+const textEditSelectionState = (proxy) => {
+  const valueLength = proxy?.value?.length ?? 0;
+  const start = Math.max(0, Math.min(proxy?.selectionStart ?? 0, valueLength));
+  const end = Math.max(0, Math.min(proxy?.selectionEnd ?? start, valueLength));
+  return {
+    start,
+    end,
+    direction: proxy?.selectionDirection || 'none',
+    hasSelection: start !== end,
+  };
+};
+
+function enterEdit(id, { history = true } = {}) {
   if (editingId === id) return;
   if (editingId) exitEdit();
   editingId = id;
@@ -27,6 +50,7 @@ function enterEdit(id) {
   _editHistoryLastContent = obj.data.content;
   clearTimeout(_editHistoryTimer);
   _editHistoryTimer = null;
+  _editHistoryActionStartState = null;
 
   const proxy = document.createElement('textarea');
   proxy.id = 'editor-proxy';
@@ -35,7 +59,19 @@ function enterEdit(id) {
   document.body.appendChild(proxy);
   _editEl = proxy;
 
+  let pendingInputState = null;
+  proxy.addEventListener('beforeinput', (event) => {
+    pendingInputState = {
+      ...textEditSelectionState(proxy),
+      inputType: event?.inputType || '',
+    };
+    beginTextEditHistoryAction(id, pendingInputState, {
+      splitPending: shouldCommitTextEditInputImmediately(pendingInputState.inputType, pendingInputState.hasSelection),
+    });
+  });
   proxy.addEventListener('input', (event) => {
+    const inputState = pendingInputState || textEditSelectionState(proxy);
+    pendingInputState = null;
     globalThis.BoardfishMotion?.applyActionAnimation?.(textEditActionFromInputType(event?.inputType));
     markDirty(id);
     obj.data.content = normalizeTextContent(proxy.value);
@@ -48,8 +84,19 @@ function enterEdit(id) {
     }
     delete obj._layoutCache;
     const heightChanged = syncTextAutoHeight(obj, obj._editMinLines || 1);
-    scheduleEditHistoryCheckpoint(id);
+    const nextSelectionState = textEditSelectionState(proxy);
+    _textInputSelectionHistorySuppress = {
+      start: nextSelectionState.start,
+      end: nextSelectionState.end,
+    };
+    recordTextEditInputHistory(id, {
+      inputType: event?.inputType || inputState.inputType || '',
+      hadSelection: !!inputState.hasSelection,
+    });
     scheduleRender(true, heightChanged);
+  });
+  proxy.addEventListener('blur', () => {
+    flushEditHistoryCheckpoint();
   });
   proxy.addEventListener('keydown', (e) => {
     _caretVisible = true;
@@ -70,6 +117,7 @@ function enterEdit(id) {
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
+      flushEditHistoryCheckpoint();
       proxy.setSelectionRange(0, proxy.value.length, 'none');
       TextSelDebug._logSelection('select-all', proxy);
       globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-select-all');
@@ -82,6 +130,7 @@ function enterEdit(id) {
     // and compute line navigation from the canvas layout instead.
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
+      flushEditHistoryCheckpoint();
       const layout = getTextLayout(obj);
       if (!layout.length) { scheduleRender(true, false); return; }
 
@@ -137,6 +186,7 @@ function enterEdit(id) {
       return;
     }
 
+    if (textEditNavigationKeys.has(e.key)) flushEditHistoryCheckpoint();
     scheduleRender(true, false);
   });
 
@@ -146,6 +196,16 @@ function enterEdit(id) {
     const s = proxy.selectionStart, e = proxy.selectionEnd;
     if (s === _prevSelStart && e === _prevSelEnd && _caretVisible) return;
     _prevSelStart = s; _prevSelEnd = e;
+    if (
+      _textInputSelectionHistorySuppress &&
+      _textInputSelectionHistorySuppress.start === s &&
+      _textInputSelectionHistorySuppress.end === e
+    ) {
+      _textInputSelectionHistorySuppress = null;
+    } else {
+      _textInputSelectionHistorySuppress = null;
+      flushEditHistoryCheckpoint();
+    }
     TextSelDebug._logSelection('selectionchange', proxy);
     _caretVisible = true;
     globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
@@ -167,6 +227,7 @@ function enterEdit(id) {
 
   proxy.focus({ preventScroll: true });
   proxy.setSelectionRange(proxy.value.length, proxy.value.length);
+  if (history && typeof pushHistory === 'function') pushHistory('text-edit-enter');
   scheduleRender(true, true);
 }
 
@@ -182,6 +243,7 @@ function exitEdit() {
   _caretBlinkInterval = null;
   clearTimeout(_editHistoryTimer);
   _editHistoryTimer = null;
+  _editHistoryActionStartState = null;
   if (_selChangeListener) {
     document.removeEventListener('selectionchange', _selChangeListener);
     _selChangeListener = null;
@@ -199,6 +261,7 @@ function exitEdit() {
       delete obj._editStartContent;
       delete obj._editMinLines;
       _editHistoryLastContent = null;
+      _editHistoryActionStartState = null;
       scheduleRender(true, true);
       pushHistory('delete-empty-text');
       return;
@@ -215,6 +278,7 @@ function exitEdit() {
   }
 
   _editHistoryLastContent = null;
+  _editHistoryActionStartState = null;
   scheduleRender(true, true);
   window.getSelection()?.removeAllRanges();
 }

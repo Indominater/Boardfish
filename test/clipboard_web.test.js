@@ -130,6 +130,14 @@ function loadClipboardExportHarness() {
     normalizeTextContent(value) {
       return String(value ?? '').replace(/\r\n?/g, '\n');
     },
+    textForClipboard(value) {
+      const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
+      let first = 0;
+      let last = lines.length - 1;
+      while (first <= last && !/\S/.test(lines[first])) first++;
+      while (last >= first && !/\S/.test(lines[last])) last--;
+      return first <= last ? lines.slice(first, last + 1).join('\n') : '';
+    },
     resizeCanvas() {},
     scheduleRender(board, overlay, sourceName) {
       calls.renders.push({ board, overlay, source: sourceName });
@@ -142,6 +150,179 @@ function loadClipboardExportHarness() {
   vm.runInContext(`${source}\nglobalThis.copySelected = copySelected;\n`, context, {
     filename: 'clipboard_export_init.js',
   });
+  return context;
+}
+
+function loadClipboardPasteObjectsHarness() {
+  const source = fs.readFileSync(path.join(root, 'src/js/clipboard_export_init.js'), 'utf8');
+  const sourceTextObject = {
+    id: 'text-source',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 128,
+    z: 1,
+    data: { content: '   \n\t\nfirst line\nsecond line\n   \n\t' },
+  };
+  const calls = {
+    added: [],
+    histories: [],
+    selections: [],
+    synced: [],
+  };
+  const context = {
+    console,
+    Promise,
+    TextEncoder,
+    document: {
+      addEventListener() {},
+      visibilityState: 'visible',
+    },
+    window: {
+      addEventListener() {},
+    },
+    performance: { now: () => 0 },
+    calls,
+    objects: [],
+    jsClipboard: {
+      type: 'objects',
+      objects: [sourceTextObject],
+      imageData: {},
+    },
+    _pasteInProgress: false,
+    eyedropperEnabled: false,
+    historyIndex: 0,
+    zCounter: 1,
+    BoardfishClipboardIO: {
+      describeClipboardData() { return {}; },
+      readBoardfishClipboardTokenFromEvent() { return ''; },
+    },
+    BoardfishEditorState: {
+      addObject(obj) {
+        context.objects.push(obj);
+        calls.added.push(obj);
+      },
+      setSelection(ids, options = {}) {
+        calls.selections.push({ ids, options });
+      },
+    },
+    BoardfishImageStore: {
+      hasSource() { return true; },
+      setSource() {},
+    },
+    BoardfishMotion: {
+      applyActionAnimation() {},
+    },
+    BoardfishWebLimits: {
+      canAddObjects() { return true; },
+      canAcceptAdditionalContentBytes() { return true; },
+      imageSourceByteLength() { return 0; },
+    },
+    ClipDebug: {
+      end() {},
+      start() { return {}; },
+      step() {},
+    },
+    cloneObjects(list) {
+      return JSON.parse(JSON.stringify(list));
+    },
+    hasTauri() {
+      return false;
+    },
+    jsClipboardStillCurrent() {
+      return Promise.resolve(true);
+    },
+    newId() {
+      return 'text-pasted';
+    },
+    resizeCanvas() {},
+    scheduleRender() {},
+    pushHistory(reason) {
+      calls.histories.push(reason);
+    },
+    syncTextAutoHeight(obj) {
+      calls.synced.push(obj.id);
+      obj.h = 56;
+      return true;
+    },
+    textForTextObjectPaste(value) {
+      const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
+      let first = 0;
+      let last = lines.length - 1;
+      while (first <= last && !/\S/.test(lines[first])) first++;
+      while (last >= first && !/\S/.test(lines[last])) last--;
+      return first <= last ? lines.slice(first, last + 1).join('\n') : '';
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(`${source}\nglobalThis.pasteAtPos = pasteAtPos;\n`, context, {
+    filename: 'clipboard_export_init.js',
+  });
+  return { context, sourceTextObject };
+}
+
+function loadTextEditCopyHarness(value) {
+  const source = fs.readFileSync(path.join(root, 'src/js/context_menu.js'), 'utf8');
+  const start = source.indexOf('const getTextEditSelectionState');
+  const end = source.indexOf('const cutTextEditSelection', start);
+  assert.ok(start >= 0 && end > start, 'text edit copy helpers are missing');
+  const calls = {
+    copiedTexts: [],
+    jello: [],
+    renders: [],
+  };
+  const editProxy = {
+    value,
+    selectionStart: 0,
+    selectionEnd: value.length,
+    selectionDirection: 'none',
+    focus() {},
+  };
+  const context = {
+    console,
+    editingId: 'text-1',
+    _editEl: editProxy,
+    calls,
+    BoardfishClipboardIO: {
+      copyTextToClipboard(text) {
+        calls.copiedTexts.push(text);
+        return Promise.resolve();
+      },
+    },
+    BoardfishMotion: {
+      applyActionAnimation(_action, payload = {}) {
+        if (payload.textSelection) calls.jello.push({ ...payload.textSelection });
+      },
+    },
+    MenuDebug: { log() {} },
+    clearJsClipboard() {},
+    scheduleRender(board, overlay, sourceName) {
+      calls.renders.push({ board, overlay, source: sourceName });
+    },
+    textForClipboard(text) {
+      const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
+      let last = lines.length - 1;
+      while (last >= 0 && !/\S/.test(lines[last])) last--;
+      return last >= 0 ? lines.slice(0, last + 1).join('\n') : '';
+    },
+    textSelectionForClipboard(text) {
+      const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
+      let first = 0;
+      let last = lines.length - 1;
+      while (first <= last && !/\S/.test(lines[first])) first++;
+      while (last >= first && !/\S/.test(lines[last])) last--;
+      return first <= last ? lines.slice(first, last + 1).join('\n') : '';
+    },
+  };
+
+  vm.createContext(context);
+  vm.runInContext(
+    `${source.slice(start, end)}\n` +
+      'globalThis.copyTextEditSelection = copyTextEditSelection;\n',
+    context,
+    { filename: 'context_menu_text_copy.js' },
+  );
   return context;
 }
 
@@ -254,4 +435,42 @@ test('copying a selected text object jiggles the whole text box like other objec
     source: 'copy-text-object',
   }]);
   assert.deepEqual(context.calls.copiedTexts, [context.textObject.data.content]);
+});
+
+test('copying a text object omits whitespace-only lines at plain clipboard edges', async () => {
+  const context = loadClipboardExportHarness();
+  context.textObject.data.content = '   \n\t\n  first line  \n second line\t \n   \n\t';
+
+  await context.copySelected();
+
+  assert.deepEqual(context.calls.copiedTexts, ['  first line  \n second line\t ']);
+});
+
+test('copying highlighted text omits whitespace-only lines at selection edges', async () => {
+  const context = loadTextEditCopyHarness('   \n\t\n  first line  \n second line\t \n   \n\t');
+
+  await context.copyTextEditSelection();
+
+  assert.deepEqual(context.calls.copiedTexts, ['  first line  \n second line\t ']);
+  assert.deepEqual(context.calls.jello, [{
+    id: 'text-1',
+    start: 0,
+    end: context._editEl.value.length,
+    direction: 'none',
+    hasSelection: true,
+  }]);
+});
+
+test('pasting Boardfish text objects strips whitespace-only edge lines from the pasted clone', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness();
+
+  await context.pasteAtPos(300, 200, {
+    getData() { return ''; },
+  });
+
+  assert.equal(context.calls.added.length, 1);
+  assert.equal(context.calls.added[0].data.content, 'first line\nsecond line');
+  assert.equal(context.calls.added[0].h, 56);
+  assert.equal(sourceTextObject.data.content, '   \n\t\nfirst line\nsecond line\n   \n\t');
+  assert.deepEqual(context.calls.histories, ['paste-objects']);
 });

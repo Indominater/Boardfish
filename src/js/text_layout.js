@@ -5,13 +5,25 @@ var LINE_H    = 24;
 var TEXT_PAD  = 4;
 var NEW_TEXT_EDIT_MIN_LINES = 3;
 const regular_text = 400;
-const bold_text = 500;
 var FONT      = `${regular_text} ${FONT_SIZE}px 'Geist Sans', system-ui`;
 var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
 
 function normalizeTextContent(value) {
   return String(value ?? '').replace(/\r\n?/g, '\n');
 }
+
+const trimWhitespaceOnlyEdgeLines = (value) => {
+  const lines = normalizeTextContent(value).split('\n');
+  let first = 0;
+  let last = lines.length - 1;
+  while (first <= last && !/\S/.test(lines[first])) first++;
+  while (last >= first && !/\S/.test(lines[last])) last--;
+  return first <= last ? lines.slice(first, last + 1).join('\n') : '';
+};
+
+const textForClipboard = (value) => trimWhitespaceOnlyEdgeLines(value);
+const textSelectionForClipboard = (value) => trimWhitespaceOnlyEdgeLines(value);
+const textForTextObjectPaste = (value) => trimWhitespaceOnlyEdgeLines(value);
 
 function isTextContentEmpty(value) {
   return normalizeTextContent(value).replace(/[\u200B-\u200D\uFEFF]/g, '').trim() === '';

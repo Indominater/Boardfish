@@ -264,25 +264,27 @@ fn decoded_image_bytes(decoded: &DecodedImageSource) -> usize {
     decoded.rgba.len()
 }
 
-fn decoded_cache_entry_count(cache: &ImageSourceCacheInner) -> usize {
-    cache
-        .entries
-        .values()
-        .filter(|entry| entry.decoded.is_some())
-        .count()
-}
-
 fn prune_decoded_cache_locked(cache: &mut ImageSourceCacheInner) {
-    while cache.decoded_bytes > DECODED_IMAGE_CACHE_MAX_BYTES
-        || decoded_cache_entry_count(cache) > DECODED_IMAGE_CACHE_MAX_ENTRIES
-    {
-        let Some(oldest_key) = cache
+    loop {
+        let mut decoded_count = 0usize;
+        let oldest_key = cache
             .entries
             .iter()
-            .filter(|(_, entry)| entry.decoded.is_some())
-            .min_by_key(|(_, entry)| entry.decoded_last_used)
-            .map(|(key, _)| key.clone())
-        else {
+            .filter_map(|(key, entry)| {
+                entry.decoded.as_ref()?;
+                decoded_count += 1;
+                Some((key, entry.decoded_last_used))
+            })
+            .min_by_key(|(_, last_used)| *last_used)
+            .map(|(key, _)| key.clone());
+
+        if cache.decoded_bytes <= DECODED_IMAGE_CACHE_MAX_BYTES
+            && decoded_count <= DECODED_IMAGE_CACHE_MAX_ENTRIES
+        {
+            break;
+        }
+
+        let Some(oldest_key) = oldest_key else {
             cache.decoded_bytes = 0;
             break;
         };

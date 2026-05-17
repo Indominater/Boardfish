@@ -78,7 +78,9 @@ function loadKeyboardHarness() {
     openBoard() {},
     saveBoardAs() {},
     saveBoard() {},
-    resetZoomToClosestObject() {},
+    resetZoomToClosestObject() {
+      context.calls.push(['reset-zoom']);
+    },
     isBoardInputBlocked: () => false,
     selectAllObjects() {},
     hasTauri: () => false,
@@ -186,4 +188,18 @@ test('command T no longer adds text', () => {
 
   assert.equal(event.defaultPrevented, false);
   assert.equal(harness.context.calls.some((call) => call[0] === 'add-text'), false);
+});
+
+test('command 0 resets zoom while editing text', () => {
+  const harness = loadKeyboardHarness();
+  harness.context.editingId = 'text-1';
+
+  const event = harness.documentEvent('keydown', {
+    key: '0',
+    code: 'Digit0',
+    ctrlKey: true,
+  });
+
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(harness.context.calls.at(-1), ['reset-zoom']);
 });

@@ -24,6 +24,7 @@ const HISTORY_NO_REPLAY_REASONS = new Set([
   'add-text',
   'delete-empty-text',
   'text-edit-checkpoint',
+  'text-edit-enter',
   'text-height-change',
 ]);
 
@@ -227,7 +228,7 @@ function snapshot() {
 // Delta push: only deep-clones objects that changed since last snapshot.
 // Unchanged objects share the previous snapshot's reference (safe since
 // restoreSnapshot always deep-clones before mutating).
-function pushHistory(reason = '') {
+function pushHistory(reason = '', options = {}) {
   const dbg = HistoryDebug.start('pushHistory', {
     reason,
     objectCount: objects.length,
@@ -261,6 +262,7 @@ function pushHistory(reason = '') {
     motion: historyMotionForReason(reason),
     objects: entry,
     editState,
+    beforeEditState: options.beforeEditState || null,
   });
   historyIndex++;
   trimHistory();
@@ -274,9 +276,11 @@ function pushHistory(reason = '') {
 function restoreSnapshot(s, {
   historyMotion = null,
   selectionPulseOptions = { includeText: false },
+  editStateOverride = undefined,
 } = {}) {
   const snapshotObjects = Array.isArray(s) ? s : (s?.objects || []);
-  const editState = Array.isArray(s) ? null : (s?.editState || null);
+  const snapshotEditState = Array.isArray(s) ? null : (s?.editState || null);
+  const editState = editStateOverride === undefined ? snapshotEditState : editStateOverride;
   const hadEditing = !!editingId;
   const motionTransition = historyRestoreMotionTransition(objects, snapshotObjects);
   const dbg = HistoryDebug.start('restoreSnapshot', {
@@ -294,6 +298,7 @@ function restoreSnapshot(s, {
     clearTimeout(_editHistoryTimer);
     _editHistoryTimer = null;
     _editHistoryLastContent = null;
+    _editHistoryActionStartState = null;
     if (_selChangeListener) {
       document.removeEventListener('selectionchange', _selChangeListener);
       _selChangeListener = null;
@@ -302,6 +307,7 @@ function restoreSnapshot(s, {
     editingId = null;
     _editEl = null;
   }
+  _editHistoryActionStartState = null;
   HistoryDebug.step(dbg, 'clear-editing', { hadEditing });
   const prevSelectedIds = new Set(selectedIds);
   BoardfishEditorState.replaceBoardObjects(cloneObjects(snapshotObjects));
@@ -332,7 +338,7 @@ function restoreSnapshot(s, {
   }
 
   BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
-  enterEdit(obj.id);
+  enterEdit(obj.id, { history: false });
 
   if (!_editEl) return;
   const max = _editEl.value.length;
@@ -358,21 +364,27 @@ function captureEditState() {
 }
 
 function undo() {
+  if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
   if (historyIndex <= 0) return;
   globalThis.BoardfishMotion?.applyActionAnimation?.('history-undo');
   HistoryDebug.count('undo');
   const dbg = HistoryDebug.start('undo', { historyLength: boardHistory.length, historyIndex });
   const actionEntry = boardHistory[historyIndex];
   historyIndex--;
+  const undoEditState = !Array.isArray(actionEntry) && actionEntry?.reason === 'text-edit-checkpoint'
+    ? actionEntry.beforeEditState || undefined
+    : undefined;
   restoreSnapshot(boardHistory[historyIndex], {
     historyMotion: historyMotionForEntry(actionEntry),
     selectionPulseOptions: historySelectionPulseOptions(actionEntry),
+    editStateOverride: undoEditState,
   });
   updateTitle();
   HistoryDebug.end(dbg, { historyLength: boardHistory.length, historyIndex });
 }
 
 function redo() {
+  if (typeof flushEditHistoryCheckpoint === 'function' && flushEditHistoryCheckpoint()) return;
   if (historyIndex >= boardHistory.length - 1) return;
   globalThis.BoardfishMotion?.applyActionAnimation?.('history-redo');
   HistoryDebug.count('redo');

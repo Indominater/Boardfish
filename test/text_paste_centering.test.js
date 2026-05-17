@@ -43,6 +43,14 @@ function loadAddTextHarness({ syncedHeight = 168 } = {}) {
     normalizeTextContent(value) {
       return String(value ?? '').replace(/\r\n?/g, '\n');
     },
+    textForTextObjectPaste(value) {
+      const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
+      let first = 0;
+      let last = lines.length - 1;
+      while (first <= last && !/\S/.test(lines[first])) first++;
+      while (last >= first && !/\S/.test(lines[last])) last--;
+      return first <= last ? lines.slice(first, last + 1).join('\n') : '';
+    },
     newId() {
       return `obj-${idCounter++}`;
     },
@@ -142,6 +150,16 @@ test('addText keeps top-left placement by default', () => {
   assert.equal(obj.x, 24);
   assert.equal(obj.y, 48);
   assert.deepEqual(context.editedIds, [obj.id]);
+});
+
+test('addText strips whitespace-only lines at pasted text edges', () => {
+  const context = loadAddTextHarness();
+
+  context.addText(24, 48, '  \n\t\nfirst line  \nsecond line\n   \n\t');
+
+  const obj = context.added[0];
+  assert.equal(obj.data.content, 'first line  \nsecond line');
+  assert.deepEqual(context.editedIds, []);
 });
 
 test('outside clipboard text is pasted at the same center point as canvas objects', async () => {

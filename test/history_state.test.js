@@ -41,6 +41,7 @@ function loadHistoryHarness() {
     _caretBlinkInterval: null,
     _editHistoryTimer: null,
     _editHistoryLastContent: null,
+    _editHistoryActionStartState: null,
     _selChangeListener: null,
     _editEl: null,
     pulses,
@@ -139,6 +140,21 @@ function loadHistoryHarness() {
       return null;
     },
     scheduleRender() {},
+    enterEdit(id) {
+      context.editingId = id;
+      context._editEl = {
+        value: context.objectsMap.get(id)?.data?.content || '',
+        selectionStart: 0,
+        selectionEnd: 0,
+        selectionDirection: 'none',
+        remove() {},
+        setSelectionRange(start, end, direction = 'none') {
+          this.selectionStart = start;
+          this.selectionEnd = end;
+          this.selectionDirection = direction;
+        },
+      };
+    },
     updateTitle() {},
   };
 
@@ -278,6 +294,107 @@ test('undo delete jiggles restored images while redo delete stays inert', () => 
     { ids: ['image-1'], options: { includeText: false } },
   ]);
   assert.deepEqual(context.jelloRemoved, []);
+});
+
+test('undo flushes a pending text edit checkpoint before restoring it', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, [
+    { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'before' } },
+  ], ['text-1']);
+  context.snapshot();
+
+  const text = context.objectsMap.get('text-1');
+  text.data.content = 'after';
+  context.editingId = text.id;
+  context._editEl = {
+    selectionStart: 5,
+    selectionEnd: 5,
+    selectionDirection: 'none',
+    remove() {},
+  };
+  context._editHistoryLastContent = 'before';
+  context.flushEditHistoryCheckpoint = () => {
+    context.markDirty(text.id);
+    context.pushHistory('text-edit-checkpoint');
+    return true;
+  };
+
+  context.undo();
+
+  assert.equal(context.historyIndex, 0);
+  assert.equal(context.objectsMap.get('text-1').data.content, 'before');
+});
+
+test('undoing first text run restores the edit-entry snapshot and stays editing', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, [
+    { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'before' } },
+  ], ['text-1']);
+  context.snapshot();
+
+  context.editingId = 'text-1';
+  context._editEl = {
+    selectionStart: 6,
+    selectionEnd: 6,
+    selectionDirection: 'none',
+    remove() {},
+  };
+  context.pushHistory('text-edit-enter');
+
+  context.objectsMap.get('text-1').data.content = 'before after';
+  context.markDirty('text-1');
+  context.pushHistory('text-edit-checkpoint');
+
+  context.undo();
+
+  assert.equal(context.objectsMap.get('text-1').data.content, 'before');
+  assert.equal(context.editingId, 'text-1');
+  assert.equal(context._editEl.selectionStart, 6);
+  assert.equal(context._editEl.selectionEnd, 6);
+});
+
+test('undoing a text run restores the caret saved before the run started', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, [
+    { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'one two three' } },
+  ], ['text-1']);
+  context.snapshot();
+
+  context.editingId = 'text-1';
+  context._editEl = {
+    selectionStart: 13,
+    selectionEnd: 13,
+    selectionDirection: 'none',
+    remove() {},
+  };
+  context.pushHistory('text-edit-enter');
+
+  const text = context.objectsMap.get('text-1');
+  text.data.content = 'one two INSERT three';
+  context._editEl.selectionStart = 14;
+  context._editEl.selectionEnd = 14;
+  context.markDirty('text-1');
+  context.pushHistory('text-edit-checkpoint', {
+    beforeEditState: {
+      id: 'text-1',
+      selectionStart: 8,
+      selectionEnd: 8,
+      selectionDirection: 'none',
+    },
+  });
+
+  context.undo();
+
+  assert.equal(context.objectsMap.get('text-1').data.content, 'one two three');
+  assert.equal(context.editingId, 'text-1');
+  assert.equal(context._editEl.selectionStart, 8);
+  assert.equal(context._editEl.selectionEnd, 8);
+
+  context.redo();
+
+  assert.equal(context.objectsMap.get('text-1').data.content, 'one two INSERT three');
+  assert.equal(context._editEl.selectionStart, 14);
+  assert.equal(context._editEl.selectionEnd, 14);
 });
 
 test('undo image add removes without animation and redo jiggles images back', () => {

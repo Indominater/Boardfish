@@ -440,30 +440,84 @@ function hideMenus() {
 
 // ─── Edit mode ────────────────────────────────────────────────────────────────
 
+const normalizeTextEditHistoryState = (id, state = null) => {
+  const targetId = id || state?.id || editingId;
+  if (!targetId) return null;
+  const valueLength = _editEl?.value?.length ?? objectsMap.get(targetId)?.data?.content?.length ?? 0;
+  const start = Math.max(0, Math.min(state?.start ?? state?.selectionStart ?? _editEl?.selectionStart ?? 0, valueLength));
+  const end = Math.max(0, Math.min(state?.end ?? state?.selectionEnd ?? start, valueLength));
+  return {
+    id: targetId,
+    selectionStart: start,
+    selectionEnd: end,
+    selectionDirection: state?.direction || state?.selectionDirection || _editEl?.selectionDirection || 'none',
+  };
+};
+
+const beginTextEditHistoryAction = (id = editingId, state = null, { splitPending = false } = {}) => {
+  if (!id) return null;
+  if (splitPending && _editHistoryTimer) flushEditHistoryCheckpoint();
+  if (!_editHistoryActionStartState || _editHistoryActionStartState.id !== id) {
+    _editHistoryActionStartState = normalizeTextEditHistoryState(id, state);
+  }
+  return _editHistoryActionStartState;
+};
+
+const consumeTextEditHistoryActionStartState = (id) => {
+  const state = _editHistoryActionStartState?.id === id ? _editHistoryActionStartState : null;
+  _editHistoryActionStartState = null;
+  return state;
+};
+
 function pushEditHistoryIfChanged(id) {
   const obj = objectsMap.get(id);
   if (!obj) return false;
   if (_editHistoryLastContent === null) _editHistoryLastContent = obj.data.content;
   if (obj.data.content === _editHistoryLastContent) return false;
   markDirty(id);
-  pushHistory('text-edit-checkpoint');
+  pushHistory('text-edit-checkpoint', {
+    beforeEditState: consumeTextEditHistoryActionStartState(id),
+  });
   _editHistoryLastContent = obj.data.content;
   return true;
 }
 
-function flushEditHistoryCheckpoint() {
+const clearEditHistoryCheckpointTimer = () => {
   if (_editHistoryTimer) {
     clearTimeout(_editHistoryTimer);
     _editHistoryTimer = null;
   }
+};
+
+function flushEditHistoryCheckpoint() {
+  clearEditHistoryCheckpointTimer();
+  if (typeof _textInputSelectionHistorySuppress !== 'undefined') _textInputSelectionHistorySuppress = null;
   if (!editingId) return false;
   return pushEditHistoryIfChanged(editingId);
 }
 
 function scheduleEditHistoryCheckpoint(id) {
-  clearTimeout(_editHistoryTimer);
+  clearEditHistoryCheckpointTimer();
   _editHistoryTimer = setTimeout(() => {
     _editHistoryTimer = null;
     pushEditHistoryIfChanged(id);
   }, EDIT_HISTORY_DEBOUNCE_MS);
 }
+
+const shouldCommitTextEditInputImmediately = (inputType = '', hadSelection = false) => {
+  const value = String(inputType || '').toLowerCase();
+  return !!hadSelection || value.includes('paste') || value.includes('cut');
+};
+
+const recordTextEditInputHistory = (id, {
+  inputType = '',
+  hadSelection = false,
+  immediate = false,
+} = {}) => {
+  if (immediate || shouldCommitTextEditInputImmediately(inputType, hadSelection)) {
+    clearEditHistoryCheckpointTimer();
+    return pushEditHistoryIfChanged(id);
+  }
+  scheduleEditHistoryCheckpoint(id);
+  return false;
+};

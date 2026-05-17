@@ -127,7 +127,7 @@ pub(crate) async fn read_board(
 
     {
         let cache_start = std::time::Instant::now();
-        state.replace_all(result.sources.drain(..).collect())?;
+        state.replace_all(std::mem::take(&mut result.sources))?;
         result.stats.cache_insert_ms = cache_start.elapsed().as_secs_f64() * 1000.0;
     }
 

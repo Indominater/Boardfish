@@ -106,7 +106,7 @@ function loadCanvasWheelHarness() {
   return context;
 }
 
-function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1 } = {}) {
+function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1, selectedIds = [], editingId = null } = {}) {
   const source = readSource('src/js/context_menu.js');
   const match = source.match(/function pointToObjectCenterDistanceSq\(point, obj\) \{[\s\S]*?\r?\n\r?\nconst resetZoomFromPill/);
   assert.ok(match, 'reset zoom functions are missing');
@@ -116,7 +116,10 @@ function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1 } = {
     panX,
     panY,
     zoom,
+    selectedIds: new Set(selectedIds),
+    editingId,
     transforms: [],
+    deselectCalls: 0,
     debugEnd: null,
     window: { innerWidth: 1000, innerHeight: 800 },
     toWorld(sx, sy) {
@@ -138,6 +141,11 @@ function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1 } = {
     },
     scheduleTransform(sourceName) {
       context.transforms.push(sourceName);
+    },
+    deselectAll() {
+      context.deselectCalls++;
+      context.selectedIds.clear();
+      context.editingId = null;
     },
   };
 
@@ -280,4 +288,25 @@ test('reset zoom on an empty board zooms to 100 percent around the current cente
   assert.equal(context.toWorld(500, 400).x, 150);
   assert.equal(context.toWorld(500, 400).y, 150);
   assert.equal(context.debugEnd.mode, 'empty-board-center');
+});
+
+test('reset zoom clears selected and edited objects before zooming', () => {
+  const image = { id: 'img-1', type: 'image', x: 600, y: 300, w: 100, h: 100 };
+  const text = { id: 'text-1', type: 'text', x: 100, y: 100, w: 200, h: 80 };
+  const context = loadResetZoomHarness({
+    objects: [image, text],
+    selectedIds: [image.id, text.id],
+    editingId: text.id,
+    panX: 0,
+    panY: 0,
+    zoom: 2,
+  });
+
+  assert.equal(context.resetZoomToClosestObject(), true);
+
+  assert.equal(context.deselectCalls, 1);
+  assert.equal(context.selectedIds.size, 0);
+  assert.equal(context.editingId, null);
+  assert.equal(context.zoom, 1);
+  assert.deepEqual(context.transforms, ['reset-zoom']);
 });

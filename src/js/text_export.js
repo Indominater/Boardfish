@@ -3,7 +3,7 @@
 async function exportAllText() {
   const dbg = ExportDebug.start('exportAllText', { objectCount: objects.length });
   globalThis.BoardfishMotion?.applyActionAnimation?.('export-all-text');
-  const textObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'text');
+  const textObjs = objects.filter((o) => o.type === 'text').sort((a, b) => b.z - a.z);
   if (!textObjs.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-text' }); return; }
   const releaseInputShield = acquireInputShield();
 
