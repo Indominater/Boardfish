@@ -4,7 +4,7 @@
   const MB = 1024 * 1024;
   const LIMITS = Object.freeze({
     maxObjects: 100,
-    maxBoardContentBytes: 512 * MB,
+    maxBoardContentBytes: 500 * MB,
   });
 
   function isLimitedRuntime() {

@@ -2,6 +2,7 @@
 
 async function saveSelectedImage() {
   const dbg = ExportDebug.start('exportImage', { selectedCount: selectedIds.size });
+  globalThis.BoardfishMotion?.applyActionAnimation?.('export-selected-image');
   const imageObjs = [...selectedIds].map(id => objectsMap.get(id)).filter(o => o && o.type === 'image');
   if (imageObjs.length !== 1) { ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length }); return; }
   ExportDebug.startMassive('exportImage', imageObjs);
@@ -23,6 +24,7 @@ async function saveSelectedImage() {
       );
       ExportDebug.step(dbg, 'image:path-selected', { selected: !!path });
       if (!path) {
+        globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
         releaseInputShield();
         ExportDebug.end(dbg, { saved: false, cancelled: true });
         return;
@@ -585,6 +587,7 @@ async function exportImageBatch({
 }
 
 async function saveSelectedImages() {
+  globalThis.BoardfishMotion?.applyActionAnimation?.('export-selected-images');
   const multiSelection = isMultiSelected();
   const selectedObjs = BoardfishExportUtils.selectedImageObjects();
   return exportImageBatch({
@@ -598,6 +601,7 @@ async function saveSelectedImages() {
 }
 
 async function exportAllImages() {
+  globalThis.BoardfishMotion?.applyActionAnimation?.('export-all-images');
   deselectAll();
   const imageObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'image');
   return exportImageBatch({

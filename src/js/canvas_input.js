@@ -42,6 +42,7 @@ function handleViewportWheel(e) {
         : e.deltaY < 0 ? 1.1 : 1 / 1.1;
       const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
       BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, newZoom);
+      globalThis.BoardfishMotion?.applyActionAnimation?.('board-wheel-zoom');
       scheduleTransform('wheel-zoom', e);
       ViewportDebug.end(dbg, { mode: 'zoom', newZoom, panX, panY });
       return;
@@ -50,6 +51,7 @@ function handleViewportWheel(e) {
     if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('wheel-pan');
     ViewportDebug.count('wheelPan');
     BoardfishViewportState.panBy(-e.deltaX, -e.deltaY);
+    globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
     scheduleTransform('wheel-pan', e);
     ViewportDebug.end(dbg, { mode: 'pan', appliedDX: e.deltaX, appliedDY: e.deltaY, panX, panY });
   } finally {
@@ -61,6 +63,7 @@ canvas.addEventListener('wheel', handleViewportWheel, { passive: false });
 for (const surface of [
   typeof ctxMenu !== 'undefined' ? ctxMenu : null,
   typeof objCtxMenu !== 'undefined' ? objCtxMenu : null,
+  typeof BoardfishDOM !== 'undefined' ? BoardfishDOM.textCtxMenu : null,
   typeof ctxActions !== 'undefined' ? ctxActions : null,
   typeof island !== 'undefined' ? island : null,
 ].filter(Boolean)) {
@@ -140,6 +143,7 @@ function startMousePan(e) {
       ViewportDebug.count('mousePanMoves');
       if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('mouse-pan', 240);
       BoardfishViewportState.setPan(startPanX + (ev.clientX - startX), startPanY + (ev.clientY - startY));
+      globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
       scheduleTransform('mouse-pan', ev);
     } finally {
       if (collectDebug) ViewportDebug.timing('mousePanHandler', performance.now() - handlerStart);
@@ -184,6 +188,15 @@ function startGroupDrag(e) {
       if (!grpMoved) return;
       dragCommitter.flush();
       for (const item of grpItems) markDirty(item.obj.id);
+      if (grpItems.some((item) => item.obj?.type === 'text')) {
+        globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-drag');
+      }
+      if (grpItems.some((item) => item.obj?.type !== 'text')) {
+        globalThis.BoardfishMotion?.applyActionAnimation?.('object-group-drag', {
+          selection: true,
+          options: { includeText: false },
+        });
+      }
       pushHistory('group-drag');
     },
   });
@@ -210,6 +223,7 @@ function startRubberBandSelection(e, additive) {
   function onRbUp(ev) {
     finishRubberBandDrag();
     _setStyleIfChanged(rubberBand, 'display', 'none', _rubberBandStyleState);
+    globalThis.BoardfishMotion?.applyActionAnimation?.('rubber-band-release');
     if (!rbActive) return;
     const x1 = Math.min(rbStartX, ev.clientX), y1 = Math.min(rbStartY, ev.clientY);
     const x2 = Math.max(rbStartX, ev.clientX), y2 = Math.max(rbStartY, ev.clientY);
@@ -228,6 +242,10 @@ function startRubberBandSelection(e, additive) {
     if (nextSelection.size === selectedIds.size && [...nextSelection].every((id) => selectedIds.has(id))) return;
     BoardfishEditorState.setSelection([...nextSelection]);
     scheduleRender(true, true);
+    globalThis.BoardfishMotion?.applyActionAnimation?.('rubber-band-select', {
+      selection: true,
+      options: { includeText: false },
+    });
   }
   beginDocumentDrag({ move: onRbMove, up: onRbUp });
 }
@@ -248,6 +266,10 @@ function toggleAdditiveSelection(obj) {
     }
   }
   scheduleRender(true, true);
+  globalThis.BoardfishMotion?.applyActionAnimation?.('additive-select', {
+    selection: true,
+    options: { includeText: false },
+  });
 }
 
 function startTextSelectionDrag(e, obj, wp) {
@@ -258,6 +280,7 @@ function startTextSelectionDrag(e, obj, wp) {
     _editEl.setSelectionRange(clickIdx, clickIdx);
     TextSelDebug._logSelection('mouse-down', _editEl);
     _caretVisible = true;
+    globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
     scheduleRender(true, false);
   }
   function onSelMove(ev) {
@@ -267,6 +290,7 @@ function startTextSelectionDrag(e, obj, wp) {
       _editEl.setSelectionRange(Math.min(clickIdx, endIdx), Math.max(clickIdx, endIdx));
       TextSelDebug._logSelection('mouse-drag', _editEl);
       _caretVisible = true;
+      globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-drag-select');
       scheduleRender(true, false);
     }
   }
@@ -316,6 +340,7 @@ function startObjectDrag(e, obj) {
           _editEl.setSelectionRange(clickIdx, clickIdx);
           TextSelDebug._logSelection('click-to-edit', _editEl);
           _caretVisible = true;
+          globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
           scheduleRender(true, false);
         }
       }
@@ -323,6 +348,15 @@ function startObjectDrag(e, obj) {
     }
     dragCommitter.flush();
     for (const item of dragItems) markDirty(item.obj.id);
+    if (dragItems.some((item) => item.obj?.type === 'text')) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-drag');
+    }
+    if (dragItems.some((item) => item.obj?.type !== 'text')) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('object-drag', {
+        selection: true,
+        options: { includeText: false },
+      });
+    }
     pushHistory('drag');
   }
   beginDocumentDrag({ move: onMove, up: onUp });

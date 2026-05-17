@@ -30,26 +30,44 @@ var unsavedDialog = document.getElementById('dialog');
 var _dialogResolve = null;
 
 function _dialogClose(result) {
-  dialogOverlay.classList.remove('show');
-  updateInputShieldVisual();
-  const r = _dialogResolve;
-  _dialogResolve = null;
-  if (r) r(result);
+  const finish = () => {
+    dialogOverlay.classList.remove('show');
+    updateInputShieldVisual();
+    const r = _dialogResolve;
+    _dialogResolve = null;
+    if (r) r(result);
+  };
+  if (globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-close', {
+    surface: unsavedDialog,
+    phase: 'close',
+    after: finish,
+  })) return;
+  finish();
 }
 
 unsavedDialog.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   e.stopPropagation();
 });
-document.getElementById('dlg-save').addEventListener('click', () => _dialogClose('save'));
-document.getElementById('dlg-discard').addEventListener('click', () => _dialogClose('discard'));
-document.getElementById('dlg-cancel').addEventListener('click', () => _dialogClose('cancel'));
+document.getElementById('dlg-save').addEventListener('click', () => {
+  globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-save-press');
+  _dialogClose('save');
+});
+document.getElementById('dlg-discard').addEventListener('click', () => {
+  globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-delete-press');
+  _dialogClose('discard');
+});
+document.getElementById('dlg-cancel').addEventListener('click', () => {
+  globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-cancel-press');
+  _dialogClose('cancel');
+});
 
 // Returns 'save' | 'discard' | 'cancel'
 function showUnsavedDialog() {
   return new Promise((resolve) => {
     _dialogResolve = resolve;
     dialogOverlay.classList.add('show');
+    globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-open', { surface: unsavedDialog });
     updateInputShieldVisual();
   });
 }
@@ -514,7 +532,47 @@ async function hydrateAllImagesForOpen(dbg = null) {
   });
   return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
 }
+globalThis.markOpenEyedropperNativeDecodePrewarmStarted = (reason = 'external') => {
+  if (globalThis.scheduleOpenEyedropperNativeDecodePrewarm.started) return false;
+  globalThis.scheduleOpenEyedropperNativeDecodePrewarm.started = true;
+  return true;
+};
+
+globalThis.scheduleOpenEyedropperNativeDecodePrewarm = (reason = 'open-all-content-rendered', dbg = null) => {
+  if (!globalThis.markOpenEyedropperNativeDecodePrewarmStarted(reason)) {
+    const result = { scheduled: false, reason, alreadyStarted: true };
+    OpenDebug.step(dbg, 'eyedropper-prewarm:skip', result);
+    return result;
+  }
+  const result = typeof scheduleEyedropperNativeDecodePrewarm === 'function'
+    ? scheduleEyedropperNativeDecodePrewarm(reason)
+    : { scheduled: false, reason: 'unavailable' };
+  OpenDebug.step(dbg, 'eyedropper-prewarm:scheduled', { trigger: reason, ...(result || { scheduled: false }) });
+  return result;
+};
+globalThis.scheduleOpenEyedropperNativeDecodePrewarm.started = false;
+
+globalThis.resetOpenEyedropperNativeDecodePrewarmGate = () => {
+  globalThis.scheduleOpenEyedropperNativeDecodePrewarm.started = false;
+};
+
+const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
+  const t0 = performance.now();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (source) => {
+      if (settled) return;
+      settled = true;
+      OpenDebug.step(dbg, 'open-render-frame:settled', { reason, source, ms: performance.now() - t0 });
+      resolve();
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => finish('raf'));
+    setTimeout(() => finish('timeout'), 80);
+  });
+};
+
 var _backgroundOpenHydrationRunning = false;
+
 async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
   if (_backgroundOpenHydrationRunning) return;
   _backgroundOpenHydrationRunning = true;
@@ -533,13 +591,19 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
     }
   } finally {
     _backgroundOpenHydrationRunning = false;
+    const remaining = getPendingHydratableImageKeys().length;
+    const stale = generation !== _imageStoreGeneration;
     OpenDebug.step(dbg, 'hydrate-background:done', {
       batchCount,
       hydrated: hydratedTotal,
-      remaining: getPendingHydratableImageKeys().length,
-      stale: generation !== _imageStoreGeneration,
+      remaining,
+      stale,
       ms: performance.now() - totalStart,
     });
+    if (!stale && remaining === 0) {
+      if (batchCount > 0) await waitForOpenRenderFrame(dbg, 'open-all-content-rendered');
+      globalThis.scheduleOpenEyedropperNativeDecodePrewarm('open-all-content-rendered', dbg);
+    }
   }
 }
 
@@ -630,10 +694,15 @@ async function finishOpenedBoard(dbg, data) {
     scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',
     croppedImages: drawBreakdown?.croppedImages ?? '',
   });
-  const prewarmResult = typeof scheduleEyedropperNativeDecodePrewarm === 'function'
-    ? scheduleEyedropperNativeDecodePrewarm('board-loaded')
-    : { scheduled: false, reason: 'unavailable' };
-  OpenDebug.step(dbg, 'eyedropper-prewarm:scheduled', prewarmResult || { scheduled: false });
+  const pendingAfterInitialRender = getPendingHydratableImageKeys().length;
+  if (pendingAfterInitialRender === 0) {
+    globalThis.scheduleOpenEyedropperNativeDecodePrewarm('open-all-content-rendered', dbg);
+  } else {
+    OpenDebug.step(dbg, 'eyedropper-prewarm:deferred', {
+      reason: 'waiting-for-all-display-hydration',
+      pendingImages: pendingAfterInitialRender,
+    });
+  }
   const pillFinishReason = await finishPillTask({
     beforeFinish: () => {
       const shieldStart = performance.now();
@@ -669,6 +738,7 @@ function applyBoardData(data, options = {}) {
     kept: prune.kept,
     referenced: prune.referenced,
   });
+  globalThis.resetOpenEyedropperNativeDecodePrewarmGate();
   setEyedropperEnabled(false);
   clearJsClipboard();
   if (typeof clearEyedropperCardForBoard === 'function') {
@@ -754,12 +824,19 @@ runExclusiveBoardSave.inFlight = null;
 
 const saveBoardAsImpl = async () => {
   const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
+  globalThis.BoardfishMotion?.applyActionAnimation?.('save-board-as');
   const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
   try {
     const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
     const command = hasTauri() ? TAURI_COMMANDS.SAVE_FILE_DIALOG : BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG;
+    globalThis.BoardfishMotion?.applyActionAnimation?.('native-file-dialog-open');
     const fileRef = await SaveDebug.wrap(dbg, command, () => BoardfishRuntime.saveFileDialog(defaultName), { defaultName });
-    if (!fileRef) { SaveDebug.end(dbg, { cancelled: true }); releaseInputShield(); return false; }
+    if (!fileRef) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
+      SaveDebug.end(dbg, { cancelled: true });
+      releaseInputShield();
+      return false;
+    }
     await runShieldedPillTask({
       releaseInputShield,
       startMessage: 'Saving',
@@ -788,6 +865,7 @@ async function saveBoardAs() {
 }
 
 const saveBoardImpl = async () => {
+  globalThis.BoardfishMotion?.applyActionAnimation?.('save-board');
   const target = BoardfishRuntime.canSaveToExistingTarget(currentFileRef)
     ? currentFileRef
     : (hasTauri() && currentFilePath ? currentFilePath : null);
@@ -838,8 +916,14 @@ async function openBoard() {
 
   try {
     const command = hasTauri() ? TAURI_COMMANDS.OPEN_FILE_DIALOG : BoardfishRuntime.WEB_COMMANDS.OPEN_FILE_DIALOG;
+    globalThis.BoardfishMotion?.applyActionAnimation?.('open-board-file-pick');
+    globalThis.BoardfishMotion?.applyActionAnimation?.('native-file-dialog-open');
     const fileRef = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.openFileDialog());
-    if (!fileRef) { OpenDebug.end(dbg, { cancelled: true }); return; }
+    if (!fileRef) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
+      OpenDebug.end(dbg, { cancelled: true });
+      return;
+    }
     await openBoardFromPath(fileRef, dbg, 'Open failed:');
   } catch (err) {
     finishFailedOpen(dbg, err, 'Open failed:');
@@ -851,6 +935,7 @@ var _closeGuardRunning = false;
 
 async function requestAppClose(event = null) {
   if (!hasTauri()) return;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('app-window-close-request');
   const seq = Number(event?.payload || 0);
   if (seq) BoardfishTauri.acknowledgeCloseRequest(seq).catch(() => {});
   if (_closeGuardRunning) return;

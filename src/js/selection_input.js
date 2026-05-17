@@ -51,6 +51,7 @@ const isEventInsideVisibleContextMenu = (e) => {
   return (
     isEventInsideVisibleSurface(e, ctxMenu) ||
     isEventInsideVisibleSurface(e, objCtxMenu) ||
+    isEventInsideVisibleSurface(e, typeof BoardfishDOM !== 'undefined' ? BoardfishDOM.textCtxMenu : null) ||
     isEventInsideVisibleSurface(e, ctxActions)
   );
 };
@@ -308,6 +309,10 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           up() {
             resizeCommitter.flush();
             for (const snap of snapshots) markDirty(snap.id);
+            globalThis.BoardfishMotion?.applyActionAnimation?.('object-multi-resize', {
+              selection: true,
+              options: { includeText: false },
+            });
             pushHistory('multi-resize');
           },
         });
@@ -361,6 +366,14 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         up() {
           resizeCommitter.flush();
           markDirty(obj.id);
+          if (obj.type === 'text') {
+            globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-resize');
+          } else {
+            globalThis.BoardfishMotion?.applyActionAnimation?.('object-resize', {
+              selection: true,
+              options: { includeText: false },
+            });
+          }
           pushHistory('resize');
         },
       });
@@ -386,11 +399,17 @@ function selectObject(id) {
     obj.z = ++zCounter;
   }
   scheduleRender(true, true);
+  globalThis.BoardfishMotion?.applyActionAnimation?.('object-select', {
+    selection: true,
+    options: { includeText: false },
+  });
 }
 
 function deselectAll() {
+  const hadSelection = selectedIds.size > 0;
   if (editingId) exitEdit();
   BoardfishEditorState.clearSelection();
+  if (hadSelection) globalThis.BoardfishMotion?.applyActionAnimation?.('object-deselect');
   scheduleRender(false, true);
 }
 
@@ -401,6 +420,10 @@ function selectAllObjects() {
     exitEditing: false,
   });
   scheduleRender(false, true);
+  globalThis.BoardfishMotion?.applyActionAnimation?.('object-select', {
+    selection: true,
+    options: { includeText: false },
+  });
 }
 
 function hideMenus() {
@@ -412,6 +435,7 @@ function hideMenus() {
   ctxMenu.classList.remove('visible');
   ctxActions?.classList.remove('visible');
   objCtxMenu.classList.remove('visible');
+  if (typeof BoardfishDOM !== 'undefined') BoardfishDOM.textCtxMenu.classList.remove('visible');
 }
 
 // ─── Edit mode ────────────────────────────────────────────────────────────────

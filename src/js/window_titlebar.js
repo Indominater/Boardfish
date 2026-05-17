@@ -49,6 +49,7 @@
   function minimizeWindow(event) {
     consumeWindowControlEvent(event);
     if (!hasNativeWindow()) return;
+    root.BoardfishMotion?.applyActionAnimation?.('app-window-minimize');
     root.BoardfishTauri.minimizeWindow()
       .catch((error) => reportWindowControlError('minimize', error));
   }
@@ -56,6 +57,7 @@
   function toggleMaximizeWindow(event) {
     if (event) consumeWindowControlEvent(event);
     if (!hasNativeWindow()) return;
+    root.BoardfishMotion?.applyActionAnimation?.('app-window-toggle-maximize');
     root.BoardfishTauri.toggleMaximizeWindow()
       .then((state) => setMaximizedState(state?.maximized))
       .catch((error) => reportWindowControlError('toggle maximize', error));
@@ -64,6 +66,7 @@
   function requestWindowClose(event) {
     consumeWindowControlEvent(event);
     if (!hasNativeWindow()) return;
+    root.BoardfishMotion?.applyActionAnimation?.('app-window-close-request');
     root.BoardfishTauri.requestWindowClose()
       .catch((error) => reportWindowControlError('close', error));
   }
@@ -71,6 +74,9 @@
   minimizeButton.addEventListener('click', minimizeWindow);
   maximizeButton.addEventListener('click', toggleMaximizeWindow);
   closeButton.addEventListener('click', requestWindowClose);
+  dragRegion.addEventListener('mousedown', () => {
+    root.BoardfishMotion?.applyActionAnimation?.('app-window-drag');
+  });
   dragRegion.addEventListener('dblclick', toggleMaximizeWindow);
 
   let resizeRaf = 0;
@@ -78,6 +84,7 @@
     if (resizeRaf) return;
     resizeRaf = requestAnimationFrame(() => {
       resizeRaf = 0;
+      root.BoardfishMotion?.applyActionAnimation?.('app-window-resize');
       syncMaximizedState();
     });
   });

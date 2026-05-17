@@ -2,6 +2,7 @@
 
 async function exportAllText() {
   const dbg = ExportDebug.start('exportAllText', { objectCount: objects.length });
+  globalThis.BoardfishMotion?.applyActionAnimation?.('export-all-text');
   const textObjs = [...objects].sort((a, b) => b.z - a.z).filter((o) => o.type === 'text');
   if (!textObjs.length) { ExportDebug.end(dbg, { skipped: true, reason: 'no-text' }); return; }
   const releaseInputShield = acquireInputShield();
@@ -19,6 +20,7 @@ async function exportAllText() {
       );
       ExportDebug.step(dbg, 'text:path-selected', { selected: !!path });
       if (!path) {
+        globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
         releaseInputShield();
         ExportDebug.end(dbg, { saved: false, cancelled: true });
         return;

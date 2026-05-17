@@ -54,9 +54,9 @@
     return !!(obj?.type === 'image' &&
       key &&
       canEyedropperDecodeCachedPixels(key) &&
-      !eyedropperNativeDecodePrewarm.active.has(key) &&
-      !eyedropperNativeDecodePrewarm.ready.has(key) &&
-      !eyedropperNativeDecodePrewarm.failed.has(key));
+      !indominaterGreedyEyedropperNativeDecodePrewarm.active.has(key) &&
+      !indominaterGreedyEyedropperNativeDecodePrewarm.ready.has(key) &&
+      !indominaterGreedyEyedropperNativeDecodePrewarm.failed.has(key));
   }
 
   function betterEyedropperDecodeCandidate(decoderId, candidate, best) {
@@ -120,8 +120,8 @@
 
   function resetEyedropperDecodedImageKey(key) {
     if (!key) return;
-    eyedropperNativeDecodePrewarm.ready.delete(key);
-    eyedropperNativeDecodePrewarm.failed.delete(key);
+    indominaterGreedyEyedropperNativeDecodePrewarm.ready.delete(key);
+    indominaterGreedyEyedropperNativeDecodePrewarm.failed.delete(key);
     if (_eyedropperNativePixelTarget?.key === key && !_eyedropperNativePixelInFlight) _eyedropperNativePixelTarget = null;
   }
 
@@ -131,7 +131,7 @@
   }
 
   function noteEyedropperImageAvailable(key = '', reason = 'image-available') {
-    if (key) eyedropperNativeDecodePrewarm.failed.delete(key);
+    if (key) indominaterGreedyEyedropperNativeDecodePrewarm.failed.delete(key);
     scheduleEyedropperNativeDecodePrewarm(reason);
   }
 
@@ -140,14 +140,14 @@
   }
 
   function startEyedropperImageDecode(decoderId, candidate, reason = 'decode') {
-    const decoder = eyedropperNativeDecodePrewarm.decoders[decoderId];
+    const decoder = indominaterGreedyEyedropperNativeDecodePrewarm.decoders[decoderId];
     const key = candidate?.key;
-    if (!decoder || decoder.running || !key || eyedropperNativeDecodePrewarm.active.has(key)) return false;
+    if (!decoder || decoder.running || !key || indominaterGreedyEyedropperNativeDecodePrewarm.active.has(key)) return false;
 
     decoder.running = true;
     decoder.key = key;
     const token = candidate.token || eyedropperSafeImageToken(key);
-    eyedropperNativeDecodePrewarm.active.set(key, {
+    indominaterGreedyEyedropperNativeDecodePrewarm.active.set(key, {
       decoderId,
       token,
       startedAt: performance.now(),
@@ -173,8 +173,8 @@
           });
           return;
         }
-        eyedropperNativeDecodePrewarm.ready.add(key);
-        eyedropperNativeDecodePrewarm.failed.delete(key);
+        indominaterGreedyEyedropperNativeDecodePrewarm.ready.add(key);
+        indominaterGreedyEyedropperNativeDecodePrewarm.failed.delete(key);
         EyedropperDebug._logSamplingEvent('decode-prewarm-ready', {
           imgKey: key,
           decoderId,
@@ -186,8 +186,8 @@
         });
       })
       .catch((err) => {
-        eyedropperNativeDecodePrewarm.ready.delete(key);
-        eyedropperNativeDecodePrewarm.failed.set(key, String(err));
+        indominaterGreedyEyedropperNativeDecodePrewarm.ready.delete(key);
+        indominaterGreedyEyedropperNativeDecodePrewarm.failed.set(key, String(err));
         EyedropperDebug._logReadbackFailure('decode-prewarm', {
           imgKey: key,
           decoderId,
@@ -195,7 +195,7 @@
         });
       })
       .finally(() => {
-        eyedropperNativeDecodePrewarm.active.delete(key);
+        indominaterGreedyEyedropperNativeDecodePrewarm.active.delete(key);
         decoder.running = false;
         decoder.key = '';
         if (eyedropperSampling) {
@@ -208,7 +208,7 @@
   }
 
   function pumpEyedropperDecodeWarmer(decoderId, reason = 'pump') {
-    const decoder = eyedropperNativeDecodePrewarm.decoders[decoderId];
+    const decoder = indominaterGreedyEyedropperNativeDecodePrewarm.decoders[decoderId];
     if (!decoder || decoder.running) return false;
     const candidate = findEyedropperDecodeCandidate(decoderId);
     if (!candidate) return false;
@@ -222,18 +222,18 @@
   }
 
   function scheduleEyedropperImageDecodeWarmup(reason = 'change') {
-    eyedropperNativeDecodePrewarm.pendingReasons.add(reason);
-    if (eyedropperNativeDecodePrewarm.scheduled) {
+    indominaterGreedyEyedropperNativeDecodePrewarm.pendingReasons.add(reason);
+    if (indominaterGreedyEyedropperNativeDecodePrewarm.scheduled) {
       return { scheduled: false, pending: true, reason };
     }
-    eyedropperNativeDecodePrewarm.scheduled = true;
+    indominaterGreedyEyedropperNativeDecodePrewarm.scheduled = true;
     const schedule = typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame
       : (callback) => setTimeout(callback, 0);
     schedule(() => {
-      const reasons = [...eyedropperNativeDecodePrewarm.pendingReasons].join(',');
-      eyedropperNativeDecodePrewarm.pendingReasons.clear();
-      eyedropperNativeDecodePrewarm.scheduled = false;
+      const reasons = [...indominaterGreedyEyedropperNativeDecodePrewarm.pendingReasons].join(',');
+      indominaterGreedyEyedropperNativeDecodePrewarm.pendingReasons.clear();
+      indominaterGreedyEyedropperNativeDecodePrewarm.scheduled = false;
       pumpEyedropperImageDecodeWarmup(reasons || reason);
       if (eyedropperSampling) pumpEyedropperDecodeWarmer('d3', reasons || reason);
     });

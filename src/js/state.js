@@ -61,7 +61,7 @@ function bringObjectToFront(id) {
 
 function sendSelectedToBack() {
   if (!selectedIds.size) return;
-  BoardfishEditorState.commitMutation('send-selected-to-back', () => {
+  const moved = BoardfishEditorState.commitMutation('send-selected-to-back', () => {
     // Pull out selected objects (preserving their relative order), prepend to front.
     const selected = [], rest = [];
     for (const o of objects) {
@@ -74,6 +74,7 @@ function sendSelectedToBack() {
     for (const obj of selected) markDirty(obj.id);
     return true;
   });
+  if (moved) globalThis.BoardfishMotion?.applyActionAnimation?.('send-selected-to-back', { selection: true });
 }
 
 function flipSelectedImages(axis) {
@@ -94,11 +95,12 @@ function flipSelectedImages(axis) {
   }, { invalidate: true });
   ClipDebug.step(dbg, 'toggle-flags', { imageCount, flipped });
   if (!flipped) { ClipDebug.end(dbg, { skipped: true }); return; }
+  globalThis.BoardfishMotion?.applyActionAnimation?.('flip-image', { selection: true });
   ClipDebug.end(dbg, { historyIndex });
 }
 
 function rotateSelectedImages(dir) {
-  BoardfishEditorState.commitMutation(`rotate-image-${dir}`, () => {
+  const rotatedAny = BoardfishEditorState.commitMutation(`rotate-image-${dir}`, () => {
     let rotated = false;
     for (const id of selectedIds) {
       const obj = objectsMap.get(id);
@@ -121,6 +123,7 @@ function rotateSelectedImages(dir) {
     }
     return rotated;
   }, { invalidate: true });
+  if (rotatedAny) globalThis.BoardfishMotion?.applyActionAnimation?.('rotate-image', { selection: true });
 }
 
 function isMultiSelected() {

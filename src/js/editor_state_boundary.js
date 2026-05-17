@@ -6,20 +6,36 @@
     selectedIds.clear();
   }
 
+  function noteNewlySelectedObjects(previousSelectedIds) {
+    const newlySelectedObjects = [];
+    for (const id of selectedIds) {
+      if (previousSelectedIds.has(id)) continue;
+      const obj = objectsMap.get(id);
+      if (obj && obj.type !== 'text') newlySelectedObjects.push(obj);
+    }
+    if (newlySelectedObjects.length) {
+      root.BoardfishMotion?.applyActionAnimation?.('object-select', { objects: newlySelectedObjects });
+    }
+  }
+
   function setSelectionState(ids = [], {
+    animateSelection = true,
     primaryId = null,
     exitEditing = true,
   } = {}) {
-    if (exitEditing && editingId && !ids.includes(editingId)) exitEdit();
+    const nextIds = Array.isArray(ids) ? ids : [...(ids || [])];
+    const previousSelectedIds = new Set(selectedIds);
+    if (exitEditing && editingId && !nextIds.includes(editingId)) exitEdit();
     selectedIds.clear();
     let lastExistingId = null;
-    for (const id of ids) {
+    for (const id of nextIds) {
       if (!objectsMap.has(id)) continue;
       selectedIds.add(id);
       lastExistingId = id;
     }
     selectedId = primaryId && selectedIds.has(primaryId) ? primaryId : lastExistingId;
     if (editingId && !selectedIds.has(editingId)) exitEdit();
+    if (animateSelection) noteNewlySelectedObjects(previousSelectedIds);
     return selectedIds.size;
   }
 

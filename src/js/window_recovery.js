@@ -28,7 +28,11 @@ function recoverWindowPaint(reason = 'resume', hardRepaint = false) {
   boardCanvas.style.display = '';
   updateInputShieldVisual();
   if (dialogOverlay.classList.contains('show') && !_dialogResolve) dialogOverlay.classList.remove('show');
-  if (!ctxMenu.classList.contains('visible') && !objCtxMenu.classList.contains('visible')) {
+  if (
+    !ctxMenu.classList.contains('visible') &&
+    !objCtxMenu.classList.contains('visible') &&
+    !BoardfishDOM.textCtxMenu.classList.contains('visible')
+  ) {
     hideMenus();
   } else {
     MenuDebug.log('recoverWindowPaint:keep-open-menu', { reason });

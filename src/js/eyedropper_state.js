@@ -48,7 +48,7 @@ var eyedropperReadbackProbeCanvas = document.createElement('canvas');
 var eyedropperReadbackProbeCtx = eyedropperReadbackProbeCanvas.getContext('2d', { willReadFrequently: true });
 var _eyedropperNativePixelInFlight = false;
 var _eyedropperNativePixelTarget = null;
-var eyedropperNativeDecodePrewarm = {
+var indominaterGreedyEyedropperNativeDecodePrewarm = {
   active: new Map(),
   ready: new Set(),
   failed: new Map(),
@@ -80,8 +80,8 @@ const hasEyedropperNativePixelCacheSource = (key) => {
   return !!(
     isNativeImageRef(imageStore[key]) ||
     imageAssetUrlCache[key] ||
-    eyedropperNativeDecodePrewarm.active.has(key) ||
-    eyedropperNativeDecodePrewarm.ready.has(key)
+    indominaterGreedyEyedropperNativeDecodePrewarm.active.has(key) ||
+    indominaterGreedyEyedropperNativeDecodePrewarm.ready.has(key)
   );
 };
 

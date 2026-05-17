@@ -1,6 +1,6 @@
 // ─── Add objects ─────────────────────────────────────────────────────────────
 
-function addText(wx, wy, content = '') {
+function addText(wx, wy, content = '', options = {}) {
   if (eyedropperEnabled) return;
   if (!BoardfishWebLimits.canAddObjects(1)) return;
   const textBytes = typeof TextEncoder === 'function' ? new TextEncoder().encode(String(content || '')).length : String(content || '').length;
@@ -16,7 +16,15 @@ function addText(wx, wy, content = '') {
 
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data: { content } };
   syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
+  if (options?.anchor === 'center') {
+    obj.x = wx - obj.w / 2;
+    obj.y = wy - obj.h / 2;
+  }
   BoardfishEditorState.addObject(obj);
+  globalThis.BoardfishMotion?.applyActionAnimation?.(
+    content ? 'plain-text-paste-as-text-box' : 'text-box-create',
+    { objects: [obj] }
+  );
   selectObject(obj.id);
   scheduleRender(true, false);
   pushHistory('add-text');
@@ -121,6 +129,7 @@ async function newBoard() {
     if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
   }
   const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
+  globalThis.BoardfishMotion?.applyActionAnimation?.('new-board-state-reset');
   BoardfishEditorState.setBoardOpening(true);
   if (typeof beginOpeningFreeze === 'function') beginOpeningFreeze();
   else openingShield.classList.add('active');
@@ -160,23 +169,51 @@ async function newBoard() {
 // ─── Duplicate ────────────────────────────────────────────────────────────────
 
 function duplicateSelected() {
-  if (!selectedIds.size) return;
+  if (!selectedIds.size || editingId) return;
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  const cloned = [];
-  const imageData = {};
+  const selectedObjects = [];
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
-    if (!obj) continue;
-    const o = cloneObject(obj);
-    if (o.type === 'image') {
-      const src = BoardfishImageStore.getSource(o.data.imgKey);
-      if (src) imageData[o.data.imgKey] = src;
-    }
-    cloned.push(o);
+    if (obj) selectedObjects.push(obj);
   }
+  if (!selectedObjects.length || !BoardfishWebLimits.canAddObjects(selectedObjects.length)) return;
+  const additionalTextBytes = selectedObjects.reduce((sum, obj) => {
+    if (obj?.type !== 'text') return sum;
+    const text = String(obj.data?.content || '');
+    return sum + (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length);
+  }, 0);
+  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
+
+  const cloned = selectedObjects.map((obj) => cloneObject(obj));
   if (!cloned.length) return;
-  setJsClipboard({ type: 'objects', objects: cloned, imageData });
-  pasteAtPos(center.x, center.y);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const obj of cloned) {
+    minX = Math.min(minX, obj.x);
+    minY = Math.min(minY, obj.y);
+    maxX = Math.max(maxX, obj.x + obj.w);
+    maxY = Math.max(maxY, obj.y + obj.h);
+  }
+  const dx = center.x - (minX + maxX) / 2;
+  const dy = center.y - (minY + maxY) / 2;
+  const duplicatedIds = [];
+  for (const obj of cloned) {
+    obj.id = newId();
+    obj.x += dx;
+    obj.y += dy;
+    obj.z = ++zCounter;
+    BoardfishEditorState.addObject(obj);
+    duplicatedIds.push(obj.id);
+  }
+  BoardfishEditorState.setSelection(duplicatedIds, {
+    primaryId: duplicatedIds[duplicatedIds.length - 1],
+    animateSelection: false,
+  });
+  const duplicatedTextObjects = cloned.filter((obj) => obj?.type === 'text');
+  const duplicatedNonTextObjects = cloned.filter((obj) => obj?.type !== 'text');
+  globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-duplicate', { objects: duplicatedTextObjects });
+  globalThis.BoardfishMotion?.applyActionAnimation?.('image-object-duplicate', { objects: duplicatedNonTextObjects });
+  scheduleRender(true, true, 'duplicate-selected');
+  pushHistory('duplicate-selected');
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
@@ -185,6 +222,11 @@ function deleteSelected() {
   if (!hasSelection() || editingId) return;
   const idsToDelete = [...selectedIds];
   if (!idsToDelete.length) return;
+  const removedObjects = idsToDelete
+    .map((id) => objectsMap.get(id))
+    .filter(Boolean)
+    .map((obj) => cloneObject(obj));
+  globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects });
   BoardfishEditorState.removeObjectsById(idsToDelete);
   if (selectedIds.size) {
     const remaining = [...selectedIds];

@@ -21,6 +21,7 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     zoom: 1,
     entered: [],
     history: [],
+    menus: [],
     selections: [],
     renders: [],
     logs: [],
@@ -49,8 +50,15 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     editProxy: {
       focused: false,
       selection: null,
+      value: 'hello',
+      selectionStart: 0,
+      selectionEnd: 0,
       focus() { this.focused = true; },
-      setSelectionRange(start, end) { this.selection = [start, end]; },
+      setSelectionRange(start, end) {
+        this.selection = [start, end];
+        this.selectionStart = start;
+        this.selectionEnd = end;
+      },
     },
     toWorld(clientX, clientY) { return { x: clientX, y: clientY }; },
     getTextLayout() { return [{ text: 'hello', startIndex: 0, prefixWidths: new Float64Array([0]) }]; },
@@ -60,6 +68,7 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     },
     TextSelDebug: { _logSelection(type) { context.logs.push(type); } },
     scheduleRender(select, overlay) { context.renders.push({ select, overlay }); },
+    showTextEditContextMenuAt(clientX, clientY) { context.menus.push({ clientX, clientY }); },
   };
   context.latestDrag = () => dragHandlers[dragHandlers.length - 1];
 
@@ -106,4 +115,32 @@ test('first click on an unselected text object only selects it', () => {
 
   assert.deepEqual(context.entered, []);
   assert.equal(context.isSelected('text-1'), true);
+});
+
+test('releasing a dragged text highlight does not open the text edit menu', () => {
+  const context = loadCanvasInputHarness();
+  const hits = [1, 4];
+  context.editingId = context.obj.id;
+  context._editEl = context.editProxy;
+  context.layoutHitTest = () => hits.shift() ?? 4;
+
+  context.startTextSelectionDrag({ clientX: 12, clientY: 22 }, context.obj, { x: 12, y: 22 });
+  context.latestDrag().move({ clientX: 42, clientY: 22 });
+  context.latestDrag().up?.({ button: 0, clientX: 42, clientY: 22 });
+
+  assert.deepEqual(context.editProxy.selection, [1, 4]);
+  assert.deepEqual(context.menus, []);
+});
+
+test('releasing a caret-only text click does not open the text edit menu', () => {
+  const context = loadCanvasInputHarness();
+  context.editingId = context.obj.id;
+  context._editEl = context.editProxy;
+  context.layoutHitTest = () => 2;
+
+  context.startTextSelectionDrag({ clientX: 12, clientY: 22 }, context.obj, { x: 12, y: 22 });
+  context.latestDrag().up?.({ button: 0, clientX: 12, clientY: 22 });
+
+  assert.deepEqual(context.editProxy.selection, [2, 2]);
+  assert.deepEqual(context.menus, []);
 });

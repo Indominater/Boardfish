@@ -228,7 +228,7 @@ test('eyedropper readout samples rendered canvas-visible pixels', () => {
   assert.match(decodeWarmersSource, /return naturalWidth \* naturalHeight \* formatMultiplier;/);
   assert.match(decodeWarmersSource, /BoardfishTauri\.prewarmCachedImagePixels\(key\)/);
   assert.match(source, /native-pixel-wait-decode-prewarm/);
-  assert.match(source, /if \(!eyedropperNativeDecodePrewarm\.ready\.has\(target\.key\)\)/);
+  assert.match(source, /if \(!indominaterGreedyEyedropperNativeDecodePrewarm\.ready\.has\(target\.key\)\)/);
   assert.match(source, /BoardfishTauri\.sampleCachedImagePixel\(target\.key, target\.sourceX, target\.sourceY\)/);
   assert.match(source, /source: 'pixel-cache'/);
   assert.match(source, /'cached-image-tile'/);
@@ -502,7 +502,11 @@ test('eyedropper decode warming uses two background decoders after board open', 
   assert.doesNotMatch(eyedropperSource, /POST_OPEN_EYEDROPPER_PREWARM/);
   assert.doesNotMatch(eyedropperSource, /scheduleNewImageEyedropperSafePrewarm/);
   assert.doesNotMatch(eyedropperSource, /NEW_IMAGE_EYEDROPPER_PREWARM/);
-  assert.match(ioCloseSource, /scheduleEyedropperNativeDecodePrewarm\('board-loaded'\)/);
+  assert.match(ioCloseSource, /globalThis\.scheduleOpenEyedropperNativeDecodePrewarm = \(reason = 'open-all-content-rendered'/);
+  assert.match(ioCloseSource, /globalThis\.scheduleOpenEyedropperNativeDecodePrewarm\('open-all-content-rendered', dbg\)/);
+  assert.match(ioCloseSource, /eyedropper-prewarm:deferred/);
+  assert.doesNotMatch(ioCloseSource, /scheduleEyedropperNativeDecodePrewarm\('board-loaded'\)/);
+  assert.match(eyedropperSource, /markOpenEyedropperNativeDecodePrewarmStarted\('eyedropper-enabled'\)/);
   assert.match(decodeWarmersSource, /pumpEyedropperDecodeWarmer\('d1', reason\)/);
   assert.match(decodeWarmersSource, /pumpEyedropperDecodeWarmer\('d2', reason\)/);
   assert.doesNotMatch(decodeWarmersSource, /currentViewportWorldRect\(0\)[\s\S]*findEyedropperBackgroundDecodeCandidate/);

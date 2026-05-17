@@ -54,6 +54,97 @@ function loadClipboardStateHarness() {
   return context;
 }
 
+function loadClipboardExportHarness() {
+  const source = fs.readFileSync(path.join(root, 'src/js/clipboard_export_init.js'), 'utf8');
+  const textObject = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 80,
+    z: 1,
+    data: { content: 'first line\nsecond line' },
+  };
+  const calls = {
+    copiedTexts: [],
+    jello: [],
+    objectJello: [],
+    pulses: 0,
+    renders: [],
+  };
+  const context = {
+    console,
+    Promise,
+    document: {
+      addEventListener() {},
+      visibilityState: 'visible',
+    },
+    window: {
+      addEventListener() {},
+    },
+    selectedIds: new Set([textObject.id]),
+    textObject,
+    calls,
+    BoardfishClipboardIO: {
+      copyTextToClipboard(text) {
+        calls.copiedTexts.push(text);
+        return Promise.resolve({ boardfishTokenWritten: true });
+      },
+    },
+    BoardfishImageStore: {
+      getSource() { return ''; },
+    },
+    BoardfishMotion: {
+      applyActionAnimation(action, payload = {}) {
+        if (payload.textSelection) calls.jello.push({ ...payload.textSelection });
+        if (payload.objects) calls.objectJello.push({
+          action,
+          ids: payload.objects.map((obj) => obj.id),
+        });
+        if (payload.selection) calls.pulses++;
+        return action !== 'menu-command-press';
+      },
+      noteTextSelectionJello(spec) { calls.jello.push({ ...spec }); },
+      pulseSelection() { calls.pulses++; },
+    },
+    ClipDebug: {
+      end() {},
+      start() { return {}; },
+      step() {},
+    },
+    cloneObject(obj) {
+      return { ...obj, data: { ...obj.data } };
+    },
+    finishNativeClipboardWrite() {},
+    getFirstSelectedObject() {
+      return textObject;
+    },
+    getJsClipboardWebToken() {
+      return 'web-token';
+    },
+    hasTauri() {
+      return false;
+    },
+    markJsClipboardWebTokenOnNative() {},
+    normalizeTextContent(value) {
+      return String(value ?? '').replace(/\r\n?/g, '\n');
+    },
+    resizeCanvas() {},
+    scheduleRender(board, overlay, sourceName) {
+      calls.renders.push({ board, overlay, source: sourceName });
+    },
+    setJsClipboard() {
+      return 'clip-token';
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(`${source}\nglobalThis.copySelected = copySelected;\n`, context, {
+    filename: 'clipboard_export_init.js',
+  });
+  return context;
+}
+
 test('web js clipboard stays current only while its browser clipboard marker matches', async () => {
   const context = loadClipboardStateHarness();
 
@@ -140,4 +231,27 @@ test('clipboard IO extracts and writes Boardfish web clipboard markers', async (
     if (previous.navigator) Object.defineProperty(globalThis, 'navigator', previous.navigator);
     else delete globalThis.navigator;
   }
+});
+
+test('copying a selected text object jiggles the whole text box like other objects', async () => {
+  const context = loadClipboardExportHarness();
+
+  await context.copySelected();
+
+  assert.deepEqual(context.calls.jello, []);
+  const objectJello = context.calls.objectJello.map((call) => ({
+    action: call.action,
+    ids: [...call.ids],
+  }));
+  assert.deepEqual(objectJello, [{
+    action: 'copy-text-object',
+    ids: ['text-1'],
+  }]);
+  assert.equal(context.calls.pulses, 0);
+  assert.deepEqual(context.calls.renders, [{
+    board: true,
+    overlay: true,
+    source: 'copy-text-object',
+  }]);
+  assert.deepEqual(context.calls.copiedTexts, [context.textObject.data.content]);
 });

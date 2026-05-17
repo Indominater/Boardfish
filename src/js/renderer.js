@@ -203,23 +203,59 @@
       const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
       const view = options.view || viewDefaults();
       const imageSourceResolver = options.imageSourceResolver || null;
+      const objectMotionForDraw = typeof deps.objectMotionForDraw === 'function' ? deps.objectMotionForDraw : null;
+      const motionObjectsForDraw = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw : null;
       let drawnImages = 0;
       let drawnText = 0;
-      for (const obj of deps.objects()) {
-        if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if (obj.id === skipId) continue;
+      const drawObject = (obj, countObject = true) => {
+        if (countObject && counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
+        if (obj.id === skipId) return;
         if (deps.viewportCullingEnabled() && !deps.objectIntersectsRect(obj, viewportRect)) {
-          countCulledObject(obj, counters);
-          continue;
+          if (countObject) countCulledObject(obj, counters);
+          return;
         }
-        if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
-        const drawn = drawSingleObj(context, obj, counters, {
-          view,
-          imageSourceResolver,
-          viewportRect,
-        });
-        if (obj.type === 'image' && drawn) drawnImages++;
-        else if (obj.type === 'text') drawnText++;
+        if (countObject && counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
+        const motion = objectMotionForDraw ? objectMotionForDraw(obj, { view, viewportRect }) : null;
+        if (motion?.skip) return;
+        if (motion && context.save) {
+          context.save();
+          const opacity = Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
+          const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
+          const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
+          const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+          const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
+          const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
+          context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
+          if (translateX || translateY) context.translate(translateX, translateY);
+          if (scaleX !== 1 || scaleY !== 1) {
+            context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
+            context.scale(scaleX, scaleY);
+            context.translate(-(obj.x + obj.w / 2), -(obj.y + obj.h / 2));
+          }
+        }
+        let drawn = false;
+        try {
+          drawn = drawSingleObj(context, obj, counters, {
+            view,
+            imageSourceResolver,
+            viewportRect,
+          });
+        } finally {
+          if (motion && context.restore) context.restore();
+        }
+        if (obj.type === 'image' && drawn) {
+          drawnImages++;
+          if (countObject && typeof deps.noteImageObjectDrawn === 'function') {
+            deps.noteImageObjectDrawn(obj, { view, viewportRect });
+          }
+        } else if (obj.type === 'text') drawnText++;
+      };
+
+      for (const obj of deps.objects()) {
+        drawObject(obj, true);
+      }
+      for (const obj of motionObjectsForDraw?.({ view, viewportRect }) || []) {
+        drawObject(obj, false);
       }
       return { drawnImages, drawnText };
     }

@@ -37,8 +37,8 @@ test('web board content limit carries a short user-facing message', () => {
       imageEntries: [],
     }),
     (err) => {
-      assert.equal(err.message, 'This board is 512 MB; Boardfish Web boards are limited to 512 MB.');
-      assert.equal(err.boardfishUserMessage, 'Boardfish Web boards are limited to 512 MB');
+      assert.equal(err.message, 'This board is 500 MB; Boardfish Web boards are limited to 500 MB.');
+      assert.equal(err.boardfishUserMessage, 'Boardfish Web boards are limited to 500 MB');
       return true;
     },
   );

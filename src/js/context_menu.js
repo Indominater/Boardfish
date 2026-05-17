@@ -11,14 +11,35 @@ function clampMenuTop(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
   return Math.max(margin, Math.min(max, value));
 }
 
-function openMenuAt(menu, x, y) {
+function openMenuAt(menu, x, y, options = {}) {
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   menu.classList.add('visible');
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${Math.round(clampMenuCoord(x, rect.width))}px`;
   menu.style.top = `${Math.round(clampMenuTop(y, rect.height))}px`;
+  if (options.animate !== false) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('menu-open', { surface: menu });
+  }
 }
+
+const closeFloatingSurface = (surface, after = null, action = 'menu-close') => {
+  const finish = () => {
+    surface?.classList.remove('visible');
+    if (typeof after === 'function') after();
+  };
+  if (!surface?.classList.contains('visible')) {
+    if (typeof after === 'function') after();
+    return false;
+  }
+  if (globalThis.BoardfishMotion?.applyActionAnimation?.(action, {
+    surface,
+    phase: 'close',
+    after: finish,
+  })) return true;
+  finish();
+  return false;
+};
 
 function menuGapPx() {
   const value = parseFloat(cssVar('--menu-shell-padding'));
@@ -31,7 +52,7 @@ function updateCtxActionStates() {
 
 function closeCtxActions(reason) {
   MenuDebug.log('ctx-actions:close', { reason });
-  ctxActions?.classList.remove('visible');
+  closeFloatingSurface(ctxActions, null, 'context-action-rail-close');
 }
 
 function syncCtxActionsWithMenu(reason) {
@@ -39,38 +60,54 @@ function syncCtxActionsWithMenu(reason) {
   closeCtxActions(reason);
 }
 
-function alignCtxActionsToMenuRow(actionRect, gap) {
-  let menuRect = ctxMenu.getBoundingClientRect();
-  const margin = MENU_VIEWPORT_EDGE_MARGIN;
-  const maxRight = window.innerWidth - margin;
-  const desiredRight = menuRect.right + gap + actionRect.width;
+function alignCtxActionsToMenuRow(gap) {
+  const layoutBox = (surface) => {
+    const rect = surface.getBoundingClientRect();
+    const left = parseFloat(surface.style.left);
+    const top = parseFloat(surface.style.top);
+    return {
+      left: Number.isFinite(left) ? left : rect.left,
+      top: Number.isFinite(top) ? top : rect.top,
+      width: surface.offsetWidth || rect.width,
+    };
+  };
+  const menuBox = layoutBox(ctxMenu);
+  const actionBox = layoutBox(ctxActions);
+  const edgeGap = gap;
+  const maxActionRight = window.innerWidth - edgeGap;
+  const maxActionLeft = Math.max(edgeGap, maxActionRight - actionBox.width);
+  let menuLeft = menuBox.left <= MENU_VIEWPORT_EDGE_MARGIN ? edgeGap : menuBox.left;
+  let actionLeft = menuLeft + menuBox.width + gap;
 
-  if (desiredRight > maxRight) {
-    const menuLeft = Math.max(margin, maxRight - menuRect.width - gap - actionRect.width);
-    ctxMenu.style.left = `${Math.round(menuLeft)}px`;
-    menuRect = ctxMenu.getBoundingClientRect();
+  if (actionLeft + actionBox.width > maxActionRight) {
+    actionLeft = maxActionLeft;
+    menuLeft = actionLeft - gap - menuBox.width;
   }
 
-  let left = menuRect.right + gap;
-  if (left + actionRect.width > maxRight) {
-    const leftOfMenu = menuRect.left - gap - actionRect.width;
-    left = leftOfMenu >= margin ? leftOfMenu : clampMenuCoord(left, actionRect.width);
+  if (menuLeft < edgeGap) {
+    menuLeft = edgeGap;
+    actionLeft = Math.min(maxActionLeft, menuLeft + menuBox.width + gap);
   }
 
-  ctxActions.style.left = `${Math.round(left)}px`;
-  ctxActions.style.top = `${Math.round(clampMenuTop(menuRect.top, actionRect.height))}px`;
+  ctxMenu.style.left = `${Math.round(menuLeft)}px`;
+  ctxActions.style.left = `${Math.round(actionLeft)}px`;
+  ctxActions.style.top = `${Math.round(menuBox.top)}px`;
 }
 
 function openCtxMenuAt(x, y) {
   closeOpenMenusExcept('ctx-menu', 'open-ctx-menu');
-  openMenuAt(ctxMenu, x, y);
-  if (!ctxActions || !ctxActions.querySelector('.ctx-action-item')) return;
+  openMenuAt(ctxMenu, x, y, { animate: false });
+  if (!ctxActions || !ctxActions.querySelector('.ctx-action-item')) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('menu-open', { surface: ctxMenu });
+    return;
+  }
 
   updateCtxActionStates();
   ctxActions.classList.add('visible');
   const gap = menuGapPx();
-  const actionRect = ctxActions.getBoundingClientRect();
-  alignCtxActionsToMenuRow(actionRect, gap);
+  alignCtxActionsToMenuRow(gap);
+  globalThis.BoardfishMotion?.applyActionAnimation?.('menu-open', { surface: ctxMenu });
+  globalThis.BoardfishMotion?.applyActionAnimation?.('context-action-rail-open', { surface: ctxActions });
 }
 
 if (ctxActions) {
@@ -84,24 +121,31 @@ if (DEBUG_TOOLS_ENABLED) {
     document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:bubble`, e), false);
     ctxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`ctx-menu:${type}`, e));
     objCtxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`obj-ctx-menu:${type}`, e));
+    BoardfishDOM.textCtxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`text-ctx-menu:${type}`, e));
   }
 }
 
 function closeCtxMenu(reason) {
   MenuDebug.log('ctx-menu:close', { reason });
-  ctxMenu.classList.remove('visible');
+  closeFloatingSurface(ctxMenu);
   closeCtxActions(reason);
 }
 
 function closeObjCtxMenu(reason) {
   MenuDebug.log('obj-ctx-menu:close', { reason });
-  objCtxMenu.classList.remove('visible');
+  closeFloatingSurface(objCtxMenu);
 }
+
+const closeTextCtxMenu = (reason) => {
+  MenuDebug.log('text-ctx-menu:close', { reason });
+  closeFloatingSurface(BoardfishDOM.textCtxMenu);
+};
 
 function menuSurfaces() {
   return [
     { id: 'ctx-menu', close: closeCtxMenu },
     { id: 'obj-ctx-menu', close: closeObjCtxMenu },
+    { id: 'text-ctx-menu', close: closeTextCtxMenu },
   ];
 }
 
@@ -138,6 +182,120 @@ var MENU_COMMANDS = {
   'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
   'obj-btn-save-image': () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); },
   'obj-btn-save-images': () => { closeObjCtxMenu('command:save-images'); showInputShield({ keepSelectionOverlay: true }); saveSelectedImages(); },
+  'text-btn-copy': () => { closeTextCtxMenu('command:copy'); copyTextEditSelection(); },
+  'text-btn-paste': () => { closeTextCtxMenu('command:paste'); pasteTextIntoEditSelection(); },
+  'text-btn-cut': () => { closeTextCtxMenu('command:cut'); cutTextEditSelection(); },
+  'text-btn-delete': () => { closeTextCtxMenu('command:delete'); deleteTextEditSelection(); },
+};
+
+const getTextEditSelectionState = () => {
+  if (!editingId || !_editEl) return null;
+  const start = Math.max(0, Math.min(_editEl.selectionStart ?? 0, _editEl.value.length));
+  const end = Math.max(0, Math.min(_editEl.selectionEnd ?? start, _editEl.value.length));
+  return {
+    start: Math.min(start, end),
+    end: Math.max(start, end),
+    direction: _editEl.selectionDirection || 'none',
+    hasSelection: start !== end,
+  };
+};
+
+const focusTextEditProxy = () => {
+  if (!_editEl) return;
+  _editEl.focus({ preventScroll: true });
+};
+
+const selectedTextForEditMenu = () => {
+  const selection = getTextEditSelectionState();
+  if (!selection?.hasSelection || !_editEl) return '';
+  return _editEl.value.slice(selection.start, selection.end);
+};
+
+const readTextClipboardForEditMenu = async () => {
+  try {
+    if (hasTauri()) {
+      return String(await BoardfishTauri.readTextFromClipboard() || '');
+    }
+    if (navigator.clipboard?.readText) {
+      return String(await navigator.clipboard.readText() || '');
+    }
+  } catch (err) {
+    MenuDebug.log('text-ctx-menu:clipboard-text-miss', { error: String(err) });
+  }
+  return '';
+};
+
+const writeTextClipboardFromEditMenu = async (text) => {
+  if (!text) return false;
+  clearJsClipboard();
+  try {
+    await BoardfishClipboardIO.copyTextToClipboard(text);
+    return true;
+  } catch (err) {
+    MenuDebug.log('text-ctx-menu:clipboard-write-miss', { error: String(err) });
+    return false;
+  }
+};
+
+const replaceTextEditSelection = (text) => {
+  const selection = getTextEditSelectionState();
+  if (!selection || !_editEl) return false;
+  const normalizedText = normalizeTextContent(text);
+  _editEl.setSelectionRange(selection.start, selection.end, selection.direction);
+  _editEl.setRangeText(normalizedText, selection.start, selection.end, 'end');
+  _caretVisible = true;
+  _editEl.dispatchEvent(new Event('input', { bubbles: true }));
+  focusTextEditProxy();
+  scheduleRender(true, false);
+  return true;
+};
+
+const copyTextEditSelection = async () => {
+  const selection = getTextEditSelectionState();
+  const copied = await writeTextClipboardFromEditMenu(selectedTextForEditMenu());
+  if (copied) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
+      textSelection: {
+        id: editingId,
+        ...selection,
+      },
+    });
+    scheduleRender(true, false, 'copy-text-selection');
+  }
+  focusTextEditProxy();
+};
+
+const cutTextEditSelection = async () => {
+  const text = selectedTextForEditMenu();
+  if (!text) {
+    focusTextEditProxy();
+    return;
+  }
+  if (await writeTextClipboardFromEditMenu(text)) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-cut');
+    replaceTextEditSelection('');
+  }
+  else focusTextEditProxy();
+};
+
+const deleteTextEditSelection = () => {
+  if (!selectedTextForEditMenu()) {
+    focusTextEditProxy();
+    return;
+  }
+  globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-delete');
+  replaceTextEditSelection('');
+};
+
+const pasteTextIntoEditSelection = async () => {
+  const text = await readTextClipboardForEditMenu();
+  if (!text) {
+    focusTextEditProxy();
+    return;
+  }
+  clearJsClipboard();
+  globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-paste');
+  replaceTextEditSelection(text);
 };
 
 function menuCommandFromButton(button) {
@@ -145,7 +303,7 @@ function menuCommandFromButton(button) {
 }
 
 function menuCommandName(button) {
-  return button?.id ? button.id.replace(/^(btn|obj-btn)-/, '') : '';
+  return button?.id ? button.id.replace(/^(btn|obj-btn|text-btn)-/, '') : '';
 }
 
 function runMenuCommand(button, source) {
@@ -163,10 +321,16 @@ function runMenuCommand(button, source) {
     MenuDebug.log('menu:click-command:suppressed', { command });
     return true;
   }
-  MenuDebug.log(button.id.startsWith('obj-') ? 'obj-ctx-menu:command' : 'ctx-menu:command', {
+  const commandSurface = button.id.startsWith('obj-')
+    ? 'obj-ctx-menu:command'
+    : button.id.startsWith('text-')
+      ? 'text-ctx-menu:command'
+      : 'ctx-menu:command';
+  MenuDebug.log(commandSurface, {
     command,
     source,
   });
+  globalThis.BoardfishMotion?.applyActionAnimation?.('menu-command-press');
   if (source === 'pointerup' || source === 'mouseup') _lastPointerMenuCommandAt = performance.now();
   const runWithDebug = () => {
     MenuDebug.log('menu:command:start', { command, source });
@@ -228,6 +392,7 @@ function closestResetZoomObjectToViewportCenter() {
 
 function resetZoomToClosestObject() {
   const dbg = ViewportDebug.start('resetZoom', { panX, panY, zoom, objectCount: objects.length });
+  globalThis.BoardfishMotion?.applyActionAnimation?.('board-reset-zoom');
   const { object, targetType, distanceSq, center } = closestResetZoomObjectToViewportCenter();
   const targetZoom = 1;
   if (!object) {
@@ -333,11 +498,15 @@ ctxMenu.addEventListener('pointerdown', onMenuPointerDown);
 ctxMenu.addEventListener('pointerup', onMenuPointerUp);
 objCtxMenu.addEventListener('pointerdown', onMenuPointerDown);
 objCtxMenu.addEventListener('pointerup', onMenuPointerUp);
+BoardfishDOM.textCtxMenu.addEventListener('pointerdown', onMenuPointerDown);
+BoardfishDOM.textCtxMenu.addEventListener('pointerup', onMenuPointerUp);
 ctxMenu.addEventListener('mousedown', onMenuMouseDown);
 ctxMenu.addEventListener('mouseup', onMenuMouseUp);
 objCtxMenu.addEventListener('mousedown', onMenuMouseDown);
 objCtxMenu.addEventListener('mouseup', onMenuMouseUp);
-for (const menu of [ctxMenu, objCtxMenu, ctxActions].filter(Boolean)) {
+BoardfishDOM.textCtxMenu.addEventListener('mousedown', onMenuMouseDown);
+BoardfishDOM.textCtxMenu.addEventListener('mouseup', onMenuMouseUp);
+for (const menu of [ctxMenu, objCtxMenu, BoardfishDOM.textCtxMenu, ctxActions].filter(Boolean)) {
   for (const type of ['click', 'contextmenu']) {
     menu.addEventListener(type, (e) => {
       e.stopPropagation();
@@ -350,6 +519,7 @@ function isContextMenuSurfaceEvent(e) {
   return !!(e?.target instanceof Node && (
     ctxMenu.contains(e.target) ||
     objCtxMenu.contains(e.target) ||
+    BoardfishDOM.textCtxMenu.contains(e.target) ||
     ctxActions?.contains(e.target)
   ));
 }
@@ -387,6 +557,19 @@ function updateObjMenuActions() {
   if (deleteBtn) deleteBtn.style.display = showDelete ? '' : 'none';
 }
 
+const updateTextEditMenuActions = async () => {
+  const selection = getTextEditSelectionState();
+  const hasSelection = !!selection?.hasSelection;
+  const clipboardText = await readTextClipboardForEditMenu();
+  const showPaste = clipboardText.length > 0;
+  BoardfishDOM.textCopyBtn.style.display = hasSelection ? '' : 'none';
+  BoardfishDOM.textPasteBtn.style.display = showPaste ? '' : 'none';
+  BoardfishDOM.textCutBtn.style.display = hasSelection ? '' : 'none';
+  BoardfishDOM.textDeleteSep.style.display = hasSelection ? 'block' : 'none';
+  BoardfishDOM.textDeleteBtn.style.display = hasSelection ? '' : 'none';
+  return hasSelection || showPaste;
+};
+
 function updateCtxMenuActions() {
   const hasImages = objects.some((o) => o.type === 'image');
   const hasText   = objects.some((o) => o.type === 'text');
@@ -398,6 +581,28 @@ function updateCtxMenuActions() {
   if (exportAllImageBtn) exportAllImageBtn.style.display = show && hasImages ? '' : 'none';
   if (exportAllSep) exportAllSep.style.display = show ? 'block' : 'none';
 }
+
+const showTextEditContextMenuAt = async (clientX, clientY) => {
+  const requestId = (showTextEditContextMenuAt.requestId || 0) + 1;
+  showTextEditContextMenuAt.requestId = requestId;
+  focusTextEditProxy();
+  const hasVisibleActions = await updateTextEditMenuActions();
+  if (requestId !== showTextEditContextMenuAt.requestId || !editingId) return;
+  if (!hasVisibleActions) {
+    closeOpenMenusExcept('', 'text-ctx-menu:empty');
+    focusTextEditProxy();
+    MenuDebug.log('text-ctx-menu:blocked-empty', { x: clientX, y: clientY });
+    return;
+  }
+  openExclusiveMenuAt(BoardfishDOM.textCtxMenu, 'text-ctx-menu', clientX, clientY, 'show-text-menu:edit');
+  focusTextEditProxy();
+  MenuDebug.log('text-ctx-menu:open', {
+    hasSelection: !!getTextEditSelectionState()?.hasSelection,
+    pasteVisible: BoardfishDOM.textPasteBtn.style.display !== 'none',
+    x: clientX,
+    y: clientY,
+  });
+};
 
 function showCanvasContextMenuAt(clientX, clientY) {
   if (_rubberBandDragActive) {
@@ -414,6 +619,11 @@ function showCanvasContextMenuAt(clientX, clientY) {
   }
 
   const obj = hitTest(wp.x, wp.y);
+
+  if (editingId && obj?.id === editingId) {
+    showTextEditContextMenuAt(clientX, clientY);
+    return;
+  }
 
   // Multi-select: right-click anywhere inside the selected bounding box shows
   // the group menu.
@@ -549,6 +759,11 @@ darkModeMenuBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   if (ctxActions?.contains(e.currentTarget) && !isCtxActionHotspotEvent(e, e.currentTarget)) return;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('dark-mode-toggle');
   closeCtxMenu('command:dark-mode');
   Promise.resolve(toggleAppTheme()).finally(updateCtxActionStates);
+});
+
+document.getElementById('ctx-btn-github')?.addEventListener('click', () => {
+  globalThis.BoardfishMotion?.applyActionAnimation?.('external-github-open');
 });

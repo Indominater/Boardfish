@@ -108,7 +108,7 @@ function loadCanvasWheelHarness() {
 
 function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1 } = {}) {
   const source = readSource('src/js/context_menu.js');
-  const match = source.match(/function pointToObjectCenterDistanceSq\(point, obj\) \{[\s\S]*?\n\nconst resetZoomFromPill/);
+  const match = source.match(/function pointToObjectCenterDistanceSq\(point, obj\) \{[\s\S]*?\r?\n\r?\nconst resetZoomFromPill/);
   assert.ok(match, 'reset zoom functions are missing');
 
   const context = {
@@ -142,7 +142,7 @@ function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1 } = {
   };
 
   vm.createContext(context);
-  vm.runInContext(match[0].replace(/\n\nconst resetZoomFromPill$/, ''), context);
+  vm.runInContext(match[0].replace(/\r?\n\r?\nconst resetZoomFromPill$/, ''), context);
   return context;
 }
 
@@ -166,6 +166,24 @@ test('background context menu clears object selection before opening', () => {
   const contextMenuSource = readSource('src/js/context_menu.js');
 
   assert.match(contextMenuSource, /if \(obj\) \{[\s\S]*obj-ctx-menu:open[\s\S]*return;[\s\S]*\}\s*if \(selectedIds\.size\) deselectAll\(\);\s*ctxPos = wp;\s*updateCtxMenuActions\(\);\s*openCtxMenuAt\(clientX, clientY\);/);
+});
+
+test('text editing context menu uses text actions before object actions', () => {
+  const contextMenuSource = readSource('src/js/context_menu.js');
+  const indexSource = readSource('src/index.html');
+
+  assert.match(contextMenuSource, /if \(editingId && obj\?\.id === editingId\) \{\s*showTextEditContextMenuAt\(clientX, clientY\);\s*return;\s*\}/);
+  assert.match(contextMenuSource, /const showPaste = clipboardText\.length > 0;/);
+  assert.match(contextMenuSource, /return hasSelection \|\| showPaste;/);
+
+  const textMenuStart = indexSource.indexOf('<div id="text-ctx-menu">');
+  assert.notEqual(textMenuStart, -1);
+  const textMenuEnd = indexSource.indexOf('<input type="file"', textMenuStart);
+  const textMenu = indexSource.slice(textMenuStart, textMenuEnd);
+  assert.ok(textMenu.indexOf('id="text-btn-copy"') < textMenu.indexOf('id="text-btn-paste"'));
+  assert.ok(textMenu.indexOf('id="text-btn-paste"') < textMenu.indexOf('id="text-btn-cut"'));
+  assert.ok(textMenu.indexOf('id="text-btn-cut"') < textMenu.indexOf('id="text-sep-delete"'));
+  assert.ok(textMenu.indexOf('id="text-sep-delete"') < textMenu.indexOf('id="text-btn-delete"'));
 });
 
 test('wheel zoom over visible floating UI uses the viewport wheel handler', () => {

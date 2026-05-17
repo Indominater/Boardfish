@@ -288,7 +288,7 @@ const clampEyedropperCardPosition = (card, left, top) => {
 const applyEyedropperCardPosition = (card, left, top) => {
   if (!card?.el) return;
   const position = clampEyedropperCardPosition(card, left, top);
-  card.el.style.transform = `translate(${position.left}px,${position.top}px)`;
+  card.el.style.left = `${position.left}px`; card.el.style.top = `${position.top}px`;
 };
 
 function createEyedropperCard() {
@@ -342,6 +342,7 @@ function eyedropperCardFromEvent(e) {
 function prepareEyedropperSamplingCard() {
   const card = ensureEyedropperCard() || createEyedropperCard();
   useEyedropperCard(card);
+  BoardfishEyedropperCards.preservePinnedCardUntilNextSample(card, EyedropperDebug);
   card.el.classList.remove('visible', 'pinned', 'dragging');
   invalidateEyedropperLayoutMetrics();
   resetEyedropperCardPreviewState(card);
@@ -350,8 +351,8 @@ function prepareEyedropperSamplingCard() {
 
 function hideEyedropperCard(card) {
   if (!card) return;
-  if (_eyedropperDragState?.card === card) _eyedropperDragState = null;
-  card.el.classList.remove('visible', 'pinned', 'dragging');
+  const wasVisible = card.el?.classList.contains('visible'); if (_eyedropperDragState?.card === card) _eyedropperDragState = null;
+  card.el.classList.remove('visible', 'pinned', 'dragging'); if (wasVisible) globalThis.BoardfishMotion?.applyActionAnimation?.('eyedropper-loupe-close');
   invalidateEyedropperLayoutMetrics();
 }
 
@@ -452,8 +453,9 @@ const rememberEyedropperPendingCardPreviewSnapshot = (card, canvas, reason = 'sa
 
 const resetEyedropperCardVisual = (card) => {
   if (!card?.el) return;
+  BoardfishEyedropperCards.removePendingPinnedCardClone(card);
   card.el.classList.remove('visible', 'pinned', 'dragging');
-  card.el.style.transform = '';
+  card.el.style.left = card.el.style.top = '';
   resetEyedropperCardPreviewState(card);
   if (card.hex) card.hex.textContent = '#000000';
   if (card.rgb) card.rgb.textContent = '0 0 0';
@@ -540,7 +542,7 @@ function setEyedropperEnabled(enabled, options = {}) {
   }
 
   if (eyedropperEnabled) {
-    phaseStart = performance.now();
+    phaseStart = performance.now(); if (typeof markOpenEyedropperNativeDecodePrewarmStarted === 'function') markOpenEyedropperNativeDecodePrewarmStarted('eyedropper-enabled');
     scheduleEyedropperNativeDecodePrewarm('eyedropper-enabled');
     recordPhase('prewarmSchedule', phaseStart);
   } else {
@@ -764,7 +766,7 @@ function positionEyedropperLoupe(clientX, clientY) {
   const unclampedTop = clientY - previewTopOffset - sampleCenter.y;
   const left = Math.max(margin, Math.min(window.innerWidth - width - margin, unclampedLeft));
   const top = Math.max(margin, Math.min(window.innerHeight - height - margin, unclampedTop));
-  eyedropperLoupe.style.transform = `translate(${Math.round(left)}px,${Math.round(top)}px)`;
+  eyedropperLoupe.style.left = `${Math.round(left)}px`; eyedropperLoupe.style.top = `${Math.round(top)}px`;
   return layout;
 }
 
@@ -1148,7 +1150,6 @@ const resolveEyedropperImageReadoutTargetAt = (clientX, clientY, timings = null)
   if (!token) return { kind: 'image-miss', object: topObject, key, reason: 'missing-image-token' };
   return { kind: 'image', object: topObject, key, local, safeEntry, token };
 };
-
 function resolveEyedropperNativePixelTargetAt(clientX, clientY, timings = null) {
   const options = arguments[3] || {};
   const logMiss = options.logMiss === true;
@@ -1223,7 +1224,7 @@ function pumpEyedropperNativePixelQueue() {
     : null;
   _eyedropperNativePixelTarget = target;
   if (!target) return;
-  if (eyedropperNativeDecodePrewarm.active.has(target.key)) {
+  if (indominaterGreedyEyedropperNativeDecodePrewarm.active.has(target.key)) {
     EyedropperDebug._logSamplingEvent('native-pixel-wait-decode-prewarm', nativePixelQueueDebugState(pointer, target, {
       sourceKind: 'native-pixel',
       reason: 'decode-prewarm-active',
@@ -1235,7 +1236,7 @@ function pumpEyedropperNativePixelQueue() {
     }));
     return;
   }
-  if (!eyedropperNativeDecodePrewarm.ready.has(target.key)) {
+  if (!indominaterGreedyEyedropperNativeDecodePrewarm.ready.has(target.key)) {
     EyedropperDebug._logSamplingEvent('native-pixel-wait-decode-prewarm', nativePixelQueueDebugState(pointer, target, {
       sourceKind: 'native-pixel',
       reason: 'decode-not-ready',
@@ -1293,8 +1294,8 @@ function pumpEyedropperNativePixelQueue() {
       const sourceX = Number(result.sourceX);
       const sourceY = Number(result.sourceY);
       const pixel = [rgba[0], rgba[1], rgba[2], rgba[3]];
-      eyedropperNativeDecodePrewarm.ready.add(target.key);
-      eyedropperNativeDecodePrewarm.failed.delete(target.key);
+      indominaterGreedyEyedropperNativeDecodePrewarm.ready.add(target.key);
+      indominaterGreedyEyedropperNativeDecodePrewarm.failed.delete(target.key);
       updateEyedropperColorReadout(pixel, {
         source: 'native-pixel',
         reason: 'native-pixel-ready',
@@ -1323,7 +1324,7 @@ function pumpEyedropperNativePixelQueue() {
       });
     })
     .catch((err) => {
-      eyedropperNativeDecodePrewarm.ready.delete(target.key);
+      indominaterGreedyEyedropperNativeDecodePrewarm.ready.delete(target.key);
       scheduleEyedropperSamplerDecode('native-pixel-sample-miss');
       EyedropperDebug._logReadbackFailure('native-pixel-sample', {
         imgKey: target.key,
@@ -1689,9 +1690,9 @@ function clearEyedropperSafeImageCache() {
   eyedropperSafeTileCachePending.clear();
   eyedropperSafeTileCacheBytes = 0;
   _eyedropperNativePixelTarget = null;
-  eyedropperNativeDecodePrewarm.ready.clear();
-  eyedropperNativeDecodePrewarm.failed.clear();
-  eyedropperNativeDecodePrewarm.pendingReasons.clear();
+  indominaterGreedyEyedropperNativeDecodePrewarm.ready.clear();
+  indominaterGreedyEyedropperNativeDecodePrewarm.failed.clear();
+  indominaterGreedyEyedropperNativeDecodePrewarm.pendingReasons.clear();
   eyedropperSafeDisplayProbeFailures.clear();
   eyedropperNativeSourceSkipLogged.clear();
 }
@@ -2325,9 +2326,8 @@ function commitEyedropperSample(e, options = {}) {
   const visibleStart = performance.now();
   if (!eyedropperLoupe.classList.contains('visible')) {
     if (typeof closeOpenMenusExcept === 'function') closeOpenMenusExcept('eyedropper-loupe', 'open-eyedropper-loupe');
-    eyedropperLoupe.classList.add('visible');
-    invalidateEyedropperLayoutMetrics();
-    layoutMetrics = null;
+    eyedropperLoupe.classList.add('visible'); globalThis.BoardfishMotion?.applyActionAnimation?.('eyedropper-loupe-open');
+    invalidateEyedropperLayoutMetrics(); layoutMetrics = null;
   }
   timings.showLoupe = performance.now() - visibleStart;
   const visibleAt = performance.now();
@@ -2337,6 +2337,7 @@ function commitEyedropperSample(e, options = {}) {
   latency.eventToPreviewVisibleMs = eventToPreviewVisibleMs == null ? '' : Math.round(eventToPreviewVisibleMs * 100) / 100;
   const positionStart = performance.now();
   layoutMetrics = positionEyedropperLoupe(e.clientX, e.clientY, layoutMetrics);
+  BoardfishEyedropperCards.removePendingPinnedCardClone(eyedropperActiveCard);
   timings.position = performance.now() - positionStart;
   timings.total = performance.now() - totalStart;
   if (previewSample) previewSample.timings = timings;
@@ -2503,7 +2504,7 @@ const shouldProcessEyedropperMoveEvent = (e) => {
   const now = performance.now();
   const eventType = String(e.type || '');
   if (eventType === 'pointermove') {
-    eyedropperNativeDecodePrewarm.lastPointerMoveForDedupe = {
+    indominaterGreedyEyedropperNativeDecodePrewarm.lastPointerMoveForDedupe = {
       clientX: e.clientX,
       clientY: e.clientY,
       timeStamp: Number(e.timeStamp) || 0,
@@ -2513,7 +2514,7 @@ const shouldProcessEyedropperMoveEvent = (e) => {
     return true;
   }
   if (eventType !== 'mousemove') return true;
-  const last = eyedropperNativeDecodePrewarm.lastPointerMoveForDedupe;
+  const last = indominaterGreedyEyedropperNativeDecodePrewarm.lastPointerMoveForDedupe;
   if (!last) return true;
   const samePoint = last.clientX === e.clientX && last.clientY === e.clientY;
   const timeStamp = Number(e.timeStamp) || 0;
@@ -2561,7 +2562,7 @@ function activatePinnedEyedropperCardInteraction(card, reason = 'pinned-card-int
 
 function beginEyedropperHoldSample(e = null) {
   if (!eyedropperEnabled || _eyedropperHoldActive) return false;
-  _eyedropperHoldActive = true;
+  _eyedropperHoldActive = true; globalThis.BoardfishMotion?.applyActionAnimation?.('eyedropper-hold-start');
   document.body.classList.add('eyedropper-hold-active');
   eyedropperSampling = true;
   prepareEyedropperSamplingCard();
@@ -2584,7 +2585,7 @@ function beginEyedropperHoldSample(e = null) {
 
 function endEyedropperHoldSample(e = null) {
   if (!_eyedropperHoldActive) return false;
-  _eyedropperHoldActive = false;
+  _eyedropperHoldActive = false; globalThis.BoardfishMotion?.applyActionAnimation?.('eyedropper-hold-end');
   document.body.classList.remove('eyedropper-hold-active');
   if (eyedropperSampling && e?.clientX != null && e?.clientY != null) noteEyedropperMouseEvent(e);
   endEyedropperSample(_eyedropperLastMouseEvent);
@@ -2600,7 +2601,7 @@ function updateEyedropperHoldSample(e) {
     endEyedropperHoldSample(e);
     return;
   }
-  updateEyedropperSample(e);
+  globalThis.BoardfishMotion?.applyActionAnimation?.('eyedropper-hover'); updateEyedropperSample(e);
 }
 
 function dragEyedropperLoupeTo(clientX, clientY) {
@@ -2625,7 +2626,7 @@ function startEyedropperLoupeDrag(e, card = eyedropperActiveCard) {
     startLeft: rect.left,
     startTop: rect.top,
   };
-  card.el.classList.add('dragging');
+  card.el.classList.add('dragging'); globalThis.BoardfishMotion?.applyActionAnimation?.('eyedropper-loupe-drag');
   card.el.setPointerCapture?.(e.pointerId);
   return true;
 }

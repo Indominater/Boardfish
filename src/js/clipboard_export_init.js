@@ -29,6 +29,17 @@ const readWebClipboardTokenForPaste = async (clipboardData, dbg = null) => {
   }
 };
 
+const noteTextObjectCopyFeedback = (obj) => {
+  if (obj?.type !== 'text') return false;
+  const text = normalizeTextContent(obj.data?.content);
+  if (!text.length) return false;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-object', {
+    objects: [obj],
+  });
+  scheduleRender(true, true, 'copy-text-object');
+  return true;
+};
+
 const clipboardImageBlobName = (blob, fallback = 'clipboard-image') => {
   if (blob?.name) return blob.name;
   const ext = blob?.type === 'image/jpeg' ? 'jpg' : 'png';
@@ -76,6 +87,7 @@ async function copySelected() {
   if (!selectedIds.size) { ClipDebug.end(dbg, { skipped: 'empty-selection' }); return; }
 
   if (selectedIds.size > 1) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
     const clonedObjs = [];
     const imageData = {};
     let processed = 0;
@@ -110,6 +122,9 @@ async function copySelected() {
 
   const obj = getFirstSelectedObject();
   if (!obj) { ClipDebug.end(dbg, { skipped: 'missing-object' }); return; }
+  if (!noteTextObjectCopyFeedback(obj)) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
+  }
 
   const cloned = cloneObject(obj);
   const imgData = {};
@@ -306,7 +321,14 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
             });
           }
         }
-        BoardfishEditorState.setSelection(pastedIds, { primaryId: pastedIds[pastedIds.length - 1] });
+        BoardfishEditorState.setSelection(pastedIds, {
+          primaryId: pastedIds[pastedIds.length - 1],
+          animateSelection: false,
+        });
+        const pastedTextObjects = clones.filter((obj) => obj?.type === 'text');
+        const pastedNonTextObjects = clones.filter((obj) => obj?.type !== 'text');
+        globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-paste', { objects: pastedTextObjects });
+        globalThis.BoardfishMotion?.applyActionAnimation?.('image-object-paste', { objects: pastedNonTextObjects });
         ClipDebug.step(dbg, 'paste:objects-add-done', { objectCount: clones.length, registeredImages });
         scheduleRender(true, true);
         ClipDebug.step(dbg, 'paste:boardHistory-start', { objectCount: clones.length });
@@ -340,7 +362,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     }
     const eventText = BoardfishClipboardIO.readClipboardTextFromEvent(clipboardData);
     if (eventText && eventText.trim()) {
-      addText(wx - 100, wy - 40, eventText);
+      addText(wx, wy, eventText, { anchor: 'center' });
       ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length });
       return;
     }
@@ -393,7 +415,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
             TAURI_COMMANDS.READ_TEXT_FROM_CLIPBOARD,
             () => BoardfishTauri.readTextFromClipboard()
           );
-          if (text && text.trim()) addText(wx - 100, wy - 40, text);
+          if (text && text.trim()) addText(wx, wy, text, { anchor: 'center' });
           ClipDebug.end(dbg, { path: 'native-text', textLen: text?.length || 0, objectCountAfter: objects.length });
           return;
         } catch (textErr) {
@@ -412,7 +434,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       }
       hideInputShield();
       const text = await navigator.clipboard.readText();
-      if (text && text.trim()) addText(wx - 100, wy - 40, text);
+      if (text && text.trim()) addText(wx, wy, text, { anchor: 'center' });
       ClipDebug.end(dbg, { path: 'web-text', textLen: text?.length || 0, objectCountAfter: objects.length });
     } catch (err) {
       hideInputShield();

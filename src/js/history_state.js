@@ -2,6 +2,150 @@
 var boardHistory = [];
 var historyIndex = -1;
 var MAX_HISTORY = 50;
+const HISTORY_FULL_SELECTION_PULSE_REASONS = new Set([
+  'send-selected-to-back',
+]);
+const HISTORY_ADDED_OBJECT_REASONS = new Set([
+  'add-image',
+  'add-native-data-url-image',
+  'add-native-image',
+  'bulk-image-insert',
+  'duplicate-selected',
+  'paste-objects',
+  'paste-native-image',
+]);
+const HISTORY_SMOOTH_SLIDE_REASONS = new Set([
+]);
+const HISTORY_RESTORE_DELETED_REASONS = new Set([
+  'delete-selected',
+]);
+const HISTORY_NO_REPLAY_REASONS = new Set([
+  'snapshot',
+  'add-text',
+  'delete-empty-text',
+  'text-edit-checkpoint',
+  'text-height-change',
+]);
+
+const historyReasonUsesFullSelectionPulse = (reason = '') => {
+  const value = String(reason || '');
+  return HISTORY_FULL_SELECTION_PULSE_REASONS.has(value) ||
+    value.startsWith('flip-image-') ||
+    value.startsWith('rotate-image-');
+};
+
+const historySelectionPulseOptions = (entry) => {
+  const reason = Array.isArray(entry) ? '' : entry?.reason;
+  return historyReasonUsesFullSelectionPulse(reason) ? {} : { includeText: false };
+};
+
+const historyMotionForReason = (reason = '') => {
+  const value = String(reason || '');
+  if (!value || HISTORY_NO_REPLAY_REASONS.has(value)) return { type: 'none' };
+  if (HISTORY_ADDED_OBJECT_REASONS.has(value)) return { type: 'added-objects', options: { includeText: false } };
+  if (HISTORY_SMOOTH_SLIDE_REASONS.has(value)) return { type: 'smooth-slide' };
+  if (HISTORY_RESTORE_DELETED_REASONS.has(value)) return { type: 'restore-deleted-objects', options: { includeText: false } };
+  return { type: 'jello', options: historyReasonUsesFullSelectionPulse(value) ? {} : { includeText: false } };
+};
+
+const historyMotionForEntry = (entry) => {
+  if (Array.isArray(entry)) return historyMotionForReason('');
+  const motion = entry?.motion;
+  if (motion?.type === 'added-objects') return { type: 'added-objects', options: { ...(motion.options || {}) } };
+  if (motion?.type === 'restore-deleted-objects') return { type: 'restore-deleted-objects', options: { ...(motion.options || {}) } };
+  if (motion?.type === 'smooth-slide') return { type: 'smooth-slide' };
+  if (motion?.type === 'jello') return { type: 'jello', options: { ...(motion.options || {}) } };
+  if (motion?.type === 'none') return { type: 'none' };
+  return historyMotionForReason(entry?.reason || '');
+};
+
+const applyHistoryAddedObjectsMotion = (added, removed, options = {}) => {
+  if (added.length) {
+    if (options.textMotion === 'smooth-slide') {
+      const textObjects = added.filter((obj) => obj?.type === 'text');
+      const nonTextObjects = added.filter((obj) => obj?.type !== 'text');
+      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-redo-create', { objects: textObjects }, options);
+      globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { objects: nonTextObjects }, {
+        ...options,
+        includeText: false,
+      });
+    } else {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { objects: added }, options);
+    }
+  }
+  if (removed.length) globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects: removed }, options);
+};
+
+const applyHistoryRestoredDeleteMotion = (added, removed, options = {}) => {
+  if (added.length) {
+    const textObjects = added.filter((obj) => obj?.type === 'text');
+    const imageObjects = added.filter((obj) => obj?.type === 'image');
+    globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-undo-delete', { objects: textObjects });
+    globalThis.BoardfishMotion?.applyActionAnimation?.('object-undo-delete', { objects: imageObjects }, {
+      ...options,
+      includeText: false,
+    });
+  }
+  if (removed.length) globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects: removed }, options);
+};
+
+const historyRestoreMotionTransition = (beforeObjects = [], targetObjects = []) => {
+  const beforeIds = new Set();
+  for (const obj of beforeObjects || []) {
+    if (obj?.id) beforeIds.add(obj.id);
+  }
+  const targetIds = new Set();
+  const addedIds = [];
+  for (const obj of targetObjects || []) {
+    if (!obj?.id) continue;
+    targetIds.add(obj.id);
+    if (!beforeIds.has(obj.id)) addedIds.push(obj.id);
+  }
+  const removed = [];
+  for (const obj of beforeObjects || []) {
+    if (!obj?.id || targetIds.has(obj.id)) continue;
+    removed.push(cloneObject(obj));
+  }
+  return { addedIds, removed };
+};
+
+const applyHistoryMotionReplay = (motion, transition, selectionPulseOptions) => {
+  const replay = motion || { type: 'jello', options: selectionPulseOptions };
+  if (replay.type === 'none') return;
+  const added = (transition?.addedIds || [])
+    .map((id) => objectsMap.get(id))
+    .filter(Boolean);
+  const removed = transition?.removed || [];
+  if (replay.type === 'smooth-slide') {
+    if (added.length) {
+      const textObjects = added.filter((obj) => obj?.type === 'text');
+      const nonTextObjects = added.filter((obj) => obj?.type !== 'text');
+      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-undo-delete', { objects: textObjects });
+      globalThis.BoardfishMotion?.applyActionAnimation?.('object-undo-delete', { objects: nonTextObjects }, { includeText: false });
+    }
+    if (removed.length) globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects: removed });
+    return;
+  }
+  if (replay.type === 'added-objects') {
+    applyHistoryAddedObjectsMotion(added, removed, replay.options || {});
+    return;
+  }
+  if (replay.type === 'restore-deleted-objects') {
+    applyHistoryRestoredDeleteMotion(added, removed, replay.options || {});
+    return;
+  }
+  const options = replay.options || selectionPulseOptions || {};
+  if (added.length) globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { objects: added }, options);
+  if (removed.length) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { removedObjects: removed }, options);
+  }
+  if (!added.length && !removed.length) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', {
+      selection: true,
+      options: selectionPulseOptions,
+    });
+  }
+};
 
 function trimHistory() {
   if (boardHistory.length > MAX_HISTORY) {
@@ -66,6 +210,8 @@ function snapshot() {
   const editState = captureEditState();
   HistoryDebug.step(dbg, 'captureEditState', { editState: !!editState });
   boardHistory.push({
+    reason: 'snapshot',
+    motion: historyMotionForReason('snapshot'),
     objects: objectsSnapshot,
     editState,
   });
@@ -111,6 +257,8 @@ function pushHistory(reason = '') {
   const editState = captureEditState();
   HistoryDebug.step(dbg, 'captureEditState', { editState: !!editState });
   boardHistory.push({
+    reason,
+    motion: historyMotionForReason(reason),
     objects: entry,
     editState,
   });
@@ -123,10 +271,14 @@ function pushHistory(reason = '') {
   HistoryDebug.end(dbg, { reason, ms, cloned, reused, historyLength: boardHistory.length, historyIndex });
 }
 
-function restoreSnapshot(s) {
+function restoreSnapshot(s, {
+  historyMotion = null,
+  selectionPulseOptions = { includeText: false },
+} = {}) {
   const snapshotObjects = Array.isArray(s) ? s : (s?.objects || []);
   const editState = Array.isArray(s) ? null : (s?.editState || null);
   const hadEditing = !!editingId;
+  const motionTransition = historyRestoreMotionTransition(objects, snapshotObjects);
   const dbg = HistoryDebug.start('restoreSnapshot', {
     objectCount: snapshotObjects.length,
     historyLength: boardHistory.length,
@@ -160,8 +312,9 @@ function restoreSnapshot(s) {
   HistoryDebug.step(dbg, 'sync-text-heights');
   invalidateOffscreen();
   // Preserve selection for objects that still exist in the restored state
-  BoardfishEditorState.setSelection([...prevSelectedIds], { exitEditing: false });
+  BoardfishEditorState.setSelection([...prevSelectedIds], { exitEditing: false, animateSelection: false });
   renderAll();
+  applyHistoryMotionReplay(historyMotion, motionTransition, selectionPulseOptions);
   HistoryDebug.step(dbg, 'renderAll', { selectedCount: selectedIds.size });
 
   if (!editState || !editState.id) {
@@ -206,20 +359,30 @@ function captureEditState() {
 
 function undo() {
   if (historyIndex <= 0) return;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('history-undo');
   HistoryDebug.count('undo');
   const dbg = HistoryDebug.start('undo', { historyLength: boardHistory.length, historyIndex });
+  const actionEntry = boardHistory[historyIndex];
   historyIndex--;
-  restoreSnapshot(boardHistory[historyIndex]);
+  restoreSnapshot(boardHistory[historyIndex], {
+    historyMotion: historyMotionForEntry(actionEntry),
+    selectionPulseOptions: historySelectionPulseOptions(actionEntry),
+  });
   updateTitle();
   HistoryDebug.end(dbg, { historyLength: boardHistory.length, historyIndex });
 }
 
 function redo() {
   if (historyIndex >= boardHistory.length - 1) return;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('history-redo');
   HistoryDebug.count('redo');
   const dbg = HistoryDebug.start('redo', { historyLength: boardHistory.length, historyIndex });
   historyIndex++;
-  restoreSnapshot(boardHistory[historyIndex]);
+  const actionEntry = boardHistory[historyIndex];
+  restoreSnapshot(actionEntry, {
+    historyMotion: historyMotionForEntry(actionEntry),
+    selectionPulseOptions: historySelectionPulseOptions(actionEntry),
+  });
   updateTitle();
   HistoryDebug.end(dbg, { historyLength: boardHistory.length, historyIndex });
 }

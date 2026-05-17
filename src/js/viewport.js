@@ -71,6 +71,16 @@ const syncOpeningShieldPill = (text = islZoom.textContent) => {
   pill.classList.toggle('visible', !!text);
 };
 
+const setPillMessageText = (text, { animate = true } = {}) => {
+  const nextText = text == null ? '' : String(text);
+  const previousText = islZoom.textContent || '';
+  const textChanged = previousText !== nextText;
+  islZoom.textContent = nextText;
+  syncOpeningShieldPill(nextText);
+  if (animate && textChanged) globalThis.BoardfishMotion?.applyActionAnimation?.('pill-message-update', { pill: true });
+  return textChanged;
+};
+
 function setIslandVisible(visible) {
   island.classList.toggle('visible', visible);
   island.setAttribute('aria-hidden', visible ? 'false' : 'true');
@@ -85,15 +95,22 @@ const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
   island.dataset.mode = 'zoom';
   island.title = 'Reset Zoom';
   setIslandVisible(true);
-  if (changed) PillDebug.log('zoomIsland:shown', { reason, zoom, text: zoomText });
+  if (changed) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('pill-message-open', { pill: true });
+    PillDebug.log('zoomIsland:shown', { reason, zoom, text: zoomText });
+  }
 };
 
 function showIslandForMessage(text) {
-  islZoom.textContent = text;
+  const wasVisible = island.classList.contains('visible');
+  const previousMode = island.dataset.mode;
   island.dataset.mode = 'message';
   island.title = 'Reset Zoom';
   setIslandVisible(true);
-  syncOpeningShieldPill(text);
+  const textChanged = setPillMessageText(text, { animate: false });
+  if (!wasVisible || previousMode !== 'message' || textChanged) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('pill-message-open', { pill: true });
+  }
 }
 
 function hideIsland(reason = 'hide') {
@@ -117,8 +134,7 @@ function startIslandBusyMsg(text) {
   return {
     update(nextText) {
       if (token !== _islMsgToken) return;
-      islZoom.textContent = nextText;
-      syncOpeningShieldPill(nextText);
+      setPillMessageText(nextText);
       PillDebug.log('busyIslandMsg:update', { text: nextText });
     },
     done(finalMsg = null, duration = short_message, onRestore = null) {
@@ -308,9 +324,9 @@ function drawVisibleObjects(context, counters, { skipId = null, viewportRect = c
   return BoardRenderer.drawVisibleObjects(context, counters, { skipId, viewportRect, view, imageSourceResolver });
 }
 
-function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd) {
-  if (selStart === selEnd) return;
-  context.fillStyle = 'rgba(10, 132, 255, 0.3)';
+const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
+  if (selStart === selEnd) return null;
+  const runs = [];
   for (const line of layout) {
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
@@ -319,11 +335,111 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd) {
       const endX = lineEndX(line, obj);
       const x1 = o0 < line.text.length ? lineXAtOffset(line, obj, o0) : endX;
       const x2 = o1 < line.text.length ? lineXAtOffset(line, obj, o1) : endX;
-      TextSelDebug._logDraw(line, selStart, selEnd, x1, x2);
-      context.fillRect(x1, line.y, x2 - x1, LINE_H);
+      runs.push({ line, x1, x2, text: line.text.slice(o0, o1) });
     }
   }
+  if (!runs.length) return null;
+  return {
+    runs,
+    bounds: {
+      left: Math.min(...runs.map((run) => run.x1)),
+      top: Math.min(...runs.map((run) => run.line.y)),
+      right: Math.max(...runs.map((run) => run.x2)),
+      bottom: Math.max(...runs.map((run) => run.line.y + LINE_H)),
+    },
+  };
+};
+
+const textSelectionMotionForOptions = (obj, selStart, selEnd, options = {}) => {
+  if (Object.prototype.hasOwnProperty.call(options, 'motion')) return options.motion || null;
+  return globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd) || null;
+};
+
+const applyTextSelectionMotionTransform = (context, bounds, motion) => {
+  if (!motion) return false;
+  const cx = (bounds.left + bounds.right) / 2;
+  const cy = (bounds.top + bounds.bottom) / 2;
+  context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * (motion.opacity ?? 1);
+  context.translate(cx, cy);
+  context.scale(motion.scaleX ?? 1, motion.scaleY ?? 1);
+  context.translate(-cx, -cy);
+  return true;
+};
+
+const drawTextLayoutStatic = (context, obj, layout, selectionGap = null) => {
+  context.fillStyle = canvasTextColor();
+  if (!selectionGap) {
+    for (const line of layout) context.fillText(line.text, obj.x + TEXT_PAD, line.textY);
+    return;
+  }
+  const selStart = Math.min(selectionGap.start, selectionGap.end);
+  const selEnd = Math.max(selectionGap.start, selectionGap.end);
+  for (const line of layout) {
+    const ls = line.startIndex, textEnd = ls + line.text.length;
+    const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
+    if (h0 >= h1) {
+      context.fillText(line.text, obj.x + TEXT_PAD, line.textY);
+      continue;
+    }
+    const o0 = h0 - ls, o1 = h1 - ls;
+    const before = line.text.slice(0, o0);
+    const after = line.text.slice(o1);
+    if (before) context.fillText(before, obj.x + TEXT_PAD, line.textY);
+    if (after) context.fillText(after, lineXAtOffset(line, obj, o1), line.textY);
+  }
+};
+
+function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, options = {}) {
+  if (selStart === selEnd) return false;
+  const requireMotion = options.requireMotion === true;
+  const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
+  if (!selection) return false;
+  const motion = textSelectionMotionForOptions(obj, selStart, selEnd, options);
+  if (requireMotion && !motion) return false;
+  context.save();
+  applyTextSelectionMotionTransform(context, selection.bounds, motion);
+  context.fillStyle = 'rgba(10, 132, 255, 0.3)';
+  for (const run of selection.runs) {
+    TextSelDebug._logDraw(run.line, selStart, selEnd, run.x1, run.x2);
+    context.fillRect(run.x1, run.line.y, run.x2 - run.x1, LINE_H);
+  }
+  context.restore();
+  return true;
 }
+
+const drawTextSelectionContentJello = (context, obj, layout, selStart, selEnd, options = {}) => {
+  const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
+  if (!selection) return false;
+  const motion = textSelectionMotionForOptions(obj, selStart, selEnd, options);
+  if (!motion) return false;
+  context.save();
+  applyTextSelectionMotionTransform(context, selection.bounds, motion);
+  context.fillStyle = canvasTextColor();
+  for (const run of selection.runs) {
+    if (run.text) context.fillText(run.text, run.x1, run.line.textY);
+  }
+  context.restore();
+  return true;
+};
+
+const drawTextSelectionJelloOverlays = (context, viewportRect = null) => {
+  const specs = globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.() || [];
+  if (!specs.length) return 0;
+  let drawn = 0;
+  for (const spec of specs) {
+    if (spec.id === editingId) continue;
+    const obj = objectsMap.get(spec.id);
+    if (!obj || obj.type !== 'text') continue;
+    if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
+    const layout = getTextLayout(obj);
+    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(spec.id, spec.start, spec.end) || null;
+    if (!drawTextSelectionHighlight(context, obj, layout, spec.start, spec.end, { requireMotion: true, motion })) continue;
+    drawTextLayoutStatic(context, obj, layout, { start: spec.start, end: spec.end });
+    drawTextSelectionContentJello(context, obj, layout, spec.start, spec.end, { motion });
+    drawn++;
+  }
+  return drawn;
+};
 
 function drawCaret(context, obj, layout, selStart) {
   if (!_caretVisible) return;
@@ -341,22 +457,58 @@ function drawCaret(context, obj, layout, selStart) {
   context.fillRect(cx, cy, 2 / zoom, LINE_H);
 }
 
+const applyObjectMotionForDraw = (context, obj, motion) => {
+  if (!motion || motion.skip || !context.save) return false;
+  context.save();
+  const opacity = Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
+  const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
+  const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
+  const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+  const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
+  const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
+  context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
+  if (translateX || translateY) context.translate(translateX, translateY);
+  if (scaleX !== 1 || scaleY !== 1) {
+    context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
+    context.scale(scaleX, scaleY);
+    context.translate(-(obj.x + obj.w / 2), -(obj.y + obj.h / 2));
+  }
+  return true;
+};
+
 function drawEditingTextOverlay(context) {
   const obj = objectsMap.get(editingId);
   if (!obj || obj.type !== 'text') return;
-  context.font = FONT;
-  context.textBaseline = 'alphabetic';
+  const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
+  const viewportRect = currentViewportWorldRect(0);
+  const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, { view, viewportRect });
+  if (motion?.skip) return;
+  const restoreMotion = applyObjectMotionForDraw(context, obj, motion);
+  try {
+    context.font = FONT;
+    context.textBaseline = 'alphabetic';
 
-  const selStart = _editEl ? _editEl.selectionStart : 0;
-  const selEnd   = _editEl ? _editEl.selectionEnd   : 0;
-  const layout = getTextLayout(obj);
+    const selStart = _editEl ? _editEl.selectionStart : 0;
+    const selEnd   = _editEl ? _editEl.selectionEnd   : 0;
+    const layout = getTextLayout(obj);
+    const textSelectionMotion = selStart !== selEnd
+      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd) || null
+      : null;
 
-  drawTextSelectionHighlight(context, obj, layout, selStart, selEnd);
+    drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion });
 
-  context.fillStyle = canvasTextColor();
-  for (const line of layout) context.fillText(line.text, obj.x + TEXT_PAD, line.textY);
+    drawTextLayoutStatic(
+      context,
+      obj,
+      layout,
+      textSelectionMotion ? { start: selStart, end: selEnd } : null,
+    );
+    drawTextSelectionContentJello(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion });
 
-  if (selStart === selEnd) drawCaret(context, obj, layout, selStart);
+    if (selStart === selEnd) drawCaret(context, obj, layout, selStart);
+  } finally {
+    if (restoreMotion) context.restore();
+  }
 }
 
 function drawBoard() {
@@ -399,6 +551,7 @@ function drawBoard() {
 
     const editStart = collectDrawDebug ? performance.now() : 0;
     setWorldCanvasTransform(ctx, dpr);
+    drawTextSelectionJelloOverlays(ctx, viewportRect);
     drawEditingTextOverlay(ctx);
     resetCanvasToScreen(ctx);
     if (collectDrawDebug) drawPhases.editingOverlayMs = performance.now() - editStart;
@@ -413,6 +566,7 @@ function drawBoard() {
     if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
     drawnImages = drawn.drawnImages;
     drawnText = drawn.drawnText;
+    drawTextSelectionJelloOverlays(ctx, viewportRect);
     const resetStart = collectDrawDebug ? performance.now() : 0;
     resetCanvasToScreen(ctx);
     if (collectDrawDebug) drawPhases.resetMs = performance.now() - resetStart;
@@ -569,6 +723,9 @@ BoardRenderer = BoardfishRenderer.createBoardRenderer({
   imageTransformNeedsRendering,
   isSidewaysRotation,
   objectIntersectsRect,
+  motionObjectsForDraw: (options) => globalThis.BoardfishMotion?.motionObjectsForDraw(options) || [],
+  noteImageObjectDrawn: (obj) => globalThis.BoardfishImageInsertMotion?.noteDrawn(obj),
+  objectMotionForDraw: (obj, options) => globalThis.BoardfishMotion?.objectMotionForDraw(obj, options) || null,
   selectImageSourceForDraw,
   setCanvasImageQuality,
 });

@@ -1,3 +1,11 @@
+const textEditActionFromInputType = (inputType = '') => {
+  const value = String(inputType || '');
+  if (value.toLowerCase().includes('paste')) return 'text-edit-paste';
+  if (value.toLowerCase().includes('cut')) return 'text-edit-cut';
+  if (value.startsWith('delete')) return 'text-edit-delete';
+  return 'text-edit-type';
+};
+
 function enterEdit(id) {
   if (editingId === id) return;
   if (editingId) exitEdit();
@@ -5,6 +13,7 @@ function enterEdit(id) {
 
   const obj = objectsMap.get(id);
   if (!obj) return;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-enter');
   const normalized = normalizeTextContent(obj.data.content);
   if (normalized !== obj.data.content) {
     obj.data.content = normalized;
@@ -26,7 +35,8 @@ function enterEdit(id) {
   document.body.appendChild(proxy);
   _editEl = proxy;
 
-  proxy.addEventListener('input', () => {
+  proxy.addEventListener('input', (event) => {
+    globalThis.BoardfishMotion?.applyActionAnimation?.(textEditActionFromInputType(event?.inputType));
     markDirty(id);
     obj.data.content = normalizeTextContent(proxy.value);
     if (proxy.value !== obj.data.content) {
@@ -44,10 +54,25 @@ function enterEdit(id) {
   proxy.addEventListener('keydown', (e) => {
     _caretVisible = true;
 
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && proxy.selectionStart !== proxy.selectionEnd) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
+        textSelection: {
+          id,
+          start: proxy.selectionStart,
+          end: proxy.selectionEnd,
+          direction: proxy.selectionDirection || 'none',
+          hasSelection: true,
+        },
+      });
+      scheduleRender(true, false, 'copy-text-selection');
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
       proxy.setSelectionRange(0, proxy.value.length, 'none');
       TextSelDebug._logSelection('select-all', proxy);
+      globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-select-all');
       scheduleRender(true, false);
       return;
     }
@@ -107,6 +132,7 @@ function enterEdit(id) {
         proxy.setSelectionRange(newPos, newPos);
       }
 
+      globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
       scheduleRender(true, false);
       return;
     }
@@ -122,6 +148,7 @@ function enterEdit(id) {
     _prevSelStart = s; _prevSelEnd = e;
     TextSelDebug._logSelection('selectionchange', proxy);
     _caretVisible = true;
+    globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
     scheduleRender(true, false);
   };
   document.addEventListener('selectionchange', _selChangeListener);
@@ -145,6 +172,7 @@ function enterEdit(id) {
 
 function exitEdit() {
   if (!editingId) return;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-exit');
   const id = editingId;
   const proxy = _editEl;
   editingId = null;
@@ -166,6 +194,7 @@ function exitEdit() {
   const obj = objectsMap.get(id);
   if (obj) {
     if (isTextContentEmpty(obj.data.content)) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-empty-delete-on-exit');
       BoardfishEditorState.removeEmptyTextObjects({ ids: [id] });
       delete obj._editStartContent;
       delete obj._editMinLines;
@@ -180,6 +209,7 @@ function exitEdit() {
     const contentChanged = obj.data.content !== _editHistoryLastContent;
     pushEditHistoryIfChanged(id);
     if (heightChanged && !contentChanged) pushHistory('text-height-change');
+    if (heightChanged && !contentChanged) globalThis.BoardfishMotion?.applyActionAnimation?.('text-height-change');
     delete obj._editStartContent;
     delete obj._editMinLines;
   }

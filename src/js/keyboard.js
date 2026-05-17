@@ -114,6 +114,7 @@ function isNativeFindShortcut(e) {
 
 document.addEventListener('keydown', (e) => {
   if (isNativeFindShortcut(e)) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('native-find-shortcut');
     e.preventDefault();
     e.stopPropagation();
   }
@@ -161,9 +162,7 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     if (editingId) {
-      exitEdit();
-      BoardfishEditorState.clearSelection();
-      scheduleRender(false, true);
+      deselectAll();
       return;
     }
     deselectAll();
@@ -241,6 +240,7 @@ document.addEventListener('keydown', (e) => {
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'x') && !editingId) {
     e.preventDefault();
+    globalThis.BoardfishMotion?.applyActionAnimation?.('cut-selected-objects');
     (async () => {
       await copySelected();
       deleteSelected();

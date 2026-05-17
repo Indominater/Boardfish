@@ -76,6 +76,7 @@ function loadSelectionInputHarness(objects, options = {}) {
     history: [],
     renders: [],
     syncedTextIds: [],
+    motionPulses: [],
     isMultiSelected: () => selectedIds.size > 1,
     selectedObjectsList: () => objects,
     selectedBounds: () => objectBounds(objects),
@@ -104,6 +105,16 @@ function loadSelectionInputHarness(objects, options = {}) {
     getTextMinLines: () => 1,
     markDirty(id) { context.dirty.push(id); },
     pushHistory(reason) { context.history.push(reason); },
+    BoardfishMotion: {
+      applyActionAnimation(_action, payload = {}, options = {}) {
+        if (!payload.selection) return false;
+        context.motionPulses.push({ ...(payload.options || {}), ...options });
+        return true;
+      },
+      pulseSelection(options = {}) {
+        context.motionPulses.push(options);
+      },
+    },
   };
 
   vm.createContext(context);
@@ -146,6 +157,8 @@ test('multi-selection resize leaves text objects unchanged', () => {
   assert.deepEqual(context.syncedTextIds, []);
   assert.deepEqual(context.dirty, ['image-a']);
   assert.deepEqual(context.history, ['multi-resize']);
+  assert.equal(context.motionPulses.length, 1);
+  assert.equal(context.motionPulses[0].includeText, false);
 });
 
 test('multi-selection resize anchors the opposite rectangle corner', () => {
@@ -234,6 +247,8 @@ test('single image resize anchors the opposite corner', () => {
   assert.equal(Math.round(image.h), 120);
   assert.equal(Math.round(image.x + image.w), 240);
   assert.equal(Math.round(image.y + image.h), 120);
+  assert.equal(context.motionPulses.length, 1);
+  assert.equal(context.motionPulses[0].includeText, false);
 });
 
 test('single text horizontal resize anchors the opposite side after auto-height sync', () => {
@@ -261,6 +276,7 @@ test('single text horizontal resize anchors the opposite side after auto-height 
   assert.equal(text.y, 0);
   assert.equal(text.w, 240);
   assert.equal(text.h, 80);
+  assert.deepEqual(context.motionPulses, []);
 });
 
 test('save flushes a pending text edit checkpoint into the saved baseline', () => {

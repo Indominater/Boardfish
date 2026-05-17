@@ -280,6 +280,7 @@ test('frontend abstraction scripts load before their consumers', () => {
   before('eyedropper_geometry.js', 'eyedropper.js');
   before('eyedropper_debug.js', 'eyedropper_state.js');
   before('eyedropper_state.js', 'eyedropper.js');
+  before('eyedropper_cards.js', 'eyedropper.js');
   before('eyedropper.js', 'eyedropper_decode_warmers.js');
   before('eyedropper_decode_warmers.js', 'canvas_input.js');
 });
@@ -472,8 +473,8 @@ test('viewport navigation diagnostics measure input latency without an extra whe
   const debugSource = readSource('src/js/debug.js');
   const perfSource = readSource('src/js/debug_manual_perf.js');
 
-  assert.match(inputSource, /BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, newZoom\);\s*scheduleTransform\('wheel-zoom', e\);/);
-  assert.match(inputSource, /BoardfishViewportState\.panBy\(-e\.deltaX, -e\.deltaY\);\s*scheduleTransform\('wheel-pan', e\);/);
+  assert.match(inputSource, /BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, newZoom\);\s*globalThis\.BoardfishMotion\?\.applyActionAnimation\?\.\('board-wheel-zoom'\);\s*scheduleTransform\('wheel-zoom', e\);/);
+  assert.match(inputSource, /BoardfishViewportState\.panBy\(-e\.deltaX, -e\.deltaY\);\s*globalThis\.BoardfishMotion\?\.applyActionAnimation\?\.\('board-canvas-pan'\);\s*scheduleTransform\('wheel-pan', e\);/);
   assert.doesNotMatch(inputSource, /requestAnimationFrame\(flushWheelPan\)/);
   assert.match(inputSource, /scheduleTransform\('mouse-pan', ev\)/);
   assert.match(viewportSource, /function viewportEventTime\(event = null\)/);
@@ -545,6 +546,7 @@ test('web app tab uses the Boardfish icon', () => {
 test('context action rail links to the Boardfish GitHub page', () => {
   const indexSource = readSource('src/index.html');
   const styles = readSource('src/styles.css');
+  const contextMenuSource = readSource('src/js/context_menu.js');
 
   assert.match(indexSource, /icon_names=dark_mode/);
   assert.match(indexSource, /id="ctx-btn-dark-mode" type="button" aria-label="Dark Mode" title="Dark Mode" aria-pressed="false"/);
@@ -558,6 +560,10 @@ test('context action rail links to the Boardfish GitHub page', () => {
   assert.match(styles, /\.ctx-action-item \{[\s\S]*height: var\(--menu-item-height\);/);
   assert.match(styles, /\.ctx-action-icon \.material-symbols-outlined,\s*\.ctx-action-icon svg \{/);
   assert.match(styles, /\.ctx-action-icon \.material-symbols-outlined \{[\s\S]*'FILL' 0,/);
+  assert.match(contextMenuSource, /openMenuAt\(ctxMenu, x, y, \{ animate: false \}\)/);
+  assert.match(contextMenuSource, /ctxActions\.style\.top = `\$\{Math\.round\(menuBox\.top\)\}px`/);
+  assert.match(contextMenuSource, /const maxActionRight = window\.innerWidth - edgeGap/);
+  assert.doesNotMatch(contextMenuSource, /\bleftOfMenu\b/);
 });
 
 test('context action rail treats dark mode as the enabled theme state', () => {
@@ -565,6 +571,316 @@ test('context action rail treats dark mode as the enabled theme state', () => {
 
   assert.match(contextMenuSource, /darkModeMenuBtn\.setAttribute\('aria-pressed', appTheme === 'dark' \? 'true' : 'false'\)/);
   assert.match(contextMenuSource, /closeCtxMenu\('command:dark-mode'\)/);
+});
+
+test('duplicate command clones the active selection without using clipboard paste state', () => {
+  const objectCommandsSource = readSource('src/js/object_commands.js');
+  const start = objectCommandsSource.indexOf('function duplicateSelected()');
+  const end = objectCommandsSource.indexOf('// ─── Delete', start);
+  assert.ok(start >= 0 && end > start, 'duplicateSelected block is missing');
+  const duplicateSource = objectCommandsSource.slice(start, end);
+  assert.doesNotMatch(duplicateSource, /\bsetJsClipboard\(/);
+  assert.doesNotMatch(duplicateSource, /\bpasteAtPos\(/);
+  assert.match(duplicateSource, /BoardfishEditorState\.addObject\(obj\)/);
+  assert.match(duplicateSource, /BoardfishEditorState\.setSelection\(duplicatedIds/);
+});
+
+test('eyedropper menu opens immediately and keeps cursor positioning independent from transforms', () => {
+  const styles = readSource('src/styles.css');
+  const eyedropperSource = readSource('src/js/eyedropper.js');
+  assert.match(styles, /#eyedropper-loupe\.visible,\s*\.eyedropper-loupe\.visible \{\s*display: block;\s*\}/);
+  assert.match(styles, /#eyedropper-loupe,\s*\.eyedropper-loupe,\s*#eyedropper-loupe \*,\s*\.eyedropper-loupe \* \{[\s\S]*animation: none !important;[\s\S]*transition: none !important;/);
+  assert.match(eyedropperSource, /eyedropperLoupe\.style\.left = `\$\{Math\.round\(left\)\}px`/);
+  assert.match(eyedropperSource, /eyedropperLoupe\.style\.top = `\$\{Math\.round\(top\)\}px`/);
+  assert.doesNotMatch(eyedropperSource, /style\.transform/);
+  assert.doesNotMatch(eyedropperSource, /noteSmoothSlideOpened\(eyedropperLoupe\)/);
+  assert.doesNotMatch(eyedropperSource, /noteSmoothSlideClosed\(card\.el, finish\)/);
+  assert.match(eyedropperSource, /BoardfishEyedropperCards\.preservePinnedCardUntilNextSample\(card, EyedropperDebug\);[\s\S]*card\.el\.classList\.remove\('visible', 'pinned', 'dragging'\)/);
+  assert.match(eyedropperSource, /layoutMetrics = positionEyedropperLoupe\(e\.clientX, e\.clientY, layoutMetrics\);\s*BoardfishEyedropperCards\.removePendingPinnedCardClone\(eyedropperActiveCard\);/);
+  assert.match(readSource('src/js/eyedropper_cards.js'), /const preservePinnedCardUntilNextSample = \(card, debug = null\) => \{[\s\S]*card\.pendingPinnedClone = clone;/);
+});
+
+test('selection feedback uses object jello instead of halo pulse styling', () => {
+  const motionSource = readSource('src/js/motion.js');
+  const styles = readSource('src/styles.css');
+  assert.match(motionSource, /const noteObjectsJello/);
+  assert.match(motionSource, /const configureJello/);
+  assert.match(motionSource, /scaleX: 1 \+ wobble \+ rebound/);
+  assert.doesNotMatch(styles, /motion-selection-pulse|bf-selection-pulse|selection-glow/);
+  assert.doesNotMatch(styles, /0 0 0 8px rgba\(10, 132, 255/);
+});
+
+test('user actions are assigned through the central animation policy', () => {
+  const motionSource = readSource('src/js/motion.js');
+  assert.match(motionSource, /ACTION ANIMATION CONTRACT/);
+  assert.match(motionSource, /const ACTION_ANIMATION_SETS = Object\.freeze/);
+  assert.match(motionSource, /notApplicable: 'not-applicable'/);
+  assert.match(motionSource, /const ACTION_ANIMATION_ASSIGNMENTS = Object\.freeze/);
+  assert.match(motionSource, /const applyActionAnimation = \(action, payload = \{\}, options = \{\}\) =>/);
+  assert.match(motionSource, /getActionAnimationPartition/);
+  assert.match(motionSource, /getActionAnimationPolicyIssues/);
+  assert.match(motionSource, /getUnassignedActionAnimations/);
+  assert.match(motionSource, /const jiggleActionControlOptions = \(options = \{\}\) =>/);
+  assert.match(motionSource, /setName === ACTION_ANIMATION_SETS\.jiggle[\s\S]*jiggleActionControlOptions\(options\)/);
+  assert.match(motionSource, /const inferActionObjects = \(action, payload = \{\}\) =>/);
+  assert.match(motionSource, /payload\?\.selection \? selectedObjectsFromRoot\(\) : inferActionObjects\(action, payload\)/);
+  const assignmentMatch = motionSource.match(/const ACTION_ANIMATION_ASSIGNMENTS = Object\.freeze\(\{([\s\S]*?)\n\s*\}\);/);
+  assert.ok(assignmentMatch, 'ACTION_ANIMATION_ASSIGNMENTS block is missing');
+  const assignedActions = new Map();
+  for (const bucketMatch of assignmentMatch[1].matchAll(/\[ACTION_ANIMATION_SETS\.(\w+)\]: Object\.freeze\(\[([\s\S]*?)\]\)/g)) {
+    const bucket = bucketMatch[1];
+    for (const actionMatch of bucketMatch[2].matchAll(/'([a-z0-9-]+)'/g)) {
+      const action = actionMatch[1];
+      const buckets = assignedActions.get(action) || [];
+      buckets.push(bucket);
+      assignedActions.set(action, buckets);
+    }
+  }
+  const duplicateActions = [...assignedActions.entries()]
+    .filter(([, buckets]) => buckets.length !== 1)
+    .map(([action, buckets]) => `${action}:${buckets.join(',')}`);
+  assert.deepEqual(duplicateActions, []);
+  const usedActions = new Set();
+  for (const relativePath of frontendSources()) {
+    const source = readSource(relativePath);
+    for (const match of source.matchAll(/applyActionAnimation\?\.\(\s*'([a-z0-9-]+)'/g)) {
+      usedActions.add(match[1]);
+    }
+  }
+  const unassignedUsedActions = [...usedActions].filter((action) => !assignedActions.has(action)).sort();
+  assert.deepEqual(unassignedUsedActions, []);
+  for (const action of [
+    'rubber-band-release',
+    'board-file-drop-open',
+    'app-window-minimize',
+    'app-window-close-request',
+    'cut-selected-objects',
+    'dark-mode-toggle',
+    'eyedropper-loupe-close',
+    'eyedropper-loupe-drag',
+    'eyedropper-loupe-open',
+    'external-github-open',
+    'export-all-images',
+    'export-all-text',
+    'history-undo',
+    'image-file-dialog-open',
+    'image-file-drop',
+    'native-find-shortcut',
+    'object-deselect',
+    'text-edit-enter',
+    'text-edit-type',
+    'text-edit-drag-select',
+    'text-box-resize',
+    'text-box-drag',
+    'text-box-create',
+    'text-box-duplicate',
+    'text-box-paste',
+    'object-delete',
+    'object-undo-delete',
+    'image-object-create',
+    'object-select',
+    'copy-text-selection',
+    'menu-open',
+    'unsaved-dialog-cancel-press',
+    'unsaved-dialog-delete-press',
+    'unsaved-dialog-open',
+    'unsaved-dialog-save-press',
+    'pill-message-update',
+  ]) {
+    assert.match(motionSource, new RegExp(`'${action}'`));
+  }
+
+  for (const relativePath of frontendSources()) {
+    if (relativePath === 'src/js/motion.js') continue;
+    const source = readSource(relativePath);
+    assert.doesNotMatch(source, /BoardfishMotion\?\.(?:note|pulseSelection|bumpIsland)/, `${relativePath} should use applyActionAnimation for user action motion`);
+    assert.doesNotMatch(source, /BoardfishMotion\.(?:note|pulseSelection|bumpIsland)/, `${relativePath} should use applyActionAnimation for user action motion`);
+  }
+});
+
+test('copying highlighted text selection jiggles the selection and selected text', () => {
+  const motionSource = readSource('src/js/motion.js');
+  const clipboardSource = readSource('src/js/clipboard_export_init.js');
+  const contextMenuSource = readSource('src/js/context_menu.js');
+  const textEditorSource = readSource('src/js/text_editor.js');
+  const viewportSource = readSource('src/js/viewport.js');
+  assert.match(motionSource, /const textSelectionJelloMotions = new Map\(\)/);
+  assert.match(motionSource, /const noteTextSelectionJello/);
+  assert.match(motionSource, /const textSelectionMotionForDraw/);
+  assert.match(motionSource, /textSelectionMotionForDraw,/);
+  assert.match(contextMenuSource, /copyTextEditSelection[\s\S]*applyActionAnimation\?\.\('copy-text-selection'/);
+  assert.match(textEditorSource, /selectionStart !== proxy\.selectionEnd[\s\S]*applyActionAnimation\?\.\('copy-text-selection'/);
+  const textObjectFeedbackStart = clipboardSource.indexOf('const noteTextObjectCopyFeedback');
+  const textObjectFeedbackEnd = clipboardSource.indexOf('const clipboardImageBlobName', textObjectFeedbackStart);
+  const textObjectFeedbackSource = clipboardSource.slice(textObjectFeedbackStart, textObjectFeedbackEnd);
+  assert.match(textObjectFeedbackSource, /applyActionAnimation\?\.\('copy-text-object', \{\s*objects: \[obj\]/);
+  assert.doesNotMatch(textObjectFeedbackSource, /textSelection:/);
+  assert.match(viewportSource, /const collectTextSelectionRuns = /);
+  assert.match(viewportSource, /const drawTextLayoutStatic = /);
+  assert.match(viewportSource, /const drawTextSelectionContentJello = /);
+  assert.match(viewportSource, /textSelectionMotionForDraw\?\.\(obj\.id, selStart, selEnd\)/);
+  assert.match(viewportSource, /context\.scale\(motion\.scaleX \?\? 1, motion\.scaleY \?\? 1\)/);
+  assert.match(viewportSource, /if \(requireMotion && !motion\) return false;/);
+  assert.match(viewportSource, /context\.fillText\(run\.text, run\.x1, run\.line\.textY\)/);
+  assert.match(viewportSource, /drawTextLayoutStatic[\s\S]*const before = line\.text\.slice\(0, o0\)[\s\S]*const after = line\.text\.slice\(o1\)/);
+  assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*drawTextSelectionHighlight\(context, obj, layout, spec\.start, spec\.end, \{ requireMotion: true, motion \}\)/);
+  assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*drawTextLayoutStatic\(context, obj, layout, \{ start: spec\.start, end: spec\.end \}\)/);
+  assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*drawTextSelectionContentJello\(context, obj, layout, spec\.start, spec\.end, \{ motion \}\)/);
+  assert.match(viewportSource, /drawEditingTextOverlay[\s\S]*textSelectionMotion \? \{ start: selStart, end: selEnd \} : null/);
+  assert.match(viewportSource, /drawEditingTextOverlay[\s\S]*drawTextSelectionContentJello\(context, obj, layout, selStart, selEnd, \{ motion: textSelectionMotion \}\)/);
+});
+
+test('duplicate leaves text objects unanimated while image duplicates jiggle', () => {
+  const motionSource = readSource('src/js/motion.js');
+  const objectCommandsSource = readSource('src/js/object_commands.js');
+  assert.doesNotMatch(motionSource, /jiggleOrder|JiggleOrder|BoardfishJiggleOrderParams/);
+  assert.match(motionSource, /const noteObjectsSmoothSlideAdded/);
+  assert.match(motionSource, /\[ACTION_ANIMATION_SETS\.none\]: Object\.freeze\(\[[\s\S]*'text-box-duplicate'/);
+  assert.match(motionSource, /\[ACTION_ANIMATION_SETS\.jiggle\]: Object\.freeze\(\[[\s\S]*'image-object-duplicate'/);
+
+  const duplicateStart = objectCommandsSource.indexOf('function duplicateSelected()');
+  const duplicateEnd = objectCommandsSource.indexOf('// ─── Delete', duplicateStart);
+  const duplicateSource = objectCommandsSource.slice(duplicateStart, duplicateEnd);
+  assert.match(duplicateSource, /animateSelection: false/);
+  assert.match(duplicateSource, /applyActionAnimation\?\.\('text-box-duplicate', \{ objects: duplicatedTextObjects \}\)/);
+  assert.match(duplicateSource, /applyActionAnimation\?\.\('image-object-duplicate', \{ objects: duplicatedNonTextObjects \}\)/);
+  assert.doesNotMatch(duplicateSource, /BoardfishMotion\?\.pulseSelection\(\)/);
+  assert.doesNotMatch(duplicateSource, /noteObjectsJiggleOrder|noteObjectJiggleOrder/);
+});
+
+test('paste leaves text objects unanimated while inserted images jiggle independently', () => {
+  const motionSource = readSource('src/js/motion.js');
+  const clipboardSource = readSource('src/js/clipboard_export_init.js');
+  const imageInsertSource = readSource('src/js/image_insert.js');
+  assert.match(motionSource, /const pulseSelection = \(options = \{\}\) => \{[\s\S]*\[\.\.\.selectedIds\][\s\S]*noteObjectsJello\(selectedObjects, options\);/);
+  assert.match(motionSource, /options\.includeText === false && obj\.type === 'text'/);
+  assert.match(motionSource, /const noteObjectsJello[\s\S]*delay: Math\.min\(index \* stagger, 160\)/);
+  assert.match(motionSource, /\[ACTION_ANIMATION_SETS\.none\]: Object\.freeze\(\[[\s\S]*'text-box-paste'/);
+  assert.match(motionSource, /\[ACTION_ANIMATION_SETS\.jiggle\]: Object\.freeze\(\[[\s\S]*'image-object-paste'/);
+
+  const pasteStart = clipboardSource.indexOf('async function pasteAtPos');
+  const pasteEnd = clipboardSource.indexOf('if (!hasTauri())', pasteStart);
+  const pasteSource = clipboardSource.slice(pasteStart, pasteEnd > pasteStart ? pasteEnd : undefined);
+  assert.match(pasteSource, /animateSelection: false/);
+  assert.match(pasteSource, /applyActionAnimation\?\.\('text-box-paste', \{ objects: pastedTextObjects \}\)/);
+  assert.match(pasteSource, /applyActionAnimation\?\.\('image-object-paste', \{ objects: pastedNonTextObjects \}\)/);
+  assert.doesNotMatch(pasteSource, /BoardfishMotion\?\.pulseSelection\(\)/);
+  assert.doesNotMatch(pasteSource, /noteObjectsJiggleOrderWhenReady|noteObjectsJiggleOrder\(clones\)/);
+
+  assert.match(imageInsertSource, /BoardfishEditorState\.setSelection\(\[obj\.id\], \{ primaryId: obj\.id, exitEditing: false, animateSelection: false \}\)/);
+  assert.match(imageInsertSource, /const pendingInsertedImageMotions = new Map\(\)/);
+  assert.match(imageInsertSource, /const queueImageObjectInsertMotion = \(obj, options = \{\}\) =>/);
+  assert.match(imageInsertSource, /const noteInsertedImageObjectDrawn = \(obj\) =>/);
+  assert.match(imageInsertSource, /objectsMap\.get\(obj\.id\) !== obj/);
+  assert.match(imageInsertSource, /applyActionAnimation\?\.\(\s*pending\.action \|\| 'image-object-create'/);
+  assert.match(imageInsertSource, /queueImageObjectInsertMotion\(obj, options\)/);
+  assert.match(imageInsertSource, /BoardfishImageInsertMotion = Object\.freeze/);
+  assert.match(imageInsertSource, /noteDrawn: noteInsertedImageObjectDrawn/);
+  assert.match(imageInsertSource, /requestAnimationFrame\(start\)/);
+  assert.match(imageInsertSource, /insertMotionAction: bulk \? 'bulk-image-create' : undefined/);
+  assert.doesNotMatch(imageInsertSource, /insertMotionOptions|BULK_IMAGE_INSERT_JELLO_OPTIONS|amplitude: 0\.09|duration: 680|staggerMs: 34/);
+  assert.match(imageInsertSource, /const orderedAddedObjects = addedObjects\.filter\(Boolean\)/);
+  assert.match(imageInsertSource, /BoardfishEditorState\.setSelection\(orderedAddedObjects\.map\(\(obj\) => obj\.id\), \{[\s\S]*animateSelection: false/);
+  assert.doesNotMatch(imageInsertSource, /if \(bulk && orderedAddedObjects\.length\) globalThis\.BoardfishMotion\?\.pulseSelection\(\)/);
+  assert.doesNotMatch(imageInsertSource, /noteObjectsJiggleOrderWhenReady|objectImageReadyPromise|objectStillOnBoard/);
+  assert.match(readSource('src/js/renderer.js'), /deps\.noteImageObjectDrawn\(obj, \{ view, viewportRect \}\)/);
+  assert.match(readSource('src/js/viewport.js'), /noteImageObjectDrawn: \(obj\) => globalThis\.BoardfishImageInsertMotion\?\.noteDrawn\(obj\)/);
+});
+
+test('delete object feedback is routed through the no-animation action set', () => {
+  const motionSource = readSource('src/js/motion.js');
+  const objectCommandsSource = readSource('src/js/object_commands.js');
+  const contextMenuSource = readSource('src/js/context_menu.js');
+  assert.match(motionSource, /\[ACTION_ANIMATION_SETS\.none\]: Object\.freeze\(\[[\s\S]*'object-delete'/);
+  assert.match(objectCommandsSource, /deleteSelected[\s\S]*applyActionAnimation\?\.\('object-delete', \{ removedObjects \}\)/);
+  assert.match(contextMenuSource, /'obj-btn-delete': \(\) => \{ closeObjCtxMenu\('command:delete'\); deleteSelected\(\); \}/);
+});
+
+test('text editing and text box transforms do not animate', () => {
+  const motionSource = readSource('src/js/motion.js');
+  const objectCommandsSource = readSource('src/js/object_commands.js');
+  const textEditorSource = readSource('src/js/text_editor.js');
+  const canvasInputSource = readSource('src/js/canvas_input.js');
+  const selectionInputSource = readSource('src/js/selection_input.js');
+  const viewportSource = readSource('src/js/viewport.js');
+  const historySource = readSource('src/js/history_state.js');
+
+  assert.match(motionSource, /const noteTextObjectSmoothSlide = \(obj, options = \{\}\) =>/);
+  assert.match(motionSource, /const noteTextObjectsSmoothSlide = \(items, options = \{\}\) =>/);
+  assert.match(objectCommandsSource, /function addText[\s\S]*applyActionAnimation\?\.\([\s\S]*content \? 'plain-text-paste-as-text-box' : 'text-box-create'/);
+  assert.doesNotMatch(textEditorSource, /noteTextEditSmoothSlide|noteTextObjectSmoothSlide|noteTextObjectsSmoothSlide/);
+  assert.doesNotMatch(textEditorSource, /exitEdit[\s\S]*BoardfishMotion\?\.noteObjectsRemoved\?\.\(\[removedObject\]\)/);
+  assert.doesNotMatch(canvasInputSource, /startTextSelectionDrag[\s\S]*BoardfishMotion\?\.noteTextObjectSmoothSlide\?\.\(obj\)/);
+  assert.doesNotMatch(canvasInputSource, /noteTextObjectsSmoothSlide\?\.\((?:dragItems|grpItems)\.map\(\(item\) => item\.obj\)\)/);
+  assert.doesNotMatch(selectionInputSource, /if \(obj\.type === 'text'\) globalThis\.BoardfishMotion\?\.noteTextObjectSmoothSlide\?\.\(obj\)/);
+  assert.match(viewportSource, /const applyObjectMotionForDraw = \(context, obj, motion\) =>/);
+  assert.match(viewportSource, /drawEditingTextOverlay[\s\S]*BoardfishMotion\?\.objectMotionForDraw\(obj/);
+  const noReplayReasons = historySource.match(/const HISTORY_NO_REPLAY_REASONS = new Set\(\[([\s\S]*?)\]\);/);
+  assert.ok(noReplayReasons, 'HISTORY_NO_REPLAY_REASONS block is missing');
+  assert.match(noReplayReasons[1], /'add-text'/);
+  assert.doesNotMatch(noReplayReasons[1], /'delete-selected'/);
+  assert.match(historySource, /HISTORY_RESTORE_DELETED_REASONS[\s\S]*'delete-selected'/);
+  assert.match(historySource, /applyHistoryRestoredDeleteMotion[\s\S]*'object-undo-delete'/);
+  assert.match(motionSource, /\[ACTION_ANIMATION_SETS\.jiggle\]: Object\.freeze\(\[[\s\S]*'object-undo-delete'/);
+  assert.match(historySource, /HISTORY_ADDED_OBJECT_REASONS[\s\S]*'duplicate-selected'[\s\S]*'paste-objects'/);
+  assert.match(historySource, /historyMotionForReason[\s\S]*HISTORY_ADDED_OBJECT_REASONS\.has\(value\)[\s\S]*includeText: false/);
+});
+
+test('floating UI surfaces share the smooth slide animation set', () => {
+  const motionSource = readSource('src/js/motion.js');
+  const styles = readSource('src/styles.css');
+  assert.match(motionSource, /const smoothSlideDefaults = Object\.freeze/);
+  assert.match(motionSource, /const configureSmoothSlide/);
+  assert.match(motionSource, /const noteSmoothSlideOpened/);
+  assert.match(motionSource, /const noteSmoothSlideClosed/);
+  assert.match(styles, /--smooth-slide-duration:/);
+  assert.match(styles, /@keyframes bf-smooth-slide-enter/);
+  assert.match(styles, /@keyframes bf-smooth-slide-exit/);
+  assert.doesNotMatch(styles, /bf-smooth-slide-enter-centered|bf-smooth-slide-exit-centered/);
+  assert.match(styles, /#ctx-menu\.motion-smooth-slide-enter,[\s\S]*#ctx-actions\.motion-smooth-slide-enter \{[\s\S]*bf-smooth-slide-enter/);
+  assert.doesNotMatch(styles, /#eyedropper-loupe\.visible,\s*\.eyedropper-loupe\.visible \{[^}]*bf-smooth-slide-enter/);
+  assert.doesNotMatch(styles, /#eyedropper-loupe\.motion-smooth-slide-exit,[\s\S]*bf-smooth-slide-exit/);
+  assert.match(styles, /#dialog-overlay\.show #dialog \{[\s\S]*bf-smooth-slide-enter/);
+  assert.match(styles, /#dialog-overlay\.show #dialog\.motion-smooth-slide-exit,[\s\S]*bf-smooth-slide-exit/);
+  assert.match(styles, /#island \{[\s\S]*translate: -50% 0;/);
+  assert.match(styles, /#island\.visible,[\s\S]*\.opening-shield-pill\.visible \{[\s\S]*bf-smooth-slide-enter/);
+  assert.match(styles, /#island\.motion-smooth-slide-exit,[\s\S]*\.opening-shield-pill\.motion-smooth-slide-exit \{[\s\S]*bf-smooth-slide-exit/);
+  assert.doesNotMatch(styles, /bf-menu-enter|bf-pill-enter|bf-pill-bump|bf-eyedropper-enter|bf-dialog-enter|bf-selection-focus|bf-rubber-band|bf-fade-in/);
+  assert.doesNotMatch(styles, /--motion-(?:fast|medium|slow|ease|spring)|var\(--motion-/);
+  assert.match(readSource('src/js/context_menu.js'), /applyActionAnimation\?\.\(action, \{[\s\S]*phase: 'close'/);
+  assert.match(readSource('src/js/io_close.js'), /applyActionAnimation\?\.\('unsaved-dialog-open'/);
+  assert.match(readSource('src/js/io_close.js'), /applyActionAnimation\?\.\('unsaved-dialog-close'/);
+  assert.match(readSource('src/js/io_close.js'), /applyActionAnimation\?\.\('unsaved-dialog-save-press'/);
+  assert.match(readSource('src/js/io_close.js'), /applyActionAnimation\?\.\('unsaved-dialog-delete-press'/);
+  assert.match(readSource('src/js/io_close.js'), /applyActionAnimation\?\.\('unsaved-dialog-cancel-press'/);
+});
+
+test('jello feedback covers selection-entry and selected-object transform operations', () => {
+  const editorStateSource = readSource('src/js/editor_state_boundary.js');
+  const motionSource = readSource('src/js/motion.js');
+  assert.match(editorStateSource, /const previousSelectedIds = new Set\(selectedIds\)/);
+  assert.match(editorStateSource, /noteNewlySelectedObjects\(previousSelectedIds\)/);
+  assert.match(editorStateSource, /if \(animateSelection\) noteNewlySelectedObjects\(previousSelectedIds\)/);
+  assert.match(editorStateSource, /if \(obj && obj\.type !== 'text'\) newlySelectedObjects\.push\(obj\)/);
+  assert.match(editorStateSource, /root\.BoardfishMotion\?\.applyActionAnimation\?\.\('object-select', \{ objects: newlySelectedObjects \}\)/);
+  assert.doesNotMatch(motionSource, /activeObjectMotions|exitingObjectMotions|exitingObjectsForDraw|jelloObjectsForDraw/);
+
+  assert.match(readSource('src/js/canvas_input.js'), /pushHistory\('drag'\)/);
+  assert.match(readSource('src/js/canvas_input.js'), /applyActionAnimation\?\.\('object-drag'[\s\S]*includeText: false[\s\S]*pushHistory\('drag'\)/);
+  assert.match(readSource('src/js/canvas_input.js'), /applyActionAnimation\?\.\('object-group-drag'[\s\S]*includeText: false[\s\S]*pushHistory\('group-drag'\)/);
+  assert.match(readSource('src/js/selection_input.js'), /function selectObject[\s\S]*applyActionAnimation\?\.\('object-select'[\s\S]*includeText: false/);
+  assert.match(readSource('src/js/selection_input.js'), /function selectAllObjects[\s\S]*applyActionAnimation\?\.\('object-select'[\s\S]*includeText: false/);
+  assert.match(readSource('src/js/selection_input.js'), /applyActionAnimation\?\.\('object-resize'[\s\S]*includeText: false[\s\S]*pushHistory\('resize'\)/);
+  assert.match(readSource('src/js/selection_input.js'), /applyActionAnimation\?\.\('object-multi-resize'[\s\S]*includeText: false[\s\S]*pushHistory\('multi-resize'\)/);
+  assert.match(readSource('src/js/clipboard_export_init.js'), /async function copySelected\(\)[\s\S]*applyActionAnimation\?\.\('copy-selected-objects'/);
+  assert.match(readSource('src/js/history_state.js'), /historySelectionPulseOptions/);
+  assert.match(readSource('src/js/history_state.js'), /historyMotionForEntry/);
+  assert.match(readSource('src/js/history_state.js'), /applyHistoryMotionReplay[\s\S]*applyActionAnimation\?\.\('history-object-jiggle-replay'/);
+  assert.match(readSource('src/js/state.js'), /sendSelectedToBack[\s\S]*applyActionAnimation\?\.\('send-selected-to-back'/);
+  assert.match(readSource('src/js/state.js'), /flipSelectedImages[\s\S]*applyActionAnimation\?\.\('flip-image'/);
+  assert.match(readSource('src/js/state.js'), /rotateSelectedImages[\s\S]*applyActionAnimation\?\.\('rotate-image'/);
+  assert.match(readSource('src/js/image_insert.js'), /queueImageObjectInsertMotion\(obj, options\)/);
+  assert.match(readSource('src/js/renderer.js'), /noteImageObjectDrawn/);
 });
 
 test('viewport and image-store mutations stay behind boundary modules', () => {
