@@ -15,7 +15,10 @@ var EyedropperDebug = (() => {
   const MAX_PREVIEW_PRESENT_SAMPLES = 80;
   const MAX_LONG_TASKS = 80;
   const MAX_FRAME_GAPS = 80;
-  const STUTTER_FRAME_GAP_MS = 120;
+  const MAX_IMAGE_SWITCHES = 120;
+  const MAX_READOUT_EVENTS = 160;
+  const IMAGE_SWITCH_SLOW_MS = 16.7;
+  const STUTTER_FRAME_GAP_MS = 50;
   const slowSamples = [];
   const firstSamples = [];
   const previewMismatchSamples = [];
@@ -23,15 +26,22 @@ var EyedropperDebug = (() => {
   const slowPreviewPresentSamples = [];
   const longTasks = [];
   const frameGaps = [];
+  const imageSwitches = [];
+  const slowImageSwitches = [];
+  const readoutEvents = [];
   let longTaskObserver = null;
   let frameProbeRaf = null;
   let lastFrameProbeAt = 0;
   let lastSamplingEvent = null;
+  let lastSampleImageKey = null;
+  let lastImageSwitch = null;
   const phaseStats = {};
   const perfStats = {
     sampleMoves: 0,
     sampleCommits: 0,
     firstSamples: 0,
+    imageSwitches: 0,
+    slowImageSwitches: 0,
     sampleCoalescedMoves: 0,
     duplicateMouseMovesSkipped: 0,
     layoutCacheHits: 0,
@@ -40,10 +50,19 @@ var EyedropperDebug = (() => {
     backingStoreResizeSkips: 0,
     colorReadoutDomWrites: 0,
     colorReadoutDomSkips: 0,
+    colorReadoutAttempts: 0,
+    colorReadoutWithPixel: 0,
+    colorReadoutWithoutPixel: 0,
+    colorReadoutNoUpdateSamples: 0,
+    colorReadoutDomMismatches: 0,
+    colorReadoutMissingElements: 0,
     prewarmRunsTimed: 0,
     slowSamples: 0,
     maxSampleMs: 0,
     maxFirstSampleMs: 0,
+    maxImageSwitchSampleMs: 0,
+    maxImageSwitchPaintMs: 0,
+    maxImageSwitchReadoutMs: 0,
     maxPrewarmMs: 0,
     maxInputAgeMs: 0,
     maxQueueDelayMs: 0,
@@ -61,6 +80,8 @@ var EyedropperDebug = (() => {
     maxLongTaskMs: 0,
     frameGaps: 0,
     maxFrameGapMs: 0,
+    stuttersOver50ms: 0,
+    stuttersOver80ms: 0,
     stuttersOver120ms: 0,
     stuttersOver200ms: 0,
     stuttersOver300ms: 0,
@@ -102,7 +123,8 @@ var EyedropperDebug = (() => {
 
   function recordPhase(name, ms) {
     if (!core.enabled || !name) return;
-    const value = Number(ms) || 0;
+    const value = Number(ms);
+    if (!Number.isFinite(value)) return;
     const stat = phaseStats[name] || { count: 0, totalMs: 0, maxMs: 0 };
     stat.count++;
     stat.totalMs += value;
@@ -120,8 +142,20 @@ var EyedropperDebug = (() => {
 
   function compactTimings(timings = {}) {
     const out = {};
-    for (const [name, ms] of Object.entries(timings)) out[name] = roundMs(ms);
+    for (const [name, ms] of Object.entries(timings)) {
+      const value = Number(ms);
+      out[name] = Number.isFinite(value) ? roundMs(value) : ms;
+    }
     return out;
+  }
+
+  function sampleTopObjectAt(clientX, clientY) {
+    const point = clientToBoardWorldPoint(clientX, clientY);
+    return { point, topObject: topObjectAtWorldPoint(point) };
+  }
+
+  function imageKeyForObject(obj) {
+    return obj?.type === 'image' ? obj.data?.imgKey || '' : '';
   }
 
   function compactPreviewDiagnostics(diag = null) {
@@ -152,6 +186,10 @@ var EyedropperDebug = (() => {
     const isFirstSample = !!previewSample?.firstSample;
     const latency = previewSample?.latency || {};
     const previewDiag = previewSample?.previewDiagnostics || null;
+    const { topObject } = sampleTopObjectAt(clientX, clientY);
+    const topObjectId = topObject?.id || '';
+    const topObjectType = topObject?.type || '';
+    const topImageKey = imageKeyForObject(topObject);
     perfStats.maxInputAgeMs = Math.max(perfStats.maxInputAgeMs, Number(latency.inputAgeAtCommitMs) || 0);
     perfStats.maxQueueDelayMs = Math.max(perfStats.maxQueueDelayMs, Number(latency.queueDelayMs) || 0);
     perfStats.maxPointerDeltaPx = Math.max(perfStats.maxPointerDeltaPx, Number(latency.pointerDeltaPx) || 0);
@@ -173,7 +211,9 @@ var EyedropperDebug = (() => {
         clientX,
         clientY,
         sampleMs: roundMs(sampleMs),
-        topObjectId: previewSample?.topObjectId || '',
+        topObjectId,
+        topObjectType,
+        topImageKey,
         drawnImages: previewSample?.drawnImages ?? '',
         drawnText: previewSample?.drawnText ?? '',
         testedObjects: previewSample?.testedObjects ?? '',
@@ -194,7 +234,9 @@ var EyedropperDebug = (() => {
         clientX,
         clientY,
         sampleMs: roundMs(sampleMs),
-        topObjectId: previewSample?.topObjectId || '',
+        topObjectId,
+        topObjectType,
+        topImageKey,
         drawnImages: previewSample?.drawnImages ?? '',
         drawnText: previewSample?.drawnText ?? '',
         missingImages: previewSample?.counters?.missingImages ?? '',
@@ -212,7 +254,9 @@ var EyedropperDebug = (() => {
         clientX,
         clientY,
         sampleMs: roundMs(sampleMs),
-        topObjectId: previewSample?.topObjectId || '',
+        topObjectId,
+        topObjectType,
+        topImageKey,
         drawnImages: previewSample?.drawnImages ?? '',
         drawnText: previewSample?.drawnText ?? '',
         testedObjects: previewSample?.testedObjects ?? '',
@@ -307,8 +351,14 @@ var EyedropperDebug = (() => {
       previewSuspectedBlank: e.meta?.previewSuspectedBlank ?? '',
       top: e.meta?.topObjectId || '',
       topType: e.meta?.topObjectType || '',
+      topKey: e.meta?.topImageKey || '',
       first: e.meta?.firstSample ?? '',
       center: compactPixel(e.meta?.centerPixel),
+      readoutPixel: e.meta?.readoutPixel || '',
+      displayedHex: e.meta?.displayedHex || '',
+      readoutMatchesDisplayed: e.meta?.readoutMatchesDisplayed ?? '',
+      readoutChanged: e.meta?.readoutChanged ?? '',
+      readoutNoUpdate: e.meta?.readoutNoUpdate ?? '',
       drawnImages: e.meta?.drawnImages ?? '',
       missingImages: e.meta?.missingImages ?? '',
       pendingImages: e.meta?.readbackSafePendingImages ?? '',
@@ -317,6 +367,11 @@ var EyedropperDebug = (() => {
       nativeSkipped: e.meta?.nativeSourceHydrationSkipped ?? '',
       lastMissingKey: e.meta?.lastMissingKey || '',
       lastMissingReason: e.meta?.lastMissingReason || '',
+      wallpaperMs: e.meta?.wallpaperRenderMs ?? '',
+      cachedLookupMs: e.meta?.readoutCachedPixelLookupMs ?? '',
+      cachedMiss: e.meta?.readoutCachedPixelMissReason || '',
+      safeTileBuildMs: e.meta?.readoutSafeTileBuildMs ?? '',
+      localReadoutMs: e.meta?.readoutLocalTotalMs ?? '',
     };
   }
 
@@ -368,6 +423,41 @@ var EyedropperDebug = (() => {
     };
   }
 
+  function readoutEventRow(row) {
+    return {
+      at: row.at,
+      x: row.clientX ?? '',
+      y: row.clientY ?? '',
+      source: row.source || '',
+      reason: row.reason || '',
+      hasPixel: row.hasPixel ?? '',
+      noUpdate: row.noReadoutUpdate ?? '',
+      changed: row.changed ?? '',
+      domMatchesPixel: row.domMatchesPixel ?? '',
+      pixelHex: row.pixelHex || '',
+      pixelRgb: row.pixelRgb || '',
+      beforeHex: row.before?.domHex || '',
+      afterHex: row.after?.domHex || '',
+      beforeRgb: row.before?.domRgb || '',
+      afterRgb: row.after?.domRgb || '',
+      activeCardVisible: row.after?.activeCardVisible ?? row.before?.activeCardVisible ?? '',
+      activeCardPinned: row.after?.activeCardPinned ?? row.before?.activeCardPinned ?? '',
+      ownsSwatch: row.after?.activeCardOwnsSwatch ?? row.before?.activeCardOwnsSwatch ?? '',
+      ownsHex: row.after?.activeCardOwnsHex ?? row.before?.activeCardOwnsHex ?? '',
+      ownsRgb: row.after?.activeCardOwnsRgb ?? row.before?.activeCardOwnsRgb ?? '',
+      hexConnected: row.after?.hexConnected ?? row.before?.hexConnected ?? '',
+      rgbConnected: row.after?.rgbConnected ?? row.before?.rgbConnected ?? '',
+      swatchConnected: row.after?.swatchConnected ?? row.before?.swatchConnected ?? '',
+      first: row.firstSample ?? '',
+      final: row.finalSample ?? '',
+      objectId: row.objectId || '',
+      objectType: row.objectType || '',
+      imgKey: row.imgKey || '',
+      sourceX: row.sourceX ?? '',
+      sourceY: row.sourceY ?? '',
+    };
+  }
+
   function failureRow(e) {
     return {
       at: e.at,
@@ -380,6 +470,106 @@ var EyedropperDebug = (() => {
       reason: e.meta?.reason || '',
       error: e.meta?.error || '',
     };
+  }
+
+  function imageSwitchRuntimeState(key) {
+    const safeEntry = key ? eyedropperSafeImageCache.get(key) : null;
+    return {
+      nativeCacheSource: key ? !!globalThis.hasEyedropperNativePixelCacheSource?.(key) : '',
+      nativeDecodeReady: key ? eyedropperNativeDecodePrewarm.ready.has(key) : '',
+      nativeDecodeActive: key ? eyedropperNativeDecodePrewarm.active.has(key) : '',
+      nativeDecodeFailed: key ? eyedropperNativeDecodePrewarm.failed.has(key) : '',
+      nativeInFlight: _eyedropperNativePixelInFlight,
+      nativeTargetKey: _eyedropperNativePixelTarget?.key || '',
+      safeImagePending: eyedropperSafeImagePromises.size,
+      safeCacheHasKey: !!safeEntry,
+      safeCacheKind: safeEntry?.sourceKind || '',
+      safeTileCacheSize: eyedropperSafeTileCache.size,
+      safeTileCachePending: eyedropperSafeTileCachePending.size,
+      viewportScaleQueueLength: typeof imageScaledVariantQueue !== 'undefined' ? imageScaledVariantQueue.length : '',
+      viewportScalePending: typeof imageScaledBitmapPending !== 'undefined' ? imageScaledBitmapPending.size : '',
+    };
+  }
+
+  function imageSwitchRow(sample, previousKey, first = false) {
+    const key = sample?.topImageKey || '';
+    return {
+      at: roundMs(performance.now()),
+      first,
+      fromKey: previousKey || '',
+      toKey: key,
+      objectId: sample?.topObjectId || '',
+      objectType: sample?.topObjectType || '',
+      sampleMs: roundMs(sample?.sampleMs),
+      paintMs: roundMs(sample?.paintMs),
+      wallpaperMs: roundMs(sample?.wallpaperRenderMs),
+      objectLoopMs: roundMs(sample?.objectLoopMs),
+      canvasReadoutMs: roundMs(sample?.canvasReadoutMs),
+      readoutMs: roundMs(sample?.readoutMs),
+      positionMs: roundMs(sample?.positionMs),
+      cachedLookupMs: roundMs(sample?.readoutCachedPixelLookupMs),
+      cachedHitTestMs: roundMs(sample?.readoutCachedPixelHitTestMs),
+      cachedSourceSetupMs: roundMs(sample?.readoutCachedPixelSourceSetupMs),
+      cachedSafeRequestMs: roundMs(sample?.readoutCachedPixelSafeImageRequestMs),
+      cachedResolvedSync: sample?.readoutCachedPixelSafeImageResolvedSync ?? '',
+      cachedTileSampleMs: roundMs(sample?.readoutCachedPixelTileSampleMs),
+      cachedMiss: sample?.readoutCachedPixelMissReason || '',
+      safeTileBuildMs: roundMs(sample?.readoutSafeTileBuildMs),
+      safeTileReadMs: roundMs(sample?.readoutSafeTileReadMs),
+      localReadoutMs: roundMs(sample?.readoutLocalTotalMs),
+      localDrawMs: roundMs(sample?.readoutLocalDrawMs),
+      readoutSource: sample?.readoutSource || '',
+      readoutReason: sample?.readoutReason || '',
+      drawnImages: sample?.drawnImages ?? '',
+      missingImages: sample?.missingImages ?? '',
+      pendingImages: sample?.readbackSafePendingImages ?? '',
+      safeDisplayImages: sample?.safeDisplayImages ?? '',
+      safeDataUrlImages: sample?.safeDataUrlImages ?? '',
+      nativeSkipped: sample?.nativeSourceHydrationSkipped ?? '',
+      lastMissingReason: sample?.lastMissingReason || '',
+      ...imageSwitchRuntimeState(key),
+    };
+  }
+
+  function recordImageSwitch(sample = null) {
+    if (!core.enabled || !sample) return;
+    const key = sample.topImageKey || '';
+    if (lastSampleImageKey === null) {
+      lastSampleImageKey = key;
+      if (!key) return;
+      const row = imageSwitchRow(sample, '', true);
+      imageSwitches.push(row);
+      if (imageSwitches.length > MAX_IMAGE_SWITCHES) imageSwitches.shift();
+      lastImageSwitch = row;
+      perfStats.imageSwitches++;
+      perfStats.maxImageSwitchSampleMs = Math.max(perfStats.maxImageSwitchSampleMs, Number(row.sampleMs) || 0);
+      perfStats.maxImageSwitchPaintMs = Math.max(perfStats.maxImageSwitchPaintMs, Number(row.paintMs) || 0);
+      perfStats.maxImageSwitchReadoutMs = Math.max(perfStats.maxImageSwitchReadoutMs, Number(row.canvasReadoutMs) || 0);
+      if ((Number(row.sampleMs) || 0) > IMAGE_SWITCH_SLOW_MS) {
+        perfStats.slowImageSwitches++;
+        slowImageSwitches.push(row);
+        if (slowImageSwitches.length > MAX_IMAGE_SWITCHES) slowImageSwitches.shift();
+      }
+      core.push({ step: 'image-switch', meta: row });
+      return;
+    }
+    if (key === lastSampleImageKey) return;
+    const previousKey = lastSampleImageKey;
+    lastSampleImageKey = key;
+    const row = imageSwitchRow(sample, previousKey);
+    imageSwitches.push(row);
+    if (imageSwitches.length > MAX_IMAGE_SWITCHES) imageSwitches.shift();
+    lastImageSwitch = row;
+    perfStats.imageSwitches++;
+    perfStats.maxImageSwitchSampleMs = Math.max(perfStats.maxImageSwitchSampleMs, Number(row.sampleMs) || 0);
+    perfStats.maxImageSwitchPaintMs = Math.max(perfStats.maxImageSwitchPaintMs, Number(row.paintMs) || 0);
+    perfStats.maxImageSwitchReadoutMs = Math.max(perfStats.maxImageSwitchReadoutMs, Number(row.canvasReadoutMs) || 0);
+    if ((Number(row.sampleMs) || 0) > IMAGE_SWITCH_SLOW_MS) {
+      perfStats.slowImageSwitches++;
+      slowImageSwitches.push(row);
+      if (slowImageSwitches.length > MAX_IMAGE_SWITCHES) slowImageSwitches.shift();
+    }
+    core.push({ step: 'image-switch', meta: row });
   }
 
   function compactLastSample(sample = lastSample) {
@@ -419,11 +609,17 @@ var EyedropperDebug = (() => {
       previewRectH: sample.previewRectH,
       topObjectId: sample.topObjectId,
       topObjectType: sample.topObjectType,
+      topImageKey: sample.topImageKey,
       firstSample: sample.firstSample,
       centerPixel: sample.centerPixel,
       previewPixel: sample.previewPixel,
       readoutSource: sample.readoutSource,
       readoutReason: sample.readoutReason,
+      readoutNoUpdate: sample.readoutNoUpdate,
+      readoutChanged: sample.readoutChanged,
+      readoutMatchesDisplayed: sample.readoutMatchesDisplayed,
+      displayedHex: sample.displayedHex,
+      displayedRgb: sample.displayedRgb,
       readoutObjectId: sample.readoutObjectId,
       readoutObjectType: sample.readoutObjectType,
       readoutSourcePixel: sample.readoutSourcePixel,
@@ -442,6 +638,18 @@ var EyedropperDebug = (() => {
       nativeSourceHydrationSkipped: sample.nativeSourceHydrationSkipped,
       lastMissingKey: sample.lastMissingKey,
       lastMissingReason: sample.lastMissingReason,
+      sampleMs: sample.sampleMs,
+      paintMs: sample.paintMs,
+      wallpaperRenderMs: sample.wallpaperRenderMs,
+      canvasReadoutMs: sample.canvasReadoutMs,
+      readoutMs: sample.readoutMs,
+      positionMs: sample.positionMs,
+      readoutCachedPixelLookupMs: sample.readoutCachedPixelLookupMs,
+      readoutCachedPixelMissReason: sample.readoutCachedPixelMissReason,
+      readoutCachedPixelSafeImageResolvedSync: sample.readoutCachedPixelSafeImageResolvedSync,
+      readoutPixelPresent: sample.readoutPixelPresent,
+      readoutSafeTileBuildMs: sample.readoutSafeTileBuildMs,
+      readoutLocalTotalMs: sample.readoutLocalTotalMs,
       textHits: Array.isArray(sample.textHits) ? sample.textHits.length : sample.textHits,
     };
   }
@@ -548,11 +756,11 @@ var EyedropperDebug = (() => {
   }
 
   function sampleSnapshot(clientX, clientY, previewSample = null, centerPixel = null, readoutSampleInfo = null) {
-    const point = clientToBoardWorldPoint(clientX, clientY);
-    const topObject = topObjectAtWorldPoint(point);
+    const { point, topObject } = sampleTopObjectAt(clientX, clientY);
     const dpr = window.devicePixelRatio || 1;
     const previewRect = eyedropperCanvas?.getBoundingClientRect();
     const drawSize = previewSample?.drawSize || eyedropperPreviewDrawSize(dpr);
+    const timings = previewSample?.timings || {};
     const previewCssSize = previewSample?.previewCssSize || (drawSize / dpr);
     const previewZoom = Math.max(zoom || 1, 0.0001) * EYEDROPPER_PREVIEW_ZOOM_SCALE;
     const renderCssSize = drawSize / dpr;
@@ -564,6 +772,9 @@ var EyedropperDebug = (() => {
       y2: point.y + halfWorld,
     };
     const counters = previewSample?.counters || {};
+    const readoutPixelHex = rgbaToHex(readoutSampleInfo?.pixel);
+    const displayedHex = eyedropperHex?.textContent || '';
+    const displayedRgb = eyedropperRgb?.textContent || '';
     return {
       clientX,
       clientY,
@@ -577,6 +788,7 @@ var EyedropperDebug = (() => {
       previewZoom: previewSample?.previewZoom ?? previewZoom,
       topObjectId: topObject?.id || '',
       topObjectType: topObject?.type || '',
+      topImageKey: imageKeyForObject(topObject),
       previewPainted: !!previewSample?.painted,
       previewFallback: !!previewSample?.usedFallback,
       firstSample: !!previewSample?.firstSample,
@@ -618,8 +830,10 @@ var EyedropperDebug = (() => {
       readoutSourceW: readoutSampleInfo?.sourceW ?? '',
       readoutSourceH: readoutSampleInfo?.sourceH ?? '',
       readoutLayers: readoutSampleInfo?.layers?.length ?? '',
-      readoutPixel: rgbaToHex(readoutSampleInfo?.pixel),
+      readoutPixel: readoutPixelHex,
       readoutRgba: readoutSampleInfo?.pixel ? readoutSampleInfo.pixel.join(' ') : '',
+      readoutNoUpdate: !!readoutSampleInfo?.noReadoutUpdate,
+      readoutMatchesDisplayed: !!readoutSampleInfo?.pixel && displayedHex === readoutPixelHex,
       readoutCanvasX: readoutSampleInfo?.sourceX ?? '',
       readoutCanvasY: readoutSampleInfo?.sourceY ?? '',
       readoutInBounds: readoutSampleInfo?.inBounds ?? '',
@@ -629,24 +843,42 @@ var EyedropperDebug = (() => {
       readoutRectH: '',
       readoutScaleX: '',
       readoutScaleY: '',
-      displayedHex: eyedropperHex?.textContent || '',
-      displayedRgb: eyedropperRgb?.textContent || '',
+      displayedHex,
+      displayedRgb,
+      activeCardVisible: !!eyedropperActiveCard?.el?.classList.contains('visible'),
+      activeCardPinned: !!eyedropperActiveCard?.el?.classList.contains('pinned'),
+      activeCardOwnsHex: eyedropperActiveCard?.hex ? eyedropperActiveCard.hex === eyedropperHex : '',
       drawnImages: previewSample?.drawnImages ?? '',
       drawnText: previewSample?.drawnText ?? '',
       testedObjects: previewSample?.testedObjects ?? '',
       intersectingObjects: previewSample?.intersectingObjects ?? '',
-      sampleMs: previewSample?.timings?.total ?? '',
-      paintMs: previewSample?.timings?.paintPreview ?? '',
-      objectLoopMs: previewSample?.timings?.objectLoop ?? '',
-      readbackMs: previewSample?.timings?.readback ?? '',
-      previewReadbackMs: previewSample?.timings?.previewReadback ?? '',
-      canvasReadoutMs: previewSample?.timings?.canvasReadout ?? '',
-      blitMs: previewSample?.timings?.blit ?? '',
-      sizeMs: previewSample?.timings?.drawSize ?? '',
-      resizeMs: previewSample?.timings?.resizeVisible ?? '',
-      dotMs: previewSample?.timings?.dot ?? '',
-      readoutMs: previewSample?.timings?.readout ?? '',
-      positionMs: previewSample?.timings?.position ?? '',
+      sampleMs: timings.total ?? '',
+      paintMs: timings.paintPreview ?? '',
+      wallpaperRenderMs: timings.wallpaperRender ?? '',
+      objectLoopMs: timings.objectLoop ?? '',
+      readbackMs: timings.readback ?? '',
+      previewReadbackMs: timings.previewReadback ?? '',
+      canvasReadoutMs: timings.canvasReadout ?? '',
+      blitMs: timings.blit ?? '',
+      sizeMs: timings.drawSize ?? '',
+      resizeMs: timings.resizeVisible ?? '',
+      dotMs: timings.dot ?? '',
+      readoutMs: timings.readout ?? '',
+      readoutChanged: timings.readoutChanged ?? '',
+      readoutPixelPresent: timings.readoutPixelPresent ?? '',
+      positionMs: timings.position ?? '',
+      readoutCachedPixelLookupMs: timings['readout:cachedPixelLookup'] ?? '',
+      readoutCachedPixelHitTestMs: timings['readout:cachedPixelHitTest'] ?? '',
+      readoutCachedPixelSourceSetupMs: timings['readout:cachedPixelSourceSetup'] ?? '',
+      readoutCachedPixelSafeImageRequestMs: timings['readout:cachedPixelSafeImageRequest'] ?? '',
+      readoutCachedPixelSafeImageResolvedSync: timings['readout:cachedPixelSafeImageResolvedSync'] ?? '',
+      readoutCachedPixelTileSampleMs: timings['readout:cachedPixelTileSample'] ?? '',
+      readoutCachedPixelMissReason: timings['readout:cachedPixelImageMissReason'] || '',
+      readoutSafeTileBuildMs: timings['readout:safeTileBuild'] ?? '',
+      readoutSafeTileReadMs: timings['readout:safeTileRead'] ?? '',
+      readoutLocalDrawMs: timings['readout:localReadoutDraw'] ?? '',
+      readoutLocalReadbackMs: timings['readout:localReadoutReadback'] ?? '',
+      readoutLocalTotalMs: timings['readout:localReadoutTotal'] ?? '',
       bitmapImages: counters.bitmapImages ?? '',
       elementImages: counters.elementImages ?? '',
       fallbackImages: counters.fallbackImages ?? '',
@@ -687,6 +919,7 @@ var EyedropperDebug = (() => {
   function logSample(clientX, clientY, previewSample = null, centerPixel = null, readoutSampleInfo = null) {
     if (!core.enabled) return;
     lastSample = sampleSnapshot(clientX, clientY, previewSample, centerPixel, readoutSampleInfo);
+    recordImageSwitch(lastSample);
     core.push({
       step: 'sample',
       meta: {
@@ -732,6 +965,25 @@ var EyedropperDebug = (() => {
     core.push({ step: 'toggle', meta });
   }
 
+  function logReadoutUpdate(meta = {}) {
+    if (!core.enabled) return;
+    const row = {
+      at: roundMs(performance.now()),
+      ...meta,
+    };
+    perfStats.colorReadoutAttempts++;
+    if (row.hasPixel) perfStats.colorReadoutWithPixel++;
+    else perfStats.colorReadoutWithoutPixel++;
+    if (row.noReadoutUpdate) perfStats.colorReadoutNoUpdateSamples++;
+    if (row.domMatchesPixel === false) perfStats.colorReadoutDomMismatches++;
+    if (!row.after?.hexPresent || !row.after?.rgbPresent || !row.after?.swatchPresent) {
+      perfStats.colorReadoutMissingElements++;
+    }
+    readoutEvents.push(row);
+    if (readoutEvents.length > MAX_READOUT_EVENTS) readoutEvents.shift();
+    core.push({ step: 'readout-update', meta: row });
+  }
+
   function count(name, amount = 1) {
     countStat(name, amount);
   }
@@ -766,14 +1018,16 @@ var EyedropperDebug = (() => {
     const gapMs = frameAt - previousFrameAt;
     if (gapMs <= STUTTER_FRAME_GAP_MS) return;
     perfStats.frameGaps++;
-    perfStats.stuttersOver120ms++;
+    perfStats.stuttersOver50ms++;
+    if (gapMs > 80) perfStats.stuttersOver80ms++;
+    if (gapMs > 120) perfStats.stuttersOver120ms++;
     if (gapMs > 200) perfStats.stuttersOver200ms++;
     if (gapMs > 300) perfStats.stuttersOver300ms++;
     perfStats.maxFrameGapMs = Math.max(perfStats.maxFrameGapMs, gapMs);
     frameGaps.push({
       at: roundMs(frameAt),
       gapMs: roundMs(gapMs),
-      severity: gapMs > 300 ? 'major' : gapMs > 200 ? 'visible' : 'minor',
+      severity: gapMs > 300 ? 'major' : gapMs > 200 ? 'visible' : gapMs > 120 ? 'minor' : gapMs > 80 ? 'noticeable' : 'small',
       thresholdMs: STUTTER_FRAME_GAP_MS,
       enabled: eyedropperEnabled,
       sampling: eyedropperSampling,
@@ -789,6 +1043,8 @@ var EyedropperDebug = (() => {
       tileCachePending: eyedropperSafeTileCachePending.size,
       tileCacheSize: eyedropperSafeTileCache.size,
       lastSamplingEvent,
+      lastImageSwitch,
+      lastImageSwitchAgeMs: lastImageSwitch?.at ? roundMs(frameAt - lastImageSwitch.at) : '',
       visibility: document.visibilityState || '',
       hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : '',
     });
@@ -1194,6 +1450,11 @@ var EyedropperDebug = (() => {
       lastEventAgeMs: row.lastSamplingEvent?.at ? roundMs(row.at - row.lastSamplingEvent.at) : '',
       lastEventSampleMs: row.lastSamplingEvent?.sampleMs ?? '',
       lastEventQueueDelayMs: row.lastSamplingEvent?.queueDelayMs ?? '',
+      lastSwitchToKey: row.lastImageSwitch?.toKey || '',
+      lastSwitchAgeMs: row.lastImageSwitchAgeMs ?? '',
+      lastSwitchSampleMs: row.lastImageSwitch?.sampleMs ?? '',
+      lastSwitchReadoutReason: row.lastImageSwitch?.readoutReason || '',
+      lastSwitchCachedMiss: row.lastImageSwitch?.cachedMiss || '',
       visibility: row.visibility,
       hasFocus: row.hasFocus,
     })), options, 40);
@@ -1422,6 +1683,88 @@ var EyedropperDebug = (() => {
     return out;
   }
 
+  function countRowsBy(rows, field) {
+    const out = {};
+    for (const row of rows) {
+      const key = row[field] || 'none';
+      out[key] = (out[key] || 0) + 1;
+    }
+    return out;
+  }
+
+  function imageSwitchSummary(options = {}) {
+    const rows = recentRows(imageSwitches, options, 40);
+    const slowRows = recentRows(slowImageSwitches, options?.slow ?? options, 20);
+    const totals = {
+      switches: perfStats.imageSwitches,
+      retainedSwitchRows: imageSwitches.length,
+      slowSwitches: perfStats.slowImageSwitches,
+      retainedSlowSwitchRows: slowImageSwitches.length,
+      maxSampleMs: roundMs(perfStats.maxImageSwitchSampleMs),
+      maxPaintMs: roundMs(perfStats.maxImageSwitchPaintMs),
+      maxReadoutMs: roundMs(perfStats.maxImageSwitchReadoutMs),
+      nativeDecodeWaits: imageSwitches.filter(row => row.readoutReason === 'native-pixel-pending' || row.cachedMiss === 'native-pixel-pending').length,
+      safeImageWaits: imageSwitches.filter(row => String(row.cachedMiss || row.readoutReason || '').includes('safe-image')).length,
+      localReadouts: imageSwitches.filter(row => row.readoutSource === 'local-readout').length,
+    };
+    const out = {
+      totals,
+      byReadoutReason: countRowsBy(imageSwitches, 'readoutReason'),
+      byCachedMiss: countRowsBy(imageSwitches, 'cachedMiss'),
+      recent: rows,
+      slow: slowRows,
+    };
+    if (options.table !== false) {
+      console.table([totals]);
+      console.table(rows);
+      if (slowRows.length) console.table(slowRows);
+    }
+    return out;
+  }
+
+  function readoutSummary(options = {}) {
+    const rows = recentRows(readoutEvents.map(readoutEventRow), options, 60);
+    const totals = {
+      attempts: perfStats.colorReadoutAttempts,
+      retainedRows: readoutEvents.length,
+      withPixel: perfStats.colorReadoutWithPixel,
+      withoutPixel: perfStats.colorReadoutWithoutPixel,
+      domWrites: perfStats.colorReadoutDomWrites,
+      domSkips: perfStats.colorReadoutDomSkips,
+      noUpdateSamples: perfStats.colorReadoutNoUpdateSamples,
+      domMismatches: perfStats.colorReadoutDomMismatches,
+      missingElements: perfStats.colorReadoutMissingElements,
+    };
+    const out = {
+      totals,
+      bySource: countRowsBy(readoutEvents, 'source'),
+      byReason: countRowsBy(readoutEvents, 'reason'),
+      byChanged: countRowsBy(readoutEvents, 'changed'),
+      recent: rows,
+    };
+    if (options.table !== false) {
+      console.table([totals]);
+      console.table(rows);
+    }
+    return out;
+  }
+
+  function captureHealth(sampleEvents, timelineEvents) {
+    const noSamplesCaptured = sampleEvents.length === 0;
+    const out = {
+      noSamplesCaptured,
+      noTimelineEventsCaptured: timelineEvents.length === 0,
+      enabledAtFinish: eyedropperEnabled,
+      samplingAtFinish: eyedropperSampling,
+      loupeVisibleAtFinish: isEyedropperSampleVisible(),
+      note: noSamplesCaptured
+        ? 'No eyedropper sampler movement was captured. Run beginDebug, reproduce the sampler movement, then run finishDebug.'
+        : '',
+    };
+    if (noSamplesCaptured) console.warn('[Boardfish eyedropper] No sampler movement was captured. Run beginDebug, reproduce the sampler movement, then run finishDebug.');
+    return out;
+  }
+
   function report(options = {}) {
     const sampleEvents = events.filter(e => e.step === 'sample');
     const failureEvents = events.filter(e => e.step === 'readback-fail' || e.step === 'fallback-sample' || e.step === 'unsafe-image-skip');
@@ -1435,16 +1778,26 @@ var EyedropperDebug = (() => {
       sampleMoves: perfStats.sampleMoves,
       sampleCommits: perfStats.sampleCommits,
       firstSamples: perfStats.firstSamples,
+      imageSwitches: perfStats.imageSwitches,
+      slowImageSwitches: perfStats.slowImageSwitches,
       coalescedMoves: perfStats.sampleCoalescedMoves,
       duplicateMouseMovesSkipped: perfStats.duplicateMouseMovesSkipped,
       layoutCacheHits: perfStats.layoutCacheHits,
       layoutCacheMisses: perfStats.layoutCacheMisses,
       backingStoreResizeSkips: perfStats.backingStoreResizeSkips,
+      colorReadoutAttempts: perfStats.colorReadoutAttempts,
+      colorReadoutDomWrites: perfStats.colorReadoutDomWrites,
       colorReadoutDomSkips: perfStats.colorReadoutDomSkips,
+      colorReadoutWithoutPixel: perfStats.colorReadoutWithoutPixel,
+      colorReadoutNoUpdateSamples: perfStats.colorReadoutNoUpdateSamples,
+      colorReadoutDomMismatches: perfStats.colorReadoutDomMismatches,
       prewarmRunsTimed: perfStats.prewarmRunsTimed,
       slowSamples: perfStats.slowSamples,
       maxSampleMs: roundMs(perfStats.maxSampleMs),
       maxFirstSampleMs: roundMs(perfStats.maxFirstSampleMs),
+      maxImageSwitchSampleMs: roundMs(perfStats.maxImageSwitchSampleMs),
+      stuttersOver50ms: perfStats.stuttersOver50ms,
+      stuttersOver80ms: perfStats.stuttersOver80ms,
       maxPrewarmMs: roundMs(perfStats.maxPrewarmMs),
       samplesWithMissingImages: sampleEvents.filter(e => Number(e.meta?.missingImages) > 0).length,
       samplesWithPendingImages: sampleEvents.filter(e => Number(e.meta?.readbackSafePendingImages) > 0).length,
@@ -1455,6 +1808,7 @@ var EyedropperDebug = (() => {
     const out = {
       stats: { ...stats },
       perf: { ...perfStats },
+      captureHealth: captureHealth(sampleEvents, timelineEvents),
       timings: timingSummary({ table: false }),
       safeCache: safeImageCacheSummary({ table: false }),
       totals,
@@ -1465,6 +1819,8 @@ var EyedropperDebug = (() => {
       slowPreviewPresent: recentRows(slowPreviewPresentSamples, options?.slowPresent ?? options, 12),
       previewMismatches: recentRows(previewMismatchSamples, options?.preview ?? options, 12),
       eventTimeline: recentRows(timelineEvents.map(sampleEventRow), options?.timeline ?? options, 30),
+      imageSwitches: imageSwitchSummary({ table: false, limit: debugLimit(options?.imageSwitches ?? options, 40) }),
+      readoutUpdates: readoutSummary({ table: false, limit: debugLimit(options?.readout ?? options, 60) }),
       safeImageTimeline: safeImageTimeline({ table: false, limit: debugLimit(options?.safeImages ?? options, 80) }),
       nativePixel: nativePixelSummary({ table: false, limit: debugLimit(options?.nativePixel ?? options, 40) }),
       longTasks: recentRows(longTasks, options?.longTasks ?? options, 12),
@@ -1503,8 +1859,13 @@ var EyedropperDebug = (() => {
     for (const key of Object.keys(perfStats)) perfStats[key] = 0;
     for (const key of Object.keys(phaseStats)) delete phaseStats[key];
     lastSamplingEvent = null;
+    lastSampleImageKey = null;
+    lastImageSwitch = null;
     slowSamples.length = 0;
     firstSamples.length = 0;
+    imageSwitches.length = 0;
+    slowImageSwitches.length = 0;
+    readoutEvents.length = 0;
     previewPresentSamples.length = 0;
     slowPreviewPresentSamples.length = 0;
     previewMismatchSamples.length = 0;
@@ -1542,6 +1903,8 @@ var EyedropperDebug = (() => {
     previewPresentSummary,
     slowPreviewPresentSummary,
     previewMismatchSummary,
+    imageSwitchSummary,
+    readoutSummary,
     longTaskSummary,
     frameGapSummary,
     stutterSummary,
@@ -1567,6 +1930,7 @@ var EyedropperDebug = (() => {
     _logUnsafeImageSkip: logUnsafeImageSkip,
     _logInteraction: logInteraction,
     _logToggle: logToggle,
+    _logReadoutUpdate: logReadoutUpdate,
     _logSamplingEvent: logSamplingEvent,
     _logPreviewPresent: logPreviewPresent,
     _startFrameProbe: startFrameProbe,

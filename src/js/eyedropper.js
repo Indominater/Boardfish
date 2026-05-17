@@ -768,23 +768,42 @@ function positionEyedropperLoupe(clientX, clientY) {
   return layout;
 }
 
-function updateEyedropperColorReadout(pixel) {
+const eyedropperColorReadoutDebugState = () => {
+  const card = eyedropperActiveCard;
+  const classes = card?.el?.classList;
+  return {
+    hasActiveCard: !!card, activeCardVisible: !!classes?.contains('visible'), activeCardPinned: !!classes?.contains('pinned'),
+    activeCardOwnsSwatch: card?.swatch ? card.swatch === eyedropperSwatch : '',
+    activeCardOwnsHex: card?.hex ? card.hex === eyedropperHex : '',
+    activeCardOwnsRgb: card?.rgb ? card.rgb === eyedropperRgb : '',
+    swatchPresent: !!eyedropperSwatch, hexPresent: !!eyedropperHex, rgbPresent: !!eyedropperRgb,
+    swatchConnected: !!eyedropperSwatch?.isConnected, hexConnected: !!eyedropperHex?.isConnected, rgbConnected: !!eyedropperRgb?.isConnected,
+    domHex: eyedropperHex?.textContent || '', domRgb: eyedropperRgb?.textContent || '',
+    swatchStyle: eyedropperSwatch?.style?.background || '',
+    cardLastHex: card?.lastHex || '', cardLastRgb: card?.lastRgb || '', cardLastSwatchCss: card?.lastSwatchCss || '',
+  };
+};
+function updateEyedropperColorReadout(pixel, meta = {}) {
   const cssColor = rgbaToCss(pixel);
   const hex = rgbaToHex(pixel);
   const rgb = rgbaToRgbText(pixel);
   const card = eyedropperActiveCard;
-  let changed = false;
+  const before = eyedropperColorReadoutDebugState();
+  let changed = false, swatchChanged = false, hexChanged = false, rgbChanged = false;
   if (eyedropperSwatch && card?.lastSwatchCss !== cssColor) {
     eyedropperSwatch.style.background = cssColor;
     changed = true;
+    swatchChanged = true;
   }
   if (eyedropperHex && card?.lastHex !== hex) {
     eyedropperHex.textContent = hex;
     changed = true;
+    hexChanged = true;
   }
   if (eyedropperRgb && card?.lastRgb !== rgb) {
     eyedropperRgb.textContent = rgb;
     changed = true;
+    rgbChanged = true;
   }
   if (card) {
     card.lastSwatchCss = cssColor;
@@ -792,6 +811,21 @@ function updateEyedropperColorReadout(pixel) {
     card.lastRgb = rgb;
   }
   EyedropperDebug._countPerf(changed ? 'colorReadoutDomWrites' : 'colorReadoutDomSkips');
+  const after = eyedropperColorReadoutDebugState();
+  EyedropperDebug._logReadoutUpdate({
+    ...meta,
+    hasPixel: true,
+    pixelHex: hex,
+    pixelRgb: rgb,
+    cssColor,
+    changed,
+    swatchChanged,
+    hexChanged,
+    rgbChanged,
+    domMatchesPixel: after.domHex === hex && after.domRgb === rgb,
+    before,
+    after,
+  });
   return changed;
 }
 
@@ -1095,6 +1129,26 @@ const logEyedropperNativePixelResolveMiss = (reason, meta = {}) => {
   });
 };
 
+const resolveEyedropperImageReadoutTargetAt = (clientX, clientY, timings = null) => {
+  const hitStart = performance.now();
+  const point = clientToBoardWorldPoint(clientX, clientY);
+  const topObject = topObjectAtWorldPoint(point);
+  if (timings) timings.cachedPixelHitTest = performance.now() - hitStart;
+  if (!topObject) return { kind: 'background' };
+  if (topObject.type !== 'image') return { kind: 'other', object: topObject };
+
+  const sourceStart = performance.now();
+  const key = topObject.data?.imgKey;
+  const local = worldPointToImageLocalUnit(topObject, point);
+  const safeEntry = key ? eyedropperSafeImageCache.get(key) : null;
+  const token = safeEntry?.token || (key ? eyedropperSafeImageToken(key) : '');
+  if (timings) timings.cachedPixelSourceSetup = performance.now() - sourceStart;
+  if (!key) return { kind: 'image-miss', object: topObject, reason: 'missing-img-key' };
+  if (!local) return { kind: 'image-miss', object: topObject, key, reason: 'missing-local-image-point' };
+  if (!token) return { kind: 'image-miss', object: topObject, key, reason: 'missing-image-token' };
+  return { kind: 'image', object: topObject, key, local, safeEntry, token };
+};
+
 function resolveEyedropperNativePixelTargetAt(clientX, clientY, timings = null) {
   const options = arguments[3] || {};
   const logMiss = options.logMiss === true;
@@ -1241,7 +1295,15 @@ function pumpEyedropperNativePixelQueue() {
       const pixel = [rgba[0], rgba[1], rgba[2], rgba[3]];
       eyedropperNativeDecodePrewarm.ready.add(target.key);
       eyedropperNativeDecodePrewarm.failed.delete(target.key);
-      updateEyedropperColorReadout(pixel);
+      updateEyedropperColorReadout(pixel, {
+        source: 'native-pixel',
+        reason: 'native-pixel-ready',
+        clientX: target.clientX,
+        clientY: target.clientY,
+        imgKey: target.key,
+        sourceX,
+        sourceY,
+      });
       EyedropperDebug._count('nativePixelReady');
       EyedropperDebug._logSamplingEvent('native-pixel-ready', {
         imgKey: target.key,
@@ -1309,11 +1371,8 @@ function sampleEyedropperCachedPixelAt(clientX, clientY) {
     timings.cachedPixelImageMissReason = 'native-pixel-pending';
     return null;
   }
-  const hitStart = performance.now();
-  const point = clientToBoardWorldPoint(clientX, clientY);
-  const topObject = topObjectAtWorldPoint(point);
-  timings.cachedPixelHitTest = performance.now() - hitStart;
-  if (!topObject) {
+  const target = resolveEyedropperImageReadoutTargetAt(clientX, clientY, timings);
+  if (target.kind === 'background') {
     clearEyedropperNativePixelTarget();
     return {
       pixel: boardBackgroundPixel(),
@@ -1324,19 +1383,59 @@ function sampleEyedropperCachedPixelAt(clientX, clientY) {
       layers: [],
     };
   }
-  if (topObject.type !== 'image') {
+  if (target.kind === 'other') {
     clearEyedropperNativePixelTarget();
     return null;
   }
-  const sourceStart = performance.now();
-  const key = topObject.data?.imgKey;
-  const local = worldPointToImageLocalUnit(topObject, point);
-  const safeEntry = key ? eyedropperSafeImageCache.get(key) : null;
-  const token = safeEntry?.token || (key ? eyedropperSafeImageToken(key) : '');
-  timings.cachedPixelSourceSetup = performance.now() - sourceStart;
-  if (!key || !local || !token) {
+  if (target.kind === 'image-miss') {
     clearEyedropperNativePixelTarget();
+    timings.cachedPixelImageMiss = 1;
+    timings.cachedPixelImageMissReason = target.reason || 'image-target-missing';
     return null;
+  }
+  const { key, local, token, object: topObject } = target;
+  let safeEntry = target.safeEntry;
+  if (safeEntry?.token !== token || !isDrawableImageSource(safeEntry.source)) {
+    const requestStart = performance.now();
+    const resolvedSource = resolveEyedropperSafeImageSource(key);
+    timings.cachedPixelSafeImageRequest = performance.now() - requestStart;
+    safeEntry = eyedropperSafeImageCache.get(key);
+    if (resolvedSource && safeEntry?.token === token && isDrawableImageSource(safeEntry.source)) {
+      timings.cachedPixelSafeImageResolvedSync = 1;
+    }
+  }
+  if (safeEntry?.token === token && isDrawableImageSource(safeEntry.source)) {
+    clearEyedropperNativePixelTarget();
+    const sampleStart = performance.now();
+    const { width: sourceW, height: sourceH } = imageSourceSize(safeEntry.source);
+    let sourceX = local.u * Math.max(0, sourceW - 1);
+    let sourceY = local.v * Math.max(0, sourceH - 1);
+    const tileSample = sampleEyedropperSafeTileCache(key, token, safeEntry.source, sourceX, sourceY, {
+      timings,
+      sync: options.syncTileBuild === true,
+    });
+    timings.cachedPixelTileSample = performance.now() - sampleStart;
+    const pixel = tileSample?.pixel || null;
+    sourceX = tileSample?.sourceX ?? sourceX;
+    sourceY = tileSample?.sourceY ?? sourceY;
+    if (!pixel) {
+      timings.cachedPixelImageMiss = 1;
+      timings.cachedPixelImageMissReason = 'safe-tile-pending';
+      return null;
+    }
+    return {
+      pixel,
+      source: 'pixel-cache',
+      reason: 'cached-image-tile',
+      objectId: topObject.id || '',
+      objectType: topObject.type || '',
+      sourceX,
+      sourceY,
+      sourceW,
+      sourceH,
+      inBounds: true,
+      layers: [],
+    };
   }
   if (globalThis.hasEyedropperNativePixelCacheSource?.(key)) {
     requestEyedropperNativePixel();
@@ -1344,45 +1443,9 @@ function sampleEyedropperCachedPixelAt(clientX, clientY) {
     timings.cachedPixelImageMissReason = 'native-pixel-pending';
     return null;
   }
-  if (safeEntry?.token !== token || !isDrawableImageSource(safeEntry.source)) {
-    const requestStart = performance.now();
-    resolveEyedropperSafeImageSource(key);
-    timings.cachedPixelSafeImageRequest = performance.now() - requestStart;
-    timings.cachedPixelImageMiss = 1;
-    timings.cachedPixelImageMissReason = 'safe-image-pending';
-    return null;
-  }
-  clearEyedropperNativePixelTarget();
-  const sampleStart = performance.now();
-  const { width: sourceW, height: sourceH } = imageSourceSize(safeEntry.source);
-  let sourceX = local.u * Math.max(0, sourceW - 1);
-  let sourceY = local.v * Math.max(0, sourceH - 1);
-  const tileSample = sampleEyedropperSafeTileCache(key, token, safeEntry.source, sourceX, sourceY, {
-    timings,
-    sync: options.syncTileBuild === true,
-  });
-  timings.cachedPixelTileSample = performance.now() - sampleStart;
-  const pixel = tileSample?.pixel || null;
-  sourceX = tileSample?.sourceX ?? sourceX;
-  sourceY = tileSample?.sourceY ?? sourceY;
-  if (!pixel) {
-    timings.cachedPixelImageMiss = 1;
-    timings.cachedPixelImageMissReason = 'safe-tile-pending';
-    return null;
-  }
-  return {
-    pixel,
-    source: 'pixel-cache',
-    reason: 'cached-image-tile',
-    objectId: topObject.id || '',
-    objectType: topObject.type || '',
-    sourceX,
-    sourceY,
-    sourceW,
-    sourceH,
-    inBounds: true,
-    layers: [],
-  };
+  timings.cachedPixelImageMiss = 1;
+  timings.cachedPixelImageMissReason = 'safe-image-pending';
+  return null;
 }
 
 function displayedBoardPixelSampleInfo(clientX, clientY, options = {}) {
@@ -1453,7 +1516,10 @@ function displayedBoardPixelSampleInfo(clientX, clientY, options = {}) {
 function sampleEyedropperReadoutPixel(clientX, clientY, previewSample = null, options = {}) {
   const timings = {};
   const cacheStart = performance.now();
-  const cachedPixel = sampleEyedropperCachedPixelAt(clientX, clientY, { timings });
+  const cachedPixel = sampleEyedropperCachedPixelAt(clientX, clientY, {
+    timings,
+    syncTileBuild: options.syncTileBuild !== false,
+  });
   timings.cachedPixelLookup = performance.now() - cacheStart;
   if (cachedPixel) return { ...cachedPixel, timings };
   if (timings.cachedPixelImageMissReason === 'native-pixel-pending') {
@@ -1571,6 +1637,7 @@ function eyedropperSafeImageToken(key, dataUrl = null) {
       stored.size || '',
     ].join(':');
   }
+  if (typeof isWebImageRef === 'function' && isWebImageRef(stored)) return ['web', stored.path || '', stored.mime || '', stored.ext || '', stored.bytes || '', webImageDisplaySrc(stored) || webImageDataUrl(stored)].join(':');
   return '';
 }
 
@@ -1604,8 +1671,7 @@ function removeEyedropperSafeImageKey(key) {
       eyedropperSafeScaledBitmapPendingBytes.delete(pendingKey);
     }
   }
-  eyedropperSafeDisplayProbeFailures.delete(eyedropperDisplayProbeFailureKey(key, 'imageCache'));
-  eyedropperSafeDisplayProbeFailures.delete(eyedropperDisplayProbeFailureKey(key, 'display-cache'));
+  ['imageCache', 'display-cache', 'bitmap-cache'].forEach(kind => eyedropperSafeDisplayProbeFailures.delete(eyedropperDisplayProbeFailureKey(key, kind)));
   eyedropperNativeSourceSkipLogged.delete(key);
   resetEyedropperDecodedImageKey(key);
   return !!existing;
@@ -1701,9 +1767,10 @@ function resolveEyedropperDisplayCacheSource(key, token, counters = null) {
   if (isNativeImageRef(imageStore[key])) return null;
   if (imageAssetUrlCache[key]) return null;
 
-  const displayImg = imageCache[key];
-  if (isDrawableImageSource(displayImg) && isEyedropperReadbackSafeDisplaySource(key, token, displayImg, 'imageCache', counters)) {
-    storeEyedropperSafeImage(key, token, displayImg, { owned: false, sourceKind: 'display-cache' });
+  const displayImg = imageBitmapCache[key] || imageCache[key];
+  const sourceKind = displayImg === imageBitmapCache[key] ? 'bitmap-cache' : 'display-cache';
+  if (isDrawableImageSource(displayImg) && isEyedropperReadbackSafeDisplaySource(key, token, displayImg, sourceKind, counters)) {
+    storeEyedropperSafeImage(key, token, displayImg, { owned: false, sourceKind });
     countEyedropperCounter(counters, 'safeDisplayImages');
     return displayImg;
   }
@@ -1811,7 +1878,7 @@ function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
 
 function countEyedropperSafeSourceUse(entry, counters = null) {
   if (!entry) return;
-  if (entry.sourceKind === 'display-cache') countEyedropperCounter(counters, 'safeDisplayImages');
+  if (entry.sourceKind === 'display-cache' || entry.sourceKind === 'bitmap-cache') countEyedropperCounter(counters, 'safeDisplayImages');
   else if (entry.sourceKind === 'data-url') countEyedropperCounter(counters, 'safeDataUrlImages');
 }
 
@@ -2219,6 +2286,7 @@ function commitEyedropperSample(e, options = {}) {
   const canvasReadoutStart = performance.now();
   let readoutSample = sampleEyedropperReadoutPixel(e.clientX, e.clientY, previewSample, {
     localImageFallback: options.first === true,
+    syncTileBuild: true,
   });
   timings.canvasReadout = performance.now() - canvasReadoutStart;
   for (const [name, ms] of Object.entries(readoutSample?.timings || {})) {
@@ -2240,7 +2308,19 @@ function commitEyedropperSample(e, options = {}) {
   drawEyedropperSampleDot(drawSize, dpr);
   timings.dot = performance.now() - dotStart;
   const readoutStart = performance.now();
-  timings.readoutChanged = centerPixel && updateEyedropperColorReadout(centerPixel) ? 1 : 0;
+  timings.readoutPixelPresent = centerPixel ? 1 : 0;
+  timings.readoutNoUpdate = readoutSample?.noReadoutUpdate ? 1 : 0;
+  const readoutMeta = {
+    source: readoutSample?.source || '', reason: readoutSample?.reason || '', clientX: e.clientX, clientY: e.clientY,
+    firstSample: !!options.first, finalSample: !!options.final, noReadoutUpdate: !!readoutSample?.noReadoutUpdate,
+    objectId: readoutSample?.objectId || '', objectType: readoutSample?.objectType || '',
+    sourceX: readoutSample?.sourceX ?? '', sourceY: readoutSample?.sourceY ?? '',
+  };
+  timings.readoutChanged = centerPixel && updateEyedropperColorReadout(centerPixel, readoutMeta) ? 1 : 0;
+  if (!centerPixel) EyedropperDebug._logReadoutUpdate({
+    ...readoutMeta, reason: readoutMeta.reason || 'missing-readout-pixel', hasPixel: false,
+    before: eyedropperColorReadoutDebugState(), after: eyedropperColorReadoutDebugState(),
+  });
   timings.readout = performance.now() - readoutStart;
   const visibleStart = performance.now();
   if (!eyedropperLoupe.classList.contains('visible')) {
@@ -2299,6 +2379,11 @@ function commitEyedropperSample(e, options = {}) {
     sampleMs: timings.total,
     paintMs: timings.paintPreview,
     readoutMs: timings.readout,
+    readoutSource: readoutSample?.source || '',
+    readoutReason: readoutSample?.reason || '',
+    readoutNoUpdate: !!readoutSample?.noReadoutUpdate,
+    readoutPixelPresent: !!centerPixel,
+    readoutChanged: timings.readoutChanged,
     positionMs: timings.position,
     previewPainted: !!previewSample?.painted,
     drawnImages: previewSample?.drawnImages ?? '',
