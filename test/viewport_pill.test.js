@@ -134,6 +134,8 @@ test('pill messages replay smooth slide only when the message changes', () => {
 
   context.showIslandMsg('Saved');
   assert.deepEqual(context.motionCalls, ['Saved']);
+  assert.equal(context.island.dataset.mode, 'message');
+  assert.equal(context.island.title, '');
 
   context.motionCalls.length = 0;
   context.showIslandMsg('Saved');

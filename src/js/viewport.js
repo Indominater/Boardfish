@@ -105,7 +105,7 @@ function showIslandForMessage(text) {
   const wasVisible = island.classList.contains('visible');
   const previousMode = island.dataset.mode;
   island.dataset.mode = 'message';
-  island.title = 'Reset Zoom';
+  island.title = '';
   setIslandVisible(true);
   const textChanged = setPillMessageText(text, { animate: false });
   if (!wasVisible || previousMode !== 'message' || textChanged) {

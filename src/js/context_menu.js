@@ -444,6 +444,7 @@ function resetZoomToClosestObject() {
 }
 
 const resetZoomFromPill = (e) => {
+  if (island?.dataset?.mode !== 'zoom') return;
   e.preventDefault();
   e.stopPropagation();
   if (document.activeElement === island) island.blur();
@@ -452,6 +453,7 @@ const resetZoomFromPill = (e) => {
 };
 
 const suppressZoomPillContextMenu = (e) => {
+  if (island?.dataset?.mode !== 'zoom') return;
   e.preventDefault();
   e.stopPropagation();
 };

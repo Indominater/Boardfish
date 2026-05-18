@@ -208,8 +208,13 @@ test('eyedropper readout samples rendered canvas-visible pixels', () => {
 
   assert.match(source, /function sampleEyedropperReadoutPixel\(clientX, clientY, previewSample = null, options = \{\}\)/);
   assert.match(source, /function renderEyedropperLocalReadoutPixel\(clientX, clientY\)/);
+  assert.match(source, /const sampleCenterOffset = 0\.5 \/ Math\.max\(dpr, 1\);/);
+  assert.match(source, /panX: panX - clientX \+ sampleCenterOffset/);
+  assert.match(source, /x1: \(clientX - sampleCenterOffset - panX\) \/ z/);
   assert.match(source, /function sampleEyedropperCachedPixelAt\(clientX, clientY\)/);
   assert.match(source, /function sampleEyedropperSafeTileCache\(key, token, source, sourceX, sourceY, options = \{\}\)/);
+  assert.match(source, /const eyedropperSourcePixelFromLocalUnit = \(unit, sourceSize\) =>/);
+  assert.match(source, /Math\.floor\(\(Number\.isFinite\(unit\) \? unit : 0\) \* size\)/);
   assert.match(source, /const resolveEyedropperImageReadoutTargetAt = \(clientX, clientY, timings = null\) =>/);
   assert.match(source, /const displayImg = imageBitmapCache\[key\] \|\| imageCache\[key\];/);
   assert.match(source, /sourceKind = displayImg === imageBitmapCache\[key\] \? 'bitmap-cache' : 'display-cache'/);
@@ -239,6 +244,9 @@ test('eyedropper readout samples rendered canvas-visible pixels', () => {
   assert.doesNotMatch(source, /reason: 'native-image-pixel'/);
   assert.match(source, /if \(globalThis\.hasEyedropperNativePixelCacheSource\?\.\(key\)\) \{[\s\S]*requestEyedropperNativePixel\(\);[\s\S]*cachedPixelImageMissReason = 'native-pixel-pending';[\s\S]*return null;[\s\S]*\}/);
   assert.match(source, /if \(target\.kind === 'image-miss'\) \{[\s\S]*cachedPixelImageMiss = 1;[\s\S]*cachedPixelImageMissReason = target\.reason \|\| 'image-target-missing';[\s\S]*return null;[\s\S]*\}/);
+  assert.match(source, /sourceX: eyedropperSourcePixelFromLocalUnit\(local\.u, dimensionSize\.width\)/);
+  assert.match(source, /let sourceX = eyedropperSourcePixelFromLocalUnit\(local\.u, sourceW\);/);
+  assert.doesNotMatch(source, /local\.u \* Math\.max\(0, sourceW - 1\)/);
   assert.match(source, /const resolvedSource = resolveEyedropperSafeImageSource\(key\);[\s\S]*cachedPixelSafeImageResolvedSync = 1;[\s\S]*sampleEyedropperSafeTileCache\(key, token, safeEntry\.source, sourceX, sourceY/);
   assert.match(source, /if \(timings\.cachedPixelImageMissReason === 'native-pixel-pending'\) \{[\s\S]*noReadoutUpdate: true,[\s\S]*\}\s*if \(timings\.cachedPixelImageMiss && options\.localImageFallback !== true\) \{[\s\S]*pixel: null,[\s\S]*source: 'pixel-cache',[\s\S]*noReadoutUpdate: true,/);
   assert.doesNotMatch(source, /pixel: previewSample\?\.pixel \|\| boardBackgroundPixel\(\),\s*source: 'background',\s*reason: timings\.cachedPixelImageMissReason/);

@@ -214,11 +214,15 @@ test('zoom pill stays out of keyboard focus and Space reset paths', () => {
   const styles = readSource('src/styles.css');
 
   assert.match(styles, /#island:hover #isl-zoom\s*\{[\s\S]*background: var\(--firefox-menu-hover-bg\);[\s\S]*\}/);
+  assert.match(styles, /#island\[data-mode="message"\] \{[\s\S]*pointer-events: none;[\s\S]*\}/);
+  assert.match(styles, /#island\[data-mode="message"\] #isl-zoom,\s*#island\[data-mode="message"\]:hover #isl-zoom,\s*#island\[data-mode="message"\]:active #isl-zoom \{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);[\s\S]*background: transparent;[\s\S]*transform: none;[\s\S]*\}/);
   assert.doesNotMatch(styles, /#island:hover #isl-zoom,\s*#island:focus-visible #isl-zoom/);
   assert.doesNotMatch(styles, /#island:focus-visible #isl-zoom/);
   assert.doesNotMatch(viewportSource, /island\.setAttribute\('tabindex', '0'\)/);
   assert.doesNotMatch(viewportSource, /island\.setAttribute\('role', 'button'\)/);
   assert.doesNotMatch(contextMenuSource, /island\?\.addEventListener\('keydown'/);
+  assert.match(contextMenuSource, /const resetZoomFromPill = \(e\) => \{\s*if \(island\?\.dataset\?\.mode !== 'zoom'\) return;/);
+  assert.match(contextMenuSource, /const suppressZoomPillContextMenu = \(e\) => \{\s*if \(island\?\.dataset\?\.mode !== 'zoom'\) return;/);
   assert.match(contextMenuSource, /if \(document\.activeElement === island\) island\.blur\(\);/);
 });
 

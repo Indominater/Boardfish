@@ -87,6 +87,17 @@ function isShieldInputAllowed(e) {
 }
 
 function blockShieldInput(e) {
+  if (
+    _rubberBandDragActive &&
+    e.type === 'keydown' &&
+    (e.key === 'Escape' || e.key === 'Meta' || e.key === 'OS' || e.metaKey)
+  ) {
+    if (typeof cancelRubberBandSelection === 'function' && cancelRubberBandSelection('key-cancel')) {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+  }
   if (isShieldInputAllowed(e)) return;
   if (e.cancelable) e.preventDefault();
   e.stopPropagation();

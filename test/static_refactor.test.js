@@ -630,6 +630,8 @@ test('eyedropper menu opens immediately and keeps cursor positioning independent
   const eyedropperSource = readSource('src/js/eyedropper.js');
   assert.match(styles, /#eyedropper-loupe\.visible,\s*\.eyedropper-loupe\.visible \{\s*display: block;\s*\}/);
   assert.match(styles, /#eyedropper-loupe,\s*\.eyedropper-loupe,\s*#eyedropper-loupe \*,\s*\.eyedropper-loupe \* \{[\s\S]*animation: none !important;[\s\S]*transition: none !important;/);
+  assert.match(styles, /\.eyedropper-value-row \{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);[\s\S]*transform: none;/);
+  assert.match(styles, /\.eyedropper-value-row:hover,\s*\.eyedropper-value-row:active \{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);[\s\S]*background: transparent;[\s\S]*transform: none;/);
   assert.match(eyedropperSource, /eyedropperLoupe\.style\.left = `\$\{Math\.round\(left\)\}px`/);
   assert.match(eyedropperSource, /eyedropperLoupe\.style\.top = `\$\{Math\.round\(top\)\}px`/);
   assert.doesNotMatch(eyedropperSource, /style\.transform/);

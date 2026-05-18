@@ -81,6 +81,134 @@ function loadCanvasInputHarness({ selected = true } = {}) {
   return context;
 }
 
+function addListener(listeners, type, fn) {
+  if (!listeners.has(type)) listeners.set(type, []);
+  listeners.get(type).push(fn);
+}
+
+function loadRubberBandHarness() {
+  const windowListeners = new Map();
+  const documentListeners = new Map();
+  const selectedIds = new Set();
+  const objects = [{ id: 'image-1', type: 'image', x: 0, y: 0, w: 50, h: 50, data: {} }];
+  const context = {
+    console,
+    window: {
+      addEventListener(type, fn) { addListener(windowListeners, type, fn); },
+    },
+    canvas: { addEventListener() {}, classList: { add() {}, remove() {} } },
+    boardCanvas: {},
+    document: {
+      visibilityState: 'visible',
+      hidden: false,
+      addEventListener(type, fn) { addListener(documentListeners, type, fn); },
+      removeEventListener() {},
+    },
+    objects,
+    objectsMap: new Map(objects.map((obj) => [obj.id, obj])),
+    selectedIds,
+    editingId: null,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    _rubberBandDragActive: false,
+    _rubberBandStyleState: { display: '', left: '', top: '', width: '', height: '' },
+    rubberBand: { style: {} },
+    cleaned: 0,
+    deselected: 0,
+    motions: [],
+    renders: [],
+    selections: [],
+    _setStyleIfChanged(el, prop, value, state) {
+      if (state[prop] === value) return;
+      state[prop] = value;
+      el.style[prop] = value;
+    },
+    beginRubberBandDrag() {
+      context._rubberBandDragActive = true;
+    },
+    finishRubberBandDrag() {
+      context._rubberBandDragActive = false;
+    },
+    beginDocumentDrag(handlers) {
+      context.drag = handlers;
+      return (event) => {
+        context.cleaned += 1;
+        handlers.up(event);
+      };
+    },
+    deselectAll() {
+      context.deselected += 1;
+      selectedIds.clear();
+    },
+    objectIntersectsRect() { return true; },
+    BoardfishEditorState: {
+      deleteEmptyTextObjects() {},
+      setSelection(ids) {
+        context.selections.push(Array.from(ids));
+        selectedIds.clear();
+        for (const id of ids) selectedIds.add(id);
+      },
+    },
+    BoardfishMotion: {
+      applyActionAnimation(action) { context.motions.push(action); },
+    },
+    scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
+    ViewportDebug: { isEnabled: () => false, start() { return {}; }, count() {}, end() {}, timing() {} },
+    BoardfishViewportState: { zoomAroundClient() {}, panBy() {}, setPan() {} },
+    scheduleTransform() {},
+    noteEyedropperNavigationActive() {},
+    createRafCommitter: () => ({ schedule() {}, flush() {} }),
+    isBoardInputBlocked: () => false,
+    isBoardNavigationAllowedWhileBlocked: () => false,
+    isMultiSelected: () => false,
+    hasSelection: () => false,
+    hitTest: () => null,
+    toWorld: () => ({ x: 0, y: 0 }),
+  };
+  context.windowEvent = (type) => {
+    for (const fn of windowListeners.get(type) || []) fn();
+  };
+  context.documentEvent = (type) => {
+    for (const fn of documentListeners.get(type) || []) fn();
+  };
+
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'canvas_input.js'), 'utf8'),
+    context,
+    { filename: 'canvas_input.js' },
+  );
+  return context;
+}
+
+test('rubber-band selection cancels on window blur without selecting objects', () => {
+  const context = loadRubberBandHarness();
+
+  context.startRubberBandSelection({ clientX: 0, clientY: 0 }, false);
+  context.drag.move({ clientX: 20, clientY: 20 });
+  context.windowEvent('blur');
+
+  assert.equal(context._rubberBandDragActive, false);
+  assert.equal(context.rubberBand.style.display, 'none');
+  assert.equal(context.cleaned, 1);
+  assert.deepEqual(context.selections, []);
+  assert.deepEqual(context.motions, []);
+});
+
+test('rubber-band selection still selects objects on normal mouse release', () => {
+  const context = loadRubberBandHarness();
+
+  context.startRubberBandSelection({ clientX: 0, clientY: 0 }, false);
+  context.drag.move({ clientX: 20, clientY: 20 });
+  context.drag.up({ clientX: 20, clientY: 20 });
+
+  assert.equal(context._rubberBandDragActive, false);
+  assert.equal(context.rubberBand.style.display, 'none');
+  assert.deepEqual(context.selections, [['image-1']]);
+  assert.deepEqual(context.motions, ['rubber-band-release', 'rubber-band-select']);
+});
+
 test('click-release on an already selected text object enters edit mode', () => {
   const context = loadCanvasInputHarness();
 

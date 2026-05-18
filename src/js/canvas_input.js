@@ -88,7 +88,11 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 document.addEventListener('wheel', handleGlobalViewportWheel, { capture: true, passive: false });
 
 // ─── Pan (spacebar + left click) ─────────────────────────────────────────────
-var _spaceDown = false;
+var _spaceDown = false,
+  _rubberBandSelectionCleanup = null,
+  _rubberBandSelectionCancel = null,
+  hideRubberBandSelectionVisual = null,
+  cancelRubberBandSelection = null;
 
 document.addEventListener('keydown', (e) => {
   if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling && e.code === 'Space') {
@@ -203,11 +207,42 @@ function startGroupDrag(e) {
   return true;
 }
 
+hideRubberBandSelectionVisual = () => {
+  finishRubberBandDrag();
+  _setStyleIfChanged(rubberBand, 'display', 'none', _rubberBandStyleState);
+};
+
+cancelRubberBandSelection = (reason = 'cancel') => {
+  if (_rubberBandSelectionCancel) {
+    _rubberBandSelectionCancel(reason);
+    return true;
+  }
+  if (!_rubberBandDragActive) return false;
+  hideRubberBandSelectionVisual();
+  return true;
+};
+
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('blur', () => cancelRubberBandSelection('window-blur'));
+  window.addEventListener('pagehide', () => cancelRubberBandSelection('pagehide'));
+}
+
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' || document.hidden) {
+      cancelRubberBandSelection('document-hidden');
+    }
+  });
+  document.addEventListener('pointercancel', () => cancelRubberBandSelection('pointercancel'), true);
+}
+
 function startRubberBandSelection(e, additive) {
+  cancelRubberBandSelection('restart');
   if (!additive) deselectAll();
   const rbStartX = e.clientX, rbStartY = e.clientY;
   beginRubberBandDrag();
   let rbActive = false;
+  let rbFinished = false;
   function onRbMove(ev) {
     const dx = ev.clientX - rbStartX, dy = ev.clientY - rbStartY;
     if (!rbActive && dx*dx + dy*dy > 16) rbActive = true;
@@ -221,8 +256,12 @@ function startRubberBandSelection(e, additive) {
     _setStyleIfChanged(rubberBand, 'height', h + 'px', _rubberBandStyleState);
   }
   function onRbUp(ev) {
-    finishRubberBandDrag();
-    _setStyleIfChanged(rubberBand, 'display', 'none', _rubberBandStyleState);
+    if (rbFinished) return;
+    rbFinished = true;
+    _rubberBandSelectionCleanup = null;
+    _rubberBandSelectionCancel = null;
+    hideRubberBandSelectionVisual();
+    if (ev?.__boardfishRubberBandCancel) return;
     globalThis.BoardfishMotion?.applyActionAnimation?.('rubber-band-release');
     if (!rbActive) return;
     const x1 = Math.min(rbStartX, ev.clientX), y1 = Math.min(rbStartY, ev.clientY);
@@ -247,7 +286,13 @@ function startRubberBandSelection(e, additive) {
       options: { includeText: false },
     });
   }
-  beginDocumentDrag({ move: onRbMove, up: onRbUp });
+  _rubberBandSelectionCancel = (reason) => {
+    const cleanup = _rubberBandSelectionCleanup;
+    const cancelEvent = { __boardfishRubberBandCancel: true, reason };
+    if (cleanup) cleanup(cancelEvent);
+    else onRbUp(cancelEvent);
+  };
+  _rubberBandSelectionCleanup = beginDocumentDrag({ move: onRbMove, up: onRbUp });
 }
 
 function toggleAdditiveSelection(obj) {

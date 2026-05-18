@@ -856,19 +856,14 @@ function renderEyedropperLocalReadoutPixel(clientX, clientY) {
   const timings = options.timings || {};
   const totalStart = performance.now();
   const dpr = window.devicePixelRatio || 1;
-  const cssSize = 1 / Math.max(dpr, 1);
+  const sampleCenterOffset = 0.5 / Math.max(dpr, 1);
   const z = Math.max(zoom || 1, 0.0001);
-  const view = {
-    zoom: z,
-    panX: panX - clientX,
-    panY: panY - clientY,
-    dpr,
-  };
+  const view = { zoom: z, panX: panX - clientX + sampleCenterOffset, panY: panY - clientY + sampleCenterOffset, dpr };
   const viewportRect = {
-    x1: (clientX - panX) / z,
-    y1: (clientY - panY) / z,
-    x2: (clientX + cssSize - panX) / z,
-    y2: (clientY + cssSize - panY) / z,
+    x1: (clientX - sampleCenterOffset - panX) / z,
+    y1: (clientY - sampleCenterOffset - panY) / z,
+    x2: (clientX + sampleCenterOffset - panX) / z,
+    y2: (clientY + sampleCenterOffset - panY) / z,
   };
   const counters = typeof createDrawCounters === 'function' ? createDrawCounters() : {};
   const previousViewportCullingEnabled = typeof viewportCullingEnabled !== 'undefined'
@@ -944,6 +939,11 @@ function imageSourceSize(source) {
     height: source?.height || source?.naturalHeight || 0,
   };
 }
+
+const eyedropperSourcePixelFromLocalUnit = (unit, sourceSize) => {
+  const size = Math.max(1, Math.floor(Number(sourceSize) || 0));
+  return Math.max(0, Math.min(size - 1, Math.floor((Number.isFinite(unit) ? unit : 0) * size)));
+};
 
 function scheduleIdleTask(callback) {
   if (typeof requestIdleCallback === 'function') {
@@ -1199,8 +1199,8 @@ function resolveEyedropperNativePixelTargetAt(clientX, clientY, timings = null) 
   return {
     key,
     token,
-    sourceX: Math.max(0, Math.min(dimensionSize.width - 1, Math.floor(local.u * Math.max(0, dimensionSize.width - 1)))),
-    sourceY: Math.max(0, Math.min(dimensionSize.height - 1, Math.floor(local.v * Math.max(0, dimensionSize.height - 1)))),
+    sourceX: eyedropperSourcePixelFromLocalUnit(local.u, dimensionSize.width),
+    sourceY: eyedropperSourcePixelFromLocalUnit(local.v, dimensionSize.height),
     sourceW: dimensionSize.width,
     sourceH: dimensionSize.height,
     clientX,
@@ -1409,8 +1409,8 @@ function sampleEyedropperCachedPixelAt(clientX, clientY) {
     clearEyedropperNativePixelTarget();
     const sampleStart = performance.now();
     const { width: sourceW, height: sourceH } = imageSourceSize(safeEntry.source);
-    let sourceX = local.u * Math.max(0, sourceW - 1);
-    let sourceY = local.v * Math.max(0, sourceH - 1);
+    let sourceX = eyedropperSourcePixelFromLocalUnit(local.u, sourceW);
+    let sourceY = eyedropperSourcePixelFromLocalUnit(local.v, sourceH);
     const tileSample = sampleEyedropperSafeTileCache(key, token, safeEntry.source, sourceX, sourceY, {
       timings,
       sync: options.syncTileBuild === true,

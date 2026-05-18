@@ -29,6 +29,11 @@ function createElement(id = 'el') {
   };
 }
 
+function addListener(listeners, type, fn) {
+  if (!listeners.has(type)) listeners.set(type, []);
+  listeners.get(type).push(fn);
+}
+
 function objectBounds(objects) {
   let x1 = Infinity;
   let y1 = Infinity;
@@ -47,12 +52,13 @@ function loadSelectionInputHarness(objects, options = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/selection_input.js'), 'utf8');
   const byId = new Map(objects.map((obj) => [obj.id, obj]));
   const selectedIds = new Set(objects.map((obj) => obj.id));
+  const documentListeners = new Map();
   const context = {
     console,
     document: {
       getElementById: (id) => createElement(id),
       createElement: () => createElement(),
-      addEventListener() {},
+      addEventListener(type, fn) { addListener(documentListeners, type, fn); },
     },
     clearTimeout(id) { context.clearedTimeouts.push(id); },
     setTimeout(handler, delay) {
@@ -132,6 +138,25 @@ function loadSelectionInputHarness(objects, options = {}) {
       },
     },
   };
+  context.documentEvent = (type, init = {}) => {
+    const event = {
+      type,
+      key: '',
+      code: '',
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      cancelable: true,
+      defaultPrevented: false,
+      propagationStopped: false,
+      preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.propagationStopped = true; },
+      ...init,
+    };
+    for (const fn of documentListeners.get(type) || []) fn(event);
+    return event;
+  };
 
   vm.createContext(context);
   vm.runInContext(
@@ -145,6 +170,27 @@ function loadSelectionInputHarness(objects, options = {}) {
   );
   return context;
 }
+
+test('shielded system key cancels active rubber-band selection before blocking input', () => {
+  const context = loadSelectionInputHarness([]);
+  context._rubberBandDragActive = true;
+  context.cancelCalls = [];
+  context.cancelRubberBandSelection = (reason) => {
+    context.cancelCalls.push(reason);
+    context._rubberBandDragActive = false;
+    return true;
+  };
+
+  const event = context.documentEvent('keydown', {
+    key: 'Meta',
+    code: 'MetaLeft',
+    metaKey: true,
+  });
+
+  assert.deepEqual(context.cancelCalls, ['key-cancel']);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+});
 
 test('multi-selection resize leaves text objects unchanged', () => {
   const objects = [

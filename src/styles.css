@@ -660,6 +660,11 @@ body[data-theme="dark"] .window-control-close:active {
   outline: none;
 }
 
+#island[data-mode="message"] {
+  cursor: default;
+  pointer-events: none;
+}
+
 .opening-shield-pill {
   position: fixed;
   bottom: 5%;
@@ -711,6 +716,14 @@ body[data-theme="dark"] .window-control-close:active {
 
 #island:active #isl-zoom {
   background: var(--menu-active-bg);
+}
+
+#island[data-mode="message"] #isl-zoom,
+#island[data-mode="message"]:hover #isl-zoom,
+#island[data-mode="message"]:active #isl-zoom {
+  --ui-highlight-nudge-transform: translateX(0);
+  background: transparent;
+  transform: none;
 }
 
 #isl-zoom {
@@ -855,11 +868,13 @@ body[data-theme="dark"] .window-control-close:active {
   visibility: hidden;
 }
 .eyedropper-value-row {
+  --ui-highlight-nudge-transform: translateX(0);
   grid-column: 1;
   width: auto;
   display: flex;
   align-items: center;
   padding: 0 16px;
+  transform: none;
 }
 .eyedropper-hex-row {
   grid-row: 2;
@@ -869,7 +884,9 @@ body[data-theme="dark"] .window-control-close:active {
 }
 .eyedropper-value-row:hover,
 .eyedropper-value-row:active {
+  --ui-highlight-nudge-transform: translateX(0);
   background: transparent;
+  transform: none;
 }
 .eyedropper-value-text {
   min-width: 0;
