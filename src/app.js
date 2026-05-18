@@ -71,9 +71,11 @@ syncPlatformShortcutLabels();
 var APP_THEMES = {
   light: {
     native: 'Light',
+    webThemeColor: '#eaeaed',
   },
   dark: {
     native: 'Dark',
+    webThemeColor: '#1c1b22',
   },
 };
 var appTheme = 'light';
@@ -118,6 +120,12 @@ function storeAppTheme() {
     localStorage.setItem(APP_THEME_STORAGE_KEY, appTheme);
   } catch (_) {}
 }
+
+const syncWebAppThemeColor = (theme = appTheme) => {
+  const nextTheme = normalizeAppTheme(theme);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', APP_THEMES[nextTheme].webThemeColor);
+};
 
 function applyNativeAppTheme(theme = appTheme) {
   if (!hasTauri()) return Promise.resolve();
@@ -228,6 +236,7 @@ function applyAppTheme(theme, {
     const changed = appTheme !== nextTheme;
     appTheme = nextTheme;
     document.body.dataset.theme = appTheme;
+    syncWebAppThemeColor(appTheme);
     logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
     if (render && (changed || dirty)) {
       logStartupStep('theme-canvas-repaint', { theme: appTheme, mode: repaintBoardForThemeChange() });

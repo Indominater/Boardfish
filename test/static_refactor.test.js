@@ -546,13 +546,14 @@ test('web app tab uses the Boardfish icon', () => {
 test('web app exposes PWA install metadata', () => {
   const indexSource = readSource('src/index.html');
   const manifest = JSON.parse(readSource('src/manifest.webmanifest'));
+  const appSource = readSource('src/app.js');
   const serviceWorkerSource = readSource('src/sw.js');
   const webEnvSource = readSource('src/js/web_env.js');
   const buildSource = readSource('scripts/build-runtime-assets.mjs');
   const icon192Path = path.join(root, 'src', 'boardfish-icon-192.png');
 
   assert.match(indexSource, /<link rel="manifest" href="manifest\.webmanifest" \/>/);
-  assert.match(indexSource, /<meta name="theme-color" content="#efeff3" \/>/);
+  assert.match(indexSource, /<meta name="theme-color" content="#eaeaed" \/>/);
 
   assert.equal(manifest.name, 'Boardfish');
   assert.equal(manifest.short_name, 'Boardfish');
@@ -560,14 +561,21 @@ test('web app exposes PWA install metadata', () => {
   assert.equal(manifest.start_url, './');
   assert.equal(manifest.scope, './');
   assert.equal(manifest.display, 'standalone');
-  assert.equal(manifest.theme_color, '#efeff3');
+  assert.equal(manifest.background_color, '#eaeaed');
+  assert.equal(manifest.theme_color, '#eaeaed');
   assert.ok(manifest.icons.some((icon) => icon.src === 'boardfish-icon-192.png' && icon.sizes === '192x192'));
   assert.ok(manifest.icons.some((icon) => icon.src === 'boardfish-icon.png' && icon.sizes === '512x512' && /maskable/.test(icon.purpose)));
   assert.ok(fs.existsSync(icon192Path), '192px PWA icon is missing');
   assert.ok(fs.statSync(icon192Path).size > 0, '192px PWA icon is empty');
 
+  assert.match(appSource, /webThemeColor: '#eaeaed'/);
+  assert.match(appSource, /webThemeColor: '#1c1b22'/);
+  assert.match(appSource, /const syncWebAppThemeColor = \(theme = appTheme\) =>/);
+  assert.match(appSource, /document\.querySelector\('meta\[name="theme-color"\]'\)/);
+  assert.match(appSource, /syncWebAppThemeColor\(appTheme\)/);
   assert.match(webEnvSource, /navigator\.serviceWorker\.register\('\.\/sw\.js'\)/);
   assert.match(webEnvSource, /protocol === 'https:' \|\|/);
+  assert.match(serviceWorkerSource, /const BOARDFISH_CACHE = 'boardfish-web-v2'/);
   assert.match(serviceWorkerSource, /self\.addEventListener\('fetch'/);
   assert.match(serviceWorkerSource, /caches\.open\(BOARDFISH_CACHE\)/);
   assert.match(buildSource, /includePwa = false/);

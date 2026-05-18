@@ -1,6 +1,6 @@
 'use strict';
 
-const BOARDFISH_CACHE = 'boardfish-web-v1';
+const BOARDFISH_CACHE = 'boardfish-web-v2';
 const BOARDFISH_APP_SHELL = [
   './',
   './index.html',
