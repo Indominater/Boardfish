@@ -59,11 +59,16 @@ async function copyDir(from, to) {
   }
 }
 
-async function copyStaticAssets(outDir, { includeJs = false } = {}) {
+async function copyStaticAssets(outDir, { includeJs = false, includePwa = false } = {}) {
   await copyFile(path.join(srcRoot, 'styles.css'), path.join(outDir, 'styles.css'));
   await copyFile(path.join(srcRoot, 'boardfish-icon.png'), path.join(outDir, 'boardfish-icon.png'));
   await copyDir(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'));
   await copyDir(path.join(srcRoot, 'shared'), path.join(outDir, 'shared'));
+  if (includePwa) {
+    await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
+    await copyFile(path.join(srcRoot, 'sw.js'), path.join(outDir, 'sw.js'));
+    await copyFile(path.join(srcRoot, 'boardfish-icon-192.png'), path.join(outDir, 'boardfish-icon-192.png'));
+  }
   if (includeJs) await copyDir(jsRoot, path.join(outDir, 'js'));
 }
 
@@ -99,7 +104,7 @@ function cacheBustedBundlePath(bundle, code) {
 async function buildBundle(variantName, config) {
   await resetDir(config.outDir);
   await mkdir(path.join(config.outDir, 'assets'), { recursive: true });
-  await copyStaticAssets(config.outDir);
+  await copyStaticAssets(config.outDir, { includePwa: variantName === 'web-preview' });
 
   const concatenated = await concatenateScripts(config.scripts, variantName);
   const result = await esbuild.transform(concatenated, {

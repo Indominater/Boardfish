@@ -1,0 +1,24 @@
+{
+  "id": "./",
+  "name": "Boardfish",
+  "short_name": "Boardfish",
+  "description": "A fast visual board for images and text.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#efeff3",
+  "theme_color": "#efeff3",
+  "icons": [
+    {
+      "src": "boardfish-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "boardfish-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
