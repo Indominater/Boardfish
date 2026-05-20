@@ -159,6 +159,7 @@
     root.BoardfishWebLimits?.validateBoardPayload({
       objectCount: result.board?.objects?.length || 0,
       boardJsonBytes: result.debug?.board_json_bytes || 0,
+      imageBytes: result.debug?.image_bytes,
       imageEntries: result.imageEntries || [],
     });
     await root.BoardfishWebLimits?.validateOpenedImageEntries(result.imageEntries || []);
@@ -210,6 +211,7 @@
     root.BoardfishWebLimits?.validateBoardPayload({
       objectCount: board?.objects?.length || 0,
       boardJsonBytes: payload.boardJsonBytes,
+      imageBytes: payload.imageBytes,
       imageEntries: payload.imageEntries,
     });
     const serializeMs = performance.now() - createStart;

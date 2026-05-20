@@ -63,7 +63,6 @@ async function copyStaticAssets(outDir, { includeJs = false, includePwa = false 
   await copyFile(path.join(srcRoot, 'styles.css'), path.join(outDir, 'styles.css'));
   await copyFile(path.join(srcRoot, 'boardfish-icon.png'), path.join(outDir, 'boardfish-icon.png'));
   await copyDir(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'));
-  await copyDir(path.join(srcRoot, 'shared'), path.join(outDir, 'shared'));
   if (includePwa) {
     await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
     await copyFile(path.join(srcRoot, 'sw.js'), path.join(outDir, 'sw.js'));

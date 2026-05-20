@@ -149,15 +149,18 @@
     return validateImageBytes(dataUrlImageBytesForValidation(dataUrl), options);
   }
 
-  function validateBoardPayload({ objectCount: nextObjectCount = 0, boardJsonBytes = 0, imageEntries = [] } = {}) {
+  function validateBoardPayload({ objectCount: nextObjectCount = 0, boardJsonBytes = 0, imageBytes = null, imageEntries = [] } = {}) {
     if (!isLimitedRuntime()) return true;
     assertObjectCountAllowed(nextObjectCount, 'board');
-    let imageBytes = 0;
-    for (const entry of imageEntries || []) {
-      const bytes = Number(entry.byteLength ?? entry.bytes?.length ?? 0) || 0;
-      imageBytes += bytes;
+    let totalImageBytes = Number(imageBytes);
+    if (!Number.isFinite(totalImageBytes)) {
+      totalImageBytes = 0;
+      for (const entry of imageEntries || []) {
+        const bytes = Number(entry.byteLength ?? entry.bytes?.length ?? 0) || 0;
+        totalImageBytes += bytes;
+      }
     }
-    const total = (Number(boardJsonBytes) || 0) + imageBytes;
+    const total = (Number(boardJsonBytes) || 0) + totalImageBytes;
     if (total > LIMITS.maxBoardContentBytes) {
       throw limitError(
         `This board is ${formatBytes(total)}; Boardfish Web boards are limited to ${formatBytes(LIMITS.maxBoardContentBytes)}.`,
