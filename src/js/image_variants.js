@@ -115,11 +115,6 @@ function clearScaledImageVariants(key = null) {
   imageScaledVariantPrewarmTimer = null;
 }
 
-function pruneScaledImageVariants() {
-  imageScaledBitmapStore.prune();
-  imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
-}
-
 function scheduleScaledVariantReadyRender(countReadyVariant = true) {
   if (countReadyVariant) imageScaledVariantRenderCount++;
   invalidateOffscreen();
@@ -244,7 +239,6 @@ function queueScaledImageVariant(key, source, scale) {
       imageScaledBitmapStore.set(key, scale, { bitmap, bytes });
       imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
       imageScaledBitmapUseCounter = imageScaledBitmapStore.useCounter;
-      pruneScaledImageVariants();
       scheduleScaledVariantReadyRender();
     } finally {
       const buildMs = performance.now() - buildStart;

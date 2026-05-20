@@ -34,12 +34,14 @@ pub(crate) fn write_board_container(
 
     let image_options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let mut image_bytes = 0usize;
+    let mut image_count = 0usize;
     for (key, source) in sources {
         let path = format!("images/{}.{}", key, source.ext);
         zip.start_file(path, image_options)
             .map_err(|e| e.to_string())?;
         zip.write_all(&source.bytes).map_err(|e| e.to_string())?;
         image_bytes += source.bytes.len();
+        image_count += 1;
     }
     zip.finish().map_err(|e| e.to_string())?;
     let write_ms = write_start.elapsed().as_secs_f64() * 1000.0;
@@ -47,11 +49,7 @@ pub(crate) fn write_board_container(
     Ok(BoardWriteStats {
         json_bytes: board_json.len(),
         image_bytes,
-        image_count: board
-            .get("imageStore")
-            .and_then(|v| v.as_object())
-            .map(|o| o.len())
-            .unwrap_or(0),
+        image_count,
         serialize_ms,
         write_ms,
         zip_ms: zip_start.elapsed().as_secs_f64() * 1000.0,

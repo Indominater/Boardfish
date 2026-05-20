@@ -50,6 +50,10 @@
 
   function removeObjectsById(ids = []) {
     const idsToRemove = new Set(ids);
+    if (!idsToRemove.size) {
+      if (selectedId && !selectedIds.has(selectedId)) selectedId = null;
+      return 0;
+    }
     let write = 0;
     let removed = 0;
     for (let read = 0; read < objects.length; read++) {

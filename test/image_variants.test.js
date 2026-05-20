@@ -610,7 +610,7 @@ test('eyedropper sampling and navigation are mutually exclusive', () => {
   assert.doesNotMatch(eyedropperSource, /eyedropperSampling \|\| isEyedropperSampleVisible\(\)\) hideEyedropperSample\(\)/);
 
   assert.match(inputSource, /mode: 'blocked-eyedropper-sampling'/);
-  assert.match(inputSource, /function cancelWheelPan\(\)/);
+  assert.doesNotMatch(inputSource, /cancelWheelPan/);
   assert.match(inputSource, /noteEyedropperNavigationActive\('wheel-zoom'\)/);
   assert.match(inputSource, /noteEyedropperNavigationActive\('wheel-pan'\)/);
   assert.match(inputSource, /noteEyedropperNavigationActive\('mouse-pan', 240\)/);

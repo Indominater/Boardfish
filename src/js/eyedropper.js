@@ -2570,7 +2570,6 @@ function beginEyedropperHoldSample(e = null) {
     ? eyedropperPointerDebugEvent(e)
     : _eyedropperLastMouseEvent;
   if (!sourceEvent) return true;
-  if (typeof cancelWheelPan === 'function') cancelWheelPan();
   cancelEyedropperSnapshotRefresh();
   _eyedropperLatestPointerEvent = sourceEvent;
   scheduleEyedropperSamplerDecode('sample-start');

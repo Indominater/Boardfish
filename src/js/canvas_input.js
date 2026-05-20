@@ -8,11 +8,6 @@ var _editHistoryTimer = null, _editHistoryLastContent = null;
 var EDIT_HISTORY_DEBOUNCE_MS = 500;
 var _textInputSelectionHistorySuppress = null, _editHistoryActionStartState = null;
 
-function cancelWheelPan() {
-  // Wheel panning is applied immediately and coalesced by the shared render RAF.
-}
-
-
 function handleViewportWheel(e) {
   if (e.__boardfishViewportWheelHandled) return;
   try { e.__boardfishViewportWheelHandled = true; } catch (_) {}
@@ -27,7 +22,6 @@ function handleViewportWheel(e) {
       return;
     }
     if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling) {
-      cancelWheelPan();
       ViewportDebug.end(dbg, { mode: 'blocked-eyedropper-sampling', panX, panY, zoom });
       return;
     }

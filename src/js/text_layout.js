@@ -37,7 +37,6 @@ var _mwCache = Object.create(null);
 
 function measureTextW(text) {
   if (text in _mwCache) return _mwCache[text];
-  _measureCtx.font = FONT;
   return (_mwCache[text] = _measureCtx.measureText(text).width);
 }
 
