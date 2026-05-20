@@ -602,11 +602,18 @@ test('web app exposes PWA install metadata', () => {
   assert.match(webEnvSource, /navigator\.serviceWorker\.register\('\.\/sw\.js'\)/);
   assert.match(webEnvSource, /protocol === 'https:' \|\|/);
   assert.match(serviceWorkerSource, /const BOARDFISH_CACHE = 'boardfish-web-v2'/);
+  assert.match(serviceWorkerSource, /const BOARDFISH_BUILD_ASSETS = \[\]/);
   assert.match(serviceWorkerSource, /self\.addEventListener\('fetch'/);
   assert.match(serviceWorkerSource, /caches\.open\(BOARDFISH_CACHE\)/);
+  assert.match(serviceWorkerSource, /function pruneCurrentCache\(\)/);
+  assert.match(serviceWorkerSource, /function shouldCacheRequest\(request, url\)/);
+  assert.match(serviceWorkerSource, /isBoardfishBundleUrl\(url\) && !isAppShellUrl\(url\)/);
   assert.match(buildSource, /includePwa = false/);
   assert.match(buildSource, /manifest\.webmanifest/);
   assert.match(buildSource, /copyStaticAssets\(config\.outDir, \{ includePwa: variantName === 'web-preview' \}\)/);
+  assert.match(buildSource, /function writeServiceWorker\(outDir, buildAssets = \[\]\)/);
+  assert.match(buildSource, /BOARDFISH_BUILD_ASSETS = \$\{JSON\.stringify\(assets\)\}/);
+  assert.match(buildSource, /writeServiceWorker\(config\.outDir, \[bundle\]\)/);
 });
 
 test('context action rail links to the Boardfish GitHub page', () => {
@@ -1000,6 +1007,25 @@ test('viewport and image-store mutations stay behind boundary modules', () => {
   }
 });
 
+test('cache invalidation is explicit for replaceable sources and text layout state', () => {
+  const imageStoreBoundary = readSource('src/js/image_store_boundary.js');
+  const imageState = readSource('src/js/image_state.js');
+  const textLayout = readSource('src/js/text_layout.js');
+  const editorState = readSource('src/js/editor_state_boundary.js');
+
+  assert.match(imageStoreBoundary, /const changed = hadSource && previous !== source/);
+  assert.match(imageStoreBoundary, /invalidateImageSourceCachesForKey\(key\)/);
+  assert.match(imageState, /const invalidateImageSourceCachesForKey = \(key\) =>/);
+  assert.match(imageState, /imageSourceCachePromises\.delete\(key\)/);
+  assert.match(imageState, /removeImageAssetMaterializePromisesForKey\(key\)/);
+  assert.match(imageState, /removeEyedropperSafeImageKey\(key\)/);
+  assert.match(textLayout, /TEXT_MEASURE_CACHE_MAX_ENTRIES/);
+  assert.match(textLayout, /TEXT_PREFIX_CACHE_MAX_ENTRIES/);
+  assert.match(textLayout, /TEXT_LINES_CACHE_MAX_ENTRIES/);
+  assert.match(editorState, /clearTextLayoutCaches\(\{ measurements: true \}\)/);
+  assert.match(editorState, /objects = Array\.isArray\(nextObjects\) \? nextObjects : \[\];\s*clearTextLayoutState\(\);/);
+});
+
 test('legacy frontend global surface has an explicit abstraction budget', () => {
   const source = frontendSources()
     .map((relativePath) => readSource(relativePath))
@@ -1021,6 +1047,7 @@ test('Rust image source responsibilities stay split', () => {
   assert.match(readSource('src-tauri/src/image_source_cache.rs'), /struct ImageSourceCacheDebug/);
   assert.match(imageSources, /fn image_source_cache_debug\(/);
   assert.match(readSource('src-tauri/src/image_source_cache.rs'), /source_token: Option<String>/);
+  assert.match(readSource('src-tauri/src/image_source_cache.rs'), /Native decoded pixels are intentionally not capped/);
   assert.doesNotMatch(readSource('src-tauri/src/image_source_cache.rs'), /DECODED_IMAGE_CACHE_MAX_BYTES/);
   assert.doesNotMatch(readSource('src-tauri/src/image_source_cache.rs'), /fn prune_decoded_cache_locked/);
   assert.match(imageSources, /use crate::image_source_files::/);

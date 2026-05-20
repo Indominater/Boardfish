@@ -65,7 +65,6 @@ async function copyStaticAssets(outDir, { includeJs = false, includePwa = false 
   await copyDir(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'));
   if (includePwa) {
     await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
-    await copyFile(path.join(srcRoot, 'sw.js'), path.join(outDir, 'sw.js'));
     await copyFile(path.join(srcRoot, 'boardfish-icon-192.png'), path.join(outDir, 'boardfish-icon-192.png'));
   }
   if (includeJs) await copyDir(jsRoot, path.join(outDir, 'js'));
@@ -98,6 +97,16 @@ async function writeIndex(outDir, scriptTag, { includePwa = false } = {}) {
   await writeFile(path.join(outDir, 'index.html'), next);
 }
 
+async function writeServiceWorker(outDir, buildAssets = []) {
+  const source = await readFile(path.join(srcRoot, 'sw.js'), 'utf8');
+  const assets = buildAssets.map((asset) => asset.startsWith('./') ? asset : `./${asset}`);
+  const next = source.replace(
+    /const BOARDFISH_BUILD_ASSETS = \[\];/,
+    `const BOARDFISH_BUILD_ASSETS = ${JSON.stringify(assets)};`,
+  );
+  await writeFile(path.join(outDir, 'sw.js'), next);
+}
+
 function cacheBustedBundlePath(bundle, code) {
   const hash = createHash('sha256').update(code).digest('hex').slice(0, 12);
   return bundle.replace(/(?:\.min)?\.js$/, `.${hash}.min.js`);
@@ -120,6 +129,7 @@ async function buildBundle(variantName, config) {
   await writeIndex(config.outDir, `<script src="${bundle}"></script>`, {
     includePwa: variantName === 'web-preview',
   });
+  if (variantName === 'web-preview') await writeServiceWorker(config.outDir, [bundle]);
 
   const rawKb = Math.round(result.code.length / 1024 * 10) / 10;
   const gzipKb = Math.round(gzipSync(result.code).length / 1024 * 10) / 10;

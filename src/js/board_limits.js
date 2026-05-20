@@ -78,6 +78,16 @@
     return Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
   }
 
+  let textByteEncoder = null;
+  function textByteLength(text = '') {
+    const value = String(text ?? '');
+    if (typeof TextEncoder === 'function') {
+      if (!textByteEncoder) textByteEncoder = new TextEncoder();
+      return textByteEncoder.encode(value).length;
+    }
+    return value.length;
+  }
+
   function imageSourceByteLength(source) {
     if (typeof source === 'string' && source.startsWith('data:')) return dataUrlByteLength(source);
     if (source && typeof source === 'object') return Number(source.bytes || source.byteLength || 0) || 0;
@@ -192,6 +202,7 @@
     notify,
     objectLimitMessage,
     remainingObjectSlots,
+    textByteLength,
     validateBoardPayload,
     validateDataUrlImage,
     validateImageBlob,

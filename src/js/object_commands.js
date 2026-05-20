@@ -5,8 +5,9 @@ function addText(wx, wy, content = '', options = {}) {
   if (!BoardfishWebLimits.canAddObjects(1)) return;
   content = textForTextObjectPaste(content);
   if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
-    const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
-    const textBytes = encoder ? encoder.encode(content).length : content.length;
+    const textBytes = typeof BoardfishWebLimits.textByteLength === 'function'
+      ? BoardfishWebLimits.textByteLength(content)
+      : (typeof TextEncoder === 'function' ? new TextEncoder().encode(content).length : content.length);
     if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1)) return;
   }
   let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
@@ -180,11 +181,12 @@ function duplicateSelected() {
   }
   if (!selectedObjects.length || !BoardfishWebLimits.canAddObjects(selectedObjects.length)) return;
   if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
-    const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
     const additionalTextBytes = selectedObjects.reduce((sum, obj) => {
       if (obj?.type !== 'text') return sum;
       const text = String(obj.data?.content || '');
-      return sum + (encoder ? encoder.encode(text).length : text.length);
+      return sum + (typeof BoardfishWebLimits.textByteLength === 'function'
+        ? BoardfishWebLimits.textByteLength(text)
+        : (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length));
     }, 0);
     if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
   }

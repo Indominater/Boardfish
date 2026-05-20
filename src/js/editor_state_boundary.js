@@ -98,6 +98,10 @@
   }
 
   function clearTextLayoutState() {
+    if (typeof clearTextLayoutCaches === 'function') {
+      clearTextLayoutCaches({ measurements: true });
+      return;
+    }
     _linesCacheMap.clear();
     _prefixCache.clear();
   }
@@ -127,6 +131,7 @@
     restoreCounters = true,
   } = {}) {
     objects = Array.isArray(nextObjects) ? nextObjects : [];
+    clearTextLayoutState();
     if (normalizeText) {
       for (const obj of objects) {
         if (obj?.type === 'text') obj.data.content = normalizeTextContent(obj.data?.content);

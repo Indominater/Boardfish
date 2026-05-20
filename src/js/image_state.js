@@ -104,7 +104,8 @@ function cacheImageSourceForSave(key, src, dbg = null) {
   if (existing) return existing;
   const generation = _imageStoreGeneration;
   const sourceToken = createImageSourceToken(key);
-  const promise = SaveDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), { imgKey: key, dataUrl: src })
+  let promise;
+  promise = SaveDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), { imgKey: key, dataUrl: src })
     .then((result) => {
       if (!isImageSourceRequestCurrent(key, src, generation)) {
         cleanupNativeImageSourceToken(key, sourceToken);
@@ -113,7 +114,9 @@ function cacheImageSourceForSave(key, src, dbg = null) {
       if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-source-ready');
       return result;
     })
-    .finally(() => imageSourceCachePromises.delete(key));
+    .finally(() => {
+      if (imageSourceCachePromises.get(key) === promise) imageSourceCachePromises.delete(key);
+    });
   imageSourceCachePromises.set(key, promise);
   return promise;
 }
@@ -127,7 +130,8 @@ function cacheImageSourceForExport(key, src, dbg = null) {
   }
   const generation = _imageStoreGeneration;
   const sourceToken = createImageSourceToken(key);
-  const promise = ExportDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), { imgKey: key })
+  let promise;
+  promise = ExportDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), { imgKey: key })
     .then((result) => {
       if (!isImageSourceRequestCurrent(key, src, generation)) {
         cleanupNativeImageSourceToken(key, sourceToken);
@@ -136,7 +140,9 @@ function cacheImageSourceForExport(key, src, dbg = null) {
       if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-source-ready');
       return result;
     })
-    .finally(() => imageSourceCachePromises.delete(key));
+    .finally(() => {
+      if (imageSourceCachePromises.get(key) === promise) imageSourceCachePromises.delete(key);
+    });
   imageSourceCachePromises.set(key, promise);
   return promise;
 }
@@ -379,7 +385,8 @@ async function materializeImageAssets(keys, dbg = null) {
   const existing = imageAssetMaterializePromises.get(promiseKey);
   if (existing) return existing;
   const generation = _imageStoreGeneration;
-  const promise = OpenDebug.wrap(
+  let promise;
+  promise = OpenDebug.wrap(
     dbg,
     TAURI_COMMANDS.MATERIALIZE_CACHED_IMAGE_SOURCES,
     () => BoardfishTauri.materializeCachedImageSources(pending),
@@ -431,7 +438,9 @@ async function materializeImageAssets(keys, dbg = null) {
       OpenDebug.step(dbg, 'materialize-image-assets', { requested: pending.length, returned: entries?.length || 0, count, skipped });
       return count;
     })
-    .finally(() => imageAssetMaterializePromises.delete(promiseKey));
+    .finally(() => {
+      if (imageAssetMaterializePromises.get(promiseKey) === promise) imageAssetMaterializePromises.delete(promiseKey);
+    });
   imageAssetMaterializePromises.set(promiseKey, promise);
   return promise;
 }
@@ -463,12 +472,15 @@ async function ensureImageDataUrl(key, dbg = null) {
   const existing = imageHydrationPromises.get(key);
   if (existing) return existing;
   const generation = _imageStoreGeneration;
-  const promise = OpenDebug.wrap(dbg, TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL, () => BoardfishTauri.getCachedImageDataUrl(key), { imgKey: key })
+  let promise;
+  promise = OpenDebug.wrap(dbg, TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL, () => BoardfishTauri.getCachedImageDataUrl(key), { imgKey: key })
     .then((dataUrl) => {
       if (generation === _imageStoreGeneration && isNativeImageRef(imageStore[key])) imageStore[key] = dataUrl;
       return dataUrl;
     })
-    .finally(() => imageHydrationPromises.delete(key));
+    .finally(() => {
+      if (imageHydrationPromises.get(key) === promise) imageHydrationPromises.delete(key);
+    });
   imageHydrationPromises.set(key, promise);
   return promise;
 }
@@ -556,10 +568,14 @@ async function ensureImagePreviewBitmap(key, img, dbg = null) {
 }
 
 function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
-  if (imageCache[key]) return imageReadyPromiseForKey(key);
   if (isNativeImageRef(src)) return;
   const displaySrc = isWebImageRef(src) ? webImageDisplaySrc(src) : src;
   if (typeof displaySrc !== 'string' || !displaySrc) return;
+  if (imageCache[key]) {
+    const cachedSrc = imageCache[key].currentSrc || imageCache[key].src || '';
+    if (cachedSrc === displaySrc) return imageReadyPromiseForKey(key);
+    removeImageRuntimeCachesForKey(key);
+  }
   const generation = _imageStoreGeneration;
   imageBitmapFailed.delete(key);
   const cacheStart = performance.now();
@@ -869,7 +885,25 @@ const removeImageRuntimeCachesForKey = (key) => {
   imageReadyPromises.delete(key);
   imageHydrationPromises.delete(key);
   clearScaledImageVariants(key);
+  if (typeof removeEyedropperSafeImageKey === 'function') removeEyedropperSafeImageKey(key);
   return removed;
+};
+
+const removeImageAssetMaterializePromisesForKey = (key) => {
+  for (const promiseKey of [...imageAssetMaterializePromises.keys()]) {
+    if (promiseKey.split('|').includes(key)) imageAssetMaterializePromises.delete(promiseKey);
+  }
+};
+
+const invalidateImageSourceCachesForKey = (key) => {
+  if (!key) return;
+  _imageStoreGeneration++;
+  imageSourceCachePromises.delete(key);
+  imageHydrationPromises.delete(key);
+  removeImageAssetMaterializePromisesForKey(key);
+  _imageHydrationQueued.delete(key);
+  _imageHydrationQueue = _imageHydrationQueue.filter((item) => item?.key !== key);
+  removeImageRuntimeCachesForKey(key);
 };
 
 const pruneImageCachesToKeys = (retainedKeys = new Set()) => {

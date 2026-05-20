@@ -382,18 +382,26 @@ function pointToObjectCenterDistanceSq(point, obj) {
 
 function closestResetZoomObjectToViewportCenter() {
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  const hasImages = objects.some((obj) => obj?.type === 'image');
-  const targetType = hasImages ? 'image' : 'text';
-  let closest = null;
-  let closestDistanceSq = Infinity;
+  let closestImage = null;
+  let closestImageDistanceSq = Infinity;
+  let closestText = null;
+  let closestTextDistanceSq = Infinity;
   for (const obj of objects) {
-    if (obj?.type !== targetType) continue;
+    if (obj?.type !== 'image' && obj?.type !== 'text') continue;
     const distanceSq = pointToObjectCenterDistanceSq(center, obj);
-    if (distanceSq < closestDistanceSq) {
-      closest = obj;
-      closestDistanceSq = distanceSq;
+    if (obj.type === 'image') {
+      if (distanceSq < closestImageDistanceSq) {
+        closestImage = obj;
+        closestImageDistanceSq = distanceSq;
+      }
+    } else if (distanceSq < closestTextDistanceSq) {
+      closestText = obj;
+      closestTextDistanceSq = distanceSq;
     }
   }
+  const targetType = closestImage ? 'image' : 'text';
+  const closest = closestImage || closestText;
+  const closestDistanceSq = closestImage ? closestImageDistanceSq : closestTextDistanceSq;
   return { object: closest, targetType, distanceSq: closestDistanceSq, center };
 }
 

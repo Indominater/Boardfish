@@ -163,6 +163,10 @@ impl ImageSourceCache {
             }
         }
         cache.decoded_use_counter = next_use;
+        // Native decoded pixels are intentionally not capped. The eyedropper path
+        // needs decoded sources to stay warm for repeat sampling, and entries are
+        // released with their image source on replace, remove, board close, or app
+        // exit. Keep decoded_bytes for diagnostics instead of enforcing eviction.
         if bytes_delta.is_negative() {
             cache.decoded_bytes = cache
                 .decoded_bytes
@@ -241,6 +245,7 @@ impl ImageSourceCache {
         let stale_paths = drain_materialized_paths(&mut cache.entries);
         cache.entries.clear();
         cache.decoded_bytes = 0;
+        cache.decoded_use_counter = 0;
         for (key, source) in sources {
             cache.entries.insert(
                 key,
@@ -308,6 +313,7 @@ impl ImageSourceCache {
         let stale_paths = drain_materialized_paths(&mut cache.entries);
         cache.entries.clear();
         cache.decoded_bytes = 0;
+        cache.decoded_use_counter = 0;
         drop(cache);
         cleanup_materialized_paths(stale_paths);
         Ok(())
@@ -320,6 +326,7 @@ impl Drop for ImageSourceCache {
             let stale_paths = drain_materialized_paths(&mut cache.entries);
             cache.entries.clear();
             cache.decoded_bytes = 0;
+            cache.decoded_use_counter = 0;
             cleanup_materialized_paths(stale_paths);
         }
     }

@@ -33,10 +33,19 @@ var _measureCanvas = document.createElement('canvas');
 var _measureCtx = _measureCanvas.getContext('2d');
 _measureCtx.font = FONT;
 refreshTextMetrics();
+const TEXT_MEASURE_CACHE_MAX_ENTRIES = 4096;
+const TEXT_PREFIX_CACHE_MAX_ENTRIES = 2048;
+const TEXT_LINES_CACHE_MAX_ENTRIES = 2048;
 var _mwCache = Object.create(null);
+var _mwCacheKeys = [];
 
 function measureTextW(text) {
   if (text in _mwCache) return _mwCache[text];
+  if (_mwCacheKeys.length >= TEXT_MEASURE_CACHE_MAX_ENTRIES) {
+    const oldest = _mwCacheKeys.shift();
+    delete _mwCache[oldest];
+  }
+  _mwCacheKeys.push(text);
   return (_mwCache[text] = _measureCtx.measureText(text).width);
 }
 
@@ -59,23 +68,46 @@ var _linesCacheMap = new Map();
 // Computed once per unique line string; avoids O(n2) slice allocations on every frame.
 var _prefixCache = new Map();
 
+const trimMapCache = (map, maxEntries) => {
+  while (map.size > maxEntries) {
+    const oldest = map.keys().next().value;
+    map.delete(oldest);
+  }
+};
+
+const clearMeasuredTextWidthCache = () => {
+  for (const k of _mwCacheKeys) delete _mwCache[k];
+  _mwCacheKeys.length = 0;
+};
+
+const clearTextLayoutCaches = (options = {}) => {
+  _linesCacheMap.clear();
+  _prefixCache.clear();
+  if (options.measurements) clearMeasuredTextWidthCache();
+  if (options.objectLayout !== false) {
+    for (const obj of objects) delete obj._layoutCache;
+  }
+};
+
 function getPrefixWidths(text) {
   const hit = _prefixCache.get(text);
-  if (hit) return hit;
+  if (hit) {
+    _prefixCache.delete(text);
+    _prefixCache.set(text, hit);
+    return hit;
+  }
   const pw = new Float64Array(text.length + 1);
   for (let k = 0; k < text.length; k++) {
     pw[k + 1] = measureTextW(text.slice(0, k + 1));
   }
   _prefixCache.set(text, pw);
+  trimMapCache(_prefixCache, TEXT_PREFIX_CACHE_MAX_ENTRIES);
   return pw;
 }
 
 function clearTextMeasurementCaches() {
   refreshTextMetrics();
-  for (const k of Object.keys(_mwCache)) delete _mwCache[k];
-  _linesCacheMap.clear();
-  _prefixCache.clear();
-  for (const obj of objects) delete obj._layoutCache;
+  clearTextLayoutCaches({ measurements: true });
   syncAllTextAutoHeights();
   invalidateOffscreen();
   scheduleRender(true, true);
@@ -152,6 +184,7 @@ function getWrappedLines(obj) {
   }
 
   _linesCacheMap.set(obj.id, { content: obj.data.content, w: obj.w, lines: result });
+  trimMapCache(_linesCacheMap, TEXT_LINES_CACHE_MAX_ENTRIES);
   return result;
 }
 

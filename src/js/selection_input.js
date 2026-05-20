@@ -28,13 +28,15 @@ function inputNameFromEvent(e) {
   return e.type;
 }
 
+const unsavedDialogOverlayForInputShield = document.getElementById('dialog-overlay');
+const unsavedDialogForInputShield = document.getElementById('dialog');
+
 function isUnsavedDialogOpen() {
-  return !!document.getElementById('dialog-overlay')?.classList.contains('show');
+  return !!unsavedDialogOverlayForInputShield?.classList.contains('show');
 }
 
 function isEventInsideUnsavedDialog(e) {
-  const dialog = document.getElementById('dialog');
-  return !!dialog && e.target instanceof Node && dialog.contains(e.target);
+  return !!unsavedDialogForInputShield && e.target instanceof Node && unsavedDialogForInputShield.contains(e.target);
 }
 
 const isEventInsideVisibleSurface = (e, surface) => {

@@ -300,11 +300,12 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           const additionalImageBytes = imgEntries.reduce((sum, [key, src]) => (
             BoardfishImageStore.hasSource(key) ? sum : sum + BoardfishWebLimits.imageSourceByteLength(src)
           ), 0);
-          const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
           const additionalTextBytes = clones.reduce((sum, obj) => {
             if (obj?.type !== 'text') return sum;
             const text = String(obj.data?.content || '');
-            return sum + (encoder ? encoder.encode(text).length : text.length);
+            return sum + (typeof BoardfishWebLimits.textByteLength === 'function'
+              ? BoardfishWebLimits.textByteLength(text)
+              : (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length));
           }, 0);
           if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalImageBytes + additionalTextBytes, clones.length)) {
             ClipDebug.end(dbg, { skipped: 'web-content-limit', additionalImageBytes, additionalTextBytes });

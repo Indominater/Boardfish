@@ -1,7 +1,7 @@
 'use strict';
 
 const BOARDFISH_CACHE = 'boardfish-web-v2';
-const BOARDFISH_APP_SHELL = [
+const BOARDFISH_STATIC_ASSETS = [
   './',
   './index.html',
   './styles.css',
@@ -10,6 +10,34 @@ const BOARDFISH_APP_SHELL = [
   './boardfish-icon-192.png',
   './fonts/Geist.woff2',
 ];
+const BOARDFISH_BUILD_ASSETS = [];
+const BOARDFISH_APP_SHELL = [...BOARDFISH_STATIC_ASSETS, ...BOARDFISH_BUILD_ASSETS];
+const BOARDFISH_APP_SHELL_URLS = new Set(
+  BOARDFISH_APP_SHELL.map((asset) => new URL(asset, self.location.href).href),
+);
+
+function isBoardfishBundleUrl(url) {
+  return /\/assets\/boardfish-web-preview(?:\.[a-f0-9]{12})?\.min\.js$/.test(url.pathname);
+}
+
+function isAppShellUrl(url) {
+  return BOARDFISH_APP_SHELL_URLS.has(url.href);
+}
+
+function shouldCacheRequest(request, url) {
+  return request.mode === 'navigate' || isAppShellUrl(url) || isBoardfishBundleUrl(url);
+}
+
+async function pruneCurrentCache() {
+  const cache = await caches.open(BOARDFISH_CACHE);
+  const requests = await cache.keys();
+  await Promise.all(requests.map((request) => {
+    const url = new URL(request.url);
+    if (url.origin !== self.location.origin) return cache.delete(request);
+    if (isBoardfishBundleUrl(url) && !isAppShellUrl(url)) return cache.delete(request);
+    return Promise.resolve(false);
+  }));
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -28,6 +56,7 @@ self.addEventListener('activate', (event) => {
           .filter((key) => key.startsWith('boardfish-web-') && key !== BOARDFISH_CACHE)
           .map((key) => caches.delete(key)),
       ))
+      .then(() => pruneCurrentCache())
       .then(() => self.clients.claim()),
   );
 });
@@ -42,7 +71,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     try {
       const response = await fetch(request);
-      if (response && response.ok && response.type === 'basic') {
+      if (response && response.ok && response.type === 'basic' && shouldCacheRequest(request, url)) {
         const cache = await caches.open(BOARDFISH_CACHE);
         await cache.put(request, response.clone());
       }
