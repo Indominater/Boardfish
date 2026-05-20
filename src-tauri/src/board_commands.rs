@@ -117,15 +117,19 @@ pub(crate) async fn save_board(
 
     let sources = state.get_many(&image_keys)?;
     let source_lookup_ms = source_lookup_start.elapsed().as_secs_f64() * 1000.0;
-    let board_json_bytes = serde_json::to_vec(&board).map_err(|e| e.to_string())?.len();
+    let serialize_start = std::time::Instant::now();
+    let board_json = serde_json::to_vec(&board).map_err(|e| e.to_string())?;
+    let serialize_ms = serialize_start.elapsed().as_secs_f64() * 1000.0;
     let image_bytes = sources.iter().fold(0usize, |sum, (_, source)| {
         sum.saturating_add(source.bytes.len())
     });
-    validate_board_limits(&board, board_json_bytes, image_bytes)?;
+    validate_board_limits(&board, board_json.len(), image_bytes)?;
 
-    let result = tokio::task::spawn_blocking(move || write_board_container(&path, board, sources))
-        .await
-        .map_err(|e| e.to_string())??;
+    let result = tokio::task::spawn_blocking(move || {
+        write_board_container(&path, board_json, sources, serialize_ms)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -147,11 +151,6 @@ pub(crate) async fn read_board(
             .await
             .map_err(|e| e.to_string())??;
     validate_board_value(&result.board)?;
-    validate_board_limits(
-        &result.board,
-        result.stats.board_json_bytes,
-        result.stats.image_bytes,
-    )?;
 
     {
         let cache_start = std::time::Instant::now();

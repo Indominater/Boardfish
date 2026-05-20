@@ -102,40 +102,22 @@ const isImageDisplayCacheRequestCurrent = (key, src, generation) => {
   return false;
 };
 
-function cacheImageSourceForSave(key, src, dbg = null) {
-  if (!hasTauri() || !src || isNativeImageRef(src)) return Promise.resolve();
-  const existing = imageSourceCachePromises.get(key);
-  if (existing) return existing;
-  const generation = _imageStoreGeneration;
-  const sourceToken = createImageSourceToken(key);
-  let promise;
-  promise = SaveDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), { imgKey: key, dataUrl: src })
-    .then((result) => {
-      if (!isImageSourceRequestCurrent(key, src, generation)) {
-        cleanupNativeImageSourceToken(key, sourceToken);
-        return result;
-      }
-      if (typeof noteEyedropperImageAvailable === 'function') noteEyedropperImageAvailable(key, 'image-source-ready');
-      return result;
-    })
-    .finally(() => {
-      if (imageSourceCachePromises.get(key) === promise) imageSourceCachePromises.delete(key);
-    });
-  imageSourceCachePromises.set(key, promise);
-  return promise;
-}
-
-function cacheImageSourceForExport(key, src, dbg = null) {
+const cacheNativeImageSourceForRegistration = (key, src, {
+  dbg = null,
+  debugApi,
+  debugPayload,
+  reusePendingStep = '',
+} = {}) => {
   if (!hasTauri() || !src || isNativeImageRef(src)) return Promise.resolve();
   const existing = imageSourceCachePromises.get(key);
   if (existing) {
-    ExportDebug.step(dbg, 'register:reuse-pending', { imgKey: key });
+    if (reusePendingStep) debugApi.step(dbg, reusePendingStep, { imgKey: key });
     return existing;
   }
   const generation = _imageStoreGeneration;
   const sourceToken = createImageSourceToken(key);
   let promise;
-  promise = ExportDebug.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), { imgKey: key })
+  promise = debugApi.wrap(dbg, TAURI_COMMANDS.REGISTER_IMAGE_SOURCE, () => BoardfishTauri.registerImageSource(key, src, sourceToken), debugPayload)
     .then((result) => {
       if (!isImageSourceRequestCurrent(key, src, generation)) {
         cleanupNativeImageSourceToken(key, sourceToken);
@@ -149,6 +131,23 @@ function cacheImageSourceForExport(key, src, dbg = null) {
     });
   imageSourceCachePromises.set(key, promise);
   return promise;
+};
+
+function cacheImageSourceForSave(key, src, dbg = null) {
+  return cacheNativeImageSourceForRegistration(key, src, {
+    dbg,
+    debugApi: SaveDebug,
+    debugPayload: { imgKey: key, dataUrl: src },
+  });
+}
+
+function cacheImageSourceForExport(key, src, dbg = null) {
+  return cacheNativeImageSourceForRegistration(key, src, {
+    dbg,
+    debugApi: ExportDebug,
+    debugPayload: { imgKey: key },
+    reusePendingStep: 'register:reuse-pending',
+  });
 }
 
 function imageNeedsRendering(obj) {

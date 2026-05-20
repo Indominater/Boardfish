@@ -546,7 +546,7 @@ function drawBoard() {
   const collectDrawDebug = ViewportDebug.isEnabled();
   const drawStart = collectDrawDebug ? performance.now() : 0;
   const drawPhases = {};
-  const counters = createDrawCounters();
+  const counters = collectDrawDebug ? createDrawCounters() : null;
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = currentViewportWorldRect(0);
   let drawnImages = 0;
@@ -597,11 +597,11 @@ function drawBoard() {
     resetCanvasToScreen(ctx);
     if (collectDrawDebug) drawPhases.resetMs = performance.now() - resetStart;
   }
-  ViewportDebug.count('croppedImages', counters.croppedImages);
-  ViewportDebug.count('imageDrawMissing', counters.missingImages);
-  ViewportDebug.count('imageDrawFallback', counters.fallbackImages);
-  ViewportDebug.count('imageDrawErrors', counters.erroredImages);
   if (collectDrawDebug) {
+    ViewportDebug.count('croppedImages', counters.croppedImages);
+    ViewportDebug.count('imageDrawMissing', counters.missingImages);
+    ViewportDebug.count('imageDrawFallback', counters.fallbackImages);
+    ViewportDebug.count('imageDrawErrors', counters.erroredImages);
     const drawMeta = {
       source: _activeRenderSource,
       drawnImages,

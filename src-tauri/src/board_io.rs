@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::image_sources::CachedImageSource;
+use crate::memory_limits::format_limit_bytes;
 
 #[derive(Clone, Copy)]
 pub(crate) struct BoardLimits {
@@ -19,17 +20,14 @@ pub(crate) struct BoardWriteStats {
 
 pub(crate) fn write_board_container(
     path: &str,
-    board: serde_json::Value,
+    board_json: Vec<u8>,
     sources: Vec<(String, CachedImageSource)>,
+    serialize_ms: f64,
 ) -> Result<BoardWriteStats, String> {
     use std::io::Write;
     use zip::write::FileOptions;
 
     let zip_start = std::time::Instant::now();
-    let serialize_start = std::time::Instant::now();
-    let board_json = serde_json::to_vec(&board).map_err(|e| e.to_string())?;
-    let serialize_ms = serialize_start.elapsed().as_secs_f64() * 1000.0;
-
     let write_start = std::time::Instant::now();
     let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
@@ -58,7 +56,7 @@ pub(crate) fn write_board_container(
         image_count,
         serialize_ms,
         write_ms,
-        zip_ms: zip_start.elapsed().as_secs_f64() * 1000.0,
+        zip_ms: serialize_ms + zip_start.elapsed().as_secs_f64() * 1000.0,
     })
 }
 
@@ -89,15 +87,6 @@ fn board_object_count(board: &serde_json::Value) -> usize {
         .and_then(|value| value.as_array())
         .map(|objects| objects.len())
         .unwrap_or(0)
-}
-
-fn format_limit_bytes(bytes: usize) -> String {
-    let mb = ((bytes as f64 / 1024.0 / 1024.0) * 10.0).round() / 10.0;
-    if (mb.fract()).abs() < f64::EPSILON {
-        format!("{} MB", mb as usize)
-    } else {
-        format!("{mb:.1} MB")
-    }
 }
 
 pub(crate) fn validate_board_limits(
@@ -217,7 +206,6 @@ pub(crate) fn read_board_file_with_limits(
         let board_json = String::from_utf8(board_json_bytes).map_err(|e| e.to_string())?;
         stats.board_json_read_ms = json_read_start.elapsed().as_secs_f64() * 1000.0;
         stats.board_json_bytes = board_json.len();
-        validate_board_content_bytes(limits, stats.board_json_bytes, 0)?;
 
         let parse_start = std::time::Instant::now();
         let parsed = serde_json::from_str(&board_json).map_err(|e| e.to_string())?;
@@ -333,10 +321,12 @@ mod tests {
             bytes: Arc::from([1_u8, 2, 3, 4]),
         };
 
+        let board_json = serde_json::to_vec(&board).unwrap();
         let write_stats = write_board_container(
             path.to_str().unwrap(),
-            board,
+            board_json,
             vec![("img-1".to_string(), source)],
+            0.0,
         )
         .unwrap();
         assert_eq!(write_stats.image_count, 1);
@@ -372,10 +362,12 @@ mod tests {
             ext: "png".to_string(),
             bytes: Arc::from([1_u8, 2, 3, 4]),
         };
+        let board_json = serde_json::to_vec(&board).unwrap();
         write_board_container(
             path.to_str().unwrap(),
-            board,
+            board_json,
             vec![("img-1".to_string(), source)],
+            0.0,
         )
         .unwrap();
         let result = read_board_file_with_limits(path.to_str().unwrap(), None).unwrap();

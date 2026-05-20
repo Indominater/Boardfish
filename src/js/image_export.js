@@ -210,10 +210,13 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
     });
   };
 
-  const resolveUniqueObject = async (obj, index) => {
-    const imgKey = obj?.data?.imgKey;
-    const source = BoardfishImageStore.getSource(imgKey);
-    const sourceKind = exportSourceKind(source);
+  const resolveUniqueObject = async (obj, index, context = {}) => {
+    const imgKey = context.imgKey ?? obj?.data?.imgKey;
+    const source = Object.prototype.hasOwnProperty.call(context, 'source')
+      ? context.source
+      : BoardfishImageStore.getSource(imgKey);
+    const sourceKind = context.sourceKind ?? exportSourceKind(source);
+    const needsRendering = context.needsRendering ?? imageNeedsRendering(obj);
     if (!imgKey || !source) {
       return {
         key: '',
@@ -226,7 +229,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
       };
     }
 
-    if (!imageNeedsRendering(obj)) {
+    if (!needsRendering) {
       const itemStart = performance.now();
       await cacheImageSourceForExport(imgKey, source, dbg);
       return {
@@ -345,9 +348,11 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
   const results = await mapWithConcurrency(imageObjs, nativeConcurrency, async (obj, index) => {
     const imgKey = obj.data?.imgKey;
     const source = BoardfishImageStore.getSource(imgKey);
-    const dedupeKey = imageNeedsRendering(obj)
+    const sourceKind = exportSourceKind(source);
+    const needsRendering = imageNeedsRendering(obj);
+    const dedupeKey = needsRendering
       ? `render:${exportTransformSignature(obj)}`
-      : `passthrough:${imgKey || ''}:${exportSourceKind(source)}`;
+      : `passthrough:${imgKey || ''}:${sourceKind}`;
     const itemStart = performance.now();
     const existing = resolvePromises.get(dedupeKey);
     if (existing) {
@@ -362,7 +367,7 @@ async function resolveExportKeys(imageObjs, dbg, onProgress = null) {
       return reused;
     }
 
-    const promise = resolveUniqueObject(obj, index);
+    const promise = resolveUniqueObject(obj, index, { imgKey, source, sourceKind, needsRendering });
     resolvePromises.set(dedupeKey, promise);
     const result = await promise;
     if (result?.ms == null) result.ms = performance.now() - itemStart;
