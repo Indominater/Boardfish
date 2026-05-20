@@ -85,7 +85,7 @@
     return imageItem?.getAsFile?.() || [...files].find((file) => isSupportedImageType(file.type)) || null;
   }
 
-  function readClipboardImageDataUrlFromEvent(clipboardData, dbg = null) {
+  function readClipboardImageFileFromClipboardData(clipboardData, dbg = null, describeBlob = null) {
     if (!clipboardData) {
       ClipDebug.step(dbg, 'event-clipboard:none');
       return null;
@@ -96,22 +96,24 @@
       ClipDebug.step(dbg, 'event-image:none');
       return null;
     }
-    ClipDebug.step(dbg, 'event-image-blob', { type: imageFile.type, blobSize: imageFile.size });
+    ClipDebug.step(dbg, 'event-image-blob', describeBlob ? describeBlob(imageFile) : { type: imageFile.type, blobSize: imageFile.size });
+    return imageFile;
+  }
+
+  function readClipboardImageDataUrlFromEvent(clipboardData, dbg = null) {
+    const imageFile = readClipboardImageFileFromClipboardData(clipboardData, dbg);
+    if (!imageFile) {
+      return null;
+    }
     return readClipboardBlobAsDataUrlDebug(imageFile, 'failed to read clipboard image', dbg, { source: 'paste-event' });
   }
 
   function readClipboardImageFileFromEvent(clipboardData, dbg = null) {
-    if (!clipboardData) {
-      ClipDebug.step(dbg, 'event-clipboard:none');
-      return null;
-    }
-    ClipDebug.step(dbg, 'event-clipboard:inspect', describeClipboardData(clipboardData));
-    const imageFile = supportedClipboardImageFile(clipboardData.items || [], clipboardData.files || []);
-    if (!imageFile) {
-      ClipDebug.step(dbg, 'event-image:none');
-      return null;
-    }
-    ClipDebug.step(dbg, 'event-image-blob', { type: imageFile.type, blobSize: imageFile.size, fileName: imageFile.name || '' });
+    const imageFile = readClipboardImageFileFromClipboardData(clipboardData, dbg, (file) => ({
+      type: file.type,
+      blobSize: file.size,
+      fileName: file.name || '',
+    }));
     return imageFile;
   }
 
@@ -164,23 +166,7 @@
     };
   }
 
-  async function readClipboardImageDataUrlFromBrowser(dbg = null) {
-    if (!navigator.clipboard?.read) return null;
-    ClipDebug.step(dbg, 'browser-clipboard-read:start');
-    const items = await navigator.clipboard.read();
-    ClipDebug.step(dbg, 'browser-clipboard-read:ok', { itemCount: items.length });
-    for (const item of items) {
-      for (const type of item.types) {
-        if (type !== 'image/png' && type !== 'image/jpeg') continue;
-        const blob = await item.getType(type);
-        ClipDebug.step(dbg, 'browser-image-blob', { type, blobSize: blob.size });
-        return readClipboardBlobAsDataUrlDebug(blob, 'failed to read browser clipboard image', dbg, { source: 'browser-clipboard' });
-      }
-    }
-    return null;
-  }
-
-  async function readClipboardImageBlobFromBrowser(dbg = null) {
+  async function readClipboardImageBlobFromBrowserClipboard(dbg = null) {
     if (!navigator.clipboard?.read) return null;
     ClipDebug.step(dbg, 'browser-clipboard-read:start');
     const items = await navigator.clipboard.read();
@@ -194,6 +180,18 @@
       }
     }
     return null;
+  }
+
+  async function readClipboardImageDataUrlFromBrowser(dbg = null) {
+    const blob = await readClipboardImageBlobFromBrowserClipboard(dbg);
+    if (!blob) {
+      return null;
+    }
+    return readClipboardBlobAsDataUrlDebug(blob, 'failed to read browser clipboard image', dbg, { source: 'browser-clipboard' });
+  }
+
+  async function readClipboardImageBlobFromBrowser(dbg = null) {
+    return readClipboardImageBlobFromBrowserClipboard(dbg);
   }
 
   async function readBoardfishClipboardTokenFromBrowser(dbg = null) {

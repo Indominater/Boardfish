@@ -113,58 +113,57 @@ pub(crate) fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
         parsed
     };
 
-    let entries = board
-        .get("imageStore")
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
+    let entries = board.get("imageStore").and_then(|v| v.as_object());
     let mut image_store = serde_json::Map::new();
-    let mut sources = Vec::with_capacity(entries.len());
-    for (key, meta) in entries {
-        let entry_path = meta
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                let ext = meta.get("ext").and_then(|v| v.as_str()).unwrap_or("png");
-                format!("images/{}.{}", key, ext)
-            });
-        let mime = meta
-            .get("mime")
-            .and_then(|v| v.as_str())
-            .unwrap_or("image/png")
-            .to_string();
-        let ext = meta
-            .get("ext")
-            .and_then(|v| v.as_str())
-            .unwrap_or_else(|| if mime == "image/jpeg" { "jpg" } else { "png" })
-            .to_string();
+    let mut sources = Vec::with_capacity(entries.map_or(0, |entries| entries.len()));
+    if let Some(entries) = entries {
+        for (key, meta) in entries {
+            let entry_path = meta
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    let ext = meta.get("ext").and_then(|v| v.as_str()).unwrap_or("png");
+                    format!("images/{}.{}", key, ext)
+                });
+            let mime = meta
+                .get("mime")
+                .and_then(|v| v.as_str())
+                .unwrap_or("image/png")
+                .to_string();
+            let ext = meta
+                .get("ext")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| if mime == "image/jpeg" { "jpg" } else { "png" })
+                .to_string();
 
-        let image_read_start = std::time::Instant::now();
-        let mut image_file = archive.by_name(&entry_path).map_err(|e| e.to_string())?;
-        let mut image_bytes = Vec::with_capacity(image_file.size() as usize);
-        image_file
-            .read_to_end(&mut image_bytes)
-            .map_err(|e| e.to_string())?;
-        stats.image_read_ms += image_read_start.elapsed().as_secs_f64() * 1000.0;
-        stats.image_count += 1;
-        stats.image_bytes += image_bytes.len();
+            let image_read_start = std::time::Instant::now();
+            let mut image_file = archive.by_name(&entry_path).map_err(|e| e.to_string())?;
+            let mut image_bytes = Vec::with_capacity(image_file.size() as usize);
+            image_file
+                .read_to_end(&mut image_bytes)
+                .map_err(|e| e.to_string())?;
+            stats.image_read_ms += image_read_start.elapsed().as_secs_f64() * 1000.0;
+            stats.image_count += 1;
+            stats.image_bytes += image_bytes.len();
 
-        let source = CachedImageSource {
-            mime: mime.clone(),
-            ext: ext.clone(),
-            bytes: Arc::from(image_bytes),
-        };
-        image_store.insert(
-            key.clone(),
-            serde_json::json!({
-                "native": true,
-                "path": entry_path,
-                "mime": mime,
-                "ext": ext,
-            }),
-        );
-        sources.push((key, source));
+            let source = CachedImageSource {
+                mime: mime.clone(),
+                ext: ext.clone(),
+                bytes: Arc::from(image_bytes),
+            };
+            let source_key = key.clone();
+            image_store.insert(
+                source_key.clone(),
+                serde_json::json!({
+                    "native": true,
+                    "path": entry_path,
+                    "mime": mime,
+                    "ext": ext,
+                }),
+            );
+            sources.push((source_key, source));
+        }
     }
     board["imageStore"] = serde_json::Value::Object(image_store);
     stats.total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
