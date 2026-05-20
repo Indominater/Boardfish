@@ -135,7 +135,6 @@
 
   async function validateImageBlob(blob, name = 'image', options = {}) {
     if (!isLimitedRuntime()) return true;
-    void name;
     return validateImageBytes(blob?.size || blob?.byteLength || 0, options);
   }
 
@@ -145,7 +144,6 @@
 
   async function validateDataUrlImage(dataUrl, name = 'image', options = {}) {
     if (!isLimitedRuntime()) return true;
-    void name;
     return validateImageBytes(dataUrlImageBytesForValidation(dataUrl), options);
   }
 
@@ -172,7 +170,6 @@
 
   async function validateOpenedImageEntries(imageEntries = []) {
     if (!isLimitedRuntime()) return true;
-    void imageEntries;
     return true;
   }
 

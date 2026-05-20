@@ -43,7 +43,6 @@ var MENU_SHORTCUTS = {
   'add-text': ['T'],
   'add-images': [COMMAND_KEY_LABEL, 'I'],
   paste: [COMMAND_KEY_LABEL, 'V'],
-  'reset-zoom': [COMMAND_KEY_LABEL, '0'],
   save: [COMMAND_KEY_LABEL, 'S'],
   'save-as': IS_MAC ? [SHIFT_KEY_LABEL, COMMAND_KEY_LABEL, 'S'] : [COMMAND_KEY_LABEL, SHIFT_KEY_LABEL, 'S'],
   open: [COMMAND_KEY_LABEL, 'O'],
