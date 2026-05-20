@@ -257,10 +257,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false } = {}) => {
 const copyTextEditSelection = async () => {
   const selection = getTextEditSelectionState();
   const selectedText = selectedTextForEditMenu();
-  const copied = await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
-    allowEmpty: !!selectedText,
-  });
-  if (copied) {
+  if (selectedText) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
       textSelection: {
         id: editingId,
@@ -269,6 +266,9 @@ const copyTextEditSelection = async () => {
     });
     scheduleRender(true, false, 'copy-text-selection');
   }
+  await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
+    allowEmpty: !!selectedText,
+  });
   focusTextEditProxy();
 };
 

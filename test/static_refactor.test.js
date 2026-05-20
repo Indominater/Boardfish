@@ -769,8 +769,8 @@ test('copying highlighted text selection jiggles the selection and selected text
   assert.match(motionSource, /const noteTextSelectionJello/);
   assert.match(motionSource, /const textSelectionMotionForDraw/);
   assert.match(motionSource, /textSelectionMotionForDraw,/);
-  assert.match(contextMenuSource, /copyTextEditSelection[\s\S]*applyActionAnimation\?\.\('copy-text-selection'/);
-  assert.match(textEditorSource, /const copyTextEditSelectionFromProxy[\s\S]*await BoardfishClipboardIO\.copyTextToClipboard[\s\S]*applyActionAnimation\?\.\('copy-text-selection'/);
+  assert.match(contextMenuSource, /copyTextEditSelection[\s\S]*applyActionAnimation\?\.\('copy-text-selection'[\s\S]*writeTextClipboardFromEditMenu/);
+  assert.match(textEditorSource, /const copyTextEditSelectionFromProxy[\s\S]*applyActionAnimation\?\.\('copy-text-selection'[\s\S]*BoardfishClipboardIO\.copyTextToClipboard/);
   assert.match(textEditorSource, /selectionStart !== proxy\.selectionEnd[\s\S]*e\.preventDefault\(\)[\s\S]*copyTextEditSelectionFromProxy\(id, proxy\)/);
   const textObjectFeedbackStart = clipboardSource.indexOf('const noteTextObjectCopyFeedback');
   const textObjectFeedbackEnd = clipboardSource.indexOf('const clipboardImageBlobName', textObjectFeedbackStart);
@@ -953,8 +953,9 @@ test('copy-only jiggle policy keeps object action routing centralized', () => {
   assert.match(readSource('src/js/selection_input.js'), /applyActionAnimation\?\.\('object-resize'[\s\S]*includeText: false[\s\S]*pushHistory\('resize'\)/);
   assert.match(readSource('src/js/selection_input.js'), /applyActionAnimation\?\.\('object-multi-resize'[\s\S]*includeText: false[\s\S]*pushHistory\('multi-resize'\)/);
   const clipboardSource = readSource('src/js/clipboard_export_init.js');
-  assert.match(clipboardSource, /const noteCopiedObjectsFeedback[\s\S]*applyActionAnimation\?\.\('copy-selected-objects'/);
-  assert.match(clipboardSource, /async function copySelected\(\)[\s\S]*await BoardfishClipboardIO\.copyTextToClipboard[\s\S]*noteCopiedObjectsFeedback\(\[obj\]\)/);
+  assert.doesNotMatch(clipboardSource, /noteCopiedObjectsFeedback|copyError|await enqueueNativeClipboardWrite|await writeWebClipboardTokenForJsClipboard/);
+  assert.match(clipboardSource, /if \(!noteTextObjectCopyFeedback\(obj\)\) \{[\s\S]*applyActionAnimation\?\.\('copy-selected-objects', \{ selection: true \}\);[\s\S]*const cloned = cloneObject\(obj\)/);
+  assert.match(clipboardSource, /BoardfishClipboardIO\.copyTextToClipboard\(clipboardText[\s\S]*\.catch\(\(err\) => console\.error\('\[copy\] writeText FAILED:'/);
   assert.match(readSource('src/js/history_state.js'), /historySelectionPulseOptions/);
   assert.match(readSource('src/js/history_state.js'), /historyMotionForEntry/);
   assert.match(readSource('src/js/history_state.js'), /applyHistoryMotionReplay[\s\S]*applyActionAnimation\?\.\('history-object-jiggle-replay'/);

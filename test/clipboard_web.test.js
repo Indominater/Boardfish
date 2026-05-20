@@ -423,19 +423,13 @@ test('clipboard IO extracts and writes Boardfish web clipboard markers', async (
   }
 });
 
-test('copying a selected text object jiggles only after the clipboard write completes', async () => {
+test('copying a selected text object jiggles immediately while clipboard write continues', async () => {
   const context = loadClipboardExportHarness({ deferCopyText: true });
 
   const copyPromise = context.copySelected();
 
   assert.deepEqual(context.calls.copiedTexts, [context.textObject.data.content]);
   assert.deepEqual(context.calls.jello, []);
-  assert.deepEqual(context.calls.objectJello, []);
-  assert.deepEqual(context.calls.renders, []);
-
-  context.calls.resolveNextCopiedText();
-  assert.equal(await copyPromise, true);
-
   const objectJello = context.calls.objectJello.map((call) => ({
     action: call.action,
     ids: [...call.ids],
@@ -450,6 +444,11 @@ test('copying a selected text object jiggles only after the clipboard write comp
     overlay: true,
     source: 'copy-text-object',
   }]);
+
+  assert.equal(await copyPromise, true);
+  assert.equal(context.calls.pendingTextCopyResolves.length, 1);
+  context.calls.resolveNextCopiedText();
+  await Promise.resolve();
 });
 
 test('copying a text object omits whitespace-only lines at plain clipboard edges', async () => {

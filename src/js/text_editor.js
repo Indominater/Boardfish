@@ -32,21 +32,19 @@ const textEditSelectionState = (proxy) => {
 const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSelectionState(proxy)) => {
   if (!selection?.hasSelection || !proxy) return false;
   const selectedText = proxy.value.slice(selection.start, selection.end);
+  const clipboardText = textSelectionForClipboard(selectedText);
   clearJsClipboard();
-  try {
-    await BoardfishClipboardIO.copyTextToClipboard(textSelectionForClipboard(selectedText));
-  } catch (err) {
-    console.error('[copy] text selection clipboard write FAILED:', err);
-    return false;
+  if (editingId === id && _editEl === proxy) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
+      textSelection: {
+        id,
+        ...selection,
+      },
+    });
+    scheduleRender(true, false, 'copy-text-selection');
   }
-  if (editingId !== id || _editEl !== proxy) return true;
-  globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
-    textSelection: {
-      id,
-      ...selection,
-    },
-  });
-  scheduleRender(true, false, 'copy-text-selection');
+  BoardfishClipboardIO.copyTextToClipboard(clipboardText)
+    .catch((err) => console.error('[copy] text selection clipboard write FAILED:', err));
   return true;
 };
 
