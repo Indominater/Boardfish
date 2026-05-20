@@ -10,13 +10,17 @@
   const ZIP_EOCD_MAX_COMMENT = 0xFFFF;
 
   let crcTable = null;
+  let utf8TextEncoder = null;
+  let utf8TextDecoder = null;
 
   function textEncoder() {
-    return new TextEncoder();
+    if (!utf8TextEncoder) utf8TextEncoder = new TextEncoder();
+    return utf8TextEncoder;
   }
 
   function textDecoder() {
-    return new TextDecoder();
+    if (!utf8TextDecoder) utf8TextDecoder = new TextDecoder();
+    return utf8TextDecoder;
   }
 
   function utf8Encode(text) {
@@ -504,6 +508,7 @@
     const boardJson = JSON.stringify(board);
     const boardBytes = utf8Encode(boardJson);
     const imageEntries = buildImageEntries(board, rawImageStore);
+    const imageBytes = imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0);
     const zip = await createZipBlob([
       { name: 'board.json', data: boardBytes },
       ...imageEntries.map((entry) => ({ name: entry.path, data: entry.bytes })),
@@ -514,10 +519,10 @@
       zipBytes: zip.byteLength,
       zipMode: zip.mode,
       boardJsonBytes: boardBytes.length,
-      imageBytes: imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0),
+      imageBytes,
       imageCount: imageEntries.length,
       imageEntries,
-      totalContentBytes: boardBytes.length + imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0),
+      totalContentBytes: boardBytes.length + imageBytes,
     };
   }
 
@@ -553,6 +558,7 @@
       });
     }
 
+    const imageBytes = imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0);
     return {
       board: {
         ...board,
@@ -563,8 +569,8 @@
         file_bytes: containerBytes.length,
         board_json_bytes: boardJsonBytes.length,
         image_count: imageEntries.length,
-        image_bytes: imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0),
-        total_content_bytes: boardJsonBytes.length + imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0),
+        image_bytes: imageBytes,
+        total_content_bytes: boardJsonBytes.length + imageBytes,
       },
       imageEntries,
     };

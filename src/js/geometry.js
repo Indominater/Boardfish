@@ -1,13 +1,14 @@
 'use strict';
 
-function objectsBounds(objectsList) {
+function selectedBounds() {
   let x1 = Infinity;
   let y1 = Infinity;
   let x2 = -Infinity;
   let y2 = -Infinity;
   let count = 0;
 
-  for (const obj of objectsList || []) {
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
     if (!obj) continue;
     x1 = Math.min(x1, obj.x);
     y1 = Math.min(y1, obj.y);
@@ -17,19 +18,6 @@ function objectsBounds(objectsList) {
   }
 
   return count ? { x1, y1, x2, y2, count } : null;
-}
-
-function selectedObjectsList() {
-  const list = [];
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (obj) list.push(obj);
-  }
-  return list;
-}
-
-function selectedBounds() {
-  return objectsBounds(selectedObjectsList());
 }
 
 function viewportWorldRect(padScreenPx = 0, view = { panX, panY, zoom }) {

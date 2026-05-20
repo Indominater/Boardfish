@@ -157,28 +157,12 @@ function boardDocumentDeps() {
   };
 }
 
-function boardData() {
-  return BoardfishBoardDocument.createLegacyBoardData({
-    viewport: { panX, panY, zoom },
-    imageStore,
-    objects,
-  });
-}
-
 function boardDataForSave() {
   return BoardfishBoardDocument.createBoardDataForSave({
     viewport: { panX, panY, zoom },
     imageStore,
     objects,
   }, boardDocumentDeps());
-}
-
-function summarizeImageStore(store = {}, { includeRuntime = false } = {}) {
-  return BoardfishBoardDocument.summarizeImageStore(store, boardDocumentDeps(), { includeRuntime });
-}
-
-function getObjectTypeCounts(objectsList = []) {
-  return BoardfishBoardDocument.getObjectTypeCounts(objectsList);
 }
 
 function getBoardSaveMetrics(data) {

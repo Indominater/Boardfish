@@ -110,7 +110,10 @@ test('web release preview keeps debug tools off on localhost', () => {
   assert.match(buildSource, /function cacheBustedBundlePath\(bundle, code\)/);
   assert.match(buildSource, /createHash\('sha256'\)\.update\(code\)\.digest\('hex'\)\.slice\(0, 12\)/);
   assert.match(buildSource, /const bundle = config\.cacheBust \? cacheBustedBundlePath\(config\.bundle, result\.code\) : config\.bundle;/);
-  assert.match(buildSource, /writeIndex\(config\.outDir, `<script src="\$\{bundle\}"><\/script>`\)/);
+  assert.match(
+    buildSource,
+    /writeIndex\(config\.outDir, `<script src="\$\{bundle\}"><\/script>`, \{\s*includePwa: variantName === 'web-preview',\s*\}\)/,
+  );
 
   assert.match(webEnvSource, /'__BOARDFISH_WEB_DEV_MODE__'/);
   assert.match(webEnvSource, /value: false/);

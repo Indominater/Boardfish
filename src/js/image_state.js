@@ -187,11 +187,12 @@ function canvasToPngBlob(canvas) {
 async function getRenderedImageDataUrl(obj, dbg = null) {
   const imgKey = obj?.data?.imgKey;
   const transform = imageTransformFromObject(obj);
+  const needsRender = imageTransformNeedsRendering(transform);
   const baseMeta = {
     objectId: obj?.id,
     imgKey,
     ...transform,
-    needsRender: imageNeedsRendering(obj),
+    needsRender,
     storedKind: isNativeImageRef(imageStore[imgKey]) ? 'native-ref' : typeof imageStore[imgKey],
     storedMB: Math.round(imageStoreBytesEstimate(imageStore[imgKey]) / 1024 / 1024 * 100) / 100,
   };
@@ -202,7 +203,7 @@ async function getRenderedImageDataUrl(obj, dbg = null) {
   const sourceKind = baseMeta.storedKind === 'native-ref'
     ? 'hydrated-native-ref'
     : (typeof imageStore[imgKey] === 'string' ? 'data-url' : baseMeta.storedKind);
-  if (!src || !imageNeedsRendering(obj)) {
+  if (!src || !needsRender) {
     ExportDebug.step(dbg, 'render:done', {
       ...baseMeta,
       sourceKind,

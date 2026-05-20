@@ -87,12 +87,15 @@ async function concatenateScripts(scripts, variantName) {
   return parts.join('');
 }
 
-async function writeIndex(outDir, scriptTag) {
+async function writeIndex(outDir, scriptTag, { includePwa = false } = {}) {
   const html = await readFile(path.join(srcRoot, 'index.html'), 'utf8');
-  const next = html.replace(
+  let next = html.replace(
     /<script\s+type="module"\s+src="js\/main(?:\.[^"]+)?\.mjs"><\/script>/,
     scriptTag,
   );
+  if (!includePwa) {
+    next = next.replace(/\n\s*<link\s+rel="manifest"\s+href="manifest\.webmanifest"\s*\/>/, '');
+  }
   await writeFile(path.join(outDir, 'index.html'), next);
 }
 
@@ -115,7 +118,9 @@ async function buildBundle(variantName, config) {
   const bundle = config.cacheBust ? cacheBustedBundlePath(config.bundle, result.code) : config.bundle;
   const outPath = path.join(config.outDir, bundle);
   await writeFile(outPath, result.code);
-  await writeIndex(config.outDir, `<script src="${bundle}"></script>`);
+  await writeIndex(config.outDir, `<script src="${bundle}"></script>`, {
+    includePwa: variantName === 'web-preview',
+  });
 
   const rawKb = Math.round(result.code.length / 1024 * 10) / 10;
   const gzipKb = Math.round(gzipSync(result.code).length / 1024 * 10) / 10;

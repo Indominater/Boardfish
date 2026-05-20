@@ -4,8 +4,11 @@ function addText(wx, wy, content = '', options = {}) {
   if (eyedropperEnabled) return;
   if (!BoardfishWebLimits.canAddObjects(1)) return;
   content = textForTextObjectPaste(content);
-  const textBytes = typeof TextEncoder === 'function' ? new TextEncoder().encode(content).length : content.length;
-  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1)) return;
+  if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
+    const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+    const textBytes = encoder ? encoder.encode(content).length : content.length;
+    if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1)) return;
+  }
   let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
   if (content) {
     const lines = content.split('\n');
@@ -177,12 +180,15 @@ function duplicateSelected() {
     if (obj) selectedObjects.push(obj);
   }
   if (!selectedObjects.length || !BoardfishWebLimits.canAddObjects(selectedObjects.length)) return;
-  const additionalTextBytes = selectedObjects.reduce((sum, obj) => {
-    if (obj?.type !== 'text') return sum;
-    const text = String(obj.data?.content || '');
-    return sum + (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length);
-  }, 0);
-  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
+  if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
+    const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+    const additionalTextBytes = selectedObjects.reduce((sum, obj) => {
+      if (obj?.type !== 'text') return sum;
+      const text = String(obj.data?.content || '');
+      return sum + (encoder ? encoder.encode(text).length : text.length);
+    }, 0);
+    if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
+  }
 
   const cloned = selectedObjects.map((obj) => cloneObject(obj));
   if (!cloned.length) return;
@@ -208,8 +214,12 @@ function duplicateSelected() {
     primaryId: duplicatedIds[duplicatedIds.length - 1],
     animateSelection: false,
   });
-  const duplicatedTextObjects = cloned.filter((obj) => obj?.type === 'text');
-  const duplicatedNonTextObjects = cloned.filter((obj) => obj?.type !== 'text');
+  const duplicatedTextObjects = [];
+  const duplicatedNonTextObjects = [];
+  for (const obj of cloned) {
+    if (obj.type === 'text') duplicatedTextObjects.push(obj);
+    else duplicatedNonTextObjects.push(obj);
+  }
   globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-duplicate', { objects: duplicatedTextObjects });
   globalThis.BoardfishMotion?.applyActionAnimation?.('image-object-duplicate', { objects: duplicatedNonTextObjects });
   scheduleRender(true, true, 'duplicate-selected');
@@ -222,10 +232,11 @@ function deleteSelected() {
   if (!hasSelection() || editingId) return;
   const idsToDelete = [...selectedIds];
   if (!idsToDelete.length) return;
-  const removedObjects = idsToDelete
-    .map((id) => objectsMap.get(id))
-    .filter(Boolean)
-    .map((obj) => cloneObject(obj));
+  const removedObjects = [];
+  for (const id of idsToDelete) {
+    const obj = objectsMap.get(id);
+    if (obj) removedObjects.push(cloneObject(obj));
+  }
   globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects });
   BoardfishEditorState.removeObjectsById(idsToDelete);
   if (selectedIds.size) {

@@ -29,7 +29,6 @@ var rotateBtn         = BoardfishDOM.rotateBtn;
 var rubberBand       = BoardfishDOM.rubberBand;
 var addTextBtn       = BoardfishDOM.addTextBtn;
 var addImageBtn      = BoardfishDOM.addImageBtn;
-var pasteBtn         = BoardfishDOM.pasteBtn;
 var exportAllImageBtn = BoardfishDOM.exportAllImageBtn;
 var exportAllTextBtn  = BoardfishDOM.exportAllTextBtn;
 var exportAllSep      = BoardfishDOM.exportAllSep;
@@ -80,9 +79,6 @@ var APP_THEMES = {
 };
 var appTheme = 'light';
 var APP_THEME_STORAGE_KEY = 'bf_app_theme';
-var _queuedNativeAppTheme = null;
-var _nativeAppThemeRaf = null;
-var _nativeAppThemeInFlight = false;
 
 // StartupDebug is initialized by js/startup_debug.js.
 
@@ -152,33 +148,6 @@ function showAppWindow() {
     .catch((err) => {
       logStartupError('show-window:failed', err);
     });
-}
-
-function flushQueuedNativeAppTheme() {
-  if (_nativeAppThemeInFlight || !_queuedNativeAppTheme) return Promise.resolve();
-  const nextTheme = _queuedNativeAppTheme;
-  _queuedNativeAppTheme = null;
-  _nativeAppThemeInFlight = true;
-  return applyNativeAppTheme(nextTheme).finally(() => {
-    _nativeAppThemeInFlight = false;
-    if (!_queuedNativeAppTheme) return;
-    if (_queuedNativeAppTheme === nextTheme) {
-      _queuedNativeAppTheme = null;
-      return;
-    }
-    scheduleNativeAppThemeAfterPaint(_queuedNativeAppTheme);
-  });
-}
-
-function scheduleNativeAppThemeAfterPaint(theme = appTheme) {
-  if (!hasTauri()) return Promise.resolve();
-  _queuedNativeAppTheme = normalizeAppTheme(theme);
-  if (_nativeAppThemeRaf || _nativeAppThemeInFlight) return Promise.resolve();
-  _nativeAppThemeRaf = requestAnimationFrame(() => {
-    _nativeAppThemeRaf = null;
-    flushQueuedNativeAppTheme();
-  });
-  return Promise.resolve();
 }
 
 function repaintBoardForThemeChange() {

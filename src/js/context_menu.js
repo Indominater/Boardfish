@@ -581,8 +581,13 @@ const updateTextEditMenuActions = async () => {
 };
 
 function updateCtxMenuActions() {
-  const hasImages = objects.some((o) => o.type === 'image');
-  const hasText   = objects.some((o) => o.type === 'text');
+  let hasImages = false;
+  let hasText = false;
+  for (const o of objects) {
+    if (o.type === 'image') hasImages = true;
+    else if (o.type === 'text') hasText = true;
+    if (hasImages && hasText) break;
+  }
   const show = hasImages || hasText;
   const canAddObject = BoardfishWebLimits.canAddObjects(1, { notifyUser: false });
   if (addTextBtn) addTextBtn.disabled = !canAddObject;

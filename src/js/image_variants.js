@@ -175,11 +175,13 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
   const dpr = view?.dpr || window.devicePixelRatio || 1;
   const neededW = obj.w * viewZoom * dpr;
   const neededH = obj.h * viewZoom * dpr;
-  const scaleLevels = IMAGE_SCALE_LEVELS.slice().sort((a, b) => a - b);
-  for (const scale of scaleLevels) {
-    if (sourceW * scale >= neededW && sourceH * scale >= neededH) return scale;
+  let selectedScale = Infinity;
+  for (const scale of IMAGE_SCALE_LEVELS) {
+    if (sourceW * scale >= neededW && sourceH * scale >= neededH && scale < selectedScale) {
+      selectedScale = scale;
+    }
   }
-  return 1;
+  return Number.isFinite(selectedScale) ? selectedScale : 1;
 }
 
 function queueScaledImageVariant(key, source, scale) {
@@ -312,9 +314,10 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
   const targetScale = chooseImageScaleForDraw(obj, fullSource, view);
   const map = imageScaledBitmapCache.get(key);
   if (map && targetScale < 1) {
-    const selectedScale = IMAGE_SCALE_LEVELS
-      .filter((scale) => scale >= targetScale && map.has(scale))
-      .reduce((best, scale) => Math.min(best, scale), 1);
+    let selectedScale = 1;
+    for (const scale of IMAGE_SCALE_LEVELS) {
+      if (scale >= targetScale && map.has(scale) && scale < selectedScale) selectedScale = scale;
+    }
     if (selectedScale < 1) {
       const entry = map.get(selectedScale);
       entry.lastUsed = imageScaledBitmapUseCounter++;

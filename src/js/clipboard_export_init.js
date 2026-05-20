@@ -296,17 +296,20 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           ClipDebug.end(dbg, { skipped: 'web-object-limit', objectCount: clones.length });
           return;
         }
-        const additionalImageBytes = imgEntries.reduce((sum, [key, src]) => (
-          BoardfishImageStore.hasSource(key) ? sum : sum + BoardfishWebLimits.imageSourceByteLength(src)
-        ), 0);
-        const additionalTextBytes = clones.reduce((sum, obj) => {
-          if (obj?.type !== 'text') return sum;
-          const text = String(obj.data?.content || '');
-          return sum + (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length);
-        }, 0);
-        if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalImageBytes + additionalTextBytes, clones.length)) {
-          ClipDebug.end(dbg, { skipped: 'web-content-limit', additionalImageBytes, additionalTextBytes });
-          return;
+        if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
+          const additionalImageBytes = imgEntries.reduce((sum, [key, src]) => (
+            BoardfishImageStore.hasSource(key) ? sum : sum + BoardfishWebLimits.imageSourceByteLength(src)
+          ), 0);
+          const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+          const additionalTextBytes = clones.reduce((sum, obj) => {
+            if (obj?.type !== 'text') return sum;
+            const text = String(obj.data?.content || '');
+            return sum + (encoder ? encoder.encode(text).length : text.length);
+          }, 0);
+          if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalImageBytes + additionalTextBytes, clones.length)) {
+            ClipDebug.end(dbg, { skipped: 'web-content-limit', additionalImageBytes, additionalTextBytes });
+            return;
+          }
         }
         // Re-register image data in case we're on a different board
         let registeredImages = 0;
@@ -335,12 +338,16 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         const dx = wx - (minX + maxX) / 2, dy = wy - (minY + maxY) / 2;
         let processedObjects = 0;
         const pastedIds = [];
+        const pastedTextObjects = [];
+        const pastedNonTextObjects = [];
         ClipDebug.step(dbg, 'paste:objects-add-start', { objectCount: clones.length });
         for (const o of clones) {
           processedObjects++;
           o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
           BoardfishEditorState.addObject(o);
           pastedIds.push(o.id);
+          if (o.type === 'text') pastedTextObjects.push(o);
+          else pastedNonTextObjects.push(o);
           if (processedObjects === 1 || processedObjects % 50 === 0 || processedObjects === clones.length) {
             ClipDebug.step(dbg, 'paste:objects-add-progress', {
               processed: processedObjects,
@@ -353,8 +360,6 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           primaryId: pastedIds[pastedIds.length - 1],
           animateSelection: false,
         });
-        const pastedTextObjects = clones.filter((obj) => obj?.type === 'text');
-        const pastedNonTextObjects = clones.filter((obj) => obj?.type !== 'text');
         globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-paste', { objects: pastedTextObjects });
         globalThis.BoardfishMotion?.applyActionAnimation?.('image-object-paste', { objects: pastedNonTextObjects });
         ClipDebug.step(dbg, 'paste:objects-add-done', { objectCount: clones.length, registeredImages });
