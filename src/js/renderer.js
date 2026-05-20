@@ -205,12 +205,13 @@
       const imageSourceResolver = options.imageSourceResolver || null;
       const objectMotionForDraw = typeof deps.objectMotionForDraw === 'function' ? deps.objectMotionForDraw : null;
       const motionObjectsForDraw = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw : null;
+      const cullingEnabled = deps.viewportCullingEnabled();
       let drawnImages = 0;
       let drawnText = 0;
       const drawObject = (obj, countObject = true) => {
         if (countObject && counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
         if (obj.id === skipId) return;
-        if (deps.viewportCullingEnabled() && !deps.objectIntersectsRect(obj, viewportRect)) {
+        if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect)) {
           if (countObject) countCulledObject(obj, counters);
           return;
         }

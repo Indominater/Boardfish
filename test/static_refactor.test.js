@@ -785,11 +785,13 @@ test('copying highlighted text selection jiggles the selection and selected text
   assert.match(viewportSource, /if \(requireMotion && !motion\) return false;/);
   assert.match(viewportSource, /context\.fillText\(run\.text, run\.x1, run\.line\.textY\)/);
   assert.match(viewportSource, /drawTextLayoutStatic[\s\S]*const before = line\.text\.slice\(0, o0\)[\s\S]*const after = line\.text\.slice\(o1\)/);
-  assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*drawTextSelectionHighlight\(context, obj, layout, spec\.start, spec\.end, \{ requireMotion: true, motion \}\)/);
+  assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*const selection = collectTextSelectionRuns\(obj, layout, spec\.start, spec\.end\)/);
+  assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*drawTextSelectionHighlight\(context, obj, layout, spec\.start, spec\.end, \{ requireMotion: true, motion, selection \}\)/);
   assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*drawTextLayoutStatic\(context, obj, layout, \{ start: spec\.start, end: spec\.end \}\)/);
-  assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*drawTextSelectionContentJello\(context, obj, layout, spec\.start, spec\.end, \{ motion \}\)/);
+  assert.match(viewportSource, /drawTextSelectionJelloOverlays[\s\S]*drawTextSelectionContentJello\(context, obj, layout, spec\.start, spec\.end, \{ motion, selection \}\)/);
   assert.match(viewportSource, /drawEditingTextOverlay[\s\S]*textSelectionMotion \? \{ start: selStart, end: selEnd \} : null/);
-  assert.match(viewportSource, /drawEditingTextOverlay[\s\S]*drawTextSelectionContentJello\(context, obj, layout, selStart, selEnd, \{ motion: textSelectionMotion \}\)/);
+  assert.match(viewportSource, /drawEditingTextOverlay[\s\S]*const selection = collectTextSelectionRuns\(obj, layout, selStart, selEnd\)/);
+  assert.match(viewportSource, /drawEditingTextOverlay[\s\S]*drawTextSelectionContentJello\(context, obj, layout, selStart, selEnd, \{ motion: textSelectionMotion, selection \}\)/);
 });
 
 test('duplicate leaves text and image duplicate feedback unanimated', () => {

@@ -356,6 +356,11 @@ const textSelectionMotionForOptions = (obj, selStart, selEnd, options = {}) => {
   return globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd) || null;
 };
 
+const textSelectionRunsForOptions = (obj, layout, selStart, selEnd, options = {}) => {
+  if (Object.prototype.hasOwnProperty.call(options, 'selection')) return options.selection || null;
+  return collectTextSelectionRuns(obj, layout, selStart, selEnd);
+};
+
 const applyTextSelectionMotionTransform = (context, bounds, motion) => {
   if (!motion) return false;
   const cx = (bounds.left + bounds.right) / 2;
@@ -393,7 +398,7 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null) => {
 function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, options = {}) {
   if (selStart === selEnd) return false;
   const requireMotion = options.requireMotion === true;
-  const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
+  const selection = textSelectionRunsForOptions(obj, layout, selStart, selEnd, options);
   if (!selection) return false;
   const motion = textSelectionMotionForOptions(obj, selStart, selEnd, options);
   if (requireMotion && !motion) return false;
@@ -409,7 +414,7 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, opti
 }
 
 const drawTextSelectionContentJello = (context, obj, layout, selStart, selEnd, options = {}) => {
-  const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
+  const selection = textSelectionRunsForOptions(obj, layout, selStart, selEnd, options);
   if (!selection) return false;
   const motion = textSelectionMotionForOptions(obj, selStart, selEnd, options);
   if (!motion) return false;
@@ -434,9 +439,10 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null) => {
     if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
     const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(spec.id, spec.start, spec.end) || null;
-    if (!drawTextSelectionHighlight(context, obj, layout, spec.start, spec.end, { requireMotion: true, motion })) continue;
+    const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
+    if (!drawTextSelectionHighlight(context, obj, layout, spec.start, spec.end, { requireMotion: true, motion, selection })) continue;
     drawTextLayoutStatic(context, obj, layout, { start: spec.start, end: spec.end });
-    drawTextSelectionContentJello(context, obj, layout, spec.start, spec.end, { motion });
+    drawTextSelectionContentJello(context, obj, layout, spec.start, spec.end, { motion, selection });
     drawn++;
   }
   return drawn;
@@ -477,11 +483,11 @@ const applyObjectMotionForDraw = (context, obj, motion) => {
   return true;
 };
 
-function drawEditingTextOverlay(context) {
+function drawEditingTextOverlay(context, options = {}) {
   const obj = objectsMap.get(editingId);
   if (!obj || obj.type !== 'text') return;
-  const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
-  const viewportRect = currentViewportWorldRect(0);
+  const view = options.view || { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
+  const viewportRect = options.viewportRect || currentViewportWorldRect(0);
   const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, { view, viewportRect });
   if (motion?.skip) return;
   const restoreMotion = applyObjectMotionForDraw(context, obj, motion);
@@ -495,8 +501,9 @@ function drawEditingTextOverlay(context) {
     const textSelectionMotion = selStart !== selEnd
       ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd) || null
       : null;
+    const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
 
-    drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion });
+    drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion, selection });
 
     drawTextLayoutStatic(
       context,
@@ -504,7 +511,7 @@ function drawEditingTextOverlay(context) {
       layout,
       textSelectionMotion ? { start: selStart, end: selEnd } : null,
     );
-    drawTextSelectionContentJello(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion });
+    drawTextSelectionContentJello(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion, selection });
 
     if (selStart === selEnd) drawCaret(context, obj, layout, selStart);
   } finally {
@@ -553,7 +560,7 @@ function drawBoard() {
     const editStart = collectDrawDebug ? performance.now() : 0;
     setWorldCanvasTransform(ctx, dpr);
     drawTextSelectionJelloOverlays(ctx, viewportRect);
-    drawEditingTextOverlay(ctx);
+    drawEditingTextOverlay(ctx, { view: { zoom, panX, panY, dpr }, viewportRect });
     resetCanvasToScreen(ctx);
     if (collectDrawDebug) drawPhases.editingOverlayMs = performance.now() - editStart;
   } else {
