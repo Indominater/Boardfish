@@ -629,9 +629,7 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
     InsertDebug.step(dbg, 'bulk:start', { source, fileCount: accepted.length, concurrency, bytes: acceptedBytes });
   }
   try {
-    if (accepted.length) {
-      InsertDebug.step(dbg, 'web:concurrency', { source, fileCount: accepted.length, concurrency, bytes: acceptedBytes });
-    }
+    InsertDebug.step(dbg, 'web:concurrency', { source, fileCount: accepted.length, concurrency, bytes: acceptedBytes });
     await mapWithConcurrency(accepted, concurrency, async ({ file, acceptedIndex }) => {
       const fileDbg = InsertDebug.start('insertImage', { source, fileName: file.name, fileSize: file.size, fileType: file.type });
       try {

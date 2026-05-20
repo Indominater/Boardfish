@@ -35,8 +35,6 @@ const HISTORY_ADDED_OBJECT_REASONS = new Set([
   'paste-objects',
   'paste-native-image',
 ]);
-const HISTORY_SMOOTH_SLIDE_REASONS = new Set([
-]);
 const HISTORY_RESTORE_DELETED_REASONS = new Set([
   'delete-selected',
 ]);
@@ -186,7 +184,6 @@ const historyMotionForReason = (reason = '') => {
   if (HISTORY_ADDED_OBJECT_REASONS.has(value)) {
     return cloneHistoryMotion(HISTORY_ADDED_OBJECT_REPLAY_BY_REASON[value] || HISTORY_DEFAULT_REPLAY);
   }
-  if (HISTORY_SMOOTH_SLIDE_REASONS.has(value)) return { type: 'smooth-slide' };
   if (HISTORY_RESTORE_DELETED_REASONS.has(value)) return cloneHistoryMotion(HISTORY_RESTORE_DELETED_REPLAY);
   return cloneHistoryMotion(HISTORY_DEFAULT_REPLAY);
 };

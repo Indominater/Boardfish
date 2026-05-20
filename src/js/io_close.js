@@ -256,8 +256,9 @@ async function invokeReadBoard(fileRef, dbg) {
   const result = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.readBoard(fileRef), { path });
   if (frameProbe) frameProbe();
   const board = result?.board || result;
-  if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...getBoardOpenMetrics(board) });
-  OpenDebug.step(dbg, 'read-board-shape', getBoardOpenMetrics(board));
+  const boardMetrics = getBoardOpenMetrics(board);
+  if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...boardMetrics });
+  OpenDebug.step(dbg, 'read-board-shape', boardMetrics);
   return board;
 }
 
@@ -618,7 +619,8 @@ function getOpenHydrationMode() {
 }
 
 async function finishOpenedBoard(dbg, data) {
-  PillDebug.log('open:finishOpenedBoard:start', getBoardOpenMetrics(data));
+  const openMetrics = getBoardOpenMetrics(data);
+  PillDebug.log('open:finishOpenedBoard:start', openMetrics);
   const hydrationMode = getOpenHydrationMode();
   if (hydrationMode === 'visible-first') {
     const hydrateStart = performance.now();
@@ -698,7 +700,7 @@ async function finishOpenedBoard(dbg, data) {
     },
   });
   PillDebug.log('open:pillFinish:end', { pillFinishReason });
-  OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
+  OpenDebug.end(dbg, { opened: true, ...openMetrics });
   if (hydrationMode === 'visible-first') {
     setTimeout(() => hydrateRemainingImagesForOpen(dbg).catch((err) => {
       OpenDebug.step(dbg, 'hydrate-background:error', { error: String(err) });
@@ -715,8 +717,9 @@ function applyBoardData(data, options = {}) {
   const sourcesCached = !!options.sourcesCached;
   const deferRender = !!options.deferRender;
   const endDebug = options.endDebug !== false;
-  PillDebug.log('open:applyBoardData:start', getBoardOpenMetrics(data));
-  OpenDebug.step(dbg, 'applyBoardData:start', getBoardOpenMetrics(data));
+  const openMetrics = getBoardOpenMetrics(data);
+  PillDebug.log('open:applyBoardData:start', openMetrics);
+  OpenDebug.step(dbg, 'applyBoardData:start', openMetrics);
   OpenDebug.step(dbg, 'prune-unreferenced-images', {
     removed: prune.removed,
     kept: prune.kept,
@@ -787,8 +790,8 @@ function applyBoardData(data, options = {}) {
   boardHistory = []; historyIndex = -1; snapshot();
   markSaved();
   OpenDebug.step(dbg, 'reset-boardHistory-markSaved', { ms: performance.now() - historyStart, historyLength: boardHistory.length, historyIndex });
-  PillDebug.log('open:applyBoardData:end', getBoardOpenMetrics(data));
-  if (endDebug) OpenDebug.end(dbg, { opened: true, ...getBoardOpenMetrics(data) });
+  PillDebug.log('open:applyBoardData:end', openMetrics);
+  if (endDebug) OpenDebug.end(dbg, { opened: true, ...openMetrics });
 }
 
 const runExclusiveBoardSave = (op, run) => {
