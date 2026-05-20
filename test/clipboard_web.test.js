@@ -16,6 +16,7 @@ function loadClipboardStateHarness() {
     Date,
     Promise,
     Set,
+    clearTimeout,
     crypto: {
       randomUUID() {
         tokenId++;
@@ -37,6 +38,7 @@ function loadClipboardStateHarness() {
         return task();
       },
     },
+    setTimeout,
   };
   vm.createContext(context);
   vm.runInContext(
@@ -47,10 +49,16 @@ function loadClipboardStateHarness() {
       'globalThis.markJsClipboardWebTokenOnNative = markJsClipboardWebTokenOnNative;\n' +
       'globalThis.markJsClipboardMaybeStaleFromWebBlur = markJsClipboardMaybeStaleFromWebBlur;\n' +
       'globalThis.jsClipboardStillCurrent = jsClipboardStillCurrent;\n' +
+      'globalThis.waitForNativeClipboardIdle = waitForNativeClipboardIdle;\n' +
+      'globalThis.resolveNativeClipboardIdleWaiters = resolveNativeClipboardIdleWaiters;\n' +
       'globalThis.forceJsClipboardSetAt = (value) => { _jsClipboardSetAt = value; };\n',
     context,
     { filename: 'clipboard_state.js' },
   );
+  context.setNativeClipboardPendingCount = (value) => {
+    vm.runInContext(`_nativeClipboardPendingCount = ${Number(value) || 0};`, context);
+  };
+  context.nativeClipboardIdleResolverCount = () => vm.runInContext('_nativeClipboardIdleResolvers.length', context);
   return context;
 }
 
@@ -364,6 +372,33 @@ test('web js clipboard without a native marker is invalidated after leaving the 
     webClipboardTokenChecked: true,
     webClipboardToken: '',
   }), false);
+});
+
+test('native clipboard idle waiter removes itself after timeout', async () => {
+  const context = loadClipboardStateHarness();
+  context.setNativeClipboardPendingCount(1);
+
+  const result = await context.waitForNativeClipboardIdle(1);
+
+  assert.equal(result.ready, false);
+  assert.equal(result.pending, 1);
+  assert.equal(context.nativeClipboardIdleResolverCount(), 0);
+});
+
+test('native clipboard idle waiter resolves normally and clears the waiter list', async () => {
+  const context = loadClipboardStateHarness();
+  context.setNativeClipboardPendingCount(1);
+
+  const waitPromise = context.waitForNativeClipboardIdle(50);
+  assert.equal(context.nativeClipboardIdleResolverCount(), 1);
+
+  context.setNativeClipboardPendingCount(0);
+  context.resolveNativeClipboardIdleWaiters();
+
+  const result = await waitPromise;
+  assert.equal(result.ready, true);
+  assert.equal(result.error, '');
+  assert.equal(context.nativeClipboardIdleResolverCount(), 0);
 });
 
 test('clipboard IO extracts and writes Boardfish web clipboard markers', async () => {

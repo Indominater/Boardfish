@@ -584,14 +584,17 @@ const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
   const t0 = performance.now();
   return new Promise((resolve) => {
     let settled = false;
+    let timeoutId = null;
     const finish = (source) => {
       if (settled) return;
       settled = true;
+      if (timeoutId != null) clearTimeout(timeoutId);
       OpenDebug.step(dbg, 'open-render-frame:settled', { reason, source, ms: performance.now() - t0 });
       resolve();
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => finish('raf'));
-    setTimeout(() => finish('timeout'), 80);
+    timeoutId = setTimeout(() => finish('timeout'), 80);
+    if (settled) clearTimeout(timeoutId);
   });
 };
 

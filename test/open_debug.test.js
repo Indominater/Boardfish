@@ -4,12 +4,65 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 
 function readSource(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
+
+function waitForOpenRenderFrameSource() {
+  const source = readSource('src/js/io_close.js');
+  const start = source.indexOf('const waitForOpenRenderFrame =');
+  const end = source.indexOf('\nvar _backgroundOpenHydrationRunning', start);
+  assert.ok(start >= 0 && end > start, 'waitForOpenRenderFrame source is missing');
+  return source.slice(start, end);
+}
+
+test('open render frame wait clears timeout after RAF settles', async () => {
+  const activeTimers = new Set();
+  const steps = [];
+  let nextTimerId = 0;
+  const context = {
+    clearTimeout(id) {
+      activeTimers.delete(id);
+    },
+    OpenDebug: {
+      step(_dbg, phase, detail) {
+        steps.push({ phase, detail });
+      },
+    },
+    performance: {
+      now() {
+        return 100;
+      },
+    },
+    requestAnimationFrame(callback) {
+      callback();
+    },
+    setTimeout() {
+      nextTimerId++;
+      activeTimers.add(nextTimerId);
+      return nextTimerId;
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${waitForOpenRenderFrameSource()}\n` +
+      'globalThis.waitForOpenRenderFrame = waitForOpenRenderFrame;\n',
+    context,
+    { filename: 'io_close_wait_frame.js' },
+  );
+
+  await context.waitForOpenRenderFrame(null, 'test-render');
+
+  assert.equal(activeTimers.size, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(steps)), [{
+    phase: 'open-render-frame:settled',
+    detail: { reason: 'test-render', source: 'raf', ms: 0 },
+  }]);
+});
 
 test('open-board debugger covers the slow open phases developers need to inspect', () => {
   const openDebug = readSource('src/js/debug_open.js');

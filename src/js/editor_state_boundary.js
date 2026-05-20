@@ -54,6 +54,7 @@
       if (selectedId && !selectedIds.has(selectedId)) selectedId = null;
       return 0;
     }
+    root.BoardfishImageInsertMotion?.clear?.(idsToRemove);
     let write = 0;
     let removed = 0;
     for (let read = 0; read < objects.length; read++) {
@@ -138,6 +139,7 @@
       }
     }
     rebuildObjectsMap();
+    root.BoardfishImageInsertMotion?.clearStale?.();
     if (syncTextHeights) syncAllTextAutoHeights();
     if (restoreCounters) restoreObjectCountersFromObjects(objects);
     if (typeof noteEyedropperBoardContentChanged === 'function') {
@@ -152,6 +154,7 @@
     objects = [];
     objectsMap.clear();
     clearTextLayoutState();
+    root.BoardfishImageInsertMotion?.clear?.();
     resetObjectCounters();
   }
 

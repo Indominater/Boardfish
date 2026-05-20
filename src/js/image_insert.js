@@ -130,6 +130,31 @@ const queueImageObjectInsertMotion = (obj, options = {}) => {
   });
 };
 
+const clearInsertedImageMotions = (ids = null) => {
+  if (ids == null) {
+    const cleared = pendingInsertedImageMotions.size;
+    pendingInsertedImageMotions.clear();
+    return cleared;
+  }
+  const iterable = typeof ids === 'string' ? [ids] : ids;
+  if (!iterable || typeof iterable[Symbol.iterator] !== 'function') return 0;
+  let cleared = 0;
+  for (const id of iterable) {
+    if (pendingInsertedImageMotions.delete(id)) cleared++;
+  }
+  return cleared;
+};
+
+const clearStaleInsertedImageMotions = () => {
+  let cleared = 0;
+  for (const [id, pending] of pendingInsertedImageMotions) {
+    if (objectsMap.get(id) === pending.obj) continue;
+    pendingInsertedImageMotions.delete(id);
+    cleared++;
+  }
+  return cleared;
+};
+
 const noteInsertedImageObjectDrawn = (obj) => {
   const pending = pendingInsertedImageMotions.get(obj?.id);
   if (!pending) return;
@@ -148,6 +173,8 @@ const noteInsertedImageObjectDrawn = (obj) => {
 };
 
 globalThis.BoardfishImageInsertMotion = Object.freeze({
+  clear: clearInsertedImageMotions,
+  clearStale: clearStaleInsertedImageMotions,
   noteDrawn: noteInsertedImageObjectDrawn,
 });
 

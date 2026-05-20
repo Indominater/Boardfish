@@ -36,13 +36,22 @@ function resolveNativeClipboardIdleWaiters() {
 function waitForNativeClipboardIdle(timeoutMs = 10000) {
   if (_nativeClipboardPendingCount <= 0) return Promise.resolve({ ready: true, error: _nativeClipboardLastError || '' });
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      resolve({ ready: false, pending: _nativeClipboardPendingCount, error: _nativeClipboardLastError || '' });
-    }, timeoutMs);
-    _nativeClipboardIdleResolvers.push((result) => {
+    let settled = false;
+    let timer = null;
+    const resolver = (result) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       resolve(result);
-    });
+    };
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const index = _nativeClipboardIdleResolvers.indexOf(resolver);
+      if (index >= 0) _nativeClipboardIdleResolvers.splice(index, 1);
+      resolve({ ready: false, pending: _nativeClipboardPendingCount, error: _nativeClipboardLastError || '' });
+    }, timeoutMs);
+    _nativeClipboardIdleResolvers.push(resolver);
   });
 }
 
