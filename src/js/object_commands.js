@@ -173,7 +173,6 @@ async function newBoard() {
 
 function duplicateSelected() {
   if (!selectedIds.size || editingId) return;
-  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
   const selectedObjects = [];
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
@@ -192,6 +191,7 @@ function duplicateSelected() {
 
   const cloned = selectedObjects.map((obj) => cloneObject(obj));
   if (!cloned.length) return;
+  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const obj of cloned) {
     minX = Math.min(minX, obj.x);

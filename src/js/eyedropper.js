@@ -1208,7 +1208,7 @@ function resolveEyedropperNativePixelTargetAt(clientX, clientY, timings = null) 
   };
 }
 
-function pumpEyedropperNativePixelQueue() {
+function indominaterPumpEyedropperNativePixelQueue() {
   if (_eyedropperNativePixelInFlight) {
     EyedropperDebug._count('nativePixelBusySkips');
     EyedropperDebug._logSamplingEvent('native-pixel-queue-busy', nativePixelQueueDebugState(
@@ -1342,14 +1342,14 @@ function pumpEyedropperNativePixelQueue() {
           null,
           { sourceKind: 'native-pixel', reason: 'request-finished' },
         ));
-        pumpEyedropperNativePixelQueue();
+        indominaterPumpEyedropperNativePixelQueue();
       }
     });
 }
 
 function requestEyedropperNativePixel() {
   if (typeof hasTauri !== 'function' || !hasTauri() || !BoardfishTauri?.sampleCachedImagePixel) return false;
-  pumpEyedropperNativePixelQueue();
+  indominaterPumpEyedropperNativePixelQueue();
   return true;
 }
 

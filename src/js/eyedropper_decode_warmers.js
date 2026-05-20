@@ -199,7 +199,7 @@
         decoder.running = false;
         decoder.key = '';
         if (eyedropperSampling) {
-          if (_eyedropperLatestPointerEvent || _eyedropperLastSampleEvent) pumpEyedropperNativePixelQueue();
+          if (_eyedropperLatestPointerEvent || _eyedropperLastSampleEvent) indominaterPumpEyedropperNativePixelQueue();
           pumpEyedropperDecodeWarmer('d3', 'decode-finished');
         }
         pumpEyedropperImageDecodeWarmup('decode-finished');
