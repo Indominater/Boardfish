@@ -44,7 +44,6 @@
   --window-control-icon-size: 18px;
   --window-titlebar-bg: transparent;
   --window-control-bg: transparent;
-  --window-control-separator: transparent;
   --window-control-fg: rgba(var(--black_font_rgb), 0.78);
   --window-control-accent: rgba(var(--black_font_rgb), 0.28);
   --window-control-hover-bg: rgba(var(--black_font_rgb), 0.08);
