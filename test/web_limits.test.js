@@ -29,6 +29,45 @@ test('web board payload limits count decoded image bytes toward board content', 
   );
 });
 
+test('web data URL image validation measures bytes without decoding payload', async () => {
+  const previousContainer = globalThis.BoardfishWebBoardContainer;
+  const previousObjects = globalThis.objects;
+  const previousImageStore = globalThis.imageStore;
+  let byteLengthCalls = 0;
+  let decodeCalls = 0;
+  globalThis.objects = [];
+  globalThis.imageStore = {};
+  globalThis.BoardfishWebBoardContainer = {
+    dataUrlByteLength(dataUrl) {
+      byteLengthCalls += 1;
+      assert.equal(dataUrl, 'data:image/png;base64,AQIDBA==');
+      return 4;
+    },
+    dataUrlToBytes() {
+      decodeCalls += 1;
+      throw new Error('data URL validation should not decode bytes');
+    },
+  };
+  try {
+    assert.deepEqual(
+      await WebLimits.validateDataUrlImage('data:image/png;base64,AQIDBA=='),
+      { bytes: 4 },
+    );
+    assert.deepEqual(
+      await WebLimits.validateDataUrlImage('not-a-data-url'),
+      { bytes: 0 },
+    );
+    assert.equal(byteLengthCalls, 1);
+    assert.equal(decodeCalls, 0);
+  } finally {
+    globalThis.BoardfishWebBoardContainer = previousContainer;
+    if (previousObjects === undefined) delete globalThis.objects;
+    else globalThis.objects = previousObjects;
+    if (previousImageStore === undefined) delete globalThis.imageStore;
+    else globalThis.imageStore = previousImageStore;
+  }
+});
+
 test('web board content limit carries a short user-facing message', () => {
   assert.throws(
     () => WebLimits.validateBoardPayload({

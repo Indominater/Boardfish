@@ -12,13 +12,24 @@ function createElement(id = 'el') {
   const attrs = new Map();
   const children = [];
   const classes = new Set();
+  let textContentValue = '';
+  let textContentWrites = 0;
   const el = {
     id,
     dataset: {},
     style: {},
-    textContent: '',
     parentNode: null,
     children,
+    get textContent() {
+      return textContentValue;
+    },
+    set textContent(value) {
+      textContentWrites += 1;
+      textContentValue = String(value);
+    },
+    textContentWriteCount() {
+      return textContentWrites;
+    },
     appendChild(child) {
       child.parentNode = el;
       children.push(child);
@@ -121,7 +132,8 @@ function loadViewportPillHarness() {
     `${source.slice(0, prefixEnd)}\n` +
       'globalThis.showIslandMsg = showIslandMsg;\n' +
       'globalThis.startPillTask = startPillTask;\n' +
-      'globalThis.updatePillTask = updatePillTask;\n',
+      'globalThis.updatePillTask = updatePillTask;\n' +
+      'globalThis.syncIslandZoomDisplay = syncIslandZoomDisplay;\n',
     context,
     { filename: 'viewport.js' },
   );
@@ -160,4 +172,22 @@ test('busy pill progress requests animation policy when the displayed message ch
   const openingPill = context.openingShield.querySelector('.opening-shield-pill');
   assert.equal(openingPill.firstElementChild.textContent, '1/2');
   assert.equal(openingPill.classList.contains('visible'), true);
+});
+
+test('zoom pill sync skips unchanged text writes', () => {
+  const context = loadViewportPillHarness();
+  assert.equal(context.islZoom.textContent, '100%');
+  assert.equal(context.island.dataset.mode, 'zoom');
+  assert.equal(context.island.title, 'Reset Zoom');
+
+  const writesAfterInit = context.islZoom.textContentWriteCount();
+  context.syncIslandZoomDisplay('same-zoom');
+  assert.equal(context.islZoom.textContentWriteCount(), writesAfterInit);
+  assert.deepEqual(context.motionCalls, []);
+
+  context.zoom = 2;
+  context.syncIslandZoomDisplay('zoom-changed');
+  assert.equal(context.islZoom.textContent, '200%');
+  assert.equal(context.islZoom.textContentWriteCount(), writesAfterInit + 1);
+  assert.deepEqual(context.motionCalls, ['200%']);
 });

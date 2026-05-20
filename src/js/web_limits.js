@@ -117,21 +117,26 @@
     return rejectLimit(`Boardfish Web boards are limited to ${formatBytes(LIMITS.maxBoardContentBytes)}`, options);
   }
 
-  function blobFromDataUrl(dataUrl) {
-    const match = /^data:([^;,]+);base64,(.*)$/i.exec(String(dataUrl || ''));
-    if (!match || !root.BoardfishWebBoardContainer?.dataUrlToBytes) return null;
-    return new Blob([root.BoardfishWebBoardContainer.dataUrlToBytes(dataUrl)], { type: match[1] });
+  function validateImageBytes(bytes, options = {}) {
+    try {
+      const normalizedBytes = Number(bytes || 0);
+      canAcceptAdditionalContentBytes(normalizedBytes, 1, { notifyUser: false, throwError: true });
+      return { bytes: normalizedBytes };
+    } catch (err) {
+      return rejectLimit(err?.boardfishUserMessage || err?.message || String(err), options);
+    }
+  }
+
+  function dataUrlImageBytesForValidation(dataUrl) {
+    const text = String(dataUrl || '');
+    if (!/^data:[^;,]+;base64,/i.test(text)) return 0;
+    return dataUrlByteLength(text);
   }
 
   async function validateImageBlob(blob, name = 'image', options = {}) {
     if (!isLimitedRuntime()) return true;
-    try {
-      const bytes = Number(blob?.size || blob?.byteLength || 0);
-      canAcceptAdditionalContentBytes(bytes, 1, { notifyUser: false, throwError: true });
-      return { bytes };
-    } catch (err) {
-      return rejectLimit(err?.boardfishUserMessage || err?.message || String(err), options);
-    }
+    void name;
+    return validateImageBytes(blob?.size || blob?.byteLength || 0, options);
   }
 
   async function validateImageFile(file, options = {}) {
@@ -140,8 +145,8 @@
 
   async function validateDataUrlImage(dataUrl, name = 'image', options = {}) {
     if (!isLimitedRuntime()) return true;
-    const blob = blobFromDataUrl(dataUrl);
-    return validateImageBlob(blob, name, options);
+    void name;
+    return validateImageBytes(dataUrlImageBytesForValidation(dataUrl), options);
   }
 
   function validateBoardPayload({ objectCount: nextObjectCount = 0, boardJsonBytes = 0, imageEntries = [] } = {}) {

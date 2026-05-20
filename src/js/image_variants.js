@@ -15,6 +15,7 @@ var imageScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
 var imageScaledBitmapCache = imageScaledBitmapStore.groups; // key -> Map(scale -> { bitmap, bytes, lastUsed })
 var imageScaledBitmapPending = new Set();
 var imageScaledBitmapPendingBytes = new Map();
+var imageScaledBitmapPendingByteTotal = 0;
 var imageScaledBitmapBytes = 0;
 var imageScaledBitmapUseCounter = 1;
 var imageScaledVariantRenderTimer = null;
@@ -56,9 +57,20 @@ function scaledVariantEstimatedBytes(sourceW, sourceH, scale) {
 }
 
 function pendingScaledVariantBytes() {
-  let bytes = 0;
-  for (const value of imageScaledBitmapPendingBytes.values()) bytes += value || 0;
-  return bytes;
+  return imageScaledBitmapPendingByteTotal;
+}
+
+function addPendingScaledVariantBytes(key, bytes) {
+  const previous = imageScaledBitmapPendingBytes.get(key) || 0;
+  imageScaledBitmapPendingBytes.set(key, bytes);
+  imageScaledBitmapPendingByteTotal += bytes - previous;
+}
+
+function removePendingScaledVariantBytes(key) {
+  const bytes = imageScaledBitmapPendingBytes.get(key) || 0;
+  if (imageScaledBitmapPendingBytes.delete(key)) {
+    imageScaledBitmapPendingByteTotal -= bytes;
+  }
 }
 
 function getImageVariantMap(key) {
@@ -71,7 +83,7 @@ function clearScaledImageVariants(key = null) {
     for (const pendingKey of [...imageScaledBitmapPending]) {
       if (pendingKey.startsWith(`${key}:`)) {
         imageScaledBitmapPending.delete(pendingKey);
-        imageScaledBitmapPendingBytes.delete(pendingKey);
+        removePendingScaledVariantBytes(pendingKey);
       }
     }
     imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
@@ -80,6 +92,7 @@ function clearScaledImageVariants(key = null) {
   imageScaledBitmapStore.clear();
   imageScaledBitmapPending.clear();
   imageScaledBitmapPendingBytes.clear();
+  imageScaledBitmapPendingByteTotal = 0;
   imageScaledVariantQueue.length = 0;
   imageScaledVariantQueueScheduled = false;
   imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
@@ -198,7 +211,7 @@ function queueScaledImageVariant(key, source, scale) {
     return;
   }
   imageScaledBitmapPending.add(pendingKey);
-  imageScaledBitmapPendingBytes.set(pendingKey, estimatedBytes);
+  addPendingScaledVariantBytes(pendingKey, estimatedBytes);
   const generation = _imageStoreGeneration;
   enqueueScaledVariantTask(async () => {
     const buildStart = performance.now();
@@ -239,7 +252,7 @@ function queueScaledImageVariant(key, source, scale) {
       imageScaledVariantBuildTotalMs += buildMs;
       imageScaledVariantBuildMaxMs = Math.max(imageScaledVariantBuildMaxMs, buildMs);
       imageScaledBitmapPending.delete(pendingKey);
-      imageScaledBitmapPendingBytes.delete(pendingKey);
+      removePendingScaledVariantBytes(pendingKey);
     }
   });
 }

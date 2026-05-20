@@ -237,12 +237,14 @@
     const byteLength = offset + central.length + eocd.length;
     const blob = new Blob(parts, { type: 'application/octet-stream' });
     const keepBytesBelow = Number(options.keepBytesBelow) || 8 * 1024 * 1024;
-    const bytes = byteLength <= keepBytesBelow ? new Uint8Array(await blob.arrayBuffer()) : null;
+    const materializeBytes = options.materializeBytes !== false;
+    const isSmallPayload = byteLength <= keepBytesBelow;
+    const bytes = materializeBytes && isSmallPayload ? new Uint8Array(await blob.arrayBuffer()) : null;
     return {
       blob,
       bytes,
       byteLength,
-      mode: bytes ? 'blob-parts+materialized-small' : 'blob-parts',
+      mode: isSmallPayload ? 'blob-parts+materialized-small' : 'blob-parts',
     };
   }
 
@@ -504,7 +506,7 @@
     return entries;
   }
 
-  async function createBoardContainerBlob(board, rawImageStore = {}) {
+  async function createBoardContainerBlob(board, rawImageStore = {}, options = {}) {
     const boardJson = JSON.stringify(board);
     const boardBytes = utf8Encode(boardJson);
     const imageEntries = buildImageEntries(board, rawImageStore);
@@ -512,7 +514,7 @@
     const zip = await createZipBlob([
       { name: 'board.json', data: boardBytes },
       ...imageEntries.map((entry) => ({ name: entry.path, data: entry.bytes })),
-    ]);
+    ], options);
     return {
       blob: zip.blob,
       bytes: zip.bytes,

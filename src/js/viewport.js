@@ -82,18 +82,19 @@ const setPillMessageText = (text, { animate = true } = {}) => {
 };
 
 function setIslandVisible(visible) {
-  island.classList.toggle('visible', visible);
-  island.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  if (island.classList.contains('visible') !== visible) island.classList.toggle('visible', visible);
+  const ariaHidden = visible ? 'false' : 'true';
+  if (island.getAttribute?.('aria-hidden') !== ariaHidden) island.setAttribute('aria-hidden', ariaHidden);
 }
 
 const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
   if (_islMsgActive) return;
   const zoomText = formatZoomPercent();
   const changed = island.dataset.mode !== 'zoom' || _lastIslandZoomText !== zoomText || !island.classList.contains('visible');
-  islZoom.textContent = zoomText;
+  if (islZoom.textContent !== zoomText) islZoom.textContent = zoomText;
   _lastIslandZoomText = zoomText;
-  island.dataset.mode = 'zoom';
-  island.title = 'Reset Zoom';
+  if (island.dataset.mode !== 'zoom') island.dataset.mode = 'zoom';
+  if (island.title !== 'Reset Zoom') island.title = 'Reset Zoom';
   setIslandVisible(true);
   if (changed) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('pill-message-open', { pill: true });

@@ -207,7 +207,11 @@
     if (isDesktop()) return root.BoardfishTauri.saveBoard(ref, board);
     const totalStart = performance.now();
     const createStart = performance.now();
-    const payload = await root.BoardfishWebBoardContainer.createBoardContainerBlob(board, options.imageStore || root.imageStore || {});
+    const payload = await root.BoardfishWebBoardContainer.createBoardContainerBlob(
+      board,
+      options.imageStore || root.imageStore || {},
+      { materializeBytes: false },
+    );
     root.BoardfishWebLimits?.validateBoardPayload({
       objectCount: board?.objects?.length || 0,
       boardJsonBytes: payload.boardJsonBytes,
