@@ -18,7 +18,7 @@
   ]);
 
   function isDesktop() {
-    return typeof root.hasTauri === 'function' && root.hasTauri();
+    return false;
   }
 
   function isAbortError(err) {
@@ -69,7 +69,6 @@
 
   function canSaveToExistingTarget(ref) {
     if (!ref) return false;
-    if (isDesktop()) return typeof ref === 'string';
     return ref.kind === 'web-file-handle' || ref.kind === 'web-save-handle' || ref.kind === 'web-download';
   }
 
@@ -107,7 +106,6 @@
   }
 
   async function openFileDialog() {
-    if (isDesktop()) return root.BoardfishTauri.openFileDialog();
     if (hasFileSystemAccess()) {
       try {
         const handles = await root.showOpenFilePicker({
@@ -125,7 +123,6 @@
   }
 
   async function saveFileDialog(defaultName = 'board.bf') {
-    if (isDesktop()) return root.BoardfishTauri.saveFileDialog(defaultName);
     if (hasFileSystemAccess()) {
       try {
         const handle = await root.showSaveFilePicker({
@@ -150,7 +147,6 @@
   }
 
   async function readBoard(ref) {
-    if (isDesktop()) return root.BoardfishTauri.readBoard(ref);
     const file = await fileFromRef(ref);
     if (!file) throw new Error('no Boardfish file selected');
     if (root.BoardfishWebLimits?.LIMITS && file.size > root.BoardfishWebLimits.LIMITS.maxBoardContentBytes + 10 * 1024 * 1024) {
@@ -204,7 +200,6 @@
   }
 
   async function saveBoard(ref, board, options = {}) {
-    if (isDesktop()) return root.BoardfishTauri.saveBoard(ref, board);
     const totalStart = performance.now();
     const createStart = performance.now();
     const payload = await root.BoardfishWebBoardContainer.createBoardContainerBlob(
@@ -245,7 +240,7 @@
     fileNameFromRef,
     fileRefFromFile: webFileRef,
     isDesktop,
-    isWeb: () => !isDesktop(),
+    isWeb: () => true,
     openFileDialog,
     readBoard,
     saveBoard,

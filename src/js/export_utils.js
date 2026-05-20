@@ -6,8 +6,11 @@
   }
 
   function guessImageExtForObjectExport(obj) {
-    if (imageNeedsRendering(obj)) return 'png';
     const src = BoardfishImageStore.getSource(obj?.data?.imgKey);
+    return imageNeedsRendering(obj) ? 'png' : guessImageExtForSource(src);
+  }
+
+  function guessImageExtForSource(src) {
     if (isNativeImageRef(src)) return src.ext === 'jpeg' ? 'jpg' : (src.ext || 'png');
     if (typeof isWebImageRef === 'function' && isWebImageRef(src)) return src.ext === 'jpeg' ? 'jpg' : (src.ext || 'png');
     if (typeof src === 'string') return guessImageExtFromDataUrl(src);
@@ -114,9 +117,10 @@
   }
 
   async function imageObjectDownloadEntry(obj, index, dbg, options = {}) {
-    const name = options.filename || `image_${index + 1}.${guessImageExtForObjectExport(obj)}`;
     const source = BoardfishImageStore.getSource(obj?.data?.imgKey);
-    if (!imageNeedsRendering(obj)) {
+    const needsRendering = imageNeedsRendering(obj);
+    const name = options.filename || `image_${index + 1}.${needsRendering ? 'png' : guessImageExtForSource(source)}`;
+    if (!needsRendering) {
       const sourceEntry = imageSourceDownloadEntry(source, name);
       if (sourceEntry) return sourceEntry;
     }

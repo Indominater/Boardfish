@@ -44,7 +44,7 @@ async function exportAllText() {
     return;
   }
 
-  const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0');
+  const hex = BoardfishExportUtils.randomHex();
   const blob = new Blob([combined], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
