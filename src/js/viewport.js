@@ -217,10 +217,27 @@ async function _rebuildOffscreenAsync() {
     if (!key || imageBitmapCache[key] || imageBitmapFailed.has(key)) continue;
     const img = imageCache[key];
     if (!img || !img.complete) continue;
+    const generation = _imageStoreGeneration;
+    const displaySrc = img.currentSrc || img.src || '';
     bitmapPromises.push(
       createImageBitmap(img)
-        .then(bm => { imageBitmapCache[key] = bm; })
-        .catch(() => { imageBitmapFailed.add(key); ViewportDebug.count('imageBitmapFailures'); })
+        .then(bm => {
+          if (
+            imageBitmapCache[key] ||
+            imageCache[key] !== img ||
+            !isImageDisplayCacheRequestCurrent(key, displaySrc, generation)
+          ) {
+            bm.close();
+            return;
+          }
+          imageBitmapCache[key] = bm;
+        })
+        .catch(() => {
+          if (imageCache[key] === img && isImageDisplayCacheRequestCurrent(key, displaySrc, generation)) {
+            imageBitmapFailed.add(key);
+          }
+          ViewportDebug.count('imageBitmapFailures');
+        })
     );
   }
   const bitmapStart = performance.now();

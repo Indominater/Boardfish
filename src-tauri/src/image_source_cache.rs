@@ -177,6 +177,18 @@ impl ImageSourceCache {
         Ok(decoded)
     }
 
+    pub(crate) fn clear_decoded(&self) -> Result<(), String> {
+        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
+        for entry in cache.entries.values_mut() {
+            entry.decoded = None;
+            entry.decoded_bytes = 0;
+            entry.decoded_last_used = 0;
+        }
+        cache.decoded_bytes = 0;
+        cache.decoded_use_counter = 0;
+        Ok(())
+    }
+
     pub(crate) fn get_many(&self, keys: &[String]) -> Result<CachedImageSources, String> {
         let cache = self.0.lock().map_err(|e| e.to_string())?;
         let mut sources = Vec::with_capacity(keys.len());

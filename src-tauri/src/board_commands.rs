@@ -1,10 +1,17 @@
-use crate::board_io::{read_board_file, write_board_container, BoardReadStats, BoardWriteStats};
+use crate::board_io::{
+    read_board_file_with_limits, validate_board_limits as validate_board_limits_with,
+    write_board_container, BoardLimits, BoardReadStats, BoardWriteStats,
+};
 use crate::board_types::validate_board_value;
 use crate::image_sources::ImageSourceCache;
 use tauri::Manager;
 
 const BOARD_MAX_OBJECTS: usize = 100;
 const BOARD_MAX_CONTENT_BYTES: usize = 500 * 1024 * 1024;
+const BOARD_LIMITS: BoardLimits = BoardLimits {
+    max_objects: BOARD_MAX_OBJECTS,
+    max_content_bytes: BOARD_MAX_CONTENT_BYTES,
+};
 
 #[derive(serde::Serialize)]
 pub(crate) struct SaveBoardResponse {
@@ -83,43 +90,12 @@ impl From<BoardReadStats> for ReadBoardDebug {
     }
 }
 
-fn board_object_count(board: &serde_json::Value) -> usize {
-    board
-        .get("objects")
-        .and_then(|value| value.as_array())
-        .map(|objects| objects.len())
-        .unwrap_or(0)
-}
-
-fn format_limit_bytes(bytes: usize) -> String {
-    let mb = ((bytes as f64 / 1024.0 / 1024.0) * 10.0).round() / 10.0;
-    if (mb.fract()).abs() < f64::EPSILON {
-        format!("{} MB", mb as usize)
-    } else {
-        format!("{mb:.1} MB")
-    }
-}
-
 fn validate_board_limits(
     board: &serde_json::Value,
     board_json_bytes: usize,
     image_bytes: usize,
 ) -> Result<(), String> {
-    let object_count = board_object_count(board);
-    if object_count > BOARD_MAX_OBJECTS {
-        return Err(format!(
-            "This board has {object_count} objects; Boardfish is limited to {BOARD_MAX_OBJECTS} objects."
-        ));
-    }
-    let total_bytes = board_json_bytes.saturating_add(image_bytes);
-    if total_bytes > BOARD_MAX_CONTENT_BYTES {
-        return Err(format!(
-            "This board is {}; Boardfish boards are limited to {}.",
-            format_limit_bytes(total_bytes),
-            format_limit_bytes(BOARD_MAX_CONTENT_BYTES)
-        ));
-    }
-    Ok(())
+    validate_board_limits_with(BOARD_LIMITS, board, board_json_bytes, image_bytes)
 }
 
 #[tauri::command]
@@ -167,9 +143,10 @@ pub(crate) async fn read_board(
     state: tauri::State<'_, ImageSourceCache>,
     path: String,
 ) -> Result<ReadBoardResponse, String> {
-    let mut result = tokio::task::spawn_blocking(move || read_board_file(&path))
-        .await
-        .map_err(|e| e.to_string())??;
+    let mut result =
+        tokio::task::spawn_blocking(move || read_board_file_with_limits(&path, Some(BOARD_LIMITS)))
+            .await
+            .map_err(|e| e.to_string())??;
     validate_board_value(&result.board)?;
     validate_board_limits(
         &result.board,

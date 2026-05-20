@@ -155,7 +155,12 @@
         root.BoardfishWebLimits.boardContentLimitMessage()
       );
     }
-    const result = await root.BoardfishWebBoardContainer.readBoardContainer(file);
+    const result = await root.BoardfishWebBoardContainer.readBoardContainer(file, {
+      maxBoardContentBytes: root.BoardfishWebLimits?.LIMITS?.maxBoardContentBytes,
+      validateBoardPayload(payload) {
+        return root.BoardfishWebLimits?.validateBoardPayload(payload);
+      },
+    });
     root.BoardfishWebLimits?.validateBoardPayload({
       objectCount: result.board?.objects?.length || 0,
       boardJsonBytes: result.debug?.board_json_bytes || 0,

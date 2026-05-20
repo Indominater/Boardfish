@@ -550,6 +550,7 @@ function setEyedropperEnabled(enabled, options = {}) {
     if (options.keepSample) endEyedropperSample();
     else hideEyedropperSample();
     recordPhase('hideSample', phaseStart);
+    if (toggleMeta.before) releaseEyedropperCachesAfterDisable();
   }
 
   phaseStart = performance.now();

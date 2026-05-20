@@ -41,6 +41,38 @@ test('writes and reads Boardfish .bf containers in browser format', async () => 
   assert.equal(savedAgain.imageBytes, 4);
 });
 
+test('read validates advertised image bytes before materializing image entries', async () => {
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {
+      'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' },
+    },
+    objects: [
+      { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 10, z: 1, data: { imgKey: 'img-1' } },
+    ],
+  };
+  const payload = await WebContainer.createBoardContainerBlob(board, {
+    'img-1': 'data:image/png;base64,AQIDBA==',
+  });
+  const maxBoardContentBytes = payload.boardJsonBytes + 3;
+  const validations = [];
+
+  await assert.rejects(
+    () => WebContainer.readBoardContainer(payload.blob, {
+      maxBoardContentBytes,
+      validateBoardPayload(next) {
+        validations.push({ ...next });
+        if ((next.boardJsonBytes || 0) + (next.imageBytes || 0) > maxBoardContentBytes) {
+          throw new Error('board content limit');
+        }
+      },
+    }),
+    /board content limit/,
+  );
+  assert.ok(validations.some((next) => next.imageBytes === 4));
+});
+
 test('measures data URL payload bytes without base64 inflation', () => {
   assert.equal(WebContainer.dataUrlByteLength('data:image/png;base64,AQIDBA=='), 4);
 });

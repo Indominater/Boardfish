@@ -315,11 +315,36 @@
     return new Uint8Array(await new Response(stream).arrayBuffer());
   }
 
-  async function readZipEntry(bytes, entry) {
+  function assertZipEntryReadBudget(entry, maxBytes, tooLargeError = null) {
+    const limit = Number(maxBytes);
+    if (!Number.isFinite(limit)) return;
+    const advertisedSize = zipEntryContentBytes(entry);
+    if (advertisedSize <= limit) return;
+    if (typeof tooLargeError === 'function') throw tooLargeError(advertisedSize);
+    throw new Error(`Boardfish container entry ${entry?.name || ''} exceeds the board content limit`);
+  }
+
+  function zipEntryContentBytes(entry) {
+    const uncompressedSize = Number(entry?.uncompressedSize || 0);
+    if (entry?.method === ZIP_METHOD_STORED) {
+      return Math.max(uncompressedSize, Number(entry?.compressedSize || 0));
+    }
+    return uncompressedSize;
+  }
+
+  async function readZipEntry(bytes, entry, options = {}) {
+    assertZipEntryReadBudget(entry, options.maxBytes, options.tooLargeError);
     const compressed = compressedEntryBytes(bytes, entry);
-    if (entry.method === ZIP_METHOD_STORED) return compressed;
-    if (entry.method === ZIP_METHOD_DEFLATED) return inflateRaw(compressed);
-    throw new Error(`unsupported .bf compression method ${entry.method} for ${entry.name}`);
+    let out;
+    if (entry.method === ZIP_METHOD_STORED) out = compressed;
+    else if (entry.method === ZIP_METHOD_DEFLATED) out = await inflateRaw(compressed);
+    else throw new Error(`unsupported .bf compression method ${entry.method} for ${entry.name}`);
+    const limit = Number(options.maxBytes);
+    if (Number.isFinite(limit) && out.length > limit) {
+      if (typeof options.tooLargeError === 'function') throw options.tooLargeError(out.length);
+      throw new Error(`Boardfish container entry ${entry.name} exceeds the board content limit`);
+    }
+    return out;
   }
 
   function base64ToBytes(base64) {
@@ -528,15 +553,33 @@
     };
   }
 
-  async function readBoardContainer(input) {
+  async function readBoardContainer(input, options = {}) {
     const containerBytes = await blobToBytes(input);
     const entries = parseCentralDirectory(containerBytes);
     const boardEntry = entries.get('board.json');
     if (!boardEntry) throw new Error('Boardfish file is missing board.json');
-    const boardJsonBytes = await readZipEntry(containerBytes, boardEntry);
+    const validateBoardPayload = typeof options.validateBoardPayload === 'function'
+      ? options.validateBoardPayload
+      : null;
+    const maxBoardContentBytes = Number(options.maxBoardContentBytes);
+    if (validateBoardPayload) {
+      validateBoardPayload({
+        objectCount: 0,
+        boardJsonBytes: zipEntryContentBytes(boardEntry),
+        imageBytes: 0,
+      });
+    }
+    const boardJsonBytes = await readZipEntry(containerBytes, boardEntry, {
+      maxBytes: Number.isFinite(maxBoardContentBytes) ? maxBoardContentBytes : undefined,
+    });
     const board = JSON.parse(utf8Decode(boardJsonBytes));
+    const objectCount = board?.objects?.length || 0;
+    if (validateBoardPayload) {
+      validateBoardPayload({ objectCount, boardJsonBytes: boardJsonBytes.length, imageBytes: 0 });
+    }
     const nextSources = {};
     const imageEntries = [];
+    let imageBytes = 0;
 
     for (const [key, manifest] of Object.entries(board.imageStore || {})) {
       const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
@@ -544,7 +587,22 @@
       const path = candidates.find((candidate) => entries.has(candidate)) || candidates[0];
       const imageEntry = entries.get(path);
       if (!imageEntry) throw new Error(`Boardfish file is missing ${path}`);
-      const bytes = await readZipEntry(containerBytes, imageEntry);
+      const advertisedImageBytes = zipEntryContentBytes(imageEntry);
+      if (validateBoardPayload) {
+        validateBoardPayload({
+          objectCount,
+          boardJsonBytes: boardJsonBytes.length,
+          imageBytes: imageBytes + advertisedImageBytes,
+        });
+      }
+      const remainingBytes = Number.isFinite(maxBoardContentBytes)
+        ? maxBoardContentBytes - boardJsonBytes.length - imageBytes
+        : undefined;
+      const bytes = await readZipEntry(containerBytes, imageEntry, { maxBytes: remainingBytes });
+      imageBytes += bytes.length;
+      if (validateBoardPayload) {
+        validateBoardPayload({ objectCount, boardJsonBytes: boardJsonBytes.length, imageBytes });
+      }
       const manifestExt = manifestObject.ext || '';
       const ext = manifestExt || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
       const mime = manifestObject.mime || mimeForExt(ext);
@@ -560,7 +618,6 @@
       });
     }
 
-    const imageBytes = imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0);
     return {
       board: {
         ...board,

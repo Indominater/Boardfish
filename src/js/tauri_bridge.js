@@ -4,6 +4,7 @@
   var TAURI_COMMANDS = Object.freeze({
     ACKNOWLEDGE_CLOSE_REQUEST: 'acknowledge_close_request',
     CANCEL_PENDING_TERMINATION: 'cancel_pending_termination',
+    CLEAR_DECODED_IMAGE_SOURCE_CACHE: 'clear_decoded_image_source_cache',
     CLEAR_IMAGE_SOURCE_CACHE: 'clear_image_source_cache',
     CLIPBOARD_SEQUENCE: 'clipboard_sequence',
     COPY_IMAGE_DATA_URL_TO_CLIPBOARD_TRANSFORMED: 'copy_image_data_url_to_clipboard_transformed',
@@ -75,6 +76,9 @@
     },
     clearImageSourceCache() {
       return tauriInvoke(TAURI_COMMANDS.CLEAR_IMAGE_SOURCE_CACHE);
+    },
+    clearDecodedImageSourceCache() {
+      return tauriInvoke(TAURI_COMMANDS.CLEAR_DECODED_IMAGE_SOURCE_CACHE);
     },
     exitApp() {
       return tauriInvoke(TAURI_COMMANDS.EXIT_APP);

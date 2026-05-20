@@ -89,6 +89,14 @@ Object.assign(globalThis, {
   hasEyedropperNativePixelCacheSource,
 });
 
+function releaseEyedropperCachesAfterDisable() {
+  clearEyedropperSafeImageCache();
+  if (hasTauri() && BoardfishTauri?.clearDecodedImageSourceCache) {
+    BoardfishTauri.clearDecodedImageSourceCache()
+      .catch((err) => console.warn('[eyedropper] clear decoded image source cache failed:', err));
+  }
+}
+
 const resetEyedropperCardPreviewState = (card) => card && Object.assign(card, {
   previewStateVersion: (card.previewStateVersion || 0) + 1,
   previewToken: '', previewDataUrl: '', previewCanvasWidth: 0, previewCanvasHeight: 0,

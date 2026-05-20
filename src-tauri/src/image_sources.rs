@@ -523,3 +523,10 @@ pub(crate) fn clear_image_source_cache(
 ) -> Result<(), String> {
     source_state.clear()
 }
+
+#[tauri::command]
+pub(crate) fn clear_decoded_image_source_cache(
+    source_state: tauri::State<ImageSourceCache>,
+) -> Result<(), String> {
+    source_state.clear_decoded()
+}

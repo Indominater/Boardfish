@@ -1,7 +1,8 @@
 const textEditActionFromInputType = (inputType = '') => {
   const value = String(inputType || '');
-  if (value.toLowerCase().includes('paste')) return 'text-edit-paste';
-  if (value.toLowerCase().includes('cut')) return 'text-edit-cut';
+  const lower = value.toLowerCase();
+  if (lower.includes('paste')) return 'text-edit-paste';
+  if (lower.includes('cut')) return 'text-edit-cut';
   if (value.startsWith('delete')) return 'text-edit-delete';
   return 'text-edit-type';
 };
