@@ -179,10 +179,6 @@ fn read_zip_entry_bytes<R: std::io::Read>(
     Ok(bytes)
 }
 
-pub(crate) fn read_board_file(path: &str) -> Result<BoardReadResult, String> {
-    read_board_file_with_limits(path, None)
-}
-
 pub(crate) fn read_board_file_with_limits(
     path: &str,
     limits: Option<BoardLimits>,
@@ -302,7 +298,7 @@ pub(crate) fn read_board_file_with_limits(
 mod tests {
     use std::sync::Arc;
 
-    use super::{read_board_file, read_board_file_with_limits, write_board_container, BoardLimits};
+    use super::{read_board_file_with_limits, write_board_container, BoardLimits};
     use crate::image_sources::CachedImageSource;
 
     fn temp_board_path() -> std::path::PathBuf {
@@ -346,7 +342,7 @@ mod tests {
         assert_eq!(write_stats.image_count, 1);
         assert_eq!(write_stats.image_bytes, 4);
 
-        let result = read_board_file(path.to_str().unwrap()).unwrap();
+        let result = read_board_file_with_limits(path.to_str().unwrap(), None).unwrap();
         assert_eq!(result.sources.len(), 1);
         assert_eq!(result.sources[0].0, "img-1");
         assert_eq!(&*result.sources[0].1.bytes, &[1, 2, 3, 4]);
@@ -382,7 +378,7 @@ mod tests {
             vec![("img-1".to_string(), source)],
         )
         .unwrap();
-        let result = read_board_file(path.to_str().unwrap()).unwrap();
+        let result = read_board_file_with_limits(path.to_str().unwrap(), None).unwrap();
         let err = match read_board_file_with_limits(
             path.to_str().unwrap(),
             Some(BoardLimits {
