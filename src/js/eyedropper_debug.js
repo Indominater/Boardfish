@@ -1517,6 +1517,83 @@ var EyedropperDebug = (() => {
     return out;
   }
 
+  function jsReadyDecodedEstimate(options = {}) {
+    const readyKeys = [...indominaterGreedyEyedropperNativeDecodePrewarm.ready];
+    const rows = readyKeys.map((key) => {
+      const source = imageBitmapCache[key] || imageCache[key] || eyedropperSafeImageCache.get(key)?.source || null;
+      const width = source?.width || source?.naturalWidth || 0;
+      const height = source?.height || source?.naturalHeight || 0;
+      const decodedBytes = width * height * 4;
+      return {
+        imgKey: key,
+        width,
+        height,
+        decodedBytes,
+        decodedMB: roundMs(decodedBytes / 1024 / 1024),
+        hasDisplayImage: !!imageCache[key],
+        hasBitmap: !!imageBitmapCache[key],
+        safeCacheKind: eyedropperSafeImageCache.get(key)?.sourceKind || '',
+      };
+    }).sort((a, b) => b.decodedBytes - a.decodedBytes || String(a.imgKey).localeCompare(String(b.imgKey)));
+    const decodedBytes = rows.reduce((sum, row) => sum + row.decodedBytes, 0);
+    const limit = debugLimit(options, 40);
+    return {
+      readyCount: rows.length,
+      estimatedDecodedBytes: decodedBytes,
+      estimatedDecodedMB: roundMs(decodedBytes / 1024 / 1024),
+      entries: rows.slice(0, limit),
+    };
+  }
+
+  async function nativeDecodedCacheReport(options = {}) {
+    const jsReady = jsReadyDecodedEstimate(options);
+    const out = {
+      native: null,
+      jsReady,
+      comparison: null,
+      error: '',
+    };
+    try {
+      if (typeof hasTauri !== 'function' || !hasTauri() || !BoardfishTauri?.imageSourceCacheDebug) {
+        out.error = 'native-cache-debug-unavailable';
+      } else {
+        out.native = await BoardfishTauri.imageSourceCacheDebug();
+      }
+    } catch (err) {
+      out.error = String(err);
+    }
+
+    if (out.native?.entries) {
+      const nativeDecodedKeys = new Set(out.native.entries.filter(row => row.decoded).map(row => row.imgKey));
+      const jsReadyKeys = new Set([...indominaterGreedyEyedropperNativeDecodePrewarm.ready]);
+      const staleJsReady = [...jsReadyKeys].filter(key => !nativeDecodedKeys.has(key));
+      const nativeDecodedNotJsReady = out.native.entries
+        .filter(row => row.decoded && !jsReadyKeys.has(row.imgKey))
+        .map(row => row.imgKey);
+      out.comparison = {
+        staleJsReadyCount: staleJsReady.length,
+        staleJsReady,
+        nativeDecodedNotJsReadyCount: nativeDecodedNotJsReady.length,
+        nativeDecodedNotJsReady,
+      };
+    }
+
+    if (options.table !== false) {
+      const native = out.native || {};
+      console.table([{
+        rustDecodedMB: native.decodedMb ?? '',
+        rustDecodedCount: native.decodedCount ?? '',
+        jsReadyMB: jsReady.estimatedDecodedMB,
+        jsReadyCount: jsReady.readyCount,
+        staleJsReady: out.comparison?.staleJsReadyCount ?? '',
+        error: out.error,
+      }]);
+      if (native.entries?.length) console.table(native.entries.slice(0, debugLimit(options, 40)));
+      else if (jsReady.entries.length) console.table(jsReady.entries);
+    }
+    return out;
+  }
+
   function hexEqual(a, b) {
     return String(a || '').toUpperCase() === String(b || '').toUpperCase();
   }
@@ -1912,6 +1989,7 @@ var EyedropperDebug = (() => {
     safeImageTimeline,
     nativePixelTimeline,
     nativePixelSummary,
+    nativeDecodedCacheReport,
     backgroundReadoutReport,
     slowSampleSummary,
     readbackFailures,

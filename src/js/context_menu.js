@@ -256,7 +256,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false } = {}) => {
 
 const copyTextEditSelection = async () => {
   const selection = getTextEditSelectionState();
-  const selectedText = selectedTextForEditMenu();
+  const selectedText = selection?.hasSelection && _editEl ? _editEl.value.slice(selection.start, selection.end) : '';
   if (selectedText) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
       textSelection: {

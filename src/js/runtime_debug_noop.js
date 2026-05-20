@@ -135,6 +135,7 @@ const EyedropperDebug = createNoopDebugApi({
   _logUnsafeImageSkip: noop,
   _recordPrewarmTiming: noop,
   _recordSampleTiming: noop,
+  nativeDecodedCacheReport: async () => null,
   _startFrameProbe: noop,
   _stopFrameProbe: noop,
 });

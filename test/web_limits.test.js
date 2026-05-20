@@ -4,14 +4,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 require('../src/js/web_board_container.js');
-const WebLimits = require('../src/js/web_limits.js');
+const WebLimits = require('../src/js/board_limits.js');
 
 test('web board payload limits reject too many objects', () => {
   assert.throws(
     () => WebLimits.validateBoardPayload({ objectCount: WebLimits.LIMITS.maxObjects + 1 }),
     (err) => {
-      assert.equal(err.message, 'This board has 101 objects; Boardfish Web is limited to 100 objects.');
-      assert.equal(err.boardfishUserMessage, 'Boardfish Web is limited to 100 objects');
+      assert.equal(err.message, 'This board has 101 objects; Boardfish is limited to 100 objects.');
+      assert.equal(err.boardfishUserMessage, 'Boardfish is limited to 100 objects');
       return true;
     },
   );
@@ -76,8 +76,8 @@ test('web board content limit carries a short user-facing message', () => {
       imageEntries: [],
     }),
     (err) => {
-      assert.equal(err.message, 'This board is 500 MB; Boardfish Web boards are limited to 500 MB.');
-      assert.equal(err.boardfishUserMessage, 'Boardfish Web boards are limited to 500 MB');
+      assert.equal(err.message, 'This board is 500 MB; Boardfish boards are limited to 500 MB.');
+      assert.equal(err.boardfishUserMessage, 'Boardfish boards are limited to 500 MB');
       return true;
     },
   );

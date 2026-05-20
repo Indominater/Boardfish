@@ -1,6 +1,6 @@
 'use strict';
 
-(function initWebLimits(root) {
+(function initBoardLimits(root) {
   const MB = 1024 * 1024;
   const LIMITS = Object.freeze({
     maxObjects: 100,
@@ -8,12 +8,20 @@
   });
 
   function isLimitedRuntime() {
-    return !(typeof root.hasTauri === 'function' && root.hasTauri());
+    return true;
   }
 
   function formatBytes(bytes) {
     const mb = Math.round((Number(bytes) || 0) / MB * 10) / 10;
     return `${mb} MB`;
+  }
+
+  function objectLimitMessage() {
+    return `Boardfish is limited to ${LIMITS.maxObjects} objects`;
+  }
+
+  function boardContentLimitMessage() {
+    return `Boardfish boards are limited to ${formatBytes(LIMITS.maxBoardContentBytes)}`;
   }
 
   function limitError(message, userMessage = '') {
@@ -42,23 +50,20 @@
   }
 
   function remainingObjectSlots() {
-    if (!isLimitedRuntime()) return Infinity;
     return Math.max(0, LIMITS.maxObjects - objectCount());
   }
 
   function canAddObjects(count = 1, options = {}) {
-    if (!isLimitedRuntime()) return true;
     const nextCount = objectCount() + Math.max(0, Number(count) || 0);
     if (nextCount <= LIMITS.maxObjects) return true;
-    return rejectLimit(`Boardfish Web is limited to ${LIMITS.maxObjects} objects`, options);
+    return rejectLimit(objectLimitMessage(), options);
   }
 
   function assertObjectCountAllowed(count, label = 'board') {
-    if (!isLimitedRuntime()) return true;
     if ((Number(count) || 0) <= LIMITS.maxObjects) return true;
     throw limitError(
-      `This ${label} has ${count} objects; Boardfish Web is limited to ${LIMITS.maxObjects} objects.`,
-      `Boardfish Web is limited to ${LIMITS.maxObjects} objects`
+      `This ${label} has ${count} objects; ${objectLimitMessage()}.`,
+      objectLimitMessage()
     );
   }
 
@@ -111,10 +116,9 @@
   }
 
   function canAcceptAdditionalContentBytes(additionalImageBytes = 0, additionalObjectCount = 0, options = {}) {
-    if (!isLimitedRuntime()) return true;
     const projected = projectedContentBytes(additionalImageBytes, additionalObjectCount);
     if (projected <= LIMITS.maxBoardContentBytes) return true;
-    return rejectLimit(`Boardfish Web boards are limited to ${formatBytes(LIMITS.maxBoardContentBytes)}`, options);
+    return rejectLimit(boardContentLimitMessage(), options);
   }
 
   function validateImageBytes(bytes, options = {}) {
@@ -134,7 +138,6 @@
   }
 
   async function validateImageBlob(blob, name = 'image', options = {}) {
-    if (!isLimitedRuntime()) return true;
     return validateImageBytes(blob?.size || blob?.byteLength || 0, options);
   }
 
@@ -143,12 +146,10 @@
   }
 
   async function validateDataUrlImage(dataUrl, name = 'image', options = {}) {
-    if (!isLimitedRuntime()) return true;
     return validateImageBytes(dataUrlImageBytesForValidation(dataUrl), options);
   }
 
   function validateBoardPayload({ objectCount: nextObjectCount = 0, boardJsonBytes = 0, imageBytes = null, imageEntries = [] } = {}) {
-    if (!isLimitedRuntime()) return true;
     assertObjectCountAllowed(nextObjectCount, 'board');
     let totalImageBytes = Number(imageBytes);
     if (!Number.isFinite(totalImageBytes)) {
@@ -161,20 +162,18 @@
     const total = (Number(boardJsonBytes) || 0) + totalImageBytes;
     if (total > LIMITS.maxBoardContentBytes) {
       throw limitError(
-        `This board is ${formatBytes(total)}; Boardfish Web boards are limited to ${formatBytes(LIMITS.maxBoardContentBytes)}.`,
-        `Boardfish Web boards are limited to ${formatBytes(LIMITS.maxBoardContentBytes)}`
+        `This board is ${formatBytes(total)}; ${boardContentLimitMessage()}.`,
+        boardContentLimitMessage()
       );
     }
     return true;
   }
 
   async function validateOpenedImageEntries(imageEntries = []) {
-    if (!isLimitedRuntime()) return true;
     return true;
   }
 
   function assertBoardDataAllowed(board) {
-    if (!isLimitedRuntime()) return true;
     assertObjectCountAllowed(board?.objects?.length || 0, 'board');
     return true;
   }
@@ -182,6 +181,7 @@
   const api = Object.freeze({
     LIMITS,
     assertBoardDataAllowed,
+    boardContentLimitMessage,
     canAcceptAdditionalContentBytes,
     canAddObjects,
     currentImageContentBytes,
@@ -190,6 +190,7 @@
     isLimitedRuntime,
     limitError,
     notify,
+    objectLimitMessage,
     remainingObjectSlots,
     validateBoardPayload,
     validateDataUrlImage,
@@ -198,6 +199,7 @@
     validateOpenedImageEntries,
   });
 
+  root.BoardfishLimits = api;
   root.BoardfishWebLimits = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

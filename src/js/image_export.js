@@ -403,7 +403,8 @@ async function pickExportFolder(dbg) {
 
 async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 3, onProgress = null) {
   const stopWatch = ExportDebug.watch(dbg, 'save-batches', { keyCount: keys.length, batchSize });
-  ExportDebug.recordSaveStart({ keyCount: keys.length, batchSize, batchCount: Math.ceil(keys.length / batchSize) });
+  const batchCount = Math.ceil(keys.length / batchSize);
+  ExportDebug.recordSaveStart({ keyCount: keys.length, batchSize, batchCount });
   let savedCount = 0;
   let failedCount = 0;
   let missingCount = 0;
@@ -413,7 +414,6 @@ async function saveExportKeysToFolderInBatches(folder, keys, dbg, batchSize = 3,
     for (let start = 0; start < keys.length; start += batchSize) {
       const batch = keys.slice(start, start + batchSize);
       const batchIndex = Math.floor(start / batchSize) + 1;
-      const batchCount = Math.ceil(keys.length / batchSize);
       ExportDebug.step(dbg, 'save:batch-start', {
         batchIndex,
         batchCount,
@@ -525,9 +525,10 @@ async function exportImageBatch({
         updateProgress('save-progress', imageObjs.length, { batchIndex, batchCount, savedKeyCount: finishedCount, keyCount: totalCount });
       });
       const savedCount = typeof saveResult === 'number' ? saveResult : (saveResult?.savedCount || 0);
-      ExportDebug.step(dbg, 'save:result', BoardfishExportUtils.normalizeSaveResult(saveResult));
+      const normalizedSaveResult = BoardfishExportUtils.normalizeSaveResult(saveResult);
+      ExportDebug.step(dbg, 'save:result', normalizedSaveResult);
       stopTotalWatch({ savedCount });
-      ExportDebug.end(dbg, { savedCount, ...BoardfishExportUtils.normalizeSaveResult(saveResult) });
+      ExportDebug.end(dbg, { savedCount, ...normalizedSaveResult });
       if (savedCount > 0) {
         finishPillTask({
           beforeFinish: () => BoardfishExportUtils.finishImageExportInputShield(clearSelectionAfter),

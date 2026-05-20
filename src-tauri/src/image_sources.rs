@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::elapsed_ms;
 use crate::image_data_url::cached_source_from_data_url;
-use crate::image_source_cache::DecodedImageSource;
 pub(crate) use crate::image_source_cache::{CachedImageSource, ImageSourceCache};
+use crate::image_source_cache::{DecodedImageSource, ImageSourceCacheDebug};
 use crate::image_source_files::{
     cleanup_materialized_paths, image_source_batch_dir, image_source_file_path,
 };
@@ -204,6 +204,13 @@ pub(crate) async fn prewarm_cached_image_pixels(
         decode_ms,
         total_ms: elapsed_ms(total_start),
     })
+}
+
+#[tauri::command]
+pub(crate) fn image_source_cache_debug(
+    state: tauri::State<'_, ImageSourceCache>,
+) -> Result<ImageSourceCacheDebug, String> {
+    state.debug_snapshot()
 }
 
 #[tauri::command]

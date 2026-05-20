@@ -3,6 +3,9 @@ use crate::board_types::validate_board_value;
 use crate::image_sources::ImageSourceCache;
 use tauri::Manager;
 
+const BOARD_MAX_OBJECTS: usize = 100;
+const BOARD_MAX_CONTENT_BYTES: usize = 500 * 1024 * 1024;
+
 #[derive(serde::Serialize)]
 pub(crate) struct SaveBoardResponse {
     format: &'static str,
@@ -80,6 +83,45 @@ impl From<BoardReadStats> for ReadBoardDebug {
     }
 }
 
+fn board_object_count(board: &serde_json::Value) -> usize {
+    board
+        .get("objects")
+        .and_then(|value| value.as_array())
+        .map(|objects| objects.len())
+        .unwrap_or(0)
+}
+
+fn format_limit_bytes(bytes: usize) -> String {
+    let mb = ((bytes as f64 / 1024.0 / 1024.0) * 10.0).round() / 10.0;
+    if (mb.fract()).abs() < f64::EPSILON {
+        format!("{} MB", mb as usize)
+    } else {
+        format!("{mb:.1} MB")
+    }
+}
+
+fn validate_board_limits(
+    board: &serde_json::Value,
+    board_json_bytes: usize,
+    image_bytes: usize,
+) -> Result<(), String> {
+    let object_count = board_object_count(board);
+    if object_count > BOARD_MAX_OBJECTS {
+        return Err(format!(
+            "This board has {object_count} objects; Boardfish is limited to {BOARD_MAX_OBJECTS} objects."
+        ));
+    }
+    let total_bytes = board_json_bytes.saturating_add(image_bytes);
+    if total_bytes > BOARD_MAX_CONTENT_BYTES {
+        return Err(format!(
+            "This board is {}; Boardfish boards are limited to {}.",
+            format_limit_bytes(total_bytes),
+            format_limit_bytes(BOARD_MAX_CONTENT_BYTES)
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn save_board(
     state: tauri::State<'_, ImageSourceCache>,
@@ -100,6 +142,11 @@ pub(crate) async fn save_board(
 
     let sources = state.get_many(&image_keys)?;
     let source_lookup_ms = source_lookup_start.elapsed().as_secs_f64() * 1000.0;
+    let board_json_bytes = serde_json::to_vec(&board).map_err(|e| e.to_string())?.len();
+    let image_bytes = sources.iter().fold(0usize, |sum, (_, source)| {
+        sum.saturating_add(source.bytes.len())
+    });
+    validate_board_limits(&board, board_json_bytes, image_bytes)?;
 
     let result = tokio::task::spawn_blocking(move || write_board_container(&path, board, sources))
         .await
@@ -124,6 +171,11 @@ pub(crate) async fn read_board(
         .await
         .map_err(|e| e.to_string())??;
     validate_board_value(&result.board)?;
+    validate_board_limits(
+        &result.board,
+        result.stats.board_json_bytes,
+        result.stats.image_bytes,
+    )?;
 
     {
         let cache_start = std::time::Instant::now();

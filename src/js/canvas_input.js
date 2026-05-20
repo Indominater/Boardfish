@@ -185,11 +185,17 @@ function startGroupDrag(e) {
     up() {
       if (!grpMoved) return;
       dragCommitter.flush();
-      for (const item of grpItems) markDirty(item.obj.id);
-      if (grpItems.some((item) => item.obj?.type === 'text')) {
+      let hasText = false;
+      let hasNonText = false;
+      for (const item of grpItems) {
+        markDirty(item.obj.id);
+        if (item.obj?.type === 'text') hasText = true;
+        else hasNonText = true;
+      }
+      if (hasText) {
         globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-drag');
       }
-      if (grpItems.some((item) => item.obj?.type !== 'text')) {
+      if (hasNonText) {
         globalThis.BoardfishMotion?.applyActionAnimation?.('object-group-drag', {
           selection: true,
           options: { includeText: false },
@@ -387,11 +393,17 @@ function startObjectDrag(e, obj) {
       return;
     }
     dragCommitter.flush();
-    for (const item of dragItems) markDirty(item.obj.id);
-    if (dragItems.some((item) => item.obj?.type === 'text')) {
+    let hasText = false;
+    let hasNonText = false;
+    for (const item of dragItems) {
+      markDirty(item.obj.id);
+      if (item.obj?.type === 'text') hasText = true;
+      else hasNonText = true;
+    }
+    if (hasText) {
       globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-drag');
     }
-    if (dragItems.some((item) => item.obj?.type !== 'text')) {
+    if (hasNonText) {
       globalThis.BoardfishMotion?.applyActionAnimation?.('object-drag', {
         selection: true,
         options: { includeText: false },

@@ -18,6 +18,35 @@ pub(crate) struct DecodedImageSource {
     pub(crate) rgba: Arc<[u8]>,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImageSourceCacheDebugEntry {
+    img_key: String,
+    mime: String,
+    ext: String,
+    source_bytes: usize,
+    source_mb: f64,
+    decoded: bool,
+    decoded_bytes: usize,
+    decoded_mb: f64,
+    width: u32,
+    height: u32,
+    decoded_last_used: u64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImageSourceCacheDebug {
+    source_count: usize,
+    decoded_count: usize,
+    source_bytes: usize,
+    source_mb: f64,
+    decoded_bytes: usize,
+    decoded_mb: f64,
+    decoded_use_counter: u64,
+    entries: Vec<ImageSourceCacheDebugEntry>,
+}
+
 struct CachedImageSourceEntry {
     source: CachedImageSource,
     materialized_paths: Vec<PathBuf>,
@@ -40,10 +69,54 @@ struct ImageSourceCacheInner {
 #[derive(Default)]
 pub(crate) struct ImageSourceCache(Mutex<ImageSourceCacheInner>);
 
-const DECODED_IMAGE_CACHE_MAX_BYTES: usize = 512 * 1024 * 1024;
-const DECODED_IMAGE_CACHE_MAX_ENTRIES: usize = 24;
-
 impl ImageSourceCache {
+    pub(crate) fn debug_snapshot(&self) -> Result<ImageSourceCacheDebug, String> {
+        let cache = self.0.lock().map_err(|e| e.to_string())?;
+        let mut entries = Vec::with_capacity(cache.entries.len());
+        let mut source_bytes = 0usize;
+        let mut decoded_count = 0usize;
+
+        for (img_key, entry) in &cache.entries {
+            source_bytes = source_bytes.saturating_add(entry.source.bytes.len());
+            let decoded = entry.decoded.as_ref();
+            let decoded_bytes = entry.decoded_bytes;
+            if decoded.is_some() {
+                decoded_count += 1;
+            }
+            entries.push(ImageSourceCacheDebugEntry {
+                img_key: img_key.clone(),
+                mime: entry.source.mime.clone(),
+                ext: entry.source.ext.clone(),
+                source_bytes: entry.source.bytes.len(),
+                source_mb: bytes_mb(entry.source.bytes.len()),
+                decoded: decoded.is_some(),
+                decoded_bytes,
+                decoded_mb: bytes_mb(decoded_bytes),
+                width: decoded.map(|d| d.width).unwrap_or(0),
+                height: decoded.map(|d| d.height).unwrap_or(0),
+                decoded_last_used: entry.decoded_last_used,
+            });
+        }
+
+        entries.sort_by(|a, b| {
+            b.decoded_bytes
+                .cmp(&a.decoded_bytes)
+                .then_with(|| b.source_bytes.cmp(&a.source_bytes))
+                .then_with(|| a.img_key.cmp(&b.img_key))
+        });
+
+        Ok(ImageSourceCacheDebug {
+            source_count: cache.entries.len(),
+            decoded_count,
+            source_bytes,
+            source_mb: bytes_mb(source_bytes),
+            decoded_bytes: cache.decoded_bytes,
+            decoded_mb: bytes_mb(cache.decoded_bytes),
+            decoded_use_counter: cache.decoded_use_counter,
+            entries,
+        })
+    }
+
     pub(crate) fn get(&self, key: &str) -> Result<CachedImageSource, String> {
         self.0
             .lock()
@@ -97,7 +170,6 @@ impl ImageSourceCache {
         } else {
             cache.decoded_bytes = cache.decoded_bytes.saturating_add(bytes_delta as usize);
         }
-        prune_decoded_cache_locked(&mut cache);
         Ok(decoded)
     }
 
@@ -138,24 +210,25 @@ impl ImageSourceCache {
         source: CachedImageSource,
         source_token: Option<String>,
     ) -> Result<(), String> {
-        let stale_paths = self
-            .0
-            .lock()
-            .map_err(|e| e.to_string())?
-            .entries
-            .insert(
-                key,
-                CachedImageSourceEntry {
-                    source,
-                    materialized_paths: Vec::new(),
-                    decoded: None,
-                    decoded_bytes: 0,
-                    decoded_last_used: 0,
-                    source_token,
-                },
-            )
-            .map(|entry| entry.materialized_paths)
-            .unwrap_or_default();
+        let mut cache = self.0.lock().map_err(|e| e.to_string())?;
+        let stale = cache.entries.insert(
+            key,
+            CachedImageSourceEntry {
+                source,
+                materialized_paths: Vec::new(),
+                decoded: None,
+                decoded_bytes: 0,
+                decoded_last_used: 0,
+                source_token,
+            },
+        );
+        let stale_paths = if let Some(entry) = stale {
+            cache.decoded_bytes = cache.decoded_bytes.saturating_sub(entry.decoded_bytes);
+            entry.materialized_paths
+        } else {
+            Vec::new()
+        };
+        drop(cache);
         cleanup_materialized_paths(stale_paths);
         Ok(())
     }
@@ -264,35 +337,6 @@ fn decoded_image_bytes(decoded: &DecodedImageSource) -> usize {
     decoded.rgba.len()
 }
 
-fn prune_decoded_cache_locked(cache: &mut ImageSourceCacheInner) {
-    loop {
-        let mut decoded_count = 0usize;
-        let oldest_key = cache
-            .entries
-            .iter()
-            .filter_map(|(key, entry)| {
-                entry.decoded.as_ref()?;
-                decoded_count += 1;
-                Some((key, entry.decoded_last_used))
-            })
-            .min_by_key(|(_, last_used)| *last_used)
-            .map(|(key, _)| key.clone());
-
-        if cache.decoded_bytes <= DECODED_IMAGE_CACHE_MAX_BYTES
-            && decoded_count <= DECODED_IMAGE_CACHE_MAX_ENTRIES
-        {
-            break;
-        }
-
-        let Some(oldest_key) = oldest_key else {
-            cache.decoded_bytes = 0;
-            break;
-        };
-        if let Some(entry) = cache.entries.get_mut(&oldest_key) {
-            cache.decoded_bytes = cache.decoded_bytes.saturating_sub(entry.decoded_bytes);
-            entry.decoded = None;
-            entry.decoded_bytes = 0;
-            entry.decoded_last_used = 0;
-        }
-    }
+fn bytes_mb(bytes: usize) -> f64 {
+    ((bytes as f64 / 1024.0 / 1024.0) * 100.0).round() / 100.0
 }

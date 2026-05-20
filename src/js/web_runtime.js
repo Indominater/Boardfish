@@ -151,8 +151,8 @@
     if (!file) throw new Error('no Boardfish file selected');
     if (root.BoardfishWebLimits?.LIMITS && file.size > root.BoardfishWebLimits.LIMITS.maxBoardContentBytes + 10 * 1024 * 1024) {
       throw root.BoardfishWebLimits.limitError(
-        `This file is too large for Boardfish Web (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB).`,
-        `Boardfish Web boards are limited to ${Math.round(root.BoardfishWebLimits.LIMITS.maxBoardContentBytes / 1024 / 1024 * 10) / 10} MB`
+        `This file is too large for Boardfish (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB).`,
+        root.BoardfishWebLimits.boardContentLimitMessage()
       );
     }
     const result = await root.BoardfishWebBoardContainer.readBoardContainer(file);

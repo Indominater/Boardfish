@@ -11,6 +11,7 @@
     EXIT_APP: 'exit_app',
     GET_WINDOW_MAXIMIZED: 'get_window_maximized',
     GET_CACHED_IMAGE_DATA_URL: 'get_cached_image_data_url',
+    IMAGE_SOURCE_CACHE_DEBUG: 'image_source_cache_debug',
     PREWARM_CACHED_IMAGE_PIXELS: 'prewarm_cached_image_pixels',
     SAMPLE_CACHED_IMAGE_PIXEL: 'sample_cached_image_pixel',
     GET_STARTUP_FILE: 'get_startup_file',
@@ -86,6 +87,9 @@
     },
     getCachedImageDataUrl(imgKey) {
       return tauriInvoke(TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL, { imgKey });
+    },
+    imageSourceCacheDebug() {
+      return tauriInvoke(TAURI_COMMANDS.IMAGE_SOURCE_CACHE_DEBUG);
     },
     prewarmCachedImagePixels(imgKey) {
       return tauriInvoke(TAURI_COMMANDS.PREWARM_CACHED_IMAGE_PIXELS, { imgKey });

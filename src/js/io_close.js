@@ -203,6 +203,43 @@ function measureBoardJsonForSaveDebug(dbg, data) {
   }
 }
 
+function boardLimitImageEntriesForData(data) {
+  return Object.keys(data?.imageStore || {}).map((key) => ({
+    key,
+    byteLength: BoardfishWebLimits.imageSourceByteLength(imageStore[key]),
+  }));
+}
+
+function boardJsonBytesForLimit(data) {
+  try {
+    return JSON.stringify(data).length;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function validateBoardPayloadForSave(data) {
+  BoardfishWebLimits.validateBoardPayload({
+    objectCount: data?.objects?.length || 0,
+    boardJsonBytes: boardJsonBytesForLimit(data),
+    imageEntries: boardLimitImageEntriesForData(data),
+  });
+}
+
+function validateBoardPayloadForOpen(board, debug = null) {
+  const boardJsonBytes = Number(debug?.board_json_bytes ?? debug?.boardJsonBytes ?? 0) || 0;
+  const imageBytes = Number(debug?.image_bytes ?? debug?.imageBytes ?? 0);
+  if (boardJsonBytes || Number.isFinite(imageBytes)) {
+    BoardfishWebLimits.validateBoardPayload({
+      objectCount: board?.objects?.length || 0,
+      boardJsonBytes,
+      imageBytes,
+    });
+  } else {
+    BoardfishWebLimits.assertBoardDataAllowed(board);
+  }
+}
+
 function scheduleSaveFrameProbe(dbg, label) {
   if (!SaveDebug.enabled) return null;
   const scheduledAt = performance.now();
@@ -226,6 +263,7 @@ async function invokeSaveBoard(fileRef, dbg) {
   const metrics = getBoardSaveDebugMetrics(dbg, data);
   SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...metrics });
   measureBoardJsonForSaveDebug(dbg, data);
+  validateBoardPayloadForSave(data);
   if (hasTauri()) {
     const pendingSources = Object.keys(data.imageStore || {})
       .map((key) => imageSourceCachePromises.get(key))
@@ -259,6 +297,7 @@ async function invokeReadBoard(fileRef, dbg) {
   const boardMetrics = getBoardOpenMetrics(board);
   if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...boardMetrics });
   OpenDebug.step(dbg, 'read-board-shape', boardMetrics);
+  validateBoardPayloadForOpen(board, result?.debug);
   return board;
 }
 
@@ -710,7 +749,7 @@ async function finishOpenedBoard(dbg, data) {
 
 function applyBoardData(data, options = {}) {
   data = BoardSchema.normalizeBoardData(data);
-  if (!hasTauri()) BoardfishWebLimits.assertBoardDataAllowed(data);
+  BoardfishWebLimits.assertBoardDataAllowed(data);
   const prune = BoardfishBoardDocument.pruneBoardDataImageStore(data);
   data = prune.data;
   const dbg = options.dbg || null;

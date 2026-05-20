@@ -122,8 +122,13 @@ test('startup variants strip debug and runtime-specific code from release surfac
   for (const file of ['tauri_bridge.js', 'window_titlebar.js', 'window_recovery.js']) {
     assert.ok(!webPreview.includes(file), `${file} should not load in web preview`);
   }
-  for (const file of ['web_env.js', 'web_board_container.js', 'web_limits.js', 'web_runtime.js']) {
+  for (const file of ['web_env.js', 'web_board_container.js', 'web_runtime.js']) {
     assert.ok(!desktopRelease.includes(file), `${file} should not load in desktop release`);
+  }
+  for (const list of [webPreview, desktopRelease]) {
+    assert.ok(list.includes('board_limits.js'), 'all release variants should load the shared board limits');
+    assert.ok(!list.includes('web_limits.js'), 'release variants should not load the removed web-only limits shim');
+    assert.ok(!list.includes('runtime_desktop_limits.js'), 'release variants should not load the removed desktop limits shim');
   }
 
   assert.ok(webDev.includes('debug.js'), 'web dev keeps debug tooling');
@@ -253,7 +258,7 @@ test('frontend abstraction scripts load before their consumers', () => {
   before('dom_registry.js', '../app.js');
   before('runtime_web_native.js', '../app.js');
   before('web_runtime.js', 'io_close.js');
-  before('web_limits.js', 'image_insert.js');
+  before('board_limits.js', 'image_insert.js');
   before('web_board_container.js', 'web_runtime.js');
   before('bitmap_cache.js', 'image_variants.js');
   before('bitmap_cache.js', 'eyedropper.js');
@@ -1013,9 +1018,11 @@ test('Rust image source responsibilities stay split', () => {
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_source_cache;/);
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_source_files;/);
   assert.match(readSource('src-tauri/src/main.rs'), /mod image_transform;/);
-  assert.match(readSource('src-tauri/src/image_source_cache.rs'), /DECODED_IMAGE_CACHE_MAX_BYTES/);
+  assert.match(readSource('src-tauri/src/image_source_cache.rs'), /struct ImageSourceCacheDebug/);
+  assert.match(imageSources, /fn image_source_cache_debug\(/);
   assert.match(readSource('src-tauri/src/image_source_cache.rs'), /source_token: Option<String>/);
-  assert.match(readSource('src-tauri/src/image_source_cache.rs'), /fn prune_decoded_cache_locked/);
+  assert.doesNotMatch(readSource('src-tauri/src/image_source_cache.rs'), /DECODED_IMAGE_CACHE_MAX_BYTES/);
+  assert.doesNotMatch(readSource('src-tauri/src/image_source_cache.rs'), /fn prune_decoded_cache_locked/);
   assert.match(imageSources, /use crate::image_source_files::/);
   assert.match(imageSources, /use crate::image_data_url::cached_source_from_data_url;/);
   assert.match(imageSources, /use crate::image_transform::transform_dynamic_image;/);
@@ -1023,7 +1030,7 @@ test('Rust image source responsibilities stay split', () => {
   assert.match(imageSources, /fn image_dimensions_from_bytes\(bytes: &\[u8\]\)/);
   assert.match(imageSources, /register_image_source[\s\S]*image_dimensions_from_bytes\(&source\.bytes\)/);
   assert.ok(lineCount('src-tauri/src/image_sources.rs') < 680, 'image_sources.rs should keep filesystem helper responsibilities split out');
-  assert.ok(lineCount('src-tauri/src/image_source_cache.rs') < 340, 'image_source_cache.rs should stay focused on native cache state');
+  assert.ok(lineCount('src-tauri/src/image_source_cache.rs') < 430, 'image_source_cache.rs should stay focused on native cache state');
   assert.ok(lineCount('src-tauri/src/image_source_files.rs') < 220, 'image_source_files.rs should stay focused on temp-file lifecycle helpers');
 });
 

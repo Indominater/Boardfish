@@ -35,10 +35,11 @@ use dialogs::{
 };
 use image_source_files::cleanup_stale_image_source_cache;
 use image_sources::{
-    clear_image_source_cache, get_cached_image_data_url, materialize_cached_image_sources,
-    prewarm_cached_image_pixels, register_image_file_source, register_image_source,
-    register_transformed_image_source, remove_cached_image_sources, sample_cached_image_pixel,
-    save_images_to_existing_folder_by_keys, write_image_file_by_key, ImageSourceCache,
+    clear_image_source_cache, get_cached_image_data_url, image_source_cache_debug,
+    materialize_cached_image_sources, prewarm_cached_image_pixels, register_image_file_source,
+    register_image_source, register_transformed_image_source, remove_cached_image_sources,
+    sample_cached_image_pixel, save_images_to_existing_folder_by_keys, write_image_file_by_key,
+    ImageSourceCache,
 };
 
 pub(crate) fn elapsed_ms(start: std::time::Instant) -> f64 {
@@ -81,6 +82,7 @@ fn main() {
             register_image_file_source,
             get_cached_image_data_url,
             prewarm_cached_image_pixels,
+            image_source_cache_debug,
             sample_cached_image_pixel,
             materialize_cached_image_sources,
             open_file_dialog,

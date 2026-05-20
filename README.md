@@ -22,7 +22,7 @@ Desktop installers:
 ## Features
 
 - drag/drop or paste PNG/JPEG images and text
-- smoothly pan/zoom boards with 500+ MB of images
+- smoothly pan/zoom boards with up to 500 MB of images
 - preserve images losslessly
 - save everything locally as a portable `.bf` file
 - multi-select, resize, flip, rotate, duplicate, copy/paste

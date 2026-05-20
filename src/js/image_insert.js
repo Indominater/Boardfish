@@ -616,7 +616,7 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
   }
   const bulk = accepted.length > 1;
   if (!accepted.length) {
-    if (dropped.contentLimit > 0) BoardfishWebLimits.notify(`Boardfish Web boards are limited to ${Math.round(BoardfishWebLimits.LIMITS.maxBoardContentBytes / 1024 / 1024 * 10) / 10} MB`);
+    if (dropped.contentLimit > 0) BoardfishWebLimits.notify(BoardfishWebLimits.boardContentLimitMessage());
     InsertDebug.end(dbg, { source, fileCount: files.length, added: 0, skipped: 'no-supported-files', ...dropped });
     return;
   }
@@ -685,7 +685,7 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
       InsertDebug.step(dbg, 'bulk:end', { source, added, historyAdded });
     }
     hideInputShield();
-    if (dropped.contentLimit > 0) BoardfishWebLimits.notify(`Boardfish Web boards are limited to ${Math.round(BoardfishWebLimits.LIMITS.maxBoardContentBytes / 1024 / 1024 * 10) / 10} MB`);
+    if (dropped.contentLimit > 0) BoardfishWebLimits.notify(BoardfishWebLimits.boardContentLimitMessage());
     InsertDebug.end(dbg, { source, fileCount: files.length, acceptedFileCount: accepted.length, added, concurrency, ...dropped });
   }
 }
