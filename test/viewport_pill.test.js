@@ -129,7 +129,7 @@ function loadViewportPillHarness() {
   return context;
 }
 
-test('pill messages replay smooth slide only when the message changes', () => {
+test('pill messages request animation policy only when the message changes', () => {
   const context = loadViewportPillHarness();
 
   context.showIslandMsg('Saved');
@@ -145,7 +145,7 @@ test('pill messages replay smooth slide only when the message changes', () => {
   assert.deepEqual(context.motionCalls, ['Copied']);
 });
 
-test('busy pill progress updates smooth slide when the displayed message changes', () => {
+test('busy pill progress requests animation policy when the displayed message changes', () => {
   const context = loadViewportPillHarness();
   const busyPill = context.startPillTask({ message: '0/2', progress: true });
   assert.deepEqual(context.motionCalls, ['0/2']);

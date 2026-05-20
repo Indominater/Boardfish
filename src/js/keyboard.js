@@ -242,8 +242,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     globalThis.BoardfishMotion?.applyActionAnimation?.('cut-selected-objects');
     (async () => {
-      await copySelected();
-      deleteSelected();
+      if (await copySelected()) deleteSelected();
     })();
     return;
   }

@@ -2,6 +2,27 @@
 var boardHistory = [];
 var historyIndex = -1;
 var MAX_HISTORY = 50;
+const HISTORY_OBJECT_FILTERS = Object.freeze({
+  all: 'all',
+  image: 'image',
+  nonText: 'non-text',
+  text: 'text',
+});
+const HISTORY_NON_TEXT_OPTIONS = Object.freeze({ includeText: false });
+const historyAction = (action, { filter = HISTORY_OBJECT_FILTERS.all, options = {} } = {}) => Object.freeze({
+  action,
+  filter,
+  options: Object.freeze({ ...(options || {}) }),
+});
+const historyReplay = ({ selection = null, added = [], removed = [] } = {}) => Object.freeze({
+  type: 'actions',
+  selection,
+  added: Object.freeze([...added]),
+  removed: Object.freeze([...removed]),
+});
+const HISTORY_REMOVE_WITHOUT_ANIMATION = Object.freeze([
+  historyAction('object-delete'),
+]);
 const HISTORY_FULL_SELECTION_PULSE_REASONS = new Set([
   'send-selected-to-back',
 ]);
@@ -27,6 +48,95 @@ const HISTORY_NO_REPLAY_REASONS = new Set([
   'text-edit-enter',
   'text-height-change',
 ]);
+const HISTORY_SELECTION_REPLAY_BY_REASON = Object.freeze({
+  'drag': historyReplay({
+    selection: historyAction('object-drag', { options: HISTORY_NON_TEXT_OPTIONS }),
+  }),
+  'group-drag': historyReplay({
+    selection: historyAction('object-group-drag', { options: HISTORY_NON_TEXT_OPTIONS }),
+  }),
+  'multi-resize': historyReplay({
+    selection: historyAction('object-multi-resize', { options: HISTORY_NON_TEXT_OPTIONS }),
+  }),
+  'resize': historyReplay({
+    selection: historyAction('object-resize', { options: HISTORY_NON_TEXT_OPTIONS }),
+  }),
+  'send-selected-to-back': historyReplay({
+    selection: historyAction('send-selected-to-back'),
+  }),
+});
+const HISTORY_ADDED_OBJECT_REPLAY_BY_REASON = Object.freeze({
+  'add-image': historyReplay({
+    added: [historyAction('image-object-create', {
+      filter: HISTORY_OBJECT_FILTERS.nonText,
+      options: HISTORY_NON_TEXT_OPTIONS,
+    })],
+    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
+  }),
+  'add-native-data-url-image': historyReplay({
+    added: [historyAction('image-object-create', {
+      filter: HISTORY_OBJECT_FILTERS.nonText,
+      options: HISTORY_NON_TEXT_OPTIONS,
+    })],
+    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
+  }),
+  'add-native-image': historyReplay({
+    added: [historyAction('image-object-create', {
+      filter: HISTORY_OBJECT_FILTERS.nonText,
+      options: HISTORY_NON_TEXT_OPTIONS,
+    })],
+    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
+  }),
+  'bulk-image-insert': historyReplay({
+    added: [historyAction('bulk-image-create', {
+      filter: HISTORY_OBJECT_FILTERS.nonText,
+      options: HISTORY_NON_TEXT_OPTIONS,
+    })],
+    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
+  }),
+  'duplicate-selected': historyReplay({
+    added: [
+      historyAction('text-box-duplicate', { filter: HISTORY_OBJECT_FILTERS.text }),
+      historyAction('image-object-duplicate', {
+        filter: HISTORY_OBJECT_FILTERS.nonText,
+        options: HISTORY_NON_TEXT_OPTIONS,
+      }),
+    ],
+    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
+  }),
+  'paste-objects': historyReplay({
+    added: [
+      historyAction('text-box-paste', { filter: HISTORY_OBJECT_FILTERS.text }),
+      historyAction('image-object-paste', {
+        filter: HISTORY_OBJECT_FILTERS.nonText,
+        options: HISTORY_NON_TEXT_OPTIONS,
+      }),
+    ],
+    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
+  }),
+  'paste-native-image': historyReplay({
+    added: [historyAction('image-object-create', {
+      filter: HISTORY_OBJECT_FILTERS.nonText,
+      options: HISTORY_NON_TEXT_OPTIONS,
+    })],
+    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
+  }),
+});
+const HISTORY_RESTORE_DELETED_REPLAY = historyReplay({
+  added: [
+    historyAction('text-box-undo-delete', { filter: HISTORY_OBJECT_FILTERS.text }),
+    historyAction('object-undo-delete', {
+      filter: HISTORY_OBJECT_FILTERS.nonText,
+      options: HISTORY_NON_TEXT_OPTIONS,
+    }),
+  ],
+  removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
+});
+const HISTORY_DEFAULT_REPLAY = historyReplay({
+  selection: historyAction('history-object-jiggle-replay', { options: HISTORY_NON_TEXT_OPTIONS }),
+  added: [historyAction('history-object-jiggle-replay', { options: HISTORY_NON_TEXT_OPTIONS })],
+  removed: [historyAction('history-object-jiggle-replay', { options: HISTORY_NON_TEXT_OPTIONS })],
+});
 
 const historyReasonUsesFullSelectionPulse = (reason = '') => {
   const value = String(reason || '');
@@ -40,24 +150,88 @@ const historySelectionPulseOptions = (entry) => {
   return historyReasonUsesFullSelectionPulse(reason) ? {} : { includeText: false };
 };
 
+const cloneHistoryAction = (spec) => spec ? ({
+  action: spec.action,
+  filter: spec.filter || HISTORY_OBJECT_FILTERS.all,
+  options: { ...(spec.options || {}) },
+}) : null;
+
+const cloneHistoryMotion = (motion) => {
+  if (!motion || motion.type === 'none') return { type: 'none' };
+  if (motion.type !== 'actions') return motion;
+  return {
+    type: 'actions',
+    selection: cloneHistoryAction(motion.selection),
+    added: (motion.added || []).map(cloneHistoryAction),
+    removed: (motion.removed || []).map(cloneHistoryAction),
+  };
+};
+
+const historySelectionReplayForReason = (reason = '') => {
+  const value = String(reason || '');
+  if (value.startsWith('flip-image-')) {
+    return historyReplay({ selection: historyAction('flip-image') });
+  }
+  if (value.startsWith('rotate-image-')) {
+    return historyReplay({ selection: historyAction('rotate-image') });
+  }
+  return HISTORY_SELECTION_REPLAY_BY_REASON[value] || null;
+};
+
 const historyMotionForReason = (reason = '') => {
   const value = String(reason || '');
   if (!value || HISTORY_NO_REPLAY_REASONS.has(value)) return { type: 'none' };
-  if (HISTORY_ADDED_OBJECT_REASONS.has(value)) return { type: 'added-objects', options: { includeText: false } };
+  const selectionReplay = historySelectionReplayForReason(value);
+  if (selectionReplay) return cloneHistoryMotion(selectionReplay);
+  if (HISTORY_ADDED_OBJECT_REASONS.has(value)) {
+    return cloneHistoryMotion(HISTORY_ADDED_OBJECT_REPLAY_BY_REASON[value] || HISTORY_DEFAULT_REPLAY);
+  }
   if (HISTORY_SMOOTH_SLIDE_REASONS.has(value)) return { type: 'smooth-slide' };
-  if (HISTORY_RESTORE_DELETED_REASONS.has(value)) return { type: 'restore-deleted-objects', options: { includeText: false } };
-  return { type: 'jello', options: historyReasonUsesFullSelectionPulse(value) ? {} : { includeText: false } };
+  if (HISTORY_RESTORE_DELETED_REASONS.has(value)) return cloneHistoryMotion(HISTORY_RESTORE_DELETED_REPLAY);
+  return cloneHistoryMotion(HISTORY_DEFAULT_REPLAY);
 };
 
 const historyMotionForEntry = (entry) => {
   if (Array.isArray(entry)) return historyMotionForReason('');
   const motion = entry?.motion;
+  if (motion?.type === 'actions') return cloneHistoryMotion(motion);
   if (motion?.type === 'added-objects') return { type: 'added-objects', options: { ...(motion.options || {}) } };
   if (motion?.type === 'restore-deleted-objects') return { type: 'restore-deleted-objects', options: { ...(motion.options || {}) } };
   if (motion?.type === 'smooth-slide') return { type: 'smooth-slide' };
   if (motion?.type === 'jello') return { type: 'jello', options: { ...(motion.options || {}) } };
   if (motion?.type === 'none') return { type: 'none' };
   return historyMotionForReason(entry?.reason || '');
+};
+
+const filterHistoryMotionObjects = (items, filter = HISTORY_OBJECT_FILTERS.all) => {
+  const list = Array.isArray(items) ? items : [];
+  if (filter === HISTORY_OBJECT_FILTERS.text) return list.filter((obj) => obj?.type === 'text');
+  if (filter === HISTORY_OBJECT_FILTERS.image) return list.filter((obj) => obj?.type === 'image');
+  if (filter === HISTORY_OBJECT_FILTERS.nonText) return list.filter((obj) => obj?.type !== 'text');
+  return list;
+};
+
+const applyHistoryActionSpecs = (specs, items, payloadKey) => {
+  let applied = false;
+  for (const spec of specs || []) {
+    const actionObjects = filterHistoryMotionObjects(items, spec?.filter);
+    if (!spec?.action || !actionObjects.length) continue;
+    const payload = payloadKey === 'removedObjects'
+      ? { removedObjects: actionObjects }
+      : { objects: actionObjects };
+    globalThis.BoardfishMotion?.applyActionAnimation?.(spec.action, payload, spec.options || {});
+    applied = true;
+  }
+  return applied;
+};
+
+const applyHistorySelectionAction = (spec, selectionPulseOptions = {}) => {
+  if (!spec?.action) return false;
+  globalThis.BoardfishMotion?.applyActionAnimation?.(spec.action, {
+    selection: true,
+    options: { ...(selectionPulseOptions || {}), ...(spec.options || {}) },
+  });
+  return true;
 };
 
 const applyHistoryAddedObjectsMotion = (added, removed, options = {}) => {
@@ -117,6 +291,12 @@ const applyHistoryMotionReplay = (motion, transition, selectionPulseOptions) => 
     .map((id) => objectsMap.get(id))
     .filter(Boolean);
   const removed = transition?.removed || [];
+  if (replay.type === 'actions') {
+    if (added.length) applyHistoryActionSpecs(replay.added, added, 'objects');
+    if (removed.length) applyHistoryActionSpecs(replay.removed, removed, 'removedObjects');
+    if (!added.length && !removed.length) applyHistorySelectionAction(replay.selection, selectionPulseOptions);
+    return;
+  }
   if (replay.type === 'smooth-slide') {
     if (added.length) {
       const textObjects = added.filter((obj) => obj?.type === 'text');

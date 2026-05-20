@@ -29,6 +29,27 @@ const textEditSelectionState = (proxy) => {
   };
 };
 
+const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSelectionState(proxy)) => {
+  if (!selection?.hasSelection || !proxy) return false;
+  const selectedText = proxy.value.slice(selection.start, selection.end);
+  clearJsClipboard();
+  try {
+    await BoardfishClipboardIO.copyTextToClipboard(textSelectionForClipboard(selectedText));
+  } catch (err) {
+    console.error('[copy] text selection clipboard write FAILED:', err);
+    return false;
+  }
+  if (editingId !== id || _editEl !== proxy) return true;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
+    textSelection: {
+      id,
+      ...selection,
+    },
+  });
+  scheduleRender(true, false, 'copy-text-selection');
+  return true;
+};
+
 function enterEdit(id, { history = true } = {}) {
   if (editingId === id) return;
   if (editingId) exitEdit();
@@ -102,16 +123,8 @@ function enterEdit(id, { history = true } = {}) {
     _caretVisible = true;
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && proxy.selectionStart !== proxy.selectionEnd) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
-        textSelection: {
-          id,
-          start: proxy.selectionStart,
-          end: proxy.selectionEnd,
-          direction: proxy.selectionDirection || 'none',
-          hasSelection: true,
-        },
-      });
-      scheduleRender(true, false, 'copy-text-selection');
+      e.preventDefault();
+      copyTextEditSelectionFromProxy(id, proxy);
       return;
     }
 

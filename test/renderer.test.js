@@ -314,6 +314,18 @@ test('action animation policy partitions user actions and tracks missing assignm
   const motion = context.BoardfishMotion;
 
   const partition = motion.getActionAnimationPartition();
+  const groups = motion.getActionAnimationGroups();
+  assert.equal(groups.imageTransform.setName, 'no-animation');
+  assert.deepEqual(plain(groups.imageTransform.actions), ['flip-image', 'rotate-image']);
+  assert.equal(groups.objectPaste.setName, 'no-animation');
+  assert.deepEqual(plain(groups.objectPaste.actions), ['image-object-paste']);
+  assert.equal(groups.objectCopy.setName, 'jiggle');
+  assert.deepEqual(plain(groups.objectCopy.actions), ['copy-selected-objects', 'copy-text-object', 'copy-text-selection']);
+  assert.equal(groups.objectRemoval.setName, 'no-animation');
+  assert.ok(groups.objectRemoval.actions.includes('object-delete'));
+  assert.equal(groups.floatingSurface.setName, 'no-animation');
+  assert.equal(groups.pillSurface.setName, 'no-animation');
+  assert.equal(groups.unsavedDialogSurface.setName, 'no-animation');
   assert.ok(partition['no-animation'].includes('text-edit-type'));
   assert.ok(partition['no-animation'].includes('rubber-band-release'));
   assert.ok(partition['no-animation'].includes('text-box-create'));
@@ -321,9 +333,13 @@ test('action animation policy partitions user actions and tracks missing assignm
   assert.ok(partition['no-animation'].includes('object-deselect'));
   assert.ok(partition['no-animation'].includes('image-file-dialog-open'));
   assert.ok(partition['no-animation'].includes('eyedropper-loupe-drag'));
-  assert.ok(partition['smooth-slide'].includes('menu-open'));
-  assert.ok(partition.jiggle.includes('image-object-create'));
-  assert.ok(partition.jiggle.includes('object-undo-delete'));
+  assert.deepEqual(plain(partition['smooth-slide']), []);
+  assert.ok(partition['no-animation'].includes('menu-open'));
+  assert.ok(partition['no-animation'].includes('pill-message-update'));
+  assert.ok(partition['no-animation'].includes('unsaved-dialog-open'));
+  assert.ok(partition['no-animation'].includes('image-object-create'));
+  assert.ok(partition['no-animation'].includes('object-undo-delete'));
+  assert.deepEqual(plain(partition.jiggle), ['copy-selected-objects', 'copy-text-object', 'copy-text-selection']);
   assert.ok(partition['not-applicable'].includes('app-window-minimize'));
   assert.deepEqual(plain(motion.getActionAnimationPolicyIssues()), {
     duplicateAssignments: [],
@@ -334,8 +350,12 @@ test('action animation policy partitions user actions and tracks missing assignm
   assert.equal(motion.actionAnimationSetFor('object-delete'), 'no-animation');
   assert.equal(motion.actionAnimationSetFor('object-deselect'), 'no-animation');
   assert.equal(motion.actionAnimationSetFor('cut-selected-objects'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('object-undo-delete'), 'jiggle');
-  assert.equal(motion.actionAnimationSetFor('menu-open'), 'smooth-slide');
+  assert.equal(motion.actionAnimationSetFor('object-undo-delete'), 'no-animation');
+  assert.equal(motion.actionAnimationSetFor('flip-image'), 'no-animation');
+  assert.equal(motion.actionAnimationSetFor('image-object-paste'), 'no-animation');
+  assert.equal(motion.actionAnimationSetFor('menu-open'), 'no-animation');
+  assert.equal(motion.actionAnimationSetFor('pill-message-update'), 'no-animation');
+  assert.equal(motion.actionAnimationSetFor('unsaved-dialog-open'), 'no-animation');
   assert.equal(motion.actionAnimationSetFor('copy-text-selection'), 'jiggle');
   assert.equal(motion.actionAnimationSetFor('app-window-minimize'), 'not-applicable');
 
@@ -350,26 +370,30 @@ test('action animation policy partitions user actions and tracks missing assignm
   assert.equal(motion.objectMotionForDraw(quietObj), null);
 
   const surface = classElement();
-  assert.equal(motion.applyActionAnimation('menu-open', { surface }), true);
-  assert.equal(surface.classList.contains('motion-smooth-slide-enter'), true);
+  assert.equal(motion.applyActionAnimation('menu-open', { surface }), false);
+  assert.equal(surface.classList.contains('motion-smooth-slide-enter'), false);
 
   const jiggleObj = { id: 'jiggle-1', type: 'image' };
   context.selectedIds = new Set([jiggleObj.id]);
   context.objectsMap = new Map([[jiggleObj.id, jiggleObj]]);
-  assert.equal(motion.applyActionAnimation('object-select'), true);
-  assert.ok(motion.objectMotionForDraw(jiggleObj));
+  assert.equal(motion.applyActionAnimation('object-select'), false);
+  assert.equal(motion.objectMotionForDraw(jiggleObj), null);
 
   const restoredImage = { id: 'restored-image', type: 'image' };
-  assert.equal(motion.applyActionAnimation('object-undo-delete', { objects: [restoredImage] }, { includeText: false }), true);
-  assert.ok(motion.objectMotionForDraw(restoredImage));
+  assert.equal(motion.applyActionAnimation('object-undo-delete', { objects: [restoredImage] }, { includeText: false }), false);
+  assert.equal(motion.objectMotionForDraw(restoredImage), null);
 
   const paramGuardImage = { id: 'param-guard-image', type: 'image' };
   assert.equal(motion.applyActionAnimation('image-object-create', { objects: [paramGuardImage] }, {
     amplitude: 0.2,
     duration: 1200,
-  }), true);
+  }), false);
   setTime(700);
   assert.equal(motion.objectMotionForDraw(paramGuardImage), null);
+
+  const copiedImage = { id: 'copied-image', type: 'image' };
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [copiedImage] }), true);
+  assert.ok(motion.objectMotionForDraw(copiedImage));
 
   assert.deepEqual(plain(motion.getUnassignedActionAnimations()), []);
   assert.equal(motion.applyActionAnimation('missing-action-for-test'), false);

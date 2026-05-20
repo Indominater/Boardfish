@@ -18,6 +18,12 @@ function loadHistoryHarness() {
   const jelloRemoved = [];
   const smoothAdded = [];
   const smoothRemoved = [];
+  const actionCalls = [];
+  const jiggleActions = new Set([
+    'copy-selected-objects',
+    'copy-text-object',
+    'copy-text-selection',
+  ]);
   const ids = (items) => Array.from(items || [], (obj) => obj.id);
   const motionItems = (items, options = {}) => {
     const list = Array.from(items || []);
@@ -49,6 +55,7 @@ function loadHistoryHarness() {
     jelloRemoved,
     smoothAdded,
     smoothRemoved,
+    actionCalls,
     BoardfishEditorState: {
       replaceBoardObjects(nextObjects) {
         context.objects = nextObjects;
@@ -71,10 +78,20 @@ function loadHistoryHarness() {
         const list = Array.from(payload.objects || payload.addedObjects || []);
         const removed = Array.from(payload.removedObjects || []);
         const motionOptions = { ...(payload.options || {}), ...options };
+        actionCalls.push({
+          action,
+          ids: ids(list),
+          removedIds: ids(removed),
+          selection: !!payload.selection,
+          options: { ...motionOptions },
+        });
         if (action === 'object-delete') {
           return false;
         }
         if (String(action).startsWith('text-box-')) {
+          return false;
+        }
+        if (!jiggleActions.has(action)) {
           return false;
         }
         if (payload.selection) {
@@ -174,7 +191,7 @@ function setBoard(context, objects, selectedIds = []) {
   context.selectedId = selectedIds[selectedIds.length - 1] || null;
 }
 
-test('undo and redo keep text out of selection pulse for text-safe actions', () => {
+test('undo and redo keep text-safe actions inert under copy-only jiggle policy', () => {
   const context = loadHistoryHarness();
   setBoard(context, [
     { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'hello' } },
@@ -188,17 +205,14 @@ test('undo and redo keep text out of selection pulse for text-safe actions', () 
   context.undo();
   context.redo();
 
-  assert.deepEqual(context.pulses, [
-    { includeText: false },
-    { includeText: false },
-  ]);
+  assert.deepEqual(context.pulses, []);
   assert.deepEqual(context.jelloAdded, []);
   assert.deepEqual(context.jelloRemoved, []);
   assert.deepEqual(context.smoothAdded, []);
   assert.deepEqual(context.smoothRemoved, []);
 });
 
-test('duplicate and paste history replay leaves text unanimated while jiggling images', () => {
+test('duplicate and paste history replay are inert under copy-only jiggle policy', () => {
   for (const reason of ['duplicate-selected', 'paste-objects']) {
     const context = loadHistoryHarness();
     setBoard(context, [
@@ -224,9 +238,7 @@ test('duplicate and paste history replay leaves text unanimated while jiggling i
     assert.deepEqual(context.smoothRemoved, [], reason);
     assert.deepEqual(context.jelloRemoved, [], reason);
     assert.deepEqual(context.smoothAdded, [], reason);
-    assert.deepEqual(context.jelloAdded, [
-      { ids: ['image-2'], options: { includeText: false } },
-    ], reason);
+    assert.deepEqual(context.jelloAdded, [], reason);
   }
 });
 
@@ -251,7 +263,7 @@ test('add-text history replay does not animate text objects', () => {
   assert.deepEqual(context.jelloAdded, []);
 });
 
-test('undo and redo replay full selection pulse for actions that originally jiggle text', () => {
+test('undo and redo leave prior selection-pulse actions inert under copy-only jiggle policy', () => {
   const context = loadHistoryHarness();
   setBoard(context, [
     { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'hello' } },
@@ -267,13 +279,69 @@ test('undo and redo replay full selection pulse for actions that originally jigg
   context.undo();
   context.redo();
 
-  assert.deepEqual(context.pulses, [
-    {},
-    {},
-  ]);
+  assert.deepEqual(context.pulses, []);
 });
 
-test('undo delete jiggles restored images while redo delete stays inert', () => {
+test('undo and redo image flips replay the flip animation action', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, [
+    { id: 'image-1', type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: { imgKey: 'img-1', flipX: false, flipY: false } },
+  ], ['image-1']);
+
+  context.snapshot();
+  context.objectsMap.get('image-1').data.flipX = true;
+  context.markDirty('image-1');
+  context.pushHistory('flip-image-x');
+
+  context.undo();
+  context.redo();
+
+  assert.deepEqual(
+    context.actionCalls
+      .filter((call) => call.action === 'flip-image' || call.action === 'history-object-jiggle-replay')
+      .map((call) => ({ action: call.action, selection: call.selection, options: call.options })),
+    [
+      { action: 'flip-image', selection: true, options: {} },
+      { action: 'flip-image', selection: true, options: {} },
+    ],
+  );
+});
+
+test('redo paste replays paste actions while undo paste stays inert', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, []);
+
+  context.snapshot();
+  setBoard(context, [
+    { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'hello' } },
+    { id: 'image-1', type: 'image', x: 40, y: 40, w: 100, h: 100, z: 2, data: { imgKey: 'img-1' } },
+  ], ['text-1', 'image-1']);
+  context.markDirty('text-1');
+  context.markDirty('image-1');
+  context.pushHistory('paste-objects');
+
+  context.undo();
+  context.redo();
+
+  assert.deepEqual(
+    context.actionCalls
+      .filter((call) => ['object-delete', 'text-box-paste', 'image-object-paste'].includes(call.action))
+      .map((call) => ({
+        action: call.action,
+        ids: call.ids,
+        removedIds: call.removedIds,
+        selection: call.selection,
+        options: call.options,
+      })),
+    [
+      { action: 'object-delete', ids: [], removedIds: ['text-1', 'image-1'], selection: false, options: {} },
+      { action: 'text-box-paste', ids: ['text-1'], removedIds: [], selection: false, options: {} },
+      { action: 'image-object-paste', ids: ['image-1'], removedIds: [], selection: false, options: { includeText: false } },
+    ],
+  );
+});
+
+test('undo and redo delete stay inert under copy-only jiggle policy', () => {
   const context = loadHistoryHarness();
   setBoard(context, [
     { id: 'image-1', type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: { imgKey: 'img-1' } },
@@ -290,9 +358,7 @@ test('undo delete jiggles restored images while redo delete stays inert', () => 
   assert.deepEqual(context.pulses, []);
   assert.deepEqual(context.smoothAdded, []);
   assert.deepEqual(context.smoothRemoved, []);
-  assert.deepEqual(context.jelloAdded, [
-    { ids: ['image-1'], options: { includeText: false } },
-  ]);
+  assert.deepEqual(context.jelloAdded, []);
   assert.deepEqual(context.jelloRemoved, []);
 });
 
@@ -397,7 +463,7 @@ test('undoing a text run restores the caret saved before the run started', () =>
   assert.equal(context._editEl.selectionEnd, 14);
 });
 
-test('undo image add removes without animation and redo jiggles images back', () => {
+test('undo and redo image add stay inert under copy-only jiggle policy', () => {
   const context = loadHistoryHarness();
   setBoard(context, []);
 
@@ -414,8 +480,6 @@ test('undo image add removes without animation and redo jiggles images back', ()
   assert.deepEqual(context.pulses, []);
   assert.deepEqual(context.smoothRemoved, []);
   assert.deepEqual(context.jelloRemoved, []);
-  assert.deepEqual(context.jelloAdded, [
-    { ids: ['image-1'], options: { includeText: false } },
-  ]);
+  assert.deepEqual(context.jelloAdded, []);
   assert.deepEqual(context.smoothAdded, []);
 });

@@ -34,55 +34,85 @@ const BoardfishMotion = (() => {
     jiggle: 'jiggle',
     notApplicable: 'not-applicable',
   });
+  const actionAnimationGroup = (setName, actions) => Object.freeze({
+    setName,
+    actions: Object.freeze([...actions]),
+  });
   // ACTION ANIMATION CONTRACT:
-  // Every new user-visible action must be added to exactly one bucket below and
+  // Every new user-visible action must be added to exactly one group below and
   // feature code must request motion through applyActionAnimation(action, ...).
+  // Keep inherently connected action paths in the same group or replay them
+  // through the same action name, so changing one setName updates the sequence.
   // Keep low-level note* helpers inside this module or tests; new action code
   // should not choose jello/smooth-slide/no-animation directly.
-  const ACTION_ANIMATION_ASSIGNMENTS = Object.freeze({
-    [ACTION_ANIMATION_SETS.none]: Object.freeze([
+  const ACTION_ANIMATION_GROUPS = Object.freeze({
+    boardNavigation: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'board-canvas-pan',
-      'board-file-drop-open',
       'board-reset-zoom',
       'board-wheel-zoom',
+    ]),
+    boardFileOpen: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'board-file-drop-open',
+      'open-board-file-pick',
+    ]),
+    objectRemoval: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'cut-selected-objects',
+      'object-delete',
+    ]),
+    quietObjectSelection: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'object-deselect',
+      'rubber-band-release',
+    ]),
+    appStateCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'dark-mode-toggle',
+      'history-redo',
+      'history-undo',
+      'menu-command-press',
+      'new-board-state-reset',
+    ]),
+    eyedropperQuiet: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'eyedropper-hold-end',
       'eyedropper-hold-start',
       'eyedropper-hover',
       'eyedropper-loupe-close',
       'eyedropper-loupe-drag',
       'eyedropper-loupe-open',
+    ]),
+    exportCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'export-all-images',
       'export-all-text',
       'export-selected-image',
       'export-selected-images',
+    ]),
+    fileDialogCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'file-dialog-cancel',
-      'history-redo',
-      'history-undo',
       'image-file-dialog-open',
       'image-file-drop',
-      'menu-command-press',
       'native-file-dialog-open',
-      'new-board-state-reset',
-      'object-delete',
-      'object-deselect',
-      'open-board-file-pick',
-      'plain-text-paste-as-text-box',
-      'rubber-band-release',
+    ]),
+    saveCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'save-board',
       'save-board-as',
+    ]),
+    textBoxCreate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'plain-text-paste-as-text-box',
       'text-box-create',
-      'text-box-delete',
-      'text-box-drag',
-      'text-box-duplicate',
-      'text-box-empty-delete-on-exit',
-      'text-box-paste',
       'text-box-redo-create',
-      'text-box-redo-delete',
       'text-box-resize',
       'text-box-undo-create',
+    ]),
+    textBoxRemoval: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'text-box-delete',
+      'text-box-empty-delete-on-exit',
+      'text-box-redo-delete',
       'text-box-undo-delete',
+    ]),
+    textBoxTransform: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'text-box-drag',
+      'text-box-duplicate',
+      'text-box-paste',
+    ]),
+    textEditing: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'text-edit-caret-move',
       'text-edit-cut',
       'text-edit-delete',
@@ -93,47 +123,69 @@ const BoardfishMotion = (() => {
       'text-edit-select-all',
       'text-edit-type',
       'text-height-change',
+    ]),
+    unsavedDialogButtons: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'unsaved-dialog-cancel-press',
       'unsaved-dialog-delete-press',
       'unsaved-dialog-save-press',
     ]),
-    [ACTION_ANIMATION_SETS.smoothSlide]: Object.freeze([
+    floatingSurface: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'context-action-rail-close',
       'context-action-rail-open',
       'menu-close',
       'menu-open',
+    ]),
+    pillSurface: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'opening-shield-pill-open',
       'pill-message-close',
       'pill-message-open',
       'pill-message-update',
+    ]),
+    unsavedDialogSurface: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'unsaved-dialog-close',
       'unsaved-dialog-open',
     ]),
-    [ACTION_ANIMATION_SETS.jiggle]: Object.freeze([
+    objectSelection: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'additive-select',
-      'bulk-image-create',
+      'object-select',
+      'rubber-band-select',
+    ]),
+    objectCopy: actionAnimationGroup(ACTION_ANIMATION_SETS.jiggle, [
       'copy-selected-objects',
       'copy-text-object',
       'copy-text-selection',
-      'history-object-jiggle-replay',
+    ]),
+    objectCreate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'bulk-image-create',
       'image-object-create',
-      'image-object-drag',
+      'object-undo-insert',
+    ]),
+    objectDuplicate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'image-object-duplicate',
+    ]),
+    objectPaste: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'image-object-paste',
+    ]),
+    objectTransform: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'image-object-drag',
       'image-object-resize',
       'object-drag',
       'object-group-drag',
       'object-multi-resize',
       'object-resize',
-      'object-select',
-      'object-undo-delete',
-      'object-undo-insert',
-      'rubber-band-select',
       'send-selected-to-back',
+    ]),
+    imageTransform: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'flip-image',
       'rotate-image',
     ]),
-    [ACTION_ANIMATION_SETS.notApplicable]: Object.freeze([
+    historyFallbackReplay: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'history-object-jiggle-replay',
+    ]),
+    objectRestore: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
+      'object-undo-delete',
+    ]),
+    appWindowNative: actionAnimationGroup(ACTION_ANIMATION_SETS.notApplicable, [
       'app-window-close-request',
       'app-window-drag',
       'app-window-minimize',
@@ -143,6 +195,19 @@ const BoardfishMotion = (() => {
       'native-find-shortcut',
     ]),
   });
+  const buildActionAnimationAssignments = () => {
+    const assignments = {};
+    for (const setName of Object.values(ACTION_ANIMATION_SETS)) assignments[setName] = [];
+    for (const group of Object.values(ACTION_ANIMATION_GROUPS)) {
+      if (!assignments[group.setName]) assignments[group.setName] = [];
+      assignments[group.setName].push(...group.actions);
+    }
+    for (const [setName, actions] of Object.entries(assignments)) {
+      assignments[setName] = Object.freeze(actions);
+    }
+    return assignments;
+  };
+  const ACTION_ANIMATION_ASSIGNMENTS = Object.freeze(buildActionAnimationAssignments());
   let jelloParams = null;
   let smoothSlideParams = null;
   let noAnimationParams = null;
@@ -235,6 +300,12 @@ const BoardfishMotion = (() => {
     [ACTION_ANIMATION_SETS.jiggle]: [...ACTION_ANIMATION_ASSIGNMENTS[ACTION_ANIMATION_SETS.jiggle]],
     [ACTION_ANIMATION_SETS.notApplicable]: [...ACTION_ANIMATION_ASSIGNMENTS[ACTION_ANIMATION_SETS.notApplicable]],
   });
+  const getActionAnimationGroups = () => Object.freeze(Object.fromEntries(
+    Object.entries(ACTION_ANIMATION_GROUPS).map(([name, group]) => [name, Object.freeze({
+      setName: group.setName,
+      actions: [...group.actions],
+    })])
+  ));
   const getActionAnimationPolicyIssues = () => Object.freeze({
     duplicateAssignments: actionAnimationPolicyDuplicateAssignments.map((issue) => ({
       action: issue.action,
@@ -857,6 +928,7 @@ const BoardfishMotion = (() => {
     configureSmoothSlide,
     configureJello,
     getActionAnimationPartition,
+    getActionAnimationGroups,
     getActionAnimationPolicyIssues,
     getActionAnimationSetParams,
     getJelloParams,
