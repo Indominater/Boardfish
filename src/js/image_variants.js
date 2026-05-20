@@ -80,6 +80,9 @@ function getImageVariantMap(key) {
 function clearScaledImageVariants(key = null) {
   if (key) {
     imageScaledBitmapStore.removeGroup(key);
+    if (imageScaledVariantQueue.length) {
+      imageScaledVariantQueue = imageScaledVariantQueue.filter((task) => task?.variantKey !== key);
+    }
     for (const pendingKey of [...imageScaledBitmapPending]) {
       if (pendingKey.startsWith(`${key}:`)) {
         imageScaledBitmapPending.delete(pendingKey);
@@ -141,6 +144,10 @@ function scheduleScaledVariantReadyRender(countReadyVariant = true) {
 function enqueueScaledVariantTask(task) {
   imageScaledVariantQueue.push(task);
   scheduleScaledVariantQueue();
+}
+
+function shouldBuildScaledImageVariant(pendingKey, generation) {
+  return generation === _imageStoreGeneration && imageScaledBitmapPending.has(pendingKey);
 }
 
 function scheduleScaledVariantQueue() {
@@ -208,7 +215,12 @@ function queueScaledImageVariant(key, source, scale) {
   imageScaledBitmapPending.add(pendingKey);
   addPendingScaledVariantBytes(pendingKey, estimatedBytes);
   const generation = _imageStoreGeneration;
-  enqueueScaledVariantTask(async () => {
+  const task = async () => {
+    if (!shouldBuildScaledImageVariant(pendingKey, generation)) {
+      imageScaledBitmapPending.delete(pendingKey);
+      removePendingScaledVariantBytes(pendingKey);
+      return;
+    }
     const buildStart = performance.now();
     try {
       const w = Math.max(1, Math.ceil(sourceW * scale));
@@ -222,6 +234,7 @@ function queueScaledImageVariant(key, source, scale) {
         });
         imageScaledVariantResizeBitmapCount++;
       } catch (_) {
+        if (!shouldBuildScaledImageVariant(pendingKey, generation)) return;
         const canvas = document.createElement('canvas');
         canvas.width = w;
         canvas.height = h;
@@ -231,7 +244,7 @@ function queueScaledImageVariant(key, source, scale) {
         bitmap = await createImageBitmap(canvas);
         imageScaledVariantCanvasFallbackCount++;
       }
-      if (generation !== _imageStoreGeneration) {
+      if (!shouldBuildScaledImageVariant(pendingKey, generation)) {
         bitmap.close();
         return;
       }
@@ -248,7 +261,11 @@ function queueScaledImageVariant(key, source, scale) {
       imageScaledBitmapPending.delete(pendingKey);
       removePendingScaledVariantBytes(pendingKey);
     }
-  });
+  };
+  task.variantKey = key;
+  task.pendingKey = pendingKey;
+  task.generation = generation;
+  enqueueScaledVariantTask(task);
 }
 
 function hasScaledImageVariant(key, scale) {

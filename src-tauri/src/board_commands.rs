@@ -124,6 +124,7 @@ pub(crate) async fn save_board(
         sum.saturating_add(source.bytes.len())
     });
     validate_board_limits(&board, board_json.len(), image_bytes)?;
+    drop(board);
 
     let result = tokio::task::spawn_blocking(move || {
         write_board_container(&path, board_json, sources, serialize_ms)

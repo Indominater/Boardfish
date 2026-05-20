@@ -950,7 +950,7 @@ test('smooth slide is limited to passive hover timing, not interactive surface o
 test('copy-only jiggle policy keeps object action routing centralized', () => {
   const editorStateSource = readSource('src/js/editor_state_boundary.js');
   const motionSource = readSource('src/js/motion.js');
-  assert.match(editorStateSource, /const previousSelectedIds = new Set\(selectedIds\)/);
+  assert.match(editorStateSource, /const previousSelectedIds = animateSelection \? new Set\(selectedIds\) : null/);
   assert.match(editorStateSource, /noteNewlySelectedObjects\(previousSelectedIds\)/);
   assert.match(editorStateSource, /if \(animateSelection\) noteNewlySelectedObjects\(previousSelectedIds\)/);
   assert.match(editorStateSource, /if \(obj && obj\.type !== 'text'\) newlySelectedObjects\.push\(obj\)/);

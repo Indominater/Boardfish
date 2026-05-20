@@ -162,3 +162,35 @@ test('editor object removal, replacement, and reset clear pending inserted-image
   context.BoardfishEditorState.resetBoardObjectState();
   assert.deepEqual(JSON.parse(JSON.stringify(context.calls.clear)), [['obj-1', 'missing'], null]);
 });
+
+test('editor selection snapshots are allocated only for animated selection changes', () => {
+  const context = loadEditorStateBoundaryHarness();
+  let allocations = 0;
+  context.Set = class CountingSet extends Set {
+    constructor(iterable) {
+      super(iterable);
+      allocations++;
+    }
+  };
+
+  context.BoardfishEditorState.setSelection(['obj-2'], {
+    primaryId: 'obj-2',
+    animateSelection: false,
+  });
+  assert.equal(allocations, 0);
+
+  context.BoardfishEditorState.setSelection(['obj-1'], {
+    primaryId: 'obj-1',
+    animateSelection: true,
+  });
+  assert.equal(allocations, 1);
+});
+
+test('failed web image inserts revoke unadopted web image sources', () => {
+  const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
+
+  assert.match(source, /const cleanupFailedWebImageInsertSource = \(imgKey, imageSource\) =>/);
+  assert.match(source, /if \(!obj\) cleanupFailedWebImageInsertSource\(imgKey, imageSource\);/);
+  assert.match(source, /catch \(err\) \{[\s\S]*cleanupFailedWebImageInsertSource\(imgKey, imageSource\);[\s\S]*throw err;/);
+  assert.match(source, /BoardfishWebBoardContainer\.revokeImageSource\?\.\(imageSource\);/);
+});

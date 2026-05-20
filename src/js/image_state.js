@@ -866,7 +866,6 @@ const removeImageRuntimeCachesForKey = (key) => {
     assetUrls: 0,
     bitmaps: 0,
     bitmapFailures: 0,
-    scaledVariants: 0,
   };
   if (imageCache[key]) {
     delete imageCache[key];

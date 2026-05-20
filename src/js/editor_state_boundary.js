@@ -24,7 +24,7 @@
     exitEditing = true,
   } = {}) {
     const nextIds = Array.isArray(ids) ? ids : [...(ids || [])];
-    const previousSelectedIds = new Set(selectedIds);
+    const previousSelectedIds = animateSelection ? new Set(selectedIds) : null;
     if (exitEditing && editingId && !nextIds.includes(editingId)) exitEdit();
     selectedIds.clear();
     let lastExistingId = null;

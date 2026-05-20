@@ -192,6 +192,42 @@ test('scaled image variants stay disabled when createImageBitmap is unavailable'
   assert.equal(context.isViewportImageScalingActive(), false);
 });
 
+test('stale scaled image variant tasks skip resize work', async () => {
+  const context = loadImageVariantsForPlatform(false);
+  let resizeCalls = 0;
+  context.createImageBitmap = async () => {
+    resizeCalls++;
+    return { width: 50, height: 50, close() {} };
+  };
+
+  context.queueScaledImageVariant('img-1', { width: 100, height: 100 }, 0.5);
+  assert.equal(context.imageScaledVariantQueue.length, 1);
+  assert.equal(context.isScaledImageVariantPending('img-1', 0.5), true);
+
+  const task = context.imageScaledVariantQueue.shift();
+  context._imageStoreGeneration++;
+  await task();
+
+  assert.equal(resizeCalls, 0);
+  assert.equal(context.isScaledImageVariantPending('img-1', 0.5), false);
+  assert.equal(context.hasScaledImageVariant('img-1', 0.5), false);
+});
+
+test('clearing scaled variants for one key removes queued work for that key', () => {
+  const context = loadImageVariantsForPlatform(false);
+
+  context.queueScaledImageVariant('img-1', { width: 100, height: 100 }, 0.5);
+  context.queueScaledImageVariant('img-2', { width: 100, height: 100 }, 0.5);
+
+  assert.equal(context.imageScaledVariantQueue.length, 2);
+  context.clearScaledImageVariants('img-1');
+
+  assert.equal(context.imageScaledVariantQueue.length, 1);
+  assert.equal(context.imageScaledVariantQueue[0].variantKey, 'img-2');
+  assert.equal(context.isScaledImageVariantPending('img-1', 0.5), false);
+  assert.equal(context.isScaledImageVariantPending('img-2', 0.5), true);
+});
+
 test('eyedropper readout resolves safe scaled variants independently of the preview', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 

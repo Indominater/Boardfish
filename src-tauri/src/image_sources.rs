@@ -281,6 +281,7 @@ pub(crate) async fn materialize_cached_image_sources(
         for (key, source) in sources {
             let path = image_source_file_path(&dir, &key, &source.ext);
             if let Err(err) = std::fs::write(&path, &source.bytes) {
+                written_paths.push(path);
                 cleanup_materialized_paths(written_paths);
                 return Err(err.to_string());
             }

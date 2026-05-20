@@ -83,9 +83,22 @@
       input.accept = accept;
       input.style.display = 'none';
       let settled = false;
+      let focusHandler = null;
+      let focusCancelTimer = 0;
+      const removeFocusFallback = () => {
+        if (focusHandler) {
+          root.removeEventListener('focus', focusHandler);
+          focusHandler = null;
+        }
+        if (focusCancelTimer) {
+          clearTimeout(focusCancelTimer);
+          focusCancelTimer = 0;
+        }
+      };
       const done = (value) => {
         if (settled) return;
         settled = true;
+        removeFocusFallback();
         input.remove();
         resolve(value);
       };
@@ -94,11 +107,18 @@
         done(file ? webFileRef(file) : null);
       });
       setTimeout(() => {
-        root.addEventListener('focus', () => {
-          setTimeout(() => {
+        if (settled) return;
+        focusHandler = () => {
+          if (focusHandler) {
+            root.removeEventListener('focus', focusHandler);
+            focusHandler = null;
+          }
+          focusCancelTimer = setTimeout(() => {
+            focusCancelTimer = 0;
             if (!input.files?.length) done(null);
           }, 500);
-        }, { once: true });
+        };
+        root.addEventListener('focus', focusHandler, { once: true });
       }, 0);
       document.body.appendChild(input);
       input.click();

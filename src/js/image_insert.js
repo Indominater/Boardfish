@@ -116,6 +116,24 @@ const createWebImageSourceFromBytes = (file, imgKey, bytes) => {
   throw new Error('web image container unavailable');
 };
 
+const cleanupFailedWebImageInsertSource = (imgKey, imageSource) => {
+  if (
+    imgKey
+    && typeof imageStore !== 'undefined'
+    && typeof BoardfishImageStore !== 'undefined'
+    && BoardfishImageStore.getSource?.(imgKey) === imageSource
+  ) {
+    delete imageStore[imgKey];
+    if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey);
+    if (typeof noteEyedropperImageSourceChanged === 'function') {
+      noteEyedropperImageSourceChanged(imgKey, 'image-source-removed');
+    }
+  }
+  if (typeof BoardfishWebBoardContainer !== 'undefined') {
+    BoardfishWebBoardContainer.revokeImageSource?.(imageSource);
+  }
+};
+
 function shouldUseNativeDataUrlImageCache(src) {
   return hasTauri() && isImageDataUrl(src) && src.length >= NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD;
 }
@@ -538,8 +556,16 @@ const insertWebImageFile = async (file, x, y, dbg, options = {}) => {
     readyRenderMinIntervalMs: options.readyRenderMinIntervalMs,
   });
   if (!options.holdShield) hideInputShield();
-  const obj = await addPromise;
+  let obj;
+  try {
+    obj = await addPromise;
+  } catch (err) {
+    cleanupFailedWebImageInsertSource(imgKey, imageSource);
+    if (!options.holdShield) showInputShield();
+    throw err;
+  }
   if (!options.holdShield) showInputShield();
+  if (!obj) cleanupFailedWebImageInsertSource(imgKey, imageSource);
   InsertDebug.end(dbg, {
     added: !!obj,
     source: options.source,
