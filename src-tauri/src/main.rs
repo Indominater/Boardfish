@@ -13,6 +13,7 @@ mod image_source_files;
 mod image_source_process;
 mod image_sources;
 mod image_transform;
+mod memory_limits;
 #[cfg(target_os = "macos")]
 mod platform_macos;
 #[cfg(target_os = "windows")]

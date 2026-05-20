@@ -93,7 +93,11 @@ const isImageDisplayCacheRequestCurrent = (key, src, generation) => {
   if (generation !== _imageStoreGeneration) return false;
   const stored = imageStore[key];
   if (typeof stored === 'string') return stored === src;
-  if (isNativeImageRef(stored)) return !!src && imageAssetUrlCache[key] === src;
+  if (isNativeImageRef(stored)) {
+    if (!src) return false;
+    if (imageAssetUrlCache[key] === src) return true;
+    return typeof src === 'string' && src.startsWith('data:image/') && !imageAssetUrlCache[key];
+  }
   if (isWebImageRef(stored)) return !!src && webImageDisplaySrc(stored) === src;
   return false;
 };
@@ -474,10 +478,7 @@ async function ensureImageDataUrl(key, dbg = null) {
   const generation = _imageStoreGeneration;
   let promise;
   promise = OpenDebug.wrap(dbg, TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL, () => BoardfishTauri.getCachedImageDataUrl(key), { imgKey: key })
-    .then((dataUrl) => {
-      if (generation === _imageStoreGeneration && isNativeImageRef(imageStore[key])) imageStore[key] = dataUrl;
-      return dataUrl;
-    })
+    .then((dataUrl) => (generation === _imageStoreGeneration && isNativeImageRef(imageStore[key]) ? dataUrl : ''))
     .finally(() => {
       if (imageHydrationPromises.get(key) === promise) imageHydrationPromises.delete(key);
     });

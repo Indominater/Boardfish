@@ -48,6 +48,26 @@ function fitImageSize(naturalW, naturalH, exactSize = false) {
 }
 
 var NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD = 2 * 1024 * 1024;
+const nativeImageInsertReservation = { bytes: 0, objects: 0 };
+
+const reserveNativeImageContent = (bytes = 0, objectCount = 1, options = {}) => {
+  const reservedBytes = Math.max(0, Number(bytes) || 0);
+  const reservedObjects = Math.max(0, Number(objectCount) || 0);
+  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(
+    nativeImageInsertReservation.bytes + reservedBytes,
+    nativeImageInsertReservation.objects + reservedObjects,
+    options,
+  )) return null;
+  nativeImageInsertReservation.bytes += reservedBytes;
+  nativeImageInsertReservation.objects += reservedObjects;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    nativeImageInsertReservation.bytes = Math.max(0, nativeImageInsertReservation.bytes - reservedBytes);
+    nativeImageInsertReservation.objects = Math.max(0, nativeImageInsertReservation.objects - reservedObjects);
+  };
+};
 
 var isImageDataUrl = (src) => typeof src === 'string' && /^data:image\/(?:png|jpeg);base64,/i.test(src);
 
@@ -178,11 +198,26 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
   const imgKey = existingImgKey || newImgKey();
   const generation = _imageStoreGeneration;
   const sourceToken = createImageSourceToken(imgKey);
+  if (!BoardfishWebLimits.canAddObjects(1)) {
+    if (!_boardOpening) hideInputShield();
+    ViewportDebug.end(dbg, { imgKey, path: 'native-data-url-cache', skipped: 'object-limit' });
+    return null;
+  }
+  const sourceBytes = BoardfishWebLimits.dataUrlByteLength?.(src) || 0;
+  const releaseReservation = reserveNativeImageContent(sourceBytes, 1, { notifyUser: true });
+  if (!releaseReservation) {
+    if (!_boardOpening) hideInputShield();
+    ViewportDebug.end(dbg, { imgKey, path: 'native-data-url-cache', skipped: 'content-limit' });
+    return null;
+  }
+  let registeredNativeSource = false;
   try {
     ViewportDebug.step(dbg, 'native-data-url-register:start', { imgKey, dataUrl: src });
     const meta = await BoardfishTauri.registerImageSource(imgKey, src, sourceToken);
+    registeredNativeSource = true;
     if (generation !== _imageStoreGeneration) {
       cleanupNativeImageSourceToken(imgKey, sourceToken);
+      registeredNativeSource = false;
       return null;
     }
     const naturalW = Number(meta?.width) || 1;
@@ -212,6 +247,11 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
     const { w, h } = fitImageSize(naturalW, naturalH, exactSize);
     ViewportDebug.step(dbg, 'size-object', { w, h });
     const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-data-url-image');
+    if (!obj) {
+      cleanupNativeImageSourceToken(imgKey, sourceToken);
+      registeredNativeSource = false;
+      return null;
+    }
     if (typeof scheduleEyedropperNativeDecodePrewarm === 'function') {
       scheduleEyedropperNativeDecodePrewarm('add-native-data-url-image');
     }
@@ -220,11 +260,13 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
     ViewportDebug.end(dbg, { id: obj.id, imgKey, total, path: 'native-data-url-cache' });
     return obj;
   } catch (err) {
+    if (registeredNativeSource) cleanupNativeImageSourceToken(imgKey, sourceToken);
     const total = performance.now() - t0;
     ViewportDebug.max('maxImageAddMs', total);
     ViewportDebug.end(dbg, { imgKey, total, path: 'native-data-url-cache', error: String(err) });
     return null;
   } finally {
+    releaseReservation();
     if (!_boardOpening) hideInputShield();
   }
 }
@@ -314,59 +356,82 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
     cleanupNativeImageSourceToken(imgKey, sourceToken);
     return null;
   }
+  if (!BoardfishWebLimits.canAddObjects(1)) {
+    cleanupNativeImageSourceToken(imgKey, sourceToken);
+    ViewportDebug.end(dbg, { imgKey, skipped: 'object-limit' });
+    return null;
+  }
+  const bytes = Number(meta.bytes) || 0;
+  const releaseReservation = reserveNativeImageContent(bytes, 1, { notifyUser: true });
+  if (!releaseReservation) {
+    cleanupNativeImageSourceToken(imgKey, sourceToken);
+    ViewportDebug.end(dbg, { imgKey, bytes, skipped: 'content-limit' });
+    return null;
+  }
   const naturalW = Number(meta.width) || 1;
   const naturalH = Number(meta.height) || 1;
   const { w, h } = fitImageSize(naturalW, naturalH, options.exactSize);
-  BoardfishImageStore.setSource(imgKey, {
-    native: true,
-    mime: meta.mime || '',
-    ext: meta.ext || '',
-    bytes: meta.bytes || 0,
-  });
-  if (options.materializeAsset) {
-    const materializeStart = performance.now();
-    InsertDebug.step(insertDbg, 'materialize:start', { source, fileName: path, imgKey });
-    await materializeImageAssets([imgKey]);
-    InsertDebug.step(insertDbg, 'materialize:end', {
+  try {
+    BoardfishImageStore.setSource(imgKey, {
+      native: true,
+      mime: meta.mime || '',
+      ext: meta.ext || '',
+      bytes,
+    });
+    if (options.materializeAsset) {
+      const materializeStart = performance.now();
+      InsertDebug.step(insertDbg, 'materialize:start', { source, fileName: path, imgKey });
+      await materializeImageAssets([imgKey]);
+      InsertDebug.step(insertDbg, 'materialize:end', {
+        source,
+        fileName: path,
+        imgKey,
+        ms: performance.now() - materializeStart,
+        assetReady: !!imageAssetUrlCache[imgKey],
+      });
+    }
+    if (!imageAssetUrlCache[imgKey]) {
+      imageAssetUrlCache[imgKey] = convertTauriFileSrc(path);
+      InsertDebug.step(insertDbg, 'display-src:direct-file', { source, fileName: path, imgKey });
+    }
+    cacheImage(imgKey, imageAssetUrlCache[imgKey], null, null, {
+      skipSourceRegistration: true,
+      resolveOnLoad: options.resolveOnLoad === true,
+    });
+    InsertDebug.step(insertDbg, 'cache:queued', {
       source,
       fileName: path,
       imgKey,
-      ms: performance.now() - materializeStart,
+      resolveOnLoad: options.resolveOnLoad === true,
       assetReady: !!imageAssetUrlCache[imgKey],
     });
+    const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-image');
+    InsertDebug.step(insertDbg, 'object:add', {
+      source,
+      fileName: path,
+      imgKey,
+      objectId: obj?.id || '',
+      w,
+      h,
+      z: obj?.z ?? '',
+    });
+    if (!obj) {
+      cleanupNativeImageSourceToken(imgKey, sourceToken);
+      return null;
+    }
+    if (typeof scheduleEyedropperNativeDecodePrewarm === 'function') {
+      scheduleEyedropperNativeDecodePrewarm('add-native-image');
+    }
+    const total = performance.now() - t0;
+    ViewportDebug.max('maxImageAddMs', total);
+    ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, width: naturalW, height: naturalH, bytes, total, added: !!obj });
+    return obj;
+  } catch (err) {
+    cleanupNativeImageSourceToken(imgKey, sourceToken);
+    throw err;
+  } finally {
+    releaseReservation();
   }
-  if (!imageAssetUrlCache[imgKey]) {
-    imageAssetUrlCache[imgKey] = convertTauriFileSrc(path);
-    InsertDebug.step(insertDbg, 'display-src:direct-file', { source, fileName: path, imgKey });
-  }
-  cacheImage(imgKey, imageAssetUrlCache[imgKey], null, null, {
-    skipSourceRegistration: true,
-    resolveOnLoad: options.resolveOnLoad === true,
-  });
-  InsertDebug.step(insertDbg, 'cache:queued', {
-    source,
-    fileName: path,
-    imgKey,
-    resolveOnLoad: options.resolveOnLoad === true,
-    assetReady: !!imageAssetUrlCache[imgKey],
-  });
-  const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-image');
-  InsertDebug.step(insertDbg, 'object:add', {
-    source,
-    fileName: path,
-    imgKey,
-    objectId: obj?.id || '',
-    w,
-    h,
-    z: obj?.z ?? '',
-  });
-  if (typeof scheduleEyedropperNativeDecodePrewarm === 'function') {
-    scheduleEyedropperNativeDecodePrewarm('add-native-image');
-  }
-  const total = performance.now() - t0;
-  ViewportDebug.max('maxImageAddMs', total);
-  ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, width: naturalW, height: naturalH, bytes: meta.bytes || 0, total, added: !!obj });
-  return obj;
 }
 
 fileInput.addEventListener('change', async () => {
@@ -507,10 +572,22 @@ async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {})
 async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken = null) {
   showInputShield();
   const objectCountBefore = objects.length;
+  let releaseReservation = null;
   try {
     const naturalW = Number(meta?.width) || 1;
     const naturalH = Number(meta?.height) || 1;
     const bytes = Number(meta?.bytes) || 0;
+    if (!BoardfishWebLimits.canAddObjects(1)) {
+      cleanupNativeImageSourceToken(imgKey, sourceToken);
+      ClipDebug.end(dbg, { path, added: false, imgKey, skipped: 'object-limit', objectCountBefore, objectCountAfter: objects.length });
+      return null;
+    }
+    releaseReservation = reserveNativeImageContent(bytes, 1, { notifyUser: true });
+    if (!releaseReservation) {
+      cleanupNativeImageSourceToken(imgKey, sourceToken);
+      ClipDebug.end(dbg, { path, added: false, imgKey, skipped: 'content-limit', objectCountBefore, objectCountAfter: objects.length });
+      return null;
+    }
     ClipDebug.step(dbg, 'paste-native-cache:source-registered', {
       path,
       imgKey,
@@ -546,6 +623,11 @@ async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken
     });
     const { w, h } = fitImageSize(naturalW, naturalH, false);
     const obj = addImageObject(imgKey, x, y, w, h, {}, 'paste-native-image');
+    if (!obj) {
+      cleanupNativeImageSourceToken(imgKey, sourceToken);
+      ClipDebug.end(dbg, { path, added: false, imgKey, skipped: 'object-limit', objectCountBefore, objectCountAfter: objects.length });
+      return null;
+    }
     ClipDebug.step(dbg, 'paste-native-cache:add-object', { path, imgKey, objectId: obj.id, w, h });
     ClipDebug.step(dbg, 'paste-image:ready-wait-start', { path, imgKey });
     const readyMetrics = await imageReadyPromiseForKey(imgKey);
@@ -574,6 +656,7 @@ async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken
     cleanupNativeImageSourceToken(imgKey, sourceToken);
     throw err;
   } finally {
+    if (releaseReservation) releaseReservation();
     hideInputShield();
   }
 }
@@ -695,7 +778,15 @@ async function insertNativeImagePaths(paths, x, y, source = 'native-drop') {
   let added = 0;
   const readyPromises = [];
   const addedObjects = new Array(paths.length);
-  const imagePaths = paths.filter((path) => /\.(png|jpe?g)$/i.test(path));
+  if (!BoardfishWebLimits.canAddObjects(1)) {
+    InsertDebug.end(dbg, { source, skipped: 'web-object-limit', fileCount: paths.length });
+    return;
+  }
+  const remainingSlotsRaw = BoardfishWebLimits.remainingObjectSlots?.();
+  const remainingSlots = Number.isFinite(Number(remainingSlotsRaw)) ? Number(remainingSlotsRaw) : paths.length;
+  const imagePaths = paths
+    .filter((path) => /\.(png|jpe?g)$/i.test(path))
+    .slice(0, Math.max(0, remainingSlots));
   const bulk = imagePaths.length > 1;
   const concurrency = nativeImageInsertConcurrency(imagePaths.length);
   const bulkZBase = bulk ? zCounter + 1 : null;

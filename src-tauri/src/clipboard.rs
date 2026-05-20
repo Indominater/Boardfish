@@ -3,6 +3,9 @@ use std::sync::Arc;
 
 use crate::image_sources::{CachedImageSource, ImageSourceCache};
 use crate::image_transform::transform_dynamic_image;
+use crate::memory_limits::{
+    estimate_base64_decoded_len, validate_decoded_image_dimensions, validate_image_source_bytes,
+};
 use crate::{elapsed_ms, rgba_mb};
 
 static CLIPBOARD_DEBUG: AtomicBool = AtomicBool::new(false);
@@ -173,6 +176,7 @@ fn transform_rgba(
     flip_y: bool,
     rotation: u32,
 ) -> Result<(u32, u32, Arc<[u8]>), String> {
+    validate_decoded_image_dimensions(width, height)?;
     let normalized_rotation = rotation % 360;
     if !flip_x && !flip_y && normalized_rotation == 0 {
         return Ok((width, height, rgba));
@@ -189,7 +193,16 @@ fn transform_rgba(
     .to_rgba8();
     let width = img.width();
     let height = img.height();
+    validate_decoded_image_dimensions(width, height)?;
     Ok((width, height, Arc::from(img.into_raw())))
+}
+
+fn image_dimensions_from_bytes(bytes: &[u8]) -> Result<(u32, u32), String> {
+    image::io::Reader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?
+        .into_dimensions()
+        .map_err(|e| e.to_string())
 }
 
 fn decode_data_url_to_cached_image_timed(
@@ -198,18 +211,23 @@ fn decode_data_url_to_cached_image_timed(
     use base64::{engine::general_purpose, Engine as _};
     let total = std::time::Instant::now();
     let base64_data = data_url.split(',').nth(1).ok_or("invalid data URL")?;
+    validate_image_source_bytes(estimate_base64_decoded_len(base64_data)?)?;
     let base64_decode = std::time::Instant::now();
     let bytes = general_purpose::STANDARD
         .decode(base64_data)
         .map_err(|e| e.to_string())?;
+    validate_image_source_bytes(bytes.len())?;
     let base64_ms = elapsed_ms(base64_decode);
     clipboard_debug("decode_data_url base64", base64_decode);
     let image_decode = std::time::Instant::now();
+    let (width, height) = image_dimensions_from_bytes(&bytes)?;
+    validate_decoded_image_dimensions(width, height)?;
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
     let image_decode_ms = elapsed_ms(image_decode);
     clipboard_debug("decode_data_url image decode", image_decode);
     let rgba_convert = std::time::Instant::now();
     let rgba = img.to_rgba8();
+    validate_decoded_image_dimensions(rgba.width(), rgba.height())?;
     let rgba_convert_ms = elapsed_ms(rgba_convert);
     clipboard_debug("decode_data_url rgba convert", rgba_convert);
     let (width, height) = rgba.dimensions();
@@ -251,8 +269,9 @@ pub(crate) async fn read_image_from_clipboard_cached(
         let read_ms = elapsed_ms(read);
         clipboard_debug("read_image_from_clipboard_cached get_image", read);
 
-        let width = img.width as u32;
-        let height = img.height as u32;
+        let width = u32::try_from(img.width).map_err(|_| "clipboard image is too wide")?;
+        let height = u32::try_from(img.height).map_err(|_| "clipboard image is too tall")?;
+        validate_decoded_image_dimensions(width, height)?;
         let rgba_bytes = img.bytes.into_owned();
 
         let encode = std::time::Instant::now();
@@ -268,6 +287,7 @@ pub(crate) async fn read_image_from_clipboard_cached(
         let png_encode_ms = elapsed_ms(encode);
         clipboard_debug("read_image_from_clipboard_cached png encode", encode);
         let bytes = png_bytes.len();
+        validate_image_source_bytes(bytes)?;
         let source = CachedImageSource {
             mime: "image/png".to_string(),
             ext: "png".to_string(),
@@ -322,6 +342,7 @@ fn write_rgba_to_clipboard(
     rgba: Arc<[u8]>,
 ) -> Result<ClipboardCopyTiming, String> {
     let total = std::time::Instant::now();
+    validate_decoded_image_dimensions(width, height)?;
     let arboard_write = std::time::Instant::now();
     let result = arboard::Clipboard::new()
         .map_err(|e| e.to_string())

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::image_source_files::cleanup_materialized_paths;
+use crate::memory_limits::DECODED_IMAGE_CACHE_MAX_BYTES;
 
 #[derive(Clone)]
 pub(crate) struct CachedImageSource {
@@ -163,10 +164,6 @@ impl ImageSourceCache {
             }
         }
         cache.decoded_use_counter = next_use;
-        // Native decoded pixels are intentionally not capped. The eyedropper path
-        // needs decoded sources to stay warm for repeat sampling, and entries are
-        // released with their image source on replace, remove, board close, or app
-        // exit. Keep decoded_bytes for diagnostics instead of enforcing eviction.
         if bytes_delta.is_negative() {
             cache.decoded_bytes = cache
                 .decoded_bytes
@@ -174,6 +171,7 @@ impl ImageSourceCache {
         } else {
             cache.decoded_bytes = cache.decoded_bytes.saturating_add(bytes_delta as usize);
         }
+        prune_decoded_cache_locked(&mut cache, key);
         Ok(decoded)
     }
 
@@ -354,6 +352,26 @@ fn drain_materialized_paths(cache: &mut HashMap<String, CachedImageSourceEntry>)
 
 fn decoded_image_bytes(decoded: &DecodedImageSource) -> usize {
     decoded.rgba.len()
+}
+
+fn prune_decoded_cache_locked(cache: &mut ImageSourceCacheInner, protected_key: &str) {
+    while cache.decoded_bytes > DECODED_IMAGE_CACHE_MAX_BYTES {
+        let victim_key = cache
+            .entries
+            .iter()
+            .filter(|(key, entry)| key.as_str() != protected_key && entry.decoded.is_some())
+            .min_by_key(|(_key, entry)| entry.decoded_last_used)
+            .map(|(key, _entry)| key.clone());
+        let Some(victim_key) = victim_key else {
+            break;
+        };
+        if let Some(entry) = cache.entries.get_mut(&victim_key) {
+            entry.decoded = None;
+            cache.decoded_bytes = cache.decoded_bytes.saturating_sub(entry.decoded_bytes);
+            entry.decoded_bytes = 0;
+            entry.decoded_last_used = 0;
+        }
+    }
 }
 
 fn bytes_mb(bytes: usize) -> f64 {

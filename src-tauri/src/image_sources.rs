@@ -8,6 +8,9 @@ use crate::image_source_files::{
     cleanup_materialized_paths, image_source_batch_dir, image_source_file_path,
 };
 use crate::image_transform::transform_dynamic_image;
+use crate::memory_limits::{
+    usize_from_u64, validate_decoded_image_dimensions, validate_image_source_bytes,
+};
 
 #[derive(serde::Serialize)]
 pub(crate) struct ImageSourceResponse {
@@ -107,6 +110,12 @@ fn image_dimensions_from_bytes(bytes: &[u8]) -> Result<(u32, u32), String> {
         .map_err(|e| e.to_string())
 }
 
+fn validated_image_dimensions_from_bytes(bytes: &[u8]) -> Result<(u32, u32), String> {
+    let dimensions = image_dimensions_from_bytes(bytes)?;
+    validate_decoded_image_dimensions(dimensions.0, dimensions.1)?;
+    Ok(dimensions)
+}
+
 #[tauri::command]
 pub(crate) async fn register_image_file_source(
     state: tauri::State<'_, ImageSourceCache>,
@@ -115,9 +124,14 @@ pub(crate) async fn register_image_file_source(
     source_token: Option<String>,
 ) -> Result<ImageSourceResponse, String> {
     let (source, width, height) = tokio::task::spawn_blocking(move || {
+        let file_bytes = std::fs::metadata(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|metadata| usize_from_u64(metadata.len(), "Image file is too large."))?;
+        validate_image_source_bytes(file_bytes)?;
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        validate_image_source_bytes(bytes.len())?;
         let (mime, ext) = image_mime_ext_from_path(&path);
-        let dimensions = image_dimensions_from_bytes(&bytes)?;
+        let dimensions = validated_image_dimensions_from_bytes(&bytes)?;
         Ok::<_, String>((
             CachedImageSource {
                 mime: mime.to_string(),
@@ -169,8 +183,11 @@ async fn decoded_cached_image_source(
     let source_bytes = source.bytes.clone();
     let decode_start = std::time::Instant::now();
     let decoded = tokio::task::spawn_blocking(move || {
+        let (width, height) = image_dimensions_from_bytes(&source_bytes)?;
+        validate_decoded_image_dimensions(width, height)?;
         let image = image::load_from_memory(&source_bytes).map_err(|e| e.to_string())?;
         let rgba = image.to_rgba8();
+        validate_decoded_image_dimensions(rgba.width(), rgba.height())?;
         Ok::<_, String>(DecodedImageSource {
             width: rgba.width(),
             height: rgba.height(),
@@ -327,7 +344,7 @@ pub(crate) async fn register_image_source(
 ) -> Result<ImageSourceResponse, String> {
     let (source, width, height) = tokio::task::spawn_blocking(move || {
         let source = cached_source_from_data_url(&data_url)?;
-        let (width, height) = image_dimensions_from_bytes(&source.bytes)?;
+        let (width, height) = validated_image_dimensions_from_bytes(&source.bytes)?;
         Ok::<_, String>((source, width, height))
     })
     .await
@@ -361,6 +378,8 @@ pub(crate) async fn register_transformed_image_source(
     let normalized_rotation = rotation % 360;
     let result = tokio::task::spawn_blocking(move || {
         let decode_start = std::time::Instant::now();
+        let (source_width, source_height) = image_dimensions_from_bytes(&source.bytes)?;
+        validate_decoded_image_dimensions(source_width, source_height)?;
         let mut img = image::load_from_memory(&source.bytes).map_err(|e| e.to_string())?;
         let decode_ms = elapsed_ms(decode_start);
 
@@ -368,6 +387,7 @@ pub(crate) async fn register_transformed_image_source(
         img = transform_dynamic_image(img, flip_x, flip_y, normalized_rotation);
         let width = img.width();
         let height = img.height();
+        validate_decoded_image_dimensions(width, height)?;
         let transform_ms = elapsed_ms(transform_start);
 
         let encode_start = std::time::Instant::now();
@@ -387,6 +407,7 @@ pub(crate) async fn register_transformed_image_source(
         }
         let encode_ms = elapsed_ms(encode_start);
         let bytes = png_bytes.len();
+        validate_image_source_bytes(bytes)?;
 
         Ok::<_, String>((
             CachedImageSource {

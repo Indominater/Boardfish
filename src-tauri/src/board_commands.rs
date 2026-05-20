@@ -4,10 +4,9 @@ use crate::board_io::{
 };
 use crate::board_types::validate_board_value;
 use crate::image_sources::ImageSourceCache;
+use crate::memory_limits::{BOARD_MAX_CONTENT_BYTES, BOARD_MAX_OBJECTS};
 use tauri::Manager;
 
-const BOARD_MAX_OBJECTS: usize = 100;
-const BOARD_MAX_CONTENT_BYTES: usize = 500 * 1024 * 1024;
 const BOARD_LIMITS: BoardLimits = BoardLimits {
     max_objects: BOARD_MAX_OBJECTS,
     max_content_bytes: BOARD_MAX_CONTENT_BYTES,
