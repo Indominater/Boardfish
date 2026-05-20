@@ -67,14 +67,19 @@
     const referenced = referencedImageKeys(objects);
     const pruned = {};
     let removed = 0;
+    let kept = 0;
     for (const [key, src] of Object.entries(imageStore || {})) {
-      if (referenced.has(key)) pruned[key] = src;
-      else removed++;
+      if (referenced.has(key)) {
+        pruned[key] = src;
+        kept++;
+      } else {
+        removed++;
+      }
     }
     return {
       imageStore: pruned,
       removed,
-      kept: Object.keys(pruned).length,
+      kept,
       referenced: referenced.size,
     };
   }

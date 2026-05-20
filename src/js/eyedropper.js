@@ -1616,13 +1616,13 @@ function resetEyedropperRenderedSampleSize(width, height) {
 
 function refreshEyedropperAfterSafeImageReady() {
   if (!eyedropperEnabled) return;
-  scheduleEyedropperSnapshotRefresh('safe-image-ready', { delayMs: 40 });
+  scheduleEyedropperSnapshotRefresh('safe-image-ready');
   if (eyedropperSampling && _eyedropperLastSampleEvent) updateEyedropperSample(_eyedropperLastSampleEvent);
 }
 
 function refreshEyedropperViewportAfterSafeImageReady() {
   if (!eyedropperEnabled) return;
-  scheduleEyedropperSnapshotRefresh('safe-image-ready', { delayMs: 40 });
+  scheduleEyedropperSnapshotRefresh('safe-image-ready');
 }
 
 function eyedropperSafeImageToken(key, dataUrl = null) {
