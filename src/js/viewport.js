@@ -439,6 +439,7 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null) => {
     if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
     const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(spec.id, spec.start, spec.end) || null;
+    if (!motion) continue;
     const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
     if (!drawTextSelectionHighlight(context, obj, layout, spec.start, spec.end, { requireMotion: true, motion, selection })) continue;
     drawTextLayoutStatic(context, obj, layout, { start: spec.start, end: spec.end });

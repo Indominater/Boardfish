@@ -124,7 +124,6 @@ pub(crate) async fn copy_image_data_url_to_clipboard_transformed(
     let total = std::time::Instant::now();
     let result = tokio::task::spawn_blocking(move || {
         let (cached, decode_timing) = decode_data_url_to_cached_image_timed(&data_url)?;
-        let normalized_rotation = rotation % 360;
         let transform = std::time::Instant::now();
         let (width, height, rgba) = transform_rgba(
             cached.width,
@@ -132,7 +131,7 @@ pub(crate) async fn copy_image_data_url_to_clipboard_transformed(
             cached.rgba,
             flip_x,
             flip_y,
-            normalized_rotation,
+            rotation,
         )?;
         let transform_ms = elapsed_ms(transform);
         clipboard_debug(
