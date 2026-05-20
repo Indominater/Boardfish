@@ -25,13 +25,6 @@
   --firefox-menu-shadow:
     0 8px 24px rgba(0,0,0,0.32),
     0 0 0 1px rgba(0,0,0,0.10);
-  --menu-bg-alpha: 0.82;
-  --menu-bg-blur: 3px;
-  --menu-bg-smudge: url(#glass-distortion);
-  --menu-bg-backdrop-filter: blur(var(--menu-bg-blur));
-  --menu-bg-shine:
-    inset 2px 2px 1px 0 rgba(255,255,255,0.22),
-    inset -1px -1px 1px 0 rgba(0,0,0,0.16);
   --ui-radius: 25px;
   --menu-shell-radius: var(--ui-radius);
   --menu-shell-padding: 8px;
@@ -404,7 +397,7 @@ body[data-theme="dark"] .window-control-close:active {
 #dialog,
 #island,
 .opening-shield-pill {
-  background: transparent;
+  background: var(--firefox-menu-bg);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border: 1px solid var(--firefox-menu-border);
@@ -412,65 +405,10 @@ body[data-theme="dark"] .window-control-close:active {
   box-shadow: var(--firefox-menu-shadow);
   color: var(--firefox-menu-text);
   font-family: inherit;
-  isolation: isolate;
   padding: var(--menu-shell-padding);
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
-}
-
-#ctx-menu::before,
-#obj-ctx-menu::before,
-#ctx-actions::before,
-#text-ctx-menu::before,
-#eyedropper-loupe::before,
-.eyedropper-loupe::before,
-#dialog::before,
-#island::before,
-.opening-shield-pill::before,
-#ctx-menu::after,
-#obj-ctx-menu::after,
-#ctx-actions::after,
-#text-ctx-menu::after,
-#eyedropper-loupe::after,
-.eyedropper-loupe::after,
-#dialog::after,
-#island::after,
-.opening-shield-pill::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-#ctx-menu::before,
-#obj-ctx-menu::before,
-#ctx-actions::before,
-#text-ctx-menu::before,
-#eyedropper-loupe::before,
-.eyedropper-loupe::before,
-#dialog::before,
-#island::before,
-.opening-shield-pill::before {
-  z-index: -2;
-  backdrop-filter: var(--menu-bg-backdrop-filter);
-  -webkit-backdrop-filter: var(--menu-bg-backdrop-filter);
-  filter: var(--menu-bg-smudge);
-}
-
-#ctx-menu::after,
-#obj-ctx-menu::after,
-#ctx-actions::after,
-#text-ctx-menu::after,
-#eyedropper-loupe::after,
-.eyedropper-loupe::after,
-#dialog::after,
-#island::after,
-.opening-shield-pill::after {
-  z-index: -1;
-  background: var(--firefox-menu-bg);
-  box-shadow: var(--menu-bg-shine);
 }
 
 #ctx-menu,
