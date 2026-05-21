@@ -673,11 +673,17 @@ function queueVisibleImageHydration(limit = 3, dbg = null) {
   for (const key of getVisibleImageKeys(limit)) queueImageHydration(key, dbg);
 }
 var _visibleHydrationTimer = null;
+const clearVisibleHydrationTimer = () => {
+  clearTimeout(_visibleHydrationTimer);
+  _visibleHydrationTimer = null;
+};
+
 function scheduleVisibleHydrationAfterIdle() {
   if (!hasTauri() || _boardOpening || (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled)) return;
-  clearTimeout(_visibleHydrationTimer);
+  clearVisibleHydrationTimer();
   _visibleHydrationTimer = setTimeout(() => {
     _visibleHydrationTimer = null;
+    if (!hasTauri() || _boardOpening || (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled)) return;
     queueVisibleImageHydration(1);
     if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
       scheduleVisibleScaledVariantPrewarmAfterIdle('visible-hydration');

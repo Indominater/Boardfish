@@ -319,6 +319,50 @@ function imageReadbackProbeKey(src) {
   return src.length > 512 ? `${src.length}:${src.slice(0, 256)}:${src.slice(-128)}` : src;
 }
 
+const addImageReadbackProbeSource = (sources, src) => {
+  if (typeof src === 'string' && src) sources.add(src);
+};
+
+const collectImageReadbackProbeSourcesForKey = (key, sourceOverride = undefined) => {
+  const sources = new Set();
+  if (sourceOverride !== undefined) addImageReadbackProbeSource(sources, sourceOverride);
+  const source = imageStore[key];
+  addImageReadbackProbeSource(sources, source);
+  if (isWebImageRef(source)) addImageReadbackProbeSource(sources, webImageDisplaySrc(source));
+  addImageReadbackProbeSource(sources, imageAssetUrlCache[key]);
+  const display = imageCache[key];
+  addImageReadbackProbeSource(sources, display?.currentSrc);
+  addImageReadbackProbeSource(sources, display?.src);
+  return sources;
+};
+
+const isImageReadbackProbeSourceUsedByOtherKey = (key, src) => {
+  if (typeof src !== 'string' || !src) return false;
+  const probeKey = imageReadbackProbeKey(src);
+  for (const otherKey of new Set([
+    ...Object.keys(imageStore),
+    ...Object.keys(imageCache),
+    ...Object.keys(imageAssetUrlCache),
+  ])) {
+    if (otherKey === key) continue;
+    for (const otherSrc of collectImageReadbackProbeSourcesForKey(otherKey)) {
+      if (imageReadbackProbeKey(otherSrc) === probeKey) return true;
+    }
+  }
+  return false;
+};
+
+const clearImageReadbackProbeCacheForKey = (key, sourceOverride = undefined) => {
+  if (!key || !imageReadbackSafeSourceCache.size) return 0;
+  let removed = 0;
+  for (const src of collectImageReadbackProbeSourcesForKey(key, sourceOverride)) {
+    if (isImageReadbackProbeSourceUsedByOtherKey(key, src)) continue;
+    const probeKey = imageReadbackProbeKey(src);
+    if (probeKey && imageReadbackSafeSourceCache.delete(probeKey)) removed++;
+  }
+  return removed;
+};
+
 function probeImageCanvasReadback(img, src = '') {
   if (!img || !img.naturalWidth || !img.naturalHeight) return false;
   const cacheKey = imageReadbackProbeKey(src);
@@ -884,13 +928,14 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   return readyPromise;
 }
 
-const removeImageRuntimeCachesForKey = (key) => {
+const removeImageRuntimeCachesForKey = (key, sourceOverride = undefined) => {
   let removed = {
     displayImages: 0,
     assetUrls: 0,
     bitmaps: 0,
     bitmapFailures: 0,
   };
+  clearImageReadbackProbeCacheForKey(key, sourceOverride);
   if (imageCache[key]) {
     delete imageCache[key];
     removed.displayImages++;
@@ -952,6 +997,7 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
   for (const key of keys) {
     if (retainedKeys.has(key)) continue;
     if (Object.hasOwn(imageStore, key)) {
+      clearImageReadbackProbeCacheForKey(key, imageStore[key]);
       revokeWebImageSource(imageStore[key]);
       delete imageStore[key];
       removedSourceKeys.push(key);
@@ -975,6 +1021,7 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
 };
 
 function clearImageStore(clearNativeCaches = true) {
+  if (typeof clearVisibleHydrationTimer === 'function') clearVisibleHydrationTimer();
   _imageStoreGeneration++;
   for (const k of Object.keys(imageStore)) {
     revokeWebImageSource(imageStore[k]);

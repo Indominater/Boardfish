@@ -116,19 +116,50 @@ const createWebImageSourceFromBytes = (file, imgKey, bytes) => {
   throw new Error('web image container unavailable');
 };
 
-const cleanupFailedWebImageInsertSource = (imgKey, imageSource) => {
+const rollbackImageInsertSource = ({
+  imgKey,
+  source,
+  hadPreviousSource = false,
+  previousSource = undefined,
+} = {}) => {
   if (
     imgKey
     && typeof imageStore !== 'undefined'
     && typeof BoardfishImageStore !== 'undefined'
-    && BoardfishImageStore.getSource?.(imgKey) === imageSource
+    && BoardfishImageStore.getSource?.(imgKey) === source
   ) {
-    delete imageStore[imgKey];
-    if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey);
-    if (typeof noteEyedropperImageSourceChanged === 'function') {
-      noteEyedropperImageSourceChanged(imgKey, 'image-source-removed');
+    if (hadPreviousSource) {
+      BoardfishImageStore.setSource(imgKey, previousSource);
+    } else {
+      if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey, source);
+      delete imageStore[imgKey];
+      if (typeof noteEyedropperImageSourceChanged === 'function') {
+        noteEyedropperImageSourceChanged(imgKey, 'image-source-removed');
+      }
     }
+    return true;
   }
+  return false;
+};
+
+const createImageInsertSourceRollback = (imgKey, source) => {
+  const canCapture = !!(
+    imgKey
+    && typeof imageStore !== 'undefined'
+    && typeof BoardfishImageStore !== 'undefined'
+  );
+  const hadPreviousSource = canCapture && Object.hasOwn(imageStore, imgKey);
+  const previousSource = hadPreviousSource ? imageStore[imgKey] : undefined;
+  let rolledBack = false;
+  return () => {
+    if (rolledBack) return false;
+    rolledBack = true;
+    return rollbackImageInsertSource({ imgKey, source, hadPreviousSource, previousSource });
+  };
+};
+
+const cleanupFailedWebImageInsertSource = (imgKey, imageSource) => {
+  rollbackImageInsertSource({ imgKey, source: imageSource });
   if (typeof BoardfishWebBoardContainer !== 'undefined') {
     BoardfishWebBoardContainer.revokeImageSource?.(imageSource);
   }
@@ -337,6 +368,7 @@ async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, o
       const { w, h } = fitImageSize(img.naturalWidth, img.naturalHeight, exactSize);
       ViewportDebug.step(dbg, 'size-object', { w, h });
       const imgKey = existingImgKey || newImgKey();
+      const rollbackSource = createImageInsertSourceRollback(imgKey, src);
       BoardfishImageStore.setSource(imgKey, src);
       cacheImage(imgKey, src, null, img, {
         resolveOnLoad: options.resolveOnLoad === true,
@@ -358,6 +390,7 @@ async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, o
         h,
         z: obj?.z ?? '',
       });
+      if (!obj) rollbackSource();
       const total = performance.now() - t0;
       ViewportDebug.max('maxImageAddMs', total);
       ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, total, added: !!obj });

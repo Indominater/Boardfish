@@ -107,6 +107,104 @@ function loadEditorStateBoundaryHarness() {
   return context;
 }
 
+function loadDataUrlPasteFailureHarness() {
+  const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
+  const start = source.indexOf('function fitImageSize');
+  const end = source.indexOf('\nasync function pasteNativeCachedImage', start);
+  assert.ok(start >= 0 && end > start, 'data URL image insert helpers are missing');
+  const calls = {
+    cached: [],
+    removedRuntime: [],
+    sourceChanged: [],
+    shields: [],
+  };
+  const imageStore = {};
+  const imageCache = {};
+  const context = {
+    console,
+    calls,
+    imageStore,
+    imageCache,
+    objects: [],
+    _boardOpening: false,
+    performance: { now: () => 1 },
+    fileInput: { addEventListener() {}, value: '', files: [] },
+    eyedropperEnabled: false,
+    hasTauri: () => false,
+    isWebImageRef: () => false,
+    webImageDisplaySrc: (src) => src,
+    imageSourceDebugInfo: () => ({ kind: 'data-url' }),
+    showInputShield() { calls.shields.push('show'); },
+    hideInputShield() { calls.shields.push('hide'); },
+    cacheImage(key, src, _dbg, loadedImg) {
+      calls.cached.push({ key, src, loaded: !!loadedImg });
+      imageCache[key] = loadedImg || { src };
+      return Promise.resolve({ cacheReadyStage: 'display' });
+    },
+    removeImageRuntimeCachesForKey(key, sourceOverride) {
+      calls.removedRuntime.push({ key, sourceOverride });
+      delete imageCache[key];
+    },
+    noteEyedropperImageSourceChanged(key, reason) {
+      calls.sourceChanged.push({ key, reason });
+    },
+    BoardfishImageStore: {
+      getSource(key) { return imageStore[key]; },
+      setSource(key, sourceValue) {
+        imageStore[key] = sourceValue;
+        return true;
+      },
+    },
+    BoardfishWebLimits: {
+      validateDataUrlImage: async () => true,
+      canAddObjects: () => true,
+      canAcceptAdditionalContentBytes: () => true,
+    },
+    BoardfishWebBoardContainer: {
+      revokeImageSource() {},
+    },
+    ViewportDebug: {
+      start: () => null,
+      step() {},
+      count() {},
+      max() {},
+      end() {},
+    },
+    InsertDebug: {
+      start: () => null,
+      step() {},
+      end() {},
+    },
+    ClipDebug: {
+      step() {},
+      end() {},
+    },
+    Image: function Image() {
+      this.naturalWidth = 120;
+      this.naturalHeight = 80;
+      this.complete = false;
+      Object.defineProperty(this, 'src', {
+        get: () => this._src || '',
+        set: (value) => {
+          this._src = value;
+          this.currentSrc = value;
+          this.complete = true;
+          if (this.onload) this.onload();
+        },
+      });
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${source.slice(start, end)}\n` +
+      'addImageObject = () => null;\n' +
+      'globalThis.pasteDataUrlImage = pasteDataUrlImage;\n',
+    context,
+    { filename: 'image_insert.js' },
+  );
+  return context;
+}
+
 test('inserted image motion clear drops deleted objects before first draw', () => {
   const context = loadImageInsertMotionHarness();
   const obj = { id: 'image-1', type: 'image' };
@@ -193,4 +291,28 @@ test('failed web image inserts revoke unadopted web image sources', () => {
   assert.match(source, /if \(!obj\) cleanupFailedWebImageInsertSource\(imgKey, imageSource\);/);
   assert.match(source, /catch \(err\) \{[\s\S]*cleanupFailedWebImageInsertSource\(imgKey, imageSource\);[\s\S]*throw err;/);
   assert.match(source, /BoardfishWebBoardContainer\.revokeImageSource\?\.\(imageSource\);/);
+});
+
+test('failed generic data URL paste rolls back the orphan image source and runtime cache', async () => {
+  const context = loadDataUrlPasteFailureHarness();
+  const dataUrl = 'data:image/png;base64,boardfish';
+
+  const obj = await context.pasteDataUrlImage(dataUrl, 10, 20, 'img-1', 'event-image', null);
+
+  assert.equal(obj, null);
+  assert.equal(Object.hasOwn(context.imageStore, 'img-1'), false);
+  assert.equal(Object.hasOwn(context.imageCache, 'img-1'), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.calls.cached)), [{
+    key: 'img-1',
+    src: dataUrl,
+    loaded: true,
+  }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.calls.removedRuntime)), [{
+    key: 'img-1',
+    sourceOverride: dataUrl,
+  }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.calls.sourceChanged)), [{
+    key: 'img-1',
+    reason: 'image-source-removed',
+  }]);
 });

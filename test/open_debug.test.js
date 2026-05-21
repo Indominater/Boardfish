@@ -20,6 +20,14 @@ function waitForOpenRenderFrameSource() {
   return source.slice(start, end);
 }
 
+function visibleHydrationTimerSource() {
+  const source = readSource('src/js/io_close.js');
+  const start = source.indexOf('function queueVisibleImageHydration');
+  const end = source.indexOf('\nvar openHydrationMode', start);
+  assert.ok(start >= 0 && end > start, 'visible hydration timer source is missing');
+  return source.slice(start, end);
+}
+
 test('open render frame wait clears timeout after RAF settles', async () => {
   const activeTimers = new Set();
   const steps = [];
@@ -62,6 +70,57 @@ test('open render frame wait clears timeout after RAF settles', async () => {
     phase: 'open-render-frame:settled',
     detail: { reason: 'test-render', source: 'raf', ms: 0 },
   }]);
+});
+
+test('visible hydration idle timer rechecks stale open guards and can be cleared', () => {
+  const timers = [];
+  const cleared = [];
+  const queued = [];
+  const prewarmReasons = [];
+  const context = {
+    _boardOpening: false,
+    eyedropperEnabled: false,
+    hasTauri: () => true,
+    setTimeout(callback) {
+      timers.push(callback);
+      return `timer-${timers.length}`;
+    },
+    clearTimeout(id) {
+      if (id) cleared.push(id);
+    },
+    getVisibleImageKeys: () => ['img-1'],
+    queueImageHydration(key) {
+      queued.push(key);
+    },
+    scheduleVisibleScaledVariantPrewarmAfterIdle(reason) {
+      prewarmReasons.push(reason);
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${visibleHydrationTimerSource()}\n` +
+      'globalThis.scheduleVisibleHydrationAfterIdle = scheduleVisibleHydrationAfterIdle;\n' +
+      'globalThis.clearVisibleHydrationTimer = clearVisibleHydrationTimer;\n',
+    context,
+    { filename: 'io_close_visible_hydration.js' },
+  );
+
+  context.scheduleVisibleHydrationAfterIdle();
+  assert.equal(timers.length, 1);
+  context._boardOpening = true;
+  timers[0]();
+  assert.deepEqual(queued, []);
+  assert.deepEqual(prewarmReasons, []);
+
+  context._boardOpening = false;
+  context.scheduleVisibleHydrationAfterIdle();
+  context.clearVisibleHydrationTimer();
+  assert.deepEqual(cleared, ['timer-2']);
+
+  context.scheduleVisibleHydrationAfterIdle();
+  timers[2]();
+  assert.deepEqual(queued, ['img-1']);
+  assert.deepEqual(prewarmReasons, ['visible-hydration']);
 });
 
 test('open-board debugger covers the slow open phases developers need to inspect', () => {

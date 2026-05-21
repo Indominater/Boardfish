@@ -379,11 +379,18 @@ fn write_rgba_to_clipboard(
             "set the clipboard to (read POSIX file \"{}\" as «class PNGf»)",
             tmp_path.to_string_lossy()
         );
-        std::process::Command::new("osascript")
+        let osascript_result = std::process::Command::new("osascript")
             .arg("-e")
             .arg(&script)
-            .output()
-            .map_err(|e| e.to_string())?;
+            .output();
+        if let Err(err) = std::fs::remove_file(&tmp_path) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                clipboard_debug_msg(&format!(
+                    "write_rgba_to_clipboard macos fallback cleanup failed error={err}"
+                ));
+            }
+        }
+        osascript_result.map_err(|e| e.to_string())?;
         let macos_fallback_ms = elapsed_ms(fallback);
         clipboard_debug("write_rgba_to_clipboard macos fallback", fallback);
         clipboard_debug("write_rgba_to_clipboard total", total);

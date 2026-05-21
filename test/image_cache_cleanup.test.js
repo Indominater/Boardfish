@@ -86,7 +86,9 @@ function loadImageState(createImageBitmap) {
 
   vm.createContext(context);
   vm.runInContext(
-    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8'),
+    `${fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8')}\n` +
+      'globalThis.removeImageRuntimeCachesForKey = removeImageRuntimeCachesForKey;\n' +
+      'globalThis.imageReadbackProbeKey = imageReadbackProbeKey;\n',
     context,
     { filename: 'image_state.js' },
   );
@@ -122,4 +124,36 @@ test('cacheImage keeps an existing current bitmap and closes a racing duplicate'
   assert.equal(context.imageBitmapCache['img-1'], existing);
   assert.equal(existing.closed, false);
   assert.equal(duplicate.closed, true);
+});
+
+test('removeImageRuntimeCachesForKey clears readback probe entries for the removed image only', () => {
+  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+  const removedSrc = 'data:image/png;base64,removed';
+  const unrelatedSrc = 'data:image/png;base64,unrelated';
+  const sharedSrc = 'data:image/png;base64,shared';
+
+  context.imageStore['img-1'] = removedSrc;
+  context.imageStore['img-2'] = unrelatedSrc;
+  context.imageStore['img-3'] = sharedSrc;
+  context.imageStore['img-4'] = sharedSrc;
+  context.imageReadbackSafeSourceCache.set(context.imageReadbackProbeKey(removedSrc), true);
+  context.imageReadbackSafeSourceCache.set(context.imageReadbackProbeKey(unrelatedSrc), true);
+  context.imageReadbackSafeSourceCache.set(context.imageReadbackProbeKey(sharedSrc), true);
+
+  context.removeImageRuntimeCachesForKey('img-1');
+  assert.equal(context.imageReadbackSafeSourceCache.has(context.imageReadbackProbeKey(removedSrc)), false);
+  assert.equal(context.imageReadbackSafeSourceCache.has(context.imageReadbackProbeKey(unrelatedSrc)), true);
+
+  context.removeImageRuntimeCachesForKey('img-3');
+  assert.equal(context.imageReadbackSafeSourceCache.has(context.imageReadbackProbeKey(sharedSrc)), true);
+});
+
+test('clearImageStore clears any pending visible hydration timer hook', () => {
+  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+  let clears = 0;
+  context.clearVisibleHydrationTimer = () => { clears++; };
+
+  context.clearImageStore(false);
+
+  assert.equal(clears, 1);
 });
