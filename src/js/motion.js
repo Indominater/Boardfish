@@ -710,6 +710,7 @@ const BoardfishMotion = (() => {
   };
 
   const objectMotionForDraw = (obj, options = {}) => {
+    if (!hasObjectMotions()) return null;
     return smoothSlideObjectMotionForDraw(obj, options) || jelloMotionForDraw(obj);
   };
 

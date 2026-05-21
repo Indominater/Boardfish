@@ -581,41 +581,46 @@
     const imageEntries = [];
     let imageBytes = 0;
 
-    for (const [key, manifest] of Object.entries(board.imageStore || {})) {
-      const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
-      const candidates = candidateImageEntryPaths(key, manifestObject);
-      const path = candidates.find((candidate) => entries.has(candidate)) || candidates[0];
-      const imageEntry = entries.get(path);
-      if (!imageEntry) throw new Error(`Boardfish file is missing ${path}`);
-      const advertisedImageBytes = zipEntryContentBytes(imageEntry);
-      if (validateBoardPayload) {
-        validateBoardPayload({
-          objectCount,
-          boardJsonBytes: boardJsonBytes.length,
-          imageBytes: imageBytes + advertisedImageBytes,
+    try {
+      for (const [key, manifest] of Object.entries(board.imageStore || {})) {
+        const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
+        const candidates = candidateImageEntryPaths(key, manifestObject);
+        const path = candidates.find((candidate) => entries.has(candidate)) || candidates[0];
+        const imageEntry = entries.get(path);
+        if (!imageEntry) throw new Error(`Boardfish file is missing ${path}`);
+        const advertisedImageBytes = zipEntryContentBytes(imageEntry);
+        if (validateBoardPayload) {
+          validateBoardPayload({
+            objectCount,
+            boardJsonBytes: boardJsonBytes.length,
+            imageBytes: imageBytes + advertisedImageBytes,
+          });
+        }
+        const remainingBytes = Number.isFinite(maxBoardContentBytes)
+          ? maxBoardContentBytes - boardJsonBytes.length - imageBytes
+          : undefined;
+        const bytes = await readZipEntry(containerBytes, imageEntry, { maxBytes: remainingBytes });
+        imageBytes += bytes.length;
+        if (validateBoardPayload) {
+          validateBoardPayload({ objectCount, boardJsonBytes: boardJsonBytes.length, imageBytes });
+        }
+        const manifestExt = manifestObject.ext || '';
+        const ext = manifestExt || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
+        const mime = manifestObject.mime || mimeForExt(ext);
+        nextSources[key] = createWebImageRef({ path, mime, ext, bytes });
+        imageEntries.push({
+          key,
+          path,
+          mime,
+          ext,
+          bytes,
+          byteLength: bytes.length,
+          compressedSize: imageEntry.compressedSize,
         });
       }
-      const remainingBytes = Number.isFinite(maxBoardContentBytes)
-        ? maxBoardContentBytes - boardJsonBytes.length - imageBytes
-        : undefined;
-      const bytes = await readZipEntry(containerBytes, imageEntry, { maxBytes: remainingBytes });
-      imageBytes += bytes.length;
-      if (validateBoardPayload) {
-        validateBoardPayload({ objectCount, boardJsonBytes: boardJsonBytes.length, imageBytes });
-      }
-      const manifestExt = manifestObject.ext || '';
-      const ext = manifestExt || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
-      const mime = manifestObject.mime || mimeForExt(ext);
-      nextSources[key] = createWebImageRef({ path, mime, ext, bytes });
-      imageEntries.push({
-        key,
-        path,
-        mime,
-        ext,
-        bytes,
-        byteLength: bytes.length,
-        compressedSize: imageEntry.compressedSize,
-      });
+    } catch (err) {
+      for (const source of Object.values(nextSources)) revokeImageSource(source);
+      throw err;
     }
 
     return {

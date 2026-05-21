@@ -79,7 +79,7 @@ function clearScaledImageVariants(key = null) {
     if (imageScaledVariantQueue.length) {
       imageScaledVariantQueue = imageScaledVariantQueue.filter((task) => task?.variantKey !== key);
     }
-    for (const pendingKey of [...imageScaledBitmapPending]) {
+    for (const pendingKey of imageScaledBitmapPending) {
       if (pendingKey.startsWith(`${key}:`)) {
         imageScaledBitmapPending.delete(pendingKey);
         removePendingScaledVariantBytes(pendingKey);

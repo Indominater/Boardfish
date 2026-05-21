@@ -81,8 +81,17 @@
 
   function supportedClipboardImageFile(items = [], files = []) {
     const isSupportedImageType = (type) => type === 'image/png' || type === 'image/jpeg';
-    const imageItem = [...items].find((item) => item.kind === 'file' && isSupportedImageType(item.type));
-    return imageItem?.getAsFile?.() || [...files].find((file) => isSupportedImageType(file.type)) || null;
+    for (const item of items) {
+      if (item.kind === 'file' && isSupportedImageType(item.type)) {
+        const file = item.getAsFile?.();
+        if (file) return file;
+        break;
+      }
+    }
+    for (const file of files) {
+      if (isSupportedImageType(file.type)) return file;
+    }
+    return null;
   }
 
   function readClipboardImageFileFromClipboardData(clipboardData, dbg = null, describeBlob = null) {

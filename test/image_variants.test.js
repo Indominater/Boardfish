@@ -73,6 +73,149 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
   return context;
 }
 
+function loadEyedropperScaledQueue(createImageBitmap) {
+  const rafs = [];
+  let now = 0;
+  const noopContext = {
+    setTransform() {},
+    clearRect() {},
+    drawImage() {},
+    getImageData() { return { data: [0, 0, 0, 0] }; },
+    fillRect() {},
+    save() {},
+    restore() {},
+    beginPath() {},
+    arc() {},
+    fill() {},
+  };
+  const makeElement = () => ({
+    width: 1,
+    height: 1,
+    style: {},
+    classList: {
+      add() {},
+      remove() {},
+      toggle() {},
+      contains() { return false; },
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    getContext() { return noopContext; },
+    getBoundingClientRect() { return { width: 96, height: 96, left: 0, top: 0, right: 96, bottom: 96 }; },
+    querySelector() { return null; },
+  });
+  const geometry = {
+    boardBackgroundPixel: () => [0, 0, 0, 255],
+    clientToBoardScreenPoint: () => ({ x: 0, y: 0 }),
+    clientToBoardWorldPoint: () => ({ x: 0, y: 0 }),
+    displayedBoardSourcePoint: () => null,
+    imageBoundsDistanceSqToWorldPoint: () => 0,
+    objectContainsWorldPoint: () => false,
+    screenToBoardWorldPoint: () => ({ x: 0, y: 0 }),
+    topObjectAtWorldPoint: () => null,
+    worldPointToImageLocalUnit: () => null,
+  };
+  const debugNoop = {
+    enabled: false,
+    state: () => ({}),
+    _count() {},
+    _countPerf() {},
+    _logReadbackFailure() {},
+    _logSamplingEvent() {},
+    _logToggle() {},
+    _logUnsafeImageSkip() {},
+    _recordPrewarmTiming() {},
+    _startFrameProbe() {},
+    _stopFrameProbe() {},
+  };
+  const context = {
+    console,
+    Map,
+    Set,
+    Promise,
+    Object,
+    Number,
+    Math,
+    String,
+    Date,
+    Error,
+    window: { devicePixelRatio: 1, innerWidth: 800, innerHeight: 600 },
+    document: {
+      getElementById: makeElement,
+      createElement: makeElement,
+      addEventListener() {},
+      removeEventListener() {},
+      body: makeElement(),
+    },
+    getComputedStyle: () => ({
+      backgroundColor: 'rgb(255, 255, 255)',
+      width: '96px',
+      borderLeftWidth: '0px',
+      borderRightWidth: '0px',
+      boxSizing: 'border-box',
+      getPropertyValue: () => '',
+    }),
+    performance: { now: () => ++now },
+    requestAnimationFrame(cb) {
+      rafs.push(cb);
+      return rafs.length;
+    },
+    cancelAnimationFrame() {},
+    clearTimeout() {},
+    setTimeout() { return 0; },
+    BoardfishEyedropperGeometry: { createEyedropperGeometry: () => geometry },
+    BoardfishEyedropperCards: {
+      preservePinnedCardUntilNextSample() {},
+      removePendingPinnedCardClone() {},
+    },
+    BoardfishMotion: { applyActionAnimation() {} },
+    EyedropperDebug: debugNoop,
+    boardCanvas: null,
+    canvas: makeElement(),
+    imageTransformFromObject: () => ({ rotation: 0, flipX: false, flipY: false }),
+    isSidewaysRotation: () => false,
+    objects: [],
+    parseCssColor: () => [0, 0, 0, 255],
+    toWorld: null,
+    panX: 0,
+    panY: 0,
+    zoom: 1,
+    imageStore: {},
+    imageCache: {},
+    imageBitmapCache: {},
+    imageAssetUrlCache: {},
+    isNativeImageRef: () => false,
+    isWebImageRef: () => false,
+    webImageDisplaySrc: () => '',
+    webImageDataUrl: () => '',
+    isDrawableImageSource: (source) => !!(source && (source.width || source.naturalWidth) && (source.height || source.naturalHeight)),
+    isViewportImageScalingActive: () => true,
+    chooseImageScaleForDraw: () => 0.5,
+    scaledVariantEstimatedBytes: (w, h, scale) => Math.ceil(w * scale) * Math.ceil(h * scale) * 4,
+    bitmapByteSize: (bitmap) => (bitmap.width || 0) * (bitmap.height || 0) * 4,
+    resetEyedropperDecodedImageKey() {},
+    removeEyedropperSafePixelCache() {},
+    hasTauri: () => false,
+    BoardfishTauri: {},
+    createImageBitmap,
+  };
+
+  vm.createContext(context);
+  for (const file of ['bitmap_cache.js', 'eyedropper_state.js', 'eyedropper.js']) {
+    vm.runInContext(
+      fs.readFileSync(path.join(__dirname, '..', 'src', 'js', file), 'utf8'),
+      context,
+      { filename: file },
+    );
+  }
+  vm.runInContext(
+    'globalThis.__testEyedropperSafeScaledPendingBuilds = eyedropperSafeScaledBitmapPendingBuilds;',
+    context,
+    { filename: 'eyedropper_scaled_test_hook.js' },
+  );
+  return { context, rafs };
+}
+
 function scaleFor(context, options) {
   return context.chooseImageScaleForDraw(
     { w: options.objW, h: options.objH },
@@ -228,6 +371,87 @@ test('clearing scaled variants for one key removes queued work for that key', ()
   assert.equal(context.isScaledImageVariantPending('img-2', 0.5), true);
 });
 
+test('eyedropper safe scaled variants drop stale async cache writes', async () => {
+  let resolveBitmap;
+  let resizeCalls = 0;
+  const staleBitmap = {
+    width: 50,
+    height: 50,
+    closed: false,
+    close() { this.closed = true; },
+  };
+  const { context, rafs } = loadEyedropperScaledQueue(() => {
+    resizeCalls++;
+    return new Promise((resolve) => { resolveBitmap = resolve; });
+  });
+  const pendingKey = 'img-1:0.5';
+  const sourceA = { width: 100, height: 100 };
+  const sourceB = { width: 100, height: 100 };
+
+  context.eyedropperSafeImageCache.set('img-1', { token: 'a', source: sourceA, owned: false });
+  context.queueEyedropperSafeScaledImage('img-1', sourceA, 0.5);
+  assert.equal(rafs.length, 1);
+
+  rafs.shift()();
+  assert.equal(resizeCalls, 1);
+
+  context.storeEyedropperSafeImage('img-1', 'b', sourceB, { owned: false });
+  assert.equal(context.eyedropperSafeScaledBitmapPending.has(pendingKey), false);
+
+  context.queueEyedropperSafeScaledImage('img-1', sourceB, 0.5);
+  assert.equal(context.eyedropperSafeScaledBitmapPending.has(pendingKey), true);
+  const currentBuildId = context.__testEyedropperSafeScaledPendingBuilds.get(pendingKey);
+
+  resolveBitmap(staleBitmap);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(staleBitmap.closed, true);
+  assert.equal(!!context.eyedropperSafeScaledBitmapCache.get('img-1')?.has(0.5), false);
+  assert.equal(context.eyedropperSafeScaledBitmapPending.has(pendingKey), true);
+  assert.equal(context.__testEyedropperSafeScaledPendingBuilds.get(pendingKey), currentBuildId);
+});
+
+test('eyedropper safe scaled variants skip resize work after key removal', () => {
+  let resizeCalls = 0;
+  const { context, rafs } = loadEyedropperScaledQueue(() => {
+    resizeCalls++;
+    return Promise.resolve({ width: 50, height: 50, close() {} });
+  });
+  const source = { width: 100, height: 100 };
+
+  context.eyedropperSafeImageCache.set('img-1', { token: 'a', source, owned: false });
+  context.queueEyedropperSafeScaledImage('img-1', source, 0.5);
+  assert.equal(rafs.length, 1);
+
+  context.removeEyedropperSafeImageKey('img-1');
+  rafs.shift()();
+
+  assert.equal(resizeCalls, 0);
+  assert.equal(context.eyedropperSafeScaledBitmapPending.has('img-1:0.5'), false);
+  assert.equal(context.__testEyedropperSafeScaledPendingBuilds.has('img-1:0.5'), false);
+});
+
+test('eyedropper tile cache removal keeps other image entries', () => {
+  const { context } = loadEyedropperScaledQueue(() => Promise.resolve({ width: 1, height: 1, close() {} }));
+
+  context.eyedropperSafeTileCache.set('img-1:1:0:0', { bytes: 4 });
+  context.eyedropperSafeTileCache.set('img-1:1:1:0', { bytes: 4 });
+  context.eyedropperSafeTileCache.set('img-2:1:0:0', { bytes: 8 });
+  context.eyedropperSafeTileCacheBytes = 16;
+  context.eyedropperSafeTileCachePending.add('img-1:1:2:0');
+  context.eyedropperSafeTileCachePending.add('img-2:1:2:0');
+
+  context.removeEyedropperSafeTileCacheForImage('img-1');
+
+  assert.equal(context.eyedropperSafeTileCache.has('img-1:1:0:0'), false);
+  assert.equal(context.eyedropperSafeTileCache.has('img-1:1:1:0'), false);
+  assert.equal(context.eyedropperSafeTileCache.has('img-2:1:0:0'), true);
+  assert.equal(context.eyedropperSafeTileCacheBytes, 8);
+  assert.equal(context.eyedropperSafeTileCachePending.has('img-1:1:2:0'), false);
+  assert.equal(context.eyedropperSafeTileCachePending.has('img-2:1:2:0'), true);
+});
+
 test('scaled image variant skips do not create empty cache groups', () => {
   const context = loadImageVariantsForPlatform(false);
 
@@ -350,6 +574,11 @@ test('eyedropper sampler removes avoidable per-frame work', () => {
   assert.match(source, /colorReadoutDomSkips/);
   assert.match(source, /card\.lastSwatchCss = cssColor;/);
   assert.match(source, /EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT = 1024 \* 1024 \* 1024/);
+  assert.match(source, /let eyedropperSafeImageCacheGeneration = 0;/);
+  assert.match(source, /eyedropperSafeImageCacheGeneration\+\+;/);
+  assert.match(source, /options\.cacheGeneration !== eyedropperSafeImageCacheGeneration/);
+  assert.equal((source.match(/const cacheGeneration = eyedropperSafeImageCacheGeneration;/g) || []).length, 2);
+  assert.equal((source.match(/if \(eyedropperSafeImagePromises\.get\(key\) === promise\) eyedropperSafeImagePromises\.delete\(key\);/g) || []).length, 2);
   assert.doesNotMatch(source, /eyedropperSafeDisplayReloadPromises/);
   assert.match(source, /safeDisplayReloadPending: 0/);
   assert.match(source, /displayReloadPending: 0/);
@@ -534,13 +763,14 @@ test('eyedropper safe image loaders drop stale async cache writes', () => {
   const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 
   assert.match(eyedropperSource, /function isEyedropperSafeImageRequestCurrent\(key, options = \{\}\)/);
+  assert.match(eyedropperSource, /options\.cacheGeneration !== eyedropperSafeImageCacheGeneration/);
   assert.match(eyedropperSource, /Object\.hasOwn\(options, 'dataUrl'\)[\s\S]*imageStore\[key\] === options\.dataUrl/);
   assert.match(eyedropperSource, /options\.token[\s\S]*eyedropperSafeImageToken\(key\) === options\.token/);
   assert.match(eyedropperSource, /function closeStaleEyedropperSafeImageSource\(source, loadedImage\)/);
-  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ token \}\)\) return null;/);
-  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ token \}\)\) \{\s*closeStaleEyedropperSafeImageSource\(source, img\);\s*return null;\s*\}/);
-  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ dataUrl \}\)\) return null;/);
-  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ dataUrl \}\)\) \{\s*closeStaleEyedropperSafeImageSource\(source, img\);\s*return null;\s*\}/);
+  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ token, cacheGeneration \}\)\) return null;/);
+  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ token, cacheGeneration \}\)\) \{\s*closeStaleEyedropperSafeImageSource\(source, img\);\s*return null;\s*\}/);
+  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ dataUrl, cacheGeneration \}\)\) return null;/);
+  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ dataUrl, cacheGeneration \}\)\) \{\s*closeStaleEyedropperSafeImageSource\(source, img\);\s*return null;\s*\}/);
 });
 
 test('image cache skips readback probes during normal display hydration', () => {

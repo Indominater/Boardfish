@@ -353,6 +353,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         obj.h = state.h;
         if (obj.type === 'text') {
           delete obj._layoutCache;
+          delete obj._layoutCacheKey;
           syncTextAutoHeight(obj, getTextMinLines(obj));
         }
         scheduleRender(true, true);

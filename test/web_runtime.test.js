@@ -105,3 +105,40 @@ test('fallback file picker does not retain focus listener after selected file se
   assert.equal(harness.rootListeners.has('focus'), false);
 });
 
+test('failed web board validation revokes decoded image refs', async () => {
+  const harness = loadWebRuntimeHarness();
+  const imageRef = { web: true, objectUrl: 'blob:image-1' };
+  const revoked = [];
+  harness.context.BoardfishWebBoardContainer = {
+    async readBoardContainer() {
+      return {
+        board: {
+          objects: [],
+          imageStore: { 'img-1': imageRef },
+        },
+        debug: {
+          board_json_bytes: 2,
+          image_bytes: 4,
+        },
+        imageEntries: [{ key: 'img-1', byteLength: 4 }],
+      };
+    },
+    revokeImageSource(source) {
+      revoked.push(source.objectUrl || '');
+      return true;
+    },
+  };
+  harness.context.BoardfishWebLimits = {
+    validateBoardPayload() {},
+    async validateOpenedImageEntries() {
+      throw new Error('image validation failed');
+    },
+  };
+
+  const ref = harness.context.BoardfishRuntime.fileRefFromFile({ name: 'board.bf', size: 6 });
+  await assert.rejects(
+    () => harness.context.BoardfishRuntime.readBoard(ref),
+    /image validation failed/,
+  );
+  assert.deepEqual(revoked, ['blob:image-1']);
+});

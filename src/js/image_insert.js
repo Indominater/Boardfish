@@ -274,6 +274,7 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
   const imgKey = existingImgKey || newImgKey();
   const generation = _imageStoreGeneration;
   const sourceToken = createImageSourceToken(imgKey);
+  let rollbackSource = null;
   if (!BoardfishWebLimits.canAddObjects(1)) {
     if (!_boardOpening) hideInputShield();
     ViewportDebug.end(dbg, { imgKey, path: 'native-data-url-cache', skipped: 'object-limit' });
@@ -298,12 +299,14 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
     }
     const naturalW = Number(meta?.width) || 1;
     const naturalH = Number(meta?.height) || 1;
-    BoardfishImageStore.setSource(imgKey, {
+    const imageSource = {
       native: true,
       mime: meta?.mime || 'image/png',
       ext: meta?.ext || 'png',
       bytes: meta?.bytes || 0,
-    });
+    };
+    rollbackSource = createImageInsertSourceRollback(imgKey, imageSource);
+    BoardfishImageStore.setSource(imgKey, imageSource);
     ViewportDebug.step(dbg, 'native-data-url-register:end', {
       imgKey,
       width: naturalW,
@@ -324,6 +327,7 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
     ViewportDebug.step(dbg, 'size-object', { w, h });
     const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-data-url-image');
     if (!obj) {
+      rollbackSource();
       cleanupNativeImageSourceToken(imgKey, sourceToken);
       registeredNativeSource = false;
       return null;
@@ -337,6 +341,7 @@ async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, exi
     return obj;
   } catch (err) {
     if (registeredNativeSource) cleanupNativeImageSourceToken(imgKey, sourceToken);
+    if (rollbackSource) rollbackSource();
     const total = performance.now() - t0;
     ViewportDebug.max('maxImageAddMs', total);
     ViewportDebug.end(dbg, { imgKey, total, path: 'native-data-url-cache', error: String(err) });
@@ -449,13 +454,16 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
   const naturalW = Number(meta.width) || 1;
   const naturalH = Number(meta.height) || 1;
   const { w, h } = fitImageSize(naturalW, naturalH, options.exactSize);
+  let rollbackSource = null;
   try {
-    BoardfishImageStore.setSource(imgKey, {
+    const imageSource = {
       native: true,
       mime: meta.mime || '',
       ext: meta.ext || '',
       bytes,
-    });
+    };
+    rollbackSource = createImageInsertSourceRollback(imgKey, imageSource);
+    BoardfishImageStore.setSource(imgKey, imageSource);
     if (options.materializeAsset) {
       const materializeStart = performance.now();
       InsertDebug.step(insertDbg, 'materialize:start', { source, fileName: path, imgKey });
@@ -494,6 +502,7 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
       z: obj?.z ?? '',
     });
     if (!obj) {
+      rollbackSource();
       cleanupNativeImageSourceToken(imgKey, sourceToken);
       return null;
     }
@@ -505,6 +514,7 @@ async function addNativeImageFile(path, cx, cy, options = {}) {
     ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, width: naturalW, height: naturalH, bytes, total, added: !!obj });
     return obj;
   } catch (err) {
+    if (rollbackSource) rollbackSource();
     cleanupNativeImageSourceToken(imgKey, sourceToken);
     throw err;
   } finally {
@@ -659,6 +669,7 @@ async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken
   showInputShield();
   const objectCountBefore = objects.length;
   let releaseReservation = null;
+  let rollbackSource = null;
   try {
     const naturalW = Number(meta?.width) || 1;
     const naturalH = Number(meta?.height) || 1;
@@ -685,12 +696,14 @@ async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken
       mime: meta?.mime || '',
       ext: meta?.ext || '',
     });
-    BoardfishImageStore.setSource(imgKey, {
+    const imageSource = {
       native: true,
       mime: meta?.mime || 'image/png',
       ext: meta?.ext || 'png',
       bytes,
-    });
+    };
+    rollbackSource = createImageInsertSourceRollback(imgKey, imageSource);
+    BoardfishImageStore.setSource(imgKey, imageSource);
 
     const materializeStart = performance.now();
     ClipDebug.step(dbg, 'paste-native-cache:materialize-start', { path, imgKey });
@@ -710,6 +723,7 @@ async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken
     const { w, h } = fitImageSize(naturalW, naturalH, false);
     const obj = addImageObject(imgKey, x, y, w, h, {}, 'paste-native-image');
     if (!obj) {
+      rollbackSource();
       cleanupNativeImageSourceToken(imgKey, sourceToken);
       ClipDebug.end(dbg, { path, added: false, imgKey, skipped: 'object-limit', objectCountBefore, objectCountAfter: objects.length });
       return null;
@@ -739,6 +753,7 @@ async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken
     });
     return obj;
   } catch (err) {
+    if (rollbackSource) rollbackSource();
     cleanupNativeImageSourceToken(imgKey, sourceToken);
     throw err;
   } finally {
@@ -835,13 +850,13 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
       }
     });
   } finally {
-    const orderedAddedObjects = addedObjects.filter(Boolean);
     if (readyPromises.length) {
       InsertDebug.step(dbg, 'ready:wait-start', { source, added, readyCount: readyPromises.length });
       await Promise.allSettled(readyPromises);
       InsertDebug.step(dbg, 'ready:wait-end', { source, added, readyCount: readyPromises.length });
     }
     if (bulk) {
+      const orderedAddedObjects = addedObjects.filter(Boolean);
       const primaryObj = orderedAddedObjects[orderedAddedObjects.length - 1];
       if (primaryObj) {
         BoardfishEditorState.setSelection(orderedAddedObjects.map((obj) => obj.id), {
@@ -931,13 +946,13 @@ async function insertNativeImagePaths(paths, x, y, source = 'native-drop') {
       }
     });
   } finally {
-    const orderedAddedObjects = addedObjects.filter(Boolean);
     if (readyPromises.length) {
       InsertDebug.step(dbg, 'ready:wait-start', { source, added, readyCount: readyPromises.length });
       await Promise.allSettled(readyPromises);
       InsertDebug.step(dbg, 'ready:wait-end', { source, added, readyCount: readyPromises.length });
     }
     if (bulk) {
+      const orderedAddedObjects = addedObjects.filter(Boolean);
       const primaryObj = orderedAddedObjects[orderedAddedObjects.length - 1];
       if (primaryObj) {
         BoardfishEditorState.setSelection(orderedAddedObjects.map((obj) => obj.id), {
@@ -963,7 +978,14 @@ if (hasTauri()) {
   });
 } else {
   canvas.addEventListener('dragover', (event) => {
-    if (![...(event.dataTransfer?.items || [])].some((item) => item.kind === 'file')) return;
+    let hasFile = false;
+    for (const item of event.dataTransfer?.items || []) {
+      if (item.kind === 'file') {
+        hasFile = true;
+        break;
+      }
+    }
+    if (!hasFile) return;
     event.preventDefault();
   });
 

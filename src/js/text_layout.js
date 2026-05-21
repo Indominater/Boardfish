@@ -36,17 +36,35 @@ refreshTextMetrics();
 const TEXT_MEASURE_CACHE_MAX_ENTRIES = 4096;
 const TEXT_PREFIX_CACHE_MAX_ENTRIES = 2048;
 const TEXT_LINES_CACHE_MAX_ENTRIES = 2048;
-var _mwCache = Object.create(null);
-var _mwCacheKeys = [];
+const TEXT_TAB_SIZE_SPACES = 8;
+var _mwCache = new Map();
+
+function measureRawTextW(text) {
+  const value = String(text ?? '');
+  if (_mwCache.has(value)) return _mwCache.get(value);
+  if (_mwCache.size >= TEXT_MEASURE_CACHE_MAX_ENTRIES) {
+    _mwCache.delete(_mwCache.keys().next().value);
+  }
+  const width = _measureCtx.measureText(value).width;
+  _mwCache.set(value, width);
+  return width;
+}
+
+const textTabStopWidth = () => {
+  const width = measureRawTextW(' '.repeat(TEXT_TAB_SIZE_SPACES));
+  return width > 0 ? width : FONT_SIZE * 4;
+};
+
+const textWidthAfterTab = (currentWidth) => {
+  const tabStop = textTabStopWidth();
+  return (Math.floor(currentWidth / tabStop) + 1) * tabStop;
+};
 
 function measureTextW(text) {
-  if (text in _mwCache) return _mwCache[text];
-  if (_mwCacheKeys.length >= TEXT_MEASURE_CACHE_MAX_ENTRIES) {
-    const oldest = _mwCacheKeys.shift();
-    delete _mwCache[oldest];
-  }
-  _mwCacheKeys.push(text);
-  return (_mwCache[text] = _measureCtx.measureText(text).width);
+  const value = String(text ?? '');
+  if (!value.includes('\t')) return measureRawTextW(value);
+  const widths = getPrefixWidths(value);
+  return widths[widths.length - 1] || 0;
 }
 
 function refreshTextMetrics() {
@@ -76,8 +94,7 @@ const trimMapCache = (map, maxEntries) => {
 };
 
 const clearMeasuredTextWidthCache = () => {
-  for (const k of _mwCacheKeys) delete _mwCache[k];
-  _mwCacheKeys.length = 0;
+  _mwCache.clear();
 };
 
 const clearTextLayoutCaches = (options = {}) => {
@@ -85,22 +102,36 @@ const clearTextLayoutCaches = (options = {}) => {
   _prefixCache.clear();
   if (options.measurements) clearMeasuredTextWidthCache();
   if (options.objectLayout !== false) {
-    for (const obj of objects) delete obj._layoutCache;
+    for (const obj of objects) {
+      delete obj._layoutCache;
+      delete obj._layoutCacheKey;
+    }
   }
 };
 
 function getPrefixWidths(text) {
-  const hit = _prefixCache.get(text);
+  const value = String(text ?? '');
+  const hit = _prefixCache.get(value);
   if (hit) {
-    _prefixCache.delete(text);
-    _prefixCache.set(text, hit);
+    _prefixCache.delete(value);
+    _prefixCache.set(value, hit);
     return hit;
   }
-  const pw = new Float64Array(text.length + 1);
-  for (let k = 0; k < text.length; k++) {
-    pw[k + 1] = measureTextW(text.slice(0, k + 1));
+  const pw = new Float64Array(value.length + 1);
+  let segmentStart = 0;
+  let segmentBaseWidth = 0;
+  for (let k = 0; k < value.length; k++) {
+    if (value[k] === '\t') {
+      const widthBeforeTab = segmentBaseWidth + measureRawTextW(value.slice(segmentStart, k));
+      pw[k] = widthBeforeTab;
+      pw[k + 1] = textWidthAfterTab(widthBeforeTab);
+      segmentStart = k + 1;
+      segmentBaseWidth = pw[k + 1];
+    } else {
+      pw[k + 1] = segmentBaseWidth + measureRawTextW(value.slice(segmentStart, k + 1));
+    }
   }
-  _prefixCache.set(text, pw);
+  _prefixCache.set(value, pw);
   trimMapCache(_prefixCache, TEXT_PREFIX_CACHE_MAX_ENTRIES);
   return pw;
 }
@@ -242,6 +273,24 @@ function getTextLayout(obj) {
 function lineXAtOffset(line, obj, offset) {
   return obj.x + TEXT_PAD + line.prefixWidths[Math.max(0, Math.min(offset, line.text.length))];
 }
+
+const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0) => {
+  if (!context || !line || !obj) return;
+  const text = String(line.text ?? '');
+  const start = Math.max(0, Math.min(startOffset, text.length));
+  const end = Math.max(start, Math.min(endOffset, text.length));
+  let chunkStart = start;
+  for (let i = start; i < end; i++) {
+    if (text[i] !== '\t') continue;
+    if (chunkStart < i) {
+      context.fillText(text.slice(chunkStart, i), lineXAtOffset(line, obj, chunkStart), line.textY);
+    }
+    chunkStart = i + 1;
+  }
+  if (chunkStart < end) {
+    context.fillText(text.slice(chunkStart, end), lineXAtOffset(line, obj, chunkStart), line.textY);
+  }
+};
 
 function lineEndX(line, obj) {
   return lineXAtOffset(line, obj, line.text.length);

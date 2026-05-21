@@ -29,6 +29,7 @@ var _eyedropperHoldActive = false;
 var _eyedropperLastMouseEvent = null;
 var eyedropperSafeImageCache = new Map();
 var eyedropperSafeImagePromises = new Map();
+let eyedropperSafeImageCacheGeneration = 0;
 var EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT = 1024 * 1024 * 1024;
 var eyedropperSafeScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
   memoryLimit: EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT,
@@ -37,6 +38,39 @@ var eyedropperSafeScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache
 var eyedropperSafeScaledBitmapCache = eyedropperSafeScaledBitmapStore.groups;
 var eyedropperSafeScaledBitmapPending = new Set();
 var eyedropperSafeScaledBitmapPendingBytes = new Map();
+let eyedropperSafeScaledBitmapPendingByteTotal = 0;
+let eyedropperSafeScaledBitmapPendingBuilds = new Map();
+let eyedropperSafeScaledBitmapPendingBuildCounter = 1;
+const setEyedropperSafeScaledPendingBytes = (pendingKey, bytes) => {
+  const previous = eyedropperSafeScaledBitmapPendingBytes.get(pendingKey) || 0;
+  eyedropperSafeScaledBitmapPendingBytes.set(pendingKey, bytes);
+  eyedropperSafeScaledBitmapPendingByteTotal += bytes - previous;
+};
+const removeEyedropperSafeScaledPendingBytes = (pendingKey) => {
+  const bytes = eyedropperSafeScaledBitmapPendingBytes.get(pendingKey) || 0;
+  if (eyedropperSafeScaledBitmapPendingBytes.delete(pendingKey)) eyedropperSafeScaledBitmapPendingByteTotal = Math.max(0, eyedropperSafeScaledBitmapPendingByteTotal - bytes);
+};
+const eyedropperSafeScaledPendingBytes = () => eyedropperSafeScaledBitmapPendingByteTotal;
+const clearEyedropperSafeScaledPendingBuild = (pendingKey, buildId = null) => {
+  if (!pendingKey || (buildId != null && eyedropperSafeScaledBitmapPendingBuilds.get(pendingKey) !== buildId)) return false;
+  eyedropperSafeScaledBitmapPending.delete(pendingKey);
+  eyedropperSafeScaledBitmapPendingBuilds.delete(pendingKey);
+  removeEyedropperSafeScaledPendingBytes(pendingKey);
+  return true;
+};
+const clearEyedropperSafeScaledPendingForKey = (key) => {
+  if (!key) return;
+  for (const pendingKey of eyedropperSafeScaledBitmapPending) {
+    if (pendingKey.startsWith(`${key}:`)) clearEyedropperSafeScaledPendingBuild(pendingKey);
+  }
+};
+const isEyedropperSafeScaledImageRequestCurrent = (key, pendingKey, buildId, token, source) => {
+  if (!eyedropperSafeScaledBitmapPending.has(pendingKey)) return false;
+  if (eyedropperSafeScaledBitmapPendingBuilds.get(pendingKey) !== buildId) return false;
+  if (!token) return true;
+  const latest = eyedropperSafeImageCache.get(key);
+  return latest?.token === token && latest.source === source;
+};
 var eyedropperSafeDisplayProbeFailures = new Map();
 var eyedropperSafeTileCache = new Map();
 var eyedropperSafeTileCachePending = new Set();

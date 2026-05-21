@@ -58,7 +58,7 @@
     }
 
     function clear() {
-      for (const key of [...groups.keys()]) removeGroup(key);
+      for (const key of groups.keys()) removeGroup(key);
       bytes = 0;
       useCounter = 1;
     }

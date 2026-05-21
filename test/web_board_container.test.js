@@ -73,6 +73,53 @@ test('read validates advertised image bytes before materializing image entries',
   assert.ok(validations.some((next) => next.imageBytes === 4));
 });
 
+test('failed reads revoke web image refs created before the failure', async () => {
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {
+      'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' },
+      'img-2': { path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
+    },
+    objects: [
+      { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 10, z: 1, data: { imgKey: 'img-1' } },
+      { id: 'obj-2', type: 'image', x: 12, y: 0, w: 10, h: 10, z: 2, data: { imgKey: 'img-2' } },
+    ],
+  };
+  const payload = await WebContainer.createBoardContainerBlob(board, {
+    'img-1': 'data:image/png;base64,AQIDBA==',
+    'img-2': 'data:image/png;base64,BQYHCA==',
+  });
+  const created = [];
+  const revoked = [];
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = () => {
+    const url = `blob:boardfish-test-${created.length}`;
+    created.push(url);
+    return url;
+  };
+  URL.revokeObjectURL = (url) => {
+    revoked.push(url);
+  };
+  try {
+    await assert.rejects(
+      () => WebContainer.readBoardContainer(payload.blob, {
+        validateBoardPayload(next) {
+          if ((next.imageBytes || 0) > 4) throw new Error('board content limit');
+        },
+      }),
+      /board content limit/,
+    );
+  } finally {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+  }
+
+  assert.deepEqual(created, ['blob:boardfish-test-0']);
+  assert.deepEqual(revoked, ['blob:boardfish-test-0']);
+});
+
 test('measures data URL payload bytes without base64 inflation', () => {
   assert.equal(WebContainer.dataUrlByteLength('data:image/png;base64,AQIDBA=='), 4);
 });

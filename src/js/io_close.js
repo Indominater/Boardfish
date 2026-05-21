@@ -692,9 +692,9 @@ function scheduleVisibleHydrationAfterIdle() {
 }
 
 var openHydrationMode = 'visible-first';
+var OPEN_HYDRATION_MODES = new Set(['all-before-open', 'visible-first']);
 function setOpenHydrationMode(mode) {
-  const allowed = new Set(['all-before-open', 'visible-first']);
-  if (!allowed.has(mode)) return openHydrationMode;
+  if (!OPEN_HYDRATION_MODES.has(mode)) return openHydrationMode;
   openHydrationMode = mode;
   return openHydrationMode;
 }

@@ -354,7 +354,30 @@ function retainedImageKeysForCurrentAndHistory() {
   return keys;
 }
 
+const hasObjectCacheEntries = (value) => {
+  if (!value || typeof value !== 'object') return false;
+  for (const key in value) {
+    if (Object.hasOwn(value, key)) return true;
+  }
+  return false;
+};
+const hasCollectionCacheEntries = (value) => !!(value && typeof value.size === 'number' && value.size);
+
+function hasPruneableImageCacheState() {
+  if (typeof pruneImageCachesToKeys === 'function') {
+    if (typeof imageStore !== 'undefined' && hasObjectCacheEntries(imageStore)) return true;
+    if (typeof imageCache !== 'undefined' && hasObjectCacheEntries(imageCache)) return true;
+    if (typeof imageAssetUrlCache !== 'undefined' && hasObjectCacheEntries(imageAssetUrlCache)) return true;
+    if (typeof imageBitmapCache !== 'undefined' && hasObjectCacheEntries(imageBitmapCache)) return true;
+    if (typeof imageBitmapFailed !== 'undefined' && hasCollectionCacheEntries(imageBitmapFailed)) return true;
+  }
+  return typeof pruneEyedropperSafeImagesToKeys === 'function' &&
+    typeof eyedropperSafeImageCache !== 'undefined' &&
+    hasCollectionCacheEntries(eyedropperSafeImageCache);
+}
+
 function pruneImageCachesAfterHistoryChange(reason = 'history-change') {
+  if (!hasPruneableImageCacheState()) return;
   const retainedKeys = retainedImageKeysForCurrentAndHistory();
   let imageResult = null;
   if (typeof pruneImageCachesToKeys === 'function') {

@@ -336,14 +336,26 @@ const collectImageReadbackProbeSourcesForKey = (key, sourceOverride = undefined)
   return sources;
 };
 
-const isImageReadbackProbeSourceUsedByOtherKey = (key, src) => {
+const addImageRuntimeObjectKeysToSet = (keys, value) => {
+  if (!value || typeof value !== 'object') return keys;
+  for (const sourceKey in value) {
+    if (Object.hasOwn(value, sourceKey)) keys.add(sourceKey);
+  }
+  return keys;
+};
+
+const collectImageReadbackProbeSourceKeys = () => addImageRuntimeObjectKeysToSet(
+  addImageRuntimeObjectKeysToSet(
+    addImageRuntimeObjectKeysToSet(new Set(), imageStore),
+    imageCache,
+  ),
+  imageAssetUrlCache,
+);
+
+const isImageReadbackProbeSourceUsedByOtherKey = (key, src, sourceKeys = collectImageReadbackProbeSourceKeys()) => {
   if (typeof src !== 'string' || !src) return false;
   const probeKey = imageReadbackProbeKey(src);
-  for (const otherKey of new Set([
-    ...Object.keys(imageStore),
-    ...Object.keys(imageCache),
-    ...Object.keys(imageAssetUrlCache),
-  ])) {
+  for (const otherKey of sourceKeys) {
     if (otherKey === key) continue;
     for (const otherSrc of collectImageReadbackProbeSourcesForKey(otherKey)) {
       if (imageReadbackProbeKey(otherSrc) === probeKey) return true;
@@ -355,8 +367,9 @@ const isImageReadbackProbeSourceUsedByOtherKey = (key, src) => {
 const clearImageReadbackProbeCacheForKey = (key, sourceOverride = undefined) => {
   if (!key || !imageReadbackSafeSourceCache.size) return 0;
   let removed = 0;
+  const sourceKeys = collectImageReadbackProbeSourceKeys();
   for (const src of collectImageReadbackProbeSourcesForKey(key, sourceOverride)) {
-    if (isImageReadbackProbeSourceUsedByOtherKey(key, src)) continue;
+    if (isImageReadbackProbeSourceUsedByOtherKey(key, src, sourceKeys)) continue;
     const probeKey = imageReadbackProbeKey(src);
     if (probeKey && imageReadbackSafeSourceCache.delete(probeKey)) removed++;
   }
@@ -928,14 +941,16 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   return readyPromise;
 }
 
-const removeImageRuntimeCachesForKey = (key, sourceOverride = undefined) => {
+const removeImageRuntimeCachesForKey = (key, sourceOverride = undefined, options = {}) => {
   let removed = {
     displayImages: 0,
     assetUrls: 0,
     bitmaps: 0,
     bitmapFailures: 0,
   };
-  clearImageReadbackProbeCacheForKey(key, sourceOverride);
+  if (options.clearReadbackProbe !== false) {
+    clearImageReadbackProbeCacheForKey(key, sourceOverride);
+  }
   if (imageCache[key]) {
     delete imageCache[key];
     removed.displayImages++;
@@ -978,13 +993,12 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
   if (!retainedKeys || typeof retainedKeys.has !== 'function') {
     return { removedSources: 0, removedNativeSources: 0 };
   }
-  const keys = new Set([
-    ...Object.keys(imageStore),
-    ...Object.keys(imageCache),
-    ...Object.keys(imageAssetUrlCache),
-    ...Object.keys(imageBitmapCache),
-    ...imageBitmapFailed,
-  ]);
+  const keys = new Set();
+  addImageRuntimeObjectKeysToSet(keys, imageStore);
+  addImageRuntimeObjectKeysToSet(keys, imageCache);
+  addImageRuntimeObjectKeysToSet(keys, imageAssetUrlCache);
+  addImageRuntimeObjectKeysToSet(keys, imageBitmapCache);
+  for (const key of imageBitmapFailed) keys.add(key);
   const removedSourceKeys = [];
   const result = {
     removedSources: 0,
@@ -996,14 +1010,18 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
   };
   for (const key of keys) {
     if (retainedKeys.has(key)) continue;
+    let readbackProbeCleared = false;
     if (Object.hasOwn(imageStore, key)) {
       clearImageReadbackProbeCacheForKey(key, imageStore[key]);
+      readbackProbeCleared = true;
       revokeWebImageSource(imageStore[key]);
       delete imageStore[key];
       removedSourceKeys.push(key);
       result.removedSources++;
     }
-    const removed = removeImageRuntimeCachesForKey(key);
+    const removed = removeImageRuntimeCachesForKey(key, undefined, {
+      clearReadbackProbe: !readbackProbeCleared,
+    });
     result.removedDisplayImages += removed.displayImages;
     result.removedAssetUrls += removed.assetUrls;
     result.removedBitmaps += removed.bitmaps;

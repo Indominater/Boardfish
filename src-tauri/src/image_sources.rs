@@ -29,7 +29,7 @@ pub(crate) struct SampledImagePixelResponse {
     source_h: u32,
     source_x: u32,
     source_y: u32,
-    rgba: Vec<u8>,
+    rgba: [u8; 4],
     decode_ms: f64,
     sample_ms: f64,
     total_ms: f64,
@@ -251,7 +251,12 @@ pub(crate) async fn sample_cached_image_pixel(
     let source_x = source_x.min(decoded.width - 1);
     let source_y = source_y.min(decoded.height - 1);
     let index = ((source_y as usize * decoded.width as usize) + source_x as usize) * 4;
-    let rgba = decoded.rgba[index..index + 4].to_vec();
+    let rgba = [
+        decoded.rgba[index],
+        decoded.rgba[index + 1],
+        decoded.rgba[index + 2],
+        decoded.rgba[index + 3],
+    ];
 
     Ok(SampledImagePixelResponse {
         img_key,
@@ -558,4 +563,27 @@ pub(crate) fn clear_decoded_image_source_cache(
     source_state: tauri::State<ImageSourceCache>,
 ) -> Result<(), String> {
     source_state.clear_decoded()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SampledImagePixelResponse;
+
+    #[test]
+    fn sampled_pixel_rgba_serializes_as_json_array() {
+        let response = SampledImagePixelResponse {
+            img_key: "img-1".to_string(),
+            source_w: 2,
+            source_h: 2,
+            source_x: 1,
+            source_y: 1,
+            rgba: [1, 2, 3, 4],
+            decode_ms: 0.0,
+            sample_ms: 0.0,
+            total_ms: 0.0,
+        };
+
+        let value = serde_json::to_value(response).expect("serialize sampled pixel response");
+        assert_eq!(value["rgba"], serde_json::json!([1, 2, 3, 4]));
+    }
 }

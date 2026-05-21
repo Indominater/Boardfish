@@ -129,6 +129,10 @@
       if (obj.type === 'text') {
         context.fillStyle = deps.canvasTextColor();
         context.textBaseline = 'alphabetic';
+        if (typeof deps.getTextLayout === 'function' && typeof deps.drawTextLineRange === 'function') {
+          for (const line of deps.getTextLayout(obj)) deps.drawTextLineRange(context, line, obj);
+          return true;
+        }
         const lines = deps.getWrappedLines(obj);
         const textBaselineYOffset = resolveTextBaselineYOffset(deps);
         for (let i = 0; i < lines.length; i++) {

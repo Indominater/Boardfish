@@ -41,6 +41,8 @@ const closeFloatingSurface = (surface, after = null, action = 'menu-close') => {
   return false;
 };
 
+var ctxActionItems = ctxActions ? ctxActions.getElementsByClassName('ctx-action-item') : [];
+
 function menuGapPx() {
   const value = parseFloat(cssVar('--menu-shell-padding'));
   return Number.isFinite(value) ? value : 8;
@@ -97,7 +99,7 @@ function alignCtxActionsToMenuRow(gap) {
 function openCtxMenuAt(x, y) {
   closeOpenMenusExcept('ctx-menu', 'open-ctx-menu');
   openMenuAt(ctxMenu, x, y, { animate: false });
-  if (!ctxActions || !ctxActions.querySelector('.ctx-action-item')) {
+  if (!ctxActions || !ctxActionItems.length) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('menu-open', { surface: ctxMenu });
     return;
   }
@@ -751,7 +753,8 @@ function isCtxActionHotspotEvent(e, button) {
 
 function updateCtxActionHotspotState(e, active = false) {
   const button = e.target.closest?.('.ctx-action-item');
-  for (const item of ctxActions?.querySelectorAll('.ctx-action-item') || []) {
+  for (let i = 0; i < ctxActionItems.length; i++) {
+    const item = ctxActionItems[i];
     const hot = item === button && isCtxActionHotspotEvent(e, item);
     item.classList.toggle('hotspot-hover', hot);
     item.classList.toggle('hotspot-active', active && hot);
@@ -759,7 +762,8 @@ function updateCtxActionHotspotState(e, active = false) {
 }
 
 function clearCtxActionHotspotState() {
-  for (const item of ctxActions?.querySelectorAll('.ctx-action-item') || []) {
+  for (let i = 0; i < ctxActionItems.length; i++) {
+    const item = ctxActionItems[i];
     item.classList.remove('hotspot-hover', 'hotspot-active');
   }
 }

@@ -30,6 +30,104 @@ const textEditSelectionState = (proxy) => {
   };
 };
 
+const TEXT_EDIT_INDENT = '\t';
+const TEXT_EDIT_LEGACY_SPACE_INDENT_SIZE = 4;
+
+const textEditLineStartAt = (value, index) => {
+  const text = String(value ?? '');
+  const clamped = Math.max(0, Math.min(index ?? 0, text.length));
+  if (clamped <= 0) return 0;
+  const newlineAt = text.lastIndexOf('\n', clamped - 1);
+  return newlineAt === -1 ? 0 : newlineAt + 1;
+};
+
+const textEditSelectedLineStarts = (value, selection) => {
+  const text = String(value ?? '');
+  const start = Math.max(0, Math.min(selection?.start ?? 0, text.length));
+  const end = Math.max(0, Math.min(selection?.end ?? start, text.length));
+  const lastSelectedIndex = end > start ? end - 1 : start;
+  const firstLineStart = textEditLineStartAt(text, start);
+  const lastLineStart = textEditLineStartAt(text, lastSelectedIndex);
+  const starts = [];
+  let lineStart = firstLineStart;
+  while (lineStart <= lastLineStart) {
+    starts.push(lineStart);
+    const newlineAt = text.indexOf('\n', lineStart);
+    if (newlineAt === -1) break;
+    lineStart = newlineAt + 1;
+  }
+  return starts;
+};
+
+const textEditOutdentLengthAt = (value, lineStart) => {
+  if (value[lineStart] === '\t') return 1;
+  let count = 0;
+  while (count < TEXT_EDIT_LEGACY_SPACE_INDENT_SIZE && value[lineStart + count] === ' ') count++;
+  return count;
+};
+
+const adjustTextEditIndexForRemoval = (index, start, length) => {
+  if (index <= start) return index;
+  if (index >= start + length) return index - length;
+  return start;
+};
+
+const applyTextEditLineIndent = (value, selection, { outdent = false } = {}) => {
+  const text = String(value ?? '');
+  const selectionState = {
+    start: Math.max(0, Math.min(selection?.start ?? 0, text.length)),
+    end: Math.max(0, Math.min(selection?.end ?? selection?.start ?? 0, text.length)),
+    direction: selection?.direction || 'none',
+  };
+  const lineStarts = textEditSelectedLineStarts(text, selectionState);
+  const edits = outdent
+    ? lineStarts
+      .map((lineStart) => ({ lineStart, length: textEditOutdentLengthAt(text, lineStart) }))
+      .filter((edit) => edit.length > 0)
+    : lineStarts.map((lineStart) => ({ lineStart, insert: TEXT_EDIT_INDENT }));
+  if (!edits.length) return { ...selectionState, value: text, changed: false };
+
+  let nextValue = text;
+  let nextStart = selectionState.start;
+  let nextEnd = selectionState.end;
+  for (let i = edits.length - 1; i >= 0; i--) {
+    const edit = edits[i];
+    if (edit.insert) {
+      nextValue = nextValue.slice(0, edit.lineStart) + edit.insert + nextValue.slice(edit.lineStart);
+      if (nextStart >= edit.lineStart) nextStart += edit.insert.length;
+      if (nextEnd >= edit.lineStart) nextEnd += edit.insert.length;
+    } else {
+      nextValue = nextValue.slice(0, edit.lineStart) + nextValue.slice(edit.lineStart + edit.length);
+      nextStart = adjustTextEditIndexForRemoval(nextStart, edit.lineStart, edit.length);
+      nextEnd = adjustTextEditIndexForRemoval(nextEnd, edit.lineStart, edit.length);
+    }
+  }
+
+  return {
+    value: nextValue,
+    start: nextStart,
+    end: nextEnd,
+    direction: selectionState.direction,
+    changed: nextValue !== text,
+  };
+};
+
+const dispatchTextEditInputEvent = (proxy, inputType) => {
+  let event = null;
+  try {
+    event = typeof InputEvent === 'function'
+      ? new InputEvent('input', { bubbles: true, inputType })
+      : new Event('input', { bubbles: true });
+  } catch (_) {
+    event = document.createEvent('Event');
+    event.initEvent('input', true, false);
+  }
+  if (event && !event.inputType) {
+    try { Object.defineProperty(event, 'inputType', { value: inputType }); } catch (_) {}
+  }
+  proxy.dispatchEvent(event);
+};
+
 const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSelectionState(proxy)) => {
   if (!selection?.hasSelection || !proxy) return false;
   const selectedText = proxy.value.slice(selection.start, selection.end);
@@ -61,6 +159,7 @@ function enterEdit(id, { history = true } = {}) {
   if (normalized !== obj.data.content) {
     obj.data.content = normalized;
     delete obj._layoutCache;
+    delete obj._layoutCacheKey;
     _linesCacheMap.delete(obj.id);
     markDirty(obj.id);
   }
@@ -103,6 +202,7 @@ function enterEdit(id, { history = true } = {}) {
       proxy.setSelectionRange(start, end, direction);
     }
     delete obj._layoutCache;
+    delete obj._layoutCacheKey;
     const heightChanged = syncTextAutoHeight(obj, obj._editMinLines || 1);
     const nextSelectionState = textEditSelectionState(proxy);
     _textInputSelectionHistorySuppress = {
@@ -120,6 +220,28 @@ function enterEdit(id, { history = true } = {}) {
   });
   proxy.addEventListener('keydown', (e) => {
     _caretVisible = true;
+
+    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const selection = textEditSelectionState(proxy);
+      const indentResult = applyTextEditLineIndent(proxy.value, selection, { outdent: e.shiftKey });
+      if (!indentResult.changed) {
+        scheduleRender(true, false);
+        return;
+      }
+      const inputType = e.shiftKey ? 'deleteContentBackward' : 'insertText';
+      pendingInputState = {
+        ...selection,
+        inputType,
+      };
+      beginTextEditHistoryAction(id, pendingInputState, {
+        splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
+      });
+      proxy.value = indentResult.value;
+      proxy.setSelectionRange(indentResult.start, indentResult.end, indentResult.direction);
+      dispatchTextEditInputEvent(proxy, inputType);
+      return;
+    }
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && proxy.selectionStart !== proxy.selectionEnd) {
       e.preventDefault();
@@ -279,6 +401,7 @@ function exitEdit() {
       return;
     }
     delete obj._layoutCache;
+    delete obj._layoutCacheKey;
     const heightChanged = syncTextAutoHeight(obj);
     if (heightChanged) markDirty(id);
     const contentChanged = obj.data.content !== _editHistoryLastContent;

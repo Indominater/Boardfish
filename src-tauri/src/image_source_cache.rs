@@ -355,16 +355,24 @@ fn decoded_image_bytes(decoded: &DecodedImageSource) -> usize {
 }
 
 fn prune_decoded_cache_locked(cache: &mut ImageSourceCacheInner, protected_key: &str) {
-    while cache.decoded_bytes > DECODED_IMAGE_CACHE_MAX_BYTES {
-        let victim_key = cache
-            .entries
-            .iter()
-            .filter(|(key, entry)| key.as_str() != protected_key && entry.decoded.is_some())
-            .min_by_key(|(_key, entry)| entry.decoded_last_used)
-            .map(|(key, _entry)| key.clone());
-        let Some(victim_key) = victim_key else {
+    if cache.decoded_bytes <= DECODED_IMAGE_CACHE_MAX_BYTES {
+        return;
+    }
+    let mut victims: Vec<_> = cache
+        .entries
+        .iter()
+        .filter_map(|(key, entry)| {
+            if key.as_str() == protected_key || entry.decoded.is_none() {
+                return None;
+            }
+            Some((entry.decoded_last_used, key.clone()))
+        })
+        .collect();
+    victims.sort_by_key(|(decoded_last_used, _key)| *decoded_last_used);
+    for (_decoded_last_used, victim_key) in victims {
+        if cache.decoded_bytes <= DECODED_IMAGE_CACHE_MAX_BYTES {
             break;
-        };
+        }
         if let Some(entry) = cache.entries.get_mut(&victim_key) {
             entry.decoded = None;
             cache.decoded_bytes = cache.decoded_bytes.saturating_sub(entry.decoded_bytes);
@@ -377,3 +385,7 @@ fn prune_decoded_cache_locked(cache: &mut ImageSourceCacheInner, protected_key: 
 fn bytes_mb(bytes: usize) -> f64 {
     ((bytes as f64 / 1024.0 / 1024.0) * 100.0).round() / 100.0
 }
+
+#[cfg(test)]
+#[path = "image_source_cache_tests.rs"]
+mod image_source_cache_tests;

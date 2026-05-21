@@ -293,6 +293,15 @@ test('failed web image inserts revoke unadopted web image sources', () => {
   assert.match(source, /BoardfishWebBoardContainer\.revokeImageSource\?\.\(imageSource\);/);
 });
 
+test('failed native image inserts roll back unadopted JS image sources', () => {
+  const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
+
+  assert.match(source, /rollbackSource = createImageInsertSourceRollback\(imgKey, imageSource\);\s*BoardfishImageStore\.setSource\(imgKey, imageSource\);/);
+  assert.match(source, /if \(!obj\) \{\s*rollbackSource\(\);\s*cleanupNativeImageSourceToken\(imgKey, sourceToken\);/);
+  assert.match(source, /catch \(err\) \{\s*if \(registeredNativeSource\) cleanupNativeImageSourceToken\(imgKey, sourceToken\);\s*if \(rollbackSource\) rollbackSource\(\);/);
+  assert.match(source, /catch \(err\) \{\s*if \(rollbackSource\) rollbackSource\(\);\s*cleanupNativeImageSourceToken\(imgKey, sourceToken\);\s*throw err;/);
+});
+
 test('failed generic data URL paste rolls back the orphan image source and runtime cache', async () => {
   const context = loadDataUrlPasteFailureHarness();
   const dataUrl = 'data:image/png;base64,boardfish';

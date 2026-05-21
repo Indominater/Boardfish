@@ -166,6 +166,12 @@
     throw new Error('unsupported web file reference');
   }
 
+  function revokeBoardImageSources(board) {
+    const revoke = root.BoardfishWebBoardContainer?.revokeImageSource;
+    if (typeof revoke !== 'function') return;
+    for (const source of Object.values(board?.imageStore || {})) revoke(source);
+  }
+
   async function readBoard(ref) {
     const file = await fileFromRef(ref);
     if (!file) throw new Error('no Boardfish file selected');
@@ -175,23 +181,29 @@
         root.BoardfishWebLimits.boardContentLimitMessage()
       );
     }
-    const result = await root.BoardfishWebBoardContainer.readBoardContainer(file, {
-      maxBoardContentBytes: root.BoardfishWebLimits?.LIMITS?.maxBoardContentBytes,
-      validateBoardPayload(payload) {
-        return root.BoardfishWebLimits?.validateBoardPayload(payload);
-      },
-    });
-    root.BoardfishWebLimits?.validateBoardPayload({
-      objectCount: result.board?.objects?.length || 0,
-      boardJsonBytes: result.debug?.board_json_bytes || 0,
-      imageBytes: result.debug?.image_bytes,
-      imageEntries: result.imageEntries || [],
-    });
-    await root.BoardfishWebLimits?.validateOpenedImageEntries(result.imageEntries || []);
-    return {
-      board: result.board,
-      debug: result.debug,
-    };
+    let result = null;
+    try {
+      result = await root.BoardfishWebBoardContainer.readBoardContainer(file, {
+        maxBoardContentBytes: root.BoardfishWebLimits?.LIMITS?.maxBoardContentBytes,
+        validateBoardPayload(payload) {
+          return root.BoardfishWebLimits?.validateBoardPayload(payload);
+        },
+      });
+      root.BoardfishWebLimits?.validateBoardPayload({
+        objectCount: result.board?.objects?.length || 0,
+        boardJsonBytes: result.debug?.board_json_bytes || 0,
+        imageBytes: result.debug?.image_bytes,
+        imageEntries: result.imageEntries || [],
+      });
+      await root.BoardfishWebLimits?.validateOpenedImageEntries(result.imageEntries || []);
+      return {
+        board: result.board,
+        debug: result.debug,
+      };
+    } catch (err) {
+      if (result?.board) revokeBoardImageSources(result.board);
+      throw err;
+    }
   }
 
   async function ensureReadWritePermission(handle) {

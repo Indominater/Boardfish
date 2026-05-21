@@ -19,6 +19,8 @@ function loadHistoryHarness() {
   const smoothAdded = [];
   const smoothRemoved = [];
   const actionCalls = [];
+  const imagePruneCalls = [];
+  const eyedropperPruneCalls = [];
   const jiggleActions = new Set([
     'copy-selected-objects',
     'copy-text-object',
@@ -56,6 +58,8 @@ function loadHistoryHarness() {
     smoothAdded,
     smoothRemoved,
     actionCalls,
+    imagePruneCalls,
+    eyedropperPruneCalls,
     BoardfishEditorState: {
       replaceBoardObjects(nextObjects) {
         context.objects = nextObjects;
@@ -150,10 +154,12 @@ function loadHistoryHarness() {
     markDirty(id) {
       context._dirtyIds.add(id);
     },
-    pruneEyedropperSafeImagesToKeys() {
+    pruneEyedropperSafeImagesToKeys(retainedKeys) {
+      eyedropperPruneCalls.push([...retainedKeys].sort());
       return null;
     },
-    pruneImageCachesToKeys() {
+    pruneImageCachesToKeys(retainedKeys) {
+      imagePruneCalls.push([...retainedKeys].sort());
       return null;
     },
     scheduleRender() {},
@@ -190,6 +196,39 @@ function setBoard(context, objects, selectedIds = []) {
   context.selectedIds = new Set(selectedIds);
   context.selectedId = selectedIds[selectedIds.length - 1] || null;
 }
+
+test('text-only history skips image cache pruning when no image cache state exists', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, [
+    { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'hello' } },
+  ], ['text-1']);
+
+  context.snapshot();
+  context.objectsMap.get('text-1').data.content = 'hello world';
+  context.markDirty('text-1');
+  context.pushHistory('text-edit-checkpoint');
+
+  assert.deepEqual(context.imagePruneCalls, []);
+  assert.deepEqual(context.eyedropperPruneCalls, []);
+});
+
+test('history keeps image cache pruning when pruneable image state exists', () => {
+  const context = loadHistoryHarness();
+  context.imageStore = {
+    'img-1': 'data:image/png;base64,AQ==',
+    'img-unused': 'data:image/png;base64,Ag==',
+  };
+  setBoard(context, [
+    { id: 'image-1', type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: { imgKey: 'img-1' } },
+  ], ['image-1']);
+
+  context.snapshot();
+  setBoard(context, [], []);
+  context.pushHistory('delete-selected');
+
+  assert.deepEqual(context.imagePruneCalls, [['img-1'], ['img-1']]);
+  assert.deepEqual(context.eyedropperPruneCalls, [['img-1'], ['img-1']]);
+});
 
 test('undo and redo keep text-safe actions inert under copy-only jiggle policy', () => {
   const context = loadHistoryHarness();

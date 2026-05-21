@@ -47,6 +47,7 @@ const trimPastedTextObjectContent = (obj) => {
   if (content === obj.data.content) return false;
   obj.data.content = content;
   delete obj._layoutCache;
+  delete obj._layoutCacheKey;
   syncTextAutoHeight(obj);
   return true;
 };

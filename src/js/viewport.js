@@ -349,6 +349,10 @@ function drawVisibleObjects(context, counters, { skipId = null, viewportRect = c
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
   if (selStart === selEnd) return null;
   const runs = [];
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
   for (const line of layout) {
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
@@ -357,18 +361,18 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
       const endX = lineEndX(line, obj);
       const x1 = o0 < line.text.length ? lineXAtOffset(line, obj, o0) : endX;
       const x2 = o1 < line.text.length ? lineXAtOffset(line, obj, o1) : endX;
-      runs.push({ line, x1, x2, text: line.text.slice(o0, o1) });
+      const run = { line, x1, x2, startOffset: o0, endOffset: o1, text: line.text.slice(o0, o1) };
+      runs.push(run);
+      if (x1 < left) left = x1;
+      if (line.y < top) top = line.y;
+      if (x2 > right) right = x2;
+      if (line.y + LINE_H > bottom) bottom = line.y + LINE_H;
     }
   }
   if (!runs.length) return null;
   return {
     runs,
-    bounds: {
-      left: Math.min(...runs.map((run) => run.x1)),
-      top: Math.min(...runs.map((run) => run.line.y)),
-      right: Math.max(...runs.map((run) => run.x2)),
-      bottom: Math.max(...runs.map((run) => run.line.y + LINE_H)),
-    },
+    bounds: { left, top, right, bottom },
   };
 };
 
@@ -396,7 +400,7 @@ const applyTextSelectionMotionTransform = (context, bounds, motion) => {
 const drawTextLayoutStatic = (context, obj, layout, selectionGap = null) => {
   context.fillStyle = canvasTextColor();
   if (!selectionGap) {
-    for (const line of layout) context.fillText(line.text, obj.x + TEXT_PAD, line.textY);
+    for (const line of layout) drawTextLineRange(context, line, obj);
     return;
   }
   const selStart = Math.min(selectionGap.start, selectionGap.end);
@@ -405,14 +409,14 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null) => {
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
     if (h0 >= h1) {
-      context.fillText(line.text, obj.x + TEXT_PAD, line.textY);
+      drawTextLineRange(context, line, obj);
       continue;
     }
     const o0 = h0 - ls, o1 = h1 - ls;
     const before = line.text.slice(0, o0);
     const after = line.text.slice(o1);
-    if (before) context.fillText(before, obj.x + TEXT_PAD, line.textY);
-    if (after) context.fillText(after, lineXAtOffset(line, obj, o1), line.textY);
+    if (before) drawTextLineRange(context, line, obj, 0, o0);
+    if (after) drawTextLineRange(context, line, obj, o1, line.text.length);
   }
 };
 
@@ -443,7 +447,7 @@ const drawTextSelectionContentJello = (context, obj, layout, selStart, selEnd, o
   applyTextSelectionMotionTransform(context, selection.bounds, motion);
   context.fillStyle = canvasTextColor();
   for (const run of selection.runs) {
-    if (run.text) context.fillText(run.text, run.x1, run.line.textY);
+    if (run.text) drawTextLineRange(context, run.line, obj, run.startOffset, run.endOffset);
   }
   context.restore();
   return true;
@@ -748,6 +752,8 @@ BoardRenderer = BoardfishRenderer.createBoardRenderer({
   lineHeight: LINE_H,
   canvasTextColor,
   currentViewportWorldRect,
+  drawTextLineRange,
+  getTextLayout,
   getWrappedLines,
   imageTransformFromObject,
   imageTransformNeedsRendering,
@@ -792,7 +798,7 @@ function scheduleFrame(source = 'unknown') {
   _frameScheduledAt = collectDebug ? performance.now() : 0;
   ViewportDebug.count('scheduledFrames');
   _frameRaf = requestAnimationFrame(() => {
-    const sources = [...new Set(_frameSources)];
+    const sources = _frameSources.length <= 1 ? _frameSources : [...new Set(_frameSources)];
     _frameSources = [];
     const doTransform = _needTransform;
     const doBoard = _needBoardRender;

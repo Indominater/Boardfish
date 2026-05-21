@@ -968,10 +968,10 @@ function removeEyedropperSafeTileCache(cacheKey) {
 
 function removeEyedropperSafeTileCacheForImage(key) {
   if (!key) return;
-  for (const cacheKey of [...eyedropperSafeTileCache.keys()]) {
+  for (const cacheKey of eyedropperSafeTileCache.keys()) {
     if (cacheKey.startsWith(`${key}:`)) removeEyedropperSafeTileCache(cacheKey);
   }
-  for (const cacheKey of [...eyedropperSafeTileCachePending]) {
+  for (const cacheKey of eyedropperSafeTileCachePending) {
     if (cacheKey.startsWith(`${key}:`)) eyedropperSafeTileCachePending.delete(cacheKey);
   }
 }
@@ -1654,7 +1654,7 @@ function closeEyedropperSafeImageEntry(entry) {
 }
 
 function isEyedropperSafeImageRequestCurrent(key, options = {}) {
-  if (!key) return false;
+  if (!key || (Object.hasOwn(options, 'cacheGeneration') && options.cacheGeneration !== eyedropperSafeImageCacheGeneration)) return false;
   if (Object.hasOwn(options, 'dataUrl')) return imageStore[key] === options.dataUrl;
   if (options.token) return eyedropperSafeImageToken(key) === options.token;
   return false;
@@ -1666,6 +1666,7 @@ function closeStaleEyedropperSafeImageSource(source, loadedImage) {
 
 function closeEyedropperSafeScaledImages(key) {
   eyedropperSafeScaledBitmapStore.removeGroup(key);
+  clearEyedropperSafeScaledPendingForKey(key);
 }
 
 function removeEyedropperSafeImageKey(key) {
@@ -1677,12 +1678,6 @@ function removeEyedropperSafeImageKey(key) {
   closeEyedropperSafeScaledImages(key);
   removeEyedropperSafeTileCacheForImage(key);
   if (typeof removeEyedropperSafePixelCache === 'function') removeEyedropperSafePixelCache(key);
-  for (const pendingKey of [...eyedropperSafeScaledBitmapPending]) {
-    if (pendingKey.startsWith(`${key}:`)) {
-      eyedropperSafeScaledBitmapPending.delete(pendingKey);
-      eyedropperSafeScaledBitmapPendingBytes.delete(pendingKey);
-    }
-  }
   ['imageCache', 'display-cache', 'bitmap-cache'].forEach(kind => eyedropperSafeDisplayProbeFailures.delete(eyedropperDisplayProbeFailureKey(key, kind)));
   eyedropperNativeSourceSkipLogged.delete(key);
   resetEyedropperDecodedImageKey(key);
@@ -1690,12 +1685,16 @@ function removeEyedropperSafeImageKey(key) {
 }
 
 function clearEyedropperSafeImageCache() {
+  eyedropperSafeImageCacheGeneration++;
   for (const entry of eyedropperSafeImageCache.values()) closeEyedropperSafeImageEntry(entry);
   eyedropperSafeScaledBitmapStore.clear();
   eyedropperSafeImageCache.clear();
   eyedropperSafeImagePromises.clear();
   eyedropperSafeScaledBitmapPending.clear();
   eyedropperSafeScaledBitmapPendingBytes.clear();
+  eyedropperSafeScaledBitmapPendingBuilds.clear();
+  eyedropperSafeScaledBitmapPendingBuildCounter = 1;
+  eyedropperSafeScaledBitmapPendingByteTotal = 0;
   eyedropperSafeTileCache.clear();
   eyedropperSafeTileCachePending.clear();
   eyedropperSafeTileCacheBytes = 0;
@@ -1710,7 +1709,7 @@ function clearEyedropperSafeImageCache() {
 function pruneEyedropperSafeImagesToKeys(retainedKeys = new Set()) {
   if (!retainedKeys || typeof retainedKeys.has !== 'function') return { removed: 0, retained: eyedropperSafeImageCache.size };
   let removed = 0;
-  for (const key of [...eyedropperSafeImageCache.keys()]) {
+  for (const key of eyedropperSafeImageCache.keys()) {
     if (retainedKeys.has(key)) continue;
     if (removeEyedropperSafeImageKey(key)) removed++;
   }
@@ -1811,14 +1810,13 @@ function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
     countEyedropperCounter(counters, 'safeDataUrlPending');
     return null;
   }
-
-  const requestStart = performance.now();
+  const requestStart = performance.now(); const cacheGeneration = eyedropperSafeImageCacheGeneration;
   EyedropperDebug._logSamplingEvent('safe-image-request-start', {
     imgKey: key,
     sourceKind: 'native-data-url',
     safeImagePending: eyedropperSafeImagePromises.size,
   });
-  const promise = ensureImageDataUrl(key)
+  let promise = ensureImageDataUrl(key)
     .then((dataUrl) => {
       const dataUrlAt = performance.now();
       EyedropperDebug._logSamplingEvent('safe-image-data-url-ready', {
@@ -1829,7 +1827,7 @@ function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
       });
       if (!dataUrl) return null;
       const dataToken = eyedropperSafeImageToken(key, dataUrl);
-      if (!isEyedropperSafeImageRequestCurrent(key, { token })) return null;
+      if (!isEyedropperSafeImageRequestCurrent(key, { token, cacheGeneration })) return null;
       const latest = eyedropperSafeImageCache.get(key);
       if (latest?.token === dataToken && isDrawableImageSource(latest.source)) return latest.source;
       const loadStart = performance.now();
@@ -1850,7 +1848,7 @@ function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
               });
             } catch (_) {}
           }
-          if (!isEyedropperSafeImageRequestCurrent(key, { token })) {
+          if (!isEyedropperSafeImageRequestCurrent(key, { token, cacheGeneration })) {
             closeStaleEyedropperSafeImageSource(source, img);
             return null;
           }
@@ -1883,7 +1881,7 @@ function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
         durationMs: performance.now() - requestStart,
         safeImagePending: eyedropperSafeImagePromises.size,
       });
-      eyedropperSafeImagePromises.delete(key);
+      if (eyedropperSafeImagePromises.get(key) === promise) eyedropperSafeImagePromises.delete(key);
     });
 
   eyedropperSafeImagePromises.set(key, promise);
@@ -1928,13 +1926,13 @@ function resolveEyedropperSafeImageSource(key, counters = null) {
 
   if (typeof stored !== 'string') return null;
 
-  const requestStart = performance.now();
+  const requestStart = performance.now(); const cacheGeneration = eyedropperSafeImageCacheGeneration;
   EyedropperDebug._logSamplingEvent('safe-image-request-start', {
     imgKey: key,
     sourceKind: 'stored-data-url',
     safeImagePending: eyedropperSafeImagePromises.size,
   });
-  const promise = Promise.resolve(stored)
+  let promise = Promise.resolve(stored)
     .then((dataUrl) => {
       const dataUrlAt = performance.now();
       EyedropperDebug._logSamplingEvent('safe-image-data-url-ready', {
@@ -1945,7 +1943,7 @@ function resolveEyedropperSafeImageSource(key, counters = null) {
       });
       if (!dataUrl) return null;
       const dataToken = eyedropperSafeImageToken(key, dataUrl);
-      if (!isEyedropperSafeImageRequestCurrent(key, { dataUrl })) return null;
+      if (!isEyedropperSafeImageRequestCurrent(key, { dataUrl, cacheGeneration })) return null;
       const latest = eyedropperSafeImageCache.get(key);
       if (latest?.token === dataToken && isDrawableImageSource(latest.source)) return latest.source;
       const loadStart = performance.now();
@@ -1966,7 +1964,7 @@ function resolveEyedropperSafeImageSource(key, counters = null) {
               });
             } catch (_) {}
           }
-          if (!isEyedropperSafeImageRequestCurrent(key, { dataUrl })) {
+          if (!isEyedropperSafeImageRequestCurrent(key, { dataUrl, cacheGeneration })) {
             closeStaleEyedropperSafeImageSource(source, img);
             return null;
           }
@@ -1999,7 +1997,7 @@ function resolveEyedropperSafeImageSource(key, counters = null) {
         durationMs: performance.now() - requestStart,
         safeImagePending: eyedropperSafeImagePromises.size,
       });
-      eyedropperSafeImagePromises.delete(key);
+      if (eyedropperSafeImagePromises.get(key) === promise) eyedropperSafeImagePromises.delete(key);
     });
 
   eyedropperSafeImagePromises.set(key, promise);
@@ -2058,16 +2056,6 @@ function eyedropperScaledVariantEstimatedBytes(sourceW, sourceH, scale) {
   return Math.max(1, Math.ceil(sourceW * scale)) * Math.max(1, Math.ceil(sourceH * scale)) * 4;
 }
 
-function eyedropperSafeScaledPendingBytes() {
-  let bytes = 0;
-  for (const value of eyedropperSafeScaledBitmapPendingBytes.values()) bytes += value || 0;
-  return bytes;
-}
-
-function pruneEyedropperSafeScaledImages() {
-  eyedropperSafeScaledBitmapStore.prune();
-}
-
 function queueEyedropperSafeScaledImage(key, source, scale) {
   if (!key || !source || scale >= 1 || typeof createImageBitmap !== 'function') return;
   const pendingKey = `${key}:${scale}`;
@@ -2082,22 +2070,32 @@ function queueEyedropperSafeScaledImage(key, source, scale) {
     return;
   }
 
+  const safeEntry = eyedropperSafeImageCache.get(key);
+  const token = safeEntry?.source === source ? safeEntry.token : '';
+  const buildId = eyedropperSafeScaledBitmapPendingBuildCounter++;
   eyedropperSafeScaledBitmapPending.add(pendingKey);
-  eyedropperSafeScaledBitmapPendingBytes.set(pendingKey, estimatedBytes);
+  eyedropperSafeScaledBitmapPendingBuilds.set(pendingKey, buildId);
+  setEyedropperSafeScaledPendingBytes(pendingKey, estimatedBytes);
   requestAnimationFrame(() => {
+    if (!isEyedropperSafeScaledImageRequestCurrent(key, pendingKey, buildId, token, source)) {
+      clearEyedropperSafeScaledPendingBuild(pendingKey, buildId);
+      return;
+    }
     const w = Math.max(1, Math.ceil(sourceW * scale));
     const h = Math.max(1, Math.ceil(sourceH * scale));
     createImageBitmap(source, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' })
       .then((bitmap) => {
+        if (!isEyedropperSafeScaledImageRequestCurrent(key, pendingKey, buildId, token, source)) {
+          closeEyedropperImageSource(bitmap);
+          return;
+        }
         const bytes = eyedropperBitmapByteSize(bitmap);
         eyedropperSafeScaledBitmapStore.set(key, scale, { bitmap, bytes });
-        pruneEyedropperSafeScaledImages();
         refreshEyedropperAfterSafeImageReady();
       })
       .catch(() => {})
       .finally(() => {
-        eyedropperSafeScaledBitmapPending.delete(pendingKey);
-        eyedropperSafeScaledBitmapPendingBytes.delete(pendingKey);
+        clearEyedropperSafeScaledPendingBuild(pendingKey, buildId);
       });
   });
 }
@@ -2112,9 +2110,10 @@ function selectEyedropperSafeImageSourceForDraw(key, obj, view, counters = null)
   if (decision.targetScale < 1) {
     const map = eyedropperSafeScaledBitmapCache.get(key);
     const scaleLevels = Array.isArray(IMAGE_SCALE_LEVELS) ? IMAGE_SCALE_LEVELS : [];
-    const availableScale = scaleLevels
-      .filter((scale) => scale >= decision.targetScale && map?.has(scale))
-      .reduce((best, scale) => Math.min(best, scale), 1);
+    let availableScale = 1;
+    for (const scale of scaleLevels) {
+      if (scale >= decision.targetScale && map?.has(scale) && scale < availableScale) availableScale = scale;
+    }
     if (availableScale < 1) {
       selectedScale = availableScale;
       const entry = eyedropperSafeScaledBitmapStore.get(key, availableScale);
