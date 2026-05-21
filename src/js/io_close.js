@@ -177,6 +177,26 @@ function getBoardOpenMetrics(data) {
   return BoardfishBoardDocument.getBoardOpenMetrics(data, boardDocumentDeps());
 }
 
+const isDebugApiEnabledForStep = (api, dbg = null) => {
+  return !!(dbg && api && (api.enabled === true || api.isEnabled?.() === true));
+};
+
+const isOpenDebugActive = (dbg = null) => {
+  return isDebugApiEnabledForStep(OpenDebug, dbg);
+};
+
+const isPillDebugActive = () => {
+  return !!(PillDebug && (PillDebug.enabled === true || PillDebug.isEnabled?.() === true));
+};
+
+const shouldCollectOpenBoardMetrics = (dbg = null) => {
+  return isOpenDebugActive(dbg) || isPillDebugActive();
+};
+
+const getBoardOpenDebugMetrics = (dbg, data) => {
+  return shouldCollectOpenBoardMetrics(dbg) ? getBoardOpenMetrics(data) : {};
+};
+
 function imageRefKind(src) {
   return BoardfishBoardDocument.defaultImageRefKind(src, isNativeImageRef);
 }
@@ -188,6 +208,14 @@ function getImageStoreOpenDebugSample(limit = 12) {
 function getOpenImageRuntimeMetrics() {
   return BoardfishBoardDocument.getImageRuntimeMetrics(imageStore, boardDocumentDeps());
 }
+
+const getOpenImageRuntimeDebugMetrics = (dbg = null) => {
+  return isOpenDebugActive(dbg) ? getOpenImageRuntimeMetrics() : {};
+};
+
+const getImageStoreOpenDebugSampleIfEnabled = (dbg = null) => {
+  return isOpenDebugActive(dbg) ? getImageStoreOpenDebugSample() : [];
+};
 
 function measureBoardJsonForSaveDebug(dbg, data) {
   if (!SaveDebug.enabled) return;
@@ -294,9 +322,11 @@ async function invokeReadBoard(fileRef, dbg) {
   const result = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.readBoard(fileRef), { path });
   if (frameProbe) frameProbe();
   const board = result?.board || result;
-  const boardMetrics = getBoardOpenMetrics(board);
-  if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...boardMetrics });
-  OpenDebug.step(dbg, 'read-board-shape', boardMetrics);
+  if (isOpenDebugActive(dbg)) {
+    const boardMetrics = getBoardOpenMetrics(board);
+    if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...boardMetrics });
+    OpenDebug.step(dbg, 'read-board-shape', boardMetrics);
+  }
   validateBoardPayloadForOpen(board, result?.debug);
   return board;
 }
@@ -448,7 +478,7 @@ async function hydrateImageForDisplay(key, dbg = null) {
 }
 
 async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDebug.hydrationConcurrency) {
-  OpenDebug.step(dbg, `${label}:start`, { count: keys.length, concurrency, ...getOpenImageRuntimeMetrics() });
+  OpenDebug.step(dbg, `${label}:start`, { count: keys.length, concurrency, ...getOpenImageRuntimeDebugMetrics(dbg) });
   const t0 = performance.now();
   await materializeImageAssets(keys, dbg).catch((err) => {
     OpenDebug.step(dbg, `${label}:materialize-error`, { error: String(err) });
@@ -461,14 +491,17 @@ async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDeb
       OpenDebug.step(dbg, `${label}:error`, { imgKey: key, error: String(err) });
     }
   });
-  OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0, ...getOpenImageRuntimeMetrics() });
+  OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0, ...getOpenImageRuntimeDebugMetrics(dbg) });
   if (hydrated) invalidateOffscreen();
   return hydrated;
 }
 
 async function hydrateVisibleImagesForOpen(dbg = null) {
   const keys = getVisibleImageKeys();
-  OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: keys.length, ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() });
+  const debugMeta = isOpenDebugActive(dbg)
+    ? { ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() }
+    : {};
+  OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: keys.length, ...debugMeta });
   await hydrateImageKeysWithLimit(keys, dbg, 'hydrate-visible', OpenDebug.hydrationConcurrency);
   return keys;
 }
@@ -548,12 +581,14 @@ async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch
 
 async function hydrateAllImagesForOpen(dbg = null) {
   const keys = getReferencedHydratableImageKeys();
-  OpenDebug.step(dbg, 'hydrate-all:candidates', {
-    count: keys.length,
-    ...(getReferencedHydratableImageKeys.lastDebug || {}),
-    pendingImages: getPendingHydratableImageKeys().length,
-    ...getOpenImageRuntimeMetrics(),
-  });
+  const debugMeta = isOpenDebugActive(dbg)
+    ? {
+        ...(getReferencedHydratableImageKeys.lastDebug || {}),
+        pendingImages: getPendingHydratableImageKeys().length,
+        ...getOpenImageRuntimeMetrics(),
+      }
+    : {};
+  OpenDebug.step(dbg, 'hydrate-all:candidates', { count: keys.length, ...debugMeta });
   return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
 }
 globalThis.markOpenEyedropperNativeDecodePrewarmStarted = (reason = 'external') => {
@@ -642,6 +677,7 @@ function scheduleVisibleHydrationAfterIdle() {
   if (!hasTauri() || _boardOpening || (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled)) return;
   clearTimeout(_visibleHydrationTimer);
   _visibleHydrationTimer = setTimeout(() => {
+    _visibleHydrationTimer = null;
     queueVisibleImageHydration(1);
     if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
       scheduleVisibleScaledVariantPrewarmAfterIdle('visible-hydration');
@@ -661,7 +697,7 @@ function getOpenHydrationMode() {
 }
 
 async function finishOpenedBoard(dbg, data) {
-  const openMetrics = getBoardOpenMetrics(data);
+  const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:finishOpenedBoard:start', openMetrics);
   const hydrationMode = getOpenHydrationMode();
   if (hydrationMode === 'visible-first') {
@@ -670,23 +706,29 @@ async function finishOpenedBoard(dbg, data) {
     PillDebug.log('open:hydrate-visible:end', { phaseMs: performance.now() - hydrateStart, visibleCount: visibleKeys?.length || 0 });
     const bitmapSettle = await settleVisibleImageBitmapsForOpen(visibleKeys, dbg);
     PillDebug.log('open:hydrate-visible:bitmap-settle', { phaseMs: bitmapSettle.ms, before: bitmapSettle.before, after: bitmapSettle.after, failed: bitmapSettle.failed, pending: bitmapSettle.pending, missing: bitmapSettle.missing });
-    OpenDebug.step(dbg, 'hydrate-initial-policy', {
-      mode: 'visible-first',
-      visibleCount: visibleKeys?.length || 0,
-      visibleBitmapsReady: bitmapSettle.after,
-      visibleBitmapsFailed: bitmapSettle.failed,
-      visibleBitmapsMissing: bitmapSettle.missing,
-      visibleBitmapSettleMs: bitmapSettle.ms,
-      pendingImages: getPendingHydratableImageKeys().length,
-    });
+    if (isOpenDebugActive(dbg)) {
+      OpenDebug.step(dbg, 'hydrate-initial-policy', {
+        mode: 'visible-first',
+        visibleCount: visibleKeys?.length || 0,
+        visibleBitmapsReady: bitmapSettle.after,
+        visibleBitmapsFailed: bitmapSettle.failed,
+        visibleBitmapsMissing: bitmapSettle.missing,
+        visibleBitmapSettleMs: bitmapSettle.ms,
+        pendingImages: getPendingHydratableImageKeys().length,
+      });
+    }
   } else {
-    OpenDebug.step(dbg, 'hydrate-initial-policy', {
-      mode: 'all-before-open',
-      pendingImages: getPendingHydratableImageKeys().length,
-    });
+    if (isOpenDebugActive(dbg)) {
+      OpenDebug.step(dbg, 'hydrate-initial-policy', {
+        mode: 'all-before-open',
+        pendingImages: getPendingHydratableImageKeys().length,
+      });
+    }
     const hydrateStart = performance.now();
     await hydrateAllImagesForOpen(dbg);
-    PillDebug.log('open:hydrate-all:end', { phaseMs: performance.now() - hydrateStart, pendingImages: getPendingHydratableImageKeys().length });
+    if (isPillDebugActive()) {
+      PillDebug.log('open:hydrate-all:end', { phaseMs: performance.now() - hydrateStart, pendingImages: getPendingHydratableImageKeys().length });
+    }
   }
   _boardOpening = false;
   const renderStart = performance.now();
@@ -759,7 +801,7 @@ function applyBoardData(data, options = {}) {
   const sourcesCached = !!options.sourcesCached;
   const deferRender = !!options.deferRender;
   const endDebug = options.endDebug !== false;
-  const openMetrics = getBoardOpenMetrics(data);
+  const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:applyBoardData:start', openMetrics);
   OpenDebug.step(dbg, 'applyBoardData:start', openMetrics);
   OpenDebug.step(dbg, 'prune-unreferenced-images', {
@@ -803,9 +845,9 @@ function applyBoardData(data, options = {}) {
     sourcesCached,
     deferredInitialCacheImages,
     visibleFirstOpen,
-    ...getOpenImageRuntimeMetrics(),
+    ...getOpenImageRuntimeDebugMetrics(dbg),
   });
-  OpenDebug.step(dbg, 'image-store-sample', { sample: getImageStoreOpenDebugSample() });
+  OpenDebug.step(dbg, 'image-store-sample', { sample: getImageStoreOpenDebugSampleIfEnabled(dbg) });
 
   const stateStart = performance.now();
   if (editingId) exitEdit();

@@ -169,8 +169,16 @@ const proportionalScaleFromHandleDrag = function proportionalScaleFromHandleDrag
 function hideMultiSelectionOverlay() {
   if (!multiSelOverlay) return;
   if (multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.remove('visible');
-  for (const box of _multiSelBoxes) _setMultiBoxDisplayIfChanged(box, 'none');
+  trimMultiSelectionBoxes(0);
 }
+
+const trimMultiSelectionBoxes = (maxCount = 0) => {
+  while (_multiSelBoxes.length > maxCount) {
+    const box = _multiSelBoxes.pop();
+    _multiSelStyleState.delete(box);
+    box?.parentNode?.removeChild(box);
+  }
+};
 
 function updateMultiSelectionOverlay() {
   if (!multiSelOverlay || !isMultiSelected()) {
@@ -197,9 +205,7 @@ function updateMultiSelectionOverlay() {
     _setStyleIfChanged(box, 'height', (obj.h * zoom) + 'px', state);
   }
 
-  for (let i = selectedIdx; i < _multiSelBoxes.length; i++) {
-    _setMultiBoxDisplayIfChanged(_multiSelBoxes[i], 'none');
-  }
+  trimMultiSelectionBoxes(selectedIdx);
 
   if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
 }

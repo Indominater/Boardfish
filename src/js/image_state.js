@@ -286,6 +286,12 @@ async function getRenderedImageDataUrl(obj, dbg = null) {
   return dataUrl;
 }
 
+const clearImageLoadHandlers = (img) => {
+  if (!img) return;
+  img.onload = null;
+  img.onerror = null;
+};
+
 function loadImageElement(src, options = {}) {
   const timeoutMs = typeof options === 'number' ? options : (options.timeoutMs || 10000);
   return new Promise((resolve, reject) => {
@@ -297,6 +303,7 @@ function loadImageElement(src, options = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearImageLoadHandlers(img);
       fn(value);
     };
     const timeout = () => reject(new Error('image load timed out'));
@@ -557,7 +564,15 @@ function imageReadyPromiseForKey(key) {
   return imageReadyPromises.get(key) || Promise.resolve();
 }
 
-async function ensureImagePreviewBitmap(key, img, dbg = null) {
+const isDebugApiEnabled = (api) => {
+  return !!(api && (api.enabled === true || api.isEnabled?.() === true));
+};
+
+const shouldPrepareImagePreviewDebug = (dbg = null) => {
+  return isDebugApiEnabled(ViewportDebug) || (!!dbg && isDebugApiEnabled(OpenDebug));
+};
+
+function ensureImagePreviewBitmap(key, img, dbg = null) {
   const t0 = performance.now();
   // Placeholder hook for future lower-resolution previews. The timing is kept
   // separate from ImageBitmap creation so readiness reports show the true stage.
@@ -626,6 +641,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   // memory pressure during board open.
   const loadStart = performance.now();
   function finishLoadForImage(loaded, loadedSrc, reusedLoadedImage = false) {
+    clearImageLoadHandlers(loaded);
     if (!isImageDisplayCacheRequestCurrent(key, loadedSrc, generation)) {
       cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
       ViewportDebug.end(vpDbg, { key, stale: true });
@@ -751,22 +767,25 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
         return;
       }
 
-      const previewStart = performance.now();
-      try {
-        await ensureImagePreviewBitmap(key, loaded, dbg);
-        const previewMs = performance.now() - previewStart;
-        cacheMetrics.cachePreviewMs = previewMs;
-        ViewportDebug.max('maxImagePreviewMs', previewMs);
-        ViewportDebug.step(vpDbg, 'previewBitmap', { ms: previewMs });
-        OpenDebug.step(dbg, 'cache-image:previewBitmap', { imgKey: key, ms: previewMs, ok: true });
-      } catch (err) {
-        const previewMs = performance.now() - previewStart;
-        cacheMetrics.cachePreviewMs = previewMs;
-        ViewportDebug.count('imagePreviewFailures');
-        ViewportDebug.max('maxImagePreviewMs', previewMs);
-        ViewportDebug.step(vpDbg, 'previewBitmap:error', { ms: previewMs, error: String(err) });
-        OpenDebug.step(dbg, 'cache-image:previewBitmap:error', { imgKey: key, ms: previewMs, error: String(err) });
-      } finally {
+      if (shouldPrepareImagePreviewDebug(dbg)) {
+        const previewStart = performance.now();
+        try {
+          ensureImagePreviewBitmap(key, loaded, dbg);
+          const previewMs = performance.now() - previewStart;
+          cacheMetrics.cachePreviewMs = previewMs;
+          ViewportDebug.max('maxImagePreviewMs', previewMs);
+          ViewportDebug.step(vpDbg, 'previewBitmap', { ms: previewMs });
+          OpenDebug.step(dbg, 'cache-image:previewBitmap', { imgKey: key, ms: previewMs, ok: true });
+        } catch (err) {
+          const previewMs = performance.now() - previewStart;
+          cacheMetrics.cachePreviewMs = previewMs;
+          ViewportDebug.count('imagePreviewFailures');
+          ViewportDebug.max('maxImagePreviewMs', previewMs);
+          ViewportDebug.step(vpDbg, 'previewBitmap:error', { ms: previewMs, error: String(err) });
+          OpenDebug.step(dbg, 'cache-image:previewBitmap:error', { imgKey: key, ms: previewMs, error: String(err) });
+        }
+      }
+      {
         const renderScheduleStart = performance.now();
         scheduleImageReadyRender('image-load', {
           minIntervalMs: options.readyRenderMinIntervalMs,
@@ -804,6 +823,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
   }
   img.onload = () => finishLoadForImage(img, displaySrc, !!loadedImg);
   img.onerror = () => {
+    clearImageLoadHandlers(img);
     if (!isImageDisplayCacheRequestCurrent(key, displaySrc, generation)) {
       cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
       ViewportDebug.end(vpDbg, { key, stale: true, error: 'image load failed' });

@@ -301,12 +301,19 @@ pub(crate) async fn materialize_cached_image_sources(
     .await
     .map_err(|e| e.to_string())??;
 
-    state.record_materialized(
-        materialized
-            .iter()
-            .map(|(entry, path)| (entry.img_key.clone(), path.clone()))
-            .collect(),
-    )?;
+    let materialized_paths: Vec<_> = materialized
+        .iter()
+        .map(|(entry, path)| (entry.img_key.clone(), path.clone()))
+        .collect();
+    if let Err(err) = state.record_materialized(materialized_paths.clone()) {
+        cleanup_materialized_paths(
+            materialized_paths
+                .into_iter()
+                .map(|(_key, path)| path)
+                .collect(),
+        );
+        return Err(err);
+    }
 
     Ok(materialized
         .into_iter()

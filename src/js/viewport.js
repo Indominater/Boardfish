@@ -117,6 +117,7 @@ function showIslandForMessage(text) {
 function hideIsland(reason = 'hide') {
   ++_islMsgToken;
   clearTimeout(_islMsgTimer);
+  _islMsgTimer = null;
   _islMsgActive = false;
   islZoom.textContent = '';
   hideOpeningShieldPill();
@@ -128,6 +129,7 @@ function hideIsland(reason = 'hide') {
 function startIslandBusyMsg(text) {
   const token = ++_islMsgToken;
   clearTimeout(_islMsgTimer);
+  _islMsgTimer = null;
   _islMsgActive = true;
   showIslandForMessage(text);
   PillDebug.log('busyIslandMsg:shown', { text });
@@ -177,12 +179,14 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
   const token = ++_islMsgToken;
   PillDebug.log('showIslandMsg:start', { msg, duration });
   clearTimeout(_islMsgTimer);
+  _islMsgTimer = null;
   _islMsgActive = true;
   showIslandForMessage(msg);
   PillDebug.log('showIslandMsg:shown', { msg });
   if (duration > 0) {
     _islMsgTimer = setTimeout(() => {
       if (token !== _islMsgToken) return;
+      _islMsgTimer = null;
       const hideReason = hideIsland('message-timeout');
       if (onRestore) onRestore();
       PillDebug.log('showIslandMsg:onHide', { msg, hideReason });
