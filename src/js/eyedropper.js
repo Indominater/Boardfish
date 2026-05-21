@@ -1653,6 +1653,17 @@ function closeEyedropperSafeImageEntry(entry) {
   if (entry?.owned) closeEyedropperImageSource(entry.source);
 }
 
+function isEyedropperSafeImageRequestCurrent(key, options = {}) {
+  if (!key) return false;
+  if (Object.hasOwn(options, 'dataUrl')) return imageStore[key] === options.dataUrl;
+  if (options.token) return eyedropperSafeImageToken(key) === options.token;
+  return false;
+}
+
+function closeStaleEyedropperSafeImageSource(source, loadedImage) {
+  if (source && source !== loadedImage) closeEyedropperImageSource(source);
+}
+
 function closeEyedropperSafeScaledImages(key) {
   eyedropperSafeScaledBitmapStore.removeGroup(key);
 }
@@ -1818,6 +1829,7 @@ function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
       });
       if (!dataUrl) return null;
       const dataToken = eyedropperSafeImageToken(key, dataUrl);
+      if (!isEyedropperSafeImageRequestCurrent(key, { token })) return null;
       const latest = eyedropperSafeImageCache.get(key);
       if (latest?.token === dataToken && isDrawableImageSource(latest.source)) return latest.source;
       const loadStart = performance.now();
@@ -1837,6 +1849,10 @@ function resolveEyedropperNativeDataUrlSource(key, token, counters = null) {
                 safeImagePending: eyedropperSafeImagePromises.size,
               });
             } catch (_) {}
+          }
+          if (!isEyedropperSafeImageRequestCurrent(key, { token })) {
+            closeStaleEyedropperSafeImageSource(source, img);
+            return null;
           }
           storeEyedropperSafeImage(key, dataToken, source, { owned: source !== img, sourceKind: 'data-url' });
           EyedropperDebug._count('safeDataUrlLoads');
@@ -1929,6 +1945,7 @@ function resolveEyedropperSafeImageSource(key, counters = null) {
       });
       if (!dataUrl) return null;
       const dataToken = eyedropperSafeImageToken(key, dataUrl);
+      if (!isEyedropperSafeImageRequestCurrent(key, { dataUrl })) return null;
       const latest = eyedropperSafeImageCache.get(key);
       if (latest?.token === dataToken && isDrawableImageSource(latest.source)) return latest.source;
       const loadStart = performance.now();
@@ -1948,6 +1965,10 @@ function resolveEyedropperSafeImageSource(key, counters = null) {
                 safeImagePending: eyedropperSafeImagePromises.size,
               });
             } catch (_) {}
+          }
+          if (!isEyedropperSafeImageRequestCurrent(key, { dataUrl })) {
+            closeStaleEyedropperSafeImageSource(source, img);
+            return null;
           }
           storeEyedropperSafeImage(key, dataToken, source, { owned: source !== img, sourceKind: 'data-url' });
           EyedropperDebug._count('safeDataUrlLoads');
@@ -2535,45 +2556,32 @@ function noteEyedropperMouseEvent(e) {
 }
 
 function isEventInsideVisibleEyedropperLoupe(e) {
-  return !!(e?.target instanceof Node &&
-    eyedropperCard?.el?.classList.contains('visible') &&
-    eyedropperCard.el.contains(e.target));
+  return !!(e?.target instanceof Node && eyedropperCard?.el?.classList.contains('visible') && eyedropperCard.el.contains(e.target));
 }
 
 function activatePinnedEyedropperCardInteraction(card, reason = 'pinned-card-interaction') {
   if (!isPinnedEyedropperCard(card) || eyedropperSampling) return false;
   useEyedropperCard(card);
-  if (typeof activateInteractiveSurface === 'function') {
-    activateInteractiveSurface({
-      kind: 'pinned-eyedropper-card',
-      reason,
-      closeMenus: true,
-      clearObjectSelection: false,
-      exitTextEdit: false,
-    });
-  }
+  if (typeof activateInteractiveSurface === 'function') activateInteractiveSurface({ kind: 'pinned-eyedropper-card', reason, closeMenus: true, clearObjectSelection: false, exitTextEdit: false });
   return true;
 }
 
-function beginEyedropperHoldSample(e = null) {
+function beginEyedropperHoldSample(e = null, debugActivation = null) {
   if (!eyedropperEnabled || _eyedropperHoldActive) return false;
+  const holdStartAt = performance.now(); if (typeof beginEyedropperHoldDebug === 'function') beginEyedropperHoldDebug(e, debugActivation, holdStartAt);
   _eyedropperHoldActive = true; globalThis.BoardfishMotion?.applyActionAnimation?.('eyedropper-hold-start');
   document.body.classList.add('eyedropper-hold-active');
   eyedropperSampling = true;
-  prepareEyedropperSamplingCard();
-  const sourceEvent = e?.clientX != null && e?.clientY != null
-    ? eyedropperPointerDebugEvent(e)
-    : _eyedropperLastMouseEvent;
-  if (!sourceEvent) return true;
+  const prepareStart = performance.now(); prepareEyedropperSamplingCard(); const prepareMs = performance.now() - prepareStart;
+  const sourceEvent = e?.clientX != null && e?.clientY != null ? eyedropperPointerDebugEvent(e) : _eyedropperLastMouseEvent;
+  if (sourceEvent && typeof attachEyedropperActivationTiming === 'function') attachEyedropperActivationTiming(sourceEvent, debugActivation, holdStartAt);
+  if (!sourceEvent) { if (typeof finishEyedropperHoldDebug === 'function') finishEyedropperHoldDebug({ activation: debugActivation, holdStartAt, prepareMs, sourceEvent: null }); return true; }
   cancelEyedropperSnapshotRefresh();
   _eyedropperLatestPointerEvent = sourceEvent;
   scheduleEyedropperSamplerDecode('sample-start');
-  EyedropperDebug._logSamplingEvent('initial-sample-start', {
-    clientX: sourceEvent.clientX,
-    clientY: sourceEvent.clientY,
-    inputAgeAtReceiveMs: sourceEvent.inputAgeAtReceiveMs,
-  });
-  commitEyedropperSample(sourceEvent, { first: true });
+  EyedropperDebug._logSamplingEvent('initial-sample-start', { clientX: sourceEvent.clientX, clientY: sourceEvent.clientY, inputAgeAtReceiveMs: sourceEvent.inputAgeAtReceiveMs });
+  const commitStart = performance.now(); commitEyedropperSample(sourceEvent, { first: true });
+  if (typeof finishEyedropperHoldDebug === 'function') finishEyedropperHoldDebug({ activation: debugActivation, holdStartAt, prepareMs, sourceEvent, commitMs: performance.now() - commitStart, totalMs: performance.now() - holdStartAt });
   return true;
 }
 
@@ -2601,11 +2609,7 @@ function updateEyedropperHoldSample(e) {
 function dragEyedropperLoupeTo(clientX, clientY) {
   const card = _eyedropperDragState?.card || eyedropperActiveCard;
   if (!_eyedropperDragState || !card?.el) return;
-  applyEyedropperCardPosition(
-    card,
-    _eyedropperDragState.startLeft + clientX - _eyedropperDragState.startX,
-    _eyedropperDragState.startTop + clientY - _eyedropperDragState.startY,
-  );
+  applyEyedropperCardPosition(card, _eyedropperDragState.startLeft + clientX - _eyedropperDragState.startX, _eyedropperDragState.startTop + clientY - _eyedropperDragState.startY);
 }
 
 function startEyedropperLoupeDrag(e, card = eyedropperActiveCard) {

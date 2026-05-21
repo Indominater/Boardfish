@@ -25,6 +25,7 @@ function loadImageState(createImageBitmap) {
     Map,
     Set,
     Promise,
+    Date,
     Error,
     Object,
     Number,
@@ -76,7 +77,10 @@ function loadImageState(createImageBitmap) {
     ViewportDebug: noopDebugApi(),
     ClipDebug: noopDebugApi(),
     BoardfishTauri: {},
-    TAURI_COMMANDS: { REGISTER_IMAGE_SOURCE: 'register_image_source' },
+    TAURI_COMMANDS: {
+      REGISTER_IMAGE_SOURCE: 'register_image_source',
+      GET_CACHED_IMAGE_DATA_URL: 'get_cached_image_data_url',
+    },
     clearScaledImageVariants() {},
     isSidewaysRotation: () => false,
     imageTransformFromObject: () => ({ rotation: 0, flipX: false, flipY: false }),
@@ -156,4 +160,31 @@ test('clearImageStore clears any pending visible hydration timer hook', () => {
   context.clearImageStore(false);
 
   assert.equal(clears, 1);
+});
+
+test('queued native image hydration skips duplicate source registration', async () => {
+  const { context, rafs } = loadImageState(() => Promise.resolve({ close() {} }));
+  const dataUrl = 'data:image/png;base64,native-cache';
+  let registerCalls = 0;
+  context.hasTauri = () => true;
+  context.BoardfishTauri.getCachedImageDataUrl = async (key) => {
+    assert.equal(key, 'img-1');
+    return dataUrl;
+  };
+  context.BoardfishTauri.registerImageSource = async () => {
+    registerCalls++;
+    return { bytes: 12, mime: 'image/png', ext: 'png', width: 1, height: 1 };
+  };
+
+  context.imageStore['img-1'] = { native: true, bytes: 12, mime: 'image/png', ext: 'png' };
+  context.queueImageHydration('img-1');
+  assert.equal(rafs.length, 1);
+
+  rafs.shift()();
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(context.imageReadyPromises.has('img-1'), true);
+  assert.equal(registerCalls, 0);
 });

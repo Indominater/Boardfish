@@ -493,7 +493,7 @@ test('eyedropper debugger exposes compact reports for JSON copying', () => {
   assert.match(source, /previewBlankSamples/);
   assert.match(source, /previewCenterMatches/);
   assert.match(source, /maxFirstSampleMs/);
-  assert.match(source, /function beginEyedropperHoldSample\(e = null\)/);
+  assert.match(source, /function beginEyedropperHoldSample\(e = null, debugActivation = null\)/);
   assert.match(source, /const sourceEvent = e\?\.clientX != null && e\?\.clientY != null[\s\S]*: _eyedropperLastMouseEvent;/);
   assert.match(source, /commitEyedropperSample\(sourceEvent, \{ first: true \}\)/);
   assert.match(source, /function toggleReport\(options = \{\}\)/);
@@ -528,6 +528,19 @@ test('eyedropper avoids asset display probes for readback-safe sampling', () => 
   assert.doesNotMatch(eyedropperSource, /loadImageElement\(assetSrc, \{ crossOrigin: 'anonymous' \}\)/);
   assert.doesNotMatch(eyedropperSource, /sourceKind: 'display-cors'/);
   assert.match(imageStateSource, /img\.crossOrigin = crossOrigin/);
+});
+
+test('eyedropper safe image loaders drop stale async cache writes', () => {
+  const eyedropperSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
+
+  assert.match(eyedropperSource, /function isEyedropperSafeImageRequestCurrent\(key, options = \{\}\)/);
+  assert.match(eyedropperSource, /Object\.hasOwn\(options, 'dataUrl'\)[\s\S]*imageStore\[key\] === options\.dataUrl/);
+  assert.match(eyedropperSource, /options\.token[\s\S]*eyedropperSafeImageToken\(key\) === options\.token/);
+  assert.match(eyedropperSource, /function closeStaleEyedropperSafeImageSource\(source, loadedImage\)/);
+  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ token \}\)\) return null;/);
+  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ token \}\)\) \{\s*closeStaleEyedropperSafeImageSource\(source, img\);\s*return null;\s*\}/);
+  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ dataUrl \}\)\) return null;/);
+  assert.match(eyedropperSource, /if \(!isEyedropperSafeImageRequestCurrent\(key, \{ dataUrl \}\)\) \{\s*closeStaleEyedropperSafeImageSource\(source, img\);\s*return null;\s*\}/);
 });
 
 test('image cache skips readback probes during normal display hydration', () => {
@@ -692,7 +705,7 @@ test('shift eyedropper shortcut self-heals stale keyboard state', () => {
   assert.match(keyboardSource, /if \(isModifierKeyId\(keyId\)\) clearNonModifierActiveKeyboardKeys\(\);/);
   assert.match(keyboardSource, /window\.addEventListener\('blur', \(\) => \{\s*clearActiveKeyboardKeys\(\);\s*endEyedropperHoldIfActive\(\);/);
   assert.match(keyboardSource, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(document\.visibilityState !== 'visible'\) \{\s*clearActiveKeyboardKeys\(\);\s*endEyedropperHoldIfActive\(\);/);
-  assert.match(keyboardSource, /if \(isShiftOnlyKey\(e\) && !editingId\) \{[\s\S]*setEyedropperEnabled\(true\);[\s\S]*beginEyedropperHoldSample\(e\);/);
+  assert.match(keyboardSource, /if \(isShiftOnlyKey\(e\) && !editingId\) \{[\s\S]*setEyedropperEnabled\(true\);[\s\S]*beginEyedropperHoldSample\(e, shiftDebug\);/);
   assert.match(eyedropperSource, /if \(e && e\.shiftKey === false\) \{\s*endEyedropperHoldSample\(e\);/);
 });
 
@@ -719,7 +732,7 @@ test('pinned eyedropper card interaction closes menus without clearing object se
 
   assert.match(source, /function activatePinnedEyedropperCardInteraction\(card, reason = 'pinned-card-interaction'\) \{/);
   assert.match(source, /if \(!isPinnedEyedropperCard\(card\) \|\| eyedropperSampling\) return false;/);
-  assert.match(source, /activateInteractiveSurface\(\{\s*kind: 'pinned-eyedropper-card',\s*reason,\s*closeMenus: true,\s*clearObjectSelection: false,\s*exitTextEdit: false,/);
+  assert.match(source, /activateInteractiveSurface\(\{ kind: 'pinned-eyedropper-card', reason, closeMenus: true, clearObjectSelection: false, exitTextEdit: false \}\)/);
   assert.match(source, /activatePinnedEyedropperCardInteraction\(eventCard, 'eyedropper-card:pointerdown'\);/);
   assert.match(source, /activatePinnedEyedropperCardInteraction\(eventCard, 'eyedropper-card:mousedown'\);/);
   assert.match(source, /activatePinnedEyedropperCardInteraction\(eventCard, 'eyedropper-card:contextmenu'\);/);

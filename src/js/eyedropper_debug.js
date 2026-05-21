@@ -420,6 +420,13 @@ var EyedropperDebug = (() => {
       eventToPreviewVisibleMs: e.meta?.eventToPreviewVisibleMs ?? '',
       clickToPreviewFrameMs: e.meta?.clickToPreviewFrameMs ?? '',
       eventToPreviewFrameMs: e.meta?.eventToPreviewFrameMs ?? '',
+      activationInputAgeMs: e.meta?.activationInputAgeAtReceiveMs ?? '',
+      activationToCardReadyMs: e.meta?.activationToCardReadyMs ?? '',
+      holdToCardReadyMs: e.meta?.holdToCardReadyMs ?? '',
+      enableMs: e.meta?.enableMs ?? '',
+      beginHoldMs: e.meta?.beginHoldMs ?? '',
+      prepareMs: e.meta?.prepareMs ?? '',
+      commitMs: e.meta?.commitMs ?? '',
     };
   }
 
@@ -1470,6 +1477,42 @@ var EyedropperDebug = (() => {
     return rows;
   }
 
+  function isShiftHoldEvent(e) {
+    const event = String(e.meta?.event || '');
+    return event.startsWith('shift-') || event.startsWith('hold-begin') || event === 'initial-sample-start' || (event.startsWith('sample-commit') && e.meta?.firstSample === true);
+  }
+
+  function shiftHoldTimeline(options = {}) {
+    const rows = recentRows(events
+      .filter(e => e.step === 'sample-event' && isShiftHoldEvent(e))
+      .map(e => ({
+        at: e.at,
+        event: e.meta?.event || '',
+        inputAgeMs: e.meta?.inputAgeAtReceiveMs ?? e.meta?.activationInputAgeAtReceiveMs ?? '',
+        activationToHoldStartMs: e.meta?.activationToHoldStartMs ?? '',
+        activationToCardReadyMs: e.meta?.activationToCardReadyMs ?? '',
+        holdToCardReadyMs: e.meta?.holdToCardReadyMs ?? '',
+        totalMs: e.meta?.totalMs ?? e.meta?.sampleMs ?? '',
+        enableMs: e.meta?.enableMs ?? '',
+        beginHoldMs: e.meta?.beginHoldMs ?? '',
+        prepareMs: e.meta?.prepareMs ?? '',
+        commitMs: e.meta?.commitMs ?? '',
+        sourceMouseAgeMs: e.meta?.sourceMouseAgeAtHoldStartMs ?? e.meta?.lastMouseAgeMs ?? '',
+        hasLastMouse: e.meta?.hasLastMouse ?? '',
+        sourceX: e.meta?.sourceX ?? e.meta?.clientX ?? e.meta?.lastMouseX ?? '',
+        sourceY: e.meta?.sourceY ?? e.meta?.clientY ?? e.meta?.lastMouseY ?? '',
+        sampleVisible: e.meta?.sampleVisible ?? e.meta?.loupeVisible ?? '',
+        pinned: e.meta?.loupePinned ?? '',
+        pendingClone: e.meta?.pendingPinnedClone ?? '',
+        enabled: e.meta?.enabledAfter ?? e.meta?.enabledBefore ?? e.meta?.enabled ?? '',
+        holdActive: e.meta?.holdActiveAfter ?? e.meta?.holdActiveBefore ?? e.meta?.holdActive ?? '',
+        sampling: e.meta?.samplingAfter ?? e.meta?.samplingBefore ?? '',
+        reason: e.meta?.reason ?? '',
+      })), options, 80);
+    if (options.table !== false) console.table(rows);
+    return rows;
+  }
+
   function safeImageTimeline(options = {}) {
     const rows = recentRows(events
       .filter(e => e.step === 'sample-event' && String(e.meta?.event || '').startsWith('safe-image'))
@@ -1895,6 +1938,7 @@ var EyedropperDebug = (() => {
       previewPresent: recentRows(previewPresentSamples, options?.present ?? options, 12),
       slowPreviewPresent: recentRows(slowPreviewPresentSamples, options?.slowPresent ?? options, 12),
       previewMismatches: recentRows(previewMismatchSamples, options?.preview ?? options, 12),
+      shiftHoldTimeline: shiftHoldTimeline({ table: false, limit: debugLimit(options?.shiftHold ?? options, 40) }),
       eventTimeline: recentRows(timelineEvents.map(sampleEventRow), options?.timeline ?? options, 30),
       imageSwitches: imageSwitchSummary({ table: false, limit: debugLimit(options?.imageSwitches ?? options, 40) }),
       readoutUpdates: readoutSummary({ table: false, limit: debugLimit(options?.readout ?? options, 60) }),
@@ -1985,6 +2029,7 @@ var EyedropperDebug = (() => {
     longTaskSummary,
     frameGapSummary,
     stutterSummary,
+    shiftHoldTimeline,
     eventTimeline,
     safeImageTimeline,
     nativePixelTimeline,

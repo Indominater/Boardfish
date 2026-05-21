@@ -563,7 +563,7 @@ function processImageHydrationQueue() {
     count++;
     ensureImageDataUrl(key, dbg)
       .then((dataUrl) => {
-        if (dataUrl && !imageCache[key]) cacheImage(key, dataUrl);
+        if (dataUrl && !imageCache[key]) cacheImage(key, dataUrl, null, null, { skipSourceRegistration: true });
       })
       .catch((err) => OpenDebug.step(dbg, 'hydrate-image:error', { imgKey: key, error: String(err) }));
   }

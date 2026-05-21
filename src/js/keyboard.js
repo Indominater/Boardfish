@@ -112,12 +112,12 @@ function reconcileModifierKeyboardState(e) {
   }
 }
 
-function isNativeFindShortcut(e) {
+const isNativeFindShortcut = (e) => {
   const commandFind = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'f');
   const findByLetter = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'g') && !e.altKey;
   const findNext = e.key === 'F3' || e.code === 'F3';
   return commandFind || findByLetter || findNext;
-}
+};
 
 document.addEventListener('keydown', (e) => {
   if (isNativeFindShortcut(e)) {
@@ -147,10 +147,21 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (isShiftOnlyKey(e) && !editingId) {
+    const shiftDebug = typeof beginEyedropperShiftKeyDebug === 'function'
+      ? beginEyedropperShiftKeyDebug(e, { keyId, keyDownAt, hasOtherKeyDown, activeKeyCount: activeKeyboardKeys.size })
+      : { activationAt: keyDownAt };
     if (!e.repeat && !hasOtherKeyDown) {
       e.preventDefault();
+      const enableStart = performance.now();
       setEyedropperEnabled(true);
-      beginEyedropperHoldSample(e);
+      const enableMs = performance.now() - enableStart;
+      const beginStart = performance.now();
+      const holdStarted = beginEyedropperHoldSample(e, shiftDebug);
+      if (typeof finishEyedropperShiftKeyDebug === 'function') {
+        finishEyedropperShiftKeyDebug(e, { ...shiftDebug, enableMs, beginHoldMs: performance.now() - beginStart, totalMs: performance.now() - keyDownAt, holdStarted });
+      }
+    } else if (typeof logEyedropperShortcutDebug === 'function') {
+      logEyedropperShortcutDebug('shift-keydown-skipped', { repeat: !!e.repeat, hasOtherKeyDown, enabled: eyedropperEnabled, holdActive: _eyedropperHoldActive });
     }
     return;
   }
@@ -265,10 +276,15 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('keyup', (e) => {
   const keyId = e.code || e.key;
+  const keyUpAt = performance.now();
   deleteActiveKeyboardKey(keyId);
   if (isModifierKeyId(keyId)) clearNonModifierActiveKeyboardKeys();
   reconcileModifierKeyboardState(e);
-  if (e.key === 'Shift' && endEyedropperHoldIfActive(e)) return;
+  if (e.key === 'Shift') {
+    const endedHold = endEyedropperHoldIfActive(e);
+    if (typeof logEyedropperShiftKeyupDebug === 'function') logEyedropperShiftKeyupDebug(e, { keyUpAt, endedHold });
+    if (endedHold) return;
+  }
   reconcileEyedropperHoldModifierState(e);
 });
 
