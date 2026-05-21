@@ -73,10 +73,6 @@ function removePendingScaledVariantBytes(key) {
   }
 }
 
-function getImageVariantMap(key) {
-  return imageScaledBitmapStore.getGroup(key);
-}
-
 function clearScaledImageVariants(key = null) {
   if (key) {
     imageScaledBitmapStore.removeGroup(key);

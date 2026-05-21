@@ -2027,10 +2027,6 @@ function eyedropperSafeScaleDecision(obj, source, view) {
   };
 }
 
-function getEyedropperSafeScaledMap(key) {
-  return eyedropperSafeScaledBitmapStore.getGroup(key);
-}
-
 function eyedropperBitmapByteSize(bitmap) {
   if (typeof bitmapByteSize === 'function') return bitmapByteSize(bitmap);
   return (bitmap?.width || 0) * (bitmap?.height || 0) * 4;

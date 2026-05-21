@@ -687,7 +687,8 @@ test('shift eyedropper shortcut self-heals stale keyboard state', () => {
   assert.match(keyboardSource, /function pruneActiveKeyboardKeys\(now = performance\.now\(\)\) \{/);
   assert.match(keyboardSource, /function reconcileModifierKeyboardState\(e\) \{/);
   assert.match(keyboardSource, /function endEyedropperHoldIfActive\(e = null\) \{/);
-  assert.match(keyboardSource, /pruneActiveKeyboardKeys\(keyDownAt\);\s*reconcileModifierKeyboardState\(e\);\s*reconcileEyedropperHoldModifierState\(e\);\s*const hasOtherKeyDown = \[\.\.\.activeKeyboardKeys\]/);
+  assert.match(keyboardSource, /function hasOtherActiveKeyboardKey\(keyId\) \{/);
+  assert.match(keyboardSource, /pruneActiveKeyboardKeys\(keyDownAt\);\s*reconcileModifierKeyboardState\(e\);\s*reconcileEyedropperHoldModifierState\(e\);\s*const hasOtherKeyDown = hasOtherActiveKeyboardKey\(keyId\);/);
   assert.match(keyboardSource, /if \(isModifierKeyId\(keyId\)\) clearNonModifierActiveKeyboardKeys\(\);/);
   assert.match(keyboardSource, /window\.addEventListener\('blur', \(\) => \{\s*clearActiveKeyboardKeys\(\);\s*endEyedropperHoldIfActive\(\);/);
   assert.match(keyboardSource, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(document\.visibilityState !== 'visible'\) \{\s*clearActiveKeyboardKeys\(\);\s*endEyedropperHoldIfActive\(\);/);

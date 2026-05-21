@@ -58,6 +58,13 @@ function pruneActiveKeyboardKeys(now = performance.now()) {
   }
 }
 
+function hasOtherActiveKeyboardKey(keyId) {
+  for (const activeKey of activeKeyboardKeys) {
+    if (activeKey !== keyId) return true;
+  }
+  return false;
+}
+
 function clearNonModifierActiveKeyboardKeys() {
   for (const keyId of [...activeKeyboardKeys]) {
     if (!isModifierKeyId(keyId)) deleteActiveKeyboardKey(keyId);
@@ -126,7 +133,7 @@ document.addEventListener('keydown', (e) => {
   pruneActiveKeyboardKeys(keyDownAt);
   reconcileModifierKeyboardState(e);
   reconcileEyedropperHoldModifierState(e);
-  const hasOtherKeyDown = [...activeKeyboardKeys].some((activeKey) => activeKey !== keyId);
+  const hasOtherKeyDown = hasOtherActiveKeyboardKey(keyId);
   activeKeyboardKeys.add(keyId);
   activeKeyboardKeyTimes.set(keyId, keyDownAt);
 
