@@ -1663,7 +1663,6 @@ function removeEyedropperSafeImageKey(key) {
   if (existing) closeEyedropperSafeImageEntry(existing);
   eyedropperSafeImageCache.delete(key);
   eyedropperSafeImagePromises.delete(key);
-  eyedropperSafeDisplayReloadPromises.delete(key);
   closeEyedropperSafeScaledImages(key);
   removeEyedropperSafeTileCacheForImage(key);
   if (typeof removeEyedropperSafePixelCache === 'function') removeEyedropperSafePixelCache(key);
@@ -1684,7 +1683,6 @@ function clearEyedropperSafeImageCache() {
   eyedropperSafeScaledBitmapStore.clear();
   eyedropperSafeImageCache.clear();
   eyedropperSafeImagePromises.clear();
-  eyedropperSafeDisplayReloadPromises.clear();
   eyedropperSafeScaledBitmapPending.clear();
   eyedropperSafeScaledBitmapPendingBytes.clear();
   eyedropperSafeTileCache.clear();
@@ -2056,8 +2054,8 @@ function pruneEyedropperSafeScaledImages() {
 function queueEyedropperSafeScaledImage(key, source, scale) {
   if (!key || !source || scale >= 1 || typeof createImageBitmap !== 'function') return;
   const pendingKey = `${key}:${scale}`;
-  const map = getEyedropperSafeScaledMap(key);
-  if (map.has(scale) || eyedropperSafeScaledBitmapPending.has(pendingKey)) return;
+  const map = eyedropperSafeScaledBitmapCache.get(key);
+  if (map?.has(scale) || eyedropperSafeScaledBitmapPending.has(pendingKey)) return;
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
   if (!sourceW || !sourceH) return;
@@ -2342,7 +2340,7 @@ function commitEyedropperSample(e, options = {}) {
   timings.position = performance.now() - positionStart;
   timings.total = performance.now() - totalStart;
   if (previewSample) previewSample.timings = timings;
-  if (previewSample) {
+  if (previewSample && EyedropperDebug.enabled) {
     const presentMeta = {
       clientX: e.clientX,
       clientY: e.clientY,

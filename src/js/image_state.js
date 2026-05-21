@@ -743,7 +743,11 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
           ViewportDebug.step(vpDbg, 'createImageBitmap:stale', { ms: bitmapMs });
           OpenDebug.step(dbg, 'cache-image:createImageBitmap:stale', { imgKey: key, ms: bitmapMs });
         } else {
-          imageBitmapCache[key] = bitmap;
+          if (imageBitmapCache[key]) {
+            bitmap.close();
+          } else {
+            imageBitmapCache[key] = bitmap;
+          }
           ViewportDebug.count('imageBitmaps');
           ViewportDebug.max('maxImageBitmapMs', bitmapMs);
           ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs });

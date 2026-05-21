@@ -29,7 +29,6 @@ var _eyedropperHoldActive = false;
 var _eyedropperLastMouseEvent = null;
 var eyedropperSafeImageCache = new Map();
 var eyedropperSafeImagePromises = new Map();
-var eyedropperSafeDisplayReloadPromises = new Map();
 var EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT = 1024 * 1024 * 1024;
 var eyedropperSafeScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
   memoryLimit: EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT,

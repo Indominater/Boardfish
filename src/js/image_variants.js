@@ -202,8 +202,8 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
 function queueScaledImageVariant(key, source, scale) {
   if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key || !source || scale >= 1) return;
   const pendingKey = `${key}:${scale}`;
-  const map = getImageVariantMap(key);
-  if (map.has(scale) || imageScaledBitmapPending.has(pendingKey)) return;
+  const map = imageScaledBitmapCache.get(key);
+  if (map?.has(scale) || imageScaledBitmapPending.has(pendingKey)) return;
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
   if (!sourceW || !sourceH) return;

@@ -228,6 +228,18 @@ test('clearing scaled variants for one key removes queued work for that key', ()
   assert.equal(context.isScaledImageVariantPending('img-2', 0.5), true);
 });
 
+test('scaled image variant skips do not create empty cache groups', () => {
+  const context = loadImageVariantsForPlatform(false);
+
+  context.queueScaledImageVariant('img-missing-size', { width: 0, height: 100 }, 0.5);
+  assert.equal(context.imageScaledBitmapCache.has('img-missing-size'), false);
+  assert.equal(context.isScaledImageVariantPending('img-missing-size', 0.5), false);
+
+  context.queueScaledImageVariant('img-too-large', { width: 100000, height: 100000 }, 0.5);
+  assert.equal(context.imageScaledBitmapCache.has('img-too-large'), false);
+  assert.equal(context.isScaledImageVariantPending('img-too-large', 0.5), false);
+});
+
 test('eyedropper readout resolves safe scaled variants independently of the preview', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'eyedropper.js'), 'utf8');
 
@@ -338,6 +350,11 @@ test('eyedropper sampler removes avoidable per-frame work', () => {
   assert.match(source, /colorReadoutDomSkips/);
   assert.match(source, /card\.lastSwatchCss = cssColor;/);
   assert.match(source, /EYEDROPPER_SAFE_SCALED_MEMORY_LIMIT = 1024 \* 1024 \* 1024/);
+  assert.doesNotMatch(source, /eyedropperSafeDisplayReloadPromises/);
+  assert.match(source, /safeDisplayReloadPending: 0/);
+  assert.match(source, /displayReloadPending: 0/);
+  assert.match(source, /if \(previewSample && EyedropperDebug\.enabled\) \{/);
+  assert.match(source, /const map = eyedropperSafeScaledBitmapCache\.get\(key\);\s*if \(map\?\.has\(scale\) \|\| eyedropperSafeScaledBitmapPending\.has\(pendingKey\)\) return;/);
 });
 
 test('eyedropper sampler keeps edge gap while Windows titlebar controls layer above it', () => {
