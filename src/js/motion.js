@@ -79,8 +79,6 @@ const BoardfishMotion = (() => {
       'eyedropper-loupe-open',
     ]),
     exportCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'export-all-images',
-      'export-all-text',
       'export-selected-image',
       'export-selected-images',
     ]),

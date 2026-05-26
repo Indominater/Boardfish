@@ -110,7 +110,6 @@ test('startup variants strip debug and runtime-specific code from release surfac
       'debug_export.js',
       'debug_manual_perf.js',
       'debug_insert.js',
-      'debug_export_all_diag.js',
       'debug_text_selection.js',
       'viewport_debug_ui.js',
       'eyedropper_debug.js',
@@ -215,7 +214,6 @@ test('frontend feature code uses typed Tauri facade instead of raw invoke', () =
   const rawInvokeAllowed = new Set([
     'src/js/debug.js',
     'src/js/debug_export.js',
-    'src/js/debug_export_all_diag.js',
     'src/js/debug_open.js',
     'src/js/debug_save.js',
     'src/js/runtime_web_native.js',
@@ -243,9 +241,7 @@ test('typed Tauri facade covers feature command groups', () => {
     'registerTransformedImageSource',
     'saveImageFileDialog',
     'saveImagesToExistingFolderByKeys',
-    'saveTextFileDialog',
     'writeImageFileByKey',
-    'writeTextFile',
   ]) {
     assert.match(bridge, new RegExp(`\\b${method}\\(`), `BoardfishTauri is missing ${method}`);
   }
@@ -270,7 +266,6 @@ test('frontend abstraction scripts load before their consumers', () => {
   before('debug.js', 'debug_save.js');
   before('debug.js', 'debug_open.js');
   before('debug.js', 'debug_export.js');
-  before('debug.js', 'debug_export_all_diag.js');
   before('debug.js', 'debug_manual_perf.js');
   before('debug.js', 'debug_insert.js');
   before('debug.js', 'debug_text_selection.js');
@@ -279,7 +274,6 @@ test('frontend abstraction scripts load before their consumers', () => {
   before('export_utils.js', 'clipboard_export_init.js');
   before('export_utils.js', 'image_export.js');
   before('image_export.js', 'clipboard_export_init.js');
-  before('text_export.js', 'clipboard_export_init.js');
   before('io_close.js', 'app_bootstrap.js');
   before('clipboard_export_init.js', 'app_bootstrap.js');
   before('keyboard.js', 'app_bootstrap.js');
@@ -353,14 +347,12 @@ test('shared abstractions own DOM lookup, Tauri invoke, rendering helpers, bitma
   assert.match(readSource('src/js/debug_save.js'), /var SaveDebug = \(\(\) =>/);
   assert.match(readSource('src/js/debug_open.js'), /var OpenDebug = \(\(\) =>/);
   assert.match(readSource('src/js/debug_export.js'), /var ExportDebug = \(\(\) =>/);
-  assert.match(readSource('src/js/debug_export_all_diag.js'), /var ExportAllDiag = \(\(\) =>/);
   assert.match(readSource('src/js/debug_manual_perf.js'), /var ManualPerfDebug = \(\(\) =>/);
   assert.match(readSource('src/js/debug_insert.js'), /var InsertDebug = \(\(\) =>/);
   assert.match(readSource('src/js/debug_text_selection.js'), /var TextSelDebug = \(\(\) =>/);
   assert.doesNotMatch(readSource('src/js/debug.js'), /^var SaveDebug/gm);
   assert.doesNotMatch(readSource('src/js/debug.js'), /^var OpenDebug/gm);
   assert.doesNotMatch(readSource('src/js/debug.js'), /^var ExportDebug/gm);
-  assert.doesNotMatch(readSource('src/js/debug.js'), /^var ExportAllDiag/gm);
   assert.doesNotMatch(readSource('src/js/debug.js'), /^var ManualPerfDebug/gm);
   assert.doesNotMatch(readSource('src/js/debug.js'), /^var InsertDebug/gm);
   assert.doesNotMatch(readSource('src/js/debug.js'), /^var TextSelDebug/gm);
@@ -380,7 +372,6 @@ test('shared abstractions own DOM lookup, Tauri invoke, rendering helpers, bitma
   assert.match(readSource('src/js/export_utils.js'), /BoardfishExportUtils/);
   assert.match(readSource('src/js/image_export.js'), /BoardfishExportUtils\.createProgressUpdater/);
   assert.doesNotMatch(readSource('src/js/clipboard_export_init.js'), /^async function saveSelectedImage/gm);
-  assert.doesNotMatch(readSource('src/js/clipboard_export_init.js'), /^async function exportAllText/gm);
   assert.doesNotMatch(readSource('src/js/clipboard_export_init.js'), /^function createExportProgressUpdater/gm);
   assert.match(readSource('src/js/app_bootstrap.js'), /async function openFilePath\(filePath\)/);
   assert.doesNotMatch(readSource('src/js/clipboard_export_init.js'), /^async function openFilePath/gm);
@@ -424,9 +415,19 @@ test('large clipboard paste diagnostics are available through beginDebug finishD
 
   assert.match(debugSource, /function largePasteReport\(\)/);
   assert.match(debugSource, /function pasteBreakdown\(\)/);
+  assert.match(debugSource, /function copyPanReport\(\)/);
+  assert.match(debugSource, /function eventLoopTimeline\(limit = 80\)/);
+  assert.match(debugSource, /function rawInputTimeline\(limit = 120\)/);
   assert.match(debugSource, /largePasteReport,/);
   assert.match(debugSource, /pasteBreakdown,/);
+  assert.match(debugSource, /copyPanReport,/);
+  assert.match(debugSource, /eventLoopTimeline,/);
+  assert.match(debugSource, /rawInputTimeline,/);
+  assert.match(debugSource, /firstRawWheelDeliveryAgeMs/);
   assert.match(debugSource, /failedCheckpoint/);
+  assert.match(debugSource, /postCopyWheelPanGapMs/);
+  assert.match(debugSource, /stutter captured on web image copy/);
+  assert.match(debugSource, /stutter aligns with data-url clipboard IPC or hydration before\/during first pan/);
   assert.match(clipboardIoSource, /function readClipboardBlobAsDataUrlDebug/);
   assert.match(clipboardIoSource, /function readClipboardImageFileFromEvent/);
   assert.match(clipboardIoSource, /async function readClipboardImageBlobFromBrowser/);
@@ -457,6 +458,36 @@ test('large clipboard paste diagnostics are available through beginDebug finishD
   assert.match(imageStateSource, /materialize-image-assets:entry/);
   assert.match(imageStateSource, /cache-image:source/);
   assert.match(debugSource, /sourceKind/);
+});
+
+test('native image copy uses cached image keys and exposes copy-to-pan diagnostics', () => {
+  const bridgeSource = readSource('src/js/tauri_bridge.js');
+  const clipboardSource = readSource('src/js/clipboard_export_init.js');
+  const debugSource = readSource('src/js/debug.js');
+  const rustClipboardSource = readSource('src-tauri/src/clipboard.rs');
+  const rustMainSource = readSource('src-tauri/src/main.rs');
+
+  assert.match(bridgeSource, /COPY_IMAGE_KEY_TO_CLIPBOARD_TRANSFORMED: 'copy_image_key_to_clipboard_transformed'/);
+  assert.match(bridgeSource, /copyImageKeyToClipboardTransformed\(\{ imgKey, flipX, flipY, rotation \}\)/);
+  assert.match(clipboardSource, /BoardfishTauri\.copyImageKeyToClipboardTransformed\(\{ imgKey, flipX, flipY, rotation \}\)/);
+  assert.match(clipboardSource, /isNativeImageRef\(storedSource\) && typeof BoardfishTauri\.copyImageKeyToClipboardTransformed === 'function'/);
+  assert.match(clipboardSource, /copyDataUrlFallback\(\s*isNativeImageRef\(storedSource\) \? 'native-key-unavailable' : 'data-url-copy'\s*\)/);
+  assert.match(clipboardSource, /createWebSourcePngClipboardBlob/);
+  assert.match(clipboardSource, /copy:web-source-png-blob/);
+  assert.match(clipboardSource, /image-web-source-png/);
+  assert.doesNotMatch(clipboardSource, /copy:web-native-write-queued/);
+  assert.doesNotMatch(clipboardSource, /deferredNativeClipboard/);
+  assert.match(rustClipboardSource, /pub\(crate\) async fn copy_image_key_to_clipboard_transformed/);
+  assert.match(rustClipboardSource, /decode_cached_source_to_clipboard_image_timed/);
+  assert.match(rustClipboardSource, /path: "cache-key-rgba"\.to_string\(\)/);
+  assert.match(rustMainSource, /copy_image_key_to_clipboard_transformed/);
+  assert.match(debugSource, /copyPanReport/);
+  assert.match(debugSource, /eventLoopGapsDuringCopy/);
+  assert.match(debugSource, /webSourcePngBlobMs/);
+  assert.match(debugSource, /maxPanFrameRafGapMs/);
+  assert.match(debugSource, /renderCanvasMs/);
+  assert.match(debugSource, /pngBlobMs/);
+  assert.match(debugSource, /copyWindowRows\.map\(e => debugRow\(e, \{ includeId: true, includeSkipped: true \}\)\)/);
 });
 
 test('right-click image insert path has display-ready timing and bounded native concurrency diagnostics', () => {
@@ -498,9 +529,11 @@ test('right-click image insert path has display-ready timing and bounded native 
 
 test('viewport navigation diagnostics measure input latency without an extra wheel RAF', () => {
   const inputSource = readSource('src/js/canvas_input.js');
+  const selectionInputSource = readSource('src/js/selection_input.js');
   const viewportSource = readSource('src/js/viewport.js');
   const debugSource = readSource('src/js/debug.js');
   const perfSource = readSource('src/js/debug_manual_perf.js');
+  const noopSource = readSource('src/js/runtime_debug_noop.js');
 
   assert.match(inputSource, /BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, newZoom\);\s*globalThis\.BoardfishMotion\?\.applyActionAnimation\?\.\('board-wheel-zoom'\);\s*scheduleTransform\('wheel-zoom', e\);/);
   assert.match(inputSource, /BoardfishViewportState\.panBy\(-e\.deltaX, -e\.deltaY\);\s*globalThis\.BoardfishMotion\?\.applyActionAnimation\?\.\('board-canvas-pan'\);\s*scheduleTransform\('wheel-pan', e\);/);
@@ -513,11 +546,21 @@ test('viewport navigation diagnostics measure input latency without an extra whe
   assert.match(debugSource, /maxInputAgeMs/);
   assert.match(debugSource, /inputFrames/);
   assert.match(debugSource, /wheelSummary/);
+  assert.match(debugSource, /rawInputEvents/);
+  assert.match(debugSource, /recordShieldBlock/);
+  assert.match(debugSource, /window\.addEventListener\(type, onRawInputCapture, \{ capture: true, passive: true \}\)/);
+  assert.match(selectionInputSource, /ViewportDebug\.recordShieldBlock\?\.\(e, \{ reason: 'input-shield' \}\)/);
+  assert.match(noopSource, /rawInputTimeline: \(\) => \[\]/);
+  assert.match(debugSource, /const thresholdMs = Math\.max\(16, Number\(options\.eventLoopGapThresholdMs\) \|\| EVENT_LOOP_GAP_THRESHOLD_MS\)/);
+  assert.match(debugSource, /Math\.min\(EVENT_LOOP_INTERVAL_MS, Math\.max\(8, thresholdMs \/ 2\)\)/);
   assert.match(perfSource, /function panningReport\(options = \{\}\)/);
   assert.match(perfSource, /function wheelPanTest\(options = \{\}\)/);
   assert.match(perfSource, /function mousePanTest\(options = \{\}\)/);
   assert.match(perfSource, /function zoomReport\(options = \{\}\)/);
   assert.match(perfSource, /function wheelZoomTest\(options = \{\}\)/);
+  assert.match(perfSource, /async function memorySnapshot\(label = 'memory', options = \{\}\)/);
+  assert.match(perfSource, /async function benchmarkReport\(options = \{\}\)/);
+  assert.match(perfSource, /nativeImageSourceCache: await nativeImageSourceCacheSnapshot\(options\)/);
 });
 
 test('image export diagnostics cover deduped resolve work and smoothness timing', () => {
@@ -736,8 +779,6 @@ test('user actions are assigned through the central animation policy', () => {
     'eyedropper-loupe-drag',
     'eyedropper-loupe-open',
     'external-github-open',
-    'export-all-images',
-    'export-all-text',
     'history-undo',
     'image-file-dialog-open',
     'image-file-drop',
@@ -971,7 +1012,10 @@ test('copy-only jiggle policy keeps object action routing centralized', () => {
   assert.match(readSource('src/js/selection_input.js'), /applyActionAnimation\?\.\('object-multi-resize'[\s\S]*includeText: false[\s\S]*pushHistory\('multi-resize'\)/);
   const clipboardSource = readSource('src/js/clipboard_export_init.js');
   assert.doesNotMatch(clipboardSource, /noteCopiedObjectsFeedback|copyError|await enqueueNativeClipboardWrite|await writeWebClipboardTokenForJsClipboard/);
-  assert.match(clipboardSource, /if \(!noteTextObjectCopyFeedback\(obj\)\) \{[\s\S]*applyActionAnimation\?\.\('copy-selected-objects', \{ selection: true \}\);[\s\S]*const cloned = cloneObject\(obj\)/);
+  assert.match(clipboardSource, /const animateCopy = options\.animateCopy !== false/);
+  assert.match(clipboardSource, /if \(animateCopy\) \{[\s\S]*if \(!noteTextObjectCopyFeedback\(obj\)\) \{[\s\S]*applyActionAnimation\?\.\('copy-selected-objects', \{ selection: true \}\);[\s\S]*const cloned = cloneObject\(obj\)/);
+  assert.match(clipboardSource, /const cutSelected = \(\) => \{[\s\S]*copySelected\(\{ animateCopy: false \}\)[\s\S]*deleteSelected\(\)/);
+  assert.match(readSource('src/js/keyboard.js'), /isShortcutKey\(e, 'x'\)[\s\S]*cutSelected\(\)/);
   assert.match(clipboardSource, /BoardfishClipboardIO\.copyTextToClipboard\(clipboardText[\s\S]*\.catch\(\(err\) => console\.error\('\[copy\] writeText FAILED:'/);
   assert.match(readSource('src/js/history_state.js'), /historySelectionPulseOptions/);
   assert.match(readSource('src/js/history_state.js'), /historyMotionForEntry/);

@@ -22,6 +22,7 @@ struct CachedClipboardImage {
 pub(crate) struct ClipboardCopyTiming {
     path: String,
     flipped: bool,
+    source_bytes: Option<usize>,
     width: u32,
     height: u32,
     pixels: u64,
@@ -168,6 +169,60 @@ pub(crate) async fn copy_image_data_url_to_clipboard_transformed(
     result
 }
 
+#[tauri::command]
+pub(crate) async fn copy_image_key_to_clipboard_transformed(
+    state: tauri::State<'_, ImageSourceCache>,
+    img_key: String,
+    flip_x: bool,
+    flip_y: bool,
+    rotation: u32,
+) -> Result<ClipboardCopyTiming, String> {
+    let total = std::time::Instant::now();
+    let source = state.get(&img_key)?;
+    let result = tokio::task::spawn_blocking(move || {
+        let (cached, decode_timing) = decode_cached_source_to_clipboard_image_timed(source)?;
+        let transform = std::time::Instant::now();
+        let (width, height, rgba) = transform_rgba(
+            cached.width,
+            cached.height,
+            cached.rgba,
+            flip_x,
+            flip_y,
+            rotation,
+        )?;
+        let transform_ms = elapsed_ms(transform);
+        clipboard_debug(
+            "copy_image_key_to_clipboard_transformed transform worker",
+            transform,
+        );
+        let write_timing = write_rgba_to_clipboard(width, height, rgba)?;
+        let mut timing = ClipboardCopyTiming {
+            path: "cache-key-rgba".to_string(),
+            flipped: flip_x || flip_y,
+            source_bytes: decode_timing.source_bytes,
+            width,
+            height,
+            pixels: width as u64 * height as u64,
+            rgba_mb: rgba_mb(width, height),
+            decode_ms: decode_timing.decode_ms,
+            base64_ms: decode_timing.base64_ms,
+            image_decode_ms: decode_timing.image_decode_ms,
+            rgba_convert_ms: decode_timing.rgba_convert_ms,
+            transform_ms: Some(transform_ms),
+            clipboard_write_ms: write_timing.clipboard_write_ms,
+            arboard_ms: write_timing.arboard_ms,
+            macos_fallback_ms: write_timing.macos_fallback_ms,
+            ..Default::default()
+        };
+        timing.total_ms = elapsed_ms(total);
+        Ok::<_, String>(timing)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    clipboard_debug("copy_image_key_to_clipboard_transformed total", total);
+    result
+}
+
 fn transform_rgba(
     width: u32,
     height: u32,
@@ -247,6 +302,48 @@ fn decode_data_url_to_cached_image_timed(
             rgba_mb: rgba_mb(width, height),
             decode_ms: Some(decode_ms),
             base64_ms: Some(base64_ms),
+            image_decode_ms: Some(image_decode_ms),
+            rgba_convert_ms: Some(rgba_convert_ms),
+            ..Default::default()
+        },
+    ))
+}
+
+fn decode_cached_source_to_clipboard_image_timed(
+    source: CachedImageSource,
+) -> Result<(CachedClipboardImage, ClipboardCopyTiming), String> {
+    let total = std::time::Instant::now();
+    validate_image_source_bytes(source.bytes.len())?;
+    let image_decode = std::time::Instant::now();
+    let (width, height) = image_dimensions_from_bytes(&source.bytes)?;
+    validate_decoded_image_dimensions(width, height)?;
+    let img = image::load_from_memory(&source.bytes).map_err(|e| e.to_string())?;
+    let image_decode_ms = elapsed_ms(image_decode);
+    clipboard_debug("decode_cached_source image decode", image_decode);
+    let rgba_convert = std::time::Instant::now();
+    let rgba = img.to_rgba8();
+    validate_decoded_image_dimensions(rgba.width(), rgba.height())?;
+    let rgba_convert_ms = elapsed_ms(rgba_convert);
+    clipboard_debug("decode_cached_source rgba convert", rgba_convert);
+    let (width, height) = rgba.dimensions();
+    let decode_ms = elapsed_ms(total);
+    clipboard_debug("decode_cached_source total", total);
+    let cached = CachedClipboardImage {
+        width,
+        height,
+        rgba: Arc::from(rgba.into_raw()),
+    };
+    Ok((
+        cached,
+        ClipboardCopyTiming {
+            path: "cached-source".to_string(),
+            source_bytes: Some(source.bytes.len()),
+            width,
+            height,
+            pixels: width as u64 * height as u64,
+            rgba_mb: rgba_mb(width, height),
+            decode_ms: Some(decode_ms),
+            base64_ms: Some(0.0),
             image_decode_ms: Some(image_decode_ms),
             rgba_convert_ms: Some(rgba_convert_ms),
             ..Default::default()

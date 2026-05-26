@@ -101,6 +101,7 @@ function blockShieldInput(e) {
     }
   }
   if (isShieldInputAllowed(e)) return;
+  ViewportDebug.recordShieldBlock?.(e, { reason: 'input-shield' });
   if (e.cancelable) e.preventDefault();
   e.stopPropagation();
 }

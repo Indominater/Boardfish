@@ -92,6 +92,12 @@ function loadKeyboardHarness() {
     sendSelectedToBack() {},
     selectedIds: new Set(),
     objectsMap: new Map(),
+    flipSelectedImages() {
+      context.calls.push(['flip']);
+    },
+    rotateSelectedImages(dir) {
+      context.calls.push(['rotate', dir]);
+    },
     saveSelectedImage() {},
     showInputShield() {},
     saveSelectedImages() {},
@@ -202,4 +208,58 @@ test('command 0 resets zoom while editing text', () => {
 
   assert.equal(event.defaultPrevented, true);
   assert.deepEqual(harness.context.calls.at(-1), ['reset-zoom']);
+});
+
+test('command R rotates selected images and still blocks browser reload', () => {
+  const harness = loadKeyboardHarness();
+  harness.context.selectedIds = new Set(['image-1', 'text-1']);
+  harness.context.objectsMap = new Map([
+    ['image-1', { type: 'image' }],
+    ['text-1', { type: 'text' }],
+  ]);
+
+  const event = harness.documentEvent('keydown', {
+    key: 'r',
+    code: 'KeyR',
+    ctrlKey: true,
+  });
+
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(harness.context.calls.at(-1), ['rotate', 'cw']);
+});
+
+test('command F flips selected images instead of opening native find', () => {
+  const harness = loadKeyboardHarness();
+  harness.context.selectedIds = new Set(['image-1']);
+  harness.context.objectsMap = new Map([
+    ['image-1', { type: 'image' }],
+  ]);
+
+  const event = harness.documentEvent('keydown', {
+    key: 'f',
+    code: 'KeyF',
+    ctrlKey: true,
+  });
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, false);
+  assert.deepEqual(harness.context.calls.at(-1), ['flip']);
+});
+
+test('command F without selected images keeps native find blocked', () => {
+  const harness = loadKeyboardHarness();
+  harness.context.selectedIds = new Set(['text-1']);
+  harness.context.objectsMap = new Map([
+    ['text-1', { type: 'text' }],
+  ]);
+
+  const event = harness.documentEvent('keydown', {
+    key: 'f',
+    code: 'KeyF',
+    ctrlKey: true,
+  });
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.equal(harness.context.calls.some((call) => call[0] === 'flip'), false);
 });

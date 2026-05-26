@@ -66,6 +66,58 @@ const normalizeClipboardImageBlob = (blob, fallback = 'clipboard-image') => {
   return blob;
 };
 
+const clipboardNow = () => (
+  typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
+);
+
+const webSourceClipboardMime = (source) => {
+  if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return String(source.mime || '').toLowerCase();
+  if (typeof source === 'string') return (/^data:([^;,]+)/i.exec(source)?.[1] || '').toLowerCase();
+  return '';
+};
+
+const webSourceClipboardKind = (source) => {
+  if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return 'web-ref';
+  if (typeof source === 'string' && source.startsWith('data:')) return 'data-url';
+  return typeof source;
+};
+
+const createWebSourcePngClipboardBlob = (obj, source, dbg = null) => {
+  if (!obj || imageNeedsRendering(obj)) return null;
+  if (typeof Blob === 'undefined') return null;
+  const container = globalThis.BoardfishWebBoardContainer;
+  if (!container?.bytesForImageSource) return null;
+  const isDirectWebSource = (
+    (typeof isWebImageRef === 'function' && isWebImageRef(source)) ||
+    (typeof source === 'string' && /^data:image\/png[;,]/i.test(source))
+  );
+  if (!isDirectWebSource || webSourceClipboardMime(source) !== 'image/png') return null;
+
+  const startedAt = clipboardNow();
+  try {
+    const bytes = container.bytesForImageSource(source);
+    if (!bytes) return null;
+    const blob = new Blob([bytes], { type: 'image/png' });
+    ClipDebug.step(dbg, 'copy:web-source-png-blob', {
+      imgKey: obj?.data?.imgKey || '',
+      sourceKind: webSourceClipboardKind(source),
+      sourceBytes: bytes.byteLength ?? bytes.length ?? blob.size,
+      blobSize: blob.size,
+      ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
+    });
+    return blob;
+  } catch (err) {
+    ClipDebug.step(dbg, 'copy:web-source-png-blob:error', {
+      imgKey: obj?.data?.imgKey || '',
+      sourceKind: webSourceClipboardKind(source),
+      error: String(err),
+    });
+    return null;
+  }
+};
+
 async function pasteWebImageBlob(blob, wx, wy, dbg, source) {
   const file = normalizeClipboardImageBlob(blob, source);
   if (!file) return false;
@@ -94,12 +146,13 @@ async function pasteWebImageBlob(blob, wx, wy, dbg, source) {
   return added;
 }
 
-async function copySelected() {
+const copySelected = (options = {}) => {
+  const animateCopy = options.animateCopy !== false;
   const dbg = ClipDebug.start('copySelected', { selectedCount: selectedIds.size });
   if (!selectedIds.size) { ClipDebug.end(dbg, { skipped: 'empty-selection' }); return false; }
 
   if (selectedIds.size > 1) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
+    if (animateCopy) globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
     const clonedObjs = [];
     const imageData = {};
     let imageCount = 0;
@@ -139,8 +192,10 @@ async function copySelected() {
 
   const obj = getFirstSelectedObject();
   if (!obj) { ClipDebug.end(dbg, { skipped: 'missing-object' }); return false; }
-  if (!noteTextObjectCopyFeedback(obj)) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
+  if (animateCopy) {
+    if (!noteTextObjectCopyFeedback(obj)) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
+    }
   }
 
   const cloned = cloneObject(obj);
@@ -189,9 +244,30 @@ async function copySelected() {
     if (isTauri) {
       const imgKey = obj.data.imgKey;
       const { flipX, flipY, rotation } = imageTransformFromObject(obj);
+      const storedSource = BoardfishImageStore.getSource(imgKey);
+      const storedInfo = typeof imageSourceDebugInfo === 'function'
+        ? imageSourceDebugInfo(storedSource)
+        : { kind: isNativeImageRef(storedSource) ? 'native-ref' : typeof storedSource, length: '', prefix: '' };
+      const nativeCopyMeta = {
+        imgKey,
+        flipX,
+        flipY,
+        rotation,
+        sourceKind: storedInfo.kind,
+        sourceLen: storedInfo.length,
+        sourcePrefix: storedInfo.prefix,
+      };
+      const copyNativeCachedKey = async () => {
+        ClipDebug.step(dbg, 'copy:key-start', nativeCopyMeta);
+        await ClipDebug.wrap(
+          dbg,
+          TAURI_COMMANDS.COPY_IMAGE_KEY_TO_CLIPBOARD_TRANSFORMED,
+          () => BoardfishTauri.copyImageKeyToClipboardTransformed({ imgKey, flipX, flipY, rotation }),
+          nativeCopyMeta
+        );
+      };
       const copyDataUrlFallback = async (reason) => {
         const sourceStart = performance.now();
-        const storedSource = BoardfishImageStore.getSource(obj.data.imgKey);
         ClipDebug.step(dbg, 'copy:source-start', { imgKey, reason, storedType: typeof storedSource, nativeRef: isNativeImageRef(storedSource) });
         const src = await ensureImageDataUrl(obj.data.imgKey, dbg);
         if (!src) return;
@@ -214,7 +290,13 @@ async function copySelected() {
           ClipDebug.step(dbg, 'native-copy-stale-skip', { type: 'image', imgKey, token: clipboardToken, currentToken: _jsClipboardToken });
           return;
         }
-        await copyDataUrlFallback('native-unique-copy');
+        if (isNativeImageRef(storedSource) && typeof BoardfishTauri.copyImageKeyToClipboardTransformed === 'function') {
+          await copyNativeCachedKey();
+          return;
+        }
+        await copyDataUrlFallback(
+          isNativeImageRef(storedSource) ? 'native-key-unavailable' : 'data-url-copy'
+        );
       }, dbg, { type: 'image', imgKey, flipX, flipY, rotation })
         .catch((err) => {
           ClipDebug.step(dbg, 'copy:image-error', { imgKey, flipX, flipY, rotation, error: String(err) });
@@ -224,33 +306,82 @@ async function copySelected() {
         .finally(() => ClipDebug.end(dbg, { path: 'image-tauri-cached-transform', imgKey, flipX, flipY, rotation }));
       return true;
     } else {
-      let pngBlob = null;
-      try {
-        const canvas = renderImageToCanvas(obj);
-        if (!canvas) {
-          ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' });
-          return false;
-        }
-        pngBlob = await canvasToPngBlob(canvas);
-        if (!pngBlob) {
-          ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'blob-null' });
-          return false;
-        }
+      const writeWebPngBlob = async (blob, path, meta = {}) => {
         const webToken = globalThis.getJsClipboardWebToken?.() || '';
-        const result = await BoardfishClipboardIO.copyImageBlobToClipboard(pngBlob, webToken, dbg);
-        finishWebClipboardTokenWrite(result, webToken, dbg);
-        return true;
-      } catch (err) {
-        console.error('[copy] clipboard.write FAILED:', err);
-        return false;
-      } finally {
-        if (pngBlob) ClipDebug.end(dbg, { path: 'image-web-rendered', blobSize: pngBlob.size });
+        const writeMeta = { path, blobSize: blob?.size ?? '', ...meta };
+        const startedAt = clipboardNow();
+        ClipDebug.step(dbg, 'copy:web-native-write-start', writeMeta);
+        try {
+          const result = await BoardfishClipboardIO.copyImageBlobToClipboard(blob, webToken, dbg);
+          ClipDebug.step(dbg, 'copy:web-native-write-end', {
+            ...writeMeta,
+            ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
+          });
+          finishWebClipboardTokenWrite(result, webToken, dbg);
+          return true;
+        } catch (err) {
+          ClipDebug.step(dbg, 'copy:web-native-write-error', {
+            ...writeMeta,
+            ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
+            error: String(err),
+          });
+          console.error('[copy] clipboard.write FAILED:', err);
+          return false;
+        } finally {
+          ClipDebug.end(dbg, writeMeta);
+        }
+      };
+      const storedSource = BoardfishImageStore.getSource(obj.data.imgKey);
+      const sourcePngBlob = createWebSourcePngClipboardBlob(obj, storedSource, dbg);
+      if (sourcePngBlob) {
+        return writeWebPngBlob(sourcePngBlob, 'image-web-source-png', {
+          imgKey: obj.data.imgKey,
+          sourceKind: webSourceClipboardKind(storedSource),
+          sourceBytes: sourcePngBlob.size,
+        });
       }
+      let pngBlob = null;
+      const canvas = renderImageToCanvas(obj);
+      if (!canvas) {
+        ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' });
+        return false;
+      }
+      return (async () => {
+        try {
+          pngBlob = await canvasToPngBlob(canvas);
+          if (!pngBlob) {
+            ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'blob-null' });
+            return false;
+          }
+          return await writeWebPngBlob(pngBlob, 'image-web-rendered');
+        } catch (err) {
+          console.error('[copy] clipboard.write FAILED:', err);
+          return false;
+        }
+      })();
     }
   }
   ClipDebug.end(dbg, { path: 'object-jsClipboard', type: obj.type || '' });
   return true;
-}
+};
+
+const cutSelected = () => {
+  if (!hasSelection() || editingId) return false;
+  globalThis.BoardfishMotion?.applyActionAnimation?.('cut-selected-objects');
+  let copyResult = false;
+  try {
+    copyResult = copySelected({ animateCopy: false });
+  } catch (err) {
+    console.error('[cut] copySelected FAILED:', err);
+    return false;
+  }
+  if (copyResult === false) return false;
+  deleteSelected();
+  if (copyResult && typeof copyResult.catch === 'function') {
+    copyResult.catch((err) => console.error('[cut] copySelected FAILED:', err));
+  }
+  return true;
+};
 
 async function pasteAtPos(wx, wy, clipboardData = null) {
   if (eyedropperEnabled) return;

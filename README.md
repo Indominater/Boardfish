@@ -27,7 +27,7 @@ Desktop installers:
 - save everything locally as a portable `.bf` file
 - multi-select, resize, flip, rotate, duplicate, copy/paste
 - sample colors with a pinned eyedropper card
-- export selected images, all images, or all text
+- export selected image(s)
 - light/dark mode
 
 ## Keyboard Shortcuts
@@ -48,6 +48,8 @@ Desktop installers:
 | Paste | Cmd+V | Ctrl+V |
 | Duplicate selected | Cmd+D | Ctrl+D |
 | Move selected to back | Cmd+[ | Ctrl+[ |
+| Flip selected image(s) | Cmd+F | Ctrl+F |
+| Rotate selected image(s) | Cmd+R | Ctrl+R |
 | Export selected image(s) | Cmd+E | Ctrl+E |
 | Undo | Cmd+Z | Ctrl+Z |
 | Redo | Cmd+Shift+Z | Ctrl+Shift+Z / Ctrl+Y |

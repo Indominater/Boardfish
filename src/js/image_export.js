@@ -611,18 +611,3 @@ async function saveSelectedImages() {
     errorLabel: 'Save images failed:',
   });
 }
-
-async function exportAllImages() {
-  globalThis.BoardfishMotion?.applyActionAnimation?.('export-all-images');
-  deselectAll();
-  const imageObjs = objects.filter((o) => o.type === 'image').sort((a, b) => b.z - a.z);
-  return exportImageBatch({
-    op: 'exportAllImages',
-    mode: 'all',
-    imageObjs,
-    startMeta: { objectCount: objects.length },
-    skipMeta: imageObjs.length ? null : { reason: 'no-images' },
-    errorLabel: 'Export all images failed:',
-    clearSelectionAfter: true,
-  });
-}

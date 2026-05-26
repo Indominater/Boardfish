@@ -23,15 +23,11 @@ var exportSep         = BoardfishDOM.exportSep;
 var imageActionsSep   = BoardfishDOM.imageActionsSep;
 var layerActionsSep   = BoardfishDOM.layerActionsSep;
 var deleteSep         = BoardfishDOM.deleteSep;
-var flipHorizontalBtn = BoardfishDOM.flipHorizontalBtn;
-var flipVerticalBtn   = BoardfishDOM.flipVerticalBtn;
+var flipBtn           = BoardfishDOM.flipBtn;
 var rotateBtn         = BoardfishDOM.rotateBtn;
 var rubberBand       = BoardfishDOM.rubberBand;
 var addTextBtn       = BoardfishDOM.addTextBtn;
 var addImageBtn      = BoardfishDOM.addImageBtn;
-var exportAllImageBtn = BoardfishDOM.exportAllImageBtn;
-var exportAllTextBtn  = BoardfishDOM.exportAllTextBtn;
-var exportAllSep      = BoardfishDOM.exportAllSep;
 var IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 var IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 if (IS_MAC && typeof hasTauri === 'function' && hasTauri()) document.body.classList.add('is-macos');
@@ -50,6 +46,8 @@ var MENU_SHORTCUTS = {
   cut: [COMMAND_KEY_LABEL, 'X'],
   duplicate: [COMMAND_KEY_LABEL, 'D'],
   'move-to-back': [COMMAND_KEY_LABEL, '['],
+  'flip-image': [COMMAND_KEY_LABEL, 'F'],
+  'rotate-image': [COMMAND_KEY_LABEL, 'R'],
   'export-image': [COMMAND_KEY_LABEL, 'E'],
   'export-images': [COMMAND_KEY_LABEL, 'E'],
   delete: ['Delete'],

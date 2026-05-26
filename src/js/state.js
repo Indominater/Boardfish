@@ -77,17 +77,16 @@ function sendSelectedToBack() {
   if (moved) globalThis.BoardfishMotion?.applyActionAnimation?.('send-selected-to-back', { selection: true });
 }
 
-function flipSelectedImages(axis) {
-  const dbg = ClipDebug.start('flipSelectedImages', { axis, selectedCount: selectedIds.size });
+function flipSelectedImages() {
+  const dbg = ClipDebug.start('flipSelectedImages', { selectedCount: selectedIds.size });
   let imageCount = 0;
-  const flipped = BoardfishEditorState.commitMutation(`flip-image-${axis}`, () => {
+  const flipped = BoardfishEditorState.commitMutation('flip-image', () => {
     let didFlip = false;
     for (const id of selectedIds) {
       const obj = objectsMap.get(id);
       if (!obj || obj.type !== 'image') continue;
       imageCount++;
-      if (axis === 'x') obj.data.flipX = !obj.data.flipX;
-      else obj.data.flipY = !obj.data.flipY;
+      obj.data.flipX = !obj.data.flipX;
       markDirty(obj.id);
       didFlip = true;
     }

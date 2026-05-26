@@ -74,12 +74,20 @@ function loadClipboardExportHarness(options = {}) {
     z: 1,
     data: { content: 'first line\nsecond line' },
   };
+  const selectedObject = options.selectedObject || textObject;
+  let nowMs = 0;
   const calls = {
+    canvasToPngBlob: 0,
+    copiedImages: [],
     copiedTexts: [],
+    debugEnds: [],
+    debugSteps: [],
     jello: [],
     objectJello: [],
+    deleted: 0,
     pendingTextCopyResolves: [],
     pulses: 0,
+    renderImageToCanvas: 0,
     renders: [],
     resolveNextCopiedText(result = { boardfishTokenWritten: true }) {
       const resolve = calls.pendingTextCopyResolves.shift();
@@ -88,6 +96,7 @@ function loadClipboardExportHarness(options = {}) {
     },
   };
   const context = {
+    Blob,
     console,
     Promise,
     document: {
@@ -97,10 +106,22 @@ function loadClipboardExportHarness(options = {}) {
     window: {
       addEventListener() {},
     },
-    selectedIds: new Set([textObject.id]),
+    performance: {
+      now() {
+        nowMs += 1;
+        return nowMs;
+      },
+    },
+    editingId: null,
+    selectedIds: new Set([selectedObject.id]),
     textObject,
+    selectedObject,
     calls,
     BoardfishClipboardIO: {
+      copyImageBlobToClipboard(blob, token) {
+        calls.copiedImages.push({ blob, token });
+        return Promise.resolve({ boardfishTokenWritten: true });
+      },
       copyTextToClipboard(text) {
         calls.copiedTexts.push(text);
         if (options.deferCopyText) {
@@ -110,8 +131,9 @@ function loadClipboardExportHarness(options = {}) {
       },
     },
     BoardfishImageStore: {
-      getSource() { return ''; },
+      getSource() { return options.imageSource || ''; },
     },
+    BoardfishWebBoardContainer: options.BoardfishWebBoardContainer,
     BoardfishMotion: {
       applyActionAnimation(action, payload = {}) {
         if (payload.textSelection) calls.jello.push({ ...payload.textSelection });
@@ -126,16 +148,19 @@ function loadClipboardExportHarness(options = {}) {
       pulseSelection() { calls.pulses++; },
     },
     ClipDebug: {
-      end() {},
+      end(_dbg, meta = {}) { calls.debugEnds.push({ ...meta }); },
       start() { return {}; },
-      step() {},
+      step(_dbg, step, meta = {}) { calls.debugSteps.push({ step, meta: { ...meta } }); },
     },
     cloneObject(obj) {
       return { ...obj, data: { ...obj.data } };
     },
     finishNativeClipboardWrite() {},
     getFirstSelectedObject() {
-      return textObject;
+      return selectedObject;
+    },
+    hasSelection() {
+      return context.selectedIds.size > 0;
     },
     getJsClipboardWebToken() {
       return 'web-token';
@@ -144,8 +169,18 @@ function loadClipboardExportHarness(options = {}) {
       return false;
     },
     markJsClipboardWebTokenOnNative() {},
+    imageNeedsRendering: options.imageNeedsRendering || (() => false),
+    isWebImageRef: options.isWebImageRef || (() => false),
     normalizeTextContent(value) {
       return String(value ?? '').replace(/\r\n?/g, '\n');
+    },
+    renderImageToCanvas() {
+      calls.renderImageToCanvas++;
+      return options.renderedCanvas || null;
+    },
+    canvasToPngBlob() {
+      calls.canvasToPngBlob++;
+      return Promise.resolve(options.renderedBlob || null);
     },
     textForClipboard(value) {
       const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
@@ -162,9 +197,13 @@ function loadClipboardExportHarness(options = {}) {
     setJsClipboard() {
       return 'clip-token';
     },
+    deleteSelected() {
+      calls.deleted++;
+      context.selectedIds.clear();
+    },
   };
   vm.createContext(context);
-  vm.runInContext(`${source}\nglobalThis.copySelected = copySelected;\n`, context, {
+  vm.runInContext(`${source}\nglobalThis.copySelected = copySelected;\nglobalThis.cutSelected = cutSelected;\n`, context, {
     filename: 'clipboard_export_init.js',
   });
   return context;
@@ -484,6 +523,63 @@ test('copying a selected text object jiggles immediately while clipboard write c
   assert.equal(context.calls.pendingTextCopyResolves.length, 1);
   context.calls.resolveNextCopiedText();
   await Promise.resolve();
+});
+
+test('cutting a selected object copies without jiggle and deletes immediately', () => {
+  const context = loadClipboardExportHarness({ deferCopyText: true });
+
+  const cutResult = context.cutSelected();
+
+  assert.equal(cutResult, true);
+  assert.deepEqual(context.calls.copiedTexts, [context.textObject.data.content]);
+  assert.deepEqual(context.calls.jello, []);
+  assert.deepEqual(context.calls.objectJello, []);
+  assert.equal(context.calls.pulses, 0);
+  assert.equal(context.calls.deleted, 1);
+  assert.equal(context.calls.pendingTextCopyResolves.length, 1);
+});
+
+test('copying an untransformed web PNG image writes source bytes without rendering', async () => {
+  const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const imageSource = {
+    web: true,
+    objectUrl: 'blob:test-image',
+    mime: 'image/png',
+    bytes: pngBytes.length,
+  };
+  const imageObject = {
+    id: 'image-1',
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 64,
+    h: 64,
+    z: 1,
+    data: { imgKey: 'img-1' },
+  };
+  const context = loadClipboardExportHarness({
+    selectedObject: imageObject,
+    imageSource,
+    BoardfishWebBoardContainer: {
+      bytesForImageSource(source) {
+        assert.equal(source, imageSource);
+        return pngBytes;
+      },
+    },
+    imageNeedsRendering: () => false,
+    isWebImageRef: (source) => source?.web === true,
+  });
+
+  assert.equal(await context.copySelected(), true);
+
+  assert.equal(context.calls.renderImageToCanvas, 0);
+  assert.equal(context.calls.canvasToPngBlob, 0);
+  assert.equal(context.calls.copiedImages.length, 1);
+  assert.equal(context.calls.copiedImages[0].token, 'web-token');
+  assert.equal(context.calls.copiedImages[0].blob.type, 'image/png');
+  assert.equal(context.calls.copiedImages[0].blob.size, pngBytes.length);
+  assert.equal(context.calls.debugSteps.some((entry) => entry.step === 'copy:web-source-png-blob'), true);
+  assert.equal(context.calls.debugEnds.at(-1).path, 'image-web-source-png');
 });
 
 test('copying a text object omits whitespace-only lines at plain clipboard edges', async () => {

@@ -657,7 +657,6 @@ const BoardfishDebugConsole = (() => {
     export: 'ExportDebug',
     perf: 'ManualPerfDebug',
     insert: 'InsertDebug',
-    exportAllDiag: 'ExportAllDiag',
     textSel: 'TextSelDebug',
     pill: 'PillDebug',
     menu: 'MenuDebug',

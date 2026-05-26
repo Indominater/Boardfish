@@ -16,7 +16,7 @@ var ClipDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Use finishDebug({ clipboard: ["pasteBreakdown", "largePasteReport", "phaseSummary", "summary", "dump"] }) to collect results.');
+    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Use finishDebug({ clipboard: ["copyPanReport", "copyBreakdown", "pasteBreakdown", "largePasteReport", "status", "phaseSummary", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -112,6 +112,7 @@ var ClipDebug = (() => {
       sourceKind: e.meta?.sourceKind || e.meta?.pathKind || e.meta?.assetKind || '',
       sourceLen: e.meta?.sourceLen ?? e.meta?.pathLen ?? e.meta?.assetLen ?? '',
       sourcePrefix: e.meta?.sourcePrefix || e.meta?.pathPrefix || e.meta?.assetPrefix || '',
+      sourceBytes: e.meta?.sourceBytes ?? timing(e.meta, 'sourceBytes'),
       bytes: e.meta?.bytes ?? timing(e.meta, 'bytes'),
       assetReady: e.meta?.assetReady ?? '',
       nativePath: timing(e.meta, 'path'),
@@ -153,7 +154,7 @@ var ClipDebug = (() => {
   }
 
   function phaseSummary() {
-    const rows = events.filter(e => e.step && e.step !== 'start').map(e => debugRow(e, { includeSkipped: true }));
+    const rows = events.filter(e => e.step && e.step !== 'start').map(e => debugRow(e, { includeId: true, includeSkipped: true }));
     console.table(rows);
     return rows;
   }
@@ -167,6 +168,7 @@ var ClipDebug = (() => {
         imgKey: e.meta?.imgKey || '',
         nativePath: timing(e.meta, 'path'),
         flipped: timing(e.meta, 'flipped'),
+        sourceBytes: timing(e.meta, 'sourceBytes'),
         width: timing(e.meta, 'width'),
         height: timing(e.meta, 'height'),
         bytes: timing(e.meta, 'bytes'),
@@ -187,6 +189,223 @@ var ClipDebug = (() => {
       }));
     console.table(rows);
     return rows;
+  }
+
+  function copyPanReport() {
+    const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
+    const copyStarts = events.filter(e => e.op === 'copySelected' && e.step === 'start');
+    const copyStart = copyStarts[copyStarts.length - 1];
+    if (!copyStart) {
+      const empty = { copyRuns: 0, verdict: 'no copySelected events captured' };
+      console.table([empty]);
+      return empty;
+    }
+
+    const run = events.filter(e => e.id === copyStart.id);
+    const latest = (stepName) => [...run].reverse().find(e => e.step === stepName);
+    const invokeOk = [...run].reverse().find(e => e.step === 'invoke:ok');
+    const nativeStart = latest('native-copy-start');
+    const nativeFinish = latest('native-copy-finished');
+    const copyEnd = latest('end');
+    const copyDoneAt = copyEnd?.at ?? nativeFinish?.at ?? invokeOk?.at ?? run[run.length - 1]?.at ?? copyStart.at;
+    const copyWindowRows = events.filter(e => e.at >= copyStart.at && e.at <= copyDoneAt + 1);
+    const renderCanvasEnd = copyWindowRows.find(e => e.op === 'renderImageToCanvas' && e.step === 'end');
+    const pngBlobEnd = copyWindowRows.find(e => e.op === 'canvasToPngBlob' && e.step === 'end');
+    const webSourcePngBlob = latest('copy:web-source-png-blob');
+    const webNativeWriteEnd = latest('copy:web-native-write-end');
+
+    const viewportEvents = typeof ViewportDebug !== 'undefined' ? ViewportDebug.events : [];
+    const frameStarts = new Map();
+    for (const e of viewportEvents) {
+      if (e.op === 'frame' && e.step === 'start') frameStarts.set(e.id, e);
+    }
+    const frameRows = viewportEvents
+      .filter(e => e.op === 'frame' && e.step === 'end')
+      .map(e => ({
+        kind: 'pan-frame',
+        at: e.at,
+        id: e.id,
+        ...(frameStarts.get(e.id)?.meta || {}),
+        ...(e.meta || {}),
+      }))
+      .filter(row => row.at >= copyStart.at && /pan/.test(String(row.inputSource || row.sources || '')));
+
+    const timeline = [];
+    for (const e of viewportEvents) {
+      if (e.at < copyStart.at) continue;
+      if (e.op === 'wheel' && e.step === 'end' && e.meta?.mode === 'pan') {
+        timeline.push({
+          kind: 'wheel-pan',
+          at: e.at,
+          afterCopyMs: round(e.at - copyStart.at),
+          gapMs: '',
+          deltaX: e.meta?.appliedDX ?? e.meta?.deltaX ?? '',
+          deltaY: e.meta?.appliedDY ?? e.meta?.deltaY ?? '',
+        });
+      } else if (e.op === 'mousePan' && e.step === 'start') {
+        timeline.push({
+          kind: 'mouse-pan-start',
+          at: e.at,
+          afterCopyMs: round(e.at - copyStart.at),
+          startX: e.meta?.startX ?? '',
+          startY: e.meta?.startY ?? '',
+        });
+      } else if (e.op === 'eventLoop' && e.step === 'gap') {
+        timeline.push({
+          kind: 'event-loop-gap',
+          at: e.at,
+          afterCopyMs: round(e.at - copyStart.at),
+          gapMs: e.meta?.gapMs ?? '',
+          overMs: e.meta?.overMs ?? '',
+        });
+      } else if (e.op === 'longTask' && e.step === 'entry') {
+        timeline.push({
+          kind: 'long-task',
+          at: e.at,
+          afterCopyMs: round(e.at - copyStart.at),
+          durationMs: e.meta?.duration ?? '',
+          startTime: e.meta?.startTime ?? '',
+        });
+      }
+    }
+    for (const row of frameRows) {
+      timeline.push({
+        kind: row.kind,
+        at: row.at,
+        afterCopyMs: round(row.at - copyStart.at),
+        inputSource: row.inputSource || '',
+        inputAgeMs: row.inputAgeMs ?? '',
+        queueMs: row.queueMs ?? '',
+        frameMs: row.frameMs ?? '',
+        rafGap: row.rafGap ?? '',
+        sources: row.sources || '',
+      });
+    }
+    timeline.sort((a, b) => a.at - b.at);
+    const wheelPanRows = timeline.filter(row => row.kind === 'wheel-pan');
+    for (let i = 1; i < wheelPanRows.length; i++) {
+      wheelPanRows[i].gapMs = round(wheelPanRows[i].at - wheelPanRows[i - 1].at);
+    }
+    const rawInputRows = viewportEvents
+      .filter(e => e.op === 'input' && e.at >= copyStart.at)
+      .map(e => ({
+        at: e.at,
+        step: e.step,
+        ...(e.meta || {}),
+      }));
+
+    const firstPan = timeline.find(row => /pan/.test(row.kind));
+    const firstPanFrame = timeline.find(row => row.kind === 'pan-frame');
+    const windowEndAt = Math.max(copyDoneAt, firstPan?.at || copyDoneAt);
+    const eventLoopGapsDuringCopy = timeline
+      .filter(row => row.kind === 'event-loop-gap' && row.at <= windowEndAt)
+      .map(row => Number(row.gapMs) || 0);
+    const maxEventLoopGapMs = eventLoopGapsDuringCopy.reduce((max, value) => Math.max(max, value), 0);
+    const copyPendingAtFirstPan = !!firstPan && copyDoneAt > firstPan.at;
+    const nativeCommand = invokeOk?.meta?.command || '';
+    const dataUrlLen = invokeOk?.meta?.dataUrlLen ?? latest('copy:source-ready')?.meta?.dataUrlLen ?? '';
+    const sourceLen = invokeOk?.meta?.sourceLen ?? latest('copy:key-start')?.meta?.sourceLen ?? '';
+    const sourceBytes = timing(invokeOk?.meta, 'sourceBytes') || webSourcePngBlob?.meta?.sourceBytes || '';
+    const nativeTotalMs = timing(invokeOk?.meta, 'totalMs') || '';
+    const renderCanvasMs = renderCanvasEnd?.total ?? '';
+    const pngBlobMs = pngBlobEnd?.total ?? '';
+    const webSourcePngBlobMs = webSourcePngBlob?.meta?.ms ?? '';
+    const webBlobReady = pngBlobEnd || webSourcePngBlob;
+    const webClipboardWriteAfterBlobMs = webBlobReady && (webNativeWriteEnd || copyEnd)
+      ? round((webNativeWriteEnd?.at ?? copyEnd.at) - webBlobReady.at)
+      : '';
+    const maxWheelPanGapMs = wheelPanRows.reduce((max, row) => Math.max(max, Number(row.gapMs) || 0), 0);
+    const postCopyWheelPanGapMs = wheelPanRows
+      .filter(row => row.at >= copyDoneAt && row.at <= copyDoneAt + 1500)
+      .reduce((max, row) => Math.max(max, Number(row.gapMs) || 0), 0);
+    const maxPanFrameRafGapMs = timeline
+      .filter(row => row.kind === 'pan-frame')
+      .reduce((max, row) => Math.max(max, Number(row.rafGap) || 0), 0);
+    const firstRawInput = rawInputRows.find(row => row.at >= copyDoneAt);
+    const firstRawWheel = rawInputRows.find(row => row.eventType === 'wheel' && row.at >= copyDoneAt);
+    const blockedInputsAfterCopy = rawInputRows
+      .filter(row => row.step === 'shield-block' && row.at >= copyDoneAt && row.at <= copyDoneAt + 1500)
+      .length;
+    const firstRawWheelDeliveryAgeMs = Number(firstRawWheel?.eventAgeMs) || 0;
+    const firstPanFrameMs = Number(firstPanFrame?.frameMs) || 0;
+    const firstPanInputAgeMs = Number(firstPanFrame?.inputAgeMs) || 0;
+    const likelyBlock = Math.max(
+      maxEventLoopGapMs,
+      firstPanInputAgeMs,
+      firstPanFrameMs,
+      postCopyWheelPanGapMs,
+      maxPanFrameRafGapMs,
+      firstRawWheelDeliveryAgeMs
+    ) > 32;
+    const dataUrlPath = /data_url|data-url/i.test(nativeCommand || timing(invokeOk?.meta, 'path'));
+    const webRenderedPath = copyEnd?.meta?.path === 'image-web-rendered';
+    let verdict = 'no >32ms copy-to-pan stall captured';
+    if (!firstPan) {
+      verdict = blockedInputsAfterCopy
+        ? 'copy captured; post-copy input was blocked by Boardfish input shield'
+        : 'copy captured; no pan input captured after copy';
+    } else if (blockedInputsAfterCopy) {
+      verdict = 'post-copy input reached Boardfish but was blocked by input shield';
+    } else if (firstRawWheelDeliveryAgeMs > 32) {
+      verdict = 'pan input was generated earlier but delivered late to Boardfish';
+    } else if (likelyBlock && webRenderedPath) {
+      verdict = 'stutter captured on web image copy; inspect render/png/clipboard timings and pan gaps';
+    } else if (likelyBlock && dataUrlPath) {
+      verdict = 'stutter aligns with data-url clipboard IPC or hydration before/during first pan';
+    } else if (likelyBlock && copyPendingAtFirstPan) {
+      verdict = 'stutter overlaps native clipboard write; inspect native timing columns';
+    } else if (likelyBlock) {
+      verdict = 'pan frame or event-loop gap is slow; inspect viewport timeline';
+    }
+
+    const summary = {
+      copyRuns: copyStarts.length,
+      copyPath: copyEnd?.meta?.path || '',
+      nativeCommand,
+      nativeQueueMs: nativeStart?.meta?.queueMs ?? '',
+      invokeAtMs: invokeOk?.total ?? '',
+      invokeMs: invokeOk?.meta?.ms ?? '',
+      nativeTotalMs,
+      clipboardWriteMs: timing(invokeOk?.meta, 'clipboardWriteMs') || '',
+      arboardMs: timing(invokeOk?.meta, 'arboardMs') || '',
+      macosFallbackMs: timing(invokeOk?.meta, 'macosFallbackMs') || '',
+      sourceLen,
+      sourceBytes,
+      dataUrlLen,
+      webNativeWriteMs: webNativeWriteEnd?.meta?.ms ?? '',
+      webSourcePngBlobMs,
+      renderCanvasMs,
+      pngBlobMs,
+      webClipboardWriteAfterBlobMs,
+      maxWheelPanGapMs: round(maxWheelPanGapMs),
+      postCopyWheelPanGapMs: round(postCopyWheelPanGapMs),
+      maxPanFrameRafGapMs: round(maxPanFrameRafGapMs),
+      firstRawInputAfterCopyEndMs: firstRawInput ? round(firstRawInput.at - copyDoneAt) : '',
+      firstRawInputType: firstRawInput?.eventType || '',
+      firstRawWheelAfterCopyEndMs: firstRawWheel ? round(firstRawWheel.at - copyDoneAt) : '',
+      firstRawWheelEventAfterCopyEndMs: firstRawWheel?.eventAt ? round(firstRawWheel.eventAt - copyDoneAt) : '',
+      firstRawWheelDeliveryAgeMs: firstRawWheel?.eventAgeMs ?? '',
+      blockedInputsAfterCopy,
+      copyEndMs: copyEnd?.total ?? '',
+      firstPanAfterCopyEndMs: firstPan ? round(firstPan.at - copyDoneAt) : '',
+      firstPanAfterCopyMs: firstPan?.afterCopyMs ?? '',
+      firstPanKind: firstPan?.kind || '',
+      copyPendingAtFirstPan,
+      firstPanInputAgeMs: firstPanFrame?.inputAgeMs ?? '',
+      firstPanFrameMs: firstPanFrame?.frameMs ?? '',
+      firstPanRafGapMs: firstPanFrame?.rafGap ?? '',
+      eventLoopGapsDuringCopy: eventLoopGapsDuringCopy.length,
+      maxEventLoopGapMs: round(maxEventLoopGapMs),
+      verdict,
+    };
+    console.table([summary]);
+    console.table(timeline.slice(0, 80));
+    return {
+      summary,
+      timeline: timeline.slice(0, 200),
+      rawInputRows: rawInputRows.slice(0, 200),
+      copyRows: copyWindowRows.map(e => debugRow(e, { includeId: true, includeSkipped: true })),
+    };
   }
 
   function memorySnapshotFromEvent(e) {
@@ -397,6 +616,7 @@ var ClipDebug = (() => {
     summary,
     phaseSummary,
     copyBreakdown,
+    copyPanReport,
     largePasteReport,
     pasteBreakdown,
     status,
@@ -524,7 +744,7 @@ var HistoryDebug = (() => {
 
 exposeDebug({ history: HistoryDebug });
 var ViewportDebug = (() => {
-  const MAX_EVENTS = 900;
+  const MAX_EVENTS = 2400;
   const MAX_SLOW_RECORDS = 100;
   let enabled = false;
   let verbose = false;
@@ -553,6 +773,12 @@ var ViewportDebug = (() => {
     maxInputAgeMs: 0,
     lastRafGapMs: 0,
     maxRafGapMs: 0,
+    eventLoopGaps: 0,
+    maxEventLoopGapMs: 0,
+    longTasks: 0,
+    maxLongTaskMs: 0,
+    rawInputEvents: 0,
+    shieldBlockedInputs: 0,
     wheelHandlerCount: 0,
     wheelHandlerTotalMs: 0,
     maxWheelHandlerMs: 0,
@@ -583,6 +809,13 @@ var ViewportDebug = (() => {
     maxImagePreviewMs: 0,
   };
   let lastRafAt = 0;
+  let eventLoopTimer = null;
+  let eventLoopLastTick = 0;
+  let longTaskObserver = null;
+  let rawInputMonitorActive = false;
+  const EVENT_LOOP_INTERVAL_MS = 50;
+  const EVENT_LOOP_GAP_THRESHOLD_MS = 80;
+  const RAW_INPUT_TYPES = ['wheel', 'keydown', 'keyup', 'pointerdown', 'pointerup', 'mousedown', 'mouseup'];
 
   function sanitize(value) {
     return sanitizeDebugMeta(value, { roundNumbers: true });
@@ -596,16 +829,192 @@ var ViewportDebug = (() => {
     if (verbose) console.debug('[Boardfish viewport]', entry);
   }
 
+  function startEventLoopMonitor(options = {}) {
+    if (eventLoopTimer || typeof setInterval !== 'function') return;
+    const thresholdMs = Math.max(16, Number(options.eventLoopGapThresholdMs) || EVENT_LOOP_GAP_THRESHOLD_MS);
+    const requestedIntervalMs = Number(options.eventLoopIntervalMs);
+    const intervalMs = Math.max(8, Number.isFinite(requestedIntervalMs) && requestedIntervalMs > 0
+      ? requestedIntervalMs
+      : Math.min(EVENT_LOOP_INTERVAL_MS, Math.max(8, thresholdMs / 2)));
+    eventLoopLastTick = performance.now();
+    eventLoopTimer = setInterval(() => {
+      const now = performance.now();
+      const gapMs = now - eventLoopLastTick;
+      eventLoopLastTick = now;
+      if (gapMs < thresholdMs) return;
+      stats.eventLoopGaps++;
+      stats.maxEventLoopGapMs = Math.max(stats.maxEventLoopGapMs, gapMs);
+      push({
+        op: 'eventLoop',
+        step: 'gap',
+        meta: sanitize({
+          gapMs,
+          expectedMs: intervalMs,
+          thresholdMs,
+          overMs: gapMs - thresholdMs,
+          panX,
+          panY,
+          zoom,
+        }),
+      });
+    }, intervalMs);
+  }
+
+  function stopEventLoopMonitor() {
+    if (!eventLoopTimer) return;
+    clearInterval(eventLoopTimer);
+    eventLoopTimer = null;
+    eventLoopLastTick = 0;
+  }
+
+  function startLongTaskObserver() {
+    if (longTaskObserver || typeof PerformanceObserver === 'undefined') return;
+    try {
+      longTaskObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const duration = Number(entry.duration) || 0;
+          stats.longTasks++;
+          stats.maxLongTaskMs = Math.max(stats.maxLongTaskMs, duration);
+          push({
+            op: 'longTask',
+            step: 'entry',
+            meta: sanitize({
+              startTime: entry.startTime,
+              duration,
+              name: entry.name || '',
+            }),
+          });
+        }
+      });
+      longTaskObserver.observe({ entryTypes: ['longtask'] });
+    } catch (_) {
+      longTaskObserver = null;
+    }
+  }
+
+  function stopLongTaskObserver() {
+    if (!longTaskObserver) return;
+    longTaskObserver.disconnect();
+    longTaskObserver = null;
+  }
+
+  function eventTimestampMs(event = null) {
+    const timestamp = Number(event?.timeStamp);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return performance.now();
+    return timestamp > performance.timeOrigin ? timestamp - performance.timeOrigin : timestamp;
+  }
+
+  function eventTargetLabel(target) {
+    if (!target) return '';
+    const id = target.id ? `#${target.id}` : '';
+    const className = typeof target.className === 'string'
+      ? target.className.trim().split(/\s+/).filter(Boolean).slice(0, 3).map(name => `.${name}`).join('')
+      : '';
+    return `${String(target.tagName || target.nodeName || '').toLowerCase()}${id}${className}`;
+  }
+
+  function inputShieldState() {
+    const shieldActive = typeof openingShield !== 'undefined' &&
+      !!openingShield?.classList?.contains?.('active');
+    return {
+      shieldActive,
+      inputShieldCount: typeof _inputShieldCount !== 'undefined' ? _inputShieldCount : '',
+      boardOpening: typeof _boardOpening !== 'undefined' ? !!_boardOpening : '',
+      rubberBandDragActive: typeof _rubberBandDragActive !== 'undefined' ? !!_rubberBandDragActive : '',
+      spaceDown: typeof _spaceDown !== 'undefined' ? !!_spaceDown : '',
+      editingId: typeof editingId !== 'undefined' ? (editingId || '') : '',
+    };
+  }
+
+  function inputEventMeta(event, extra = {}) {
+    const eventAt = eventTimestampMs(event);
+    return sanitize({
+      source: extra.source || '',
+      eventType: event?.type || '',
+      eventAt,
+      eventAgeMs: Math.max(0, performance.now() - eventAt),
+      key: event?.key || '',
+      code: event?.code || '',
+      repeat: !!event?.repeat,
+      deltaX: event?.deltaX ?? '',
+      deltaY: event?.deltaY ?? '',
+      button: event?.button ?? '',
+      buttons: event?.buttons ?? '',
+      clientX: event?.clientX ?? '',
+      clientY: event?.clientY ?? '',
+      ctrlKey: !!event?.ctrlKey,
+      metaKey: !!event?.metaKey,
+      shiftKey: !!event?.shiftKey,
+      altKey: !!event?.altKey,
+      defaultPrevented: !!event?.defaultPrevented,
+      cancelable: !!event?.cancelable,
+      target: eventTargetLabel(event?.target),
+      ...inputShieldState(),
+      ...extra,
+    });
+  }
+
+  function recordRawInput(event, source = 'raw-capture') {
+    if (!enabled) return;
+    stats.rawInputEvents++;
+    push({
+      op: 'input',
+      step: 'raw',
+      meta: inputEventMeta(event, { source }),
+    });
+  }
+
+  function recordShieldBlock(event, meta = {}) {
+    if (!enabled) return;
+    stats.shieldBlockedInputs++;
+    push({
+      op: 'input',
+      step: 'shield-block',
+      meta: inputEventMeta(event, { source: 'input-shield', blocked: true, ...meta }),
+    });
+  }
+
+  function onRawInputCapture(event) {
+    if (!enabled) return;
+    try {
+      if (event.__boardfishViewportRawInputLogged) return;
+      event.__boardfishViewportRawInputLogged = true;
+    } catch (_) {}
+    recordRawInput(event, 'window-capture');
+  }
+
+  function startRawInputMonitor(options = {}) {
+    if (rawInputMonitorActive || options.rawInput !== true || typeof window === 'undefined') return;
+    rawInputMonitorActive = true;
+    for (const type of RAW_INPUT_TYPES) {
+      window.addEventListener(type, onRawInputCapture, { capture: true, passive: true });
+    }
+  }
+
+  function stopRawInputMonitor() {
+    if (!rawInputMonitorActive || typeof window === 'undefined') return;
+    for (const type of RAW_INPUT_TYPES) {
+      window.removeEventListener(type, onRawInputCapture, { capture: true, passive: true });
+    }
+    rawInputMonitorActive = false;
+  }
+
   function enable(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
+    startEventLoopMonitor(options);
+    startLongTaskObserver();
+    startRawInputMonitor(options);
 
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["report", "summary", "frameSummary", "wheelSummary", "drawSummary", "slowFrames", "imageHealth", "dump"] }) to collect results.');
+    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["report", "summary", "frameSummary", "wheelSummary", "drawSummary", "slowFrames", "eventLoopTimeline", "rawInputTimeline", "imageHealth", "dump"] }) to collect results.');
   }
 
   function disable() {
     enabled = false;
+    stopEventLoopMonitor();
+    stopLongTaskObserver();
+    stopRawInputMonitor();
     if (DEBUG_TOOLS_ENABLED) console.info('Boardfish viewport debugger disabled.');
   }
 
@@ -738,6 +1147,12 @@ var ViewportDebug = (() => {
       { metric: 'maxQueueMs', value: Math.round(stats.maxQueueMs * 100) / 100 },
       { metric: 'maxInputAgeMs', value: Math.round(stats.maxInputAgeMs * 100) / 100 },
       { metric: 'maxRafGapMs', value: Math.round(stats.maxRafGapMs * 100) / 100 },
+      { metric: 'eventLoopGapsOverThreshold', value: stats.eventLoopGaps },
+      { metric: 'maxEventLoopGapMs', value: Math.round(stats.maxEventLoopGapMs * 100) / 100 },
+      { metric: 'longTasks', value: stats.longTasks },
+      { metric: 'maxLongTaskMs', value: Math.round(stats.maxLongTaskMs * 100) / 100 },
+      { metric: 'rawInputEvents', value: stats.rawInputEvents },
+      { metric: 'shieldBlockedInputs', value: stats.shieldBlockedInputs },
       { metric: 'avgWheelHandlerMs', value: stats.wheelHandlerCount ? Math.round(stats.wheelHandlerTotalMs / stats.wheelHandlerCount * 100) / 100 : 0 },
       { metric: 'maxWheelHandlerMs', value: Math.round(stats.maxWheelHandlerMs * 100) / 100 },
       { metric: 'avgMousePanHandlerMs', value: stats.mousePanHandlerCount ? Math.round(stats.mousePanHandlerTotalMs / stats.mousePanHandlerCount * 100) / 100 : 0 },
@@ -796,6 +1211,12 @@ var ViewportDebug = (() => {
       recentMaxInputAgeMs: Math.round(max('inputAgeMs') * 100) / 100,
       maxRafGapMs: Math.round(stats.maxRafGapMs * 100) / 100,
       recentMaxRafGapMs: Math.round(max('rafGap') * 100) / 100,
+      eventLoopGapsOverThreshold: stats.eventLoopGaps,
+      maxEventLoopGapMs: Math.round(stats.maxEventLoopGapMs * 100) / 100,
+      longTasks: stats.longTasks,
+      maxLongTaskMs: Math.round(stats.maxLongTaskMs * 100) / 100,
+      rawInputEvents: stats.rawInputEvents,
+      shieldBlockedInputs: stats.shieldBlockedInputs,
       transformFrames: stats.transformFrames,
       boardFrames: stats.boardFrames,
       overlayFrames: stats.overlayFrames,
@@ -1009,7 +1430,7 @@ var ViewportDebug = (() => {
     return out;
   }
 
-  function imageScaleCacheSummary() {
+  function imageScaleCacheSummary(options = {}) {
     const byScale = {};
     let variantCount = 0;
     for (const map of imageScaledBitmapCache.values()) {
@@ -1055,8 +1476,10 @@ var ViewportDebug = (() => {
       supported: VIEWPORT_IMAGE_SCALING_SUPPORTED,
       enabled: viewportImageScalingEnabled,
     };
-    console.table([out]);
-    if (rows.length) console.table(rows);
+    if (options.table !== false) {
+      console.table([out]);
+      if (rows.length) console.table(rows);
+    }
     return { ...out, byScale: rows };
   }
 
@@ -1227,6 +1650,51 @@ var ViewportDebug = (() => {
     return out;
   }
 
+  function eventLoopTimeline(limit = 80) {
+    const rows = events
+      .filter(e => e.op === 'eventLoop' || e.op === 'longTask')
+      .slice(-Math.max(1, Number(limit) || 80))
+      .map(e => ({
+        at: e.at,
+        kind: e.op,
+        step: e.step,
+        gapMs: e.meta?.gapMs ?? '',
+        overMs: e.meta?.overMs ?? '',
+        durationMs: e.meta?.duration ?? '',
+        startTime: e.meta?.startTime ?? '',
+      }));
+    console.table(rows);
+    return rows;
+  }
+
+  function rawInputTimeline(limit = 120) {
+    const rows = events
+      .filter(e => e.op === 'input')
+      .slice(-Math.max(1, Number(limit) || 120))
+      .map(e => ({
+        at: e.at,
+        step: e.step,
+        source: e.meta?.source || '',
+        eventType: e.meta?.eventType || '',
+        eventAgeMs: e.meta?.eventAgeMs ?? '',
+        deltaX: e.meta?.deltaX ?? '',
+        deltaY: e.meta?.deltaY ?? '',
+        key: e.meta?.key || '',
+        code: e.meta?.code || '',
+        repeat: e.meta?.repeat ?? '',
+        button: e.meta?.button ?? '',
+        buttons: e.meta?.buttons ?? '',
+        ctrl: !!e.meta?.ctrlKey,
+        meta: !!e.meta?.metaKey,
+        shieldActive: e.meta?.shieldActive ?? '',
+        inputShieldCount: e.meta?.inputShieldCount ?? '',
+        blocked: e.meta?.blocked ?? '',
+        target: e.meta?.target || '',
+      }));
+    console.table(rows);
+    return rows;
+  }
+
   function report(options = {}) {
     const out = {
       summary: summary(),
@@ -1234,6 +1702,8 @@ var ViewportDebug = (() => {
       wheelSummary: wheelSummary(),
       drawSummary: drawSummary(),
       transformSummary: transformSummary(),
+      eventLoopTimeline: eventLoopTimeline(options.eventLoopLimit ?? 80),
+      rawInputTimeline: rawInputTimeline(options.rawInputLimit ?? 120),
       slowFrames: slowFrames(options.slowFrames ?? options.limit ?? 20),
       imageScaleCache: imageScaleCacheSummary(),
       culling: cullingSummary(),
@@ -1258,6 +1728,7 @@ var ViewportDebug = (() => {
     slowRecords.length = 0;
     for (const key of Object.keys(stats)) stats[key] = 0;
     lastRafAt = 0;
+    eventLoopLastTick = performance.now();
   }
 
   return {
@@ -1287,6 +1758,10 @@ var ViewportDebug = (() => {
       typeof viewportPerfModeSummary === 'function' ? viewportPerfModeSummary(modeKey) : null
     ),
     transformSummary,
+    eventLoopTimeline,
+    rawInputTimeline,
+    recordRawInput,
+    recordShieldBlock,
     wheelSummary,
     wheelTimeline,
     slowFrames,

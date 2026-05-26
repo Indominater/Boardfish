@@ -47,29 +47,6 @@ pub(crate) async fn save_file_dialog(
 }
 
 #[tauri::command]
-pub(crate) async fn save_text_file_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let hex = {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos() as u64)
-            .unwrap_or(0);
-        format!("{:06x}", nanos & 0xFFFFFF)
-    };
-    let default_name = format!("text_{}.txt", hex);
-    tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .add_filter("Text", &["txt"])
-            .set_file_name(default_name)
-            .blocking_save_file()
-            .map(|p| p.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub(crate) async fn save_image_file_dialog(
     app: tauri::AppHandle,
     default_name: Option<String>,

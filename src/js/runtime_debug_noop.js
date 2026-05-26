@@ -74,11 +74,18 @@ const StartupDebug = {
 };
 
 const ClipDebug = createNoopDebugApi({
+  copyBreakdown: () => [],
+  copyPanReport: () => null,
   largePasteReport: () => null,
   pasteBreakdown: () => null,
+  status: () => null,
 });
 const HistoryDebug = createNoopDebugApi();
-const ViewportDebug = createNoopDebugApi();
+const ViewportDebug = createNoopDebugApi({
+  rawInputTimeline: () => [],
+  recordRawInput: noop,
+  recordShieldBlock: noop,
+});
 const SaveDebug = createNoopDebugApi({
   report: () => null,
 });
@@ -114,7 +121,6 @@ const InsertDebug = createNoopDebugApi({
   imageBreakdown: () => [],
   nativeBreakdown: () => [],
 });
-const ExportAllDiag = createNoopDebugApi();
 const TextSelDebug = createNoopDebugApi({
   _logDraw: noop,
   _logHit: noop,

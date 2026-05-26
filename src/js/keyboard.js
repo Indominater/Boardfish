@@ -17,6 +17,18 @@ function isShiftOnlyKey(e) {
   return e.key === 'Shift' && !e.ctrlKey && !e.metaKey && !e.altKey;
 }
 
+const hasSelectedImagesForKeyboardTransform = () => {
+  if (!selectedIds?.size || !objectsMap?.get) return false;
+  for (const id of selectedIds) {
+    if (objectsMap.get(id)?.type === 'image') return true;
+  }
+  return false;
+};
+
+const canTransformSelectedImagesFromKeyboard = () => {
+  return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardTransform();
+};
+
 const activeKeyboardKeys = new Set();
 const activeKeyboardKeyTimes = new Map();
 const STALE_ACTIVE_KEY_MS = 1200;
@@ -121,6 +133,7 @@ const isNativeFindShortcut = (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (isNativeFindShortcut(e)) {
+    if (hasExactCommandModifier(e) && isShortcutKey(e, 'f') && canTransformSelectedImagesFromKeyboard()) return;
     globalThis.BoardfishMotion?.applyActionAnimation?.('native-find-shortcut');
     e.preventDefault();
     e.stopPropagation();
@@ -138,7 +151,17 @@ document.addEventListener('keydown', (e) => {
   activeKeyboardKeyTimes.set(keyId, keyDownAt);
 
   if (e.key === 'Alt') { e.preventDefault(); return; }
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) { e.preventDefault(); return; }
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) {
+    e.preventDefault();
+    if (canTransformSelectedImagesFromKeyboard()) rotateSelectedImages('cw');
+    return;
+  }
+
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'f')) {
+    e.preventDefault();
+    if (canTransformSelectedImagesFromKeyboard()) flipSelectedImages();
+    return;
+  }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'i') && !editingId) {
     e.preventDefault();
@@ -258,10 +281,7 @@ document.addEventListener('keydown', (e) => {
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'x') && !editingId) {
     e.preventDefault();
-    globalThis.BoardfishMotion?.applyActionAnimation?.('cut-selected-objects');
-    (async () => {
-      if (await copySelected()) deleteSelected();
-    })();
+    cutSelected();
     return;
   }
 

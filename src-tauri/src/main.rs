@@ -25,14 +25,14 @@ use app_lifecycle::{
     request_window_close, set_title, show_app_window, startup_file_state, toggle_maximize_window,
 };
 use app_theme::set_app_theme;
-use board_commands::{read_board, save_board, write_debug_log_file, write_text_file};
+use board_commands::{read_board, save_board, write_debug_log_file};
 use clipboard::{
-    clipboard_sequence, copy_image_data_url_to_clipboard_transformed, copy_text_to_clipboard,
+    clipboard_sequence, copy_image_data_url_to_clipboard_transformed,
+    copy_image_key_to_clipboard_transformed, copy_text_to_clipboard,
     read_image_from_clipboard_cached, read_text_from_clipboard,
 };
 use dialogs::{
     open_file_dialog, pick_folder, pick_image_files, save_file_dialog, save_image_file_dialog,
-    save_text_file_dialog,
 };
 use image_source_files::cleanup_stale_image_source_cache;
 use image_sources::{
@@ -76,8 +76,6 @@ fn main() {
             get_startup_file,
             get_window_maximized,
             save_board,
-            save_text_file_dialog,
-            write_text_file,
             write_debug_log_file,
             read_board,
             register_image_file_source,
@@ -108,6 +106,7 @@ fn main() {
             register_transformed_image_source,
             remove_cached_image_sources,
             copy_image_data_url_to_clipboard_transformed,
+            copy_image_key_to_clipboard_transformed,
             read_image_from_clipboard_cached,
             read_text_from_clipboard,
             clear_decoded_image_source_cache,

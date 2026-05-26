@@ -23,8 +23,7 @@
     imageActionsSep: 'obj-sep-image-actions',
     layerActionsSep: 'obj-sep-layer-actions',
     deleteSep: 'obj-sep-delete',
-    flipHorizontalBtn: 'obj-btn-flip-horizontal',
-    flipVerticalBtn: 'obj-btn-flip-vertical',
+    flipBtn: 'obj-btn-flip',
     rotateBtn: 'obj-btn-rotate',
     rubberBand: 'rubber-band',
     addTextBtn: 'btn-add-text',
@@ -32,12 +31,8 @@
     pasteBtn: 'btn-paste',
     textCopyBtn: 'text-btn-copy',
     textPasteBtn: 'text-btn-paste',
-    textCutBtn: 'text-btn-cut',
     textDeleteBtn: 'text-btn-delete',
     textDeleteSep: 'text-sep-delete',
-    exportAllImageBtn: 'btn-export-all-images',
-    exportAllTextBtn: 'btn-export-all-text',
-    exportAllSep: 'ctx-sep-export-all',
   });
 
   function requireElement(id) {

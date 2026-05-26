@@ -165,13 +165,6 @@ pub(crate) async fn read_board(
     })
 }
 
-#[tauri::command]
-pub(crate) async fn write_text_file(path: String, text: String) -> Result<(), String> {
-    tokio::fs::write(path, text.as_bytes())
-        .await
-        .map_err(|e| e.to_string())
-}
-
 fn safe_debug_filename(filename: &str) -> String {
     let mut out: String = filename
         .chars()

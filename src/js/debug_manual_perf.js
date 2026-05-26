@@ -3,17 +3,287 @@
 var ManualPerfDebug = (() => {
   let lastReport = null;
   let lastJson = '';
+  let sessionStartMemory = null;
   const markers = [];
 
+  function boardObjects() {
+    return typeof objects === 'undefined' ? [] : objects;
+  }
+
   function imageCount() {
-    return (typeof objects === 'undefined' ? [] : objects).filter(obj => obj?.type === 'image').length;
+    return boardObjects().filter(obj => obj?.type === 'image').length;
+  }
+
+  function round(value, places = 2) {
+    const factor = 10 ** places;
+    return Math.round((Number(value) || 0) * factor) / factor;
+  }
+
+  function mb(bytes) {
+    return round((Number(bytes) || 0) / 1024 / 1024);
+  }
+
+  function estimateDataUrlBytes(value) {
+    if (typeof value !== 'string') return 0;
+    const comma = value.indexOf(',');
+    if (comma < 0) return value.length;
+    const header = value.slice(0, comma).toLowerCase();
+    const payload = value.slice(comma + 1);
+    if (!header.includes(';base64')) return payload.length;
+    const compact = payload.replace(/\s+/g, '');
+    const padding = compact.endsWith('==') ? 2 : compact.endsWith('=') ? 1 : 0;
+    return Math.max(0, Math.floor(compact.length * 3 / 4) - padding);
+  }
+
+  function sourceKind(source) {
+    if (typeof source === 'string') return source.startsWith('data:') ? 'data-url' : 'string';
+    if (typeof isNativeImageRef === 'function' && isNativeImageRef(source)) return 'native-ref';
+    if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return 'web-ref';
+    if (source && typeof source === 'object') return source.native ? 'native-ref' : 'object-ref';
+    return 'missing';
+  }
+
+  function sourceApproxBytes(source) {
+    if (typeof source === 'string') return estimateDataUrlBytes(source);
+    if (!source || typeof source !== 'object') return 0;
+    return Number(source.bytes ?? source.size ?? source.fileSize ?? 0) || 0;
+  }
+
+  function drawableRgbaBytes(source) {
+    const width = Number(source?.width || source?.naturalWidth || 0);
+    const height = Number(source?.height || source?.naturalHeight || 0);
+    return width > 0 && height > 0 ? width * height * 4 : 0;
+  }
+
+  function safeObjectKeys(value) {
+    return value && typeof value === 'object' ? Object.keys(value) : [];
+  }
+
+  function boardImageMemorySummary(options = {}) {
+    const store = typeof imageStore === 'undefined' ? {} : imageStore;
+    const imgCache = typeof imageCache === 'undefined' ? {} : imageCache;
+    const bitmapCache = typeof imageBitmapCache === 'undefined' ? {} : imageBitmapCache;
+    const assetCache = typeof imageAssetUrlCache === 'undefined' ? {} : imageAssetUrlCache;
+    const keys = new Set([
+      ...safeObjectKeys(store),
+      ...safeObjectKeys(imgCache),
+      ...safeObjectKeys(bitmapCache),
+      ...safeObjectKeys(assetCache),
+    ]);
+    const rows = [];
+    let sourceBytes = 0;
+    let imageElementBytes = 0;
+    let bitmapBytes = 0;
+    let loadedImageElements = 0;
+    let bitmapCount = 0;
+    let nativeRefs = 0;
+    let dataUrls = 0;
+    let assetUrls = 0;
+
+    for (const key of keys) {
+      const source = store[key];
+      const image = imgCache[key];
+      const bitmap = bitmapCache[key];
+      const sourceBytesForKey = sourceApproxBytes(source);
+      const imageElementBytesForKey = drawableRgbaBytes(image);
+      const bitmapBytesForKey = drawableRgbaBytes(bitmap);
+      const kind = sourceKind(source);
+      sourceBytes += sourceBytesForKey;
+      imageElementBytes += imageElementBytesForKey;
+      bitmapBytes += bitmapBytesForKey;
+      if (imageElementBytesForKey > 0) loadedImageElements++;
+      if (bitmapBytesForKey > 0) bitmapCount++;
+      if (kind === 'native-ref') nativeRefs++;
+      if (kind === 'data-url') dataUrls++;
+      if (assetCache[key]) assetUrls++;
+      rows.push({
+        key,
+        kind,
+        sourceMB: mb(sourceBytesForKey),
+        imageElementMB: mb(imageElementBytesForKey),
+        bitmapMB: mb(bitmapBytesForKey),
+        totalEstimateMB: mb(sourceBytesForKey + imageElementBytesForKey + bitmapBytesForKey),
+        imageW: image?.naturalWidth || image?.width || 0,
+        imageH: image?.naturalHeight || image?.height || 0,
+        bitmapW: bitmap?.width || 0,
+        bitmapH: bitmap?.height || 0,
+        hasAssetUrl: !!assetCache[key],
+      });
+    }
+
+    rows.sort((a, b) => b.totalEstimateMB - a.totalEstimateMB || b.sourceMB - a.sourceMB);
+    const rowLimit = Math.max(0, Math.min(200, Number(options.rowLimit ?? options.limit ?? 20)));
+    const out = {
+      imageObjectCount: imageCount(),
+      imageStoreKeys: safeObjectKeys(store).length,
+      cacheKeys: keys.size,
+      nativeRefs,
+      dataUrls,
+      assetUrls,
+      loadedImageElements,
+      bitmapCount,
+      sourceMB: mb(sourceBytes),
+      imageElementDecodedEstimateMB: mb(imageElementBytes),
+      bitmapEstimateMB: mb(bitmapBytes),
+      displayDecodedEstimateMB: mb(imageElementBytes + bitmapBytes),
+      totalLogicalEstimateMB: mb(sourceBytes + imageElementBytes + bitmapBytes),
+      topImages: rows.slice(0, rowLimit),
+    };
+    if (options.table !== false) {
+      console.table([{
+        imageStoreKeys: out.imageStoreKeys,
+        sourceMB: out.sourceMB,
+        imageElementDecodedEstimateMB: out.imageElementDecodedEstimateMB,
+        bitmapEstimateMB: out.bitmapEstimateMB,
+        totalLogicalEstimateMB: out.totalLogicalEstimateMB,
+      }]);
+      if (out.topImages.length) console.table(out.topImages);
+    }
+    return out;
+  }
+
+  function jsHeapSnapshot() {
+    const memory = performance?.memory;
+    if (!memory) return { available: false, reason: 'performance.memory unavailable in this runtime' };
+    return {
+      available: true,
+      usedJSHeapMB: mb(memory.usedJSHeapSize),
+      totalJSHeapMB: mb(memory.totalJSHeapSize),
+      jsHeapLimitMB: mb(memory.jsHeapSizeLimit),
+    };
+  }
+
+  function eyedropperNativeDecodeState() {
+    const warm = typeof indominaterGreedyEyedropperNativeDecodePrewarm !== 'undefined'
+      ? indominaterGreedyEyedropperNativeDecodePrewarm
+      : null;
+    if (!warm) return { available: false };
+    return {
+      available: true,
+      active: warm.active?.size || 0,
+      ready: warm.ready?.size || 0,
+      failed: warm.failed?.size || 0,
+      scheduled: !!warm.scheduled,
+      pendingReasons: warm.pendingReasons ? [...warm.pendingReasons] : [],
+      decoders: Object.fromEntries(Object.entries(warm.decoders || {}).map(([id, decoder]) => [
+        id,
+        { running: !!decoder.running, key: decoder.key || '', mode: decoder.mode || '' },
+      ])),
+    };
+  }
+
+  async function nativeImageSourceCacheSnapshot(options = {}) {
+    if (typeof hasTauri !== 'function' || !hasTauri() || !BoardfishTauri?.imageSourceCacheDebug) {
+      return { available: false, reason: 'tauri image source cache unavailable' };
+    }
+    try {
+      const cache = await BoardfishTauri.imageSourceCacheDebug();
+      const entries = Array.isArray(cache?.entries) ? cache.entries : [];
+      const limit = Math.max(0, Math.min(200, Number(options.nativeEntryLimit ?? options.limit ?? 20)));
+      return {
+        available: true,
+        sourceCount: cache.sourceCount ?? 0,
+        sourceMB: cache.sourceMb ?? cache.sourceMB ?? mb(cache.sourceBytes),
+        sourceBytes: cache.sourceBytes ?? 0,
+        decodedCount: cache.decodedCount ?? 0,
+        decodedMB: cache.decodedMb ?? cache.decodedMB ?? mb(cache.decodedBytes),
+        decodedBytes: cache.decodedBytes ?? 0,
+        decodedUseCounter: cache.decodedUseCounter ?? 0,
+        entries: options.includeNativeEntries === true ? entries : entries.slice(0, limit),
+      };
+    } catch (err) {
+      return { available: false, error: String(err) };
+    }
+  }
+
+  function diffMB(after, before) {
+    const a = Number(after);
+    const b = Number(before);
+    return Number.isFinite(a) && Number.isFinite(b) ? round(a - b) : '';
+  }
+
+  function memoryDelta(start, end) {
+    if (!start || !end) return null;
+    return {
+      jsHeapUsedDeltaMB: diffMB(end.jsHeap?.usedJSHeapMB, start.jsHeap?.usedJSHeapMB),
+      nativeSourceDeltaMB: diffMB(end.nativeImageSourceCache?.sourceMB, start.nativeImageSourceCache?.sourceMB),
+      nativeDecodedDeltaMB: diffMB(end.nativeImageSourceCache?.decodedMB, start.nativeImageSourceCache?.decodedMB),
+      viewportScaleDeltaMB: diffMB(end.viewportScaleCache?.cacheMB, start.viewportScaleCache?.cacheMB),
+      eyedropperSafeScaledDeltaMB: diffMB(end.eyedropperSafeCache?.scaledMB, start.eyedropperSafeCache?.scaledMB),
+      eyedropperTileDeltaMB: diffMB(end.eyedropperSafeCache?.tileCacheMB, start.eyedropperSafeCache?.tileCacheMB),
+      boardSourceDeltaMB: diffMB(end.boardImages?.sourceMB, start.boardImages?.sourceMB),
+      displayDecodedEstimateDeltaMB: diffMB(end.boardImages?.displayDecodedEstimateMB, start.boardImages?.displayDecodedEstimateMB),
+    };
+  }
+
+  function memoryHeadline(snapshot = {}) {
+    return {
+      imageStoreKeys: snapshot.boardImages?.imageStoreKeys ?? '',
+      boardSourceMB: snapshot.boardImages?.sourceMB ?? '',
+      displayDecodedEstimateMB: snapshot.boardImages?.displayDecodedEstimateMB ?? '',
+      jsHeapUsedMB: snapshot.jsHeap?.usedJSHeapMB ?? '',
+      nativeSourceMB: snapshot.nativeImageSourceCache?.sourceMB ?? '',
+      nativeDecodedMB: snapshot.nativeImageSourceCache?.decodedMB ?? '',
+      nativeDecodedCount: snapshot.nativeImageSourceCache?.decodedCount ?? '',
+      viewportScaleCacheMB: snapshot.viewportScaleCache?.cacheMB ?? '',
+      viewportScaleVariants: snapshot.viewportScaleCache?.variants ?? '',
+      eyedropperSafeImages: snapshot.eyedropperSafeCache?.cached ?? '',
+      eyedropperSafeScaledMB: snapshot.eyedropperSafeCache?.scaledMB ?? '',
+      eyedropperTileMB: snapshot.eyedropperSafeCache?.tileCacheMB ?? '',
+      nativeDecodeWarmReady: snapshot.eyedropperNativeDecode?.ready ?? '',
+      nativeDecodeWarmActive: snapshot.eyedropperNativeDecode?.active ?? '',
+    };
+  }
+
+  async function memorySnapshot(label = 'memory', options = {}) {
+    const viewportScaleCache = BoardfishDebug.viewport?.imageScaleCacheSummary
+      ? BoardfishDebug.viewport.imageScaleCacheSummary({ table: false })
+      : null;
+    const eyedropperSafeCache = BoardfishDebug.eyedropper?.safeImageCacheSummary
+      ? BoardfishDebug.eyedropper.safeImageCacheSummary({ table: false })
+      : null;
+    const out = {
+      label,
+      at: new Date().toISOString(),
+      t: round(performance.now()),
+      objectCount: boardObjects().length,
+      imageCount: imageCount(),
+      textCount: boardObjects().filter(obj => obj?.type === 'text').length,
+      zoom: typeof zoom !== 'undefined' ? round(zoom, 4) : '',
+      panX: typeof panX !== 'undefined' ? round(panX) : '',
+      panY: typeof panY !== 'undefined' ? round(panY) : '',
+      jsHeap: jsHeapSnapshot(),
+      boardImages: boardImageMemorySummary({ ...options, table: false }),
+      nativeImageSourceCache: await nativeImageSourceCacheSnapshot(options),
+      viewportScaleCache,
+      eyedropperSafeCache,
+      eyedropperNativeDecode: eyedropperNativeDecodeState(),
+      eyedropperRuntime: BoardfishDebug.eyedropper?.state ? BoardfishDebug.eyedropper.state({ table: false }) : null,
+      viewportPerfMode: BoardfishDebug.viewport?.perfMode ? BoardfishDebug.viewport.perfMode() : null,
+    };
+    out.headline = memoryHeadline(out);
+    if (options.table !== false) {
+      console.group(`[Boardfish perf] memory ${label}`);
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
   }
 
   function headline(report) {
     const viewport = report.viewport || {};
     const eyedropper = report.eyedropper?.totals || {};
+    const memory = report.memoryEnd || report.memory || {};
+    const mem = memoryHeadline(memory);
     return {
       imageCount: report.imageCount,
+      boardSourceMB: mem.boardSourceMB,
+      nativeDecodedMB: mem.nativeDecodedMB,
+      nativeDecodedCount: mem.nativeDecodedCount,
+      viewportScaleCacheMB: mem.viewportScaleCacheMB,
+      eyedropperSafeScaledMB: mem.eyedropperSafeScaledMB,
+      jsHeapUsedMB: mem.jsHeapUsedMB,
       viewportFrames: viewport.frameSummary?.frames ?? '',
       viewportSlowFrames: viewport.frameSummary?.slowFramesOver16ms ?? '',
       viewportMaxFrameMs: viewport.frameSummary?.maxFrameMs ?? '',
@@ -36,27 +306,34 @@ var ManualPerfDebug = (() => {
     };
   }
 
-  function begin(options = {}) {
+  async function begin(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
       console.warn('[Boardfish perf] Debug tools are disabled in this build.');
       return null;
     }
-    BoardfishDebug.viewport.enable({ verbose: false });
+    BoardfishDebug.viewport.enable({
+      verbose: false,
+      rawInput: options.rawInput !== false,
+      eventLoopGapThresholdMs: options.eventLoopGapThresholdMs,
+    });
     BoardfishDebug.eyedropper.enable({ verbose: false });
     BoardfishDebug.viewport.reset();
     BoardfishDebug.eyedropper.reset();
     markers.length = 0;
+    sessionStartMemory = options.memory === false ? null : await memorySnapshot('begin', { ...options, table: false });
     if (typeof setEyedropperPreviewDiagnosticsEnabled === 'function') {
       setEyedropperPreviewDiagnosticsEnabled(options.previewDiagnostics === true);
     }
     const out = {
       startedAt: new Date().toISOString(),
       imageCount: imageCount(),
-      objectCount: objects.length,
+      objectCount: boardObjects().length,
       previewDiagnostics: options.previewDiagnostics === true,
+      rawInput: options.rawInput !== false,
+      memoryStart: sessionStartMemory,
     };
-    console.info('[Boardfish perf] Manual session started. Run the interaction, then call finishDebug({ perf: ["report"] }), finishDebug({ perf: ["zoomReport"] }), or finishDebug({ perf: ["panningReport"] }).');
-    console.table([out]);
+    console.info('[Boardfish perf] Manual session started. Run the interaction, then call finishDebug({ perf: ["benchmarkReport"] }) or finishDebug({ perf: ["memoryReport"] }).');
+    console.table([{ ...out, memoryStart: sessionStartMemory ? 'captured' : 'disabled' }]);
     return out;
   }
 
@@ -152,7 +429,7 @@ var ManualPerfDebug = (() => {
       label: 'manual-eyedropper-viewport-perf',
       reportedAt: new Date().toISOString(),
       imageCount: imageCount(),
-      objectCount: objects.length,
+      objectCount: boardObjects().length,
       viewport: BoardfishDebug.viewport.report({ log: false, details: options.details === true, limit: options.limit || 12 }),
       eyedropper: eyedropperReport,
       markers: markers.slice(),
@@ -195,6 +472,91 @@ var ManualPerfDebug = (() => {
       console.warn('[Boardfish perf] Clipboard copy failed. JSON was printed above and finishDebug() will include perf.lastJson.', err);
       return text;
     }
+  }
+
+  async function memoryReport(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    const memory = await memorySnapshot(options.label || 'memory-report', options);
+    const out = {
+      label: options.label || 'manual-memory-report',
+      reportedAt: new Date().toISOString(),
+      memoryStart: sessionStartMemory,
+      memoryEnd: memory,
+      memoryDelta: memoryDelta(sessionStartMemory, memory),
+    };
+    out.headline = {
+      ...memory.headline,
+      ...(out.memoryDelta || {}),
+    };
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] memory report');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    if (options.copy === true) void copyLast();
+    return out;
+  }
+
+  async function benchmarkReport(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    const memoryEnd = await memorySnapshot('finish', { ...options, table: false });
+    const eyedropperReport = BoardfishDebug.eyedropper.report({
+      log: false,
+      samples: options.samples ?? options.sampleLimit ?? 120,
+      slow: options.slow ?? options.slowLimit ?? 80,
+      failures: options.failures ?? options.failureLimit ?? 30,
+      timeline: options.timeline ?? 160,
+      nativePixel: options.nativePixel ?? 80,
+      safeImages: options.safeImages ?? 120,
+      frameGaps: options.frameGaps ?? 40,
+      longTasks: options.longTasks ?? 40,
+    });
+    const viewport = BoardfishDebug.viewport.report({
+      log: false,
+      details: options.details === true,
+      limit: options.limit || 30,
+      eventLoopLimit: options.eventLoopLimit ?? 120,
+      rawInputLimit: options.rawInputLimit ?? 180,
+      slowFrames: options.slowFrames ?? 40,
+    });
+    const out = {
+      label: options.label || 'current-eyedropper-pan-zoom-benchmark',
+      reportedAt: new Date().toISOString(),
+      imageCount: imageCount(),
+      objectCount: boardObjects().length,
+      viewport,
+      eyedropper: eyedropperReport,
+      memoryStart: sessionStartMemory,
+      memoryEnd,
+      memoryDelta: memoryDelta(sessionStartMemory, memoryEnd),
+      markers: markers.slice(),
+    };
+    out.headline = {
+      ...headline(out),
+      ...(out.memoryDelta || {}),
+    };
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] current eyedropper + pan/zoom benchmark');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    if (options.copy !== false) void copyLast();
+    if (options.previewDiagnostics === false && typeof setEyedropperPreviewDiagnosticsEnabled === 'function') {
+      setEyedropperPreviewDiagnosticsEnabled(false);
+    }
+    return out;
   }
 
   function animationFrame() {
@@ -464,7 +826,7 @@ var ManualPerfDebug = (() => {
       label: options.label || 'viewport-panning-perf',
       reportedAt: new Date().toISOString(),
       imageCount: imageCount(),
-      objectCount: objects.length,
+      objectCount: boardObjects().length,
       viewport,
       markers: markers.slice(),
     };
@@ -558,7 +920,7 @@ var ManualPerfDebug = (() => {
       label: options.label || 'viewport-zoom-perf',
       reportedAt: new Date().toISOString(),
       imageCount: imageCount(),
-      objectCount: objects.length,
+      objectCount: boardObjects().length,
       zoom,
       panX,
       panY,
@@ -701,6 +1063,10 @@ var ManualPerfDebug = (() => {
     mark,
     resetPhase,
     report,
+    benchmarkReport,
+    memorySnapshot,
+    memoryReport,
+    boardImageMemorySummary,
     eyedropperInitialPreviewTest,
     eyedropperContinuousPreviewTest,
     colorpickerZoomReport,

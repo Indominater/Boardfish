@@ -348,8 +348,7 @@ body[data-theme="dark"] .window-control-close:active {
   pointer-events: all;
   transition:
     background-color var(--smooth-slide-duration) var(--smooth-slide-ease),
-    box-shadow var(--smooth-slide-duration) var(--smooth-slide-ease),
-    transform var(--smooth-slide-duration) var(--smooth-slide-ease);
+    box-shadow var(--smooth-slide-duration) var(--smooth-slide-ease);
 }
 .s-handle[data-dir="nw"] { top: -4px;    left: -4px;   cursor: nw-resize; }
 .s-handle[data-dir="ne"] { top: -4px;    right: -4px;  cursor: ne-resize; }
@@ -359,16 +358,6 @@ body[data-theme="dark"] .window-control-close:active {
 .s-handle[data-dir="e"]  { top: 50%; right: -4px; transform: translateY(-50%); cursor: ew-resize; }
 #sel-overlay:not(.editing) .s-handle:hover {
   box-shadow: var(--selection-handle-shadow);
-}
-#sel-overlay:not(.editing) .s-handle[data-dir="nw"]:hover,
-#sel-overlay:not(.editing) .s-handle[data-dir="ne"]:hover,
-#sel-overlay:not(.editing) .s-handle[data-dir="sw"]:hover,
-#sel-overlay:not(.editing) .s-handle[data-dir="se"]:hover {
-  transform: scale(1.35);
-}
-#sel-overlay:not(.editing) .s-handle[data-dir="w"]:hover,
-#sel-overlay:not(.editing) .s-handle[data-dir="e"]:hover {
-  transform: translateY(-50%) scale(1.35);
 }
 
 #multi-sel-overlay {

@@ -189,8 +189,8 @@ test('text editing context menu uses text actions before object actions', () => 
   const textMenuEnd = indexSource.indexOf('<input type="file"', textMenuStart);
   const textMenu = indexSource.slice(textMenuStart, textMenuEnd);
   assert.ok(textMenu.indexOf('id="text-btn-copy"') < textMenu.indexOf('id="text-btn-paste"'));
-  assert.ok(textMenu.indexOf('id="text-btn-paste"') < textMenu.indexOf('id="text-btn-cut"'));
-  assert.ok(textMenu.indexOf('id="text-btn-cut"') < textMenu.indexOf('id="text-sep-delete"'));
+  assert.equal(textMenu.indexOf('id="text-btn-cut"'), -1);
+  assert.ok(textMenu.indexOf('id="text-btn-paste"') < textMenu.indexOf('id="text-sep-delete"'));
   assert.ok(textMenu.indexOf('id="text-sep-delete"') < textMenu.indexOf('id="text-btn-delete"'));
 });
 

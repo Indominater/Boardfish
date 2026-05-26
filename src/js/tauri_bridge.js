@@ -8,6 +8,7 @@
     CLEAR_IMAGE_SOURCE_CACHE: 'clear_image_source_cache',
     CLIPBOARD_SEQUENCE: 'clipboard_sequence',
     COPY_IMAGE_DATA_URL_TO_CLIPBOARD_TRANSFORMED: 'copy_image_data_url_to_clipboard_transformed',
+    COPY_IMAGE_KEY_TO_CLIPBOARD_TRANSFORMED: 'copy_image_key_to_clipboard_transformed',
     COPY_TEXT_TO_CLIPBOARD: 'copy_text_to_clipboard',
     EXIT_APP: 'exit_app',
     GET_WINDOW_MAXIMIZED: 'get_window_maximized',
@@ -33,14 +34,12 @@
     SAVE_FILE_DIALOG: 'save_file_dialog',
     SAVE_IMAGE_FILE_DIALOG: 'save_image_file_dialog',
     SAVE_IMAGES_TO_EXISTING_FOLDER_BY_KEYS: 'save_images_to_existing_folder_by_keys',
-    SAVE_TEXT_FILE_DIALOG: 'save_text_file_dialog',
     SET_APP_THEME: 'set_app_theme',
     SET_TITLE: 'set_title',
     SHOW_APP_WINDOW: 'show_app_window',
     TOGGLE_MAXIMIZE_WINDOW: 'toggle_maximize_window',
     WRITE_IMAGE_FILE_BY_KEY: 'write_image_file_by_key',
     WRITE_DEBUG_LOG_FILE: 'write_debug_log_file',
-    WRITE_TEXT_FILE: 'write_text_file',
   });
 
   function hasTauri() {
@@ -152,9 +151,6 @@
     saveImagesToExistingFolderByKeys(folder, imgKeys) {
       return tauriInvoke(TAURI_COMMANDS.SAVE_IMAGES_TO_EXISTING_FOLDER_BY_KEYS, { folder, imgKeys });
     },
-    saveTextFileDialog() {
-      return tauriInvoke(TAURI_COMMANDS.SAVE_TEXT_FILE_DIALOG);
-    },
     setAppTheme(theme) {
       return tauriInvoke(TAURI_COMMANDS.SET_APP_THEME, { theme });
     },
@@ -173,14 +169,14 @@
     writeDebugLogFile(filename, json) {
       return tauriInvoke(TAURI_COMMANDS.WRITE_DEBUG_LOG_FILE, { filename, json });
     },
-    writeTextFile(path, text) {
-      return tauriInvoke(TAURI_COMMANDS.WRITE_TEXT_FILE, { path, text });
-    },
     copyTextToClipboard(text) {
       return tauriInvoke(TAURI_COMMANDS.COPY_TEXT_TO_CLIPBOARD, { text });
     },
     copyImageDataUrlToClipboardTransformed({ dataUrl, flipX, flipY, rotation }) {
       return tauriInvoke(TAURI_COMMANDS.COPY_IMAGE_DATA_URL_TO_CLIPBOARD_TRANSFORMED, { dataUrl, flipX, flipY, rotation });
+    },
+    copyImageKeyToClipboardTransformed({ imgKey, flipX, flipY, rotation }) {
+      return tauriInvoke(TAURI_COMMANDS.COPY_IMAGE_KEY_TO_CLIPBOARD_TRANSFORMED, { imgKey, flipX, flipY, rotation });
     },
     clipboardSequence() {
       return tauriInvoke(TAURI_COMMANDS.CLIPBOARD_SEQUENCE);

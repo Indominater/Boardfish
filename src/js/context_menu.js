@@ -173,20 +173,16 @@ var MENU_COMMANDS = {
   'btn-save': () => { closeCtxMenu('command:save'); saveBoard(); },
   'btn-save-as': () => { closeCtxMenu('command:save-as'); saveBoardAs(); },
   'btn-open': () => { closeCtxMenu('command:open'); openBoard(); },
-  'btn-export-all-images': () => { closeCtxMenu('command:export-all-images'); showInputShield(); exportAllImages(); },
-  'btn-export-all-text': () => { closeCtxMenu('command:export-all-text'); exportAllText(); },
   'obj-btn-copy': () => { closeObjCtxMenu('command:copy'); copySelected(); },
   'obj-btn-delete': () => { closeObjCtxMenu('command:delete'); deleteSelected(); },
   'obj-btn-duplicate': () => { closeObjCtxMenu('command:duplicate'); duplicateSelected(); },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
-  'obj-btn-flip-horizontal': () => { flipSelectedImages('x'); },
-  'obj-btn-flip-vertical': () => { flipSelectedImages('y'); },
+  'obj-btn-flip': () => { flipSelectedImages(); },
   'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
   'obj-btn-save-image': () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); },
   'obj-btn-save-images': () => { closeObjCtxMenu('command:save-images'); showInputShield({ keepSelectionOverlay: true }); saveSelectedImages(); },
   'text-btn-copy': () => { closeTextCtxMenu('command:copy'); copyTextEditSelection(); },
   'text-btn-paste': () => { closeTextCtxMenu('command:paste'); pasteTextIntoEditSelection(); },
-  'text-btn-cut': () => { closeTextCtxMenu('command:cut'); cutTextEditSelection(); },
   'text-btn-delete': () => { closeTextCtxMenu('command:delete'); deleteTextEditSelection(); },
 };
 
@@ -560,8 +556,7 @@ function updateObjMenuActions() {
   const showDelete = selectedCount >= 1;
   if (copyBtn) copyBtn.style.display = '';
   if (imageActionsSep) imageActionsSep.style.display = showImageActions ? 'block' : 'none';
-  if (flipHorizontalBtn) flipHorizontalBtn.style.display = showImageActions ? '' : 'none';
-  if (flipVerticalBtn) flipVerticalBtn.style.display = showImageActions ? '' : 'none';
+  if (flipBtn) flipBtn.style.display = showImageActions ? '' : 'none';
   if (rotateBtn) rotateBtn.style.display = showImageActions ? '' : 'none';
   if (layerActionsSep) layerActionsSep.style.display = showLayerActions ? 'block' : 'none';
   if (moveToBackBtn) moveToBackBtn.style.display = showLayerActions ? '' : 'none';
@@ -584,27 +579,15 @@ const updateTextEditMenuActions = async () => {
   const showPaste = clipboardText.length > 0;
   BoardfishDOM.textCopyBtn.style.display = hasSelection ? '' : 'none';
   BoardfishDOM.textPasteBtn.style.display = showPaste ? '' : 'none';
-  BoardfishDOM.textCutBtn.style.display = hasSelection ? '' : 'none';
   BoardfishDOM.textDeleteSep.style.display = hasSelection ? 'block' : 'none';
   BoardfishDOM.textDeleteBtn.style.display = hasSelection ? '' : 'none';
   return hasSelection || showPaste;
 };
 
 function updateCtxMenuActions() {
-  let hasImages = false;
-  let hasText = false;
-  for (const o of objects) {
-    if (o.type === 'image') hasImages = true;
-    else if (o.type === 'text') hasText = true;
-    if (hasImages && hasText) break;
-  }
-  const show = hasImages || hasText;
   const canAddObject = BoardfishWebLimits.canAddObjects(1, { notifyUser: false });
   if (addTextBtn) addTextBtn.disabled = !canAddObject;
   if (addImageBtn) addImageBtn.disabled = !canAddObject;
-  if (exportAllTextBtn) exportAllTextBtn.style.display = show && hasText ? '' : 'none';
-  if (exportAllImageBtn) exportAllImageBtn.style.display = show && hasImages ? '' : 'none';
-  if (exportAllSep) exportAllSep.style.display = show ? 'block' : 'none';
 }
 
 const showTextEditContextMenuAt = async (clientX, clientY) => {
