@@ -97,7 +97,7 @@
     const event = _eyedropperLatestPointerEvent || _eyedropperLastSampleEvent || _eyedropperLastMouseEvent;
     if (!event || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null;
     const point = clientToBoardWorldPoint(event.clientX, event.clientY);
-    const topObject = topObjectAtWorldPoint(point);
+    const topObject = topObjectAtWorldPoint(point, objects, isEyedropperSampleObject);
     if (topObject?.type !== 'image') return null;
     if (!isEyedropperDecodeCandidate(topObject)) return null;
     const key = topObject.data.imgKey;

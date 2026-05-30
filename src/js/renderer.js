@@ -207,6 +207,7 @@
       const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
       const view = options.view || viewDefaults();
       const imageSourceResolver = options.imageSourceResolver || null;
+      const skipText = options.skipText === true;
       const objectMotionForDraw = typeof deps.objectMotionForDraw === 'function' ? deps.objectMotionForDraw : null;
       const motionObjectsForDraw = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw : null;
       const cullingEnabled = deps.viewportCullingEnabled();
@@ -215,6 +216,7 @@
       const drawObject = (obj, countObject = true) => {
         if (countObject && counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
         if (obj.id === skipId) return;
+        if (skipText && obj.type === 'text') return;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect)) {
           if (countObject) countCulledObject(obj, counters);
           return;

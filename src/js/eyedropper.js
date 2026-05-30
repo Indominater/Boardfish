@@ -20,6 +20,7 @@ globalThis.screenToBoardWorldPoint = EyedropperGeometry.screenToBoardWorldPoint;
 globalThis.topObjectAtWorldPoint = EyedropperGeometry.topObjectAtWorldPoint;
 globalThis.worldPointToImageLocalUnit = EyedropperGeometry.worldPointToImageLocalUnit;
 
+const isEyedropperSampleObject = (obj) => obj?.type !== 'text';
 function cssPx(value) {
   const px = Number.parseFloat(value);
   return Number.isFinite(px) ? px : 0;
@@ -623,6 +624,7 @@ function captureEyedropperZoomWallpaper(geometry, renderSize) {
     const drawn = drawVisibleObjects(eyedropperZoomWallpaperCtx, counters, {
       viewportRect: geometry.viewportRect,
       view: geometry.view,
+      skipText: true,
     });
     resetCanvasToScreen(eyedropperZoomWallpaperCtx);
     if (previousViewportCullingEnabled === false) viewportCullingEnabled = false;
@@ -884,6 +886,7 @@ function renderEyedropperLocalReadoutPixel(clientX, clientY) {
       viewportRect,
       view,
       imageSourceResolver: selectEyedropperSafeImageSourceForDraw,
+      skipText: true,
     });
     timings.localReadoutDraw = performance.now() - drawStart;
     const resetStart = performance.now();
@@ -1135,7 +1138,7 @@ const logEyedropperNativePixelResolveMiss = (reason, meta = {}) => {
 const resolveEyedropperImageReadoutTargetAt = (clientX, clientY, timings = null) => {
   const hitStart = performance.now();
   const point = clientToBoardWorldPoint(clientX, clientY);
-  const topObject = topObjectAtWorldPoint(point);
+  const topObject = topObjectAtWorldPoint(point, objects, isEyedropperSampleObject);
   if (timings) timings.cachedPixelHitTest = performance.now() - hitStart;
   if (!topObject) return { kind: 'background' };
   if (topObject.type !== 'image') return { kind: 'other', object: topObject };
@@ -1164,7 +1167,7 @@ function resolveEyedropperNativePixelTargetAt(clientX, clientY, timings = null) 
   };
   const hitStart = performance.now();
   const point = clientToBoardWorldPoint(clientX, clientY);
-  const topObject = topObjectAtWorldPoint(point);
+  const topObject = topObjectAtWorldPoint(point, objects, isEyedropperSampleObject);
   if (timings) timings.nativePixelResolveHitTest = performance.now() - hitStart;
   if (!topObject) return miss('empty-board');
   if (topObject.type !== 'image') return miss('top-object-not-image', {

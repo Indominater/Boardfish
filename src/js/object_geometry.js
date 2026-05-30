@@ -70,9 +70,10 @@
       return point.x >= obj.x && point.x <= obj.x + obj.w && point.y >= obj.y && point.y <= obj.y + obj.h;
     }
 
-    function topObjectAtWorldPoint(point, objectsList = deps.objects()) {
+    function topObjectAtWorldPoint(point, objectsList = deps.objects(), predicate = null) {
       for (let i = objectsList.length - 1; i >= 0; i--) {
         const obj = objectsList[i];
+        if (predicate && !predicate(obj)) continue;
         if (objectContainsWorldPoint(obj, point)) return obj;
       }
       return null;

@@ -469,6 +469,7 @@ test('eyedropper readout resolves safe scaled variants independently of the prev
 
   assert.match(source, /function renderEyedropperLocalReadoutPixel\(clientX, clientY\)/);
   assert.match(source, /imageSourceResolver: selectEyedropperSafeImageSourceForDraw/);
+  assert.match(source, /imageSourceResolver: selectEyedropperSafeImageSourceForDraw,\s*skipText: true,/);
   assert.match(source, /const scaleVariantsEnabled = typeof isViewportImageScalingActive === 'function'/);
   assert.match(source, /targetScale: scaleVariantsEnabled \? chooseImageScaleForDraw\(obj, source, view\) : 1/);
 });
@@ -488,6 +489,9 @@ test('eyedropper readout samples rendered canvas-visible pixels', () => {
   assert.match(source, /const eyedropperSourcePixelFromLocalUnit = \(unit, sourceSize\) =>/);
   assert.match(source, /Math\.floor\(\(Number\.isFinite\(unit\) \? unit : 0\) \* size\)/);
   assert.match(source, /const resolveEyedropperImageReadoutTargetAt = \(clientX, clientY, timings = null\) =>/);
+  assert.match(source, /const isEyedropperSampleObject = \(obj\) => obj\?\.type !== 'text';/);
+  assert.match(source, /topObjectAtWorldPoint\(point, objects, isEyedropperSampleObject\)/);
+  assert.match(decodeWarmersSource, /topObjectAtWorldPoint\(point, objects, isEyedropperSampleObject\)/);
   assert.match(source, /const displayImg = imageBitmapCache\[key\] \|\| imageCache\[key\];/);
   assert.match(source, /sourceKind = displayImg === imageBitmapCache\[key\] \? 'bitmap-cache' : 'display-cache'/);
   assert.match(source, /if \(typeof isWebImageRef === 'function' && isWebImageRef\(stored\)\) return \['web'/);
@@ -638,7 +642,7 @@ test('eyedropper preview uses viewport-style rendered-board wallpaper while acti
   assert.match(source, /panY: sampleDotCenterY \/ dpr - worldPoint\.y \* previewZoom/);
   assert.match(source, /const wallpaper = captureEyedropperZoomedWallpaper\(clientX, clientY, renderSize, \{ geometry \}\)/);
   assert.match(source, /function captureEyedropperZoomWallpaper\(geometry, renderSize\)/);
-  assert.match(source, /drawVisibleObjects\(eyedropperZoomWallpaperCtx, counters, \{\s*viewportRect: geometry\.viewportRect,\s*view: geometry\.view,\s*\}\)/);
+  assert.match(source, /drawVisibleObjects\(eyedropperZoomWallpaperCtx, counters, \{\s*viewportRect: geometry\.viewportRect,\s*view: geometry\.view,\s*skipText: true,\s*\}\)/);
   assert.doesNotMatch(source, /function selectEyedropperPreviewImageSourceForDraw/);
   assert.doesNotMatch(source, /imageSourceResolver: selectEyedropperPreviewImageSourceForDraw/);
   assert.doesNotMatch(source, /visualFallback: true/);

@@ -342,8 +342,8 @@ function setWorldCanvasTransform(context, dpr = window.devicePixelRatio || 1, vi
   return BoardRenderer.setWorldCanvasTransform(context, dpr, view);
 }
 
-function drawVisibleObjects(context, counters, { skipId = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null } = {}) {
-  return BoardRenderer.drawVisibleObjects(context, counters, { skipId, viewportRect, view, imageSourceResolver });
+function drawVisibleObjects(context, counters, { skipId = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null, skipText = false } = {}) {
+  return BoardRenderer.drawVisibleObjects(context, counters, { skipId, viewportRect, view, imageSourceResolver, skipText });
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {

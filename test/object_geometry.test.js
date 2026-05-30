@@ -66,3 +66,13 @@ test('finds topmost object using shared hit-testing rules', () => {
   assert.equal(geometry.topObjectAtWorldPoint({ x: 5, y: 5 }), bottom);
   assert.equal(geometry.topObjectAtWorldPoint({ x: 200, y: 200 }), null);
 });
+
+test('topmost object hit-test can ignore filtered objects', () => {
+  const image = { id: 'image', type: 'image', x: 0, y: 0, w: 100, h: 100 };
+  const text = { id: 'text', type: 'text', x: 20, y: 20, w: 20, h: 20 };
+  const geometry = createGeometry({ objects: () => [image, text] });
+  assert.equal(
+    geometry.topObjectAtWorldPoint({ x: 25, y: 25 }, undefined, obj => obj.type !== 'text'),
+    image,
+  );
+});
