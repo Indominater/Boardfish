@@ -6,7 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadTextLayout() {
+const plain = (value) => JSON.parse(JSON.stringify(value));
+
+function loadTextLayout({ measureWidth = (text) => String(text).length } = {}) {
   const measured = [];
   const context = {
     document: {
@@ -19,7 +21,7 @@ function loadTextLayout() {
               measureText(text) {
                 measured.push(String(text));
                 return {
-                  width: String(text).length,
+                  width: measureWidth(String(text)),
                   actualBoundingBoxAscent: 12,
                   actualBoundingBoxDescent: 4,
                 };
@@ -43,6 +45,11 @@ function loadTextLayout() {
   vm.runInContext(
     `globalThis.__testTextLayout = {
       measureTextW,
+      getTextMinWidthWordSegment,
+      getTextMinWidth,
+      getTextLayout,
+      getTextRenderedContentWidth,
+      fitTextObjectWidthToRenderedContent,
       clearTextLayoutCaches,
       get cache() { return _mwCache; },
       maxEntries: TEXT_MEASURE_CACHE_MAX_ENTRIES,
@@ -85,4 +92,189 @@ test('text measurement cache clears with other measurement caches', () => {
   textLayout.clearTextLayoutCaches({ measurements: true });
 
   assert.equal(textLayout.cache.size, 0);
+});
+
+test('text minimum width uses the widest rendered word, not character count', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return [...String(text)].reduce((sum, ch) => {
+        if (ch === 'W') return sum + 12;
+        if (ch === 'i') return sum + 2;
+        if (ch === ' ') return sum + 4;
+        return sum + 6;
+      }, 0);
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'iiiiiiii WWW' },
+  };
+
+  assert.equal(textLayout.getTextMinWidth(obj), 45);
+});
+
+test('text minimum width includes leading indentation before the first word', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return [...String(text)].reduce((sum, ch) => sum + (ch === ' ' ? 4 : 6), 0);
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'Boardfish\n    Boardfish indentation example' },
+  };
+
+  assert.equal(textLayout.getTextMinWidth(obj), 79);
+  assert.deepEqual(plain(textLayout.getTextMinWidthWordSegment(obj)), {
+    text: '    Boardfish',
+    word: 'Boardfish',
+    width: 70,
+    lineIndex: 1,
+    startOffset: 10,
+    endOffset: 23,
+  });
+});
+
+test('text minimum width treats spaces between words as separators', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return [...String(text)].reduce((sum, ch) => sum + (ch === ' ' ? 4 : 6), 0);
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 240,
+    h: 40,
+    data: { content: 'short      coordinate x\n        pixel y' },
+  };
+
+  assert.equal(textLayout.getTextMinWidth(obj), 71);
+  assert.deepEqual(plain(textLayout.getTextMinWidthWordSegment(obj)), {
+    text: '        pixel',
+    word: 'pixel',
+    width: 62,
+    lineIndex: 1,
+    startOffset: 24,
+    endOffset: 37,
+  });
+});
+
+test('soft wrap after a full-width word consumes separator spaces', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 'indominatoer'.length + 8,
+    h: 40,
+    data: { content: 'indominatoer hi' },
+  };
+
+  const lines = textLayout.getTextLayout(obj).map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    caretEndIndex: line.caretEndIndex,
+    nextStartIndex: line.nextStartIndex,
+  }));
+
+  assert.deepEqual(plain(lines), [
+    { text: 'indominatoer', startIndex: 0, endIndex: 12, caretEndIndex: 13, nextStartIndex: 13 },
+    { text: 'hi', startIndex: 13, endIndex: 15, caretEndIndex: 15, nextStartIndex: 15 },
+  ]);
+});
+
+test('caret range stays on the current line for trailing overflow spaces', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 'indominater'.length + 8,
+    h: 40,
+    data: { content: 'indominater    \nhi' },
+  };
+
+  const lines = textLayout.getTextLayout(obj).map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    caretEndIndex: line.caretEndIndex,
+    nextStartIndex: line.nextStartIndex,
+  }));
+
+  assert.deepEqual(plain(lines), [
+    { text: 'indominater', startIndex: 0, endIndex: 11, caretEndIndex: 15, nextStartIndex: 15 },
+    { text: 'hi', startIndex: 16, endIndex: 18, caretEndIndex: 18, nextStartIndex: 18 },
+  ]);
+});
+
+test('trailing overflow spaces keep the last fitting spaces on the caret line', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 'hi  '.length + 8,
+    h: 40,
+    data: { content: 'hi     \nnext' },
+  };
+
+  const lines = textLayout.getTextLayout(obj).map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    caretEndIndex: line.caretEndIndex,
+    nextStartIndex: line.nextStartIndex,
+  }));
+
+  assert.deepEqual(plain(lines), [
+    { text: 'hi  ', startIndex: 0, endIndex: 4, caretEndIndex: 7, nextStartIndex: 7 },
+    { text: 'next', startIndex: 8, endIndex: 12, caretEndIndex: 12, nextStartIndex: 12 },
+  ]);
+});
+
+test('text object width can fit the rendered visible line width', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return [...String(text)].reduce((sum, ch) => sum + (ch === 'H' ? 10 : ch === 'i' ? 3 : 5), 0);
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 80,
+    data: { content: 'Hi' },
+  };
+
+  assert.equal(textLayout.getTextRenderedContentWidth(obj), 22);
+  assert.equal(textLayout.fitTextObjectWidthToRenderedContent(obj), true);
+  assert.equal(obj.w, 22);
+  assert.equal(textLayout.fitTextObjectWidthToRenderedContent(obj), false);
 });

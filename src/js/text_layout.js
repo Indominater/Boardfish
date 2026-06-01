@@ -67,6 +67,10 @@ function measureTextW(text) {
   return widths[widths.length - 1] || 0;
 }
 
+const measureVisibleLineTextW = (text) => {
+  return measureTextW(String(text ?? '').replace(/[ \t]+$/g, ''));
+};
+
 function refreshTextMetrics() {
   _measureCtx.font = FONT;
   _measureCtx.textBaseline = 'alphabetic';
@@ -152,11 +156,12 @@ function getWrappedLines(obj) {
   const result = [];
 
   const isWrapSpace = (ch) => ch === ' ' || ch === '\t';
-  const pushLine = (start, end, nextStart = end) => {
+  const pushLine = (start, end, nextStart = end, caretEnd = end) => {
     result.push({
       text: obj.data.content.slice(start, end),
       startIndex: start,
       endIndex: end,
+      caretEndIndex: caretEnd,
       nextStartIndex: nextStart,
     });
   };
@@ -186,6 +191,7 @@ function getWrappedLines(obj) {
 
         let lineEnd = lo;
         let nextStart = lineEnd;
+        let caretEnd = lineEnd;
         if (lineEnd < paraEnd) {
           let breakAt = -1;
           for (let i = lineEnd; i > lineStart; i--) {
@@ -195,9 +201,15 @@ function getWrappedLines(obj) {
             }
           }
           if (breakAt > lineStart) {
-            lineEnd = breakAt;
             nextStart = breakAt;
             while (nextStart < paraEnd && isWrapSpace(obj.data.content[nextStart])) nextStart++;
+            if (nextStart < paraEnd) {
+              lineEnd = breakAt;
+            }
+            caretEnd = nextStart;
+          } else if (isWrapSpace(obj.data.content[nextStart])) {
+            while (nextStart < paraEnd && isWrapSpace(obj.data.content[nextStart])) nextStart++;
+            caretEnd = nextStart;
           }
         }
 
@@ -205,7 +217,7 @@ function getWrappedLines(obj) {
           lineEnd = Math.min(lineStart + 1, paraEnd);
           nextStart = lineEnd;
         }
-        pushLine(lineStart, lineEnd, nextStart);
+        pushLine(lineStart, lineEnd, nextStart, caretEnd);
         lineStart = nextStart;
       }
     }
@@ -222,6 +234,80 @@ function getWrappedLines(obj) {
 function getTextAutoHeight(obj, minLines = 1) {
   return Math.max(minLines * LINE_H + TEXT_PAD * 2, getWrappedLines(obj).length * LINE_H + TEXT_PAD * 2);
 }
+
+const isTextWordSeparator = (ch) => ch === ' ' || ch === '\t';
+
+const getTextMinWidthWordSegment = (obj) => {
+  const empty = { text: '', word: '', width: 0, lineIndex: -1, startOffset: 0, endOffset: 0 };
+  if (!obj || obj.type !== 'text') return empty;
+
+  const content = normalizeTextContent(obj.data?.content || '');
+  const lines = content.split('\n');
+  let best = empty;
+  let contentOffset = 0;
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    let i = 0;
+    while (i < line.length && isTextWordSeparator(line[i])) i++;
+
+    let isFirstWord = true;
+    while (i < line.length) {
+      if (!isFirstWord) {
+        while (i < line.length && isTextWordSeparator(line[i])) i++;
+        if (i >= line.length) break;
+      }
+
+      const wordStart = i;
+      while (i < line.length && !isTextWordSeparator(line[i])) i++;
+      const wordEnd = i;
+      const segmentStart = isFirstWord ? 0 : wordStart;
+      const text = line.slice(segmentStart, wordEnd);
+      const width = measureTextW(text);
+
+      if (width > best.width) {
+        best = {
+          text,
+          word: line.slice(wordStart, wordEnd),
+          width,
+          lineIndex,
+          startOffset: contentOffset + segmentStart,
+          endOffset: contentOffset + wordEnd,
+        };
+      }
+      isFirstWord = false;
+    }
+
+    contentOffset += line.length + 1;
+  }
+
+  return best;
+};
+
+const getTextMinWidth = (obj) => {
+  if (!obj || obj.type !== 'text') return TEXT_PAD * 2 + 1;
+  return Math.ceil(getTextMinWidthWordSegment(obj).width + TEXT_PAD * 2 + 1);
+};
+
+const getTextRenderedContentWidth = (obj) => {
+  if (!obj || obj.type !== 'text') return TEXT_PAD * 2 + 1;
+  let maxLineW = 0;
+  for (const line of getTextLayout(obj)) {
+    maxLineW = Math.max(maxLineW, measureVisibleLineTextW(line.text));
+  }
+  return Math.max(getTextMinWidth(obj), Math.ceil(maxLineW + TEXT_PAD * 2 + 1));
+};
+
+const fitTextObjectWidthToRenderedContent = (obj) => {
+  if (!obj || obj.type !== 'text') return false;
+  const w = getTextRenderedContentWidth(obj);
+  if (!Number.isFinite(w) || w <= 0 || obj.w === w) return false;
+  obj.w = w;
+  delete obj._layoutCache;
+  delete obj._layoutCacheKey;
+  _linesCacheMap.delete(obj.id);
+  return true;
+};
 
 function syncTextAutoHeight(obj, minLines = 1) {
   if (!obj || obj.type !== 'text') return false;
@@ -254,6 +340,7 @@ function calculateTextLayout(obj) {
       text: line.text,
       startIndex: line.startIndex,
       endIndex: line.endIndex,
+      caretEndIndex: line.caretEndIndex,
       nextStartIndex: line.nextStartIndex,
       y,
       textY: y + TEXT_BASELINE_Y_OFFSET,

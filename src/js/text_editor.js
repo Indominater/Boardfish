@@ -66,6 +66,14 @@ const textEditOutdentLengthAt = (value, lineStart) => {
   return count;
 };
 
+const textEditLineIndentAt = (value, index) => {
+  const text = String(value ?? '');
+  const lineStart = textEditLineStartAt(text, index);
+  let end = lineStart;
+  while (end < text.length && (text[end] === ' ' || text[end] === '\t')) end++;
+  return text.slice(lineStart, end);
+};
+
 const adjustTextEditIndexForRemoval = (index, start, length) => {
   if (index <= start) return index;
   if (index >= start + length) return index - length;
@@ -108,6 +116,27 @@ const applyTextEditLineIndent = (value, selection, { outdent = false } = {}) => 
     start: nextStart,
     end: nextEnd,
     direction: selectionState.direction,
+    changed: nextValue !== text,
+  };
+};
+
+const applyTextEditLineBreakIndent = (value, selection) => {
+  const text = String(value ?? '');
+  const selectionState = {
+    start: Math.max(0, Math.min(selection?.start ?? 0, text.length)),
+    end: Math.max(0, Math.min(selection?.end ?? selection?.start ?? 0, text.length)),
+    direction: selection?.direction || 'none',
+  };
+  const start = Math.min(selectionState.start, selectionState.end);
+  const end = Math.max(selectionState.start, selectionState.end);
+  const insert = '\n' + textEditLineIndentAt(text, start);
+  const nextValue = text.slice(0, start) + insert + text.slice(end);
+  const nextCaret = start + insert.length;
+  return {
+    value: nextValue,
+    start: nextCaret,
+    end: nextCaret,
+    direction: 'none',
     changed: nextValue !== text,
   };
 };
@@ -243,6 +272,24 @@ function enterEdit(id, { history = true } = {}) {
       return;
     }
 
+    if (e.key === 'Enter' && !e.isComposing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const selection = textEditSelectionState(proxy);
+      const lineBreakResult = applyTextEditLineBreakIndent(proxy.value, selection);
+      const inputType = 'insertLineBreak';
+      pendingInputState = {
+        ...selection,
+        inputType,
+      };
+      beginTextEditHistoryAction(id, pendingInputState, {
+        splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
+      });
+      proxy.value = lineBreakResult.value;
+      proxy.setSelectionRange(lineBreakResult.start, lineBreakResult.end, lineBreakResult.direction);
+      dispatchTextEditInputEvent(proxy, inputType);
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && proxy.selectionStart !== proxy.selectionEnd) {
       e.preventDefault();
       copyTextEditSelectionFromProxy(id, proxy);
@@ -283,14 +330,14 @@ function enterEdit(id, { history = true } = {}) {
       let refLineIdx = layout.length - 1;
       for (let i = 0; i < layout.length; i++) {
         const ln = layout[i];
-        if (refPos >= ln.startIndex && refPos <= (ln.endIndex ?? (ln.startIndex + ln.text.length))) {
+        if (refPos >= ln.startIndex && refPos <= (ln.caretEndIndex ?? ln.endIndex ?? (ln.startIndex + ln.text.length))) {
           refLineIdx = i; break;
         }
       }
       const refLine = layout[refLineIdx];
 
       // Caret world-x in the reference line
-      const off = refPos - refLine.startIndex;
+      const off = Math.min(refPos - refLine.startIndex, refLine.text.length);
       const caretX = lineXAtOffset(refLine, obj, off);
 
       // Find nearest position in the target line
@@ -402,12 +449,15 @@ function exitEdit() {
     }
     delete obj._layoutCache;
     delete obj._layoutCacheKey;
+    const widthChanged = obj._editStartContent === '' && typeof fitTextObjectWidthToRenderedContent === 'function'
+      ? fitTextObjectWidthToRenderedContent(obj)
+      : false;
     const heightChanged = syncTextAutoHeight(obj);
-    if (heightChanged) markDirty(id);
+    if (widthChanged || heightChanged) markDirty(id);
     const contentChanged = obj.data.content !== _editHistoryLastContent;
     pushEditHistoryIfChanged(id);
-    if (heightChanged && !contentChanged) pushHistory('text-height-change');
-    if (heightChanged && !contentChanged) globalThis.BoardfishMotion?.applyActionAnimation?.('text-height-change');
+    if ((widthChanged || heightChanged) && !contentChanged) pushHistory('text-height-change');
+    if ((widthChanged || heightChanged) && !contentChanged) globalThis.BoardfishMotion?.applyActionAnimation?.('text-height-change');
     delete obj._editStartContent;
     delete obj._editMinLines;
   }

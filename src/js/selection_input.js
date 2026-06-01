@@ -345,7 +345,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
       if (!obj) return;
 
       const { x: ox, y: oy, w: ow, h: oh } = obj;
-      const MIN = 100;
+      const MIN_OBJECT_SIZE = 100;
 
       function applyResize(state) {
         obj.x = state.x;
@@ -367,16 +367,17 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         let x = ox, y = oy, w = ow, h = oh;
 
         if (obj.type === 'image') {
-          const minScale = Math.min(1, Math.max(MIN / ow, MIN / oh));
+          const minScale = Math.min(1, Math.max(MIN_OBJECT_SIZE / ow, MIN_OBJECT_SIZE / oh));
           const size = proportionalCornerResizeSize(dir, ow, oh, dx, dy, minScale);
           w = size.w;
           h = size.h;
           if (dir.includes('w')) x = ox + ow - w;
           if (dir.includes('n')) y = oy + oh - h;
         } else {
-          if (dir.includes('e')) w = Math.max(MIN, ow + dx);
+          const minTextW = typeof getTextMinWidth === 'function' ? getTextMinWidth(obj) : MIN_OBJECT_SIZE;
+          if (dir.includes('e')) w = Math.max(minTextW, ow + dx);
           h = oh;
-          if (dir.includes('w')) { w = Math.max(MIN, ow - dx); x = ox + ow - w; }
+          if (dir.includes('w')) { w = Math.max(minTextW, ow - dx); x = ox + ow - w; }
         }
 
         resizeCommitter.schedule({ x, y, w, h });

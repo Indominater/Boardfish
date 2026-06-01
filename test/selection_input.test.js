@@ -121,6 +121,9 @@ function loadSelectionInputHarness(objects, options = {}) {
       obj.h = Math.max(32, Math.round(obj.h));
       return true;
     },
+    getTextMinWidth(obj) {
+      return options.getTextMinWidth ? options.getTextMinWidth(obj, context) : 100;
+    },
     getTextMinLines: () => 1,
     markDirty(id) { context.dirty.push(id); },
     pushHistory(reason, historyOptions = {}) {
@@ -341,6 +344,29 @@ test('single text horizontal resize anchors the opposite side after auto-height 
   assert.equal(text.w, 240);
   assert.equal(text.h, 80);
   assert.deepEqual(context.motionPulses, []);
+});
+
+test('single text horizontal resize clamps to the measured word minimum width', () => {
+  const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'wide' } };
+  const context = loadSelectionInputHarness([text], {
+    getTextMinWidth: () => 47,
+  });
+
+  context.beginSelectionHandleDrag({
+    dataset: { dir: 'e' },
+  }, {
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  context.drag.move({ clientX: -180, clientY: 0 });
+  context.drag.up();
+
+  assert.equal(text.x, 0);
+  assert.equal(text.w, 47);
+  assert.deepEqual(context.history, ['resize']);
 });
 
 test('save flushes a pending text edit checkpoint into the saved baseline', () => {

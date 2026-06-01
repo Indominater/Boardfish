@@ -478,9 +478,10 @@ function drawCaret(context, obj, layout, selStart) {
   if (!_caretVisible) return;
   let cx = obj.x + TEXT_PAD, cy = obj.y + TEXT_PAD;
   for (const line of layout) {
-    const ls = line.startIndex, le = line.endIndex ?? (ls + line.text.length);
+    const ls = line.startIndex;
+    const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
     if (selStart >= ls && selStart <= le) {
-      const off = selStart - ls;
+      const off = Math.min(selStart - ls, line.text.length);
       cx = off < line.text.length ? lineXAtOffset(line, obj, off) : lineEndX(line, obj);
       cy = line.y;
       break;
