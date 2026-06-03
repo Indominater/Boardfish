@@ -45,9 +45,39 @@ const TEXT_MEASURE_CACHE_MAX_ENTRIES = 4096;
 const TEXT_PREFIX_CACHE_MAX_ENTRIES = 2048;
 const TEXT_LINES_CACHE_MAX_ENTRIES = 2048;
 const TEXT_TAB_SIZE_SPACES = 8;
+const TEXT_ARROW_LIGATURE_RE = /->|<-/;
 var _mwCache = new Map();
 var _scriptMwCache = new Map();
 var _fontMeasureCaches = new Map();
+
+const forEachTextArrowLigatureSafeRun = (value, callback) => {
+  const text = String(value ?? '');
+  if (!TEXT_ARROW_LIGATURE_RE.test(text)) {
+    callback(text, 0, text.length);
+    return;
+  }
+
+  let start = 0;
+  for (let i = 0; i < text.length - 1; i++) {
+    if (
+      (text[i] === '-' && text[i + 1] === '>') ||
+      (text[i] === '<' && text[i + 1] === '-')
+    ) {
+      const end = i + 1;
+      if (end > start) callback(text.slice(start, end), start, end);
+      start = end;
+    }
+  }
+  if (start < text.length) callback(text.slice(start), start, text.length);
+};
+
+const measureTextWithoutArrowLigatures = (text) => {
+  let width = 0;
+  forEachTextArrowLigatureSafeRun(text, (run) => {
+    width += _measureCtx.measureText(run).width;
+  });
+  return width;
+};
 
 function measureRawTextWWithFont(text, font, cache) {
   const value = String(text ?? '');
@@ -57,7 +87,7 @@ function measureRawTextWWithFont(text, font, cache) {
   }
   const previousFont = _measureCtx.font;
   if (previousFont !== font) _measureCtx.font = font;
-  const width = _measureCtx.measureText(value).width;
+  const width = measureTextWithoutArrowLigatures(value);
   if (_measureCtx.font !== previousFont) _measureCtx.font = previousFont;
   cache.set(value, width);
   return width;
@@ -1110,7 +1140,9 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
     const previousFont = context.font;
     if (state.depth > 0) context.font = state.font;
     const y = line.textY + state.offset;
-    context.fillText(text.slice(i, j), lineXAtOffset(line, obj, i), y);
+    forEachTextArrowLigatureSafeRun(text.slice(i, j), (run, runStart) => {
+      context.fillText(run, lineXAtOffset(line, obj, i + runStart), y);
+    });
     if (state.depth > 0 && context.font !== previousFont) context.font = previousFont;
     i = j;
   }

@@ -52,6 +52,7 @@ function loadTextLayout({ measureWidth = (text) => String(text).length } = {}) {
       fitTextObjectWidthToRenderedContent,
       applyTextLineAlignmentRange,
       clearTextLayoutCaches,
+      drawTextLineRange,
       lineXAtOffset,
       get cache() { return _mwCache; },
       maxEntries: TEXT_MEASURE_CACHE_MAX_ENTRIES,
@@ -94,6 +95,47 @@ test('text measurement cache clears with other measurement caches', () => {
   textLayout.clearTextLayoutCaches({ measurements: true });
 
   assert.equal(textLayout.cache.size, 0);
+});
+
+test('text measurement keeps ASCII arrow pairs out of font ligatures', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      if (text === 'a->b' || text === 'x<-y') return 1;
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const initialMeasures = measured.length;
+
+  assert.equal(textLayout.measureTextW('a->b'), 4);
+  assert.equal(textLayout.measureTextW('x<-y'), 4);
+
+  assert.deepEqual(measured.slice(initialMeasures), ['a-', '>b', 'x<', '-y']);
+});
+
+test('text drawing splits ASCII arrow pairs before fillText', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'a->b c<-d' },
+  };
+  const [line] = textLayout.getTextLayout(obj);
+  const calls = [];
+
+  textLayout.drawTextLineRange({
+    font: '',
+    fillText(text, x, y) {
+      calls.push({ text, x, y });
+    },
+  }, line, obj);
+
+  assert.deepEqual(calls.map((call) => call.text), ['a-', '>b c<', '-d']);
 });
 
 test('text minimum width uses the widest rendered word, not character count', () => {
