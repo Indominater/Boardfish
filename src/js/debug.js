@@ -28,50 +28,8 @@ var ClipDebug = (() => {
   const step = core.step;
   const end = core.end;
 
-  async function invoke(ctx, command, args = {}, meta = {}) {
-    if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!core.enabled) return tauriInvoke(command, args);
-    const t0 = performance.now();
-    step(ctx, 'invoke:start', { command, ...meta });
-    try {
-      const result = await tauriInvoke(command, args);
-      const nativeTiming = result && typeof result === 'object' && !Array.isArray(result) ? result : null;
-      step(ctx, 'invoke:ok', {
-        command,
-        ms: Math.round((performance.now() - t0) * 100) / 100,
-        ...meta,
-        ...(nativeTiming ? { nativeTiming } : {}),
-      });
-      return result;
-    } catch (err) {
-      step(ctx, 'invoke:error', { command, ms: Math.round((performance.now() - t0) * 100) / 100, error: String(err), ...meta });
-      throw err;
-    }
-  }
-
-  async function wrap(ctx, command, call, meta = {}) {
-    if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!core.enabled) return call();
-    const t0 = performance.now();
-    step(ctx, 'invoke:start', { command, ...meta });
-    try {
-      const result = await call();
-      const nativeTiming = result && typeof result === 'object' && !Array.isArray(result) ? result : null;
-      step(ctx, 'invoke:ok', {
-        command,
-        ms: Math.round((performance.now() - t0) * 100) / 100,
-        ...meta,
-        ...(nativeTiming ? { nativeTiming } : {}),
-      });
-      return result;
-    } catch (err) {
-      step(ctx, 'invoke:error', { command, ms: Math.round((performance.now() - t0) * 100) / 100, error: String(err), ...meta });
-      throw err;
-    }
-  }
-
   function timing(meta, key) {
-    return meta?.nativeTiming?.[key] ?? '';
+    return meta?.timing?.[key] ?? '';
   }
 
   function debugRow(e, { includeId = false, includeSkipped = false } = {}) {
@@ -90,7 +48,6 @@ var ClipDebug = (() => {
       processed: e.meta?.processed ?? '',
       registeredImages: e.meta?.registeredImages ?? '',
       historyIndex: e.meta?.historyIndex ?? '',
-      nativePending: e.meta?.nativePending ?? '',
       queueMs: e.meta?.queueMs ?? '',
       signature: e.meta?.signature || '',
       imgKey: e.meta?.imgKey || '',
@@ -115,13 +72,13 @@ var ClipDebug = (() => {
       sourceBytes: e.meta?.sourceBytes ?? timing(e.meta, 'sourceBytes'),
       bytes: e.meta?.bytes ?? timing(e.meta, 'bytes'),
       assetReady: e.meta?.assetReady ?? '',
-      nativePath: timing(e.meta, 'path'),
+      sourcePath: timing(e.meta, 'path'),
       flipped: timing(e.meta, 'flipped'),
       width: timing(e.meta, 'width'),
       height: timing(e.meta, 'height'),
       pixels: timing(e.meta, 'pixels'),
       rgbaMB: timing(e.meta, 'rgbaMb'),
-      nativeTotalMs: timing(e.meta, 'totalMs'),
+      totalMs: timing(e.meta, 'totalMs'),
       decodeMs: timing(e.meta, 'decodeMs'),
       readMs: timing(e.meta, 'readMs'),
       pngEncodeMs: timing(e.meta, 'pngEncodeMs'),
@@ -131,8 +88,6 @@ var ClipDebug = (() => {
       rgbaConvertMs: timing(e.meta, 'rgbaConvertMs'),
       transformMs: timing(e.meta, 'transformMs'),
       clipboardWriteMs: timing(e.meta, 'clipboardWriteMs'),
-      arboardMs: timing(e.meta, 'arboardMs'),
-      macosFallbackMs: timing(e.meta, 'macosFallbackMs'),
       textLen: e.meta?.textLen ?? '',
       seq: e.meta?.seq ?? '',
       expected: e.meta?.expected ?? '',
@@ -161,32 +116,8 @@ var ClipDebug = (() => {
 
   function copyBreakdown() {
     const rows = events
-      .filter(e => e.step === 'invoke:ok' && e.meta?.nativeTiming)
-      .map(e => ({
-        total: e.total,
-        command: e.meta?.command || '',
-        imgKey: e.meta?.imgKey || '',
-        nativePath: timing(e.meta, 'path'),
-        flipped: timing(e.meta, 'flipped'),
-        sourceBytes: timing(e.meta, 'sourceBytes'),
-        width: timing(e.meta, 'width'),
-        height: timing(e.meta, 'height'),
-        bytes: timing(e.meta, 'bytes'),
-        rgbaMB: timing(e.meta, 'rgbaMb'),
-        invokeMs: e.meta?.ms ?? '',
-        nativeTotalMs: timing(e.meta, 'totalMs'),
-        decodeMs: timing(e.meta, 'decodeMs'),
-        readMs: timing(e.meta, 'readMs'),
-        pngEncodeMs: timing(e.meta, 'pngEncodeMs'),
-        cacheInsertMs: timing(e.meta, 'cacheInsertMs'),
-        base64Ms: timing(e.meta, 'base64Ms'),
-        imageDecodeMs: timing(e.meta, 'imageDecodeMs'),
-        rgbaConvertMs: timing(e.meta, 'rgbaConvertMs'),
-        transformMs: timing(e.meta, 'transformMs'),
-        clipboardWriteMs: timing(e.meta, 'clipboardWriteMs'),
-        arboardMs: timing(e.meta, 'arboardMs'),
-        macosFallbackMs: timing(e.meta, 'macosFallbackMs'),
-      }));
+      .filter(e => e.op === 'copySelected' && e.step && e.step !== 'start')
+      .map(e => debugRow(e, { includeId: true, includeSkipped: true }));
     console.table(rows);
     return rows;
   }
@@ -203,16 +134,13 @@ var ClipDebug = (() => {
 
     const run = events.filter(e => e.id === copyStart.id);
     const latest = (stepName) => [...run].reverse().find(e => e.step === stepName);
-    const invokeOk = [...run].reverse().find(e => e.step === 'invoke:ok');
-    const nativeStart = latest('native-copy-start');
-    const nativeFinish = latest('native-copy-finished');
     const copyEnd = latest('end');
-    const copyDoneAt = copyEnd?.at ?? nativeFinish?.at ?? invokeOk?.at ?? run[run.length - 1]?.at ?? copyStart.at;
+    const copyDoneAt = copyEnd?.at ?? run[run.length - 1]?.at ?? copyStart.at;
     const copyWindowRows = events.filter(e => e.at >= copyStart.at && e.at <= copyDoneAt + 1);
     const renderCanvasEnd = copyWindowRows.find(e => e.op === 'renderImageToCanvas' && e.step === 'end');
     const pngBlobEnd = copyWindowRows.find(e => e.op === 'canvasToPngBlob' && e.step === 'end');
     const webSourcePngBlob = latest('copy:web-source-png-blob');
-    const webNativeWriteEnd = latest('copy:web-native-write-end');
+    const webClipboardWriteEnd = latest('copy:web-clipboard-write-end');
 
     const viewportEvents = typeof ViewportDebug !== 'undefined' ? ViewportDebug.events : [];
     const frameStarts = new Map();
@@ -302,17 +230,15 @@ var ClipDebug = (() => {
       .map(row => Number(row.gapMs) || 0);
     const maxEventLoopGapMs = eventLoopGapsDuringCopy.reduce((max, value) => Math.max(max, value), 0);
     const copyPendingAtFirstPan = !!firstPan && copyDoneAt > firstPan.at;
-    const nativeCommand = invokeOk?.meta?.command || '';
-    const dataUrlLen = invokeOk?.meta?.dataUrlLen ?? latest('copy:source-ready')?.meta?.dataUrlLen ?? '';
-    const sourceLen = invokeOk?.meta?.sourceLen ?? latest('copy:key-start')?.meta?.sourceLen ?? '';
-    const sourceBytes = timing(invokeOk?.meta, 'sourceBytes') || webSourcePngBlob?.meta?.sourceBytes || '';
-    const nativeTotalMs = timing(invokeOk?.meta, 'totalMs') || '';
+    const dataUrlLen = latest('copy:source-ready')?.meta?.dataUrlLen ?? '';
+    const sourceLen = latest('copy:key-start')?.meta?.sourceLen ?? '';
+    const sourceBytes = webSourcePngBlob?.meta?.sourceBytes || '';
     const renderCanvasMs = renderCanvasEnd?.total ?? '';
     const pngBlobMs = pngBlobEnd?.total ?? '';
     const webSourcePngBlobMs = webSourcePngBlob?.meta?.ms ?? '';
     const webBlobReady = pngBlobEnd || webSourcePngBlob;
-    const webClipboardWriteAfterBlobMs = webBlobReady && (webNativeWriteEnd || copyEnd)
-      ? round((webNativeWriteEnd?.at ?? copyEnd.at) - webBlobReady.at)
+    const webClipboardWriteAfterBlobMs = webBlobReady && (webClipboardWriteEnd || copyEnd)
+      ? round((webClipboardWriteEnd?.at ?? copyEnd.at) - webBlobReady.at)
       : '';
     const maxWheelPanGapMs = wheelPanRows.reduce((max, row) => Math.max(max, Number(row.gapMs) || 0), 0);
     const postCopyWheelPanGapMs = wheelPanRows
@@ -337,7 +263,6 @@ var ClipDebug = (() => {
       maxPanFrameRafGapMs,
       firstRawWheelDeliveryAgeMs
     ) > 32;
-    const dataUrlPath = /data_url|data-url/i.test(nativeCommand || timing(invokeOk?.meta, 'path'));
     const webRenderedPath = copyEnd?.meta?.path === 'image-web-rendered';
     let verdict = 'no >32ms copy-to-pan stall captured';
     if (!firstPan) {
@@ -350,10 +275,8 @@ var ClipDebug = (() => {
       verdict = 'pan input was generated earlier but delivered late to Boardfish';
     } else if (likelyBlock && webRenderedPath) {
       verdict = 'stutter captured on web image copy; inspect render/png/clipboard timings and pan gaps';
-    } else if (likelyBlock && dataUrlPath) {
-      verdict = 'stutter aligns with data-url clipboard IPC or hydration before/during first pan';
     } else if (likelyBlock && copyPendingAtFirstPan) {
-      verdict = 'stutter overlaps native clipboard write; inspect native timing columns';
+      verdict = 'stutter overlaps browser clipboard write; inspect clipboard timing and pan gaps';
     } else if (likelyBlock) {
       verdict = 'pan frame or event-loop gap is slow; inspect viewport timeline';
     }
@@ -361,18 +284,10 @@ var ClipDebug = (() => {
     const summary = {
       copyRuns: copyStarts.length,
       copyPath: copyEnd?.meta?.path || '',
-      nativeCommand,
-      nativeQueueMs: nativeStart?.meta?.queueMs ?? '',
-      invokeAtMs: invokeOk?.total ?? '',
-      invokeMs: invokeOk?.meta?.ms ?? '',
-      nativeTotalMs,
-      clipboardWriteMs: timing(invokeOk?.meta, 'clipboardWriteMs') || '',
-      arboardMs: timing(invokeOk?.meta, 'arboardMs') || '',
-      macosFallbackMs: timing(invokeOk?.meta, 'macosFallbackMs') || '',
       sourceLen,
       sourceBytes,
       dataUrlLen,
-      webNativeWriteMs: webNativeWriteEnd?.meta?.ms ?? '',
+      webClipboardWriteMs: webClipboardWriteEnd?.meta?.ms ?? '',
       webSourcePngBlobMs,
       renderCanvasMs,
       pngBlobMs,
@@ -439,43 +354,33 @@ var ClipDebug = (() => {
     const firstError = run.find(e => /(?:error|miss|empty)$/i.test(e.step) || e.meta?.error);
     const blobEvent = latest('event-image-blob') || latest('browser-image-blob');
     const blobReadOk = latest('clipboard-blob-read:ok');
-    const nativeRead = latest('native-image-read');
-    const nativeReadCommand = typeof TAURI_COMMANDS !== 'undefined'
-      ? TAURI_COMMANDS.READ_IMAGE_FROM_CLIPBOARD_CACHED
-      : 'read_image_from_clipboard_cached';
-    const nativeInvokeOk = run.find(e => e.step === 'invoke:ok' && e.meta?.command === nativeReadCommand);
-    const materializeEnd = latest('paste-native-cache:materialize-end');
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
-    const addObject = latest('paste-native-cache:add-object') || latest('paste-image:add-object') || webInsertEnd;
+    const addObject = latest('paste:objects-add-start') || latest('paste-image:add-object') || webInsertEnd;
     const end = latest('end');
     const objectCountBefore = pasteStart?.meta?.objectCountBefore ?? '';
     const objectCountAfter = end?.meta?.objectCountAfter ?? '';
     const objectDelta = typeof objectCountBefore === 'number' && typeof objectCountAfter === 'number'
       ? objectCountAfter - objectCountBefore
       : '';
-    const nativeReadAttempted = run.some(e => e.meta?.command === nativeReadCommand);
     const pathDetected = webInsertEnd
       ? end?.meta?.path || 'web-paste-blob'
       : blobReadOk
       ? 'event-or-browser-blob'
-      : nativeReadAttempted
-        ? 'native-cache'
-        : stepNames.has('browser-clipboard-read:start')
-          ? 'browser-read'
-          : stepNames.has('event-clipboard:inspect')
-            ? 'paste-event'
-            : 'unknown';
+      : stepNames.has('browser-clipboard-read:start')
+        ? 'browser-read'
+        : stepNames.has('event-clipboard:inspect')
+          ? 'paste-event'
+          : 'unknown';
     const checkpoints = [
       ['pasteStarted', true],
       ['eventInspected', stepNames.has('event-clipboard:inspect') || !pasteStart.meta?.clipboardData],
-      ['imagePayloadFound', !!blobEvent || nativeReadAttempted],
-      ['imagePayloadRead', !!blobReadOk || !!nativeRead || !!nativeInvokeOk || !!webInsertEnd],
-      ['nativeMaterialized', pathDetected !== 'native-cache' || !!materializeEnd?.meta?.assetReady],
+      ['imagePayloadFound', !!blobEvent || !!webInsertEnd || pathDetected === 'browser-read'],
+      ['imagePayloadRead', !!blobReadOk || !!webInsertEnd || pathDetected !== 'unknown'],
       ['objectAddStarted', !!addObject],
       ['pasteEndedAdded', end?.meta?.added === true || objectDelta > 0],
     ];
     const failedCheckpoint = checkpoints.find(([, ok]) => !ok);
-    const sizeEvent = nativeRead || nativeInvokeOk || blobReadOk || blobEvent;
+    const sizeEvent = blobReadOk || blobEvent;
     const out = {
       pasteRuns: pasteStarts.length,
       totalMs: end?.total ?? run.at(-1)?.total ?? '',
@@ -488,9 +393,9 @@ var ClipDebug = (() => {
       objectCountAfter,
       objectDelta,
       pathDetected,
-      imageSource: blobEvent?.meta?.type || blobReadOk?.meta?.blobType || nativeRead?.meta?.mime || '',
+      imageSource: blobEvent?.meta?.type || blobReadOk?.meta?.blobType || '',
       blobSize: blobEvent?.meta?.blobSize ?? blobReadOk?.meta?.blobSize ?? '',
-      bytes: nativeRead?.meta?.bytes ?? timing(nativeInvokeOk?.meta, 'bytes') ?? '',
+      bytes: blobReadOk?.meta?.bytes ?? blobEvent?.meta?.bytes ?? '',
       dataUrlLen: blobReadOk?.meta?.dataUrlLen ?? '',
       ...memorySnapshotFromEvent(sizeEvent),
       failedCheckpoint: failedCheckpoint ? failedCheckpoint[0] : '',
@@ -516,36 +421,23 @@ var ClipDebug = (() => {
     const run = events.filter(e => e.id === pasteStart.id);
     const latest = (stepName) => [...run].reverse().find(e => e.step === stepName);
     const first = (stepName) => run.find(e => e.step === stepName);
-    const nativeReadCommand = typeof TAURI_COMMANDS !== 'undefined'
-      ? TAURI_COMMANDS.READ_IMAGE_FROM_CLIPBOARD_CACHED
-      : 'read_image_from_clipboard_cached';
-    const nativeInvokeOk = run.find(e => e.step === 'invoke:ok' && e.meta?.command === nativeReadCommand);
     const blobEvent = latest('event-image-blob') || latest('browser-image-blob');
     const blobReadOk = latest('clipboard-blob-read:ok');
-    const nativeRead = latest('native-image-read');
-    const materializeEnd = latest('paste-native-cache:materialize-end');
-    const objectAdd = latest('paste-native-cache:add-object') || latest('paste-image:add-object');
+    const objectAdd = latest('paste:objects-add-start') || latest('paste-image:add-object');
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
     const readyEnd = latest('paste-image:ready-wait-end');
-    const settleEnd = latest('native-clipboard-settle:end');
-    const settleSkip = latest('native-clipboard-settle:skip');
     const end = latest('end');
-    const imageReadAt = blobReadOk?.total ?? nativeRead?.total ?? nativeInvokeOk?.total ?? webInsertEnd?.total ?? '';
+    const imageReadAt = blobReadOk?.total ?? webInsertEnd?.total ?? '';
     const objectAt = objectAdd?.total ?? webInsertEnd?.total ?? '';
     const displayAt = readyEnd?.total ?? webInsertEnd?.total ?? '';
     const out = {
       pasteRuns: pasteStarts.length,
       path: end?.meta?.path || '',
       totalMs: end?.total ?? run.at(-1)?.total ?? '',
-      nativeSettleMs: settleEnd?.meta?.ms ?? (settleSkip ? 0 : ''),
       imagePayloadAtMs: imageReadAt,
       objectAtMs: objectAt,
       displayReadyAtMs: displayAt,
       objectToDisplayMs: typeof objectAt === 'number' && typeof displayAt === 'number' ? Math.round((displayAt - objectAt) * 100) / 100 : '',
-      materializeMs: materializeEnd?.meta?.ms ?? '',
-      nativeInvokeMs: nativeInvokeOk?.meta?.ms ?? '',
-      nativeReadMs: timing(nativeInvokeOk?.meta, 'readMs') || '',
-      nativePngEncodeMs: timing(nativeInvokeOk?.meta, 'pngEncodeMs') || '',
       blobReadMs: blobReadOk?.meta?.ms ?? '',
       blobSize: blobEvent?.meta?.blobSize ?? blobReadOk?.meta?.blobSize ?? '',
       dataUrlLen: blobReadOk?.meta?.dataUrlLen ?? '',
@@ -557,7 +449,7 @@ var ClipDebug = (() => {
       bitmapReady: end?.meta?.bitmapReady ?? '',
       added: end?.meta?.added ?? '',
       objectDelta: webInsertEnd?.meta?.objectDelta ?? '',
-      firstPayloadStep: first('event-image-blob')?.step || first('browser-image-blob')?.step || (nativeInvokeOk ? 'native-image-read' : ''),
+      firstPayloadStep: first('event-image-blob')?.step || first('browser-image-blob')?.step || '',
       verdict: end?.meta?.added || webInsertEnd?.meta?.added
         ? 'paste produced a drawable object'
         : 'paste did not add an image; inspect rows',
@@ -573,18 +465,11 @@ var ClipDebug = (() => {
     const pasteEnd = [...events].reverse().find(e => e.op === 'pasteAtPos' && e.step === 'end');
     const copyProgress = latest('copy:multi-progress');
     const pasteProgress = latest('paste:objects-add-progress') || latest('paste:register-images-progress');
-    const nativeStart = latest('native-copy-start');
-    const nativeFinish = latest('native-copy-finished');
     const out = {
       lastOp: last?.op || '',
       lastStep: last?.step || '',
       totalMs: last?.total ?? '',
       path: last?.meta?.path || '',
-      nativePending: nativeClipboardPendingCount(),
-      nativeReady: nativeClipboardPendingCount() === 0,
-      nativeQueueMs: nativeStart?.meta?.queueMs ?? '',
-      nativeSignature: nativeStart?.meta?.signature || nativeFinish?.meta?.signature || '',
-      nativeError: nativeClipboardLastError() || '',
       copyObjects: copyEnd?.meta?.objectCount ?? copyProgress?.meta?.objectCount ?? '',
       copyImages: copyEnd?.meta?.imageCount ?? copyProgress?.meta?.imageCount ?? '',
       pasteObjects: pasteEnd?.meta?.objectCount ?? pasteProgress?.meta?.objectCount ?? '',
@@ -610,8 +495,6 @@ var ClipDebug = (() => {
     start,
     step,
     end,
-    invoke,
-    wrap,
     dump,
     summary,
     phaseSummary,
@@ -620,11 +503,6 @@ var ClipDebug = (() => {
     largePasteReport,
     pasteBreakdown,
     status,
-    waitForNative: (timeoutMs) => (
-      typeof waitForNativeClipboardIdle === 'function'
-        ? waitForNativeClipboardIdle(timeoutMs)
-        : Promise.resolve({ ready: true, error: '' })
-    ),
     reset,
     clear,
     get events() { return events.slice(); },
@@ -786,7 +664,6 @@ var ViewportDebug = (() => {
     mousePanHandlerTotalMs: 0,
     maxMousePanHandlerMs: 0,
     imageAdds: 0,
-    nativeImageAdds: 0,
     imageLoads: 0,
     imageDecodeQueued: 0,
     maxImageDecodeQueueDepth: 0,
@@ -1158,7 +1035,6 @@ var ViewportDebug = (() => {
       { metric: 'avgMousePanHandlerMs', value: stats.mousePanHandlerCount ? Math.round(stats.mousePanHandlerTotalMs / stats.mousePanHandlerCount * 100) / 100 : 0 },
       { metric: 'maxMousePanHandlerMs', value: Math.round(stats.maxMousePanHandlerMs * 100) / 100 },
       { metric: 'imageAdds', value: stats.imageAdds },
-      { metric: 'nativeImageAdds', value: stats.nativeImageAdds },
       { metric: 'imageLoads', value: stats.imageLoads },
       { metric: 'imageDecodeQueued', value: stats.imageDecodeQueued },
       { metric: 'maxImageDecodeQueueDepth', value: stats.maxImageDecodeQueueDepth },
@@ -1348,8 +1224,6 @@ var ViewportDebug = (() => {
       avgScaledFallbackFull: draws.length ? Math.round(sum('scaledFallbackFull') / draws.length * 100) / 100 : 0,
       avgScaledVariantPendingImages: draws.length ? Math.round(sum('scaledVariantPendingImages') / draws.length * 100) / 100 : 0,
       maxScaledVariantPendingImages: max('scaledVariantPendingImages'),
-      avgEyedropperWarmedScaledImages: draws.length ? Math.round(sum('eyedropperWarmedScaledImages') / draws.length * 100) / 100 : 0,
-      maxEyedropperWarmedScaledImages: max('eyedropperWarmedScaledImages'),
       avgScaledImageScale: sum('scaledImages') ? Math.round(sum('scaledImageScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgTargetImageScale: sum('scaledImages') ? Math.round(sum('scaledImageTargetScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgMissingImages: draws.length ? Math.round(sum('missingImages') / draws.length * 100) / 100 : 0,
@@ -1369,15 +1243,13 @@ var ViewportDebug = (() => {
       .filter(obj => obj.type === 'image')
       .map(obj => {
         const key = obj.data?.imgKey || '';
-        const img = key ? imageCache[key] : null;
+        const img = key ? (imageMetadataCache[key] || imageCache[key]) : null;
         const bitmap = key ? imageBitmapCache[key] : null;
         const src = key ? imageStore[key] : null;
-        const assetUrl = key ? imageAssetUrlCache[key] : '';
         const ready = key ? imageReadyPromises.get(key) : null;
         let status = 'ok';
         if (!key) status = 'missing-key';
         else if (!src) status = 'missing-store';
-        else if (!assetUrl && isNativeImageRef(src)) status = 'missing-asset-url';
         else if (!img) status = 'missing-image-element';
         else if (imageBitmapFailed.has(key) && img.complete && img.naturalWidth > 0) status = 'fallback-ok';
         else if (imageBitmapFailed.has(key)) status = 'bitmap-failed-no-fallback';
@@ -1390,9 +1262,8 @@ var ViewportDebug = (() => {
           y: Math.round(obj.y),
           w: Math.round(obj.w),
           h: Math.round(obj.h),
-          native: !!src?.native,
+          sourceKind: typeof isWebImageRef === 'function' && isWebImageRef(src) ? 'web-ref' : typeof src,
           bytes: src?.bytes ?? '',
-          hasAssetUrl: !!assetUrl,
           hasImg: !!img,
           complete: !!img?.complete,
           naturalW: img?.naturalWidth || 0,
@@ -1499,7 +1370,7 @@ var ViewportDebug = (() => {
           visibleImages++;
           const key = obj.data?.imgKey;
           const bitmap = key ? imageBitmapCache[key] : null;
-          const fullSource = bitmap || imageCache[key] || null;
+          const fullSource = bitmap || imageMetadataCache[key] || imageCache[key] || null;
           const scalingActive = typeof isViewportImageScalingActive === 'function'
             ? isViewportImageScalingActive()
             : viewportImageScalingEnabled;
@@ -1566,7 +1437,6 @@ var ViewportDebug = (() => {
         scaledImages: e.steps?.drawBoard?.meta?.scaledImages ?? '',
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? '',
         scaledVariantPendingImages: e.steps?.drawBoard?.meta?.scaledVariantPendingImages ?? '',
-        eyedropperWarmedScaledImages: e.steps?.drawBoard?.meta?.eyedropperWarmedScaledImages ?? '',
         fullScaleImages: e.steps?.drawBoard?.meta?.fullScaleImages ?? '',
         missingImages: e.steps?.drawBoard?.meta?.missingImages ?? '',
         croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? '',

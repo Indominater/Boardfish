@@ -47,6 +47,27 @@
     };
     if (obj.type === OBJECT_TYPES.TEXT) {
       normalized.data.content = typeof data.content === 'string' ? data.content : '';
+      if (Array.isArray(data.lineAlign)) {
+        const align = data.lineAlign
+          .map((value) => ['left', 'center', 'right'].includes(value) ? value : 'left');
+        while (align.length && align[align.length - 1] === 'left') align.pop();
+        if (align.length) normalized.data.lineAlign = align;
+      }
+      if (Array.isArray(data.scriptRanges)) {
+        const scriptRanges = [];
+        for (const range of data.scriptRanges) {
+          const kind = ['sup', 'sub'].includes(range?.kind) ? range.kind : '';
+          const start = Math.trunc(Number(range?.start));
+          const end = Math.trunc(Number(range?.end));
+          if (!kind || !Number.isFinite(start) || !Number.isFinite(end)) continue;
+          scriptRanges.push({
+            start: Math.max(0, start),
+            end: Math.max(0, end),
+            kind,
+          });
+        }
+        if (scriptRanges.length) normalized.data.scriptRanges = scriptRanges;
+      }
     } else {
       if (typeof data.imgKey !== 'string' || !data.imgKey) {
         throw new Error(`image object ${obj.id} is missing imgKey`);
@@ -86,10 +107,9 @@
         throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);
       }
     }
-    const { preferences: _preferences, eyedropperCards: _eyedropperCards, ...boardFields } = data;
     const normalized = {
-      ...boardFields,
       version: Number(data.version || 3),
+      format: BOARD_FORMAT,
       viewport: normalizeViewport(data.viewport),
       imageStore,
       objects,

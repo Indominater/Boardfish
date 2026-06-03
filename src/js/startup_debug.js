@@ -1,7 +1,6 @@
 'use strict';
 
-// Tauri injects this from the Cargo build profile before frontend scripts run.
-// Browser/file loads without that injection stay release-safe.
+// Web release builds leave this disabled unless a dev build enables it.
 const DEBUG_TOOLS_ENABLED = globalThis.__BOARDFISH_DEBUG_TOOLS_ENABLED__ === true;
 
 function createNoopStartupDebug() {
@@ -16,7 +15,7 @@ function createNoopStartupDebug() {
     toggleStress: noopAsync,
     topBandScan: () => ({ summary: {}, rows: [] }),
     toggleBandStress: noopAsync,
-    toggleNativeSkewStress: noopAsync,
+    toggleThemeOrderStress: noopAsync,
     events,
     samples,
     expectedCanvasBg(theme = appTheme) {
@@ -185,21 +184,14 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
 
   async function report({ frames = 8 } = {}) {
     const frameRows = await sampleFrames(frames);
-    const nativeDone = events.find((event) => event.step === 'apply-native-theme:done');
     const bodySet = events.find((event) => event.step === 'body-theme-applied');
-    const showStart = events.find((event) => event.step === 'show-window:start');
     const firstMismatch = frameRows.find((row) => !row.domMatchesExpected);
     const summary = {
       theme: appTheme,
       expected: expectedCanvasBg(),
-      nativeThemeDoneAt: nativeDone?.t ?? '',
       bodyThemeAppliedAt: bodySet?.t ?? '',
-      showRequestedAt: showStart?.t ?? '',
-      nativeVsBodyDeltaMs: nativeDone && bodySet ? round(nativeDone.t - bodySet.t) : '',
       firstFrameMismatch: firstMismatch?.label || '',
       allSampledFramesMatch: !firstMismatch,
-      nativeColor: nativeDone?.nativeColor || '',
-      nativeTheme: nativeDone?.nativeTheme || '',
     };
     console.table([summary]);
     console.table(events);
@@ -335,20 +327,18 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
       const targetTheme = appTheme === 'dark' ? 'light' : 'dark';
       const eventStart = events.length;
       const startAt = performance.now();
-      await applyAppTheme(targetTheme, { dirty: false, nativeFirst: true });
+      await applyAppTheme(targetTheme, { dirty: false });
 
       for (let frame = 0; frame < frames; frame++) {
         if (frame > 0) await new Promise((resolve) => requestAnimationFrame(resolve));
         const scan = scanTopBandRows({ height, step, x, tolerance });
         const bodyEvent = latestSince('body-theme-applied', eventStart);
-        const nativeEvent = latestSince('apply-native-theme:done', eventStart);
         const row = {
           toggleIndex,
           frame,
           targetTheme,
           sinceToggleMs: round(performance.now() - startAt),
           bodyAppliedAt: bodyEvent?.t ?? '',
-          nativeDoneAt: nativeEvent?.t ?? '',
           mismatchCount: scan.summary.mismatchCount,
           canvasMismatchCount: scan.summary.canvasMismatchCount,
           elementBgMismatchCount: scan.summary.elementBgMismatchCount,
@@ -383,7 +373,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     }
 
     if (restore && appTheme !== originalTheme) {
-      await applyAppTheme(originalTheme, { dirty: false, nativeFirst: true });
+      await applyAppTheme(originalTheme, { dirty: false });
     }
 
     const summary = {
@@ -422,129 +412,8 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     return result;
   }
 
-  async function toggleNativeSkewStress({
-    togglesPerVariant = 8,
-    frames = 3,
-    height = window.innerHeight - 1,
-    step = 50,
-    x = Math.round(window.innerWidth / 2),
-    tolerance = 2,
-    delayMs = 0,
-    pauseBetweenVariantsMs = 900,
-    restore = true,
-    copy = true,
-    variants = [
-      { label: 'native-first-immediate', nativeFirst: true, nativeSettleFrames: 0, nativeSettleMs: 0 },
-      { label: 'native-first-1-frame', nativeFirst: true, nativeSettleFrames: 1, nativeSettleMs: 0 },
-      { label: 'native-first-0ms', nativeFirst: true, nativeSettleFrames: 0, nativeSettleMs: 0 },
-      { label: 'native-parallel-0ms', nativeParallel: true, nativeParallelDomMs: 0 },
-      { label: 'dom-first-immediate', nativeFirst: false, nativeSettleFrames: 0, nativeSettleMs: 0 },
-    ],
-  } = {}) {
-    const originalTheme = appTheme;
-    const variantRows = [];
-    const frameRows = [];
-
-    for (const variant of variants) {
-      const variantStartIndex = frameRows.length;
-      console.info('[Boardfish startup]', 'native-skew-variant:start', variant);
-      record('native-skew-variant:start', variant);
-
-      for (let toggleIndex = 0; toggleIndex < togglesPerVariant; toggleIndex++) {
-        const targetTheme = appTheme === 'dark' ? 'light' : 'dark';
-        const eventStart = events.length;
-        const startAt = performance.now();
-        await applyAppTheme(targetTheme, {
-          dirty: false,
-          nativeFirst: variant.nativeFirst !== false,
-          nativeParallel: variant.nativeParallel === true,
-          nativeParallelDomMs: variant.nativeParallelDomMs || 0,
-          nativeSettleFrames: variant.nativeSettleFrames || 0,
-          nativeSettleMs: variant.nativeSettleMs || 0,
-        });
-
-        for (let frame = 0; frame < frames; frame++) {
-          if (frame > 0) await waitFrames(1);
-          const scan = scanTopBandRows({ height, step, x, tolerance });
-          const nativeStart = latestSince('apply-native-theme:start', eventStart);
-          const nativeDone = latestSince('apply-native-theme:done', eventStart);
-          const bodyEvent = latestSince('body-theme-applied', eventStart);
-          const repaintEvent = latestSince('theme-canvas-repaint', eventStart);
-          frameRows.push({
-            variant: variant.label || '',
-            toggleIndex,
-            frame,
-            targetTheme,
-            sinceToggleMs: round(performance.now() - startAt),
-            nativeStartAt: nativeStart?.t ?? '',
-            nativeDoneAt: nativeDone?.t ?? '',
-            bodyAppliedAt: bodyEvent?.t ?? '',
-            canvasRepaintAt: repaintEvent?.t ?? '',
-            nativeDoneToBodyMs: nativeDone && bodyEvent ? round(bodyEvent.t - nativeDone.t) : '',
-            bodyToCanvasRepaintMs: bodyEvent && repaintEvent ? round(repaintEvent.t - bodyEvent.t) : '',
-            nativeStartToBodyMs: nativeStart && bodyEvent ? round(bodyEvent.t - nativeStart.t) : '',
-            nativeStartToCanvasRepaintMs: nativeStart && repaintEvent ? round(repaintEvent.t - nativeStart.t) : '',
-            canvasMismatchCount: scan.summary.canvasMismatchCount,
-            elementBgMismatchCount: scan.summary.elementBgMismatchCount,
-            verdict: scan.summary.verdict,
-          });
-        }
-
-        if (delayMs > 0) await wait(delayMs);
-      }
-
-      const rows = frameRows.slice(variantStartIndex);
-      const variantSummary = {
-        label: variant.label || '',
-        nativeFirst: variant.nativeFirst !== false,
-        nativeParallel: variant.nativeParallel === true,
-        nativeParallelDomMs: variant.nativeParallelDomMs || 0,
-        nativeSettleFrames: variant.nativeSettleFrames || 0,
-        nativeSettleMs: variant.nativeSettleMs || 0,
-        samples: rows.length,
-        framesWithCanvasMismatch: rows.filter((row) => row.canvasMismatchCount > 0).length,
-        maxCanvasMismatchCountInFrame: rows.reduce((max, row) => Math.max(max, row.canvasMismatchCount), 0),
-        minNativeDoneToBodyMs: rows.reduce((min, row) => typeof row.nativeDoneToBodyMs === 'number' ? Math.min(min, row.nativeDoneToBodyMs) : min, Infinity),
-        maxNativeDoneToBodyMs: rows.reduce((max, row) => typeof row.nativeDoneToBodyMs === 'number' ? Math.max(max, row.nativeDoneToBodyMs) : max, -Infinity),
-        averageNativeDoneToBodyMs: round(rows.reduce((sum, row) => sum + (Number(row.nativeDoneToBodyMs) || 0), 0) / Math.max(1, rows.filter((row) => typeof row.nativeDoneToBodyMs === 'number').length)),
-        note: 'Native titlebar pixels cannot be sampled from the webview; visually compare titlebar/canvas during this variant.',
-      };
-      if (variantSummary.minNativeDoneToBodyMs === Infinity) variantSummary.minNativeDoneToBodyMs = '';
-      if (variantSummary.maxNativeDoneToBodyMs === -Infinity) variantSummary.maxNativeDoneToBodyMs = '';
-      variantRows.push(variantSummary);
-      console.table([variantSummary]);
-
-      if (pauseBetweenVariantsMs > 0) await wait(pauseBetweenVariantsMs);
-    }
-
-    if (restore && appTheme !== originalTheme) {
-      await applyAppTheme(originalTheme, { dirty: false, nativeFirst: true });
-    }
-
-    const result = {
-      summary: {
-        togglesPerVariant,
-        frames,
-        height,
-        step,
-        x,
-        tolerance,
-        originalTheme,
-        finalTheme: appTheme,
-        variants: variantRows.length,
-        verdict: 'Use visual comparison between variants; if settle variants look aligned, app can delay web repaint. If none align, native OS composition is likely the limit.',
-      },
-      variantRows,
-      frameRows,
-      events: events.slice(),
-    };
-    console.table(variantRows);
-    console.table(frameRows);
-
-    storeResult(result);
-    if (copy) await copyDebugJson('native skew stress', result);
-
-    return result;
+  async function toggleThemeOrderStress(options = {}) {
+    return toggleBandStress(options);
   }
 
   function latestSince(step, sinceIndex) {
@@ -569,39 +438,29 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
       const targetTheme = appTheme === 'dark' ? 'light' : 'dark';
       const eventStart = events.length;
       const startAt = performance.now();
-      await applyAppTheme(targetTheme, { dirty: false, nativeFirst: true });
+      await applyAppTheme(targetTheme, { dirty: false });
       for (let frame = 0; frame < settleFrames; frame++) {
         await new Promise((resolve) => requestAnimationFrame(resolve));
       }
       const bodyEvent = latestSince('body-theme-applied', eventStart);
-      const nativeEvent = latestSince('apply-native-theme:done', eventStart);
       const sampleRow = sample(`toggle-${index}-settled`);
-      const expectedNativeColor = targetTheme === 'dark' ? '#1c1b22' : '#eaeaed';
-      const mismatchMs = bodyEvent && nativeEvent ? round(nativeEvent.t - bodyEvent.t) : '';
       rows.push({
         index,
         targetTheme,
         totalMs: round(performance.now() - startAt),
         bodyAppliedAt: bodyEvent?.t ?? '',
-        nativeDoneAt: nativeEvent?.t ?? '',
-        mismatchMs,
-        nativeColor: nativeEvent?.nativeColor || '',
-        expectedNativeColor,
-        nativeMatchesTarget: nativeEvent?.theme === targetTheme && nativeEvent?.nativeColor === expectedNativeColor,
         domMatchesExpected: sampleRow.domMatchesExpected,
-        visibleMismatchRisk: typeof mismatchMs === 'number' && mismatchMs > mismatchThresholdMs,
+        visibleMismatchRisk: !sampleRow.domMatchesExpected,
       });
       if (delayMs > 0) await wait(delayMs);
     }
 
     if (restore && appTheme !== originalTheme) {
-      await applyAppTheme(originalTheme, { dirty: false, nativeFirst: true });
+      await applyAppTheme(originalTheme, { dirty: false });
     }
 
     const mismatches = rows.filter((row) => (
-      !row.nativeMatchesTarget ||
-      !row.domMatchesExpected ||
-      row.visibleMismatchRisk
+      !row.domMatchesExpected
     ));
     const summary = {
       toggles,
@@ -610,13 +469,11 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
       originalTheme,
       finalTheme: appTheme,
       mismatchThresholdMs,
-      maxMismatchMs: rows.reduce((max, row) => Math.max(max, Number(row.mismatchMs) || 0), 0),
       mismatchCount: mismatches.length,
-      allNativeColorsMatched: rows.every((row) => row.nativeMatchesTarget),
       allDomFramesMatched: rows.every((row) => row.domMatchesExpected),
       anyVisibleMismatchRisk: rows.some((row) => row.visibleMismatchRisk),
       verdict: mismatches.length
-        ? 'inspect rows with native/color/dom mismatch or visibleMismatchRisk'
+        ? 'inspect rows with dom mismatch or visibleMismatchRisk'
         : 'all toggles matched within threshold',
     };
     const result = { summary, rows, events: events.slice(), samples: samples.slice() };
@@ -629,7 +486,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     return result;
   }
 
-  const api = { record, sample, sampleFrames, report, toggleStress, topBandScan, toggleBandStress, toggleNativeSkewStress, events, samples, expectedCanvasBg, lastResult, lastJson };
+  const api = { record, sample, sampleFrames, report, toggleStress, topBandScan, toggleBandStress, toggleThemeOrderStress, events, samples, expectedCanvasBg, lastResult, lastJson };
   return api;
 })() : createNoopStartupDebug();
 
@@ -660,7 +517,6 @@ const BoardfishDebugConsole = (() => {
     textSel: 'TextSelDebug',
     pill: 'PillDebug',
     menu: 'MenuDebug',
-    eyedropper: 'EyedropperDebug',
   };
 
   let activeDepth = 0;
@@ -996,14 +852,6 @@ const BoardfishDebugConsole = (() => {
     const filename = options.filename || debugFileName(options.label || payload.label || '');
     const json = JSON.stringify(payload, null, 2);
     if (options.download === false) return { method: 'disabled', filename, bytes: json.length };
-    try {
-      if (typeof hasTauri === 'function' && hasTauri() && typeof BoardfishTauri !== 'undefined' && typeof BoardfishTauri.writeDebugLogFile === 'function') {
-        const path = await BoardfishTauri.writeDebugLogFile(filename, json);
-        return { method: 'tauri-downloads-dir', filename, path, bytes: json.length };
-      }
-    } catch (error) {
-      console.warn('[Boardfish debug] Native Downloads write failed; falling back to browser download.', error);
-    }
     return browserDownload(filename, json);
   }
 

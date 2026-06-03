@@ -21,9 +21,6 @@
       BoardfishWebBoardContainer.revokeImageSource?.(previous);
     }
     imageStore[key] = source;
-    if (typeof noteEyedropperImageSourceChanged === 'function') {
-      noteEyedropperImageSourceChanged(key, 'image-source');
-    }
     return true;
   }
 
@@ -40,18 +37,23 @@
       }
     }
     Object.assign(imageStore, nextSources || {});
-    if (typeof noteEyedropperBoardContentChanged === 'function') {
-      noteEyedropperBoardContentChanged('image-sources');
-    }
     return imageStore;
   }
 
   function getDisplayImage(key) {
-    return imageCache[key] || null;
+    return imageMetadataCache[key] || (imageBitmapCache[key] ? {
+      width: imageBitmapCache[key].width || 0,
+      height: imageBitmapCache[key].height || 0,
+      naturalWidth: imageBitmapCache[key].width || 0,
+      naturalHeight: imageBitmapCache[key].height || 0,
+      complete: true,
+      src: '',
+      currentSrc: '',
+    } : null);
   }
 
   function hasDisplayImage(key) {
-    return !!imageCache[key];
+    return !!(imageMetadataCache[key] || imageBitmapCache[key]);
   }
 
   function sourceKeys() {

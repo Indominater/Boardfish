@@ -21,13 +21,13 @@ assignees: ""
 ## Environment
 
 - Boardfish version:
-- OS: macOS / Windows
+- Browser:
+- Browser version:
+- OS:
 - OS version:
-- Installer used: dmg / app.tar.gz / exe / msi / built from source
 
 ## Files or media
 
 If useful, attach a screenshot, screen recording, or a small `.bf` file that reproduces the issue.
 
 ## Additional context
-

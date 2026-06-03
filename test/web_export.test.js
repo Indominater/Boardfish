@@ -13,7 +13,6 @@ test('web image export writes original bytes to a picked folder', async () => {
     Blob: globalThis.Blob,
     getRenderedImageDataUrl: globalThis.getRenderedImageDataUrl,
     imageNeedsRendering: globalThis.imageNeedsRendering,
-    isNativeImageRef: globalThis.isNativeImageRef,
     performance: globalThis.performance,
     renderImageToCanvas: globalThis.renderImageToCanvas,
     showDirectoryPicker: globalThis.showDirectoryPicker,
@@ -52,7 +51,6 @@ test('web image export writes original bytes to a picked folder', async () => {
   };
   globalThis.getRenderedImageDataUrl = async () => '';
   globalThis.imageNeedsRendering = () => false;
-  globalThis.isNativeImageRef = () => false;
   globalThis.renderImageToCanvas = () => null;
   globalThis.showDirectoryPicker = async () => directoryHandle;
 

@@ -65,9 +65,7 @@ function loadCanvasWheelHarness() {
     _rubberBandDragActive: false,
     zoomCalls: [],
     transforms: [],
-    navigationNotes: [],
     isEventInsideViewportWheelSurface: (e) => e.insideViewportWheelSurface === true,
-    isEventInsideVisibleEyedropperLoupe: () => false,
     ViewportDebug: {
       isEnabled: () => false,
       start: () => ({}),
@@ -84,9 +82,6 @@ function loadCanvasWheelHarness() {
     },
     scheduleTransform(source, event) {
       context.transforms.push({ source, event });
-    },
-    noteEyedropperNavigationActive(reason) {
-      context.navigationNotes.push(reason);
     },
     createRafCommitter: () => ({ schedule() {}, flush() {} }),
     beginDocumentDrag() {},
@@ -199,7 +194,7 @@ test('wheel zoom over visible floating UI uses the viewport wheel handler', () =
   const selectionSource = readSource('src/js/selection_input.js');
   const styles = readSource('src/styles.css');
 
-  assert.match(inputSource, /function handleGlobalViewportWheel\(e\) \{[\s\S]*if \(e\.__boardfishViewportWheelHandled\) return;[\s\S]*const viewportZoomGesture = e\.ctrlKey \|\| e\.metaKey;[\s\S]*isEventInsideViewportWheelSurface[\s\S]*isEventInsideVisibleEyedropperLoupe[\s\S]*if \(!viewportZoomGesture && !insideViewportWheelSurface && !insideEyedropperLoupe\) return;\s*handleViewportWheel\(e\);[\s\S]*\}/);
+  assert.match(inputSource, /function handleGlobalViewportWheel\(e\) \{[\s\S]*if \(e\.__boardfishViewportWheelHandled\) return;[\s\S]*const viewportZoomGesture = e\.ctrlKey \|\| e\.metaKey;[\s\S]*isEventInsideViewportWheelSurface[\s\S]*if \(!viewportZoomGesture && !insideViewportWheelSurface\) return;\s*handleViewportWheel\(e\);[\s\S]*\}/);
   assert.match(inputSource, /window\.addEventListener\('wheel', handleGlobalViewportWheel, \{ capture: true, passive: false \}\);/);
   assert.match(inputSource, /document\.addEventListener\('wheel', handleGlobalViewportWheel, \{ capture: true, passive: false \}\);/);
   assert.match(selectionSource, /document\.elementFromPoint\(x, y\)/);
@@ -224,6 +219,19 @@ test('zoom pill stays out of keyboard focus and Space reset paths', () => {
   assert.match(contextMenuSource, /const resetZoomFromPill = \(e\) => \{\s*if \(island\?\.dataset\?\.mode !== 'zoom'\) return;/);
   assert.match(contextMenuSource, /const suppressZoomPillContextMenu = \(e\) => \{\s*if \(island\?\.dataset\?\.mode !== 'zoom'\) return;/);
   assert.match(contextMenuSource, /if \(document\.activeElement === island\) island\.blur\(\);/);
+});
+
+test('text edit caret height follows script formatting', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart)');
+  const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const drawCaretSource = viewportSource.slice(start, end);
+
+  assert.match(drawCaretSource, /textScriptCaretStateAt/);
+  assert.match(drawCaretSource, /caretHeight = LINE_H \* scale;/);
+  assert.match(drawCaretSource, /TEXT_BASELINE_Y_OFFSET \* scale/);
 });
 
 test('zoom pill suppresses browser context menu without resetting zoom', () => {
@@ -276,7 +284,6 @@ test('global capture wheel zoom over the zoom pill is handled once by the board'
   assert.equal(event.defaultPrevented, true);
   assert.equal(context.zoomCalls.length, 1);
   assert.deepEqual(context.transforms.map((entry) => entry.source), ['wheel-zoom']);
-  assert.deepEqual(context.navigationNotes, ['wheel-zoom']);
   assert.ok(context.zoomCalls[0].nextZoom > 1);
 });
 

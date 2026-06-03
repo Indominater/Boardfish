@@ -21,21 +21,6 @@ var SaveDebug = (() => {
     if (DEBUG_TOOLS_ENABLED) console.info('Boardfish save debugger disabled.');
   }
 
-  async function invoke(ctx, command, args = {}, meta = {}) {
-    if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!core.enabled) return tauriInvoke(command, args);
-    const t0 = performance.now();
-    core.step(ctx, 'invoke:start', { command, ...meta });
-    try {
-      const result = await tauriInvoke(command, args);
-      core.step(ctx, 'invoke:ok', { command, ms: performance.now() - t0, rust: result || null });
-      return result;
-    } catch (err) {
-      core.step(ctx, 'invoke:error', { command, ms: performance.now() - t0, error: String(err) });
-      throw err;
-    }
-  }
-
   async function wrap(ctx, command, call, meta = {}) {
     if (!core.enabled) return call();
     const t0 = performance.now();
@@ -193,7 +178,6 @@ var SaveDebug = (() => {
     start: core.start,
     step: core.step,
     end: core.end,
-    invoke,
     wrap,
     dump,
     summary,

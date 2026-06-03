@@ -94,7 +94,6 @@ function loadEditorStateBoundaryHarness() {
     normalizeTextContent(value) {
       return String(value || '');
     },
-    noteEyedropperBoardContentChanged() {},
     rebuildObjectsMap() {
       context.objectsMap.clear();
       for (const obj of context.objects) context.objectsMap.set(obj.id, obj);
@@ -110,12 +109,11 @@ function loadEditorStateBoundaryHarness() {
 function loadDataUrlPasteFailureHarness() {
   const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
   const start = source.indexOf('function fitImageSize');
-  const end = source.indexOf('\nasync function pasteNativeCachedImage', start);
+  const end = source.indexOf('\nasync function insertImageFiles', start);
   assert.ok(start >= 0 && end > start, 'data URL image insert helpers are missing');
   const calls = {
     cached: [],
     removedRuntime: [],
-    sourceChanged: [],
     shields: [],
   };
   const imageStore = {};
@@ -129,8 +127,6 @@ function loadDataUrlPasteFailureHarness() {
     _boardOpening: false,
     performance: { now: () => 1 },
     fileInput: { addEventListener() {}, value: '', files: [] },
-    eyedropperEnabled: false,
-    hasTauri: () => false,
     isWebImageRef: () => false,
     webImageDisplaySrc: (src) => src,
     imageSourceDebugInfo: () => ({ kind: 'data-url' }),
@@ -139,17 +135,15 @@ function loadDataUrlPasteFailureHarness() {
     cacheImage(key, src, _dbg, loadedImg) {
       calls.cached.push({ key, src, loaded: !!loadedImg });
       imageCache[key] = loadedImg || { src };
-      return Promise.resolve({ cacheReadyStage: 'display' });
+      return Promise.resolve({ cacheReadyStage: 'bitmap', naturalWidth: 120, naturalHeight: 80 });
     },
     removeImageRuntimeCachesForKey(key, sourceOverride) {
       calls.removedRuntime.push({ key, sourceOverride });
       delete imageCache[key];
     },
-    noteEyedropperImageSourceChanged(key, reason) {
-      calls.sourceChanged.push({ key, reason });
-    },
     BoardfishImageStore: {
       getSource(key) { return imageStore[key]; },
+      getDisplayImage(key) { return imageCache[key] || null; },
       setSource(key, sourceValue) {
         imageStore[key] = sourceValue;
         return true;
@@ -293,15 +287,6 @@ test('failed web image inserts revoke unadopted web image sources', () => {
   assert.match(source, /BoardfishWebBoardContainer\.revokeImageSource\?\.\(imageSource\);/);
 });
 
-test('failed native image inserts roll back unadopted JS image sources', () => {
-  const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
-
-  assert.match(source, /rollbackSource = createImageInsertSourceRollback\(imgKey, imageSource\);\s*BoardfishImageStore\.setSource\(imgKey, imageSource\);/);
-  assert.match(source, /if \(!obj\) \{\s*rollbackSource\(\);\s*cleanupNativeImageSourceToken\(imgKey, sourceToken\);/);
-  assert.match(source, /catch \(err\) \{\s*if \(registeredNativeSource\) cleanupNativeImageSourceToken\(imgKey, sourceToken\);\s*if \(rollbackSource\) rollbackSource\(\);/);
-  assert.match(source, /catch \(err\) \{\s*if \(rollbackSource\) rollbackSource\(\);\s*cleanupNativeImageSourceToken\(imgKey, sourceToken\);\s*throw err;/);
-});
-
 test('failed generic data URL paste rolls back the orphan image source and runtime cache', async () => {
   const context = loadDataUrlPasteFailureHarness();
   const dataUrl = 'data:image/png;base64,boardfish';
@@ -314,14 +299,10 @@ test('failed generic data URL paste rolls back the orphan image source and runti
   assert.deepEqual(JSON.parse(JSON.stringify(context.calls.cached)), [{
     key: 'img-1',
     src: dataUrl,
-    loaded: true,
+    loaded: false,
   }]);
   assert.deepEqual(JSON.parse(JSON.stringify(context.calls.removedRuntime)), [{
     key: 'img-1',
     sourceOverride: dataUrl,
-  }]);
-  assert.deepEqual(JSON.parse(JSON.stringify(context.calls.sourceChanged)), [{
-    key: 'img-1',
-    reason: 'image-source-removed',
   }]);
 });

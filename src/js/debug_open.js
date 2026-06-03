@@ -50,21 +50,6 @@ var OpenDebug = (() => {
   const step = core.step;
   const end = core.end;
 
-  async function invoke(ctx, command, args = {}, meta = {}) {
-    if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!core.enabled) return tauriInvoke(command, args);
-    const t0 = performance.now();
-    step(ctx, 'invoke:start', { command, ...meta });
-    try {
-      const result = await tauriInvoke(command, args);
-      step(ctx, 'invoke:ok', { command, ms: performance.now() - t0, rust: result?.debug || result || null });
-      return result;
-    } catch (err) {
-      step(ctx, 'invoke:error', { command, ms: performance.now() - t0, error: String(err) });
-      throw err;
-    }
-  }
-
   async function wrap(ctx, command, call, meta = {}) {
     if (!core.enabled) return call();
     const t0 = performance.now();
@@ -119,9 +104,6 @@ var OpenDebug = (() => {
   }
 
   function phaseSummary() {
-    const dataUrlCommand = typeof TAURI_COMMANDS !== 'undefined'
-      ? TAURI_COMMANDS.GET_CACHED_IMAGE_DATA_URL
-      : 'get_cached_image_data_url';
     const interesting = new Set([
       'read-board-debug',
       'apply-state',
@@ -135,7 +117,7 @@ var OpenDebug = (() => {
     ]);
     const rows = events.filter(e => (
       interesting.has(e.step) ||
-      (e.step === 'invoke:ok' && e.meta?.command && e.meta.command !== dataUrlCommand)
+      (e.step === 'invoke:ok' && e.meta?.command)
     )).map(e => ({
       step: e.step,
       total: e.total,
@@ -212,12 +194,8 @@ var OpenDebug = (() => {
         previewMs: 0,
         renderScheduleMs: 0,
         loadMs: 0,
-        readbackProbeMs: 0,
         bitmapReady: '',
         bitmapFailed: '',
-        readbackSafe: '',
-        skippedReadbackProbe: '',
-        requiredReadbackSafe: '',
         error: '',
       });
       const row = totals.get(key);
@@ -226,7 +204,6 @@ var OpenDebug = (() => {
         row.totalMs = meta.ms ?? row.totalMs;
         row.bitmapReady = meta.bitmapReady ?? row.bitmapReady;
         row.bitmapFailed = meta.bitmapFailed ?? row.bitmapFailed;
-        row.readbackSafe = meta.readbackSafe ?? row.readbackSafe;
       } else if (event.step === 'cache-image:decode-queue:start') {
         row.queueWaitMs = meta.queueWaitMs ?? row.queueWaitMs;
       } else if (event.step === 'cache-image:createImageBitmap') {
@@ -235,12 +212,6 @@ var OpenDebug = (() => {
         row.previewMs = meta.ms ?? row.previewMs;
       } else if (event.step === 'cache-image:schedule-render') {
         row.renderScheduleMs = meta.ms ?? row.renderScheduleMs;
-      } else if (event.step === 'cache-image:load') {
-        row.loadMs = meta.ms ?? row.loadMs;
-      } else if (event.step === 'cache-image:readback-probe') {
-        row.readbackProbeMs = meta.ms ?? row.readbackProbeMs;
-        row.skippedReadbackProbe = meta.skipped ?? '';
-        row.requiredReadbackSafe = meta.required ?? '';
       } else if (event.step.endsWith(':error')) {
         row.error = meta.error || row.error;
       }
@@ -267,8 +238,6 @@ var OpenDebug = (() => {
         cacheBitmapMs: e.meta?.cacheBitmapMs ?? '',
         cachePreviewMs: e.meta?.cachePreviewMs ?? '',
         cacheRenderScheduleMs: e.meta?.cacheRenderScheduleMs ?? '',
-        cacheReadbackProbeMs: e.meta?.cacheReadbackProbeMs ?? '',
-        skippedReadbackProbe: e.meta?.skippedReadbackProbe ?? '',
         source: e.meta?.source ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
         displayReady: e.meta?.displayReady ?? '',
@@ -289,17 +258,15 @@ var OpenDebug = (() => {
         command: e.meta?.command || '',
         count: e.meta?.count ?? '',
         hydrated: e.meta?.hydrated ?? '',
-        pendingImages: e.meta?.pendingImages ?? e.meta?.pendingNativeImages ?? '',
+        pendingImages: e.meta?.pendingImages ?? '',
         visibleBitmapsReady: e.meta?.visibleBitmapsReady ?? e.meta?.after ?? '',
         visibleBitmapsFailed: e.meta?.visibleBitmapsFailed ?? e.meta?.failed ?? '',
         visibleBitmapsMissing: e.meta?.visibleBitmapsMissing ?? e.meta?.missing ?? '',
         visibleBitmapSettleMs: e.meta?.visibleBitmapSettleMs ?? '',
-        nativeRefs: e.meta?.nativeRefs ?? '',
         manifestRefs: e.meta?.manifestRefs ?? '',
         dataUrlRefs: e.meta?.dataUrlRefs ?? '',
         missingStoreRefs: e.meta?.missingStoreRefs ?? '',
         cachedImages: e.meta?.cachedImages ?? '',
-        assetUrls: e.meta?.assetUrls ?? '',
         deferredInitialCacheImages: e.meta?.deferredInitialCacheImages ?? '',
         visibleFirstOpen: e.meta?.visibleFirstOpen ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
@@ -395,8 +362,7 @@ var OpenDebug = (() => {
     const backgroundDone = findLastStep('hydrate-background:done');
     const initialRender = findStep('initial-applyTransform');
     const endEvent = findLastStep('end');
-    const read = findInvoke(typeof TAURI_COMMANDS !== 'undefined' ? TAURI_COMMANDS.READ_BOARD : 'read_board') ||
-      rows.find(e => e.step === 'invoke:ok' && /read_board|web_read_board/.test(e.meta?.command || '')) ||
+    const read = rows.find(e => e.step === 'invoke:ok' && /web_read_board/.test(e.meta?.command || '')) ||
       null;
     const shape = findStep('read-board-shape');
     const applyState = findStep('apply-state');
@@ -446,7 +412,7 @@ var OpenDebug = (() => {
       findings.push('The open waited for non-visible image hydration; visible-first avoids that critical-path work.');
     }
     if (Number(summaryRow.rustImageReadMs) > Number(summaryRow.initialHydrationMs || 0)) {
-      findings.push('Native image extraction is the largest measured open phase.');
+      findings.push('Board file image extraction is the largest measured open phase.');
     }
     if (Number(summaryRow.initialRenderMs) > 50) {
       if (Number(summaryRow.initialSaveViewportMs) > 50 && Number(summaryRow.initialSaveViewportMs) > Number(summaryRow.initialDrawMs || 0)) {
@@ -475,7 +441,6 @@ var OpenDebug = (() => {
     start,
     step,
     end,
-    invoke,
     wrap,
     dump,
     summary,

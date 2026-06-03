@@ -1,16 +1,36 @@
 // ─── Add objects ─────────────────────────────────────────────────────────────
 
 function addText(wx, wy, content = '', options = {}) {
-  if (eyedropperEnabled) return;
   if (!BoardfishWebLimits.canAddObjects(1)) return;
   content = textForTextObjectPaste(content);
+  let sourceRanges = Array.isArray(options?.scriptRanges)
+    ? options.scriptRanges
+    : (typeof deriveBracedTextScriptRangesFromContent === 'function' ? deriveBracedTextScriptRangesFromContent(content) : []);
+  if (typeof textScriptLinearToDeterministicBraces === 'function') {
+    content = normalizeTextContent(textScriptLinearToDeterministicBraces(content, sourceRanges));
+    sourceRanges = typeof deriveBracedTextScriptRangesFromContent === 'function'
+      ? deriveBracedTextScriptRangesFromContent(content)
+      : [];
+  }
+  const data = { content };
+  if (typeof normalizeTextScriptRangesForContent === 'function') {
+    const scriptRanges = normalizeTextScriptRangesForContent(content, sourceRanges);
+    if (scriptRanges.length) data.scriptRanges = scriptRanges;
+  }
   if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
     const textBytes = typeof BoardfishWebLimits.textByteLength === 'function'
       ? BoardfishWebLimits.textByteLength(content)
       : (typeof TextEncoder === 'function' ? new TextEncoder().encode(content).length : content.length);
     if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1)) return;
   }
-  let w = 200, h = content ? LINE_H + TEXT_PAD * 2 : NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
+  const defaultSize = typeof defaultTextBoxSize === 'function'
+    ? defaultTextBoxSize()
+    : (() => {
+        const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
+        return { w: h * ((1 + Math.sqrt(5)) / 2), h };
+      })();
+  let w = content ? 200 : defaultSize.w;
+  let h = content ? LINE_H + TEXT_PAD * 2 : defaultSize.h;
   if (content) {
     const lines = content.split('\n');
     const charW = 9.2, pad = 8;
@@ -18,7 +38,7 @@ function addText(wx, wy, content = '', options = {}) {
     w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
   }
 
-  const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data: { content } };
+  const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
   syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
   if (options?.anchor === 'center') {
     obj.x = wx - obj.w / 2;
@@ -124,7 +144,6 @@ async function runShieldedPillTask({
 
 async function newBoard() {
   if (objects.length === 0 && !currentFilePath) {
-    setEyedropperEnabled(false);
     return;
   }
   if (isDirty()) {
@@ -139,11 +158,7 @@ async function newBoard() {
   else openingShield.classList.add('active');
   const openingStart = performance.now();
   await startPillTask({ message: 'Opening' });
-  setEyedropperEnabled(false);
   BoardfishEditorState.resetBoardObjectState();
-  if (typeof clearEyedropperCardForBoard === 'function') {
-    clearEyedropperCardForBoard();
-  }
   OpenDebug.step(dbg, 'exitEdit', {});
   clearJsClipboard();
   invalidateOffscreen();

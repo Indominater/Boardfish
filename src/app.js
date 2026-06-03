@@ -28,9 +28,7 @@ var rotateBtn         = BoardfishDOM.rotateBtn;
 var rubberBand       = BoardfishDOM.rubberBand;
 var addTextBtn       = BoardfishDOM.addTextBtn;
 var addImageBtn      = BoardfishDOM.addImageBtn;
-var IS_WIN = /Win/.test(navigator.platform) || /Win/.test(navigator.userAgent);
 var IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
-if (IS_MAC && typeof hasTauri === 'function' && hasTauri()) document.body.classList.add('is-macos');
 var COMMAND_KEY_LABEL = IS_MAC ? '\u2318' : 'Ctrl';
 var SHIFT_KEY_LABEL = IS_MAC ? '\u21e7' : 'Shift';
 var MENU_VIEWPORT_EDGE_MARGIN = 12;
@@ -66,11 +64,9 @@ function syncPlatformShortcutLabels() {
 syncPlatformShortcutLabels();
 var APP_THEMES = {
   light: {
-    native: 'Light',
     webThemeColor: '#eaeaed',
   },
   dark: {
-    native: 'Dark',
     webThemeColor: '#1c1b22',
   },
 };
@@ -120,33 +116,6 @@ const syncWebAppThemeColor = (theme = appTheme) => {
   if (meta) meta.setAttribute('content', APP_THEMES[nextTheme].webThemeColor);
 };
 
-function applyNativeAppTheme(theme = appTheme) {
-  if (!hasTauri()) return Promise.resolve();
-  const nextTheme = normalizeAppTheme(theme);
-  const nativeTheme = APP_THEMES[nextTheme].native;
-  logStartupStep('apply-native-theme:start', { theme: nextTheme, nativeTheme });
-  return BoardfishTauri.setAppTheme(nativeTheme)
-    .then((native) => logStartupStep('apply-native-theme:done', {
-      theme: nextTheme,
-      nativeTheme: native?.theme || nativeTheme,
-      nativeColor: native?.color || '',
-      nativeMs: native?.ms ?? '',
-    }))
-    .catch((err) => {
-      logStartupError('apply-native-theme:failed', err);
-    });
-}
-
-function showAppWindow() {
-  if (!hasTauri()) return Promise.resolve();
-  logStartupStep('show-window:start', { theme: appTheme });
-  return BoardfishTauri.showAppWindow()
-    .then(() => logStartupStep('show-window:done', { theme: appTheme }))
-    .catch((err) => {
-      logStartupError('show-window:failed', err);
-    });
-}
-
 function repaintBoardForThemeChange() {
   if (typeof invalidateOffscreen === 'function') {
     invalidateOffscreen();
@@ -170,82 +139,32 @@ function repaintBoardForThemeChange() {
   return 'deferred-unavailable';
 }
 
-async function waitForNativeThemeSettle({ frames = 0, ms = 0, theme = appTheme } = {}) {
-  if (frames <= 0 && ms <= 0) return;
-  const start = performance.now();
-  if (ms > 0) {
-    await new Promise((resolve) => setTimeout(resolve, ms));
-  }
-  for (let frame = 0; frame < frames; frame++) {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
-  logStartupStep('native-theme-settle', {
-    theme,
-    frames,
-    ms,
-    actualMs: Math.round((performance.now() - start) * 100) / 100,
-  });
-}
-
 function applyAppTheme(theme, {
   dirty = false,
-  native = true,
   render = true,
-  nativeFirst = false,
-  nativeParallel = false,
-  nativeParallelDomMs = 0,
-  nativeSettleFrames = 0,
-  nativeSettleMs = 0,
 } = {}) {
   const nextTheme = normalizeAppTheme(theme);
-  const applyDomTheme = () => {
-    const changed = appTheme !== nextTheme;
-    appTheme = nextTheme;
-    document.body.dataset.theme = appTheme;
-    syncWebAppThemeColor(appTheme);
-    logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
-    if (render && (changed || dirty)) {
-      logStartupStep('theme-canvas-repaint', { theme: appTheme, mode: repaintBoardForThemeChange() });
-    }
-    if (dirty) {
-      storeAppTheme();
-    }
-  };
-
-  if (native && nativeParallel) {
-    const nativePromise = applyNativeAppTheme(nextTheme);
-    return waitForNativeThemeSettle({
-      ms: nativeParallelDomMs,
-      theme: nextTheme,
-    })
-      .then(applyDomTheme)
-      .then(() => nativePromise);
+  const changed = appTheme !== nextTheme;
+  appTheme = nextTheme;
+  document.body.dataset.theme = appTheme;
+  syncWebAppThemeColor(appTheme);
+  logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
+  if (render && (changed || dirty)) {
+    logStartupStep('theme-canvas-repaint', { theme: appTheme, mode: repaintBoardForThemeChange() });
   }
-
-  if (native && nativeFirst) {
-    return applyNativeAppTheme(nextTheme)
-      .then(() => waitForNativeThemeSettle({
-        frames: nativeSettleFrames,
-        ms: nativeSettleMs,
-        theme: nextTheme,
-      }))
-      .then(applyDomTheme);
-  }
-
-  applyDomTheme();
-  return native ? applyNativeAppTheme(nextTheme) : Promise.resolve();
+  if (dirty) storeAppTheme();
+  return Promise.resolve();
 }
 
 function toggleAppTheme() {
   return applyAppTheme(appTheme === 'dark' ? 'light' : 'dark', {
     dirty: true,
-    native: true,
   });
 }
 
 const startupTheme = loadStoredAppTheme();
-logStartupStep('theme-bootstrap', { theme: startupTheme, hasTauri: hasTauri() });
-applyAppTheme(startupTheme, { render: false }).finally(showAppWindow);
+logStartupStep('theme-bootstrap', { theme: startupTheme });
+applyAppTheme(startupTheme, { render: false });
 
 function cssVar(name) {
   return getComputedStyle(document.body).getPropertyValue(name).trim();

@@ -157,7 +157,6 @@ function loadRubberBandHarness() {
     ViewportDebug: { isEnabled: () => false, start() { return {}; }, count() {}, end() {}, timing() {} },
     BoardfishViewportState: { zoomAroundClient() {}, panBy() {}, setPan() {} },
     scheduleTransform() {},
-    noteEyedropperNavigationActive() {},
     createRafCommitter: () => ({ schedule() {}, flush() {} }),
     isBoardInputBlocked: () => false,
     isBoardNavigationAllowedWhileBlocked: () => false,
@@ -271,4 +270,34 @@ test('releasing a caret-only text click does not open the text edit menu', () =>
 
   assert.deepEqual(context.editProxy.selection, [2, 2]);
   assert.deepEqual(context.menus, []);
+});
+
+test('text click preserves script caret affinity from rich hit testing', () => {
+  const context = loadCanvasInputHarness();
+  context.obj.data.content = 'e^{x^{2}}';
+  context.editProxy.value = context.obj.data.content;
+  context.editingId = context.obj.id;
+  context._editEl = context.editProxy;
+  context.layoutHitTestCaret = () => ({ index: 8, affinity: 'after' });
+
+  context.startTextSelectionDrag({ clientX: 12, clientY: 22 }, context.obj, { x: 12, y: 22 });
+
+  assert.deepEqual(context.editProxy.selection, [8, 8]);
+  assert.equal(context.obj._textEditCaretIndex, 8);
+  assert.equal(context.obj._textScriptCaretIndex, 8);
+  assert.equal(context.obj._textScriptCaretAffinity, 'after');
+});
+
+test('double-clicking text while editing places the caret without selecting a word', () => {
+  const context = loadCanvasInputHarness();
+  context.obj.data.content = '  alpha\tbeta gamma';
+  context.editProxy.value = context.obj.data.content;
+  context.editingId = context.obj.id;
+  context._editEl = context.editProxy;
+  context.layoutHitTest = () => 10;
+
+  context.startTextSelectionDrag({ clientX: 12, clientY: 22, detail: 2 }, context.obj, { x: 12, y: 22 });
+
+  assert.deepEqual(context.editProxy.selection, [10, 10]);
+  assert.deepEqual(context.logs.at(-1), 'mouse-down');
 });

@@ -18,17 +18,6 @@ const variants = {
     cacheBust: true,
     mode: 'bundle',
   },
-  'desktop-release': {
-    outDir: path.join(root, 'dist-desktop'),
-    scripts: VARIANT_SCRIPTS['desktop-release'],
-    bundle: 'assets/boardfish-desktop.min.js',
-    mode: 'bundle',
-  },
-  'desktop-dev': {
-    outDir: path.join(root, 'dist-desktop'),
-    mode: 'copy',
-    entrypoint: 'js/main.desktop.dev.mjs',
-  },
 };
 
 function assertInsideWorkspace(target) {
@@ -136,15 +125,8 @@ async function buildBundle(variantName, config) {
   console.log(`${variantName}: ${bundle} ${rawKb} KB raw, ${gzipKb} KB gzip`);
 }
 
-async function buildCopy(variantName, config) {
-  await resetDir(config.outDir);
-  await copyStaticAssets(config.outDir, { includeJs: true });
-  await writeIndex(config.outDir, `<script type="module" src="${config.entrypoint}"></script>`);
-  console.log(`${variantName}: copied source assets to ${path.relative(root, config.outDir)}`);
-}
-
 const requested = process.argv.slice(2);
-const names = requested.length ? requested : ['web-preview', 'desktop-release'];
+const names = requested.length ? requested : ['web-preview'];
 
 for (const name of names) {
   const config = variants[name];
@@ -152,6 +134,5 @@ for (const name of names) {
     console.error(`Unknown build variant "${name}". Expected one of: ${Object.keys(variants).join(', ')}`);
     process.exit(1);
   }
-  if (config.mode === 'copy') await buildCopy(name, config);
-  else await buildBundle(name, config);
+  await buildBundle(name, config);
 }

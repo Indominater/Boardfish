@@ -1,12 +1,7 @@
 'use strict';
 
-const NATIVE_IMAGE_INSERT_CONCURRENCY = 3;
 const WEB_IMAGE_INSERT_CONCURRENCY = 3;
 const WEB_BULK_IMAGE_READY_RENDER_INTERVAL_MS = 450;
-
-const nativeImageInsertConcurrency = (count) => (
-  Math.max(1, Math.min(NATIVE_IMAGE_INSERT_CONCURRENCY, Number(count) || 1))
-);
 
 const webImageInsertConcurrency = (count) => (
   Math.max(1, Math.min(WEB_IMAGE_INSERT_CONCURRENCY, Number(count) || 1))
@@ -46,28 +41,6 @@ function fitImageSize(naturalW, naturalH, exactSize = false) {
   }
   return { w, h };
 }
-
-var NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD = 2 * 1024 * 1024;
-const nativeImageInsertReservation = { bytes: 0, objects: 0 };
-
-const reserveNativeImageContent = (bytes = 0, objectCount = 1, options = {}) => {
-  const reservedBytes = Math.max(0, Number(bytes) || 0);
-  const reservedObjects = Math.max(0, Number(objectCount) || 0);
-  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(
-    nativeImageInsertReservation.bytes + reservedBytes,
-    nativeImageInsertReservation.objects + reservedObjects,
-    options,
-  )) return null;
-  nativeImageInsertReservation.bytes += reservedBytes;
-  nativeImageInsertReservation.objects += reservedObjects;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    nativeImageInsertReservation.bytes = Math.max(0, nativeImageInsertReservation.bytes - reservedBytes);
-    nativeImageInsertReservation.objects = Math.max(0, nativeImageInsertReservation.objects - reservedObjects);
-  };
-};
 
 var isImageDataUrl = (src) => typeof src === 'string' && /^data:image\/(?:png|jpeg);base64,/i.test(src);
 
@@ -133,9 +106,6 @@ const rollbackImageInsertSource = ({
     } else {
       if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey, source);
       delete imageStore[imgKey];
-      if (typeof noteEyedropperImageSourceChanged === 'function') {
-        noteEyedropperImageSourceChanged(imgKey, 'image-source-removed');
-      }
     }
     return true;
   }
@@ -164,10 +134,6 @@ const cleanupFailedWebImageInsertSource = (imgKey, imageSource) => {
     BoardfishWebBoardContainer.revokeImageSource?.(imageSource);
   }
 };
-
-function shouldUseNativeDataUrlImageCache(src) {
-  return hasTauri() && isImageDataUrl(src) && src.length >= NATIVE_DATA_URL_IMAGE_CACHE_THRESHOLD;
-}
 
 const pendingInsertedImageMotions = new Map();
 
@@ -258,275 +224,72 @@ function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-
   return obj;
 }
 
-async function addDataUrlImageViaNativeCache(src, cx, cy, exactSize = false, existingImgKey = null, options = {}) {
-  const dbg = ViewportDebug.start('addImage', {
-    src,
-    cx,
-    cy,
-    exactSize,
-    existingImgKey,
-    path: 'native-data-url-cache',
-  });
-  const t0 = performance.now();
-  ViewportDebug.count('imageAdds');
-  ViewportDebug.count('nativeImageAdds');
-  if (!_boardOpening) showInputShield();
-  const imgKey = existingImgKey || newImgKey();
-  const generation = _imageStoreGeneration;
-  const sourceToken = createImageSourceToken(imgKey);
-  let rollbackSource = null;
-  if (!BoardfishWebLimits.canAddObjects(1)) {
-    if (!_boardOpening) hideInputShield();
-    ViewportDebug.end(dbg, { imgKey, path: 'native-data-url-cache', skipped: 'object-limit' });
-    return null;
-  }
-  const sourceBytes = BoardfishWebLimits.dataUrlByteLength?.(src) || 0;
-  const releaseReservation = reserveNativeImageContent(sourceBytes, 1, { notifyUser: true });
-  if (!releaseReservation) {
-    if (!_boardOpening) hideInputShield();
-    ViewportDebug.end(dbg, { imgKey, path: 'native-data-url-cache', skipped: 'content-limit' });
-    return null;
-  }
-  let registeredNativeSource = false;
-  try {
-    ViewportDebug.step(dbg, 'native-data-url-register:start', { imgKey, dataUrl: src });
-    const meta = await BoardfishTauri.registerImageSource(imgKey, src, sourceToken);
-    registeredNativeSource = true;
-    if (generation !== _imageStoreGeneration) {
-      cleanupNativeImageSourceToken(imgKey, sourceToken);
-      registeredNativeSource = false;
-      return null;
-    }
-    const naturalW = Number(meta?.width) || 1;
-    const naturalH = Number(meta?.height) || 1;
-    const imageSource = {
-      native: true,
-      mime: meta?.mime || 'image/png',
-      ext: meta?.ext || 'png',
-      bytes: meta?.bytes || 0,
-    };
-    rollbackSource = createImageInsertSourceRollback(imgKey, imageSource);
-    BoardfishImageStore.setSource(imgKey, imageSource);
-    ViewportDebug.step(dbg, 'native-data-url-register:end', {
-      imgKey,
-      width: naturalW,
-      height: naturalH,
-      bytes: meta?.bytes || 0,
-      mime: meta?.mime || '',
-      ext: meta?.ext || '',
-    });
-
-    await materializeImageAssets([imgKey], dbg);
-    if (!imageAssetUrlCache[imgKey]) throw new Error('native data URL image materialization failed');
-    cacheImage(imgKey, imageAssetUrlCache[imgKey], dbg, null, {
-      skipSourceRegistration: true,
-      resolveOnLoad: options.resolveOnLoad === true,
-    });
-
-    const { w, h } = fitImageSize(naturalW, naturalH, exactSize);
-    ViewportDebug.step(dbg, 'size-object', { w, h });
-    const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-data-url-image');
-    if (!obj) {
-      rollbackSource();
-      cleanupNativeImageSourceToken(imgKey, sourceToken);
-      registeredNativeSource = false;
-      return null;
-    }
-    if (typeof scheduleEyedropperNativeDecodePrewarm === 'function') {
-      scheduleEyedropperNativeDecodePrewarm('add-native-data-url-image');
-    }
-    const total = performance.now() - t0;
-    ViewportDebug.max('maxImageAddMs', total);
-    ViewportDebug.end(dbg, { id: obj.id, imgKey, total, path: 'native-data-url-cache' });
-    return obj;
-  } catch (err) {
-    if (registeredNativeSource) cleanupNativeImageSourceToken(imgKey, sourceToken);
-    if (rollbackSource) rollbackSource();
-    const total = performance.now() - t0;
-    ViewportDebug.max('maxImageAddMs', total);
-    ViewportDebug.end(dbg, { imgKey, total, path: 'native-data-url-cache', error: String(err) });
-    return null;
-  } finally {
-    releaseReservation();
-    if (!_boardOpening) hideInputShield();
-  }
-}
-
 async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, options = {}) {
-  if (shouldUseNativeDataUrlImageCache(src)) {
-    return addDataUrlImageViaNativeCache(src, cx, cy, exactSize, existingImgKey, options);
-  }
   const displaySrc = isWebImageRef(src) ? webImageDisplaySrc(src) : src;
   if (typeof displaySrc !== 'string' || !displaySrc) return null;
-  if (!hasTauri() && !options.webValidated && isImageDataUrl(src)) {
+  if (!options.webValidated && isImageDataUrl(src)) {
     const valid = await BoardfishWebLimits.validateDataUrlImage(src, 'image');
     if (!valid) return null;
   }
-  return new Promise((resolve) => {
-    const dbg = ViewportDebug.start('addImage', { src: displaySrc, cx, cy, exactSize, existingImgKey });
-    const t0 = performance.now();
-    ViewportDebug.count('imageAdds');
-    if (!_boardOpening) showInputShield();
-    const img = new Image();
-    img.onload = () => {
-      ViewportDebug.step(dbg, 'load', { width: img.naturalWidth, height: img.naturalHeight, ms: performance.now() - t0 });
-      const { w, h } = fitImageSize(img.naturalWidth, img.naturalHeight, exactSize);
-      ViewportDebug.step(dbg, 'size-object', { w, h });
-      const imgKey = existingImgKey || newImgKey();
-      const rollbackSource = createImageInsertSourceRollback(imgKey, src);
-      BoardfishImageStore.setSource(imgKey, src);
-      cacheImage(imgKey, src, null, img, {
-        resolveOnLoad: options.resolveOnLoad === true,
-        readyRenderMinIntervalMs: options.readyRenderMinIntervalMs,
-      });
-      ViewportDebug.step(dbg, 'cache-registered', { imgKey });
-      InsertDebug.step(options.insertDebug, 'cache:queued', {
-        source: options.source || '',
-        imgKey,
-        resolveOnLoad: options.resolveOnLoad === true,
-        sourceKind: imageSourceDebugInfo(src).kind,
-      });
-      const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-image');
-      InsertDebug.step(options.insertDebug, 'object:add', {
-        source: options.source || '',
-        imgKey,
-        objectId: obj?.id || '',
-        w,
-        h,
-        z: obj?.z ?? '',
-      });
-      if (!obj) rollbackSource();
-      const total = performance.now() - t0;
-      ViewportDebug.max('maxImageAddMs', total);
-      ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, total, added: !!obj });
-      if (!_boardOpening) hideInputShield();
-      resolve(obj);
-    };
-    img.onerror = () => {
-      const total = performance.now() - t0;
-      ViewportDebug.max('maxImageAddMs', total);
-      ViewportDebug.end(dbg, { error: 'image load failed', total });
-      if (!_boardOpening) hideInputShield();
-      resolve(null);
-    };
-    img.src = displaySrc;
-    ViewportDebug.step(dbg, 'set-src', { src: displaySrc });
-  });
-}
-
-async function addNativeImageFile(path, cx, cy, options = {}) {
-  const dbg = ViewportDebug.start('addNativeImageFile', { path, cx, cy });
-  const insertDbg = options.insertDebug || null;
-  const source = options.source || '';
+  const dbg = ViewportDebug.start('addImage', { src: displaySrc, cx, cy, exactSize, existingImgKey, bitmapOnly: true });
   const t0 = performance.now();
   ViewportDebug.count('imageAdds');
-  ViewportDebug.count('nativeImageAdds');
-  const imgKey = options.imgKey || newImgKey();
-  const generation = _imageStoreGeneration;
-  const sourceToken = createImageSourceToken(imgKey);
-  InsertDebug.step(insertDbg, 'native-register:start', { source, fileName: path, imgKey });
-  const meta = await BoardfishTauri.registerImageFileSource(imgKey, path, sourceToken);
-  InsertDebug.step(insertDbg, 'native-register:end', {
-    source,
-    fileName: path,
-    imgKey,
-    width: meta.width,
-    height: meta.height,
-    fileSize: meta.bytes || '',
-    fileType: meta.mime || '',
-  });
-  if (generation !== _imageStoreGeneration) {
-    cleanupNativeImageSourceToken(imgKey, sourceToken);
-    return null;
-  }
-  if (!BoardfishWebLimits.canAddObjects(1)) {
-    cleanupNativeImageSourceToken(imgKey, sourceToken);
-    ViewportDebug.end(dbg, { imgKey, skipped: 'object-limit' });
-    return null;
-  }
-  const bytes = Number(meta.bytes) || 0;
-  const releaseReservation = reserveNativeImageContent(bytes, 1, { notifyUser: true });
-  if (!releaseReservation) {
-    cleanupNativeImageSourceToken(imgKey, sourceToken);
-    ViewportDebug.end(dbg, { imgKey, bytes, skipped: 'content-limit' });
-    return null;
-  }
-  const naturalW = Number(meta.width) || 1;
-  const naturalH = Number(meta.height) || 1;
-  const { w, h } = fitImageSize(naturalW, naturalH, options.exactSize);
-  let rollbackSource = null;
+  if (!_boardOpening) showInputShield();
+  const imgKey = existingImgKey || newImgKey();
+  const rollbackSource = createImageInsertSourceRollback(imgKey, src);
   try {
-    const imageSource = {
-      native: true,
-      mime: meta.mime || '',
-      ext: meta.ext || '',
-      bytes,
-    };
-    rollbackSource = createImageInsertSourceRollback(imgKey, imageSource);
-    BoardfishImageStore.setSource(imgKey, imageSource);
-    if (options.materializeAsset) {
-      const materializeStart = performance.now();
-      InsertDebug.step(insertDbg, 'materialize:start', { source, fileName: path, imgKey });
-      await materializeImageAssets([imgKey]);
-      InsertDebug.step(insertDbg, 'materialize:end', {
-        source,
-        fileName: path,
-        imgKey,
-        ms: performance.now() - materializeStart,
-        assetReady: !!imageAssetUrlCache[imgKey],
-      });
-    }
-    if (!imageAssetUrlCache[imgKey]) {
-      imageAssetUrlCache[imgKey] = convertTauriFileSrc(path);
-      InsertDebug.step(insertDbg, 'display-src:direct-file', { source, fileName: path, imgKey });
-    }
-    cacheImage(imgKey, imageAssetUrlCache[imgKey], null, null, {
-      skipSourceRegistration: true,
+    BoardfishImageStore.setSource(imgKey, src);
+    const cacheMetrics = await cacheImage(imgKey, src, null, null, {
       resolveOnLoad: options.resolveOnLoad === true,
+      readyRenderMinIntervalMs: options.readyRenderMinIntervalMs,
     });
-    InsertDebug.step(insertDbg, 'cache:queued', {
-      source,
-      fileName: path,
+    const display = BoardfishImageStore.getDisplayImage?.(imgKey) || {};
+    const naturalW = Number(cacheMetrics?.naturalWidth || display.naturalWidth || display.width || imageBitmapCache[imgKey]?.width || 0);
+    const naturalH = Number(cacheMetrics?.naturalHeight || display.naturalHeight || display.height || imageBitmapCache[imgKey]?.height || 0);
+    ViewportDebug.step(dbg, 'bitmap-ready', { width: naturalW, height: naturalH, ms: performance.now() - t0 });
+    if (!(naturalW > 0 && naturalH > 0)) {
+      rollbackSource();
+      const total = performance.now() - t0;
+      ViewportDebug.max('maxImageAddMs', total);
+      ViewportDebug.end(dbg, { error: 'image bitmap failed', total });
+      return null;
+    }
+    const { w, h } = fitImageSize(naturalW, naturalH, exactSize);
+    ViewportDebug.step(dbg, 'size-object', { w, h });
+    ViewportDebug.step(dbg, 'cache-registered', { imgKey, bitmapOnly: true });
+    InsertDebug.step(options.insertDebug, 'cache:queued', {
+      source: options.source || '',
       imgKey,
       resolveOnLoad: options.resolveOnLoad === true,
-      assetReady: !!imageAssetUrlCache[imgKey],
+      sourceKind: imageSourceDebugInfo(src).kind,
+      bitmapOnly: true,
     });
-    const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-native-image');
-    InsertDebug.step(insertDbg, 'object:add', {
-      source,
-      fileName: path,
+    const obj = addImageObject(imgKey, cx, cy, w, h, options, 'add-image');
+    InsertDebug.step(options.insertDebug, 'object:add', {
+      source: options.source || '',
       imgKey,
       objectId: obj?.id || '',
       w,
       h,
       z: obj?.z ?? '',
     });
-    if (!obj) {
-      rollbackSource();
-      cleanupNativeImageSourceToken(imgKey, sourceToken);
-      return null;
-    }
-    if (typeof scheduleEyedropperNativeDecodePrewarm === 'function') {
-      scheduleEyedropperNativeDecodePrewarm('add-native-image');
-    }
+    if (!obj) rollbackSource();
     const total = performance.now() - t0;
     ViewportDebug.max('maxImageAddMs', total);
-    ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, width: naturalW, height: naturalH, bytes, total, added: !!obj });
+    ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, total, added: !!obj, bitmapOnly: true });
     return obj;
   } catch (err) {
-    if (rollbackSource) rollbackSource();
-    cleanupNativeImageSourceToken(imgKey, sourceToken);
-    throw err;
+    rollbackSource();
+    const total = performance.now() - t0;
+    ViewportDebug.max('maxImageAddMs', total);
+    ViewportDebug.end(dbg, { error: String(err), total, bitmapOnly: true });
+    return null;
   } finally {
-    releaseReservation();
+    if (!_boardOpening) hideInputShield();
   }
 }
 
 fileInput.addEventListener('change', async () => {
-  if (eyedropperEnabled) {
-    fileInput.value = '';
-    return;
-  }
   const files = [...fileInput.files];
   if (!files.length) globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
   try {
@@ -537,22 +300,7 @@ fileInput.addEventListener('change', async () => {
 });
 
 async function pickAndInsertImages(x, y) {
-  if (eyedropperEnabled) return;
   if (!BoardfishWebLimits.canAddObjects(1)) return;
-  if (hasTauri()) {
-    const dbg = InsertDebug.start('pickImages', { source: 'file-picker-native' });
-    try {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('image-file-dialog-open');
-      const paths = await BoardfishTauri.pickImageFiles();
-      if (!paths?.length) globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
-      InsertDebug.end(dbg, { source: 'file-picker-native', fileCount: paths?.length || 0, cancelled: !paths?.length });
-      if (paths?.length) await insertNativeImagePaths(paths, x, y, 'file-picker-native');
-    } catch (err) {
-      InsertDebug.end(dbg, { source: 'file-picker-native', error: String(err) });
-      console.error('Failed to pick images:', err);
-    }
-    return;
-  }
   fileInput.value = '';
   globalThis.BoardfishMotion?.applyActionAnimation?.('image-file-dialog-open');
   fileInput.click();
@@ -653,7 +401,7 @@ async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {})
       added: true,
       imgKey: obj.data?.imgKey,
       readyStage,
-      displayReady: readyStage === 'display' || !!BoardfishImageStore.getDisplayImage(obj.data?.imgKey)?.complete,
+      displayReady: readyStage === 'bitmap' || !!BoardfishImageStore.getDisplayImage(obj.data?.imgKey)?.complete,
       bitmapReady: !!imageBitmapCache[obj.data?.imgKey],
       fallbackReady: imageBitmapFailed.has(obj.data?.imgKey) && !!BoardfishImageStore.getDisplayImage(obj.data?.imgKey)?.complete,
       objectCountBefore,
@@ -661,103 +409,6 @@ async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {})
     });
     return obj;
   } finally {
-    hideInputShield();
-  }
-}
-
-async function pasteNativeCachedImage(meta, x, y, imgKey, path, dbg, sourceToken = null) {
-  showInputShield();
-  const objectCountBefore = objects.length;
-  let releaseReservation = null;
-  let rollbackSource = null;
-  try {
-    const naturalW = Number(meta?.width) || 1;
-    const naturalH = Number(meta?.height) || 1;
-    const bytes = Number(meta?.bytes) || 0;
-    if (!BoardfishWebLimits.canAddObjects(1)) {
-      cleanupNativeImageSourceToken(imgKey, sourceToken);
-      ClipDebug.end(dbg, { path, added: false, imgKey, skipped: 'object-limit', objectCountBefore, objectCountAfter: objects.length });
-      return null;
-    }
-    releaseReservation = reserveNativeImageContent(bytes, 1, { notifyUser: true });
-    if (!releaseReservation) {
-      cleanupNativeImageSourceToken(imgKey, sourceToken);
-      ClipDebug.end(dbg, { path, added: false, imgKey, skipped: 'content-limit', objectCountBefore, objectCountAfter: objects.length });
-      return null;
-    }
-    ClipDebug.step(dbg, 'paste-native-cache:source-registered', {
-      path,
-      imgKey,
-      width: naturalW,
-      height: naturalH,
-      pixels: Number(meta?.pixels) || naturalW * naturalH,
-      rgbaMB: meta?.rgbaMb ?? '',
-      bytes,
-      mime: meta?.mime || '',
-      ext: meta?.ext || '',
-    });
-    const imageSource = {
-      native: true,
-      mime: meta?.mime || 'image/png',
-      ext: meta?.ext || 'png',
-      bytes,
-    };
-    rollbackSource = createImageInsertSourceRollback(imgKey, imageSource);
-    BoardfishImageStore.setSource(imgKey, imageSource);
-
-    const materializeStart = performance.now();
-    ClipDebug.step(dbg, 'paste-native-cache:materialize-start', { path, imgKey });
-    await materializeImageAssets([imgKey], dbg);
-    ClipDebug.step(dbg, 'paste-native-cache:materialize-end', {
-      path,
-      imgKey,
-      ms: Math.round((performance.now() - materializeStart) * 100) / 100,
-      assetReady: !!imageAssetUrlCache[imgKey],
-    });
-
-    if (!imageAssetUrlCache[imgKey]) throw new Error('native clipboard image materialization failed');
-    cacheImage(imgKey, imageAssetUrlCache[imgKey], dbg, null, {
-      skipSourceRegistration: true,
-      resolveOnLoad: true,
-    });
-    const { w, h } = fitImageSize(naturalW, naturalH, false);
-    const obj = addImageObject(imgKey, x, y, w, h, {}, 'paste-native-image');
-    if (!obj) {
-      rollbackSource();
-      cleanupNativeImageSourceToken(imgKey, sourceToken);
-      ClipDebug.end(dbg, { path, added: false, imgKey, skipped: 'object-limit', objectCountBefore, objectCountAfter: objects.length });
-      return null;
-    }
-    ClipDebug.step(dbg, 'paste-native-cache:add-object', { path, imgKey, objectId: obj.id, w, h });
-    ClipDebug.step(dbg, 'paste-image:ready-wait-start', { path, imgKey });
-    const readyMetrics = await imageReadyPromiseForKey(imgKey);
-    const readyStage = readyMetrics?.cacheReadyStage || '';
-    ClipDebug.step(dbg, 'paste-image:ready-wait-end', {
-      path,
-      imgKey,
-      readyStage,
-      cacheTotalMs: readyMetrics?.cacheTotalMs ?? '',
-      cacheQueueWaitMs: readyMetrics?.cacheQueueWaitMs ?? '',
-      cacheBitmapMs: readyMetrics?.cacheBitmapMs ?? '',
-    });
-    ClipDebug.end(dbg, {
-      path,
-      added: true,
-      imgKey,
-      readyStage,
-      displayReady: readyStage === 'display' || !!BoardfishImageStore.getDisplayImage(imgKey)?.complete,
-      bitmapReady: !!imageBitmapCache[imgKey],
-      fallbackReady: imageBitmapFailed.has(imgKey) && !!BoardfishImageStore.getDisplayImage(imgKey)?.complete,
-      objectCountBefore,
-      objectCountAfter: objects.length,
-    });
-    return obj;
-  } catch (err) {
-    if (rollbackSource) rollbackSource();
-    cleanupNativeImageSourceToken(imgKey, sourceToken);
-    throw err;
-  } finally {
-    if (releaseReservation) releaseReservation();
     hideInputShield();
   }
 }
@@ -874,133 +525,29 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
   }
 }
 
-async function insertNativeImagePaths(paths, x, y, source = 'native-drop') {
-  const dbg = InsertDebug.start('insertImages', { source, fileCount: paths.length });
-  let added = 0;
-  const readyPromises = [];
-  const addedObjects = new Array(paths.length);
-  if (!BoardfishWebLimits.canAddObjects(1)) {
-    InsertDebug.end(dbg, { source, skipped: 'web-object-limit', fileCount: paths.length });
+canvas.addEventListener('dragover', (event) => {
+  let hasFile = false;
+  for (const item of event.dataTransfer?.items || []) {
+    if (item.kind === 'file') {
+      hasFile = true;
+      break;
+    }
+  }
+  if (!hasFile) return;
+  event.preventDefault();
+});
+
+canvas.addEventListener('drop', async (event) => {
+  const files = [...(event.dataTransfer?.files || [])];
+  if (!files.length) return;
+  event.preventDefault();
+  const boardFile = files.find((file) => /\.bf$/i.test(file.name || ''));
+  if (boardFile && typeof openBoardFileRef === 'function') {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('board-file-drop-open');
+    await openBoardFileRef(BoardfishRuntime.fileRefFromFile(boardFile));
     return;
   }
-  const remainingSlotsRaw = BoardfishWebLimits.remainingObjectSlots?.();
-  const remainingSlots = Number.isFinite(Number(remainingSlotsRaw)) ? Number(remainingSlotsRaw) : paths.length;
-  const imagePaths = paths
-    .filter((path) => /\.(png|jpe?g)$/i.test(path))
-    .slice(0, Math.max(0, remainingSlots));
-  const bulk = imagePaths.length > 1;
-  const concurrency = nativeImageInsertConcurrency(imagePaths.length);
-  const bulkZBase = bulk ? zCounter + 1 : null;
-  showInputShield();
-  if (bulk) {
-    beginBulkImageInsert();
-    InsertDebug.step(dbg, 'bulk:start', { source, fileCount: imagePaths.length, concurrency });
-  }
-  try {
-    if (imagePaths.length) {
-      InsertDebug.step(dbg, 'native:concurrency', { source, fileCount: imagePaths.length, concurrency });
-    }
-    await mapWithConcurrency(imagePaths, concurrency, async (path, index) => {
-      const fileDbg = InsertDebug.start('insertImage', { source, fileName: path });
-      try {
-        InsertDebug.step(fileDbg, 'register:start', { source, fileName: path });
-        const obj = await addNativeImageFile(path, x, y, {
-          deferHistory: bulk,
-          materializeAsset: source === 'file-picker-native',
-          suppressProgressRender: false,
-          resolveOnLoad: true,
-          insertDebug: fileDbg,
-          source,
-          z: bulkZBase == null ? undefined : bulkZBase + index,
-          insertMotionAction: bulk ? 'bulk-image-create' : undefined,
-        });
-        const imgRef = obj ? BoardfishImageStore.getSource(obj.data.imgKey) : null;
-        InsertDebug.step(fileDbg, 'register:end', {
-          source,
-          fileName: path,
-          imgKey: obj?.data?.imgKey,
-          native: true,
-          fileSize: imgRef?.bytes || '',
-          fileType: imgRef?.mime || '',
-        });
-        InsertDebug.end(fileDbg, { source, added: !!obj, imgKey: obj?.data?.imgKey, native: true });
-        if (obj) {
-          addedObjects[index] = obj;
-          added++;
-          readyPromises.push(imageReadyPromiseForKey(obj.data.imgKey).then((metrics) => {
-            InsertDebug.step(fileDbg, 'ready', {
-              source,
-              imgKey: obj.data.imgKey,
-              cacheReadyStage: metrics?.cacheReadyStage || '',
-              cacheTotalMs: metrics?.cacheTotalMs ?? '',
-              cacheQueueWaitMs: metrics?.cacheQueueWaitMs ?? '',
-              cacheBitmapMs: metrics?.cacheBitmapMs ?? '',
-              bitmapReady: !!imageBitmapCache[obj.data.imgKey],
-            });
-            return metrics;
-          }));
-        }
-      } catch (err) {
-        InsertDebug.end(fileDbg, { source, error: String(err) });
-        console.error('Failed to load image file:', err);
-      }
-    });
-  } finally {
-    if (readyPromises.length) {
-      InsertDebug.step(dbg, 'ready:wait-start', { source, added, readyCount: readyPromises.length });
-      await Promise.allSettled(readyPromises);
-      InsertDebug.step(dbg, 'ready:wait-end', { source, added, readyCount: readyPromises.length });
-    }
-    if (bulk) {
-      const orderedAddedObjects = addedObjects.filter(Boolean);
-      const primaryObj = orderedAddedObjects[orderedAddedObjects.length - 1];
-      if (primaryObj) {
-        BoardfishEditorState.setSelection(orderedAddedObjects.map((obj) => obj.id), {
-          primaryId: primaryObj.id,
-          exitEditing: false,
-          animateSelection: false,
-        });
-      }
-      const historyAdded = finishBulkImageInsert({ pushHistoryEntry: added > 0 });
-      InsertDebug.step(dbg, 'bulk:end', { source, fileCount: imagePaths.length, added, historyAdded });
-    }
-    hideInputShield();
-    InsertDebug.end(dbg, { source, fileCount: imagePaths.length, droppedFileCount: paths.length, added });
-  }
-}
-
-if (hasTauri()) {
-  tauriListen('boardfish://file-drop', async (event) => {
-    const { paths } = event.payload;
-    if (paths?.length) globalThis.BoardfishMotion?.applyActionAnimation?.('image-file-drop');
-    const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-    await insertNativeImagePaths(paths, center.x, center.y, 'native-drop');
-  });
-} else {
-  canvas.addEventListener('dragover', (event) => {
-    let hasFile = false;
-    for (const item of event.dataTransfer?.items || []) {
-      if (item.kind === 'file') {
-        hasFile = true;
-        break;
-      }
-    }
-    if (!hasFile) return;
-    event.preventDefault();
-  });
-
-  canvas.addEventListener('drop', async (event) => {
-    const files = [...(event.dataTransfer?.files || [])];
-    if (!files.length) return;
-    event.preventDefault();
-    const boardFile = files.find((file) => /\.bf$/i.test(file.name || ''));
-    if (boardFile && typeof openBoardFileRef === 'function') {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('board-file-drop-open');
-      await openBoardFileRef(BoardfishRuntime.fileRefFromFile(boardFile));
-      return;
-    }
-    const wp = toWorld(event.clientX, event.clientY);
-    globalThis.BoardfishMotion?.applyActionAnimation?.('image-file-drop');
-    await insertImageFiles(files, wp.x, wp.y, 'web-drop');
-  });
-}
+  const wp = toWorld(event.clientX, event.clientY);
+  globalThis.BoardfishMotion?.applyActionAnimation?.('image-file-drop');
+  await insertImageFiles(files, wp.x, wp.y, 'web-drop');
+});

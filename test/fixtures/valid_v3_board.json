@@ -8,7 +8,7 @@
   },
   "imageStore": {
     "img-1": {
-      "native": true,
+      "web": true,
       "path": "images/img-1.png",
       "mime": "image/png",
       "ext": "png"

@@ -213,37 +213,9 @@ async function _rebuildOffscreenAsync() {
   const rebuildVersion = _offscreenVersion;
   const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length, editingId: snapshotEditingId, version: rebuildVersion });
 
-  // Ensure all images have GPU-resident ImageBitmap before drawing
+  // Images are decoded into ImageBitmap by cacheImage(); no retained
+  // HTMLImageElement source remains for offscreen rebuilds.
   const bitmapPromises = [];
-  for (const obj of objects) {
-    if (obj.id === snapshotEditingId || obj.type !== 'image') continue;
-    const key = obj.data?.imgKey;
-    if (!key || imageBitmapCache[key] || imageBitmapFailed.has(key)) continue;
-    const img = imageCache[key];
-    if (!img || !img.complete) continue;
-    const generation = _imageStoreGeneration;
-    const displaySrc = img.currentSrc || img.src || '';
-    bitmapPromises.push(
-      createImageBitmap(img)
-        .then(bm => {
-          if (
-            imageBitmapCache[key] ||
-            imageCache[key] !== img ||
-            !isImageDisplayCacheRequestCurrent(key, displaySrc, generation)
-          ) {
-            bm.close();
-            return;
-          }
-          imageBitmapCache[key] = bm;
-        })
-        .catch(() => {
-          if (imageCache[key] === img && isImageDisplayCacheRequestCurrent(key, displaySrc, generation)) {
-            imageBitmapFailed.add(key);
-          }
-          ViewportDebug.count('imageBitmapFailures');
-        })
-    );
-  }
   const bitmapStart = performance.now();
   await Promise.all(bitmapPromises);
   ViewportDebug.step(dbg, 'ensure-bitmaps', { count: bitmapPromises.length, ms: performance.now() - bitmapStart });
@@ -285,9 +257,6 @@ var _dirtyIds = new Set();
 function markDirty(id) {
   const wasDirty = isDirty();
   _dirtyIds.add(id);
-  if (typeof noteEyedropperBoardContentChanged === 'function') {
-    noteEyedropperBoardContentChanged('object-dirty');
-  }
   if (!wasDirty) updateTitle();
 }
 
@@ -302,9 +271,6 @@ function resizeCanvas() {
   boardCanvas.height = height;
   invalidateOffscreen();
   scheduleRender(true, false);
-  if (typeof handleEyedropperViewportChanged === 'function') {
-    handleEyedropperViewportChanged('resize');
-  }
 }
 
 function drawImageObj(context, obj, img) {
@@ -353,20 +319,61 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
   let top = Infinity;
   let right = -Infinity;
   let bottom = -Infinity;
+  const selectionBoxForState = (line, state) => {
+    if (state?.depth > 0) {
+      return {
+        y: line.textY + state.offset - (TEXT_BASELINE_Y_OFFSET * state.scale),
+        height: LINE_H * state.scale,
+      };
+    }
+    return { y: line.y, height: LINE_H };
+  };
   for (const line of layout) {
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
     if (h0 < h1) {
       const o0 = h0 - ls, o1 = h1 - ls;
       const endX = lineEndX(line, obj);
-      const x1 = o0 < line.text.length ? lineXAtOffset(line, obj, o0) : endX;
-      const x2 = o1 < line.text.length ? lineXAtOffset(line, obj, o1) : endX;
-      const run = { line, x1, x2, startOffset: o0, endOffset: o1, text: line.text.slice(o0, o1) };
-      runs.push(run);
-      if (x1 < left) left = x1;
-      if (line.y < top) top = line.y;
-      if (x2 > right) right = x2;
-      if (line.y + LINE_H > bottom) bottom = line.y + LINE_H;
+      let i = o0;
+      while (i < o1) {
+        const globalIndex = line.startIndex + i;
+        if (typeof isTextScriptMarkerHiddenAt === 'function' && isTextScriptMarkerHiddenAt(line.scriptRanges || [], globalIndex, line.content || '')) {
+          i++;
+          continue;
+        }
+        const state = typeof textScriptStateAt === 'function'
+          ? textScriptStateAt(line.scriptRanges || [], globalIndex)
+          : { key: '', depth: 0, offset: 0, scale: 1 };
+        let j = i + 1;
+        while (j < o1) {
+          const nextGlobalIndex = line.startIndex + j;
+          if (typeof isTextScriptMarkerHiddenAt === 'function' && isTextScriptMarkerHiddenAt(line.scriptRanges || [], nextGlobalIndex, line.content || '')) break;
+          const nextState = typeof textScriptStateAt === 'function'
+            ? textScriptStateAt(line.scriptRanges || [], nextGlobalIndex)
+            : { key: '', depth: 0, offset: 0, scale: 1 };
+          if (nextState.key !== state.key) break;
+          j++;
+        }
+        const x1 = i < line.text.length ? lineXAtOffset(line, obj, i) : endX;
+        const x2 = j < line.text.length ? lineXAtOffset(line, obj, j) : endX;
+        const box = selectionBoxForState(line, state);
+        const run = {
+          line,
+          x1,
+          x2,
+          y: box.y,
+          height: box.height,
+          startOffset: i,
+          endOffset: j,
+          text: line.text.slice(i, j),
+        };
+        runs.push(run);
+        if (x1 < left) left = x1;
+        if (box.y < top) top = box.y;
+        if (x2 > right) right = x2;
+        if (box.y + box.height > bottom) bottom = box.y + box.height;
+        i = j;
+      }
     }
   }
   if (!runs.length) return null;
@@ -378,7 +385,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
 
 const textSelectionMotionForOptions = (obj, selStart, selEnd, options = {}) => {
   if (Object.prototype.hasOwnProperty.call(options, 'motion')) return options.motion || null;
-  return globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd) || null;
+  return globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, { view: options.view }) || null;
 };
 
 const textSelectionRunsForOptions = (obj, layout, selStart, selEnd, options = {}) => {
@@ -390,10 +397,17 @@ const applyTextSelectionMotionTransform = (context, bounds, motion) => {
   if (!motion) return false;
   const cx = (bounds.left + bounds.right) / 2;
   const cy = (bounds.top + bounds.bottom) / 2;
+  const scaleX = motion.scaleX ?? 1;
+  const scaleY = motion.scaleY ?? 1;
+  const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
+  const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
   context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * (motion.opacity ?? 1);
-  context.translate(cx, cy);
-  context.scale(motion.scaleX ?? 1, motion.scaleY ?? 1);
-  context.translate(-cx, -cy);
+  if (translateX || translateY) context.translate(translateX, translateY);
+  if (scaleX !== 1 || scaleY !== 1) {
+    context.translate(cx, cy);
+    context.scale(scaleX, scaleY);
+    context.translate(-cx, -cy);
+  }
   return true;
 };
 
@@ -432,7 +446,7 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, opti
   context.fillStyle = 'rgba(10, 132, 255, 0.3)';
   for (const run of selection.runs) {
     TextSelDebug._logDraw(run.line, selStart, selEnd, run.x1, run.x2);
-    context.fillRect(run.x1, run.line.y, run.x2 - run.x1, LINE_H);
+    context.fillRect(run.x1, run.y ?? run.line.y, run.x2 - run.x1, run.height ?? LINE_H);
   }
   context.restore();
   return true;
@@ -453,7 +467,7 @@ const drawTextSelectionContentJello = (context, obj, layout, selStart, selEnd, o
   return true;
 };
 
-const drawTextSelectionJelloOverlays = (context, viewportRect = null) => {
+const drawTextSelectionJelloOverlays = (context, viewportRect = null, view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 }) => {
   const specs = globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.() || [];
   if (!specs.length) return 0;
   let drawn = 0;
@@ -463,7 +477,7 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null) => {
     if (!obj || obj.type !== 'text') continue;
     if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
-    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(spec.id, spec.start, spec.end) || null;
+    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(spec.id, spec.start, spec.end, { view }) || null;
     if (!motion) continue;
     const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
     if (!drawTextSelectionHighlight(context, obj, layout, spec.start, spec.end, { requireMotion: true, motion, selection })) continue;
@@ -477,18 +491,30 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null) => {
 function drawCaret(context, obj, layout, selStart) {
   if (!_caretVisible) return;
   let cx = obj.x + TEXT_PAD, cy = obj.y + TEXT_PAD;
+  let caretHeight = LINE_H;
   for (const line of layout) {
     const ls = line.startIndex;
     const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
     if (selStart >= ls && selStart <= le) {
       const off = Math.min(selStart - ls, line.text.length);
       cx = off < line.text.length ? lineXAtOffset(line, obj, off) : lineEndX(line, obj);
-      cy = line.y;
+      const state = typeof textScriptCaretStateAt === 'function'
+        ? textScriptCaretStateAt(obj, selStart)
+        : { depth: 0, offset: 0, scale: 1 };
+      if (state?.depth > 0) {
+        const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
+        const textY = Number.isFinite(line.textY) ? line.textY : line.y + TEXT_BASELINE_Y_OFFSET;
+        cy = textY + state.offset - (TEXT_BASELINE_Y_OFFSET * scale);
+        caretHeight = LINE_H * scale;
+      } else {
+        cy = line.y;
+        caretHeight = LINE_H;
+      }
       break;
     }
   }
   context.fillStyle = canvasTextColor();
-  context.fillRect(cx, cy, 2 / zoom, LINE_H);
+  context.fillRect(cx, cy, 2 / zoom, caretHeight);
 }
 
 const applyObjectMotionForDraw = (context, obj, motion) => {
@@ -526,7 +552,7 @@ function drawEditingTextOverlay(context, options = {}) {
     const selEnd   = _editEl ? _editEl.selectionEnd   : 0;
     const layout = getTextLayout(obj);
     const textSelectionMotion = selStart !== selEnd
-      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd) || null
+      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, { view }) || null
       : null;
     const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
 
@@ -586,8 +612,9 @@ function drawBoard() {
 
     const editStart = collectDrawDebug ? performance.now() : 0;
     setWorldCanvasTransform(ctx, dpr);
-    drawTextSelectionJelloOverlays(ctx, viewportRect);
-    drawEditingTextOverlay(ctx, { view: { zoom, panX, panY, dpr }, viewportRect });
+    const overlayView = { zoom, panX, panY, dpr };
+    drawTextSelectionJelloOverlays(ctx, viewportRect, overlayView);
+    drawEditingTextOverlay(ctx, { view: overlayView, viewportRect });
     resetCanvasToScreen(ctx);
     if (collectDrawDebug) drawPhases.editingOverlayMs = performance.now() - editStart;
   } else {
@@ -601,7 +628,7 @@ function drawBoard() {
     if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
     drawnImages = drawn.drawnImages;
     drawnText = drawn.drawnText;
-    drawTextSelectionJelloOverlays(ctx, viewportRect);
+    drawTextSelectionJelloOverlays(ctx, viewportRect, { zoom, panX, panY, dpr });
     const resetStart = collectDrawDebug ? performance.now() : 0;
     resetCanvasToScreen(ctx);
     if (collectDrawDebug) drawPhases.resetMs = performance.now() - resetStart;
@@ -684,9 +711,6 @@ function applyTransform(frameDbg = null) {
   scheduleVisibleHydrationAfterIdle();
   if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
     scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
-  }
-  if (typeof handleEyedropperViewportChanged === 'function') {
-    handleEyedropperViewportChanged(_activeRenderSource || 'transform');
   }
   syncIslandZoomDisplay(_activeRenderSource || 'transform');
   getLastApplyTransformMeta.last = {

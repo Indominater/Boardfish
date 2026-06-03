@@ -7,24 +7,45 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
+const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
 
-function loadAddTextHarness({ syncedHeight = 168 } = {}) {
+function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}) {
+  const textLayoutSource = withTextLayout ? fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') + '\n' : '';
   const source = fs.readFileSync(path.join(root, 'src/js/object_commands.js'), 'utf8');
   let idCounter = 1;
   const context = {
     console,
     TextEncoder,
+    document: {
+      createElement() {
+        return {
+          getContext() {
+            return {
+              font: '',
+              textBaseline: '',
+              measureText(text) {
+                return {
+                  width: String(text).length,
+                  actualBoundingBoxAscent: 12,
+                  actualBoundingBoxDescent: 4,
+                };
+              },
+            };
+          },
+        };
+      },
+    },
     added: [],
     animations: [],
     editedIds: [],
     histories: [],
+    objects: [],
     renders: [],
     selectedIds: [],
     zCounter: 1,
-    eyedropperEnabled: false,
     LINE_H: 24,
     TEXT_PAD: 4,
-    NEW_TEXT_EDIT_MIN_LINES: 3,
+    NEW_TEXT_EDIT_MIN_LINES: 5,
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
@@ -54,8 +75,9 @@ function loadAddTextHarness({ syncedHeight = 168 } = {}) {
     newId() {
       return `obj-${idCounter++}`;
     },
-    syncTextAutoHeight(obj) {
-      obj.h = syncedHeight;
+    syncTextAutoHeight(obj, minLines = 1) {
+      const contentLines = String(obj.data?.content || '').split('\n').length;
+      obj.h = syncedHeight ?? Math.max(minLines, contentLines) * context.LINE_H + context.TEXT_PAD * 2;
       return true;
     },
     selectObject(id) {
@@ -70,9 +92,11 @@ function loadAddTextHarness({ syncedHeight = 168 } = {}) {
     enterEdit(id) {
       context.editedIds.push(id);
     },
+    invalidateOffscreen() {},
+    syncAllTextAutoHeights() {},
   };
   vm.createContext(context);
-  vm.runInContext(`${source}\nglobalThis.addText = addText;\n`, context, {
+  vm.runInContext(`${textLayoutSource}${source}\nglobalThis.addText = addText;\n`, context, {
     filename: 'object_commands.js',
   });
   return context;
@@ -95,7 +119,6 @@ function loadPasteHarness() {
     objects: [],
     jsClipboard: null,
     _pasteInProgress: false,
-    eyedropperEnabled: false,
     BoardfishClipboardIO: {
       describeClipboardData() { return {}; },
       readClipboardImageFileFromEvent() { return null; },
@@ -108,9 +131,6 @@ function loadPasteHarness() {
       end() {},
       start() { return {}; },
       step() {},
-    },
-    hasTauri() {
-      return false;
     },
     resizeCanvas() {},
     addText(wx, wy, content, options = {}) {
@@ -149,6 +169,8 @@ test('addText keeps top-left placement by default', () => {
   const obj = context.added[0];
   assert.equal(obj.x, 24);
   assert.equal(obj.y, 48);
+  assert.equal(obj.h, 128);
+  assert.ok(Math.abs(obj.w / obj.h - GOLDEN_RATIO) < 1e-12);
   assert.deepEqual(context.editedIds, [obj.id]);
 });
 
@@ -159,6 +181,20 @@ test('addText strips whitespace-only lines at pasted text edges', () => {
 
   const obj = context.added[0];
   assert.equal(obj.data.content, 'first line  \nsecond line');
+  assert.deepEqual(context.editedIds, []);
+});
+
+test('addText keeps deterministic braced script text editable', () => {
+  const context = loadAddTextHarness({ withTextLayout: true });
+
+  context.addText(24, 48, 'e^{x^{2}+1}');
+
+  const obj = context.added[0];
+  assert.equal(obj.data.content, 'e^{x^{2}+1}');
+  assert.deepEqual(JSON.parse(JSON.stringify(obj.data.scriptRanges)), [
+    { start: 2, end: 11, kind: 'sup' },
+    { start: 5, end: 8, kind: 'sup' },
+  ]);
   assert.deepEqual(context.editedIds, []);
 });
 

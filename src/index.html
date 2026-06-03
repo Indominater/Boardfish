@@ -13,22 +13,6 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="mac-titlebar" data-tauri-drag-region></div>
-  <div id="windows-titlebar" aria-hidden="true">
-    <div id="windows-titlebar-drag" data-tauri-drag-region></div>
-  </div>
-  <div id="windows-titlebar-controls">
-    <button class="window-control window-control-minimize" id="win-btn-minimize" type="button" data-window-action="minimize" aria-label="Minimize" title="Minimize">
-      <span class="window-control-icon" aria-hidden="true"></span>
-    </button>
-    <button class="window-control window-control-maximize" id="win-btn-maximize" type="button" data-window-action="maximize" aria-label="Maximize" title="Maximize">
-      <span class="window-control-icon" aria-hidden="true"></span>
-    </button>
-    <button class="window-control window-control-close" id="win-btn-close" type="button" data-window-action="close" aria-label="Close" title="Close">
-      <span class="window-control-icon" aria-hidden="true"></span>
-    </button>
-  </div>
-
   <div id="canvas">
     <canvas id="board-canvas"></canvas>
     <div id="multi-sel-overlay"></div>
@@ -112,22 +96,6 @@
 
   <div id="island" aria-hidden="true">
     <span id="isl-zoom" class="ui-highlight-nudge"></span>
-  </div>
-  <div id="eyedropper-loupe" class="eyedropper-loupe" aria-hidden="true">
-    <div id="eyedropper-top" class="eyedropper-top">
-      <div id="eyedropper-preview" class="eyedropper-preview">
-        <canvas id="eyedropper-canvas" class="eyedropper-canvas"></canvas>
-      </div>
-    </div>
-    <div id="eyedropper-values" class="eyedropper-values">
-      <div class="ctx-item eyedropper-value-row eyedropper-hex-row">
-        <span class="eyedropper-value-text"><span>HEX:</span> <span id="eyedropper-hex" class="eyedropper-hex">#000000</span></span>
-      </div>
-      <div class="ctx-item eyedropper-value-row">
-        <span class="eyedropper-value-text"><span>RGB:</span> <span id="eyedropper-rgb" class="eyedropper-rgb">0 0 0</span></span>
-      </div>
-      <span id="eyedropper-swatch" class="eyedropper-swatch" aria-hidden="true"></span>
-    </div>
   </div>
 
   <script type="application/json" id="boardfish-board-contract">

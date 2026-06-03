@@ -27,7 +27,6 @@ function loadClipboardStateHarness() {
       addEventListener() {},
       visibilityState: 'visible',
     },
-    hasTauri: () => false,
     performance: { now: () => 0 },
     window: {
       addEventListener() {},
@@ -46,19 +45,13 @@ function loadClipboardStateHarness() {
       'globalThis.setJsClipboard = setJsClipboard;\n' +
       'globalThis.clearJsClipboard = clearJsClipboard;\n' +
       'globalThis.getJsClipboardWebToken = getJsClipboardWebToken;\n' +
-      'globalThis.markJsClipboardWebTokenOnNative = markJsClipboardWebTokenOnNative;\n' +
+      'globalThis.markJsClipboardWebTokenWritten = markJsClipboardWebTokenWritten;\n' +
       'globalThis.markJsClipboardMaybeStaleFromWebBlur = markJsClipboardMaybeStaleFromWebBlur;\n' +
       'globalThis.jsClipboardStillCurrent = jsClipboardStillCurrent;\n' +
-      'globalThis.waitForNativeClipboardIdle = waitForNativeClipboardIdle;\n' +
-      'globalThis.resolveNativeClipboardIdleWaiters = resolveNativeClipboardIdleWaiters;\n' +
       'globalThis.forceJsClipboardSetAt = (value) => { _jsClipboardSetAt = value; };\n',
     context,
     { filename: 'clipboard_state.js' },
   );
-  context.setNativeClipboardPendingCount = (value) => {
-    vm.runInContext(`_nativeClipboardPendingCount = ${Number(value) || 0};`, context);
-  };
-  context.nativeClipboardIdleResolverCount = () => vm.runInContext('_nativeClipboardIdleResolvers.length', context);
   return context;
 }
 
@@ -155,7 +148,6 @@ function loadClipboardExportHarness(options = {}) {
     cloneObject(obj) {
       return { ...obj, data: { ...obj.data } };
     },
-    finishNativeClipboardWrite() {},
     getFirstSelectedObject() {
       return selectedObject;
     },
@@ -165,10 +157,7 @@ function loadClipboardExportHarness(options = {}) {
     getJsClipboardWebToken() {
       return 'web-token';
     },
-    hasTauri() {
-      return false;
-    },
-    markJsClipboardWebTokenOnNative() {},
+    markJsClipboardWebTokenWritten() {},
     imageNeedsRendering: options.imageNeedsRendering || (() => false),
     isWebImageRef: options.isWebImageRef || (() => false),
     normalizeTextContent(value) {
@@ -247,7 +236,6 @@ function loadClipboardPasteObjectsHarness() {
       imageData: {},
     },
     _pasteInProgress: false,
-    eyedropperEnabled: false,
     historyIndex: 0,
     zCounter: 1,
     BoardfishClipboardIO: {
@@ -282,9 +270,6 @@ function loadClipboardPasteObjectsHarness() {
     },
     cloneObjects(list) {
       return JSON.parse(JSON.stringify(list));
-    },
-    hasTauri() {
-      return false;
     },
     jsClipboardStillCurrent() {
       return Promise.resolve(true);
@@ -387,7 +372,7 @@ test('web js clipboard stays current only while its browser clipboard marker mat
 
   context.setJsClipboard({ type: 'objects', objects: [{ id: 'obj-1' }], imageData: {} });
   const token = context.getJsClipboardWebToken();
-  context.markJsClipboardWebTokenOnNative(token);
+  context.markJsClipboardWebTokenWritten(token);
 
   assert.equal(await context.jsClipboardStillCurrent(null, {
     webClipboardTokenChecked: true,
@@ -400,7 +385,7 @@ test('web js clipboard stays current only while its browser clipboard marker mat
   }), false);
 });
 
-test('web js clipboard without a native marker is invalidated after leaving the page', async () => {
+test('web js clipboard without a browser marker is invalidated after leaving the page', async () => {
   const context = loadClipboardStateHarness();
 
   context.setJsClipboard({ type: 'objects', objects: [{ id: 'obj-1' }], imageData: {} });
@@ -413,38 +398,10 @@ test('web js clipboard without a native marker is invalidated after leaving the 
   }), false);
 });
 
-test('native clipboard idle waiter removes itself after timeout', async () => {
-  const context = loadClipboardStateHarness();
-  context.setNativeClipboardPendingCount(1);
-
-  const result = await context.waitForNativeClipboardIdle(1);
-
-  assert.equal(result.ready, false);
-  assert.equal(result.pending, 1);
-  assert.equal(context.nativeClipboardIdleResolverCount(), 0);
-});
-
-test('native clipboard idle waiter resolves normally and clears the waiter list', async () => {
-  const context = loadClipboardStateHarness();
-  context.setNativeClipboardPendingCount(1);
-
-  const waitPromise = context.waitForNativeClipboardIdle(50);
-  assert.equal(context.nativeClipboardIdleResolverCount(), 1);
-
-  context.setNativeClipboardPendingCount(0);
-  context.resolveNativeClipboardIdleWaiters();
-
-  const result = await waitPromise;
-  assert.equal(result.ready, true);
-  assert.equal(result.error, '');
-  assert.equal(context.nativeClipboardIdleResolverCount(), 0);
-});
-
 test('clipboard IO extracts and writes Boardfish web clipboard markers', async () => {
   const previous = {
     ClipboardItem: globalThis.ClipboardItem,
     ClipDebug: globalThis.ClipDebug,
-    hasTauri: globalThis.hasTauri,
     navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator'),
   };
   const writes = [];
@@ -457,7 +414,6 @@ test('clipboard IO extracts and writes Boardfish web clipboard markers', async (
   try {
     globalThis.ClipboardItem = FakeClipboardItem;
     globalThis.ClipDebug = { step() {} };
-    globalThis.hasTauri = () => false;
     Object.defineProperty(globalThis, 'navigator', {
       configurable: true,
       value: {
@@ -490,8 +446,6 @@ test('clipboard IO extracts and writes Boardfish web clipboard markers', async (
     else globalThis.ClipboardItem = previous.ClipboardItem;
     if (previous.ClipDebug === undefined) delete globalThis.ClipDebug;
     else globalThis.ClipDebug = previous.ClipDebug;
-    if (previous.hasTauri === undefined) delete globalThis.hasTauri;
-    else globalThis.hasTauri = previous.hasTauri;
     if (previous.navigator) Object.defineProperty(globalThis, 'navigator', previous.navigator);
     else delete globalThis.navigator;
   }

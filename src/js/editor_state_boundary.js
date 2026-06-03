@@ -42,9 +42,6 @@
   function addObject(obj) {
     objects.push(obj);
     objectsMap.set(obj.id, obj);
-    if (typeof noteEyedropperBoardContentChanged === 'function') {
-      noteEyedropperBoardContentChanged('object-added');
-    }
     return obj;
   }
 
@@ -71,9 +68,6 @@
     }
     objects.length = write;
     if (selectedId && !selectedIds.has(selectedId)) selectedId = null;
-    if (removed && typeof noteEyedropperBoardContentChanged === 'function') {
-      noteEyedropperBoardContentChanged('objects-removed');
-    }
     return removed;
   }
 
@@ -135,16 +129,25 @@
     clearTextLayoutState();
     if (normalizeText) {
       for (const obj of objects) {
-        if (obj?.type === 'text') obj.data.content = normalizeTextContent(obj.data?.content);
+        if (obj?.type !== 'text') continue;
+        if (!obj.data) obj.data = {};
+        obj.data.content = normalizeTextContent(obj.data?.content);
+        if (typeof normalizeTextLineAlignForContent === 'function' && Array.isArray(obj.data.lineAlign)) {
+          const lineAlign = normalizeTextLineAlignForContent(obj.data.content, obj.data.lineAlign);
+          if (lineAlign.length) obj.data.lineAlign = lineAlign;
+          else delete obj.data.lineAlign;
+        }
+        if (typeof normalizeTextScriptRangesForContent === 'function' && Array.isArray(obj.data.scriptRanges)) {
+          const scriptRanges = normalizeTextScriptRangesForContent(obj.data.content, obj.data.scriptRanges);
+          if (scriptRanges.length) obj.data.scriptRanges = scriptRanges;
+          else delete obj.data.scriptRanges;
+        }
       }
     }
     rebuildObjectsMap();
     root.BoardfishImageInsertMotion?.clearStale?.();
     if (syncTextHeights) syncAllTextAutoHeights();
     if (restoreCounters) restoreObjectCountersFromObjects(objects);
-    if (typeof noteEyedropperBoardContentChanged === 'function') {
-      noteEyedropperBoardContentChanged('objects-replaced');
-    }
     return objects;
   }
 
@@ -172,9 +175,6 @@
   } = {}) {
     const result = typeof mutate === 'function' ? mutate() : undefined;
     if (!result) return result;
-    if (typeof noteEyedropperBoardContentChanged === 'function') {
-      noteEyedropperBoardContentChanged(reason || 'mutation');
-    }
     if (invalidate && typeof invalidateOffscreen === 'function') invalidateOffscreen();
     if (typeof scheduleRender === 'function') scheduleRender(renderBoard, renderOverlay, renderSource);
     if (history && typeof pushHistory === 'function') pushHistory(reason);

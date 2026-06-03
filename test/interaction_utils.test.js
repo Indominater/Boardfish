@@ -78,20 +78,20 @@ test('activateInteractiveSurface closes menus and clears object selection by con
     globalThis.deselectAll = () => calls.push(['deselect']);
 
     const result = Interaction.activateInteractiveSurface({
-      kind: 'pinned-eyedropper-card',
-      reason: 'eyedropper-card:pointerdown',
+      kind: 'floating-panel',
+      reason: 'floating-panel:pointerdown',
       closeMenus: true,
       clearObjectSelection: true,
       exitTextEdit: true,
     });
 
     assert.deepEqual(calls, [
-      ['close', '', 'eyedropper-card:pointerdown'],
+      ['close', '', 'floating-panel:pointerdown'],
       ['deselect'],
     ]);
     assert.deepEqual(result, {
-      kind: 'pinned-eyedropper-card',
-      reason: 'eyedropper-card:pointerdown',
+      kind: 'floating-panel',
+      reason: 'floating-panel:pointerdown',
       closedMenus: true,
       clearedObjectSelection: true,
       exitedTextEdit: true,

@@ -3,24 +3,18 @@
   "private": true,
   "version": "1.2.0",
   "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev",
+    "dev": "npm run web:dev",
     "web": "npm run web:preview",
     "web:preview": "npm run web:build && node scripts/serve-web.mjs --preview",
     "web:dev": "node scripts/serve-web.mjs --dev",
     "web:build": "node scripts/build-runtime-assets.mjs web-preview",
-    "desktop:build": "node scripts/build-runtime-assets.mjs desktop-release",
-    "desktop:dev:build": "node scripts/build-runtime-assets.mjs desktop-dev",
-    "build": "tauri build",
-    "pretest": "node scripts/sync-debug-tools.mjs",
+    "build": "npm run web:build",
     "test": "node --test",
     "check:js-syntax": "node scripts/check-js-syntax.mjs",
     "check:static": "node --test test/static_refactor.test.js",
-    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",
-    "check": "npm run check:js-syntax && npm test && npm run check:static && npm run check:rust"
+    "check": "npm run check:js-syntax && npm test && npm run check:static"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
     "esbuild": "^0.25.12"
   }
 }

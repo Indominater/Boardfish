@@ -43,7 +43,7 @@ var ExportDebug = (() => {
   function startMassive(op, imageObjs = []) {
     if (!core.enabled) return null;
     const seen = new Map();
-    const countsBySourceKind = { nativeRef: 0, dataUrl: 0, missing: 0, other: 0 };
+    const countsBySourceKind = { webRef: 0, dataUrl: 0, missing: 0, other: 0 };
     let storedBytes = 0;
     let transformedCount = 0;
     let duplicateObjectCount = 0;
@@ -58,7 +58,7 @@ var ExportDebug = (() => {
       const bytes = imageStoreBytesEstimate(source);
       storedBytes += bytes;
       if (imageNeedsRendering(obj)) transformedCount++;
-      if (isNativeImageRef(source)) countsBySourceKind.nativeRef++;
+      if (typeof isWebImageRef === 'function' && isWebImageRef(source)) countsBySourceKind.webRef++;
       else if (typeof source === 'string') countsBySourceKind.dataUrl++;
       else if (!source) {
         countsBySourceKind.missing++;
@@ -105,7 +105,6 @@ var ExportDebug = (() => {
         keyCount: 0,
         tempKeyCount: 0,
         renderedCount: 0,
-        nativeTransformCount: 0,
         fallbackRenderCount: 0,
         dedupedCount: 0,
         skippedCount: 0,
@@ -200,7 +199,6 @@ var ExportDebug = (() => {
     if (meta.key) r.keyCount++;
     if (meta.tempKey && !meta.reusedTempKey) r.tempKeyCount++;
     if (meta.rendered) r.renderedCount++;
-    if (meta.nativeTransform) r.nativeTransformCount++;
     if (meta.fallbackRender) r.fallbackRenderCount++;
     if (meta.deduped) r.dedupedCount++;
     if (meta.skipped) r.skippedCount++;
@@ -221,7 +219,6 @@ var ExportDebug = (() => {
       imgKey: meta.imgKey || '',
       phase: meta.phase || '',
       ms: Math.round((meta.ms || 0) * 100) / 100,
-      nativeTransform: !!meta.nativeTransform,
       fallbackRender: !!meta.fallbackRender,
       deduped: !!meta.deduped,
       sourceKind: meta.sourceKind || '',
@@ -342,7 +339,7 @@ var ExportDebug = (() => {
       storedPayloadMB: report.storedPayloadMB,
       transformedCount: report.transformedCount,
       passthroughCount: report.passthroughCount,
-      nativeRefs: report.countsBySourceKind.nativeRef,
+      webRefs: report.countsBySourceKind.webRef,
       dataUrls: report.countsBySourceKind.dataUrl,
       missingSources: report.missingSourceCount,
       duplicateKeys: report.duplicateKeyCount,
@@ -508,36 +505,6 @@ var ExportDebug = (() => {
     };
   }
 
-  async function invoke(ctx, command, args = {}, meta = {}) {
-    if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!core.enabled) return tauriInvoke(command, args);
-    step(ctx, 'invoke:start', { command, ...sanitize(meta) });
-    const t0 = performance.now();
-    try {
-      const result = await tauriInvoke(command, args);
-      step(ctx, 'invoke:ok', { command, ...sanitize(meta), ms: Math.round((performance.now() - t0) * 100) / 100, result });
-      return result;
-    } catch (err) {
-      step(ctx, 'invoke:error', { command, ms: Math.round((performance.now() - t0) * 100) / 100, error: String(err) });
-      throw err;
-    }
-  }
-
-  async function wrap(ctx, command, call, meta = {}) {
-    if (!hasTauri()) throw new Error('Tauri is unavailable');
-    if (!core.enabled) return call();
-    step(ctx, 'invoke:start', { command, ...sanitize(meta) });
-    const t0 = performance.now();
-    try {
-      const result = await call();
-      step(ctx, 'invoke:ok', { command, ...sanitize(meta), ms: Math.round((performance.now() - t0) * 100) / 100, result });
-      return result;
-    } catch (err) {
-      step(ctx, 'invoke:error', { command, ms: Math.round((performance.now() - t0) * 100) / 100, error: String(err) });
-      throw err;
-    }
-  }
-
   function dump() {
     const flat = events.map(({ meta, ...rest }) => ({ ...rest, ...(meta || {}) }));
     console.table(flat);
@@ -641,25 +608,8 @@ var ExportDebug = (() => {
       }))
       .sort((a, b) => Number(b.totalRenderMs || 0) - Number(a.totalRenderMs || 0));
 
-    const registerRows = events
-      .filter(e => e.step === 'invoke:ok' && (e.meta?.command === TAURI_COMMANDS.REGISTER_IMAGE_SOURCE || e.meta?.command === TAURI_COMMANDS.REGISTER_TRANSFORMED_IMAGE_SOURCE))
-      .map(e => ({
-        id: e.id,
-        op: e.op,
-        command: e.meta?.command || '',
-        imgKey: e.meta?.result?.tempKey ?? e.meta?.result?.imgKey ?? e.meta?.imgKey ?? '',
-        registerMs: e.meta?.ms ?? '',
-        nativeDecodeMs: e.meta?.result?.decodeMs ?? '',
-        nativeTransformMs: e.meta?.result?.transformMs ?? '',
-        nativeEncodeMs: e.meta?.result?.encodeMs ?? '',
-        bytesMB: e.meta?.result?.bytes ? Math.round(e.meta.result.bytes / 1024 / 1024 * 100) / 100 : '',
-        mime: e.meta?.result?.mime ?? '',
-        ext: e.meta?.result?.ext ?? '',
-      }))
-      .sort((a, b) => Number(b.registerMs || 0) - Number(a.registerMs || 0));
-
     const saveRows = events
-      .filter(e => e.step === 'save:batch-result' || e.step === 'web-export:folder-write' || e.step === 'web-export:zip-done' || (e.step === 'invoke:ok' && e.meta?.command === TAURI_COMMANDS.SAVE_IMAGES_TO_EXISTING_FOLDER_BY_KEYS))
+      .filter(e => e.step === 'save:batch-result' || e.step === 'web-export:folder-write' || e.step === 'web-export:zip-done')
       .map(e => ({
         id: e.id,
         op: e.op,
@@ -683,18 +633,15 @@ var ExportDebug = (() => {
       slowestRenderMs: renderRows[0]?.totalRenderMs ?? '',
       renderMsTotal: Math.round(renderRows.reduce((n, r) => n + (Number(r.totalRenderMs) || 0), 0) * 100) / 100,
       encodeMsTotal: Math.round(renderRows.reduce((n, r) => n + (Number(r.encodeMs) || 0), 0) * 100) / 100,
-      registerMsTotal: Math.round(registerRows.reduce((n, r) => n + (Number(r.registerMs) || 0), 0) * 100) / 100,
-      nativeTransformMsTotal: Math.round(registerRows.reduce((n, r) => n + (Number(r.nativeTransformMs) || 0), 0) * 100) / 100,
       saveMsTotal: Math.round(saveRows.reduce((n, r) => n + (Number(r.ms) || 0), 0) * 100) / 100,
     };
 
     console.group('[Boardfish export] slow image report');
     console.table([totals]);
     console.table(renderRows);
-    console.table(registerRows);
     console.table(saveRows);
     console.groupEnd();
-    return { totals, renderRows, registerRows, saveRows, events: events.slice() };
+    return { totals, renderRows, saveRows, events: events.slice() };
   }
 
   function status() {
@@ -734,7 +681,7 @@ var ExportDebug = (() => {
 
   function reset() { core.reset(); massive = null; }
 
-  return { enable, disable, setVerbose, start, step, end, watch, invoke, wrap, startMassive, recordResolveStart, recordResolveProgress, recordResolveDone, recordResolve, recordSaveStart, recordSaveBatch, recordSaveDone, recordProgressUi, recordEventLoopYield, massiveReport, progressReport, smoothnessReport, dump, summary, phaseSummary, slowImageReport, status, reset, get enabled() { return core.enabled; }, get events() { return events.slice(); }, get massive() { return massive ? JSON.parse(JSON.stringify(massive)) : null; } };
+  return { enable, disable, setVerbose, start, step, end, watch, startMassive, recordResolveStart, recordResolveProgress, recordResolveDone, recordResolve, recordSaveStart, recordSaveBatch, recordSaveDone, recordProgressUi, recordEventLoopYield, massiveReport, progressReport, smoothnessReport, dump, summary, phaseSummary, slowImageReport, status, reset, get enabled() { return core.enabled; }, get events() { return events.slice(); }, get massive() { return massive ? JSON.parse(JSON.stringify(massive)) : null; } };
 })();
 
 exposeDebug({ export: ExportDebug });

@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Download the latest release
-    url: https://github.com/Indominater/Boardfish/releases/latest
-    about: Get the latest Windows and macOS installers.
+  - name: Open the web app
+    url: https://indominater.github.io/Boardfish/
+    about: Use the current web version of Boardfish.

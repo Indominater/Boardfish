@@ -117,13 +117,4 @@ var finishFailedOpen;
   // beginDebug({ openFilePath: [...] }) without bypassing capture/download.
   registerDebugCommand('openFilePath', openFilePath);
 
-  if (hasTauri()) {
-    tauriListen('boardfish://open-file', (event) => {
-      openFilePath(event.payload);
-    });
-
-    BoardfishTauri.getStartupFile().then((filePath) => {
-      if (filePath) openFilePath(filePath);
-    });
-  }
 }

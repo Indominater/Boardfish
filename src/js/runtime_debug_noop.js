@@ -63,7 +63,7 @@ const StartupDebug = {
   toggleStress: async () => ({ summary: {}, events: [], samples: [] }),
   topBandScan: () => ({ summary: {}, rows: [] }),
   toggleBandStress: async () => ({ summary: {}, events: [], samples: [] }),
-  toggleNativeSkewStress: async () => ({ summary: {}, events: [], samples: [] }),
+  toggleThemeOrderStress: async () => ({ summary: {}, events: [], samples: [] }),
   events: [],
   samples: [],
   expectedCanvasBg(theme = 'light') {
@@ -119,7 +119,7 @@ const ManualPerfDebug = createNoopDebugApi();
 const InsertDebug = createNoopDebugApi({
   report: () => null,
   imageBreakdown: () => [],
-  nativeBreakdown: () => [],
+  fileBreakdown: () => [],
 });
 const TextSelDebug = createNoopDebugApi({
   _logDraw: noop,
@@ -128,23 +128,6 @@ const TextSelDebug = createNoopDebugApi({
 });
 const PillDebug = createNoopDebugApi();
 const MenuDebug = createNoopDebugApi();
-const EyedropperDebug = createNoopDebugApi({
-  state: () => ({}),
-  _count: noop,
-  _countPerf: noop,
-  _logPreviewPresent: noop,
-  _logReadbackFailure: noop,
-  _logReadoutUpdate: noop,
-  _logSample: noop,
-  _logSamplingEvent: noop,
-  _logToggle: noop,
-  _logUnsafeImageSkip: noop,
-  _recordPrewarmTiming: noop,
-  _recordSampleTiming: noop,
-  nativeDecodedCacheReport: async () => null,
-  _startFrameProbe: noop,
-  _stopFrameProbe: noop,
-});
 
 const exposeDebug = () => {};
 const registerDebugCommand = () => {};

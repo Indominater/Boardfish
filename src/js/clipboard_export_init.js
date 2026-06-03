@@ -1,7 +1,7 @@
-const canStartWebClipboardWrite = () => !hasTauri() && (typeof document === 'undefined' || document.visibilityState !== 'hidden');
+const canStartWebClipboardWrite = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
 
 const finishWebClipboardTokenWrite = (result, token, dbg = null) => {
-  if (result?.boardfishTokenWritten) globalThis.markJsClipboardWebTokenOnNative?.(token, dbg);
+  if (result?.boardfishTokenWritten) globalThis.markJsClipboardWebTokenWritten?.(token, dbg);
 };
 
 const writeWebClipboardTokenForJsClipboard = (dbg = null, meta = {}) => {
@@ -14,7 +14,6 @@ const writeWebClipboardTokenForJsClipboard = (dbg = null, meta = {}) => {
 };
 
 const readWebClipboardTokenForPaste = async (clipboardData, dbg = null) => {
-  if (hasTauri()) return { checked: false, token: '' };
   if (clipboardData) {
     return {
       checked: true,
@@ -183,7 +182,7 @@ const copySelected = (options = {}) => {
     }
     if (!clonedObjs.length) { ClipDebug.end(dbg, { skipped: 'no-clones' }); return false; }
     ClipDebug.step(dbg, 'copy:multi-set-jsClipboard-start', { objectCount: clonedObjs.length, imageCount });
-    setJsClipboard({ type: 'objects', objects: clonedObjs, imageData }, true);
+    setJsClipboard({ type: 'objects', objects: clonedObjs, imageData });
     writeWebClipboardTokenForJsClipboard(dbg, { objectCount: clonedObjs.length, imageCount });
     ClipDebug.step(dbg, 'copy:multi-set-jsClipboard-end', { objectCount: clonedObjs.length, imageCount });
     ClipDebug.end(dbg, { path: 'multi-jsClipboard', objectCount: clonedObjs.length, imageCount });
@@ -204,162 +203,75 @@ const copySelected = (options = {}) => {
     const src = BoardfishImageStore.getSource(obj.data.imgKey);
     if (src) imgData[obj.data.imgKey] = src;
   }
-  const isTauri = hasTauri();
-
-  const clipboardToken = setJsClipboard({ type: 'objects', objects: [cloned], imageData: imgData }, false, isTauri);
-  ClipDebug.step(dbg, 'set-jsClipboard', { type: obj.type, isTauri, imgKey: obj.data?.imgKey, imageNeedsRendering: obj.type === 'image' ? imageNeedsRendering(obj) : false });
+  setJsClipboard({ type: 'objects', objects: [cloned], imageData: imgData });
+  ClipDebug.step(dbg, 'set-jsClipboard', { type: obj.type, imgKey: obj.data?.imgKey, imageNeedsRendering: obj.type === 'image' ? imageNeedsRendering(obj) : false });
 
   if (obj.type === 'text') {
-    const clipboardText = textForClipboard(obj.data.content);
-    if (isTauri) {
-      const copyStartSequencePromise = getNativeClipboardSequence(dbg);
-      enqueueNativeClipboardWrite(async () => {
-        if (clipboardToken !== _jsClipboardToken) {
-          ClipDebug.step(dbg, 'native-copy-stale-skip', { type: 'text', token: clipboardToken, currentToken: _jsClipboardToken });
-          return;
-        }
-        const startSeq = await copyStartSequencePromise;
-        const currentSeq = await getNativeClipboardSequence(dbg);
-        if (clipboardSequenceChangedExternally(startSeq, currentSeq)) {
-          ClipDebug.step(dbg, 'native-copy-external-change-skip', { type: 'text', startSeq, currentSeq });
-          return;
-        }
-        await BoardfishClipboardIO.copyTextToClipboard(clipboardText, dbg);
-      }, dbg, { type: 'text', token: clipboardToken })
-        .catch((err) => console.error('[copy] copy_text_to_clipboard FAILED:', err))
-        .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
-        .finally(() => ClipDebug.end(dbg, { path: 'text-tauri' }));
-      return true;
-    } else {
-      const webToken = globalThis.getJsClipboardWebToken?.() || '';
-      BoardfishClipboardIO.copyTextToClipboard(clipboardText, dbg, { boardfishToken: webToken })
-        .then((result) => finishWebClipboardTokenWrite(result, webToken, dbg))
-        .catch((err) => console.error('[copy] writeText FAILED:', err))
-        .finally(() => ClipDebug.end(dbg, { path: 'text-web' }));
-      return true;
-    }
+    const clipboardText = typeof textObjectContentForClipboard === 'function'
+      ? textObjectContentForClipboard(obj)
+      : textForClipboard(obj.data.content);
+    const webToken = globalThis.getJsClipboardWebToken?.() || '';
+    BoardfishClipboardIO.copyTextToClipboard(clipboardText, dbg, { boardfishToken: webToken })
+      .then((result) => finishWebClipboardTokenWrite(result, webToken, dbg))
+      .catch((err) => console.error('[copy] writeText FAILED:', err))
+      .finally(() => ClipDebug.end(dbg, { path: 'text-web' }));
+    return true;
   }
 
   if (obj.type === 'image') {
-    if (isTauri) {
-      const imgKey = obj.data.imgKey;
-      const { flipX, flipY, rotation } = imageTransformFromObject(obj);
-      const storedSource = BoardfishImageStore.getSource(imgKey);
-      const storedInfo = typeof imageSourceDebugInfo === 'function'
-        ? imageSourceDebugInfo(storedSource)
-        : { kind: isNativeImageRef(storedSource) ? 'native-ref' : typeof storedSource, length: '', prefix: '' };
-      const nativeCopyMeta = {
-        imgKey,
-        flipX,
-        flipY,
-        rotation,
-        sourceKind: storedInfo.kind,
-        sourceLen: storedInfo.length,
-        sourcePrefix: storedInfo.prefix,
-      };
-      const copyNativeCachedKey = async () => {
-        ClipDebug.step(dbg, 'copy:key-start', nativeCopyMeta);
-        await ClipDebug.wrap(
-          dbg,
-          TAURI_COMMANDS.COPY_IMAGE_KEY_TO_CLIPBOARD_TRANSFORMED,
-          () => BoardfishTauri.copyImageKeyToClipboardTransformed({ imgKey, flipX, flipY, rotation }),
-          nativeCopyMeta
-        );
-      };
-      const copyDataUrlFallback = async (reason) => {
-        const sourceStart = performance.now();
-        ClipDebug.step(dbg, 'copy:source-start', { imgKey, reason, storedType: typeof storedSource, nativeRef: isNativeImageRef(storedSource) });
-        const src = await ensureImageDataUrl(obj.data.imgKey, dbg);
-        if (!src) return;
-        ClipDebug.step(dbg, 'copy:source-ready', {
-          imgKey,
-          reason,
-          ms: Math.round((performance.now() - sourceStart) * 100) / 100,
-          dataUrl: src,
+    const writeWebPngBlob = async (blob, path, meta = {}) => {
+      const webToken = globalThis.getJsClipboardWebToken?.() || '';
+      const writeMeta = { path, blobSize: blob?.size ?? '', ...meta };
+      const startedAt = clipboardNow();
+      ClipDebug.step(dbg, 'copy:web-clipboard-write-start', writeMeta);
+      try {
+        const result = await BoardfishClipboardIO.copyImageBlobToClipboard(blob, webToken, dbg);
+        ClipDebug.step(dbg, 'copy:web-clipboard-write-end', {
+          ...writeMeta,
+          ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
         });
-        ClipDebug.step(dbg, 'copy:data-url-fallback', { imgKey, flipX, flipY, rotation, reason, dataUrl: src });
-        await ClipDebug.wrap(
-          dbg,
-          TAURI_COMMANDS.COPY_IMAGE_DATA_URL_TO_CLIPBOARD_TRANSFORMED,
-          () => BoardfishTauri.copyImageDataUrlToClipboardTransformed({ dataUrl: src, flipX, flipY, rotation }),
-          { imgKey, flipX, flipY, rotation, dataUrl: src }
-        );
-      };
-      enqueueNativeClipboardWrite(async () => {
-        if (clipboardToken !== _jsClipboardToken) {
-          ClipDebug.step(dbg, 'native-copy-stale-skip', { type: 'image', imgKey, token: clipboardToken, currentToken: _jsClipboardToken });
-          return;
-        }
-        if (isNativeImageRef(storedSource) && typeof BoardfishTauri.copyImageKeyToClipboardTransformed === 'function') {
-          await copyNativeCachedKey();
-          return;
-        }
-        await copyDataUrlFallback(
-          isNativeImageRef(storedSource) ? 'native-key-unavailable' : 'data-url-copy'
-        );
-      }, dbg, { type: 'image', imgKey, flipX, flipY, rotation })
-        .catch((err) => {
-          ClipDebug.step(dbg, 'copy:image-error', { imgKey, flipX, flipY, rotation, error: String(err) });
-          console.error('[copy] image clipboard write FAILED:', err);
-        })
-        .finally(() => finishNativeClipboardWrite(clipboardToken, dbg))
-        .finally(() => ClipDebug.end(dbg, { path: 'image-tauri-cached-transform', imgKey, flipX, flipY, rotation }));
-      return true;
-    } else {
-      const writeWebPngBlob = async (blob, path, meta = {}) => {
-        const webToken = globalThis.getJsClipboardWebToken?.() || '';
-        const writeMeta = { path, blobSize: blob?.size ?? '', ...meta };
-        const startedAt = clipboardNow();
-        ClipDebug.step(dbg, 'copy:web-native-write-start', writeMeta);
-        try {
-          const result = await BoardfishClipboardIO.copyImageBlobToClipboard(blob, webToken, dbg);
-          ClipDebug.step(dbg, 'copy:web-native-write-end', {
-            ...writeMeta,
-            ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
-          });
-          finishWebClipboardTokenWrite(result, webToken, dbg);
-          return true;
-        } catch (err) {
-          ClipDebug.step(dbg, 'copy:web-native-write-error', {
-            ...writeMeta,
-            ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
-            error: String(err),
-          });
-          console.error('[copy] clipboard.write FAILED:', err);
-          return false;
-        } finally {
-          ClipDebug.end(dbg, writeMeta);
-        }
-      };
-      const storedSource = BoardfishImageStore.getSource(obj.data.imgKey);
-      const sourcePngBlob = createWebSourcePngClipboardBlob(obj, storedSource, dbg);
-      if (sourcePngBlob) {
-        return writeWebPngBlob(sourcePngBlob, 'image-web-source-png', {
-          imgKey: obj.data.imgKey,
-          sourceKind: webSourceClipboardKind(storedSource),
-          sourceBytes: sourcePngBlob.size,
+        finishWebClipboardTokenWrite(result, webToken, dbg);
+        return true;
+      } catch (err) {
+        ClipDebug.step(dbg, 'copy:web-clipboard-write-error', {
+          ...writeMeta,
+          ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
+          error: String(err),
         });
+        console.error('[copy] clipboard.write FAILED:', err);
+        return false;
+      } finally {
+        ClipDebug.end(dbg, writeMeta);
       }
-      let pngBlob = null;
-      const canvas = renderImageToCanvas(obj);
-      if (!canvas) {
-        ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' });
+    };
+    const storedSource = BoardfishImageStore.getSource(obj.data.imgKey);
+    const sourcePngBlob = createWebSourcePngClipboardBlob(obj, storedSource, dbg);
+    if (sourcePngBlob) {
+      return writeWebPngBlob(sourcePngBlob, 'image-web-source-png', {
+        imgKey: obj.data.imgKey,
+        sourceKind: webSourceClipboardKind(storedSource),
+        sourceBytes: sourcePngBlob.size,
+      });
+    }
+    let pngBlob = null;
+    const canvas = renderImageToCanvas(obj);
+    if (!canvas) {
+      ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' });
+      return false;
+    }
+    return (async () => {
+      try {
+        pngBlob = await canvasToPngBlob(canvas);
+        if (!pngBlob) {
+          ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'blob-null' });
+          return false;
+        }
+        return await writeWebPngBlob(pngBlob, 'image-web-rendered');
+      } catch (err) {
+        console.error('[copy] clipboard.write FAILED:', err);
         return false;
       }
-      return (async () => {
-        try {
-          pngBlob = await canvasToPngBlob(canvas);
-          if (!pngBlob) {
-            ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'blob-null' });
-            return false;
-          }
-          return await writeWebPngBlob(pngBlob, 'image-web-rendered');
-        } catch (err) {
-          console.error('[copy] clipboard.write FAILED:', err);
-          return false;
-        }
-      })();
-    }
+    })();
   }
   ClipDebug.end(dbg, { path: 'object-jsClipboard', type: obj.type || '' });
   return true;
@@ -384,7 +296,6 @@ const cutSelected = () => {
 };
 
 async function pasteAtPos(wx, wy, clipboardData = null) {
-  if (eyedropperEnabled) return;
   const dbg = ClipDebug.start('pasteAtPos', {
     wx,
     wy,
@@ -406,7 +317,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       webClipboardTokenChecked: webClipboardToken.checked,
       webClipboardToken: webClipboardToken.token,
     }))) {
-      ClipDebug.step(dbg, 'clear-stale-jsClipboard', { expectedSequence: _jsClipboardSequence });
+      ClipDebug.step(dbg, 'clear-stale-jsClipboard', { expectedToken: _jsClipboardWebToken });
       clearJsClipboard();
     }
     if (jsClipboard) {
@@ -504,91 +415,16 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         return;
       }
     }
-    if (!hasTauri()) {
-      const eventImageFile = BoardfishClipboardIO.readClipboardImageFileFromEvent(clipboardData, dbg);
-      if (eventImageFile) {
-        await pasteWebImageBlob(eventImageFile, wx, wy, dbg, 'web-paste-event');
-        return;
-      }
-    }
-    const eventImage = hasTauri()
-      ? BoardfishClipboardIO.readClipboardImageDataUrlFromEvent(clipboardData, dbg)
-      : null;
-    if (eventImage) {
-      try {
-        const imgKey = newImgKey();
-        const dataUrl = await eventImage;
-        ClipDebug.step(dbg, 'event-image-read', { imgKey, dataUrl });
-        await pasteDataUrlImage(dataUrl, wx, wy, imgKey, 'event-image', dbg, { resolveOnLoad: true });
-        return;
-      } catch (err) {
-        hideInputShield();
-        ClipDebug.step(dbg, 'event-image-miss', { error: String(err) });
-      }
+    const eventImageFile = BoardfishClipboardIO.readClipboardImageFileFromEvent(clipboardData, dbg);
+    if (eventImageFile) {
+      await pasteWebImageBlob(eventImageFile, wx, wy, dbg, 'web-paste-event');
+      return;
     }
     const eventText = BoardfishClipboardIO.readClipboardTextFromEvent(clipboardData);
     if (eventText && eventText.trim()) {
       addText(wx, wy, eventText, { anchor: 'center' });
       ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length });
       return;
-    }
-    if (hasTauri()) {
-      try {
-        if (nativeClipboardPendingCount() > 0) {
-          const settleStart = performance.now();
-          ClipDebug.step(dbg, 'native-clipboard-settle:start', { nativePending: nativeClipboardPendingCount() });
-          const settle = await waitForNativeClipboardIdle(250);
-          ClipDebug.step(dbg, 'native-clipboard-settle:end', {
-            nativePending: nativeClipboardPendingCount(),
-            ready: settle?.ready ?? '',
-            error: settle?.error || '',
-            ms: Math.round((performance.now() - settleStart) * 100) / 100,
-          });
-        } else {
-          ClipDebug.step(dbg, 'native-clipboard-settle:skip', { reason: 'no-pending-native-write' });
-        }
-        const imgKey = newImgKey();
-        const generation = _imageStoreGeneration;
-        const sourceToken = createImageSourceToken(imgKey);
-        const meta = await ClipDebug.wrap(
-          dbg,
-          TAURI_COMMANDS.READ_IMAGE_FROM_CLIPBOARD_CACHED,
-          () => BoardfishTauri.readImageFromClipboardCached(imgKey, sourceToken),
-          { imgKey }
-        );
-        if (generation !== _imageStoreGeneration) {
-          cleanupNativeImageSourceToken(imgKey, sourceToken);
-          ClipDebug.step(dbg, 'native-image-stale-skip', { imgKey });
-          return;
-        }
-        ClipDebug.step(dbg, 'native-image-read', {
-          imgKey,
-          width: meta?.width,
-          height: meta?.height,
-          pixels: meta?.pixels,
-          bytes: meta?.bytes,
-          mime: meta?.mime,
-          ext: meta?.ext,
-        });
-        await pasteNativeCachedImage(meta, wx, wy, imgKey, 'native-image-cache', dbg, sourceToken);
-        return;
-      } catch (err) {
-        hideInputShield();
-        ClipDebug.step(dbg, 'native-image-miss', { error: String(err) });
-        try {
-          const text = await ClipDebug.wrap(
-            dbg,
-            TAURI_COMMANDS.READ_TEXT_FROM_CLIPBOARD,
-            () => BoardfishTauri.readTextFromClipboard()
-          );
-          if (text && text.trim()) addText(wx, wy, text, { anchor: 'center' });
-          ClipDebug.end(dbg, { path: 'native-text', textLen: text?.length || 0, objectCountAfter: objects.length });
-          return;
-        } catch (textErr) {
-          ClipDebug.end(dbg, { path: 'native-empty', error: String(textErr), objectCountAfter: objects.length });
-        }
-        return;
-      }
     }
     showInputShield();
     try {

@@ -17,6 +17,22 @@ const BoardfishMotion = (() => {
     squish: 0.68,
     staggerMs: 18,
   });
+  const copyJiggleDefaults = Object.freeze({
+    duration: 500,
+    translateXPx: 5.0,
+    translateYPx: 10.75,
+    yFreqHz: 3.55,
+    xFreqHz: 4.65,
+    yDamping: 0.24,
+    xDamping: 0.34,
+    yLagMs: 16,
+    attackMs: 26,
+    settleStart: 0.88,
+    sagGain: 0.18,
+    sagDecay: 2.15,
+    lateralCoupling: 0.16,
+    normalizePath: true,
+  });
   const smoothSlideDefaults = Object.freeze({
     duration: 220,
     offsetY: -6,
@@ -70,23 +86,15 @@ const BoardfishMotion = (() => {
       'menu-command-press',
       'new-board-state-reset',
     ]),
-    eyedropperQuiet: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'eyedropper-hold-end',
-      'eyedropper-hold-start',
-      'eyedropper-hover',
-      'eyedropper-loupe-close',
-      'eyedropper-loupe-drag',
-      'eyedropper-loupe-open',
-    ]),
     exportCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'export-selected-image',
       'export-selected-images',
     ]),
     fileDialogCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'file-dialog-cancel',
+      'file-dialog-open',
       'image-file-dialog-open',
       'image-file-drop',
-      'native-file-dialog-open',
     ]),
     saveCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'save-board',
@@ -120,6 +128,7 @@ const BoardfishMotion = (() => {
       'text-edit-paste',
       'text-edit-select-all',
       'text-edit-type',
+      'text-align',
       'text-height-change',
     ]),
     unsavedDialogButtons: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
@@ -183,14 +192,9 @@ const BoardfishMotion = (() => {
     objectRestore: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'object-undo-delete',
     ]),
-    appWindowNative: actionAnimationGroup(ACTION_ANIMATION_SETS.notApplicable, [
-      'app-window-close-request',
-      'app-window-drag',
-      'app-window-minimize',
-      'app-window-resize',
-      'app-window-toggle-maximize',
+    browserReservedShortcuts: actionAnimationGroup(ACTION_ANIMATION_SETS.notApplicable, [
+      'browser-find-shortcut',
       'external-github-open',
-      'native-find-shortcut',
     ]),
   });
   const buildActionAnimationAssignments = () => {
@@ -209,6 +213,7 @@ const BoardfishMotion = (() => {
   let jelloParams = null;
   let smoothSlideParams = null;
   let noAnimationParams = null;
+  const copyJiggleNormalizerCache = new Map();
   const actionAnimationRuntimeUnassigned = new Set();
   const actionAnimationPolicyDuplicateAssignments = [];
 
@@ -225,6 +230,10 @@ const BoardfishMotion = (() => {
   );
 
   const clamp01 = (value) => Math.max(0, Math.min(1, value));
+  const smoothstep = (value) => {
+    const t = clamp01(value);
+    return t * t * (3 - 2 * t);
+  };
   const numberInRange = (value, fallback, min, max) => {
     if (value == null || value === '') return fallback;
     const numeric = Number(value);
@@ -247,6 +256,82 @@ const BoardfishMotion = (() => {
     settleScale: numberInRange(options.settleScale, base.settleScale, 0.8, 1.2),
     ease: typeof options.ease === 'string' && options.ease.trim() ? options.ease.trim() : base.ease,
   });
+  const normalizeCopyJiggleParams = (options = {}, base = copyJiggleDefaults) => ({
+    yFreqHz: numberInRange(options.yFreqHz, base.yFreqHz, 0.1, 12),
+    xFreqHz: numberInRange(options.xFreqHz, base.xFreqHz, 0.1, 12),
+    yDamping: numberInRange(options.yDamping, base.yDamping, 0.001, 0.999),
+    xDamping: numberInRange(options.xDamping, base.xDamping, 0.001, 0.999),
+    yLagMs: numberInRange(options.yLagMs, base.yLagMs, 0, 160),
+    attackMs: numberInRange(options.attackMs, base.attackMs, 0, 240),
+    settleStart: numberInRange(options.settleStart, base.settleStart, 0, 0.99),
+    sagGain: numberInRange(options.sagGain, base.sagGain, -1, 1),
+    sagDecay: numberInRange(options.sagDecay, base.sagDecay, 0, 12),
+    lateralCoupling: numberInRange(options.lateralCoupling, base.lateralCoupling, -1, 1),
+    normalizePath: options.normalizePath == null ? base.normalizePath : options.normalizePath !== false,
+  });
+  const copyJiggleParamKey = (p) => [
+    p.duration,
+    p.yFreqHz,
+    p.xFreqHz,
+    p.yDamping,
+    p.xDamping,
+    p.yLagMs,
+    p.attackMs,
+    p.settleStart,
+    p.sagGain,
+    p.sagDecay,
+    p.lateralCoupling,
+    p.normalizePath ? 1 : 0,
+  ].join('|');
+  const dampedSpringImpulse = (timeSec, freqHz, dampingRatio) => {
+    const zeta = numberInRange(dampingRatio, 0.5, 0.001, 0.999);
+    const omega0 = 2 * Math.PI * freqHz;
+    const omegaD = omega0 * Math.sqrt(1 - zeta * zeta);
+    return Math.exp(-zeta * omega0 * timeSec) * Math.sin(omegaD * timeSec);
+  };
+  const copyJiggleUnit = (t, p) => {
+    const durationSec = p.duration / 1000;
+    const timeSec = t * durationSec;
+    const attack = smoothstep(timeSec / Math.max(0.001, p.attackMs / 1000));
+    const settle = 1 - smoothstep((t - p.settleStart) / Math.max(0.001, 1 - p.settleStart));
+    const yTimeSec = Math.max(0, timeSec - p.yLagMs / 1000);
+    const xBase = dampedSpringImpulse(timeSec, p.xFreqHz, p.xDamping);
+    const yBase = dampedSpringImpulse(yTimeSec, p.yFreqHz, p.yDamping);
+    const coupledX = (
+      dampedSpringImpulse(yTimeSec, p.yFreqHz * 1.32, p.yDamping + 0.08)
+      * p.lateralCoupling
+    );
+    const sag = (
+      Math.sin(t * Math.PI)
+      * Math.exp(-p.sagDecay * timeSec)
+      * p.sagGain
+    );
+    return {
+      x: (xBase + coupledX) * attack * settle,
+      y: (yBase + sag) * attack * settle,
+    };
+  };
+  const getCopyJiggleNormalizer = (p) => {
+    if (!p.normalizePath) return { x: 1, y: 1 };
+    const key = copyJiggleParamKey(p);
+    const cached = copyJiggleNormalizerCache.get(key);
+    if (cached) return cached;
+    let maxX = 0.0001;
+    let maxY = 0.0001;
+    const samples = 192;
+    for (let i = 0; i <= samples; i += 1) {
+      const point = copyJiggleUnit(i / samples, p);
+      maxX = Math.max(maxX, Math.abs(point.x));
+      maxY = Math.max(maxY, Math.abs(point.y));
+    }
+    const normalizer = Object.freeze({
+      x: 1 / maxX,
+      y: 1 / maxY,
+    });
+    if (copyJiggleNormalizerCache.size > 32) copyJiggleNormalizerCache.clear();
+    copyJiggleNormalizerCache.set(key, normalizer);
+    return normalizer;
+  };
   const applySmoothSlideCssVars = () => {
     const style = root.document?.documentElement?.style;
     if (!style) return;
@@ -375,11 +460,31 @@ const BoardfishMotion = (() => {
     );
   };
 
+  const copyJiggleMotionFields = (options = {}, baseMotion = {}) => {
+    const translateXPx = numberInRange(options.translateXPx, 0, 0, 48);
+    const translateYPx = numberInRange(options.translateYPx, 0, 0, 48);
+    if (!translateXPx && !translateYPx) {
+      return { translateXPx, translateYPx };
+    }
+    const params = normalizeCopyJiggleParams(options);
+    return {
+      ...params,
+      translateXPx,
+      translateYPx,
+      copyJiggleNormalizer: getCopyJiggleNormalizer({
+        ...baseMotion,
+        ...params,
+        translateXPx,
+        translateYPx,
+      }),
+    };
+  };
+
   const noteObjectJello = (obj, options = {}) => {
     if (!obj?.id || (options.includeText === false && obj.type === 'text') || prefersReducedMotion()) return;
     const amplitude = numberInRange(options.amplitude, jelloParams.amplitude, 0, 0.24);
     if (amplitude <= 0) return;
-    jelloObjectMotions.set(obj.id, {
+    const baseMotion = {
       obj: options.phase === 'exit' ? obj : null,
       phase: options.phase === 'exit' ? 'exit' : 'pulse',
       startedAt: now(),
@@ -389,6 +494,11 @@ const BoardfishMotion = (() => {
       oscillations: numberInRange(options.oscillations, jelloParams.oscillations, 1, 16),
       rebound: numberInRange(options.rebound, jelloParams.rebound, 0, 0.8),
       squish: numberInRange(options.squish, jelloParams.squish, 0, 1.4),
+      decayPower: numberInRange(options.decayPower, 2.15, 0.8, 4),
+    };
+    jelloObjectMotions.set(obj.id, {
+      ...baseMotion,
+      ...copyJiggleMotionFields(options, baseMotion),
     });
     requestMotionFrame();
   };
@@ -416,7 +526,7 @@ const BoardfishMotion = (() => {
     if (!spec?.id || !spec.hasSelection || prefersReducedMotion()) return;
     const amplitude = numberInRange(options.amplitude, jelloParams.amplitude, 0, 0.24);
     if (amplitude <= 0) return;
-    textSelectionJelloMotions.set(spec.id, {
+    const baseMotion = {
       startedAt: now(),
       delay: Math.max(0, Number(options.delay) || 0),
       duration: numberInRange(options.duration, jelloParams.duration, 180, 1200),
@@ -424,8 +534,13 @@ const BoardfishMotion = (() => {
       oscillations: numberInRange(options.oscillations, jelloParams.oscillations, 1, 16),
       rebound: numberInRange(options.rebound, jelloParams.rebound, 0, 0.8),
       squish: numberInRange(options.squish, jelloParams.squish, 0, 1.4),
+      decayPower: numberInRange(options.decayPower, 2.15, 0.8, 4),
       start: Math.min(spec.start, spec.end),
       end: Math.max(spec.start, spec.end),
+    };
+    textSelectionJelloMotions.set(spec.id, {
+      ...baseMotion,
+      ...copyJiggleMotionFields(options, baseMotion),
     });
     requestMotionFrame();
   };
@@ -591,11 +706,13 @@ const BoardfishMotion = (() => {
     return sampleY(u);
   };
 
-  const smoothSlideObjectTranslateYValue = (value, options = {}) => {
+  const screenPxToWorldValue = (value, options = {}) => {
     const viewZoom = Number(options?.view?.zoom);
     const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
     return value / safeZoom;
   };
+
+  const smoothSlideObjectTranslateYValue = (value, options = {}) => screenPxToWorldValue(value, options);
 
   const smoothSlideObjectTranslateY = (motion, options = {}, eased = 0) => {
     return smoothSlideObjectTranslateYValue(motion.offsetY * eased, options);
@@ -621,7 +738,7 @@ const BoardfishMotion = (() => {
   };
 
   const jelloScaleForMotion = (motion, t) => {
-    const decay = Math.pow(1 - t, 2.15);
+    const decay = Math.pow(1 - t, numberInRange(motion.decayPower, 2.15, 0.8, 4));
     const wobble = Math.sin(t * Math.PI * motion.oscillations) * motion.amplitude * decay;
     const rebound = Math.sin(t * Math.PI * motion.oscillations * 2) * motion.amplitude * motion.rebound * decay;
     return {
@@ -630,7 +747,38 @@ const BoardfishMotion = (() => {
     };
   };
 
-  const textSelectionMotionForDraw = (id, start, end) => {
+  const jelloTranslateForMotion = (motion, t, options = {}) => {
+    const point = copyJiggleUnit(t, motion);
+    const normalizer = motion.copyJiggleNormalizer || getCopyJiggleNormalizer(motion);
+    const result = {};
+    if (motion.translateXPx) {
+      result.translateX = screenPxToWorldValue(point.x * normalizer.x * motion.translateXPx, options);
+    }
+    if (motion.translateYPx) {
+      result.translateY = screenPxToWorldValue(point.y * normalizer.y * motion.translateYPx, options);
+    }
+    return result;
+  };
+
+  const jelloTransformForMotion = (motion, t, options = {}) => {
+    if (motion.translateXPx || motion.translateYPx) return jelloTranslateForMotion(motion, t, options);
+    return jelloScaleForMotion(motion, t);
+  };
+
+  const restingJelloTransformForMotion = (motion) => {
+    if (motion.translateXPx || motion.translateYPx) {
+      return {
+        translateX: 0,
+        translateY: 0,
+      };
+    }
+    return {
+      scaleX: 1,
+      scaleY: 1,
+    };
+  };
+
+  const textSelectionMotionForDraw = (id, start, end, options = {}) => {
     const motion = textSelectionJelloMotions.get(id);
     if (!motion || prefersReducedMotion()) return null;
     if (motion.start !== Math.min(start, end) || motion.end !== Math.max(start, end)) {
@@ -642,10 +790,10 @@ const BoardfishMotion = (() => {
       textSelectionJelloMotions.delete(id);
       return null;
     }
-    if (progress.waiting) return { opacity: 1, scaleX: 1, scaleY: 1 };
+    if (progress.waiting) return { opacity: 1, ...restingJelloTransformForMotion(motion) };
     return {
       opacity: 1,
-      ...jelloScaleForMotion(motion, progress.t),
+      ...jelloTransformForMotion(motion, progress.t, options),
     };
   };
 
@@ -664,7 +812,7 @@ const BoardfishMotion = (() => {
     return specs;
   };
 
-  const jelloMotionForDraw = (obj) => {
+  const jelloMotionForDraw = (obj, options = {}) => {
     const jello = jelloObjectMotions.get(obj?.id);
     if (!jello || prefersReducedMotion()) return null;
     const cutoff = now();
@@ -673,12 +821,12 @@ const BoardfishMotion = (() => {
       jelloObjectMotions.delete(obj.id);
       return jello.phase === 'exit' ? { opacity: 0, scale: 1, skip: true } : null;
     }
-    if (progress.waiting) return { opacity: 1, scale: 1 };
+    if (progress.waiting) return { opacity: 1, ...restingJelloTransformForMotion(jello) };
     const t = progress.t;
     const exitOpacity = jello.phase === 'exit' ? clamp01(1 - t) : 1;
     return {
       opacity: exitOpacity,
-      ...jelloScaleForMotion(jello, t),
+      ...jelloTransformForMotion(jello, t, options),
     };
   };
 
@@ -709,7 +857,7 @@ const BoardfishMotion = (() => {
 
   const objectMotionForDraw = (obj, options = {}) => {
     if (!hasObjectMotions()) return null;
-    return smoothSlideObjectMotionForDraw(obj, options) || jelloMotionForDraw(obj);
+    return smoothSlideObjectMotionForDraw(obj, options) || jelloMotionForDraw(obj, options);
   };
 
   const motionObjectsForDraw = () => {
@@ -832,6 +980,10 @@ const BoardfishMotion = (() => {
     const controls = {};
     if (hasOwn(options, 'includeText')) controls.includeText = options.includeText;
     if (hasOwn(options, 'textMotion')) controls.textMotion = options.textMotion;
+    controls.duration = numberInRange(options.duration, copyJiggleDefaults.duration, 180, 1200);
+    controls.translateXPx = numberInRange(options.translateXPx, copyJiggleDefaults.translateXPx, 0, 48);
+    controls.translateYPx = numberInRange(options.translateYPx, copyJiggleDefaults.translateYPx, 0, 48);
+    Object.assign(controls, normalizeCopyJiggleParams(options));
     return controls;
   };
 

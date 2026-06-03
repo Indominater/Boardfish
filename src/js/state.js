@@ -26,7 +26,23 @@ function cloneObject(obj) {
         imgKey: obj.data.imgKey,
         ...imageTransformFromObject(obj),
       }
-    : { content: normalizeTextContent(obj.data.content) };
+    : (() => {
+        const content = normalizeTextContent(obj.data.content);
+        const textData = { content };
+        if (typeof normalizeTextLineAlignForContent === 'function') {
+          const lineAlign = normalizeTextLineAlignForContent(content, obj.data.lineAlign);
+          if (lineAlign.length) textData.lineAlign = lineAlign;
+        } else if (Array.isArray(obj.data.lineAlign)) {
+          textData.lineAlign = [...obj.data.lineAlign];
+        }
+        if (typeof normalizeTextScriptRangesForContent === 'function') {
+          const scriptRanges = normalizeTextScriptRangesForContent(content, obj.data.scriptRanges);
+          if (scriptRanges.length) textData.scriptRanges = scriptRanges;
+        } else if (Array.isArray(obj.data.scriptRanges)) {
+          textData.scriptRanges = obj.data.scriptRanges.map((range) => ({ ...range }));
+        }
+        return textData;
+      })();
   return {
     id: obj.id,
     type: obj.type,

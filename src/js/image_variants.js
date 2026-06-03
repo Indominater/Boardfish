@@ -24,8 +24,7 @@ var imageScaledVariantQueue = [];
 var imageScaledVariantQueueScheduled = false;
 var lastViewportInputAt = 0;
 var IMAGE_VARIANT_INPUT_IDLE_MS = 180;
-var IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS = 24,
-    IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS = 16;
+var IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS = 16;
 var imageScaledVariantBuildCount = 0;
 var imageScaledVariantBuildTotalMs = 0;
 var imageScaledVariantBuildMaxMs = 0;
@@ -153,10 +152,7 @@ function scheduleScaledVariantQueue() {
   const run = () => {
     imageScaledVariantQueueScheduled = false;
     const inputIdleMs = performance.now() - lastViewportInputAt;
-    const eyedropperActive = typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled;
-    const idleThresholdMs = eyedropperActive
-      ? IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS
-      : activeInputQueueDelayMs;
+    const idleThresholdMs = activeInputQueueDelayMs;
     if (inputIdleMs < idleThresholdMs) {
       scheduleScaledVariantQueue();
       return;
@@ -170,10 +166,7 @@ function scheduleScaledVariantQueue() {
       });
   };
   const inputIdleMs = performance.now() - lastViewportInputAt;
-  const eyedropperActive = typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled;
-  const idleThresholdMs = eyedropperActive
-    ? IMAGE_VARIANT_EYEDROPPER_INPUT_IDLE_MS
-    : activeInputQueueDelayMs;
+  const idleThresholdMs = activeInputQueueDelayMs;
   const delay = inputIdleMs < idleThresholdMs ? idleThresholdMs - inputIdleMs : 16;
   setTimeout(run, delay);
 }
@@ -273,7 +266,6 @@ function isScaledImageVariantPending(key, scale) {
 }
 
 function prewarmVisibleScaledImageVariants(options = {}) {
-  if (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled) return { skipped: 'eyedropper' };
   if (!isViewportImageScalingActive() || _boardOpening) return { skipped: 'disabled-or-opening' };
   const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.5;
   if (!(scale > 0 && scale < 1)) return { skipped: 'invalid-scale' };
@@ -293,7 +285,7 @@ function prewarmVisibleScaledImageVariants(options = {}) {
       ready++;
       continue;
     }
-    const source = imageBitmapCache[key] || imageCache[key] || null;
+    const source = imageBitmapCache[key] || null;
     if (!isDrawableImageSource(source)) {
       noSource++;
       continue;
@@ -311,7 +303,6 @@ function prewarmVisibleScaledImageVariants(options = {}) {
 }
 
 function scheduleVisibleScaledVariantPrewarmAfterIdle(reason = 'viewport-settled', options = {}) {
-  if (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled) return;
   if (!isViewportImageScalingActive() || _boardOpening) return;
   clearTimeout(imageScaledVariantPrewarmTimer);
   const delay = Number.isFinite(options.delayMs) ? options.delayMs : IMAGE_VARIANT_INPUT_IDLE_MS;

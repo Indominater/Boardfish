@@ -211,9 +211,6 @@ const selectedTextForEditMenu = () => {
 
 const readTextClipboardForEditMenu = async () => {
   try {
-    if (hasTauri()) {
-      return String(await BoardfishTauri.readTextFromClipboard() || '');
-    }
     if (navigator.clipboard?.readText) {
       return String(await navigator.clipboard.readText() || '');
     }
@@ -254,6 +251,15 @@ const replaceTextEditSelection = (text, { immediateHistory = false } = {}) => {
 
 const copyTextEditSelection = async () => {
   const selection = getTextEditSelectionState();
+  if (
+    selection?.hasSelection &&
+    _editEl &&
+    typeof copyTextEditSelectionFromProxy === 'function'
+  ) {
+    await copyTextEditSelectionFromProxy(editingId, _editEl, selection);
+    focusTextEditProxy();
+    return;
+  }
   const selectedText = selection?.hasSelection && _editEl ? _editEl.value.slice(selection.start, selection.end) : '';
   if (selectedText) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
@@ -276,7 +282,15 @@ const cutTextEditSelection = async () => {
     focusTextEditProxy();
     return;
   }
-  if (await writeTextClipboardFromEditMenu(textSelectionForClipboard(text), { allowEmpty: true })) {
+  const selection = getTextEditSelectionState();
+  const copied = (
+    selection?.hasSelection &&
+    _editEl &&
+    typeof copyTextEditSelectionFromProxy === 'function'
+  )
+    ? await copyTextEditSelectionFromProxy(editingId, _editEl, selection)
+    : await writeTextClipboardFromEditMenu(textSelectionForClipboard(text), { allowEmpty: true });
+  if (copied) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-cut');
     replaceTextEditSelection('', { immediateHistory: true });
   }
@@ -293,6 +307,13 @@ const deleteTextEditSelection = () => {
 };
 
 const pasteTextIntoEditSelection = async () => {
+  if (
+    typeof pasteBoardfishTextSelectionIntoEditSelection === 'function' &&
+    await pasteBoardfishTextSelectionIntoEditSelection({ immediateHistory: true })
+  ) {
+    focusTextEditProxy();
+    return;
+  }
   const text = await readTextClipboardForEditMenu();
   if (!text) {
     focusTextEditProxy();
@@ -366,8 +387,14 @@ function runAddImagesCommandFromShortcut() {
 
 function runAddTextCommandFromShortcut() {
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  const defaultW = 200;
-  const defaultH = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
+  const defaultSize = typeof defaultTextBoxSize === 'function'
+    ? defaultTextBoxSize()
+    : (() => {
+        const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
+        return { w: h * ((1 + Math.sqrt(5)) / 2), h };
+      })();
+  const defaultW = defaultSize.w;
+  const defaultH = defaultSize.h;
   ctxPos = { x: center.x - defaultW / 2, y: center.y - defaultH / 2 };
   runMenuCommand(addTextBtn, 'shortcut');
 }
@@ -619,12 +646,6 @@ function showCanvasContextMenuAt(clientX, clientY) {
   }
   const wp = toWorld(clientX, clientY);
   MenuDebug.log('canvas:contextmenu', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
-
-  if (eyedropperEnabled) {
-    closeOpenMenusExcept('', 'canvas-contextmenu:eyedropper');
-    MenuDebug.log('canvas:contextmenu:blocked-eyedropper', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
-    return;
-  }
 
   const obj = hitTest(wp.x, wp.y);
 

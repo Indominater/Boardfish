@@ -50,38 +50,16 @@ test('ignores legacy board theme preferences', () => {
   assert.equal(Object.hasOwn(board, 'preferences'), false);
 });
 
-test('strips legacy saved eyedropper cards', () => {
+test('strips unsupported transient board fields', () => {
   const board = BoardSchema.normalizeBoardData({
     version: 3,
     format: 'boardfish-container',
     imageStore: {},
     objects: [],
-    eyedropperCards: [
-      {
-        rgba: [254.2, 224.4, 198.1],
-        left: 30,
-        top: 20,
-        order: 1,
-        canvasWidth: 96,
-        canvasHeight: 96,
-        previewDataUrl: 'data:image/png;base64,abc',
-      },
-    ],
+    transientPanelState: { visible: true },
   });
 
-  assert.equal(Object.hasOwn(board, 'eyedropperCards'), false);
-});
-
-test('ignores invalid legacy eyedropper card data', () => {
-  const board = BoardSchema.normalizeBoardData({
-    version: 3,
-    format: 'boardfish-container',
-    imageStore: {},
-    objects: [],
-    eyedropperCards: 'not-used',
-  });
-
-  assert.equal(Object.hasOwn(board, 'eyedropperCards'), false);
+  assert.equal(Object.hasOwn(board, 'transientPanelState'), false);
 });
 
 test('rejects image objects with missing image sources', () => {

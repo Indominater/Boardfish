@@ -385,7 +385,6 @@ test('action animation policy partitions user actions and tracks missing assignm
   assert.ok(partition['no-animation'].includes('object-delete'));
   assert.ok(partition['no-animation'].includes('object-deselect'));
   assert.ok(partition['no-animation'].includes('image-file-dialog-open'));
-  assert.ok(partition['no-animation'].includes('eyedropper-loupe-drag'));
   assert.deepEqual(plain(partition['smooth-slide']), []);
   assert.ok(partition['no-animation'].includes('menu-open'));
   assert.ok(partition['no-animation'].includes('pill-message-update'));
@@ -393,7 +392,7 @@ test('action animation policy partitions user actions and tracks missing assignm
   assert.ok(partition['no-animation'].includes('image-object-create'));
   assert.ok(partition['no-animation'].includes('object-undo-delete'));
   assert.deepEqual(plain(partition.jiggle), ['copy-selected-objects', 'copy-text-object', 'copy-text-selection']);
-  assert.ok(partition['not-applicable'].includes('app-window-minimize'));
+  assert.ok(partition['not-applicable'].includes('browser-find-shortcut'));
   assert.deepEqual(plain(motion.getActionAnimationPolicyIssues()), {
     duplicateAssignments: [],
     runtimeUnassigned: [],
@@ -410,7 +409,7 @@ test('action animation policy partitions user actions and tracks missing assignm
   assert.equal(motion.actionAnimationSetFor('pill-message-update'), 'no-animation');
   assert.equal(motion.actionAnimationSetFor('unsaved-dialog-open'), 'no-animation');
   assert.equal(motion.actionAnimationSetFor('copy-text-selection'), 'jiggle');
-  assert.equal(motion.actionAnimationSetFor('app-window-minimize'), 'not-applicable');
+  assert.equal(motion.actionAnimationSetFor('browser-find-shortcut'), 'not-applicable');
 
   assert.equal(motion.applyActionAnimation('text-edit-type'), false);
   const quietObj = { id: 'quiet-1', type: 'text' };
@@ -419,7 +418,7 @@ test('action animation policy partitions user actions and tracks missing assignm
   assert.equal(motion.applyActionAnimation('text-box-resize', { objects: [quietObj] }), false);
   assert.equal(motion.applyActionAnimation('text-box-create', { objects: [quietObj] }), false);
   assert.equal(motion.applyActionAnimation('object-delete', { removedObjects: [quietObj] }), false);
-  assert.equal(motion.applyActionAnimation('app-window-minimize'), false);
+  assert.equal(motion.applyActionAnimation('browser-find-shortcut'), false);
   assert.equal(motion.objectMotionForDraw(quietObj), null);
 
   const surface = classElement();
@@ -474,6 +473,94 @@ test('text duplicate action is no-animation and empty image duplicate payloads s
 
   setTime(260);
   assert.equal(motion.objectMotionForDraw(text), null);
+});
+
+test('copy object jiggle uses fixed screen-distance translation independent of object width', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const narrow = { id: 'narrow-text', type: 'text', w: 80, h: 32 };
+  const wide = { id: 'wide-text', type: 'text', w: 800, h: 32 };
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [narrow] }), true);
+  setTime(100);
+  const narrowAtZoom1 = motion.objectMotionForDraw(narrow, { view: { zoom: 1 } });
+  const narrowAtZoom2 = motion.objectMotionForDraw(narrow, { view: { zoom: 2 } });
+  setTime(420);
+  const narrowLate = motion.objectMotionForDraw(narrow, { view: { zoom: 1 } });
+
+  setTime(1000);
+  assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [wide] }), true);
+  setTime(1100);
+  const wideAtZoom1 = motion.objectMotionForDraw(wide, { view: { zoom: 1 } });
+
+  assert.notEqual(narrowAtZoom1.translateX, 0);
+  assert.notEqual(narrowAtZoom1.translateY, 0);
+  assert.ok(narrowLate);
+  assert.equal(narrowAtZoom1.scaleX, undefined);
+  assert.equal(narrowAtZoom1.scaleY, undefined);
+  assert.ok(Math.abs(narrowAtZoom1.translateX - wideAtZoom1.translateX) < 0.000001);
+  assert.ok(Math.abs(narrowAtZoom1.translateY - wideAtZoom1.translateY) < 0.000001);
+  assert.ok(Math.abs(narrowAtZoom1.translateX - narrowAtZoom2.translateX * 2) < 0.000001);
+  assert.ok(Math.abs(narrowAtZoom1.translateY - narrowAtZoom2.translateY * 2) < 0.000001);
+});
+
+test('copy text selection jiggle uses fixed screen-distance translation independent of selection length', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-text-selection', {
+    textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
+  }), true);
+  setTime(100);
+  const shortAtZoom1 = motion.textSelectionMotionForDraw('text-1', 2, 9, { view: { zoom: 1 } });
+  const shortAtZoom2 = motion.textSelectionMotionForDraw('text-1', 2, 9, { view: { zoom: 2 } });
+  setTime(420);
+  const shortLate = motion.textSelectionMotionForDraw('text-1', 2, 9, { view: { zoom: 1 } });
+
+  setTime(1000);
+  assert.equal(motion.applyActionAnimation('copy-text-selection', {
+    textSelection: { id: 'text-1', start: 2, end: 40, hasSelection: true },
+  }), true);
+  setTime(1100);
+  const longAtZoom1 = motion.textSelectionMotionForDraw('text-1', 2, 40, { view: { zoom: 1 } });
+
+  assert.notEqual(shortAtZoom1.translateX, 0);
+  assert.notEqual(shortAtZoom1.translateY, 0);
+  assert.ok(shortLate);
+  assert.equal(shortAtZoom1.scaleX, undefined);
+  assert.equal(shortAtZoom1.scaleY, undefined);
+  assert.ok(Math.abs(shortAtZoom1.translateX - longAtZoom1.translateX) < 0.000001);
+  assert.ok(Math.abs(shortAtZoom1.translateY - longAtZoom1.translateY) < 0.000001);
+  assert.ok(Math.abs(shortAtZoom1.translateX - shortAtZoom2.translateX * 2) < 0.000001);
+  assert.ok(Math.abs(shortAtZoom1.translateY - shortAtZoom2.translateY * 2) < 0.000001);
+});
+
+test('copy jiggle normalizes per-axis waveform to configured screen-pixel distance', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const obj = { id: 'copied-text', type: 'text' };
+  let maxX = 0;
+  let maxY = 0;
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [obj] }), true);
+  for (let i = 0; i < 192; i += 1) {
+    setTime(i * 500 / 192);
+    const frame = motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+    if (!frame) continue;
+    maxX = Math.max(maxX, Math.abs(frame.translateX || 0));
+    maxY = Math.max(maxY, Math.abs(frame.translateY || 0));
+    assert.equal(frame.scaleX, undefined);
+    assert.equal(frame.scaleY, undefined);
+  }
+
+  assert.ok(Math.abs(maxX - 5) < 0.000001, `expected max X of 5px, got ${maxX}`);
+  assert.ok(Math.abs(maxY - 10.75) < 0.000001, `expected max Y of 10.75px, got ${maxY}`);
+
+  setTime(501);
+  assert.equal(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }), null);
 });
 
 test('text selection copy feedback uses the jello set', () => {

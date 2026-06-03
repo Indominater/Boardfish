@@ -132,15 +132,6 @@
   }
 
   async function copyTextToClipboard(text, dbg = null, meta = {}) {
-    if (hasTauri()) {
-      await ClipDebug.wrap(
-        dbg,
-        TAURI_COMMANDS.COPY_TEXT_TO_CLIPBOARD,
-        () => BoardfishTauri.copyTextToClipboard(text),
-        { textLen: text.length, ...meta }
-      );
-      return;
-    }
     if (meta.boardfishToken && supportsRichClipboardWrite()) {
       try {
         await writeClipboardItem({

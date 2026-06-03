@@ -21,7 +21,6 @@
     DATA_URL: 'data-url',
     MANIFEST: 'manifest',
     MISSING: 'missing',
-    NATIVE: 'native',
     STRING: 'string',
   });
   const VIEWPORT_LIMITS = Object.freeze({
@@ -50,8 +49,7 @@
     return Math.max(VIEWPORT_LIMITS.MIN_ZOOM, Math.min(VIEWPORT_LIMITS.MAX_ZOOM, zoom));
   }
 
-  function imageRefKind(src, isNativeImageRef = () => false) {
-    if (isNativeImageRef(src)) return IMAGE_REF_KINDS.NATIVE;
+  function imageRefKind(src) {
     if (typeof src === 'string') return src.startsWith('data:') ? IMAGE_REF_KINDS.DATA_URL : IMAGE_REF_KINDS.STRING;
     if (isObject(src) && (src.path || src.mime || src.ext)) return IMAGE_REF_KINDS.MANIFEST;
     if (src == null) return IMAGE_REF_KINDS.MISSING;

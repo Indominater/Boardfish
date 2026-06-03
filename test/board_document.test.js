@@ -11,7 +11,7 @@ test('creates v3 board save data with image manifest refs', () => {
     viewport: { panX: 1, panY: 2, zoom: 1.5 },
     imageStore: {
       'img-1': 'data:image/jpeg;base64,abc',
-      'img-2': { native: true, path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
+      'img-2': { web: true, path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
       'img-3': { web: true, path: 'images/img-3.webp', mime: 'image/webp', ext: 'webp', bytes: 12 },
     },
     objects: [
@@ -21,7 +21,6 @@ test('creates v3 board save data with image manifest refs', () => {
     ],
   }, {
     schema: BoardSchema,
-    isNativeImageRef: (src) => !!src?.native,
     guessImageExtFromDataUrl: () => 'jpg',
   });
 
@@ -74,43 +73,31 @@ test('prunes unreferenced image store entries from saved board data', () => {
   assert.deepEqual(Object.keys(data.imageStore).sort(), ['img-1', 'img-2']);
 });
 
-test('omits transient eyedropper card data from board data', () => {
+test('omits unsupported transient board data from board data', () => {
   const data = BoardDocument.createBoardDataForSave({
     viewport: { panX: 0, panY: 0, zoom: 1 },
     imageStore: {},
     objects: [],
-    eyedropperCards: [
-      {
-        rgba: [254, 224, 198, 255],
-        left: 30,
-        top: 20,
-        order: 1,
-        canvasWidth: 96,
-        canvasHeight: 96,
-        previewDataUrl: 'data:image/png;base64,abc',
-      },
-    ],
+    transientPanelState: { visible: true },
   }, {
     schema: BoardSchema,
     guessImageExtFromDataUrl: () => 'png',
   });
 
-  assert.equal(Object.hasOwn(data, 'eyedropperCards'), false);
-  assert.equal(Object.hasOwn(BoardDocument.getBoardSaveMetrics(data), 'eyedropperCardPreviewCount'), false);
+  assert.equal(Object.hasOwn(data, 'transientPanelState'), false);
 });
 
 test('summarizes image store without runtime globals', () => {
   const summary = BoardDocument.summarizeImageStore({
     'img-1': 'data:image/png;base64,abc',
-    'img-2': { native: true, path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
+    'img-2': { web: true, path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
   }, {
-    isNativeImageRef: (src) => !!src?.native,
     imageStoreBytesEstimate: (src) => typeof src === 'string' ? src.length : JSON.stringify(src).length,
   });
 
   assert.equal(summary.imageCount, 2);
-  assert.equal(summary.nativeRefs, 1);
   assert.equal(summary.dataUrlRefs, 1);
-  assert.equal(summary.manifestRefs, 0);
+  assert.equal(summary.manifestRefs, 1);
+  assert.equal(summary.otherRefs, 0);
   assert.ok(summary.imageStoreBytes > 0);
 });

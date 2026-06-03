@@ -20,7 +20,6 @@ function updateTitle() {
   const fileName = BoardfishRuntime?.fileNameFromRef?.(currentFileRef || currentFilePath, '') || '';
   const title = fileName ? `${isDirty() ? '* ' : ''}${fileName}` : 'Boardfish';
   document.title = title;
-  if (hasTauri()) BoardfishTauri.setTitle('');
 }
 
 
@@ -72,11 +71,6 @@ function showUnsavedDialog() {
   });
 }
 
-const stripOpeningFreezeIds = (node) => {
-  node?.removeAttribute?.('id');
-  for (const child of node?.querySelectorAll?.('[id]') || []) child.removeAttribute('id');
-};
-
 const copyOpeningFreezeCanvas = (sourceCanvas, cloneCanvas) => {
   if (!sourceCanvas || !cloneCanvas) return false;
   cloneCanvas.width = sourceCanvas.width || 1;
@@ -104,28 +98,12 @@ const appendOpeningFreezeBoard = () => {
   openingShield.appendChild(clone);
 };
 
-const appendOpeningFreezeCards = () => {
-  const card = typeof eyedropperCard !== 'undefined' ? eyedropperCard : null;
-  if (!card?.el?.classList.contains('visible')) return;
-  const clone = card.el.cloneNode(true);
-  stripOpeningFreezeIds(clone);
-  clone.classList.add('opening-freeze-card');
-  clone.setAttribute('aria-hidden', 'true');
-  const sourceCanvases = card.el.querySelectorAll('canvas');
-  const cloneCanvases = clone.querySelectorAll('canvas');
-  for (let i = 0; i < sourceCanvases.length; i++) {
-    copyOpeningFreezeCanvas(sourceCanvases[i], cloneCanvases[i]);
-  }
-  openingShield.appendChild(clone);
-};
-
 const beginOpeningFreeze = () => {
   if (!openingShield) return;
   openingShield.replaceChildren();
   openingShield.style.background = canvas ? getComputedStyle(canvas).backgroundColor : '';
   openingShield.classList.add('opening-freeze', 'active');
   appendOpeningFreezeBoard();
-  appendOpeningFreezeCards();
 };
 
 const endOpeningFreeze = () => {
@@ -140,7 +118,6 @@ const endOpeningFreeze = () => {
 function boardDocumentDeps() {
   return {
     schema: BoardSchema,
-    isNativeImageRef,
     guessImageExtFromDataUrl: BoardfishExportUtils.guessImageExtFromDataUrl,
     imageStoreBytesEstimate,
     imageRefKind,
@@ -150,7 +127,6 @@ function boardDocumentDeps() {
     dirty: isDirty(),
     runtime: {
       imageCache,
-      imageAssetUrlCache,
       imageBitmapCache,
       imageBitmapFailed,
     },
@@ -198,7 +174,7 @@ const getBoardOpenDebugMetrics = (dbg, data) => {
 };
 
 function imageRefKind(src) {
-  return BoardfishBoardDocument.defaultImageRefKind(src, isNativeImageRef);
+  return BoardfishBoardDocument.defaultImageRefKind(src);
 }
 
 function getImageStoreOpenDebugSample(limit = 12) {
@@ -292,19 +268,8 @@ async function invokeSaveBoard(fileRef, dbg) {
   SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...metrics });
   measureBoardJsonForSaveDebug(dbg, data);
   validateBoardPayloadForSave(data);
-  if (hasTauri()) {
-    const pendingSources = Object.keys(data.imageStore || {})
-      .map((key) => imageSourceCachePromises.get(key))
-      .filter(Boolean);
-    if (pendingSources.length) {
-      const sourceStart = performance.now();
-      SaveDebug.step(dbg, 'await-image-source-cache:start', { count: pendingSources.length });
-      await Promise.allSettled(pendingSources);
-      SaveDebug.step(dbg, 'await-image-source-cache:end', { count: pendingSources.length, ms: performance.now() - sourceStart });
-    }
-  }
   const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
-  const command = hasTauri() ? TAURI_COMMANDS.SAVE_BOARD : BoardfishRuntime.WEB_COMMANDS.SAVE_BOARD;
+  const command = BoardfishRuntime.WEB_COMMANDS.SAVE_BOARD;
   const result = await SaveDebug.wrap(
     dbg,
     command,
@@ -318,7 +283,7 @@ async function invokeSaveBoard(fileRef, dbg) {
 async function invokeReadBoard(fileRef, dbg) {
   const path = BoardfishRuntime.describeFileRef(fileRef);
   const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
-  const command = hasTauri() ? TAURI_COMMANDS.READ_BOARD : BoardfishRuntime.WEB_COMMANDS.READ_BOARD;
+  const command = BoardfishRuntime.WEB_COMMANDS.READ_BOARD;
   const result = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.readBoard(fileRef), { path });
   if (frameProbe) frameProbe();
   const board = result?.board || result;
@@ -349,7 +314,7 @@ function getVisibleWorldBounds() {
 }
 
 const isOpenHydratableImageSource = (source) => {
-  return typeof source === 'string' || isNativeImageRef(source) || isWebImageRef(source);
+  return typeof source === 'string' || isWebImageRef(source);
 };
 
 function getVisibleImageKeys(limit = Infinity) {
@@ -445,17 +410,8 @@ async function hydrateImageForDisplay(key, dbg = null) {
     OpenDebug.step(dbg, 'hydrate-image:skip', { imgKey: key, reason: 'no-display-src', storeKind: imageRefKind(BoardfishImageStore.getSource(key)) });
     return false;
   }
-  const loadStart = performance.now();
-  let img;
-  try {
-    img = await loadImageElement(display.src);
-  } catch (err) {
-    OpenDebug.step(dbg, 'hydrate-image:load-error', { imgKey: key, source: display.source, error: String(err), srcPrefix: String(display.src).slice(0, 80) });
-    throw err;
-  }
-  const loadMs = performance.now() - loadStart;
   const readyStart = performance.now();
-  const cacheMetrics = await cacheImage(key, display.src, dbg, img, {
+  const cacheMetrics = await cacheImage(key, display.src, dbg, null, {
     skipSourceRegistration: true,
     resolveOnLoad: true,
   });
@@ -466,7 +422,7 @@ async function hydrateImageForDisplay(key, dbg = null) {
     imgKey: key,
     ms: performance.now() - t0,
     fetchMs,
-    loadMs,
+    loadMs: 0,
     readyMs,
     ...(cacheMetrics || {}),
     dataUrlLen: display.dataUrlLen,
@@ -480,9 +436,6 @@ async function hydrateImageForDisplay(key, dbg = null) {
 async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDebug.hydrationConcurrency) {
   OpenDebug.step(dbg, `${label}:start`, { count: keys.length, concurrency, ...getOpenImageRuntimeDebugMetrics(dbg) });
   const t0 = performance.now();
-  await materializeImageAssets(keys, dbg).catch((err) => {
-    OpenDebug.step(dbg, `${label}:materialize-error`, { error: String(err) });
-  });
   let hydrated = 0;
   await mapWithConcurrency(keys, concurrency, async (key) => {
     try {
@@ -591,30 +544,6 @@ async function hydrateAllImagesForOpen(dbg = null) {
   OpenDebug.step(dbg, 'hydrate-all:candidates', { count: keys.length, ...debugMeta });
   return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
 }
-globalThis.markOpenEyedropperNativeDecodePrewarmStarted = (reason = 'external') => {
-  if (globalThis.scheduleOpenEyedropperNativeDecodePrewarm.started) return false;
-  globalThis.scheduleOpenEyedropperNativeDecodePrewarm.started = true;
-  return true;
-};
-
-globalThis.scheduleOpenEyedropperNativeDecodePrewarm = (reason = 'open-all-content-rendered', dbg = null) => {
-  if (!globalThis.markOpenEyedropperNativeDecodePrewarmStarted(reason)) {
-    const result = { scheduled: false, reason, alreadyStarted: true };
-    OpenDebug.step(dbg, 'eyedropper-prewarm:skip', result);
-    return result;
-  }
-  const result = typeof scheduleEyedropperNativeDecodePrewarm === 'function'
-    ? scheduleEyedropperNativeDecodePrewarm(reason)
-    : { scheduled: false, reason: 'unavailable' };
-  OpenDebug.step(dbg, 'eyedropper-prewarm:scheduled', { trigger: reason, ...(result || { scheduled: false }) });
-  return result;
-};
-globalThis.scheduleOpenEyedropperNativeDecodePrewarm.started = false;
-
-globalThis.resetOpenEyedropperNativeDecodePrewarmGate = () => {
-  globalThis.scheduleOpenEyedropperNativeDecodePrewarm.started = false;
-};
-
 const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
   const t0 = performance.now();
   return new Promise((resolve) => {
@@ -662,10 +591,7 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
       stale,
       ms: performance.now() - totalStart,
     });
-    if (!stale && remaining === 0) {
-      if (batchCount > 0) await waitForOpenRenderFrame(dbg, 'open-all-content-rendered');
-      globalThis.scheduleOpenEyedropperNativeDecodePrewarm('open-all-content-rendered', dbg);
-    }
+    if (!stale && remaining === 0 && batchCount > 0) await waitForOpenRenderFrame(dbg, 'open-all-content-rendered');
   }
 }
 
@@ -679,11 +605,11 @@ const clearVisibleHydrationTimer = () => {
 };
 
 function scheduleVisibleHydrationAfterIdle() {
-  if (!hasTauri() || _boardOpening || (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled)) return;
+  if (_boardOpening) return;
   clearVisibleHydrationTimer();
   _visibleHydrationTimer = setTimeout(() => {
     _visibleHydrationTimer = null;
-    if (!hasTauri() || _boardOpening || (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled)) return;
+    if (_boardOpening) return;
     queueVisibleImageHydration(1);
     if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
       scheduleVisibleScaledVariantPrewarmAfterIdle('visible-hydration');
@@ -770,19 +696,9 @@ async function finishOpenedBoard(dbg, data) {
     scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',
     croppedImages: drawBreakdown?.croppedImages ?? '',
   });
-  const pendingAfterInitialRender = getPendingHydratableImageKeys().length;
-  if (pendingAfterInitialRender === 0) {
-    globalThis.scheduleOpenEyedropperNativeDecodePrewarm('open-all-content-rendered', dbg);
-  } else {
-    OpenDebug.step(dbg, 'eyedropper-prewarm:deferred', {
-      reason: 'waiting-for-all-display-hydration',
-      pendingImages: pendingAfterInitialRender,
-    });
-  }
   const pillFinishReason = await finishPillTask({
     beforeFinish: () => {
       const shieldStart = performance.now();
-      applyNativeAppTheme();
       if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
       else openingShield.classList.remove('active');
       OpenDebug.step(dbg, 'opening-shield:removed', { ms: performance.now() - shieldStart });
@@ -815,14 +731,9 @@ function applyBoardData(data, options = {}) {
     kept: prune.kept,
     referenced: prune.referenced,
   });
-  globalThis.resetOpenEyedropperNativeDecodePrewarmGate();
-  setEyedropperEnabled(false);
   clearJsClipboard();
-  if (typeof clearEyedropperCardForBoard === 'function') {
-    clearEyedropperCardForBoard();
-  }
   const t0 = performance.now();
-  clearImageStore(!sourcesCached);
+  clearImageStore();
   OpenDebug.step(dbg, 'clearImageStore', { ms: performance.now() - t0 });
 
   const imageStart = performance.now();
@@ -831,20 +742,15 @@ function applyBoardData(data, options = {}) {
     typeof getOpenHydrationMode === 'function' &&
     getOpenHydrationMode() === 'visible-first';
   let deferredInitialCacheImages = 0;
-  _skipImageSourceRegistration = sourcesCached;
-  try {
-    for (const k of BoardfishImageStore.sourceKeys()) {
-      const source = BoardfishImageStore.getSource(k);
-      const n = parseInt(k.split('-')[1]);
-      if (!isNaN(n) && n >= imgKeyCounter) imgKeyCounter = n + 1;
-      if (visibleFirstOpen && isOpenHydratableImageSource(source)) {
-        deferredInitialCacheImages++;
-        continue;
-      }
-      if (!sourcesCached || !isNativeImageRef(source)) cacheImage(k, source);
+  for (const k of BoardfishImageStore.sourceKeys()) {
+    const source = BoardfishImageStore.getSource(k);
+    const n = parseInt(k.split('-')[1]);
+    if (!isNaN(n) && n >= imgKeyCounter) imgKeyCounter = n + 1;
+    if (visibleFirstOpen && isOpenHydratableImageSource(source)) {
+      deferredInitialCacheImages++;
+      continue;
     }
-  } finally {
-    _skipImageSourceRegistration = false;
+    cacheImage(k, source);
   }
   OpenDebug.step(dbg, 'cacheImage:start-all', {
     ms: performance.now() - imageStart,
@@ -867,7 +773,6 @@ function applyBoardData(data, options = {}) {
   const countersStart = performance.now();
   BoardfishEditorState.restoreObjectCountersFromObjects(objects);
   BoardfishEditorState.setViewport(data.viewport);
-  if (!deferRender) applyNativeAppTheme();
   OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });
 
   if (!deferRender) {
@@ -905,8 +810,8 @@ const saveBoardAsImpl = async () => {
   const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
   try {
     const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
-    const command = hasTauri() ? TAURI_COMMANDS.SAVE_FILE_DIALOG : BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG;
-    globalThis.BoardfishMotion?.applyActionAnimation?.('native-file-dialog-open');
+    const command = BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG;
+    globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-open');
     const fileRef = await SaveDebug.wrap(dbg, command, () => BoardfishRuntime.saveFileDialog(defaultName), { defaultName });
     if (!fileRef) {
       globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
@@ -943,9 +848,7 @@ async function saveBoardAs() {
 
 const saveBoardImpl = async () => {
   globalThis.BoardfishMotion?.applyActionAnimation?.('save-board');
-  const target = BoardfishRuntime.canSaveToExistingTarget(currentFileRef)
-    ? currentFileRef
-    : (hasTauri() && currentFilePath ? currentFilePath : null);
+  const target = BoardfishRuntime.canSaveToExistingTarget(currentFileRef) ? currentFileRef : null;
   if (target) {
     const path = BoardfishRuntime.describeFileRef(target);
     const dbg = SaveDebug.start('saveBoard', { path, objectCount: objects.length });
@@ -992,9 +895,9 @@ async function openBoard() {
   if (!(await confirmDirtyBeforeOpen(dbg))) return;
 
   try {
-    const command = hasTauri() ? TAURI_COMMANDS.OPEN_FILE_DIALOG : BoardfishRuntime.WEB_COMMANDS.OPEN_FILE_DIALOG;
+    const command = BoardfishRuntime.WEB_COMMANDS.OPEN_FILE_DIALOG;
     globalThis.BoardfishMotion?.applyActionAnimation?.('open-board-file-pick');
-    globalThis.BoardfishMotion?.applyActionAnimation?.('native-file-dialog-open');
+    globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-open');
     const fileRef = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.openFileDialog());
     if (!fileRef) {
       globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
@@ -1007,51 +910,8 @@ async function openBoard() {
   }
 }
 
-// ─── Close guard ─────────────────────────────────────────────────────────────
-var _closeGuardRunning = false;
-
-async function requestAppClose(event = null) {
-  if (!hasTauri()) return;
-  globalThis.BoardfishMotion?.applyActionAnimation?.('app-window-close-request');
-  const seq = Number(event?.payload || 0);
-  if (seq) BoardfishTauri.acknowledgeCloseRequest(seq).catch(() => {});
-  if (_closeGuardRunning) return;
-  _closeGuardRunning = true;
-  try {
-    recoverWindowPaint('close-request', false);
-    if (isDirty()) {
-      const choice = await showUnsavedDialog();
-      if (choice === 'cancel') {
-        BoardfishTauri.cancelPendingTermination().catch(() => {});
-        return;
-      }
-      if (choice === 'save') {
-        const saved = await saveBoard();
-        if (!saved) {
-          BoardfishTauri.cancelPendingTermination().catch(() => {});
-          return;
-        }
-      }
-    }
-    clearJsClipboard();
-    // Use process.exit instead of appWindow.close() to avoid re-triggering
-    // the CloseRequested event in Rust (which would cause an infinite loop)
-    await BoardfishTauri.exitApp();
-  } finally {
-    _closeGuardRunning = false;
-  }
-}
-
-if (hasTauri()) {
-  tauriListen('boardfish://close-requested', requestAppClose);
-  tauriListen('boardfish://app-resumed', () => {
-    recoverWindowPaint('app-resumed');
-    setTimeout(() => recoverBlankUi('app-resumed-followup'), 250);
-  });
-} else {
-  window.addEventListener('beforeunload', (event) => {
-    if (!isDirty()) return;
-    event.preventDefault();
-    event.returnValue = '';
-  });
-}
+window.addEventListener('beforeunload', (event) => {
+  if (!isDirty()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});

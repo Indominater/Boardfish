@@ -17,10 +17,6 @@
     },
   ]);
 
-  function isDesktop() {
-    return false;
-  }
-
   function isAbortError(err) {
     return err?.name === 'AbortError';
   }
@@ -278,7 +274,6 @@
     describeFileRef,
     fileNameFromRef,
     fileRefFromFile: webFileRef,
-    isDesktop,
     isWeb: () => true,
     openFileDialog,
     readBoard,

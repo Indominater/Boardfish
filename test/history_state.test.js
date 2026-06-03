@@ -20,7 +20,6 @@ function loadHistoryHarness() {
   const smoothRemoved = [];
   const actionCalls = [];
   const imagePruneCalls = [];
-  const eyedropperPruneCalls = [];
   const jiggleActions = new Set([
     'copy-selected-objects',
     'copy-text-object',
@@ -52,6 +51,9 @@ function loadHistoryHarness() {
     _editHistoryActionStartState: null,
     _selChangeListener: null,
     _editEl: null,
+    enterEditCalls: [],
+    replaceBoardObjectsOptions: [],
+    collapseTextOnReplace: false,
     pulses,
     jelloAdded,
     jelloRemoved,
@@ -59,10 +61,15 @@ function loadHistoryHarness() {
     smoothRemoved,
     actionCalls,
     imagePruneCalls,
-    eyedropperPruneCalls,
     BoardfishEditorState: {
-      replaceBoardObjects(nextObjects) {
+      replaceBoardObjects(nextObjects, options = {}) {
+        context.replaceBoardObjectsOptions.push({ ...(options || {}) });
         context.objects = nextObjects;
+        if (context.collapseTextOnReplace && options.syncTextHeights !== false) {
+          for (const obj of context.objects) {
+            if (obj?.type === 'text') obj.h = 32;
+          }
+        }
         context.objectsMap = new Map(nextObjects.map((obj) => [obj.id, obj]));
         return nextObjects;
       },
@@ -154,19 +161,18 @@ function loadHistoryHarness() {
     markDirty(id) {
       context._dirtyIds.add(id);
     },
-    pruneEyedropperSafeImagesToKeys(retainedKeys) {
-      eyedropperPruneCalls.push([...retainedKeys].sort());
-      return null;
-    },
     pruneImageCachesToKeys(retainedKeys) {
       imagePruneCalls.push([...retainedKeys].sort());
       return null;
     },
     scheduleRender() {},
-    enterEdit(id) {
+    enterEdit(id, options = {}) {
+      context.enterEditCalls.push({ id, options: { ...(options || {}) } });
       context.editingId = id;
+      const obj = context.objectsMap.get(id);
+      if (obj && !options.preserveSize) obj.h = 32;
       context._editEl = {
-        value: context.objectsMap.get(id)?.data?.content || '',
+        value: obj?.data?.content || '',
         selectionStart: 0,
         selectionEnd: 0,
         selectionDirection: 'none',
@@ -190,6 +196,28 @@ function loadHistoryHarness() {
   return context;
 }
 
+function loadTextEditHistoryStateHarness() {
+  const source = fs.readFileSync(path.join(root, 'src/js/selection_input.js'), 'utf8');
+  const start = source.indexOf('const normalizeTextEditHistoryState');
+  const end = source.indexOf('const consumeTextEditHistoryActionStartState', start);
+  const context = {
+    editingId: 'text-1',
+    objectsMap: new Map(),
+    _editEl: null,
+    _editHistoryTimer: null,
+    _editHistoryActionStartState: null,
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    source.slice(start, end) +
+      '\nglobalThis.normalizeTextEditHistoryState = normalizeTextEditHistoryState;\n' +
+      'globalThis.beginTextEditHistoryAction = beginTextEditHistoryAction;\n',
+    context,
+    { filename: 'selection_input_history_state_slice.js' },
+  );
+  return context;
+}
+
 function setBoard(context, objects, selectedIds = []) {
   context.objects = objects.map(cloneObject);
   context.objectsMap = new Map(context.objects.map((obj) => [obj.id, obj]));
@@ -209,7 +237,6 @@ test('text-only history skips image cache pruning when no image cache state exis
   context.pushHistory('text-edit-checkpoint');
 
   assert.deepEqual(context.imagePruneCalls, []);
-  assert.deepEqual(context.eyedropperPruneCalls, []);
 });
 
 test('history keeps image cache pruning when pruneable image state exists', () => {
@@ -227,7 +254,6 @@ test('history keeps image cache pruning when pruneable image state exists', () =
   context.pushHistory('delete-selected');
 
   assert.deepEqual(context.imagePruneCalls, [['img-1'], ['img-1']]);
-  assert.deepEqual(context.eyedropperPruneCalls, [['img-1'], ['img-1']]);
 });
 
 test('undo and redo keep text-safe actions inert under copy-only jiggle policy', () => {
@@ -500,6 +526,142 @@ test('undoing a text run restores the caret saved before the run started', () =>
   assert.equal(context.objectsMap.get('text-1').data.content, 'one two INSERT three');
   assert.equal(context._editEl.selectionStart, 14);
   assert.equal(context._editEl.selectionEnd, 14);
+});
+
+test('text edit history start state preserves script caret affinity', () => {
+  const context = loadTextEditHistoryStateHarness();
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    data: { content: 'e_{i}^{2x}' },
+    _textScriptCaretIndex: 10,
+    _textScriptCaretAffinity: 'after',
+  };
+  context.objectsMap.set(obj.id, obj);
+  context._editEl = {
+    value: obj.data.content,
+    selectionStart: 10,
+    selectionEnd: 10,
+    selectionDirection: 'none',
+  };
+
+  const state = context.beginTextEditHistoryAction('text-1', {
+    start: 10,
+    end: 10,
+    direction: 'none',
+    scriptCaretAffinity: 'after',
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(state)), {
+    id: 'text-1',
+    selectionStart: 10,
+    selectionEnd: 10,
+    selectionDirection: 'none',
+    scriptCaretIndex: 10,
+    scriptCaretAffinity: 'after',
+  });
+});
+
+test('undoing a script-boundary delete restores the saved script caret affinity', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, [
+    { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'e_{i}^{2x}' } },
+  ], ['text-1']);
+  context.snapshot();
+
+  context.editingId = 'text-1';
+  context._editEl = {
+    selectionStart: 10,
+    selectionEnd: 10,
+    selectionDirection: 'none',
+    remove() {},
+  };
+  const original = context.objectsMap.get('text-1');
+  original._textScriptCaretIndex = 10;
+  original._textScriptCaretAffinity = 'after';
+  context.pushHistory('text-edit-enter');
+
+  const text = context.objectsMap.get('text-1');
+  text.data.content = '';
+  delete text.data.scriptRanges;
+  context._editEl.selectionStart = 0;
+  context._editEl.selectionEnd = 0;
+  context.markDirty('text-1');
+  context.pushHistory('text-edit-checkpoint', {
+    beforeEditState: {
+      id: 'text-1',
+      selectionStart: 10,
+      selectionEnd: 10,
+      selectionDirection: 'none',
+      scriptCaretIndex: 10,
+      scriptCaretAffinity: 'after',
+    },
+  });
+
+  context.undo();
+
+  const restored = context.objectsMap.get('text-1');
+  assert.equal(restored.data.content, 'e_{i}^{2x}');
+  assert.equal(context.editingId, 'text-1');
+  assert.equal(context._editEl.selectionStart, 10);
+  assert.equal(context._editEl.selectionEnd, 10);
+  assert.equal(restored._textEditCaretIndex, 10);
+  assert.equal(restored._textScriptCaretIndex, 10);
+  assert.equal(restored._textScriptCaretAffinity, 'after');
+});
+
+test('undoing and redoing text edits preserve restored text box dimensions', () => {
+  const context = loadHistoryHarness();
+  context.collapseTextOnReplace = true;
+  setBoard(context, [
+    { id: 'text-1', type: 'text', x: 0, y: 0, w: 920, h: 370, z: 1, data: { content: 'e^{x^{2}+1}' } },
+  ], ['text-1']);
+  context.snapshot();
+
+  context.editingId = 'text-1';
+  context._editEl = {
+    selectionStart: 11,
+    selectionEnd: 11,
+    selectionDirection: 'none',
+    remove() {},
+  };
+  context.pushHistory('text-edit-enter');
+
+  const text = context.objectsMap.get('text-1');
+  text.data.content = '';
+  text.w = 920;
+  text.h = 96;
+  context._editEl.selectionStart = 0;
+  context._editEl.selectionEnd = 0;
+  context.markDirty('text-1');
+  context.pushHistory('text-edit-checkpoint', {
+    beforeEditState: {
+      id: 'text-1',
+      selectionStart: 11,
+      selectionEnd: 11,
+      selectionDirection: 'none',
+    },
+  });
+
+  context.undo();
+
+  let restored = context.objectsMap.get('text-1');
+  assert.equal(restored.data.content, 'e^{x^{2}+1}');
+  assert.equal(restored.w, 920);
+  assert.equal(restored.h, 370);
+  assert.equal(context.editingId, 'text-1');
+  assert.equal(context.enterEditCalls.at(-1).options.preserveSize, true);
+  assert.equal(context.replaceBoardObjectsOptions.at(-1).syncTextHeights, false);
+
+  context.redo();
+
+  restored = context.objectsMap.get('text-1');
+  assert.equal(restored.data.content, '');
+  assert.equal(restored.w, 920);
+  assert.equal(restored.h, 96);
+  assert.equal(context.editingId, 'text-1');
+  assert.equal(context.enterEditCalls.at(-1).options.preserveSize, true);
+  assert.equal(context.replaceBoardObjectsOptions.at(-1).syncTextHeights, false);
 });
 
 test('undo and redo image add stay inert under copy-only jiggle policy', () => {

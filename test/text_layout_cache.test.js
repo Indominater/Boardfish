@@ -50,7 +50,9 @@ function loadTextLayout({ measureWidth = (text) => String(text).length } = {}) {
       getTextLayout,
       getTextRenderedContentWidth,
       fitTextObjectWidthToRenderedContent,
+      applyTextLineAlignmentRange,
       clearTextLayoutCaches,
+      lineXAtOffset,
       get cache() { return _mwCache; },
       maxEntries: TEXT_MEASURE_CACHE_MAX_ENTRIES,
     };`,
@@ -277,4 +279,31 @@ test('text object width can fit the rendered visible line width', () => {
   assert.equal(textLayout.fitTextObjectWidthToRenderedContent(obj), true);
   assert.equal(obj.w, 22);
   assert.equal(textLayout.fitTextObjectWidthToRenderedContent(obj), false);
+});
+
+test('line alignment offsets caret positions within the text box', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 10,
+    y: 0,
+    w: 20,
+    h: 40,
+    data: { content: 'abcd' },
+  };
+
+  let [line] = textLayout.getTextLayout(obj);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 14);
+
+  assert.equal(textLayout.applyTextLineAlignmentRange(obj, 0, 0, 'right'), true);
+  [line] = textLayout.getTextLayout(obj);
+  assert.equal(line.align, 'center');
+  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 18);
+
+  assert.equal(textLayout.applyTextLineAlignmentRange(obj, 0, 0, 'right'), true);
+  [line] = textLayout.getTextLayout(obj);
+  assert.equal(line.align, 'right');
+  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 22);
 });

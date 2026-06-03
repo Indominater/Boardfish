@@ -19,10 +19,6 @@
       scaledFallbackFull: 0,
       scaledVariantPendingImages: 0,
       fullScaleImages: 0,
-      readbackSafeImages: 0,
-      readbackSafePendingImages: 0,
-      readbackSafeScaledImages: 0,
-      eyedropperWarmedScaledImages: 0,
       scaledImageScaleTotal: 0,
       scaledImageTargetScaleTotal: 0,
       culledImages: 0,
@@ -160,9 +156,7 @@
           } else if (selected?.scale === 1 && selected?.targetScale === 1) {
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
           }
-          if (selected?.readbackSafe) counters.readbackSafeImages = (counters.readbackSafeImages || 0) + 1;
-          if (selected?.warmedEyedropper) counters.eyedropperWarmedScaledImages = (counters.eyedropperWarmedScaledImages || 0) + 1;
-          if (bitmap || selected?.scale < 1 || selected?.readbackSafe) counters.bitmapImages++;
+          if (bitmap || selected?.scale < 1) counters.bitmapImages++;
           else {
             counters.elementImages++;
             counters.fallbackImages++;
@@ -190,7 +184,7 @@
         counters.lastMissingKey = key;
         counters.lastMissingId = obj.id;
         counters.lastMissingReason = selected?.scaledVariantPending ? 'scaled-variant-pending-active-input'
-          : imageSourceResolver ? 'readback-safe-source-pending'
+          : imageSourceResolver ? 'resolved-source-pending'
           : !key ? 'missing-key'
           : !deps.imageStore()[key] ? 'missing-store'
             : !deps.imageCache()[key] ? 'missing-image-element'

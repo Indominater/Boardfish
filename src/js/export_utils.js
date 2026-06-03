@@ -11,7 +11,6 @@
   }
 
   function guessImageExtForSource(src) {
-    if (isNativeImageRef(src)) return src.ext === 'jpeg' ? 'jpg' : (src.ext || 'png');
     if (typeof isWebImageRef === 'function' && isWebImageRef(src)) return src.ext === 'jpeg' ? 'jpg' : (src.ext || 'png');
     if (typeof src === 'string') return guessImageExtFromDataUrl(src);
     return 'png';
@@ -95,10 +94,8 @@
     };
   }
 
-  function cleanupTempKeys(tempKeys) {
-    if (!tempKeys?.length || !hasTauri()) return Promise.resolve(0);
-    return BoardfishTauri.removeCachedImageSources(tempKeys)
-      .catch((err) => console.warn('[export] remove_cached_image_sources failed:', err));
+  function cleanupTempKeys() {
+    return Promise.resolve(0);
   }
 
   function normalizeSaveResult(result) {
@@ -200,7 +197,6 @@
   }
 
   function imageSourceKind(source) {
-    if (typeof isNativeImageRef === 'function' && isNativeImageRef(source)) return 'native-ref';
     if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return 'web-ref';
     if (typeof source === 'string') return source.startsWith('data:') ? 'data-url' : 'string';
     if (!source) return 'missing';

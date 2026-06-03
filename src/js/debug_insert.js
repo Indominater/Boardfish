@@ -17,7 +17,7 @@ var InsertDebug = (() => {
     label: '[Boardfish insert]',
     sanitize,
     onEnable() {
-      console.info('Boardfish insert debugger enabled. Use finishDebug({ insert: ["report", "imageBreakdown", "nativeBreakdown", "phaseSummary", "summary", "dump"] }) to collect results.');
+      console.info('Boardfish insert debugger enabled. Use finishDebug({ insert: ["report", "imageBreakdown", "fileBreakdown", "phaseSummary", "summary", "dump"] }) to collect results.');
     },
     onDisable() {
       if (DEBUG_TOOLS_ENABLED) console.info('Boardfish insert debugger disabled.');
@@ -54,7 +54,6 @@ var InsertDebug = (() => {
         readMode: e.meta?.readMode || '',
         sourceKind: e.meta?.sourceKind || '',
         imgKey: e.meta?.imgKey || '',
-        native: e.meta?.native ?? '',
         dataUrlLen: e.meta?.dataUrlLen ?? '',
         width: e.meta?.width ?? '',
         height: e.meta?.height ?? '',
@@ -107,7 +106,6 @@ var InsertDebug = (() => {
       .map((end) => {
         const run = eventsForId(end.id);
         const start = run.find(e => e.step === 'start');
-        const nativeRegister = lastStep(run, 'native-register:end');
         const readEnd = lastStep(run, 'read:end');
         const materialize = lastStep(run, 'materialize:end');
         const objectAdd = lastStep(run, 'object:add');
@@ -121,7 +119,6 @@ var InsertDebug = (() => {
           totalMs: end.total ?? '',
           readMs: readEnd?.dt ?? '',
           readMode: readEnd?.meta?.readMode || '',
-          nativeRegisterMs: nativeRegister?.dt ?? '',
           materializeMs: materialize?.meta?.ms ?? materialize?.dt ?? '',
           objectAtMs: objectAdd?.total ?? '',
           readyAtMs: ready?.total ?? '',
@@ -132,9 +129,9 @@ var InsertDebug = (() => {
           bitmapReady: ready?.meta?.bitmapReady ?? '',
           resolveOnLoad: cacheQueued?.meta?.resolveOnLoad ?? '',
           sourceKind: webRef?.meta?.sourceKind || cacheQueued?.meta?.sourceKind || end.meta?.sourceKind || '',
-          width: nativeRegister?.meta?.width ?? '',
-          height: nativeRegister?.meta?.height ?? '',
-          bytes: webRef?.meta?.bytes ?? nativeRegister?.meta?.fileSize ?? end.meta?.bytes ?? end.meta?.fileSize ?? '',
+          width: webRef?.meta?.width ?? '',
+          height: webRef?.meta?.height ?? '',
+          bytes: webRef?.meta?.bytes ?? end.meta?.bytes ?? end.meta?.fileSize ?? '',
           added: end.meta?.added ?? '',
           error: end.meta?.error || '',
         };
@@ -146,8 +143,8 @@ var InsertDebug = (() => {
     console.table(rows);
     return rows;
   }
-  function nativeBreakdown(limit = BREAKDOWN_LIMIT) {
-    const rows = imageBreakdownRows(limit).filter(row => row.source === 'file-picker-native' || row.source === 'native-drop');
+  function fileBreakdown(limit = BREAKDOWN_LIMIT) {
+    const rows = imageBreakdownRows(limit).filter(row => row.source === 'file-input' || row.source === 'web-drop');
     console.table(rows);
     return rows;
   }
@@ -166,12 +163,11 @@ var InsertDebug = (() => {
     const imageEnds = events().filter(e => e.op === 'insertImage' && e.step === 'end' && e.meta?.source === last.meta?.source);
     const readEnds = events().filter(e => e.op === 'insertImage' && e.step === 'read:end' && e.meta?.source === last.meta?.source);
     const registerEnds = events().filter(e => e.op === 'insertImage' && e.step === 'register:end' && e.meta?.source === last.meta?.source);
-    const nativeRegisterEnds = events().filter(e => e.step === 'native-register:end' && e.meta?.source === last.meta?.source);
     const objectAdd = start ? firstStepAfter(start.at, 'object:add') : null;
     const displayReady = start ? firstStepAfter(start.at, 'ready') : null;
     const pickerEnd = [...events()].reverse().find(e => e.op === 'pickImages' && e.step === 'end');
-    const concurrencyStep = findStep('native:concurrency') || findStep('bulk:start');
-    const registerSource = nativeRegisterEnds.length ? nativeRegisterEnds : registerEnds;
+    const concurrencyStep = findStep('bulk:start');
+    const registerSource = registerEnds;
     const maxRegisterMs = registerSource.reduce((n, e) => Math.max(n, Number(e.dt) || 0), 0);
     const maxRegister = registerSource.find(e => (Number(e.dt) || 0) === maxRegisterMs);
     const maxReadMs = readEnds.reduce((n, e) => Math.max(n, Number(e.dt) || 0), 0);
@@ -216,7 +212,7 @@ var InsertDebug = (() => {
     end: recorder.end,
     report,
     imageBreakdown,
-    nativeBreakdown,
+    fileBreakdown,
     phaseSummary,
     summary,
     dump,

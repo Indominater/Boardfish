@@ -28,12 +28,9 @@ const HISTORY_FULL_SELECTION_PULSE_REASONS = new Set([
 ]);
 const HISTORY_ADDED_OBJECT_REASONS = new Set([
   'add-image',
-  'add-native-data-url-image',
-  'add-native-image',
   'bulk-image-insert',
   'duplicate-selected',
   'paste-objects',
-  'paste-native-image',
 ]);
 const HISTORY_RESTORE_DELETED_REASONS = new Set([
   'delete-selected',
@@ -71,20 +68,6 @@ const HISTORY_ADDED_OBJECT_REPLAY_BY_REASON = Object.freeze({
     })],
     removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
   }),
-  'add-native-data-url-image': historyReplay({
-    added: [historyAction('image-object-create', {
-      filter: HISTORY_OBJECT_FILTERS.nonText,
-      options: HISTORY_NON_TEXT_OPTIONS,
-    })],
-    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
-  }),
-  'add-native-image': historyReplay({
-    added: [historyAction('image-object-create', {
-      filter: HISTORY_OBJECT_FILTERS.nonText,
-      options: HISTORY_NON_TEXT_OPTIONS,
-    })],
-    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
-  }),
   'bulk-image-insert': historyReplay({
     added: [historyAction('bulk-image-create', {
       filter: HISTORY_OBJECT_FILTERS.nonText,
@@ -110,13 +93,6 @@ const HISTORY_ADDED_OBJECT_REPLAY_BY_REASON = Object.freeze({
         options: HISTORY_NON_TEXT_OPTIONS,
       }),
     ],
-    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
-  }),
-  'paste-native-image': historyReplay({
-    added: [historyAction('image-object-create', {
-      filter: HISTORY_OBJECT_FILTERS.nonText,
-      options: HISTORY_NON_TEXT_OPTIONS,
-    })],
     removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
   }),
 });
@@ -367,13 +343,10 @@ function hasPruneableImageCacheState() {
   if (typeof pruneImageCachesToKeys === 'function') {
     if (typeof imageStore !== 'undefined' && hasObjectCacheEntries(imageStore)) return true;
     if (typeof imageCache !== 'undefined' && hasObjectCacheEntries(imageCache)) return true;
-    if (typeof imageAssetUrlCache !== 'undefined' && hasObjectCacheEntries(imageAssetUrlCache)) return true;
     if (typeof imageBitmapCache !== 'undefined' && hasObjectCacheEntries(imageBitmapCache)) return true;
     if (typeof imageBitmapFailed !== 'undefined' && hasCollectionCacheEntries(imageBitmapFailed)) return true;
   }
-  return typeof pruneEyedropperSafeImagesToKeys === 'function' &&
-    typeof eyedropperSafeImageCache !== 'undefined' &&
-    hasCollectionCacheEntries(eyedropperSafeImageCache);
+  return false;
 }
 
 function pruneImageCachesAfterHistoryChange(reason = 'history-change') {
@@ -383,19 +356,15 @@ function pruneImageCachesAfterHistoryChange(reason = 'history-change') {
   if (typeof pruneImageCachesToKeys === 'function') {
     imageResult = pruneImageCachesToKeys(retainedKeys);
   }
-  const eyedropperResult = typeof pruneEyedropperSafeImagesToKeys === 'function'
-    ? pruneEyedropperSafeImagesToKeys(retainedKeys)
-    : null;
   const removedImageCaches = (imageResult?.removedSources || 0) +
     (imageResult?.removedDisplayImages || 0) +
     (imageResult?.removedAssetUrls || 0) +
     (imageResult?.removedBitmaps || 0) +
     (imageResult?.removedBitmapFailures || 0);
-  if ((removedImageCaches || eyedropperResult?.removed) && typeof HistoryDebug !== 'undefined') {
+  if (removedImageCaches && typeof HistoryDebug !== 'undefined') {
     HistoryDebug.step(null, 'image-cache-prune', {
       reason,
       ...(imageResult || {}),
-      eyedropperRemoved: eyedropperResult?.removed || 0,
       retained: retainedKeys.size,
     });
   }
@@ -510,12 +479,12 @@ function restoreSnapshot(s, {
   _editHistoryActionStartState = null;
   HistoryDebug.step(dbg, 'clear-editing', { hadEditing });
   const prevSelectedIds = new Set(selectedIds);
-  BoardfishEditorState.replaceBoardObjects(cloneObjects(snapshotObjects));
+  BoardfishEditorState.replaceBoardObjects(cloneObjects(snapshotObjects), { syncTextHeights: false });
   HistoryDebug.step(dbg, 'clone-snapshot', { objectCount: objects.length });
   HistoryDebug.step(dbg, 'normalize-text', { objectCount: objects.length });
   _dirtyIds.clear();
   HistoryDebug.step(dbg, 'rebuild-caches', { objectCount: objectsMap.size });
-  HistoryDebug.step(dbg, 'sync-text-heights');
+  HistoryDebug.step(dbg, 'preserve-text-heights');
   invalidateOffscreen();
   // Preserve selection for objects that still exist in the restored state
   BoardfishEditorState.setSelection([...prevSelectedIds], { exitEditing: false, animateSelection: false });
@@ -538,13 +507,27 @@ function restoreSnapshot(s, {
   }
 
   BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
-  enterEdit(obj.id, { history: false });
+  enterEdit(obj.id, { history: false, preserveSize: true });
 
   if (!_editEl) return;
   const max = _editEl.value.length;
   const start = Math.max(0, Math.min(editState.selectionStart ?? max, max));
   const end = Math.max(0, Math.min(editState.selectionEnd ?? max, max));
   _editEl.setSelectionRange(start, end, editState.selectionDirection || 'none');
+  if (start === end) {
+    obj._textEditCaretIndex = start;
+    if (editState.scriptCaretIndex === start && editState.scriptCaretAffinity) {
+      obj._textScriptCaretIndex = start;
+      obj._textScriptCaretAffinity = editState.scriptCaretAffinity;
+    } else {
+      delete obj._textScriptCaretIndex;
+      delete obj._textScriptCaretAffinity;
+    }
+  } else {
+    delete obj._textEditCaretIndex;
+    delete obj._textScriptCaretIndex;
+    delete obj._textScriptCaretAffinity;
+  }
   _caretVisible = true;
   scheduleRender(true, true);
   const ms = performance.now() - t0;
@@ -555,12 +538,22 @@ function restoreSnapshot(s, {
 function captureEditState() {
   if (!editingId) return null;
   if (!_editEl) return { id: editingId, selectionStart: 0, selectionEnd: 0, selectionDirection: 'none' };
-  return {
+  const state = {
     id: editingId,
     selectionStart: _editEl.selectionStart,
     selectionEnd: _editEl.selectionEnd,
     selectionDirection: _editEl.selectionDirection || 'none',
   };
+  const obj = objectsMap.get(editingId);
+  if (
+    state.selectionStart === state.selectionEnd &&
+    obj?._textScriptCaretIndex === state.selectionStart &&
+    obj?._textScriptCaretAffinity
+  ) {
+    state.scriptCaretIndex = obj._textScriptCaretIndex;
+    state.scriptCaretAffinity = obj._textScriptCaretAffinity;
+  }
+  return state;
 }
 
 function undo() {

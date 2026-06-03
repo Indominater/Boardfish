@@ -73,8 +73,6 @@ const isEventInsideViewportWheelSurface = (e) => {
 function isShieldInputAllowed(e) {
   if (isUnsavedDialogOpen()) return isEventInsideUnsavedDialog(e);
   if (isEventInsideVisibleContextMenu(e)) return true;
-  if (typeof isEventInsideVisibleEyedropperLoupe === 'function' && isEventInsideVisibleEyedropperLoupe(e)) return true;
-  if (typeof eyedropperEnabled !== 'undefined' && eyedropperEnabled && isEventInsideIsland(e)) return true;
   if (openingShield.classList.contains('active') && !_inputShieldStack.length) return false;
   if (_boardOpening) return false;
   if (_inputShieldStack.length === 0) return true;
@@ -468,12 +466,25 @@ const normalizeTextEditHistoryState = (id, state = null) => {
   const valueLength = _editEl?.value?.length ?? objectsMap.get(targetId)?.data?.content?.length ?? 0;
   const start = Math.max(0, Math.min(state?.start ?? state?.selectionStart ?? _editEl?.selectionStart ?? 0, valueLength));
   const end = Math.max(0, Math.min(state?.end ?? state?.selectionEnd ?? start, valueLength));
-  return {
+  const obj = objectsMap.get(targetId);
+  const rawScriptCaretIndex = state?.scriptCaretIndex ?? state?.textScriptCaretIndex ?? obj?._textScriptCaretIndex;
+  const scriptCaretIndexValue = Number(rawScriptCaretIndex ?? start);
+  const scriptCaretIndex = Number.isFinite(scriptCaretIndexValue)
+    ? Math.max(0, Math.min(scriptCaretIndexValue, valueLength))
+    : start;
+  const scriptCaretAffinity = state?.scriptCaretAffinity ?? state?.textScriptCaretAffinity ??
+    (obj?._textScriptCaretIndex === start ? obj?._textScriptCaretAffinity : '');
+  const normalized = {
     id: targetId,
     selectionStart: start,
     selectionEnd: end,
     selectionDirection: state?.direction || state?.selectionDirection || _editEl?.selectionDirection || 'none',
   };
+  if (start === end && scriptCaretIndex === start && scriptCaretAffinity) {
+    normalized.scriptCaretIndex = scriptCaretIndex;
+    normalized.scriptCaretAffinity = scriptCaretAffinity;
+  }
+  return normalized;
 };
 
 const beginTextEditHistoryAction = (id = editingId, state = null, { splitPending = false } = {}) => {

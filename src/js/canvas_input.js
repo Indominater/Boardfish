@@ -21,15 +21,10 @@ function handleViewportWheel(e) {
       ViewportDebug.end(dbg, { mode: 'blocked-rubber-band', panX, panY, zoom });
       return;
     }
-    if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling) {
-      ViewportDebug.end(dbg, { mode: 'blocked-eyedropper-sampling', panX, panY, zoom });
-      return;
-    }
     if (editingId) {
       _caretVisible = true;
     }
     if (e.ctrlKey || e.metaKey) {
-      if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('wheel-zoom');
       ViewportDebug.count('wheelZoom');
       const factor = Math.abs(e.deltaY) < 30
         ? Math.pow(0.995, e.deltaY)
@@ -42,7 +37,6 @@ function handleViewportWheel(e) {
       return;
     }
 
-    if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('wheel-pan');
     ViewportDebug.count('wheelPan');
     BoardfishViewportState.panBy(-e.deltaX, -e.deltaY);
     globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
@@ -70,10 +64,7 @@ function handleGlobalViewportWheel(e) {
   const insideViewportWheelSurface =
     typeof isEventInsideViewportWheelSurface === 'function' &&
     isEventInsideViewportWheelSurface(e);
-  const insideEyedropperLoupe =
-    typeof isEventInsideVisibleEyedropperLoupe === 'function' &&
-    isEventInsideVisibleEyedropperLoupe(e);
-  if (!viewportZoomGesture && !insideViewportWheelSurface && !insideEyedropperLoupe) return;
+  if (!viewportZoomGesture && !insideViewportWheelSurface) return;
   handleViewportWheel(e);
 }
 if (typeof window !== 'undefined' && window.addEventListener) {
@@ -89,10 +80,6 @@ var _spaceDown = false,
   cancelRubberBandSelection = null;
 
 document.addEventListener('keydown', (e) => {
-  if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling && e.code === 'Space') {
-    e.preventDefault();
-    return;
-  }
   if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.code === 'Space')) {
     if (e.code === 'Space') e.preventDefault();
     return;
@@ -106,7 +93,6 @@ document.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     _spaceDown = true;
     canvas.classList.add('panning');
-    if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('space');
   }
 });
 
@@ -129,7 +115,6 @@ function dragItemsForSelection() {
 
 function startMousePan(e) {
   const panDbg = ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, panX, panY, zoom });
-  if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('mouse-pan', 240);
   e.preventDefault();
   e.stopPropagation();
   const startX = e.clientX, startY = e.clientY;
@@ -139,7 +124,6 @@ function startMousePan(e) {
     const handlerStart = collectDebug ? performance.now() : 0;
     try {
       ViewportDebug.count('mousePanMoves');
-      if (typeof noteEyedropperNavigationActive === 'function') noteEyedropperNavigationActive('mouse-pan', 240);
       BoardfishViewportState.setPan(startPanX + (ev.clientX - startX), startPanY + (ev.clientY - startY));
       globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
       scheduleTransform('mouse-pan', ev);
@@ -156,11 +140,6 @@ function startMousePan(e) {
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
-
-document.addEventListener('mousedown', (e) => {
-  if (typeof isEventInsideVisibleEyedropperLoupe !== 'function' || !isEventInsideVisibleEyedropperLoupe(e)) return;
-  if (e.button === 0 && _spaceDown) startMousePan(e);
-}, true);
 
 function startGroupDrag(e) {
   const grpStartX = e.clientX, grpStartY = e.clientY;
@@ -317,13 +296,57 @@ function toggleAdditiveSelection(obj) {
   });
 }
 
+function textCaretHitForPoint(layout, wx, wy, obj) {
+  if (typeof layoutHitTestCaret === 'function') return layoutHitTestCaret(layout, wx, wy, obj);
+  return { index: layoutHitTest(layout, wx, wy, obj), affinity: '' };
+}
+
+function applyTextEditCaretHit(obj, proxy, hit) {
+  if (!obj || !proxy || !hit) return;
+  const textContent = typeof normalizeTextContent === 'function'
+    ? normalizeTextContent(obj.data?.content || '')
+    : String(obj.data?.content || '').replace(/\r\n?/g, '\n');
+  const textLength = textContent.length;
+  const index = Math.max(0, Math.min(Math.trunc(hit.index ?? 0), textLength));
+  proxy.setSelectionRange(index, index, 'none');
+  if (hit.affinity) {
+    if (typeof setTextScriptCaretAffinity === 'function') {
+      setTextScriptCaretAffinity(obj, index, hit.affinity);
+    } else {
+      obj._textScriptCaretIndex = index;
+      obj._textScriptCaretAffinity = hit.affinity;
+      obj._textEditCaretIndex = index;
+    }
+  } else {
+    if (typeof clearTextScriptCaretAffinity === 'function') clearTextScriptCaretAffinity(obj);
+    else {
+      delete obj._textScriptCaretIndex;
+      delete obj._textScriptCaretAffinity;
+    }
+    if (typeof setTextEditCaretIndex === 'function') setTextEditCaretIndex(obj, index);
+    else obj._textEditCaretIndex = index;
+  }
+}
+
+function clearTextEditCaretHit(obj) {
+  if (!obj) return;
+  if (typeof clearTextScriptCaretAffinity === 'function') clearTextScriptCaretAffinity(obj);
+  else {
+    delete obj._textScriptCaretIndex;
+    delete obj._textScriptCaretAffinity;
+  }
+  if (typeof clearTextEditCaretIndex === 'function') clearTextEditCaretIndex(obj);
+  else delete obj._textEditCaretIndex;
+}
+
 function startTextSelectionDrag(e, obj, wp) {
   if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
   const layout = getTextLayout(obj);
-  const clickIdx = layoutHitTest(layout, wp.x, wp.y, obj);
+  const clickHit = textCaretHitForPoint(layout, wp.x, wp.y, obj);
+  const clickIdx = clickHit.index;
   if (_editEl) {
     _editEl.focus({ preventScroll: true });
-    _editEl.setSelectionRange(clickIdx, clickIdx);
+    applyTextEditCaretHit(obj, _editEl, clickHit);
     TextSelDebug._logSelection('mouse-down', _editEl);
     _caretVisible = true;
     globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
@@ -331,9 +354,12 @@ function startTextSelectionDrag(e, obj, wp) {
   }
   function onSelMove(ev) {
     const wp2 = toWorld(ev.clientX, ev.clientY);
-    const endIdx = layoutHitTest(obj._layoutCache || layout, wp2.x, wp2.y, obj);
+    const endHit = textCaretHitForPoint(obj._layoutCache || layout, wp2.x, wp2.y, obj);
+    const endIdx = endHit.index;
     if (_editEl) {
       _editEl.setSelectionRange(Math.min(clickIdx, endIdx), Math.max(clickIdx, endIdx));
+      if (clickIdx === endIdx) applyTextEditCaretHit(obj, _editEl, endHit);
+      else clearTextEditCaretHit(obj);
       TextSelDebug._logSelection('mouse-drag', _editEl);
       _caretVisible = true;
       globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-drag-select');
@@ -381,9 +407,9 @@ function startObjectDrag(e, obj) {
         if (_editEl && ev) {
           const upPoint = toWorld(ev.clientX, ev.clientY);
           const layout = getTextLayout(obj);
-          const clickIdx = layoutHitTest(layout, upPoint.x, upPoint.y, obj);
+          const clickHit = textCaretHitForPoint(layout, upPoint.x, upPoint.y, obj);
           _editEl.focus({ preventScroll: true });
-          _editEl.setSelectionRange(clickIdx, clickIdx);
+          applyTextEditCaretHit(obj, _editEl, clickHit);
           TextSelDebug._logSelection('click-to-edit', _editEl);
           _caretVisible = true;
           globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
@@ -416,11 +442,6 @@ function startObjectDrag(e, obj) {
 }
 
 canvas.addEventListener('mousedown', (e) => {
-  if (typeof eyedropperSampling !== 'undefined' && eyedropperSampling) {
-    e.preventDefault();
-    e.stopPropagation();
-    return;
-  }
   if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.button === 0 && _spaceDown)) {
     e.preventDefault();
     e.stopPropagation();

@@ -79,8 +79,6 @@ test('visible hydration idle timer rechecks stale open guards and can be cleared
   const prewarmReasons = [];
   const context = {
     _boardOpening: false,
-    eyedropperEnabled: false,
-    hasTauri: () => true,
     setTimeout(callback) {
       timers.push(callback);
       return `timer-${timers.length}`;
@@ -151,11 +149,10 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /const visibleFirstOpen = deferRender &&/);
   assert.match(openIo, /deferredInitialCacheImages\+\+;/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
-  assert.match(openIo, /typeof source === 'string' \|\| isNativeImageRef\(source\) \|\| isWebImageRef\(source\)/);
+  assert.match(openIo, /typeof source === 'string' \|\| isWebImageRef\(source\)/);
   assert.match(openIo, /function getReferencedHydratableImageKeys\(limit = Infinity, exclude = new Set\(\)\)/);
   assert.match(openIo, /const keys = getReferencedHydratableImageKeys\(\);/);
   assert.match(openIo, /pendingImages: getPendingHydratableImageKeys\(\)\.length/);
-  assert.doesNotMatch(openIo, /pendingNativeImages: getPendingNativeImageKeys\(\)\.length/);
   assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
   assert.match(openIo, /source: 'pending-cache'/);
   assert.match(openIo, /async function settleVisibleImageBitmapsForOpen/);
@@ -192,9 +189,8 @@ test('open-board debugger covers the slow open phases developers need to inspect
   }
 
   for (const phase of [
-    'cache-image:load',
-    'cache-image:readback-probe',
-    'cache-image:display-ready',
+    'cache-image:decode',
+    'cache-image:set-src',
     'cache-image:decode-queue:queued',
     'cache-image:decode-queue:start',
     'cache-image:createImageBitmap',
@@ -214,7 +210,7 @@ test('open-board debug workflow stays capturable through beginDebug and finishDe
   assert.match(startupDebug, /async function finishDebug\(spec = \{\}\)/);
   assert.match(startupDebug, /startConsoleCapture\(id\)/);
   assert.match(startupDebug, /finishCalls = calls\.length \? calls : defaultFinishCalls\(\)/);
-  assert.match(startupDebug, /writeDebugLogFile/);
+  assert.match(startupDebug, /method: 'browser-download'/);
   assert.match(startupDebug, /debugGlobalNames = \{/);
   assert.match(startupDebug, /open: 'OpenDebug'/);
   assert.match(bootstrap, /registerDebugCommand\('openFilePath', openFilePath\)/);
