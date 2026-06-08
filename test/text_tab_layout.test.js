@@ -127,6 +127,40 @@ test('text script hit testing skips hidden script marker caret stops', () => {
   assert.equal(textLayout.layoutHitTest([line], markerX - 0.01, line.y, obj), 2);
 });
 
+test('text caret hit at wrapped line start records the visual line', () => {
+  const textLayout = loadTextLayout();
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 10,
+    y: 0,
+    w: 11,
+    h: 48,
+    data: { content: 'abcdef' },
+  };
+  const layout = textLayout.getTextLayout(obj);
+  const [firstLine, secondLine] = layout;
+
+  assert.equal(firstLine.text, 'abc');
+  assert.equal(secondLine.text, 'def');
+
+  const secondLineHit = textLayout.layoutHitTestCaret(
+    layout,
+    textLayout.lineXAtOffset(secondLine, obj, 0),
+    secondLine.y,
+    obj,
+  );
+  const firstLineEndHit = textLayout.layoutHitTestCaret(
+    layout,
+    textLayout.lineXAtOffset(firstLine, obj, firstLine.text.length),
+    firstLine.y,
+    obj,
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(secondLineHit)), { index: 3, affinity: '', lineStartIndex: 3 });
+  assert.deepEqual(JSON.parse(JSON.stringify(firstLineEndHit)), { index: 3, affinity: '', lineStartIndex: 0 });
+});
+
 test('braced text script hit testing keeps the marker-side caret boundary', () => {
   const textLayout = loadTextLayout();
   const obj = {
@@ -165,16 +199,16 @@ test('braced text script hit testing picks the closest vertical caret layer', ()
   const parentHit = textLayout.layoutHitTestCaret([line], endX, line.y + 8, obj);
   const baseHit = textLayout.layoutHitTestCaret([line], endX, line.y + 14, obj);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(innerHit)), { index: 7, affinity: '' });
-  assert.deepEqual(JSON.parse(JSON.stringify(parentHit)), { index: 8, affinity: 'after' });
-  assert.deepEqual(JSON.parse(JSON.stringify(baseHit)), { index: 9, affinity: 'after' });
+  assert.deepEqual(JSON.parse(JSON.stringify(innerHit)), { index: 7, affinity: '', lineStartIndex: 0 });
+  assert.deepEqual(JSON.parse(JSON.stringify(parentHit)), { index: 8, affinity: 'after', lineStartIndex: 0 });
+  assert.deepEqual(JSON.parse(JSON.stringify(baseHit)), { index: 9, affinity: 'after', lineStartIndex: 0 });
 
   const nestedStartX = textLayout.lineXAtOffset(line, obj, 4);
   const nestedParentHit = textLayout.layoutHitTestCaret([line], nestedStartX, line.y + 8, obj);
   const nestedInnerHit = textLayout.layoutHitTestCaret([line], nestedStartX, line.y + 4, obj);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(nestedParentHit)), { index: 4, affinity: '' });
-  assert.deepEqual(JSON.parse(JSON.stringify(nestedInnerHit)), { index: 6, affinity: '' });
+  assert.deepEqual(JSON.parse(JSON.stringify(nestedParentHit)), { index: 4, affinity: '', lineStartIndex: 0 });
+  assert.deepEqual(JSON.parse(JSON.stringify(nestedInnerHit)), { index: 6, affinity: '', lineStartIndex: 0 });
 });
 
 test('existing scripts stay rich after a pending base marker is inserted before them', () => {

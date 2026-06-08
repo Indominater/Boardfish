@@ -1093,7 +1093,7 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
 function layoutHitTestCaret(layout, wx, wy, obj) {
   if (!layout.length) return { index: 0, affinity: '' };
   const line = textLayoutLineForHit(layout, wy);
-  if (!line.text.length) return { index: line.startIndex, affinity: '' };
+  if (!line.text.length) return { index: line.startIndex, affinity: '', lineStartIndex: line.startIndex };
   const candidates = textLayoutCaretHitCandidates(line, wx, obj);
   if (candidates.length) {
     candidates.sort((a, b) => Math.abs(a.centerY - wy) - Math.abs(b.centerY - wy) ||
@@ -1101,7 +1101,7 @@ function layoutHitTestCaret(layout, wx, wy, obj) {
       String(a.affinity).localeCompare(String(b.affinity)));
     const hit = candidates[0];
     TextSelDebug._logHit(wx, wy, obj, line, hit.index, line.prefixWidths);
-    return { index: hit.index, affinity: hit.affinity || '' };
+    return { index: hit.index, affinity: hit.affinity || '', lineStartIndex: line.startIndex };
   }
 
   const baseX = lineBaseX(line, obj);
@@ -1110,12 +1110,12 @@ function layoutHitTestCaret(layout, wx, wy, obj) {
     if (wx < baseX + pw[j] + (pw[j + 1] - pw[j]) / 2) {
       const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + j, 'forward');
       TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
-      return hitIndex;
+      return { index: hitIndex, affinity: '', lineStartIndex: line.startIndex };
     }
   }
   const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + line.text.length, 'backward');
   TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
-  return { index: hitIndex, affinity: '' };
+  return { index: hitIndex, affinity: '', lineStartIndex: line.startIndex };
 }
 
 function layoutHitTest(layout, wx, wy, obj) {

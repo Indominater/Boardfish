@@ -288,6 +288,21 @@ test('text click preserves script caret affinity from rich hit testing', () => {
   assert.equal(context.obj._textScriptCaretAffinity, 'after');
 });
 
+test('text click stores visual line preference at wrapped line start', () => {
+  const context = loadCanvasInputHarness();
+  context.obj.data.content = 'abcdef';
+  context.editProxy.value = context.obj.data.content;
+  context.editingId = context.obj.id;
+  context._editEl = context.editProxy;
+  context.layoutHitTestCaret = () => ({ index: 3, affinity: '', lineStartIndex: 3 });
+
+  context.startTextSelectionDrag({ clientX: 12, clientY: 44 }, context.obj, { x: 12, y: 44 });
+
+  assert.deepEqual(context.editProxy.selection, [3, 3]);
+  assert.equal(context.obj._textEditCaretIndex, 3);
+  assert.equal(context.obj._textEditCaretLineStartIndex, 3);
+});
+
 test('double-clicking text while editing places the caret without selecting a word', () => {
   const context = loadCanvasInputHarness();
   context.obj.data.content = '  alpha\tbeta gamma';

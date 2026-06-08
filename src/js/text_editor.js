@@ -247,6 +247,7 @@ const setTextScriptCaretAffinity = (obj, index, affinity) => {
   obj._textScriptCaretIndex = index;
   obj._textScriptCaretAffinity = affinity;
   obj._textEditCaretIndex = index;
+  delete obj._textEditCaretLineStartIndex;
 };
 
 const clearTextScriptCaretAffinity = (obj) => {
@@ -255,15 +256,21 @@ const clearTextScriptCaretAffinity = (obj) => {
   delete obj._textScriptCaretAffinity;
 };
 
-const setTextEditCaretIndex = (obj, index) => {
+const setTextEditCaretIndex = (obj, index, options = {}) => {
   if (!obj) return;
   const length = normalizeTextContent(obj.data?.content || '').length;
-  obj._textEditCaretIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), length));
+  const nextIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), length));
+  if (obj._textEditCaretIndex !== nextIndex) delete obj._textEditCaretLineStartIndex;
+  obj._textEditCaretIndex = nextIndex;
+  if (Number.isFinite(options.lineStartIndex)) {
+    obj._textEditCaretLineStartIndex = Math.max(0, Math.min(Math.trunc(options.lineStartIndex), length));
+  }
 };
 
 const clearTextEditCaretIndex = (obj) => {
   if (!obj) return;
   delete obj._textEditCaretIndex;
+  delete obj._textEditCaretLineStartIndex;
 };
 
 const textEditScriptRanges = (obj) => {

@@ -234,6 +234,58 @@ test('text edit caret height follows script formatting', () => {
   assert.match(drawCaretSource, /TEXT_BASELINE_Y_OFFSET \* scale/);
 });
 
+test('text edit caret honors visual line preference at wrapped line start', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
+  const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const context = {
+    _caretVisible: true,
+    LINE_H: 24,
+    TEXT_PAD: 4,
+    TEXT_BASELINE_Y_OFFSET: 16,
+    zoom: 1,
+    canvasTextColor: () => '#111',
+    lineXAtOffset(line, obj, offset) {
+      return obj.x + 4 + offset * 10;
+    },
+    lineEndX(line, obj) {
+      return obj.x + 4 + line.text.length * 10;
+    },
+    textLayoutLineIntersectsViewport: () => true,
+    textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${viewportSource.slice(start, end)}\n` +
+      'globalThis.drawCaret = drawCaret;\n',
+    context,
+  );
+
+  const fillRects = [];
+  const canvasContext = {
+    fillStyle: '',
+    fillRect(...args) { fillRects.push(args); },
+  };
+  const obj = {
+    x: 10,
+    y: 0,
+    w: 120,
+    h: 48,
+    _textEditCaretIndex: 3,
+    _textEditCaretLineStartIndex: 3,
+  };
+  const layout = [
+    { text: 'abc', startIndex: 0, endIndex: 3, caretEndIndex: 3, y: 0 },
+    { text: 'def', startIndex: 3, endIndex: 6, caretEndIndex: 6, y: 24 },
+  ];
+
+  assert.equal(context.drawCaret(canvasContext, obj, layout, 3), true);
+  assert.deepEqual(fillRects, [[14, 24, 2, 24]]);
+});
+
 test('text edit overlay draws only visible layout lines', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawEditingTextOverlay');
@@ -263,9 +315,9 @@ test('text selection collection uses indexed script metrics while editing math t
   assert.match(selectionSource, /textScriptMetricsStateAt/);
 });
 
-test('overlapping text selection highlight runs are filled once as a path', () => {
+test('overlapping text selection highlight runs collapse before fill', () => {
   const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('function drawTextSelectionHighlight');
+  const start = viewportSource.indexOf('const TEXT_SELECTION_RECT_EPSILON =');
   const end = viewportSource.indexOf('const drawTextSelectionContentJello', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
@@ -306,10 +358,54 @@ test('overlapping text selection highlight runs are filled once as a path', () =
   assert.deepEqual(drawCalls, [
     ['save'],
     ['beginPath'],
-    ['rect', 0, 0, 40, 24],
-    ['rect', 20, 0, 40, 24],
+    ['rect', 0, 0, 60, 24],
     ['fill'],
     ['restore'],
+  ]);
+});
+
+test('script text selection highlight removes base overlap before fill', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('const TEXT_SELECTION_RECT_EPSILON =');
+  const end = viewportSource.indexOf('const drawTextSelectionContentJello', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const selection = {
+    bounds: { left: 0, top: -6, right: 100, bottom: 24 },
+    runs: [
+      { line: { y: 0 }, x1: 0, x2: 100, y: 0, height: 24 },
+      { line: { y: 0 }, x1: 40, x2: 70, y: -6, height: 17 },
+    ],
+  };
+  const rectCalls = [];
+  const context = {
+    LINE_H: 24,
+    TextSelDebug: { _logDraw() {} },
+    applyTextSelectionMotionTransform() {},
+    textSelectionMotionForOptions() { return null; },
+    textSelectionRunsForOptions() { return selection; },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${viewportSource.slice(start, end)}\n` +
+      'globalThis.drawTextSelectionHighlight = drawTextSelectionHighlight;\n',
+    context,
+  );
+
+  const canvasContext = {
+    fillStyle: '',
+    save() {},
+    restore() {},
+    beginPath() {},
+    rect(...args) { rectCalls.push(args); },
+    fill() {},
+  };
+
+  assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, [], 0, 10), true);
+  assert.deepEqual(rectCalls, [
+    [40, -6, 30, 6],
+    [0, 0, 100, 24],
   ]);
 });
 

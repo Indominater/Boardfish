@@ -323,8 +323,12 @@ function applyTextEditCaretHit(obj, proxy, hit) {
       delete obj._textScriptCaretIndex;
       delete obj._textScriptCaretAffinity;
     }
-    if (typeof setTextEditCaretIndex === 'function') setTextEditCaretIndex(obj, index);
-    else obj._textEditCaretIndex = index;
+    if (typeof setTextEditCaretIndex === 'function') {
+      setTextEditCaretIndex(obj, index, { lineStartIndex: hit.lineStartIndex });
+    } else {
+      obj._textEditCaretIndex = index;
+      if (Number.isFinite(hit.lineStartIndex)) obj._textEditCaretLineStartIndex = hit.lineStartIndex;
+    }
   }
 }
 
@@ -336,7 +340,10 @@ function clearTextEditCaretHit(obj) {
     delete obj._textScriptCaretAffinity;
   }
   if (typeof clearTextEditCaretIndex === 'function') clearTextEditCaretIndex(obj);
-  else delete obj._textEditCaretIndex;
+  else {
+    delete obj._textEditCaretIndex;
+    delete obj._textEditCaretLineStartIndex;
+  }
 }
 
 function startTextSelectionDrag(e, obj, wp) {
