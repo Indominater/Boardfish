@@ -67,17 +67,13 @@ function loadTextScriptEditorHelpers() {
     fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') +
       '\n' +
       fs.readFileSync(path.join(root, 'src/js/text_editor.js'), 'utf8') +
-      '\nglobalThis.handleTextScriptCommitSpace = handleTextScriptCommitSpace;\n' +
-      'globalThis.exitTextScriptForLineBreak = exitTextScriptForLineBreak;\n' +
+      '\nglobalThis.exitTextScriptForLineBreak = exitTextScriptForLineBreak;\n' +
       'globalThis.createTextSelectionClipboardPayload = createTextSelectionClipboardPayload;\n' +
       'globalThis.textSelectionPayloadFromBoardfishClipboardValue = textSelectionPayloadFromBoardfishClipboardValue;\n' +
-      'globalThis.handleTextLayerDelete = handleTextLayerDelete;\n' +
       'globalThis.syncFreshTextEditWidth = syncFreshTextEditWidth;\n' +
       'globalThis.textScriptCaretAffinityForInput = textScriptCaretAffinityForInput;\n' +
       'globalThis.textScriptCaretRangesAfterInput = textScriptCaretRangesAfterInput;\n' +
       'globalThis.setTextScriptCaretAffinityForRanges = setTextScriptCaretAffinityForRanges;\n' +
-      'globalThis.textContentWithLinearScriptMarkers = textContentWithLinearScriptMarkers;\n' +
-      'globalThis.textScriptDeterministicBracesToLinear = textScriptDeterministicBracesToLinear;\n' +
       'globalThis.textScriptLinearToDeterministicBraces = textScriptLinearToDeterministicBraces;\n' +
       'globalThis.textEditInputReplacement = textEditInputReplacement;\n' +
       'globalThis.normalizeTextEditVisibleCaretIndex = normalizeTextEditVisibleCaretIndex;\n' +
@@ -645,37 +641,6 @@ test('script input waits for a real operand before creating a range', () => {
   assert.equal(beforeSpace.active, null);
 });
 
-test('space no longer commits or exits scripts', () => {
-  const { handleTextScriptCommitSpace } = loadTextScriptEditorHelpers();
-  const obj = {
-    id: 'text-1',
-    type: 'text',
-    data: {
-      content: 'a^{b}',
-    },
-  };
-  const proxy = {
-    selectionStart: 5,
-    selectionEnd: 5,
-    setSelectionRange(start, end) {
-      this.selectionStart = start;
-      this.selectionEnd = end;
-    },
-  };
-  let prevented = false;
-
-  assert.equal(handleTextScriptCommitSpace(obj, proxy, {
-    key: ' ',
-    ctrlKey: false,
-    metaKey: false,
-    altKey: false,
-    preventDefault() { prevented = true; },
-  }), false);
-  assert.equal(prevented, false);
-  assert.equal(obj.data.content, 'a^{b}');
-  assert.equal(proxy.selectionStart, 5);
-});
-
 test('space inserts at the visible script caret without closing it', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
@@ -1197,35 +1162,11 @@ test('typing a script marker at a base boundary inserts before existing scripts'
   assert.equal(textEditScriptMarkerInsertionIndexAt(nestedScriptsObj, 4), 3);
 });
 
-test('canonical braced script text can be converted to linear text plus metadata', () => {
+test('linear script text can be converted to canonical braces', () => {
   const {
-    textContentWithLinearScriptMarkers,
-    textScriptDeterministicBracesToLinear,
     textScriptLinearToDeterministicBraces,
     transformTextScriptRangesForInput,
   } = loadTextScriptEditorHelpers();
-  assert.deepEqual(JSON.parse(JSON.stringify(textScriptDeterministicBracesToLinear('e^{x^{2}+1}'))), {
-    text: 'e^x^2+1',
-    scriptRanges: [
-      { start: 2, end: 7, kind: 'sup' },
-      { start: 4, end: 5, kind: 'sup' },
-    ],
-  });
-  assert.deepEqual(JSON.parse(JSON.stringify(textContentWithLinearScriptMarkers('e^{x^{2}+1}'))), {
-    text: 'e^x^2+1',
-    scriptRanges: [
-      { start: 2, end: 7, kind: 'sup' },
-      { start: 4, end: 5, kind: 'sup' },
-    ],
-  });
-  assert.deepEqual(JSON.parse(JSON.stringify(textScriptDeterministicBracesToLinear('p_{1}^{u_{1}}'))), {
-    text: 'p_1^u_1',
-    scriptRanges: [
-      { start: 2, end: 3, kind: 'sub' },
-      { start: 4, end: 7, kind: 'sup' },
-      { start: 6, end: 7, kind: 'sub' },
-    ],
-  });
   assert.equal(textScriptLinearToDeterministicBraces('e^x^2+1', [
     { start: 2, end: 7, kind: 'sup' },
     { start: 4, end: 5, kind: 'sup' },
@@ -1245,40 +1186,6 @@ test('canonical braced script text can be converted to linear text plus metadata
     inputType: 'deleteContentBackward',
   });
   assert.deepEqual(JSON.parse(JSON.stringify(result.ranges)), []);
-});
-
-test('delete at deterministic braced script boundaries falls through to native deletion', () => {
-  const { handleTextLayerDelete } = loadTextScriptEditorHelpers();
-  const makeEvent = (key) => ({
-    key,
-    shiftKey: false,
-    ctrlKey: false,
-    metaKey: false,
-    altKey: false,
-    prevented: false,
-    preventDefault() { this.prevented = true; },
-  });
-  const obj = {
-    id: 'text-1',
-    type: 'text',
-    data: {
-      content: 'a = p_{1}^{u_{1}}',
-    },
-  };
-  const proxy = {
-    value: obj.data.content,
-    selectionStart: obj.data.content.length,
-    selectionEnd: obj.data.content.length,
-    selectionDirection: 'none',
-    setSelectionRange(start, end, direction = 'none') {
-      this.selectionStart = start;
-      this.selectionEnd = end;
-      this.selectionDirection = direction;
-    },
-  };
-  const event = makeEvent('Backspace');
-  assert.equal(handleTextLayerDelete(obj, proxy, event), false);
-  assert.equal(event.prevented, false);
 });
 
 test('tab indents the current text edit line', () => {

@@ -777,10 +777,6 @@ test('smooth slide settings are adjustable and applied to CSS variables', () => 
   });
   assert.deepEqual(plain(context.BoardfishMotion.getSmoothSlideParams()), plain(settings));
   assert.equal(styleVars.get('--smooth-slide-duration'), '260ms');
-  assert.equal(styleVars.get('--smooth-slide-offset-y'), '-9px');
-  assert.equal(styleVars.get('--smooth-slide-settle-y'), '2px');
-  assert.equal(styleVars.get('--smooth-slide-start-scale'), '0.975');
-  assert.equal(styleVars.get('--smooth-slide-settle-scale'), '1.01');
   assert.equal(styleVars.get('--smooth-slide-ease'), 'cubic-bezier(0.2, 0.8, 0.2, 1)');
 });
 

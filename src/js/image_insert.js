@@ -370,49 +370,6 @@ const insertWebImageFile = async (file, x, y, dbg, options = {}) => {
   return obj;
 };
 
-async function pasteDataUrlImage(dataUrl, x, y, imgKey, path, dbg, options = {}) {
-  showInputShield();
-  const objectCountBefore = objects.length;
-  try {
-    ClipDebug.step(dbg, 'paste-image:add-start', { path, imgKey });
-    const obj = await addImage(dataUrl, x, y, false, imgKey, {
-      resolveOnLoad: options.resolveOnLoad !== false,
-      readyRenderMinIntervalMs: options.readyRenderMinIntervalMs,
-      source: path,
-    });
-    if (!obj) {
-      ClipDebug.end(dbg, { path, added: false, imgKey, objectCountBefore, objectCountAfter: objects.length });
-      return null;
-    }
-    ClipDebug.step(dbg, 'paste-image:add-object', { path, imgKey: obj.data?.imgKey, objectId: obj.id, w: obj.w, h: obj.h });
-    ClipDebug.step(dbg, 'paste-image:ready-wait-start', { path, imgKey: obj.data?.imgKey });
-    const readyMetrics = await imageReadyPromiseForKey(obj.data.imgKey);
-    const readyStage = readyMetrics?.cacheReadyStage || '';
-    ClipDebug.step(dbg, 'paste-image:ready-wait-end', {
-      path,
-      imgKey: obj.data?.imgKey,
-      readyStage,
-      cacheTotalMs: readyMetrics?.cacheTotalMs ?? '',
-      cacheQueueWaitMs: readyMetrics?.cacheQueueWaitMs ?? '',
-      cacheBitmapMs: readyMetrics?.cacheBitmapMs ?? '',
-    });
-    ClipDebug.end(dbg, {
-      path,
-      added: true,
-      imgKey: obj.data?.imgKey,
-      readyStage,
-      displayReady: readyStage === 'bitmap' || !!BoardfishImageStore.getDisplayImage(obj.data?.imgKey)?.complete,
-      bitmapReady: !!imageBitmapCache[obj.data?.imgKey],
-      fallbackReady: imageBitmapFailed.has(obj.data?.imgKey) && !!BoardfishImageStore.getDisplayImage(obj.data?.imgKey)?.complete,
-      objectCountBefore,
-      objectCountAfter: objects.length,
-    });
-    return obj;
-  } finally {
-    hideInputShield();
-  }
-}
-
 async function insertImageFiles(files, x, y, source = 'file-input') {
   const dbg = InsertDebug.start('insertImages', { source, fileCount: files.length });
   if (!files.length) { InsertDebug.end(dbg, { source, skipped: 'no-files' }); return; }

@@ -49,7 +49,6 @@ function loadTextLayout({ measureWidth = (text) => String(text).length } = {}) {
       getTextMinWidth,
       getTextLayout,
       getTextRenderedContentWidth,
-      fitTextObjectWidthToRenderedContent,
       applyTextLineAlignmentRange,
       clearTextLayoutCaches,
       drawTextLineRange,
@@ -300,7 +299,7 @@ test('trailing overflow spaces keep the last fitting spaces on the caret line', 
   ]);
 });
 
-test('text object width can fit the rendered visible line width', () => {
+test('text rendered content width uses the visible line width', () => {
   const { context } = loadTextLayout({
     measureWidth(text) {
       return [...String(text)].reduce((sum, ch) => sum + (ch === 'H' ? 10 : ch === 'i' ? 3 : 5), 0);
@@ -318,9 +317,6 @@ test('text object width can fit the rendered visible line width', () => {
   };
 
   assert.equal(textLayout.getTextRenderedContentWidth(obj), 22);
-  assert.equal(textLayout.fitTextObjectWidthToRenderedContent(obj), true);
-  assert.equal(obj.w, 22);
-  assert.equal(textLayout.fitTextObjectWidthToRenderedContent(obj), false);
 });
 
 test('line alignment offsets caret positions within the text box', () => {

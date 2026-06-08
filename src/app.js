@@ -84,14 +84,6 @@ function logStartupStep(step, detail = {}) {
   } catch (_) {}
 }
 
-function logStartupError(step, error) {
-  StartupDebug.record(step, { error: String(error) });
-  if (!DEBUG_TOOLS_ENABLED) return;
-  try {
-    console.error('[Boardfish startup]', step, error);
-  } catch (_) {}
-}
-
 function normalizeAppTheme(value) {
   return String(value || '').toLowerCase() === 'dark' ? 'dark' : 'light';
 }

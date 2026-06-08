@@ -276,27 +276,6 @@ const copyTextEditSelection = async () => {
   focusTextEditProxy();
 };
 
-const cutTextEditSelection = async () => {
-  const text = selectedTextForEditMenu();
-  if (!text) {
-    focusTextEditProxy();
-    return;
-  }
-  const selection = getTextEditSelectionState();
-  const copied = (
-    selection?.hasSelection &&
-    _editEl &&
-    typeof copyTextEditSelectionFromProxy === 'function'
-  )
-    ? await copyTextEditSelectionFromProxy(editingId, _editEl, selection)
-    : await writeTextClipboardFromEditMenu(textSelectionForClipboard(text), { allowEmpty: true });
-  if (copied) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-cut');
-    replaceTextEditSelection('', { immediateHistory: true });
-  }
-  else focusTextEditProxy();
-};
-
 const deleteTextEditSelection = () => {
   if (!selectedTextForEditMenu()) {
     focusTextEditProxy();

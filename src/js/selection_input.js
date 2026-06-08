@@ -58,10 +58,6 @@ const isEventInsideVisibleContextMenu = (e) => {
   );
 };
 
-function isEventInsideIsland(e) {
-  return !!(island && e.target instanceof Node && island.contains(e.target));
-}
-
 const isEventInsideVisibleIsland = (e) => {
   return isEventInsideVisibleSurface(e, island);
 };

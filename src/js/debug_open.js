@@ -354,7 +354,6 @@ var OpenDebug = (() => {
     const rows = latestOpenEvents();
     const findStep = (step) => rows.find(e => e.step === step) || null;
     const findLastStep = (step) => [...rows].reverse().find(e => e.step === step) || null;
-    const findInvoke = (command) => rows.find(e => e.step === 'invoke:ok' && e.meta?.command === command) || null;
     const initialPolicy = findStep('hydrate-initial-policy');
     const visibleHydrate = findStep('hydrate-visible:end');
     const allHydrate = findStep('hydrate-all:end');

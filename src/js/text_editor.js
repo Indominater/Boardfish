@@ -842,12 +842,6 @@ const textScriptActiveRangesAtIndex = (ranges, index, options = {}) => {
     .map((range) => ({ ...range }));
 };
 
-const textScriptActiveRangesAtCaret = (obj, index) => {
-  const ranges = textEditScriptRanges(obj);
-  const affinity = obj?._textScriptCaretIndex === index ? obj._textScriptCaretAffinity : '';
-  return textScriptActiveRangesAtIndex(ranges, index, { includeEnd: true, affinity });
-};
-
 const textScriptCaretRangesForEditState = (scriptRanges, index, affinity = '') => (
   textScriptActiveRangesAtIndex(scriptRanges || [], index, { includeEnd: true, affinity }).map((range) => ({ ...range }))
 );
@@ -873,90 +867,6 @@ const setTextScriptCaretAffinityForRanges = (obj, index, desiredRanges = []) => 
   setTextScriptCaretAffinity(obj, index, 'inside');
 };
 
-const addOrMergeTextScriptRange = (ranges, range) => {
-  if (!range || !range.kind) return false;
-  const existing = ranges.find((item) => item.start === range.start && item.kind === range.kind);
-  if (existing) {
-    existing.end = Math.max(existing.end, range.end);
-    return true;
-  }
-  ranges.push({ ...range });
-  return true;
-};
-
-const shouldExitTextScriptAt = (obj, index, affinity = '') => {
-  if (!obj || index == null || affinity === 'after') return false;
-  return textEditScriptRanges(obj).some((range) => range.end === index && isTextScriptRangeActiveAt(range, index, affinity));
-};
-
-const isTextScriptSpaceKeyEvent = (e) => {
-  if (e.ctrlKey || e.metaKey || e.altKey) return false;
-  return e.key === ' ' || e.key === 'Spacebar';
-};
-
-const isTextScriptInsertSpaceInput = (event) => {
-  return event?.inputType === 'insertText' && event?.data === ' ';
-};
-
-const isTextScriptSpaceEvent = (event) => {
-  if (!event) return true;
-  if (isTextScriptInsertSpaceInput(event)) return true;
-  return isTextScriptSpaceKeyEvent(event);
-};
-
-const textScriptCurrentRangeAt = (obj, index, affinity = '') => {
-  const active = textEditScriptRanges(obj)
-    .filter((range) => isTextScriptRangeActiveAt(range, index, affinity))
-    .sort((a, b) => b.start - a.start || a.end - b.end);
-  return active[0] || null;
-};
-
-const textScriptPendingRangeAt = (obj, index) => {
-  if (!obj || obj.type !== 'text') return null;
-  const text = normalizeTextContent(obj.data?.content || '');
-  const caret = Math.max(0, Math.min(index ?? 0, text.length));
-  const resolvedMarkerIndexes = new Set(textEditScriptRanges(obj).map((range) => range.start - 1));
-  for (let markerIndex = caret - 1; markerIndex > 0; markerIndex--) {
-    if (resolvedMarkerIndexes.has(markerIndex)) continue;
-    const kind = typeof textScriptKindForMarker === 'function' ? textScriptKindForMarker(text[markerIndex]) : '';
-    if (!kind) continue;
-    if (typeof canOpenTextScriptAt === 'function' && !canOpenTextScriptAt(text, markerIndex)) continue;
-    const start = markerIndex + 1;
-    if (start >= caret) continue;
-    let crossesSeparator = false;
-    for (let i = start; i < caret; i++) {
-      if (typeof isTextWordOrLineSeparator === 'function' ? isTextWordOrLineSeparator(text[i]) : /\s/.test(text[i])) {
-        crossesSeparator = true;
-        break;
-      }
-    }
-    if (crossesSeparator) continue;
-    return { start, end: caret, kind };
-  }
-  return null;
-};
-
-const commitPendingTextScriptAt = (obj, index) => {
-  if (!obj || typeof normalizeTextScriptRangesForContent !== 'function') return null;
-  const range = textScriptPendingRangeAt(obj, index);
-  if (!range) return null;
-  const content = normalizeTextContent(obj.data?.content || '');
-  const ranges = [...textEditScriptRanges(obj), range];
-  obj.data.content = content;
-  const normalized = normalizeTextScriptRangesForContent(content, ranges);
-  if (normalized.length) obj.data.scriptRanges = normalized;
-  else delete obj.data.scriptRanges;
-  const caret = Math.max(0, Math.min(index ?? 0, content.length));
-  const committed = normalized.find((item) => item.start === range.start && item.end === range.end && item.kind === range.kind) || range;
-  setTextScriptCaretAffinity(obj, caret, 'after');
-  invalidateTextEditObjectLayout(obj);
-  return { ...committed, caret, content };
-};
-
-const handleTextScriptCommitSpace = (obj, proxy, e = null) => {
-  return false;
-};
-
 const exitTextScriptForLineBreak = (obj, proxy) => {
   if (!obj || !proxy || proxy.selectionStart !== proxy.selectionEnd) return false;
   const pos = proxy.selectionStart;
@@ -974,63 +884,6 @@ const exitTextScriptForLineBreak = (obj, proxy) => {
 const textScriptCaretAffinityForInput = (obj, proxy, event, selection) => {
   const start = selection?.start ?? proxy?.selectionStart ?? 0;
   return obj?._textScriptCaretIndex === start ? obj._textScriptCaretAffinity : '';
-};
-
-const textScriptRangesMatch = (a, b) => (
-  !!a && !!b && a.start === b.start && a.end === b.end && a.kind === b.kind
-);
-
-const textScriptRangeForDeleteUncommit = (obj, index, key) => {
-  if (!obj || obj.type !== 'text') return null;
-  const text = normalizeTextContent(obj.data?.content || '');
-  const pos = Math.max(0, Math.min(index ?? 0, text.length));
-  const ranges = textEditScriptRanges(obj);
-  const candidates = ranges.filter((range) => {
-    if (typeof isTextScriptBracedRange === 'function' && isTextScriptBracedRange(text, range)) return false;
-    const markerIndex = range.start - 1;
-    if (key === 'Delete') return markerIndex <= pos && pos < range.end;
-    return markerIndex < pos && pos <= range.end;
-  });
-  candidates.sort((a, b) => (a.start - b.start) || (b.end - a.end) || String(a.kind).localeCompare(String(b.kind)));
-  return candidates[0] || null;
-};
-
-const bracedTextScriptStructuralRangeAt = (ranges, index, content = '') => {
-  if (typeof isTextScriptBracedRange !== 'function') return null;
-  for (const range of ranges || []) {
-    if (!isTextScriptBracedRange(content, range)) continue;
-    if (index === range.start - 1 || index === range.start || index === range.end - 1) return range;
-  }
-  return null;
-};
-
-const bracedTextScriptBoundaryForCompoundDelete = (ranges, index, key, content = '') => {
-  if (typeof isTextScriptBracedRange !== 'function' || typeof textScriptCompoundBoundsForRange !== 'function') return null;
-  const text = normalizeTextContent(content);
-  const pos = Math.max(0, Math.min(index ?? 0, text.length));
-  if (
-    typeof textScriptRawCompoundBoundsAtCaret === 'function' &&
-    textScriptRawCompoundBoundsAtCaret(text, ranges, pos).length
-  ) {
-    return null;
-  }
-  const candidates = [];
-  for (const range of ranges || []) {
-    if (!isTextScriptBracedRange(text, range)) continue;
-    const bounds = textScriptCompoundBoundsForRange(text, range);
-    if (!bounds || (pos > bounds.start && pos < bounds.end)) continue;
-    if ((key === 'Backspace' && pos === bounds.end) || (key === 'Delete' && pos === bounds.start)) {
-      candidates.push({ range, bounds });
-    }
-  }
-  candidates.sort((a, b) => (a.bounds.start - b.bounds.start) || (b.bounds.end - a.bounds.end));
-  return candidates[0] || null;
-};
-
-const handleTextLayerDelete = (obj, proxy, e) => {
-  if (!obj || !proxy || (e.key !== 'Backspace' && e.key !== 'Delete')) return false;
-  if (e.ctrlKey || e.metaKey || e.altKey) return false;
-  return false;
 };
 
 const transformTextScriptRangesForInput = (oldRanges, {
@@ -1859,8 +1712,6 @@ function enterEdit(id, { history = true, preserveSize = false } = {}) {
         return;
       }
     }
-
-    if (handleTextLayerDelete(obj, proxy, e)) return;
 
     // The 1px-wide proxy treats all content as a single column, so the browser's
     // own up/down logic navigates char-by-char instead of line-by-line. Intercept

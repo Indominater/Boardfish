@@ -306,7 +306,7 @@ function loadClipboardPasteObjectsHarness() {
 function loadTextEditCopyHarness(value) {
   const source = fs.readFileSync(path.join(root, 'src/js/context_menu.js'), 'utf8');
   const start = source.indexOf('const getTextEditSelectionState');
-  const end = source.indexOf('const cutTextEditSelection', start);
+  const end = source.indexOf('const deleteTextEditSelection', start);
   assert.ok(start >= 0 && end > start, 'text edit copy helpers are missing');
   const calls = {
     copiedTexts: [],

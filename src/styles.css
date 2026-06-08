@@ -11,7 +11,6 @@
   --regular_text: 400;
   --bold_text: 500;
   --black_font: #15141A;
-  --black_font_rgb: 21, 20, 26;
   --white_font: #fbfbfe;
   --white_font_rgb: 251, 251, 254;
   --firefox-menu-bg: #42414d;
@@ -41,10 +40,6 @@
   --selection-handle-shadow: 0 1px 3px rgba(0,0,0,0.28);
   --menu-active-bg: var(--firefox-menu-active-bg);
   --smooth-slide-duration: 220ms;
-  --smooth-slide-offset-y: -6px;
-  --smooth-slide-settle-y: 1px;
-  --smooth-slide-start-scale: 0.985;
-  --smooth-slide-settle-scale: 1.005;
   --smooth-slide-ease: cubic-bezier(0.18, 0.9, 0.24, 1.18);
   --highlight-nudge-x: 2px;
 }

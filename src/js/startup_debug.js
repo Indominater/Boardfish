@@ -202,12 +202,6 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async function waitFrames(count = 0) {
-    for (let frame = 0; frame < count; frame++) {
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-    }
-  }
-
   function elementLabel(element) {
     if (!element) return '';
     const id = element.id ? `#${element.id}` : '';

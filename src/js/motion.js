@@ -336,10 +336,6 @@ const BoardfishMotion = (() => {
     const style = root.document?.documentElement?.style;
     if (!style) return;
     style.setProperty('--smooth-slide-duration', `${smoothSlideParams.duration}ms`);
-    style.setProperty('--smooth-slide-offset-y', `${smoothSlideParams.offsetY}px`);
-    style.setProperty('--smooth-slide-settle-y', `${smoothSlideParams.settleY}px`);
-    style.setProperty('--smooth-slide-start-scale', String(smoothSlideParams.startScale));
-    style.setProperty('--smooth-slide-settle-scale', String(smoothSlideParams.settleScale));
     style.setProperty('--smooth-slide-ease', smoothSlideParams.ease);
   };
   jelloParams = normalizeJelloParams(root.BoardfishJelloParams || {});

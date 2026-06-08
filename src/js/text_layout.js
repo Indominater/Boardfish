@@ -10,8 +10,6 @@ const textFontForSize = (size) => `${regular_text} ${size}px 'Geist Sans', syste
 var FONT      = textFontForSize(FONT_SIZE);
 const TEXT_SCRIPT_FONT_SCALE = Math.SQRT1_2;
 const TEXT_SCRIPT_MAX_SIZE_DEPTH = 2;
-var TEXT_SCRIPT_FONT_SIZE = Math.max(1, FONT_SIZE * TEXT_SCRIPT_FONT_SCALE);
-var TEXT_SCRIPT_FONT = textFontForSize(TEXT_SCRIPT_FONT_SIZE);
 const TEXT_SCRIPT_SUP_OFFSET = -FONT_SIZE * 0.38;
 const TEXT_SCRIPT_SUB_OFFSET = FONT_SIZE * 0.24;
 var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
@@ -56,7 +54,6 @@ const BASE_TEXT_SCRIPT_STATE = Object.freeze({
   scale: 1,
 });
 var _mwCache = new Map();
-var _scriptMwCache = new Map();
 var _fontMeasureCaches = new Map();
 var _scriptIndexCache = new Map();
 
@@ -105,10 +102,6 @@ function measureRawTextWWithFont(text, font, cache) {
 
 function measureRawTextW(text) {
   return measureRawTextWWithFont(text, FONT, _mwCache);
-}
-
-function measureScriptRawTextW(text) {
-  return measureRawTextWWithFont(text, TEXT_SCRIPT_FONT, _scriptMwCache);
 }
 
 const textScriptSizeDepthForDepth = (depth) => Math.min(TEXT_SCRIPT_MAX_SIZE_DEPTH, Math.max(0, depth || 0));
@@ -185,7 +178,6 @@ const trimMapCache = (map, maxEntries) => {
 
 const clearMeasuredTextWidthCache = () => {
   _mwCache.clear();
-  _scriptMwCache.clear();
   _fontMeasureCaches.clear();
 };
 
@@ -298,17 +290,13 @@ function clearTextMeasurementCaches() {
 
 function getWrappedLines(obj) {
   const cached = _linesCacheMap.get(obj.id);
-  const scriptLayout = textScriptLayoutContext(obj);
-  const scriptRanges = scriptLayout.ranges;
-  const rawBounds = scriptLayout.rawBounds;
+  const scriptRanges = getTextScriptRangesForLayout(obj);
   const scriptKey = JSON.stringify(scriptRanges);
-  const rawKey = textScriptRawLayoutKey(rawBounds);
   if (
     cached &&
     cached.content === obj.data.content &&
     cached.w === obj.w &&
-    cached.scriptKey === scriptKey &&
-    cached.rawKey === rawKey
+    cached.scriptKey === scriptKey
   ) return cached.lines;
 
   const maxW = obj.w - TEXT_PAD * 2;
@@ -334,8 +322,6 @@ function getWrappedLines(obj) {
 
     if (paraStart === paraEnd) {
       result.push({ text: '', startIndex: paraStart, endIndex: paraStart, nextStartIndex: paraStart, logicalLineIndex });
-    } else if (textScriptRawBoundsIntersectRange(rawBounds, paraStart, paraEnd)) {
-      pushLine(paraStart, paraEnd, paraEnd, paraEnd, logicalLineIndex);
     } else {
       const paragraphText = obj.data.content.slice(paraStart, paraEnd);
       const paragraphPrefixWidths = paragraphText.includes('\t')
@@ -400,7 +386,7 @@ function getWrappedLines(obj) {
     logicalLineIndex++;
   }
 
-  _linesCacheMap.set(obj.id, { content: obj.data.content, w: obj.w, scriptKey, rawKey, lines: result });
+  _linesCacheMap.set(obj.id, { content: obj.data.content, w: obj.w, scriptKey, lines: result });
   trimMapCache(_linesCacheMap, TEXT_LINES_CACHE_MAX_ENTRIES);
   return result;
 }
@@ -570,37 +556,6 @@ const findBalancedTextScriptEnd = (content, start) => {
   return -1;
 };
 
-const textScriptEndForMarkerAt = (content, markerIndex) => {
-  const text = normalizeTextContent(content);
-  const start = markerIndex + 1;
-  let end = findBalancedTextScriptEnd(text, start);
-  if (end === -1) {
-    end = start;
-    while (end < text.length && !isTextWordOrLineSeparator(text[end])) end++;
-  }
-  return end;
-};
-
-const textScriptRangeForMarkerAt = (content, markerIndex) => {
-  const text = normalizeTextContent(content);
-  const kind = textScriptKindForMarker(text[markerIndex]);
-  if (!kind || !canOpenTextScriptAt(text, markerIndex)) return null;
-  const start = markerIndex + 1;
-  const end = textScriptEndForMarkerAt(text, markerIndex);
-  if (end <= start) return null;
-  return { start, end, kind };
-};
-
-const deriveTextScriptRangesFromContent = (content) => {
-  const text = normalizeTextContent(content);
-  const ranges = [];
-  for (let i = 0; i < text.length - 1; i++) {
-    const range = textScriptRangeForMarkerAt(text, i);
-    if (range) ranges.push(range);
-  }
-  return ranges;
-};
-
 const deriveBracedTextScriptRangesFromContent = (content) => {
   const text = normalizeTextContent(content);
   const ranges = [];
@@ -644,113 +599,7 @@ const getTextScriptRanges = (obj) => {
   return [];
 };
 
-const findBalancedTextScriptStart = (content, closeIndex) => {
-  const text = normalizeTextContent(content);
-  const close = text[closeIndex];
-  const pairs = { ')': '(', ']': '[', '}': '{' };
-  const open = pairs[close];
-  if (!open) return -1;
-  let depth = 0;
-  for (let i = closeIndex; i >= 0; i--) {
-    if (text[i] === close) depth++;
-    else if (text[i] === open) {
-      depth--;
-      if (depth === 0) return i;
-    }
-    if (text[i] === '\n') return -1;
-  }
-  return -1;
-};
-
-const isTextScriptCompoundBoundary = (ch) => (
-  !ch || isTextWordOrLineSeparator(ch) || '{}()[]+-*/=,;:<>&|'.includes(ch)
-);
-
-const textScriptCompoundStartForMarker = (content, markerIndex) => {
-  const text = normalizeTextContent(content);
-  const marker = Math.max(0, Math.min(markerIndex ?? 0, text.length));
-  let previous = marker - 1;
-  if (previous < 0) return marker;
-
-  if (text[previous] === '}') {
-    const openIndex = findBalancedTextScriptStart(text, previous);
-    const previousMarker = openIndex - 1;
-    if (
-      previousMarker >= 0 &&
-      textScriptKindForMarker(text[previousMarker]) &&
-      canOpenTextScriptAt(text, previousMarker)
-    ) {
-      return textScriptCompoundStartForMarker(text, previousMarker);
-    }
-    return openIndex === -1 ? previous : openIndex;
-  }
-
-  if (text[previous] === ')' || text[previous] === ']') {
-    const openIndex = findBalancedTextScriptStart(text, previous);
-    return openIndex === -1 ? previous : openIndex;
-  }
-
-  while (previous > 0 && !isTextScriptCompoundBoundary(text[previous - 1])) previous--;
-  return previous;
-};
-
-const textScriptCompoundEndForRange = (content, range) => {
-  const text = normalizeTextContent(content);
-  let end = Math.max(0, Math.min(range?.end ?? 0, text.length));
-  while (end < text.length - 1) {
-    const kind = textScriptKindForMarker(text[end]);
-    if (!kind || text[end + 1] !== '{') break;
-    if (!canOpenTextScriptAt(text, end)) break;
-    const nextEnd = findBalancedTextScriptEnd(text, end + 1);
-    if (nextEnd === -1 || nextEnd <= end + 3) break;
-    end = nextEnd;
-  }
-  return end;
-};
-
-const textScriptCompoundBoundsForRange = (content, range) => {
-  if (!isTextScriptBracedRange(content, range)) return null;
-  const markerIndex = range.start - 1;
-  const start = textScriptCompoundStartForMarker(content, markerIndex);
-  const end = textScriptCompoundEndForRange(content, range);
-  return end > start ? { start, end } : null;
-};
-
-const textScriptEditingCaretIndex = (obj, content) => {
-  if (!obj || typeof editingId === 'undefined' || obj.id !== editingId) return null;
-  const text = normalizeTextContent(content);
-  const rawIndex = Number.isFinite(obj._textEditCaretIndex) ? obj._textEditCaretIndex : obj._textScriptCaretIndex;
-  if (!Number.isFinite(rawIndex)) return null;
-  return Math.max(0, Math.min(Math.trunc(rawIndex), text.length));
-};
-
-const textScriptRawCompoundBoundsAtCaret = (content, ranges = [], caretIndex = null) => {
-  if (!Number.isFinite(caretIndex)) return [];
-  const bounds = [];
-  for (const range of ranges || []) {
-    const compound = textScriptCompoundBoundsForRange(content, range);
-    if (!compound) continue;
-    if (caretIndex > compound.start && caretIndex < compound.end) bounds.push(compound);
-  }
-  bounds.sort((a, b) => a.start - b.start || b.end - a.end);
-  return bounds;
-};
-
-const textScriptLayoutContext = (obj) => ({ ranges: getTextScriptRanges(obj), rawBounds: [] });
-
-const getTextScriptRangesForLayout = (obj) => textScriptLayoutContext(obj).ranges;
-
-const textScriptRawLayoutKey = (rawBounds = []) => {
-  if (!rawBounds.length) return '';
-  return rawBounds.map((bounds) => `${bounds.start}:${bounds.end}`).join('|');
-};
-
-const textScriptRawBoundsIntersectRange = (rawBounds = [], start = 0, end = start) => {
-  for (const bounds of rawBounds || []) {
-    if (bounds.start < end && bounds.end > start) return true;
-  }
-  return false;
-};
+const getTextScriptRangesForLayout = (obj) => getTextScriptRanges(obj);
 
 const textContentWithCanonicalScriptBraces = (content, scriptRanges = []) => {
   const text = normalizeTextContent(content);
@@ -792,84 +641,6 @@ const textContentWithCanonicalScriptBraces = (content, scriptRanges = []) => {
   return writeSegment(0, text.length);
 };
 
-const textContentWithLinearScriptMarkers = (content, scriptRanges = []) => {
-  const text = normalizeTextContent(content);
-  const ranges = normalizeTextScriptRangesForContent(text, [
-    ...(Array.isArray(scriptRanges) ? scriptRanges : []),
-    ...deriveBracedTextScriptRangesFromContent(text),
-  ]);
-  const bracedRanges = ranges.filter((range) => isTextScriptBracedRange(text, range));
-  if (!bracedRanges.length) return { text, scriptRanges: ranges };
-
-  const bracedByMarkerIndex = new Map();
-  for (const range of bracedRanges) {
-    const markerIndex = range.start - 1;
-    const existing = bracedByMarkerIndex.get(markerIndex);
-    if (!existing || range.end > existing.end) bracedByMarkerIndex.set(markerIndex, range);
-  }
-
-  let out = '';
-  const outRanges = [];
-  const oldPositionToNew = new Array(text.length + 1);
-  const markPosition = (index) => {
-    if (index >= 0 && index <= text.length && oldPositionToNew[index] == null) oldPositionToNew[index] = out.length;
-  };
-  const appendChar = (index) => {
-    markPosition(index);
-    out += text[index];
-    oldPositionToNew[index + 1] = out.length;
-  };
-  const skipChar = (index) => {
-    markPosition(index);
-    oldPositionToNew[index + 1] = out.length;
-  };
-
-  const writeSegment = (start, end) => {
-    let i = start;
-    markPosition(i);
-    while (i < end) {
-      const range = bracedByMarkerIndex.get(i);
-      if (range && range.start === i + 1 && range.end <= end) {
-        appendChar(i);
-        skipChar(range.start);
-        const rangeStart = out.length;
-        writeSegment(range.start + 1, range.end - 1);
-        skipChar(range.end - 1);
-        const rangeEnd = out.length;
-        if (rangeEnd > rangeStart) outRanges.push({ start: rangeStart, end: rangeEnd, kind: range.kind });
-        i = range.end;
-        markPosition(i);
-        continue;
-      }
-      appendChar(i);
-      i++;
-    }
-    markPosition(end);
-  };
-
-  writeSegment(0, text.length);
-  for (let i = 0, last = 0; i < oldPositionToNew.length; i++) {
-    if (oldPositionToNew[i] == null) oldPositionToNew[i] = last;
-    else last = oldPositionToNew[i];
-  }
-
-  for (const range of ranges) {
-    if (isTextScriptBracedRange(text, range)) continue;
-    const start = oldPositionToNew[range.start];
-    const end = oldPositionToNew[range.end];
-    if (end > start) outRanges.push({ start, end, kind: range.kind });
-  }
-
-  return {
-    text: out,
-    scriptRanges: normalizeTextScriptRangesForContent(out, outRanges),
-  };
-};
-
-const textScriptDeterministicBracesToLinear = (content, scriptRanges = []) => (
-  textContentWithLinearScriptMarkers(content, scriptRanges)
-);
-
 const textScriptLinearToDeterministicBraces = (content, scriptRanges = []) => (
   textContentWithCanonicalScriptBraces(content, scriptRanges)
 );
@@ -878,20 +649,6 @@ const textObjectContentForClipboard = (obj) => {
   if (!obj || obj.type !== 'text') return '';
   const content = normalizeTextContent(obj.data?.content || '');
   return textForClipboard(textScriptLinearToDeterministicBraces(content, getTextScriptRanges(obj)));
-};
-
-const textScriptRangeForIndex = (ranges, index, { includeEnd = false } = {}) => {
-  for (const range of ranges || []) {
-    if (index >= range.start && (index < range.end || (includeEnd && index === range.end))) return range;
-  }
-  return null;
-};
-
-const textScriptRangeForMarkerIndex = (ranges, index) => {
-  for (const range of ranges || []) {
-    if (range.start === index + 1) return range;
-  }
-  return null;
 };
 
 const isTextScriptMarkerHiddenAt = (ranges, index, content = '') => {
@@ -1035,11 +792,6 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
   return result;
 }
 
-const textScriptCaretKindAt = (obj, index) => {
-  const state = textScriptCaretStateAt(obj, index);
-  return state.kinds[state.kinds.length - 1] || '';
-};
-
 const textScriptCaretStateAt = (obj, index) => {
   const ranges = getTextScriptRanges(obj);
   const affinity = obj?._textScriptCaretIndex === index ? obj._textScriptCaretAffinity : '';
@@ -1112,54 +864,6 @@ const getTextRenderedContentWidth = (obj) => {
   return Math.max(getTextMinWidth(obj), Math.ceil(maxLineW + TEXT_PAD * 2 + 1));
 };
 
-const textLayoutLineSignature = (line) => ({
-  startIndex: line.startIndex,
-  endIndex: line.endIndex,
-  caretEndIndex: line.caretEndIndex,
-  nextStartIndex: line.nextStartIndex,
-});
-
-const textLayoutSignaturesEqual = (a, b) => {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i].startIndex !== b[i].startIndex) return false;
-    if (a[i].endIndex !== b[i].endIndex) return false;
-    if (a[i].caretEndIndex !== b[i].caretEndIndex) return false;
-    if (a[i].nextStartIndex !== b[i].nextStartIndex) return false;
-  }
-  return true;
-};
-
-const textWidthPreservesCurrentWrap = (obj, width, currentSignature) => {
-  if (!obj || !Number.isFinite(width) || width <= 0) return false;
-  const originalW = obj.w;
-  const originalCache = obj._layoutCache;
-  const originalCacheKey = obj._layoutCacheKey;
-  obj.w = width;
-  delete obj._layoutCache;
-  delete obj._layoutCacheKey;
-  _linesCacheMap.delete(obj.id);
-  const nextSignature = getTextLayout(obj).map(textLayoutLineSignature);
-  obj.w = originalW;
-  obj._layoutCache = originalCache;
-  obj._layoutCacheKey = originalCacheKey;
-  _linesCacheMap.delete(obj.id);
-  return textLayoutSignaturesEqual(currentSignature, nextSignature);
-};
-
-const fitTextObjectWidthToRenderedContent = (obj) => {
-  if (!obj || obj.type !== 'text') return false;
-  const currentSignature = getTextLayout(obj).map(textLayoutLineSignature);
-  const w = getTextRenderedContentWidth(obj);
-  if (!Number.isFinite(w) || w <= 0 || obj.w === w) return false;
-  if (w < obj.w && !textWidthPreservesCurrentWrap(obj, w, currentSignature)) return false;
-  obj.w = w;
-  delete obj._layoutCache;
-  delete obj._layoutCacheKey;
-  _linesCacheMap.delete(obj.id);
-  return true;
-};
-
 function syncTextAutoHeight(obj, minLines = 1) {
   if (!obj || obj.type !== 'text') return false;
   const h = getTextAutoHeight(obj, minLines);
@@ -1206,11 +910,9 @@ function calculateTextLayout(obj) {
 }
 
 function getTextLayout(obj) {
-  const scriptLayout = textScriptLayoutContext(obj);
-  const scriptKey = JSON.stringify(scriptLayout.ranges);
-  const rawKey = textScriptRawLayoutKey(scriptLayout.rawBounds);
+  const scriptKey = JSON.stringify(getTextScriptRangesForLayout(obj));
   const alignKey = JSON.stringify(normalizeTextLineAlignForContent(obj.data?.content, obj.data?.lineAlign));
-  const cacheKey = `${obj.data.content}\n${obj.w}\n${obj.y}\n${scriptKey}\n${rawKey}\n${alignKey}`;
+  const cacheKey = `${obj.data.content}\n${obj.w}\n${obj.y}\n${scriptKey}\n${alignKey}`;
   if (obj._layoutCache && obj._layoutCacheKey === cacheKey) return obj._layoutCache;
   obj._layoutCacheKey = cacheKey;
   obj._layoutCache = calculateTextLayout(obj);
