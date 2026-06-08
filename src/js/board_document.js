@@ -8,10 +8,6 @@
     return BoardTypes.imageRefKind(src);
   }
 
-  function createLegacyBoardData({ viewport, imageStore, objects }) {
-    return { version: BoardTypes.BOARD_VERSION_LEGACY, viewport, imageStore, objects };
-  }
-
   function extForMime(mime = '') {
     const value = String(mime || '').toLowerCase();
     if (value === 'image/jpeg' || value === 'image/jpg') return 'jpg';
@@ -236,7 +232,6 @@
   }
 
   const api = Object.freeze({
-    createLegacyBoardData,
     createBoardDataForSave,
     defaultImageRefKind,
     getBoardOpenMetrics,

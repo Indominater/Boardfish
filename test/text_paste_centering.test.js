@@ -122,7 +122,6 @@ function loadPasteHarness() {
     BoardfishClipboardIO: {
       describeClipboardData() { return {}; },
       readClipboardImageFileFromEvent() { return null; },
-      readClipboardImageDataUrlFromEvent() { return null; },
       readClipboardTextFromEvent(clipboardData) {
         return clipboardData?.getData?.('text/plain') || '';
       },

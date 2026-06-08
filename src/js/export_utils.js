@@ -54,20 +54,6 @@
     return ms;
   }
 
-  function nextAnimationFrame() {
-    return new Promise(resolve => requestAnimationFrame(() => resolve()));
-  }
-
-  async function letUiPaint(dbg, phase) {
-    const t0 = performance.now();
-    ExportDebug.step(dbg, 'ui:paint-wait:start', { phase });
-    await nextAnimationFrame();
-    await nextAnimationFrame();
-    const ms = performance.now() - t0;
-    ExportDebug.step(dbg, 'ui:paint-wait:end', { phase, ms });
-    ExportDebug.recordEventLoopYield?.({ phase, ms, kind: 'paint-wait' });
-  }
-
   function createProgressUpdater(totalCount, busyPill) {
     let currentProgressText = progressText(totalCount, 0);
     ExportDebug.recordProgressUi({
@@ -91,25 +77,6 @@
         totalCount,
         ...extra,
       });
-    };
-  }
-
-  function cleanupTempKeys() {
-    return Promise.resolve(0);
-  }
-
-  function normalizeSaveResult(result) {
-    if (!result || typeof result === 'number') return { savedCount: result || 0 };
-    return {
-      savedCount: result.savedCount ?? result.saved_count ?? 0,
-      failedCount: result.failedCount ?? result.failed_count ?? 0,
-      missingCount: result.missingCount ?? result.missing_count ?? 0,
-      bytesMB: result.bytes ? Math.round(result.bytes / 1024 / 1024 * 100) / 100 : 0,
-      requestedCount: result.requestedCount ?? result.requested_count ?? '',
-      sourceCount: result.sourceCount ?? result.source_count ?? '',
-      writeConcurrency: result.writeConcurrency ?? result.write_concurrency ?? '',
-      writeMs: result.writeMs ?? result.write_ms ?? '',
-      error: result.errors?.length ? result.errors.slice(0, 3).join(' | ') : '',
     };
   }
 
@@ -570,11 +537,6 @@
     return String(name || `image.${cleanExt}`).replace(/\.(png|jpe?g|webp|gif)$/i, '') + `.${cleanExt}`;
   }
 
-  function blobFromDataUrl(dataUrl) {
-    if (!/^data:([^;,]+);base64,/i.test(String(dataUrl || '')) || !root.BoardfishWebBoardContainer?.dataUrlToBytes) return null;
-    return new Blob([root.BoardfishWebBoardContainer.dataUrlToBytes(dataUrl)], { type: dataUrlMime(dataUrl) });
-  }
-
   function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -585,19 +547,6 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
-  }
-
-  function downloadDataUrl(dataUrl, filename) {
-    const blob = blobFromDataUrl(dataUrl);
-    if (blob) {
-      downloadBlob(blob, filename);
-      return true;
-    }
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = filename;
-    a.click();
-    return false;
   }
 
   function selectedImageObjects() {
@@ -615,18 +564,14 @@
   }
 
   root.BoardfishExportUtils = Object.freeze({
-    cleanupTempKeys,
     createProgressUpdater,
     delay,
-    downloadDataUrl,
     downloadImageObjects,
     finishImageExportInputShield,
     guessImageExtForObjectExport,
     guessImageExtFromDataUrl,
-    normalizeSaveResult,
     randomHex,
     selectedImageObjects,
-    letUiPaint,
     yieldToEventLoop,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

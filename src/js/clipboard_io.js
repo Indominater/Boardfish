@@ -43,42 +43,6 @@
     await navigator.clipboard.write([new ClipboardItem(parts)]);
   }
 
-  function readClipboardBlobAsDataUrl(blob, errorMessage) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => resolve(ev.target.result);
-      reader.onerror = () => reject(reader.error || new Error(errorMessage));
-      reader.readAsDataURL(blob);
-    });
-  }
-
-  async function readClipboardBlobAsDataUrlDebug(blob, errorMessage, dbg, meta = {}) {
-    const readStart = performance.now();
-    ClipDebug.step(dbg, 'clipboard-blob-read:start', {
-      ...meta,
-      blobSize: blob?.size ?? '',
-      blobType: blob?.type || '',
-    });
-    try {
-      const dataUrl = await readClipboardBlobAsDataUrl(blob, errorMessage);
-      ClipDebug.step(dbg, 'clipboard-blob-read:ok', {
-        ...meta,
-        blobSize: blob?.size ?? '',
-        dataUrl,
-        ms: Math.round((performance.now() - readStart) * 100) / 100,
-      });
-      return dataUrl;
-    } catch (err) {
-      ClipDebug.step(dbg, 'clipboard-blob-read:error', {
-        ...meta,
-        blobSize: blob?.size ?? '',
-        ms: Math.round((performance.now() - readStart) * 100) / 100,
-        error: String(err),
-      });
-      throw err;
-    }
-  }
-
   function supportedClipboardImageFile(items = [], files = []) {
     const isSupportedImageType = (type) => type === 'image/png' || type === 'image/jpeg';
     for (const item of items) {
@@ -107,14 +71,6 @@
     }
     ClipDebug.step(dbg, 'event-image-blob', describeBlob ? describeBlob(imageFile) : { type: imageFile.type, blobSize: imageFile.size });
     return imageFile;
-  }
-
-  function readClipboardImageDataUrlFromEvent(clipboardData, dbg = null) {
-    const imageFile = readClipboardImageFileFromClipboardData(clipboardData, dbg);
-    if (!imageFile) {
-      return null;
-    }
-    return readClipboardBlobAsDataUrlDebug(imageFile, 'failed to read clipboard image', dbg, { source: 'paste-event' });
   }
 
   function readClipboardImageFileFromEvent(clipboardData, dbg = null) {
@@ -182,14 +138,6 @@
     return null;
   }
 
-  async function readClipboardImageDataUrlFromBrowser(dbg = null) {
-    const blob = await readClipboardImageBlobFromBrowserClipboard(dbg);
-    if (!blob) {
-      return null;
-    }
-    return readClipboardBlobAsDataUrlDebug(blob, 'failed to read browser clipboard image', dbg, { source: 'browser-clipboard' });
-  }
-
   async function readClipboardImageBlobFromBrowser(dbg = null) {
     return readClipboardImageBlobFromBrowserClipboard(dbg);
   }
@@ -248,8 +196,6 @@
     readBoardfishClipboardTokenFromBrowser,
     readBoardfishClipboardTokenFromEvent,
     readClipboardImageBlobFromBrowser,
-    readClipboardImageDataUrlFromBrowser,
-    readClipboardImageDataUrlFromEvent,
     readClipboardImageFileFromEvent,
     readClipboardTextFromEvent,
   });

@@ -147,14 +147,6 @@
     return dataUrlByteLength(text);
   }
 
-  async function validateImageBlob(blob, name = 'image', options = {}) {
-    return validateImageBytes(blob?.size || blob?.byteLength || 0, options);
-  }
-
-  async function validateImageFile(file, options = {}) {
-    return validateImageBlob(file, file?.name || 'image', options);
-  }
-
   async function validateDataUrlImage(dataUrl, name = 'image', options = {}) {
     return validateImageBytes(dataUrlImageBytesForValidation(dataUrl), options);
   }
@@ -205,8 +197,6 @@
     textByteLength,
     validateBoardPayload,
     validateDataUrlImage,
-    validateImageBlob,
-    validateImageFile,
     validateOpenedImageEntries,
   });
 

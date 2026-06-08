@@ -274,7 +274,6 @@
     describeFileRef,
     fileNameFromRef,
     fileRefFromFile: webFileRef,
-    isWeb: () => true,
     openFileDialog,
     readBoard,
     saveBoard,

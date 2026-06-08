@@ -564,17 +564,6 @@ const BoardfishMotion = (() => {
     requestMotionFrame();
   };
 
-  const noteTextObjectsSmoothSlide = (items, options = {}) => {
-    const textObjects = (Array.isArray(items) ? items : [])
-      .filter((obj) => obj?.type === 'text');
-    noteObjectsSmoothSlideAdded(textObjects, options);
-  };
-
-  const noteTextObjectSmoothSlide = (obj, options = {}) => {
-    if (obj?.type !== 'text') return;
-    noteObjectsSmoothSlideAdded([obj], options);
-  };
-
   const noteObjectsSmoothSlideRemoved = (items, options = {}) => {
     const list = Array.isArray(items) ? items : [];
     if (!list.length || prefersReducedMotion()) return;
@@ -891,8 +880,6 @@ const BoardfishMotion = (() => {
     surface.classList.remove('motion-smooth-slide-exit');
     restartClass(surface, 'motion-smooth-slide-enter');
   };
-  const noteMenuOpened = (menu) => noteSmoothSlideOpened(menu);
-
   const noteSmoothSlideClosed = (surface, after = null) => {
     if (!surface || prefersReducedMotion()) {
       if (typeof after === 'function') after();
@@ -1083,7 +1070,6 @@ const BoardfishMotion = (() => {
     getSmoothSlideParams,
     getUnassignedActionAnimations,
     actionAnimationSetFor,
-    noteMenuOpened,
     noteObjectAdded,
     noteObjectsAdded,
     noteObjectJello,
@@ -1092,8 +1078,6 @@ const BoardfishMotion = (() => {
     noteObjectsRemoved,
     noteObjectsSmoothSlideAdded,
     noteObjectsSmoothSlideRemoved,
-    noteTextObjectSmoothSlide,
-    noteTextObjectsSmoothSlide,
     noteTextSelectionJello,
     noteSmoothSlideClosed,
     noteSmoothSlideOpened,
