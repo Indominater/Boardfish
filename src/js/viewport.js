@@ -479,10 +479,23 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, opti
   context.save();
   applyTextSelectionMotionTransform(context, selection.bounds, motion);
   context.fillStyle = 'rgba(10, 132, 255, 0.3)';
+  const pathFill = typeof context.beginPath === 'function' &&
+    typeof context.rect === 'function' &&
+    typeof context.fill === 'function';
+  if (pathFill) context.beginPath();
+  let rectCount = 0;
   for (const run of selection.runs) {
     TextSelDebug._logDraw(run.line, selStart, selEnd, run.x1, run.x2);
-    context.fillRect(run.x1, run.y ?? run.line.y, run.x2 - run.x1, run.height ?? LINE_H);
+    const x = Math.min(run.x1, run.x2);
+    const w = Math.abs(run.x2 - run.x1);
+    const y = run.y ?? run.line.y;
+    const h = run.height ?? LINE_H;
+    if (!(w > 0 && h > 0)) continue;
+    if (pathFill) context.rect(x, y, w, h);
+    else context.fillRect(x, y, w, h);
+    rectCount++;
   }
+  if (pathFill && rectCount) context.fill();
   context.restore();
   return true;
 }

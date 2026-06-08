@@ -263,6 +263,56 @@ test('text selection collection uses indexed script metrics while editing math t
   assert.match(selectionSource, /textScriptMetricsStateAt/);
 });
 
+test('overlapping text selection highlight runs are filled once as a path', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('function drawTextSelectionHighlight');
+  const end = viewportSource.indexOf('const drawTextSelectionContentJello', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const selection = {
+    bounds: { left: 0, top: 0, right: 40, bottom: 24 },
+    runs: [
+      { line: { y: 0 }, x1: 0, x2: 40, y: 0, height: 24 },
+      { line: { y: 0 }, x1: 20, x2: 60, y: 0, height: 24 },
+    ],
+  };
+  const drawCalls = [];
+  const context = {
+    LINE_H: 24,
+    TextSelDebug: { _logDraw() {} },
+    applyTextSelectionMotionTransform() {},
+    textSelectionMotionForOptions() { return null; },
+    textSelectionRunsForOptions() { return selection; },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${viewportSource.slice(start, end)}\n` +
+      'globalThis.drawTextSelectionHighlight = drawTextSelectionHighlight;\n',
+    context,
+  );
+
+  const canvasContext = {
+    fillStyle: '',
+    save() { drawCalls.push(['save']); },
+    restore() { drawCalls.push(['restore']); },
+    beginPath() { drawCalls.push(['beginPath']); },
+    rect(...args) { drawCalls.push(['rect', ...args]); },
+    fill() { drawCalls.push(['fill']); },
+    fillRect(...args) { drawCalls.push(['fillRect', ...args]); },
+  };
+
+  assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, [], 0, 10), true);
+  assert.deepEqual(drawCalls, [
+    ['save'],
+    ['beginPath'],
+    ['rect', 0, 0, 40, 24],
+    ['rect', 20, 0, 40, 24],
+    ['fill'],
+    ['restore'],
+  ]);
+});
+
 test('zoom pill suppresses browser context menu without resetting zoom', () => {
   const contextMenuSource = readSource('src/js/context_menu.js');
   const handlerBlock = contextMenuSource.match(/const suppressZoomPillContextMenu = \(e\) => \{[\s\S]*?\n\};/);
