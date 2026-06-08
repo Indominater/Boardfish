@@ -296,7 +296,8 @@ function loadLiveTextEditResizeHarness() {
     fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') +
       '\n' +
       fs.readFileSync(path.join(root, 'src/js/text_editor.js'), 'utf8') +
-      '\nglobalThis.enterEdit = enterEdit;\n',
+      '\nglobalThis.enterEdit = enterEdit;\n' +
+      'globalThis.exitEdit = exitEdit;\n',
     context,
     { filename: 'live_text_edit_resize_harness.js' },
   );
@@ -1375,7 +1376,7 @@ test('text edit input resizes the textbox height in update mode', () => {
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
 
-test('editing nested exponent text keeps the default new textbox height', () => {
+test('editing existing default-height text can shrink below the default new textbox height', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   obj.w = DEFAULT_TEXT_BOX_WIDTH;
@@ -1384,18 +1385,41 @@ test('editing nested exponent text keeps the default new textbox height', () => 
 
   context.enterEdit(obj.id, { history: false });
   assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
-  assert.equal(obj._editMinLines, 5);
+  assert.equal(obj._editMinLines, 1);
 
   context.proxy.setSelectionRange(7, 7, 'none');
   const event = typeNativeText(context.proxy, '3');
 
   assert.equal(event.prevented, false);
   assert.equal(obj.data.content, 'e^{x^{23}}');
-  assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
+  assert.equal(obj.h, 32);
   assert.deepEqual(JSON.parse(JSON.stringify(obj.data.scriptRanges)), [
     { start: 2, end: 10, kind: 'sup' },
     { start: 5, end: 9, kind: 'sup' },
   ]);
+});
+
+test('freshly created text stays at five-line height until edit exit', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.w = DEFAULT_TEXT_BOX_WIDTH;
+  obj.h = DEFAULT_TEXT_BOX_HEIGHT;
+  obj.data = { content: '' };
+
+  context.enterEdit(obj.id, { history: false });
+  assert.equal(obj._editMinLines, 5);
+
+  const event = typeNativeText(context.proxy, 'Hi');
+
+  assert.equal(event.prevented, false);
+  assert.equal(obj.data.content, 'Hi');
+  assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
+
+  context.exitEdit();
+  assert.equal(obj.h, 32);
+
+  context.enterEdit(obj.id, { history: false });
+  assert.equal(obj._editMinLines, 1);
 });
 
 test('exiting a newly created text box keeps default width when content fits', () => {

@@ -235,11 +235,11 @@ const exactTextEditLineCountForHeight = (height) => {
 
 const textEditMinLinesForSession = (obj, { preserveSize = false } = {}) => {
   if (!obj || obj.type !== 'text') return 1;
-  if (!normalizeTextContent(obj.data?.content || '')) return NEW_TEXT_EDIT_MIN_LINES;
   const currentLines = exactTextEditLineCountForHeight(obj.h);
-  if (currentLines >= NEW_TEXT_EDIT_MIN_LINES) return currentLines;
   if (preserveSize && currentLines > 1) return currentLines;
-  return 1;
+  return normalizeTextContent(obj._editStartContent ?? obj.data?.content ?? '') === ''
+    ? NEW_TEXT_EDIT_MIN_LINES
+    : 1;
 };
 
 const setTextScriptCaretAffinity = (obj, index, affinity) => {
