@@ -23,6 +23,9 @@
       scaledImageTargetScaleTotal: 0,
       culledImages: 0,
       culledText: 0,
+      textLines: 0,
+      drawnTextLines: 0,
+      culledTextLines: 0,
     };
   }
 
@@ -109,6 +112,22 @@
       : deps.textBaselineYOffset;
   }
 
+  function textLineIntersectsRect(lineTop, lineHeight, rect) {
+    if (!rect) return true;
+    const top = Number(lineTop);
+    const height = Number(lineHeight);
+    if (!Number.isFinite(top) || !Number.isFinite(height) || height <= 0) return true;
+    return top + height >= rect.y1 && top <= rect.y2;
+  }
+
+  function countTextLine(counters, field, amount = 1) {
+    if (!counters) return;
+    const count = Math.max(0, Math.trunc(Number(amount)) || 0);
+    if (!count) return;
+    counters.textLines = (counters.textLines || 0) + count;
+    counters[field] = (counters[field] || 0) + count;
+  }
+
   function createBoardRenderer(deps) {
     function viewDefaults() {
       return {
@@ -126,13 +145,27 @@
         context.fillStyle = deps.canvasTextColor();
         context.textBaseline = 'alphabetic';
         if (typeof deps.getTextLayout === 'function' && typeof deps.drawTextLineRange === 'function') {
-          for (const line of deps.getTextLayout(obj)) deps.drawTextLineRange(context, line, obj);
+          const lineHeight = deps.lineHeight || 0;
+          for (const line of deps.getTextLayout(obj)) {
+            if (!textLineIntersectsRect(line.y, lineHeight, options.viewportRect || null)) {
+              countTextLine(counters, 'culledTextLines');
+              continue;
+            }
+            countTextLine(counters, 'drawnTextLines');
+            deps.drawTextLineRange(context, line, obj);
+          }
           return true;
         }
         const lines = deps.getWrappedLines(obj);
         const textBaselineYOffset = resolveTextBaselineYOffset(deps);
         for (let i = 0; i < lines.length; i++) {
-          context.fillText(lines[i].text, obj.x + deps.textPad, obj.y + deps.textPad + textBaselineYOffset + i * deps.lineHeight);
+          const lineY = obj.y + deps.textPad + i * deps.lineHeight;
+          if (!textLineIntersectsRect(lineY, deps.lineHeight, options.viewportRect || null)) {
+            countTextLine(counters, 'culledTextLines');
+            continue;
+          }
+          countTextLine(counters, 'drawnTextLines');
+          context.fillText(lines[i].text, obj.x + deps.textPad, lineY + textBaselineYOffset);
         }
         return true;
       }

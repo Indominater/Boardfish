@@ -349,3 +349,43 @@ test('line alignment offsets caret positions within the text box', () => {
   assert.equal(line.align, 'right');
   assert.equal(textLayout.lineXAtOffset(line, obj, 0), 22);
 });
+
+test('script-heavy text layout reuses paragraph prefix widths while wrapping', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return [...String(text)].reduce((sum, ch) => sum + (ch === ' ' ? 4 : 8), 0);
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const proofLine = [
+    'By FTA, let n_{k}=p_{1}^{a_{1}} p_{2}^{a_{2}}',
+    'and q_{i}^{b_{i}} divides n^{m};',
+    'therefore x_{i}^{2}+y_{i}^{2}=z_{i}^{2}.',
+  ].join(' ');
+  const content = Array.from({ length: 18 }, (_, i) => `${i + 1}. ${proofLine} Case ${i + 1}`).join('\n');
+  const obj = {
+    id: 'proof',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 360,
+    h: 40,
+    data: { content },
+  };
+  const before = measured.length;
+
+  const layout = textLayout.getTextLayout(obj);
+  const coldMeasureCount = measured.length - before;
+
+  assert.ok((obj.data.scriptRanges || []).length >= 100);
+  assert.ok(layout.length > 18);
+  assert.ok(
+    coldMeasureCount < content.length * 4,
+    `expected bounded measurement work, got ${coldMeasureCount} calls for ${content.length} chars`,
+  );
+
+  const warmBefore = measured.length;
+  textLayout.getTextLayout(obj);
+
+  assert.equal(measured.length, warmBefore);
+});

@@ -223,7 +223,7 @@ test('zoom pill stays out of keyboard focus and Space reset paths', () => {
 
 test('text edit caret height follows script formatting', () => {
   const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart)');
+  const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
   const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
@@ -232,6 +232,35 @@ test('text edit caret height follows script formatting', () => {
   assert.match(drawCaretSource, /textScriptCaretStateAt/);
   assert.match(drawCaretSource, /caretHeight = LINE_H \* scale;/);
   assert.match(drawCaretSource, /TEXT_BASELINE_Y_OFFSET \* scale/);
+});
+
+test('text edit overlay draws only visible layout lines', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('function drawEditingTextOverlay');
+  const end = viewportSource.indexOf('function drawBoard', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const overlaySource = viewportSource.slice(start, end);
+
+  assert.match(overlaySource, /visibleTextLayoutLines\(layout, viewportRect\)/);
+  assert.match(overlaySource, /editVisibleLines/);
+  assert.match(overlaySource, /editCulledLines/);
+  assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*lines: visibleLines/);
+});
+
+test('text selection collection uses indexed script metrics while editing math text', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('const collectTextSelectionRuns =');
+  const end = viewportSource.indexOf('const textSelectionMotionForOptions', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const selectionSource = viewportSource.slice(start, end);
+
+  assert.match(selectionSource, /getTextScriptLayoutMetrics/);
+  assert.match(selectionSource, /const isHiddenAt = \(line, globalIndex\) =>/);
+  assert.match(selectionSource, /const stateAt = \(line, globalIndex\) =>/);
+  assert.match(selectionSource, /textScriptMetricsHiddenAt/);
+  assert.match(selectionSource, /textScriptMetricsStateAt/);
 });
 
 test('zoom pill suppresses browser context menu without resetting zoom', () => {

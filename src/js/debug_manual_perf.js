@@ -4,7 +4,33 @@ var ManualPerfDebug = (() => {
   let lastReport = null;
   let lastJson = '';
   let sessionStartMemory = null;
+  let largeTextSession = null;
+  let nextLargeTextSessionId = 1;
+  let textEditMathSession = null;
+  let nextTextEditMathSessionId = 1;
+  let textEditMathEventsActive = false;
+  let textEditMathLastEventAt = 0;
   const markers = [];
+  const textEditMathEvents = [];
+  const TEXT_EDIT_MATH_MAX_EVENTS = 5000;
+  const TEXT_EDIT_MATH_EVENT_TYPES = [
+    'wheel',
+    'pointerdown',
+    'pointermove',
+    'pointerup',
+    'mousedown',
+    'mousemove',
+    'mouseup',
+    'keydown',
+    'keyup',
+    'beforeinput',
+    'input',
+    'paste',
+    'compositionstart',
+    'compositionupdate',
+    'compositionend',
+    'selectionchange',
+  ];
 
   function boardObjects() {
     return typeof objects === 'undefined' ? [] : objects;
@@ -17,6 +43,12 @@ var ManualPerfDebug = (() => {
   function round(value, places = 2) {
     const factor = 10 ** places;
     return Math.round((Number(value) || 0) * factor) / factor;
+  }
+
+  function clampInteger(value, fallback, min, max) {
+    const number = Math.trunc(Number(value));
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(min, Math.min(max, number));
   }
 
   function mb(bytes) {
@@ -279,6 +311,23 @@ var ManualPerfDebug = (() => {
     }
     return {
       viewport: BoardfishDebug.viewport.perfMode(),
+      largeTextSession: largeTextSession
+        ? {
+            id: largeTextSession.id,
+            active: true,
+            startedAt: largeTextSession.startedAt,
+            scenario: largeTextSession.scenario?.summary || null,
+          }
+        : null,
+      textEditMathSession: textEditMathSession
+        ? {
+            id: textEditMathSession.id,
+            active: textEditMathEventsActive,
+            startedAt: textEditMathSession.startedAt,
+            events: textEditMathEvents.length,
+            startSnapshot: textEditMathSession.startSnapshot,
+          }
+        : null,
     };
   }
 
@@ -688,6 +737,915 @@ var ManualPerfDebug = (() => {
     return out;
   }
 
+  function textObjectList() {
+    return boardObjects().filter(obj => obj?.type === 'text');
+  }
+
+  function textObjectScriptRangeCount(obj) {
+    return Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges.length : 0;
+  }
+
+  function countTextLines(content) {
+    const value = normalizeTextContent(content);
+    return value ? value.split('\n').length : 0;
+  }
+
+  function eventTimestampMs(event = null) {
+    const timestamp = Number(event?.timeStamp);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return performance.now();
+    return timestamp > performance.timeOrigin ? timestamp - performance.timeOrigin : timestamp;
+  }
+
+  function eventTargetLabel(target) {
+    if (!target) return '';
+    const id = target.id ? `#${target.id}` : '';
+    const className = typeof target.className === 'string'
+      ? target.className.trim().split(/\s+/).filter(Boolean).slice(0, 3).map(name => `.${name}`).join('')
+      : '';
+    return `${String(target.tagName || target.nodeName || '').toLowerCase()}${id}${className}`;
+  }
+
+  function sanitizePerfMeta(value) {
+    return typeof sanitizeDebugMeta === 'function'
+      ? sanitizeDebugMeta(value, { roundNumbers: true })
+      : value;
+  }
+
+  function textEditMathSnapshot() {
+    const id = typeof editingId !== 'undefined' ? (editingId || '') : '';
+    const obj = id && typeof objectsMap !== 'undefined' ? objectsMap.get(id) : null;
+    const proxyValue = typeof _editEl?.value === 'string' ? _editEl.value : null;
+    const content = proxyValue ?? (typeof obj?.data?.content === 'string' ? obj.data.content : '');
+    return sanitizePerfMeta({
+      editingId: id,
+      hasEditProxy: !!_editEl,
+      objectFound: !!obj,
+      valueLength: content.length,
+      contentLength: typeof obj?.data?.content === 'string' ? obj.data.content.length : '',
+      selectionStart: _editEl?.selectionStart ?? '',
+      selectionEnd: _editEl?.selectionEnd ?? '',
+      selectionDirection: _editEl?.selectionDirection || '',
+      scriptRanges: textObjectScriptRangeCount(obj),
+      scriptCaretAffinity: obj?._textScriptCaretAffinity || '',
+      objectW: obj?.w ?? '',
+      objectH: obj?.h ?? '',
+      zoom: typeof zoom !== 'undefined' ? zoom : '',
+      panX: typeof panX !== 'undefined' ? panX : '',
+      panY: typeof panY !== 'undefined' ? panY : '',
+    });
+  }
+
+  function textEditMathEventMeta(event) {
+    const eventAt = eventTimestampMs(event);
+    const now = performance.now();
+    const selectionStart = _editEl?.selectionStart ?? '';
+    const selectionEnd = _editEl?.selectionEnd ?? '';
+    const valueLength = typeof _editEl?.value === 'string' ? _editEl.value.length : '';
+    const clipboardTypes = event?.clipboardData?.types ? Array.from(event.clipboardData.types) : [];
+    const meta = {
+      at: round(now),
+      sinceStartMs: textEditMathSession ? now - textEditMathSession.startedAtMs : '',
+      gapMs: textEditMathLastEventAt ? now - textEditMathLastEventAt : '',
+      eventType: event?.type || '',
+      eventAt,
+      eventAgeMs: Math.max(0, now - eventAt),
+      inputType: event?.inputType || '',
+      dataLength: typeof event?.data === 'string' ? event.data.length : '',
+      key: event?.key || '',
+      code: event?.code || '',
+      repeat: !!event?.repeat,
+      deltaX: event?.deltaX ?? '',
+      deltaY: event?.deltaY ?? '',
+      clientX: event?.clientX ?? '',
+      clientY: event?.clientY ?? '',
+      button: event?.button ?? '',
+      buttons: event?.buttons ?? '',
+      isComposing: !!event?.isComposing,
+      ctrlKey: !!event?.ctrlKey,
+      metaKey: !!event?.metaKey,
+      shiftKey: !!event?.shiftKey,
+      altKey: !!event?.altKey,
+      defaultPrevented: !!event?.defaultPrevented,
+      cancelable: !!event?.cancelable,
+      target: eventTargetLabel(event?.target),
+      editingId: typeof editingId !== 'undefined' ? (editingId || '') : '',
+      hasEditProxy: !!_editEl,
+      valueLength,
+      selectionStart,
+      selectionEnd,
+      selectionLength: Number.isFinite(selectionStart) && Number.isFinite(selectionEnd)
+        ? Math.abs(selectionEnd - selectionStart)
+        : '',
+      selectionDirection: _editEl?.selectionDirection || '',
+      clipboardTypes,
+    };
+    textEditMathLastEventAt = now;
+    return sanitizePerfMeta(meta);
+  }
+
+  function recordTextEditMathEvent(event) {
+    if (!textEditMathEventsActive) return;
+    textEditMathEvents.push(textEditMathEventMeta(event));
+    if (textEditMathEvents.length > TEXT_EDIT_MATH_MAX_EVENTS) textEditMathEvents.shift();
+  }
+
+  function setTextEditMathListeners(active) {
+    if (typeof document === 'undefined' || textEditMathEventsActive === active) return;
+    for (const type of TEXT_EDIT_MATH_EVENT_TYPES) {
+      document[active ? 'addEventListener' : 'removeEventListener'](type, recordTextEditMathEvent, { capture: true, passive: true });
+    }
+    textEditMathEventsActive = active;
+  }
+
+  function textEditMathEventSummary(events = textEditMathEvents) {
+    const counts = {};
+    const inputTypes = {};
+    let maxGapMs = 0;
+    let gapsOver16ms = 0;
+    let gapsOver32ms = 0;
+    let gapsOver80ms = 0;
+    let maxEventAgeMs = 0;
+    let maxSelectionLength = 0;
+    for (const event of events) {
+      const eventType = event.eventType || '';
+      if (eventType) counts[eventType] = (counts[eventType] || 0) + 1;
+      const inputType = event.inputType || '';
+      if (inputType) inputTypes[inputType] = (inputTypes[inputType] || 0) + 1;
+      const gap = Number(event.gapMs) || 0;
+      maxGapMs = Math.max(maxGapMs, gap);
+      if (gap > 16.7) gapsOver16ms++;
+      if (gap > 32) gapsOver32ms++;
+      if (gap > 80) gapsOver80ms++;
+      maxEventAgeMs = Math.max(maxEventAgeMs, Number(event.eventAgeMs) || 0);
+      maxSelectionLength = Math.max(maxSelectionLength, Number(event.selectionLength) || 0);
+    }
+    const first = events[0] || null;
+    const last = events[events.length - 1] || null;
+    return {
+      events: events.length,
+      firstAt: first?.at ?? '',
+      lastAt: last?.at ?? '',
+      durationMs: first && last ? round((Number(last.at) || 0) - (Number(first.at) || 0)) : 0,
+      beforeinput: counts.beforeinput || 0,
+      input: counts.input || 0,
+      paste: counts.paste || 0,
+      wheel: counts.wheel || 0,
+      pointermove: counts.pointermove || 0,
+      mousemove: counts.mousemove || 0,
+      keydown: counts.keydown || 0,
+      keyup: counts.keyup || 0,
+      selectionchange: counts.selectionchange || 0,
+      compositionEvents: (counts.compositionstart || 0) + (counts.compositionupdate || 0) + (counts.compositionend || 0),
+      maxGapMs: round(maxGapMs),
+      gapsOver16ms,
+      gapsOver32ms,
+      gapsOver80ms,
+      maxEventAgeMs: round(maxEventAgeMs),
+      maxSelectionLength,
+      counts,
+      inputTypes,
+    };
+  }
+
+  function textEditMathTimeline(options = {}) {
+    const limit = Math.max(1, Math.min(TEXT_EDIT_MATH_MAX_EVENTS, Number(options.limit) || 200));
+    const rows = textEditMathEvents.slice(-limit).map(event => ({
+      at: event.at,
+      gapMs: event.gapMs,
+      eventType: event.eventType,
+      inputType: event.inputType,
+      dataLength: event.dataLength,
+      key: event.key,
+      code: event.code,
+      repeat: event.repeat,
+      deltaX: event.deltaX,
+      deltaY: event.deltaY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      buttons: event.buttons,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      valueLength: event.valueLength,
+      selectionStart: event.selectionStart,
+      selectionEnd: event.selectionEnd,
+      selectionLength: event.selectionLength,
+      target: event.target,
+      defaultPrevented: event.defaultPrevented,
+    }));
+    if (options.table !== false) console.table(rows);
+    return rows;
+  }
+
+  function viewportEventReport(options = {}) {
+    const viewportApi = BoardfishDebug.viewport;
+    return {
+      frameSummary: viewportApi.frameSummary(),
+      wheelSummary: viewportApi.wheelSummary(),
+      drawSummary: viewportApi.drawSummary(),
+      transformSummary: viewportApi.transformSummary(),
+      eventLoopTimeline: viewportApi.eventLoopTimeline(options.eventLoopLimit ?? 120),
+      rawInputTimeline: viewportApi.rawInputTimeline(options.rawInputLimit ?? 180),
+      slowFrames: viewportApi.slowFrames(options.slowFrames ?? options.limit ?? 40),
+    };
+  }
+
+  function textEditMathHeadline(report = {}) {
+    const eventSummary = report.eventSummary || {};
+    const frame = report.viewport?.frameSummary || {};
+    const draw = report.viewport?.drawSummary || {};
+    return {
+      events: eventSummary.events ?? '',
+      beforeinput: eventSummary.beforeinput ?? '',
+      input: eventSummary.input ?? '',
+      paste: eventSummary.paste ?? '',
+      wheel: eventSummary.wheel ?? '',
+      pointermove: eventSummary.pointermove ?? '',
+      mousemove: eventSummary.mousemove ?? '',
+      selectionchange: eventSummary.selectionchange ?? '',
+      maxEventGapMs: eventSummary.maxGapMs ?? '',
+      gapsOver32ms: eventSummary.gapsOver32ms ?? '',
+      valueLengthStart: report.startSnapshot?.valueLength ?? '',
+      valueLengthEnd: report.endSnapshot?.valueLength ?? '',
+      scriptRangesEnd: report.endSnapshot?.scriptRanges ?? '',
+      frames: frame.frames ?? '',
+      slowFramesOver16ms: frame.slowFramesOver16ms ?? '',
+      maxFrameMs: frame.maxFrameMs ?? '',
+      maxInputAgeMs: frame.maxInputAgeMs ?? '',
+      maxDrawMs: draw.maxDrawMs ?? '',
+      maxEditingOverlayMs: draw.maxEditingOverlayMs ?? '',
+      maxEditLayoutMs: draw.maxEditLayoutMs ?? '',
+      maxEditTextDrawMs: draw.maxEditTextDrawMs ?? '',
+      maxEditSelectionMs: draw.maxEditSelectionMs ?? '',
+      maxEditCaretMs: draw.maxEditCaretMs ?? '',
+      maxEditVisibleLines: draw.maxEditVisibleLines ?? '',
+      maxEditCulledLines: draw.maxEditCulledLines ?? '',
+    };
+  }
+
+  function textEditMathBegin(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    setTextEditMathListeners(false);
+    BoardfishDebug.viewport.enable({
+      verbose: false,
+      rawInput: options.rawInput !== false,
+      eventLoopGapThresholdMs: options.eventLoopGapThresholdMs,
+    });
+    BoardfishDebug.viewport.reset();
+    markers.length = 0;
+    textEditMathEvents.length = 0;
+    textEditMathLastEventAt = 0;
+    const id = `text-edit-math-${nextTextEditMathSessionId++}`;
+    textEditMathSession = {
+      id,
+      startedAt: new Date().toISOString(),
+      startedAtMs: performance.now(),
+      startSnapshot: textEditMathSnapshot(),
+      options: sanitizePerfMeta({
+        rawInput: options.rawInput !== false,
+        eventLoopGapThresholdMs: options.eventLoopGapThresholdMs ?? '',
+      }),
+    };
+    setTextEditMathListeners(true);
+    const out = {
+      sessionId: id,
+      startedAt: textEditMathSession.startedAt,
+      mode: 'passive-event-recording',
+      startSnapshot: textEditMathSession.startSnapshot,
+      recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES.slice(),
+      next: 'Do the paste/edit/pan/zoom manually, then run finishDebug({ label: "text-edit-math", perf: ["textEditMathReport"] }).',
+    };
+    if (options.log !== false) {
+      console.group('[Boardfish perf] text edit math passive recorder');
+      console.table([{ sessionId: id, mode: out.mode, editingId: out.startSnapshot.editingId, valueLength: out.startSnapshot.valueLength }]);
+      console.info(out.next);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  function textEditMathReport(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    if (options.stop !== false) setTextEditMathListeners(false);
+    const session = textEditMathSession;
+    const events = textEditMathEvents.slice();
+    const endSnapshot = textEditMathSnapshot();
+    const out = {
+      label: options.label || 'text-edit-math-passive-events',
+      reportedAt: new Date().toISOString(),
+      sessionId: session?.id || null,
+      mode: 'passive-event-recording',
+      startSnapshot: session?.startSnapshot || null,
+      endSnapshot,
+      eventSummary: textEditMathEventSummary(events),
+      eventTimeline: textEditMathTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? 400 }),
+      viewport: viewportEventReport(options),
+      markers: markers.slice(),
+      notes: [
+        'Passive report only: no board mutation, synthetic input, board viewport change, text layout measurement, cache clearing, memory snapshot, restore, or clipboard copy.',
+      ],
+    };
+    out.headline = textEditMathHeadline(out);
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.clear !== false) {
+      textEditMathSession = null;
+      textEditMathLastEventAt = 0;
+    }
+    if (options.log !== false) {
+      console.group('[Boardfish perf] text edit math passive report');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  function textBoardSummary(options = {}) {
+    const includeLayout = options.layout === true;
+    const viewportRect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(0) : null;
+    const rows = [];
+    let totalChars = 0;
+    let totalLogicalLines = 0;
+    let totalRenderedLines = 0;
+    let visibleTextObjects = 0;
+    let maxChars = 0;
+    let maxLogicalLines = 0;
+    let maxRenderedLines = 0;
+    let totalScriptRanges = 0;
+    let maxScriptRanges = 0;
+
+    for (const obj of textObjectList()) {
+      const content = normalizeTextContent(obj.data?.content || '');
+      const chars = content.length;
+      const logicalLines = countTextLines(content);
+      const visible = !viewportRect || typeof objectIntersectsRect !== 'function'
+        ? true
+        : objectIntersectsRect(obj, viewportRect);
+      let renderedLines = '';
+      if (includeLayout && typeof getTextLayout === 'function') {
+        renderedLines = getTextLayout(obj).length;
+        totalRenderedLines += renderedLines;
+        maxRenderedLines = Math.max(maxRenderedLines, renderedLines);
+      }
+      const scriptRanges = textObjectScriptRangeCount(obj);
+      if (visible) visibleTextObjects++;
+      totalChars += chars;
+      totalLogicalLines += logicalLines;
+      maxChars = Math.max(maxChars, chars);
+      maxLogicalLines = Math.max(maxLogicalLines, logicalLines);
+      totalScriptRanges += scriptRanges;
+      maxScriptRanges = Math.max(maxScriptRanges, scriptRanges);
+      rows.push({
+        id: obj.id,
+        chars,
+        logicalLines,
+        renderedLines,
+        scriptRanges,
+        visible,
+        x: round(obj.x),
+        y: round(obj.y),
+        w: round(obj.w),
+        h: round(obj.h),
+      });
+    }
+
+    rows.sort((a, b) => b.chars - a.chars || b.logicalLines - a.logicalLines);
+    const rowLimit = Math.max(0, Math.min(100, Number(options.limit ?? 20)));
+    const out = {
+      textObjectCount: rows.length,
+      visibleTextObjects,
+      totalChars,
+      totalLogicalLines,
+      totalRenderedLines: includeLayout ? totalRenderedLines : '',
+      maxChars,
+      maxLogicalLines,
+      maxRenderedLines: includeLayout ? maxRenderedLines : '',
+      totalScriptRanges,
+      maxScriptRanges,
+      avgCharsPerTextObject: rows.length ? round(totalChars / rows.length) : 0,
+      avgLogicalLinesPerTextObject: rows.length ? round(totalLogicalLines / rows.length) : 0,
+      topTextObjects: rows.slice(0, rowLimit),
+    };
+    if (options.table !== false) {
+      console.table([{
+        textObjectCount: out.textObjectCount,
+        visibleTextObjects: out.visibleTextObjects,
+        totalChars: out.totalChars,
+        totalLogicalLines: out.totalLogicalLines,
+        totalRenderedLines: out.totalRenderedLines,
+        maxChars: out.maxChars,
+        maxLogicalLines: out.maxLogicalLines,
+        maxRenderedLines: out.maxRenderedLines,
+        totalScriptRanges: out.totalScriptRanges,
+        maxScriptRanges: out.maxScriptRanges,
+      }]);
+      if (out.topTextObjects.length) console.table(out.topTextObjects);
+    }
+    return out;
+  }
+
+  function measureTextLayoutPass(options = {}) {
+    if (typeof getTextLayout !== 'function') {
+      return { available: false, reason: 'getTextLayout unavailable' };
+    }
+    if (options.clearLayout === true && typeof clearTextLayoutCaches === 'function') {
+      clearTextLayoutCaches({
+        measurements: options.clearMeasurements === true,
+        objectLayout: true,
+      });
+    }
+
+    const viewportRect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(0) : null;
+    const visibleOnly = options.visibleOnly === true;
+    const rows = [];
+    const startedAt = performance.now();
+    let objectCount = 0;
+    let renderedLines = 0;
+    let chars = 0;
+    let logicalLines = 0;
+    let maxObjectMs = 0;
+
+    for (const obj of textObjectList()) {
+      const visible = !viewportRect || typeof objectIntersectsRect !== 'function'
+        ? true
+        : objectIntersectsRect(obj, viewportRect);
+      if (visibleOnly && !visible) continue;
+      const content = normalizeTextContent(obj.data?.content || '');
+      const t0 = performance.now();
+      const layout = getTextLayout(obj);
+      const ms = performance.now() - t0;
+      const scriptRanges = textObjectScriptRangeCount(obj);
+      objectCount++;
+      renderedLines += layout.length;
+      chars += content.length;
+      logicalLines += countTextLines(content);
+      maxObjectMs = Math.max(maxObjectMs, ms);
+      rows.push({
+        id: obj.id,
+        ms: round(ms),
+        chars: content.length,
+        logicalLines: countTextLines(content),
+        renderedLines: layout.length,
+        scriptRanges,
+        visible,
+      });
+    }
+
+    const totalMs = performance.now() - startedAt;
+    rows.sort((a, b) => b.ms - a.ms || b.renderedLines - a.renderedLines);
+    const out = {
+      label: options.label || (options.clearLayout ? 'cold-text-layout' : 'warm-text-layout'),
+      clearLayout: options.clearLayout === true,
+      clearMeasurements: options.clearMeasurements === true,
+      visibleOnly,
+      objectCount,
+      chars,
+      logicalLines,
+      renderedLines,
+      totalMs: round(totalMs),
+      avgObjectMs: objectCount ? round(totalMs / objectCount) : 0,
+      maxObjectMs: round(maxObjectMs),
+      topObjects: rows.slice(0, Math.max(0, Math.min(100, Number(options.limit ?? 20)))),
+    };
+    if (options.table !== false) {
+      console.table([{
+        label: out.label,
+        objectCount: out.objectCount,
+        chars: out.chars,
+        logicalLines: out.logicalLines,
+        renderedLines: out.renderedLines,
+        totalMs: out.totalMs,
+        avgObjectMs: out.avgObjectMs,
+        maxObjectMs: out.maxObjectMs,
+      }]);
+      if (out.topObjects.length) console.table(out.topObjects);
+    }
+    return out;
+  }
+
+  function largeTextLine(objectIndex, lineIndex, charsPerLine) {
+    const seed = `obj ${objectIndex + 1} line ${lineIndex + 1} Boardfish large text navigation performance sample `;
+    let out = seed;
+    let token = 0;
+    while (out.length < charsPerLine) {
+      out += `${(objectIndex + 17) * (lineIndex + 31) + token} `;
+      token++;
+    }
+    return out.slice(0, charsPerLine);
+  }
+
+  function largeTextContent(objectIndex, lineCount, charsPerLine) {
+    const lines = [];
+    for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+      lines.push(largeTextLine(objectIndex, lineIndex, charsPerLine));
+    }
+    return lines.join('\n');
+  }
+
+  function createLargeTextScenario(options = {}) {
+    const objectCount = clampInteger(options.objectCount ?? options.objects, 32, 1, 250);
+    const linesPerObject = clampInteger(options.linesPerObject ?? options.lines, 160, 1, 2000);
+    const charsPerLine = clampInteger(options.charsPerLine ?? options.chars, 96, 8, 240);
+    const cols = clampInteger(options.cols, Math.ceil(Math.sqrt(objectCount)), 1, objectCount);
+    const gap = clampInteger(options.gap, 80, 0, 2000);
+    const objectW = Math.max(160, Number(options.objectWidth) || Math.ceil(charsPerLine * 9.2 + TEXT_PAD * 2));
+    const objectH = linesPerObject * LINE_H + TEXT_PAD * 2;
+    const objectsOut = [];
+
+    for (let index = 0; index < objectCount; index++) {
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+      objectsOut.push({
+        id: `debug-text-${index + 1}`,
+        type: 'text',
+        x: col * (objectW + gap),
+        y: row * (objectH + gap),
+        w: objectW,
+        h: objectH,
+        z: index + 1,
+        data: {
+          content: largeTextContent(index, linesPerObject, charsPerLine),
+        },
+      });
+    }
+
+    const rows = Math.ceil(objectCount / cols);
+    const boardW = cols * objectW + Math.max(0, cols - 1) * gap;
+    const boardH = rows * objectH + Math.max(0, rows - 1) * gap;
+    const viewW = window.innerWidth || 1200;
+    const viewH = window.innerHeight || 800;
+    const zoomValue = Number.isFinite(Number(options.zoom)) ? Number(options.zoom) : 0.22;
+    const viewport = {
+      zoom: zoomValue,
+      panX: Number.isFinite(Number(options.panX)) ? Number(options.panX) : Math.round(viewW * 0.12),
+      panY: Number.isFinite(Number(options.panY)) ? Number(options.panY) : Math.round(viewH * 0.1),
+    };
+    return {
+      objects: objectsOut,
+      viewport,
+      summary: {
+        objectCount,
+        linesPerObject,
+        charsPerLine,
+        cols,
+        rows,
+        objectW,
+        objectH,
+        boardW,
+        boardH,
+        totalLogicalLines: objectCount * linesPerObject,
+        totalChars: objectsOut.reduce((sum, obj) => sum + obj.data.content.length, 0),
+        viewport,
+      },
+    };
+  }
+
+  function captureLargeTextOriginalState() {
+    return {
+      objects: cloneObjects(boardObjects()),
+      viewport: { panX, panY, zoom },
+      selectedId,
+      selectedIds: [...selectedIds],
+      dirtyIds: [..._dirtyIds],
+      idCounter,
+      zCounter,
+      boardHistory: boardHistory.slice(),
+      historyIndex,
+      savedHistoryIndex,
+      currentFilePath,
+      currentFileRef,
+      title: document.title,
+    };
+  }
+
+  function restoreLargeTextOriginalState(session = largeTextSession, options = {}) {
+    if (!session?.original) return { restored: false, reason: 'no-large-text-session' };
+    const original = session.original;
+    if (editingId && typeof exitEdit === 'function') exitEdit();
+    BoardfishEditorState.replaceBoardObjects(cloneObjects(original.objects), {
+      normalizeText: false,
+      syncTextHeights: false,
+      restoreCounters: false,
+    });
+    idCounter = original.idCounter;
+    zCounter = original.zCounter;
+    BoardfishViewportState.setViewport(original.viewport);
+    selectedIds.clear();
+    for (const id of original.selectedIds) {
+      if (objectsMap.has(id)) selectedIds.add(id);
+    }
+    selectedId = selectedIds.has(original.selectedId)
+      ? original.selectedId
+      : ([...selectedIds].pop() || null);
+    _dirtyIds.clear();
+    for (const id of original.dirtyIds) _dirtyIds.add(id);
+    boardHistory = original.boardHistory.slice();
+    historyIndex = original.historyIndex;
+    savedHistoryIndex = original.savedHistoryIndex;
+    currentFilePath = original.currentFilePath;
+    currentFileRef = original.currentFileRef;
+    invalidateOffscreen();
+    scheduleRender(true, true, 'large-text-perf-restore');
+    if (typeof updateTitle === 'function') updateTitle();
+    else document.title = original.title;
+    if (largeTextSession?.id === session.id) largeTextSession = null;
+    const out = {
+      restored: true,
+      sessionId: session.id,
+      objectCount: objects.length,
+      historyLength: boardHistory.length,
+      historyIndex,
+      savedHistoryIndex,
+    };
+    if (options.log !== false) {
+      console.info(`[Boardfish perf] Restored board after large text evaluation (${session.id}).`);
+      console.table([out]);
+    }
+    return out;
+  }
+
+  function applyLargeTextScenario(scenario) {
+    if (editingId) {
+      throw new Error('[Boardfish perf] Exit text editing before running the large text evaluation.');
+    }
+    BoardfishEditorState.replaceBoardObjects(cloneObjects(scenario.objects), {
+      normalizeText: false,
+      syncTextHeights: false,
+      restoreCounters: true,
+    });
+    BoardfishEditorState.clearSelection();
+    BoardfishViewportState.setViewport(scenario.viewport);
+    _dirtyIds.clear();
+    invalidateOffscreen();
+    scheduleRender(true, true, 'large-text-perf-setup');
+  }
+
+  async function largeTextSetup(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    if (editingId && options.force !== true) {
+      const skipped = { skipped: true, reason: 'editing-active' };
+      console.warn('[Boardfish perf] Exit text editing before running the large text evaluation, or pass { force: true }.');
+      return skipped;
+    }
+    if (editingId && options.force === true && typeof exitEdit === 'function') exitEdit();
+    if (largeTextSession) restoreLargeTextOriginalState(largeTextSession, { log: false });
+
+    const original = captureLargeTextOriginalState();
+    const scenario = createLargeTextScenario(options);
+    const id = `large-text-${nextLargeTextSessionId++}`;
+    applyLargeTextScenario(scenario);
+    BoardfishDebug.viewport.enable({
+      verbose: false,
+      rawInput: options.rawInput !== false,
+      eventLoopGapThresholdMs: options.eventLoopGapThresholdMs,
+    });
+    BoardfishDebug.viewport.reset();
+    markers.length = 0;
+    sessionStartMemory = options.memory === false ? null : await memorySnapshot('large-text-begin', { ...options, table: false });
+    await animationFrame();
+    largeTextSession = {
+      id,
+      startedAt: new Date().toISOString(),
+      original,
+      scenario,
+      memoryStart: sessionStartMemory,
+    };
+    const textSummary = textBoardSummary({ table: false, layout: false });
+    const out = {
+      sessionId: id,
+      startedAt: largeTextSession.startedAt,
+      scenario: scenario.summary,
+      textSummary,
+      viewport: { panX, panY, zoom },
+      next: 'Pan and zoom the board, then run finishDebug({ label: "large-text-perf", perf: [["largeTextReport", { restore: true }]] }).',
+    };
+    if (options.log !== false) {
+      console.group('[Boardfish perf] large text setup');
+      console.table([{
+        sessionId: id,
+        textObjects: textSummary.textObjectCount,
+        totalChars: textSummary.totalChars,
+        totalLogicalLines: textSummary.totalLogicalLines,
+        zoom,
+      }]);
+      console.info(out.next);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  function viewportPhaseHeadline(report = {}) {
+    const viewport = report.viewport || {};
+    return viewportNavigationHeadline(viewport);
+  }
+
+  function largeTextHeadline(report = {}) {
+    const text = report.textSummary || {};
+    const cold = report.layoutCold || {};
+    const warm = report.layoutWarm || {};
+    const viewport = report.viewport || {};
+    const frame = viewport.frameSummary || {};
+    const draw = viewport.drawSummary || {};
+    const pan = report.pan?.viewport || {};
+    const zoomPhase = report.zoomPhase?.viewport || {};
+    return {
+      textObjects: text.textObjectCount ?? '',
+      visibleTextObjects: text.visibleTextObjects ?? '',
+      totalChars: text.totalChars ?? '',
+      totalLogicalLines: text.totalLogicalLines ?? '',
+      totalRenderedLines: text.totalRenderedLines ?? '',
+      totalScriptRanges: text.totalScriptRanges ?? '',
+      maxScriptRanges: text.maxScriptRanges ?? '',
+      coldLayoutMs: cold.totalMs ?? '',
+      warmLayoutMs: warm.totalMs ?? '',
+      slowFramesOver16ms: frame.slowFramesOver16ms ?? '',
+      maxFrameMs: frame.maxFrameMs ?? '',
+      maxDrawMs: draw.maxDrawMs ?? '',
+      maxObjectLoopMs: draw.maxObjectLoopMs ?? '',
+      avgDrawnTextLines: draw.avgDrawnTextLines ?? '',
+      maxDrawnTextLines: draw.maxDrawnTextLines ?? '',
+      avgCulledTextLines: draw.avgCulledTextLines ?? '',
+      maxCulledTextLines: draw.maxCulledTextLines ?? '',
+      maxEditingOverlayMs: draw.maxEditingOverlayMs ?? '',
+      maxEditLayoutMs: draw.maxEditLayoutMs ?? '',
+      maxEditTextDrawMs: draw.maxEditTextDrawMs ?? '',
+      maxEditSelectionMs: draw.maxEditSelectionMs ?? '',
+      maxEditCaretMs: draw.maxEditCaretMs ?? '',
+      maxEditVisibleLines: draw.maxEditVisibleLines ?? '',
+      maxEditCulledLines: draw.maxEditCulledLines ?? '',
+      panMaxFrameMs: pan.frameSummary?.maxFrameMs ?? '',
+      panMaxDrawMs: pan.drawSummary?.maxDrawMs ?? '',
+      zoomMaxFrameMs: zoomPhase.frameSummary?.maxFrameMs ?? '',
+      zoomMaxDrawMs: zoomPhase.drawSummary?.maxDrawMs ?? '',
+      restored: report.restore?.restored ?? false,
+    };
+  }
+
+  async function largeTextReport(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    const memoryEnd = options.memory === false ? null : await memorySnapshot('large-text-finish', { ...options, table: false });
+    const textSummary = textBoardSummary({ table: false, layout: true, limit: options.limit || 20 });
+    const layoutCold = measureTextLayoutPass({
+      label: 'large-text-cold-layout',
+      clearLayout: true,
+      clearMeasurements: options.clearMeasurements === true,
+      visibleOnly: options.visibleOnly === true,
+      table: false,
+      limit: options.limit || 20,
+    });
+    const layoutWarm = measureTextLayoutPass({
+      label: 'large-text-warm-layout',
+      visibleOnly: options.visibleOnly === true,
+      table: false,
+      limit: options.limit || 20,
+    });
+    const viewport = BoardfishDebug.viewport.report({
+      log: false,
+      details: options.details === true,
+      limit: options.limit || 30,
+      eventLoopLimit: options.eventLoopLimit ?? 120,
+      rawInputLimit: options.rawInputLimit ?? 180,
+      slowFrames: options.slowFrames ?? 40,
+    });
+    const session = largeTextSession;
+    const out = {
+      label: options.label || 'large-text-performance',
+      reportedAt: new Date().toISOString(),
+      sessionId: session?.id || null,
+      scenario: session?.scenario?.summary || null,
+      textSummary,
+      layoutCold,
+      layoutWarm,
+      viewport,
+      memoryStart: session?.memoryStart || sessionStartMemory,
+      memoryEnd,
+      memoryDelta: memoryDelta(session?.memoryStart || sessionStartMemory, memoryEnd),
+      markers: markers.slice(),
+      restore: null,
+    };
+    if (options.restore !== false && session) {
+      out.restore = restoreLargeTextOriginalState(session, { log: false });
+    }
+    out.headline = {
+      ...largeTextHeadline(out),
+      ...(out.memoryDelta || {}),
+    };
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] large text report');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    if (options.copy === true) void copyLast();
+    return out;
+  }
+
+  async function largeTextEvaluation(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    const setup = await largeTextSetup({ ...options, log: false });
+    if (!setup || setup.skipped) return setup;
+    const session = largeTextSession;
+    const panEvents = clampInteger(options.panEvents, 90, 1, 360);
+    const zoomEvents = clampInteger(options.zoomEvents, 90, 1, 360);
+    const pan = await wheelPanTest({
+      events: panEvents,
+      deltaX: Number.isFinite(Number(options.panDeltaX)) ? Number(options.panDeltaX) : 10,
+      deltaY: Number.isFinite(Number(options.panDeltaY)) ? Number(options.panDeltaY) : 14,
+      waveX: Number.isFinite(Number(options.panWaveX)) ? Number(options.panWaveX) : 3,
+      waveY: Number.isFinite(Number(options.panWaveY)) ? Number(options.panWaveY) : 5,
+      framePerWheel: options.framePerWheel !== false,
+      log: false,
+      details: options.details === true,
+    });
+    if (session?.scenario?.viewport) {
+      BoardfishViewportState.setViewport(session.scenario.viewport);
+      scheduleRender(true, true, 'large-text-perf-reset-zoom-phase');
+      await animationFrame();
+    }
+    const zoomPhase = await wheelZoomTest({
+      events: zoomEvents,
+      deltaY: Number.isFinite(Number(options.zoomDeltaY)) ? Number(options.zoomDeltaY) : -5,
+      waveY: Number.isFinite(Number(options.zoomWaveY)) ? Number(options.zoomWaveY) : 1.5,
+      framePerWheel: options.framePerWheel !== false,
+      log: false,
+      details: options.details === true,
+    });
+    const memoryEnd = options.memory === false ? null : await memorySnapshot('large-text-evaluation-finish', { ...options, table: false });
+    const textSummary = textBoardSummary({ table: false, layout: true, limit: options.limit || 20 });
+    const layoutCold = measureTextLayoutPass({
+      label: 'large-text-evaluation-cold-layout',
+      clearLayout: true,
+      clearMeasurements: options.clearMeasurements === true,
+      visibleOnly: options.visibleOnly === true,
+      table: false,
+      limit: options.limit || 20,
+    });
+    const layoutWarm = measureTextLayoutPass({
+      label: 'large-text-evaluation-warm-layout',
+      visibleOnly: options.visibleOnly === true,
+      table: false,
+      limit: options.limit || 20,
+    });
+    const out = {
+      label: options.label || 'large-text-automatic-evaluation',
+      reportedAt: new Date().toISOString(),
+      sessionId: session?.id || null,
+      setup,
+      scenario: session?.scenario?.summary || null,
+      textSummary,
+      layoutCold,
+      layoutWarm,
+      pan,
+      zoomPhase,
+      memoryStart: session?.memoryStart || sessionStartMemory,
+      memoryEnd,
+      memoryDelta: memoryDelta(session?.memoryStart || sessionStartMemory, memoryEnd),
+      restore: null,
+    };
+    if (options.restore !== false && session) {
+      out.restore = restoreLargeTextOriginalState(session, { log: false });
+    }
+    out.headline = {
+      ...largeTextHeadline(out),
+      panMaxFrameMs: viewportPhaseHeadline(pan).maxFrameMs,
+      panMaxDrawMs: pan?.viewport?.drawSummary?.maxDrawMs ?? '',
+      panMaxObjectLoopMs: pan?.viewport?.drawSummary?.maxObjectLoopMs ?? '',
+      zoomMaxFrameMs: viewportPhaseHeadline(zoomPhase).maxFrameMs,
+      zoomMaxDrawMs: zoomPhase?.viewport?.drawSummary?.maxDrawMs ?? '',
+      zoomMaxObjectLoopMs: zoomPhase?.viewport?.drawSummary?.maxObjectLoopMs ?? '',
+      ...(out.memoryDelta || {}),
+    };
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] large text automatic evaluation');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    if (options.copy === true) void copyLast();
+    return out;
+  }
+
   return {
     begin,
     mark,
@@ -702,6 +1660,15 @@ var ManualPerfDebug = (() => {
     mousePanTest,
     zoomReport,
     wheelZoomTest,
+    textBoardSummary,
+    measureTextLayoutPass,
+    textEditMathBegin,
+    textEditMathReport,
+    textEditMathTimeline,
+    largeTextSetup,
+    largeTextReport,
+    largeTextEvaluation,
+    restoreLargeTextOriginalState,
     state,
     json,
     copyLast,

@@ -44,11 +44,21 @@ refreshTextMetrics();
 const TEXT_MEASURE_CACHE_MAX_ENTRIES = 4096;
 const TEXT_PREFIX_CACHE_MAX_ENTRIES = 2048;
 const TEXT_LINES_CACHE_MAX_ENTRIES = 2048;
+const TEXT_SCRIPT_INDEX_CACHE_MAX_ENTRIES = 256;
 const TEXT_TAB_SIZE_SPACES = 8;
 const TEXT_ARROW_LIGATURE_RE = /->|<-/;
+const BASE_TEXT_SCRIPT_STATE = Object.freeze({
+  depth: 0,
+  font: FONT,
+  key: '',
+  kinds: Object.freeze([]),
+  offset: 0,
+  scale: 1,
+});
 var _mwCache = new Map();
 var _scriptMwCache = new Map();
 var _fontMeasureCaches = new Map();
+var _scriptIndexCache = new Map();
 
 const forEachTextArrowLigatureSafeRun = (value, callback) => {
   const text = String(value ?? '');
@@ -182,11 +192,14 @@ const clearMeasuredTextWidthCache = () => {
 const clearTextLayoutCaches = (options = {}) => {
   _linesCacheMap.clear();
   _prefixCache.clear();
+  _scriptIndexCache.clear();
   if (options.measurements) clearMeasuredTextWidthCache();
   if (options.objectLayout !== false) {
     for (const obj of objects) {
       delete obj._layoutCache;
       delete obj._layoutCacheKey;
+      delete obj._textScriptRangesCache;
+      delete obj._textScriptRangesCacheKey;
     }
   }
 };
@@ -228,10 +241,11 @@ function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], conte
   let i = 0;
   let width = 0;
   const sourceContent = content || value;
+  const scriptMetrics = getTextScriptLayoutMetrics(sourceContent, scriptRanges);
 
   while (i < value.length) {
     const globalIndex = rangeStart + i;
-    if (isTextScriptMarkerHiddenAt(scriptRanges, globalIndex, sourceContent)) {
+    if (textScriptMetricsHiddenAt(scriptMetrics, globalIndex)) {
       pw[i + 1] = width;
       i++;
       continue;
@@ -244,13 +258,13 @@ function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], conte
       continue;
     }
 
-    const state = textScriptStateAt(scriptRanges, globalIndex);
+    const state = textScriptMetricsStateAt(scriptMetrics, globalIndex);
     let j = i + 1;
     while (j < value.length) {
       const nextGlobalIndex = rangeStart + j;
       if (value[j] === '\t') break;
-      if (isTextScriptMarkerHiddenAt(scriptRanges, nextGlobalIndex, sourceContent)) break;
-      if (textScriptStateAt(scriptRanges, nextGlobalIndex).key !== state.key) break;
+      if (textScriptMetricsHiddenAt(scriptMetrics, nextGlobalIndex)) break;
+      if (textScriptMetricsStateAt(scriptMetrics, nextGlobalIndex).key !== state.key) break;
       j++;
     }
 
@@ -323,18 +337,28 @@ function getWrappedLines(obj) {
     } else if (textScriptRawBoundsIntersectRange(rawBounds, paraStart, paraEnd)) {
       pushLine(paraStart, paraEnd, paraEnd, paraEnd, logicalLineIndex);
     } else {
+      const paragraphText = obj.data.content.slice(paraStart, paraEnd);
+      const paragraphPrefixWidths = paragraphText.includes('\t')
+        ? null
+        : getTextRangePrefixWidths(paragraphText, paraStart, scriptRanges, obj.data.content);
+      const paragraphRangeWidth = (start, end) => {
+        if (!paragraphPrefixWidths) return measureTextRangeW(obj.data.content, start, end, scriptRanges);
+        const from = Math.max(0, Math.min(start - paraStart, paragraphPrefixWidths.length - 1));
+        const to = Math.max(from, Math.min(end - paraStart, paragraphPrefixWidths.length - 1));
+        return Math.max(0, paragraphPrefixWidths[to] - paragraphPrefixWidths[from]);
+      };
       let lineStart = paraStart;
       while (lineStart < paraEnd) {
         let lo = lineStart + 1;
         let hi = paraEnd;
-        if (measureTextRangeW(obj.data.content, lineStart, lo, scriptRanges) > maxW) {
+        if (paragraphRangeWidth(lineStart, lo) > maxW) {
           pushLine(lineStart, lo, lo, lo, logicalLineIndex);
           lineStart = lo;
           continue;
         }
         while (lo < hi) {
           const mid = Math.ceil((lo + hi + 1) / 2);
-          if (measureTextRangeW(obj.data.content, lineStart, mid, scriptRanges) <= maxW) lo = mid;
+          if (paragraphRangeWidth(lineStart, mid) <= maxW) lo = mid;
           else hi = mid - 1;
         }
 
@@ -595,15 +619,28 @@ const getTextScriptRanges = (obj) => {
   if (!obj || obj.type !== 'text') return [];
   const content = normalizeTextContent(obj.data?.content);
   const source = Array.isArray(obj.data?.scriptRanges) ? obj.data.scriptRanges : [];
+  const cacheKey = `${content}\n${JSON.stringify(source)}`;
+  if (obj._textScriptRangesCacheKey === cacheKey && Array.isArray(obj._textScriptRangesCache)) {
+    return obj._textScriptRangesCache;
+  }
   const bracedRanges = deriveBracedTextScriptRangesFromContent(content);
   const combined = [...source, ...bracedRanges];
   if (combined.length) {
     const normalized = normalizeTextScriptRangesForContent(content, combined);
-    if (normalized.length) obj.data.scriptRanges = normalized;
-    else delete obj.data.scriptRanges;
+    if (normalized.length) {
+      obj.data.scriptRanges = normalized;
+      obj._textScriptRangesCache = normalized;
+      obj._textScriptRangesCacheKey = `${content}\n${JSON.stringify(normalized)}`;
+    } else {
+      delete obj.data.scriptRanges;
+      obj._textScriptRangesCache = [];
+      obj._textScriptRangesCacheKey = `${content}\n[]`;
+    }
     return normalized;
   }
   if (obj.data) delete obj.data.scriptRanges;
+  obj._textScriptRangesCache = [];
+  obj._textScriptRangesCacheKey = `${content}\n[]`;
   return [];
 };
 
@@ -885,6 +922,7 @@ const textScriptOffsetForKind = (kind) => kind === 'sub' ? TEXT_SCRIPT_SUB_OFFSE
 
 const textScriptStateFromRanges = (activeRanges) => {
   const ranges = activeRanges || [];
+  if (!ranges.length) return BASE_TEXT_SCRIPT_STATE;
   let offset = 0;
   const kinds = [];
   for (let i = 0; i < ranges.length; i++) {
@@ -907,6 +945,95 @@ const textScriptStateFromRanges = (activeRanges) => {
 const textScriptStateAt = (ranges, index) => {
   return textScriptStateFromRanges(activeTextScriptRangesAt(ranges, index));
 };
+
+function textScriptIndexCacheKey(content, ranges = []) {
+  return `${normalizeTextContent(content)}\n${JSON.stringify(ranges || [])}`;
+}
+
+function textScriptMetricsStateAt(metrics, index) {
+  const pos = Math.max(0, Math.trunc(Number(index)) || 0);
+  return metrics?.states?.[pos] || BASE_TEXT_SCRIPT_STATE;
+}
+
+function textScriptMetricsHiddenAt(metrics, index) {
+  const pos = Math.trunc(Number(index));
+  return Number.isFinite(pos) && !!metrics?.hidden?.[pos];
+}
+
+function getTextScriptLayoutMetrics(content, scriptRanges = []) {
+  const text = normalizeTextContent(content);
+  const ranges = Array.isArray(scriptRanges) ? scriptRanges : [];
+  const cacheKey = textScriptIndexCacheKey(text, ranges);
+  const hit = _scriptIndexCache.get(cacheKey);
+  if (hit) {
+    _scriptIndexCache.delete(cacheKey);
+    _scriptIndexCache.set(cacheKey, hit);
+    return hit;
+  }
+
+  const hidden = new Uint8Array(text.length);
+  const states = new Array(text.length);
+  const starts = new Map();
+  const ends = new Map();
+  const indexedRanges = [];
+  const addEvent = (map, index, range) => {
+    const list = map.get(index);
+    if (list) list.push(range);
+    else map.set(index, [range]);
+  };
+
+  for (const sourceRange of ranges) {
+    const kind = normalizeTextScriptKind(sourceRange?.kind);
+    const rawStart = Math.trunc(Number(sourceRange?.start));
+    const rawEnd = Math.trunc(Number(sourceRange?.end));
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) continue;
+    const start = Math.max(0, Math.min(rawStart, text.length));
+    const end = Math.max(start, Math.min(rawEnd, text.length));
+    if (!kind || end <= start) continue;
+    const range = { start, end, kind };
+    indexedRanges.push(range);
+    addEvent(starts, start, range);
+    addEvent(ends, end, range);
+    const markerIndex = start - 1;
+    if (markerIndex >= 0 && markerIndex < hidden.length) hidden[markerIndex] = 1;
+    if (isTextScriptBracedRange(text, range)) {
+      if (start >= 0 && start < hidden.length) hidden[start] = 1;
+      if (end - 1 >= 0 && end - 1 < hidden.length) hidden[end - 1] = 1;
+    }
+  }
+
+  let active = [];
+  let state = BASE_TEXT_SCRIPT_STATE;
+  const refreshState = () => {
+    if (!active.length) {
+      state = BASE_TEXT_SCRIPT_STATE;
+      return;
+    }
+    const sorted = active.slice().sort((a, b) => a.start - b.start || b.end - a.end || a.kind.localeCompare(b.kind));
+    state = textScriptStateFromRanges(sorted);
+  };
+
+  for (let index = 0; index < text.length; index++) {
+    let changed = false;
+    const ending = ends.get(index);
+    if (ending) {
+      active = active.filter((range) => !ending.includes(range));
+      changed = true;
+    }
+    const starting = starts.get(index);
+    if (starting) {
+      active.push(...starting);
+      changed = true;
+    }
+    if (changed) refreshState();
+    states[index] = state;
+  }
+
+  const result = { hidden, states };
+  _scriptIndexCache.set(cacheKey, result);
+  trimMapCache(_scriptIndexCache, TEXT_SCRIPT_INDEX_CACHE_MAX_ENTRIES);
+  return result;
+}
 
 const textScriptCaretKindAt = (obj, index) => {
   const state = textScriptCaretStateAt(obj, index);
@@ -1121,20 +1248,21 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
   const start = Math.max(0, Math.min(startOffset, text.length));
   const end = Math.max(start, Math.min(endOffset, text.length));
   const ranges = line.scriptRanges || [];
+  const scriptMetrics = getTextScriptLayoutMetrics(line.content || text, ranges);
   let i = start;
   while (i < end) {
     const globalIndex = line.startIndex + i;
-    if (text[i] === '\t' || isTextScriptMarkerHiddenAt(ranges, globalIndex, line.content || '')) {
+    if (text[i] === '\t' || textScriptMetricsHiddenAt(scriptMetrics, globalIndex)) {
       i++;
       continue;
     }
-    const state = textScriptStateAt(ranges, globalIndex);
+    const state = textScriptMetricsStateAt(scriptMetrics, globalIndex);
     let j = i + 1;
     while (j < end) {
       const nextGlobalIndex = line.startIndex + j;
       if (text[j] === '\t') break;
-      if (isTextScriptMarkerHiddenAt(ranges, nextGlobalIndex, line.content || '')) break;
-      if (textScriptStateAt(ranges, nextGlobalIndex).key !== state.key) break;
+      if (textScriptMetricsHiddenAt(scriptMetrics, nextGlobalIndex)) break;
+      if (textScriptMetricsStateAt(scriptMetrics, nextGlobalIndex).key !== state.key) break;
       j++;
     }
     const previousFont = context.font;

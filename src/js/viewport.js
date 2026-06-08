@@ -312,8 +312,28 @@ function drawVisibleObjects(context, counters, { skipId = null, viewportRect = c
   return BoardRenderer.drawVisibleObjects(context, counters, { skipId, viewportRect, view, imageSourceResolver, skipText });
 }
 
-const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
+const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
+  const viewportRect = options.viewportRect || null;
   if (selStart === selEnd) return null;
+  const firstLine = layout.find((line) => line?.content != null || Array.isArray(line?.scriptRanges));
+  const scriptMetrics = firstLine && typeof getTextScriptLayoutMetrics === 'function'
+    ? getTextScriptLayoutMetrics(firstLine.content || '', firstLine.scriptRanges || [])
+    : null;
+  const isHiddenAt = (line, globalIndex) => {
+    if (scriptMetrics && typeof textScriptMetricsHiddenAt === 'function') {
+      return textScriptMetricsHiddenAt(scriptMetrics, globalIndex);
+    }
+    return typeof isTextScriptMarkerHiddenAt === 'function' &&
+      isTextScriptMarkerHiddenAt(line.scriptRanges || [], globalIndex, line.content || '');
+  };
+  const stateAt = (line, globalIndex) => {
+    if (scriptMetrics && typeof textScriptMetricsStateAt === 'function') {
+      return textScriptMetricsStateAt(scriptMetrics, globalIndex);
+    }
+    return typeof textScriptStateAt === 'function'
+      ? textScriptStateAt(line.scriptRanges || [], globalIndex)
+      : { key: '', depth: 0, offset: 0, scale: 1 };
+  };
   const runs = [];
   let left = Infinity;
   let top = Infinity;
@@ -329,6 +349,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
     return { y: line.y, height: LINE_H };
   };
   for (const line of layout) {
+    if (!textLayoutLineIntersectsViewport(line, viewportRect)) continue;
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
     if (h0 < h1) {
@@ -337,20 +358,16 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
       let i = o0;
       while (i < o1) {
         const globalIndex = line.startIndex + i;
-        if (typeof isTextScriptMarkerHiddenAt === 'function' && isTextScriptMarkerHiddenAt(line.scriptRanges || [], globalIndex, line.content || '')) {
+        if (isHiddenAt(line, globalIndex)) {
           i++;
           continue;
         }
-        const state = typeof textScriptStateAt === 'function'
-          ? textScriptStateAt(line.scriptRanges || [], globalIndex)
-          : { key: '', depth: 0, offset: 0, scale: 1 };
+        const state = stateAt(line, globalIndex);
         let j = i + 1;
         while (j < o1) {
           const nextGlobalIndex = line.startIndex + j;
-          if (typeof isTextScriptMarkerHiddenAt === 'function' && isTextScriptMarkerHiddenAt(line.scriptRanges || [], nextGlobalIndex, line.content || '')) break;
-          const nextState = typeof textScriptStateAt === 'function'
-            ? textScriptStateAt(line.scriptRanges || [], nextGlobalIndex)
-            : { key: '', depth: 0, offset: 0, scale: 1 };
+          if (isHiddenAt(line, nextGlobalIndex)) break;
+          const nextState = stateAt(line, nextGlobalIndex);
           if (nextState.key !== state.key) break;
           j++;
         }
@@ -390,7 +407,7 @@ const textSelectionMotionForOptions = (obj, selStart, selEnd, options = {}) => {
 
 const textSelectionRunsForOptions = (obj, layout, selStart, selEnd, options = {}) => {
   if (Object.prototype.hasOwnProperty.call(options, 'selection')) return options.selection || null;
-  return collectTextSelectionRuns(obj, layout, selStart, selEnd);
+  return collectTextSelectionRuns(obj, layout, selStart, selEnd, { viewportRect: options.viewportRect || null });
 };
 
 const applyTextSelectionMotionTransform = (context, bounds, motion) => {
@@ -411,19 +428,36 @@ const applyTextSelectionMotionTransform = (context, bounds, motion) => {
   return true;
 };
 
-const drawTextLayoutStatic = (context, obj, layout, selectionGap = null) => {
+const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
+  if (!viewportRect) return true;
+  const y = Number(line?.y);
+  if (!Number.isFinite(y)) return true;
+  return y + LINE_H >= viewportRect.y1 && y <= viewportRect.y2;
+};
+
+const visibleTextLayoutLines = (layout, viewportRect = null) => (
+  viewportRect ? layout.filter((line) => textLayoutLineIntersectsViewport(line, viewportRect)) : layout
+);
+
+const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options = {}) => {
   context.fillStyle = canvasTextColor();
+  const lines = options.lines || visibleTextLayoutLines(layout, options.viewportRect || null);
+  const stats = options.stats || null;
   if (!selectionGap) {
-    for (const line of layout) drawTextLineRange(context, line, obj);
+    for (const line of lines) {
+      drawTextLineRange(context, line, obj);
+      if (stats) stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
+    }
     return;
   }
   const selStart = Math.min(selectionGap.start, selectionGap.end);
   const selEnd = Math.max(selectionGap.start, selectionGap.end);
-  for (const line of layout) {
+  for (const line of lines) {
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
     if (h0 >= h1) {
       drawTextLineRange(context, line, obj);
+      if (stats) stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
       continue;
     }
     const o0 = h0 - ls, o1 = h1 - ls;
@@ -431,6 +465,7 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null) => {
     const after = line.text.slice(o1);
     if (before) drawTextLineRange(context, line, obj, 0, o0);
     if (after) drawTextLineRange(context, line, obj, o1, line.text.length);
+    if (stats && (before || after)) stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
   }
 };
 
@@ -488,10 +523,11 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, view = { z
   return drawn;
 };
 
-function drawCaret(context, obj, layout, selStart) {
-  if (!_caretVisible) return;
+function drawCaret(context, obj, layout, selStart, options = {}) {
+  if (!_caretVisible) return false;
   let cx = obj.x + TEXT_PAD, cy = obj.y + TEXT_PAD;
   let caretHeight = LINE_H;
+  let caretLine = null;
   for (const line of layout) {
     const ls = line.startIndex;
     const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
@@ -510,11 +546,14 @@ function drawCaret(context, obj, layout, selStart) {
         cy = line.y;
         caretHeight = LINE_H;
       }
+      caretLine = line;
       break;
     }
   }
+  if (caretLine && !textLayoutLineIntersectsViewport(caretLine, options.viewportRect || null)) return false;
   context.fillStyle = canvasTextColor();
   context.fillRect(cx, cy, 2 / zoom, caretHeight);
+  return true;
 }
 
 const applyObjectMotionForDraw = (context, obj, motion) => {
@@ -538,11 +577,24 @@ const applyObjectMotionForDraw = (context, obj, motion) => {
 
 function drawEditingTextOverlay(context, options = {}) {
   const obj = objectsMap.get(editingId);
-  if (!obj || obj.type !== 'text') return;
+  if (!obj || obj.type !== 'text') return null;
   const view = options.view || { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
   const viewportRect = options.viewportRect || currentViewportWorldRect(0);
+  const collectDebug = options.collectDebug === true;
+  const stats = collectDebug ? {
+    editLayoutMs: 0,
+    editSelectionMs: 0,
+    editTextDrawMs: 0,
+    editCaretMs: 0,
+    editLayoutLines: 0,
+    editVisibleLines: 0,
+    editCulledLines: 0,
+    editDrawnTextLines: 0,
+    editSelectionRuns: 0,
+    editCaretDrawn: false,
+  } : null;
   const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, { view, viewportRect });
-  if (motion?.skip) return;
+  if (motion?.skip) return stats;
   const restoreMotion = applyObjectMotionForDraw(context, obj, motion);
   try {
     context.font = FONT;
@@ -550,26 +602,52 @@ function drawEditingTextOverlay(context, options = {}) {
 
     const selStart = _editEl ? _editEl.selectionStart : 0;
     const selEnd   = _editEl ? _editEl.selectionEnd   : 0;
+    const layoutStart = collectDebug ? performance.now() : 0;
     const layout = getTextLayout(obj);
+    if (collectDebug) {
+      stats.editLayoutMs = performance.now() - layoutStart;
+      stats.editLayoutLines = layout.length;
+    }
+    const visibleLines = visibleTextLayoutLines(layout, viewportRect);
+    if (collectDebug) {
+      stats.editVisibleLines = visibleLines.length;
+      stats.editCulledLines = Math.max(0, layout.length - visibleLines.length);
+    }
     const textSelectionMotion = selStart !== selEnd
       ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, { view }) || null
       : null;
-    const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
+    const selectionStart = collectDebug ? performance.now() : 0;
+    const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd, { viewportRect });
+    if (collectDebug) {
+      stats.editSelectionMs = performance.now() - selectionStart;
+      stats.editSelectionRuns = selection?.runs?.length || 0;
+    }
 
     drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion, selection });
 
+    const textDrawStart = collectDebug ? performance.now() : 0;
     drawTextLayoutStatic(
       context,
       obj,
       layout,
       textSelectionMotion ? { start: selStart, end: selEnd } : null,
+      { lines: visibleLines, view, stats },
     );
     drawTextSelectionContentJello(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion, selection });
+    if (collectDebug) stats.editTextDrawMs = performance.now() - textDrawStart;
 
-    if (selStart === selEnd) drawCaret(context, obj, layout, selStart);
+    if (selStart === selEnd) {
+      const caretStart = collectDebug ? performance.now() : 0;
+      const drawn = drawCaret(context, obj, layout, selStart, { viewportRect });
+      if (collectDebug) {
+        stats.editCaretMs = performance.now() - caretStart;
+        stats.editCaretDrawn = !!drawn;
+      }
+    }
   } finally {
     if (restoreMotion) context.restore();
   }
+  return stats;
 }
 
 function drawBoard() {
@@ -614,9 +692,12 @@ function drawBoard() {
     setWorldCanvasTransform(ctx, dpr);
     const overlayView = { zoom, panX, panY, dpr };
     drawTextSelectionJelloOverlays(ctx, viewportRect, overlayView);
-    drawEditingTextOverlay(ctx, { view: overlayView, viewportRect });
+    const editStats = drawEditingTextOverlay(ctx, { view: overlayView, viewportRect, collectDebug: collectDrawDebug });
     resetCanvasToScreen(ctx);
-    if (collectDrawDebug) drawPhases.editingOverlayMs = performance.now() - editStart;
+    if (collectDrawDebug) {
+      drawPhases.editingOverlayMs = performance.now() - editStart;
+      if (editStats) Object.assign(drawPhases, editStats);
+    }
   } else {
     const setupStart = collectDrawDebug ? performance.now() : 0;
     resetCanvasToScreen(ctx);

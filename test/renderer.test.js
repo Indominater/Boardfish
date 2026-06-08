@@ -274,6 +274,95 @@ test('renderer can skip text while drawing visible objects', () => {
   assert.deepEqual(fillTextCalls, []);
 });
 
+test('text renderer skips layout lines outside the visible viewport', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawnLines = [];
+  const context = {
+    fillStyle: '',
+    textBaseline: '',
+  };
+  const text = { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 96 };
+  const counters = BoardfishRenderer.createDrawCounters();
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 200, y2: 47 }),
+    dpr: () => 1,
+    drawTextLineRange(_context, line) {
+      drawnLines.push(line.text);
+    },
+    getTextLayout: () => [
+      { text: 'above', y: -48 },
+      { text: 'visible', y: 0 },
+      { text: 'below', y: 48 },
+    ],
+    getWrappedLines: () => [],
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [text],
+    panX: () => 0,
+    panY: () => 0,
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  const result = renderer.drawVisibleObjects(context, counters);
+
+  assert.equal(result.drawnText, 1);
+  assert.deepEqual(drawnLines, ['visible']);
+  assert.equal(counters.textLines, 3);
+  assert.equal(counters.drawnTextLines, 1);
+  assert.equal(counters.culledTextLines, 2);
+});
+
+test('text renderer draws visible text at low zoom instead of substituting or hiding it', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawnText = [];
+  const rects = [];
+  let layoutCalls = 0;
+  const context = {
+    fillStyle: '',
+    textBaseline: '',
+    fillRect(...args) {
+      rects.push(args);
+    },
+  };
+  const text = { id: 'text-1', type: 'text', x: 10, y: 20, w: 200, h: 32 };
+  const counters = BoardfishRenderer.createDrawCounters();
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 300, y2: 100 }),
+    dpr: () => 1,
+    drawTextLineRange(_context, line) {
+      drawnText.push(line.text);
+    },
+    getTextLayout() {
+      layoutCalls++;
+      return [{ text: 'tiny', y: 20, prefixWidths: [0, 12, 24, 36, 48] }];
+    },
+    getWrappedLines: () => [],
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [text],
+    panX: () => 0,
+    panY: () => 0,
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 0.25,
+  });
+
+  renderer.drawVisibleObjects(context, counters);
+
+  assert.deepEqual(drawnText, ['tiny']);
+  assert.equal(rects.length, 0);
+  assert.equal(layoutCalls, 1);
+  assert.equal(counters.textLines, 1);
+  assert.equal(counters.drawnTextLines, 1);
+  assert.equal(counters.culledTextLines, 0);
+});
+
 test('renderer applies object motion translation and non-uniform scaling around object center', () => {
   const BoardfishRenderer = loadRenderer();
   const calls = [];
