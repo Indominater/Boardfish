@@ -70,39 +70,115 @@ document.addEventListener('keydown', (e) => {
   }
 }, true);
 
+function consumeShortcutEvent(e) {
+  if (e.cancelable !== false) e.preventDefault();
+  e.stopPropagation();
+}
+
+function contextMenusOpenForShortcut() {
+  return typeof hasOpenContextMenu === 'function' && hasOpenContextMenu();
+}
+
+function closeMenusForShortcut(shortcutName) {
+  if (!contextMenusOpenForShortcut() || typeof closeOpenMenusExcept !== 'function') return;
+  closeOpenMenusExcept('', `shortcut:${shortcutName}`);
+}
+
+function runShortcutCommand(shortcutName, fallback) {
+  if (
+    typeof runVisibleMenuCommandForShortcut === 'function' &&
+    runVisibleMenuCommandForShortcut(shortcutName)
+  ) {
+    return true;
+  }
+  closeMenusForShortcut(shortcutName);
+  if (typeof fallback === 'function') fallback();
+  return true;
+}
+
+function pasteAtViewportCenterFromShortcut() {
+  if (editingId || typeof pasteAtPos !== 'function') return;
+  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  pasteAtPos(center.x, center.y);
+}
+
 document.addEventListener('keydown', (e) => {
+  if (
+    isBrowserFindShortcut(e) &&
+    !(hasExactCommandModifier(e) && isShortcutKey(e, 'f') && canTransformSelectedImagesFromKeyboard())
+  ) {
+    return;
+  }
   if (e.key === 'Alt') { e.preventDefault(); return; }
+
+  if (hasNoShortcutModifiers(e) && isShortcutKey(e, 'n') && !editingId && !e.repeat) {
+    consumeShortcutEvent(e);
+    runShortcutCommand('new-board', () => {
+      if (!isBoardInputBlocked()) newBoard();
+    });
+    return;
+  }
+
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'v') && contextMenusOpenForShortcut()) {
+    consumeShortcutEvent(e);
+    runShortcutCommand('paste', pasteAtViewportCenterFromShortcut);
+    return;
+  }
+
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'c')) {
+    if (contextMenusOpenForShortcut()) {
+      consumeShortcutEvent(e);
+      runShortcutCommand('copy', () => {
+        if (!editingId) copySelected();
+      });
+      return;
+    }
+    if (!editingId) {
+      consumeShortcutEvent(e);
+      runShortcutCommand('copy', copySelected);
+      return;
+    }
+    return;
+  }
+
   if (hasExactCommandModifier(e) && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-    e.preventDefault();
-    if (!editingId) applySelectedTextAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left');
+    consumeShortcutEvent(e);
+    runShortcutCommand(`text-align-${e.key === 'ArrowRight' ? 'right' : 'left'}`, () => {
+      if (!editingId) applySelectedTextAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left');
+    });
     return;
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) {
-    e.preventDefault();
-    if (canTransformSelectedImagesFromKeyboard()) rotateSelectedImages('cw');
+    consumeShortcutEvent(e);
+    runShortcutCommand('rotate-image', () => {
+      if (canTransformSelectedImagesFromKeyboard()) rotateSelectedImages('cw');
+    });
     return;
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'f')) {
-    e.preventDefault();
-    if (canTransformSelectedImagesFromKeyboard()) flipSelectedImages();
+    consumeShortcutEvent(e);
+    runShortcutCommand('flip-image', () => {
+      if (canTransformSelectedImagesFromKeyboard()) flipSelectedImages();
+    });
     return;
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'i') && !editingId) {
-    e.preventDefault();
-    runAddImagesCommandFromShortcut();
+    consumeShortcutEvent(e);
+    runShortcutCommand('add-images', runAddImagesCommandFromShortcut);
     return;
   }
 
   if (hasNoShortcutModifiers(e) && isShortcutKey(e, 't') && !editingId && !e.repeat) {
-    e.preventDefault();
-    runAddTextCommandFromShortcut();
+    consumeShortcutEvent(e);
+    runShortcutCommand('add-text', runAddTextCommandFromShortcut);
     return;
   }
 
   if (e.key === 'Escape') {
+    consumeShortcutEvent(e);
     hideMenus();
     if (editingId) {
       deselectAll();
@@ -113,77 +189,102 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'o') && !editingId) {
-    e.preventDefault();
-    openBoard();
+    consumeShortcutEvent(e);
+    runShortcutCommand('open', openBoard);
     return;
   }
 
   if (hasExactCommandModifier(e, { shift: true }) && isShortcutKey(e, 's')) {
-    e.preventDefault();
-    saveBoardAs();
+    consumeShortcutEvent(e);
+    runShortcutCommand('save-as', saveBoardAs);
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 's')) { e.preventDefault(); saveBoard(); return; }
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 's')) {
+    consumeShortcutEvent(e);
+    runShortcutCommand('save', saveBoard);
+    return;
+  }
 
   if (hasExactCommandModifier(e) && (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0')) {
-    e.preventDefault();
-    resetZoomToClosestObject();
+    consumeShortcutEvent(e);
+    runShortcutCommand('reset-zoom', resetZoomToClosestObject);
     return;
   }
 
-  if (isBoardInputBlocked()) { e.preventDefault(); return; }
+  if (isBoardInputBlocked()) { consumeShortcutEvent(e); return; }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'a')) {
     if (!editingId) {
-      e.preventDefault();
-      selectAllObjects();
+      consumeShortcutEvent(e);
+      runShortcutCommand('select-all', selectAllObjects);
     }
     return;
   }
 
-  if (hasNoShortcutModifiers(e) && (e.key === 'Backspace' || e.key === 'Delete') && hasSelection() && !editingId) {
-    e.preventDefault(); deleteSelected(); return;
-  }
-
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'n') && !editingId) {
-    e.preventDefault();
-    newBoard();
+  if (hasNoShortcutModifiers(e) && (e.key === 'Backspace' || e.key === 'Delete')) {
+    if (contextMenusOpenForShortcut()) {
+      consumeShortcutEvent(e);
+      runShortcutCommand('delete', () => {
+        if (hasSelection() && !editingId) deleteSelected();
+      });
+      return;
+    }
+    if (hasSelection() && !editingId) {
+      consumeShortcutEvent(e);
+      runShortcutCommand('delete', deleteSelected);
+    }
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'c') && !editingId) { e.preventDefault(); copySelected(); return; }
-
   if (hasExactCommandModifier(e) && (e.code === 'BracketLeft' || e.key === '[') && !editingId) {
-    e.preventDefault();
-    sendSelectedToBack();
+    consumeShortcutEvent(e);
+    runShortcutCommand('move-to-back', sendSelectedToBack);
     return;
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'e') && !editingId) {
     const imageObjs = BoardfishExportUtils.selectedImageObjects();
-    if (imageObjs.length) {
-      e.preventDefault();
-      if (imageObjs.length === 1) saveSelectedImage();
-      else {
-        showInputShield({ keepSelectionOverlay: true });
-        saveSelectedImages();
-      }
+    if (contextMenusOpenForShortcut() || imageObjs.length) {
+      consumeShortcutEvent(e);
+      runShortcutCommand('export-image', () => {
+        if (!imageObjs.length) return;
+        if (imageObjs.length === 1) saveSelectedImage();
+        else {
+          showInputShield({ keepSelectionOverlay: true });
+          saveSelectedImages();
+        }
+      });
     }
     return;
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'x') && !editingId) {
-    e.preventDefault();
-    cutSelected();
+    consumeShortcutEvent(e);
+    runShortcutCommand('cut', cutSelected);
     return;
   }
 
-  if (hasExactCommandModifier(e, { shift: true }) && isShortcutKey(e, 'z')) { e.preventDefault(); redo(); return; }
+  if (hasExactCommandModifier(e, { shift: true }) && isShortcutKey(e, 'z')) {
+    consumeShortcutEvent(e);
+    runShortcutCommand('redo', redo);
+    return;
+  }
 
-  if (e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && isShortcutKey(e, 'y')) { e.preventDefault(); redo(); return; }
+  if (e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && isShortcutKey(e, 'y')) {
+    consumeShortcutEvent(e);
+    runShortcutCommand('redo', redo);
+    return;
+  }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'z')) { e.preventDefault(); undo(); return; }
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'z')) {
+    consumeShortcutEvent(e);
+    runShortcutCommand('undo', undo);
+    return;
+  }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'd') && !editingId) { e.preventDefault(); duplicateSelected(); return; }
-});
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'd') && !editingId) {
+    consumeShortcutEvent(e);
+    runShortcutCommand('duplicate', duplicateSelected);
+  }
+}, true);

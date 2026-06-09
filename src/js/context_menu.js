@@ -355,6 +355,69 @@ function runMenuCommand(button, source) {
   return true;
 }
 
+function contextMenuSurfaceById(id) {
+  if (id === 'ctx-menu') return ctxMenu;
+  if (id === 'obj-ctx-menu') return objCtxMenu;
+  if (id === 'text-ctx-menu') return BoardfishDOM.textCtxMenu;
+  return null;
+}
+
+function hasOpenContextMenu() {
+  return !!(
+    ctxMenu.classList.contains('visible') ||
+    objCtxMenu.classList.contains('visible') ||
+    BoardfishDOM.textCtxMenu.classList.contains('visible')
+  );
+}
+
+function isVisibleMenuCommandButton(button) {
+  return !!button &&
+    !button.hidden &&
+    button.style.display !== 'none' &&
+    button.getAttribute('aria-hidden') !== 'true';
+}
+
+var SHORTCUT_MENU_COMMANDS = {
+  'new-board': [['ctx-menu', 'btn-new']],
+  'add-text': [['ctx-menu', 'btn-add-text']],
+  'add-images': [['ctx-menu', 'btn-add-image']],
+  paste: [
+    ['text-ctx-menu', 'text-btn-paste'],
+    ['ctx-menu', 'btn-paste'],
+  ],
+  save: [['ctx-menu', 'btn-save']],
+  'save-as': [['ctx-menu', 'btn-save-as']],
+  open: [['ctx-menu', 'btn-open']],
+  copy: [
+    ['text-ctx-menu', 'text-btn-copy'],
+    ['obj-ctx-menu', 'obj-btn-copy'],
+  ],
+  duplicate: [['obj-ctx-menu', 'obj-btn-duplicate']],
+  'move-to-back': [['obj-ctx-menu', 'obj-btn-move-to-back']],
+  'flip-image': [['obj-ctx-menu', 'obj-btn-flip']],
+  'rotate-image': [['obj-ctx-menu', 'obj-btn-rotate']],
+  'export-image': [
+    ['obj-ctx-menu', 'obj-btn-save-image'],
+    ['obj-ctx-menu', 'obj-btn-save-images'],
+  ],
+  delete: [
+    ['text-ctx-menu', 'text-btn-delete'],
+    ['obj-ctx-menu', 'obj-btn-delete'],
+  ],
+};
+
+function runVisibleMenuCommandForShortcut(shortcutName) {
+  const candidates = SHORTCUT_MENU_COMMANDS[shortcutName] || [];
+  for (const [menuId, buttonId] of candidates) {
+    const menu = contextMenuSurfaceById(menuId);
+    if (!menu?.classList.contains('visible')) continue;
+    const button = document.getElementById(buttonId);
+    if (!isVisibleMenuCommandButton(button)) continue;
+    return runMenuCommand(button, 'shortcut');
+  }
+  return false;
+}
+
 function runAddImagesCommandFromShortcut() {
   if (ctxMenu.classList.contains('visible')) {
     runMenuCommand(addImageBtn, 'shortcut');
@@ -365,6 +428,10 @@ function runAddImagesCommandFromShortcut() {
 }
 
 function runAddTextCommandFromShortcut() {
+  if (ctxMenu.classList.contains('visible')) {
+    runMenuCommand(addTextBtn, 'shortcut');
+    return;
+  }
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
   const defaultSize = typeof defaultTextBoxSize === 'function'
     ? defaultTextBoxSize()

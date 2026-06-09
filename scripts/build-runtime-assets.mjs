@@ -16,7 +16,6 @@ const variants = {
     scripts: VARIANT_SCRIPTS['web-preview'],
     bundle: 'assets/boardfish-web-preview.min.js',
     cacheBust: true,
-    mode: 'bundle',
   },
 };
 
@@ -48,7 +47,7 @@ async function copyDir(from, to) {
   }
 }
 
-async function copyStaticAssets(outDir, { includeJs = false, includePwa = false } = {}) {
+async function copyStaticAssets(outDir, { includePwa = false } = {}) {
   await copyFile(path.join(srcRoot, 'styles.css'), path.join(outDir, 'styles.css'));
   await copyFile(path.join(srcRoot, 'boardfish-icon.png'), path.join(outDir, 'boardfish-icon.png'));
   await copyDir(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'));
@@ -56,7 +55,6 @@ async function copyStaticAssets(outDir, { includeJs = false, includePwa = false 
     await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
     await copyFile(path.join(srcRoot, 'boardfish-icon-192.png'), path.join(outDir, 'boardfish-icon-192.png'));
   }
-  if (includeJs) await copyDir(jsRoot, path.join(outDir, 'js'));
 }
 
 function resolveScriptPath(script) {

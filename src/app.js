@@ -33,7 +33,7 @@ var COMMAND_KEY_LABEL = IS_MAC ? '\u2318' : 'Ctrl';
 var SHIFT_KEY_LABEL = IS_MAC ? '\u21e7' : 'Shift';
 var MENU_VIEWPORT_EDGE_MARGIN = 12;
 var MENU_SHORTCUTS = {
-  'new-board': [COMMAND_KEY_LABEL, 'N'],
+  'new-board': ['N'],
   'add-text': ['T'],
   'add-images': [COMMAND_KEY_LABEL, 'I'],
   paste: [COMMAND_KEY_LABEL, 'V'],

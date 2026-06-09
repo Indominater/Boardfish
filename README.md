@@ -24,7 +24,7 @@ https://indominater.github.io/Boardfish/
 
 | Action | Mac | Windows |
 |--------|-----|---------|
-| New board | Cmd+N | Ctrl+N |
+| New board | N | N |
 | Open board | Cmd+O | Ctrl+O |
 | Save | Cmd+S | Ctrl+S |
 | Save As | Cmd+Shift+S | Ctrl+Shift+S |
