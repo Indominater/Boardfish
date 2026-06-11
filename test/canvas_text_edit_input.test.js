@@ -10,16 +10,35 @@ function loadCanvasInputHarness({ selected = true } = {}) {
   const obj = { id: 'text-1', type: 'text', x: 10, y: 20, w: 160, h: 40, data: { content: 'hello' } };
   const selectedIds = selected ? new Set([obj.id]) : new Set();
   const dragHandlers = [];
+  const deferredTimers = [];
+  const animationFrames = [];
   const context = {
     console,
     canvas: { addEventListener() {}, classList: { add() {}, remove() {} } },
     boardCanvas: {},
-    document: { addEventListener() {}, removeEventListener() {} },
+    document: { activeElement: null, addEventListener() {}, removeEventListener() {} },
+    requestAnimationFrame(fn) {
+      animationFrames.push(fn);
+      return animationFrames.length;
+    },
+    setTimeout(fn) {
+      deferredTimers.push(fn);
+      return deferredTimers.length;
+    },
+    flushDeferredTasks() {
+      while (animationFrames.length || deferredTimers.length) {
+        const frames = animationFrames.splice(0);
+        for (const fn of frames) fn();
+        const timers = deferredTimers.splice(0);
+        for (const fn of timers) fn();
+      }
+    },
     objectsMap: new Map([[obj.id, obj]]),
     selectedIds,
     editingId: null,
     zoom: 1,
     entered: [],
+    enterOptions: [],
     history: [],
     menus: [],
     selections: [],
@@ -43,8 +62,10 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     updateSelectionOverlay() {},
     markDirty(id) { context.dirty = id; },
     pushHistory(reason) { context.history.push(reason); },
-    enterEdit(id) {
+    enterEdit(id, options = {}) {
       context.entered.push(id);
+      context.enterOptions.push({ ...(options || {}) });
+      context.editingId = id;
       context._editEl = context.editProxy;
     },
     editProxy: {
@@ -53,7 +74,10 @@ function loadCanvasInputHarness({ selected = true } = {}) {
       value: 'hello',
       selectionStart: 0,
       selectionEnd: 0,
-      focus() { this.focused = true; },
+      focus() {
+        this.focused = true;
+        context.document.activeElement = this;
+      },
       setSelectionRange(start, end) {
         this.selection = [start, end];
         this.selectionStart = start;
@@ -215,8 +239,11 @@ test('click-release on an already selected text object enters edit mode', () => 
   context.latestDrag().up({ clientX: 32, clientY: 42 });
 
   assert.deepEqual(context.entered, ['text-1']);
-  assert.equal(context.editProxy.focused, true);
+  assert.deepEqual(context.enterOptions, [{ placeInitialCaret: false }]);
   assert.deepEqual(context.editProxy.selection, [3, 3]);
+  assert.equal(context.editProxy.focused, false);
+  context.flushDeferredTasks();
+  assert.equal(context.editProxy.focused, true);
   assert.deepEqual(context.hitPoint, { x: 32, y: 42 });
   assert.deepEqual(context.history, []);
 });

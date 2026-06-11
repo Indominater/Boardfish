@@ -94,6 +94,49 @@
     return 0;
   }
 
+  function textDataForJsonEstimate(data = {}) {
+    const content = typeof data.content === 'string' ? data.content : '';
+    const result = { content };
+    if (Array.isArray(data.lineAlign) && data.lineAlign.length) result.lineAlign = [...data.lineAlign];
+    if (Array.isArray(data.scriptRanges) && data.scriptRanges.length) {
+      const scriptRanges = [];
+      for (const range of data.scriptRanges) {
+        const kind = range?.kind === 'sup' || range?.kind === 'sub' ? range.kind : '';
+        if (!kind) continue;
+        scriptRanges.push({
+          start: Math.max(0, Math.trunc(Number(range?.start)) || 0),
+          end: Math.max(0, Math.trunc(Number(range?.end)) || 0),
+          kind,
+        });
+      }
+      if (scriptRanges.length) result.scriptRanges = scriptRanges;
+    }
+    return result;
+  }
+
+  function imageDataForJsonEstimate(data = {}) {
+    return {
+      imgKey: typeof data.imgKey === 'string' ? data.imgKey : '',
+      flipX: !!data.flipX,
+      flipY: !!data.flipY,
+      rotation: Number.isFinite(data.rotation) ? data.rotation : 0,
+    };
+  }
+
+  function objectForJsonEstimate(obj = {}) {
+    const type = obj.type === 'image' ? 'image' : 'text';
+    return {
+      id: typeof obj.id === 'string' ? obj.id : '',
+      type,
+      x: Number.isFinite(obj.x) ? obj.x : 0,
+      y: Number.isFinite(obj.y) ? obj.y : 0,
+      w: Number.isFinite(obj.w) ? obj.w : 1,
+      h: Number.isFinite(obj.h) ? obj.h : 1,
+      z: Number.isFinite(obj.z) ? obj.z : 0,
+      data: type === 'image' ? imageDataForJsonEstimate(obj.data) : textDataForJsonEstimate(obj.data),
+    };
+  }
+
   function referencedImageKeys() {
     if (root.BoardfishBoardDocument?.referencedImageKeys && Array.isArray(root.objects)) {
       return root.BoardfishBoardDocument.referencedImageKeys(root.objects);
@@ -112,9 +155,11 @@
   function currentBoardJsonEstimateBytes(additionalObjectCount = 0) {
     try {
       const objects = Array.isArray(root.objects) ? root.objects : [];
+      const cleanObjects = objects.map(objectForJsonEstimate);
+      for (let i = 0; i < additionalObjectCount; i++) cleanObjects.push({});
       return JSON.stringify({
         viewport: { panX: root.panX || 0, panY: root.panY || 0, zoom: root.zoom || 1 },
-        objects: additionalObjectCount ? objects.concat(new Array(additionalObjectCount).fill({})) : objects,
+        objects: cleanObjects,
       }).length + 1024;
     } catch (_) {
       return 1024;

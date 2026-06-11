@@ -78,7 +78,7 @@ test('text script ranges hide the marker and draw following text smaller', () =>
   const textLayout = loadTextLayout();
   const calls = [];
   const context = {
-    font: "400 16px 'Geist Sans', system-ui",
+    font: "normal 400 16px 'Geist Sans', system-ui",
     fillText(text, x, y) {
       calls.push({ text, x, y, font: this.font });
     },
@@ -99,7 +99,7 @@ test('text script ranges hide the marker and draw following text smaller', () =>
 
   textLayout.drawTextLineRange(context, line, obj);
 
-  assert.deepEqual(calls.map((call) => call.text), ['a', 'bc']);
+  assert.deepEqual(calls.map((call) => call.text), ['a', 'b', 'c']);
   assert.equal(calls[0].x, 14);
   assert.equal(calls[1].x, 15);
   assert.ok(calls[1].y < calls[0].y);
@@ -215,7 +215,7 @@ test('existing scripts stay rich after a pending base marker is inserted before 
   const textLayout = loadTextLayout();
   const calls = [];
   const context = {
-    font: "400 16px 'Geist Sans', system-ui",
+    font: "normal 400 16px 'Geist Sans', system-ui",
     fillText(text, x, y) {
       calls.push({ text, x, y, font: this.font });
     },
@@ -236,15 +236,15 @@ test('existing scripts stay rich after a pending base marker is inserted before 
 
   textLayout.drawTextLineRange(context, line, obj);
 
-  assert.deepEqual(calls.map((call) => call.text), ['e_', '2']);
-  assert.ok(calls[1].y < calls[0].y);
+  assert.deepEqual(calls.map((call) => call.text), ['e', '_', '2']);
+  assert.ok(calls[2].y < calls[0].y);
 });
 
 test('braced text script ranges hide marker and braces while copying canonical text', () => {
   const textLayout = loadTextLayout();
   const calls = [];
   const context = {
-    font: "400 16px 'Geist Sans', system-ui",
+    font: "normal 400 16px 'Geist Sans', system-ui",
     fillText(text, x, y) {
       calls.push({ text, x, y, font: this.font });
     },
@@ -264,7 +264,7 @@ test('braced text script ranges hide marker and braces while copying canonical t
 
   textLayout.drawTextLineRange(context, line, obj);
 
-  assert.deepEqual(calls.map((call) => call.text), ['a', 'i', '+b', '2']);
+  assert.deepEqual(calls.map((call) => call.text), ['a', 'i', '+', 'b', '2']);
   assert.deepEqual(JSON.parse(JSON.stringify(obj.data.scriptRanges)), [
     { start: 2, end: 5, kind: 'sub' },
     { start: 8, end: 11, kind: 'sup' },
@@ -297,7 +297,7 @@ test('braced compound script stays rich while the caret is inside the compound',
   const drawTextsAtCaret = (caret, { editing = true } = {}) => {
     const calls = [];
     const context = {
-      font: "400 16px 'Geist Sans', system-ui",
+      font: "normal 400 16px 'Geist Sans', system-ui",
       fillText(text) { calls.push(text); },
     };
     obj._textEditCaretIndex = caret;
@@ -307,11 +307,11 @@ test('braced compound script stays rich while the caret is inside the compound',
     return calls;
   };
 
-  assert.deepEqual(drawTextsAtCaret(0), ['e', 'x', '2', '+1']);
-  assert.deepEqual(drawTextsAtCaret(6), ['e', 'x', '2', '+1']);
-  assert.deepEqual(drawTextsAtCaret(obj.data.content.length), ['e', 'x', '2', '+1']);
+  assert.deepEqual(drawTextsAtCaret(0), ['e', 'x', '2', '+', '1']);
+  assert.deepEqual(drawTextsAtCaret(6), ['e', 'x', '2', '+', '1']);
+  assert.deepEqual(drawTextsAtCaret(obj.data.content.length), ['e', 'x', '2', '+', '1']);
 
-  assert.deepEqual(drawTextsAtCaret(6, { editing: false }), ['e', 'x', '2', '+1']);
+  assert.deepEqual(drawTextsAtCaret(6, { editing: false }), ['e', 'x', '2', '+', '1']);
 });
 
 test('rich script layout stays stable while editing inside it', () => {
@@ -349,7 +349,7 @@ test('text script ranges can nest with cumulative scale and offsets', () => {
   const textLayout = loadTextLayout();
   const calls = [];
   const context = {
-    font: "400 16px 'Geist Sans', system-ui",
+    font: "normal 400 16px 'Geist Sans', system-ui",
     fillText(text, x, y) {
       calls.push({ text, x, y, font: this.font });
     },
@@ -387,7 +387,7 @@ test('text script nesting keeps third layer at second layer size', () => {
   const textLayout = loadTextLayout();
   const calls = [];
   const context = {
-    font: "400 16px 'Geist Sans', system-ui",
+    font: "normal 400 16px 'Geist Sans', system-ui",
     fillText(text, x, y) {
       calls.push({ text, x, y, font: this.font });
     },
@@ -423,7 +423,7 @@ test('text script markers require a following non-space character', () => {
   const textLayout = loadTextLayout();
   const calls = [];
   const context = {
-    font: "400 16px 'Geist Sans', system-ui",
+    font: "normal 400 16px 'Geist Sans', system-ui",
     fillText(text, x, y) {
       calls.push({ text, x, y, font: this.font });
     },
@@ -445,8 +445,8 @@ test('text script markers require a following non-space character', () => {
 
   assert.deepEqual(Array.from(textLayout.normalizeTextScriptRangesForContent('a^', [{ start: 2, end: 2, kind: 'sup' }])), []);
   assert.deepEqual(Array.from(textLayout.normalizeTextScriptRangesForContent('a^ b', [{ start: 2, end: 4, kind: 'sup' }])), []);
-  assert.deepEqual(calls.map((call) => call.text), ['a^ b']);
-  assert.equal(calls[0].font, "400 16px 'Geist Sans', system-ui");
+  assert.deepEqual(calls.map((call) => call.text), ['a', '^', ' ', 'b']);
+  assert.equal(calls[0].font, "normal 400 16px 'Geist Sans', system-ui");
 });
 
 test('space after a script exit uses normal text spacing', () => {
@@ -494,6 +494,7 @@ test('text tab drawing leaves tab glyphs invisible and positions later chunks at
 
   assert.deepEqual(calls, [
     { text: 'a', x: 14, y: 20 },
-    { text: 'bc', x: 22, y: 20 },
+    { text: 'b', x: 22, y: 20 },
+    { text: 'c', x: 23, y: 20 },
   ]);
 });

@@ -55,6 +55,7 @@ function loadTextScriptEditorHelpers() {
     BoardfishMotion: {
       applyActionAnimation(action) { context.animations.push(action); },
     },
+    shouldCommitTextEditInputImmediately() { return false; },
     flushEditHistoryCheckpoint() { context.flushedHistory = true; return false; },
     invalidateOffscreen() {},
     markDirty(id) { context.dirty.push(id); },
@@ -81,8 +82,11 @@ function loadTextScriptEditorHelpers() {
       'globalThis.moveTextEditCaretScriptLayer = moveTextEditCaretScriptLayer;\n' +
       'globalThis.textEditVisibleSelectionDeleteRange = textEditVisibleSelectionDeleteRange;\n' +
       'globalThis.textEditVisibleDeleteRange = textEditVisibleDeleteRange;\n' +
+      'globalThis.textEditBlankLineDeleteRange = textEditBlankLineDeleteRange;\n' +
       'globalThis.textEditScriptMarkerInsertionIndexAt = textEditScriptMarkerInsertionIndexAt;\n' +
-      'globalThis.transformTextScriptRangesForInput = transformTextScriptRangesForInput;\n',
+      'globalThis.transformTextScriptRangesForInput = transformTextScriptRangesForInput;\n' +
+      'globalThis.replaceTextEditProxyRange = replaceTextEditProxyRange;\n' +
+      'globalThis.tryNativeBoardfishTextSelectionPaste = tryNativeBoardfishTextSelectionPaste;\n',
     context,
     { filename: 'text_script_editor_helpers.js' },
   );
@@ -798,6 +802,473 @@ test('Boardfish text selection paste shifts copied script ranges into destinatio
   ]);
 });
 
+test('plain text paste outside existing script ranges avoids whole-text script normalization', () => {
+  const { transformTextScriptRangesForInput } = loadTextScriptEditorHelpers();
+  const prefix = 'alpha '.repeat(1200);
+  const suffix = ' omega'.repeat(800);
+  const markerIndex = prefix.length + 1;
+  const oldValue = `${prefix}x^{abc}${suffix}`;
+  const insertedText = 'external text\nwithout script ranges ';
+  const result = transformTextScriptRangesForInput([
+    { start: markerIndex + 1, end: markerIndex + 6, kind: 'sup' },
+  ], {
+    oldValue,
+    newValue: `${oldValue.slice(0, 100)}${insertedText}${oldValue.slice(100)}`,
+    start: 100,
+    end: 100,
+    insertedText,
+    insertedScriptRanges: [],
+  });
+
+  assert.equal(result.fastPath, 'plain-outside-script-ranges');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ranges)), [
+    {
+      start: markerIndex + 1 + insertedText.length,
+      end: markerIndex + 6 + insertedText.length,
+      kind: 'sup',
+    },
+  ]);
+});
+
+test('plain text paste after script end avoids whole-text script normalization', () => {
+  const { transformTextScriptRangesForInput } = loadTextScriptEditorHelpers();
+  const oldValue = `x^{abc}${' tail'.repeat(1200)}`;
+  const insertedText = ' external text\nwithout script ranges ';
+  const result = transformTextScriptRangesForInput([
+    { start: 2, end: 7, kind: 'sup' },
+  ], {
+    oldValue,
+    newValue: `${oldValue.slice(0, 7)}${insertedText}${oldValue.slice(7)}`,
+    start: 7,
+    end: 7,
+    insertedText,
+    insertedScriptRanges: [],
+    caretAffinity: 'after',
+  });
+
+  assert.equal(result.fastPath, 'plain-outside-script-ranges');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ranges)), [
+    { start: 2, end: 7, kind: 'sup' },
+  ]);
+});
+
+test('plain text paste before script marker avoids whole-text script normalization', () => {
+  const { transformTextScriptRangesForInput } = loadTextScriptEditorHelpers();
+  const oldValue = `x^{abc}${' tail'.repeat(1200)}`;
+  const insertedText = 'external text ';
+  const result = transformTextScriptRangesForInput([
+    { start: 2, end: 7, kind: 'sup' },
+  ], {
+    oldValue,
+    newValue: `${oldValue.slice(0, 1)}${insertedText}${oldValue.slice(1)}`,
+    start: 1,
+    end: 1,
+    insertedText,
+    insertedScriptRanges: [],
+  });
+
+  assert.equal(result.fastPath, 'plain-outside-script-ranges');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ranges)), [
+    { start: 2 + insertedText.length, end: 7 + insertedText.length, kind: 'sup' },
+  ]);
+});
+
+test('external paste with script marker characters derives local ranges without whole-text normalization', () => {
+  const { transformTextScriptRangesForInput } = loadTextScriptEditorHelpers();
+  const prefix = 'alpha '.repeat(1200);
+  const suffix = ' omega'.repeat(800);
+  const oldRangeStart = prefix.length + 2;
+  const oldRangeEnd = prefix.length + 7;
+  const oldValue = `${prefix}x^{abc}${suffix}`;
+  const insertedText = 'plain z^{2} and q_{n} text';
+  const start = 100;
+  const result = transformTextScriptRangesForInput([
+    { start: oldRangeStart, end: oldRangeEnd, kind: 'sup' },
+  ], {
+    oldValue,
+    newValue: `${oldValue.slice(0, start)}${insertedText}${oldValue.slice(start)}`,
+    start,
+    end: start,
+    insertedText,
+    insertedScriptRanges: [],
+  });
+  const insertedSupStart = start + insertedText.indexOf('^{') + 1;
+  const insertedSubStart = start + insertedText.indexOf('_{') + 1;
+
+  assert.equal(result.fastPath, 'plain-local-script-ranges');
+  assert.equal(result.insertedMayCreateScriptRange, true);
+  assert.equal(result.localDerivedRangeCount, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ranges)), [
+    { start: insertedSupStart, end: insertedSupStart + 3, kind: 'sup' },
+    { start: insertedSubStart, end: insertedSubStart + 3, kind: 'sub' },
+    {
+      start: oldRangeStart + insertedText.length,
+      end: oldRangeEnd + insertedText.length,
+      kind: 'sup',
+    },
+  ]);
+});
+
+test('external paste can create script range across paste boundary using local scan', () => {
+  const { transformTextScriptRangesForInput } = loadTextScriptEditorHelpers();
+  const oldValue = `${'alpha '.repeat(400)}x`;
+  const insertedText = '^{2}';
+  const result = transformTextScriptRangesForInput([], {
+    oldValue,
+    newValue: `${oldValue}${insertedText}`,
+    start: oldValue.length,
+    end: oldValue.length,
+    insertedText,
+    insertedScriptRanges: [],
+  });
+
+  assert.equal(result.fastPath, 'plain-local-script-ranges');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ranges)), [
+    { start: oldValue.length + 1, end: oldValue.length + 4, kind: 'sup' },
+  ]);
+});
+
+test('large text paste proxy replacement assigns value directly instead of setRangeText', () => {
+  const { replaceTextEditProxyRange } = loadTextScriptEditorHelpers();
+  let setRangeTextCalled = false;
+  const largePrefix = 'a'.repeat(25000);
+  const proxy = {
+    value: `${largePrefix}tail`,
+    selectionStart: 0,
+    selectionEnd: 0,
+    setSelectionRange(start, end, direction = 'none') {
+      this.selectionStart = start;
+      this.selectionEnd = end;
+      this.selectionDirection = direction;
+    },
+    setRangeText() {
+      setRangeTextCalled = true;
+    },
+  };
+  const result = replaceTextEditProxyRange(proxy, 'PASTE', largePrefix.length, largePrefix.length, 'end');
+
+  assert.equal(setRangeTextCalled, false);
+  assert.equal(result.method, 'value');
+  assert.equal(proxy.value, `${largePrefix}PASTEtail`);
+  assert.equal(proxy.selectionStart, largePrefix.length + 'PASTE'.length);
+  assert.equal(proxy.selectionEnd, largePrefix.length + 'PASTE'.length);
+});
+
+test('large synthetic proxy replacement can defer the textarea DOM value', () => {
+  const { replaceTextEditProxyRange } = loadTextScriptEditorHelpers();
+  let setRangeTextCalled = false;
+  const largeText = `${'a'.repeat(25000)}tail`;
+  const proxy = {
+    value: largeText,
+    selectionStart: 0,
+    selectionEnd: 0,
+    setSelectionRange(start, end, direction = 'none') {
+      this.selectionStart = start;
+      this.selectionEnd = end;
+      this.selectionDirection = direction;
+    },
+    setRangeText() {
+      setRangeTextCalled = true;
+    },
+  };
+  const result = replaceTextEditProxyRange(proxy, '', 10, 30, 'start', { deferDomValue: true });
+
+  assert.equal(setRangeTextCalled, false);
+  assert.equal(result.method, 'logical');
+  assert.equal(proxy.value, largeText);
+  assert.equal(proxy._boardfishLogicalValue, `${largeText.slice(0, 10)}${largeText.slice(30)}`);
+  assert.equal(proxy._boardfishDomValueStale, true);
+  assert.equal(proxy.selectionStart, 10);
+  assert.equal(proxy.selectionEnd, 10);
+});
+
+test('small proxy replacement starts from logical text when DOM value is stale', () => {
+  const { replaceTextEditProxyRange } = loadTextScriptEditorHelpers();
+  const proxy = {
+    value: 'aXbc',
+    _boardfishLogicalValue: 'abc',
+    _boardfishDomValueStale: true,
+    selectionStart: 1,
+    selectionEnd: 1,
+    setSelectionRange(start, end, direction = 'none') {
+      this.selectionStart = start;
+      this.selectionEnd = end;
+      this.selectionDirection = direction;
+    },
+    setRangeText(text, start, end, selectionMode = 'preserve') {
+      this.value = this.value.slice(0, start) + text + this.value.slice(end);
+      if (selectionMode === 'end') {
+        const pos = start + text.length;
+        this.setSelectionRange(pos, pos, 'none');
+      }
+    },
+  };
+
+  const result = replaceTextEditProxyRange(proxy, 'X', 1, 1, 'end');
+
+  assert.equal(result.method, 'setRangeText');
+  assert.equal(result.domSyncedBeforeMutation, true);
+  assert.equal(proxy.value, 'aXbc');
+  assert.equal(proxy._boardfishLogicalValue, 'aXbc');
+  assert.equal(proxy._boardfishDomValueStale, false);
+  assert.equal(proxy.selectionStart, 2);
+  assert.equal(proxy.selectionEnd, 2);
+});
+
+test('verified Boardfish text selection paste can use native textarea insertion', () => {
+  const context = loadTextScriptEditorHelpers();
+  const { tryNativeBoardfishTextSelectionPaste } = context;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    data: { content: 'hello ' },
+  };
+  context.objectsMap = new Map([[obj.id, obj]]);
+  context.getJsClipboardWebToken = () => 'bf-token';
+  context.BoardfishClipboardIO = {
+    readBoardfishClipboardTokenFromEvent() {
+      return 'bf-token';
+    },
+  };
+  let historyAction = null;
+  context.beginTextEditHistoryAction = (id, state, options) => {
+    historyAction = { id, state, options };
+  };
+  let pendingState = null;
+  const proxy = {
+    value: 'hello ',
+    selectionStart: 6,
+    selectionEnd: 6,
+    selectionDirection: 'none',
+    _boardfishSetPendingInputState(state) {
+      pendingState = state;
+    },
+  };
+
+  const result = tryNativeBoardfishTextSelectionPaste(obj.id, proxy, {
+    type: 'text-selection',
+    text: 'PASTE',
+    scriptRanges: [],
+  }, {
+    event: { clipboardData: {} },
+    selection: { start: 6, end: 6, direction: 'none', hasSelection: false },
+    fallbackText: 'PASTE',
+    inputType: 'insertFromPaste',
+    debug: { id: 1 },
+  });
+
+  assert.equal(result.text, 'PASTE');
+  assert.deepEqual(Array.from(result.scriptRanges), []);
+  assert.equal(proxy.value, 'hello ');
+  assert.equal(pendingState.replacement.start, 6);
+  assert.equal(pendingState.replacement.end, 6);
+  assert.equal(pendingState.replacement.insertedText, 'PASTE');
+  assert.equal(pendingState.nativePasteEndMeta.path, 'jsClipboard-text-selection-native');
+  assert.equal(historyAction.id, obj.id);
+});
+
+test('native Boardfish paste keeps pending state through beforeinput', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const clipEvents = [];
+  context.ClipDebug = {
+    start(op, meta) {
+      const dbg = { id: clipEvents.length + 1, op };
+      clipEvents.push({ op, step: 'start', meta });
+      return dbg;
+    },
+    step(dbg, step, meta) {
+      clipEvents.push({ op: dbg.op, step, meta });
+    },
+    end(dbg, meta) {
+      clipEvents.push({ op: dbg.op, step: 'end', meta });
+    },
+  };
+  context.BoardfishClipboardIO = {
+    describeClipboardData() { return {}; },
+    readBoardfishClipboardTokenFromEvent() { return 'bf-token'; },
+    readClipboardTextFromEvent() { return 'P^{Q}'; },
+  };
+  context.getJsClipboardWebToken = () => 'bf-token';
+  context.jsClipboard = {
+    type: 'text-selection',
+    text: 'P^{Q}',
+    scriptRanges: [{ start: 2, end: 5, kind: 'sup' }],
+  };
+  obj.data = { content: 'hello ' };
+
+  context.enterEdit(obj.id, { history: false });
+  context.proxy.setSelectionRange(6, 6, 'none');
+  const paste = {
+    type: 'paste',
+    clipboardData: {},
+    cancelable: true,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+  };
+  context.proxy.dispatchEvent(paste);
+  assert.equal(paste.defaultPrevented, false);
+
+  const before = makeBeforeInputEvent('insertFromPaste', 'P^{Q}');
+  context.proxy.dispatchEvent(before);
+  assert.equal(before.prevented, false);
+  context.proxy.value = 'hello P^{Q}';
+  context.proxy.setSelectionRange(context.proxy.value.length, context.proxy.value.length, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste', data: 'P^{Q}' });
+
+  assert.equal(obj.data.content, 'hello P^{Q}');
+  assert.deepEqual(JSON.parse(JSON.stringify(obj.data.scriptRanges)), [
+    { start: 8, end: 11, kind: 'sup' },
+  ]);
+  assert.ok(clipEvents.some((event) => event.step === 'text-edit-input:end'));
+  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'jsClipboard-text-selection-native'));
+  assert.equal(clipEvents.some((event) => event.step === 'paste:text-edit-range-text-set'), false);
+});
+
+test('external paste with stale Boardfish clipboard can use native textarea insertion', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const clipEvents = [];
+  context.ClipDebug = {
+    start(op, meta) {
+      const dbg = { id: clipEvents.length + 1, op };
+      clipEvents.push({ op, step: 'start', meta });
+      return dbg;
+    },
+    step(dbg, step, meta) {
+      clipEvents.push({ op: dbg.op, step, meta });
+    },
+    end(dbg, meta) {
+      clipEvents.push({ op: dbg.op, step: 'end', meta });
+    },
+  };
+  context.BoardfishClipboardIO = {
+    describeClipboardData() { return {}; },
+    readBoardfishClipboardTokenFromEvent() { return ''; },
+    readClipboardTextFromEvent() { return 'outside text'; },
+  };
+  context.getJsClipboardWebToken = () => 'old-token';
+  context.jsClipboard = {
+    type: 'text-selection',
+    text: 'stale^{Boardfish}',
+    scriptRanges: [{ start: 6, end: 17, kind: 'sup' }],
+  };
+  obj.data = { content: 'hello ' };
+
+  context.enterEdit(obj.id, { history: false });
+  context.proxy.setSelectionRange(6, 6, 'none');
+  const paste = {
+    type: 'paste',
+    clipboardData: {},
+    cancelable: true,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+  };
+  context.proxy.dispatchEvent(paste);
+  assert.equal(paste.defaultPrevented, false);
+
+  const before = makeBeforeInputEvent('insertFromPaste', 'outside text');
+  context.proxy.dispatchEvent(before);
+  assert.equal(before.prevented, false);
+  context.proxy.value = 'hello outside text';
+  context.proxy.setSelectionRange(context.proxy.value.length, context.proxy.value.length, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste', data: 'outside text' });
+
+  assert.equal(obj.data.content, 'hello outside text');
+  assert.equal(obj.data.scriptRanges, undefined);
+  assert.ok(clipEvents.some((event) => event.step === 'paste:text-edit-native-textarea-skipped'));
+  assert.ok(clipEvents.some((event) => event.step === 'paste:text-edit-native-event-text-allowed'));
+  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'fallback-event-text-native'));
+  assert.equal(clipEvents.some((event) => event.step === 'paste:text-edit-range-text-set'), false);
+});
+
+test('paste after stale proxy restore uses logical text before copy', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const copiedTexts = [];
+  const jsClipboardWrites = [];
+  context.BoardfishClipboardIO = {
+    describeClipboardData() { return {}; },
+    readClipboardTextFromEvent() { return 'X'; },
+    copyTextToClipboard(text) {
+      copiedTexts.push(text);
+      return Promise.resolve({});
+    },
+  };
+  context.setJsClipboard = (value) => { jsClipboardWrites.push(value); };
+  obj.data = { content: 'hello removed' };
+
+  context.enterEdit(obj.id, { history: false });
+  obj.data.content = 'hello ';
+  context.proxy._boardfishSetLogicalValue('hello ', { domSynced: false });
+  context.proxy.setSelectionRange(6, 6, 'none');
+
+  const paste = {
+    type: 'paste',
+    clipboardData: {},
+    cancelable: true,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+  };
+  context.proxy.dispatchEvent(paste);
+
+  assert.equal(paste.defaultPrevented, true);
+  assert.equal(obj.data.content, 'hello X');
+  assert.equal(context.proxy.value, 'hello X');
+  assert.equal(context.proxy._boardfishLogicalValue, 'hello X');
+  assert.equal(context.proxy._boardfishDomValueStale, false);
+
+  context.proxy.setSelectionRange(0, context.proxy._boardfishLogicalValue.length, 'none');
+  const copy = makeKeyEvent('c');
+  copy.metaKey = true;
+  context.proxy.dispatchEvent(copy);
+
+  assert.equal(copy.prevented, true);
+  assert.deepEqual(copiedTexts, ['hello X']);
+  assert.equal(jsClipboardWrites.length, 1);
+  assert.equal(jsClipboardWrites[0].text, 'hello X');
+});
+
+test('external edit paste trims whitespace-only edge lines before insertion', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const rawPasteText = '\nline 1\n\nline 2\n';
+  context.BoardfishClipboardIO = {
+    describeClipboardData() { return {}; },
+    readBoardfishClipboardTokenFromEvent() { return ''; },
+    readClipboardTextFromEvent() { return rawPasteText; },
+  };
+  obj.data = { content: 'existing line 1\nexisting line 2\n\nexisting line 3' };
+
+  context.enterEdit(obj.id, { history: false });
+  const caret = obj.data.content.indexOf('\n\nexisting line 3') + 1;
+  context.proxy.setSelectionRange(caret, caret, 'none');
+  const paste = {
+    type: 'paste',
+    clipboardData: {},
+    cancelable: true,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+  };
+  context.proxy.dispatchEvent(paste);
+
+  assert.equal(paste.defaultPrevented, true);
+  assert.equal(
+    obj.data.content,
+    'existing line 1\nexisting line 2\nline 1\n\nline 2\nexisting line 3',
+  );
+  assert.equal(context.proxy.value, obj.data.content);
+  assert.equal(context.proxy.selectionStart, 'existing line 1\nexisting line 2\nline 1\n\nline 2'.length);
+});
+
 test('enter inside an existing script starts the new line at normal size', () => {
   const { exitTextScriptForLineBreak, transformTextScriptRangesForInput } = loadTextScriptEditorHelpers();
   const scriptRanges = [{ start: 2, end: 4, kind: 'sup' }];
@@ -958,6 +1429,7 @@ test('rich script caret navigation includes script layer boundary stops', () => 
     moveTextEditCaretScriptLayer,
     textEditVisibleSelectionDeleteRange,
     textEditVisibleDeleteRange,
+    textEditBlankLineDeleteRange,
     transformTextScriptRangesForInput,
   } = loadTextScriptEditorHelpers();
   const simpleObj = {
@@ -984,6 +1456,18 @@ test('rich script caret navigation includes script layer boundary stops', () => 
   };
   assert.deepEqual(JSON.parse(JSON.stringify(textEditVisibleSelectionDeleteRange(multiCharObj, { start: 2, end: 3 }))), { start: 2, end: 3 });
   assert.deepEqual(JSON.parse(JSON.stringify(textEditVisibleSelectionDeleteRange(multiCharObj, { start: 2, end: 4 }))), { start: 1, end: 4 });
+
+  const blankLineText = 'line 1\n  \nline 2';
+  assert.deepEqual(JSON.parse(JSON.stringify(textEditBlankLineDeleteRange(blankLineText, 7, 'Delete'))), {
+    start: 7,
+    end: 10,
+    insertedText: '',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(textEditBlankLineDeleteRange(blankLineText, 7, 'Backspace'))), {
+    start: 6,
+    end: 9,
+    insertedText: '',
+  });
 
   let oldValue = 'a^b';
   let newValue = 'a';
@@ -1189,6 +1673,73 @@ test('linear script text can be converted to canonical braces', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(result.ranges)), []);
 });
 
+test('plain delete inside script text avoids whole-text script normalization', () => {
+  const { transformTextScriptRangesForInput } = loadTextScriptEditorHelpers();
+  const prefix = 'alpha '.repeat(1200);
+  const suffix = ' omega'.repeat(800);
+  const target = 'x^{abcdefghij}';
+  const oldValue = `${prefix}${target}${suffix}`;
+  const rangeStart = prefix.length + 2;
+  const rangeEnd = prefix.length + target.length;
+  const deleteStart = prefix.length + 5;
+  const deleteEnd = prefix.length + 8;
+  const newValue = `${oldValue.slice(0, deleteStart)}${oldValue.slice(deleteEnd)}`;
+  const result = transformTextScriptRangesForInput([
+    { start: rangeStart, end: rangeEnd, kind: 'sup' },
+  ], {
+    oldValue,
+    newValue,
+    start: deleteStart,
+    end: deleteEnd,
+    insertedText: '',
+  });
+
+  assert.equal(result.fastPath, 'plain-delete-script-ranges');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ranges)), [
+    { start: rangeStart, end: rangeEnd - (deleteEnd - deleteStart), kind: 'sup' },
+  ]);
+});
+
+test('large plain delete before many script ranges stays on the outside fast path', () => {
+  const { transformTextScriptRangesForInput } = loadTextScriptEditorHelpers();
+  const prefix = 'alpha '.repeat(1200);
+  const removed = 'remove '.repeat(40);
+  let tail = '';
+  const ranges = [];
+  for (let i = 0; i < 1500; i++) {
+    const token = ` item${i}^{x}`;
+    const base = prefix.length + removed.length + tail.length;
+    ranges.push({
+      start: base + token.indexOf('{'),
+      end: base + token.length,
+      kind: 'sup',
+    });
+    tail += token;
+  }
+  const oldValue = `${prefix}${removed}${tail}`;
+  const newValue = `${prefix}${tail}`;
+  const result = transformTextScriptRangesForInput(ranges, {
+    oldValue,
+    newValue,
+    start: prefix.length,
+    end: prefix.length + removed.length,
+    insertedText: '',
+  });
+
+  assert.equal(result.fastPath, 'plain-outside-script-ranges');
+  assert.equal(result.ranges.length, ranges.length);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ranges[0])), {
+    start: ranges[0].start - removed.length,
+    end: ranges[0].end - removed.length,
+    kind: 'sup',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ranges.at(-1))), {
+    start: ranges.at(-1).start - removed.length,
+    end: ranges.at(-1).end - removed.length,
+    kind: 'sup',
+  });
+});
+
 test('tab indents the current text edit line', () => {
   const { applyTextEditLineIndent } = loadTextEditorHelpers();
 
@@ -1376,6 +1927,185 @@ test('text edit input resizes the textbox height in update mode', () => {
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
 
+test('typing after history restore uses logical text when proxy DOM value is stale', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'hello removed' };
+
+  context.enterEdit(obj.id, { history: false });
+  obj.data.content = 'hello ';
+  context.proxy._boardfishSetLogicalValue('hello ', { domSynced: false });
+  context.proxy.setSelectionRange(6, 6, 'none');
+
+  typeNativeText(context.proxy, 'X');
+
+  assert.equal(obj.data.content, 'hello X');
+  assert.equal(context.proxy.value, 'hello X');
+  assert.equal(context.proxy._boardfishLogicalValue, 'hello X');
+  assert.equal(context.proxy._boardfishDomValueStale, false);
+});
+
+test('delete input without beforeinput uses logical text when proxy DOM value is stale', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'abc' };
+
+  context.enterEdit(obj.id, { history: false });
+  obj.data.content = 'abc';
+  context.proxy.value = 'aXXbc';
+  context.proxy._boardfishSetLogicalValue('abc', { domSynced: false });
+  context.proxy.setSelectionRange(1, 1, 'none');
+
+  context.proxy.value = 'aXbc';
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'deleteContentForward' });
+
+  assert.equal(obj.data.content, 'ac');
+  assert.equal(context.proxy.value, 'ac');
+  assert.equal(context.proxy._boardfishLogicalValue, 'ac');
+  assert.equal(context.proxy._boardfishDomValueStale, false);
+  assert.equal(context.proxy.selectionStart, 1);
+  assert.equal(context.proxy.selectionEnd, 1);
+});
+
+test('delete removes an indented blank line in one keypress', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'line 1\n  \nline 2' };
+
+  context.enterEdit(obj.id, { history: false });
+  const blankLineStart = obj.data.content.indexOf('\n') + 1;
+  context.proxy.setSelectionRange(blankLineStart, blankLineStart, 'none');
+  obj._textEditCaretIndex = blankLineStart;
+  obj._textEditCaretLineStartIndex = blankLineStart;
+  const key = makeKeyEvent('Delete');
+
+  context.proxy.dispatchEvent(key);
+
+  assert.equal(key.prevented, true);
+  assert.equal(obj.data.content, 'line 1\nline 2');
+  assert.equal(context.proxy.value, 'line 1\nline 2');
+  assert.equal(context.proxy.selectionStart, blankLineStart);
+  assert.equal(context.proxy.selectionEnd, blankLineStart);
+  assert.equal(obj._textEditCaretIndex, blankLineStart);
+  assert.equal(obj._textEditCaretLineStartIndex, undefined);
+});
+
+test('large existing text edit defers auto-height until exit', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const largeText = `${'word '.repeat(4100)}tail`;
+  obj.data = { content: largeText };
+  obj.w = 800;
+  obj.h = 160;
+
+  context.enterEdit(obj.id, { history: false });
+  context.renders = [];
+  context.dirty = [];
+
+  const insertedText = ' pasted';
+  const nextValue = largeText + insertedText;
+  context.proxy._boardfishSetPendingInputState({
+    start: largeText.length,
+    end: largeText.length,
+    direction: 'none',
+    hasSelection: false,
+    value: largeText,
+    scriptRanges: [],
+    scriptCaretAffinity: '',
+    scriptCaretRanges: [],
+    inputType: 'insertFromPaste',
+    replacement: { start: largeText.length, end: largeText.length, insertedText },
+  });
+  context.proxy.value = nextValue;
+  context.proxy.setSelectionRange(nextValue.length, nextValue.length, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
+
+  assert.equal(obj.data.content, nextValue);
+  assert.equal(obj.h, 160);
+  assert.equal(obj._textEditPendingSizeSync, true);
+  assert.deepEqual(context.renders.at(-1), { board: true, overlay: false, reason: undefined });
+
+  context.exitEdit();
+  assert.notEqual(obj.h, 160);
+  assert.equal(obj._textEditPendingSizeSync, undefined);
+});
+
+test('perf text input trace records selected-content delete phases', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const steps = [];
+  context.ManualPerfDebug = {
+    isTextEditInputTraceActive(inputType) {
+      return String(inputType || '').startsWith('delete');
+    },
+    recordTextEditInputStep(step, meta) {
+      steps.push({ step, meta });
+    },
+  };
+  obj.data = { content: 'alpha beta gamma' };
+
+  context.enterEdit(obj.id, { history: false });
+  context.proxy.setSelectionRange(6, 10, 'forward');
+  const before = makeBeforeInputEvent('deleteContentBackward');
+  context.proxy.dispatchEvent(before);
+  assert.equal(before.prevented, false);
+
+  context.proxy.value = 'alpha gamma';
+  context.proxy.setSelectionRange(6, 6, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'deleteContentBackward' });
+
+  assert.equal(obj.data.content, 'alpha gamma');
+  assert.ok(steps.some((event) => event.step === 'beforeinput-state-ready'));
+  assert.ok(steps.some((event) => event.step === 'replacement-ready' && event.meta.removedChars === 4));
+  assert.ok(steps.some((event) => event.step === 'script-ranges-transformed'));
+  assert.ok(steps.some((event) => event.step === 'layout-patched' || event.step === 'layout-invalidated'));
+  assert.ok(steps.some((event) => event.step === 'history-recorded'));
+  assert.ok(steps.some((event) => event.step === 'render-scheduled'));
+  assert.ok(steps.some((event) => event.step === 'end'));
+  assert.deepEqual([...new Set(steps.map((event) => event.meta.seq).filter(Boolean))], [1]);
+});
+
+test('large keyboard structural delete avoids textarea setRangeText', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const largeText = `${'word '.repeat(5000)}tail`;
+  const steps = [];
+  context.ManualPerfDebug = {
+    isTextEditInputTraceActive(inputType) {
+      return String(inputType || '').startsWith('delete');
+    },
+    recordTextEditInputStep(step, meta) {
+      steps.push({ step, meta });
+    },
+  };
+  obj.data = { content: largeText };
+
+  context.enterEdit(obj.id, { history: false });
+  let setRangeTextCalls = 0;
+  const originalSetRangeText = context.proxy.setRangeText.bind(context.proxy);
+  context.proxy.setRangeText = (...args) => {
+    setRangeTextCalls++;
+    return originalSetRangeText(...args);
+  };
+  context.proxy.setSelectionRange(10, 30, 'forward');
+  const key = makeKeyEvent('Backspace');
+  context.proxy.dispatchEvent(key);
+
+  assert.equal(key.prevented, true);
+  assert.equal(setRangeTextCalls, 0);
+  assert.equal(obj.data.content, `${largeText.slice(0, 10)}${largeText.slice(30)}`);
+  assert.equal(context.proxy.value, largeText);
+  assert.equal(context.proxy._boardfishLogicalValue, obj.data.content);
+  assert.equal(context.proxy._boardfishDomValueStale, true);
+  assert.equal(context.proxy.selectionStart, 10);
+  assert.equal(context.proxy.selectionEnd, 10);
+  const mutationStep = steps.find((event) => event.step === 'keydown-delete-textarea-mutated');
+  assert.equal(mutationStep.meta.textareaMutationMethod, 'logical');
+  assert.equal(mutationStep.meta.domProxyChars, largeText.length);
+  assert.equal(mutationStep.meta.proxyChars, obj.data.content.length);
+  assert.equal(mutationStep.meta.nextChars, obj.data.content.length);
+});
+
 test('editing existing default-height text can shrink below the default new textbox height', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
@@ -1431,5 +2161,30 @@ test('exiting a newly created text box keeps default width when content fits', (
   assert.equal(context.obj.h, 32);
   assert.deepEqual(context.dirty, ['text-1']);
   assert.deepEqual(context.histories, ['text-height-change']);
+  assert.deepEqual(context.renders, [{ board: true, overlay: true }]);
+});
+
+test('exiting unchanged existing text keeps cached layout and skips size history', () => {
+  const context = loadExitEditHarness();
+  const cachedLayout = [{ text: 'Hi', startIndex: 0, endIndex: 2, nextStartIndex: 2 }];
+  Object.assign(context.obj, {
+    h: 32,
+    _editMinLines: 5,
+    _editStartContent: 'Hi',
+    _layoutCache: cachedLayout,
+    _layoutCacheContent: 'Hi',
+    _layoutCacheW: context.obj.w,
+    _layoutCacheScriptKey: '[]',
+    _layoutCacheAlignKey: '',
+    _layoutCacheY: context.obj.y,
+  });
+  context._editHistoryLastContent = 'Hi';
+
+  context.exitEdit();
+
+  assert.equal(context.obj._layoutCache, cachedLayout);
+  assert.deepEqual(context.dirty, []);
+  assert.deepEqual(context.histories, []);
+  assert.deepEqual(context.editHistoryPushes, ['text-1']);
   assert.deepEqual(context.renders, [{ board: true, overlay: true }]);
 });

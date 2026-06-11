@@ -19,7 +19,23 @@ function rebuildObjectsMap() {
 
 function newId() { return 'obj-' + (idCounter++); }
 
-function cloneObject(obj) {
+function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
+  if (!Array.isArray(sourceScriptRanges) || !sourceScriptRanges.length) return [];
+  if (typeof normalizeTextScriptRangesForContent === 'function') {
+    const sourceKey = JSON.stringify(sourceScriptRanges);
+    if (
+      Array.isArray(obj._textScriptRangesCache) &&
+      obj._textScriptRangesCacheContent === content &&
+      obj._textScriptRangesCacheSourceKey === sourceKey
+    ) {
+      return obj._textScriptRangesCache.map((range) => ({ ...range }));
+    }
+    return normalizeTextScriptRangesForContent(content, sourceScriptRanges);
+  }
+  return sourceScriptRanges.map((range) => ({ ...range }));
+}
+
+function cloneObject(obj, options = {}) {
   HistoryDebug.count('cloneObjectCalls');
   const data = obj.type === 'image'
     ? {
@@ -29,21 +45,23 @@ function cloneObject(obj) {
     : (() => {
         const content = normalizeTextContent(obj.data.content);
         const textData = { content };
-        if (typeof normalizeTextLineAlignForContent === 'function') {
-          const lineAlign = normalizeTextLineAlignForContent(content, obj.data.lineAlign);
-          if (lineAlign.length) textData.lineAlign = lineAlign;
-        } else if (Array.isArray(obj.data.lineAlign)) {
-          textData.lineAlign = [...obj.data.lineAlign];
+        const sourceLineAlign = obj.data?.lineAlign;
+        if (Array.isArray(sourceLineAlign) && sourceLineAlign.length) {
+          if (typeof normalizeTextLineAlignForContent === 'function') {
+            const lineAlign = normalizeTextLineAlignForContent(content, sourceLineAlign);
+            if (lineAlign.length) textData.lineAlign = lineAlign;
+          } else {
+            textData.lineAlign = [...sourceLineAlign];
+          }
         }
-        if (typeof normalizeTextScriptRangesForContent === 'function') {
-          const scriptRanges = normalizeTextScriptRangesForContent(content, obj.data.scriptRanges);
+        const sourceScriptRanges = obj.data?.scriptRanges;
+        if (Array.isArray(sourceScriptRanges) && sourceScriptRanges.length) {
+          const scriptRanges = cloneTextScriptRangesForObject(obj, content, sourceScriptRanges);
           if (scriptRanges.length) textData.scriptRanges = scriptRanges;
-        } else if (Array.isArray(obj.data.scriptRanges)) {
-          textData.scriptRanges = obj.data.scriptRanges.map((range) => ({ ...range }));
         }
         return textData;
       })();
-  return {
+  const cloned = {
     id: obj.id,
     type: obj.type,
     x: obj.x,
@@ -53,15 +71,23 @@ function cloneObject(obj) {
     z: obj.z,
     data,
   };
+  if (
+    options.runtimeTextCache === true &&
+    cloned.type === 'text' &&
+    typeof cloneTextObjectRuntimeCaches === 'function'
+  ) {
+    cloneTextObjectRuntimeCaches(obj, cloned);
+  }
+  return cloned;
 }
 
-function cloneObjects(list) {
+function cloneObjects(list, options = {}) {
   const dbg = HistoryDebug.start('cloneObjects', { objectCount: list.length });
   const t0 = performance.now();
   HistoryDebug.count('cloneObjectsCalls');
   HistoryDebug.count('clonedObjects', list.length);
   const clones = new Array(list.length);
-  for (let i = 0; i < list.length; i++) clones[i] = cloneObject(list[i]);
+  for (let i = 0; i < list.length; i++) clones[i] = cloneObject(list[i], options);
   const ms = performance.now() - t0;
   HistoryDebug.max('maxCloneObjectsMs', ms);
   HistoryDebug.end(dbg, { objectCount: list.length, ms });

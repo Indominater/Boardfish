@@ -283,7 +283,7 @@ test('text edit caret honors visual line preference at wrapped line start', () =
   ];
 
   assert.equal(context.drawCaret(canvasContext, obj, layout, 3), true);
-  assert.deepEqual(fillRects, [[14, 24, 2, 24]]);
+  assert.deepEqual(fillRects, [[13, 24, 2, 24]]);
 });
 
 test('text edit overlay draws only visible layout lines', () => {

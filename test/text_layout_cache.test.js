@@ -8,7 +8,10 @@ const vm = require('node:vm');
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-function loadTextLayout({ measureWidth = (text) => String(text).length } = {}) {
+function loadTextLayout({
+  measureWidth = (text) => String(text).length,
+  measureTextMetrics = null,
+} = {}) {
   const measured = [];
   const context = {
     document: {
@@ -19,11 +22,17 @@ function loadTextLayout({ measureWidth = (text) => String(text).length } = {}) {
               font: '',
               textBaseline: '',
               measureText(text) {
-                measured.push(String(text));
+                const value = String(text);
+                measured.push(value);
+                const width = measureWidth.call(this, value);
+                const extra = measureTextMetrics
+                  ? measureTextMetrics.call(this, value, { width })
+                  : {};
                 return {
-                  width: measureWidth(String(text)),
+                  width,
                   actualBoundingBoxAscent: 12,
                   actualBoundingBoxDescent: 4,
+                  ...extra,
                 };
               },
             };
@@ -32,6 +41,9 @@ function loadTextLayout({ measureWidth = (text) => String(text).length } = {}) {
       },
     },
     objects: [],
+    TextSelDebug: {
+      _logHit() {},
+    },
     invalidateOffscreen() {},
     scheduleRender() {},
     syncAllTextAutoHeights() {},
@@ -48,12 +60,34 @@ function loadTextLayout({ measureWidth = (text) => String(text).length } = {}) {
       getTextMinWidthWordSegment,
       getTextMinWidth,
       getTextLayout,
+      getTextLayoutForViewport,
+      getTextLayoutForLineRange,
+      getTextAutoHeight,
       getTextRenderedContentWidth,
+      syncTextAutoHeight,
+      prewarmTextObjectLayoutRuntimeCaches,
       applyTextLineAlignmentRange,
+      patchTextObjectLayoutAfterInput,
       clearTextLayoutCaches,
+      clearTextObjectLayoutRuntime,
       drawTextLineRange,
+      lineCaretXAtOffset,
       lineXAtOffset,
+      layoutHitTestCaret,
+      textScriptMetricsHiddenAt,
+      textScriptMetricsStateAt,
+      clearScriptIndexCache() { _scriptIndexCache.clear(); },
+      cloneTextObjectRuntimeCaches,
+      paragraphPrefixCacheSize(obj) { return obj?._textParagraphPrefixCache?.size || 0; },
+      hasObjectLayoutCache(obj) { return Array.isArray(obj?._layoutCache); },
+      wrappedLineCountCacheValue(obj) { return obj?._textWrappedLineCountCacheValue || 0; },
+      wrappedLineIndexCacheSize(obj) { return obj?._textWrappedLineIndexCache?.entries?.length || 0; },
+      wrappedLineIndexWidthCacheSize(obj) { return obj?._textWrappedLineIndexWidthCache?.size || 0; },
+      viewportRangeCacheSize(obj) { return obj?._textViewportLayoutRangeCache?.size || 0; },
+      viewportLineCacheSize(obj) { return obj?._textViewportLayoutLineCache?.size || 0; },
       get cache() { return _mwCache; },
+      get prefixCacheSize() { return _prefixCache.size; },
+      get scriptIndexCacheSize() { return _scriptIndexCache.size; },
       maxEntries: TEXT_MEASURE_CACHE_MAX_ENTRIES,
     };`,
     context,
@@ -69,7 +103,7 @@ test('text measurement cache evicts oldest entry without changing cache size', (
 
   assert.equal(textLayout.measureTextW('k0'), 2);
   assert.equal(textLayout.measureTextW('k0'), 2);
-  assert.equal(measured.length, initialMeasures + 1);
+  assert.equal(measured.length, initialMeasures + 2);
 
   for (let i = 1; i < textLayout.maxEntries; i++) {
     textLayout.measureTextW(`k${i}`);
@@ -96,23 +130,69 @@ test('text measurement cache clears with other measurement caches', () => {
   assert.equal(textLayout.cache.size, 0);
 });
 
-test('text measurement keeps ASCII arrow pairs out of font ligatures', () => {
+test('text measurement uses single-glyph advances for consistent spacing', () => {
   const { context, measured } = loadTextLayout({
     measureWidth(text) {
-      if (text === 'a->b' || text === 'x<-y') return 1;
+      if (text === 'YY' || text === 'XY' || text === 'XX') return 1;
       return String(text).length;
     },
   });
   const textLayout = context.__testTextLayout;
   const initialMeasures = measured.length;
 
-  assert.equal(textLayout.measureTextW('a->b'), 4);
-  assert.equal(textLayout.measureTextW('x<-y'), 4);
+  assert.equal(textLayout.measureTextW('YY'), 2);
+  assert.equal(textLayout.measureTextW('XY'), 2);
+  assert.equal(textLayout.measureTextW('XX'), 2);
 
-  assert.deepEqual(measured.slice(initialMeasures), ['a-', '>b', 'x<', '-y']);
+  assert.ok(!measured.slice(initialMeasures).includes('YY'));
+  assert.ok(!measured.slice(initialMeasures).includes('XY'));
+  assert.ok(!measured.slice(initialMeasures).includes('XX'));
 });
 
-test('text drawing splits ASCII arrow pairs before fillText', () => {
+test('text layout adds a small advance when neighboring glyph ink would touch', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length * 10;
+    },
+    measureTextMetrics(text, { width }) {
+      if (text === 'Y') {
+        return {
+          actualBoundingBoxLeft: 0,
+          actualBoundingBoxRight: width,
+        };
+      }
+      return {};
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'YY' },
+  };
+  const [line] = textLayout.getTextLayout(obj);
+  const calls = [];
+
+  assert.equal(textLayout.measureTextW('YY'), 20.5);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 1), 14.5);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 2), 24.5);
+
+  textLayout.drawTextLineRange({
+    font: '',
+    fillText(text, x, y) {
+      calls.push({ text, x, y });
+    },
+  }, line, obj);
+
+  assert.deepEqual(calls.map((call) => call.text), ['Y', 'Y']);
+  assert.deepEqual(calls.map((call) => call.x), [4, 14.5]);
+});
+
+test('text drawing places each glyph at measured prefix positions', () => {
   const { context } = loadTextLayout();
   const textLayout = context.__testTextLayout;
   const obj = {
@@ -134,7 +214,34 @@ test('text drawing splits ASCII arrow pairs before fillText', () => {
     },
   }, line, obj);
 
-  assert.deepEqual(calls.map((call) => call.text), ['a-', '>b c<', '-d']);
+  assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', ' ', 'c', '<', '-', 'd']);
+  assert.deepEqual(calls.map((call) => call.x), Array.from(line.prefixWidths.slice(0, -1)).map((x) => obj.x + 4 + x));
+});
+
+test('fast text drawing request preserves measured glyph positions', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-fast-pan',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'a->b c<-d' },
+  };
+  const [line] = textLayout.getTextLayout(obj);
+  const calls = [];
+
+  textLayout.drawTextLineRange({
+    font: '',
+    fillText(text, x, y) {
+      calls.push({ text, x, y });
+    },
+  }, line, obj, 0, line.text.length, { fast: true });
+
+  assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', ' ', 'c', '<', '-', 'd']);
+  assert.deepEqual(calls.map((call) => call.x), Array.from(line.prefixWidths.slice(0, -1)).map((x) => obj.x + 4 + x));
 });
 
 test('text minimum width uses the widest rendered word, not character count', () => {
@@ -216,6 +323,56 @@ test('text minimum width treats spaces between words as separators', () => {
     startOffset: 24,
     endOffset: 37,
   });
+});
+
+test('text minimum width builds prefix widths once per logical line', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const lines = Array.from({ length: 40 }, (_, index) => `indent ${index} unique-word-${index}`);
+  const obj = {
+    id: 'text-min-width-prefix-cache',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: lines.join('\n') },
+  };
+
+  assert.ok(textLayout.getTextMinWidth(obj) > 0);
+
+  assert.ok(textLayout.prefixCacheSize <= lines.length);
+});
+
+test('cloned text runtime caches preserve cached minimum width', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const source = {
+    id: 'source',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'alpha beta\n    wideword' },
+  };
+  const target = {
+    id: 'target',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: source.data.content },
+  };
+  const width = textLayout.getTextMinWidth(source);
+  const prefixCacheSize = textLayout.prefixCacheSize;
+
+  textLayout.cloneTextObjectRuntimeCaches(source, target);
+
+  assert.deepEqual(plain(target._textMinWidthWordSegmentCache), plain(source._textMinWidthWordSegmentCache));
+  assert.equal(textLayout.getTextMinWidth(target), width);
+  assert.equal(textLayout.prefixCacheSize, prefixCacheSize);
 });
 
 test('soft wrap after a full-width word consumes separator spaces', () => {
@@ -346,6 +503,78 @@ test('line alignment offsets caret positions within the text box', () => {
   assert.equal(textLayout.lineXAtOffset(line, obj, 0), 22);
 });
 
+test('text caret x centers between neighboring glyph ink bounds', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length * 10;
+    },
+    measureTextMetrics(text, { width }) {
+      if (text === 'X') {
+        return {
+          actualBoundingBoxLeft: -4,
+          actualBoundingBoxRight: 9,
+        };
+      }
+      return {
+        actualBoundingBoxLeft: 0,
+        actualBoundingBoxRight: width,
+      };
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'YX' },
+  };
+
+  const [line] = textLayout.getTextLayout(obj);
+
+  assert.equal(textLayout.lineXAtOffset(line, obj, 1), 14);
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 1), 16);
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 0), 4);
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 2), 24);
+});
+
+test('text caret x keeps logical positions next to whitespace', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length * 10;
+    },
+    measureTextMetrics(text, { width }) {
+      if (text === 'X') {
+        return {
+          actualBoundingBoxLeft: -4,
+          actualBoundingBoxRight: 9,
+        };
+      }
+      return {
+        actualBoundingBoxLeft: 0,
+        actualBoundingBoxRight: width,
+      };
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'Y X' },
+  };
+
+  const [line] = textLayout.getTextLayout(obj);
+
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 1), textLayout.lineXAtOffset(line, obj, 1));
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 2), textLayout.lineXAtOffset(line, obj, 2));
+});
+
 test('script-heavy text layout reuses paragraph prefix widths while wrapping', () => {
   const { context, measured } = loadTextLayout({
     measureWidth(text) {
@@ -384,4 +613,936 @@ test('script-heavy text layout reuses paragraph prefix widths while wrapping', (
   textLayout.getTextLayout(obj);
 
   assert.equal(measured.length, warmBefore);
+});
+
+test('large script-heavy hit testing reuses indexed script metrics', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const mathRun = 'alpha ^{beta_{gamma}} plus delta_{epsilon} ';
+  const content = Array.from({ length: 360 }, (_, i) => `${i} ${mathRun}`).join('\n');
+  const obj = {
+    id: 'large-script-hit',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 72,
+    h: 40,
+    data: { content },
+  };
+  const layout = textLayout.getTextLayout(obj);
+  const targetLine = layout.find((line, index) => index > layout.length / 2 && line.text.length) ||
+    layout.find((line) => line.text.length);
+
+  assert.ok(layout.length > 300);
+  assert.ok((obj.data.scriptRanges || []).length > 600);
+  assert.ok(targetLine);
+
+  textLayout.clearScriptIndexCache();
+  assert.equal(textLayout.scriptIndexCacheSize, 0);
+
+  const hitX = textLayout.lineXAtOffset(targetLine, obj, Math.min(4, targetLine.text.length));
+  const hitY = targetLine.y + 8;
+  const hit = textLayout.layoutHitTestCaret(layout, hitX, hitY, obj);
+
+  assert.ok(hit.index >= targetLine.startIndex);
+  assert.equal(textLayout.scriptIndexCacheSize, 0);
+
+  for (let i = 0; i < 100; i++) {
+    textLayout.layoutHitTestCaret(layout, hitX, hitY, obj);
+  }
+  assert.equal(textLayout.scriptIndexCacheSize, 0);
+});
+
+test('large script-heavy drawing reuses layout script metrics', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const mathRun = 'alpha ^{beta_{gamma}} plus delta_{epsilon} ';
+  const content = Array.from({ length: 360 }, (_, i) => `${i} ${mathRun}`).join('\n');
+  const obj = {
+    id: 'large-script-draw',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 72,
+    h: 40,
+    data: { content },
+  };
+  const layout = textLayout.getTextLayout(obj);
+  const drawContext = {
+    font: "normal 400 16px 'Geist Sans', system-ui",
+    fillText() {},
+  };
+
+  assert.ok(layout.length > 300);
+  assert.ok((obj.data.scriptRanges || []).length > 600);
+
+  textLayout.clearScriptIndexCache();
+  assert.equal(textLayout.scriptIndexCacheSize, 0);
+
+  for (const line of layout.slice(0, 120)) {
+    textLayout.drawTextLineRange(drawContext, line, obj);
+  }
+
+  assert.equal(textLayout.scriptIndexCacheSize, 0);
+});
+
+test('large plain text layout uses bounded measurement work', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 3000 }, (_, index) => `word${index}`).join(' ');
+  const obj = {
+    id: 'large-text',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 360,
+    h: 40,
+    data: { content },
+  };
+  const before = measured.length;
+
+  const layout = textLayout.getTextLayout(obj);
+  const coldMeasureCount = measured.length - before;
+
+  assert.ok(layout.length > 50);
+  assert.ok(
+    coldMeasureCount < content.length / 2,
+    `expected bounded measurement work, got ${coldMeasureCount} calls for ${content.length} chars`,
+  );
+  assert.equal(Object.hasOwn(layout[0], 'content'), false);
+});
+
+test('large text insertion patches cached layout instead of rebuilding every line', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const oldContent = Array.from(
+    { length: 220 },
+    (_, index) => `line ${index} alpha beta gamma delta epsilon zeta eta theta`,
+  ).join('\n');
+  const obj = {
+    id: 'large-incremental-layout',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 34,
+    h: 40,
+    data: { content: oldContent },
+  };
+  textLayout.getTextLayout(obj);
+  const beforePatchMeasures = measured.length;
+  const insertAt = oldContent.indexOf('gamma', oldContent.indexOf('line 110'));
+  const insertedText = 'inserted words\nwith another wrapped line ';
+  const newContent = `${oldContent.slice(0, insertAt)}${insertedText}${oldContent.slice(insertAt)}`;
+  obj.data.content = newContent;
+
+  assert.equal(textLayout.patchTextObjectLayoutAfterInput(obj, {
+    oldContent,
+    newContent,
+    start: insertAt,
+    end: insertAt,
+    insertedText,
+  }), true);
+
+  const patchedLayout = textLayout.getTextLayout(obj);
+  const patchMeasureCount = measured.length - beforePatchMeasures;
+  const fresh = {
+    id: 'large-incremental-layout-fresh',
+    type: 'text',
+    x: obj.x,
+    y: obj.y,
+    w: obj.w,
+    h: obj.h,
+    data: { content: newContent },
+  };
+  const freshLayout = textLayout.getTextLayout(fresh);
+  const comparable = (layout) => layout.map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    caretEndIndex: line.caretEndIndex,
+    nextStartIndex: line.nextStartIndex,
+    logicalLineIndex: line.logicalLineIndex,
+    y: line.y,
+    textY: line.textY,
+    align: line.align,
+  }));
+
+  assert.ok(patchedLayout.length > 300);
+  assert.deepEqual(comparable(patchedLayout), comparable(freshLayout));
+  assert.ok(
+    patchMeasureCount < 160,
+    `expected incremental patch to measure only affected lines, got ${patchMeasureCount}`,
+  );
+});
+
+test('blank line deletion patches cached layout to match a fresh layout', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length * 10;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const oldContent = 'line 1\n  \nline 2';
+  const newContent = 'line 1\nline 2';
+  const obj = {
+    id: 'blank-line-delete-layout',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 800,
+    h: 80,
+    data: { content: oldContent },
+  };
+  textLayout.getTextLayout(obj);
+  obj.data.content = newContent;
+
+  assert.equal(textLayout.patchTextObjectLayoutAfterInput(obj, {
+    oldContent,
+    newContent,
+    start: 7,
+    end: 10,
+    insertedText: '',
+  }), true);
+
+  const patchedLayout = textLayout.getTextLayout(obj);
+  const fresh = {
+    id: 'blank-line-delete-layout-fresh',
+    type: 'text',
+    x: obj.x,
+    y: obj.y,
+    w: obj.w,
+    h: obj.h,
+    data: { content: newContent },
+  };
+  const freshLayout = textLayout.getTextLayout(fresh);
+  const comparable = (layout) => layout.map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    caretEndIndex: line.caretEndIndex,
+    nextStartIndex: line.nextStartIndex,
+    logicalLineIndex: line.logicalLineIndex,
+    y: line.y,
+  }));
+
+  assert.deepEqual(comparable(patchedLayout), comparable(freshLayout));
+  assert.deepEqual(plain(comparable(patchedLayout)), [
+    { text: 'line 1', startIndex: 0, endIndex: 6, caretEndIndex: 6, nextStartIndex: 6, logicalLineIndex: 0, y: 4 },
+    { text: 'line 2', startIndex: 7, endIndex: 13, caretEndIndex: 13, nextStartIndex: 13, logicalLineIndex: 1, y: 28 },
+  ]);
+});
+
+test('large script text insertion patches script layout metrics incrementally', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  let oldContent = '';
+  const oldRanges = [];
+  for (let i = 0; i < 160; i++) {
+    oldContent += `line${i} alpha`;
+    const marker = oldContent.length;
+    oldContent += '^x';
+    oldRanges.push({ start: marker + 1, end: marker + 2, kind: 'sup' });
+    oldContent += ' beta gamma delta epsilon\n';
+  }
+  const obj = {
+    id: 'large-script-incremental-layout',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 36,
+    h: 40,
+    data: { content: oldContent, scriptRanges: oldRanges.map((range) => ({ ...range })) },
+  };
+  textLayout.getTextLayout(obj);
+
+  const insertAt = oldContent.indexOf('line80');
+  const insertedText = 'paste^y words\nnext_z words ';
+  const insertedRanges = [
+    { start: insertedText.indexOf('y'), end: insertedText.indexOf('y') + 1, kind: 'sup' },
+    { start: insertedText.indexOf('z'), end: insertedText.indexOf('z') + 1, kind: 'sub' },
+  ];
+  const newContent = `${oldContent.slice(0, insertAt)}${insertedText}${oldContent.slice(insertAt)}`;
+  const newRanges = [
+    ...oldRanges.map((range) => (
+      range.start >= insertAt
+        ? { ...range, start: range.start + insertedText.length, end: range.end + insertedText.length }
+        : { ...range }
+    )),
+    ...insertedRanges.map((range) => ({
+      ...range,
+      start: range.start + insertAt,
+      end: range.end + insertAt,
+    })),
+  ].sort((a, b) => a.start - b.start || a.end - b.end);
+  obj.data.content = newContent;
+  obj.data.scriptRanges = newRanges.map((range) => ({ ...range }));
+  obj._textScriptRangesCache = newRanges.map((range) => ({ ...range }));
+  obj._textScriptRangesCacheContent = newContent;
+  obj._textScriptRangesCacheSourceKey = JSON.stringify(newRanges);
+
+  assert.equal(textLayout.patchTextObjectLayoutAfterInput(obj, {
+    oldContent,
+    newContent,
+    start: insertAt,
+    end: insertAt,
+    insertedText,
+  }), true);
+  assert.equal(obj._lastTextLayoutPatchDebug.scriptMetricsPatched, true);
+  assert.equal(obj._lastTextLayoutPatchDebug.scriptMetricsInsertedRangeCount, insertedRanges.length);
+
+  const patchedLayout = textLayout.getTextLayout(obj);
+  const fresh = {
+    id: 'large-script-incremental-layout-fresh',
+    type: 'text',
+    x: obj.x,
+    y: obj.y,
+    w: obj.w,
+    h: obj.h,
+    data: {
+      content: newContent,
+      scriptRanges: newRanges.map((range) => ({ ...range })),
+    },
+  };
+  const freshLayout = textLayout.getTextLayout(fresh);
+  const comparable = (layout) => layout.map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    caretEndIndex: line.caretEndIndex,
+    nextStartIndex: line.nextStartIndex,
+    logicalLineIndex: line.logicalLineIndex,
+    prefixWidths: Array.from(line.prefixWidths || []),
+  }));
+
+  assert.deepEqual(comparable(patchedLayout), comparable(freshLayout));
+
+  const patchedMetrics = patchedLayout.find((line) => line._scriptMetrics)?._scriptMetrics;
+  const freshMetrics = freshLayout.find((line) => line._scriptMetrics)?._scriptMetrics;
+  for (const range of newRanges.slice(75, 85)) {
+    const markerIndex = range.start - 1;
+    assert.equal(textLayout.textScriptMetricsHiddenAt(patchedMetrics, markerIndex), textLayout.textScriptMetricsHiddenAt(freshMetrics, markerIndex));
+    assert.equal(textLayout.textScriptMetricsStateAt(patchedMetrics, range.start).key, textLayout.textScriptMetricsStateAt(freshMetrics, range.start).key);
+  }
+});
+
+test('large braced script text deletion patches script layout metrics incrementally', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  let oldContent = '';
+  const oldRanges = [];
+  for (let i = 0; i < 160; i++) {
+    oldContent += `line${i} alpha`;
+    const marker = oldContent.length;
+    oldContent += `^{script payload ${i} segment words}`;
+    oldRanges.push({ start: marker + 1, end: oldContent.length, kind: 'sup' });
+    oldContent += ' beta gamma delta epsilon\n';
+  }
+  const obj = {
+    id: 'large-script-delete-layout',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 36,
+    h: 40,
+    data: { content: oldContent, scriptRanges: oldRanges.map((range) => ({ ...range })) },
+  };
+  textLayout.getTextLayout(obj);
+
+  const targetRange = oldRanges[80];
+  const deleteStart = oldContent.indexOf('payload 80', targetRange.start);
+  const deleteEnd = deleteStart + 'payload 80 '.length;
+  const removedLength = deleteEnd - deleteStart;
+  const newContent = `${oldContent.slice(0, deleteStart)}${oldContent.slice(deleteEnd)}`;
+  const newRanges = oldRanges.map((range) => {
+    if (range.end <= deleteStart) return { ...range };
+    if (range.start >= deleteEnd) {
+      return { ...range, start: range.start - removedLength, end: range.end - removedLength };
+    }
+    assert.ok(range.start <= deleteStart && range.end > deleteEnd);
+    return { ...range, end: range.end - removedLength };
+  });
+  obj.data.content = newContent;
+  obj.data.scriptRanges = newRanges.map((range) => ({ ...range }));
+  obj._textScriptRangesCache = newRanges.map((range) => ({ ...range }));
+  obj._textScriptRangesCacheContent = newContent;
+  obj._textScriptRangesCacheSourceKey = JSON.stringify(newRanges);
+
+  assert.equal(textLayout.patchTextObjectLayoutAfterInput(obj, {
+    oldContent,
+    newContent,
+    start: deleteStart,
+    end: deleteEnd,
+    insertedText: '',
+  }), true);
+  assert.equal(obj._lastTextLayoutPatchDebug.scriptMetricsPatched, true);
+  assert.equal(obj._lastTextLayoutPatchDebug.scriptMetricsOperation, 'delete');
+  assert.equal(obj._lastTextLayoutPatchDebug.scriptMetricsDeletedRangeCount, 0);
+
+  const patchedLayout = textLayout.getTextLayout(obj);
+  const fresh = {
+    id: 'large-script-delete-layout-fresh',
+    type: 'text',
+    x: obj.x,
+    y: obj.y,
+    w: obj.w,
+    h: obj.h,
+    data: {
+      content: newContent,
+      scriptRanges: newRanges.map((range) => ({ ...range })),
+    },
+  };
+  const freshLayout = textLayout.getTextLayout(fresh);
+  const comparable = (layout) => layout.map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    caretEndIndex: line.caretEndIndex,
+    nextStartIndex: line.nextStartIndex,
+    logicalLineIndex: line.logicalLineIndex,
+    prefixWidths: Array.from(line.prefixWidths || []),
+  }));
+
+  assert.deepEqual(comparable(patchedLayout), comparable(freshLayout));
+
+  const patchedMetrics = patchedLayout.find((line) => line._scriptMetrics)?._scriptMetrics;
+  const freshMetrics = freshLayout.find((line) => line._scriptMetrics)?._scriptMetrics;
+  const newTargetRange = newRanges[80];
+  assert.equal(textLayout.textScriptMetricsHiddenAt(patchedMetrics, newTargetRange.start - 1), true);
+  assert.equal(textLayout.textScriptMetricsHiddenAt(patchedMetrics, newTargetRange.start), true);
+  assert.equal(textLayout.textScriptMetricsHiddenAt(patchedMetrics, newTargetRange.end - 1), true);
+  assert.equal(textLayout.textScriptMetricsStateAt(patchedMetrics, newTargetRange.start + 1).key, 'sup');
+  assert.equal(
+    textLayout.textScriptMetricsStateAt(patchedMetrics, newTargetRange.start + 1).key,
+    textLayout.textScriptMetricsStateAt(freshMetrics, newTargetRange.start + 1).key,
+  );
+});
+
+test('large plain text wrapping consumes separator spaces between wrapped words', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = `${'alpha '.repeat(90)}omega`;
+  const obj = {
+    id: 'large-wrap-spaces',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 'alpha'.length + 8,
+    h: 40,
+    data: { content },
+  };
+
+  const layout = textLayout.getTextLayout(obj);
+
+  assert.ok(layout.length > 80);
+  assert.equal(layout.at(-1).text, 'omega');
+  assert.ok(layout.slice(1).every((line) => !line.text.startsWith(' ')));
+  assert.ok(layout.every((line) => line.text.length > 0));
+});
+
+test('large plain text wrapping keeps fitting trailing spaces on the caret line', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = 'hi     '.repeat(80);
+  const obj = {
+    id: 'large-wrap-trailing-spaces',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 'hi  '.length + 8,
+    h: 40,
+    data: { content },
+  };
+
+  const lastLine = textLayout.getTextLayout(obj).at(-1);
+
+  assert.equal(lastLine.text, 'hi  ');
+  assert.equal(lastLine.caretEndIndex, content.length);
+  assert.equal(lastLine.nextStartIndex, content.length);
+});
+
+test('moving a large text object reuses cached layout measurements', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 1200 }, (_, index) => `word${index}`).join(' ');
+  const obj = {
+    id: 'moving-text',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 320,
+    h: 40,
+    data: { content },
+  };
+
+  const first = textLayout.getTextLayout(obj);
+  const measuredAfterFirst = measured.length;
+  const firstLineY = first[0].y;
+  obj.y = 240;
+
+  const second = textLayout.getTextLayout(obj);
+
+  assert.equal(second, first);
+  assert.equal(measured.length, measuredAfterFirst);
+  assert.notEqual(second[0].y, firstLineY);
+  assert.equal(second[0].y, obj.y + context.TEXT_PAD);
+});
+
+test('text auto-height reuses cached layout after wrapped-line cache is gone', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 1200 }, (_, index) => `word${index}`).join(' ');
+  const obj = {
+    id: 'auto-height-cache',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 320,
+    h: 1,
+    data: { content },
+  };
+  const layout = textLayout.getTextLayout(obj);
+  const measuredAfterLayout = measured.length;
+  textLayout.clearTextLayoutCaches({ objectLayout: false });
+
+  assert.equal(textLayout.syncTextAutoHeight(obj), true);
+
+  assert.equal(obj.h, layout.length * context.LINE_H + context.TEXT_PAD * 2);
+  assert.equal(measured.length, measuredAfterLayout);
+});
+
+test('text layout reuses prefix widths created while wrapping for auto-height', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 200 }, (_, index) => `word${index}`).join(' ');
+  const obj = {
+    id: 'layout-prefix-reuse',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 120,
+    h: 1,
+    data: { content },
+  };
+
+  assert.equal(textLayout.syncTextAutoHeight(obj), true);
+  const prefixCacheSizeAfterHeight = textLayout.prefixCacheSize;
+  const layout = textLayout.getTextLayout(obj);
+
+  assert.ok(layout.length > 1);
+  assert.equal(textLayout.prefixCacheSize, prefixCacheSizeAfterHeight);
+});
+
+test('scripted text reuses paragraph prefix widths across resized widths', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 80 }, (_, index) => `alpha ^{beta${index}} gamma delta`).join('\n');
+  const obj = {
+    id: 'script-prefix-resize',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 24,
+    h: 1,
+    data: { content },
+  };
+
+  const first = textLayout.getTextLayout(obj);
+  const measuredAfterFirst = measured.length;
+  const paragraphCacheSizeAfterFirst = textLayout.paragraphPrefixCacheSize(obj);
+  obj.w = 28;
+  const second = textLayout.getTextLayout(obj);
+  const minWidth = textLayout.getTextMinWidth(obj);
+
+  assert.ok(first.length > 80);
+  assert.ok(second.length > 80);
+  assert.ok(minWidth > 0);
+  assert.ok(paragraphCacheSizeAfterFirst > 0);
+  assert.equal(textLayout.paragraphPrefixCacheSize(obj), paragraphCacheSizeAfterFirst);
+  assert.equal(measured.length, measuredAfterFirst);
+});
+
+test('paragraph prefix cache survives layout clear during resize auto-height', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 40 }, (_, index) => `word ^{script${index}} tail`).join('\n');
+  const obj = {
+    id: 'script-prefix-clear',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 96,
+    h: 1,
+    data: { content },
+  };
+
+  textLayout.getTextLayout(obj);
+  const measuredAfterLayout = measured.length;
+  const paragraphCacheSizeAfterLayout = textLayout.paragraphPrefixCacheSize(obj);
+  obj.w = 104;
+  textLayout.clearTextObjectLayoutRuntime(obj, { script: false, minWidth: false, prefix: false });
+
+  assert.equal(textLayout.syncTextAutoHeight(obj), true);
+  assert.equal(textLayout.paragraphPrefixCacheSize(obj), paragraphCacheSizeAfterLayout);
+  assert.equal(measured.length, measuredAfterLayout);
+});
+
+test('auto-height keeps unwrapped logical lines exact without full layout cache', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 160 }, (_, index) => `line ${index} ^{script${index}} tail`).join('\n');
+  const obj = {
+    id: 'unwrapped-auto-height-count',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 120,
+    h: 1,
+    data: { content },
+  };
+
+  assert.equal(textLayout.syncTextAutoHeight(obj), true);
+  const count = textLayout.wrappedLineCountCacheValue(obj);
+  const viewportLayout = textLayout.getTextLayoutForViewport(obj, { y1: 0, y2: context.LINE_H * 5 });
+
+  assert.equal(count, 160);
+  assert.equal(obj.h, 160 * context.LINE_H + context.TEXT_PAD * 2);
+  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
+  assert.equal(viewportLayout.totalLines, 160);
+  assert.deepEqual(plain(viewportLayout.slice(0, 3).map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    logicalLineIndex: line.logicalLineIndex,
+    y: line.y,
+  }))), [
+    { text: 'line 0 ^{script0} tail', startIndex: 0, logicalLineIndex: 0, y: 4 },
+    { text: 'line 1 ^{script1} tail', startIndex: 23, logicalLineIndex: 1, y: 28 },
+    { text: 'line 2 ^{script2} tail', startIndex: 46, logicalLineIndex: 2, y: 52 },
+  ]);
+});
+
+test('viewport text layout matches full layout for visible lines', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 80 }, (_, index) => `line ${index} alpha beta gamma`).join('\n');
+  const obj = {
+    id: 'visible-layout',
+    type: 'text',
+    x: 0,
+    y: -120,
+    w: 36,
+    h: 1,
+    data: { content },
+  };
+  const full = textLayout.getTextLayout(obj);
+  const viewportRect = { y1: 120, y2: 240 };
+  const expected = full.filter((line) => line.y + context.LINE_H >= viewportRect.y1 && line.y <= viewportRect.y2);
+  textLayout.clearTextObjectLayoutRuntime(obj, { script: false, minWidth: false, prefix: false });
+  textLayout.syncTextAutoHeight(obj);
+
+  const visible = textLayout.getTextLayoutForViewport(obj, viewportRect);
+  const visibleInViewport = visible.filter((line) => line.y + context.LINE_H >= viewportRect.y1 && line.y <= viewportRect.y2);
+
+  assert.equal(visible.totalLines, full.length);
+  assert.deepEqual(plain(visibleInViewport.map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    y: line.y,
+    prefixWidths: Array.from(line.prefixWidths || []),
+  }))), plain(expected.map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    y: line.y,
+    prefixWidths: Array.from(line.prefixWidths || []),
+  }))));
+});
+
+test('auto-height count cache also stores line index for viewport reuse', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 120 }, (_, index) => `word ^{script${index}} tail`).join('\n');
+  const obj = {
+    id: 'visible-layout-cache',
+    type: 'text',
+    x: 0,
+    y: -400,
+    w: 42,
+    h: 1,
+    data: { content },
+  };
+
+  assert.equal(textLayout.syncTextAutoHeight(obj), true);
+  const count = textLayout.wrappedLineCountCacheValue(obj);
+  const indexEntriesBeforeViewport = textLayout.wrappedLineIndexCacheSize(obj);
+  const visible = textLayout.getTextLayoutForViewport(obj, { y1: 0, y2: 120 });
+
+  assert.ok(count > visible.length);
+  assert.equal(indexEntriesBeforeViewport, 120);
+  assert.equal(textLayout.wrappedLineIndexCacheSize(obj), 120);
+  assert.equal(visible.totalLines, count);
+  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
+  assert.ok(visible.length > 0);
+});
+
+test('auto-height reuses exact wrapped line index when resize revisits a width', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 120 }, (_, index) => `word ^{script${index}} tail`).join('\n');
+  const obj = {
+    id: 'revisited-width-auto-height',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 42,
+    h: 1,
+    data: { content },
+  };
+
+  assert.equal(textLayout.syncTextAutoHeight(obj), true);
+  const firstHeight = obj.h;
+  const firstLineCount = textLayout.wrappedLineCountCacheValue(obj);
+  const measuredAfterFirst = measured.length;
+
+  obj.w = 58;
+  textLayout.syncTextAutoHeight(obj);
+  assert.equal(textLayout.wrappedLineIndexWidthCacheSize(obj), 2);
+  assert.ok(measured.length >= measuredAfterFirst);
+
+  obj.w = 42;
+  obj.h = 1;
+  const measuredBeforeRevisit = measured.length;
+  assert.equal(textLayout.syncTextAutoHeight(obj), true);
+
+  assert.equal(obj.h, firstHeight);
+  assert.equal(textLayout.wrappedLineCountCacheValue(obj), firstLineCount);
+  assert.equal(textLayout.wrappedLineIndexWidthCacheSize(obj), 2);
+  assert.equal(measured.length, measuredBeforeRevisit);
+  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
+});
+
+test('viewport layout still supports count-only auto-height cache without full line index', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 90 }, (_, index) => `line ${index} alpha beta`).join('\n');
+  const obj = {
+    id: 'count-only-visible-layout-cache',
+    type: 'text',
+    x: 0,
+    y: -240,
+    w: 42,
+    h: 90 * context.LINE_H + context.TEXT_PAD * 2,
+    data: { content },
+    _textWrappedLineCountCacheContent: content,
+    _textWrappedLineCountCacheW: 42,
+    _textWrappedLineCountCacheScriptKey: '[]',
+    _textWrappedLineCountCacheValue: 90,
+  };
+
+  assert.equal(textLayout.wrappedLineIndexCacheSize(obj), 0);
+  assert.equal(textLayout.syncTextAutoHeight(obj), false);
+  assert.equal(textLayout.wrappedLineIndexCacheSize(obj), 0);
+  const visible = textLayout.getTextLayoutForViewport(obj, { y1: 0, y2: 120 });
+  assert.equal(visible.totalLines, 90);
+  assert.ok(visible.length > 0);
+  assert.equal(textLayout.wrappedLineIndexCacheSize(obj), 0);
+  assert.ok(textLayout.viewportLineCacheSize(obj) >= visible.length);
+  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
+});
+
+test('runtime prewarm fills paragraph prefixes without full layout cache', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 90 }, (_, index) => `line ${index} alpha beta gamma`).join('\n');
+  const obj = {
+    id: 'runtime-prefix-prewarm',
+    type: 'text',
+    x: 0,
+    y: -900,
+    w: 42,
+    h: 90 * context.LINE_H + context.TEXT_PAD * 2,
+    data: { content },
+  };
+
+  const prewarm = textLayout.prewarmTextObjectLayoutRuntimeCaches(obj);
+  const secondPrewarm = textLayout.prewarmTextObjectLayoutRuntimeCaches(obj);
+  const measuredAfterPrewarm = measured.length;
+  const visible = textLayout.getTextLayoutForViewport(obj, { y1: 0, y2: 120 });
+
+  assert.equal(prewarm.available, true);
+  assert.equal(prewarm.logicalLineEntries, 90);
+  assert.equal(secondPrewarm.skipped, 'warm');
+  assert.equal(secondPrewarm.processedLogicalLines, 0);
+  assert.equal(textLayout.paragraphPrefixCacheSize(obj), 90);
+  assert.equal(textLayout.wrappedLineIndexCacheSize(obj), 90);
+  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
+  assert.equal(visible.totalLines, 90);
+  assert.ok(visible.length > 0);
+  assert.equal(measured.length, measuredAfterPrewarm);
+});
+
+test('viewport line range layout is cached for repeated panning draws', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 100 }, (_, index) => `line ${index} alpha beta gamma`).join('\n');
+  const obj = {
+    id: 'viewport-range-cache',
+    type: 'text',
+    x: 0,
+    y: -360,
+    w: 42,
+    h: 100 * context.LINE_H + context.TEXT_PAD * 2,
+    data: { content },
+  };
+  const viewportRect = { y1: 0, y2: 120 };
+
+  const first = textLayout.getTextLayoutForViewport(obj, viewportRect);
+  const second = textLayout.getTextLayoutForViewport(obj, viewportRect);
+
+  assert.equal(textLayout.viewportRangeCacheSize(obj), 1);
+  assert.equal(second, first);
+  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
+  assert.ok(second.length > 0);
+});
+
+test('viewport line cache reuses prewarmed lines for shifted panning ranges', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 620 }, (_, index) => `line ${index} alpha beta gamma`).join('\n');
+  const obj = {
+    id: 'viewport-shifted-range-cache',
+    type: 'text',
+    x: 0,
+    y: -4800,
+    w: 42,
+    h: 620 * context.LINE_H + context.TEXT_PAD * 2,
+    data: { content },
+  };
+  const paddedRect = { y1: -240, y2: 9600 };
+  const shiftedRect = { y1: 0, y2: 120 };
+
+  const padded = textLayout.getTextLayoutForViewport(obj, paddedRect);
+  const shifted = textLayout.getTextLayoutForViewport(obj, shiftedRect);
+
+  assert.ok(textLayout.viewportLineCacheSize(obj) >= padded.length);
+  assert.ok(shifted.length > 0);
+  assert.ok(shifted.every((line) => padded.includes(line)));
+  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
+});
+
+test('viewport line cache keeps blank lines during full range prewarm', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const content = Array.from({ length: 120 }, (_, index) => (
+    index % 5 === 0 ? '' : `line ${index} alpha beta`
+  )).join('\n');
+  const obj = {
+    id: 'viewport-full-range-blank-lines',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 240,
+    h: 120 * context.LINE_H + context.TEXT_PAD * 2,
+    data: { content },
+  };
+
+  textLayout.prewarmTextObjectLayoutRuntimeCaches(obj);
+  const full = textLayout.getTextLayoutForLineRange(obj, 0, 119);
+
+  assert.equal(full.totalLines, 120);
+  assert.equal(full.length, 120);
+  assert.equal(textLayout.viewportLineCacheSize(obj), 120);
+  assert.equal(full.filter((line) => line.text === '').length, 24);
+  for (let i = 1; i < full.length; i++) {
+    assert.equal(full[i].y - full[i - 1].y, context.LINE_H);
+  }
+  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
 });

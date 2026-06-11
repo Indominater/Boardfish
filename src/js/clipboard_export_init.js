@@ -45,10 +45,27 @@ const trimPastedTextObjectContent = (obj) => {
   const content = textForTextObjectPaste(obj.data?.content);
   if (content === obj.data.content) return false;
   obj.data.content = content;
-  delete obj._layoutCache;
-  delete obj._layoutCacheKey;
+  if (typeof clearTextObjectLayoutRuntime === 'function') clearTextObjectLayoutRuntime(obj);
+  else {
+    delete obj._layoutCache;
+    delete obj._layoutCacheKey;
+  }
   syncTextAutoHeight(obj);
   return true;
+};
+
+const clipboardTextMetricsForObjects = (items = []) => {
+  let textObjectCount = 0;
+  let textCharCount = 0;
+  let largestTextChars = 0;
+  for (const obj of items || []) {
+    if (obj?.type !== 'text') continue;
+    textObjectCount++;
+    const chars = String(obj.data?.content || '').length;
+    textCharCount += chars;
+    largestTextChars = Math.max(largestTextChars, chars);
+  }
+  return { textObjectCount, textCharCount, largestTextChars };
 };
 
 const clipboardImageBlobName = (blob, fallback = 'clipboard-image') => {
@@ -69,6 +86,31 @@ const clipboardNow = () => (
   typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
     : Date.now()
+);
+
+const clipboardElapsedMs = (startedAt) => Math.round((clipboardNow() - startedAt) * 100) / 100;
+
+const clipboardTextStats = (value, scriptRanges = []) => {
+  const text = String(value ?? '');
+  const lines = text ? text.split('\n') : [];
+  let largestLineChars = 0;
+  for (const line of lines) largestLineChars = Math.max(largestLineChars, line.length);
+  const textBytes = typeof BoardfishWebLimits !== 'undefined' && typeof BoardfishWebLimits.textByteLength === 'function'
+    ? BoardfishWebLimits.textByteLength(text)
+    : (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length);
+  return {
+    textLen: text.length,
+    textLineCount: lines.length,
+    largestLineChars,
+    textBytes,
+    scriptRangeCount: Array.isArray(scriptRanges) ? scriptRanges.length : '',
+  };
+};
+
+const addTextPasteOptions = (dbg, options = {}) => (
+  typeof ClipDebug !== 'undefined' && ClipDebug.enabled === true
+    ? { ...options, debug: dbg }
+    : options
 );
 
 const webSourceClipboardMime = (source) => {
@@ -161,7 +203,7 @@ const copySelected = (options = {}) => {
       processed++;
       const obj = objectsMap.get(id);
       if (!obj) continue;
-      const cloned = cloneObject(obj);
+      const cloned = cloneObject(obj, { runtimeTextCache: obj.type === 'text' });
       if (cloned.type === 'image') {
         const imgKey = cloned.data.imgKey;
         const src = BoardfishImageStore.getSource(imgKey);
@@ -177,15 +219,29 @@ const copySelected = (options = {}) => {
           selectedCount: selectedIds.size,
           objectCount: clonedObjs.length,
           imageCount,
+          ...clipboardTextMetricsForObjects(clonedObjs),
         });
       }
     }
     if (!clonedObjs.length) { ClipDebug.end(dbg, { skipped: 'no-clones' }); return false; }
-    ClipDebug.step(dbg, 'copy:multi-set-jsClipboard-start', { objectCount: clonedObjs.length, imageCount });
+    ClipDebug.step(dbg, 'copy:multi-set-jsClipboard-start', {
+      objectCount: clonedObjs.length,
+      imageCount,
+      ...clipboardTextMetricsForObjects(clonedObjs),
+    });
     setJsClipboard({ type: 'objects', objects: clonedObjs, imageData });
     writeWebClipboardTokenForJsClipboard(dbg, { objectCount: clonedObjs.length, imageCount });
-    ClipDebug.step(dbg, 'copy:multi-set-jsClipboard-end', { objectCount: clonedObjs.length, imageCount });
-    ClipDebug.end(dbg, { path: 'multi-jsClipboard', objectCount: clonedObjs.length, imageCount });
+    ClipDebug.step(dbg, 'copy:multi-set-jsClipboard-end', {
+      objectCount: clonedObjs.length,
+      imageCount,
+      ...clipboardTextMetricsForObjects(clonedObjs),
+    });
+    ClipDebug.end(dbg, {
+      path: 'multi-jsClipboard',
+      objectCount: clonedObjs.length,
+      imageCount,
+      ...clipboardTextMetricsForObjects(clonedObjs),
+    });
     return true;
   }
 
@@ -197,24 +253,67 @@ const copySelected = (options = {}) => {
     }
   }
 
-  const cloned = cloneObject(obj);
+  const cloneStartedAt = clipboardNow();
+  const cloned = cloneObject(obj, { runtimeTextCache: obj.type === 'text' });
+  ClipDebug.step(dbg, 'copy:single-clone-done', {
+    type: obj.type,
+    ms: clipboardElapsedMs(cloneStartedAt),
+    ...(obj.type === 'text' ? clipboardTextStats(cloned.data?.content, cloned.data?.scriptRanges) : {}),
+  });
   const imgData = {};
   if (obj.type === 'image') {
     const src = BoardfishImageStore.getSource(obj.data.imgKey);
     if (src) imgData[obj.data.imgKey] = src;
   }
   setJsClipboard({ type: 'objects', objects: [cloned], imageData: imgData });
-  ClipDebug.step(dbg, 'set-jsClipboard', { type: obj.type, imgKey: obj.data?.imgKey, imageNeedsRendering: obj.type === 'image' ? imageNeedsRendering(obj) : false });
+  ClipDebug.step(dbg, 'set-jsClipboard', {
+    type: obj.type,
+    imgKey: obj.data?.imgKey,
+    imageNeedsRendering: obj.type === 'image' ? imageNeedsRendering(obj) : false,
+    ...(obj.type === 'text' ? clipboardTextStats(cloned.data?.content, cloned.data?.scriptRanges) : {}),
+  });
 
   if (obj.type === 'text') {
+    const payloadStartedAt = clipboardNow();
     const clipboardText = typeof textObjectContentForClipboard === 'function'
       ? textObjectContentForClipboard(obj)
       : textForClipboard(obj.data.content);
+    const textStats = clipboardTextStats(clipboardText, cloned.data?.scriptRanges);
+    ClipDebug.step(dbg, 'copy:text-payload-ready', {
+      sourceTextLen: String(obj.data?.content || '').length,
+      ms: clipboardElapsedMs(payloadStartedAt),
+      ...textStats,
+    });
     const webToken = globalThis.getJsClipboardWebToken?.() || '';
-    BoardfishClipboardIO.copyTextToClipboard(clipboardText, dbg, { boardfishToken: webToken })
+    const writeStartedAt = clipboardNow();
+    ClipDebug.step(dbg, 'copy:web-text-clipboard-write-start', {
+      boardfishToken: !!webToken,
+      ...textStats,
+    });
+    BoardfishClipboardIO.copyTextToClipboard(clipboardText, dbg, { boardfishToken: webToken, ...textStats })
       .then((result) => finishWebClipboardTokenWrite(result, webToken, dbg))
-      .catch((err) => console.error('[copy] writeText FAILED:', err))
-      .finally(() => ClipDebug.end(dbg, { path: 'text-web' }));
+      .then(() => {
+        ClipDebug.step(dbg, 'copy:web-text-clipboard-write-end', {
+          ms: clipboardElapsedMs(writeStartedAt),
+          ...textStats,
+        });
+      })
+      .catch((err) => {
+        ClipDebug.step(dbg, 'copy:web-text-clipboard-write-error', {
+          ms: clipboardElapsedMs(writeStartedAt),
+          error: String(err),
+          ...textStats,
+        });
+        console.error('[copy] writeText FAILED:', err);
+      })
+      .finally(() => ClipDebug.end(dbg, {
+        path: 'text-web',
+        objectCount: 1,
+        textObjectCount: 1,
+        textCharCount: textStats.textLen,
+        largestTextChars: textStats.textLen,
+        ...textStats,
+      }));
     return true;
   }
 
@@ -325,21 +424,42 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         const sourceObjects = jsClipboard.objects || [];
         const imgData = jsClipboard.imageData || {};
         const imgEntries = Object.entries(imgData);
-        ClipDebug.step(dbg, 'paste:objects-start', { objectCount: sourceObjects.length, imageCount: imgEntries.length });
+        ClipDebug.step(dbg, 'paste:objects-start', {
+          objectCount: sourceObjects.length,
+          imageCount: imgEntries.length,
+          ...clipboardTextMetricsForObjects(sourceObjects),
+        });
         const cloneStart = performance.now();
-        const clones = cloneObjects(sourceObjects);
-        ClipDebug.step(dbg, 'paste:clone-done', { objectCount: clones.length, ms: Math.round((performance.now() - cloneStart) * 100) / 100 });
+        const clones = cloneObjects(sourceObjects, { runtimeTextCache: true });
+        ClipDebug.step(dbg, 'paste:clone-done', {
+          objectCount: clones.length,
+          ms: Math.round((performance.now() - cloneStart) * 100) / 100,
+          ...clipboardTextMetricsForObjects(clones),
+        });
         if (!clones.length) { ClipDebug.end(dbg, { skipped: 'empty-jsClipboard' }); return; }
         let trimmedTextObjects = 0;
+        const trimStart = clipboardNow();
         for (const obj of clones) {
           if (trimPastedTextObjectContent(obj)) trimmedTextObjects++;
         }
-        if (trimmedTextObjects) ClipDebug.step(dbg, 'paste:text-trim-trailing-lines', { trimmedTextObjects });
-        if (!BoardfishWebLimits.canAddObjects(clones.length)) {
+        ClipDebug.step(dbg, 'paste:text-trim-done', {
+          trimmedTextObjects,
+          ms: clipboardElapsedMs(trimStart),
+          ...clipboardTextMetricsForObjects(clones),
+        });
+        const objectLimitStart = clipboardNow();
+        const canAddObjects = BoardfishWebLimits.canAddObjects(clones.length);
+        ClipDebug.step(dbg, 'paste:object-limit-done', {
+          objectCount: clones.length,
+          accepted: canAddObjects,
+          ms: clipboardElapsedMs(objectLimitStart),
+        });
+        if (!canAddObjects) {
           ClipDebug.end(dbg, { skipped: 'web-object-limit', objectCount: clones.length });
           return;
         }
         if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
+          const contentLimitStart = clipboardNow();
           const additionalImageBytes = imgEntries.reduce((sum, [key, src]) => (
             BoardfishImageStore.hasSource(key) ? sum : sum + BoardfishWebLimits.imageSourceByteLength(src)
           ), 0);
@@ -350,7 +470,17 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
               ? BoardfishWebLimits.textByteLength(text)
               : (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length));
           }, 0);
-          if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalImageBytes + additionalTextBytes, clones.length)) {
+          const canAcceptContent = BoardfishWebLimits.canAcceptAdditionalContentBytes(
+            additionalImageBytes + additionalTextBytes,
+            clones.length
+          );
+          ClipDebug.step(dbg, 'paste:content-limit-done', {
+            additionalImageBytes,
+            additionalTextBytes,
+            accepted: canAcceptContent,
+            ms: clipboardElapsedMs(contentLimitStart),
+          });
+          if (!canAcceptContent) {
             ClipDebug.end(dbg, { skipped: 'web-content-limit', additionalImageBytes, additionalTextBytes });
             return;
           }
@@ -358,6 +488,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         // Re-register image data in case we're on a different board
         let registeredImages = 0;
         let processedImages = 0;
+        const registerImagesStart = clipboardNow();
         for (const [key, src] of imgEntries) {
           processedImages++;
           if (!BoardfishImageStore.hasSource(key)) {
@@ -373,7 +504,11 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
             });
           }
         }
-        ClipDebug.step(dbg, 'paste:register-images-done', { imageCount: imgEntries.length, registeredImages });
+        ClipDebug.step(dbg, 'paste:register-images-done', {
+          imageCount: imgEntries.length,
+          registeredImages,
+          ms: clipboardElapsedMs(registerImagesStart),
+        });
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const o of clones) {
           minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
@@ -384,7 +519,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         const pastedIds = [];
         const pastedTextObjects = [];
         const pastedNonTextObjects = [];
-        ClipDebug.step(dbg, 'paste:objects-add-start', { objectCount: clones.length });
+        ClipDebug.step(dbg, 'paste:objects-add-start', { objectCount: clones.length, ...clipboardTextMetricsForObjects(clones) });
         for (const o of clones) {
           processedObjects++;
           o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
@@ -406,12 +541,23 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         });
         globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-paste', { objects: pastedTextObjects });
         globalThis.BoardfishMotion?.applyActionAnimation?.('image-object-paste', { objects: pastedNonTextObjects });
-        ClipDebug.step(dbg, 'paste:objects-add-done', { objectCount: clones.length, registeredImages });
+        ClipDebug.step(dbg, 'paste:objects-add-done', {
+          objectCount: clones.length,
+          registeredImages,
+          ...clipboardTextMetricsForObjects(clones),
+        });
         scheduleRender(true, true);
         ClipDebug.step(dbg, 'paste:boardHistory-start', { objectCount: clones.length });
         pushHistory('paste-objects');
         ClipDebug.step(dbg, 'paste:boardHistory-done', { historyIndex });
-        ClipDebug.end(dbg, { path: 'jsClipboard', objectCount: clones.length, registeredImages, historyIndex, objectCountAfter: objects.length });
+        ClipDebug.end(dbg, {
+          path: 'jsClipboard',
+          objectCount: clones.length,
+          registeredImages,
+          historyIndex,
+          objectCountAfter: objects.length,
+          ...clipboardTextMetricsForObjects(clones),
+        });
         return;
       }
     }
@@ -421,9 +567,25 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       return;
     }
     const eventText = BoardfishClipboardIO.readClipboardTextFromEvent(clipboardData);
+    ClipDebug.step(dbg, 'paste:event-text-read-done', clipboardTextStats(eventText));
     if (eventText && eventText.trim()) {
-      addText(wx, wy, eventText, { anchor: 'center' });
-      ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length });
+      const objectCountBefore = objects.length;
+      const addStartedAt = clipboardNow();
+      ClipDebug.step(dbg, 'paste:plain-text-add-start', {
+        path: 'event-text',
+        objectCountBefore,
+        ...clipboardTextStats(eventText),
+      });
+      addText(wx, wy, eventText, addTextPasteOptions(dbg, { anchor: 'center' }));
+      ClipDebug.step(dbg, 'paste:plain-text-add-done', {
+        path: 'event-text',
+        ms: clipboardElapsedMs(addStartedAt),
+        objectCountBefore,
+        objectCountAfter: objects.length,
+        objectDelta: objects.length - objectCountBefore,
+        ...clipboardTextStats(eventText),
+      });
+      ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length, textObjectCount: 1, textCharCount: eventText.length, largestTextChars: eventText.length, objectCountAfter: objects.length });
       return;
     }
     showInputShield();
@@ -435,9 +597,39 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         return;
       }
       hideInputShield();
+      const textReadStartedAt = clipboardNow();
+      ClipDebug.step(dbg, 'browser-text-read:start');
       const text = await navigator.clipboard.readText();
-      if (text && text.trim()) addText(wx, wy, text, { anchor: 'center' });
-      ClipDebug.end(dbg, { path: 'web-text', textLen: text?.length || 0, objectCountAfter: objects.length });
+      ClipDebug.step(dbg, 'browser-text-read:ok', {
+        ms: clipboardElapsedMs(textReadStartedAt),
+        ...clipboardTextStats(text),
+      });
+      if (text && text.trim()) {
+        const objectCountBefore = objects.length;
+        const addStartedAt = clipboardNow();
+        ClipDebug.step(dbg, 'paste:plain-text-add-start', {
+          path: 'web-text',
+          objectCountBefore,
+          ...clipboardTextStats(text),
+        });
+        addText(wx, wy, text, addTextPasteOptions(dbg, { anchor: 'center' }));
+        ClipDebug.step(dbg, 'paste:plain-text-add-done', {
+          path: 'web-text',
+          ms: clipboardElapsedMs(addStartedAt),
+          objectCountBefore,
+          objectCountAfter: objects.length,
+          objectDelta: objects.length - objectCountBefore,
+          ...clipboardTextStats(text),
+        });
+      }
+      ClipDebug.end(dbg, {
+        path: 'web-text',
+        textLen: text?.length || 0,
+        textObjectCount: text && text.trim() ? 1 : 0,
+        textCharCount: text?.length || 0,
+        largestTextChars: text?.length || 0,
+        objectCountAfter: objects.length,
+      });
     } catch (err) {
       hideInputShield();
       ClipDebug.end(dbg, { path: 'web-empty', error: String(err), objectCountAfter: objects.length });

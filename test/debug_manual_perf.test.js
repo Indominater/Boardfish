@@ -14,8 +14,12 @@ function readSource(relativePath) {
 function functionSource(source, name) {
   const start = source.indexOf(`function ${name}`);
   assert.notEqual(start, -1, `${name} is missing`);
-  const next = source.indexOf(`\n  function `, start + 1);
-  assert.notEqual(next, -1, `${name} end could not be found`);
+  const boundaries = [
+    source.indexOf(`\n  function `, start + 1),
+    source.indexOf(`\n  return {`, start + 1),
+  ].filter(index => index !== -1);
+  assert.notEqual(boundaries.length, 0, `${name} end could not be found`);
+  const next = Math.min(...boundaries);
   return source.slice(start, next);
 }
 
@@ -25,20 +29,46 @@ test('text edit math perf debugger is passive event recording only', () => {
   const reportSource = functionSource(source, 'textEditMathReport');
   const combined = `${beginSource}\n${reportSource}`;
 
-  assert.match(source, /const TEXT_EDIT_MATH_EVENT_TYPES = \[[\s\S]*'wheel'[\s\S]*'pointermove'[\s\S]*'mousemove'[\s\S]*'beforeinput'[\s\S]*'input'[\s\S]*'paste'[\s\S]*'selectionchange'/);
+  assert.match(source, /const TEXT_EDIT_MATH_EVENT_TYPES = \[[\s\S]*'wheel'[\s\S]*'pointermove'[\s\S]*'mousemove'[\s\S]*'beforeinput'[\s\S]*'input'[\s\S]*'paste'[\s\S]*'copy'[\s\S]*'cut'[\s\S]*'selectionchange'/);
   assert.match(source, /deltaX: event\?\.deltaX/);
   assert.match(source, /clientX: event\?\.clientX/);
+  assert.match(source, /shortcut: textEditMathShortcutFromEvent\(event\)/);
+  assert.match(source, /historyTextUndoRedoReport/);
+  assert.match(source, /historyMaxProxyValueSetMs/);
+  assert.match(source, /historyMaxProxyValueDiffMs/);
+  assert.match(source, /historyMaxProxyValueMutationMs/);
+  assert.match(source, /historyMaxProxyValueAssignMs/);
+  assert.match(source, /historyHydratedTextRuntimeCaches/);
+  assert.match(source, /historyHydratedTextLayoutCaches/);
+  assert.match(source, /domValueLength/);
+  assert.match(source, /domValueStale/);
+  assert.match(source, /maxLogicalSetMs/);
+  assert.match(source, /historyMaxFocusMs/);
+  assert.match(source, /textUndoRedoReport/);
+  assert.match(source, /const textEditInputSteps = \[\]/);
+  assert.match(source, /function isTextEditInputTraceActive/);
+  assert.match(source, /function recordTextEditInputStep/);
+  assert.match(source, /function textEditInputStepSummary/);
+  assert.match(source, /function textEditInputStepTimeline/);
+  assert.match(source, /traceDeleteInputs/);
+  assert.match(source, /maxLayoutPatchTotalMs/);
+  assert.match(source, /maxTextareaMutationMs/);
   assert.match(source, /textEditMathBegin/);
   assert.match(source, /textEditMathReport/);
   assert.match(source, /textEditMathTimeline/);
+  assert.match(source, /textEditInputStepTimeline/);
   assert.match(combined, /mode: 'passive-event-recording'/);
   assert.match(combined, /BoardfishDebug\.viewport\.enable/);
   assert.match(combined, /BoardfishDebug\.viewport\.reset/);
+  assert.match(combined, /BoardfishDebug\.history\.enable/);
+  assert.match(combined, /BoardfishDebug\.history\.reset/);
   assert.match(combined, /setTextEditMathListeners\(true\)/);
   assert.match(combined, /setTextEditMathListeners\(false\)/);
+  assert.match(combined, /history: historyTextUndoRedoReport\(options\)/);
+  assert.match(combined, /inputStepSummary: textEditInputStepSummary\(inputSteps\)/);
+  assert.match(combined, /inputStepTimeline: textEditInputStepTimeline/);
 
   for (const forbidden of [
-    'largeTextSetup',
     'wheelPanTest',
     'wheelZoomTest',
     'mousePanTest',
@@ -49,7 +79,6 @@ test('text edit math perf debugger is passive event recording only', () => {
     'clearTextLayoutCaches',
     'textBoardSummary',
     'memorySnapshot',
-    'restoreLargeTextOriginalState',
     'BoardfishEditorState',
     'BoardfishViewportState.setViewport',
     'scheduleRender',
@@ -57,4 +86,146 @@ test('text edit math perf debugger is passive event recording only', () => {
   ]) {
     assert.doesNotMatch(combined, new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+});
+
+test('text resize perf debugger captures resize and follow-up input evidence', () => {
+  const source = readSource('src/js/debug_manual_perf.js');
+  const beginSource = functionSource(source, 'textResizeBegin');
+  const reportSource = functionSource(source, 'textResizeReport');
+  const combined = `${beginSource}\n${reportSource}`;
+
+  assert.match(source, /const textResizeEvents = \[\]/);
+  assert.match(source, /function textResizeSummary/);
+  assert.match(source, /function textResizeTimeline/);
+  assert.match(source, /function textResizeHeadline/);
+  assert.match(source, /function isTextResizeTraceActive/);
+  assert.match(source, /function startTextResizeDrag/);
+  assert.match(source, /function recordTextResizeStep/);
+  assert.match(source, /function finishTextResizeDrag/);
+  assert.match(source, /textResizeBegin/);
+  assert.match(source, /textResizeReport/);
+  assert.match(source, /maxResizeAutoHeightMs/);
+  assert.match(source, /liveAutoHeightCommits/);
+  assert.match(source, /liveBoardRenderCommits/);
+  assert.match(source, /cacheKeyedAutoHeightCommits/);
+  assert.match(source, /maxResizeClearLayoutMs/);
+  assert.match(source, /maxResizeScheduleRenderMs/);
+  assert.match(source, /maxResizeEventAgeMs/);
+  assert.match(source, /_textMinWidthWordSegmentCache/);
+  assert.doesNotMatch(source, /_textMinWidthCache/);
+  assert.match(source, /paragraphPrefixCacheEntries/);
+  assert.match(source, /wrappedLineCountCachePresent/);
+  assert.match(source, /scriptMetricsCachePresent/);
+  assert.match(source, /layoutCacheLinesBefore/);
+  assert.match(source, /layoutInvalidationMethod/);
+  assert.match(source, /startParagraphPrefixCacheEntries/);
+  assert.match(source, /endWrappedLineCountCacheW/);
+  assert.match(source, /textSelectionRecording/);
+  assert.match(combined, /mode: 'passive-text-resize-and-input-recording'/);
+  assert.match(combined, /BoardfishDebug\.viewport\.enable/);
+  assert.match(combined, /BoardfishDebug\.viewport\.reset/);
+  assert.match(combined, /BoardfishDebug\.history\.enable/);
+  assert.match(combined, /TextSelDebug\.enable/);
+  assert.match(combined, /setTextEditMathListeners\(true\)/);
+  assert.match(combined, /setTextEditMathListeners\(false\)/);
+  assert.match(combined, /resizeSummary: textResizeSummary\(events\)/);
+  assert.match(combined, /resizeTimeline: textResizeTimeline/);
+  assert.match(combined, /eventSummary: textEditMathEventSummary\(domEvents\)/);
+  assert.match(combined, /inputStepSummary: textEditInputStepSummary\(inputSteps\)/);
+  assert.match(combined, /viewport: viewportEventReport\(options\)/);
+  assert.match(combined, /history: historyTextUndoRedoReport\(options\)/);
+});
+
+test('large text panning debugger records the four large-text viewport scenarios', () => {
+  const source = readSource('src/js/debug_manual_perf.js');
+  const viewportSource = readSource('src/js/debug.js');
+  const beginSource = functionSource(source, 'largeTextPanningBegin');
+  const reportSource = functionSource(source, 'largeTextPanningReport');
+  const combined = `${beginSource}\n${reportSource}`;
+
+  assert.match(source, /let largeTextPanningSession = null/);
+  assert.doesNotMatch(source, new RegExp('create' + 'LargeTextScenario'));
+  assert.doesNotMatch(source, new RegExp('debug' + '-text-'));
+  assert.doesNotMatch(source, new RegExp('restore' + 'LargeTextOriginalState'));
+  assert.doesNotMatch(source, new RegExp('largeText' + 'Evaluation'));
+  assert.match(source, /function normalizeLargeTextPanningMode/);
+  assert.match(source, /function applyLargeTextPanningState/);
+  assert.match(source, /function currentLargeTextPanningState/);
+  assert.match(source, /function largeTextInteractionSnapshot/);
+  assert.match(source, /function largeTextPanningHeadline/);
+  assert.match(source, /largeTextPanningBegin/);
+  assert.match(source, /largeTextPanningReport/);
+  assert.match(source, /manual-sequence/);
+  assert.match(source, /large-text-pan-manual-sequence/);
+  assert.match(source, /large-text-pan-plain/);
+  assert.match(source, /large-text-pan-select-mode/);
+  assert.match(source, /large-text-pan-edit-mode/);
+  assert.match(source, /large-text-pan-edit-highlight/);
+  assert.match(source, /mode === 'select'/);
+  assert.match(source, /mode === 'edit'/);
+  assert.match(source, /mode === 'edit-highlight'/);
+  assert.match(source, /setLargeTextEditSelection\(obj, range, highlighted\)/);
+  assert.match(source, /TextSelDebug\.selectionReport/);
+  assert.match(beginSource, /currentLargeTextPanningState\(mode, options\)/);
+  assert.match(beginSource, /applyState: options\.applyState === true/);
+  assert.doesNotMatch(beginSource, /setup:|objectCount|linesPerObject|charsPerLine/);
+  assert.match(combined, /resetLargeTextPanningRecorders\(options\)/);
+  assert.match(combined, /setTextEditMathListeners\(true\)/);
+  assert.match(combined, /setTextEditMathListeners\(false\)/);
+  assert.match(combined, /recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES\.slice\(\)/);
+  assert.match(combined, /eventSummary: textEditMathEventSummary\(events\)/);
+  assert.match(combined, /eventTimeline: textEditMathTimeline/);
+  assert.match(combined, /viewportEvents/);
+  assert.match(combined, /BoardfishDebug\.viewport\.events/);
+  assert.match(combined, /largeTextSelectionDebugReport\(options\)/);
+  assert.match(combined, /history: options\.history === false \? null : historyTextUndoRedoReport\(options\)/);
+  assert.match(combined, /includeViewportEvents/);
+  assert.doesNotMatch(reportSource, /restore/);
+  assert.doesNotMatch(reportSource, /wheelPanTest|wheelZoomTest|mousePanTest|dispatchPanWheel|dispatchPanMouse|clearTextLayoutCaches/);
+
+  assert.match(viewportSource, /const MAX_EVENTS = 10000/);
+  assert.match(viewportSource, /const RAW_INPUT_TYPES = \[[\s\S]*'pointermove'[\s\S]*'pointercancel'[\s\S]*'mousemove'/);
+});
+
+test('text selection debugger includes focused enter and exit edit timings', () => {
+  const source = readSource('src/js/debug_text_selection.js');
+
+  assert.match(source, /function enterEditReport/);
+  assert.match(source, /maxClickToEditTotalMs/);
+  assert.match(source, /maxEnterEditCallMs/);
+  assert.match(source, /maxCanvasRouteMs/);
+  assert.match(source, /maxEmptyTextCleanupMs/);
+  assert.match(source, /maxHitTestMs/);
+  assert.match(source, /maxCaretApplyMs/);
+  assert.match(source, /maxScheduledDelayMs/);
+  assert.match(source, /focusScheduled/);
+  assert.match(source, /scheduledDelayMs/);
+  assert.match(source, /proxyWrap/);
+  assert.match(source, /proxySpellcheck/);
+  assert.match(source, /proxyAriaHidden/);
+  assert.match(source, /proxyAriaLabel/);
+  assert.match(source, /proxyContain/);
+  assert.match(source, /function exitEditReport/);
+  assert.match(source, /maxProxyRemoveMs/);
+  assert.match(source, /maxWidthSyncMs/);
+  assert.match(source, /maxHeightSyncMs/);
+  assert.match(source, /sizeSyncReason/);
+  assert.match(source, /latestSizeSyncReason/);
+  assert.match(source, /maxEditHistoryMs/);
+  assert.match(source, /maxWindowSelectionClearMs/);
+});
+
+test('text edit proxy disables native wrapping and browser text services', () => {
+  const source = readSource('src/js/text_editor.js');
+
+  assert.match(source, /function configureTextEditProxyElement/);
+  assert.match(source, /proxy\.wrap = 'off'/);
+  assert.match(source, /proxy\.spellcheck = false/);
+  assert.match(source, /autocomplete', 'off'/);
+  assert.match(source, /autocorrect', 'off'/);
+  assert.match(source, /autocapitalize', 'off'/);
+  assert.match(source, /aria-label', 'Boardfish text editor'/);
+  assert.doesNotMatch(source, /aria-hidden', 'true'/);
+  assert.match(source, /'contain:strict'/);
+  assert.match(source, /configureTextEditProxyElement\(proxy\)/);
 });

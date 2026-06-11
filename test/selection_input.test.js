@@ -79,6 +79,7 @@ function loadSelectionInputHarness(objects, options = {}) {
     selectedId: options.selectedId ?? (objects.length === 1 ? objects[0].id : null),
     objectsMap: byId,
     editingId: null,
+    zCounter: 1,
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -104,7 +105,18 @@ function loadSelectionInputHarness(objects, options = {}) {
     isBoardInputBlocked: () => false,
     shouldKeepSelectionOverlayWhileBlocked: () => false,
     acquireInputShield: () => () => {},
-    BoardfishEditorState: { clearSelection() {} },
+    bringObjectToFront() {},
+    BoardfishEditorState: {
+      clearSelection() {
+        selectedIds.clear();
+        context.selectedId = null;
+      },
+      setSelection(ids, options = {}) {
+        selectedIds.clear();
+        for (const id of ids) selectedIds.add(id);
+        context.selectedId = options.primaryId ?? ids[0] ?? null;
+      },
+    },
     beginDocumentDrag(handlers) { context.drag = handlers; },
     createRafCommitter(apply) {
       return {
@@ -367,6 +379,306 @@ test('single text horizontal resize clamps to the measured word minimum width', 
   assert.equal(text.x, 0);
   assert.equal(text.w, 47);
   assert.deepEqual(context.history, ['resize']);
+});
+
+test('single text horizontal resize records passive perf debug phases', () => {
+  const text = {
+    id: 'text-a',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'alpha\nbeta gamma' },
+  };
+  const context = loadSelectionInputHarness([text], {
+    syncTextAutoHeight(obj) {
+      obj.h = 72;
+      return true;
+    },
+  });
+  const debugEvents = [];
+  context.ManualPerfDebug = {
+    isTextResizeTraceActive() {
+      return true;
+    },
+    startTextResizeDrag(meta) {
+      debugEvents.push({ step: 'start', meta });
+      return 'drag-1';
+    },
+    recordTextResizeStep(step, meta) {
+      debugEvents.push({ step, meta });
+    },
+    finishTextResizeDrag(dragId, meta) {
+      debugEvents.push({ step: 'end', meta: { dragId, ...meta } });
+    },
+  };
+
+  context.beginSelectionHandleDrag({
+    dataset: { dir: 'e' },
+  }, {
+    type: 'mousedown',
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  context.drag.move({ type: 'mousemove', clientX: 40, clientY: 0 });
+  context.drag.up();
+
+  const steps = debugEvents.map((event) => event.step);
+  assert.ok(steps.includes('start'));
+  assert.ok(steps.includes('move'));
+  assert.ok(steps.includes('apply-start'));
+  assert.ok(steps.includes('apply-end'));
+  assert.ok(steps.includes('flush'));
+  assert.ok(steps.includes('history-pushed'));
+  assert.equal(steps.at(-1), 'end');
+  assert.equal(debugEvents[0].meta.contentChars, text.data.content.length);
+  assert.equal(debugEvents[0].meta.logicalLines, 2);
+  assert.equal(debugEvents[0].meta.startW, 200);
+  assert.equal(debugEvents.find((event) => event.step === 'move').meta.minTextW, 100);
+  assert.equal(debugEvents.find((event) => event.step === 'move').meta.w, 240);
+  assert.equal(debugEvents.find((event) => event.step === 'apply-end').meta.autoHeightChanged, true);
+  assert.equal(debugEvents.find((event) => event.step === 'history-pushed').meta.historyReason, 'resize');
+});
+
+test('single text horizontal resize reuses measured minimum width during one drag', () => {
+  const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'wide' } };
+  let minWidthCalls = 0;
+  const context = loadSelectionInputHarness([text], {
+    getTextMinWidth() {
+      minWidthCalls++;
+      return 90;
+    },
+  });
+
+  context.beginSelectionHandleDrag({
+    dataset: { dir: 'e' },
+  }, {
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  context.drag.move({ clientX: -80, clientY: 0 });
+  context.drag.move({ clientX: -70, clientY: 0 });
+  context.drag.move({ clientX: -60, clientY: 0 });
+  context.drag.up();
+
+  assert.equal(minWidthCalls, 1);
+  assert.equal(text.w, 140);
+});
+
+test('selecting text schedules delayed minimum-width cache warm', () => {
+  const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'wide' } };
+  let minWidthCalls = 0;
+  const context = loadSelectionInputHarness([text], {
+    selectedId: null,
+    getTextMinWidth(obj) {
+      minWidthCalls++;
+      assert.equal(obj.id, 'text-a');
+      return 90;
+    },
+  });
+
+  context.selectObject('text-a');
+
+  assert.equal(minWidthCalls, 0);
+  assert.equal(context.timeoutDelay, 250);
+
+  context.timeoutHandler();
+
+  assert.equal(minWidthCalls, 1);
+});
+
+test('deselecting text cancels delayed minimum-width cache warm', () => {
+  const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'wide' } };
+  let minWidthCalls = 0;
+  const context = loadSelectionInputHarness([text], {
+    getTextMinWidth() {
+      minWidthCalls++;
+      return 90;
+    },
+  });
+
+  context.selectObject('text-a');
+  context.deselectAll();
+  context.timeoutHandler();
+
+  assert.deepEqual(context.clearedTimeouts, [1]);
+  assert.equal(minWidthCalls, 0);
+});
+
+test('single text resize skips auto-height when clamped width is unchanged', () => {
+  const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'wide' } };
+  const context = loadSelectionInputHarness([text], {
+    getTextMinWidth: () => 100,
+    syncTextAutoHeight(obj) {
+      obj.h = 80;
+      return true;
+    },
+  });
+
+  context.beginSelectionHandleDrag({
+    dataset: { dir: 'e' },
+  }, {
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  context.drag.move({ clientX: -120, clientY: 0 });
+  context.drag.move({ clientX: -140, clientY: 0 });
+  context.drag.up();
+
+  assert.equal(text.w, 100);
+  assert.equal(text.h, 80);
+  assert.deepEqual(context.syncedTextIds, ['text-a']);
+});
+
+test('large text resize updates auto-height and board content during drag', () => {
+  const text = {
+    id: 'text-a',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'word '.repeat(5000) },
+  };
+  const context = loadSelectionInputHarness([text], {
+    syncTextAutoHeight(obj) {
+      obj.h = 120;
+      return true;
+    },
+  });
+
+  context.beginSelectionHandleDrag({
+    dataset: { dir: 'e' },
+  }, {
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  context.drag.move({ clientX: 80, clientY: 0 });
+
+  assert.equal(text.w, 280);
+  assert.equal(text.h, 120);
+  assert.deepEqual(context.syncedTextIds, ['text-a']);
+  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true });
+
+  context.drag.up();
+
+  assert.equal(text.h, 120);
+  assert.deepEqual(context.syncedTextIds, ['text-a']);
+  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true });
+});
+
+test('large text resize skips board redraw when clamped width is unchanged', () => {
+  const text = {
+    id: 'text-a',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'word '.repeat(5000) },
+  };
+  const context = loadSelectionInputHarness([text], {
+    getTextMinWidth: () => 100,
+    syncTextAutoHeight(obj) {
+      obj.h = 120;
+      return true;
+    },
+  });
+
+  context.beginSelectionHandleDrag({
+    dataset: { dir: 'e' },
+  }, {
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  context.drag.move({ clientX: -120, clientY: 0 });
+  context.drag.move({ clientX: -140, clientY: 0 });
+
+  assert.equal(text.w, 100);
+  assert.equal(text.h, 120);
+  assert.deepEqual(context.syncedTextIds, ['text-a']);
+  assert.deepEqual(context.renders, [
+    { board: true, overlay: true },
+    { board: false, overlay: true },
+  ]);
+
+  context.drag.up();
+
+  assert.equal(text.h, 120);
+  assert.deepEqual(context.syncedTextIds, ['text-a']);
+  assert.deepEqual(context.renders.at(-1), { board: false, overlay: true });
+});
+
+test('large text resize records live cache-keyed auto-height debug evidence', () => {
+  const text = {
+    id: 'text-a',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 40,
+    data: { content: 'word '.repeat(5000) },
+  };
+  const context = loadSelectionInputHarness([text], {
+    syncTextAutoHeight(obj) {
+      obj.h = 120;
+      return true;
+    },
+  });
+  const debugEvents = [];
+  context.ManualPerfDebug = {
+    isTextResizeTraceActive() {
+      return true;
+    },
+    startTextResizeDrag(meta) {
+      debugEvents.push({ step: 'start', meta });
+      return 'drag-large';
+    },
+    recordTextResizeStep(step, meta) {
+      debugEvents.push({ step, meta });
+    },
+    finishTextResizeDrag(dragId, meta) {
+      debugEvents.push({ step: 'end', meta: { dragId, ...meta } });
+    },
+  };
+
+  context.beginSelectionHandleDrag({
+    dataset: { dir: 'e' },
+  }, {
+    type: 'mousedown',
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  context.drag.move({ type: 'mousemove', clientX: 80, clientY: 0 });
+  context.drag.up();
+
+  const applyEnd = debugEvents.find((event) => event.step === 'apply-end');
+  const flush = debugEvents.find((event) => event.step === 'flush');
+
+  assert.equal(applyEnd.meta.renderBoard, true);
+  assert.equal(applyEnd.meta.pendingSizeSync, false);
+  assert.equal(applyEnd.meta.autoHeightReason, 'resize');
+  assert.equal(applyEnd.meta.layoutInvalidationMethod, 'cache-keyed');
+  assert.equal(flush.meta.pendingSizeSync, false);
 });
 
 test('save flushes a pending text edit checkpoint into the saved baseline', () => {

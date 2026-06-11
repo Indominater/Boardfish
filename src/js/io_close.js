@@ -122,6 +122,7 @@ function boardDocumentDeps() {
     imageStoreBytesEstimate,
     imageRefKind,
     rawImageStore: imageStore,
+    rawObjects: objects,
     historyLength: boardHistory.length,
     historyIndex,
     dirty: isDirty(),

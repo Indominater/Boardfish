@@ -104,6 +104,7 @@
       imageStore: imageManifest,
       objects,
     };
+    if (deps.schema?.normalizeBoardData) return deps.schema.normalizeBoardData(data);
     if (deps.schema?.validateBoardData) deps.schema.validateBoardData(data);
     return data;
   }
@@ -162,15 +163,66 @@
     return { imageObjectCount, textObjectCount };
   }
 
+  function getTextSaveMetrics(objectsList = []) {
+    let textCharCount = 0;
+    let largestTextId = '';
+    let largestTextChars = 0;
+    for (const obj of objectsList || []) {
+      if (obj?.type !== 'text') continue;
+      const chars = String(obj.data?.content || '').length;
+      textCharCount += chars;
+      if (chars > largestTextChars) {
+        largestTextChars = chars;
+        largestTextId = obj.id || '';
+      }
+    }
+    return { textCharCount, largestTextId, largestTextChars };
+  }
+
+  function getTextRuntimeMetrics(objectsList = []) {
+    let runtimeTextCacheObjects = 0;
+    let runtimeTextCacheLines = 0;
+    let runtimeTextCacheContentChars = 0;
+    let runtimeTextCachePrefixEntries = 0;
+    let runtimeTextCacheKeyChars = 0;
+    let runtimeTextPrivateFields = 0;
+    for (const obj of objectsList || []) {
+      if (obj?.type !== 'text') continue;
+      const privateKeys = Object.keys(obj).filter((key) => key.startsWith('_'));
+      runtimeTextPrivateFields += privateKeys.length;
+      if (Array.isArray(obj._layoutCache)) {
+        runtimeTextCacheObjects++;
+        runtimeTextCacheLines += obj._layoutCache.length;
+        for (const line of obj._layoutCache) {
+          runtimeTextCacheContentChars += String(line?.content || '').length;
+          runtimeTextCachePrefixEntries += Number(line?.prefixWidths?.length) || 0;
+        }
+      }
+      if (typeof obj._layoutCacheKey === 'string') runtimeTextCacheKeyChars += obj._layoutCacheKey.length;
+    }
+    return {
+      runtimeTextCacheObjects,
+      runtimeTextCacheLines,
+      runtimeTextCacheContentChars,
+      runtimeTextCachePrefixEntries,
+      runtimeTextCacheKeyChars,
+      runtimeTextPrivateFields,
+    };
+  }
+
   function getBoardSaveMetrics(data, deps = {}) {
     const imageSummary = summarizeImageStore(data.imageStore || {}, deps);
     const objectCounts = getObjectTypeCounts(data.objects || []);
+    const textSummary = getTextSaveMetrics(data.objects || []);
+    const runtimeTextSummary = getTextRuntimeMetrics(deps.rawObjects || data.objects || []);
     const rawImageStore = deps.rawImageStore || {};
     const imageStoreBytesEstimate = deps.imageStoreBytesEstimate || (() => 0);
     return {
       objectCount: data.objects?.length || 0,
       imageCount: imageSummary.imageCount,
       ...objectCounts,
+      ...textSummary,
+      ...runtimeTextSummary,
       imageStoreBytes: imageSummary.imageStoreBytes,
       rawImageStoreBytes: Object.values(rawImageStore).reduce((sum, src) => sum + imageStoreBytesEstimate(src), 0),
       largestImageKey: imageSummary.largestImageKey,

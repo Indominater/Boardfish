@@ -43,6 +43,10 @@ const HISTORY_NO_REPLAY_REASONS = new Set([
   'text-edit-enter',
   'text-height-change',
 ]);
+const HISTORY_RUNTIME_TEXT_CACHE_REASONS = new Set([
+  'text-edit-checkpoint',
+  'text-edit-enter',
+]);
 const HISTORY_SELECTION_REPLAY_BY_REASON = Object.freeze({
   'drag': historyReplay({
     selection: historyAction('object-drag', { options: HISTORY_NON_TEXT_OPTIONS }),
@@ -175,6 +179,13 @@ const historyMotionForEntry = (entry) => {
   if (motion?.type === 'none') return { type: 'none' };
   return historyMotionForReason(entry?.reason || '');
 };
+
+const historyCloneOptionsForObject = (reason = '', obj = null) => ({
+  runtimeTextCache: HISTORY_RUNTIME_TEXT_CACHE_REASONS.has(String(reason || '')) &&
+    obj?.type === 'text' &&
+    !!editingId &&
+    obj.id === editingId,
+});
 
 const filterHistoryMotionObjects = (items, filter = HISTORY_OBJECT_FILTERS.all) => {
   const list = Array.isArray(items) ? items : [];
@@ -370,13 +381,290 @@ function pruneImageCachesAfterHistoryChange(reason = 'history-change') {
   }
 }
 
+const isHistoryDebugEnabled = () => !!(typeof HistoryDebug !== 'undefined' && (
+  HistoryDebug.enabled === true || HistoryDebug.isEnabled?.() === true
+));
+
+const historyDebugRound = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+function historyTextValueDiff(oldValue = '', nextValue = '') {
+  const oldText = String(oldValue ?? '');
+  const nextText = String(nextValue ?? '');
+  const oldLength = oldText.length;
+  const nextLength = nextText.length;
+  let start = 0;
+  while (start < oldLength && start < nextLength && oldText[start] === nextText[start]) start++;
+  let oldEnd = oldLength;
+  let nextEnd = nextLength;
+  while (oldEnd > start && nextEnd > start && oldText[oldEnd - 1] === nextText[nextEnd - 1]) {
+    oldEnd--;
+    nextEnd--;
+  }
+  return {
+    start,
+    end: oldEnd,
+    inserted: nextText.slice(start, nextEnd),
+    oldChars: oldLength,
+    nextChars: nextLength,
+    removedChars: oldEnd - start,
+    insertedChars: nextEnd - start,
+    prefixChars: start,
+    suffixChars: oldLength - oldEnd,
+  };
+}
+
+function historyEditProxyValue(proxy) {
+  if (typeof proxy?._boardfishLogicalValue === 'string') return proxy._boardfishLogicalValue;
+  return String(proxy?.value ?? '');
+}
+
+function setHistoryEditProxyLogicalValue(proxy, value = '') {
+  if (!proxy) return;
+  const nextValue = String(value ?? '');
+  const domSynced = String(proxy.value ?? '') === nextValue;
+  if (typeof proxy._boardfishSetLogicalValue === 'function') {
+    proxy._boardfishSetLogicalValue(nextValue, { domSynced });
+    return;
+  }
+  proxy._boardfishLogicalValue = nextValue;
+  proxy._boardfishDomValueStale = !domSynced;
+}
+
+function setHistoryEditProxyValue(proxy, nextValue = '') {
+  const oldValue = historyEditProxyValue(proxy);
+  const normalizedNextValue = String(nextValue ?? '');
+  const startedAt = performance.now();
+  if (!proxy || oldValue === normalizedNextValue) {
+    setHistoryEditProxyLogicalValue(proxy, normalizedNextValue);
+    return {
+      changed: false,
+      method: 'none',
+      totalMs: historyDebugRound(performance.now() - startedAt),
+      diffMs: 0,
+      mutationMs: 0,
+      assignMs: '',
+      oldChars: oldValue.length,
+      nextChars: normalizedNextValue.length,
+      insertedChars: 0,
+      removedChars: 0,
+      start: 0,
+      end: 0,
+      prefixChars: oldValue.length,
+      suffixChars: oldValue.length,
+    };
+  }
+
+  const diffStartedAt = performance.now();
+  const diff = historyTextValueDiff(oldValue, normalizedNextValue);
+  const diffMs = historyDebugRound(performance.now() - diffStartedAt);
+  setHistoryEditProxyLogicalValue(proxy, normalizedNextValue);
+  return {
+    changed: true,
+    method: 'deferred',
+    totalMs: historyDebugRound(performance.now() - startedAt),
+    diffMs,
+    mutationMs: 0,
+    assignMs: '',
+    ...diff,
+  };
+}
+
+function syncHistoryEditProxyDomValueForSelection(proxy, start, end) {
+  const domValue = String(proxy?.value ?? '');
+  const logicalValue = historyEditProxyValue(proxy);
+  const domCharsBefore = domValue.length;
+  const selectionStart = Math.max(0, Math.trunc(Number(start)) || 0);
+  const selectionEnd = Math.max(selectionStart, Math.trunc(Number(end)) || selectionStart);
+  const stale = !!proxy?._boardfishDomValueStale || domValue !== logicalValue;
+  const needsSelectionRange = selectionStart !== selectionEnd || selectionEnd > domCharsBefore;
+  if (!proxy || !stale || !needsSelectionRange) {
+    return {
+      synced: false,
+      reason: !proxy ? 'missing-proxy' : (!stale ? 'dom-current' : 'selection-fits-stale-dom'),
+      ms: 0,
+      domCharsBefore,
+      domCharsAfter: domCharsBefore,
+    };
+  }
+  const startedAt = performance.now();
+  proxy.value = logicalValue;
+  setHistoryEditProxyLogicalValue(proxy, logicalValue);
+  return {
+    synced: true,
+    reason: selectionStart !== selectionEnd ? 'restore-highlight' : 'selection-outside-stale-dom',
+    ms: historyDebugRound(performance.now() - startedAt),
+    domCharsBefore,
+    domCharsAfter: String(proxy.value ?? '').length,
+  };
+}
+
+function historyTextContentDebugMetrics(content) {
+  const text = String(content ?? '');
+  if (!text) return { lineCount: 0, largestLineChars: 0 };
+  let lineCount = 1;
+  let currentLineChars = 0;
+  let largestLineChars = 0;
+  for (let index = 0; index < text.length; index++) {
+    if (text.charCodeAt(index) === 10) {
+      largestLineChars = Math.max(largestLineChars, currentLineChars);
+      currentLineChars = 0;
+      lineCount++;
+    } else {
+      currentLineChars++;
+    }
+  }
+  largestLineChars = Math.max(largestLineChars, currentLineChars);
+  return { lineCount, largestLineChars };
+}
+
+function prefixHistoryDebugMetrics(prefix, metrics = {}) {
+  if (!prefix) return metrics;
+  const out = {};
+  for (const [key, value] of Object.entries(metrics)) {
+    out[`${prefix}${key[0].toUpperCase()}${key.slice(1)}`] = value;
+  }
+  return out;
+}
+
+function getHistoryEditStateDebugMetrics(editState = null, prefix = 'editState') {
+  if (!isHistoryDebugEnabled() || !editState) return {};
+  const start = Number(editState.selectionStart) || 0;
+  const end = Number(editState.selectionEnd) || start;
+  return {
+    [`${prefix}Id`]: editState.id || '',
+    [`${prefix}SelectionStart`]: start,
+    [`${prefix}SelectionEnd`]: end,
+    [`${prefix}SelectedChars`]: Math.abs(end - start),
+    [`${prefix}SelectionDirection`]: editState.selectionDirection || 'none',
+    [`${prefix}ScriptCaretIndex`]: editState.scriptCaretIndex ?? '',
+    [`${prefix}ScriptCaretAffinity`]: editState.scriptCaretAffinity || '',
+  };
+}
+
+function historyEntryReason(entry) {
+  if (Array.isArray(entry)) return 'legacy-array';
+  return entry?.reason || '';
+}
+
+function historyEntryObjects(entry) {
+  return Array.isArray(entry) ? entry : (entry?.objects || []);
+}
+
+function getHistoryEntryDebugMetrics(entry, prefix = 'entry') {
+  if (!isHistoryDebugEnabled()) return {};
+  const entryObjects = historyEntryObjects(entry);
+  const editState = Array.isArray(entry) ? null : entry?.editState || null;
+  const beforeEditState = Array.isArray(entry) ? null : entry?.beforeEditState || null;
+  return {
+    [`${prefix}Reason`]: historyEntryReason(entry),
+    [`${prefix}ObjectCount`]: entryObjects.length,
+    [`${prefix}HasEditState`]: !!editState,
+    [`${prefix}HasBeforeEditState`]: !!beforeEditState,
+    ...prefixHistoryDebugMetrics(prefix, getHistoryTextDebugMetrics(entryObjects)),
+    ...getHistoryEditStateDebugMetrics(editState, `${prefix}EditState`),
+    ...getHistoryEditStateDebugMetrics(beforeEditState, `${prefix}BeforeEditState`),
+  };
+}
+
+function getHistoryTextDebugMetrics(sourceObjects = objects) {
+  if (!isHistoryDebugEnabled()) return {};
+  let textObjectCount = 0;
+  let textCharCount = 0;
+  let largestTextChars = 0;
+  let largestTextId = '';
+  let textLineCount = 0;
+  let largestTextLineChars = 0;
+  let runtimeTextLayoutObjects = 0;
+  let runtimeTextLayoutLines = 0;
+  let runtimeTextLayoutPrefixEntries = 0;
+  let runtimeTextLineContentChars = 0;
+  for (const obj of sourceObjects || []) {
+    if (obj?.type !== 'text') continue;
+    textObjectCount++;
+    const content = String(obj.data?.content || '');
+    const chars = content.length;
+    const contentMetrics = historyTextContentDebugMetrics(content);
+    textCharCount += chars;
+    textLineCount += contentMetrics.lineCount;
+    largestTextLineChars = Math.max(largestTextLineChars, contentMetrics.largestLineChars);
+    if (chars > largestTextChars) {
+      largestTextChars = chars;
+      largestTextId = obj.id || '';
+    }
+    if (!Array.isArray(obj._layoutCache)) continue;
+    runtimeTextLayoutObjects++;
+    runtimeTextLayoutLines += obj._layoutCache.length;
+    for (const line of obj._layoutCache) {
+      runtimeTextLayoutPrefixEntries += Number(line?.prefixWidths?.length) || 0;
+      runtimeTextLineContentChars += String(line?.content || '').length;
+    }
+  }
+  return {
+    textObjectCount,
+    textCharCount,
+    largestTextChars,
+    largestTextId,
+    textLineCount,
+    largestTextLineChars,
+    runtimeTextLayoutObjects,
+    runtimeTextLayoutLines,
+    runtimeTextLayoutPrefixEntries,
+    runtimeTextLineContentChars,
+  };
+}
+
+function replaceObjectContentsInPlace(target, source) {
+  if (!target || !source) return target;
+  for (const key of Object.keys(target)) delete target[key];
+  for (const [key, value] of Object.entries(source)) target[key] = value;
+  return target;
+}
+
+function hydrateRestoredTextCachesFromLiveObjects(restoredObjects = []) {
+  if (typeof cloneTextObjectRuntimeCaches !== 'function') {
+    return { skipped: 'cloneTextObjectRuntimeCaches-unavailable' };
+  }
+  let candidates = 0;
+  let hydrated = 0;
+  let layoutCaches = 0;
+  let scriptRangeCaches = 0;
+  let scriptMetricCaches = 0;
+  for (const obj of restoredObjects || []) {
+    if (!obj || obj.type !== 'text' || !obj.id) continue;
+    const live = objectsMap.get(obj.id);
+    if (!live || live === obj || live.type !== 'text') continue;
+    candidates++;
+    const hadLayout = Array.isArray(obj._layoutCache);
+    const hadScriptRanges = Array.isArray(obj._textScriptRangesCache);
+    const hadScriptMetrics = !!obj._textScriptLayoutMetrics;
+    cloneTextObjectRuntimeCaches(live, obj);
+    const hasLayout = Array.isArray(obj._layoutCache);
+    const hasScriptRanges = Array.isArray(obj._textScriptRangesCache);
+    const hasScriptMetrics = !!obj._textScriptLayoutMetrics;
+    const changed = (!hadLayout && hasLayout) ||
+      (!hadScriptRanges && hasScriptRanges) ||
+      (!hadScriptMetrics && hasScriptMetrics);
+    if (!changed) continue;
+    hydrated++;
+    if (!hadLayout && hasLayout) layoutCaches++;
+    if (!hadScriptRanges && hasScriptRanges) scriptRangeCaches++;
+    if (!hadScriptMetrics && hasScriptMetrics) scriptMetricCaches++;
+  }
+  return { candidates, hydrated, layoutCaches, scriptRangeCaches, scriptMetricCaches };
+}
+
 function snapshot() {
-  const dbg = HistoryDebug.start('snapshot', { objectCount: objects.length, historyLength: boardHistory.length, historyIndex });
+  const dbg = HistoryDebug.start('snapshot', {
+    objectCount: objects.length,
+    historyLength: boardHistory.length,
+    historyIndex,
+    ...getHistoryTextDebugMetrics(objects),
+  });
   const t0 = performance.now();
   HistoryDebug.count('snapshots');
   boardHistory.length = historyIndex + 1;
   const objectsSnapshot = cloneObjects(objects);
-  HistoryDebug.step(dbg, 'cloneObjects', { objectCount: objectsSnapshot.length });
+  HistoryDebug.step(dbg, 'cloneObjects', { objectCount: objectsSnapshot.length, ...getHistoryTextDebugMetrics(objectsSnapshot) });
   const editState = captureEditState();
   HistoryDebug.step(dbg, 'captureEditState', { editState: !!editState });
   boardHistory.push({
@@ -391,7 +679,7 @@ function snapshot() {
   pruneImageCachesAfterHistoryChange('snapshot');
   const ms = performance.now() - t0;
   HistoryDebug.max('maxSnapshotMs', ms);
-  HistoryDebug.end(dbg, { ms, historyLength: boardHistory.length, historyIndex });
+  HistoryDebug.end(dbg, { ms, historyLength: boardHistory.length, historyIndex, ...getHistoryTextDebugMetrics(objects) });
 }
 
 // Delta push: only deep-clones objects that changed since last snapshot.
@@ -404,6 +692,7 @@ function pushHistory(reason = '', options = {}) {
     dirtyCount: _dirtyIds.size,
     historyLength: boardHistory.length,
     historyIndex,
+    ...getHistoryTextDebugMetrics(objects),
   });
   const t0 = performance.now();
   HistoryDebug.count('pushHistory');
@@ -415,14 +704,18 @@ function pushHistory(reason = '', options = {}) {
   HistoryDebug.step(dbg, 'build-prev-map', { objectCount: prevObjects.length });
   let cloned = 0;
   let reused = 0;
-  const entry = objects.map(o =>
-    (_dirtyIds.has(o.id) || !prevMap.has(o.id))
-      ? (cloned++, cloneObject(o))
-      : (reused++, prevMap.get(o.id))
-  );
+  const entry = objects.map((o) => {
+    const cloneOptions = historyCloneOptionsForObject(reason, o);
+    if (_dirtyIds.has(o.id) || !prevMap.has(o.id) || cloneOptions.runtimeTextCache) {
+      cloned++;
+      return cloneObject(o, cloneOptions);
+    }
+    reused++;
+    return prevMap.get(o.id);
+  });
   HistoryDebug.count('clonedObjects', cloned);
   HistoryDebug.count('reusedObjects', reused);
-  HistoryDebug.step(dbg, 'clone-dirty-objects', { cloned, reused, objectCount: entry.length });
+  HistoryDebug.step(dbg, 'clone-dirty-objects', { cloned, reused, objectCount: entry.length, ...getHistoryTextDebugMetrics(entry) });
   _dirtyIds.clear();
   const editState = captureEditState();
   HistoryDebug.step(dbg, 'captureEditState', { editState: !!editState });
@@ -439,7 +732,7 @@ function pushHistory(reason = '', options = {}) {
   updateTitle();
   const ms = performance.now() - t0;
   HistoryDebug.max('maxPushHistoryMs', ms);
-  HistoryDebug.end(dbg, { reason, ms, cloned, reused, historyLength: boardHistory.length, historyIndex });
+  HistoryDebug.end(dbg, { reason, ms, cloned, reused, historyLength: boardHistory.length, historyIndex, ...getHistoryTextDebugMetrics(entry) });
 }
 
 function restoreSnapshot(s, {
@@ -458,62 +751,279 @@ function restoreSnapshot(s, {
     historyIndex,
     selectedCount: selectedIds.size,
     editState: !!editState,
+    sourceReason: historyEntryReason(s),
+    ...getHistoryEntryDebugMetrics(s, 'source'),
+    ...getHistoryEditStateDebugMetrics(editState, 'editState'),
+    ...getHistoryTextDebugMetrics(snapshotObjects),
   });
   const t0 = performance.now();
   HistoryDebug.count('restores');
-  if (editingId) {
+  const clearEditMeta = {
+    hadEditing,
+    previousEditingId: editingId || '',
+    previousProxyChars: typeof _editEl?.value === 'string' ? _editEl.value.length : '',
+    previousSelectionStart: _editEl?.selectionStart ?? '',
+    previousSelectionEnd: _editEl?.selectionEnd ?? '',
+    hadSelectionListener: !!_selChangeListener,
+    hadCaretTimer: !!_caretBlinkInterval,
+    hadHistoryTimer: !!_editHistoryTimer,
+  };
+  const liveEditId = editingId || '';
+  const liveEditProxy = _editEl || null;
+  const liveEditObject = liveEditId ? objectsMap.get(liveEditId) : null;
+  const preserveLiveEdit = !!(
+    editState?.id &&
+    liveEditId === editState.id &&
+    liveEditProxy &&
+    liveEditObject?.type === 'text' &&
+    snapshotObjects.some((obj) => obj?.id === editState.id && obj?.type === 'text')
+  );
+  let liveSelectionListenerRemoved = false;
+  clearTimeout(_editHistoryTimer);
+  _editHistoryTimer = null;
+  _editHistoryActionStartState = null;
+  if (editingId && preserveLiveEdit) {
+    if (_selChangeListener) {
+      document.removeEventListener('selectionchange', _selChangeListener);
+      liveSelectionListenerRemoved = true;
+    }
+    clearEditMeta.preservedLiveEdit = true;
+    clearEditMeta.removedSelectionListenerTemporarily = liveSelectionListenerRemoved;
+  } else if (editingId) {
     clearInterval(_caretBlinkInterval);
     _caretBlinkInterval = null;
-    clearTimeout(_editHistoryTimer);
-    _editHistoryTimer = null;
     _editHistoryLastContent = null;
-    _editHistoryActionStartState = null;
     if (_selChangeListener) {
       document.removeEventListener('selectionchange', _selChangeListener);
       _selChangeListener = null;
     }
-    if (_editEl) _editEl.remove();
+    if (_editEl) {
+      const removeProxyStart = performance.now();
+      _editEl.remove();
+      clearEditMeta.removeProxyMs = historyDebugRound(performance.now() - removeProxyStart);
+    }
     editingId = null;
     _editEl = null;
   }
   _editHistoryActionStartState = null;
-  HistoryDebug.step(dbg, 'clear-editing', { hadEditing });
+  HistoryDebug.step(dbg, 'clear-editing', clearEditMeta);
   const prevSelectedIds = new Set(selectedIds);
-  BoardfishEditorState.replaceBoardObjects(cloneObjects(snapshotObjects), { syncTextHeights: false });
-  HistoryDebug.step(dbg, 'clone-snapshot', { objectCount: objects.length });
+  const cloneObjectsStart = performance.now();
+  const clonedSnapshotObjects = cloneObjects(snapshotObjects, { runtimeTextCache: true });
+  const liveCacheHydrateMeta = hydrateRestoredTextCachesFromLiveObjects(clonedSnapshotObjects);
+  HistoryDebug.step(dbg, 'hydrate-live-text-caches', liveCacheHydrateMeta);
+  if (preserveLiveEdit) {
+    const liveIndex = clonedSnapshotObjects.findIndex((obj) => obj?.id === liveEditId && obj?.type === 'text');
+    if (liveIndex >= 0) {
+      replaceObjectContentsInPlace(liveEditObject, clonedSnapshotObjects[liveIndex]);
+      clonedSnapshotObjects[liveIndex] = liveEditObject;
+    }
+  }
+  const cloneObjectsMs = performance.now() - cloneObjectsStart;
+  HistoryDebug.step(dbg, 'clone-snapshot-objects', {
+    cloneObjectsMs,
+    objectCount: clonedSnapshotObjects.length,
+    preservedLiveEdit: preserveLiveEdit,
+    ...getHistoryTextDebugMetrics(clonedSnapshotObjects),
+  });
+  const replaceStart = performance.now();
+  BoardfishEditorState.replaceBoardObjects(clonedSnapshotObjects, {
+    normalizeText: false,
+    syncTextHeights: false,
+    preserveTextRuntimeCaches: true,
+  });
+  const replaceBoardObjectsMs = performance.now() - replaceStart;
+  HistoryDebug.step(dbg, 'replace-board-objects', {
+    replaceBoardObjectsMs,
+    objectCount: objects.length,
+    ...getHistoryTextDebugMetrics(objects),
+  });
   HistoryDebug.step(dbg, 'normalize-text', { objectCount: objects.length });
   _dirtyIds.clear();
   HistoryDebug.step(dbg, 'rebuild-caches', { objectCount: objectsMap.size });
   HistoryDebug.step(dbg, 'preserve-text-heights');
+  const invalidateStart = performance.now();
   invalidateOffscreen();
+  HistoryDebug.step(dbg, 'invalidate-offscreen', { invalidateOffscreenMs: performance.now() - invalidateStart });
   // Preserve selection for objects that still exist in the restored state
+  const selectionStart = performance.now();
   BoardfishEditorState.setSelection([...prevSelectedIds], { exitEditing: false, animateSelection: false });
+  HistoryDebug.step(dbg, 'restore-selection', {
+    setSelectionMs: performance.now() - selectionStart,
+    previousSelectedCount: prevSelectedIds.size,
+    selectedCount: selectedIds.size,
+  });
+  const renderStart = performance.now();
   renderAll();
+  HistoryDebug.step(dbg, 'renderAll-scheduled', {
+    renderScheduleMs: performance.now() - renderStart,
+    selectedCount: selectedIds.size,
+    ...getHistoryTextDebugMetrics(objects),
+  });
+  const motionStart = performance.now();
   applyHistoryMotionReplay(historyMotion, motionTransition, selectionPulseOptions);
-  HistoryDebug.step(dbg, 'renderAll', { selectedCount: selectedIds.size });
+  HistoryDebug.step(dbg, 'motion-replay', {
+    motionReplayMs: performance.now() - motionStart,
+    motionType: historyMotion?.type || '',
+    transitionAddedIds: motionTransition.addedIds.length,
+    transitionRemovedObjects: motionTransition.removed.length,
+  });
 
   if (!editState || !editState.id) {
     const ms = performance.now() - t0;
     HistoryDebug.max('maxRestoreMs', ms);
-    HistoryDebug.end(dbg, { ms, objectCount: objects.length, selectedCount: selectedIds.size });
+    HistoryDebug.end(dbg, { ms, objectCount: objects.length, selectedCount: selectedIds.size, ...getHistoryTextDebugMetrics(objects) });
     return;
   }
   const obj = objectsMap.get(editState.id);
   if (!obj || obj.type !== 'text') {
     const ms = performance.now() - t0;
     HistoryDebug.max('maxRestoreMs', ms);
-    HistoryDebug.end(dbg, { ms, skippedEditRestore: true });
+    HistoryDebug.end(dbg, { ms, skippedEditRestore: true, ...getHistoryTextDebugMetrics(objects) });
     return;
   }
 
+  HistoryDebug.step(dbg, 'restore-edit-start', {
+    editValueChars: String(obj.data?.content || '').length,
+    objectWidth: obj.w,
+    objectHeight: obj.h,
+    ...getHistoryEditStateDebugMetrics(editState, 'editState'),
+  });
+  const editSelectionStart = performance.now();
   BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
-  enterEdit(obj.id, { history: false, preserveSize: true });
+  HistoryDebug.step(dbg, 'restore-edit-selection', {
+    setSelectionMs: performance.now() - editSelectionStart,
+    selectedCount: selectedIds.size,
+    editStateId: editState.id,
+  });
+  const enterEditStart = performance.now();
+  let reusedEditProxy = false;
+  let proxyValueSetMs = '';
+  let proxyValueChanged = '';
+  let proxyValueSetMethod = '';
+  let proxyValueDiffMs = '';
+  let proxyValueMutationMs = '';
+  let proxyValueAssignMs = '';
+  let proxyValueInsertedChars = '';
+  let proxyValueRemovedChars = '';
+  let proxyValuePatchStart = '';
+  let proxyValuePatchEnd = '';
+  let proxyValuePatchPrefixChars = '';
+  let proxyValuePatchSuffixChars = '';
+  if (preserveLiveEdit && _editEl === liveEditProxy && obj === liveEditObject) {
+    reusedEditProxy = true;
+    const nextProxyValue = String(obj.data?.content || '');
+    const proxyValueResult = setHistoryEditProxyValue(_editEl, nextProxyValue);
+    proxyValueChanged = proxyValueResult.changed;
+    proxyValueSetMs = proxyValueResult.totalMs;
+    proxyValueSetMethod = proxyValueResult.method;
+    proxyValueDiffMs = proxyValueResult.diffMs;
+    proxyValueMutationMs = proxyValueResult.mutationMs;
+    proxyValueAssignMs = proxyValueResult.assignMs;
+    proxyValueInsertedChars = proxyValueResult.insertedChars;
+    proxyValueRemovedChars = proxyValueResult.removedChars;
+    proxyValuePatchStart = proxyValueResult.start;
+    proxyValuePatchEnd = proxyValueResult.end;
+    proxyValuePatchPrefixChars = proxyValueResult.prefixChars;
+    proxyValuePatchSuffixChars = proxyValueResult.suffixChars;
+    obj._editStartContent = obj.data.content;
+    if (typeof textEditMinLinesForSession === 'function') {
+      obj._editMinLines = textEditMinLinesForSession(obj, { preserveSize: true });
+    }
+    _editHistoryLastContent = obj.data.content;
+    _editHistoryActionStartState = null;
+  } else {
+    enterEdit(obj.id, {
+      history: false,
+      preserveSize: true,
+      placeInitialCaret: false,
+      normalizeForEdit: false,
+    });
+  }
+  HistoryDebug.step(dbg, 'enter-edit-restored', {
+    enterEditMs: performance.now() - enterEditStart,
+    editStateId: editState.id,
+    reusedEditProxy,
+    proxyValueSetMs,
+    proxyValueChanged,
+    proxyValueSetMethod,
+    proxyValueDiffMs,
+    proxyValueMutationMs,
+    proxyValueAssignMs,
+    proxyValueInsertedChars,
+    proxyValueRemovedChars,
+    proxyValuePatchStart,
+    proxyValuePatchEnd,
+    proxyValuePatchPrefixChars,
+    proxyValuePatchSuffixChars,
+    proxyChars: historyEditProxyValue(_editEl).length,
+    objectWidth: obj.w,
+    objectHeight: obj.h,
+    ...getHistoryTextDebugMetrics([obj]),
+  });
 
-  if (!_editEl) return;
-  const max = _editEl.value.length;
+  if (!_editEl) {
+    const ms = performance.now() - t0;
+    HistoryDebug.max('maxRestoreMs', ms);
+    HistoryDebug.end(dbg, { ms, skippedEditRestore: 'missing-edit-proxy', ...getHistoryTextDebugMetrics(objects) });
+    return;
+  }
+  const max = historyEditProxyValue(_editEl).length;
   const start = Math.max(0, Math.min(editState.selectionStart ?? max, max));
   const end = Math.max(0, Math.min(editState.selectionEnd ?? max, max));
+  const proxyDomSync = syncHistoryEditProxyDomValueForSelection(_editEl, start, end);
+  const setSelectionRangeStart = performance.now();
+  _textInputSelectionHistorySuppress = { start, end };
   _editEl.setSelectionRange(start, end, editState.selectionDirection || 'none');
+  const setSelectionRangeMs = performance.now() - setSelectionRangeStart;
+  let focusMs = '';
+  let focusSkipped = '';
+  const editProxyAlreadyFocused = typeof document !== 'undefined' && document.activeElement === _editEl;
+  if (reusedEditProxy && editProxyAlreadyFocused) {
+    focusSkipped = 'already-focused';
+  } else if (typeof _editEl.focus === 'function') {
+    const focusStart = performance.now();
+    _editEl.focus({ preventScroll: true });
+    focusMs = performance.now() - focusStart;
+  } else {
+    focusSkipped = 'missing-focus';
+  }
+  HistoryDebug.step(dbg, 'restore-edit-caret', {
+    setSelectionRangeMs,
+    focusMs,
+    focusSkipped,
+    editStateId: editState.id,
+    editValueChars: max,
+    proxyDomSyncedForSelection: proxyDomSync.synced,
+    proxyDomSyncReason: proxyDomSync.reason,
+    proxyDomSyncMs: proxyDomSync.ms,
+    proxyDomCharsBeforeSelection: proxyDomSync.domCharsBefore,
+    proxyDomCharsAfterSelection: proxyDomSync.domCharsAfter,
+    selectionStart: start,
+    selectionEnd: end,
+    selectedChars: Math.abs(end - start),
+    selectionDirection: editState.selectionDirection || 'none',
+    scriptCaretIndex: editState.scriptCaretIndex ?? '',
+    scriptCaretAffinity: editState.scriptCaretAffinity || '',
+  });
+  if (typeof TextSelDebug !== 'undefined') {
+    TextSelDebug._logHistoryAction?.('history-restore-edit-caret', {
+      objectId: obj.id,
+      editValueChars: max,
+      selectionStart: start,
+      selectionEnd: end,
+      selectedChars: Math.abs(end - start),
+      selectionDirection: editState.selectionDirection || 'none',
+      reusedEditProxy,
+      proxyValueSetMethod,
+      proxyValueChanged,
+      proxyDomSyncedForSelection: proxyDomSync.synced,
+      proxyDomSyncReason: proxyDomSync.reason,
+      proxyDomCharsBeforeSelection: proxyDomSync.domCharsBefore,
+      proxyDomCharsAfterSelection: proxyDomSync.domCharsAfter,
+      proxyChars: typeof _editEl?.value === 'string' ? _editEl.value.length : '',
+    });
+  }
   if (start === end) {
     obj._textEditCaretIndex = start;
     if (editState.scriptCaretIndex === start && editState.scriptCaretAffinity) {
@@ -528,11 +1038,22 @@ function restoreSnapshot(s, {
     delete obj._textScriptCaretIndex;
     delete obj._textScriptCaretAffinity;
   }
+  if (liveSelectionListenerRemoved && _selChangeListener) {
+    document.addEventListener('selectionchange', _selChangeListener);
+    HistoryDebug.step(dbg, 'restore-edit-listener', { editStateId: editState.id, restoredSelectionListener: true });
+  }
   _caretVisible = true;
+  const scheduleStart = performance.now();
   scheduleRender(true, true);
+  HistoryDebug.step(dbg, 'restore-render-scheduled', {
+    renderScheduleMs: performance.now() - scheduleStart,
+    editStateId: editState.id,
+    selectionStart: start,
+    selectionEnd: end,
+  });
   const ms = performance.now() - t0;
   HistoryDebug.max('maxRestoreMs', ms);
-  HistoryDebug.end(dbg, { ms, objectCount: objects.length, selectedCount: selectedIds.size, restoredEdit: true });
+  HistoryDebug.end(dbg, { ms, objectCount: objects.length, selectedCount: selectedIds.size, restoredEdit: true, ...getHistoryTextDebugMetrics(objects) });
 }
 
 function captureEditState() {
@@ -557,39 +1078,121 @@ function captureEditState() {
 }
 
 function undo() {
-  if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
-  if (historyIndex <= 0) return;
+  const dbg = HistoryDebug.start('undo', {
+    historyLength: boardHistory.length,
+    historyIndex,
+    editing: !!editingId,
+    ...getHistoryTextDebugMetrics(objects),
+  });
+  let flushedCheckpoint = false;
+  if (typeof flushEditHistoryCheckpoint === 'function') {
+    const flushStart = performance.now();
+    flushedCheckpoint = !!flushEditHistoryCheckpoint();
+    HistoryDebug.step(dbg, 'flush-edit-history', {
+      flushedCheckpoint,
+      flushMs: performance.now() - flushStart,
+      historyLength: boardHistory.length,
+      historyIndex,
+      ...getHistoryTextDebugMetrics(objects),
+    });
+  }
+  if (historyIndex <= 0) {
+    HistoryDebug.end(dbg, { skipped: 'at-start', flushedCheckpoint, historyLength: boardHistory.length, historyIndex });
+    return;
+  }
   globalThis.BoardfishMotion?.applyActionAnimation?.('history-undo');
   HistoryDebug.count('undo');
-  const dbg = HistoryDebug.start('undo', { historyLength: boardHistory.length, historyIndex });
   const actionEntry = boardHistory[historyIndex];
+  const targetEntry = boardHistory[historyIndex - 1];
+  HistoryDebug.step(dbg, 'target-ready', {
+    actionReason: historyEntryReason(actionEntry),
+    targetReason: historyEntryReason(targetEntry),
+    flushedCheckpoint,
+    ...getHistoryEntryDebugMetrics(actionEntry, 'action'),
+    ...getHistoryEntryDebugMetrics(targetEntry, 'target'),
+  });
   historyIndex--;
   const undoEditState = !Array.isArray(actionEntry) && actionEntry?.reason === 'text-edit-checkpoint'
     ? actionEntry.beforeEditState || undefined
     : undefined;
+  const restoreStart = performance.now();
   restoreSnapshot(boardHistory[historyIndex], {
     historyMotion: historyMotionForEntry(actionEntry),
     selectionPulseOptions: historySelectionPulseOptions(actionEntry),
     editStateOverride: undoEditState,
   });
+  HistoryDebug.step(dbg, 'restore-done', {
+    restoreMs: performance.now() - restoreStart,
+    historyLength: boardHistory.length,
+    historyIndex,
+    ...getHistoryTextDebugMetrics(objects),
+  });
   updateTitle();
-  HistoryDebug.end(dbg, { historyLength: boardHistory.length, historyIndex });
+  HistoryDebug.end(dbg, {
+    historyLength: boardHistory.length,
+    historyIndex,
+    actionReason: historyEntryReason(actionEntry),
+    targetReason: historyEntryReason(targetEntry),
+    flushedCheckpoint,
+    ...getHistoryTextDebugMetrics(objects),
+  });
 }
 
 function redo() {
-  if (typeof flushEditHistoryCheckpoint === 'function' && flushEditHistoryCheckpoint()) return;
-  if (historyIndex >= boardHistory.length - 1) return;
+  const dbg = HistoryDebug.start('redo', {
+    historyLength: boardHistory.length,
+    historyIndex,
+    editing: !!editingId,
+    ...getHistoryTextDebugMetrics(objects),
+  });
+  let flushedCheckpoint = false;
+  if (typeof flushEditHistoryCheckpoint === 'function') {
+    const flushStart = performance.now();
+    flushedCheckpoint = !!flushEditHistoryCheckpoint();
+    HistoryDebug.step(dbg, 'flush-edit-history', {
+      flushedCheckpoint,
+      flushMs: performance.now() - flushStart,
+      historyLength: boardHistory.length,
+      historyIndex,
+      ...getHistoryTextDebugMetrics(objects),
+    });
+  }
+  if (flushedCheckpoint) {
+    HistoryDebug.end(dbg, { skipped: 'flushed-pending-checkpoint', flushedCheckpoint, historyLength: boardHistory.length, historyIndex });
+    return;
+  }
+  if (historyIndex >= boardHistory.length - 1) {
+    HistoryDebug.end(dbg, { skipped: 'at-end', flushedCheckpoint, historyLength: boardHistory.length, historyIndex });
+    return;
+  }
   globalThis.BoardfishMotion?.applyActionAnimation?.('history-redo');
   HistoryDebug.count('redo');
-  const dbg = HistoryDebug.start('redo', { historyLength: boardHistory.length, historyIndex });
   historyIndex++;
   const actionEntry = boardHistory[historyIndex];
+  HistoryDebug.step(dbg, 'target-ready', {
+    targetReason: historyEntryReason(actionEntry),
+    flushedCheckpoint,
+    ...getHistoryEntryDebugMetrics(actionEntry, 'target'),
+  });
+  const restoreStart = performance.now();
   restoreSnapshot(actionEntry, {
     historyMotion: historyMotionForEntry(actionEntry),
     selectionPulseOptions: historySelectionPulseOptions(actionEntry),
   });
+  HistoryDebug.step(dbg, 'restore-done', {
+    restoreMs: performance.now() - restoreStart,
+    historyLength: boardHistory.length,
+    historyIndex,
+    ...getHistoryTextDebugMetrics(objects),
+  });
   updateTitle();
-  HistoryDebug.end(dbg, { historyLength: boardHistory.length, historyIndex });
+  HistoryDebug.end(dbg, {
+    historyLength: boardHistory.length,
+    historyIndex,
+    targetReason: historyEntryReason(actionEntry),
+    flushedCheckpoint,
+    ...getHistoryTextDebugMetrics(objects),
+  });
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────────

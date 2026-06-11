@@ -188,8 +188,9 @@ var MENU_COMMANDS = {
 
 const getTextEditSelectionState = () => {
   if (!editingId || !_editEl) return null;
-  const start = Math.max(0, Math.min(_editEl.selectionStart ?? 0, _editEl.value.length));
-  const end = Math.max(0, Math.min(_editEl.selectionEnd ?? start, _editEl.value.length));
+  const value = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
+  const start = Math.max(0, Math.min(_editEl.selectionStart ?? 0, value.length));
+  const end = Math.max(0, Math.min(_editEl.selectionEnd ?? start, value.length));
   return {
     start: Math.min(start, end),
     end: Math.max(start, end),
@@ -206,7 +207,8 @@ const focusTextEditProxy = () => {
 const selectedTextForEditMenu = () => {
   const selection = getTextEditSelectionState();
   if (!selection?.hasSelection || !_editEl) return '';
-  return _editEl.value.slice(selection.start, selection.end);
+  const value = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
+  return value.slice(selection.start, selection.end);
 };
 
 const readTextClipboardForEditMenu = async () => {
@@ -232,17 +234,93 @@ const writeTextClipboardFromEditMenu = async (text, { allowEmpty = false } = {})
   }
 };
 
-const replaceTextEditSelection = (text, { immediateHistory = false } = {}) => {
+const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 'insertText' } = {}) => {
   const selection = getTextEditSelectionState();
   if (!selection || !_editEl) return false;
+  const inputTypeValue = String(inputType || '');
   const normalizedText = normalizeTextContent(text);
+  const replacementText = inputTypeValue.toLowerCase().includes('paste') && typeof textForTextObjectPaste === 'function'
+    ? textForTextObjectPaste(normalizedText)
+    : normalizedText;
+  if (inputTypeValue.toLowerCase().includes('paste') && !replacementText) return false;
+  const oldValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
+  const obj = objectsMap.get(editingId);
+  const replacementState = {
+    ...selection,
+    value: oldValue,
+    scriptRanges: typeof textEditScriptRanges === 'function' && obj ? textEditScriptRanges(obj) : [],
+    inputType,
+    replacement: {
+      start: selection.start,
+      end: selection.end,
+      insertedText: replacementText,
+    },
+  };
+  if (typeof nextTextEditInputDebugSeq === 'function') replacementState._debugSeq = nextTextEditInputDebugSeq();
   if (immediateHistory) {
-    beginTextEditHistoryAction(editingId, selection, { splitPending: true });
+    beginTextEditHistoryAction(editingId, replacementState, { splitPending: true });
   }
+  if (typeof setPendingTextEditInputState === 'function') setPendingTextEditInputState(_editEl, replacementState);
   _editEl.setSelectionRange(selection.start, selection.end, selection.direction);
-  _editEl.setRangeText(normalizedText, selection.start, selection.end, 'end');
+  const debugNow = typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now();
+  const debugRound = typeof textEditorDebugRound === 'function'
+    ? textEditorDebugRound
+    : (value) => Math.round((Number(value) || 0) * 100) / 100;
+  const mutationStartedAt = debugNow();
+  const mutationResult = typeof replaceTextEditProxyRange === 'function'
+    ? replaceTextEditProxyRange(_editEl, replacementText, selection.start, selection.end, 'end', {
+      deferDomValue: inputType && String(inputType).toLowerCase().startsWith('delete'),
+    })
+    : (() => {
+      _editEl.setRangeText(replacementText, selection.start, selection.end, 'end');
+      return {
+        method: 'setRangeText',
+        setRangeTextMs: '',
+        valueAssignMs: '',
+        valueBuildMs: '',
+        valueSetMs: '',
+        logicalSetMs: '',
+        selectionSetMs: '',
+      };
+    })();
+  const mutationMs = debugRound(debugNow() - mutationStartedAt);
+  const nextValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
+  if (typeof recordTextEditorInputPerfStep === 'function') {
+    recordTextEditorInputPerfStep('menu-replace-textarea-mutated', {
+      seq: replacementState._debugSeq ?? '',
+      inputType,
+      objectId: editingId,
+      textareaMutationMs: mutationMs,
+      textareaMutationMethod: mutationResult.method,
+      setRangeTextMs: mutationResult.setRangeTextMs || (mutationResult.method === 'setRangeText' ? mutationMs : ''),
+      valueAssignMs: mutationResult.valueAssignMs,
+      valueBuildMs: mutationResult.valueBuildMs,
+      valueSetMs: mutationResult.valueSetMs,
+      logicalSetMs: mutationResult.logicalSetMs,
+      selectionSetMs: mutationResult.selectionSetMs,
+      proxyChars: nextValue.length,
+      domProxyChars: String(_editEl.value ?? '').length,
+      domValueStale: !!_editEl._boardfishDomValueStale,
+      oldChars: oldValue.length,
+      nextChars: nextValue.length,
+      insertedChars: replacementText.length,
+      removedChars: Math.max(0, selection.end - selection.start),
+      replacementStart: selection.start,
+      replacementEnd: selection.end,
+      ...(typeof textEditorSelectionDebugStats === 'function' ? textEditorSelectionDebugStats(selection, oldValue) : {}),
+    });
+  }
   _caretVisible = true;
+  const dispatchStartedAt = debugNow();
   _editEl.dispatchEvent(new Event('input', { bubbles: true }));
+  if (typeof recordTextEditorInputPerfStep === 'function') {
+    recordTextEditorInputPerfStep('menu-replace-input-dispatched', {
+      seq: replacementState._debugSeq ?? '',
+      inputType,
+      objectId: editingId,
+      dispatchMs: debugRound(debugNow() - dispatchStartedAt),
+    });
+  }
   if (immediateHistory) flushEditHistoryCheckpoint();
   focusTextEditProxy();
   scheduleRender(true, false);
@@ -260,7 +338,8 @@ const copyTextEditSelection = async () => {
     focusTextEditProxy();
     return;
   }
-  const selectedText = selection?.hasSelection && _editEl ? _editEl.value.slice(selection.start, selection.end) : '';
+  const value = _editEl && typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl?.value ?? '');
+  const selectedText = selection?.hasSelection && _editEl ? value.slice(selection.start, selection.end) : '';
   if (selectedText) {
     globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
       textSelection: {
@@ -282,7 +361,7 @@ const deleteTextEditSelection = () => {
     return;
   }
   globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-delete');
-  replaceTextEditSelection('', { immediateHistory: true });
+  replaceTextEditSelection('', { immediateHistory: true, inputType: 'deleteContentBackward' });
 };
 
 const pasteTextIntoEditSelection = async () => {
@@ -300,7 +379,7 @@ const pasteTextIntoEditSelection = async () => {
   }
   clearJsClipboard();
   globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-paste');
-  replaceTextEditSelection(text, { immediateHistory: true });
+  replaceTextEditSelection(text, { immediateHistory: true, inputType: 'insertFromPaste' });
 };
 
 function menuCommandFromButton(button) {

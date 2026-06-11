@@ -4,15 +4,24 @@ var ManualPerfDebug = (() => {
   let lastReport = null;
   let lastJson = '';
   let sessionStartMemory = null;
-  let largeTextSession = null;
-  let nextLargeTextSessionId = 1;
+  let largeTextPanningSession = null;
+  let nextLargeTextPanningSessionId = 1;
   let textEditMathSession = null;
   let nextTextEditMathSessionId = 1;
   let textEditMathEventsActive = false;
   let textEditMathLastEventAt = 0;
+  let textEditInputStepLastAt = 0;
+  let textResizeSession = null;
+  let nextTextResizeSessionId = 1;
+  let nextTextResizeDragId = 1;
+  let textResizeLastEventAt = 0;
   const markers = [];
   const textEditMathEvents = [];
-  const TEXT_EDIT_MATH_MAX_EVENTS = 5000;
+  const textEditInputSteps = [];
+  const textResizeEvents = [];
+  const TEXT_EDIT_MATH_MAX_EVENTS = 10000;
+  const TEXT_EDIT_INPUT_MAX_STEPS = 5000;
+  const TEXT_RESIZE_MAX_EVENTS = 5000;
   const TEXT_EDIT_MATH_EVENT_TYPES = [
     'wheel',
     'pointerdown',
@@ -26,6 +35,10 @@ var ManualPerfDebug = (() => {
     'beforeinput',
     'input',
     'paste',
+    'copy',
+    'cut',
+    'focus',
+    'blur',
     'compositionstart',
     'compositionupdate',
     'compositionend',
@@ -311,12 +324,14 @@ var ManualPerfDebug = (() => {
     }
     return {
       viewport: BoardfishDebug.viewport.perfMode(),
-      largeTextSession: largeTextSession
+      largeTextPanningSession: largeTextPanningSession
         ? {
-            id: largeTextSession.id,
+            id: largeTextPanningSession.id,
             active: true,
-            startedAt: largeTextSession.startedAt,
-            scenario: largeTextSession.scenario?.summary || null,
+            startedAt: largeTextPanningSession.startedAt,
+            mode: largeTextPanningSession.mode,
+            objectId: largeTextPanningSession.objectId || '',
+            startSnapshot: largeTextPanningSession.startSnapshot || null,
           }
         : null,
       textEditMathSession: textEditMathSession
@@ -325,7 +340,19 @@ var ManualPerfDebug = (() => {
             active: textEditMathEventsActive,
             startedAt: textEditMathSession.startedAt,
             events: textEditMathEvents.length,
+            inputSteps: textEditInputSteps.length,
             startSnapshot: textEditMathSession.startSnapshot,
+          }
+        : null,
+      textResizeSession: textResizeSession
+        ? {
+            id: textResizeSession.id,
+            active: true,
+            startedAt: textResizeSession.startedAt,
+            resizeEvents: textResizeEvents.length,
+            textEditEvents: textEditMathEvents.length,
+            inputSteps: textEditInputSteps.length,
+            startSnapshot: textResizeSession.startSnapshot,
           }
         : null,
     };
@@ -765,6 +792,18 @@ var ManualPerfDebug = (() => {
     return `${String(target.tagName || target.nodeName || '').toLowerCase()}${id}${className}`;
   }
 
+  function textEditMathShortcutFromEvent(event = null) {
+    const type = event?.type || '';
+    if (type !== 'keydown' && type !== 'keyup') return '';
+    const key = String(event?.key || '').toLowerCase();
+    const code = String(event?.code || '');
+    const commandModifier = event.ctrlKey !== event.metaKey && !event.altKey;
+    if (commandModifier && !event.shiftKey && (key === 'z' || code === 'KeyZ')) return 'undo';
+    if (commandModifier && event.shiftKey && (key === 'z' || code === 'KeyZ')) return 'redo';
+    if (event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && (key === 'y' || code === 'KeyY')) return 'redo';
+    return '';
+  }
+
   function sanitizePerfMeta(value) {
     return typeof sanitizeDebugMeta === 'function'
       ? sanitizeDebugMeta(value, { roundNumbers: true })
@@ -774,13 +813,19 @@ var ManualPerfDebug = (() => {
   function textEditMathSnapshot() {
     const id = typeof editingId !== 'undefined' ? (editingId || '') : '';
     const obj = id && typeof objectsMap !== 'undefined' ? objectsMap.get(id) : null;
-    const proxyValue = typeof _editEl?.value === 'string' ? _editEl.value : null;
-    const content = proxyValue ?? (typeof obj?.data?.content === 'string' ? obj.data.content : '');
+    const domProxyValue = typeof _editEl?.value === 'string' ? _editEl.value : null;
+    const logicalProxyValue = typeof textEditProxyValue === 'function' && _editEl
+      ? textEditProxyValue(_editEl)
+      : domProxyValue;
+    const content = logicalProxyValue ?? (typeof obj?.data?.content === 'string' ? obj.data.content : '');
     return sanitizePerfMeta({
       editingId: id,
       hasEditProxy: !!_editEl,
       objectFound: !!obj,
       valueLength: content.length,
+      logicalValueLength: typeof logicalProxyValue === 'string' ? logicalProxyValue.length : '',
+      domValueLength: typeof domProxyValue === 'string' ? domProxyValue.length : '',
+      domValueStale: !!_editEl?._boardfishDomValueStale,
       contentLength: typeof obj?.data?.content === 'string' ? obj.data.content.length : '',
       selectionStart: _editEl?.selectionStart ?? '',
       selectionEnd: _editEl?.selectionEnd ?? '',
@@ -789,6 +834,12 @@ var ManualPerfDebug = (() => {
       scriptCaretAffinity: obj?._textScriptCaretAffinity || '',
       objectW: obj?.w ?? '',
       objectH: obj?.h ?? '',
+      editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
+      pendingSizeSync: !!obj?._textEditPendingSizeSync,
+      layoutCachePresent: !!obj?._layoutCache,
+      layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
+      historyLength: typeof boardHistory !== 'undefined' && Array.isArray(boardHistory) ? boardHistory.length : '',
+      historyIndex: typeof historyIndex !== 'undefined' ? historyIndex : '',
       zoom: typeof zoom !== 'undefined' ? zoom : '',
       panX: typeof panX !== 'undefined' ? panX : '',
       panY: typeof panY !== 'undefined' ? panY : '',
@@ -798,9 +849,14 @@ var ManualPerfDebug = (() => {
   function textEditMathEventMeta(event) {
     const eventAt = eventTimestampMs(event);
     const now = performance.now();
+    const id = typeof editingId !== 'undefined' ? (editingId || '') : '';
+    const obj = id && typeof objectsMap !== 'undefined' ? objectsMap.get(id) : null;
     const selectionStart = _editEl?.selectionStart ?? '';
     const selectionEnd = _editEl?.selectionEnd ?? '';
-    const valueLength = typeof _editEl?.value === 'string' ? _editEl.value.length : '';
+    const domValueLength = typeof _editEl?.value === 'string' ? _editEl.value.length : '';
+    const logicalValueLength = typeof textEditProxyValue === 'function' && _editEl
+      ? textEditProxyValue(_editEl).length
+      : domValueLength;
     const clipboardTypes = event?.clipboardData?.types ? Array.from(event.clipboardData.types) : [];
     const meta = {
       at: round(now),
@@ -810,6 +866,7 @@ var ManualPerfDebug = (() => {
       eventAt,
       eventAgeMs: Math.max(0, now - eventAt),
       inputType: event?.inputType || '',
+      shortcut: textEditMathShortcutFromEvent(event),
       dataLength: typeof event?.data === 'string' ? event.data.length : '',
       key: event?.key || '',
       code: event?.code || '',
@@ -828,9 +885,21 @@ var ManualPerfDebug = (() => {
       defaultPrevented: !!event?.defaultPrevented,
       cancelable: !!event?.cancelable,
       target: eventTargetLabel(event?.target),
-      editingId: typeof editingId !== 'undefined' ? (editingId || '') : '',
+      editingId: id,
       hasEditProxy: !!_editEl,
-      valueLength,
+      valueLength: logicalValueLength,
+      logicalValueLength,
+      domValueLength,
+      domValueStale: !!_editEl?._boardfishDomValueStale,
+      objectContentLength: typeof obj?.data?.content === 'string' ? obj.data.content.length : '',
+      objectW: obj?.w ?? '',
+      objectH: obj?.h ?? '',
+      editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
+      pendingSizeSync: !!obj?._textEditPendingSizeSync,
+      layoutCachePresent: !!obj?._layoutCache,
+      layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
+      historyLength: typeof boardHistory !== 'undefined' && Array.isArray(boardHistory) ? boardHistory.length : '',
+      historyIndex: typeof historyIndex !== 'undefined' ? historyIndex : '',
       selectionStart,
       selectionEnd,
       selectionLength: Number.isFinite(selectionStart) && Number.isFinite(selectionEnd)
@@ -849,6 +918,326 @@ var ManualPerfDebug = (() => {
     if (textEditMathEvents.length > TEXT_EDIT_MATH_MAX_EVENTS) textEditMathEvents.shift();
   }
 
+  function textResizeSelectedTextObject(objectId = '') {
+    const id = objectId || (typeof selectedId !== 'undefined' ? selectedId : '');
+    if (id && typeof objectsMap !== 'undefined') {
+      const obj = objectsMap.get(id);
+      if (obj?.type === 'text') return obj;
+    }
+    if (typeof selectedIds !== 'undefined' && typeof objectsMap !== 'undefined') {
+      for (const selected of selectedIds) {
+        const obj = objectsMap.get(selected);
+        if (obj?.type === 'text') return obj;
+      }
+    }
+    return null;
+  }
+
+  function textResizeSnapshot(options = {}) {
+    const obj = textResizeSelectedTextObject(options.objectId || '');
+    const content = typeof obj?.data?.content === 'string' ? obj.data.content : '';
+    const includeContent = options.includeContent !== false;
+    return sanitizePerfMeta({
+      selectedId: typeof selectedId !== 'undefined' ? (selectedId || '') : '',
+      selectedCount: typeof selectedIds !== 'undefined' ? selectedIds.size : '',
+      objectId: obj?.id || '',
+      objectFound: !!obj,
+      objectType: obj?.type || '',
+      x: obj?.x ?? '',
+      y: obj?.y ?? '',
+      w: obj?.w ?? '',
+      h: obj?.h ?? '',
+      contentChars: includeContent ? content.length : '',
+      logicalLines: includeContent ? countTextLines(content) : '',
+      scriptRanges: textObjectScriptRangeCount(obj),
+      layoutCachePresent: !!obj?._layoutCache,
+      layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
+      minWidthCachePresent: !!obj?._textMinWidthWordSegmentCache,
+      paragraphPrefixCacheEntries: obj?._textParagraphPrefixCache?.size || 0,
+      wrappedLineCountCachePresent: Number.isFinite(obj?._textWrappedLineCountCacheValue),
+      wrappedLineCountCacheW: Number.isFinite(obj?._textWrappedLineCountCacheW) ? obj._textWrappedLineCountCacheW : '',
+      wrappedLineIndexCacheEntries: obj?._textWrappedLineIndexCache?.entries?.length ?? '',
+      wrappedLineIndexCacheLines: obj?._textWrappedLineIndexCache?.lineCount ?? '',
+      wrappedLineIndexWidthCacheSize: obj?._textWrappedLineIndexWidthCache?.size ?? '',
+      scriptMetricsCachePresent: !!obj?._textScriptLayoutMetrics,
+      pendingSizeSync: !!obj?._textEditPendingSizeSync,
+      zoom: typeof zoom !== 'undefined' ? zoom : '',
+      panX: typeof panX !== 'undefined' ? panX : '',
+      panY: typeof panY !== 'undefined' ? panY : '',
+      editingId: typeof editingId !== 'undefined' ? (editingId || '') : '',
+    });
+  }
+
+  function isTextResizeTraceActive() {
+    return !!textResizeSession;
+  }
+
+  function recordTextResizeStep(step, meta = {}) {
+    if (!isTextResizeTraceActive()) return;
+    const now = performance.now();
+    const entry = sanitizePerfMeta({
+      at: round(now),
+      sinceStartMs: textResizeSession ? now - textResizeSession.startedAtMs : '',
+      gapMs: textResizeLastEventAt ? now - textResizeLastEventAt : '',
+      step,
+      ...meta,
+    });
+    textResizeLastEventAt = now;
+    textResizeEvents.push(entry);
+    if (textResizeEvents.length > TEXT_RESIZE_MAX_EVENTS) textResizeEvents.shift();
+  }
+
+  function startTextResizeDrag(meta = {}) {
+    if (!isTextResizeTraceActive()) return null;
+    const dragId = `text-resize-drag-${nextTextResizeDragId++}`;
+    textResizeSession.currentDragId = dragId;
+    recordTextResizeStep('start', { dragId, ...meta });
+    return dragId;
+  }
+
+  function finishTextResizeDrag(dragId = '', meta = {}) {
+    if (!isTextResizeTraceActive()) return;
+    const id = dragId || textResizeSession?.currentDragId || '';
+    recordTextResizeStep('end', { dragId: id, ...meta });
+    if (textResizeSession?.currentDragId === id) textResizeSession.currentDragId = '';
+  }
+
+  function textResizeSummary(events = textResizeEvents) {
+    const counts = {};
+    const dragIds = new Set();
+    const max = (field) => events.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
+    let maxGapMs = 0;
+    let gapsOver16ms = 0;
+    let gapsOver32ms = 0;
+    let gapsOver80ms = 0;
+    let maxW = 0;
+    let maxH = 0;
+    let maxContentChars = 0;
+    let maxLogicalLines = 0;
+    let maxWrappedLineIndexCacheEntries = 0;
+    let maxWrappedLineIndexWidthCacheSize = 0;
+    let worstStep = null;
+    let worstStepMs = 0;
+    let liveAutoHeightCommits = 0;
+    let liveBoardRenderCommits = 0;
+    let cacheKeyedAutoHeightCommits = 0;
+    for (const row of events) {
+      const step = row.step || '';
+      if (step) counts[step] = (counts[step] || 0) + 1;
+      if (row.dragId) dragIds.add(row.dragId);
+      if (step === 'apply-end' && row.autoHeightReason) liveAutoHeightCommits++;
+      if (step === 'apply-end' && row.renderBoard === true) liveBoardRenderCommits++;
+      if (step === 'apply-end' && row.layoutInvalidationMethod === 'cache-keyed') cacheKeyedAutoHeightCommits++;
+      const gap = Number(row.gapMs) || 0;
+      maxGapMs = Math.max(maxGapMs, gap);
+      if (gap > 16.7) gapsOver16ms++;
+      if (gap > 32) gapsOver32ms++;
+      if (gap > 80) gapsOver80ms++;
+      maxW = Math.max(maxW, Number(row.w) || Number(row.afterW) || Number(row.startW) || 0);
+      maxH = Math.max(maxH, Number(row.h) || Number(row.afterH) || Number(row.startH) || 0);
+      maxContentChars = Math.max(maxContentChars, Number(row.contentChars) || 0);
+      maxLogicalLines = Math.max(maxLogicalLines, Number(row.logicalLines) || 0);
+      maxWrappedLineIndexCacheEntries = Math.max(
+        maxWrappedLineIndexCacheEntries,
+        Number(row.wrappedLineIndexCacheEntries) || 0,
+      );
+      maxWrappedLineIndexWidthCacheSize = Math.max(
+        maxWrappedLineIndexWidthCacheSize,
+        Number(row.wrappedLineIndexWidthCacheSize) || 0,
+      );
+      const stepMs = Math.max(
+        Number(row.ms) || 0,
+        Number(row.moveMs) || 0,
+        Number(row.applyMs) || 0,
+        Number(row.autoHeightMs) || 0,
+        Number(row.clearLayoutMs) || 0,
+        Number(row.scheduleRenderMs) || 0,
+        Number(row.flushMs) || 0,
+        Number(row.historyMs) || 0,
+      );
+      if (stepMs > worstStepMs) {
+        worstStepMs = stepMs;
+        worstStep = row;
+      }
+    }
+    return {
+      events: events.length,
+      dragCount: dragIds.size,
+      moves: counts.move || 0,
+      applyCommits: counts['apply-end'] || 0,
+      liveAutoHeightCommits,
+      liveBoardRenderCommits,
+      cacheKeyedAutoHeightCommits,
+      firstAt: events[0]?.at ?? '',
+      lastAt: events[events.length - 1]?.at ?? '',
+      durationMs: events.length > 1 ? round((Number(events[events.length - 1].at) || 0) - (Number(events[0].at) || 0)) : 0,
+      maxGapMs: round(maxGapMs),
+      gapsOver16ms,
+      gapsOver32ms,
+      gapsOver80ms,
+      maxEventAgeMs: round(max('eventAgeMs')),
+      maxMoveMs: round(max('moveMs')),
+      maxMinWidthMs: round(max('minWidthMs')),
+      maxApplyMs: round(max('applyMs')),
+      maxClearLayoutMs: round(max('clearLayoutMs')),
+      maxAutoHeightMs: round(max('autoHeightMs')),
+      maxScheduleRenderMs: round(max('scheduleRenderMs')),
+      maxFlushMs: round(max('flushMs')),
+      maxHistoryMs: round(max('historyMs')),
+      maxW: round(maxW),
+      maxH: round(maxH),
+      maxContentChars,
+      maxLogicalLines,
+      maxWrappedLineIndexCacheEntries,
+      maxWrappedLineIndexWidthCacheSize,
+      worstStep: worstStep
+        ? {
+            step: worstStep.step || '',
+            dragId: worstStep.dragId || '',
+            ms: round(worstStepMs),
+            objectId: worstStep.objectId || '',
+            w: worstStep.w ?? worstStep.afterW ?? '',
+            h: worstStep.h ?? worstStep.afterH ?? '',
+          }
+        : null,
+      counts,
+    };
+  }
+
+  function textResizeTimeline(options = {}) {
+    const limit = Math.max(1, Math.min(TEXT_RESIZE_MAX_EVENTS, Number(options.limit) || 500));
+    const rows = textResizeEvents.slice(-limit).map(event => ({
+      at: event.at,
+      sinceStartMs: event.sinceStartMs,
+      gapMs: event.gapMs,
+      dragId: event.dragId,
+      step: event.step,
+      eventType: event.eventType,
+      eventAgeMs: event.eventAgeMs,
+      dir: event.dir,
+      objectId: event.objectId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      dx: event.dx,
+      dy: event.dy,
+      zoom: event.zoom,
+      startX: event.startX,
+      startY: event.startY,
+      startW: event.startW,
+      startH: event.startH,
+      x: event.x,
+      y: event.y,
+      w: event.w,
+      h: event.h,
+      beforeW: event.beforeW,
+      beforeH: event.beforeH,
+      afterW: event.afterW,
+      afterH: event.afterH,
+      minTextW: event.minTextW,
+      contentChars: event.contentChars,
+      logicalLines: event.logicalLines,
+      scriptRanges: event.scriptRanges,
+      layoutCacheHadValue: event.layoutCacheHadValue,
+      layoutCacheLinesBefore: event.layoutCacheLinesBefore,
+      layoutCachePresent: event.layoutCachePresent,
+      layoutCacheLines: event.layoutCacheLines,
+      minWidthCachePresent: event.minWidthCachePresent,
+      paragraphPrefixCacheEntries: event.paragraphPrefixCacheEntries,
+      wrappedLineCountCachePresent: event.wrappedLineCountCachePresent,
+      wrappedLineCountCacheW: event.wrappedLineCountCacheW,
+      wrappedLineIndexCacheEntries: event.wrappedLineIndexCacheEntries,
+      wrappedLineIndexCacheLines: event.wrappedLineIndexCacheLines,
+      wrappedLineIndexWidthCacheSize: event.wrappedLineIndexWidthCacheSize,
+      scriptMetricsCachePresent: event.scriptMetricsCachePresent,
+      clearLayoutMs: event.clearLayoutMs,
+      autoHeightMs: event.autoHeightMs,
+      autoHeightChanged: event.autoHeightChanged,
+      autoHeightReason: event.autoHeightReason,
+      layoutInvalidationMethod: event.layoutInvalidationMethod,
+      pendingSizeSync: event.pendingSizeSync,
+      renderBoard: event.renderBoard,
+      renderOverlay: event.renderOverlay,
+      scheduleRenderMs: event.scheduleRenderMs,
+      applyMs: event.applyMs,
+      moveMs: event.moveMs,
+      minWidthMs: event.minWidthMs,
+      flushMs: event.flushMs,
+      markDirtyMs: event.markDirtyMs,
+      historyMs: event.historyMs,
+      historyReason: event.historyReason,
+      pendingBeforeFlush: event.pendingBeforeFlush,
+    }));
+    if (options.table !== false) console.table(rows);
+    return rows;
+  }
+
+  function textResizeHeadline(report = {}) {
+    const resize = report.resizeSummary || {};
+    const events = report.eventSummary || {};
+    const input = report.inputStepSummary || {};
+    const frame = report.viewport?.frameSummary || {};
+    const draw = report.viewport?.drawSummary || {};
+    const historySummary = report.history?.textUndoRedo?.summary || {};
+    return {
+      resizeEvents: resize.events ?? '',
+      resizeDrags: resize.dragCount ?? '',
+      resizeMoves: resize.moves ?? '',
+      resizeCommits: resize.applyCommits ?? '',
+      liveAutoHeightCommits: resize.liveAutoHeightCommits ?? '',
+      liveBoardRenderCommits: resize.liveBoardRenderCommits ?? '',
+      cacheKeyedAutoHeightCommits: resize.cacheKeyedAutoHeightCommits ?? '',
+      maxResizeGapMs: resize.maxGapMs ?? '',
+      resizeGapsOver32ms: resize.gapsOver32ms ?? '',
+      maxResizeEventAgeMs: resize.maxEventAgeMs ?? '',
+      maxResizeApplyMs: resize.maxApplyMs ?? '',
+      maxResizeAutoHeightMs: resize.maxAutoHeightMs ?? '',
+      maxResizeClearLayoutMs: resize.maxClearLayoutMs ?? '',
+      maxResizeScheduleRenderMs: resize.maxScheduleRenderMs ?? '',
+      maxResizeFlushMs: resize.maxFlushMs ?? '',
+      maxResizeHistoryMs: resize.maxHistoryMs ?? '',
+      resizedContentChars: report.startSnapshot?.contentChars ?? resize.maxContentChars ?? '',
+      resizedLogicalLines: report.startSnapshot?.logicalLines ?? resize.maxLogicalLines ?? '',
+      startW: report.startSnapshot?.w ?? '',
+      startH: report.startSnapshot?.h ?? '',
+      endW: report.endSnapshot?.w ?? '',
+      endH: report.endSnapshot?.h ?? '',
+      startMinWidthCachePresent: report.startSnapshot?.minWidthCachePresent ?? '',
+      endMinWidthCachePresent: report.endSnapshot?.minWidthCachePresent ?? '',
+      startParagraphPrefixCacheEntries: report.startSnapshot?.paragraphPrefixCacheEntries ?? '',
+      endParagraphPrefixCacheEntries: report.endSnapshot?.paragraphPrefixCacheEntries ?? '',
+      startWrappedLineCountCachePresent: report.startSnapshot?.wrappedLineCountCachePresent ?? '',
+      endWrappedLineCountCachePresent: report.endSnapshot?.wrappedLineCountCachePresent ?? '',
+      endWrappedLineCountCacheW: report.endSnapshot?.wrappedLineCountCacheW ?? '',
+      startWrappedLineIndexCacheEntries: report.startSnapshot?.wrappedLineIndexCacheEntries ?? '',
+      endWrappedLineIndexCacheEntries: report.endSnapshot?.wrappedLineIndexCacheEntries ?? '',
+      maxWrappedLineIndexCacheEntries: resize.maxWrappedLineIndexCacheEntries ?? '',
+      endWrappedLineIndexWidthCacheSize: report.endSnapshot?.wrappedLineIndexWidthCacheSize ?? '',
+      maxWrappedLineIndexWidthCacheSize: resize.maxWrappedLineIndexWidthCacheSize ?? '',
+      endScriptMetricsCachePresent: report.endSnapshot?.scriptMetricsCachePresent ?? '',
+      domEvents: events.events ?? '',
+      pointermove: events.pointermove ?? '',
+      mousemove: events.mousemove ?? '',
+      beforeinput: events.beforeinput ?? '',
+      input: events.input ?? '',
+      maxDomEventGapMs: events.maxGapMs ?? '',
+      inputRuns: input.inputRuns ?? '',
+      maxInputHandlerMs: input.maxInputTotalMs ?? '',
+      maxInputStepMs: input.maxStepMs ?? '',
+      worstInputStep: input.worstStep?.step ?? '',
+      maxTextareaMutationMs: input.maxTextareaMutationMs ?? '',
+      maxLayoutPatchTotalMs: input.maxLayoutPatchTotalMs ?? '',
+      frames: frame.frames ?? '',
+      slowFramesOver16ms: frame.slowFramesOver16ms ?? '',
+      maxFrameMs: frame.maxFrameMs ?? '',
+      maxInputAgeMs: frame.maxInputAgeMs ?? '',
+      maxDrawMs: draw.maxDrawMs ?? '',
+      maxEditLayoutMs: draw.maxEditLayoutMs ?? '',
+      historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
+      historyMaxFocusMs: historySummary.maxFocusMs ?? '',
+      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
+    };
+  }
+
   function setTextEditMathListeners(active) {
     if (typeof document === 'undefined' || textEditMathEventsActive === active) return;
     for (const type of TEXT_EDIT_MATH_EVENT_TYPES) {
@@ -860,17 +1249,23 @@ var ManualPerfDebug = (() => {
   function textEditMathEventSummary(events = textEditMathEvents) {
     const counts = {};
     const inputTypes = {};
+    const shortcuts = {};
     let maxGapMs = 0;
     let gapsOver16ms = 0;
     let gapsOver32ms = 0;
     let gapsOver80ms = 0;
     let maxEventAgeMs = 0;
     let maxSelectionLength = 0;
+    let maxValueLength = 0;
+    let maxDomValueLength = 0;
+    let maxObjectContentLength = 0;
     for (const event of events) {
       const eventType = event.eventType || '';
       if (eventType) counts[eventType] = (counts[eventType] || 0) + 1;
       const inputType = event.inputType || '';
       if (inputType) inputTypes[inputType] = (inputTypes[inputType] || 0) + 1;
+      const shortcut = event.shortcut || '';
+      if (shortcut) shortcuts[shortcut] = (shortcuts[shortcut] || 0) + 1;
       const gap = Number(event.gapMs) || 0;
       maxGapMs = Math.max(maxGapMs, gap);
       if (gap > 16.7) gapsOver16ms++;
@@ -878,6 +1273,9 @@ var ManualPerfDebug = (() => {
       if (gap > 80) gapsOver80ms++;
       maxEventAgeMs = Math.max(maxEventAgeMs, Number(event.eventAgeMs) || 0);
       maxSelectionLength = Math.max(maxSelectionLength, Number(event.selectionLength) || 0);
+      maxValueLength = Math.max(maxValueLength, Number(event.valueLength) || 0);
+      maxDomValueLength = Math.max(maxDomValueLength, Number(event.domValueLength) || 0);
+      maxObjectContentLength = Math.max(maxObjectContentLength, Number(event.objectContentLength) || 0);
     }
     const first = events[0] || null;
     const last = events[events.length - 1] || null;
@@ -902,9 +1300,199 @@ var ManualPerfDebug = (() => {
       gapsOver80ms,
       maxEventAgeMs: round(maxEventAgeMs),
       maxSelectionLength,
+      maxValueLength,
+      maxDomValueLength,
+      maxObjectContentLength,
+      counts,
+      inputTypes,
+      shortcuts,
+    };
+  }
+
+  function isDeleteLikeTextInput(inputType = '') {
+    const value = String(inputType || '').toLowerCase();
+    return value.startsWith('delete') || value.includes('cut');
+  }
+
+  function isTextEditInputTraceActive(inputType = '') {
+    if (!textEditMathEventsActive || !textEditMathSession?.traceTextInput) return false;
+    const options = textEditMathSession.traceTextInput;
+    if (options.allInputs) return true;
+    const value = String(inputType || '').toLowerCase();
+    if (options.deleteInputs !== false && isDeleteLikeTextInput(value)) return true;
+    if (options.pasteInputs === true && value.includes('paste')) return true;
+    return false;
+  }
+
+  function recordTextEditInputStep(step, meta = {}) {
+    if (!isTextEditInputTraceActive(meta?.inputType)) return;
+    const now = performance.now();
+    const entry = sanitizePerfMeta({
+      at: round(now),
+      sinceStartMs: textEditMathSession ? now - textEditMathSession.startedAtMs : '',
+      gapMs: textEditInputStepLastAt ? now - textEditInputStepLastAt : '',
+      step,
+      ...meta,
+    });
+    textEditInputStepLastAt = now;
+    textEditInputSteps.push(entry);
+    if (textEditInputSteps.length > TEXT_EDIT_INPUT_MAX_STEPS) textEditInputSteps.shift();
+  }
+
+  function textEditInputStepSummary(steps = textEditInputSteps) {
+    const counts = {};
+    const inputTypes = {};
+    const max = (field) => steps.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
+    let maxGapMs = 0;
+    let gapsOver16ms = 0;
+    let gapsOver32ms = 0;
+    let maxStepMs = 0;
+    let maxInputTotalMs = 0;
+    let maxRemovedChars = 0;
+    let maxInsertedChars = 0;
+    let maxSelectedChars = 0;
+    let maxOldChars = 0;
+    let maxNextChars = 0;
+    let deleteInputRuns = new Set();
+    let worstStep = null;
+    for (const row of steps) {
+      const step = row.step || '';
+      if (step) counts[step] = (counts[step] || 0) + 1;
+      const inputType = row.inputType || '';
+      if (inputType) inputTypes[inputType] = (inputTypes[inputType] || 0) + 1;
+      if (isDeleteLikeTextInput(inputType) && row.seq !== '' && row.seq != null) deleteInputRuns.add(row.seq);
+      const gap = Number(row.gapMs) || 0;
+      maxGapMs = Math.max(maxGapMs, gap);
+      if (gap > 16.7) gapsOver16ms++;
+      if (gap > 32) gapsOver32ms++;
+      const stepMs = Number(row.ms) || 0;
+      if (stepMs > maxStepMs) {
+        maxStepMs = stepMs;
+        worstStep = row;
+      }
+      maxInputTotalMs = Math.max(maxInputTotalMs, Number(row.totalMs) || 0);
+      maxRemovedChars = Math.max(maxRemovedChars, Number(row.removedChars) || 0);
+      maxInsertedChars = Math.max(maxInsertedChars, Number(row.insertedChars) || 0);
+      maxSelectedChars = Math.max(maxSelectedChars, Number(row.selectedChars) || 0);
+      maxOldChars = Math.max(maxOldChars, Number(row.oldChars) || Number(row.proxyChars) || 0);
+      maxNextChars = Math.max(maxNextChars, Number(row.nextChars) || Number(row.proxyChars) || 0);
+    }
+    return {
+      steps: steps.length,
+      inputRuns: new Set(steps.map(row => row.seq).filter(value => value !== '' && value != null)).size,
+      deleteInputRuns: deleteInputRuns.size,
+      maxGapMs: round(maxGapMs),
+      gapsOver16ms,
+      gapsOver32ms,
+      maxStepMs: round(maxStepMs),
+      worstStep: worstStep
+        ? {
+            step: worstStep.step || '',
+            inputType: worstStep.inputType || '',
+            seq: worstStep.seq ?? '',
+            ms: worstStep.ms ?? '',
+            totalMs: worstStep.totalMs ?? '',
+            removedChars: worstStep.removedChars ?? '',
+            selectedChars: worstStep.selectedChars ?? '',
+          }
+        : null,
+      maxInputTotalMs: round(maxInputTotalMs),
+      maxEventAgeMs: round(max('eventAgeMs')),
+      maxSelectedChars,
+      maxRemovedChars,
+      maxInsertedChars,
+      maxOldChars,
+      maxNextChars,
+      maxScriptTransformMs: round(max('scriptTransformMs')),
+      maxLayoutPatchMs: round(max('layoutPatchMs')),
+      maxLayoutPatchTotalMs: round(max('layoutPatchTotalMs')),
+      maxLayoutPatchRangeMs: round(max('layoutPatchRangeMs')),
+      maxLayoutPatchSpliceMs: round(max('layoutPatchSpliceMs')),
+      maxLayoutPatchWrapMs: round(max('layoutPatchWrapMs')),
+      maxLayoutPatchScriptRangesMs: round(max('layoutPatchScriptRangesMs')),
+      maxLayoutPatchScriptMetricsMs: round(max('layoutPatchScriptMetricsMs')),
+      maxLayoutPatchInsertLayoutMs: round(max('layoutPatchInsertLayoutMs')),
+      maxLayoutPatchRemapMs: round(max('layoutPatchRemapMs')),
+      maxLayoutPatchLinesCacheMs: round(max('layoutPatchLinesCacheMs')),
+      maxHistoryRecordMs: round(max('historyRecordMs')),
+      maxRenderScheduleMs: round(max('renderScheduleMs')),
+      maxTextareaMutationMs: round(max('textareaMutationMs')),
+      maxSetRangeTextMs: round(max('setRangeTextMs')),
+      maxValueAssignMs: round(max('valueAssignMs')),
+      maxValueBuildMs: round(max('valueBuildMs')),
+      maxValueSetMs: round(max('valueSetMs')),
+      maxLogicalSetMs: round(max('logicalSetMs')),
+      maxSelectionSetMs: round(max('selectionSetMs')),
       counts,
       inputTypes,
     };
+  }
+
+  function textEditInputStepTimeline(options = {}) {
+    const limit = Math.max(1, Math.min(TEXT_EDIT_INPUT_MAX_STEPS, Number(options.limit) || 400));
+    const rows = textEditInputSteps.slice(-limit).map(step => ({
+      at: step.at,
+      gapMs: step.gapMs,
+      seq: step.seq,
+      step: step.step,
+      inputType: step.inputType,
+      key: step.key,
+      eventType: step.eventType,
+      eventAgeMs: step.eventAgeMs,
+      ms: step.ms,
+      totalMs: step.totalMs,
+      objectId: step.objectId,
+      proxyChars: step.proxyChars,
+      domProxyChars: step.domProxyChars,
+      domValueStale: step.domValueStale,
+      oldChars: step.oldChars,
+      nextChars: step.nextChars,
+      insertedChars: step.insertedChars,
+      removedChars: step.removedChars,
+      replacementStart: step.replacementStart,
+      replacementEnd: step.replacementEnd,
+      selectionStart: step.selectionStart,
+      selectionEnd: step.selectionEnd,
+      selectedChars: step.selectedChars,
+      selectionDirection: step.selectionDirection,
+      scriptRangeCount: step.scriptRangeCount,
+      scriptTransformMs: step.scriptTransformMs,
+      scriptTransformFastPath: step.scriptTransformFastPath,
+      scriptTransformSkipReason: step.scriptTransformSkipReason,
+      layoutPatched: step.layoutPatched,
+      layoutPatchMs: step.layoutPatchMs,
+      layoutPatchTotalMs: step.layoutPatchTotalMs,
+      layoutPatchRangeMs: step.layoutPatchRangeMs,
+      layoutPatchSpliceMs: step.layoutPatchSpliceMs,
+      layoutPatchWrapMs: step.layoutPatchWrapMs,
+      layoutPatchScriptRangesMs: step.layoutPatchScriptRangesMs,
+      layoutPatchScriptMetricsMs: step.layoutPatchScriptMetricsMs,
+      layoutPatchInsertLayoutMs: step.layoutPatchInsertLayoutMs,
+      layoutPatchRemapMs: step.layoutPatchRemapMs,
+      layoutPatchLinesCacheMs: step.layoutPatchLinesCacheMs,
+      layoutPatchOldLines: step.layoutPatchOldLines,
+      layoutPatchNewLines: step.layoutPatchNewLines,
+      layoutPatchRemovedLines: step.layoutPatchRemovedLines,
+      layoutPatchInsertedLines: step.layoutPatchInsertedLines,
+      layoutPatchLineDelta: step.layoutPatchLineDelta,
+      layoutPatchLogicalLineDelta: step.layoutPatchLogicalLineDelta,
+      layoutPatchReason: step.layoutPatchReason,
+      autoHeightDeferred: step.autoHeightDeferred,
+      pendingSizeSync: step.pendingSizeSync,
+      historyRecordMs: step.historyRecordMs,
+      historyPushed: step.historyPushed,
+      renderScheduleMs: step.renderScheduleMs,
+      textareaMutationMs: step.textareaMutationMs,
+      textareaMutationMethod: step.textareaMutationMethod,
+      setRangeTextMs: step.setRangeTextMs,
+      valueAssignMs: step.valueAssignMs,
+      valueBuildMs: step.valueBuildMs,
+      valueSetMs: step.valueSetMs,
+      logicalSetMs: step.logicalSetMs,
+      selectionSetMs: step.selectionSetMs,
+    }));
+    if (options.table !== false) console.table(rows);
+    return rows;
   }
 
   function textEditMathTimeline(options = {}) {
@@ -914,6 +1502,7 @@ var ManualPerfDebug = (() => {
       gapMs: event.gapMs,
       eventType: event.eventType,
       inputType: event.inputType,
+      shortcut: event.shortcut,
       dataLength: event.dataLength,
       key: event.key,
       code: event.code,
@@ -926,6 +1515,17 @@ var ManualPerfDebug = (() => {
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
       valueLength: event.valueLength,
+      domValueLength: event.domValueLength,
+      domValueStale: event.domValueStale,
+      objectContentLength: event.objectContentLength,
+      objectW: event.objectW,
+      objectH: event.objectH,
+      editStartChars: event.editStartChars,
+      pendingSizeSync: event.pendingSizeSync,
+      layoutCachePresent: event.layoutCachePresent,
+      layoutCacheLines: event.layoutCacheLines,
+      historyLength: event.historyLength,
+      historyIndex: event.historyIndex,
       selectionStart: event.selectionStart,
       selectionEnd: event.selectionEnd,
       selectionLength: event.selectionLength,
@@ -949,23 +1549,66 @@ var ManualPerfDebug = (() => {
     };
   }
 
+  function historyTextUndoRedoReport(options = {}) {
+    const historyApi = BoardfishDebug.history;
+    if (!historyApi?.textUndoRedoReport) {
+      return { available: false, reason: 'history text undo/redo report unavailable' };
+    }
+    return {
+      available: true,
+      textUndoRedo: historyApi.textUndoRedoReport({
+        table: options.historyTable === true,
+        limit: options.historyLimit ?? options.limit ?? 240,
+      }),
+      stats: historyApi.stats || null,
+    };
+  }
+
   function textEditMathHeadline(report = {}) {
     const eventSummary = report.eventSummary || {};
+    const inputStepSummary = report.inputStepSummary || {};
     const frame = report.viewport?.frameSummary || {};
     const draw = report.viewport?.drawSummary || {};
+    const historySummary = report.history?.textUndoRedo?.summary || {};
     return {
       events: eventSummary.events ?? '',
       beforeinput: eventSummary.beforeinput ?? '',
       input: eventSummary.input ?? '',
       paste: eventSummary.paste ?? '',
+      undoShortcuts: eventSummary.shortcuts?.undo ?? '',
+      redoShortcuts: eventSummary.shortcuts?.redo ?? '',
       wheel: eventSummary.wheel ?? '',
       pointermove: eventSummary.pointermove ?? '',
       mousemove: eventSummary.mousemove ?? '',
       selectionchange: eventSummary.selectionchange ?? '',
       maxEventGapMs: eventSummary.maxGapMs ?? '',
       gapsOver32ms: eventSummary.gapsOver32ms ?? '',
+      inputRuns: inputStepSummary.inputRuns ?? '',
+      deleteInputRuns: inputStepSummary.deleteInputRuns ?? '',
+      maxInputHandlerMs: inputStepSummary.maxInputTotalMs ?? '',
+      maxInputStepMs: inputStepSummary.maxStepMs ?? '',
+      worstInputStep: inputStepSummary.worstStep?.step ?? '',
+      maxRemovedChars: inputStepSummary.maxRemovedChars ?? '',
+      maxSelectedCharsInInput: inputStepSummary.maxSelectedChars ?? '',
+      maxScriptTransformMs: inputStepSummary.maxScriptTransformMs ?? '',
+      maxLayoutPatchMs: inputStepSummary.maxLayoutPatchMs ?? '',
+      maxLayoutPatchTotalMs: inputStepSummary.maxLayoutPatchTotalMs ?? '',
+      maxHistoryRecordMs: inputStepSummary.maxHistoryRecordMs ?? '',
+      maxTextareaMutationMs: inputStepSummary.maxTextareaMutationMs ?? '',
+      maxRenderScheduleMs: inputStepSummary.maxRenderScheduleMs ?? '',
       valueLengthStart: report.startSnapshot?.valueLength ?? '',
       valueLengthEnd: report.endSnapshot?.valueLength ?? '',
+      maxValueLength: eventSummary.maxValueLength ?? '',
+      domValueLengthStart: report.startSnapshot?.domValueLength ?? '',
+      domValueLengthEnd: report.endSnapshot?.domValueLength ?? '',
+      domValueStaleEnd: report.endSnapshot?.domValueStale ?? '',
+      maxDomValueLength: eventSummary.maxDomValueLength ?? '',
+      contentLengthStart: report.startSnapshot?.contentLength ?? '',
+      contentLengthEnd: report.endSnapshot?.contentLength ?? '',
+      maxObjectContentLength: eventSummary.maxObjectContentLength ?? '',
+      editStartChars: report.startSnapshot?.editStartChars ?? '',
+      pendingSizeSyncEnd: report.endSnapshot?.pendingSizeSync ?? '',
+      layoutCacheLinesEnd: report.endSnapshot?.layoutCacheLines ?? '',
       scriptRangesEnd: report.endSnapshot?.scriptRanges ?? '',
       frames: frame.frames ?? '',
       slowFramesOver16ms: frame.slowFramesOver16ms ?? '',
@@ -979,6 +1622,24 @@ var ManualPerfDebug = (() => {
       maxEditCaretMs: draw.maxEditCaretMs ?? '',
       maxEditVisibleLines: draw.maxEditVisibleLines ?? '',
       maxEditCulledLines: draw.maxEditCulledLines ?? '',
+      historyUndoCount: historySummary.undoCount ?? '',
+      historyRedoCount: historySummary.redoCount ?? '',
+      historyMaxUndoMs: historySummary.maxUndoMs ?? '',
+      historyMaxRedoMs: historySummary.maxRedoMs ?? '',
+      historyMaxRestoreMs: historySummary.maxRestoreMs ?? '',
+      historyMaxOuterRestoreMs: historySummary.maxOuterRestoreMs ?? '',
+      historyMaxFlushMs: historySummary.maxFlushMs ?? '',
+      historyMaxCloneObjectsMs: historySummary.maxCloneObjectsMs ?? '',
+      historyHydratedTextRuntimeCaches: historySummary.hydratedTextRuntimeCaches ?? '',
+      historyHydratedTextLayoutCaches: historySummary.hydratedTextLayoutCaches ?? '',
+      historyMaxReplaceBoardObjectsMs: historySummary.maxReplaceBoardObjectsMs ?? '',
+      historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
+      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
+      historyMaxProxyValueDiffMs: historySummary.maxProxyValueDiffMs ?? '',
+      historyMaxProxyValueMutationMs: historySummary.maxProxyValueMutationMs ?? '',
+      historyMaxProxyValueAssignMs: historySummary.maxProxyValueAssignMs ?? '',
+      historyMaxSetSelectionRangeMs: historySummary.maxSetSelectionRangeMs ?? '',
+      historyMaxFocusMs: historySummary.maxFocusMs ?? '',
     };
   }
 
@@ -994,18 +1655,37 @@ var ManualPerfDebug = (() => {
       eventLoopGapThresholdMs: options.eventLoopGapThresholdMs,
     });
     BoardfishDebug.viewport.reset();
+    if (options.history !== false && BoardfishDebug.history?.enable && BoardfishDebug.history?.reset) {
+      BoardfishDebug.history.enable({ verbose: false });
+      BoardfishDebug.history.reset();
+    }
     markers.length = 0;
     textEditMathEvents.length = 0;
+    textEditInputSteps.length = 0;
     textEditMathLastEventAt = 0;
+    textEditInputStepLastAt = 0;
     const id = `text-edit-math-${nextTextEditMathSessionId++}`;
+    const traceTextInput = options.traceTextInput !== false;
     textEditMathSession = {
       id,
       startedAt: new Date().toISOString(),
       startedAtMs: performance.now(),
       startSnapshot: textEditMathSnapshot(),
+      traceTextInput: traceTextInput
+        ? {
+            allInputs: options.traceAllTextInputs === true,
+            deleteInputs: options.traceDeleteInputs !== false,
+            pasteInputs: options.tracePasteInputs === true,
+          }
+        : null,
       options: sanitizePerfMeta({
         rawInput: options.rawInput !== false,
         eventLoopGapThresholdMs: options.eventLoopGapThresholdMs ?? '',
+        history: options.history !== false,
+        traceTextInput,
+        traceAllTextInputs: options.traceAllTextInputs === true,
+        traceDeleteInputs: options.traceDeleteInputs !== false,
+        tracePasteInputs: options.tracePasteInputs === true,
       }),
     };
     setTextEditMathListeners(true);
@@ -1015,7 +1695,9 @@ var ManualPerfDebug = (() => {
       mode: 'passive-event-recording',
       startSnapshot: textEditMathSession.startSnapshot,
       recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES.slice(),
-      next: 'Do the paste/edit/pan/zoom manually, then run finishDebug({ label: "text-edit-math", perf: ["textEditMathReport"] }).',
+      historyRecording: options.history !== false,
+      textInputStepTracing: textEditMathSession.traceTextInput,
+      next: 'Do the edit/delete interaction manually, then run finishDebug({ label: "text-edit-delete-lag", perf: ["textEditMathReport"], history: ["textUndoRedoReport"], viewport: ["report"], textSel: ["performanceSummary", "enterEditReport", "editLifecycleReport"] }).',
     };
     if (options.log !== false) {
       console.group('[Boardfish perf] text edit math passive recorder');
@@ -1035,6 +1717,7 @@ var ManualPerfDebug = (() => {
     if (options.stop !== false) setTextEditMathListeners(false);
     const session = textEditMathSession;
     const events = textEditMathEvents.slice();
+    const inputSteps = textEditInputSteps.slice();
     const endSnapshot = textEditMathSnapshot();
     const out = {
       label: options.label || 'text-edit-math-passive-events',
@@ -1045,7 +1728,10 @@ var ManualPerfDebug = (() => {
       endSnapshot,
       eventSummary: textEditMathEventSummary(events),
       eventTimeline: textEditMathTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? 400 }),
+      inputStepSummary: textEditInputStepSummary(inputSteps),
+      inputStepTimeline: textEditInputStepTimeline({ table: false, limit: options.inputStepLimit ?? options.limit ?? 400 }),
       viewport: viewportEventReport(options),
+      history: historyTextUndoRedoReport(options),
       markers: markers.slice(),
       notes: [
         'Passive report only: no board mutation, synthetic input, board viewport change, text layout measurement, cache clearing, memory snapshot, restore, or clipboard copy.',
@@ -1057,9 +1743,158 @@ var ManualPerfDebug = (() => {
     if (options.clear !== false) {
       textEditMathSession = null;
       textEditMathLastEventAt = 0;
+      textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
       console.group('[Boardfish perf] text edit math passive report');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  function textResizeBegin(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    setTextEditMathListeners(false);
+    BoardfishDebug.viewport.enable({
+      verbose: false,
+      rawInput: options.rawInput !== false,
+      eventLoopGapThresholdMs: options.eventLoopGapThresholdMs,
+    });
+    BoardfishDebug.viewport.reset();
+    if (options.history !== false && BoardfishDebug.history?.enable && BoardfishDebug.history?.reset) {
+      BoardfishDebug.history.enable({ verbose: false });
+      BoardfishDebug.history.reset();
+    }
+    if (options.textSelection !== false && typeof TextSelDebug !== 'undefined') {
+      TextSelDebug.enable?.({ verbose: false });
+      TextSelDebug.reset?.();
+    }
+    markers.length = 0;
+    textResizeEvents.length = 0;
+    textEditMathEvents.length = 0;
+    textEditInputSteps.length = 0;
+    textResizeLastEventAt = 0;
+    textEditMathLastEventAt = 0;
+    textEditInputStepLastAt = 0;
+    const id = `text-resize-${nextTextResizeSessionId++}`;
+    const startedAt = new Date().toISOString();
+    const startedAtMs = performance.now();
+    const traceTextInput = options.traceTextInput !== false;
+    const traceConfig = traceTextInput
+      ? {
+          allInputs: options.traceAllTextInputs !== false,
+          deleteInputs: options.traceDeleteInputs !== false,
+          pasteInputs: options.tracePasteInputs !== false,
+        }
+      : null;
+    textEditMathSession = {
+      id: `${id}:text-input`,
+      startedAt,
+      startedAtMs,
+      startSnapshot: textEditMathSnapshot(),
+      traceTextInput: traceConfig,
+      options: sanitizePerfMeta({
+        owner: id,
+        rawInput: options.rawInput !== false,
+        eventLoopGapThresholdMs: options.eventLoopGapThresholdMs ?? '',
+        history: options.history !== false,
+        traceTextInput,
+        traceAllTextInputs: options.traceAllTextInputs !== false,
+        traceDeleteInputs: options.traceDeleteInputs !== false,
+        tracePasteInputs: options.tracePasteInputs !== false,
+      }),
+    };
+    textResizeSession = {
+      id,
+      startedAt,
+      startedAtMs,
+      startSnapshot: textResizeSnapshot({ includeContent: true }),
+      textEditStartSnapshot: textEditMathSession.startSnapshot,
+      traceTextInput: traceConfig,
+      options: textEditMathSession.options,
+      currentDragId: '',
+    };
+    setTextEditMathListeners(true);
+    const out = {
+      sessionId: id,
+      startedAt,
+      mode: 'passive-text-resize-and-input-recording',
+      startSnapshot: textResizeSession.startSnapshot,
+      textEditStartSnapshot: textResizeSession.textEditStartSnapshot,
+      recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES.slice(),
+      historyRecording: options.history !== false,
+      textSelectionRecording: options.textSelection !== false,
+      textInputStepTracing: traceConfig,
+      next: 'Resize the large text box, then perform the delayed input action and run finishDebug({ label: "large-text-resize-input-delay", perf: [["textResizeReport", { limit: 800, eventLimit: 1200, inputStepLimit: 1200 }]], viewport: ["report"], history: ["textUndoRedoReport"], textSel: ["performanceSummary", "enterEditReport", "editLifecycleReport"] }).',
+    };
+    if (options.log !== false) {
+      console.group('[Boardfish perf] text resize passive recorder');
+      console.table([{
+        sessionId: id,
+        objectId: out.startSnapshot.objectId,
+        contentChars: out.startSnapshot.contentChars,
+        logicalLines: out.startSnapshot.logicalLines,
+        w: out.startSnapshot.w,
+        h: out.startSnapshot.h,
+      }]);
+      console.info(out.next);
+      console.log(out);
+      console.groupEnd();
+    }
+    return out;
+  }
+
+  function textResizeReport(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    if (options.stop !== false) setTextEditMathListeners(false);
+    const session = textResizeSession;
+    const events = textResizeEvents.slice();
+    const domEvents = textEditMathEvents.slice();
+    const inputSteps = textEditInputSteps.slice();
+    const out = {
+      label: options.label || 'large-text-resize-input-delay',
+      reportedAt: new Date().toISOString(),
+      sessionId: session?.id || null,
+      mode: 'passive-text-resize-and-input-recording',
+      startSnapshot: session?.startSnapshot || null,
+      endSnapshot: textResizeSnapshot({ includeContent: true }),
+      textEditStartSnapshot: session?.textEditStartSnapshot || null,
+      textEditEndSnapshot: textEditMathSnapshot(),
+      resizeSummary: textResizeSummary(events),
+      resizeTimeline: textResizeTimeline({ table: false, limit: options.resizeLimit ?? options.limit ?? 800 }),
+      eventSummary: textEditMathEventSummary(domEvents),
+      eventTimeline: textEditMathTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? 800 }),
+      inputStepSummary: textEditInputStepSummary(inputSteps),
+      inputStepTimeline: textEditInputStepTimeline({ table: false, limit: options.inputStepLimit ?? options.limit ?? 800 }),
+      viewport: viewportEventReport(options),
+      history: historyTextUndoRedoReport(options),
+      markers: markers.slice(),
+      notes: [
+        'Passive report only: no board mutation, synthetic input, board viewport change, text layout measurement, cache clearing, memory snapshot, restore, or clipboard copy.',
+        'Resize timeline records requested moves separately from rAF-applied resize work so pointer backlog and layout/render cost can be distinguished.',
+        'Text resize frames keep auto-height and board redraw live; liveAutoHeightCommits and cacheKeyedAutoHeightCommits show the optimized path.',
+      ],
+    };
+    out.headline = textResizeHeadline(out);
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.clear !== false) {
+      textResizeSession = null;
+      textEditMathSession = null;
+      textResizeLastEventAt = 0;
+      textEditMathLastEventAt = 0;
+      textEditInputStepLastAt = 0;
+    }
+    if (options.log !== false) {
+      console.group('[Boardfish perf] text resize/input passive report');
       console.table([out.headline]);
       console.log(out);
       console.groupEnd();
@@ -1230,213 +2065,380 @@ var ManualPerfDebug = (() => {
     return out;
   }
 
-  function largeTextLine(objectIndex, lineIndex, charsPerLine) {
-    const seed = `obj ${objectIndex + 1} line ${lineIndex + 1} Boardfish large text navigation performance sample `;
-    let out = seed;
-    let token = 0;
-    while (out.length < charsPerLine) {
-      out += `${(objectIndex + 17) * (lineIndex + 31) + token} `;
-      token++;
-    }
-    return out.slice(0, charsPerLine);
+  function normalizeLargeTextPanningMode(value = 'manual-sequence') {
+    const mode = String(value || 'manual-sequence').trim().toLowerCase().replace(/[_\s]+/g, '-');
+    if (
+      mode === 'manual' ||
+      mode === 'manual-sequence' ||
+      mode === 'sequence' ||
+      mode === 'all' ||
+      mode === 'all-variants' ||
+      mode === 'current-board'
+    ) return 'manual-sequence';
+    if (
+      mode === 'plain' ||
+      mode === 'view' ||
+      mode === 'screen' ||
+      mode === 'large-text' ||
+      mode === 'large-text-on-screen'
+    ) return 'plain';
+    if (
+      mode === 'select' ||
+      mode === 'selected' ||
+      mode === 'selection' ||
+      mode === 'select-mode' ||
+      mode === 'selection-mode' ||
+      mode === 'object-selection' ||
+      mode === 'large-text-select-mode'
+    ) return 'select';
+    if (
+      mode === 'edit' ||
+      mode === 'editing' ||
+      mode === 'edit-mode' ||
+      mode === 'edti-mode' ||
+      mode === 'large-text-edit-mode'
+    ) return 'edit';
+    if (
+      mode === 'highlight' ||
+      mode === 'text-highlight' ||
+      mode === 'edit-highlight' ||
+      mode === 'edit-mode-highlight' ||
+      mode === 'editing-highlight' ||
+      mode === 'large-text-edit-mode-highlight'
+    ) return 'edit-highlight';
+    if (mode.includes('highlight')) return 'edit-highlight';
+    if (mode.includes('edit') || mode.includes('edti')) return 'edit';
+    if (mode.includes('select')) return 'select';
+    return 'plain';
   }
 
-  function largeTextContent(objectIndex, lineCount, charsPerLine) {
-    const lines = [];
-    for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
-      lines.push(largeTextLine(objectIndex, lineIndex, charsPerLine));
-    }
-    return lines.join('\n');
+  function largeTextPanningLabelForMode(mode) {
+    if (mode === 'manual-sequence') return 'large-text-pan-manual-sequence';
+    if (mode === 'select') return 'large-text-pan-select-mode';
+    if (mode === 'edit') return 'large-text-pan-edit-mode';
+    if (mode === 'edit-highlight') return 'large-text-pan-edit-highlight';
+    return 'large-text-pan-plain';
   }
 
-  function createLargeTextScenario(options = {}) {
-    const objectCount = clampInteger(options.objectCount ?? options.objects, 32, 1, 250);
-    const linesPerObject = clampInteger(options.linesPerObject ?? options.lines, 160, 1, 2000);
-    const charsPerLine = clampInteger(options.charsPerLine ?? options.chars, 96, 8, 240);
-    const cols = clampInteger(options.cols, Math.ceil(Math.sqrt(objectCount)), 1, objectCount);
-    const gap = clampInteger(options.gap, 80, 0, 2000);
-    const objectW = Math.max(160, Number(options.objectWidth) || Math.ceil(charsPerLine * 9.2 + TEXT_PAD * 2));
-    const objectH = linesPerObject * LINE_H + TEXT_PAD * 2;
-    const objectsOut = [];
+  function largeTextPrimaryObject(options = {}) {
+    const objectId = options.objectId || largeTextPanningSession?.objectId || '';
+    if (objectId && typeof objectsMap !== 'undefined') {
+      const requested = objectsMap.get(objectId);
+      if (requested?.type === 'text') return requested;
+    }
+    const texts = textObjectList();
+    if (!texts.length) return null;
+    if (options.objectIndex == null) {
+      return texts.slice().sort((a, b) => (
+        normalizeTextContent(b?.data?.content || '').length -
+        normalizeTextContent(a?.data?.content || '').length
+      ))[0] || null;
+    }
+    const index = Math.max(0, Math.min(texts.length - 1, Math.trunc(Number(options.objectIndex) || 0)));
+    return texts[index] || null;
+  }
 
-    for (let index = 0; index < objectCount; index++) {
-      const col = index % cols;
-      const row = Math.floor(index / cols);
-      objectsOut.push({
-        id: `debug-text-${index + 1}`,
-        type: 'text',
-        x: col * (objectW + gap),
-        y: row * (objectH + gap),
-        w: objectW,
-        h: objectH,
-        z: index + 1,
-        data: {
-          content: largeTextContent(index, linesPerObject, charsPerLine),
-        },
+  function textIndexAtLine(content, targetLine) {
+    const line = Math.max(0, Math.trunc(Number(targetLine) || 0));
+    if (!line) return 0;
+    let currentLine = 0;
+    for (let index = 0; index < content.length; index++) {
+      if (content[index] !== '\n') continue;
+      currentLine++;
+      if (currentLine >= line) return index + 1;
+    }
+    return content.length;
+  }
+
+  function largeTextSelectionRangeForObject(obj, options = {}) {
+    const content = normalizeTextContent(obj?.data?.content || '');
+    const length = content.length;
+    const line = clampInteger(options.selectionStartLine ?? options.highlightStartLine ?? options.caretLine, 5, 0, 100000);
+    const lines = clampInteger(options.selectionLines ?? options.highlightLines, 20, 1, 2000);
+    const explicitStart = Number(options.selectionStart ?? options.highlightStart);
+    const start = Math.max(0, Math.min(length, Number.isFinite(explicitStart)
+      ? Math.trunc(explicitStart)
+      : textIndexAtLine(content, line)));
+    const explicitEnd = Number(options.selectionEnd ?? options.highlightEnd);
+    const explicitChars = Number(options.selectionChars ?? options.highlightChars);
+    let end = Number.isFinite(explicitEnd)
+      ? Math.trunc(explicitEnd)
+      : Number.isFinite(explicitChars)
+        ? start + Math.max(1, Math.trunc(explicitChars))
+        : textIndexAtLine(content, line + lines);
+    end = Math.max(start, Math.min(length, end));
+    if (end <= start && length > start) end = Math.min(length, start + Math.min(2000, length - start));
+    return { start, end, selectedChars: Math.max(0, end - start), direction: 'forward' };
+  }
+
+  function largeTextInteractionSnapshot(options = {}) {
+    const obj = largeTextPrimaryObject(options);
+    const content = normalizeTextContent(
+      typeof textEditProxyValue === 'function' && _editEl
+        ? textEditProxyValue(_editEl)
+        : (obj?.data?.content || '')
+    );
+    const selectionStart = _editEl?.selectionStart ?? '';
+    const selectionEnd = _editEl?.selectionEnd ?? '';
+    const selectedChars = Number.isFinite(selectionStart) && Number.isFinite(selectionEnd)
+      ? Math.abs(selectionEnd - selectionStart)
+      : '';
+    const viewportRect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(0) : null;
+    return sanitizePerfMeta({
+      mode: options.mode || largeTextPanningSession?.mode || '',
+      objectId: obj?.id || '',
+      objectFound: !!obj,
+      selectedId: typeof selectedId !== 'undefined' ? (selectedId || '') : '',
+      selectedCount: typeof selectedIds !== 'undefined' ? selectedIds.size : '',
+      selectedIds: typeof selectedIds !== 'undefined' ? [...selectedIds].slice(0, 20).join(',') : '',
+      editingId: typeof editingId !== 'undefined' ? (editingId || '') : '',
+      hasEditProxy: !!_editEl,
+      activeElementIsProxy: typeof document !== 'undefined' ? document.activeElement === _editEl : '',
+      proxyChars: typeof _editEl?.value === 'string' ? _editEl.value.length : '',
+      logicalProxyChars: typeof textEditProxyValue === 'function' && _editEl ? textEditProxyValue(_editEl).length : '',
+      domValueStale: !!_editEl?._boardfishDomValueStale,
+      selectionStart,
+      selectionEnd,
+      selectionDirection: _editEl?.selectionDirection || '',
+      selectedChars,
+      contentChars: content.length,
+      logicalLines: countTextLines(content),
+      scriptRanges: textObjectScriptRangeCount(obj),
+      layoutCachePresent: !!obj?._layoutCache,
+      layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
+      wrappedLineIndexPresent: !!obj?._textWrappedLineIndexCache,
+      wrappedLineIndexEntries: obj?._textWrappedLineIndexCache?.entries?.length ?? '',
+      wrappedLineIndexLines: obj?._textWrappedLineIndexCache?.lineCount ?? '',
+      wrappedLineCountCachePresent: Number.isFinite(obj?._textWrappedLineCountCacheValue),
+      paragraphPrefixCacheEntries: obj?._textParagraphPrefixCache?.size ?? '',
+      scriptMetricsCachePresent: !!obj?._textScriptLayoutMetrics,
+      x: obj?.x ?? '',
+      y: obj?.y ?? '',
+      w: obj?.w ?? '',
+      h: obj?.h ?? '',
+      zoom: typeof zoom !== 'undefined' ? zoom : '',
+      panX: typeof panX !== 'undefined' ? panX : '',
+      panY: typeof panY !== 'undefined' ? panY : '',
+      viewportX1: viewportRect?.x1 ?? '',
+      viewportY1: viewportRect?.y1 ?? '',
+      viewportX2: viewportRect?.x2 ?? '',
+      viewportY2: viewportRect?.y2 ?? '',
+    });
+  }
+
+  function setLargeTextEditSelection(obj, range, highlight) {
+    if (!_editEl || !obj) return false;
+    if (highlight) {
+      _editEl.setSelectionRange(range.start, range.end, range.direction || 'forward');
+      if (typeof clearTextEditCaretIndex === 'function') clearTextEditCaretIndex(obj);
+      else {
+        delete obj._textEditCaretIndex;
+        delete obj._textEditCaretLineStartIndex;
+      }
+    } else {
+      _editEl.setSelectionRange(range.start, range.start, 'none');
+      if (typeof setTextEditCaretIndex === 'function') setTextEditCaretIndex(obj, range.start, { clearLineStartIndex: true });
+      else obj._textEditCaretIndex = range.start;
+    }
+    _caretVisible = true;
+    if (typeof focusTextEditProxyNow === 'function') {
+      focusTextEditProxyNow(_editEl, obj, 'large-text-panning-focus', {
+        phase: 'large-text-panning-state',
+        highlight,
+        selectionStart: _editEl.selectionStart ?? '',
+        selectionEnd: _editEl.selectionEnd ?? '',
       });
+    } else {
+      _editEl.focus?.({ preventScroll: true });
+    }
+    if (typeof TextSelDebug !== 'undefined') {
+      TextSelDebug._logSelection?.('large-text-panning-state', _editEl, obj);
+    }
+    scheduleRender(true, false, 'large-text-panning-edit-selection');
+    return true;
+  }
+
+  function applyLargeTextPanningState(mode, options = {}) {
+    const normalizedMode = normalizeLargeTextPanningMode(mode);
+    const obj = largeTextPrimaryObject(options);
+    if (!obj) return { skipped: true, reason: 'no-text-object', mode: normalizedMode };
+
+    if (normalizedMode === 'plain') {
+      if (editingId && typeof exitEdit === 'function') exitEdit();
+      BoardfishEditorState.clearSelection();
+      scheduleRender(true, true, 'large-text-panning-plain');
+      return { mode: normalizedMode, objectId: obj.id, startSnapshot: largeTextInteractionSnapshot({ objectId: obj.id, mode: normalizedMode }) };
     }
 
-    const rows = Math.ceil(objectCount / cols);
-    const boardW = cols * objectW + Math.max(0, cols - 1) * gap;
-    const boardH = rows * objectH + Math.max(0, rows - 1) * gap;
-    const viewW = window.innerWidth || 1200;
-    const viewH = window.innerHeight || 800;
-    const zoomValue = Number.isFinite(Number(options.zoom)) ? Number(options.zoom) : 0.22;
-    const viewport = {
-      zoom: zoomValue,
-      panX: Number.isFinite(Number(options.panX)) ? Number(options.panX) : Math.round(viewW * 0.12),
-      panY: Number.isFinite(Number(options.panY)) ? Number(options.panY) : Math.round(viewH * 0.1),
-    };
-    return {
-      objects: objectsOut,
-      viewport,
-      summary: {
-        objectCount,
-        linesPerObject,
-        charsPerLine,
-        cols,
-        rows,
-        objectW,
-        objectH,
-        boardW,
-        boardH,
-        totalLogicalLines: objectCount * linesPerObject,
-        totalChars: objectsOut.reduce((sum, obj) => sum + obj.data.content.length, 0),
-        viewport,
-      },
-    };
-  }
-
-  function captureLargeTextOriginalState() {
-    return {
-      objects: cloneObjects(boardObjects()),
-      viewport: { panX, panY, zoom },
-      selectedId,
-      selectedIds: [...selectedIds],
-      dirtyIds: [..._dirtyIds],
-      idCounter,
-      zCounter,
-      boardHistory: boardHistory.slice(),
-      historyIndex,
-      savedHistoryIndex,
-      currentFilePath,
-      currentFileRef,
-      title: document.title,
-    };
-  }
-
-  function restoreLargeTextOriginalState(session = largeTextSession, options = {}) {
-    if (!session?.original) return { restored: false, reason: 'no-large-text-session' };
-    const original = session.original;
-    if (editingId && typeof exitEdit === 'function') exitEdit();
-    BoardfishEditorState.replaceBoardObjects(cloneObjects(original.objects), {
-      normalizeText: false,
-      syncTextHeights: false,
-      restoreCounters: false,
+    if (editingId && editingId !== obj.id && typeof exitEdit === 'function') exitEdit();
+    BoardfishEditorState.setSelection([obj.id], {
+      primaryId: obj.id,
+      exitEditing: false,
+      animateSelection: false,
     });
-    idCounter = original.idCounter;
-    zCounter = original.zCounter;
-    BoardfishViewportState.setViewport(original.viewport);
-    selectedIds.clear();
-    for (const id of original.selectedIds) {
-      if (objectsMap.has(id)) selectedIds.add(id);
-    }
-    selectedId = selectedIds.has(original.selectedId)
-      ? original.selectedId
-      : ([...selectedIds].pop() || null);
-    _dirtyIds.clear();
-    for (const id of original.dirtyIds) _dirtyIds.add(id);
-    boardHistory = original.boardHistory.slice();
-    historyIndex = original.historyIndex;
-    savedHistoryIndex = original.savedHistoryIndex;
-    currentFilePath = original.currentFilePath;
-    currentFileRef = original.currentFileRef;
-    invalidateOffscreen();
-    scheduleRender(true, true, 'large-text-perf-restore');
-    if (typeof updateTitle === 'function') updateTitle();
-    else document.title = original.title;
-    if (largeTextSession?.id === session.id) largeTextSession = null;
-    const out = {
-      restored: true,
-      sessionId: session.id,
-      objectCount: objects.length,
-      historyLength: boardHistory.length,
-      historyIndex,
-      savedHistoryIndex,
-    };
-    if (options.log !== false) {
-      console.info(`[Boardfish perf] Restored board after large text evaluation (${session.id}).`);
-      console.table([out]);
-    }
-    return out;
-  }
 
-  function applyLargeTextScenario(scenario) {
-    if (editingId) {
-      throw new Error('[Boardfish perf] Exit text editing before running the large text evaluation.');
+    if (normalizedMode === 'select') {
+      if (editingId && typeof exitEdit === 'function') exitEdit();
+      scheduleRender(true, true, 'large-text-panning-select');
+      return { mode: normalizedMode, objectId: obj.id, startSnapshot: largeTextInteractionSnapshot({ objectId: obj.id, mode: normalizedMode }) };
     }
-    BoardfishEditorState.replaceBoardObjects(cloneObjects(scenario.objects), {
-      normalizeText: false,
-      syncTextHeights: false,
-      restoreCounters: true,
+
+    if (typeof enterEdit !== 'function') {
+      return { skipped: true, reason: 'enterEdit-unavailable', mode: normalizedMode, objectId: obj.id };
+    }
+
+    enterEdit(obj.id, {
+      history: false,
+      preserveSize: true,
+      placeInitialCaret: false,
+      normalizeForEdit: options.normalizeForEdit === true,
     });
-    BoardfishEditorState.clearSelection();
-    BoardfishViewportState.setViewport(scenario.viewport);
-    _dirtyIds.clear();
-    invalidateOffscreen();
-    scheduleRender(true, true, 'large-text-perf-setup');
+    const range = largeTextSelectionRangeForObject(obj, options);
+    const highlighted = normalizedMode === 'edit-highlight';
+    setLargeTextEditSelection(obj, range, highlighted);
+    return {
+      mode: normalizedMode,
+      objectId: obj.id,
+      editSelection: range,
+      highlighted,
+      startSnapshot: largeTextInteractionSnapshot({ objectId: obj.id, mode: normalizedMode }),
+    };
   }
 
-  async function largeTextSetup(options = {}) {
-    if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
-      return null;
-    }
-    if (editingId && options.force !== true) {
-      const skipped = { skipped: true, reason: 'editing-active' };
-      console.warn('[Boardfish perf] Exit text editing before running the large text evaluation, or pass { force: true }.');
-      return skipped;
-    }
-    if (editingId && options.force === true && typeof exitEdit === 'function') exitEdit();
-    if (largeTextSession) restoreLargeTextOriginalState(largeTextSession, { log: false });
+  function currentLargeTextPanningState(mode, options = {}) {
+    const obj = largeTextPrimaryObject(options);
+    return {
+      mode,
+      objectId: obj?.id || '',
+      manual: true,
+      startSnapshot: largeTextInteractionSnapshot({ objectId: obj?.id || '', mode }),
+    };
+  }
 
-    const original = captureLargeTextOriginalState();
-    const scenario = createLargeTextScenario(options);
-    const id = `large-text-${nextLargeTextSessionId++}`;
-    applyLargeTextScenario(scenario);
+  function resetLargeTextPanningRecorders(options = {}) {
     BoardfishDebug.viewport.enable({
       verbose: false,
       rawInput: options.rawInput !== false,
       eventLoopGapThresholdMs: options.eventLoopGapThresholdMs,
     });
     BoardfishDebug.viewport.reset();
+    if (options.history !== false && BoardfishDebug.history?.enable && BoardfishDebug.history?.reset) {
+      BoardfishDebug.history.enable({ verbose: false });
+      BoardfishDebug.history.reset();
+    }
+    if (options.textSelection !== false && typeof TextSelDebug !== 'undefined') {
+      TextSelDebug.enable?.({ verbose: false });
+      TextSelDebug.reset?.();
+    }
     markers.length = 0;
-    sessionStartMemory = options.memory === false ? null : await memorySnapshot('large-text-begin', { ...options, table: false });
+    textEditMathEvents.length = 0;
+    textEditInputSteps.length = 0;
+    textEditMathLastEventAt = 0;
+    textEditInputStepLastAt = 0;
+  }
+
+  async function largeTextPanningBegin(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    setTextEditMathListeners(false);
+    largeTextPanningSession = null;
+    const mode = normalizeLargeTextPanningMode(options.mode ?? options.scenario ?? options.state);
+    const state = options.applyState === true && mode !== 'manual-sequence'
+      ? applyLargeTextPanningState(mode, options)
+      : currentLargeTextPanningState(mode, options);
+    if (state?.skipped) {
+      console.warn(`[Boardfish perf] Large text panning state skipped: ${state.reason}`);
+      return state;
+    }
+
     await animationFrame();
-    largeTextSession = {
+    await animationFrame();
+    resetLargeTextPanningRecorders(options);
+
+    const layoutPrewarm = options.prewarmLayout === false || typeof prewarmVisibleTextLayoutCaches !== 'function'
+      ? null
+      : prewarmVisibleTextLayoutCaches({
+          source: 'large-text-panning-begin',
+          padScreenPx: options.prewarmPadScreenPx ?? 1024,
+          minChars: options.prewarmMinChars ?? 1024,
+          maxObjects: options.prewarmMaxObjects ?? 100,
+          fullLineCache: options.prewarmFullLineCache === true,
+          fullLineCacheMaxLines: options.prewarmFullLineCacheMaxLines ?? 8192,
+          limit: options.prewarmLimit ?? 8,
+        });
+
+    const id = `large-text-pan-${nextLargeTextPanningSessionId++}`;
+    const startedAt = new Date().toISOString();
+    const startedAtMs = performance.now();
+    const startSnapshot = largeTextInteractionSnapshot({ objectId: state.objectId, mode });
+    const traceConfig = options.traceTextInput === true
+      ? {
+          allInputs: options.traceAllTextInputs === true,
+          deleteInputs: options.traceDeleteInputs !== false,
+          pasteInputs: options.tracePasteInputs === true,
+        }
+      : null;
+    largeTextPanningSession = {
       id,
-      startedAt: new Date().toISOString(),
-      original,
-      scenario,
-      memoryStart: sessionStartMemory,
+      startedAt,
+      startedAtMs,
+      mode,
+      objectId: state.objectId,
+      startSnapshot,
+      layoutPrewarm,
+      editSelection: state.editSelection || null,
+      options: sanitizePerfMeta({
+        applyState: options.applyState === true,
+        prewarmLayout: options.prewarmLayout !== false,
+        prewarmPadScreenPx: options.prewarmPadScreenPx ?? 1024,
+        prewarmMinChars: options.prewarmMinChars ?? 1024,
+        rawInput: options.rawInput !== false,
+        history: options.history !== false,
+        textSelection: options.textSelection !== false,
+        eventLoopGapThresholdMs: options.eventLoopGapThresholdMs ?? '',
+      }),
     };
-    const textSummary = textBoardSummary({ table: false, layout: false });
+    textEditMathSession = {
+      id: `${id}:dom-events`,
+      startedAt,
+      startedAtMs,
+      startSnapshot: textEditMathSnapshot(),
+      traceTextInput: traceConfig,
+      options: sanitizePerfMeta({
+        owner: id,
+        mode,
+        rawInput: options.rawInput !== false,
+        traceTextInput: !!traceConfig,
+      }),
+    };
+    setTextEditMathListeners(true);
+    sessionStartMemory = options.memory === false ? null : await memorySnapshot('large-text-panning-begin', { ...options, table: false });
+    largeTextPanningSession.memoryStart = sessionStartMemory;
     const out = {
       sessionId: id,
-      startedAt: largeTextSession.startedAt,
-      scenario: scenario.summary,
-      textSummary,
-      viewport: { panX, panY, zoom },
-      next: 'Pan and zoom the board, then run finishDebug({ label: "large-text-perf", perf: [["largeTextReport", { restore: true }]] }).',
+      startedAt,
+      mode,
+      startSnapshot,
+      layoutPrewarm,
+      memoryStart: sessionStartMemory,
+      recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES.slice(),
+      next: `Pan the already-open board through the four variants, then run finishDebug({ label: "${largeTextPanningLabelForMode(mode)}", perf: [["largeTextPanningReport"]] }).`,
     };
     if (options.log !== false) {
-      console.group('[Boardfish perf] large text setup');
+      console.group('[Boardfish perf] large text panning recorder');
       console.table([{
         sessionId: id,
-        textObjects: textSummary.textObjectCount,
-        totalChars: textSummary.totalChars,
-        totalLogicalLines: textSummary.totalLogicalLines,
-        zoom,
+        mode,
+        objectId: startSnapshot.objectId,
+        contentChars: startSnapshot.contentChars,
+        logicalLines: startSnapshot.logicalLines,
+        selectedChars: startSnapshot.selectedChars,
+        editingId: startSnapshot.editingId,
+        zoom: startSnapshot.zoom,
+        prewarmMs: layoutPrewarm?.totalMs ?? '',
+        prewarmObjects: layoutPrewarm?.warmedTextObjects ?? '',
       }]);
       console.info(out.next);
       console.log(out);
@@ -1445,199 +2447,139 @@ var ManualPerfDebug = (() => {
     return out;
   }
 
-  function viewportPhaseHeadline(report = {}) {
-    const viewport = report.viewport || {};
-    return viewportNavigationHeadline(viewport);
+  function largeTextSelectionDebugReport(options = {}) {
+    if (options.textSelection === false) return { available: false, reason: 'disabled' };
+    if (typeof TextSelDebug === 'undefined') return { available: false, reason: 'TextSelDebug unavailable' };
+    const out = {
+      available: true,
+      performanceSummary: TextSelDebug.performanceSummary?.() || null,
+      selectionReport: editingId ? TextSelDebug.selectionReport?.({
+        neighborLines: options.neighborLines ?? 3,
+      }) : null,
+      editLifecycleReport: TextSelDebug.editLifecycleReport?.() || null,
+    };
+    if (options.includeTextSelectionEvents !== false) out.events = TextSelDebug.events || [];
+    return out;
   }
 
-  function largeTextHeadline(report = {}) {
-    const text = report.textSummary || {};
-    const cold = report.layoutCold || {};
-    const warm = report.layoutWarm || {};
-    const viewport = report.viewport || {};
-    const frame = viewport.frameSummary || {};
-    const draw = viewport.drawSummary || {};
-    const pan = report.pan?.viewport || {};
-    const zoomPhase = report.zoomPhase?.viewport || {};
+  function largeTextPanningHeadline(report = {}) {
+    const eventSummary = report.eventSummary || {};
+    const frame = report.viewport?.frameSummary || {};
+    const wheel = report.viewport?.wheelSummary || {};
+    const draw = report.viewport?.drawSummary || {};
+    const transform = report.viewport?.transformSummary || {};
+    const prewarm = report.layoutPrewarm || {};
     return {
-      textObjects: text.textObjectCount ?? '',
-      visibleTextObjects: text.visibleTextObjects ?? '',
-      totalChars: text.totalChars ?? '',
-      totalLogicalLines: text.totalLogicalLines ?? '',
-      totalRenderedLines: text.totalRenderedLines ?? '',
-      totalScriptRanges: text.totalScriptRanges ?? '',
-      maxScriptRanges: text.maxScriptRanges ?? '',
-      coldLayoutMs: cold.totalMs ?? '',
-      warmLayoutMs: warm.totalMs ?? '',
+      mode: report.mode || '',
+      contentChars: report.startSnapshot?.contentChars ?? '',
+      logicalLines: report.startSnapshot?.logicalLines ?? '',
+      selectedCharsStart: report.startSnapshot?.selectedChars ?? '',
+      selectedCharsEnd: report.endSnapshot?.selectedChars ?? '',
+      prewarmTextObjects: prewarm.warmedTextObjects ?? '',
+      prewarmTotalMs: prewarm.totalMs ?? '',
+      prewarmMaxObjectMs: prewarm.maxObjectMs ?? '',
+      prewarmVisibleLines: prewarm.warmedVisibleLines ?? '',
+      prewarmTotalLines: prewarm.warmedTotalLines ?? '',
+      domEvents: eventSummary.events ?? '',
+      wheel: eventSummary.wheel ?? '',
+      pointermove: eventSummary.pointermove ?? '',
+      mousemove: eventSummary.mousemove ?? '',
+      maxDomEventGapMs: eventSummary.maxGapMs ?? '',
+      domGapsOver32ms: eventSummary.gapsOver32ms ?? '',
+      frames: frame.frames ?? '',
+      inputFrames: frame.inputFrames ?? '',
       slowFramesOver16ms: frame.slowFramesOver16ms ?? '',
       maxFrameMs: frame.maxFrameMs ?? '',
+      maxInputAgeMs: frame.maxInputAgeMs ?? '',
+      maxQueueMs: frame.maxQueueMs ?? '',
+      rawInputEvents: frame.rawInputEvents ?? '',
+      wheelPanEvents: wheel.panEvents ?? '',
+      maxWheelGapMs: wheel.maxWheelGapMs ?? '',
+      avgDrawMs: draw.avgDrawMs ?? '',
       maxDrawMs: draw.maxDrawMs ?? '',
       maxObjectLoopMs: draw.maxObjectLoopMs ?? '',
-      avgDrawnTextLines: draw.avgDrawnTextLines ?? '',
-      maxDrawnTextLines: draw.maxDrawnTextLines ?? '',
-      avgCulledTextLines: draw.avgCulledTextLines ?? '',
-      maxCulledTextLines: draw.maxCulledTextLines ?? '',
       maxEditingOverlayMs: draw.maxEditingOverlayMs ?? '',
       maxEditLayoutMs: draw.maxEditLayoutMs ?? '',
       maxEditTextDrawMs: draw.maxEditTextDrawMs ?? '',
       maxEditSelectionMs: draw.maxEditSelectionMs ?? '',
-      maxEditCaretMs: draw.maxEditCaretMs ?? '',
-      maxEditVisibleLines: draw.maxEditVisibleLines ?? '',
-      maxEditCulledLines: draw.maxEditCulledLines ?? '',
-      panMaxFrameMs: pan.frameSummary?.maxFrameMs ?? '',
-      panMaxDrawMs: pan.drawSummary?.maxDrawMs ?? '',
-      zoomMaxFrameMs: zoomPhase.frameSummary?.maxFrameMs ?? '',
-      zoomMaxDrawMs: zoomPhase.drawSummary?.maxDrawMs ?? '',
-      restored: report.restore?.restored ?? false,
+      maxEditSelectedChars: draw.maxEditSelectedChars ?? '',
+      maxEditSelectionLines: draw.maxEditSelectionLines ?? '',
+      maxEditSelectionVisibleLines: draw.maxEditSelectionVisibleLines ?? '',
+      avgTransformMs: transform.avgTotalMs ?? '',
+      maxTransformMs: transform.maxTotalMs ?? '',
+      viewportEvents: Array.isArray(report.viewportEvents) ? report.viewportEvents.length : '',
     };
   }
 
-  async function largeTextReport(options = {}) {
+  async function largeTextPanningReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
       console.warn('[Boardfish perf] Debug tools are disabled in this build.');
       return null;
     }
-    const memoryEnd = options.memory === false ? null : await memorySnapshot('large-text-finish', { ...options, table: false });
-    const textSummary = textBoardSummary({ table: false, layout: true, limit: options.limit || 20 });
-    const layoutCold = measureTextLayoutPass({
-      label: 'large-text-cold-layout',
-      clearLayout: true,
-      clearMeasurements: options.clearMeasurements === true,
-      visibleOnly: options.visibleOnly === true,
-      table: false,
-      limit: options.limit || 20,
-    });
-    const layoutWarm = measureTextLayoutPass({
-      label: 'large-text-warm-layout',
-      visibleOnly: options.visibleOnly === true,
-      table: false,
-      limit: options.limit || 20,
-    });
+    if (options.stop !== false) setTextEditMathListeners(false);
+    const session = largeTextPanningSession;
+    const events = textEditMathEvents.slice();
+    const mode = session?.mode || normalizeLargeTextPanningMode(options.mode ?? options.scenario ?? options.state);
+    const endSnapshot = largeTextInteractionSnapshot({ objectId: session?.objectId || options.objectId || '', mode });
+    const memoryEnd = options.memory === false ? null : await memorySnapshot('large-text-panning-finish', { ...options, table: false });
     const viewport = BoardfishDebug.viewport.report({
       log: false,
-      details: options.details === true,
-      limit: options.limit || 30,
-      eventLoopLimit: options.eventLoopLimit ?? 120,
-      rawInputLimit: options.rawInputLimit ?? 180,
-      slowFrames: options.slowFrames ?? 40,
+      details: options.details !== false,
+      limit: options.limit || 80,
+      eventLoopLimit: options.eventLoopLimit ?? options.limit ?? 10000,
+      rawInputLimit: options.rawInputLimit ?? options.limit ?? 10000,
+      slowFrames: options.slowFrames ?? options.limit ?? 200,
     });
-    const session = largeTextSession;
+    const viewportEvents = options.includeViewportEvents === false
+      ? null
+      : (BoardfishDebug.viewport.events || []);
     const out = {
-      label: options.label || 'large-text-performance',
+      label: options.label || largeTextPanningLabelForMode(mode),
       reportedAt: new Date().toISOString(),
       sessionId: session?.id || null,
-      scenario: session?.scenario?.summary || null,
-      textSummary,
-      layoutCold,
-      layoutWarm,
+      mode,
+      startSnapshot: session?.startSnapshot || null,
+      endSnapshot,
+      editSelection: session?.editSelection || null,
+      layoutPrewarm: session?.layoutPrewarm || null,
+      latestLayoutPrewarm: typeof getLastVisibleTextLayoutPrewarm === 'function'
+        ? getLastVisibleTextLayoutPrewarm()
+        : null,
+      textSummary: textBoardSummary({
+        table: false,
+        layout: options.layout === true,
+        limit: options.textLimit ?? options.limit ?? 20,
+      }),
+      eventSummary: textEditMathEventSummary(events),
+      eventTimeline: textEditMathTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? TEXT_EDIT_MATH_MAX_EVENTS }),
       viewport,
+      viewportEvents,
+      textSelection: largeTextSelectionDebugReport(options),
+      history: options.history === false ? null : historyTextUndoRedoReport(options),
       memoryStart: session?.memoryStart || sessionStartMemory,
       memoryEnd,
       memoryDelta: memoryDelta(session?.memoryStart || sessionStartMemory, memoryEnd),
       markers: markers.slice(),
-      restore: null,
+      notes: [
+        'Panning report is passive: no synthetic board, pan, zoom, cache clearing, or board content mutation is performed while measuring.',
+        'Begin can optionally prewarm runtime text layout caches for the already-open visible board; pass prewarmLayout: false to disable that warmup.',
+        'viewportEvents contains the retained raw viewport event buffer, including raw move/wheel input, frame timings, draw timings, event-loop gaps, and long tasks.',
+      ],
     };
-    if (options.restore !== false && session) {
-      out.restore = restoreLargeTextOriginalState(session, { log: false });
-    }
     out.headline = {
-      ...largeTextHeadline(out),
+      ...largeTextPanningHeadline(out),
       ...(out.memoryDelta || {}),
     };
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
+    if (options.clear !== false) {
+      largeTextPanningSession = null;
+      textEditMathSession = null;
+      textEditMathLastEventAt = 0;
+      textEditInputStepLastAt = 0;
+    }
     if (options.log !== false) {
-      console.group('[Boardfish perf] large text report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
-    }
-    if (options.copy === true) void copyLast();
-    return out;
-  }
-
-  async function largeTextEvaluation(options = {}) {
-    if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
-      return null;
-    }
-    const setup = await largeTextSetup({ ...options, log: false });
-    if (!setup || setup.skipped) return setup;
-    const session = largeTextSession;
-    const panEvents = clampInteger(options.panEvents, 90, 1, 360);
-    const zoomEvents = clampInteger(options.zoomEvents, 90, 1, 360);
-    const pan = await wheelPanTest({
-      events: panEvents,
-      deltaX: Number.isFinite(Number(options.panDeltaX)) ? Number(options.panDeltaX) : 10,
-      deltaY: Number.isFinite(Number(options.panDeltaY)) ? Number(options.panDeltaY) : 14,
-      waveX: Number.isFinite(Number(options.panWaveX)) ? Number(options.panWaveX) : 3,
-      waveY: Number.isFinite(Number(options.panWaveY)) ? Number(options.panWaveY) : 5,
-      framePerWheel: options.framePerWheel !== false,
-      log: false,
-      details: options.details === true,
-    });
-    if (session?.scenario?.viewport) {
-      BoardfishViewportState.setViewport(session.scenario.viewport);
-      scheduleRender(true, true, 'large-text-perf-reset-zoom-phase');
-      await animationFrame();
-    }
-    const zoomPhase = await wheelZoomTest({
-      events: zoomEvents,
-      deltaY: Number.isFinite(Number(options.zoomDeltaY)) ? Number(options.zoomDeltaY) : -5,
-      waveY: Number.isFinite(Number(options.zoomWaveY)) ? Number(options.zoomWaveY) : 1.5,
-      framePerWheel: options.framePerWheel !== false,
-      log: false,
-      details: options.details === true,
-    });
-    const memoryEnd = options.memory === false ? null : await memorySnapshot('large-text-evaluation-finish', { ...options, table: false });
-    const textSummary = textBoardSummary({ table: false, layout: true, limit: options.limit || 20 });
-    const layoutCold = measureTextLayoutPass({
-      label: 'large-text-evaluation-cold-layout',
-      clearLayout: true,
-      clearMeasurements: options.clearMeasurements === true,
-      visibleOnly: options.visibleOnly === true,
-      table: false,
-      limit: options.limit || 20,
-    });
-    const layoutWarm = measureTextLayoutPass({
-      label: 'large-text-evaluation-warm-layout',
-      visibleOnly: options.visibleOnly === true,
-      table: false,
-      limit: options.limit || 20,
-    });
-    const out = {
-      label: options.label || 'large-text-automatic-evaluation',
-      reportedAt: new Date().toISOString(),
-      sessionId: session?.id || null,
-      setup,
-      scenario: session?.scenario?.summary || null,
-      textSummary,
-      layoutCold,
-      layoutWarm,
-      pan,
-      zoomPhase,
-      memoryStart: session?.memoryStart || sessionStartMemory,
-      memoryEnd,
-      memoryDelta: memoryDelta(session?.memoryStart || sessionStartMemory, memoryEnd),
-      restore: null,
-    };
-    if (options.restore !== false && session) {
-      out.restore = restoreLargeTextOriginalState(session, { log: false });
-    }
-    out.headline = {
-      ...largeTextHeadline(out),
-      panMaxFrameMs: viewportPhaseHeadline(pan).maxFrameMs,
-      panMaxDrawMs: pan?.viewport?.drawSummary?.maxDrawMs ?? '',
-      panMaxObjectLoopMs: pan?.viewport?.drawSummary?.maxObjectLoopMs ?? '',
-      zoomMaxFrameMs: viewportPhaseHeadline(zoomPhase).maxFrameMs,
-      zoomMaxDrawMs: zoomPhase?.viewport?.drawSummary?.maxDrawMs ?? '',
-      zoomMaxObjectLoopMs: zoomPhase?.viewport?.drawSummary?.maxObjectLoopMs ?? '',
-      ...(out.memoryDelta || {}),
-    };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
-    if (options.log !== false) {
-      console.group('[Boardfish perf] large text automatic evaluation');
+      console.group('[Boardfish perf] large text panning report');
       console.table([out.headline]);
       console.log(out);
       console.groupEnd();
@@ -1665,10 +2607,18 @@ var ManualPerfDebug = (() => {
     textEditMathBegin,
     textEditMathReport,
     textEditMathTimeline,
-    largeTextSetup,
-    largeTextReport,
-    largeTextEvaluation,
-    restoreLargeTextOriginalState,
+    textEditInputStepTimeline,
+    isTextEditInputTraceActive,
+    recordTextEditInputStep,
+    textResizeBegin,
+    textResizeReport,
+    textResizeTimeline,
+    isTextResizeTraceActive,
+    startTextResizeDrag,
+    recordTextResizeStep,
+    finishTextResizeDrag,
+    largeTextPanningBegin,
+    largeTextPanningReport,
     state,
     json,
     copyLast,

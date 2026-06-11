@@ -16,7 +16,7 @@ var ClipDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Use finishDebug({ clipboard: ["copyPanReport", "copyBreakdown", "pasteBreakdown", "largePasteReport", "status", "phaseSummary", "summary", "dump"] }) to collect results.');
+    if (core.enabled) console.info('Boardfish clipboard debugger enabled. Use finishDebug({ clipboard: ["textPasteLagReport", "textClipboardReport", "copyPanReport", "copyBreakdown", "pasteBreakdown", "largePasteReport", "status", "phaseSummary", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -42,11 +42,19 @@ var ClipDebug = (() => {
       command: e.meta?.command || '',
       path: e.meta?.path || '',
       reason: e.meta?.reason || '',
+      objectId: e.meta?.objectId || '',
       selectedCount: e.meta?.selectedCount ?? '',
       objectCount: e.meta?.objectCount ?? '',
       imageCount: e.meta?.imageCount ?? '',
+      textObjectCount: e.meta?.textObjectCount ?? '',
+      textCharCount: e.meta?.textCharCount ?? '',
+      largestTextChars: e.meta?.largestTextChars ?? '',
+      trimmedTextObjects: e.meta?.trimmedTextObjects ?? '',
+      additionalImageBytes: e.meta?.additionalImageBytes ?? '',
+      additionalTextBytes: e.meta?.additionalTextBytes ?? '',
       processed: e.meta?.processed ?? '',
       registeredImages: e.meta?.registeredImages ?? '',
+      accepted: e.meta?.accepted ?? '',
       historyIndex: e.meta?.historyIndex ?? '',
       queueMs: e.meta?.queueMs ?? '',
       signature: e.meta?.signature || '',
@@ -74,8 +82,8 @@ var ClipDebug = (() => {
       assetReady: e.meta?.assetReady ?? '',
       sourcePath: timing(e.meta, 'path'),
       flipped: timing(e.meta, 'flipped'),
-      width: timing(e.meta, 'width'),
-      height: timing(e.meta, 'height'),
+      width: e.meta?.width ?? timing(e.meta, 'width'),
+      height: e.meta?.height ?? timing(e.meta, 'height'),
       pixels: timing(e.meta, 'pixels'),
       rgbaMB: timing(e.meta, 'rgbaMb'),
       totalMs: timing(e.meta, 'totalMs'),
@@ -87,8 +95,95 @@ var ClipDebug = (() => {
       imageDecodeMs: timing(e.meta, 'imageDecodeMs'),
       rgbaConvertMs: timing(e.meta, 'rgbaConvertMs'),
       transformMs: timing(e.meta, 'transformMs'),
-      clipboardWriteMs: timing(e.meta, 'clipboardWriteMs'),
+      clipboardWriteMs: e.meta?.clipboardWriteMs ?? timing(e.meta, 'clipboardWriteMs'),
       textLen: e.meta?.textLen ?? '',
+      boardfishTokenWritten: e.meta?.boardfishTokenWritten ?? '',
+      richAttempted: e.meta?.richAttempted ?? '',
+      inputType: e.meta?.inputType || '',
+      scriptTransformMs: e.meta?.scriptTransformMs ?? '',
+      scriptTransformFastPath: e.meta?.scriptTransformFastPath || '',
+      scriptTransformInputRangeCount: e.meta?.scriptTransformInputRangeCount ?? '',
+      scriptTransformInsertedRangeCount: e.meta?.scriptTransformInsertedRangeCount ?? '',
+      scriptTransformInsertedMayCreateRange: e.meta?.scriptTransformInsertedMayCreateRange ?? '',
+      scriptTransformLocalDerivedRangeCount: e.meta?.scriptTransformLocalDerivedRangeCount ?? '',
+      scriptTransformSkipReason: e.meta?.scriptTransformSkipReason || '',
+      scriptTransformSkipRangeIndex: e.meta?.scriptTransformSkipRangeIndex ?? '',
+      scriptTransformSkipRangeStart: e.meta?.scriptTransformSkipRangeStart ?? '',
+      scriptTransformSkipRangeEnd: e.meta?.scriptTransformSkipRangeEnd ?? '',
+      scriptTransformSkipMarkerIndex: e.meta?.scriptTransformSkipMarkerIndex ?? '',
+      scriptTransformSkipRangeKind: e.meta?.scriptTransformSkipRangeKind || '',
+      eventType: e.meta?.eventType || '',
+      eventAgeMs: e.meta?.eventAgeMs ?? '',
+      eventAt: e.meta?.eventAt ?? '',
+      inputDataLength: e.meta?.inputDataLength ?? '',
+      isComposing: e.meta?.isComposing ?? '',
+      isTrusted: e.meta?.isTrusted ?? '',
+      cancelable: e.meta?.cancelable ?? '',
+      defaultPrevented: e.meta?.defaultPrevented ?? '',
+      sourceTextLen: e.meta?.sourceTextLen ?? '',
+      fallbackTextChars: e.meta?.fallbackTextChars ?? '',
+      candidateTextLen: e.meta?.candidateTextLen ?? '',
+      candidateScriptRangeCount: e.meta?.candidateScriptRangeCount ?? '',
+      selectedChars: e.meta?.selectedChars ?? '',
+      selectionStart: e.meta?.selectionStart ?? '',
+      selectionEnd: e.meta?.selectionEnd ?? '',
+      replacementStart: e.meta?.replacementStart ?? '',
+      replacementEnd: e.meta?.replacementEnd ?? '',
+      replacementChars: e.meta?.replacementChars ?? '',
+      oldChars: e.meta?.oldChars ?? '',
+      nextChars: e.meta?.nextChars ?? '',
+      insertedChars: e.meta?.insertedChars ?? '',
+      removedChars: e.meta?.removedChars ?? '',
+      proxyChars: e.meta?.proxyChars ?? '',
+      textBytes: e.meta?.textBytes ?? '',
+      textLineCount: e.meta?.textLineCount ?? '',
+      largestLineChars: e.meta?.largestLineChars ?? '',
+      scriptRangeCount: e.meta?.scriptRangeCount ?? '',
+      objectWidth: e.meta?.objectWidth ?? '',
+      objectHeight: e.meta?.objectHeight ?? '',
+      editStartChars: e.meta?.editStartChars ?? '',
+      layoutCachePresent: e.meta?.layoutCachePresent ?? '',
+      layoutCacheLines: e.meta?.layoutCacheLines ?? '',
+      layoutPatched: e.meta?.layoutPatched ?? '',
+      layoutPatchMs: e.meta?.layoutPatchMs ?? '',
+      layoutPatchTotalMs: e.meta?.layoutPatchTotalMs ?? '',
+      layoutPatchRangeMs: e.meta?.layoutPatchRangeMs ?? '',
+      layoutPatchSpliceMs: e.meta?.layoutPatchSpliceMs ?? '',
+      layoutPatchWrapMs: e.meta?.layoutPatchWrapMs ?? '',
+      layoutPatchScriptRangesMs: e.meta?.layoutPatchScriptRangesMs ?? '',
+      layoutPatchScriptMetricsMs: e.meta?.layoutPatchScriptMetricsMs ?? '',
+      layoutPatchScriptMetricsPatched: e.meta?.layoutPatchScriptMetricsPatched ?? '',
+      layoutPatchScriptMetricsPatchReason: e.meta?.layoutPatchScriptMetricsPatchReason || '',
+      layoutPatchScriptMetricsInsertedRangeCount: e.meta?.layoutPatchScriptMetricsInsertedRangeCount ?? '',
+      layoutPatchInsertLayoutMs: e.meta?.layoutPatchInsertLayoutMs ?? '',
+      layoutPatchRemapMs: e.meta?.layoutPatchRemapMs ?? '',
+      layoutPatchLinesCacheMs: e.meta?.layoutPatchLinesCacheMs ?? '',
+      layoutPatchOldLines: e.meta?.layoutPatchOldLines ?? '',
+      layoutPatchNewLines: e.meta?.layoutPatchNewLines ?? '',
+      layoutPatchRemovedLines: e.meta?.layoutPatchRemovedLines ?? '',
+      layoutPatchInsertedLines: e.meta?.layoutPatchInsertedLines ?? '',
+      layoutPatchLineDelta: e.meta?.layoutPatchLineDelta ?? '',
+      layoutPatchLogicalLineDelta: e.meta?.layoutPatchLogicalLineDelta ?? '',
+      layoutPatchReason: e.meta?.layoutPatchReason || '',
+      historyActionMs: e.meta?.historyActionMs ?? '',
+      historyRecordMs: e.meta?.historyRecordMs ?? '',
+      historyPushed: e.meta?.historyPushed ?? '',
+      setRangeTextMs: e.meta?.setRangeTextMs ?? '',
+      valueAssignMs: e.meta?.valueAssignMs ?? '',
+      valueBuildMs: e.meta?.valueBuildMs ?? '',
+      valueSetMs: e.meta?.valueSetMs ?? '',
+      selectionSetMs: e.meta?.selectionSetMs ?? '',
+      textareaMutationMs: e.meta?.textareaMutationMs ?? '',
+      textareaMutationMethod: e.meta?.textareaMutationMethod || '',
+      dispatchMs: e.meta?.dispatchMs ?? '',
+      heightChanged: e.meta?.heightChanged ?? '',
+      autoHeightDeferred: e.meta?.autoHeightDeferred ?? '',
+      pendingSizeSync: e.meta?.pendingSizeSync ?? '',
+      renderScheduleMs: e.meta?.renderScheduleMs ?? '',
+      renderBoard: e.meta?.renderBoard ?? '',
+      renderOverlay: e.meta?.renderOverlay ?? '',
+      renderSource: e.meta?.renderSource || '',
+      pasted: e.meta?.pasted ?? '',
       seq: e.meta?.seq ?? '',
       expected: e.meta?.expected ?? '',
       current: e.meta?.current ?? '',
@@ -116,7 +211,7 @@ var ClipDebug = (() => {
 
   function copyBreakdown() {
     const rows = events
-      .filter(e => e.op === 'copySelected' && e.step && e.step !== 'start')
+      .filter(e => (e.op === 'copySelected' || e.op === 'copyTextEditSelection') && e.step && e.step !== 'start')
       .map(e => debugRow(e, { includeId: true, includeSkipped: true }));
     console.table(rows);
     return rows;
@@ -357,6 +452,7 @@ var ClipDebug = (() => {
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
     const addObject = latest('paste:objects-add-start') || latest('paste-image:add-object') || webInsertEnd;
     const end = latest('end');
+    const textPayload = latest('paste:objects-add-done') || latest('paste:clone-done') || latest('paste:objects-start') || end;
     const objectCountBefore = pasteStart?.meta?.objectCountBefore ?? '';
     const objectCountAfter = end?.meta?.objectCountAfter ?? '';
     const objectDelta = typeof objectCountBefore === 'number' && typeof objectCountAfter === 'number'
@@ -392,6 +488,9 @@ var ClipDebug = (() => {
       objectCountBefore,
       objectCountAfter,
       objectDelta,
+      textObjectCount: textPayload?.meta?.textObjectCount ?? '',
+      textCharCount: textPayload?.meta?.textCharCount ?? '',
+      largestTextChars: textPayload?.meta?.largestTextChars ?? '',
       pathDetected,
       imageSource: blobEvent?.meta?.type || blobReadOk?.meta?.blobType || '',
       blobSize: blobEvent?.meta?.blobSize ?? blobReadOk?.meta?.blobSize ?? '',
@@ -426,7 +525,15 @@ var ClipDebug = (() => {
     const objectAdd = latest('paste:objects-add-start') || latest('paste-image:add-object');
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
     const readyEnd = latest('paste-image:ready-wait-end');
+    const cloneDone = latest('paste:clone-done');
+    const trimDone = latest('paste:text-trim-done');
+    const objectLimitDone = latest('paste:object-limit-done');
+    const contentLimitDone = latest('paste:content-limit-done');
+    const registerImagesDone = latest('paste:register-images-done');
+    const historyStart = latest('paste:boardHistory-start');
+    const historyDone = latest('paste:boardHistory-done');
     const end = latest('end');
+    const textPayload = latest('paste:objects-add-done') || latest('paste:clone-done') || latest('paste:objects-start') || end;
     const imageReadAt = blobReadOk?.total ?? webInsertEnd?.total ?? '';
     const objectAt = objectAdd?.total ?? webInsertEnd?.total ?? '';
     const displayAt = readyEnd?.total ?? webInsertEnd?.total ?? '';
@@ -438,6 +545,22 @@ var ClipDebug = (() => {
       objectAtMs: objectAt,
       displayReadyAtMs: displayAt,
       objectToDisplayMs: typeof objectAt === 'number' && typeof displayAt === 'number' ? Math.round((displayAt - objectAt) * 100) / 100 : '',
+      textObjectCount: textPayload?.meta?.textObjectCount ?? '',
+      textCharCount: textPayload?.meta?.textCharCount ?? '',
+      largestTextChars: textPayload?.meta?.largestTextChars ?? '',
+      cloneMs: cloneDone?.meta?.ms ?? '',
+      trimMs: trimDone?.meta?.ms ?? '',
+      trimmedTextObjects: trimDone?.meta?.trimmedTextObjects ?? '',
+      objectLimitMs: objectLimitDone?.meta?.ms ?? '',
+      objectLimitAccepted: objectLimitDone?.meta?.accepted ?? '',
+      contentLimitMs: contentLimitDone?.meta?.ms ?? '',
+      contentLimitAccepted: contentLimitDone?.meta?.accepted ?? '',
+      additionalTextBytes: contentLimitDone?.meta?.additionalTextBytes ?? '',
+      additionalImageBytes: contentLimitDone?.meta?.additionalImageBytes ?? '',
+      registerImagesMs: registerImagesDone?.meta?.ms ?? '',
+      historyMs: typeof historyStart?.total === 'number' && typeof historyDone?.total === 'number'
+        ? Math.round((historyDone.total - historyStart.total) * 100) / 100
+        : '',
       blobReadMs: blobReadOk?.meta?.ms ?? '',
       blobSize: blobEvent?.meta?.blobSize ?? blobReadOk?.meta?.blobSize ?? '',
       dataUrlLen: blobReadOk?.meta?.dataUrlLen ?? '',
@@ -458,11 +581,330 @@ var ClipDebug = (() => {
     return { summary: out, rows: run.map(e => debugRow(e, { includeId: true, includeSkipped: true })) };
   }
 
+  function textPasteLagReport(options = {}) {
+    const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
+    const pasteStarts = events.filter(e => e.op === 'pasteTextEditSelection' && e.step === 'start');
+    const pasteStart = pasteStarts[pasteStarts.length - 1];
+    if (!pasteStart) {
+      const empty = { pasteRuns: 0, verdict: 'no pasteTextEditSelection events captured' };
+      console.table([empty]);
+      return empty;
+    }
+
+    const run = events.filter(e => e.id === pasteStart.id && e.op === pasteStart.op);
+    const latest = (stepName) => [...run].reverse().find(e => e.step === stepName);
+    const first = (stepName) => run.find(e => e.step === stepName);
+    const latestMetaValue = (names) => {
+      for (const event of [...run].reverse()) {
+        for (const name of names) {
+          const value = event.meta?.[name];
+          if (value !== undefined && value !== '') return value;
+        }
+      }
+      return '';
+    };
+    const summarizePasteRun = (start) => {
+      const runEvents = events.filter(e => e.id === start.id && e.op === start.op);
+      const runLatest = (stepName) => [...runEvents].reverse().find(e => e.step === stepName);
+      const runFirst = (stepName) => runEvents.find(e => e.step === stepName);
+      const nativeAllowed = runLatest('paste:text-edit-native-textarea-allowed');
+      const end = runLatest('end');
+      const last = end || runEvents[runEvents.length - 1] || start;
+      const inputEndForRun = runLatest('text-edit-input:end');
+      const rangeTextForRun = runLatest('paste:text-edit-range-text-set');
+      const scriptTransformForRun = runLatest('text-edit-input:script-ranges-transformed');
+      const layoutForRun = runLatest('text-edit-input:layout-patched') || runLatest('text-edit-input:layout-invalidated');
+      const dispatchForRun = runLatest('paste:text-edit-input-dispatched');
+      const inputMs = Number(inputEndForRun?.meta?.totalMs ?? inputEndForRun?.dt) || 0;
+      const transformMs = Number(scriptTransformForRun?.meta?.scriptTransformMs ?? scriptTransformForRun?.dt) || 0;
+      const textareaMs = Number(rangeTextForRun?.meta?.textareaMutationMs ?? rangeTextForRun?.meta?.setRangeTextMs) || 0;
+      let runVerdict = 'no >32ms paste/input stall captured';
+      if (nativeAllowed && !end) runVerdict = 'native paste allowed; waiting for input/end capture';
+      else if (transformMs > 32) runVerdict = 'script range transform slow';
+      else if (inputMs > 32 || Number(dispatchForRun?.meta?.dispatchMs || 0) > 32) runVerdict = 'input handler slow';
+      else if (textareaMs > 32) runVerdict = `textarea ${rangeTextForRun?.meta?.textareaMutationMethod || 'mutation'} slow`;
+      return {
+        id: start.id,
+        path: end?.meta?.path || (nativeAllowed ? 'jsClipboard-text-selection-native' : ''),
+        pasted: end?.meta?.pasted ?? '',
+        totalMs: end?.total ?? last?.total ?? '',
+        nativeAllowed: !!nativeAllowed,
+        inputCaptured: !!inputEndForRun,
+        fallbackTextChars: runLatest('paste:text-edit-event-read-done')?.meta?.fallbackTextChars ?? '',
+        candidateTextLen: runLatest('paste:text-edit-event-read-done')?.meta?.candidateTextLen ?? '',
+        insertedChars: runLatest('text-edit-input:replacement-ready')?.meta?.insertedChars ?? end?.meta?.textCharCount ?? '',
+        inputHandlerMs: inputEndForRun?.meta?.totalMs ?? inputEndForRun?.dt ?? '',
+        dispatchMs: dispatchForRun?.meta?.dispatchMs ?? '',
+        scriptTransformMs: scriptTransformForRun?.meta?.scriptTransformMs ?? '',
+        scriptTransformFastPath: scriptTransformForRun?.meta?.scriptTransformFastPath || '',
+        scriptTransformInsertedMayCreateRange: scriptTransformForRun?.meta?.scriptTransformInsertedMayCreateRange ?? '',
+        scriptTransformLocalDerivedRangeCount: scriptTransformForRun?.meta?.scriptTransformLocalDerivedRangeCount ?? '',
+        scriptTransformSkipReason: scriptTransformForRun?.meta?.scriptTransformSkipReason || '',
+        scriptTransformSkipRangeIndex: scriptTransformForRun?.meta?.scriptTransformSkipRangeIndex ?? '',
+        textareaMutationMs: rangeTextForRun?.meta?.textareaMutationMs ?? rangeTextForRun?.meta?.setRangeTextMs ?? '',
+        textareaMutationMethod: rangeTextForRun?.meta?.textareaMutationMethod || '',
+        layoutPatchMs: layoutForRun?.meta?.layoutPatchMs ?? '',
+        verdict: runVerdict,
+      };
+    };
+    const runSummaries = pasteStarts.map(summarizePasteRun);
+    const pasteEnd = latest('end') || run[run.length - 1] || pasteStart;
+    const inputStart = first('text-edit-input:start');
+    const inputEnd = latest('text-edit-input:end');
+    const renderScheduled = latest('text-edit-input:render-scheduled');
+    const autoHeight = latest('text-edit-input:auto-height-done');
+    const layoutPatch = latest('text-edit-input:layout-patched') || latest('text-edit-input:layout-invalidated');
+    const history = latest('text-edit-input:history-recorded');
+    const scriptTransform = latest('text-edit-input:script-ranges-transformed');
+    const replacement = latest('text-edit-input:replacement-ready') || latest('paste:text-edit-replace-selection-ready');
+    const rangeText = latest('paste:text-edit-range-text-set');
+    const dispatch = latest('paste:text-edit-input-dispatched');
+    const windowBeforeMs = Number(options.windowBeforeMs ?? 40) || 40;
+    const windowAfterMs = Number(options.windowAfterMs ?? 1200) || 1200;
+    const startAt = Math.max(0, pasteStart.at - windowBeforeMs);
+    const endAt = (pasteEnd.at || pasteStart.at) + windowAfterMs;
+    const viewportEvents = typeof ViewportDebug !== 'undefined' ? ViewportDebug.events : [];
+    const frameStarts = new Map();
+    for (const event of viewportEvents) {
+      if (event.op === 'frame' && event.step === 'start') frameStarts.set(event.id, event);
+    }
+    const frameRows = viewportEvents
+      .filter(e => e.op === 'frame' && e.step === 'end' && e.at >= startAt && e.at <= endAt)
+      .map(e => ({
+        at: e.at,
+        afterPasteStartMs: round(e.at - pasteStart.at),
+        afterPasteEndMs: pasteEnd?.at ? round(e.at - pasteEnd.at) : '',
+        ...(frameStarts.get(e.id)?.meta || {}),
+        ...(e.meta || {}),
+      }));
+    const rawInputRows = viewportEvents
+      .filter(e => e.op === 'input' && e.at >= startAt && e.at <= endAt)
+      .map(e => ({
+        at: e.at,
+        afterPasteStartMs: round(e.at - pasteStart.at),
+        step: e.step,
+        eventType: e.meta?.eventType || '',
+        inputType: e.meta?.inputType || '',
+        eventAgeMs: e.meta?.eventAgeMs ?? '',
+        source: e.meta?.source || '',
+        target: e.meta?.target || '',
+        defaultPrevented: e.meta?.defaultPrevented ?? '',
+        blocked: e.meta?.blocked ?? '',
+      }));
+    const eventLoopRows = viewportEvents
+      .filter(e => (e.op === 'eventLoop' || e.op === 'longTask') && e.at >= startAt && e.at <= endAt)
+      .map(e => ({
+        at: e.at,
+        afterPasteStartMs: round(e.at - pasteStart.at),
+        kind: e.op,
+        step: e.step,
+        gapMs: e.meta?.gapMs ?? '',
+        durationMs: e.meta?.duration ?? '',
+      }));
+    const max = (rows, field) => rows.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
+    const maxFrameMs = max(frameRows, 'frameMs');
+    const maxDrawMs = max(frameRows, 'totalMeasuredMs');
+    const maxEditingOverlayMs = max(frameRows, 'editingOverlayMs');
+    const maxEditLayoutMs = max(frameRows, 'editLayoutMs');
+    const maxEditTextDrawMs = max(frameRows, 'editTextDrawMs');
+    const maxEditSelectionMs = max(frameRows, 'editSelectionMs');
+    const maxEventLoopGapMs = max(eventLoopRows, 'gapMs');
+    const maxLongTaskMs = max(eventLoopRows, 'durationMs');
+    const firstFrameAfterInput = inputEnd
+      ? frameRows.find(row => row.at >= inputEnd.at)
+      : frameRows.find(row => row.at >= pasteEnd.at);
+    const browserPasteEventAgeMs = Number(pasteStart.meta?.eventAgeMs) || 0;
+    const inputEventAgeMs = Number(inputStart?.meta?.eventAgeMs) || 0;
+    const inputHandlerMs = Number(inputEnd?.meta?.totalMs ?? inputEnd?.dt) || 0;
+    const scriptTransformMs = Number(scriptTransform?.meta?.scriptTransformMs ?? scriptTransform?.dt) || 0;
+    const dispatchMs = Number(dispatch?.meta?.dispatchMs) || 0;
+    const setRangeTextMs = Number(rangeText?.meta?.setRangeTextMs) || 0;
+    const textareaMutationMs = Number(rangeText?.meta?.textareaMutationMs ?? rangeText?.meta?.setRangeTextMs) || 0;
+    const historyRecordMs = Number(history?.meta?.historyRecordMs) || 0;
+    const renderToFirstFrameMs = firstFrameAfterInput && renderScheduled
+      ? round(firstFrameAfterInput.at - renderScheduled.at)
+      : '';
+    let verdict = 'no >32ms paste/input/render stall captured';
+    if (browserPasteEventAgeMs > 32 || inputEventAgeMs > 32) {
+      verdict = 'native paste/input event delivery was delayed before Boardfish handled it';
+    } else if (scriptTransformMs > 32) {
+      verdict = 'text script range transform was slow; inspect text-edit-input:script-ranges-transformed';
+    } else if (inputHandlerMs > 32 || dispatchMs > 32) {
+      verdict = 'Boardfish text input handler was slow; inspect text-edit-input rows';
+    } else if (textareaMutationMs > 32) {
+      verdict = `browser textarea ${rangeText?.meta?.textareaMutationMethod || 'mutation'} was slow for the large value`;
+    } else if (historyRecordMs > 32) {
+      verdict = 'text edit history checkpoint was slow';
+    } else if (maxFrameMs > 32 || maxDrawMs > 32 || maxEditingOverlayMs > 32) {
+      verdict = 'post-paste render frame was slow; inspect frame and draw rows';
+    } else if (maxEventLoopGapMs > 32 || maxLongTaskMs > 32) {
+      verdict = 'event loop gap or browser long task overlapped the paste';
+    }
+    const summary = {
+      pasteRuns: pasteStarts.length,
+      path: pasteEnd?.meta?.path || '',
+      pasted: pasteEnd?.meta?.pasted ?? '',
+      totalMs: pasteEnd?.total ?? '',
+      browserPasteEventAgeMs: pasteStart.meta?.eventAgeMs ?? '',
+      inputEventAgeMs: inputStart?.meta?.eventAgeMs ?? '',
+      inputHandlerMs: inputEnd?.meta?.totalMs ?? inputEnd?.dt ?? '',
+      dispatchMs: dispatch?.meta?.dispatchMs ?? '',
+      scriptTransformMs: scriptTransform?.meta?.scriptTransformMs ?? '',
+      scriptTransformFastPath: scriptTransform?.meta?.scriptTransformFastPath || '',
+      scriptTransformInputRangeCount: scriptTransform?.meta?.scriptTransformInputRangeCount ?? '',
+      scriptTransformInsertedRangeCount: scriptTransform?.meta?.scriptTransformInsertedRangeCount ?? '',
+      scriptTransformInsertedMayCreateRange: scriptTransform?.meta?.scriptTransformInsertedMayCreateRange ?? '',
+      scriptTransformLocalDerivedRangeCount: scriptTransform?.meta?.scriptTransformLocalDerivedRangeCount ?? '',
+      scriptTransformSkipReason: scriptTransform?.meta?.scriptTransformSkipReason || '',
+      scriptTransformSkipRangeIndex: scriptTransform?.meta?.scriptTransformSkipRangeIndex ?? '',
+      scriptTransformSkipRangeStart: scriptTransform?.meta?.scriptTransformSkipRangeStart ?? '',
+      scriptTransformSkipRangeEnd: scriptTransform?.meta?.scriptTransformSkipRangeEnd ?? '',
+      scriptTransformSkipMarkerIndex: scriptTransform?.meta?.scriptTransformSkipMarkerIndex ?? '',
+      scriptTransformSkipRangeKind: scriptTransform?.meta?.scriptTransformSkipRangeKind || '',
+      setRangeTextMs: rangeText?.meta?.setRangeTextMs ?? '',
+      valueAssignMs: rangeText?.meta?.valueAssignMs ?? '',
+      valueBuildMs: rangeText?.meta?.valueBuildMs ?? '',
+      valueSetMs: rangeText?.meta?.valueSetMs ?? '',
+      selectionSetMs: rangeText?.meta?.selectionSetMs ?? '',
+      textareaMutationMs: rangeText?.meta?.textareaMutationMs ?? rangeText?.meta?.setRangeTextMs ?? '',
+      textareaMutationMethod: rangeText?.meta?.textareaMutationMethod || '',
+      historyRecordMs: history?.meta?.historyRecordMs ?? '',
+      historyPushed: history?.meta?.historyPushed ?? '',
+      renderScheduleMs: renderScheduled?.meta?.renderScheduleMs ?? '',
+      renderToFirstFrameMs,
+      firstFrameAfterInputMs: firstFrameAfterInput ? round(firstFrameAfterInput.at - (inputEnd?.at || pasteEnd.at)) : '',
+      maxFrameMs: round(maxFrameMs),
+      maxDrawMs: round(maxDrawMs),
+      maxEditingOverlayMs: round(maxEditingOverlayMs),
+      maxEditLayoutMs: round(maxEditLayoutMs),
+      maxEditTextDrawMs: round(maxEditTextDrawMs),
+      maxEditSelectionMs: round(maxEditSelectionMs),
+      maxEventLoopGapMs: round(maxEventLoopGapMs),
+      maxLongTaskMs: round(maxLongTaskMs),
+      oldChars: replacement?.meta?.oldChars ?? '',
+      nextChars: replacement?.meta?.nextChars ?? '',
+      insertedChars: latestMetaValue(['insertedChars', 'textLen', 'fallbackTextChars', 'textCharCount']),
+      selectedChars: latestMetaValue(['selectedChars']),
+      textBytes: latestMetaValue(['textBytes']),
+      textLineCount: latestMetaValue(['textLineCount']),
+      largestLineChars: latestMetaValue(['largestLineChars']),
+      scriptRangeCount: latestMetaValue(['scriptRangeCount']),
+      autoHeightDeferred: autoHeight?.meta?.autoHeightDeferred ?? '',
+      pendingSizeSync: autoHeight?.meta?.pendingSizeSync ?? pasteEnd?.meta?.pendingSizeSync ?? '',
+      layoutPatched: layoutPatch?.meta?.layoutPatched ?? '',
+      layoutPatchMs: layoutPatch?.meta?.layoutPatchMs ?? '',
+      layoutPatchTotalMs: layoutPatch?.meta?.layoutPatchTotalMs ?? '',
+      layoutPatchRangeMs: layoutPatch?.meta?.layoutPatchRangeMs ?? '',
+      layoutPatchSpliceMs: layoutPatch?.meta?.layoutPatchSpliceMs ?? '',
+      layoutPatchWrapMs: layoutPatch?.meta?.layoutPatchWrapMs ?? '',
+      layoutPatchScriptRangesMs: layoutPatch?.meta?.layoutPatchScriptRangesMs ?? '',
+      layoutPatchScriptMetricsMs: layoutPatch?.meta?.layoutPatchScriptMetricsMs ?? '',
+      layoutPatchScriptMetricsPatched: layoutPatch?.meta?.layoutPatchScriptMetricsPatched ?? '',
+      layoutPatchScriptMetricsPatchReason: layoutPatch?.meta?.layoutPatchScriptMetricsPatchReason || '',
+      layoutPatchScriptMetricsInsertedRangeCount: layoutPatch?.meta?.layoutPatchScriptMetricsInsertedRangeCount ?? '',
+      layoutPatchInsertLayoutMs: layoutPatch?.meta?.layoutPatchInsertLayoutMs ?? '',
+      layoutPatchRemapMs: layoutPatch?.meta?.layoutPatchRemapMs ?? '',
+      layoutPatchLinesCacheMs: layoutPatch?.meta?.layoutPatchLinesCacheMs ?? '',
+      layoutPatchLineDelta: layoutPatch?.meta?.layoutPatchLineDelta ?? '',
+      layoutPatchLogicalLineDelta: layoutPatch?.meta?.layoutPatchLogicalLineDelta ?? '',
+      layoutPatchReason: layoutPatch?.meta?.layoutPatchReason || '',
+      objectWidth: latestMetaValue(['objectWidth']),
+      objectHeight: latestMetaValue(['objectHeight']),
+      layoutCachePresent: latestMetaValue(['layoutCachePresent']),
+      layoutCacheLines: latestMetaValue(['layoutCacheLines']),
+      rawInputs: rawInputRows.length,
+      frames: frameRows.length,
+      slowFramesOver16ms: frameRows.filter(row => Number(row.frameMs) > 16.7).length,
+      eventLoopOrLongTaskRows: eventLoopRows.length,
+      verdict,
+    };
+    const rowLimit = Math.max(1, Number(options.limit) || 200);
+    console.table([summary]);
+    if (runSummaries.length > 1) console.table(runSummaries.slice(-rowLimit));
+    console.table(run.map(e => debugRow(e, { includeId: true, includeSkipped: true })).slice(-rowLimit));
+    if (frameRows.length) console.table(frameRows.slice(-Math.min(rowLimit, 80)));
+    return {
+      summary,
+      runSummaries,
+      rows: run.map(e => debugRow(e, { includeId: true, includeSkipped: true })),
+      frameRows: frameRows.slice(-rowLimit),
+      rawInputRows: rawInputRows.slice(-rowLimit),
+      eventLoopRows: eventLoopRows.slice(-rowLimit),
+    };
+  }
+
+  function textClipboardReport() {
+    const textOps = new Set(['copySelected', 'copyTextEditSelection', 'pasteAtPos', 'pasteTextEditSelection']);
+    const rows = events
+      .filter(e => textOps.has(e.op) && e.step && e.step !== 'start')
+      .map(e => debugRow(e, { includeId: true, includeSkipped: true }));
+    const latestRun = (ops) => {
+      const starts = events.filter(e => ops.includes(e.op) && e.step === 'start');
+      const start = starts[starts.length - 1];
+      if (!start) return { start: null, run: [], end: null };
+      const run = events.filter(e => e.id === start.id && e.op === start.op);
+      const end = [...run].reverse().find(e => e.step === 'end') || null;
+      return { start, run, end };
+    };
+    const copy = latestRun(['copyTextEditSelection', 'copySelected']);
+    const paste = latestRun(['pasteTextEditSelection', 'pasteAtPos']);
+    const latestMetaValue = (run, names) => {
+      for (const event of [...run].reverse()) {
+        for (const name of names) {
+          const value = event.meta?.[name];
+          if (value !== undefined && value !== '') return value;
+        }
+      }
+      return '';
+    };
+    const stepTotal = (run, name) => [...run].reverse().find(e => e.step === name)?.total ?? '';
+    const summary = {
+      copyRuns: events.filter(e => (e.op === 'copySelected' || e.op === 'copyTextEditSelection') && e.step === 'start').length,
+      pasteRuns: events.filter(e => (e.op === 'pasteAtPos' || e.op === 'pasteTextEditSelection') && e.step === 'start').length,
+      lastCopyOp: copy.start?.op || '',
+      lastCopyPath: copy.end?.meta?.path || '',
+      lastCopyTotalMs: copy.end?.total ?? '',
+      lastCopyTextChars: latestMetaValue(copy.run, ['textCharCount', 'textLen', 'sourceTextLen']),
+      lastCopyTextBytes: latestMetaValue(copy.run, ['textBytes']),
+      lastCopyLines: latestMetaValue(copy.run, ['textLineCount']),
+      lastCopyScriptRanges: latestMetaValue(copy.run, ['scriptRangeCount']),
+      lastCopyClipboardWriteMs: latestMetaValue(copy.run, ['clipboardWriteMs']),
+      lastCopyPayloadReadyAtMs: stepTotal(copy.run, 'copy:text-selection-payload-ready') || stepTotal(copy.run, 'copy:text-payload-ready'),
+      lastPasteOp: paste.start?.op || '',
+      lastPastePath: paste.end?.meta?.path || '',
+      lastPasteTotalMs: paste.end?.total ?? '',
+      lastPasteTextChars: latestMetaValue(paste.run, ['textCharCount', 'textLen', 'insertedChars', 'fallbackTextChars']),
+      lastPasteTextBytes: latestMetaValue(paste.run, ['textBytes', 'additionalTextBytes']),
+      lastPasteLines: latestMetaValue(paste.run, ['textLineCount']),
+      lastPasteScriptRanges: latestMetaValue(paste.run, ['scriptRangeCount']),
+      lastPasteSetRangeTextMs: latestMetaValue(paste.run, ['setRangeTextMs']),
+      lastPasteDispatchMs: latestMetaValue(paste.run, ['dispatchMs']),
+      lastPasteInputEventAgeMs: latestMetaValue(paste.run, ['eventAgeMs']),
+      lastPasteInputHandlerMs: latestMetaValue(paste.run, ['totalMs']),
+      lastPasteHistoryRecordMs: latestMetaValue(paste.run, ['historyRecordMs']),
+      lastPasteAutoHeightDeferred: latestMetaValue(paste.run, ['autoHeightDeferred']),
+      lastPastePendingSizeSync: latestMetaValue(paste.run, ['pendingSizeSync']),
+      lastPasteRenderScheduleMs: latestMetaValue(paste.run, ['renderScheduleMs']),
+      lastPasteInputEndAtMs: stepTotal(paste.run, 'text-edit-input:end'),
+      lastPasteAutoHeightAtMs: stepTotal(paste.run, 'text-edit-input:auto-height-done') || stepTotal(paste.run, 'addText:auto-height-done'),
+      lastPasteHistoryAtMs: stepTotal(paste.run, 'text-edit-input:history-recorded') || stepTotal(paste.run, 'paste:boardHistory-done') || stepTotal(paste.run, 'addText:history-pushed'),
+      lastPasteObjectCountAfter: paste.end?.meta?.objectCountAfter ?? '',
+      verdict: paste.start
+        ? 'text copy/paste capture present'
+        : copy.start
+          ? 'copy captured; no paste captured'
+          : 'no text copy/paste events captured',
+    };
+    console.table([summary]);
+    console.table(rows.slice(-160));
+    return { summary, rows };
+  }
+
   function status() {
     const last = events[events.length - 1];
     const latest = (stepName) => [...events].reverse().find(e => e.step === stepName);
-    const copyEnd = [...events].reverse().find(e => e.op === 'copySelected' && e.step === 'end');
-    const pasteEnd = [...events].reverse().find(e => e.op === 'pasteAtPos' && e.step === 'end');
+    const copyEnd = [...events].reverse().find(e => (e.op === 'copySelected' || e.op === 'copyTextEditSelection') && e.step === 'end');
+    const pasteEnd = [...events].reverse().find(e => (e.op === 'pasteAtPos' || e.op === 'pasteTextEditSelection') && e.step === 'end');
     const copyProgress = latest('copy:multi-progress');
     const pasteProgress = latest('paste:objects-add-progress') || latest('paste:register-images-progress');
     const out = {
@@ -472,7 +914,11 @@ var ClipDebug = (() => {
       path: last?.meta?.path || '',
       copyObjects: copyEnd?.meta?.objectCount ?? copyProgress?.meta?.objectCount ?? '',
       copyImages: copyEnd?.meta?.imageCount ?? copyProgress?.meta?.imageCount ?? '',
+      copyTextChars: copyEnd?.meta?.textCharCount ?? copyEnd?.meta?.textLen ?? '',
       pasteObjects: pasteEnd?.meta?.objectCount ?? pasteProgress?.meta?.objectCount ?? '',
+      pasteTextObjects: pasteEnd?.meta?.textObjectCount ?? pasteProgress?.meta?.textObjectCount ?? '',
+      pasteTextChars: pasteEnd?.meta?.textCharCount ?? pasteEnd?.meta?.textLen ?? pasteProgress?.meta?.textCharCount ?? '',
+      largestTextChars: pasteEnd?.meta?.largestTextChars ?? pasteProgress?.meta?.largestTextChars ?? '',
       processed: pasteProgress?.meta?.processed ?? copyProgress?.meta?.processed ?? '',
       registeredImages: pasteEnd?.meta?.registeredImages ?? pasteProgress?.meta?.registeredImages ?? '',
       historyIndex: pasteEnd?.meta?.historyIndex ?? '',
@@ -500,6 +946,8 @@ var ClipDebug = (() => {
     phaseSummary,
     copyBreakdown,
     copyPanReport,
+    textPasteLagReport,
+    textClipboardReport,
     largePasteReport,
     pasteBreakdown,
     status,
@@ -513,7 +961,7 @@ exposeDebug({ clipboard: ClipDebug });
 
 // ─── History debugger ───────────────────────────────────────────────────────
 var HistoryDebug = (() => {
-  const MAX_EVENTS = 500;
+  const MAX_EVENTS = 1200;
   const stats = {
     snapshots: 0,
     pushHistory: 0,
@@ -546,7 +994,7 @@ var HistoryDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish history debugger enabled. Use finishDebug({ history: ["pushes", "summary", "dump"] }) to collect results.');
+    if (core.enabled) console.info('Boardfish history debugger enabled. Use finishDebug({ history: ["textUndoRedoReport", "largeTextReport", "pushes", "summary", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -585,6 +1033,30 @@ var HistoryDebug = (() => {
       dirtyCount: e.meta?.dirtyCount ?? '',
       selectedCount: e.meta?.selectedCount ?? '',
       editState: e.meta?.editState ?? '',
+      restoredEdit: e.meta?.restoredEdit ?? '',
+      actionReason: e.meta?.actionReason ?? '',
+      targetReason: e.meta?.targetReason ?? '',
+      sourceReason: e.meta?.sourceReason ?? '',
+      flushedCheckpoint: e.meta?.flushedCheckpoint ?? '',
+      skipped: e.meta?.skipped ?? '',
+      textObjectCount: e.meta?.textObjectCount ?? '',
+      textCharCount: e.meta?.textCharCount ?? '',
+      largestTextChars: e.meta?.largestTextChars ?? '',
+      textLineCount: e.meta?.textLineCount ?? '',
+      largestTextLineChars: e.meta?.largestTextLineChars ?? '',
+      runtimeTextLayoutObjects: e.meta?.runtimeTextLayoutObjects ?? '',
+      runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
+      runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
+      runtimeTextLineContentChars: e.meta?.runtimeTextLineContentChars ?? '',
+      restoreCloneMs: e.meta?.cloneObjectsMs ?? '',
+      hydrateCandidates: e.meta?.candidates ?? '',
+      hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
+      hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
+      hydratedTextScriptRangeCaches: e.meta?.scriptRangeCaches ?? '',
+      hydratedTextScriptMetricCaches: e.meta?.scriptMetricCaches ?? '',
+      replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
+      enterEditMs: e.meta?.enterEditMs ?? '',
+      renderScheduleMs: e.meta?.renderScheduleMs ?? '',
       reason: e.meta?.reason ?? '',
       ms: e.meta?.ms ?? '',
     }));
@@ -601,10 +1073,254 @@ var HistoryDebug = (() => {
       cloned: e.meta?.cloned ?? '',
       reused: e.meta?.reused ?? '',
       reason: e.meta?.reason ?? '',
+      textObjectCount: e.meta?.textObjectCount ?? '',
+      textCharCount: e.meta?.textCharCount ?? '',
+      largestTextChars: e.meta?.largestTextChars ?? '',
+      textLineCount: e.meta?.textLineCount ?? '',
+      largestTextLineChars: e.meta?.largestTextLineChars ?? '',
+      runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
+      runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
       ms: e.meta?.ms ?? '',
     }));
     console.table(rows);
     return rows;
+  }
+
+  function largeTextReport() {
+    const rows = events
+      .filter(e => (
+        e.step === 'end' ||
+        e.step === 'cloneObjects' ||
+        e.step === 'clone-dirty-objects' ||
+        e.step === 'clone-snapshot' ||
+        e.step === 'clone-snapshot-objects' ||
+        e.step === 'hydrate-live-text-caches' ||
+        e.step === 'replace-board-objects' ||
+        e.step === 'restore-selection' ||
+        e.step === 'renderAll' ||
+        e.step === 'renderAll-scheduled' ||
+        e.step === 'motion-replay' ||
+        e.step === 'restore-edit-selection' ||
+        e.step === 'enter-edit-restored' ||
+        e.step === 'restore-edit-caret' ||
+        e.step === 'restore-render-scheduled' ||
+        e.step === 'flush-edit-history' ||
+        e.step === 'restore-done'
+      ))
+      .filter(e => (
+        Number(e.meta?.textCharCount || 0) ||
+        Number(e.meta?.largestTextChars || 0) ||
+        Number(e.meta?.runtimeTextLayoutLines || 0) ||
+        ['snapshot', 'pushHistory', 'restoreSnapshot', 'undo', 'redo'].includes(e.op)
+      ))
+      .map(e => ({
+        id: e.id,
+        op: e.op,
+        step: e.step,
+        total: e.total,
+        dt: e.dt,
+        reason: e.meta?.reason ?? '',
+        ms: e.meta?.ms ?? '',
+        objectCount: e.meta?.objectCount ?? '',
+        cloned: e.meta?.cloned ?? '',
+        reused: e.meta?.reused ?? '',
+        textObjectCount: e.meta?.textObjectCount ?? '',
+        textCharCount: e.meta?.textCharCount ?? '',
+        largestTextChars: e.meta?.largestTextChars ?? '',
+        largestTextId: e.meta?.largestTextId ?? '',
+        textLineCount: e.meta?.textLineCount ?? '',
+        largestTextLineChars: e.meta?.largestTextLineChars ?? '',
+        runtimeTextLayoutObjects: e.meta?.runtimeTextLayoutObjects ?? '',
+        runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
+        runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
+        runtimeTextLineContentChars: e.meta?.runtimeTextLineContentChars ?? '',
+        actionReason: e.meta?.actionReason ?? '',
+        targetReason: e.meta?.targetReason ?? '',
+        sourceReason: e.meta?.sourceReason ?? '',
+        editStateId: e.meta?.editStateId ?? '',
+        editValueChars: e.meta?.editValueChars ?? '',
+        selectionStart: e.meta?.selectionStart ?? '',
+        selectionEnd: e.meta?.selectionEnd ?? '',
+        cloneObjectsMs: e.meta?.cloneObjectsMs ?? '',
+        hydrateCandidates: e.meta?.candidates ?? '',
+        hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
+        hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
+        hydratedTextScriptRangeCaches: e.meta?.scriptRangeCaches ?? '',
+        hydratedTextScriptMetricCaches: e.meta?.scriptMetricCaches ?? '',
+        replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
+        enterEditMs: e.meta?.enterEditMs ?? '',
+        reusedEditProxy: e.meta?.reusedEditProxy ?? '',
+        proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
+        proxyValueChanged: e.meta?.proxyValueChanged ?? '',
+        proxyValueSetMethod: e.meta?.proxyValueSetMethod ?? '',
+        proxyDomSyncedForSelection: e.meta?.proxyDomSyncedForSelection ?? '',
+        proxyDomSyncReason: e.meta?.proxyDomSyncReason ?? '',
+        proxyDomSyncMs: e.meta?.proxyDomSyncMs ?? '',
+        proxyDomCharsBeforeSelection: e.meta?.proxyDomCharsBeforeSelection ?? '',
+        proxyDomCharsAfterSelection: e.meta?.proxyDomCharsAfterSelection ?? '',
+        proxyValueDiffMs: e.meta?.proxyValueDiffMs ?? '',
+        proxyValueMutationMs: e.meta?.proxyValueMutationMs ?? '',
+        proxyValueAssignMs: e.meta?.proxyValueAssignMs ?? '',
+        proxyValueInsertedChars: e.meta?.proxyValueInsertedChars ?? '',
+        proxyValueRemovedChars: e.meta?.proxyValueRemovedChars ?? '',
+        proxyValuePatchStart: e.meta?.proxyValuePatchStart ?? '',
+        proxyValuePatchEnd: e.meta?.proxyValuePatchEnd ?? '',
+        proxyValuePatchPrefixChars: e.meta?.proxyValuePatchPrefixChars ?? '',
+        proxyValuePatchSuffixChars: e.meta?.proxyValuePatchSuffixChars ?? '',
+        setSelectionRangeMs: e.meta?.setSelectionRangeMs ?? '',
+        focusMs: e.meta?.focusMs ?? '',
+        focusSkipped: e.meta?.focusSkipped ?? '',
+        renderScheduleMs: e.meta?.renderScheduleMs ?? '',
+        flushedCheckpoint: e.meta?.flushedCheckpoint ?? '',
+        historyLength: e.meta?.historyLength ?? '',
+        historyIndex: e.meta?.historyIndex ?? '',
+      }));
+    console.table(rows);
+    return rows;
+  }
+
+  function textUndoRedoReport(options = {}) {
+    const rowLimit = Math.max(1, Math.min(MAX_EVENTS, Number(options.limit) || 240));
+    const rows = events
+      .filter(e => (
+        ['undo', 'redo', 'restoreSnapshot', 'pushHistory'].includes(e.op) ||
+        e.step === 'flush-edit-history'
+      ))
+      .map(e => ({
+        id: e.id,
+        op: e.op,
+        step: e.step,
+        total: e.total,
+        dt: e.dt,
+        ms: e.meta?.ms ?? '',
+        reason: e.meta?.reason ?? '',
+        actionReason: e.meta?.actionReason ?? '',
+        targetReason: e.meta?.targetReason ?? '',
+        sourceReason: e.meta?.sourceReason ?? '',
+        flushedCheckpoint: e.meta?.flushedCheckpoint ?? '',
+        flushMs: e.meta?.flushMs ?? '',
+        restoreMs: e.meta?.restoreMs ?? '',
+        skipped: e.meta?.skipped ?? '',
+        objectCount: e.meta?.objectCount ?? '',
+        selectedCount: e.meta?.selectedCount ?? '',
+        editState: e.meta?.editState ?? '',
+        restoredEdit: e.meta?.restoredEdit ?? '',
+	        editStateId: e.meta?.editStateId ?? '',
+	        editValueChars: e.meta?.editValueChars ?? '',
+	        selectionStart: e.meta?.selectionStart ?? '',
+	        selectionEnd: e.meta?.selectionEnd ?? '',
+	        editStateSelectionStart: e.meta?.editStateSelectionStart ?? '',
+	        editStateSelectionEnd: e.meta?.editStateSelectionEnd ?? '',
+	        editStateSelectedChars: e.meta?.editStateSelectedChars ?? '',
+	        beforeEditStateSelectionStart: e.meta?.beforeEditStateSelectionStart ?? '',
+	        beforeEditStateSelectionEnd: e.meta?.beforeEditStateSelectionEnd ?? '',
+	        beforeEditStateSelectedChars: e.meta?.beforeEditStateSelectedChars ?? '',
+	        actionEditStateSelectionStart: e.meta?.actionEditStateSelectionStart ?? '',
+	        actionEditStateSelectionEnd: e.meta?.actionEditStateSelectionEnd ?? '',
+	        actionEditStateSelectedChars: e.meta?.actionEditStateSelectedChars ?? '',
+	        actionBeforeEditStateSelectionStart: e.meta?.actionBeforeEditStateSelectionStart ?? '',
+	        actionBeforeEditStateSelectionEnd: e.meta?.actionBeforeEditStateSelectionEnd ?? '',
+	        actionBeforeEditStateSelectedChars: e.meta?.actionBeforeEditStateSelectedChars ?? '',
+	        targetEditStateSelectionStart: e.meta?.targetEditStateSelectionStart ?? '',
+	        targetEditStateSelectionEnd: e.meta?.targetEditStateSelectionEnd ?? '',
+	        targetEditStateSelectedChars: e.meta?.targetEditStateSelectedChars ?? '',
+	        sourceEditStateSelectionStart: e.meta?.sourceEditStateSelectionStart ?? '',
+	        sourceEditStateSelectionEnd: e.meta?.sourceEditStateSelectionEnd ?? '',
+	        sourceEditStateSelectedChars: e.meta?.sourceEditStateSelectedChars ?? '',
+	        textObjectCount: e.meta?.textObjectCount ?? '',
+        textCharCount: e.meta?.textCharCount ?? '',
+        largestTextChars: e.meta?.largestTextChars ?? '',
+        largestTextId: e.meta?.largestTextId ?? '',
+        textLineCount: e.meta?.textLineCount ?? '',
+        largestTextLineChars: e.meta?.largestTextLineChars ?? '',
+        runtimeTextLayoutObjects: e.meta?.runtimeTextLayoutObjects ?? '',
+        runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
+        runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
+        cloneObjectsMs: e.meta?.cloneObjectsMs ?? '',
+        hydrateCandidates: e.meta?.candidates ?? '',
+        hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
+        hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
+        hydratedTextScriptRangeCaches: e.meta?.scriptRangeCaches ?? '',
+        hydratedTextScriptMetricCaches: e.meta?.scriptMetricCaches ?? '',
+        replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
+        setSelectionMs: e.meta?.setSelectionMs ?? '',
+        renderScheduleMs: e.meta?.renderScheduleMs ?? '',
+        motionReplayMs: e.meta?.motionReplayMs ?? '',
+        enterEditMs: e.meta?.enterEditMs ?? '',
+        reusedEditProxy: e.meta?.reusedEditProxy ?? '',
+        proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
+        proxyValueChanged: e.meta?.proxyValueChanged ?? '',
+        proxyValueSetMethod: e.meta?.proxyValueSetMethod ?? '',
+        proxyDomSyncedForSelection: e.meta?.proxyDomSyncedForSelection ?? '',
+        proxyDomSyncReason: e.meta?.proxyDomSyncReason ?? '',
+        proxyDomSyncMs: e.meta?.proxyDomSyncMs ?? '',
+        proxyDomCharsBeforeSelection: e.meta?.proxyDomCharsBeforeSelection ?? '',
+        proxyDomCharsAfterSelection: e.meta?.proxyDomCharsAfterSelection ?? '',
+        proxyValueDiffMs: e.meta?.proxyValueDiffMs ?? '',
+        proxyValueMutationMs: e.meta?.proxyValueMutationMs ?? '',
+        proxyValueAssignMs: e.meta?.proxyValueAssignMs ?? '',
+        proxyValueInsertedChars: e.meta?.proxyValueInsertedChars ?? '',
+        proxyValueRemovedChars: e.meta?.proxyValueRemovedChars ?? '',
+        proxyValuePatchStart: e.meta?.proxyValuePatchStart ?? '',
+        proxyValuePatchEnd: e.meta?.proxyValuePatchEnd ?? '',
+        proxyValuePatchPrefixChars: e.meta?.proxyValuePatchPrefixChars ?? '',
+        proxyValuePatchSuffixChars: e.meta?.proxyValuePatchSuffixChars ?? '',
+        setSelectionRangeMs: e.meta?.setSelectionRangeMs ?? '',
+        focusMs: e.meta?.focusMs ?? '',
+        focusSkipped: e.meta?.focusSkipped ?? '',
+        proxyChars: e.meta?.proxyChars ?? '',
+        historyLength: e.meta?.historyLength ?? '',
+        historyIndex: e.meta?.historyIndex ?? '',
+      }));
+    const max = (field) => rows.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
+    const sum = (field) => rows.reduce((value, row) => value + (Number(row[field]) || 0), 0);
+    const endRows = rows.filter(row => row.step === 'end');
+    const restoreEnds = endRows.filter(row => row.op === 'restoreSnapshot');
+    const summaryOut = {
+      undoCount: events.filter(e => e.op === 'undo' && e.step === 'start').length,
+      redoCount: events.filter(e => e.op === 'redo' && e.step === 'start').length,
+      restoreCount: events.filter(e => e.op === 'restoreSnapshot' && e.step === 'start').length,
+      textEditCheckpointPushes: events.filter(e => e.op === 'pushHistory' && e.step === 'end' && e.meta?.reason === 'text-edit-checkpoint').length,
+      maxRestoreMs: restoreEnds.reduce((value, row) => Math.max(value, Number(row.ms) || Number(row.total) || 0), 0),
+      maxOuterRestoreMs: max('restoreMs'),
+      maxFlushMs: max('flushMs'),
+      maxCloneObjectsMs: max('cloneObjectsMs'),
+      maxHydrateCandidates: max('hydrateCandidates'),
+      hydratedTextRuntimeCaches: sum('hydratedTextRuntimeCaches'),
+      hydratedTextLayoutCaches: sum('hydratedTextLayoutCaches'),
+      hydratedTextScriptRangeCaches: sum('hydratedTextScriptRangeCaches'),
+      hydratedTextScriptMetricCaches: sum('hydratedTextScriptMetricCaches'),
+      maxReplaceBoardObjectsMs: max('replaceBoardObjectsMs'),
+      maxEnterEditMs: max('enterEditMs'),
+      maxProxyValueSetMs: max('proxyValueSetMs'),
+      maxProxyValueDiffMs: max('proxyValueDiffMs'),
+      maxProxyValueMutationMs: max('proxyValueMutationMs'),
+      maxProxyValueAssignMs: max('proxyValueAssignMs'),
+      maxSetSelectionRangeMs: max('setSelectionRangeMs'),
+      maxFocusMs: max('focusMs'),
+      maxRenderScheduleMs: max('renderScheduleMs'),
+      maxMotionReplayMs: max('motionReplayMs'),
+      maxTextCharCount: max('textCharCount'),
+      maxLargestTextChars: max('largestTextChars'),
+      maxRuntimeTextLayoutLines: max('runtimeTextLayoutLines'),
+      restoredEditCount: restoreEnds.filter(row => row.restoredEdit === true).length,
+      skippedRows: rows.filter(row => row.skipped).length,
+    };
+    const opEnds = endRows.filter(row => row.op === 'undo' || row.op === 'redo');
+    summaryOut.maxUndoMs = opEnds
+      .filter(row => row.op === 'undo')
+      .reduce((value, row) => Math.max(value, Number(row.total) || 0), 0);
+    summaryOut.maxRedoMs = opEnds
+      .filter(row => row.op === 'redo')
+      .reduce((value, row) => Math.max(value, Number(row.total) || 0), 0);
+    for (const key of Object.keys(summaryOut)) {
+      if (typeof summaryOut[key] === 'number') summaryOut[key] = round(summaryOut[key]);
+    }
+    if (options.table !== false) {
+      console.table([summaryOut]);
+      console.table(rows.slice(-rowLimit));
+    }
+    return { summary: summaryOut, rows: rows.slice(-rowLimit) };
   }
 
   function dump() {
@@ -617,12 +1333,32 @@ var HistoryDebug = (() => {
     for (const key of Object.keys(stats)) stats[key] = 0;
   }
 
-  return { enable, disable, setVerbose, start, step, end, count, max, summary, pushes, dump, reset, clear: reset, get events() { return events.slice(); }, get stats() { return { ...stats }; } };
+  return {
+    enable,
+    disable,
+    setVerbose,
+    start,
+    step,
+    end,
+    count,
+    max,
+    summary,
+    pushes,
+    largeTextReport,
+    textUndoRedoReport,
+    dump,
+    reset,
+    clear: reset,
+    isEnabled: () => core.enabled,
+    get enabled() { return core.enabled; },
+    get events() { return events.slice(); },
+    get stats() { return { ...stats }; },
+  };
 })();
 
 exposeDebug({ history: HistoryDebug });
 var ViewportDebug = (() => {
-  const MAX_EVENTS = 2400;
+  const MAX_EVENTS = 10000;
   const MAX_SLOW_RECORDS = 100;
   let enabled = false;
   let verbose = false;
@@ -692,7 +1428,18 @@ var ViewportDebug = (() => {
   let rawInputMonitorActive = false;
   const EVENT_LOOP_INTERVAL_MS = 50;
   const EVENT_LOOP_GAP_THRESHOLD_MS = 80;
-  const RAW_INPUT_TYPES = ['wheel', 'keydown', 'keyup', 'pointerdown', 'pointerup', 'mousedown', 'mouseup'];
+  const RAW_INPUT_TYPES = [
+    'wheel',
+    'keydown',
+    'keyup',
+    'pointerdown',
+    'pointermove',
+    'pointerup',
+    'pointercancel',
+    'mousedown',
+    'mousemove',
+    'mouseup',
+  ];
 
   function sanitize(value) {
     return sanitizeDebugMeta(value, { roundNumbers: true });
@@ -1191,6 +1938,9 @@ var ViewportDebug = (() => {
         editCaretMs: e.steps?.drawBoard?.meta?.editCaretMs ?? 0,
         editVisibleLines: e.steps?.drawBoard?.meta?.editVisibleLines ?? 0,
         editCulledLines: e.steps?.drawBoard?.meta?.editCulledLines ?? 0,
+        editSelectedChars: e.steps?.drawBoard?.meta?.editSelectedChars ?? 0,
+        editSelectionLines: e.steps?.drawBoard?.meta?.editSelectionLines ?? 0,
+        editSelectionVisibleLines: e.steps?.drawBoard?.meta?.editSelectionVisibleLines ?? 0,
       }))
       .filter(row => Number(row.drawMs) > 0);
     const sum = (field) => draws.reduce((n, row) => n + (Number(row[field]) || 0), 0);
@@ -1241,6 +1991,12 @@ var ViewportDebug = (() => {
       maxRetainedSlowCroppedImages: slowMax('croppedImages'),
       avgDrawnText: draws.length ? Math.round(sum('drawnText') / draws.length * 100) / 100 : 0,
       avgCulledText: draws.length ? Math.round(sum('culledText') / draws.length * 100) / 100 : 0,
+      avgTextLayoutMs: draws.length ? Math.round(sum('textLayoutMs') / draws.length * 100) / 100 : 0,
+      maxTextLayoutMs: Math.round(max('maxTextLayoutMs') * 100) / 100,
+      avgTextLayoutObjects: draws.length ? Math.round(sum('textLayoutObjects') / draws.length * 100) / 100 : 0,
+      maxTextCharCount: max('textCharCount'),
+      largestTextChars: max('largestTextChars'),
+      largestTextLayoutLines: max('largestTextLayoutLines'),
       avgTextLines: draws.length ? Math.round(sum('textLines') / draws.length * 100) / 100 : 0,
       avgDrawnTextLines: draws.length ? Math.round(sum('drawnTextLines') / draws.length * 100) / 100 : 0,
       maxDrawnTextLines: Math.max(max('drawnTextLines'), slowMax('drawnTextLines')),
@@ -1252,6 +2008,9 @@ var ViewportDebug = (() => {
       maxEditTextDrawMs: Math.round(Math.max(max('editTextDrawMs'), slowMax('editTextDrawMs')) * 100) / 100,
       avgEditSelectionMs: draws.length ? Math.round(sum('editSelectionMs') / draws.length * 100) / 100 : 0,
       maxEditSelectionMs: Math.round(Math.max(max('editSelectionMs'), slowMax('editSelectionMs')) * 100) / 100,
+      maxEditSelectedChars: Math.max(max('editSelectedChars'), slowMax('editSelectedChars')),
+      maxEditSelectionLines: Math.max(max('editSelectionLines'), slowMax('editSelectionLines')),
+      maxEditSelectionVisibleLines: Math.max(max('editSelectionVisibleLines'), slowMax('editSelectionVisibleLines')),
       avgEditCaretMs: draws.length ? Math.round(sum('editCaretMs') / draws.length * 100) / 100 : 0,
       maxEditCaretMs: Math.round(Math.max(max('editCaretMs'), slowMax('editCaretMs')) * 100) / 100,
       avgEditVisibleLines: draws.length ? Math.round(sum('editVisibleLines') / draws.length * 100) / 100 : 0,
@@ -1457,6 +2216,12 @@ var ViewportDebug = (() => {
         visibleObjects: e.steps?.drawBoard?.meta?.visibleObjects ?? '',
         drawnImages: e.steps?.drawBoard?.meta?.drawnImages ?? '',
         drawnText: e.steps?.drawBoard?.meta?.drawnText ?? '',
+        textLayoutMs: e.steps?.drawBoard?.meta?.textLayoutMs ?? '',
+        maxTextLayoutMs: e.steps?.drawBoard?.meta?.maxTextLayoutMs ?? '',
+        textLayoutObjects: e.steps?.drawBoard?.meta?.textLayoutObjects ?? '',
+        textCharCount: e.steps?.drawBoard?.meta?.textCharCount ?? '',
+        largestTextChars: e.steps?.drawBoard?.meta?.largestTextChars ?? '',
+        largestTextLayoutLines: e.steps?.drawBoard?.meta?.largestTextLayoutLines ?? '',
         textLines: e.steps?.drawBoard?.meta?.textLines ?? '',
         drawnTextLines: e.steps?.drawBoard?.meta?.drawnTextLines ?? '',
         culledTextLines: e.steps?.drawBoard?.meta?.culledTextLines ?? '',
@@ -1468,6 +2233,9 @@ var ViewportDebug = (() => {
         editVisibleLines: e.steps?.drawBoard?.meta?.editVisibleLines ?? '',
         editCulledLines: e.steps?.drawBoard?.meta?.editCulledLines ?? '',
         editSelectionRuns: e.steps?.drawBoard?.meta?.editSelectionRuns ?? '',
+        editSelectedChars: e.steps?.drawBoard?.meta?.editSelectedChars ?? '',
+        editSelectionLines: e.steps?.drawBoard?.meta?.editSelectionLines ?? '',
+        editSelectionVisibleLines: e.steps?.drawBoard?.meta?.editSelectionVisibleLines ?? '',
         editCaretDrawn: e.steps?.drawBoard?.meta?.editCaretDrawn ?? '',
         bitmapImages: e.steps?.drawBoard?.meta?.bitmapImages ?? '',
         elementImages: e.steps?.drawBoard?.meta?.elementImages ?? '',
@@ -1479,6 +2247,9 @@ var ViewportDebug = (() => {
         croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? '',
         culledImages: e.steps?.drawBoard?.meta?.culledImages ?? '',
         culledText: e.steps?.drawBoard?.meta?.culledText ?? '',
+        slowDrawObjects: (e.steps?.drawBoard?.meta?.slowDrawObjects || [])
+          .map(row => `${row.type || ''}:${row.id || ''}:${row.ms ?? ''}ms`)
+          .join(' | '),
         canvasW: e.steps?.drawBoard?.meta?.canvasW ?? '',
         canvasH: e.steps?.drawBoard?.meta?.canvasH ?? '',
         zoom: e.steps?.drawBoard?.meta?.zoom ?? e.zoom ?? '',

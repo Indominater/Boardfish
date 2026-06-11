@@ -8,11 +8,84 @@ var _editHistoryTimer = null, _editHistoryLastContent = null;
 var EDIT_HISTORY_DEBOUNCE_MS = 500;
 var _textInputSelectionHistorySuppress = null, _editHistoryActionStartState = null;
 
+function canvasInputNow() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+function canvasInputDebugRound(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function canvasInputTextDebugLog(label, obj = null, meta = {}) {
+  if (typeof TextSelDebug === 'undefined') return;
+  TextSelDebug._logEditLifecycle?.(label, obj, meta);
+}
+
+function focusTextEditProxyNow(proxy, obj = null, label = 'text-edit-focus', meta = {}) {
+  if (!proxy) return { focused: false, skipped: true, reason: 'missing-proxy', focusMs: '' };
+  if (typeof document !== 'undefined' && document.activeElement === proxy) {
+    const out = { focused: false, skipped: true, reason: 'already-active', focusMs: 0, activeElementIsProxy: true };
+    canvasInputTextDebugLog(label, obj, { ...meta, ...out });
+    return out;
+  }
+  const focusStart = canvasInputNow();
+  proxy.focus({ preventScroll: true });
+  const out = {
+    focused: true,
+    skipped: false,
+    reason: '',
+    focusMs: canvasInputDebugRound(canvasInputNow() - focusStart),
+    activeElementIsProxy: typeof document !== 'undefined' ? document.activeElement === proxy : '',
+  };
+  canvasInputTextDebugLog(label, obj, { ...meta, ...out });
+  return out;
+}
+
+function scheduleTextEditProxyFocus(proxy, obj = null, label = 'text-edit-focus-deferred', meta = {}) {
+  if (!proxy) return false;
+  if (typeof document !== 'undefined' && document.activeElement === proxy) {
+    canvasInputTextDebugLog(label, obj, {
+      ...meta,
+      skipped: true,
+      reason: 'already-active',
+      focusMs: 0,
+      activeElementIsProxy: true,
+    });
+    return false;
+  }
+  const scheduledAt = canvasInputNow();
+  const runFocus = () => {
+    if (_editEl !== proxy || !editingId) {
+      canvasInputTextDebugLog(label, obj, {
+        ...meta,
+        skipped: true,
+        reason: 'stale-proxy',
+        scheduledDelayMs: canvasInputDebugRound(canvasInputNow() - scheduledAt),
+      });
+      return;
+    }
+    focusTextEditProxyNow(proxy, obj, label, {
+      ...meta,
+      scheduledDelayMs: canvasInputDebugRound(canvasInputNow() - scheduledAt),
+    });
+  };
+  if (typeof requestAnimationFrame === 'function' && typeof setTimeout === 'function') {
+    requestAnimationFrame(() => setTimeout(runFocus, 0));
+  } else if (typeof setTimeout === 'function') {
+    setTimeout(runFocus, 0);
+  } else {
+    runFocus();
+  }
+  return true;
+}
+
 function handleViewportWheel(e) {
   if (e.__boardfishViewportWheelHandled) return;
   try { e.__boardfishViewportWheelHandled = true; } catch (_) {}
   const collectDebug = ViewportDebug.isEnabled();
-  const handlerStart = collectDebug ? performance.now() : 0;
+  const handlerStart = collectDebug ? canvasInputNow() : 0;
   const dbg = ViewportDebug.start('wheel', { deltaX: e.deltaX, deltaY: e.deltaY, ctrlKey: e.ctrlKey, metaKey: e.metaKey, panX, panY, zoom });
   try {
     ViewportDebug.count('wheel');
@@ -43,7 +116,7 @@ function handleViewportWheel(e) {
     scheduleTransform('wheel-pan', e);
     ViewportDebug.end(dbg, { mode: 'pan', appliedDX: e.deltaX, appliedDY: e.deltaY, panX, panY });
   } finally {
-    if (collectDebug) ViewportDebug.timing('wheelHandler', performance.now() - handlerStart);
+    if (collectDebug) ViewportDebug.timing('wheelHandler', canvasInputNow() - handlerStart);
   }
 }
 
@@ -121,14 +194,14 @@ function startMousePan(e) {
   const startPanX = panX, startPanY = panY;
   function onMove(ev) {
     const collectDebug = ViewportDebug.isEnabled();
-    const handlerStart = collectDebug ? performance.now() : 0;
+    const handlerStart = collectDebug ? canvasInputNow() : 0;
     try {
       ViewportDebug.count('mousePanMoves');
       BoardfishViewportState.setPan(startPanX + (ev.clientX - startX), startPanY + (ev.clientY - startY));
       globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
       scheduleTransform('mouse-pan', ev);
     } finally {
-      if (collectDebug) ViewportDebug.timing('mousePanHandler', performance.now() - handlerStart);
+      if (collectDebug) ViewportDebug.timing('mousePanHandler', canvasInputNow() - handlerStart);
     }
   }
   function onUp(ev) {
@@ -348,32 +421,56 @@ function clearTextEditCaretHit(obj) {
 
 function startTextSelectionDrag(e, obj, wp) {
   if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
+  TextSelDebug._logPointer?.('selection-drag-start', e, { objectId: obj?.id || '', wx: wp.x, wy: wp.y });
+  const layoutStart = canvasInputNow();
   const layout = getTextLayout(obj);
+  TextSelDebug._logLayout?.('selection-drag-start-layout', obj, layout, canvasInputNow() - layoutStart);
+  const clickHitStart = canvasInputNow();
   const clickHit = textCaretHitForPoint(layout, wp.x, wp.y, obj);
+  TextSelDebug._logHitTiming?.('selection-drag-start-hit', obj, clickHit, canvasInputNow() - clickHitStart, {
+    wx: wp.x,
+    wy: wp.y,
+  });
   const clickIdx = clickHit.index;
   if (_editEl) {
-    _editEl.focus({ preventScroll: true });
     applyTextEditCaretHit(obj, _editEl, clickHit);
-    TextSelDebug._logSelection('mouse-down', _editEl);
+    focusTextEditProxyNow(_editEl, obj, 'selection-drag-focus', {
+      phase: 'selection-drag',
+      clientX: e?.clientX ?? '',
+      clientY: e?.clientY ?? '',
+    });
+    TextSelDebug._logSelection('mouse-down', _editEl, obj);
     _caretVisible = true;
     globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
     scheduleRender(true, false);
   }
   function onSelMove(ev) {
     const wp2 = toWorld(ev.clientX, ev.clientY);
+    TextSelDebug._logPointer?.('selection-drag-move', ev, { objectId: obj?.id || '', wx: wp2.x, wy: wp2.y });
+    const hitStart = canvasInputNow();
     const endHit = textCaretHitForPoint(obj._layoutCache || layout, wp2.x, wp2.y, obj);
+    TextSelDebug._logHitTiming?.('selection-drag-move-hit', obj, endHit, canvasInputNow() - hitStart, {
+      wx: wp2.x,
+      wy: wp2.y,
+    });
     const endIdx = endHit.index;
     if (_editEl) {
       _editEl.setSelectionRange(Math.min(clickIdx, endIdx), Math.max(clickIdx, endIdx));
       if (clickIdx === endIdx) applyTextEditCaretHit(obj, _editEl, endHit);
       else clearTextEditCaretHit(obj);
-      TextSelDebug._logSelection('mouse-drag', _editEl);
+      TextSelDebug._logSelection('mouse-drag', _editEl, obj);
       _caretVisible = true;
       globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-drag-select');
       scheduleRender(true, false);
     }
   }
-  beginDocumentDrag({ move: onSelMove });
+  function onSelUp(ev) {
+    if (!ev) return;
+    const wp2 = toWorld(ev.clientX, ev.clientY);
+    TextSelDebug._logPointer?.('selection-drag-end', ev, { objectId: obj?.id || '', wx: wp2.x, wy: wp2.y });
+    if (_editEl) TextSelDebug._logSelection('mouse-up', _editEl, obj);
+  }
+  beginDocumentDrag({ move: onSelMove, up: onSelUp });
 }
 
 function startObjectDrag(e, obj) {
@@ -410,18 +507,105 @@ function startObjectDrag(e, obj) {
     if (!moved) {
       if (!isSelected(obj.id)) selectObject(obj.id);
       if (canClickToEditText) {
-        enterEdit(obj.id);
+        const clickEditStart = canvasInputNow();
+        let clickEditStepStart = clickEditStart;
+        const logClickEditStep = (label, meta = {}) => {
+          const t = canvasInputNow();
+          canvasInputTextDebugLog(label, obj, {
+            phase: 'click-to-edit',
+            clientX: ev?.clientX ?? '',
+            clientY: ev?.clientY ?? '',
+            startClientX: startX,
+            startClientY: startY,
+            selectedCount: selectedIds.size,
+            wasSelected,
+            canClickToEditText,
+            ms: canvasInputDebugRound(t - clickEditStepStart),
+            totalMs: canvasInputDebugRound(t - clickEditStart),
+            ...meta,
+          });
+          clickEditStepStart = t;
+        };
+        logClickEditStep('click-to-edit-start', {
+          hasEditProxy: !!_editEl,
+          previousEditingId: editingId || '',
+        });
+        const enterEditStart = canvasInputNow();
+        enterEdit(obj.id, { placeInitialCaret: false });
+        logClickEditStep('click-to-edit-enter-edit', {
+          enterEditMs: canvasInputDebugRound(canvasInputNow() - enterEditStart),
+          hasEditProxy: !!_editEl,
+          editingId: editingId || '',
+        });
         if (_editEl && ev) {
+          const worldStart = canvasInputNow();
           const upPoint = toWorld(ev.clientX, ev.clientY);
+          logClickEditStep('click-to-edit-world-point', {
+            wx: upPoint.x,
+            wy: upPoint.y,
+            worldPointMs: canvasInputDebugRound(canvasInputNow() - worldStart),
+          });
+          const layoutStart = canvasInputNow();
           const layout = getTextLayout(obj);
+          logClickEditStep('click-to-edit-layout', {
+            layoutMs: canvasInputDebugRound(canvasInputNow() - layoutStart),
+            layoutLines: Array.isArray(layout) ? layout.length : '',
+            layoutCached: Array.isArray(obj?._layoutCache),
+          });
+          const hitStart = canvasInputNow();
           const clickHit = textCaretHitForPoint(layout, upPoint.x, upPoint.y, obj);
-          _editEl.focus({ preventScroll: true });
+          logClickEditStep('click-to-edit-hit', {
+            hitMs: canvasInputDebugRound(canvasInputNow() - hitStart),
+            returnedIdx: clickHit?.index ?? '',
+            affinity: clickHit?.affinity || '',
+            lineStartIndex: clickHit?.lineStartIndex ?? '',
+          });
+          const caretStart = canvasInputNow();
           applyTextEditCaretHit(obj, _editEl, clickHit);
-          TextSelDebug._logSelection('click-to-edit', _editEl);
+          logClickEditStep('click-to-edit-caret-applied', {
+            caretApplyMs: canvasInputDebugRound(canvasInputNow() - caretStart),
+            selectionStart: _editEl.selectionStart ?? '',
+            selectionEnd: _editEl.selectionEnd ?? '',
+            selectionDirection: _editEl.selectionDirection || 'none',
+            scriptCaretIndex: obj._textScriptCaretIndex ?? '',
+            scriptCaretAffinity: obj._textScriptCaretAffinity || '',
+            textEditCaretIndex: obj._textEditCaretIndex ?? '',
+            textEditCaretLineStartIndex: obj._textEditCaretLineStartIndex ?? '',
+          });
+          TextSelDebug._logSelection('click-to-edit', _editEl, obj);
           _caretVisible = true;
+          const motionStart = canvasInputNow();
           globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
+          logClickEditStep('click-to-edit-motion', {
+            motionMs: canvasInputDebugRound(canvasInputNow() - motionStart),
+          });
+          const renderStart = canvasInputNow();
           scheduleRender(true, false);
+          logClickEditStep('click-to-edit-render-scheduled', {
+            renderScheduleMs: canvasInputDebugRound(canvasInputNow() - renderStart),
+          });
+          const focusScheduled = scheduleTextEditProxyFocus(_editEl, obj, 'click-to-edit-focus-deferred', {
+            phase: 'click-to-edit',
+            clientX: ev?.clientX ?? '',
+            clientY: ev?.clientY ?? '',
+            startClientX: startX,
+            startClientY: startY,
+            selectedCount: selectedIds.size,
+            wasSelected,
+            canClickToEditText,
+            selectionStart: _editEl.selectionStart ?? '',
+            selectionEnd: _editEl.selectionEnd ?? '',
+          });
+          logClickEditStep('click-to-edit-focus-scheduled', {
+            focusScheduled,
+            activeElementIsProxy: typeof document !== 'undefined' ? document.activeElement === _editEl : '',
+          });
         }
+        logClickEditStep('click-to-edit-end', {
+          hasEditProxy: !!_editEl,
+          editingId: editingId || '',
+          clickToEditTotalMs: canvasInputDebugRound(canvasInputNow() - clickEditStart),
+        });
       }
       return;
     }
@@ -449,6 +633,7 @@ function startObjectDrag(e, obj) {
 }
 
 canvas.addEventListener('mousedown', (e) => {
+  const mouseDownStart = canvasInputNow();
   if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.button === 0 && _spaceDown)) {
     e.preventDefault();
     e.stopPropagation();
@@ -466,12 +651,39 @@ canvas.addEventListener('mousedown', (e) => {
   if (e.target !== canvas && e.target !== boardCanvas) return;
 
   e.preventDefault();
-  BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
+  const cleanupStart = canvasInputNow();
+  const emptyTextDeleted = BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
     preserveIds: editingId ? [editingId] : [],
   });
+  const emptyTextCleanupMs = canvasInputDebugRound(canvasInputNow() - cleanupStart);
+  const worldStart = canvasInputNow();
   const wp = toWorld(e.clientX, e.clientY);
+  const worldPointMs = canvasInputDebugRound(canvasInputNow() - worldStart);
+  const hitStart = canvasInputNow();
   const obj = hitTest(wp.x, wp.y);
+  const hitTestMs = canvasInputDebugRound(canvasInputNow() - hitStart);
   const additive = e.metaKey || e.ctrlKey;
+  canvasInputTextDebugLog('canvas-mousedown-route', obj, {
+    phase: 'canvas-mousedown',
+    clientX: e.clientX,
+    clientY: e.clientY,
+    wx: wp.x,
+    wy: wp.y,
+    button: e.button,
+    detail: e.detail ?? '',
+    additive,
+    emptyTextDeleted: !!emptyTextDeleted,
+    emptyTextCleanupMs,
+    worldPointMs,
+    hitTestMs,
+    hitObjectId: obj?.id || '',
+    hitObjectType: obj?.type || '',
+    hitObjectSelected: obj ? isSelected(obj.id) : '',
+    selectedCount: selectedIds.size,
+    editingId: editingId || '',
+    ms: canvasInputDebugRound(canvasInputNow() - mouseDownStart),
+    totalMs: canvasInputDebugRound(canvasInputNow() - mouseDownStart),
+  });
 
   // Multi-select: any click inside the bounding box (object or empty space) → drag group
   if (isMultiSelected() && !additive) {

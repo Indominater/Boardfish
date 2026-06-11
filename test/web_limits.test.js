@@ -68,6 +68,49 @@ test('web data URL image validation measures bytes without decoding payload', as
   }
 });
 
+test('web board content estimate ignores runtime text layout cache fields', () => {
+  const previousObjects = globalThis.objects;
+  const previousImageStore = globalThis.imageStore;
+  const previousViewport = {
+    panX: globalThis.panX,
+    panY: globalThis.panY,
+    zoom: globalThis.zoom,
+  };
+  globalThis.panX = 0;
+  globalThis.panY = 0;
+  globalThis.zoom = 1;
+  globalThis.imageStore = {};
+  globalThis.objects = [{
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 240,
+    h: 120,
+    z: 1,
+    data: { content: 'hello' },
+    _layoutCache: {
+      toJSON() {
+        throw new Error('runtime layout cache should not be serialized');
+      },
+    },
+  }];
+  try {
+    assert.equal(WebLimits.canAcceptAdditionalContentBytes(0, 1, { notifyUser: false }), true);
+  } finally {
+    if (previousObjects === undefined) delete globalThis.objects;
+    else globalThis.objects = previousObjects;
+    if (previousImageStore === undefined) delete globalThis.imageStore;
+    else globalThis.imageStore = previousImageStore;
+    if (previousViewport.panX === undefined) delete globalThis.panX;
+    else globalThis.panX = previousViewport.panX;
+    if (previousViewport.panY === undefined) delete globalThis.panY;
+    else globalThis.panY = previousViewport.panY;
+    if (previousViewport.zoom === undefined) delete globalThis.zoom;
+    else globalThis.zoom = previousViewport.zoom;
+  }
+});
+
 test('web board content limit carries a short user-facing message', () => {
   assert.throws(
     () => WebLimits.validateBoardPayload({

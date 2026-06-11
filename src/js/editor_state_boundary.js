@@ -23,8 +23,12 @@
     primaryId = null,
     exitEditing = true,
   } = {}) {
+    const startedAt = root.performance?.now?.() ?? Date.now();
     const nextIds = Array.isArray(ids) ? ids : [...(ids || [])];
     const previousSelectedIds = animateSelection ? new Set(selectedIds) : null;
+    const previousCount = selectedIds.size;
+    const previousPrimaryId = selectedId || '';
+    const previousEditingId = editingId || '';
     if (exitEditing && editingId && !nextIds.includes(editingId)) exitEdit();
     selectedIds.clear();
     let lastExistingId = null;
@@ -36,6 +40,15 @@
     selectedId = primaryId && selectedIds.has(primaryId) ? primaryId : lastExistingId;
     if (editingId && !selectedIds.has(editingId)) exitEdit();
     if (animateSelection) noteNewlySelectedObjects(previousSelectedIds);
+    root.TextSelDebug?._logObjectSelection?.('set-selection', nextIds, {
+      ms: Math.round(((root.performance?.now?.() ?? Date.now()) - startedAt) * 100) / 100,
+      previousCount,
+      previousPrimaryId,
+      previousEditingId,
+      exitEditing,
+      animateSelection,
+      requestedPrimaryId: primaryId || '',
+    });
     return selectedIds.size;
   }
 
@@ -92,9 +105,12 @@
     return commitMutation(reason, () => removeEmptyTextObjects(options) > 0);
   }
 
-  function clearTextLayoutState() {
+  function clearTextLayoutState(options = {}) {
     if (typeof clearTextLayoutCaches === 'function') {
-      clearTextLayoutCaches({ measurements: true });
+      clearTextLayoutCaches({
+        measurements: true,
+        objectLayout: options.objectLayout !== false,
+      });
       return;
     }
     _linesCacheMap.clear();
@@ -124,9 +140,10 @@
     normalizeText = true,
     syncTextHeights = true,
     restoreCounters = true,
+    preserveTextRuntimeCaches = false,
   } = {}) {
     objects = Array.isArray(nextObjects) ? nextObjects : [];
-    clearTextLayoutState();
+    clearTextLayoutState({ objectLayout: preserveTextRuntimeCaches !== true });
     if (normalizeText) {
       for (const obj of objects) {
         if (obj?.type !== 'text') continue;

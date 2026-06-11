@@ -76,6 +76,8 @@ const StartupDebug = {
 const ClipDebug = createNoopDebugApi({
   copyBreakdown: () => [],
   copyPanReport: () => null,
+  textPasteLagReport: () => null,
+  textClipboardReport: () => null,
   largePasteReport: () => null,
   pasteBreakdown: () => null,
   status: () => null,
@@ -122,7 +124,14 @@ const InsertDebug = createNoopDebugApi({
   fileBreakdown: () => [],
 });
 const TextSelDebug = createNoopDebugApi({
+  clipboardReport: () => null,
+  editLifecycleReport: () => [],
+  exitEditReport: () => null,
+  performanceSummary: () => null,
+  selectionReport: () => null,
   _logDraw: noop,
+  _logClipboard: noop,
+  _logEditLifecycle: noop,
   _logHit: noop,
   _logSelection: noop,
 });

@@ -87,6 +87,58 @@ test('omits unsupported transient board data from board data', () => {
   assert.equal(Object.hasOwn(data, 'transientPanelState'), false);
 });
 
+test('strips runtime text layout caches from saved board data', () => {
+  const content = Array.from({ length: 3000 }, (_, index) => `word${index}`).join(' ');
+  const runtimeTextObject = {
+    id: 'text-1',
+    type: 'text',
+    x: 10,
+    y: 20,
+    w: 600,
+    h: 900,
+    z: 1,
+    data: { content },
+    _layoutCacheKey: `${content}\n600\n20`,
+    _layoutCache: Array.from({ length: 120 }, (_, index) => ({
+      text: `line ${index}`,
+      startIndex: index,
+      endIndex: index + 1,
+      scriptRanges: [],
+      content,
+      prefixWidths: [0, 10],
+    })),
+    _textEditCaretIndex: content.length,
+    _editStartContent: content,
+    _editMinLines: 5,
+  };
+
+  const data = BoardDocument.createBoardDataForSave({
+    viewport: { panX: 0, panY: 0, zoom: 1 },
+    imageStore: {},
+    objects: [runtimeTextObject],
+  }, {
+    schema: BoardSchema,
+  });
+
+  assert.deepEqual(Object.keys(data.objects[0]).sort(), ['data', 'h', 'id', 'type', 'w', 'x', 'y', 'z'].sort());
+  assert.deepEqual(Object.keys(data.objects[0].data), ['content']);
+  assert.equal(data.objects[0].data.content, content);
+
+  const json = JSON.stringify(data);
+  assert.equal(json.includes('_layoutCache'), false);
+  assert.equal(json.includes('_editStartContent'), false);
+  assert.ok(json.length < content.length * 2);
+
+  const metrics = BoardDocument.getBoardSaveMetrics(data, { rawObjects: [runtimeTextObject] });
+  assert.equal(metrics.textCharCount, content.length);
+  assert.equal(metrics.largestTextChars, content.length);
+  assert.equal(metrics.runtimeTextCacheObjects, 1);
+  assert.equal(metrics.runtimeTextCacheLines, 120);
+  assert.equal(metrics.runtimeTextCacheContentChars, content.length * 120);
+  assert.equal(metrics.runtimeTextCachePrefixEntries, 240);
+  assert.ok(metrics.runtimeTextPrivateFields >= 4);
+});
+
 test('summarizes image store without runtime globals', () => {
   const summary = BoardDocument.summarizeImageStore({
     'img-1': 'data:image/png;base64,abc',

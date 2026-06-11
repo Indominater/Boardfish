@@ -43,6 +43,36 @@
     await navigator.clipboard.write([new ClipboardItem(parts)]);
   }
 
+  function clipboardIoNow() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+  }
+
+  function clipboardIoElapsedMs(startedAt) {
+    return Math.round((clipboardIoNow() - startedAt) * 100) / 100;
+  }
+
+  function clipDebugStep(dbg, step, meta = {}) {
+    if (typeof ClipDebug !== 'undefined') ClipDebug.step(dbg, step, meta);
+  }
+
+  function textClipboardStats(text) {
+    const value = String(text ?? '');
+    const lines = value ? value.split('\n') : [];
+    let largestLineChars = 0;
+    for (const line of lines) largestLineChars = Math.max(largestLineChars, line.length);
+    const textBytes = typeof TextEncoder === 'function'
+      ? new TextEncoder().encode(value).length
+      : value.length;
+    return {
+      textLen: value.length,
+      textLineCount: lines.length,
+      largestLineChars,
+      textBytes,
+    };
+  }
+
   function supportedClipboardImageFile(items = [], files = []) {
     const isSupportedImageType = (type) => type === 'image/png' || type === 'image/jpeg';
     for (const item of items) {
@@ -88,18 +118,53 @@
   }
 
   async function copyTextToClipboard(text, dbg = null, meta = {}) {
+    const writeStartedAt = clipboardIoNow();
+    clipDebugStep(dbg, 'web-clipboard-text-write-start', {
+      ...meta,
+      ...textClipboardStats(text),
+      richAttempted: !!meta.boardfishToken && supportsRichClipboardWrite(),
+    });
     if (meta.boardfishToken && supportsRichClipboardWrite()) {
+      const richStartedAt = clipboardIoNow();
       try {
         await writeClipboardItem({
           'text/plain': new Blob([text], { type: 'text/plain' }),
           'text/html': new Blob([textToClipboardHtml(text, meta.boardfishToken)], { type: 'text/html' }),
         });
+        clipDebugStep(dbg, 'web-clipboard-rich-text-write-end', {
+          ...meta,
+          ...textClipboardStats(text),
+          ms: clipboardIoElapsedMs(richStartedAt),
+        });
+        clipDebugStep(dbg, 'web-clipboard-text-write-end', {
+          ...meta,
+          ...textClipboardStats(text),
+          boardfishTokenWritten: true,
+          ms: clipboardIoElapsedMs(writeStartedAt),
+        });
         return { boardfishTokenWritten: true };
       } catch (err) {
-        ClipDebug.step(dbg, 'web-clipboard-rich-text-miss', { error: String(err) });
+        clipDebugStep(dbg, 'web-clipboard-rich-text-miss', {
+          ...meta,
+          ...textClipboardStats(text),
+          ms: clipboardIoElapsedMs(richStartedAt),
+          error: String(err),
+        });
       }
     }
+    const plainStartedAt = clipboardIoNow();
     await navigator.clipboard.writeText(text);
+    clipDebugStep(dbg, 'web-clipboard-plain-text-write-end', {
+      ...meta,
+      ...textClipboardStats(text),
+      ms: clipboardIoElapsedMs(plainStartedAt),
+    });
+    clipDebugStep(dbg, 'web-clipboard-text-write-end', {
+      ...meta,
+      ...textClipboardStats(text),
+      boardfishTokenWritten: false,
+      ms: clipboardIoElapsedMs(writeStartedAt),
+    });
     return { boardfishTokenWritten: false };
   }
 

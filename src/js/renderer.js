@@ -26,6 +26,13 @@
       textLines: 0,
       drawnTextLines: 0,
       culledTextLines: 0,
+      textLayoutObjects: 0,
+      textLayoutMs: 0,
+      maxTextLayoutMs: 0,
+      textCharCount: 0,
+      largestTextChars: 0,
+      largestTextLayoutLines: 0,
+      slowDrawObjects: [],
     };
   }
 
@@ -99,11 +106,22 @@
     context.setTransform(1, 0, 0, 1, 0, 0);
   }
 
+  function configureRendererTextContext(context) {
+    if (!context) return;
+    try { context.fontKerning = 'none'; } catch (_) {}
+    try { context.letterSpacing = '0px'; } catch (_) {}
+    try { context.fontStretch = 'normal'; } catch (_) {}
+    try { context.fontVariantCaps = 'normal'; } catch (_) {}
+    try { context.textAlign = 'left'; } catch (_) {}
+    try { context.direction = 'ltr'; } catch (_) {}
+  }
+
   function setWorldCanvasTransform(context, dpr, view, deps) {
     context.setTransform(view.zoom * dpr, 0, 0, view.zoom * dpr, view.panX * dpr, view.panY * dpr);
     deps.setCanvasImageQuality(context);
     context.font = deps.font;
     context.textBaseline = 'alphabetic';
+    configureRendererTextContext(context);
   }
 
   function resolveTextBaselineYOffset(deps) {
@@ -128,6 +146,37 @@
     counters[field] = (counters[field] || 0) + count;
   }
 
+  function drawCounterValue(counters, field) {
+    return Number(counters?.[field]) || 0;
+  }
+
+  function recordSlowDrawObject(counters, obj, ms, before, drawn, motion = null) {
+    if (!counters || !obj || !Number.isFinite(ms) || ms <= 0) return;
+    const row = {
+      id: obj.id || '',
+      type: obj.type || '',
+      ms: Math.round(ms * 100) / 100,
+      drawn: !!drawn,
+      motion: !!motion,
+    };
+    if (obj.type === 'text') {
+      row.chars = String(obj.data?.content || '').length;
+      row.layoutMs = Math.round((drawCounterValue(counters, 'textLayoutMs') - before.textLayoutMs) * 100) / 100;
+      row.textLines = drawCounterValue(counters, 'textLines') - before.textLines;
+      row.drawnTextLines = drawCounterValue(counters, 'drawnTextLines') - before.drawnTextLines;
+      row.culledTextLines = drawCounterValue(counters, 'culledTextLines') - before.culledTextLines;
+    } else if (obj.type === 'image') {
+      row.cropped = drawCounterValue(counters, 'croppedImages') > before.croppedImages;
+      row.scaled = drawCounterValue(counters, 'scaledImages') > before.scaledImages;
+      row.fullScale = drawCounterValue(counters, 'fullScaleImages') > before.fullScaleImages;
+      row.fallbackFull = drawCounterValue(counters, 'scaledFallbackFull') > before.scaledFallbackFull;
+    }
+    const list = Array.isArray(counters.slowDrawObjects) ? counters.slowDrawObjects : [];
+    list.push(row);
+    list.sort((a, b) => (b.ms || 0) - (a.ms || 0));
+    counters.slowDrawObjects = list.slice(0, 8);
+  }
+
   function createBoardRenderer(deps) {
     function viewDefaults() {
       return {
@@ -144,15 +193,40 @@
       if (obj.type === 'text') {
         context.fillStyle = deps.canvasTextColor();
         context.textBaseline = 'alphabetic';
+        configureRendererTextContext(context);
         if (typeof deps.getTextLayout === 'function' && typeof deps.drawTextLineRange === 'function') {
+          const layoutStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
+          const layout = typeof deps.getTextLayoutForViewport === 'function'
+            ? deps.getTextLayoutForViewport(obj, options.viewportRect || null)
+            : deps.getTextLayout(obj);
+          const totalLayoutLines = Math.max(
+            layout.length,
+            Math.trunc(Number(layout.totalLines)) || layout.length,
+          );
+          if (counters) {
+            const layoutMs = typeof performance !== 'undefined' ? performance.now() - layoutStart : 0;
+            const chars = String(obj.data?.content || '').length;
+            counters.textLayoutObjects = (counters.textLayoutObjects || 0) + 1;
+            counters.textLayoutMs = (counters.textLayoutMs || 0) + layoutMs;
+            counters.maxTextLayoutMs = Math.max(counters.maxTextLayoutMs || 0, layoutMs);
+            counters.textCharCount = (counters.textCharCount || 0) + chars;
+            counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
+            counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
+          }
           const lineHeight = deps.lineHeight || 0;
-          for (const line of deps.getTextLayout(obj)) {
+          let drawnLineCount = 0;
+          for (const line of layout) {
             if (!textLineIntersectsRect(line.y, lineHeight, options.viewportRect || null)) {
-              countTextLine(counters, 'culledTextLines');
               continue;
             }
-            countTextLine(counters, 'drawnTextLines');
+            drawnLineCount++;
             deps.drawTextLineRange(context, line, obj);
+          }
+          if (counters) {
+            const culledLineCount = Math.max(0, totalLayoutLines - drawnLineCount);
+            counters.textLines = (counters.textLines || 0) + totalLayoutLines;
+            counters.drawnTextLines = (counters.drawnTextLines || 0) + drawnLineCount;
+            counters.culledTextLines = (counters.culledTextLines || 0) + culledLineCount;
           }
           return true;
         }
@@ -268,6 +342,17 @@
           }
         }
         let drawn = false;
+        const objectDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
+        const before = counters ? {
+          textLayoutMs: drawCounterValue(counters, 'textLayoutMs'),
+          textLines: drawCounterValue(counters, 'textLines'),
+          drawnTextLines: drawCounterValue(counters, 'drawnTextLines'),
+          culledTextLines: drawCounterValue(counters, 'culledTextLines'),
+          croppedImages: drawCounterValue(counters, 'croppedImages'),
+          scaledImages: drawCounterValue(counters, 'scaledImages'),
+          fullScaleImages: drawCounterValue(counters, 'fullScaleImages'),
+          scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
+        } : null;
         try {
           drawn = drawSingleObj(context, obj, counters, {
             view,
@@ -276,6 +361,9 @@
           });
         } finally {
           if (motion && context.restore) context.restore();
+          if (counters && typeof performance !== 'undefined') {
+            recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, motion);
+          }
         }
         if (obj.type === 'image' && drawn) {
           drawnImages++;

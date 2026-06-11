@@ -315,16 +315,21 @@ function drawVisibleObjects(context, counters, { skipId = null, viewportRect = c
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
   const viewportRect = options.viewportRect || null;
   if (selStart === selEnd) return null;
-  const firstLine = layout.find((line) => line?.content != null || Array.isArray(line?.scriptRanges));
-  const scriptMetrics = firstLine && typeof getTextScriptLayoutMetrics === 'function'
-    ? getTextScriptLayoutMetrics(firstLine.content || '', firstLine.scriptRanges || [])
-    : null;
+  const firstLine = layout.find((line) => Array.isArray(line?.scriptRanges) && line.scriptRanges.length);
+  const content = normalizeTextContent(obj?.data?.content || '');
+  const scriptMetrics = firstLine?._scriptMetrics ||
+    (firstLine && typeof getTextScriptLayoutMetricsForObject === 'function'
+      ? getTextScriptLayoutMetricsForObject(obj, content, firstLine.scriptRanges || [])
+      : null) ||
+    (firstLine && typeof getTextScriptLayoutMetrics === 'function'
+      ? getTextScriptLayoutMetrics(content, firstLine.scriptRanges || [])
+      : null);
   const isHiddenAt = (line, globalIndex) => {
     if (scriptMetrics && typeof textScriptMetricsHiddenAt === 'function') {
       return textScriptMetricsHiddenAt(scriptMetrics, globalIndex);
     }
     return typeof isTextScriptMarkerHiddenAt === 'function' &&
-      isTextScriptMarkerHiddenAt(line.scriptRanges || [], globalIndex, line.content || '');
+      isTextScriptMarkerHiddenAt(line.scriptRanges || [], globalIndex, content);
   };
   const stateAt = (line, globalIndex) => {
     if (scriptMetrics && typeof textScriptMetricsStateAt === 'function') {
@@ -339,6 +344,9 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
   let top = Infinity;
   let right = -Infinity;
   let bottom = -Infinity;
+  let scannedLines = 0;
+  let selectedLines = 0;
+  let hiddenChars = 0;
   const selectionBoxForState = (line, state) => {
     if (state?.depth > 0) {
       return {
@@ -350,15 +358,18 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
   };
   for (const line of layout) {
     if (!textLayoutLineIntersectsViewport(line, viewportRect)) continue;
+    scannedLines++;
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
     if (h0 < h1) {
+      selectedLines++;
       const o0 = h0 - ls, o1 = h1 - ls;
       const endX = lineEndX(line, obj);
       let i = o0;
       while (i < o1) {
         const globalIndex = line.startIndex + i;
         if (isHiddenAt(line, globalIndex)) {
+          hiddenChars++;
           i++;
           continue;
         }
@@ -397,6 +408,12 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
   return {
     runs,
     bounds: { left, top, right, bottom },
+    metrics: {
+      scannedLines,
+      selectedLines,
+      hiddenChars,
+      selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)),
+    },
   };
 };
 
@@ -575,16 +592,24 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, opti
     typeof context.rect === 'function' &&
     typeof context.fill === 'function';
   if (pathFill) context.beginPath();
-  let rectCount = 0;
   for (const run of selection.runs) {
     TextSelDebug._logDraw(run.line, selStart, selEnd, run.x1, run.x2);
   }
-  for (const rect of textSelectionHighlightRects(selection.runs)) {
+  const selectionRects = textSelectionHighlightRects(selection.runs);
+  for (const rect of selectionRects) {
     if (pathFill) context.rect(rect.x, rect.y, rect.w, rect.h);
     else context.fillRect(rect.x, rect.y, rect.w, rect.h);
-    rectCount++;
   }
-  if (pathFill && rectCount) context.fill();
+  if (pathFill && selectionRects.length) context.fill();
+  TextSelDebug._logSelectionDraw?.({
+    objectId: obj?.id || '',
+    selStart,
+    selEnd,
+    selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)),
+    selectionRuns: selection.runs.length,
+    selectionRects: selectionRects.length,
+    ...(selection.metrics || {}),
+  });
   context.restore();
   return true;
 }
@@ -639,7 +664,9 @@ function drawCaret(context, obj, layout, selStart, options = {}) {
     const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
     if (!(selStart >= ls && selStart <= le)) return false;
     const off = Math.min(selStart - ls, line.text.length);
-    cx = off < line.text.length ? lineXAtOffset(line, obj, off) : lineEndX(line, obj);
+    cx = typeof lineCaretXAtOffset === 'function'
+      ? lineCaretXAtOffset(line, obj, off)
+      : off < line.text.length ? lineXAtOffset(line, obj, off) : lineEndX(line, obj);
     const state = typeof textScriptCaretStateAt === 'function'
       ? textScriptCaretStateAt(obj, selStart)
       : { depth: 0, offset: 0, scale: 1 };
@@ -666,7 +693,8 @@ function drawCaret(context, obj, layout, selStart, options = {}) {
   }
   if (caretLine && !textLayoutLineIntersectsViewport(caretLine, options.viewportRect || null)) return false;
   context.fillStyle = canvasTextColor();
-  context.fillRect(cx, cy, 2 / zoom, caretHeight);
+  const caretWidth = 2 / zoom;
+  context.fillRect(cx - caretWidth / 2, cy, caretWidth, caretHeight);
   return true;
 }
 
@@ -735,6 +763,9 @@ function drawEditingTextOverlay(context, options = {}) {
     if (collectDebug) {
       stats.editSelectionMs = performance.now() - selectionStart;
       stats.editSelectionRuns = selection?.runs?.length || 0;
+      stats.editSelectedChars = Math.abs((selEnd ?? 0) - (selStart ?? 0));
+      stats.editSelectionLines = selection?.metrics?.selectedLines || 0;
+      stats.editSelectionVisibleLines = selection?.metrics?.scannedLines || 0;
     }
 
     drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, { motion: textSelectionMotion, selection });
@@ -904,6 +935,7 @@ function applyTransform(frameDbg = null) {
     ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs, skipped: !needsOverlayUpdate });
   }
   scheduleVisibleHydrationAfterIdle();
+  scheduleVisibleTextLayoutPrewarmAfterIdle(_activeRenderSource || 'transform');
   if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
     scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
   }
@@ -950,6 +982,9 @@ var _activeRenderSource = 'direct';
 var _lastDrawBoardMeta = null;
 var _frameInputAt = 0;
 var _frameInputSource = '';
+var _visibleTextLayoutPrewarmCancel = null;
+var _lastVisibleTextLayoutPrewarm = null;
+var TEXT_LAYOUT_PREWARM_INPUT_IDLE_MS = 180;
 
 function setCanvasImageQuality(context) {
   context.imageSmoothingEnabled = true;
@@ -974,6 +1009,7 @@ BoardRenderer = BoardfishRenderer.createBoardRenderer({
   currentViewportWorldRect,
   drawTextLineRange,
   getTextLayout,
+  getTextLayoutForViewport,
   getWrappedLines,
   imageTransformFromObject,
   imageTransformNeedsRendering,
@@ -1000,6 +1036,197 @@ function withRenderSource(source, fn) {
   } finally {
     _activeRenderSource = prev;
   }
+}
+
+function textPrewarmLogicalLineCount(content) {
+  const text = typeof normalizeTextContent === 'function'
+    ? normalizeTextContent(content)
+    : String(content ?? '').replace(/\r\n?/g, '\n');
+  return text ? text.split('\n').length : 1;
+}
+
+function prewarmVisibleTextLayoutCaches(options = {}) {
+  if (typeof getTextLayoutForViewport !== 'function') {
+    return { available: false, skipped: 'getTextLayoutForViewport-unavailable' };
+  }
+  if (_boardOpening) {
+    return { available: true, skipped: 'board-opening' };
+  }
+  const source = options.source || 'visible-text-layout-prewarm';
+  const padScreenPx = Math.max(0, Math.trunc(Number(options.padScreenPx ?? 1024)) || 0);
+  const minChars = Math.max(0, Math.trunc(Number(options.minChars ?? 1024)) || 0);
+  const maxObjects = Math.max(1, Math.trunc(Number(options.maxObjects ?? 100)) || 100);
+  const fullLineCache = options.fullLineCache === true;
+  const fullLineCacheMaxLines = Math.max(1, Math.trunc(Number(options.fullLineCacheMaxLines ?? 8192)) || 8192);
+  const viewportRect = typeof currentViewportWorldRect === 'function'
+    ? currentViewportWorldRect(padScreenPx)
+    : null;
+  const exactViewportRect = typeof currentViewportWorldRect === 'function'
+    ? currentViewportWorldRect(0)
+    : viewportRect;
+  const dbg = ViewportDebug.start('visibleTextLayoutPrewarm', {
+    source,
+    padScreenPx,
+    minChars,
+    objectCount: objects.length,
+    viewportX1: viewportRect?.x1 ?? '',
+    viewportY1: viewportRect?.y1 ?? '',
+    viewportX2: viewportRect?.x2 ?? '',
+    viewportY2: viewportRect?.y2 ?? '',
+  });
+  const startedAt = performance.now();
+  const rows = [];
+  let textObjectCount = 0;
+  let visibleTextObjects = 0;
+  let warmedTextObjects = 0;
+  let skippedSmallTextObjects = 0;
+  let warmedChars = 0;
+  let warmedLogicalLines = 0;
+  let warmedVisibleLines = 0;
+  let warmedTotalLines = 0;
+  let maxObjectMs = 0;
+
+  for (const obj of objects) {
+    if (obj?.type !== 'text') continue;
+    textObjectCount++;
+    if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
+    visibleTextObjects++;
+    const content = normalizeTextContent(obj.data?.content || '');
+    if (content.length < minChars) {
+      skippedSmallTextObjects++;
+      continue;
+    }
+    if (warmedTextObjects >= maxObjects) break;
+    const objectStart = performance.now();
+    const runtimePrewarm = typeof prewarmTextObjectLayoutRuntimeCaches === 'function' && options.runtimeCaches !== false
+      ? prewarmTextObjectLayoutRuntimeCaches(obj)
+      : null;
+    let fullLineCacheLines = 0;
+    let fullLineCacheMs = 0;
+    const fullLineCount = Math.trunc(Number(obj._textWrappedLineIndexCache?.lineCount || obj._textWrappedLineCountCacheValue)) || 0;
+    if (
+      fullLineCache &&
+      fullLineCount > 0 &&
+      fullLineCount <= fullLineCacheMaxLines &&
+      typeof getTextLayoutForLineRange === 'function'
+    ) {
+      const fullLineCacheStart = performance.now();
+      const fullLineLayout = getTextLayoutForLineRange(obj, 0, fullLineCount - 1);
+      fullLineCacheMs = performance.now() - fullLineCacheStart;
+      fullLineCacheLines = fullLineLayout.length;
+    }
+    const layout = getTextLayoutForViewport(obj, viewportRect);
+    const exactLayout = exactViewportRect &&
+      exactViewportRect !== viewportRect &&
+      (!viewportCullingEnabled || objectIntersectsRect(obj, exactViewportRect))
+        ? getTextLayoutForViewport(obj, exactViewportRect)
+        : layout;
+    const objectMs = performance.now() - objectStart;
+    const totalLines = Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length);
+    const logicalLines = textPrewarmLogicalLineCount(content);
+    warmedTextObjects++;
+    warmedChars += content.length;
+    warmedLogicalLines += logicalLines;
+    warmedVisibleLines += layout.length;
+    warmedTotalLines += totalLines;
+    maxObjectMs = Math.max(maxObjectMs, objectMs);
+    rows.push({
+      id: obj.id || '',
+      ms: Math.round(objectMs * 100) / 100,
+      chars: content.length,
+      logicalLines,
+      visibleLines: layout.length,
+      exactVisibleLines: exactLayout.length,
+      totalLines,
+      fullLineCacheLines,
+      fullLineCacheMs: fullLineCacheLines ? Math.round(fullLineCacheMs * 100) / 100 : '',
+      scriptRanges: Array.isArray(obj.data?.scriptRanges) ? obj.data.scriptRanges.length : 0,
+      paragraphPrefixCacheEntries: obj._textParagraphPrefixCache?.size ?? '',
+      runtimePrefixCacheEntriesAdded: runtimePrewarm?.prefixCacheEntriesAdded ?? '',
+      runtimePrewarmMs: runtimePrewarm?.totalMs ?? '',
+      wrappedLineIndexEntries: obj._textWrappedLineIndexCache?.entries?.length ?? '',
+      scriptMetricsCachePresent: !!obj._textScriptLayoutMetrics,
+    });
+  }
+
+  rows.sort((a, b) => (b.ms || 0) - (a.ms || 0) || (b.chars || 0) - (a.chars || 0));
+  const totalMs = performance.now() - startedAt;
+  const out = {
+    available: true,
+    source,
+    padScreenPx,
+    minChars,
+    maxObjects,
+    fullLineCache,
+    fullLineCacheMaxLines,
+    textObjectCount,
+    visibleTextObjects,
+    warmedTextObjects,
+    skippedSmallTextObjects,
+    warmedChars,
+    warmedLogicalLines,
+    warmedVisibleLines,
+    warmedTotalLines,
+    totalMs: Math.round(totalMs * 100) / 100,
+    avgObjectMs: warmedTextObjects ? Math.round((totalMs / warmedTextObjects) * 100) / 100 : 0,
+    maxObjectMs: Math.round(maxObjectMs * 100) / 100,
+    topObjects: rows.slice(0, Math.max(0, Math.min(20, Number(options.limit ?? 8)))),
+  };
+  _lastVisibleTextLayoutPrewarm = out;
+  ViewportDebug.end(dbg, out);
+  return out;
+}
+
+function getLastVisibleTextLayoutPrewarm() {
+  if (!_lastVisibleTextLayoutPrewarm) return null;
+  return {
+    ..._lastVisibleTextLayoutPrewarm,
+    topObjects: (_lastVisibleTextLayoutPrewarm.topObjects || []).map((row) => ({ ...row })),
+  };
+}
+
+function clearVisibleTextLayoutPrewarmAfterIdle() {
+  if (!_visibleTextLayoutPrewarmCancel) return;
+  _visibleTextLayoutPrewarmCancel();
+  _visibleTextLayoutPrewarmCancel = null;
+}
+
+function scheduleVisibleTextLayoutPrewarmAfterIdle(source = 'render', options = {}) {
+  clearVisibleTextLayoutPrewarmAfterIdle();
+  const run = () => {
+    _visibleTextLayoutPrewarmCancel = null;
+    const idleMs = typeof lastViewportInputAt !== 'undefined'
+      ? performance.now() - lastViewportInputAt
+      : Infinity;
+    const idleThresholdMs = Math.max(0, Math.trunc(Number(options.inputIdleMs ?? TEXT_LAYOUT_PREWARM_INPUT_IDLE_MS)) || 0);
+    if (idleMs < idleThresholdMs) {
+      scheduleVisibleTextLayoutPrewarmAfterIdle(source, {
+        ...options,
+        delayMs: idleThresholdMs - idleMs,
+      });
+      return;
+    }
+    prewarmVisibleTextLayoutCaches({
+      ...options,
+      source,
+    });
+  };
+  const requestedDelay = Number(options.delayMs);
+  if (Number.isFinite(requestedDelay) && requestedDelay > 0) {
+    const handle = setTimeout(run, Math.max(0, requestedDelay));
+    _visibleTextLayoutPrewarmCancel = () => clearTimeout(handle);
+    return handle;
+  }
+  if (typeof requestIdleCallback === 'function') {
+    const handle = requestIdleCallback(run, {
+      timeout: Math.max(50, Math.trunc(Number(options.timeoutMs ?? 1200)) || 1200),
+    });
+    _visibleTextLayoutPrewarmCancel = () => cancelIdleCallback(handle);
+    return handle;
+  }
+  const handle = setTimeout(run, Math.max(0, Math.trunc(Number(options.delayMs ?? TEXT_LAYOUT_PREWARM_INPUT_IDLE_MS)) || 0));
+  _visibleTextLayoutPrewarmCancel = () => clearTimeout(handle);
+  return handle;
 }
 
 function viewportEventTime(event = null) {
