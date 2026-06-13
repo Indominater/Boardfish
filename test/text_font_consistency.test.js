@@ -66,7 +66,8 @@ test('DOM text uses the shared app font rendering defaults', () => {
   );
   assert.match(css, /\.ctx-shortcut\s*\{[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*line-height: inherit;[\s\S]*\}/);
   assert.doesNotMatch(css, /\b500\b/);
-  assert.match(html, /Material\+Symbols\+Outlined:opsz,wght,FILL,GRAD@24,300,0,0/);
+  assert.match(html, /id="ctx-btn-dark-mode"[\s\S]*<svg viewBox="0 0 24 24"/);
+  assert.doesNotMatch(html, /Material\+Symbols|fonts\.googleapis\.com|fonts\.gstatic\.com/);
   assert.doesNotMatch(html, /wght[^"]*100\.\.700/);
 
   assert.match(css, /button,\s*input,\s*textarea,\s*select\s*\{[\s\S]*font: inherit;[\s\S]*font-variant-caps: inherit;[\s\S]*letter-spacing: inherit;[\s\S]*direction: inherit;[\s\S]*\}/);

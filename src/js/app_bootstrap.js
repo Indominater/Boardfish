@@ -8,7 +8,7 @@ var finishFailedOpen;
   document.fonts?.ready.then(clearTextMeasurementCaches).catch(() => {});
   resizeCanvas();
   snapshot();
-  updateTitle();
+  markSaved();
 
   confirmDirtyBeforeOpen = async function confirmDirtyBeforeOpen(dbg) {
     if (!isDirty()) return true;
@@ -68,7 +68,7 @@ var finishFailedOpen;
     if (/Boardfish file is missing .+|references missing image/i.test(raw)) return 'Boardfish file is missing image data';
     if (
       name === 'SyntaxError' ||
-      /invalid Boardfish container|truncated Boardfish container|expected image data URL|base64 (?:de|en)coding is unavailable|board data must be an object|imageStore must be an object|imageStore contains an empty key|imageStore\..+ must be a string or object|object \d+ is not an object|object \d+ has unsupported type|object \d+ is missing id|image object .+ is missing imgKey/i.test(raw)
+      /invalid Boardfish container|truncated Boardfish container|CRC mismatch|expected image data URL|base64 (?:de|en)coding is unavailable|board data must be an object|imageStore must be an object|imageStore contains an empty key|imageStore\..+ must be a string or object|object \d+ is not an object|object \d+ has unsupported type|object \d+ is missing id|image object .+ is missing imgKey/i.test(raw)
     ) {
       return 'Boardfish file is invalid';
     }

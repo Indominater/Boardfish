@@ -1,7 +1,14 @@
 'use strict';
 
 var IMAGE_SCALE_LEVELS = [0.5];
-var IMAGE_VARIANT_MEMORY_LIMIT = 1024 * 1024 * 1024;
+function imageVariantMemoryLimit() {
+  const maxBytes = 1024 * 1024 * 1024;
+  const minBytes = 64 * 1024 * 1024;
+  const deviceMemoryGb = typeof navigator !== 'undefined' ? Number(navigator.deviceMemory) : NaN;
+  if (!Number.isFinite(deviceMemoryGb) || deviceMemoryGb <= 0) return maxBytes;
+  return Math.max(minBytes, Math.min(maxBytes, Math.floor(deviceMemoryGb * 1024 * 1024 * 1024 / 4)));
+}
+var IMAGE_VARIANT_MEMORY_LIMIT = imageVariantMemoryLimit();
 var VIEWPORT_PERF_MODES = {
   '1': { label: 'culling + scaled images', culling: true, scaling: true },
   '2': { label: 'scaled images only', culling: false, scaling: true },

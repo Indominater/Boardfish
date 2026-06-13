@@ -927,7 +927,9 @@ function restoreSnapshot(s, {
     proxyValuePatchPrefixChars = proxyValueResult.prefixChars;
     proxyValuePatchSuffixChars = proxyValueResult.suffixChars;
     obj._editStartContent = obj.data.content;
-    if (typeof textEditMinLinesForSession === 'function') {
+    if (typeof setTextEditMinLinesForSession === 'function') {
+      setTextEditMinLinesForSession(obj, { preserveSize: true });
+    } else if (typeof textEditMinLinesForSession === 'function') {
       obj._editMinLines = textEditMinLinesForSession(obj, { preserveSize: true });
     }
     _editHistoryLastContent = obj.data.content;

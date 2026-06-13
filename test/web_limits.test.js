@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 require('../src/js/web_board_container.js');
 const WebLimits = require('../src/js/board_limits.js');
@@ -147,6 +149,22 @@ test('web image pixel cap is not enforced', async () => {
     if (previousCreateImageBitmap) globalThis.createImageBitmap = previousCreateImageBitmap;
     else delete globalThis.createImageBitmap;
   }
+});
+
+test('opened image entry metadata rejects unsupported image types', async () => {
+  await assert.rejects(
+    () => WebLimits.validateOpenedImageEntries([
+      { path: 'images/img-1.txt', mime: 'text/plain', byteLength: 4 },
+    ]),
+    /unsupported image metadata/,
+  );
+});
+
+test('board JSON estimate uses UTF-8 byte length rather than UTF-16 string length', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src/js/board_limits.js'), 'utf8');
+
+  assert.match(source, /return textByteLength\(json\) \+ 1024;/);
+  assert.doesNotMatch(source, /JSON\.stringify\(\{[\s\S]*\}\)\.length \+ 1024/);
 });
 
 test('web limit notifications remain visible long enough to read', () => {

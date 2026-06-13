@@ -205,13 +205,10 @@ function startMousePan(e) {
     }
   }
   function onUp(ev) {
-    if (ev.button !== 0) return;
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    ViewportDebug.end(panDbg, { endX: ev.clientX, endY: ev.clientY, panX, panY });
+    if (ev && !ev.__boardfishDragCancel && ev.button !== 0) return;
+    ViewportDebug.end(panDbg, { endX: ev?.clientX ?? '', endY: ev?.clientY ?? '', panX, panY, cancelled: !!ev?.__boardfishDragCancel });
   }
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
+  beginDocumentDrag({ move: onMove, up: onUp });
 }
 
 function startGroupDrag(e) {
@@ -465,7 +462,7 @@ function startTextSelectionDrag(e, obj, wp) {
     }
   }
   function onSelUp(ev) {
-    if (!ev) return;
+    if (!ev || ev.__boardfishDragCancel) return;
     const wp2 = toWorld(ev.clientX, ev.clientY);
     TextSelDebug._logPointer?.('selection-drag-end', ev, { objectId: obj?.id || '', wx: wp2.x, wy: wp2.y });
     if (_editEl) TextSelDebug._logSelection('mouse-up', _editEl, obj);

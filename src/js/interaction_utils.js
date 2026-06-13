@@ -48,14 +48,41 @@
       active = false;
       document.removeEventListener(moveEvent, onMove);
       document.removeEventListener(upEvent, onUp);
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('blur', onCancel);
+        window.removeEventListener('pagehide', onCancel);
+      }
+      if (document.removeEventListener) {
+        document.removeEventListener('visibilitychange', onVisibilityChange, true);
+        document.removeEventListener('pointercancel', onCancel, true);
+      }
       if (up) up(event);
     };
     const onMove = (event) => {
       if (move) move(event);
     };
     const onUp = (event) => cleanup(event);
+    const onCancel = (event) => cleanup({
+      __boardfishDragCancel: true,
+      type: event?.type || 'cancel',
+      clientX: event?.clientX,
+      clientY: event?.clientY,
+    });
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' || document.hidden) {
+        onCancel({ type: 'visibilitychange' });
+      }
+    };
     document.addEventListener(moveEvent, onMove);
     document.addEventListener(upEvent, onUp);
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('blur', onCancel);
+      window.addEventListener('pagehide', onCancel);
+    }
+    if (document.addEventListener) {
+      document.addEventListener('visibilitychange', onVisibilityChange, true);
+      document.addEventListener('pointercancel', onCancel, true);
+    }
     return cleanup;
   }
 

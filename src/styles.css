@@ -329,7 +329,6 @@ body {
   width: auto;
   transform: none;
 }
-.ctx-action-icon .material-symbols-outlined,
 .ctx-action-icon svg {
   position: relative;
   z-index: 1;
@@ -339,18 +338,6 @@ body {
 }
 .ctx-action-icon svg {
   fill: currentColor;
-}
-.ctx-action-icon .material-symbols-outlined {
-  font-size: 20px;
-  line-height: 20px;
-  font-variation-settings:
-    'FILL' 0,
-    'wght' var(--bold_text),
-    'GRAD' 0,
-    'opsz' 24;
-  pointer-events: none;
-  contain: paint;
-  transform: translateZ(0);
 }
 
 .ctx-action-sep {
@@ -555,16 +542,6 @@ body {
   overflow: hidden;
   pointer-events: none;
 }
-
-.material-symbols-outlined {
-  font-variation-settings:
-    'FILL' 0,
-    'wght' var(--bold_text),
-    'GRAD' 0,
-    'opsz' 24;
-}
-
-
 
 #opening-shield {
   display: none;

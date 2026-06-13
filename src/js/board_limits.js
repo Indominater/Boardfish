@@ -157,10 +157,11 @@
       const objects = Array.isArray(root.objects) ? root.objects : [];
       const cleanObjects = objects.map(objectForJsonEstimate);
       for (let i = 0; i < additionalObjectCount; i++) cleanObjects.push({});
-      return JSON.stringify({
+      const json = JSON.stringify({
         viewport: { panX: root.panX || 0, panY: root.panY || 0, zoom: root.zoom || 1 },
         objects: cleanObjects,
-      }).length + 1024;
+      });
+      return textByteLength(json) + 1024;
     } catch (_) {
       return 1024;
     }
@@ -217,6 +218,19 @@
   }
 
   async function validateOpenedImageEntries(imageEntries = []) {
+    if (!Array.isArray(imageEntries)) throw new Error('Boardfish image entries metadata is invalid');
+    for (const entry of imageEntries) {
+      const path = typeof entry?.path === 'string' ? entry.path : '';
+      const mime = typeof entry?.mime === 'string' ? entry.mime.toLowerCase() : '';
+      const byteLength = Number(entry?.byteLength ?? entry?.bytes?.length ?? entry?.bytes ?? 0);
+      if (!path || path.includes('\0')) throw new Error('Boardfish image entry path is invalid');
+      if (!/^image\/(?:png|jpe?g|webp|gif)$/.test(mime)) {
+        throw new Error(`${path} has unsupported image metadata`);
+      }
+      if (!Number.isFinite(byteLength) || byteLength < 0) {
+        throw new Error(`${path} has invalid image metadata`);
+      }
+    }
     return true;
   }
 

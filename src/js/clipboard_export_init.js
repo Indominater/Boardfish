@@ -588,15 +588,14 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length, textObjectCount: 1, textCharCount: eventText.length, largestTextChars: eventText.length, objectCountAfter: objects.length });
       return;
     }
-    showInputShield();
+    const releaseInputShield = acquireInputShield();
     try {
       const imageBlob = await BoardfishClipboardIO.readClipboardImageBlobFromBrowser(dbg);
       if (imageBlob) {
-        hideInputShield();
+        releaseInputShield();
         await pasteWebImageBlob(imageBlob, wx, wy, dbg, 'web-paste-browser');
         return;
       }
-      hideInputShield();
       const textReadStartedAt = clipboardNow();
       ClipDebug.step(dbg, 'browser-text-read:start');
       const text = await navigator.clipboard.readText();
@@ -631,8 +630,9 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         objectCountAfter: objects.length,
       });
     } catch (err) {
-      hideInputShield();
       ClipDebug.end(dbg, { path: 'web-empty', error: String(err), objectCountAfter: objects.length });
+    } finally {
+      releaseInputShield();
     }
   } finally {
     _pasteInProgress = false;

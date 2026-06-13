@@ -6,7 +6,6 @@ var currentFilePath = null;
 var currentFileRef = null;
 
 function isDirty() {
-  if (objects.length === 0) return false;
   return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0;
 }
 
@@ -217,7 +216,10 @@ function boardLimitImageEntriesForData(data) {
 
 function boardJsonBytesForLimit(data) {
   try {
-    return JSON.stringify(data).length;
+    const json = JSON.stringify(data);
+    return typeof BoardfishWebLimits !== 'undefined' && typeof BoardfishWebLimits.textByteLength === 'function'
+      ? BoardfishWebLimits.textByteLength(json)
+      : json.length;
   } catch (_) {
     return 0;
   }
@@ -509,11 +511,25 @@ async function settleVisibleImageBitmapsForOpen(keys, dbg = null) {
   }
 
   const startedAt = performance.now();
+  const timeoutMs = 15000;
+  const deadline = startedAt + timeoutMs;
+  let timedOut = false;
   while (state.settled < count) {
     await new Promise((resolve) => setTimeout(resolve, 12));
     state = countVisibleImageBitmapSettle(visibleKeys);
+    if (performance.now() >= deadline) {
+      timedOut = true;
+      break;
+    }
   }
   const ms = performance.now() - startedAt;
+  const pendingKeys = timedOut
+    ? visibleKeys.filter((key) => {
+        const source = BoardfishImageStore.getSource(key);
+        if (!source) return false;
+        return !imageBitmapCache[key] && !imageBitmapFailed.has(key);
+      })
+    : [];
   OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', {
     count,
     before,
@@ -525,8 +541,11 @@ async function settleVisibleImageBitmapsForOpen(keys, dbg = null) {
     missing: Math.max(0, count - state.ready),
     target: count,
     ms,
+    timedOut,
+    timeoutMs,
+    pendingKeys,
   });
-  return { count, before, after: state.ready, failed: state.failed, missingStore: state.missingStore, pending: state.pending, settled: state.settled, missing: Math.max(0, count - state.ready), target: count, ms };
+  return { count, before, after: state.ready, failed: state.failed, missingStore: state.missingStore, pending: state.pending, settled: state.settled, missing: Math.max(0, count - state.ready), target: count, ms, timedOut, timeoutMs, pendingKeys };
 }
 
 async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch') {

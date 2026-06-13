@@ -38,7 +38,7 @@
     if (src && typeof src === 'object' && (src.path || src.mime || src.ext)) {
       const ext = normalizeImageExt(src.ext, src.mime);
       const mime = src.mime || mimeForExt(ext);
-      const path = src.path || `images/${imgKey}.${ext}`;
+      const path = `images/${imgKey}.${ext}`;
       return { path, mime, ext };
     }
     const comma = typeof src === 'string' ? src.indexOf(',') : -1;

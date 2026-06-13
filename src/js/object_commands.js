@@ -87,7 +87,10 @@ function addText(wx, wy, content = '', options = {}) {
   if (content) {
     const lines = content.split('\n');
     const charW = 9.2, pad = 8;
-    const maxLineLen = Math.max(...lines.map(l => l.length), 1);
+    let maxLineLen = 1;
+    for (const line of lines) {
+      if (line.length > maxLineLen) maxLineLen = line.length;
+    }
     w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
   }
   logStep('size-estimate-done', { w, h, ...objectCommandTextStats(content, data.scriptRanges) });

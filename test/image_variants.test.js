@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadImageVariants() {
+function loadImageVariants(options = {}) {
   const context = {
     IS_MAC: false,
     window: { devicePixelRatio: 1 },
@@ -19,6 +19,7 @@ function loadImageVariants() {
     setTimeout() { return 0; },
     performance: { now: () => 0 },
   };
+  if (options.navigator) context.navigator = options.navigator;
 
   vm.createContext(context);
   vm.runInContext(
@@ -127,6 +128,12 @@ test('scaled image variant cache stays bounded with web headroom cap', () => {
   const context = loadImageVariants();
 
   assert.equal(context.IMAGE_VARIANT_MEMORY_LIMIT, 1024 * 1024 * 1024);
+});
+
+test('scaled image variant cache scales down on low-memory devices', () => {
+  const context = loadImageVariants({ navigator: { deviceMemory: 1 } });
+
+  assert.equal(context.IMAGE_VARIANT_MEMORY_LIMIT, 256 * 1024 * 1024);
 });
 
 test('scaled image variants are platform-independent when createImageBitmap is available', () => {

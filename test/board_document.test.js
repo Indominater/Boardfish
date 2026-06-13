@@ -43,6 +43,26 @@ test('creates v3 board save data with image manifest refs', () => {
   });
 });
 
+test('saved image metadata regenerates canonical paths for web refs', () => {
+  const data = BoardDocument.createBoardDataForSave({
+    viewport: { panX: 0, panY: 0, zoom: 1 },
+    imageStore: {
+      'img-1': { web: true, path: '../evil.png', mime: 'image/png', ext: 'png', bytes: 4 },
+    },
+    objects: [
+      { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 10, z: 1, data: { imgKey: 'img-1' } },
+    ],
+  }, {
+    schema: BoardSchema,
+  });
+
+  assert.deepEqual(data.imageStore['img-1'], {
+    path: 'images/img-1.png',
+    mime: 'image/png',
+    ext: 'png',
+  });
+});
+
 test('prunes unreferenced image store entries from saved board data', () => {
   const imageStore = {
     'img-1': 'data:image/png;base64,abc',

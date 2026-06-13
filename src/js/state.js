@@ -17,7 +17,13 @@ function rebuildObjectsMap() {
   for (const obj of objects) objectsMap.set(obj.id, obj);
 }
 
-function newId() { return 'obj-' + (idCounter++); }
+function newId() {
+  let id = '';
+  do {
+    id = 'obj-' + (idCounter++);
+  } while (objectsMap?.has?.(id));
+  return id;
+}
 
 function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
   if (!Array.isArray(sourceScriptRanges) || !sourceScriptRanges.length) return [];

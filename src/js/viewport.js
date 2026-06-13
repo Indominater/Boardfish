@@ -213,13 +213,6 @@ async function _rebuildOffscreenAsync() {
   const rebuildVersion = _offscreenVersion;
   const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length, editingId: snapshotEditingId, version: rebuildVersion });
 
-  // Images are decoded into ImageBitmap by cacheImage(); no retained
-  // HTMLImageElement source remains for offscreen rebuilds.
-  const bitmapPromises = [];
-  const bitmapStart = performance.now();
-  await Promise.all(bitmapPromises);
-  ViewportDebug.step(dbg, 'ensure-bitmaps', { count: bitmapPromises.length, ms: performance.now() - bitmapStart });
-
   // Bail if edit mode or viewport content changed while we were awaiting.
   if (!editingId || editingId !== snapshotEditingId || rebuildVersion !== _offscreenVersion) {
     _offscreenRebuilding = false;

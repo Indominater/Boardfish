@@ -157,7 +157,9 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /source: 'pending-cache'/);
   assert.match(openIo, /async function settleVisibleImageBitmapsForOpen/);
   assert.match(openIo, /while \(state\.settled < count\)/);
-  assert.doesNotMatch(openIo, /const maxMs = Number\.isFinite\(options\.maxMs\)/);
+  assert.match(openIo, /const timeoutMs = 15000;/);
+  assert.match(openIo, /timedOut/);
+  assert.match(openIo, /pendingKeys/);
   assert.match(openIo, /hydrate-visible:bitmap-settle/);
   assert.match(openDebug, /visibleBitmapSettleMs/);
   assert.match(openDebug, /visibleBitmapsFailed/);

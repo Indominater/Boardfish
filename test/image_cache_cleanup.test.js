@@ -85,7 +85,9 @@ function loadImageState(createImageBitmap) {
   vm.runInContext(
     `${fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8')}\n` +
       'globalThis.removeImageRuntimeCachesForKey = removeImageRuntimeCachesForKey;\n' +
-      'globalThis.pruneImageCachesToKeys = pruneImageCachesToKeys;\n',
+      'globalThis.pruneImageCachesToKeys = pruneImageCachesToKeys;\n' +
+      'globalThis.newImgKey = newImgKey;\n' +
+      'globalThis.clearImageStore = clearImageStore;\n',
     context,
     { filename: 'image_state.js' },
   );
@@ -156,4 +158,32 @@ test('clearImageStore clears any pending visible hydration timer hook', () => {
   context.clearImageStore(false);
 
   assert.equal(clears, 1);
+});
+
+test('newImgKey skips keys already present in the live image store', () => {
+  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+
+  context.imageStore['img-1'] = 'data:image/png;base64,AQ==';
+
+  assert.equal(context.newImgKey(), 'img-2');
+});
+
+test('clearImageStore continues after an ImageBitmap close throws', () => {
+  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+  let keptClosed = false;
+  context.imageBitmapCache['img-1'] = {
+    close() {
+      throw new Error('already closed');
+    },
+  };
+  context.imageBitmapCache['img-2'] = {
+    close() {
+      keptClosed = true;
+    },
+  };
+
+  assert.doesNotThrow(() => context.clearImageStore());
+
+  assert.equal(keptClosed, true);
+  assert.deepEqual(Object.keys(context.imageBitmapCache), []);
 });

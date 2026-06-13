@@ -13,7 +13,13 @@ var MAX_IMAGE_DECODE_ACTIVE = 2;
 const MAX_OPEN_IMAGE_DECODE_ACTIVE = 8;
 var imageReadyPromises = new Map();
 
-function newImgKey() { return 'img-' + (imgKeyCounter++); }
+function newImgKey() {
+  let key = '';
+  do {
+    key = 'img-' + (imgKeyCounter++);
+  } while (Object.hasOwn(imageStore, key));
+  return key;
+}
 
 const isWebImageRef = (src) => {
   return typeof BoardfishWebBoardContainer !== 'undefined' &&
@@ -319,7 +325,7 @@ function processImageHydrationQueue() {
   _imageHydrationScheduled = false;
   const batchStart = performance.now();
   let count = 0;
-  while (_imageHydrationQueue.length && count < 1 && performance.now() - batchStart < 6) {
+  while (_imageHydrationQueue.length && (count === 0 || performance.now() - batchStart < 6)) {
     const { key, dbg } = _imageHydrationQueue.shift();
     _imageHydrationQueued.delete(key);
     const source = imageStore[key];
@@ -641,7 +647,10 @@ function clearImageStore() {
   }
   for (const k of Object.keys(imageCache)) delete imageCache[k];
   for (const k of Object.keys(imageMetadataCache)) delete imageMetadataCache[k];
-  for (const k of Object.keys(imageBitmapCache)) { imageBitmapCache[k].close(); delete imageBitmapCache[k]; }
+  for (const k of Object.keys(imageBitmapCache)) {
+    try { imageBitmapCache[k].close(); } catch (_) {}
+    delete imageBitmapCache[k];
+  }
   clearScaledImageVariants();
   imageBitmapFailed.clear();
   imageReadyPromises.clear();

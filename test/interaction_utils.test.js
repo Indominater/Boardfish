@@ -60,6 +60,46 @@ test('beginDocumentDrag attaches listeners and cleanup calls the up handler once
   }
 });
 
+test('beginDocumentDrag cancels and cleans up on window blur', () => {
+  const previousDocument = globalThis.document;
+  const previousWindow = globalThis.window;
+  const documentListeners = new Map();
+  const windowListeners = new Map();
+  globalThis.document = {
+    hidden: false,
+    visibilityState: 'visible',
+    addEventListener(type, handler) { documentListeners.set(type, handler); },
+    removeEventListener(type, handler) {
+      if (documentListeners.get(type) === handler) documentListeners.delete(type);
+    },
+  };
+  globalThis.window = {
+    addEventListener(type, handler) { windowListeners.set(type, handler); },
+    removeEventListener(type, handler) {
+      if (windowListeners.get(type) === handler) windowListeners.delete(type);
+    },
+  };
+  delete require.cache[require.resolve('../src/js/interaction_utils.js')];
+  const Interaction = require('../src/js/interaction_utils.js');
+  const ups = [];
+
+  try {
+    Interaction.beginDocumentDrag({
+      move() {},
+      up: (event) => ups.push(event),
+    });
+    windowListeners.get('blur')({ type: 'blur' });
+    assert.equal(ups.length, 1);
+    assert.equal(ups[0].__boardfishDragCancel, true);
+    assert.equal(ups[0].type, 'blur');
+    assert.equal(documentListeners.size, 0);
+    assert.equal(windowListeners.size, 0);
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.window = previousWindow;
+  }
+});
+
 test('activateInteractiveSurface closes menus and clears object selection by contract', () => {
   const previousGlobals = {
     closeOpenMenusExcept: globalThis.closeOpenMenusExcept,

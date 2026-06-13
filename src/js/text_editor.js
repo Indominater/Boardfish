@@ -72,6 +72,15 @@ const textEditorTextStats = (value, scriptRanges = []) => {
   };
 };
 
+const textEditorNewlineCount = (value) => {
+  const text = String(value ?? '');
+  let count = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\n') count++;
+  }
+  return count;
+};
+
 const textEditorSelectionDebugStats = (selection = {}, value = '') => {
   const text = String(value ?? '');
   const start = Math.max(0, Math.min(selection.start ?? 0, text.length));
@@ -118,10 +127,129 @@ const textEditorObjectDebugStats = (obj) => ({
   objectWidth: obj?.w ?? '',
   objectHeight: obj?.h ?? '',
   editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
+  editMinLines: obj?._editMinLines ?? '',
+  preservedMinLines: obj?._textEditPreservedMinLines ?? '',
   pendingSizeSync: !!obj?._textEditPendingSizeSync,
   layoutCachePresent: !!obj?._layoutCache,
   layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
 });
+
+const textEditorCap = (prefix, name) => (
+  prefix ? `${prefix}${name.charAt(0).toUpperCase()}${name.slice(1)}` : name
+);
+
+const textEditorLayoutScriptKey = (obj) => {
+  try {
+    if (typeof getTextScriptRangesForLayout === 'function') {
+      return JSON.stringify(getTextScriptRangesForLayout(obj));
+    }
+  } catch (_) {}
+  return JSON.stringify(Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges : []);
+};
+
+const textEditorLayoutAlignKey = (obj, content) => {
+  try {
+    if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj, content);
+  } catch (_) {}
+  return '';
+};
+
+const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
+  const key = (name) => textEditorCap(prefix, name);
+  if (!obj || obj.type !== 'text') {
+    return {
+      [key('objectHeight')]: '',
+      [key('expectedLogicalHeight')]: '',
+      [key('expectedCachedHeight')]: '',
+      [key('heightDeltaFromLogical')]: '',
+      [key('heightDeltaFromCached')]: '',
+    };
+  }
+  const text = normalizeTextContent(content ?? obj.data?.content ?? '');
+  const scriptKey = textEditorLayoutScriptKey(obj);
+  const alignKey = textEditorLayoutAlignKey(obj, text);
+  const lineH = Number(typeof LINE_H !== 'undefined' ? LINE_H : 24) || 24;
+  const pad = Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 4) || 4;
+  const activeEditingId = typeof editingId !== 'undefined' ? editingId : '';
+  const minLines = obj.id === activeEditingId ? (Math.max(1, Math.trunc(Number(obj._editMinLines)) || 1)) : 1;
+  const logicalLines = Math.max(1, textEditorNewlineCount(text) + 1);
+  const layoutCacheValid = Array.isArray(obj._layoutCache) &&
+    obj._layoutCacheContent === text &&
+    obj._layoutCacheW === obj.w &&
+    obj._layoutCacheScriptKey === scriptKey &&
+    obj._layoutCacheAlignKey === alignKey;
+  const wrappedCountValid = obj._textWrappedLineCountCacheContent === text &&
+    obj._textWrappedLineCountCacheW === obj.w &&
+    obj._textWrappedLineCountCacheScriptKey === scriptKey &&
+    Number.isFinite(obj._textWrappedLineCountCacheValue);
+  const wrappedIndex = obj._textWrappedLineIndexCache;
+  const wrappedIndexValid = wrappedIndex &&
+    Array.isArray(wrappedIndex.entries) &&
+    obj._textWrappedLineIndexCacheContent === text &&
+    obj._textWrappedLineIndexCacheW === obj.w &&
+    obj._textWrappedLineIndexCacheScriptKey === scriptKey &&
+    Number.isFinite(wrappedIndex.lineCount);
+  const widthCache = obj._textWrappedLineIndexWidthCache;
+  const widthCached = widthCache &&
+    obj._textWrappedLineIndexWidthCacheContent === text &&
+    obj._textWrappedLineIndexWidthCacheScriptKey === scriptKey &&
+    typeof widthCache.get === 'function'
+    ? widthCache.get(String(obj.w))
+    : null;
+  const widthCacheValid = widthCached &&
+    Array.isArray(widthCached.entries) &&
+    Number.isFinite(widthCached.lineCount);
+  let cachedLines = '';
+  let cachedSource = '';
+  if (layoutCacheValid) {
+    cachedLines = Math.max(1, obj._layoutCache.length);
+    cachedSource = 'layout-cache';
+  } else if (wrappedIndexValid) {
+    cachedLines = Math.max(1, Math.trunc(Number(wrappedIndex.lineCount)) || 1);
+    cachedSource = 'wrapped-index-cache';
+  } else if (wrappedCountValid) {
+    cachedLines = Math.max(1, Math.trunc(Number(obj._textWrappedLineCountCacheValue)) || 1);
+    cachedSource = 'wrapped-count-cache';
+  } else if (widthCacheValid) {
+    cachedLines = Math.max(1, Math.trunc(Number(widthCached.lineCount)) || 1);
+    cachedSource = 'wrapped-width-cache';
+  }
+  const heightLines = exactTextEditLineCountForHeight(obj.h);
+  const expectedLogicalHeight = Math.max(minLines, logicalLines) * lineH + pad * 2;
+  const expectedCachedHeight = cachedLines === ''
+    ? ''
+    : Math.max(minLines, cachedLines) * lineH + pad * 2;
+  return {
+    [key('objectWidth')]: obj.w,
+    [key('objectHeight')]: obj.h,
+    [key('heightLines')]: heightLines || '',
+    [key('editMinLines')]: minLines,
+    [key('logicalLines')]: logicalLines,
+    [key('cachedLines')]: cachedLines,
+    [key('cachedLineSource')]: cachedSource,
+    [key('expectedLogicalHeight')]: expectedLogicalHeight,
+    [key('expectedCachedHeight')]: expectedCachedHeight,
+    [key('heightDeltaFromLogical')]: Number(obj.h) - expectedLogicalHeight,
+    [key('heightDeltaFromCached')]: expectedCachedHeight === '' ? '' : Number(obj.h) - expectedCachedHeight,
+    [key('layoutCacheValid')]: !!layoutCacheValid,
+    [key('wrappedCountCacheValid')]: !!wrappedCountValid,
+    [key('wrappedIndexCacheValid')]: !!wrappedIndexValid,
+    [key('wrappedWidthCacheValid')]: !!widthCacheValid,
+    [key('lineHeight')]: lineH,
+    [key('textPad')]: pad,
+  };
+};
+
+const textEditorProxySizeDebugStats = (proxy, prefix = 'proxy') => {
+  const key = (name) => textEditorCap(prefix, name);
+  if (!proxy) return {};
+  return {
+    [key('ScrollHeight')]: proxy.scrollHeight ?? '',
+    [key('ClientHeight')]: proxy.clientHeight ?? '',
+    [key('OffsetHeight')]: proxy.offsetHeight ?? '',
+    [key('StyleHeight')]: proxy.style?.height || '',
+  };
+};
 
 const textEditorPerfDebugApi = () => (
   typeof ManualPerfDebug !== 'undefined' ? ManualPerfDebug : null
@@ -484,15 +612,46 @@ const textEditMinLinesForSession = (obj, { preserveSize = false } = {}) => {
     : 1;
 };
 
-const shouldDeferTextEditAutoHeightForInput = (obj) => {
+const setTextEditMinLinesForSession = (obj, options = {}) => {
+  if (!obj || obj.type !== 'text') return 1;
+  const minLines = textEditMinLinesForSession(obj, options);
+  obj._editMinLines = minLines;
+  const normalMinLines = textEditMinLinesForSession(obj, { preserveSize: false });
+  if (options.preserveSize && minLines > normalMinLines) {
+    obj._textEditPreservedMinLines = minLines;
+  } else {
+    delete obj._textEditPreservedMinLines;
+  }
+  return minLines;
+};
+
+const resetTextEditPreservedMinLinesForInput = (obj) => {
+  if (!obj || obj.type !== 'text' || !obj._textEditPreservedMinLines) {
+    return { reset: false };
+  }
+  const previousMinLines = obj._editMinLines ?? '';
+  const preservedMinLines = obj._textEditPreservedMinLines;
+  const nextMinLines = textEditMinLinesForSession(obj, { preserveSize: false });
+  obj._editMinLines = nextMinLines;
+  delete obj._textEditPreservedMinLines;
+  return {
+    reset: true,
+    previousMinLines,
+    preservedMinLines,
+    nextMinLines,
+  };
+};
+
+const shouldDeferTextEditAutoHeightForInput = (obj, options = {}) => {
+  if (options.forceSync) return false;
   if (!obj || obj.type !== 'text') return false;
   if (String(obj._editStartContent ?? '') === '') return false;
   const contentLength = String(obj.data?.content || '').length;
   return contentLength >= TEXT_EDIT_DEFER_AUTO_HEIGHT_CHARS;
 };
 
-const syncTextEditAutoHeightForInput = (obj, inputType, minLines = 1) => {
-  if (shouldDeferTextEditAutoHeightForInput(obj, inputType)) {
+const syncTextEditAutoHeightForInput = (obj, inputType, minLines = 1, options = {}) => {
+  if (shouldDeferTextEditAutoHeightForInput(obj, options)) {
     obj._textEditPendingSizeSync = true;
     return { heightChanged: false, deferred: true };
   }
@@ -1669,19 +1828,6 @@ const updateTextLineAlignForInput = (obj, inputState, nextValue, insertedText) =
   else delete obj.data.lineAlign;
 };
 
-const applyTextAlignmentShortcut = (obj, proxy, direction) => {
-  if (!obj || obj.type !== 'text' || typeof applyTextLineAlignmentRange !== 'function') return false;
-  const selection = proxy ? textEditSelectionState(proxy) : { start: 0, end: normalizeTextContent(obj.data?.content).length };
-  const range = textLogicalLineRangeForSelection(obj.data?.content || '', selection);
-  const changed = applyTextLineAlignmentRange(obj, range.startLine, range.endLine, direction);
-  if (!changed) return false;
-  markDirty(obj.id);
-  globalThis.BoardfishMotion?.applyActionAnimation?.('text-align');
-  scheduleRender(true, true, 'text-align');
-  pushHistory('text-align');
-  return true;
-};
-
 const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSelectionState(proxy)) => {
   if (!selection?.hasSelection || !proxy) return false;
   const dbgApi = textEditorClipDebugApi();
@@ -2225,10 +2371,10 @@ function enterEdit(id, {
   const previousEditingId = editingId || '';
   if (editingId === id) return;
   if (editingId) exitEdit();
-  editingId = id;
 
   const obj = objectsMap.get(id);
   if (!obj) return;
+  editingId = id;
   let stepStart = textEditorDebugNow();
   const logStep = (label, meta = {}) => {
     const t = textEditorDebugNow();
@@ -2290,7 +2436,7 @@ function enterEdit(id, {
   });
   clearTextScriptCaretAffinity(obj);
   obj._editStartContent = obj.data.content;
-  obj._editMinLines = textEditMinLinesForSession(obj, { preserveSize });
+  setTextEditMinLinesForSession(obj, { preserveSize });
   _editHistoryLastContent = obj.data.content;
   clearTimeout(_editHistoryTimer);
   _editHistoryTimer = null;
@@ -2341,6 +2487,8 @@ function enterEdit(id, {
       domValueStale: !!proxy._boardfishDomValueStale,
       ...textEditorEventDebugStats(event),
       ...textEditorObjectDebugStats(obj),
+      ...textEditorSizeDebugStats(obj, sourceValue, 'inputState'),
+      ...textEditorProxySizeDebugStats(proxy),
       ...textEditorSelectionDebugStats(state, sourceValue),
       oldChars: sourceValue.length,
       insertedChars: String(replacement?.insertedText ?? '').length,
@@ -2512,6 +2660,7 @@ function enterEdit(id, {
     const inputStartedAt = inputStepStartedAt;
     const logInputStep = (step, meta = {}) => {
       if (!shouldLogInput) return;
+      const details = typeof meta === 'function' ? meta() : meta;
       const now = textEditorDebugNow();
       const payload = {
         seq: inputDebugSeq,
@@ -2519,14 +2668,14 @@ function enterEdit(id, {
         ms: textEditorDebugRound(now - inputStepStartedAt),
         totalMs: textEditorDebugRound(now - inputStartedAt),
         objectId: id,
-        ...meta,
+        ...details,
       };
       textEditorClipStep(dbg, `text-edit-input:${step}`, payload);
       textEditorDebugLog(`input-${step}`, obj, payload);
       if (perfTraceInput) recordTextEditorInputPerfStep(step, payload);
       inputStepStartedAt = now;
 	    };
-	    logInputStep('start', {
+	    logInputStep('start', () => ({
 	      proxyChars: textEditProxyValue(proxy).length,
 	      domProxyChars: proxy.value.length,
 	      domValueStale: !!proxy._boardfishDomValueStale,
@@ -2536,8 +2685,10 @@ function enterEdit(id, {
 	      ...textEditorCaretLineDebugStats(obj, inputState.start ?? proxy.selectionStart, 'inputStartCaret'),
 	      ...textEditorEventDebugStats(event),
 	      ...textEditorObjectDebugStats(obj),
+	      ...textEditorSizeDebugStats(obj, inputState.value ?? obj.data.content ?? '', 'inputStart'),
+	      ...textEditorProxySizeDebugStats(proxy),
 	      ...textEditorSelectionDebugStats(inputState, inputState.value ?? obj.data.content ?? ''),
-	    });
+	    }));
     pendingInputState = null;
     proxy._boardfishPendingInputState = null;
 	    globalThis.BoardfishMotion?.applyActionAnimation?.(textEditActionFromInputType(event?.inputType));
@@ -2563,7 +2714,7 @@ function enterEdit(id, {
 	      nextRawValue = normalizeTextContent(proxy.value);
 	      replacement = replacement || textEditInputReplacement(oldValue, nextRawValue, inputState, inputType);
 	    }
-	    logInputStep('replacement-ready', {
+	    logInputStep('replacement-ready', () => ({
 	      oldChars: oldValue.length,
 	      nextChars: nextRawValue.length,
       insertedChars: String(replacement.insertedText || '').length,
@@ -2574,8 +2725,9 @@ function enterEdit(id, {
       textEditCaretIndex: obj._textEditCaretIndex ?? '',
       textEditCaretLineStartIndex: obj._textEditCaretLineStartIndex ?? '',
       ...textEditorCaretLineDebugStats(obj, replacement.start ?? inputState.start ?? 0, 'replacementCaret'),
+      ...textEditorSizeDebugStats(obj, oldValue, 'replacementOld'),
       ...textEditorTextStats(replacement.insertedText, inputState.insertedScriptRanges),
-    });
+    }));
 	    obj.data.content = nextRawValue;
 	    if (proxy._boardfishDomValueStale) {
 	      if (synthesizedStaleReplacement) {
@@ -2672,7 +2824,7 @@ function enterEdit(id, {
     } else {
       clearTextEditCaretIndex(obj);
     }
-    logInputStep('caret-updated', {
+    logInputStep('caret-updated', () => ({
       selectionStart: proxy.selectionStart,
       selectionEnd: proxy.selectionEnd,
       scriptCaretIndex: obj._textScriptCaretIndex ?? '',
@@ -2680,7 +2832,9 @@ function enterEdit(id, {
       textEditCaretIndex: obj._textEditCaretIndex ?? '',
       textEditCaretLineStartIndex: obj._textEditCaretLineStartIndex ?? '',
       ...textEditorCaretLineDebugStats(obj, proxy.selectionStart, 'updatedCaret'),
-    });
+      ...textEditorSizeDebugStats(obj, obj.data.content, 'updated'),
+      ...textEditorProxySizeDebugStats(proxy),
+    }));
     const patchLayoutStart = textEditorDebugNow();
     const layoutPatched = typeof patchTextObjectLayoutAfterInput === 'function'
       ? patchTextObjectLayoutAfterInput(obj, {
@@ -2719,16 +2873,59 @@ function enterEdit(id, {
       layoutPatchLogicalLineDelta: layoutPatchDebug.logicalLineDelta ?? '',
       layoutPatchReason: layoutPatchDebug.reason || '',
     });
-    const autoHeightResult = syncTextEditAutoHeightForInput(obj, inputType, getTextMinLines(obj));
+    const restoredMinLinesReset = resetTextEditPreservedMinLinesForInput(obj);
+    const pendingSizeSyncBeforeAutoHeight = !!obj._textEditPendingSizeSync;
+    const replacementStart = Math.max(0, Math.min(replacement.start ?? 0, oldValue.length));
+    const replacementEnd = Math.max(replacementStart, Math.min(replacement.end ?? replacementStart, oldValue.length));
+    const insertedText = String(replacement.insertedText || '');
+    const removedText = oldValue.slice(replacementStart, replacementEnd);
+    const removedChars = removedText.length;
+    const insertedChars = insertedText.length;
+    const deletesContent = textEditInputTypeDeletesContent(inputType);
+    const removedNewlines = textEditorNewlineCount(removedText);
+    const insertedNewlines = textEditorNewlineCount(insertedText);
+    const deleteReducedLogicalLines = deletesContent && removedNewlines > insertedNewlines;
+    const selectedDeleteShrankText = deletesContent && !!inputState.hasSelection && removedChars > insertedChars;
+    const deleteShrankPendingEdit = pendingSizeSyncBeforeAutoHeight &&
+      deletesContent &&
+      removedChars > insertedChars;
+    const layoutLineDelta = Number(layoutPatchDebug.layoutLineDelta);
+    const layoutRemovedLines = layoutPatched && Number.isFinite(layoutLineDelta) && layoutLineDelta < 0;
+    const autoHeightForceReason = layoutRemovedLines
+      ? 'layout-line-removal'
+      : (deleteReducedLogicalLines
+        ? 'logical-line-delete'
+        : (selectedDeleteShrankText
+          ? 'selected-delete'
+          : (deleteShrankPendingEdit ? 'pending-size-delete' : '')));
+    const sizeBeforeAutoHeight = textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight');
+    const proxySizeBeforeAutoHeight = textEditorProxySizeDebugStats(proxy);
+    const autoHeightResult = syncTextEditAutoHeightForInput(obj, inputType, getTextMinLines(obj), {
+      forceSync: !!autoHeightForceReason,
+    });
     const heightChanged = autoHeightResult.heightChanged;
-    logInputStep('auto-height-done', {
+    logInputStep('auto-height-done', () => ({
       heightChanged,
       autoHeightDeferred: autoHeightResult.deferred,
+      autoHeightForceSync: !!autoHeightForceReason,
+      autoHeightForceReason,
+      restoredMinLinesReset: restoredMinLinesReset.reset,
+      restoredPreviousMinLines: restoredMinLinesReset.previousMinLines ?? '',
+      restoredPreservedMinLines: restoredMinLinesReset.preservedMinLines ?? '',
+      restoredNextMinLines: restoredMinLinesReset.nextMinLines ?? '',
+      pendingSizeSyncBeforeAutoHeight,
       pendingSizeSync: !!obj._textEditPendingSizeSync,
       width: obj.w,
       height: obj.h,
+      ...sizeBeforeAutoHeight,
+      ...textEditorSizeDebugStats(obj, obj.data.content, 'afterAutoHeight'),
+      ...proxySizeBeforeAutoHeight,
+      removedChars,
+      insertedChars,
+      removedNewlines,
+      insertedNewlines,
       ...textEditorTextStats(obj.data.content, obj.data.scriptRanges),
-    });
+    }));
     const nextSelectionState = textEditSelectionState(proxy);
     _textInputSelectionHistorySuppress = {
       start: nextSelectionState.start,
@@ -2752,14 +2949,16 @@ function enterEdit(id, {
       renderOverlay: heightChanged,
       renderSource: 'render',
     });
-	    logInputStep('end', {
+	    logInputStep('end', () => ({
 	      heightChanged,
 	      proxyChars: textEditProxyValue(proxy).length,
 	      domProxyChars: proxy.value.length,
 	      domValueStale: !!proxy._boardfishDomValueStale,
 	      ...textEditorObjectDebugStats(obj),
+	      ...textEditorSizeDebugStats(obj, obj.data.content, 'inputEnd'),
+	      ...textEditorProxySizeDebugStats(proxy),
 	      ...textEditorSelectionDebugStats(nextSelectionState, textEditProxyValue(proxy)),
-	    });
+	    }));
     if (inputState.nativePasteEndMeta && dbg) {
       textEditorClipDebugApi()?.end?.(dbg, {
         ...inputState.nativePasteEndMeta,
@@ -3032,13 +3231,13 @@ function enterEdit(id, {
       return;
     }
 
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && proxy.selectionStart !== proxy.selectionEnd) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'c' && proxy.selectionStart !== proxy.selectionEnd) {
       e.preventDefault();
       copyTextEditSelectionFromProxy(id, proxy);
       return;
     }
 
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && proxy.selectionStart !== proxy.selectionEnd) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'x' && proxy.selectionStart !== proxy.selectionEnd) {
       e.preventDefault();
       copyTextEditSelectionFromProxy(id, proxy);
       const selection = textEditSelectionState(proxy);
@@ -3065,7 +3264,7 @@ function enterEdit(id, {
       return;
     }
 
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
       e.preventDefault();
       flushEditHistoryCheckpoint();
       proxy.setSelectionRange(0, textEditProxyValue(proxy).length, 'none');
@@ -3076,9 +3275,6 @@ function enterEdit(id, {
     }
 
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-      e.preventDefault();
-      flushEditHistoryCheckpoint();
-      applyTextAlignmentShortcut(obj, proxy, e.key === 'ArrowRight' ? 'right' : 'left');
       return;
     }
 

@@ -45,7 +45,7 @@ function loadStateCloneHarness() {
   vm.createContext(context);
   vm.runInContext(
     `${fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'state.js'), 'utf8')}\n` +
-      'globalThis.__stateClone = { cloneObject };\n',
+      'globalThis.__stateClone = { cloneObject, newId };\n',
     context,
     { filename: 'state.js' },
   );
@@ -149,4 +149,12 @@ test('text clone copies runtime caches only when requested', () => {
 
   assert.equal(regularClone._runtimeCopiedFrom, undefined);
   assert.equal(runtimeClone._runtimeCopiedFrom, 'text-1');
+});
+
+test('newId skips ids already present in the live object map', () => {
+  const context = loadStateCloneHarness();
+
+  context.objectsMap.set('obj-1', { id: 'obj-1' });
+
+  assert.equal(context.__stateClone.newId(), 'obj-2');
 });

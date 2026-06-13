@@ -777,6 +777,132 @@ var ManualPerfDebug = (() => {
     return value ? value.split('\n').length : 0;
   }
 
+  function textEditCap(prefix, name) {
+    return prefix ? `${prefix}${name.charAt(0).toUpperCase()}${name.slice(1)}` : name;
+  }
+
+  function textEditLineHeight() {
+    return Number(typeof LINE_H !== 'undefined' ? LINE_H : 24) || 24;
+  }
+
+  function textEditPad() {
+    return Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 4) || 4;
+  }
+
+  function textEditHeightLines(height) {
+    const lines = (Number(height) - textEditPad() * 2) / textEditLineHeight();
+    if (!Number.isFinite(lines) || lines <= 0) return '';
+    const rounded = Math.round(lines);
+    return Math.abs(lines - rounded) < 1e-6 ? Math.max(1, rounded) : '';
+  }
+
+  function textEditScriptKey(obj) {
+    try {
+      if (typeof getTextScriptRangesForLayout === 'function') {
+        return JSON.stringify(getTextScriptRangesForLayout(obj));
+      }
+    } catch (_) {}
+    return JSON.stringify(Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges : []);
+  }
+
+  function textEditAlignKey(obj, content) {
+    try {
+      if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj, content);
+    } catch (_) {}
+    return '';
+  }
+
+  function textEditCachedLineInfo(obj, content = '') {
+    if (!obj || obj.type !== 'text') return { lines: '', source: '' };
+    const text = normalizeTextContent(content);
+    const scriptKey = textEditScriptKey(obj);
+    const alignKey = textEditAlignKey(obj, text);
+    const layoutCacheValid = Array.isArray(obj._layoutCache) &&
+      obj._layoutCacheContent === text &&
+      obj._layoutCacheW === obj.w &&
+      obj._layoutCacheScriptKey === scriptKey &&
+      obj._layoutCacheAlignKey === alignKey;
+    if (layoutCacheValid) return { lines: Math.max(1, obj._layoutCache.length), source: 'layout-cache' };
+    const wrappedIndex = obj._textWrappedLineIndexCache;
+    const wrappedIndexValid = wrappedIndex &&
+      Array.isArray(wrappedIndex.entries) &&
+      obj._textWrappedLineIndexCacheContent === text &&
+      obj._textWrappedLineIndexCacheW === obj.w &&
+      obj._textWrappedLineIndexCacheScriptKey === scriptKey &&
+      Number.isFinite(wrappedIndex.lineCount);
+    if (wrappedIndexValid) {
+      return {
+        lines: Math.max(1, Math.trunc(Number(wrappedIndex.lineCount)) || 1),
+        source: 'wrapped-index-cache',
+      };
+    }
+    const wrappedCountValid = obj._textWrappedLineCountCacheContent === text &&
+      obj._textWrappedLineCountCacheW === obj.w &&
+      obj._textWrappedLineCountCacheScriptKey === scriptKey &&
+      Number.isFinite(obj._textWrappedLineCountCacheValue);
+    if (wrappedCountValid) {
+      return {
+        lines: Math.max(1, Math.trunc(Number(obj._textWrappedLineCountCacheValue)) || 1),
+        source: 'wrapped-count-cache',
+      };
+    }
+    const widthCache = obj._textWrappedLineIndexWidthCache;
+    const widthCached = widthCache &&
+      obj._textWrappedLineIndexWidthCacheContent === text &&
+      obj._textWrappedLineIndexWidthCacheScriptKey === scriptKey &&
+      typeof widthCache.get === 'function'
+      ? widthCache.get(String(obj.w))
+      : null;
+    if (widthCached && Array.isArray(widthCached.entries) && Number.isFinite(widthCached.lineCount)) {
+      return {
+        lines: Math.max(1, Math.trunc(Number(widthCached.lineCount)) || 1),
+        source: 'wrapped-width-cache',
+      };
+    }
+    return { lines: '', source: '' };
+  }
+
+  function textEditSizeSnapshot(obj, content = '', prefix = '') {
+    const key = (name) => textEditCap(prefix, name);
+    if (!obj || obj.type !== 'text') return {};
+    const text = normalizeTextContent(content);
+    const lineH = textEditLineHeight();
+    const pad = textEditPad();
+    const logicalLines = Math.max(1, countTextLines(text));
+    const minLines = obj.id === (typeof editingId !== 'undefined' ? editingId : '')
+      ? Math.max(1, Math.trunc(Number(obj._editMinLines)) || 1)
+      : 1;
+    const cached = textEditCachedLineInfo(obj, text);
+    const expectedLogicalHeight = Math.max(minLines, logicalLines) * lineH + pad * 2;
+    const expectedCachedHeight = cached.lines === ''
+      ? ''
+      : Math.max(minLines, Number(cached.lines) || 1) * lineH + pad * 2;
+    return {
+      [key('logicalLines')]: logicalLines,
+      [key('cachedLines')]: cached.lines,
+      [key('cachedLineSource')]: cached.source,
+      [key('objectHeight')]: obj.h ?? '',
+      [key('heightLines')]: textEditHeightLines(obj.h),
+      [key('editMinLines')]: minLines,
+      [key('expectedLogicalHeight')]: expectedLogicalHeight,
+      [key('expectedCachedHeight')]: expectedCachedHeight,
+      [key('heightDeltaFromLogical')]: Number(obj.h) - expectedLogicalHeight,
+      [key('heightDeltaFromCached')]: expectedCachedHeight === '' ? '' : Number(obj.h) - expectedCachedHeight,
+      [key('lineHeight')]: lineH,
+      [key('textPad')]: pad,
+    };
+  }
+
+  function textEditProxySizeSnapshot(proxy = _editEl) {
+    if (!proxy) return {};
+    return {
+      proxyScrollHeight: proxy.scrollHeight ?? '',
+      proxyClientHeight: proxy.clientHeight ?? '',
+      proxyOffsetHeight: proxy.offsetHeight ?? '',
+      proxyStyleHeight: proxy.style?.height || '',
+    };
+  }
+
   function eventTimestampMs(event = null) {
     const timestamp = Number(event?.timeStamp);
     if (!Number.isFinite(timestamp) || timestamp <= 0) return performance.now();
@@ -836,6 +962,8 @@ var ManualPerfDebug = (() => {
       objectH: obj?.h ?? '',
       editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
       pendingSizeSync: !!obj?._textEditPendingSizeSync,
+      ...textEditSizeSnapshot(obj, content),
+      ...textEditProxySizeSnapshot(_editEl),
       layoutCachePresent: !!obj?._layoutCache,
       layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
       historyLength: typeof boardHistory !== 'undefined' && Array.isArray(boardHistory) ? boardHistory.length : '',
@@ -896,6 +1024,10 @@ var ManualPerfDebug = (() => {
       objectH: obj?.h ?? '',
       editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
       pendingSizeSync: !!obj?._textEditPendingSizeSync,
+      ...textEditSizeSnapshot(obj, typeof _editEl?._boardfishLogicalValue === 'string'
+        ? _editEl._boardfishLogicalValue
+        : (typeof obj?.data?.content === 'string' ? obj.data.content : '')),
+      ...textEditProxySizeSnapshot(_editEl),
       layoutCachePresent: !!obj?._layoutCache,
       layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
       historyLength: typeof boardHistory !== 'undefined' && Array.isArray(boardHistory) ? boardHistory.length : '',
@@ -1351,6 +1483,8 @@ var ManualPerfDebug = (() => {
     let maxRemovedChars = 0;
     let maxInsertedChars = 0;
     let maxSelectedChars = 0;
+    let maxHeightDeltaFromLogical = 0;
+    let maxHeightDeltaFromCached = 0;
     let maxOldChars = 0;
     let maxNextChars = 0;
     let deleteInputRuns = new Set();
@@ -1374,6 +1508,14 @@ var ManualPerfDebug = (() => {
       maxRemovedChars = Math.max(maxRemovedChars, Number(row.removedChars) || 0);
       maxInsertedChars = Math.max(maxInsertedChars, Number(row.insertedChars) || 0);
       maxSelectedChars = Math.max(maxSelectedChars, Number(row.selectedChars) || 0);
+      maxHeightDeltaFromLogical = Math.max(
+        maxHeightDeltaFromLogical,
+        Math.abs(Number(row.afterAutoHeightHeightDeltaFromLogical ?? row.inputEndHeightDeltaFromLogical ?? row.heightDeltaFromLogical) || 0),
+      );
+      maxHeightDeltaFromCached = Math.max(
+        maxHeightDeltaFromCached,
+        Math.abs(Number(row.afterAutoHeightHeightDeltaFromCached ?? row.inputEndHeightDeltaFromCached ?? row.heightDeltaFromCached) || 0),
+      );
       maxOldChars = Math.max(maxOldChars, Number(row.oldChars) || Number(row.proxyChars) || 0);
       maxNextChars = Math.max(maxNextChars, Number(row.nextChars) || Number(row.proxyChars) || 0);
     }
@@ -1401,6 +1543,8 @@ var ManualPerfDebug = (() => {
       maxSelectedChars,
       maxRemovedChars,
       maxInsertedChars,
+      maxHeightDeltaFromLogical: round(maxHeightDeltaFromLogical),
+      maxHeightDeltaFromCached: round(maxHeightDeltaFromCached),
       maxOldChars,
       maxNextChars,
       maxScriptTransformMs: round(max('scriptTransformMs')),
@@ -1478,7 +1622,56 @@ var ManualPerfDebug = (() => {
       layoutPatchLogicalLineDelta: step.layoutPatchLogicalLineDelta,
       layoutPatchReason: step.layoutPatchReason,
       autoHeightDeferred: step.autoHeightDeferred,
+      autoHeightForceSync: step.autoHeightForceSync,
+      autoHeightForceReason: step.autoHeightForceReason,
+      restoredMinLinesReset: step.restoredMinLinesReset,
+      restoredPreviousMinLines: step.restoredPreviousMinLines,
+      restoredPreservedMinLines: step.restoredPreservedMinLines,
+      restoredNextMinLines: step.restoredNextMinLines,
+      pendingSizeSyncBeforeAutoHeight: step.pendingSizeSyncBeforeAutoHeight,
       pendingSizeSync: step.pendingSizeSync,
+      inputStateObjectHeight: step.inputStateObjectHeight,
+      inputStateLogicalLines: step.inputStateLogicalLines,
+      inputStateCachedLines: step.inputStateCachedLines,
+      inputStateCachedLineSource: step.inputStateCachedLineSource,
+      inputStateExpectedLogicalHeight: step.inputStateExpectedLogicalHeight,
+      inputStateExpectedCachedHeight: step.inputStateExpectedCachedHeight,
+      inputStateHeightDeltaFromLogical: step.inputStateHeightDeltaFromLogical,
+      inputStateHeightDeltaFromCached: step.inputStateHeightDeltaFromCached,
+      updatedObjectHeight: step.updatedObjectHeight,
+      updatedLogicalLines: step.updatedLogicalLines,
+      updatedCachedLines: step.updatedCachedLines,
+      updatedCachedLineSource: step.updatedCachedLineSource,
+      updatedExpectedLogicalHeight: step.updatedExpectedLogicalHeight,
+      updatedExpectedCachedHeight: step.updatedExpectedCachedHeight,
+      updatedHeightDeltaFromLogical: step.updatedHeightDeltaFromLogical,
+      updatedHeightDeltaFromCached: step.updatedHeightDeltaFromCached,
+      beforeAutoHeightObjectHeight: step.beforeAutoHeightObjectHeight,
+      beforeAutoHeightLogicalLines: step.beforeAutoHeightLogicalLines,
+      beforeAutoHeightCachedLines: step.beforeAutoHeightCachedLines,
+      beforeAutoHeightCachedLineSource: step.beforeAutoHeightCachedLineSource,
+      beforeAutoHeightExpectedLogicalHeight: step.beforeAutoHeightExpectedLogicalHeight,
+      beforeAutoHeightExpectedCachedHeight: step.beforeAutoHeightExpectedCachedHeight,
+      beforeAutoHeightHeightDeltaFromLogical: step.beforeAutoHeightHeightDeltaFromLogical,
+      beforeAutoHeightHeightDeltaFromCached: step.beforeAutoHeightHeightDeltaFromCached,
+      afterAutoHeightObjectHeight: step.afterAutoHeightObjectHeight,
+      afterAutoHeightLogicalLines: step.afterAutoHeightLogicalLines,
+      afterAutoHeightCachedLines: step.afterAutoHeightCachedLines,
+      afterAutoHeightCachedLineSource: step.afterAutoHeightCachedLineSource,
+      afterAutoHeightExpectedLogicalHeight: step.afterAutoHeightExpectedLogicalHeight,
+      afterAutoHeightExpectedCachedHeight: step.afterAutoHeightExpectedCachedHeight,
+      afterAutoHeightHeightDeltaFromLogical: step.afterAutoHeightHeightDeltaFromLogical,
+      afterAutoHeightHeightDeltaFromCached: step.afterAutoHeightHeightDeltaFromCached,
+      inputEndObjectHeight: step.inputEndObjectHeight,
+      inputEndLogicalLines: step.inputEndLogicalLines,
+      inputEndCachedLines: step.inputEndCachedLines,
+      inputEndCachedLineSource: step.inputEndCachedLineSource,
+      inputEndExpectedLogicalHeight: step.inputEndExpectedLogicalHeight,
+      inputEndExpectedCachedHeight: step.inputEndExpectedCachedHeight,
+      inputEndHeightDeltaFromLogical: step.inputEndHeightDeltaFromLogical,
+      inputEndHeightDeltaFromCached: step.inputEndHeightDeltaFromCached,
+      proxyScrollHeight: step.proxyScrollHeight,
+      proxyClientHeight: step.proxyClientHeight,
       historyRecordMs: step.historyRecordMs,
       historyPushed: step.historyPushed,
       renderScheduleMs: step.renderScheduleMs,
@@ -1520,6 +1713,16 @@ var ManualPerfDebug = (() => {
       objectContentLength: event.objectContentLength,
       objectW: event.objectW,
       objectH: event.objectH,
+      logicalLines: event.logicalLines,
+      cachedLines: event.cachedLines,
+      cachedLineSource: event.cachedLineSource,
+      heightLines: event.heightLines,
+      expectedLogicalHeight: event.expectedLogicalHeight,
+      expectedCachedHeight: event.expectedCachedHeight,
+      heightDeltaFromLogical: event.heightDeltaFromLogical,
+      heightDeltaFromCached: event.heightDeltaFromCached,
+      proxyScrollHeight: event.proxyScrollHeight,
+      proxyClientHeight: event.proxyClientHeight,
       editStartChars: event.editStartChars,
       pendingSizeSync: event.pendingSizeSync,
       layoutCachePresent: event.layoutCachePresent,
@@ -1590,6 +1793,8 @@ var ManualPerfDebug = (() => {
       worstInputStep: inputStepSummary.worstStep?.step ?? '',
       maxRemovedChars: inputStepSummary.maxRemovedChars ?? '',
       maxSelectedCharsInInput: inputStepSummary.maxSelectedChars ?? '',
+      maxHeightDeltaFromLogical: inputStepSummary.maxHeightDeltaFromLogical ?? '',
+      maxHeightDeltaFromCached: inputStepSummary.maxHeightDeltaFromCached ?? '',
       maxScriptTransformMs: inputStepSummary.maxScriptTransformMs ?? '',
       maxLayoutPatchMs: inputStepSummary.maxLayoutPatchMs ?? '',
       maxLayoutPatchTotalMs: inputStepSummary.maxLayoutPatchTotalMs ?? '',
@@ -1608,6 +1813,11 @@ var ManualPerfDebug = (() => {
       maxObjectContentLength: eventSummary.maxObjectContentLength ?? '',
       editStartChars: report.startSnapshot?.editStartChars ?? '',
       pendingSizeSyncEnd: report.endSnapshot?.pendingSizeSync ?? '',
+      objectHeightEnd: report.endSnapshot?.objectH ?? '',
+      expectedLogicalHeightEnd: report.endSnapshot?.expectedLogicalHeight ?? '',
+      expectedCachedHeightEnd: report.endSnapshot?.expectedCachedHeight ?? '',
+      heightDeltaFromLogicalEnd: report.endSnapshot?.heightDeltaFromLogical ?? '',
+      heightDeltaFromCachedEnd: report.endSnapshot?.heightDeltaFromCached ?? '',
       layoutCacheLinesEnd: report.endSnapshot?.layoutCacheLines ?? '',
       scriptRangesEnd: report.endSnapshot?.scriptRanges ?? '',
       frames: frame.frames ?? '',
@@ -1697,7 +1907,7 @@ var ManualPerfDebug = (() => {
       recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES.slice(),
       historyRecording: options.history !== false,
       textInputStepTracing: textEditMathSession.traceTextInput,
-      next: 'Do the edit/delete interaction manually, then run finishDebug({ label: "text-edit-delete-lag", perf: ["textEditMathReport"], history: ["textUndoRedoReport"], viewport: ["report"], textSel: ["performanceSummary", "enterEditReport", "editLifecycleReport"] }).',
+      next: 'Do the edit/delete interaction manually, then run finishDebug({ label: "text-box-shrink-after-undo", perf: [["textEditMathReport", { limit: 1200, eventLimit: 1200, inputStepLimit: 1200 }]], history: ["textUndoRedoReport", "largeTextReport"], clipboard: ["textClipboardReport"], textSel: ["performanceSummary", "clipboardReport", "editLifecycleReport"] }).',
     };
     if (options.log !== false) {
       console.group('[Boardfish perf] text edit math passive recorder');

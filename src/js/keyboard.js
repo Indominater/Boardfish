@@ -13,6 +13,39 @@ function hasNoShortcutModifiers(e) {
   return !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
 }
 
+function isEditableTextShortcutTarget(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tagName = String(target.tagName || target.nodeName || '').toLowerCase();
+  if (tagName === 'textarea') return true;
+  if (tagName !== 'input') return false;
+  const type = String(target.type || '').toLowerCase();
+  return !type || [
+    'text',
+    'search',
+    'url',
+    'tel',
+    'email',
+    'password',
+    'number',
+  ].includes(type);
+}
+
+function hasDocumentTextSelectionForShortcut() {
+  if (typeof window === 'undefined' || typeof window.getSelection !== 'function') return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  return String(selection) !== '';
+}
+
+function hasTextEditingOrSelectionContextForShortcut(e) {
+  return !!editingId ||
+    (typeof _editEl !== 'undefined' && !!_editEl) ||
+    isEditableTextShortcutTarget(e.target) ||
+    (typeof document !== 'undefined' && isEditableTextShortcutTarget(document.activeElement)) ||
+    hasDocumentTextSelectionForShortcut();
+}
+
 const hasSelectedImagesForKeyboardTransform = () => {
   if (!selectedIds?.size || !objectsMap?.get) return false;
   for (const id of selectedIds) {
@@ -63,7 +96,7 @@ const isBrowserFindShortcut = (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (isBrowserFindShortcut(e)) {
-    if (hasExactCommandModifier(e) && isShortcutKey(e, 'f') && canTransformSelectedImagesFromKeyboard()) return;
+    if (hasExactCommandModifier(e) && isShortcutKey(e, 'f')) return;
     globalThis.BoardfishMotion?.applyActionAnimation?.('browser-find-shortcut');
     e.preventDefault();
     e.stopPropagation();
@@ -142,25 +175,28 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (hasExactCommandModifier(e) && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    if (hasTextEditingOrSelectionContextForShortcut(e)) return;
     consumeShortcutEvent(e);
     runShortcutCommand(`text-align-${e.key === 'ArrowRight' ? 'right' : 'left'}`, () => {
-      if (!editingId) applySelectedTextAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left');
+      applySelectedTextAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left');
     });
     return;
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) {
+    if (!canTransformSelectedImagesFromKeyboard()) return;
     consumeShortcutEvent(e);
     runShortcutCommand('rotate-image', () => {
-      if (canTransformSelectedImagesFromKeyboard()) rotateSelectedImages('cw');
+      rotateSelectedImages('cw');
     });
     return;
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'f')) {
+    if (!canTransformSelectedImagesFromKeyboard()) return;
     consumeShortcutEvent(e);
     runShortcutCommand('flip-image', () => {
-      if (canTransformSelectedImagesFromKeyboard()) flipSelectedImages();
+      flipSelectedImages();
     });
     return;
   }
@@ -180,10 +216,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     consumeShortcutEvent(e);
     hideMenus();
-    if (editingId) {
-      deselectAll();
-      return;
-    }
     deselectAll();
     return;
   }

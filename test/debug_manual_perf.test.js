@@ -44,6 +44,13 @@ test('text edit math perf debugger is passive event recording only', () => {
   assert.match(source, /domValueStale/);
   assert.match(source, /maxLogicalSetMs/);
   assert.match(source, /historyMaxFocusMs/);
+  assert.match(source, /maxHeightDeltaFromLogical/);
+  assert.match(source, /expectedLogicalHeight/);
+  assert.match(source, /heightDeltaFromCached/);
+  assert.match(source, /cachedLineSource/);
+  assert.match(source, /proxyScrollHeight/);
+  assert.match(source, /autoHeightForceReason/);
+  assert.match(source, /restoredMinLinesReset/);
   assert.match(source, /textUndoRedoReport/);
   assert.match(source, /const textEditInputSteps = \[\]/);
   assert.match(source, /function isTextEditInputTraceActive/);

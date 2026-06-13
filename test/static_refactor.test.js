@@ -172,3 +172,85 @@ test('motion policy reserves browser shortcuts instead of window chrome', () => 
   assert.match(keyboard, /isBrowserFindShortcut/);
   assert.match(keyboard, /'browser-find-shortcut'/);
 });
+
+test('text edit entry and shortcuts keep edge-case guards', () => {
+  const textEditor = readSource('src/js/text_editor.js');
+
+  assert.match(textEditor, /const obj = objectsMap\.get\(id\);\s*if \(!obj\) return;\s*editingId = id;/);
+  assert.match(textEditor, /\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && !e\.shiftKey && e\.key\.toLowerCase\(\) === 'c'/);
+  assert.match(textEditor, /\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && !e\.shiftKey && e\.key\.toLowerCase\(\) === 'x'/);
+  assert.match(textEditor, /\(e\.ctrlKey \|\| e\.metaKey\) && !e\.altKey && !e\.shiftKey && e\.key\.toLowerCase\(\) === 'a'/);
+});
+
+test('text input debug metadata is lazy when logging is disabled', () => {
+  const textEditor = readSource('src/js/text_editor.js');
+
+  assert.match(textEditor, /const details = typeof meta === 'function' \? meta\(\) : meta;/);
+  assert.match(textEditor, /logInputStep\('start', \(\) => \(\{/);
+  assert.match(textEditor, /logInputStep\('auto-height-done', \(\) => \(\{/);
+});
+
+test('browser paste fallback owns exactly one input shield token', () => {
+  const clipboardExport = readSource('src/js/clipboard_export_init.js');
+
+  assert.match(clipboardExport, /const releaseInputShield = acquireInputShield\(\);/);
+  assert.match(clipboardExport, /finally \{\s*releaseInputShield\(\);\s*\}/);
+  assert.doesNotMatch(clipboardExport, /showInputShield\(\);\s*try \{\s*const imageBlob/);
+});
+
+test('dirty tracking does not special-case empty boards as clean', () => {
+  const io = readSource('src/js/io_close.js');
+  const match = io.match(/function isDirty\(\) \{([\s\S]*?)\n\}/);
+  assert.ok(match, 'isDirty function is missing');
+  assert.doesNotMatch(match[1], /objects\.length\s*===\s*0/);
+  assert.match(match[1], /historyIndex !== savedHistoryIndex \|\| _dirtyIds\.size > 0/);
+});
+
+test('startup marks the initial empty board snapshot clean', () => {
+  const bootstrap = readSource('src/js/app_bootstrap.js');
+
+  assert.match(bootstrap, /resizeCanvas\(\);\s*snapshot\(\);\s*markSaved\(\);/);
+});
+
+test('dark mode icon is local and offline-safe', () => {
+  const html = readSource('src/index.html');
+  const styles = readSource('src/styles.css');
+  const sw = readSource('src/sw.js');
+
+  assert.doesNotMatch(html, /fonts\.googleapis\.com|fonts\.gstatic\.com|Material Symbols|material-symbols-outlined/i);
+  assert.match(html, /id="ctx-btn-dark-mode"[\s\S]*<svg viewBox="0 0 24 24"/);
+  assert.doesNotMatch(styles, /material-symbols-outlined/i);
+  assert.doesNotMatch(sw, /fonts\.googleapis\.com|fonts\.gstatic\.com/i);
+});
+
+test('dev server returns 400 for malformed URL encodings', () => {
+  const server = readSource('scripts/serve-web.mjs');
+
+  assert.match(server, /catch \(err\) \{\s*if \(err instanceof URIError\) \{\s*res\.writeHead\(400\)\.end\('Bad Request'\);/);
+});
+
+test('image hydration queue processes until its time budget is consumed', () => {
+  const imageState = readSource('src/js/image_state.js');
+
+  assert.match(imageState, /while \(_imageHydrationQueue\.length && \(count === 0 \|\| performance\.now\(\) - batchStart < 6\)\)/);
+  assert.doesNotMatch(imageState, /count < 1 && performance\.now\(\) - batchStart < 6/);
+});
+
+test('offscreen rebuild no longer awaits an empty bitmap promise list', () => {
+  const viewport = readSource('src/js/viewport.js');
+  const start = viewport.indexOf('async function _rebuildOffscreenAsync()');
+  const end = viewport.indexOf('\nfunction', start + 1);
+  const source = viewport.slice(start, end > start ? end : undefined);
+
+  assert.doesNotMatch(source, /bitmapPromises/);
+  assert.doesNotMatch(source, /ensure-bitmaps/);
+});
+
+test('addText sizes multiline text without spreading all lines into Math.max', () => {
+  const objectCommands = readSource('src/js/object_commands.js');
+  const match = objectCommands.match(/function addText\([\s\S]*?const obj = \{/);
+  assert.ok(match, 'addText function body is missing');
+
+  assert.doesNotMatch(match[0], /Math\.max\(\.\.\.lines\.map/);
+  assert.match(match[0], /let maxLineLen = 1;/);
+});

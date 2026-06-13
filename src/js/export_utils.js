@@ -245,7 +245,7 @@
 
     if (!downloads.length) return { downloadedCount: 0, skippedCount, method: 'none' };
 
-    if (downloads.length === 1 || !canZip) {
+    if (downloads.length === 1) {
       const item = downloads[0];
       const blob = new Blob([item.data], { type: item.mime || 'image/png' });
       ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 1, method: target?.handle ? 'file-picker' : 'download' });
@@ -271,6 +271,47 @@
         options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length, force: true });
       }
       return { downloadedCount: downloads.length, skippedCount, method: target?.handle ? 'file-picker' : 'download' };
+    }
+
+    if (!canZip) {
+      ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: 1, batchCount: downloads.length, method: 'download' });
+      if (typeof options.onProgress === 'function') {
+        options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length, force: true });
+      }
+      let savedCount = 0;
+      let savedBytes = 0;
+      for (let i = 0; i < downloads.length; i++) {
+        const item = downloads[i];
+        const blob = new Blob([item.data], { type: item.mime || 'image/png' });
+        const saveStart = performance.now();
+        await saveExportBlob(blob, target, item.name);
+        savedCount++;
+        savedBytes += blob.size;
+        ExportDebug.recordSaveBatch?.({
+          batchIndex: i + 1,
+          batchCount: downloads.length,
+          batchSize: 1,
+          keyCount: downloads.length,
+          savedCount: 1,
+          failedCount: 0,
+          missingCount: 0,
+          bytesMB: Math.round(blob.size / 1024 / 1024 * 100) / 100,
+          ms: performance.now() - saveStart,
+          method: 'download',
+        });
+        if (typeof options.onProgress === 'function') {
+          options.onProgress({
+            phase: 'save-progress',
+            preparedCount: downloads.length,
+            finishedCount: savedCount,
+            totalCount: imageObjs.length,
+            force: i === downloads.length - 1,
+          });
+        }
+        if (i % 2 === 1 || i === downloads.length - 1) await yieldToEventLoop(dbg, 'web-save-downloads', { savedCount, keyCount: downloads.length });
+      }
+      ExportDebug.recordSaveDone?.({ savedCount, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round(savedBytes / 1024 / 1024 * 100) / 100 });
+      return { downloadedCount: savedCount, skippedCount, method: 'download' };
     }
 
     const zipEntries = downloads.map((item) => ({

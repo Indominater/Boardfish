@@ -36,6 +36,7 @@ function loadKeyboard(overrides = {}) {
     console,
     calls,
     document: {
+      activeElement: null,
       addEventListener(type, handler, options) {
         listeners.push({ type, handler, options });
       },
@@ -43,6 +44,7 @@ function loadKeyboard(overrides = {}) {
     window: {
       innerWidth: 1000,
       innerHeight: 800,
+      getSelection: () => ({ isCollapsed: true, toString: () => '' }),
     },
     selectedIds: new Set(),
     objectsMap: new Map(),
@@ -203,4 +205,133 @@ test('paste keydown stays native unless a context menu is open', () => {
   assert.equal(event.defaultPrevented, false);
   assert.equal(event.propagationStopped, false);
   assert.deepEqual(calls, []);
+});
+
+test('cmd+arrow text alignment falls through to the text editor while editing', () => {
+  const { calls, mainKeydown } = loadKeyboard({ editingId: 'text-1' });
+  const event = keyEvent({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(event.propagationStopped, false);
+  assert.deepEqual(calls, []);
+});
+
+test('cmd+arrow text alignment falls through for editable DOM targets', () => {
+  const { calls, mainKeydown } = loadKeyboard();
+  const event = keyEvent({
+    key: 'ArrowRight',
+    code: 'ArrowRight',
+    metaKey: true,
+    target: { tagName: 'INPUT', type: 'text' },
+  });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(event.propagationStopped, false);
+  assert.deepEqual(calls, []);
+});
+
+test('cmd+arrow text alignment falls through while document text is selected', () => {
+  const { calls, mainKeydown } = loadKeyboard({
+    window: {
+      innerWidth: 1000,
+      innerHeight: 800,
+      getSelection: () => ({ isCollapsed: false, toString: () => 'selected text' }),
+    },
+  });
+  const event = keyEvent({ key: 'ArrowLeft', code: 'ArrowLeft', metaKey: true });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(event.propagationStopped, false);
+  assert.deepEqual(calls, []);
+});
+
+test('cmd+arrow text alignment still applies to selected text objects outside editing', () => {
+  const selectedIds = new Set(['text-1']);
+  const textObject = { id: 'text-1', type: 'text', data: { content: 'one\ntwo' } };
+  const objectsMap = new Map([[textObject.id, textObject]]);
+  const { calls, mainKeydown } = loadKeyboard({
+    selectedIds,
+    objectsMap,
+    applyTextLineAlignmentRange: (obj, startLine, endLine, direction) => {
+      calls.push(['align', obj.id, startLine, endLine, direction]);
+      return true;
+    },
+    textLogicalLineCount: () => 2,
+    markDirty: (id) => calls.push(['markDirty', id]),
+    scheduleRender: (board, overlay, reason) => calls.push(['scheduleRender', board, overlay, reason]),
+    pushHistory: (reason) => calls.push(['pushHistory', reason]),
+  });
+  const event = keyEvent({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.deepEqual(calls, [
+    ['align', 'text-1', 0, 1, 'right'],
+    ['markDirty', 'text-1'],
+    ['motion', 'text-align'],
+    ['scheduleRender', true, true, 'text-align'],
+    ['pushHistory', 'text-align'],
+  ]);
+});
+
+test('cmd+r falls through to browser reload when no image can rotate', () => {
+  const { calls, mainKeydown } = loadKeyboard();
+  const event = keyEvent({ key: 'r', code: 'KeyR', metaKey: true });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(event.propagationStopped, false);
+  assert.deepEqual(calls, []);
+});
+
+test('cmd+r rotates selected images when available', () => {
+  const selectedIds = new Set(['obj-1']);
+  const objectsMap = new Map([['obj-1', { id: 'obj-1', type: 'image' }]]);
+  const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
+  const event = keyEvent({ key: 'r', code: 'KeyR', metaKey: true });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.deepEqual(calls, [
+    ['rotateSelectedImages'],
+  ]);
+});
+
+test('cmd+f falls through to browser find when no image can flip', () => {
+  const { calls, keydownListeners, mainKeydown } = loadKeyboard();
+  const event = keyEvent({ key: 'f', code: 'KeyF', metaKey: true });
+
+  keydownListeners[0].handler(event);
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(event.propagationStopped, false);
+  assert.deepEqual(calls, []);
+});
+
+test('cmd+f flips selected images when available', () => {
+  const selectedIds = new Set(['obj-1']);
+  const objectsMap = new Map([['obj-1', { id: 'obj-1', type: 'image' }]]);
+  const { calls, keydownListeners, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
+  const event = keyEvent({ key: 'f', code: 'KeyF', metaKey: true });
+
+  keydownListeners[0].handler(event);
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.deepEqual(calls, [
+    ['flipSelectedImages'],
+  ]);
 });

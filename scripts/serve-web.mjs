@@ -47,7 +47,16 @@ function webEnvSource() {
 }
 
 async function handleRequest(req, res) {
-  const filePath = safePath(req.url || '/');
+  let filePath = null;
+  try {
+    filePath = safePath(req.url || '/');
+  } catch (err) {
+    if (err instanceof URIError) {
+      res.writeHead(400).end('Bad Request');
+      return;
+    }
+    throw err;
+  }
   if (!filePath) {
     res.writeHead(403).end('Forbidden');
     return;

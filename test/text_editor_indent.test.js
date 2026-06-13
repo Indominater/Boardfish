@@ -301,7 +301,8 @@ function loadLiveTextEditResizeHarness() {
       '\n' +
       fs.readFileSync(path.join(root, 'src/js/text_editor.js'), 'utf8') +
       '\nglobalThis.enterEdit = enterEdit;\n' +
-      'globalThis.exitEdit = exitEdit;\n',
+      'globalThis.exitEdit = exitEdit;\n' +
+      'globalThis.getTextLayout = getTextLayout;\n',
     context,
     { filename: 'live_text_edit_resize_harness.js' },
   );
@@ -318,7 +319,7 @@ function makeBeforeInputEvent(inputType, data = '') {
   };
 }
 
-function makeKeyEvent(key) {
+function makeKeyEvent(key, overrides = {}) {
   return {
     type: 'keydown',
     key,
@@ -328,6 +329,7 @@ function makeKeyEvent(key) {
     shiftKey: false,
     prevented: false,
     preventDefault() { this.prevented = true; },
+    ...overrides,
   };
 }
 
@@ -454,6 +456,50 @@ test('right arrow from a nested braced script end exits to the parent layer', ()
     { start: 2, end: 10, kind: 'sup' },
     { start: 5, end: 8, kind: 'sup' },
   ]);
+});
+
+test('cmd+right while editing stays native for caret movement', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'one\ntwo\nthree' };
+
+  context.enterEdit(obj.id, { history: false });
+  context.dirty.length = 0;
+  context.histories.length = 0;
+  context.renders.length = 0;
+  context.animations.length = 0;
+  context.proxy.setSelectionRange(5, 5, 'none');
+  const key = makeKeyEvent('ArrowRight', { metaKey: true });
+  context.proxy.dispatchEvent(key);
+
+  assert.equal(key.prevented, false);
+  assert.equal(obj.data.lineAlign, undefined);
+  assert.deepEqual(context.dirty, []);
+  assert.deepEqual(context.histories, []);
+  assert.deepEqual(context.renders, []);
+  assert.deepEqual(context.animations, []);
+});
+
+test('cmd+right while editing highlighted text stays native', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'one\ntwo\nthree' };
+
+  context.enterEdit(obj.id, { history: false });
+  context.dirty.length = 0;
+  context.histories.length = 0;
+  context.renders.length = 0;
+  context.animations.length = 0;
+  context.proxy.setSelectionRange(4, obj.data.content.length, 'forward');
+  const key = makeKeyEvent('ArrowRight', { metaKey: true });
+  context.proxy.dispatchEvent(key);
+
+  assert.equal(key.prevented, false);
+  assert.equal(obj.data.lineAlign, undefined);
+  assert.deepEqual(context.dirty, []);
+  assert.deepEqual(context.histories, []);
+  assert.deepEqual(context.renders, []);
+  assert.deepEqual(context.animations, []);
 });
 
 test('typing over a visible braced compound selection removes hidden closing braces', () => {
@@ -2028,6 +2074,167 @@ test('large existing text edit defers auto-height until exit', () => {
   context.exitEdit();
   assert.notEqual(obj.h, 160);
   assert.equal(obj._textEditPendingSizeSync, undefined);
+});
+
+test('large pasted text shrinks after a cached line-removing delete', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const line = 'x'.repeat(3000);
+  const initialValue = Array.from({ length: 50 }, () => line).join('\n');
+  obj.data = { content: initialValue };
+  obj.w = 1_000_000;
+  obj.h = 50 * 24 + 8;
+
+  context.enterEdit(obj.id, { history: false });
+
+  const pastedText = `\n${line}`;
+  const pastedValue = initialValue + pastedText;
+  context.proxy._boardfishSetPendingInputState({
+    start: initialValue.length,
+    end: initialValue.length,
+    direction: 'none',
+    hasSelection: false,
+    value: initialValue,
+    scriptRanges: [],
+    scriptCaretAffinity: '',
+    scriptCaretRanges: [],
+    inputType: 'insertFromPaste',
+    replacement: { start: initialValue.length, end: initialValue.length, insertedText: pastedText },
+  });
+  context.proxy.value = pastedValue;
+  context.proxy.setSelectionRange(pastedValue.length, pastedValue.length, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
+
+  assert.equal(obj.data.content, pastedValue);
+  assert.equal(obj.h, 50 * 24 + 8);
+  assert.equal(obj._textEditPendingSizeSync, true);
+
+  context.getTextLayout(obj);
+  const nextValue = pastedValue.split('\n').slice(0, 10).join('\n');
+  context.proxy._boardfishSetPendingInputState({
+    start: nextValue.length,
+    end: pastedValue.length,
+    direction: 'forward',
+    hasSelection: true,
+    value: pastedValue,
+    scriptRanges: [],
+    scriptCaretAffinity: '',
+    scriptCaretRanges: [],
+    inputType: 'deleteContentBackward',
+    replacement: { start: nextValue.length, end: pastedValue.length, insertedText: '' },
+  });
+  context.proxy.value = nextValue;
+  context.proxy.setSelectionRange(nextValue.length, nextValue.length, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'deleteContentBackward' });
+
+  assert.equal(obj.data.content, nextValue);
+  assert.equal(obj.data.content.length >= 20000, true);
+  assert.equal(obj.h, 10 * 24 + 8);
+  assert.equal(obj._textEditPendingSizeSync, undefined);
+  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
+});
+
+test('large pasted text shrinks after line-removing delete before layout cache exists', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const line = 'x'.repeat(3000);
+  const initialValue = Array.from({ length: 50 }, () => line).join('\n');
+  obj.data = { content: initialValue };
+  obj.w = 1_000_000;
+  obj.h = 50 * 24 + 8;
+
+  context.enterEdit(obj.id, { history: false });
+
+  const pastedText = `\n${line}`;
+  const pastedValue = initialValue + pastedText;
+  context.proxy._boardfishSetPendingInputState({
+    start: initialValue.length,
+    end: initialValue.length,
+    direction: 'none',
+    hasSelection: false,
+    value: initialValue,
+    scriptRanges: [],
+    scriptCaretAffinity: '',
+    scriptCaretRanges: [],
+    inputType: 'insertFromPaste',
+    replacement: { start: initialValue.length, end: initialValue.length, insertedText: pastedText },
+  });
+  context.proxy.value = pastedValue;
+  context.proxy.setSelectionRange(pastedValue.length, pastedValue.length, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
+
+  assert.equal(obj.data.content, pastedValue);
+  assert.equal(obj.h, 50 * 24 + 8);
+  assert.equal(obj._textEditPendingSizeSync, true);
+  delete obj._layoutCache;
+  delete obj._layoutCacheContent;
+  delete obj._layoutCacheW;
+
+  const nextValue = pastedValue.split('\n').slice(0, 10).join('\n');
+  context.proxy._boardfishSetPendingInputState({
+    start: nextValue.length,
+    end: pastedValue.length,
+    direction: 'forward',
+    hasSelection: true,
+    value: pastedValue,
+    scriptRanges: [],
+    scriptCaretAffinity: '',
+    scriptCaretRanges: [],
+    inputType: 'deleteContentBackward',
+    replacement: { start: nextValue.length, end: pastedValue.length, insertedText: '' },
+  });
+  context.proxy.value = nextValue;
+  context.proxy.setSelectionRange(nextValue.length, nextValue.length, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'deleteContentBackward' });
+
+  assert.equal(obj.data.content, nextValue);
+  assert.equal(obj.data.content.length >= 20000, true);
+  assert.equal(obj.h, 10 * 24 + 8);
+  assert.equal(obj._textEditPendingSizeSync, undefined);
+  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
+});
+
+test('undo-restored large pasted text shrinks on the next selected delete', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const line = 'x'.repeat(3000);
+  const restoredValue = Array.from({ length: 51 }, () => line).join('\n');
+  obj.data = { content: restoredValue };
+  obj.w = 1_000_000;
+  obj.h = 51 * 24 + 8;
+
+  context.enterEdit(obj.id, { history: false });
+  obj._editMinLines = 51;
+  obj._textEditPreservedMinLines = 51;
+  delete obj._textEditPendingSizeSync;
+  delete obj._layoutCache;
+  delete obj._layoutCacheContent;
+  delete obj._layoutCacheW;
+
+  const nextValue = restoredValue.split('\n').slice(0, 10).join('\n');
+  context.proxy._boardfishSetPendingInputState({
+    start: nextValue.length,
+    end: restoredValue.length,
+    direction: 'forward',
+    hasSelection: true,
+    value: restoredValue,
+    scriptRanges: [],
+    scriptCaretAffinity: '',
+    scriptCaretRanges: [],
+    inputType: 'deleteContentBackward',
+    replacement: { start: nextValue.length, end: restoredValue.length, insertedText: '' },
+  });
+  context.proxy.value = nextValue;
+  context.proxy.setSelectionRange(nextValue.length, nextValue.length, 'none');
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'deleteContentBackward' });
+
+  assert.equal(obj.data.content, nextValue);
+  assert.equal(obj.data.content.length >= 20000, true);
+  assert.equal(obj.h, 10 * 24 + 8);
+  assert.equal(obj._editMinLines, 1);
+  assert.equal(obj._textEditPreservedMinLines, undefined);
+  assert.equal(obj._textEditPendingSizeSync, undefined);
+  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
 
 test('perf text input trace records selected-content delete phases', () => {

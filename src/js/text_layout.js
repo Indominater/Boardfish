@@ -1374,6 +1374,31 @@ function wrappedLineFromLayoutLine(line) {
   };
 }
 
+function wrappedLineIndexFromLayout(layout) {
+  const lines = Array.isArray(layout) ? layout : [];
+  const entries = [];
+  for (let visualLineIndex = 0; visualLineIndex < lines.length; visualLineIndex++) {
+    const line = lines[visualLineIndex] || {};
+    const logicalLineIndex = Math.max(0, Math.trunc(Number(line.logicalLineIndex)) || 0);
+    let entry = entries[entries.length - 1];
+    if (!entry || entry.logicalLineIndex !== logicalLineIndex) {
+      entry = {
+        logicalLineIndex,
+        startIndex: Math.max(0, Math.trunc(Number(line.startIndex)) || 0),
+        endIndex: Math.max(0, Math.trunc(Number(line.endIndex)) || 0),
+        visualStart: visualLineIndex,
+        visualEnd: visualLineIndex,
+      };
+      entries.push(entry);
+    } else {
+      entry.startIndex = Math.min(entry.startIndex, Math.max(0, Math.trunc(Number(line.startIndex)) || 0));
+      entry.endIndex = Math.max(entry.endIndex, Math.max(0, Math.trunc(Number(line.endIndex)) || 0));
+      entry.visualEnd = visualLineIndex;
+    }
+  }
+  return entries;
+}
+
 function patchTextObjectLayoutAfterInput(obj, options = {}) {
   if (!obj || obj.type !== 'text' || !Array.isArray(obj._layoutCache)) return false;
   const patchStartedAt = textLayoutDebugNow();
@@ -1528,15 +1553,18 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
     cachedWrapped.content = newContent;
     cachedWrapped.w = obj.w;
     cachedWrapped.scriptKey = scriptKey;
+    cachedWrapped.lineCount = Math.max(1, layout.length);
   } else {
     _linesCacheMap.set(obj.id, {
       content: newContent,
       w: obj.w,
       scriptKey,
       lines: layout.map(wrappedLineFromLayoutLine),
+      lineCount: Math.max(1, layout.length),
     });
   }
   trimMapCache(_linesCacheMap, TEXT_LINES_CACHE_MAX_ENTRIES);
+  setCachedTextWrappedLineIndex(obj, newContent, scriptKey, wrappedLineIndexFromLayout(layout), layout.length);
 
   mark('linesCacheMs', stepStartedAt);
   debug.ok = true;
