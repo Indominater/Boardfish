@@ -15,8 +15,8 @@
   --text-font-variant-caps: normal;
   --text-letter-spacing: 0px;
   --text-direction: ltr;
-  --regular_text: 300;
-  --bold_text: 350;
+  --regular_text: 400;
+  --bold_text: 500;
   --black_font: #15141A;
   --white_font: #fbfbfe;
   --white_font_rgb: 251, 251, 254;
@@ -99,6 +99,8 @@ body {
   font-variant-caps: var(--text-font-variant-caps);
   letter-spacing: var(--text-letter-spacing);
   direction: var(--text-direction);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #canvas {
@@ -378,7 +380,7 @@ body {
   white-space: nowrap;
 }
 .ctx-shortcut {
-  color: rgba(var(--white_font_rgb), 0.64);
+  color: rgba(var(--white_font_rgb), 0.7);
   font: var(--text-font-style) var(--regular_text) var(--menu-item-font-size) var(--text-font-family);
   line-height: inherit;
   justify-self: end;
@@ -392,11 +394,6 @@ body {
 .ctx-item:active {
   background: var(--menu-active-bg);
   transition-duration: 0ms;
-}
-.ctx-item:disabled,
-.ctx-item[aria-disabled="true"] {
-  opacity: 0.42;
-  pointer-events: none;
 }
 .ctx-sep {
   height: 1px;

@@ -167,8 +167,11 @@ test('canvas and context menu use regular hit testing', () => {
 
 test('background context menu clears object selection before opening', () => {
   const contextMenuSource = readSource('src/js/context_menu.js');
+  const styles = readSource('src/styles.css');
 
-  assert.match(contextMenuSource, /if \(obj\) \{[\s\S]*obj-ctx-menu:open[\s\S]*return;[\s\S]*\}\s*if \(selectedIds\.size\) deselectAll\(\);\s*ctxPos = wp;\s*updateCtxMenuActions\(\);\s*openCtxMenuAt\(clientX, clientY\);/);
+  assert.match(contextMenuSource, /if \(obj\) \{[\s\S]*obj-ctx-menu:open[\s\S]*return;[\s\S]*\}\s*if \(selectedIds\.size\) deselectAll\(\);\s*ctxPos = wp;\s*openCtxMenuAt\(clientX, clientY\);/);
+  assert.doesNotMatch(contextMenuSource, /addTextBtn\.disabled|addImageBtn\.disabled|updateCtxMenuActions|button\??\.disabled|reason: 'disabled'/);
+  assert.doesNotMatch(styles, /\.ctx-item:disabled|aria-disabled/);
 });
 
 test('text editing context menu uses text actions before object actions', () => {

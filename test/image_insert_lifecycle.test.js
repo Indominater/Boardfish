@@ -193,3 +193,12 @@ test('failed web image inserts revoke unadopted web image sources', () => {
   assert.match(source, /catch \(err\) \{[\s\S]*cleanupFailedWebImageInsertSource\(imgKey, imageSource\);[\s\S]*throw err;/);
   assert.match(source, /BoardfishWebBoardContainer\.revokeImageSource\?\.\(imageSource\);/);
 });
+
+test('web image insert rejects a whole supported batch that would exceed object limit', () => {
+  const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
+
+  assert.match(source, /const supportedFiles = \[\];/);
+  assert.match(source, /supportedFiles\.push\(file\);/);
+  assert.match(source, /BoardfishWebLimits\.canAddObjects\(supportedFiles\.length\)/);
+  assert.doesNotMatch(source, /remainingObjectSlots|accepted\.length >= maxObjects/);
+});

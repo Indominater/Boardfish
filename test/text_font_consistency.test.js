@@ -30,8 +30,8 @@ test('DOM text uses the shared app font rendering defaults', () => {
   for (const declaration of [
     "--text-font-family: 'Geist Sans', system-ui;",
     '--text-font-style: normal;',
-    '--regular_text: 300;',
-    '--bold_text: 350;',
+    '--regular_text: 400;',
+    '--bold_text: 500;',
     '--text-font-kerning: none;',
     '--text-font-stretch: normal;',
     '--text-font-variant-caps: normal;',
@@ -49,6 +49,8 @@ test('DOM text uses the shared app font rendering defaults', () => {
     'font-variant-caps: var(--text-font-variant-caps);',
     'letter-spacing: var(--text-letter-spacing);',
     'direction: var(--text-direction);',
+    '-webkit-font-smoothing: antialiased;',
+    '-moz-osx-font-smoothing: grayscale;',
   ]) {
     assert.ok(css.includes(bodyDeclaration), `body does not apply ${bodyDeclaration}`);
   }
@@ -65,7 +67,6 @@ test('DOM text uses the shared app font rendering defaults', () => {
     2
   );
   assert.match(css, /\.ctx-shortcut\s*\{[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*line-height: inherit;[\s\S]*\}/);
-  assert.doesNotMatch(css, /\b500\b/);
   assert.match(html, /id="ctx-btn-dark-mode"[\s\S]*<svg viewBox="0 0 24 24"/);
   assert.doesNotMatch(html, /Material\+Symbols|fonts\.googleapis\.com|fonts\.gstatic\.com/);
   assert.doesNotMatch(html, /wght[^"]*100\.\.700/);
@@ -73,7 +74,6 @@ test('DOM text uses the shared app font rendering defaults', () => {
   assert.match(css, /button,\s*input,\s*textarea,\s*select\s*\{[\s\S]*font: inherit;[\s\S]*font-variant-caps: inherit;[\s\S]*letter-spacing: inherit;[\s\S]*direction: inherit;[\s\S]*\}/);
   assert.doesNotMatch(css, /font-synthesis/);
   assert.doesNotMatch(css, /font-variant-numeric/);
-  assert.doesNotMatch(css, /-webkit-font-smoothing/);
 });
 
 test('canvas text uses the same non-size font feature defaults', () => {

@@ -393,10 +393,6 @@ function menuCommandName(button) {
 function runMenuCommand(button, source) {
   const run = menuCommandFromButton(button);
   const command = menuCommandName(button);
-  if (button?.disabled) {
-    MenuDebug.log('menu:command:blocked', { command, source, reason: 'disabled' });
-    return true;
-  }
   if (!run) {
     MenuDebug.log('menu:command:missing', { command, source, target: button?.id || '' });
     return false;
@@ -621,7 +617,7 @@ island?.addEventListener('contextmenu', suppressZoomPillContextMenu);
 
 function onMenuPointerDown(e) {
   const button = e.target.closest?.('.ctx-item');
-  if (!button || button.disabled || e.button !== 0) return;
+  if (!button || e.button !== 0) return;
   e.stopPropagation();
   _menuPointerCommand = button;
   MenuDebug.log('menu:pointer-command:start', { command: menuCommandName(button), target: button.id });
@@ -643,7 +639,7 @@ function onMenuPointerUp(e) {
 
 function onMenuMouseDown(e) {
   const button = e.target.closest?.('.ctx-item');
-  if (!button || button.disabled || e.button !== 0) return;
+  if (!button || e.button !== 0) return;
   _menuMouseCommand = button;
   MenuDebug.log('menu:mouse-command:start', { command: menuCommandName(button), target: button.id });
 }
@@ -736,12 +732,6 @@ const updateTextEditMenuActions = async () => {
   return hasSelection || showPaste;
 };
 
-function updateCtxMenuActions() {
-  const canAddObject = BoardfishWebLimits.canAddObjects(1, { notifyUser: false });
-  if (addTextBtn) addTextBtn.disabled = !canAddObject;
-  if (addImageBtn) addImageBtn.disabled = !canAddObject;
-}
-
 const showTextEditContextMenuAt = async (clientX, clientY) => {
   const requestId = (showTextEditContextMenuAt.requestId || 0) + 1;
   showTextEditContextMenuAt.requestId = requestId;
@@ -809,7 +799,6 @@ function showCanvasContextMenuAt(clientX, clientY) {
   }
   if (selectedIds.size) deselectAll();
   ctxPos = wp;
-  updateCtxMenuActions();
   openCtxMenuAt(clientX, clientY);
   MenuDebug.log('ctx-menu:open', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
 }

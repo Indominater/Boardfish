@@ -375,15 +375,9 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
   if (!files.length) { InsertDebug.end(dbg, { source, skipped: 'no-files' }); return; }
   let added = 0;
   const readyPromises = [];
-  if (!BoardfishWebLimits.canAddObjects(1)) {
-    InsertDebug.end(dbg, { source, skipped: 'web-object-limit', fileCount: files.length });
-    return;
-  }
   const accepted = [];
   const dropped = { type: 0, objectLimit: 0, contentLimit: 0 };
-  const remainingSlotsRaw = BoardfishWebLimits.remainingObjectSlots?.();
-  const remainingSlots = Number.isFinite(Number(remainingSlotsRaw)) ? Number(remainingSlotsRaw) : files.length;
-  const maxObjects = Math.max(0, Math.min(files.length, remainingSlots));
+  const supportedFiles = [];
   let acceptedBytes = 0;
   for (const file of files) {
     if (!isWebInsertImageFile(file)) {
@@ -391,11 +385,18 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
       InsertDebug.step(dbg, 'file:skip', { source, fileName: file?.name || '', fileSize: file?.size ?? '', fileType: file?.type || '', skipped: 'unsupported-type' });
       continue;
     }
-    if (accepted.length >= maxObjects) {
-      dropped.objectLimit++;
-      InsertDebug.step(dbg, 'file:skip', { source, fileName: file.name, fileSize: file.size, fileType: file.type, skipped: 'web-object-limit' });
-      continue;
-    }
+    supportedFiles.push(file);
+  }
+  if (!supportedFiles.length) {
+    InsertDebug.end(dbg, { source, fileCount: files.length, added: 0, skipped: 'no-supported-files', ...dropped });
+    return;
+  }
+  if (!BoardfishWebLimits.canAddObjects(supportedFiles.length)) {
+    dropped.objectLimit = supportedFiles.length;
+    InsertDebug.end(dbg, { source, fileCount: files.length, supportedFileCount: supportedFiles.length, added: 0, skipped: 'web-object-limit', ...dropped });
+    return;
+  }
+  for (const file of supportedFiles) {
     const projectedBytes = acceptedBytes + Number(file.size || 0);
     const projectedObjects = accepted.length + 1;
     if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(projectedBytes, projectedObjects, { notifyUser: false })) {
