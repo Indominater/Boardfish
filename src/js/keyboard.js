@@ -46,6 +46,10 @@ function hasTextEditingOrSelectionContextForShortcut(e) {
     hasDocumentTextSelectionForShortcut();
 }
 
+function hasActiveTextEditAlignmentContext() {
+  return !!editingId && typeof _editEl !== 'undefined' && !!_editEl;
+}
+
 const hasSelectedImagesForKeyboardTransform = () => {
   if (!selectedIds?.size || !objectsMap?.get) return false;
   for (const id of selectedIds) {
@@ -175,10 +179,21 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (hasExactCommandModifier(e) && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    const direction = e.key === 'ArrowRight' ? 'right' : 'left';
+    if (
+      hasActiveTextEditAlignmentContext() &&
+      typeof applyTextEditAlignmentFromKeyboard === 'function'
+    ) {
+      consumeShortcutEvent(e);
+      runShortcutCommand(`text-align-${direction}`, () => {
+        applyTextEditAlignmentFromKeyboard(direction);
+      });
+      return;
+    }
     if (hasTextEditingOrSelectionContextForShortcut(e)) return;
     consumeShortcutEvent(e);
-    runShortcutCommand(`text-align-${e.key === 'ArrowRight' ? 'right' : 'left'}`, () => {
-      applySelectedTextAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left');
+    runShortcutCommand(`text-align-${direction}`, () => {
+      applySelectedTextAlignmentFromKeyboard(direction);
     });
     return;
   }

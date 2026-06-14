@@ -49,6 +49,7 @@ function loadKeyboard(overrides = {}) {
     selectedIds: new Set(),
     objectsMap: new Map(),
     editingId: null,
+    _editEl: null,
     isBoardInputBlocked: () => false,
     hasOpenContextMenu: () => false,
     runVisibleMenuCommandForShortcut: () => false,
@@ -207,15 +208,22 @@ test('paste keydown stays native unless a context menu is open', () => {
   assert.deepEqual(calls, []);
 });
 
-test('cmd+arrow text alignment falls through to the text editor while editing', () => {
-  const { calls, mainKeydown } = loadKeyboard({ editingId: 'text-1' });
+test('cmd+arrow text alignment applies to the active text edit', () => {
+  const { calls, mainKeydown } = loadKeyboard({
+    editingId: 'text-1',
+    _editEl: {},
+    applyTextEditAlignmentFromKeyboard: (direction) => {
+      calls.push(['alignEdit', direction]);
+      return true;
+    },
+  });
   const event = keyEvent({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true });
 
   mainKeydown(event);
 
-  assert.equal(event.defaultPrevented, false);
-  assert.equal(event.propagationStopped, false);
-  assert.deepEqual(calls, []);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.deepEqual(calls, [['alignEdit', 'right']]);
 });
 
 test('cmd+arrow text alignment falls through for editable DOM targets', () => {

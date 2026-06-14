@@ -458,7 +458,7 @@ test('right arrow from a nested braced script end exits to the parent layer', ()
   ]);
 });
 
-test('cmd+right while editing stays native for caret movement', () => {
+test('cmd+right while editing aligns the current caret line', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   obj.data = { content: 'one\ntwo\nthree' };
@@ -472,15 +472,41 @@ test('cmd+right while editing stays native for caret movement', () => {
   const key = makeKeyEvent('ArrowRight', { metaKey: true });
   context.proxy.dispatchEvent(key);
 
-  assert.equal(key.prevented, false);
-  assert.equal(obj.data.lineAlign, undefined);
-  assert.deepEqual(context.dirty, []);
-  assert.deepEqual(context.histories, []);
-  assert.deepEqual(context.renders, []);
-  assert.deepEqual(context.animations, []);
+  assert.equal(key.prevented, true);
+  assert.deepEqual([...obj.data.lineAlign], ['left', 'center']);
+  assert.equal(context.proxy.selectionStart, 5);
+  assert.equal(context.proxy.selectionEnd, 5);
+  assert.deepEqual(context.dirty, [obj.id]);
+  assert.deepEqual(context.histories, ['text-align']);
+  assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
+  assert.deepEqual(context.animations, ['text-align']);
 });
 
-test('cmd+right while editing highlighted text stays native', () => {
+test('cmd+left while editing aligns the current caret line leftward', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'one\ntwo\nthree', lineAlign: ['left', 'right', 'right'] };
+
+  context.enterEdit(obj.id, { history: false });
+  context.dirty.length = 0;
+  context.histories.length = 0;
+  context.renders.length = 0;
+  context.animations.length = 0;
+  context.proxy.setSelectionRange(5, 5, 'none');
+  const key = makeKeyEvent('ArrowLeft', { metaKey: true });
+  context.proxy.dispatchEvent(key);
+
+  assert.equal(key.prevented, true);
+  assert.deepEqual([...obj.data.lineAlign], ['left', 'center', 'right']);
+  assert.equal(context.proxy.selectionStart, 5);
+  assert.equal(context.proxy.selectionEnd, 5);
+  assert.deepEqual(context.dirty, [obj.id]);
+  assert.deepEqual(context.histories, ['text-align']);
+  assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
+  assert.deepEqual(context.animations, ['text-align']);
+});
+
+test('cmd+right while editing highlighted text aligns the highlighted lines', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   obj.data = { content: 'one\ntwo\nthree' };
@@ -494,12 +520,14 @@ test('cmd+right while editing highlighted text stays native', () => {
   const key = makeKeyEvent('ArrowRight', { metaKey: true });
   context.proxy.dispatchEvent(key);
 
-  assert.equal(key.prevented, false);
-  assert.equal(obj.data.lineAlign, undefined);
-  assert.deepEqual(context.dirty, []);
-  assert.deepEqual(context.histories, []);
-  assert.deepEqual(context.renders, []);
-  assert.deepEqual(context.animations, []);
+  assert.equal(key.prevented, true);
+  assert.deepEqual([...obj.data.lineAlign], ['left', 'center', 'center']);
+  assert.equal(context.proxy.selectionStart, 4);
+  assert.equal(context.proxy.selectionEnd, obj.data.content.length);
+  assert.deepEqual(context.dirty, [obj.id]);
+  assert.deepEqual(context.histories, ['text-align']);
+  assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
+  assert.deepEqual(context.animations, ['text-align']);
 });
 
 test('typing over a visible braced compound selection removes hidden closing braces', () => {

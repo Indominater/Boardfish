@@ -1828,6 +1828,36 @@ const updateTextLineAlignForInput = (obj, inputState, nextValue, insertedText) =
   else delete obj.data.lineAlign;
 };
 
+const applyTextEditAlignmentFromKeyboard = (direction = 'right', id = editingId, proxy = _editEl) => {
+  if (!id || !proxy) return false;
+  if (typeof isBoardInputBlocked === 'function' && isBoardInputBlocked()) return false;
+  if (
+    typeof applyTextLineAlignmentRange !== 'function' ||
+    typeof textLogicalLineRangeForSelection !== 'function'
+  ) {
+    return false;
+  }
+  const obj = objectsMap.get(id);
+  if (!obj || obj.type !== 'text') return false;
+  if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
+  if (!obj.data) obj.data = {};
+  const content = textEditProxyValue(proxy);
+  if (obj.data.content !== content) obj.data.content = content;
+  const selection = textEditSelectionState(proxy);
+  const range = textLogicalLineRangeForSelection(content, selection);
+  if (typeof _caretVisible !== 'undefined') _caretVisible = true;
+  const changed = applyTextLineAlignmentRange(obj, range.startLine, range.endLine, direction);
+  if (!changed) {
+    scheduleRender(true, false, 'text-align');
+    return true;
+  }
+  markDirty(id);
+  globalThis.BoardfishMotion?.applyActionAnimation?.('text-align', { objects: [obj] });
+  scheduleRender(true, true, 'text-align');
+  pushHistory('text-align');
+  return true;
+};
+
 const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSelectionState(proxy)) => {
   if (!selection?.hasSelection || !proxy) return false;
   const dbgApi = textEditorClipDebugApi();
@@ -3275,6 +3305,10 @@ function enterEdit(id, {
     }
 
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      e.preventDefault();
+      if (typeof applyTextEditAlignmentFromKeyboard === 'function') {
+        applyTextEditAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left', id, proxy);
+      }
       return;
     }
 
