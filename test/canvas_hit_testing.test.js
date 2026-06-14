@@ -286,7 +286,54 @@ test('text edit caret honors visual line preference at wrapped line start', () =
   ];
 
   assert.equal(context.drawCaret(canvasContext, obj, layout, 3), true);
-  assert.deepEqual(fillRects, [[13, 24, 2, 24]]);
+  assert.deepEqual(fillRects, [[14, 24, 2, 24]]);
+});
+
+test('text edit caret stays inside content bounds at low zoom', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
+  const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const context = {
+    _caretVisible: true,
+    LINE_H: 24,
+    TEXT_PAD: 4,
+    TEXT_BASELINE_Y_OFFSET: 16,
+    zoom: 1,
+    canvasTextColor: () => '#111',
+    lineXAtOffset(line, obj, offset) {
+      return obj.x + context.TEXT_PAD + offset * 10;
+    },
+    lineEndX(line, obj) {
+      return obj.x + context.TEXT_PAD + line.text.length * 10;
+    },
+    textLayoutLineIntersectsViewport: () => true,
+    textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${viewportSource.slice(start, end)}\n` +
+      'globalThis.drawCaret = drawCaret;\n',
+    context,
+  );
+
+  const fillRects = [];
+  const canvasContext = {
+    fillStyle: '',
+    fillRect(...args) { fillRects.push(args); },
+  };
+  const obj = { x: 10, y: 0, w: 40, h: 24 };
+  const layout = [{ text: 'abc', startIndex: 0, endIndex: 3, caretEndIndex: 3, y: 0 }];
+  const view = { zoom: 0.25 };
+
+  assert.equal(context.drawCaret(canvasContext, obj, layout, 0, { view }), true);
+  assert.equal(context.drawCaret(canvasContext, obj, layout, 3, { view }), true);
+  assert.deepEqual(fillRects, [
+    [14, 0, 8, 24],
+    [38, 0, 8, 24],
+  ]);
 });
 
 test('text edit overlay draws only visible layout lines', () => {
@@ -301,6 +348,51 @@ test('text edit overlay draws only visible layout lines', () => {
   assert.match(overlaySource, /editVisibleLines/);
   assert.match(overlaySource, /editCulledLines/);
   assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*lines: visibleLines/);
+});
+
+test('entering text edit invalidates the offscreen cache before proxy setup', () => {
+  const textEditorSource = readSource('src/js/text_editor.js');
+  const start = textEditorSource.indexOf('function enterEdit');
+  const end = textEditorSource.indexOf('function exitEdit', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const enterSource = textEditorSource.slice(start, end);
+  const editingIndex = enterSource.indexOf('editingId = id;');
+  const invalidateIndex = enterSource.indexOf('invalidateOffscreen();', editingIndex);
+  const proxyIndex = enterSource.indexOf("document.createElement('textarea')");
+
+  assert.ok(editingIndex >= 0, 'enterEdit must set editingId');
+  assert.ok(invalidateIndex > editingIndex, 'enterEdit must invalidate after editingId changes');
+  assert.ok(proxyIndex > invalidateIndex, 'offscreen invalidation must happen before proxy setup can focus or render');
+});
+
+test('dark text edit mode bypasses the offscreen text cache', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const helperStart = viewportSource.indexOf('function shouldUseEditOffscreenCache');
+  const helperEnd = viewportSource.indexOf('function drawBoard', helperStart);
+  assert.notEqual(helperStart, -1);
+  assert.notEqual(helperEnd, -1);
+
+  for (const [theme, expected] of [['dark', false], ['light', true]]) {
+    const context = { appTheme: theme, document: { body: { dataset: { theme } } } };
+    vm.createContext(context);
+    vm.runInContext(
+      `${viewportSource.slice(helperStart, helperEnd)}\n` +
+        'globalThis.shouldUseEditOffscreenCache = shouldUseEditOffscreenCache;\n',
+      context,
+    );
+    assert.equal(context.shouldUseEditOffscreenCache(), expected);
+  }
+
+  const drawStart = viewportSource.indexOf('function drawBoard');
+  const drawEnd = viewportSource.indexOf('function hitTest', drawStart);
+  assert.notEqual(drawStart, -1);
+  assert.notEqual(drawEnd, -1);
+  const drawSource = viewportSource.slice(drawStart, drawEnd);
+
+  assert.match(drawSource, /const useEditOffscreenCache = shouldUseEditOffscreenCache\(\);/);
+  assert.match(drawSource, /else if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
+  assert.match(drawSource, /else \{[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, viewportRect \}\);/);
 });
 
 test('text selection collection uses indexed script metrics while editing math text', () => {

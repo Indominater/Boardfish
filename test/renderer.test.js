@@ -112,6 +112,24 @@ test('text renderer uses the latest measured baseline offset', () => {
   ]);
 });
 
+test('screen canvas reset restores full-opacity source-over drawing', () => {
+  const BoardfishRenderer = loadRenderer();
+  const calls = [];
+  const context = {
+    globalAlpha: 0.42,
+    globalCompositeOperation: 'multiply',
+    setTransform(...args) {
+      calls.push(args);
+    },
+  };
+
+  BoardfishRenderer.resetCanvasToScreen(context);
+
+  assert.deepEqual(calls, [[1, 0, 0, 1, 0, 0]]);
+  assert.equal(context.globalAlpha, 1);
+  assert.equal(context.globalCompositeOperation, 'source-over');
+});
+
 test('image renderer crops untransformed images to the visible viewport', () => {
   const BoardfishRenderer = loadRenderer();
   const drawImageCalls = [];

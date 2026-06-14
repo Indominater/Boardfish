@@ -104,6 +104,8 @@
 
   function resetCanvasToScreen(context) {
     context.setTransform(1, 0, 0, 1, 0, 0);
+    context.globalAlpha = 1;
+    context.globalCompositeOperation = 'source-over';
   }
 
   function configureRendererTextContext(context) {

@@ -686,8 +686,14 @@ function drawCaret(context, obj, layout, selStart, options = {}) {
   }
   if (caretLine && !textLayoutLineIntersectsViewport(caretLine, options.viewportRect || null)) return false;
   context.fillStyle = canvasTextColor();
-  const caretWidth = 2 / zoom;
-  context.fillRect(cx - caretWidth / 2, cy, caretWidth, caretHeight);
+  const viewZoom = Number(options.view?.zoom ?? zoom);
+  const caretZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
+  const caretWidth = 2 / caretZoom;
+  const contentLeft = obj.x + TEXT_PAD;
+  const contentRight = Math.max(contentLeft, obj.x + obj.w - TEXT_PAD);
+  const maxCaretX = Math.max(contentLeft, contentRight - caretWidth);
+  const caretX = Math.max(contentLeft, Math.min(cx - caretWidth / 2, maxCaretX));
+  context.fillRect(caretX, cy, caretWidth, caretHeight);
   return true;
 }
 
@@ -776,7 +782,7 @@ function drawEditingTextOverlay(context, options = {}) {
 
     if (selStart === selEnd) {
       const caretStart = collectDebug ? performance.now() : 0;
-      const drawn = drawCaret(context, obj, layout, selStart, { viewportRect });
+      const drawn = drawCaret(context, obj, layout, selStart, { viewportRect, view });
       if (collectDebug) {
         stats.editCaretMs = performance.now() - caretStart;
         stats.editCaretDrawn = !!drawn;
@@ -786,6 +792,11 @@ function drawEditingTextOverlay(context, options = {}) {
     if (restoreMotion) context.restore();
   }
   return stats;
+}
+
+function shouldUseEditOffscreenCache() {
+  if (typeof appTheme !== 'undefined') return appTheme !== 'dark';
+  return document?.body?.dataset?.theme !== 'dark';
 }
 
 function drawBoard() {
@@ -804,7 +815,8 @@ function drawBoard() {
   let drawnText = 0;
 
   if (editingId) {
-    if (_offscreenDirty) {
+    const useEditOffscreenCache = shouldUseEditOffscreenCache();
+    if (useEditOffscreenCache && _offscreenDirty) {
       // Kick off async rebuild (pre-decodes images to avoid GPU stall).
       // Draw all objects directly this frame while the rebuild is pending.
       _rebuildOffscreenAsync();
@@ -818,12 +830,23 @@ function drawBoard() {
       if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
       drawnImages += drawn.drawnImages;
       drawnText += drawn.drawnText;
-    } else {
+    } else if (useEditOffscreenCache) {
       // Blit cached offscreen (background + all non-editing objects)
       const blitStart = collectDrawDebug ? performance.now() : 0;
       resetCanvasToScreen(ctx);
       ctx.drawImage(_offscreen, 0, 0);
       if (collectDrawDebug) drawPhases.offscreenBlitMs = performance.now() - blitStart;
+    } else {
+      const setupStart = collectDrawDebug ? performance.now() : 0;
+      resetCanvasToScreen(ctx);
+      fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
+      setWorldCanvasTransform(ctx, dpr);
+      if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
+      const objectsStart = collectDrawDebug ? performance.now() : 0;
+      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, viewportRect });
+      if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
+      drawnImages += drawn.drawnImages;
+      drawnText += drawn.drawnText;
     }
 
     const editStart = collectDrawDebug ? performance.now() : 0;

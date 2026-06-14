@@ -2405,6 +2405,7 @@ function enterEdit(id, {
   const obj = objectsMap.get(id);
   if (!obj) return;
   editingId = id;
+  invalidateOffscreen();
   let stepStart = textEditorDebugNow();
   const logStep = (label, meta = {}) => {
     const t = textEditorDebugNow();
