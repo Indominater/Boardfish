@@ -6,19 +6,6 @@ var _rubberBandStyleState = { display: '', left: '', top: '', width: '', height:
 var _rubberBandDragActive = false;
 var _textMinWidthWarmCancel = null;
 var _textMinWidthWarmObjectId = '';
-var _textEditRectangleGutterSvg = null;
-var _textEditRectangleGutterPath = null;
-var _textEditRectangleGutterState = {
-  objectId: '',
-  targetCenterX: null,
-  targetCenterY: null,
-  currentCenterX: null,
-  currentCenterY: null,
-  pointerClientX: null,
-  pointerClientY: null,
-  heightPx: 0,
-  lineHeightPx: 0,
-};
 
 function selectionOverlayDevicePixelRatio() {
   const value = typeof window !== 'undefined' ? Number(window.devicePixelRatio) : 1;
@@ -51,190 +38,6 @@ function snappedSelectionOverlayScreenRect(x, y, width, height, dpr = selectionO
     width: Math.max(0, x2 - x1),
     height: Math.max(0, y2 - y1),
   };
-}
-
-function textEditRectangleGutterApi() {
-  return typeof BoardfishTextEditRectangleGutter !== 'undefined'
-    ? BoardfishTextEditRectangleGutter
-    : globalThis.BoardfishTextEditRectangleGutter;
-}
-
-function ensureTextEditRectangleGutterElements() {
-  if (_textEditRectangleGutterSvg && _textEditRectangleGutterPath) return true;
-  if (typeof document === 'undefined') return false;
-  _textEditRectangleGutterSvg = document.getElementById('text-edit-rectangle-gutter');
-  _textEditRectangleGutterPath = document.getElementById('text-edit-rectangle-gutter-path');
-  if (!_textEditRectangleGutterSvg && selOverlay) {
-    _textEditRectangleGutterSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    _textEditRectangleGutterSvg.id = 'text-edit-rectangle-gutter';
-    _textEditRectangleGutterSvg.setAttribute('aria-hidden', 'true');
-    _textEditRectangleGutterSvg.setAttribute('focusable', 'false');
-    _textEditRectangleGutterPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    _textEditRectangleGutterPath.id = 'text-edit-rectangle-gutter-path';
-    _textEditRectangleGutterSvg.appendChild(_textEditRectangleGutterPath);
-    selOverlay.insertBefore(_textEditRectangleGutterSvg, selOverlay.firstChild);
-  }
-  return !!(_textEditRectangleGutterSvg && _textEditRectangleGutterPath);
-}
-
-function textEditRectangleGutterCenterForClientPoint(obj, clientX, clientY) {
-  if (!obj || obj.type !== 'text' || !Number.isFinite(Number(clientX)) || !Number.isFinite(Number(clientY)) || !(zoom > 0)) return null;
-  return {
-    x: Number(clientX) - (obj.x * zoom + panX),
-    y: Number(clientY) - (obj.y * zoom + panY),
-  };
-}
-
-function textEditRectangleGutterCaretCenter(obj) {
-  if (!obj || obj.type !== 'text' || !(zoom > 0)) return null;
-  const layout = typeof getTextLayout === 'function' ? getTextLayout(obj) : null;
-  if (!Array.isArray(layout) || !layout.length) return null;
-  const pos = Math.max(0, Math.trunc(Number(_editEl?.selectionStart)) || 0);
-  for (const line of layout) {
-    const start = Math.max(0, Math.trunc(Number(line.startIndex)) || 0);
-    const end = Math.max(start, Math.trunc(Number(line.caretEndIndex ?? line.endIndex ?? start)) || start);
-    if (pos >= start && pos <= end) return (line.y - obj.y + LINE_H / 2) * zoom;
-  }
-  const fallbackLine = layout[0];
-  return (fallbackLine.y - obj.y + LINE_H / 2) * zoom;
-}
-
-function textEditRectangleGutterGeometryFor(obj, center = null, heightPx = null, widthPx = null) {
-  const api = textEditRectangleGutterApi();
-  if (!api || !obj || obj.type !== 'text' || !(zoom > 0)) return null;
-  const overlayWidthPx = Math.max(0, Number(widthPx ?? obj.w * zoom) || 0);
-  const overlayHeightPx = Math.max(0, Number(heightPx ?? obj.h * zoom) || 0);
-  const caretHeightPx = Math.max(1, LINE_H * zoom);
-  const marginPx = Math.max(0, TEXT_PAD * zoom);
-  const fallbackCenterY = textEditRectangleGutterCaretCenter(obj) ?? overlayHeightPx / 2;
-  const centerX = typeof center === 'object' && center
-    ? center.x
-    : (Number.isFinite(Number(center)) ? null : overlayWidthPx / 2);
-  const centerY = typeof center === 'object' && center
-    ? center.y
-    : (Number.isFinite(Number(center)) ? Number(center) : fallbackCenterY);
-  return api.createGeometry({
-    widthPx: overlayWidthPx,
-    heightPx: overlayHeightPx,
-    centerX: Number.isFinite(Number(centerX)) ? Number(centerX) : overlayWidthPx / 2,
-    centerY: Number.isFinite(Number(centerY)) ? Number(centerY) : fallbackCenterY,
-    caretHeightPx,
-    marginPx,
-  });
-}
-
-function textEditRectangleGutterNeedsMergedOutline(geometry) {
-  if (!geometry) return false;
-  return geometry.leftX < 0 ||
-    geometry.topY < 0 ||
-    geometry.rightX > geometry.widthPx ||
-    geometry.bottomY > geometry.heightPx;
-}
-
-function textEditRectangleGutterTargetCenter(obj, overlayWidthPx, overlayHeightPx) {
-  const pointerCenter = textEditRectangleGutterCenterForClientPoint(
-    obj,
-    _textEditRectangleGutterState.pointerClientX,
-    _textEditRectangleGutterState.pointerClientY,
-  );
-  if (pointerCenter) {
-    _textEditRectangleGutterState.targetCenterX = Number(pointerCenter.x);
-    _textEditRectangleGutterState.targetCenterY = Number(pointerCenter.y);
-    return pointerCenter;
-  }
-  if (
-    Number.isFinite(Number(_textEditRectangleGutterState.targetCenterX)) &&
-    Number.isFinite(Number(_textEditRectangleGutterState.targetCenterY))
-  ) {
-    return {
-      x: Number(_textEditRectangleGutterState.targetCenterX),
-      y: Number(_textEditRectangleGutterState.targetCenterY),
-    };
-  }
-  return {
-    x: overlayWidthPx / 2,
-    y: textEditRectangleGutterCaretCenter(obj) ?? overlayHeightPx / 2,
-  };
-}
-
-function renderTextEditRectangleGutter(obj, heightPx = null, widthPx = null) {
-  const api = textEditRectangleGutterApi();
-  if (!api || !ensureTextEditRectangleGutterElements() || !obj || obj.type !== 'text' || !editingId) {
-    if (_textEditRectangleGutterPath) _textEditRectangleGutterPath.setAttribute('d', '');
-    if (selOverlay?.classList?.contains('merged-outline')) selOverlay.classList.remove('merged-outline');
-    return false;
-  }
-
-  const overlayWidthPx = Math.max(0, Number(widthPx ?? obj.w * zoom) || 0);
-  const overlayHeightPx = Math.max(0, Number(heightPx ?? obj.h * zoom) || 0);
-  const caretHeightPx = Math.max(1, LINE_H * zoom);
-  const marginPx = Math.max(0, TEXT_PAD * zoom);
-  const targetCenter = textEditRectangleGutterTargetCenter(obj, overlayWidthPx, overlayHeightPx);
-  const geometry = api.createGeometry({
-    widthPx: overlayWidthPx,
-    heightPx: overlayHeightPx,
-    centerX: targetCenter.x,
-    centerY: targetCenter.y,
-    caretHeightPx,
-    marginPx,
-  });
-  _textEditRectangleGutterState.currentCenterX = geometry.centerX;
-  _textEditRectangleGutterState.currentCenterY = geometry.centerY;
-  _textEditRectangleGutterState.objectId = obj.id || '';
-  _textEditRectangleGutterState.heightPx = overlayHeightPx;
-  _textEditRectangleGutterState.lineHeightPx = caretHeightPx;
-
-  _textEditRectangleGutterSvg.setAttribute('viewBox', `${geometry.svgLeftPx} ${geometry.svgTopPx} ${geometry.svgWidthPx} ${Math.max(1, geometry.svgHeightPx)}`);
-  _textEditRectangleGutterSvg.style.setProperty('--text-edit-gutter-depth', `${geometry.horizontalDepthPx}px`);
-  _textEditRectangleGutterSvg.style.width = `${geometry.svgWidthPx}px`;
-  _textEditRectangleGutterSvg.style.height = `${Math.max(1, geometry.svgHeightPx)}px`;
-  _textEditRectangleGutterSvg.style.left = `${geometry.svgLeftPx}px`;
-  _textEditRectangleGutterSvg.style.top = `${geometry.svgTopPx}px`;
-  const needsMergedOutline = textEditRectangleGutterNeedsMergedOutline(geometry);
-  if (needsMergedOutline) {
-    if (!selOverlay.classList.contains('merged-outline')) selOverlay.classList.add('merged-outline');
-  } else if (selOverlay.classList.contains('merged-outline')) {
-    selOverlay.classList.remove('merged-outline');
-  }
-  _textEditRectangleGutterPath.setAttribute('d', needsMergedOutline ? api.pathData(geometry) : '');
-  return true;
-}
-
-function captureTextEditRectangleGutterPointerFromEvent(e) {
-  if (!editingId || !_editEl || !Number.isFinite(Number(e?.clientX)) || !Number.isFinite(Number(e?.clientY))) return false;
-  const obj = objectsMap.get(editingId);
-  if (!obj || obj.type !== 'text') return false;
-  _textEditRectangleGutterState.pointerClientX = Number(e.clientX);
-  _textEditRectangleGutterState.pointerClientY = Number(e.clientY);
-  const center = textEditRectangleGutterCenterForClientPoint(obj, e.clientX, e.clientY);
-  if (!center) return false;
-  _textEditRectangleGutterState.targetCenterX = Number(center.x);
-  _textEditRectangleGutterState.targetCenterY = Number(center.y);
-  return true;
-}
-
-function updateTextEditRectangleGutterTargetFromEvent(e) {
-  if (!captureTextEditRectangleGutterPointerFromEvent(e)) return;
-  const obj = objectsMap.get(editingId);
-  renderTextEditRectangleGutter(obj);
-}
-
-function textEditRectangleGutterHitTest(clientX, clientY, obj = null) {
-  const api = textEditRectangleGutterApi();
-  const targetObj = obj || (editingId ? objectsMap.get(editingId) : null);
-  if (!api || !editingId || !_editEl || !targetObj || targetObj.type !== 'text' || selectedIds.size !== 1) return null;
-  if (!(zoom > 0)) return null;
-  const localX = Number(clientX) - (targetObj.x * zoom + panX);
-  const localY = Number(clientY) - (targetObj.y * zoom + panY);
-  const center = textEditRectangleGutterCenterForClientPoint(targetObj, clientX, clientY) ?? { x: localX, y: localY };
-  const geometry = textEditRectangleGutterGeometryFor(targetObj, center);
-  if (!api.hitTestLocal(localX, localY, geometry)) return null;
-  _textEditRectangleGutterState.pointerClientX = Number(clientX);
-  _textEditRectangleGutterState.pointerClientY = Number(clientY);
-  _textEditRectangleGutterState.targetCenterX = geometry.centerX;
-  _textEditRectangleGutterState.targetCenterY = geometry.centerY;
-  renderTextEditRectangleGutter(targetObj);
-  return { object: targetObj, geometry, localX, localY };
 }
 
 function beginRubberBandDrag() {
@@ -434,7 +237,6 @@ var INPUT_SHIELD_EVENT_OPTIONS = { capture: true, passive: false };
 for (const type of ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu', 'wheel', 'keydown', 'keyup', 'beforeinput', 'input', 'paste', 'drop', 'dragover']) {
   document.addEventListener(type, blockShieldInput, INPUT_SHIELD_EVENT_OPTIONS);
 }
-document.addEventListener('mousemove', updateTextEditRectangleGutterTargetFromEvent, { passive: true });
 
 function _setStyleIfChanged(el, prop, value, state) {
   if (state[prop] === value) return;
@@ -589,20 +391,6 @@ function updateSelectionOverlay() {
     if (!selOverlay.classList.contains('text-resize')) selOverlay.classList.add('text-resize');
   } else {
     if (selOverlay.classList.contains('text-resize')) selOverlay.classList.remove('text-resize');
-  }
-  if (editingId && !isMultiSelected() && firstSelectedObj.type === 'text') {
-    if (
-      _textEditRectangleGutterState.objectId !== firstSelectedObj.id ||
-      _textEditRectangleGutterState.targetCenterX == null ||
-      _textEditRectangleGutterState.targetCenterY == null
-    ) {
-      _textEditRectangleGutterState.targetCenterX = screenRect.width / 2;
-      _textEditRectangleGutterState.targetCenterY = textEditRectangleGutterCaretCenter(firstSelectedObj) ?? screenRect.height / 2;
-    }
-    renderTextEditRectangleGutter(firstSelectedObj, screenRect.height, screenRect.width);
-  } else if (_textEditRectangleGutterPath) {
-    _textEditRectangleGutterPath.setAttribute('d', '');
-    if (selOverlay.classList.contains('merged-outline')) selOverlay.classList.remove('merged-outline');
   }
   updateMultiSelectionOverlay();
   if (!selOverlay.classList.contains('visible')) selOverlay.classList.add('visible');

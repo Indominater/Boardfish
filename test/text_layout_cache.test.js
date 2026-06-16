@@ -178,8 +178,8 @@ test('text layout adds a small advance when neighboring glyph ink would touch', 
   const calls = [];
 
   assert.equal(textLayout.measureTextW('YY'), 20.5);
-  assert.equal(textLayout.lineXAtOffset(line, obj, 1), 14.5);
-  assert.equal(textLayout.lineXAtOffset(line, obj, 2), 24.5);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 1), 26.5);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 2), 36.5);
 
   textLayout.drawTextLineRange({
     font: '',
@@ -189,7 +189,7 @@ test('text layout adds a small advance when neighboring glyph ink would touch', 
   }, line, obj);
 
   assert.deepEqual(calls.map((call) => call.text), ['Y', 'Y']);
-  assert.deepEqual(calls.map((call) => call.x), [4, 14.5]);
+  assert.deepEqual(calls.map((call) => call.x), [context.TEXT_PAD, context.TEXT_PAD + 10.5]);
 });
 
 test('text drawing places each glyph at measured prefix positions', () => {
@@ -215,7 +215,7 @@ test('text drawing places each glyph at measured prefix positions', () => {
   }, line, obj);
 
   assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', ' ', 'c', '<', '-', 'd']);
-  assert.deepEqual(calls.map((call) => call.x), Array.from(line.prefixWidths.slice(0, -1)).map((x) => obj.x + 4 + x));
+  assert.deepEqual(calls.map((call) => call.x), Array.from(line.prefixWidths.slice(0, -1)).map((x) => obj.x + context.TEXT_PAD + x));
 });
 
 test('fast text drawing request preserves measured glyph positions', () => {
@@ -241,7 +241,7 @@ test('fast text drawing request preserves measured glyph positions', () => {
   }, line, obj, 0, line.text.length, { fast: true });
 
   assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', ' ', 'c', '<', '-', 'd']);
-  assert.deepEqual(calls.map((call) => call.x), Array.from(line.prefixWidths.slice(0, -1)).map((x) => obj.x + 4 + x));
+  assert.deepEqual(calls.map((call) => call.x), Array.from(line.prefixWidths.slice(0, -1)).map((x) => obj.x + context.TEXT_PAD + x));
 });
 
 test('text minimum width uses the widest rendered word, not character count', () => {
@@ -266,7 +266,7 @@ test('text minimum width uses the widest rendered word, not character count', ()
     data: { content: 'iiiiiiii WWW' },
   };
 
-  assert.equal(textLayout.getTextMinWidth(obj), 45);
+  assert.equal(textLayout.getTextMinWidth(obj), 69);
 });
 
 test('text minimum width includes leading indentation before the first word', () => {
@@ -286,7 +286,7 @@ test('text minimum width includes leading indentation before the first word', ()
     data: { content: 'Boardfish\n    Boardfish indentation example' },
   };
 
-  assert.equal(textLayout.getTextMinWidth(obj), 79);
+  assert.equal(textLayout.getTextMinWidth(obj), 103);
   assert.deepEqual(plain(textLayout.getTextMinWidthWordSegment(obj)), {
     text: '    Boardfish',
     word: 'Boardfish',
@@ -314,7 +314,7 @@ test('text minimum width treats spaces between words as separators', () => {
     data: { content: 'short      coordinate x\n        pixel y' },
   };
 
-  assert.equal(textLayout.getTextMinWidth(obj), 71);
+  assert.equal(textLayout.getTextMinWidth(obj), 95);
   assert.deepEqual(plain(textLayout.getTextMinWidthWordSegment(obj)), {
     text: '        pixel',
     word: 'pixel',
@@ -383,7 +383,7 @@ test('soft wrap after a full-width word consumes separator spaces', () => {
     type: 'text',
     x: 0,
     y: 0,
-    w: 'indominatoer'.length + 8,
+    w: 'indominatoer'.length + context.TEXT_PAD * 2,
     h: 40,
     data: { content: 'indominatoer hi' },
   };
@@ -410,7 +410,7 @@ test('caret range stays on the current line for trailing overflow spaces', () =>
     type: 'text',
     x: 0,
     y: 0,
-    w: 'indominater'.length + 8,
+    w: 'indominater'.length + context.TEXT_PAD * 2,
     h: 40,
     data: { content: 'indominater    \nhi' },
   };
@@ -437,7 +437,7 @@ test('trailing overflow spaces keep the last fitting spaces on the caret line', 
     type: 'text',
     x: 0,
     y: 0,
-    w: 'hi  '.length + 8,
+    w: 'hi  '.length + context.TEXT_PAD * 2,
     h: 40,
     data: { content: 'hi     \nnext' },
   };
@@ -473,7 +473,7 @@ test('text rendered content width uses the visible line width', () => {
     data: { content: 'Hi' },
   };
 
-  assert.equal(textLayout.getTextRenderedContentWidth(obj), 22);
+  assert.equal(textLayout.getTextRenderedContentWidth(obj), 46);
 });
 
 test('line alignment offsets caret positions within the text box', () => {
@@ -484,23 +484,23 @@ test('line alignment offsets caret positions within the text box', () => {
     type: 'text',
     x: 10,
     y: 0,
-    w: 20,
+    w: 44,
     h: 40,
     data: { content: 'abcd' },
   };
 
   let [line] = textLayout.getTextLayout(obj);
-  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 14);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 26);
 
   assert.equal(textLayout.applyTextLineAlignmentRange(obj, 0, 0, 'right'), true);
   [line] = textLayout.getTextLayout(obj);
   assert.equal(line.align, 'center');
-  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 18);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 30);
 
   assert.equal(textLayout.applyTextLineAlignmentRange(obj, 0, 0, 'right'), true);
   [line] = textLayout.getTextLayout(obj);
   assert.equal(line.align, 'right');
-  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 22);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 34);
 });
 
 test('text caret x centers between neighboring glyph ink bounds', () => {
@@ -534,10 +534,10 @@ test('text caret x centers between neighboring glyph ink bounds', () => {
 
   const [line] = textLayout.getTextLayout(obj);
 
-  assert.equal(textLayout.lineXAtOffset(line, obj, 1), 14);
-  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 1), 16);
-  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 0), 4);
-  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 2), 24);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 1), 26);
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 1), 28);
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 0), 16);
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 2), 36);
 });
 
 test('text caret x keeps logical positions next to whitespace', () => {
@@ -740,7 +740,7 @@ test('large text insertion patches cached layout instead of rebuilding every lin
     type: 'text',
     x: 0,
     y: 0,
-    w: 34,
+    w: 26 + context.TEXT_PAD * 2,
     h: 40,
     data: { content: oldContent },
   };
@@ -843,8 +843,8 @@ test('blank line deletion patches cached layout to match a fresh layout', () => 
 
   assert.deepEqual(comparable(patchedLayout), comparable(freshLayout));
   assert.deepEqual(plain(comparable(patchedLayout)), [
-    { text: 'line 1', startIndex: 0, endIndex: 6, caretEndIndex: 6, nextStartIndex: 6, logicalLineIndex: 0, y: 4 },
-    { text: 'line 2', startIndex: 7, endIndex: 13, caretEndIndex: 13, nextStartIndex: 13, logicalLineIndex: 1, y: 28 },
+    { text: 'line 1', startIndex: 0, endIndex: 6, caretEndIndex: 6, nextStartIndex: 6, logicalLineIndex: 0, y: context.TEXT_PAD },
+    { text: 'line 2', startIndex: 7, endIndex: 13, caretEndIndex: 13, nextStartIndex: 13, logicalLineIndex: 1, y: context.TEXT_PAD + context.LINE_H },
   ]);
 });
 
@@ -1054,7 +1054,7 @@ test('large plain text wrapping consumes separator spaces between wrapped words'
     type: 'text',
     x: 0,
     y: 0,
-    w: 'alpha'.length + 8,
+    w: 'alpha'.length + context.TEXT_PAD * 2,
     h: 40,
     data: { content },
   };
@@ -1080,7 +1080,7 @@ test('large plain text wrapping keeps fitting trailing spaces on the caret line'
     type: 'text',
     x: 0,
     y: 0,
-    w: 'hi  '.length + 8,
+    w: 'hi  '.length + context.TEXT_PAD * 2,
     h: 40,
     data: { content },
   };
@@ -1270,9 +1270,9 @@ test('auto-height keeps unwrapped logical lines exact without full layout cache'
     logicalLineIndex: line.logicalLineIndex,
     y: line.y,
   }))), [
-    { text: 'line 0 ^{script0} tail', startIndex: 0, logicalLineIndex: 0, y: 4 },
-    { text: 'line 1 ^{script1} tail', startIndex: 23, logicalLineIndex: 1, y: 28 },
-    { text: 'line 2 ^{script2} tail', startIndex: 46, logicalLineIndex: 2, y: 52 },
+    { text: 'line 0 ^{script0} tail', startIndex: 0, logicalLineIndex: 0, y: context.TEXT_PAD },
+    { text: 'line 1 ^{script1} tail', startIndex: 23, logicalLineIndex: 1, y: context.TEXT_PAD + context.LINE_H },
+    { text: 'line 2 ^{script2} tail', startIndex: 46, logicalLineIndex: 2, y: context.TEXT_PAD + context.LINE_H * 2 },
   ]);
 });
 
@@ -1331,7 +1331,7 @@ test('auto-height count cache also stores line index for viewport reuse', () => 
     type: 'text',
     x: 0,
     y: -400,
-    w: 42,
+    w: 34 + context.TEXT_PAD * 2,
     h: 1,
     data: { content },
   };
@@ -1362,7 +1362,7 @@ test('auto-height reuses exact wrapped line index when resize revisits a width',
     type: 'text',
     x: 0,
     y: 0,
-    w: 42,
+    w: 34 + context.TEXT_PAD * 2,
     h: 1,
     data: { content },
   };
@@ -1372,12 +1372,12 @@ test('auto-height reuses exact wrapped line index when resize revisits a width',
   const firstLineCount = textLayout.wrappedLineCountCacheValue(obj);
   const measuredAfterFirst = measured.length;
 
-  obj.w = 58;
+  obj.w = 50 + context.TEXT_PAD * 2;
   textLayout.syncTextAutoHeight(obj);
   assert.equal(textLayout.wrappedLineIndexWidthCacheSize(obj), 2);
   assert.ok(measured.length >= measuredAfterFirst);
 
-  obj.w = 42;
+  obj.w = 34 + context.TEXT_PAD * 2;
   obj.h = 1;
   const measuredBeforeRevisit = measured.length;
   assert.equal(textLayout.syncTextAutoHeight(obj), true);
@@ -1402,11 +1402,11 @@ test('viewport layout still supports count-only auto-height cache without full l
     type: 'text',
     x: 0,
     y: -240,
-    w: 42,
+    w: 34 + context.TEXT_PAD * 2,
     h: 90 * context.LINE_H + context.TEXT_PAD * 2,
     data: { content },
     _textWrappedLineCountCacheContent: content,
-    _textWrappedLineCountCacheW: 42,
+    _textWrappedLineCountCacheW: 34 + context.TEXT_PAD * 2,
     _textWrappedLineCountCacheScriptKey: '[]',
     _textWrappedLineCountCacheValue: 90,
   };
@@ -1435,7 +1435,7 @@ test('runtime prewarm fills paragraph prefixes without full layout cache', () =>
     type: 'text',
     x: 0,
     y: -900,
-    w: 42,
+    w: 34 + context.TEXT_PAD * 2,
     h: 90 * context.LINE_H + context.TEXT_PAD * 2,
     data: { content },
   };
@@ -1470,7 +1470,7 @@ test('viewport line range layout is cached for repeated panning draws', () => {
     type: 'text',
     x: 0,
     y: -360,
-    w: 42,
+    w: 34 + context.TEXT_PAD * 2,
     h: 100 * context.LINE_H + context.TEXT_PAD * 2,
     data: { content },
   };
@@ -1498,7 +1498,7 @@ test('viewport line cache reuses prewarmed lines for shifted panning ranges', ()
     type: 'text',
     x: 0,
     y: -4800,
-    w: 42,
+    w: 34 + context.TEXT_PAD * 2,
     h: 620 * context.LINE_H + context.TEXT_PAD * 2,
     data: { content },
   };

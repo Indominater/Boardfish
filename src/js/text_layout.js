@@ -2,7 +2,7 @@
 
 var FONT_SIZE = 16;
 var LINE_H    = 24;
-var TEXT_PAD  = 4;
+var TEXT_PAD  = 16;
 var NEW_TEXT_EDIT_MIN_LINES = 5;
 const TEXT_BOX_GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
 const regular_text = 400;

@@ -1321,9 +1321,6 @@ function scheduleTransform(source = 'transform', inputEvent = null) {
   lastViewportInputAt = performance.now();
   _frameInputAt = viewportEventTime(inputEvent);
   _frameInputSource = source;
-  if (typeof captureTextEditRectangleGutterPointerFromEvent === 'function') {
-    captureTextEditRectangleGutterPointerFromEvent(inputEvent);
-  }
   _needTransform = true;
   syncIslandZoomDisplay(source);
   scheduleFrame(source);

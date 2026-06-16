@@ -529,14 +529,10 @@ function startObjectDrag(e, obj) {
         });
         const enterEditStart = canvasInputNow();
         enterEdit(obj.id, { placeInitialCaret: false });
-        const gutterPrimed = typeof captureTextEditRectangleGutterPointerFromEvent === 'function'
-          ? captureTextEditRectangleGutterPointerFromEvent(ev)
-          : false;
         logClickEditStep('click-to-edit-enter-edit', {
           enterEditMs: canvasInputDebugRound(canvasInputNow() - enterEditStart),
           hasEditProxy: !!_editEl,
           editingId: editingId || '',
-          gutterPrimed,
         });
         if (_editEl && ev) {
           const worldStart = canvasInputNow();
@@ -661,13 +657,8 @@ canvas.addEventListener('mousedown', (e) => {
   const wp = toWorld(e.clientX, e.clientY);
   const worldPointMs = canvasInputDebugRound(canvasInputNow() - worldStart);
   const additive = e.metaKey || e.ctrlKey;
-  const rectangleGutterStart = canvasInputNow();
-  const rectangleGutterHit = !additive && typeof textEditRectangleGutterHitTest === 'function'
-    ? textEditRectangleGutterHitTest(e.clientX, e.clientY)
-    : null;
-  const rectangleGutterMs = canvasInputDebugRound(canvasInputNow() - rectangleGutterStart);
   const hitStart = canvasInputNow();
-  const obj = rectangleGutterHit?.object || hitTest(wp.x, wp.y);
+  const obj = hitTest(wp.x, wp.y);
   const hitTestMs = canvasInputDebugRound(canvasInputNow() - hitStart);
   canvasInputTextDebugLog('canvas-mousedown-route', obj, {
     phase: 'canvas-mousedown',
@@ -678,8 +669,6 @@ canvas.addEventListener('mousedown', (e) => {
     button: e.button,
     detail: e.detail ?? '',
     additive,
-    rectangleGutterHit: !!rectangleGutterHit,
-    rectangleGutterMs,
     emptyTextDeleted: !!emptyTextDeleted,
     emptyTextCleanupMs,
     worldPointMs,
@@ -692,11 +681,6 @@ canvas.addEventListener('mousedown', (e) => {
     ms: canvasInputDebugRound(canvasInputNow() - mouseDownStart),
     totalMs: canvasInputDebugRound(canvasInputNow() - mouseDownStart),
   });
-
-  if (rectangleGutterHit?.object) {
-    startTextSelectionDrag(e, rectangleGutterHit.object, wp);
-    return;
-  }
 
   // Multi-select: any click inside the bounding box (object or empty space) → drag group
   if (isMultiSelected() && !additive) {

@@ -1,6 +1,11 @@
 // ─── Context menu ─────────────────────────────────────────────────────────────
 var ctxPos = { x: 0, y: 0 };
 
+function addTextAtContextPoint() {
+  closeCtxMenu('command:add-text');
+  addText(ctxPos.x, ctxPos.y);
+}
+
 function clampMenuCoord(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
   const max = Math.max(margin, window.innerWidth - size - margin);
   return Math.max(margin, Math.min(max, value));
@@ -167,7 +172,7 @@ var _menuMouseCommand = null;
 var _lastPointerMenuCommandAt = 0;
 var MENU_COMMANDS = {
   'btn-new': () => { closeCtxMenu('command:new'); newBoard(); },
-  'btn-add-text': () => { closeCtxMenu('command:add-text'); addText(ctxPos.x, ctxPos.y); },
+  'btn-add-text': addTextAtContextPoint,
   'btn-add-image': () => { closeCtxMenu('command:add-image'); pickAndInsertImages(ctxPos.x, ctxPos.y); },
   'btn-paste': () => { closeCtxMenu('command:paste'); pasteAtPos(ctxPos.x, ctxPos.y); },
   'btn-save': () => { closeCtxMenu('command:save'); saveBoard(); },

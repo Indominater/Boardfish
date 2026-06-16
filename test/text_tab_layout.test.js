@@ -58,6 +58,7 @@ function loadTextLayout({ scaleMeasureWithFont = false } = {}) {
       normalizeTextScriptRangesForContent,
       setEditingId(id) { editingId = id; },
       textContentWithCanonicalScriptBraces,
+      get textPad() { return TEXT_PAD; },
     };`,
     context,
     { filename: 'text_tab_layout_test_hook.js' },
@@ -100,8 +101,8 @@ test('text script ranges hide the marker and draw following text smaller', () =>
   textLayout.drawTextLineRange(context, line, obj);
 
   assert.deepEqual(calls.map((call) => call.text), ['a', 'b', 'c']);
-  assert.equal(calls[0].x, 14);
-  assert.equal(calls[1].x, 15);
+  assert.equal(calls[0].x, obj.x + textLayout.textPad);
+  assert.equal(calls[1].x, obj.x + textLayout.textPad + 1);
   assert.ok(calls[1].y < calls[0].y);
   assert.match(calls[1].font, /11\.313708498984761px/);
   assert.equal(textLayout.lineXAtOffset(line, obj, 1), textLayout.lineXAtOffset(line, obj, 2));
@@ -134,7 +135,7 @@ test('text caret hit at wrapped line start records the visual line', () => {
     type: 'text',
     x: 10,
     y: 0,
-    w: 11,
+    w: 3 + textLayout.textPad * 2,
     h: 48,
     data: { content: 'abcdef' },
   };
@@ -321,7 +322,7 @@ test('rich script layout stays stable while editing inside it', () => {
     type: 'text',
     x: 10,
     y: 0,
-    w: 36,
+    w: 28 + textLayout.textPad * 2,
     h: 40,
     data: {
       content: 'By FTA, let a = p_1^u_1 * p',
@@ -380,7 +381,7 @@ test('text script ranges can nest with cumulative scale and offsets', () => {
   assert.ok(calls[2].y > calls[1].y);
   assert.equal(textLayout.lineXAtOffset(line, obj, 1), textLayout.lineXAtOffset(line, obj, 2));
   assert.equal(textLayout.lineXAtOffset(line, obj, 3), textLayout.lineXAtOffset(line, obj, 4));
-  assert.equal(textLayout.lineXAtOffset(line, obj, 5), 17);
+  assert.equal(textLayout.lineXAtOffset(line, obj, 5), obj.x + textLayout.textPad + 3);
 });
 
 test('text script nesting keeps third layer at second layer size', () => {
@@ -493,8 +494,8 @@ test('text tab drawing leaves tab glyphs invisible and positions later chunks at
   textLayout.drawTextLineRange(context, line, obj);
 
   assert.deepEqual(calls, [
-    { text: 'a', x: 14, y: 20 },
-    { text: 'b', x: 22, y: 20 },
-    { text: 'c', x: 23, y: 20 },
+    { text: 'a', x: obj.x + textLayout.textPad, y: 20 },
+    { text: 'b', x: obj.x + textLayout.textPad + 8, y: 20 },
+    { text: 'c', x: obj.x + textLayout.textPad + 9, y: 20 },
   ]);
 });

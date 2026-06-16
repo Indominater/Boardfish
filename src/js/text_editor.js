@@ -169,7 +169,7 @@ const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
   const scriptKey = textEditorLayoutScriptKey(obj);
   const alignKey = textEditorLayoutAlignKey(obj, text);
   const lineH = Number(typeof LINE_H !== 'undefined' ? LINE_H : 24) || 24;
-  const pad = Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 4) || 4;
+  const pad = Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 16) || 16;
   const activeEditingId = typeof editingId !== 'undefined' ? editingId : '';
   const minLines = obj.id === activeEditingId ? (Math.max(1, Math.trunc(Number(obj._editMinLines)) || 1)) : 1;
   const logicalLines = Math.max(1, textEditorNewlineCount(text) + 1);

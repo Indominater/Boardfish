@@ -69,7 +69,8 @@ var APP_THEMES = {
     webThemeColor: '#1c1b22',
   },
 };
-var appTheme = 'light';
+var DEFAULT_APP_THEME = 'dark';
+var appTheme = DEFAULT_APP_THEME;
 var APP_THEME_STORAGE_KEY = 'bf_app_theme';
 
 // StartupDebug is initialized by js/startup_debug.js.
@@ -83,15 +84,17 @@ function logStartupStep(step, detail = {}) {
   } catch (_) {}
 }
 
-function normalizeAppTheme(value) {
-  return String(value || '').toLowerCase() === 'dark' ? 'dark' : 'light';
+function normalizeAppTheme(value, fallback = DEFAULT_APP_THEME) {
+  const theme = String(value || '').toLowerCase();
+  if (theme === 'dark' || theme === 'light') return theme;
+  return fallback;
 }
 
 function loadStoredAppTheme() {
   try {
     return normalizeAppTheme(localStorage.getItem(APP_THEME_STORAGE_KEY));
   } catch (_) {
-    return 'light';
+    return DEFAULT_APP_THEME;
   }
 }
 

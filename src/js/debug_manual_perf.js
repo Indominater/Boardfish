@@ -786,7 +786,7 @@ var ManualPerfDebug = (() => {
   }
 
   function textEditPad() {
-    return Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 4) || 4;
+    return Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 16) || 16;
   }
 
   function textEditHeightLines(height) {

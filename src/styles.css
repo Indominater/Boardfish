@@ -141,7 +141,6 @@ body {
 
 /* ── Selection overlay ── */
 #sel-overlay {
-  --text-edit-gutter-depth: 24px;
   --text-edit-outline: var(--selection-outline);
   position: absolute;
   top: 0; left: 0;
@@ -159,28 +158,6 @@ body {
 }
 #sel-overlay.editing {
   border: 0;
-}
-#sel-overlay.editing.text-resize.merged-outline {
-  box-shadow: none;
-}
-#text-edit-rectangle-gutter {
-  position: absolute;
-  top: 0;
-  left: calc(-1 * var(--text-edit-gutter-depth));
-  display: none;
-  width: calc(100% + var(--text-edit-gutter-depth));
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-#sel-overlay.editing.text-resize #text-edit-rectangle-gutter {
-  display: block;
-}
-#text-edit-rectangle-gutter-path {
-  fill: none;
-  stroke: var(--text-edit-outline);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
 }
 #sel-overlay .s-handle[data-dir="w"],
 #sel-overlay .s-handle[data-dir="e"] { display: none; }

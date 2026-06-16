@@ -275,15 +275,15 @@ test('text edit caret honors visual line preference at wrapped line start', () =
   const context = {
     _caretVisible: true,
     LINE_H: 24,
-    TEXT_PAD: 4,
+    TEXT_PAD: 16,
     TEXT_BASELINE_Y_OFFSET: 16,
     zoom: 1,
     canvasTextColor: () => '#111',
     lineXAtOffset(line, obj, offset) {
-      return obj.x + 4 + offset * 10;
+      return obj.x + context.TEXT_PAD + offset * 10;
     },
     lineEndX(line, obj) {
-      return obj.x + 4 + line.text.length * 10;
+      return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
     textLayoutLineIntersectsViewport: () => true,
     textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
@@ -314,7 +314,7 @@ test('text edit caret honors visual line preference at wrapped line start', () =
   ];
 
   assert.equal(context.drawCaret(canvasContext, obj, layout, 3), true);
-  assert.deepEqual(fillRects, [[14, 24, 2, 24]]);
+  assert.deepEqual(fillRects, [[26, 24, 2, 24]]);
 });
 
 test('text edit caret stays inside content bounds at low zoom', () => {
@@ -327,7 +327,7 @@ test('text edit caret stays inside content bounds at low zoom', () => {
   const context = {
     _caretVisible: true,
     LINE_H: 24,
-    TEXT_PAD: 4,
+    TEXT_PAD: 16,
     TEXT_BASELINE_Y_OFFSET: 16,
     zoom: 1,
     canvasTextColor: () => '#111',
@@ -359,8 +359,8 @@ test('text edit caret stays inside content bounds at low zoom', () => {
   assert.equal(context.drawCaret(canvasContext, obj, layout, 0, { view }), true);
   assert.equal(context.drawCaret(canvasContext, obj, layout, 3, { view }), true);
   assert.deepEqual(fillRects, [
-    [14, 0, 8, 24],
-    [38, 0, 8, 24],
+    [26, 0, 8, 24],
+    [26, 0, 8, 24],
   ]);
 });
 

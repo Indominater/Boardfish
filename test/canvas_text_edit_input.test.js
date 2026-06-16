@@ -44,7 +44,6 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     selections: [],
     renders: [],
     logs: [],
-    gutterCaptures: [],
     obj,
     isSelected(id) { return selectedIds.has(id); },
     selectObject(id) { selectedIds.clear(); selectedIds.add(id); },
@@ -68,14 +67,6 @@ function loadCanvasInputHarness({ selected = true } = {}) {
       context.enterOptions.push({ ...(options || {}) });
       context.editingId = id;
       context._editEl = context.editProxy;
-    },
-    captureTextEditRectangleGutterPointerFromEvent(event) {
-      context.gutterCaptures.push({
-        clientY: event?.clientY ?? null,
-        editingId: context.editingId,
-        hasEditProxy: !!context._editEl,
-      });
-      return true;
     },
     editProxy: {
       focused: false,
@@ -249,7 +240,6 @@ test('click-release on an already selected text object enters edit mode', () => 
 
   assert.deepEqual(context.entered, ['text-1']);
   assert.deepEqual(context.enterOptions, [{ placeInitialCaret: false }]);
-  assert.deepEqual(context.gutterCaptures, [{ clientY: 42, editingId: 'text-1', hasEditProxy: true }]);
   assert.deepEqual(context.editProxy.selection, [3, 3]);
   assert.equal(context.editProxy.focused, false);
   context.flushDeferredTasks();

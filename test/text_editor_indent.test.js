@@ -8,7 +8,10 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
-const DEFAULT_TEXT_BOX_HEIGHT = 5 * 24 + 4 * 2;
+const TEST_LINE_H = 24;
+const TEST_TEXT_PAD = 16;
+const SINGLE_LINE_TEXT_BOX_HEIGHT = TEST_LINE_H + TEST_TEXT_PAD * 2;
+const DEFAULT_TEXT_BOX_HEIGHT = 5 * TEST_LINE_H + TEST_TEXT_PAD * 2;
 const DEFAULT_TEXT_BOX_WIDTH = DEFAULT_TEXT_BOX_HEIGHT * GOLDEN_RATIO;
 
 function loadTextEditorHelpers() {
@@ -1940,11 +1943,11 @@ test('fresh text edit width only grows past the default width', () => {
     id: 'text-1',
     type: 'text',
     w: DEFAULT_TEXT_BOX_WIDTH,
-    data: { content: 'x'.repeat(220) },
+    data: { content: 'x'.repeat(300) },
     _editStartContent: '',
   };
   assert.equal(syncFreshTextEditWidth(longObj), true);
-  assert.equal(longObj.w, 229);
+  assert.equal(longObj.w, 300 + TEST_TEXT_PAD * 2 + 1);
 
   const existingObj = {
     id: 'text-1',
@@ -1996,7 +1999,7 @@ test('text edit input resizes the textbox height in update mode', () => {
 
   assert.equal(obj.data.content, nextValue);
   assert.equal(obj.w, 800);
-  assert.equal(obj.h, 200);
+  assert.equal(obj.h, 8 * TEST_LINE_H + TEST_TEXT_PAD * 2);
   assert.deepEqual(context.dirty, [obj.id]);
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
@@ -2111,7 +2114,7 @@ test('large pasted text shrinks after a cached line-removing delete', () => {
   const initialValue = Array.from({ length: 50 }, () => line).join('\n');
   obj.data = { content: initialValue };
   obj.w = 1_000_000;
-  obj.h = 50 * 24 + 8;
+  obj.h = 50 * TEST_LINE_H + TEST_TEXT_PAD * 2;
 
   context.enterEdit(obj.id, { history: false });
 
@@ -2134,7 +2137,7 @@ test('large pasted text shrinks after a cached line-removing delete', () => {
   context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
 
   assert.equal(obj.data.content, pastedValue);
-  assert.equal(obj.h, 50 * 24 + 8);
+  assert.equal(obj.h, 50 * TEST_LINE_H + TEST_TEXT_PAD * 2);
   assert.equal(obj._textEditPendingSizeSync, true);
 
   context.getTextLayout(obj);
@@ -2157,7 +2160,7 @@ test('large pasted text shrinks after a cached line-removing delete', () => {
 
   assert.equal(obj.data.content, nextValue);
   assert.equal(obj.data.content.length >= 20000, true);
-  assert.equal(obj.h, 10 * 24 + 8);
+  assert.equal(obj.h, 10 * TEST_LINE_H + TEST_TEXT_PAD * 2);
   assert.equal(obj._textEditPendingSizeSync, undefined);
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
@@ -2169,7 +2172,7 @@ test('large pasted text shrinks after line-removing delete before layout cache e
   const initialValue = Array.from({ length: 50 }, () => line).join('\n');
   obj.data = { content: initialValue };
   obj.w = 1_000_000;
-  obj.h = 50 * 24 + 8;
+  obj.h = 50 * TEST_LINE_H + TEST_TEXT_PAD * 2;
 
   context.enterEdit(obj.id, { history: false });
 
@@ -2192,7 +2195,7 @@ test('large pasted text shrinks after line-removing delete before layout cache e
   context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
 
   assert.equal(obj.data.content, pastedValue);
-  assert.equal(obj.h, 50 * 24 + 8);
+  assert.equal(obj.h, 50 * TEST_LINE_H + TEST_TEXT_PAD * 2);
   assert.equal(obj._textEditPendingSizeSync, true);
   delete obj._layoutCache;
   delete obj._layoutCacheContent;
@@ -2217,7 +2220,7 @@ test('large pasted text shrinks after line-removing delete before layout cache e
 
   assert.equal(obj.data.content, nextValue);
   assert.equal(obj.data.content.length >= 20000, true);
-  assert.equal(obj.h, 10 * 24 + 8);
+  assert.equal(obj.h, 10 * TEST_LINE_H + TEST_TEXT_PAD * 2);
   assert.equal(obj._textEditPendingSizeSync, undefined);
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
@@ -2229,7 +2232,7 @@ test('undo-restored large pasted text shrinks on the next selected delete', () =
   const restoredValue = Array.from({ length: 51 }, () => line).join('\n');
   obj.data = { content: restoredValue };
   obj.w = 1_000_000;
-  obj.h = 51 * 24 + 8;
+  obj.h = 51 * TEST_LINE_H + TEST_TEXT_PAD * 2;
 
   context.enterEdit(obj.id, { history: false });
   obj._editMinLines = 51;
@@ -2258,7 +2261,7 @@ test('undo-restored large pasted text shrinks on the next selected delete', () =
 
   assert.equal(obj.data.content, nextValue);
   assert.equal(obj.data.content.length >= 20000, true);
-  assert.equal(obj.h, 10 * 24 + 8);
+  assert.equal(obj.h, 10 * TEST_LINE_H + TEST_TEXT_PAD * 2);
   assert.equal(obj._editMinLines, 1);
   assert.equal(obj._textEditPreservedMinLines, undefined);
   assert.equal(obj._textEditPendingSizeSync, undefined);
@@ -2357,7 +2360,7 @@ test('editing existing default-height text can shrink below the default new text
 
   assert.equal(event.prevented, false);
   assert.equal(obj.data.content, 'e^{x^{23}}');
-  assert.equal(obj.h, 32);
+  assert.equal(obj.h, SINGLE_LINE_TEXT_BOX_HEIGHT);
   assert.deepEqual(JSON.parse(JSON.stringify(obj.data.scriptRanges)), [
     { start: 2, end: 10, kind: 'sup' },
     { start: 5, end: 9, kind: 'sup' },
@@ -2381,7 +2384,7 @@ test('freshly created text stays at five-line height until edit exit', () => {
   assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
 
   context.exitEdit();
-  assert.equal(obj.h, 32);
+  assert.equal(obj.h, SINGLE_LINE_TEXT_BOX_HEIGHT);
 
   context.enterEdit(obj.id, { history: false });
   assert.equal(obj._editMinLines, 1);
@@ -2393,7 +2396,7 @@ test('exiting a newly created text box keeps default width when content fits', (
   context.exitEdit();
 
   assert.equal(context.obj.w, DEFAULT_TEXT_BOX_WIDTH);
-  assert.equal(context.obj.h, 32);
+  assert.equal(context.obj.h, SINGLE_LINE_TEXT_BOX_HEIGHT);
   assert.deepEqual(context.dirty, ['text-1']);
   assert.deepEqual(context.histories, ['text-height-change']);
   assert.deepEqual(context.renders, [{ board: true, overlay: true }]);
@@ -2403,7 +2406,7 @@ test('exiting unchanged existing text keeps cached layout and skips size history
   const context = loadExitEditHarness();
   const cachedLayout = [{ text: 'Hi', startIndex: 0, endIndex: 2, nextStartIndex: 2 }];
   Object.assign(context.obj, {
-    h: 32,
+    h: SINGLE_LINE_TEXT_BOX_HEIGHT,
     _editMinLines: 5,
     _editStartContent: 'Hi',
     _layoutCache: cachedLayout,

@@ -44,7 +44,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     selectedIds: [],
     zCounter: 1,
     LINE_H: 24,
-    TEXT_PAD: 4,
+    TEXT_PAD: 16,
     NEW_TEXT_EDIT_MIN_LINES: 5,
     BoardfishWebLimits: {
       canAddObjects() { return true; },
@@ -168,7 +168,7 @@ test('addText keeps top-left placement by default', () => {
   const obj = context.added[0];
   assert.equal(obj.x, 24);
   assert.equal(obj.y, 48);
-  assert.equal(obj.h, 128);
+  assert.equal(obj.h, 152);
   assert.ok(Math.abs(obj.w / obj.h - GOLDEN_RATIO) < 1e-12);
   assert.deepEqual(context.editedIds, [obj.id]);
 });

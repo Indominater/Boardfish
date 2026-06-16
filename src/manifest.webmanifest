@@ -6,8 +6,8 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#eaeaed",
-  "theme_color": "#eaeaed",
+  "background_color": "#1c1b22",
+  "theme_color": "#1c1b22",
   "icons": [
     {
       "src": "boardfish-icon-192.png",

@@ -66,7 +66,7 @@ const StartupDebug = {
   toggleThemeOrderStress: async () => ({ summary: {}, events: [], samples: [] }),
   events: [],
   samples: [],
-  expectedCanvasBg(theme = 'light') {
+  expectedCanvasBg(theme = 'dark') {
     return theme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
   },
   lastResult: null,

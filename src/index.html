@@ -6,19 +6,16 @@
   <title>Boardfish</title>
   <!-- Pages deploy refresh: 2026-06-03. -->
   <link rel="manifest" href="manifest.webmanifest" />
-  <meta name="theme-color" content="#eaeaed" />
+  <meta name="theme-color" content="#1c1b22" />
   <link rel="icon" type="image/png" sizes="512x512" href="boardfish-icon.png" />
   <link rel="apple-touch-icon" href="boardfish-icon.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body data-theme="dark">
   <div id="canvas">
     <canvas id="board-canvas"></canvas>
     <div id="multi-sel-overlay"></div>
     <div id="sel-overlay">
-      <svg id="text-edit-rectangle-gutter" viewBox="0 0 25 1" aria-hidden="true" focusable="false">
-        <path id="text-edit-rectangle-gutter-path"></path>
-      </svg>
       <div class="s-handle" data-dir="nw"></div>
       <div class="s-handle" data-dir="ne"></div>
       <div class="s-handle" data-dir="sw"></div>
@@ -41,7 +38,7 @@
   </div>
 
   <div id="ctx-actions">
-    <button class="ctx-action-item ctx-action-icon ui-highlight-nudge" id="ctx-btn-dark-mode" type="button" aria-label="Dark Mode" title="Dark Mode" aria-pressed="false">
+    <button class="ctx-action-item ctx-action-icon ui-highlight-nudge" id="ctx-btn-dark-mode" type="button" aria-label="Dark Mode" title="Dark Mode" aria-pressed="true">
       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
         <path d="M20.7 14.4A8.3 8.3 0 0 1 9.6 3.3a.8.8 0 0 0-.8-1.2A10.3 10.3 0 1 0 21.9 15.2a.8.8 0 0 0-1.2-.8ZM12 20.3A8.3 8.3 0 0 1 7.3 5.1a9.9 9.9 0 0 0 11.6 11.6A8.3 8.3 0 0 1 12 20.3Z" />
       </svg>
