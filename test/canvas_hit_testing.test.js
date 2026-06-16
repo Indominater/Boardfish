@@ -206,6 +206,34 @@ test('wheel zoom over visible floating UI uses the viewport wheel handler', () =
   assert.match(styles, /#island \{[\s\S]*overscroll-behavior: none;[\s\S]*touch-action: none;/);
 });
 
+test('keyboard focus mirrors menu hover styling without focusing the zoom pill', () => {
+  const styles = readSource('src/styles.css');
+  const indexSource = readSource('src/index.html');
+
+  assert.match(indexSource, /<button class="ctx-action-item[^"]*" id="ctx-btn-dark-mode"/);
+  assert.match(indexSource, /<a class="ctx-action-item[^"]*" id="ctx-btn-github"/);
+  assert.match(styles, /button:focus,\s*button:focus-visible\s*\{\s*outline: none;\s*\}/);
+  assert.match(styles, /\.ctx-action-item\s*\{[\s\S]*outline: none;[\s\S]*\}/);
+  assert.match(styles, /\.ctx-action-item:focus,\s*\.ctx-action-item:focus-visible\s*\{\s*outline: none;\s*\}/);
+  assert.match(styles, /:where\(\.ctx-item:hover,\s*\.ctx-item:focus-visible,\s*\.ctx-action-item:focus-visible,[\s\S]*#island:hover \.ui-highlight-nudge\)\s*\{[\s\S]*--ui-highlight-nudge-transform: translateX\(var\(--highlight-nudge-x\)\);[\s\S]*\}/);
+  assert.match(styles, /\.ctx-item:focus-visible\s*\{[\s\S]*background: var\(--firefox-menu-hover-bg\);[\s\S]*box-shadow: none;[\s\S]*color: var\(--firefox-menu-text\);[\s\S]*\}/);
+  assert.match(styles, /\.ctx-action-item\.hotspot-hover::before,\s*\.ctx-action-item:focus-visible::before\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
+  assert.match(styles, /#dlg-discard:focus-visible\s*\{\s*background: var\(--danger-hover-bg\);\s*\}/);
+  assert.doesNotMatch(styles, /#island:focus-visible #isl-zoom/);
+});
+
+test('destructive dialog action uses shared danger color tokens', () => {
+  const styles = readSource('src/styles.css');
+
+  assert.match(styles, /--danger-text:\s*#FF453A;/);
+  assert.match(styles, /--danger-bg:\s*rgba\(255,\s*69,\s*58,\s*0\.18\);/);
+  assert.match(styles, /--danger-hover-bg:\s*rgba\(255,\s*69,\s*58,\s*0\.26\);/);
+  assert.match(styles, /--danger-active-bg:\s*rgba\(255,\s*69,\s*58,\s*0\.34\);/);
+  assert.match(styles, /#dlg-discard\s*\{[\s\S]*background: var\(--danger-bg\);[\s\S]*color: var\(--danger-text\);[\s\S]*\}/);
+  assert.match(styles, /#dlg-discard:hover\s*\{\s*background: var\(--danger-hover-bg\);\s*\}/);
+  assert.match(styles, /#dlg-discard:active\s*\{\s*background: var\(--danger-active-bg\);\s*\}/);
+});
+
 test('zoom pill stays out of keyboard focus and Space reset paths', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const contextMenuSource = readSource('src/js/context_menu.js');
@@ -366,15 +394,27 @@ test('entering text edit invalidates the offscreen cache before proxy setup', ()
   assert.ok(proxyIndex > invalidateIndex, 'offscreen invalidation must happen before proxy setup can focus or render');
 });
 
-test('dark text edit mode bypasses the offscreen text cache', () => {
+test('text edit mode bypasses offscreen cache when other text boxes exist', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const helperStart = viewportSource.indexOf('function shouldUseEditOffscreenCache');
   const helperEnd = viewportSource.indexOf('function drawBoard', helperStart);
   assert.notEqual(helperStart, -1);
   assert.notEqual(helperEnd, -1);
 
-  for (const [theme, expected] of [['dark', false], ['light', true]]) {
-    const context = { appTheme: theme, document: { body: { dataset: { theme } } } };
+  for (const { theme, objects, editingId, expected } of [
+    { theme: 'dark', objects: [], editingId: 'text-1', expected: false },
+    { theme: 'light', objects: [{ id: 'img-1', type: 'image' }], editingId: 'text-1', expected: true },
+    {
+      theme: 'light',
+      objects: [
+        { id: 'text-1', type: 'text' },
+        { id: 'text-2', type: 'text' },
+      ],
+      editingId: 'text-1',
+      expected: false,
+    },
+  ]) {
+    const context = { appTheme: theme, document: { body: { dataset: { theme } } }, objects, editingId };
     vm.createContext(context);
     vm.runInContext(
       `${viewportSource.slice(helperStart, helperEnd)}\n` +

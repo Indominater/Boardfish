@@ -55,6 +55,7 @@ function loadSelectionInputHarness(objects, options = {}) {
   const documentListeners = new Map();
   const context = {
     console,
+    window: { devicePixelRatio: options.devicePixelRatio ?? 1 },
     document: {
       getElementById: (id) => createElement(id),
       createElement: () => createElement(),
@@ -178,6 +179,8 @@ function loadSelectionInputHarness(objects, options = {}) {
     `${source}\n` +
       'globalThis.beginSelectionHandleDrag = beginSelectionHandleDrag;\n' +
       'globalThis.proportionalCornerResizeSize = proportionalCornerResizeSize;\n' +
+      'globalThis.updateSelectionOverlay = updateSelectionOverlay;\n' +
+      'globalThis.snappedSelectionOverlayScreenRect = snappedSelectionOverlayScreenRect;\n' +
       'globalThis.flushEditHistoryCheckpoint = flushEditHistoryCheckpoint;\n' +
       'globalThis.beginTextEditHistoryAction = beginTextEditHistoryAction;\n' +
       'globalThis.recordTextEditInputHistory = recordTextEditInputHistory;\n',
@@ -302,6 +305,34 @@ test('proportional corner resize uses the smaller implied scale', () => {
   const resized = context.proportionalCornerResizeSize('ne', 200, 100, 40, 10, 0.1);
   assert.equal(resized.w, 180);
   assert.equal(resized.h, 90);
+});
+
+test('selection overlay snaps outline edges to the device pixel grid', () => {
+  const text = { id: 'text-a', type: 'text', x: 10.25, y: 20.25, w: 100.6, h: 40.6, data: { content: 'hello' } };
+  const context = loadSelectionInputHarness([text], { devicePixelRatio: 2 });
+  context.panX = 0.1;
+  context.panY = 0.2;
+
+  context.updateSelectionOverlay();
+
+  assert.equal(context.selOverlay.style.transform, 'translate(10.5px,20.5px)');
+  assert.equal(context.selOverlay.style.width, '100.5px');
+  assert.equal(context.selOverlay.style.height, '40.5px');
+  const snapped = context.snappedSelectionOverlayScreenRect(10.35, 20.45, 100.6, 40.6, 2);
+  assert.equal(snapped.x, 10.5);
+  assert.equal(snapped.y, 20.5);
+  assert.equal(snapped.width, 100.5);
+  assert.equal(snapped.height, 40.5);
+});
+
+test('selection surfaces share the same outline color token', () => {
+  const styles = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
+
+  assert.match(styles, /--selection-outline:\s*rgba\(10,\s*132,\s*255,\s*0\.9\);/);
+  assert.match(styles, /--selection-highlight:\s*rgba\(10,\s*132,\s*255,\s*0\.3\);/);
+  assert.match(styles, /--text-edit-outline:\s*var\(--selection-outline\);/);
+  assert.match(styles, /\.multi-sel-box\s*\{[\s\S]*box-shadow:\s*inset 0 0 0 1px var\(--selection-outline\);/);
+  assert.match(styles, /#rubber-band\s*\{[\s\S]*border:\s*1px solid var\(--selection-outline\);/);
 });
 
 test('single image resize anchors the opposite corner', () => {

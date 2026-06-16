@@ -580,7 +580,9 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, opti
   if (requireMotion && !motion) return false;
   context.save();
   applyTextSelectionMotionTransform(context, selection.bounds, motion);
-  context.fillStyle = 'rgba(10, 132, 255, 0.3)';
+  context.fillStyle = typeof canvasSelectionHighlightColor === 'function'
+    ? canvasSelectionHighlightColor()
+    : 'rgba(10, 132, 255, 0.3)';
   const pathFill = typeof context.beginPath === 'function' &&
     typeof context.rect === 'function' &&
     typeof context.fill === 'function';
@@ -795,8 +797,16 @@ function drawEditingTextOverlay(context, options = {}) {
 }
 
 function shouldUseEditOffscreenCache() {
-  if (typeof appTheme !== 'undefined') return appTheme !== 'dark';
-  return document?.body?.dataset?.theme !== 'dark';
+  const lightTheme = typeof appTheme !== 'undefined'
+    ? appTheme !== 'dark'
+    : document?.body?.dataset?.theme !== 'dark';
+  if (!lightTheme) return false;
+  // Canvas-to-canvas blits can subtly change text antialiasing. While editing,
+  // render other text boxes through the same direct path as normal mode.
+  if (typeof objects !== 'undefined' && Array.isArray(objects)) {
+    return !objects.some((obj) => obj?.type === 'text' && obj.id !== editingId);
+  }
+  return true;
 }
 
 function drawBoard() {
@@ -1311,6 +1321,9 @@ function scheduleTransform(source = 'transform', inputEvent = null) {
   lastViewportInputAt = performance.now();
   _frameInputAt = viewportEventTime(inputEvent);
   _frameInputSource = source;
+  if (typeof captureTextEditRectangleGutterPointerFromEvent === 'function') {
+    captureTextEditRectangleGutterPointerFromEvent(inputEvent);
+  }
   _needTransform = true;
   syncIslandZoomDisplay(source);
   scheduleFrame(source);

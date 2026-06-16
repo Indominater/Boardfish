@@ -105,12 +105,9 @@ const BoardfishMotion = (() => {
       'text-box-create',
       'text-box-redo-create',
       'text-box-resize',
-      'text-box-undo-create',
     ]),
     textBoxRemoval: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'text-box-delete',
       'text-box-empty-delete-on-exit',
-      'text-box-redo-delete',
       'text-box-undo-delete',
     ]),
     textBoxTransform: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
@@ -143,8 +140,6 @@ const BoardfishMotion = (() => {
       'menu-open',
     ]),
     pillSurface: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'opening-shield-pill-open',
-      'pill-message-close',
       'pill-message-open',
       'pill-message-update',
     ]),
@@ -165,7 +160,6 @@ const BoardfishMotion = (() => {
     objectCreate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'bulk-image-create',
       'image-object-create',
-      'object-undo-insert',
     ]),
     objectDuplicate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'image-object-duplicate',
@@ -174,8 +168,6 @@ const BoardfishMotion = (() => {
       'image-object-paste',
     ]),
     objectTransform: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'image-object-drag',
-      'image-object-resize',
       'object-drag',
       'object-group-drag',
       'object-multi-resize',

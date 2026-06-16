@@ -41,7 +41,6 @@ var MENU_SHORTCUTS = {
   'save-as': IS_MAC ? [SHIFT_KEY_LABEL, COMMAND_KEY_LABEL, 'S'] : [COMMAND_KEY_LABEL, SHIFT_KEY_LABEL, 'S'],
   open: [COMMAND_KEY_LABEL, 'O'],
   copy: [COMMAND_KEY_LABEL, 'C'],
-  cut: [COMMAND_KEY_LABEL, 'X'],
   duplicate: [COMMAND_KEY_LABEL, 'D'],
   'move-to-back': [COMMAND_KEY_LABEL, '['],
   'flip-image': [COMMAND_KEY_LABEL, 'F'],
@@ -168,6 +167,10 @@ function boardBg() {
 
 function canvasTextColor() {
   return cssVar('--canvas-text') || '#15141A';
+}
+
+function canvasSelectionHighlightColor() {
+  return cssVar('--selection-highlight') || 'rgba(10, 132, 255, 0.3)';
 }
 
 function fillBoardBackground(context, width, height) {

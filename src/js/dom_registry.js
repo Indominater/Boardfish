@@ -28,7 +28,6 @@
     rubberBand: 'rubber-band',
     addTextBtn: 'btn-add-text',
     addImageBtn: 'btn-add-image',
-    pasteBtn: 'btn-paste',
     textCopyBtn: 'text-btn-copy',
     textPasteBtn: 'text-btn-paste',
     textDeleteBtn: 'text-btn-delete',
