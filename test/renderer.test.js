@@ -191,6 +191,54 @@ test('image renderer crops untransformed images to the visible viewport', () => 
   ]]);
 });
 
+test('image renderer overdraws image edges by one device pixel at the current view scale', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawImageCalls = [];
+  const context = {
+    drawImage(...args) {
+      drawImageCalls.push(args);
+    },
+  };
+  const source = {
+    complete: true,
+    naturalWidth: 80,
+    naturalHeight: 60,
+    width: 80,
+    height: 60,
+  };
+  const obj = { type: 'image', x: 10, y: 20, w: 40, h: 30, data: { imgKey: 'img-1' } };
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 100, y2: 100 }),
+    dpr: () => 1,
+    getWrappedLines: () => [],
+    imageBitmapCache: () => ({}),
+    imageCache: () => ({ 'img-1': source }),
+    imageStore: () => ({ 'img-1': 'source' }),
+    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
+    imageTransformNeedsRendering: () => false,
+    isSidewaysRotation: () => false,
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [obj],
+    panX: () => 0,
+    panY: () => 0,
+    selectImageSourceForDraw: () => ({ source, scale: 1, targetScale: 1 }),
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters(), {
+    viewportRect: { x1: 0, y1: 0, x2: 100, y2: 100 },
+    view: { zoom: 2, dpr: 2, panX: 0, panY: 0 },
+  });
+
+  assert.deepEqual(drawImageCalls, [[source, 9.75, 19.75, 40.5, 30.5]]);
+});
+
 test('renderer does not redraw finished exit-motion objects', () => {
   const BoardfishRenderer = loadRenderer();
   const drawImageCalls = [];

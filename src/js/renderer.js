@@ -1,6 +1,9 @@
 'use strict';
 
 (function initBoardRenderer(root) {
+  const IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
+  const IMAGE_EDGE_EPSILON = 1e-9;
+
   function defaultImageBitmapCtor() {
     return typeof ImageBitmap !== 'undefined' ? ImageBitmap : null;
   }
@@ -77,7 +80,40 @@
     };
   }
 
+  function imageEdgeOverdrawWorld(deps, options = {}) {
+    const viewZoom = Number(options.view?.zoom ?? deps.zoom?.());
+    const viewDpr = Number(options.view?.dpr ?? deps.dpr?.());
+    const zoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
+    const dpr = Number.isFinite(viewDpr) && viewDpr > 0 ? viewDpr : 1;
+    return IMAGE_EDGE_OVERDRAW_DEVICE_PX / (zoom * dpr);
+  }
+
+  function nearlyEqual(a, b) {
+    return Math.abs(a - b) <= IMAGE_EDGE_EPSILON;
+  }
+
+  function imageCropDestinationWithOverdraw(crop, obj, edge) {
+    if (!(edge > 0)) return crop;
+    const cropRight = crop.dx + crop.dw;
+    const cropBottom = crop.dy + crop.dh;
+    const objRight = obj.x + obj.w;
+    const objBottom = obj.y + obj.h;
+    const left = nearlyEqual(crop.dx, obj.x) ? edge : 0;
+    const top = nearlyEqual(crop.dy, obj.y) ? edge : 0;
+    const right = nearlyEqual(cropRight, objRight) ? edge : 0;
+    const bottom = nearlyEqual(cropBottom, objBottom) ? edge : 0;
+    if (!(left || top || right || bottom)) return crop;
+    return {
+      ...crop,
+      dx: crop.dx - left,
+      dy: crop.dy - top,
+      dw: crop.dw + left + right,
+      dh: crop.dh + top + bottom,
+    };
+  }
+
   function drawImageObj(context, obj, img, deps, options = {}) {
+    const edgeOverdraw = imageEdgeOverdrawWorld(deps, options);
     const transform = deps.imageTransformFromObject(obj);
     if (deps.imageTransformNeedsRendering(transform)) {
       const sideways = deps.isSidewaysRotation(transform.rotation);
@@ -87,7 +123,13 @@
       context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
       context.scale(transform.flipX ? -1 : 1, transform.flipY ? -1 : 1);
       if (transform.rotation) context.rotate((transform.rotation * Math.PI) / 180);
-      context.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      context.drawImage(
+        img,
+        -drawW / 2 - edgeOverdraw,
+        -drawH / 2 - edgeOverdraw,
+        drawW + edgeOverdraw * 2,
+        drawH + edgeOverdraw * 2,
+      );
       context.restore();
       return { cropped: false };
     }
@@ -95,10 +137,17 @@
     const crop = visibleImageCrop(obj, img, options.viewportRect);
     if (crop?.empty) return { skipped: true };
     if (crop) {
-      context.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, crop.dx, crop.dy, crop.dw, crop.dh);
+      const dest = imageCropDestinationWithOverdraw(crop, obj, edgeOverdraw);
+      context.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, dest.dx, dest.dy, dest.dw, dest.dh);
       return { cropped: true };
     }
-    context.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+    context.drawImage(
+      img,
+      obj.x - edgeOverdraw,
+      obj.y - edgeOverdraw,
+      obj.w + edgeOverdraw * 2,
+      obj.h + edgeOverdraw * 2,
+    );
     return { cropped: false };
   }
 
@@ -272,7 +321,7 @@
           }
         }
         try {
-          const drawResult = drawImageObj(context, obj, img, deps, { viewportRect: options.viewportRect || null });
+          const drawResult = drawImageObj(context, obj, img, deps, { viewportRect: options.viewportRect || null, view });
           if (drawResult?.skipped) return false;
           if (drawResult?.cropped && counters) counters.croppedImages = (counters.croppedImages || 0) + 1;
           return true;
