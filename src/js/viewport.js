@@ -301,8 +301,8 @@ function setWorldCanvasTransform(context, dpr = window.devicePixelRatio || 1, vi
   return BoardRenderer.setWorldCanvasTransform(context, dpr, view);
 }
 
-function drawVisibleObjects(context, counters, { skipId = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null, skipText = false } = {}) {
-  return BoardRenderer.drawVisibleObjects(context, counters, { skipId, viewportRect, view, imageSourceResolver, skipText });
+function drawVisibleObjects(context, counters, { skipId = null, skipIds = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null, skipText = false } = {}) {
+  return BoardRenderer.drawVisibleObjects(context, counters, { skipId, skipIds, viewportRect, view, imageSourceResolver, skipText });
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
@@ -624,8 +624,25 @@ const drawTextSelectionContentJello = (context, obj, layout, selStart, selEnd, o
   return true;
 };
 
-const drawTextSelectionJelloOverlays = (context, viewportRect = null, view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 }) => {
-  const specs = globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.() || [];
+const textSelectionJelloSpecsForDraw = () => (
+  globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.() || []
+);
+
+const textSelectionJelloSpecForId = (specs = [], id = null) => (
+  specs.find((spec) => spec?.id && spec.id === id) || null
+);
+
+const textSelectionJelloSkipIds = (specs = [], exceptId = null) => {
+  const ids = new Set();
+  for (const spec of specs) {
+    if (!spec?.id || spec.id === exceptId) continue;
+    ids.add(spec.id);
+  }
+  return ids;
+};
+
+const drawTextSelectionJelloOverlays = (context, viewportRect = null, view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 }, specs = null) => {
+  specs = Array.isArray(specs) ? specs : textSelectionJelloSpecsForDraw();
   if (!specs.length) return 0;
   let drawn = 0;
   for (const spec of specs) {
@@ -723,6 +740,7 @@ function drawEditingTextOverlay(context, options = {}) {
   if (!obj || obj.type !== 'text') return null;
   const view = options.view || { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
   const viewportRect = options.viewportRect || currentViewportWorldRect(0);
+  const copiedSelectionSpec = textSelectionJelloSpecForId(options.textSelectionSpecs || [], obj.id);
   const collectDebug = options.collectDebug === true;
   const stats = collectDebug ? {
     editLayoutMs: 0,
@@ -743,8 +761,19 @@ function drawEditingTextOverlay(context, options = {}) {
     context.font = FONT;
     context.textBaseline = 'alphabetic';
 
-    const selStart = _editEl ? _editEl.selectionStart : 0;
-    const selEnd   = _editEl ? _editEl.selectionEnd   : 0;
+    const liveSelStart = _editEl ? _editEl.selectionStart : 0;
+    const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;
+    const liveStart = Math.min(liveSelStart, liveSelEnd);
+    const liveEnd = Math.max(liveSelStart, liveSelEnd);
+    const copiedMotion = copiedSelectionSpec
+      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, copiedSelectionSpec.start, copiedSelectionSpec.end, { view }) || null
+      : null;
+    const liveMatchesCopied = copiedSelectionSpec &&
+      liveStart === copiedSelectionSpec.start &&
+      liveEnd === copiedSelectionSpec.end;
+    const useCopiedSelectionMotion = !!copiedMotion && (liveSelStart === liveSelEnd || liveMatchesCopied);
+    const selStart = useCopiedSelectionMotion ? copiedSelectionSpec.start : liveSelStart;
+    const selEnd   = useCopiedSelectionMotion ? copiedSelectionSpec.end   : liveSelEnd;
     const layoutStart = collectDebug ? performance.now() : 0;
     const layout = getTextLayout(obj);
     if (collectDebug) {
@@ -756,7 +785,7 @@ function drawEditingTextOverlay(context, options = {}) {
       stats.editVisibleLines = visibleLines.length;
       stats.editCulledLines = Math.max(0, layout.length - visibleLines.length);
     }
-    const textSelectionMotion = selStart !== selEnd
+    const textSelectionMotion = useCopiedSelectionMotion ? copiedMotion : selStart !== selEnd
       ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, { view }) || null
       : null;
     const selectionStart = collectDebug ? performance.now() : 0;
@@ -823,9 +852,11 @@ function drawBoard() {
   const viewportRect = currentViewportWorldRect(0);
   let drawnImages = 0;
   let drawnText = 0;
+  const textSelectionSpecs = textSelectionJelloSpecsForDraw();
+  const copiedSelectionSkipIds = textSelectionJelloSkipIds(textSelectionSpecs, editingId || null);
 
   if (editingId) {
-    const useEditOffscreenCache = shouldUseEditOffscreenCache();
+    const useEditOffscreenCache = shouldUseEditOffscreenCache() && copiedSelectionSkipIds.size === 0;
     if (useEditOffscreenCache && _offscreenDirty) {
       // Kick off async rebuild (pre-decodes images to avoid GPU stall).
       // Draw all objects directly this frame while the rebuild is pending.
@@ -836,7 +867,7 @@ function drawBoard() {
       setWorldCanvasTransform(ctx, dpr);
       if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
       const objectsStart = collectDrawDebug ? performance.now() : 0;
-      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, viewportRect });
+      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect });
       if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
       drawnImages += drawn.drawnImages;
       drawnText += drawn.drawnText;
@@ -853,7 +884,7 @@ function drawBoard() {
       setWorldCanvasTransform(ctx, dpr);
       if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
       const objectsStart = collectDrawDebug ? performance.now() : 0;
-      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, viewportRect });
+      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect });
       if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
       drawnImages += drawn.drawnImages;
       drawnText += drawn.drawnText;
@@ -862,8 +893,8 @@ function drawBoard() {
     const editStart = collectDrawDebug ? performance.now() : 0;
     setWorldCanvasTransform(ctx, dpr);
     const overlayView = { zoom, panX, panY, dpr };
-    drawTextSelectionJelloOverlays(ctx, viewportRect, overlayView);
-    const editStats = drawEditingTextOverlay(ctx, { view: overlayView, viewportRect, collectDebug: collectDrawDebug });
+    drawTextSelectionJelloOverlays(ctx, viewportRect, overlayView, textSelectionSpecs);
+    const editStats = drawEditingTextOverlay(ctx, { view: overlayView, viewportRect, collectDebug: collectDrawDebug, textSelectionSpecs });
     resetCanvasToScreen(ctx);
     if (collectDrawDebug) {
       drawPhases.editingOverlayMs = performance.now() - editStart;
@@ -876,11 +907,11 @@ function drawBoard() {
     setWorldCanvasTransform(ctx, dpr);
     if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
     const objectsStart = collectDrawDebug ? performance.now() : 0;
-    const drawn = drawVisibleObjects(ctx, counters, { viewportRect });
+    const drawn = drawVisibleObjects(ctx, counters, { viewportRect, skipIds: copiedSelectionSkipIds });
     if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
     drawnImages = drawn.drawnImages;
     drawnText = drawn.drawnText;
-    drawTextSelectionJelloOverlays(ctx, viewportRect, { zoom, panX, panY, dpr });
+    drawTextSelectionJelloOverlays(ctx, viewportRect, { zoom, panX, panY, dpr }, textSelectionSpecs);
     const resetStart = collectDrawDebug ? performance.now() : 0;
     resetCanvasToScreen(ctx);
     if (collectDrawDebug) drawPhases.resetMs = performance.now() - resetStart;

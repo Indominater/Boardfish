@@ -340,6 +340,40 @@ test('renderer can skip text while drawing visible objects', () => {
   assert.deepEqual(fillTextCalls, []);
 });
 
+test('renderer can skip arbitrary object ids while drawing visible objects', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawnText = [];
+  const textA = { id: 'text-a', type: 'text', x: 0, y: 0, w: 80, h: 24, data: { content: 'skip' } };
+  const textB = { id: 'text-b', type: 'text', x: 0, y: 30, w: 80, h: 24, data: { content: 'draw' } };
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 120, y2: 80 }),
+    dpr: () => 1,
+    drawTextLineRange(_context, line) {
+      drawnText.push(line.text);
+    },
+    getTextLayout: (obj) => [{ text: obj.data.content, y: obj.y }],
+    getWrappedLines: () => [],
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [textA, textB],
+    panX: () => 0,
+    panY: () => 0,
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  const result = renderer.drawVisibleObjects({}, BoardfishRenderer.createDrawCounters(), {
+    skipIds: new Set(['text-a']),
+  });
+
+  assert.equal(result.drawnText, 1);
+  assert.deepEqual(drawnText, ['draw']);
+});
+
 test('text renderer skips layout lines outside the visible viewport', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnLines = [];

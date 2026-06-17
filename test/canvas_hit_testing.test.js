@@ -430,9 +430,13 @@ test('text edit mode bypasses offscreen cache when other text boxes exist', () =
   assert.notEqual(drawEnd, -1);
   const drawSource = viewportSource.slice(drawStart, drawEnd);
 
-  assert.match(drawSource, /const useEditOffscreenCache = shouldUseEditOffscreenCache\(\);/);
+  assert.match(drawSource, /const textSelectionSpecs = textSelectionJelloSpecsForDraw\(\);/);
+  assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionJelloSkipIds\(textSelectionSpecs, editingId \|\| null\);/);
+  assert.match(drawSource, /const useEditOffscreenCache = shouldUseEditOffscreenCache\(\) && copiedSelectionSkipIds\.size === 0;/);
   assert.match(drawSource, /else if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /else \{[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, viewportRect \}\);/);
+  assert.match(drawSource, /else \{[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect \}\);/);
+  assert.match(drawSource, /drawVisibleObjects\(ctx, counters, \{ viewportRect, skipIds: copiedSelectionSkipIds \}\);/);
+  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, \{ zoom, panX, panY, dpr \}, textSelectionSpecs\);/);
 });
 
 test('text selection collection uses indexed script metrics while editing math text', () => {
@@ -448,6 +452,21 @@ test('text selection collection uses indexed script metrics while editing math t
   assert.match(selectionSource, /const stateAt = \(line, globalIndex\) =>/);
   assert.match(selectionSource, /textScriptMetricsHiddenAt/);
   assert.match(selectionSource, /textScriptMetricsStateAt/);
+});
+
+test('editing overlay keeps copied text selection highlighted while its jiggle is active', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('function drawEditingTextOverlay');
+  const end = viewportSource.indexOf('function shouldUseEditOffscreenCache', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const overlaySource = viewportSource.slice(start, end);
+
+  assert.match(overlaySource, /const copiedSelectionSpec = textSelectionJelloSpecForId\(options\.textSelectionSpecs \|\| \[\], obj\.id\);/);
+  assert.match(overlaySource, /const useCopiedSelectionMotion = !!copiedMotion && \(liveSelStart === liveSelEnd \|\| liveMatchesCopied\);/);
+  assert.match(overlaySource, /const selStart = useCopiedSelectionMotion \? copiedSelectionSpec\.start : liveSelStart;/);
+  assert.match(overlaySource, /const selEnd\s+= useCopiedSelectionMotion \? copiedSelectionSpec\.end\s+: liveSelEnd;/);
+  assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*textSelectionMotion \? \{ start: selStart, end: selEnd \} : null/);
 });
 
 test('overlapping text selection highlight runs collapse before fill', () => {

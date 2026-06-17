@@ -356,6 +356,9 @@
 
     function drawVisibleObjects(context, counters, options = {}) {
       const skipId = options.skipId || null;
+      const skipIds = options.skipIds && typeof options.skipIds.has === 'function'
+        ? options.skipIds
+        : Array.isArray(options.skipIds) ? new Set(options.skipIds) : null;
       const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
       const view = options.view || viewDefaults();
       const imageSourceResolver = options.imageSourceResolver || null;
@@ -367,7 +370,7 @@
       let drawnText = 0;
       const drawObject = (obj, countObject = true) => {
         if (countObject && counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if (obj.id === skipId) return;
+        if (obj.id === skipId || skipIds?.has(obj.id)) return;
         if (skipText && obj.type === 'text') return;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect)) {
           if (countObject) countCulledObject(obj, counters);
