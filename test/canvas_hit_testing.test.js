@@ -317,6 +317,54 @@ test('text edit caret honors visual line preference at wrapped line start', () =
   assert.deepEqual(fillRects, [[26, 24, 2, 24]]);
 });
 
+test('text edit caret passes consumed soft-wrap space offsets to layout', () => {
+  const viewportSource = readSource('src/js/viewport.js');
+  const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
+  const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const seenOffsets = [];
+  const context = {
+    _caretVisible: true,
+    LINE_H: 24,
+    TEXT_PAD: 16,
+    TEXT_BASELINE_Y_OFFSET: 16,
+    zoom: 1,
+    canvasTextColor: () => '#111',
+    lineCaretXAtOffset(line, obj, offset) {
+      seenOffsets.push(offset);
+      return obj.x + context.TEXT_PAD + offset * 10;
+    },
+    lineXAtOffset(line, obj, offset) {
+      return obj.x + context.TEXT_PAD + offset * 10;
+    },
+    lineEndX(line, obj) {
+      return obj.x + context.TEXT_PAD + line.text.length * 10;
+    },
+    textLayoutLineIntersectsViewport: () => true,
+    textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${viewportSource.slice(start, end)}\n` +
+      'globalThis.drawCaret = drawCaret;\n',
+    context,
+  );
+
+  const fillRects = [];
+  const canvasContext = {
+    fillStyle: '',
+    fillRect(...args) { fillRects.push(args); },
+  };
+  const obj = { x: 10, y: 0, w: 120, h: 24 };
+  const layout = [{ text: 'hi', startIndex: 0, endIndex: 2, caretEndIndex: 4, y: 0 }];
+
+  assert.equal(context.drawCaret(canvasContext, obj, layout, 3), true);
+  assert.deepEqual(seenOffsets, [3]);
+  assert.deepEqual(fillRects, [[55, 0, 2, 24]]);
+});
+
 test('text edit caret stays inside content bounds at low zoom', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');

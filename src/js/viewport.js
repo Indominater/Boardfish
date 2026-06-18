@@ -675,7 +675,7 @@ function drawCaret(context, obj, layout, selStart, options = {}) {
     const ls = line.startIndex;
     const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
     if (!(selStart >= ls && selStart <= le)) return false;
-    const off = Math.min(selStart - ls, line.text.length);
+    const off = Math.max(0, selStart - ls);
     cx = typeof lineCaretXAtOffset === 'function'
       ? lineCaretXAtOffset(line, obj, off)
       : off < line.text.length ? lineXAtOffset(line, obj, off) : lineEndX(line, obj);

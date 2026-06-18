@@ -517,7 +517,7 @@ function runAddTextCommandFromShortcut() {
     ? defaultTextBoxSize()
     : (() => {
         const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-        return { w: h * ((1 + Math.sqrt(5)) / 2), h };
+        return { w: h * 2, h };
       })();
   const defaultW = defaultSize.w;
   const defaultH = defaultSize.h;

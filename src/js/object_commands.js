@@ -80,7 +80,7 @@ function addText(wx, wy, content = '', options = {}) {
     ? defaultTextBoxSize()
     : (() => {
         const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-        return { w: h * ((1 + Math.sqrt(5)) / 2), h };
+        return { w: h * 2, h };
       })();
   let w = content ? 200 : defaultSize.w;
   let h = content ? LINE_H + TEXT_PAD * 2 : defaultSize.h;

@@ -575,6 +575,31 @@ test('text caret x keeps logical positions next to whitespace', () => {
   assert.equal(textLayout.lineCaretXAtOffset(line, obj, 2), textLayout.lineXAtOffset(line, obj, 2));
 });
 
+test('text caret x advances through consumed soft-wrap spaces', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-1',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 'hi  '.length + context.TEXT_PAD * 2,
+    h: 40,
+    data: { content: 'hi     \nnext' },
+  };
+
+  const [line] = textLayout.getTextLayout(obj);
+
+  assert.equal(line.text, 'hi  ');
+  assert.equal(line.caretEndIndex, 7);
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 5), obj.x + context.TEXT_PAD + 5);
+  assert.equal(textLayout.lineCaretXAtOffset(line, obj, 7), obj.x + context.TEXT_PAD + 7);
+});
+
 test('script-heavy text layout reuses paragraph prefix widths while wrapping', () => {
   const { context, measured } = loadTextLayout({
     measureWidth(text) {

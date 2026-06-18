@@ -7,7 +7,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
-const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
+const DEFAULT_TEXT_BOX_MIN_LINES = 3;
+const DEFAULT_TEXT_BOX_LINE_H = 24;
+const DEFAULT_TEXT_BOX_PAD = 16;
+const DEFAULT_TEXT_BOX_HEIGHT = DEFAULT_TEXT_BOX_MIN_LINES * DEFAULT_TEXT_BOX_LINE_H + DEFAULT_TEXT_BOX_PAD * 2;
 
 function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}) {
   const textLayoutSource = withTextLayout ? fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') + '\n' : '';
@@ -43,9 +46,9 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     renders: [],
     selectedIds: [],
     zCounter: 1,
-    LINE_H: 24,
-    TEXT_PAD: 16,
-    NEW_TEXT_EDIT_MIN_LINES: 5,
+    LINE_H: DEFAULT_TEXT_BOX_LINE_H,
+    TEXT_PAD: DEFAULT_TEXT_BOX_PAD,
+    NEW_TEXT_EDIT_MIN_LINES: DEFAULT_TEXT_BOX_MIN_LINES,
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
@@ -168,8 +171,8 @@ test('addText keeps top-left placement by default', () => {
   const obj = context.added[0];
   assert.equal(obj.x, 24);
   assert.equal(obj.y, 48);
-  assert.equal(obj.h, 152);
-  assert.ok(Math.abs(obj.w / obj.h - GOLDEN_RATIO) < 1e-12);
+  assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
+  assert.equal(obj.w, DEFAULT_TEXT_BOX_HEIGHT * 2);
   assert.deepEqual(context.editedIds, [obj.id]);
 });
 

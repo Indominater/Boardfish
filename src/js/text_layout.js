@@ -3,8 +3,7 @@
 var FONT_SIZE = 16;
 var LINE_H    = 24;
 var TEXT_PAD  = 16;
-var NEW_TEXT_EDIT_MIN_LINES = 5;
-const TEXT_BOX_GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
+var NEW_TEXT_EDIT_MIN_LINES = 3;
 const regular_text = 400;
 const TEXT_FONT_STYLE = 'normal';
 const TEXT_FONT_FAMILY = "'Geist Sans', system-ui";
@@ -146,7 +145,7 @@ const textScriptScaleForDepth = (depth) => Math.pow(TEXT_SCRIPT_FONT_SCALE, text
 
 function defaultTextBoxSize() {
   const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-  return { w: h * TEXT_BOX_GOLDEN_RATIO, h };
+  return { w: h * 2, h };
 }
 
 const textFontForScriptDepth = (depth) => {
@@ -2822,8 +2821,24 @@ function lineXAtOffset(line, obj, offset) {
 
 function lineCaretXAtOffset(line, obj, offset) {
   const text = String(line?.text ?? '');
-  const clamped = Math.max(0, Math.min(Math.trunc(Number(offset)) || 0, text.length));
-  const logicalX = lineXAtOffset(line, obj, clamped);
+  const lineStart = Math.max(0, Math.trunc(Number(line?.startIndex)) || 0);
+  const content = normalizeTextContent(obj?.data?.content ?? line?.content ?? text);
+  const caretEnd = Number.isFinite(line?.caretEndIndex)
+    ? Math.max(lineStart, Math.min(Math.trunc(Number(line.caretEndIndex)) || lineStart, content.length))
+    : lineStart + text.length;
+  const maxOffset = Math.max(text.length, caretEnd - lineStart);
+  const clamped = Math.max(0, Math.min(Math.trunc(Number(offset)) || 0, maxOffset));
+  const logicalX = clamped <= text.length
+    ? lineXAtOffset(line, obj, clamped)
+    : lineBaseX(line, obj) + (
+      getTextRangePrefixWidths(
+        content.slice(lineStart, lineStart + clamped),
+        lineStart,
+        line?.scriptRanges || [],
+        content,
+        line?._scriptMetrics || null,
+      )[clamped] || 0
+    );
   if (clamped <= 0 || clamped >= text.length) return logicalX;
 
   const previousChar = text[clamped - 1];
@@ -2836,7 +2851,6 @@ function lineCaretXAtOffset(line, obj, offset) {
   let previousState = BASE_TEXT_SCRIPT_STATE;
   let nextState = BASE_TEXT_SCRIPT_STATE;
   if (hasScriptRanges) {
-    const content = normalizeTextContent(obj?.data?.content ?? line?.content ?? text);
     const scriptMetrics = line._scriptMetrics || getTextScriptLayoutMetricsForObject(obj, content, ranges);
     const previousIndex = (line.startIndex || 0) + clamped - 1;
     const nextIndex = (line.startIndex || 0) + clamped;

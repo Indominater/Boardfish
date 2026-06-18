@@ -7,12 +7,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
-const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
 const TEST_LINE_H = 24;
 const TEST_TEXT_PAD = 16;
+const TEST_NEW_TEXT_EDIT_MIN_LINES = 3;
 const SINGLE_LINE_TEXT_BOX_HEIGHT = TEST_LINE_H + TEST_TEXT_PAD * 2;
-const DEFAULT_TEXT_BOX_HEIGHT = 5 * TEST_LINE_H + TEST_TEXT_PAD * 2;
-const DEFAULT_TEXT_BOX_WIDTH = DEFAULT_TEXT_BOX_HEIGHT * GOLDEN_RATIO;
+const DEFAULT_TEXT_BOX_HEIGHT = TEST_NEW_TEXT_EDIT_MIN_LINES * TEST_LINE_H + TEST_TEXT_PAD * 2;
+const DEFAULT_TEXT_BOX_WIDTH = DEFAULT_TEXT_BOX_HEIGHT * 2;
 
 function loadTextEditorHelpers() {
   const context = { console };
@@ -2367,7 +2367,7 @@ test('editing existing default-height text can shrink below the default new text
   ]);
 });
 
-test('freshly created text stays at five-line height until edit exit', () => {
+test('freshly created text stays at default height until edit exit', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   obj.w = DEFAULT_TEXT_BOX_WIDTH;
@@ -2375,7 +2375,7 @@ test('freshly created text stays at five-line height until edit exit', () => {
   obj.data = { content: '' };
 
   context.enterEdit(obj.id, { history: false });
-  assert.equal(obj._editMinLines, 5);
+  assert.equal(obj._editMinLines, TEST_NEW_TEXT_EDIT_MIN_LINES);
 
   const event = typeNativeText(context.proxy, 'Hi');
 
