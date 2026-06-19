@@ -1545,6 +1545,16 @@ test('rich script caret navigation includes script layer boundary stops', () => 
     end: 9,
     insertedText: '',
   });
+  assert.equal(textEditBlankLineDeleteRange(blankLineText, 9, 'Backspace'), null);
+  const blankLineObj = {
+    id: 'text-blank',
+    type: 'text',
+    data: { content: blankLineText },
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(textEditVisibleDeleteRange(blankLineObj, 9, 'Backspace'))), {
+    start: 8,
+    end: 9,
+  });
 
   let oldValue = 'a^b';
   let newValue = 'a';
@@ -2064,6 +2074,30 @@ test('delete removes an indented blank line in one keypress', () => {
   assert.equal(context.proxy.selectionStart, blankLineStart);
   assert.equal(context.proxy.selectionEnd, blankLineStart);
   assert.equal(obj._textEditCaretIndex, blankLineStart);
+  assert.equal(obj._textEditCaretLineStartIndex, undefined);
+});
+
+test('backspace after a tab on a blank line removes only the tab', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'Case n = k:\n\t' };
+
+  context.enterEdit(obj.id, { history: false });
+  const lineStart = obj.data.content.indexOf('\n') + 1;
+  const caretAfterTab = obj.data.content.length;
+  context.proxy.setSelectionRange(caretAfterTab, caretAfterTab, 'none');
+  obj._textEditCaretIndex = caretAfterTab;
+  obj._textEditCaretLineStartIndex = lineStart;
+  const key = makeKeyEvent('Backspace');
+
+  context.proxy.dispatchEvent(key);
+
+  assert.equal(key.prevented, true);
+  assert.equal(obj.data.content, 'Case n = k:\n');
+  assert.equal(context.proxy.value, 'Case n = k:\n');
+  assert.equal(context.proxy.selectionStart, lineStart);
+  assert.equal(context.proxy.selectionEnd, lineStart);
+  assert.equal(obj._textEditCaretIndex, lineStart);
   assert.equal(obj._textEditCaretLineStartIndex, undefined);
 });
 

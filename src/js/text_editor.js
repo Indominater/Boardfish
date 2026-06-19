@@ -530,11 +530,13 @@ const textEditLineBoundsAt = (value, index) => {
 const textEditBlankLineDeleteRange = (value, index, keyOrInputType = '') => {
   const text = normalizeTextContent(value);
   if (!text.includes('\n')) return null;
+  const pos = Math.max(0, Math.min(Math.trunc(Number(index)) || 0, text.length));
   const key = String(keyOrInputType || '').toLowerCase();
   if (!key.includes('delete') && !key.includes('backspace')) return null;
   const backward = key.includes('backspace') || key.includes('backward');
-  const { start, end } = textEditLineBoundsAt(text, index);
+  const { start, end } = textEditLineBoundsAt(text, pos);
   if (!/^[ \t]*$/.test(text.slice(start, end))) return null;
+  if (backward && pos > start) return null;
   if (backward && start > 0) return { start: start - 1, end, insertedText: '' };
   if (!backward && end < text.length) return { start, end: end + 1, insertedText: '' };
   if (start > 0) return { start: start - 1, end, insertedText: '' };
