@@ -40,6 +40,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     },
     added: [],
     animations: [],
+    editCalls: [],
     editedIds: [],
     histories: [],
     objects: [],
@@ -92,7 +93,8 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     pushHistory(reason) {
       context.histories.push(reason);
     },
-    enterEdit(id) {
+    enterEdit(id, options = {}) {
+      context.editCalls.push({ id, options });
       context.editedIds.push(id);
     },
     invalidateOffscreen() {},
@@ -105,7 +107,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
   return context;
 }
 
-function loadPasteHarness() {
+function loadPasteHarness({ browserText = '' } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/clipboard_export_init.js'), 'utf8');
   const calls = { addText: [] };
   const context = {
@@ -119,12 +121,20 @@ function loadPasteHarness() {
     window: {
       addEventListener() {},
     },
+    navigator: {
+      clipboard: {
+        readText() {
+          return Promise.resolve(browserText);
+        },
+      },
+    },
     objects: [],
     jsClipboard: null,
     _pasteInProgress: false,
     BoardfishClipboardIO: {
       describeClipboardData() { return {}; },
       readClipboardImageFileFromEvent() { return null; },
+      readClipboardImageBlobFromBrowser() { return Promise.resolve(null); },
       readClipboardTextFromEvent(clipboardData) {
         return clipboardData?.getData?.('text/plain') || '';
       },
@@ -135,6 +145,9 @@ function loadPasteHarness() {
       step() {},
     },
     resizeCanvas() {},
+    acquireInputShield() {
+      return () => {};
+    },
     addText(wx, wy, content, options = {}) {
       calls.addText.push({ wx, wy, content, options });
     },
@@ -186,6 +199,18 @@ test('addText strips whitespace-only lines at pasted text edges', () => {
   assert.deepEqual(context.editedIds, []);
 });
 
+test('addText can enter edit mode at the end for pasted text boxes', () => {
+  const context = loadAddTextHarness();
+
+  context.addText(24, 48, 'pasted text', { editAfterCreate: true, enterEditHistory: false });
+
+  const obj = context.added[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(context.editCalls)), [{
+    id: obj.id,
+    options: { history: false, placeInitialCaret: true },
+  }]);
+});
+
 test('addText keeps deterministic braced script text editable', () => {
   const context = loadAddTextHarness({ withTextLayout: true });
 
@@ -213,6 +238,23 @@ test('outside clipboard text is pasted at the same center point as canvas object
     wx: 640,
     wy: 360,
     content: 'outside text',
-    options: { anchor: 'center' },
+    options: { anchor: 'center', editAfterCreate: true, enterEditHistory: false },
+  }]);
+});
+
+test('browser clipboard text paste enters edit mode for the new text box', async () => {
+  const context = loadPasteHarness({ browserText: 'browser text' });
+
+  await context.pasteAtPos(640, 360, {
+    getData() {
+      return '';
+    },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.calls.addText)), [{
+    wx: 640,
+    wy: 360,
+    content: 'browser text',
+    options: { anchor: 'center', editAfterCreate: true, enterEditHistory: false },
   }]);
 });

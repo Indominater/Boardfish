@@ -440,6 +440,17 @@ test('clipboard IO extracts and writes Boardfish web clipboard markers', async (
     assert.equal(writes.length, 1);
     assert.equal(await writes[0].parts['text/plain'].text(), '');
     assert.match(await writes[0].parts['text/html'].text(), /boardfish-clipboard:bf-written/);
+
+    const imageResult = await ClipboardIO.copyImageBlobToClipboard(
+      new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      'bf-image',
+    );
+    assert.equal(imageResult.boardfishTokenWritten, true);
+    assert.equal(writes.length, 2);
+    assert.ok(writes[1].parts['image/png']);
+    const imageHtml = await writes[1].parts['text/html'].text();
+    assert.match(imageHtml, /boardfish-clipboard:bf-image/);
+    assert.match(imageHtml, /<img src="data:image\/png;base64,AQID" alt="">/);
   } finally {
     delete require.cache[require.resolve('../src/js/clipboard_io.js')];
     if (previous.ClipboardItem === undefined) delete globalThis.ClipboardItem;

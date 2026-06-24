@@ -576,7 +576,11 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         objectCountBefore,
         ...clipboardTextStats(eventText),
       });
-      addText(wx, wy, eventText, addTextPasteOptions(dbg, { anchor: 'center' }));
+      addText(wx, wy, eventText, addTextPasteOptions(dbg, {
+        anchor: 'center',
+        editAfterCreate: true,
+        enterEditHistory: false,
+      }));
       ClipDebug.step(dbg, 'paste:plain-text-add-done', {
         path: 'event-text',
         ms: clipboardElapsedMs(addStartedAt),
@@ -611,7 +615,11 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           objectCountBefore,
           ...clipboardTextStats(text),
         });
-        addText(wx, wy, text, addTextPasteOptions(dbg, { anchor: 'center' }));
+        addText(wx, wy, text, addTextPasteOptions(dbg, {
+          anchor: 'center',
+          editAfterCreate: true,
+          enterEditHistory: false,
+        }));
         ClipDebug.step(dbg, 'paste:plain-text-add-done', {
           path: 'web-text',
           ms: clipboardElapsedMs(addStartedAt),

@@ -121,9 +121,17 @@ function addText(wx, wy, content = '', options = {}) {
   const historyStartedAt = objectCommandDebugNow();
   pushHistory('add-text');
   logStep('history-pushed', { objectId: obj.id, historyMs: objectCommandElapsedMs(historyStartedAt) });
-  if (!content) {
-    enterEdit(obj.id);
-    logStep('enter-edit-done', { objectId: obj.id });
+  const shouldEnterEdit = !content || options?.editAfterCreate === true;
+  if (shouldEnterEdit) {
+    const enterEditOptions = content
+      ? { history: options?.enterEditHistory !== false, placeInitialCaret: true }
+      : {};
+    enterEdit(obj.id, enterEditOptions);
+    logStep('enter-edit-done', {
+      objectId: obj.id,
+      editAfterCreate: !!content,
+      enterEditHistory: enterEditOptions.history ?? true,
+    });
   }
   logStep('end', { objectId: obj.id, objectCountAfter: objects.length });
 }

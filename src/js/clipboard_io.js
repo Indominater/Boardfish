@@ -26,6 +26,40 @@
     return `${createBoardfishClipboardMarker(token)}<span></span>`;
   }
 
+  function imageClipboardHtml(token, dataUrl = '') {
+    const marker = createBoardfishClipboardMarker(token);
+    const src = String(dataUrl || '');
+    if (!src) return boardfishTokenClipboardHtml(token);
+    return `${marker}<img src="${escapeHtml(src)}" alt="">`;
+  }
+
+  async function blobToDataUrl(blob) {
+    if (!blob) return '';
+    if (typeof FileReader !== 'undefined') {
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('failed to read image blob'));
+        reader.readAsDataURL(blob);
+      });
+    }
+    if (typeof blob.arrayBuffer !== 'function') return '';
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (typeof Buffer !== 'undefined') {
+      return `data:${blob.type || 'image/png'};base64,${Buffer.from(bytes).toString('base64')}`;
+    }
+    if (typeof btoa !== 'function') return '';
+    const chunkSize = 0x8000;
+    let base64 = '';
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      let binary = '';
+      const chunk = bytes.subarray(offset, offset + chunkSize);
+      for (const byte of chunk) binary += String.fromCharCode(byte);
+      base64 += btoa(binary);
+    }
+    return `data:${blob.type || 'image/png'};base64,${base64}`;
+  }
+
   function readBoardfishClipboardTokenFromHtml(html = '') {
     return BOARDFISH_CLIPBOARD_TOKEN_RE.exec(String(html || ''))?.[1] || '';
   }
@@ -239,12 +273,17 @@
 
   async function copyImageBlobToClipboard(blob, token = '', dbg = null) {
     if (token && supportsRichClipboardWrite()) {
+      const dataUrl = await blobToDataUrl(blob).catch((err) => {
+        ClipDebug.step(dbg, 'web-clipboard-image-html-miss', { error: String(err) });
+        return '';
+      });
       try {
-        await writeClipboardItem({
-          'image/png': blob,
-          'text/html': new Blob([boardfishTokenClipboardHtml(token)], { type: 'text/html' }),
-        });
-        return { boardfishTokenWritten: true };
+        const parts = { 'image/png': blob };
+        if (dataUrl) {
+          parts['text/html'] = new Blob([imageClipboardHtml(token, dataUrl)], { type: 'text/html' });
+        }
+        await writeClipboardItem(parts);
+        return { boardfishTokenWritten: !!dataUrl };
       } catch (err) {
         ClipDebug.step(dbg, 'web-clipboard-rich-image-miss', { error: String(err) });
       }
