@@ -576,11 +576,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         objectCountBefore,
         ...clipboardTextStats(eventText),
       });
-      addText(wx, wy, eventText, addTextPasteOptions(dbg, {
-        anchor: 'center',
-        editAfterCreate: true,
-        enterEditHistory: false,
-      }));
+      addText(wx, wy, eventText, addTextPasteOptions(dbg, { anchor: 'center' }));
       ClipDebug.step(dbg, 'paste:plain-text-add-done', {
         path: 'event-text',
         ms: clipboardElapsedMs(addStartedAt),
@@ -615,11 +611,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           objectCountBefore,
           ...clipboardTextStats(text),
         });
-        addText(wx, wy, text, addTextPasteOptions(dbg, {
-          anchor: 'center',
-          editAfterCreate: true,
-          enterEditHistory: false,
-        }));
+        addText(wx, wy, text, addTextPasteOptions(dbg, { anchor: 'center' }));
         ClipDebug.step(dbg, 'paste:plain-text-add-done', {
           path: 'web-text',
           ms: clipboardElapsedMs(addStartedAt),
@@ -651,8 +643,10 @@ document.addEventListener('paste', (e) => {
   if (editingId) return;
   e.preventDefault();
   if (isBoardInputBlocked()) return;
-  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  pasteAtPos(center.x, center.y, e.clipboardData);
+  const point = typeof boardCursorWorldPoint === 'function'
+    ? boardCursorWorldPoint()
+    : toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  pasteAtPos(point.x, point.y, e.clipboardData);
 });
 
 // ─── Init ────────────────────────────────────────────────────────────────────

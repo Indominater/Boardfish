@@ -14,9 +14,11 @@ const TEXT_SCRIPT_MAX_SIZE_DEPTH = 2;
 const TEXT_SCRIPT_SUP_OFFSET = -FONT_SIZE * 0.38;
 const TEXT_SCRIPT_SUB_OFFSET = FONT_SIZE * 0.24;
 const TEXT_CANVAS_FONT_KERNING = 'none';
+const TEXT_CANVAS_CONTEXT_CONFIG_KEY = 'fontKerning:none;letterSpacing:0px;fontStretch:normal;fontVariantCaps:normal;textAlign:left;direction:ltr';
 const TEXT_GLYPH_MIN_GAP = 0.5;
 const TEXT_GLYPH_MIN_INK_WIDTH = 0.01;
 var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
+var _configuredTextCanvasContexts = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
 
 function normalizeTextContent(value) {
   return String(value ?? '').replace(/\r\n?/g, '\n');
@@ -41,12 +43,16 @@ function isTextContentEmpty(value) {
 
 function configureTextCanvasContext(context) {
   if (!context) return;
+  try {
+    if (_configuredTextCanvasContexts?.get(context) === TEXT_CANVAS_CONTEXT_CONFIG_KEY) return;
+  } catch (_) {}
   try { context.fontKerning = TEXT_CANVAS_FONT_KERNING; } catch (_) {}
   try { context.letterSpacing = '0px'; } catch (_) {}
   try { context.fontStretch = 'normal'; } catch (_) {}
   try { context.fontVariantCaps = 'normal'; } catch (_) {}
   try { context.textAlign = 'left'; } catch (_) {}
   try { context.direction = 'ltr'; } catch (_) {}
+  try { _configuredTextCanvasContexts?.set(context, TEXT_CANVAS_CONTEXT_CONFIG_KEY); } catch (_) {}
 }
 
 var _measureCanvas = document.createElement('canvas');
@@ -2819,6 +2825,56 @@ function lineXAtOffset(line, obj, offset) {
   return lineBaseX(line, obj) + line.prefixWidths[Math.max(0, Math.min(offset, line.text.length))];
 }
 
+function lineHitOffsetForX(line, wx, obj) {
+  const textLength = String(line?.text ?? '').length;
+  const pw = line?.prefixWidths;
+  if (!pw || pw.length < textLength + 1) return 0;
+  const target = wx - lineBaseX(line, obj);
+  let lo = 0;
+  let hi = textLength;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const threshold = pw[mid] + (pw[mid + 1] - pw[mid]) / 2;
+    if (target < threshold) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+function lineNearestCaretOffsetsForX(line, wx, obj) {
+  const textLength = String(line?.text ?? '').length;
+  const pw = line?.prefixWidths;
+  if (!pw || pw.length < textLength + 1) return [0];
+  const target = wx - lineBaseX(line, obj);
+  let lo = 0;
+  let hi = textLength;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (pw[mid] < target) lo = mid + 1;
+    else hi = mid;
+  }
+
+  const right = lo;
+  const left = Math.max(0, right - 1);
+  let bestOffset = right;
+  if (right > textLength) bestOffset = textLength;
+  if (right <= textLength) {
+    const leftDistance = Math.abs(target - pw[left]);
+    const rightDistance = Math.abs(target - pw[right]);
+    bestOffset = leftDistance <= rightDistance ? left : right;
+  }
+
+  const bestX = pw[Math.max(0, Math.min(bestOffset, textLength))];
+  const epsilon = 1e-7;
+  let first = bestOffset;
+  while (first > 0 && Math.abs(pw[first - 1] - bestX) <= epsilon) first--;
+  let last = bestOffset;
+  while (last < textLength && Math.abs(pw[last + 1] - bestX) <= epsilon) last++;
+  const offsets = [];
+  for (let offset = first; offset <= last; offset++) offsets.push(offset);
+  return offsets;
+}
+
 function lineCaretXAtOffset(line, obj, offset) {
   const text = String(line?.text ?? '');
   const lineStart = Math.max(0, Math.trunc(Number(line?.startIndex)) || 0);
@@ -2882,22 +2938,69 @@ function lineCaretXAtOffset(line, obj, offset) {
   return (previousInkRight + nextInkLeft) / 2;
 }
 
-const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0) => {
-  if (!context || !line || !obj) return;
-  configureTextCanvasContext(context);
-  const text = String(line.text ?? '');
-  const start = Math.max(0, Math.min(startOffset, text.length));
-  const end = Math.max(start, Math.min(endOffset, text.length));
-  const ranges = line.scriptRanges || [];
-  const hasScriptRanges = ranges.length > 0;
-  const content = hasScriptRanges ? normalizeTextContent(obj.data?.content ?? line.content ?? text) : '';
-  const scriptMetrics = hasScriptRanges
-    ? line._scriptMetrics || getTextScriptLayoutMetricsForObject(obj, content, ranges)
-    : null;
+function createTextDrawStats() {
+  return {
+    chars: 0,
+    drawnChars: 0,
+    drawUnits: 0,
+    runs: 0,
+    plainRuns: 0,
+    scriptRuns: 0,
+    skippedTabs: 0,
+    skippedSpaces: 0,
+    hiddenChars: 0,
+    fontSwitches: 0,
+    planCacheHits: 0,
+    planCacheMisses: 0,
+  };
+}
+
+function cloneTextDrawStats(stats, cacheHit = false) {
+  return {
+    ...stats,
+    planCacheHits: cacheHit ? 1 : 0,
+    planCacheMisses: cacheHit ? 0 : 1,
+  };
+}
+
+function isTextDrawBlankUnit(unit) {
+  return unit === ' ' || unit === '\u00a0';
+}
+
+function textDrawPlanCacheMatches(plan, line, text, start, end, scriptMetrics) {
+  return !!plan &&
+    plan.text === text &&
+    plan.start === start &&
+    plan.end === end &&
+    plan.startIndex === line.startIndex &&
+    plan.prefixWidths === line.prefixWidths &&
+    plan.scriptRanges === line.scriptRanges &&
+    plan.scriptMetrics === scriptMetrics &&
+    plan.font === FONT;
+}
+
+function setTextDrawPlanCache(line, plan) {
+  try {
+    Object.defineProperty(line, '_textDrawPlanCache', {
+      value: plan,
+      configurable: true,
+      writable: true,
+    });
+  } catch (_) {
+    line._textDrawPlanCache = plan;
+  }
+}
+
+function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetrics) {
+  const stats = createTextDrawStats();
+  stats.chars = end - start;
+  const runs = [];
   let i = start;
   while (i < end) {
     const globalIndex = line.startIndex + i;
     if (text[i] === '\t' || (hasScriptRanges && textScriptMetricsHiddenAt(scriptMetrics, globalIndex))) {
+      if (text[i] === '\t') stats.skippedTabs++;
+      else stats.hiddenChars++;
       i++;
       continue;
     }
@@ -2910,15 +3013,86 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
       if (hasScriptRanges && textScriptMetricsStateAt(scriptMetrics, nextGlobalIndex).key !== state.key) break;
       j++;
     }
-    const previousFont = context.font;
-    if (state.depth > 0) context.font = state.font;
-    const y = line.textY + state.offset;
-    forEachTextSpacingUnit(text, (unit, unitStart) => {
-      context.fillText(unit, lineXAtOffset(line, obj, unitStart), y);
+    const run = {
+      font: state.depth > 0 ? state.font : '',
+      offset: state.offset,
+      units: [],
+    };
+    stats.runs++;
+    if (state.depth > 0) {
+      stats.scriptRuns++;
+      stats.fontSwitches++;
+    } else {
+      stats.plainRuns++;
+    }
+    forEachTextSpacingUnit(text, (unit, unitStart, unitEnd) => {
+      const charCount = Math.max(0, unitEnd - unitStart);
+      if (isTextDrawBlankUnit(unit)) {
+        stats.skippedSpaces += charCount;
+        return;
+      }
+      stats.drawUnits++;
+      stats.drawnChars += charCount;
+      run.units.push({
+        text: unit,
+        offset: unitStart,
+        x: line.prefixWidths?.[unitStart],
+      });
     }, i, j);
-    if (state.depth > 0 && context.font !== previousFont) context.font = previousFont;
+    if (run.units.length) runs.push(run);
     i = j;
   }
+  return {
+    text,
+    start,
+    end,
+    startIndex: line.startIndex,
+    prefixWidths: line.prefixWidths,
+    scriptRanges: line.scriptRanges,
+    scriptMetrics,
+    font: FONT,
+    runs,
+    stats,
+  };
+}
+
+function drawTextPlan(context, line, obj, plan) {
+  const baseX = lineBaseX(line, obj);
+  const previousFont = context.font;
+  for (const run of plan.runs) {
+    if (run.font) context.font = run.font;
+    const y = line.textY + run.offset;
+    for (const unit of run.units) {
+      const x = Number.isFinite(unit.x) ? baseX + unit.x : lineXAtOffset(line, obj, unit.offset);
+      context.fillText(unit.text, x, y);
+    }
+    if (run.font && context.font !== previousFont) context.font = previousFont;
+  }
+}
+
+const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0) => {
+  if (!context || !line || !obj) return createTextDrawStats();
+  configureTextCanvasContext(context);
+  const text = String(line.text ?? '');
+  const start = Math.max(0, Math.min(startOffset, text.length));
+  const end = Math.max(start, Math.min(endOffset, text.length));
+  const ranges = line.scriptRanges || [];
+  const hasScriptRanges = ranges.length > 0;
+  const content = hasScriptRanges ? normalizeTextContent(obj.data?.content ?? line.content ?? text) : '';
+  const scriptMetrics = hasScriptRanges
+    ? line._scriptMetrics || getTextScriptLayoutMetricsForObject(obj, content, ranges)
+    : null;
+  const cacheable = start === 0 && end === text.length && !!line.prefixWidths;
+  let plan = cacheable && textDrawPlanCacheMatches(line._textDrawPlanCache, line, text, start, end, scriptMetrics)
+    ? line._textDrawPlanCache
+    : null;
+  const cacheHit = !!plan;
+  if (!plan) {
+    plan = createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetrics);
+    if (cacheable) setTextDrawPlanCache(line, plan);
+  }
+  drawTextPlan(context, line, obj, plan);
+  return cloneTextDrawStats(plan.stats, cacheHit);
 };
 
 function lineEndX(line, obj) {
@@ -2975,23 +3149,7 @@ const textLayoutCaretCenterYForHit = (line, obj, index, affinity = '', metrics =
 };
 
 const textLayoutNearestCaretOffsets = (line, wx, obj) => {
-  const text = String(line?.text ?? '');
-  let bestDistance = Infinity;
-  let bestX = lineXAtOffset(line, obj, 0);
-  for (let offset = 0; offset <= text.length; offset++) {
-    const x = lineXAtOffset(line, obj, offset);
-    const distance = Math.abs(wx - x);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestX = x;
-    }
-  }
-  const offsets = [];
-  const epsilon = 1e-7;
-  for (let offset = 0; offset <= text.length; offset++) {
-    if (Math.abs(lineXAtOffset(line, obj, offset) - bestX) <= epsilon) offsets.push(offset);
-  }
-  return offsets;
+  return lineNearestCaretOffsetsForX(line, wx, obj);
 };
 
 const textLayoutCaretHitCandidates = (line, wx, obj) => {
@@ -3053,16 +3211,10 @@ function layoutHitTestCaret(layout, wx, wy, obj) {
     return { index: hit.index, affinity: hit.affinity || '', lineStartIndex: line.startIndex };
   }
 
-  const baseX = lineBaseX(line, obj);
   const pw = line.prefixWidths;
-  for (let j = 0; j < line.text.length; j++) {
-    if (wx < baseX + pw[j] + (pw[j + 1] - pw[j]) / 2) {
-      const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + j, 'forward', obj);
-      TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
-      return { index: hitIndex, affinity: '', lineStartIndex: line.startIndex };
-    }
-  }
-  const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + line.text.length, 'backward', obj);
+  const offset = lineHitOffsetForX(line, wx, obj);
+  const direction = offset < line.text.length ? 'forward' : 'backward';
+  const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + offset, direction, obj);
   TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
   return { index: hitIndex, affinity: '', lineStartIndex: line.startIndex };
 }
@@ -3071,16 +3223,10 @@ function layoutHitTest(layout, wx, wy, obj) {
   if (!layout.length) return 0;
   const line = textLayoutLineForHit(layout, wy);
   if (!line.text.length) return line.startIndex;
-  const baseX = lineBaseX(line, obj);
   const pw = line.prefixWidths;
-  for (let j = 0; j < line.text.length; j++) {
-    if (wx < baseX + pw[j] + (pw[j + 1] - pw[j]) / 2) {
-      const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + j, 'forward', obj);
-      TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
-      return hitIndex;
-    }
-  }
-  const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + line.text.length, 'backward', obj);
+  const offset = lineHitOffsetForX(line, wx, obj);
+  const direction = offset < line.text.length ? 'forward' : 'backward';
+  const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + offset, direction, obj);
   TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
   return hitIndex;
 }

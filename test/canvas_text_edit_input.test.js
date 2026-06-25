@@ -72,17 +72,40 @@ function loadCanvasInputHarness({ selected = true } = {}) {
       focused: false,
       selection: null,
       value: 'hello',
+      _boardfishLogicalValue: 'hello',
+      _boardfishDomValueStale: false,
       selectionStart: 0,
       selectionEnd: 0,
       focus() {
         this.focused = true;
         context.document.activeElement = this;
       },
-      setSelectionRange(start, end) {
-        this.selection = [start, end];
-        this.selectionStart = start;
-        this.selectionEnd = end;
+      setSelectionRange(start, end, direction = 'none') {
+        const max = String(this.value ?? '').length;
+        const normalizedStart = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, max));
+        const normalizedEnd = Math.max(normalizedStart, Math.min(Math.trunc(Number(end)) || normalizedStart, max));
+        this.selection = [normalizedStart, normalizedEnd];
+        this.selectionStart = normalizedStart;
+        this.selectionEnd = normalizedEnd;
+        this.selectionDirection = direction;
       },
+    },
+    textEditProxyValue(proxy) {
+      if (typeof proxy?._boardfishLogicalValue === 'string') return proxy._boardfishLogicalValue;
+      return String(proxy?.value ?? '');
+    },
+    setTextEditProxySelectionRange(proxy, start, end = start, direction = 'none', options = {}) {
+      const text = String(options.value ?? context.textEditProxyValue(proxy));
+      const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, text.length));
+      const to = Math.max(from, Math.min(Math.trunc(Number(end ?? start)) || from, text.length));
+      const domLength = String(proxy.value ?? '').length;
+      const domStale = !!proxy._boardfishDomValueStale || String(proxy.value ?? '') !== text;
+      if (domStale && (from > domLength || to > domLength)) {
+        proxy.value = text;
+        proxy._boardfishLogicalValue = text;
+        proxy._boardfishDomValueStale = false;
+      }
+      proxy.setSelectionRange(from, to, direction);
     },
     toWorld(clientX, clientY) { return { x: clientX, y: clientY }; },
     getTextLayout() { return [{ text: 'hello', startIndex: 0, prefixWidths: new Float64Array([0]) }]; },
@@ -284,6 +307,26 @@ test('releasing a dragged text highlight does not open the text edit menu', () =
 
   assert.deepEqual(context.editProxy.selection, [1, 4]);
   assert.deepEqual(context.menus, []);
+});
+
+test('dragging text highlight syncs stale short edit proxy before selecting logical tail', () => {
+  const context = loadCanvasInputHarness();
+  const logicalValue = '0123456789';
+  const hits = [0, logicalValue.length];
+  context.obj.data.content = logicalValue;
+  context.editProxy.value = '0123';
+  context.editProxy._boardfishLogicalValue = logicalValue;
+  context.editProxy._boardfishDomValueStale = true;
+  context.editingId = context.obj.id;
+  context._editEl = context.editProxy;
+  context.layoutHitTest = () => hits.shift() ?? logicalValue.length;
+
+  context.startTextSelectionDrag({ clientX: 12, clientY: 22 }, context.obj, { x: 12, y: 22 });
+  context.latestDrag().move({ clientX: 72, clientY: 22 });
+
+  assert.equal(context.editProxy.value, logicalValue);
+  assert.equal(context.editProxy._boardfishDomValueStale, false);
+  assert.deepEqual(context.editProxy.selection, [0, logicalValue.length]);
 });
 
 test('releasing a caret-only text click does not open the text edit menu', () => {

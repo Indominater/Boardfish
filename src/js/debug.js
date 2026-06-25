@@ -1441,6 +1441,14 @@ var ViewportDebug = (() => {
     maxLongTaskMs: 0,
     rawInputEvents: 0,
     shieldBlockedInputs: 0,
+    panZoomEvents: 0,
+    panZoomPanEvents: 0,
+    panZoomZoomEvents: 0,
+    panZoomBlockedEvents: 0,
+    frameScheduleEvents: 0,
+    maxFrameScheduleSources: 0,
+    maxPanDistancePx: 0,
+    maxZoomDeltaPct: 0,
     wheelHandlerCount: 0,
     wheelHandlerTotalMs: 0,
     maxWheelHandlerMs: 0,
@@ -1585,6 +1593,66 @@ var ViewportDebug = (() => {
     return `${String(target.tagName || target.nodeName || '').toLowerCase()}${id}${className}`;
   }
 
+  function round(value, places = 2) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return value;
+    const factor = 10 ** places;
+    return Math.round(numeric * factor) / factor;
+  }
+
+  function wheelDeltaModeLabel(mode) {
+    if (mode === 1) return 'line';
+    if (mode === 2) return 'page';
+    return 'pixel';
+  }
+
+  function wheelDeltaPixelScale(mode) {
+    if (mode === 1) return 16;
+    if (mode === 2) {
+      const pageHeight = typeof window !== 'undefined' ? Number(window.innerHeight) : 1;
+      return Math.max(1, pageHeight || 1);
+    }
+    return 1;
+  }
+
+  function wheelEventMeta(event = null) {
+    if (!event || !('deltaY' in event || 'deltaX' in event)) return {};
+    const deltaMode = Number(event.deltaMode) || 0;
+    const scale = wheelDeltaPixelScale(deltaMode);
+    return {
+      deltaMode,
+      deltaModeLabel: wheelDeltaModeLabel(deltaMode),
+      deltaZ: event.deltaZ ?? '',
+      wheelDeltaXPx: (Number(event.deltaX) || 0) * scale,
+      wheelDeltaYPx: (Number(event.deltaY) || 0) * scale,
+      wheelDeltaZPx: (Number(event.deltaZ) || 0) * scale,
+    };
+  }
+
+  function viewportStateMeta() {
+    const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+    const rect = typeof currentViewportWorldRect === 'function'
+      ? currentViewportWorldRect(0)
+      : null;
+    return {
+      panX: typeof panX !== 'undefined' ? panX : '',
+      panY: typeof panY !== 'undefined' ? panY : '',
+      zoom: typeof zoom !== 'undefined' ? zoom : '',
+      dpr,
+      viewportX1: rect?.x1 ?? '',
+      viewportY1: rect?.y1 ?? '',
+      viewportX2: rect?.x2 ?? '',
+      viewportY2: rect?.y2 ?? '',
+      viewportW: rect ? rect.x2 - rect.x1 : '',
+      viewportH: rect ? rect.y2 - rect.y1 : '',
+      canvasW: typeof boardCanvas !== 'undefined' ? boardCanvas?.width ?? '' : '',
+      canvasH: typeof boardCanvas !== 'undefined' ? boardCanvas?.height ?? '' : '',
+      objectCount: typeof objects !== 'undefined' ? objects.length : '',
+      selectedCount: typeof selectedIds !== 'undefined' ? selectedIds.size : '',
+      editing: typeof editingId !== 'undefined' ? !!editingId : '',
+    };
+  }
+
   function inputShieldState() {
     const shieldActive = typeof openingShield !== 'undefined' &&
       !!openingShield?.classList?.contains?.('active');
@@ -1610,10 +1678,20 @@ var ViewportDebug = (() => {
       repeat: !!event?.repeat,
       deltaX: event?.deltaX ?? '',
       deltaY: event?.deltaY ?? '',
+      ...wheelEventMeta(event),
       button: event?.button ?? '',
       buttons: event?.buttons ?? '',
       clientX: event?.clientX ?? '',
       clientY: event?.clientY ?? '',
+      movementX: event?.movementX ?? '',
+      movementY: event?.movementY ?? '',
+      offsetX: event?.offsetX ?? '',
+      offsetY: event?.offsetY ?? '',
+      pointerId: event?.pointerId ?? '',
+      pointerType: event?.pointerType || '',
+      pressure: event?.pressure ?? '',
+      isPrimary: event?.isPrimary ?? '',
+      isTrusted: event?.isTrusted ?? '',
       ctrlKey: !!event?.ctrlKey,
       metaKey: !!event?.metaKey,
       shiftKey: !!event?.shiftKey,
@@ -1643,6 +1721,49 @@ var ViewportDebug = (() => {
       op: 'input',
       step: 'shield-block',
       meta: inputEventMeta(event, { source: 'input-shield', blocked: true, ...meta }),
+    });
+  }
+
+  function updatePanZoomStats(stepName, meta = {}) {
+    stats.panZoomEvents++;
+    const mode = meta.mode || '';
+    if (mode === 'pan') stats.panZoomPanEvents++;
+    if (mode === 'zoom') stats.panZoomZoomEvents++;
+    if (meta.blocked || /blocked/.test(stepName)) stats.panZoomBlockedEvents++;
+    const panDistance = Number(meta.panDistancePx) || Math.hypot(Number(meta.panDeltaX) || 0, Number(meta.panDeltaY) || 0);
+    stats.maxPanDistancePx = Math.max(stats.maxPanDistancePx, panDistance);
+    stats.maxZoomDeltaPct = Math.max(stats.maxZoomDeltaPct, Math.abs(Number(meta.zoomDeltaPct) || 0));
+  }
+
+  function recordPanZoom(stepName, meta = {}, event = null) {
+    if (!enabled) return;
+    const eventMeta = event ? inputEventMeta(event, { source: meta.source || '' }) : {};
+    const currentViewport = viewportStateMeta();
+    const payload = sanitize({
+      ...currentViewport,
+      ...eventMeta,
+      ...meta,
+    });
+    updatePanZoomStats(stepName, payload);
+    push({
+      op: 'panZoom',
+      step: stepName,
+      meta: payload,
+    });
+  }
+
+  function recordFrameSchedule(stepName, meta = {}) {
+    if (!enabled) return;
+    const payload = sanitize({
+      ...viewportStateMeta(),
+      ...meta,
+    });
+    stats.frameScheduleEvents++;
+    stats.maxFrameScheduleSources = Math.max(stats.maxFrameScheduleSources, Number(payload.pendingSources) || 0);
+    push({
+      op: 'frameSchedule',
+      step: stepName,
+      meta: payload,
     });
   }
 
@@ -1679,7 +1800,7 @@ var ViewportDebug = (() => {
     startRawInputMonitor(options);
 
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["report", "summary", "frameSummary", "wheelSummary", "drawSummary", "slowFrames", "eventLoopTimeline", "rawInputTimeline", "imageHealth", "dump"] }) to collect results.');
+    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["panZoomReport", "report", "summary", "frameSummary", "panZoomSummary", "panZoomTimeline", "wheelSummary", "drawSummary", "slowFrames", "eventLoopTimeline", "rawInputTimeline", "imageHealth", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -1825,6 +1946,14 @@ var ViewportDebug = (() => {
       { metric: 'maxLongTaskMs', value: Math.round(stats.maxLongTaskMs * 100) / 100 },
       { metric: 'rawInputEvents', value: stats.rawInputEvents },
       { metric: 'shieldBlockedInputs', value: stats.shieldBlockedInputs },
+      { metric: 'panZoomEvents', value: stats.panZoomEvents },
+      { metric: 'panZoomPanEvents', value: stats.panZoomPanEvents },
+      { metric: 'panZoomZoomEvents', value: stats.panZoomZoomEvents },
+      { metric: 'panZoomBlockedEvents', value: stats.panZoomBlockedEvents },
+      { metric: 'frameScheduleEvents', value: stats.frameScheduleEvents },
+      { metric: 'maxFrameScheduleSources', value: stats.maxFrameScheduleSources },
+      { metric: 'maxPanDistancePx', value: Math.round(stats.maxPanDistancePx * 100) / 100 },
+      { metric: 'maxZoomDeltaPct', value: Math.round(stats.maxZoomDeltaPct * 100) / 100 },
       { metric: 'avgWheelHandlerMs', value: stats.wheelHandlerCount ? Math.round(stats.wheelHandlerTotalMs / stats.wheelHandlerCount * 100) / 100 : 0 },
       { metric: 'maxWheelHandlerMs', value: Math.round(stats.maxWheelHandlerMs * 100) / 100 },
       { metric: 'avgMousePanHandlerMs', value: stats.mousePanHandlerCount ? Math.round(stats.mousePanHandlerTotalMs / stats.mousePanHandlerCount * 100) / 100 : 0 },
@@ -1951,21 +2080,253 @@ var ViewportDebug = (() => {
   }
 
   function wheelTimeline(limit = 80) {
+    const rowLimit = typeof limit === 'object' ? limit.limit : limit;
     const rows = wheelRows();
-    const start = Math.max(0, rows.length - Math.max(1, Number(limit) || 80));
+    const start = Math.max(0, rows.length - Math.max(1, Number(rowLimit) || 80));
     const recent = rows.slice(start).map((row, idx, list) => ({
       at: row.at,
       gapMs: idx ? Math.round((row.at - list[idx - 1].at) * 100) / 100 : '',
       mode: row.mode || '',
       deltaX: row.deltaX ?? '',
       deltaY: row.deltaY ?? '',
+      deltaMode: row.deltaMode ?? '',
+      wheelDeltaXPx: row.wheelDeltaXPx ?? '',
+      wheelDeltaYPx: row.wheelDeltaYPx ?? '',
       ctrl: !!row.ctrlKey,
       meta: !!row.metaKey,
       zoom: row.zoom ?? '',
       newZoom: row.newZoom ?? '',
+      panX: row.panX ?? '',
+      panY: row.panY ?? '',
+      panDeltaX: row.panDeltaX ?? '',
+      panDeltaY: row.panDeltaY ?? '',
+      zoomDeltaPct: row.zoomDeltaPct ?? '',
+      handlerMs: row.handlerMs ?? '',
     }));
     console.table(recent);
     return recent;
+  }
+
+  function panZoomRows() {
+    return events
+      .filter(e => e.op === 'panZoom')
+      .map(e => ({ at: e.at, step: e.step, ...(e.meta || {}) }));
+  }
+
+  function panZoomSummary() {
+    const rows = panZoomRows();
+    const panRows = rows.filter(row => row.mode === 'pan');
+    const zoomRows = rows.filter(row => row.mode === 'zoom');
+    const inputRows = rows.filter(row => /wheel|mouse|pointer|key/.test(String(row.eventType || row.step || '')));
+    const scheduleRows = events.filter(e => e.op === 'frameSchedule');
+    const gaps = [];
+    for (let i = 1; i < inputRows.length; i++) gaps.push(inputRows[i].at - inputRows[i - 1].at);
+    const maxValue = (items, field) => items.reduce((value, row) => Math.max(value, Math.abs(Number(row[field]) || 0)), 0);
+    const sumValue = (items, field) => items.reduce((value, row) => value + Math.abs(Number(row[field]) || 0), 0);
+    const panDistanceTotal = panRows.reduce((value, row) => {
+      const distance = Number(row.panDistancePx);
+      return value + (Number.isFinite(distance) ? Math.abs(distance) : Math.hypot(Number(row.panDeltaX) || 0, Number(row.panDeltaY) || 0));
+    }, 0);
+    const minZoom = zoomRows.reduce((value, row) => {
+      const after = Number(row.zoomAfter ?? row.newZoom ?? row.zoom);
+      return Number.isFinite(after) ? Math.min(value, after) : value;
+    }, Infinity);
+    const maxZoom = zoomRows.reduce((value, row) => {
+      const after = Number(row.zoomAfter ?? row.newZoom ?? row.zoom);
+      return Number.isFinite(after) ? Math.max(value, after) : value;
+    }, 0);
+    const out = {
+      events: rows.length,
+      panEvents: panRows.length,
+      zoomEvents: zoomRows.length,
+      blockedEvents: rows.filter(row => row.blocked || /blocked/.test(row.step)).length,
+      wheelPanEvents: panRows.filter(row => row.source === 'wheel-pan').length,
+      mousePanMoves: panRows.filter(row => row.step === 'mouse-pan-move').length,
+      wheelZoomEvents: zoomRows.filter(row => row.source === 'wheel-zoom').length,
+      frameScheduleEvents: scheduleRows.length,
+      coalescedFrameSchedules: scheduleRows.filter(row => row.step === 'coalesced').length,
+      scheduledFrames: stats.scheduledFrames,
+      coalescedFrames: stats.coalescedFrames,
+      transformFrames: stats.transformFrames,
+      slowFramesOver16ms: stats.slowFrames,
+      maxFrameMs: round(stats.maxFrameMs),
+      maxQueueMs: round(stats.maxQueueMs),
+      maxInputAgeMs: round(stats.maxInputAgeMs),
+      maxRafGapMs: round(stats.maxRafGapMs),
+      eventLoopGapsOverThreshold: stats.eventLoopGaps,
+      maxEventLoopGapMs: round(stats.maxEventLoopGapMs),
+      maxInputGapMs: round(gaps.reduce((value, gap) => Math.max(value, Number(gap) || 0), 0)),
+      inputGapsOver16ms: gaps.filter(gap => gap > 16.7).length,
+      inputGapsOver32ms: gaps.filter(gap => gap > 32).length,
+      maxPanDistancePx: round(Math.max(stats.maxPanDistancePx, maxValue(panRows, 'panDistancePx'))),
+      totalPanDistancePx: round(panDistanceTotal),
+      maxPanDeltaX: round(maxValue(panRows, 'panDeltaX')),
+      maxPanDeltaY: round(maxValue(panRows, 'panDeltaY')),
+      maxZoomDeltaPct: round(Math.max(stats.maxZoomDeltaPct, maxValue(zoomRows, 'zoomDeltaPct'))),
+      totalAbsZoomDeltaPct: round(sumValue(zoomRows, 'zoomDeltaPct')),
+      minZoom: minZoom === Infinity ? '' : round(minZoom, 4),
+      maxZoom: maxZoom ? round(maxZoom, 4) : '',
+      firstAt: rows[0]?.at ?? '',
+      lastAt: rows[rows.length - 1]?.at ?? '',
+      durationMs: rows.length > 1 ? round(rows[rows.length - 1].at - rows[0].at) : 0,
+      framesPerNavigationEvent: rows.length ? round(stats.transformFrames / rows.length, 3) : 0,
+    };
+    console.table([out]);
+    return out;
+  }
+
+  function frameScheduleTimeline(limit = 120) {
+    const rowLimit = typeof limit === 'object' ? limit.limit : limit;
+    const rows = events
+      .filter(e => e.op === 'frameSchedule')
+      .slice(-Math.max(1, Number(rowLimit) || 120))
+      .map(e => ({
+        at: e.at,
+        step: e.step,
+        source: e.meta?.source || '',
+        pendingSources: e.meta?.pendingSources ?? '',
+        needTransform: e.meta?.needTransform ?? '',
+        needBoardRender: e.meta?.needBoardRender ?? '',
+        needOverlayRender: e.meta?.needOverlayRender ?? '',
+        inputSource: e.meta?.inputSource || '',
+        inputAgeMs: e.meta?.inputAgeMs ?? '',
+        panX: e.meta?.panX ?? '',
+        panY: e.meta?.panY ?? '',
+        zoom: e.meta?.zoom ?? '',
+      }));
+    console.table(rows);
+    return rows;
+  }
+
+  function panZoomTimeline(options = {}) {
+    const opts = options && typeof options === 'object' ? options : { limit: options };
+    const limit = Math.max(1, Number(opts.limit) || 300);
+    const timeline = [];
+    for (const e of events) {
+      if (e.op === 'panZoom') {
+        timeline.push({
+          at: e.at,
+          kind: 'panZoom',
+          step: e.step,
+          mode: e.meta?.mode || '',
+          source: e.meta?.source || '',
+          eventType: e.meta?.eventType || '',
+          eventAgeMs: e.meta?.eventAgeMs ?? '',
+          inputGapMs: e.meta?.inputGapMs ?? '',
+          deltaX: e.meta?.deltaX ?? '',
+          deltaY: e.meta?.deltaY ?? '',
+          deltaMode: e.meta?.deltaMode ?? '',
+          wheelDeltaXPx: e.meta?.wheelDeltaXPx ?? '',
+          wheelDeltaYPx: e.meta?.wheelDeltaYPx ?? '',
+          clientX: e.meta?.clientX ?? '',
+          clientY: e.meta?.clientY ?? '',
+          panXBefore: e.meta?.panXBefore ?? '',
+          panYBefore: e.meta?.panYBefore ?? '',
+          panXAfter: e.meta?.panXAfter ?? '',
+          panYAfter: e.meta?.panYAfter ?? '',
+          panDeltaX: e.meta?.panDeltaX ?? '',
+          panDeltaY: e.meta?.panDeltaY ?? '',
+          panDistancePx: e.meta?.panDistancePx ?? '',
+          zoomBefore: e.meta?.zoomBefore ?? '',
+          zoomAfter: e.meta?.zoomAfter ?? e.meta?.newZoom ?? '',
+          zoomDeltaPct: e.meta?.zoomDeltaPct ?? '',
+          handlerMs: e.meta?.handlerMs ?? '',
+          rafPending: e.meta?.rafPending ?? '',
+          pendingSources: e.meta?.pendingSources ?? '',
+        });
+      } else if (e.op === 'frame' && (e.step === 'start' || e.step === 'end')) {
+        timeline.push({
+          at: e.at,
+          kind: 'frame',
+          step: e.step,
+          source: e.meta?.inputSource || e.meta?.sources || '',
+          queueMs: e.meta?.queueMs ?? '',
+          inputAgeMs: e.meta?.inputAgeMs ?? '',
+          rafGap: e.meta?.rafGap ?? '',
+          frameMs: e.meta?.frameMs ?? '',
+          doTransform: e.meta?.doTransform ?? '',
+          doBoard: e.meta?.doBoard ?? '',
+          doOverlay: e.meta?.doOverlay ?? '',
+          slow: e.meta?.slow ?? '',
+        });
+      } else if (e.op === 'frameSchedule') {
+        timeline.push({
+          at: e.at,
+          kind: 'frameSchedule',
+          step: e.step,
+          source: e.meta?.source || '',
+          inputAgeMs: e.meta?.inputAgeMs ?? '',
+          rafPending: e.meta?.rafPending ?? '',
+          pendingSources: e.meta?.pendingSources ?? '',
+          needTransform: e.meta?.needTransform ?? '',
+          needBoardRender: e.meta?.needBoardRender ?? '',
+          needOverlayRender: e.meta?.needOverlayRender ?? '',
+        });
+      } else if (e.op === 'applyTransform' && e.step === 'end') {
+        timeline.push({
+          at: e.at,
+          kind: 'applyTransform',
+          step: 'end',
+          source: e.meta?.source || '',
+          totalMs: e.meta?.totalMeasuredMs ?? e.total ?? '',
+          drawMs: e.meta?.drawMs ?? '',
+          saveViewportMs: e.meta?.saveViewportMs ?? '',
+          overlayMs: e.meta?.overlayMs ?? '',
+          panX: e.meta?.panX ?? '',
+          panY: e.meta?.panY ?? '',
+          zoom: e.meta?.zoom ?? '',
+        });
+      } else if (e.op === 'drawBoard' && e.step === 'end' && !e.meta?.skipped) {
+        timeline.push({
+          at: e.at,
+          kind: 'drawBoard',
+          step: 'end',
+          source: e.meta?.source || '',
+          totalMs: e.meta?.totalMeasuredMs ?? e.total ?? '',
+          objectLoopMs: e.meta?.objectLoopMs ?? '',
+          visibleObjects: e.meta?.visibleObjects ?? '',
+          testedObjects: e.meta?.testedObjects ?? '',
+          drawnImages: e.meta?.drawnImages ?? '',
+          drawnText: e.meta?.drawnText ?? '',
+          drawnTextLines: e.meta?.drawnTextLines ?? '',
+          richTextDrawUnits: e.meta?.richTextDrawUnits ?? '',
+          richTextRuns: e.meta?.richTextRuns ?? '',
+          richTextPlanCacheHits: e.meta?.richTextPlanCacheHits ?? '',
+          richTextPlanCacheMisses: e.meta?.richTextPlanCacheMisses ?? '',
+          richTextLineDrawMs: e.meta?.richTextLineDrawMs ?? '',
+          maxRichTextLineDrawMs: e.meta?.maxRichTextLineDrawMs ?? '',
+          slowRichTextLineDraws: e.meta?.slowRichTextLineDraws ?? '',
+          richTextDirectDraws: e.meta?.richTextDirectDraws ?? '',
+          imageContextFirstDraws: e.meta?.imageContextFirstDraws ?? '',
+          scaledImageContextFirstDraws: e.meta?.scaledImageContextFirstDraws ?? '',
+          culledImages: e.meta?.culledImages ?? '',
+          culledText: e.meta?.culledText ?? '',
+          scaledImages: e.meta?.scaledImages ?? '',
+          openPreviewImages: e.meta?.openPreviewImages ?? '',
+          dynamicOpenPreviewRequests: e.meta?.dynamicOpenPreviewRequests ?? '',
+          scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
+          activeInputFullFallbackImages: e.meta?.activeInputFullFallbackImages ?? '',
+          scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
+          fullScaleImages: e.meta?.fullScaleImages ?? '',
+          zoom: e.meta?.zoom ?? '',
+        });
+      } else if (e.op === 'eventLoop' || e.op === 'longTask') {
+        timeline.push({
+          at: e.at,
+          kind: e.op,
+          step: e.step,
+          gapMs: e.meta?.gapMs ?? '',
+          durationMs: e.meta?.duration ?? '',
+        });
+      }
+    }
+    timeline.sort((a, b) => a.at - b.at);
+    const rows = timeline.slice(-limit).map((row, index, list) => ({
+      ...row,
+      timelineGapMs: index ? round(row.at - list[index - 1].at) : '',
+    }));
+    console.table(rows);
+    return rows;
   }
 
   function drawSummary() {
@@ -1978,8 +2339,33 @@ var ViewportDebug = (() => {
         drawMs: e.steps?.drawBoard?.ms ?? e.steps?.drawBoard?.meta?.totalMeasuredMs ?? 0,
         objectLoopMs: e.steps?.drawBoard?.meta?.objectLoopMs ?? 0,
         croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? 0,
+        openPreviewImages: e.steps?.drawBoard?.meta?.openPreviewImages ?? 0,
+        dynamicOpenPreviewRequests: e.steps?.drawBoard?.meta?.dynamicOpenPreviewRequests ?? 0,
+        scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? 0,
+        activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? 0,
+        imageSourceFirstDraws: e.steps?.drawBoard?.meta?.imageSourceFirstDraws ?? 0,
+        imageSourceWarmDraws: e.steps?.drawBoard?.meta?.imageSourceWarmDraws ?? 0,
+        imageContextFirstDraws: e.steps?.drawBoard?.meta?.imageContextFirstDraws ?? 0,
+        imageContextWarmDraws: e.steps?.drawBoard?.meta?.imageContextWarmDraws ?? 0,
+        scaledImageContextFirstDraws: e.steps?.drawBoard?.meta?.scaledImageContextFirstDraws ?? 0,
+        fullScaleImageContextFirstDraws: e.steps?.drawBoard?.meta?.fullScaleImageContextFirstDraws ?? 0,
+        openPreviewImageContextFirstDraws: e.steps?.drawBoard?.meta?.openPreviewImageContextFirstDraws ?? 0,
         drawnTextLines: e.steps?.drawBoard?.meta?.drawnTextLines ?? 0,
         culledTextLines: e.steps?.drawBoard?.meta?.culledTextLines ?? 0,
+        richTextDrawUnits: e.steps?.drawBoard?.meta?.richTextDrawUnits ?? 0,
+        richTextRuns: e.steps?.drawBoard?.meta?.richTextRuns ?? 0,
+        richTextScriptRuns: e.steps?.drawBoard?.meta?.richTextScriptRuns ?? 0,
+        richTextSkippedTabs: e.steps?.drawBoard?.meta?.richTextSkippedTabs ?? 0,
+        richTextSkippedSpaces: e.steps?.drawBoard?.meta?.richTextSkippedSpaces ?? 0,
+        richTextHiddenChars: e.steps?.drawBoard?.meta?.richTextHiddenChars ?? 0,
+        richTextPlanCacheHits: e.steps?.drawBoard?.meta?.richTextPlanCacheHits ?? 0,
+        richTextPlanCacheMisses: e.steps?.drawBoard?.meta?.richTextPlanCacheMisses ?? 0,
+        richTextLineDrawMs: e.steps?.drawBoard?.meta?.richTextLineDrawMs ?? 0,
+        maxRichTextLineDrawMs: e.steps?.drawBoard?.meta?.maxRichTextLineDrawMs ?? 0,
+        slowRichTextLineDraws: e.steps?.drawBoard?.meta?.slowRichTextLineDraws ?? 0,
+        maxRichTextDrawUnitsPerLine: e.steps?.drawBoard?.meta?.maxRichTextDrawUnitsPerLine ?? 0,
+        maxRichTextRunsPerLine: e.steps?.drawBoard?.meta?.maxRichTextRunsPerLine ?? 0,
+        richTextDirectDraws: e.steps?.drawBoard?.meta?.richTextDirectDraws ?? 0,
         editLayoutMs: e.steps?.drawBoard?.meta?.editLayoutMs ?? 0,
         editTextDrawMs: e.steps?.drawBoard?.meta?.editTextDrawMs ?? 0,
         editSelectionMs: e.steps?.drawBoard?.meta?.editSelectionMs ?? 0,
@@ -2027,15 +2413,39 @@ var ViewportDebug = (() => {
       avgElementImages: draws.length ? Math.round(sum('elementImages') / draws.length * 100) / 100 : 0,
       avgScaledImages: draws.length ? Math.round(sum('scaledImages') / draws.length * 100) / 100 : 0,
       maxScaledImages: max('scaledImages'),
+      avgFullScaleImages: draws.length ? Math.round(sum('fullScaleImages') / draws.length * 100) / 100 : 0,
+      maxFullScaleImages: max('fullScaleImages'),
+      avgOpenPreviewImages: draws.length ? Math.round(sum('openPreviewImages') / draws.length * 100) / 100 : 0,
+      maxOpenPreviewImages: max('openPreviewImages'),
+      avgDynamicOpenPreviewRequests: draws.length ? Math.round(sum('dynamicOpenPreviewRequests') / draws.length * 100) / 100 : 0,
+      maxDynamicOpenPreviewRequests: Math.max(max('dynamicOpenPreviewRequests'), slowMax('dynamicOpenPreviewRequests')),
       avgScaledFallbackFull: draws.length ? Math.round(sum('scaledFallbackFull') / draws.length * 100) / 100 : 0,
+      maxScaledFallbackFull: Math.max(max('scaledFallbackFull'), slowMax('scaledFallbackFull')),
+      avgActiveInputFullFallbackImages: draws.length ? Math.round(sum('activeInputFullFallbackImages') / draws.length * 100) / 100 : 0,
+      maxActiveInputFullFallbackImages: Math.max(max('activeInputFullFallbackImages'), slowMax('activeInputFullFallbackImages')),
       avgScaledVariantPendingImages: draws.length ? Math.round(sum('scaledVariantPendingImages') / draws.length * 100) / 100 : 0,
       maxScaledVariantPendingImages: max('scaledVariantPendingImages'),
       avgScaledImageScale: sum('scaledImages') ? Math.round(sum('scaledImageScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgTargetImageScale: sum('scaledImages') ? Math.round(sum('scaledImageTargetScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
+      avgImageSourceFirstDraws: draws.length ? Math.round(sum('imageSourceFirstDraws') / draws.length * 100) / 100 : 0,
+      maxImageSourceFirstDraws: Math.max(max('imageSourceFirstDraws'), slowMax('imageSourceFirstDraws')),
+      avgImageSourceWarmDraws: draws.length ? Math.round(sum('imageSourceWarmDraws') / draws.length * 100) / 100 : 0,
+      maxImageSourceWarmDraws: Math.max(max('imageSourceWarmDraws'), slowMax('imageSourceWarmDraws')),
+      avgImageContextFirstDraws: draws.length ? Math.round(sum('imageContextFirstDraws') / draws.length * 100) / 100 : 0,
+      maxImageContextFirstDraws: Math.max(max('imageContextFirstDraws'), slowMax('imageContextFirstDraws')),
+      avgImageContextWarmDraws: draws.length ? Math.round(sum('imageContextWarmDraws') / draws.length * 100) / 100 : 0,
+      maxImageContextWarmDraws: Math.max(max('imageContextWarmDraws'), slowMax('imageContextWarmDraws')),
+      avgScaledImageContextFirstDraws: draws.length ? Math.round(sum('scaledImageContextFirstDraws') / draws.length * 100) / 100 : 0,
+      maxScaledImageContextFirstDraws: Math.max(max('scaledImageContextFirstDraws'), slowMax('scaledImageContextFirstDraws')),
+      avgFullScaleImageContextFirstDraws: draws.length ? Math.round(sum('fullScaleImageContextFirstDraws') / draws.length * 100) / 100 : 0,
+      maxFullScaleImageContextFirstDraws: Math.max(max('fullScaleImageContextFirstDraws'), slowMax('fullScaleImageContextFirstDraws')),
+      avgOpenPreviewImageContextFirstDraws: draws.length ? Math.round(sum('openPreviewImageContextFirstDraws') / draws.length * 100) / 100 : 0,
+      maxOpenPreviewImageContextFirstDraws: Math.max(max('openPreviewImageContextFirstDraws'), slowMax('openPreviewImageContextFirstDraws')),
       avgMissingImages: draws.length ? Math.round(sum('missingImages') / draws.length * 100) / 100 : 0,
       maxMissingImages: max('missingImages'),
       avgErroredImages: draws.length ? Math.round(sum('erroredImages') / draws.length * 100) / 100 : 0,
       avgCroppedImages: draws.length ? Math.round(sum('croppedImages') / draws.length * 100) / 100 : 0,
+      maxRetainedSlowOpenPreviewImages: slowMax('openPreviewImages'),
       maxRetainedSlowCroppedImages: slowMax('croppedImages'),
       avgDrawnText: draws.length ? Math.round(sum('drawnText') / draws.length * 100) / 100 : 0,
       avgCulledText: draws.length ? Math.round(sum('culledText') / draws.length * 100) / 100 : 0,
@@ -2050,6 +2460,29 @@ var ViewportDebug = (() => {
       maxDrawnTextLines: Math.max(max('drawnTextLines'), slowMax('drawnTextLines')),
       avgCulledTextLines: draws.length ? Math.round(sum('culledTextLines') / draws.length * 100) / 100 : 0,
       maxCulledTextLines: Math.max(max('culledTextLines'), slowMax('culledTextLines')),
+      avgRichTextDrawUnits: draws.length ? Math.round(sum('richTextDrawUnits') / draws.length * 100) / 100 : 0,
+      maxRichTextDrawUnits: Math.max(max('richTextDrawUnits'), slowMax('richTextDrawUnits')),
+      avgRichTextRuns: draws.length ? Math.round(sum('richTextRuns') / draws.length * 100) / 100 : 0,
+      maxRichTextRuns: Math.max(max('richTextRuns'), slowMax('richTextRuns')),
+      avgRichTextScriptRuns: draws.length ? Math.round(sum('richTextScriptRuns') / draws.length * 100) / 100 : 0,
+      maxRichTextScriptRuns: Math.max(max('richTextScriptRuns'), slowMax('richTextScriptRuns')),
+      avgRichTextSkippedTabs: draws.length ? Math.round(sum('richTextSkippedTabs') / draws.length * 100) / 100 : 0,
+      maxRichTextSkippedTabs: Math.max(max('richTextSkippedTabs'), slowMax('richTextSkippedTabs')),
+      avgRichTextSkippedSpaces: draws.length ? Math.round(sum('richTextSkippedSpaces') / draws.length * 100) / 100 : 0,
+      maxRichTextSkippedSpaces: Math.max(max('richTextSkippedSpaces'), slowMax('richTextSkippedSpaces')),
+      avgRichTextHiddenChars: draws.length ? Math.round(sum('richTextHiddenChars') / draws.length * 100) / 100 : 0,
+      maxRichTextHiddenChars: Math.max(max('richTextHiddenChars'), slowMax('richTextHiddenChars')),
+      avgRichTextPlanCacheHits: draws.length ? Math.round(sum('richTextPlanCacheHits') / draws.length * 100) / 100 : 0,
+      maxRichTextPlanCacheHits: Math.max(max('richTextPlanCacheHits'), slowMax('richTextPlanCacheHits')),
+      avgRichTextPlanCacheMisses: draws.length ? Math.round(sum('richTextPlanCacheMisses') / draws.length * 100) / 100 : 0,
+      maxRichTextPlanCacheMisses: Math.max(max('richTextPlanCacheMisses'), slowMax('richTextPlanCacheMisses')),
+      avgRichTextLineDrawMs: draws.length ? Math.round(sum('richTextLineDrawMs') / draws.length * 100) / 100 : 0,
+      maxRichTextLineDrawMs: Math.round(Math.max(max('maxRichTextLineDrawMs'), slowMax('maxRichTextLineDrawMs')) * 100) / 100,
+      maxSlowRichTextLineDraws: Math.max(max('slowRichTextLineDraws'), slowMax('slowRichTextLineDraws')),
+      maxRichTextDrawUnitsPerLine: Math.max(max('maxRichTextDrawUnitsPerLine'), slowMax('maxRichTextDrawUnitsPerLine')),
+      maxRichTextRunsPerLine: Math.max(max('maxRichTextRunsPerLine'), slowMax('maxRichTextRunsPerLine')),
+      avgRichTextDirectDraws: draws.length ? Math.round(sum('richTextDirectDraws') / draws.length * 100) / 100 : 0,
+      maxRichTextDirectDraws: Math.max(max('richTextDirectDraws'), slowMax('richTextDirectDraws')),
       avgEditLayoutMs: draws.length ? Math.round(sum('editLayoutMs') / draws.length * 100) / 100 : 0,
       maxEditLayoutMs: Math.round(Math.max(max('editLayoutMs'), slowMax('editLayoutMs')) * 100) / 100,
       avgEditTextDrawMs: draws.length ? Math.round(sum('editTextDrawMs') / draws.length * 100) / 100 : 0,
@@ -2153,14 +2586,17 @@ var ViewportDebug = (() => {
       variants: variantCount,
       cacheMB: Math.round(imageScaledBitmapBytes / 1024 / 1024 * 100) / 100,
       limitMB: Math.round(IMAGE_VARIANT_MEMORY_LIMIT / 1024 / 1024),
-      pending: imageScaledBitmapPending.size,
-      pendingMB: Math.round(pendingScaledVariantBytes() / 1024 / 1024 * 100) / 100,
-      queued: imageScaledVariantQueue.length,
-      renderBatchPending: !!imageScaledVariantRenderTimer,
+	      pending: imageScaledBitmapPending.size,
+	      pendingMB: Math.round(pendingScaledVariantBytes() / 1024 / 1024 * 100) / 100,
+	      queued: imageScaledVariantQueue.length,
+	      queueActive: imageScaledVariantQueueActive,
+	      queueConcurrency: IMAGE_VARIANT_QUEUE_CONCURRENCY,
+	      renderBatchPending: !!imageScaledVariantRenderTimer,
       renderBatchCount: imageScaledVariantRenderCount,
       inputIdleMs: Math.round((performance.now() - lastViewportInputAt) * 10) / 10,
       inputIdleThresholdMs: IMAGE_VARIANT_INPUT_IDLE_MS,
       activeInputQueueDelayMs: IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS,
+      activeInputPriorityMs: IMAGE_VARIANT_ACTIVE_INPUT_PRIORITY_MS,
       builds: imageScaledVariantBuildCount,
       avgBuildMs: imageScaledVariantBuildCount ? Math.round(imageScaledVariantBuildTotalMs / imageScaledVariantBuildCount * 10) / 10 : 0,
       maxBuildMs: Math.round(imageScaledVariantBuildMaxMs * 10) / 10,
@@ -2168,6 +2604,8 @@ var ViewportDebug = (() => {
       canvasFallbackBuilds: imageScaledVariantCanvasFallbackCount,
       evictions: imageScaledVariantEvictionCount,
       memorySkips: imageScaledVariantMemorySkipCount,
+      activeInputFullFallbacks: imageScaledVariantActiveInputFullFallbackCount,
+      priorityBoosts: imageScaledVariantPriorityBoostCount,
       prewarmRuns: imageScaledVariantPrewarmRunCount,
       prewarmCandidates: imageScaledVariantPrewarmCandidateCount,
       prewarmReady: imageScaledVariantPrewarmReadyCount,
@@ -2175,6 +2613,26 @@ var ViewportDebug = (() => {
       prewarmNoSource: imageScaledVariantPrewarmNoSourceCount,
       prewarmPending: !!imageScaledVariantPrewarmTimer,
       prewarmPadPx: IMAGE_VARIANT_PREWARM_PAD_PX,
+      sourceReadyCandidates: imageScaledVariantSourceReadyCandidateCount,
+      sourceReadyQueued: imageScaledVariantSourceReadyQueuedCount,
+      sourceReadyReady: imageScaledVariantSourceReadyReadyCount,
+      sourceReadyNoSource: imageScaledVariantSourceReadyNoSourceCount,
+      sourceReadyFullScale: imageScaledVariantSourceReadyFullScaleCount,
+      drawWarmupQueued: drawableBitmapWarmupQueuedCount,
+      drawWarmupPending: drawableBitmapWarmupQueue.length,
+	      drawWarmupWarmed: drawableBitmapWarmupWarmedCount,
+	      drawWarmupAvgMs: drawableBitmapWarmupWarmedCount ? Math.round(drawableBitmapWarmupTotalMs / drawableBitmapWarmupWarmedCount * 10) / 10 : 0,
+	      drawWarmupMaxMs: Math.round(drawableBitmapWarmupMaxMs * 10) / 10,
+	      drawWarmupAvgPixels: drawableBitmapWarmupWarmedCount ? Math.round(drawableBitmapWarmupTotalPixels / drawableBitmapWarmupWarmedCount) : 0,
+	      drawWarmupMaxPixels: drawableBitmapWarmupMaxPixels,
+	      drawWarmupErrors: drawableBitmapWarmupErrorCount,
+      drawWarmupUnsupported: drawableBitmapWarmupUnsupportedCount,
+      drawWarmupFullImageQueued: drawableBitmapWarmupQueuedByKind.fullImage || 0,
+      drawWarmupFullImageWarmed: drawableBitmapWarmupWarmedByKind.fullImage || 0,
+      drawWarmupScaledVariantQueued: drawableBitmapWarmupQueuedByKind.scaledVariant || 0,
+      drawWarmupScaledVariantWarmed: drawableBitmapWarmupWarmedByKind.scaledVariant || 0,
+      drawWarmupOpenPreviewQueued: drawableBitmapWarmupQueuedByKind.openPreview || 0,
+      drawWarmupOpenPreviewWarmed: drawableBitmapWarmupWarmedByKind.openPreview || 0,
       levels: IMAGE_SCALE_LEVELS.join(','),
       supported: VIEWPORT_IMAGE_SCALING_SUPPORTED,
       enabled: viewportImageScalingEnabled,
@@ -2273,6 +2731,20 @@ var ViewportDebug = (() => {
         textLines: e.steps?.drawBoard?.meta?.textLines ?? '',
         drawnTextLines: e.steps?.drawBoard?.meta?.drawnTextLines ?? '',
         culledTextLines: e.steps?.drawBoard?.meta?.culledTextLines ?? '',
+        richTextDrawUnits: e.steps?.drawBoard?.meta?.richTextDrawUnits ?? '',
+        richTextRuns: e.steps?.drawBoard?.meta?.richTextRuns ?? '',
+        richTextScriptRuns: e.steps?.drawBoard?.meta?.richTextScriptRuns ?? '',
+        richTextSkippedTabs: e.steps?.drawBoard?.meta?.richTextSkippedTabs ?? '',
+        richTextSkippedSpaces: e.steps?.drawBoard?.meta?.richTextSkippedSpaces ?? '',
+        richTextHiddenChars: e.steps?.drawBoard?.meta?.richTextHiddenChars ?? '',
+        richTextPlanCacheHits: e.steps?.drawBoard?.meta?.richTextPlanCacheHits ?? '',
+        richTextPlanCacheMisses: e.steps?.drawBoard?.meta?.richTextPlanCacheMisses ?? '',
+        richTextLineDrawMs: e.steps?.drawBoard?.meta?.richTextLineDrawMs ?? '',
+        maxRichTextLineDrawMs: e.steps?.drawBoard?.meta?.maxRichTextLineDrawMs ?? '',
+        slowRichTextLineDraws: e.steps?.drawBoard?.meta?.slowRichTextLineDraws ?? '',
+        maxRichTextDrawUnitsPerLine: e.steps?.drawBoard?.meta?.maxRichTextDrawUnitsPerLine ?? '',
+        maxRichTextRunsPerLine: e.steps?.drawBoard?.meta?.maxRichTextRunsPerLine ?? '',
+        richTextDirectDraws: e.steps?.drawBoard?.meta?.richTextDirectDraws ?? '',
         editLayoutMs: e.steps?.drawBoard?.meta?.editLayoutMs ?? '',
         editTextDrawMs: e.steps?.drawBoard?.meta?.editTextDrawMs ?? '',
         editSelectionMs: e.steps?.drawBoard?.meta?.editSelectionMs ?? '',
@@ -2288,7 +2760,17 @@ var ViewportDebug = (() => {
         bitmapImages: e.steps?.drawBoard?.meta?.bitmapImages ?? '',
         elementImages: e.steps?.drawBoard?.meta?.elementImages ?? '',
         scaledImages: e.steps?.drawBoard?.meta?.scaledImages ?? '',
+        openPreviewImages: e.steps?.drawBoard?.meta?.openPreviewImages ?? '',
+        dynamicOpenPreviewRequests: e.steps?.drawBoard?.meta?.dynamicOpenPreviewRequests ?? '',
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? '',
+        activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? '',
+        imageSourceFirstDraws: e.steps?.drawBoard?.meta?.imageSourceFirstDraws ?? '',
+        imageSourceWarmDraws: e.steps?.drawBoard?.meta?.imageSourceWarmDraws ?? '',
+        imageContextFirstDraws: e.steps?.drawBoard?.meta?.imageContextFirstDraws ?? '',
+        imageContextWarmDraws: e.steps?.drawBoard?.meta?.imageContextWarmDraws ?? '',
+        scaledImageContextFirstDraws: e.steps?.drawBoard?.meta?.scaledImageContextFirstDraws ?? '',
+        fullScaleImageContextFirstDraws: e.steps?.drawBoard?.meta?.fullScaleImageContextFirstDraws ?? '',
+        openPreviewImageContextFirstDraws: e.steps?.drawBoard?.meta?.openPreviewImageContextFirstDraws ?? '',
         scaledVariantPendingImages: e.steps?.drawBoard?.meta?.scaledVariantPendingImages ?? '',
         fullScaleImages: e.steps?.drawBoard?.meta?.fullScaleImages ?? '',
         missingImages: e.steps?.drawBoard?.meta?.missingImages ?? '',
@@ -2296,8 +2778,13 @@ var ViewportDebug = (() => {
         culledImages: e.steps?.drawBoard?.meta?.culledImages ?? '',
         culledText: e.steps?.drawBoard?.meta?.culledText ?? '',
         slowDrawObjects: (e.steps?.drawBoard?.meta?.slowDrawObjects || [])
-          .map(row => `${row.type || ''}:${row.id || ''}:${row.ms ?? ''}ms`)
+          .map(row => `${row.type || ''}:${row.id || ''}${row.imgKey ? ':' + row.imgKey : ''}:${row.ms ?? ''}ms`)
           .join(' | '),
+        slowDrawObjectRows: (e.steps?.drawBoard?.meta?.slowDrawObjects || []).map(row => ({ ...row })),
+        slowTextLineDraws: (e.steps?.drawBoard?.meta?.slowTextLineDraws || [])
+          .map(row => `${row.objectId || row.id || ''}:${row.logicalLineIndex ?? ''}:${row.ms ?? ''}ms`)
+          .join(' | '),
+        slowTextLineRows: (e.steps?.drawBoard?.meta?.slowTextLineDraws || []).map(row => ({ ...row })),
         canvasW: e.steps?.drawBoard?.meta?.canvasW ?? '',
         canvasH: e.steps?.drawBoard?.meta?.canvasH ?? '',
         zoom: e.steps?.drawBoard?.meta?.zoom ?? e.zoom ?? '',
@@ -2377,9 +2864,10 @@ var ViewportDebug = (() => {
   }
 
   function eventLoopTimeline(limit = 80) {
+    const rowLimit = typeof limit === 'object' ? limit.limit : limit;
     const rows = events
       .filter(e => e.op === 'eventLoop' || e.op === 'longTask')
-      .slice(-Math.max(1, Number(limit) || 80))
+      .slice(-Math.max(1, Number(rowLimit) || 80))
       .map(e => ({
         at: e.at,
         kind: e.op,
@@ -2394,9 +2882,10 @@ var ViewportDebug = (() => {
   }
 
   function rawInputTimeline(limit = 120) {
+    const rowLimit = typeof limit === 'object' ? limit.limit : limit;
     const rows = events
       .filter(e => e.op === 'input')
-      .slice(-Math.max(1, Number(limit) || 120))
+      .slice(-Math.max(1, Number(rowLimit) || 120))
       .map(e => ({
         at: e.at,
         step: e.step,
@@ -2405,6 +2894,9 @@ var ViewportDebug = (() => {
         eventAgeMs: e.meta?.eventAgeMs ?? '',
         deltaX: e.meta?.deltaX ?? '',
         deltaY: e.meta?.deltaY ?? '',
+        deltaMode: e.meta?.deltaMode ?? '',
+        wheelDeltaXPx: e.meta?.wheelDeltaXPx ?? '',
+        wheelDeltaYPx: e.meta?.wheelDeltaYPx ?? '',
         key: e.meta?.key || '',
         code: e.meta?.code || '',
         repeat: e.meta?.repeat ?? '',
@@ -2421,10 +2913,43 @@ var ViewportDebug = (() => {
     return rows;
   }
 
+  function panZoomReport(options = {}) {
+    const opts = options && typeof options === 'object' ? options : { limit: options };
+    const out = {
+      summary: panZoomSummary(),
+      panZoomTimeline: panZoomTimeline(opts.timelineLimit ? { limit: opts.timelineLimit } : opts),
+      wheelSummary: wheelSummary(),
+      wheelTimeline: wheelTimeline(opts.wheelLimit ?? opts.limit ?? 120),
+      frameSummary: frameSummary(),
+      frameScheduleTimeline: frameScheduleTimeline(opts.frameScheduleLimit ?? opts.limit ?? 120),
+      transformSummary: transformSummary(),
+      drawSummary: drawSummary(),
+      slowFrames: slowFrames(opts.slowFrames ?? opts.limit ?? 40),
+      eventLoopTimeline: eventLoopTimeline(opts.eventLoopLimit ?? opts.limit ?? 120),
+      rawInputTimeline: rawInputTimeline(opts.rawInputLimit ?? opts.limit ?? 240),
+      imageScaleCache: imageScaleCacheSummary({ table: opts.cacheTable === true }),
+      textLayoutPrewarm: typeof getLastVisibleTextLayoutPrewarm === 'function'
+        ? getLastVisibleTextLayoutPrewarm()
+        : null,
+      bestTextLayoutPrewarm: typeof getBestVisibleTextLayoutPrewarm === 'function'
+        ? getBestVisibleTextLayoutPrewarm()
+        : null,
+      textLayoutPrewarmHistory: typeof getVisibleTextLayoutPrewarmHistory === 'function'
+        ? getVisibleTextLayoutPrewarmHistory(opts.textPrewarmHistoryLimit ?? 8)
+        : null,
+      culling: cullingSummary(),
+    };
+    if (opts.details === true) out.slowFrameDetails = slowFrameDetails(opts.detailLimit ?? 5);
+    if (opts.log !== false) console.log(out);
+    return out;
+  }
+
   function report(options = {}) {
     const out = {
       summary: summary(),
       frameSummary: frameSummary(),
+      panZoomSummary: panZoomSummary(),
+      panZoomTimeline: panZoomTimeline(options.panZoomLimit ?? options.limit ?? 160),
       wheelSummary: wheelSummary(),
       drawSummary: drawSummary(),
       transformSummary: transformSummary(),
@@ -2432,6 +2957,15 @@ var ViewportDebug = (() => {
       rawInputTimeline: rawInputTimeline(options.rawInputLimit ?? 120),
       slowFrames: slowFrames(options.slowFrames ?? options.limit ?? 20),
       imageScaleCache: imageScaleCacheSummary(),
+      textLayoutPrewarm: typeof getLastVisibleTextLayoutPrewarm === 'function'
+        ? getLastVisibleTextLayoutPrewarm()
+        : null,
+      bestTextLayoutPrewarm: typeof getBestVisibleTextLayoutPrewarm === 'function'
+        ? getBestVisibleTextLayoutPrewarm()
+        : null,
+      textLayoutPrewarmHistory: typeof getVisibleTextLayoutPrewarmHistory === 'function'
+        ? getVisibleTextLayoutPrewarmHistory(options.textPrewarmHistoryLimit ?? 8)
+        : null,
       culling: cullingSummary(),
     };
     if (options.details !== false) out.slowFrameDetails = slowFrameDetails(options.detailLimit ?? 3);
@@ -2469,7 +3003,10 @@ var ViewportDebug = (() => {
     timing,
     frameStart,
     frameEnd,
+    recordPanZoom,
+    recordFrameSchedule,
     report,
+    panZoomReport,
     summary,
     frameSummary,
     drawSummary,
@@ -2486,8 +3023,11 @@ var ViewportDebug = (() => {
     transformSummary,
     eventLoopTimeline,
     rawInputTimeline,
+    frameScheduleTimeline,
     recordRawInput,
     recordShieldBlock,
+    panZoomSummary,
+    panZoomTimeline,
     wheelSummary,
     wheelTimeline,
     slowFrames,

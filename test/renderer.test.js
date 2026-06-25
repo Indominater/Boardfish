@@ -6,8 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadRenderer() {
-  const context = { console };
+function loadRenderer(overrides = {}) {
+  const context = { console, ...overrides };
   vm.createContext(context);
   vm.runInContext(
     fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'renderer.js'), 'utf8'),
@@ -178,6 +178,12 @@ test('image renderer crops untransformed images to the visible viewport', () => 
   assert.equal(result.drawnImages, 1);
   assert.equal(result.drawnText, 0);
   assert.equal(counters.croppedImages, 1);
+  assert.equal(counters.imageSourceDraws, 1);
+  assert.equal(counters.imageSourceFirstDraws, 1);
+  assert.equal(counters.imageSourceWarmDraws, 0);
+  assert.equal(counters.imageContextFirstDraws, 1);
+  assert.equal(counters.imageContextWarmDraws, 0);
+  assert.equal(counters.fullScaleImageContextFirstDraws, 1);
   assert.deepEqual(drawImageCalls, [[
     source,
     20,
@@ -189,6 +195,30 @@ test('image renderer crops untransformed images to the visible viewport', () => 
     60,
     20,
   ]]);
+
+  drawImageCalls.length = 0;
+  const warmCounters = BoardfishRenderer.createDrawCounters();
+  renderer.drawVisibleObjects(context, warmCounters, {
+    viewportRect: { x1: 0, y1: 25, x2: 60, y2: 45 },
+  });
+
+  assert.equal(warmCounters.imageSourceFirstDraws, 0);
+  assert.equal(warmCounters.imageSourceWarmDraws, 1);
+  assert.equal(warmCounters.imageContextFirstDraws, 0);
+  assert.equal(warmCounters.imageContextWarmDraws, 1);
+
+  const nextContextCounters = BoardfishRenderer.createDrawCounters();
+  renderer.drawVisibleObjects({
+    drawImage() {},
+  }, nextContextCounters, {
+    viewportRect: { x1: 0, y1: 25, x2: 60, y2: 45 },
+  });
+
+  assert.equal(nextContextCounters.imageSourceFirstDraws, 0);
+  assert.equal(nextContextCounters.imageSourceWarmDraws, 1);
+  assert.equal(nextContextCounters.imageContextFirstDraws, 1);
+  assert.equal(nextContextCounters.imageContextWarmDraws, 0);
+  assert.equal(nextContextCounters.fullScaleImageContextFirstDraws, 1);
 });
 
 test('image renderer overdraws image edges by one device pixel at the current view scale', () => {
@@ -237,6 +267,68 @@ test('image renderer overdraws image edges by one device pixel at the current vi
   });
 
   assert.deepEqual(drawImageCalls, [[source, 9.75, 19.75, 40.5, 30.5]]);
+});
+
+test('image renderer keeps active full fallback visible with temporary low smoothing', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawQualities = [];
+  const drawSmoothingEnabled = [];
+  const context = {
+    imageSmoothingEnabled: true,
+    imageSmoothingQuality: 'high',
+    drawImage() {
+      drawSmoothingEnabled.push(this.imageSmoothingEnabled);
+      drawQualities.push(this.imageSmoothingQuality);
+    },
+  };
+  const source = {
+    complete: true,
+    naturalWidth: 4000,
+    naturalHeight: 4000,
+    width: 4000,
+    height: 4000,
+  };
+  const obj = { type: 'image', x: 10, y: 20, w: 500, h: 500, data: { imgKey: 'img-1' } };
+  const counters = BoardfishRenderer.createDrawCounters();
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 1000, y2: 1000 }),
+    dpr: () => 1,
+    getWrappedLines: () => [],
+    imageBitmapCache: () => ({}),
+    imageCache: () => ({ 'img-1': source }),
+    imageStore: () => ({ 'img-1': 'source' }),
+    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
+    imageTransformNeedsRendering: () => false,
+    isSidewaysRotation: () => false,
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [obj],
+    panX: () => 0,
+    panY: () => 0,
+    selectImageSourceForDraw: () => ({
+      source,
+      scale: 1,
+      targetScale: 0.25,
+      scaledVariantPending: true,
+      activeInputFullFallback: true,
+    }),
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 0.1,
+  });
+
+  const result = renderer.drawVisibleObjects(context, counters);
+
+  assert.equal(result.drawnImages, 1);
+  assert.deepEqual(drawSmoothingEnabled, [false]);
+  assert.equal(context.imageSmoothingEnabled, true);
+  assert.deepEqual(drawQualities, ['low']);
+  assert.equal(context.imageSmoothingQuality, 'high');
+  assert.equal(counters.scaledFallbackFull, 1);
+  assert.equal(counters.activeInputFullFallbackImages, 1);
 });
 
 test('renderer does not redraw finished exit-motion objects', () => {
@@ -340,6 +432,62 @@ test('renderer can skip text while drawing visible objects', () => {
   assert.deepEqual(fillTextCalls, []);
 });
 
+test('renderer can draw only text while drawing visible objects', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawImageCalls = [];
+  const drawnText = [];
+  const source = {
+    width: 20,
+    height: 20,
+  };
+  const context = {
+    drawImage(...args) {
+      drawImageCalls.push(args);
+    },
+    fillText(text) {
+      drawnText.push(text);
+    },
+    setTransform() {},
+    translate() {},
+    rotate() {},
+    scale() {},
+    save() {},
+    restore() {},
+  };
+  const image = { id: 'img-1', type: 'image', x: 0, y: 0, w: 20, h: 20, data: { imgKey: 'img-1' } };
+  const text = { id: 'text-1', type: 'text', x: 0, y: 0, w: 20, h: 20 };
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 30, y2: 30 }),
+    dpr: () => 1,
+    getWrappedLines: () => [{ text: 'drawn' }],
+    imageBitmapCache: () => ({}),
+    imageCache: () => ({ 'img-1': source }),
+    imageStore: () => ({ 'img-1': 'source' }),
+    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
+    imageTransformNeedsRendering: () => false,
+    isSidewaysRotation: () => false,
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [image, text],
+    panX: () => 0,
+    panY: () => 0,
+    selectImageSourceForDraw: () => ({ source, scale: 1, targetScale: 1 }),
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  const result = renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters(), { onlyText: true });
+
+  assert.equal(result.drawnImages, 0);
+  assert.equal(result.drawnText, 1);
+  assert.deepEqual(drawImageCalls, []);
+  assert.deepEqual(drawnText, ['drawn']);
+});
+
 test('renderer can skip arbitrary object ids while drawing visible objects', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnText = [];
@@ -416,7 +564,7 @@ test('text renderer skips layout lines outside the visible viewport', () => {
   assert.equal(counters.culledTextLines, 2);
 });
 
-test('text renderer draws visible text at low zoom instead of substituting or hiding it', () => {
+test('text renderer keeps rich text drawing at low zoom instead of switching to fast text', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnText = [];
   const rects = [];
@@ -433,9 +581,21 @@ test('text renderer draws visible text at low zoom instead of substituting or hi
   const renderer = BoardfishRenderer.createBoardRenderer({
     canvasTextColor: () => '#fff',
     currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 300, y2: 100 }),
-    dpr: () => 1,
-    drawTextLineRange(_context, line) {
+    dpr: () => 2,
+    drawTextLineRange(_context, line, _obj, _start, _end, options = {}) {
       drawnText.push(line.text);
+      assert.equal(options.fast, undefined);
+      return {
+        chars: line.text.length,
+        drawnChars: line.text.length,
+        drawUnits: line.text.length,
+        runs: 1,
+        plainRuns: 1,
+        scriptRuns: 0,
+        skippedTabs: 0,
+        hiddenChars: 0,
+        fontSwitches: 0,
+      };
     },
     getTextLayout() {
       layoutCalls++;
@@ -450,7 +610,7 @@ test('text renderer draws visible text at low zoom instead of substituting or hi
     textBaselineYOffset: () => 0,
     textPad: 4,
     viewportCullingEnabled: () => true,
-    zoom: () => 0.25,
+    zoom: () => 0.2,
   });
 
   renderer.drawVisibleObjects(context, counters);
@@ -461,6 +621,191 @@ test('text renderer draws visible text at low zoom instead of substituting or hi
   assert.equal(counters.textLines, 1);
   assert.equal(counters.drawnTextLines, 1);
   assert.equal(counters.culledTextLines, 0);
+  assert.equal(counters.richTextChars, 4);
+  assert.equal(counters.richTextDrawUnits, 4);
+  assert.equal(counters.richTextRuns, 1);
+  assert.equal(counters.richTextPlainRuns, 1);
+  assert.equal(counters.richTextScriptRuns, 0);
+  assert.equal(counters.maxRichTextDrawUnitsPerLine, 4);
+});
+
+test('text renderer keeps direct rich rendering', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawImageCalls = [];
+  const drawnLines = [];
+  const context = {
+    fillStyle: '',
+    textBaseline: '',
+    drawImage(...args) {
+      drawImageCalls.push(args);
+    },
+  };
+  const text = { id: 'text-1', type: 'text', x: 10, y: 20, w: 200, h: 80, data: { content: 'cached' } };
+  const counters = BoardfishRenderer.createDrawCounters();
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 300, y2: 160 }),
+    dpr: () => 2,
+    drawTextLineRange(_context, line) {
+      drawnLines.push(line.text);
+      return {
+        chars: line.text.length,
+        drawnChars: line.text.length,
+        drawUnits: line.text.length,
+        runs: 1,
+        plainRuns: 1,
+        scriptRuns: 0,
+      };
+    },
+    getTextLayout() {
+      return [
+        { text: 'cached one', y: 20, textY: 36 },
+        { text: 'cached two', y: 44, textY: 60 },
+      ];
+    },
+    getWrappedLines: () => [],
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [text],
+    panX: () => 0,
+    panY: () => 0,
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  renderer.drawVisibleObjects(context, counters, {
+    viewportRect: { x1: 0, y1: 0, x2: 300, y2: 160 },
+    view: { zoom: 1, panX: 0, panY: 0, dpr: 2 },
+  });
+
+  assert.deepEqual(drawnLines, ['cached one', 'cached two']);
+  assert.deepEqual(drawImageCalls, []);
+  assert.equal(counters.textLines, 2);
+  assert.equal(counters.drawnTextLines, 2);
+  assert.equal(counters.richTextDirectDraws, 1);
+});
+
+test('animated text keeps direct rich rendering', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawnLines = [];
+  const context = {
+    fillStyle: '',
+    globalAlpha: 1,
+    save() {},
+    restore() {},
+    textBaseline: '',
+    translate() {},
+    scale() {},
+  };
+  const text = { id: 'text-1', type: 'text', x: 10, y: 20, w: 200, h: 80, data: { content: 'moving' } };
+  const counters = BoardfishRenderer.createDrawCounters();
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 300, y2: 160 }),
+    dpr: () => 2,
+    drawTextLineRange(_context, line) {
+      drawnLines.push(line.text);
+      return {
+        chars: line.text.length,
+        drawnChars: line.text.length,
+        drawUnits: line.text.length,
+        runs: 1,
+        plainRuns: 1,
+        scriptRuns: 0,
+      };
+    },
+    getTextLayout() {
+      return [{ text: 'moving rich text', y: 20, textY: 36 }];
+    },
+    getWrappedLines: () => [],
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objectMotionForDraw: () => ({ opacity: 1, translateX: 1, scale: 1 }),
+    objects: () => [text],
+    panX: () => 0,
+    panY: () => 0,
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  renderer.drawVisibleObjects(context, counters);
+
+  assert.deepEqual(drawnLines, ['moving rich text']);
+  assert.equal(counters.richTextDirectDraws, 1);
+});
+
+test('text renderer records slow rich text line timing rows for debug captures', () => {
+  let now = 0;
+  const BoardfishRenderer = loadRenderer({
+    performance: {
+      now() {
+        now += 1;
+        return now;
+      },
+    },
+  });
+  const text = { id: 'text-1', type: 'text', x: 10, y: 20, w: 200, h: 80, data: { content: 'first line\nsecond line' } };
+  const counters = BoardfishRenderer.createDrawCounters();
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 300, y2: 160 }),
+    dpr: () => 2,
+    drawTextLineRange(_context, line) {
+      return {
+        chars: line.text.length,
+        drawnChars: line.text.length,
+        drawUnits: line.text.length,
+        runs: 1,
+        plainRuns: 1,
+        scriptRuns: 0,
+        skippedTabs: 0,
+        skippedSpaces: 1,
+        hiddenChars: 0,
+        fontSwitches: 0,
+        planCacheHits: 1,
+        planCacheMisses: 0,
+      };
+    },
+    getTextLayout() {
+      return [
+        { text: 'first line', y: 20, textY: 36, startIndex: 0, endIndex: 10, logicalLineIndex: 0 },
+        { text: 'second line', y: 44, textY: 60, startIndex: 11, endIndex: 22, logicalLineIndex: 1 },
+      ];
+    },
+    getWrappedLines: () => [],
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [text],
+    panX: () => 0,
+    panY: () => 0,
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 0.1,
+  });
+
+  renderer.drawVisibleObjects({ fillStyle: '', textBaseline: '' }, counters);
+
+  assert.equal(counters.richTextLineDrawMs, 2);
+  assert.equal(counters.maxRichTextLineDrawMs, 1);
+  assert.equal(counters.slowRichTextLineDraws, 2);
+  assert.equal(counters.slowTextLineDraws.length, 2);
+  const lineRows = counters.slowTextLineDraws.slice().sort((a, b) => a.lineIndex - b.lineIndex);
+  assert.equal(lineRows[0].objectId, 'text-1');
+  assert.equal(lineRows[0].logicalLineIndex, 0);
+  assert.equal(lineRows[0].sample, 'first line');
+  assert.equal(lineRows[0].drawUnits, 10);
+  assert.equal(lineRows[1].logicalLineIndex, 1);
+  assert.equal(lineRows[1].sample, 'second line');
+  assert.equal(counters.slowDrawObjects[0].richTextLineDrawMs, 2);
+  assert.equal(counters.slowDrawObjects[0].slowRichTextLineDraws, 2);
+  assert.equal(counters.slowDrawObjects[0].slowTextLineRows.length, 2);
 });
 
 test('renderer applies object motion translation and non-uniform scaling around object center', () => {

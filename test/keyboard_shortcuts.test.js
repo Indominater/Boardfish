@@ -58,6 +58,7 @@ function loadKeyboard(overrides = {}) {
     copySelected: () => calls.push(['copySelected']),
     saveBoard: () => calls.push(['saveBoard']),
     pasteAtPos: (x, y) => calls.push(['pasteAtPos', x, y]),
+    enterEdit: (id, options = {}) => calls.push(['enterEdit', id, options]),
     toWorld: (x, y) => ({ x: x + 1, y: y + 1 }),
     hasSelection: () => false,
     applyTextLineAlignmentRange: () => false,
@@ -208,6 +209,62 @@ test('paste keydown stays native unless a context menu is open', () => {
   assert.deepEqual(calls, []);
 });
 
+test('paste shortcut fallback uses the current cursor point', () => {
+  const { calls, mainKeydown } = loadKeyboard({
+    hasOpenContextMenu: () => true,
+    runVisibleMenuCommandForShortcut: (shortcutName) => {
+      calls.push(['visibleMenuCommand', shortcutName]);
+      return false;
+    },
+    boardCursorWorldPoint: () => ({ x: 41, y: 42 }),
+  });
+  const event = keyEvent({ key: 'v', code: 'KeyV', metaKey: true });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.deepEqual(calls, [
+    ['visibleMenuCommand', 'paste'],
+    ['close', '', 'shortcut:paste'],
+    ['pasteAtPos', 41, 42],
+  ]);
+});
+
+test('plain enter edits a single selected text object with the caret at the end', () => {
+  const selectedIds = new Set(['text-1']);
+  const textObject = { id: 'text-1', type: 'text', data: { content: 'selected text' } };
+  const objectsMap = new Map([[textObject.id, textObject]]);
+  const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
+  const event = keyEvent({ key: 'Enter', code: 'Enter' });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ['enterEdit', 'text-1', { placeInitialCaret: true }],
+  ]);
+});
+
+test('plain enter does not edit text objects in a multi-selection', () => {
+  const selectedIds = new Set(['text-1', 'image-1']);
+  const textObject = { id: 'text-1', type: 'text', data: { content: 'selected text' } };
+  const imageObject = { id: 'image-1', type: 'image' };
+  const objectsMap = new Map([
+    [textObject.id, textObject],
+    [imageObject.id, imageObject],
+  ]);
+  const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
+  const event = keyEvent({ key: 'Enter', code: 'Enter' });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(event.propagationStopped, false);
+  assert.deepEqual(calls, []);
+});
+
 test('cmd+arrow text alignment applies to the active text edit', () => {
   const { calls, mainKeydown } = loadKeyboard({
     editingId: 'text-1',
@@ -341,5 +398,18 @@ test('cmd+f flips selected images when available', () => {
   assert.equal(event.propagationStopped, true);
   assert.deepEqual(calls, [
     ['flipSelectedImages'],
+  ]);
+});
+
+test('cmd+y is consumed as redo before browser actions', () => {
+  const { calls, mainKeydown } = loadKeyboard();
+  const event = keyEvent({ key: 'y', code: 'KeyY', metaKey: true });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.deepEqual(calls, [
+    ['redo'],
   ]);
 });

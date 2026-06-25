@@ -251,11 +251,15 @@ var ManualPerfDebug = (() => {
     const viewport = report.viewport || {};
     const memory = report.memoryEnd || report.memory || {};
     const mem = memoryHeadline(memory);
+    const panZoom = viewport.panZoomSummary || report.panZoom?.summary || {};
     return {
       imageCount: report.imageCount,
       boardSourceMB: mem.boardSourceMB,
       viewportScaleCacheMB: mem.viewportScaleCacheMB,
       jsHeapUsedMB: mem.jsHeapUsedMB,
+      panZoomEvents: panZoom.events ?? '',
+      panEvents: panZoom.panEvents ?? '',
+      zoomEvents: panZoom.zoomEvents ?? '',
       viewportFrames: viewport.frameSummary?.frames ?? '',
       viewportSlowFrames: viewport.frameSummary?.slowFramesOver16ms ?? '',
       viewportMaxFrameMs: viewport.frameSummary?.maxFrameMs ?? '',
@@ -280,12 +284,32 @@ var ManualPerfDebug = (() => {
     });
     BoardfishDebug.viewport.reset();
     markers.length = 0;
+    const scaledImagePrewarmOptions = options.prewarmScaledImages && typeof options.prewarmScaledImages === 'object'
+      ? options.prewarmScaledImages
+      : {};
+    const scaledImagePrewarm = options.prewarmScaledImages && typeof prewarmVisibleScaledImageVariants === 'function'
+      ? prewarmVisibleScaledImageVariants({
+          reason: 'perf-begin',
+          ...scaledImagePrewarmOptions,
+        })
+      : null;
+    const textLayoutPrewarmOptions = options.prewarmTextLayout && typeof options.prewarmTextLayout === 'object'
+      ? options.prewarmTextLayout
+      : {};
+    const textLayoutPrewarm = options.prewarmTextLayout && typeof prewarmVisibleTextLayoutCaches === 'function'
+      ? prewarmVisibleTextLayoutCaches({
+          source: 'perf-begin',
+          ...textLayoutPrewarmOptions,
+        })
+      : null;
     sessionStartMemory = options.memory === false ? null : await memorySnapshot('begin', { ...options, table: false });
     const out = {
       startedAt: new Date().toISOString(),
       imageCount: imageCount(),
       objectCount: boardObjects().length,
       rawInput: options.rawInput !== false,
+      scaledImagePrewarm,
+      textLayoutPrewarm,
       memoryStart: sessionStartMemory,
     };
     console.info('[Boardfish perf] Manual session started. Run the interaction, then call finishDebug({ perf: ["benchmarkReport"] }) or finishDebug({ perf: ["memoryReport"] }).');
@@ -487,7 +511,12 @@ var ManualPerfDebug = (() => {
     const wheel = viewportReport.wheelSummary || {};
     const draw = viewportReport.drawSummary || {};
     const transform = viewportReport.transformSummary || {};
+    const panZoom = viewportReport.panZoomSummary || {};
     return {
+      panZoomEvents: panZoom.events ?? '',
+      panEvents: panZoom.panEvents ?? '',
+      zoomEvents: panZoom.zoomEvents ?? '',
+      blockedEvents: panZoom.blockedEvents ?? '',
       frames: frame.frames ?? '',
       inputFrames: frame.inputFrames ?? '',
       transformFrames: frame.transformFrames ?? '',
@@ -502,6 +531,8 @@ var ManualPerfDebug = (() => {
       maxWheelGapMs: wheel.maxWheelGapMs ?? '',
       avgZoomStepPct: wheel.avgZoomStepPct ?? '',
       maxZoomStepPct: wheel.maxZoomStepPct ?? '',
+      maxPanDistancePx: panZoom.maxPanDistancePx ?? '',
+      maxZoomDeltaPct: panZoom.maxZoomDeltaPct ?? '',
       avgDrawMs: draw.avgDrawMs ?? '',
       maxDrawMs: draw.maxDrawMs ?? '',
       maxObjectLoopMs: draw.maxObjectLoopMs ?? '',
@@ -642,6 +673,71 @@ var ManualPerfDebug = (() => {
       console.log(out);
       console.groupEnd();
     }
+    return out;
+  }
+
+  async function panZoomReport(options = {}) {
+    if (!DEBUG_TOOLS_ENABLED) {
+      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      return null;
+    }
+    const memoryEnd = options.memory === false ? null : await memorySnapshot('pan-zoom-finish', { ...options, table: false });
+    const panZoom = BoardfishDebug.viewport.panZoomReport({
+      details: options.details === true,
+      limit: options.limit || 240,
+      timelineLimit: options.timelineLimit ?? options.limit ?? 300,
+      rawInputLimit: options.rawInputLimit ?? options.limit ?? 300,
+      eventLoopLimit: options.eventLoopLimit ?? options.limit ?? 160,
+      frameScheduleLimit: options.frameScheduleLimit ?? options.limit ?? 160,
+      slowFrames: options.slowFrames ?? 80,
+      cacheTable: options.cacheTable === true,
+      log: false,
+    });
+    const out = {
+      label: options.label || 'viewport-pan-zoom-optimization',
+      reportedAt: new Date().toISOString(),
+      imageCount: imageCount(),
+      objectCount: boardObjects().length,
+      zoom,
+      panX,
+      panY,
+      panZoom,
+      viewport: {
+        panZoomSummary: panZoom.summary,
+        panZoomTimeline: panZoom.panZoomTimeline,
+        wheelSummary: panZoom.wheelSummary,
+        frameSummary: panZoom.frameSummary,
+        frameScheduleTimeline: panZoom.frameScheduleTimeline,
+        transformSummary: panZoom.transformSummary,
+        drawSummary: panZoom.drawSummary,
+        slowFrames: panZoom.slowFrames,
+        eventLoopTimeline: panZoom.eventLoopTimeline,
+        rawInputTimeline: panZoom.rawInputTimeline,
+        imageScaleCache: panZoom.imageScaleCache,
+        culling: panZoom.culling,
+      },
+      memoryStart: sessionStartMemory,
+      memoryEnd,
+      memoryDelta: memoryDelta(sessionStartMemory, memoryEnd),
+      markers: markers.slice(),
+      notes: [
+        'Pan/zoom report is passive: it records user-driven input, scheduling, frame, transform, draw, cache, and event-loop evidence without mutating board content.',
+        'Use panZoomTimeline to correlate input gaps, RAF coalescing, transform cost, draw cost, and visible image/text workload.',
+      ],
+    };
+    out.headline = {
+      ...viewportNavigationHeadline(out.viewport),
+      ...(out.memoryDelta || {}),
+    };
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+    if (options.log !== false) {
+      console.group('[Boardfish perf] viewport pan/zoom optimization');
+      console.table([out.headline]);
+      console.log(out);
+      console.groupEnd();
+    }
+    if (options.copy === true) void copyLast();
     return out;
   }
 
@@ -926,7 +1022,7 @@ var ManualPerfDebug = (() => {
     const commandModifier = event.ctrlKey !== event.metaKey && !event.altKey;
     if (commandModifier && !event.shiftKey && (key === 'z' || code === 'KeyZ')) return 'undo';
     if (commandModifier && event.shiftKey && (key === 'z' || code === 'KeyZ')) return 'redo';
-    if (event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && (key === 'y' || code === 'KeyY')) return 'redo';
+    if (commandModifier && !event.shiftKey && (key === 'y' || code === 'KeyY')) return 'redo';
     return '';
   }
 
@@ -2438,15 +2534,26 @@ var ManualPerfDebug = (() => {
 
   function setLargeTextEditSelection(obj, range, highlight) {
     if (!_editEl || !obj) return false;
+    const value = typeof textEditProxyValue === 'function'
+      ? textEditProxyValue(_editEl)
+      : String(_editEl.value ?? '');
     if (highlight) {
-      _editEl.setSelectionRange(range.start, range.end, range.direction || 'forward');
+      if (typeof setTextEditProxySelectionRange === 'function') {
+        setTextEditProxySelectionRange(_editEl, range.start, range.end, range.direction || 'forward', { value });
+      } else {
+        _editEl.setSelectionRange(range.start, range.end, range.direction || 'forward');
+      }
       if (typeof clearTextEditCaretIndex === 'function') clearTextEditCaretIndex(obj);
       else {
         delete obj._textEditCaretIndex;
         delete obj._textEditCaretLineStartIndex;
       }
     } else {
-      _editEl.setSelectionRange(range.start, range.start, 'none');
+      if (typeof setTextEditProxySelectionRange === 'function') {
+        setTextEditProxySelectionRange(_editEl, range.start, range.start, 'none', { value });
+      } else {
+        _editEl.setSelectionRange(range.start, range.start, 'none');
+      }
       if (typeof setTextEditCaretIndex === 'function') setTextEditCaretIndex(obj, range.start, { clearLineStartIndex: true });
       else obj._textEditCaretIndex = range.start;
     }
@@ -2807,6 +2914,7 @@ var ManualPerfDebug = (() => {
     memorySnapshot,
     memoryReport,
     boardImageMemorySummary,
+    panZoomReport,
     panningReport,
     wheelPanTest,
     mousePanTest,

@@ -236,10 +236,12 @@
   function getBoardOpenMetrics(data, deps = {}) {
     const imageSummary = summarizeImageStore(data?.imageStore || {}, deps);
     const objectCounts = getObjectTypeCounts(data?.objects || []);
+    const textSummary = getTextSaveMetrics(data?.objects || []);
     return {
       objectCount: data?.objects?.length || 0,
       imageCount: imageSummary.imageCount,
       ...objectCounts,
+      ...textSummary,
       imageStoreBytes: imageSummary.imageStoreBytes,
       largestImageKey: imageSummary.largestImageKey,
       largestImageBytes: imageSummary.largestImageBytes,

@@ -214,8 +214,11 @@ function loadLiveTextEditResizeHarness() {
     focus() { context.focusedProxy = true; },
     remove() { context.removedProxy = true; },
     setSelectionRange(start, end, direction = 'none') {
-      this.selectionStart = start;
-      this.selectionEnd = end;
+      const max = String(this.value ?? '').length;
+      const normalizedStart = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, max));
+      const normalizedEnd = Math.max(normalizedStart, Math.min(Math.trunc(Number(end)) || normalizedStart, max));
+      this.selectionStart = normalizedStart;
+      this.selectionEnd = normalizedEnd;
       this.selectionDirection = direction;
     },
     setRangeText(text, start, end, selectionMode = 'preserve') {
@@ -660,6 +663,7 @@ test('left arrows step through visible characters after closing a braced script'
 
   obj.data = { content: 'e^{x^{2}+1}' };
   context.proxy.value = obj.data.content;
+  context.proxy._boardfishSetLogicalValue(obj.data.content, { domSynced: true });
   context.proxy.setSelectionRange(context.proxy.value.length, context.proxy.value.length, 'none');
   obj._textScriptCaretIndex = context.proxy.value.length;
   obj._textScriptCaretAffinity = 'after';
@@ -2052,6 +2056,29 @@ test('delete input without beforeinput uses logical text when proxy DOM value is
   assert.equal(context.proxy._boardfishDomValueStale, false);
   assert.equal(context.proxy.selectionStart, 1);
   assert.equal(context.proxy.selectionEnd, 1);
+});
+
+test('cmd+a syncs a stale short edit proxy before selecting the full logical text', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'old' };
+
+  context.enterEdit(obj.id, { history: false });
+  const logicalValue = `${'x'.repeat(25_000)}tail`;
+  obj.data.content = logicalValue;
+  context.proxy.value = 'old';
+  context.proxy._boardfishSetLogicalValue(logicalValue, { domSynced: false });
+  context.proxy.setSelectionRange(3, 3, 'none');
+
+  const key = makeKeyEvent('a', { metaKey: true });
+  context.proxy.dispatchEvent(key);
+
+  assert.equal(key.prevented, true);
+  assert.equal(context.proxy.value, logicalValue);
+  assert.equal(context.proxy._boardfishLogicalValue, logicalValue);
+  assert.equal(context.proxy._boardfishDomValueStale, false);
+  assert.equal(context.proxy.selectionStart, 0);
+  assert.equal(context.proxy.selectionEnd, logicalValue.length);
 });
 
 test('delete removes an indented blank line in one keypress', () => {

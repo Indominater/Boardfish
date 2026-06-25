@@ -194,6 +194,54 @@ test('large text panning debugger records the four large-text viewport scenarios
   assert.match(viewportSource, /const RAW_INPUT_TYPES = \[[\s\S]*'pointermove'[\s\S]*'pointercancel'[\s\S]*'mousemove'/);
 });
 
+test('pan and zoom debugger captures input, scheduling, and render evidence', () => {
+  const source = readSource('src/js/debug_manual_perf.js');
+  const viewportSource = readSource('src/js/debug.js');
+  const canvasInputSource = readSource('src/js/canvas_input.js');
+  const viewportRuntimeSource = readSource('src/js/viewport.js');
+  const beginSource = functionSource(source, 'begin');
+  const panZoomReportSource = functionSource(source, 'panZoomReport');
+
+  assert.match(viewportSource, /function recordPanZoom/);
+  assert.match(viewportSource, /function recordFrameSchedule/);
+  assert.match(viewportSource, /function panZoomSummary/);
+  assert.match(viewportSource, /function panZoomTimeline/);
+  assert.match(viewportSource, /function panZoomReport/);
+  assert.match(viewportSource, /wheelDeltaXPx/);
+  assert.match(viewportSource, /deltaModeLabel/);
+  assert.match(viewportSource, /maxPanDistancePx/);
+  assert.match(viewportSource, /maxZoomDeltaPct/);
+  assert.match(viewportSource, /frameScheduleTimeline/);
+  assert.match(viewportSource, /bestTextLayoutPrewarm/);
+  assert.match(viewportSource, /textLayoutPrewarmHistory/);
+
+  assert.match(canvasInputSource, /canvasInputWheelDebugMeta/);
+  assert.match(canvasInputSource, /recordPanZoom\?\.\('wheel-pan'/);
+  assert.match(canvasInputSource, /recordPanZoom\?\.\('wheel-zoom'/);
+  assert.match(canvasInputSource, /recordPanZoom\?\.\('mouse-pan-move'/);
+  assert.match(canvasInputSource, /panXBefore/);
+  assert.match(canvasInputSource, /zoomDeltaPct/);
+  assert.match(canvasInputSource, /handlerMs/);
+
+  assert.match(viewportRuntimeSource, /recordFrameSchedule\?\.\('scheduled'/);
+  assert.match(viewportRuntimeSource, /recordFrameSchedule\?\.\('coalesced'/);
+  assert.match(viewportRuntimeSource, /recordFrameSchedule\?\.\('raf-fired'/);
+  assert.match(viewportRuntimeSource, /recordPanZoom\?\.\('transform-scheduled'/);
+  assert.match(viewportRuntimeSource, /totalMeasuredMs: getLastApplyTransformMeta\.last\.totalMeasuredMs/);
+  assert.match(viewportRuntimeSource, /function getVisibleTextLayoutPrewarmHistory/);
+  assert.match(viewportRuntimeSource, /function getBestVisibleTextLayoutPrewarm/);
+
+  assert.match(beginSource, /prewarmScaledImages/);
+  assert.match(beginSource, /prewarmVisibleScaledImageVariants/);
+  assert.match(beginSource, /prewarmTextLayout/);
+  assert.match(beginSource, /prewarmVisibleTextLayoutCaches/);
+  assert.match(source, /panZoomReport/);
+  assert.match(panZoomReportSource, /BoardfishDebug\.viewport\.panZoomReport/);
+  assert.match(panZoomReportSource, /memorySnapshot\('pan-zoom-finish'/);
+  assert.match(panZoomReportSource, /Pan\/zoom report is passive/);
+  assert.match(panZoomReportSource, /viewportNavigationHeadline\(out\.viewport\)/);
+});
+
 test('text selection debugger includes focused enter and exit edit timings', () => {
   const source = readSource('src/js/debug_text_selection.js');
 

@@ -327,7 +327,7 @@ function setTextEditProxyLogicalValue(proxy, value = '', { domSynced = true } = 
 function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
   if (!proxy) return { synced: false, reason: 'missing-proxy' };
   const text = normalizeTextContent(value);
-  if (!proxy._boardfishDomValueStale) return { synced: false, reason: 'dom-current' };
+  if (!proxy._boardfishDomValueStale && String(proxy.value ?? '') === text) return { synced: false, reason: 'dom-current' };
   proxy.value = text;
   setTextEditProxyLogicalValue(proxy, text, { domSynced: true });
   if (selection && typeof proxy.setSelectionRange === 'function') {
@@ -337,6 +337,31 @@ function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
     proxy.setSelectionRange(start, end, selection.direction || 'none');
   }
   return { synced: true, reason: 'stale-dom' };
+}
+
+function setTextEditProxySelectionRange(proxy, start, end = start, direction = 'none', options = {}) {
+  if (!proxy || typeof proxy.setSelectionRange !== 'function') {
+    return { set: false, synced: false, reason: 'missing-proxy' };
+  }
+  const text = normalizeTextContent(options.value ?? textEditProxyValue(proxy));
+  const max = text.length;
+  const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, max));
+  const to = Math.max(from, Math.min(Math.trunc(Number(end ?? start)) || from, max));
+  const domLength = String(proxy.value ?? '').length;
+  const domStale = !!proxy._boardfishDomValueStale || String(proxy.value ?? '') !== text;
+  const shouldSyncDom = options.syncDom === true || (domStale && (from > domLength || to > domLength));
+  const syncResult = shouldSyncDom
+    ? syncTextEditProxyDomValue(proxy, text, { start: from, end: to, direction })
+    : { synced: false, reason: shouldSyncDom ? 'sync-skipped' : 'selection-fits-dom' };
+  if (!syncResult.synced) proxy.setSelectionRange(from, to, direction);
+  return {
+    set: true,
+    start: from,
+    end: to,
+    direction,
+    synced: !!syncResult.synced,
+    reason: syncResult.reason || '',
+  };
 }
 
 const textEditSelectionState = (proxy) => {
@@ -2336,7 +2361,9 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   });
   setPendingTextEditInputState(proxy, inputState);
   const selectionStartedAt = textEditorDebugNow();
-  proxy.setSelectionRange(replacementRange.start, replacementRange.end, selection.direction || 'none');
+  setTextEditProxySelectionRange(proxy, replacementRange.start, replacementRange.end, selection.direction || 'none', {
+    value: currentProxyValue,
+  });
   logStep('paste:text-edit-selection-range-set', {
     selectionSetMs: Math.round((textEditorDebugNow() - selectionStartedAt) * 100) / 100,
     replacementStart: replacementRange.start,
@@ -3300,7 +3327,10 @@ function enterEdit(id, {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
       e.preventDefault();
       flushEditHistoryCheckpoint();
-      proxy.setSelectionRange(0, textEditProxyValue(proxy).length, 'none');
+      const currentProxyValue = textEditProxyValue(proxy);
+      setTextEditProxySelectionRange(proxy, 0, currentProxyValue.length, 'none', {
+        value: currentProxyValue,
+      });
       TextSelDebug._logSelection('select-all', proxy);
       globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-select-all');
       scheduleRender(true, false);
@@ -3324,12 +3354,13 @@ function enterEdit(id, {
       let scriptLayerMove = false;
       if (selection.hasSelection && !e.shiftKey) {
         nextPos = normalizeTextEditVisibleCaretIndex(obj, direction === 'backward' ? selection.start : selection.end, direction);
-        proxy.setSelectionRange(nextPos, nextPos, 'none');
+        setTextEditProxySelectionRange(proxy, nextPos, nextPos, 'none');
       } else if (e.shiftKey) {
         const activePos = selection.direction === 'backward' ? selection.start : selection.end;
         const anchorPos = selection.direction === 'backward' ? selection.end : selection.start;
         nextPos = moveTextEditVisibleCaret(obj, activePos, direction);
-        proxy.setSelectionRange(
+        setTextEditProxySelectionRange(
+          proxy,
           Math.min(anchorPos, nextPos),
           Math.max(anchorPos, nextPos),
           anchorPos <= nextPos ? 'forward' : 'backward'
@@ -3338,7 +3369,7 @@ function enterEdit(id, {
         const layerMove = moveTextEditCaretScriptLayer(obj, selection.start, direction);
         if (layerMove) {
           nextPos = layerMove.index;
-          proxy.setSelectionRange(nextPos, nextPos, 'none');
+          setTextEditProxySelectionRange(proxy, nextPos, nextPos, 'none');
           if (layerMove.affinity === 'after') {
             setTextScriptCaretAffinity(obj, nextPos, 'after');
           } else {
@@ -3348,7 +3379,7 @@ function enterEdit(id, {
           scriptLayerMove = true;
         } else {
           nextPos = moveTextEditVisibleCaret(obj, selection.start, direction);
-          proxy.setSelectionRange(nextPos, nextPos, 'none');
+          setTextEditProxySelectionRange(proxy, nextPos, nextPos, 'none');
         }
       }
       if (proxy.selectionStart === proxy.selectionEnd) {
@@ -3558,12 +3589,13 @@ function enterEdit(id, {
       if (e.shiftKey) {
         const d = proxy.selectionDirection;
         const anchorPos = d === 'backward' ? proxy.selectionEnd : proxy.selectionStart;
-        proxy.setSelectionRange(
+        setTextEditProxySelectionRange(
+          proxy,
           Math.min(anchorPos, newPos), Math.max(anchorPos, newPos),
           anchorPos <= newPos ? 'forward' : 'backward'
         );
       } else {
-        proxy.setSelectionRange(newPos, newPos);
+        setTextEditProxySelectionRange(proxy, newPos, newPos, 'none');
       }
 
       globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');

@@ -316,6 +316,10 @@ function loadTextEditHistoryStateHarness() {
     _editEl: null,
     _editHistoryTimer: null,
     _editHistoryActionStartState: null,
+    textEditProxyValue(proxy) {
+      if (typeof proxy?._boardfishLogicalValue === 'string') return proxy._boardfishLogicalValue;
+      return String(proxy?.value ?? '');
+    },
   };
   vm.createContext(context);
   vm.runInContext(
@@ -327,6 +331,24 @@ function loadTextEditHistoryStateHarness() {
   );
   return context;
 }
+
+test('text edit history state clamps against logical proxy length when DOM is stale', () => {
+  const context = loadTextEditHistoryStateHarness();
+  const obj = { id: 'text-1', type: 'text', data: { content: '0123456789' } };
+  context.objectsMap.set(obj.id, obj);
+  context._editEl = makeEditProxy({ value: '0123', selectionStart: 4, selectionEnd: 4 });
+  context._editEl._boardfishSetLogicalValue(obj.data.content, { domSynced: false });
+
+  const normalized = context.normalizeTextEditHistoryState(obj.id, {
+    start: 0,
+    end: obj.data.content.length,
+    direction: 'forward',
+  });
+
+  assert.equal(normalized.selectionStart, 0);
+  assert.equal(normalized.selectionEnd, obj.data.content.length);
+  assert.equal(normalized.selectionDirection, 'forward');
+});
 
 function setBoard(context, objects, selectedIds = []) {
   context.objects = objects.map(cloneObject);

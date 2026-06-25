@@ -193,6 +193,8 @@ globalThis.BoardfishImageInsertMotion = Object.freeze({
   noteDrawn: noteInsertedImageObjectDrawn,
 });
 
+var _pendingImageInsertPoint = null;
+
 function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-image') {
   if (!BoardfishWebLimits.canAddObjects(1)) return null;
   const explicitZ = Number.isFinite(options.z) ? Number(options.z) : null;
@@ -291,16 +293,19 @@ async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, o
 
 fileInput.addEventListener('change', async () => {
   const files = [...fileInput.files];
+  const insertPoint = _pendingImageInsertPoint || ctxPos;
   if (!files.length) globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
   try {
-    await insertImageFiles(files, ctxPos.x, ctxPos.y, 'file-input');
+    await insertImageFiles(files, insertPoint.x, insertPoint.y, 'file-input');
   } finally {
+    _pendingImageInsertPoint = null;
     fileInput.value = '';
   }
 });
 
 async function pickAndInsertImages(x, y) {
   if (!BoardfishWebLimits.canAddObjects(1)) return;
+  _pendingImageInsertPoint = { x, y };
   fileInput.value = '';
   globalThis.BoardfishMotion?.applyActionAnimation?.('image-file-dialog-open');
   fileInput.click();

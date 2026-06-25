@@ -207,18 +207,46 @@ test('text drawing places each glyph at measured prefix positions', () => {
   const [line] = textLayout.getTextLayout(obj);
   const calls = [];
 
-  textLayout.drawTextLineRange({
+  const stats = textLayout.drawTextLineRange({
     font: '',
     fillText(text, x, y) {
       calls.push({ text, x, y });
     },
   }, line, obj);
 
-  assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', ' ', 'c', '<', '-', 'd']);
-  assert.deepEqual(calls.map((call) => call.x), Array.from(line.prefixWidths.slice(0, -1)).map((x) => obj.x + context.TEXT_PAD + x));
+  assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', 'c', '<', '-', 'd']);
+  assert.deepEqual(
+    calls.map((call) => call.x),
+    [0, 1, 2, 3, 5, 6, 7, 8].map((offset) => obj.x + context.TEXT_PAD + line.prefixWidths[offset]),
+  );
+  assert.equal(stats.chars, 9);
+  assert.equal(stats.drawnChars, 8);
+  assert.equal(stats.drawUnits, 8);
+  assert.equal(stats.runs, 1);
+  assert.equal(stats.plainRuns, 1);
+  assert.equal(stats.scriptRuns, 0);
+  assert.equal(stats.skippedTabs, 0);
+  assert.equal(stats.skippedSpaces, 1);
+  assert.equal(stats.hiddenChars, 0);
+  assert.equal(stats.planCacheHits, 0);
+  assert.equal(stats.planCacheMisses, 1);
+
+  calls.length = 0;
+  const cachedStats = textLayout.drawTextLineRange({
+    font: '',
+    fillText(text, x, y) {
+      calls.push({ text, x, y });
+    },
+  }, line, obj);
+
+  assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', 'c', '<', '-', 'd']);
+  assert.equal(cachedStats.drawUnits, 8);
+  assert.equal(cachedStats.skippedSpaces, 1);
+  assert.equal(cachedStats.planCacheHits, 1);
+  assert.equal(cachedStats.planCacheMisses, 0);
 });
 
-test('fast text drawing request preserves measured glyph positions', () => {
+test('text drawing ignores stale fast requests and preserves rich measured positions', () => {
   const { context } = loadTextLayout();
   const textLayout = context.__testTextLayout;
   const obj = {
@@ -233,15 +261,22 @@ test('fast text drawing request preserves measured glyph positions', () => {
   const [line] = textLayout.getTextLayout(obj);
   const calls = [];
 
-  textLayout.drawTextLineRange({
+  const stats = textLayout.drawTextLineRange({
     font: '',
     fillText(text, x, y) {
       calls.push({ text, x, y });
     },
   }, line, obj, 0, line.text.length, { fast: true });
 
-  assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', ' ', 'c', '<', '-', 'd']);
-  assert.deepEqual(calls.map((call) => call.x), Array.from(line.prefixWidths.slice(0, -1)).map((x) => obj.x + context.TEXT_PAD + x));
+  assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', 'c', '<', '-', 'd']);
+  assert.deepEqual(
+    calls.map((call) => call.x),
+    [0, 1, 2, 3, 5, 6, 7, 8].map((offset) => obj.x + context.TEXT_PAD + line.prefixWidths[offset]),
+  );
+  assert.equal(stats.drawUnits, 8);
+  assert.equal(stats.runs, 1);
+  assert.equal(stats.plainRuns, 1);
+  assert.equal(stats.skippedSpaces, 1);
 });
 
 test('text minimum width uses the widest rendered word, not character count', () => {

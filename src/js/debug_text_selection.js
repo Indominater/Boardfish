@@ -795,7 +795,14 @@ var TextSelDebug = (() => {
       return null;
     }
     _editEl.focus({ preventScroll: true });
-    _editEl.setSelectionRange(0, _editEl.value.length, 'none');
+    const value = typeof textEditProxyValue === 'function'
+      ? textEditProxyValue(_editEl)
+      : String(_editEl.value ?? '');
+    if (typeof setTextEditProxySelectionRange === 'function') {
+      setTextEditProxySelectionRange(_editEl, 0, value.length, 'none', { value });
+    } else {
+      _editEl.setSelectionRange(0, value.length, 'none');
+    }
     _caretVisible = true;
     _logSelection('debug-select-all', _editEl);
     scheduleRender(true, false);

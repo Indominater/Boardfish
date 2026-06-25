@@ -3,6 +3,54 @@
 (function initBoardRenderer(root) {
   const IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
   const IMAGE_EDGE_EPSILON = 1e-9;
+  const SLOW_TEXT_LINE_DRAW_THRESHOLD_MS = 0.25;
+  const MAX_SLOW_TEXT_LINE_DRAWS = 16;
+  const imageSourceDrawnSet = typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
+  const imageSourceContextDrawnMap = typeof WeakMap !== 'undefined' && typeof WeakSet !== 'undefined'
+    ? new WeakMap()
+    : null;
+
+  function canTrackImageDrawTarget(value) {
+    return !!value && (typeof value === 'object' || typeof value === 'function');
+  }
+
+  function imageSourceDrawnBefore(source) {
+    if (!canTrackImageDrawTarget(source)) return false;
+    try {
+      return imageSourceDrawnSet.has(source);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function imageSourceContextDrawnBefore(source, context) {
+    if (!imageSourceContextDrawnMap ||
+        !canTrackImageDrawTarget(source) ||
+        !canTrackImageDrawTarget(context)) {
+      return imageSourceDrawnBefore(source);
+    }
+    try {
+      return !!imageSourceContextDrawnMap.get(source)?.has(context);
+    } catch (_) {
+      return imageSourceDrawnBefore(source);
+    }
+  }
+
+  function markImageSourceDrawn(source, context) {
+    if (!canTrackImageDrawTarget(source)) return;
+    try {
+      imageSourceDrawnSet.add(source);
+    } catch (_) {}
+    if (!imageSourceContextDrawnMap || !canTrackImageDrawTarget(context)) return;
+    try {
+      let contexts = imageSourceContextDrawnMap.get(source);
+      if (!contexts) {
+        contexts = new WeakSet();
+        imageSourceContextDrawnMap.set(source, contexts);
+      }
+      contexts.add(context);
+    } catch (_) {}
+  }
 
   function defaultImageBitmapCtor() {
     return typeof ImageBitmap !== 'undefined' ? ImageBitmap : null;
@@ -19,7 +67,10 @@
       erroredImages: 0,
       croppedImages: 0,
       scaledImages: 0,
+      openPreviewImages: 0,
+      dynamicOpenPreviewRequests: 0,
       scaledFallbackFull: 0,
+      activeInputFullFallbackImages: 0,
       scaledVariantPendingImages: 0,
       fullScaleImages: 0,
       scaledImageScaleTotal: 0,
@@ -35,7 +86,34 @@
       textCharCount: 0,
       largestTextChars: 0,
       largestTextLayoutLines: 0,
+      richTextChars: 0,
+      richTextDrawnChars: 0,
+      richTextDrawUnits: 0,
+      richTextRuns: 0,
+      richTextPlainRuns: 0,
+      richTextScriptRuns: 0,
+      richTextSkippedTabs: 0,
+      richTextSkippedSpaces: 0,
+      richTextHiddenChars: 0,
+      richTextFontSwitches: 0,
+      richTextPlanCacheHits: 0,
+      richTextPlanCacheMisses: 0,
+      richTextLineDrawMs: 0,
+      maxRichTextLineDrawMs: 0,
+      slowRichTextLineDraws: 0,
+      maxRichTextDrawUnitsPerLine: 0,
+      maxRichTextRunsPerLine: 0,
+      richTextDirectDraws: 0,
+      imageSourceDraws: 0,
+      imageSourceFirstDraws: 0,
+      imageSourceWarmDraws: 0,
+      imageContextFirstDraws: 0,
+      imageContextWarmDraws: 0,
+      scaledImageContextFirstDraws: 0,
+      fullScaleImageContextFirstDraws: 0,
+      openPreviewImageContextFirstDraws: 0,
       slowDrawObjects: [],
+      slowTextLineDraws: [],
     };
   }
 
@@ -112,7 +190,7 @@
     };
   }
 
-  function drawImageObj(context, obj, img, deps, options = {}) {
+  function drawImageObjWithCurrentQuality(context, obj, img, deps, options = {}) {
     const edgeOverdraw = imageEdgeOverdrawWorld(deps, options);
     const transform = deps.imageTransformFromObject(obj);
     if (deps.imageTransformNeedsRendering(transform)) {
@@ -149,6 +227,24 @@
       obj.h + edgeOverdraw * 2,
     );
     return { cropped: false };
+  }
+
+  function drawImageObj(context, obj, img, deps, options = {}) {
+    const lowerQuality = options.activeInputFullFallback === true;
+    const previousQuality = lowerQuality ? context.imageSmoothingQuality : undefined;
+    const previousSmoothingEnabled = lowerQuality ? context.imageSmoothingEnabled : undefined;
+    if (lowerQuality) {
+      try { context.imageSmoothingEnabled = false; } catch (_) {}
+      try { context.imageSmoothingQuality = 'low'; } catch (_) {}
+    }
+    try {
+      return drawImageObjWithCurrentQuality(context, obj, img, deps, options);
+    } finally {
+      if (lowerQuality) {
+        try { context.imageSmoothingEnabled = previousSmoothingEnabled; } catch (_) {}
+        try { context.imageSmoothingQuality = previousQuality; } catch (_) {}
+      }
+    }
   }
 
   function resetCanvasToScreen(context) {
@@ -201,7 +297,103 @@
     return Number(counters?.[field]) || 0;
   }
 
-  function recordSlowDrawObject(counters, obj, ms, before, drawn, motion = null) {
+  function roundDebugMs(value) {
+    return Math.round((Number(value) || 0) * 100) / 100;
+  }
+
+  function textLineSample(text, limit = 80) {
+    const value = String(text ?? '').replace(/\s+/g, ' ').trim();
+    return value.length > limit ? `${value.slice(0, limit)}...` : value;
+  }
+
+  function addRichTextDrawStats(counters, stats) {
+    if (!counters || !stats) return;
+    const add = (field, sourceField = field) => {
+      counters[field] = (counters[field] || 0) + (Number(stats[sourceField]) || 0);
+    };
+    add('richTextChars', 'chars');
+    add('richTextDrawnChars', 'drawnChars');
+    add('richTextDrawUnits', 'drawUnits');
+    add('richTextRuns', 'runs');
+    add('richTextPlainRuns', 'plainRuns');
+    add('richTextScriptRuns', 'scriptRuns');
+    add('richTextSkippedTabs', 'skippedTabs');
+    add('richTextSkippedSpaces', 'skippedSpaces');
+    add('richTextHiddenChars', 'hiddenChars');
+    add('richTextFontSwitches', 'fontSwitches');
+    add('richTextPlanCacheHits', 'planCacheHits');
+    add('richTextPlanCacheMisses', 'planCacheMisses');
+    counters.maxRichTextDrawUnitsPerLine = Math.max(
+      counters.maxRichTextDrawUnitsPerLine || 0,
+      Number(stats.drawUnits) || 0,
+    );
+    counters.maxRichTextRunsPerLine = Math.max(
+      counters.maxRichTextRunsPerLine || 0,
+      Number(stats.runs) || 0,
+    );
+  }
+
+  function recordRichTextLineDraw(counters, obj, line, lineIndex, stats, ms, deps) {
+    if (!counters || !Number.isFinite(ms) || ms < 0) return;
+    counters.richTextLineDrawMs = (counters.richTextLineDrawMs || 0) + ms;
+    counters.maxRichTextLineDrawMs = Math.max(counters.maxRichTextLineDrawMs || 0, ms);
+    if (ms < SLOW_TEXT_LINE_DRAW_THRESHOLD_MS) return;
+    counters.slowRichTextLineDraws = (counters.slowRichTextLineDraws || 0) + 1;
+    const viewZoom = Number(deps?.zoom?.()) || 0;
+    const viewDpr = Number(deps?.dpr?.()) || 1;
+    const deviceScale = Math.max(viewZoom, 0) * Math.max(viewDpr, 1);
+    const row = {
+      id: obj?.id || '',
+      objectId: obj?.id || '',
+      type: 'text-line',
+      ms: roundDebugMs(ms),
+      lineIndex: Math.max(0, Math.trunc(Number(lineIndex)) || 0),
+      logicalLineIndex: Math.max(0, Math.trunc(Number(line?.logicalLineIndex)) || 0),
+      startIndex: Math.max(0, Math.trunc(Number(line?.startIndex)) || 0),
+      endIndex: Math.max(0, Math.trunc(Number(line?.endIndex)) || 0),
+      textLength: String(line?.text ?? '').length,
+      sample: textLineSample(line?.text),
+      drawUnits: Number(stats?.drawUnits) || 0,
+      runs: Number(stats?.runs) || 0,
+      plainRuns: Number(stats?.plainRuns) || 0,
+      scriptRuns: Number(stats?.scriptRuns) || 0,
+      skippedSpaces: Number(stats?.skippedSpaces) || 0,
+      skippedTabs: Number(stats?.skippedTabs) || 0,
+      hiddenChars: Number(stats?.hiddenChars) || 0,
+      planCacheHits: Number(stats?.planCacheHits) || 0,
+      planCacheMisses: Number(stats?.planCacheMisses) || 0,
+      y: Number.isFinite(Number(line?.y)) ? roundDebugMs(Number(line.y)) : '',
+      textY: Number.isFinite(Number(line?.textY)) ? roundDebugMs(Number(line.textY)) : '',
+      lineHeightDevicePx: roundDebugMs((Number(deps?.lineHeight) || 0) * deviceScale),
+    };
+    const list = Array.isArray(counters.slowTextLineDraws) ? counters.slowTextLineDraws : [];
+    list.push(row);
+    list.sort((a, b) => (b.ms || 0) - (a.ms || 0));
+    counters.slowTextLineDraws = list.slice(0, MAX_SLOW_TEXT_LINE_DRAWS);
+  }
+
+  function recordImageDrawWarmStats(counters, selected, firstSourceDraw, firstContextDraw) {
+    if (!counters) return;
+    counters.imageSourceDraws = (counters.imageSourceDraws || 0) + 1;
+    if (firstSourceDraw) counters.imageSourceFirstDraws = (counters.imageSourceFirstDraws || 0) + 1;
+    else counters.imageSourceWarmDraws = (counters.imageSourceWarmDraws || 0) + 1;
+    if (firstContextDraw) {
+      counters.imageContextFirstDraws = (counters.imageContextFirstDraws || 0) + 1;
+      if (selected?.scale < 1) {
+        counters.scaledImageContextFirstDraws = (counters.scaledImageContextFirstDraws || 0) + 1;
+      }
+      if (selected?.scale === 1 && selected?.targetScale === 1) {
+        counters.fullScaleImageContextFirstDraws = (counters.fullScaleImageContextFirstDraws || 0) + 1;
+      }
+      if (selected?.openPreview) {
+        counters.openPreviewImageContextFirstDraws = (counters.openPreviewImageContextFirstDraws || 0) + 1;
+      }
+    } else {
+      counters.imageContextWarmDraws = (counters.imageContextWarmDraws || 0) + 1;
+    }
+  }
+
+  function recordSlowDrawObject(counters, obj, ms, before, drawn, motion = null, deps = null) {
     if (!counters || !obj || !Number.isFinite(ms) || ms <= 0) return;
     const row = {
       id: obj.id || '',
@@ -216,11 +408,62 @@
       row.textLines = drawCounterValue(counters, 'textLines') - before.textLines;
       row.drawnTextLines = drawCounterValue(counters, 'drawnTextLines') - before.drawnTextLines;
       row.culledTextLines = drawCounterValue(counters, 'culledTextLines') - before.culledTextLines;
+      row.richTextDrawUnits = drawCounterValue(counters, 'richTextDrawUnits') - before.richTextDrawUnits;
+      row.richTextRuns = drawCounterValue(counters, 'richTextRuns') - before.richTextRuns;
+      row.richTextScriptRuns = drawCounterValue(counters, 'richTextScriptRuns') - before.richTextScriptRuns;
+      row.richTextSkippedTabs = drawCounterValue(counters, 'richTextSkippedTabs') - before.richTextSkippedTabs;
+      row.richTextSkippedSpaces = drawCounterValue(counters, 'richTextSkippedSpaces') - before.richTextSkippedSpaces;
+      row.richTextHiddenChars = drawCounterValue(counters, 'richTextHiddenChars') - before.richTextHiddenChars;
+      row.richTextPlanCacheHits = drawCounterValue(counters, 'richTextPlanCacheHits') - before.richTextPlanCacheHits;
+      row.richTextPlanCacheMisses = drawCounterValue(counters, 'richTextPlanCacheMisses') - before.richTextPlanCacheMisses;
+      row.richTextLineDrawMs = roundDebugMs(drawCounterValue(counters, 'richTextLineDrawMs') - before.richTextLineDrawMs);
+      row.slowRichTextLineDraws = drawCounterValue(counters, 'slowRichTextLineDraws') - before.slowRichTextLineDraws;
+      row.richTextDirectDraws = drawCounterValue(counters, 'richTextDirectDraws') - before.richTextDirectDraws;
+      row.slowTextLineRows = (Array.isArray(counters.slowTextLineDraws) ? counters.slowTextLineDraws : [])
+        .filter(lineRow => lineRow.objectId === obj.id)
+        .slice(0, 6)
+        .map(lineRow => ({ ...lineRow }));
+      row.richTextUnitsPerLine = row.drawnTextLines > 0
+        ? Math.round(row.richTextDrawUnits / row.drawnTextLines * 100) / 100
+        : 0;
+      row.scriptRanges = Array.isArray(obj.data?.scriptRanges) ? obj.data.scriptRanges.length : 0;
+      const lineHeightDevicePx = deps
+        ? (Number(deps.lineHeight || 0) || 0) *
+          Math.max(Number(deps.zoom?.()) || 0, 0) *
+          Math.max(Number(deps.dpr?.()) || 1, 1)
+        : 0;
+      row.lineHeightDevicePx = Math.round(lineHeightDevicePx * 100) / 100;
     } else if (obj.type === 'image') {
+      row.imgKey = obj.data?.imgKey || '';
+      const fullSource = row.imgKey && deps
+        ? (deps.imageBitmapCache?.()?.[row.imgKey] || deps.imageCache?.()?.[row.imgKey] || null)
+        : null;
+      const fullDims = imageDimensions(fullSource);
+      const scaledDelta = drawCounterValue(counters, 'scaledImages') - before.scaledImages;
+      row.objectW = Number(obj.w || 0) || 0;
+      row.objectH = Number(obj.h || 0) || 0;
+      row.fullSourceW = fullDims.width || '';
+      row.fullSourceH = fullDims.height || '';
+      row.drawDeviceW = deps ? Math.round(row.objectW * Math.max(Number(deps.zoom?.()) || 0, 0) * Math.max(Number(deps.dpr?.()) || 1, 1) * 100) / 100 : '';
+      row.drawDeviceH = deps ? Math.round(row.objectH * Math.max(Number(deps.zoom?.()) || 0, 0) * Math.max(Number(deps.dpr?.()) || 1, 1) * 100) / 100 : '';
       row.cropped = drawCounterValue(counters, 'croppedImages') > before.croppedImages;
       row.scaled = drawCounterValue(counters, 'scaledImages') > before.scaledImages;
+      row.openPreview = drawCounterValue(counters, 'openPreviewImages') > before.openPreviewImages;
+      row.dynamicOpenPreviewRequest = drawCounterValue(counters, 'dynamicOpenPreviewRequests') > before.dynamicOpenPreviewRequests;
       row.fullScale = drawCounterValue(counters, 'fullScaleImages') > before.fullScaleImages;
+      row.selectedScale = scaledDelta > 0
+        ? Math.round((drawCounterValue(counters, 'scaledImageScaleTotal') - before.scaledImageScaleTotal) / scaledDelta * 1000) / 1000
+        : row.fullScale ? 1 : '';
+      row.targetScale = scaledDelta > 0
+        ? Math.round((drawCounterValue(counters, 'scaledImageTargetScaleTotal') - before.scaledImageTargetScaleTotal) / scaledDelta * 1000) / 1000
+        : row.fullScale ? 1 : '';
       row.fallbackFull = drawCounterValue(counters, 'scaledFallbackFull') > before.scaledFallbackFull;
+      row.activeInputFullFallback = drawCounterValue(counters, 'activeInputFullFallbackImages') > before.activeInputFullFallbackImages;
+      row.scaledVariantPending = drawCounterValue(counters, 'scaledVariantPendingImages') > before.scaledVariantPendingImages;
+      row.firstSourceDraw = drawCounterValue(counters, 'imageSourceFirstDraws') > before.imageSourceFirstDraws;
+      row.firstContextDraw = drawCounterValue(counters, 'imageContextFirstDraws') > before.imageContextFirstDraws;
+      row.warmSourceDraw = drawCounterValue(counters, 'imageSourceWarmDraws') > before.imageSourceWarmDraws;
+      row.warmContextDraw = drawCounterValue(counters, 'imageContextWarmDraws') > before.imageContextWarmDraws;
     }
     const list = Array.isArray(counters.slowDrawObjects) ? counters.slowDrawObjects : [];
     list.push(row);
@@ -265,13 +508,24 @@
             counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
           }
           const lineHeight = deps.lineHeight || 0;
-          let drawnLineCount = 0;
+          const visibleLines = [];
+          let layoutLineIndex = -1;
           for (const line of layout) {
+            layoutLineIndex++;
             if (!textLineIntersectsRect(line.y, lineHeight, options.viewportRect || null)) {
               continue;
             }
-            drawnLineCount++;
-            deps.drawTextLineRange(context, line, obj);
+            visibleLines.push({ line, layoutLineIndex });
+          }
+          const drawnLineCount = visibleLines.length;
+          if (counters) counters.richTextDirectDraws = (counters.richTextDirectDraws || 0) + 1;
+          for (const { line, layoutLineIndex: visibleLayoutLineIndex } of visibleLines) {
+            const lineDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
+            const drawStats = deps.drawTextLineRange(context, line, obj, 0, line.text?.length ?? 0);
+            addRichTextDrawStats(counters, drawStats);
+            if (counters && typeof performance !== 'undefined') {
+              recordRichTextLineDraw(counters, obj, line, visibleLayoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
+            }
           }
           if (counters) {
             const culledLineCount = Math.max(0, totalLayoutLines - drawnLineCount);
@@ -304,13 +558,19 @@
         : fullImg ? deps.selectImageSourceForDraw(key, obj, fullImg, view) : null;
       const img = selected?.source || null;
       if (isDrawableImageSource(img)) {
+        const firstSourceDraw = !imageSourceDrawnBefore(img);
+        const firstContextDraw = !imageSourceContextDrawnBefore(img, context);
         if (counters) {
           if (selected?.scale < 1) {
             counters.scaledImages = (counters.scaledImages || 0) + 1;
             counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
             counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
+            if (selected?.openPreview) counters.openPreviewImages = (counters.openPreviewImages || 0) + 1;
           } else if (selected?.targetScale < 1) {
             counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
+            if (selected?.activeInputFullFallback) {
+              counters.activeInputFullFallbackImages = (counters.activeInputFullFallbackImages || 0) + 1;
+            }
           } else if (selected?.scale === 1 && selected?.targetScale === 1) {
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
           }
@@ -321,8 +581,14 @@
           }
         }
         try {
-          const drawResult = drawImageObj(context, obj, img, deps, { viewportRect: options.viewportRect || null, view });
+          const drawResult = drawImageObj(context, obj, img, deps, {
+            viewportRect: options.viewportRect || null,
+            view,
+            activeInputFullFallback: selected?.activeInputFullFallback === true,
+          });
           if (drawResult?.skipped) return false;
+          recordImageDrawWarmStats(counters, selected, firstSourceDraw, firstContextDraw);
+          markImageSourceDrawn(img, context);
           if (drawResult?.cropped && counters) counters.croppedImages = (counters.croppedImages || 0) + 1;
           return true;
         } catch (err) {
@@ -363,6 +629,7 @@
       const view = options.view || viewDefaults();
       const imageSourceResolver = options.imageSourceResolver || null;
       const skipText = options.skipText === true;
+      const onlyText = options.onlyText === true;
       const objectMotionForDraw = typeof deps.objectMotionForDraw === 'function' ? deps.objectMotionForDraw : null;
       const motionObjectsForDraw = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw : null;
       const cullingEnabled = deps.viewportCullingEnabled();
@@ -372,6 +639,7 @@
         if (countObject && counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
         if (obj.id === skipId || skipIds?.has(obj.id)) return;
         if (skipText && obj.type === 'text') return;
+        if (onlyText && obj.type !== 'text') return;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect)) {
           if (countObject) countCulledObject(obj, counters);
           return;
@@ -404,8 +672,29 @@
           culledTextLines: drawCounterValue(counters, 'culledTextLines'),
           croppedImages: drawCounterValue(counters, 'croppedImages'),
           scaledImages: drawCounterValue(counters, 'scaledImages'),
+          openPreviewImages: drawCounterValue(counters, 'openPreviewImages'),
+          dynamicOpenPreviewRequests: drawCounterValue(counters, 'dynamicOpenPreviewRequests'),
           fullScaleImages: drawCounterValue(counters, 'fullScaleImages'),
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
+          activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
+          scaledVariantPendingImages: drawCounterValue(counters, 'scaledVariantPendingImages'),
+          scaledImageScaleTotal: drawCounterValue(counters, 'scaledImageScaleTotal'),
+          scaledImageTargetScaleTotal: drawCounterValue(counters, 'scaledImageTargetScaleTotal'),
+          richTextDrawUnits: drawCounterValue(counters, 'richTextDrawUnits'),
+          richTextRuns: drawCounterValue(counters, 'richTextRuns'),
+          richTextScriptRuns: drawCounterValue(counters, 'richTextScriptRuns'),
+          richTextSkippedTabs: drawCounterValue(counters, 'richTextSkippedTabs'),
+          richTextSkippedSpaces: drawCounterValue(counters, 'richTextSkippedSpaces'),
+          richTextHiddenChars: drawCounterValue(counters, 'richTextHiddenChars'),
+          richTextPlanCacheHits: drawCounterValue(counters, 'richTextPlanCacheHits'),
+          richTextPlanCacheMisses: drawCounterValue(counters, 'richTextPlanCacheMisses'),
+          richTextLineDrawMs: drawCounterValue(counters, 'richTextLineDrawMs'),
+          slowRichTextLineDraws: drawCounterValue(counters, 'slowRichTextLineDraws'),
+          richTextDirectDraws: drawCounterValue(counters, 'richTextDirectDraws'),
+          imageSourceFirstDraws: drawCounterValue(counters, 'imageSourceFirstDraws'),
+          imageSourceWarmDraws: drawCounterValue(counters, 'imageSourceWarmDraws'),
+          imageContextFirstDraws: drawCounterValue(counters, 'imageContextFirstDraws'),
+          imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
           drawn = drawSingleObj(context, obj, counters, {
@@ -416,7 +705,7 @@
         } finally {
           if (motion && context.restore) context.restore();
           if (counters && typeof performance !== 'undefined') {
-            recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, motion);
+            recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, motion, deps);
           }
         }
         if (obj.type === 'image' && drawn) {

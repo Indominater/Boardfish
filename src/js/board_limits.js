@@ -49,10 +49,6 @@
     return Array.isArray(root.objects) ? root.objects.length : 0;
   }
 
-  function remainingObjectSlots() {
-    return Math.max(0, LIMITS.maxObjects - objectCount());
-  }
-
   function canAddObjects(count = 1, options = {}) {
     const nextCount = objectCount() + Math.max(0, Number(count) || 0);
     if (nextCount <= LIMITS.maxObjects) return true;
@@ -252,7 +248,6 @@
     limitError,
     notify,
     objectLimitMessage,
-    remainingObjectSlots,
     textByteLength,
     validateBoardPayload,
     validateDataUrlImage,

@@ -173,13 +173,29 @@ function isEventInsideUnsavedDialog(e) {
   return !!unsavedDialogForInputShield && e.target instanceof Node && unsavedDialogForInputShield.contains(e.target);
 }
 
+const _inputEventPointElementCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+
+function pointedElementForInputEvent(e) {
+  if (!e || (typeof e !== 'object' && typeof e !== 'function')) return null;
+  if (_inputEventPointElementCache) {
+    try {
+      if (_inputEventPointElementCache.has(e)) return _inputEventPointElementCache.get(e);
+    } catch (_) {}
+  }
+  const x = Number(e?.clientX);
+  const y = Number(e?.clientY);
+  const pointed = Number.isFinite(x) && Number.isFinite(y)
+    ? document.elementFromPoint(x, y)
+    : null;
+  const element = pointed instanceof Node ? pointed : null;
+  try { _inputEventPointElementCache?.set(e, element); } catch (_) {}
+  return element;
+}
+
 const isEventInsideVisibleSurface = (e, surface) => {
   if (!surface || !surface.classList.contains('visible')) return false;
   if (e.target instanceof Node && surface.contains(e.target)) return true;
-  const x = Number(e?.clientX);
-  const y = Number(e?.clientY);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-  const pointed = document.elementFromPoint(x, y);
+  const pointed = pointedElementForInputEvent(e);
   return pointed instanceof Node && surface.contains(pointed);
 };
 
@@ -793,9 +809,12 @@ function hideMenus() {
 const normalizeTextEditHistoryState = (id, state = null) => {
   const targetId = id || state?.id || editingId;
   if (!targetId) return null;
+  const proxyValue = typeof textEditProxyValue === 'function' && _editEl
+    ? textEditProxyValue(_editEl)
+    : (typeof _editEl?.value === 'string' ? _editEl.value : '');
   const valueLength = typeof state?.value === 'string'
     ? state.value.length
-    : (_editEl?.value?.length ?? objectsMap.get(targetId)?.data?.content?.length ?? 0);
+    : (_editEl ? proxyValue.length : (objectsMap.get(targetId)?.data?.content?.length || 0));
   const start = Math.max(0, Math.min(state?.start ?? state?.selectionStart ?? _editEl?.selectionStart ?? 0, valueLength));
   const end = Math.max(0, Math.min(state?.end ?? state?.selectionEnd ?? start, valueLength));
   const obj = objectsMap.get(targetId);

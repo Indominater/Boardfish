@@ -1,9 +1,41 @@
 // ─── Context menu ─────────────────────────────────────────────────────────────
 var ctxPos = { x: 0, y: 0 };
+var _lastBoardCursorClientPoint = null;
 
-function addTextAtContextPoint() {
+function rememberBoardCursorClientPoint(event) {
+  const x = Number(event?.clientX);
+  const y = Number(event?.clientY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  _lastBoardCursorClientPoint = { x, y };
+}
+
+function boardCursorClientPoint() {
+  return _lastBoardCursorClientPoint || {
+    x: window.innerWidth / 2,
+    y: window.innerHeight / 2,
+  };
+}
+
+function boardCursorWorldPoint() {
+  const point = boardCursorClientPoint();
+  return toWorld(point.x, point.y);
+}
+
+function menuCommandWorldPoint(event = null) {
+  const x = Number(event?.clientX);
+  const y = Number(event?.clientY);
+  if (Number.isFinite(x) && Number.isFinite(y)) return toWorld(x, y);
+  return boardCursorWorldPoint();
+}
+
+for (const type of ['pointermove', 'pointerdown', 'mousemove', 'mousedown', 'contextmenu']) {
+  document.addEventListener(type, rememberBoardCursorClientPoint, true);
+}
+
+function addTextAtMenuCommandPoint(event = null) {
+  const point = menuCommandWorldPoint(event);
   closeCtxMenu('command:add-text');
-  addText(ctxPos.x, ctxPos.y);
+  addText(point.x, point.y, '', { anchor: 'center' });
 }
 
 function clampMenuCoord(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
@@ -172,15 +204,27 @@ var _menuMouseCommand = null;
 var _lastPointerMenuCommandAt = 0;
 var MENU_COMMANDS = {
   'btn-new': () => { closeCtxMenu('command:new'); newBoard(); },
-  'btn-add-text': addTextAtContextPoint,
-  'btn-add-image': () => { closeCtxMenu('command:add-image'); pickAndInsertImages(ctxPos.x, ctxPos.y); },
-  'btn-paste': () => { closeCtxMenu('command:paste'); pasteAtPos(ctxPos.x, ctxPos.y); },
+  'btn-add-text': addTextAtMenuCommandPoint,
+  'btn-add-image': (event) => {
+    const point = menuCommandWorldPoint(event);
+    closeCtxMenu('command:add-image');
+    pickAndInsertImages(point.x, point.y);
+  },
+  'btn-paste': (event) => {
+    const point = menuCommandWorldPoint(event);
+    closeCtxMenu('command:paste');
+    pasteAtPos(point.x, point.y);
+  },
   'btn-save': () => { closeCtxMenu('command:save'); saveBoard(); },
   'btn-save-as': () => { closeCtxMenu('command:save-as'); saveBoardAs(); },
   'btn-open': () => { closeCtxMenu('command:open'); openBoard(); },
   'obj-btn-copy': () => { closeObjCtxMenu('command:copy'); copySelected(); },
   'obj-btn-delete': () => { closeObjCtxMenu('command:delete'); deleteSelected(); },
-  'obj-btn-duplicate': () => { closeObjCtxMenu('command:duplicate'); duplicateSelected(); },
+  'obj-btn-duplicate': (event) => {
+    const point = menuCommandWorldPoint(event);
+    closeObjCtxMenu('command:duplicate');
+    duplicateSelected(point);
+  },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
   'obj-btn-flip': () => { flipSelectedImages(); },
   'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
@@ -266,7 +310,11 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
     beginTextEditHistoryAction(editingId, replacementState, { splitPending: true });
   }
   if (typeof setPendingTextEditInputState === 'function') setPendingTextEditInputState(_editEl, replacementState);
-  _editEl.setSelectionRange(selection.start, selection.end, selection.direction);
+  if (typeof setTextEditProxySelectionRange === 'function') {
+    setTextEditProxySelectionRange(_editEl, selection.start, selection.end, selection.direction, { value: oldValue });
+  } else {
+    _editEl.setSelectionRange(selection.start, selection.end, selection.direction);
+  }
   const debugNow = typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now();
   const debugRound = typeof textEditorDebugRound === 'function'
     ? textEditorDebugRound
@@ -395,7 +443,7 @@ function menuCommandName(button) {
   return button?.id ? button.id.replace(/^(btn|obj-btn|text-btn)-/, '') : '';
 }
 
-function runMenuCommand(button, source) {
+function runMenuCommand(button, source, commandEvent = null) {
   const run = menuCommandFromButton(button);
   const command = menuCommandName(button);
   if (!run) {
@@ -420,7 +468,7 @@ function runMenuCommand(button, source) {
   const runWithDebug = () => {
     MenuDebug.log('menu:command:start', { command, source });
     try {
-      run();
+      run(commandEvent);
       MenuDebug.log('menu:command:end', { command, source });
     } catch (err) {
       MenuDebug.log('menu:command:error', { command, source, error: String(err) });
@@ -503,7 +551,7 @@ function runAddImagesCommandFromShortcut() {
     runMenuCommand(addImageBtn, 'shortcut');
     return;
   }
-  ctxPos = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  ctxPos = boardCursorWorldPoint();
   runMenuCommand(addImageBtn, 'shortcut');
 }
 
@@ -512,16 +560,7 @@ function runAddTextCommandFromShortcut() {
     runMenuCommand(addTextBtn, 'shortcut');
     return;
   }
-  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  const defaultSize = typeof defaultTextBoxSize === 'function'
-    ? defaultTextBoxSize()
-    : (() => {
-        const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-        return { w: h * 2, h };
-      })();
-  const defaultW = defaultSize.w;
-  const defaultH = defaultSize.h;
-  ctxPos = { x: center.x - defaultW / 2, y: center.y - defaultH / 2 };
+  ctxPos = boardCursorWorldPoint();
   runMenuCommand(addTextBtn, 'shortcut');
 }
 
@@ -639,7 +678,7 @@ function onMenuPointerUp(e) {
   }
   e.preventDefault();
   e.stopPropagation();
-  runMenuCommand(button, 'pointerup');
+  runMenuCommand(button, 'pointerup', e);
 }
 
 function onMenuMouseDown(e) {
@@ -660,7 +699,7 @@ function onMenuMouseUp(e) {
   }
   e.preventDefault();
   e.stopPropagation();
-  runMenuCommand(button, 'mouseup');
+  runMenuCommand(button, 'mouseup', e);
 }
 
 ctxMenu.addEventListener('pointerdown', onMenuPointerDown);
@@ -778,6 +817,7 @@ function showCanvasContextMenuAt(clientX, clientY) {
   // the group menu.
   if (isMultiSelected()) {
     if (rectContainsPoint(selectedBounds(), wp) && (!obj || isSelected(obj.id))) {
+      ctxPos = wp;
       updateObjMenuActions();
       openExclusiveMenuAt(objCtxMenu, 'obj-ctx-menu', clientX, clientY, 'show-obj-menu:multi');
       MenuDebug.log('obj-ctx-menu:open', { reason: 'multi', x: clientX, y: clientY });
@@ -797,6 +837,7 @@ function showCanvasContextMenuAt(clientX, clientY) {
   });
   if (obj) {
     if (!isSelected(obj.id)) selectObject(obj.id);
+    ctxPos = wp;
     updateObjMenuActions();
     openExclusiveMenuAt(objCtxMenu, 'obj-ctx-menu', clientX, clientY, 'show-obj-menu:object');
     MenuDebug.log('obj-ctx-menu:open', { reason: 'object', objectId: obj.id, objectType: obj.type, x: clientX, y: clientY });
@@ -817,7 +858,7 @@ for (const id of Object.keys(MENU_COMMANDS)) {
   document.getElementById(id)?.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    runMenuCommand(event.currentTarget, 'click');
+    runMenuCommand(event.currentTarget, 'click', event);
   });
 }
 

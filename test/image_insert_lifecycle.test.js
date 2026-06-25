@@ -200,5 +200,15 @@ test('web image insert rejects a whole supported batch that would exceed object 
   assert.match(source, /const supportedFiles = \[\];/);
   assert.match(source, /supportedFiles\.push\(file\);/);
   assert.match(source, /BoardfishWebLimits\.canAddObjects\(supportedFiles\.length\)/);
-  assert.doesNotMatch(source, /remainingObjectSlots|accepted\.length >= maxObjects/);
+  assert.doesNotMatch(source, /accepted\.length >= maxObjects/);
+});
+
+test('file picker image insertion freezes the command point before files are chosen', () => {
+  const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
+
+  assert.match(source, /var _pendingImageInsertPoint = null;/);
+  assert.match(source, /_pendingImageInsertPoint = \{ x, y \};[\s\S]*fileInput\.click\(\);/);
+  assert.match(source, /const insertPoint = _pendingImageInsertPoint \|\| ctxPos;/);
+  assert.match(source, /insertImageFiles\(files, insertPoint\.x, insertPoint\.y, 'file-input'\)/);
+  assert.match(source, /finally \{[\s\S]*_pendingImageInsertPoint = null;[\s\S]*fileInput\.value = '';/);
 });

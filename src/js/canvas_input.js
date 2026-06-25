@@ -18,6 +18,70 @@ function canvasInputDebugRound(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+function canvasInputEventTimestampMs(event = null) {
+  const timestamp = Number(event?.timeStamp);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return canvasInputNow();
+  return timestamp > performance.timeOrigin ? timestamp - performance.timeOrigin : timestamp;
+}
+
+function canvasInputWheelDeltaScale(deltaMode) {
+  if (deltaMode === 1) return 16;
+  if (deltaMode === 2) return Math.max(1, Number(window.innerHeight) || 1);
+  return 1;
+}
+
+function canvasInputWheelDebugMeta(e) {
+  const deltaMode = Number(e?.deltaMode) || 0;
+  const scale = canvasInputWheelDeltaScale(deltaMode);
+  return {
+    deltaMode,
+    deltaModeLabel: deltaMode === 1 ? 'line' : deltaMode === 2 ? 'page' : 'pixel',
+    deltaX: e?.deltaX ?? '',
+    deltaY: e?.deltaY ?? '',
+    deltaZ: e?.deltaZ ?? '',
+    wheelDeltaXPx: (Number(e?.deltaX) || 0) * scale,
+    wheelDeltaYPx: (Number(e?.deltaY) || 0) * scale,
+    wheelDeltaZPx: (Number(e?.deltaZ) || 0) * scale,
+  };
+}
+
+function canvasInputEventDebugMeta(e) {
+  const eventAt = canvasInputEventTimestampMs(e);
+  return {
+    eventAt,
+    eventAgeMs: Math.max(0, canvasInputNow() - eventAt),
+    eventType: e?.type || '',
+    clientX: e?.clientX ?? '',
+    clientY: e?.clientY ?? '',
+    button: e?.button ?? '',
+    buttons: e?.buttons ?? '',
+    movementX: e?.movementX ?? '',
+    movementY: e?.movementY ?? '',
+    ctrlKey: !!e?.ctrlKey,
+    metaKey: !!e?.metaKey,
+    shiftKey: !!e?.shiftKey,
+    altKey: !!e?.altKey,
+    defaultPrevented: !!e?.defaultPrevented,
+    cancelable: !!e?.cancelable,
+    isTrusted: e?.isTrusted ?? '',
+  };
+}
+
+function canvasInputViewportDebugSnapshot(prefix = '') {
+  const key = (name) => prefix ? `${name}${prefix}` : name;
+  return {
+    [key('panX')]: panX,
+    [key('panY')]: panY,
+    [key('zoom')]: zoom,
+  };
+}
+
+function canvasInputViewportResult(result) {
+  return result && typeof result === 'object'
+    ? result
+    : { panX, panY, zoom };
+}
+
 function canvasInputTextDebugLog(label, obj = null, meta = {}) {
   if (typeof TextSelDebug === 'undefined') return;
   TextSelDebug._logEditLifecycle?.(label, obj, meta);
@@ -86,11 +150,32 @@ function handleViewportWheel(e) {
   try { e.__boardfishViewportWheelHandled = true; } catch (_) {}
   const collectDebug = ViewportDebug.isEnabled();
   const handlerStart = collectDebug ? canvasInputNow() : 0;
-  const dbg = ViewportDebug.start('wheel', { deltaX: e.deltaX, deltaY: e.deltaY, ctrlKey: e.ctrlKey, metaKey: e.metaKey, panX, panY, zoom });
+  const wheelMeta = collectDebug ? canvasInputWheelDebugMeta(e) : {};
+  const eventMeta = collectDebug ? canvasInputEventDebugMeta(e) : {};
+  const beforeMeta = collectDebug ? canvasInputViewportDebugSnapshot('Before') : {};
+  const dbg = ViewportDebug.start('wheel', {
+    ...eventMeta,
+    ...wheelMeta,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+    ...beforeMeta,
+    panX,
+    panY,
+    zoom,
+  });
   try {
     ViewportDebug.count('wheel');
     e.preventDefault();
     if (_rubberBandDragActive) {
+      ViewportDebug.recordPanZoom?.('wheel-blocked-rubber-band', {
+        mode: 'blocked',
+        source: 'wheel',
+        blocked: true,
+        reason: 'rubber-band',
+        ...wheelMeta,
+        ...beforeMeta,
+        ...canvasInputViewportDebugSnapshot('After'),
+      }, e);
       ViewportDebug.end(dbg, { mode: 'blocked-rubber-band', panX, panY, zoom });
       return;
     }
@@ -99,22 +184,107 @@ function handleViewportWheel(e) {
     }
     if (e.ctrlKey || e.metaKey) {
       ViewportDebug.count('wheelZoom');
+      const panXBefore = panX;
+      const panYBefore = panY;
+      const zoomBefore = zoom;
+      const focusWorldX = (e.clientX - panXBefore) / Math.max(zoomBefore || 1, 0.0001);
+      const focusWorldY = (e.clientY - panYBefore) / Math.max(zoomBefore || 1, 0.0001);
       const factor = Math.abs(e.deltaY) < 30
         ? Math.pow(0.995, e.deltaY)
         : e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom * factor));
-      BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, newZoom);
+      const requestedZoom = zoom * factor;
+      const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, requestedZoom));
+      const nextViewport = canvasInputViewportResult(
+        BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, newZoom),
+      );
       globalThis.BoardfishMotion?.applyActionAnimation?.('board-wheel-zoom');
       scheduleTransform('wheel-zoom', e);
-      ViewportDebug.end(dbg, { mode: 'zoom', newZoom, panX, panY });
+      const handlerMs = collectDebug ? canvasInputDebugRound(canvasInputNow() - handlerStart) : '';
+      const zoomDeltaPct = zoomBefore ? ((nextViewport.zoom / zoomBefore) - 1) * 100 : 0;
+      const panDeltaX = nextViewport.panX - panXBefore;
+      const panDeltaY = nextViewport.panY - panYBefore;
+      ViewportDebug.recordPanZoom?.('wheel-zoom', {
+        mode: 'zoom',
+        source: 'wheel-zoom',
+        ...eventMeta,
+        ...wheelMeta,
+        panXBefore,
+        panYBefore,
+        zoomBefore,
+        panXAfter: nextViewport.panX,
+        panYAfter: nextViewport.panY,
+        zoomAfter: nextViewport.zoom,
+        panDeltaX,
+        panDeltaY,
+        panDistancePx: Math.hypot(panDeltaX, panDeltaY),
+        zoomDelta: nextViewport.zoom - zoomBefore,
+        zoomDeltaPct,
+        factor,
+        requestedZoom,
+        clamped: newZoom !== requestedZoom,
+        focusWorldX,
+        focusWorldY,
+        handlerMs,
+      }, e);
+      ViewportDebug.end(dbg, {
+        mode: 'zoom',
+        source: 'wheel-zoom',
+        newZoom,
+        zoomBefore,
+        zoomAfter: nextViewport.zoom,
+        zoomDeltaPct,
+        panX,
+        panY,
+        panDeltaX,
+        panDeltaY,
+        handlerMs,
+      });
       return;
     }
 
     ViewportDebug.count('wheelPan');
-    BoardfishViewportState.panBy(-e.deltaX, -e.deltaY);
+    const panXBefore = panX;
+    const panYBefore = panY;
+    const zoomBefore = zoom;
+    const appliedPanX = -e.deltaX;
+    const appliedPanY = -e.deltaY;
+    const nextViewport = canvasInputViewportResult(BoardfishViewportState.panBy(appliedPanX, appliedPanY));
     globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
     scheduleTransform('wheel-pan', e);
-    ViewportDebug.end(dbg, { mode: 'pan', appliedDX: e.deltaX, appliedDY: e.deltaY, panX, panY });
+    const handlerMs = collectDebug ? canvasInputDebugRound(canvasInputNow() - handlerStart) : '';
+    const panDeltaX = nextViewport.panX - panXBefore;
+    const panDeltaY = nextViewport.panY - panYBefore;
+    ViewportDebug.recordPanZoom?.('wheel-pan', {
+      mode: 'pan',
+      source: 'wheel-pan',
+      ...eventMeta,
+      ...wheelMeta,
+      panXBefore,
+      panYBefore,
+      zoomBefore,
+      panXAfter: nextViewport.panX,
+      panYAfter: nextViewport.panY,
+      zoomAfter: nextViewport.zoom,
+      appliedPanX,
+      appliedPanY,
+      panDeltaX,
+      panDeltaY,
+      panDistancePx: Math.hypot(panDeltaX, panDeltaY),
+      handlerMs,
+    }, e);
+    ViewportDebug.end(dbg, {
+      mode: 'pan',
+      source: 'wheel-pan',
+      appliedDX: e.deltaX,
+      appliedDY: e.deltaY,
+      appliedPanX,
+      appliedPanY,
+      panX,
+      panY,
+      panDeltaX,
+      panDeltaY,
+      handlerMs,
+    });
   } finally {
     if (collectDebug) ViewportDebug.timing('wheelHandler', canvasInputNow() - handlerStart);
   }
@@ -187,26 +357,115 @@ function dragItemsForSelection() {
 }
 
 function startMousePan(e) {
-  const panDbg = ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, panX, panY, zoom });
+  const startDebugMeta = {
+    ...canvasInputEventDebugMeta(e),
+    ...canvasInputViewportDebugSnapshot('Before'),
+  };
+  const panDbg = ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, ...startDebugMeta, panX, panY, zoom });
   e.preventDefault();
   e.stopPropagation();
   const startX = e.clientX, startY = e.clientY;
   const startPanX = panX, startPanY = panY;
+  const startZoom = zoom;
+  const panStartedAt = canvasInputNow();
+  let moveCount = 0;
+  let lastClientX = startX;
+  let lastClientY = startY;
+  ViewportDebug.recordPanZoom?.('mouse-pan-start', {
+    mode: 'pan',
+    source: 'mouse-pan',
+    ...startDebugMeta,
+    startClientX: startX,
+    startClientY: startY,
+    panXBefore: startPanX,
+    panYBefore: startPanY,
+    zoomBefore: startZoom,
+  }, e);
   function onMove(ev) {
     const collectDebug = ViewportDebug.isEnabled();
     const handlerStart = collectDebug ? canvasInputNow() : 0;
     try {
       ViewportDebug.count('mousePanMoves');
-      BoardfishViewportState.setPan(startPanX + (ev.clientX - startX), startPanY + (ev.clientY - startY));
+      const panXBefore = panX;
+      const panYBefore = panY;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      const nextViewport = canvasInputViewportResult(BoardfishViewportState.setPan(startPanX + dx, startPanY + dy));
       globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
       scheduleTransform('mouse-pan', ev);
+      if (collectDebug) {
+        const panDeltaX = nextViewport.panX - panXBefore;
+        const panDeltaY = nextViewport.panY - panYBefore;
+        const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
+        moveCount++;
+        ViewportDebug.recordPanZoom?.('mouse-pan-move', {
+          mode: 'pan',
+          source: 'mouse-pan',
+          moveIndex: moveCount,
+          ...canvasInputEventDebugMeta(ev),
+          panXBefore,
+          panYBefore,
+          zoomBefore: startZoom,
+          panXAfter: nextViewport.panX,
+          panYAfter: nextViewport.panY,
+          zoomAfter: nextViewport.zoom,
+          startClientX: startX,
+          startClientY: startY,
+          clientDeltaX: dx,
+          clientDeltaY: dy,
+          clientStepX: ev.clientX - lastClientX,
+          clientStepY: ev.clientY - lastClientY,
+          panDeltaX,
+          panDeltaY,
+          panDistancePx: Math.hypot(panDeltaX, panDeltaY),
+          cumulativePanX: nextViewport.panX - startPanX,
+          cumulativePanY: nextViewport.panY - startPanY,
+          handlerMs,
+        }, ev);
+      }
+      lastClientX = ev.clientX;
+      lastClientY = ev.clientY;
     } finally {
       if (collectDebug) ViewportDebug.timing('mousePanHandler', canvasInputNow() - handlerStart);
     }
   }
   function onUp(ev) {
     if (ev && !ev.__boardfishDragCancel && ev.button !== 0) return;
-    ViewportDebug.end(panDbg, { endX: ev?.clientX ?? '', endY: ev?.clientY ?? '', panX, panY, cancelled: !!ev?.__boardfishDragCancel });
+    const panDeltaX = panX - startPanX;
+    const panDeltaY = panY - startPanY;
+    ViewportDebug.recordPanZoom?.('mouse-pan-end', {
+      mode: 'pan',
+      source: 'mouse-pan',
+      ...(ev ? canvasInputEventDebugMeta(ev) : {}),
+      startClientX: startX,
+      startClientY: startY,
+      endClientX: ev?.clientX ?? '',
+      endClientY: ev?.clientY ?? '',
+      panXBefore: startPanX,
+      panYBefore: startPanY,
+      zoomBefore: startZoom,
+      panXAfter: panX,
+      panYAfter: panY,
+      zoomAfter: zoom,
+      panDeltaX,
+      panDeltaY,
+      panDistancePx: Math.hypot(panDeltaX, panDeltaY),
+      moveCount,
+      durationMs: canvasInputNow() - panStartedAt,
+      cancelled: !!ev?.__boardfishDragCancel,
+    }, ev);
+    ViewportDebug.end(panDbg, {
+      endX: ev?.clientX ?? '',
+      endY: ev?.clientY ?? '',
+      panX,
+      panY,
+      zoom,
+      panDeltaX,
+      panDeltaY,
+      panDistancePx: Math.hypot(panDeltaX, panDeltaY),
+      moveCount,
+      cancelled: !!ev?.__boardfishDragCancel,
+    });
   }
   beginDocumentDrag({ move: onMove, up: onUp });
 }
@@ -378,7 +637,11 @@ function applyTextEditCaretHit(obj, proxy, hit) {
     : String(obj.data?.content || '').replace(/\r\n?/g, '\n');
   const textLength = textContent.length;
   const index = Math.max(0, Math.min(Math.trunc(hit.index ?? 0), textLength));
-  proxy.setSelectionRange(index, index, 'none');
+  if (typeof setTextEditProxySelectionRange === 'function') {
+    setTextEditProxySelectionRange(proxy, index, index, 'none', { value: textContent });
+  } else {
+    proxy.setSelectionRange(index, index, 'none');
+  }
   if (hit.affinity) {
     if (typeof setTextScriptCaretAffinity === 'function') {
       setTextScriptCaretAffinity(obj, index, hit.affinity);
@@ -452,7 +715,16 @@ function startTextSelectionDrag(e, obj, wp) {
     });
     const endIdx = endHit.index;
     if (_editEl) {
-      _editEl.setSelectionRange(Math.min(clickIdx, endIdx), Math.max(clickIdx, endIdx));
+      const start = Math.min(clickIdx, endIdx);
+      const end = Math.max(clickIdx, endIdx);
+      if (typeof setTextEditProxySelectionRange === 'function') {
+        const value = typeof normalizeTextContent === 'function'
+          ? normalizeTextContent(obj.data?.content || '')
+          : String(obj.data?.content || '').replace(/\r\n?/g, '\n');
+        setTextEditProxySelectionRange(_editEl, start, end, 'none', { value });
+      } else {
+        _editEl.setSelectionRange(start, end);
+      }
       if (clickIdx === endIdx) applyTextEditCaretHit(obj, _editEl, endHit);
       else clearTextEditCaretHit(obj);
       TextSelDebug._logSelection('mouse-drag', _editEl, obj);

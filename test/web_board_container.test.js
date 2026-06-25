@@ -117,10 +117,59 @@ test('writes and reads Boardfish .bf containers in browser format', async () => 
   assert.equal(source.bytes, 4);
   assert.equal(WebContainer.dataUrlForImageSource(source), imageStore['img-1']);
   assert.equal(result.debug.image_bytes, 4);
+  assert.equal(result.debug.format, 'container-web');
+  assert.equal(typeof result.debug.total_ms, 'number');
+  assert.equal(typeof result.debug.read_ms, 'number');
+  assert.equal(typeof result.debug.zip_open_ms, 'number');
+  assert.equal(typeof result.debug.board_json_read_ms, 'number');
+  assert.equal(typeof result.debug.board_json_parse_ms, 'number');
+  assert.equal(typeof result.debug.image_read_ms, 'number');
+  assert.equal(typeof result.debug.image_read_max_ms, 'number');
+  assert.equal(result.debug.image_read_max_key, 'img-1');
+  assert.equal(typeof result.debug.image_ref_ms, 'number');
+  assert.equal(typeof result.debug.image_crc_ms, 'number');
+  assert.equal(result.debug.lazy_image_refs, 0);
+  assert.equal(result.debug.eager_image_refs, 1);
+  assert.equal(result.debug.zip_entry_count, 2);
   assert.equal(result.imageEntries[0].path, 'images/img-1.png');
 
   const savedAgain = await WebContainer.createBoardContainerBlob(board, result.board.imageStore);
   assert.equal(savedAgain.imageBytes, 4);
+});
+
+test('reads Boardfish containers with lazy image refs for fast web opens', async () => {
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    viewport: { panX: 1, panY: 2, zoom: 1 },
+    imageStore: {
+      'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' },
+    },
+    objects: [
+      { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 10, z: 1, data: { imgKey: 'img-1' } },
+    ],
+  };
+  const imageStore = {
+    'img-1': 'data:image/png;base64,AQIDBA==',
+  };
+  const payload = await WebContainer.createBoardContainerBlob(board, imageStore);
+
+  const result = await WebContainer.readBoardContainer(payload.blob, {
+    lazyImageRefs: true,
+    verifyImageCrc: false,
+  });
+  const source = result.board.imageStore['img-1'];
+
+  assert.equal(WebContainer.isWebImageRef(source), true);
+  assert.equal(source.bytes, 4);
+  assert.equal(source.__bytes, undefined);
+  assert.equal(result.debug.lazy_image_refs, 1);
+  assert.equal(result.debug.eager_image_refs, 0);
+  assert.equal(result.debug.image_read_ms, 0);
+  assert.equal(result.debug.image_crc_count, 0);
+  assert.equal(result.debug.warnings.length, 0);
+  assert.equal(WebContainer.bytesForImageSource(source)[0], 1);
+  assert.equal(WebContainer.dataUrlForImageSource(source), imageStore['img-1']);
 });
 
 test('read validates advertised image bytes before materializing image entries', async () => {

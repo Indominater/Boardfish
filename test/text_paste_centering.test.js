@@ -199,16 +199,12 @@ test('addText strips whitespace-only lines at pasted text edges', () => {
   assert.deepEqual(context.editedIds, []);
 });
 
-test('addText can enter edit mode at the end for pasted text boxes', () => {
+test('addText with pasted content stays in select mode by default', () => {
   const context = loadAddTextHarness();
 
-  context.addText(24, 48, 'pasted text', { editAfterCreate: true, enterEditHistory: false });
+  context.addText(24, 48, 'pasted text');
 
-  const obj = context.added[0];
-  assert.deepEqual(JSON.parse(JSON.stringify(context.editCalls)), [{
-    id: obj.id,
-    options: { history: false, placeInitialCaret: true },
-  }]);
+  assert.deepEqual(context.editCalls, []);
 });
 
 test('addText keeps deterministic braced script text editable', () => {
@@ -238,11 +234,11 @@ test('outside clipboard text is pasted at the same center point as canvas object
     wx: 640,
     wy: 360,
     content: 'outside text',
-    options: { anchor: 'center', editAfterCreate: true, enterEditHistory: false },
+    options: { anchor: 'center' },
   }]);
 });
 
-test('browser clipboard text paste enters edit mode for the new text box', async () => {
+test('browser clipboard text paste stays in select mode for the new text box', async () => {
   const context = loadPasteHarness({ browserText: 'browser text' });
 
   await context.pasteAtPos(640, 360, {
@@ -255,6 +251,6 @@ test('browser clipboard text paste enters edit mode for the new text box', async
     wx: 640,
     wy: 360,
     content: 'browser text',
-    options: { anchor: 'center', editAfterCreate: true, enterEditHistory: false },
+    options: { anchor: 'center' },
   }]);
 });

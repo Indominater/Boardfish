@@ -42,7 +42,7 @@ https://indominater.github.io/Boardfish/
 | Rotate selected image(s) | Cmd+R | Ctrl+R |
 | Export selected image(s) | Cmd+E | Ctrl+E |
 | Undo | Cmd+Z | Ctrl+Z |
-| Redo | Cmd+Shift+Z | Ctrl+Shift+Z / Ctrl+Y |
+| Redo | Cmd+Shift+Z / Cmd+Y | Ctrl+Shift+Z / Ctrl+Y |
 | Delete selected | Backspace / Delete | Backspace / Delete |
 | Edit text | Double-click | Double-click |
 | Pan canvas | Space + drag | Space + drag |

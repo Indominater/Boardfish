@@ -72,6 +72,31 @@ const selectedTextObjectsForKeyboard = () => {
   return textObjects;
 };
 
+const selectedTextObjectForKeyboardEdit = () => {
+  if (!selectedIds || selectedIds.size !== 1 || !objectsMap?.get) return null;
+  const [id] = selectedIds;
+  const obj = objectsMap.get(id);
+  return obj?.type === 'text' ? obj : null;
+};
+
+const enterSelectedTextEditFromKeyboard = (e) => {
+  if (
+    editingId ||
+    e.repeat ||
+    e.isComposing ||
+    isBoardInputBlocked() ||
+    typeof enterEdit !== 'function' ||
+    isEditableTextShortcutTarget(e.target) ||
+    (typeof document !== 'undefined' && isEditableTextShortcutTarget(document.activeElement))
+  ) {
+    return false;
+  }
+  const obj = selectedTextObjectForKeyboardEdit();
+  if (!obj) return false;
+  enterEdit(obj.id, { placeInitialCaret: true });
+  return true;
+};
+
 const applySelectedTextAlignmentFromKeyboard = (direction) => {
   if (editingId || isBoardInputBlocked() || typeof applyTextLineAlignmentRange !== 'function') return false;
   const textObjects = selectedTextObjectsForKeyboard();
@@ -135,8 +160,10 @@ function runShortcutCommand(shortcutName, fallback) {
 
 function pasteAtViewportCenterFromShortcut() {
   if (editingId || typeof pasteAtPos !== 'function') return;
-  const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  pasteAtPos(center.x, center.y);
+  const point = typeof boardCursorWorldPoint === 'function'
+    ? boardCursorWorldPoint()
+    : toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  pasteAtPos(point.x, point.y);
 }
 
 document.addEventListener('keydown', (e) => {
@@ -226,6 +253,13 @@ document.addEventListener('keydown', (e) => {
     consumeShortcutEvent(e);
     runShortcutCommand('add-text', runAddTextCommandFromShortcut);
     return;
+  }
+
+  if (hasNoShortcutModifiers(e) && e.key === 'Enter') {
+    if (enterSelectedTextEditFromKeyboard(e)) {
+      consumeShortcutEvent(e);
+      return;
+    }
   }
 
   if (e.key === 'Escape') {
@@ -318,7 +352,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && isShortcutKey(e, 'y')) {
+  if (hasExactCommandModifier(e) && isShortcutKey(e, 'y')) {
     consumeShortcutEvent(e);
     runShortcutCommand('redo', redo);
     return;

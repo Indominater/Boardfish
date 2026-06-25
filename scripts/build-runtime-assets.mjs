@@ -72,12 +72,18 @@ async function concatenateScripts(scripts, variantName) {
   return parts.join('');
 }
 
-async function writeIndex(outDir, scriptTag, { includePwa = false } = {}) {
+async function writeIndex(outDir, scriptTag, { includePwa = false, preloadScript = '' } = {}) {
   const html = await readFile(path.join(srcRoot, 'index.html'), 'utf8');
   let next = html.replace(
     /<script\s+type="module"\s+src="js\/main(?:\.[^"]+)?\.mjs"><\/script>/,
     scriptTag,
   );
+  if (preloadScript) {
+    next = next.replace(
+      /\n<\/head>/,
+      `\n  <link rel="preload" href="${preloadScript}" as="script" />\n</head>`,
+    );
+  }
   if (!includePwa) {
     next = next.replace(/\n\s*<link\s+rel="manifest"\s+href="manifest\.webmanifest"\s*\/>/, '');
   }
@@ -115,6 +121,7 @@ async function buildBundle(variantName, config) {
   await writeFile(outPath, result.code);
   await writeIndex(config.outDir, `<script src="${bundle}"></script>`, {
     includePwa: variantName === 'web-preview',
+    preloadScript: bundle,
   });
   if (variantName === 'web-preview') await writeServiceWorker(config.outDir, [bundle]);
 

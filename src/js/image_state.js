@@ -11,7 +11,14 @@ var _imageDecodeActive = 0;
 var _imageDecodeScheduled = false;
 var MAX_IMAGE_DECODE_ACTIVE = 2;
 const MAX_OPEN_IMAGE_DECODE_ACTIVE = 8;
+const MAX_DYNAMIC_OPEN_PREVIEW_ACTIVE = 4;
 var imageReadyPromises = new Map();
+var imageOpenPreviewBitmapCache = new Map();
+var imageOpenPreviewRequestPending = new Set();
+var imageOpenPreviewRequestQueue = [];
+var imageOpenPreviewRequestActive = 0;
+var imageOpenPreviewRequestScheduled = false;
+var imageOpenPreviewRequestEpoch = 0;
 
 function newImgKey() {
   let key = '';
@@ -263,6 +270,327 @@ const createImageBitmapForSource = async (source, displaySrc) => {
   return createImageBitmap(bitmapSource);
 };
 
+const openPreviewTargetForObject = (obj, view = {}) => {
+  const dpr = Number(view.dpr || (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
+  const z = Math.max(0.001, Number(view.zoom || 1));
+  const transform = typeof imageTransformFromObject === 'function'
+    ? imageTransformFromObject(obj)
+    : { rotation: 0 };
+  const sideways = typeof isSidewaysRotation === 'function' && isSidewaysRotation(transform.rotation);
+  const worldW = Math.max(1, sideways ? Number(obj?.h || 0) : Number(obj?.w || 0));
+  const worldH = Math.max(1, sideways ? Number(obj?.w || 0) : Number(obj?.h || 0));
+  return {
+    width: Math.max(1, Math.min(4096, Math.ceil(worldW * z * dpr))),
+    height: Math.max(1, Math.min(4096, Math.ceil(worldH * z * dpr))),
+  };
+};
+
+async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}, dbg = null, options = {}) {
+  const t0 = performance.now();
+  if (typeof createImageBitmap !== 'function') return { key, ready: false, skipped: 'createImageBitmap-unavailable' };
+  if (!key || !obj) return { key, ready: false, skipped: 'invalid' };
+  const current = imageOpenPreviewBitmapCache.get(key);
+  if (current?.generation === _imageStoreGeneration && current.bitmap) {
+    return { key, ready: true, skipped: 'already-ready', width: current.bitmap.width, height: current.bitmap.height };
+  }
+  const source = imageStore[key];
+  if (typeof source !== 'string' && !isWebImageRef(source)) return { key, ready: false, skipped: 'non-hydratable' };
+  const generation = _imageStoreGeneration;
+  const target = openPreviewTargetForObject(obj, view);
+  let bitmap = null;
+  let sourceKind = 'store';
+  let sourceFallbackError = '';
+  try {
+    const preferredSource = options.sourceBitmap || null;
+    const preferredW = preferredSource?.width || preferredSource?.naturalWidth || 0;
+    const preferredH = preferredSource?.height || preferredSource?.naturalHeight || 0;
+    let bitmapSource = null;
+    if (preferredW > 0 && preferredH > 0) {
+      try {
+        bitmap = await createImageBitmap(preferredSource, {
+          resizeWidth: target.width,
+          resizeHeight: target.height,
+          resizeQuality: 'high',
+        });
+        sourceKind = 'bitmap';
+      } catch (err) {
+        sourceFallbackError = String(err);
+        bitmap = null;
+      }
+    }
+    if (!bitmap) {
+      bitmapSource = await bitmapSourceFromImageSource(source, '');
+      bitmap = await createImageBitmap(bitmapSource, {
+        resizeWidth: target.width,
+        resizeHeight: target.height,
+        resizeQuality: 'high',
+      });
+      sourceKind = 'store';
+    }
+    if (generation !== _imageStoreGeneration || imageStore[key] !== source) {
+      bitmap.close?.();
+      bitmap = null;
+      return { key, ready: false, skipped: 'stale', ms: performance.now() - t0 };
+    }
+    const previous = imageOpenPreviewBitmapCache.get(key);
+    if (typeof dropDrawableBitmapWarmup === 'function') dropDrawableBitmapWarmup(previous?.bitmap);
+    previous?.bitmap?.close?.();
+    imageOpenPreviewBitmapCache.set(key, {
+      bitmap,
+      generation,
+      width: bitmap.width,
+      height: bitmap.height,
+      targetWidth: target.width,
+      targetHeight: target.height,
+      objectId: obj.id || '',
+      objectW: Number(obj.w || 0) || 0,
+      objectH: Number(obj.h || 0) || 0,
+      viewZoom: Number(view.zoom || 0) || 0,
+      viewDpr: Number(view.dpr || 0) || 0,
+    });
+    if (typeof scheduleDrawableBitmapWarmup === 'function') {
+      scheduleDrawableBitmapWarmup(bitmap, {
+        kind: 'open-preview',
+        key,
+        objectId: obj.id || '',
+        source: options.source || '',
+      }, {
+        immediate: options.warmupImmediate === true || (typeof _boardOpening !== 'undefined' && _boardOpening),
+        budgetMs: 8,
+        maxItems: 1,
+      });
+    }
+    bitmap = null;
+    return {
+      key,
+      ready: true,
+      width: target.width,
+      height: target.height,
+      bytes: target.width * target.height * 4,
+      ms: performance.now() - t0,
+      sourceKind,
+      sourceFallbackError,
+    };
+  } catch (err) {
+    bitmap?.close?.();
+    OpenDebug.step(dbg, 'open-preview-image:error', { imgKey: key, error: String(err), ms: performance.now() - t0 });
+    return { key, ready: false, skipped: 'error', error: String(err), ms: performance.now() - t0 };
+  }
+}
+
+function scheduleOpenInitialImagePreviewRequestQueue() {
+  if (imageOpenPreviewRequestScheduled) return;
+  imageOpenPreviewRequestScheduled = true;
+  setTimeout(() => {
+    imageOpenPreviewRequestScheduled = false;
+    while (imageOpenPreviewRequestActive < MAX_DYNAMIC_OPEN_PREVIEW_ACTIVE && imageOpenPreviewRequestQueue.length) {
+      const task = imageOpenPreviewRequestQueue.shift();
+      imageOpenPreviewRequestActive++;
+      task()
+        .catch(() => {})
+        .finally(() => {
+          imageOpenPreviewRequestActive = Math.max(0, imageOpenPreviewRequestActive - 1);
+          if (imageOpenPreviewRequestQueue.length) scheduleOpenInitialImagePreviewRequestQueue();
+        });
+    }
+  }, 0);
+}
+
+function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, options = {}) {
+  if (typeof createImageBitmap !== 'function') return false;
+  if (!key || !obj || imageOpenPreviewBitmapCache.has(key) || imageOpenPreviewRequestPending.has(key)) return false;
+  const source = imageStore[key];
+  if (typeof source !== 'string' && !isWebImageRef(source)) return false;
+  const requestEpoch = imageOpenPreviewRequestEpoch;
+  const queuedAt = performance.now();
+  const sourceBitmap = options.sourceBitmap || null;
+  const sourceBitmapW = sourceBitmap?.width || sourceBitmap?.naturalWidth || 0;
+  const sourceBitmapH = sourceBitmap?.height || sourceBitmap?.naturalHeight || 0;
+  imageOpenPreviewRequestPending.add(key);
+  if (typeof OpenDebug !== 'undefined' && typeof OpenDebug.recordDynamicPreview === 'function') {
+	    OpenDebug.recordDynamicPreview({
+	      imgKey: key,
+	      objectId: obj.id || '',
+	      reason: options.reason || '',
+	      queued: true,
+	      pending: imageOpenPreviewRequestPending.size,
+	      queuedCount: imageOpenPreviewRequestQueue.length + 1,
+	      active: imageOpenPreviewRequestActive,
+      concurrency: MAX_DYNAMIC_OPEN_PREVIEW_ACTIVE,
+      sourceBitmap: sourceBitmapW > 0 && sourceBitmapH > 0,
+      sourceBitmapW: sourceBitmapW || '',
+      sourceBitmapH: sourceBitmapH || '',
+    });
+  }
+  const task = async () => {
+    const startedAt = performance.now();
+    try {
+      if (requestEpoch !== imageOpenPreviewRequestEpoch || imageStore[key] !== source) return;
+      const result = await buildOpenInitialImagePreviewForOpen(key, obj, view, null, {
+        source: options.source || 'open-preview-dynamic-ready',
+        warmupImmediate: true,
+        sourceBitmap,
+      });
+      const completedAt = performance.now();
+      if (result?.ready) {
+        if (requestEpoch === imageOpenPreviewRequestEpoch) {
+          if (typeof scheduleRender === 'function') scheduleRender(true, false, options.source || 'open-preview-dynamic-ready');
+        } else {
+          clearOpenInitialImagePreviews(key);
+        }
+      }
+      if (typeof OpenDebug !== 'undefined' && typeof OpenDebug.recordDynamicPreview === 'function') {
+        OpenDebug.recordDynamicPreview({
+          imgKey: key,
+          objectId: obj.id || '',
+          reason: options.reason || '',
+          queuedMs: startedAt - queuedAt,
+          waitMs: startedAt - queuedAt,
+          buildMs: result?.ms ?? '',
+          totalMs: completedAt - queuedAt,
+          ready: result?.ready === true,
+          skipped: result?.skipped || '',
+          width: result?.width ?? '',
+          height: result?.height ?? '',
+          ms: result?.ms ?? '',
+          active: imageOpenPreviewRequestActive,
+          queuedCount: imageOpenPreviewRequestQueue.length,
+          concurrency: MAX_DYNAMIC_OPEN_PREVIEW_ACTIVE,
+          sourceKind: result?.sourceKind || '',
+          sourceFallbackError: result?.sourceFallbackError || '',
+        });
+      }
+    } finally {
+      imageOpenPreviewRequestPending.delete(key);
+    }
+  };
+  task.imgKey = key;
+  imageOpenPreviewRequestQueue.push(task);
+  scheduleOpenInitialImagePreviewRequestQueue();
+  return true;
+}
+
+function hasOpenInitialImagePreviews() {
+  for (const entry of imageOpenPreviewBitmapCache.values()) {
+    if (entry?.generation === _imageStoreGeneration && entry.bitmap) return true;
+  }
+  return false;
+}
+
+function hasBlockingOpenInitialImagePreviewsForOpen() {
+  for (const [key, entry] of imageOpenPreviewBitmapCache.entries()) {
+    if (entry?.generation === _imageStoreGeneration && entry.bitmap && !imageBitmapFailed.has(key)) return true;
+  }
+  return false;
+}
+
+function clearOpenInitialImagePreviews(key = null) {
+  if (key) {
+    const entry = imageOpenPreviewBitmapCache.get(key);
+    if (typeof dropDrawableBitmapWarmup === 'function') dropDrawableBitmapWarmup(entry?.bitmap);
+    entry?.bitmap?.close?.();
+    imageOpenPreviewBitmapCache.delete(key);
+    imageOpenPreviewRequestPending.delete(key);
+    if (imageOpenPreviewRequestQueue.length) {
+      imageOpenPreviewRequestQueue = imageOpenPreviewRequestQueue.filter((task) => task?.imgKey !== key);
+    }
+    return;
+  }
+  imageOpenPreviewRequestEpoch++;
+  imageOpenPreviewRequestPending.clear();
+  imageOpenPreviewRequestQueue.length = 0;
+  for (const entry of imageOpenPreviewBitmapCache.values()) {
+    if (typeof dropDrawableBitmapWarmup === 'function') dropDrawableBitmapWarmup(entry?.bitmap);
+    entry?.bitmap?.close?.();
+  }
+  imageOpenPreviewBitmapCache.clear();
+}
+
+function openInitialPreviewReleaseTargetScale(key, entry) {
+  const fullSource = imageBitmapCache[key] || imageCache[key] || null;
+  if (!fullSource || typeof chooseImageScaleForDraw !== 'function') return 1;
+  return chooseImageScaleForDraw(
+    {
+      w: Math.max(1, Number(entry?.objectW || 0) || Number(entry?.targetWidth || 1) || 1),
+      h: Math.max(1, Number(entry?.objectH || 0) || Number(entry?.targetHeight || 1) || 1),
+    },
+    fullSource,
+    {
+      zoom: Number(entry?.viewZoom || 0) || (typeof zoom !== 'undefined' ? zoom : 1),
+      dpr: Number(entry?.viewDpr || 0) || (typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1),
+    },
+  );
+}
+
+function openInitialPreviewIsCoveredByDrawSource(key, entry) {
+  if (imageBitmapFailed.has(key)) return true;
+  const fullSource = imageBitmapCache[key] || imageCache[key] || null;
+  if (!fullSource) return false;
+  if (typeof isViewportImageScalingActive !== 'function' ||
+    !isViewportImageScalingActive() ||
+    typeof hasScaledImageVariant !== 'function') {
+    return true;
+  }
+  const targetScale = openInitialPreviewReleaseTargetScale(key, entry);
+  return !(targetScale > 0 && targetScale < 1) || hasScaledImageVariant(key, targetScale);
+}
+
+function releaseReadyOpenInitialImagePreviewsForOpen() {
+  let total = 0;
+  let ready = 0;
+  let pending = 0;
+  let failed = 0;
+  let stale = 0;
+  const releasable = [];
+  const staleKeys = [];
+  for (const [key, entry] of imageOpenPreviewBitmapCache.entries()) {
+    if (!entry?.bitmap || entry.generation !== _imageStoreGeneration) {
+      stale++;
+      staleKeys.push(key);
+      continue;
+    }
+    total++;
+    if (imageBitmapFailed.has(key)) failed++;
+    else if (openInitialPreviewIsCoveredByDrawSource(key, entry)) {
+      ready++;
+      releasable.push(key);
+    } else pending++;
+  }
+  for (const key of staleKeys) clearOpenInitialImagePreviews(key);
+  if (pending > 0) return { total, ready, pending, failed, stale, released: 0, remaining: imageOpenPreviewBitmapCache.size };
+
+  let released = 0;
+  for (const key of releasable) {
+    clearOpenInitialImagePreviews(key);
+    released++;
+  }
+  return { total, ready, pending, failed, stale, released, remaining: imageOpenPreviewBitmapCache.size };
+}
+
+function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: window.devicePixelRatio || 1 }, counters = null) {
+  const entry = imageOpenPreviewBitmapCache.get(key);
+  if (entry?.generation === _imageStoreGeneration && entry.bitmap) {
+    const fullSource = imageBitmapCache[key] || imageCache[key] || null;
+    const targetScale = fullSource && typeof queueScaledImageVariantForDraw === 'function'
+      ? queueScaledImageVariantForDraw(key, obj, fullSource, view, { priority: true })
+      : 0.25;
+    return { source: entry.bitmap, scale: 0.25, targetScale, openPreview: true };
+  }
+  const fullSource = imageBitmapCache[key] || imageCache[key] || null;
+  const selected = fullSource && typeof selectImageSourceForDraw === 'function'
+    ? selectImageSourceForDraw(key, obj, fullSource, view)
+    : null;
+  if (selected?.activeInputFullFallback === true && hasOpenInitialImagePreviews()) {
+    const requested = requestOpenInitialImagePreviewForDraw(key, obj, view, {
+      reason: 'active-input-full-fallback',
+      source: 'open-preview-dynamic-ready',
+      sourceBitmap: fullSource,
+    });
+    if (requested && counters) counters.dynamicOpenPreviewRequests = (counters.dynamicOpenPreviewRequests || 0) + 1;
+  }
+  return selected;
+}
+
 const addImageRuntimeObjectKeysToSet = (keys, value) => {
   if (!value || typeof value !== 'object') return keys;
   for (const sourceKey in value) {
@@ -415,6 +743,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     cacheBitmapMs: 0,
     cachePreviewMs: 0,
     cacheRenderScheduleMs: 0,
+    cacheRenderSkipped: '',
     cacheReadyStage: '',
   };
   const vpDbg = ViewportDebug.start('cacheImage', { key, src: displaySrc, reusedLoadedImage: false, bitmapOnly: true });
@@ -477,6 +806,22 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
         if (imageBitmapCache[key]) bitmap.close?.();
         else imageBitmapCache[key] = bitmap;
         setImageDisplayMetadata(key, selectedBitmap, displaySrc);
+        if (typeof scheduleDrawableBitmapWarmup === 'function') {
+          scheduleDrawableBitmapWarmup(selectedBitmap, {
+            kind: 'full-image',
+            key,
+            source: 'cache-image',
+          });
+        }
+        if (typeof queueScaledImageVariantForReadyImage === 'function') {
+          const variantQueue = queueScaledImageVariantForReadyImage(key, selectedBitmap);
+          OpenDebug.step(dbg, 'cache-image:queue-scaled-variant', {
+            imgKey: key,
+            scale: variantQueue?.scale ?? '',
+            queued: variantQueue?.queued === true,
+            skipped: variantQueue?.skipped || '',
+          });
+        }
         ViewportDebug.count('imageBitmaps');
         ViewportDebug.max('maxImageBitmapMs', bitmapMs);
         ViewportDebug.step(vpDbg, 'createImageBitmap', { ms: bitmapMs, bitmapOnly: true });
@@ -520,15 +865,23 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     }
 
     const renderScheduleStart = performance.now();
-    scheduleImageReadyRender('image-bitmap-ready', {
-      minIntervalMs: options.readyRenderMinIntervalMs,
-    });
+    const deferBitmapReadyRenderForOpenPreview = hasBlockingOpenInitialImagePreviewsForOpen();
+    if (!deferBitmapReadyRenderForOpenPreview) {
+      scheduleImageReadyRender('image-bitmap-ready', {
+        minIntervalMs: options.readyRenderMinIntervalMs,
+      });
+    }
     if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
       scheduleVisibleScaledVariantPrewarmAfterIdle('image-ready');
     }
     cacheMetrics.cacheRenderScheduleMs = performance.now() - renderScheduleStart;
+    cacheMetrics.cacheRenderSkipped = deferBitmapReadyRenderForOpenPreview ? 'open-preview-held' : '';
     cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
-    OpenDebug.step(dbg, 'cache-image:schedule-render', { imgKey: key, ms: cacheMetrics.cacheRenderScheduleMs });
+    OpenDebug.step(dbg, 'cache-image:schedule-render', {
+      imgKey: key,
+      ms: cacheMetrics.cacheRenderScheduleMs,
+      skipped: cacheMetrics.cacheRenderSkipped,
+    });
     ViewportDebug.end(vpDbg, {
       key,
       decodeReady: !!imageBitmapCache[key],
@@ -542,6 +895,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
       bitmapMs: cacheMetrics.cacheBitmapMs,
       previewMs: cacheMetrics.cachePreviewMs,
       renderScheduleMs: cacheMetrics.cacheRenderScheduleMs,
+      cacheRenderSkipped: cacheMetrics.cacheRenderSkipped,
       bitmapReady: !!imageBitmapCache[key],
       bitmapFailed: imageBitmapFailed.has(key),
       bitmapOnly: true,
@@ -584,12 +938,14 @@ const removeImageRuntimeCachesForKey = (key) => {
     removed.displayImages++;
   }
   if (imageBitmapCache[key]) {
+    if (typeof dropDrawableBitmapWarmup === 'function') dropDrawableBitmapWarmup(imageBitmapCache[key]);
     try { imageBitmapCache[key].close(); } catch (_) {}
     delete imageBitmapCache[key];
     removed.bitmaps++;
   }
   if (imageBitmapFailed.delete(key)) removed.bitmapFailures++;
   imageReadyPromises.delete(key);
+  clearOpenInitialImagePreviews(key);
   clearScaledImageVariants(key);
   return removed;
 };
@@ -651,6 +1007,7 @@ function clearImageStore() {
     try { imageBitmapCache[k].close(); } catch (_) {}
     delete imageBitmapCache[k];
   }
+  clearOpenInitialImagePreviews();
   clearScaledImageVariants();
   imageBitmapFailed.clear();
   imageReadyPromises.clear();

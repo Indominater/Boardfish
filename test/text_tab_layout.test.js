@@ -98,7 +98,7 @@ test('text script ranges hide the marker and draw following text smaller', () =>
   };
   const [line] = textLayout.getTextLayout(obj);
 
-  textLayout.drawTextLineRange(context, line, obj);
+  const stats = textLayout.drawTextLineRange(context, line, obj);
 
   assert.deepEqual(calls.map((call) => call.text), ['a', 'b', 'c']);
   assert.equal(calls[0].x, obj.x + textLayout.textPad);
@@ -106,6 +106,14 @@ test('text script ranges hide the marker and draw following text smaller', () =>
   assert.ok(calls[1].y < calls[0].y);
   assert.match(calls[1].font, /11\.313708498984761px/);
   assert.equal(textLayout.lineXAtOffset(line, obj, 1), textLayout.lineXAtOffset(line, obj, 2));
+  assert.equal(stats.chars, 4);
+  assert.equal(stats.drawnChars, 3);
+  assert.equal(stats.drawUnits, 3);
+  assert.equal(stats.runs, 2);
+  assert.equal(stats.plainRuns, 1);
+  assert.equal(stats.scriptRuns, 1);
+  assert.equal(stats.hiddenChars, 1);
+  assert.equal(stats.fontSwitches, 1);
 });
 
 test('text script hit testing skips hidden script marker caret stops', () => {
@@ -446,7 +454,7 @@ test('text script markers require a following non-space character', () => {
 
   assert.deepEqual(Array.from(textLayout.normalizeTextScriptRangesForContent('a^', [{ start: 2, end: 2, kind: 'sup' }])), []);
   assert.deepEqual(Array.from(textLayout.normalizeTextScriptRangesForContent('a^ b', [{ start: 2, end: 4, kind: 'sup' }])), []);
-  assert.deepEqual(calls.map((call) => call.text), ['a', '^', ' ', 'b']);
+  assert.deepEqual(calls.map((call) => call.text), ['a', '^', 'b']);
   assert.equal(calls[0].font, "normal 400 16px 'Geist Sans', system-ui");
 });
 

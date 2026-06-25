@@ -180,6 +180,8 @@
     let result = null;
     try {
       result = await root.BoardfishWebBoardContainer.readBoardContainer(file, {
+        lazyImageRefs: true,
+        verifyImageCrc: false,
         maxBoardContentBytes: root.BoardfishWebLimits?.LIMITS?.maxBoardContentBytes,
         validateBoardPayload(payload) {
           return root.BoardfishWebLimits?.validateBoardPayload(payload);

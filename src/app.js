@@ -72,6 +72,12 @@ var APP_THEMES = {
 var DEFAULT_APP_THEME = 'dark';
 var appTheme = DEFAULT_APP_THEME;
 var APP_THEME_STORAGE_KEY = 'bf_app_theme';
+var CANVAS_THEME_COLOR_FALLBACKS = {
+  '--canvas-bg': '#d6d8da',
+  '--canvas-text': '#15141A',
+  '--selection-highlight': 'rgba(10, 132, 255, 0.3)',
+};
+var _canvasThemeColorCache = { ...CANVAS_THEME_COLOR_FALLBACKS };
 
 // StartupDebug is initialized by js/startup_debug.js.
 
@@ -110,6 +116,23 @@ const syncWebAppThemeColor = (theme = appTheme) => {
   if (meta) meta.setAttribute('content', APP_THEMES[nextTheme].webThemeColor);
 };
 
+function readCssVarFromStyle(style, name) {
+  return style?.getPropertyValue?.(name)?.trim?.() || '';
+}
+
+function refreshCanvasThemeColorCache() {
+  const style = getComputedStyle(document.body);
+  _canvasThemeColorCache = {
+    '--canvas-bg': readCssVarFromStyle(style, '--canvas-bg') || CANVAS_THEME_COLOR_FALLBACKS['--canvas-bg'],
+    '--canvas-text': readCssVarFromStyle(style, '--canvas-text') || CANVAS_THEME_COLOR_FALLBACKS['--canvas-text'],
+    '--selection-highlight': readCssVarFromStyle(style, '--selection-highlight') || CANVAS_THEME_COLOR_FALLBACKS['--selection-highlight'],
+  };
+}
+
+function cachedCanvasCssVar(name) {
+  return _canvasThemeColorCache?.[name] || '';
+}
+
 function repaintBoardForThemeChange() {
   if (typeof invalidateOffscreen === 'function') {
     invalidateOffscreen();
@@ -142,6 +165,7 @@ function applyAppTheme(theme, {
   appTheme = nextTheme;
   document.body.dataset.theme = appTheme;
   syncWebAppThemeColor(appTheme);
+  refreshCanvasThemeColorCache();
   logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
   if (render && (changed || dirty)) {
     logStartupStep('theme-canvas-repaint', { theme: appTheme, mode: repaintBoardForThemeChange() });
@@ -165,15 +189,15 @@ function cssVar(name) {
 }
 
 function boardBg() {
-  return cssVar('--canvas-bg') || '#d6d8da';
+  return cachedCanvasCssVar('--canvas-bg') || cssVar('--canvas-bg') || CANVAS_THEME_COLOR_FALLBACKS['--canvas-bg'];
 }
 
 function canvasTextColor() {
-  return cssVar('--canvas-text') || '#15141A';
+  return cachedCanvasCssVar('--canvas-text') || cssVar('--canvas-text') || CANVAS_THEME_COLOR_FALLBACKS['--canvas-text'];
 }
 
 function canvasSelectionHighlightColor() {
-  return cssVar('--selection-highlight') || 'rgba(10, 132, 255, 0.3)';
+  return cachedCanvasCssVar('--selection-highlight') || cssVar('--selection-highlight') || CANVAS_THEME_COLOR_FALLBACKS['--selection-highlight'];
 }
 
 function fillBoardBackground(context, width, height) {

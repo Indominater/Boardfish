@@ -212,6 +212,7 @@ function loadClipboardPasteObjectsHarness() {
   };
   const calls = {
     added: [],
+    editCalls: [],
     histories: [],
     selections: [],
     synced: [],
@@ -281,6 +282,9 @@ function loadClipboardPasteObjectsHarness() {
     scheduleRender() {},
     pushHistory(reason) {
       calls.histories.push(reason);
+    },
+    enterEdit(id, options = {}) {
+      calls.editCalls.push({ id, options });
     },
     syncTextAutoHeight(obj) {
       calls.synced.push(obj.id);
@@ -583,4 +587,5 @@ test('pasting Boardfish text objects strips whitespace-only edge lines from the 
   assert.equal(context.calls.added[0].h, 56);
   assert.equal(sourceTextObject.data.content, '   \n\t\nfirst line\nsecond line\n   \n\t');
   assert.deepEqual(context.calls.histories, ['paste-objects']);
+  assert.deepEqual(context.calls.editCalls, []);
 });

@@ -105,6 +105,39 @@ test('fallback file picker does not retain focus listener after selected file se
   assert.equal(harness.rootListeners.has('focus'), false);
 });
 
+test('web board open defers image byte extraction during container read', async () => {
+  const harness = loadWebRuntimeHarness();
+  const seenOptions = [];
+  harness.context.BoardfishWebBoardContainer = {
+    async readBoardContainer(_file, options) {
+      seenOptions.push(options);
+      return {
+        board: {
+          objects: [],
+          imageStore: {},
+        },
+        debug: {
+          board_json_bytes: 2,
+          image_bytes: 0,
+        },
+        imageEntries: [],
+      };
+    },
+  };
+  harness.context.BoardfishWebLimits = {
+    LIMITS: { maxBoardContentBytes: 1024 * 1024 },
+    validateBoardPayload() {},
+    async validateOpenedImageEntries() {},
+  };
+
+  const ref = harness.context.BoardfishRuntime.fileRefFromFile({ name: 'board.bf', size: 6 });
+  await harness.context.BoardfishRuntime.readBoard(ref);
+
+  assert.equal(seenOptions.length, 1);
+  assert.equal(seenOptions[0].lazyImageRefs, true);
+  assert.equal(seenOptions[0].verifyImageCrc, false);
+});
+
 test('failed web board validation revokes decoded image refs', async () => {
   const harness = loadWebRuntimeHarness();
   const imageRef = { web: true, objectUrl: 'blob:image-1' };

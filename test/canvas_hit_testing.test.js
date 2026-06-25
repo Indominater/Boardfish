@@ -174,6 +174,21 @@ test('background context menu clears object selection before opening', () => {
   assert.doesNotMatch(styles, /\.ctx-item:disabled|aria-disabled/);
 });
 
+test('context menu command buttons use the button click point as the object center', () => {
+  const contextMenuSource = readSource('src/js/context_menu.js');
+
+  assert.match(contextMenuSource, /function menuCommandWorldPoint\(event = null\) \{[\s\S]*return toWorld\(x, y\);[\s\S]*return boardCursorWorldPoint\(\);[\s\S]*\}/);
+  assert.match(contextMenuSource, /const point = menuCommandWorldPoint\(event\);[\s\S]*addText\(point\.x, point\.y, '', \{ anchor: 'center' \}\)/);
+  assert.match(contextMenuSource, /'btn-add-image': \(event\) => \{[\s\S]*const point = menuCommandWorldPoint\(event\);[\s\S]*pickAndInsertImages\(point\.x, point\.y\);[\s\S]*\}/);
+  assert.match(contextMenuSource, /'btn-paste': \(event\) => \{[\s\S]*const point = menuCommandWorldPoint\(event\);[\s\S]*pasteAtPos\(point\.x, point\.y\);[\s\S]*\}/);
+  assert.match(contextMenuSource, /'obj-btn-duplicate': \(event\) => \{[\s\S]*const point = menuCommandWorldPoint\(event\);[\s\S]*duplicateSelected\(point\);[\s\S]*\}/);
+  assert.match(contextMenuSource, /runMenuCommand\(button, 'pointerup', e\);/);
+  assert.match(contextMenuSource, /runMenuCommand\(button, 'mouseup', e\);/);
+  assert.match(contextMenuSource, /runMenuCommand\(event\.currentTarget, 'click', event\);/);
+  assert.match(contextMenuSource, /ctxPos = boardCursorWorldPoint\(\);[\s\S]*runMenuCommand\(addImageBtn, 'shortcut'\);/);
+  assert.match(contextMenuSource, /ctxPos = boardCursorWorldPoint\(\);[\s\S]*runMenuCommand\(addTextBtn, 'shortcut'\);/);
+});
+
 test('text editing context menu uses text actions before object actions', () => {
   const contextMenuSource = readSource('src/js/context_menu.js');
   const indexSource = readSource('src/index.html');
@@ -442,16 +457,16 @@ test('entering text edit invalidates the offscreen cache before proxy setup', ()
   assert.ok(proxyIndex > invalidateIndex, 'offscreen invalidation must happen before proxy setup can focus or render');
 });
 
-test('text edit mode bypasses offscreen cache when other text boxes exist', () => {
+test('text edit mode keeps text direct while caching static non-text layers', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const helperStart = viewportSource.indexOf('function shouldUseEditOffscreenCache');
   const helperEnd = viewportSource.indexOf('function drawBoard', helperStart);
   assert.notEqual(helperStart, -1);
   assert.notEqual(helperEnd, -1);
 
-  for (const { theme, objects, editingId, expected } of [
-    { theme: 'dark', objects: [], editingId: 'text-1', expected: false },
-    { theme: 'light', objects: [{ id: 'img-1', type: 'image' }], editingId: 'text-1', expected: true },
+  for (const { theme, objects, editingId, expectedFullCache, expectedCacheKind } of [
+    { theme: 'dark', objects: [], editingId: 'text-1', expectedFullCache: false, expectedCacheKind: 'non-text' },
+    { theme: 'light', objects: [{ id: 'img-1', type: 'image' }], editingId: 'text-1', expectedFullCache: true, expectedCacheKind: 'full' },
     {
       theme: 'light',
       objects: [
@@ -459,17 +474,20 @@ test('text edit mode bypasses offscreen cache when other text boxes exist', () =
         { id: 'text-2', type: 'text' },
       ],
       editingId: 'text-1',
-      expected: false,
+      expectedFullCache: false,
+      expectedCacheKind: 'non-text',
     },
   ]) {
     const context = { appTheme: theme, document: { body: { dataset: { theme } } }, objects, editingId };
     vm.createContext(context);
     vm.runInContext(
       `${viewportSource.slice(helperStart, helperEnd)}\n` +
-        'globalThis.shouldUseEditOffscreenCache = shouldUseEditOffscreenCache;\n',
+        'globalThis.shouldUseEditOffscreenCache = shouldUseEditOffscreenCache;\n' +
+        'globalThis.editOffscreenCacheKind = editOffscreenCacheKind;\n',
       context,
     );
-    assert.equal(context.shouldUseEditOffscreenCache(), expected);
+    assert.equal(context.shouldUseEditOffscreenCache(), expectedFullCache);
+    assert.equal(context.editOffscreenCacheKind(), expectedCacheKind);
   }
 
   const drawStart = viewportSource.indexOf('function drawBoard');
@@ -480,10 +498,13 @@ test('text edit mode bypasses offscreen cache when other text boxes exist', () =
 
   assert.match(drawSource, /const textSelectionSpecs = textSelectionJelloSpecsForDraw\(\);/);
   assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionJelloSkipIds\(textSelectionSpecs, editingId \|\| null\);/);
-  assert.match(drawSource, /const useEditOffscreenCache = shouldUseEditOffscreenCache\(\) && copiedSelectionSkipIds\.size === 0;/);
+  assert.match(drawSource, /const editCacheKind = copiedSelectionSkipIds\.size === 0 \? editOffscreenCacheKind\(\) : '';/);
+  assert.match(drawSource, /setEditOffscreenCacheKind\(editCacheKind\);/);
+  assert.match(drawSource, /const useEditOffscreenCache = !!editCacheKind;/);
   assert.match(drawSource, /else if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /else \{[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect \}\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, counters, \{ viewportRect, skipIds: copiedSelectionSkipIds \}\);/);
+  assert.match(drawSource, /if \(editCacheKind === 'non-text'\)[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \}\);/);
+  assert.match(drawSource, /else \{[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver \}\);/);
+  assert.match(drawSource, /drawVisibleObjects\(ctx, counters, \{ viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver \}\);/);
   assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, \{ zoom, panX, panY, dpr \}, textSelectionSpecs\);/);
 });
 

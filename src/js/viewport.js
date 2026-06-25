@@ -201,22 +201,34 @@ var _offCtx    = _offscreen.getContext('2d');
 var _offscreenDirty = true;
 var _offscreenRebuilding = false;
 var _offscreenVersion = 0;
+var _offscreenCacheKind = '';
 function invalidateOffscreen() {
   _offscreenDirty = true;
   _offscreenVersion++;
+}
+
+function setEditOffscreenCacheKind(kind) {
+  const nextKind = String(kind || '');
+  if (_offscreenCacheKind === nextKind) return;
+  _offscreenCacheKind = nextKind;
+  invalidateOffscreen();
 }
 
 async function _rebuildOffscreenAsync() {
   if (_offscreenRebuilding) return;
   _offscreenRebuilding = true;
   const snapshotEditingId = editingId;
+  const snapshotCacheKind = _offscreenCacheKind;
   const rebuildVersion = _offscreenVersion;
-  const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length, editingId: snapshotEditingId, version: rebuildVersion });
+  const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length, editingId: snapshotEditingId, cacheKind: snapshotCacheKind, version: rebuildVersion });
 
   // Bail if edit mode or viewport content changed while we were awaiting.
-  if (!editingId || editingId !== snapshotEditingId || rebuildVersion !== _offscreenVersion) {
+  if (!editingId ||
+      editingId !== snapshotEditingId ||
+      snapshotCacheKind !== _offscreenCacheKind ||
+      rebuildVersion !== _offscreenVersion) {
     _offscreenRebuilding = false;
-    ViewportDebug.end(dbg, { stale: true, currentVersion: _offscreenVersion });
+    ViewportDebug.end(dbg, { stale: true, currentCacheKind: _offscreenCacheKind, currentVersion: _offscreenVersion });
     if (editingId && _offscreenDirty) scheduleRender(true, false, 'offscreen-stale');
     return;
   }
@@ -233,6 +245,7 @@ async function _rebuildOffscreenAsync() {
   const viewportRect = currentViewportWorldRect(0);
   for (const obj of objects) {
     if (obj.id === editingId) continue;
+    if (snapshotCacheKind === 'non-text' && obj.type === 'text') continue;
     if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) continue;
     drawSingleObj(_offCtx, obj, null, { viewportRect, view: { zoom, dpr } });
   }
@@ -301,8 +314,8 @@ function setWorldCanvasTransform(context, dpr = window.devicePixelRatio || 1, vi
   return BoardRenderer.setWorldCanvasTransform(context, dpr, view);
 }
 
-function drawVisibleObjects(context, counters, { skipId = null, skipIds = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null, skipText = false } = {}) {
-  return BoardRenderer.drawVisibleObjects(context, counters, { skipId, skipIds, viewportRect, view, imageSourceResolver, skipText });
+function drawVisibleObjects(context, counters, { skipId = null, skipIds = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null, skipText = false, onlyText = false } = {}) {
+  return BoardRenderer.drawVisibleObjects(context, counters, { skipId, skipIds, viewportRect, view, imageSourceResolver, skipText, onlyText });
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
@@ -838,13 +851,24 @@ function shouldUseEditOffscreenCache() {
   return true;
 }
 
+function editOffscreenCacheKind() {
+  if (shouldUseEditOffscreenCache()) return 'full';
+  // Keep text on the direct canvas path so antialiasing stays identical, but
+  // still reuse a static background/image layer during edit caret frames.
+  return 'non-text';
+}
+
 function drawBoard() {
   const dbg = ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId, offscreenDirty: _offscreenDirty });
   if (_boardOpening) {
     ViewportDebug.end(dbg, { skipped: 'board-opening' });
     return;
   }
-  const collectDrawDebug = ViewportDebug.isEnabled();
+  const hasOpenPreviewFallback = typeof hasOpenInitialImagePreviews === 'function' &&
+    hasOpenInitialImagePreviews();
+  const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;
+  const collectOpenPreviewFallbackDebug = OpenDebug.enabled === true && hasOpenPreviewFallback;
+  const collectDrawDebug = ViewportDebug.isEnabled() || collectOpenInitialRenderDebug || collectOpenPreviewFallbackDebug;
   const drawStart = collectDrawDebug ? performance.now() : 0;
   const drawPhases = {};
   const counters = collectDrawDebug ? createDrawCounters() : null;
@@ -854,9 +878,15 @@ function drawBoard() {
   let drawnText = 0;
   const textSelectionSpecs = textSelectionJelloSpecsForDraw();
   const copiedSelectionSkipIds = textSelectionJelloSkipIds(textSelectionSpecs, editingId || null);
+  const openInitialImageSourceResolver = (collectOpenInitialRenderDebug || hasOpenPreviewFallback) &&
+      typeof resolveOpenInitialImageSourceForDraw === 'function'
+    ? resolveOpenInitialImageSourceForDraw
+    : null;
 
   if (editingId) {
-    const useEditOffscreenCache = shouldUseEditOffscreenCache() && copiedSelectionSkipIds.size === 0;
+    const editCacheKind = copiedSelectionSkipIds.size === 0 ? editOffscreenCacheKind() : '';
+    setEditOffscreenCacheKind(editCacheKind);
+    const useEditOffscreenCache = !!editCacheKind;
     if (useEditOffscreenCache && _offscreenDirty) {
       // Kick off async rebuild (pre-decodes images to avoid GPU stall).
       // Draw all objects directly this frame while the rebuild is pending.
@@ -867,16 +897,23 @@ function drawBoard() {
       setWorldCanvasTransform(ctx, dpr);
       if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
       const objectsStart = collectDrawDebug ? performance.now() : 0;
-      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect });
+      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver });
       if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
       drawnImages += drawn.drawnImages;
       drawnText += drawn.drawnText;
     } else if (useEditOffscreenCache) {
-      // Blit cached offscreen (background + all non-editing objects)
+      // Blit cached offscreen (background + non-editing objects, or non-text static layer)
       const blitStart = collectDrawDebug ? performance.now() : 0;
       resetCanvasToScreen(ctx);
       ctx.drawImage(_offscreen, 0, 0);
       if (collectDrawDebug) drawPhases.offscreenBlitMs = performance.now() - blitStart;
+      if (editCacheKind === 'non-text') {
+        const textStart = collectDrawDebug ? performance.now() : 0;
+        setWorldCanvasTransform(ctx, dpr);
+        const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true });
+        if (collectDrawDebug) drawPhases.offscreenTextDrawMs = performance.now() - textStart;
+        drawnText += drawn.drawnText;
+      }
     } else {
       const setupStart = collectDrawDebug ? performance.now() : 0;
       resetCanvasToScreen(ctx);
@@ -884,7 +921,7 @@ function drawBoard() {
       setWorldCanvasTransform(ctx, dpr);
       if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
       const objectsStart = collectDrawDebug ? performance.now() : 0;
-      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect });
+      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver });
       if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
       drawnImages += drawn.drawnImages;
       drawnText += drawn.drawnText;
@@ -907,7 +944,7 @@ function drawBoard() {
     setWorldCanvasTransform(ctx, dpr);
     if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
     const objectsStart = collectDrawDebug ? performance.now() : 0;
-    const drawn = drawVisibleObjects(ctx, counters, { viewportRect, skipIds: copiedSelectionSkipIds });
+    const drawn = drawVisibleObjects(ctx, counters, { viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver });
     if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
     drawnImages = drawn.drawnImages;
     drawnText = drawn.drawnText;
@@ -939,12 +976,16 @@ function drawBoard() {
       viewportH: viewportRect.y2 - viewportRect.y1,
       editing: !!editingId,
       offscreenDirty: !!_offscreenDirty,
+      openPreviewFallback: !!hasOpenPreviewFallback,
       objectCount: objects.length,
       totalMeasuredMs: performance.now() - drawStart,
       ...drawPhases,
       ...counters,
     };
     _lastDrawBoardMeta = drawMeta;
+    if (hasOpenPreviewFallback && typeof OpenDebug.recordPreviewFallbackDraw === 'function') {
+      OpenDebug.recordPreviewFallbackDraw(drawMeta);
+    }
     ViewportDebug.end(dbg, drawMeta);
   } else {
     _lastDrawBoardMeta = null;
@@ -964,7 +1005,8 @@ function applyTransform(frameDbg = null) {
     return;
   }
   if (editingId) invalidateOffscreen();
-  const collectTransformDebug = ViewportDebug.isEnabled();
+  const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;
+  const collectTransformDebug = ViewportDebug.isEnabled() || collectOpenInitialRenderDebug;
   const transformStart = performance.now();
   const drawStart = performance.now();
   drawBoard();
@@ -1012,7 +1054,20 @@ function applyTransform(frameDbg = null) {
     selectedCount: selectedIds.size,
     drawBoard: _lastDrawBoardMeta ? { ..._lastDrawBoardMeta } : null,
   };
-  ViewportDebug.end(dbg);
+  ViewportDebug.end(dbg, {
+    totalMeasuredMs: getLastApplyTransformMeta.last.totalMeasuredMs,
+    drawMs,
+    saveViewportMs: saveMs,
+    overlayMs,
+    overlaySkipped: !needsOverlayUpdate,
+    source: _activeRenderSource,
+    editing: !!editingId,
+    panX,
+    panY,
+    zoom,
+    objectCount: objects.length,
+    selectedCount: selectedIds.size,
+  });
 }
 
 function getLastApplyTransformMeta() {
@@ -1041,7 +1096,15 @@ var _frameInputAt = 0;
 var _frameInputSource = '';
 var _visibleTextLayoutPrewarmCancel = null;
 var _lastVisibleTextLayoutPrewarm = null;
+var _visibleTextLayoutPrewarmHistory = [];
 var TEXT_LAYOUT_PREWARM_INPUT_IDLE_MS = 180;
+var _textDrawWarmupCanvas = null;
+var _textDrawWarmupCtx = null;
+const TEXT_DRAW_WARMUP_CANVAS_MAX_W = 2048;
+const TEXT_DRAW_WARMUP_CANVAS_MAX_H = 128;
+const TEXT_DRAW_WARMUP_MARGIN_PX = 8;
+const TEXT_DRAW_WARMUP_TARGET_OFFSCREEN = 'offscreen';
+const TEXT_DRAW_WARMUP_TARGET_BOARD = 'board';
 
 function setCanvasImageQuality(context) {
   context.imageSmoothingEnabled = true;
@@ -1102,6 +1165,275 @@ function textPrewarmLogicalLineCount(content) {
   return text ? text.split('\n').length : 1;
 }
 
+function textDrawWarmupContext() {
+  if (_textDrawWarmupCtx) return _textDrawWarmupCtx;
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+  try {
+    _textDrawWarmupCanvas = document.createElement('canvas');
+    _textDrawWarmupCanvas.width = 1;
+    _textDrawWarmupCanvas.height = 1;
+    _textDrawWarmupCtx = _textDrawWarmupCanvas.getContext('2d');
+  } catch (_) {
+    _textDrawWarmupCanvas = null;
+    _textDrawWarmupCtx = null;
+  }
+  return _textDrawWarmupCtx;
+}
+
+function normalizeTextDrawWarmupTarget(value) {
+  return value === TEXT_DRAW_WARMUP_TARGET_BOARD
+    ? TEXT_DRAW_WARMUP_TARGET_BOARD
+    : TEXT_DRAW_WARMUP_TARGET_OFFSCREEN;
+}
+
+function textDrawWarmupTarget(options = {}) {
+  const target = normalizeTextDrawWarmupTarget(options.drawWarmupTarget ?? options.target);
+  if (target === TEXT_DRAW_WARMUP_TARGET_BOARD) {
+    return {
+      target,
+      ctx: typeof ctx !== 'undefined' ? ctx : null,
+      canvas: typeof boardCanvas !== 'undefined' ? boardCanvas : null,
+      restore: options.drawWarmupRestore !== false,
+    };
+  }
+  return {
+    target: TEXT_DRAW_WARMUP_TARGET_OFFSCREEN,
+    ctx: textDrawWarmupContext(),
+    canvas: _textDrawWarmupCanvas,
+    restore: false,
+  };
+}
+
+function createBoardTextDrawWarmupSnapshot(canvas) {
+  if (!canvas || !(canvas.width > 0) || !(canvas.height > 0)) return null;
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+  try {
+    const snapshot = document.createElement('canvas');
+    snapshot.width = canvas.width;
+    snapshot.height = canvas.height;
+    const snapshotCtx = snapshot.getContext('2d');
+    snapshotCtx.drawImage(canvas, 0, 0);
+    return snapshot;
+  } catch (_) {
+    return null;
+  }
+}
+
+function restoreBoardTextDrawWarmupSnapshot(context, canvas, snapshot) {
+  if (!context || !canvas || !snapshot) return 0;
+  const startedAt = performance.now();
+  try {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    try { context.globalAlpha = 1; } catch (_) {}
+    try { context.globalCompositeOperation = 'copy'; } catch (_) {}
+    context.drawImage(snapshot, 0, 0);
+    try { context.globalCompositeOperation = 'source-over'; } catch (_) {}
+  } catch (_) {
+    try {
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(snapshot, 0, 0);
+    } catch (_) {}
+  }
+  return performance.now() - startedAt;
+}
+
+function textDrawWarmupLineWidth(line, obj) {
+  const textLength = String(line?.text ?? '').length;
+  if (typeof lineXAtOffset === 'function') {
+    return Math.max(1, lineXAtOffset(line, obj, textLength) - lineXAtOffset(line, obj, 0));
+  }
+  if (line?.prefixWidths && Number.isFinite(Number(line.prefixWidths[textLength]))) {
+    return Math.max(1, Number(line.prefixWidths[textLength]) || 1);
+  }
+  return Math.max(1, (Number(obj?.w) || 0) - TEXT_PAD * 2);
+}
+
+function textDrawWarmupBaseX(line, obj) {
+  if (typeof lineXAtOffset === 'function') return lineXAtOffset(line, obj, 0);
+  return (Number(obj?.x) || 0) + TEXT_PAD;
+}
+
+function resizeTextDrawWarmupCanvas(width, height, target = null) {
+  const canvas = target?.canvas || _textDrawWarmupCanvas;
+  if (!canvas || target?.target === TEXT_DRAW_WARMUP_TARGET_BOARD) return;
+  const nextW = Math.min(TEXT_DRAW_WARMUP_CANVAS_MAX_W, Math.max(1, Math.ceil(width)));
+  const nextH = Math.min(TEXT_DRAW_WARMUP_CANVAS_MAX_H, Math.max(1, Math.ceil(height)));
+  if (canvas.width < nextW) canvas.width = nextW;
+  if (canvas.height < nextH) canvas.height = nextH;
+}
+
+function warmTextLayoutDrawLines(obj, layout, options = {}) {
+  const target = textDrawWarmupTarget(options);
+  const ctx = target.ctx;
+  const canvas = target.canvas;
+  if (!ctx || typeof drawTextLineRange !== 'function' || !Array.isArray(layout) || !layout.length) {
+    return {
+      available: !!ctx,
+      target: target.target,
+      warmedLines: 0,
+      drawUnits: 0,
+      totalMs: 0,
+      maxLineMs: 0,
+      restoreMs: 0,
+      restored: false,
+      errors: 0,
+    };
+  }
+  const maxLines = Math.max(0, Math.trunc(Number(options.maxLines ?? 256)) || 0);
+  if (!maxLines) {
+    return {
+      available: true,
+      target: target.target,
+      warmedLines: 0,
+      drawUnits: 0,
+      totalMs: 0,
+      maxLineMs: 0,
+      restoreMs: 0,
+      restored: false,
+      errors: 0,
+    };
+  }
+  const viewZoom = Math.max(0.01, Number(options.zoom ?? zoom) || 1);
+  const viewDpr = Math.max(1, Number(options.dpr ?? window.devicePixelRatio) || 1);
+  const deviceScale = viewZoom * viewDpr;
+  const startedAt = performance.now();
+  const snapshot = target.restore ? createBoardTextDrawWarmupSnapshot(canvas) : null;
+  if (target.target === TEXT_DRAW_WARMUP_TARGET_BOARD && target.restore && !snapshot) {
+    return {
+      available: false,
+      skipped: 'board-warmup-snapshot-unavailable',
+      target: target.target,
+      warmedLines: 0,
+      drawUnits: 0,
+      totalMs: Math.round((performance.now() - startedAt) * 100) / 100,
+      maxLineMs: 0,
+      restoreMs: 0,
+      restored: false,
+      errors: 0,
+    };
+  }
+  let warmedLines = 0;
+  let drawUnits = 0;
+  let maxLineMs = 0;
+  let restoreMs = 0;
+  let errors = 0;
+
+  try {
+    if (target.target === TEXT_DRAW_WARMUP_TARGET_BOARD && typeof ctx.save === 'function') ctx.save();
+    for (const line of layout) {
+      if (warmedLines >= maxLines) break;
+      if (!line || !String(line.text ?? '').length) continue;
+      const lineWidth = textDrawWarmupLineWidth(line, obj);
+      const drawW = lineWidth * deviceScale + TEXT_DRAW_WARMUP_MARGIN_PX * 2;
+      const drawH = LINE_H * deviceScale + TEXT_DRAW_WARMUP_MARGIN_PX * 2;
+      resizeTextDrawWarmupCanvas(drawW, drawH, target);
+      try {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (target.target !== TEXT_DRAW_WARMUP_TARGET_BOARD && canvas) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.fillStyle = canvasTextColor();
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = FONT;
+        const baseX = textDrawWarmupBaseX(line, obj);
+        const textY = Number.isFinite(Number(line.textY)) ? Number(line.textY) : Number(line.y || 0) + TEXT_BASELINE_Y_OFFSET;
+        ctx.setTransform(
+          deviceScale,
+          0,
+          0,
+          deviceScale,
+          TEXT_DRAW_WARMUP_MARGIN_PX - baseX * deviceScale,
+          TEXT_DRAW_WARMUP_MARGIN_PX - textY * deviceScale,
+        );
+        const lineStart = performance.now();
+        const stats = drawTextLineRange(ctx, line, obj, 0, line.text.length);
+        const lineMs = performance.now() - lineStart;
+        drawUnits += Number(stats?.drawUnits) || 0;
+        maxLineMs = Math.max(maxLineMs, lineMs);
+        warmedLines++;
+      } catch (_) {
+        errors++;
+      } finally {
+        try { ctx.setTransform(1, 0, 0, 1, 0, 0); } catch (_) {}
+      }
+    }
+  } finally {
+    restoreMs = restoreBoardTextDrawWarmupSnapshot(ctx, canvas, snapshot);
+    if (target.target === TEXT_DRAW_WARMUP_TARGET_BOARD && typeof ctx.restore === 'function') {
+      try { ctx.restore(); } catch (_) {}
+    }
+  }
+
+  return {
+    available: true,
+    target: target.target,
+    warmedLines,
+    drawUnits,
+    totalMs: Math.round((performance.now() - startedAt) * 100) / 100,
+    maxLineMs: Math.round(maxLineMs * 100) / 100,
+    restoreMs: Math.round(restoreMs * 100) / 100,
+    restored: !!snapshot,
+    errors,
+  };
+}
+
+function roundTextDrawWarmupZoom(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '';
+  return Math.round(numeric * 10000) / 10000;
+}
+
+function normalizeTextDrawWarmupZooms(options = {}) {
+  const fallbackZoom = Number(options.zoom ?? zoom);
+  const fallback = Number.isFinite(fallbackZoom) && fallbackZoom > 0 ? fallbackZoom : 1;
+  const raw = Array.isArray(options.drawWarmupZooms)
+    ? options.drawWarmupZooms
+    : options.drawWarmupZooms == null ? [fallback] : [options.drawWarmupZooms];
+  const out = [];
+  const seen = new Set();
+  for (const value of raw) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) continue;
+    const rounded = roundTextDrawWarmupZoom(numeric);
+    const key = String(rounded);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(numeric);
+  }
+  return out.length ? out : [fallback];
+}
+
+function createTextDrawWarmupAggregate() {
+  return {
+    available: true,
+    warmedLines: 0,
+    drawUnits: 0,
+    totalMs: 0,
+    maxLineMs: 0,
+    restoreMs: 0,
+    errors: 0,
+    zooms: [],
+    targets: [],
+  };
+}
+
+function addTextDrawWarmupAggregate(target, stats, warmupZoom) {
+  if (!target || !stats) return;
+  target.available = target.available && stats.available !== false;
+  target.warmedLines += Number(stats.warmedLines) || 0;
+  target.drawUnits += Number(stats.drawUnits) || 0;
+  target.totalMs += Number(stats.totalMs) || 0;
+  target.maxLineMs = Math.max(target.maxLineMs, Number(stats.maxLineMs) || 0);
+  target.restoreMs += Number(stats.restoreMs) || 0;
+  target.errors += Number(stats.errors) || 0;
+  if ((Number(stats.warmedLines) || 0) > 0) {
+    target.zooms.push(roundTextDrawWarmupZoom(warmupZoom));
+    const statsTarget = normalizeTextDrawWarmupTarget(stats.target);
+    if (!target.targets.includes(statsTarget)) target.targets.push(statsTarget);
+  }
+}
+
 function prewarmVisibleTextLayoutCaches(options = {}) {
   if (typeof getTextLayoutForViewport !== 'function') {
     return { available: false, skipped: 'getTextLayoutForViewport-unavailable' };
@@ -1115,6 +1447,19 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
   const maxObjects = Math.max(1, Math.trunc(Number(options.maxObjects ?? 100)) || 100);
   const fullLineCache = options.fullLineCache === true;
   const fullLineCacheMaxLines = Math.max(1, Math.trunc(Number(options.fullLineCacheMaxLines ?? 8192)) || 8192);
+  const drawWarmup = options.drawWarmup !== false;
+  const drawWarmupMaxLines = Math.max(0, Math.trunc(Number(options.drawWarmupMaxLines ?? 2048)) || 0);
+  const drawWarmupMaxLinesPerObject = Math.max(1, Math.trunc(Number(options.drawWarmupMaxLinesPerObject ?? 256)) || 256);
+  const drawWarmupFullObjectLines = options.drawWarmupFullObjectLines !== false;
+  const drawWarmupZooms = normalizeTextDrawWarmupZooms(options);
+  const requestedDrawWarmupTarget = normalizeTextDrawWarmupTarget(options.drawWarmupTarget);
+  const drawWarmupRestore = options.drawWarmupRestore !== false;
+  const drawWarmupBoardSnapshot = drawWarmup && requestedDrawWarmupTarget === TEXT_DRAW_WARMUP_TARGET_BOARD && drawWarmupRestore
+    ? createBoardTextDrawWarmupSnapshot(typeof boardCanvas !== 'undefined' ? boardCanvas : null)
+    : null;
+  const drawWarmupTarget = requestedDrawWarmupTarget === TEXT_DRAW_WARMUP_TARGET_BOARD && drawWarmupRestore && !drawWarmupBoardSnapshot
+    ? TEXT_DRAW_WARMUP_TARGET_OFFSCREEN
+    : requestedDrawWarmupTarget;
   const viewportRect = typeof currentViewportWorldRect === 'function'
     ? currentViewportWorldRect(padScreenPx)
     : null;
@@ -1125,6 +1470,8 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
     source,
     padScreenPx,
     minChars,
+    drawWarmupTarget,
+    requestedDrawWarmupTarget,
     objectCount: objects.length,
     viewportX1: viewportRect?.x1 ?? '',
     viewportY1: viewportRect?.y1 ?? '',
@@ -1142,6 +1489,12 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
   let warmedVisibleLines = 0;
   let warmedTotalLines = 0;
   let maxObjectMs = 0;
+  let drawWarmupTextObjects = 0;
+  let drawWarmupLines = 0;
+  let drawWarmupDrawUnits = 0;
+  let drawWarmupTotalMs = 0;
+  let drawWarmupMaxLineMs = 0;
+  let drawWarmupErrors = 0;
 
   for (const obj of objects) {
     if (obj?.type !== 'text') continue;
@@ -1178,8 +1531,51 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
       (!viewportCullingEnabled || objectIntersectsRect(obj, exactViewportRect))
         ? getTextLayoutForViewport(obj, exactViewportRect)
         : layout;
-    const objectMs = performance.now() - objectStart;
     const totalLines = Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length);
+    let drawWarmupStats = null;
+    let drawWarmupSource = '';
+    if (drawWarmup && drawWarmupLines < drawWarmupMaxLines) {
+      let remainingWarmupLines = Math.min(drawWarmupMaxLinesPerObject, drawWarmupMaxLines - drawWarmupLines);
+      let drawWarmupLayout = layout;
+      drawWarmupSource = 'visible';
+      if (
+        drawWarmupFullObjectLines &&
+        totalLines > 0 &&
+        totalLines <= remainingWarmupLines &&
+        typeof getTextLayoutForLineRange === 'function'
+      ) {
+        drawWarmupLayout = getTextLayoutForLineRange(obj, 0, totalLines - 1);
+        drawWarmupSource = 'full-object';
+      }
+      drawWarmupStats = createTextDrawWarmupAggregate();
+      for (const warmupZoom of drawWarmupZooms) {
+        if (remainingWarmupLines <= 0 || drawWarmupLines >= drawWarmupMaxLines) break;
+        const stats = warmTextLayoutDrawLines(obj, drawWarmupLayout, {
+          maxLines: remainingWarmupLines,
+          zoom: warmupZoom,
+          dpr: window.devicePixelRatio || 1,
+          drawWarmupTarget,
+          drawWarmupRestore: false,
+        });
+        addTextDrawWarmupAggregate(drawWarmupStats, stats, warmupZoom);
+        const usedLines = Number(stats?.warmedLines) || 0;
+        remainingWarmupLines = Math.min(
+          drawWarmupMaxLinesPerObject - drawWarmupStats.warmedLines,
+          drawWarmupMaxLines - drawWarmupLines - drawWarmupStats.warmedLines,
+        );
+        if (usedLines <= 0 && stats?.available === false) break;
+      }
+      drawWarmupStats.totalMs = Math.round(drawWarmupStats.totalMs * 100) / 100;
+      drawWarmupStats.maxLineMs = Math.round(drawWarmupStats.maxLineMs * 100) / 100;
+      drawWarmupStats.restoreMs = Math.round(drawWarmupStats.restoreMs * 100) / 100;
+      if (drawWarmupStats.warmedLines > 0) drawWarmupTextObjects++;
+      drawWarmupLines += drawWarmupStats.warmedLines || 0;
+      drawWarmupDrawUnits += drawWarmupStats.drawUnits || 0;
+      drawWarmupTotalMs += drawWarmupStats.totalMs || 0;
+      drawWarmupMaxLineMs = Math.max(drawWarmupMaxLineMs, drawWarmupStats.maxLineMs || 0);
+      drawWarmupErrors += drawWarmupStats.errors || 0;
+    }
+    const objectMs = performance.now() - objectStart;
     const logicalLines = textPrewarmLogicalLineCount(content);
     warmedTextObjects++;
     warmedChars += content.length;
@@ -1201,11 +1597,27 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
       paragraphPrefixCacheEntries: obj._textParagraphPrefixCache?.size ?? '',
       runtimePrefixCacheEntriesAdded: runtimePrewarm?.prefixCacheEntriesAdded ?? '',
       runtimePrewarmMs: runtimePrewarm?.totalMs ?? '',
+      drawWarmupLines: drawWarmupStats?.warmedLines ?? '',
+      drawWarmupDrawUnits: drawWarmupStats?.drawUnits ?? '',
+      drawWarmupMs: drawWarmupStats ? Math.round((drawWarmupStats.totalMs || 0) * 100) / 100 : '',
+      drawWarmupMaxLineMs: drawWarmupStats ? Math.round((drawWarmupStats.maxLineMs || 0) * 100) / 100 : '',
+      drawWarmupErrors: drawWarmupStats?.errors ?? '',
+      drawWarmupZooms: drawWarmupStats?.zooms?.join(',') || '',
+      drawWarmupTargets: drawWarmupStats?.targets?.join(',') || '',
+      drawWarmupRestoreMs: drawWarmupStats?.restoreMs ?? '',
+      drawWarmupSource,
       wrappedLineIndexEntries: obj._textWrappedLineIndexCache?.entries?.length ?? '',
       scriptMetricsCachePresent: !!obj._textScriptLayoutMetrics,
     });
   }
 
+  const boardRestoreMs = drawWarmupBoardSnapshot
+    ? restoreBoardTextDrawWarmupSnapshot(
+        typeof ctx !== 'undefined' ? ctx : null,
+        typeof boardCanvas !== 'undefined' ? boardCanvas : null,
+        drawWarmupBoardSnapshot,
+      )
+    : 0;
   rows.sort((a, b) => (b.ms || 0) - (a.ms || 0) || (b.chars || 0) - (a.chars || 0));
   const totalMs = performance.now() - startedAt;
   const out = {
@@ -1216,6 +1628,16 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
     maxObjects,
     fullLineCache,
     fullLineCacheMaxLines,
+    drawWarmup,
+    requestedDrawWarmupTarget,
+    drawWarmupTarget,
+    drawWarmupTargetFallback: requestedDrawWarmupTarget !== drawWarmupTarget,
+    drawWarmupRestored: !!drawWarmupBoardSnapshot,
+    drawWarmupMaxLines,
+    drawWarmupMaxLinesPerObject,
+    drawWarmupFullObjectLines,
+    drawWarmupZooms: drawWarmupZooms.map(roundTextDrawWarmupZoom).join(','),
+    drawWarmupZoomCount: drawWarmupZooms.length,
     textObjectCount,
     visibleTextObjects,
     warmedTextObjects,
@@ -1224,22 +1646,55 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
     warmedLogicalLines,
     warmedVisibleLines,
     warmedTotalLines,
+    drawWarmupTextObjects,
+    drawWarmupLines,
+    drawWarmupDrawUnits,
+    drawWarmupTotalMs: Math.round(drawWarmupTotalMs * 100) / 100,
+    drawWarmupMaxLineMs: Math.round(drawWarmupMaxLineMs * 100) / 100,
+    drawWarmupRestoreMs: Math.round((boardRestoreMs + rows.reduce((sum, row) => sum + (Number(row.drawWarmupRestoreMs) || 0), 0)) * 100) / 100,
+    drawWarmupErrors,
     totalMs: Math.round(totalMs * 100) / 100,
     avgObjectMs: warmedTextObjects ? Math.round((totalMs / warmedTextObjects) * 100) / 100 : 0,
     maxObjectMs: Math.round(maxObjectMs * 100) / 100,
     topObjects: rows.slice(0, Math.max(0, Math.min(20, Number(options.limit ?? 8)))),
   };
   _lastVisibleTextLayoutPrewarm = out;
+  _visibleTextLayoutPrewarmHistory.push(out);
+  if (_visibleTextLayoutPrewarmHistory.length > 12) _visibleTextLayoutPrewarmHistory.shift();
   ViewportDebug.end(dbg, out);
   return out;
 }
 
-function getLastVisibleTextLayoutPrewarm() {
-  if (!_lastVisibleTextLayoutPrewarm) return null;
+function cloneVisibleTextLayoutPrewarm(report) {
+  if (!report) return null;
   return {
-    ..._lastVisibleTextLayoutPrewarm,
-    topObjects: (_lastVisibleTextLayoutPrewarm.topObjects || []).map((row) => ({ ...row })),
+    ...report,
+    topObjects: (report.topObjects || []).map((row) => ({ ...row })),
   };
+}
+
+function getLastVisibleTextLayoutPrewarm() {
+  return cloneVisibleTextLayoutPrewarm(_lastVisibleTextLayoutPrewarm);
+}
+
+function getVisibleTextLayoutPrewarmHistory(limit = 12) {
+  const count = Math.max(1, Math.trunc(Number(limit)) || 12);
+  return _visibleTextLayoutPrewarmHistory
+    .slice(-count)
+    .map(cloneVisibleTextLayoutPrewarm);
+}
+
+function getBestVisibleTextLayoutPrewarm() {
+  let best = null;
+  for (const report of _visibleTextLayoutPrewarmHistory) {
+    if (!best ||
+      (Number(report.drawWarmupZoomCount) || 0) > (Number(best.drawWarmupZoomCount) || 0) ||
+      ((Number(report.drawWarmupZoomCount) || 0) === (Number(best.drawWarmupZoomCount) || 0) &&
+        (Number(report.drawWarmupLines) || 0) > (Number(best.drawWarmupLines) || 0))) {
+      best = report;
+    }
+  }
+  return cloneVisibleTextLayoutPrewarm(best);
 }
 
 function clearVisibleTextLayoutPrewarmAfterIdle() {
@@ -1294,13 +1749,25 @@ function viewportEventTime(event = null) {
 
 function scheduleFrame(source = 'unknown') {
   if (source) _frameSources.push(source);
+  const pendingMeta = {
+    source,
+    pendingSources: _frameSources.length,
+    needTransform: _needTransform,
+    needBoardRender: _needBoardRender,
+    needOverlayRender: _needOverlayRender,
+    inputSource: _frameInputSource,
+    inputAgeMs: _frameInputAt ? Math.max(0, performance.now() - _frameInputAt) : '',
+    rafPending: !!_frameRaf,
+  };
   if (_frameRaf) {
     ViewportDebug.count('coalescedFrames');
+    ViewportDebug.recordFrameSchedule?.('coalesced', pendingMeta);
     return;
   }
   const collectDebug = ViewportDebug.isEnabled();
   _frameScheduledAt = collectDebug ? performance.now() : 0;
   ViewportDebug.count('scheduledFrames');
+  ViewportDebug.recordFrameSchedule?.('scheduled', pendingMeta);
   _frameRaf = requestAnimationFrame(() => {
     const sources = _frameSources.length <= 1 ? _frameSources : [...new Set(_frameSources)];
     _frameSources = [];
@@ -1314,6 +1781,15 @@ function scheduleFrame(source = 'unknown') {
       inputSource,
     } : {};
     const frameDbg = collectDebug ? ViewportDebug.frameStart(performance.now() - _frameScheduledAt, frameMeta) : null;
+    ViewportDebug.recordFrameSchedule?.('raf-fired', {
+      sources: sources.join(','),
+      pendingSources: sources.length,
+      doTransform,
+      doBoard,
+      doOverlay,
+      inputSource,
+      inputAgeMs: frameMeta.inputAgeMs ?? '',
+    });
     ViewportDebug.step(frameDbg, 'sources', { sources: sources.join(',') });
     _frameRaf = null;
     _needTransform = false;
@@ -1349,8 +1825,22 @@ function scheduleFrame(source = 'unknown') {
 }
 
 function scheduleTransform(source = 'transform', inputEvent = null) {
-  lastViewportInputAt = performance.now();
-  _frameInputAt = viewportEventTime(inputEvent);
+  const now = performance.now();
+  const eventAt = viewportEventTime(inputEvent);
+  const inputAgeMs = Math.max(0, now - eventAt);
+  lastViewportInputAt = now;
+  ViewportDebug.recordPanZoom?.('transform-scheduled', {
+    mode: source.includes('zoom') ? 'zoom' : source.includes('pan') ? 'pan' : 'transform',
+    source,
+    eventAt,
+    inputAgeMs,
+    rafPending: !!_frameRaf,
+    pendingSources: _frameSources.length,
+    needTransformBefore: _needTransform,
+    needBoardRenderBefore: _needBoardRender,
+    needOverlayRenderBefore: _needOverlayRender,
+  }, inputEvent);
+  _frameInputAt = eventAt;
   _frameInputSource = source;
   _needTransform = true;
   syncIslandZoomDisplay(source);

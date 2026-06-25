@@ -452,14 +452,90 @@ async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDeb
   return hydrated;
 }
 
-async function hydrateVisibleImagesForOpen(dbg = null) {
-  const keys = getVisibleImageKeys();
-  const debugMeta = isOpenDebugActive(dbg)
-    ? { ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() }
-    : {};
-  OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: keys.length, ...debugMeta });
-  await hydrateImageKeysWithLimit(keys, dbg, 'hydrate-visible', OpenDebug.hydrationConcurrency);
-  return keys;
+function getVisibleImagePreviewTasks(keys, options = {}) {
+  const wanted = new Set(Array.isArray(keys) ? keys.filter(Boolean) : []);
+  const includeCached = options.includeCached === true;
+  const rect = getVisibleWorldBounds();
+  const tasksByKey = new Map();
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    if (obj?.type !== 'image' || !obj.data?.imgKey || !objectIntersectsRect(obj, rect)) continue;
+    const key = obj.data.imgKey;
+    if (!includeCached && !wanted.has(key)) continue;
+    if (includeCached && !isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) continue;
+    const area = Math.max(1, Number(obj.w || 0)) * Math.max(1, Number(obj.h || 0));
+    const previous = tasksByKey.get(key);
+    if (!previous || area > previous.area) tasksByKey.set(key, { key, obj, area });
+  }
+  return [...tasksByKey.values()];
+}
+
+async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) {
+  if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
+  const pendingKeys = new Set(Array.isArray(keys) ? keys.filter(Boolean) : []);
+  const tasks = getVisibleImagePreviewTasks(keys, options);
+  const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
+  const t0 = performance.now();
+  const concurrency = Math.max(1, Math.min(8, tasks.length || 1));
+  OpenDebug.step(dbg, 'open-preview-visible:start', {
+    count: keys.length,
+    selected: tasks.length,
+    includeCached: options.includeCached === true,
+    concurrency,
+  });
+  let built = 0;
+  let ready = 0;
+  let pendingReady = 0;
+  let failed = 0;
+  let skipped = 0;
+  let bytes = 0;
+  const results = await mapWithConcurrency(tasks, concurrency, async ({ key, obj }) => {
+    const result = await buildOpenInitialImagePreviewForOpen(key, obj, view, dbg);
+    if (result.ready) {
+      ready++;
+      if (pendingKeys.has(key)) pendingReady++;
+      if (!result.skipped) built++;
+      bytes += Number(result.bytes) || 0;
+    } else if (result.skipped === 'error') failed++;
+    else skipped++;
+    return result;
+  });
+  const resultRows = results.map((result) => ({
+    key: result?.key || '',
+    ready: result?.ready === true,
+    skipped: result?.skipped || '',
+    width: result?.width ?? '',
+    height: result?.height ?? '',
+    ms: result?.ms ?? '',
+    error: result?.error || '',
+  }));
+  const slowResults = [...resultRows]
+    .sort((a, b) => (Number(b.ms) || 0) - (Number(a.ms) || 0))
+    .slice(0, 24)
+    .map((row) => ({ ...row }));
+  const slowest = slowResults[0] || null;
+  const sampleResults = resultRows.slice(0, 24).map((row) => ({ ...row }));
+  const out = {
+    count: keys.length,
+    selected: tasks.length,
+    ready,
+    pendingReady,
+    built,
+    failed,
+    skipped,
+    bytes,
+    mb: Math.round(bytes / 1024 / 1024 * 100) / 100,
+    concurrency,
+    ms: performance.now() - t0,
+    maxMs: slowest?.ms ?? '',
+    maxKey: slowest?.key || '',
+    maxWidth: slowest?.width ?? '',
+    maxHeight: slowest?.height ?? '',
+    results: sampleResults,
+    slowResults,
+  };
+  OpenDebug.step(dbg, 'open-preview-visible:end', out);
+  return out;
 }
 
 function countVisibleImageBitmapSettle(keys) {
@@ -597,7 +673,16 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
       if (!keys.length) break;
       batchCount++;
       hydratedTotal += await hydrateImageBatchForOpen(keys, dbg, 'hydrate-background');
-      scheduleRender(true, false, 'open-background-hydration');
+      const previewRelease = typeof releaseReadyOpenInitialImagePreviewsForOpen === 'function'
+        ? releaseReadyOpenInitialImagePreviewsForOpen()
+        : null;
+      if (previewRelease?.released || previewRelease?.pending || previewRelease?.failed) {
+        OpenDebug.step(dbg, 'open-preview-release', previewRelease);
+      }
+      const previewStillHoldingRender = !!previewRelease && Number(previewRelease.pending) > 0;
+      if (!previewStillHoldingRender || previewRelease?.released) {
+        scheduleRender(true, false, previewRelease?.released ? 'open-preview-release' : 'open-background-hydration');
+      }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   } finally {
@@ -652,11 +737,55 @@ async function finishOpenedBoard(dbg, data) {
   const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:finishOpenedBoard:start', openMetrics);
   const hydrationMode = getOpenHydrationMode();
+  let skipInitialScaledPrewarm = false;
   if (hydrationMode === 'visible-first') {
     const hydrateStart = performance.now();
-    const visibleKeys = await hydrateVisibleImagesForOpen(dbg);
-    PillDebug.log('open:hydrate-visible:end', { phaseMs: performance.now() - hydrateStart, visibleCount: visibleKeys?.length || 0 });
-    const bitmapSettle = await settleVisibleImageBitmapsForOpen(visibleKeys, dbg);
+    const visibleKeys = getVisibleImageKeys();
+    const debugMeta = isOpenDebugActive(dbg)
+      ? { ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() }
+      : {};
+    OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: visibleKeys.length, ...debugMeta });
+    const preview = await buildVisibleImagePreviewsForOpen(visibleKeys, dbg, { includeCached: true });
+    const previewReady = preview && preview.pendingReady >= visibleKeys.length;
+    if (!previewReady) await hydrateImageKeysWithLimit(visibleKeys, dbg, 'hydrate-visible', OpenDebug.hydrationConcurrency);
+    else {
+      OpenDebug.step(dbg, 'hydrate-visible:end', {
+        count: visibleKeys.length,
+        hydrated: 0,
+        previewReady: preview.ready,
+        previewPendingReady: preview.pendingReady,
+        previewBuilt: preview.built,
+        previewMB: preview.mb,
+        previewMaxMs: preview.maxMs,
+        previewMaxKey: preview.maxKey,
+        skipped: 'open-preview-ready',
+        concurrency: preview.concurrency,
+        ms: performance.now() - hydrateStart,
+        ...getOpenImageRuntimeMetrics(),
+      });
+      skipInitialScaledPrewarm = true;
+    }
+    PillDebug.log('open:hydrate-visible:end', { phaseMs: performance.now() - hydrateStart, visibleCount: visibleKeys?.length || 0, previewReady: preview?.ready ?? '' });
+    const bitmapSettle = previewReady
+      ? {
+          count: visibleKeys.length,
+          before: 0,
+          after: 0,
+          failed: 0,
+          missingStore: 0,
+          pending: 0,
+          settled: visibleKeys.length,
+          missing: 0,
+          target: visibleKeys.length,
+          ms: 0,
+          skipped: 'open-preview-ready',
+          previewReady: preview.ready,
+          previewPendingReady: preview.pendingReady,
+        }
+      : await settleVisibleImageBitmapsForOpen(visibleKeys, dbg);
+    if (previewReady) {
+      OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', bitmapSettle);
+    }
     PillDebug.log('open:hydrate-visible:bitmap-settle', { phaseMs: bitmapSettle.ms, before: bitmapSettle.before, after: bitmapSettle.after, failed: bitmapSettle.failed, pending: bitmapSettle.pending, missing: bitmapSettle.missing });
     if (isOpenDebugActive(dbg)) {
       OpenDebug.step(dbg, 'hydrate-initial-policy', {
@@ -665,6 +794,7 @@ async function finishOpenedBoard(dbg, data) {
         visibleBitmapsReady: bitmapSettle.after,
         visibleBitmapsFailed: bitmapSettle.failed,
         visibleBitmapsMissing: bitmapSettle.missing,
+        visiblePreviewReady: bitmapSettle.previewReady ?? '',
         visibleBitmapSettleMs: bitmapSettle.ms,
         pendingImages: getPendingHydratableImageKeys().length,
       });
@@ -682,10 +812,41 @@ async function finishOpenedBoard(dbg, data) {
       PillDebug.log('open:hydrate-all:end', { phaseMs: performance.now() - hydrateStart, pendingImages: getPendingHydratableImageKeys().length });
     }
   }
+  if (!skipInitialScaledPrewarm && typeof prewarmVisibleScaledImageVariantsForOpen === 'function') {
+    const prewarmStart = performance.now();
+    const prewarm = await prewarmVisibleScaledImageVariantsForOpen({
+      padPx: 0,
+      concurrency: 4,
+      reason: 'open-initial-render',
+    });
+    OpenDebug.step(dbg, 'prewarm-visible-scaled-variants', {
+      ms: performance.now() - prewarmStart,
+      ...prewarm,
+    });
+    PillDebug.log('open:prewarm-visible-scaled-variants:end', {
+      phaseMs: performance.now() - prewarmStart,
+      candidates: prewarm?.candidates ?? '',
+      built: prewarm?.built ?? '',
+      skipped: prewarm?.skipped ?? '',
+    });
+  } else if (skipInitialScaledPrewarm) {
+    OpenDebug.step(dbg, 'prewarm-visible-scaled-variants', {
+      skipped: 'open-preview-ready',
+      ms: 0,
+      built: 0,
+      candidates: 0,
+      alreadyReady: 0,
+    });
+  }
   _boardOpening = false;
   const renderStart = performance.now();
   PillDebug.log('open:initial-applyTransform:start');
-  applyTransform();
+  const collectInitialRenderDebug = OpenDebug.beginInitialRenderDebug?.() === true;
+  try {
+    applyTransform();
+  } finally {
+    if (collectInitialRenderDebug) OpenDebug.endInitialRenderDebug?.();
+  }
   const renderMs = performance.now() - renderStart;
   const renderBreakdown = typeof getLastApplyTransformMeta === 'function'
     ? getLastApplyTransformMeta()
@@ -712,6 +873,7 @@ async function finishOpenedBoard(dbg, data) {
     bitmapImages: drawBreakdown?.bitmapImages ?? '',
     elementImages: drawBreakdown?.elementImages ?? '',
     scaledImages: drawBreakdown?.scaledImages ?? '',
+    openPreviewImages: drawBreakdown?.openPreviewImages ?? '',
     scaledFallbackFull: drawBreakdown?.scaledFallbackFull ?? '',
     scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',
     croppedImages: drawBreakdown?.croppedImages ?? '',

@@ -125,6 +125,7 @@ test('open-board debugger covers the slow open phases developers need to inspect
   const openDebug = readSource('src/js/debug_open.js');
   const openIo = readSource('src/js/io_close.js');
   const imageState = readSource('src/js/image_state.js');
+  const imageVariants = readSource('src/js/image_variants.js');
   const viewport = readSource('src/js/viewport.js');
 
   for (const method of [
@@ -134,10 +135,18 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'imageStoreSummary',
     'hydrationCandidates',
     'slowImages',
+    'openPreviewBreakdown',
     'hydrationBreakdown',
     'cacheImageBreakdown',
     'setHydrationMode',
     'setHydrationConcurrency',
+    'optimizationReport',
+    'beginInitialRenderDebug',
+    'endInitialRenderDebug',
+    'isInitialRenderDebugActive',
+    'recordPreviewFallbackDraw',
+    'recordPreviewHeldRender',
+    'recordDynamicPreview',
     'report',
   ]) {
     assert.match(openDebug, new RegExp(`\\b${method}\\b`), `OpenDebug is missing ${method}`);
@@ -168,8 +177,63 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(imageState, /_boardOpening[\s\S]*MAX_OPEN_IMAGE_DECODE_ACTIVE[\s\S]*MAX_IMAGE_DECODE_ACTIVE/);
   assert.match(viewport, /function getLastApplyTransformMeta\(\)/);
   assert.match(openIo, /const renderBreakdown = typeof getLastApplyTransformMeta === 'function'/);
+  assert.match(openIo, /OpenDebug\.beginInitialRenderDebug\?\.\(\)/);
+  assert.match(openIo, /OpenDebug\.endInitialRenderDebug\?\.\(\)/);
+  assert.match(viewport, /OpenDebug\.isInitialRenderDebugActive\?\.\(\) === true/);
+  assert.match(viewport, /resolveOpenInitialImageSourceForDraw/);
+  assert.match(viewport, /hasOpenInitialImagePreviews/);
+  assert.match(viewport, /openPreviewFallback/);
+  assert.match(viewport, /collectOpenPreviewFallbackDebug/);
+  assert.match(viewport, /OpenDebug\.recordPreviewFallbackDraw/);
   assert.match(openIo, /drawBoardTotalMs: drawBreakdown\?\.totalMeasuredMs/);
   assert.match(openDebug, /initialDrawMs: initialRender\?\.meta\?\.drawMs/);
+  assert.match(openDebug, /initialOpenPreviewImages/);
+  assert.match(openDebug, /openPreviewMs/);
+  assert.match(openDebug, /openPreviewMaxMs/);
+  assert.match(openDebug, /openPreviewBreakdown/);
+  assert.match(openDebug, /scaledPrewarmSkipped/);
+  assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
+  assert.match(openIo, /maxKey: slowest\?\.key/);
+  assert.match(openIo, /previewMaxKey: preview\.maxKey/);
+  assert.match(openIo, /buildVisibleImagePreviewsForOpen\(visibleKeys, dbg, \{ includeCached: true \}\)/);
+  assert.match(openIo, /const previewReady = preview && preview\.pendingReady >= visibleKeys\.length/);
+  assert.match(openIo, /previewPendingReady: preview\.pendingReady/);
+  assert.match(openDebug, /openPreviewPendingReady/);
+  assert.match(openIo, /releaseReadyOpenInitialImagePreviewsForOpen/);
+  assert.match(openIo, /open-preview-release/);
+  assert.match(openIo, /previewRelease\?\.released \? 'open-preview-release' : 'open-background-hydration'/);
+  assert.match(openDebug, /open-preview-fallback-draw/);
+  assert.match(imageState, /buildOpenInitialImagePreviewForOpen/);
+  assert.match(imageState, /hasOpenInitialImagePreviews/);
+  assert.match(imageState, /hasBlockingOpenInitialImagePreviewsForOpen/);
+  assert.match(imageState, /releaseReadyOpenInitialImagePreviewsForOpen/);
+  assert.match(imageState, /deferBitmapReadyRenderForOpenPreview/);
+  assert.match(imageState, /open-preview-held/);
+  assert.match(imageState, /cacheRenderSkipped/);
+  assert.match(imageState, /clearOpenInitialImagePreviews\(key\)/);
+  assert.match(openIo, /previewStillHoldingRender/);
+  assert.match(openDebug, /decodeQueueWaitMaxMs/);
+  assert.match(openDebug, /bitmapDecodeMaxMs/);
+  assert.match(openDebug, /scaledPrewarmMs/);
+  assert.match(openDebug, /rustBoardJsonReadMs/);
+  assert.match(openDebug, /rustImageReadMaxMs/);
+  assert.match(openDebug, /rustImageRefMs/);
+  assert.match(openDebug, /rustLazyImageRefs/);
+  assert.match(openDebug, /rustImageCrcMs/);
+  assert.match(openDebug, /slowCacheImages/);
+  assert.match(openDebug, /filePickerMs/);
+  assert.match(openDebug, /appCriticalPathMs/);
+  assert.match(openDebug, /postReadCriticalPathMs/);
+  assert.match(openDebug, /openPreviewFallbackDrawCount/);
+  assert.match(openDebug, /openPreviewFallbackMissingMax/);
+  assert.match(openDebug, /openPreviewHeldRenderSkips/);
+  assert.match(openDebug, /openPreviewHeldVariantRenderSkips/);
+  assert.match(openDebug, /openPreviewDynamicRequests/);
+  assert.match(openDebug, /openPreviewDynamicCompletions/);
+  assert.match(openDebug, /open-preview-dynamic/);
+  assert.match(openDebug, /openPreviewReleaseRemaining/);
+  assert.match(openDebug, /open-preview-render-held/);
+  assert.match(imageVariants, /recordPreviewHeldRender/);
 
   for (const phase of [
     'read-board-debug',
@@ -183,7 +247,11 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'restore-counters-viewport',
     'hydrate-initial-policy',
     'hydrate-visible:candidates',
+    'open-preview-visible:start',
+    'open-preview-visible:end',
+    'open-preview-release',
     'hydrate-all:candidates',
+    'prewarm-visible-scaled-variants',
     'hydrate-background:done',
     'initial-applyTransform',
   ]) {
