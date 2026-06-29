@@ -198,12 +198,17 @@ test('browser paste fallback owns exactly one input shield token', () => {
   assert.doesNotMatch(clipboardExport, /showInputShield\(\);\s*try \{\s*const imageBlob/);
 });
 
-test('dirty tracking does not special-case empty boards as clean', () => {
+test('dirty tracking treats net-empty boards as clean only against an empty saved baseline', () => {
   const io = readSource('src/js/io_close.js');
+  const objectCommands = readSource('src/js/object_commands.js');
   const match = io.match(/function isDirty\(\) \{([\s\S]*?)\n\}/);
   assert.ok(match, 'isDirty function is missing');
-  assert.doesNotMatch(match[1], /objects\.length\s*===\s*0/);
+  assert.match(io, /function isDefaultEmptyBoardState\(objectList = objects\) \{\s*return !hasPersistableBoardObjects\(objectList\);\s*\}/);
+  assert.match(io, /function isSavedDefaultEmptyBoardState\(\) \{[\s\S]*boardHistory\[savedHistoryIndex\][\s\S]*\}/);
+  assert.match(io, /function isCleanDefaultEmptyBoardState\(\) \{\s*return isDefaultEmptyBoardState\(objects\) && isSavedDefaultEmptyBoardState\(\);\s*\}/);
+  assert.match(match[1], /if \(isCleanDefaultEmptyBoardState\(\)\) return false;/);
   assert.match(match[1], /historyIndex !== savedHistoryIndex \|\| _dirtyIds\.size > 0/);
+  assert.match(objectCommands, /if \(isCleanDefaultEmptyBoardState\(\) && !currentFilePath && !currentFileRef\) \{\s*return;\s*\}/);
 });
 
 test('startup marks the initial empty board snapshot clean', () => {

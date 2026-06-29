@@ -256,7 +256,7 @@ async function runShieldedPillTask({
 // ─── New board ───────────────────────────────────────────────────────────────
 
 async function newBoard() {
-  if (objects.length === 0 && !currentFilePath) {
+  if (isCleanDefaultEmptyBoardState() && !currentFilePath && !currentFileRef) {
     return;
   }
   if (isDirty()) {

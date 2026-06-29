@@ -5,7 +5,44 @@ var savedHistoryIndex = -1;
 var currentFilePath = null;
 var currentFileRef = null;
 
+function historyEntryObjects(entry) {
+  if (Array.isArray(entry)) return entry;
+  return Array.isArray(entry?.objects) ? entry.objects : [];
+}
+
+function isPersistableBoardObject(obj) {
+  if (!obj) return false;
+  if (obj.type === 'text') {
+    const content = obj.data?.content;
+    return typeof isTextContentEmpty === 'function'
+      ? !isTextContentEmpty(content)
+      : String(content || '').trim() !== '';
+  }
+  return true;
+}
+
+function hasPersistableBoardObjects(objectList = objects) {
+  for (const obj of objectList || []) {
+    if (isPersistableBoardObject(obj)) return true;
+  }
+  return false;
+}
+
+function isDefaultEmptyBoardState(objectList = objects) {
+  return !hasPersistableBoardObjects(objectList);
+}
+
+function isSavedDefaultEmptyBoardState() {
+  if (savedHistoryIndex < 0 || savedHistoryIndex >= boardHistory.length) return false;
+  return isDefaultEmptyBoardState(historyEntryObjects(boardHistory[savedHistoryIndex]));
+}
+
+function isCleanDefaultEmptyBoardState() {
+  return isDefaultEmptyBoardState(objects) && isSavedDefaultEmptyBoardState();
+}
+
 function isDirty() {
+  if (isCleanDefaultEmptyBoardState()) return false;
   return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0;
 }
 
