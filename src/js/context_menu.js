@@ -1,6 +1,25 @@
 // ─── Context menu ─────────────────────────────────────────────────────────────
 var ctxPos = { x: 0, y: 0 };
 var _lastBoardCursorClientPoint = null;
+const BOARD_CURSOR_CLIENT_EVENT_TYPES = Object.freeze([
+  'pointerover',
+  'pointerenter',
+  'pointermove',
+  'pointerdown',
+  'pointerup',
+  'mouseover',
+  'mouseenter',
+  'mousemove',
+  'mousedown',
+  'mouseup',
+  'click',
+  'dblclick',
+  'auxclick',
+  'contextmenu',
+  'dragenter',
+  'dragover',
+  'drop',
+]);
 
 function rememberBoardCursorClientPoint(event) {
   const x = Number(event?.clientX);
@@ -28,8 +47,9 @@ function menuCommandWorldPoint(event = null) {
   return boardCursorWorldPoint();
 }
 
-for (const type of ['pointermove', 'pointerdown', 'mousemove', 'mousedown', 'contextmenu']) {
+for (const type of BOARD_CURSOR_CLIENT_EVENT_TYPES) {
   document.addEventListener(type, rememberBoardCursorClientPoint, true);
+  window.addEventListener(type, rememberBoardCursorClientPoint, true);
 }
 
 function addTextAtMenuCommandPoint(event = null) {

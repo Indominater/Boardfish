@@ -177,6 +177,8 @@ test('background context menu clears object selection before opening', () => {
 test('context menu command buttons use the button click point as the object center', () => {
   const contextMenuSource = readSource('src/js/context_menu.js');
 
+  assert.match(contextMenuSource, /const BOARD_CURSOR_CLIENT_EVENT_TYPES = Object\.freeze\(\[[\s\S]*'pointerover'[\s\S]*'pointerenter'[\s\S]*'pointermove'[\s\S]*'pointerdown'[\s\S]*'pointerup'[\s\S]*'mouseover'[\s\S]*'mouseenter'[\s\S]*'mousemove'[\s\S]*'mousedown'[\s\S]*'mouseup'[\s\S]*'click'[\s\S]*'dragover'[\s\S]*'drop'[\s\S]*\]\);/);
+  assert.match(contextMenuSource, /for \(const type of BOARD_CURSOR_CLIENT_EVENT_TYPES\) \{\s*document\.addEventListener\(type, rememberBoardCursorClientPoint, true\);\s*window\.addEventListener\(type, rememberBoardCursorClientPoint, true\);\s*\}/);
   assert.match(contextMenuSource, /function menuCommandWorldPoint\(event = null\) \{[\s\S]*return toWorld\(x, y\);[\s\S]*return boardCursorWorldPoint\(\);[\s\S]*\}/);
   assert.match(contextMenuSource, /const point = menuCommandWorldPoint\(event\);[\s\S]*addText\(point\.x, point\.y, '', \{ anchor: 'center' \}\)/);
   assert.match(contextMenuSource, /'btn-add-image': \(event\) => \{[\s\S]*const point = menuCommandWorldPoint\(event\);[\s\S]*pickAndInsertImages\(point\.x, point\.y\);[\s\S]*\}/);
