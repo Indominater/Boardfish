@@ -82,6 +82,21 @@ function canvasInputViewportResult(result) {
     : { panX, panY, zoom };
 }
 
+function selectionSetsEqual(a, b) {
+  if (a.size !== b.size) return false;
+  for (const id of a) {
+    if (!b.has(id)) return false;
+  }
+  return true;
+}
+
+function selectionIdsFromSet(set) {
+  const ids = new Array(set.size);
+  let write = 0;
+  for (const id of set) ids[write++] = id;
+  return ids;
+}
+
 function canvasInputTextDebugLog(label, obj = null, meta = {}) {
   if (typeof TextSelDebug === 'undefined') return;
   TextSelDebug._logEditLifecycle?.(label, obj, meta);
@@ -150,33 +165,37 @@ function handleViewportWheel(e) {
   try { e.__boardfishViewportWheelHandled = true; } catch (_) {}
   const collectDebug = ViewportDebug.isEnabled();
   const handlerStart = collectDebug ? canvasInputNow() : 0;
-  const wheelMeta = collectDebug ? canvasInputWheelDebugMeta(e) : {};
-  const eventMeta = collectDebug ? canvasInputEventDebugMeta(e) : {};
-  const beforeMeta = collectDebug ? canvasInputViewportDebugSnapshot('Before') : {};
-  const dbg = ViewportDebug.start('wheel', {
-    ...eventMeta,
-    ...wheelMeta,
-    ctrlKey: e.ctrlKey,
-    metaKey: e.metaKey,
-    ...beforeMeta,
-    panX,
-    panY,
-    zoom,
-  });
+  const wheelMeta = collectDebug ? canvasInputWheelDebugMeta(e) : null;
+  const eventMeta = collectDebug ? canvasInputEventDebugMeta(e) : null;
+  const beforeMeta = collectDebug ? canvasInputViewportDebugSnapshot('Before') : null;
+  const dbg = collectDebug
+    ? ViewportDebug.start('wheel', {
+      ...eventMeta,
+      ...wheelMeta,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      ...beforeMeta,
+      panX,
+      panY,
+      zoom,
+    })
+    : null;
   try {
     ViewportDebug.count('wheel');
     e.preventDefault();
     if (_rubberBandDragActive) {
-      ViewportDebug.recordPanZoom?.('wheel-blocked-rubber-band', {
-        mode: 'blocked',
-        source: 'wheel',
-        blocked: true,
-        reason: 'rubber-band',
-        ...wheelMeta,
-        ...beforeMeta,
-        ...canvasInputViewportDebugSnapshot('After'),
-      }, e);
-      ViewportDebug.end(dbg, { mode: 'blocked-rubber-band', panX, panY, zoom });
+      if (collectDebug) {
+        ViewportDebug.recordPanZoom?.('wheel-blocked-rubber-band', {
+          mode: 'blocked',
+          source: 'wheel',
+          blocked: true,
+          reason: 'rubber-band',
+          ...wheelMeta,
+          ...beforeMeta,
+          ...canvasInputViewportDebugSnapshot('After'),
+        }, e);
+        ViewportDebug.end(dbg, { mode: 'blocked-rubber-band', panX, panY, zoom });
+      }
       return;
     }
     if (editingId) {
@@ -187,8 +206,6 @@ function handleViewportWheel(e) {
       const panXBefore = panX;
       const panYBefore = panY;
       const zoomBefore = zoom;
-      const focusWorldX = (e.clientX - panXBefore) / Math.max(zoomBefore || 1, 0.0001);
-      const focusWorldY = (e.clientY - panYBefore) / Math.max(zoomBefore || 1, 0.0001);
       const factor = Math.abs(e.deltaY) < 30
         ? Math.pow(0.995, e.deltaY)
         : e.deltaY < 0 ? 1.1 : 1 / 1.1;
@@ -199,46 +216,50 @@ function handleViewportWheel(e) {
       );
       globalThis.BoardfishMotion?.applyActionAnimation?.('board-wheel-zoom');
       scheduleTransform('wheel-zoom', e);
-      const handlerMs = collectDebug ? canvasInputDebugRound(canvasInputNow() - handlerStart) : '';
-      const zoomDeltaPct = zoomBefore ? ((nextViewport.zoom / zoomBefore) - 1) * 100 : 0;
-      const panDeltaX = nextViewport.panX - panXBefore;
-      const panDeltaY = nextViewport.panY - panYBefore;
-      ViewportDebug.recordPanZoom?.('wheel-zoom', {
-        mode: 'zoom',
-        source: 'wheel-zoom',
-        ...eventMeta,
-        ...wheelMeta,
-        panXBefore,
-        panYBefore,
-        zoomBefore,
-        panXAfter: nextViewport.panX,
-        panYAfter: nextViewport.panY,
-        zoomAfter: nextViewport.zoom,
-        panDeltaX,
-        panDeltaY,
-        panDistancePx: Math.hypot(panDeltaX, panDeltaY),
-        zoomDelta: nextViewport.zoom - zoomBefore,
-        zoomDeltaPct,
-        factor,
-        requestedZoom,
-        clamped: newZoom !== requestedZoom,
-        focusWorldX,
-        focusWorldY,
-        handlerMs,
-      }, e);
-      ViewportDebug.end(dbg, {
-        mode: 'zoom',
-        source: 'wheel-zoom',
-        newZoom,
-        zoomBefore,
-        zoomAfter: nextViewport.zoom,
-        zoomDeltaPct,
-        panX,
-        panY,
-        panDeltaX,
-        panDeltaY,
-        handlerMs,
-      });
+      if (collectDebug) {
+        const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
+        const zoomDeltaPct = zoomBefore ? ((nextViewport.zoom / zoomBefore) - 1) * 100 : 0;
+        const panDeltaX = nextViewport.panX - panXBefore;
+        const panDeltaY = nextViewport.panY - panYBefore;
+        const focusWorldX = (e.clientX - panXBefore) / Math.max(zoomBefore || 1, 0.0001);
+        const focusWorldY = (e.clientY - panYBefore) / Math.max(zoomBefore || 1, 0.0001);
+        ViewportDebug.recordPanZoom?.('wheel-zoom', {
+          mode: 'zoom',
+          source: 'wheel-zoom',
+          ...eventMeta,
+          ...wheelMeta,
+          panXBefore,
+          panYBefore,
+          zoomBefore,
+          panXAfter: nextViewport.panX,
+          panYAfter: nextViewport.panY,
+          zoomAfter: nextViewport.zoom,
+          panDeltaX,
+          panDeltaY,
+          panDistancePx: Math.hypot(panDeltaX, panDeltaY),
+          zoomDelta: nextViewport.zoom - zoomBefore,
+          zoomDeltaPct,
+          factor,
+          requestedZoom,
+          clamped: newZoom !== requestedZoom,
+          focusWorldX,
+          focusWorldY,
+          handlerMs,
+        }, e);
+        ViewportDebug.end(dbg, {
+          mode: 'zoom',
+          source: 'wheel-zoom',
+          newZoom,
+          zoomBefore,
+          zoomAfter: nextViewport.zoom,
+          zoomDeltaPct,
+          panX,
+          panY,
+          panDeltaX,
+          panDeltaY,
+          handlerMs,
+        });
+      }
       return;
     }
 
@@ -251,53 +272,57 @@ function handleViewportWheel(e) {
     const nextViewport = canvasInputViewportResult(BoardfishViewportState.panBy(appliedPanX, appliedPanY));
     globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
     scheduleTransform('wheel-pan', e);
-    const handlerMs = collectDebug ? canvasInputDebugRound(canvasInputNow() - handlerStart) : '';
-    const panDeltaX = nextViewport.panX - panXBefore;
-    const panDeltaY = nextViewport.panY - panYBefore;
-    ViewportDebug.recordPanZoom?.('wheel-pan', {
-      mode: 'pan',
-      source: 'wheel-pan',
-      ...eventMeta,
-      ...wheelMeta,
-      panXBefore,
-      panYBefore,
-      zoomBefore,
-      panXAfter: nextViewport.panX,
-      panYAfter: nextViewport.panY,
-      zoomAfter: nextViewport.zoom,
-      appliedPanX,
-      appliedPanY,
-      panDeltaX,
-      panDeltaY,
-      panDistancePx: Math.hypot(panDeltaX, panDeltaY),
-      handlerMs,
-    }, e);
-    ViewportDebug.end(dbg, {
-      mode: 'pan',
-      source: 'wheel-pan',
-      appliedDX: e.deltaX,
-      appliedDY: e.deltaY,
-      appliedPanX,
-      appliedPanY,
-      panX,
-      panY,
-      panDeltaX,
-      panDeltaY,
-      handlerMs,
-    });
+    if (collectDebug) {
+      const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
+      const panDeltaX = nextViewport.panX - panXBefore;
+      const panDeltaY = nextViewport.panY - panYBefore;
+      ViewportDebug.recordPanZoom?.('wheel-pan', {
+        mode: 'pan',
+        source: 'wheel-pan',
+        ...eventMeta,
+        ...wheelMeta,
+        panXBefore,
+        panYBefore,
+        zoomBefore,
+        panXAfter: nextViewport.panX,
+        panYAfter: nextViewport.panY,
+        zoomAfter: nextViewport.zoom,
+        appliedPanX,
+        appliedPanY,
+        panDeltaX,
+        panDeltaY,
+        panDistancePx: Math.hypot(panDeltaX, panDeltaY),
+        handlerMs,
+      }, e);
+      ViewportDebug.end(dbg, {
+        mode: 'pan',
+        source: 'wheel-pan',
+        appliedDX: e.deltaX,
+        appliedDY: e.deltaY,
+        appliedPanX,
+        appliedPanY,
+        panX,
+        panY,
+        panDeltaX,
+        panDeltaY,
+        handlerMs,
+      });
+    }
   } finally {
     if (collectDebug) ViewportDebug.timing('wheelHandler', canvasInputNow() - handlerStart);
   }
 }
 
 canvas.addEventListener('wheel', handleViewportWheel, { passive: false });
-for (const surface of [
+const viewportWheelSurfaces = [
   typeof ctxMenu !== 'undefined' ? ctxMenu : null,
   typeof objCtxMenu !== 'undefined' ? objCtxMenu : null,
   typeof BoardfishDOM !== 'undefined' ? BoardfishDOM.textCtxMenu : null,
   typeof ctxActions !== 'undefined' ? ctxActions : null,
   typeof island !== 'undefined' ? island : null,
-].filter(Boolean)) {
+];
+for (const surface of viewportWheelSurfaces) {
+  if (!surface) continue;
   surface.addEventListener('wheel', handleViewportWheel, { passive: false });
 }
 
@@ -357,30 +382,35 @@ function dragItemsForSelection() {
 }
 
 function startMousePan(e) {
-  const startDebugMeta = {
+  const collectPanDebug = ViewportDebug.isEnabled();
+  const startDebugMeta = collectPanDebug ? {
     ...canvasInputEventDebugMeta(e),
     ...canvasInputViewportDebugSnapshot('Before'),
-  };
-  const panDbg = ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, ...startDebugMeta, panX, panY, zoom });
+  } : null;
+  const panDbg = collectPanDebug
+    ? ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, ...startDebugMeta, panX, panY, zoom })
+    : null;
   e.preventDefault();
   e.stopPropagation();
   const startX = e.clientX, startY = e.clientY;
   const startPanX = panX, startPanY = panY;
   const startZoom = zoom;
-  const panStartedAt = canvasInputNow();
+  const panStartedAt = collectPanDebug ? canvasInputNow() : 0;
   let moveCount = 0;
   let lastClientX = startX;
   let lastClientY = startY;
-  ViewportDebug.recordPanZoom?.('mouse-pan-start', {
-    mode: 'pan',
-    source: 'mouse-pan',
-    ...startDebugMeta,
-    startClientX: startX,
-    startClientY: startY,
-    panXBefore: startPanX,
-    panYBefore: startPanY,
-    zoomBefore: startZoom,
-  }, e);
+  if (collectPanDebug) {
+    ViewportDebug.recordPanZoom?.('mouse-pan-start', {
+      mode: 'pan',
+      source: 'mouse-pan',
+      ...startDebugMeta,
+      startClientX: startX,
+      startClientY: startY,
+      panXBefore: startPanX,
+      panYBefore: startPanY,
+      zoomBefore: startZoom,
+    }, e);
+  }
   function onMove(ev) {
     const collectDebug = ViewportDebug.isEnabled();
     const handlerStart = collectDebug ? canvasInputNow() : 0;
@@ -431,41 +461,44 @@ function startMousePan(e) {
   }
   function onUp(ev) {
     if (ev && !ev.__boardfishDragCancel && ev.button !== 0) return;
-    const panDeltaX = panX - startPanX;
-    const panDeltaY = panY - startPanY;
-    ViewportDebug.recordPanZoom?.('mouse-pan-end', {
-      mode: 'pan',
-      source: 'mouse-pan',
-      ...(ev ? canvasInputEventDebugMeta(ev) : {}),
-      startClientX: startX,
-      startClientY: startY,
-      endClientX: ev?.clientX ?? '',
-      endClientY: ev?.clientY ?? '',
-      panXBefore: startPanX,
-      panYBefore: startPanY,
-      zoomBefore: startZoom,
-      panXAfter: panX,
-      panYAfter: panY,
-      zoomAfter: zoom,
-      panDeltaX,
-      panDeltaY,
-      panDistancePx: Math.hypot(panDeltaX, panDeltaY),
-      moveCount,
-      durationMs: canvasInputNow() - panStartedAt,
-      cancelled: !!ev?.__boardfishDragCancel,
-    }, ev);
-    ViewportDebug.end(panDbg, {
-      endX: ev?.clientX ?? '',
-      endY: ev?.clientY ?? '',
-      panX,
-      panY,
-      zoom,
-      panDeltaX,
-      panDeltaY,
-      panDistancePx: Math.hypot(panDeltaX, panDeltaY),
-      moveCount,
-      cancelled: !!ev?.__boardfishDragCancel,
-    });
+    if (collectPanDebug) {
+      const panDeltaX = panX - startPanX;
+      const panDeltaY = panY - startPanY;
+      const panDistancePx = Math.hypot(panDeltaX, panDeltaY);
+      ViewportDebug.recordPanZoom?.('mouse-pan-end', {
+        mode: 'pan',
+        source: 'mouse-pan',
+        ...(ev ? canvasInputEventDebugMeta(ev) : {}),
+        startClientX: startX,
+        startClientY: startY,
+        endClientX: ev?.clientX ?? '',
+        endClientY: ev?.clientY ?? '',
+        panXBefore: startPanX,
+        panYBefore: startPanY,
+        zoomBefore: startZoom,
+        panXAfter: panX,
+        panYAfter: panY,
+        zoomAfter: zoom,
+        panDeltaX,
+        panDeltaY,
+        panDistancePx,
+        moveCount,
+        durationMs: canvasInputNow() - panStartedAt,
+        cancelled: !!ev?.__boardfishDragCancel,
+      }, ev);
+      ViewportDebug.end(panDbg, {
+        endX: ev?.clientX ?? '',
+        endY: ev?.clientY ?? '',
+        panX,
+        panY,
+        zoom,
+        panDeltaX,
+        panDeltaY,
+        panDistancePx,
+        moveCount,
+        cancelled: !!ev?.__boardfishDragCancel,
+      });
+    }
   }
   beginDocumentDrag({ move: onMove, up: onUp });
 }
@@ -586,8 +619,8 @@ function startRubberBandSelection(e, additive) {
         nextSelection.add(o.id);
       }
     }
-    if (nextSelection.size === selectedIds.size && [...nextSelection].every((id) => selectedIds.has(id))) return;
-    BoardfishEditorState.setSelection([...nextSelection]);
+    if (selectionSetsEqual(nextSelection, selectedIds)) return;
+    BoardfishEditorState.setSelection(selectionIdsFromSet(nextSelection));
     scheduleRender(true, true);
     globalThis.BoardfishMotion?.applyActionAnimation?.('rubber-band-select', {
       selection: true,
@@ -607,10 +640,10 @@ function toggleAdditiveSelection(obj) {
   const nextSelection = new Set(selectedIds);
   if (isSelected(obj.id)) {
     nextSelection.delete(obj.id);
-    BoardfishEditorState.setSelection([...nextSelection]);
+    BoardfishEditorState.setSelection(selectionIdsFromSet(nextSelection));
   } else {
     nextSelection.add(obj.id);
-    BoardfishEditorState.setSelection([...nextSelection], { primaryId: obj.id });
+    BoardfishEditorState.setSelection(selectionIdsFromSet(nextSelection), { primaryId: obj.id });
     const addedObj = objectsMap.get(obj.id);
     if (addedObj) {
       bringObjectToFront(obj.id);

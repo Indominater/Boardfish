@@ -11,10 +11,13 @@ const BOARDFISH_STATIC_ASSETS = [
   './fonts/Geist.woff2',
 ];
 const BOARDFISH_BUILD_ASSETS = [];
-const BOARDFISH_APP_SHELL = [...BOARDFISH_STATIC_ASSETS, ...BOARDFISH_BUILD_ASSETS];
-const BOARDFISH_APP_SHELL_URLS = new Set(
-  BOARDFISH_APP_SHELL.map((asset) => new URL(asset, self.location.href).href),
-);
+const BOARDFISH_APP_SHELL = new Array(BOARDFISH_STATIC_ASSETS.length + BOARDFISH_BUILD_ASSETS.length);
+for (let i = 0; i < BOARDFISH_STATIC_ASSETS.length; i++) BOARDFISH_APP_SHELL[i] = BOARDFISH_STATIC_ASSETS[i];
+for (let i = 0; i < BOARDFISH_BUILD_ASSETS.length; i++) BOARDFISH_APP_SHELL[BOARDFISH_STATIC_ASSETS.length + i] = BOARDFISH_BUILD_ASSETS[i];
+const BOARDFISH_APP_SHELL_URLS = new Set();
+for (const asset of BOARDFISH_APP_SHELL) {
+  BOARDFISH_APP_SHELL_URLS.add(new URL(asset, self.location.href).href);
+}
 
 function isBoardfishBundleUrl(url) {
   return /\/assets\/boardfish-web-preview(?:\.[a-f0-9]{12})?\.min\.js$/.test(url.pathname);
@@ -46,12 +49,14 @@ async function fetchAndCacheRequest(request, url) {
 async function pruneCurrentCache() {
   const cache = await caches.open(BOARDFISH_CACHE);
   const requests = await cache.keys();
-  await Promise.all(requests.map((request) => {
+  const deletions = [];
+  for (const request of requests) {
     const url = new URL(request.url);
-    if (url.origin !== self.location.origin) return cache.delete(request);
-    if (isBoardfishBundleUrl(url) && !isAppShellUrl(url)) return cache.delete(request);
-    return Promise.resolve(false);
-  }));
+    if (url.origin !== self.location.origin || (isBoardfishBundleUrl(url) && !isAppShellUrl(url))) {
+      deletions.push(cache.delete(request));
+    }
+  }
+  await Promise.all(deletions);
 }
 
 self.addEventListener('install', (event) => {
@@ -66,11 +71,15 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys
-          .filter((key) => key.startsWith('boardfish-web-') && key !== BOARDFISH_CACHE)
-          .map((key) => caches.delete(key)),
-      ))
+      .then((keys) => {
+        const deletions = [];
+        for (const key of keys) {
+          if (key.startsWith('boardfish-web-') && key !== BOARDFISH_CACHE) {
+            deletions.push(caches.delete(key));
+          }
+        }
+        return Promise.all(deletions);
+      })
       .then(() => pruneCurrentCache())
       .then(() => self.clients.claim()),
   );

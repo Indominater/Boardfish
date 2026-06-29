@@ -18,18 +18,32 @@
     }
   }
 
+  function idsToArray(ids = []) {
+    if (Array.isArray(ids)) return ids;
+    const out = [];
+    for (const id of ids || []) out.push(id);
+    return out;
+  }
+
+  function idListHas(ids = [], target = null) {
+    for (const id of ids || []) {
+      if (id === target) return true;
+    }
+    return false;
+  }
+
   function setSelectionState(ids = [], {
     animateSelection = true,
     primaryId = null,
     exitEditing = true,
   } = {}) {
     const startedAt = root.performance?.now?.() ?? Date.now();
-    const nextIds = Array.isArray(ids) ? ids : [...(ids || [])];
+    const nextIds = idsToArray(ids);
     const previousSelectedIds = animateSelection ? new Set(selectedIds) : null;
     const previousCount = selectedIds.size;
     const previousPrimaryId = selectedId || '';
     const previousEditingId = editingId || '';
-    if (exitEditing && editingId && !nextIds.includes(editingId)) exitEdit();
+    if (exitEditing && editingId && !idListHas(nextIds, editingId)) exitEdit();
     selectedIds.clear();
     let lastExistingId = null;
     for (const id of nextIds) {
@@ -89,7 +103,10 @@
     preserveIds = [],
   } = {}) {
     const candidateIds = ids ? new Set(ids) : null;
-    const preserved = new Set(preserveIds.filter(Boolean));
+    const preserved = new Set();
+    for (const id of preserveIds || []) {
+      if (id) preserved.add(id);
+    }
     const idsToRemove = [];
     for (const obj of objects) {
       if (!obj || obj.type !== 'text') continue;

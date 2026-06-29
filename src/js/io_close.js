@@ -208,10 +208,16 @@ function measureBoardJsonForSaveDebug(dbg, data) {
 }
 
 function boardLimitImageEntriesForData(data) {
-  return Object.keys(data?.imageStore || {}).map((key) => ({
-    key,
-    byteLength: BoardfishWebLimits.imageSourceByteLength(imageStore[key]),
-  }));
+  const entries = [];
+  const store = data?.imageStore || {};
+  for (const key in store) {
+    if (!Object.prototype.hasOwnProperty.call(store, key)) continue;
+    entries.push({
+      key,
+      byteLength: BoardfishWebLimits.imageSourceByteLength(imageStore[key]),
+    });
+  }
+  return entries;
 }
 
 function boardJsonBytesForLimit(data) {
@@ -452,8 +458,26 @@ async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDeb
   return hydrated;
 }
 
+function truthyKeySet(keys) {
+  const set = new Set();
+  if (!Array.isArray(keys)) return set;
+  for (const key of keys) {
+    if (key) set.add(key);
+  }
+  return set;
+}
+
+function truthyKeyList(keys) {
+  const list = [];
+  if (!Array.isArray(keys)) return list;
+  for (const key of keys) {
+    if (key) list.push(key);
+  }
+  return list;
+}
+
 function getVisibleImagePreviewTasks(keys, options = {}) {
-  const wanted = new Set(Array.isArray(keys) ? keys.filter(Boolean) : []);
+  const wanted = truthyKeySet(keys);
   const includeCached = options.includeCached === true;
   const rect = getVisibleWorldBounds();
   const tasksByKey = new Map();
@@ -467,12 +491,14 @@ function getVisibleImagePreviewTasks(keys, options = {}) {
     const previous = tasksByKey.get(key);
     if (!previous || area > previous.area) tasksByKey.set(key, { key, obj, area });
   }
-  return [...tasksByKey.values()];
+  const tasks = [];
+  for (const task of tasksByKey.values()) tasks.push(task);
+  return tasks;
 }
 
 async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) {
   if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
-  const pendingKeys = new Set(Array.isArray(keys) ? keys.filter(Boolean) : []);
+  const pendingKeys = truthyKeySet(keys);
   const tasks = getVisibleImagePreviewTasks(keys, options);
   const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
   const t0 = performance.now();
@@ -500,21 +526,32 @@ async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) 
     else skipped++;
     return result;
   });
-  const resultRows = results.map((result) => ({
-    key: result?.key || '',
-    ready: result?.ready === true,
-    skipped: result?.skipped || '',
-    width: result?.width ?? '',
-    height: result?.height ?? '',
-    ms: result?.ms ?? '',
-    error: result?.error || '',
-  }));
-  const slowResults = [...resultRows]
-    .sort((a, b) => (Number(b.ms) || 0) - (Number(a.ms) || 0))
-    .slice(0, 24)
-    .map((row) => ({ ...row }));
+  const resultRows = new Array(results.length);
+  const slowResults = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const row = {
+      key: result?.key || '',
+      ready: result?.ready === true,
+      skipped: result?.skipped || '',
+      width: result?.width ?? '',
+      height: result?.height ?? '',
+      ms: result?.ms ?? '',
+      error: result?.error || '',
+    };
+    resultRows[i] = row;
+    const rowMs = Number(row.ms) || 0;
+    let insertAt = slowResults.length;
+    while (insertAt > 0 && rowMs > (Number(slowResults[insertAt - 1].ms) || 0)) insertAt--;
+    if (insertAt < 24) {
+      slowResults.splice(insertAt, 0, { ...row });
+      if (slowResults.length > 24) slowResults.pop();
+    }
+  }
   const slowest = slowResults[0] || null;
-  const sampleResults = resultRows.slice(0, 24).map((row) => ({ ...row }));
+  const sampleCount = Math.min(24, resultRows.length);
+  const sampleResults = new Array(sampleCount);
+  for (let i = 0; i < sampleCount; i++) sampleResults[i] = { ...resultRows[i] };
   const out = {
     count: keys.length,
     selected: tasks.length,
@@ -539,7 +576,7 @@ async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) 
 }
 
 function countVisibleImageBitmapSettle(keys) {
-  const visibleKeys = Array.isArray(keys) ? keys.filter(Boolean) : [];
+  const visibleKeys = truthyKeyList(keys);
   let ready = 0;
   let failed = 0;
   let missingStore = 0;
@@ -565,7 +602,7 @@ function countVisibleImageBitmapSettle(keys) {
 }
 
 async function settleVisibleImageBitmapsForOpen(keys, dbg = null) {
-  const visibleKeys = Array.isArray(keys) ? keys.filter(Boolean) : [];
+  const visibleKeys = truthyKeyList(keys);
   const count = visibleKeys.length;
   let state = countVisibleImageBitmapSettle(visibleKeys);
   const before = state.ready;
@@ -599,13 +636,13 @@ async function settleVisibleImageBitmapsForOpen(keys, dbg = null) {
     }
   }
   const ms = performance.now() - startedAt;
-  const pendingKeys = timedOut
-    ? visibleKeys.filter((key) => {
-        const source = BoardfishImageStore.getSource(key);
-        if (!source) return false;
-        return !imageBitmapCache[key] && !imageBitmapFailed.has(key);
-      })
-    : [];
+  const pendingKeys = [];
+  if (timedOut) {
+    for (const key of visibleKeys) {
+      const source = BoardfishImageStore.getSource(key);
+      if (source && !imageBitmapCache[key] && !imageBitmapFailed.has(key)) pendingKeys.push(key);
+    }
+  }
   OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', {
     count,
     before,

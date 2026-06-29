@@ -314,10 +314,14 @@
       return { downloadedCount: savedCount, skippedCount, method: 'download' };
     }
 
-    const zipEntries = downloads.map((item) => ({
-      name: item.name,
-      data: item.data,
-    }));
+    const zipEntries = new Array(downloads.length);
+    for (let i = 0; i < downloads.length; i++) {
+      const item = downloads[i];
+      zipEntries[i] = {
+        name: item.name,
+        data: item.data,
+      };
+    }
     ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 2, method: target?.handle ? 'zip-file-picker' : 'zip' });
     await yieldToEventLoop(dbg, 'web-before-zip', { entryCount: zipEntries.length });
     const zipStart = performance.now();

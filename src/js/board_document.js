@@ -62,7 +62,10 @@
     const pruned = {};
     let removed = 0;
     let kept = 0;
-    for (const [key, src] of Object.entries(imageStore || {})) {
+    const store = imageStore || {};
+    for (const key in store) {
+      if (!Object.prototype.hasOwnProperty.call(store, key)) continue;
+      const src = store[key];
       if (referenced.has(key)) {
         pruned[key] = src;
         kept++;
@@ -94,7 +97,10 @@
   function createBoardDataForSave({ viewport, imageStore, objects }, deps = {}) {
     const prune = pruneImageStoreForObjects(imageStore || {}, objects || []);
     const imageManifest = {};
-    for (const [key, src] of Object.entries(prune.imageStore || {})) {
+    const prunedStore = prune.imageStore || {};
+    for (const key in prunedStore) {
+      if (!Object.prototype.hasOwnProperty.call(prunedStore, key)) continue;
+      const src = prunedStore[key];
       imageManifest[key] = imageMetaForBoardFile(key, src, deps);
     }
     const data = {
@@ -123,7 +129,10 @@
     let cachedImages = 0;
     let bitmaps = 0;
     let bitmapFailures = 0;
-    for (const [key, src] of Object.entries(store || {})) {
+    const imageStore = store || {};
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      const src = imageStore[key];
       imageCount++;
       const bytes = imageStoreBytesEstimate(src);
       imageStoreBytes += bytes;
@@ -151,6 +160,16 @@
       otherRefs,
       ...(includeRuntime ? { cachedImages, bitmaps, bitmapFailures } : {}),
     };
+  }
+
+  function imageStoreByteTotal(store = {}, imageStoreBytesEstimate = () => 0) {
+    let total = 0;
+    const imageStore = store || {};
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      total += imageStoreBytesEstimate(imageStore[key]);
+    }
+    return total;
   }
 
   function getObjectTypeCounts(objectsList = []) {
@@ -188,8 +207,10 @@
     let runtimeTextPrivateFields = 0;
     for (const obj of objectsList || []) {
       if (obj?.type !== 'text') continue;
-      const privateKeys = Object.keys(obj).filter((key) => key.startsWith('_'));
-      runtimeTextPrivateFields += privateKeys.length;
+      for (const key in obj) {
+        if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+        if (key.startsWith('_')) runtimeTextPrivateFields++;
+      }
       if (Array.isArray(obj._layoutCache)) {
         runtimeTextCacheObjects++;
         runtimeTextCacheLines += obj._layoutCache.length;
@@ -224,7 +245,7 @@
       ...textSummary,
       ...runtimeTextSummary,
       imageStoreBytes: imageSummary.imageStoreBytes,
-      rawImageStoreBytes: Object.values(rawImageStore).reduce((sum, src) => sum + imageStoreBytesEstimate(src), 0),
+      rawImageStoreBytes: imageStoreByteTotal(rawImageStore, imageStoreBytesEstimate),
       largestImageKey: imageSummary.largestImageKey,
       largestImageBytes: imageSummary.largestImageBytes,
       historyLength: deps.historyLength ?? 0,
@@ -255,7 +276,10 @@
     const rows = [];
     const runtime = deps.runtime || {};
     const imageRefKind = deps.imageRefKind || defaultImageRefKind;
-    for (const [key, src] of Object.entries(store || {})) {
+    const imageStore = store || {};
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      const src = imageStore[key];
       rows.push({
         key,
         kind: imageRefKind(src),

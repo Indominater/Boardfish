@@ -209,15 +209,29 @@
       type: file.type || '',
       size: file.size ?? '',
     });
-    return {
-      itemTypes: [...(clipboardData.items || [])].map((item) => item.type || item.kind || ''),
-      items: [...(clipboardData.items || [])].map((item) => ({
+    const itemTypes = [];
+    const items = [];
+    for (const item of clipboardData.items || []) {
+      itemTypes.push(item.type || item.kind || '');
+      items.push({
         kind: item.kind || '',
         type: item.type || '',
-      })),
-      fileTypes: [...(clipboardData.files || [])].map((file) => file.type || ''),
-      files: [...(clipboardData.files || [])].map(describeFile),
-      types: [...(clipboardData.types || [])],
+      });
+    }
+    const fileTypes = [];
+    const files = [];
+    for (const file of clipboardData.files || []) {
+      fileTypes.push(file.type || '');
+      files.push(describeFile(file));
+    }
+    const types = [];
+    for (const type of clipboardData.types || []) types.push(type);
+    return {
+      itemTypes,
+      items,
+      fileTypes,
+      files,
+      types,
     };
   }
 

@@ -3,7 +3,7 @@
 var FONT_SIZE = 16;
 var LINE_H    = 24;
 var TEXT_PAD  = 16;
-var NEW_TEXT_EDIT_MIN_LINES = 3;
+var NEW_TEXT_EDIT_MIN_LINES = 1;
 const regular_text = 400;
 const TEXT_FONT_STYLE = 'normal';
 const TEXT_FONT_FAMILY = "'Geist Sans', system-ui";
@@ -151,7 +151,7 @@ const textScriptScaleForDepth = (depth) => Math.pow(TEXT_SCRIPT_FONT_SCALE, text
 
 function defaultTextBoxSize() {
   const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-  return { w: h * 2, h };
+  return { w: h * 8, h };
 }
 
 const textFontForScriptDepth = (depth) => {
@@ -360,6 +360,48 @@ const cloneTextLayoutRuntimeLine = (line) => {
   return clone;
 };
 
+const cloneTextLayoutScriptRanges = (ranges = []) => {
+  const out = new Array(ranges.length);
+  for (let i = 0; i < ranges.length; i++) out[i] = { ...ranges[i] };
+  return out;
+};
+
+const cloneTextWrappedLineIndexEntries = (entries = []) => {
+  const out = new Array(entries.length);
+  for (let i = 0; i < entries.length; i++) out[i] = { ...entries[i] };
+  return out;
+};
+
+const cloneTextLayoutRuntimeLines = (lines = []) => {
+  const out = new Array(lines.length);
+  for (let i = 0; i < lines.length; i++) out[i] = cloneTextLayoutRuntimeLine(lines[i]);
+  return out;
+};
+
+function replaceArraySegmentInPlace(target, start, deleteCount, inserted = []) {
+  if (!Array.isArray(target)) return target;
+  const source = Array.isArray(inserted) ? inserted : [];
+  const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, target.length));
+  const removeCount = Math.max(0, Math.min(Math.trunc(Number(deleteCount)) || 0, target.length - from));
+  const insertCount = source.length;
+  const suffixStart = from + removeCount;
+  const suffixLength = target.length - suffixStart;
+  const newLength = from + insertCount + suffixLength;
+  if (insertCount > removeCount) {
+    target.length = newLength;
+    for (let i = suffixLength - 1; i >= 0; i--) {
+      target[from + insertCount + i] = target[suffixStart + i];
+    }
+  } else if (insertCount < removeCount) {
+    for (let i = 0; i < suffixLength; i++) {
+      target[from + insertCount + i] = target[suffixStart + i];
+    }
+    target.length = newLength;
+  }
+  for (let i = 0; i < insertCount; i++) target[from + i] = source[i];
+  return target;
+}
+
 function cloneTextObjectRuntimeCaches(source, target) {
   if (!source || !target || source.type !== 'text' || target.type !== 'text') return target;
   const content = normalizeTextContent(target.data?.content || '');
@@ -371,7 +413,7 @@ function cloneTextObjectRuntimeCaches(source, target) {
     source._textScriptRangesCacheContent === content &&
     source._textScriptRangesCacheSourceKey === sourceScriptKey
   ) {
-    target._textScriptRangesCache = source._textScriptRangesCache.map((range) => ({ ...range }));
+    target._textScriptRangesCache = cloneTextLayoutScriptRanges(source._textScriptRangesCache);
     target._textScriptRangesCacheContent = content;
     target._textScriptRangesCacheSourceKey = JSON.stringify(target._textScriptRangesCache);
   }
@@ -441,7 +483,7 @@ function cloneTextObjectRuntimeCaches(source, target) {
     target._textWrappedLineIndexCacheScriptKey = source._textWrappedLineIndexCacheScriptKey;
     target._textWrappedLineIndexCache = {
       lineCount: source._textWrappedLineIndexCache.lineCount,
-      entries: source._textWrappedLineIndexCache.entries.map((entry) => ({ ...entry })),
+      entries: cloneTextWrappedLineIndexEntries(source._textWrappedLineIndexCache.entries),
     };
   }
 
@@ -452,7 +494,7 @@ function cloneTextObjectRuntimeCaches(source, target) {
     typeof source._layoutCacheScriptKey === 'string' &&
     source._layoutCacheAlignKey === textLayoutAlignKey(target, content)
   ) {
-    target._layoutCache = source._layoutCache.map(cloneTextLayoutRuntimeLine);
+    target._layoutCache = cloneTextLayoutRuntimeLines(source._layoutCache);
     target._layoutCacheKey = source._layoutCacheKey;
     target._layoutCacheContent = source._layoutCacheContent;
     target._layoutCacheW = source._layoutCacheW;
@@ -716,15 +758,20 @@ function setCachedTextWrappedLineIndex(obj, content, scriptKey, entries, lineCou
   obj._textWrappedLineIndexCacheContent = text;
   obj._textWrappedLineIndexCacheW = obj.w;
   obj._textWrappedLineIndexCacheScriptKey = scriptKey;
-  const cache = {
-    lineCount: count,
-    entries: entries.map((entry) => ({
+  const normalizedEntries = new Array(entries.length);
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    normalizedEntries[i] = {
       logicalLineIndex: Math.max(0, Math.trunc(Number(entry.logicalLineIndex)) || 0),
       startIndex: Math.max(0, Math.trunc(Number(entry.startIndex)) || 0),
       endIndex: Math.max(0, Math.trunc(Number(entry.endIndex)) || 0),
       visualStart: Math.max(0, Math.trunc(Number(entry.visualStart)) || 0),
       visualEnd: Math.max(0, Math.trunc(Number(entry.visualEnd)) || 0),
-    })),
+    };
+  }
+  const cache = {
+    lineCount: count,
+    entries: normalizedEntries,
   };
   obj._textWrappedLineIndexCache = cache;
   setCachedTextWrappedLineCount(obj, text, scriptKey, count);
@@ -1379,6 +1426,12 @@ function wrappedLineFromLayoutLine(line) {
   };
 }
 
+function wrappedLinesFromLayout(layout) {
+  const lines = new Array(layout.length);
+  for (let i = 0; i < layout.length; i++) lines[i] = wrappedLineFromLayoutLine(layout[i]);
+  return lines;
+}
+
 function wrappedLineIndexFromLayout(layout) {
   const lines = Array.isArray(layout) ? layout : [];
   const entries = [];
@@ -1448,7 +1501,12 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   mark('rangeMs', stepStartedAt);
 
   const oldScriptKey = obj._layoutCacheScriptKey || '';
-  const oldScriptRanges = layout.find((line) => Array.isArray(line?.scriptRanges))?.scriptRanges || [];
+  let oldScriptRanges = [];
+  for (const line of layout) {
+    if (!Array.isArray(line?.scriptRanges)) continue;
+    oldScriptRanges = line.scriptRanges;
+    break;
+  }
   stepStartedAt = textLayoutDebugNow();
   const oldSplice = textLayoutSpliceRangeForLogicalLines(layout, oldRange.startLine, oldRange.endLine);
   mark('spliceMs', stepStartedAt);
@@ -1492,9 +1550,10 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   mark('wrapMs', stepStartedAt);
 
   stepStartedAt = textLayoutDebugNow();
-  const insertedLayout = newWrapped.map((line, offset) => (
-    layoutLineFromWrappedLine(obj, line, oldSplice.start + offset, scriptRanges, scriptMetrics)
-  ));
+  const insertedLayout = new Array(newWrapped.length);
+  for (let i = 0; i < newWrapped.length; i++) {
+    insertedLayout[i] = layoutLineFromWrappedLine(obj, newWrapped[i], oldSplice.start + i, scriptRanges, scriptMetrics);
+  }
   mark('insertLayoutMs', stepStartedAt);
 
   const removedLayoutCount = oldSplice.end - oldSplice.start;
@@ -1526,7 +1585,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
     line.textY = line.y + TEXT_BASELINE_Y_OFFSET;
     setTextLayoutLineScriptMetrics(line, scriptMetrics);
   }
-  layout.splice(oldSplice.start, removedLayoutCount, ...insertedLayout);
+  replaceArraySegmentInPlace(layout, oldSplice.start, removedLayoutCount, insertedLayout);
   mark('remapMs', stepStartedAt);
 
   obj._layoutCacheKey = `${newContent.length}:${obj.w}:${scriptKey.length}:${alignKey}`;
@@ -1554,7 +1613,9 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
       if (Number.isFinite(line.nextStartIndex)) line.nextStartIndex += deltaChars;
       line.logicalLineIndex = (line.logicalLineIndex || 0) + logicalLineDelta;
     }
-    cachedWrapped.lines.splice(oldSplice.start, removedLayoutCount, ...newWrapped.map((line) => ({ ...line })));
+    const insertedWrapped = new Array(newWrapped.length);
+    for (let i = 0; i < newWrapped.length; i++) insertedWrapped[i] = { ...newWrapped[i] };
+    replaceArraySegmentInPlace(cachedWrapped.lines, oldSplice.start, removedLayoutCount, insertedWrapped);
     cachedWrapped.content = newContent;
     cachedWrapped.w = obj.w;
     cachedWrapped.scriptKey = scriptKey;
@@ -1564,7 +1625,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
       content: newContent,
       w: obj.w,
       scriptKey,
-      lines: layout.map(wrappedLineFromLayoutLine),
+      lines: wrappedLinesFromLayout(layout),
       lineCount: Math.max(1, layout.length),
     });
   }
@@ -1744,8 +1805,11 @@ const normalizeTextScriptRangesForContent = (content, scriptRanges = []) => {
   }
   ranges.sort((a, b) => a.start - b.start || a.end - b.end);
   const normalized = [];
+  const seen = new Set();
   for (const range of ranges) {
-    if (normalized.some((item) => item.start === range.start && item.end === range.end && item.kind === range.kind)) continue;
+    const key = `${range.start}:${range.end}:${range.kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     normalized.push({ ...range });
   }
   return normalized;
@@ -1803,7 +1867,9 @@ const getTextScriptRanges = (obj) => {
     return [];
   }
   const bracedRanges = deriveBracedTextScriptRangesFromContent(content);
-  const combined = [...source, ...bracedRanges];
+  const combined = new Array(source.length + bracedRanges.length);
+  for (let i = 0; i < source.length; i++) combined[i] = source[i];
+  for (let i = 0; i < bracedRanges.length; i++) combined[source.length + i] = bracedRanges[i];
   if (combined.length) {
     const normalized = normalizeTextScriptRangesForContent(content, combined);
     if (normalized.length) {
@@ -1830,12 +1896,17 @@ const getTextScriptRangesForLayout = (obj) => getTextScriptRanges(obj);
 
 const textContentWithCanonicalScriptBraces = (content, scriptRanges = [], options = {}) => {
   const text = normalizeTextContent(content);
-  const ranges = options.normalized === true
-    ? (Array.isArray(scriptRanges) ? scriptRanges : []).map((range) => ({ ...range }))
-    : normalizeTextScriptRangesForContent(text, [
-      ...(Array.isArray(scriptRanges) ? scriptRanges : []),
-      ...deriveBracedTextScriptRangesFromContent(text),
-    ]);
+  let ranges = [];
+  if (options.normalized === true) {
+    ranges = cloneTextLayoutScriptRanges(Array.isArray(scriptRanges) ? scriptRanges : []);
+  } else {
+    const sourceRanges = Array.isArray(scriptRanges) ? scriptRanges : [];
+    const bracedRanges = deriveBracedTextScriptRangesFromContent(text);
+    const combinedRanges = new Array(sourceRanges.length + bracedRanges.length);
+    for (let i = 0; i < sourceRanges.length; i++) combinedRanges[i] = sourceRanges[i];
+    for (let i = 0; i < bracedRanges.length; i++) combinedRanges[sourceRanges.length + i] = bracedRanges[i];
+    ranges = normalizeTextScriptRangesForContent(text, combinedRanges);
+  }
   if (!ranges.length) return text;
 
   const rangesByMarkerIndex = new Map();
@@ -1845,7 +1916,9 @@ const textContentWithCanonicalScriptBraces = (content, scriptRanges = [], option
     const existing = rangesByMarkerIndex.get(markerIndex);
     if (!existing || range.end > existing.end) rangesByMarkerIndex.set(markerIndex, range);
   }
-  const markerIndices = [...rangesByMarkerIndex.keys()].sort((a, b) => a - b);
+  const markerIndices = [];
+  for (const markerIndex of rangesByMarkerIndex.keys()) markerIndices.push(markerIndex);
+  markerIndices.sort((a, b) => a - b);
   const nextMarkerAtOrAfter = (index) => {
     let lo = 0;
     let hi = markerIndices.length;
@@ -1933,7 +2006,7 @@ const activeTextScriptRangesAt = (ranges, index, { includeEnd = false, affinity 
     }
     active.push(range);
   }
-  active.sort((a, b) => a.start - b.start || b.end - a.end || a.kind.localeCompare(b.kind));
+  if (active.length > 1) active.sort((a, b) => a.start - b.start || b.end - a.end || a.kind.localeCompare(b.kind));
   return active;
 };
 
@@ -2032,14 +2105,26 @@ function spliceTextMetricPositionByteArray(oldArray, start, insertedArray, newLe
 function spliceTextMetricStateArray(oldArray, start, insertedArray) {
   const oldStates = Array.isArray(oldArray) ? oldArray : [];
   const inserted = Array.isArray(insertedArray) ? insertedArray : [];
-  return oldStates.slice(0, start).concat(inserted, oldStates.slice(start));
+  const boundary = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, oldStates.length));
+  const out = new Array(oldStates.length + inserted.length);
+  for (let i = 0; i < boundary; i++) out[i] = oldStates[i];
+  for (let i = 0; i < inserted.length; i++) out[boundary + i] = inserted[i];
+  for (let i = boundary; i < oldStates.length; i++) out[inserted.length + i] = oldStates[i];
+  return out;
 }
 
 function spliceTextMetricCaretStateArray(oldArray, start, insertedArray) {
   const oldStates = Array.isArray(oldArray) ? oldArray : [];
   const inserted = Array.isArray(insertedArray) ? insertedArray : [];
-  const boundary = Math.max(0, Math.min(start, Math.max(0, oldStates.length - 1)));
-  return oldStates.slice(0, boundary + 1).concat(inserted.slice(1), oldStates.slice(boundary + 1));
+  const startIndex = Math.trunc(Number(start)) || 0;
+  const boundary = Math.max(0, Math.min(startIndex, Math.max(0, oldStates.length - 1)));
+  const insertedSuffixLength = Math.max(0, inserted.length - 1);
+  const prefixLength = Math.min(boundary + 1, oldStates.length);
+  const out = new Array(oldStates.length + insertedSuffixLength);
+  for (let i = 0; i < prefixLength; i++) out[i] = oldStates[i];
+  for (let i = 1; i < inserted.length; i++) out[prefixLength + i - 1] = inserted[i];
+  for (let i = prefixLength; i < oldStates.length; i++) out[insertedSuffixLength + i] = oldStates[i];
+  return out;
 }
 
 function deleteTextMetricByteArray(oldArray, start, end, newLength) {
@@ -2064,14 +2149,25 @@ function deleteTextMetricPositionByteArray(oldArray, start, end, newLength) {
 
 function deleteTextMetricStateArray(oldArray, start, end) {
   const oldStates = Array.isArray(oldArray) ? oldArray : [];
-  return oldStates.slice(0, start).concat(oldStates.slice(end));
+  const prefixEnd = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, oldStates.length));
+  const suffixStart = Math.max(prefixEnd, Math.min(Math.trunc(Number(end)) || 0, oldStates.length));
+  const out = new Array(prefixEnd + oldStates.length - suffixStart);
+  for (let i = 0; i < prefixEnd; i++) out[i] = oldStates[i];
+  for (let i = suffixStart; i < oldStates.length; i++) out[prefixEnd + i - suffixStart] = oldStates[i];
+  return out;
 }
 
 function deleteTextMetricCaretStateArray(oldArray, start, end) {
   const oldStates = Array.isArray(oldArray) ? oldArray : [];
-  const boundary = Math.max(0, Math.min(start, Math.max(0, oldStates.length - 1)));
-  const suffixStart = Math.max(boundary + 1, Math.min(end + 1, oldStates.length));
-  return oldStates.slice(0, boundary + 1).concat(oldStates.slice(suffixStart));
+  const startIndex = Math.trunc(Number(start)) || 0;
+  const endIndex = Math.trunc(Number(end)) || 0;
+  const boundary = Math.max(0, Math.min(startIndex, Math.max(0, oldStates.length - 1)));
+  const suffixStart = Math.max(boundary + 1, Math.min(endIndex + 1, oldStates.length));
+  const prefixLength = Math.min(boundary + 1, oldStates.length);
+  const out = new Array(prefixLength + oldStates.length - suffixStart);
+  for (let i = 0; i < prefixLength; i++) out[i] = oldStates[i];
+  for (let i = suffixStart; i < oldStates.length; i++) out[prefixLength + i - suffixStart] = oldStates[i];
+  return out;
 }
 
 function textScriptRangeKey(range) {
@@ -2279,7 +2375,13 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
       state = BASE_TEXT_SCRIPT_STATE;
       return;
     }
-    const sorted = active.slice().sort((a, b) => a.start - b.start || b.end - a.end || a.kind.localeCompare(b.kind));
+    if (active.length === 1) {
+      state = textScriptStateFromRanges(active);
+      return;
+    }
+    const sorted = new Array(active.length);
+    for (let i = 0; i < active.length; i++) sorted[i] = active[i];
+    sorted.sort((a, b) => a.start - b.start || b.end - a.end || a.kind.localeCompare(b.kind));
     state = textScriptStateFromRanges(sorted);
   };
 
@@ -2287,7 +2389,7 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
     let changed = false;
     const starting = starts.get(index);
     if (starting) {
-      active.push(...starting);
+      for (const range of starting) active.push(range);
       changed = true;
     }
     if (changed) refreshState();
@@ -2295,7 +2397,19 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
 
     const ending = ends.get(index);
     if (ending) {
-      active = active.filter((range) => !ending.includes(range));
+      let write = 0;
+      for (let read = 0; read < active.length; read++) {
+        const range = active[read];
+        let remove = false;
+        for (const endedRange of ending) {
+          if (range === endedRange) {
+            remove = true;
+            break;
+          }
+        }
+        if (!remove) active[write++] = range;
+      }
+      active.length = write;
       refreshState();
     }
     if (index < text.length) states[index] = state;
@@ -2466,7 +2580,11 @@ function calculateTextLayout(obj) {
   const scriptMetrics = scriptRanges.length
     ? getTextScriptLayoutMetricsForObject(obj, obj.data.content, scriptRanges)
     : null;
-  return lines.map((line, i) => layoutLineFromWrappedLine(obj, line, i, scriptRanges, scriptMetrics));
+  const layout = new Array(lines.length);
+  for (let i = 0; i < lines.length; i++) {
+    layout[i] = layoutLineFromWrappedLine(obj, lines[i], i, scriptRanges, scriptMetrics);
+  }
+  return layout;
 }
 
 function textLayoutAlignKey(obj, content) {
@@ -2639,23 +2757,33 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, scriptRanges, s
   const scriptMetrics = scriptRanges.length
     ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
     : null;
-  const wrappedLines = wrapTextLogicalLineRange(obj, firstEntry.entry.logicalLineIndex, lastEntry.entry.logicalLineIndex, {
+  const wrappedSourceLines = wrapTextLogicalLineRange(obj, firstEntry.entry.logicalLineIndex, lastEntry.entry.logicalLineIndex, {
     scriptRanges,
     scriptMetrics,
     visualLineStartByLogicalLine,
     logicalLineEntriesByIndex,
-  }).filter((line) => (
-    Number.isFinite(line?.visualLineIndex) &&
-    line.visualLineIndex >= first &&
-    line.visualLineIndex <= actualLast
-  ));
-  const layout = wrappedLines.map((line) => layoutLineFromWrappedLine(
-    obj,
-    line,
-    line.visualLineIndex,
-    scriptRanges,
-    scriptMetrics,
-  ));
+  });
+  const wrappedLines = [];
+  for (const line of wrappedSourceLines) {
+    if (
+      Number.isFinite(line?.visualLineIndex) &&
+      line.visualLineIndex >= first &&
+      line.visualLineIndex <= actualLast
+    ) {
+      wrappedLines.push(line);
+    }
+  }
+  const layout = new Array(wrappedLines.length);
+  for (let i = 0; i < wrappedLines.length; i++) {
+    const line = wrappedLines[i];
+    layout[i] = layoutLineFromWrappedLine(
+      obj,
+      line,
+      line.visualLineIndex,
+      scriptRanges,
+      scriptMetrics,
+    );
+  }
   return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, totalLines);
 }
 
@@ -2731,13 +2859,17 @@ function getTextLayoutForLineRange(obj, firstLineIndex = 0, lastLineIndex = firs
     const scriptMetrics = scriptRanges.length
       ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
       : null;
-    const layout = wrapped.lines.map((line, i) => layoutLineFromWrappedLine(
-      obj,
-      line,
-      Number.isFinite(line?.visualLineIndex) ? line.visualLineIndex : first + i,
-      scriptRanges,
-      scriptMetrics,
-    ));
+    const layout = new Array(wrapped.lines.length);
+    for (let i = 0; i < wrapped.lines.length; i++) {
+      const line = wrapped.lines[i];
+      layout[i] = layoutLineFromWrappedLine(
+        obj,
+        line,
+        Number.isFinite(line?.visualLineIndex) ? line.visualLineIndex : first + i,
+        scriptRanges,
+        scriptMetrics,
+      );
+    }
     return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, wrapped.lineCount);
   }
   lineIndexCache = ensureCachedTextWrappedLineIndex(obj, content, scriptRanges, scriptKey);
@@ -2746,7 +2878,8 @@ function getTextLayoutForLineRange(obj, firstLineIndex = 0, lastLineIndex = firs
   if (missingSpans.length) {
     const actualLast = Math.min(last, totalLineCount - 1);
     const requestedLineCount = first <= actualLast ? actualLast - first + 1 : 0;
-    const missingLineCount = missingSpans.reduce((sum, span) => sum + span.last - span.first + 1, 0);
+    let missingLineCount = 0;
+    for (const span of missingSpans) missingLineCount += span.last - span.first + 1;
     if (requestedLineCount > 0 && missingLineCount < requestedLineCount) {
       for (const span of missingSpans) {
         buildTextViewportLayoutRangeFromLineIndex(obj, content, scriptRanges, scriptKey, alignKey, span.first, span.last, lineIndexCache);
@@ -2779,13 +2912,17 @@ function getTextLayoutForLineRange(obj, firstLineIndex = 0, lastLineIndex = firs
   const scriptMetrics = scriptRanges.length
     ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
     : null;
-  const layout = wrapped.lines.map((line, i) => layoutLineFromWrappedLine(
-    obj,
-    line,
-    Number.isFinite(line?.visualLineIndex) ? line.visualLineIndex : first + i,
-    scriptRanges,
-    scriptMetrics,
-  ));
+  const layout = new Array(wrapped.lines.length);
+  for (let i = 0; i < wrapped.lines.length; i++) {
+    const line = wrapped.lines[i];
+    layout[i] = layoutLineFromWrappedLine(
+      obj,
+      line,
+      Number.isFinite(line?.visualLineIndex) ? line.visualLineIndex : first + i,
+      scriptRanges,
+      scriptMetrics,
+    );
+  }
   return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, wrapped.lineCount);
 }
 
@@ -3104,10 +3241,16 @@ const normalizeTextLayoutHitCaretIndex = (line, index, direction = 'forward', ob
   const ranges = line?.scriptRanges || [];
   let pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
   const step = direction === 'backward' ? -1 : 1;
-  const shouldSkip = () => ranges.some((range) => {
-    if (isTextScriptBracedRange(text, range)) return range.start === pos;
-    return range.start === pos + 1;
-  });
+  const shouldSkip = () => {
+    for (const range of ranges) {
+      if (isTextScriptBracedRange(text, range)) {
+        if (range.start === pos) return true;
+      } else if (range.start === pos + 1) {
+        return true;
+      }
+    }
+    return false;
+  };
   let guard = text.length + 1;
   while (guard-- > 0 && pos >= 0 && pos <= text.length && shouldSkip()) {
     pos += step;
@@ -3203,10 +3346,24 @@ function layoutHitTestCaret(layout, wx, wy, obj) {
   if (!line.text.length) return { index: line.startIndex, affinity: '', lineStartIndex: line.startIndex };
   const candidates = textLayoutCaretHitCandidates(line, wx, obj);
   if (candidates.length) {
-    candidates.sort((a, b) => Math.abs(a.centerY - wy) - Math.abs(b.centerY - wy) ||
-      a.index - b.index ||
-      String(a.affinity).localeCompare(String(b.affinity)));
-    const hit = candidates[0];
+    let hit = candidates[0];
+    let hitDistance = Math.abs(hit.centerY - wy);
+    for (let i = 1; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      const candidateDistance = Math.abs(candidate.centerY - wy);
+      if (
+        candidateDistance < hitDistance ||
+        (candidateDistance === hitDistance && candidate.index < hit.index) ||
+        (
+          candidateDistance === hitDistance &&
+          candidate.index === hit.index &&
+          String(candidate.affinity).localeCompare(String(hit.affinity)) < 0
+        )
+      ) {
+        hit = candidate;
+        hitDistance = candidateDistance;
+      }
+    }
     TextSelDebug._logHit(wx, wy, obj, line, hit.index, line.prefixWidths);
     return { index: hit.index, affinity: hit.affinity || '', lineStartIndex: line.startIndex };
   }

@@ -82,6 +82,48 @@ function scaleFor(context, options) {
   );
 }
 
+test('grouped bitmap cache prunes the least recently used variant', () => {
+  const context = loadImageVariants();
+  const closed = [];
+  const evicted = [];
+  const store = context.BoardfishBitmapCache.createGroupedLruCache({
+    memoryLimit: 10,
+    closeEntry: (entry) => closed.push(entry.id),
+    entryBytes: (entry) => entry.bytes,
+    onEvict: (entry, key, slot) => evicted.push({ id: entry.id, key, slot }),
+  });
+
+  store.set('img-a', 0.25, { id: 'a', bytes: 4 });
+  store.set('img-b', 0.25, { id: 'b', bytes: 4 });
+  store.get('img-a', 0.25);
+  store.set('img-c', 0.25, { id: 'c', bytes: 4 });
+
+  assert.equal(store.get('img-a', 0.25).id, 'a');
+  assert.equal(store.get('img-b', 0.25), null);
+  assert.equal(store.get('img-c', 0.25).id, 'c');
+  assert.deepEqual(closed, ['b']);
+  assert.deepEqual(evicted, [{ id: 'b', key: 'img-b', slot: 0.25 }]);
+  assert.equal(store.bytes, 8);
+});
+
+test('grouped bitmap cache keeps a group tracked when replacing its only variant', () => {
+  const context = loadImageVariants();
+  const closed = [];
+  const store = context.BoardfishBitmapCache.createGroupedLruCache({
+    memoryLimit: 12,
+    closeEntry: (entry) => closed.push(entry.id),
+    entryBytes: (entry) => entry.bytes,
+  });
+
+  store.set('img-a', 0.25, { id: 'a1', bytes: 4 });
+  store.set('img-a', 0.25, { id: 'a2', bytes: 4 });
+
+  assert.equal(store.get('img-a', 0.25).id, 'a2');
+  assert.equal(store.groups.get('img-a').get(0.25).id, 'a2');
+  assert.deepEqual(closed, ['a1']);
+  assert.equal(store.bytes, 4);
+});
+
 test('chooses the smallest scaled variant that preserves display-pixel detail', () => {
   const context = loadImageVariants();
 
@@ -593,7 +635,9 @@ test('undo-history lifecycle prunes image caches to current board, history, and 
   assert.match(historySource, /collectImageKeysFromObjects\(objects, keys\)/);
   assert.match(historySource, /for \(const entry of boardHistory\)/);
   assert.match(historySource, /collectImageKeysFromObjects\(jsClipboard\?\.objects, keys\)/);
-  assert.match(historySource, /Object\.keys\(jsClipboard\?\.imageData \|\| \{\}\)/);
+  assert.match(historySource, /const clipboardImageData = jsClipboard\?\.imageData \|\| \{\};/);
+  assert.match(historySource, /for \(const key in clipboardImageData\)/);
+  assert.match(historySource, /keys\.add\(key\)/);
   assert.match(historySource, /pruneImageCachesToKeys\(retainedKeys\)/);
 });
 

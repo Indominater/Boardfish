@@ -68,7 +68,8 @@
   }
 
   function concatBytes(parts) {
-    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    let total = 0;
+    for (const part of parts) total += part.length;
     const out = new Uint8Array(total);
     let offset = 0;
     for (const part of parts) {
@@ -209,11 +210,15 @@
   }
 
   function createZip(entries) {
-    const normalized = entries.map((entry) => ({
-      name: entry.name,
-      data: entry.data instanceof Uint8Array ? entry.data : new Uint8Array(entry.data || []),
-      date: entry.date || new Date(),
-    }));
+    const normalized = new Array(entries.length);
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      normalized[i] = {
+        name: entry.name,
+        data: entry.data instanceof Uint8Array ? entry.data : new Uint8Array(entry.data || []),
+        date: entry.date || new Date(),
+      };
+    }
     for (const entry of normalized) entry.crc = crc32(entry.data);
 
     const localParts = [];
@@ -228,15 +233,20 @@
     const centralOffset = offset;
     const central = concatBytes(centralParts);
     const eocd = endOfCentralDirectory(normalized.length, central.length, centralOffset);
-    return concatBytes([...localParts, central, eocd]);
+    localParts.push(central, eocd);
+    return concatBytes(localParts);
   }
 
   async function createZipBlob(entries, options = {}) {
-    const normalized = entries.map((entry) => ({
-      name: entry.name,
-      data: entry.data instanceof Uint8Array ? entry.data : new Uint8Array(entry.data || []),
-      date: entry.date || new Date(),
-    }));
+    const normalized = new Array(entries.length);
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      normalized[i] = {
+        name: entry.name,
+        data: entry.data instanceof Uint8Array ? entry.data : new Uint8Array(entry.data || []),
+        date: entry.date || new Date(),
+      };
+    }
     const yieldState = {
       everyMs: Number(options.yieldEveryMs) || 48,
       lastYieldAt: nowMs(),
@@ -255,9 +265,9 @@
     const centralOffset = offset;
     const central = concatBytes(centralParts);
     const eocd = endOfCentralDirectory(normalized.length, central.length, centralOffset);
-    const parts = [...localParts, central, eocd];
+    localParts.push(central, eocd);
     const byteLength = offset + central.length + eocd.length;
-    const blob = new Blob(parts, { type: 'application/octet-stream' });
+    const blob = new Blob(localParts, { type: 'application/octet-stream' });
     const keepBytesBelow = Number(options.keepBytesBelow) || 8 * 1024 * 1024;
     const materializeBytes = options.materializeBytes !== false;
     const isSmallPayload = byteLength <= keepBytesBelow;
@@ -318,7 +328,7 @@
       const nextOffset = nameStart + nameLength + extraLength + commentLength;
       ensureByteRange(bytes, nameStart, nameLength, 'invalid Boardfish container entry name');
       if (nextOffset > centralEnd) throw invalidContainerError('invalid Boardfish container entry');
-      const name = utf8Decode(bytes.slice(nameStart, nameStart + nameLength));
+      const name = utf8Decode(bytes.subarray(nameStart, nameStart + nameLength));
       entries.set(name, { name, method, crc, compressedSize, uncompressedSize, localOffset });
       offset = nextOffset;
     }
@@ -341,12 +351,14 @@
   }
 
   function entryReadLimit(entry, maxBytes) {
-    const limits = [];
     const advertisedSize = Number(entry?.uncompressedSize);
     const max = Number(maxBytes);
-    if (Number.isFinite(advertisedSize)) limits.push(Math.max(0, advertisedSize));
-    if (Number.isFinite(max)) limits.push(Math.max(0, max));
-    return limits.length ? Math.min(...limits) : Infinity;
+    const hasAdvertisedSize = Number.isFinite(advertisedSize);
+    const hasMax = Number.isFinite(max);
+    if (hasAdvertisedSize && hasMax) return Math.min(Math.max(0, advertisedSize), Math.max(0, max));
+    if (hasAdvertisedSize) return Math.max(0, advertisedSize);
+    if (hasMax) return Math.max(0, max);
+    return Infinity;
   }
 
   function throwEntryTooLarge(entry, actualBytes, options = {}) {
@@ -621,7 +633,12 @@
       `images/${key}.webp`,
       `images/${key}.gif`,
     ];
-    return [...new Set(paths.filter(Boolean))];
+    const out = [];
+    for (const path of paths) {
+      if (!path || out.includes(path)) continue;
+      out.push(path);
+    }
+    return out;
   }
 
   function mimeForImageSource(source, manifest = {}) {
@@ -645,7 +662,9 @@
 
   function buildImageEntries(board, rawImageStore = {}) {
     const entries = [];
-    for (const key of Object.keys(board?.imageStore || {})) {
+    const imageStore = board?.imageStore || {};
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
       const manifest = manifestEntryForKey(board, key);
       const source = rawImageStore[key];
       const bytes = bytesForImageSource(source);
@@ -665,11 +684,13 @@
     const boardJson = JSON.stringify(board);
     const boardBytes = utf8Encode(boardJson);
     const imageEntries = buildImageEntries(board, rawImageStore);
-    const imageBytes = imageEntries.reduce((sum, entry) => sum + entry.byteLength, 0);
-    const zip = await createZipBlob([
-      { name: 'board.json', data: boardBytes },
-      ...imageEntries.map((entry) => ({ name: entry.path, data: entry.bytes })),
-    ], options);
+    let imageBytes = 0;
+    const zipEntries = [{ name: 'board.json', data: boardBytes }];
+    for (const entry of imageEntries) {
+      imageBytes += entry.byteLength;
+      zipEntries.push({ name: entry.path, data: entry.bytes });
+    }
+    const zip = await createZipBlob(zipEntries, options);
     return {
       blob: zip.blob,
       bytes: zip.bytes,
@@ -733,10 +754,18 @@
     let eagerImageRefCount = 0;
 
     try {
-      for (const [key, manifest] of Object.entries(board.imageStore || {})) {
+      const imageStore = board.imageStore || {};
+      for (const key in imageStore) {
+        if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+        const manifest = imageStore[key];
         const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
         const candidates = candidateImageEntryPaths(key, manifestObject);
-        const path = candidates.find((candidate) => entries.has(candidate)) || candidates[0];
+        let path = candidates[0];
+        for (const candidate of candidates) {
+          if (!entries.has(candidate)) continue;
+          path = candidate;
+          break;
+        }
         const imageEntry = entries.get(path);
         if (!imageEntry) throw new Error(`Boardfish file is missing ${path}`);
         const advertisedImageBytes = zipEntryContentBytes(imageEntry);
@@ -814,7 +843,9 @@
         imageRefMs += nowMs() - imageRefStart;
       }
     } catch (err) {
-      for (const source of Object.values(nextSources)) revokeImageSource(source);
+      for (const key in nextSources) {
+        if (Object.prototype.hasOwnProperty.call(nextSources, key)) revokeImageSource(nextSources[key]);
+      }
       throw err;
     }
     containerBytes = null;

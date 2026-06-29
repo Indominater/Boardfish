@@ -42,7 +42,9 @@
 
   function createDomRegistry() {
     const elements = {};
-    for (const [name, id] of Object.entries(REQUIRED_ELEMENTS)) {
+    for (const name in REQUIRED_ELEMENTS) {
+      if (!Object.prototype.hasOwnProperty.call(REQUIRED_ELEMENTS, name)) continue;
+      const id = REQUIRED_ELEMENTS[name];
       elements[name] = requireElement(id);
     }
     elements.ctx = elements.boardCanvas.getContext('2d');

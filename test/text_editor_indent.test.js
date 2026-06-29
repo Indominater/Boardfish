@@ -9,10 +9,10 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const TEST_LINE_H = 24;
 const TEST_TEXT_PAD = 16;
-const TEST_NEW_TEXT_EDIT_MIN_LINES = 3;
+const TEST_NEW_TEXT_EDIT_MIN_LINES = 1;
 const SINGLE_LINE_TEXT_BOX_HEIGHT = TEST_LINE_H + TEST_TEXT_PAD * 2;
 const DEFAULT_TEXT_BOX_HEIGHT = TEST_NEW_TEXT_EDIT_MIN_LINES * TEST_LINE_H + TEST_TEXT_PAD * 2;
-const DEFAULT_TEXT_BOX_WIDTH = DEFAULT_TEXT_BOX_HEIGHT * 2;
+const DEFAULT_TEXT_BOX_WIDTH = DEFAULT_TEXT_BOX_HEIGHT * 8;
 
 function loadTextEditorHelpers() {
   const context = { console };
@@ -1957,11 +1957,11 @@ test('fresh text edit width only grows past the default width', () => {
     id: 'text-1',
     type: 'text',
     w: DEFAULT_TEXT_BOX_WIDTH,
-    data: { content: 'x'.repeat(300) },
+    data: { content: 'x'.repeat(500) },
     _editStartContent: '',
   };
   assert.equal(syncFreshTextEditWidth(longObj), true);
-  assert.equal(longObj.w, 300 + TEST_TEXT_PAD * 2 + 1);
+  assert.equal(longObj.w, 500 + TEST_TEXT_PAD * 2 + 1);
 
   const existingObj = {
     id: 'text-1',
@@ -2451,15 +2451,15 @@ test('freshly created text stays at default height until edit exit', () => {
   assert.equal(obj._editMinLines, 1);
 });
 
-test('exiting a newly created text box keeps default width when content fits', () => {
+test('exiting a newly created one-line text box keeps default size when content fits', () => {
   const context = loadExitEditHarness();
 
   context.exitEdit();
 
   assert.equal(context.obj.w, DEFAULT_TEXT_BOX_WIDTH);
   assert.equal(context.obj.h, SINGLE_LINE_TEXT_BOX_HEIGHT);
-  assert.deepEqual(context.dirty, ['text-1']);
-  assert.deepEqual(context.histories, ['text-height-change']);
+  assert.deepEqual(context.dirty, []);
+  assert.deepEqual(context.histories, []);
   assert.deepEqual(context.renders, [{ board: true, overlay: true }]);
 });
 

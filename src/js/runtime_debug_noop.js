@@ -17,12 +17,16 @@ async function mapWithConcurrency(items, limit, worker) {
   const out = new Array(items.length);
   let next = 0;
   const workerCount = Math.max(1, Math.min(Number(limit) || 1, items.length));
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      out[index] = await worker(items[index], index);
-    }
-  }));
+  const workers = new Array(workerCount);
+  for (let i = 0; i < workerCount; i++) {
+    workers[i] = (async () => {
+      while (next < items.length) {
+        const index = next++;
+        out[index] = await worker(items[index], index);
+      }
+    })();
+  }
+  await Promise.all(workers);
   return out;
 }
 

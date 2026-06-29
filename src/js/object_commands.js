@@ -78,9 +78,9 @@ function addText(wx, wy, content = '', options = {}) {
   }
   const defaultSize = typeof defaultTextBoxSize === 'function'
     ? defaultTextBoxSize()
-    : (() => {
+      : (() => {
         const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-        return { w: h * 2, h };
+        return { w: h * 8, h };
       })();
   let w = content ? 200 : defaultSize.w;
   let h = content ? LINE_H + TEXT_PAD * 2 : defaultSize.h;
@@ -139,9 +139,36 @@ var _inputShieldCount = 0;
 var _inputShieldStack = [];
 var _inputShieldReleases = [];
 
+function allowedInputSet(allowedInputs = []) {
+  const allow = new Set();
+  for (const input of allowedInputs) {
+    if (Array.isArray(input)) {
+      for (const item of input) {
+        if (item) allow.add(item);
+      }
+    } else if (input) {
+      allow.add(input);
+    }
+  }
+  return allow;
+}
+
 function updateInputShieldVisual() {
-  if (isUnsavedDialogOpen()) openingShield.classList.remove('active');
-  else if (_boardOpening || _inputShieldStack.some((token) => token.visual !== false)) openingShield.classList.add('active');
+  if (isUnsavedDialogOpen()) {
+    openingShield.classList.remove('active');
+    return;
+  }
+  if (_boardOpening) {
+    openingShield.classList.add('active');
+    return;
+  }
+  let hasVisualShieldToken = false;
+  for (const token of _inputShieldStack) {
+    if (token.visual === false) continue;
+    hasVisualShieldToken = true;
+    break;
+  }
+  if (hasVisualShieldToken) openingShield.classList.add('active');
   else openingShield.classList.remove('active');
 }
 
@@ -156,7 +183,7 @@ function acquireInputShield(...allowedInputs) {
     options = allowedInputs.pop();
   }
   const token = {
-    allow: new Set(allowedInputs.flat().filter(Boolean)),
+    allow: allowedInputSet(allowedInputs),
     allowBoardNavigation: options.allowBoardNavigation === true,
     keepSelectionOverlay: options.keepSelectionOverlay === true,
     visual: options.visual !== false,
@@ -194,14 +221,19 @@ function isBoardInputBlocked() {
 }
 
 function isBoardNavigationAllowedWhileBlocked() {
-  return !_boardOpening &&
-    !openingShield.classList.contains('active') &&
-    _inputShieldStack.length > 0 &&
-    _inputShieldStack.every((token) => token.allowBoardNavigation);
+  if (_boardOpening || openingShield.classList.contains('active') || !_inputShieldStack.length) return false;
+  for (const token of _inputShieldStack) {
+    if (!token.allowBoardNavigation) return false;
+  }
+  return true;
 }
 
 function shouldKeepSelectionOverlayWhileBlocked() {
-  return !_boardOpening && _inputShieldStack.some((token) => token.keepSelectionOverlay);
+  if (_boardOpening) return false;
+  for (const token of _inputShieldStack) {
+    if (token.keepSelectionOverlay) return true;
+  }
+  return false;
 }
 
 async function runShieldedPillTask({
@@ -277,17 +309,19 @@ function duplicateSelected(anchorPoint = null) {
   }
   if (!selectedObjects.length || !BoardfishWebLimits.canAddObjects(selectedObjects.length)) return;
   if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
-    const additionalTextBytes = selectedObjects.reduce((sum, obj) => {
-      if (obj?.type !== 'text') return sum;
+    let additionalTextBytes = 0;
+    for (const obj of selectedObjects) {
+      if (obj?.type !== 'text') continue;
       const text = String(obj.data?.content || '');
-      return sum + (typeof BoardfishWebLimits.textByteLength === 'function'
+      additionalTextBytes += typeof BoardfishWebLimits.textByteLength === 'function'
         ? BoardfishWebLimits.textByteLength(text)
-        : (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length));
-    }, 0);
+        : (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length);
+    }
     if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
   }
 
-  const cloned = selectedObjects.map((obj) => cloneObject(obj));
+  const cloned = new Array(selectedObjects.length);
+  for (let i = 0; i < selectedObjects.length; i++) cloned[i] = cloneObject(selectedObjects[i]);
   if (!cloned.length) return;
   const center = (
     anchorPoint &&
@@ -336,7 +370,8 @@ function duplicateSelected(anchorPoint = null) {
 
 function deleteSelected() {
   if (!hasSelection() || editingId) return;
-  const idsToDelete = [...selectedIds];
+  const idsToDelete = [];
+  for (const id of selectedIds) idsToDelete.push(id);
   if (!idsToDelete.length) return;
   const removedObjects = [];
   for (const id of idsToDelete) {
@@ -346,7 +381,8 @@ function deleteSelected() {
   globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects });
   BoardfishEditorState.removeObjectsById(idsToDelete);
   if (selectedIds.size) {
-    const remaining = [...selectedIds];
+    const remaining = [];
+    for (const id of selectedIds) remaining.push(id);
     BoardfishEditorState.setSelection(remaining, { primaryId: remaining[remaining.length - 1], exitEditing: false });
   } else {
     BoardfishEditorState.clearSelection();

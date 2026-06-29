@@ -227,7 +227,7 @@ test('pan and zoom debugger captures input, scheduling, and render evidence', ()
   assert.match(viewportRuntimeSource, /recordFrameSchedule\?\.\('coalesced'/);
   assert.match(viewportRuntimeSource, /recordFrameSchedule\?\.\('raf-fired'/);
   assert.match(viewportRuntimeSource, /recordPanZoom\?\.\('transform-scheduled'/);
-  assert.match(viewportRuntimeSource, /totalMeasuredMs: getLastApplyTransformMeta\.last\.totalMeasuredMs/);
+  assert.match(viewportRuntimeSource, /const totalMeasuredMs = performance\.now\(\) - transformStart/);
   assert.match(viewportRuntimeSource, /function getVisibleTextLayoutPrewarmHistory/);
   assert.match(viewportRuntimeSource, /function getBestVisibleTextLayoutPrewarm/);
 

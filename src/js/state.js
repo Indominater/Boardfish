@@ -25,6 +25,21 @@ function newId() {
   return id;
 }
 
+function cloneStateTextScriptRanges(ranges = []) {
+  const out = new Array(ranges.length);
+  for (let i = 0; i < ranges.length; i++) {
+    const range = ranges[i];
+    out[i] = { ...range };
+  }
+  return out;
+}
+
+function cloneStateLineAlign(lineAlign = []) {
+  const out = new Array(lineAlign.length);
+  for (let i = 0; i < lineAlign.length; i++) out[i] = lineAlign[i];
+  return out;
+}
+
 function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
   if (!Array.isArray(sourceScriptRanges) || !sourceScriptRanges.length) return [];
   if (typeof normalizeTextScriptRangesForContent === 'function') {
@@ -34,11 +49,11 @@ function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
       obj._textScriptRangesCacheContent === content &&
       obj._textScriptRangesCacheSourceKey === sourceKey
     ) {
-      return obj._textScriptRangesCache.map((range) => ({ ...range }));
+      return cloneStateTextScriptRanges(obj._textScriptRangesCache);
     }
     return normalizeTextScriptRangesForContent(content, sourceScriptRanges);
   }
-  return sourceScriptRanges.map((range) => ({ ...range }));
+  return cloneStateTextScriptRanges(sourceScriptRanges);
 }
 
 function cloneObject(obj, options = {}) {
@@ -57,7 +72,7 @@ function cloneObject(obj, options = {}) {
             const lineAlign = normalizeTextLineAlignForContent(content, sourceLineAlign);
             if (lineAlign.length) textData.lineAlign = lineAlign;
           } else {
-            textData.lineAlign = [...sourceLineAlign];
+            textData.lineAlign = cloneStateLineAlign(sourceLineAlign);
           }
         }
         const sourceScriptRanges = obj.data?.scriptRanges;
@@ -118,7 +133,8 @@ function sendSelectedToBack() {
     }
     if (!selected.length) return false;
     objects.length = 0;
-    objects.push(...selected, ...rest);
+    for (const obj of selected) objects.push(obj);
+    for (const obj of rest) objects.push(obj);
     for (const obj of selected) markDirty(obj.id);
     return true;
   });

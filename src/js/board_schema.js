@@ -48,8 +48,11 @@
     if (obj.type === OBJECT_TYPES.TEXT) {
       normalized.data.content = typeof data.content === 'string' ? data.content : '';
       if (Array.isArray(data.lineAlign)) {
-        const align = data.lineAlign
-          .map((value) => ['left', 'center', 'right'].includes(value) ? value : 'left');
+        const align = new Array(data.lineAlign.length);
+        for (let i = 0; i < data.lineAlign.length; i++) {
+          const value = data.lineAlign[i];
+          align[i] = value === 'center' || value === 'right' || value === 'left' ? value : 'left';
+        }
         while (align.length && align[align.length - 1] === 'left') align.pop();
         if (align.length) normalized.data.lineAlign = align;
       }
@@ -82,7 +85,9 @@
 
   function validateImageStore(imageStore) {
     if (!isObject(imageStore)) throw new Error('imageStore must be an object');
-    for (const [key, value] of Object.entries(imageStore)) {
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      const value = imageStore[key];
       if (!key) throw new Error('imageStore contains an empty key');
       const validValue = typeof value === 'string' || isObject(value);
       if (!validValue) throw new Error(`imageStore.${key} must be a string or object`);
@@ -97,11 +102,17 @@
     if (data.format != null && data.format !== BOARD_FORMAT) {
       throw new Error(`unsupported board format ${data.format}`);
     }
-    const imageStore = isObject(data.imageStore) ? { ...data.imageStore } : {};
+    const imageStore = {};
+    if (isObject(data.imageStore)) {
+      for (const key in data.imageStore) {
+        if (Object.prototype.hasOwnProperty.call(data.imageStore, key)) imageStore[key] = data.imageStore[key];
+      }
+    }
     validateImageStore(imageStore);
-    const objects = Array.isArray(data.objects)
-      ? data.objects.map((obj, index) => normalizeObject(obj, index))
-      : [];
+    const objects = [];
+    if (Array.isArray(data.objects)) {
+      for (let i = 0; i < data.objects.length; i++) objects.push(normalizeObject(data.objects[i], i));
+    }
     for (const obj of objects) {
       if (obj.type === OBJECT_TYPES.IMAGE && !Object.prototype.hasOwnProperty.call(imageStore, obj.data.imgKey)) {
         throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);

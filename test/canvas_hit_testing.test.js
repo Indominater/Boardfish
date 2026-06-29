@@ -498,7 +498,8 @@ test('text edit mode keeps text direct while caching static non-text layers', ()
 
   assert.match(drawSource, /const textSelectionSpecs = textSelectionJelloSpecsForDraw\(\);/);
   assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionJelloSkipIds\(textSelectionSpecs, editingId \|\| null\);/);
-  assert.match(drawSource, /const editCacheKind = copiedSelectionSkipIds\.size === 0 \? editOffscreenCacheKind\(\) : '';/);
+  assert.match(drawSource, /const hasCopiedSelectionSkipIds = !!copiedSelectionSkipIds\?\.size;/);
+  assert.match(drawSource, /const editCacheKind = hasCopiedSelectionSkipIds \? '' : editOffscreenCacheKind\(\);/);
   assert.match(drawSource, /setEditOffscreenCacheKind\(editCacheKind\);/);
   assert.match(drawSource, /const useEditOffscreenCache = !!editCacheKind;/);
   assert.match(drawSource, /else if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);

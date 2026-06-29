@@ -46,7 +46,7 @@
   --pill-text-max-width: min(680px, calc(100vw - 56px));
   --canvas-text: var(--black_font);
   --dialog-overlay-bg: rgba(0,0,0,0.18);
-  --selection-outline: rgba(10, 132, 255, 0.9);
+  --selection-outline: rgba(10, 132, 255, 1);
   --selection-highlight: rgba(10, 132, 255, 0.3);
   --selection-handle-bg: #f8fafc;
   --selection-handle-shadow: 0 1px 3px rgba(0,0,0,0.28);

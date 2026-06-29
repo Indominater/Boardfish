@@ -434,11 +434,15 @@ const applyTextEditLineIndent = (value, selection, { outdent = false } = {}) => 
     direction: selection?.direction || 'none',
   };
   const lineStarts = textEditSelectedLineStarts(text, selectionState);
-  const edits = outdent
-    ? lineStarts
-      .map((lineStart) => ({ lineStart, length: textEditOutdentLengthAt(text, lineStart) }))
-      .filter((edit) => edit.length > 0)
-    : lineStarts.map((lineStart) => ({ lineStart, insert: TEXT_EDIT_INDENT }));
+  const edits = [];
+  if (outdent) {
+    for (const lineStart of lineStarts) {
+      const length = textEditOutdentLengthAt(text, lineStart);
+      if (length > 0) edits.push({ lineStart, length });
+    }
+  } else {
+    for (const lineStart of lineStarts) edits.push({ lineStart, insert: TEXT_EDIT_INDENT });
+  }
   if (!edits.length) return { ...selectionState, value: text, changed: false };
 
   let nextValue = text;
@@ -720,15 +724,39 @@ const clearTextEditCaretIndex = (obj) => {
   delete obj._textEditCaretLineStartIndex;
 };
 
+const cloneTextEditScriptRangeList = (ranges = []) => {
+  const source = Array.isArray(ranges) ? ranges : [];
+  const out = new Array(source.length);
+  for (let i = 0; i < source.length; i++) {
+    out[i] = { ...source[i] };
+  }
+  return out;
+};
+
+const entriesToTextScriptRanges = (entries = []) => {
+  const out = new Array(entries.length);
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    out[i] = { start: entry.start, end: entry.end, kind: entry.kind };
+  }
+  return out;
+};
+
+const isBetterNestedTextEditScriptRange = (candidate, current) => (
+  !current ||
+  candidate.start > current.start ||
+  (candidate.start === current.start && candidate.end < current.end)
+);
+
 const textEditScriptRanges = (obj) => {
   if (!obj || typeof getTextScriptRanges !== 'function') return [];
-  return getTextScriptRanges(obj).map((range) => ({ ...range }));
+  return cloneTextEditScriptRangeList(getTextScriptRanges(obj));
 };
 
 const setTextEditScriptRangesForContent = (obj, content, ranges = []) => {
   if (!obj || obj.type !== 'text') return;
   const normalizedContent = normalizeTextContent(content);
-  const nextRanges = Array.isArray(ranges) ? ranges.map((range) => ({ ...range })) : [];
+  const nextRanges = cloneTextEditScriptRangeList(ranges);
   if (nextRanges.length) obj.data.scriptRanges = nextRanges;
   else delete obj.data.scriptRanges;
   obj._textScriptRangesCache = nextRanges;
@@ -787,6 +815,30 @@ const isTextEditScriptHiddenAtFast = (index, text, context) => {
 
 const textEditScriptRangesKey = (ranges) => JSON.stringify(Array.isArray(ranges) ? ranges : []);
 
+const textEditScriptRangesEqual = (a = [], b = []) => {
+  const left = Array.isArray(a) ? a : [];
+  const right = Array.isArray(b) ? b : [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    const leftRange = left[i];
+    const rightRange = right[i];
+    if (leftRange?.start !== rightRange?.start || leftRange?.end !== rightRange?.end || leftRange?.kind !== rightRange?.kind) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const textEditFlatArrayEqual = (a = [], b = []) => {
+  const left = Array.isArray(a) ? a : [];
+  const right = Array.isArray(b) ? b : [];
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+};
+
 const textEditHasCurrentScriptRangeCache = (obj, content, sourceKey) => (
   Array.isArray(obj?._textScriptRangesCache) &&
   obj._textScriptRangesCacheContent === content &&
@@ -795,20 +847,27 @@ const textEditHasCurrentScriptRangeCache = (obj, content, sourceKey) => (
 
 const textEditScriptRangesAreBraced = (content, ranges = []) => {
   const text = normalizeTextContent(content);
-  return Array.isArray(ranges) && ranges.length > 0 && ranges.every((range) => {
+  if (!Array.isArray(ranges) || !ranges.length) return false;
+  for (const range of ranges) {
     const start = Math.trunc(Number(range?.start));
     const end = Math.trunc(Number(range?.end));
     const marker = typeof textScriptMarkerForKind === 'function'
       ? textScriptMarkerForKind(range?.kind)
       : (range?.kind === 'sub' ? '_' : range?.kind === 'sup' ? '^' : '');
-    return !!marker &&
+    if (!marker ||
+      !(
       start > 0 &&
       end > start + 1 &&
       end <= text.length &&
       text[start - 1] === marker &&
       text[start] === '{' &&
-      text[end - 1] === '}';
-  });
+        text[end - 1] === '}'
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
 };
 
 const normalizeTextObjectScriptRangesForEdit = (obj, content) => {
@@ -820,7 +879,7 @@ const normalizeTextObjectScriptRangesForEdit = (obj, content) => {
   const scriptRanges = normalizeTextScriptRangesForContent(content, beforeScriptRanges);
   if (scriptRanges.length) obj.data.scriptRanges = scriptRanges;
   else delete obj.data.scriptRanges;
-  return beforeKey !== textEditScriptRangesKey(obj.data.scriptRanges || []);
+  return !textEditScriptRangesEqual(beforeScriptRanges, obj.data.scriptRanges || []);
 };
 
 const normalizeTextObjectToEditableScriptBraces = (obj) => {
@@ -840,13 +899,17 @@ const normalizeTextObjectToEditableScriptBraces = (obj) => {
     return false;
   }
   const content = brace(current, sourceRanges);
-  const scriptRanges = typeof normalizeTextScriptRangesForContent === 'function'
-    ? normalizeTextScriptRangesForContent(content, [
-      ...sourceRanges,
-      ...(typeof deriveBracedTextScriptRangesFromContent === 'function' ? deriveBracedTextScriptRangesFromContent(content) : []),
-    ])
-    : [];
-  if (content === current && JSON.stringify(scriptRanges || []) === JSON.stringify(obj.data?.scriptRanges || [])) return false;
+  let scriptRanges = [];
+  if (typeof normalizeTextScriptRangesForContent === 'function') {
+    const derivedRanges = typeof deriveBracedTextScriptRangesFromContent === 'function'
+      ? deriveBracedTextScriptRangesFromContent(content)
+      : [];
+    const combinedRanges = new Array(sourceRanges.length + derivedRanges.length);
+    for (let i = 0; i < sourceRanges.length; i++) combinedRanges[i] = sourceRanges[i];
+    for (let i = 0; i < derivedRanges.length; i++) combinedRanges[sourceRanges.length + i] = derivedRanges[i];
+    scriptRanges = normalizeTextScriptRangesForContent(content, combinedRanges);
+  }
+  if (content === current && textEditScriptRangesEqual(scriptRanges || [], obj.data?.scriptRanges || [])) return false;
   obj.data.content = content;
   if (scriptRanges?.length) obj.data.scriptRanges = scriptRanges;
   else delete obj.data.scriptRanges;
@@ -858,13 +921,16 @@ const normalizeTextEditVisibleCaretIndex = (obj, index, direction = 'forward') =
   const text = normalizeTextContent(obj?.data?.content || '');
   const ranges = textEditScriptRanges(obj);
   const context = textEditScriptRangeContext(ranges);
+  const hasBracedRangeStartingAt = (pos) => {
+    for (const range of textEditContextList(context, 'byStart', pos)) {
+      if (textEditIsBracedRangeInText(text, range)) return true;
+    }
+    return false;
+  };
   let pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
   const step = direction === 'backward' ? -1 : 1;
   let guard = text.length + 1;
-  while (
-    guard-- > 0 &&
-    textEditContextList(context, 'byStart', pos).some((range) => textEditIsBracedRangeInText(text, range))
-  ) {
+  while (guard-- > 0 && hasBracedRangeStartingAt(pos)) {
     pos += step;
     if (pos < 0) return 0;
     if (pos > text.length) return text.length;
@@ -883,13 +949,19 @@ const moveTextEditVisibleCaret = (obj, index, direction = 'forward') => {
 const textEditCanExitScriptLayerAt = (obj, index, affinity = '') => {
   if (!obj || affinity === 'after') return false;
   const pos = normalizeTextEditVisibleCaretIndex(obj, index, 'forward');
-  return textEditScriptRanges(obj).some((range) => range.end === pos && isTextScriptRangeActiveAt(range, pos, affinity));
+  for (const range of textEditScriptRanges(obj)) {
+    if (range.end === pos && isTextScriptRangeActiveAt(range, pos, affinity)) return true;
+  }
+  return false;
 };
 
 const textEditCanEnterScriptLayerAt = (obj, index, affinity = '') => {
   if (!obj || affinity !== 'after') return false;
   const pos = normalizeTextEditVisibleCaretIndex(obj, index, 'backward');
-  return textEditScriptRanges(obj).some((range) => range.end === pos);
+  for (const range of textEditScriptRanges(obj)) {
+    if (range.end === pos) return true;
+  }
+  return false;
 };
 
 const moveTextEditCaretScriptLayer = (obj, index, direction = 'forward') => {
@@ -898,17 +970,21 @@ const moveTextEditCaretScriptLayer = (obj, index, direction = 'forward') => {
   const text = normalizeTextContent(obj?.data?.content || '');
   const ranges = textEditScriptRanges(obj);
   if (direction === 'forward') {
-    const bracedClose = ranges
-      .filter((range) => range.end - 1 === pos && textEditIsBracedRangeInText(text, range))
-      .sort((a, b) => b.start - a.start || a.end - b.end)[0];
+    let bracedClose = null;
+    for (const range of ranges) {
+      if (range.end - 1 !== pos || !textEditIsBracedRangeInText(text, range)) continue;
+      if (isBetterNestedTextEditScriptRange(range, bracedClose)) bracedClose = range;
+    }
     if (bracedClose) {
       return { index: bracedClose.end, affinity: 'after' };
     }
   }
   if (direction === 'backward') {
-    const bracedEnd = ranges
-      .filter((range) => range.end === pos && textEditIsBracedRangeInText(text, range))
-      .sort((a, b) => b.start - a.start || a.end - b.end)[0];
+    let bracedEnd = null;
+    for (const range of ranges) {
+      if (range.end !== pos || !textEditIsBracedRangeInText(text, range)) continue;
+      if (isBetterNestedTextEditScriptRange(range, bracedEnd)) bracedEnd = range;
+    }
     if (bracedEnd && bracedEnd.end - 1 > bracedEnd.start) {
       return { index: bracedEnd.end - 1, affinity: 'after' };
     }
@@ -930,8 +1006,12 @@ const moveTextEditCaretScriptLayer = (obj, index, direction = 'forward') => {
 };
 
 const textEditScriptRangeEndingAtContainsIndex = (ranges, index, end, context = null) => {
-  const candidates = context ? textEditContextList(context, 'byEnd', end) : (ranges || []).filter((range) => range.end === end);
-  return candidates.some((range) => range.start <= index && index < range.end);
+  const candidates = context ? textEditContextList(context, 'byEnd', end) : (ranges || []);
+  for (const range of candidates) {
+    if (!context && range.end !== end) continue;
+    if (range.start <= index && index < range.end) return true;
+  }
+  return false;
 };
 
 const textEditScriptRangeVisibleBounds = (content, range) => {
@@ -974,9 +1054,11 @@ const textEditScriptRootBaseIndexForRange = (ranges, range) => {
   if (markerIndex <= 0) return markerIndex - 1;
   let guard = (ranges || []).length + 1;
   while (guard-- > 0) {
-    const previous = (ranges || [])
-      .filter((item) => item.end === markerIndex)
-      .sort((a, b) => (a.start - 1) - (b.start - 1))[0];
+    let previous = null;
+    for (const item of ranges || []) {
+      if (item.end !== markerIndex) continue;
+      if (!previous || item.start < previous.start) previous = item;
+    }
     if (!previous) break;
     markerIndex = previous.start - 1;
   }
@@ -1050,27 +1132,32 @@ const textEditStructuralDeleteReplacement = (obj, deletion) => {
   const fallback = { start, end, insertedText: '', insertedScriptRanges: [] };
   if (!obj || start === end) return fallback;
   const ranges = textEditScriptRanges(obj);
-  const candidates = ranges
-    .filter((range) => (
-      textEditIsBracedRangeInText(text, range) &&
-      start <= range.start &&
-      end > range.start &&
-      end <= range.end - 1
-    ))
-    .sort((a, b) => b.start - a.start || a.end - b.end);
-  const range = candidates[0];
+  let range = null;
+  for (const candidate of ranges) {
+    if (
+      !textEditIsBracedRangeInText(text, candidate) ||
+      start > candidate.start ||
+      end <= candidate.start ||
+      end > candidate.end - 1
+    ) {
+      continue;
+    }
+    if (isBetterNestedTextEditScriptRange(candidate, range)) range = candidate;
+  }
   if (!range) return fallback;
 
   const insertedStart = end;
   const insertedEnd = range.end - 1;
   const insertedText = text.slice(insertedStart, insertedEnd);
-  const insertedScriptRanges = ranges
-    .filter((item) => item !== range && item.start >= insertedStart && item.end <= insertedEnd)
-    .map((item) => ({
+  const insertedScriptRanges = [];
+  for (const item of ranges) {
+    if (item === range || item.start < insertedStart || item.end > insertedEnd) continue;
+    insertedScriptRanges.push({
       start: item.start - insertedStart,
       end: item.end - insertedStart,
       kind: item.kind,
-    }));
+    });
+  }
 
   return {
     start,
@@ -1113,13 +1200,19 @@ const textEditVisibleSelectionReplacementRange = (obj, selection) => {
   let replacementRange = textEditVisibleSelectionDeleteRange(obj, replacementSelection, text, ranges, rangeContext) || replacementSelection;
   const rawStart = Math.max(0, Math.min(selection?.start ?? 0, text.length));
   const rawEnd = Math.max(rawStart, Math.min(selection?.end ?? rawStart, text.length));
-  const containingRange = ranges
-    .filter((range) => (
-      textEditIsBracedRangeInText(text, range) &&
-      (rawStart === range.start || rawStart === range.start + 1) &&
-      rawEnd <= range.end - 1
-    ))
-    .sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+  let containingRange = null;
+  for (const range of ranges) {
+    if (
+      !textEditIsBracedRangeInText(text, range) ||
+      (rawStart !== range.start && rawStart !== range.start + 1) ||
+      rawEnd > range.end - 1
+    ) {
+      continue;
+    }
+    if (!containingRange || range.end - range.start < containingRange.end - containingRange.start) {
+      containingRange = range;
+    }
+  }
   if (containingRange) {
     replacementRange = {
       start: Math.max(replacementRange.start, containingRange.start + 1),
@@ -1165,7 +1258,12 @@ const textEditScriptMarkerInsertionIndexAt = (obj, index) => {
   const ranges = textEditScriptRanges(obj);
   const rangeContext = textEditScriptRangeContext(ranges);
   const pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
-  const currentRange = ranges.find((range) => range.start === pos || range.start - 1 === pos);
+  let currentRange = null;
+  for (const range of ranges) {
+    if (range.start !== pos && range.start - 1 !== pos) continue;
+    currentRange = range;
+    break;
+  }
   if (!currentRange) return null;
 
   let insertIndex = currentRange.start - 1;
@@ -1201,9 +1299,11 @@ const textEditBracedScriptBoundaryInsertionAt = (obj, index) => {
   const pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
   const affinity = obj._textScriptCaretIndex === pos ? obj._textScriptCaretAffinity : '';
   if (affinity === 'after') return null;
-  const range = textEditScriptRanges(obj)
-    .filter((item) => item.end === pos && textEditIsBracedRangeInText(text, item))
-    .sort((a, b) => b.start - a.start || a.end - b.end)[0];
+  let range = null;
+  for (const item of textEditScriptRanges(obj)) {
+    if (item.end !== pos || !textEditIsBracedRangeInText(text, item)) continue;
+    if (isBetterNestedTextEditScriptRange(item, range)) range = item;
+  }
   if (!range || range.end - 1 <= range.start) return null;
   return { index: range.end - 1, affinity: 'after' };
 };
@@ -1271,7 +1371,7 @@ const textSelectionBracedRangeNeedsCompletion = (content, range, start, end) => 
 
 const completeTextSelectionBracedScriptRanges = (content, start, end, selectedText, rangeEntries = [], sourceRanges = []) => {
   let text = normalizeTextContent(selectedText);
-  const entries = rangeEntries.map((entry) => ({ ...entry }));
+  const entries = cloneTextEditScriptRangeList(rangeEntries);
   const missingClosings = [];
   for (const range of sourceRanges || []) {
     if (range.end <= start) continue;
@@ -1285,7 +1385,12 @@ const completeTextSelectionBracedScriptRanges = (content, start, end, selectedTe
     if (relativeStart < 0 || relativeStart >= text.length) continue;
     const closeIndex = text.length;
     text += '}';
-    const entry = entries.find((item) => item.sourceRange === range);
+    let entry = null;
+    for (const item of entries) {
+      if (item.sourceRange !== range) continue;
+      entry = item;
+      break;
+    }
     if (entry) {
       entry.end = closeIndex + 1;
     } else {
@@ -1300,11 +1405,7 @@ const completeTextSelectionBracedScriptRanges = (content, start, end, selectedTe
 
   return {
     text,
-    scriptRanges: entries.map(({ start: rangeStart, end: rangeEnd, kind }) => ({
-      start: rangeStart,
-      end: rangeEnd,
-      kind,
-    })),
+    scriptRanges: entriesToTextScriptRanges(entries),
   };
 };
 
@@ -1358,13 +1459,13 @@ const textSelectionPayloadFromBoardfishClipboardValue = (clipboard) => {
     const text = normalizeTextContent(clipboard.text || '');
     const scriptRanges = typeof normalizeTextScriptRangesForContent === 'function'
       ? normalizeTextScriptRangesForContent(text, clipboard.scriptRanges || [])
-      : (clipboard.scriptRanges || []).map((range) => ({ ...range }));
+      : cloneTextEditScriptRangeList(clipboard.scriptRanges || []);
     return { type: 'text-selection', text, scriptRanges };
   }
   if (clipboard.type === 'objects') {
-    const textObjects = (clipboard.objects || []).filter((obj) => obj?.type === 'text');
-    if (textObjects.length !== 1 || (clipboard.objects || []).length !== 1) return null;
-    const source = textObjects[0];
+    const objects = clipboard.objects || [];
+    if (objects.length !== 1 || objects[0]?.type !== 'text') return null;
+    const source = objects[0];
     const content = normalizeTextContent(source.data?.content || '');
     return createTextSelectionClipboardPayload(source, {
       start: 0,
@@ -1385,13 +1486,7 @@ const isTextScriptRangeActiveAt = (range, index, affinity) => {
   return true;
 };
 
-const textScriptRangesEqual = (a = [], b = []) => {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i].start !== b[i].start || a[i].end !== b[i].end || a[i].kind !== b[i].kind) return false;
-  }
-  return true;
-};
+const textScriptRangesEqual = textEditScriptRangesEqual;
 
 const compareTextScriptRangesForEdit = (a, b) => {
   if (a.start !== b.start) return a.start - b.start;
@@ -1420,15 +1515,27 @@ const areTextScriptRangesSortedUniqueForEdit = (ranges = []) => {
   return true;
 };
 
+const cloneTextScriptRangesForEdit = (ranges = []) => {
+  const out = new Array(ranges.length);
+  for (let i = 0; i < ranges.length; i++) {
+    const range = ranges[i];
+    out[i] = { start: range.start, end: range.end, kind: range.kind };
+  }
+  return out;
+};
+
 const sortAndDedupeTextScriptRanges = (ranges = []) => {
   const source = Array.isArray(ranges) ? ranges : [];
   if (areTextScriptRangesSortedUniqueForEdit(source)) {
-    return source.map((range) => ({ start: range.start, end: range.end, kind: range.kind }));
+    return cloneTextScriptRangesForEdit(source);
   }
-  const sorted = source
-    .filter(isFiniteTextScriptRangeForEdit)
-    .map((range) => ({ start: range.start, end: range.end, kind: range.kind }))
-    .sort(compareTextScriptRangesForEdit);
+  const sorted = [];
+  for (const range of source) {
+    if (isFiniteTextScriptRangeForEdit(range)) {
+      sorted.push({ start: range.start, end: range.end, kind: range.kind });
+    }
+  }
+  sorted.sort(compareTextScriptRangesForEdit);
   const out = [];
   for (const range of sorted) {
     const previous = out[out.length - 1];
@@ -1436,6 +1543,14 @@ const sortAndDedupeTextScriptRanges = (ranges = []) => {
     out.push(range);
   }
   return out;
+};
+
+const findTransformedActiveTextScriptRange = (ranges, expandedScript) => {
+  if (!expandedScript) return null;
+  for (const range of ranges || []) {
+    if (range.start === expandedScript.start && range.kind === expandedScript.kind) return range;
+  }
+  return null;
 };
 
 const plainEditScriptNormalizeSkipInfo = (oldRanges = [], {
@@ -1562,44 +1677,52 @@ const deriveBracedTextScriptRangesAroundEdit = (content, start, end) => {
   const nextNewline = text.indexOf('\n', to);
   const scanEnd = nextNewline === -1 ? text.length : nextNewline;
   const slice = text.slice(scanStart, scanEnd);
-  return deriveBracedTextScriptRangesFromContent(slice)
-    .map((range) => ({
+  const ranges = [];
+  for (const range of deriveBracedTextScriptRangesFromContent(slice)) {
+    const normalized = {
       start: scanStart + range.start,
       end: scanStart + range.end,
       kind: range.kind,
-    }))
-    .filter((range) => {
-      const markerIndex = Math.max(0, range.start - 1);
-      return range.end > from && markerIndex <= to;
-    });
+    };
+    const markerIndex = Math.max(0, normalized.start - 1);
+    if (normalized.end > from && markerIndex <= to) ranges.push(normalized);
+  }
+  return ranges;
 };
 
 const textScriptActiveRangesAtIndex = (ranges, index, options = {}) => {
   if (typeof activeTextScriptRangesAt === 'function') {
-    return activeTextScriptRangesAt(ranges, index, options).map((range) => ({ ...range }));
+    return cloneTextScriptRangesForEdit(activeTextScriptRangesAt(ranges, index, options));
   }
   const includeEnd = options.includeEnd === true;
   const affinity = options.affinity || '';
-  return (ranges || [])
-    .filter((range) => {
-      if (index < range.start || index > range.end) return false;
-      if (index === range.end) {
-        if (!includeEnd) return false;
-        if (affinity === 'after') return false;
-      }
-      return true;
-    })
-    .sort((a, b) => a.start - b.start || b.end - a.end || String(a.kind).localeCompare(String(b.kind)))
-    .map((range) => ({ ...range }));
+  const active = [];
+  for (const range of ranges || []) {
+    if (index < range.start || index > range.end) continue;
+    if (index === range.end) {
+      if (!includeEnd) continue;
+      if (affinity === 'after') continue;
+    }
+    active.push({ start: range.start, end: range.end, kind: range.kind });
+  }
+  if (active.length > 1) {
+    active.sort((a, b) => a.start - b.start || b.end - a.end || String(a.kind).localeCompare(String(b.kind)));
+  }
+  return active;
 };
 
 const textScriptCaretRangesForEditState = (scriptRanges, index, affinity = '') => (
-  textScriptActiveRangesAtIndex(scriptRanges || [], index, { includeEnd: true, affinity }).map((range) => ({ ...range }))
+  textScriptActiveRangesAtIndex(scriptRanges || [], index, { includeEnd: true, affinity })
 );
 
 const textScriptRangeEndingAt = (ranges, index) => {
-  const candidates = (ranges || []).filter((range) => range.end === index);
-  candidates.sort((a, b) => b.start - a.start || a.end - b.end || String(a.kind).localeCompare(String(b.kind)));
+  const candidates = [];
+  for (const range of ranges || []) {
+    if (range.end === index) candidates.push(range);
+  }
+  if (candidates.length > 1) {
+    candidates.sort((a, b) => b.start - a.start || a.end - b.end || String(a.kind).localeCompare(String(b.kind)));
+  }
   return candidates[0] || null;
 };
 
@@ -1622,9 +1745,11 @@ const exitTextScriptForLineBreak = (obj, proxy) => {
   if (!obj || !proxy || proxy.selectionStart !== proxy.selectionEnd) return false;
   const pos = proxy.selectionStart;
   const affinity = obj._textScriptCaretIndex === pos ? obj._textScriptCaretAffinity : '';
-  const active = textEditScriptRanges(obj).filter((range) => isTextScriptRangeActiveAt(range, pos, affinity));
-  if (!active.length) return false;
-  const nextPos = Math.max(...active.map((range) => range.end));
+  let nextPos = -Infinity;
+  for (const range of textEditScriptRanges(obj)) {
+    if (isTextScriptRangeActiveAt(range, pos, affinity) && range.end > nextPos) nextPos = range.end;
+  }
+  if (!Number.isFinite(nextPos)) return false;
   if (proxy.selectionStart !== nextPos || proxy.selectionEnd !== nextPos) {
     proxy.setSelectionRange(nextPos, nextPos, 'none');
   }
@@ -1780,7 +1905,7 @@ const transformTextScriptRangesForInput = (oldRanges, {
 
   if (pureInsertion && hasInsertedScriptRanges) {
     const normalized = sortAndDedupeTextScriptRanges(ranges);
-    const active = normalized.find((range) => expandedScript && range.start === expandedScript.start && range.kind === expandedScript.kind) || null;
+    const active = findTransformedActiveTextScriptRange(normalized, expandedScript);
     return {
       ranges: normalized,
       active,
@@ -1802,8 +1927,11 @@ const transformTextScriptRangesForInput = (oldRanges, {
     typeof deriveBracedTextScriptRangesFromContent === 'function'
     ? deriveBracedTextScriptRangesFromContent(nextText)
     : [];
-  const normalized = normalizeTextScriptRangesForContent(nextText, [...ranges, ...wholeTextDerivedRanges]);
-  const active = normalized.find((range) => expandedScript && range.start === expandedScript.start && range.kind === expandedScript.kind) || null;
+  const combinedRanges = new Array(ranges.length + wholeTextDerivedRanges.length);
+  for (let i = 0; i < ranges.length; i++) combinedRanges[i] = ranges[i];
+  for (let i = 0; i < wholeTextDerivedRanges.length; i++) combinedRanges[ranges.length + i] = wholeTextDerivedRanges[i];
+  const normalized = normalizeTextScriptRangesForContent(nextText, combinedRanges);
+  const active = findTransformedActiveTextScriptRange(normalized, expandedScript);
   return { ranges: normalized, active, fastPath: '', ...transformDebug };
 };
 
@@ -1820,7 +1948,7 @@ const textScriptCaretRangesAfterInput = (inputState = {}, {
   const end = inputState.end ?? start;
   if (!textEditInputTypeDeletesContent(type) || inputState.hasSelection || start !== end) return null;
   const caretRanges = Array.isArray(inputState.scriptCaretRanges)
-    ? inputState.scriptCaretRanges.map((range) => ({ ...range }))
+    ? cloneTextEditScriptRangeList(inputState.scriptCaretRanges)
     : textScriptCaretRangesForEditState(inputState.scriptRanges || [], start, inputState.scriptCaretAffinity || '');
   if (!caretRanges.length) return [];
   const edit = replacement || textEditInputReplacement(oldValue, newValue, inputState, type);
@@ -1839,7 +1967,7 @@ const updateTextLineAlignForInput = (obj, inputState, nextValue, insertedText) =
   if (!obj || typeof normalizeTextLineAlignForContent !== 'function') return;
   if (!Array.isArray(obj.data?.lineAlign)) return;
   const oldValue = normalizeTextContent(inputState?.value ?? '');
-  const oldAlign = normalizeTextLineAlignForContent(oldValue, obj.data.lineAlign);
+  let oldAlign = normalizeTextLineAlignForContent(oldValue, obj.data.lineAlign);
   const oldStart = Math.max(0, Math.min(inputState?.start ?? 0, oldValue.length));
   const oldEnd = Math.max(oldStart, Math.min(inputState?.end ?? oldStart, oldValue.length));
   const removedLineCount = textLogicalLineIndexAt(oldValue, oldEnd) - textLogicalLineIndexAt(oldValue, oldStart);
@@ -1848,7 +1976,13 @@ const updateTextLineAlignForInput = (obj, inputState, nextValue, insertedText) =
     const lineIndex = textLogicalLineIndexAt(oldValue, oldStart);
     const baseAlign = oldAlign[lineIndex] || 'left';
     while (oldAlign.length < textLogicalLineCount(oldValue)) oldAlign.push('left');
-    oldAlign.splice(lineIndex + 1, removedLineCount, ...new Array(insertedLineCount).fill(baseAlign));
+    const spliceStart = lineIndex + 1;
+    const suffixStart = Math.min(spliceStart + removedLineCount, oldAlign.length);
+    const nextAlign = new Array(spliceStart + insertedLineCount + oldAlign.length - suffixStart);
+    for (let i = 0; i < spliceStart; i++) nextAlign[i] = oldAlign[i];
+    for (let i = 0; i < insertedLineCount; i++) nextAlign[spliceStart + i] = baseAlign;
+    for (let i = suffixStart; i < oldAlign.length; i++) nextAlign[spliceStart + insertedLineCount + i - suffixStart] = oldAlign[i];
+    oldAlign = nextAlign;
   }
   const normalized = normalizeTextLineAlignForContent(nextValue, oldAlign);
   if (normalized.length) obj.data.lineAlign = normalized;
@@ -2148,10 +2282,11 @@ const editableTextScriptPayload = (payload = {}) => {
       ? brace(payload.text || '', payload.scriptRanges || [])
       : (payload.text || '')
   );
+  const derivedRanges = typeof deriveBracedTextScriptRangesFromContent === 'function'
+    ? deriveBracedTextScriptRangesFromContent(text)
+    : [];
   const scriptRanges = typeof normalizeTextScriptRangesForContent === 'function'
-    ? normalizeTextScriptRangesForContent(text, [
-      ...(typeof deriveBracedTextScriptRangesFromContent === 'function' ? deriveBracedTextScriptRangesFromContent(text) : []),
-    ])
+    ? normalizeTextScriptRangesForContent(text, derivedRanges)
     : [];
   return { text, scriptRanges };
 };
@@ -2480,11 +2615,11 @@ function enterEdit(id, {
       markDirty(obj.id);
     }
     if (typeof normalizeTextLineAlignForContent === 'function' && Array.isArray(obj.data?.lineAlign)) {
-      const beforeLineAlign = JSON.stringify(obj.data.lineAlign || []);
+      const beforeLineAlign = obj.data.lineAlign || [];
       const lineAlign = normalizeTextLineAlignForContent(obj.data.content, obj.data.lineAlign);
       if (lineAlign.length) obj.data.lineAlign = lineAlign;
       else delete obj.data.lineAlign;
-      lineAlignNormalized = beforeLineAlign !== JSON.stringify(obj.data.lineAlign || []);
+      lineAlignNormalized = !textEditFlatArrayEqual(beforeLineAlign, obj.data.lineAlign || []);
     }
   }
   logStep('enter-normalize', {

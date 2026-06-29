@@ -307,7 +307,7 @@ test('proportional corner resize uses the smaller implied scale', () => {
   assert.equal(resized.h, 90);
 });
 
-test('selection overlay snaps outline edges to the device pixel grid', () => {
+test('selection overlay expands snapped outline edges to cover object bounds', () => {
   const text = { id: 'text-a', type: 'text', x: 10.25, y: 20.25, w: 100.6, h: 40.6, data: { content: 'hello' } };
   const context = loadSelectionInputHarness([text], { devicePixelRatio: 2 });
   context.panX = 0.1;
@@ -315,20 +315,31 @@ test('selection overlay snaps outline edges to the device pixel grid', () => {
 
   context.updateSelectionOverlay();
 
-  assert.equal(context.selOverlay.style.transform, 'translate(10.5px,20.5px)');
-  assert.equal(context.selOverlay.style.width, '100.5px');
-  assert.equal(context.selOverlay.style.height, '40.5px');
+  assert.equal(context.selOverlay.style.transform, 'translate(10px,20px)');
+  assert.equal(context.selOverlay.style.width, '101px');
+  assert.equal(context.selOverlay.style.height, '41.5px');
   const snapped = context.snappedSelectionOverlayScreenRect(10.35, 20.45, 100.6, 40.6, 2);
-  assert.equal(snapped.x, 10.5);
-  assert.equal(snapped.y, 20.5);
-  assert.equal(snapped.width, 100.5);
-  assert.equal(snapped.height, 40.5);
+  assert.equal(snapped.x, 10);
+  assert.equal(snapped.y, 20);
+  assert.equal(snapped.width, 101);
+  assert.equal(snapped.height, 41.5);
+});
+
+test('image selection overlay covers renderer edge overdraw', () => {
+  const image = { id: 'image-a', type: 'image', x: 10, y: 20, w: 100, h: 40, data: {} };
+  const context = loadSelectionInputHarness([image], { devicePixelRatio: 2 });
+
+  context.updateSelectionOverlay();
+
+  assert.equal(context.selOverlay.style.transform, 'translate(9.5px,19.5px)');
+  assert.equal(context.selOverlay.style.width, '101px');
+  assert.equal(context.selOverlay.style.height, '41px');
 });
 
 test('selection surfaces share the same outline color token', () => {
   const styles = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
 
-  assert.match(styles, /--selection-outline:\s*rgba\(10,\s*132,\s*255,\s*0\.9\);/);
+  assert.match(styles, /--selection-outline:\s*rgba\(10,\s*132,\s*255,\s*1\);/);
   assert.match(styles, /--selection-highlight:\s*rgba\(10,\s*132,\s*255,\s*0\.3\);/);
   assert.match(styles, /--text-edit-outline:\s*var\(--selection-outline\);/);
   assert.match(styles, /\.multi-sel-box\s*\{[\s\S]*box-shadow:\s*inset 0 0 0 1px var\(--selection-outline\);/);

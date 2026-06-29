@@ -714,7 +714,9 @@ objCtxMenu.addEventListener('mousedown', onMenuMouseDown);
 objCtxMenu.addEventListener('mouseup', onMenuMouseUp);
 BoardfishDOM.textCtxMenu.addEventListener('mousedown', onMenuMouseDown);
 BoardfishDOM.textCtxMenu.addEventListener('mouseup', onMenuMouseUp);
-for (const menu of [ctxMenu, objCtxMenu, BoardfishDOM.textCtxMenu, ctxActions].filter(Boolean)) {
+const contextMenuStopSurfaces = [ctxMenu, objCtxMenu, BoardfishDOM.textCtxMenu, ctxActions];
+for (const menu of contextMenuStopSurfaces) {
+  if (!menu) continue;
   for (const type of ['click', 'contextmenu']) {
     menu.addEventListener(type, (e) => {
       e.stopPropagation();
@@ -854,7 +856,8 @@ canvas.addEventListener('contextmenu', (e) => {
   showCanvasContextMenuAt(e.clientX, e.clientY);
 });
 
-for (const id of Object.keys(MENU_COMMANDS)) {
+for (const id in MENU_COMMANDS) {
+  if (!Object.prototype.hasOwnProperty.call(MENU_COMMANDS, id)) continue;
   document.getElementById(id)?.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();

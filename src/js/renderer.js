@@ -306,6 +306,20 @@
     return value.length > limit ? `${value.slice(0, limit)}...` : value;
   }
 
+  function insertBoundedSlowCounterRow(counters, key, row, limit) {
+    const list = Array.isArray(counters[key]) ? counters[key] : [];
+    const rowMs = Number(row?.ms) || 0;
+    let insertAt = list.length;
+    while (insertAt > 0 && rowMs > (Number(list[insertAt - 1]?.ms) || 0)) insertAt--;
+    if (insertAt < limit) {
+      list.splice(insertAt, 0, row);
+      if (list.length > limit) list.pop();
+    } else if (list.length > limit) {
+      list.length = limit;
+    }
+    counters[key] = list;
+  }
+
   function addRichTextDrawStats(counters, stats) {
     if (!counters || !stats) return;
     const add = (field, sourceField = field) => {
@@ -366,10 +380,7 @@
       textY: Number.isFinite(Number(line?.textY)) ? roundDebugMs(Number(line.textY)) : '',
       lineHeightDevicePx: roundDebugMs((Number(deps?.lineHeight) || 0) * deviceScale),
     };
-    const list = Array.isArray(counters.slowTextLineDraws) ? counters.slowTextLineDraws : [];
-    list.push(row);
-    list.sort((a, b) => (b.ms || 0) - (a.ms || 0));
-    counters.slowTextLineDraws = list.slice(0, MAX_SLOW_TEXT_LINE_DRAWS);
+    insertBoundedSlowCounterRow(counters, 'slowTextLineDraws', row, MAX_SLOW_TEXT_LINE_DRAWS);
   }
 
   function recordImageDrawWarmStats(counters, selected, firstSourceDraw, firstContextDraw) {
@@ -419,10 +430,13 @@
       row.richTextLineDrawMs = roundDebugMs(drawCounterValue(counters, 'richTextLineDrawMs') - before.richTextLineDrawMs);
       row.slowRichTextLineDraws = drawCounterValue(counters, 'slowRichTextLineDraws') - before.slowRichTextLineDraws;
       row.richTextDirectDraws = drawCounterValue(counters, 'richTextDirectDraws') - before.richTextDirectDraws;
-      row.slowTextLineRows = (Array.isArray(counters.slowTextLineDraws) ? counters.slowTextLineDraws : [])
-        .filter(lineRow => lineRow.objectId === obj.id)
-        .slice(0, 6)
-        .map(lineRow => ({ ...lineRow }));
+      row.slowTextLineRows = [];
+      const slowLineRows = Array.isArray(counters.slowTextLineDraws) ? counters.slowTextLineDraws : [];
+      for (const lineRow of slowLineRows) {
+        if (lineRow.objectId !== obj.id) continue;
+        row.slowTextLineRows.push({ ...lineRow });
+        if (row.slowTextLineRows.length >= 6) break;
+      }
       row.richTextUnitsPerLine = row.drawnTextLines > 0
         ? Math.round(row.richTextDrawUnits / row.drawnTextLines * 100) / 100
         : 0;
@@ -465,10 +479,7 @@
       row.warmSourceDraw = drawCounterValue(counters, 'imageSourceWarmDraws') > before.imageSourceWarmDraws;
       row.warmContextDraw = drawCounterValue(counters, 'imageContextWarmDraws') > before.imageContextWarmDraws;
     }
-    const list = Array.isArray(counters.slowDrawObjects) ? counters.slowDrawObjects : [];
-    list.push(row);
-    list.sort((a, b) => (b.ms || 0) - (a.ms || 0));
-    counters.slowDrawObjects = list.slice(0, 8);
+    insertBoundedSlowCounterRow(counters, 'slowDrawObjects', row, 8);
   }
 
   function createBoardRenderer(deps) {
@@ -507,24 +518,21 @@
             counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
             counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
           }
+          if (counters) counters.richTextDirectDraws = (counters.richTextDirectDraws || 0) + 1;
           const lineHeight = deps.lineHeight || 0;
-          const visibleLines = [];
+          let drawnLineCount = 0;
           let layoutLineIndex = -1;
           for (const line of layout) {
             layoutLineIndex++;
             if (!textLineIntersectsRect(line.y, lineHeight, options.viewportRect || null)) {
               continue;
             }
-            visibleLines.push({ line, layoutLineIndex });
-          }
-          const drawnLineCount = visibleLines.length;
-          if (counters) counters.richTextDirectDraws = (counters.richTextDirectDraws || 0) + 1;
-          for (const { line, layoutLineIndex: visibleLayoutLineIndex } of visibleLines) {
+            drawnLineCount++;
             const lineDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
             const drawStats = deps.drawTextLineRange(context, line, obj, 0, line.text?.length ?? 0);
             addRichTextDrawStats(counters, drawStats);
             if (counters && typeof performance !== 'undefined') {
-              recordRichTextLineDraw(counters, obj, line, visibleLayoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
+              recordRichTextLineDraw(counters, obj, line, layoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
             }
           }
           if (counters) {

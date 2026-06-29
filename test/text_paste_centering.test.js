@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
-const DEFAULT_TEXT_BOX_MIN_LINES = 3;
+const DEFAULT_TEXT_BOX_MIN_LINES = 1;
 const DEFAULT_TEXT_BOX_LINE_H = 24;
 const DEFAULT_TEXT_BOX_PAD = 16;
 const DEFAULT_TEXT_BOX_HEIGHT = DEFAULT_TEXT_BOX_MIN_LINES * DEFAULT_TEXT_BOX_LINE_H + DEFAULT_TEXT_BOX_PAD * 2;
@@ -185,7 +185,7 @@ test('addText keeps top-left placement by default', () => {
   assert.equal(obj.x, 24);
   assert.equal(obj.y, 48);
   assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
-  assert.equal(obj.w, DEFAULT_TEXT_BOX_HEIGHT * 2);
+  assert.equal(obj.w, DEFAULT_TEXT_BOX_HEIGHT * 8);
   assert.deepEqual(context.editedIds, [obj.id]);
 });
 

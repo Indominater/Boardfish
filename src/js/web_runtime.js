@@ -165,7 +165,10 @@
   function revokeBoardImageSources(board) {
     const revoke = root.BoardfishWebBoardContainer?.revokeImageSource;
     if (typeof revoke !== 'function') return;
-    for (const source of Object.values(board?.imageStore || {})) revoke(source);
+    const store = board?.imageStore || {};
+    for (const key in store) {
+      if (Object.prototype.hasOwnProperty.call(store, key)) revoke(store[key]);
+    }
   }
 
   async function readBoard(ref) {

@@ -484,6 +484,16 @@ function hasBlockingOpenInitialImagePreviewsForOpen() {
   return false;
 }
 
+function removeOpenPreviewRequestsForKey(key) {
+  let write = 0;
+  for (let read = 0; read < imageOpenPreviewRequestQueue.length; read++) {
+    const task = imageOpenPreviewRequestQueue[read];
+    if (task?.imgKey === key) continue;
+    imageOpenPreviewRequestQueue[write++] = task;
+  }
+  imageOpenPreviewRequestQueue.length = write;
+}
+
 function clearOpenInitialImagePreviews(key = null) {
   if (key) {
     const entry = imageOpenPreviewBitmapCache.get(key);
@@ -492,7 +502,7 @@ function clearOpenInitialImagePreviews(key = null) {
     imageOpenPreviewBitmapCache.delete(key);
     imageOpenPreviewRequestPending.delete(key);
     if (imageOpenPreviewRequestQueue.length) {
-      imageOpenPreviewRequestQueue = imageOpenPreviewRequestQueue.filter((task) => task?.imgKey !== key);
+      removeOpenPreviewRequestsForKey(key);
     }
     return;
   }
@@ -954,7 +964,13 @@ const invalidateImageSourceCachesForKey = (key) => {
   if (!key) return;
   _imageStoreGeneration++;
   _imageHydrationQueued.delete(key);
-  _imageHydrationQueue = _imageHydrationQueue.filter((item) => item?.key !== key);
+  let write = 0;
+  for (let read = 0; read < _imageHydrationQueue.length; read++) {
+    const item = _imageHydrationQueue[read];
+    if (item?.key === key) continue;
+    _imageHydrationQueue[write++] = item;
+  }
+  _imageHydrationQueue.length = write;
   removeImageRuntimeCachesForKey(key);
 };
 
@@ -997,13 +1013,19 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
 function clearImageStore() {
   if (typeof clearVisibleHydrationTimer === 'function') clearVisibleHydrationTimer();
   _imageStoreGeneration++;
-  for (const k of Object.keys(imageStore)) {
+  for (const k in imageStore) {
+    if (!Object.prototype.hasOwnProperty.call(imageStore, k)) continue;
     revokeWebImageSource(imageStore[k]);
     delete imageStore[k];
   }
-  for (const k of Object.keys(imageCache)) delete imageCache[k];
-  for (const k of Object.keys(imageMetadataCache)) delete imageMetadataCache[k];
-  for (const k of Object.keys(imageBitmapCache)) {
+  for (const k in imageCache) {
+    if (Object.prototype.hasOwnProperty.call(imageCache, k)) delete imageCache[k];
+  }
+  for (const k in imageMetadataCache) {
+    if (Object.prototype.hasOwnProperty.call(imageMetadataCache, k)) delete imageMetadataCache[k];
+  }
+  for (const k in imageBitmapCache) {
+    if (!Object.prototype.hasOwnProperty.call(imageBitmapCache, k)) continue;
     try { imageBitmapCache[k].close(); } catch (_) {}
     delete imageBitmapCache[k];
   }

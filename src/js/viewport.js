@@ -321,7 +321,13 @@ function drawVisibleObjects(context, counters, { skipId = null, skipIds = null, 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
   const viewportRect = options.viewportRect || null;
   if (selStart === selEnd) return null;
-  const firstLine = layout.find((line) => Array.isArray(line?.scriptRanges) && line.scriptRanges.length);
+  let firstLine = null;
+  for (const line of layout) {
+    if (Array.isArray(line?.scriptRanges) && line.scriptRanges.length) {
+      firstLine = line;
+      break;
+    }
+  }
   const content = normalizeTextContent(obj?.data?.content || '');
   const scriptMetrics = firstLine?._scriptMetrics ||
     (firstLine && typeof getTextScriptLayoutMetricsForObject === 'function'
@@ -399,7 +405,6 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
           height: box.height,
           startOffset: i,
           endOffset: j,
-          text: line.text.slice(i, j),
         };
         runs.push(run);
         if (x1 < left) left = x1;
@@ -436,9 +441,11 @@ const textSelectionRunsForOptions = (obj, layout, selStart, selEnd, options = {}
 const TEXT_SELECTION_RECT_EPSILON = 1e-7;
 
 const textSelectionSortedUniqueCoordinates = (values) => {
-  const sorted = values
-    .filter((value) => Number.isFinite(value))
-    .sort((a, b) => a - b);
+  const sorted = [];
+  for (const value of values || []) {
+    if (Number.isFinite(value)) sorted.push(value);
+  }
+  sorted.sort((a, b) => a - b);
   const unique = [];
   for (const value of sorted) {
     if (!unique.length || Math.abs(unique[unique.length - 1] - value) > TEXT_SELECTION_RECT_EPSILON) {
@@ -461,13 +468,15 @@ const textSelectionHighlightRects = (runs = []) => {
     rects.push({ x1, x2, y1, y2 });
     yEdges.push(y1, y2);
   }
-  if (rects.length <= 1) {
-    return rects.map((rect) => ({
+  if (rects.length === 0) return [];
+  if (rects.length === 1) {
+    const rect = rects[0];
+    return [{
       x: rect.x1,
       y: rect.y1,
       w: rect.x2 - rect.x1,
       h: rect.y2 - rect.y1,
-    }));
+    }];
   }
 
   rects.sort((a, b) => a.y1 - b.y1 || a.y2 - b.y2 || a.x1 - b.x1 || a.x2 - b.x2);
@@ -486,18 +495,26 @@ const textSelectionHighlightRects = (runs = []) => {
       activeRects.push(rects[nextRectIndex]);
       nextRectIndex++;
     }
-    activeRects = activeRects.filter((rect) => rect.y2 >= y2 - TEXT_SELECTION_RECT_EPSILON);
-    const intervals = activeRects
-      .filter((rect) => rect.y1 <= y1 + TEXT_SELECTION_RECT_EPSILON && rect.y2 >= y2 - TEXT_SELECTION_RECT_EPSILON)
-      .map((rect) => ({ x1: rect.x1, x2: rect.x2 }))
-      .sort((a, b) => a.x1 - b.x1 || a.x2 - b.x2);
+    let activeWrite = 0;
+    for (let activeRead = 0; activeRead < activeRects.length; activeRead++) {
+      const rect = activeRects[activeRead];
+      if (rect.y2 >= y2 - TEXT_SELECTION_RECT_EPSILON) activeRects[activeWrite++] = rect;
+    }
+    activeRects.length = activeWrite;
+    const intervals = [];
+    for (const rect of activeRects) {
+      if (rect.y1 <= y1 + TEXT_SELECTION_RECT_EPSILON && rect.y2 >= y2 - TEXT_SELECTION_RECT_EPSILON) {
+        intervals.push({ x1: rect.x1, x2: rect.x2 });
+      }
+    }
+    intervals.sort((a, b) => a.x1 - b.x1 || a.x2 - b.x2);
     const mergedIntervals = [];
     for (const interval of intervals) {
       const previous = mergedIntervals[mergedIntervals.length - 1];
       if (previous && interval.x1 <= previous.x2 + TEXT_SELECTION_RECT_EPSILON) {
         previous.x2 = Math.max(previous.x2, interval.x2);
       } else {
-        mergedIntervals.push({ ...interval });
+        mergedIntervals.push({ x1: interval.x1, x2: interval.x2 });
       }
     }
     for (const interval of mergedIntervals) {
@@ -517,12 +534,17 @@ const textSelectionHighlightRects = (runs = []) => {
       if (!mergedIntoPrevious) mergedRects.push({ x1: interval.x1, x2: interval.x2, y1, y2 });
     }
   }
-  return mergedRects.map((rect) => ({
-    x: rect.x1,
-    y: rect.y1,
-    w: rect.x2 - rect.x1,
-    h: rect.y2 - rect.y1,
-  }));
+  const out = new Array(mergedRects.length);
+  for (let i = 0; i < mergedRects.length; i++) {
+    const rect = mergedRects[i];
+    out[i] = {
+      x: rect.x1,
+      y: rect.y1,
+      w: rect.x2 - rect.x1,
+      h: rect.y2 - rect.y1,
+    };
+  }
+  return out;
 };
 
 const applyTextSelectionMotionTransform = (context, bounds, motion) => {
@@ -550,9 +572,14 @@ const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
   return y + LINE_H >= viewportRect.y1 && y <= viewportRect.y2;
 };
 
-const visibleTextLayoutLines = (layout, viewportRect = null) => (
-  viewportRect ? layout.filter((line) => textLayoutLineIntersectsViewport(line, viewportRect)) : layout
-);
+const visibleTextLayoutLines = (layout, viewportRect = null) => {
+  if (!viewportRect) return layout;
+  const visibleLines = [];
+  for (const line of layout) {
+    if (textLayoutLineIntersectsViewport(line, viewportRect)) visibleLines.push(line);
+  }
+  return visibleLines;
+};
 
 const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options = {}) => {
   context.fillStyle = canvasTextColor();
@@ -576,11 +603,11 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options
       continue;
     }
     const o0 = h0 - ls, o1 = h1 - ls;
-    const before = line.text.slice(0, o0);
-    const after = line.text.slice(o1);
-    if (before) drawTextLineRange(context, line, obj, 0, o0);
-    if (after) drawTextLineRange(context, line, obj, o1, line.text.length);
-    if (stats && (before || after)) stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
+    const hasBefore = o0 > 0;
+    const hasAfter = o1 < line.text.length;
+    if (hasBefore) drawTextLineRange(context, line, obj, 0, o0);
+    if (hasAfter) drawTextLineRange(context, line, obj, o1, line.text.length);
+    if (stats && (hasBefore || hasAfter)) stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
   }
 };
 
@@ -631,7 +658,7 @@ const drawTextSelectionContentJello = (context, obj, layout, selStart, selEnd, o
   applyTextSelectionMotionTransform(context, selection.bounds, motion);
   context.fillStyle = canvasTextColor();
   for (const run of selection.runs) {
-    if (run.text) drawTextLineRange(context, run.line, obj, run.startOffset, run.endOffset);
+    if (run.endOffset > run.startOffset) drawTextLineRange(context, run.line, obj, run.startOffset, run.endOffset);
   }
   context.restore();
   return true;
@@ -641,14 +668,18 @@ const textSelectionJelloSpecsForDraw = () => (
   globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.() || []
 );
 
-const textSelectionJelloSpecForId = (specs = [], id = null) => (
-  specs.find((spec) => spec?.id && spec.id === id) || null
-);
+const textSelectionJelloSpecForId = (specs = [], id = null) => {
+  for (const spec of specs) {
+    if (spec?.id && spec.id === id) return spec;
+  }
+  return null;
+};
 
 const textSelectionJelloSkipIds = (specs = [], exceptId = null) => {
-  const ids = new Set();
+  let ids = null;
   for (const spec of specs) {
     if (!spec?.id || spec.id === exceptId) continue;
+    if (!ids) ids = new Set();
     ids.add(spec.id);
   }
   return ids;
@@ -708,7 +739,12 @@ function drawCaret(context, obj, layout, selStart, options = {}) {
     return true;
   };
   if (preferredLineStart != null) {
-    const preferredLine = layout.find((line) => line.startIndex === preferredLineStart);
+    let preferredLine = null;
+    for (const line of layout) {
+      if (line.startIndex !== preferredLineStart) continue;
+      preferredLine = line;
+      break;
+    }
     if (preferredLine) placeCaretOnLine(preferredLine);
   }
   if (!caretLine) {
@@ -846,7 +882,10 @@ function shouldUseEditOffscreenCache() {
   // Canvas-to-canvas blits can subtly change text antialiasing. While editing,
   // render other text boxes through the same direct path as normal mode.
   if (typeof objects !== 'undefined' && Array.isArray(objects)) {
-    return !objects.some((obj) => obj?.type === 'text' && obj.id !== editingId);
+    for (const obj of objects) {
+      if (obj?.type === 'text' && obj.id !== editingId) return false;
+    }
+    return true;
   }
   return true;
 }
@@ -859,18 +898,21 @@ function editOffscreenCacheKind() {
 }
 
 function drawBoard() {
-  const dbg = ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId, offscreenDirty: _offscreenDirty });
+  const collectViewportDebug = ViewportDebug.isEnabled();
+  const dbg = collectViewportDebug
+    ? ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId, offscreenDirty: _offscreenDirty })
+    : null;
   if (_boardOpening) {
-    ViewportDebug.end(dbg, { skipped: 'board-opening' });
+    if (collectViewportDebug) ViewportDebug.end(dbg, { skipped: 'board-opening' });
     return;
   }
   const hasOpenPreviewFallback = typeof hasOpenInitialImagePreviews === 'function' &&
     hasOpenInitialImagePreviews();
   const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;
   const collectOpenPreviewFallbackDebug = OpenDebug.enabled === true && hasOpenPreviewFallback;
-  const collectDrawDebug = ViewportDebug.isEnabled() || collectOpenInitialRenderDebug || collectOpenPreviewFallbackDebug;
+  const collectDrawDebug = collectViewportDebug || collectOpenInitialRenderDebug || collectOpenPreviewFallbackDebug;
   const drawStart = collectDrawDebug ? performance.now() : 0;
-  const drawPhases = {};
+  const drawPhases = collectDrawDebug ? {} : null;
   const counters = collectDrawDebug ? createDrawCounters() : null;
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = currentViewportWorldRect(0);
@@ -878,13 +920,14 @@ function drawBoard() {
   let drawnText = 0;
   const textSelectionSpecs = textSelectionJelloSpecsForDraw();
   const copiedSelectionSkipIds = textSelectionJelloSkipIds(textSelectionSpecs, editingId || null);
+  const hasCopiedSelectionSkipIds = !!copiedSelectionSkipIds?.size;
   const openInitialImageSourceResolver = (collectOpenInitialRenderDebug || hasOpenPreviewFallback) &&
       typeof resolveOpenInitialImageSourceForDraw === 'function'
     ? resolveOpenInitialImageSourceForDraw
     : null;
 
   if (editingId) {
-    const editCacheKind = copiedSelectionSkipIds.size === 0 ? editOffscreenCacheKind() : '';
+    const editCacheKind = hasCopiedSelectionSkipIds ? '' : editOffscreenCacheKind();
     setEditOffscreenCacheKind(editCacheKind);
     const useEditOffscreenCache = !!editCacheKind;
     if (useEditOffscreenCache && _offscreenDirty) {
@@ -986,10 +1029,10 @@ function drawBoard() {
     if (hasOpenPreviewFallback && typeof OpenDebug.recordPreviewFallbackDraw === 'function') {
       OpenDebug.recordPreviewFallbackDraw(drawMeta);
     }
-    ViewportDebug.end(dbg, drawMeta);
+    if (collectViewportDebug) ViewportDebug.end(dbg, drawMeta);
   } else {
     _lastDrawBoardMeta = null;
-    ViewportDebug.end(dbg);
+    if (collectViewportDebug) ViewportDebug.end(dbg);
   }
 }
 
@@ -998,40 +1041,49 @@ function hitTest(wx, wy) {
 }
 
 function applyTransform(frameDbg = null) {
-  const dbg = ViewportDebug.start('applyTransform', { editing: !!editingId, panX, panY, zoom, objectCount: objects.length, selectedCount: selectedIds.size });
+  const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;
+  const collectViewportDebug = ViewportDebug.isEnabled();
+  const collectTransformDebug = collectViewportDebug || collectOpenInitialRenderDebug;
+  const dbg = collectViewportDebug
+    ? ViewportDebug.start('applyTransform', { editing: !!editingId, panX, panY, zoom, objectCount: objects.length, selectedCount: selectedIds.size })
+    : null;
   if (_boardOpening) {
     getLastApplyTransformMeta.last = { skipped: 'board-opening', panX, panY, zoom, objectCount: objects.length };
-    ViewportDebug.end(dbg, { skipped: 'board-opening' });
+    if (collectViewportDebug) ViewportDebug.end(dbg, { skipped: 'board-opening' });
     return;
   }
   if (editingId) invalidateOffscreen();
-  const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;
-  const collectTransformDebug = ViewportDebug.isEnabled() || collectOpenInitialRenderDebug;
-  const transformStart = performance.now();
-  const drawStart = performance.now();
+  const transformStart = collectTransformDebug ? performance.now() : 0;
+  const drawStart = collectTransformDebug ? performance.now() : 0;
   drawBoard();
-  const drawMs = performance.now() - drawStart;
+  const drawMs = collectTransformDebug ? performance.now() - drawStart : 0;
   if (collectTransformDebug) {
-    ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
-    ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
+    if (collectViewportDebug) {
+      ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
+      ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
+    }
   }
-  const saveStart = performance.now();
+  const saveStart = collectTransformDebug ? performance.now() : 0;
   saveViewport();
-  const saveMs = performance.now() - saveStart;
+  const saveMs = collectTransformDebug ? performance.now() - saveStart : 0;
   if (collectTransformDebug) {
-    ViewportDebug.step(dbg, 'saveViewport', { ms: saveMs });
-    ViewportDebug.step(frameDbg, 'saveViewport', { ms: saveMs });
+    if (collectViewportDebug) {
+      ViewportDebug.step(dbg, 'saveViewport', { ms: saveMs });
+      ViewportDebug.step(frameDbg, 'saveViewport', { ms: saveMs });
+    }
   }
-  const overlayStart = performance.now();
+  const overlayStart = collectTransformDebug ? performance.now() : 0;
   const needsOverlayUpdate = hasSelection()
     || selOverlay.classList.contains('visible')
     || multiSelOverlay.classList.contains('visible');
   if (needsOverlayUpdate) updateSelectionOverlay();
   else ViewportDebug.count('selectionOverlaySkipped');
-  const overlayMs = performance.now() - overlayStart;
+  const overlayMs = collectTransformDebug ? performance.now() - overlayStart : 0;
   if (collectTransformDebug) {
-    ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: overlayMs, skipped: !needsOverlayUpdate });
-    ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs, skipped: !needsOverlayUpdate });
+    if (collectViewportDebug) {
+      ViewportDebug.step(dbg, 'updateSelectionOverlay', { ms: overlayMs, skipped: !needsOverlayUpdate });
+      ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: overlayMs, skipped: !needsOverlayUpdate });
+    }
   }
   scheduleVisibleHydrationAfterIdle();
   scheduleVisibleTextLayoutPrewarmAfterIdle(_activeRenderSource || 'transform');
@@ -1039,11 +1091,7 @@ function applyTransform(frameDbg = null) {
     scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
   }
   syncIslandZoomDisplay(_activeRenderSource || 'transform');
-  getLastApplyTransformMeta.last = {
-    totalMeasuredMs: performance.now() - transformStart,
-    drawMs,
-    saveViewportMs: saveMs,
-    overlayMs,
+  const baseMeta = {
     overlaySkipped: !needsOverlayUpdate,
     source: _activeRenderSource,
     editing: !!editingId,
@@ -1052,22 +1100,29 @@ function applyTransform(frameDbg = null) {
     zoom,
     objectCount: objects.length,
     selectedCount: selectedIds.size,
-    drawBoard: _lastDrawBoardMeta ? { ..._lastDrawBoardMeta } : null,
   };
-  ViewportDebug.end(dbg, {
-    totalMeasuredMs: getLastApplyTransformMeta.last.totalMeasuredMs,
-    drawMs,
-    saveViewportMs: saveMs,
-    overlayMs,
-    overlaySkipped: !needsOverlayUpdate,
-    source: _activeRenderSource,
-    editing: !!editingId,
-    panX,
-    panY,
-    zoom,
-    objectCount: objects.length,
-    selectedCount: selectedIds.size,
-  });
+  if (collectTransformDebug) {
+    const totalMeasuredMs = performance.now() - transformStart;
+    getLastApplyTransformMeta.last = {
+      totalMeasuredMs,
+      drawMs,
+      saveViewportMs: saveMs,
+      overlayMs,
+      ...baseMeta,
+      drawBoard: _lastDrawBoardMeta ? { ..._lastDrawBoardMeta } : null,
+    };
+    if (collectViewportDebug) {
+      ViewportDebug.end(dbg, {
+        totalMeasuredMs,
+        drawMs,
+        saveViewportMs: saveMs,
+        overlayMs,
+        ...baseMeta,
+      });
+    }
+  } else {
+    getLastApplyTransformMeta.last = baseMeta;
+  }
 }
 
 function getLastApplyTransformMeta() {
@@ -1620,6 +1675,17 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
     : 0;
   rows.sort((a, b) => (b.ms || 0) - (a.ms || 0) || (b.chars || 0) - (a.chars || 0));
   const totalMs = performance.now() - startedAt;
+  let drawWarmupZoomsText = '';
+  for (let i = 0; i < drawWarmupZooms.length; i++) {
+    if (i > 0) drawWarmupZoomsText += ',';
+    drawWarmupZoomsText += roundTextDrawWarmupZoom(drawWarmupZooms[i]);
+  }
+  let rowRestoreMs = 0;
+  for (const row of rows) rowRestoreMs += Number(row.drawWarmupRestoreMs) || 0;
+  const rawTopObjectLimit = Math.max(0, Math.min(20, Number(options.limit ?? 8)));
+  const topObjectLimit = Number.isFinite(rawTopObjectLimit) ? Math.trunc(rawTopObjectLimit) : 0;
+  const topObjects = new Array(Math.min(topObjectLimit, rows.length));
+  for (let i = 0; i < topObjects.length; i++) topObjects[i] = rows[i];
   const out = {
     available: true,
     source,
@@ -1636,7 +1702,7 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
     drawWarmupMaxLines,
     drawWarmupMaxLinesPerObject,
     drawWarmupFullObjectLines,
-    drawWarmupZooms: drawWarmupZooms.map(roundTextDrawWarmupZoom).join(','),
+    drawWarmupZooms: drawWarmupZoomsText,
     drawWarmupZoomCount: drawWarmupZooms.length,
     textObjectCount,
     visibleTextObjects,
@@ -1651,12 +1717,12 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
     drawWarmupDrawUnits,
     drawWarmupTotalMs: Math.round(drawWarmupTotalMs * 100) / 100,
     drawWarmupMaxLineMs: Math.round(drawWarmupMaxLineMs * 100) / 100,
-    drawWarmupRestoreMs: Math.round((boardRestoreMs + rows.reduce((sum, row) => sum + (Number(row.drawWarmupRestoreMs) || 0), 0)) * 100) / 100,
+    drawWarmupRestoreMs: Math.round((boardRestoreMs + rowRestoreMs) * 100) / 100,
     drawWarmupErrors,
     totalMs: Math.round(totalMs * 100) / 100,
     avgObjectMs: warmedTextObjects ? Math.round((totalMs / warmedTextObjects) * 100) / 100 : 0,
     maxObjectMs: Math.round(maxObjectMs * 100) / 100,
-    topObjects: rows.slice(0, Math.max(0, Math.min(20, Number(options.limit ?? 8)))),
+    topObjects,
   };
   _lastVisibleTextLayoutPrewarm = out;
   _visibleTextLayoutPrewarmHistory.push(out);
@@ -1667,9 +1733,14 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
 
 function cloneVisibleTextLayoutPrewarm(report) {
   if (!report) return null;
+  const sourceTopObjects = report.topObjects || [];
+  const topObjects = new Array(sourceTopObjects.length);
+  for (let i = 0; i < sourceTopObjects.length; i++) {
+    topObjects[i] = { ...sourceTopObjects[i] };
+  }
   return {
     ...report,
-    topObjects: (report.topObjects || []).map((row) => ({ ...row })),
+    topObjects,
   };
 }
 
@@ -1679,9 +1750,12 @@ function getLastVisibleTextLayoutPrewarm() {
 
 function getVisibleTextLayoutPrewarmHistory(limit = 12) {
   const count = Math.max(1, Math.trunc(Number(limit)) || 12);
-  return _visibleTextLayoutPrewarmHistory
-    .slice(-count)
-    .map(cloneVisibleTextLayoutPrewarm);
+  const start = Math.max(0, _visibleTextLayoutPrewarmHistory.length - count);
+  const out = new Array(_visibleTextLayoutPrewarmHistory.length - start);
+  for (let i = start; i < _visibleTextLayoutPrewarmHistory.length; i++) {
+    out[i - start] = cloneVisibleTextLayoutPrewarm(_visibleTextLayoutPrewarmHistory[i]);
+  }
+  return out;
 }
 
 function getBestVisibleTextLayoutPrewarm() {
@@ -1749,48 +1823,76 @@ function viewportEventTime(event = null) {
 
 function scheduleFrame(source = 'unknown') {
   if (source) _frameSources.push(source);
-  const pendingMeta = {
-    source,
-    pendingSources: _frameSources.length,
-    needTransform: _needTransform,
-    needBoardRender: _needBoardRender,
-    needOverlayRender: _needOverlayRender,
-    inputSource: _frameInputSource,
-    inputAgeMs: _frameInputAt ? Math.max(0, performance.now() - _frameInputAt) : '',
-    rafPending: !!_frameRaf,
-  };
+  const collectDebug = ViewportDebug.isEnabled();
   if (_frameRaf) {
     ViewportDebug.count('coalescedFrames');
-    ViewportDebug.recordFrameSchedule?.('coalesced', pendingMeta);
+    if (collectDebug) {
+      ViewportDebug.recordFrameSchedule?.('coalesced', {
+        source,
+        pendingSources: _frameSources.length,
+        needTransform: _needTransform,
+        needBoardRender: _needBoardRender,
+        needOverlayRender: _needOverlayRender,
+        inputSource: _frameInputSource,
+        inputAgeMs: _frameInputAt ? Math.max(0, performance.now() - _frameInputAt) : '',
+        rafPending: true,
+      });
+    }
     return;
   }
-  const collectDebug = ViewportDebug.isEnabled();
   _frameScheduledAt = collectDebug ? performance.now() : 0;
   ViewportDebug.count('scheduledFrames');
-  ViewportDebug.recordFrameSchedule?.('scheduled', pendingMeta);
+  if (collectDebug) {
+    ViewportDebug.recordFrameSchedule?.('scheduled', {
+      source,
+      pendingSources: _frameSources.length,
+      needTransform: _needTransform,
+      needBoardRender: _needBoardRender,
+      needOverlayRender: _needOverlayRender,
+      inputSource: _frameInputSource,
+      inputAgeMs: _frameInputAt ? Math.max(0, _frameScheduledAt - _frameInputAt) : '',
+      rafPending: false,
+    });
+  }
   _frameRaf = requestAnimationFrame(() => {
-    const sources = _frameSources.length <= 1 ? _frameSources : [...new Set(_frameSources)];
+    const frameSources = _frameSources;
+    let sourceLabel = '';
+    let sourceCount = 0;
+    if (frameSources.length === 1) {
+      sourceLabel = frameSources[0] || '';
+      sourceCount = sourceLabel ? 1 : 0;
+    } else if (frameSources.length > 1) {
+      const uniqueSources = [];
+      for (const frameSource of frameSources) {
+        if (!frameSource || uniqueSources.includes(frameSource)) continue;
+        uniqueSources.push(frameSource);
+      }
+      sourceLabel = uniqueSources.join(',');
+      sourceCount = uniqueSources.length;
+    }
     _frameSources = [];
     const doTransform = _needTransform;
     const doBoard = _needBoardRender;
     const doOverlay = _needOverlayRender;
     const inputAt = doTransform ? _frameInputAt : 0;
     const inputSource = doTransform ? _frameInputSource : '';
-    const frameMeta = inputAt ? {
+    const frameMeta = collectDebug && inputAt ? {
       inputAgeMs: Math.max(0, performance.now() - inputAt),
       inputSource,
-    } : {};
-    const frameDbg = collectDebug ? ViewportDebug.frameStart(performance.now() - _frameScheduledAt, frameMeta) : null;
-    ViewportDebug.recordFrameSchedule?.('raf-fired', {
-      sources: sources.join(','),
-      pendingSources: sources.length,
-      doTransform,
-      doBoard,
-      doOverlay,
-      inputSource,
-      inputAgeMs: frameMeta.inputAgeMs ?? '',
-    });
-    ViewportDebug.step(frameDbg, 'sources', { sources: sources.join(',') });
+    } : null;
+    const frameDbg = collectDebug ? ViewportDebug.frameStart(performance.now() - _frameScheduledAt, frameMeta || {}) : null;
+    if (collectDebug) {
+      ViewportDebug.recordFrameSchedule?.('raf-fired', {
+        sources: sourceLabel,
+        pendingSources: sourceCount,
+        doTransform,
+        doBoard,
+        doOverlay,
+        inputSource,
+        inputAgeMs: frameMeta?.inputAgeMs ?? '',
+      });
+      ViewportDebug.step(frameDbg, 'sources', { sources: sourceLabel });
+    }
     _frameRaf = null;
     _needTransform = false;
     _needBoardRender = false;
@@ -1803,15 +1905,15 @@ function scheduleFrame(source = 'unknown') {
     if (doTransform) {
       ViewportDebug.count('transformFrames');
       const transformStart = collectDebug ? performance.now() : 0;
-      withRenderSource(sources.join(',') || 'transform', () => applyTransform(frameDbg));
+      withRenderSource(sourceLabel || 'transform', () => applyTransform(frameDbg));
       if (collectDebug) ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
-      ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sources.join(',') });
+      if (collectDebug) ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sourceLabel });
       return;
     }
     if (doBoard) {
       ViewportDebug.count('boardFrames');
       const drawStart = collectDebug ? performance.now() : 0;
-      withRenderSource(sources.join(',') || 'board', () => drawBoard());
+      withRenderSource(sourceLabel || 'board', () => drawBoard());
       if (collectDebug) ViewportDebug.step(frameDbg, 'drawBoard', { ms: performance.now() - drawStart, ...(_lastDrawBoardMeta || {}) });
     }
     if (doOverlay) {
@@ -1820,26 +1922,27 @@ function scheduleFrame(source = 'unknown') {
       updateSelectionOverlay();
       if (collectDebug) ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
     }
-    ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sources.join(',') });
+    if (collectDebug) ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sourceLabel });
   });
 }
 
 function scheduleTransform(source = 'transform', inputEvent = null) {
   const now = performance.now();
   const eventAt = viewportEventTime(inputEvent);
-  const inputAgeMs = Math.max(0, now - eventAt);
   lastViewportInputAt = now;
-  ViewportDebug.recordPanZoom?.('transform-scheduled', {
-    mode: source.includes('zoom') ? 'zoom' : source.includes('pan') ? 'pan' : 'transform',
-    source,
-    eventAt,
-    inputAgeMs,
-    rafPending: !!_frameRaf,
-    pendingSources: _frameSources.length,
-    needTransformBefore: _needTransform,
-    needBoardRenderBefore: _needBoardRender,
-    needOverlayRenderBefore: _needOverlayRender,
-  }, inputEvent);
+  if (ViewportDebug.isEnabled()) {
+    ViewportDebug.recordPanZoom?.('transform-scheduled', {
+      mode: source.includes('zoom') ? 'zoom' : source.includes('pan') ? 'pan' : 'transform',
+      source,
+      eventAt,
+      inputAgeMs: Math.max(0, now - eventAt),
+      rafPending: !!_frameRaf,
+      pendingSources: _frameSources.length,
+      needTransformBefore: _needTransform,
+      needBoardRenderBefore: _needBoardRender,
+      needOverlayRenderBefore: _needOverlayRender,
+    }, inputEvent);
+  }
   _frameInputAt = eventAt;
   _frameInputSource = source;
   _needTransform = true;

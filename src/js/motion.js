@@ -50,10 +50,14 @@ const BoardfishMotion = (() => {
     jiggle: 'jiggle',
     notApplicable: 'not-applicable',
   });
-  const actionAnimationGroup = (setName, actions) => Object.freeze({
-    setName,
-    actions: Object.freeze([...actions]),
-  });
+  const actionAnimationGroup = (setName, actions) => {
+    const frozenActions = new Array(actions.length);
+    for (let i = 0; i < actions.length; i++) frozenActions[i] = actions[i];
+    return Object.freeze({
+      setName,
+      actions: Object.freeze(frozenActions),
+    });
+  };
   // ACTION ANIMATION CONTRACT:
   // Every new user-visible action must be added to exactly one group below and
   // feature code must request motion through applyActionAnimation(action, ...).
@@ -191,12 +195,19 @@ const BoardfishMotion = (() => {
   });
   const buildActionAnimationAssignments = () => {
     const assignments = {};
-    for (const setName of Object.values(ACTION_ANIMATION_SETS)) assignments[setName] = [];
-    for (const group of Object.values(ACTION_ANIMATION_GROUPS)) {
-      if (!assignments[group.setName]) assignments[group.setName] = [];
-      assignments[group.setName].push(...group.actions);
+    for (const key in ACTION_ANIMATION_SETS) {
+      if (!Object.prototype.hasOwnProperty.call(ACTION_ANIMATION_SETS, key)) continue;
+      assignments[ACTION_ANIMATION_SETS[key]] = [];
     }
-    for (const [setName, actions] of Object.entries(assignments)) {
+    for (const key in ACTION_ANIMATION_GROUPS) {
+      if (!Object.prototype.hasOwnProperty.call(ACTION_ANIMATION_GROUPS, key)) continue;
+      const group = ACTION_ANIMATION_GROUPS[key];
+      if (!assignments[group.setName]) assignments[group.setName] = [];
+      for (const action of group.actions) assignments[group.setName].push(action);
+    }
+    for (const setName in assignments) {
+      if (!Object.prototype.hasOwnProperty.call(assignments, setName)) continue;
+      const actions = assignments[setName];
       assignments[setName] = Object.freeze(actions);
     }
     return assignments;
@@ -206,16 +217,30 @@ const BoardfishMotion = (() => {
   let smoothSlideParams = null;
   let noAnimationParams = null;
   const copyJiggleNormalizerCache = new Map();
+  const cubicBezierCache = new Map();
   const actionAnimationRuntimeUnassigned = new Set();
   const actionAnimationPolicyDuplicateAssignments = [];
+  let reducedMotionQueryReady = false;
+  let reducedMotionQuery = null;
 
-  const prefersReducedMotion = () => {
-    try {
-      return !!root.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    } catch (_) {
-      return false;
-    }
+  const setCubicBezierCache = (key, value) => {
+    if (cubicBezierCache.size > 32) cubicBezierCache.clear();
+    cubicBezierCache.set(key, value);
+    return value;
   };
+
+  const reducedMotionMediaQuery = () => {
+    if (reducedMotionQueryReady) return reducedMotionQuery;
+    reducedMotionQueryReady = true;
+    try {
+      reducedMotionQuery = root.matchMedia?.('(prefers-reduced-motion: reduce)') || null;
+    } catch (_) {
+      reducedMotionQuery = null;
+    }
+    return reducedMotionQuery;
+  };
+
+  const prefersReducedMotion = () => !!reducedMotionMediaQuery()?.matches;
 
   const now = () => (
     root.performance?.now ? root.performance.now() : Date.now()
@@ -338,7 +363,9 @@ const BoardfishMotion = (() => {
 
   const buildActionAnimationLookup = () => {
     const lookup = new Map();
-    for (const [setName, actions] of Object.entries(ACTION_ANIMATION_ASSIGNMENTS)) {
+    for (const setName in ACTION_ANIMATION_ASSIGNMENTS) {
+      if (!Object.prototype.hasOwnProperty.call(ACTION_ANIMATION_ASSIGNMENTS, setName)) continue;
+      const actions = ACTION_ANIMATION_ASSIGNMENTS[setName];
       for (const action of actions) {
         if (lookup.has(action)) {
           const existingSet = lookup.get(action);
@@ -365,26 +392,55 @@ const BoardfishMotion = (() => {
     if (!value) return '';
     return actionAnimationLookup.get(value) || '';
   };
+  const cloneActionAnimationAssignmentSet = (setName) => {
+    const source = ACTION_ANIMATION_ASSIGNMENTS[setName] || [];
+    const out = new Array(source.length);
+    for (let i = 0; i < source.length; i++) out[i] = source[i];
+    return out;
+  };
   const getActionAnimationPartition = () => Object.freeze({
-    [ACTION_ANIMATION_SETS.none]: [...ACTION_ANIMATION_ASSIGNMENTS[ACTION_ANIMATION_SETS.none]],
-    [ACTION_ANIMATION_SETS.smoothSlide]: [...ACTION_ANIMATION_ASSIGNMENTS[ACTION_ANIMATION_SETS.smoothSlide]],
-    [ACTION_ANIMATION_SETS.jiggle]: [...ACTION_ANIMATION_ASSIGNMENTS[ACTION_ANIMATION_SETS.jiggle]],
-    [ACTION_ANIMATION_SETS.notApplicable]: [...ACTION_ANIMATION_ASSIGNMENTS[ACTION_ANIMATION_SETS.notApplicable]],
+    [ACTION_ANIMATION_SETS.none]: cloneActionAnimationAssignmentSet(ACTION_ANIMATION_SETS.none),
+    [ACTION_ANIMATION_SETS.smoothSlide]: cloneActionAnimationAssignmentSet(ACTION_ANIMATION_SETS.smoothSlide),
+    [ACTION_ANIMATION_SETS.jiggle]: cloneActionAnimationAssignmentSet(ACTION_ANIMATION_SETS.jiggle),
+    [ACTION_ANIMATION_SETS.notApplicable]: cloneActionAnimationAssignmentSet(ACTION_ANIMATION_SETS.notApplicable),
   });
-  const getActionAnimationGroups = () => Object.freeze(Object.fromEntries(
-    Object.entries(ACTION_ANIMATION_GROUPS).map(([name, group]) => [name, Object.freeze({
-      setName: group.setName,
-      actions: [...group.actions],
-    })])
-  ));
-  const getActionAnimationPolicyIssues = () => Object.freeze({
-    duplicateAssignments: actionAnimationPolicyDuplicateAssignments.map((issue) => ({
-      action: issue.action,
-      sets: [...issue.sets],
-    })),
-    runtimeUnassigned: getUnassignedActionAnimations(),
-  });
-  const getUnassignedActionAnimations = () => [...actionAnimationRuntimeUnassigned].sort();
+  const getActionAnimationGroups = () => {
+    const out = {};
+    for (const name in ACTION_ANIMATION_GROUPS) {
+      if (!Object.prototype.hasOwnProperty.call(ACTION_ANIMATION_GROUPS, name)) continue;
+      const group = ACTION_ANIMATION_GROUPS[name];
+      const actions = new Array(group.actions.length);
+      for (let i = 0; i < group.actions.length; i++) actions[i] = group.actions[i];
+      out[name] = Object.freeze({
+        setName: group.setName,
+        actions,
+      });
+    }
+    return Object.freeze(out);
+  };
+  const getActionAnimationPolicyIssues = () => {
+    const duplicateAssignments = new Array(actionAnimationPolicyDuplicateAssignments.length);
+    for (let i = 0; i < actionAnimationPolicyDuplicateAssignments.length; i++) {
+      const issue = actionAnimationPolicyDuplicateAssignments[i];
+      const sets = new Array(issue.sets.length);
+      for (let j = 0; j < issue.sets.length; j++) sets[j] = issue.sets[j];
+      duplicateAssignments[i] = {
+        action: issue.action,
+        sets,
+      };
+    }
+    return Object.freeze({
+      duplicateAssignments,
+      runtimeUnassigned: getUnassignedActionAnimations(),
+    });
+  };
+  const getUnassignedActionAnimations = () => {
+    const out = new Array(actionAnimationRuntimeUnassigned.size);
+    let index = 0;
+    for (const action of actionAnimationRuntimeUnassigned) out[index++] = action;
+    out.sort();
+    return out;
+  };
   const noteUnassignedActionAnimation = (action) => {
     const value = String(action || '').trim() || '(empty-action)';
     actionAnimationRuntimeUnassigned.add(value);
@@ -431,8 +487,15 @@ const BoardfishMotion = (() => {
   const noteObjectsAdded = (items, options = {}) => {
     const list = Array.isArray(items) ? items : [];
     if (options.textMotion === 'smooth-slide') {
-      const textObjects = options.includeText === false ? [] : list.filter((obj) => obj?.type === 'text');
-      const jelloObjects = list.filter((obj) => obj?.type !== 'text');
+      const textObjects = [];
+      const jelloObjects = [];
+      for (const obj of list) {
+        if (obj?.type === 'text') {
+          if (options.includeText !== false) textObjects.push(obj);
+        } else if (obj) {
+          jelloObjects.push(obj);
+        }
+      }
       noteObjectsJello(jelloObjects, { ...options, includeText: false });
       noteObjectsSmoothSlideAdded(textObjects, options);
       return;
@@ -442,10 +505,15 @@ const BoardfishMotion = (() => {
 
   const noteObjectsRemoved = (items, options = {}) => {
     const list = Array.isArray(items) ? items : [];
-    noteObjectsSmoothSlideRemoved(
-      options.includeText === false ? list.filter((obj) => obj?.type !== 'text') : list,
-      options
-    );
+    if (options.includeText !== false) {
+      noteObjectsSmoothSlideRemoved(list, options);
+      return;
+    }
+    const nonTextObjects = [];
+    for (const obj of list) {
+      if (obj && obj.type !== 'text') nonTextObjects.push(obj);
+    }
+    noteObjectsSmoothSlideRemoved(nonTextObjects, options);
   };
 
   const copyJiggleMotionFields = (options = {}, baseMotion = {}) => {
@@ -633,6 +701,7 @@ const BoardfishMotion = (() => {
   const parseCubicBezier = (ease) => {
     if (typeof ease !== 'string') return null;
     const normalized = ease.trim().toLowerCase();
+    if (cubicBezierCache.has(normalized)) return cubicBezierCache.get(normalized);
     const keywordCurves = {
       linear: [0, 0, 1, 1],
       ease: [0.25, 0.1, 0.25, 1],
@@ -640,12 +709,27 @@ const BoardfishMotion = (() => {
       'ease-out': [0, 0, 0.58, 1],
       'ease-in-out': [0.42, 0, 0.58, 1],
     };
-    if (keywordCurves[normalized]) return keywordCurves[normalized];
-    if (!normalized.startsWith('cubic-bezier')) return null;
-    const values = ease.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) || [];
-    if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) return null;
-    if (values[0] < 0 || values[0] > 1 || values[2] < 0 || values[2] > 1) return null;
-    return values;
+    if (keywordCurves[normalized]) {
+      return setCubicBezierCache(normalized, keywordCurves[normalized]);
+    }
+    if (!normalized.startsWith('cubic-bezier')) {
+      return setCubicBezierCache(normalized, null);
+    }
+    const matches = ease.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi) || [];
+    const values = new Array(matches.length);
+    let valid = matches.length === 4;
+    for (let i = 0; i < matches.length; i++) {
+      const value = Number(matches[i]);
+      values[i] = value;
+      if (!Number.isFinite(value)) valid = false;
+    }
+    if (!valid) {
+      return setCubicBezierCache(normalized, null);
+    }
+    if (values[0] < 0 || values[0] > 1 || values[2] < 0 || values[2] > 1) {
+      return setCubicBezierCache(normalized, null);
+    }
+    return setCubicBezierCache(normalized, values);
   };
 
   const cubicBezierProgress = (t, ease) => {
@@ -911,22 +995,34 @@ const BoardfishMotion = (() => {
     const selectedIds = root.selectedIds;
     const objectsMap = root.objectsMap;
     if (!selectedIds?.size || !objectsMap?.get) return;
-    const selectedObjects = [...selectedIds]
-      .map((id) => objectsMap.get(id))
-      .filter(Boolean);
+    const selectedObjects = [];
+    for (const id of selectedIds) {
+      const obj = objectsMap.get(id);
+      if (obj) selectedObjects.push(obj);
+    }
     noteObjectsJello(selectedObjects, options);
   };
 
   const asObjectList = (items) => {
     if (!items) return [];
-    return Array.isArray(items) ? items.filter(Boolean) : [items].filter(Boolean);
+    if (!Array.isArray(items)) return items ? [items] : [];
+    const out = [];
+    for (const item of items) {
+      if (item) out.push(item);
+    }
+    return out;
   };
 
   const selectedObjectsFromRoot = () => {
     const selectedIds = root.selectedIds;
     const objectsMap = root.objectsMap;
     if (!selectedIds?.size || !objectsMap?.get) return [];
-    return [...selectedIds].map((id) => objectsMap.get(id)).filter(Boolean);
+    const out = [];
+    for (const id of selectedIds) {
+      const obj = objectsMap.get(id);
+      if (obj) out.push(obj);
+    }
+    return out;
   };
 
   const inferActionObjects = (action, payload = {}) => {

@@ -93,7 +93,11 @@
   function textDataForJsonEstimate(data = {}) {
     const content = typeof data.content === 'string' ? data.content : '';
     const result = { content };
-    if (Array.isArray(data.lineAlign) && data.lineAlign.length) result.lineAlign = [...data.lineAlign];
+    if (Array.isArray(data.lineAlign) && data.lineAlign.length) {
+      const lineAlign = new Array(data.lineAlign.length);
+      for (let i = 0; i < data.lineAlign.length; i++) lineAlign[i] = data.lineAlign[i];
+      result.lineAlign = lineAlign;
+    }
     if (Array.isArray(data.scriptRanges) && data.scriptRanges.length) {
       const scriptRanges = [];
       for (const range of data.scriptRanges) {
@@ -137,7 +141,12 @@
     if (root.BoardfishBoardDocument?.referencedImageKeys && Array.isArray(root.objects)) {
       return root.BoardfishBoardDocument.referencedImageKeys(root.objects);
     }
-    return new Set(Object.keys(root.imageStore || {}));
+    const keys = new Set();
+    const store = root.imageStore || {};
+    for (const key in store) {
+      if (Object.prototype.hasOwnProperty.call(store, key)) keys.add(key);
+    }
+    return keys;
   }
 
   function currentImageContentBytes() {
@@ -151,7 +160,8 @@
   function currentBoardJsonEstimateBytes(additionalObjectCount = 0) {
     try {
       const objects = Array.isArray(root.objects) ? root.objects : [];
-      const cleanObjects = objects.map(objectForJsonEstimate);
+      const cleanObjects = [];
+      for (const obj of objects) cleanObjects.push(objectForJsonEstimate(obj));
       for (let i = 0; i < additionalObjectCount; i++) cleanObjects.push({});
       const json = JSON.stringify({
         viewport: { panX: root.panX || 0, panY: root.panY || 0, zoom: root.zoom || 1 },

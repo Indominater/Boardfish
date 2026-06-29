@@ -291,8 +291,14 @@ async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, o
   }
 }
 
+function imageInsertFilesFromList(fileList) {
+  const files = [];
+  for (const file of fileList || []) files.push(file);
+  return files;
+}
+
 fileInput.addEventListener('change', async () => {
-  const files = [...fileInput.files];
+  const files = imageInsertFilesFromList(fileInput.files);
   const insertPoint = _pendingImageInsertPoint || ctxPos;
   if (!files.length) globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
   try {
@@ -470,10 +476,15 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
       InsertDebug.step(dbg, 'ready:wait-end', { source, added, readyCount: readyPromises.length });
     }
     if (bulk) {
-      const orderedAddedObjects = addedObjects.filter(Boolean);
+      const orderedAddedObjects = [];
+      for (const obj of addedObjects) {
+        if (obj) orderedAddedObjects.push(obj);
+      }
       const primaryObj = orderedAddedObjects[orderedAddedObjects.length - 1];
       if (primaryObj) {
-        BoardfishEditorState.setSelection(orderedAddedObjects.map((obj) => obj.id), {
+        const ids = new Array(orderedAddedObjects.length);
+        for (let i = 0; i < orderedAddedObjects.length; i++) ids[i] = orderedAddedObjects[i].id;
+        BoardfishEditorState.setSelection(ids, {
           primaryId: primaryObj.id,
           exitEditing: false,
           animateSelection: false,
@@ -501,10 +512,16 @@ canvas.addEventListener('dragover', (event) => {
 });
 
 canvas.addEventListener('drop', async (event) => {
-  const files = [...(event.dataTransfer?.files || [])];
+  const files = imageInsertFilesFromList(event.dataTransfer?.files || []);
   if (!files.length) return;
   event.preventDefault();
-  const boardFile = files.find((file) => /\.bf$/i.test(file.name || ''));
+  let boardFile = null;
+  for (const file of files) {
+    if (/\.bf$/i.test(file.name || '')) {
+      boardFile = file;
+      break;
+    }
+  }
   if (boardFile && typeof openBoardFileRef === 'function') {
     globalThis.BoardfishMotion?.applyActionAnimation?.('board-file-drop-open');
     await openBoardFileRef(BoardfishRuntime.fileRefFromFile(boardFile));

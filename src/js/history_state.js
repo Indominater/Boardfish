@@ -14,11 +14,17 @@ const historyAction = (action, { filter = HISTORY_OBJECT_FILTERS.all, options = 
   filter,
   options: Object.freeze({ ...(options || {}) }),
 });
+const freezeHistoryArrayCopy = (items = []) => {
+  const source = Array.isArray(items) ? items : [];
+  const out = new Array(source.length);
+  for (let i = 0; i < source.length; i++) out[i] = source[i];
+  return Object.freeze(out);
+};
 const historyReplay = ({ selection = null, added = [], removed = [] } = {}) => Object.freeze({
   type: 'actions',
   selection,
-  added: Object.freeze([...added]),
-  removed: Object.freeze([...removed]),
+  added: freezeHistoryArrayCopy(added),
+  removed: freezeHistoryArrayCopy(removed),
 });
 const HISTORY_REMOVE_WITHOUT_ANIMATION = Object.freeze([
   historyAction('object-delete'),
@@ -134,14 +140,21 @@ const cloneHistoryAction = (spec) => spec ? ({
   options: { ...(spec.options || {}) },
 }) : null;
 
+const cloneHistoryActions = (actions = []) => {
+  const source = Array.isArray(actions) ? actions : [];
+  const cloned = new Array(source.length);
+  for (let i = 0; i < source.length; i++) cloned[i] = cloneHistoryAction(source[i]);
+  return cloned;
+};
+
 const cloneHistoryMotion = (motion) => {
   if (!motion || motion.type === 'none') return { type: 'none' };
   if (motion.type !== 'actions') return motion;
   return {
     type: 'actions',
     selection: cloneHistoryAction(motion.selection),
-    added: (motion.added || []).map(cloneHistoryAction),
-    removed: (motion.removed || []).map(cloneHistoryAction),
+    added: cloneHistoryActions(motion.added),
+    removed: cloneHistoryActions(motion.removed),
   };
 };
 
@@ -189,10 +202,43 @@ const historyCloneOptionsForObject = (reason = '', obj = null) => ({
 
 const filterHistoryMotionObjects = (items, filter = HISTORY_OBJECT_FILTERS.all) => {
   const list = Array.isArray(items) ? items : [];
-  if (filter === HISTORY_OBJECT_FILTERS.text) return list.filter((obj) => obj?.type === 'text');
-  if (filter === HISTORY_OBJECT_FILTERS.image) return list.filter((obj) => obj?.type === 'image');
-  if (filter === HISTORY_OBJECT_FILTERS.nonText) return list.filter((obj) => obj?.type !== 'text');
+  if (filter === HISTORY_OBJECT_FILTERS.all) return list;
+  const out = [];
+  for (const obj of list) {
+    if (filter === HISTORY_OBJECT_FILTERS.text) {
+      if (obj?.type === 'text') out.push(obj);
+    } else if (filter === HISTORY_OBJECT_FILTERS.image) {
+      if (obj?.type === 'image') out.push(obj);
+    } else if (filter === HISTORY_OBJECT_FILTERS.nonText && obj?.type !== 'text') {
+      out.push(obj);
+    }
+  }
+  if (
+    filter === HISTORY_OBJECT_FILTERS.text ||
+    filter === HISTORY_OBJECT_FILTERS.image ||
+    filter === HISTORY_OBJECT_FILTERS.nonText
+  ) return out;
   return list;
+};
+
+const splitHistoryTextObjects = (items = []) => {
+  const textObjects = [];
+  const nonTextObjects = [];
+  for (const obj of items || []) {
+    if (obj?.type === 'text') textObjects.push(obj);
+    else nonTextObjects.push(obj);
+  }
+  return { textObjects, nonTextObjects };
+};
+
+const splitHistoryRestoredObjects = (items = []) => {
+  const textObjects = [];
+  const imageObjects = [];
+  for (const obj of items || []) {
+    if (obj?.type === 'text') textObjects.push(obj);
+    else if (obj?.type === 'image') imageObjects.push(obj);
+  }
+  return { textObjects, imageObjects };
 };
 
 const applyHistoryActionSpecs = (specs, items, payloadKey) => {
@@ -221,8 +267,7 @@ const applyHistorySelectionAction = (spec, selectionPulseOptions = {}) => {
 const applyHistoryAddedObjectsMotion = (added, removed, options = {}) => {
   if (added.length) {
     if (options.textMotion === 'smooth-slide') {
-      const textObjects = added.filter((obj) => obj?.type === 'text');
-      const nonTextObjects = added.filter((obj) => obj?.type !== 'text');
+      const { textObjects, nonTextObjects } = splitHistoryTextObjects(added);
       globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-redo-create', { objects: textObjects }, options);
       globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { objects: nonTextObjects }, {
         ...options,
@@ -237,8 +282,7 @@ const applyHistoryAddedObjectsMotion = (added, removed, options = {}) => {
 
 const applyHistoryRestoredDeleteMotion = (added, removed, options = {}) => {
   if (added.length) {
-    const textObjects = added.filter((obj) => obj?.type === 'text');
-    const imageObjects = added.filter((obj) => obj?.type === 'image');
+    const { textObjects, imageObjects } = splitHistoryRestoredObjects(added);
     globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-undo-delete', { objects: textObjects });
     globalThis.BoardfishMotion?.applyActionAnimation?.('object-undo-delete', { objects: imageObjects }, {
       ...options,
@@ -271,9 +315,11 @@ const historyRestoreMotionTransition = (beforeObjects = [], targetObjects = []) 
 const applyHistoryMotionReplay = (motion, transition, selectionPulseOptions) => {
   const replay = motion || { type: 'jello', options: selectionPulseOptions };
   if (replay.type === 'none') return;
-  const added = (transition?.addedIds || [])
-    .map((id) => objectsMap.get(id))
-    .filter(Boolean);
+  const added = [];
+  for (const id of transition?.addedIds || []) {
+    const obj = objectsMap.get(id);
+    if (obj) added.push(obj);
+  }
   const removed = transition?.removed || [];
   if (replay.type === 'actions') {
     if (added.length) applyHistoryActionSpecs(replay.added, added, 'objects');
@@ -283,8 +329,7 @@ const applyHistoryMotionReplay = (motion, transition, selectionPulseOptions) => 
   }
   if (replay.type === 'smooth-slide') {
     if (added.length) {
-      const textObjects = added.filter((obj) => obj?.type === 'text');
-      const nonTextObjects = added.filter((obj) => obj?.type !== 'text');
+      const { textObjects, nonTextObjects } = splitHistoryTextObjects(added);
       globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-undo-delete', { objects: textObjects });
       globalThis.BoardfishMotion?.applyActionAnimation?.('object-undo-delete', { objects: nonTextObjects }, { includeText: false });
     }
@@ -335,7 +380,9 @@ function retainedImageKeysForCurrentAndHistory() {
     collectImageKeysFromObjects(Array.isArray(entry) ? entry : entry?.objects, keys);
   }
   collectImageKeysFromObjects(jsClipboard?.objects, keys);
-  for (const key of Object.keys(jsClipboard?.imageData || {})) {
+  const clipboardImageData = jsClipboard?.imageData || {};
+  for (const key in clipboardImageData) {
+    if (!Object.prototype.hasOwnProperty.call(clipboardImageData, key)) continue;
     if (key) keys.add(key);
   }
   return keys;
@@ -520,7 +567,9 @@ function historyTextContentDebugMetrics(content) {
 function prefixHistoryDebugMetrics(prefix, metrics = {}) {
   if (!prefix) return metrics;
   const out = {};
-  for (const [key, value] of Object.entries(metrics)) {
+  for (const key in metrics) {
+    if (!Object.prototype.hasOwnProperty.call(metrics, key)) continue;
+    const value = metrics[key];
     out[`${prefix}${key[0].toUpperCase()}${key.slice(1)}`] = value;
   }
   return out;
@@ -615,8 +664,12 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
 
 function replaceObjectContentsInPlace(target, source) {
   if (!target || !source) return target;
-  for (const key of Object.keys(target)) delete target[key];
-  for (const [key, value] of Object.entries(source)) target[key] = value;
+  for (const key in target) {
+    if (Object.prototype.hasOwnProperty.call(target, key)) delete target[key];
+  }
+  for (const key in source) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = source[key];
+  }
   return target;
 }
 
@@ -704,15 +757,18 @@ function pushHistory(reason = '', options = {}) {
   HistoryDebug.step(dbg, 'build-prev-map', { objectCount: prevObjects.length });
   let cloned = 0;
   let reused = 0;
-  const entry = objects.map((o) => {
+  const entry = new Array(objects.length);
+  for (let i = 0; i < objects.length; i++) {
+    const o = objects[i];
     const cloneOptions = historyCloneOptionsForObject(reason, o);
     if (_dirtyIds.has(o.id) || !prevMap.has(o.id) || cloneOptions.runtimeTextCache) {
       cloned++;
-      return cloneObject(o, cloneOptions);
+      entry[i] = cloneObject(o, cloneOptions);
+      continue;
     }
     reused++;
-    return prevMap.get(o.id);
-  });
+    entry[i] = prevMap.get(o.id);
+  }
   HistoryDebug.count('clonedObjects', cloned);
   HistoryDebug.count('reusedObjects', reused);
   HistoryDebug.step(dbg, 'clone-dirty-objects', { cloned, reused, objectCount: entry.length, ...getHistoryTextDebugMetrics(entry) });
@@ -733,6 +789,13 @@ function pushHistory(reason = '', options = {}) {
   const ms = performance.now() - t0;
   HistoryDebug.max('maxPushHistoryMs', ms);
   HistoryDebug.end(dbg, { reason, ms, cloned, reused, historyLength: boardHistory.length, historyIndex, ...getHistoryTextDebugMetrics(entry) });
+}
+
+function snapshotContainsTextObject(snapshotObjects = [], id = '') {
+  for (const obj of snapshotObjects || []) {
+    if (obj?.id === id && obj?.type === 'text') return true;
+  }
+  return false;
 }
 
 function restoreSnapshot(s, {
@@ -776,7 +839,7 @@ function restoreSnapshot(s, {
     liveEditId === editState.id &&
     liveEditProxy &&
     liveEditObject?.type === 'text' &&
-    snapshotObjects.some((obj) => obj?.id === editState.id && obj?.type === 'text')
+    snapshotContainsTextObject(snapshotObjects, editState.id)
   );
   let liveSelectionListenerRemoved = false;
   clearTimeout(_editHistoryTimer);
@@ -847,7 +910,7 @@ function restoreSnapshot(s, {
   HistoryDebug.step(dbg, 'invalidate-offscreen', { invalidateOffscreenMs: performance.now() - invalidateStart });
   // Preserve selection for objects that still exist in the restored state
   const selectionStart = performance.now();
-  BoardfishEditorState.setSelection([...prevSelectedIds], { exitEditing: false, animateSelection: false });
+  BoardfishEditorState.setSelection(prevSelectedIds, { exitEditing: false, animateSelection: false });
   HistoryDebug.step(dbg, 'restore-selection', {
     setSelectionMs: performance.now() - selectionStart,
     previousSelectedCount: prevSelectedIds.size,

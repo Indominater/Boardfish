@@ -8,6 +8,9 @@
     onEvict = null,
   }) {
     const groups = new Map();
+    const entryNodes = new WeakMap();
+    let lruHead = null;
+    let lruTail = null;
     let bytes = 0;
     let useCounter = 1;
 
@@ -25,15 +28,68 @@
       else if (entry?.bitmap?.close) entry.bitmap.close();
     }
 
+    function detachLruNode(node) {
+      if (!node) return;
+      if (node.prev) node.prev.next = node.next;
+      else if (lruHead === node) lruHead = node.next;
+      if (node.next) node.next.prev = node.prev;
+      else if (lruTail === node) lruTail = node.prev;
+      node.prev = null;
+      node.next = null;
+    }
+
+    function appendLruNode(node) {
+      if (!node) return;
+      node.prev = lruTail;
+      node.next = null;
+      if (lruTail) lruTail.next = node;
+      else lruHead = node;
+      lruTail = node;
+    }
+
+    function touchEntry(key, slot, entry) {
+      let node = entryNodes.get(entry);
+      if (!node) {
+        node = { key, slot, entry, prev: null, next: null };
+        entryNodes.set(entry, node);
+      } else {
+        node.key = key;
+        node.slot = slot;
+      }
+      if (lruTail !== node) {
+        detachLruNode(node);
+        appendLruNode(node);
+      } else if (!lruHead) {
+        appendLruNode(node);
+      }
+      entry.lastUsed = useCounter++;
+      return entry;
+    }
+
+    function untrackEntry(entry) {
+      const node = entryNodes.get(entry);
+      if (!node) return;
+      detachLruNode(node);
+      entryNodes.delete(entry);
+    }
+
+    function evictEntry(key, group, slot, entry, notify = false, dropEmptyGroup = true) {
+      untrackEntry(entry);
+      close(entry);
+      bytes -= entryBytes(entry);
+      group.delete(slot);
+      if (dropEmptyGroup && !group.size) groups.delete(key);
+      if (notify && onEvict) onEvict(entry, key, slot);
+    }
+
     function set(key, slot, entry) {
       const group = getGroup(key);
       const existing = group.get(slot);
       if (existing) {
-        close(existing);
-        bytes -= entryBytes(existing);
+        evictEntry(key, group, slot, existing, false, false);
       }
-      entry.lastUsed = useCounter++;
       group.set(slot, entry);
+      touchEntry(key, slot, entry);
       bytes += entryBytes(entry);
       prune();
       return entry;
@@ -41,7 +97,7 @@
 
     function get(key, slot) {
       const entry = groups.get(key)?.get(slot) || null;
-      if (entry) entry.lastUsed = useCounter++;
+      if (entry) touchEntry(key, slot, entry);
       return entry;
     }
 
@@ -49,6 +105,7 @@
       const group = groups.get(key);
       if (!group) return;
       for (const entry of group.values()) {
+        untrackEntry(entry);
         close(entry);
         bytes -= entryBytes(entry);
       }
@@ -58,27 +115,31 @@
     }
 
     function clear() {
-      for (const key of groups.keys()) removeGroup(key);
+      while (groups.size) {
+        const first = groups.keys().next();
+        if (first.done) break;
+        removeGroup(first.value);
+      }
+      lruHead = null;
+      lruTail = null;
       bytes = 0;
       useCounter = 1;
     }
 
     function prune() {
       if (bytes <= memoryLimit) return 0;
-      const entries = [];
-      for (const [key, group] of groups.entries()) {
-        for (const [slot, entry] of group.entries()) entries.push({ key, group, slot, entry });
-      }
-      entries.sort((a, b) => (a.entry.lastUsed || 0) - (b.entry.lastUsed || 0));
       let evicted = 0;
-      for (const item of entries) {
-        if (bytes <= memoryLimit) break;
-        close(item.entry);
-        bytes -= entryBytes(item.entry);
-        item.group.delete(item.slot);
-        if (!item.group.size) groups.delete(item.key);
+      while (bytes > memoryLimit && lruHead) {
+        const node = lruHead;
+        const group = groups.get(node.key);
+        const entry = group?.get(node.slot) || null;
+        if (entry !== node.entry) {
+          detachLruNode(node);
+          entryNodes.delete(node.entry);
+          continue;
+        }
+        evictEntry(node.key, group, node.slot, node.entry, true);
         evicted++;
-        if (onEvict) onEvict(item.entry, item.key, item.slot);
       }
       bytes = Math.max(0, bytes);
       return evicted;

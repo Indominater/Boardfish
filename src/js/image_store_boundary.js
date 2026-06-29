@@ -25,7 +25,10 @@
   }
 
   function setSources(nextSources = {}) {
-    for (const [key, source] of Object.entries(nextSources || {})) {
+    const sources = nextSources || {};
+    for (const key in sources) {
+      if (!Object.prototype.hasOwnProperty.call(sources, key)) continue;
+      const source = sources[key];
       const hadSource = Object.hasOwn(imageStore, key);
       const previous = imageStore[key];
       const changed = hadSource && previous !== source;
@@ -35,8 +38,8 @@
       if (changed && previous && typeof BoardfishWebBoardContainer !== 'undefined') {
         BoardfishWebBoardContainer.revokeImageSource?.(previous);
       }
+      imageStore[key] = source;
     }
-    Object.assign(imageStore, nextSources || {});
     return imageStore;
   }
 

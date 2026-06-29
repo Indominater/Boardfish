@@ -146,7 +146,13 @@ function dropDrawableBitmapWarmup(source) {
   drawableBitmapWarmupDelete(drawableBitmapWarmupQueued, source);
   drawableBitmapWarmupDelete(drawableBitmapWarmupReady, source);
   if (drawableBitmapWarmupQueue.length) {
-    drawableBitmapWarmupQueue = drawableBitmapWarmupQueue.filter((task) => task?.source !== source);
+    let write = 0;
+    for (let read = 0; read < drawableBitmapWarmupQueue.length; read++) {
+      const task = drawableBitmapWarmupQueue[read];
+      if (task?.source === source) continue;
+      drawableBitmapWarmupQueue[write++] = task;
+    }
+    drawableBitmapWarmupQueue.length = write;
   }
 }
 
@@ -313,7 +319,13 @@ function clearScaledImageVariants(key = null) {
     imageScaledBitmapStore.removeGroup(key);
     dropDrawableBitmapWarmupsForKey(key);
     if (imageScaledVariantQueue.length) {
-      imageScaledVariantQueue = imageScaledVariantQueue.filter((task) => task?.variantKey !== key);
+      let write = 0;
+      for (let read = 0; read < imageScaledVariantQueue.length; read++) {
+        const task = imageScaledVariantQueue[read];
+        if (task?.variantKey === key) continue;
+        imageScaledVariantQueue[write++] = task;
+      }
+      imageScaledVariantQueue.length = write;
     }
     for (const pendingKey of imageScaledBitmapPending) {
       if (pendingKey.startsWith(`${key}:`)) {
@@ -445,12 +457,16 @@ async function mapScaledVariantTasksWithConcurrency(items, limit, worker) {
   const out = new Array(items.length);
   let next = 0;
   const workerCount = Math.max(1, Math.min(Number(limit) || 1, items.length));
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      out[index] = await worker(items[index], index);
-    }
-  }));
+  const workers = new Array(workerCount);
+  for (let i = 0; i < workerCount; i++) {
+    workers[i] = (async () => {
+      while (next < items.length) {
+        const index = next++;
+        out[index] = await worker(items[index], index);
+      }
+    })();
+  }
+  await Promise.all(workers);
   return out;
 }
 
@@ -727,7 +743,9 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
   }
   tasks.sort((a, b) => bitmapByteSize(b.source) - bitmapByteSize(a.source));
   const limit = Math.max(0, Math.floor(Number(options.limit) || tasks.length));
-  const selectedTasks = tasks.slice(0, limit);
+  const selectedCount = Math.min(limit, tasks.length);
+  const selectedTasks = new Array(selectedCount);
+  for (let i = 0; i < selectedCount; i++) selectedTasks[i] = tasks[i];
   const concurrency = Math.max(1, Math.min(8, Math.floor(Number(options.concurrency) || 4), selectedTasks.length || 1));
   let built = 0;
   let failed = 0;
@@ -750,6 +768,20 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
     }
     return result;
   });
+  const resultCount = Math.min(24, results.length);
+  const resultRows = new Array(resultCount);
+  for (let i = 0; i < resultCount; i++) {
+    const result = results[i];
+    resultRows[i] = {
+      key: result?.key || '',
+      scale: result?.scale ?? '',
+      ready: result?.ready === true,
+      skipped: result?.skipped || '',
+      ms: result?.ms ?? '',
+      bytes: result?.bytes ?? '',
+      error: result?.error || '',
+    };
+  }
   return {
     candidates,
     selected: selectedTasks.length,
@@ -764,15 +796,7 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
     concurrency,
     padPx,
     ms: performance.now() - startedAt,
-    results: results.slice(0, 24).map((result) => ({
-      key: result?.key || '',
-      scale: result?.scale ?? '',
-      ready: result?.ready === true,
-      skipped: result?.skipped || '',
-      ms: result?.ms ?? '',
-      bytes: result?.bytes ?? '',
-      error: result?.error || '',
-    })),
+    results: resultRows,
   };
 }
 
@@ -859,8 +883,8 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
       if (scale >= targetScale && map.has(scale) && scale < selectedScale) selectedScale = scale;
     }
     if (selectedScale < 1) {
-      const entry = map.get(selectedScale);
-      entry.lastUsed = imageScaledBitmapUseCounter++;
+      const entry = imageScaledBitmapStore.get(key, selectedScale);
+      imageScaledBitmapUseCounter = imageScaledBitmapStore.useCounter;
       return { source: entry.bitmap, scale: selectedScale, targetScale };
     }
   }
@@ -892,11 +916,19 @@ function setViewportPerfMode(modeKey) {
 }
 
 function viewportPerfModeSummary(modeKey = null) {
-  const active = Object.entries(VIEWPORT_PERF_MODES).find(([, mode]) => (
-    mode.culling === viewportCullingEnabled && mode.scaling === viewportImageScalingEnabled
-  ));
-  const key = modeKey || active?.[0] || '';
-  const mode = VIEWPORT_PERF_MODES[key] || active?.[1] || {};
+  let activeKey = '';
+  let activeMode = null;
+  for (const key in VIEWPORT_PERF_MODES) {
+    if (!Object.prototype.hasOwnProperty.call(VIEWPORT_PERF_MODES, key)) continue;
+    const mode = VIEWPORT_PERF_MODES[key];
+    if (mode.culling === viewportCullingEnabled && mode.scaling === viewportImageScalingEnabled) {
+      activeKey = key;
+      activeMode = mode;
+      break;
+    }
+  }
+  const key = modeKey || activeKey || '';
+  const mode = VIEWPORT_PERF_MODES[key] || activeMode || {};
   return {
     key,
     label: mode.label || 'custom',

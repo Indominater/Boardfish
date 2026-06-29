@@ -1,24 +1,21 @@
 # Boardfish
 
+[https://indominater.github.io/Boardfish/](https://indominater.github.io/Boardfish/)
+
 Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in the browser and provides a lightweight environment for visual research, moodboarding, and snippets.
 
 <img src="docs/readme-assets/boardfish-canvas-screenshot.png" alt="Boardfish canvas screenshot" width="900">
 
-## Use Boardfish
-
-Open the web app in a modern Chromium-based browser:
-
-https://indominater.github.io/Boardfish/
-
 ## Features
 
-- drag/drop or paste PNG/JPEG images and text
-- smoothly pan/zoom boards with up to 500 MB of images
-- preserve images losslessly
-- save everything locally as a portable `.bf` file
-- multi-select, resize, flip, rotate, duplicate, copy/paste
-- export selected image(s)
-- light/dark mode
+- An infinite canvas free from formatting rules
+- Lag-free navigation across massive boards supporting 500 MB of images and text
+- Losslessly add images via clipboard, drag and drop, or the file picker
+- Multi-select, translate, scale, flip, rotate, copy, paste, and duplicate
+- Format text with sub/superscript and left/middle/right align
+- Export one image, selected images, or all images
+- Losslessly copy images back to your clipboard
+- Save everything locally as a portable .bf file
 
 ## Keyboard Shortcuts
 
