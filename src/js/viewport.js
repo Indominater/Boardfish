@@ -1213,6 +1213,13 @@ function withRenderSource(source, fn) {
   }
 }
 
+function finishMotionViewportRenderFrame(source, meta = {}) {
+  globalThis.BoardfishMotion?.afterViewportRenderFrame?.({
+    source: source || _activeRenderSource || 'render',
+    ...meta,
+  });
+}
+
 function textPrewarmLogicalLineCount(content) {
   const text = typeof normalizeTextContent === 'function'
     ? normalizeTextContent(content)
@@ -1907,6 +1914,7 @@ function scheduleFrame(source = 'unknown') {
       const transformStart = collectDebug ? performance.now() : 0;
       withRenderSource(sourceLabel || 'transform', () => applyTransform(frameDbg));
       if (collectDebug) ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
+      finishMotionViewportRenderFrame(sourceLabel || 'transform', { doTransform, doBoard: true, doOverlay: true });
       if (collectDebug) ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sourceLabel });
       return;
     }
@@ -1922,6 +1930,7 @@ function scheduleFrame(source = 'unknown') {
       updateSelectionOverlay();
       if (collectDebug) ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
     }
+    if (doBoard) finishMotionViewportRenderFrame(sourceLabel || 'board', { doTransform, doBoard, doOverlay });
     if (collectDebug) ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sourceLabel });
   });
 }

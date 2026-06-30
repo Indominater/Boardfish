@@ -78,6 +78,7 @@ function loadClipboardExportHarness(options = {}) {
     jello: [],
     objectJello: [],
     deleted: 0,
+    pendingImageCopyResolves: [],
     pendingTextCopyResolves: [],
     pulses: 0,
     renderImageToCanvas: 0,
@@ -85,6 +86,11 @@ function loadClipboardExportHarness(options = {}) {
     resolveNextCopiedText(result = { boardfishTokenWritten: true }) {
       const resolve = calls.pendingTextCopyResolves.shift();
       if (!resolve) throw new Error('No pending text copy to resolve');
+      resolve(result);
+    },
+    resolveNextCopiedImage(result = { boardfishTokenWritten: true }) {
+      const resolve = calls.pendingImageCopyResolves.shift();
+      if (!resolve) throw new Error('No pending image copy to resolve');
       resolve(result);
     },
   };
@@ -113,6 +119,9 @@ function loadClipboardExportHarness(options = {}) {
     BoardfishClipboardIO: {
       copyImageBlobToClipboard(blob, token) {
         calls.copiedImages.push({ blob, token });
+        if (options.deferCopyImage) {
+          return new Promise((resolve) => calls.pendingImageCopyResolves.push(resolve));
+        }
         return Promise.resolve({ boardfishTokenWritten: true });
       },
       copyTextToClipboard(text) {
@@ -537,9 +546,10 @@ test('copying an untransformed web PNG image writes source bytes without renderi
     },
     imageNeedsRendering: () => false,
     isWebImageRef: (source) => source?.web === true,
+    deferCopyImage: true,
   });
 
-  assert.equal(await context.copySelected(), true);
+  const copyPromise = context.copySelected();
 
   assert.equal(context.calls.renderImageToCanvas, 0);
   assert.equal(context.calls.canvasToPngBlob, 0);
@@ -547,6 +557,17 @@ test('copying an untransformed web PNG image writes source bytes without renderi
   assert.equal(context.calls.copiedImages[0].token, 'web-token');
   assert.equal(context.calls.copiedImages[0].blob.type, 'image/png');
   assert.equal(context.calls.copiedImages[0].blob.size, pngBytes.length);
+  assert.deepEqual(context.calls.objectJello, []);
+
+  context.calls.resolveNextCopiedImage();
+  assert.equal(await copyPromise, true);
+  assert.deepEqual(context.calls.objectJello.map((call) => ({
+    action: call.action,
+    ids: [...call.ids],
+  })), [{
+    action: 'copy-selected-objects',
+    ids: ['image-1'],
+  }]);
   assert.equal(context.calls.debugSteps.some((entry) => entry.step === 'copy:web-source-png-blob'), true);
   assert.equal(context.calls.debugEnds.at(-1).path, 'image-web-source-png');
 });

@@ -72,6 +72,16 @@
       scaledFallbackFull: 0,
       activeInputFullFallbackImages: 0,
       scaledVariantPendingImages: 0,
+      motionObjects: 0,
+      motionImages: 0,
+      motionText: 0,
+      motionTranslatedObjects: 0,
+      motionScaledObjects: 0,
+      lowLatencyImageDraws: 0,
+      motionScaledImages: 0,
+      motionFullScaleImages: 0,
+      motionFullFallbackImages: 0,
+      motionActiveInputFullFallbackImages: 0,
       fullScaleImages: 0,
       scaledImageScaleTotal: 0,
       scaledImageTargetScaleTotal: 0,
@@ -230,7 +240,7 @@
   }
 
   function drawImageObj(context, obj, img, deps, options = {}) {
-    const lowerQuality = options.activeInputFullFallback === true;
+    const lowerQuality = options.activeInputFullFallback === true || options.lowLatency === true;
     const previousQuality = lowerQuality ? context.imageSmoothingQuality : undefined;
     const previousSmoothingEnabled = lowerQuality ? context.imageSmoothingEnabled : undefined;
     if (lowerQuality) {
@@ -474,6 +484,11 @@
       row.fallbackFull = drawCounterValue(counters, 'scaledFallbackFull') > before.scaledFallbackFull;
       row.activeInputFullFallback = drawCounterValue(counters, 'activeInputFullFallbackImages') > before.activeInputFullFallbackImages;
       row.scaledVariantPending = drawCounterValue(counters, 'scaledVariantPendingImages') > before.scaledVariantPendingImages;
+      row.lowLatencyImageDraw = drawCounterValue(counters, 'lowLatencyImageDraws') > before.lowLatencyImageDraws;
+      row.motionScaledImage = drawCounterValue(counters, 'motionScaledImages') > before.motionScaledImages;
+      row.motionFullScaleImage = drawCounterValue(counters, 'motionFullScaleImages') > before.motionFullScaleImages;
+      row.motionFullFallbackImage = drawCounterValue(counters, 'motionFullFallbackImages') > before.motionFullFallbackImages;
+      row.motionActiveInputFullFallback = drawCounterValue(counters, 'motionActiveInputFullFallbackImages') > before.motionActiveInputFullFallbackImages;
       row.firstSourceDraw = drawCounterValue(counters, 'imageSourceFirstDraws') > before.imageSourceFirstDraws;
       row.firstContextDraw = drawCounterValue(counters, 'imageContextFirstDraws') > before.imageContextFirstDraws;
       row.warmSourceDraw = drawCounterValue(counters, 'imageSourceWarmDraws') > before.imageSourceWarmDraws;
@@ -561,9 +576,11 @@
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
       const fullImg = bitmap || deps.imageCache()[key] || null;
+      const motion = options.motion || null;
+      const lowLatencyImageMotion = !!motion;
       const selected = imageSourceResolver
-        ? imageSourceResolver(key, obj, view, counters)
-        : fullImg ? deps.selectImageSourceForDraw(key, obj, fullImg, view) : null;
+        ? imageSourceResolver(key, obj, view, counters, { activeInput: lowLatencyImageMotion })
+        : fullImg ? deps.selectImageSourceForDraw(key, obj, fullImg, view, { activeInput: lowLatencyImageMotion }) : null;
       const img = selected?.source || null;
       if (isDrawableImageSource(img)) {
         const firstSourceDraw = !imageSourceDrawnBefore(img);
@@ -574,14 +591,19 @@
             counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
             counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
             if (selected?.openPreview) counters.openPreviewImages = (counters.openPreviewImages || 0) + 1;
+            if (lowLatencyImageMotion) counters.motionScaledImages = (counters.motionScaledImages || 0) + 1;
           } else if (selected?.targetScale < 1) {
             counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
+            if (lowLatencyImageMotion) counters.motionFullFallbackImages = (counters.motionFullFallbackImages || 0) + 1;
             if (selected?.activeInputFullFallback) {
               counters.activeInputFullFallbackImages = (counters.activeInputFullFallbackImages || 0) + 1;
+              if (lowLatencyImageMotion) counters.motionActiveInputFullFallbackImages = (counters.motionActiveInputFullFallbackImages || 0) + 1;
             }
           } else if (selected?.scale === 1 && selected?.targetScale === 1) {
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
+            if (lowLatencyImageMotion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
           }
+          if (lowLatencyImageMotion) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
           if (bitmap || selected?.scale < 1) counters.bitmapImages++;
           else {
             counters.elementImages++;
@@ -593,6 +615,7 @@
             viewportRect: options.viewportRect || null,
             view,
             activeInputFullFallback: selected?.activeInputFullFallback === true,
+            lowLatency: lowLatencyImageMotion,
           });
           if (drawResult?.skipped) return false;
           recordImageDrawWarmStats(counters, selected, firstSourceDraw, firstContextDraw);
@@ -655,14 +678,21 @@
         if (countObject && counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
         const motion = objectMotionForDraw ? objectMotionForDraw(obj, { view, viewportRect }) : null;
         if (motion?.skip) return;
+        const opacity = motion && Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
+        const scale = motion && Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
+        const scaleX = motion && Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
+        const scaleY = motion && Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+        const translateX = motion && Number.isFinite(motion.translateX) ? motion.translateX : 0;
+        const translateY = motion && Number.isFinite(motion.translateY) ? motion.translateY : 0;
+        if (motion && countObject && counters) {
+          counters.motionObjects = (counters.motionObjects || 0) + 1;
+          if (obj.type === 'image') counters.motionImages = (counters.motionImages || 0) + 1;
+          else if (obj.type === 'text') counters.motionText = (counters.motionText || 0) + 1;
+          if (translateX || translateY) counters.motionTranslatedObjects = (counters.motionTranslatedObjects || 0) + 1;
+          if (scaleX !== 1 || scaleY !== 1) counters.motionScaledObjects = (counters.motionScaledObjects || 0) + 1;
+        }
         if (motion && context.save) {
           context.save();
-          const opacity = Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
-          const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
-          const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
-          const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
-          const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
-          const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
           context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
           if (translateX || translateY) context.translate(translateX, translateY);
           if (scaleX !== 1 || scaleY !== 1) {
@@ -686,6 +716,16 @@
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
           activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
           scaledVariantPendingImages: drawCounterValue(counters, 'scaledVariantPendingImages'),
+          motionObjects: drawCounterValue(counters, 'motionObjects'),
+          motionImages: drawCounterValue(counters, 'motionImages'),
+          motionText: drawCounterValue(counters, 'motionText'),
+          motionTranslatedObjects: drawCounterValue(counters, 'motionTranslatedObjects'),
+          motionScaledObjects: drawCounterValue(counters, 'motionScaledObjects'),
+          lowLatencyImageDraws: drawCounterValue(counters, 'lowLatencyImageDraws'),
+          motionScaledImages: drawCounterValue(counters, 'motionScaledImages'),
+          motionFullScaleImages: drawCounterValue(counters, 'motionFullScaleImages'),
+          motionFullFallbackImages: drawCounterValue(counters, 'motionFullFallbackImages'),
+          motionActiveInputFullFallbackImages: drawCounterValue(counters, 'motionActiveInputFullFallbackImages'),
           scaledImageScaleTotal: drawCounterValue(counters, 'scaledImageScaleTotal'),
           scaledImageTargetScaleTotal: drawCounterValue(counters, 'scaledImageTargetScaleTotal'),
           richTextDrawUnits: drawCounterValue(counters, 'richTextDrawUnits'),
@@ -708,6 +748,7 @@
           drawn = drawSingleObj(context, obj, counters, {
             view,
             imageSourceResolver,
+            motion,
             viewportRect,
           });
         } finally {

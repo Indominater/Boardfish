@@ -8,7 +8,8 @@ const BoardfishMotion = (() => {
   const smoothSlideSurfaceCloses = new WeakMap();
   const smoothSlideEnterAnimation = 'bf-smooth-slide-enter';
   const smoothSlideExitAnimation = 'bf-smooth-slide-exit';
-  let tickRaf = 0;
+  let motionRenderPending = false;
+  let motionRenderRequestedAt = 0;
   const jelloDefaults = Object.freeze({
     amplitude: 0.062,
     duration: 520,
@@ -465,18 +466,55 @@ const BoardfishMotion = (() => {
     jelloObjectMotions.size || textSelectionJelloMotions.size || smoothSlideObjectMotions.size
   );
 
+  const motionDebugMeta = () => ({
+    jelloObjectMotions: jelloObjectMotions.size,
+    textSelectionJelloMotions: textSelectionJelloMotions.size,
+    smoothSlideObjectMotions: smoothSlideObjectMotions.size,
+    hasObjectMotions: !!hasObjectMotions(),
+  });
+
+  const recordMotionDebug = (stepName, meta = {}) => {
+    root.ViewportDebug?.recordMotion?.(stepName, {
+      ...motionDebugMeta(),
+      ...meta,
+    });
+  };
+
   const requestMotionFrame = () => {
-    if (tickRaf || prefersReducedMotion()) return;
-    tickRaf = root.requestAnimationFrame?.(() => {
-      tickRaf = 0;
-      const removed = pruneFinishedObjectMotions();
-      if (!hasObjectMotions()) {
-        if (removed) root.scheduleRender?.(true, true, 'motion-finished');
-        return;
-      }
-      root.scheduleRender?.(true, true, 'motion');
-      requestMotionFrame();
-    }) || 0;
+    if (motionRenderPending || prefersReducedMotion()) return;
+    if (typeof root.scheduleRender !== 'function') return;
+    const requestedAt = now();
+    motionRenderPending = true;
+    motionRenderRequestedAt = requestedAt;
+    recordMotionDebug('raf-scheduled', { requestedAt, source: 'motion' });
+    root.scheduleRender?.(true, true, 'motion');
+    recordMotionDebug('render-scheduled', { source: 'motion' });
+  };
+
+  const afterViewportRenderFrame = (meta = {}) => {
+    if (prefersReducedMotion()) return;
+    if (!motionRenderPending && !hasObjectMotions()) return;
+    const requestedAt = motionRenderRequestedAt;
+    const firedAt = now();
+    const wasPending = motionRenderPending;
+    motionRenderPending = false;
+    motionRenderRequestedAt = 0;
+    const removed = pruneFinishedObjectMotions();
+    if (wasPending) {
+      recordMotionDebug('raf-fired', {
+        requestedAt,
+        firedAt,
+        waitMs: requestedAt ? firedAt - requestedAt : '',
+        removed,
+        source: meta.source || meta.sources || 'motion',
+      });
+    }
+    if (!hasObjectMotions()) {
+      if (removed) root.scheduleRender?.(true, true, 'motion-finished');
+      if (wasPending || removed) recordMotionDebug('finished', { removed });
+      return;
+    }
+    requestMotionFrame();
   };
 
   const noteObjectAdded = (obj, options = {}) => {
@@ -552,9 +590,23 @@ const BoardfishMotion = (() => {
       squish: numberInRange(options.squish, jelloParams.squish, 0, 1.4),
       decayPower: numberInRange(options.decayPower, 2.15, 0.8, 4),
     };
-    jelloObjectMotions.set(obj.id, {
+    const motion = {
       ...baseMotion,
       ...copyJiggleMotionFields(options, baseMotion),
+    };
+    jelloObjectMotions.set(obj.id, motion);
+    recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
+      id: obj.id,
+      objectType: obj.type || '',
+      action: options.action || '',
+      phase: motion.phase,
+      delay: motion.delay,
+      duration: motion.duration,
+      amplitude: motion.amplitude,
+      translateXPx: motion.translateXPx || 0,
+      translateYPx: motion.translateYPx || 0,
+      xFreqHz: motion.xFreqHz || '',
+      yFreqHz: motion.yFreqHz || '',
     });
     requestMotionFrame();
   };
@@ -594,9 +646,22 @@ const BoardfishMotion = (() => {
       start: Math.min(spec.start, spec.end),
       end: Math.max(spec.start, spec.end),
     };
-    textSelectionJelloMotions.set(spec.id, {
+    const motion = {
       ...baseMotion,
       ...copyJiggleMotionFields(options, baseMotion),
+    };
+    textSelectionJelloMotions.set(spec.id, motion);
+    recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
+      id: spec.id,
+      objectType: 'text-selection',
+      action: options.action || '',
+      delay: motion.delay,
+      duration: motion.duration,
+      amplitude: motion.amplitude,
+      translateXPx: motion.translateXPx || 0,
+      translateYPx: motion.translateYPx || 0,
+      start: motion.start,
+      end: motion.end,
     });
     requestMotionFrame();
   };
@@ -844,17 +909,43 @@ const BoardfishMotion = (() => {
     if (!motion || prefersReducedMotion()) return null;
     if (motion.start !== Math.min(start, end) || motion.end !== Math.max(start, end)) {
       textSelectionJelloMotions.delete(id);
+      recordMotionDebug('jiggle-cancelled', {
+        id,
+        objectType: 'text-selection',
+        reason: 'selection-range-changed',
+      });
       return null;
     }
     const progress = motionProgress(motion, now());
     if (progress.done) {
       textSelectionJelloMotions.delete(id);
+      recordMotionDebug('jiggle-done', {
+        id,
+        objectType: 'text-selection',
+        t: 1,
+      });
       return null;
     }
-    if (progress.waiting) return { opacity: 1, ...restingJelloTransformForMotion(motion) };
+    if (progress.waiting) {
+      const transform = restingJelloTransformForMotion(motion);
+      recordMotionDebug('jiggle-waiting', {
+        id,
+        objectType: 'text-selection',
+        t: 0,
+        ...transform,
+      });
+      return { opacity: 1, ...transform };
+    }
+    const transform = jelloTransformForMotion(motion, progress.t, options);
+    recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-progress' : 'jello-progress', {
+      id,
+      objectType: 'text-selection',
+      t: progress.t,
+      ...transform,
+    });
     return {
       opacity: 1,
-      ...jelloTransformForMotion(motion, progress.t, options),
+      ...transform,
     };
   };
 
@@ -880,14 +971,39 @@ const BoardfishMotion = (() => {
     const progress = motionProgress(jello, cutoff);
     if (progress.done) {
       jelloObjectMotions.delete(obj.id);
+      recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-done' : 'jello-done', {
+        id: obj.id,
+        objectType: obj.type || '',
+        phase: jello.phase,
+        t: 1,
+      });
       return jello.phase === 'exit' ? { opacity: 0, scale: 1, skip: true } : null;
     }
-    if (progress.waiting) return { opacity: 1, ...restingJelloTransformForMotion(jello) };
+    if (progress.waiting) {
+      const transform = restingJelloTransformForMotion(jello);
+      recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-waiting' : 'jello-waiting', {
+        id: obj.id,
+        objectType: obj.type || '',
+        phase: jello.phase,
+        t: 0,
+        ...transform,
+      });
+      return { opacity: 1, ...transform };
+    }
     const t = progress.t;
     const exitOpacity = jello.phase === 'exit' ? clamp01(1 - t) : 1;
+    const transform = jelloTransformForMotion(jello, t, options);
+    recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-progress' : 'jello-progress', {
+      id: obj.id,
+      objectType: obj.type || '',
+      phase: jello.phase,
+      t,
+      opacity: exitOpacity,
+      ...transform,
+    });
     return {
       opacity: exitOpacity,
-      ...jelloTransformForMotion(jello, t, options),
+      ...transform,
     };
   };
 
@@ -1083,10 +1199,13 @@ const BoardfishMotion = (() => {
       return false;
     }
 
-    const motionOptions = actionOptionsForSet(setName, {
-      ...(payload?.options || {}),
-      ...(options || {}),
-    });
+    const motionOptions = {
+      ...actionOptionsForSet(setName, {
+        ...(payload?.options || {}),
+        ...(options || {}),
+      }),
+      action,
+    };
     const hasExplicitObjects = hasOwn(payload, 'objects') || hasOwn(payload, 'addedObjects');
     const hasExplicitRemovedObjects = hasOwn(payload, 'removedObjects');
     let objects = hasExplicitObjects
@@ -1143,6 +1262,7 @@ const BoardfishMotion = (() => {
 
   const api = Object.freeze({
     ACTION_ANIMATION_SETS,
+    afterViewportRenderFrame,
     applyActionAnimation,
     bumpIsland,
     configureActionAnimationSet,

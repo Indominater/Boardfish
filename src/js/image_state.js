@@ -577,18 +577,18 @@ function releaseReadyOpenInitialImagePreviewsForOpen() {
   return { total, ready, pending, failed, stale, released, remaining: imageOpenPreviewBitmapCache.size };
 }
 
-function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: window.devicePixelRatio || 1 }, counters = null) {
+function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: window.devicePixelRatio || 1 }, counters = null, options = {}) {
   const entry = imageOpenPreviewBitmapCache.get(key);
   if (entry?.generation === _imageStoreGeneration && entry.bitmap) {
     const fullSource = imageBitmapCache[key] || imageCache[key] || null;
     const targetScale = fullSource && typeof queueScaledImageVariantForDraw === 'function'
-      ? queueScaledImageVariantForDraw(key, obj, fullSource, view, { priority: true })
+      ? queueScaledImageVariantForDraw(key, obj, fullSource, view, { priority: true, activeOverscale: options.activeInput === true })
       : 0.25;
     return { source: entry.bitmap, scale: 0.25, targetScale, openPreview: true };
   }
   const fullSource = imageBitmapCache[key] || imageCache[key] || null;
   const selected = fullSource && typeof selectImageSourceForDraw === 'function'
-    ? selectImageSourceForDraw(key, obj, fullSource, view)
+    ? selectImageSourceForDraw(key, obj, fullSource, view, options)
     : null;
   if (selected?.activeInputFullFallback === true && hasOpenInitialImagePreviews()) {
     const requested = requestOpenInitialImagePreviewForDraw(key, obj, view, {

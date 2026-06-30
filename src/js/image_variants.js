@@ -872,9 +872,9 @@ function scheduleVisibleScaledVariantPrewarmAfterIdle(reason = 'viewport-settled
   }, Math.max(0, delay));
 }
 
-function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }) {
+function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }, options = {}) {
   if (!isViewportImageScalingActive()) return { source: fullSource, scale: 1, targetScale: 1, disabled: true };
-  const activeInput = isActiveViewportInput();
+  const activeInput = options.activeInput === true || (options.activeInput !== false && isActiveViewportInput());
   const targetScale = chooseImageScaleForDraw(obj, fullSource, view, { activeOverscale: activeInput });
   const map = imageScaledBitmapCache.get(key);
   if (map && targetScale < 1) {

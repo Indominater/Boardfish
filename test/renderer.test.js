@@ -21,6 +21,7 @@ function loadMotion() {
   let currentTime = 0;
   const styleVars = new Map();
   const timers = [];
+  const renderCalls = [];
   const context = {
     console: { ...console, warn() {} },
     document: {
@@ -35,7 +36,9 @@ function loadMotion() {
     matchMedia: () => ({ matches: false }),
     performance: { now: () => currentTime },
     requestAnimationFrame: () => 0,
-    scheduleRender() {},
+    scheduleRender(board, overlay, source) {
+      renderCalls.push({ board, overlay, source });
+    },
     setTimeout(callback, ms) {
       timers.push({ callback, ms });
       return timers.length;
@@ -49,6 +52,7 @@ function loadMotion() {
   );
   return {
     context,
+    renderCalls,
     styleVars,
     timers,
     setTime(ms) {
@@ -329,6 +333,76 @@ test('image renderer keeps active full fallback visible with temporary low smoot
   assert.equal(context.imageSmoothingQuality, 'high');
   assert.equal(counters.scaledFallbackFull, 1);
   assert.equal(counters.activeInputFullFallbackImages, 1);
+});
+
+test('animated image motion uses low-latency drawing and active variant selection', () => {
+  const BoardfishRenderer = loadRenderer();
+  const drawSmoothingEnabled = [];
+  const drawQualities = [];
+  const selectCalls = [];
+  const context = {
+    imageSmoothingEnabled: true,
+    imageSmoothingQuality: 'high',
+    drawImage() {
+      drawSmoothingEnabled.push(this.imageSmoothingEnabled);
+      drawQualities.push(this.imageSmoothingQuality);
+    },
+    globalAlpha: 1,
+    save() {},
+    restore() {},
+    translate() {},
+    scale() {},
+  };
+  const source = {
+    complete: true,
+    naturalWidth: 4000,
+    naturalHeight: 4000,
+    width: 4000,
+    height: 4000,
+  };
+  const obj = { id: 'img-motion', type: 'image', x: 10, y: 20, w: 500, h: 500, data: { imgKey: 'img-1' } };
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 1000, y2: 1000 }),
+    dpr: () => 1,
+    getWrappedLines: () => [],
+    imageBitmapCache: () => ({}),
+    imageCache: () => ({ 'img-1': source }),
+    imageStore: () => ({ 'img-1': 'source' }),
+    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
+    imageTransformNeedsRendering: () => false,
+    isSidewaysRotation: () => false,
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objectMotionForDraw: () => ({ opacity: 1, translateY: -3 }),
+    objects: () => [obj],
+    panX: () => 0,
+    panY: () => 0,
+    selectImageSourceForDraw(key, selectedObj, fullSource, view, options) {
+      selectCalls.push({ key, selectedObj, fullSource, view, options });
+      return { source, scale: 1, targetScale: 1 };
+    },
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  const counters = BoardfishRenderer.createDrawCounters();
+  const result = renderer.drawVisibleObjects(context, counters);
+
+  assert.equal(result.drawnImages, 1);
+  assert.deepEqual(plain(selectCalls.map((call) => call.options)), [{ activeInput: true }]);
+  assert.deepEqual(drawSmoothingEnabled, [false]);
+  assert.equal(context.imageSmoothingEnabled, true);
+  assert.deepEqual(drawQualities, ['low']);
+  assert.equal(context.imageSmoothingQuality, 'high');
+  assert.equal(counters.motionObjects, 1);
+  assert.equal(counters.motionImages, 1);
+  assert.equal(counters.motionTranslatedObjects, 1);
+  assert.equal(counters.lowLatencyImageDraws, 1);
+  assert.equal(counters.motionFullScaleImages, 1);
 });
 
 test('renderer does not redraw finished exit-motion objects', () => {
@@ -1095,6 +1169,24 @@ test('copy jiggle normalizes per-axis waveform to configured screen-pixel distan
 
   setTime(501);
   assert.equal(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }), null);
+});
+
+test('copy jiggle drives frames through the viewport scheduler', () => {
+  const { context, renderCalls, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const obj = { id: 'copied-image', type: 'image' };
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  assert.deepEqual(renderCalls, [{ board: true, overlay: true, source: 'motion' }]);
+
+  setTime(16);
+  const frame = motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+  assert.ok(frame);
+  motion.afterViewportRenderFrame({ source: 'motion' });
+
+  assert.equal(renderCalls.length, 2);
+  assert.deepEqual(renderCalls[1], { board: true, overlay: true, source: 'motion' });
 });
 
 test('text selection copy feedback uses the jello set', () => {

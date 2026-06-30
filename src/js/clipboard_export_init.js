@@ -193,7 +193,6 @@ const copySelected = (options = {}) => {
   if (!selectedIds.size) { ClipDebug.end(dbg, { skipped: 'empty-selection' }); return false; }
 
   if (selectedIds.size > 1) {
-    if (animateCopy) globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
     const clonedObjs = [];
     const imageData = {};
     let imageCount = 0;
@@ -242,15 +241,14 @@ const copySelected = (options = {}) => {
       imageCount,
       ...clipboardTextMetricsForObjects(clonedObjs),
     });
+    if (animateCopy) globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
     return true;
   }
 
   const obj = getFirstSelectedObject();
   if (!obj) { ClipDebug.end(dbg, { skipped: 'missing-object' }); return false; }
-  if (animateCopy) {
-    if (!noteTextObjectCopyFeedback(obj)) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
-    }
+  if (animateCopy && obj.type === 'text' && !noteTextObjectCopyFeedback(obj)) {
+    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { objects: [obj] });
   }
 
   const cloneStartedAt = clipboardNow();
@@ -322,6 +320,7 @@ const copySelected = (options = {}) => {
       const webToken = globalThis.getJsClipboardWebToken?.() || '';
       const writeMeta = { path, blobSize: blob?.size ?? '', ...meta };
       const startedAt = clipboardNow();
+      let copied = false;
       ClipDebug.step(dbg, 'copy:web-clipboard-write-start', writeMeta);
       try {
         const result = await BoardfishClipboardIO.copyImageBlobToClipboard(blob, webToken, dbg);
@@ -330,6 +329,7 @@ const copySelected = (options = {}) => {
           ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
         });
         finishWebClipboardTokenWrite(result, webToken, dbg);
+        copied = true;
         return true;
       } catch (err) {
         ClipDebug.step(dbg, 'copy:web-clipboard-write-error', {
@@ -341,6 +341,9 @@ const copySelected = (options = {}) => {
         return false;
       } finally {
         ClipDebug.end(dbg, writeMeta);
+        if (copied && animateCopy) {
+          globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { objects: [obj] });
+        }
       }
     };
     const storedSource = BoardfishImageStore.getSource(obj.data.imgKey);
@@ -373,6 +376,7 @@ const copySelected = (options = {}) => {
     })();
   }
   ClipDebug.end(dbg, { path: 'object-jsClipboard', type: obj.type || '' });
+  if (animateCopy) globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { objects: [obj] });
   return true;
 };
 

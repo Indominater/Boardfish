@@ -242,6 +242,39 @@ test('pan and zoom debugger captures input, scheduling, and render evidence', ()
   assert.match(panZoomReportSource, /viewportNavigationHeadline\(out\.viewport\)/);
 });
 
+test('jiggle debugger captures motion smoothness and animated image latency evidence', () => {
+  const viewportSource = readSource('src/js/debug.js');
+  const motionSource = readSource('src/js/motion.js');
+  const rendererSource = readSource('src/js/renderer.js');
+
+  assert.match(viewportSource, /function recordMotion/);
+  assert.match(viewportSource, /function motionSummary/);
+  assert.match(viewportSource, /function motionTimeline/);
+  assert.match(viewportSource, /function jiggleReport/);
+  assert.match(viewportSource, /motionJiggleStarts/);
+  assert.match(viewportSource, /maxFirstProgressLatencyMs/);
+  assert.match(viewportSource, /progressGapsOver32ms/);
+  assert.match(viewportSource, /maxLowLatencyImageDraws/);
+  assert.match(viewportSource, /motionActiveInputFullFallbackImages/);
+  assert.match(viewportSource, /lowLatencyImageDraws/);
+  assert.match(viewportSource, /recordMotion,/);
+  assert.match(viewportSource, /jiggleReport,/);
+  assert.match(viewportSource, /motionSummary,/);
+  assert.match(viewportSource, /motionTimeline,/);
+
+  assert.match(motionSource, /recordMotionDebug\(motion\.translateXPx \|\| motion\.translateYPx \? 'jiggle-start'/);
+  assert.match(motionSource, /recordMotionDebug\('raf-fired'/);
+  assert.match(motionSource, /recordMotionDebug\('render-scheduled'/);
+  assert.match(motionSource, /recordMotionDebug\(jello\.translateXPx \|\| jello\.translateYPx \? 'jiggle-progress'/);
+  assert.match(motionSource, /action,\s*\};/);
+
+  assert.match(rendererSource, /lowLatencyImageDraws/);
+  assert.match(rendererSource, /motionScaledImages/);
+  assert.match(rendererSource, /motionFullFallbackImages/);
+  assert.match(rendererSource, /imageSourceResolver\(key, obj, view, counters, \{ activeInput: lowLatencyImageMotion \}\)/);
+  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, fullImg, view, \{ activeInput: lowLatencyImageMotion \}\)/);
+});
+
 test('text selection debugger includes focused enter and exit edit timings', () => {
   const source = readSource('src/js/debug_text_selection.js');
 
