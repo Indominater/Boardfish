@@ -939,7 +939,6 @@ const normalizeTextEditVisibleCaretIndex = (obj, index, direction = 'forward') =
 };
 
 const moveTextEditVisibleCaret = (obj, index, direction = 'forward') => {
-  const text = normalizeTextContent(obj?.data?.content || '');
   const backward = direction === 'backward';
   const current = normalizeTextEditVisibleCaretIndex(obj, index, backward ? 'backward' : 'forward');
   const stepped = current + (backward ? -1 : 1);

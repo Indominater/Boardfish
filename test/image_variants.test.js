@@ -74,6 +74,33 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
   return context;
 }
 
+function installManualTimers(context) {
+  const timers = [];
+  let nextId = 1;
+  context.setTimeout = (callback, ms = 0) => {
+    const timer = { id: nextId++, callback, ms, cleared: false, fired: false };
+    timers.push(timer);
+    return timer.id;
+  };
+  context.clearTimeout = (id) => {
+    const timer = timers.find((entry) => entry.id === id);
+    if (timer) timer.cleared = true;
+  };
+  return {
+    timers,
+    pending() {
+      return timers.filter((timer) => !timer.cleared && !timer.fired);
+    },
+    run(timer) {
+      assert.ok(timer);
+      assert.equal(timer.cleared, false);
+      assert.equal(timer.fired, false);
+      timer.fired = true;
+      timer.callback();
+    },
+  };
+}
+
 function scaleFor(context, options) {
   return context.chooseImageScaleForDraw(
     { w: options.objW, h: options.objH },
@@ -368,6 +395,83 @@ test('active low-zoom navigation prioritizes visible pending scaled variants', (
   assert.equal(context.imageScaledVariantPriorityBoostCount, 1);
 });
 
+test('scaled variant queue defers background work until viewport input is idle', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const clock = installManualTimers(context);
+  let now = 1000;
+  let starts = 0;
+  context.performance.now = () => now;
+  context.lastViewportInputAt = 990;
+
+  context.enqueueScaledVariantTask(async () => { starts++; });
+
+  assert.equal(clock.pending().length, 1);
+  assert.equal(clock.pending()[0].ms, 170);
+  clock.run(clock.pending()[0]);
+  assert.equal(starts, 0);
+  assert.equal(clock.pending().length, 1);
+  assert.equal(clock.pending()[0].ms, 170);
+
+  now = 1170;
+  clock.run(clock.pending()[0]);
+  assert.equal(starts, 1);
+});
+
+test('priority scaled variants start during input without pulling background work into the batch', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const clock = installManualTimers(context);
+  const starts = [];
+  context.performance.now = () => 1000;
+  context.lastViewportInputAt = 990;
+
+  context.enqueueScaledVariantTask(async () => {
+    starts.push('background');
+    await new Promise(() => {});
+  });
+  const backgroundTimer = clock.pending()[0];
+  context.enqueueScaledVariantTask(async () => {
+    starts.push('priority');
+    await new Promise(() => {});
+  }, { priority: true });
+
+  assert.equal(backgroundTimer.cleared, true);
+  assert.equal(clock.pending().length, 1);
+  assert.equal(clock.pending()[0].ms, 0);
+  clock.run(clock.pending()[0]);
+
+  assert.deepEqual(starts, ['priority']);
+  assert.equal(context.imageScaledVariantQueue.length, 1);
+  assert.equal(context.imageScaledVariantQueue[0].priority, false);
+  assert.equal(clock.pending().length, 1);
+  assert.equal(clock.pending()[0].ms, 170);
+});
+
+test('promoting the sole pending scaled variant wakes its delayed queue timer', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const clock = installManualTimers(context);
+  let starts = 0;
+  context.performance.now = () => 1000;
+  context.lastViewportInputAt = 990;
+  const task = async () => {
+    starts++;
+    await new Promise(() => {});
+  };
+  task.pendingKey = 'img-1:0.25';
+
+  context.enqueueScaledVariantTask(task);
+  const backgroundTimer = clock.pending()[0];
+  const promoted = context.prioritizeScaledVariantQueue(task.pendingKey);
+
+  assert.equal(promoted, true);
+  assert.equal(task.priority, true);
+  assert.equal(context.imageScaledVariantPriorityBoostCount, 1);
+  assert.equal(backgroundTimer.cleared, true);
+  assert.equal(clock.pending().length, 1);
+  assert.equal(clock.pending()[0].ms, 0);
+  clock.run(clock.pending()[0]);
+  assert.equal(starts, 1);
+});
+
 test('active navigation can keep a nearly large enough 0.25x variant instead of full-size draw', async () => {
   const context = loadImageVariantsForPlatform(false);
   const fullSource = { width: 1500, height: 2000 };
@@ -625,6 +729,23 @@ test('clearing scaled variants for one key removes queued work for that key', ()
   assert.equal(context.imageScaledVariantQueue[0].variantKey, 'img-2');
   assert.equal(context.isScaledImageVariantPending('img-1', 0.25), false);
   assert.equal(context.isScaledImageVariantPending('img-2', 0.25), true);
+});
+
+test('clearing the final queued scaled variant cancels its delayed timer', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const clock = installManualTimers(context);
+  context.performance.now = () => 1000;
+  context.lastViewportInputAt = 990;
+
+  context.queueScaledImageVariant('img-1', { width: 100, height: 100 }, 0.25);
+  const delayedTimer = clock.pending()[0];
+  context.clearScaledImageVariants('img-1');
+
+  assert.equal(delayedTimer.cleared, true);
+  assert.equal(context.imageScaledVariantQueue.length, 0);
+  assert.equal(context.imageScaledVariantQueueScheduled, false);
+  assert.equal(context.imageScaledVariantQueueTimer, null);
+  assert.equal(context.isScaledImageVariantPending('img-1', 0.25), false);
 });
 
 test('scaled image variant skips do not create empty cache groups', () => {

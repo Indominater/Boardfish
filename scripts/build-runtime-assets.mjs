@@ -4,7 +4,7 @@ import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
-import { VARIANT_SCRIPTS } from '../src/js/startup_manifest.mjs';
+import { WEB_PREVIEW_SCRIPTS } from '../src/js/startup_manifest.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const srcRoot = path.join(root, 'src');
@@ -13,9 +13,8 @@ const jsRoot = path.join(srcRoot, 'js');
 const variants = {
   'web-preview': {
     outDir: path.join(root, 'dist-web'),
-    scripts: VARIANT_SCRIPTS['web-preview'],
+    scripts: WEB_PREVIEW_SCRIPTS,
     bundle: 'assets/boardfish-web-preview.min.js',
-    cacheBust: true,
   },
 };
 
@@ -72,7 +71,7 @@ async function concatenateScripts(scripts, variantName) {
   return parts.join('');
 }
 
-async function writeIndex(outDir, scriptTag, { includePwa = false, preloadScript = '' } = {}) {
+async function writeIndex(outDir, scriptTag, { preloadScript = '' } = {}) {
   const html = await readFile(path.join(srcRoot, 'index.html'), 'utf8');
   let next = html.replace(
     /<script\s+type="module"\s+src="js\/main(?:\.[^"]+)?\.mjs"><\/script>/,
@@ -83,9 +82,6 @@ async function writeIndex(outDir, scriptTag, { includePwa = false, preloadScript
       /\n<\/head>/,
       `\n  <link rel="preload" href="${preloadScript}" as="script" />\n</head>`,
     );
-  }
-  if (!includePwa) {
-    next = next.replace(/\n\s*<link\s+rel="manifest"\s+href="manifest\.webmanifest"\s*\/>/, '');
   }
   await writeFile(path.join(outDir, 'index.html'), next);
 }
@@ -116,11 +112,10 @@ async function buildBundle(variantName, config) {
     legalComments: 'none',
     target: 'es2020',
   });
-  const bundle = config.cacheBust ? cacheBustedBundlePath(config.bundle, result.code) : config.bundle;
+  const bundle = cacheBustedBundlePath(config.bundle, result.code);
   const outPath = path.join(config.outDir, bundle);
   await writeFile(outPath, result.code);
   await writeIndex(config.outDir, `<script src="${bundle}"></script>`, {
-    includePwa: variantName === 'web-preview',
     preloadScript: bundle,
   });
   if (variantName === 'web-preview') await writeServiceWorker(config.outDir, [bundle]);

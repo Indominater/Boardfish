@@ -596,7 +596,8 @@ function historyEntryReason(entry) {
 }
 
 function historyEntryObjects(entry) {
-  return Array.isArray(entry) ? entry : (entry?.objects || []);
+  if (Array.isArray(entry)) return entry;
+  return Array.isArray(entry?.objects) ? entry.objects : [];
 }
 
 function getHistoryEntryDebugMetrics(entry, prefix = 'entry') {

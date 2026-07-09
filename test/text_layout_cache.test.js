@@ -11,10 +11,17 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 function loadTextLayout({
   measureWidth = (text) => String(text).length,
   measureTextMetrics = null,
+  fontStatus = 'loaded',
+  fontCheck = () => true,
+  userAgent = 'Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36',
 } = {}) {
   const measured = [];
   const context = {
     document: {
+      fonts: {
+        status: fontStatus,
+        check: fontCheck,
+      },
       createElement() {
         return {
           getContext() {
@@ -40,6 +47,7 @@ function loadTextLayout({
         };
       },
     },
+    navigator: { userAgent },
     objects: [],
     TextSelDebug: {
       _logHit() {},
@@ -222,6 +230,7 @@ test('text drawing places each glyph at measured prefix positions', () => {
   assert.equal(stats.chars, 9);
   assert.equal(stats.drawnChars, 8);
   assert.equal(stats.drawUnits, 8);
+  assert.equal(stats.drawCalls, 8);
   assert.equal(stats.runs, 1);
   assert.equal(stats.plainRuns, 1);
   assert.equal(stats.scriptRuns, 0);
@@ -241,6 +250,7 @@ test('text drawing places each glyph at measured prefix positions', () => {
 
   assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', 'c', '<', '-', 'd']);
   assert.equal(cachedStats.drawUnits, 8);
+  assert.equal(cachedStats.drawCalls, 8);
   assert.equal(cachedStats.skippedSpaces, 1);
   assert.equal(cachedStats.planCacheHits, 1);
   assert.equal(cachedStats.planCacheMisses, 0);
@@ -274,9 +284,98 @@ test('text drawing ignores stale fast requests and preserves rich measured posit
     [0, 1, 2, 3, 5, 6, 7, 8].map((offset) => obj.x + context.TEXT_PAD + line.prefixWidths[offset]),
   );
   assert.equal(stats.drawUnits, 8);
+  assert.equal(stats.drawCalls, 8);
   assert.equal(stats.runs, 1);
   assert.equal(stats.plainRuns, 1);
   assert.equal(stats.skippedSpaces, 1);
+});
+
+test('text drawing batches pixel-equivalent plain ASCII spans only', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-batched-ascii',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 240,
+    h: 40,
+    data: { content: 'Boardfish 123 café' },
+  };
+  const [line] = textLayout.getTextLayout(obj);
+  const calls = [];
+
+  const stats = textLayout.drawTextLineRange({
+    font: '',
+    fillText(text, x, y) {
+      calls.push({ text, x, y });
+    },
+  }, line, obj);
+
+  assert.deepEqual(calls.map((call) => call.text), ['Bo', 'ar', 'd', 'f', 'is', 'h', '12', '3', 'ca', 'f', 'é']);
+  assert.deepEqual(
+    calls.map((call) => call.x),
+    [0, 2, 4, 5, 6, 8, 10, 12, 14, 16, 17].map((offset) => obj.x + context.TEXT_PAD + line.prefixWidths[offset]),
+  );
+  assert.equal(stats.drawUnits, 16);
+  assert.equal(stats.drawCalls, 11);
+});
+
+test('text drawing splits the Geist contextual tt pair', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-tt-ligature',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 120,
+    h: 40,
+    data: { content: 'letter' },
+  };
+  const [line] = textLayout.getTextLayout(obj);
+  const calls = [];
+
+  const stats = textLayout.drawTextLineRange({
+    font: '',
+    fillText(text) {
+      calls.push(text);
+    },
+  }, line, obj);
+
+  assert.deepEqual(calls, ['le', 't', 'te', 'r']);
+  assert.equal(stats.drawUnits, 6);
+  assert.equal(stats.drawCalls, 4);
+});
+
+test('text drawing keeps the exact per-grapheme path for fallback fonts and unverified engines', () => {
+  for (const options of [
+    { fontStatus: 'loading' },
+    { fontCheck: () => false },
+    { userAgent: 'Mozilla/5.0 Firefox/142.0' },
+  ]) {
+    const { context } = loadTextLayout(options);
+    const textLayout = context.__testTextLayout;
+    const obj = {
+      id: 'text-unverified-font',
+      type: 'text',
+      x: 0,
+      y: 0,
+      w: 120,
+      h: 40,
+      data: { content: 'Board' },
+    };
+    const [line] = textLayout.getTextLayout(obj);
+    const calls = [];
+
+    const stats = textLayout.drawTextLineRange({
+      font: '',
+      fillText(text) { calls.push(text); },
+    }, line, obj);
+
+    assert.deepEqual(calls, ['B', 'o', 'a', 'r', 'd']);
+    assert.equal(stats.drawCalls, 5);
+  }
 });
 
 test('text minimum width uses the widest rendered word, not character count', () => {
@@ -744,6 +843,15 @@ test('large script-heavy drawing reuses layout script metrics', () => {
   assert.ok(layout.length > 300);
   assert.ok((obj.data.scriptRanges || []).length > 600);
 
+  let contentReads = 0;
+  Object.defineProperty(obj.data, 'content', {
+    configurable: true,
+    get() {
+      contentReads++;
+      return content;
+    },
+  });
+
   textLayout.clearScriptIndexCache();
   assert.equal(textLayout.scriptIndexCacheSize, 0);
 
@@ -752,6 +860,7 @@ test('large script-heavy drawing reuses layout script metrics', () => {
   }
 
   assert.equal(textLayout.scriptIndexCacheSize, 0);
+  assert.equal(contentReads, 0, 'warm line drawing should reuse attached script metrics before reading full content');
 });
 
 test('large plain text layout uses bounded measurement work', () => {

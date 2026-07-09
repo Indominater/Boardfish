@@ -201,6 +201,9 @@ function pointedElementForInputEvent(e) {
 const isEventInsideVisibleSurface = (e, surface) => {
   if (!surface || !surface.classList.contains('visible')) return false;
   if (e.target instanceof Node && surface.contains(e.target)) return true;
+  // A concrete event target is already the browser's hit-test result. Only use
+  // elementFromPoint for ambiguous document/window-targeted synthetic events.
+  if (e.target instanceof Node && e.target.nodeType === 1) return false;
   const pointed = pointedElementForInputEvent(e);
   return pointed instanceof Node && surface.contains(pointed);
 };

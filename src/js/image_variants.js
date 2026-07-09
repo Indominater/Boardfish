@@ -27,11 +27,11 @@ var imageScaledBitmapPending = new Set();
 var imageScaledBitmapPendingBytes = new Map();
 var imageScaledBitmapPendingByteTotal = 0;
 var imageScaledBitmapBytes = 0;
-var imageScaledBitmapUseCounter = 1;
 var imageScaledVariantRenderTimer = null;
 var imageScaledVariantRenderCount = 0;
 var imageScaledVariantQueue = [];
 var imageScaledVariantQueueScheduled = false;
+var imageScaledVariantQueueTimer = null;
 var imageScaledVariantQueueActive = 0;
 var lastViewportInputAt = 0;
 var IMAGE_VARIANT_INPUT_IDLE_MS = 180;
@@ -326,6 +326,7 @@ function clearScaledImageVariants(key = null) {
         imageScaledVariantQueue[write++] = task;
       }
       imageScaledVariantQueue.length = write;
+      if (!imageScaledVariantQueue.length) cancelScheduledScaledVariantQueue();
     }
     for (const pendingKey of imageScaledBitmapPending) {
       if (pendingKey.startsWith(`${key}:`)) {
@@ -341,7 +342,7 @@ function clearScaledImageVariants(key = null) {
   imageScaledBitmapPendingBytes.clear();
   imageScaledBitmapPendingByteTotal = 0;
   imageScaledVariantQueue.length = 0;
-  imageScaledVariantQueueScheduled = false;
+  cancelScheduledScaledVariantQueue();
   imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
   clearTimeout(imageScaledVariantRenderTimer);
   imageScaledVariantRenderTimer = null;
@@ -432,18 +433,30 @@ function scheduleScaledVariantReadyRender(countReadyVariant = true) {
 }
 
 function enqueueScaledVariantTask(task, options = {}) {
-  if (options.priority === true) imageScaledVariantQueue.unshift(task);
-  else imageScaledVariantQueue.push(task);
+  task.priority = options.priority === true;
+  if (task.priority) {
+    imageScaledVariantQueue.unshift(task);
+    cancelScheduledScaledVariantQueue();
+  } else {
+    imageScaledVariantQueue.push(task);
+  }
   scheduleScaledVariantQueue();
 }
 
 function prioritizeScaledVariantQueue(pendingKey) {
-  if (!pendingKey || imageScaledVariantQueue.length <= 1) return false;
+  if (!pendingKey || !imageScaledVariantQueue.length) return false;
   const index = imageScaledVariantQueue.findIndex((task) => task?.pendingKey === pendingKey);
-  if (index <= 0) return false;
-  const [task] = imageScaledVariantQueue.splice(index, 1);
-  imageScaledVariantQueue.unshift(task);
+  if (index < 0) return false;
+  const task = imageScaledVariantQueue[index];
+  const boosted = task.priority !== true || index > 0;
+  if (!boosted) return false;
+  task.priority = true;
+  if (index > 0) {
+    imageScaledVariantQueue.splice(index, 1);
+    imageScaledVariantQueue.unshift(task);
+  }
   imageScaledVariantPriorityBoostCount++;
+  cancelScheduledScaledVariantQueue();
   scheduleScaledVariantQueue();
   return true;
 }
@@ -533,7 +546,6 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
     }, { immediate: options.warmupImmediate === true, budgetMs: 8, maxItems: 1 });
     bitmap = null;
     imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
-    imageScaledBitmapUseCounter = imageScaledBitmapStore.useCounter;
     if (options.scheduleRender !== false) scheduleScaledVariantReadyRender();
     return { key, scale, ready: true, bytes, ms: performance.now() - buildStart };
   } catch (err) {
@@ -549,16 +561,35 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
   }
 }
 
+function cancelScheduledScaledVariantQueue() {
+  if (imageScaledVariantQueueTimer !== null) clearTimeout(imageScaledVariantQueueTimer);
+  imageScaledVariantQueueTimer = null;
+  imageScaledVariantQueueScheduled = false;
+}
+
+function scaledVariantQueueTaskIdleThresholdMs(task) {
+  if (task?.priority === true) {
+    return Math.max(0, Number(IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS) || 0);
+  }
+  return Math.max(0, Number(IMAGE_VARIANT_INPUT_IDLE_MS) || 0);
+}
+
 function scheduleScaledVariantQueue() {
   const concurrency = Math.max(1, Math.trunc(Number(IMAGE_VARIANT_QUEUE_CONCURRENCY) || 1));
   if (imageScaledVariantQueueActive >= concurrency) return;
+  if (!imageScaledVariantQueue.length) return;
   if (imageScaledVariantQueueScheduled) return;
   imageScaledVariantQueueScheduled = true;
-  const activeInputQueueDelayMs = Math.max(0, Number(IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS) || 0);
   const runReadyTasks = () => {
     while (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
-      const task = imageScaledVariantQueue.shift();
-      if (!task) continue;
+      const task = imageScaledVariantQueue[0];
+      if (!task) {
+        imageScaledVariantQueue.shift();
+        continue;
+      }
+      const inputIdleMs = activeViewportInputIdleMs();
+      if (inputIdleMs < scaledVariantQueueTaskIdleThresholdMs(task)) break;
+      imageScaledVariantQueue.shift();
       imageScaledVariantQueueActive++;
       task()
         .catch(() => {})
@@ -569,19 +600,17 @@ function scheduleScaledVariantQueue() {
     }
   };
   const run = () => {
+    imageScaledVariantQueueTimer = null;
     imageScaledVariantQueueScheduled = false;
-    const inputIdleMs = performance.now() - lastViewportInputAt;
-    const idleThresholdMs = activeInputQueueDelayMs;
-    if (inputIdleMs < idleThresholdMs) {
-      scheduleScaledVariantQueue();
-      return;
-    }
     runReadyTasks();
+    if (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
+      scheduleScaledVariantQueue();
+    }
   };
-  const inputIdleMs = performance.now() - lastViewportInputAt;
-  const idleThresholdMs = activeInputQueueDelayMs;
+  const inputIdleMs = activeViewportInputIdleMs();
+  const idleThresholdMs = scaledVariantQueueTaskIdleThresholdMs(imageScaledVariantQueue[0]);
   const delay = inputIdleMs < idleThresholdMs ? idleThresholdMs - inputIdleMs : 0;
-  setTimeout(run, delay);
+  imageScaledVariantQueueTimer = setTimeout(run, delay);
 }
 
 function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, options = {}) {
@@ -650,7 +679,6 @@ function queueScaledImageVariant(key, source, scale, options = {}) {
       });
       bitmap = null;
       imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
-      imageScaledBitmapUseCounter = imageScaledBitmapStore.useCounter;
       scheduleScaledVariantReadyRender();
     } catch (_) {
       bitmap?.close?.();
@@ -884,7 +912,6 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
     }
     if (selectedScale < 1) {
       const entry = imageScaledBitmapStore.get(key, selectedScale);
-      imageScaledBitmapUseCounter = imageScaledBitmapStore.useCounter;
       return { source: entry.bitmap, scale: selectedScale, targetScale };
     }
   }

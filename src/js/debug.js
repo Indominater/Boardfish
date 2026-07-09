@@ -766,7 +766,6 @@ var ClipDebug = (() => {
     const inputHandlerMs = Number(inputEnd?.meta?.totalMs ?? inputEnd?.dt) || 0;
     const scriptTransformMs = Number(scriptTransform?.meta?.scriptTransformMs ?? scriptTransform?.dt) || 0;
     const dispatchMs = Number(dispatch?.meta?.dispatchMs) || 0;
-    const setRangeTextMs = Number(rangeText?.meta?.setRangeTextMs) || 0;
     const textareaMutationMs = Number(rangeText?.meta?.textareaMutationMs ?? rangeText?.meta?.setRangeTextMs) || 0;
     const historyRecordMs = Number(history?.meta?.historyRecordMs) || 0;
     const renderToFirstFrameMs = firstFrameAfterInput && renderScheduled
@@ -2318,6 +2317,7 @@ var ViewportDebug = (() => {
           drawnText: e.meta?.drawnText ?? '',
           drawnTextLines: e.meta?.drawnTextLines ?? '',
           richTextDrawUnits: e.meta?.richTextDrawUnits ?? '',
+          richTextDrawCalls: e.meta?.richTextDrawCalls ?? '',
           richTextRuns: e.meta?.richTextRuns ?? '',
           richTextPlanCacheHits: e.meta?.richTextPlanCacheHits ?? '',
           richTextPlanCacheMisses: e.meta?.richTextPlanCacheMisses ?? '',
@@ -2391,6 +2391,7 @@ var ViewportDebug = (() => {
         drawnTextLines: e.steps?.drawBoard?.meta?.drawnTextLines ?? 0,
         culledTextLines: e.steps?.drawBoard?.meta?.culledTextLines ?? 0,
         richTextDrawUnits: e.steps?.drawBoard?.meta?.richTextDrawUnits ?? 0,
+        richTextDrawCalls: e.steps?.drawBoard?.meta?.richTextDrawCalls ?? 0,
         richTextRuns: e.steps?.drawBoard?.meta?.richTextRuns ?? 0,
         richTextScriptRuns: e.steps?.drawBoard?.meta?.richTextScriptRuns ?? 0,
         richTextSkippedTabs: e.steps?.drawBoard?.meta?.richTextSkippedTabs ?? 0,
@@ -2402,6 +2403,7 @@ var ViewportDebug = (() => {
         maxRichTextLineDrawMs: e.steps?.drawBoard?.meta?.maxRichTextLineDrawMs ?? 0,
         slowRichTextLineDraws: e.steps?.drawBoard?.meta?.slowRichTextLineDraws ?? 0,
         maxRichTextDrawUnitsPerLine: e.steps?.drawBoard?.meta?.maxRichTextDrawUnitsPerLine ?? 0,
+        maxRichTextDrawCallsPerLine: e.steps?.drawBoard?.meta?.maxRichTextDrawCallsPerLine ?? 0,
         maxRichTextRunsPerLine: e.steps?.drawBoard?.meta?.maxRichTextRunsPerLine ?? 0,
         richTextDirectDraws: e.steps?.drawBoard?.meta?.richTextDirectDraws ?? 0,
         editLayoutMs: e.steps?.drawBoard?.meta?.editLayoutMs ?? 0,
@@ -2422,6 +2424,8 @@ var ViewportDebug = (() => {
     const retainedMaxSlowDrawMs = Math.round(slowMax('drawMs') * 100) / 100;
     const recentMaxObjectLoopMs = Math.round(max('objectLoopMs') * 100) / 100;
     const retainedMaxSlowObjectLoopMs = Math.round(slowMax('objectLoopMs') * 100) / 100;
+    const richTextDrawUnits = sum('richTextDrawUnits');
+    const richTextDrawCalls = sum('richTextDrawCalls');
     const out = {
       draws: draws.length,
       retainedSlowDraws: retainedSlowDraws.length,
@@ -2520,6 +2524,11 @@ var ViewportDebug = (() => {
       maxCulledTextLines: Math.max(max('culledTextLines'), slowMax('culledTextLines')),
       avgRichTextDrawUnits: draws.length ? Math.round(sum('richTextDrawUnits') / draws.length * 100) / 100 : 0,
       maxRichTextDrawUnits: Math.max(max('richTextDrawUnits'), slowMax('richTextDrawUnits')),
+      avgRichTextDrawCalls: draws.length ? Math.round(sum('richTextDrawCalls') / draws.length * 100) / 100 : 0,
+      maxRichTextDrawCalls: Math.max(max('richTextDrawCalls'), slowMax('richTextDrawCalls')),
+      richTextDrawCallReductionPct: richTextDrawUnits > 0
+        ? Math.round((1 - richTextDrawCalls / richTextDrawUnits) * 10000) / 100
+        : 0,
       avgRichTextRuns: draws.length ? Math.round(sum('richTextRuns') / draws.length * 100) / 100 : 0,
       maxRichTextRuns: Math.max(max('richTextRuns'), slowMax('richTextRuns')),
       avgRichTextScriptRuns: draws.length ? Math.round(sum('richTextScriptRuns') / draws.length * 100) / 100 : 0,
@@ -2538,6 +2547,7 @@ var ViewportDebug = (() => {
       maxRichTextLineDrawMs: Math.round(Math.max(max('maxRichTextLineDrawMs'), slowMax('maxRichTextLineDrawMs')) * 100) / 100,
       maxSlowRichTextLineDraws: Math.max(max('slowRichTextLineDraws'), slowMax('slowRichTextLineDraws')),
       maxRichTextDrawUnitsPerLine: Math.max(max('maxRichTextDrawUnitsPerLine'), slowMax('maxRichTextDrawUnitsPerLine')),
+      maxRichTextDrawCallsPerLine: Math.max(max('maxRichTextDrawCallsPerLine'), slowMax('maxRichTextDrawCallsPerLine')),
       maxRichTextRunsPerLine: Math.max(max('maxRichTextRunsPerLine'), slowMax('maxRichTextRunsPerLine')),
       avgRichTextDirectDraws: draws.length ? Math.round(sum('richTextDirectDraws') / draws.length * 100) / 100 : 0,
       maxRichTextDirectDraws: Math.max(max('richTextDirectDraws'), slowMax('richTextDirectDraws')),
@@ -2790,6 +2800,7 @@ var ViewportDebug = (() => {
         drawnTextLines: e.steps?.drawBoard?.meta?.drawnTextLines ?? '',
         culledTextLines: e.steps?.drawBoard?.meta?.culledTextLines ?? '',
         richTextDrawUnits: e.steps?.drawBoard?.meta?.richTextDrawUnits ?? '',
+        richTextDrawCalls: e.steps?.drawBoard?.meta?.richTextDrawCalls ?? '',
         richTextRuns: e.steps?.drawBoard?.meta?.richTextRuns ?? '',
         richTextScriptRuns: e.steps?.drawBoard?.meta?.richTextScriptRuns ?? '',
         richTextSkippedTabs: e.steps?.drawBoard?.meta?.richTextSkippedTabs ?? '',
@@ -2801,6 +2812,7 @@ var ViewportDebug = (() => {
         maxRichTextLineDrawMs: e.steps?.drawBoard?.meta?.maxRichTextLineDrawMs ?? '',
         slowRichTextLineDraws: e.steps?.drawBoard?.meta?.slowRichTextLineDraws ?? '',
         maxRichTextDrawUnitsPerLine: e.steps?.drawBoard?.meta?.maxRichTextDrawUnitsPerLine ?? '',
+        maxRichTextDrawCallsPerLine: e.steps?.drawBoard?.meta?.maxRichTextDrawCallsPerLine ?? '',
         maxRichTextRunsPerLine: e.steps?.drawBoard?.meta?.maxRichTextRunsPerLine ?? '',
         richTextDirectDraws: e.steps?.drawBoard?.meta?.richTextDirectDraws ?? '',
         editLayoutMs: e.steps?.drawBoard?.meta?.editLayoutMs ?? '',

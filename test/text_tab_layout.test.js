@@ -9,7 +9,12 @@ const vm = require('node:vm');
 function loadTextLayout({ scaleMeasureWithFont = false } = {}) {
   const context = {
     console,
+    navigator: { userAgent: 'Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36' },
     document: {
+      fonts: {
+        status: 'loaded',
+        check: () => true,
+      },
       createElement() {
         const canvasContext = {
           font: '',
@@ -100,7 +105,7 @@ test('text script ranges hide the marker and draw following text smaller', () =>
 
   const stats = textLayout.drawTextLineRange(context, line, obj);
 
-  assert.deepEqual(calls.map((call) => call.text), ['a', 'b', 'c']);
+  assert.deepEqual(calls.map((call) => call.text), ['a', 'bc']);
   assert.equal(calls[0].x, obj.x + textLayout.textPad);
   assert.equal(calls[1].x, obj.x + textLayout.textPad + 1);
   assert.ok(calls[1].y < calls[0].y);
@@ -109,6 +114,7 @@ test('text script ranges hide the marker and draw following text smaller', () =>
   assert.equal(stats.chars, 4);
   assert.equal(stats.drawnChars, 3);
   assert.equal(stats.drawUnits, 3);
+  assert.equal(stats.drawCalls, 2);
   assert.equal(stats.runs, 2);
   assert.equal(stats.plainRuns, 1);
   assert.equal(stats.scriptRuns, 1);
@@ -503,7 +509,6 @@ test('text tab drawing leaves tab glyphs invisible and positions later chunks at
 
   assert.deepEqual(calls, [
     { text: 'a', x: obj.x + textLayout.textPad, y: 20 },
-    { text: 'b', x: obj.x + textLayout.textPad + 8, y: 20 },
-    { text: 'c', x: obj.x + textLayout.textPad + 9, y: 20 },
+    { text: 'bc', x: obj.x + textLayout.textPad + 8, y: 20 },
   ]);
 });

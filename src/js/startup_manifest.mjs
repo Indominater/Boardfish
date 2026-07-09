@@ -94,8 +94,3 @@ export const WEB_PREVIEW_SCRIPTS = Object.freeze([
   'keyboard.js',
   'app_bootstrap.js',
 ]);
-
-export const VARIANT_SCRIPTS = Object.freeze({
-  'web-dev': WEB_DEV_SCRIPTS,
-  'web-preview': WEB_PREVIEW_SCRIPTS,
-});

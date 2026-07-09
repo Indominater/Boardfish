@@ -80,7 +80,7 @@ test('startup manifest exposes only web variants', () => {
   const webDev = manifestScripts('WEB_DEV_SCRIPTS');
   const webPreview = manifestScripts('WEB_PREVIEW_SCRIPTS');
 
-  assert.match(manifest, /export const VARIANT_SCRIPTS = Object\.freeze\(\{\s*'web-dev': WEB_DEV_SCRIPTS,\s*'web-preview': WEB_PREVIEW_SCRIPTS,\s*\}\);/);
+  assert.doesNotMatch(manifest, /VARIANT_SCRIPTS/);
   assert.doesNotMatch(manifest, new RegExp(shellWord.toUpperCase()));
   assert.ok(webDev.includes('web_runtime.js'));
   assert.ok(webDev.includes('startup_debug.js'));
@@ -258,14 +258,42 @@ test('image hydration queue processes until its time budget is consumed', () => 
   assert.doesNotMatch(imageState, /count < 1 && performance\.now\(\) - batchStart < 6/);
 });
 
-test('offscreen rebuild no longer awaits an empty bitmap promise list', () => {
+test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing size', () => {
   const viewport = readSource('src/js/viewport.js');
-  const start = viewport.indexOf('async function _rebuildOffscreenAsync()');
+  const start = viewport.indexOf('function _rebuildOffscreen()');
   const end = viewport.indexOf('\nfunction', start + 1);
   const source = viewport.slice(start, end > start ? end : undefined);
 
+  assert.notEqual(start, -1);
   assert.doesNotMatch(source, /bitmapPromises/);
   assert.doesNotMatch(source, /ensure-bitmaps/);
+  assert.doesNotMatch(source, /scheduleRender/);
+  assert.match(source, /if \(_offscreen\.width !== boardCanvas\.width\) _offscreen\.width = boardCanvas\.width;/);
+  assert.match(source, /if \(_offscreen\.height !== boardCanvas\.height\) _offscreen\.height = boardCanvas\.height;/);
+  assert.match(source, /return ready;/);
+});
+
+test('viewport transforms do not schedule an unbounded automatic text prewarm', () => {
+  const viewport = readSource('src/js/viewport.js');
+  const start = viewport.indexOf('function applyTransform');
+  const end = viewport.indexOf('function getLastApplyTransformMeta', start);
+  const source = viewport.slice(start, end > start ? end : undefined);
+
+  assert.doesNotMatch(source, /scheduleVisibleTextLayoutPrewarmAfterIdle\(/);
+  assert.match(viewport, /function prewarmVisibleTextLayoutCaches\(options = \{\}\)/);
+});
+
+test('background open hydration yields while viewport input is active', () => {
+  const ioClose = readSource('src/js/io_close.js');
+  const start = ioClose.indexOf('async function hydrateRemainingImagesForOpen');
+  const end = ioClose.indexOf('\nfunction queueVisibleImageHydration', start);
+  const source = ioClose.slice(start, end > start ? end : undefined);
+
+  assert.match(ioClose, /const BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS = 180;/);
+  assert.match(source, /batchSize = 2/);
+  assert.match(source, /performance\.now\(\) - lastViewportInputAt/);
+  assert.match(source, /inputIdleMs < BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS/);
+  assert.match(source, /await new Promise\(\(resolve\) => setTimeout/);
 });
 
 test('addText sizes multiline text without spreading all lines into Math.max', () => {

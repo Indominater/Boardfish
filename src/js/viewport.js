@@ -3,6 +3,7 @@ var panX = 0, panY = 0, zoom = 1;
 var _vpSaveTimer = null;
 var _vpSaveDueAt = 0;
 var BoardRenderer = null;
+const VIEWPORT_TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
 function saveViewport() {
   _vpSaveDueAt = performance.now() + 400;
   if (_vpSaveTimer) return;
@@ -214,28 +215,27 @@ function setEditOffscreenCacheKind(kind) {
   invalidateOffscreen();
 }
 
-async function _rebuildOffscreenAsync() {
-  if (_offscreenRebuilding) return;
+function _rebuildOffscreen() {
+  if (_offscreenRebuilding) return false;
   _offscreenRebuilding = true;
   const snapshotEditingId = editingId;
   const snapshotCacheKind = _offscreenCacheKind;
   const rebuildVersion = _offscreenVersion;
   const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length, editingId: snapshotEditingId, cacheKind: snapshotCacheKind, version: rebuildVersion });
 
-  // Bail if edit mode or viewport content changed while we were awaiting.
+  // Bail if edit mode or cache state changed before the rebuild starts.
   if (!editingId ||
       editingId !== snapshotEditingId ||
       snapshotCacheKind !== _offscreenCacheKind ||
       rebuildVersion !== _offscreenVersion) {
     _offscreenRebuilding = false;
     ViewportDebug.end(dbg, { stale: true, currentCacheKind: _offscreenCacheKind, currentVersion: _offscreenVersion });
-    if (editingId && _offscreenDirty) scheduleRender(true, false, 'offscreen-stale');
-    return;
+    return false;
   }
 
   const dpr = window.devicePixelRatio || 1;
-  _offscreen.width  = boardCanvas.width;
-  _offscreen.height = boardCanvas.height;
+  if (_offscreen.width !== boardCanvas.width) _offscreen.width = boardCanvas.width;
+  if (_offscreen.height !== boardCanvas.height) _offscreen.height = boardCanvas.height;
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
   fillBoardBackground(_offCtx, _offscreen.width, _offscreen.height);
   _offCtx.setTransform(zoom * dpr, 0, 0, zoom * dpr, panX * dpr, panY * dpr);
@@ -252,10 +252,10 @@ async function _rebuildOffscreenAsync() {
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
 
   _offscreenRebuilding = false;
-  if (rebuildVersion === _offscreenVersion) _offscreenDirty = false;
-  // Re-render to display the fresh offscreen (caret/selection on top)
-  scheduleRender(true, false, 'offscreen-ready');
-  ViewportDebug.end(dbg, { stale: false });
+  const ready = rebuildVersion === _offscreenVersion;
+  if (ready) _offscreenDirty = false;
+  ViewportDebug.end(dbg, { stale: !ready });
+  return ready;
 }
 
 // ─── History delta tracking ───────────────────────────────────────────────────
@@ -279,21 +279,10 @@ function resizeCanvas() {
   scheduleRender(true, false);
 }
 
-function drawImageObj(context, obj, img) {
-  return BoardRenderer.drawImageObj(context, obj, img);
-}
-
-function isDrawableImageSource(source) {
-  return BoardRenderer.isDrawableImageSource(source);
-}
 var VIEWPORT_CULL_PADDING_PX = 256;
 
 function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view = { panX, panY, zoom }) {
   return viewportWorldRect(padScreenPx, view);
-}
-
-function countCulledObject(obj, counters = null) {
-  return BoardRenderer.countCulledObject(obj, counters);
 }
 
 // Draws a single non-editing object onto any canvas context (world coords).
@@ -587,7 +576,7 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options
   const stats = options.stats || null;
   if (!selectionGap) {
     for (const line of lines) {
-      drawTextLineRange(context, line, obj);
+      drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
       if (stats) stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
     }
     return;
@@ -598,15 +587,15 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
     if (h0 >= h1) {
-      drawTextLineRange(context, line, obj);
+      drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
       if (stats) stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
       continue;
     }
     const o0 = h0 - ls, o1 = h1 - ls;
     const hasBefore = o0 > 0;
     const hasAfter = o1 < line.text.length;
-    if (hasBefore) drawTextLineRange(context, line, obj, 0, o0);
-    if (hasAfter) drawTextLineRange(context, line, obj, o1, line.text.length);
+    if (hasBefore) drawTextLineRange(context, line, obj, 0, o0, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
+    if (hasAfter) drawTextLineRange(context, line, obj, o1, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
     if (stats && (hasBefore || hasAfter)) stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
   }
 };
@@ -658,7 +647,16 @@ const drawTextSelectionContentJello = (context, obj, layout, selStart, selEnd, o
   applyTextSelectionMotionTransform(context, selection.bounds, motion);
   context.fillStyle = canvasTextColor();
   for (const run of selection.runs) {
-    if (run.endOffset > run.startOffset) drawTextLineRange(context, run.line, obj, run.startOffset, run.endOffset);
+    if (run.endOffset > run.startOffset) {
+      drawTextLineRange(
+        context,
+        run.line,
+        obj,
+        run.startOffset,
+        run.endOffset,
+        VIEWPORT_TEXT_DRAW_STATS_DISABLED,
+      );
+    }
   }
   context.restore();
   return true;
@@ -897,10 +895,11 @@ function editOffscreenCacheKind() {
   return 'non-text';
 }
 
-function drawBoard() {
+function drawBoard(options = {}) {
+  const bypassEditOffscreenCache = options.bypassEditOffscreenCache === true;
   const collectViewportDebug = ViewportDebug.isEnabled();
   const dbg = collectViewportDebug
-    ? ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId, offscreenDirty: _offscreenDirty })
+    ? ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId, offscreenDirty: _offscreenDirty, bypassEditOffscreenCache })
     : null;
   if (_boardOpening) {
     if (collectViewportDebug) ViewportDebug.end(dbg, { skipped: 'board-opening' });
@@ -929,22 +928,11 @@ function drawBoard() {
   if (editingId) {
     const editCacheKind = hasCopiedSelectionSkipIds ? '' : editOffscreenCacheKind();
     setEditOffscreenCacheKind(editCacheKind);
-    const useEditOffscreenCache = !!editCacheKind;
+    const useEditOffscreenCache = !!editCacheKind && !bypassEditOffscreenCache;
     if (useEditOffscreenCache && _offscreenDirty) {
-      // Kick off async rebuild (pre-decodes images to avoid GPU stall).
-      // Draw all objects directly this frame while the rebuild is pending.
-      _rebuildOffscreenAsync();
-      const setupStart = collectDrawDebug ? performance.now() : 0;
-      resetCanvasToScreen(ctx);
-      fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
-      setWorldCanvasTransform(ctx, dpr);
-      if (collectDrawDebug) drawPhases.backgroundSetupMs = performance.now() - setupStart;
-      const objectsStart = collectDrawDebug ? performance.now() : 0;
-      const drawn = drawVisibleObjects(ctx, counters, { skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver });
-      if (collectDrawDebug) drawPhases.objectLoopMs = performance.now() - objectsStart;
-      drawnImages += drawn.drawnImages;
-      drawnText += drawn.drawnText;
-    } else if (useEditOffscreenCache) {
+      _rebuildOffscreen();
+    }
+    if (useEditOffscreenCache && !_offscreenDirty) {
       // Blit cached offscreen (background + non-editing objects, or non-text static layer)
       const blitStart = collectDrawDebug ? performance.now() : 0;
       resetCanvasToScreen(ctx);
@@ -1019,6 +1007,7 @@ function drawBoard() {
       viewportH: viewportRect.y2 - viewportRect.y1,
       editing: !!editingId,
       offscreenDirty: !!_offscreenDirty,
+      bypassEditOffscreenCache,
       openPreviewFallback: !!hasOpenPreviewFallback,
       objectCount: objects.length,
       totalMeasuredMs: performance.now() - drawStart,
@@ -1055,7 +1044,10 @@ function applyTransform(frameDbg = null) {
   if (editingId) invalidateOffscreen();
   const transformStart = collectTransformDebug ? performance.now() : 0;
   const drawStart = collectTransformDebug ? performance.now() : 0;
-  drawBoard();
+  // Viewport transforms already require a direct redraw at the new pan/zoom.
+  // Rebuilding the edit cache here would render the static scene twice in the
+  // same frame; leave it dirty for the next non-navigation edit render.
+  drawBoard({ bypassEditOffscreenCache: true });
   const drawMs = collectTransformDebug ? performance.now() - drawStart : 0;
   if (collectTransformDebug) {
     if (collectViewportDebug) {
@@ -1086,7 +1078,10 @@ function applyTransform(frameDbg = null) {
     }
   }
   scheduleVisibleHydrationAfterIdle();
-  scheduleVisibleTextLayoutPrewarmAfterIdle(_activeRenderSource || 'transform');
+  // The frame already laid out and drew the visible text. The legacy automatic
+  // prewarm rescanned up to 100 large text objects in one unbounded main-thread
+  // callback, which could delay the next gesture. Keep prewarm available to the
+  // explicit performance debugger, but do not run it after navigation.
   if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
     scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
   }
@@ -1149,10 +1144,8 @@ var _activeRenderSource = 'direct';
 var _lastDrawBoardMeta = null;
 var _frameInputAt = 0;
 var _frameInputSource = '';
-var _visibleTextLayoutPrewarmCancel = null;
 var _lastVisibleTextLayoutPrewarm = null;
 var _visibleTextLayoutPrewarmHistory = [];
-var TEXT_LAYOUT_PREWARM_INPUT_IDLE_MS = 180;
 var _textDrawWarmupCanvas = null;
 var _textDrawWarmupCtx = null;
 const TEXT_DRAW_WARMUP_CANVAS_MAX_W = 2048;
@@ -1776,50 +1769,6 @@ function getBestVisibleTextLayoutPrewarm() {
     }
   }
   return cloneVisibleTextLayoutPrewarm(best);
-}
-
-function clearVisibleTextLayoutPrewarmAfterIdle() {
-  if (!_visibleTextLayoutPrewarmCancel) return;
-  _visibleTextLayoutPrewarmCancel();
-  _visibleTextLayoutPrewarmCancel = null;
-}
-
-function scheduleVisibleTextLayoutPrewarmAfterIdle(source = 'render', options = {}) {
-  clearVisibleTextLayoutPrewarmAfterIdle();
-  const run = () => {
-    _visibleTextLayoutPrewarmCancel = null;
-    const idleMs = typeof lastViewportInputAt !== 'undefined'
-      ? performance.now() - lastViewportInputAt
-      : Infinity;
-    const idleThresholdMs = Math.max(0, Math.trunc(Number(options.inputIdleMs ?? TEXT_LAYOUT_PREWARM_INPUT_IDLE_MS)) || 0);
-    if (idleMs < idleThresholdMs) {
-      scheduleVisibleTextLayoutPrewarmAfterIdle(source, {
-        ...options,
-        delayMs: idleThresholdMs - idleMs,
-      });
-      return;
-    }
-    prewarmVisibleTextLayoutCaches({
-      ...options,
-      source,
-    });
-  };
-  const requestedDelay = Number(options.delayMs);
-  if (Number.isFinite(requestedDelay) && requestedDelay > 0) {
-    const handle = setTimeout(run, Math.max(0, requestedDelay));
-    _visibleTextLayoutPrewarmCancel = () => clearTimeout(handle);
-    return handle;
-  }
-  if (typeof requestIdleCallback === 'function') {
-    const handle = requestIdleCallback(run, {
-      timeout: Math.max(50, Math.trunc(Number(options.timeoutMs ?? 1200)) || 1200),
-    });
-    _visibleTextLayoutPrewarmCancel = () => cancelIdleCallback(handle);
-    return handle;
-  }
-  const handle = setTimeout(run, Math.max(0, Math.trunc(Number(options.delayMs ?? TEXT_LAYOUT_PREWARM_INPUT_IDLE_MS)) || 0));
-  _visibleTextLayoutPrewarmCancel = () => clearTimeout(handle);
-  return handle;
 }
 
 function viewportEventTime(event = null) {

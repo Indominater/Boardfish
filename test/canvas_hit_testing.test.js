@@ -218,6 +218,7 @@ test('wheel zoom over visible floating UI uses the viewport wheel handler', () =
   assert.match(inputSource, /window\.addEventListener\('wheel', handleGlobalViewportWheel, \{ capture: true, passive: false \}\);/);
   assert.match(inputSource, /document\.addEventListener\('wheel', handleGlobalViewportWheel, \{ capture: true, passive: false \}\);/);
   assert.match(selectionSource, /document\.elementFromPoint\(x, y\)/);
+  assert.match(selectionSource, /if \(e\.target instanceof Node && e\.target\.nodeType === 1\) return false;/);
   assert.match(selectionSource, /const isEventInsideViewportWheelSurface = \(e\) => \{[\s\S]*isEventInsideVisibleContextMenu\(e\) \|\| isEventInsideVisibleIsland\(e\);[\s\S]*\};/);
   assert.match(selectionSource, /const isEventInsideVisibleContextMenu = \(e\) => \{[\s\S]*isEventInsideVisibleSurface\(e, ctxMenu\)[\s\S]*isEventInsideVisibleSurface\(e, objCtxMenu\)[\s\S]*isEventInsideVisibleSurface\(e, ctxActions\)[\s\S]*\};/);
   assert.match(styles, /#island \{[\s\S]*overscroll-behavior: none;[\s\S]*touch-action: none;/);
@@ -229,11 +230,12 @@ test('keyboard focus mirrors menu hover styling without focusing the zoom pill',
 
   assert.match(indexSource, /<button class="ctx-action-item[^"]*" id="ctx-btn-dark-mode"/);
   assert.match(indexSource, /<a class="ctx-action-item[^"]*" id="ctx-btn-github"/);
-  assert.match(styles, /button:focus,\s*button:focus-visible\s*\{\s*outline: none;\s*\}/);
+  assert.match(styles, /button\s*\{\s*outline: none;\s*\}/);
+  assert.doesNotMatch(styles, /button:focus,\s*button:focus-visible\s*\{\s*outline: none;\s*\}/);
   assert.match(styles, /\.ctx-action-item\s*\{[\s\S]*outline: none;[\s\S]*\}/);
-  assert.match(styles, /\.ctx-action-item:focus,\s*\.ctx-action-item:focus-visible\s*\{\s*outline: none;\s*\}/);
+  assert.doesNotMatch(styles, /\.ctx-action-item:focus,\s*\.ctx-action-item:focus-visible\s*\{\s*outline: none;\s*\}/);
   assert.match(styles, /:where\(\.ctx-item:hover,\s*\.ctx-item:focus-visible,\s*\.ctx-action-item:focus-visible,[\s\S]*#island:hover \.ui-highlight-nudge\)\s*\{[\s\S]*--ui-highlight-nudge-transform: translateX\(var\(--highlight-nudge-x\)\);[\s\S]*\}/);
-  assert.match(styles, /\.ctx-item:focus-visible\s*\{[\s\S]*background: var\(--firefox-menu-hover-bg\);[\s\S]*box-shadow: none;[\s\S]*color: var\(--firefox-menu-text\);[\s\S]*\}/);
+  assert.match(styles, /\.ctx-item:focus-visible\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
   assert.match(styles, /\.ctx-action-item\.hotspot-hover::before,\s*\.ctx-action-item:focus-visible::before\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
   assert.match(styles, /#dlg-discard:focus-visible\s*\{\s*background: var\(--danger-hover-bg\);\s*\}/);
   assert.doesNotMatch(styles, /#island:focus-visible #isl-zoom/);
@@ -258,7 +260,7 @@ test('zoom pill stays out of keyboard focus and Space reset paths', () => {
 
   assert.match(styles, /#island:hover #isl-zoom\s*\{[\s\S]*background: var\(--firefox-menu-hover-bg\);[\s\S]*\}/);
   assert.match(styles, /#island\[data-mode="message"\] \{[\s\S]*pointer-events: none;[\s\S]*\}/);
-  assert.match(styles, /#island\[data-mode="message"\] #isl-zoom,\s*#island\[data-mode="message"\]:hover #isl-zoom,\s*#island\[data-mode="message"\]:active #isl-zoom \{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);[\s\S]*background: transparent;[\s\S]*transform: none;[\s\S]*\}/);
+  assert.match(styles, /#island\[data-mode="message"\] #isl-zoom\s*\{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);[\s\S]*background: transparent;[\s\S]*transform: none;[\s\S]*\}/);
   assert.doesNotMatch(styles, /#island:hover #isl-zoom,\s*#island:focus-visible #isl-zoom/);
   assert.doesNotMatch(styles, /#island:focus-visible #isl-zoom/);
   assert.doesNotMatch(viewportSource, /island\.setAttribute\('tabindex', '0'\)/);
@@ -503,12 +505,20 @@ test('text edit mode keeps text direct while caching static non-text layers', ()
   assert.match(drawSource, /const hasCopiedSelectionSkipIds = !!copiedSelectionSkipIds\?\.size;/);
   assert.match(drawSource, /const editCacheKind = hasCopiedSelectionSkipIds \? '' : editOffscreenCacheKind\(\);/);
   assert.match(drawSource, /setEditOffscreenCacheKind\(editCacheKind\);/);
-  assert.match(drawSource, /const useEditOffscreenCache = !!editCacheKind;/);
-  assert.match(drawSource, /else if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
+  assert.match(drawSource, /const bypassEditOffscreenCache = options\.bypassEditOffscreenCache === true;/);
+  assert.match(drawSource, /const useEditOffscreenCache = !!editCacheKind && !bypassEditOffscreenCache;/);
+  assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(\);\s*\}/);
+  assert.match(drawSource, /if \(useEditOffscreenCache && !_offscreenDirty\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
   assert.match(drawSource, /if \(editCacheKind === 'non-text'\)[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \}\);/);
   assert.match(drawSource, /else \{[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver \}\);/);
   assert.match(drawSource, /drawVisibleObjects\(ctx, counters, \{ viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver \}\);/);
   assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, \{ zoom, panX, panY, dpr \}, textSelectionSpecs\);/);
+
+  const transformStart = viewportSource.indexOf('function applyTransform');
+  const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
+  const transformSource = viewportSource.slice(transformStart, transformEnd);
+  assert.match(transformSource, /drawBoard\(\{ bypassEditOffscreenCache: true \}\);/);
+  assert.doesNotMatch(transformSource, /_rebuildOffscreen\(/);
 });
 
 test('text selection collection uses indexed script metrics while editing math text', () => {

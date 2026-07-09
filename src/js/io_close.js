@@ -5,11 +5,6 @@ var savedHistoryIndex = -1;
 var currentFilePath = null;
 var currentFileRef = null;
 
-function historyEntryObjects(entry) {
-  if (Array.isArray(entry)) return entry;
-  return Array.isArray(entry?.objects) ? entry.objects : [];
-}
-
 function isPersistableBoardObject(obj) {
   if (!obj) return false;
   if (obj.type === 'text') {
@@ -733,8 +728,9 @@ const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
 };
 
 var _backgroundOpenHydrationRunning = false;
+const BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS = 180;
 
-async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
+async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 2) {
   if (_backgroundOpenHydrationRunning) return;
   _backgroundOpenHydrationRunning = true;
   const generation = _imageStoreGeneration;
@@ -743,6 +739,16 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 4) {
   let hydratedTotal = 0;
   try {
     while (!_boardOpening && generation === _imageStoreGeneration) {
+      const inputIdleMs = typeof lastViewportInputAt !== 'undefined' && lastViewportInputAt > 0
+        ? performance.now() - lastViewportInputAt
+        : Infinity;
+      if (inputIdleMs < BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS) {
+        await new Promise((resolve) => setTimeout(
+          resolve,
+          Math.max(16, BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS - inputIdleMs),
+        ));
+        continue;
+      }
       const keys = getPendingHydratableImageKeys(batchSize);
       if (!keys.length) break;
       batchCount++;

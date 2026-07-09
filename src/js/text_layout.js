@@ -17,8 +17,16 @@ const TEXT_CANVAS_FONT_KERNING = 'none';
 const TEXT_CANVAS_CONTEXT_CONFIG_KEY = 'fontKerning:none;letterSpacing:0px;fontStretch:normal;fontVariantCaps:normal;textAlign:left;direction:ltr';
 const TEXT_GLYPH_MIN_GAP = 0.5;
 const TEXT_GLYPH_MIN_INK_WIDTH = 0.01;
+const TEXT_DRAW_BATCH_POSITION_EPSILON = 1e-7;
+const TEXT_DRAW_BATCH_MAX_UNITS = 2;
+// Only batch pairs exhaustively pixel-verified against per-grapheme Geist
+// rendering in Chromium. Keep fallback fonts, other engines, f/F ligatures,
+// the contextual "tt" alternate, punctuation, and complex scripts exact.
+const TEXT_DRAW_BATCHABLE_ASCII_RE = /^[A-EG-Za-eg-z0-9]$/;
 var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
 var _configuredTextCanvasContexts = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+var _textDrawBatchingEngineVerified = null;
+var _textDrawBatchingVerifiedFonts = new Set();
 
 function normalizeTextContent(value) {
   return String(value ?? '').replace(/\r\n?/g, '\n');
@@ -3080,6 +3088,7 @@ function createTextDrawStats() {
     chars: 0,
     drawnChars: 0,
     drawUnits: 0,
+    drawCalls: 0,
     runs: 0,
     plainRuns: 0,
     scriptRuns: 0,
@@ -3102,6 +3111,61 @@ function cloneTextDrawStats(stats, cacheHit = false) {
 
 function isTextDrawBlankUnit(unit) {
   return unit === ' ' || unit === '\u00a0';
+}
+
+function isTextDrawBatchingFontReady(font) {
+  if (_textDrawBatchingEngineVerified == null) {
+    const userAgent = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+    _textDrawBatchingEngineVerified = /\b(?:Chrome|Chromium)\/\d+/.test(userAgent);
+  }
+  if (!_textDrawBatchingEngineVerified) return false;
+  const requestedFont = font || FONT;
+  if (_textDrawBatchingVerifiedFonts.has(requestedFont)) return true;
+  const fontSet = typeof document !== 'undefined' ? document.fonts : null;
+  if (!fontSet || fontSet.status !== 'loaded' || typeof fontSet.check !== 'function') return false;
+  try {
+    const ready = fontSet.check(requestedFont, 'Boardfish');
+    if (ready) _textDrawBatchingVerifiedFonts.add(requestedFont);
+    return ready;
+  } catch (_) {
+    return false;
+  }
+}
+
+function isTextDrawBatchableAsciiUnit(unit, batchingFontReady) {
+  return batchingFontReady === true && TEXT_DRAW_BATCHABLE_ASCII_RE.test(String(unit ?? ''));
+}
+
+function isTextDrawUnsafeAsciiPair(previousText, nextText) {
+  return previousText.endsWith('t') && nextText === 't';
+}
+
+function appendTextDrawUnit(draws, unit, font, batchingFontReady) {
+  const batchable = isTextDrawBatchableAsciiUnit(unit.text, batchingFontReady);
+  const unitWidth = batchable
+    ? measureTextGlyphMetricsWithFont(unit.text, font).width
+    : 0;
+  const previous = draws[draws.length - 1] || null;
+  if (
+    batchable &&
+    previous?.batchable === true &&
+    previous.unitCount < TEXT_DRAW_BATCH_MAX_UNITS &&
+    !isTextDrawUnsafeAsciiPair(previous.text, unit.text) &&
+    Number.isFinite(unit.x) &&
+    Number.isFinite(previous.nextX) &&
+    Math.abs(unit.x - previous.nextX) <= TEXT_DRAW_BATCH_POSITION_EPSILON
+  ) {
+    previous.text += unit.text;
+    previous.nextX = unit.x + unitWidth;
+    previous.unitCount++;
+    return;
+  }
+  draws.push({
+    ...unit,
+    batchable,
+    nextX: batchable && Number.isFinite(unit.x) ? unit.x + unitWidth : NaN,
+    unitCount: 1,
+  });
 }
 
 function textDrawPlanCacheMatches(plan, line, text, start, end, scriptMetrics) {
@@ -3153,8 +3217,10 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
     const run = {
       font: state.depth > 0 ? state.font : '',
       offset: state.offset,
-      units: [],
+      draws: [],
     };
+    const drawFont = state.font || FONT;
+    const batchingFontReady = isTextDrawBatchingFontReady(drawFont);
     stats.runs++;
     if (state.depth > 0) {
       stats.scriptRuns++;
@@ -3170,13 +3236,16 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
       }
       stats.drawUnits++;
       stats.drawnChars += charCount;
-      run.units.push({
+      appendTextDrawUnit(run.draws, {
         text: unit,
         offset: unitStart,
         x: line.prefixWidths?.[unitStart],
-      });
+      }, drawFont, batchingFontReady);
     }, i, j);
-    if (run.units.length) runs.push(run);
+    if (run.draws.length) {
+      stats.drawCalls += run.draws.length;
+      runs.push(run);
+    }
     i = j;
   }
   return {
@@ -3199,15 +3268,15 @@ function drawTextPlan(context, line, obj, plan) {
   for (const run of plan.runs) {
     if (run.font) context.font = run.font;
     const y = line.textY + run.offset;
-    for (const unit of run.units) {
-      const x = Number.isFinite(unit.x) ? baseX + unit.x : lineXAtOffset(line, obj, unit.offset);
-      context.fillText(unit.text, x, y);
+    for (const draw of run.draws) {
+      const x = Number.isFinite(draw.x) ? baseX + draw.x : lineXAtOffset(line, obj, draw.offset);
+      context.fillText(draw.text, x, y);
     }
     if (run.font && context.font !== previousFont) context.font = previousFont;
   }
 }
 
-const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0) => {
+const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0, options = {}) => {
   if (!context || !line || !obj) return createTextDrawStats();
   configureTextCanvasContext(context);
   const text = String(line.text ?? '');
@@ -3215,10 +3284,14 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
   const end = Math.max(start, Math.min(endOffset, text.length));
   const ranges = line.scriptRanges || [];
   const hasScriptRanges = ranges.length > 0;
-  const content = hasScriptRanges ? normalizeTextContent(obj.data?.content ?? line.content ?? text) : '';
-  const scriptMetrics = hasScriptRanges
-    ? line._scriptMetrics || getTextScriptLayoutMetricsForObject(obj, content, ranges)
-    : null;
+  let scriptMetrics = null;
+  if (hasScriptRanges) {
+    scriptMetrics = line._scriptMetrics || null;
+    if (!scriptMetrics) {
+      const content = normalizeTextContent(obj.data?.content ?? line.content ?? text);
+      scriptMetrics = getTextScriptLayoutMetricsForObject(obj, content, ranges);
+    }
+  }
   const cacheable = start === 0 && end === text.length && !!line.prefixWidths;
   let plan = cacheable && textDrawPlanCacheMatches(line._textDrawPlanCache, line, text, start, end, scriptMetrics)
     ? line._textDrawPlanCache
@@ -3229,7 +3302,7 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
     if (cacheable) setTextDrawPlanCache(line, plan);
   }
   drawTextPlan(context, line, obj, plan);
-  return cloneTextDrawStats(plan.stats, cacheHit);
+  return options.collectStats === false ? null : cloneTextDrawStats(plan.stats, cacheHit);
 };
 
 function lineEndX(line, obj) {

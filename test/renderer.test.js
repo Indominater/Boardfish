@@ -638,6 +638,83 @@ test('text renderer skips layout lines outside the visible viewport', () => {
   assert.equal(counters.culledTextLines, 2);
 });
 
+test('production text drawing skips debug stats allocation', () => {
+  const BoardfishRenderer = loadRenderer();
+  const collectStatsOptions = [];
+  const text = { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 24, data: { content: 'plain' } };
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 200, y2: 40 }),
+    dpr: () => 1,
+    drawTextLineRange(_context, _line, _obj, _start, _end, options) {
+      collectStatsOptions.push(options.collectStats);
+      return null;
+    },
+    getTextLayout: () => [{ text: 'plain', y: 0 }],
+    getWrappedLines: () => [],
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objects: () => [text],
+    panX: () => 0,
+    panY: () => 0,
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  renderer.drawVisibleObjects({ fillStyle: '', textBaseline: '' }, null);
+
+  assert.deepEqual(collectStatsOptions, [false]);
+});
+
+test('text context configuration is reapplied after canvas state resets', () => {
+  const BoardfishRenderer = loadRenderer();
+  let configurationWrites = 0;
+  const context = { fillStyle: '', textBaseline: '' };
+  const configuredValues = new Map();
+  for (const property of ['fontKerning', 'letterSpacing', 'fontStretch', 'fontVariantCaps', 'textAlign', 'direction']) {
+    Object.defineProperty(context, property, {
+      configurable: true,
+      get() {
+        return configuredValues.get(property);
+      },
+      set(value) {
+        configurationWrites++;
+        configuredValues.set(property, value);
+      },
+    });
+  }
+  const text = { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 24, data: { content: 'plain' } };
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    dpr: () => 1,
+    drawTextLineRange() {},
+    getTextLayout: () => [{ text: 'plain', y: 0 }],
+    getWrappedLines: () => [],
+    lineHeight: 24,
+    panX: () => 0,
+    panY: () => 0,
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    zoom: () => 1,
+  });
+
+  renderer.drawSingleObj(context, text);
+  configuredValues.clear();
+  renderer.drawSingleObj(context, text);
+
+  assert.equal(configurationWrites, 12);
+  assert.deepEqual(Object.fromEntries(configuredValues), {
+    direction: 'ltr',
+    fontKerning: 'none',
+    fontStretch: 'normal',
+    fontVariantCaps: 'normal',
+    letterSpacing: '0px',
+    textAlign: 'left',
+  });
+});
+
 test('text renderer keeps rich text drawing at low zoom instead of switching to fast text', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnText = [];
@@ -663,6 +740,7 @@ test('text renderer keeps rich text drawing at low zoom instead of switching to 
         chars: line.text.length,
         drawnChars: line.text.length,
         drawUnits: line.text.length,
+        drawCalls: 2,
         runs: 1,
         plainRuns: 1,
         scriptRuns: 0,
@@ -697,10 +775,12 @@ test('text renderer keeps rich text drawing at low zoom instead of switching to 
   assert.equal(counters.culledTextLines, 0);
   assert.equal(counters.richTextChars, 4);
   assert.equal(counters.richTextDrawUnits, 4);
+  assert.equal(counters.richTextDrawCalls, 2);
   assert.equal(counters.richTextRuns, 1);
   assert.equal(counters.richTextPlainRuns, 1);
   assert.equal(counters.richTextScriptRuns, 0);
   assert.equal(counters.maxRichTextDrawUnitsPerLine, 4);
+  assert.equal(counters.maxRichTextDrawCallsPerLine, 2);
 });
 
 test('text renderer keeps direct rich rendering', () => {

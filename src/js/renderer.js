@@ -9,6 +9,8 @@
   const imageSourceContextDrawnMap = typeof WeakMap !== 'undefined' && typeof WeakSet !== 'undefined'
     ? new WeakMap()
     : null;
+  const TEXT_DRAW_STATS_ENABLED = Object.freeze({ collectStats: true });
+  const TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
 
   function canTrackImageDrawTarget(value) {
     return !!value && (typeof value === 'object' || typeof value === 'function');
@@ -99,6 +101,7 @@
       richTextChars: 0,
       richTextDrawnChars: 0,
       richTextDrawUnits: 0,
+      richTextDrawCalls: 0,
       richTextRuns: 0,
       richTextPlainRuns: 0,
       richTextScriptRuns: 0,
@@ -112,6 +115,7 @@
       maxRichTextLineDrawMs: 0,
       slowRichTextLineDraws: 0,
       maxRichTextDrawUnitsPerLine: 0,
+      maxRichTextDrawCallsPerLine: 0,
       maxRichTextRunsPerLine: 0,
       richTextDirectDraws: 0,
       imageSourceDraws: 0,
@@ -265,6 +269,9 @@
 
   function configureRendererTextContext(context) {
     if (!context) return;
+    // Canvas width/height assignments reset context state. Reapply these values
+    // instead of caching by context identity so text remains aligned with the
+    // measurements after a resize or DPR change.
     try { context.fontKerning = 'none'; } catch (_) {}
     try { context.letterSpacing = '0px'; } catch (_) {}
     try { context.fontStretch = 'normal'; } catch (_) {}
@@ -338,6 +345,7 @@
     add('richTextChars', 'chars');
     add('richTextDrawnChars', 'drawnChars');
     add('richTextDrawUnits', 'drawUnits');
+    add('richTextDrawCalls', 'drawCalls');
     add('richTextRuns', 'runs');
     add('richTextPlainRuns', 'plainRuns');
     add('richTextScriptRuns', 'scriptRuns');
@@ -350,6 +358,10 @@
     counters.maxRichTextDrawUnitsPerLine = Math.max(
       counters.maxRichTextDrawUnitsPerLine || 0,
       Number(stats.drawUnits) || 0,
+    );
+    counters.maxRichTextDrawCallsPerLine = Math.max(
+      counters.maxRichTextDrawCallsPerLine || 0,
+      Number(stats.drawCalls) || 0,
     );
     counters.maxRichTextRunsPerLine = Math.max(
       counters.maxRichTextRunsPerLine || 0,
@@ -378,6 +390,7 @@
       textLength: String(line?.text ?? '').length,
       sample: textLineSample(line?.text),
       drawUnits: Number(stats?.drawUnits) || 0,
+      drawCalls: Number(stats?.drawCalls) || 0,
       runs: Number(stats?.runs) || 0,
       plainRuns: Number(stats?.plainRuns) || 0,
       scriptRuns: Number(stats?.scriptRuns) || 0,
@@ -430,6 +443,7 @@
       row.drawnTextLines = drawCounterValue(counters, 'drawnTextLines') - before.drawnTextLines;
       row.culledTextLines = drawCounterValue(counters, 'culledTextLines') - before.culledTextLines;
       row.richTextDrawUnits = drawCounterValue(counters, 'richTextDrawUnits') - before.richTextDrawUnits;
+      row.richTextDrawCalls = drawCounterValue(counters, 'richTextDrawCalls') - before.richTextDrawCalls;
       row.richTextRuns = drawCounterValue(counters, 'richTextRuns') - before.richTextRuns;
       row.richTextScriptRuns = drawCounterValue(counters, 'richTextScriptRuns') - before.richTextScriptRuns;
       row.richTextSkippedTabs = drawCounterValue(counters, 'richTextSkippedTabs') - before.richTextSkippedTabs;
@@ -544,7 +558,14 @@
             }
             drawnLineCount++;
             const lineDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
-            const drawStats = deps.drawTextLineRange(context, line, obj, 0, line.text?.length ?? 0);
+            const drawStats = deps.drawTextLineRange(
+              context,
+              line,
+              obj,
+              0,
+              line.text?.length ?? 0,
+              counters ? TEXT_DRAW_STATS_ENABLED : TEXT_DRAW_STATS_DISABLED,
+            );
             addRichTextDrawStats(counters, drawStats);
             if (counters && typeof performance !== 'undefined') {
               recordRichTextLineDraw(counters, obj, line, layoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
@@ -729,6 +750,7 @@
           scaledImageScaleTotal: drawCounterValue(counters, 'scaledImageScaleTotal'),
           scaledImageTargetScaleTotal: drawCounterValue(counters, 'scaledImageTargetScaleTotal'),
           richTextDrawUnits: drawCounterValue(counters, 'richTextDrawUnits'),
+          richTextDrawCalls: drawCounterValue(counters, 'richTextDrawCalls'),
           richTextRuns: drawCounterValue(counters, 'richTextRuns'),
           richTextScriptRuns: drawCounterValue(counters, 'richTextScriptRuns'),
           richTextSkippedTabs: drawCounterValue(counters, 'richTextSkippedTabs'),
@@ -776,11 +798,8 @@
 
     return Object.freeze({
       createDrawCounters,
-      countCulledObject,
-      drawImageObj: (context, obj, img, options = {}) => drawImageObj(context, obj, img, deps, options),
       drawSingleObj,
       drawVisibleObjects,
-      isDrawableImageSource,
       resetCanvasToScreen,
       setWorldCanvasTransform: (context, dpr = deps.dpr(), view = viewDefaults()) => setWorldCanvasTransform(context, dpr, view, deps),
     });
