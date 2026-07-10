@@ -2576,7 +2576,7 @@ var ViewportDebug = (() => {
       .filter(obj => obj.type === 'image')
       .map(obj => {
         const key = obj.data?.imgKey || '';
-        const img = key ? (imageMetadataCache[key] || imageCache[key]) : null;
+        const img = key ? imageMetadataCache[key] : null;
         const bitmap = key ? imageBitmapCache[key] : null;
         const src = key ? imageStore[key] : null;
         const ready = key ? imageReadyPromises.get(key) : null;
@@ -2584,9 +2584,8 @@ var ViewportDebug = (() => {
         if (!key) status = 'missing-key';
         else if (!src) status = 'missing-store';
         else if (!img) status = 'missing-image-element';
-        else if (imageBitmapFailed.has(key) && img.complete && img.naturalWidth > 0) status = 'fallback-ok';
         else if (imageBitmapFailed.has(key)) status = 'bitmap-failed-no-fallback';
-        else if (!bitmap) status = img.complete && img.naturalWidth > 0 ? 'loaded-no-bitmap' : 'not-loaded';
+        else if (!bitmap) status = 'loaded-no-bitmap';
         return {
           id: obj.id,
           key,
@@ -2606,7 +2605,7 @@ var ViewportDebug = (() => {
           hasReadyPromise: !!ready,
         };
       });
-    const bad = rows.filter(row => row.status !== 'ok' && row.status !== 'fallback-ok');
+    const bad = rows.filter(row => row.status !== 'ok');
     console.table((bad.length ? bad : rows).slice(0, limit));
     return { total: rows.length, badCount: bad.length, bad, rows };
   }
@@ -2625,7 +2624,6 @@ var ViewportDebug = (() => {
       missingStore: counts['missing-store'] || 0,
       missingAssetUrl: counts['missing-asset-url'] || 0,
       missingImageElement: counts['missing-image-element'] || 0,
-      fallbackOk: counts['fallback-ok'] || 0,
       bitmapFailedNoFallback: counts['bitmap-failed-no-fallback'] || 0,
       loadedNoBitmap: counts['loaded-no-bitmap'] || 0,
       notLoaded: counts['not-loaded'] || 0,
@@ -2728,7 +2726,7 @@ var ViewportDebug = (() => {
           visibleImages++;
           const key = obj.data?.imgKey;
           const bitmap = key ? imageBitmapCache[key] : null;
-          const fullSource = bitmap || imageMetadataCache[key] || imageCache[key] || null;
+          const fullSource = bitmap || imageMetadataCache[key] || null;
           const scalingActive = typeof isViewportImageScalingActive === 'function'
             ? isViewportImageScalingActive()
             : viewportImageScalingEnabled;

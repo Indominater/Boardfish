@@ -665,7 +665,6 @@ const resetZoomFromPill = (e) => {
   if (island?.dataset?.mode !== 'zoom') return;
   e.preventDefault();
   e.stopPropagation();
-  if (document.activeElement === island) island.blur();
   closeOpenMenusExcept('', 'pill-reset-zoom');
   resetZoomToClosestObject();
 };

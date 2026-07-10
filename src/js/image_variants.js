@@ -25,6 +25,7 @@ var imageScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
 var imageScaledBitmapCache = imageScaledBitmapStore.groups; // key -> Map(scale -> { bitmap, bytes, lastUsed })
 var imageScaledBitmapPending = new Set();
 var imageScaledBitmapPendingBytes = new Map();
+var imageScaledBitmapFailures = new Map();
 var imageScaledBitmapPendingByteTotal = 0;
 var imageScaledBitmapBytes = 0;
 var imageScaledVariantRenderTimer = null;
@@ -33,6 +34,7 @@ var imageScaledVariantQueue = [];
 var imageScaledVariantQueueScheduled = false;
 var imageScaledVariantQueueTimer = null;
 var imageScaledVariantQueueActive = 0;
+var imageScaledVariantFailureReleaseScheduled = false;
 var lastViewportInputAt = 0;
 var IMAGE_VARIANT_INPUT_IDLE_MS = 180;
 var IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS = 0;
@@ -334,12 +336,17 @@ function clearScaledImageVariants(key = null) {
         removePendingScaledVariantBytes(pendingKey);
       }
     }
+    for (const failedKey of imageScaledBitmapFailures.keys()) {
+      if (failedKey.startsWith(`${key}:`)) imageScaledBitmapFailures.delete(failedKey);
+    }
     imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
     return;
   }
   imageScaledBitmapStore.clear();
   imageScaledBitmapPending.clear();
   imageScaledBitmapPendingBytes.clear();
+  imageScaledBitmapFailures.clear();
+  imageScaledVariantFailureReleaseScheduled = false;
   imageScaledBitmapPendingByteTotal = 0;
   imageScaledVariantQueue.length = 0;
   cancelScheduledScaledVariantQueue();
@@ -522,9 +529,11 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
   const estimatedBytes = scaledVariantEstimatedBytes(sourceW, sourceH, scale);
   if (imageScaledBitmapBytes + pendingScaledVariantBytes() + estimatedBytes > IMAGE_VARIANT_MEMORY_LIMIT) {
     imageScaledVariantMemorySkipCount++;
+    recordScaledImageVariantFailure(key, scale, 'memory-limit');
     return { key, scale, ready: false, skipped: 'memory-limit', estimatedBytes };
   }
 
+  imageScaledBitmapFailures.delete(pendingKey);
   imageScaledBitmapPending.add(pendingKey);
   addPendingScaledVariantBytes(pendingKey, estimatedBytes);
   const generation = _imageStoreGeneration;
@@ -538,6 +547,7 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
     }
     const bytes = bitmapByteSize(bitmap);
     imageScaledBitmapStore.set(key, scale, { bitmap, bytes });
+    imageScaledBitmapFailures.delete(pendingKey);
     scheduleDrawableBitmapWarmup(bitmap, {
       kind: 'scaled-variant',
       key,
@@ -550,6 +560,9 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
     return { key, scale, ready: true, bytes, ms: performance.now() - buildStart };
   } catch (err) {
     bitmap?.close?.();
+    if (shouldBuildScaledImageVariant(pendingKey, generation)) {
+      recordScaledImageVariantFailure(key, scale, 'error');
+    }
     return { key, scale, ready: false, skipped: 'error', error: String(err), ms: performance.now() - buildStart };
   } finally {
     const buildMs = performance.now() - buildStart;
@@ -636,22 +649,26 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
 }
 
 function queueScaledImageVariant(key, source, scale, options = {}) {
-  if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key || !source || scale >= 1) return;
+  if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key || !source || scale >= 1) {
+    return { key, scale, queued: false, skipped: 'disabled-or-invalid' };
+  }
   const pendingKey = `${key}:${scale}`;
   const map = imageScaledBitmapCache.get(key);
-  if (map?.has(scale)) return;
+  if (map?.has(scale)) return { key, scale, queued: false, skipped: 'already-ready' };
   if (imageScaledBitmapPending.has(pendingKey)) {
-    if (options.priority === true) prioritizeScaledVariantQueue(pendingKey);
-    return;
+    const priorityBoosted = options.priority === true && prioritizeScaledVariantQueue(pendingKey);
+    return { key, scale, queued: false, skipped: 'pending', priorityBoosted };
   }
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
-  if (!sourceW || !sourceH) return;
+  if (!sourceW || !sourceH) return { key, scale, queued: false, skipped: 'missing-size' };
   const estimatedBytes = scaledVariantEstimatedBytes(sourceW, sourceH, scale);
   if (imageScaledBitmapBytes + pendingScaledVariantBytes() + estimatedBytes > IMAGE_VARIANT_MEMORY_LIMIT) {
     imageScaledVariantMemorySkipCount++;
-    return;
+    recordScaledImageVariantFailure(key, scale, 'memory-limit');
+    return { key, scale, queued: false, skipped: 'memory-limit', estimatedBytes };
   }
+  imageScaledBitmapFailures.delete(pendingKey);
   imageScaledBitmapPending.add(pendingKey);
   addPendingScaledVariantBytes(pendingKey, estimatedBytes);
   const generation = _imageStoreGeneration;
@@ -671,6 +688,7 @@ function queueScaledImageVariant(key, source, scale, options = {}) {
       }
       const bytes = bitmapByteSize(bitmap);
       imageScaledBitmapStore.set(key, scale, { bitmap, bytes });
+      imageScaledBitmapFailures.delete(pendingKey);
       scheduleDrawableBitmapWarmup(bitmap, {
         kind: 'scaled-variant',
         key,
@@ -682,6 +700,9 @@ function queueScaledImageVariant(key, source, scale, options = {}) {
       scheduleScaledVariantReadyRender();
     } catch (_) {
       bitmap?.close?.();
+      if (shouldBuildScaledImageVariant(pendingKey, generation)) {
+        recordScaledImageVariantFailure(key, scale, 'error');
+      }
     } finally {
       const buildMs = performance.now() - buildStart;
       imageScaledVariantBuildCount++;
@@ -695,6 +716,7 @@ function queueScaledImageVariant(key, source, scale, options = {}) {
   task.pendingKey = pendingKey;
   task.generation = generation;
   enqueueScaledVariantTask(task, { priority: options.priority === true });
+  return { key, scale, queued: true, priority: options.priority === true, estimatedBytes };
 }
 
 function queueScaledImageVariantForReadyImage(key, source, options = {}) {
@@ -712,15 +734,20 @@ function queueScaledImageVariantForReadyImage(key, source, options = {}) {
     imageScaledVariantSourceReadyFullScaleCount++;
     return { key, scale, queued: false, skipped: 'full-scale' };
   }
-  if (hasScaledImageVariant(key, scale) || isScaledImageVariantPending(key, scale)) {
+  if (hasScaledImageVariant(key, scale)) {
     imageScaledVariantSourceReadyReadyCount++;
-    return { key, scale, queued: false, skipped: 'already-ready-or-pending' };
+    return { key, scale, queued: false, skipped: 'already-ready' };
   }
-  queueScaledImageVariant(key, source, scale, {
+  if (isScaledImageVariantPending(key, scale)) {
+    const priorityBoosted = options.priority === true && prioritizeScaledVariantQueue(`${key}:${scale}`);
+    imageScaledVariantSourceReadyReadyCount++;
+    return { key, scale, queued: false, skipped: 'pending', priorityBoosted };
+  }
+  const result = queueScaledImageVariant(key, source, scale, {
     priority: options.priority === true,
   });
-  imageScaledVariantSourceReadyQueuedCount++;
-  return { key, scale, queued: true };
+  if (result?.queued) imageScaledVariantSourceReadyQueuedCount++;
+  return result || { key, scale, queued: false, skipped: 'not-queued' };
 }
 
 function queueScaledImageVariantForDraw(key, obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, options = {}) {
@@ -834,6 +861,28 @@ function hasScaledImageVariant(key, scale) {
 
 function isScaledImageVariantPending(key, scale) {
   return imageScaledBitmapPending.has(`${key}:${scale}`);
+}
+
+function hasScaledImageVariantFailure(key, scale) {
+  return imageScaledBitmapFailures.has(`${key}:${scale}`);
+}
+
+function scheduleScaledVariantFailurePreviewRelease() {
+  if (imageScaledVariantFailureReleaseScheduled ||
+      typeof hasOpenInitialImagePreviews !== 'function' ||
+      !hasOpenInitialImagePreviews()) return;
+  imageScaledVariantFailureReleaseScheduled = true;
+  setTimeout(() => {
+    imageScaledVariantFailureReleaseScheduled = false;
+    if (typeof hasOpenInitialImagePreviews === 'function' && hasOpenInitialImagePreviews()) {
+      scheduleScaledVariantReadyRender(false);
+    }
+  }, 0);
+}
+
+function recordScaledImageVariantFailure(key, scale, reason) {
+  imageScaledBitmapFailures.set(`${key}:${scale}`, reason || 'error');
+  scheduleScaledVariantFailurePreviewRelease();
 }
 
 function activeViewportInputIdleMs() {

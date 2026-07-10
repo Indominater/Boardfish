@@ -251,20 +251,16 @@
     boardContentLimitMessage,
     canAcceptAdditionalContentBytes,
     canAddObjects,
-    currentImageContentBytes,
-    dataUrlByteLength,
     imageSourceByteLength,
     isLimitedRuntime,
     limitError,
     notify,
-    objectLimitMessage,
     textByteLength,
     validateBoardPayload,
     validateDataUrlImage,
     validateOpenedImageEntries,
   });
 
-  root.BoardfishLimits = api;
   root.BoardfishWebLimits = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

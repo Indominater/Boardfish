@@ -73,6 +73,7 @@ const TEXT_PREFIX_CACHE_MAX_ENTRIES = 2048;
 const TEXT_LINES_CACHE_MAX_ENTRIES = 2048;
 const TEXT_SCRIPT_INDEX_CACHE_MAX_ENTRIES = 256;
 const TEXT_GLYPH_METRICS_CACHE_MAX_ENTRIES = 4096;
+const TEXT_GLYPH_PAIR_SPACING_CACHE_MAX_ENTRIES = 4096;
 const TEXT_PARAGRAPH_PREFIX_CACHE_MAX_ENTRIES = 4096;
 const TEXT_WRAPPED_WIDTH_CACHE_MAX_ENTRIES = 12;
 const TEXT_VIEWPORT_LAYOUT_RANGE_CACHE_MAX_ENTRIES = 48;
@@ -91,6 +92,7 @@ var _mwCache = new Map();
 var _fontMeasureCaches = new Map();
 var _scriptIndexCache = new Map();
 var _glyphMetricsCache = new Map();
+var _glyphPairSpacingCache = new Map();
 var _textGraphemeSegmenter = null;
 
 function forEachTextSpacingUnit(value, callback, start = 0, end = null) {
@@ -98,8 +100,33 @@ function forEachTextSpacingUnit(value, callback, start = 0, end = null) {
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, text.length));
   const to = Math.max(from, Math.min(end == null ? text.length : Math.trunc(Number(end)) || 0, text.length));
   if (from >= to) return;
+  const hasGraphemeSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function';
 
-  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+  let asciiOnly = true;
+  for (let index = from; index < to; index++) {
+    if (text.charCodeAt(index) > 0x7F) {
+      asciiOnly = false;
+      break;
+    }
+  }
+  if (asciiOnly) {
+    let index = from;
+    while (index < to) {
+      // Intl.Segmenter treats CRLF as one grapheme; the code-point fallback
+      // treats it as two. Preserve the active engine's existing boundaries.
+      const next = hasGraphemeSegmenter &&
+        text.charCodeAt(index) === 0x0D &&
+        index + 1 < to &&
+        text.charCodeAt(index + 1) === 0x0A
+        ? index + 2
+        : index + 1;
+      callback(text.slice(index, next), index, next);
+      index = next;
+    }
+    return;
+  }
+
+  if (hasGraphemeSegmenter) {
     try {
       if (!_textGraphemeSegmenter) _textGraphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
       const sliced = text.slice(from, to);
@@ -238,6 +265,7 @@ const clearMeasuredTextWidthCache = () => {
   _mwCache.clear();
   _fontMeasureCaches.clear();
   _glyphMetricsCache.clear();
+  _glyphPairSpacingCache.clear();
 };
 
 function measureTextGlyphMetricsWithFont(text, font = FONT) {
@@ -283,20 +311,47 @@ const textSpacingUnitCanUseInkGap = (unit) => {
   return !!value && !/\s/.test(value);
 };
 
-function textGlyphPairSpacing(previousUnit, nextUnit, font = FONT) {
-  if (!textSpacingUnitCanUseInkGap(previousUnit) || !textSpacingUnitCanUseInkGap(nextUnit)) return 0;
-  const previousMetrics = measureTextGlyphMetricsWithFont(previousUnit, font);
-  const nextMetrics = measureTextGlyphMetricsWithFont(nextUnit, font);
-  if (!previousMetrics.hasInkBounds || !nextMetrics.hasInkBounds) return 0;
+const textGlyphPairSpacingCacheKey = (previousUnit, nextUnit, font = FONT) => {
+  const previous = String(previousUnit ?? '');
+  const next = String(nextUnit ?? '');
   if (
-    textGlyphMetricsInkWidth(previousMetrics) <= TEXT_GLYPH_MIN_INK_WIDTH ||
-    textGlyphMetricsInkWidth(nextMetrics) <= TEXT_GLYPH_MIN_INK_WIDTH
+    font === FONT &&
+    previous.length === 1 &&
+    next.length === 1 &&
+    previous.charCodeAt(0) <= 0x7F &&
+    next.charCodeAt(0) <= 0x7F
   ) {
-    return 0;
+    return (previous.charCodeAt(0) << 7) | next.charCodeAt(0);
   }
-  const naturalGap = previousMetrics.width - nextMetrics.left - previousMetrics.right;
-  if (!Number.isFinite(naturalGap)) return 0;
-  return Math.max(0, TEXT_GLYPH_MIN_GAP - naturalGap);
+  const fontValue = String(font);
+  return `${fontValue.length}:${fontValue}${previous.length}:${previous}${next}`;
+};
+
+function textGlyphPairSpacing(previousUnit, nextUnit, font = FONT) {
+  const previous = String(previousUnit ?? '');
+  const next = String(nextUnit ?? '');
+  const cacheKey = textGlyphPairSpacingCacheKey(previous, next, font);
+  const cached = _glyphPairSpacingCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  let spacing = 0;
+  if (textSpacingUnitCanUseInkGap(previous) && textSpacingUnitCanUseInkGap(next)) {
+    const previousMetrics = measureTextGlyphMetricsWithFont(previous, font);
+    const nextMetrics = measureTextGlyphMetricsWithFont(next, font);
+    if (
+      previousMetrics.hasInkBounds &&
+      nextMetrics.hasInkBounds &&
+      textGlyphMetricsInkWidth(previousMetrics) > TEXT_GLYPH_MIN_INK_WIDTH &&
+      textGlyphMetricsInkWidth(nextMetrics) > TEXT_GLYPH_MIN_INK_WIDTH
+    ) {
+      const naturalGap = previousMetrics.width - nextMetrics.left - previousMetrics.right;
+      if (Number.isFinite(naturalGap)) spacing = Math.max(0, TEXT_GLYPH_MIN_GAP - naturalGap);
+    }
+  }
+
+  _glyphPairSpacingCache.set(cacheKey, spacing);
+  trimMapCache(_glyphPairSpacingCache, TEXT_GLYPH_PAIR_SPACING_CACHE_MAX_ENTRIES);
+  return spacing;
 }
 
 function clearTextObjectLayoutRuntime(obj, options = {}) {

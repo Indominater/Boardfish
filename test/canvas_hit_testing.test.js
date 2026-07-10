@@ -268,7 +268,7 @@ test('zoom pill stays out of keyboard focus and Space reset paths', () => {
   assert.doesNotMatch(contextMenuSource, /island\?\.addEventListener\('keydown'/);
   assert.match(contextMenuSource, /const resetZoomFromPill = \(e\) => \{\s*if \(island\?\.dataset\?\.mode !== 'zoom'\) return;/);
   assert.match(contextMenuSource, /const suppressZoomPillContextMenu = \(e\) => \{\s*if \(island\?\.dataset\?\.mode !== 'zoom'\) return;/);
-  assert.match(contextMenuSource, /if \(document\.activeElement === island\) island\.blur\(\);/);
+  assert.doesNotMatch(contextMenuSource, /document\.activeElement === island/);
 });
 
 test('text edit caret height follows script formatting', () => {

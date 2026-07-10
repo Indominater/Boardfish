@@ -128,16 +128,8 @@
     return normalized;
   }
 
-  function validateBoardData(data) {
-    normalizeBoardData(data);
-    return true;
-  }
-
   const api = {
-    BOARD_FORMAT,
-    OBJECT_TYPES,
     normalizeBoardData,
-    validateBoardData,
   };
 
   root.BoardSchema = api;

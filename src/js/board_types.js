@@ -58,13 +58,8 @@
 
   const api = Object.freeze({
     BOARD_FORMAT,
-    BOARD_CONTRACT,
     BOARD_VERSION_CONTAINER,
-    BOARD_VERSION_LEGACY,
-    IMAGE_REF_KINDS,
     OBJECT_TYPES,
-    SUPPORTED_BOARD_VERSIONS,
-    VIEWPORT_LIMITS,
     clampZoom,
     finiteNumber,
     imageRefKind,

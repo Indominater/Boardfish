@@ -14,8 +14,10 @@ function loadTextLayout({
   fontStatus = 'loaded',
   fontCheck = () => true,
   userAgent = 'Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36',
+  trackSegmenter = false,
 } = {}) {
   const measured = [];
+  const segmented = [];
   const context = {
     document: {
       fonts: {
@@ -56,6 +58,21 @@ function loadTextLayout({
     scheduleRender() {},
     syncAllTextAutoHeights() {},
   };
+  if (trackSegmenter) {
+    const NativeSegmenter = Intl.Segmenter;
+    context.Intl = {
+      Segmenter: class TrackedSegmenter {
+        constructor(...args) {
+          this.segmenter = new NativeSegmenter(...args);
+        }
+
+        segment(value) {
+          segmented.push(String(value));
+          return this.segmenter.segment(value);
+        }
+      },
+    };
+  }
   vm.createContext(context);
   vm.runInContext(
     fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'text_layout.js'), 'utf8'),
@@ -82,6 +99,19 @@ function loadTextLayout({
       lineCaretXAtOffset,
       lineXAtOffset,
       layoutHitTestCaret,
+      spacingUnits(value, start = 0, end = null) {
+        const units = [];
+        forEachTextSpacingUnit(value, (unit, unitStart, unitEnd) => {
+          units.push({ unit, start: unitStart, end: unitEnd });
+        }, start, end);
+        return units;
+      },
+      glyphPairSpacing(previous, next, font) {
+        return textGlyphPairSpacing(previous, next, font);
+      },
+      hasGlyphPairSpacing(previous, next, font = FONT) {
+        return _glyphPairSpacingCache.has(textGlyphPairSpacingCacheKey(previous, next, font));
+      },
       textScriptMetricsHiddenAt,
       textScriptMetricsStateAt,
       clearScriptIndexCache() { _scriptIndexCache.clear(); },
@@ -96,13 +126,171 @@ function loadTextLayout({
       get cache() { return _mwCache; },
       get prefixCacheSize() { return _prefixCache.size; },
       get scriptIndexCacheSize() { return _scriptIndexCache.size; },
+      get glyphPairSpacingCacheSize() { return _glyphPairSpacingCache.size; },
+      get glyphPairSpacingCacheMaxEntries() { return TEXT_GLYPH_PAIR_SPACING_CACHE_MAX_ENTRIES; },
       maxEntries: TEXT_MEASURE_CACHE_MAX_ENTRIES,
     };`,
     context,
     { filename: 'text_layout_cache_test_hook.js' },
   );
-  return { context, measured };
+  return { context, measured, segmented };
 }
+
+test('ASCII spacing units bypass Intl.Segmenter without changing grapheme boundaries', () => {
+  const { context, segmented } = loadTextLayout({ trackSegmenter: true });
+  const units = context.__testTextLayout.spacingUnits('skip\r\nASCII', 4);
+
+  assert.deepEqual(plain(units), [
+    { unit: '\r\n', start: 4, end: 6 },
+    { unit: 'A', start: 6, end: 7 },
+    { unit: 'S', start: 7, end: 8 },
+    { unit: 'C', start: 8, end: 9 },
+    { unit: 'I', start: 9, end: 10 },
+    { unit: 'I', start: 10, end: 11 },
+  ]);
+  assert.deepEqual(segmented, []);
+});
+
+test('ASCII spacing-unit fast path matches native grapheme segmentation across ranges', () => {
+  const { context } = loadTextLayout();
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  let state = 0x12345678;
+  const random = (limit) => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state % limit;
+  };
+  const alphabet = 'AaZz09 \t\n\r!_^-[]{}';
+
+  for (let sample = 0; sample < 120; sample++) {
+    let value = '';
+    const length = 1 + random(80);
+    for (let i = 0; i < length; i++) value += alphabet[random(alphabet.length)];
+    const start = random(value.length + 1);
+    const end = start + random(value.length - start + 1);
+    const expected = Array.from(segmenter.segment(value.slice(start, end)), (segment) => ({
+      unit: segment.segment,
+      start: start + segment.index,
+      end: start + segment.index + segment.segment.length,
+    }));
+
+    assert.deepEqual(plain(context.__testTextLayout.spacingUnits(value, start, end)), expected);
+  }
+});
+
+test('Unicode spacing units retain Intl grapheme segmentation and callback indices', () => {
+  const { context, segmented } = loadTextLayout({ trackSegmenter: true });
+  const value = 'xA\u0301👨‍👩‍👧‍👦1\uFE0F\u20E3z';
+  const units = context.__testTextLayout.spacingUnits(value, 1, value.length - 1);
+
+  assert.deepEqual(plain(units), [
+    { unit: 'A\u0301', start: 1, end: 3 },
+    { unit: '👨‍👩‍👧‍👦', start: 3, end: 14 },
+    { unit: '1\uFE0F\u20E3', start: 14, end: 17 },
+  ]);
+  assert.deepEqual(segmented, [value.slice(1, -1)]);
+});
+
+test('ASCII fast path preserves exact wrapped layout and auto-height', () => {
+  const { context, segmented } = loadTextLayout({ trackSegmenter: true });
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'ascii-fast-layout',
+    type: 'text',
+    x: 10,
+    y: 20,
+    w: context.TEXT_PAD * 2 + 12,
+    h: 1,
+    data: { content: 'alpha beta gamma\n1234  5678' },
+  };
+
+  const layout = textLayout.getTextLayout(obj);
+  const height = textLayout.getTextAutoHeight(obj);
+
+  assert.deepEqual(plain(layout.map((line) => ({
+    text: line.text,
+    startIndex: line.startIndex,
+    endIndex: line.endIndex,
+    caretEndIndex: line.caretEndIndex,
+    nextStartIndex: line.nextStartIndex,
+    logicalLineIndex: line.logicalLineIndex,
+    y: line.y,
+    textY: line.textY,
+    prefixWidths: Array.from(line.prefixWidths),
+  }))), [
+    { text: 'alpha beta', startIndex: 0, endIndex: 10, caretEndIndex: 11, nextStartIndex: 11, logicalLineIndex: 0, y: 36, textY: 52, prefixWidths: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+    { text: 'gamma', startIndex: 11, endIndex: 16, caretEndIndex: 16, nextStartIndex: 16, logicalLineIndex: 0, y: 60, textY: 76, prefixWidths: [0, 1, 2, 3, 4, 5] },
+    { text: '1234  5678', startIndex: 17, endIndex: 27, caretEndIndex: 27, nextStartIndex: 27, logicalLineIndex: 1, y: 84, textY: 100, prefixWidths: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+  ]);
+  assert.equal(height, context.TEXT_PAD * 2 + context.LINE_H * 3);
+  assert.deepEqual(segmented, []);
+});
+
+test('glyph-pair spacing cache preserves exact spacing and reuses measured metrics', () => {
+  const { context, measured } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length * 10;
+    },
+    measureTextMetrics(text, { width }) {
+      if (text === 'Y') {
+        return { actualBoundingBoxLeft: 0, actualBoundingBoxRight: width };
+      }
+      return {};
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const before = measured.length;
+
+  const cold = textLayout.glyphPairSpacing('Y', 'Y');
+  const afterCold = measured.length;
+  const warm = textLayout.glyphPairSpacing('Y', 'Y');
+
+  assert.equal(cold, 0.5);
+  assert.equal(warm, cold);
+  assert.equal(afterCold, before + 1);
+  assert.equal(measured.length, afterCold);
+  assert.equal(textLayout.glyphPairSpacingCacheSize, 1);
+});
+
+test('ASCII glyph-pair cache keeps default-font numeric keys isolated by font', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length * 10;
+    },
+    measureTextMetrics(_text, { width }) {
+      return {
+        actualBoundingBoxLeft: 0,
+        actualBoundingBoxRight: this.font === 'custom-font' ? width - 2 : width,
+      };
+    },
+  });
+  const textLayout = context.__testTextLayout;
+
+  assert.equal(textLayout.glyphPairSpacing('Y', 'Y'), 0.5);
+  assert.equal(textLayout.glyphPairSpacing('Y', 'Y', 'custom-font'), 0);
+  assert.equal(textLayout.hasGlyphPairSpacing('Y', 'Y'), true);
+  assert.equal(textLayout.hasGlyphPairSpacing('Y', 'Y', 'custom-font'), true);
+  assert.equal(textLayout.glyphPairSpacingCacheSize, 2);
+});
+
+test('glyph-pair spacing cache is bounded, evicts oldest entries, and clears with measurements', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const max = textLayout.glyphPairSpacingCacheMaxEntries;
+
+  textLayout.glyphPairSpacing('first', 'pair');
+  assert.equal(textLayout.hasGlyphPairSpacing('first', 'pair'), true);
+  for (let i = 0; i < max; i++) textLayout.glyphPairSpacing(`left-${i}`, `right-${i}`);
+
+  assert.equal(textLayout.glyphPairSpacingCacheSize, max);
+  assert.equal(textLayout.hasGlyphPairSpacing('first', 'pair'), false);
+  const sizeBeforeReinsert = textLayout.glyphPairSpacingCacheSize;
+  textLayout.glyphPairSpacing('first', 'pair');
+  assert.equal(textLayout.glyphPairSpacingCacheSize, sizeBeforeReinsert);
+  assert.equal(textLayout.hasGlyphPairSpacing('first', 'pair'), true);
+
+  textLayout.clearTextLayoutCaches({ measurements: true });
+  assert.equal(textLayout.glyphPairSpacingCacheSize, 0);
+});
 
 test('text measurement cache evicts oldest entry without changing cache size', () => {
   const { context, measured } = loadTextLayout();

@@ -148,17 +148,13 @@
     return {
       groups,
       get bytes() { return bytes; },
-      get useCounter() { return useCounter; },
-      getGroup,
       get,
       set,
       removeGroup,
       clear,
-      prune,
     };
   }
 
   const api = Object.freeze({ createGroupedLruCache });
   root.BoardfishBitmapCache = api;
-  if (root !== globalThis) globalThis.BoardfishBitmapCache = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -14,50 +14,6 @@ function createGeometry(overrides = {}) {
   });
 }
 
-test('maps image world points into local unit coordinates', () => {
-  const geometry = createGeometry();
-  const image = {
-    type: 'image',
-    x: 0,
-    y: 0,
-    w: 100,
-    h: 50,
-    data: { flipX: false, flipY: false, rotation: 0 },
-  };
-  assert.deepEqual(geometry.worldPointToImageLocalUnit(image, { x: 50, y: 25 }), { u: 0.5, v: 0.5 });
-  assert.equal(geometry.worldPointToImageLocalUnit(image, { x: 120, y: 25 }), null);
-});
-
-test('measures world-point distance to transformed image bounds', () => {
-  const geometry = createGeometry();
-  const image = {
-    type: 'image',
-    x: 0,
-    y: 0,
-    w: 100,
-    h: 50,
-    data: { flipX: false, flipY: false, rotation: 0 },
-  };
-  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint(image, { x: 50, y: 25 }), 0);
-  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint(image, { x: 120, y: 25 }), 400);
-  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint({ ...image, w: 0 }, { x: 50, y: 25 }), Infinity);
-});
-
-test('hit-tests rotated image objects by rendered shape', () => {
-  const geometry = createGeometry();
-  const image = {
-    type: 'image',
-    x: 0,
-    y: 0,
-    w: 100,
-    h: 50,
-    data: { flipX: false, flipY: false, rotation: 90 },
-  };
-  assert.equal(geometry.objectContainsWorldPoint(image, { x: 50, y: 25 }), true);
-  assert.equal(geometry.objectContainsWorldPoint(image, { x: -10, y: 25 }), false);
-  assert.equal(geometry.imageBoundsDistanceSqToWorldPoint(image, { x: 50, y: 100 }), 2500);
-});
-
 test('finds topmost object using shared hit-testing rules', () => {
   const bottom = { id: 'bottom', type: 'text', x: 0, y: 0, w: 100, h: 100 };
   const top = { id: 'top', type: 'text', x: 20, y: 20, w: 20, h: 20 };
@@ -65,6 +21,21 @@ test('finds topmost object using shared hit-testing rules', () => {
   assert.equal(geometry.topObjectAtWorldPoint({ x: 25, y: 25 }), top);
   assert.equal(geometry.topObjectAtWorldPoint({ x: 5, y: 5 }), bottom);
   assert.equal(geometry.topObjectAtWorldPoint({ x: 200, y: 200 }), null);
+});
+
+test('topmost hit-testing follows the rendered shape of rotated images', () => {
+  const image = {
+    id: 'image',
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 100,
+    h: 50,
+    data: { flipX: false, flipY: false, rotation: 90 },
+  };
+  const geometry = createGeometry({ objects: () => [image] });
+  assert.equal(geometry.topObjectAtWorldPoint({ x: 50, y: 25 }), image);
+  assert.equal(geometry.topObjectAtWorldPoint({ x: -10, y: 25 }), null);
 });
 
 test('topmost object hit-test can ignore filtered objects', () => {

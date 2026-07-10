@@ -241,23 +241,64 @@
   async function saveBoard(ref, board, options = {}) {
     const totalStart = performance.now();
     const createStart = performance.now();
+    const rawImageStore = options.imageStore || root.imageStore || {};
+    const validateBoardPayload = typeof root.BoardfishWebLimits?.validateBoardPayload === 'function'
+      ? (payload) => root.BoardfishWebLimits.validateBoardPayload(payload)
+      : null;
     const payload = await root.BoardfishWebBoardContainer.createBoardContainerBlob(
       board,
-      options.imageStore || root.imageStore || {},
-      { materializeBytes: false },
+      rawImageStore,
+      {
+        materializeBytes: false,
+        validateBoardPayload,
+      },
     );
-    root.BoardfishWebLimits?.validateBoardPayload({
-      objectCount: board?.objects?.length || 0,
-      boardJsonBytes: payload.boardJsonBytes,
-      imageBytes: payload.imageBytes,
-      imageEntries: payload.imageEntries,
-    });
     const serializeMs = performance.now() - createStart;
+    let imageSourceRefreshMs = 0;
+    let imageSourceRefreshCount = 0;
+    let imageSourceRefreshBytes = 0;
+    let imageSourceRefreshSkipped = '';
+    let imageSourceRefreshBacking = '';
+    let imageSourceRefreshError = '';
+    const writesExistingHandle = ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle';
+    const refreshImageSources = root.BoardfishWebBoardContainer.refreshBlobBackedImageRefsFromContainer;
     const writeStart = performance.now();
-    if (ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle') {
+    if (writesExistingHandle) {
       await writeBlobToHandle(ref.handle, payload.blob);
     } else {
       downloadBlob(payload.blob, fileNameFromRef(ref, 'board.bf'));
+    }
+    const writeMs = performance.now() - writeStart;
+    if (writesExistingHandle && typeof refreshImageSources === 'function') {
+      const refreshStart = performance.now();
+      let refresh = null;
+      try {
+        if (typeof ref.handle?.getFile !== 'function') {
+          throw new Error('saved file handle cannot provide the persisted file snapshot');
+        }
+        const savedFile = await ref.handle.getFile();
+        if (!savedFile || Number(savedFile.size) !== Number(payload.blob.size)) {
+          throw new Error('saved file size does not match the generated Boardfish container');
+        }
+        refresh = await refreshImageSources(board, rawImageStore, {
+          blob: savedFile,
+          imageArchiveEntries: payload.imageArchiveEntries,
+        });
+        imageSourceRefreshBacking = 'saved-file';
+      } catch (err) {
+        imageSourceRefreshError = String(err);
+        try {
+          refresh = await refreshImageSources(board, rawImageStore, payload);
+          imageSourceRefreshBacking = 'container-snapshot-fallback';
+        } catch (fallbackErr) {
+          imageSourceRefreshError += `; fallback refresh failed: ${String(fallbackErr)}`;
+          imageSourceRefreshBacking = 'unrefreshed';
+        }
+      }
+      imageSourceRefreshCount = Number(refresh?.refreshed || 0);
+      imageSourceRefreshBytes = Number(refresh?.bytes || 0);
+      imageSourceRefreshSkipped = refresh?.skipped || '';
+      imageSourceRefreshMs += performance.now() - refreshStart;
     }
     return {
       format: 'container-web',
@@ -265,8 +306,24 @@
       image_bytes: payload.imageBytes,
       image_count: payload.imageCount,
       serialize_ms: serializeMs,
-      write_ms: performance.now() - writeStart,
-      zip_ms: serializeMs,
+      json_stringify_ms: payload.jsonStringifyMs,
+      json_encode_ms: payload.jsonEncodeMs,
+      source_lookup_ms: payload.imageEntriesMs,
+      validate_ms: payload.validationMs,
+      write_ms: writeMs,
+      zip_ms: payload.zipMs,
+      crc_ms: payload.crcMs,
+      crc_computed_bytes: payload.crcComputedBytes,
+      crc_computed_entries: payload.crcComputedEntries,
+      crc_reused_entries: payload.crcReusedEntries,
+      blob_image_bytes: payload.blobImageBytes,
+      byte_array_image_bytes: payload.byteArrayImageBytes,
+      image_source_refresh_ms: imageSourceRefreshMs,
+      image_source_refresh_count: imageSourceRefreshCount,
+      image_source_refresh_bytes: imageSourceRefreshBytes,
+      image_source_refresh_skipped: imageSourceRefreshSkipped,
+      image_source_refresh_backing: imageSourceRefreshBacking,
+      image_source_refresh_error: imageSourceRefreshError,
       zip_mode: payload.zipMode,
       zip_bytes: payload.zipBytes,
       total_ms: performance.now() - totalStart,

@@ -105,47 +105,38 @@ var ManualPerfDebug = (() => {
 
   function boardImageMemorySummary(options = {}) {
     const store = typeof imageStore === 'undefined' ? {} : imageStore;
-    const imgCache = typeof imageCache === 'undefined' ? {} : imageCache;
     const metadataCache = typeof imageMetadataCache === 'undefined' ? {} : imageMetadataCache;
     const bitmapCache = typeof imageBitmapCache === 'undefined' ? {} : imageBitmapCache;
     const keys = new Set([
       ...safeObjectKeys(store),
-      ...safeObjectKeys(imgCache),
       ...safeObjectKeys(metadataCache),
       ...safeObjectKeys(bitmapCache),
     ]);
     const rows = [];
     let sourceBytes = 0;
-    let imageElementBytes = 0;
     let bitmapBytes = 0;
-    let loadedImageElements = 0;
     let bitmapCount = 0;
     let dataUrls = 0;
 
     for (const key of keys) {
       const source = store[key];
-      const image = imgCache[key];
       const metadata = metadataCache[key];
       const bitmap = bitmapCache[key];
       const sourceBytesForKey = sourceApproxBytes(source);
-      const imageElementBytesForKey = drawableRgbaBytes(image);
       const bitmapBytesForKey = drawableRgbaBytes(bitmap);
       const kind = sourceKind(source);
       sourceBytes += sourceBytesForKey;
-      imageElementBytes += imageElementBytesForKey;
       bitmapBytes += bitmapBytesForKey;
-      if (imageElementBytesForKey > 0) loadedImageElements++;
       if (bitmapBytesForKey > 0) bitmapCount++;
       if (kind === 'data-url') dataUrls++;
       rows.push({
         key,
         kind,
         sourceMB: mb(sourceBytesForKey),
-        imageElementMB: mb(imageElementBytesForKey),
         bitmapMB: mb(bitmapBytesForKey),
-        totalEstimateMB: mb(sourceBytesForKey + imageElementBytesForKey + bitmapBytesForKey),
-        imageW: image?.naturalWidth || image?.width || metadata?.naturalWidth || metadata?.width || 0,
-        imageH: image?.naturalHeight || image?.height || metadata?.naturalHeight || metadata?.height || 0,
+        totalEstimateMB: mb(sourceBytesForKey + bitmapBytesForKey),
+        imageW: metadata?.naturalWidth || metadata?.width || 0,
+        imageH: metadata?.naturalHeight || metadata?.height || 0,
         bitmapW: bitmap?.width || 0,
         bitmapH: bitmap?.height || 0,
       });
@@ -158,20 +149,17 @@ var ManualPerfDebug = (() => {
       imageStoreKeys: safeObjectKeys(store).length,
       cacheKeys: keys.size,
       dataUrls,
-      loadedImageElements,
       bitmapCount,
       sourceMB: mb(sourceBytes),
-      imageElementDecodedEstimateMB: mb(imageElementBytes),
       bitmapEstimateMB: mb(bitmapBytes),
-      displayDecodedEstimateMB: mb(imageElementBytes + bitmapBytes),
-      totalLogicalEstimateMB: mb(sourceBytes + imageElementBytes + bitmapBytes),
+      displayDecodedEstimateMB: mb(bitmapBytes),
+      totalLogicalEstimateMB: mb(sourceBytes + bitmapBytes),
       topImages: rows.slice(0, rowLimit),
     };
     if (options.table !== false) {
       console.table([{
         imageStoreKeys: out.imageStoreKeys,
         sourceMB: out.sourceMB,
-        imageElementDecodedEstimateMB: out.imageElementDecodedEstimateMB,
         bitmapEstimateMB: out.bitmapEstimateMB,
         totalLogicalEstimateMB: out.totalLogicalEstimateMB,
       }]);

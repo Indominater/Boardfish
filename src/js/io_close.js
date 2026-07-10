@@ -158,7 +158,6 @@ function boardDocumentDeps() {
     historyIndex,
     dirty: isDirty(),
     runtime: {
-      imageCache,
       imageBitmapCache,
       imageBitmapFailed,
     },
@@ -225,20 +224,6 @@ const getImageStoreOpenDebugSampleIfEnabled = (dbg = null) => {
   return isOpenDebugActive(dbg) ? getImageStoreOpenDebugSample() : [];
 };
 
-function measureBoardJsonForSaveDebug(dbg, data) {
-  if (!SaveDebug.enabled) return;
-  const t0 = performance.now();
-  try {
-    const json = JSON.stringify(data);
-    SaveDebug.step(dbg, 'json-stringify', {
-      ms: performance.now() - t0,
-      jsonBytes: json.length,
-    });
-  } catch (err) {
-    SaveDebug.step(dbg, 'json-stringify:error', { error: String(err) });
-  }
-}
-
 function boardLimitImageEntriesForData(data) {
   const entries = [];
   const store = data?.imageStore || {};
@@ -252,21 +237,10 @@ function boardLimitImageEntriesForData(data) {
   return entries;
 }
 
-function boardJsonBytesForLimit(data) {
-  try {
-    const json = JSON.stringify(data);
-    return typeof BoardfishWebLimits !== 'undefined' && typeof BoardfishWebLimits.textByteLength === 'function'
-      ? BoardfishWebLimits.textByteLength(json)
-      : json.length;
-  } catch (_) {
-    return 0;
-  }
-}
-
 function validateBoardPayloadForSave(data) {
   BoardfishWebLimits.validateBoardPayload({
     objectCount: data?.objects?.length || 0,
-    boardJsonBytes: boardJsonBytesForLimit(data),
+    boardJsonBytes: 0,
     imageEntries: boardLimitImageEntriesForData(data),
   });
 }
@@ -307,7 +281,6 @@ async function invokeSaveBoard(fileRef, dbg) {
   const data = boardDataForSave();
   const metrics = getBoardSaveDebugMetrics(dbg, data);
   SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...metrics });
-  measureBoardJsonForSaveDebug(dbg, data);
   validateBoardPayloadForSave(data);
   const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
   const command = BoardfishRuntime.WEB_COMMANDS.SAVE_BOARD;
@@ -730,11 +703,13 @@ const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
 var _backgroundOpenHydrationRunning = false;
 const BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS = 180;
 
-async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 2) {
+async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 2, priorityKeys = []) {
   if (_backgroundOpenHydrationRunning) return;
   _backgroundOpenHydrationRunning = true;
   const generation = _imageStoreGeneration;
   const totalStart = performance.now();
+  const hydrationPriorityKeys = truthyKeyList(priorityKeys);
+  let hydrationPriorityIndex = 0;
   let batchCount = 0;
   let hydratedTotal = 0;
   try {
@@ -749,7 +724,20 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 2) {
         ));
         continue;
       }
-      const keys = getPendingHydratableImageKeys(batchSize);
+      const keys = [];
+      const selected = new Set();
+      while (keys.length < batchSize && hydrationPriorityIndex < hydrationPriorityKeys.length) {
+        const key = hydrationPriorityKeys[hydrationPriorityIndex++];
+        if (selected.has(key)) continue;
+        const source = BoardfishImageStore.getSource(key);
+        if (BoardfishImageStore.hasDisplayImage(key) || !isOpenHydratableImageSource(source)) continue;
+        selected.add(key);
+        keys.push(key);
+      }
+      if (keys.length < batchSize) {
+        const remainingKeys = getPendingHydratableImageKeys(batchSize - keys.length, selected);
+        for (const key of remainingKeys) keys.push(key);
+      }
       if (!keys.length) break;
       batchCount++;
       hydratedTotal += await hydrateImageBatchForOpen(keys, dbg, 'hydrate-background');
@@ -817,10 +805,12 @@ async function finishOpenedBoard(dbg, data) {
   const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:finishOpenedBoard:start', openMetrics);
   const hydrationMode = getOpenHydrationMode();
+  let backgroundHydrationPriorityKeys = [];
   let skipInitialScaledPrewarm = false;
   if (hydrationMode === 'visible-first') {
     const hydrateStart = performance.now();
     const visibleKeys = getVisibleImageKeys();
+    backgroundHydrationPriorityKeys = visibleKeys;
     const debugMeta = isOpenDebugActive(dbg)
       ? { ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() }
       : {};
@@ -970,7 +960,7 @@ async function finishOpenedBoard(dbg, data) {
   PillDebug.log('open:pillFinish:end', { pillFinishReason });
   OpenDebug.end(dbg, { opened: true, ...openMetrics });
   if (hydrationMode === 'visible-first') {
-    setTimeout(() => hydrateRemainingImagesForOpen(dbg).catch((err) => {
+    setTimeout(() => hydrateRemainingImagesForOpen(dbg, 2, backgroundHydrationPriorityKeys).catch((err) => {
       OpenDebug.step(dbg, 'hydrate-background:error', { error: String(err) });
     }), 80);
   }

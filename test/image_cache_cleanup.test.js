@@ -32,6 +32,7 @@ function loadImageState(createImageBitmap) {
     Number,
     Math,
     String,
+    Blob,
     performance: { now: () => ++now },
     window: {},
     document: {
@@ -95,12 +96,33 @@ function loadImageState(createImageBitmap) {
       'globalThis.releaseReadyOpenInitialImagePreviewsForOpen = releaseReadyOpenInitialImagePreviewsForOpen;\n' +
       'globalThis.resolveOpenInitialImageSourceForDraw = resolveOpenInitialImageSourceForDraw;\n' +
       'globalThis.requestOpenInitialImagePreviewForDraw = requestOpenInitialImagePreviewForDraw;\n' +
+      'globalThis.bitmapSourceFromImageSource = bitmapSourceFromImageSource;\n' +
+      'globalThis.ensureImageDataUrl = ensureImageDataUrl;\n' +
       'globalThis.clearImageStore = clearImageStore;\n',
     context,
     { filename: 'image_state.js' },
   );
   return { context, rafs, timers };
 }
+
+test('Blob-backed web refs feed exact Blobs to bitmap decode and async data URL conversion', async () => {
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const blob = new Blob([bytes], { type: 'image/png' });
+  const source = { web: true, mime: 'image/png', bytes: bytes.length, __blob: blob };
+  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+  context.BoardfishWebBoardContainer = {
+    isWebImageRef: (value) => value?.web === true,
+    blobForImageSource: (value) => value?.__blob || null,
+    dataUrlForImageSourceAsync: async (value) => {
+      const sourceBytes = new Uint8Array(await value.__blob.arrayBuffer());
+      return `data:image/png;base64,${Buffer.from(sourceBytes).toString('base64')}`;
+    },
+  };
+  context.imageStore['img-1'] = source;
+
+  assert.equal(await context.bitmapSourceFromImageSource(source, ''), blob);
+  assert.equal(await context.ensureImageDataUrl('img-1'), 'data:image/png;base64,AQIDBA==');
+});
 
 test('cacheImage keeps an existing current bitmap and closes a racing duplicate', async () => {
   let resolveBitmap;
@@ -134,6 +156,50 @@ test('cacheImage keeps an existing current bitmap and closes a racing duplicate'
   assert.equal(duplicate.closed, true);
 });
 
+test('cacheImage retries a stale in-flight web ref against its refreshed source', async () => {
+  const firstBitmap = { width: 16, height: 16, closed: false, close() { this.closed = true; } };
+  const secondBitmap = { width: 16, height: 16, closed: false, close() { this.closed = true; } };
+  const decodedSources = [];
+  const { context, rafs } = loadImageState(async (blob) => {
+    decodedSources.push(blob);
+    return decodedSources.length === 1 ? firstBitmap : secondBitmap;
+  });
+  const source = {
+    web: true,
+    mime: 'image/png',
+    bytes: 1,
+    displaySrc: 'blob:before-save',
+    blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
+  };
+  context.BoardfishWebBoardContainer = {
+    isWebImageRef: (value) => value?.web === true,
+    displaySrcForImageSource: (value) => value.displaySrc,
+    blobForImageSource: (value) => value.blob,
+  };
+  context.imageStore['img-1'] = source;
+
+  const firstReady = context.cacheImage('img-1', source, null, null, { skipSourceRegistration: true });
+  assert.equal(rafs.length, 1);
+  rafs.shift()();
+  source.displaySrc = 'blob:after-save';
+  source.blob = new Blob([new Uint8Array([1])], { type: 'image/png' });
+  assert.equal((await firstReady).cacheReadyStage, 'stale');
+  assert.equal(firstBitmap.closed, true);
+  assert.equal(context.imageBitmapCache['img-1'], undefined);
+
+  assert.equal(rafs.length, 1);
+  rafs.shift()();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(rafs.length, 1);
+  rafs.shift()();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(decodedSources.length, 2);
+  assert.equal(context.imageBitmapCache['img-1'], secondBitmap);
+  assert.equal(secondBitmap.closed, false);
+});
+
 test('cacheImage queues full bitmap draw warmup for active-fallback safety', async () => {
   const bitmap = { width: 32, height: 24, closed: false, close() { this.closed = true; } };
   const warmups = [];
@@ -155,6 +221,31 @@ test('cacheImage queues full bitmap draw warmup for active-fallback safety', asy
   assert.equal(warmups[0].meta.kind, 'full-image');
   assert.equal(warmups[0].meta.key, 'img-1');
   assert.equal(warmups[0].meta.source, 'cache-image');
+});
+
+test('cacheImage prioritizes the exact scaled replacement for an active open preview', async () => {
+  const bitmap = { width: 4000, height: 3000, close() {} };
+  const queued = [];
+  const { context, rafs } = loadImageState(() => Promise.resolve(bitmap));
+  const src = 'data:image/png;base64,boardfish';
+  context.queueScaledImageVariantForReadyImage = (key, source, options) => {
+    queued.push({ key, source, options });
+    return { key, scale: 0.25, queued: true };
+  };
+  context.imageOpenPreviewBitmapCache.set('img-1', {
+    generation: context._imageStoreGeneration,
+    bitmap: { width: 100, height: 75, close() {} },
+  });
+  context.imageStore['img-1'] = src;
+
+  const ready = context.cacheImage('img-1', src, null, null, { skipSourceRegistration: true });
+  rafs.shift()();
+  await ready;
+
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].key, 'img-1');
+  assert.equal(queued[0].source, bitmap);
+  assert.equal(queued[0].options.priority, true);
 });
 
 test('removeImageRuntimeCachesForKey clears runtime display state for the removed image only', () => {
@@ -181,7 +272,7 @@ test('removeImageRuntimeCachesForKey clears runtime display state for the remove
   assert.equal(keptBitmap.closed, false);
 });
 
-test('open previews remain grouped until every previewed full bitmap is ready', () => {
+test('ready open previews release independently while other previews remain pending', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   const previewOne = { closed: false, close() { this.closed = true; } };
   const previewTwo = { closed: false, close() { this.closed = true; } };
@@ -203,22 +294,22 @@ test('open previews remain grouped until every previewed full bitmap is ready', 
     pending: 1,
     failed: 0,
     stale: 0,
-    released: 0,
-    remaining: 2,
+    released: 1,
+    remaining: 1,
   });
-  assert.equal(context.imageOpenPreviewBitmapCache.has('img-1'), true);
+  assert.equal(context.imageOpenPreviewBitmapCache.has('img-1'), false);
   assert.equal(context.imageOpenPreviewBitmapCache.has('img-2'), true);
-  assert.equal(previewOne.closed, false);
+  assert.equal(previewOne.closed, true);
   assert.equal(previewTwo.closed, false);
 
   context.imageBitmapCache['img-2'] = { width: 10, height: 10, close() {} };
   assert.deepEqual(JSON.parse(JSON.stringify(context.releaseReadyOpenInitialImagePreviewsForOpen())), {
-    total: 2,
-    ready: 2,
+    total: 1,
+    ready: 1,
     pending: 0,
     failed: 0,
     stale: 0,
-    released: 2,
+    released: 1,
     remaining: 0,
   });
   assert.equal(context.hasOpenInitialImagePreviews(), false);
@@ -269,6 +360,58 @@ test('open previews wait for scaled variants before releasing full bitmap handof
   assert.equal(preview.closed, true);
 });
 
+test('open preview falls back to the exact full bitmap after a terminal scaled variant failure', () => {
+  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+  const preview = { closed: false, close() { this.closed = true; } };
+  const full = { width: 4000, height: 4000, close() {} };
+  context.isViewportImageScalingActive = () => true;
+  context.chooseImageScaleForDraw = () => 0.25;
+  context.hasScaledImageVariant = () => false;
+  context.hasScaledImageVariantFailure = () => true;
+  context.selectImageSourceForDraw = (_key, _obj, source) => ({ source, scale: 1, targetScale: 0.25 });
+  context.imageOpenPreviewBitmapCache.set('img-1', {
+    generation: context._imageStoreGeneration,
+    bitmap: preview,
+    objectW: 500,
+    objectH: 500,
+    viewZoom: 0.1,
+    viewDpr: 1,
+  });
+  context.imageBitmapCache['img-1'] = full;
+
+  const release = context.releaseReadyOpenInitialImagePreviewsForOpen();
+
+  assert.equal(release.released, 1);
+  assert.equal(release.remaining, 0);
+  assert.equal(preview.closed, true);
+  assert.equal(context.resolveOpenInitialImageSourceForDraw(
+    'img-1',
+    { id: 'obj-1', type: 'image', w: 500, h: 500 },
+    { zoom: 0.1, dpr: 2 },
+  ).source, full);
+});
+
+test('open preview remains drawable when the exact full bitmap decode fails', () => {
+  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+  const preview = { width: 50, height: 50, closed: false, close() { this.closed = true; } };
+  context.imageOpenPreviewBitmapCache.set('img-1', {
+    generation: context._imageStoreGeneration,
+    bitmap: preview,
+  });
+  context.imageBitmapFailed.add('img-1');
+
+  const selected = context.resolveOpenInitialImageSourceForDraw(
+    'img-1',
+    { id: 'obj-1', type: 'image', w: 500, h: 500 },
+    { zoom: 0.1, dpr: 2 },
+  );
+
+  assert.equal(selected.source, preview);
+  assert.equal(selected.openPreview, true);
+  assert.equal(context.imageOpenPreviewBitmapCache.has('img-1'), true);
+  assert.equal(preview.closed, false);
+});
+
 test('open preview draw queues scaled variant while keeping preview visible', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   const preview = { width: 50, height: 50, close() {} };
@@ -278,6 +421,9 @@ test('open preview draw queues scaled variant while keeping preview visible', ()
     queued.push({ key, objectId: obj.id, source, view, priority: options?.priority === true });
     return 0.25;
   };
+  context.isViewportImageScalingActive = () => true;
+  context.chooseImageScaleForDraw = () => 0.25;
+  context.hasScaledImageVariant = () => false;
   context.imageOpenPreviewBitmapCache.set('img-1', {
     generation: context._imageStoreGeneration,
     bitmap: preview,

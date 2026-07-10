@@ -20,7 +20,6 @@ test('web board payload limits reject too many objects', () => {
 });
 
 test('web board payload limits count decoded image bytes toward board content', () => {
-  assert.equal(WebLimits.dataUrlByteLength('data:image/png;base64,AQIDBA=='), 4);
   assert.equal(
     WebLimits.validateBoardPayload({
       objectCount: 1,

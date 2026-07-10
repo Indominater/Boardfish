@@ -46,14 +46,12 @@ async function copyDir(from, to) {
   }
 }
 
-async function copyStaticAssets(outDir, { includePwa = false } = {}) {
+async function copyStaticAssets(outDir) {
   await copyFile(path.join(srcRoot, 'styles.css'), path.join(outDir, 'styles.css'));
   await copyFile(path.join(srcRoot, 'boardfish-icon.png'), path.join(outDir, 'boardfish-icon.png'));
   await copyDir(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'));
-  if (includePwa) {
-    await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
-    await copyFile(path.join(srcRoot, 'boardfish-icon-192.png'), path.join(outDir, 'boardfish-icon-192.png'));
-  }
+  await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
+  await copyFile(path.join(srcRoot, 'boardfish-icon-192.png'), path.join(outDir, 'boardfish-icon-192.png'));
 }
 
 function resolveScriptPath(script) {
@@ -71,24 +69,22 @@ async function concatenateScripts(scripts, variantName) {
   return parts.join('');
 }
 
-async function writeIndex(outDir, scriptTag, { preloadScript = '' } = {}) {
+async function writeIndex(outDir, scriptTag, preloadScript) {
   const html = await readFile(path.join(srcRoot, 'index.html'), 'utf8');
   let next = html.replace(
     /<script\s+type="module"\s+src="js\/main(?:\.[^"]+)?\.mjs"><\/script>/,
     scriptTag,
   );
-  if (preloadScript) {
-    next = next.replace(
-      /\n<\/head>/,
-      `\n  <link rel="preload" href="${preloadScript}" as="script" />\n</head>`,
-    );
-  }
+  next = next.replace(
+    /\n<\/head>/,
+    `\n  <link rel="preload" href="${preloadScript}" as="script" />\n</head>`,
+  );
   await writeFile(path.join(outDir, 'index.html'), next);
 }
 
-async function writeServiceWorker(outDir, buildAssets = []) {
+async function writeServiceWorker(outDir, buildAssets) {
   const source = await readFile(path.join(srcRoot, 'sw.js'), 'utf8');
-  const assets = buildAssets.map((asset) => asset.startsWith('./') ? asset : `./${asset}`);
+  const assets = buildAssets.map((asset) => `./${asset}`);
   const next = source.replace(
     /const BOARDFISH_BUILD_ASSETS = \[\];/,
     `const BOARDFISH_BUILD_ASSETS = ${JSON.stringify(assets)};`,
@@ -104,7 +100,7 @@ function cacheBustedBundlePath(bundle, code) {
 async function buildBundle(variantName, config) {
   await resetDir(config.outDir);
   await mkdir(path.join(config.outDir, 'assets'), { recursive: true });
-  await copyStaticAssets(config.outDir, { includePwa: variantName === 'web-preview' });
+  await copyStaticAssets(config.outDir);
 
   const concatenated = await concatenateScripts(config.scripts, variantName);
   const result = await esbuild.transform(concatenated, {
@@ -115,10 +111,8 @@ async function buildBundle(variantName, config) {
   const bundle = cacheBustedBundlePath(config.bundle, result.code);
   const outPath = path.join(config.outDir, bundle);
   await writeFile(outPath, result.code);
-  await writeIndex(config.outDir, `<script src="${bundle}"></script>`, {
-    preloadScript: bundle,
-  });
-  if (variantName === 'web-preview') await writeServiceWorker(config.outDir, [bundle]);
+  await writeIndex(config.outDir, `<script src="${bundle}"></script>`, bundle);
+  await writeServiceWorker(config.outDir, [bundle]);
 
   const rawKb = Math.round(result.code.length / 1024 * 10) / 10;
   const gzipKb = Math.round(gzipSync(result.code).length / 1024 * 10) / 10;

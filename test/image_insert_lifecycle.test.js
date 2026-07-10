@@ -7,6 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
+const WebContainer = require('../src/js/web_board_container.js');
 
 function loadImageInsertMotionHarness() {
   const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
@@ -46,6 +47,32 @@ function loadImageInsertMotionHarness() {
     context,
     { filename: 'image_insert.js' },
   );
+  return context;
+}
+
+function loadWebImageSourceHarness({ BlobImpl = Blob, boardContainer = null } = {}) {
+  const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
+  const start = source.indexOf('const webImageExtForFile =');
+  const end = source.indexOf('\nconst rollbackImageInsertSource =', start);
+  assert.ok(start >= 0 && end > start, 'web image source helpers are missing');
+  const calls = [];
+  const context = {
+    Blob: BlobImpl,
+    BoardfishWebBoardContainer: boardContainer || {
+      createWebImageRef(options) {
+        calls.push(options);
+        return { web: true, ...options };
+      },
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${source.slice(start, end)}\n` +
+      'globalThis.createWebImageSourceFromBytes = createWebImageSourceFromBytes;\n',
+    context,
+    { filename: 'image_insert.js' },
+  );
+  context.calls = calls;
   return context;
 }
 
@@ -120,6 +147,80 @@ test('inserted image motion clear drops deleted objects before first draw', () =
   context.BoardfishImageInsertMotion.noteDrawn(obj);
   assert.equal(context.calls.animations.length, 0);
   assert.equal(context.calls.renders.length, 0);
+});
+
+test('inserted image bytes become an immutable exact-byte Blob source', async () => {
+  const context = loadWebImageSourceHarness();
+  const bytes = new Uint8Array([0, 1, 127, 128, 254, 255]);
+
+  const source = context.createWebImageSourceFromBytes(
+    { type: 'image/jpeg' },
+    'img-7',
+    bytes,
+  );
+  const options = context.calls[0];
+
+  assert.equal(source.web, true);
+  assert.equal(options.path, 'images/img-7.jpg');
+  assert.equal(options.mime, 'image/jpeg');
+  assert.equal(options.ext, 'jpg');
+  assert.equal(options.bytes, undefined);
+  assert.equal(options.blob instanceof Blob, true);
+  assert.equal(options.blob.type, 'image/jpeg');
+  assert.deepEqual(new Uint8Array(await options.blob.arrayBuffer()), bytes);
+
+  bytes.fill(42);
+  assert.deepEqual(
+    new Uint8Array(await options.blob.arrayBuffer()),
+    new Uint8Array([0, 1, 127, 128, 254, 255]),
+  );
+});
+
+test('inserted image source retains byte-backed fallback without Blob', () => {
+  const context = loadWebImageSourceHarness({ BlobImpl: null });
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+
+  context.createWebImageSourceFromBytes({ type: 'image/png' }, 'img-2', bytes);
+  const options = context.calls[0];
+
+  assert.equal(options.path, 'images/img-2.png');
+  assert.equal(options.mime, 'image/png');
+  assert.equal(options.ext, 'png');
+  assert.equal(options.blob, undefined);
+  assert.equal(options.bytes, bytes);
+});
+
+test('inserted immutable Blob sources reuse CRC without changing saved bytes', async () => {
+  const context = loadWebImageSourceHarness({ boardContainer: WebContainer });
+  const bytes = new Uint8Array([0, 17, 34, 51, 68, 85, 255]);
+  const source = context.createWebImageSourceFromBytes(
+    { type: 'image/png' },
+    'img-9',
+    bytes,
+  );
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    viewport: { panX: 0, panY: 0, zoom: 1 },
+    imageStore: {
+      'img-9': { path: 'images/img-9.png', mime: 'image/png', ext: 'png' },
+    },
+    objects: [
+      { id: 'obj-9', type: 'image', x: 0, y: 0, w: 10, h: 10, z: 1, data: { imgKey: 'img-9' } },
+    ],
+  };
+
+  assert.equal(source.__blob instanceof Blob, true);
+  assert.equal(source.__bytes, undefined);
+  const first = await WebContainer.createBoardContainerBlob(board, { 'img-9': source });
+  const second = await WebContainer.createBoardContainerBlob(board, { 'img-9': source });
+
+  assert.equal(first.crcComputedEntries, 2);
+  assert.equal(first.crcReusedEntries, 0);
+  assert.equal(second.crcComputedEntries, 1);
+  assert.equal(second.crcReusedEntries, 1);
+  const reopened = await WebContainer.readBoardContainer(second.blob);
+  assert.deepEqual(WebContainer.bytesForImageSource(reopened.board.imageStore['img-9']), bytes);
 });
 
 test('inserted image stale motion cleanup keeps current objects animating', () => {

@@ -85,7 +85,7 @@
     const needsRendering = imageNeedsRendering(obj);
     const name = options.filename || `image_${index + 1}.${needsRendering ? 'png' : guessImageExtForSource(source)}`;
     if (!needsRendering) {
-      const sourceEntry = imageSourceDownloadEntry(source, name);
+      const sourceEntry = await imageSourceDownloadEntry(source, name);
       if (sourceEntry) return sourceEntry;
     }
 
@@ -127,10 +127,13 @@
     };
   }
 
-  function imageSourceDownloadEntry(source, name) {
+  async function imageSourceDownloadEntry(source, name) {
     if (typeof isWebImageRef === 'function' && isWebImageRef(source) && root.BoardfishWebBoardContainer?.bytesForImageSource) {
       try {
-        const data = root.BoardfishWebBoardContainer.bytesForImageSource(source);
+        const data = typeof root.BoardfishWebBoardContainer.bytesForImageSourceAsync === 'function'
+          ? await root.BoardfishWebBoardContainer.bytesForImageSourceAsync(source)
+          : root.BoardfishWebBoardContainer.bytesForImageSource(source);
+        if (!data) return null;
         const ext = source.ext === 'jpeg' ? 'jpg' : (source.ext || 'png');
         return {
           name: withImageExtension(name, ext),
@@ -610,13 +613,11 @@
 
   root.BoardfishExportUtils = Object.freeze({
     createProgressUpdater,
-    delay,
     downloadImageObjects,
     finishImageExportInputShield,
     guessImageExtForObjectExport,
     guessImageExtFromDataUrl,
     randomHex,
     selectedImageObjects,
-    yieldToEventLoop,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

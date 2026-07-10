@@ -55,10 +55,6 @@
     setPan,
     setViewport,
     setZoomPan,
-    snapshot,
     zoomAroundClient,
-    get panX() { return panX; },
-    get panY() { return panY; },
-    get zoom() { return zoom; },
   });
 })(typeof window !== 'undefined' ? window : globalThis);

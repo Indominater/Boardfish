@@ -130,7 +130,7 @@ const historyReasonUsesFullSelectionPulse = (reason = '') => {
 };
 
 const historySelectionPulseOptions = (entry) => {
-  const reason = Array.isArray(entry) ? '' : entry?.reason;
+  const reason = entry?.reason;
   return historyReasonUsesFullSelectionPulse(reason) ? {} : { includeText: false };
 };
 
@@ -182,13 +182,8 @@ const historyMotionForReason = (reason = '') => {
 };
 
 const historyMotionForEntry = (entry) => {
-  if (Array.isArray(entry)) return historyMotionForReason('');
   const motion = entry?.motion;
   if (motion?.type === 'actions') return cloneHistoryMotion(motion);
-  if (motion?.type === 'added-objects') return { type: 'added-objects', options: { ...(motion.options || {}) } };
-  if (motion?.type === 'restore-deleted-objects') return { type: 'restore-deleted-objects', options: { ...(motion.options || {}) } };
-  if (motion?.type === 'smooth-slide') return { type: 'smooth-slide' };
-  if (motion?.type === 'jello') return { type: 'jello', options: { ...(motion.options || {}) } };
   if (motion?.type === 'none') return { type: 'none' };
   return historyMotionForReason(entry?.reason || '');
 };
@@ -221,26 +216,6 @@ const filterHistoryMotionObjects = (items, filter = HISTORY_OBJECT_FILTERS.all) 
   return list;
 };
 
-const splitHistoryTextObjects = (items = []) => {
-  const textObjects = [];
-  const nonTextObjects = [];
-  for (const obj of items || []) {
-    if (obj?.type === 'text') textObjects.push(obj);
-    else nonTextObjects.push(obj);
-  }
-  return { textObjects, nonTextObjects };
-};
-
-const splitHistoryRestoredObjects = (items = []) => {
-  const textObjects = [];
-  const imageObjects = [];
-  for (const obj of items || []) {
-    if (obj?.type === 'text') textObjects.push(obj);
-    else if (obj?.type === 'image') imageObjects.push(obj);
-  }
-  return { textObjects, imageObjects };
-};
-
 const applyHistoryActionSpecs = (specs, items, payloadKey) => {
   let applied = false;
   for (const spec of specs || []) {
@@ -264,34 +239,6 @@ const applyHistorySelectionAction = (spec, selectionPulseOptions = {}) => {
   return true;
 };
 
-const applyHistoryAddedObjectsMotion = (added, removed, options = {}) => {
-  if (added.length) {
-    if (options.textMotion === 'smooth-slide') {
-      const { textObjects, nonTextObjects } = splitHistoryTextObjects(added);
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-redo-create', { objects: textObjects }, options);
-      globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { objects: nonTextObjects }, {
-        ...options,
-        includeText: false,
-      });
-    } else {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { objects: added }, options);
-    }
-  }
-  if (removed.length) globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects: removed }, options);
-};
-
-const applyHistoryRestoredDeleteMotion = (added, removed, options = {}) => {
-  if (added.length) {
-    const { textObjects, imageObjects } = splitHistoryRestoredObjects(added);
-    globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-undo-delete', { objects: textObjects });
-    globalThis.BoardfishMotion?.applyActionAnimation?.('object-undo-delete', { objects: imageObjects }, {
-      ...options,
-      includeText: false,
-    });
-  }
-  if (removed.length) globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects: removed }, options);
-};
-
 const historyRestoreMotionTransition = (beforeObjects = [], targetObjects = []) => {
   const beforeIds = new Set();
   for (const obj of beforeObjects || []) {
@@ -313,48 +260,17 @@ const historyRestoreMotionTransition = (beforeObjects = [], targetObjects = []) 
 };
 
 const applyHistoryMotionReplay = (motion, transition, selectionPulseOptions) => {
-  const replay = motion || { type: 'jello', options: selectionPulseOptions };
-  if (replay.type === 'none') return;
+  const replay = motion || { type: 'none' };
+  if (replay.type !== 'actions') return;
   const added = [];
   for (const id of transition?.addedIds || []) {
     const obj = objectsMap.get(id);
     if (obj) added.push(obj);
   }
   const removed = transition?.removed || [];
-  if (replay.type === 'actions') {
-    if (added.length) applyHistoryActionSpecs(replay.added, added, 'objects');
-    if (removed.length) applyHistoryActionSpecs(replay.removed, removed, 'removedObjects');
-    if (!added.length && !removed.length) applyHistorySelectionAction(replay.selection, selectionPulseOptions);
-    return;
-  }
-  if (replay.type === 'smooth-slide') {
-    if (added.length) {
-      const { textObjects, nonTextObjects } = splitHistoryTextObjects(added);
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-undo-delete', { objects: textObjects });
-      globalThis.BoardfishMotion?.applyActionAnimation?.('object-undo-delete', { objects: nonTextObjects }, { includeText: false });
-    }
-    if (removed.length) globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects: removed });
-    return;
-  }
-  if (replay.type === 'added-objects') {
-    applyHistoryAddedObjectsMotion(added, removed, replay.options || {});
-    return;
-  }
-  if (replay.type === 'restore-deleted-objects') {
-    applyHistoryRestoredDeleteMotion(added, removed, replay.options || {});
-    return;
-  }
-  const options = replay.options || selectionPulseOptions || {};
-  if (added.length) globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { objects: added }, options);
-  if (removed.length) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', { removedObjects: removed }, options);
-  }
-  if (!added.length && !removed.length) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('history-object-jiggle-replay', {
-      selection: true,
-      options: selectionPulseOptions,
-    });
-  }
+  if (added.length) applyHistoryActionSpecs(replay.added, added, 'objects');
+  if (removed.length) applyHistoryActionSpecs(replay.removed, removed, 'removedObjects');
+  if (!added.length && !removed.length) applyHistorySelectionAction(replay.selection, selectionPulseOptions);
 };
 
 function trimHistory() {
@@ -377,7 +293,7 @@ function retainedImageKeysForCurrentAndHistory() {
   const keys = new Set();
   collectImageKeysFromObjects(objects, keys);
   for (const entry of boardHistory) {
-    collectImageKeysFromObjects(Array.isArray(entry) ? entry : entry?.objects, keys);
+    collectImageKeysFromObjects(entry?.objects, keys);
   }
   collectImageKeysFromObjects(jsClipboard?.objects, keys);
   const clipboardImageData = jsClipboard?.imageData || {};
@@ -400,7 +316,6 @@ const hasCollectionCacheEntries = (value) => !!(value && typeof value.size === '
 function hasPruneableImageCacheState() {
   if (typeof pruneImageCachesToKeys === 'function') {
     if (typeof imageStore !== 'undefined' && hasObjectCacheEntries(imageStore)) return true;
-    if (typeof imageCache !== 'undefined' && hasObjectCacheEntries(imageCache)) return true;
     if (typeof imageBitmapCache !== 'undefined' && hasObjectCacheEntries(imageBitmapCache)) return true;
     if (typeof imageBitmapFailed !== 'undefined' && hasCollectionCacheEntries(imageBitmapFailed)) return true;
   }
@@ -591,20 +506,18 @@ function getHistoryEditStateDebugMetrics(editState = null, prefix = 'editState')
 }
 
 function historyEntryReason(entry) {
-  if (Array.isArray(entry)) return 'legacy-array';
   return entry?.reason || '';
 }
 
 function historyEntryObjects(entry) {
-  if (Array.isArray(entry)) return entry;
   return Array.isArray(entry?.objects) ? entry.objects : [];
 }
 
 function getHistoryEntryDebugMetrics(entry, prefix = 'entry') {
   if (!isHistoryDebugEnabled()) return {};
   const entryObjects = historyEntryObjects(entry);
-  const editState = Array.isArray(entry) ? null : entry?.editState || null;
-  const beforeEditState = Array.isArray(entry) ? null : entry?.beforeEditState || null;
+  const editState = entry?.editState || null;
+  const beforeEditState = entry?.beforeEditState || null;
   return {
     [`${prefix}Reason`]: historyEntryReason(entry),
     [`${prefix}ObjectCount`]: entryObjects.length,
@@ -751,8 +664,8 @@ function pushHistory(reason = '', options = {}) {
   const t0 = performance.now();
   HistoryDebug.count('pushHistory');
   boardHistory.length = historyIndex + 1;
-  const prevEntry = historyIndex >= 0 ? boardHistory[historyIndex] : [];
-  const prevObjects = Array.isArray(prevEntry) ? prevEntry : (prevEntry.objects || []);
+  const prevEntry = historyIndex >= 0 ? boardHistory[historyIndex] : null;
+  const prevObjects = prevEntry?.objects || [];
   const prevMap = new Map();
   for (const o of prevObjects) prevMap.set(o.id, o);
   HistoryDebug.step(dbg, 'build-prev-map', { objectCount: prevObjects.length });
@@ -804,8 +717,8 @@ function restoreSnapshot(s, {
   selectionPulseOptions = { includeText: false },
   editStateOverride = undefined,
 } = {}) {
-  const snapshotObjects = Array.isArray(s) ? s : (s?.objects || []);
-  const snapshotEditState = Array.isArray(s) ? null : (s?.editState || null);
+  const snapshotObjects = s?.objects || [];
+  const snapshotEditState = s?.editState || null;
   const editState = editStateOverride === undefined ? snapshotEditState : editStateOverride;
   const hadEditing = !!editingId;
   const motionTransition = historyRestoreMotionTransition(objects, snapshotObjects);
@@ -1178,7 +1091,7 @@ function undo() {
     ...getHistoryEntryDebugMetrics(targetEntry, 'target'),
   });
   historyIndex--;
-  const undoEditState = !Array.isArray(actionEntry) && actionEntry?.reason === 'text-edit-checkpoint'
+  const undoEditState = actionEntry?.reason === 'text-edit-checkpoint'
     ? actionEntry.beforeEditState || undefined
     : undefined;
   const restoreStart = performance.now();

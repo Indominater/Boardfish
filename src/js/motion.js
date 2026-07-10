@@ -4,10 +4,6 @@ const BoardfishMotion = (() => {
   const root = typeof globalThis !== 'undefined' ? globalThis : window;
   const jelloObjectMotions = new Map();
   const textSelectionJelloMotions = new Map();
-  const smoothSlideObjectMotions = new Map();
-  const smoothSlideSurfaceCloses = new WeakMap();
-  const smoothSlideEnterAnimation = 'bf-smooth-slide-enter';
-  const smoothSlideExitAnimation = 'bf-smooth-slide-exit';
   let motionRenderPending = false;
   let motionRenderRequestedAt = 0;
   const jelloDefaults = Object.freeze({
@@ -36,18 +32,10 @@ const BoardfishMotion = (() => {
   });
   const smoothSlideDefaults = Object.freeze({
     duration: 220,
-    offsetY: -6,
-    settleY: 1,
-    startScale: 0.985,
-    settleScale: 1.005,
     ease: 'cubic-bezier(0.18, 0.9, 0.24, 1.18)',
-  });
-  const noAnimationDefaults = Object.freeze({
-    duration: 0,
   });
   const ACTION_ANIMATION_SETS = Object.freeze({
     none: 'no-animation',
-    smoothSlide: 'smooth-slide',
     jiggle: 'jiggle',
     notApplicable: 'not-applicable',
   });
@@ -64,8 +52,8 @@ const BoardfishMotion = (() => {
   // feature code must request motion through applyActionAnimation(action, ...).
   // Keep inherently connected action paths in the same group or replay them
   // through the same action name, so changing one setName updates the sequence.
-  // Keep low-level note* helpers inside this module or tests; new action code
-  // should not choose jello/smooth-slide/no-animation directly.
+  // Keep low-level note* helpers inside this module; feature code should not
+  // choose animation implementations directly.
   const ACTION_ANIMATION_GROUPS = Object.freeze({
     boardNavigation: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'board-canvas-pan',
@@ -216,19 +204,9 @@ const BoardfishMotion = (() => {
   const ACTION_ANIMATION_ASSIGNMENTS = Object.freeze(buildActionAnimationAssignments());
   let jelloParams = null;
   let smoothSlideParams = null;
-  let noAnimationParams = null;
   const copyJiggleNormalizerCache = new Map();
-  const cubicBezierCache = new Map();
-  const actionAnimationRuntimeUnassigned = new Set();
-  const actionAnimationPolicyDuplicateAssignments = [];
   let reducedMotionQueryReady = false;
   let reducedMotionQuery = null;
-
-  const setCubicBezierCache = (key, value) => {
-    if (cubicBezierCache.size > 32) cubicBezierCache.clear();
-    cubicBezierCache.set(key, value);
-    return value;
-  };
 
   const reducedMotionMediaQuery = () => {
     if (reducedMotionQueryReady) return reducedMotionQuery;
@@ -268,10 +246,6 @@ const BoardfishMotion = (() => {
   });
   const normalizeSmoothSlideParams = (options = {}, base = smoothSlideDefaults) => ({
     duration: numberInRange(options.duration, base.duration, 80, 900),
-    offsetY: numberInRange(options.offsetY, base.offsetY, -48, 48),
-    settleY: numberInRange(options.settleY, base.settleY, -24, 24),
-    startScale: numberInRange(options.startScale, base.startScale, 0.8, 1.2),
-    settleScale: numberInRange(options.settleScale, base.settleScale, 0.8, 1.2),
     ease: typeof options.ease === 'string' && options.ease.trim() ? options.ease.trim() : base.ease,
   });
   const normalizeCopyJiggleParams = (options = {}, base = copyJiggleDefaults) => ({
@@ -358,8 +332,6 @@ const BoardfishMotion = (() => {
   };
   jelloParams = normalizeJelloParams(root.BoardfishJelloParams || {});
   smoothSlideParams = normalizeSmoothSlideParams(root.BoardfishSmoothSlideParams || {});
-  noAnimationParams = { ...noAnimationDefaults, ...(root.BoardfishNoAnimationParams || {}) };
-  noAnimationParams.duration = 0;
   applySmoothSlideCssVars();
 
   const buildActionAnimationLookup = () => {
@@ -370,7 +342,6 @@ const BoardfishMotion = (() => {
       for (const action of actions) {
         if (lookup.has(action)) {
           const existingSet = lookup.get(action);
-          actionAnimationPolicyDuplicateAssignments.push({ action, sets: [existingSet, setName] });
           console.error?.(`[Boardfish motion] action "${action}" is assigned to both ${existingSet} and ${setName}`);
           continue;
         }
@@ -380,78 +351,20 @@ const BoardfishMotion = (() => {
     return lookup;
   };
   const actionAnimationLookup = buildActionAnimationLookup();
-  const normalizeActionAnimationSet = (setName) => {
-    const value = String(setName || '').trim();
-    if (value === ACTION_ANIMATION_SETS.none || value === 'none') return ACTION_ANIMATION_SETS.none;
-    if (value === ACTION_ANIMATION_SETS.smoothSlide || value === 'smooth') return ACTION_ANIMATION_SETS.smoothSlide;
-    if (value === ACTION_ANIMATION_SETS.jiggle || value === 'jello') return ACTION_ANIMATION_SETS.jiggle;
-    if (value === ACTION_ANIMATION_SETS.notApplicable || value === 'not-applicable') return ACTION_ANIMATION_SETS.notApplicable;
-    return '';
-  };
   const actionAnimationSetFor = (action) => {
     const value = String(action || '').trim();
     if (!value) return '';
     return actionAnimationLookup.get(value) || '';
   };
-  const cloneActionAnimationAssignmentSet = (setName) => {
-    const source = ACTION_ANIMATION_ASSIGNMENTS[setName] || [];
-    const out = new Array(source.length);
-    for (let i = 0; i < source.length; i++) out[i] = source[i];
-    return out;
-  };
-  const getActionAnimationPartition = () => Object.freeze({
-    [ACTION_ANIMATION_SETS.none]: cloneActionAnimationAssignmentSet(ACTION_ANIMATION_SETS.none),
-    [ACTION_ANIMATION_SETS.smoothSlide]: cloneActionAnimationAssignmentSet(ACTION_ANIMATION_SETS.smoothSlide),
-    [ACTION_ANIMATION_SETS.jiggle]: cloneActionAnimationAssignmentSet(ACTION_ANIMATION_SETS.jiggle),
-    [ACTION_ANIMATION_SETS.notApplicable]: cloneActionAnimationAssignmentSet(ACTION_ANIMATION_SETS.notApplicable),
-  });
-  const getActionAnimationGroups = () => {
-    const out = {};
-    for (const name in ACTION_ANIMATION_GROUPS) {
-      if (!Object.prototype.hasOwnProperty.call(ACTION_ANIMATION_GROUPS, name)) continue;
-      const group = ACTION_ANIMATION_GROUPS[name];
-      const actions = new Array(group.actions.length);
-      for (let i = 0; i < group.actions.length; i++) actions[i] = group.actions[i];
-      out[name] = Object.freeze({
-        setName: group.setName,
-        actions,
-      });
-    }
-    return Object.freeze(out);
-  };
-  const getActionAnimationPolicyIssues = () => {
-    const duplicateAssignments = new Array(actionAnimationPolicyDuplicateAssignments.length);
-    for (let i = 0; i < actionAnimationPolicyDuplicateAssignments.length; i++) {
-      const issue = actionAnimationPolicyDuplicateAssignments[i];
-      const sets = new Array(issue.sets.length);
-      for (let j = 0; j < issue.sets.length; j++) sets[j] = issue.sets[j];
-      duplicateAssignments[i] = {
-        action: issue.action,
-        sets,
-      };
-    }
-    return Object.freeze({
-      duplicateAssignments,
-      runtimeUnassigned: getUnassignedActionAnimations(),
-    });
-  };
-  const getUnassignedActionAnimations = () => {
-    const out = new Array(actionAnimationRuntimeUnassigned.size);
-    let index = 0;
-    for (const action of actionAnimationRuntimeUnassigned) out[index++] = action;
-    out.sort();
-    return out;
-  };
   const noteUnassignedActionAnimation = (action) => {
     const value = String(action || '').trim() || '(empty-action)';
-    actionAnimationRuntimeUnassigned.add(value);
     console.warn?.(`[Boardfish motion] unassigned action animation: ${value}`);
   };
 
   const pruneFinishedObjectMotions = () => {
     const cutoff = now();
     let removed = 0;
-    for (const motions of [jelloObjectMotions, textSelectionJelloMotions, smoothSlideObjectMotions]) {
+    for (const motions of [jelloObjectMotions, textSelectionJelloMotions]) {
       for (const [id, motion] of motions) {
         if (cutoff - motion.startedAt >= motion.delay + motion.duration + 80) {
           motions.delete(id);
@@ -463,13 +376,12 @@ const BoardfishMotion = (() => {
   };
 
   const hasObjectMotions = () => (
-    jelloObjectMotions.size || textSelectionJelloMotions.size || smoothSlideObjectMotions.size
+    jelloObjectMotions.size || textSelectionJelloMotions.size
   );
 
   const motionDebugMeta = () => ({
     jelloObjectMotions: jelloObjectMotions.size,
     textSelectionJelloMotions: textSelectionJelloMotions.size,
-    smoothSlideObjectMotions: smoothSlideObjectMotions.size,
     hasObjectMotions: !!hasObjectMotions(),
   });
 
@@ -515,43 +427,6 @@ const BoardfishMotion = (() => {
       return;
     }
     requestMotionFrame();
-  };
-
-  const noteObjectAdded = (obj, options = {}) => {
-    if (obj?.type === 'text' && options.includeText !== true) return;
-    noteObjectJello(obj, options);
-  };
-
-  const noteObjectsAdded = (items, options = {}) => {
-    const list = Array.isArray(items) ? items : [];
-    if (options.textMotion === 'smooth-slide') {
-      const textObjects = [];
-      const jelloObjects = [];
-      for (const obj of list) {
-        if (obj?.type === 'text') {
-          if (options.includeText !== false) textObjects.push(obj);
-        } else if (obj) {
-          jelloObjects.push(obj);
-        }
-      }
-      noteObjectsJello(jelloObjects, { ...options, includeText: false });
-      noteObjectsSmoothSlideAdded(textObjects, options);
-      return;
-    }
-    noteObjectsJello(list, options);
-  };
-
-  const noteObjectsRemoved = (items, options = {}) => {
-    const list = Array.isArray(items) ? items : [];
-    if (options.includeText !== false) {
-      noteObjectsSmoothSlideRemoved(list, options);
-      return;
-    }
-    const nonTextObjects = [];
-    for (const obj of list) {
-      if (obj && obj.type !== 'text') nonTextObjects.push(obj);
-    }
-    noteObjectsSmoothSlideRemoved(nonTextObjects, options);
   };
 
   const copyJiggleMotionFields = (options = {}, baseMotion = {}) => {
@@ -666,96 +541,6 @@ const BoardfishMotion = (() => {
     requestMotionFrame();
   };
 
-  const noteObjectsSmoothSlideAdded = (items, options = {}) => {
-    const list = Array.isArray(items) ? items : [];
-    if (!list.length || prefersReducedMotion()) return;
-    const params = normalizeSmoothSlideParams(options, smoothSlideParams);
-    const startedAt = now();
-    const delay = Math.max(0, Number(options.delay) || 0);
-    list.forEach((obj) => {
-      if (!obj?.id) return;
-      smoothSlideObjectMotions.set(obj.id, {
-        phase: smoothSlideEnterAnimation,
-        startedAt,
-        delay,
-        duration: params.duration,
-        offsetY: params.offsetY,
-        settleY: params.settleY,
-        startScale: params.startScale,
-        settleScale: params.settleScale,
-        ease: params.ease,
-      });
-    });
-    requestMotionFrame();
-  };
-
-  const noteObjectsSmoothSlideRemoved = (items, options = {}) => {
-    const list = Array.isArray(items) ? items : [];
-    if (!list.length || prefersReducedMotion()) return;
-    const params = normalizeSmoothSlideParams(options, smoothSlideParams);
-    const startedAt = now();
-    const delay = Math.max(0, Number(options.delay) || 0);
-    list.forEach((obj) => {
-      if (!obj?.id) return;
-      smoothSlideObjectMotions.set(obj.id, {
-        obj,
-        phase: smoothSlideExitAnimation,
-        startedAt,
-        delay,
-        duration: params.duration,
-        offsetY: params.offsetY,
-        settleY: params.settleY,
-        startScale: params.startScale,
-        settleScale: params.settleScale,
-        ease: params.ease,
-      });
-    });
-    requestMotionFrame();
-  };
-
-  const configureJello = (options = {}) => {
-    jelloParams = normalizeJelloParams(options, jelloParams);
-    root.BoardfishJelloParams = { ...jelloParams };
-    return { ...jelloParams };
-  };
-
-  const getJelloParams = () => ({ ...jelloParams });
-
-  const configureSmoothSlide = (options = {}) => {
-    smoothSlideParams = normalizeSmoothSlideParams(options, smoothSlideParams);
-    root.BoardfishSmoothSlideParams = { ...smoothSlideParams };
-    applySmoothSlideCssVars();
-    return { ...smoothSlideParams };
-  };
-
-  const getSmoothSlideParams = () => ({ ...smoothSlideParams });
-
-  const configureNoAnimation = (options = {}) => {
-    noAnimationParams = { ...noAnimationParams, ...(options || {}), duration: 0 };
-    root.BoardfishNoAnimationParams = { ...noAnimationParams };
-    return { ...noAnimationParams };
-  };
-
-  const getNoAnimationParams = () => ({ ...noAnimationParams });
-
-  const getActionAnimationSetParams = (setName) => {
-    const normalized = normalizeActionAnimationSet(setName);
-    if (normalized === ACTION_ANIMATION_SETS.none) return getNoAnimationParams();
-    if (normalized === ACTION_ANIMATION_SETS.smoothSlide) return getSmoothSlideParams();
-    if (normalized === ACTION_ANIMATION_SETS.jiggle) return getJelloParams();
-    if (normalized === ACTION_ANIMATION_SETS.notApplicable) return getNoAnimationParams();
-    return {};
-  };
-
-  const configureActionAnimationSet = (setName, options = {}) => {
-    const normalized = normalizeActionAnimationSet(setName);
-    if (normalized === ACTION_ANIMATION_SETS.none) return configureNoAnimation(options);
-    if (normalized === ACTION_ANIMATION_SETS.smoothSlide) return configureSmoothSlide(options);
-    if (normalized === ACTION_ANIMATION_SETS.jiggle) return configureJello(options);
-    if (normalized === ACTION_ANIMATION_SETS.notApplicable) return getNoAnimationParams();
-    return {};
-  };
-
   const motionProgress = (motion, cutoff) => {
     const elapsed = cutoff - motion.startedAt - motion.delay;
     if (elapsed < 0) return { waiting: true, done: false, t: 0 };
@@ -763,104 +548,10 @@ const BoardfishMotion = (() => {
     return { waiting: false, done: raw >= 1, t: clamp01(raw) };
   };
 
-  const parseCubicBezier = (ease) => {
-    if (typeof ease !== 'string') return null;
-    const normalized = ease.trim().toLowerCase();
-    if (cubicBezierCache.has(normalized)) return cubicBezierCache.get(normalized);
-    const keywordCurves = {
-      linear: [0, 0, 1, 1],
-      ease: [0.25, 0.1, 0.25, 1],
-      'ease-in': [0.42, 0, 1, 1],
-      'ease-out': [0, 0, 0.58, 1],
-      'ease-in-out': [0.42, 0, 0.58, 1],
-    };
-    if (keywordCurves[normalized]) {
-      return setCubicBezierCache(normalized, keywordCurves[normalized]);
-    }
-    if (!normalized.startsWith('cubic-bezier')) {
-      return setCubicBezierCache(normalized, null);
-    }
-    const matches = ease.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi) || [];
-    const values = new Array(matches.length);
-    let valid = matches.length === 4;
-    for (let i = 0; i < matches.length; i++) {
-      const value = Number(matches[i]);
-      values[i] = value;
-      if (!Number.isFinite(value)) valid = false;
-    }
-    if (!valid) {
-      return setCubicBezierCache(normalized, null);
-    }
-    if (values[0] < 0 || values[0] > 1 || values[2] < 0 || values[2] > 1) {
-      return setCubicBezierCache(normalized, null);
-    }
-    return setCubicBezierCache(normalized, values);
-  };
-
-  const cubicBezierProgress = (t, ease) => {
-    const bezier = parseCubicBezier(ease);
-    if (!bezier) return t * t * (3 - 2 * t);
-    const [x1, y1, x2, y2] = bezier;
-    const cx = 3 * x1;
-    const bx = 3 * (x2 - x1) - cx;
-    const ax = 1 - cx - bx;
-    const cy = 3 * y1;
-    const by = 3 * (y2 - y1) - cy;
-    const ay = 1 - cy - by;
-    const sampleX = (u) => ((ax * u + bx) * u + cx) * u;
-    const sampleY = (u) => ((ay * u + by) * u + cy) * u;
-    const sampleDerivativeX = (u) => (3 * ax * u + 2 * bx) * u + cx;
-    let u = t;
-    for (let i = 0; i < 5; i++) {
-      const dx = sampleX(u) - t;
-      const derivative = sampleDerivativeX(u);
-      if (Math.abs(dx) < 0.0001 || Math.abs(derivative) < 0.000001) break;
-      u = clamp01(u - dx / derivative);
-    }
-    if (Math.abs(sampleX(u) - t) > 0.0001) {
-      let lower = 0;
-      let upper = 1;
-      u = t;
-      for (let i = 0; i < 8; i++) {
-        const x = sampleX(u);
-        if (Math.abs(x - t) < 0.0001) break;
-        if (x < t) lower = u;
-        else upper = u;
-        u = (lower + upper) / 2;
-      }
-    }
-    return sampleY(u);
-  };
-
   const screenPxToWorldValue = (value, options = {}) => {
     const viewZoom = Number(options?.view?.zoom);
     const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
     return value / safeZoom;
-  };
-
-  const smoothSlideObjectTranslateYValue = (value, options = {}) => screenPxToWorldValue(value, options);
-
-  const smoothSlideObjectTranslateY = (motion, options = {}, eased = 0) => {
-    return smoothSlideObjectTranslateYValue(motion.offsetY * eased, options);
-  };
-
-  const smoothSlideObjectEnterMotionForDraw = (motion, options = {}, eased = 0) => {
-    const t = clamp01(eased);
-    const settleAt = 0.7;
-    if (t <= settleAt) {
-      const p = t / settleAt;
-      return {
-        opacity: clamp01(p),
-        scale: motion.startScale + (motion.settleScale - motion.startScale) * p,
-        translateY: smoothSlideObjectTranslateYValue(motion.offsetY + (motion.settleY - motion.offsetY) * p, options),
-      };
-    }
-    const p = (t - settleAt) / (1 - settleAt);
-    return {
-      opacity: 1,
-      scale: motion.settleScale + (1 - motion.settleScale) * p,
-      translateY: smoothSlideObjectTranslateYValue(motion.settleY * (1 - p), options),
-    };
   };
 
   const jelloScaleForMotion = (motion, t) => {
@@ -1007,34 +698,9 @@ const BoardfishMotion = (() => {
     };
   };
 
-  const smoothSlideObjectMotionForDraw = (obj, options = {}) => {
-    const motion = smoothSlideObjectMotions.get(obj?.id);
-    if (!motion || prefersReducedMotion()) return null;
-    const progress = motionProgress(motion, now());
-    if (progress.done) {
-      smoothSlideObjectMotions.delete(obj.id);
-      return motion.phase === smoothSlideExitAnimation
-        ? { opacity: 0, scale: 1, translateY: 0, skip: true }
-        : null;
-    }
-    if (motion.phase === smoothSlideEnterAnimation && progress.waiting) {
-      return smoothSlideObjectEnterMotionForDraw(motion, options, 0);
-    }
-    if (progress.waiting) return { opacity: 1, scale: 1, translateY: 0 };
-    const eased = cubicBezierProgress(progress.t, motion.ease);
-    if (motion.phase === smoothSlideEnterAnimation) {
-      return smoothSlideObjectEnterMotionForDraw(motion, options, eased);
-    }
-    return {
-      opacity: clamp01(1 - eased),
-      scale: 1 + (motion.startScale - 1) * eased,
-      translateY: smoothSlideObjectTranslateY(motion, options, eased),
-    };
-  };
-
   const objectMotionForDraw = (obj, options = {}) => {
     if (!hasObjectMotions()) return null;
-    return smoothSlideObjectMotionForDraw(obj, options) || jelloMotionForDraw(obj, options);
+    return jelloMotionForDraw(obj, options);
   };
 
   const motionObjectsForDraw = () => {
@@ -1044,7 +710,7 @@ const BoardfishMotion = (() => {
     const addExitObjects = (motions) => {
       for (const motion of motions.values()) {
         if (
-          (motion.phase !== smoothSlideExitAnimation && motion.phase !== 'exit') ||
+          motion.phase !== 'exit' ||
           !motion.obj ||
           seenIds.has(motion.obj.id)
         ) continue;
@@ -1052,59 +718,8 @@ const BoardfishMotion = (() => {
         objects.push(motion.obj);
       }
     };
-    addExitObjects(smoothSlideObjectMotions);
     addExitObjects(jelloObjectMotions);
     return objects;
-  };
-
-  const restartClass = (el, className) => {
-    if (!el || prefersReducedMotion()) return;
-    el.classList.remove(className);
-    // Force style invalidation so repeating the same action replays cleanly.
-    void el.offsetWidth;
-    el.classList.add(className);
-  };
-
-  const noteSmoothSlideOpened = (surface) => {
-    if (!surface) return;
-    surface.__bfSmoothSlideExitToken = (surface.__bfSmoothSlideExitToken || 0) + 1;
-    smoothSlideSurfaceCloses.delete(surface);
-    surface.classList.remove('motion-smooth-slide-exit');
-    restartClass(surface, 'motion-smooth-slide-enter');
-  };
-  const noteSmoothSlideClosed = (surface, after = null) => {
-    if (!surface || prefersReducedMotion()) {
-      if (typeof after === 'function') after();
-      return false;
-    }
-    const pendingClose = smoothSlideSurfaceCloses.get(surface);
-    if (pendingClose && surface.classList.contains('motion-smooth-slide-exit')) {
-      if (typeof after === 'function') pendingClose.callbacks.push(after);
-      return true;
-    }
-    surface.classList.remove('motion-smooth-slide-enter');
-    const token = (surface.__bfSmoothSlideExitToken || 0) + 1;
-    surface.__bfSmoothSlideExitToken = token;
-    smoothSlideSurfaceCloses.set(surface, {
-      callbacks: typeof after === 'function' ? [after] : [],
-    });
-    restartClass(surface, 'motion-smooth-slide-exit');
-    const finish = () => {
-      if (surface.__bfSmoothSlideExitToken !== token) return;
-      surface.classList.remove('motion-smooth-slide-exit');
-      const close = smoothSlideSurfaceCloses.get(surface);
-      smoothSlideSurfaceCloses.delete(surface);
-      for (const callback of close?.callbacks || []) callback();
-    };
-    if (typeof root.setTimeout === 'function') root.setTimeout(finish, smoothSlideParams.duration);
-    else finish();
-    return true;
-  };
-
-  const bumpIsland = () => {
-    const doc = root.document;
-    noteSmoothSlideOpened(doc?.getElementById('island'));
-    noteSmoothSlideOpened(doc?.querySelector?.('.opening-shield-pill.visible'));
   };
 
   const pulseSelection = (options = {}) => {
@@ -1174,18 +789,10 @@ const BoardfishMotion = (() => {
     return controls;
   };
 
-  const actionOptionsForSet = (setName, options = {}) => {
-    if (setName === ACTION_ANIMATION_SETS.jiggle) {
-      return {
-        ...getActionAnimationSetParams(setName),
-        ...jiggleActionControlOptions(options),
-      };
-    }
-    return {
-      ...getActionAnimationSetParams(setName),
-      ...(options || {}),
-    };
-  };
+  const actionOptionsForSet = (options = {}) => ({
+    ...jelloParams,
+    ...jiggleActionControlOptions(options),
+  });
 
   const applyActionAnimation = (action, payload = {}, options = {}) => {
     const setName = actionAnimationSetFor(action);
@@ -1200,7 +807,7 @@ const BoardfishMotion = (() => {
     }
 
     const motionOptions = {
-      ...actionOptionsForSet(setName, {
+      ...actionOptionsForSet({
         ...(payload?.options || {}),
         ...(options || {}),
       }),
@@ -1214,30 +821,6 @@ const BoardfishMotion = (() => {
     const removedObjects = hasExplicitRemovedObjects ? asObjectList(payload.removedObjects) : [];
     if (!objects.length && !removedObjects.length && !hasExplicitObjects && !hasExplicitRemovedObjects) {
       objects = payload?.selection ? selectedObjectsFromRoot() : inferActionObjects(action, payload);
-    }
-
-    if (setName === ACTION_ANIMATION_SETS.smoothSlide) {
-      if (payload?.pill) {
-        bumpIsland();
-        return true;
-      }
-      if (payload?.phase === 'close' || payload?.close === true) {
-        return noteSmoothSlideClosed(payload?.surface, payload?.after);
-      }
-      if (payload?.surface) {
-        noteSmoothSlideOpened(payload.surface);
-        return true;
-      }
-      let applied = false;
-      if (objects.length) {
-        noteObjectsSmoothSlideAdded(objects, motionOptions);
-        applied = true;
-      }
-      if (removedObjects.length) {
-        noteObjectsSmoothSlideRemoved(removedObjects, motionOptions);
-        applied = true;
-      }
-      return applied;
     }
 
     if (payload?.textSelection) {
@@ -1261,37 +844,10 @@ const BoardfishMotion = (() => {
   };
 
   const api = Object.freeze({
-    ACTION_ANIMATION_SETS,
     afterViewportRenderFrame,
     applyActionAnimation,
-    bumpIsland,
-    configureActionAnimationSet,
-    configureNoAnimation,
-    configureSmoothSlide,
-    configureJello,
-    getActionAnimationPartition,
-    getActionAnimationGroups,
-    getActionAnimationPolicyIssues,
-    getActionAnimationSetParams,
-    getJelloParams,
-    getNoAnimationParams,
-    getSmoothSlideParams,
-    getUnassignedActionAnimations,
-    actionAnimationSetFor,
-    noteObjectAdded,
-    noteObjectsAdded,
-    noteObjectJello,
-    noteObjectsJello,
-    noteObjectsJelloRemoved,
-    noteObjectsRemoved,
-    noteObjectsSmoothSlideAdded,
-    noteObjectsSmoothSlideRemoved,
-    noteTextSelectionJello,
-    noteSmoothSlideClosed,
-    noteSmoothSlideOpened,
     motionObjectsForDraw,
     objectMotionForDraw,
-    pulseSelection,
     textSelectionJelloSpecsForDraw,
     textSelectionMotionForDraw,
   });

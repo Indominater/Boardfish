@@ -138,6 +138,100 @@ test('web board open defers image byte extraction during container read', async 
   assert.equal(seenOptions[0].verifyImageCrc, false);
 });
 
+test('web save validates during the single container build and reports its actual phases', async () => {
+  const harness = loadWebRuntimeHarness();
+  const validations = [];
+  const writes = [];
+  const events = [];
+  const savedBlob = new Blob([new Uint8Array([1, 2, 3])]);
+  const persistedBlob = new Blob([new Uint8Array([1, 2, 3])]);
+  const rawImageStore = { 'img-1': 'source' };
+  harness.context.BoardfishWebLimits = {
+    validateBoardPayload(payload) {
+      validations.push({ ...payload });
+    },
+  };
+  harness.context.BoardfishWebBoardContainer = {
+    async createBoardContainerBlob(board, imageStore, options) {
+      events.push('create-container');
+      assert.equal(board.objects.length, 1);
+      assert.equal(imageStore['img-1'], 'source');
+      assert.equal(options.materializeBytes, false);
+      options.validateBoardPayload({ objectCount: 1, boardJsonBytes: 120, imageBytes: 0 });
+      options.validateBoardPayload({ objectCount: 1, boardJsonBytes: 120, imageBytes: 4 });
+      return {
+        blob: savedBlob,
+        boardJsonBytes: 120,
+        imageBytes: 4,
+        imageCount: 1,
+        jsonStringifyMs: 2,
+        jsonEncodeMs: 3,
+        imageEntriesMs: 4,
+        validationMs: 5,
+        zipMs: 6,
+        crcMs: 7,
+        crcComputedBytes: 124,
+        crcComputedEntries: 2,
+        crcReusedEntries: 0,
+        blobImageBytes: 4,
+        byteArrayImageBytes: 0,
+        zipMode: 'blob-parts',
+        zipBytes: 200,
+      };
+    },
+    async refreshBlobBackedImageRefsFromContainer(board, imageStore, container) {
+      events.push('refresh-saved-file');
+      assert.equal(board.objects.length, 1);
+      assert.equal(imageStore, rawImageStore);
+      assert.equal(container.blob, persistedBlob);
+      return { refreshed: 1, bytes: 4, skipped: '' };
+    },
+  };
+  const handle = {
+    async createWritable() {
+      events.push('create-writable');
+      return {
+        async write(blob) { events.push('write'); writes.push(blob); },
+        async close() { events.push('close'); },
+      };
+    },
+    async getFile() {
+      events.push('get-file');
+      return persistedBlob;
+    },
+  };
+  const board = { objects: [{ id: 'obj-1' }] };
+
+  const result = await harness.context.BoardfishRuntime.saveBoard(
+    { kind: 'web-save-handle', handle, name: 'board.bf' },
+    board,
+    { imageStore: rawImageStore },
+  );
+
+  assert.equal(validations.length, 2);
+  assert.equal(writes.length, 1);
+  assert.equal(result.json_bytes, 120);
+  assert.equal(result.json_stringify_ms, 2);
+  assert.equal(result.json_encode_ms, 3);
+  assert.equal(result.source_lookup_ms, 4);
+  assert.equal(result.validate_ms, 5);
+  assert.equal(result.zip_ms, 6);
+  assert.equal(result.crc_ms, 7);
+  assert.equal(result.blob_image_bytes, 4);
+  assert.equal(result.image_source_refresh_count, 1);
+  assert.equal(result.image_source_refresh_bytes, 4);
+  assert.equal(result.image_source_refresh_backing, 'saved-file');
+  assert.equal(result.image_source_refresh_error, '');
+  assert.deepEqual(events, [
+    'create-container',
+    'create-writable',
+    'write',
+    'close',
+    'get-file',
+    'refresh-saved-file',
+  ]);
+});
+
 test('failed web board validation revokes decoded image refs', async () => {
   const harness = loadWebRuntimeHarness();
   const imageRef = { web: true, objectUrl: 'blob:image-1' };

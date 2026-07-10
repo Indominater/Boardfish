@@ -76,7 +76,8 @@ test('web release preview keeps debug tools off and ships PWA assets', () => {
   assert.match(buildSource, /'web-preview'[\s\S]*scripts: WEB_PREVIEW_SCRIPTS,[\s\S]*bundle: 'assets\/boardfish-web-preview\.min\.js'/);
   assert.match(buildSource, /const bundle = cacheBustedBundlePath\(config\.bundle, result\.code\);/);
   assert.doesNotMatch(buildSource, /cacheBust:/);
-  assert.match(buildSource, /includePwa: variantName === 'web-preview'/);
+  assert.match(buildSource, /copyFile\(path\.join\(srcRoot, 'manifest\.webmanifest'\)/);
+  assert.match(buildSource, /writeServiceWorker\(config\.outDir, \[bundle\]\)/);
   assert.match(serverSource, /devMode \? 'src' : 'dist-web'/);
   assert.match(workflowSource, /npm run web:build/);
   assert.match(workflowSource, /path: dist-web/);

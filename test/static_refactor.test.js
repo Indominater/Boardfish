@@ -293,7 +293,42 @@ test('background open hydration yields while viewport input is active', () => {
   assert.match(source, /batchSize = 2/);
   assert.match(source, /performance\.now\(\) - lastViewportInputAt/);
   assert.match(source, /inputIdleMs < BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS/);
+  assert.match(source, /hydrationPriorityKeys = truthyKeyList\(priorityKeys\)/);
+  assert.match(source, /BoardfishImageStore\.hasDisplayImage\(key\)/);
+  assert.match(source, /getPendingHydratableImageKeys\(batchSize - keys\.length, selected\)/);
   assert.match(source, /await new Promise\(\(resolve\) => setTimeout/);
+  assert.match(ioClose, /backgroundHydrationPriorityKeys = visibleKeys;/);
+  assert.match(ioClose, /hydrateRemainingImagesForOpen\(dbg, 2, backgroundHydrationPriorityKeys\)/);
+});
+
+test('save validation reuses container serialization instead of stringifying the board twice', () => {
+  const ioClose = readSource('src/js/io_close.js');
+  const validateStart = ioClose.indexOf('function validateBoardPayloadForSave');
+  const validateEnd = ioClose.indexOf('\nfunction validateBoardPayloadForOpen', validateStart);
+  const validateSource = ioClose.slice(validateStart, validateEnd);
+  assert.ok(validateStart >= 0 && validateEnd > validateStart);
+  assert.doesNotMatch(validateSource, /JSON\.stringify|TextEncoder|textByteLength/);
+  assert.match(validateSource, /boardJsonBytes: 0/);
+
+  const container = readSource('src/js/web_board_container.js');
+  const createStart = container.indexOf('async function createBoardContainerBlob');
+  const createEnd = container.indexOf('\n  async function readBoardContainer', createStart);
+  const createSource = container.slice(createStart, createEnd);
+  assert.ok(createStart >= 0 && createEnd > createStart);
+  assert.equal((createSource.match(/JSON\.stringify/g) || []).length, 1);
+  assert.match(createSource, /validateBoardPayload\(\{/);
+
+  const runtime = readSource('src/js/web_runtime.js');
+  const saveStart = runtime.indexOf('async function saveBoard');
+  const saveEnd = runtime.indexOf('\n  const api =', saveStart);
+  const saveSource = runtime.slice(saveStart, saveEnd);
+  assert.ok(saveStart >= 0 && saveEnd > saveStart);
+  assert.ok(saveSource.indexOf('await writeBlobToHandle') >= 0);
+  assert.ok(saveSource.indexOf('await writeBlobToHandle') < saveSource.indexOf('await ref.handle.getFile'));
+  assert.ok(saveSource.indexOf('await ref.handle.getFile') < saveSource.indexOf('refreshImageSources(board'));
+
+  const saveDebug = readSource('src/js/debug_save.js');
+  assert.match(saveDebug, /jsonBytes: e\.meta\?\.jsonBytes \?\? e\.meta\?\.rust\?\.json_bytes \?\? ''/);
 });
 
 test('addText sizes multiline text without spreading all lines into Math.max', () => {

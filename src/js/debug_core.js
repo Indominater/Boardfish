@@ -113,12 +113,6 @@
     return out;
   }
 
-  root.BoardfishDebugCore = Object.freeze({
-    createDebugRecorder,
-    mapWithConcurrency,
-    round2,
-    sanitizeDebugMeta,
-  });
   root.createDebugRecorder = createDebugRecorder;
   root.mapWithConcurrency = mapWithConcurrency;
   root.round2 = round2;

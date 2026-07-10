@@ -352,7 +352,6 @@ var OpenDebug = (() => {
         manifestRefs: e.meta?.manifestRefs ?? '',
         dataUrlRefs: e.meta?.dataUrlRefs ?? '',
         missingStoreRefs: e.meta?.missingStoreRefs ?? '',
-        cachedImages: e.meta?.cachedImages ?? '',
         deferredInitialCacheImages: e.meta?.deferredInitialCacheImages ?? '',
         visibleFirstOpen: e.meta?.visibleFirstOpen ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',

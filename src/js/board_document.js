@@ -111,7 +111,6 @@
       objects,
     };
     if (deps.schema?.normalizeBoardData) return deps.schema.normalizeBoardData(data);
-    if (deps.schema?.validateBoardData) deps.schema.validateBoardData(data);
     return data;
   }
 
@@ -126,7 +125,6 @@
     let manifestRefs = 0;
     let dataUrlRefs = 0;
     let otherRefs = 0;
-    let cachedImages = 0;
     let bitmaps = 0;
     let bitmapFailures = 0;
     const imageStore = store || {};
@@ -141,7 +139,6 @@
       else if (kind === 'data-url' || kind === 'string') dataUrlRefs++;
       else otherRefs++;
       if (includeRuntime) {
-        if (runtime.imageCache?.[key]) cachedImages++;
         if (runtime.imageBitmapCache?.[key]) bitmaps++;
         if (runtime.imageBitmapFailed?.has?.(key)) bitmapFailures++;
       }
@@ -158,7 +155,7 @@
       manifestRefs,
       dataUrlRefs,
       otherRefs,
-      ...(includeRuntime ? { cachedImages, bitmaps, bitmapFailures } : {}),
+      ...(includeRuntime ? { bitmaps, bitmapFailures } : {}),
     };
   }
 
@@ -287,7 +284,6 @@
         mime: typeof src?.mime === 'string' ? src.mime : '',
         ext: typeof src?.ext === 'string' ? src.ext : '',
         bytes: src?.bytes ?? '',
-        cachedImage: !!runtime.imageCache?.[key],
         bitmap: !!runtime.imageBitmapCache?.[key],
         bitmapFailed: !!runtime.imageBitmapFailed?.has?.(key),
       });
@@ -303,7 +299,6 @@
       manifestRefs: imageSummary.manifestRefs,
       dataUrlRefs: imageSummary.dataUrlRefs,
       otherRefs: imageSummary.otherRefs,
-      cachedImages: imageSummary.cachedImages,
       bitmaps: imageSummary.bitmaps,
       bitmapFailures: imageSummary.bitmapFailures,
     };
@@ -316,12 +311,8 @@
     getBoardSaveMetrics,
     getImageRuntimeMetrics,
     getImageStoreDebugSample,
-    getObjectTypeCounts,
-    imageMetaForBoardFile,
     pruneBoardDataImageStore,
-    pruneImageStoreForObjects,
     referencedImageKeys,
-    summarizeImageStore,
   });
 
   root.BoardfishBoardDocument = api;

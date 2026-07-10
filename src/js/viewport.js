@@ -1162,7 +1162,6 @@ function setCanvasImageQuality(context) {
 BoardRenderer = BoardfishRenderer.createBoardRenderer({
   objects: () => objects,
   imageStore: () => imageStore,
-  imageCache: () => imageCache,
   imageBitmapCache: () => imageBitmapCache,
   viewportCullingEnabled: () => viewportCullingEnabled,
   zoom: () => zoom,

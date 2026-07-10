@@ -126,8 +126,6 @@ function loadHistoryHarness() {
   const pulses = [];
   const jelloAdded = [];
   const jelloRemoved = [];
-  const smoothAdded = [];
-  const smoothRemoved = [];
   const actionCalls = [];
   const imagePruneCalls = [];
   const jiggleActions = new Set([
@@ -169,8 +167,6 @@ function loadHistoryHarness() {
     pulses,
     jelloAdded,
     jelloRemoved,
-    smoothAdded,
-    smoothRemoved,
     actionCalls,
     imagePruneCalls,
     BoardfishEditorState: {
@@ -229,36 +225,6 @@ function loadHistoryHarness() {
         if (addedIds.length) jelloAdded.push({ ids: addedIds, options: { ...motionOptions } });
         if (removedIds.length) jelloRemoved.push({ ids: removedIds, options: { ...motionOptions } });
         return !!(addedIds.length || removedIds.length);
-      },
-      noteObjectsAdded(items, options = {}) {
-        const list = Array.from(items || []);
-        if (options.textMotion === 'smooth-slide') {
-          const textIds = options.includeText === false ? [] : ids(list.filter((obj) => obj?.type === 'text'));
-          const jelloIds = ids(list.filter((obj) => obj?.type !== 'text'));
-          if (textIds.length) smoothAdded.push(textIds);
-          if (jelloIds.length) jelloAdded.push({ ids: jelloIds, options: { ...options, includeText: false } });
-          return;
-        }
-        const motionIds = ids(motionItems(list, options));
-        if (motionIds.length) jelloAdded.push({ ids: motionIds, options: { ...options } });
-      },
-      noteObjectsJello(items, options = {}) {
-        const motionIds = ids(motionItems(items, options));
-        if (motionIds.length) jelloAdded.push({ ids: motionIds, options: { ...options } });
-      },
-      noteObjectsJelloRemoved(items, options = {}) {
-        const motionIds = ids(motionItems(items, options));
-        if (motionIds.length) jelloRemoved.push({ ids: motionIds, options: { ...options } });
-      },
-      noteObjectsRemoved(items, options = {}) {
-        const motionIds = ids(motionItems(items, options));
-        if (motionIds.length) smoothRemoved.push(motionIds);
-      },
-      noteObjectsSmoothSlideAdded(items) {
-        smoothAdded.push(ids(items));
-      },
-      pulseSelection(options = {}) {
-        pulses.push({ ...options });
       },
     },
     HistoryDebug: {
@@ -427,8 +393,6 @@ test('undo and redo keep text-safe actions inert under copy-only jiggle policy',
   assert.deepEqual(context.pulses, []);
   assert.deepEqual(context.jelloAdded, []);
   assert.deepEqual(context.jelloRemoved, []);
-  assert.deepEqual(context.smoothAdded, []);
-  assert.deepEqual(context.smoothRemoved, []);
 });
 
 test('duplicate and paste history replay are inert under copy-only jiggle policy', () => {
@@ -454,9 +418,7 @@ test('duplicate and paste history replay are inert under copy-only jiggle policy
     context.redo();
 
     assert.deepEqual(context.pulses, [], reason);
-    assert.deepEqual(context.smoothRemoved, [], reason);
     assert.deepEqual(context.jelloRemoved, [], reason);
-    assert.deepEqual(context.smoothAdded, [], reason);
     assert.deepEqual(context.jelloAdded, [], reason);
   }
 });
@@ -476,9 +438,7 @@ test('add-text history replay does not animate text objects', () => {
   context.redo();
 
   assert.deepEqual(context.pulses, []);
-  assert.deepEqual(context.smoothRemoved, []);
   assert.deepEqual(context.jelloRemoved, []);
-  assert.deepEqual(context.smoothAdded, []);
   assert.deepEqual(context.jelloAdded, []);
 });
 
@@ -575,8 +535,6 @@ test('undo and redo delete stay inert under copy-only jiggle policy', () => {
   context.redo();
 
   assert.deepEqual(context.pulses, []);
-  assert.deepEqual(context.smoothAdded, []);
-  assert.deepEqual(context.smoothRemoved, []);
   assert.deepEqual(context.jelloAdded, []);
   assert.deepEqual(context.jelloRemoved, []);
 });
@@ -1143,8 +1101,6 @@ test('undo and redo image add stay inert under copy-only jiggle policy', () => {
   context.redo();
 
   assert.deepEqual(context.pulses, []);
-  assert.deepEqual(context.smoothRemoved, []);
   assert.deepEqual(context.jelloRemoved, []);
   assert.deepEqual(context.jelloAdded, []);
-  assert.deepEqual(context.smoothAdded, []);
 });

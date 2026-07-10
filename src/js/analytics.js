@@ -51,11 +51,5 @@
     return true;
   }
 
-  root.BoardfishAnalytics = Object.freeze({
-    init: loadScript,
-    get enabled() { return state.enabled; },
-    get provider() { return 'cloudflare'; },
-  });
-
   loadScript();
 }(globalThis));

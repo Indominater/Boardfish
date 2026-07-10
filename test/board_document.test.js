@@ -75,12 +75,6 @@ test('prunes unreferenced image store entries from saved board data', () => {
     { id: 'obj-3', type: 'image', x: 5, y: 5, w: 20, h: 10, z: 3, data: { imgKey: 'img-2' } },
   ];
 
-  const prune = BoardDocument.pruneImageStoreForObjects(imageStore, objects);
-  assert.deepEqual(Object.keys(prune.imageStore).sort(), ['img-1', 'img-2']);
-  assert.equal(prune.removed, 1);
-  assert.equal(prune.kept, 2);
-  assert.equal(prune.referenced, 2);
-
   const data = BoardDocument.createBoardDataForSave({
     viewport: { panX: 0, panY: 0, zoom: 1 },
     imageStore,
@@ -157,19 +151,4 @@ test('strips runtime text layout caches from saved board data', () => {
   assert.equal(metrics.runtimeTextCacheContentChars, content.length * 120);
   assert.equal(metrics.runtimeTextCachePrefixEntries, 240);
   assert.ok(metrics.runtimeTextPrivateFields >= 4);
-});
-
-test('summarizes image store without runtime globals', () => {
-  const summary = BoardDocument.summarizeImageStore({
-    'img-1': 'data:image/png;base64,abc',
-    'img-2': { web: true, path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
-  }, {
-    imageStoreBytesEstimate: (src) => typeof src === 'string' ? src.length : JSON.stringify(src).length,
-  });
-
-  assert.equal(summary.imageCount, 2);
-  assert.equal(summary.dataUrlRefs, 1);
-  assert.equal(summary.manifestRefs, 1);
-  assert.equal(summary.otherRefs, 0);
-  assert.ok(summary.imageStoreBytes > 0);
 });

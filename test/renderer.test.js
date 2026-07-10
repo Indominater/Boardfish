@@ -14,10 +14,16 @@ function loadRenderer(overrides = {}) {
     context,
     { filename: 'renderer.js' },
   );
-  return context.BoardfishRenderer;
+  const api = context.BoardfishRenderer;
+  const helpers = api.createBoardRenderer({});
+  return {
+    createBoardRenderer: api.createBoardRenderer,
+    createDrawCounters: helpers.createDrawCounters,
+    resetCanvasToScreen: helpers.resetCanvasToScreen,
+  };
 }
 
-function loadMotion() {
+function loadMotion(overrides = {}) {
   let currentTime = 0;
   const styleVars = new Map();
   const timers = [];
@@ -43,6 +49,7 @@ function loadMotion() {
       timers.push({ callback, ms });
       return timers.length;
     },
+    ...overrides,
   };
   vm.createContext(context);
   vm.runInContext(
@@ -63,24 +70,6 @@ function loadMotion() {
 
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
-}
-
-function classElement(initialClasses = []) {
-  const classes = new Set(initialClasses);
-  return {
-    offsetWidth: 1,
-    classList: {
-      add(...names) {
-        for (const name of names) classes.add(name);
-      },
-      remove(...names) {
-        for (const name of names) classes.delete(name);
-      },
-      contains(name) {
-        return classes.has(name);
-      },
-    },
-  };
 }
 
 test('text renderer uses the latest measured baseline offset', () => {
@@ -156,8 +145,7 @@ test('image renderer crops untransformed images to the visible viewport', () => 
     currentViewportWorldRect: () => ({ x1: 0, y1: 25, x2: 60, y2: 45 }),
     dpr: () => 1,
     getWrappedLines: () => [],
-    imageBitmapCache: () => ({}),
-    imageCache: () => ({ 'img-1': source }),
+    imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({}),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
     imageTransformNeedsRendering: () => false,
@@ -246,8 +234,7 @@ test('image renderer overdraws image edges by one device pixel at the current vi
     currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 100, y2: 100 }),
     dpr: () => 1,
     getWrappedLines: () => [],
-    imageBitmapCache: () => ({}),
-    imageCache: () => ({ 'img-1': source }),
+    imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
     imageTransformNeedsRendering: () => false,
@@ -299,8 +286,7 @@ test('image renderer keeps active full fallback visible with temporary low smoot
     currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 1000, y2: 1000 }),
     dpr: () => 1,
     getWrappedLines: () => [],
-    imageBitmapCache: () => ({}),
-    imageCache: () => ({ 'img-1': source }),
+    imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
     imageTransformNeedsRendering: () => false,
@@ -366,8 +352,7 @@ test('animated image motion uses low-latency drawing and active variant selectio
     currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 1000, y2: 1000 }),
     dpr: () => 1,
     getWrappedLines: () => [],
-    imageBitmapCache: () => ({}),
-    imageCache: () => ({ 'img-1': source }),
+    imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
     imageTransformNeedsRendering: () => false,
@@ -426,8 +411,7 @@ test('renderer does not redraw finished exit-motion objects', () => {
     currentViewportWorldRect: () => ({ x1: -10, y1: -10, x2: 40, y2: 40 }),
     dpr: () => 1,
     getWrappedLines: () => [],
-    imageBitmapCache: () => ({}),
-    imageCache: () => ({ 'img-1': source }),
+    imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
     imageTransformNeedsRendering: () => false,
@@ -479,8 +463,7 @@ test('renderer can skip text while drawing visible objects', () => {
     currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 30, y2: 30 }),
     dpr: () => 1,
     getWrappedLines: () => [{ text: 'hidden' }],
-    imageBitmapCache: () => ({}),
-    imageCache: () => ({ 'img-1': source }),
+    imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
     imageTransformNeedsRendering: () => false,
@@ -535,8 +518,7 @@ test('renderer can draw only text while drawing visible objects', () => {
     currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 30, y2: 30 }),
     dpr: () => 1,
     getWrappedLines: () => [{ text: 'drawn' }],
-    imageBitmapCache: () => ({}),
-    imageCache: () => ({ 'img-1': source }),
+    imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
     imageTransformNeedsRendering: () => false,
@@ -986,8 +968,7 @@ test('renderer applies object motion translation and non-uniform scaling around 
     currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 100, y2: 100 }),
     dpr: () => 1,
     getWrappedLines: () => [],
-    imageBitmapCache: () => ({}),
-    imageCache: () => ({ 'img-1': source }),
+    imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
     imageTransformNeedsRendering: () => false,
@@ -1018,29 +999,23 @@ test('renderer applies object motion translation and non-uniform scaling around 
   assert.deepEqual(calls.at(-1), ['restore']);
 });
 
-test('jello settings are adjustable and used by object draw motion', () => {
-  const { context, setTime } = loadMotion();
-  const settings = context.BoardfishMotion.configureJello({
-    amplitude: 0.12,
-    duration: 700,
-    oscillations: 9,
-    rebound: 0.4,
-    squish: 0.9,
-    staggerMs: 30,
+test('preconfigured jello settings are used by object draw motion', () => {
+  const { context, setTime } = loadMotion({
+    BoardfishJelloParams: {
+      amplitude: 0.12,
+      duration: 700,
+      oscillations: 9,
+      rebound: 0.4,
+      squish: 0.9,
+      staggerMs: 30,
+    },
   });
-
-  assert.deepEqual(plain(settings), {
-    amplitude: 0.12,
-    duration: 700,
-    oscillations: 9,
-    rebound: 0.4,
-    squish: 0.9,
-    staggerMs: 30,
-  });
-  assert.deepEqual(plain(context.BoardfishMotion.getJelloParams()), plain(settings));
 
   const obj = { id: 'obj-1' };
-  context.BoardfishMotion.noteObjectJello(obj);
+  context.BoardfishMotion.applyActionAnimation('copy-selected-objects', { objects: [obj] }, {
+    translateXPx: 0,
+    translateYPx: 0,
+  });
   setTime(100);
   const motion = context.BoardfishMotion.objectMotionForDraw(obj);
 
@@ -1050,99 +1025,20 @@ test('jello settings are adjustable and used by object draw motion', () => {
   assert.notEqual(motion.scaleX, motion.scaleY);
 });
 
-test('action animation policy partitions user actions and tracks missing assignments', () => {
-  const { context, setTime } = loadMotion();
+test('action animation policy keeps quiet actions inert and animates copy actions', () => {
+  const { context } = loadMotion();
   const motion = context.BoardfishMotion;
-
-  const partition = motion.getActionAnimationPartition();
-  const groups = motion.getActionAnimationGroups();
-  assert.equal(groups.imageTransform.setName, 'no-animation');
-  assert.deepEqual(plain(groups.imageTransform.actions), ['flip-image', 'rotate-image']);
-  assert.equal(groups.objectPaste.setName, 'no-animation');
-  assert.deepEqual(plain(groups.objectPaste.actions), ['image-object-paste']);
-  assert.equal(groups.objectCopy.setName, 'jiggle');
-  assert.deepEqual(plain(groups.objectCopy.actions), ['copy-selected-objects', 'copy-text-object', 'copy-text-selection']);
-  assert.equal(groups.objectRemoval.setName, 'no-animation');
-  assert.ok(groups.objectRemoval.actions.includes('object-delete'));
-  assert.equal(groups.floatingSurface.setName, 'no-animation');
-  assert.equal(groups.pillSurface.setName, 'no-animation');
-  assert.equal(groups.unsavedDialogSurface.setName, 'no-animation');
-  assert.ok(partition['no-animation'].includes('text-edit-type'));
-  assert.ok(partition['no-animation'].includes('rubber-band-release'));
-  assert.ok(partition['no-animation'].includes('text-box-create'));
-  assert.ok(partition['no-animation'].includes('object-delete'));
-  assert.ok(partition['no-animation'].includes('object-deselect'));
-  assert.ok(partition['no-animation'].includes('image-file-dialog-open'));
-  assert.deepEqual(plain(partition['smooth-slide']), []);
-  assert.ok(partition['no-animation'].includes('menu-open'));
-  assert.ok(partition['no-animation'].includes('pill-message-update'));
-  assert.ok(partition['no-animation'].includes('unsaved-dialog-open'));
-  assert.ok(partition['no-animation'].includes('image-object-create'));
-  assert.ok(partition['no-animation'].includes('object-undo-delete'));
-  assert.deepEqual(plain(partition.jiggle), ['copy-selected-objects', 'copy-text-object', 'copy-text-selection']);
-  assert.ok(partition['not-applicable'].includes('browser-find-shortcut'));
-  assert.deepEqual(plain(motion.getActionAnimationPolicyIssues()), {
-    duplicateAssignments: [],
-    runtimeUnassigned: [],
-  });
-  assert.equal(motion.actionAnimationSetFor('text-box-resize'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('text-box-create'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('object-delete'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('object-deselect'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('cut-selected-objects'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('object-undo-delete'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('flip-image'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('image-object-paste'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('menu-open'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('pill-message-update'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('unsaved-dialog-open'), 'no-animation');
-  assert.equal(motion.actionAnimationSetFor('copy-text-selection'), 'jiggle');
-  assert.equal(motion.actionAnimationSetFor('browser-find-shortcut'), 'not-applicable');
-
   assert.equal(motion.applyActionAnimation('text-edit-type'), false);
   const quietObj = { id: 'quiet-1', type: 'text' };
-  context.selectedIds = new Set([quietObj.id]);
-  context.objectsMap = new Map([[quietObj.id, quietObj]]);
   assert.equal(motion.applyActionAnimation('text-box-resize', { objects: [quietObj] }), false);
-  assert.equal(motion.applyActionAnimation('text-box-create', { objects: [quietObj] }), false);
   assert.equal(motion.applyActionAnimation('object-delete', { removedObjects: [quietObj] }), false);
   assert.equal(motion.applyActionAnimation('browser-find-shortcut'), false);
   assert.equal(motion.objectMotionForDraw(quietObj), null);
 
-  const surface = classElement();
-  assert.equal(motion.applyActionAnimation('menu-open', { surface }), false);
-  assert.equal(surface.classList.contains('motion-smooth-slide-enter'), false);
-
-  const jiggleObj = { id: 'jiggle-1', type: 'image' };
-  context.selectedIds = new Set([jiggleObj.id]);
-  context.objectsMap = new Map([[jiggleObj.id, jiggleObj]]);
-  assert.equal(motion.applyActionAnimation('object-select'), false);
-  assert.equal(motion.objectMotionForDraw(jiggleObj), null);
-
-  const restoredImage = { id: 'restored-image', type: 'image' };
-  assert.equal(motion.applyActionAnimation('object-undo-delete', { objects: [restoredImage] }, { includeText: false }), false);
-  assert.equal(motion.objectMotionForDraw(restoredImage), null);
-
-  const paramGuardImage = { id: 'param-guard-image', type: 'image' };
-  assert.equal(motion.applyActionAnimation('image-object-create', { objects: [paramGuardImage] }, {
-    amplitude: 0.2,
-    duration: 1200,
-  }), false);
-  setTime(700);
-  assert.equal(motion.objectMotionForDraw(paramGuardImage), null);
-
   const copiedImage = { id: 'copied-image', type: 'image' };
   assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [copiedImage] }), true);
   assert.ok(motion.objectMotionForDraw(copiedImage));
-
-  assert.deepEqual(plain(motion.getUnassignedActionAnimations()), []);
   assert.equal(motion.applyActionAnimation('missing-action-for-test'), false);
-  assert.deepEqual(plain(motion.getUnassignedActionAnimations()), ['missing-action-for-test']);
-  assert.deepEqual(plain(motion.getActionAnimationPolicyIssues().runtimeUnassigned), ['missing-action-for-test']);
-
-  assert.equal(motion.configureActionAnimationSet('jiggle', { amplitude: 0.12 }).amplitude, 0.12);
-  assert.equal(motion.configureActionAnimationSet('smooth-slide', { duration: 260 }).duration, 260);
-  assert.equal(motion.configureActionAnimationSet('no-animation', { duration: 999 }).duration, 0);
 });
 
 test('text duplicate action is no-animation and empty image duplicate payloads stay inert', () => {
@@ -1271,14 +1167,13 @@ test('copy jiggle drives frames through the viewport scheduler', () => {
 
 test('text selection copy feedback uses the jello set', () => {
   const { context, setTime } = loadMotion();
-  context.BoardfishMotion.noteTextSelectionJello({
-    id: 'text-1',
-    start: 2,
-    end: 9,
-    hasSelection: true,
+  context.BoardfishMotion.applyActionAnimation('copy-text-selection', {
+    textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
   }, {
     duration: 700,
     amplitude: 0.12,
+    translateXPx: 0,
+    translateYPx: 0,
   });
 
   setTime(100);
@@ -1292,11 +1187,8 @@ test('text selection copy feedback uses the jello set', () => {
 
 test('text selection jello exposes active full-range draw specs', () => {
   const { context, setTime } = loadMotion();
-  context.BoardfishMotion.noteTextSelectionJello({
-    id: 'text-1',
-    start: 0,
-    end: 17,
-    hasSelection: true,
+  context.BoardfishMotion.applyActionAnimation('copy-text-selection', {
+    textSelection: { id: 'text-1', start: 0, end: 17, hasSelection: true },
   }, {
     duration: 200,
   });
@@ -1319,130 +1211,33 @@ test('selection movement pulses can exclude text objects', () => {
     [text.id, text],
   ]);
 
-  context.BoardfishMotion.pulseSelection({ includeText: false });
+  context.BoardfishMotion.applyActionAnimation('copy-selected-objects', { selection: true }, { includeText: false });
   setTime(100);
 
   assert.ok(context.BoardfishMotion.objectMotionForDraw(image));
   assert.equal(context.BoardfishMotion.objectMotionForDraw(text), null);
 });
 
-test('added text objects can use smooth slide instead of jello', () => {
-  const { context, setTime } = loadMotion();
-  const text = { id: 'text-1', type: 'text' };
-
-  context.BoardfishMotion.noteObjectsSmoothSlideAdded([text], {
-    duration: 200,
-    offsetY: -8,
-    settleY: 2,
-    startScale: 0.96,
-    settleScale: 1.02,
-    ease: 'linear',
+test('preconfigured transition timing is applied to CSS variables', () => {
+  const { styleVars } = loadMotion({
+    BoardfishSmoothSlideParams: {
+      duration: 260,
+      ease: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+    },
   });
-
-  let motion = context.BoardfishMotion.objectMotionForDraw(text, { view: { zoom: 2 } });
-  assert.deepEqual(plain(motion), { opacity: 0, scale: 0.96, translateY: -4 });
-
-  setTime(100);
-  motion = context.BoardfishMotion.objectMotionForDraw(text, { view: { zoom: 2 } });
-  assert.ok(motion.opacity > 0 && motion.opacity < 1);
-  assert.ok(motion.translateY > -4 && motion.translateY < 1);
-  assert.equal(motion.scaleX, undefined);
-  assert.equal(motion.scaleY, undefined);
-
-  setTime(220);
-  assert.equal(context.BoardfishMotion.objectMotionForDraw(text), null);
-});
-
-test('added object feedback skips text objects while jiggling non-text objects', () => {
-  const { context, setTime } = loadMotion();
-  const image = { id: 'img-1', type: 'image' };
-  const text = { id: 'text-1', type: 'text' };
-
-  context.BoardfishMotion.noteObjectsAdded([image, text], {
-    textMotion: 'smooth-slide',
-    includeText: false,
-    duration: 200,
-    amplitude: 0.12,
-  });
-
-  setTime(100);
-  const imageMotion = context.BoardfishMotion.objectMotionForDraw(image);
-  const textMotion = context.BoardfishMotion.objectMotionForDraw(text);
-
-  assert.notEqual(imageMotion.scaleX, imageMotion.scaleY);
-  assert.equal(textMotion, null);
-});
-
-test('smooth slide settings are adjustable and applied to CSS variables', () => {
-  const { context, styleVars } = loadMotion();
-  const settings = context.BoardfishMotion.configureSmoothSlide({
-    duration: 260,
-    offsetY: -9,
-    settleY: 2,
-    startScale: 0.975,
-    settleScale: 1.01,
-    ease: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-  });
-
-  assert.deepEqual(plain(settings), {
-    duration: 260,
-    offsetY: -9,
-    settleY: 2,
-    startScale: 0.975,
-    settleScale: 1.01,
-    ease: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-  });
-  assert.deepEqual(plain(context.BoardfishMotion.getSmoothSlideParams()), plain(settings));
   assert.equal(styleVars.get('--smooth-slide-duration'), '260ms');
   assert.equal(styleVars.get('--smooth-slide-ease'), 'cubic-bezier(0.2, 0.8, 0.2, 1)');
-});
-
-test('smooth slide surface close does not restart while already exiting', () => {
-  const { context, timers } = loadMotion();
-  const surface = classElement(['visible', 'motion-smooth-slide-enter']);
-  const callbacks = [];
-
-  assert.equal(context.BoardfishMotion.noteSmoothSlideClosed(surface, () => callbacks.push('first')), true);
-  assert.equal(timers.length, 1);
-  assert.equal(timers[0].ms, 220);
-  assert.equal(surface.classList.contains('motion-smooth-slide-enter'), false);
-  assert.equal(surface.classList.contains('motion-smooth-slide-exit'), true);
-
-  assert.equal(context.BoardfishMotion.noteSmoothSlideClosed(surface, () => callbacks.push('second')), true);
-  assert.equal(timers.length, 1);
-
-  timers[0].callback();
-
-  assert.deepEqual(callbacks, ['first', 'second']);
-  assert.equal(surface.classList.contains('motion-smooth-slide-exit'), false);
-});
-
-test('object add feedback uses the jello set', () => {
-  const { context, setTime } = loadMotion();
-  const obj = { id: 'obj-1' };
-  context.BoardfishMotion.noteObjectAdded(obj, { duration: 600, amplitude: 0.1 });
-
-  setTime(100);
-  const motion = context.BoardfishMotion.objectMotionForDraw(obj);
-
-  assert.equal(motion.opacity, 1);
-  assert.ok(Math.abs(motion.scaleX - motion.scaleY) > 0.001);
-});
-
-test('object add feedback skips text boxes by default', () => {
-  const { context, setTime } = loadMotion();
-  const text = { id: 'text-1', type: 'text' };
-  context.BoardfishMotion.noteObjectAdded(text, { duration: 600, amplitude: 0.1 });
-
-  setTime(100);
-
-  assert.equal(context.BoardfishMotion.objectMotionForDraw(text), null);
 });
 
 test('object jello removal stays drawable until the exit pulse completes', () => {
   const { context, setTime } = loadMotion();
   const obj = { id: 'obj-1' };
-  context.BoardfishMotion.noteObjectsJelloRemoved([obj], { duration: 200, amplitude: 0.1 });
+  context.BoardfishMotion.applyActionAnimation('copy-selected-objects', { removedObjects: [obj] }, {
+    duration: 200,
+    amplitude: 0.1,
+    translateXPx: 0,
+    translateYPx: 0,
+  });
 
   assert.deepEqual(plain(context.BoardfishMotion.motionObjectsForDraw().map((item) => item.id)), ['obj-1']);
 
@@ -1453,35 +1248,6 @@ test('object jello removal stays drawable until the exit pulse completes', () =>
 
   setTime(220);
   assert.deepEqual(plain(context.BoardfishMotion.objectMotionForDraw(obj)), { opacity: 0, scale: 1, skip: true });
-  assert.equal(context.BoardfishMotion.motionObjectsForDraw().length, 0);
-});
-
-test('explicit smooth-slide removal helper stays drawable until complete', () => {
-  const { context, setTime } = loadMotion();
-  const first = { id: 'obj-1' };
-  const second = { id: 'obj-2' };
-  context.BoardfishMotion.noteObjectsRemoved([first, second], {
-    duration: 200,
-    offsetY: -8,
-    startScale: 0.96,
-    ease: 'cubic-bezier(0, 0, 1, 1)',
-  });
-
-  const exiting = context.BoardfishMotion.motionObjectsForDraw();
-  assert.equal(exiting.length, 2);
-  assert.equal(exiting[0].id, 'obj-1');
-  assert.equal(exiting[1].id, 'obj-2');
-  setTime(100);
-  const firstMotion = context.BoardfishMotion.objectMotionForDraw(first, { view: { zoom: 2 } });
-  const secondMotion = context.BoardfishMotion.objectMotionForDraw(second, { view: { zoom: 2 } });
-  assert.ok(Math.abs(firstMotion.opacity - 0.5) < 0.002);
-  assert.ok(Math.abs(firstMotion.scale - 0.98) < 0.002);
-  assert.ok(Math.abs(firstMotion.translateY + 2) < 0.002);
-  assert.deepEqual(plain(secondMotion), plain(firstMotion));
-
-  setTime(220);
-  assert.deepEqual(plain(context.BoardfishMotion.objectMotionForDraw(first)), { opacity: 0, scale: 1, translateY: 0, skip: true });
-  assert.deepEqual(plain(context.BoardfishMotion.objectMotionForDraw(second)), { opacity: 0, scale: 1, translateY: 0, skip: true });
   assert.equal(context.BoardfishMotion.motionObjectsForDraw().length, 0);
 });
 

@@ -13,12 +13,18 @@ test('web image export writes original bytes to a picked folder', async () => {
     Blob: globalThis.Blob,
     getRenderedImageDataUrl: globalThis.getRenderedImageDataUrl,
     imageNeedsRendering: globalThis.imageNeedsRendering,
+    isWebImageRef: globalThis.isWebImageRef,
     performance: globalThis.performance,
     renderImageToCanvas: globalThis.renderImageToCanvas,
     showDirectoryPicker: globalThis.showDirectoryPicker,
   };
   const sourceBytes = new Uint8Array([1, 2, 3, 4]);
-  const source = globalThis.BoardfishWebBoardContainer.bytesToDataUrl(sourceBytes, 'image/png');
+  const source = globalThis.BoardfishWebBoardContainer.createWebImageRef({
+    path: 'images/img-1.png',
+    mime: 'image/png',
+    ext: 'png',
+    blob: new Blob([sourceBytes], { type: 'image/png' }),
+  });
   const writes = [];
   const directoryHandle = {
     async queryPermission() { return 'granted'; },
@@ -51,6 +57,7 @@ test('web image export writes original bytes to a picked folder', async () => {
   };
   globalThis.getRenderedImageDataUrl = async () => '';
   globalThis.imageNeedsRendering = () => false;
+  globalThis.isWebImageRef = (value) => globalThis.BoardfishWebBoardContainer.isWebImageRef(value);
   globalThis.renderImageToCanvas = () => null;
   globalThis.showDirectoryPicker = async () => directoryHandle;
 

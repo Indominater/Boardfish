@@ -31,12 +31,6 @@
         }
         flush();
       },
-      cancel() {
-        if (raf) cancelAnimationFrame(raf);
-        raf = null;
-        pending = false;
-        state = null;
-      },
       get pending() { return pending; },
     };
   }
@@ -86,51 +80,9 @@
     return cleanup;
   }
 
-  function activateInteractiveSurface({
-    kind = 'surface',
-    reason = '',
-    closeMenus = false,
-    clearObjectSelection = false,
-    exitTextEdit = clearObjectSelection,
-    renderSelection = clearObjectSelection || exitTextEdit,
-  } = {}) {
-    const actionReason = reason || `${kind}:activate`;
-    if (closeMenus && typeof root.closeOpenMenusExcept === 'function') {
-      root.closeOpenMenusExcept('', actionReason);
-    }
-
-    const hasSelection = !!root.selectedIds?.size;
-    const hasEditing = !!root.editingId;
-    if (clearObjectSelection && (hasSelection || (exitTextEdit && hasEditing))) {
-      if (typeof root.deselectAll === 'function') {
-        root.deselectAll();
-      } else if (root.BoardfishEditorState?.clearSelection) {
-        if (exitTextEdit && hasEditing && typeof root.exitEdit === 'function') root.exitEdit();
-        root.BoardfishEditorState.clearSelection();
-        if (renderSelection && typeof root.scheduleRender === 'function') {
-          root.scheduleRender(false, true, actionReason);
-        }
-      }
-    } else if (exitTextEdit && hasEditing && typeof root.exitEdit === 'function') {
-      root.exitEdit();
-      if (renderSelection && typeof root.scheduleRender === 'function') {
-        root.scheduleRender(false, true, actionReason);
-      }
-    }
-
-    return {
-      kind,
-      reason: actionReason,
-      closedMenus: !!closeMenus,
-      clearedObjectSelection: !!clearObjectSelection && hasSelection,
-      exitedTextEdit: !!exitTextEdit && hasEditing,
-    };
-  }
-
-  const api = Object.freeze({ activateInteractiveSurface, beginDocumentDrag, createRafCommitter });
-  root.BoardfishInteraction = api;
-  root.activateInteractiveSurface = activateInteractiveSurface;
   root.beginDocumentDrag = beginDocumentDrag;
   root.createRafCommitter = createRafCommitter;
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = Object.freeze({ beginDocumentDrag, createRafCommitter });
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -138,6 +138,20 @@ const createWebSourcePngClipboardBlob = (obj, source, dbg = null) => {
 
   const startedAt = clipboardNow();
   try {
+    const sourceBlob = container.blobForImageSource?.(source);
+    if (sourceBlob) {
+      const blob = sourceBlob.type === 'image/png'
+        ? sourceBlob
+        : sourceBlob.slice(0, sourceBlob.size, 'image/png');
+      ClipDebug.step(dbg, 'copy:web-source-png-blob', {
+        imgKey: obj?.data?.imgKey || '',
+        sourceKind: webSourceClipboardKind(source),
+        sourceBytes: blob.size,
+        blobSize: blob.size,
+        ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
+      });
+      return blob;
+    }
     const bytes = container.bytesForImageSource(source);
     if (!bytes) return null;
     const blob = new Blob([bytes], { type: 'image/png' });

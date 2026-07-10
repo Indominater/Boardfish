@@ -71,7 +71,7 @@ test('DOM text uses the shared app font rendering defaults', () => {
   assert.doesNotMatch(html, /Material\+Symbols|fonts\.googleapis\.com|fonts\.gstatic\.com/);
   assert.doesNotMatch(html, /wght[^"]*100\.\.700/);
 
-  assert.match(css, /button,\s*input,\s*textarea,\s*select\s*\{[\s\S]*font: inherit;[\s\S]*font-variant-caps: inherit;[\s\S]*letter-spacing: inherit;[\s\S]*direction: inherit;[\s\S]*\}/);
+  assert.match(css, /button,\s*input,\s*textarea\s*\{[\s\S]*font: inherit;[\s\S]*font-variant-caps: inherit;[\s\S]*letter-spacing: inherit;[\s\S]*direction: inherit;[\s\S]*\}/);
   assert.doesNotMatch(css, /font-synthesis/);
   assert.doesNotMatch(css, /font-variant-numeric/);
 });

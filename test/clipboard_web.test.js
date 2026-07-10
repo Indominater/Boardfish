@@ -539,9 +539,12 @@ test('copying an untransformed web PNG image writes source bytes without renderi
     selectedObject: imageObject,
     imageSource,
     BoardfishWebBoardContainer: {
-      bytesForImageSource(source) {
+      blobForImageSource(source) {
         assert.equal(source, imageSource);
-        return pngBytes;
+        return new Blob([pngBytes], { type: 'image/png' });
+      },
+      bytesForImageSource() {
+        throw new Error('Blob-backed source should not be materialized before clipboard write');
       },
     },
     imageNeedsRendering: () => false,
@@ -557,6 +560,10 @@ test('copying an untransformed web PNG image writes source bytes without renderi
   assert.equal(context.calls.copiedImages[0].token, 'web-token');
   assert.equal(context.calls.copiedImages[0].blob.type, 'image/png');
   assert.equal(context.calls.copiedImages[0].blob.size, pngBytes.length);
+  assert.deepEqual(
+    new Uint8Array(await context.calls.copiedImages[0].blob.arrayBuffer()),
+    pngBytes,
+  );
   assert.deepEqual(context.calls.objectJello, []);
 
   context.calls.resolveNextCopiedImage();

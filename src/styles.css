@@ -72,8 +72,7 @@ button {
 }
 button,
 input,
-textarea,
-select {
+textarea {
   font: inherit;
   font-kerning: inherit;
   font-stretch: inherit;
@@ -407,11 +406,6 @@ body {
   max-width: calc(100vw - 32px);
 }
 
-#island:focus,
-#island:focus-visible {
-  outline: none;
-}
-
 #island[data-mode="message"] {
   cursor: default;
   pointer-events: none;
@@ -615,16 +609,6 @@ body {
 }
 #dlg-discard:active {
   background: var(--danger-active-bg);
-}
-
-#dialog.motion-smooth-slide-exit,
-#ctx-menu.motion-smooth-slide-exit,
-#obj-ctx-menu.motion-smooth-slide-exit,
-#text-ctx-menu.motion-smooth-slide-exit,
-#ctx-actions.motion-smooth-slide-exit,
-#island.motion-smooth-slide-exit,
-.opening-shield-pill.motion-smooth-slide-exit {
-  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

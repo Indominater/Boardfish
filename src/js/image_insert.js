@@ -76,12 +76,14 @@ const createWebImageSourceFromBytes = (file, imgKey, bytes) => {
   const ext = webImageExtForFile(file);
   const mime = webImageMimeForFile(file);
   if (typeof BoardfishWebBoardContainer !== 'undefined' && BoardfishWebBoardContainer?.createWebImageRef) {
-    return BoardfishWebBoardContainer.createWebImageRef({
+    const refOptions = {
       path: `images/${imgKey}.${ext}`,
       mime,
       ext,
-      bytes,
-    });
+    };
+    if (typeof Blob === 'function') refOptions.blob = new Blob([bytes], { type: mime });
+    else refOptions.bytes = bytes;
+    return BoardfishWebBoardContainer.createWebImageRef(refOptions);
   }
   if (typeof BoardfishWebBoardContainer !== 'undefined' && BoardfishWebBoardContainer?.bytesToDataUrl) {
     return BoardfishWebBoardContainer.bytesToDataUrl(bytes, mime);

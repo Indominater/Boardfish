@@ -26,19 +26,8 @@
     return normalized === 90 || normalized === 270;
   }
 
-  const api = Object.freeze({
-    normalizeRotation,
-    imageTransformFromData,
-    imageTransformFromObject,
-    imageTransformNeedsRendering,
-    isSidewaysRotation,
-  });
-
-  root.BoardfishImageTransform = api;
   root.normalizeRotation = normalizeRotation;
-  root.imageTransformFromData = imageTransformFromData;
   root.imageTransformFromObject = imageTransformFromObject;
   root.imageTransformNeedsRendering = imageTransformNeedsRendering;
   root.isSidewaysRotation = isSidewaysRotation;
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

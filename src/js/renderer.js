@@ -474,7 +474,7 @@
     } else if (obj.type === 'image') {
       row.imgKey = obj.data?.imgKey || '';
       const fullSource = row.imgKey && deps
-        ? (deps.imageBitmapCache?.()?.[row.imgKey] || deps.imageCache?.()?.[row.imgKey] || null)
+        ? (deps.imageBitmapCache?.()?.[row.imgKey] || null)
         : null;
       const fullDims = imageDimensions(fullSource);
       const scaledDelta = drawCounterValue(counters, 'scaledImages') - before.scaledImages;
@@ -596,7 +596,7 @@
 
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
-      const fullImg = bitmap || deps.imageCache()[key] || null;
+      const fullImg = bitmap || null;
       const motion = options.motion || null;
       const lowLatencyImageMotion = !!motion;
       const selected = imageSourceResolver
@@ -663,11 +663,8 @@
           : imageSourceResolver ? 'resolved-source-pending'
           : !key ? 'missing-key'
           : !deps.imageStore()[key] ? 'missing-store'
-            : !deps.imageCache()[key] ? 'missing-image-element'
-              : !deps.imageCache()[key].complete ? 'not-complete'
-                : deps.imageCache()[key].naturalWidth <= 0 ? 'zero-natural-width'
-                  : !bitmap ? 'missing-bitmap'
-                    : 'unknown';
+            : !bitmap ? 'missing-bitmap'
+              : 'unknown';
       }
       return false;
     }
@@ -805,14 +802,7 @@
     });
   }
 
-  const api = Object.freeze({
-    createBoardRenderer,
-    createDrawCounters,
-    countCulledObject,
-    isDrawableImageSource,
-    resetCanvasToScreen,
-  });
+  const api = Object.freeze({ createBoardRenderer });
 
   root.BoardfishRenderer = api;
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

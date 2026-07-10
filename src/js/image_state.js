@@ -1,6 +1,5 @@
 // ─── Image store (keeps base64 data OUT of boardHistory snapshots) ─────────────────
 var imageStore = {};
-var imageCache = {}; // Deprecated: kept empty for compatibility/debug probes.
 var imageMetadataCache = {}; // key -> lightweight display metadata; no decoded image element retained.
 var imageBitmapCache = {}; // key -> ImageBitmap (GPU-resident, never evicted by WebKit)
 var imageBitmapFailed = new Set();
@@ -38,8 +37,11 @@ const webImageDisplaySrc = (src) => {
   return BoardfishWebBoardContainer.displaySrcForImageSource?.(src) || '';
 };
 
-const webImageDataUrl = (src) => {
+const webImageDataUrl = async (src) => {
   if (!isWebImageRef(src)) return '';
+  if (typeof BoardfishWebBoardContainer.dataUrlForImageSourceAsync === 'function') {
+    return await BoardfishWebBoardContainer.dataUrlForImageSourceAsync(src) || '';
+  }
   return BoardfishWebBoardContainer.dataUrlForImageSource?.(src) || '';
 };
 
@@ -96,7 +98,7 @@ function renderImageToCanvas(obj, sourceImg = null) {
     imgKey: obj?.data?.imgKey,
     ...transform,
   });
-  const img = sourceImg || imageBitmapCache[obj.data.imgKey] || imageCache[obj.data.imgKey];
+  const img = sourceImg || imageBitmapCache[obj.data.imgKey];
   const sourceW = img?.naturalWidth || img?.width || 0;
   const sourceH = img?.naturalHeight || img?.height || 0;
   const ready = img && (img instanceof (typeof ImageBitmap !== 'undefined' ? ImageBitmap : Object) || img.complete || sourceW > 0);
@@ -248,7 +250,10 @@ const getImageDisplayMetadata = (key) => {
 
 const bitmapSourceFromImageSource = async (source, displaySrc) => {
   if (typeof isWebImageRef === 'function' && isWebImageRef(source)) {
-    const bytes = globalThis.BoardfishWebBoardContainer?.bytesForImageSource?.(source);
+    const container = globalThis.BoardfishWebBoardContainer;
+    const blob = container?.blobForImageSource?.(source);
+    if (blob) return blob;
+    const bytes = container?.bytesForImageSource?.(source);
     if (bytes && typeof Blob !== 'undefined') {
       return new Blob([bytes], { type: source.mime || 'image/png' });
     }
@@ -517,7 +522,7 @@ function clearOpenInitialImagePreviews(key = null) {
 }
 
 function openInitialPreviewReleaseTargetScale(key, entry) {
-  const fullSource = imageBitmapCache[key] || imageCache[key] || null;
+  const fullSource = imageBitmapCache[key] || null;
   if (!fullSource || typeof chooseImageScaleForDraw !== 'function') return 1;
   return chooseImageScaleForDraw(
     {
@@ -534,7 +539,7 @@ function openInitialPreviewReleaseTargetScale(key, entry) {
 
 function openInitialPreviewIsCoveredByDrawSource(key, entry) {
   if (imageBitmapFailed.has(key)) return true;
-  const fullSource = imageBitmapCache[key] || imageCache[key] || null;
+  const fullSource = imageBitmapCache[key] || null;
   if (!fullSource) return false;
   if (typeof isViewportImageScalingActive !== 'function' ||
     !isViewportImageScalingActive() ||
@@ -542,7 +547,9 @@ function openInitialPreviewIsCoveredByDrawSource(key, entry) {
     return true;
   }
   const targetScale = openInitialPreviewReleaseTargetScale(key, entry);
-  return !(targetScale > 0 && targetScale < 1) || hasScaledImageVariant(key, targetScale);
+  return !(targetScale > 0 && targetScale < 1) ||
+    hasScaledImageVariant(key, targetScale) ||
+    (typeof hasScaledImageVariantFailure === 'function' && hasScaledImageVariantFailure(key, targetScale));
 }
 
 function releaseReadyOpenInitialImagePreviewsForOpen() {
@@ -567,8 +574,6 @@ function releaseReadyOpenInitialImagePreviewsForOpen() {
     } else pending++;
   }
   for (const key of staleKeys) clearOpenInitialImagePreviews(key);
-  if (pending > 0) return { total, ready, pending, failed, stale, released: 0, remaining: imageOpenPreviewBitmapCache.size };
-
   let released = 0;
   for (const key of releasable) {
     clearOpenInitialImagePreviews(key);
@@ -578,15 +583,21 @@ function releaseReadyOpenInitialImagePreviewsForOpen() {
 }
 
 function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: window.devicePixelRatio || 1 }, counters = null, options = {}) {
-  const entry = imageOpenPreviewBitmapCache.get(key);
+  let entry = imageOpenPreviewBitmapCache.get(key);
+  if (entry?.generation === _imageStoreGeneration && entry.bitmap &&
+      !imageBitmapFailed.has(key) &&
+      openInitialPreviewIsCoveredByDrawSource(key, entry)) {
+    clearOpenInitialImagePreviews(key);
+    entry = null;
+  }
   if (entry?.generation === _imageStoreGeneration && entry.bitmap) {
-    const fullSource = imageBitmapCache[key] || imageCache[key] || null;
+    const fullSource = imageBitmapCache[key] || null;
     const targetScale = fullSource && typeof queueScaledImageVariantForDraw === 'function'
       ? queueScaledImageVariantForDraw(key, obj, fullSource, view, { priority: true, activeOverscale: options.activeInput === true })
       : 0.25;
     return { source: entry.bitmap, scale: 0.25, targetScale, openPreview: true };
   }
-  const fullSource = imageBitmapCache[key] || imageCache[key] || null;
+  const fullSource = imageBitmapCache[key] || null;
   const selected = fullSource && typeof selectImageSourceForDraw === 'function'
     ? selectImageSourceForDraw(key, obj, fullSource, view, options)
     : null;
@@ -824,12 +835,17 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
           });
         }
         if (typeof queueScaledImageVariantForReadyImage === 'function') {
-          const variantQueue = queueScaledImageVariantForReadyImage(key, selectedBitmap);
+          const previewEntry = imageOpenPreviewBitmapCache.get(key);
+          const previewPriority = previewEntry?.generation === generation && !!previewEntry.bitmap;
+          const variantQueue = queueScaledImageVariantForReadyImage(key, selectedBitmap, {
+            priority: previewPriority,
+          });
           OpenDebug.step(dbg, 'cache-image:queue-scaled-variant', {
             imgKey: key,
             scale: variantQueue?.scale ?? '',
             queued: variantQueue?.queued === true,
             skipped: variantQueue?.skipped || '',
+            priority: previewPriority,
           });
         }
         ViewportDebug.count('imageBitmaps');
@@ -851,6 +867,8 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
       cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
       ViewportDebug.end(vpDbg, { key, stale: true });
       OpenDebug.step(dbg, 'cache-image:stale', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
+      if (imageReadyPromises.get(key) === readyPromise) imageReadyPromises.delete(key);
+      if (!imageBitmapCache[key]) queueImageHydration(key, dbg);
       resolveReadyOnce('stale');
       return;
     }
@@ -939,10 +957,6 @@ const removeImageRuntimeCachesForKey = (key) => {
     bitmaps: 0,
     bitmapFailures: 0,
   };
-  if (imageCache[key]) {
-    delete imageCache[key];
-    removed.displayImages++;
-  }
   if (imageMetadataCache[key]) {
     delete imageMetadataCache[key];
     removed.displayImages++;
@@ -980,7 +994,6 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
   }
   const keys = new Set();
   addImageRuntimeObjectKeysToSet(keys, imageStore);
-  addImageRuntimeObjectKeysToSet(keys, imageCache);
   addImageRuntimeObjectKeysToSet(keys, imageMetadataCache);
   addImageRuntimeObjectKeysToSet(keys, imageBitmapCache);
   for (const key of imageBitmapFailed) keys.add(key);
@@ -1017,9 +1030,6 @@ function clearImageStore() {
     if (!Object.prototype.hasOwnProperty.call(imageStore, k)) continue;
     revokeWebImageSource(imageStore[k]);
     delete imageStore[k];
-  }
-  for (const k in imageCache) {
-    if (Object.prototype.hasOwnProperty.call(imageCache, k)) delete imageCache[k];
   }
   for (const k in imageMetadataCache) {
     if (Object.prototype.hasOwnProperty.call(imageMetadataCache, k)) delete imageMetadataCache[k];
