@@ -538,18 +538,20 @@ const textSelectionHighlightRects = (runs = []) => {
 
 const applyTextSelectionMotionTransform = (context, bounds, motion) => {
   if (!motion) return false;
-  const cx = (bounds.left + bounds.right) / 2;
-  const cy = (bounds.top + bounds.bottom) / 2;
   const scaleX = motion.scaleX ?? 1;
   const scaleY = motion.scaleY ?? 1;
+  const scaleOriginX = Number.isFinite(motion.scaleOriginX) ? Math.max(0, Math.min(1, motion.scaleOriginX)) : 0.5;
+  const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
   const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
   const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
   context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * (motion.opacity ?? 1);
   if (translateX || translateY) context.translate(translateX, translateY);
   if (scaleX !== 1 || scaleY !== 1) {
-    context.translate(cx, cy);
+    const scalePivotX = bounds.left + (bounds.right - bounds.left) * scaleOriginX;
+    const scalePivotY = bounds.top + (bounds.bottom - bounds.top) * scaleOriginY;
+    context.translate(scalePivotX, scalePivotY);
     context.scale(scaleX, scaleY);
-    context.translate(-cx, -cy);
+    context.translate(-scalePivotX, -scalePivotY);
   }
   return true;
 };
@@ -770,14 +772,18 @@ const applyObjectMotionForDraw = (context, obj, motion) => {
   const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
   const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
   const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+  const scaleOriginX = Number.isFinite(motion.scaleOriginX) ? Math.max(0, Math.min(1, motion.scaleOriginX)) : 0.5;
+  const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
   const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
   const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
   context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
   if (translateX || translateY) context.translate(translateX, translateY);
   if (scaleX !== 1 || scaleY !== 1) {
-    context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
+    const scalePivotX = obj.x + obj.w * scaleOriginX;
+    const scalePivotY = obj.y + obj.h * scaleOriginY;
+    context.translate(scalePivotX, scalePivotY);
     context.scale(scaleX, scaleY);
-    context.translate(-(obj.x + obj.w / 2), -(obj.y + obj.h / 2));
+    context.translate(-scalePivotX, -scalePivotY);
   }
   return true;
 };

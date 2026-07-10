@@ -72,6 +72,23 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function assertClose(actual, expected, epsilon = 1e-7, message = '') {
+  assert.ok(
+    Math.abs(actual - expected) <= epsilon,
+    message || `expected ${actual} to be within ${epsilon} of ${expected}`,
+  );
+}
+
+function motionRestDistance(motion) {
+  if (!motion) return 0;
+  return Math.hypot(
+    motion.translateX || 0,
+    motion.translateY || 0,
+    (motion.scaleX ?? 1) - 1,
+    (motion.scaleY ?? 1) - 1,
+  );
+}
+
 test('text renderer uses the latest measured baseline offset', () => {
   const BoardfishRenderer = loadRenderer();
   let baselineOffset = 10;
@@ -321,7 +338,7 @@ test('image renderer keeps active full fallback visible with temporary low smoot
   assert.equal(counters.activeInputFullFallbackImages, 1);
 });
 
-test('animated image motion uses low-latency drawing and active variant selection', () => {
+test('animated image motion bypasses static culling and uses low-latency variant selection', () => {
   const BoardfishRenderer = loadRenderer();
   const drawSmoothingEnabled = [];
   const drawQualities = [];
@@ -358,7 +375,7 @@ test('animated image motion uses low-latency drawing and active variant selectio
     imageTransformNeedsRendering: () => false,
     isSidewaysRotation: () => false,
     lineHeight: 24,
-    objectIntersectsRect: () => true,
+    objectIntersectsRect: () => false,
     objectMotionForDraw: () => ({ opacity: 1, translateY: -3 }),
     objects: () => [obj],
     panX: () => 0,
@@ -999,6 +1016,68 @@ test('renderer applies object motion translation and non-uniform scaling around 
   assert.deepEqual(calls.at(-1), ['restore']);
 });
 
+test('renderer applies motion scaling around the requested fractional object origin', () => {
+  const BoardfishRenderer = loadRenderer();
+  const calls = [];
+  const context = {
+    globalAlpha: 1,
+    save() { calls.push(['save']); },
+    restore() { calls.push(['restore']); },
+    translate(x, y) { calls.push(['translate', x, y]); },
+    scale(x, y) { calls.push(['scale', x, y]); },
+    drawImage(...args) { calls.push(['drawImage', ...args]); },
+  };
+  const source = {
+    complete: true,
+    naturalWidth: 20,
+    naturalHeight: 20,
+    width: 20,
+    height: 20,
+  };
+  const obj = { id: 'obj-1', type: 'image', x: 10, y: 20, w: 40, h: 30, data: { imgKey: 'img-1' } };
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 100, y2: 100 }),
+    dpr: () => 1,
+    getWrappedLines: () => [],
+    imageBitmapCache: () => ({ 'img-1': source }),
+    imageStore: () => ({ 'img-1': 'source' }),
+    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
+    imageTransformNeedsRendering: () => false,
+    isSidewaysRotation: () => false,
+    lineHeight: 24,
+    objectIntersectsRect: () => true,
+    objectMotionForDraw: () => ({
+      opacity: 1,
+      scaleX: 1.05,
+      scaleY: 1 / 1.05,
+      scaleOriginX: 0.5,
+      scaleOriginY: 0.12,
+    }),
+    objects: () => [obj],
+    panX: () => 0,
+    panY: () => 0,
+    selectImageSourceForDraw: () => ({ source, scale: 1, targetScale: 1 }),
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters());
+
+  const originX = obj.x + obj.w * 0.5;
+  const originY = obj.y + obj.h * 0.12;
+  assert.deepEqual(calls.slice(0, 4), [
+    ['save'],
+    ['translate', originX, originY],
+    ['scale', 1.05, 1 / 1.05],
+    ['translate', -originX, -originY],
+  ]);
+  assert.deepEqual(calls.at(-1), ['restore']);
+});
+
 test('preconfigured jello settings are used by object draw motion', () => {
   const { context, setTime } = loadMotion({
     BoardfishJelloParams: {
@@ -1081,12 +1160,30 @@ test('copy object jiggle uses fixed screen-distance translation independent of o
   assert.notEqual(narrowAtZoom1.translateX, 0);
   assert.notEqual(narrowAtZoom1.translateY, 0);
   assert.ok(narrowLate);
-  assert.equal(narrowAtZoom1.scaleX, undefined);
-  assert.equal(narrowAtZoom1.scaleY, undefined);
+  assert.ok(Number.isFinite(narrowAtZoom1.scaleX));
+  assert.ok(Number.isFinite(narrowAtZoom1.scaleY));
+  assertClose(narrowAtZoom1.scaleX * narrowAtZoom1.scaleY, 1, 0.0025);
   assert.ok(Math.abs(narrowAtZoom1.translateX - wideAtZoom1.translateX) < 0.000001);
   assert.ok(Math.abs(narrowAtZoom1.translateY - wideAtZoom1.translateY) < 0.000001);
   assert.ok(Math.abs(narrowAtZoom1.translateX - narrowAtZoom2.translateX * 2) < 0.000001);
   assert.ok(Math.abs(narrowAtZoom1.translateY - narrowAtZoom2.translateY * 2) < 0.000001);
+});
+
+test('object motion exposes the exact transform most recently used for drawing', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const text = { id: 'copied-text', type: 'text' };
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [text] }), true);
+  setTime(100);
+  const drawnMotion = motion.objectMotionForDraw(text, { view: { zoom: 1 } });
+
+  assert.strictEqual(motion.getLastDrawnObjectMotion(text), drawnMotion);
+
+  setTime(501);
+  assert.equal(motion.objectMotionForDraw(text, { view: { zoom: 1 } }), null);
+  assert.equal(motion.getLastDrawnObjectMotion(text), null);
 });
 
 test('copy text selection jiggle uses fixed screen-distance translation independent of selection length', () => {
@@ -1113,8 +1210,9 @@ test('copy text selection jiggle uses fixed screen-distance translation independ
   assert.notEqual(shortAtZoom1.translateX, 0);
   assert.notEqual(shortAtZoom1.translateY, 0);
   assert.ok(shortLate);
-  assert.equal(shortAtZoom1.scaleX, undefined);
-  assert.equal(shortAtZoom1.scaleY, undefined);
+  assert.ok(Number.isFinite(shortAtZoom1.scaleX));
+  assert.ok(Number.isFinite(shortAtZoom1.scaleY));
+  assertClose(shortAtZoom1.scaleX * shortAtZoom1.scaleY, 1, 0.0025);
   assert.ok(Math.abs(shortAtZoom1.translateX - longAtZoom1.translateX) < 0.000001);
   assert.ok(Math.abs(shortAtZoom1.translateY - longAtZoom1.translateY) < 0.000001);
   assert.ok(Math.abs(shortAtZoom1.translateX - shortAtZoom2.translateX * 2) < 0.000001);
@@ -1136,8 +1234,9 @@ test('copy jiggle normalizes per-axis waveform to configured screen-pixel distan
     if (!frame) continue;
     maxX = Math.max(maxX, Math.abs(frame.translateX || 0));
     maxY = Math.max(maxY, Math.abs(frame.translateY || 0));
-    assert.equal(frame.scaleX, undefined);
-    assert.equal(frame.scaleY, undefined);
+    assert.ok(Number.isFinite(frame.scaleX));
+    assert.ok(Number.isFinite(frame.scaleY));
+    assertClose(frame.scaleX * frame.scaleY, 1, 0.0025);
   }
 
   assert.ok(Math.abs(maxX - 5) < 0.000001, `expected max X of 5px, got ${maxX}`);
@@ -1145,6 +1244,244 @@ test('copy jiggle normalizes per-axis waveform to configured screen-pixel distan
 
   setTime(501);
   assert.equal(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }), null);
+});
+
+test('grouped copy jiggle is geometry-ordered with shared vertical and mirrored lateral motion', () => {
+  const left = { id: 'left', type: 'image', x: 20, y: 30, w: 80, h: 90 };
+  const right = { id: 'right', type: 'image', x: 140, y: 30, w: 80, h: 90 };
+  const capture = (objects) => {
+    const { context, setTime } = loadMotion();
+    const motion = context.BoardfishMotion;
+    setTime(0);
+    assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects }), true);
+    setTime(100);
+    return new Map(objects.map((obj) => [
+      obj.id,
+      plain(motion.objectMotionForDraw(obj, { view: { zoom: 1 } })),
+    ]));
+  };
+
+  const forward = capture([left, right]);
+  const reversed = capture([right, left]);
+  const forwardLeft = forward.get(left.id);
+  const forwardRight = forward.get(right.id);
+
+  assert.deepEqual(forward.get(left.id), reversed.get(left.id));
+  assert.deepEqual(forward.get(right.id), reversed.get(right.id));
+  assert.notEqual(forwardLeft.translateX, 0);
+  assertClose(forwardLeft.translateX, -forwardRight.translateX);
+  assert.ok(
+    Math.abs(forwardLeft.translateY - forwardRight.translateY) <=
+      Math.max(Math.abs(forwardLeft.translateY), Math.abs(forwardRight.translateY)) * 0.04,
+    'paired vertical motion diverged by more than the intended subtle asymmetry',
+  );
+  assert.ok(Math.abs(forwardLeft.translateX) < Math.abs(forwardLeft.translateY));
+});
+
+test('copy jiggle retrigger continues from the transform currently on screen', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const obj = { id: 'retriggered-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  setTime(117);
+  const before = plain(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }));
+
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  const after = plain(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }));
+
+  for (const field of ['translateX', 'translateY', 'scaleX', 'scaleY']) {
+    assertClose(after[field], before[field], 1e-7, `${field} jumped when jiggle was retriggered`);
+  }
+  assert.equal(after.scaleOriginX, before.scaleOriginX);
+  assert.equal(after.scaleOriginY, before.scaleOriginY);
+
+  setTime(618);
+  assert.equal(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }), null);
+});
+
+test('rapid and repeated copy retriggers stay within the configured motion envelope', () => {
+  const scan = (triggerTimes) => {
+    const { context, setTime } = loadMotion();
+    const motion = context.BoardfishMotion;
+    const obj = { id: 'bounded-retrigger', type: 'image', x: 20, y: 30, w: 80, h: 90 };
+    const triggers = new Set(triggerTimes);
+    let maxX = 0;
+    let maxY = 0;
+    let maxStrain = 0;
+    const end = Math.max(...triggerTimes) + 500;
+    for (let time = 0; time < end; time += 1) {
+      setTime(time);
+      if (triggers.has(time)) {
+        assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+      }
+      const frame = motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+      if (!frame) continue;
+      maxX = Math.max(maxX, Math.abs(frame.translateX || 0));
+      maxY = Math.max(maxY, Math.abs(frame.translateY || 0));
+      const scaleX = Math.max(0.01, frame.scaleX ?? 1);
+      const scaleY = Math.max(0.01, frame.scaleY ?? 1);
+      maxStrain = Math.max(maxStrain, Math.abs(0.5 * (Math.log(scaleY) - Math.log(scaleX))));
+    }
+    return { maxX, maxY, maxStrain };
+  };
+
+  for (const triggerTimes of [
+    [0, 16],
+    [0, 30],
+    [0, 60],
+    Array.from({ length: 10 }, (_, index) => index * 18),
+    Array.from({ length: 10 }, (_, index) => index * 32),
+  ]) {
+    const result = scan(triggerTimes);
+    assert.ok(result.maxX <= 5.05, `X overshot after triggers ${triggerTimes}: ${result.maxX}`);
+    assert.ok(result.maxY <= 10.8, `Y overshot after triggers ${triggerTimes}: ${result.maxY}`);
+    assert.ok(result.maxStrain <= 0.0281, `strain overshot after triggers ${triggerTimes}: ${result.maxStrain}`);
+  }
+});
+
+test('copy jiggle transform is invariant to intermediate sampling cadence', () => {
+  const captureAt333Ms = (cadenceHz) => {
+    const { context, setTime } = loadMotion();
+    const motion = context.BoardfishMotion;
+    const obj = { id: 'cadence-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
+
+    setTime(0);
+    assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+    if (cadenceHz) {
+      const stepMs = 1000 / cadenceHz;
+      for (let time = stepMs; time < 333; time += stepMs) {
+        setTime(time);
+        assert.ok(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }));
+      }
+    }
+    setTime(333);
+    return plain(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }));
+  };
+
+  const unsampled = captureAt333Ms(0);
+  assert.deepEqual(captureAt333Ms(30), unsampled);
+  assert.deepEqual(captureAt333Ms(60), unsampled);
+  assert.deepEqual(captureAt333Ms(120), unsampled);
+});
+
+test('short retrigger stays active for its longer carry and preserves area through exact rest', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const obj = { id: 'long-carry-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
+  const options = { duration: 180, carryDurationMs: 320 };
+  const at = (time) => {
+    setTime(time);
+    return motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+  };
+  const velocity = (from, to, durationMs, fields) => fields.map((field) => (
+    (to[field] - from[field]) / durationMs
+  ));
+  const norm = (values) => Math.hypot(...values);
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }, options), true);
+  const beforePrevious = plain(at(89.75));
+  const before = plain(at(90));
+
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }, options), true);
+  const after = plain(at(90));
+  for (const field of ['translateX', 'translateY', 'scaleX', 'scaleY']) {
+    assertClose(after[field], before[field], 1e-7, `${field} jumped on long-carry retrigger`);
+  }
+
+  const afterNext = plain(at(90.25));
+  const assertVelocityContinuity = (fields, label) => {
+    const beforeVelocity = velocity(beforePrevious, before, 0.25, fields);
+    const afterVelocity = velocity(after, afterNext, 0.25, fields);
+    const discontinuity = norm(afterVelocity.map((value, index) => value - beforeVelocity[index]));
+    const reference = Math.max(norm(beforeVelocity), norm(afterVelocity), 1e-9);
+    assert.ok(discontinuity <= reference * 0.05, `${label} velocity changed discontinuously at retrigger`);
+  };
+  assertVelocityContinuity(['translateX', 'translateY'], 'translation');
+  assertVelocityContinuity(['scaleX', 'scaleY'], 'deformation');
+
+  for (const time of [91, 120, 180, 250, 270, 271, 320, 400, 409.9]) {
+    const frame = at(time);
+    assert.ok(frame, `motion ended before carry rest at ${time}ms`);
+    assertClose(frame.scaleX * frame.scaleY, 1, 1e-7, `carry changed deformation area at ${time}ms`);
+  }
+  assert.ok(motionRestDistance(at(409.9)) < 1e-7, 'carry did not approach exact terminal rest');
+
+  assert.equal(at(410), null);
+  assert.equal(motion.getLastDrawnObjectMotion(obj), null);
+});
+
+test('copy jiggle has cubic-rest boundaries, decaying extrema, and exact terminal rest', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const obj = { id: 'settling-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
+  const at = (time) => {
+    setTime(time);
+    return motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+  };
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+
+  const startFrame = at(0);
+  const startHalfMs = motionRestDistance(at(0.5));
+  const oneMsFrame = at(1);
+  const startOneMs = motionRestDistance(oneMsFrame);
+  assert.ok(startHalfMs < startOneMs * 0.18, 'attack does not approach rest with a cubic-or-smoother boundary');
+
+  const samples = [Math.abs(startFrame?.translateY || 0), Math.abs(oneMsFrame?.translateY || 0)];
+  let peakDistance = Math.max(motionRestDistance(startFrame), motionRestDistance(oneMsFrame));
+  let endOneMs = 0;
+  for (let time = 2; time < 500; time += 1) {
+    const frame = at(time);
+    const y = frame?.translateY || 0;
+    peakDistance = Math.max(peakDistance, motionRestDistance(frame));
+    samples.push(Math.abs(y));
+    if (time === 499) endOneMs = motionRestDistance(frame);
+  }
+  const endHalfMs = motionRestDistance(at(499.5));
+  assert.ok(endHalfMs < endOneMs * 0.18, 'settle does not approach rest with a cubic-or-smoother boundary');
+
+  const extrema = [];
+  for (let index = 1; index < samples.length - 1; index += 1) {
+    if (samples[index] >= samples[index - 1] && samples[index] > samples[index + 1]) {
+      extrema.push(samples[index]);
+    }
+  }
+  assert.ok(extrema.length >= 3, `expected at least three vertical extrema, got ${extrema.length}`);
+  for (let index = 1; index < extrema.length; index += 1) {
+    assert.ok(
+      extrema[index] <= extrema[index - 1] * 1.01,
+      `vertical rebound grew from ${extrema[index - 1]} to ${extrema[index]}`,
+    );
+  }
+  assert.ok(endOneMs < peakDistance * 1e-5, 'one-millisecond terminal residual is too large');
+
+  assert.equal(at(500), null);
+  assert.equal(motion.getLastDrawnObjectMotion(obj), null);
+});
+
+test('copy jiggle deformation preserves area and exposes a stable upper anchor', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const obj = { id: 'deforming-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  let deformedSamples = 0;
+  for (const time of [40, 80, 120, 180, 240]) {
+    setTime(time);
+    const frame = motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+    assert.ok(Number.isFinite(frame.scaleX));
+    assert.ok(Number.isFinite(frame.scaleY));
+    assertClose(frame.scaleX * frame.scaleY, 1, 0.0025, `deformation changed area at ${time}ms`);
+    assert.equal(frame.scaleOriginX, 0.5);
+    assert.equal(frame.scaleOriginY, 0.12);
+    if (Math.abs(frame.scaleX - 1) > 0.0001 || Math.abs(frame.scaleY - 1) > 0.0001) deformedSamples++;
+  }
+  assert.ok(deformedSamples >= 3, 'deformation is not visibly active across the primary response');
 });
 
 test('copy jiggle drives frames through the viewport scheduler', () => {

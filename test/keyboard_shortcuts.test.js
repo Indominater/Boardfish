@@ -177,6 +177,17 @@ test('shortcuts use the visible menu command before fallback actions', () => {
   assert.deepEqual(calls, [['visibleMenuCommand', 'copy']]);
 });
 
+test('held copy shortcut is consumed without repeating the copy command', () => {
+  const { calls, mainKeydown } = loadKeyboard();
+  const event = keyEvent({ key: 'c', code: 'KeyC', metaKey: true, repeat: true });
+
+  mainKeydown(event);
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+  assert.deepEqual(calls, []);
+});
+
 test('shortcuts close open menus before running fallback commands', () => {
   const { calls, mainKeydown } = loadKeyboard({
     hasOpenContextMenu: () => true,

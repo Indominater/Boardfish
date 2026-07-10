@@ -689,17 +689,23 @@
         if (obj.id === skipId || skipIds?.has(obj.id)) return;
         if (skipText && obj.type === 'text') return;
         if (onlyText && obj.type !== 'text') return;
-        if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect)) {
+        const motion = objectMotionForDraw ? objectMotionForDraw(obj, { view, viewportRect }) : null;
+        if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
           if (countObject) countCulledObject(obj, counters);
           return;
         }
         if (countObject && counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
-        const motion = objectMotionForDraw ? objectMotionForDraw(obj, { view, viewportRect }) : null;
         if (motion?.skip) return;
         const opacity = motion && Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
         const scale = motion && Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
         const scaleX = motion && Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
         const scaleY = motion && Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+        const scaleOriginX = motion && Number.isFinite(motion.scaleOriginX)
+          ? Math.max(0, Math.min(1, motion.scaleOriginX))
+          : 0.5;
+        const scaleOriginY = motion && Number.isFinite(motion.scaleOriginY)
+          ? Math.max(0, Math.min(1, motion.scaleOriginY))
+          : 0.5;
         const translateX = motion && Number.isFinite(motion.translateX) ? motion.translateX : 0;
         const translateY = motion && Number.isFinite(motion.translateY) ? motion.translateY : 0;
         if (motion && countObject && counters) {
@@ -714,9 +720,11 @@
           context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
           if (translateX || translateY) context.translate(translateX, translateY);
           if (scaleX !== 1 || scaleY !== 1) {
-            context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
+            const scalePivotX = obj.x + obj.w * scaleOriginX;
+            const scalePivotY = obj.y + obj.h * scaleOriginY;
+            context.translate(scalePivotX, scalePivotY);
             context.scale(scaleX, scaleY);
-            context.translate(-(obj.x + obj.w / 2), -(obj.y + obj.h / 2));
+            context.translate(-scalePivotX, -scalePivotY);
           }
         }
         let drawn = false;

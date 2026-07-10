@@ -46,6 +46,103 @@ function selectionOverlaySelectedImageEdgePadDevicePx() {
   return 0;
 }
 
+function selectionOverlayObjectBounds(obj) {
+  if (!obj) return null;
+  const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj) || null;
+  const scale = motion && Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
+  const scaleX = motion && Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
+  const scaleY = motion && Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+  const scaleOriginX = motion && Number.isFinite(motion.scaleOriginX)
+    ? Math.max(0, Math.min(1, motion.scaleOriginX))
+    : 0.5;
+  const scaleOriginY = motion && Number.isFinite(motion.scaleOriginY)
+    ? Math.max(0, Math.min(1, motion.scaleOriginY))
+    : 0.5;
+  const translateX = motion && Number.isFinite(motion.translateX) ? motion.translateX : 0;
+  const translateY = motion && Number.isFinite(motion.translateY) ? motion.translateY : 0;
+  const scalePivotX = obj.x + obj.w * scaleOriginX;
+  const scalePivotY = obj.y + obj.h * scaleOriginY;
+  return {
+    x1: scalePivotX + (obj.x - scalePivotX) * scaleX + translateX,
+    y1: scalePivotY + (obj.y - scalePivotY) * scaleY + translateY,
+    x2: scalePivotX + (obj.x + obj.w - scalePivotX) * scaleX + translateX,
+    y2: scalePivotY + (obj.y + obj.h - scalePivotY) * scaleY + translateY,
+  };
+}
+
+function selectionOverlaySelectedBounds() {
+  const resting = selectedBounds();
+  if (!resting) return null;
+  if (selectedIds.size === 1) {
+    const obj = objectsMap.get(selectedIds.values().next().value);
+    return selectionOverlayObjectBounds(obj) || resting;
+  }
+  let translateX = 0;
+  let translateY = 0;
+  let motionCount = 0;
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj) continue;
+    const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj) || null;
+    if (!motion) continue;
+    translateX += Number.isFinite(motion.groupTranslateX)
+      ? motion.groupTranslateX
+      : Number.isFinite(motion.translateX) ? motion.translateX : 0;
+    translateY += Number.isFinite(motion.groupTranslateY)
+      ? motion.groupTranslateY
+      : Number.isFinite(motion.translateY) ? motion.translateY : 0;
+    motionCount++;
+  }
+  if (!motionCount) return resting;
+  translateX /= motionCount;
+  translateY /= motionCount;
+  return {
+    x1: resting.x1 + translateX,
+    y1: resting.y1 + translateY,
+    x2: resting.x2 + translateX,
+    y2: resting.y2 + translateY,
+  };
+}
+
+function selectionOverlayAnimatedScreenRect(resting, animated, padDevicePx = 0) {
+  if (!resting || !animated) return null;
+  const restingRaw = {
+    x: resting.x1 * zoom + panX,
+    y: resting.y1 * zoom + panY,
+    width: (resting.x2 - resting.x1) * zoom,
+    height: (resting.y2 - resting.y1) * zoom,
+  };
+  const animatedRaw = {
+    x: animated.x1 * zoom + panX,
+    y: animated.y1 * zoom + panY,
+    width: (animated.x2 - animated.x1) * zoom,
+    height: (animated.y2 - animated.y1) * zoom,
+  };
+  const snappedResting = snappedSelectionOverlayScreenRect(
+    restingRaw.x,
+    restingRaw.y,
+    restingRaw.width,
+    restingRaw.height,
+    selectionOverlayDevicePixelRatio(),
+    padDevicePx,
+  );
+  const cleanValue = (value) => {
+    if (Math.abs(value) < 1e-9) return 0;
+    return Math.round(value * 1e9) / 1e9;
+  };
+  const cleanDelta = (value) => cleanValue(value);
+  const deltaX = cleanDelta(animatedRaw.x - restingRaw.x);
+  const deltaY = cleanDelta(animatedRaw.y - restingRaw.y);
+  const deltaWidth = cleanDelta(animatedRaw.width - restingRaw.width);
+  const deltaHeight = cleanDelta(animatedRaw.height - restingRaw.height);
+  return {
+    x: cleanValue(snappedResting.x + deltaX),
+    y: cleanValue(snappedResting.y + deltaY),
+    width: cleanValue(Math.max(0, snappedResting.width + deltaWidth)),
+    height: cleanValue(Math.max(0, snappedResting.height + deltaHeight)),
+  };
+}
+
 function beginRubberBandDrag() {
   if (_rubberBandDragActive) return;
   _rubberBandDragActive = true;
@@ -371,13 +468,12 @@ function updateMultiSelectionOverlay() {
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
+    const bounds = selectionOverlayObjectBounds(obj);
+    if (!bounds) continue;
     const box = _multiSelBoxes[selectedIdx++];
-    const rect = snappedSelectionOverlayScreenRect(
-      obj.x * zoom + panX,
-      obj.y * zoom + panY,
-      obj.w * zoom,
-      obj.h * zoom,
-      selectionOverlayDevicePixelRatio(),
+    const rect = selectionOverlayAnimatedScreenRect(
+      { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h },
+      bounds,
       selectionOverlayImageEdgePadDevicePx(obj),
     );
     const state = _setMultiBoxDisplayIfChanged(box, 'block');
@@ -411,7 +507,7 @@ function updateSelectionOverlay() {
     return;
   }
 
-  const bounds = selectedBounds();
+  const bounds = selectionOverlaySelectedBounds();
   if (!bounds) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
@@ -419,16 +515,9 @@ function updateSelectionOverlay() {
     return;
   }
 
-  const sx = bounds.x1 * zoom + panX;
-  const sy = bounds.y1 * zoom + panY;
-  const sw = (bounds.x2 - bounds.x1) * zoom;
-  const sh = (bounds.y2 - bounds.y1) * zoom;
-  const screenRect = snappedSelectionOverlayScreenRect(
-    sx,
-    sy,
-    sw,
-    sh,
-    selectionOverlayDevicePixelRatio(),
+  const screenRect = selectionOverlayAnimatedScreenRect(
+    selectedBounds(),
+    bounds,
     selectionOverlaySelectedImageEdgePadDevicePx(),
   );
 

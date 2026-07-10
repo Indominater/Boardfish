@@ -41,7 +41,10 @@ test('web debug tools are controlled by the web dev flag', () => {
   assert.match(startupDebugSource, /\bconst DEBUG_TOOLS_ENABLED = globalThis\.__BOARDFISH_DEBUG_TOOLS_ENABLED__ === true;/);
   assert.match(startupDebugSource, /var StartupDebug = DEBUG_TOOLS_ENABLED \?/);
   assert.match(startupDebugSource, /createNoopStartupDebug\(\)/);
-  assert.match(webDevSource, /setDefaultDebugFlag\(globalThis\.__BOARDFISH_WEB_DEV_MODE__ === true\)/);
+  assert.match(
+    webDevSource,
+    /const \[webEnvScript, \.\.\.remainingScripts\] = WEB_DEV_SCRIPTS;[\s\S]*await loadScripts\(\[webEnvScript\]\);[\s\S]*setDefaultDebugFlag\(globalThis\.__BOARDFISH_WEB_DEV_MODE__ === true\);[\s\S]*await loadScripts\(remainingScripts\);/,
+  );
   assert.match(webEnvSource, /'__BOARDFISH_WEB_DEV_MODE__'/);
   assert.match(webEnvSource, /value: false/);
 });

@@ -190,6 +190,10 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (hasExactCommandModifier(e) && isShortcutKey(e, 'c')) {
+    if (e.repeat) {
+      if (!editingId || contextMenusOpenForShortcut()) consumeShortcutEvent(e);
+      return;
+    }
     if (contextMenusOpenForShortcut()) {
       consumeShortcutEvent(e);
       runShortcutCommand('copy', () => {

@@ -11,7 +11,6 @@ if (!Object.prototype.hasOwnProperty.call(globalThis, '__BOARDFISH_DEBUG_TOOLS_E
 }
 
 const noop = () => {};
-const noopAsync = async () => null;
 
 async function mapWithConcurrency(items, limit, worker) {
   const out = new Array(items.length);
@@ -32,29 +31,16 @@ async function mapWithConcurrency(items, limit, worker) {
 
 const createNoopDebugApi = (extra = {}) => {
   return {
-    enable: noop,
-    disable: noop,
-    setVerbose: noop,
     start: () => null,
     step: noop,
     end: noop,
     count: noop,
     max: noop,
-    timing: noop,
     isEnabled: () => false,
-    frameStart: () => null,
-    frameEnd: noop,
     log: noop,
-    logDomEvent: noop,
     watch: () => noop,
     wrap: async (_ctx, _command, call) => call(),
-    invoke: noopAsync,
-    dump: () => [],
-    summary: () => [],
-    phaseSummary: () => [],
-    reset: noop,
     get enabled() { return false; },
-    get events() { return []; },
     ...extra,
   };
 };
@@ -62,59 +48,20 @@ const createNoopDebugApi = (extra = {}) => {
 const StartupDebug = {
   record: noop,
   sample: () => null,
-  sampleFrames: async () => [],
-  report: async () => ({ summary: {}, events: [], samples: [] }),
-  toggleStress: async () => ({ summary: {}, events: [], samples: [] }),
-  topBandScan: () => ({ summary: {}, rows: [] }),
-  toggleBandStress: async () => ({ summary: {}, events: [], samples: [] }),
-  toggleThemeOrderStress: async () => ({ summary: {}, events: [], samples: [] }),
-  events: [],
-  samples: [],
-  expectedCanvasBg(theme = 'dark') {
-    return theme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
-  },
-  lastResult: null,
-  lastJson: '',
 };
 
-const ClipDebug = createNoopDebugApi({
-  copyBreakdown: () => [],
-  copyPanReport: () => null,
-  textPasteLagReport: () => null,
-  textClipboardReport: () => null,
-  largePasteReport: () => null,
-  pasteBreakdown: () => null,
-  status: () => null,
-});
+const ClipDebug = createNoopDebugApi();
 const HistoryDebug = createNoopDebugApi();
 const ViewportDebug = createNoopDebugApi({
-  rawInputTimeline: () => [],
-  recordRawInput: noop,
   recordShieldBlock: noop,
 });
-const SaveDebug = createNoopDebugApi({
-  report: () => null,
-});
+const SaveDebug = createNoopDebugApi();
 const OpenDebug = createNoopDebugApi({
   hydrationConcurrency: 8,
-  hydrationSummary: () => null,
-  hydrationBreakdown: () => [],
-  cacheImageBreakdown: () => [],
-  imageStoreSummary: () => null,
-  imageStoreSample: () => [],
-  hydrationCandidates: () => null,
-  slowImages: () => [],
-  openPreviewBreakdown: () => [],
-  optimizationReport: () => null,
-  recordPreviewFallbackDraw: noop,
   recordPreviewHeldRender: noop,
   recordDynamicPreview: noop,
-  report: () => null,
   beginInitialRenderDebug: () => false,
-  endInitialRenderDebug: () => 0,
   isInitialRenderDebugActive: () => false,
-  setHydrationMode: noop,
-  setHydrationConcurrency: noop,
 });
 const ExportDebug = createNoopDebugApi({
   startMassive: noop,
@@ -127,20 +74,9 @@ const ExportDebug = createNoopDebugApi({
   recordSaveDone: noop,
   recordProgressUi: noop,
   recordEventLoopYield: noop,
-  smoothnessReport: () => null,
 });
-const ManualPerfDebug = createNoopDebugApi();
-const InsertDebug = createNoopDebugApi({
-  report: () => null,
-  imageBreakdown: () => [],
-  fileBreakdown: () => [],
-});
+const InsertDebug = createNoopDebugApi();
 const TextSelDebug = createNoopDebugApi({
-  clipboardReport: () => null,
-  editLifecycleReport: () => [],
-  exitEditReport: () => null,
-  performanceSummary: () => null,
-  selectionReport: () => null,
   _logDraw: noop,
   _logClipboard: noop,
   _logEditLifecycle: noop,

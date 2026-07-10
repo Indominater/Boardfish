@@ -82,6 +82,7 @@ test('startup manifest exposes only web variants', () => {
 
   assert.doesNotMatch(manifest, /VARIANT_SCRIPTS/);
   assert.doesNotMatch(manifest, new RegExp(shellWord.toUpperCase()));
+  assert.equal(webDev[0], 'web_env.js');
   assert.ok(webDev.includes('web_runtime.js'));
   assert.ok(webDev.includes('startup_debug.js'));
   assert.ok(webPreview.includes('runtime_debug_noop.js'));
@@ -232,7 +233,6 @@ test('fresh app sessions default to dark mode', () => {
   const html = readSource('src/index.html');
   const manifest = readJson('src/manifest.webmanifest');
   const app = readSource('src/app.js');
-  const debugNoop = readSource('src/js/runtime_debug_noop.js');
 
   assert.match(html, /<meta name="theme-color" content="#1c1b22" \/>/);
   assert.match(html, /<body data-theme="dark">/);
@@ -242,7 +242,6 @@ test('fresh app sessions default to dark mode', () => {
   assert.match(app, /var DEFAULT_APP_THEME = 'dark';/);
   assert.match(app, /var appTheme = DEFAULT_APP_THEME;/);
   assert.match(app, /catch \(_\) \{\s*return DEFAULT_APP_THEME;\s*\}/);
-  assert.match(debugNoop, /expectedCanvasBg\(theme = 'dark'\)/);
 });
 
 test('dev server returns 400 for malformed URL encodings', () => {
