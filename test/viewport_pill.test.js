@@ -141,6 +141,39 @@ function loadViewportPillHarness() {
   return context;
 }
 
+function loadViewportRenderSchedulerHarness({ selected = false, overlayVisible = false } = {}) {
+  const source = fs.readFileSync(path.join(root, 'src', 'js', 'viewport.js'), 'utf8');
+  const functionStart = source.indexOf('function scheduleRender(');
+  assert.ok(functionStart > 0, 'scheduleRender is missing');
+  const functionEnd = source.indexOf('\n}', functionStart);
+  assert.ok(functionEnd > functionStart, 'scheduleRender is unterminated');
+  const scheduled = [];
+  const context = {
+    selected,
+    scheduled,
+    selOverlay: createElement('sel-overlay'),
+    multiSelOverlay: createElement('multi-sel-overlay'),
+    hasSelection() {
+      return context.selected;
+    },
+    scheduleFrame(sourceName) {
+      scheduled.push(sourceName);
+    },
+  };
+  if (overlayVisible) context.selOverlay.classList.add('visible');
+  vm.createContext(context);
+  vm.runInContext(
+    'var _needBoardRender = false;\n' +
+      'var _needOverlayRender = false;\n' +
+      `${source.slice(functionStart, functionEnd + 2)}\n` +
+      'globalThis.scheduleRender = scheduleRender;\n' +
+      'globalThis.renderFlags = () => ({ board: _needBoardRender, overlay: _needOverlayRender });\n',
+    context,
+    { filename: 'viewport-render-scheduler.js' },
+  );
+  return context;
+}
+
 test('opening shield pill text mirrors the zoom pill visual motion surface', () => {
   const styles = fs.readFileSync(path.join(root, 'src', 'styles.css'), 'utf8');
 
@@ -211,4 +244,22 @@ test('zoom pill sync skips unchanged text writes', () => {
   assert.equal(context.islZoom.textContent, '200%');
   assert.equal(context.islZoom.textContentWriteCount(), writesAfterInit + 1);
   assert.deepEqual(context.motionCalls, ['200%']);
+});
+
+test('board-only refreshes also schedule active selection overlays', () => {
+  for (const options of [
+    { selected: true, overlayVisible: false },
+    { selected: false, overlayVisible: true },
+  ]) {
+    const context = loadViewportRenderSchedulerHarness(options);
+    context.scheduleRender(true, false, 'image-scale-variant-batch-1');
+    assert.equal(context.renderFlags().board, true);
+    assert.equal(context.renderFlags().overlay, true);
+    assert.deepEqual(context.scheduled, ['image-scale-variant-batch-1']);
+  }
+
+  const idle = loadViewportRenderSchedulerHarness();
+  idle.scheduleRender(true, false, 'background-refresh');
+  assert.equal(idle.renderFlags().board, true);
+  assert.equal(idle.renderFlags().overlay, false);
 });

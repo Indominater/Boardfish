@@ -497,9 +497,8 @@ var ClipDebug = (() => {
     const latest = (stepName) => [...run].reverse().find(e => e.step === stepName);
     const firstError = run.find(e => /(?:error|miss|empty)$/i.test(e.step) || e.meta?.error);
     const blobEvent = latest('event-image-blob') || latest('browser-image-blob');
-    const blobReadOk = latest('clipboard-blob-read:ok');
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
-    const addObject = latest('paste:objects-add-start') || latest('paste-image:add-object') || webInsertEnd;
+    const addObject = latest('paste:objects-add-start') || webInsertEnd;
     const end = latest('end');
     const textPayload = latest('paste:objects-add-done') || latest('paste:clone-done') || latest('paste:objects-start') || end;
     const objectCountBefore = pasteStart?.meta?.objectCountBefore ?? '';
@@ -509,7 +508,7 @@ var ClipDebug = (() => {
       : '';
     const pathDetected = webInsertEnd
       ? end?.meta?.path || 'web-paste-blob'
-      : blobReadOk
+      : blobEvent
       ? 'event-or-browser-blob'
       : stepNames.has('browser-clipboard-read:start')
         ? 'browser-read'
@@ -520,12 +519,12 @@ var ClipDebug = (() => {
       ['pasteStarted', true],
       ['eventInspected', stepNames.has('event-clipboard:inspect') || !pasteStart.meta?.clipboardData],
       ['imagePayloadFound', !!blobEvent || !!webInsertEnd || pathDetected === 'browser-read'],
-      ['imagePayloadRead', !!blobReadOk || !!webInsertEnd || pathDetected !== 'unknown'],
+      ['imagePayloadRead', !!blobEvent || !!webInsertEnd || pathDetected !== 'unknown'],
       ['objectAddStarted', !!addObject],
       ['pasteEndedAdded', end?.meta?.added === true || objectDelta > 0],
     ];
     const failedCheckpoint = checkpoints.find(([, ok]) => !ok);
-    const sizeEvent = blobReadOk || blobEvent;
+    const sizeEvent = blobEvent;
     const out = {
       pasteRuns: pasteStarts.length,
       totalMs: end?.total ?? run.at(-1)?.total ?? '',
@@ -541,10 +540,8 @@ var ClipDebug = (() => {
       textCharCount: textPayload?.meta?.textCharCount ?? '',
       largestTextChars: textPayload?.meta?.largestTextChars ?? '',
       pathDetected,
-      imageSource: blobEvent?.meta?.type || blobReadOk?.meta?.blobType || '',
-      blobSize: blobEvent?.meta?.blobSize ?? blobReadOk?.meta?.blobSize ?? '',
-      bytes: blobReadOk?.meta?.bytes ?? blobEvent?.meta?.bytes ?? '',
-      dataUrlLen: blobReadOk?.meta?.dataUrlLen ?? '',
+      imageSource: blobEvent?.meta?.type || '',
+      blobSize: blobEvent?.meta?.blobSize ?? '',
       ...memorySnapshotFromEvent(sizeEvent),
       failedCheckpoint: failedCheckpoint ? failedCheckpoint[0] : '',
       firstErrorStep: firstError?.step || '',
@@ -570,10 +567,8 @@ var ClipDebug = (() => {
     const latest = (stepName) => [...run].reverse().find(e => e.step === stepName);
     const first = (stepName) => run.find(e => e.step === stepName);
     const blobEvent = latest('event-image-blob') || latest('browser-image-blob');
-    const blobReadOk = latest('clipboard-blob-read:ok');
-    const objectAdd = latest('paste:objects-add-start') || latest('paste-image:add-object');
+    const objectAdd = latest('paste:objects-add-start');
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
-    const readyEnd = latest('paste-image:ready-wait-end');
     const cloneDone = latest('paste:clone-done');
     const trimDone = latest('paste:text-trim-done');
     const objectLimitDone = latest('paste:object-limit-done');
@@ -583,9 +578,9 @@ var ClipDebug = (() => {
     const historyDone = latest('paste:boardHistory-done');
     const end = latest('end');
     const textPayload = latest('paste:objects-add-done') || latest('paste:clone-done') || latest('paste:objects-start') || end;
-    const imageReadAt = blobReadOk?.total ?? webInsertEnd?.total ?? '';
+    const imageReadAt = blobEvent?.total ?? webInsertEnd?.total ?? '';
     const objectAt = objectAdd?.total ?? webInsertEnd?.total ?? '';
-    const displayAt = readyEnd?.total ?? webInsertEnd?.total ?? '';
+    const displayAt = webInsertEnd?.total ?? '';
     const out = {
       pasteRuns: pasteStarts.length,
       path: end?.meta?.path || '',
@@ -610,13 +605,8 @@ var ClipDebug = (() => {
       historyMs: typeof historyStart?.total === 'number' && typeof historyDone?.total === 'number'
         ? Math.round((historyDone.total - historyStart.total) * 100) / 100
         : '',
-      blobReadMs: blobReadOk?.meta?.ms ?? '',
-      blobSize: blobEvent?.meta?.blobSize ?? blobReadOk?.meta?.blobSize ?? '',
-      dataUrlLen: blobReadOk?.meta?.dataUrlLen ?? '',
-      readyStage: readyEnd?.meta?.readyStage || end?.meta?.readyStage || '',
-      cacheTotalMs: readyEnd?.meta?.cacheTotalMs ?? '',
-      cacheQueueWaitMs: readyEnd?.meta?.cacheQueueWaitMs ?? '',
-      cacheBitmapMs: readyEnd?.meta?.cacheBitmapMs ?? '',
+      blobSize: blobEvent?.meta?.blobSize ?? '',
+      readyStage: end?.meta?.readyStage || '',
       displayReady: end?.meta?.displayReady ?? (webInsertEnd ? true : ''),
       bitmapReady: end?.meta?.bitmapReady ?? '',
       added: end?.meta?.added ?? '',
@@ -704,7 +694,7 @@ var ClipDebug = (() => {
     const layoutPatch = latest('text-edit-input:layout-patched') || latest('text-edit-input:layout-invalidated');
     const history = latest('text-edit-input:history-recorded');
     const scriptTransform = latest('text-edit-input:script-ranges-transformed');
-    const replacement = latest('text-edit-input:replacement-ready') || latest('paste:text-edit-replace-selection-ready');
+    const replacement = latest('text-edit-input:replacement-ready');
     const rangeText = latest('paste:text-edit-range-text-set');
     const dispatch = latest('paste:text-edit-input-dispatched');
     const windowBeforeMs = Number(options.windowBeforeMs ?? 40) || 40;
@@ -1139,12 +1129,10 @@ var HistoryDebug = (() => {
         e.step === 'end' ||
         e.step === 'cloneObjects' ||
         e.step === 'clone-dirty-objects' ||
-        e.step === 'clone-snapshot' ||
         e.step === 'clone-snapshot-objects' ||
         e.step === 'hydrate-live-text-caches' ||
         e.step === 'replace-board-objects' ||
         e.step === 'restore-selection' ||
-        e.step === 'renderAll' ||
         e.step === 'renderAll-scheduled' ||
         e.step === 'motion-replay' ||
         e.step === 'restore-edit-selection' ||
@@ -1460,11 +1448,9 @@ var ViewportDebug = (() => {
     mousePanHandlerTotalMs: 0,
     maxMousePanHandlerMs: 0,
     imageAdds: 0,
-    imageLoads: 0,
     imageDecodeQueued: 0,
     maxImageDecodeQueueDepth: 0,
     imageDecodes: 0,
-    imageDecodeFailures: 0,
     imageBitmaps: 0,
     imageBitmapFailures: 0,
     imagePreviewPrepared: 0,
@@ -1472,12 +1458,8 @@ var ViewportDebug = (() => {
     imageDrawMissing: 0,
     imageDrawFallback: 0,
     imageDrawErrors: 0,
-    culledImages: 0,
-    culledText: 0,
     croppedImages: 0,
     maxImageAddMs: 0,
-    maxImageLoadMs: 0,
-    maxImageDecodeMs: 0,
     maxImageBitmapMs: 0,
     maxImagePreviewMs: 0,
   };
@@ -1986,11 +1968,9 @@ var ViewportDebug = (() => {
       { metric: 'avgMousePanHandlerMs', value: stats.mousePanHandlerCount ? Math.round(stats.mousePanHandlerTotalMs / stats.mousePanHandlerCount * 100) / 100 : 0 },
       { metric: 'maxMousePanHandlerMs', value: Math.round(stats.maxMousePanHandlerMs * 100) / 100 },
       { metric: 'imageAdds', value: stats.imageAdds },
-      { metric: 'imageLoads', value: stats.imageLoads },
       { metric: 'imageDecodeQueued', value: stats.imageDecodeQueued },
       { metric: 'maxImageDecodeQueueDepth', value: stats.maxImageDecodeQueueDepth },
       { metric: 'imageDecodes', value: stats.imageDecodes },
-      { metric: 'imageDecodeFailures', value: stats.imageDecodeFailures },
       { metric: 'imageBitmaps', value: stats.imageBitmaps },
       { metric: 'imageBitmapFailures', value: stats.imageBitmapFailures },
       { metric: 'imagePreviewPrepared', value: stats.imagePreviewPrepared },
@@ -1998,12 +1978,8 @@ var ViewportDebug = (() => {
       { metric: 'imageDrawMissing', value: stats.imageDrawMissing },
       { metric: 'imageDrawFallback', value: stats.imageDrawFallback },
       { metric: 'imageDrawErrors', value: stats.imageDrawErrors },
-      { metric: 'culledImages', value: stats.culledImages },
-      { metric: 'culledText', value: stats.culledText },
       { metric: 'croppedImages', value: stats.croppedImages },
       { metric: 'maxImageAddMs', value: Math.round(stats.maxImageAddMs * 100) / 100 },
-      { metric: 'maxImageLoadMs', value: Math.round(stats.maxImageLoadMs * 100) / 100 },
-      { metric: 'maxImageDecodeMs', value: Math.round(stats.maxImageDecodeMs * 100) / 100 },
       { metric: 'maxImageBitmapMs', value: Math.round(stats.maxImageBitmapMs * 100) / 100 },
       { metric: 'maxImagePreviewMs', value: Math.round(stats.maxImagePreviewMs * 100) / 100 },
     ];
@@ -2622,11 +2598,9 @@ var ViewportDebug = (() => {
       ok: counts.ok || 0,
       missingKey: counts['missing-key'] || 0,
       missingStore: counts['missing-store'] || 0,
-      missingAssetUrl: counts['missing-asset-url'] || 0,
       missingImageElement: counts['missing-image-element'] || 0,
       bitmapFailedNoFallback: counts['bitmap-failed-no-fallback'] || 0,
       loadedNoBitmap: counts['loaded-no-bitmap'] || 0,
-      notLoaded: counts['not-loaded'] || 0,
     };
     console.table([out]);
     return out;

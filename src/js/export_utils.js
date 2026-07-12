@@ -173,7 +173,7 @@
     return typeof source;
   }
 
-  function recordWebResolveEntry(dbg, obj, index, entry, ms, extra = {}) {
+  function recordWebResolveEntry(obj, index, entry, ms, extra = {}) {
     ExportDebug.recordResolve?.({
       index,
       objectId: obj?.id || '',
@@ -216,12 +216,12 @@
       });
       if (!entry) {
         skippedCount++;
-        recordWebResolveEntry(dbg, imageObjs[i], i, null, performance.now() - itemStart, { phase: 'web-skipped' });
+        recordWebResolveEntry(imageObjs[i], i, null, performance.now() - itemStart, { phase: 'web-skipped' });
         continue;
       }
       downloads.push(entry);
       if (entry.debug?.rendered) renderedCount++;
-      recordWebResolveEntry(dbg, imageObjs[i], i, entry, performance.now() - itemStart);
+      recordWebResolveEntry(imageObjs[i], i, entry, performance.now() - itemStart);
       ExportDebug.recordResolveProgress?.({
         processed: i + 1,
         imageCount: imageObjs.length,
@@ -454,7 +454,7 @@
       const entry = await imageObjectDownloadEntry(imageObjs[i], i, dbg, { filename: name });
       if (!entry) {
         skippedCount++;
-        recordWebResolveEntry(dbg, imageObjs[i], i, null, performance.now() - itemStart, { phase: 'web-skipped' });
+        recordWebResolveEntry(imageObjs[i], i, null, performance.now() - itemStart, { phase: 'web-skipped' });
         if (typeof options.onProgress === 'function') {
           options.onProgress({
             phase: 'prepare-progress',
@@ -465,7 +465,7 @@
         continue;
       }
       if (entry.debug?.rendered) renderedCount++;
-      recordWebResolveEntry(dbg, imageObjs[i], i, entry, performance.now() - itemStart);
+      recordWebResolveEntry(imageObjs[i], i, entry, performance.now() - itemStart);
       ExportDebug.recordResolveProgress?.({
         processed: i + 1,
         imageCount: imageObjs.length,

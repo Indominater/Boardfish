@@ -232,7 +232,7 @@ async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, o
   const displaySrc = isWebImageRef(src) ? webImageDisplaySrc(src) : src;
   if (typeof displaySrc !== 'string' || !displaySrc) return null;
   if (!options.webValidated && isImageDataUrl(src)) {
-    const valid = await BoardfishWebLimits.validateDataUrlImage(src, 'image');
+    const valid = await BoardfishWebLimits.validateDataUrlImage(src);
     if (!valid) return null;
   }
   const dbg = ViewportDebug.start('addImage', { src: displaySrc, cx, cy, exactSize, existingImgKey, bitmapOnly: true });
@@ -243,7 +243,7 @@ async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, o
   const rollbackSource = createImageInsertSourceRollback(imgKey, src);
   try {
     BoardfishImageStore.setSource(imgKey, src);
-    const cacheMetrics = await cacheImage(imgKey, src, null, null, {
+    const cacheMetrics = await cacheImage(imgKey, src, null, {
       resolveOnLoad: options.resolveOnLoad === true,
       readyRenderMinIntervalMs: options.readyRenderMinIntervalMs,
     });

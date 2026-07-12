@@ -199,7 +199,7 @@
     return dataUrlByteLength(text);
   }
 
-  async function validateDataUrlImage(dataUrl, name = 'image', options = {}) {
+  async function validateDataUrlImage(dataUrl, options = {}) {
     return validateImageBytes(dataUrlImageBytesForValidation(dataUrl), options);
   }
 

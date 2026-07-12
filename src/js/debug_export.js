@@ -103,10 +103,8 @@ var ExportDebug = (() => {
         durationMs: 0,
         processed: 0,
         keyCount: 0,
-        tempKeyCount: 0,
         renderedCount: 0,
         fallbackRenderCount: 0,
-        dedupedCount: 0,
         skippedCount: 0,
         errorCount: 0,
         progressUpdates: 0,
@@ -133,7 +131,6 @@ var ExportDebug = (() => {
       },
       smoothness: {
         eventLoopYields: 0,
-        paintWaits: 0,
         totalYieldMs: 0,
         maxYieldMs: 0,
         slowYieldCount: 0,
@@ -197,10 +194,8 @@ var ExportDebug = (() => {
     const r = massive.resolve;
     r.processed++;
     if (meta.key) r.keyCount++;
-    if (meta.tempKey && !meta.reusedTempKey) r.tempKeyCount++;
     if (meta.rendered) r.renderedCount++;
     if (meta.fallbackRender) r.fallbackRenderCount++;
-    if (meta.deduped) r.dedupedCount++;
     if (meta.skipped) r.skippedCount++;
     if (meta.error) {
       r.errorCount++;
@@ -220,7 +215,6 @@ var ExportDebug = (() => {
       phase: meta.phase || '',
       ms: Math.round((meta.ms || 0) * 100) / 100,
       fallbackRender: !!meta.fallbackRender,
-      deduped: !!meta.deduped,
       sourceKind: meta.sourceKind || '',
       bytesMB: meta.bytesMB ?? '',
     }, 'ms');
@@ -233,14 +227,12 @@ var ExportDebug = (() => {
     const s = massive.smoothness;
     const ms = Number(meta.ms) || 0;
     s.eventLoopYields++;
-    if (meta.kind === 'paint-wait') s.paintWaits++;
     s.totalYieldMs += ms;
     s.maxYieldMs = Math.max(s.maxYieldMs, ms);
     if (ms > 50) s.slowYieldCount++;
     pushTop(s.slowestYields, {
       atMs: massiveElapsedMs(),
       phase: meta.phase || '',
-      kind: meta.kind || 'timer',
       ms: Math.round(ms * 100) / 100,
       processed: meta.processed ?? '',
       imageCount: meta.imageCount ?? '',
@@ -281,8 +273,6 @@ var ExportDebug = (() => {
       failedCount: meta.failedCount ?? '',
       missingCount: meta.missingCount ?? '',
       method: meta.method || '',
-      writeConcurrency: meta.writeConcurrency ?? '',
-      writeMs: meta.writeMs ?? '',
       ms: Math.round((meta.ms || 0) * 100) / 100,
     }, 'ms');
     massiveStep('save');
@@ -320,9 +310,6 @@ var ExportDebug = (() => {
       finishedCount,
       preparedCount: meta.preparedCount ?? '',
       totalCount: meta.totalCount ?? '',
-      batchIndex: meta.batchIndex ?? '',
-      batchCount: meta.batchCount ?? '',
-      savedKeyCount: meta.savedKeyCount ?? '',
     });
     massiveStep('ui-progress', meta);
   }
@@ -347,7 +334,6 @@ var ExportDebug = (() => {
       lastError: report.lastError,
       resolved: report.resolve.keyCount,
       resolveErrors: report.resolve.errorCount,
-      deduped: report.resolve.dedupedCount,
       saved: report.save.savedCount,
       saveFailed: report.save.failedCount,
       saveMissing: report.save.missingCount,
@@ -371,7 +357,6 @@ var ExportDebug = (() => {
       resolveProgressUpdates: report.resolve.progressUpdates,
       resolveLastProcessed: report.resolve.lastProcessed,
       resolveLastKeyCount: report.resolve.lastKeyCount,
-      resolveDeduped: report.resolve.dedupedCount,
       saveStartedAtMs: report.save.startedAtMs,
       saveCompletedAtMs: report.save.completedAtMs,
       saveDurationMs: report.save.durationMs,
@@ -407,7 +392,6 @@ var ExportDebug = (() => {
         pctOfTotal: totalMs ? Math.round(report.resolve.durationMs / totalMs * 1000) / 10 : '',
         processed: report.resolve.processed,
         keyCount: report.resolve.keyCount,
-        deduped: report.resolve.dedupedCount,
         skipped: report.resolve.skippedCount,
         updates: report.resolve.progressUpdates,
       },
@@ -453,7 +437,6 @@ var ExportDebug = (() => {
     }
     const out = {
       eventLoopYields: report.smoothness.eventLoopYields,
-      paintWaits: report.smoothness.paintWaits,
       avgYieldMs: report.smoothness.eventLoopYields ? Math.round(report.smoothness.totalYieldMs / report.smoothness.eventLoopYields * 100) / 100 : 0,
       maxYieldMs: Math.round(report.smoothness.maxYieldMs * 100) / 100,
       slowYieldCount: report.smoothness.slowYieldCount,
@@ -463,7 +446,6 @@ var ExportDebug = (() => {
       firstNonZeroText: report.progressUi.firstNonZeroText,
       firstNonZeroAtMs: report.progressUi.firstNonZeroAtMs,
       zeroHoldMs: report.progressUi.zeroHoldMs,
-      resolveDeduped: report.resolve.dedupedCount,
       resolveDurationMs: report.resolve.durationMs,
       saveDurationMs: report.save.durationMs,
     };
@@ -519,26 +501,17 @@ var ExportDebug = (() => {
       dt: e.dt,
       total: e.total,
       imageCount: e.meta?.imageCount ?? '',
-      dataUrlCount: e.meta?.dataUrlCount ?? '',
       keyCount: e.meta?.keyCount ?? '',
       processed: e.meta?.processed ?? '',
-      batchIndex: e.meta?.batchIndex ?? '',
-      batchCount: e.meta?.batchCount ?? '',
-      tempKeyCount: e.meta?.tempKeyCount ?? '',
-      renderedCount: e.meta?.renderedCount ?? '',
-      deduped: e.meta?.deduped ?? '',
       savedCount: e.meta?.savedCount ?? '',
       failedCount: e.meta?.failedCount ?? '',
       missingCount: e.meta?.missingCount ?? '',
-      bytesMB: e.meta?.bytesMB ?? '',
       method: e.meta?.method || '',
       cancelled: e.meta?.cancelled ?? '',
       phase: e.meta?.phase || '',
       tick: e.meta?.tick ?? '',
       elapsedMs: e.meta?.elapsedMs ?? '',
       lagMs: e.meta?.lagMs ?? '',
-      command: e.meta?.command || '',
-      result: e.meta?.result ?? '',
       error: e.meta?.error || '',
     }));
     console.table(rows);
@@ -552,28 +525,20 @@ var ExportDebug = (() => {
         step: e.step,
         total: e.total,
         dt: e.dt,
-        command: e.meta?.command || '',
         imageCount: e.meta?.imageCount ?? '',
         keyCount: e.meta?.keyCount ?? '',
         processed: e.meta?.processed ?? '',
-        batchIndex: e.meta?.batchIndex ?? '',
-        batchCount: e.meta?.batchCount ?? '',
-        tempKeyCount: e.meta?.tempKeyCount ?? '',
-        renderedCount: e.meta?.renderedCount ?? '',
         dataUrlLen: e.meta?.dataUrlLen ?? '',
-        savedCount: e.meta?.savedCount ?? e.meta?.result ?? '',
+        savedCount: e.meta?.savedCount ?? '',
         failedCount: e.meta?.failedCount ?? '',
         missingCount: e.meta?.missingCount ?? '',
-        bytesMB: e.meta?.bytesMB ?? '',
         method: e.meta?.method || '',
-        deduped: e.meta?.deduped ?? '',
         sourceKind: e.meta?.sourceKind || '',
         cancelled: e.meta?.cancelled ?? '',
         phase: e.meta?.phase || '',
         tick: e.meta?.tick ?? '',
         elapsedMs: e.meta?.elapsedMs ?? '',
         lagMs: e.meta?.lagMs ?? '',
-        result: e.meta?.result ?? '',
         error: e.meta?.error || '',
       }));
     console.table(rows);
@@ -593,7 +558,6 @@ var ExportDebug = (() => {
         flipY: e.meta?.flipY ?? '',
         rotation: e.meta?.rotation ?? '',
         sourceKind: e.meta?.sourceKind ?? '',
-        deduped: e.meta?.deduped ?? '',
         sourceMs: e.meta?.sourceMs ?? '',
         loadMs: e.meta?.loadMs ?? '',
         drawMs: e.meta?.drawMs ?? '',
@@ -609,23 +573,13 @@ var ExportDebug = (() => {
       .sort((a, b) => Number(b.totalRenderMs || 0) - Number(a.totalRenderMs || 0));
 
     const saveRows = events
-      .filter(e => e.step === 'save:batch-result' || e.step === 'web-export:folder-write' || e.step === 'web-export:zip-done')
+      .filter(e => e.step === 'web-export:folder-write' || e.step === 'web-export:zip-done')
       .map(e => ({
         id: e.id,
         op: e.op,
         step: e.step,
-        batchIndex: e.meta?.batchIndex ?? '',
-        batchCount: e.meta?.batchCount ?? '',
-        keyCount: e.meta?.keyCount ?? e.meta?.result?.requestedCount ?? '',
-        savedCount: e.meta?.savedCount ?? e.meta?.result?.savedCount ?? '',
-        missingCount: e.meta?.missingCount ?? e.meta?.result?.missingCount ?? '',
-        failedCount: e.meta?.failedCount ?? e.meta?.result?.failedCount ?? '',
-        bytesMB: e.meta?.bytesMB ?? (e.meta?.bytes ? Math.round(e.meta.bytes / 1024 / 1024 * 100) / 100 : (e.meta?.result?.bytes ? Math.round(e.meta.result.bytes / 1024 / 1024 * 100) / 100 : '')),
-        method: e.meta?.method || '',
-        writeConcurrency: e.meta?.writeConcurrency ?? e.meta?.result?.writeConcurrency ?? '',
-        writeMs: e.meta?.writeMs ?? e.meta?.result?.writeMs ?? '',
+        bytesMB: e.meta?.bytes ? Math.round(e.meta.bytes / 1024 / 1024 * 100) / 100 : '',
         ms: e.meta?.ms ?? e.dt ?? '',
-        error: e.meta?.error || '',
       }));
 
     const totals = {
@@ -646,8 +600,6 @@ var ExportDebug = (() => {
 
   function status() {
     const last = events[events.length - 1];
-    const batchResults = events.filter(e => e.step === 'save:batch-result');
-    const keyReady = [...events].reverse().find(e => e.step === 'keys:ready');
     const done = [...events].reverse().find(e => e.step === 'end');
     const watch = [...events].reverse().find(e => e.step === 'watch:tick' || e.step === 'watch:start' || e.step === 'watch:end');
     const out = {
@@ -657,19 +609,13 @@ var ExportDebug = (() => {
       watchTick: watch?.meta?.tick ?? '',
       watchElapsedMs: watch?.meta?.elapsedMs ?? '',
       watchLagMs: watch?.meta?.lagMs ?? '',
-      keyCount: keyReady?.meta?.keyCount ?? '',
-      batchesDone: batchResults.length,
-      batchesTotal: batchResults[batchResults.length - 1]?.meta?.batchCount ?? '',
-      processed: batchResults[batchResults.length - 1]?.meta?.processed ?? '',
-      savedCount: done?.meta?.savedCount ?? batchResults.reduce((n, e) => n + (Number(e.meta?.savedCount) || 0), 0),
-      failedCount: done?.meta?.failedCount ?? batchResults.reduce((n, e) => n + (Number(e.meta?.failedCount) || 0), 0),
-      missingCount: done?.meta?.missingCount ?? batchResults.reduce((n, e) => n + (Number(e.meta?.missingCount) || 0), 0),
-      bytesMB: done?.meta?.bytesMB ?? Math.round(batchResults.reduce((n, e) => n + (Number(e.meta?.bytesMB) || 0), 0) * 100) / 100,
+      savedCount: done?.meta?.savedCount ?? '',
+      failedCount: done?.meta?.failedCount ?? '',
+      missingCount: done?.meta?.missingCount ?? '',
       uiText: massive?.progressUi?.currentText ?? '',
       uiFirstNonZeroAtMs: massive?.progressUi?.firstNonZeroAtMs ?? '',
       resolveProcessed: massive?.resolve?.processed ?? '',
       resolveDurationMs: massive?.resolve?.durationMs ?? '',
-      resolveDeduped: massive?.resolve?.dedupedCount ?? '',
       saveDurationMs: massive?.save?.durationMs ?? '',
       eventLoopYields: massive?.smoothness?.eventLoopYields ?? '',
       maxYieldMs: massive?.smoothness?.maxYieldMs ?? '',

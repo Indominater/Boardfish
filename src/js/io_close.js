@@ -109,7 +109,7 @@ const copyOpeningFreezeCanvas = (sourceCanvas, cloneCanvas) => {
   try {
     cloneCanvas.getContext('2d')?.drawImage(sourceCanvas, 0, 0);
     return true;
-  } catch (err) {
+  } catch {
     return false;
   }
 };
@@ -406,7 +406,6 @@ async function hydrateImageForDisplay(key, dbg = null) {
       imgKey: key,
       ms: performance.now() - t0,
       fetchMs: 0,
-      loadMs: 0,
       readyMs: performance.now() - t0,
       ...(cacheMetrics || {}),
       dataUrlLen: 0,
@@ -425,7 +424,7 @@ async function hydrateImageForDisplay(key, dbg = null) {
     return false;
   }
   const readyStart = performance.now();
-  const cacheMetrics = await cacheImage(key, display.src, dbg, null, {
+  const cacheMetrics = await cacheImage(key, display.src, dbg, {
     skipSourceRegistration: true,
     resolveOnLoad: true,
   });
@@ -436,7 +435,6 @@ async function hydrateImageForDisplay(key, dbg = null) {
     imgKey: key,
     ms: performance.now() - t0,
     fetchMs,
-    loadMs: 0,
     readyMs,
     ...(cacheMetrics || {}),
     dataUrlLen: display.dataUrlLen,

@@ -645,7 +645,7 @@ async function ensureImageDisplaySrc(key, dbg = null) {
   return { src: '', source: 'missing', dataUrlLen: 0 };
 }
 
-async function ensureImageDataUrl(key, dbg = null) {
+async function ensureImageDataUrl(key) {
   const src = imageStore[key];
   if (typeof src === 'string') return src;
   if (isWebImageRef(src)) return webImageDataUrl(src);
@@ -683,7 +683,7 @@ function processImageHydrationQueue() {
     count++;
     ensureImageDisplaySrc(key, dbg)
       .then((display) => {
-        if (display?.src && !getImageDisplayMetadata(key) && !imageBitmapCache[key]) cacheImage(key, source, dbg, null, { skipSourceRegistration: true });
+        if (display?.src && !getImageDisplayMetadata(key) && !imageBitmapCache[key]) cacheImage(key, source, dbg, { skipSourceRegistration: true });
       })
       .catch((err) => OpenDebug.step(dbg, 'hydrate-image:error', { imgKey: key, error: String(err) }));
   }
@@ -736,7 +736,7 @@ const shouldPrepareImagePreviewDebug = (dbg = null) => {
   return isDebugApiEnabled(ViewportDebug) || (!!dbg && isDebugApiEnabled(OpenDebug));
 };
 
-function ensureImagePreviewBitmap(key, img, dbg = null) {
+function ensureImagePreviewBitmap(key, dbg = null) {
   const t0 = performance.now();
   // Placeholder hook for future lower-resolution previews. The timing is kept
   // separate from ImageBitmap creation so readiness reports show the true stage.
@@ -746,7 +746,7 @@ function ensureImagePreviewBitmap(key, img, dbg = null) {
   if (dbg) ViewportDebug.step(dbg, 'previewBitmap', { key, ms, skipped: true });
 }
 
-function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
+function cacheImage(key, src, dbg = null, options = {}) {
   const displaySrc = isWebImageRef(src) ? webImageDisplaySrc(src) : src;
   if (typeof displaySrc !== 'string' || !displaySrc) return;
   const cachedDisplay = getImageDisplayMetadata(key);
@@ -767,7 +767,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     cacheRenderSkipped: '',
     cacheReadyStage: '',
   };
-  const vpDbg = ViewportDebug.start('cacheImage', { key, src: displaySrc, reusedLoadedImage: false, bitmapOnly: true });
+  const vpDbg = ViewportDebug.start('cacheImage', { key, src: displaySrc, bitmapOnly: true });
   const srcInfo = imageSourceDebugInfo(src);
   OpenDebug.step(dbg, 'cache-image:source', {
     imgKey: key,
@@ -876,7 +876,7 @@ function cacheImage(key, src, dbg = null, loadedImg = null, options = {}) {
     if (shouldPrepareImagePreviewDebug(dbg) && imageBitmapCache[key]) {
       const previewStart = performance.now();
       try {
-        ensureImagePreviewBitmap(key, imageBitmapCache[key], dbg);
+        ensureImagePreviewBitmap(key, dbg);
         const previewMs = performance.now() - previewStart;
         cacheMetrics.cachePreviewMs = previewMs;
         ViewportDebug.max('maxImagePreviewMs', previewMs);

@@ -4,7 +4,6 @@ var historyIndex = -1;
 var MAX_HISTORY = 50;
 const HISTORY_OBJECT_FILTERS = Object.freeze({
   all: 'all',
-  image: 'image',
   nonText: 'non-text',
   text: 'text',
 });
@@ -202,15 +201,12 @@ const filterHistoryMotionObjects = (items, filter = HISTORY_OBJECT_FILTERS.all) 
   for (const obj of list) {
     if (filter === HISTORY_OBJECT_FILTERS.text) {
       if (obj?.type === 'text') out.push(obj);
-    } else if (filter === HISTORY_OBJECT_FILTERS.image) {
-      if (obj?.type === 'image') out.push(obj);
     } else if (filter === HISTORY_OBJECT_FILTERS.nonText && obj?.type !== 'text') {
       out.push(obj);
     }
   }
   if (
     filter === HISTORY_OBJECT_FILTERS.text ||
-    filter === HISTORY_OBJECT_FILTERS.image ||
     filter === HISTORY_OBJECT_FILTERS.nonText
   ) return out;
   return list;

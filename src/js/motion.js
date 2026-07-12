@@ -4,6 +4,8 @@ const BoardfishMotion = (() => {
   const root = typeof globalThis !== 'undefined' ? globalThis : window;
   const jelloObjectMotions = new Map();
   const textSelectionJelloMotions = new Map();
+  // Keep the sampled transform until the renderer samples this object again;
+  // async motion cleanup must not move DOM outlines ahead of canvas pixels.
   const lastDrawnObjectMotions = new Map();
   let motionRenderPending = false;
   let motionRenderRequestedAt = 0;
@@ -105,7 +107,6 @@ const BoardfishMotion = (() => {
     textBoxCreate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
       'plain-text-paste-as-text-box',
       'text-box-create',
-      'text-box-redo-create',
       'text-box-resize',
     ]),
     textBoxRemoval: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
@@ -413,7 +414,6 @@ const BoardfishMotion = (() => {
         const endElapsed = motionEndElapsed(motion);
         if (cutoff - motion.startedAt >= endElapsed + 80) {
           motions.delete(id);
-          if (motions === jelloObjectMotions) lastDrawnObjectMotions.delete(id);
           removed++;
         }
       }
@@ -553,7 +553,6 @@ const BoardfishMotion = (() => {
       ...copyJiggleMotionFields(options, baseMotion),
       ...(handoff ? { handoff } : {}),
     };
-    if (!handoff) lastDrawnObjectMotions.delete(obj.id);
     jelloObjectMotions.set(obj.id, motion);
     recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
       id: obj.id,

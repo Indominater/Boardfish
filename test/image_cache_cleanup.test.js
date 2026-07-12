@@ -132,16 +132,8 @@ test('cacheImage keeps an existing current bitmap and closes a racing duplicate'
     resolveBitmap = resolve;
   }));
   const src = 'data:image/png;base64,boardfish';
-  const loadedImg = {
-    naturalWidth: 16,
-    naturalHeight: 16,
-    currentSrc: src,
-    src,
-    complete: true,
-  };
-
   context.imageStore['img-1'] = src;
-  const ready = context.cacheImage('img-1', src, null, loadedImg, { skipSourceRegistration: true });
+  const ready = context.cacheImage('img-1', src, null, { skipSourceRegistration: true });
   assert.equal(rafs.length, 1);
 
   rafs.shift()();
@@ -178,7 +170,7 @@ test('cacheImage retries a stale in-flight web ref against its refreshed source'
   };
   context.imageStore['img-1'] = source;
 
-  const firstReady = context.cacheImage('img-1', source, null, null, { skipSourceRegistration: true });
+  const firstReady = context.cacheImage('img-1', source, null, { skipSourceRegistration: true });
   assert.equal(rafs.length, 1);
   rafs.shift()();
   source.displaySrc = 'blob:after-save';
@@ -211,7 +203,7 @@ test('cacheImage queues full bitmap draw warmup for active-fallback safety', asy
   };
   context.imageStore['img-1'] = src;
 
-  const ready = context.cacheImage('img-1', src, null, null, { skipSourceRegistration: true });
+  const ready = context.cacheImage('img-1', src, null, { skipSourceRegistration: true });
   assert.equal(rafs.length, 1);
   rafs.shift()();
   await ready;
@@ -238,7 +230,7 @@ test('cacheImage prioritizes the exact scaled replacement for an active open pre
   });
   context.imageStore['img-1'] = src;
 
-  const ready = context.cacheImage('img-1', src, null, null, { skipSourceRegistration: true });
+  const ready = context.cacheImage('img-1', src, null, { skipSourceRegistration: true });
   rafs.shift()();
   await ready;
 

@@ -54,10 +54,8 @@ var InsertDebug = (() => {
         readMode: e.meta?.readMode || '',
         sourceKind: e.meta?.sourceKind || '',
         imgKey: e.meta?.imgKey || '',
-        dataUrlLen: e.meta?.dataUrlLen ?? '',
         width: e.meta?.width ?? '',
         height: e.meta?.height ?? '',
-        materializeMs: e.step === 'materialize:end' ? e.meta?.ms ?? e.dt : '',
         cacheReadyStage: e.meta?.cacheReadyStage || '',
         cacheTotalMs: e.meta?.cacheTotalMs ?? '',
         cacheQueueWaitMs: e.meta?.cacheQueueWaitMs ?? '',
@@ -107,7 +105,6 @@ var InsertDebug = (() => {
         const run = eventsForId(end.id);
         const start = run.find(e => e.step === 'start');
         const readEnd = lastStep(run, 'read:end');
-        const materialize = lastStep(run, 'materialize:end');
         const objectAdd = lastStep(run, 'object:add');
         const ready = lastStep(run, 'ready');
         const cacheQueued = lastStep(run, 'cache:queued');
@@ -119,7 +116,6 @@ var InsertDebug = (() => {
           totalMs: end.total ?? '',
           readMs: readEnd?.dt ?? '',
           readMode: readEnd?.meta?.readMode || '',
-          materializeMs: materialize?.meta?.ms ?? materialize?.dt ?? '',
           objectAtMs: objectAdd?.total ?? '',
           readyAtMs: ready?.total ?? '',
           readyStage: ready?.meta?.cacheReadyStage || '',
@@ -162,14 +158,9 @@ var InsertDebug = (() => {
     const start = findStep('start');
     const imageEnds = events().filter(e => e.op === 'insertImage' && e.step === 'end' && e.meta?.source === last.meta?.source);
     const readEnds = events().filter(e => e.op === 'insertImage' && e.step === 'read:end' && e.meta?.source === last.meta?.source);
-    const registerEnds = events().filter(e => e.op === 'insertImage' && e.step === 'register:end' && e.meta?.source === last.meta?.source);
     const objectAdd = start ? firstStepAfter(start.at, 'object:add') : null;
     const displayReady = start ? firstStepAfter(start.at, 'ready') : null;
-    const pickerEnd = [...events()].reverse().find(e => e.op === 'pickImages' && e.step === 'end');
     const concurrencyStep = findStep('bulk:start');
-    const registerSource = registerEnds;
-    const maxRegisterMs = registerSource.reduce((n, e) => Math.max(n, Number(e.dt) || 0), 0);
-    const maxRegister = registerSource.find(e => (Number(e.dt) || 0) === maxRegisterMs);
     const maxReadMs = readEnds.reduce((n, e) => Math.max(n, Number(e.dt) || 0), 0);
     const maxRead = readEnds.find(e => (Number(e.dt) || 0) === maxReadMs);
     const readyStart = findStep('ready:wait-start');
@@ -183,7 +174,6 @@ var InsertDebug = (() => {
       acceptedFileCount: last.meta?.acceptedFileCount ?? '',
       droppedFileCount: last.meta?.droppedFileCount ?? '',
       totalMs: last.total ?? '',
-      pickerMs: pickerEnd?.meta?.source === last.meta?.source ? pickerEnd.total : '',
       concurrency: concurrencyStep?.meta?.concurrency ?? '',
       timeToFirstObjectMs: start && objectAdd ? round(objectAdd.at - start.at) : '',
       timeToFirstDisplayMs: start && displayReady ? round(displayReady.at - start.at) : '',
@@ -191,12 +181,9 @@ var InsertDebug = (() => {
       maxReadMs: round(maxReadMs),
       maxReadFile: maxRead?.meta?.fileName || '',
       registerMs,
-      materializeMsTotal: round(sumStepMs(last.meta?.source, 'materialize:end')),
       readyWaitMs: readyStart && readyEnd ? round(readyEnd.total - readyStart.total) : 0,
       readyCount: readyStart?.meta?.readyCount ?? '',
       historyAdded: bulkEnd?.meta?.historyAdded ?? '',
-      maxRegisterMs: round(maxRegisterMs),
-      maxRegisterFile: maxRegister?.meta?.fileName || '',
       errors: imageEnds.filter(e => e.meta?.error).length,
     };
     console.table([out]);

@@ -138,7 +138,6 @@ var OpenDebug = (() => {
       rustBoardJsonReadMs: e.meta?.rust?.board_json_read_ms ?? '',
       rustBoardJsonParseMs: e.meta?.rust?.board_json_parse_ms ?? '',
       rustImageReadMs: e.meta?.rust?.image_read_ms ?? '',
-      rustCacheInsertMs: e.meta?.rust?.cache_insert_ms ?? '',
       rustImageBytes: e.meta?.rust?.image_bytes ?? '',
       rustTotalMs: e.meta?.rust?.total_ms ?? '',
       error: e.meta?.error || '',
@@ -209,7 +208,6 @@ var OpenDebug = (() => {
       rustImageReadMaxKey: e.meta?.rust?.image_read_max_key ?? '',
       rustLazyImageRefs: e.meta?.rust?.lazy_image_refs ?? '',
       rustImageCrcMs: e.meta?.rust?.image_crc_ms ?? '',
-      rustCacheInsertMs: e.meta?.rust?.cache_insert_ms ?? '',
       ms: e.meta?.ms ?? '',
       skipped: e.meta?.skipped ?? '',
     }));
@@ -239,15 +237,11 @@ var OpenDebug = (() => {
     const rows = events.filter(e => e.step === 'hydrate-image').map(e => e.meta || {});
     const sum = (field) => rows.reduce((n, row) => n + (Number(row[field]) || 0), 0);
     const max = (field) => rows.reduce((n, row) => Math.max(n, Number(row[field]) || 0), 0);
-    const countSource = (source) => rows.filter((row) => row.source === source).length;
     const out = {
       imageCount: rows.length,
-      assetImages: countSource('asset'),
-      fallbackDataUrlImages: countSource('data-url-fallback'),
       totalDataUrlMB: Math.round(sum('dataUrlLen') / 1024 / 1024 * 100) / 100,
       totalImageHydrateMs: Math.round(sum('ms') * 100) / 100,
       totalFetchMs: Math.round(sum('fetchMs') * 100) / 100,
-      totalLoadMs: Math.round(sum('loadMs') * 100) / 100,
       totalBitmapMs: Math.round(sum('cacheBitmapMs') * 100) / 100,
       maxImageMs: Math.round(max('ms') * 100) / 100,
       maxFetchMs: Math.round(max('fetchMs') * 100) / 100,
@@ -271,7 +265,6 @@ var OpenDebug = (() => {
         previewMs: 0,
         renderScheduleMs: 0,
         renderSkipped: '',
-        loadMs: 0,
         bitmapReady: '',
         bitmapFailed: '',
         error: '',
@@ -309,7 +302,6 @@ var OpenDebug = (() => {
         imgKey: e.meta?.imgKey || '',
         totalMs: e.meta?.ms ?? '',
         fetchMs: e.meta?.fetchMs ?? '',
-        loadMs: e.meta?.loadMs ?? '',
         readyMs: e.meta?.readyMs ?? '',
         cacheReadyStage: e.meta?.cacheReadyStage ?? '',
         cacheTotalMs: e.meta?.cacheTotalMs ?? '',
@@ -351,7 +343,6 @@ var OpenDebug = (() => {
         visibleBitmapSettleMs: e.meta?.visibleBitmapSettleMs ?? '',
         manifestRefs: e.meta?.manifestRefs ?? '',
         dataUrlRefs: e.meta?.dataUrlRefs ?? '',
-        missingStoreRefs: e.meta?.missingStoreRefs ?? '',
         deferredInitialCacheImages: e.meta?.deferredInitialCacheImages ?? '',
         visibleFirstOpen: e.meta?.visibleFirstOpen ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
@@ -426,7 +417,6 @@ var OpenDebug = (() => {
         imgKey: e.meta?.imgKey || '',
         totalMs: e.meta?.ms ?? '',
         fetchMs: e.meta?.fetchMs ?? '',
-        loadMs: e.meta?.loadMs ?? '',
         cacheReadyStage: e.meta?.cacheReadyStage ?? '',
         bitmapMs: e.meta?.cacheBitmapMs ?? '',
         dataUrlLen: e.meta?.dataUrlLen ?? '',

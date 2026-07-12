@@ -1915,6 +1915,18 @@ function scheduleTransform(source = 'transform', inputEvent = null) {
 
 function scheduleRender(board = true, overlay = true, source = 'render') {
   if (board) _needBoardRender = true;
-  if (overlay) _needOverlayRender = true;
+  // Drawing samples object motion before painting the canvas. Keep the DOM
+  // outlines in that same frame whenever a selection surface is active, even
+  // for callers that otherwise request a board-only image/cache refresh.
+  if (
+    overlay ||
+    (board && (
+      hasSelection() ||
+      selOverlay.classList.contains('visible') ||
+      multiSelOverlay.classList.contains('visible')
+    ))
+  ) {
+    _needOverlayRender = true;
+  }
   scheduleFrame(source);
 }

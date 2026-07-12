@@ -1186,6 +1186,44 @@ test('object motion exposes the exact transform most recently used for drawing',
   assert.equal(motion.getLastDrawnObjectMotion(text), null);
 });
 
+test('motion cleanup preserves the last rendered transform until the next object draw', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const image = { id: 'late-frame-image', type: 'image', x: 10, y: 20, w: 100, h: 80 };
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
+  setTime(100);
+  const lastRendered = motion.objectMotionForDraw(image, { view: { zoom: 1 } });
+  assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
+
+  setTime(700);
+  motion.afterViewportRenderFrame({ source: 'late-board-frame' });
+  assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
+
+  assert.equal(motion.objectMotionForDraw(image, { view: { zoom: 1 } }), null);
+  assert.equal(motion.getLastDrawnObjectMotion(image), null);
+});
+
+test('starting a new motion does not discard the transform still on screen', () => {
+  const { context, setTime } = loadMotion();
+  const motion = context.BoardfishMotion;
+  const image = { id: 'restarted-image', type: 'image', x: 10, y: 20, w: 100, h: 80 };
+
+  setTime(0);
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
+  setTime(100);
+  const lastRendered = motion.objectMotionForDraw(image, { view: { zoom: 1 } });
+
+  setTime(600);
+  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
+  assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
+
+  const nextRendered = motion.objectMotionForDraw(image, { view: { zoom: 1 } });
+  assert.ok(nextRendered);
+  assert.strictEqual(motion.getLastDrawnObjectMotion(image), nextRendered);
+});
+
 test('copy text selection jiggle uses fixed screen-distance translation independent of selection length', () => {
   const { context, setTime } = loadMotion();
   const motion = context.BoardfishMotion;

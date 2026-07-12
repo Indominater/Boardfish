@@ -250,7 +250,6 @@ var MenuDebug = (() => {
       objVisible: e.objVisible,
       shieldActive: e.shieldActive,
       defaultPrevented: e.defaultPrevented ?? '',
-      propagationStopped: e.propagationStopped ?? '',
       elementAtPointer: e.elementAtPointer,
     }));
     console.table(rows);

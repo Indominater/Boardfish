@@ -681,7 +681,7 @@ const shouldDeferTextEditAutoHeightForInput = (obj, options = {}) => {
   return contentLength >= TEXT_EDIT_DEFER_AUTO_HEIGHT_CHARS;
 };
 
-const syncTextEditAutoHeightForInput = (obj, inputType, minLines = 1, options = {}) => {
+const syncTextEditAutoHeightForInput = (obj, minLines = 1, options = {}) => {
   if (shouldDeferTextEditAutoHeightForInput(obj, options)) {
     obj._textEditPendingSizeSync = true;
     return { heightChanged: false, deferred: true };
@@ -1756,7 +1756,7 @@ const exitTextScriptForLineBreak = (obj, proxy) => {
   return true;
 };
 
-const textScriptCaretAffinityForInput = (obj, proxy, event, selection) => {
+const textScriptCaretAffinityForInput = (obj, proxy, selection) => {
   const start = selection?.start ?? proxy?.selectionStart ?? 0;
   return obj?._textScriptCaretIndex === start ? obj._textScriptCaretAffinity : '';
 };
@@ -2818,7 +2818,7 @@ function enterEdit(id, {
       currentProxyValue = textEditProxyValue(proxy);
     }
     const scriptRanges = textEditScriptRanges(obj);
-    const scriptCaretAffinity = textScriptCaretAffinityForInput(obj, proxy, event, selection);
+    const scriptCaretAffinity = textScriptCaretAffinityForInput(obj, proxy, selection);
     const nativeReplacement = textEditBeforeInputReplacement(currentProxyValue, selection, event);
     pendingInputState = {
       ...selection,
@@ -3094,7 +3094,7 @@ function enterEdit(id, {
           : (deleteShrankPendingEdit ? 'pending-size-delete' : '')));
     const sizeBeforeAutoHeight = textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight');
     const proxySizeBeforeAutoHeight = textEditorProxySizeDebugStats(proxy);
-    const autoHeightResult = syncTextEditAutoHeightForInput(obj, inputType, getTextMinLines(obj), {
+    const autoHeightResult = syncTextEditAutoHeightForInput(obj, getTextMinLines(obj), {
       forceSync: !!autoHeightForceReason,
     });
     const heightChanged = autoHeightResult.heightChanged;

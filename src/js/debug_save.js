@@ -106,8 +106,6 @@ var SaveDebug = (() => {
     const rows = core.events
       .filter(e => (
         e.step === 'boardData' ||
-        e.step === 'json-stringify' ||
-        e.step.startsWith('await-image-source-cache') ||
         e.step.startsWith('save-frame-probe') ||
         (e.step === 'invoke:ok' && /save_board|web_save_board/.test(e.meta?.command || '')) ||
         e.step === 'markSaved:end' ||
@@ -191,9 +189,8 @@ var SaveDebug = (() => {
       op: run[0]?.op || '',
       totalMs: end?.total ?? '',
       boardDataMs: find('boardData')?.meta?.ms ?? '',
-      jsonStringifyMs: rust.json_stringify_ms ?? find('json-stringify')?.meta?.ms ?? '',
+      jsonStringifyMs: rust.json_stringify_ms ?? '',
       jsonEncodeMs: rust.json_encode_ms ?? '',
-      imageSourceWaitMs: find('await-image-source-cache:end')?.meta?.ms ?? '',
       invokeMs: invokeOk?.meta?.ms ?? '',
       rustValidateMs: rust.validate_ms ?? '',
       rustSourceLookupMs: rust.source_lookup_ms ?? '',
@@ -214,7 +211,7 @@ var SaveDebug = (() => {
       zipMode: rust.zip_mode ?? '',
       zipBytes: rust.zip_bytes ?? '',
       rustTotalMs: rust.total_ms ?? '',
-      jsonBytes: invokeOk?.meta?.rust?.json_bytes ?? find('json-stringify')?.meta?.jsonBytes ?? '',
+      jsonBytes: invokeOk?.meta?.rust?.json_bytes ?? '',
       imageBytes: rust.image_bytes ?? '',
       imageCount: rust.image_count ?? find('boardData')?.meta?.imageCount ?? '',
       textObjectCount: find('boardData')?.meta?.textObjectCount ?? '',
