@@ -946,7 +946,7 @@ var ManualPerfDebug = (() => {
     return { lines: '', source: '' };
   }
 
-  function textEditSizeSnapshot(obj, content = '', prefix = '') {
+  function textEditSizeSnapshot(obj, content = '', prefix = '', { eventPayload = false } = {}) {
     const key = (name) => textEditCap(prefix, name);
     if (!obj || obj.type !== 'text') return {};
     const text = normalizeTextContent(content);
@@ -965,25 +965,29 @@ var ManualPerfDebug = (() => {
       [key('logicalLines')]: logicalLines,
       [key('cachedLines')]: cached.lines,
       [key('cachedLineSource')]: cached.source,
-      [key('objectHeight')]: obj.h ?? '',
+      ...(eventPayload ? {} : { [key('objectHeight')]: obj.h ?? '' }),
       [key('heightLines')]: textEditHeightLines(obj.h),
-      [key('editMinLines')]: minLines,
+      ...(eventPayload ? {} : { [key('editMinLines')]: minLines }),
       [key('expectedLogicalHeight')]: expectedLogicalHeight,
       [key('expectedCachedHeight')]: expectedCachedHeight,
       [key('heightDeltaFromLogical')]: Number(obj.h) - expectedLogicalHeight,
       [key('heightDeltaFromCached')]: expectedCachedHeight === '' ? '' : Number(obj.h) - expectedCachedHeight,
-      [key('lineHeight')]: lineH,
-      [key('textPad')]: pad,
+      ...(eventPayload ? {} : {
+        [key('lineHeight')]: lineH,
+        [key('textPad')]: pad,
+      }),
     };
   }
 
-  function textEditProxySizeSnapshot(proxy = _editEl) {
+  function textEditProxySizeSnapshot(proxy = _editEl, { eventPayload = false } = {}) {
     if (!proxy) return {};
     return {
       proxyScrollHeight: proxy.scrollHeight ?? '',
       proxyClientHeight: proxy.clientHeight ?? '',
-      proxyOffsetHeight: proxy.offsetHeight ?? '',
-      proxyStyleHeight: proxy.style?.height || '',
+      ...(eventPayload ? {} : {
+        proxyOffsetHeight: proxy.offsetHeight ?? '',
+        proxyStyleHeight: proxy.style?.height || '',
+      }),
     };
   }
 
@@ -1069,13 +1073,10 @@ var ManualPerfDebug = (() => {
     const logicalValueLength = typeof textEditProxyValue === 'function' && _editEl
       ? textEditProxyValue(_editEl).length
       : domValueLength;
-    const clipboardTypes = event?.clipboardData?.types ? Array.from(event.clipboardData.types) : [];
     const meta = {
       at: round(now),
-      sinceStartMs: textEditMathSession ? now - textEditMathSession.startedAtMs : '',
       gapMs: textEditMathLastEventAt ? now - textEditMathLastEventAt : '',
       eventType: event?.type || '',
-      eventAt,
       eventAgeMs: Math.max(0, now - eventAt),
       inputType: event?.inputType || '',
       shortcut: textEditMathShortcutFromEvent(event),
@@ -1087,20 +1088,12 @@ var ManualPerfDebug = (() => {
       deltaY: event?.deltaY ?? '',
       clientX: event?.clientX ?? '',
       clientY: event?.clientY ?? '',
-      button: event?.button ?? '',
       buttons: event?.buttons ?? '',
-      isComposing: !!event?.isComposing,
       ctrlKey: !!event?.ctrlKey,
       metaKey: !!event?.metaKey,
-      shiftKey: !!event?.shiftKey,
-      altKey: !!event?.altKey,
       defaultPrevented: !!event?.defaultPrevented,
-      cancelable: !!event?.cancelable,
       target: eventTargetLabel(event?.target),
-      editingId: id,
-      hasEditProxy: !!_editEl,
       valueLength: logicalValueLength,
-      logicalValueLength,
       domValueLength,
       domValueStale: !!_editEl?._boardfishDomValueStale,
       objectContentLength: typeof obj?.data?.content === 'string' ? obj.data.content.length : '',
@@ -1108,10 +1101,15 @@ var ManualPerfDebug = (() => {
       objectH: obj?.h ?? '',
       editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
       pendingSizeSync: !!obj?._textEditPendingSizeSync,
-      ...textEditSizeSnapshot(obj, typeof _editEl?._boardfishLogicalValue === 'string'
-        ? _editEl._boardfishLogicalValue
-        : (typeof obj?.data?.content === 'string' ? obj.data.content : '')),
-      ...textEditProxySizeSnapshot(_editEl),
+      ...textEditSizeSnapshot(
+        obj,
+        typeof _editEl?._boardfishLogicalValue === 'string'
+          ? _editEl._boardfishLogicalValue
+          : (typeof obj?.data?.content === 'string' ? obj.data.content : ''),
+        '',
+        { eventPayload: true },
+      ),
+      ...textEditProxySizeSnapshot(_editEl, { eventPayload: true }),
       layoutCachePresent: !!obj?._layoutCache,
       layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
       historyLength: typeof boardHistory !== 'undefined' && Array.isArray(boardHistory) ? boardHistory.length : '',
@@ -1121,8 +1119,6 @@ var ManualPerfDebug = (() => {
       selectionLength: Number.isFinite(selectionStart) && Number.isFinite(selectionEnd)
         ? Math.abs(selectionEnd - selectionStart)
         : '',
-      selectionDirection: _editEl?.selectionDirection || '',
-      clipboardTypes,
     };
     textEditMathLastEventAt = now;
     return sanitizePerfMeta(meta);
@@ -1545,7 +1541,6 @@ var ManualPerfDebug = (() => {
     const now = performance.now();
     const entry = sanitizePerfMeta({
       at: round(now),
-      sinceStartMs: textEditMathSession ? now - textEditMathSession.startedAtMs : '',
       gapMs: textEditInputStepLastAt ? now - textEditInputStepLastAt : '',
       step,
       ...meta,

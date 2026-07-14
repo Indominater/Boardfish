@@ -90,12 +90,10 @@ function loadImageState(createImageBitmap) {
   vm.runInContext(
     `${fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8')}\n` +
       'globalThis.removeImageRuntimeCachesForKey = removeImageRuntimeCachesForKey;\n' +
-      'globalThis.pruneImageCachesToKeys = pruneImageCachesToKeys;\n' +
       'globalThis.newImgKey = newImgKey;\n' +
       'globalThis.hasOpenInitialImagePreviews = hasOpenInitialImagePreviews;\n' +
       'globalThis.releaseReadyOpenInitialImagePreviewsForOpen = releaseReadyOpenInitialImagePreviewsForOpen;\n' +
       'globalThis.resolveOpenInitialImageSourceForDraw = resolveOpenInitialImageSourceForDraw;\n' +
-      'globalThis.requestOpenInitialImagePreviewForDraw = requestOpenInitialImagePreviewForDraw;\n' +
       'globalThis.bitmapSourceFromImageSource = bitmapSourceFromImageSource;\n' +
       'globalThis.ensureImageDataUrl = ensureImageDataUrl;\n' +
       'globalThis.clearImageStore = clearImageStore;\n',

@@ -75,7 +75,6 @@ function loadTextScriptEditorHelpers() {
       'globalThis.createTextSelectionClipboardPayload = createTextSelectionClipboardPayload;\n' +
       'globalThis.textSelectionPayloadFromBoardfishClipboardValue = textSelectionPayloadFromBoardfishClipboardValue;\n' +
       'globalThis.syncFreshTextEditWidth = syncFreshTextEditWidth;\n' +
-      'globalThis.textScriptCaretAffinityForInput = textScriptCaretAffinityForInput;\n' +
       'globalThis.textScriptCaretRangesAfterInput = textScriptCaretRangesAfterInput;\n' +
       'globalThis.setTextScriptCaretAffinityForRanges = setTextScriptCaretAffinityForRanges;\n' +
       'globalThis.textScriptLinearToDeterministicBraces = textScriptLinearToDeterministicBraces;\n' +

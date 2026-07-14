@@ -120,9 +120,6 @@ function loadViewportPillHarness() {
         if (payload.pill) motionCalls.push(islZoom.textContent);
         return !!payload.pill;
       },
-      bumpIsland() {
-        motionCalls.push(islZoom.textContent);
-      },
     },
     motionCalls,
   };
@@ -170,6 +167,75 @@ function loadViewportRenderSchedulerHarness({ selected = false, overlayVisible =
       'globalThis.renderFlags = () => ({ board: _needBoardRender, overlay: _needOverlayRender });\n',
     context,
     { filename: 'viewport-render-scheduler.js' },
+  );
+  return context;
+}
+
+function loadViewportCanvasSizeHarness({
+  rect = { width: 1660, height: 1080 },
+  clientWidth = 1660,
+  clientHeight = 1080,
+  innerWidth = 1660,
+  innerHeight = 1030,
+  dpr = 2,
+} = {}) {
+  const source = fs.readFileSync(path.join(root, 'src', 'js', 'viewport.js'), 'utf8');
+  const sectionStart = source.indexOf('var _canvasResizeObserver = null;');
+  assert.ok(sectionStart > 0, 'canvas size tracking state is missing');
+  const sectionEnd = source.indexOf('\nvar VIEWPORT_CULL_PADDING_PX', sectionStart);
+  assert.ok(sectionEnd > sectionStart, 'canvas size tracking section is unterminated');
+  const boardCanvas = {
+    width: innerWidth * dpr,
+    height: innerHeight * dpr,
+    clientWidth,
+    clientHeight,
+  };
+  const context = {
+    surfaceRect: { ...rect },
+    canvas: {
+      getBoundingClientRect() {
+        return context.surfaceRect;
+      },
+    },
+    boardCanvas,
+    invalidations: 0,
+    renders: [],
+    observedTargets: [],
+    resizeObserverInstances: 0,
+    visualViewportListeners: [],
+    invalidateOffscreen() {
+      context.invalidations++;
+    },
+    scheduleRender(board, overlay) {
+      context.renders.push({ board, overlay });
+    },
+    ResizeObserver: class ResizeObserver {
+      constructor(callback) {
+        context.resizeObserverInstances++;
+        context.resizeObserverCallback = callback;
+      }
+      observe(target) {
+        context.observedTargets.push(target);
+      }
+    },
+    window: {
+      innerWidth,
+      innerHeight,
+      devicePixelRatio: dpr,
+      visualViewport: {
+        addEventListener(type, listener) {
+          context.visualViewportListeners.push({ type, listener });
+        },
+      },
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${source.slice(sectionStart, sectionEnd)}\n` +
+      'globalThis.resizeCanvas = resizeCanvas;\n' +
+      'globalThis.startCanvasSizeTracking = startCanvasSizeTracking;\n',
+    context,
+    { filename: 'viewport-canvas-size.js' },
   );
   return context;
 }
@@ -262,4 +328,40 @@ test('board-only refreshes also schedule active selection overlays', () => {
   idle.scheduleRender(true, false, 'background-refresh');
   assert.equal(idle.renderFlags().board, true);
   assert.equal(idle.renderFlags().overlay, false);
+});
+
+test('canvas backing store follows the rendered surface instead of stale window dimensions', () => {
+  const context = loadViewportCanvasSizeHarness();
+
+  assert.equal(context.resizeCanvas(), true);
+  assert.equal(context.boardCanvas.width, 3320);
+  assert.equal(context.boardCanvas.height, 2160);
+  assert.equal(context.invalidations, 1);
+  assert.deepEqual(context.renders, [{ board: true, overlay: false }]);
+
+  assert.equal(context.resizeCanvas(), false);
+  assert.equal(context.invalidations, 1);
+  assert.deepEqual(context.renders, [{ board: true, overlay: false }]);
+});
+
+test('canvas size tracking observes the rendered surface exactly once', () => {
+  const context = loadViewportCanvasSizeHarness({
+    rect: { width: 1660, height: 1030 },
+    clientHeight: 1030,
+  });
+
+  context.startCanvasSizeTracking();
+  context.startCanvasSizeTracking();
+
+  assert.equal(context.resizeObserverInstances, 1);
+  assert.equal(context.observedTargets.length, 1);
+  assert.strictEqual(context.observedTargets[0], context.canvas);
+  assert.equal(context.visualViewportListeners.length, 1);
+  assert.equal(context.visualViewportListeners[0].type, 'resize');
+
+  context.surfaceRect.height = 1080;
+  context.resizeObserverCallback();
+  assert.equal(context.boardCanvas.height, 2160);
+  assert.equal(context.invalidations, 1);
+  assert.deepEqual(context.renders, [{ board: true, overlay: false }]);
 });

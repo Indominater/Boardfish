@@ -268,15 +268,52 @@ function markDirty(id) {
 
 // ─── Canvas resize ────────────────────────────────────────────────────────────
 
-function resizeCanvas() {
+var _canvasResizeObserver = null;
+var _visualViewportResizeListening = false;
+
+function boardSurfaceCssSize() {
+  const rect = typeof canvas?.getBoundingClientRect === 'function'
+    ? canvas.getBoundingClientRect()
+    : null;
+  const rectWidth = Number(rect?.width);
+  const rectHeight = Number(rect?.height);
+  const clientWidth = Number(boardCanvas?.clientWidth);
+  const clientHeight = Number(boardCanvas?.clientHeight);
+  const windowWidth = Number(window.innerWidth);
+  const windowHeight = Number(window.innerHeight);
+  return {
+    width: rectWidth > 0 ? rectWidth : clientWidth > 0 ? clientWidth : windowWidth > 0 ? windowWidth : 1,
+    height: rectHeight > 0 ? rectHeight : clientHeight > 0 ? clientHeight : windowHeight > 0 ? windowHeight : 1,
+  };
+}
+
+function syncBoardCanvasBackingStore() {
   const dpr = window.devicePixelRatio || 1;
-  const width = Math.round(window.innerWidth * dpr);
-  const height = Math.round(window.innerHeight * dpr);
-  if (boardCanvas.width === width && boardCanvas.height === height) return;
+  const surface = boardSurfaceCssSize();
+  const width = Math.max(1, Math.round(surface.width * dpr));
+  const height = Math.max(1, Math.round(surface.height * dpr));
+  if (boardCanvas.width === width && boardCanvas.height === height) return false;
   boardCanvas.width = width;
   boardCanvas.height = height;
   invalidateOffscreen();
+  return true;
+}
+
+function resizeCanvas() {
+  if (!syncBoardCanvasBackingStore()) return false;
   scheduleRender(true, false);
+  return true;
+}
+
+function startCanvasSizeTracking() {
+  if (!_canvasResizeObserver && typeof ResizeObserver === 'function') {
+    _canvasResizeObserver = new ResizeObserver(() => resizeCanvas());
+    _canvasResizeObserver.observe(canvas);
+  }
+  if (!_visualViewportResizeListening && window.visualViewport?.addEventListener) {
+    window.visualViewport.addEventListener('resize', resizeCanvas);
+    _visualViewportResizeListening = true;
+  }
 }
 
 var VIEWPORT_CULL_PADDING_PX = 256;
@@ -911,6 +948,9 @@ function drawBoard(options = {}) {
     if (collectViewportDebug) ViewportDebug.end(dbg, { skipped: 'board-opening' });
     return;
   }
+  // Native window geometry can settle without a final window.resize event.
+  // Keep canvas pixels in the same CSS coordinate space as DOM selections.
+  syncBoardCanvasBackingStore();
   const hasOpenPreviewFallback = typeof hasOpenInitialImagePreviews === 'function' &&
     hasOpenInitialImagePreviews();
   const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;

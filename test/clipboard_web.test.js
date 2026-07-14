@@ -43,7 +43,6 @@ function loadClipboardStateHarness() {
   vm.runInContext(
     `${source}\n` +
       'globalThis.setJsClipboard = setJsClipboard;\n' +
-      'globalThis.clearJsClipboard = clearJsClipboard;\n' +
       'globalThis.getJsClipboardWebToken = getJsClipboardWebToken;\n' +
       'globalThis.markJsClipboardWebTokenWritten = markJsClipboardWebTokenWritten;\n' +
       'globalThis.markJsClipboardMaybeStaleFromWebBlur = markJsClipboardMaybeStaleFromWebBlur;\n' +

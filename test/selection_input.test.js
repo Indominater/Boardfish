@@ -99,7 +99,6 @@ function loadSelectionInputHarness(objects, options = {}) {
     syncedTextIds: [],
     motionPulses: [],
     isMultiSelected: () => selectedIds.size > 1,
-    selectedObjectsList: () => objects,
     selectedBounds: () => objectBounds(objects),
     hasSelection: () => selectedIds.size > 0,
     getFirstSelectedObject: () => objects[0] || null,

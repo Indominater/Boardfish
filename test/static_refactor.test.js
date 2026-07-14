@@ -327,7 +327,8 @@ test('save validation reuses container serialization instead of stringifying the
   assert.ok(saveSource.indexOf('await ref.handle.getFile') < saveSource.indexOf('refreshImageSources(board'));
 
   const saveDebug = readSource('src/js/debug_save.js');
-  assert.match(saveDebug, /jsonBytes: e\.meta\?\.jsonBytes \?\? e\.meta\?\.rust\?\.json_bytes \?\? ''/);
+  assert.match(saveDebug, /jsonBytes: e\.meta\?\.rust\?\.json_bytes \?\? ''/);
+  assert.doesNotMatch(saveDebug, /e\.meta\?\.jsonBytes/);
 });
 
 test('addText sizes multiline text without spreading all lines into Math.max', () => {

@@ -6,6 +6,7 @@ var finishFailedOpen;
 
 {
   document.fonts?.ready.then(clearTextMeasurementCaches).catch(() => {});
+  startCanvasSizeTracking();
   resizeCanvas();
   snapshot();
   markSaved();

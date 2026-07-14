@@ -376,7 +376,6 @@ var OpenDebug = (() => {
         previewMaxMs: e.meta?.previewMaxMs ?? e.meta?.maxMs ?? '',
         previewMaxKey: e.meta?.previewMaxKey ?? e.meta?.maxKey ?? '',
         skipped: e.meta?.skipped ?? '',
-        required: e.meta?.required ?? '',
         reason: e.meta?.reason || '',
         error: e.meta?.error || '',
       }));
@@ -765,7 +764,7 @@ var OpenDebug = (() => {
         bitmapMs: e.meta?.bitmapMs ?? '',
         previewMs: e.meta?.previewMs ?? '',
         renderScheduleMs: e.meta?.renderScheduleMs ?? '',
-        renderSkipped: e.meta?.cacheRenderSkipped ?? e.meta?.renderSkipped ?? '',
+        renderSkipped: e.meta?.cacheRenderSkipped ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
         bitmapFailed: e.meta?.bitmapFailed ?? '',
       }))

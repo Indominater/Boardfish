@@ -28,10 +28,6 @@ var ClipDebug = (() => {
   const step = core.step;
   const end = core.end;
 
-  function timing(meta, key) {
-    return meta?.timing?.[key] ?? '';
-  }
-
   function debugRow(e, { includeId = false, includeSkipped = false } = {}) {
     return {
       ...(includeId ? { id: e.id, op: e.op } : {}),
@@ -57,45 +53,22 @@ var ClipDebug = (() => {
       accepted: e.meta?.accepted ?? '',
       historyIndex: e.meta?.historyIndex ?? '',
       queueMs: e.meta?.queueMs ?? '',
-      signature: e.meta?.signature || '',
       imgKey: e.meta?.imgKey || '',
       added: e.meta?.added ?? '',
-      displayReady: e.meta?.displayReady ?? '',
-      readyStage: e.meta?.readyStage || '',
-      bitmapReady: e.meta?.bitmapReady ?? '',
-      fallbackReady: e.meta?.fallbackReady ?? '',
-      cacheTotalMs: e.meta?.cacheTotalMs ?? '',
-      cacheQueueWaitMs: e.meta?.cacheQueueWaitMs ?? '',
-      cacheBitmapMs: e.meta?.cacheBitmapMs ?? '',
       objectDelta: e.meta?.objectDelta ?? '',
-      dataUrlLen: e.meta?.dataUrlLen ?? '',
       blobSize: e.meta?.blobSize ?? '',
-      blobType: e.meta?.blobType || e.meta?.type || '',
+      blobType: e.meta?.type || '',
       fileName: e.meta?.fileName || '',
       fileSize: e.meta?.fileSize ?? '',
       source: e.meta?.source || '',
-      sourceKind: e.meta?.sourceKind || e.meta?.pathKind || e.meta?.assetKind || '',
-      sourceLen: e.meta?.sourceLen ?? e.meta?.pathLen ?? e.meta?.assetLen ?? '',
-      sourcePrefix: e.meta?.sourcePrefix || e.meta?.pathPrefix || e.meta?.assetPrefix || '',
-      sourceBytes: e.meta?.sourceBytes ?? timing(e.meta, 'sourceBytes'),
-      bytes: e.meta?.bytes ?? timing(e.meta, 'bytes'),
-      assetReady: e.meta?.assetReady ?? '',
-      sourcePath: timing(e.meta, 'path'),
-      flipped: timing(e.meta, 'flipped'),
-      width: e.meta?.width ?? timing(e.meta, 'width'),
-      height: e.meta?.height ?? timing(e.meta, 'height'),
-      pixels: timing(e.meta, 'pixels'),
-      rgbaMB: timing(e.meta, 'rgbaMb'),
-      totalMs: timing(e.meta, 'totalMs'),
-      decodeMs: timing(e.meta, 'decodeMs'),
-      readMs: timing(e.meta, 'readMs'),
-      pngEncodeMs: timing(e.meta, 'pngEncodeMs'),
-      cacheInsertMs: timing(e.meta, 'cacheInsertMs'),
-      base64Ms: timing(e.meta, 'base64Ms'),
-      imageDecodeMs: timing(e.meta, 'imageDecodeMs'),
-      rgbaConvertMs: timing(e.meta, 'rgbaConvertMs'),
-      transformMs: timing(e.meta, 'transformMs'),
-      clipboardWriteMs: e.meta?.clipboardWriteMs ?? timing(e.meta, 'clipboardWriteMs'),
+      sourceKind: e.meta?.sourceKind || '',
+      sourceLen: e.meta?.sourceLen ?? '',
+      sourcePrefix: e.meta?.sourcePrefix || '',
+      sourceBytes: e.meta?.sourceBytes ?? '',
+      bytes: e.meta?.bytes ?? '',
+      width: e.meta?.width ?? '',
+      height: e.meta?.height ?? '',
+      clipboardWriteMs: e.meta?.clipboardWriteMs ?? '',
       textLen: e.meta?.textLen ?? '',
       boardfishTokenWritten: e.meta?.boardfishTokenWritten ?? '',
       richAttempted: e.meta?.richAttempted ?? '',
@@ -374,8 +347,6 @@ var ClipDebug = (() => {
       .map(row => Number(row.gapMs) || 0);
     const maxEventLoopGapMs = eventLoopGapsDuringCopy.reduce((max, value) => Math.max(max, value), 0);
     const copyPendingAtFirstPan = !!firstPan && copyDoneAt > firstPan.at;
-    const dataUrlLen = latest('copy:source-ready')?.meta?.dataUrlLen ?? '';
-    const sourceLen = latest('copy:key-start')?.meta?.sourceLen ?? '';
     const sourceBytes = webSourcePngBlob?.meta?.sourceBytes || '';
     const renderCanvasMs = renderCanvasEnd?.total ?? '';
     const pngBlobMs = pngBlobEnd?.total ?? '';
@@ -428,9 +399,7 @@ var ClipDebug = (() => {
     const summary = {
       copyRuns: copyStarts.length,
       copyPath: copyEnd?.meta?.path || '',
-      sourceLen,
       sourceBytes,
-      dataUrlLen,
       webClipboardWriteMs: webClipboardWriteEnd?.meta?.ms ?? '',
       webSourcePngBlobMs,
       renderCanvasMs,
@@ -468,19 +437,9 @@ var ClipDebug = (() => {
   }
 
   function memorySnapshotFromEvent(e) {
-    const meta = e?.meta || {};
-    const bytes = Number(meta.blobSize ?? meta.bytes ?? timing(meta, 'bytes')) || 0;
-    const dataUrlLen = Number(meta.dataUrlLen) || 0;
-    const width = Number(meta.width ?? timing(meta, 'width')) || 0;
-    const height = Number(meta.height ?? timing(meta, 'height')) || 0;
-    const pixels = Number(meta.pixels ?? timing(meta, 'pixels')) || (width && height ? width * height : 0);
+    const bytes = Number(e?.meta?.blobSize) || 0;
     return {
       blobMB: bytes ? Math.round(bytes / 1024 / 1024 * 100) / 100 : '',
-      dataUrlMB: dataUrlLen ? Math.round(dataUrlLen / 1024 / 1024 * 100) / 100 : '',
-      rgbaMB: pixels ? Math.round(pixels * 4 / 1024 / 1024 * 100) / 100 : '',
-      width: width || '',
-      height: height || '',
-      pixels: pixels || '',
     };
   }
 
@@ -530,9 +489,7 @@ var ClipDebug = (() => {
       totalMs: end?.total ?? run.at(-1)?.total ?? '',
       path: end?.meta?.path || '',
       added: end?.meta?.added ?? '',
-      displayReady: end?.meta?.displayReady ?? (webInsertEnd ? true : ''),
-      readyStage: end?.meta?.readyStage || '',
-      bitmapReady: end?.meta?.bitmapReady ?? '',
+      displayReady: webInsertEnd ? true : '',
       objectCountBefore,
       objectCountAfter,
       objectDelta,
@@ -606,9 +563,7 @@ var ClipDebug = (() => {
         ? Math.round((historyDone.total - historyStart.total) * 100) / 100
         : '',
       blobSize: blobEvent?.meta?.blobSize ?? '',
-      readyStage: end?.meta?.readyStage || '',
-      displayReady: end?.meta?.displayReady ?? (webInsertEnd ? true : ''),
-      bitmapReady: end?.meta?.bitmapReady ?? '',
+      displayReady: webInsertEnd ? true : '',
       added: end?.meta?.added ?? '',
       objectDelta: webInsertEnd?.meta?.objectDelta ?? '',
       firstPayloadStep: first('event-image-blob')?.step || first('browser-image-blob')?.step || '',
@@ -1247,9 +1202,6 @@ var HistoryDebug = (() => {
 	        editStateSelectionStart: e.meta?.editStateSelectionStart ?? '',
 	        editStateSelectionEnd: e.meta?.editStateSelectionEnd ?? '',
 	        editStateSelectedChars: e.meta?.editStateSelectedChars ?? '',
-	        beforeEditStateSelectionStart: e.meta?.beforeEditStateSelectionStart ?? '',
-	        beforeEditStateSelectionEnd: e.meta?.beforeEditStateSelectionEnd ?? '',
-	        beforeEditStateSelectedChars: e.meta?.beforeEditStateSelectedChars ?? '',
 	        actionEditStateSelectionStart: e.meta?.actionEditStateSelectionStart ?? '',
 	        actionEditStateSelectionEnd: e.meta?.actionEditStateSelectionEnd ?? '',
 	        actionEditStateSelectedChars: e.meta?.actionEditStateSelectedChars ?? '',
@@ -2215,7 +2167,6 @@ var ViewportDebug = (() => {
           source: e.meta?.source || '',
           eventType: e.meta?.eventType || '',
           eventAgeMs: e.meta?.eventAgeMs ?? '',
-          inputGapMs: e.meta?.inputGapMs ?? '',
           deltaX: e.meta?.deltaX ?? '',
           deltaY: e.meta?.deltaY ?? '',
           deltaMode: e.meta?.deltaMode ?? '',
