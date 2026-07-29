@@ -107,7 +107,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
   return context;
 }
 
-function loadPasteHarness({ browserText = '' } = {}) {
+function loadPasteHarness({ browserText = '', normalizeExternalText = (value) => value } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/clipboard_export_init.js'), 'utf8');
   const calls = { addText: [] };
   const context = {
@@ -150,6 +150,9 @@ function loadPasteHarness({ browserText = '' } = {}) {
     },
     addText(wx, wy, content, options = {}) {
       calls.addText.push({ wx, wy, content, options });
+    },
+    textForExternalTextObjectPaste(value) {
+      return normalizeExternalText(value);
     },
   };
   vm.createContext(context);
@@ -239,7 +242,12 @@ test('outside clipboard text is pasted at the same center point as canvas object
 });
 
 test('browser clipboard text paste stays in select mode for the new text box', async () => {
-  const context = loadPasteHarness({ browserText: 'browser text' });
+  const context = loadPasteHarness({
+    browserText: 'browser\ntext',
+    normalizeExternalText(value) {
+      return value.replace('\n', ' ');
+    },
+  });
 
   await context.pasteAtPos(640, 360, {
     getData() {
@@ -253,4 +261,20 @@ test('browser clipboard text paste stays in select mode for the new text box', a
     content: 'browser text',
     options: { anchor: 'center' },
   }]);
+});
+
+test('outside clipboard text is normalized before creating a text box', async () => {
+  const context = loadPasteHarness({
+    normalizeExternalText(value) {
+      return value.replace('\n', ' ');
+    },
+  });
+
+  await context.pasteAtPos(640, 360, {
+    getData(type) {
+      return type === 'text/plain' ? 'wrapped prose\ncontinues here' : '';
+    },
+  });
+
+  assert.equal(context.calls.addText[0].content, 'wrapped prose continues here');
 });

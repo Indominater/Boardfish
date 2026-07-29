@@ -45,6 +45,115 @@ const textForClipboard = (value) => trimWhitespaceOnlyEdgeLines(value);
 const textSelectionForClipboard = (value) => trimWhitespaceOnlyEdgeLines(value);
 const textForTextObjectPaste = (value) => trimWhitespaceOnlyEdgeLines(value);
 
+// Some external plain-text clipboards materialize source visual wraps as newlines.
+// Only unwrap high-confidence fixed-width prose; all other paste paths stay literal.
+const EXTERNAL_TEXT_SOFT_WRAP_MIN_MEDIAN_CHARS = 56;
+const EXTERNAL_TEXT_STRUCTURED_LINE_RE = /^(?:[-*+•‣◦▪▫]\s+|\d{1,4}[.)]\s+|[A-Za-z][.)]\s+|\[[ xX]\]\s+|#{1,6}\s+|>\s*|```|~~~)/;
+const EXTERNAL_TEXT_CODE_LINE_RE = /^(?:const|let|var|function|class|import|export|return|if|for|while|switch|case)\b|(?:=>|[{};])\s*$/;
+
+const externalTextLineLooksStructured = (line) => {
+  const value = String(line ?? '');
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return (
+    /^(?:\t| {2,})/.test(value) ||
+    value.includes('\t') ||
+    /\S {2,}\S/.test(value) ||
+    /(?: {2,}|\\)$/.test(value) ||
+    EXTERNAL_TEXT_STRUCTURED_LINE_RE.test(trimmed) ||
+    /^(?:From|To|Cc|Bcc|Subject|Date):\s/i.test(trimmed) ||
+    /^(?:https?:\/\/|www\.)/i.test(trimmed) ||
+    EXTERNAL_TEXT_CODE_LINE_RE.test(trimmed)
+  );
+};
+
+const externalTextLineStartsLowercase = (line) => {
+  const first = String(line ?? '').trimStart().charAt(0);
+  return !!first && first.toLocaleLowerCase() === first && first.toLocaleUpperCase() !== first;
+};
+
+const externalTextLineStartsUppercase = (line) => {
+  const first = String(line ?? '').trimStart().charAt(0);
+  return !!first && first.toLocaleUpperCase() === first && first.toLocaleLowerCase() !== first;
+};
+
+const externalTextBoundaryLooksContinuous = (previousLine, nextLine) => {
+  const previous = String(previousLine ?? '').trimEnd();
+  const next = String(nextLine ?? '').trimStart();
+  if (!previous || !next) return false;
+  return (
+    !/[.!?…]["'”’)\]]*$/.test(previous) ||
+    externalTextLineStartsLowercase(next) ||
+    /[,;:\-‐‑‒–—]$/.test(previous)
+  );
+};
+
+const externalTextMedian = (values) => {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+};
+
+const shouldUnwrapExternalTextBlock = (lines) => {
+  if (!Array.isArray(lines) || lines.length < 3) return false;
+  if (lines.some(externalTextLineLooksStructured)) return false;
+  if (lines.filter(externalTextLineStartsUppercase).length / lines.length >= 0.8) return false;
+  const pipeTableLines = lines.filter((line) => {
+    const trimmed = String(line ?? '').trim();
+    return /^\|/.test(trimmed) && /\|$/.test(trimmed);
+  }).length;
+  if (pipeTableLines >= 2) return false;
+
+  const bodyWidths = lines.slice(0, -1).map((line) => String(line ?? '').trim().length);
+  if (!bodyWidths.length) return false;
+  const referenceWidth = Math.max(...bodyWidths);
+  if (externalTextMedian(bodyWidths) < EXTERNAL_TEXT_SOFT_WRAP_MIN_MEDIAN_CHARS) return false;
+  if (bodyWidths.some((width) => width < referenceWidth * 0.55)) return false;
+  const clusteredWidths = bodyWidths.filter((width) => width >= referenceWidth * 0.7).length;
+  if (clusteredWidths / bodyWidths.length < 0.75) return false;
+
+  let continuousBoundaries = 0;
+  for (let index = 1; index < lines.length; index++) {
+    if (externalTextBoundaryLooksContinuous(lines[index - 1], lines[index])) continuousBoundaries++;
+  }
+  return continuousBoundaries / (lines.length - 1) >= 0.5;
+};
+
+const unwrapExternalTextBlock = (lines) => {
+  let result = String(lines[0] ?? '').trimEnd();
+  for (let index = 1; index < lines.length; index++) {
+    const next = String(lines[index] ?? '').trimStart();
+    const separator = /[-‐‑‒–—]$/.test(result) ? '' : ' ';
+    result += separator + next;
+  }
+  return result;
+};
+
+const textForExternalTextObjectPaste = (value) => {
+  const text = textForTextObjectPaste(value);
+  if (!text.includes('\n')) return text;
+  const lines = text.split('\n');
+  const output = [];
+  let index = 0;
+  while (index < lines.length) {
+    if (!/\S/.test(lines[index])) {
+      output.push(lines[index]);
+      index++;
+      continue;
+    }
+    let end = index + 1;
+    while (end < lines.length && /\S/.test(lines[end])) end++;
+    const block = lines.slice(index, end);
+    if (shouldUnwrapExternalTextBlock(block)) output.push(unwrapExternalTextBlock(block));
+    else output.push(...block);
+    index = end;
+  }
+  return output.join('\n');
+};
+
 function isTextContentEmpty(value) {
   return normalizeTextContent(value).replace(/[\u200B-\u200D\uFEFF]/g, '').trim() === '';
 }

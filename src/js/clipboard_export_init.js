@@ -597,23 +597,26 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     const eventText = BoardfishClipboardIO.readClipboardTextFromEvent(clipboardData);
     ClipDebug.step(dbg, 'paste:event-text-read-done', clipboardTextStats(eventText));
     if (eventText && eventText.trim()) {
+      const text = typeof textForExternalTextObjectPaste === 'function'
+        ? textForExternalTextObjectPaste(eventText)
+        : eventText;
       const objectCountBefore = objects.length;
       const addStartedAt = clipboardNow();
       ClipDebug.step(dbg, 'paste:plain-text-add-start', {
         path: 'event-text',
         objectCountBefore,
-        ...clipboardTextStats(eventText),
+        ...clipboardTextStats(text),
       });
-      addText(wx, wy, eventText, addTextPasteOptions(dbg, { anchor: 'center' }));
+      addText(wx, wy, text, addTextPasteOptions(dbg, { anchor: 'center' }));
       ClipDebug.step(dbg, 'paste:plain-text-add-done', {
         path: 'event-text',
         ms: clipboardElapsedMs(addStartedAt),
         objectCountBefore,
         objectCountAfter: objects.length,
         objectDelta: objects.length - objectCountBefore,
-        ...clipboardTextStats(eventText),
+        ...clipboardTextStats(text),
       });
-      ClipDebug.end(dbg, { path: 'event-text', textLen: eventText.length, textObjectCount: 1, textCharCount: eventText.length, largestTextChars: eventText.length, objectCountAfter: objects.length });
+      ClipDebug.end(dbg, { path: 'event-text', textLen: text.length, textObjectCount: 1, textCharCount: text.length, largestTextChars: text.length, objectCountAfter: objects.length });
       return;
     }
     const releaseInputShield = acquireInputShield();
@@ -626,11 +629,14 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       }
       const textReadStartedAt = clipboardNow();
       ClipDebug.step(dbg, 'browser-text-read:start');
-      const text = await navigator.clipboard.readText();
+      const browserText = await navigator.clipboard.readText();
       ClipDebug.step(dbg, 'browser-text-read:ok', {
         ms: clipboardElapsedMs(textReadStartedAt),
-        ...clipboardTextStats(text),
+        ...clipboardTextStats(browserText),
       });
+      const text = typeof textForExternalTextObjectPaste === 'function'
+        ? textForExternalTextObjectPaste(browserText)
+        : browserText;
       if (text && text.trim()) {
         const objectCountBefore = objects.length;
         const addStartedAt = clipboardNow();

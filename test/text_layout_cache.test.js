@@ -82,6 +82,7 @@ function loadTextLayout({
   vm.runInContext(
     `globalThis.__testTextLayout = {
       measureTextW,
+      textForExternalTextObjectPaste,
       getTextMinWidthWordSegment,
       getTextMinWidth,
       getTextLayout,
@@ -1447,6 +1448,100 @@ test('large plain text wrapping keeps fitting trailing spaces on the caret line'
   assert.equal(lastLine.text, 'hi  ');
   assert.equal(lastLine.caretEndIndex, content.length);
   assert.equal(lastLine.nextStartIndex, content.length);
+});
+
+test('external prose paste is unwrapped before resized layout repacks every line greedily', () => {
+  const { context } = loadTextLayout({
+    measureWidth(text) {
+      return String(text).length;
+    },
+  });
+  const textLayout = context.__testTextLayout;
+  const source = [
+    'As a Combined Major in Computer Science and Mathematics at UBC, I believe that my',
+    'previous internships in QA, along with my development of high-complexity software',
+    'such as Rust-backed Boardfish and Python-based automation suites, provide me with',
+    'a strong skill set that aligns well with this position. Additionally, as a hobbyist',
+    'swimmer who uses prescription goggles, I understand the need for accuracy and',
+    'reliability in aquatics products and would love to contribute to developing',
+    "FORM's AR technology.",
+  ].join('\n');
+  const content = textLayout.textForExternalTextObjectPaste(source);
+  const obj = {
+    id: 'large-wrap-resize',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: context.TEXT_PAD * 2 + 32,
+    h: 1,
+    data: { content },
+  };
+
+  assert.equal(content.includes('\n'), false);
+  textLayout.syncTextAutoHeight(obj);
+  textLayout.getTextLayoutForViewport(obj, { y1: 0, y2: obj.h });
+  obj.w = context.TEXT_PAD * 2 + 78;
+  textLayout.syncTextAutoHeight(obj);
+
+  const resized = textLayout.getTextLayoutForViewport(obj, { y1: 0, y2: obj.h });
+  const fresh = {
+    ...obj,
+    id: 'large-wrap-resize-fresh',
+    data: { content },
+  };
+  const expected = textLayout.getTextLayout(fresh);
+
+  assert.deepEqual(
+    plain(resized.map((line) => line.text)),
+    plain(expected.map((line) => line.text)),
+  );
+  for (let index = 0; index < resized.length - 1; index++) {
+    const nextWord = resized[index + 1].text.match(/^\S+/)?.[0] || '';
+    assert.ok(
+      `${resized[index].text} ${nextWord}`.length > 78,
+      `line ${index} left avoidable room before "${nextWord}"`,
+    );
+  }
+
+  const hyphenWrapped = [
+    'This deliberately long fixed-width prose line carries an intentionally hyphen-',
+    'wrapped compound into the next similarly sized source line with enough prose',
+    'and finishes with a naturally short tail.',
+  ].join('\n');
+  assert.match(textLayout.textForExternalTextObjectPaste(hyphenWrapped), /hyphen-wrapped/);
+});
+
+test('external text paste preserves paragraphs and structured line breaks', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const source = [
+    'This deliberately long sentence has enough words to look like prose and ends here.',
+    'Another sentence starts a separate intentional line.',
+    '',
+    'Tasks:',
+    '- Keep the first item on its own line even when the item itself is deliberately long.',
+    '- Keep the second item on its own line.',
+    '',
+    'Aaron Li',
+    '123 Main Street',
+    'Vancouver, BC',
+    '',
+    '    const result = calculateSomething();',
+    '    return result;',
+    '',
+    'THIS LONG VERSE LINE STARTS WITH UPPERCASE AND SHOULD REMAIN VISUALLY DISTINCT',
+    'ANOTHER LONG VERSE LINE STARTS WITH UPPERCASE AND SHOULD NOT BE JOINED TO IT',
+    'THE FINAL LONG VERSE LINE ALSO STARTS WITH UPPERCASE AND STAYS ON ITS OWN LINE',
+    '',
+    'Name                 Role                 Location',
+    'Aaron Li             Developer            Vancouver',
+    'Jordan Smith         Designer             Toronto',
+  ].join('\r\n');
+
+  assert.equal(
+    textLayout.textForExternalTextObjectPaste(`\r\n${source}\r\n`),
+    source.replace(/\r\n/g, '\n'),
+  );
 });
 
 test('moving a large text object reuses cached layout measurements', () => {
