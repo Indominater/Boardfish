@@ -1,6 +1,6 @@
 'use strict';
 
-const BoardfishMotion = (() => {
+(() => {
   const root = typeof globalThis !== 'undefined' ? globalThis : window;
   const jelloObjectMotions = new Map();
   const textSelectionJelloMotions = new Map();
@@ -1069,5 +1069,4 @@ const BoardfishMotion = (() => {
   });
 
   root.BoardfishMotion = api;
-  return api;
 })();
