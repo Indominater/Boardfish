@@ -182,6 +182,7 @@ function loadSelectionInputHarness(objects, options = {}) {
       'globalThis.beginSelectionHandleDrag = beginSelectionHandleDrag;\n' +
       'globalThis.proportionalCornerResizeSize = proportionalCornerResizeSize;\n' +
       'globalThis.updateSelectionOverlay = updateSelectionOverlay;\n' +
+      'globalThis.selectionBoundsIntersectViewport = selectionBoundsIntersectViewport;\n' +
       'globalThis.snappedSelectionOverlayScreenRect = snappedSelectionOverlayScreenRect;\n' +
       'globalThis.flushEditHistoryCheckpoint = flushEditHistoryCheckpoint;\n' +
       'globalThis.beginTextEditHistoryAction = beginTextEditHistoryAction;\n' +
@@ -190,6 +191,33 @@ function loadSelectionInputHarness(objects, options = {}) {
   );
   return context;
 }
+
+test('selection chrome is hidden when its box only touches a viewport edge', () => {
+  const context = loadSelectionInputHarness([]);
+  const bounds = { x1: 100, y1: 200, x2: 300, y2: 400 };
+  const surface = { width: 1000, height: 800 };
+
+  assert.equal(
+    context.selectionBoundsIntersectViewport(bounds, { zoom: 1, panX: 900, panY: 0 }, surface),
+    false,
+  );
+  assert.equal(
+    context.selectionBoundsIntersectViewport(bounds, { zoom: 1, panX: -300, panY: 0 }, surface),
+    false,
+  );
+  assert.equal(
+    context.selectionBoundsIntersectViewport(bounds, { zoom: 1, panX: 0, panY: 600 }, surface),
+    false,
+  );
+  assert.equal(
+    context.selectionBoundsIntersectViewport(bounds, { zoom: 1, panX: 0, panY: -400 }, surface),
+    false,
+  );
+  assert.equal(
+    context.selectionBoundsIntersectViewport(bounds, { zoom: 2, panX: 0, panY: 0 }, surface),
+    true,
+  );
+});
 
 test('shielded system key cancels active rubber-band selection before blocking input', () => {
   const context = loadSelectionInputHarness([]);

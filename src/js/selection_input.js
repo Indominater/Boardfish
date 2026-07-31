@@ -378,6 +378,34 @@ function _setMultiBoxDisplayIfChanged(el, value) {
   return state;
 }
 
+function selectionBoundsIntersectViewport(
+  bounds,
+  view = { zoom, panX, panY },
+  surface = null,
+) {
+  if (!bounds) return false;
+  const size = surface || (
+    typeof boardSurfaceCssSize === 'function'
+      ? boardSurfaceCssSize()
+      : {
+          width: Number(typeof window !== 'undefined' ? window.innerWidth : 0) || 0,
+          height: Number(typeof window !== 'undefined' ? window.innerHeight : 0) || 0,
+        }
+  );
+  const width = Number(size?.width) || 0;
+  const height = Number(size?.height) || 0;
+  if (width <= 0 || height <= 0) return true;
+
+  const scale = Number.isFinite(view?.zoom) && view.zoom > 0 ? view.zoom : 1;
+  const offsetX = Number.isFinite(view?.panX) ? view.panX : 0;
+  const offsetY = Number.isFinite(view?.panY) ? view.panY : 0;
+  const screenX1 = Math.min(bounds.x1, bounds.x2) * scale + offsetX;
+  const screenY1 = Math.min(bounds.y1, bounds.y2) * scale + offsetY;
+  const screenX2 = Math.max(bounds.x1, bounds.x2) * scale + offsetX;
+  const screenY2 = Math.max(bounds.y1, bounds.y2) * scale + offsetY;
+  return screenX1 < width && screenX2 > 0 && screenY1 < height && screenY2 > 0;
+}
+
 const oppositeSelectionDir = function oppositeSelectionDir(dir) {
   if (dir === 'nw') return 'se';
   if (dir === 'ne') return 'sw';
@@ -512,6 +540,11 @@ function updateSelectionOverlay() {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
     BoardfishEditorState.clearSelection();
+    return;
+  }
+  if (!selectionBoundsIntersectViewport(bounds)) {
+    if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
+    hideMultiSelectionOverlay();
     return;
   }
 

@@ -1,0 +1,133 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const root = path.join(__dirname, '..');
+const {
+  boardMasterBox,
+  clampPanToBoardMasterBox,
+} = require('../src/js/viewport_state.js');
+
+test('board masterbox uses the outermost edges of every image and text box', () => {
+  const bounds = boardMasterBox([
+    { type: 'image', x: 100, y: 200, w: 300, h: 400 },
+    { type: 'text', x: -50, y: 50, w: 25, h: 25 },
+    { type: 'shape', x: -1000, y: -1000, w: 2000, h: 2000 },
+    { type: 'text', x: Number.NaN, y: 0, w: 10, h: 10 },
+  ]);
+
+  assert.deepEqual(bounds, {
+    x1: -50,
+    y1: 50,
+    x2: 400,
+    y2: 600,
+    count: 2,
+  });
+});
+
+test('viewport panning stops at the masterbox on all four sides', () => {
+  const objects = [
+    { type: 'image', x: 100, y: 200, w: 300, h: 400 },
+    { type: 'text', x: -50, y: 50, w: 25, h: 25 },
+  ];
+  const surface = { width: 1000, height: 800 };
+  const zoom = 2;
+
+  const towardTopLeft = clampPanToBoardMasterBox(
+    { panX: 100000, panY: 100000, zoom },
+    objects,
+    surface,
+  );
+  assert.equal(towardTopLeft.panX, 1100);
+  assert.equal(towardTopLeft.panY, 700);
+
+  const towardBottomRight = clampPanToBoardMasterBox(
+    { panX: -100000, panY: -100000, zoom },
+    objects,
+    surface,
+  );
+  assert.equal(towardBottomRight.panX, -800);
+  assert.equal(towardBottomRight.panY, -1200);
+
+  assert.equal(
+    (-towardTopLeft.panX + surface.width) / zoom,
+    -50,
+  );
+  assert.equal(
+    -towardBottomRight.panX / zoom,
+    400,
+  );
+  assert.equal(
+    (-towardTopLeft.panY + surface.height) / zoom,
+    50,
+  );
+  assert.equal(
+    -towardBottomRight.panY / zoom,
+    600,
+  );
+});
+
+test('viewport panning remains unchanged inside the limits and on an empty board', () => {
+  const viewport = { panX: 12, panY: -34, zoom: 1.25 };
+  const surface = { width: 1000, height: 800 };
+  const objects = [{ type: 'text', x: 0, y: 0, w: 100, h: 100 }];
+
+  assert.deepEqual(clampPanToBoardMasterBox(viewport, objects, surface), viewport);
+  assert.deepEqual(clampPanToBoardMasterBox(viewport, [], surface), viewport);
+});
+
+function loadViewportStateHarness({
+  objects = [],
+  panX = 0,
+  panY = 0,
+  zoom = 1,
+  width = 1000,
+  height = 800,
+} = {}) {
+  const source = fs.readFileSync(path.join(root, 'src/js/viewport_state.js'), 'utf8');
+  const context = {
+    console,
+    innerWidth: width,
+    innerHeight: height,
+    objects,
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `var panX = ${panX}; var panY = ${panY}; var zoom = ${zoom};\n` +
+      `${source}\n` +
+      'globalThis.viewportSnapshot = () => ({ panX, panY, zoom });\n',
+    context,
+    { filename: 'viewport_state.js' },
+  );
+  return context;
+}
+
+test('wheel and drag state methods share the same constrained pan path', () => {
+  const context = loadViewportStateHarness({
+    objects: [{ type: 'image', x: 100, y: 200, w: 300, h: 400 }],
+  });
+
+  context.BoardfishViewportState.panBy(100000, -100000);
+  assert.deepEqual(
+    { ...context.viewportSnapshot() },
+    {
+      panX: 900,
+      panY: -600,
+      zoom: 1,
+    },
+  );
+
+  context.BoardfishViewportState.setPan(-100000, 100000);
+  assert.deepEqual(
+    { ...context.viewportSnapshot() },
+    {
+      panX: -400,
+      panY: 600,
+      zoom: 1,
+    },
+  );
+});
