@@ -1,6 +1,8 @@
 'use strict';
 
 (function initViewportStateBoundary(root) {
+  const PAN_BOUNDARY_EPSILON = 0.000001;
+
   function boardMasterBox(objectList = []) {
     let x1 = Infinity;
     let y1 = Infinity;
@@ -30,10 +32,15 @@
     return count ? { x1, y1, x2, y2, count } : null;
   }
 
-  function clampPanToBoardMasterBox(viewport = {}, objectList = [], surface = {}) {
+  function clampPanToBoardMasterBox(
+    viewport = {},
+    objectList = [],
+    surface = {},
+    currentViewport = null,
+  ) {
     const nextZoom = Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
-    const nextPanX = Number.isFinite(viewport.panX) ? viewport.panX : 0;
-    const nextPanY = Number.isFinite(viewport.panY) ? viewport.panY : 0;
+    let nextPanX = Number.isFinite(viewport.panX) ? viewport.panX : 0;
+    let nextPanY = Number.isFinite(viewport.panY) ? viewport.panY : 0;
     const masterBox = boardMasterBox(objectList);
     if (!masterBox) return { panX: nextPanX, panY: nextPanY, zoom: nextZoom };
 
@@ -43,6 +50,31 @@
     const maxPanX = width - masterBox.x1 * nextZoom;
     const minPanY = -masterBox.y2 * nextZoom;
     const maxPanY = height - masterBox.y1 * nextZoom;
+
+    if (currentViewport) {
+      const currentPanX = Number.isFinite(currentViewport.panX) ? currentViewport.panX : nextPanX;
+      const currentPanY = Number.isFinite(currentViewport.panY) ? currentViewport.panY : nextPanY;
+      const viewportIsLeftOfMasterBox = currentPanX >= maxPanX - PAN_BOUNDARY_EPSILON;
+      const viewportIsRightOfMasterBox = currentPanX <= minPanX + PAN_BOUNDARY_EPSILON;
+      const viewportIsAboveMasterBox = currentPanY >= maxPanY - PAN_BOUNDARY_EPSILON;
+      const viewportIsBelowMasterBox = currentPanY <= minPanY + PAN_BOUNDARY_EPSILON;
+      const boundaryLocked = viewportIsLeftOfMasterBox ||
+        viewportIsRightOfMasterBox ||
+        viewportIsAboveMasterBox ||
+        viewportIsBelowMasterBox;
+
+      if (boundaryLocked) {
+        const recoverFromHorizontalEdge =
+          (viewportIsLeftOfMasterBox && !viewportIsRightOfMasterBox && nextPanX < currentPanX) ||
+          (viewportIsRightOfMasterBox && !viewportIsLeftOfMasterBox && nextPanX > currentPanX);
+        const recoverFromVerticalEdge =
+          (viewportIsAboveMasterBox && !viewportIsBelowMasterBox && nextPanY < currentPanY) ||
+          (viewportIsBelowMasterBox && !viewportIsAboveMasterBox && nextPanY > currentPanY);
+
+        nextPanX = recoverFromHorizontalEdge ? nextPanX : currentPanX;
+        nextPanY = recoverFromVerticalEdge ? nextPanY : currentPanY;
+      }
+    }
 
     return {
       panX: Math.min(maxPanX, Math.max(minPanX, nextPanX)),
@@ -63,11 +95,17 @@
     };
   }
 
-  function constrainPan(nextPanX = panX, nextPanY = panY, nextZoom = zoom) {
+  function constrainPan(
+    nextPanX = panX,
+    nextPanY = panY,
+    nextZoom = zoom,
+    lockAtBoundary = false,
+  ) {
     const constrained = clampPanToBoardMasterBox(
       { panX: nextPanX, panY: nextPanY, zoom: nextZoom },
       currentBoardObjects(),
       currentBoardSurfaceSize(),
+      lockAtBoundary ? { panX, panY, zoom } : null,
     );
     panX = constrained.panX;
     panY = constrained.panY;
@@ -99,6 +137,8 @@
     return constrainPan(
       panX + (Number(dx) || 0),
       panY + (Number(dy) || 0),
+      zoom,
+      true,
     );
   }
 
@@ -117,6 +157,8 @@
     return constrainPan(
       Number.isFinite(nextPanX) ? nextPanX : panX,
       Number.isFinite(nextPanY) ? nextPanY : panY,
+      zoom,
+      true,
     );
   }
 

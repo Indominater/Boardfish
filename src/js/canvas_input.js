@@ -420,7 +420,9 @@ function startMousePan(e) {
       const panYBefore = panY;
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
-      const nextViewport = canvasInputViewportResult(BoardfishViewportState.setPan(startPanX + dx, startPanY + dy));
+      const clientStepX = ev.clientX - lastClientX;
+      const clientStepY = ev.clientY - lastClientY;
+      const nextViewport = canvasInputViewportResult(BoardfishViewportState.panBy(clientStepX, clientStepY));
       globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
       scheduleTransform('mouse-pan', ev);
       if (collectDebug) {
@@ -443,8 +445,8 @@ function startMousePan(e) {
           startClientY: startY,
           clientDeltaX: dx,
           clientDeltaY: dy,
-          clientStepX: ev.clientX - lastClientX,
-          clientStepY: ev.clientY - lastClientY,
+          clientStepX,
+          clientStepY,
           panDeltaX,
           panDeltaY,
           panDistancePx: Math.hypot(panDeltaX, panDeltaY),

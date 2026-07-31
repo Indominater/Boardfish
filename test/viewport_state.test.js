@@ -80,6 +80,65 @@ test('viewport panning remains unchanged inside the limits and on an empty board
   assert.deepEqual(clampPanToBoardMasterBox(viewport, [], surface), viewport);
 });
 
+test('a masterbox edge permits only the direction that returns toward the board', () => {
+  const objects = [{ type: 'image', x: 100, y: 200, w: 300, h: 400 }];
+  const surface = { width: 1000, height: 800 };
+  const cases = [
+    {
+      current: { panX: 900, panY: 0, zoom: 1 },
+      proposed: { panX: 850, panY: 100, zoom: 1 },
+      expected: { panX: 850, panY: 0, zoom: 1 },
+    },
+    {
+      current: { panX: -400, panY: 0, zoom: 1 },
+      proposed: { panX: -350, panY: 100, zoom: 1 },
+      expected: { panX: -350, panY: 0, zoom: 1 },
+    },
+    {
+      current: { panX: 0, panY: 600, zoom: 1 },
+      proposed: { panX: 100, panY: 550, zoom: 1 },
+      expected: { panX: 0, panY: 550, zoom: 1 },
+    },
+    {
+      current: { panX: 0, panY: -600, zoom: 1 },
+      proposed: { panX: 100, panY: -550, zoom: 1 },
+      expected: { panX: 0, panY: -550, zoom: 1 },
+    },
+  ];
+
+  for (const { current, proposed, expected } of cases) {
+    assert.deepEqual(
+      clampPanToBoardMasterBox(proposed, objects, surface, current),
+      expected,
+    );
+  }
+});
+
+test('a masterbox corner permits both inward recovery directions and no others', () => {
+  const objects = [{ type: 'image', x: 100, y: 200, w: 300, h: 400 }];
+  const surface = { width: 1000, height: 800 };
+  const current = { panX: 900, panY: 600, zoom: 1 };
+
+  assert.deepEqual(
+    clampPanToBoardMasterBox(
+      { panX: 850, panY: 550, zoom: 1 },
+      objects,
+      surface,
+      current,
+    ),
+    { panX: 850, panY: 550, zoom: 1 },
+  );
+  assert.deepEqual(
+    clampPanToBoardMasterBox(
+      { panX: 950, panY: 550, zoom: 1 },
+      objects,
+      surface,
+      current,
+    ),
+    { panX: 900, panY: 550, zoom: 1 },
+  );
+});
+
 function loadViewportStateHarness({
   objects = [],
   panX = 0,
@@ -129,5 +188,31 @@ test('wheel and drag state methods share the same constrained pan path', () => {
       panY: 600,
       zoom: 1,
     },
+  );
+});
+
+test('pan state stays fully locked at an edge until movement returns toward the board', () => {
+  const context = loadViewportStateHarness({
+    objects: [{ type: 'image', x: 100, y: 200, w: 300, h: 400 }],
+    panX: 900,
+    panY: 0,
+  });
+
+  context.BoardfishViewportState.panBy(50, 75);
+  assert.deepEqual(
+    { ...context.viewportSnapshot() },
+    { panX: 900, panY: 0, zoom: 1 },
+  );
+
+  context.BoardfishViewportState.panBy(-25, 75);
+  assert.deepEqual(
+    { ...context.viewportSnapshot() },
+    { panX: 875, panY: 0, zoom: 1 },
+  );
+
+  context.BoardfishViewportState.panBy(0, 75);
+  assert.deepEqual(
+    { ...context.viewportSnapshot() },
+    { panX: 875, panY: 75, zoom: 1 },
   );
 });
