@@ -147,21 +147,46 @@ test('a single bad pinch coordinate cannot snap the zoom', () => {
   assert.equal(spike.rawDistance, 260);
 });
 
-test('a sustained large pinch change catches up in bounded steps', () => {
+test('pinch zoom follows separation instead of catching up after speed changes', () => {
   const harness = makeGestureHarness();
   harness.controller.pointerDown(point(1, 0, 0));
   harness.controller.pointerDown(point(2, 100, 0));
-  harness.controller.pointerMove(point(2, 250, 0));
-  harness.controller.pointerMove(point(2, 250, 0));
-  harness.controller.pointerMove(point(2, 250, 0));
+  for (const x of [150, 200, 150, 150]) {
+    harness.controller.pointerMove(point(2, x, 0));
+  }
 
   const scales = harness.events
     .filter((event) => event.type === 'pinch')
     .map((event) => event.scale);
-  assert.deepEqual(scales, [1, 1.2, 1.44]);
-  for (let i = 1; i < scales.length; i++) {
-    assert.ok(scales[i] / scales[i - 1] <= TouchInput.PINCH_MAX_SCALE_STEP);
-  }
+  assert.deepEqual(scales, [1.5, 2, 1.5, 1.5]);
+});
+
+test('dense and sparse pinch samples produce the same zoom at the same separation', () => {
+  const finalScale = (moves) => {
+    const harness = makeGestureHarness();
+    harness.controller.pointerDown(point(1, 0, 0));
+    harness.controller.pointerDown(point(2, 100, 0));
+    for (const x of moves) harness.controller.pointerMove(point(2, x, 0));
+    return harness.events.filter((event) => event.type === 'pinch').at(-1).scale;
+  };
+
+  assert.equal(finalScale([110, 120, 130, 140, 150]), 1.5);
+  assert.equal(finalScale([150]), 1.5);
+  assert.equal(finalScale([90, 80, 75]), 0.75);
+  assert.equal(finalScale([75]), 0.75);
+});
+
+test('a confirmed large pinch maps to its exact separation without incremental catch-up', () => {
+  const harness = makeGestureHarness();
+  harness.controller.pointerDown(point(1, 0, 0));
+  harness.controller.pointerDown(point(2, 100, 0));
+  harness.controller.pointerMove(point(2, 250, 0));
+  harness.controller.pointerUp(point(2, 250, 0));
+
+  const pinchEvents = harness.events.filter((event) => event.type === 'pinch');
+  assert.deepEqual(pinchEvents.map((event) => event.scale), [1, 2.5]);
+  assert.equal(pinchEvents[0].outlierHeld, true);
+  assert.equal(pinchEvents[1].outlierConfirmed, true);
 });
 
 test('pinch viewport math keeps the original world point under the moving midpoint', () => {

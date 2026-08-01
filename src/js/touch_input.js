@@ -3,7 +3,8 @@
 (function initBoardfishTouchInput(root) {
   const TOUCH_HOLD_DELAY_MS = 550;
   const TOUCH_MOVE_THRESHOLD_PX = 8;
-  const PINCH_MAX_SCALE_STEP = 1.2;
+  const PINCH_OUTLIER_RATIO = 1.5;
+  const PINCH_OUTLIER_MIN_DELTA_PX = 48;
 
   function touchPoint(input) {
     if (!input) return null;
@@ -32,10 +33,6 @@
       centerY: (first.y + second.y) / 2,
       distance: Math.max(1, Math.hypot(dx, dy)),
     };
-  }
-
-  function medianOfThree(a, b, c) {
-    return a + b + c - Math.min(a, b, c) - Math.max(a, b, c);
   }
 
   function pinchViewportFromGesture(viewport = {}, gesture = {}, limits = {}) {
@@ -67,18 +64,14 @@
       ? Math.max(0, options.moveThresholdPx)
       : TOUCH_MOVE_THRESHOLD_PX;
     const moveThresholdSq = moveThresholdPx * moveThresholdPx;
-    const pinchMaxScaleStep = Number.isFinite(options.pinchMaxScaleStep)
-      ? Math.max(1, options.pinchMaxScaleStep)
-      : PINCH_MAX_SCALE_STEP;
-    const pinchMinScaleStep = 1 / pinchMaxScaleStep;
     const scheduleTimer = options.scheduleTimer || ((callback, delay) => setTimeout(callback, delay));
     const cancelTimer = options.cancelTimer || ((timer) => clearTimeout(timer));
     const active = new Map();
     let mode = 'idle';
     let holdTimer = null;
     let pinchStart = null;
-    let pinchGeometrySamples = [];
-    let pinchFilteredDistance = 1;
+    let pinchAcceptedGeometry = null;
+    let pinchPendingGeometry = null;
 
     const call = (name, payload) => {
       if (typeof options[name] === 'function') options[name](payload);
@@ -135,10 +128,8 @@
       const geometry = twoPointerGeometry(points);
       mode = 'pinch';
       pinchStart = geometry;
-      // A three-sample median rejects a single bad mobile pointer coordinate.
-      // Seed it twice so the first real sample cannot move the viewport alone.
-      pinchGeometrySamples = [geometry, geometry];
-      pinchFilteredDistance = geometry.distance;
+      pinchAcceptedGeometry = geometry;
+      pinchPendingGeometry = null;
       call('onPinchStart', {
         ...geometry,
         startCenterX: geometry.centerX,
@@ -152,29 +143,66 @@
       return true;
     }
 
-    function stabilizedPinchGeometry(rawGeometry) {
-      pinchGeometrySamples.push(rawGeometry);
-      if (pinchGeometrySamples.length > 3) pinchGeometrySamples.shift();
-      if (pinchGeometrySamples.length < 3) return rawGeometry;
-      const [first, second, third] = pinchGeometrySamples;
-      const medianDistance = medianOfThree(first.distance, second.distance, third.distance);
-      const requestedScaleStep = medianDistance / Math.max(1, pinchFilteredDistance);
-      const appliedScaleStep = Math.min(
-        pinchMaxScaleStep,
-        Math.max(pinchMinScaleStep, requestedScaleStep),
-      );
-      pinchFilteredDistance *= appliedScaleStep;
+    function annotatedPinchGeometry(geometry, rawGeometry, extra = {}) {
       return {
-        centerX: medianOfThree(first.centerX, second.centerX, third.centerX),
-        centerY: medianOfThree(first.centerY, second.centerY, third.centerY),
-        distance: pinchFilteredDistance,
+        ...geometry,
         rawCenterX: rawGeometry.centerX,
         rawCenterY: rawGeometry.centerY,
         rawDistance: rawGeometry.distance,
-        requestedScaleStep,
-        appliedScaleStep,
-        scaleStepClamped: appliedScaleStep !== requestedScaleStep,
+        ...extra,
       };
+    }
+
+    function isLargePinchDistanceChange(rawGeometry, acceptedGeometry) {
+      if (!acceptedGeometry) return false;
+      const distanceDelta = Math.abs(rawGeometry.distance - acceptedGeometry.distance);
+      if (distanceDelta < PINCH_OUTLIER_MIN_DELTA_PX) return false;
+      const ratio = rawGeometry.distance / Math.max(1, acceptedGeometry.distance);
+      return ratio > PINCH_OUTLIER_RATIO || ratio < 1 / PINCH_OUTLIER_RATIO;
+    }
+
+    function pinchDistanceLogError(first, second) {
+      return Math.abs(Math.log(Math.max(1, first.distance) / Math.max(1, second.distance)));
+    }
+
+    function stabilizedPinchGeometry(rawGeometry) {
+      if (pinchPendingGeometry) {
+        const pendingWasConfirmed = pinchDistanceLogError(rawGeometry, pinchPendingGeometry)
+          <= pinchDistanceLogError(rawGeometry, pinchAcceptedGeometry);
+        pinchPendingGeometry = null;
+        if (pendingWasConfirmed) {
+          pinchAcceptedGeometry = rawGeometry;
+          return annotatedPinchGeometry(rawGeometry, rawGeometry, { outlierConfirmed: true });
+        }
+      }
+
+      // Ordinary samples map directly to absolute finger separation. Only an
+      // extreme one-frame jump is held for one confirming sample, avoiding
+      // sensor spikes without adding velocity, smoothing, or catch-up state.
+      if (isLargePinchDistanceChange(rawGeometry, pinchAcceptedGeometry)) {
+        pinchPendingGeometry = rawGeometry;
+        return annotatedPinchGeometry(pinchAcceptedGeometry, rawGeometry, { outlierHeld: true });
+      }
+
+      pinchAcceptedGeometry = rawGeometry;
+      return annotatedPinchGeometry(rawGeometry, rawGeometry);
+    }
+
+    function emitPinch(point) {
+      if (mode !== 'pinch' || active.size < 2 || !pinchStart) return false;
+      const points = activePoints(2);
+      const geometry = stabilizedPinchGeometry(twoPointerGeometry(points));
+      call('onPinch', {
+        ...geometry,
+        startCenterX: pinchStart.centerX,
+        startCenterY: pinchStart.centerY,
+        startDistance: pinchStart.distance,
+        scale: geometry.distance / pinchStart.distance,
+        pointers: points,
+        event: point?.sourceEvent || null,
+        activeCount: active.size,
+      });
+      return true;
     }
 
     function pointerDown(input) {
@@ -231,20 +259,7 @@
         return true;
       }
 
-      if (mode === 'pinch' && active.size >= 2 && pinchStart) {
-        const points = activePoints(2);
-        const geometry = stabilizedPinchGeometry(twoPointerGeometry(points));
-        call('onPinch', {
-          ...geometry,
-          startCenterX: pinchStart.centerX,
-          startCenterY: pinchStart.centerY,
-          startDistance: pinchStart.distance,
-          scale: geometry.distance / pinchStart.distance,
-          pointers: points,
-          event: point.sourceEvent,
-          activeCount: active.size,
-        });
-      }
+      emitPinch(point);
       return true;
     }
 
@@ -257,6 +272,10 @@
       current.y = point.y;
       current.sourceEvent = point.sourceEvent;
       const finishedMode = mode;
+
+      // Commit the exact final separation before removing either pointer. This
+      // also confirms a legitimate large last move that had no follow-up event.
+      if (!cancelled && finishedMode === 'pinch') emitPinch(current);
 
       if (!cancelled && finishedMode === 'pending' && active.size === 1) {
         call('onTap', gesturePayload(current));
@@ -280,7 +299,8 @@
         remaining.previousY = remaining.y;
         mode = 'pan';
         pinchStart = null;
-        pinchGeometrySamples = [];
+        pinchAcceptedGeometry = null;
+        pinchPendingGeometry = null;
         call('onPanStart', gesturePayload(remaining, { resumedFromPinch: true }));
         return true;
       }
@@ -288,7 +308,8 @@
       if (active.size === 0) {
         mode = 'idle';
         pinchStart = null;
-        pinchGeometrySamples = [];
+        pinchAcceptedGeometry = null;
+        pinchPendingGeometry = null;
         call('onGestureEnd', gesturePayload(current, { cancelled, finishedMode, activeCount: 0 }));
       }
       return true;
@@ -302,7 +323,8 @@
       active.clear();
       mode = 'idle';
       pinchStart = null;
-      pinchGeometrySamples = [];
+      pinchAcceptedGeometry = null;
+      pinchPendingGeometry = null;
       if (finishedMode === 'pinch') {
         call('onPinchEnd', gesturePayload(point, { cancelled: true, reason, activeCount: 0 }));
       }
@@ -336,7 +358,6 @@
   const api = Object.freeze({
     TOUCH_HOLD_DELAY_MS,
     TOUCH_MOVE_THRESHOLD_PX,
-    PINCH_MAX_SCALE_STEP,
     createTouchGestureController,
     pinchViewportFromGesture,
   });
@@ -497,13 +518,6 @@
   function onTouchPointerMove(event) {
     if (event.pointerType !== 'touch' || !controller.hasPointer(event.pointerId)) return;
     preventTouchDefault(event);
-    const coalesced = typeof event.getCoalescedEvents === 'function'
-      ? event.getCoalescedEvents()
-      : null;
-    if (coalesced?.length) {
-      for (const sample of coalesced) controller.pointerMove(sample);
-      return;
-    }
     controller.pointerMove(event);
   }
 
