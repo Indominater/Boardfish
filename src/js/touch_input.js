@@ -3,6 +3,7 @@
 (function initBoardfishTouchInput(root) {
   const TOUCH_HOLD_DELAY_MS = 550;
   const TOUCH_MOVE_THRESHOLD_PX = 8;
+  const PINCH_MAX_SCALE_STEP = 1.2;
 
   function touchPoint(input) {
     if (!input) return null;
@@ -31,6 +32,10 @@
       centerY: (first.y + second.y) / 2,
       distance: Math.max(1, Math.hypot(dx, dy)),
     };
+  }
+
+  function medianOfThree(a, b, c) {
+    return a + b + c - Math.min(a, b, c) - Math.max(a, b, c);
   }
 
   function pinchViewportFromGesture(viewport = {}, gesture = {}, limits = {}) {
@@ -62,12 +67,18 @@
       ? Math.max(0, options.moveThresholdPx)
       : TOUCH_MOVE_THRESHOLD_PX;
     const moveThresholdSq = moveThresholdPx * moveThresholdPx;
+    const pinchMaxScaleStep = Number.isFinite(options.pinchMaxScaleStep)
+      ? Math.max(1, options.pinchMaxScaleStep)
+      : PINCH_MAX_SCALE_STEP;
+    const pinchMinScaleStep = 1 / pinchMaxScaleStep;
     const scheduleTimer = options.scheduleTimer || ((callback, delay) => setTimeout(callback, delay));
     const cancelTimer = options.cancelTimer || ((timer) => clearTimeout(timer));
     const active = new Map();
     let mode = 'idle';
     let holdTimer = null;
     let pinchStart = null;
+    let pinchGeometrySamples = [];
+    let pinchFilteredDistance = 1;
 
     const call = (name, payload) => {
       if (typeof options[name] === 'function') options[name](payload);
@@ -124,6 +135,10 @@
       const geometry = twoPointerGeometry(points);
       mode = 'pinch';
       pinchStart = geometry;
+      // A three-sample median rejects a single bad mobile pointer coordinate.
+      // Seed it twice so the first real sample cannot move the viewport alone.
+      pinchGeometrySamples = [geometry, geometry];
+      pinchFilteredDistance = geometry.distance;
       call('onPinchStart', {
         ...geometry,
         startCenterX: geometry.centerX,
@@ -135,6 +150,31 @@
         activeCount: active.size,
       });
       return true;
+    }
+
+    function stabilizedPinchGeometry(rawGeometry) {
+      pinchGeometrySamples.push(rawGeometry);
+      if (pinchGeometrySamples.length > 3) pinchGeometrySamples.shift();
+      if (pinchGeometrySamples.length < 3) return rawGeometry;
+      const [first, second, third] = pinchGeometrySamples;
+      const medianDistance = medianOfThree(first.distance, second.distance, third.distance);
+      const requestedScaleStep = medianDistance / Math.max(1, pinchFilteredDistance);
+      const appliedScaleStep = Math.min(
+        pinchMaxScaleStep,
+        Math.max(pinchMinScaleStep, requestedScaleStep),
+      );
+      pinchFilteredDistance *= appliedScaleStep;
+      return {
+        centerX: medianOfThree(first.centerX, second.centerX, third.centerX),
+        centerY: medianOfThree(first.centerY, second.centerY, third.centerY),
+        distance: pinchFilteredDistance,
+        rawCenterX: rawGeometry.centerX,
+        rawCenterY: rawGeometry.centerY,
+        rawDistance: rawGeometry.distance,
+        requestedScaleStep,
+        appliedScaleStep,
+        scaleStepClamped: appliedScaleStep !== requestedScaleStep,
+      };
     }
 
     function pointerDown(input) {
@@ -193,7 +233,7 @@
 
       if (mode === 'pinch' && active.size >= 2 && pinchStart) {
         const points = activePoints(2);
-        const geometry = twoPointerGeometry(points);
+        const geometry = stabilizedPinchGeometry(twoPointerGeometry(points));
         call('onPinch', {
           ...geometry,
           startCenterX: pinchStart.centerX,
@@ -240,6 +280,7 @@
         remaining.previousY = remaining.y;
         mode = 'pan';
         pinchStart = null;
+        pinchGeometrySamples = [];
         call('onPanStart', gesturePayload(remaining, { resumedFromPinch: true }));
         return true;
       }
@@ -247,6 +288,7 @@
       if (active.size === 0) {
         mode = 'idle';
         pinchStart = null;
+        pinchGeometrySamples = [];
         call('onGestureEnd', gesturePayload(current, { cancelled, finishedMode, activeCount: 0 }));
       }
       return true;
@@ -260,6 +302,7 @@
       active.clear();
       mode = 'idle';
       pinchStart = null;
+      pinchGeometrySamples = [];
       if (finishedMode === 'pinch') {
         call('onPinchEnd', gesturePayload(point, { cancelled: true, reason, activeCount: 0 }));
       }
@@ -293,6 +336,7 @@
   const api = Object.freeze({
     TOUCH_HOLD_DELAY_MS,
     TOUCH_MOVE_THRESHOLD_PX,
+    PINCH_MAX_SCALE_STEP,
     createTouchGestureController,
     pinchViewportFromGesture,
   });
@@ -453,6 +497,13 @@
   function onTouchPointerMove(event) {
     if (event.pointerType !== 'touch' || !controller.hasPointer(event.pointerId)) return;
     preventTouchDefault(event);
+    const coalesced = typeof event.getCoalescedEvents === 'function'
+      ? event.getCoalescedEvents()
+      : null;
+    if (coalesced?.length) {
+      for (const sample of coalesced) controller.pointerMove(sample);
+      return;
+    }
     controller.pointerMove(event);
   }
 

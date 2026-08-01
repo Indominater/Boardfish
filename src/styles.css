@@ -32,11 +32,12 @@
     0 8px 24px rgba(0,0,0,0.32),
     0 0 0 1px rgba(0,0,0,0.10);
   --ui-radius: 25px;
+  --pill-radius: 999px;
   --menu-shell-radius: var(--ui-radius);
   --menu-shell-padding: 8px;
   --menu-item-height: 32px;
   --menu-item-padding: 0 8px;
-  --menu-item-radius: var(--ui-radius);
+  --menu-item-radius: var(--pill-radius);
   --menu-item-font-size: 13px;
   --menu-item-letter-spacing: var(--text-letter-spacing);
   --menu-item-line-height: 32px;
@@ -443,6 +444,7 @@ body {
   cursor: pointer;
   overscroll-behavior: none;
   touch-action: none;
+  border-radius: var(--pill-radius);
   max-width: calc(100vw - 32px);
 }
 
@@ -460,6 +462,7 @@ body {
   align-items: center;
   z-index: 100000;
   pointer-events: none;
+  border-radius: var(--pill-radius);
   max-width: calc(100vw - 32px);
 }
 
@@ -506,7 +509,7 @@ body {
   line-height: var(--pill-text-line-height);
   color: var(--firefox-menu-text);
   background: transparent;
-  border-radius: var(--ui-radius);
+  border-radius: var(--pill-radius);
   letter-spacing: var(--menu-item-letter-spacing);
   white-space: normal;
   min-width: var(--pill-text-min-width);
@@ -532,7 +535,7 @@ body {
   line-height: var(--pill-text-line-height);
   color: var(--firefox-menu-text);
   background: transparent;
-  border-radius: var(--ui-radius);
+  border-radius: var(--pill-radius);
   letter-spacing: var(--menu-item-letter-spacing);
   white-space: normal;
   min-width: var(--pill-text-min-width);
