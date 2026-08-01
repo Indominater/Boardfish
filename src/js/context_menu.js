@@ -58,14 +58,37 @@ function addTextAtMenuCommandPoint(event = null) {
   addText(point.x, point.y, '', { anchor: 'center' });
 }
 
+function menuSafeAreaInset(name) {
+  const value = parseFloat(cssVar(`--safe-area-${name}`));
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function menuViewportBounds() {
+  const viewport = window.visualViewport;
+  const left = Number(viewport?.offsetLeft) || 0;
+  const top = Number(viewport?.offsetTop) || 0;
+  const width = Number(viewport?.width) || Number(window.innerWidth) || 0;
+  const height = Number(viewport?.height) || Number(window.innerHeight) || 0;
+  return {
+    left: left + menuSafeAreaInset('left'),
+    top: top + menuSafeAreaInset('top'),
+    right: left + width - menuSafeAreaInset('right'),
+    bottom: top + height - menuSafeAreaInset('bottom'),
+  };
+}
+
 function clampMenuCoord(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
-  const max = Math.max(margin, window.innerWidth - size - margin);
-  return Math.max(margin, Math.min(max, value));
+  const bounds = menuViewportBounds();
+  const min = bounds.left + margin;
+  const max = Math.max(min, bounds.right - size - margin);
+  return Math.max(min, Math.min(max, value));
 }
 
 function clampMenuTop(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
-  const max = Math.max(margin, window.innerHeight - size - margin);
-  return Math.max(margin, Math.min(max, value));
+  const bounds = menuViewportBounds();
+  const min = bounds.top + margin;
+  const max = Math.max(min, bounds.bottom - size - margin);
+  return Math.max(min, Math.min(max, value));
 }
 
 function openMenuAt(menu, x, y, options = {}) {
@@ -132,10 +155,12 @@ function alignCtxActionsToMenuRow(gap) {
   };
   const menuBox = layoutBox(ctxMenu);
   const actionBox = layoutBox(ctxActions);
+  const viewport = menuViewportBounds();
   const edgeGap = gap;
-  const maxActionRight = window.innerWidth - edgeGap;
-  const maxActionLeft = Math.max(edgeGap, maxActionRight - actionBox.width);
-  let menuLeft = menuBox.left <= MENU_VIEWPORT_EDGE_MARGIN ? edgeGap : menuBox.left;
+  const minActionLeft = viewport.left + edgeGap;
+  const maxActionRight = viewport.right - edgeGap;
+  const maxActionLeft = Math.max(minActionLeft, maxActionRight - actionBox.width);
+  let menuLeft = menuBox.left <= viewport.left + MENU_VIEWPORT_EDGE_MARGIN ? minActionLeft : menuBox.left;
   let actionLeft = menuLeft + menuBox.width + gap;
 
   if (actionLeft + actionBox.width > maxActionRight) {
@@ -143,8 +168,8 @@ function alignCtxActionsToMenuRow(gap) {
     menuLeft = actionLeft - gap - menuBox.width;
   }
 
-  if (menuLeft < edgeGap) {
-    menuLeft = edgeGap;
+  if (menuLeft < minActionLeft) {
+    menuLeft = minActionLeft;
     actionLeft = Math.min(maxActionLeft, menuLeft + menuBox.width + gap);
   }
 
