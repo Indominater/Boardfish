@@ -37,6 +37,8 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     selectedIds,
     editingId: null,
     zoom: 1,
+    panX: 0,
+    panY: 0,
     entered: [],
     enterOptions: [],
     history: [],
@@ -46,6 +48,13 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     logs: [],
     obj,
     isSelected(id) { return selectedIds.has(id); },
+    selectedBounds() {
+      if (!selectedIds.size) return null;
+      return { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h };
+    },
+    rectContainsPoint(bounds, point) {
+      return point.x >= bounds.x1 && point.x <= bounds.x2 && point.y >= bounds.y1 && point.y <= bounds.y2;
+    },
     selectObject(id) { selectedIds.clear(); selectedIds.add(id); },
     exitEdit() {},
     createRafCommitter(apply) {
@@ -282,6 +291,28 @@ test('dragging an already selected text object translates instead of entering ed
   assert.equal(context.obj.x, 20);
   assert.equal(context.obj.y, 20);
   assert.deepEqual(context.history, ['drag']);
+});
+
+test('dragging from inside a selected region moves the selection on touch', () => {
+  const context = loadCanvasInputHarness();
+
+  assert.equal(context.startSelectedRegionDrag({ clientX: 20, clientY: 30 }), true);
+  context.latestDrag().move({ clientX: 32, clientY: 45 });
+  context.latestDrag().up({ clientX: 32, clientY: 45 });
+
+  assert.equal(context.obj.x, 22);
+  assert.equal(context.obj.y, 35);
+  assert.deepEqual(context.entered, []);
+  assert.deepEqual(context.history, ['group-drag']);
+});
+
+test('touch drag outside the selected region remains available for viewport panning', () => {
+  const context = loadCanvasInputHarness();
+
+  assert.equal(context.startSelectedRegionDrag({ clientX: 200, clientY: 200 }), false);
+  assert.equal(context.latestDrag(), undefined);
+  assert.equal(context.obj.x, 10);
+  assert.equal(context.obj.y, 20);
 });
 
 test('first click on an unselected text object only selects it', () => {

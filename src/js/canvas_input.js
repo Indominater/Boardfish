@@ -550,6 +550,15 @@ function startGroupDrag(e) {
   return true;
 }
 
+function startSelectedRegionDrag(e) {
+  if (editingId || !selectedIds.size) return false;
+  const bounds = selectedBounds();
+  if (!bounds) return false;
+  const point = toWorld(e.clientX, e.clientY);
+  if (!rectContainsPoint(bounds, point)) return false;
+  return startGroupDrag(e);
+}
+
 hideRubberBandSelectionVisual = () => {
   finishRubberBandDrag();
   _setStyleIfChanged(rubberBand, 'display', 'none', _rubberBandStyleState);

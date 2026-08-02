@@ -340,6 +340,7 @@
 
   const syntheticMouseEvents = new WeakSet();
   let touchPinchStartViewport = null;
+  let touchSelectionDrag = null;
   let suppressCompatibilityMouseUntil = 0;
 
   function touchInputNow() {
@@ -414,7 +415,53 @@
     target.dispatchEvent(makeTouchMouseEvent('contextmenu', point, 2, 0));
   }
 
+  function beginTouchPan(gesture) {
+    touchSelectionDrag = null;
+    if (
+      gesture?.resumedFromPinch ||
+      !boardPressAllowed() ||
+      typeof startSelectedRegionDrag !== 'function'
+    ) {
+      return false;
+    }
+    const startX = Number(gesture.startX);
+    const startY = Number(gesture.startY);
+    if (!Number.isFinite(startX) || !Number.isFinite(startY)) return false;
+    const started = startSelectedRegionDrag({
+      clientX: startX,
+      clientY: startY,
+      button: 0,
+      buttons: 1,
+      sourceEvent: gesture.event || null,
+    });
+    if (!started) return false;
+    touchSelectionDrag = { x: startX, y: startY };
+    return true;
+  }
+
+  function applyTouchSelectionDrag(gesture) {
+    if (!touchSelectionDrag) return false;
+    const x = Number(gesture.x);
+    const y = Number(gesture.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return true;
+    touchSelectionDrag.x = x;
+    touchSelectionDrag.y = y;
+    document.dispatchEvent(makeTouchMouseEvent('mousemove', { x, y }, 0, 1));
+    return true;
+  }
+
+  function finishTouchSelectionDrag(gesture = null) {
+    if (!touchSelectionDrag) return false;
+    const drag = touchSelectionDrag;
+    touchSelectionDrag = null;
+    const x = Number.isFinite(Number(gesture?.x)) ? Number(gesture.x) : drag.x;
+    const y = Number.isFinite(Number(gesture?.y)) ? Number(gesture.y) : drag.y;
+    document.dispatchEvent(makeTouchMouseEvent('mouseup', { x, y }, 0, 0));
+    return true;
+  }
+
   function applyTouchPan(gesture) {
+    if (applyTouchSelectionDrag(gesture)) return;
     if (!boardNavigationAllowed()) return;
     BoardfishViewportState.panBy(gesture.dx, gesture.dy);
     globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
@@ -422,6 +469,7 @@
   }
 
   function beginTouchPinch() {
+    finishTouchSelectionDrag();
     touchPinchStartViewport = { panX, panY, zoom };
   }
 
@@ -440,11 +488,15 @@
   const controller = createTouchGestureController({
     onTap: dispatchTouchLeftClick,
     onLongPress: dispatchTouchRightClick,
+    onPanStart: beginTouchPan,
     onPan: applyTouchPan,
     onPinchStart: beginTouchPinch,
     onPinch: applyTouchPinch,
     onPinchEnd: () => { touchPinchStartViewport = null; },
-    onGestureEnd: () => { touchPinchStartViewport = null; },
+    onGestureEnd: (gesture) => {
+      finishTouchSelectionDrag(gesture);
+      touchPinchStartViewport = null;
+    },
   });
 
   function shouldSuppressCompatibilityMouse(event) {

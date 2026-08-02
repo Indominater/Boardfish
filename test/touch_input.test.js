@@ -89,6 +89,14 @@ test('one-finger movement beyond the tap slop pans without tapping', () => {
   );
 });
 
+test('mobile pan routing gives selected-region drags to the object drag path', () => {
+  assert.match(touchInputSource, /onPanStart:\s*beginTouchPan/);
+  assert.match(touchInputSource, /function beginTouchPan\([\s\S]*startSelectedRegionDrag\(/);
+  assert.match(touchInputSource, /function applyTouchSelectionDrag\([\s\S]*makeTouchMouseEvent\('mousemove'/);
+  assert.match(touchInputSource, /function finishTouchSelectionDrag\([\s\S]*makeTouchMouseEvent\('mouseup'/);
+  assert.match(touchInputSource, /function applyTouchPan\(gesture\) \{\s*if \(applyTouchSelectionDrag\(gesture\)\) return;/);
+});
+
 test('press and hold maps to one right-click long press and suppresses tap', () => {
   const harness = makeGestureHarness();
   harness.controller.pointerDown(point(7, 50, 60));
