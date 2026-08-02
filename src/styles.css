@@ -426,21 +426,6 @@ body {
   -webkit-user-select: none;
 }
 
-@media (pointer: coarse) {
-  :root {
-    --menu-item-height: 44px;
-    --menu-item-line-height: 44px;
-    --menu-item-padding: 0 12px;
-    --menu-item-font-size: 15px;
-  }
-
-  .ctx-item,
-  .ctx-action-item,
-  #island {
-    cursor: pointer;
-  }
-}
-
 /* ── Island ── */
 #island {
   position: fixed;
