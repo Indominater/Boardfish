@@ -295,8 +295,14 @@ body {
   --ui-highlight-nudge-transform: translateX(0);
 }
 
-:where(.ctx-item:hover, .ctx-item:focus-visible, .ctx-action-item:focus-visible, .ui-highlight-nudge:hover, .ui-highlight-nudge.hotspot-hover, #island:hover .ui-highlight-nudge) {
+:where(.ctx-item:focus-visible, .ctx-action-item:focus-visible) {
   --ui-highlight-nudge-transform: translateX(var(--highlight-nudge-x));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(.ctx-item:hover, .ui-highlight-nudge:hover, .ui-highlight-nudge.hotspot-hover, #island:hover .ui-highlight-nudge) {
+    --ui-highlight-nudge-transform: translateX(var(--highlight-nudge-x));
+  }
 }
 
 .ctx-action-item {
@@ -338,8 +344,10 @@ body {
   pointer-events: none;
   z-index: 0;
 }
-.ctx-action-item.hotspot-hover::before,
 .ctx-action-item:focus-visible::before { background: var(--firefox-menu-hover-bg); }
+@media (hover: hover) and (pointer: fine) {
+  .ctx-action-item.hotspot-hover::before { background: var(--firefox-menu-hover-bg); }
+}
 .ctx-action-item.hotspot-active::before,
 .ctx-action-item[aria-pressed="true"]::before { background: var(--menu-active-bg); }
 .ctx-action-icon svg {
@@ -397,8 +405,10 @@ body {
   justify-self: end;
   white-space: nowrap;
 }
-.ctx-item:hover {
-  background: var(--firefox-menu-hover-bg);
+@media (hover: hover) and (pointer: fine) {
+  .ctx-item:hover {
+    background: var(--firefox-menu-hover-bg);
+  }
 }
 .ctx-item:focus-visible {
   background: var(--firefox-menu-hover-bg);
@@ -486,8 +496,10 @@ body {
   display: flex;
 }
 
-#island:hover #isl-zoom {
-  background: var(--firefox-menu-hover-bg);
+@media (hover: hover) and (pointer: fine) {
+  #island:hover #isl-zoom {
+    background: var(--firefox-menu-hover-bg);
+  }
 }
 
 #island:active #isl-zoom {
@@ -644,8 +656,10 @@ body {
   background: var(--danger-bg);
   color: var(--danger-text);
 }
-#dlg-discard:hover {
-  background: var(--danger-hover-bg);
+@media (hover: hover) and (pointer: fine) {
+  #dlg-discard:hover {
+    background: var(--danger-hover-bg);
+  }
 }
 #dlg-discard:focus-visible {
   background: var(--danger-hover-bg);

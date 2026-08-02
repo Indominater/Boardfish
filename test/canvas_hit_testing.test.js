@@ -12,6 +12,28 @@ function readSource(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
 
+function cssBlocksForPrelude(source, prelude) {
+  const blocks = [];
+  let searchFrom = 0;
+  while (searchFrom < source.length) {
+    const headerStart = source.indexOf(prelude, searchFrom);
+    if (headerStart < 0) break;
+    const blockStart = source.indexOf('{', headerStart + prelude.length);
+    assert.notEqual(blockStart, -1, `missing CSS block for ${prelude}`);
+    let depth = 1;
+    let cursor = blockStart + 1;
+    while (cursor < source.length && depth > 0) {
+      if (source[cursor] === '{') depth += 1;
+      else if (source[cursor] === '}') depth -= 1;
+      cursor += 1;
+    }
+    assert.equal(depth, 0, `unterminated CSS block for ${prelude}`);
+    blocks.push(source.slice(blockStart + 1, cursor - 1));
+    searchFrom = cursor;
+  }
+  return blocks;
+}
+
 function loadViewportHitTest() {
   const source = readSource('src/js/viewport.js');
   const match = source.match(/function hitTest\(wx, wy\) \{[\s\S]*?\n\}/);
@@ -234,11 +256,61 @@ test('keyboard focus mirrors menu hover styling without focusing the zoom pill',
   assert.doesNotMatch(styles, /button:focus,\s*button:focus-visible\s*\{\s*outline: none;\s*\}/);
   assert.match(styles, /\.ctx-action-item\s*\{[\s\S]*outline: none;[\s\S]*\}/);
   assert.doesNotMatch(styles, /\.ctx-action-item:focus,\s*\.ctx-action-item:focus-visible\s*\{\s*outline: none;\s*\}/);
-  assert.match(styles, /:where\(\.ctx-item:hover,\s*\.ctx-item:focus-visible,\s*\.ctx-action-item:focus-visible,[\s\S]*#island:hover \.ui-highlight-nudge\)\s*\{[\s\S]*--ui-highlight-nudge-transform: translateX\(var\(--highlight-nudge-x\)\);[\s\S]*\}/);
+  assert.match(styles, /:where\(\.ctx-item:focus-visible,\s*\.ctx-action-item:focus-visible\)\s*\{\s*--ui-highlight-nudge-transform: translateX\(var\(--highlight-nudge-x\)\);\s*\}/);
   assert.match(styles, /\.ctx-item:focus-visible\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
-  assert.match(styles, /\.ctx-action-item\.hotspot-hover::before,\s*\.ctx-action-item:focus-visible::before\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
+  assert.match(styles, /\.ctx-action-item:focus-visible::before\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
   assert.match(styles, /#dlg-discard:focus-visible\s*\{\s*background: var\(--danger-hover-bg\);\s*\}/);
   assert.doesNotMatch(styles, /#island:focus-visible #isl-zoom/);
+});
+
+test('hover effects are limited to hover-capable fine pointers', () => {
+  const styles = readSource('src/styles.css');
+  const hoverBlocks = cssBlocksForPrelude(styles, '@media (hover: hover) and (pointer: fine)');
+  const gatedHoverStyles = hoverBlocks.join('\n');
+  const occurrences = (source, pattern) => source.match(pattern)?.length || 0;
+
+  assert.ok(hoverBlocks.length > 0);
+  assert.equal(occurrences(gatedHoverStyles, /:hover/g), occurrences(styles, /:hover/g));
+  assert.equal(occurrences(gatedHoverStyles, /\.hotspot-hover/g), occurrences(styles, /\.hotspot-hover/g));
+  assert.match(gatedHoverStyles, /\.ctx-item:hover/);
+  assert.match(gatedHoverStyles, /\.ctx-action-item\.hotspot-hover::before/);
+  assert.match(gatedHoverStyles, /#island:hover #isl-zoom/);
+  assert.match(gatedHoverStyles, /#dlg-discard:hover/);
+  assert.match(styles, /\.ctx-item:active\s*\{\s*background: var\(--menu-active-bg\);/);
+  assert.match(styles, /#island:active #isl-zoom\s*\{\s*background: var\(--menu-active-bg\);/);
+  assert.match(styles, /#dlg-discard:active\s*\{\s*background: var\(--danger-active-bg\);/);
+});
+
+test('touch action hotspots use pressed state without synthesizing hover', () => {
+  const source = readSource('src/js/context_menu.js');
+  const match = source.match(/function updateCtxActionHotspotState\(e, active = false\) \{[\s\S]*?\n\}/);
+  assert.ok(match, 'context action hotspot updater is missing');
+
+  const classes = new Set();
+  const item = {
+    classList: {
+      toggle(name, enabled) {
+        if (enabled) classes.add(name);
+        else classes.delete(name);
+      },
+    },
+  };
+  const context = {
+    ctxActionItems: [item],
+    isCtxActionHotspotEvent: () => true,
+  };
+  vm.createContext(context);
+  vm.runInContext(`${match[0]}\nthis.updateCtxActionHotspotState = updateCtxActionHotspotState;`, context);
+  const event = (pointerType) => ({ pointerType, target: { closest: () => item } });
+
+  context.updateCtxActionHotspotState(event('touch'));
+  assert.deepEqual([...classes], []);
+
+  context.updateCtxActionHotspotState(event('touch'), true);
+  assert.deepEqual([...classes], ['hotspot-active']);
+
+  context.updateCtxActionHotspotState(event('mouse'));
+  assert.deepEqual([...classes], ['hotspot-hover']);
 });
 
 test('destructive dialog action uses shared danger color tokens', () => {

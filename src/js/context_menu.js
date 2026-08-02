@@ -967,7 +967,7 @@ function updateCtxActionHotspotState(e, active = false) {
   for (let i = 0; i < ctxActionItems.length; i++) {
     const item = ctxActionItems[i];
     const hot = item === button && isCtxActionHotspotEvent(e, item);
-    item.classList.toggle('hotspot-hover', hot);
+    item.classList.toggle('hotspot-hover', e.pointerType !== 'touch' && hot);
     item.classList.toggle('hotspot-active', active && hot);
   }
 }
