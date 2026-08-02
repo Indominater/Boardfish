@@ -505,47 +505,61 @@ function startMousePan(e) {
   beginDocumentDrag({ move: onMove, up: onUp });
 }
 
-function startGroupDrag(e) {
-  const grpStartX = e.clientX, grpStartY = e.clientY;
+function createSelectionDragSession(startClientX, startClientY) {
   const grpItems = dragItemsForSelection();
-  if (!grpItems.length) return false;
+  if (!grpItems.length) return null;
+  const dragZoom = Math.max(0.0001, zoom);
   let grpMoved = false;
-  const grpThreshold = 9 / (zoom * zoom);
+  let finished = false;
+  const grpThreshold = 9 / (dragZoom * dragZoom);
   function applyGrpDrag(dx, dy) {
     for (const item of grpItems) { item.obj.x = item.startX + dx; item.obj.y = item.startY + dy; }
     withRenderSource('group-drag', () => drawBoard());
     updateSelectionOverlay();
   }
   const dragCommitter = createRafCommitter(({ dx, dy }) => applyGrpDrag(dx, dy));
-  function onGrpMove(ev) {
-    const dx = (ev.clientX - grpStartX) / zoom, dy = (ev.clientY - grpStartY) / zoom;
+  function move(clientX, clientY) {
+    if (finished || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+    const dx = (clientX - startClientX) / dragZoom;
+    const dy = (clientY - startClientY) / dragZoom;
     if (!grpMoved && dx*dx + dy*dy > grpThreshold) grpMoved = true;
-    if (!grpMoved) return;
+    if (!grpMoved) return false;
     dragCommitter.schedule({ dx, dy });
+    return true;
   }
+  function finish() {
+    if (finished) return false;
+    finished = true;
+    if (!grpMoved) return false;
+    dragCommitter.flush();
+    let hasText = false;
+    let hasNonText = false;
+    for (const item of grpItems) {
+      markDirty(item.obj.id);
+      if (item.obj?.type === 'text') hasText = true;
+      else hasNonText = true;
+    }
+    if (hasText) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-drag');
+    }
+    if (hasNonText) {
+      globalThis.BoardfishMotion?.applyActionAnimation?.('object-group-drag', {
+        selection: true,
+        options: { includeText: false },
+      });
+    }
+    pushHistory('group-drag');
+    return true;
+  }
+  return Object.freeze({ move, finish });
+}
+
+function startGroupDrag(e) {
+  const drag = createSelectionDragSession(e.clientX, e.clientY);
+  if (!drag) return false;
   beginDocumentDrag({
-    move: onGrpMove,
-    up() {
-      if (!grpMoved) return;
-      dragCommitter.flush();
-      let hasText = false;
-      let hasNonText = false;
-      for (const item of grpItems) {
-        markDirty(item.obj.id);
-        if (item.obj?.type === 'text') hasText = true;
-        else hasNonText = true;
-      }
-      if (hasText) {
-        globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-drag');
-      }
-      if (hasNonText) {
-        globalThis.BoardfishMotion?.applyActionAnimation?.('object-group-drag', {
-          selection: true,
-          options: { includeText: false },
-        });
-      }
-      pushHistory('group-drag');
-    },
+    move: (ev) => drag.move(ev.clientX, ev.clientY),
+    up: () => drag.finish(),
   });
   return true;
 }
@@ -556,7 +570,7 @@ function startSelectedRegionDrag(e) {
   if (!bounds) return false;
   const point = toWorld(e.clientX, e.clientY);
   if (!rectContainsPoint(bounds, point)) return false;
-  return startGroupDrag(e);
+  return createSelectionDragSession(e.clientX, e.clientY);
 }
 
 hideRubberBandSelectionVisual = () => {

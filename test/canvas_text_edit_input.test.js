@@ -6,17 +6,24 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadCanvasInputHarness({ selected = true } = {}) {
+function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
   const obj = { id: 'text-1', type: 'text', x: 10, y: 20, w: 160, h: 40, data: { content: 'hello' } };
   const selectedIds = selected ? new Set([obj.id]) : new Set();
   const dragHandlers = [];
   const deferredTimers = [];
   const animationFrames = [];
+  const canvasListeners = new Map();
   const context = {
     console,
-    canvas: { addEventListener() {}, classList: { add() {}, remove() {} } },
+    canvas: {
+      addEventListener(type, listener) { addListener(canvasListeners, type, listener); },
+      contains() { return true; },
+      classList: { add() {}, remove() {} },
+    },
     boardCanvas: {},
     document: { activeElement: null, addEventListener() {}, removeEventListener() {} },
+    TouchEvent: touchInput ? function TouchEvent() {} : undefined,
+    navigator: { maxTouchPoints: touchInput ? 5 : 0 },
     requestAnimationFrame(fn) {
       animationFrames.push(fn);
       return animationFrames.length;
@@ -25,6 +32,7 @@ function loadCanvasInputHarness({ selected = true } = {}) {
       deferredTimers.push(fn);
       return deferredTimers.length;
     },
+    clearTimeout() {},
     flushDeferredTasks() {
       while (animationFrames.length || deferredTimers.length) {
         const frames = animationFrames.splice(0);
@@ -46,6 +54,7 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     selections: [],
     renders: [],
     logs: [],
+    viewportPans: [],
     obj,
     isSelected(id) { return selectedIds.has(id); },
     selectedBounds() {
@@ -124,9 +133,16 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     },
     TextSelDebug: { _logSelection(type) { context.logs.push(type); } },
     scheduleRender(select, overlay) { context.renders.push({ select, overlay }); },
+    scheduleTransform() {},
+    BoardfishViewportState: {
+      panBy(dx, dy) { context.viewportPans.push({ dx, dy }); },
+    },
     showTextEditContextMenuAt(clientX, clientY) { context.menus.push({ clientX, clientY }); },
   };
   context.latestDrag = () => dragHandlers[dragHandlers.length - 1];
+  context.dispatchCanvas = (type, event) => {
+    for (const listener of canvasListeners.get(type) || []) listener(event);
+  };
 
   vm.createContext(context);
   vm.runInContext(
@@ -134,6 +150,13 @@ function loadCanvasInputHarness({ selected = true } = {}) {
     context,
     { filename: 'canvas_input.js' },
   );
+  if (touchInput) {
+    vm.runInContext(
+      fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'touch_input.js'), 'utf8'),
+      context,
+      { filename: 'touch_input.js' },
+    );
+  }
   return context;
 }
 
@@ -296,14 +319,48 @@ test('dragging an already selected text object translates instead of entering ed
 test('dragging from inside a selected region moves the selection on touch', () => {
   const context = loadCanvasInputHarness();
 
-  assert.equal(context.startSelectedRegionDrag({ clientX: 20, clientY: 30 }), true);
-  context.latestDrag().move({ clientX: 32, clientY: 45 });
-  context.latestDrag().up({ clientX: 32, clientY: 45 });
+  const drag = context.startSelectedRegionDrag({ clientX: 20, clientY: 30 });
+  assert.ok(drag);
+  assert.equal(drag.move(32, 45), true);
+  assert.equal(drag.finish(), true);
 
   assert.equal(context.obj.x, 22);
   assert.equal(context.obj.y, 35);
   assert.deepEqual(context.entered, []);
   assert.deepEqual(context.history, ['group-drag']);
+});
+
+test('a mobile TouchEvent sequence drags the selected object instead of the viewport', () => {
+  const context = loadCanvasInputHarness({ touchInput: true });
+  const touch = (identifier, clientX, clientY) => ({
+    identifier,
+    clientX,
+    clientY,
+    target: context.canvas,
+  });
+  const dispatchTouch = (type, touches, changedTouches) => {
+    const event = {
+      target: context.canvas,
+      touches,
+      changedTouches,
+      cancelable: true,
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    context.dispatchCanvas(type, event);
+    assert.equal(event.defaultPrevented, true);
+  };
+
+  const start = touch(1, 20, 30);
+  const moved = touch(1, 32, 45);
+  dispatchTouch('touchstart', [start], [start]);
+  dispatchTouch('touchmove', [moved], [moved]);
+  dispatchTouch('touchend', [], [moved]);
+
+  assert.equal(context.obj.x, 22);
+  assert.equal(context.obj.y, 35);
+  assert.deepEqual(context.history, ['group-drag']);
+  assert.deepEqual(context.viewportPans, []);
 });
 
 test('touch drag outside the selected region remains available for viewport panning', () => {
@@ -313,6 +370,41 @@ test('touch drag outside the selected region remains available for viewport pann
   assert.equal(context.latestDrag(), undefined);
   assert.equal(context.obj.x, 10);
   assert.equal(context.obj.y, 20);
+});
+
+test('a mobile TouchEvent drag outside the selection pans the viewport', () => {
+  const context = loadCanvasInputHarness({ touchInput: true });
+  const start = { identifier: 1, clientX: 200, clientY: 200, target: context.canvas };
+  const moved = { identifier: 1, clientX: 212, clientY: 215, target: context.canvas };
+  const dispatchTouch = (type, touches, changedTouches) => context.dispatchCanvas(type, {
+    target: context.canvas,
+    touches,
+    changedTouches,
+    cancelable: true,
+    preventDefault() {},
+  });
+
+  dispatchTouch('touchstart', [start], [start]);
+  dispatchTouch('touchmove', [moved], [moved]);
+  dispatchTouch('touchend', [], [moved]);
+
+  assert.deepEqual(context.viewportPans, [{ dx: 12, dy: 15 }]);
+  assert.deepEqual({ x: context.obj.x, y: context.obj.y }, { x: 10, y: 20 });
+  assert.deepEqual(context.history, []);
+});
+
+test('selected-region touch drag commits the exact final lift position once', () => {
+  const context = loadCanvasInputHarness();
+  const drag = context.startSelectedRegionDrag({ clientX: 20, clientY: 30 });
+
+  drag.move(28, 38);
+  drag.move(40, 50);
+  assert.equal(drag.finish(), true);
+  assert.equal(drag.finish(), false);
+
+  assert.equal(context.obj.x, 30);
+  assert.equal(context.obj.y, 40);
+  assert.deepEqual(context.history, ['group-drag']);
 });
 
 test('first click on an unselected text object only selects it', () => {

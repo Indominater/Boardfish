@@ -220,16 +220,20 @@
     }
 
     function pointerMoves(inputs) {
-      const points = Array.from(inputs || [], touchPoint).filter(Boolean);
+      const samples = Array.from(inputs || []);
       if (mode !== 'pinch' || active.size < 2) {
         let handled = false;
-        for (const point of points) handled = pointerMove(point) || handled;
+        // pointerMove performs its own normalization. Passing an already
+        // normalized point through it drops the sample because that point has
+        // x/y rather than clientX/clientY (the one-finger TouchEvent path).
+        for (const sample of samples) handled = pointerMove(sample) || handled;
         return handled;
       }
 
       // Touch Events expose one coherent snapshot containing both contacts.
       // Update the complete snapshot before deriving its absolute scale so
       // event ordering and movement speed cannot affect the zoom ratio.
+      const points = samples.map(touchPoint).filter(Boolean);
       let lastPoint = null;
       for (const point of points) {
         if (!updateActivePoint(point)) continue;
@@ -416,7 +420,7 @@
   }
 
   function beginTouchPan(gesture) {
-    touchSelectionDrag = null;
+    finishTouchSelectionDrag();
     if (
       gesture?.resumedFromPinch ||
       !boardPressAllowed() ||
@@ -427,15 +431,15 @@
     const startX = Number(gesture.startX);
     const startY = Number(gesture.startY);
     if (!Number.isFinite(startX) || !Number.isFinite(startY)) return false;
-    const started = startSelectedRegionDrag({
+    const drag = startSelectedRegionDrag({
       clientX: startX,
       clientY: startY,
       button: 0,
       buttons: 1,
       sourceEvent: gesture.event || null,
     });
-    if (!started) return false;
-    touchSelectionDrag = { x: startX, y: startY };
+    if (!drag || typeof drag.move !== 'function' || typeof drag.finish !== 'function') return false;
+    touchSelectionDrag = drag;
     return true;
   }
 
@@ -444,9 +448,7 @@
     const x = Number(gesture.x);
     const y = Number(gesture.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return true;
-    touchSelectionDrag.x = x;
-    touchSelectionDrag.y = y;
-    document.dispatchEvent(makeTouchMouseEvent('mousemove', { x, y }, 0, 1));
+    touchSelectionDrag.move(x, y);
     return true;
   }
 
@@ -454,9 +456,10 @@
     if (!touchSelectionDrag) return false;
     const drag = touchSelectionDrag;
     touchSelectionDrag = null;
-    const x = Number.isFinite(Number(gesture?.x)) ? Number(gesture.x) : drag.x;
-    const y = Number.isFinite(Number(gesture?.y)) ? Number(gesture.y) : drag.y;
-    document.dispatchEvent(makeTouchMouseEvent('mouseup', { x, y }, 0, 0));
+    const x = Number(gesture?.x);
+    const y = Number(gesture?.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) drag.move(x, y);
+    drag.finish();
     return true;
   }
 

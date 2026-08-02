@@ -89,11 +89,25 @@ test('one-finger movement beyond the tap slop pans without tapping', () => {
   );
 });
 
+test('an atomic one-finger touch snapshot is not discarded during normalization', () => {
+  const harness = makeGestureHarness();
+  harness.controller.pointerDown(point(1, 10, 10));
+  harness.controller.pointerMoves([point(1, 20, 10)]);
+  harness.controller.pointerUp(point(1, 20, 10));
+
+  assert.deepEqual(harness.events.map((event) => event.type), ['pan-start', 'pan']);
+  assert.deepEqual(
+    harness.events.filter((event) => event.type === 'pan').map(({ dx, dy }) => ({ dx, dy })),
+    [{ dx: 10, dy: 0 }],
+  );
+});
+
 test('mobile pan routing gives selected-region drags to the object drag path', () => {
   assert.match(touchInputSource, /onPanStart:\s*beginTouchPan/);
   assert.match(touchInputSource, /function beginTouchPan\([\s\S]*startSelectedRegionDrag\(/);
-  assert.match(touchInputSource, /function applyTouchSelectionDrag\([\s\S]*makeTouchMouseEvent\('mousemove'/);
-  assert.match(touchInputSource, /function finishTouchSelectionDrag\([\s\S]*makeTouchMouseEvent\('mouseup'/);
+  assert.match(touchInputSource, /function applyTouchSelectionDrag\([\s\S]*touchSelectionDrag\.move\(x, y\)/);
+  assert.match(touchInputSource, /function finishTouchSelectionDrag\([\s\S]*drag\.move\(x, y\)[\s\S]*drag\.finish\(\)/);
+  assert.doesNotMatch(touchInputSource, /document\.dispatchEvent\(makeTouchMouseEvent\('(mousemove|mouseup)'/);
   assert.match(touchInputSource, /function applyTouchPan\(gesture\) \{\s*if \(applyTouchSelectionDrag\(gesture\)\) return;/);
 });
 
