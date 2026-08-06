@@ -41,10 +41,10 @@ function isDirty() {
   return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0;
 }
 
-function markSaved() {
+function markSaved(updateDocumentTitle = true) {
   _dirtyIds.clear();
   savedHistoryIndex = historyIndex;
-  updateTitle();
+  if (updateDocumentTitle) updateTitle();
 }
 
 function updateTitle() {
@@ -60,19 +60,11 @@ var unsavedDialog = document.getElementById('dialog');
 var _dialogResolve = null;
 
 function _dialogClose(result) {
-  const finish = () => {
-    dialogOverlay.classList.remove('show');
-    updateInputShieldVisual();
-    const r = _dialogResolve;
-    _dialogResolve = null;
-    if (r) r(result);
-  };
-  if (globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-close', {
-    surface: unsavedDialog,
-    phase: 'close',
-    after: finish,
-  })) return;
-  finish();
+  dialogOverlay.classList.remove('show');
+  updateInputShieldVisual();
+  const r = _dialogResolve;
+  _dialogResolve = null;
+  if (r) r(result);
 }
 
 unsavedDialog.addEventListener('contextmenu', (e) => {
@@ -80,15 +72,12 @@ unsavedDialog.addEventListener('contextmenu', (e) => {
   e.stopPropagation();
 });
 document.getElementById('dlg-save').addEventListener('click', () => {
-  globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-save-press');
   _dialogClose('save');
 });
 document.getElementById('dlg-discard').addEventListener('click', () => {
-  globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-delete-press');
   _dialogClose('discard');
 });
 document.getElementById('dlg-cancel').addEventListener('click', () => {
-  globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-cancel-press');
   _dialogClose('cancel');
 });
 
@@ -97,7 +86,6 @@ function showUnsavedDialog() {
   return new Promise((resolve) => {
     _dialogResolve = resolve;
     dialogOverlay.classList.add('show');
-    globalThis.BoardfishMotion?.applyActionAnimation?.('unsaved-dialog-open', { surface: unsavedDialog });
     updateInputShieldVisual();
   });
 }
@@ -148,8 +136,6 @@ const endOpeningFreeze = () => {
 
 function boardDocumentDeps() {
   return {
-    schema: BoardSchema,
-    guessImageExtFromDataUrl: BoardfishExportUtils.guessImageExtFromDataUrl,
     imageStoreBytesEstimate,
     imageRefKind,
     rawImageStore: imageStore,
@@ -169,7 +155,7 @@ function boardDataForSave() {
     viewport: { panX, panY, zoom },
     imageStore,
     objects,
-  }, boardDocumentDeps());
+  }, { schema: BoardSchema, guessImageExtFromDataUrl: BoardfishExportUtils.guessImageExtFromDataUrl });
 }
 
 function getBoardSaveMetrics(data) {
@@ -479,8 +465,7 @@ function truthyKeyList(keys) {
   return list;
 }
 
-function getVisibleImagePreviewTasks(keys, options = {}) {
-  const wanted = truthyKeySet(keys);
+function getVisibleImagePreviewTasks(wanted, options = {}) {
   const includeCached = options.includeCached === true;
   const rect = getVisibleWorldBounds();
   const tasksByKey = new Map();
@@ -502,7 +487,7 @@ function getVisibleImagePreviewTasks(keys, options = {}) {
 async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) {
   if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
   const pendingKeys = truthyKeySet(keys);
-  const tasks = getVisibleImagePreviewTasks(keys, options);
+  const tasks = getVisibleImagePreviewTasks(pendingKeys, options);
   const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
   const t0 = performance.now();
   const concurrency = Math.max(1, Math.min(8, tasks.length || 1));
@@ -529,6 +514,7 @@ async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) 
     else skipped++;
     return result;
   });
+  if (!shouldCollectOpenBoardMetrics(dbg)) return { pendingReady };
   const resultRows = new Array(results.length);
   const slowResults = [];
   for (let i = 0; i < results.length; i++) {
@@ -547,14 +533,12 @@ async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) 
     let insertAt = slowResults.length;
     while (insertAt > 0 && rowMs > (Number(slowResults[insertAt - 1].ms) || 0)) insertAt--;
     if (insertAt < 24) {
-      slowResults.splice(insertAt, 0, { ...row });
+      slowResults.splice(insertAt, 0, row);
       if (slowResults.length > 24) slowResults.pop();
     }
   }
   const slowest = slowResults[0] || null;
-  const sampleCount = Math.min(24, resultRows.length);
-  const sampleResults = new Array(sampleCount);
-  for (let i = 0; i < sampleCount; i++) sampleResults[i] = { ...resultRows[i] };
+  const sampleResults = resultRows.slice(0, 24);
   const out = {
     count: keys.length,
     selected: tasks.length,
@@ -578,8 +562,7 @@ async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) 
   return out;
 }
 
-function countVisibleImageBitmapSettle(keys) {
-  const visibleKeys = truthyKeyList(keys);
+function countVisibleImageBitmapSettle(visibleKeys) {
   let ready = 0;
   let failed = 0;
   let missingStore = 0;
@@ -1033,7 +1016,7 @@ function applyBoardData(data, options = {}) {
 
   const historyStart = performance.now();
   boardHistory = []; historyIndex = -1; snapshot();
-  markSaved();
+  markSaved(false);
   OpenDebug.step(dbg, 'reset-boardHistory-markSaved', { ms: performance.now() - historyStart, historyLength: boardHistory.length, historyIndex });
   PillDebug.log('open:applyBoardData:end', openMetrics);
   if (endDebug) OpenDebug.end(dbg, { opened: true, ...openMetrics });
@@ -1056,15 +1039,12 @@ runExclusiveBoardSave.inFlight = null;
 
 const saveBoardAsImpl = async () => {
   const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
-  globalThis.BoardfishMotion?.applyActionAnimation?.('save-board-as');
   const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
   try {
     const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
     const command = BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG;
-    globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-open');
     const fileRef = await SaveDebug.wrap(dbg, command, () => BoardfishRuntime.saveFileDialog(defaultName), { defaultName });
     if (!fileRef) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
       SaveDebug.end(dbg, { cancelled: true });
       releaseInputShield();
       return false;
@@ -1097,7 +1077,6 @@ async function saveBoardAs() {
 }
 
 const saveBoardImpl = async () => {
-  globalThis.BoardfishMotion?.applyActionAnimation?.('save-board');
   const target = BoardfishRuntime.canSaveToExistingTarget(currentFileRef) ? currentFileRef : null;
   if (target) {
     const path = BoardfishRuntime.describeFileRef(target);
@@ -1146,11 +1125,8 @@ async function openBoard() {
 
   try {
     const command = BoardfishRuntime.WEB_COMMANDS.OPEN_FILE_DIALOG;
-    globalThis.BoardfishMotion?.applyActionAnimation?.('open-board-file-pick');
-    globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-open');
     const fileRef = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.openFileDialog());
     if (!fileRef) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
       OpenDebug.end(dbg, { cancelled: true });
       return;
     }

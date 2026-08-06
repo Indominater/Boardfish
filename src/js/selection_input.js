@@ -146,7 +146,7 @@ function selectionOverlayAnimatedScreenRect(resting, animated, padDevicePx = 0) 
 function beginRubberBandDrag() {
   if (_rubberBandDragActive) return;
   _rubberBandDragActive = true;
-  _rubberBandShieldRelease = acquireInputShield('pointermove', 'pointerup:0', 'mousemove', 'mouseup:0');
+  _rubberBandShieldRelease = acquireInputShield();
 }
 
 function finishRubberBandDrag() {
@@ -193,13 +193,6 @@ function scheduleTextMinWidthWarm(obj) {
     const handle = setTimeout(run, 250);
     _textMinWidthWarmCancel = () => clearTimeout(handle);
   }
-}
-
-function inputNameFromEvent(e) {
-  if (e.type === 'keydown' || e.type === 'keyup') {
-    return e.key ? `key:${e.key.toLowerCase()}` : e.type;
-  }
-  return e.type;
 }
 
 function selectionInputPerfDebugApi() {
@@ -323,21 +316,13 @@ const isEventInsideViewportWheelSurface = (e) => {
 };
 
 function isShieldInputAllowed(e) {
+  if (!isBoardInputBlocked()) return !isUnsavedDialogOpen() || isEventInsideUnsavedDialog(e);
   if (isUnsavedDialogOpen()) return isEventInsideUnsavedDialog(e);
   if (isEventInsideVisibleContextMenu(e)) return true;
-  if (openingShield.classList.contains('active') && !_inputShieldStack.length) return false;
-  if (_boardOpening) return false;
-  if (_inputShieldStack.length === 0) return true;
-  const input = inputNameFromEvent(e);
-  const codeInput = e.type === 'keydown' || e.type === 'keyup'
-    ? `code:${String(e.code || '').toLowerCase()}`
-    : '';
-  const buttonInput = typeof e.button === 'number' ? `${e.type}:${e.button}` : '';
-  for (const { allow } of _inputShieldStack) {
-    if (allow.has(input) || (codeInput && allow.has(codeInput)) || (buttonInput && allow.has(buttonInput))) continue;
-    return false;
-  }
-  return true;
+  if (_boardOpening || !_inputShieldStack.length) return false;
+  return _rubberBandDragActive &&
+    _inputShieldStack.length === 1 &&
+    (e.type === 'mousemove' || (e.type === 'mouseup' && e.button === 0));
 }
 
 function blockShieldInput(e) {
@@ -648,10 +633,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           up() {
             resizeCommitter.flush();
             for (const snap of snapshots) markDirty(snap.id);
-            globalThis.BoardfishMotion?.applyActionAnimation?.('object-multi-resize', {
-              selection: true,
-              options: { includeText: false },
-            });
             pushHistory('multi-resize');
           },
         });
@@ -886,14 +867,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
               markDirtyMs: selectionResizeDebugRound(selectionResizeDebugNow() - markStartedAt),
             });
           }
-          if (obj.type === 'text') {
-            globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-resize');
-          } else {
-            globalThis.BoardfishMotion?.applyActionAnimation?.('object-resize', {
-              selection: true,
-              options: { includeText: false },
-            });
-          }
           const historyStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
           pushHistory('resize');
           if (resizeDebugDragId) {
@@ -936,18 +909,12 @@ function selectObject(id) {
   }
   scheduleTextMinWidthWarm(obj);
   scheduleRender(true, true);
-  globalThis.BoardfishMotion?.applyActionAnimation?.('object-select', {
-    selection: true,
-    options: { includeText: false },
-  });
 }
 
 function deselectAll() {
-  const hadSelection = selectedIds.size > 0;
   if (editingId) exitEdit();
   cancelTextMinWidthWarm();
   BoardfishEditorState.clearSelection();
-  if (hadSelection) globalThis.BoardfishMotion?.applyActionAnimation?.('object-deselect');
   scheduleRender(false, true);
 }
 
@@ -961,10 +928,6 @@ function selectAllObjects() {
     exitEditing: false,
   });
   scheduleRender(false, true);
-  globalThis.BoardfishMotion?.applyActionAnimation?.('object-select', {
-    selection: true,
-    options: { includeText: false },
-  });
 }
 
 function hideMenus() {

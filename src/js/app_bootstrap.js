@@ -43,7 +43,6 @@ var finishFailedOpen;
       currentFilePath = fileLabel;
       updateTitle();
       await finishOpenedBoard(dbg, data);
-      updateTitle();
     } catch (err) {
       finishFailedOpen(dbg, err, errorLabel);
     }

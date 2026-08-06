@@ -2,7 +2,7 @@
 var panX = 0, panY = 0, zoom = 1;
 var _vpSaveTimer = null;
 var _vpSaveDueAt = 0;
-var BoardRenderer = null;
+var drawSingleObj, createDrawCounters, resetCanvasToScreen, setWorldCanvasTransform, drawVisibleObjects;
 const VIEWPORT_TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
 function saveViewport() {
   _vpSaveDueAt = performance.now() + 400;
@@ -72,14 +72,10 @@ const syncOpeningShieldPill = (text = islZoom.textContent) => {
   pill.classList.toggle('visible', !!text);
 };
 
-const setPillMessageText = (text, { animate = true } = {}) => {
+const setPillMessageText = (text) => {
   const nextText = text == null ? '' : String(text);
-  const previousText = islZoom.textContent || '';
-  const textChanged = previousText !== nextText;
   islZoom.textContent = nextText;
   syncOpeningShieldPill(nextText);
-  if (animate && textChanged) globalThis.BoardfishMotion?.applyActionAnimation?.('pill-message-update', { pill: true });
-  return textChanged;
 };
 
 function setIslandVisible(visible) {
@@ -97,22 +93,14 @@ const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
   if (island.dataset.mode !== 'zoom') island.dataset.mode = 'zoom';
   if (island.title !== 'Reset Zoom') island.title = 'Reset Zoom';
   setIslandVisible(true);
-  if (changed) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('pill-message-open', { pill: true });
-    PillDebug.log('zoomIsland:shown', { reason, zoom, text: zoomText });
-  }
+  if (changed) PillDebug.log('zoomIsland:shown', { reason, zoom, text: zoomText });
 };
 
 function showIslandForMessage(text) {
-  const wasVisible = island.classList.contains('visible');
-  const previousMode = island.dataset.mode;
   island.dataset.mode = 'message';
   island.title = '';
   setIslandVisible(true);
-  const textChanged = setPillMessageText(text, { animate: false });
-  if (!wasVisible || previousMode !== 'message' || textChanged) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('pill-message-open', { pill: true });
-  }
+  setPillMessageText(text);
 }
 
 function hideIsland(reason = 'hide') {
@@ -223,16 +211,6 @@ function _rebuildOffscreen() {
   const rebuildVersion = _offscreenVersion;
   const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length, editingId: snapshotEditingId, cacheKind: snapshotCacheKind, version: rebuildVersion });
 
-  // Bail if edit mode or cache state changed before the rebuild starts.
-  if (!editingId ||
-      editingId !== snapshotEditingId ||
-      snapshotCacheKind !== _offscreenCacheKind ||
-      rebuildVersion !== _offscreenVersion) {
-    _offscreenRebuilding = false;
-    ViewportDebug.end(dbg, { stale: true, currentCacheKind: _offscreenCacheKind, currentVersion: _offscreenVersion });
-    return false;
-  }
-
   const dpr = window.devicePixelRatio || 1;
   if (_offscreen.width !== boardCanvas.width) _offscreen.width = boardCanvas.width;
   if (_offscreen.height !== boardCanvas.height) _offscreen.height = boardCanvas.height;
@@ -243,11 +221,12 @@ function _rebuildOffscreen() {
   _offCtx.font = FONT;
   _offCtx.textBaseline = 'alphabetic';
   const viewportRect = currentViewportWorldRect(0);
+  const drawOptions = { viewportRect, view: { zoom, dpr } };
   for (const obj of objects) {
     if (obj.id === editingId) continue;
     if (snapshotCacheKind === 'non-text' && obj.type === 'text') continue;
     if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) continue;
-    drawSingleObj(_offCtx, obj, null, { viewportRect, view: { zoom, dpr } });
+    drawSingleObj(_offCtx, obj, null, drawOptions);
   }
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -320,28 +299,6 @@ var VIEWPORT_CULL_PADDING_PX = 256;
 
 function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view = { panX, panY, zoom }) {
   return viewportWorldRect(padScreenPx, view);
-}
-
-// Draws a single non-editing object onto any canvas context (world coords).
-function drawSingleObj(context, obj, counters = null, { view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null, viewportRect = null } = {}) {
-  return BoardRenderer.drawSingleObj(context, obj, counters, { view, imageSourceResolver, viewportRect });
-}
-
-
-function createDrawCounters() {
-  return BoardRenderer.createDrawCounters();
-}
-
-function resetCanvasToScreen(context) {
-  return BoardRenderer.resetCanvasToScreen(context);
-}
-
-function setWorldCanvasTransform(context, dpr = window.devicePixelRatio || 1, view = { zoom, panX, panY }) {
-  return BoardRenderer.setWorldCanvasTransform(context, dpr, view);
-}
-
-function drawVisibleObjects(context, counters, { skipId = null, skipIds = null, viewportRect = currentViewportWorldRect(), view = { zoom, dpr: window.devicePixelRatio || 1 }, imageSourceResolver = null, skipText = false, onlyText = false } = {}) {
-  return BoardRenderer.drawVisibleObjects(context, counters, { skipId, skipIds, viewportRect, view, imageSourceResolver, skipText, onlyText });
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
@@ -1067,7 +1024,6 @@ function drawBoard(options = {}) {
     if (collectViewportDebug) ViewportDebug.end(dbg, drawMeta);
   } else {
     _lastDrawBoardMeta = null;
-    if (collectViewportDebug) ViewportDebug.end(dbg);
   }
 }
 
@@ -1205,7 +1161,7 @@ function setCanvasImageQuality(context) {
   context.imageSmoothingQuality = 'high';
 }
 
-BoardRenderer = BoardfishRenderer.createBoardRenderer({
+({ drawSingleObj, createDrawCounters, resetCanvasToScreen, setWorldCanvasTransform, drawVisibleObjects } = BoardfishRenderer.createBoardRenderer({
   objects: () => objects,
   imageStore: () => imageStore,
   imageBitmapCache: () => imageBitmapCache,
@@ -1229,11 +1185,10 @@ BoardRenderer = BoardfishRenderer.createBoardRenderer({
   isSidewaysRotation,
   objectIntersectsRect,
   motionObjectsForDraw: (options) => globalThis.BoardfishMotion?.motionObjectsForDraw(options) || [],
-  noteImageObjectDrawn: (obj) => globalThis.BoardfishImageInsertMotion?.noteDrawn(obj),
   objectMotionForDraw: (obj, options) => globalThis.BoardfishMotion?.objectMotionForDraw(obj, options) || null,
   selectImageSourceForDraw,
   setCanvasImageQuality,
-});
+}));
 
 const BoardObjectGeometry = BoardfishObjectGeometry.createObjectGeometry({
   imageTransformFromObject,

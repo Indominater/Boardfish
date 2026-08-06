@@ -5,57 +5,27 @@
   const IMAGE_EDGE_EPSILON = 1e-9;
   const SLOW_TEXT_LINE_DRAW_THRESHOLD_MS = 0.25;
   const MAX_SLOW_TEXT_LINE_DRAWS = 16;
-  const imageSourceDrawnSet = typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
-  const imageSourceContextDrawnMap = typeof WeakMap !== 'undefined' && typeof WeakSet !== 'undefined'
-    ? new WeakMap()
-    : null;
+  const imageSourceDrawnSet = new WeakSet();
+  const imageSourceContextDrawnMap = new WeakMap();
   const TEXT_DRAW_STATS_ENABLED = Object.freeze({ collectStats: true });
   const TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
 
-  function canTrackImageDrawTarget(value) {
-    return !!value && (typeof value === 'object' || typeof value === 'function');
-  }
-
   function imageSourceDrawnBefore(source) {
-    if (!canTrackImageDrawTarget(source)) return false;
-    try {
-      return imageSourceDrawnSet.has(source);
-    } catch (_) {
-      return false;
-    }
+    return imageSourceDrawnSet.has(source);
   }
 
   function imageSourceContextDrawnBefore(source, context) {
-    if (!imageSourceContextDrawnMap ||
-        !canTrackImageDrawTarget(source) ||
-        !canTrackImageDrawTarget(context)) {
-      return imageSourceDrawnBefore(source);
-    }
-    try {
-      return !!imageSourceContextDrawnMap.get(source)?.has(context);
-    } catch (_) {
-      return imageSourceDrawnBefore(source);
-    }
+    return !!imageSourceContextDrawnMap.get(source)?.has(context);
   }
 
   function markImageSourceDrawn(source, context) {
-    if (!canTrackImageDrawTarget(source)) return;
-    try {
-      imageSourceDrawnSet.add(source);
-    } catch (_) {}
-    if (!imageSourceContextDrawnMap || !canTrackImageDrawTarget(context)) return;
-    try {
-      let contexts = imageSourceContextDrawnMap.get(source);
-      if (!contexts) {
-        contexts = new WeakSet();
-        imageSourceContextDrawnMap.set(source, contexts);
-      }
-      contexts.add(context);
-    } catch (_) {}
-  }
-
-  function defaultImageBitmapCtor() {
-    return typeof ImageBitmap !== 'undefined' ? ImageBitmap : null;
+    imageSourceDrawnSet.add(source);
+    let contexts = imageSourceContextDrawnMap.get(source);
+    if (!contexts) {
+      contexts = new WeakSet();
+      imageSourceContextDrawnMap.set(source, contexts);
+    }
+    contexts.add(context);
   }
 
   function createDrawCounters() {
@@ -131,9 +101,9 @@
     };
   }
 
-  function isDrawableImageSource(source, ImageBitmapCtor = defaultImageBitmapCtor()) {
+  function isDrawableImageSource(source) {
     if (!source) return false;
-    if (ImageBitmapCtor && source instanceof ImageBitmapCtor) return true;
+    if (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) return true;
     return !!(source.complete && source.naturalWidth > 0);
   }
 
@@ -143,28 +113,22 @@
     else if (obj.type === 'text') counters.culledText = (counters.culledText || 0) + 1;
   }
 
-  function imageDimensions(source) {
-    return {
-      width: source?.width || source?.naturalWidth || 0,
-      height: source?.height || source?.naturalHeight || 0,
-    };
-  }
-
   function visibleImageCrop(obj, img, rect) {
     if (!rect || !(obj?.w > 0) || !(obj?.h > 0)) return null;
     const x1 = Math.max(obj.x, rect.x1);
     const y1 = Math.max(obj.y, rect.y1);
     const x2 = Math.min(obj.x + obj.w, rect.x2);
     const y2 = Math.min(obj.y + obj.h, rect.y2);
-    if (!(x2 > x1 && y2 > y1)) return { empty: true };
+    if (!(x2 > x1 && y2 > y1)) return false;
     if (x1 === obj.x && y1 === obj.y && x2 === obj.x + obj.w && y2 === obj.y + obj.h) return null;
-    const source = imageDimensions(img);
-    if (!(source.width > 0 && source.height > 0)) return null;
+    const sourceWidth = img?.width || img?.naturalWidth || 0;
+    const sourceHeight = img?.height || img?.naturalHeight || 0;
+    if (!(sourceWidth > 0 && sourceHeight > 0)) return null;
     return {
-      sx: (x1 - obj.x) / obj.w * source.width,
-      sy: (y1 - obj.y) / obj.h * source.height,
-      sw: (x2 - x1) / obj.w * source.width,
-      sh: (y2 - y1) / obj.h * source.height,
+      sx: (x1 - obj.x) / obj.w * sourceWidth,
+      sy: (y1 - obj.y) / obj.h * sourceHeight,
+      sw: (x2 - x1) / obj.w * sourceWidth,
+      sh: (y2 - y1) / obj.h * sourceHeight,
       dx: x1,
       dy: y1,
       dw: x2 - x1,
@@ -184,8 +148,8 @@
     return Math.abs(a - b) <= IMAGE_EDGE_EPSILON;
   }
 
-  function imageCropDestinationWithOverdraw(crop, obj, edge) {
-    if (!(edge > 0)) return crop;
+  function applyImageCropDestinationOverdraw(crop, obj, edge) {
+    if (!(edge > 0)) return;
     const cropRight = crop.dx + crop.dw;
     const cropBottom = crop.dy + crop.dh;
     const objRight = obj.x + obj.w;
@@ -194,14 +158,11 @@
     const top = nearlyEqual(crop.dy, obj.y) ? edge : 0;
     const right = nearlyEqual(cropRight, objRight) ? edge : 0;
     const bottom = nearlyEqual(cropBottom, objBottom) ? edge : 0;
-    if (!(left || top || right || bottom)) return crop;
-    return {
-      ...crop,
-      dx: crop.dx - left,
-      dy: crop.dy - top,
-      dw: crop.dw + left + right,
-      dh: crop.dh + top + bottom,
-    };
+    if (!(left || top || right || bottom)) return;
+    crop.dx -= left;
+    crop.dy -= top;
+    crop.dw += left + right;
+    crop.dh += top + bottom;
   }
 
   function drawImageObjWithCurrentQuality(context, obj, img, deps, options = {}) {
@@ -223,15 +184,15 @@
         drawH + edgeOverdraw * 2,
       );
       context.restore();
-      return { cropped: false };
+      return false;
     }
 
     const crop = visibleImageCrop(obj, img, options.viewportRect);
-    if (crop?.empty) return { skipped: true };
+    if (crop === false) return null;
     if (crop) {
-      const dest = imageCropDestinationWithOverdraw(crop, obj, edgeOverdraw);
-      context.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, dest.dx, dest.dy, dest.dw, dest.dh);
-      return { cropped: true };
+      applyImageCropDestinationOverdraw(crop, obj, edgeOverdraw);
+      context.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, crop.dx, crop.dy, crop.dw, crop.dh);
+      return true;
     }
     context.drawImage(
       img,
@@ -240,7 +201,7 @@
       obj.w + edgeOverdraw * 2,
       obj.h + edgeOverdraw * 2,
     );
-    return { cropped: false };
+    return false;
   }
 
   function drawImageObj(context, obj, img, deps, options = {}) {
@@ -476,12 +437,11 @@
       const fullSource = row.imgKey && deps
         ? (deps.imageBitmapCache?.()?.[row.imgKey] || null)
         : null;
-      const fullDims = imageDimensions(fullSource);
       const scaledDelta = drawCounterValue(counters, 'scaledImages') - before.scaledImages;
       row.objectW = Number(obj.w || 0) || 0;
       row.objectH = Number(obj.h || 0) || 0;
-      row.fullSourceW = fullDims.width || '';
-      row.fullSourceH = fullDims.height || '';
+      row.fullSourceW = fullSource?.width || fullSource?.naturalWidth || '';
+      row.fullSourceH = fullSource?.height || fullSource?.naturalHeight || '';
       row.drawDeviceW = deps ? Math.round(row.objectW * Math.max(Number(deps.zoom?.()) || 0, 0) * Math.max(Number(deps.dpr?.()) || 1, 1) * 100) / 100 : '';
       row.drawDeviceH = deps ? Math.round(row.objectH * Math.max(Number(deps.zoom?.()) || 0, 0) * Math.max(Number(deps.dpr?.()) || 1, 1) * 100) / 100 : '';
       row.cropped = drawCounterValue(counters, 'croppedImages') > before.croppedImages;
@@ -604,8 +564,6 @@
         : fullImg ? deps.selectImageSourceForDraw(key, obj, fullImg, view, { activeInput: lowLatencyImageMotion }) : null;
       const img = selected?.source || null;
       if (isDrawableImageSource(img)) {
-        const firstSourceDraw = !imageSourceDrawnBefore(img);
-        const firstContextDraw = !imageSourceContextDrawnBefore(img, context);
         if (counters) {
           if (selected?.scale < 1) {
             counters.scaledImages = (counters.scaledImages || 0) + 1;
@@ -632,16 +590,23 @@
           }
         }
         try {
-          const drawResult = drawImageObj(context, obj, img, deps, {
+          const cropped = drawImageObj(context, obj, img, deps, {
             viewportRect: options.viewportRect || null,
             view,
             activeInputFullFallback: selected?.activeInputFullFallback === true,
             lowLatency: lowLatencyImageMotion,
           });
-          if (drawResult?.skipped) return false;
-          recordImageDrawWarmStats(counters, selected, firstSourceDraw, firstContextDraw);
-          markImageSourceDrawn(img, context);
-          if (drawResult?.cropped && counters) counters.croppedImages = (counters.croppedImages || 0) + 1;
+          if (cropped === null) return false;
+          if (counters) {
+            recordImageDrawWarmStats(
+              counters,
+              selected,
+              !imageSourceDrawnBefore(img),
+              !imageSourceContextDrawnBefore(img, context),
+            );
+            markImageSourceDrawn(img, context);
+            if (cropped) counters.croppedImages = (counters.croppedImages || 0) + 1;
+          }
           return true;
         } catch (err) {
           if (counters) {
@@ -682,6 +647,8 @@
       const objectMotionForDraw = typeof deps.objectMotionForDraw === 'function' ? deps.objectMotionForDraw : null;
       const motionObjectsForDraw = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw : null;
       const cullingEnabled = deps.viewportCullingEnabled();
+      const motionOptions = { view, viewportRect };
+      const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
       let drawnImages = 0;
       let drawnText = 0;
       const drawObject = (obj, countObject = true) => {
@@ -689,7 +656,7 @@
         if (obj.id === skipId || skipIds?.has(obj.id)) return;
         if (skipText && obj.type === 'text') return;
         if (onlyText && obj.type !== 'text') return;
-        const motion = objectMotionForDraw ? objectMotionForDraw(obj, { view, viewportRect }) : null;
+        const motion = objectMotionForDraw ? objectMotionForDraw(obj, motionOptions) : null;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
           if (countObject) countCulledObject(obj, counters);
           return;
@@ -772,12 +739,8 @@
           imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
-          drawn = drawSingleObj(context, obj, counters, {
-            view,
-            imageSourceResolver,
-            motion,
-            viewportRect,
-          });
+          drawOptions.motion = motion;
+          drawn = drawSingleObj(context, obj, counters, drawOptions);
         } finally {
           if (motion && context.restore) context.restore();
           if (counters && typeof performance !== 'undefined') {
@@ -786,16 +749,13 @@
         }
         if (obj.type === 'image' && drawn) {
           drawnImages++;
-          if (countObject && typeof deps.noteImageObjectDrawn === 'function') {
-            deps.noteImageObjectDrawn(obj, { view, viewportRect });
-          }
         } else if (obj.type === 'text') drawnText++;
       };
 
       for (const obj of deps.objects()) {
         drawObject(obj, true);
       }
-      for (const obj of motionObjectsForDraw?.({ view, viewportRect }) || []) {
+      for (const obj of motionObjectsForDraw?.(motionOptions) || []) {
         drawObject(obj, false);
       }
       return { drawnImages, drawnText };

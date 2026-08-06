@@ -39,7 +39,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
       },
     },
     added: [],
-    animations: [],
+    debugSteps: [],
     editCalls: [],
     editedIds: [],
     histories: [],
@@ -53,6 +53,10 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
+      textByteLength(text) {
+        context.textByteLengthCalls++;
+        return String(text ?? '').length;
+      },
     },
     BoardfishEditorState: {
       addObject(obj) {
@@ -60,9 +64,9 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
         return obj;
       },
     },
-    BoardfishMotion: {
-      applyActionAnimation(action, payload = {}) {
-        context.animations.push({ action, ids: (payload.objects || []).map((obj) => obj.id) });
+    ClipDebug: {
+      step(_debug, step, meta) {
+        context.debugSteps.push({ step, meta });
       },
     },
     normalizeTextContent(value) {
@@ -99,6 +103,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     },
     invalidateOffscreen() {},
     syncAllTextAutoHeights() {},
+    textByteLengthCalls: 0,
   };
   vm.createContext(context);
   vm.runInContext(`${textLayoutSource}${source}\nglobalThis.addText = addText;\n`, context, {
@@ -141,7 +146,7 @@ function loadPasteHarness({ browserText = '', normalizeExternalText = (value) =>
     },
     ClipDebug: {
       end() {},
-      start() { return {}; },
+      start() { return null; },
       step() {},
     },
     resizeCanvas() {},
@@ -177,6 +182,7 @@ test('addText can center a text box after auto-height is synced', () => {
   assert.equal(obj.h, 184);
   assert.deepEqual(context.histories, ['add-text']);
   assert.deepEqual(context.editedIds, []);
+  assert.equal(context.textByteLengthCalls, 1);
 });
 
 test('addText keeps top-left placement by default', () => {
@@ -190,6 +196,16 @@ test('addText keeps top-left placement by default', () => {
   assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
   assert.equal(obj.w, DEFAULT_TEXT_BOX_HEIGHT * 8);
   assert.deepEqual(context.editedIds, [obj.id]);
+});
+
+test('addText retains full text diagnostics for an active debug capture', () => {
+  const context = loadAddTextHarness();
+
+  context.addText(24, 48, 'first\nsecond', { debug: {} });
+
+  assert.equal(context.textByteLengthCalls, 8);
+  assert.equal(context.debugSteps[0].step, 'addText:start');
+  assert.equal(context.debugSteps[0].meta.textLineCount, 2);
 });
 
 test('addText strips whitespace-only lines at pasted text edges', () => {

@@ -56,7 +56,7 @@ function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
   return cloneStateTextScriptRanges(sourceScriptRanges);
 }
 
-function cloneObject(obj, options = {}) {
+function cloneObject(obj, runtimeTextCache = false) {
   HistoryDebug.count('cloneObjectCalls');
   const data = obj.type === 'image'
     ? {
@@ -93,7 +93,7 @@ function cloneObject(obj, options = {}) {
     data,
   };
   if (
-    options.runtimeTextCache === true &&
+    runtimeTextCache &&
     cloned.type === 'text' &&
     typeof cloneTextObjectRuntimeCaches === 'function'
   ) {
@@ -102,13 +102,13 @@ function cloneObject(obj, options = {}) {
   return cloned;
 }
 
-function cloneObjects(list, options = {}) {
+function cloneObjects(list, runtimeTextCache = false) {
   const dbg = HistoryDebug.start('cloneObjects', { objectCount: list.length });
   const t0 = performance.now();
   HistoryDebug.count('cloneObjectsCalls');
   HistoryDebug.count('clonedObjects', list.length);
   const clones = new Array(list.length);
-  for (let i = 0; i < list.length; i++) clones[i] = cloneObject(list[i], options);
+  for (let i = 0; i < list.length; i++) clones[i] = cloneObject(list[i], runtimeTextCache);
   const ms = performance.now() - t0;
   HistoryDebug.max('maxCloneObjectsMs', ms);
   HistoryDebug.end(dbg, { objectCount: list.length, ms });
@@ -124,7 +124,7 @@ function bringObjectToFront(id) {
 
 function sendSelectedToBack() {
   if (!selectedIds.size) return;
-  const moved = BoardfishEditorState.commitMutation('send-selected-to-back', () => {
+  BoardfishEditorState.commitMutation('send-selected-to-back', () => {
     // Pull out selected objects (preserving their relative order), prepend to front.
     const selected = [], rest = [];
     for (const o of objects) {
@@ -138,7 +138,6 @@ function sendSelectedToBack() {
     for (const obj of selected) markDirty(obj.id);
     return true;
   });
-  if (moved) globalThis.BoardfishMotion?.applyActionAnimation?.('send-selected-to-back', { selection: true });
 }
 
 function flipSelectedImages() {
@@ -158,12 +157,11 @@ function flipSelectedImages() {
   }, { invalidate: true });
   ClipDebug.step(dbg, 'toggle-flags', { imageCount, flipped });
   if (!flipped) { ClipDebug.end(dbg, { skipped: true }); return; }
-  globalThis.BoardfishMotion?.applyActionAnimation?.('flip-image', { selection: true });
   ClipDebug.end(dbg, { historyIndex });
 }
 
 function rotateSelectedImages(dir) {
-  const rotatedAny = BoardfishEditorState.commitMutation(`rotate-image-${dir}`, () => {
+  BoardfishEditorState.commitMutation(`rotate-image-${dir}`, () => {
     let rotated = false;
     for (const id of selectedIds) {
       const obj = objectsMap.get(id);
@@ -186,7 +184,6 @@ function rotateSelectedImages(dir) {
     }
     return rotated;
   }, { invalidate: true });
-  if (rotatedAny) globalThis.BoardfishMotion?.applyActionAnimation?.('rotate-image', { selection: true });
 }
 
 function isMultiSelected() {

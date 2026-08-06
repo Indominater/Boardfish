@@ -2574,7 +2574,6 @@ var ManualPerfDebug = (() => {
     BoardfishEditorState.setSelection([obj.id], {
       primaryId: obj.id,
       exitEditing: false,
-      animateSelection: false,
     });
 
     if (normalizedMode === 'select') {

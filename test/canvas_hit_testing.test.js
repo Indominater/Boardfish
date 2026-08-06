@@ -276,7 +276,8 @@ test('hover effects are limited to hover-capable fine pointers', () => {
   assert.match(gatedHoverStyles, /\.ctx-action-item\.hotspot-hover::before/);
   assert.match(gatedHoverStyles, /#island:hover #isl-zoom/);
   assert.match(gatedHoverStyles, /#dlg-discard:hover/);
-  assert.match(styles, /\.ctx-item:active\s*\{\s*background: var\(--menu-active-bg\);/);
+  assert.match(styles, /\.ctx-item\.menu-pressed\s*\{\s*background: var\(--menu-active-bg\);/);
+  assert.doesNotMatch(styles, /\.ctx-item:active/);
   assert.match(styles, /#island:active #isl-zoom\s*\{\s*background: var\(--menu-active-bg\);/);
   assert.match(styles, /#dlg-discard:active\s*\{\s*background: var\(--danger-active-bg\);/);
 });
@@ -311,6 +312,24 @@ test('touch action hotspots use pressed state without synthesizing hover', () =>
 
   context.updateCtxActionHotspotState(event('mouse'));
   assert.deepEqual([...classes], ['hotspot-hover']);
+});
+
+test('menu rows clear explicit pressed state on release, cancellation, and close', () => {
+  const source = readSource('src/js/context_menu.js');
+  const styles = readSource('src/styles.css');
+
+  assert.match(source, /button\.classList\.add\('menu-pressed'\);/);
+  assert.match(source, /function clearMenuCommandPressState\(\) \{[\s\S]*classList\.remove\('menu-pressed'\);[\s\S]*_menuPointerCommand = null;[\s\S]*_menuMouseCommand = null;[\s\S]*\}/);
+  assert.match(source, /function onMenuPointerUp\(e\) \{[\s\S]*clearMenuCommandPressState\(\);[\s\S]*e\.pointerType === 'touch'[\s\S]*started\.blur\?\.\(\);/);
+  assert.match(source, /addEventListener\('pointercancel', clearMenuCommandPressState\)/);
+  assert.match(source, /addEventListener\('pointerleave', clearMenuCommandPressState\)/);
+  assert.match(source, /addEventListener\('lostpointercapture', clearMenuCommandPressState\)/);
+  assert.match(source, /function closeObjCtxMenu\(reason\) \{[\s\S]*clearMenuCommandPressState\(\);[\s\S]*closeFloatingSurface\(objCtxMenu\);/);
+  const coarseStyles = [
+    ...cssBlocksForPrelude(styles, '@media (hover: none)'),
+    ...cssBlocksForPrelude(styles, '@media (pointer: coarse)'),
+  ].join('\n');
+  assert.match(coarseStyles, /\.ctx-item:focus-visible\s*\{[\s\S]*background: transparent;/);
 });
 
 test('coarse pointers reuse the desktop context menu and island visual scale', () => {

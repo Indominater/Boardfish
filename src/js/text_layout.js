@@ -2775,11 +2775,7 @@ function syncTextLayoutLinePositions(obj, layout) {
 
 function setTextLayoutTotalLines(layout, totalLines) {
   if (!Array.isArray(layout)) return layout;
-  Object.defineProperty(layout, 'totalLines', {
-    configurable: true,
-    enumerable: false,
-    value: Math.max(layout.length, Math.trunc(Number(totalLines)) || layout.length),
-  });
+  layout.totalLines = Math.max(layout.length, Math.trunc(Number(totalLines)) || layout.length);
   return layout;
 }
 

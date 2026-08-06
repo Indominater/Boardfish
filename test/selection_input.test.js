@@ -76,6 +76,8 @@ function loadSelectionInputHarness(objects, options = {}) {
     ctxActions: createElement('ctx-actions'),
     island: createElement('island'),
     openingShield: createElement('opening-shield'),
+    _boardOpening: false,
+    _inputShieldStack: [],
     selectedIds,
     selectedId: options.selectedId ?? (objects.length === 1 ? objects[0].id : null),
     objectsMap: byId,
@@ -102,8 +104,9 @@ function loadSelectionInputHarness(objects, options = {}) {
     selectedBounds: () => objectBounds(objects),
     hasSelection: () => selectedIds.size > 0,
     getFirstSelectedObject: () => objects[0] || null,
-    isBoardInputBlocked: () => false,
+    isBoardInputBlocked: () => context._boardOpening || context._inputShieldStack.length > 0,
     shouldKeepSelectionOverlayWhileBlocked: () => false,
+    isUnsavedDialogOpen: () => false,
     acquireInputShield: () => () => {},
     bringObjectToFront() {},
     BoardfishEditorState: {
@@ -186,7 +189,8 @@ function loadSelectionInputHarness(objects, options = {}) {
       'globalThis.snappedSelectionOverlayScreenRect = snappedSelectionOverlayScreenRect;\n' +
       'globalThis.flushEditHistoryCheckpoint = flushEditHistoryCheckpoint;\n' +
       'globalThis.beginTextEditHistoryAction = beginTextEditHistoryAction;\n' +
-      'globalThis.recordTextEditInputHistory = recordTextEditInputHistory;\n',
+      'globalThis.recordTextEditInputHistory = recordTextEditInputHistory;\n' +
+      'globalThis.isShieldInputAllowed = isShieldInputAllowed;\n',
     context,
   );
   return context;
@@ -240,6 +244,20 @@ test('shielded system key cancels active rubber-band selection before blocking i
   assert.equal(event.propagationStopped, true);
 });
 
+test('rubber-band shield allows only the mouse events required to finish its drag', () => {
+  const context = loadSelectionInputHarness([]);
+  context._rubberBandDragActive = true;
+  context._inputShieldStack.push({});
+
+  assert.equal(context.isShieldInputAllowed({ type: 'mousemove' }), true);
+  assert.equal(context.isShieldInputAllowed({ type: 'mouseup', button: 0 }), true);
+  assert.equal(context.isShieldInputAllowed({ type: 'mouseup', button: 1 }), false);
+  assert.equal(context.isShieldInputAllowed({ type: 'pointermove' }), false);
+
+  context._inputShieldStack.push({});
+  assert.equal(context.isShieldInputAllowed({ type: 'mousemove' }), false);
+});
+
 test('multi-selection resize leaves text objects unchanged', () => {
   const objects = [
     { id: 'image-a', type: 'image', x: 0, y: 0, w: 100, h: 100, data: {} },
@@ -269,8 +287,7 @@ test('multi-selection resize leaves text objects unchanged', () => {
   assert.deepEqual(context.syncedTextIds, []);
   assert.deepEqual(context.dirty, ['image-a']);
   assert.deepEqual(context.history, ['multi-resize']);
-  assert.equal(context.motionPulses.length, 1);
-  assert.equal(context.motionPulses[0].includeText, false);
+  assert.deepEqual(context.motionPulses, []);
 });
 
 test('multi-selection resize anchors the opposite rectangle corner', () => {
@@ -511,8 +528,7 @@ test('single image resize anchors the opposite corner', () => {
   assert.equal(Math.round(image.h), 120);
   assert.equal(Math.round(image.x + image.w), 240);
   assert.equal(Math.round(image.y + image.h), 120);
-  assert.equal(context.motionPulses.length, 1);
-  assert.equal(context.motionPulses[0].includeText, false);
+  assert.deepEqual(context.motionPulses, []);
 });
 
 test('single text horizontal resize anchors the opposite side after auto-height sync', () => {

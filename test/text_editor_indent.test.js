@@ -484,7 +484,7 @@ test('cmd+right while editing aligns the current caret line', () => {
   assert.deepEqual(context.dirty, [obj.id]);
   assert.deepEqual(context.histories, ['text-align']);
   assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
-  assert.deepEqual(context.animations, ['text-align']);
+  assert.deepEqual(context.animations, []);
 });
 
 test('cmd+left while editing aligns the current caret line leftward', () => {
@@ -508,7 +508,7 @@ test('cmd+left while editing aligns the current caret line leftward', () => {
   assert.deepEqual(context.dirty, [obj.id]);
   assert.deepEqual(context.histories, ['text-align']);
   assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
-  assert.deepEqual(context.animations, ['text-align']);
+  assert.deepEqual(context.animations, []);
 });
 
 test('cmd+right while editing highlighted text aligns the highlighted lines', () => {
@@ -532,7 +532,7 @@ test('cmd+right while editing highlighted text aligns the highlighted lines', ()
   assert.deepEqual(context.dirty, [obj.id]);
   assert.deepEqual(context.histories, ['text-align']);
   assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
-  assert.deepEqual(context.animations, ['text-align']);
+  assert.deepEqual(context.animations, []);
 });
 
 test('typing over a visible braced compound selection removes hidden closing braces', () => {

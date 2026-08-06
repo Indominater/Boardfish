@@ -5,16 +5,8 @@
     return ((Number(value) || 0) % 360 + 360) % 360;
   }
 
-  function imageTransformFromData(data = {}) {
-    return {
-      flipX: !!data.flipX,
-      flipY: !!data.flipY,
-      rotation: normalizeRotation(data.rotation),
-    };
-  }
-
   function imageTransformFromObject(obj) {
-    return imageTransformFromData(obj?.data || {});
+    return obj.data;
   }
 
   function imageTransformNeedsRendering(transform) {

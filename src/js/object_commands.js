@@ -6,72 +6,68 @@ const objectCommandDebugNow = () => (
     : Date.now()
 );
 
-const objectCommandElapsedMs = (startedAt) => Math.round((objectCommandDebugNow() - startedAt) * 100) / 100;
-
 const objectCommandTextStats = (value, scriptRanges = []) => {
   const text = String(value ?? '');
   const lines = text ? text.split('\n') : [];
   let largestLineChars = 0;
   for (const line of lines) largestLineChars = Math.max(largestLineChars, line.length);
-  const textBytes = typeof BoardfishWebLimits !== 'undefined' && typeof BoardfishWebLimits.textByteLength === 'function'
-    ? BoardfishWebLimits.textByteLength(text)
-    : (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length);
   return {
     textLen: text.length,
     textLineCount: lines.length,
     largestLineChars,
-    textBytes,
+    textBytes: BoardfishWebLimits.textByteLength(text),
     scriptRangeCount: Array.isArray(scriptRanges) ? scriptRanges.length : '',
   };
 };
 
 function addText(wx, wy, content = '', options = {}) {
   const dbg = options?.debug || null;
-  let stepStartedAt = objectCommandDebugNow();
+  let stepStartedAt = dbg && objectCommandDebugNow();
   const addStartedAt = stepStartedAt;
   const logStep = (step, meta = {}) => {
-    if (typeof ClipDebug === 'undefined') return;
+    if (!dbg || typeof ClipDebug === 'undefined') return;
+    const details = typeof meta === 'function' ? meta() : meta;
     const now = objectCommandDebugNow();
     ClipDebug.step(dbg, `addText:${step}`, {
       ms: Math.round((now - stepStartedAt) * 100) / 100,
       totalMs: Math.round((now - addStartedAt) * 100) / 100,
-      ...meta,
+      ...details,
     });
     stepStartedAt = now;
   };
 
-  logStep('start', {
+  logStep('start', () => ({
     wx,
     wy,
     anchor: options?.anchor || '',
     ...objectCommandTextStats(content),
-  });
+  }));
 
   if (!BoardfishWebLimits.canAddObjects(1)) {
     logStep('object-limit-denied');
     return;
   }
   content = textForTextObjectPaste(content);
-  logStep('trim-done', objectCommandTextStats(content));
+  logStep('trim-done', () => objectCommandTextStats(content));
   let sourceRanges = Array.isArray(options?.scriptRanges)
     ? options.scriptRanges
     : (typeof deriveBracedTextScriptRangesFromContent === 'function' ? deriveBracedTextScriptRangesFromContent(content) : []);
-  logStep('script-ranges-derived', objectCommandTextStats(content, sourceRanges));
+  logStep('script-ranges-derived', () => objectCommandTextStats(content, sourceRanges));
   if (typeof textScriptLinearToDeterministicBraces === 'function') {
     content = normalizeTextContent(textScriptLinearToDeterministicBraces(content, sourceRanges));
     sourceRanges = typeof deriveBracedTextScriptRangesFromContent === 'function'
       ? deriveBracedTextScriptRangesFromContent(content)
       : [];
   }
-  logStep('script-braces-normalized', objectCommandTextStats(content, sourceRanges));
+  logStep('script-braces-normalized', () => objectCommandTextStats(content, sourceRanges));
   const data = { content };
   if (typeof normalizeTextScriptRangesForContent === 'function') {
     const scriptRanges = normalizeTextScriptRangesForContent(content, sourceRanges);
     if (scriptRanges.length) data.scriptRanges = scriptRanges;
   }
-  logStep('script-ranges-normalized', objectCommandTextStats(content, data.scriptRanges));
+  logStep('script-ranges-normalized', () => objectCommandTextStats(content, data.scriptRanges));
   if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
-    const textBytes = objectCommandTextStats(content).textBytes;
+    const textBytes = BoardfishWebLimits.textByteLength(content);
     const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
     logStep('content-limit-done', { textBytes, accepted });
     if (!accepted) return;
@@ -93,17 +89,17 @@ function addText(wx, wy, content = '', options = {}) {
     }
     w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
   }
-  logStep('size-estimate-done', { w, h, ...objectCommandTextStats(content, data.scriptRanges) });
+  logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content, data.scriptRanges) }));
 
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
   const heightChanged = syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
-  logStep('auto-height-done', {
+  logStep('auto-height-done', () => ({
     objectId: obj.id,
     heightChanged,
     w: obj.w,
     h: obj.h,
     ...objectCommandTextStats(content, data.scriptRanges),
-  });
+  }));
   if (options?.anchor === 'center') {
     obj.x = wx - obj.w / 2;
     obj.y = wy - obj.h / 2;
@@ -111,16 +107,15 @@ function addText(wx, wy, content = '', options = {}) {
   logStep('position-done', { objectId: obj.id, x: obj.x, y: obj.y, w: obj.w, h: obj.h });
   BoardfishEditorState.addObject(obj);
   logStep('add-object-done', { objectId: obj.id, objectCountAfter: objects.length });
-  globalThis.BoardfishMotion?.applyActionAnimation?.(
-    content ? 'plain-text-paste-as-text-box' : 'text-box-create',
-    { objects: [obj] }
-  );
   selectObject(obj.id);
   scheduleRender(true, false);
   logStep('render-scheduled', { objectId: obj.id });
-  const historyStartedAt = objectCommandDebugNow();
+  const historyStartedAt = dbg && objectCommandDebugNow();
   pushHistory('add-text');
-  logStep('history-pushed', { objectId: obj.id, historyMs: objectCommandElapsedMs(historyStartedAt) });
+  logStep('history-pushed', () => ({
+    objectId: obj.id,
+    historyMs: Math.round((objectCommandDebugNow() - historyStartedAt) * 100) / 100,
+  }));
   const shouldEnterEdit = !content || options?.editAfterCreate === true;
   if (shouldEnterEdit) {
     const enterEditOptions = content
@@ -138,20 +133,6 @@ function addText(wx, wy, content = '', options = {}) {
 var _inputShieldCount = 0;
 var _inputShieldStack = [];
 var _inputShieldReleases = [];
-
-function allowedInputSet(allowedInputs = []) {
-  const allow = new Set();
-  for (const input of allowedInputs) {
-    if (Array.isArray(input)) {
-      for (const item of input) {
-        if (item) allow.add(item);
-      }
-    } else if (input) {
-      allow.add(input);
-    }
-  }
-  return allow;
-}
 
 function updateInputShieldVisual() {
   if (isUnsavedDialogOpen()) {
@@ -172,18 +153,8 @@ function updateInputShieldVisual() {
   else openingShield.classList.remove('active');
 }
 
-function acquireInputShield(...allowedInputs) {
-  let options = {};
-  if (
-    allowedInputs.length &&
-    allowedInputs[allowedInputs.length - 1] &&
-    typeof allowedInputs[allowedInputs.length - 1] === 'object' &&
-    !Array.isArray(allowedInputs[allowedInputs.length - 1])
-  ) {
-    options = allowedInputs.pop();
-  }
+function acquireInputShield(options = {}) {
   const token = {
-    allow: allowedInputSet(allowedInputs),
     allowBoardNavigation: options.allowBoardNavigation === true,
     keepSelectionOverlay: options.keepSelectionOverlay === true,
     visual: options.visual !== false,
@@ -203,8 +174,8 @@ function acquireInputShield(...allowedInputs) {
   };
 }
 
-function showInputShield(...allowedInputs) {
-  _inputShieldReleases.push(acquireInputShield(...allowedInputs));
+function showInputShield(options = {}) {
+  _inputShieldReleases.push(acquireInputShield(options));
 }
 function hideInputShield() {
   const release = _inputShieldReleases.pop();
@@ -265,7 +236,6 @@ async function newBoard() {
     if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
   }
   const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
-  globalThis.BoardfishMotion?.applyActionAnimation?.('new-board-state-reset');
   BoardfishEditorState.setBoardOpening(true);
   if (typeof beginOpeningFreeze === 'function') beginOpeningFreeze();
   else openingShield.classList.add('active');
@@ -284,7 +254,6 @@ async function newBoard() {
   boardHistory = []; historyIndex = -1;
   snapshot();
   markSaved();
-  updateTitle();
   const elapsed = performance.now() - openingStart;
   OpenDebug.step(dbg, 'workDone', { elapsed });
   _boardOpening = false;
@@ -352,16 +321,7 @@ function duplicateSelected(anchorPoint = null) {
   }
   BoardfishEditorState.setSelection(duplicatedIds, {
     primaryId: duplicatedIds[duplicatedIds.length - 1],
-    animateSelection: false,
   });
-  const duplicatedTextObjects = [];
-  const duplicatedNonTextObjects = [];
-  for (const obj of cloned) {
-    if (obj.type === 'text') duplicatedTextObjects.push(obj);
-    else duplicatedNonTextObjects.push(obj);
-  }
-  globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-duplicate', { objects: duplicatedTextObjects });
-  globalThis.BoardfishMotion?.applyActionAnimation?.('image-object-duplicate', { objects: duplicatedNonTextObjects });
   scheduleRender(true, true, 'duplicate-selected');
   pushHistory('duplicate-selected');
 }
@@ -373,12 +333,6 @@ function deleteSelected() {
   const idsToDelete = [];
   for (const id of selectedIds) idsToDelete.push(id);
   if (!idsToDelete.length) return;
-  const removedObjects = [];
-  for (const id of idsToDelete) {
-    const obj = objectsMap.get(id);
-    if (obj) removedObjects.push(cloneObject(obj));
-  }
-  globalThis.BoardfishMotion?.applyActionAnimation?.('object-delete', { removedObjects });
   BoardfishEditorState.removeObjectsById(idsToDelete);
   if (selectedIds.size) {
     const remaining = [];

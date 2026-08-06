@@ -22,7 +22,7 @@ var imageScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
     dropDrawableBitmapWarmup(entry?.bitmap);
   },
 });
-var imageScaledBitmapCache = imageScaledBitmapStore.groups; // key -> Map(scale -> { bitmap, bytes, lastUsed })
+var imageScaledBitmapCache = imageScaledBitmapStore.groups; // key -> Map(scale -> { bitmap, bytes })
 var imageScaledBitmapPending = new Set();
 var imageScaledBitmapPendingBytes = new Map();
 var imageScaledBitmapFailures = new Map();

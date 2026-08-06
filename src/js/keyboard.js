@@ -110,7 +110,6 @@ const applySelectedTextAlignmentFromKeyboard = (direction) => {
     }
   }
   if (!changed) return false;
-  globalThis.BoardfishMotion?.applyActionAnimation?.('text-align', { objects: textObjects });
   scheduleRender(true, true, 'text-align');
   pushHistory('text-align');
   return true;
@@ -122,15 +121,6 @@ const isBrowserFindShortcut = (e) => {
   const findNext = e.key === 'F3' || e.code === 'F3';
   return commandFind || findByLetter || findNext;
 };
-
-document.addEventListener('keydown', (e) => {
-  if (isBrowserFindShortcut(e)) {
-    if (hasExactCommandModifier(e) && isShortcutKey(e, 'f')) return;
-    globalThis.BoardfishMotion?.applyActionAnimation?.('browser-find-shortcut');
-    e.preventDefault();
-    e.stopPropagation();
-  }
-}, true);
 
 function consumeShortcutEvent(e) {
   if (e.cancelable !== false) e.preventDefault();
@@ -167,11 +157,12 @@ function pasteAtViewportCenterFromShortcut() {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (
-    isBrowserFindShortcut(e) &&
-    !(hasExactCommandModifier(e) && isShortcutKey(e, 'f') && canTransformSelectedImagesFromKeyboard())
-  ) {
-    return;
+  if (isBrowserFindShortcut(e)) {
+    const commandFind = hasExactCommandModifier(e) && isShortcutKey(e, 'f');
+    if (!(commandFind && canTransformSelectedImagesFromKeyboard())) {
+      if (!commandFind) consumeShortcutEvent(e);
+      return;
+    }
   }
   if (e.key === 'Alt') { e.preventDefault(); return; }
 

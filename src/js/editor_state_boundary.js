@@ -6,18 +6,6 @@
     selectedIds.clear();
   }
 
-  function noteNewlySelectedObjects(previousSelectedIds) {
-    const newlySelectedObjects = [];
-    for (const id of selectedIds) {
-      if (previousSelectedIds.has(id)) continue;
-      const obj = objectsMap.get(id);
-      if (obj && obj.type !== 'text') newlySelectedObjects.push(obj);
-    }
-    if (newlySelectedObjects.length) {
-      root.BoardfishMotion?.applyActionAnimation?.('object-select', { objects: newlySelectedObjects });
-    }
-  }
-
   function idsToArray(ids = []) {
     if (Array.isArray(ids)) return ids;
     const out = [];
@@ -33,13 +21,11 @@
   }
 
   function setSelectionState(ids = [], {
-    animateSelection = true,
     primaryId = null,
     exitEditing = true,
   } = {}) {
     const startedAt = root.performance?.now?.() ?? Date.now();
     const nextIds = idsToArray(ids);
-    const previousSelectedIds = animateSelection ? new Set(selectedIds) : null;
     const previousCount = selectedIds.size;
     const previousPrimaryId = selectedId || '';
     const previousEditingId = editingId || '';
@@ -53,14 +39,12 @@
     }
     selectedId = primaryId && selectedIds.has(primaryId) ? primaryId : lastExistingId;
     if (editingId && !selectedIds.has(editingId)) exitEdit();
-    if (animateSelection) noteNewlySelectedObjects(previousSelectedIds);
     root.TextSelDebug?._logObjectSelection?.('set-selection', nextIds, {
       ms: Math.round(((root.performance?.now?.() ?? Date.now()) - startedAt) * 100) / 100,
       previousCount,
       previousPrimaryId,
       previousEditingId,
       exitEditing,
-      animateSelection,
       requestedPrimaryId: primaryId || '',
     });
     return selectedIds.size;
@@ -78,7 +62,6 @@
       if (selectedId && !selectedIds.has(selectedId)) selectedId = null;
       return 0;
     }
-    root.BoardfishImageInsertMotion?.clear?.(idsToRemove);
     let write = 0;
     let removed = 0;
     for (let read = 0; read < objects.length; read++) {
@@ -179,7 +162,6 @@
       }
     }
     rebuildObjectsMap();
-    root.BoardfishImageInsertMotion?.clearStale?.();
     if (syncTextHeights) syncAllTextAutoHeights();
     if (restoreCounters) restoreObjectCountersFromObjects(objects);
     return objects;
@@ -191,7 +173,6 @@
     objects = [];
     objectsMap.clear();
     clearTextLayoutState();
-    root.BoardfishImageInsertMotion?.clear?.();
     resetObjectCounters();
   }
 

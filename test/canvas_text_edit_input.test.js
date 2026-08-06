@@ -284,7 +284,7 @@ test('rubber-band selection still selects objects on normal mouse release', () =
   assert.equal(context._rubberBandDragActive, false);
   assert.equal(context.rubberBand.style.display, 'none');
   assert.deepEqual(context.selections, [['image-1']]);
-  assert.deepEqual(context.motions, ['rubber-band-release', 'rubber-band-select']);
+  assert.deepEqual(context.motions, []);
 });
 
 test('click-release on an already selected text object enters edit mode', () => {

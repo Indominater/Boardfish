@@ -13,7 +13,7 @@ function makeGestureHarness(overrides = {}) {
   const timers = new Map();
   const events = [];
   const controller = TouchInput.createTouchGestureController({
-    holdDelayMs: 550,
+    holdDelayMs: 500,
     moveThresholdPx: 8,
     scheduleTimer(callback, delay) {
       const id = ++timerId;
@@ -114,7 +114,7 @@ test('mobile pan routing gives selected-region drags to the object drag path', (
 test('press and hold maps to one right-click long press and suppresses tap', () => {
   const harness = makeGestureHarness();
   harness.controller.pointerDown(point(7, 50, 60));
-  harness.advance(549);
+  harness.advance(499);
   assert.deepEqual(harness.events, []);
   harness.advance(1);
   harness.controller.pointerUp(point(7, 50, 60));

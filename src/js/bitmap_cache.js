@@ -12,7 +12,6 @@
     let lruHead = null;
     let lruTail = null;
     let bytes = 0;
-    let useCounter = 1;
 
     function getGroup(key) {
       let group = groups.get(key);
@@ -62,7 +61,6 @@
       } else if (!lruHead) {
         appendLruNode(node);
       }
-      entry.lastUsed = useCounter++;
       return entry;
     }
 
@@ -123,7 +121,6 @@
       lruHead = null;
       lruTail = null;
       bytes = 0;
-      useCounter = 1;
     }
 
     function prune() {

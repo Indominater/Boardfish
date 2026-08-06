@@ -2,273 +2,6 @@
 var boardHistory = [];
 var historyIndex = -1;
 var MAX_HISTORY = 50;
-const HISTORY_OBJECT_FILTERS = Object.freeze({
-  all: 'all',
-  nonText: 'non-text',
-  text: 'text',
-});
-const HISTORY_NON_TEXT_OPTIONS = Object.freeze({ includeText: false });
-const historyAction = (action, { filter = HISTORY_OBJECT_FILTERS.all, options = {} } = {}) => Object.freeze({
-  action,
-  filter,
-  options: Object.freeze({ ...(options || {}) }),
-});
-const freezeHistoryArrayCopy = (items = []) => {
-  const source = Array.isArray(items) ? items : [];
-  const out = new Array(source.length);
-  for (let i = 0; i < source.length; i++) out[i] = source[i];
-  return Object.freeze(out);
-};
-const historyReplay = ({ selection = null, added = [], removed = [] } = {}) => Object.freeze({
-  type: 'actions',
-  selection,
-  added: freezeHistoryArrayCopy(added),
-  removed: freezeHistoryArrayCopy(removed),
-});
-const HISTORY_REMOVE_WITHOUT_ANIMATION = Object.freeze([
-  historyAction('object-delete'),
-]);
-const HISTORY_FULL_SELECTION_PULSE_REASONS = new Set([
-  'send-selected-to-back',
-]);
-const HISTORY_ADDED_OBJECT_REASONS = new Set([
-  'add-image',
-  'bulk-image-insert',
-  'duplicate-selected',
-  'paste-objects',
-]);
-const HISTORY_RESTORE_DELETED_REASONS = new Set([
-  'delete-selected',
-]);
-const HISTORY_NO_REPLAY_REASONS = new Set([
-  'snapshot',
-  'add-text',
-  'delete-empty-text',
-  'text-edit-checkpoint',
-  'text-edit-enter',
-  'text-height-change',
-]);
-const HISTORY_RUNTIME_TEXT_CACHE_REASONS = new Set([
-  'text-edit-checkpoint',
-  'text-edit-enter',
-]);
-const HISTORY_SELECTION_REPLAY_BY_REASON = Object.freeze({
-  'drag': historyReplay({
-    selection: historyAction('object-drag', { options: HISTORY_NON_TEXT_OPTIONS }),
-  }),
-  'group-drag': historyReplay({
-    selection: historyAction('object-group-drag', { options: HISTORY_NON_TEXT_OPTIONS }),
-  }),
-  'multi-resize': historyReplay({
-    selection: historyAction('object-multi-resize', { options: HISTORY_NON_TEXT_OPTIONS }),
-  }),
-  'resize': historyReplay({
-    selection: historyAction('object-resize', { options: HISTORY_NON_TEXT_OPTIONS }),
-  }),
-  'send-selected-to-back': historyReplay({
-    selection: historyAction('send-selected-to-back'),
-  }),
-});
-const HISTORY_ADDED_OBJECT_REPLAY_BY_REASON = Object.freeze({
-  'add-image': historyReplay({
-    added: [historyAction('image-object-create', {
-      filter: HISTORY_OBJECT_FILTERS.nonText,
-      options: HISTORY_NON_TEXT_OPTIONS,
-    })],
-    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
-  }),
-  'bulk-image-insert': historyReplay({
-    added: [historyAction('bulk-image-create', {
-      filter: HISTORY_OBJECT_FILTERS.nonText,
-      options: HISTORY_NON_TEXT_OPTIONS,
-    })],
-    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
-  }),
-  'duplicate-selected': historyReplay({
-    added: [
-      historyAction('text-box-duplicate', { filter: HISTORY_OBJECT_FILTERS.text }),
-      historyAction('image-object-duplicate', {
-        filter: HISTORY_OBJECT_FILTERS.nonText,
-        options: HISTORY_NON_TEXT_OPTIONS,
-      }),
-    ],
-    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
-  }),
-  'paste-objects': historyReplay({
-    added: [
-      historyAction('text-box-paste', { filter: HISTORY_OBJECT_FILTERS.text }),
-      historyAction('image-object-paste', {
-        filter: HISTORY_OBJECT_FILTERS.nonText,
-        options: HISTORY_NON_TEXT_OPTIONS,
-      }),
-    ],
-    removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
-  }),
-});
-const HISTORY_RESTORE_DELETED_REPLAY = historyReplay({
-  added: [
-    historyAction('text-box-undo-delete', { filter: HISTORY_OBJECT_FILTERS.text }),
-    historyAction('object-undo-delete', {
-      filter: HISTORY_OBJECT_FILTERS.nonText,
-      options: HISTORY_NON_TEXT_OPTIONS,
-    }),
-  ],
-  removed: HISTORY_REMOVE_WITHOUT_ANIMATION,
-});
-const HISTORY_DEFAULT_REPLAY = historyReplay({
-  selection: historyAction('history-object-jiggle-replay', { options: HISTORY_NON_TEXT_OPTIONS }),
-  added: [historyAction('history-object-jiggle-replay', { options: HISTORY_NON_TEXT_OPTIONS })],
-  removed: [historyAction('history-object-jiggle-replay', { options: HISTORY_NON_TEXT_OPTIONS })],
-});
-
-const historyReasonUsesFullSelectionPulse = (reason = '') => {
-  const value = String(reason || '');
-  return HISTORY_FULL_SELECTION_PULSE_REASONS.has(value) ||
-    value.startsWith('flip-image-') ||
-    value.startsWith('rotate-image-');
-};
-
-const historySelectionPulseOptions = (entry) => {
-  const reason = entry?.reason;
-  return historyReasonUsesFullSelectionPulse(reason) ? {} : { includeText: false };
-};
-
-const cloneHistoryAction = (spec) => spec ? ({
-  action: spec.action,
-  filter: spec.filter || HISTORY_OBJECT_FILTERS.all,
-  options: { ...(spec.options || {}) },
-}) : null;
-
-const cloneHistoryActions = (actions = []) => {
-  const source = Array.isArray(actions) ? actions : [];
-  const cloned = new Array(source.length);
-  for (let i = 0; i < source.length; i++) cloned[i] = cloneHistoryAction(source[i]);
-  return cloned;
-};
-
-const cloneHistoryMotion = (motion) => {
-  if (!motion || motion.type === 'none') return { type: 'none' };
-  if (motion.type !== 'actions') return motion;
-  return {
-    type: 'actions',
-    selection: cloneHistoryAction(motion.selection),
-    added: cloneHistoryActions(motion.added),
-    removed: cloneHistoryActions(motion.removed),
-  };
-};
-
-const historySelectionReplayForReason = (reason = '') => {
-  const value = String(reason || '');
-  if (value.startsWith('flip-image-')) {
-    return historyReplay({ selection: historyAction('flip-image') });
-  }
-  if (value.startsWith('rotate-image-')) {
-    return historyReplay({ selection: historyAction('rotate-image') });
-  }
-  return HISTORY_SELECTION_REPLAY_BY_REASON[value] || null;
-};
-
-const historyMotionForReason = (reason = '') => {
-  const value = String(reason || '');
-  if (!value || HISTORY_NO_REPLAY_REASONS.has(value)) return { type: 'none' };
-  const selectionReplay = historySelectionReplayForReason(value);
-  if (selectionReplay) return cloneHistoryMotion(selectionReplay);
-  if (HISTORY_ADDED_OBJECT_REASONS.has(value)) {
-    return cloneHistoryMotion(HISTORY_ADDED_OBJECT_REPLAY_BY_REASON[value] || HISTORY_DEFAULT_REPLAY);
-  }
-  if (HISTORY_RESTORE_DELETED_REASONS.has(value)) return cloneHistoryMotion(HISTORY_RESTORE_DELETED_REPLAY);
-  return cloneHistoryMotion(HISTORY_DEFAULT_REPLAY);
-};
-
-const historyMotionForEntry = (entry) => {
-  const motion = entry?.motion;
-  if (motion?.type === 'actions') return cloneHistoryMotion(motion);
-  if (motion?.type === 'none') return { type: 'none' };
-  return historyMotionForReason(entry?.reason || '');
-};
-
-const historyCloneOptionsForObject = (reason = '', obj = null) => ({
-  runtimeTextCache: HISTORY_RUNTIME_TEXT_CACHE_REASONS.has(String(reason || '')) &&
-    obj?.type === 'text' &&
-    !!editingId &&
-    obj.id === editingId,
-});
-
-const filterHistoryMotionObjects = (items, filter = HISTORY_OBJECT_FILTERS.all) => {
-  const list = Array.isArray(items) ? items : [];
-  if (filter === HISTORY_OBJECT_FILTERS.all) return list;
-  const out = [];
-  for (const obj of list) {
-    if (filter === HISTORY_OBJECT_FILTERS.text) {
-      if (obj?.type === 'text') out.push(obj);
-    } else if (filter === HISTORY_OBJECT_FILTERS.nonText && obj?.type !== 'text') {
-      out.push(obj);
-    }
-  }
-  if (
-    filter === HISTORY_OBJECT_FILTERS.text ||
-    filter === HISTORY_OBJECT_FILTERS.nonText
-  ) return out;
-  return list;
-};
-
-const applyHistoryActionSpecs = (specs, items, payloadKey) => {
-  let applied = false;
-  for (const spec of specs || []) {
-    const actionObjects = filterHistoryMotionObjects(items, spec?.filter);
-    if (!spec?.action || !actionObjects.length) continue;
-    const payload = payloadKey === 'removedObjects'
-      ? { removedObjects: actionObjects }
-      : { objects: actionObjects };
-    globalThis.BoardfishMotion?.applyActionAnimation?.(spec.action, payload, spec.options || {});
-    applied = true;
-  }
-  return applied;
-};
-
-const applyHistorySelectionAction = (spec, selectionPulseOptions = {}) => {
-  if (!spec?.action) return false;
-  globalThis.BoardfishMotion?.applyActionAnimation?.(spec.action, {
-    selection: true,
-    options: { ...(selectionPulseOptions || {}), ...(spec.options || {}) },
-  });
-  return true;
-};
-
-const historyRestoreMotionTransition = (beforeObjects = [], targetObjects = []) => {
-  const beforeIds = new Set();
-  for (const obj of beforeObjects || []) {
-    if (obj?.id) beforeIds.add(obj.id);
-  }
-  const targetIds = new Set();
-  const addedIds = [];
-  for (const obj of targetObjects || []) {
-    if (!obj?.id) continue;
-    targetIds.add(obj.id);
-    if (!beforeIds.has(obj.id)) addedIds.push(obj.id);
-  }
-  const removed = [];
-  for (const obj of beforeObjects || []) {
-    if (!obj?.id || targetIds.has(obj.id)) continue;
-    removed.push(cloneObject(obj));
-  }
-  return { addedIds, removed };
-};
-
-const applyHistoryMotionReplay = (motion, transition, selectionPulseOptions) => {
-  const replay = motion || { type: 'none' };
-  if (replay.type !== 'actions') return;
-  const added = [];
-  for (const id of transition?.addedIds || []) {
-    const obj = objectsMap.get(id);
-    if (obj) added.push(obj);
-  }
-  const removed = transition?.removed || [];
-  if (added.length) applyHistoryActionSpecs(replay.added, added, 'objects');
-  if (removed.length) applyHistoryActionSpecs(replay.removed, removed, 'removedObjects');
-  if (!added.length && !removed.length) applyHistorySelectionAction(replay.selection, selectionPulseOptions);
-};
-
 function trimHistory() {
   if (boardHistory.length > MAX_HISTORY) {
     const trim = boardHistory.length - MAX_HISTORY;
@@ -345,32 +78,6 @@ const isHistoryDebugEnabled = () => !!(typeof HistoryDebug !== 'undefined' && (
 
 const historyDebugRound = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
-function historyTextValueDiff(oldValue = '', nextValue = '') {
-  const oldText = String(oldValue ?? '');
-  const nextText = String(nextValue ?? '');
-  const oldLength = oldText.length;
-  const nextLength = nextText.length;
-  let start = 0;
-  while (start < oldLength && start < nextLength && oldText[start] === nextText[start]) start++;
-  let oldEnd = oldLength;
-  let nextEnd = nextLength;
-  while (oldEnd > start && nextEnd > start && oldText[oldEnd - 1] === nextText[nextEnd - 1]) {
-    oldEnd--;
-    nextEnd--;
-  }
-  return {
-    start,
-    end: oldEnd,
-    inserted: nextText.slice(start, nextEnd),
-    oldChars: oldLength,
-    nextChars: nextLength,
-    removedChars: oldEnd - start,
-    insertedChars: nextEnd - start,
-    prefixChars: start,
-    suffixChars: oldLength - oldEnd,
-  };
-}
-
 function historyEditProxyValue(proxy) {
   if (typeof proxy?._boardfishLogicalValue === 'string') return proxy._boardfishLogicalValue;
   return String(proxy?.value ?? '');
@@ -386,45 +93,6 @@ function setHistoryEditProxyLogicalValue(proxy, value = '') {
   }
   proxy._boardfishLogicalValue = nextValue;
   proxy._boardfishDomValueStale = !domSynced;
-}
-
-function setHistoryEditProxyValue(proxy, nextValue = '') {
-  const oldValue = historyEditProxyValue(proxy);
-  const normalizedNextValue = String(nextValue ?? '');
-  const startedAt = performance.now();
-  if (!proxy || oldValue === normalizedNextValue) {
-    setHistoryEditProxyLogicalValue(proxy, normalizedNextValue);
-    return {
-      changed: false,
-      method: 'none',
-      totalMs: historyDebugRound(performance.now() - startedAt),
-      diffMs: 0,
-      mutationMs: 0,
-      assignMs: '',
-      oldChars: oldValue.length,
-      nextChars: normalizedNextValue.length,
-      insertedChars: 0,
-      removedChars: 0,
-      start: 0,
-      end: 0,
-      prefixChars: oldValue.length,
-      suffixChars: oldValue.length,
-    };
-  }
-
-  const diffStartedAt = performance.now();
-  const diff = historyTextValueDiff(oldValue, normalizedNextValue);
-  const diffMs = historyDebugRound(performance.now() - diffStartedAt);
-  setHistoryEditProxyLogicalValue(proxy, normalizedNextValue);
-  return {
-    changed: true,
-    method: 'deferred',
-    totalMs: historyDebugRound(performance.now() - startedAt),
-    diffMs,
-    mutationMs: 0,
-    assignMs: '',
-    ...diff,
-  };
 }
 
 function syncHistoryEditProxyDomValueForSelection(proxy, start, end) {
@@ -632,7 +300,6 @@ function snapshot() {
   HistoryDebug.step(dbg, 'captureEditState', { editState: !!editState });
   boardHistory.push({
     reason: 'snapshot',
-    motion: historyMotionForReason('snapshot'),
     objects: objectsSnapshot,
     editState,
   });
@@ -665,15 +332,18 @@ function pushHistory(reason = '', options = {}) {
   const prevMap = new Map();
   for (const o of prevObjects) prevMap.set(o.id, o);
   HistoryDebug.step(dbg, 'build-prev-map', { objectCount: prevObjects.length });
+  const cacheEditingText = !!editingId && (
+    reason === 'text-edit-checkpoint' || reason === 'text-edit-enter'
+  );
   let cloned = 0;
   let reused = 0;
   const entry = new Array(objects.length);
   for (let i = 0; i < objects.length; i++) {
     const o = objects[i];
-    const cloneOptions = historyCloneOptionsForObject(reason, o);
-    if (_dirtyIds.has(o.id) || !prevMap.has(o.id) || cloneOptions.runtimeTextCache) {
+    const runtimeTextCache = cacheEditingText && o.type === 'text' && o.id === editingId;
+    if (_dirtyIds.has(o.id) || !prevMap.has(o.id) || runtimeTextCache) {
       cloned++;
-      entry[i] = cloneObject(o, cloneOptions);
+      entry[i] = cloneObject(o, runtimeTextCache);
       continue;
     }
     reused++;
@@ -687,7 +357,6 @@ function pushHistory(reason = '', options = {}) {
   HistoryDebug.step(dbg, 'captureEditState', { editState: !!editState });
   boardHistory.push({
     reason,
-    motion: historyMotionForReason(reason),
     objects: entry,
     editState,
     beforeEditState: options.beforeEditState || null,
@@ -709,15 +378,12 @@ function snapshotContainsTextObject(snapshotObjects = [], id = '') {
 }
 
 function restoreSnapshot(s, {
-  historyMotion = null,
-  selectionPulseOptions = { includeText: false },
   editStateOverride = undefined,
 } = {}) {
   const snapshotObjects = s?.objects || [];
   const snapshotEditState = s?.editState || null;
   const editState = editStateOverride === undefined ? snapshotEditState : editStateOverride;
   const hadEditing = !!editingId;
-  const motionTransition = historyRestoreMotionTransition(objects, snapshotObjects);
   const dbg = HistoryDebug.start('restoreSnapshot', {
     objectCount: snapshotObjects.length,
     historyLength: boardHistory.length,
@@ -782,7 +448,7 @@ function restoreSnapshot(s, {
   HistoryDebug.step(dbg, 'clear-editing', clearEditMeta);
   const prevSelectedIds = new Set(selectedIds);
   const cloneObjectsStart = performance.now();
-  const clonedSnapshotObjects = cloneObjects(snapshotObjects, { runtimeTextCache: true });
+  const clonedSnapshotObjects = cloneObjects(snapshotObjects, true);
   const liveCacheHydrateMeta = hydrateRestoredTextCachesFromLiveObjects(clonedSnapshotObjects);
   HistoryDebug.step(dbg, 'hydrate-live-text-caches', liveCacheHydrateMeta);
   if (preserveLiveEdit) {
@@ -820,7 +486,7 @@ function restoreSnapshot(s, {
   HistoryDebug.step(dbg, 'invalidate-offscreen', { invalidateOffscreenMs: performance.now() - invalidateStart });
   // Preserve selection for objects that still exist in the restored state
   const selectionStart = performance.now();
-  BoardfishEditorState.setSelection(prevSelectedIds, { exitEditing: false, animateSelection: false });
+  BoardfishEditorState.setSelection(prevSelectedIds, { exitEditing: false });
   HistoryDebug.step(dbg, 'restore-selection', {
     setSelectionMs: performance.now() - selectionStart,
     previousSelectedCount: prevSelectedIds.size,
@@ -833,15 +499,6 @@ function restoreSnapshot(s, {
     selectedCount: selectedIds.size,
     ...getHistoryTextDebugMetrics(objects),
   });
-  const motionStart = performance.now();
-  applyHistoryMotionReplay(historyMotion, motionTransition, selectionPulseOptions);
-  HistoryDebug.step(dbg, 'motion-replay', {
-    motionReplayMs: performance.now() - motionStart,
-    motionType: historyMotion?.type || '',
-    transitionAddedIds: motionTransition.addedIds.length,
-    transitionRemovedObjects: motionTransition.removed.length,
-  });
-
   if (!editState || !editState.id) {
     const ms = performance.now() - t0;
     HistoryDebug.max('maxRestoreMs', ms);
@@ -871,34 +528,9 @@ function restoreSnapshot(s, {
   });
   const enterEditStart = performance.now();
   let reusedEditProxy = false;
-  let proxyValueSetMs = '';
-  let proxyValueChanged = '';
-  let proxyValueSetMethod = '';
-  let proxyValueDiffMs = '';
-  let proxyValueMutationMs = '';
-  let proxyValueAssignMs = '';
-  let proxyValueInsertedChars = '';
-  let proxyValueRemovedChars = '';
-  let proxyValuePatchStart = '';
-  let proxyValuePatchEnd = '';
-  let proxyValuePatchPrefixChars = '';
-  let proxyValuePatchSuffixChars = '';
   if (preserveLiveEdit && _editEl === liveEditProxy && obj === liveEditObject) {
     reusedEditProxy = true;
-    const nextProxyValue = String(obj.data?.content || '');
-    const proxyValueResult = setHistoryEditProxyValue(_editEl, nextProxyValue);
-    proxyValueChanged = proxyValueResult.changed;
-    proxyValueSetMs = proxyValueResult.totalMs;
-    proxyValueSetMethod = proxyValueResult.method;
-    proxyValueDiffMs = proxyValueResult.diffMs;
-    proxyValueMutationMs = proxyValueResult.mutationMs;
-    proxyValueAssignMs = proxyValueResult.assignMs;
-    proxyValueInsertedChars = proxyValueResult.insertedChars;
-    proxyValueRemovedChars = proxyValueResult.removedChars;
-    proxyValuePatchStart = proxyValueResult.start;
-    proxyValuePatchEnd = proxyValueResult.end;
-    proxyValuePatchPrefixChars = proxyValueResult.prefixChars;
-    proxyValuePatchSuffixChars = proxyValueResult.suffixChars;
+    setHistoryEditProxyLogicalValue(_editEl, obj.data?.content);
     obj._editStartContent = obj.data.content;
     if (typeof setTextEditMinLinesForSession === 'function') {
       setTextEditMinLinesForSession(obj, { preserveSize: true });
@@ -919,18 +551,6 @@ function restoreSnapshot(s, {
     enterEditMs: performance.now() - enterEditStart,
     editStateId: editState.id,
     reusedEditProxy,
-    proxyValueSetMs,
-    proxyValueChanged,
-    proxyValueSetMethod,
-    proxyValueDiffMs,
-    proxyValueMutationMs,
-    proxyValueAssignMs,
-    proxyValueInsertedChars,
-    proxyValueRemovedChars,
-    proxyValuePatchStart,
-    proxyValuePatchEnd,
-    proxyValuePatchPrefixChars,
-    proxyValuePatchSuffixChars,
     proxyChars: historyEditProxyValue(_editEl).length,
     objectWidth: obj.w,
     objectHeight: obj.h,
@@ -990,8 +610,6 @@ function restoreSnapshot(s, {
       selectedChars: Math.abs(end - start),
       selectionDirection: editState.selectionDirection || 'none',
       reusedEditProxy,
-      proxyValueSetMethod,
-      proxyValueChanged,
       proxyDomSyncedForSelection: proxyDomSync.synced,
       proxyDomSyncReason: proxyDomSync.reason,
       proxyDomCharsBeforeSelection: proxyDomSync.domCharsBefore,
@@ -1075,7 +693,6 @@ function undo() {
     HistoryDebug.end(dbg, { skipped: 'at-start', flushedCheckpoint, historyLength: boardHistory.length, historyIndex });
     return;
   }
-  globalThis.BoardfishMotion?.applyActionAnimation?.('history-undo');
   HistoryDebug.count('undo');
   const actionEntry = boardHistory[historyIndex];
   const targetEntry = boardHistory[historyIndex - 1];
@@ -1092,8 +709,6 @@ function undo() {
     : undefined;
   const restoreStart = performance.now();
   restoreSnapshot(boardHistory[historyIndex], {
-    historyMotion: historyMotionForEntry(actionEntry),
-    selectionPulseOptions: historySelectionPulseOptions(actionEntry),
     editStateOverride: undoEditState,
   });
   HistoryDebug.step(dbg, 'restore-done', {
@@ -1140,7 +755,6 @@ function redo() {
     HistoryDebug.end(dbg, { skipped: 'at-end', flushedCheckpoint, historyLength: boardHistory.length, historyIndex });
     return;
   }
-  globalThis.BoardfishMotion?.applyActionAnimation?.('history-redo');
   HistoryDebug.count('redo');
   historyIndex++;
   const actionEntry = boardHistory[historyIndex];
@@ -1150,10 +764,7 @@ function redo() {
     ...getHistoryEntryDebugMetrics(actionEntry, 'target'),
   });
   const restoreStart = performance.now();
-  restoreSnapshot(actionEntry, {
-    historyMotion: historyMotionForEntry(actionEntry),
-    selectionPulseOptions: historySelectionPulseOptions(actionEntry),
-  });
+  restoreSnapshot(actionEntry);
   HistoryDebug.step(dbg, 'restore-done', {
     restoreMs: performance.now() - restoreStart,
     historyLength: boardHistory.length,

@@ -162,16 +162,19 @@ test('clipboard and debug tooling use browser clipboard paths', () => {
   assert.doesNotMatch(startupDebug, /writeDebugLogFile/);
 });
 
-test('motion policy reserves browser shortcuts instead of window chrome', () => {
+test('motion policy is copy-only and browser find stays native', () => {
   const motion = readSource('src/js/motion.js');
   const keyboard = readSource('src/js/keyboard.js');
 
-  assert.match(motion, /browserReservedShortcuts/);
-  assert.match(motion, /'browser-find-shortcut'/);
+  assert.match(motion, /COPY_JIGGLE_ACTIONS/);
+  assert.match(motion, /'copy-selected-objects'/);
+  assert.match(motion, /'copy-text-object'/);
+  assert.match(motion, /'copy-text-selection'/);
+  assert.doesNotMatch(motion, /browser-find-shortcut/);
   assert.doesNotMatch(motion, /appWindow/);
   assert.doesNotMatch(motion, new RegExp('app-' + 'window'));
   assert.match(keyboard, /isBrowserFindShortcut/);
-  assert.match(keyboard, /'browser-find-shortcut'/);
+  assert.doesNotMatch(keyboard, /browser-find-shortcut/);
 });
 
 test('text edit entry and shortcuts keep edge-case guards', () => {

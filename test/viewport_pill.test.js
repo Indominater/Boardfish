@@ -265,11 +265,12 @@ test('opening shield pill text mirrors the zoom pill visual motion surface', () 
   assert.match(styles, /\.opening-shield-pill-text\s*\{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);/);
 });
 
-test('pill messages request animation policy only when the message changes', () => {
+test('pill messages update without dispatching inert animation policy', () => {
   const context = loadViewportPillHarness();
 
   context.showIslandMsg('Saved');
-  assert.deepEqual(context.motionCalls, ['Saved']);
+  assert.deepEqual(context.motionCalls, []);
+  assert.equal(context.islZoom.textContent, 'Saved');
   assert.equal(context.island.dataset.mode, 'message');
   assert.equal(context.island.title, '');
 
@@ -278,20 +279,21 @@ test('pill messages request animation policy only when the message changes', () 
   assert.deepEqual(context.motionCalls, []);
 
   context.showIslandMsg('Copied');
-  assert.deepEqual(context.motionCalls, ['Copied']);
+  assert.deepEqual(context.motionCalls, []);
+  assert.equal(context.islZoom.textContent, 'Copied');
 });
 
-test('busy pill progress requests animation policy when the displayed message changes', () => {
+test('busy pill progress updates without dispatching inert animation policy', () => {
   const context = loadViewportPillHarness();
   const busyPill = context.startPillTask({ message: '0/2', progress: true });
-  assert.deepEqual(context.motionCalls, ['0/2']);
+  assert.deepEqual(context.motionCalls, []);
 
   context.motionCalls.length = 0;
   context.updatePillTask(busyPill, '0/2');
   assert.deepEqual(context.motionCalls, []);
 
   context.updatePillTask(busyPill, '1/2');
-  assert.deepEqual(context.motionCalls, ['1/2']);
+  assert.deepEqual(context.motionCalls, []);
 
   const openingPill = context.openingShield.querySelector('.opening-shield-pill');
   assert.equal(openingPill.firstElementChild.textContent, '1/2');
@@ -313,7 +315,7 @@ test('zoom pill sync skips unchanged text writes', () => {
   context.syncIslandZoomDisplay('zoom-changed');
   assert.equal(context.islZoom.textContent, '200%');
   assert.equal(context.islZoom.textContentWriteCount(), writesAfterInit + 1);
-  assert.deepEqual(context.motionCalls, ['200%']);
+  assert.deepEqual(context.motionCalls, []);
 });
 
 test('board-only refreshes also schedule active selection overlays', () => {

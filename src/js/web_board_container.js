@@ -1128,8 +1128,7 @@
   }
 
   async function createBoardContainerBlob(board, rawImageStore = {}, options = {}) {
-    const startedAt = nowMs();
-    let phaseStart = startedAt;
+    let phaseStart = nowMs();
     const boardJson = JSON.stringify(board);
     const jsonStringifyMs = nowMs() - phaseStart;
     phaseStart = nowMs();
@@ -1199,7 +1198,6 @@
       imageCount: imageEntries.length,
       imageEntries,
       imageArchiveEntries,
-      totalContentBytes: boardBytes.length + imageBytes,
       jsonStringifyMs,
       jsonEncodeMs,
       imageEntriesMs,
@@ -1211,7 +1209,6 @@
       crcReusedEntries: zip.crcReusedEntries,
       blobImageBytes,
       byteArrayImageBytes,
-      totalMs: nowMs() - startedAt,
     };
   }
 

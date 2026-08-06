@@ -214,7 +214,6 @@ function handleViewportWheel(e) {
       const nextViewport = canvasInputViewportResult(
         BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, newZoom),
       );
-      globalThis.BoardfishMotion?.applyActionAnimation?.('board-wheel-zoom');
       scheduleTransform('wheel-zoom', e);
       if (collectDebug) {
         const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
@@ -270,7 +269,6 @@ function handleViewportWheel(e) {
     const appliedPanX = -e.deltaX;
     const appliedPanY = -e.deltaY;
     const nextViewport = canvasInputViewportResult(BoardfishViewportState.panBy(appliedPanX, appliedPanY));
-    globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
     scheduleTransform('wheel-pan', e);
     if (collectDebug) {
       const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
@@ -423,7 +421,6 @@ function startMousePan(e) {
       const clientStepX = ev.clientX - lastClientX;
       const clientStepY = ev.clientY - lastClientY;
       const nextViewport = canvasInputViewportResult(BoardfishViewportState.panBy(clientStepX, clientStepY));
-      globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
       scheduleTransform('mouse-pan', ev);
       if (collectDebug) {
         const panDeltaX = nextViewport.panX - panXBefore;
@@ -532,22 +529,7 @@ function createSelectionDragSession(startClientX, startClientY) {
     finished = true;
     if (!grpMoved) return false;
     dragCommitter.flush();
-    let hasText = false;
-    let hasNonText = false;
-    for (const item of grpItems) {
-      markDirty(item.obj.id);
-      if (item.obj?.type === 'text') hasText = true;
-      else hasNonText = true;
-    }
-    if (hasText) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-drag');
-    }
-    if (hasNonText) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('object-group-drag', {
-        selection: true,
-        options: { includeText: false },
-      });
-    }
+    for (const item of grpItems) markDirty(item.obj.id);
     pushHistory('group-drag');
     return true;
   }
@@ -628,7 +610,6 @@ function startRubberBandSelection(e, additive) {
     _rubberBandSelectionCancel = null;
     hideRubberBandSelectionVisual();
     if (ev?.__boardfishRubberBandCancel) return;
-    globalThis.BoardfishMotion?.applyActionAnimation?.('rubber-band-release');
     if (!rbActive) return;
     const x1 = Math.min(rbStartX, ev.clientX), y1 = Math.min(rbStartY, ev.clientY);
     const x2 = Math.max(rbStartX, ev.clientX), y2 = Math.max(rbStartY, ev.clientY);
@@ -647,10 +628,6 @@ function startRubberBandSelection(e, additive) {
     if (selectionSetsEqual(nextSelection, selectedIds)) return;
     BoardfishEditorState.setSelection(selectionIdsFromSet(nextSelection));
     scheduleRender(true, true);
-    globalThis.BoardfishMotion?.applyActionAnimation?.('rubber-band-select', {
-      selection: true,
-      options: { includeText: false },
-    });
   }
   _rubberBandSelectionCancel = (reason) => {
     const cleanup = _rubberBandSelectionCleanup;
@@ -677,10 +654,6 @@ function toggleAdditiveSelection(obj) {
     }
   }
   scheduleRender(true, true);
-  globalThis.BoardfishMotion?.applyActionAnimation?.('additive-select', {
-    selection: true,
-    options: { includeText: false },
-  });
 }
 
 function textCaretHitForPoint(layout, wx, wy, obj) {
@@ -690,9 +663,7 @@ function textCaretHitForPoint(layout, wx, wy, obj) {
 
 function applyTextEditCaretHit(obj, proxy, hit) {
   if (!obj || !proxy || !hit) return;
-  const textContent = typeof normalizeTextContent === 'function'
-    ? normalizeTextContent(obj.data?.content || '')
-    : String(obj.data?.content || '').replace(/\r\n?/g, '\n');
+  const textContent = obj.data?.content || '';
   const textLength = textContent.length;
   const index = Math.max(0, Math.min(Math.trunc(hit.index ?? 0), textLength));
   if (typeof setTextEditProxySelectionRange === 'function') {
@@ -759,7 +730,6 @@ function startTextSelectionDrag(e, obj, wp) {
     });
     TextSelDebug._logSelection('mouse-down', _editEl, obj);
     _caretVisible = true;
-    globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
     scheduleRender(true, false);
   }
   function onSelMove(ev) {
@@ -776,10 +746,7 @@ function startTextSelectionDrag(e, obj, wp) {
       const start = Math.min(clickIdx, endIdx);
       const end = Math.max(clickIdx, endIdx);
       if (typeof setTextEditProxySelectionRange === 'function') {
-        const value = typeof normalizeTextContent === 'function'
-          ? normalizeTextContent(obj.data?.content || '')
-          : String(obj.data?.content || '').replace(/\r\n?/g, '\n');
-        setTextEditProxySelectionRange(_editEl, start, end, 'none', { value });
+        setTextEditProxySelectionRange(_editEl, start, end, 'none', { value: obj.data?.content || '' });
       } else {
         _editEl.setSelectionRange(start, end);
       }
@@ -787,7 +754,6 @@ function startTextSelectionDrag(e, obj, wp) {
       else clearTextEditCaretHit(obj);
       TextSelDebug._logSelection('mouse-drag', _editEl, obj);
       _caretVisible = true;
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-drag-select');
       scheduleRender(true, false);
     }
   }
@@ -901,11 +867,6 @@ function startObjectDrag(e, obj) {
           });
           TextSelDebug._logSelection('click-to-edit', _editEl, obj);
           _caretVisible = true;
-          const motionStart = canvasInputNow();
-          globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
-          logClickEditStep('click-to-edit-motion', {
-            motionMs: canvasInputDebugRound(canvasInputNow() - motionStart),
-          });
           const renderStart = canvasInputNow();
           scheduleRender(true, false);
           logClickEditStep('click-to-edit-render-scheduled', {
@@ -937,22 +898,7 @@ function startObjectDrag(e, obj) {
       return;
     }
     dragCommitter.flush();
-    let hasText = false;
-    let hasNonText = false;
-    for (const item of dragItems) {
-      markDirty(item.obj.id);
-      if (item.obj?.type === 'text') hasText = true;
-      else hasNonText = true;
-    }
-    if (hasText) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-drag');
-    }
-    if (hasNonText) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('object-drag', {
-        selection: true,
-        options: { includeText: false },
-      });
-    }
+    for (const item of dragItems) markDirty(item.obj.id);
     pushHistory('drag');
   }
   beginDocumentDrag({ move: onMove, up: onUp });

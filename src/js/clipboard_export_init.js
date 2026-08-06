@@ -107,11 +107,7 @@ const clipboardTextStats = (value, scriptRanges = []) => {
   };
 };
 
-const addTextPasteOptions = (dbg, options = {}) => (
-  typeof ClipDebug !== 'undefined' && ClipDebug.enabled === true
-    ? { ...options, debug: dbg }
-    : options
-);
+const addTextPasteOptions = (dbg, options = {}) => dbg ? { ...options, debug: dbg } : options;
 
 const webSourceClipboardMime = (source) => {
   if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return String(source.mime || '').toLowerCase();
@@ -216,7 +212,7 @@ const copySelected = (options = {}) => {
       processed++;
       const obj = objectsMap.get(id);
       if (!obj) continue;
-      const cloned = cloneObject(obj, { runtimeTextCache: obj.type === 'text' });
+      const cloned = cloneObject(obj, true);
       if (cloned.type === 'image') {
         const imgKey = cloned.data.imgKey;
         const src = BoardfishImageStore.getSource(imgKey);
@@ -266,7 +262,7 @@ const copySelected = (options = {}) => {
   }
 
   const cloneStartedAt = clipboardNow();
-  const cloned = cloneObject(obj, { runtimeTextCache: obj.type === 'text' });
+  const cloned = cloneObject(obj, true);
   ClipDebug.step(dbg, 'copy:single-clone-done', {
     type: obj.type,
     ms: clipboardElapsedMs(cloneStartedAt),
@@ -396,7 +392,6 @@ const copySelected = (options = {}) => {
 
 const cutSelected = () => {
   if (!hasSelection() || editingId) return false;
-  globalThis.BoardfishMotion?.applyActionAnimation?.('cut-selected-objects');
   let copyResult = false;
   try {
     copyResult = copySelected({ animateCopy: false });
@@ -451,7 +446,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           ...clipboardTextMetricsForObjects(sourceObjects),
         });
         const cloneStart = performance.now();
-        const clones = cloneObjects(sourceObjects, { runtimeTextCache: true });
+        const clones = cloneObjects(sourceObjects, true);
         ClipDebug.step(dbg, 'paste:clone-done', {
           objectCount: clones.length,
           ms: Math.round((performance.now() - cloneStart) * 100) / 100,
@@ -545,16 +540,12 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         const dx = wx - (minX + maxX) / 2, dy = wy - (minY + maxY) / 2;
         let processedObjects = 0;
         const pastedIds = [];
-        const pastedTextObjects = [];
-        const pastedNonTextObjects = [];
         ClipDebug.step(dbg, 'paste:objects-add-start', { objectCount: clones.length, ...clipboardTextMetricsForObjects(clones) });
         for (const o of clones) {
           processedObjects++;
           o.id = newId(); o.x += dx; o.y += dy; o.z = ++zCounter;
           BoardfishEditorState.addObject(o);
           pastedIds.push(o.id);
-          if (o.type === 'text') pastedTextObjects.push(o);
-          else pastedNonTextObjects.push(o);
           if (processedObjects === 1 || processedObjects % 50 === 0 || processedObjects === clones.length) {
             ClipDebug.step(dbg, 'paste:objects-add-progress', {
               processed: processedObjects,
@@ -565,10 +556,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         }
         BoardfishEditorState.setSelection(pastedIds, {
           primaryId: pastedIds[pastedIds.length - 1],
-          animateSelection: false,
         });
-        globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-paste', { objects: pastedTextObjects });
-        globalThis.BoardfishMotion?.applyActionAnimation?.('image-object-paste', { objects: pastedNonTextObjects });
         ClipDebug.step(dbg, 'paste:objects-add-done', {
           objectCount: clones.length,
           registeredImages,

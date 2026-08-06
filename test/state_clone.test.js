@@ -145,7 +145,7 @@ test('text clone copies runtime caches only when requested', () => {
   };
 
   const regularClone = context.__stateClone.cloneObject(source);
-  const runtimeClone = context.__stateClone.cloneObject(source, { runtimeTextCache: true });
+  const runtimeClone = context.__stateClone.cloneObject(source, true);
 
   assert.equal(regularClone._runtimeCopiedFrom, undefined);
   assert.equal(runtimeClone._runtimeCopiedFrom, 'text-1');

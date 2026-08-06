@@ -101,16 +101,15 @@ function loadKeyboard(overrides = {}) {
     calls,
     context,
     keydownListeners,
-    mainKeydown: keydownListeners[1].handler,
+    mainKeydown: keydownListeners[0].handler,
   };
 }
 
 test('keyboard shortcuts register the app command handler in capture phase', () => {
   const { keydownListeners } = loadKeyboard();
 
-  assert.equal(keydownListeners.length, 2);
+  assert.equal(keydownListeners.length, 1);
   assert.equal(keydownListeners[0].options, true);
-  assert.equal(keydownListeners[1].options, true);
 });
 
 test('plain n is consumed and runs new board', () => {
@@ -352,7 +351,6 @@ test('cmd+arrow text alignment still applies to selected text objects outside ed
   assert.deepEqual(calls, [
     ['align', 'text-1', 0, 1, 'right'],
     ['markDirty', 'text-1'],
-    ['motion', 'text-align'],
     ['scheduleRender', true, true, 'text-align'],
     ['pushHistory', 'text-align'],
   ]);
@@ -385,10 +383,9 @@ test('cmd+r rotates selected images when available', () => {
 });
 
 test('cmd+f falls through to browser find when no image can flip', () => {
-  const { calls, keydownListeners, mainKeydown } = loadKeyboard();
+  const { calls, mainKeydown } = loadKeyboard();
   const event = keyEvent({ key: 'f', code: 'KeyF', metaKey: true });
 
-  keydownListeners[0].handler(event);
   mainKeydown(event);
 
   assert.equal(event.defaultPrevented, false);
@@ -399,10 +396,9 @@ test('cmd+f falls through to browser find when no image can flip', () => {
 test('cmd+f flips selected images when available', () => {
   const selectedIds = new Set(['obj-1']);
   const objectsMap = new Map([['obj-1', { id: 'obj-1', type: 'image' }]]);
-  const { calls, keydownListeners, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
+  const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
   const event = keyEvent({ key: 'f', code: 'KeyF', metaKey: true });
 
-  keydownListeners[0].handler(event);
   mainKeydown(event);
 
   assert.equal(event.defaultPrevented, true);

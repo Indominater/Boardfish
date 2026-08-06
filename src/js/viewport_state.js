@@ -118,11 +118,10 @@
   }
 
   function setViewport(viewport = {}) {
-    zoom = Number.isFinite(viewport.zoom) ? viewport.zoom : zoom;
     return constrainPan(
       Number.isFinite(viewport.panX) ? viewport.panX : panX,
       Number.isFinite(viewport.panY) ? viewport.panY : panY,
-      zoom,
+      Number.isFinite(viewport.zoom) ? viewport.zoom : zoom,
     );
   }
 
@@ -149,8 +148,7 @@
     const normalizedZoom = Math.min(maxZoom, Math.max(minZoom, nextZoom));
     const nextPanX = clientX - (clientX - panX) * (normalizedZoom / currentZoom);
     const nextPanY = clientY - (clientY - panY) * (normalizedZoom / currentZoom);
-    zoom = normalizedZoom;
-    return constrainPan(nextPanX, nextPanY, zoom);
+    return constrainPan(nextPanX, nextPanY, normalizedZoom);
   }
 
   function setPan(nextPanX, nextPanY) {
@@ -163,11 +161,10 @@
   }
 
   function setZoomPan(nextZoom, nextPanX, nextPanY) {
-    zoom = Number.isFinite(nextZoom) ? nextZoom : zoom;
     return constrainPan(
       Number.isFinite(nextPanX) ? nextPanX : panX,
       Number.isFinite(nextPanY) ? nextPanY : panY,
-      zoom,
+      Number.isFinite(nextZoom) ? nextZoom : zoom,
     );
   }
 

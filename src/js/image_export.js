@@ -2,7 +2,6 @@
 
 async function saveSelectedImage() {
   const dbg = ExportDebug.start('exportImage', { selectedCount: selectedIds.size });
-  globalThis.BoardfishMotion?.applyActionAnimation?.('export-selected-image');
   const imageObjs = BoardfishExportUtils.selectedImageObjects();
   if (imageObjs.length !== 1) {
     ExportDebug.end(dbg, { skipped: true, imageCount: imageObjs.length });
@@ -110,7 +109,6 @@ async function exportImageBatch({
 }
 
 async function saveSelectedImages() {
-  globalThis.BoardfishMotion?.applyActionAnimation?.('export-selected-images');
   const multiSelection = isMultiSelected();
   const selectedObjs = BoardfishExportUtils.selectedImageObjects();
   return exportImageBatch({

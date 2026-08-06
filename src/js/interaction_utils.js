@@ -3,13 +3,11 @@
 (function initInteractionUtils(root) {
   function createRafCommitter(apply) {
     let raf = null;
-    let pending = false;
     let state = null;
 
     function flush() {
-      if (!pending) return;
+      if (state === null) return;
       const nextState = state;
-      pending = false;
       state = null;
       apply(nextState);
     }
@@ -17,7 +15,6 @@
     return {
       schedule(nextState) {
         state = nextState;
-        pending = true;
         if (raf) return;
         raf = requestAnimationFrame(() => {
           raf = null;
@@ -31,7 +28,7 @@
         }
         flush();
       },
-      get pending() { return pending; },
+      get pending() { return state !== null; },
     };
   }
 
@@ -50,11 +47,9 @@
         document.removeEventListener('visibilitychange', onVisibilityChange, true);
         document.removeEventListener('pointercancel', onCancel, true);
       }
-      if (up) up(event);
+      up(event);
     };
-    const onMove = (event) => {
-      if (move) move(event);
-    };
+    const onMove = (event) => move(event);
     const onUp = (event) => cleanup(event);
     const onCancel = (event) => cleanup({
       __boardfishDragCancel: true,

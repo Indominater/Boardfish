@@ -1,6 +1,7 @@
 // ─── Context menu ─────────────────────────────────────────────────────────────
 var ctxPos = { x: 0, y: 0 };
-var _lastBoardCursorClientPoint = null;
+var _lastBoardCursorClientX = null;
+var _lastBoardCursorClientY = null;
 const BOARD_CURSOR_CLIENT_EVENT_TYPES = Object.freeze([
   'pointerover',
   'pointerenter',
@@ -25,19 +26,15 @@ function rememberBoardCursorClientPoint(event) {
   const x = Number(event?.clientX);
   const y = Number(event?.clientY);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-  _lastBoardCursorClientPoint = { x, y };
-}
-
-function boardCursorClientPoint() {
-  return _lastBoardCursorClientPoint || {
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
-  };
+  _lastBoardCursorClientX = x;
+  _lastBoardCursorClientY = y;
 }
 
 function boardCursorWorldPoint() {
-  const point = boardCursorClientPoint();
-  return toWorld(point.x, point.y);
+  return toWorld(
+    _lastBoardCursorClientX ?? window.innerWidth / 2,
+    _lastBoardCursorClientY ?? window.innerHeight / 2,
+  );
 }
 
 function menuCommandWorldPoint(event = null) {
@@ -58,75 +55,49 @@ function addTextAtMenuCommandPoint(event = null) {
   addText(point.x, point.y, '', { anchor: 'center' });
 }
 
-function menuSafeAreaInset(name) {
-  const value = parseFloat(cssVar(`--safe-area-${name}`));
-  return Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
 function menuViewportBounds() {
   const viewport = window.visualViewport;
   const left = Number(viewport?.offsetLeft) || 0;
   const top = Number(viewport?.offsetTop) || 0;
   const width = Number(viewport?.width) || Number(window.innerWidth) || 0;
   const height = Number(viewport?.height) || Number(window.innerHeight) || 0;
+  const style = getComputedStyle(document.body);
+  const inset = (name) => {
+    const value = parseFloat(style.getPropertyValue(`--safe-area-${name}`));
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
+  };
+  const gap = parseFloat(style.getPropertyValue('--menu-shell-padding'));
   return {
-    left: left + menuSafeAreaInset('left'),
-    top: top + menuSafeAreaInset('top'),
-    right: left + width - menuSafeAreaInset('right'),
-    bottom: top + height - menuSafeAreaInset('bottom'),
+    left: left + inset('left'),
+    top: top + inset('top'),
+    right: left + width - inset('right'),
+    bottom: top + height - inset('bottom'),
+    gap: Number.isFinite(gap) ? gap : 8,
   };
 }
 
-function clampMenuCoord(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
-  const bounds = menuViewportBounds();
-  const min = bounds.left + margin;
-  const max = Math.max(min, bounds.right - size - margin);
+function clampMenuCoord(value, size, start, end, margin = MENU_VIEWPORT_EDGE_MARGIN) {
+  const min = start + margin;
+  const max = Math.max(min, end - size - margin);
   return Math.max(min, Math.min(max, value));
 }
 
-function clampMenuTop(value, size, margin = MENU_VIEWPORT_EDGE_MARGIN) {
-  const bounds = menuViewportBounds();
-  const min = bounds.top + margin;
-  const max = Math.max(min, bounds.bottom - size - margin);
-  return Math.max(min, Math.min(max, value));
-}
-
-function openMenuAt(menu, x, y, options = {}) {
+function openMenuAt(menu, x, y) {
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   menu.classList.add('visible');
   const rect = menu.getBoundingClientRect();
-  menu.style.left = `${Math.round(clampMenuCoord(x, rect.width))}px`;
-  menu.style.top = `${Math.round(clampMenuTop(y, rect.height))}px`;
-  if (options.animate !== false) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('menu-open', { surface: menu });
-  }
+  const bounds = menuViewportBounds();
+  menu.style.left = `${Math.round(clampMenuCoord(x, rect.width, bounds.left, bounds.right))}px`;
+  menu.style.top = `${Math.round(clampMenuCoord(y, rect.height, bounds.top, bounds.bottom))}px`;
+  return bounds;
 }
 
-const closeFloatingSurface = (surface, after = null, action = 'menu-close') => {
-  const finish = () => {
-    surface?.classList.remove('visible');
-    if (typeof after === 'function') after();
-  };
-  if (!surface?.classList.contains('visible')) {
-    if (typeof after === 'function') after();
-    return false;
-  }
-  if (globalThis.BoardfishMotion?.applyActionAnimation?.(action, {
-    surface,
-    phase: 'close',
-    after: finish,
-  })) return true;
-  finish();
-  return false;
+const closeFloatingSurface = (surface) => {
+  surface?.classList.remove('visible');
 };
 
 var ctxActionItems = ctxActions ? ctxActions.getElementsByClassName('ctx-action-item') : [];
-
-function menuGapPx() {
-  const value = parseFloat(cssVar('--menu-shell-padding'));
-  return Number.isFinite(value) ? value : 8;
-}
 
 function updateCtxActionStates() {
   if (darkModeMenuBtn) darkModeMenuBtn.setAttribute('aria-pressed', appTheme === 'dark' ? 'true' : 'false');
@@ -134,7 +105,7 @@ function updateCtxActionStates() {
 
 function closeCtxActions(reason) {
   MenuDebug.log('ctx-actions:close', { reason });
-  closeFloatingSurface(ctxActions, null, 'context-action-rail-close');
+  closeFloatingSurface(ctxActions);
 }
 
 function syncCtxActionsWithMenu(reason) {
@@ -142,7 +113,7 @@ function syncCtxActionsWithMenu(reason) {
   closeCtxActions(reason);
 }
 
-function alignCtxActionsToMenuRow(gap) {
+function alignCtxActionsToMenuRow(gap, viewport) {
   const layoutBox = (surface) => {
     const rect = surface.getBoundingClientRect();
     const left = parseFloat(surface.style.left);
@@ -155,7 +126,6 @@ function alignCtxActionsToMenuRow(gap) {
   };
   const menuBox = layoutBox(ctxMenu);
   const actionBox = layoutBox(ctxActions);
-  const viewport = menuViewportBounds();
   const edgeGap = gap;
   const minActionLeft = viewport.left + edgeGap;
   const maxActionRight = viewport.right - edgeGap;
@@ -180,18 +150,14 @@ function alignCtxActionsToMenuRow(gap) {
 
 function openCtxMenuAt(x, y) {
   closeOpenMenusExcept('ctx-menu', 'open-ctx-menu');
-  openMenuAt(ctxMenu, x, y, { animate: false });
+  const viewport = openMenuAt(ctxMenu, x, y);
   if (!ctxActions || !ctxActionItems.length) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('menu-open', { surface: ctxMenu });
     return;
   }
 
   updateCtxActionStates();
   ctxActions.classList.add('visible');
-  const gap = menuGapPx();
-  alignCtxActionsToMenuRow(gap);
-  globalThis.BoardfishMotion?.applyActionAnimation?.('menu-open', { surface: ctxMenu });
-  globalThis.BoardfishMotion?.applyActionAnimation?.('context-action-rail-open', { surface: ctxActions });
+  alignCtxActionsToMenuRow(viewport.gap, viewport);
 }
 
 if (ctxActions) {
@@ -211,33 +177,28 @@ if (DEBUG_TOOLS_ENABLED) {
 
 function closeCtxMenu(reason) {
   MenuDebug.log('ctx-menu:close', { reason });
+  clearMenuCommandPressState();
   closeFloatingSurface(ctxMenu);
   closeCtxActions(reason);
 }
 
 function closeObjCtxMenu(reason) {
   MenuDebug.log('obj-ctx-menu:close', { reason });
+  clearMenuCommandPressState();
   closeFloatingSurface(objCtxMenu);
 }
 
 const closeTextCtxMenu = (reason) => {
   MenuDebug.log('text-ctx-menu:close', { reason });
+  clearMenuCommandPressState();
   closeFloatingSurface(BoardfishDOM.textCtxMenu);
 };
 
-function menuSurfaces() {
-  return [
-    { id: 'ctx-menu', close: closeCtxMenu },
-    { id: 'obj-ctx-menu', close: closeObjCtxMenu },
-    { id: 'text-ctx-menu', close: closeTextCtxMenu },
-  ];
-}
-
 function closeOpenMenusExcept(activeMenuId = '', reason = 'menu-switch') {
-  for (const surface of menuSurfaces()) {
-    if (surface.id === activeMenuId || typeof surface.close !== 'function') continue;
-    surface.close(`${reason}:switch`);
-  }
+  const switchReason = `${reason}:switch`;
+  if (activeMenuId !== 'ctx-menu') closeCtxMenu(switchReason);
+  if (activeMenuId !== 'obj-ctx-menu') closeObjCtxMenu(switchReason);
+  if (activeMenuId !== 'text-ctx-menu') closeTextCtxMenu(switchReason);
 }
 
 function openExclusiveMenuAt(menu, menuId, x, y, reason) {
@@ -247,6 +208,14 @@ function openExclusiveMenuAt(menu, menuId, x, y, reason) {
 var _menuPointerCommand = null;
 var _menuMouseCommand = null;
 var _lastPointerMenuCommandAt = 0;
+
+function clearMenuCommandPressState() {
+  _menuPointerCommand?.classList.remove('menu-pressed');
+  if (_menuMouseCommand !== _menuPointerCommand) _menuMouseCommand?.classList.remove('menu-pressed');
+  _menuPointerCommand = null;
+  _menuMouseCommand = null;
+}
+
 var MENU_COMMANDS = {
   'btn-new': () => { closeCtxMenu('command:new'); newBoard(); },
   'btn-add-text': addTextAtMenuCommandPoint,
@@ -458,7 +427,6 @@ const deleteTextEditSelection = () => {
     focusTextEditProxy();
     return;
   }
-  globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-delete');
   replaceTextEditSelection('', { immediateHistory: true, inputType: 'deleteContentBackward' });
 };
 
@@ -476,7 +444,6 @@ const pasteTextIntoEditSelection = async () => {
     return;
   }
   clearJsClipboard();
-  globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-paste');
   replaceTextEditSelection(text, { immediateHistory: true, inputType: 'insertFromPaste' });
 };
 
@@ -508,7 +475,6 @@ function runMenuCommand(button, source, commandEvent = null) {
     command,
     source,
   });
-  globalThis.BoardfishMotion?.applyActionAnimation?.('menu-command-press');
   if (source === 'pointerup' || source === 'mouseup') _lastPointerMenuCommandAt = performance.now();
   const runWithDebug = () => {
     MenuDebug.log('menu:command:start', { command, source });
@@ -643,7 +609,6 @@ function closestResetZoomObjectToViewportCenter() {
 function resetZoomToClosestObject() {
   const dbg = ViewportDebug.start('resetZoom', { panX, panY, zoom, objectCount: objects.length });
   if (selectedIds.size || editingId) deselectAll();
-  globalThis.BoardfishMotion?.applyActionAnimation?.('board-reset-zoom');
   const { object, targetType, distanceSq, center } = closestResetZoomObjectToViewportCenter();
   const targetZoom = 1;
   if (!object) {
@@ -707,7 +672,9 @@ function onMenuPointerDown(e) {
   const button = e.target.closest?.('.ctx-item');
   if (!button || e.button !== 0) return;
   e.stopPropagation();
+  clearMenuCommandPressState();
   _menuPointerCommand = button;
+  button.classList.add('menu-pressed');
   MenuDebug.log('menu:pointer-command:start', { command: menuCommandName(button), target: button.id });
 }
 
@@ -715,7 +682,8 @@ function onMenuPointerUp(e) {
   if (!_menuPointerCommand || e.button !== 0) return;
   const button = e.target.closest?.('.ctx-item');
   const started = _menuPointerCommand;
-  _menuPointerCommand = null;
+  clearMenuCommandPressState();
+  if (e.pointerType === 'touch') started.blur?.();
   if (button !== started) {
     MenuDebug.log('menu:pointer-command:cancel', { started: started.id, ended: button?.id || '' });
     return;
@@ -729,6 +697,7 @@ function onMenuMouseDown(e) {
   const button = e.target.closest?.('.ctx-item');
   if (!button || e.button !== 0) return;
   _menuMouseCommand = button;
+  button.classList.add('menu-pressed');
   MenuDebug.log('menu:mouse-command:start', { command: menuCommandName(button), target: button.id });
 }
 
@@ -736,7 +705,7 @@ function onMenuMouseUp(e) {
   if (!_menuMouseCommand || e.button !== 0) return;
   const button = e.target.closest?.('.ctx-item');
   const started = _menuMouseCommand;
-  _menuMouseCommand = null;
+  clearMenuCommandPressState();
   if (button !== started) {
     MenuDebug.log('menu:mouse-command:cancel', { started: started.id, ended: button?.id || '' });
     return;
@@ -752,6 +721,11 @@ objCtxMenu.addEventListener('pointerdown', onMenuPointerDown);
 objCtxMenu.addEventListener('pointerup', onMenuPointerUp);
 BoardfishDOM.textCtxMenu.addEventListener('pointerdown', onMenuPointerDown);
 BoardfishDOM.textCtxMenu.addEventListener('pointerup', onMenuPointerUp);
+for (const menu of [ctxMenu, objCtxMenu, BoardfishDOM.textCtxMenu]) {
+  menu.addEventListener('pointercancel', clearMenuCommandPressState);
+  menu.addEventListener('pointerleave', clearMenuCommandPressState);
+  menu.addEventListener('lostpointercapture', clearMenuCommandPressState);
+}
 ctxMenu.addEventListener('mousedown', onMenuMouseDown);
 ctxMenu.addEventListener('mouseup', onMenuMouseUp);
 objCtxMenu.addEventListener('mousedown', onMenuMouseDown);
@@ -997,11 +971,6 @@ darkModeMenuBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   if (ctxActions?.contains(e.currentTarget) && !isCtxActionHotspotEvent(e, e.currentTarget)) return;
-  globalThis.BoardfishMotion?.applyActionAnimation?.('dark-mode-toggle');
   closeCtxMenu('command:dark-mode');
   Promise.resolve(toggleAppTheme()).finally(updateCtxActionStates);
-});
-
-document.getElementById('ctx-btn-github')?.addEventListener('click', () => {
-  globalThis.BoardfishMotion?.applyActionAnimation?.('external-github-open');
 });

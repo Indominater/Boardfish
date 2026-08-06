@@ -41,7 +41,7 @@
   --menu-item-font-size: 13px;
   --menu-item-letter-spacing: var(--text-letter-spacing);
   --menu-item-line-height: 32px;
-  --context-menu-width: 224px;
+  --context-menu-width: 208px;
   --pill-text-line-height: 18px;
   --pill-text-min-width: 44px;
   --pill-text-max-width: min(680px, calc(100vw - 56px));
@@ -413,7 +413,13 @@ body {
 .ctx-item:focus-visible {
   background: var(--firefox-menu-hover-bg);
 }
-.ctx-item:active {
+@media (hover: none), (pointer: coarse) {
+  .ctx-item:focus-visible {
+    --ui-highlight-nudge-transform: translateX(0);
+    background: transparent;
+  }
+}
+.ctx-item.menu-pressed {
   background: var(--menu-active-bg);
   transition-duration: 0ms;
 }

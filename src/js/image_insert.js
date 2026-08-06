@@ -137,64 +137,6 @@ const cleanupFailedWebImageInsertSource = (imgKey, imageSource) => {
   }
 };
 
-const pendingInsertedImageMotions = new Map();
-
-const queueImageObjectInsertMotion = (obj, options = {}) => {
-  if (!obj?.id || options.animateInsert === false) return;
-  pendingInsertedImageMotions.set(obj.id, {
-    obj,
-    action: options.insertMotionAction || 'image-object-create',
-  });
-};
-
-const clearInsertedImageMotions = (ids = null) => {
-  if (ids == null) {
-    const cleared = pendingInsertedImageMotions.size;
-    pendingInsertedImageMotions.clear();
-    return cleared;
-  }
-  const iterable = typeof ids === 'string' ? [ids] : ids;
-  if (!iterable || typeof iterable[Symbol.iterator] !== 'function') return 0;
-  let cleared = 0;
-  for (const id of iterable) {
-    if (pendingInsertedImageMotions.delete(id)) cleared++;
-  }
-  return cleared;
-};
-
-const clearStaleInsertedImageMotions = () => {
-  let cleared = 0;
-  for (const [id, pending] of pendingInsertedImageMotions) {
-    if (objectsMap.get(id) === pending.obj) continue;
-    pendingInsertedImageMotions.delete(id);
-    cleared++;
-  }
-  return cleared;
-};
-
-const noteInsertedImageObjectDrawn = (obj) => {
-  const pending = pendingInsertedImageMotions.get(obj?.id);
-  if (!pending) return;
-  pendingInsertedImageMotions.delete(obj.id);
-  if (objectsMap.get(obj.id) !== obj) return;
-  const start = () => {
-    if (objectsMap.get(obj.id) !== obj) return;
-    globalThis.BoardfishMotion?.applyActionAnimation?.(
-      pending.action || 'image-object-create',
-      { objects: [obj] }
-    );
-    scheduleRender(true, true, 'image-insert-jello');
-  };
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(start);
-  else start();
-};
-
-globalThis.BoardfishImageInsertMotion = Object.freeze({
-  clear: clearInsertedImageMotions,
-  clearStale: clearStaleInsertedImageMotions,
-  noteDrawn: noteInsertedImageObjectDrawn,
-});
-
 var _pendingImageInsertPoint = null;
 
 function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-image') {
@@ -202,12 +144,12 @@ function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-
   const explicitZ = Number.isFinite(options.z) ? Number(options.z) : null;
   const z = explicitZ == null ? ++zCounter : explicitZ;
   if (explicitZ != null) zCounter = Math.max(zCounter, explicitZ);
-  const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z, data: { imgKey } };
+  const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z, data: { imgKey, flipX: false, flipY: false, rotation: 0 } };
   BoardfishEditorState.addObject(obj);
   const deferHistory = options.deferHistory ?? _bulkImageInsertDepth > 0;
   if (deferHistory) {
     if (editingId) exitEdit();
-    BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false, animateSelection: false });
+    BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
     _bulkImageInsertAdded++;
     if (!options.suppressProgressRender) {
       const now = performance.now();
@@ -220,11 +162,10 @@ function addImageObject(imgKey, cx, cy, w, h, options = {}, renderSource = 'add-
     }
   } else {
     if (editingId) exitEdit();
-    BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false, animateSelection: false });
+    BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
     scheduleRender(true, true, renderSource);
     pushHistory(renderSource);
   }
-  queueImageObjectInsertMotion(obj, options);
   return obj;
 }
 
@@ -302,7 +243,6 @@ function imageInsertFilesFromList(fileList) {
 fileInput.addEventListener('change', async () => {
   const files = imageInsertFilesFromList(fileInput.files);
   const insertPoint = _pendingImageInsertPoint || ctxPos;
-  if (!files.length) globalThis.BoardfishMotion?.applyActionAnimation?.('file-dialog-cancel');
   try {
     await insertImageFiles(files, insertPoint.x, insertPoint.y, 'file-input');
   } finally {
@@ -315,7 +255,6 @@ async function pickAndInsertImages(x, y) {
   if (!BoardfishWebLimits.canAddObjects(1)) return;
   _pendingImageInsertPoint = { x, y };
   fileInput.value = '';
-  globalThis.BoardfishMotion?.applyActionAnimation?.('image-file-dialog-open');
   fileInput.click();
 }
 
@@ -356,7 +295,6 @@ const insertWebImageFile = async (file, x, y, dbg, options = {}) => {
     insertDebug: dbg,
     source: options.source,
     z: options.z,
-    animateInsert: options.animateInsert,
     readyRenderMinIntervalMs: options.readyRenderMinIntervalMs,
   });
   if (!options.holdShield) hideInputShield();
@@ -447,7 +385,6 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
           resolveOnLoad: true,
           imgKey: newImgKey(),
           z: bulkZBase == null ? undefined : bulkZBase + acceptedIndex,
-          insertMotionAction: bulk ? 'bulk-image-create' : undefined,
           readyRenderMinIntervalMs: bulk ? WEB_BULK_IMAGE_READY_RENDER_INTERVAL_MS : undefined,
         });
         if (obj) {
@@ -489,7 +426,6 @@ async function insertImageFiles(files, x, y, source = 'file-input') {
         BoardfishEditorState.setSelection(ids, {
           primaryId: primaryObj.id,
           exitEditing: false,
-          animateSelection: false,
         });
       }
       const historyAdded = finishBulkImageInsert({ pushHistoryEntry: added > 0 });
@@ -525,11 +461,9 @@ canvas.addEventListener('drop', async (event) => {
     }
   }
   if (boardFile && typeof openBoardFileRef === 'function') {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('board-file-drop-open');
     await openBoardFileRef(BoardfishRuntime.fileRefFromFile(boardFile));
     return;
   }
   const wp = toWorld(event.clientX, event.clientY);
-  globalThis.BoardfishMotion?.applyActionAnimation?.('image-file-drop');
   await insertImageFiles(files, wp.x, wp.y, 'web-drop');
 });

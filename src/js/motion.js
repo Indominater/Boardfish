@@ -45,173 +45,11 @@
     duration: 220,
     ease: 'cubic-bezier(0.18, 0.9, 0.24, 1.18)',
   });
-  const ACTION_ANIMATION_SETS = Object.freeze({
-    none: 'no-animation',
-    jiggle: 'jiggle',
-    notApplicable: 'not-applicable',
-  });
-  const actionAnimationGroup = (setName, actions) => {
-    const frozenActions = new Array(actions.length);
-    for (let i = 0; i < actions.length; i++) frozenActions[i] = actions[i];
-    return Object.freeze({
-      setName,
-      actions: Object.freeze(frozenActions),
-    });
-  };
-  // ACTION ANIMATION CONTRACT:
-  // Every new user-visible action must be added to exactly one group below and
-  // feature code must request motion through applyActionAnimation(action, ...).
-  // Keep inherently connected action paths in the same group or replay them
-  // through the same action name, so changing one setName updates the sequence.
-  // Keep low-level note* helpers inside this module; feature code should not
-  // choose animation implementations directly.
-  const ACTION_ANIMATION_GROUPS = Object.freeze({
-    boardNavigation: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'board-canvas-pan',
-      'board-reset-zoom',
-      'board-wheel-zoom',
-    ]),
-    boardFileOpen: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'board-file-drop-open',
-      'open-board-file-pick',
-    ]),
-    objectRemoval: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'cut-selected-objects',
-      'object-delete',
-    ]),
-    quietObjectSelection: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'object-deselect',
-      'rubber-band-release',
-    ]),
-    appStateCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'dark-mode-toggle',
-      'history-redo',
-      'history-undo',
-      'menu-command-press',
-      'new-board-state-reset',
-    ]),
-    exportCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'export-selected-image',
-      'export-selected-images',
-    ]),
-    fileDialogCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'file-dialog-cancel',
-      'file-dialog-open',
-      'image-file-dialog-open',
-      'image-file-drop',
-    ]),
-    saveCommands: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'save-board',
-      'save-board-as',
-    ]),
-    textBoxCreate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'plain-text-paste-as-text-box',
-      'text-box-create',
-      'text-box-resize',
-    ]),
-    textBoxRemoval: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'text-box-empty-delete-on-exit',
-      'text-box-undo-delete',
-    ]),
-    textBoxTransform: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'text-box-drag',
-      'text-box-duplicate',
-      'text-box-paste',
-    ]),
-    textEditing: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'text-edit-caret-move',
-      'text-edit-cut',
-      'text-edit-delete',
-      'text-edit-drag-select',
-      'text-edit-enter',
-      'text-edit-exit',
-      'text-edit-paste',
-      'text-edit-select-all',
-      'text-edit-type',
-      'text-align',
-      'text-height-change',
-    ]),
-    unsavedDialogButtons: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'unsaved-dialog-cancel-press',
-      'unsaved-dialog-delete-press',
-      'unsaved-dialog-save-press',
-    ]),
-    floatingSurface: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'context-action-rail-close',
-      'context-action-rail-open',
-      'menu-close',
-      'menu-open',
-    ]),
-    pillSurface: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'pill-message-open',
-      'pill-message-update',
-    ]),
-    unsavedDialogSurface: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'unsaved-dialog-close',
-      'unsaved-dialog-open',
-    ]),
-    objectSelection: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'additive-select',
-      'object-select',
-      'rubber-band-select',
-    ]),
-    objectCopy: actionAnimationGroup(ACTION_ANIMATION_SETS.jiggle, [
-      'copy-selected-objects',
-      'copy-text-object',
-      'copy-text-selection',
-    ]),
-    objectCreate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'bulk-image-create',
-      'image-object-create',
-    ]),
-    objectDuplicate: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'image-object-duplicate',
-    ]),
-    objectPaste: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'image-object-paste',
-    ]),
-    objectTransform: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'object-drag',
-      'object-group-drag',
-      'object-multi-resize',
-      'object-resize',
-      'send-selected-to-back',
-    ]),
-    imageTransform: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'flip-image',
-      'rotate-image',
-    ]),
-    historyFallbackReplay: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'history-object-jiggle-replay',
-    ]),
-    objectRestore: actionAnimationGroup(ACTION_ANIMATION_SETS.none, [
-      'object-undo-delete',
-    ]),
-    browserReservedShortcuts: actionAnimationGroup(ACTION_ANIMATION_SETS.notApplicable, [
-      'browser-find-shortcut',
-      'external-github-open',
-    ]),
-  });
-  const buildActionAnimationAssignments = () => {
-    const assignments = {};
-    for (const key in ACTION_ANIMATION_SETS) {
-      if (!Object.prototype.hasOwnProperty.call(ACTION_ANIMATION_SETS, key)) continue;
-      assignments[ACTION_ANIMATION_SETS[key]] = [];
-    }
-    for (const key in ACTION_ANIMATION_GROUPS) {
-      if (!Object.prototype.hasOwnProperty.call(ACTION_ANIMATION_GROUPS, key)) continue;
-      const group = ACTION_ANIMATION_GROUPS[key];
-      if (!assignments[group.setName]) assignments[group.setName] = [];
-      for (const action of group.actions) assignments[group.setName].push(action);
-    }
-    for (const setName in assignments) {
-      if (!Object.prototype.hasOwnProperty.call(assignments, setName)) continue;
-      const actions = assignments[setName];
-      assignments[setName] = Object.freeze(actions);
-    }
-    return assignments;
-  };
-  const ACTION_ANIMATION_ASSIGNMENTS = Object.freeze(buildActionAnimationAssignments());
+  const COPY_JIGGLE_ACTIONS = new Set([
+    'copy-selected-objects',
+    'copy-text-object',
+    'copy-text-selection',
+  ]);
   let jelloParams = null;
   let smoothSlideParams = null;
   const copyJiggleNormalizerCache = new Map();
@@ -373,33 +211,6 @@
   jelloParams = normalizeJelloParams(root.BoardfishJelloParams || {});
   smoothSlideParams = normalizeSmoothSlideParams(root.BoardfishSmoothSlideParams || {});
   applySmoothSlideCssVars();
-
-  const buildActionAnimationLookup = () => {
-    const lookup = new Map();
-    for (const setName in ACTION_ANIMATION_ASSIGNMENTS) {
-      if (!Object.prototype.hasOwnProperty.call(ACTION_ANIMATION_ASSIGNMENTS, setName)) continue;
-      const actions = ACTION_ANIMATION_ASSIGNMENTS[setName];
-      for (const action of actions) {
-        if (lookup.has(action)) {
-          const existingSet = lookup.get(action);
-          console.error?.(`[Boardfish motion] action "${action}" is assigned to both ${existingSet} and ${setName}`);
-          continue;
-        }
-        lookup.set(action, setName);
-      }
-    }
-    return lookup;
-  };
-  const actionAnimationLookup = buildActionAnimationLookup();
-  const actionAnimationSetFor = (action) => {
-    const value = String(action || '').trim();
-    if (!value) return '';
-    return actionAnimationLookup.get(value) || '';
-  };
-  const noteUnassignedActionAnimation = (action) => {
-    const value = String(action || '').trim() || '(empty-action)';
-    console.warn?.(`[Boardfish motion] unassigned action animation: ${value}`);
-  };
 
   const motionEndElapsed = (motion) => Math.max(
     motion.delay + motion.duration,
@@ -921,19 +732,9 @@
   const motionObjectsForDraw = () => {
     if (prefersReducedMotion() || !hasObjectMotions()) return [];
     const objects = [];
-    const seenIds = new Set();
-    const addExitObjects = (motions) => {
-      for (const motion of motions.values()) {
-        if (
-          motion.phase !== 'exit' ||
-          !motion.obj ||
-          seenIds.has(motion.obj.id)
-        ) continue;
-        seenIds.add(motion.obj.id);
-        objects.push(motion.obj);
-      }
-    };
-    addExitObjects(jelloObjectMotions);
+    for (const motion of jelloObjectMotions.values()) {
+      if (motion.phase === 'exit' && motion.obj) objects.push(motion.obj);
+    }
     return objects;
   };
 
@@ -959,38 +760,6 @@
     return out;
   };
 
-  const selectedObjectsFromRoot = () => {
-    const selectedIds = root.selectedIds;
-    const objectsMap = root.objectsMap;
-    if (!selectedIds?.size || !objectsMap?.get) return [];
-    const out = [];
-    for (const id of selectedIds) {
-      const obj = objectsMap.get(id);
-      if (obj) out.push(obj);
-    }
-    return out;
-  };
-
-  const inferActionObjects = (action, payload = {}) => {
-    if (payload.inferObjects === false) return [];
-    const value = String(action || '');
-    if (value.startsWith('text-edit-')) {
-      const obj = root.objectsMap?.get?.(root.editingId);
-      return obj ? [obj] : [];
-    }
-    if (
-      value.startsWith('text-box-') ||
-      value.startsWith('object-') ||
-      value.startsWith('image-object-') ||
-      value === 'flip-image' ||
-      value === 'rotate-image' ||
-      value === 'send-selected-to-back'
-    ) {
-      return selectedObjectsFromRoot();
-    }
-    return [];
-  };
-
   const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 
   const jiggleActionControlOptions = (options = {}) => {
@@ -1010,13 +779,7 @@
   });
 
   const applyActionAnimation = (action, payload = {}, options = {}) => {
-    const setName = actionAnimationSetFor(action);
-    if (!setName) {
-      noteUnassignedActionAnimation(action);
-      if (typeof payload?.after === 'function') payload.after();
-      return false;
-    }
-    if (setName === ACTION_ANIMATION_SETS.none || setName === ACTION_ANIMATION_SETS.notApplicable) {
+    if (!COPY_JIGGLE_ACTIONS.has(action)) {
       if (typeof payload?.after === 'function') payload.after();
       return false;
     }
@@ -1030,13 +793,10 @@
     };
     const hasExplicitObjects = hasOwn(payload, 'objects') || hasOwn(payload, 'addedObjects');
     const hasExplicitRemovedObjects = hasOwn(payload, 'removedObjects');
-    let objects = hasExplicitObjects
+    const objects = hasExplicitObjects
       ? asObjectList(hasOwn(payload, 'objects') ? payload.objects : payload.addedObjects)
       : [];
     const removedObjects = hasExplicitRemovedObjects ? asObjectList(payload.removedObjects) : [];
-    if (!objects.length && !removedObjects.length && !hasExplicitObjects && !hasExplicitRemovedObjects) {
-      objects = payload?.selection ? selectedObjectsFromRoot() : inferActionObjects(action, payload);
-    }
 
     if (payload?.textSelection) {
       noteTextSelectionJello(payload.textSelection, motionOptions);

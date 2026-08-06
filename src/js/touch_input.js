@@ -1,7 +1,7 @@
 'use strict';
 
 (function initBoardfishTouchInput(root) {
-  const TOUCH_HOLD_DELAY_MS = 550;
+  const TOUCH_HOLD_DELAY_MS = 500;
   const TOUCH_MOVE_THRESHOLD_PX = 8;
 
   function touchPoint(input) {
@@ -157,14 +157,12 @@
     function updateActivePoint(point) {
       const current = point ? active.get(point.id) : null;
       if (!point || !current) return null;
-      const previousX = current.x;
-      const previousY = current.y;
-      current.previousX = previousX;
-      current.previousY = previousY;
+      current.previousX = current.x;
+      current.previousY = current.y;
       current.x = point.x;
       current.y = point.y;
       current.sourceEvent = point.sourceEvent;
-      return { current, previousX, previousY };
+      return current;
     }
 
     function pointerDown(input) {
@@ -192,9 +190,8 @@
 
     function pointerMove(input) {
       const point = touchPoint(input);
-      const update = updateActivePoint(point);
-      if (!update) return false;
-      const { current, previousX, previousY } = update;
+      const current = updateActivePoint(point);
+      if (!current) return false;
 
       if (mode === 'pending') {
         const dx = current.x - current.startX;
@@ -209,8 +206,8 @@
 
       if (mode === 'pan') {
         call('onPan', gesturePayload(current, {
-          dx: current.x - previousX,
-          dy: current.y - previousY,
+          dx: current.x - current.previousX,
+          dy: current.y - current.previousY,
         }));
         return true;
       }
@@ -220,22 +217,21 @@
     }
 
     function pointerMoves(inputs) {
-      const samples = Array.from(inputs || []);
       if (mode !== 'pinch' || active.size < 2) {
         let handled = false;
         // pointerMove performs its own normalization. Passing an already
         // normalized point through it drops the sample because that point has
         // x/y rather than clientX/clientY (the one-finger TouchEvent path).
-        for (const sample of samples) handled = pointerMove(sample) || handled;
+        for (const sample of inputs || []) handled = pointerMove(sample) || handled;
         return handled;
       }
 
       // Touch Events expose one coherent snapshot containing both contacts.
       // Update the complete snapshot before deriving its absolute scale so
       // event ordering and movement speed cannot affect the zoom ratio.
-      const points = samples.map(touchPoint).filter(Boolean);
       let lastPoint = null;
-      for (const point of points) {
+      for (const sample of inputs || []) {
+        const point = touchPoint(sample);
         if (!updateActivePoint(point)) continue;
         lastPoint = point;
       }
@@ -467,7 +463,6 @@
     if (applyTouchSelectionDrag(gesture)) return;
     if (!boardNavigationAllowed()) return;
     BoardfishViewportState.panBy(gesture.dx, gesture.dy);
-    globalThis.BoardfishMotion?.applyActionAnimation?.('board-canvas-pan');
     scheduleTransform('touch-pan', gesture.event);
   }
 
@@ -479,12 +474,8 @@
   function applyTouchPinch(gesture) {
     if (!boardNavigationAllowed()) return;
     if (!touchPinchStartViewport) beginTouchPinch();
-    const next = pinchViewportFromGesture(touchPinchStartViewport, gesture, {
-      minZoom: typeof ZOOM_MIN === 'number' ? ZOOM_MIN : 0.01,
-      maxZoom: typeof ZOOM_MAX === 'number' ? ZOOM_MAX : 100,
-    });
+    const next = pinchViewportFromGesture(touchPinchStartViewport, gesture);
     BoardfishViewportState.setZoomPan(next.zoom, next.panX, next.panY);
-    globalThis.BoardfishMotion?.applyActionAnimation?.('board-wheel-zoom');
     scheduleTransform('touch-pinch-zoom', gesture.event);
   }
 

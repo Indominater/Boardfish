@@ -1,12 +1,3 @@
-const textEditActionFromInputType = (inputType = '') => {
-  const value = String(inputType || '');
-  const lower = value.toLowerCase();
-  if (lower.includes('paste')) return 'text-edit-paste';
-  if (lower.includes('cut')) return 'text-edit-cut';
-  if (value.startsWith('delete')) return 'text-edit-delete';
-  return 'text-edit-type';
-};
-
 const textEditorDebugNow = () => (
   typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
@@ -343,7 +334,7 @@ function setTextEditProxySelectionRange(proxy, start, end = start, direction = '
   if (!proxy || typeof proxy.setSelectionRange !== 'function') {
     return { set: false, synced: false, reason: 'missing-proxy' };
   }
-  const text = normalizeTextContent(options.value ?? textEditProxyValue(proxy));
+  const text = options.value ?? textEditProxyValue(proxy);
   const max = text.length;
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, max));
   const to = Math.max(from, Math.min(Math.trunc(Number(end ?? start)) || from, max));
@@ -707,7 +698,7 @@ const clearTextScriptCaretAffinity = (obj) => {
 
 const setTextEditCaretIndex = (obj, index, options = {}) => {
   if (!obj) return;
-  const length = normalizeTextContent(obj.data?.content || '').length;
+  const length = (obj.data?.content || '').length;
   const nextIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), length));
   if (obj._textEditCaretIndex !== nextIndex || options.clearLineStartIndex === true) {
     delete obj._textEditCaretLineStartIndex;
@@ -2012,7 +2003,6 @@ const applyTextEditAlignmentFromKeyboard = (direction = 'right', id = editingId,
     return true;
   }
   markDirty(id);
-  globalThis.BoardfishMotion?.applyActionAnimation?.('text-align', { objects: [obj] });
   scheduleRender(true, true, 'text-align');
   pushHistory('text-align');
   return true;
@@ -2595,7 +2585,6 @@ function enterEdit(id, {
     ms: 0,
     totalMs: Math.round((stepStart - enterStart) * 100) / 100,
   });
-  globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-enter');
   let contentNormalized = false;
   let scriptRangesNormalized = false;
   let bracesNormalized = false;
@@ -2846,8 +2835,8 @@ function enterEdit(id, {
 	    const inputType = event?.inputType || inputState.inputType || '';
 	    const dbg = inputState.debug || null;
 	    const perfTraceInput = shouldTraceTextEditorInput(inputType);
-	    const lowerInputType = String(inputType).toLowerCase();
-	    const shouldLogInput = perfTraceInput || !!dbg || lowerInputType.includes('paste') || lowerInputType.startsWith('delete');
+	    const shouldLogInput = perfTraceInput || !!dbg ||
+	      (typeof TextSelDebug !== 'undefined' && TextSelDebug.enabled === true);
 	    const inputDebugSeq = inputState._debugSeq || nextTextEditInputDebugSeq();
 	    inputState._debugSeq = inputDebugSeq;
     let inputStepStartedAt = textEditorDebugNow();
@@ -2885,7 +2874,6 @@ function enterEdit(id, {
 	    }));
     pendingInputState = null;
     proxy._boardfishPendingInputState = null;
-	    globalThis.BoardfishMotion?.applyActionAnimation?.(textEditActionFromInputType(event?.inputType));
 	    markDirty(id);
 	    logInputStep('motion-dirty-done');
 	    const oldValue = normalizeTextContent(inputState.value ?? obj.data.content ?? '');
@@ -3092,8 +3080,12 @@ function enterEdit(id, {
         : (selectedDeleteShrankText
           ? 'selected-delete'
           : (deleteShrankPendingEdit ? 'pending-size-delete' : '')));
-    const sizeBeforeAutoHeight = textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight');
-    const proxySizeBeforeAutoHeight = textEditorProxySizeDebugStats(proxy);
+    const autoHeightDebugBefore = shouldLogInput
+      ? {
+          size: textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight'),
+          proxy: textEditorProxySizeDebugStats(proxy),
+        }
+      : null;
     const autoHeightResult = syncTextEditAutoHeightForInput(obj, getTextMinLines(obj), {
       forceSync: !!autoHeightForceReason,
     });
@@ -3111,9 +3103,9 @@ function enterEdit(id, {
       pendingSizeSync: !!obj._textEditPendingSizeSync,
       width: obj.w,
       height: obj.h,
-      ...sizeBeforeAutoHeight,
+      ...autoHeightDebugBefore?.size,
       ...textEditorSizeDebugStats(obj, obj.data.content, 'afterAutoHeight'),
-      ...proxySizeBeforeAutoHeight,
+      ...autoHeightDebugBefore?.proxy,
       removedChars,
       insertedChars,
       removedNewlines,
@@ -3466,7 +3458,6 @@ function enterEdit(id, {
         value: currentProxyValue,
       });
       TextSelDebug._logSelection('select-all', proxy);
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-select-all');
       scheduleRender(true, false);
       return;
     }
@@ -3522,7 +3513,6 @@ function enterEdit(id, {
         clearTextEditCaretIndex(obj);
       }
       if (!scriptLayerMove) clearTextScriptCaretAffinity(obj);
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
       scheduleRender(true, false);
       return;
     }
@@ -3732,7 +3722,6 @@ function enterEdit(id, {
         setTextEditProxySelectionRange(proxy, newPos, newPos, 'none');
       }
 
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
       scheduleRender(true, false);
       return;
     }
@@ -3777,7 +3766,6 @@ function enterEdit(id, {
       if (s === e) setTextEditCaretIndex(currentObj, s);
       else clearTextEditCaretIndex(currentObj);
     }
-    globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-caret-move');
     scheduleRender(true, false);
   };
   document.addEventListener('selectionchange', _selChangeListener);
@@ -3854,11 +3842,6 @@ function exitEdit() {
     selectionEnd: proxy?.selectionEnd ?? '',
     activeElementIsProxy: typeof document !== 'undefined' ? document.activeElement === proxy : '',
   });
-  const motionStart = textEditorDebugNow();
-  globalThis.BoardfishMotion?.applyActionAnimation?.('text-edit-exit');
-  logStep('exit-motion-applied', objAtStart, {
-    motionMs: textEditorDebugRound(textEditorDebugNow() - motionStart),
-  });
   editingId = null;
   _editEl = null;
 
@@ -3897,7 +3880,6 @@ function exitEdit() {
   const obj = objectsMap.get(id);
   if (obj) {
     if (isTextContentEmpty(obj.data.content)) {
-      globalThis.BoardfishMotion?.applyActionAnimation?.('text-box-empty-delete-on-exit');
       BoardfishEditorState.removeEmptyTextObjects({ ids: [id] });
       delete obj._editStartContent;
       delete obj._editMinLines;
@@ -3975,7 +3957,6 @@ function exitEdit() {
       pushHistory('text-height-change');
       heightHistoryMs = Math.round((textEditorDebugNow() - heightHistoryStart) * 100) / 100;
     }
-    if ((widthChanged || heightChanged) && !contentChanged) globalThis.BoardfishMotion?.applyActionAnimation?.('text-height-change');
     delete obj._editStartContent;
     delete obj._editMinLines;
     delete obj._textEditPendingSizeSync;

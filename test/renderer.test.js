@@ -180,6 +180,10 @@ test('image renderer crops untransformed images to the visible viewport', () => 
     zoom: () => 1,
   });
 
+  renderer.drawVisibleObjects(context, null, {
+    viewportRect: { x1: 0, y1: 25, x2: 60, y2: 45 },
+  });
+  drawImageCalls.length = 0;
   const result = renderer.drawVisibleObjects(context, counters, {
     viewportRect: { x1: 0, y1: 25, x2: 60, y2: 45 },
   });
@@ -1624,77 +1628,4 @@ test('object jello removal stays drawable until the exit pulse completes', () =>
   setTime(220);
   assert.deepEqual(plain(context.BoardfishMotion.objectMotionForDraw(obj)), { opacity: 0, scale: 1, skip: true });
   assert.equal(context.BoardfishMotion.motionObjectsForDraw().length, 0);
-});
-
-test('selection boundary jello skips text objects newly entering selection', () => {
-  const calls = [];
-  const objects = [
-    { id: 'obj-1' },
-    { id: 'obj-2' },
-    { id: 'obj-3' },
-    { id: 'text-1', type: 'text' },
-  ];
-  const context = {
-    console,
-    editingId: null,
-    objectsMap: new Map(objects.map((obj) => [obj.id, obj])),
-    selectedId: 'obj-1',
-    selectedIds: new Set(['obj-1']),
-    BoardfishMotion: {
-      applyActionAnimation(_action, payload = {}) {
-        if (payload.objects) calls.push(Array.from(payload.objects, (obj) => obj.id));
-      },
-      noteObjectsJello(items) {
-        calls.push(Array.from(items, (obj) => obj.id));
-      },
-    },
-    exitEdit() {
-      context.editingId = null;
-    },
-  };
-  vm.createContext(context);
-  vm.runInContext(
-    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'editor_state_boundary.js'), 'utf8'),
-    context,
-    { filename: 'editor_state_boundary.js' },
-  );
-
-  context.BoardfishEditorState.setSelection(['obj-1', 'obj-2'], {
-    primaryId: 'obj-2',
-    exitEditing: false,
-  });
-  assert.deepEqual(calls, [['obj-2']]);
-
-  calls.length = 0;
-  context.BoardfishEditorState.setSelection(['obj-1', 'obj-2'], {
-    primaryId: 'obj-2',
-    exitEditing: false,
-  });
-  assert.deepEqual(calls, []);
-
-  context.BoardfishEditorState.setSelection(['obj-2'], {
-    primaryId: 'obj-2',
-    exitEditing: false,
-  });
-  assert.deepEqual(calls, []);
-
-  context.BoardfishEditorState.setSelection(['obj-3'], {
-    primaryId: 'obj-3',
-    exitEditing: false,
-  });
-  assert.deepEqual(calls, [['obj-3']]);
-
-  calls.length = 0;
-  context.BoardfishEditorState.setSelection(['obj-1'], {
-    primaryId: 'obj-1',
-    animateSelection: false,
-    exitEditing: false,
-  });
-  assert.deepEqual(calls, []);
-
-  context.BoardfishEditorState.setSelection(['text-1'], {
-    primaryId: 'text-1',
-    exitEditing: false,
-  });
-  assert.deepEqual(calls, []);
 });

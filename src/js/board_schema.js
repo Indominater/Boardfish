@@ -83,17 +83,6 @@
     return normalized;
   }
 
-  function validateImageStore(imageStore) {
-    if (!isObject(imageStore)) throw new Error('imageStore must be an object');
-    for (const key in imageStore) {
-      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-      const value = imageStore[key];
-      if (!key) throw new Error('imageStore contains an empty key');
-      const validValue = typeof value === 'string' || isObject(value);
-      if (!validValue) throw new Error(`imageStore.${key} must be a string or object`);
-    }
-  }
-
   function normalizeBoardData(data) {
     if (!isObject(data)) throw new Error('board data must be an object');
     if (data.version != null && !isSupportedBoardVersion(data.version)) {
@@ -105,10 +94,15 @@
     const imageStore = {};
     if (isObject(data.imageStore)) {
       for (const key in data.imageStore) {
-        if (Object.prototype.hasOwnProperty.call(data.imageStore, key)) imageStore[key] = data.imageStore[key];
+        if (!Object.prototype.hasOwnProperty.call(data.imageStore, key)) continue;
+        const value = data.imageStore[key];
+        if (!key) throw new Error('imageStore contains an empty key');
+        if (typeof value !== 'string' && !isObject(value)) {
+          throw new Error(`imageStore.${key} must be a string or object`);
+        }
+        imageStore[key] = value;
       }
     }
-    validateImageStore(imageStore);
     const objects = [];
     if (Array.isArray(data.objects)) {
       for (let i = 0; i < data.objects.length; i++) objects.push(normalizeObject(data.objects[i], i));

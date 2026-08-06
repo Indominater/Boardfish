@@ -127,6 +127,7 @@ test('grouped bitmap cache prunes the least recently used variant', () => {
   store.set('img-c', 0.25, { id: 'c', bytes: 4 });
 
   assert.equal(store.get('img-a', 0.25).id, 'a');
+  assert.equal('lastUsed' in store.get('img-a', 0.25), false);
   assert.equal(store.get('img-b', 0.25), null);
   assert.equal(store.get('img-c', 0.25).id, 'c');
   assert.deepEqual(closed, ['b']);

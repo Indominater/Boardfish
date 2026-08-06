@@ -340,7 +340,6 @@ var TextSelDebug = (() => {
       selectedIds: e.selectedIds || '',
       requestedPrimaryId: e.requestedPrimaryId || '',
       exitEditing: e.exitEditing ?? '',
-      animateSelection: e.animateSelection ?? '',
       hitObjectId: e.hitObjectId || '',
       hitObjectType: e.hitObjectType || '',
       hitObjectSelected: e.hitObjectSelected ?? '',
