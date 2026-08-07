@@ -110,11 +110,7 @@
     panX = constrained.panX;
     panY = constrained.panY;
     zoom = constrained.zoom;
-    return snapshot();
-  }
-
-  function snapshot() {
-    return { panX, panY, zoom };
+    return constrained;
   }
 
   function setViewport(viewport = {}) {
@@ -129,7 +125,7 @@
     panX = 0;
     panY = 0;
     zoom = 1;
-    return snapshot();
+    return { panX, panY, zoom };
   }
 
   function panBy(dx = 0, dy = 0) {
@@ -142,12 +138,12 @@
   }
 
   function zoomAroundClient(clientX, clientY, nextZoom) {
-    const currentZoom = Math.max(zoom || 1, 0.0001);
     const minZoom = typeof ZOOM_MIN === 'number' ? ZOOM_MIN : 0.01;
     const maxZoom = typeof ZOOM_MAX === 'number' ? ZOOM_MAX : 100;
     const normalizedZoom = Math.min(maxZoom, Math.max(minZoom, nextZoom));
-    const nextPanX = clientX - (clientX - panX) * (normalizedZoom / currentZoom);
-    const nextPanY = clientY - (clientY - panY) * (normalizedZoom / currentZoom);
+    const scale = normalizedZoom / zoom;
+    const nextPanX = clientX - (clientX - panX) * scale;
+    const nextPanY = clientY - (clientY - panY) * scale;
     return constrainPan(nextPanX, nextPanY, normalizedZoom);
   }
 

@@ -109,7 +109,7 @@ test('canvas text uses the same non-size font feature defaults', () => {
   const fillTextFiles = listFiles('src/js', (file) => file.endsWith('.js'))
     .filter((file) => readSource(file).includes('fillText('))
     .sort();
-  assert.deepEqual(fillTextFiles, ['src/js/renderer.js', 'src/js/text_layout.js']);
+  assert.deepEqual(fillTextFiles, ['src/js/text_layout.js']);
 });
 
 test('canvas selection highlight uses the shared stylesheet color token', () => {
@@ -118,6 +118,6 @@ test('canvas selection highlight uses the shared stylesheet color token', () => 
   const viewport = readSource('src/js/viewport.js');
 
   assert.match(css, /--selection-highlight:\s*rgba\(10,\s*132,\s*255,\s*0\.3\);/);
-  assert.match(app, /function canvasSelectionHighlightColor\(\)\s*\{[\s\S]*cssVar\('--selection-highlight'\)/);
+  assert.match(app, /function canvasSelectionHighlightColor\(\)\s*\{\s*return _canvasThemeColorCache\['--selection-highlight'\];\s*\}/);
   assert.match(viewport, /context\.fillStyle = typeof canvasSelectionHighlightColor === 'function'[\s\S]*canvasSelectionHighlightColor\(\)/);
 });

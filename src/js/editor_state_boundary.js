@@ -24,11 +24,15 @@
     primaryId = null,
     exitEditing = true,
   } = {}) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const startedAt = root.performance?.now?.() ?? Date.now();
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const nextIds = idsToArray(ids);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const previousCount = selectedIds.size;
     const previousPrimaryId = selectedId || '';
     const previousEditingId = editingId || '';
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (exitEditing && editingId && !idListHas(nextIds, editingId)) exitEdit();
     selectedIds.clear();
     let lastExistingId = null;
@@ -39,14 +43,16 @@
     }
     selectedId = primaryId && selectedIds.has(primaryId) ? primaryId : lastExistingId;
     if (editingId && !selectedIds.has(editingId)) exitEdit();
-    root.TextSelDebug?._logObjectSelection?.('set-selection', nextIds, {
-      ms: Math.round(((root.performance?.now?.() ?? Date.now()) - startedAt) * 100) / 100,
-      previousCount,
-      previousPrimaryId,
-      previousEditingId,
-      exitEditing,
-      requestedPrimaryId: primaryId || '',
-    });
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      root.TextSelDebug?._logObjectSelection?.('set-selection', nextIds, {
+        ms: Math.round(((root.performance?.now?.() ?? Date.now()) - startedAt) * 100) / 100,
+        previousCount,
+        previousPrimaryId,
+        previousEditingId,
+        exitEditing,
+        requestedPrimaryId: primaryId || '',
+      });
+    }
     return selectedIds.size;
   }
 
@@ -108,7 +114,6 @@
   function clearTextLayoutState(options = {}) {
     if (typeof clearTextLayoutCaches === 'function') {
       clearTextLayoutCaches({
-        measurements: true,
         objectLayout: options.objectLayout !== false,
       });
       return;
@@ -181,17 +186,24 @@
     updateInputShieldVisual();
   }
 
-  function commitMutation(reason, mutate, {
-    history = true,
-    invalidate = false,
-    renderBoard = true,
-    renderOverlay = true,
-    renderSource = reason || 'mutation',
-  } = {}) {
+  function commitMutation(reason, mutate, options = {}) {
+    const history = options.history === undefined ? true : options.history;
+    const invalidate = options.invalidate === undefined ? false : options.invalidate;
+    const renderBoard = options.renderBoard === undefined ? true : options.renderBoard;
+    const renderOverlay = options.renderOverlay === undefined ? true : options.renderOverlay;
     const result = typeof mutate === 'function' ? mutate() : undefined;
     if (!result) return result;
     if (invalidate && typeof invalidateOffscreen === 'function') invalidateOffscreen();
-    if (typeof scheduleRender === 'function') scheduleRender(renderBoard, renderOverlay, renderSource);
+    if (typeof scheduleRender === 'function') {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        const renderSource = options.renderSource === undefined
+          ? reason || 'mutation'
+          : options.renderSource;
+        scheduleRender(renderBoard, renderOverlay, renderSource);
+      } else {
+        scheduleRender(renderBoard, renderOverlay);
+      }
+    }
     if (history && typeof pushHistory === 'function') pushHistory(reason);
     return result;
   }

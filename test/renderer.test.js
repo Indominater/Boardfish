@@ -89,37 +89,26 @@ function motionRestDistance(motion) {
   );
 }
 
-test('text renderer uses the latest measured baseline offset', () => {
+test('text renderer uses the viewport-aware rich layout path', () => {
   const BoardfishRenderer = loadRenderer();
-  let baselineOffset = 10;
-  const fillTextCalls = [];
-  const context = {
-    fillStyle: '',
-    textBaseline: '',
-    fillText(text, x, y) {
-      fillTextCalls.push({ text, x, y });
-    },
-  };
-  const obj = { type: 'text', x: 20, y: 30 };
+  const drawnLines = [];
+  const viewportRect = { x1: 0, y1: 0, x2: 200, y2: 100 };
+  const obj = { type: 'text', x: 20, y: 30, data: { content: 'one\ntwo' } };
   const renderer = BoardfishRenderer.createBoardRenderer({
-    canvasTextColor: () => '#fff',
-    getWrappedLines: () => [{ text: 'one' }, { text: 'two' }],
+    drawTextLineRange(_context, line) {
+      drawnLines.push(line.text);
+    },
+    getTextLayoutForViewport(layoutObj, rect) {
+      assert.strictEqual(layoutObj, obj);
+      assert.strictEqual(rect, viewportRect);
+      return [{ text: 'one', y: 30 }, { text: 'two', y: 54 }];
+    },
     lineHeight: 24,
-    dpr: () => 1,
-    panX: () => 0,
-    panY: () => 0,
-    textBaselineYOffset: () => baselineOffset,
-    textPad: 4,
-    zoom: () => 1,
   });
 
-  baselineOffset = 12;
-  renderer.drawSingleObj(context, obj);
+  renderer.drawSingleObj({}, obj, null, { viewportRect });
 
-  assert.deepEqual(fillTextCalls, [
-    { text: 'one', x: 24, y: 46 },
-    { text: 'two', x: 24, y: 70 },
-  ]);
+  assert.deepEqual(drawnLines, ['one', 'two']);
 });
 
 test('screen canvas reset restores full-opacity source-over drawing', () => {
@@ -281,7 +270,7 @@ test('image renderer overdraws image edges by one device pixel at the current vi
   assert.deepEqual(drawImageCalls, [[source, 9.75, 19.75, 40.5, 30.5]]);
 });
 
-test('image renderer keeps active full fallback visible with temporary low smoothing', () => {
+test('image renderer keeps active full fallback visible with temporary disabled smoothing', () => {
   const BoardfishRenderer = loadRenderer();
   const drawQualities = [];
   const drawSmoothingEnabled = [];
@@ -336,7 +325,7 @@ test('image renderer keeps active full fallback visible with temporary low smoot
   assert.equal(result.drawnImages, 1);
   assert.deepEqual(drawSmoothingEnabled, [false]);
   assert.equal(context.imageSmoothingEnabled, true);
-  assert.deepEqual(drawQualities, ['low']);
+  assert.deepEqual(drawQualities, ['high']);
   assert.equal(context.imageSmoothingQuality, 'high');
   assert.equal(counters.scaledFallbackFull, 1);
   assert.equal(counters.activeInputFullFallbackImages, 1);
@@ -402,7 +391,7 @@ test('animated image motion bypasses static culling and uses low-latency variant
   assert.deepEqual(plain(selectCalls.map((call) => call.options)), [{ activeInput: true }]);
   assert.deepEqual(drawSmoothingEnabled, [false]);
   assert.equal(context.imageSmoothingEnabled, true);
-  assert.deepEqual(drawQualities, ['low']);
+  assert.deepEqual(drawQualities, ['high']);
   assert.equal(context.imageSmoothingQuality, 'high');
   assert.equal(counters.motionObjects, 1);
   assert.equal(counters.motionImages, 1);
@@ -538,7 +527,10 @@ test('renderer can draw only text while drawing visible objects', () => {
     canvasTextColor: () => '#fff',
     currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 30, y2: 30 }),
     dpr: () => 1,
-    getWrappedLines: () => [{ text: 'drawn' }],
+    drawTextLineRange(_context, line) {
+      drawnText.push(line.text);
+    },
+    getTextLayout: () => [{ text: 'drawn', y: 0 }],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
     imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
@@ -599,7 +591,7 @@ test('renderer can skip arbitrary object ids while drawing visible objects', () 
   assert.deepEqual(drawnText, ['draw']);
 });
 
-test('text renderer skips layout lines outside the visible viewport', () => {
+test('text renderer draws the exact viewport-aware layout range', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnLines = [];
   const context = {
@@ -615,11 +607,12 @@ test('text renderer skips layout lines outside the visible viewport', () => {
     drawTextLineRange(_context, line) {
       drawnLines.push(line.text);
     },
-    getTextLayout: () => [
-      { text: 'above', y: -48 },
-      { text: 'visible', y: 0 },
-      { text: 'below', y: 48 },
-    ],
+    getTextLayoutForViewport(_obj, viewportRect) {
+      assert.deepEqual(viewportRect, { x1: 0, y1: 0, x2: 200, y2: 47 });
+      const layout = [{ text: 'visible', y: 0 }];
+      layout.totalLines = 3;
+      return layout;
+    },
     getWrappedLines: () => [],
     lineHeight: 24,
     objectIntersectsRect: () => true,
@@ -671,10 +664,10 @@ test('production text drawing skips debug stats allocation', () => {
   assert.deepEqual(collectStatsOptions, [false]);
 });
 
-test('text context configuration is reapplied after canvas state resets', () => {
+test('text context configuration is applied once per canvas render pass', () => {
   const BoardfishRenderer = loadRenderer();
   let configurationWrites = 0;
-  const context = { fillStyle: '', textBaseline: '' };
+  const context = { fillStyle: '', textBaseline: '', setTransform() {} };
   const configuredValues = new Map();
   for (const property of ['fontKerning', 'letterSpacing', 'fontStretch', 'fontVariantCaps', 'textAlign', 'direction']) {
     Object.defineProperty(context, property, {
@@ -695,16 +688,25 @@ test('text context configuration is reapplied after canvas state resets', () => 
     drawTextLineRange() {},
     getTextLayout: () => [{ text: 'plain', y: 0 }],
     getWrappedLines: () => [],
+    font: '12px sans-serif',
     lineHeight: 24,
     panX: () => 0,
+    setCanvasImageQuality() {},
     panY: () => 0,
     textBaselineYOffset: () => 0,
     textPad: 4,
     zoom: () => 1,
   });
 
+  renderer.setWorldCanvasTransform(context);
   renderer.drawSingleObj(context, text);
+  renderer.drawSingleObj(context, text);
+  assert.equal(configurationWrites, 6);
+  assert.equal(context.fillStyle, '#fff');
+  assert.equal(context.textBaseline, 'alphabetic');
+
   configuredValues.clear();
+  renderer.setWorldCanvasTransform(context);
   renderer.drawSingleObj(context, text);
 
   assert.equal(configurationWrites, 12);

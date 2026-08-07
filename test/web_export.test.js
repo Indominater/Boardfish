@@ -108,7 +108,7 @@ test('web image export downloads each file when zip support is unavailable', asy
   globalThis.BoardfishImageStore = { getSource: () => source };
   globalThis.BoardfishWebBoardContainer = {
     ...previous.BoardfishWebBoardContainer,
-    createZip: undefined,
+    createZipBlob: undefined,
   };
   globalThis.ExportDebug = {
     recordEventLoopYield() {},

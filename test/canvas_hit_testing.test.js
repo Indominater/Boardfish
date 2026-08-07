@@ -199,18 +199,21 @@ test('background context menu clears object selection before opening', () => {
 test('context menu command buttons use the button click point as the object center', () => {
   const contextMenuSource = readSource('src/js/context_menu.js');
 
-  assert.match(contextMenuSource, /const BOARD_CURSOR_CLIENT_EVENT_TYPES = Object\.freeze\(\[[\s\S]*'pointerover'[\s\S]*'pointerenter'[\s\S]*'pointermove'[\s\S]*'pointerdown'[\s\S]*'pointerup'[\s\S]*'mouseover'[\s\S]*'mouseenter'[\s\S]*'mousemove'[\s\S]*'mousedown'[\s\S]*'mouseup'[\s\S]*'click'[\s\S]*'dragover'[\s\S]*'drop'[\s\S]*\]\);/);
-  assert.match(contextMenuSource, /for \(const type of BOARD_CURSOR_CLIENT_EVENT_TYPES\) \{\s*document\.addEventListener\(type, rememberBoardCursorClientPoint, true\);\s*window\.addEventListener\(type, rememberBoardCursorClientPoint, true\);\s*\}/);
+  assert.match(contextMenuSource, /const HAS_POINTER_EVENTS = 'PointerEvent' in window;/);
+  assert.match(contextMenuSource, /const BOARD_CURSOR_CLIENT_EVENT_TYPES = Object\.freeze\(\[[\s\S]*HAS_POINTER_EVENTS[\s\S]*'pointermove'[\s\S]*'mousemove'[\s\S]*'click'[\s\S]*'dragover'[\s\S]*'drop'[\s\S]*\]\);/);
+  assert.match(contextMenuSource, /for \(const type of BOARD_CURSOR_CLIENT_EVENT_TYPES\) \{\s*window\.addEventListener\(type, rememberBoardCursorClientPoint, true\);\s*\}/);
+  assert.doesNotMatch(contextMenuSource, /document\.addEventListener\(type, rememberBoardCursorClientPoint, true\)/);
   assert.match(contextMenuSource, /function menuCommandWorldPoint\(event = null\) \{[\s\S]*return toWorld\(x, y\);[\s\S]*return boardCursorWorldPoint\(\);[\s\S]*\}/);
   assert.match(contextMenuSource, /const point = menuCommandWorldPoint\(event\);[\s\S]*addText\(point\.x, point\.y, '', \{ anchor: 'center' \}\)/);
   assert.match(contextMenuSource, /'btn-add-image': \(event\) => \{[\s\S]*const point = menuCommandWorldPoint\(event\);[\s\S]*pickAndInsertImages\(point\.x, point\.y\);[\s\S]*\}/);
   assert.match(contextMenuSource, /'btn-paste': \(event\) => \{[\s\S]*const point = menuCommandWorldPoint\(event\);[\s\S]*pasteAtPos\(point\.x, point\.y\);[\s\S]*\}/);
   assert.match(contextMenuSource, /'obj-btn-duplicate': \(event\) => \{[\s\S]*const point = menuCommandWorldPoint\(event\);[\s\S]*duplicateSelected\(point\);[\s\S]*\}/);
-  assert.match(contextMenuSource, /runMenuCommand\(button, 'pointerup', e\);/);
-  assert.match(contextMenuSource, /runMenuCommand\(button, 'mouseup', e\);/);
+  assert.match(contextMenuSource, /const MENU_COMMAND_UP_EVENT = HAS_POINTER_EVENTS \? 'pointerup' : 'mouseup';/);
+  assert.match(contextMenuSource, /runMenuCommand\(button, MENU_COMMAND_UP_EVENT, e\);/);
   assert.match(contextMenuSource, /runMenuCommand\(event\.currentTarget, 'click', event\);/);
-  assert.match(contextMenuSource, /ctxPos = boardCursorWorldPoint\(\);[\s\S]*runMenuCommand\(addImageBtn, 'shortcut'\);/);
-  assert.match(contextMenuSource, /ctxPos = boardCursorWorldPoint\(\);[\s\S]*runMenuCommand\(addTextBtn, 'shortcut'\);/);
+  assert.match(contextMenuSource, /function runAddImagesCommandFromShortcut\(\) \{ runMenuCommand\(addImageBtn, 'shortcut'\); \}/);
+  assert.match(contextMenuSource, /function runAddTextCommandFromShortcut\(\) \{ runMenuCommand\(addTextBtn, 'shortcut'\); \}/);
+  assert.doesNotMatch(contextMenuSource, /ctxPos = boardCursorWorldPoint\(\);/);
 });
 
 test('text editing context menu uses text actions before object actions', () => {
@@ -236,9 +239,12 @@ test('wheel zoom over visible floating UI uses the viewport wheel handler', () =
   const selectionSource = readSource('src/js/selection_input.js');
   const styles = readSource('src/styles.css');
 
-  assert.match(inputSource, /function handleGlobalViewportWheel\(e\) \{[\s\S]*if \(e\.__boardfishViewportWheelHandled\) return;[\s\S]*const viewportZoomGesture = e\.ctrlKey \|\| e\.metaKey;[\s\S]*isEventInsideViewportWheelSurface[\s\S]*if \(!viewportZoomGesture && !insideViewportWheelSurface\) return;\s*handleViewportWheel\(e\);[\s\S]*\}/);
+  assert.match(inputSource, /function handleGlobalViewportWheel\(e\) \{[\s\S]*if \(e\.__boardfishViewportWheelHandled\) return;[\s\S]*!e\.ctrlKey && !e\.metaKey &&[\s\S]*!isEventInsideViewportWheelSurface\(e\)[\s\S]*\) return;\s*handleViewportWheel\(e\);[\s\S]*\}/);
   assert.match(inputSource, /window\.addEventListener\('wheel', handleGlobalViewportWheel, \{ capture: true, passive: false \}\);/);
-  assert.match(inputSource, /document\.addEventListener\('wheel', handleGlobalViewportWheel, \{ capture: true, passive: false \}\);/);
+  assert.doesNotMatch(inputSource, /document\.addEventListener\('wheel', handleGlobalViewportWheel/);
+  assert.doesNotMatch(inputSource, /viewportWheelSurfaces/);
+  assert.match(inputSource, /const requestedZoom = zoom \* factor;\s*const nextViewport = BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, requestedZoom\);/);
+  assert.doesNotMatch(inputSource, /const newZoom = Math\.min\(ZOOM_MAX/);
   assert.match(selectionSource, /document\.elementFromPoint\(x, y\)/);
   assert.match(selectionSource, /if \(e\.target instanceof Node && e\.target\.nodeType === 1\) return false;/);
   assert.match(selectionSource, /const isEventInsideViewportWheelSurface = \(e\) => \{[\s\S]*isEventInsideVisibleContextMenu\(e\) \|\| isEventInsideVisibleIsland\(e\);[\s\S]*\};/);
@@ -271,9 +277,9 @@ test('hover effects are limited to hover-capable fine pointers', () => {
 
   assert.ok(hoverBlocks.length > 0);
   assert.equal(occurrences(gatedHoverStyles, /:hover/g), occurrences(styles, /:hover/g));
-  assert.equal(occurrences(gatedHoverStyles, /\.hotspot-hover/g), occurrences(styles, /\.hotspot-hover/g));
+  assert.doesNotMatch(styles, /hotspot-hover/);
   assert.match(gatedHoverStyles, /\.ctx-item:hover/);
-  assert.match(gatedHoverStyles, /\.ctx-action-item\.hotspot-hover::before/);
+  assert.match(gatedHoverStyles, /\.ctx-action-item:hover::before/);
   assert.match(gatedHoverStyles, /#island:hover #isl-zoom/);
   assert.match(gatedHoverStyles, /#dlg-discard:hover/);
   assert.match(styles, /\.ctx-item\.menu-pressed\s*\{\s*background: var\(--menu-active-bg\);/);
@@ -282,36 +288,17 @@ test('hover effects are limited to hover-capable fine pointers', () => {
   assert.match(styles, /#dlg-discard:active\s*\{\s*background: var\(--danger-active-bg\);/);
 });
 
-test('touch action hotspots use pressed state without synthesizing hover', () => {
+test('context actions use native hover and explicit pressed state', () => {
   const source = readSource('src/js/context_menu.js');
-  const match = source.match(/function updateCtxActionHotspotState\(e, active = false\) \{[\s\S]*?\n\}/);
-  assert.ok(match, 'context action hotspot updater is missing');
+  const styles = readSource('src/styles.css');
 
-  const classes = new Set();
-  const item = {
-    classList: {
-      toggle(name, enabled) {
-        if (enabled) classes.add(name);
-        else classes.delete(name);
-      },
-    },
-  };
-  const context = {
-    ctxActionItems: [item],
-    isCtxActionHotspotEvent: () => true,
-  };
-  vm.createContext(context);
-  vm.runInContext(`${match[0]}\nthis.updateCtxActionHotspotState = updateCtxActionHotspotState;`, context);
-  const event = (pointerType) => ({ pointerType, target: { closest: () => item } });
-
-  context.updateCtxActionHotspotState(event('touch'));
-  assert.deepEqual([...classes], []);
-
-  context.updateCtxActionHotspotState(event('touch'), true);
-  assert.deepEqual([...classes], ['hotspot-active']);
-
-  context.updateCtxActionHotspotState(event('mouse'));
-  assert.deepEqual([...classes], ['hotspot-hover']);
+  assert.doesNotMatch(source, /isCtxActionHotspotEvent|updateCtxActionHotspotState|addEventListener\('pointermove'/);
+  assert.match(source, /ctxActions\?\.addEventListener\('pointerdown',[\s\S]*button\.classList\.add\('hotspot-active'\);/);
+  assert.match(source, /function clearCtxActionHotspotState\(\) \{[\s\S]*classList\.remove\('hotspot-active'\);[\s\S]*\}/);
+  assert.match(source, /addEventListener\('pointerup', clearCtxActionHotspotState\)/);
+  assert.match(source, /addEventListener\('pointerleave', clearCtxActionHotspotState\)/);
+  assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.ctx-action-item:hover::before/);
+  assert.match(styles, /\.ctx-action-item\.hotspot-active::before/);
 });
 
 test('menu rows clear explicit pressed state on release, cancellation, and close', () => {
@@ -319,11 +306,11 @@ test('menu rows clear explicit pressed state on release, cancellation, and close
   const styles = readSource('src/styles.css');
 
   assert.match(source, /button\.classList\.add\('menu-pressed'\);/);
-  assert.match(source, /function clearMenuCommandPressState\(\) \{[\s\S]*classList\.remove\('menu-pressed'\);[\s\S]*_menuPointerCommand = null;[\s\S]*_menuMouseCommand = null;[\s\S]*\}/);
+  assert.match(source, /function clearMenuCommandPressState\(\) \{[\s\S]*classList\.remove\('menu-pressed'\);[\s\S]*_menuPointerCommand = null;[\s\S]*\}/);
+  assert.doesNotMatch(source, /_menuMouseCommand/);
   assert.match(source, /function onMenuPointerUp\(e\) \{[\s\S]*clearMenuCommandPressState\(\);[\s\S]*e\.pointerType === 'touch'[\s\S]*started\.blur\?\.\(\);/);
-  assert.match(source, /addEventListener\('pointercancel', clearMenuCommandPressState\)/);
-  assert.match(source, /addEventListener\('pointerleave', clearMenuCommandPressState\)/);
-  assert.match(source, /addEventListener\('lostpointercapture', clearMenuCommandPressState\)/);
+  assert.match(source, /const MENU_COMMAND_CANCEL_EVENTS = HAS_POINTER_EVENTS[\s\S]*'pointercancel'[\s\S]*'pointerleave'[\s\S]*'lostpointercapture'[\s\S]*'mouseleave'/);
+  assert.match(source, /menu\.addEventListener\(MENU_COMMAND_DOWN_EVENT, onMenuPointerDown\);[\s\S]*menu\.addEventListener\(MENU_COMMAND_UP_EVENT, onMenuPointerUp\);[\s\S]*MENU_COMMAND_CANCEL_EVENTS/);
   assert.match(source, /function closeObjCtxMenu\(reason\) \{[\s\S]*clearMenuCommandPressState\(\);[\s\S]*closeFloatingSurface\(objCtxMenu\);/);
   const coarseStyles = [
     ...cssBlocksForPrelude(styles, '@media (hover: none)'),
@@ -545,10 +532,11 @@ test('text edit overlay draws only visible layout lines', () => {
   assert.notEqual(end, -1);
   const overlaySource = viewportSource.slice(start, end);
 
-  assert.match(overlaySource, /visibleTextLayoutLines\(layout, viewportRect\)/);
+  assert.match(overlaySource, /const layout = getTextLayoutForViewport\(obj, viewportRect\);/);
+  assert.doesNotMatch(overlaySource, /visibleTextLayoutLines/);
   assert.match(overlaySource, /editVisibleLines/);
   assert.match(overlaySource, /editCulledLines/);
-  assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*lines: visibleLines/);
+  assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*?context,\s*obj,\s*layout,/);
 });
 
 test('entering text edit invalidates the offscreen cache before proxy setup', () => {
@@ -567,38 +555,18 @@ test('entering text edit invalidates the offscreen cache before proxy setup', ()
   assert.ok(proxyIndex > invalidateIndex, 'offscreen invalidation must happen before proxy setup can focus or render');
 });
 
-test('text edit mode keeps text direct while caching static non-text layers', () => {
+test('text edit mode always keeps text direct while caching static non-text layers', () => {
   const viewportSource = readSource('src/js/viewport.js');
-  const helperStart = viewportSource.indexOf('function shouldUseEditOffscreenCache');
-  const helperEnd = viewportSource.indexOf('function drawBoard', helperStart);
-  assert.notEqual(helperStart, -1);
-  assert.notEqual(helperEnd, -1);
+  const rebuildStart = viewportSource.indexOf('function _rebuildOffscreen');
+  const rebuildEnd = viewportSource.indexOf('// ─── History delta tracking', rebuildStart);
+  assert.notEqual(rebuildStart, -1);
+  assert.notEqual(rebuildEnd, -1);
+  const rebuildSource = viewportSource.slice(rebuildStart, rebuildEnd);
 
-  for (const { theme, objects, editingId, expectedFullCache, expectedCacheKind } of [
-    { theme: 'dark', objects: [], editingId: 'text-1', expectedFullCache: false, expectedCacheKind: 'non-text' },
-    { theme: 'light', objects: [{ id: 'img-1', type: 'image' }], editingId: 'text-1', expectedFullCache: true, expectedCacheKind: 'full' },
-    {
-      theme: 'light',
-      objects: [
-        { id: 'text-1', type: 'text' },
-        { id: 'text-2', type: 'text' },
-      ],
-      editingId: 'text-1',
-      expectedFullCache: false,
-      expectedCacheKind: 'non-text',
-    },
-  ]) {
-    const context = { appTheme: theme, document: { body: { dataset: { theme } } }, objects, editingId };
-    vm.createContext(context);
-    vm.runInContext(
-      `${viewportSource.slice(helperStart, helperEnd)}\n` +
-        'globalThis.shouldUseEditOffscreenCache = shouldUseEditOffscreenCache;\n' +
-        'globalThis.editOffscreenCacheKind = editOffscreenCacheKind;\n',
-      context,
-    );
-    assert.equal(context.shouldUseEditOffscreenCache(), expectedFullCache);
-    assert.equal(context.editOffscreenCacheKind(), expectedCacheKind);
-  }
+  assert.match(rebuildSource, /setWorldCanvasTransform\(_offCtx, dpr\);/);
+  assert.match(rebuildSource, /if \(obj\.type === 'text'\) continue;/);
+  assert.doesNotMatch(rebuildSource, /editingId|cacheKind|_offscreenCacheKind/);
+  assert.doesNotMatch(viewportSource, /shouldUseEditOffscreenCache|editOffscreenCacheKind|setEditOffscreenCacheKind/);
 
   const drawStart = viewportSource.indexOf('function drawBoard');
   const drawEnd = viewportSource.indexOf('function hitTest', drawStart);
@@ -608,16 +576,13 @@ test('text edit mode keeps text direct while caching static non-text layers', ()
 
   assert.match(drawSource, /const textSelectionSpecs = textSelectionJelloSpecsForDraw\(\);/);
   assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionJelloSkipIds\(textSelectionSpecs, editingId \|\| null\);/);
-  assert.match(drawSource, /const hasCopiedSelectionSkipIds = !!copiedSelectionSkipIds\?\.size;/);
-  assert.match(drawSource, /const editCacheKind = hasCopiedSelectionSkipIds \? '' : editOffscreenCacheKind\(\);/);
-  assert.match(drawSource, /setEditOffscreenCacheKind\(editCacheKind\);/);
   assert.match(drawSource, /const bypassEditOffscreenCache = options\.bypassEditOffscreenCache === true;/);
-  assert.match(drawSource, /const useEditOffscreenCache = !!editCacheKind && !bypassEditOffscreenCache;/);
+  assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(\);\s*\}/);
   assert.match(drawSource, /if \(useEditOffscreenCache && !_offscreenDirty\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /if \(editCacheKind === 'non-text'\)[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \}\);/);
-  assert.match(drawSource, /else \{[\s\S]*drawVisibleObjects\(ctx, counters, \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver \}\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, counters, \{ viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver \}\);/);
+  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
+  assert.match(drawSource, /const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
+  assert.match(drawSource, /const visibleOptions = \{ viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
   assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, \{ zoom, panX, panY, dpr \}, textSelectionSpecs\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');
@@ -645,7 +610,7 @@ test('text selection collection uses indexed script metrics while editing math t
 test('editing overlay keeps copied text selection highlighted while its jiggle is active', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawEditingTextOverlay');
-  const end = viewportSource.indexOf('function shouldUseEditOffscreenCache', start);
+  const end = viewportSource.indexOf('function drawBoard', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const overlaySource = viewportSource.slice(start, end);
@@ -779,8 +744,7 @@ test('global capture wheel zoom over the zoom pill is handled once by the board'
   const documentWheel = context.listeners.document.find((entry) => entry.type === 'wheel');
   assert.equal(windowWheel.options.capture, true);
   assert.equal(windowWheel.options.passive, false);
-  assert.equal(documentWheel.options.capture, true);
-  assert.equal(documentWheel.options.passive, false);
+  assert.equal(documentWheel, undefined);
 
   const event = {
     ctrlKey: true,
@@ -796,7 +760,6 @@ test('global capture wheel zoom over the zoom pill is handled once by the board'
   };
 
   windowWheel.handler(event);
-  documentWheel.handler(event);
 
   assert.equal(event.defaultPrevented, true);
   assert.equal(context.zoomCalls.length, 1);

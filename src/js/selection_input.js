@@ -2,7 +2,6 @@
 var _selOverlayStyleState = { transform: '', width: '', height: '' };
 var _multiSelBoxes = [];
 var _multiSelStyleState = new WeakMap();
-var _rubberBandStyleState = { display: '', left: '', top: '', width: '', height: '' };
 var _rubberBandDragActive = false;
 var _textMinWidthWarmCancel = null;
 var _textMinWidthWarmObjectId = '';
@@ -70,11 +69,8 @@ function selectionOverlayObjectBounds(obj) {
   };
 }
 
-function selectionOverlaySelectedBounds() {
-  const resting = selectedBounds();
-  if (!resting) return null;
+function selectionOverlaySelectedBounds(resting, obj) {
   if (selectedIds.size === 1) {
-    const obj = objectsMap.get(selectedIds.values().next().value);
     return selectionOverlayObjectBounds(obj) || resting;
   }
   let translateX = 0;
@@ -104,42 +100,34 @@ function selectionOverlaySelectedBounds() {
   };
 }
 
+function _cleanOverlay(value) {
+  if (Math.abs(value) < 1e-9) return 0;
+  return Math.round(value * 1e9) / 1e9;
+}
+
 function selectionOverlayAnimatedScreenRect(resting, animated, padDevicePx = 0) {
   if (!resting || !animated) return null;
-  const restingRaw = {
-    x: resting.x1 * zoom + panX,
-    y: resting.y1 * zoom + panY,
-    width: (resting.x2 - resting.x1) * zoom,
-    height: (resting.y2 - resting.y1) * zoom,
-  };
-  const animatedRaw = {
-    x: animated.x1 * zoom + panX,
-    y: animated.y1 * zoom + panY,
-    width: (animated.x2 - animated.x1) * zoom,
-    height: (animated.y2 - animated.y1) * zoom,
-  };
+  const restingX = resting.x1 * zoom + panX;
+  const restingY = resting.y1 * zoom + panY;
+  const restingWidth = (resting.x2 - resting.x1) * zoom;
+  const restingHeight = (resting.y2 - resting.y1) * zoom;
   const snappedResting = snappedSelectionOverlayScreenRect(
-    restingRaw.x,
-    restingRaw.y,
-    restingRaw.width,
-    restingRaw.height,
+    restingX,
+    restingY,
+    restingWidth,
+    restingHeight,
     selectionOverlayDevicePixelRatio(),
     padDevicePx,
   );
-  const cleanValue = (value) => {
-    if (Math.abs(value) < 1e-9) return 0;
-    return Math.round(value * 1e9) / 1e9;
-  };
-  const cleanDelta = (value) => cleanValue(value);
-  const deltaX = cleanDelta(animatedRaw.x - restingRaw.x);
-  const deltaY = cleanDelta(animatedRaw.y - restingRaw.y);
-  const deltaWidth = cleanDelta(animatedRaw.width - restingRaw.width);
-  const deltaHeight = cleanDelta(animatedRaw.height - restingRaw.height);
+  const deltaX = _cleanOverlay(animated.x1 * zoom + panX - restingX);
+  const deltaY = _cleanOverlay(animated.y1 * zoom + panY - restingY);
+  const deltaWidth = _cleanOverlay((animated.x2 - animated.x1) * zoom - restingWidth);
+  const deltaHeight = _cleanOverlay((animated.y2 - animated.y1) * zoom - restingHeight);
   return {
-    x: cleanValue(snappedResting.x + deltaX),
-    y: cleanValue(snappedResting.y + deltaY),
-    width: cleanValue(Math.max(0, snappedResting.width + deltaWidth)),
-    height: cleanValue(Math.max(0, snappedResting.height + deltaHeight)),
+    x: _cleanOverlay(snappedResting.x + deltaX),
+    y: _cleanOverlay(snappedResting.y + deltaY),
+    width: _cleanOverlay(Math.max(0, snappedResting.width + deltaWidth)),
+    height: _cleanOverlay(Math.max(0, snappedResting.height + deltaHeight)),
   };
 }
 
@@ -195,6 +183,7 @@ function scheduleTextMinWidthWarm(obj) {
   }
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function selectionInputPerfDebugApi() {
   return typeof ManualPerfDebug !== 'undefined' ? ManualPerfDebug : null;
 }
@@ -257,6 +246,7 @@ function selectionResizeTextObjectStats(obj) {
 function recordSelectionTextResizeStep(step, dragId, meta = {}) {
   selectionInputPerfDebugApi()?.recordTextResizeStep?.(step, { dragId: dragId || '', ...meta });
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 const unsavedDialogOverlayForInputShield = document.getElementById('dialog-overlay');
 const unsavedDialogForInputShield = document.getElementById('dialog');
@@ -407,26 +397,6 @@ const boundsCornerPoint = function boundsCornerPoint(bounds, dir) {
   };
 };
 
-const proportionalCornerResizeSize = function proportionalCornerResizeSize(dir, startW, startH, dx, dy, minScale) {
-  if (
-    !Number.isFinite(startW) ||
-    !Number.isFinite(startH) ||
-    !Number.isFinite(dx) ||
-    !Number.isFinite(dy) ||
-    !Number.isFinite(minScale) ||
-    startW <= 0 ||
-    startH <= 0
-  ) {
-    return { w: startW, h: startH };
-  }
-  const candidateW = dir.includes('e') ? startW + dx : startW - dx;
-  const candidateH = dir.includes('s') ? startH + dy : startH - dy;
-  const scaleW = candidateW / startW;
-  const scaleH = candidateH / startH;
-  const scale = Math.max(minScale, Math.min(scaleW, scaleH));
-  return { w: startW * scale, h: startH * scale };
-};
-
 const proportionalScaleFromHandleDrag = function proportionalScaleFromHandleDrag(anchor, handlePoint, dx, dy, minScale) {
   if (!anchor || !handlePoint || !Number.isFinite(dx) || !Number.isFinite(dy) || !Number.isFinite(minScale)) return 1;
   const vx = handlePoint.x - anchor.x;
@@ -520,7 +490,8 @@ function updateSelectionOverlay() {
     return;
   }
 
-  const bounds = selectionOverlaySelectedBounds();
+  const resting = selectedBounds();
+  const bounds = resting && selectionOverlaySelectedBounds(resting, firstSelectedObj);
   if (!bounds) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
@@ -534,7 +505,7 @@ function updateSelectionOverlay() {
   }
 
   const screenRect = selectionOverlayAnimatedScreenRect(
-    selectedBounds(),
+    resting,
     bounds,
     selectionOverlaySelectedImageEdgePadDevicePx(),
   );
@@ -542,21 +513,10 @@ function updateSelectionOverlay() {
   _setStyleIfChanged(selOverlay, 'transform', `translate(${screenRect.x}px,${screenRect.y}px)`, _selOverlayStyleState);
   _setStyleIfChanged(selOverlay, 'width', screenRect.width + 'px', _selOverlayStyleState);
   _setStyleIfChanged(selOverlay, 'height', screenRect.height + 'px', _selOverlayStyleState);
-  if (isMultiSelected()) {
-    if (!selOverlay.classList.contains('multi')) selOverlay.classList.add('multi');
-  } else {
-    if (selOverlay.classList.contains('multi')) selOverlay.classList.remove('multi');
-  }
-  if (editingId) {
-    if (!selOverlay.classList.contains('editing')) selOverlay.classList.add('editing');
-  } else {
-    if (selOverlay.classList.contains('editing')) selOverlay.classList.remove('editing');
-  }
-  if (!isMultiSelected() && firstSelectedObj.type === 'text') {
-    if (!selOverlay.classList.contains('text-resize')) selOverlay.classList.add('text-resize');
-  } else {
-    if (selOverlay.classList.contains('text-resize')) selOverlay.classList.remove('text-resize');
-  }
+  const multiSelected = isMultiSelected();
+  selOverlay.classList.toggle('multi', multiSelected);
+  selOverlay.classList.toggle('editing', !!editingId);
+  selOverlay.classList.toggle('text-resize', !multiSelected && firstSelectedObj.type === 'text');
   updateMultiSelectionOverlay();
   if (!selOverlay.classList.contains('visible')) selOverlay.classList.add('visible');
 }
@@ -567,6 +527,8 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
       e.stopPropagation();
 
       const dir = handle.dataset.dir;
+      const resizeEast = dir.includes('e'), resizeWest = dir.includes('w');
+      const resizeSouth = dir.includes('s'), resizeNorth = dir.includes('n');
       const startX = e.clientX, startY = e.clientY;
 
       // ── Multi-select: scale non-text objects proportionally within the bounding box ──
@@ -646,6 +608,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
 
       const { x: ox, y: oy, w: ow, h: oh } = obj;
       const MIN_OBJECT_SIZE = 100;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const resizeDebugActive = obj.type === 'text' && !!selectionInputPerfDebugApi()?.isTextResizeTraceActive?.();
       const resizeDebugBase = resizeDebugActive
         ? {
@@ -667,41 +630,42 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         ? (selectionInputPerfDebugApi()?.startTextResizeDrag?.(resizeDebugBase) || '')
         : '';
       let resizeFinalizing = false;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-      function syncTextResizeAutoHeight(reason = 'resize') {
-        if (obj.type !== 'text') {
-          return {
-            synced: false,
-            clearLayoutMs: '',
-            autoHeightMs: '',
-            autoHeightChanged: '',
-            layoutInvalidationMethod: '',
-          };
+      function syncTextResizeAutoHeight(reason) {
+        if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+          syncTextAutoHeight(obj, getTextMinLines(obj));
+          return;
         }
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        const diagnosticReason = reason || 'resize';
         const clearStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
         // Resize changes are already guarded by width-aware layout cache keys.
         // Keeping the caches lets auto-height and the live redraw share wrapping work.
-        const layoutInvalidationMethod = 'cache-keyed';
         const clearLayoutMs = resizeDebugDragId ? selectionResizeDebugRound(selectionResizeDebugNow() - clearStartedAt) : '';
-        const heightBeforeAuto = obj.h;
+        const heightBeforeAuto = resizeDebugDragId ? obj.h : 0;
         const autoHeightStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
         syncTextAutoHeight(obj, getTextMinLines(obj));
+        if (!resizeDebugDragId) return null;
         return {
-          synced: true,
-          reason,
           clearLayoutMs,
-          autoHeightMs: resizeDebugDragId ? selectionResizeDebugRound(selectionResizeDebugNow() - autoHeightStartedAt) : '',
+          autoHeightMs: selectionResizeDebugRound(selectionResizeDebugNow() - autoHeightStartedAt),
           autoHeightChanged: obj.h !== heightBeforeAuto,
-          layoutInvalidationMethod,
+          autoHeightReason: diagnosticReason,
+          layoutInvalidationMethod: 'cache-keyed',
         };
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
 
       function applyResize(state) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const applyStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         const beforeX = obj.x;
         const beforeY = obj.y;
         const beforeW = obj.w;
         const beforeH = obj.h;
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const layoutCacheHadValue = !!obj._layoutCache;
         const layoutCacheLinesBefore = Array.isArray(obj._layoutCache) ? obj._layoutCache.length : '';
         if (resizeDebugDragId) {
@@ -719,26 +683,28 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             layoutCacheLinesBefore,
           });
         }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         const isText = obj.type === 'text';
         const textWidthChanged = isText && obj.w !== state.w;
         obj.x = state.x;
         obj.y = state.y;
         obj.w = state.w;
         if (!isText) obj.h = state.h;
-        let clearLayoutMs = '';
-        let autoHeightMs = '';
-        let autoHeightChanged = '';
-        let autoHeightReason = '';
-        let layoutInvalidationMethod = '';
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        let autoHeightDebug = null;
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if (isText && textWidthChanged) {
-          const autoHeightResult = syncTextResizeAutoHeight(resizeFinalizing ? 'resize-final' : 'resize');
-          clearLayoutMs = autoHeightResult.clearLayoutMs;
-          autoHeightMs = autoHeightResult.autoHeightMs;
-          autoHeightChanged = autoHeightResult.autoHeightChanged;
-          autoHeightReason = autoHeightResult.reason;
-          layoutInvalidationMethod = autoHeightResult.layoutInvalidationMethod;
+          if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+            syncTextResizeAutoHeight();
+          } else {
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            autoHeightDebug = syncTextResizeAutoHeight(resizeFinalizing ? 'resize-final' : 'resize');
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          }
         }
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const scheduleStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         const textGeometryChanged = isText && (
           beforeX !== obj.x ||
           beforeY !== obj.y ||
@@ -747,6 +713,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         );
         const renderBoard = !isText || textGeometryChanged;
         scheduleRender(renderBoard, true);
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (resizeDebugDragId) {
           const scheduleRenderMs = selectionResizeDebugRound(selectionResizeDebugNow() - scheduleStartedAt);
           recordSelectionTextResizeStep('apply-end', resizeDebugDragId, {
@@ -773,11 +740,11 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             wrappedLineIndexCacheLines: obj._textWrappedLineIndexCache?.lineCount ?? '',
             wrappedLineIndexWidthCacheSize: obj._textWrappedLineIndexWidthCache?.size ?? '',
             scriptMetricsCachePresent: !!obj._textScriptLayoutMetrics,
-            clearLayoutMs,
-            autoHeightMs,
-            autoHeightChanged,
-            autoHeightReason,
-            layoutInvalidationMethod,
+            clearLayoutMs: autoHeightDebug?.clearLayoutMs ?? '',
+            autoHeightMs: autoHeightDebug?.autoHeightMs ?? '',
+            autoHeightChanged: autoHeightDebug?.autoHeightChanged ?? '',
+            autoHeightReason: autoHeightDebug?.autoHeightReason ?? '',
+            layoutInvalidationMethod: autoHeightDebug?.layoutInvalidationMethod ?? '',
             pendingSizeSync: false,
             renderBoard,
             renderOverlay: true,
@@ -785,38 +752,51 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             applyMs: selectionResizeDebugRound(selectionResizeDebugNow() - applyStartedAt),
           });
         }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
       const resizeCommitter = createRafCommitter(applyResize);
       let dragMinTextW = null;
 
       function onMove(ev) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const moveStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         const dx = (ev.clientX - startX) / zoom;
         const dy = (ev.clientY - startY) / zoom;
         let x = ox, y = oy, w = ow, h = oh;
-        let minTextW = '';
+        let minTextW;
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         let minWidthMs = '';
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
         if (obj.type === 'image') {
           const minScale = Math.min(1, Math.max(MIN_OBJECT_SIZE / ow, MIN_OBJECT_SIZE / oh));
-          const size = proportionalCornerResizeSize(dir, ow, oh, dx, dy, minScale);
-          w = size.w;
-          h = size.h;
-          if (dir.includes('w')) x = ox + ow - w;
-          if (dir.includes('n')) y = oy + oh - h;
+          const scale = Math.max(minScale, Math.min(
+            (resizeEast ? ow + dx : ow - dx) / ow,
+            (resizeSouth ? oh + dy : oh - dy) / oh,
+          ));
+          w = ow * scale;
+          h = oh * scale;
+          if (resizeWest) x = ox + ow - w;
+          if (resizeNorth) y = oy + oh - h;
         } else {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const minWidthStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           if (dragMinTextW == null) {
             dragMinTextW = typeof getTextMinWidth === 'function' ? getTextMinWidth(obj) : MIN_OBJECT_SIZE;
           }
           minTextW = dragMinTextW;
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (resizeDebugDragId) minWidthMs = selectionResizeDebugRound(selectionResizeDebugNow() - minWidthStartedAt);
-          if (dir.includes('e')) w = Math.max(minTextW, ow + dx);
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          if (resizeEast) w = Math.max(minTextW, ow + dx);
           h = oh;
-          if (dir.includes('w')) { w = Math.max(minTextW, ow - dx); x = ox + ow - w; }
+          if (resizeWest) { w = Math.max(minTextW, ow - dx); x = ox + ow - w; }
         }
 
         resizeCommitter.schedule({ x, y, w, h });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (resizeDebugDragId) {
           recordSelectionTextResizeStep('move', resizeDebugDragId, {
             ...selectionResizeEventMeta(ev),
@@ -833,11 +813,13 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             moveMs: selectionResizeDebugRound(selectionResizeDebugNow() - moveStartedAt),
           });
         }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
 
       beginDocumentDrag({
         move: onMove,
         up() {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (resizeDebugDragId) {
             recordSelectionTextResizeStep('up-start', resizeDebugDragId, {
               objectId: obj.id,
@@ -846,7 +828,9 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           }
           const flushStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
           resizeFinalizing = true;
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           resizeCommitter.flush();
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           resizeFinalizing = false;
           if (resizeDebugDragId) {
             recordSelectionTextResizeStep('flush', resizeDebugDragId, {
@@ -860,7 +844,9 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             });
           }
           const markStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           markDirty(obj.id);
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (resizeDebugDragId) {
             recordSelectionTextResizeStep('mark-dirty', resizeDebugDragId, {
               objectId: obj.id,
@@ -868,7 +854,9 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             });
           }
           const historyStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           pushHistory('resize');
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (resizeDebugDragId) {
             recordSelectionTextResizeStep('history-pushed', resizeDebugDragId, {
               objectId: obj.id,
@@ -884,6 +872,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
               ...selectionResizeTextObjectStats(obj),
             });
           }
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
         },
       });
 };
@@ -931,15 +920,7 @@ function selectAllObjects() {
 }
 
 function hideMenus() {
-  MenuDebug.log('hideMenus', { reason: 'generic' });
-  if (typeof closeOpenMenusExcept === 'function') {
-    closeOpenMenusExcept('', 'hideMenus');
-    return;
-  }
-  ctxMenu.classList.remove('visible');
-  ctxActions?.classList.remove('visible');
-  objCtxMenu.classList.remove('visible');
-  if (typeof BoardfishDOM !== 'undefined') BoardfishDOM.textCtxMenu.classList.remove('visible');
+  closeOpenMenusExcept('', 'hideMenus');
 }
 
 // ─── Edit mode ────────────────────────────────────────────────────────────────
@@ -976,6 +957,7 @@ const normalizeTextEditHistoryState = (id, state = null) => {
   return normalized;
 };
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 const textEditHistoryDebugMeta = (id, state = null, normalized = null, extra = {}) => {
   const obj = id ? objectsMap.get(id) : null;
   const proxyValue = typeof textEditProxyValue === 'function' && _editEl
@@ -1010,26 +992,35 @@ const logTextEditHistoryDebug = (label, id, state = null, normalized = null, ext
   if (typeof TextSelDebug === 'undefined') return;
   TextSelDebug._logHistoryAction?.(label, textEditHistoryDebugMeta(id, state, normalized, extra));
 };
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 const beginTextEditHistoryAction = (id = editingId, state = null, { splitPending = false } = {}) => {
   if (!id) return null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hadPendingStart = !!(_editHistoryActionStartState && _editHistoryActionStartState.id === id);
   const hadTimer = !!_editHistoryTimer;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (splitPending) {
     if (_editHistoryTimer) flushEditHistoryCheckpoint();
     if (_editHistoryActionStartState?.id === id) _editHistoryActionStartState = null;
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let reusedStart = true;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!_editHistoryActionStartState || _editHistoryActionStartState.id !== id) {
     _editHistoryActionStartState = normalizeTextEditHistoryState(id, state);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     reusedStart = false;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logTextEditHistoryDebug('history-begin', id, state, _editHistoryActionStartState, {
     splitPending,
     hadTimer,
     hadPendingStart,
     reusedStart,
   });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return _editHistoryActionStartState;
 };
 
@@ -1046,10 +1037,12 @@ function pushEditHistoryIfChanged(id) {
   if (obj.data.content === _editHistoryLastContent) return false;
   markDirty(id);
   const beforeEditState = consumeTextEditHistoryActionStartState(id);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logTextEditHistoryDebug('history-push', id, null, beforeEditState, {
     previousContentChars: String(_editHistoryLastContent || '').length,
     nextContentChars: String(obj.data.content || '').length,
   });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   pushHistory('text-edit-checkpoint', {
     beforeEditState,
   });

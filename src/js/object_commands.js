@@ -1,5 +1,6 @@
 // ─── Add objects ─────────────────────────────────────────────────────────────
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 const objectCommandDebugNow = () => (
   typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
@@ -19,9 +20,11 @@ const objectCommandTextStats = (value, scriptRanges = []) => {
     scriptRangeCount: Array.isArray(scriptRanges) ? scriptRanges.length : '',
   };
 };
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function addText(wx, wy, content = '', options = {}) {
-  const dbg = options?.debug || null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const dbg = typeof BOARDFISH_PRODUCTION === 'undefined' ? options?.debug || null : null;
   let stepStartedAt = dbg && objectCommandDebugNow();
   const addStartedAt = stepStartedAt;
   const logStep = (step, meta = {}) => {
@@ -35,6 +38,7 @@ function addText(wx, wy, content = '', options = {}) {
     });
     stepStartedAt = now;
   };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   logStep('start', () => ({
     wx,
@@ -66,12 +70,10 @@ function addText(wx, wy, content = '', options = {}) {
     if (scriptRanges.length) data.scriptRanges = scriptRanges;
   }
   logStep('script-ranges-normalized', () => objectCommandTextStats(content, data.scriptRanges));
-  if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
-    const textBytes = BoardfishWebLimits.textByteLength(content);
-    const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
-    logStep('content-limit-done', { textBytes, accepted });
-    if (!accepted) return;
-  }
+  const textBytes = BoardfishWebLimits.textByteLength(content);
+  const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
+  logStep('content-limit-done', { textBytes, accepted });
+  if (!accepted) return;
   const defaultSize = typeof defaultTextBoxSize === 'function'
     ? defaultTextBoxSize()
       : (() => {
@@ -110,7 +112,9 @@ function addText(wx, wy, content = '', options = {}) {
   selectObject(obj.id);
   scheduleRender(true, false);
   logStep('render-scheduled', { objectId: obj.id });
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const historyStartedAt = dbg && objectCommandDebugNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   pushHistory('add-text');
   logStep('history-pushed', () => ({
     objectId: obj.id,
@@ -170,7 +174,10 @@ function acquireInputShield(options = {}) {
     if (index !== -1) _inputShieldStack.splice(index, 1);
     _inputShieldCount = _inputShieldStack.length;
     updateInputShieldVisual();
-    if (!_inputShieldStack.length && !_boardOpening) scheduleRender(false, true, 'input-shield-release');
+    if (!_inputShieldStack.length && !_boardOpening) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(false, true, 'input-shield-release');
+      else scheduleRender(false, true);
+    }
   };
 }
 
@@ -183,7 +190,10 @@ function hideInputShield() {
   else {
     _inputShieldCount = Math.max(0, _inputShieldCount - 1);
     updateInputShieldVisual();
-    if (!_inputShieldStack.length && !_boardOpening) scheduleRender(false, true, 'input-shield-release');
+    if (!_inputShieldStack.length && !_boardOpening) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(false, true, 'input-shield-release');
+      else scheduleRender(false, true);
+    }
   }
 }
 
@@ -235,11 +245,15 @@ async function newBoard() {
     if (choice === 'cancel') return;
     if (choice === 'save') { const saved = await saveBoard(); if (!saved) return; }
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   BoardfishEditorState.setBoardOpening(true);
   if (typeof beginOpeningFreeze === 'function') beginOpeningFreeze();
   else openingShield.classList.add('active');
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const openingStart = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   await startPillTask({ message: 'Opening' });
   BoardfishEditorState.resetBoardObjectState();
   OpenDebug.step(dbg, 'exitEdit', {});
@@ -254,7 +268,9 @@ async function newBoard() {
   boardHistory = []; historyIndex = -1;
   snapshot();
   markSaved();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const elapsed = performance.now() - openingStart;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   OpenDebug.step(dbg, 'workDone', { elapsed });
   _boardOpening = false;
   applyTransform();
@@ -277,21 +293,22 @@ function duplicateSelected(anchorPoint = null) {
     if (obj) selectedObjects.push(obj);
   }
   if (!selectedObjects.length || !BoardfishWebLimits.canAddObjects(selectedObjects.length)) return;
-  if (!BoardfishWebLimits.isLimitedRuntime || BoardfishWebLimits.isLimitedRuntime()) {
-    let additionalTextBytes = 0;
-    for (const obj of selectedObjects) {
-      if (obj?.type !== 'text') continue;
-      const text = String(obj.data?.content || '');
-      additionalTextBytes += typeof BoardfishWebLimits.textByteLength === 'function'
-        ? BoardfishWebLimits.textByteLength(text)
-        : (typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length);
-    }
-    if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
+  let additionalTextBytes = 0;
+  for (const obj of selectedObjects) {
+    if (obj?.type !== 'text') continue;
+    additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
   }
+  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
 
   const cloned = new Array(selectedObjects.length);
-  for (let i = 0; i < selectedObjects.length; i++) cloned[i] = cloneObject(selectedObjects[i]);
-  if (!cloned.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < selectedObjects.length; i++) {
+    const obj = cloned[i] = cloneObject(selectedObjects[i]);
+    minX = Math.min(minX, obj.x);
+    minY = Math.min(minY, obj.y);
+    maxX = Math.max(maxX, obj.x + obj.w);
+    maxY = Math.max(maxY, obj.y + obj.h);
+  }
   const center = (
     anchorPoint &&
     Number.isFinite(Number(anchorPoint.x)) &&
@@ -301,13 +318,6 @@ function duplicateSelected(anchorPoint = null) {
     : (typeof boardCursorWorldPoint === 'function'
         ? boardCursorWorldPoint()
         : toWorld(window.innerWidth / 2, window.innerHeight / 2));
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const obj of cloned) {
-    minX = Math.min(minX, obj.x);
-    minY = Math.min(minY, obj.y);
-    maxX = Math.max(maxX, obj.x + obj.w);
-    maxY = Math.max(maxY, obj.y + obj.h);
-  }
   const dx = center.x - (minX + maxX) / 2;
   const dy = center.y - (minY + maxY) / 2;
   const duplicatedIds = [];
@@ -322,7 +332,8 @@ function duplicateSelected(anchorPoint = null) {
   BoardfishEditorState.setSelection(duplicatedIds, {
     primaryId: duplicatedIds[duplicatedIds.length - 1],
   });
-  scheduleRender(true, true, 'duplicate-selected');
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'duplicate-selected');
+  else scheduleRender(true, true);
   pushHistory('duplicate-selected');
 }
 
@@ -330,17 +341,8 @@ function duplicateSelected(anchorPoint = null) {
 
 function deleteSelected() {
   if (!hasSelection() || editingId) return;
-  const idsToDelete = [];
-  for (const id of selectedIds) idsToDelete.push(id);
-  if (!idsToDelete.length) return;
-  BoardfishEditorState.removeObjectsById(idsToDelete);
-  if (selectedIds.size) {
-    const remaining = [];
-    for (const id of selectedIds) remaining.push(id);
-    BoardfishEditorState.setSelection(remaining, { primaryId: remaining[remaining.length - 1], exitEditing: false });
-  } else {
-    BoardfishEditorState.clearSelection();
-  }
+  BoardfishEditorState.removeObjectsById(selectedIds);
+  BoardfishEditorState.clearSelection();
   scheduleRender(true, true);
   pushHistory('delete-selected');
 }

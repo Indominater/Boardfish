@@ -224,6 +224,7 @@ function loadClipboardPasteObjectsHarness() {
     histories: [],
     selections: [],
     synced: [],
+    textBytes: [],
   };
   const context = {
     console,
@@ -271,6 +272,10 @@ function loadClipboardPasteObjectsHarness() {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
       imageSourceByteLength() { return 0; },
+      textByteLength(text) {
+        calls.textBytes.push(String(text ?? ''));
+        return String(text ?? '').length;
+      },
     },
     ClipDebug: {
       end() {},
@@ -612,7 +617,17 @@ test('pasting Boardfish text objects strips whitespace-only edge lines from the 
   assert.equal(context.calls.added.length, 1);
   assert.equal(context.calls.added[0].data.content, 'first line\nsecond line');
   assert.equal(context.calls.added[0].h, 56);
+  assert.equal(context.calls.added[0].x + context.calls.added[0].w / 2, 300);
+  assert.equal(context.calls.added[0].y + context.calls.added[0].h / 2, 200);
+  assert.deepEqual(context.calls.textBytes, ['first line\nsecond line']);
   assert.equal(sourceTextObject.data.content, '   \n\t\nfirst line\nsecond line\n   \n\t');
   assert.deepEqual(context.calls.histories, ['paste-objects']);
   assert.deepEqual(context.calls.editCalls, []);
+});
+
+test('object-limit rejection happens before pasted text trimming and measurement', async () => {
+  const { context } = loadClipboardPasteObjectsHarness();
+  context.BoardfishWebLimits.canAddObjects = () => false;
+  await context.pasteAtPos(300, 200, { getData: () => '' });
+  assert.deepEqual([context.calls.synced, context.calls.textBytes, context.calls.added, context.calls.histories], [[], [], [], []]);
 });

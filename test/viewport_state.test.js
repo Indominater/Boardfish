@@ -191,6 +191,14 @@ test('wheel and drag state methods share the same constrained pan path', () => {
   );
 });
 
+test('zooming around a client point keeps its world-space anchor fixed', () => {
+  const context = loadViewportStateHarness({ panX: 10, panY: 20, zoom: 2 });
+  const next = context.BoardfishViewportState.zoomAroundClient(110, 220, 4);
+
+  assert.deepEqual({ ...next }, { panX: -90, panY: -180, zoom: 4 });
+  assert.deepEqual({ ...context.viewportSnapshot() }, { panX: -90, panY: -180, zoom: 4 });
+});
+
 test('pan state stays fully locked at an edge until movement returns toward the board', () => {
   const context = loadViewportStateHarness({
     objects: [{ type: 'image', x: 100, y: 200, w: 300, h: 400 }],

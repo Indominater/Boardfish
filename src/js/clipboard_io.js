@@ -1,6 +1,9 @@
 'use strict';
 
 (function initClipboardIO(root) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const collectClipboardIoDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const BOARDFISH_CLIPBOARD_TOKEN_RE = /<!--\s*boardfish-clipboard:([A-Za-z0-9._:-]+)\s*-->/i;
 
   function createBoardfishClipboardMarker(token) {
@@ -30,7 +33,7 @@
     const marker = createBoardfishClipboardMarker(token);
     const src = String(dataUrl || '');
     if (!src) return boardfishTokenClipboardHtml(token);
-    return `${marker}<img src="${escapeHtml(src)}" alt="">`;
+    return `${marker}<img src="${src}" alt="">`;
   }
 
   async function blobToDataUrl(blob) {
@@ -77,6 +80,7 @@
     await navigator.clipboard.write([new ClipboardItem(parts)]);
   }
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   function clipboardIoNow() {
     return typeof performance !== 'undefined' && typeof performance.now === 'function'
       ? performance.now()
@@ -87,25 +91,20 @@
     return Math.round((clipboardIoNow() - startedAt) * 100) / 100;
   }
 
-  function clipDebugStep(dbg, step, meta = {}) {
-    if (typeof ClipDebug !== 'undefined') ClipDebug.step(dbg, step, meta);
-  }
-
   function textClipboardStats(text) {
+    if (!collectClipboardIoDiagnostics || ClipDebug.enabled === false) return {};
     const value = String(text ?? '');
     const lines = value ? value.split('\n') : [];
     let largestLineChars = 0;
     for (const line of lines) largestLineChars = Math.max(largestLineChars, line.length);
-    const textBytes = typeof TextEncoder === 'function'
-      ? new TextEncoder().encode(value).length
-      : value.length;
     return {
       textLen: value.length,
       textLineCount: lines.length,
       largestLineChars,
-      textBytes,
+      textBytes: root.BoardfishWebLimits.textByteLength(value),
     };
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   function supportedClipboardImageFile(items = [], files = []) {
     const isSupportedImageType = (type) => type === 'image/png' || type === 'image/jpeg';
@@ -122,27 +121,38 @@
     return null;
   }
 
-  function readClipboardImageFileFromClipboardData(clipboardData, dbg = null, describeBlob = null) {
+  function readClipboardImageFileFromEvent(clipboardData
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , dbg = null
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) {
     if (!clipboardData) {
-      ClipDebug.step(dbg, 'event-clipboard:none');
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectClipboardIoDiagnostics) ClipDebug.step(dbg, 'event-clipboard:none');
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return null;
     }
-    ClipDebug.step(dbg, 'event-clipboard:inspect', describeClipboardData(clipboardData));
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectClipboardIoDiagnostics) {
+      ClipDebug.step(dbg, 'event-clipboard:inspect', describeClipboardData(clipboardData));
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const imageFile = supportedClipboardImageFile(clipboardData.items || [], clipboardData.files || []);
     if (!imageFile) {
-      ClipDebug.step(dbg, 'event-image:none');
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectClipboardIoDiagnostics) ClipDebug.step(dbg, 'event-image:none');
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return null;
     }
-    ClipDebug.step(dbg, 'event-image-blob', describeBlob ? describeBlob(imageFile) : { type: imageFile.type, blobSize: imageFile.size });
-    return imageFile;
-  }
-
-  function readClipboardImageFileFromEvent(clipboardData, dbg = null) {
-    const imageFile = readClipboardImageFileFromClipboardData(clipboardData, dbg, (file) => ({
-      type: file.type,
-      blobSize: file.size,
-      fileName: file.name || '',
-    }));
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectClipboardIoDiagnostics) {
+      ClipDebug.step(dbg, 'event-image-blob', {
+        type: imageFile.type,
+        blobSize: imageFile.size,
+        fileName: imageFile.name || '',
+      });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return imageFile;
   }
 
@@ -151,57 +161,86 @@
     return clipboardData.getData?.('text/plain') || clipboardData.getData?.('text') || '';
   }
 
-  async function copyTextToClipboard(text, dbg = null, meta = {}) {
-    const writeStartedAt = clipboardIoNow();
-    clipDebugStep(dbg, 'web-clipboard-text-write-start', {
-      ...meta,
-      ...textClipboardStats(text),
-      richAttempted: !!meta.boardfishToken && supportsRichClipboardWrite(),
-    });
-    if (meta.boardfishToken && supportsRichClipboardWrite()) {
-      const richStartedAt = clipboardIoNow();
+  async function copyTextToClipboard(text
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , dbg = null
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    , options = {}
+  ) {
+    const boardfishToken = options?.boardfishToken || '';
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const meta = options;
+    const writeStartedAt = collectClipboardIoDiagnostics ? clipboardIoNow() : 0;
+    const stats = collectClipboardIoDiagnostics ? textClipboardStats(text) : null;
+    if (collectClipboardIoDiagnostics) {
+      ClipDebug.step(dbg, 'web-clipboard-text-write-start', {
+        ...meta,
+        ...stats,
+        richAttempted: !!boardfishToken && supportsRichClipboardWrite(),
+      });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (boardfishToken && supportsRichClipboardWrite()) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const richStartedAt = collectClipboardIoDiagnostics ? clipboardIoNow() : 0;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       try {
         await writeClipboardItem({
           'text/plain': new Blob([text], { type: 'text/plain' }),
-          'text/html': new Blob([textToClipboardHtml(text, meta.boardfishToken)], { type: 'text/html' }),
+          'text/html': new Blob([textToClipboardHtml(text, boardfishToken)], { type: 'text/html' }),
         });
-        clipDebugStep(dbg, 'web-clipboard-rich-text-write-end', {
-          ...meta,
-          ...textClipboardStats(text),
-          ms: clipboardIoElapsedMs(richStartedAt),
-        });
-        clipDebugStep(dbg, 'web-clipboard-text-write-end', {
-          ...meta,
-          ...textClipboardStats(text),
-          boardfishTokenWritten: true,
-          ms: clipboardIoElapsedMs(writeStartedAt),
-        });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        if (collectClipboardIoDiagnostics) {
+          ClipDebug.step(dbg, 'web-clipboard-rich-text-write-end', {
+            ...meta,
+            ...stats,
+            ms: clipboardIoElapsedMs(richStartedAt),
+          });
+          ClipDebug.step(dbg, 'web-clipboard-text-write-end', {
+            ...meta,
+            ...stats,
+            boardfishTokenWritten: true,
+            ms: clipboardIoElapsedMs(writeStartedAt),
+          });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         return { boardfishTokenWritten: true };
       } catch (err) {
-        clipDebugStep(dbg, 'web-clipboard-rich-text-miss', {
-          ...meta,
-          ...textClipboardStats(text),
-          ms: clipboardIoElapsedMs(richStartedAt),
-          error: String(err),
-        });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        if (collectClipboardIoDiagnostics) {
+          ClipDebug.step(dbg, 'web-clipboard-rich-text-miss', {
+            ...meta,
+            ...stats,
+            ms: clipboardIoElapsedMs(richStartedAt),
+            error: String(err),
+          });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
     }
-    const plainStartedAt = clipboardIoNow();
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const plainStartedAt = collectClipboardIoDiagnostics ? clipboardIoNow() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     await navigator.clipboard.writeText(text);
-    clipDebugStep(dbg, 'web-clipboard-plain-text-write-end', {
-      ...meta,
-      ...textClipboardStats(text),
-      ms: clipboardIoElapsedMs(plainStartedAt),
-    });
-    clipDebugStep(dbg, 'web-clipboard-text-write-end', {
-      ...meta,
-      ...textClipboardStats(text),
-      boardfishTokenWritten: false,
-      ms: clipboardIoElapsedMs(writeStartedAt),
-    });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectClipboardIoDiagnostics) {
+      ClipDebug.step(dbg, 'web-clipboard-plain-text-write-end', {
+        ...meta,
+        ...stats,
+        ms: clipboardIoElapsedMs(plainStartedAt),
+      });
+      ClipDebug.step(dbg, 'web-clipboard-text-write-end', {
+        ...meta,
+        ...stats,
+        boardfishTokenWritten: false,
+        ms: clipboardIoElapsedMs(writeStartedAt),
+      });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return { boardfishTokenWritten: false };
   }
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   function describeClipboardData(clipboardData) {
     if (!clipboardData) return null;
     const describeFile = (file) => ({
@@ -234,44 +273,75 @@
       types,
     };
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  async function readClipboardImageBlobFromBrowserClipboard(dbg = null) {
+  async function readClipboardImageBlobFromBrowser(
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    dbg = null
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) {
     if (!navigator.clipboard?.read) return null;
-    ClipDebug.step(dbg, 'browser-clipboard-read:start');
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectClipboardIoDiagnostics) ClipDebug.step(dbg, 'browser-clipboard-read:start');
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const items = await navigator.clipboard.read();
-    ClipDebug.step(dbg, 'browser-clipboard-read:ok', { itemCount: items.length });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectClipboardIoDiagnostics) {
+      ClipDebug.step(dbg, 'browser-clipboard-read:ok', { itemCount: items.length });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     for (const item of items) {
       for (const type of item.types) {
         if (type !== 'image/png' && type !== 'image/jpeg') continue;
         const blob = await item.getType(type);
-        ClipDebug.step(dbg, 'browser-image-blob', { type, blobSize: blob.size });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        if (collectClipboardIoDiagnostics) {
+          ClipDebug.step(dbg, 'browser-image-blob', { type, blobSize: blob.size });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         return blob;
       }
     }
     return null;
   }
 
-  async function readClipboardImageBlobFromBrowser(dbg = null) {
-    return readClipboardImageBlobFromBrowserClipboard(dbg);
-  }
-
-  async function readBoardfishClipboardTokenFromBrowser(dbg = null) {
+  async function readBoardfishClipboardTokenFromBrowser(
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    dbg = null
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) {
     if (!navigator.clipboard?.read) return { checked: false, token: '' };
-    ClipDebug.step(dbg, 'browser-clipboard-token-read:start');
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectClipboardIoDiagnostics) {
+      ClipDebug.step(dbg, 'browser-clipboard-token-read:start');
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const items = await navigator.clipboard.read();
     for (const item of items) {
       if (!item.types?.includes?.('text/html')) continue;
       const blob = await item.getType('text/html');
       const html = await blob.text();
       const token = readBoardfishClipboardTokenFromHtml(html);
-      ClipDebug.step(dbg, 'browser-clipboard-token-read:ok', { tokenFound: !!token });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectClipboardIoDiagnostics) {
+        ClipDebug.step(dbg, 'browser-clipboard-token-read:ok', { tokenFound: !!token });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return { checked: true, token };
     }
-    ClipDebug.step(dbg, 'browser-clipboard-token-read:ok', { tokenFound: false });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectClipboardIoDiagnostics) {
+      ClipDebug.step(dbg, 'browser-clipboard-token-read:ok', { tokenFound: false });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return { checked: true, token: '' };
   }
 
-  async function copyBoardfishTokenToClipboard(token, dbg = null, meta = {}) {
+  async function copyBoardfishTokenToClipboard(token
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , dbg = null, meta = null
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) {
     if (!token || !supportsRichClipboardWrite()) return { boardfishTokenWritten: false };
     try {
       await writeClipboardItem({
@@ -280,15 +350,27 @@
       });
       return { boardfishTokenWritten: true };
     } catch (err) {
-      ClipDebug.step(dbg, 'web-clipboard-token-write-miss', { ...meta, error: String(err) });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectClipboardIoDiagnostics) {
+        ClipDebug.step(dbg, 'web-clipboard-token-write-miss', { ...meta, error: String(err) });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return { boardfishTokenWritten: false };
     }
   }
 
-  async function copyImageBlobToClipboard(blob, token = '', dbg = null) {
+  async function copyImageBlobToClipboard(blob, token = ''
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , dbg = null
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) {
     if (token && supportsRichClipboardWrite()) {
       const dataUrl = await blobToDataUrl(blob).catch((err) => {
-        ClipDebug.step(dbg, 'web-clipboard-image-html-miss', { error: String(err) });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        if (collectClipboardIoDiagnostics) {
+          ClipDebug.step(dbg, 'web-clipboard-image-html-miss', { error: String(err) });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         return '';
       });
       try {
@@ -299,24 +381,31 @@
         await writeClipboardItem(parts);
         return { boardfishTokenWritten: !!dataUrl };
       } catch (err) {
-        ClipDebug.step(dbg, 'web-clipboard-rich-image-miss', { error: String(err) });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        if (collectClipboardIoDiagnostics) {
+          ClipDebug.step(dbg, 'web-clipboard-rich-image-miss', { error: String(err) });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
     }
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
     return { boardfishTokenWritten: false };
   }
 
-  root.BoardfishClipboardIO = Object.freeze({
+  const clipboardIoApi = {
     copyBoardfishTokenToClipboard,
     copyImageBlobToClipboard,
     copyTextToClipboard,
-    describeClipboardData,
     readBoardfishClipboardTokenFromBrowser,
     readBoardfishClipboardTokenFromEvent,
     readClipboardImageBlobFromBrowser,
     readClipboardImageFileFromEvent,
     readClipboardTextFromEvent,
-  });
+  };
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (collectClipboardIoDiagnostics) clipboardIoApi.describeClipboardData = describeClipboardData;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  root.BoardfishClipboardIO = Object.freeze(clipboardIoApi);
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = root.BoardfishClipboardIO;
   }

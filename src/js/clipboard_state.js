@@ -20,17 +20,23 @@ const createJsClipboardWebToken = () => {
 
 const getJsClipboardWebToken = () => _jsClipboardWebToken;
 
-const markJsClipboardWebTokenWritten = (token = _jsClipboardWebToken, dbg = null) => {
+const markJsClipboardWebTokenWritten = (token = _jsClipboardWebToken
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , dbg = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) => {
   const accepted = !!token && token === _jsClipboardWebToken && !!jsClipboard;
   if (accepted) {
     _jsClipboardWebTokenWritten = true;
     _jsClipboardWebMaybeStale = false;
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   ClipDebug.step(dbg, 'mark-js-clipboard-web-token', {
     token,
     currentToken: _jsClipboardWebToken,
     accepted,
   });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return accepted;
 };
 
@@ -56,27 +62,36 @@ function clearJsClipboard() {
   _jsClipboardToken++;
 }
 
-async function jsClipboardStillCurrent(dbg = null, options = {}) {
+function jsClipboardStillCurrent(
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  dbg = null,
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  options = {}
+) {
   if (!jsClipboard) return false;
   const clipboardTokenChecked = options.webClipboardTokenChecked === true;
   const clipboardToken = options.webClipboardToken || '';
   if (clipboardTokenChecked && (_jsClipboardWebTokenWritten || clipboardToken)) {
     const current = !!clipboardToken && clipboardToken === _jsClipboardWebToken;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     ClipDebug.step(dbg, 'validate-js-clipboard-web-token', {
       clipboardToken,
       expected: _jsClipboardWebToken,
       tokenWritten: _jsClipboardWebTokenWritten,
       current,
     });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return current;
   }
   const age = Date.now() - _jsClipboardSetAt;
   const current = !_jsClipboardWebMaybeStale || age < 750;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   ClipDebug.step(dbg, 'validate-js-clipboard-web-untracked', {
     current,
     maybeStale: _jsClipboardWebMaybeStale,
     age,
   });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return current;
 }
 

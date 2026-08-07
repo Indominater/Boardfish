@@ -10,6 +10,108 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const srcRoot = path.join(root, 'src');
 const jsRoot = path.join(srcRoot, 'js');
 
+const RUNTIME_CONSOLE_SENTINEL = '__BOARDFISH_RUNTIME_CONSOLE_7E3D2A91__';
+const DROP_DIAGNOSTIC_SENTINEL = '__BOARDFISH_DROP_DIAGNOSTIC_1C6A53B4__';
+const readableProductionAudit = process.env.BOARDFISH_BUILD_READABLE === '1';
+const DEV_DIAGNOSTICS_START = '/* BOARDFISH_DEV_DIAGNOSTICS_START */';
+const DEV_DIAGNOSTICS_END = '/* BOARDFISH_DEV_DIAGNOSTICS_END */';
+const DIAGNOSTIC_APIS = Object.freeze([
+  'StartupDebug',
+  'ClipDebug',
+  'HistoryDebug',
+  'ViewportDebug',
+  'SaveDebug',
+  'OpenDebug',
+  'ExportDebug',
+  'InsertDebug',
+  'TextSelDebug',
+  'PillDebug',
+  'MenuDebug',
+  'ManualPerfDebug',
+]);
+const DIAGNOSTIC_CALLS = Object.freeze([
+  'logStartupStep',
+  'logStep',
+  'logInputStep',
+  'logPasteStep',
+  'textEditorDebugLog',
+  'textEditorDebugNow',
+  'textEditorDebugRound',
+  'textEditorEventDebugStats',
+  'textEditorSelectionDebugStats',
+  'textEditorCaretLineDebugStats',
+  'textEditorObjectDebugStats',
+  'textEditorSizeDebugStats',
+  'textEditorProxySizeDebugStats',
+  'textEditorTextStats',
+  'textEditorClipStep',
+  'textEditorClipboardLog',
+  'textEditorPerfDebugApi',
+  'textEditorClipDebugApi',
+  'shouldTraceTextEditorInput',
+  'recordTextEditorInputPerfStep',
+  'recordInputSetupStep',
+  'nextTextEditInputDebugSeq',
+  'selectionInputPerfDebugApi',
+  'selectionResizeDebugNow',
+  'selectionResizeDebugRound',
+  'selectionResizeEventMeta',
+  'selectionResizeTextObjectStats',
+  'recordSelectionTextResizeStep',
+  'canvasInputDebugRound',
+  'canvasInputNow',
+  'canvasInputEventDebugMeta',
+  'canvasInputViewportDebugSnapshot',
+  'canvasInputWheelDebugMeta',
+  'canvasInputTextDebugLog',
+  'logClickEditStep',
+  'historyDebugRound',
+  'logTextEditHistoryDebug',
+  'objectCommandDebugNow',
+  'objectCommandTextStats',
+  'imageFileDebugName',
+  'imageSourceDebugInfo',
+  'textClipboardStats',
+  'clipboardTextStats',
+  'clipboardTextMetricsForObjects',
+  'clipboardIoNow',
+  'clipboardIoElapsedMs',
+  'clipboardNow',
+  'clipboardElapsedMs',
+  'webSourceClipboardKind',
+  'recordMotionDebug',
+  'isHistoryDebugEnabled',
+  'isDebugApiEnabled',
+  'shouldPrepareImagePreviewDebug',
+  'isDebugApiEnabledForStep',
+  'isOpenDebugActive',
+  'isPillDebugActive',
+  'shouldCollectOpenBoardMetrics',
+  'getBoardSaveDebugMetrics',
+  'getBoardOpenDebugMetrics',
+  'getOpenImageRuntimeDebugMetrics',
+  'getImageStoreOpenDebugSampleIfEnabled',
+  'scheduleSaveFrameProbe',
+  'scheduleOpenFrameProbe',
+  'registerDebugCommand',
+]);
+const PRODUCTION_FALSE_DIAGNOSTIC_FLAGS = Object.freeze([
+  'collectDiagnostics',
+  'collectDebug',
+  'collectPanDebug',
+  'collectDrawDebug',
+  'collectViewportDebug',
+  'collectOpenInitialRenderDebug',
+  'collectOpenPreviewFallbackDebug',
+  'collectTransformDebug',
+  'collectInitialRenderDebug',
+  'collectMotionDebug',
+  'collectClipboardDiagnostics',
+  'collectClipboardIoDiagnostics',
+  'perfTraceInput',
+  'shouldLogInput',
+]);
+
 const variants = {
   'web-preview': {
     outDir: path.join(root, 'dist-web'),
@@ -69,6 +171,105 @@ async function concatenateScripts(scripts, variantName) {
   return parts.join('');
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeQualifiedDiagnosticApis(source) {
+  const apiPattern = DIAGNOSTIC_APIS.map(escapeRegExp).join('|');
+  return source.replace(
+    new RegExp(`\\b(?:root|globalThis|window)\\.(${apiPattern})\\b`, 'g'),
+    '$1',
+  );
+}
+
+function inlineProductionDiagnosticFlags(source) {
+  let next = source;
+  for (const flag of PRODUCTION_FALSE_DIAGNOSTIC_FLAGS) {
+    next = next.replace(
+      new RegExp(`\\b(?:const|let|var)\\s+${escapeRegExp(flag)}\\s*=\\s*[^;]+;`, 'g'),
+      '',
+    );
+  }
+  return next;
+}
+
+function stripMarkedDeveloperDiagnostics(source) {
+  const starts = source.split(DEV_DIAGNOSTICS_START).length - 1;
+  const ends = source.split(DEV_DIAGNOSTICS_END).length - 1;
+  if (starts !== ends) throw new Error('unbalanced developer diagnostic build markers');
+  const block = new RegExp(
+    `${escapeRegExp(DEV_DIAGNOSTICS_START)}[\\s\\S]*?${escapeRegExp(DEV_DIAGNOSTICS_END)}`,
+    'g',
+  );
+  return source.replace(block, '');
+}
+
+function aliasNamedDiagnosticCalls(source) {
+  const callPattern = DIAGNOSTIC_CALLS.map(escapeRegExp).join('|');
+  return source.replace(
+    new RegExp(`(?<![\\w$])(${callPattern})\\s*(?:\\?\\.)?\\s*\\(`, 'g'),
+    (match, _name, offset, wholeSource) => {
+      const prefix = wholeSource.slice(Math.max(0, offset - 24), offset);
+      return /\bfunction\s*$/.test(prefix) ? match : `${DROP_DIAGNOSTIC_SENTINEL}.log(`;
+    },
+  );
+}
+
+async function compileProductionBundle(source) {
+  if (source.includes(RUNTIME_CONSOLE_SENTINEL)) {
+    throw new Error('production console sentinel collides with runtime source');
+  }
+  if (source.includes(DROP_DIAGNOSTIC_SENTINEL)) {
+    throw new Error('production diagnostic sentinel collides with runtime source');
+  }
+
+  const define = {
+    BOARDFISH_PRODUCTION: 'true',
+    DEBUG_TOOLS_ENABLED: 'false',
+    console: RUNTIME_CONSOLE_SENTINEL,
+    'OpenDebug.hydrationConcurrency': 'openHydrationConcurrency',
+  };
+  for (const flag of PRODUCTION_FALSE_DIAGNOSTIC_FLAGS) define[flag] = 'false';
+  for (const api of DIAGNOSTIC_APIS) {
+    define[`${api}.enabled`] = 'false';
+    define[api] = DROP_DIAGNOSTIC_SENTINEL;
+  }
+
+  // esbuild can drop console calls including their arguments. Hide the real
+  // console first, route diagnostics through console, then restore it.
+  const productionSource = inlineProductionDiagnosticFlags(stripMarkedDeveloperDiagnostics(source));
+  const diagnosticCallsAliased = aliasNamedDiagnosticCalls(normalizeQualifiedDiagnosticApis(productionSource));
+  const substituted = await esbuild.transform(diagnosticCallsAliased, {
+    define,
+    legalComments: 'none',
+    target: 'es2020',
+  });
+  const droppable = substituted.code.replaceAll(DROP_DIAGNOSTIC_SENTINEL, 'console');
+  const stripped = await esbuild.transform(droppable, {
+    drop: ['console'],
+    legalComments: 'none',
+    minifyIdentifiers: !readableProductionAudit,
+    minifySyntax: true,
+    minifyWhitespace: !readableProductionAudit,
+    target: 'es2020',
+    treeShaking: true,
+  });
+  const restored = await esbuild.transform(stripped.code, {
+    define: { [RUNTIME_CONSOLE_SENTINEL]: 'console' },
+    legalComments: 'none',
+    minifyIdentifiers: !readableProductionAudit,
+    minifySyntax: true,
+    minifyWhitespace: !readableProductionAudit,
+    target: 'es2020',
+    treeShaking: true,
+  });
+  if (restored.code.includes(RUNTIME_CONSOLE_SENTINEL)) {
+    throw new Error('production console sentinel was not restored');
+  }
+  return restored;
+}
+
 async function writeIndex(outDir, scriptTag, preloadScript) {
   const html = await readFile(path.join(srcRoot, 'index.html'), 'utf8');
   let next = html.replace(
@@ -103,11 +304,7 @@ async function buildBundle(variantName, config) {
   await copyStaticAssets(config.outDir);
 
   const concatenated = await concatenateScripts(config.scripts, variantName);
-  const result = await esbuild.transform(concatenated, {
-    minify: true,
-    legalComments: 'none',
-    target: 'es2020',
-  });
+  const result = await compileProductionBundle(concatenated);
   const bundle = cacheBustedBundlePath(config.bundle, result.code);
   const outPath = path.join(config.outDir, bundle);
   await writeFile(outPath, result.code);

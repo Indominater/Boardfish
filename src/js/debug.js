@@ -73,7 +73,6 @@ var ClipDebug = (() => {
       boardfishTokenWritten: e.meta?.boardfishTokenWritten ?? '',
       richAttempted: e.meta?.richAttempted ?? '',
       inputType: e.meta?.inputType || '',
-      scriptTransformMs: e.meta?.scriptTransformMs ?? '',
       scriptTransformFastPath: e.meta?.scriptTransformFastPath || '',
       scriptTransformInputRangeCount: e.meta?.scriptTransformInputRangeCount ?? '',
       scriptTransformInsertedRangeCount: e.meta?.scriptTransformInsertedRangeCount ?? '',
@@ -118,19 +117,9 @@ var ClipDebug = (() => {
       layoutCachePresent: e.meta?.layoutCachePresent ?? '',
       layoutCacheLines: e.meta?.layoutCacheLines ?? '',
       layoutPatched: e.meta?.layoutPatched ?? '',
-      layoutPatchMs: e.meta?.layoutPatchMs ?? '',
-      layoutPatchTotalMs: e.meta?.layoutPatchTotalMs ?? '',
-      layoutPatchRangeMs: e.meta?.layoutPatchRangeMs ?? '',
-      layoutPatchSpliceMs: e.meta?.layoutPatchSpliceMs ?? '',
-      layoutPatchWrapMs: e.meta?.layoutPatchWrapMs ?? '',
-      layoutPatchScriptRangesMs: e.meta?.layoutPatchScriptRangesMs ?? '',
-      layoutPatchScriptMetricsMs: e.meta?.layoutPatchScriptMetricsMs ?? '',
       layoutPatchScriptMetricsPatched: e.meta?.layoutPatchScriptMetricsPatched ?? '',
       layoutPatchScriptMetricsPatchReason: e.meta?.layoutPatchScriptMetricsPatchReason || '',
       layoutPatchScriptMetricsInsertedRangeCount: e.meta?.layoutPatchScriptMetricsInsertedRangeCount ?? '',
-      layoutPatchInsertLayoutMs: e.meta?.layoutPatchInsertLayoutMs ?? '',
-      layoutPatchRemapMs: e.meta?.layoutPatchRemapMs ?? '',
-      layoutPatchLinesCacheMs: e.meta?.layoutPatchLinesCacheMs ?? '',
       layoutPatchOldLines: e.meta?.layoutPatchOldLines ?? '',
       layoutPatchNewLines: e.meta?.layoutPatchNewLines ?? '',
       layoutPatchRemovedLines: e.meta?.layoutPatchRemovedLines ?? '',
@@ -139,7 +128,6 @@ var ClipDebug = (() => {
       layoutPatchLogicalLineDelta: e.meta?.layoutPatchLogicalLineDelta ?? '',
       layoutPatchReason: e.meta?.layoutPatchReason || '',
       historyActionMs: e.meta?.historyActionMs ?? '',
-      historyRecordMs: e.meta?.historyRecordMs ?? '',
       historyPushed: e.meta?.historyPushed ?? '',
       setRangeTextMs: e.meta?.setRangeTextMs ?? '',
       valueAssignMs: e.meta?.valueAssignMs ?? '',
@@ -606,10 +594,9 @@ var ClipDebug = (() => {
       const inputEndForRun = runLatest('text-edit-input:end');
       const rangeTextForRun = runLatest('paste:text-edit-range-text-set');
       const scriptTransformForRun = runLatest('text-edit-input:script-ranges-transformed');
-      const layoutForRun = runLatest('text-edit-input:layout-patched') || runLatest('text-edit-input:layout-invalidated');
       const dispatchForRun = runLatest('paste:text-edit-input-dispatched');
       const inputMs = Number(inputEndForRun?.meta?.totalMs ?? inputEndForRun?.dt) || 0;
-      const transformMs = Number(scriptTransformForRun?.meta?.scriptTransformMs ?? scriptTransformForRun?.dt) || 0;
+      const transformMs = Number(scriptTransformForRun?.dt) || 0;
       const textareaMs = Number(rangeTextForRun?.meta?.textareaMutationMs ?? rangeTextForRun?.meta?.setRangeTextMs) || 0;
       let runVerdict = 'no >32ms paste/input stall captured';
       if (nativeAllowed && !end) runVerdict = 'native paste allowed; waiting for input/end capture';
@@ -628,7 +615,7 @@ var ClipDebug = (() => {
         insertedChars: runLatest('text-edit-input:replacement-ready')?.meta?.insertedChars ?? end?.meta?.textCharCount ?? '',
         inputHandlerMs: inputEndForRun?.meta?.totalMs ?? inputEndForRun?.dt ?? '',
         dispatchMs: dispatchForRun?.meta?.dispatchMs ?? '',
-        scriptTransformMs: scriptTransformForRun?.meta?.scriptTransformMs ?? '',
+        scriptTransformMs: scriptTransformForRun?.dt ?? '',
         scriptTransformFastPath: scriptTransformForRun?.meta?.scriptTransformFastPath || '',
         scriptTransformInsertedMayCreateRange: scriptTransformForRun?.meta?.scriptTransformInsertedMayCreateRange ?? '',
         scriptTransformLocalDerivedRangeCount: scriptTransformForRun?.meta?.scriptTransformLocalDerivedRangeCount ?? '',
@@ -636,7 +623,6 @@ var ClipDebug = (() => {
         scriptTransformSkipRangeIndex: scriptTransformForRun?.meta?.scriptTransformSkipRangeIndex ?? '',
         textareaMutationMs: rangeTextForRun?.meta?.textareaMutationMs ?? rangeTextForRun?.meta?.setRangeTextMs ?? '',
         textareaMutationMethod: rangeTextForRun?.meta?.textareaMutationMethod || '',
-        layoutPatchMs: layoutForRun?.meta?.layoutPatchMs ?? '',
         verdict: runVerdict,
       };
     };
@@ -709,10 +695,10 @@ var ClipDebug = (() => {
     const browserPasteEventAgeMs = Number(pasteStart.meta?.eventAgeMs) || 0;
     const inputEventAgeMs = Number(inputStart?.meta?.eventAgeMs) || 0;
     const inputHandlerMs = Number(inputEnd?.meta?.totalMs ?? inputEnd?.dt) || 0;
-    const scriptTransformMs = Number(scriptTransform?.meta?.scriptTransformMs ?? scriptTransform?.dt) || 0;
+    const scriptTransformMs = Number(scriptTransform?.dt) || 0;
     const dispatchMs = Number(dispatch?.meta?.dispatchMs) || 0;
     const textareaMutationMs = Number(rangeText?.meta?.textareaMutationMs ?? rangeText?.meta?.setRangeTextMs) || 0;
-    const historyRecordMs = Number(history?.meta?.historyRecordMs) || 0;
+    const historyRecordMs = Number(history?.dt) || 0;
     const renderToFirstFrameMs = firstFrameAfterInput && renderScheduled
       ? round(firstFrameAfterInput.at - renderScheduled.at)
       : '';
@@ -741,7 +727,7 @@ var ClipDebug = (() => {
       inputEventAgeMs: inputStart?.meta?.eventAgeMs ?? '',
       inputHandlerMs: inputEnd?.meta?.totalMs ?? inputEnd?.dt ?? '',
       dispatchMs: dispatch?.meta?.dispatchMs ?? '',
-      scriptTransformMs: scriptTransform?.meta?.scriptTransformMs ?? '',
+      scriptTransformMs: scriptTransform?.dt ?? '',
       scriptTransformFastPath: scriptTransform?.meta?.scriptTransformFastPath || '',
       scriptTransformInputRangeCount: scriptTransform?.meta?.scriptTransformInputRangeCount ?? '',
       scriptTransformInsertedRangeCount: scriptTransform?.meta?.scriptTransformInsertedRangeCount ?? '',
@@ -760,9 +746,9 @@ var ClipDebug = (() => {
       selectionSetMs: rangeText?.meta?.selectionSetMs ?? '',
       textareaMutationMs: rangeText?.meta?.textareaMutationMs ?? rangeText?.meta?.setRangeTextMs ?? '',
       textareaMutationMethod: rangeText?.meta?.textareaMutationMethod || '',
-      historyRecordMs: history?.meta?.historyRecordMs ?? '',
+      historyRecordMs: history?.dt ?? '',
       historyPushed: history?.meta?.historyPushed ?? '',
-      renderScheduleMs: renderScheduled?.meta?.renderScheduleMs ?? '',
+      renderScheduleMs: renderScheduled?.dt ?? '',
       renderToFirstFrameMs,
       firstFrameAfterInputMs: firstFrameAfterInput ? round(firstFrameAfterInput.at - (inputEnd?.at || pasteEnd.at)) : '',
       maxFrameMs: round(maxFrameMs),
@@ -784,19 +770,10 @@ var ClipDebug = (() => {
       autoHeightDeferred: autoHeight?.meta?.autoHeightDeferred ?? '',
       pendingSizeSync: autoHeight?.meta?.pendingSizeSync ?? pasteEnd?.meta?.pendingSizeSync ?? '',
       layoutPatched: layoutPatch?.meta?.layoutPatched ?? '',
-      layoutPatchMs: layoutPatch?.meta?.layoutPatchMs ?? '',
-      layoutPatchTotalMs: layoutPatch?.meta?.layoutPatchTotalMs ?? '',
-      layoutPatchRangeMs: layoutPatch?.meta?.layoutPatchRangeMs ?? '',
-      layoutPatchSpliceMs: layoutPatch?.meta?.layoutPatchSpliceMs ?? '',
-      layoutPatchWrapMs: layoutPatch?.meta?.layoutPatchWrapMs ?? '',
-      layoutPatchScriptRangesMs: layoutPatch?.meta?.layoutPatchScriptRangesMs ?? '',
-      layoutPatchScriptMetricsMs: layoutPatch?.meta?.layoutPatchScriptMetricsMs ?? '',
+      layoutPatchMs: layoutPatch?.dt ?? '',
       layoutPatchScriptMetricsPatched: layoutPatch?.meta?.layoutPatchScriptMetricsPatched ?? '',
       layoutPatchScriptMetricsPatchReason: layoutPatch?.meta?.layoutPatchScriptMetricsPatchReason || '',
       layoutPatchScriptMetricsInsertedRangeCount: layoutPatch?.meta?.layoutPatchScriptMetricsInsertedRangeCount ?? '',
-      layoutPatchInsertLayoutMs: layoutPatch?.meta?.layoutPatchInsertLayoutMs ?? '',
-      layoutPatchRemapMs: layoutPatch?.meta?.layoutPatchRemapMs ?? '',
-      layoutPatchLinesCacheMs: layoutPatch?.meta?.layoutPatchLinesCacheMs ?? '',
       layoutPatchLineDelta: layoutPatch?.meta?.layoutPatchLineDelta ?? '',
       layoutPatchLogicalLineDelta: layoutPatch?.meta?.layoutPatchLogicalLineDelta ?? '',
       layoutPatchReason: layoutPatch?.meta?.layoutPatchReason || '',
@@ -873,10 +850,8 @@ var ClipDebug = (() => {
       lastPasteDispatchMs: latestMetaValue(paste.run, ['dispatchMs']),
       lastPasteInputEventAgeMs: latestMetaValue(paste.run, ['eventAgeMs']),
       lastPasteInputHandlerMs: latestMetaValue(paste.run, ['totalMs']),
-      lastPasteHistoryRecordMs: latestMetaValue(paste.run, ['historyRecordMs']),
       lastPasteAutoHeightDeferred: latestMetaValue(paste.run, ['autoHeightDeferred']),
       lastPastePendingSizeSync: latestMetaValue(paste.run, ['pendingSizeSync']),
-      lastPasteRenderScheduleMs: latestMetaValue(paste.run, ['renderScheduleMs']),
       lastPasteInputEndAtMs: stepTotal(paste.run, 'text-edit-input:end'),
       lastPasteAutoHeightAtMs: stepTotal(paste.run, 'text-edit-input:auto-height-done') || stepTotal(paste.run, 'addText:auto-height-done'),
       lastPasteHistoryAtMs: stepTotal(paste.run, 'text-edit-input:history-recorded') || stepTotal(paste.run, 'paste:boardHistory-done') || stepTotal(paste.run, 'addText:history-pushed'),
@@ -1093,7 +1068,6 @@ var HistoryDebug = (() => {
         e.step === 'restore-edit-selection' ||
         e.step === 'enter-edit-restored' ||
         e.step === 'restore-edit-caret' ||
-        e.step === 'restore-render-scheduled' ||
         e.step === 'flush-edit-history' ||
         e.step === 'restore-done'
       ))

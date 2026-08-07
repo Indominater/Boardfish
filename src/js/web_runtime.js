@@ -186,21 +186,14 @@
         lazyImageRefs: true,
         verifyImageCrc: false,
         maxBoardContentBytes: root.BoardfishWebLimits?.LIMITS?.maxBoardContentBytes,
-        validateBoardPayload(payload) {
-          return root.BoardfishWebLimits?.validateBoardPayload(payload);
-        },
-      });
-      root.BoardfishWebLimits?.validateBoardPayload({
-        objectCount: result.board?.objects?.length || 0,
-        boardJsonBytes: result.debug?.board_json_bytes || 0,
-        imageBytes: result.debug?.image_bytes,
-        imageEntries: result.imageEntries || [],
+        validateBoardPayload: root.BoardfishWebLimits?.validateBoardPayload,
       });
       await root.BoardfishWebLimits?.validateOpenedImageEntries(result.imageEntries || []);
-      return {
+      const opened = {
         board: result.board,
-        debug: result.debug,
       };
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') opened.debug = result.debug;
+      return opened;
     } catch (err) {
       if (result?.board) revokeBoardImageSources(result.board);
       throw err;
@@ -239,12 +232,13 @@
   }
 
   async function saveBoard(ref, board, options = {}) {
-    const totalStart = performance.now();
-    const createStart = performance.now();
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
+    const totalStart = collectDiagnostics ? performance.now() : 0;
+    const createStart = collectDiagnostics ? performance.now() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const rawImageStore = options.imageStore || root.imageStore || {};
-    const validateBoardPayload = typeof root.BoardfishWebLimits?.validateBoardPayload === 'function'
-      ? (payload) => root.BoardfishWebLimits.validateBoardPayload(payload)
-      : null;
+    const validateBoardPayload = root.BoardfishWebLimits?.validateBoardPayload;
     const payload = await root.BoardfishWebBoardContainer.createBoardContainerBlob(
       board,
       rawImageStore,
@@ -253,54 +247,97 @@
         validateBoardPayload,
       },
     );
-    const serializeMs = performance.now() - createStart;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const serializeMs = collectDiagnostics ? performance.now() - createStart : 0;
     let imageSourceRefreshMs = 0;
     let imageSourceRefreshCount = 0;
     let imageSourceRefreshBytes = 0;
     let imageSourceRefreshSkipped = '';
     let imageSourceRefreshBacking = '';
     let imageSourceRefreshError = '';
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const writesExistingHandle = ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle';
     const refreshImageSources = root.BoardfishWebBoardContainer.refreshBlobBackedImageRefsFromContainer;
-    const writeStart = performance.now();
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const writeStart = collectDiagnostics ? performance.now() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (writesExistingHandle) {
       await writeBlobToHandle(ref.handle, payload.blob);
     } else {
       downloadBlob(payload.blob, fileNameFromRef(ref, 'board.bf'));
     }
-    const writeMs = performance.now() - writeStart;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const writeMs = collectDiagnostics ? performance.now() - writeStart : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (writesExistingHandle && typeof refreshImageSources === 'function') {
-      const refreshStart = performance.now();
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const refreshStart = collectDiagnostics ? performance.now() : 0;
       let refresh = null;
-      try {
-        if (typeof ref.handle?.getFile !== 'function') {
-          throw new Error('saved file handle cannot provide the persisted file snapshot');
-        }
-        const savedFile = await ref.handle.getFile();
-        if (!savedFile || Number(savedFile.size) !== Number(payload.blob.size)) {
-          throw new Error('saved file size does not match the generated Boardfish container');
-        }
-        refresh = await refreshImageSources(board, rawImageStore, {
-          blob: savedFile,
-          imageArchiveEntries: payload.imageArchiveEntries,
-        });
-        imageSourceRefreshBacking = 'saved-file';
-      } catch (err) {
-        imageSourceRefreshError = String(err);
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      let refreshedFromSavedFile = false;
+      if (typeof ref.handle?.getFile === 'function') {
         try {
-          refresh = await refreshImageSources(board, rawImageStore, payload);
-          imageSourceRefreshBacking = 'container-snapshot-fallback';
+          const savedFile = await ref.handle.getFile();
+          if (savedFile && Number(savedFile.size) === Number(payload.blob.size)) {
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            refresh =
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+            await refreshImageSources(board, rawImageStore, {
+              blob: savedFile,
+              imageArchiveEntries: payload.imageArchiveEntries,
+            });
+            refreshedFromSavedFile = true;
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            if (collectDiagnostics) imageSourceRefreshBacking = 'saved-file';
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          } else {
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            imageSourceRefreshError = String(new Error(
+              'saved file size does not match the generated Boardfish container',
+            ));
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          }
+        } catch (err) {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          if (collectDiagnostics) imageSourceRefreshError = String(err);
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        }
+      } else {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        imageSourceRefreshError = String(new Error(
+          'saved file handle cannot provide the persisted file snapshot',
+        ));
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
+      if (!refreshedFromSavedFile) {
+        try {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          refresh =
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          await refreshImageSources(board, rawImageStore, payload);
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          if (collectDiagnostics) imageSourceRefreshBacking = 'container-snapshot-fallback';
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
         } catch (fallbackErr) {
-          imageSourceRefreshError += `; fallback refresh failed: ${String(fallbackErr)}`;
-          imageSourceRefreshBacking = 'unrefreshed';
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          if (collectDiagnostics) {
+            imageSourceRefreshError += `; fallback refresh failed: ${String(fallbackErr)}`;
+            imageSourceRefreshBacking = 'unrefreshed';
+          }
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
         }
       }
-      imageSourceRefreshCount = Number(refresh?.refreshed || 0);
-      imageSourceRefreshBytes = Number(refresh?.bytes || 0);
-      imageSourceRefreshSkipped = refresh?.skipped || '';
-      imageSourceRefreshMs += performance.now() - refreshStart;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDiagnostics) {
+        imageSourceRefreshCount = Number(refresh?.refreshed || 0);
+        imageSourceRefreshBytes = Number(refresh?.bytes || 0);
+        imageSourceRefreshSkipped = refresh?.skipped || '';
+        imageSourceRefreshMs += performance.now() - refreshStart;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    return {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectDiagnostics) return {
       format: 'container-web',
       json_bytes: payload.boardJsonBytes,
       image_bytes: payload.imageBytes,
@@ -328,6 +365,7 @@
       zip_bytes: payload.zipBytes,
       total_ms: performance.now() - totalStart,
     };
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
 
   const api = Object.freeze({

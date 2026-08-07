@@ -39,6 +39,7 @@ function loadEditorStateBoundaryHarness() {
   const source = fs.readFileSync(path.join(root, 'src/js/editor_state_boundary.js'), 'utf8');
   const obj1 = { id: 'obj-1', type: 'image', z: 1 };
   const obj2 = { id: 'obj-2', type: 'rect', z: 2 };
+  const textLayoutCacheClears = [];
   const context = {
     console,
     editingId: null,
@@ -51,10 +52,13 @@ function loadEditorStateBoundaryHarness() {
     _linesCacheMap: new Map([[obj1.id, []]]),
     _prefixCache: new Map(),
     _boardOpening: false,
+    textLayoutCacheClears,
     BoardfishViewportState: {
       setViewport() {},
     },
-    clearTextLayoutCaches() {},
+    clearTextLayoutCaches(options = {}) {
+      textLayoutCacheClears.push({ ...options });
+    },
     exitEdit() {
       context.editingId = null;
     },
@@ -169,6 +173,12 @@ test('editor selection changes do not allocate motion snapshots', () => {
     primaryId: 'obj-1',
   });
   assert.equal(allocations, 0);
+});
+
+test('board object replacement clears object layout without clearing reusable measurements', () => {
+  const context = loadEditorStateBoundaryHarness();
+  context.BoardfishEditorState.replaceBoardObjects([], { normalizeText: false, syncTextHeights: false });
+  assert.deepEqual(context.textLayoutCacheClears, [{ objectLayout: true }]);
 });
 
 test('failed web image inserts revoke unadopted web image sources', () => {

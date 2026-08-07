@@ -58,50 +58,54 @@
   }
 
   function pruneImageStoreForObjects(imageStore = {}, objects = []) {
+    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
     const referenced = referencedImageKeys(objects);
     const pruned = {};
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     let removed = 0;
     let kept = 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const store = imageStore || {};
     for (const key in store) {
       if (!Object.prototype.hasOwnProperty.call(store, key)) continue;
       const src = store[key];
       if (referenced.has(key)) {
         pruned[key] = src;
-        kept++;
+        if (collectDiagnostics) kept++;
       } else {
-        removed++;
+        if (collectDiagnostics) removed++;
       }
     }
-    return {
-      imageStore: pruned,
-      removed,
-      kept,
-      referenced: referenced.size,
-    };
+    return collectDiagnostics
+      ? { imageStore: pruned, removed, kept, referenced: referenced.size }
+      : { imageStore: pruned };
   }
 
   function pruneBoardDataImageStore(data = {}) {
     const result = pruneImageStoreForObjects(data.imageStore || {}, data.objects || []);
-    return {
+    const pruned = {
       data: {
         ...data,
         imageStore: result.imageStore,
       },
-      removed: result.removed,
-      kept: result.kept,
-      referenced: result.referenced,
     };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      Object.assign(pruned, {
+        removed: result.removed,
+        kept: result.kept,
+        referenced: result.referenced,
+      });
+    }
+    return pruned;
   }
 
   function createBoardDataForSave({ viewport, imageStore, objects }, deps = {}) {
-    const prune = pruneImageStoreForObjects(imageStore || {}, objects || []);
+    const referenced = referencedImageKeys(objects);
     const imageManifest = {};
-    const prunedStore = prune.imageStore || {};
-    for (const key in prunedStore) {
-      if (!Object.prototype.hasOwnProperty.call(prunedStore, key)) continue;
-      const src = prunedStore[key];
-      imageManifest[key] = imageMetaForBoardFile(key, src, deps);
+    const store = imageStore || {};
+    for (const key in store) {
+      if (!Object.prototype.hasOwnProperty.call(store, key) || !referenced.has(key)) continue;
+      imageManifest[key] = imageMetaForBoardFile(key, store[key], deps);
     }
     const data = {
       version: BoardTypes.BOARD_VERSION_CONTAINER,
@@ -114,6 +118,7 @@
     return data;
   }
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   function summarizeImageStore(store = {}, deps = {}, { includeRuntime = false } = {}) {
     const imageStoreBytesEstimate = deps.imageStoreBytesEstimate || (() => 0);
     const imageRefKind = deps.imageRefKind || defaultImageRefKind;
@@ -200,7 +205,6 @@
     let runtimeTextCacheLines = 0;
     let runtimeTextCacheContentChars = 0;
     let runtimeTextCachePrefixEntries = 0;
-    let runtimeTextCacheKeyChars = 0;
     let runtimeTextPrivateFields = 0;
     for (const obj of objectsList || []) {
       if (obj?.type !== 'text') continue;
@@ -216,14 +220,12 @@
           runtimeTextCachePrefixEntries += Number(line?.prefixWidths?.length) || 0;
         }
       }
-      if (typeof obj._layoutCacheKey === 'string') runtimeTextCacheKeyChars += obj._layoutCacheKey.length;
     }
     return {
       runtimeTextCacheObjects,
       runtimeTextCacheLines,
       runtimeTextCacheContentChars,
       runtimeTextCachePrefixEntries,
-      runtimeTextCacheKeyChars,
       runtimeTextPrivateFields,
     };
   }
@@ -303,17 +305,23 @@
       bitmapFailures: imageSummary.bitmapFailures,
     };
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  const api = Object.freeze({
+  const api = {
     createBoardDataForSave,
     defaultImageRefKind,
-    getBoardOpenMetrics,
-    getBoardSaveMetrics,
-    getImageRuntimeMetrics,
-    getImageStoreDebugSample,
     pruneBoardDataImageStore,
     referencedImageKeys,
-  });
+  };
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    Object.assign(api, {
+      getBoardOpenMetrics,
+      getBoardSaveMetrics,
+      getImageRuntimeMetrics,
+      getImageStoreDebugSample,
+    });
+  }
+  Object.freeze(api);
 
   root.BoardfishBoardDocument = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

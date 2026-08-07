@@ -19,6 +19,7 @@ function createElement(id = 'el') {
       contains() { return false; },
       add() {},
       remove() {},
+      toggle() {},
     },
     appendChild() {},
     addEventListener() {},
@@ -183,7 +184,6 @@ function loadSelectionInputHarness(objects, options = {}) {
   vm.runInContext(
     `${source}\n` +
       'globalThis.beginSelectionHandleDrag = beginSelectionHandleDrag;\n' +
-      'globalThis.proportionalCornerResizeSize = proportionalCornerResizeSize;\n' +
       'globalThis.updateSelectionOverlay = updateSelectionOverlay;\n' +
       'globalThis.selectionBoundsIntersectViewport = selectionBoundsIntersectViewport;\n' +
       'globalThis.snappedSelectionOverlayScreenRect = snappedSelectionOverlayScreenRect;\n' +
@@ -343,17 +343,6 @@ test('multi-selection resize follows the limiting axis of the dragged rectangle 
   assert.equal(Math.round(nextBounds.y1), startBounds.y1 + 40);
 });
 
-test('proportional corner resize uses the smaller implied scale', () => {
-  const context = loadSelectionInputHarness([
-    { id: 'image-a', type: 'image', x: 0, y: 0, w: 200, h: 100, data: {} },
-    { id: 'image-b', type: 'image', x: 240, y: 0, w: 200, h: 100, data: {} },
-  ]);
-
-  const resized = context.proportionalCornerResizeSize('ne', 200, 100, 40, 10, 0.1);
-  assert.equal(resized.w, 180);
-  assert.equal(resized.h, 90);
-});
-
 test('selection overlay expands snapped outline edges to cover object bounds', () => {
   const text = { id: 'text-a', type: 'text', x: 10.25, y: 20.25, w: 100.6, h: 40.6, data: { content: 'hello' } };
   const context = loadSelectionInputHarness([text], { devicePixelRatio: 2 });
@@ -506,12 +495,12 @@ test('selection surfaces share the same outline color token', () => {
   assert.match(styles, /#rubber-band\s*\{[\s\S]*border:\s*1px solid var\(--selection-outline\);/);
 });
 
-test('single image resize anchors the opposite corner', () => {
+test('single image resize uses the smaller implied scale and anchors the opposite corner', () => {
   const image = { id: 'image-a', type: 'image', x: 0, y: 0, w: 200, h: 100, data: {} };
   const context = loadSelectionInputHarness([image]);
 
   context.beginSelectionHandleDrag({
-    dataset: { dir: 'se' },
+    dataset: { dir: 'ne' },
   }, {
     button: 0,
     clientX: 0,
@@ -519,15 +508,15 @@ test('single image resize anchors the opposite corner', () => {
     preventDefault() {},
     stopPropagation() {},
   });
-  context.drag.move({ clientX: 40, clientY: 20 });
+  context.drag.move({ clientX: 80, clientY: -10 });
   context.drag.up();
 
   assert.equal(Math.round(image.x), 0);
-  assert.equal(Math.round(image.y), 0);
-  assert.equal(Math.round(image.w), 240);
-  assert.equal(Math.round(image.h), 120);
-  assert.equal(Math.round(image.x + image.w), 240);
-  assert.equal(Math.round(image.y + image.h), 120);
+  assert.equal(Math.round(image.y), -10);
+  assert.equal(Math.round(image.w), 220);
+  assert.equal(Math.round(image.h), 110);
+  assert.equal(Math.round(image.x + image.w), 220);
+  assert.equal(Math.round(image.y + image.h), 100);
   assert.deepEqual(context.motionPulses, []);
 });
 

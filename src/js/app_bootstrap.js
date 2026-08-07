@@ -11,40 +11,82 @@ var finishFailedOpen;
   snapshot();
   markSaved();
 
-  confirmDirtyBeforeOpen = async function confirmDirtyBeforeOpen(dbg) {
+  confirmDirtyBeforeOpen = async function confirmDirtyBeforeOpen(
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    dbg,
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) {
     if (!isDirty()) return true;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     OpenDebug.step(dbg, 'dirty-dialog:start');
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const choice = await showUnsavedDialog();
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     OpenDebug.step(dbg, 'dirty-dialog:end', { choice });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (choice === 'cancel') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       OpenDebug.end(dbg, { cancelled: true });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return false;
     }
     if (choice !== 'save') return true;
     const saved = await saveBoard();
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     OpenDebug.step(dbg, 'dirty-dialog:save-result', { saved });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (!saved) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       OpenDebug.end(dbg, { cancelled: true, reason: 'save-failed' });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return false;
     }
     return true;
   };
 
-  openBoardFromPath = async function openBoardFromPath(filePath, dbg, errorLabel) {
+  openBoardFromPath = async function openBoardFromPath(
+    filePath,
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    dbg,
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    errorLabel,
+  ) {
     try {
       const fileLabel = BoardfishRuntime.describeFileRef(filePath);
       _boardOpening = true;
       if (typeof beginOpeningFreeze === 'function') beginOpeningFreeze();
       else openingShield.classList.add('active');
       startPillTask({ message: 'Opening' });
-      const data = await invokeReadBoard(filePath, dbg);
-      applyBoardData(data, { dbg, sourcesCached: true, deferRender: true, endDebug: false });
+      let data;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        data = await invokeReadBoard(filePath, dbg);
+      } else
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      data = await invokeReadBoard(filePath);
+      const applyOptions = { deferRender: true };
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        Object.assign(applyOptions, { dbg, sourcesCached: true, endDebug: false });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      applyBoardData(data, applyOptions);
       currentFileRef = filePath;
       currentFilePath = fileLabel;
       updateTitle();
-      await finishOpenedBoard(dbg, data);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') await finishOpenedBoard(dbg, data);
+      else
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      await finishOpenedBoard();
     } catch (err) {
-      finishFailedOpen(dbg, err, errorLabel);
+      finishFailedOpen(
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        dbg,
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        err,
+        errorLabel,
+      );
     }
   };
 
@@ -90,10 +132,18 @@ var finishFailedOpen;
     return `${prefix}: ${detail}`;
   }
 
-  finishFailedOpen = function finishFailedOpen(dbg, err, errorLabel) {
+  finishFailedOpen = function finishFailedOpen(
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    dbg,
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    err,
+    errorLabel,
+  ) {
     console.error(errorLabel, err);
     const message = openFailureIslandMessage(errorLabel, err);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     OpenDebug.step(dbg, 'open-failed:message', { message, limit: !!err?.boardfishLimit });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     _boardOpening = false;
     finishPillTask({
       beforeFinish: () => {
@@ -103,9 +153,12 @@ var finishFailedOpen;
       finalMsg: message,
       duration: long_message,
     });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     OpenDebug.end(dbg, { opened: false, error: String(err) });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   };
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   async function openFilePath(filePath) {
     const dbg = OpenDebug.start('openFilePath', { path: BoardfishRuntime.describeFileRef(filePath), currentFilePath, objectCount: objects.length });
     if (!(await confirmDirtyBeforeOpen(dbg))) return;
@@ -116,5 +169,6 @@ var finishFailedOpen;
   // actions here instead of exposing them as globals so agents can pass them into
   // beginDebug({ openFilePath: [...] }) without bypassing capture/download.
   registerDebugCommand('openFilePath', openFilePath);
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 }

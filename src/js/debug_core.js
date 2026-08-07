@@ -100,19 +100,6 @@
     };
   }
 
-  async function mapWithConcurrency(items, limit, worker) {
-    const out = new Array(items.length);
-    let next = 0;
-    const workerCount = Math.max(1, Math.min(Number(limit) || 1, items.length));
-    await Promise.all(Array.from({ length: workerCount }, async () => {
-      while (next < items.length) {
-        const index = next++;
-        out[index] = await worker(items[index], index);
-      }
-    }));
-    return out;
-  }
-
   root.createDebugRecorder = createDebugRecorder;
   root.mapWithConcurrency = mapWithConcurrency;
   root.round2 = round2;

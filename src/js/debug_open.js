@@ -3,7 +3,6 @@
 var OpenDebug = (() => {
   const MAX_EVENTS = 5000;
   let hydrationMode = 'visible-first';
-  let hydrationConcurrency = 8;
   let initialRenderDebugDepth = 0;
   let latestOpenContext = null;
 
@@ -44,10 +43,9 @@ var OpenDebug = (() => {
   }
 
   function setHydrationConcurrency(value) {
-    const n = Math.max(1, Math.min(32, Math.floor(Number(value) || hydrationConcurrency)));
-    hydrationConcurrency = n;
-    console.info(`[Boardfish open] hydration concurrency set to ${hydrationConcurrency}`);
-    return hydrationConcurrency;
+    const concurrency = setOpenHydrationConcurrency(value);
+    console.info(`[Boardfish open] hydration concurrency set to ${concurrency}`);
+    return concurrency;
   }
 
   function start(op, meta = {}) {
@@ -227,7 +225,7 @@ var OpenDebug = (() => {
       remaining: last?.meta?.remaining ?? '',
       error: last?.meta?.error || '',
       hydrationMode,
-      hydrationConcurrency,
+      hydrationConcurrency: getOpenHydrationConcurrency(),
     }];
     console.table(rows);
     return rows;
@@ -245,7 +243,7 @@ var OpenDebug = (() => {
       totalBitmapMs: Math.round(sum('cacheBitmapMs') * 100) / 100,
       maxImageMs: Math.round(max('ms') * 100) / 100,
       maxFetchMs: Math.round(max('fetchMs') * 100) / 100,
-      concurrency: hydrationConcurrency,
+      concurrency: getOpenHydrationConcurrency(),
       mode: hydrationMode,
     };
     console.table([out]);
@@ -961,7 +959,7 @@ var OpenDebug = (() => {
       reset,
     get enabled() { return core.enabled; },
     get hydrationMode() { return hydrationMode; },
-    get hydrationConcurrency() { return hydrationConcurrency; },
+    get hydrationConcurrency() { return getOpenHydrationConcurrency(); },
     get events() { return events.slice(); },
   };
 })();

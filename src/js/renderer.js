@@ -3,12 +3,16 @@
 (function initBoardRenderer(root) {
   const IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
   const IMAGE_EDGE_EPSILON = 1e-9;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const SLOW_TEXT_LINE_DRAW_THRESHOLD_MS = 0.25;
   const MAX_SLOW_TEXT_LINE_DRAWS = 16;
   const imageSourceDrawnSet = new WeakSet();
   const imageSourceContextDrawnMap = new WeakMap();
   const TEXT_DRAW_STATS_ENABLED = Object.freeze({ collectStats: true });
-  const TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
 
   function imageSourceDrawnBefore(source) {
     return imageSourceDrawnSet.has(source);
@@ -100,6 +104,7 @@
       slowTextLineDraws: [],
     };
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   function isDrawableImageSource(source) {
     if (!source) return false;
@@ -107,11 +112,13 @@
     return !!(source.complete && source.naturalWidth > 0);
   }
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   function countCulledObject(obj, counters = null) {
     if (!counters) return;
     if (obj.type === 'image') counters.culledImages = (counters.culledImages || 0) + 1;
     else if (obj.type === 'text') counters.culledText = (counters.culledText || 0) + 1;
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   function visibleImageCrop(obj, img, rect) {
     if (!rect || !(obj?.w > 0) || !(obj?.h > 0)) return null;
@@ -136,14 +143,6 @@
     };
   }
 
-  function imageEdgeOverdrawWorld(deps, options = {}) {
-    const viewZoom = Number(options.view?.zoom ?? deps.zoom?.());
-    const viewDpr = Number(options.view?.dpr ?? deps.dpr?.());
-    const zoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
-    const dpr = Number.isFinite(viewDpr) && viewDpr > 0 ? viewDpr : 1;
-    return IMAGE_EDGE_OVERDRAW_DEVICE_PX / (zoom * dpr);
-  }
-
   function nearlyEqual(a, b) {
     return Math.abs(a - b) <= IMAGE_EDGE_EPSILON;
   }
@@ -166,7 +165,7 @@
   }
 
   function drawImageObjWithCurrentQuality(context, obj, img, deps, options = {}) {
-    const edgeOverdraw = imageEdgeOverdrawWorld(deps, options);
+    const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (options.view.zoom * options.view.dpr);
     const transform = deps.imageTransformFromObject(obj);
     if (deps.imageTransformNeedsRendering(transform)) {
       const sideways = deps.isSidewaysRotation(transform.rotation);
@@ -205,20 +204,15 @@
   }
 
   function drawImageObj(context, obj, img, deps, options = {}) {
-    const lowerQuality = options.activeInputFullFallback === true || options.lowLatency === true;
-    const previousQuality = lowerQuality ? context.imageSmoothingQuality : undefined;
-    const previousSmoothingEnabled = lowerQuality ? context.imageSmoothingEnabled : undefined;
-    if (lowerQuality) {
-      try { context.imageSmoothingEnabled = false; } catch (_) {}
-      try { context.imageSmoothingQuality = 'low'; } catch (_) {}
+    if (options.activeInputFullFallback !== true && options.lowLatency !== true) {
+      return drawImageObjWithCurrentQuality(context, obj, img, deps, options);
     }
+    const previousSmoothingEnabled = context.imageSmoothingEnabled;
+    try { context.imageSmoothingEnabled = false; } catch (_) {}
     try {
       return drawImageObjWithCurrentQuality(context, obj, img, deps, options);
     } finally {
-      if (lowerQuality) {
-        try { context.imageSmoothingEnabled = previousSmoothingEnabled; } catch (_) {}
-        try { context.imageSmoothingQuality = previousQuality; } catch (_) {}
-      }
+      try { context.imageSmoothingEnabled = previousSmoothingEnabled; } catch (_) {}
     }
   }
 
@@ -245,32 +239,12 @@
     context.setTransform(view.zoom * dpr, 0, 0, view.zoom * dpr, view.panX * dpr, view.panY * dpr);
     deps.setCanvasImageQuality(context);
     context.font = deps.font;
+    context.fillStyle = deps.canvasTextColor();
     context.textBaseline = 'alphabetic';
     configureRendererTextContext(context);
   }
 
-  function resolveTextBaselineYOffset(deps) {
-    return typeof deps.textBaselineYOffset === 'function'
-      ? deps.textBaselineYOffset()
-      : deps.textBaselineYOffset;
-  }
-
-  function textLineIntersectsRect(lineTop, lineHeight, rect) {
-    if (!rect) return true;
-    const top = Number(lineTop);
-    const height = Number(lineHeight);
-    if (!Number.isFinite(top) || !Number.isFinite(height) || height <= 0) return true;
-    return top + height >= rect.y1 && top <= rect.y2;
-  }
-
-  function countTextLine(counters, field, amount = 1) {
-    if (!counters) return;
-    const count = Math.max(0, Math.trunc(Number(amount)) || 0);
-    if (!count) return;
-    counters.textLines = (counters.textLines || 0) + count;
-    counters[field] = (counters[field] || 0) + count;
-  }
-
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   function drawCounterValue(counters, field) {
     return Number(counters?.[field]) || 0;
   }
@@ -299,7 +273,6 @@
   }
 
   function addRichTextDrawStats(counters, stats) {
-    if (!counters || !stats) return;
     const add = (field, sourceField = field) => {
       counters[field] = (counters[field] || 0) + (Number(stats[sourceField]) || 0);
     };
@@ -470,8 +443,11 @@
     }
     insertBoundedSlowCounterRow(counters, 'slowDrawObjects', row, 8);
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   function createBoardRenderer(deps) {
+    const getTextLayoutForDraw = deps.getTextLayoutForViewport || deps.getTextLayout;
+
     function viewDefaults() {
       return {
         zoom: deps.zoom(),
@@ -481,87 +457,106 @@
       };
     }
 
-    function drawSingleObj(context, obj, counters = null, options = {}) {
-      const view = options.view || viewDefaults();
-      const imageSourceResolver = options.imageSourceResolver || null;
-      if (obj.type === 'text') {
-        context.fillStyle = deps.canvasTextColor();
-        context.textBaseline = 'alphabetic';
-        configureRendererTextContext(context);
-        if (typeof deps.getTextLayout === 'function' && typeof deps.drawTextLineRange === 'function') {
-          const layoutStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
-          const layout = typeof deps.getTextLayoutForViewport === 'function'
-            ? deps.getTextLayoutForViewport(obj, options.viewportRect || null)
-            : deps.getTextLayout(obj);
-          const totalLayoutLines = Math.max(
-            layout.length,
-            Math.trunc(Number(layout.totalLines)) || layout.length,
-          );
-          if (counters) {
-            const layoutMs = typeof performance !== 'undefined' ? performance.now() - layoutStart : 0;
-            const chars = String(obj.data?.content || '').length;
-            counters.textLayoutObjects = (counters.textLayoutObjects || 0) + 1;
-            counters.textLayoutMs = (counters.textLayoutMs || 0) + layoutMs;
-            counters.maxTextLayoutMs = Math.max(counters.maxTextLayoutMs || 0, layoutMs);
-            counters.textCharCount = (counters.textCharCount || 0) + chars;
-            counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
-            counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
-          }
-          if (counters) counters.richTextDirectDraws = (counters.richTextDirectDraws || 0) + 1;
-          const lineHeight = deps.lineHeight || 0;
-          let drawnLineCount = 0;
-          let layoutLineIndex = -1;
+    function drawSingleObj(context, obj
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      , counters = null
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      , options = {}
+    ) {
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        const viewportRect = options.viewportRect || null;
+        if (obj.type === 'text') {
+          const layout = getTextLayoutForDraw(obj, viewportRect);
           for (const line of layout) {
-            layoutLineIndex++;
-            if (!textLineIntersectsRect(line.y, lineHeight, options.viewportRect || null)) {
-              continue;
-            }
-            drawnLineCount++;
-            const lineDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
-            const drawStats = deps.drawTextLineRange(
+            deps.drawTextLineRange(
               context,
               line,
               obj,
               0,
               line.text?.length ?? 0,
-              counters ? TEXT_DRAW_STATS_ENABLED : TEXT_DRAW_STATS_DISABLED,
             );
-            addRichTextDrawStats(counters, drawStats);
-            if (counters && typeof performance !== 'undefined') {
-              recordRichTextLineDraw(counters, obj, line, layoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
-            }
-          }
-          if (counters) {
-            const culledLineCount = Math.max(0, totalLayoutLines - drawnLineCount);
-            counters.textLines = (counters.textLines || 0) + totalLayoutLines;
-            counters.drawnTextLines = (counters.drawnTextLines || 0) + drawnLineCount;
-            counters.culledTextLines = (counters.culledTextLines || 0) + culledLineCount;
           }
           return true;
         }
-        const lines = deps.getWrappedLines(obj);
-        const textBaselineYOffset = resolveTextBaselineYOffset(deps);
-        for (let i = 0; i < lines.length; i++) {
-          const lineY = obj.y + deps.textPad + i * deps.lineHeight;
-          if (!textLineIntersectsRect(lineY, deps.lineHeight, options.viewportRect || null)) {
-            countTextLine(counters, 'culledTextLines');
-            continue;
+        if (obj.type !== 'image') return false;
+
+        const view = options.view || viewDefaults();
+        const imageSourceResolver = options.imageSourceResolver || null;
+        const key = obj.data.imgKey;
+        const bitmap = deps.imageBitmapCache()[key];
+        const lowLatencyImageMotion = !!options.motion;
+        const selected = imageSourceResolver
+          ? imageSourceResolver(key, obj, view, { activeInput: lowLatencyImageMotion })
+          : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, { activeInput: lowLatencyImageMotion }) : null;
+        const img = selected?.source || null;
+        if (!isDrawableImageSource(img)) return false;
+        try {
+          const cropped = drawImageObj(context, obj, img, deps, {
+            viewportRect,
+            view,
+            activeInputFullFallback: selected?.activeInputFullFallback === true,
+            lowLatency: lowLatencyImageMotion,
+          });
+          return cropped !== null;
+        } catch (_) {
+          return false;
+        }
+      } else {
+      const viewportRect = options.viewportRect || null;
+      if (obj.type === 'text') {
+        const layoutStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
+        const layout = getTextLayoutForDraw(obj, viewportRect);
+        const totalLayoutLines = counters
+          ? Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length)
+          : 0;
+        if (counters) {
+          const layoutMs = typeof performance !== 'undefined' ? performance.now() - layoutStart : 0;
+          const chars = String(obj.data?.content || '').length;
+          counters.textLayoutObjects = (counters.textLayoutObjects || 0) + 1;
+          counters.textLayoutMs = (counters.textLayoutMs || 0) + layoutMs;
+          counters.maxTextLayoutMs = Math.max(counters.maxTextLayoutMs || 0, layoutMs);
+          counters.textCharCount = (counters.textCharCount || 0) + chars;
+          counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
+          counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
+        }
+        if (counters) counters.richTextDirectDraws = (counters.richTextDirectDraws || 0) + 1;
+        let drawnLineCount = 0;
+        let layoutLineIndex = -1;
+        for (const line of layout) {
+          layoutLineIndex++;
+          drawnLineCount++;
+          const lineDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
+          const drawStats = deps.drawTextLineRange(
+            context,
+            line,
+            obj,
+            0,
+            line.text?.length ?? 0,
+            counters ? TEXT_DRAW_STATS_ENABLED : TEXT_DRAW_STATS_DISABLED,
+          );
+          if (counters && drawStats) addRichTextDrawStats(counters, drawStats);
+          if (counters && typeof performance !== 'undefined') {
+            recordRichTextLineDraw(counters, obj, line, layoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
           }
-          countTextLine(counters, 'drawnTextLines');
-          context.fillText(lines[i].text, obj.x + deps.textPad, lineY + textBaselineYOffset);
+        }
+        if (counters) {
+          const culledLineCount = Math.max(0, totalLayoutLines - drawnLineCount);
+          counters.textLines = (counters.textLines || 0) + totalLayoutLines;
+          counters.drawnTextLines = (counters.drawnTextLines || 0) + drawnLineCount;
+          counters.culledTextLines = (counters.culledTextLines || 0) + culledLineCount;
         }
         return true;
       }
       if (obj.type !== 'image') return false;
 
+      const view = options.view || viewDefaults();
+      const imageSourceResolver = options.imageSourceResolver || null;
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
-      const fullImg = bitmap || null;
-      const motion = options.motion || null;
-      const lowLatencyImageMotion = !!motion;
+      const lowLatencyImageMotion = !!options.motion;
       const selected = imageSourceResolver
         ? imageSourceResolver(key, obj, view, counters, { activeInput: lowLatencyImageMotion })
-        : fullImg ? deps.selectImageSourceForDraw(key, obj, fullImg, view, { activeInput: lowLatencyImageMotion }) : null;
+        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, { activeInput: lowLatencyImageMotion }) : null;
       const img = selected?.source || null;
       if (isDrawableImageSource(img)) {
         if (counters) {
@@ -591,7 +586,7 @@
         }
         try {
           const cropped = drawImageObj(context, obj, img, deps, {
-            viewportRect: options.viewportRect || null,
+            viewportRect,
             view,
             activeInputFullFallback: selected?.activeInputFullFallback === true,
             lowLatency: lowLatencyImageMotion,
@@ -632,9 +627,73 @@
               : 'unknown';
       }
       return false;
+      }
     }
 
-    function drawVisibleObjects(context, counters, options = {}) {
+    function drawVisibleObjects(context
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      , counters
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      , options = {}
+    ) {
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        const skipId = options.skipId || null;
+        const skipIds = options.skipIds && typeof options.skipIds.has === 'function'
+          ? options.skipIds
+          : Array.isArray(options.skipIds) ? new Set(options.skipIds) : null;
+        const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
+        const view = options.view || viewDefaults();
+        const imageSourceResolver = options.imageSourceResolver || null;
+        const skipText = options.skipText === true;
+        const onlyText = options.onlyText === true;
+        const objectMotionForDraw = typeof deps.objectMotionForDraw === 'function' ? deps.objectMotionForDraw : null;
+        const motionObjectsForDraw = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw : null;
+        const cullingEnabled = deps.viewportCullingEnabled();
+        const motionOptions = { view, viewportRect };
+        const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
+        const drawObject = (obj) => {
+          if (obj.id === skipId || skipIds?.has(obj.id)) return;
+          if (skipText && obj.type === 'text') return;
+          if (onlyText && obj.type !== 'text') return;
+          const motion = objectMotionForDraw ? objectMotionForDraw(obj, motionOptions) : null;
+          if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) return;
+          if (motion?.skip) return;
+          const opacity = motion && Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
+          const scale = motion && Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
+          const scaleX = motion && Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
+          const scaleY = motion && Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+          const scaleOriginX = motion && Number.isFinite(motion.scaleOriginX)
+            ? Math.max(0, Math.min(1, motion.scaleOriginX))
+            : 0.5;
+          const scaleOriginY = motion && Number.isFinite(motion.scaleOriginY)
+            ? Math.max(0, Math.min(1, motion.scaleOriginY))
+            : 0.5;
+          const translateX = motion && Number.isFinite(motion.translateX) ? motion.translateX : 0;
+          const translateY = motion && Number.isFinite(motion.translateY) ? motion.translateY : 0;
+          if (motion && context.save) {
+            context.save();
+            context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
+            if (translateX || translateY) context.translate(translateX, translateY);
+            if (scaleX !== 1 || scaleY !== 1) {
+              const scalePivotX = obj.x + obj.w * scaleOriginX;
+              const scalePivotY = obj.y + obj.h * scaleOriginY;
+              context.translate(scalePivotX, scalePivotY);
+              context.scale(scaleX, scaleY);
+              context.translate(-scalePivotX, -scalePivotY);
+            }
+          }
+          try {
+            drawOptions.motion = motion;
+            drawSingleObj(context, obj, drawOptions);
+          } finally {
+            if (motion && context.restore) context.restore();
+          }
+        };
+
+        for (const obj of deps.objects()) drawObject(obj);
+        for (const obj of motionObjectsForDraw?.(motionOptions) || []) drawObject(obj);
+        return;
+      } else {
       const skipId = options.skipId || null;
       const skipIds = options.skipIds && typeof options.skipIds.has === 'function'
         ? options.skipIds
@@ -747,9 +806,8 @@
             recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, motion, deps);
           }
         }
-        if (obj.type === 'image' && drawn) {
-          drawnImages++;
-        } else if (obj.type === 'text') drawnText++;
+        if (obj.type === 'image' && drawn) drawnImages++;
+        else if (obj.type === 'text') drawnText++;
       };
 
       for (const obj of deps.objects()) {
@@ -759,15 +817,17 @@
         drawObject(obj, false);
       }
       return { drawnImages, drawnText };
+      }
     }
 
-    return Object.freeze({
-      createDrawCounters,
+    const renderer = {
       drawSingleObj,
       drawVisibleObjects,
       resetCanvasToScreen,
       setWorldCanvasTransform: (context, dpr = deps.dpr(), view = viewDefaults()) => setWorldCanvasTransform(context, dpr, view, deps),
-    });
+    };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') renderer.createDrawCounters = createDrawCounters;
+    return Object.freeze(renderer);
   }
 
   const api = Object.freeze({ createBoardRenderer });

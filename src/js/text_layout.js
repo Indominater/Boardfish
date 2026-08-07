@@ -466,7 +466,6 @@ function textGlyphPairSpacing(previousUnit, nextUnit, font = FONT) {
 function clearTextObjectLayoutRuntime(obj, options = {}) {
   if (!obj) return;
   delete obj._layoutCache;
-  delete obj._layoutCacheKey;
   delete obj._layoutCacheContent;
   delete obj._layoutCacheW;
   delete obj._layoutCacheScriptKey;
@@ -525,7 +524,6 @@ const cloneTextLayoutRuntimeLine = (line) => {
   if (Object.prototype.hasOwnProperty.call(line || {}, '_scriptMetrics')) {
     Object.defineProperty(clone, '_scriptMetrics', {
       configurable: true,
-      enumerable: false,
       value: line._scriptMetrics,
     });
   }
@@ -667,7 +665,6 @@ function cloneTextObjectRuntimeCaches(source, target) {
     source._layoutCacheAlignKey === textLayoutAlignKey(target, content)
   ) {
     target._layoutCache = cloneTextLayoutRuntimeLines(source._layoutCache);
-    target._layoutCacheKey = source._layoutCacheKey;
     target._layoutCacheContent = source._layoutCacheContent;
     target._layoutCacheW = source._layoutCacheW;
     target._layoutCacheScriptKey = source._layoutCacheScriptKey;
@@ -691,14 +688,12 @@ const clearTextLayoutCaches = (options = {}) => {
   }
 };
 
-function getPrefixWidths(text, options = {}) {
+function getPrefixWidths(text) {
   const value = String(text ?? '');
-  const useLargeTextCache = options.largeTextCache === true || value.length > TEXT_EXACT_PREFIX_MAX_CHARS;
-  const cacheKey = useLargeTextCache ? `\u0000large:${value}` : value;
-  const hit = _prefixCache.get(cacheKey);
+  const hit = _prefixCache.get(value);
   if (hit) {
-    _prefixCache.delete(cacheKey);
-    _prefixCache.set(cacheKey, hit);
+    _prefixCache.delete(value);
+    _prefixCache.set(value, hit);
     return hit;
   }
   const pw = new Float64Array(value.length + 1);
@@ -726,7 +721,7 @@ function getPrefixWidths(text, options = {}) {
       previousUnit = unit;
     }, runStart, k);
   }
-  _prefixCache.set(cacheKey, pw);
+  _prefixCache.set(value, pw);
   trimMapCache(_prefixCache, TEXT_PREFIX_CACHE_MAX_ENTRIES);
   return pw;
 }
@@ -738,7 +733,7 @@ function measureStyledTextW(text, state) {
 function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], content = '', scriptMetrics = null) {
   const value = String(text ?? '');
   if (!Array.isArray(scriptRanges) || !scriptRanges.length) {
-    return getPrefixWidths(value, { largeTextCache: String(content || '').length > TEXT_EXACT_PREFIX_MAX_CHARS });
+    return getPrefixWidths(value);
   }
   const pw = new Float64Array(value.length + 1);
   let i = 0;
@@ -825,9 +820,8 @@ function getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, text, paraS
   return widths;
 }
 
-function getCachedTextWrappedLineCount(obj, content, scriptKey) {
+function getCachedTextWrappedLineCount(obj, text, scriptKey) {
   if (!obj || obj.type !== 'text') return null;
-  const text = normalizeTextContent(content ?? obj.data?.content ?? '');
   if (
     obj._textWrappedLineCountCacheContent === text &&
     obj._textWrappedLineCountCacheW === obj.w &&
@@ -843,9 +837,9 @@ function getCachedTextWrappedLineCount(obj, content, scriptKey) {
   return null;
 }
 
-function setCachedTextWrappedLineCount(obj, content, scriptKey, lineCount) {
+function setCachedTextWrappedLineCount(obj, text, scriptKey, lineCount) {
   if (!obj || obj.type !== 'text') return;
-  obj._textWrappedLineCountCacheContent = normalizeTextContent(content ?? obj.data?.content ?? '');
+  obj._textWrappedLineCountCacheContent = text;
   obj._textWrappedLineCountCacheW = obj.w;
   obj._textWrappedLineCountCacheScriptKey = scriptKey;
   obj._textWrappedLineCountCacheValue = Math.max(1, Math.trunc(Number(lineCount)) || 1);
@@ -853,9 +847,8 @@ function setCachedTextWrappedLineCount(obj, content, scriptKey, lineCount) {
 
 const textWrappedLineWidthCacheKey = (width) => String(width);
 
-function getTextWrappedLineIndexWidthCache(obj, content, scriptKey) {
+function getTextWrappedLineIndexWidthCache(obj, text, scriptKey) {
   if (!obj || obj.type !== 'text') return null;
-  const text = normalizeTextContent(content ?? obj.data?.content ?? '');
   const cache = obj._textWrappedLineIndexWidthCache;
   if (
     obj._textWrappedLineIndexWidthCacheContent === text &&
@@ -868,9 +861,8 @@ function getTextWrappedLineIndexWidthCache(obj, content, scriptKey) {
   return null;
 }
 
-function ensureTextWrappedLineIndexWidthCache(obj, content, scriptKey) {
+function ensureTextWrappedLineIndexWidthCache(obj, text, scriptKey) {
   if (!obj || obj.type !== 'text') return null;
-  const text = normalizeTextContent(content ?? obj.data?.content ?? '');
   if (
     obj._textWrappedLineIndexWidthCacheContent !== text ||
     obj._textWrappedLineIndexWidthCacheScriptKey !== scriptKey ||
@@ -884,9 +876,9 @@ function ensureTextWrappedLineIndexWidthCache(obj, content, scriptKey) {
   return obj._textWrappedLineIndexWidthCache;
 }
 
-function promoteCachedTextWrappedLineIndex(obj, content, scriptKey, width, cache) {
+function promoteCachedTextWrappedLineIndex(obj, text, scriptKey, width, cache) {
   if (!obj || !cache || !Array.isArray(cache.entries) || !Number.isFinite(cache.lineCount)) return null;
-  obj._textWrappedLineIndexCacheContent = normalizeTextContent(content ?? obj.data?.content ?? '');
+  obj._textWrappedLineIndexCacheContent = text;
   obj._textWrappedLineIndexCacheW = width;
   obj._textWrappedLineIndexCacheScriptKey = scriptKey;
   obj._textWrappedLineIndexCache = cache;
@@ -894,9 +886,8 @@ function promoteCachedTextWrappedLineIndex(obj, content, scriptKey, width, cache
   return cache;
 }
 
-function getCachedTextWrappedLineIndex(obj, content, scriptKey) {
+function getCachedTextWrappedLineIndex(obj, text, scriptKey) {
   if (!obj || obj.type !== 'text') return null;
-  const text = normalizeTextContent(content ?? obj.data?.content ?? '');
   const cache = obj._textWrappedLineIndexCache;
   if (
     cache &&
@@ -923,27 +914,15 @@ function getCachedTextWrappedLineIndex(obj, content, scriptKey) {
   return null;
 }
 
-function setCachedTextWrappedLineIndex(obj, content, scriptKey, entries, lineCount) {
+function setCachedTextWrappedLineIndex(obj, text, scriptKey, entries, lineCount) {
   if (!obj || obj.type !== 'text' || !Array.isArray(entries)) return;
-  const text = normalizeTextContent(content ?? obj.data?.content ?? '');
   const count = Math.max(1, Math.trunc(Number(lineCount)) || 1);
   obj._textWrappedLineIndexCacheContent = text;
   obj._textWrappedLineIndexCacheW = obj.w;
   obj._textWrappedLineIndexCacheScriptKey = scriptKey;
-  const normalizedEntries = new Array(entries.length);
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    normalizedEntries[i] = {
-      logicalLineIndex: Math.max(0, Math.trunc(Number(entry.logicalLineIndex)) || 0),
-      startIndex: Math.max(0, Math.trunc(Number(entry.startIndex)) || 0),
-      endIndex: Math.max(0, Math.trunc(Number(entry.endIndex)) || 0),
-      visualStart: Math.max(0, Math.trunc(Number(entry.visualStart)) || 0),
-      visualEnd: Math.max(0, Math.trunc(Number(entry.visualEnd)) || 0),
-    };
-  }
   const cache = {
     lineCount: count,
-    entries: normalizedEntries,
+    entries,
   };
   obj._textWrappedLineIndexCache = cache;
   setCachedTextWrappedLineCount(obj, text, scriptKey, count);
@@ -1338,9 +1317,8 @@ function getWrappedLines(obj) {
   return result;
 }
 
-function getWrappedLineCount(obj, content = null) {
+function getWrappedLineCount(obj, text) {
   if (!obj || obj.type !== 'text') return 1;
-  const text = normalizeTextContent(content ?? obj.data?.content ?? '');
   const cached = _linesCacheMap.get(obj.id);
   const scriptRanges = getTextScriptRangesForLayout(obj);
   const scriptKey = JSON.stringify(scriptRanges);
@@ -1377,8 +1355,7 @@ function textLayoutLogicalLineIndexAtContentIndex(layout, index, fallback = 0) {
   return Math.max(0, Math.trunc(Number(line?.logicalLineIndex)) || 0);
 }
 
-function textLogicalLineStartAt(content, lineIndex) {
-  const text = normalizeTextContent(content);
+function textLogicalLineStartAt(text, lineIndex) {
   const target = Math.max(0, Math.trunc(Number(lineIndex)) || 0);
   if (target <= 0) return 0;
   let line = 0;
@@ -1390,9 +1367,7 @@ function textLogicalLineStartAt(content, lineIndex) {
   return text.length;
 }
 
-function textLogicalLineEndAt(content, lineIndex) {
-  const text = normalizeTextContent(content);
-  const start = textLogicalLineStartAt(text, lineIndex);
+function textLogicalLineEndAt(text, start) {
   const newlineAt = text.indexOf('\n', start);
   return newlineAt === -1 ? text.length : newlineAt;
 }
@@ -1442,7 +1417,7 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
       : textLogicalLineStartAt(content, logicalLineIndex);
     const paraEnd = indexedLine
       ? Math.max(paraStart, Math.min(Math.trunc(Number(indexedLine.endIndex)) || paraStart, content.length))
-      : textLogicalLineEndAt(content, logicalLineIndex);
+      : textLogicalLineEndAt(content, paraStart);
     if (paraStart === paraEnd) {
       pushLine(paraStart, paraStart, paraStart, paraStart, logicalLineIndex);
       continue;
@@ -1552,7 +1527,6 @@ function setTextLayoutLineScriptMetrics(line, metrics) {
     }
     Object.defineProperty(line, '_scriptMetrics', {
       configurable: true,
-      enumerable: false,
       writable: true,
       value: metrics,
     });
@@ -1631,33 +1605,37 @@ function wrappedLineIndexFromLayout(layout) {
 
 function patchTextObjectLayoutAfterInput(obj, options = {}) {
   if (!obj || obj.type !== 'text' || !Array.isArray(obj._layoutCache)) return false;
-  const patchStartedAt = textLayoutDebugNow();
-  const debug = {
+  const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
+  obj._lastTextLayoutLineDelta = null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const debug = collectDiagnostics ? {
     ok: false,
     reason: '',
     oldLayoutLines: Array.isArray(obj._layoutCache) ? obj._layoutCache.length : 0,
-  };
+  } : null;
   const fail = (reason) => {
-    debug.reason = reason;
-    debug.totalMs = textLayoutDebugRound(textLayoutDebugNow() - patchStartedAt);
-    obj._lastTextLayoutPatchDebug = debug;
+    if (collectDiagnostics) {
+      debug.reason = reason;
+      obj._lastTextLayoutPatchDebug = debug;
+    }
     return false;
   };
-  const mark = (name, startTime) => {
-    debug[name] = textLayoutDebugRound(textLayoutDebugNow() - startTime);
-  };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   const oldContent = normalizeTextContent(options.oldContent ?? obj._layoutCacheContent ?? '');
   const newContent = normalizeTextContent(options.newContent ?? obj.data?.content ?? '');
-  if (obj._layoutCacheContent !== oldContent || obj._layoutCacheW !== obj.w) return fail('stale-layout-cache');
+  if (obj._layoutCacheContent !== oldContent || obj._layoutCacheW !== obj.w) {
+    return collectDiagnostics ? fail('stale-layout-cache') : false;
+  }
   const start = Math.max(0, Math.min(Math.trunc(Number(options.start)) || 0, oldContent.length));
   const end = Math.max(start, Math.min(Math.trunc(Number(options.end)) || start, oldContent.length));
   const insertedText = normalizeTextContent(options.insertedText ?? newContent.slice(start, Math.max(start, newContent.length - (oldContent.length - end))));
   const deltaChars = newContent.length - oldContent.length;
-  if (deltaChars !== insertedText.length - (end - start)) return fail('content-delta-mismatch');
+  if (deltaChars !== insertedText.length - (end - start)) {
+    return collectDiagnostics ? fail('content-delta-mismatch') : false;
+  }
 
   const layout = obj._layoutCache;
-  let stepStartedAt = textLayoutDebugNow();
   const insertedLineCount = textNewlineCount(insertedText);
   const removedLineCount = textNewlineCount(oldContent.slice(start, end));
   const endLineProbe = end > start && removedLineCount > 0 ? end : (end > start ? end - 1 : end);
@@ -1670,7 +1648,6 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
     endLine: oldRange.startLine + insertedLineCount,
   };
   const logicalLineDelta = insertedLineCount - removedLineCount;
-  mark('rangeMs', stepStartedAt);
 
   const oldScriptKey = obj._layoutCacheScriptKey || '';
   let oldScriptRanges = [];
@@ -1679,17 +1656,12 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
     oldScriptRanges = line.scriptRanges;
     break;
   }
-  stepStartedAt = textLayoutDebugNow();
   const oldSplice = textLayoutSpliceRangeForLogicalLines(layout, oldRange.startLine, oldRange.endLine);
-  mark('spliceMs', stepStartedAt);
 
-  stepStartedAt = textLayoutDebugNow();
   const scriptRanges = getTextScriptRangesForLayout(obj);
   const scriptKey = JSON.stringify(scriptRanges);
   const alignKey = textLayoutAlignKey(obj, newContent);
-  mark('scriptRangesMs', stepStartedAt);
 
-  stepStartedAt = textLayoutDebugNow();
   const patchedScriptMetrics = scriptRanges.length
     ? patchTextScriptLayoutMetricsForObjectAfterInput(obj, {
       oldContent,
@@ -1706,32 +1678,29 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   const scriptMetrics = scriptRanges.length
     ? (patchedScriptMetrics || getTextScriptLayoutMetricsForObject(obj, newContent, scriptRanges, scriptKey))
     : null;
-  const scriptMetricsPatchDebug = obj._lastTextScriptMetricsPatchDebug || {};
-  debug.scriptMetricsPatched = !!patchedScriptMetrics;
-  debug.scriptMetricsPatchReason = scriptMetricsPatchDebug.reason || '';
-  debug.scriptMetricsInsertedRangeCount = scriptMetricsPatchDebug.insertedScriptRangeCount ?? '';
-  debug.scriptMetricsDeletedRangeCount = scriptMetricsPatchDebug.deletedScriptRangeCount ?? '';
-  debug.scriptMetricsOperation = scriptMetricsPatchDebug.operation || '';
-  mark('scriptMetricsMs', stepStartedAt);
+  if (collectDiagnostics) {
+    const scriptMetricsPatchDebug = obj._lastTextScriptMetricsPatchDebug || {};
+    debug.scriptMetricsPatched = !!patchedScriptMetrics;
+    debug.scriptMetricsPatchReason = scriptMetricsPatchDebug.reason || '';
+    debug.scriptMetricsInsertedRangeCount = scriptMetricsPatchDebug.insertedScriptRangeCount ?? '';
+    debug.scriptMetricsDeletedRangeCount = scriptMetricsPatchDebug.deletedScriptRangeCount ?? '';
+    debug.scriptMetricsOperation = scriptMetricsPatchDebug.operation || '';
+  }
 
-  stepStartedAt = textLayoutDebugNow();
   const newWrapped = wrapTextLogicalLineRange(obj, newRange.startLine, newRange.endLine, {
     scriptRanges,
     scriptMetrics,
   });
-  mark('wrapMs', stepStartedAt);
 
-  stepStartedAt = textLayoutDebugNow();
   const insertedLayout = new Array(newWrapped.length);
   for (let i = 0; i < newWrapped.length; i++) {
     insertedLayout[i] = layoutLineFromWrappedLine(obj, newWrapped[i], oldSplice.start + i, scriptRanges, scriptMetrics);
   }
-  mark('insertLayoutMs', stepStartedAt);
 
   const removedLayoutCount = oldSplice.end - oldSplice.start;
   const layoutLineDelta = insertedLayout.length - removedLayoutCount;
+  obj._lastTextLayoutLineDelta = layoutLineDelta;
 
-  stepStartedAt = textLayoutDebugNow();
   const yChanged = obj._layoutCacheY !== obj.y;
   for (let i = 0; i < oldSplice.start; i++) {
     const line = layout[i];
@@ -1758,9 +1727,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
     setTextLayoutLineScriptMetrics(line, scriptMetrics);
   }
   replaceArraySegmentInPlace(layout, oldSplice.start, removedLayoutCount, insertedLayout);
-  mark('remapMs', stepStartedAt);
 
-  obj._layoutCacheKey = `${newContent.length}:${obj.w}:${scriptKey.length}:${alignKey}`;
   obj._layoutCacheContent = newContent;
   obj._layoutCacheW = obj.w;
   obj._layoutCacheScriptKey = scriptKey;
@@ -1768,7 +1735,6 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   obj._layoutCacheY = obj.y;
   obj._layoutCache = layout;
 
-  stepStartedAt = textLayoutDebugNow();
   const cachedWrapped = _linesCacheMap.get(obj.id);
   if (
     cachedWrapped &&
@@ -1785,9 +1751,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
       if (Number.isFinite(line.nextStartIndex)) line.nextStartIndex += deltaChars;
       line.logicalLineIndex = (line.logicalLineIndex || 0) + logicalLineDelta;
     }
-    const insertedWrapped = new Array(newWrapped.length);
-    for (let i = 0; i < newWrapped.length; i++) insertedWrapped[i] = { ...newWrapped[i] };
-    replaceArraySegmentInPlace(cachedWrapped.lines, oldSplice.start, removedLayoutCount, insertedWrapped);
+    replaceArraySegmentInPlace(cachedWrapped.lines, oldSplice.start, removedLayoutCount, newWrapped);
     cachedWrapped.content = newContent;
     cachedWrapped.w = obj.w;
     cachedWrapped.scriptKey = scriptKey;
@@ -1804,23 +1768,22 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   trimMapCache(_linesCacheMap, TEXT_LINES_CACHE_MAX_ENTRIES);
   setCachedTextWrappedLineIndex(obj, newContent, scriptKey, wrappedLineIndexFromLayout(layout), layout.length);
 
-  mark('linesCacheMs', stepStartedAt);
-  debug.ok = true;
-  debug.totalMs = textLayoutDebugRound(textLayoutDebugNow() - patchStartedAt);
-  debug.newLayoutLines = layout.length;
-  debug.removedLayoutLines = removedLayoutCount;
-  debug.insertedLayoutLines = insertedLayout.length;
-  debug.layoutLineDelta = layoutLineDelta;
-  debug.logicalLineDelta = logicalLineDelta;
-  debug.deltaChars = deltaChars;
-  debug.scriptRangeCount = scriptRanges.length;
-  obj._lastTextLayoutPatchDebug = debug;
+  if (collectDiagnostics) {
+    debug.ok = true;
+    debug.newLayoutLines = layout.length;
+    debug.removedLayoutLines = removedLayoutCount;
+    debug.insertedLayoutLines = insertedLayout.length;
+    debug.layoutLineDelta = layoutLineDelta;
+    debug.logicalLineDelta = logicalLineDelta;
+    debug.deltaChars = deltaChars;
+    debug.scriptRangeCount = scriptRanges.length;
+    obj._lastTextLayoutPatchDebug = debug;
+  }
   return true;
 }
 
-function getCachedTextLayoutLineCount(obj, content) {
+function getCachedTextLayoutLineCount(obj, text) {
   if (!obj || obj.type !== 'text' || !Array.isArray(obj._layoutCache)) return null;
-  const text = normalizeTextContent(content);
   if (obj._layoutCacheContent !== text || obj._layoutCacheW !== obj.w) return null;
   const scriptKey = JSON.stringify(getTextScriptRangesForLayout(obj));
   const alignKey = textLayoutAlignKey(obj, text);
@@ -1831,7 +1794,7 @@ function getCachedTextLayoutLineCount(obj, content) {
 function getTextAutoHeight(obj, minLines = 1) {
   const content = normalizeTextContent(obj?.data?.content || '');
   const lineCount = getCachedTextLayoutLineCount(obj, content) ?? getWrappedLineCount(obj, content);
-  return Math.max(minLines * LINE_H + TEXT_PAD * 2, lineCount * LINE_H + TEXT_PAD * 2);
+  return Math.max(minLines, lineCount) * LINE_H + TEXT_PAD * 2;
 }
 
 const isTextWordSeparator = (ch) => ch === ' ' || ch === '\t';
@@ -1867,16 +1830,6 @@ const textLineAlignAt = (obj, logicalLineIndex = 0) => {
   return normalizeTextLineAlignValue(align);
 };
 
-const textLogicalLineIndexAt = (value, index) => {
-  const text = normalizeTextContent(value);
-  const clamped = Math.max(0, Math.min(index ?? 0, text.length));
-  let lineIndex = 0;
-  for (let i = 0; i < clamped; i++) {
-    if (text[i] === '\n') lineIndex++;
-  }
-  return lineIndex;
-};
-
 const textLogicalLineRangeForSelection = (value, selection = {}) => {
   const text = normalizeTextContent(value);
   const start = Math.max(0, Math.min(selection.start ?? 0, text.length));
@@ -1884,10 +1837,14 @@ const textLogicalLineRangeForSelection = (value, selection = {}) => {
   const from = Math.min(start, end);
   const to = Math.max(start, end);
   const lastIndex = to > from ? to - 1 : from;
-  return {
-    startLine: textLogicalLineIndexAt(text, from),
-    endLine: textLogicalLineIndexAt(text, lastIndex),
-  };
+  let startLine = 0;
+  let endLine = 0;
+  for (let i = 0; i < lastIndex; i++) {
+    if (text[i] !== '\n') continue;
+    endLine++;
+    if (i < from) startLine++;
+  }
+  return { startLine, endLine };
 };
 
 const cycleTextLineAlignValue = (align, direction) => {
@@ -1926,16 +1883,14 @@ const applyTextLineAlignmentRange = (obj, startLine = 0, endLine = startLine, di
 const normalizeTextScriptKind = (kind) => TEXT_SCRIPT_KINDS.includes(kind) ? kind : '';
 const textScriptMarkerForKind = (kind) => kind === 'sub' ? '_' : '^';
 const textScriptKindForMarker = (marker) => marker === '^' ? 'sup' : marker === '_' ? 'sub' : '';
-const isTextScriptBracedRange = (content, range) => {
-  const text = normalizeTextContent(content);
+const isTextScriptBracedRange = (text, range) => {
   if (!range || range.start <= 0 || range.end <= range.start + 1 || range.end > text.length) return false;
   return text[range.start] === '{' &&
     text[range.end - 1] === '}' &&
     text[range.start - 1] === textScriptMarkerForKind(range.kind);
 };
 
-const canOpenTextScriptAt = (content, markerIndex) => {
-  const text = normalizeTextContent(content);
+const canOpenTextScriptAt = (text, markerIndex) => {
   if (markerIndex <= 0 || markerIndex >= text.length - 1) return false;
   const kind = textScriptKindForMarker(text[markerIndex]);
   if (!kind) return false;
@@ -2210,10 +2165,6 @@ const textScriptStateAt = (ranges, index) => {
   return textScriptStateFromRanges(activeTextScriptRangesAt(ranges, index));
 };
 
-function textScriptIndexCacheKey(content, ranges = []) {
-  return `${normalizeTextContent(content)}\n${JSON.stringify(ranges || [])}`;
-}
-
 function textScriptMetricsStateAt(metrics, index) {
   const pos = Math.max(0, Math.trunc(Number(index)) || 0);
   return metrics?.states?.[pos] || BASE_TEXT_SCRIPT_STATE;
@@ -2371,48 +2322,63 @@ function deletedTextScriptRangeKey(range, start, end, content) {
 }
 
 function patchTextScriptLayoutMetricsForObjectAfterInput(obj, options = {}) {
-  const debug = { ok: false, reason: '' };
+  const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const debug = collectDiagnostics ? { ok: false, reason: '' } : null;
   const fail = (reason) => {
-    debug.reason = reason;
-    obj._lastTextScriptMetricsPatchDebug = debug;
+    if (collectDiagnostics) {
+      debug.reason = reason;
+      obj._lastTextScriptMetricsPatchDebug = debug;
+    }
     return null;
   };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const oldContent = normalizeTextContent(options.oldContent || '');
   const newContent = normalizeTextContent(options.newContent || '');
   const insertedText = normalizeTextContent(options.insertedText || '');
   const start = Math.max(0, Math.min(Math.trunc(Number(options.start)) || 0, oldContent.length));
   const end = Math.max(start, Math.min(Math.trunc(Number(options.end)) || start, oldContent.length));
   const removedLength = end - start;
-  if (removedLength && insertedText.length) return fail('replacement-not-supported');
-  if (newContent.length !== oldContent.length + insertedText.length - removedLength) return fail('length-mismatch');
+  if (removedLength && insertedText.length) {
+    return collectDiagnostics ? fail('replacement-not-supported') : null;
+  }
+  if (newContent.length !== oldContent.length + insertedText.length - removedLength) {
+    return collectDiagnostics ? fail('length-mismatch') : null;
+  }
 
   const oldMetrics = obj?._textScriptLayoutMetrics;
   const oldScriptRanges = Array.isArray(options.oldScriptRanges) ? options.oldScriptRanges : [];
   const newScriptRanges = Array.isArray(options.newScriptRanges) ? options.newScriptRanges : [];
   const oldScriptKey = options.oldScriptKey || JSON.stringify(oldScriptRanges);
   const newScriptKey = options.newScriptKey || JSON.stringify(newScriptRanges);
-  if (!oldMetrics) return fail('missing-old-metrics');
-  if (obj._textScriptLayoutMetricsContent !== oldContent) return fail('old-content-mismatch');
-  if (obj._textScriptLayoutMetricsScriptKey !== oldScriptKey) return fail('old-script-key-mismatch');
+  if (!oldMetrics) return collectDiagnostics ? fail('missing-old-metrics') : null;
+  if (obj._textScriptLayoutMetricsContent !== oldContent) {
+    return collectDiagnostics ? fail('old-content-mismatch') : null;
+  }
+  if (obj._textScriptLayoutMetricsScriptKey !== oldScriptKey) {
+    return collectDiagnostics ? fail('old-script-key-mismatch') : null;
+  }
 
   const expectedNewKeys = new Set();
   const isDeletion = removedLength > 0 && insertedText.length === 0;
   if (isDeletion) {
     for (const range of oldScriptRanges) {
       const key = deletedTextScriptRangeKey(range, start, end, oldContent);
-      if (key === null) return fail('range-crosses-delete');
+      if (key === null) return collectDiagnostics ? fail('range-crosses-delete') : null;
       if (key) expectedNewKeys.add(key);
     }
   } else {
-    if (start !== end) return fail('replacement-not-supported');
-    if (activeTextScriptRangesAt(oldScriptRanges, start).length) return fail('inside-existing-script');
+    if (start !== end) return collectDiagnostics ? fail('replacement-not-supported') : null;
+    if (activeTextScriptRangesAt(oldScriptRanges, start).length) {
+      return collectDiagnostics ? fail('inside-existing-script') : null;
+    }
     for (const range of oldScriptRanges) {
       if (range.end <= start) {
         expectedNewKeys.add(textScriptRangeKey(range));
       } else if (range.start >= start) {
         expectedNewKeys.add(shiftedTextScriptRangeKey(range, insertedText.length));
       } else {
-        return fail('range-crosses-edit');
+        return collectDiagnostics ? fail('range-crosses-edit') : null;
       }
     }
   }
@@ -2432,9 +2398,9 @@ function patchTextScriptLayoutMetricsForObjectAfterInput(obj, options = {}) {
       });
       continue;
     }
-    return fail('unexpected-new-range');
+    return collectDiagnostics ? fail('unexpected-new-range') : null;
   }
-  if (expectedNewKeys.size) return fail('missing-shifted-range');
+  if (expectedNewKeys.size) return collectDiagnostics ? fail('missing-shifted-range') : null;
 
   if (isDeletion) {
     const metrics = {
@@ -2450,12 +2416,14 @@ function patchTextScriptLayoutMetricsForObjectAfterInput(obj, options = {}) {
     obj._textScriptLayoutMetrics = metrics;
     obj._textScriptLayoutMetricsContent = newContent;
     obj._textScriptLayoutMetricsScriptKey = newScriptKey;
-    debug.ok = true;
-    debug.reason = '';
-    debug.insertedScriptRangeCount = 0;
-    debug.deletedScriptRangeCount = Math.max(0, oldScriptRanges.length - newScriptRanges.length);
-    debug.operation = 'delete';
-    obj._lastTextScriptMetricsPatchDebug = debug;
+    if (collectDiagnostics) {
+      debug.ok = true;
+      debug.reason = '';
+      debug.insertedScriptRangeCount = 0;
+      debug.deletedScriptRangeCount = Math.max(0, oldScriptRanges.length - newScriptRanges.length);
+      debug.operation = 'delete';
+      obj._lastTextScriptMetricsPatchDebug = debug;
+    }
     return metrics;
   }
 
@@ -2475,19 +2443,21 @@ function patchTextScriptLayoutMetricsForObjectAfterInput(obj, options = {}) {
   obj._textScriptLayoutMetrics = metrics;
   obj._textScriptLayoutMetricsContent = newContent;
   obj._textScriptLayoutMetricsScriptKey = newScriptKey;
-  debug.ok = true;
-  debug.reason = '';
-  debug.insertedScriptRangeCount = insertedRanges.length;
-  debug.deletedScriptRangeCount = 0;
-  debug.operation = 'insert';
-  obj._lastTextScriptMetricsPatchDebug = debug;
+  if (collectDiagnostics) {
+    debug.ok = true;
+    debug.reason = '';
+    debug.insertedScriptRangeCount = insertedRanges.length;
+    debug.deletedScriptRangeCount = 0;
+    debug.operation = 'insert';
+    obj._lastTextScriptMetricsPatchDebug = debug;
+  }
   return metrics;
 }
 
 function getTextScriptLayoutMetrics(content, scriptRanges = []) {
   const text = normalizeTextContent(content);
   const ranges = Array.isArray(scriptRanges) ? scriptRanges : [];
-  const cacheKey = textScriptIndexCacheKey(text, ranges);
+  const cacheKey = `${text}\n${JSON.stringify(ranges)}`;
   const hit = _scriptIndexCache.get(cacheKey);
   if (hit) {
     _scriptIndexCache.delete(cacheKey);
@@ -2972,7 +2942,6 @@ function getTextLayout(obj) {
     }
     return obj._layoutCache;
   }
-  obj._layoutCacheKey = `${content.length}:${obj.w}:${scriptKey.length}:${alignKey}`;
   obj._layoutCacheContent = content;
   obj._layoutCacheW = obj.w;
   obj._layoutCacheScriptKey = scriptKey;
@@ -3009,7 +2978,7 @@ function getTextLayoutForLineRange(obj, firstLineIndex = 0, lastLineIndex = firs
   }
 
   const knownLineCount = getCachedTextWrappedLineCount(obj, content, scriptKey);
-  let lineIndexCache = getCachedTextWrappedLineIndex(obj, content, scriptKey);
+  const lineIndexCache = getCachedTextWrappedLineIndex(obj, content, scriptKey);
   if (!lineIndexCache) {
     const wrapped = buildWrappedLines(obj, {
       scriptRanges,
@@ -3040,7 +3009,6 @@ function getTextLayoutForLineRange(obj, firstLineIndex = 0, lastLineIndex = firs
     }
     return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, wrapped.lineCount);
   }
-  lineIndexCache = ensureCachedTextWrappedLineIndex(obj, content, scriptRanges, scriptKey);
   const totalLineCount = Math.max(1, Math.trunc(Number(lineIndexCache?.lineCount)) || 1);
   const missingSpans = textViewportLayoutLineCacheMissingSpans(obj, content, scriptKey, alignKey, first, last, totalLineCount);
   if (missingSpans.length) {
@@ -3100,8 +3068,9 @@ function getTextLayoutForViewport(obj, viewportRect = null) {
   const y2 = Number(viewportRect.y2);
   if (!Number.isFinite(y1) || !Number.isFinite(y2)) return getTextLayout(obj);
   const baseY = obj.y + TEXT_PAD;
-  const first = Math.max(0, Math.floor((Math.min(y1, y2) - baseY - LINE_H) / LINE_H));
-  const last = Math.max(first, Math.ceil((Math.max(y1, y2) - baseY) / LINE_H));
+  const first = Math.max(0, Math.ceil((Math.min(y1, y2) - baseY - LINE_H) / LINE_H));
+  const last = Math.floor((Math.max(y1, y2) - baseY) / LINE_H);
+  if (last < first) return [];
   return getTextLayoutForLineRange(obj, first, last);
 }
 
@@ -3161,15 +3130,8 @@ function lineNearestCaretOffsetsForX(line, wx, obj) {
 
   const right = lo;
   const left = Math.max(0, right - 1);
-  let bestOffset = right;
-  if (right > textLength) bestOffset = textLength;
-  if (right <= textLength) {
-    const leftDistance = Math.abs(target - pw[left]);
-    const rightDistance = Math.abs(target - pw[right]);
-    bestOffset = leftDistance <= rightDistance ? left : right;
-  }
-
-  const bestX = pw[Math.max(0, Math.min(bestOffset, textLength))];
+  const bestOffset = Math.abs(target - pw[left]) <= Math.abs(target - pw[right]) ? left : right;
+  const bestX = pw[bestOffset];
   const epsilon = 1e-7;
   let first = bestOffset;
   while (first > 0 && Math.abs(pw[first - 1] - bestX) <= epsilon) first--;
@@ -3243,6 +3205,7 @@ function lineCaretXAtOffset(line, obj, offset) {
   return (previousInkRight + nextInkLeft) / 2;
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function createTextDrawStats() {
   return {
     chars: 0,
@@ -3268,6 +3231,7 @@ function cloneTextDrawStats(stats, cacheHit = false) {
     planCacheMisses: cacheHit ? 0 : 1,
   };
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function isTextDrawBlankUnit(unit) {
   return unit === ' ' || unit === '\u00a0';
@@ -3353,15 +3317,22 @@ function setTextDrawPlanCache(line, plan) {
 }
 
 function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetrics) {
-  const stats = createTextDrawStats();
-  stats.chars = end - start;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  let stats = null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    stats = createTextDrawStats();
+    stats.chars = end - start;
+  }
   const runs = [];
   let i = start;
   while (i < end) {
     const globalIndex = line.startIndex + i;
     if (text[i] === '\t' || (hasScriptRanges && textScriptMetricsHiddenAt(scriptMetrics, globalIndex))) {
-      if (text[i] === '\t') stats.skippedTabs++;
-      else stats.hiddenChars++;
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        if (text[i] === '\t') stats.skippedTabs++;
+        else stats.hiddenChars++;
+      }
       i++;
       continue;
     }
@@ -3381,21 +3352,26 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
     };
     const drawFont = state.font || FONT;
     const batchingFontReady = isTextDrawBatchingFontReady(drawFont);
-    stats.runs++;
-    if (state.depth > 0) {
-      stats.scriptRuns++;
-      stats.fontSwitches++;
-    } else {
-      stats.plainRuns++;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      stats.runs++;
+      if (state.depth > 0) {
+        stats.scriptRuns++;
+        stats.fontSwitches++;
+      } else {
+        stats.plainRuns++;
+      }
     }
     forEachTextSpacingUnit(text, (unit, unitStart, unitEnd) => {
-      const charCount = Math.max(0, unitEnd - unitStart);
       if (isTextDrawBlankUnit(unit)) {
-        stats.skippedSpaces += charCount;
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          stats.skippedSpaces += Math.max(0, unitEnd - unitStart);
+        }
         return;
       }
-      stats.drawUnits++;
-      stats.drawnChars += charCount;
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        stats.drawUnits++;
+        stats.drawnChars += Math.max(0, unitEnd - unitStart);
+      }
       appendTextDrawUnit(run.draws, {
         text: unit,
         offset: unitStart,
@@ -3403,12 +3379,12 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
       }, drawFont, batchingFontReady);
     }, i, j);
     if (run.draws.length) {
-      stats.drawCalls += run.draws.length;
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') stats.drawCalls += run.draws.length;
       runs.push(run);
     }
     i = j;
   }
-  return {
+  const plan = {
     text,
     start,
     end,
@@ -3418,8 +3394,9 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
     scriptMetrics,
     font: FONT,
     runs,
-    stats,
   };
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') plan.stats = stats;
+  return plan;
 }
 
 function drawTextPlan(context, line, obj, plan) {
@@ -3436,8 +3413,15 @@ function drawTextPlan(context, line, obj, plan) {
   }
 }
 
-const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0, options = {}) => {
-  if (!context || !line || !obj) return createTextDrawStats();
+const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , options = {}
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) => {
+  if (!context || !line || !obj) {
+    if (typeof BOARDFISH_PRODUCTION !== 'undefined') return null;
+    return createTextDrawStats();
+  }
   configureTextCanvasContext(context);
   const text = String(line.text ?? '');
   const start = Math.max(0, Math.min(startOffset, text.length));
@@ -3456,13 +3440,18 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
   let plan = cacheable && textDrawPlanCacheMatches(line._textDrawPlanCache, line, text, start, end, scriptMetrics)
     ? line._textDrawPlanCache
     : null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cacheHit = !!plan;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!plan) {
     plan = createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetrics);
     if (cacheable) setTextDrawPlanCache(line, plan);
   }
   drawTextPlan(context, line, obj, plan);
+  if (typeof BOARDFISH_PRODUCTION !== 'undefined') return null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   return options.collectStats === false ? null : cloneTextDrawStats(plan.stats, cacheHit);
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
 function lineEndX(line, obj) {
@@ -3524,10 +3513,6 @@ const textLayoutCaretCenterYForHit = (line, obj, index, affinity = '', metrics =
   return line.y + LINE_H / 2;
 };
 
-const textLayoutNearestCaretOffsets = (line, wx, obj) => {
-  return lineNearestCaretOffsetsForX(line, wx, obj);
-};
-
 const textLayoutCaretHitCandidates = (line, wx, obj) => {
   const content = textLayoutContentForHit(line, obj);
   const ranges = line?.scriptRanges || [];
@@ -3548,7 +3533,7 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
     });
   };
 
-  for (const offset of textLayoutNearestCaretOffsets(line, wx, obj)) {
+  for (const offset of lineNearestCaretOffsetsForX(line, wx, obj)) {
     const rawIndex = Math.max(0, Math.min(line.startIndex + offset, content.length));
     const bracedOpeningGap = !!metrics?.bracedStarts?.[rawIndex];
     if (bracedOpeningGap) continue;

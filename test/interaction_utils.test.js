@@ -50,7 +50,7 @@ test('beginDocumentDrag attaches listeners and cleanup calls the up handler once
       up: (event) => ups.push(event?.x ?? null),
     });
     listeners.get('mousemove')({ x: 3 });
-    cleanup({ x: 4 });
+    listeners.get('mouseup')({ x: 4 });
     cleanup({ x: 5 });
     assert.deepEqual(moves, [3]);
     assert.deepEqual(ups, [4]);

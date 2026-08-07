@@ -62,16 +62,6 @@ const canTransformSelectedImagesFromKeyboard = () => {
   return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardTransform();
 };
 
-const selectedTextObjectsForKeyboard = () => {
-  const textObjects = [];
-  if (!selectedIds?.size || !objectsMap?.get) return textObjects;
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (obj?.type === 'text') textObjects.push(obj);
-  }
-  return textObjects;
-};
-
 const selectedTextObjectForKeyboardEdit = () => {
   if (!selectedIds || selectedIds.size !== 1 || !objectsMap?.get) return null;
   const [id] = selectedIds;
@@ -99,10 +89,11 @@ const enterSelectedTextEditFromKeyboard = (e) => {
 
 const applySelectedTextAlignmentFromKeyboard = (direction) => {
   if (editingId || isBoardInputBlocked() || typeof applyTextLineAlignmentRange !== 'function') return false;
-  const textObjects = selectedTextObjectsForKeyboard();
-  if (!textObjects.length) return false;
+  if (!selectedIds?.size || !objectsMap?.get) return false;
   let changed = false;
-  for (const obj of textObjects) {
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (obj?.type !== 'text') continue;
     const lineCount = typeof textLogicalLineCount === 'function' ? textLogicalLineCount(obj.data?.content || '') : 1;
     if (applyTextLineAlignmentRange(obj, 0, Math.max(0, lineCount - 1), direction)) {
       markDirty(obj.id);
@@ -110,7 +101,8 @@ const applySelectedTextAlignmentFromKeyboard = (direction) => {
     }
   }
   if (!changed) return false;
-  scheduleRender(true, true, 'text-align');
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'text-align');
+  else scheduleRender(true, true);
   pushHistory('text-align');
   return true;
 };

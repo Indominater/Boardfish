@@ -8,7 +8,9 @@
   // async motion cleanup must not move DOM outlines ahead of canvas pixels.
   const lastDrawnObjectMotions = new Map();
   let motionRenderPending = false;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let motionRenderRequestedAt = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const jelloDefaults = Object.freeze({
     amplitude: 0.062,
     duration: 520,
@@ -116,24 +118,7 @@
     carryDurationMs: numberInRange(options.carryDurationMs, base.carryDurationMs, 80, 320),
     normalizePath: options.normalizePath == null ? base.normalizePath : options.normalizePath !== false,
   });
-  const copyJiggleParamKey = (p) => [
-    p.duration,
-    p.yFreqHz,
-    p.xFreqHz,
-    p.yDamping,
-    p.xDamping,
-    p.yLagMs,
-    p.attackMs,
-    p.settleStart,
-    p.sagGain,
-    p.sagDecay,
-    p.lateralCoupling,
-    p.deformation,
-    p.deformationLagMs,
-    p.deformationFreqHz,
-    p.deformationDamping,
-    p.normalizePath ? 1 : 0,
-  ].join('|');
+  const copyJiggleParamKey = (p) => `${p.duration}|${p.yFreqHz}|${p.xFreqHz}|${p.yDamping}|${p.xDamping}|${p.yLagMs}|${p.attackMs}|${p.settleStart}|${p.sagGain}|${p.sagDecay}|${p.lateralCoupling}|${p.deformation}|${p.deformationLagMs}|${p.deformationFreqHz}|${p.deformationDamping}|${p.normalizePath ? 1 : 0}`;
   const dampedSpringImpulse = (timeSec, freqHz, dampingRatio) => {
     const zeta = numberInRange(dampingRatio, 0.5, 0.001, 0.999);
     const omega0 = 2 * Math.PI * freqHz;
@@ -236,40 +221,57 @@
     jelloObjectMotions.size || textSelectionJelloMotions.size
   );
 
-  const motionDebugMeta = () => ({
-    jelloObjectMotions: jelloObjectMotions.size,
-    textSelectionJelloMotions: textSelectionJelloMotions.size,
-    hasObjectMotions: !!hasObjectMotions(),
-  });
-
-  const recordMotionDebug = (stepName, meta = {}) => {
-    root.ViewportDebug?.recordMotion?.(stepName, {
-      ...motionDebugMeta(),
-      ...meta,
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  let recordMotionDebug = null;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    const motionDebugMeta = () => ({
+      jelloObjectMotions: jelloObjectMotions.size,
+      textSelectionJelloMotions: textSelectionJelloMotions.size,
+      hasObjectMotions: !!hasObjectMotions(),
     });
-  };
+    recordMotionDebug = (stepName, meta = {}) => {
+      root.ViewportDebug?.recordMotion?.(stepName, {
+        ...motionDebugMeta(),
+        ...meta,
+      });
+    };
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   const requestMotionFrame = () => {
     if (motionRenderPending || prefersReducedMotion()) return;
     if (typeof root.scheduleRender !== 'function') return;
-    const requestedAt = now();
     motionRenderPending = true;
-    motionRenderRequestedAt = requestedAt;
-    recordMotionDebug('raf-scheduled', { requestedAt, source: 'motion' });
-    root.scheduleRender?.(true, true, 'motion');
-    recordMotionDebug('render-scheduled', { source: 'motion' });
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const requestedAt = now();
+      motionRenderRequestedAt = requestedAt;
+      recordMotionDebug('raf-scheduled', { requestedAt, source: 'motion' });
+      root.scheduleRender?.(true, true, 'motion');
+      recordMotionDebug('render-scheduled', { source: 'motion' });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    } else {
+      root.scheduleRender?.(true, true);
+    }
   };
 
-  const afterViewportRenderFrame = (meta = {}) => {
+  const afterViewportRenderFrame = (
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    meta = {},
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) => {
     if (prefersReducedMotion()) return;
     if (!motionRenderPending && !hasObjectMotions()) return;
-    const requestedAt = motionRenderRequestedAt;
-    const firedAt = now();
-    const wasPending = motionRenderPending;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const wasPending = typeof BOARDFISH_PRODUCTION === 'undefined' && motionRenderPending;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     motionRenderPending = false;
-    motionRenderRequestedAt = 0;
     const removed = pruneFinishedObjectMotions();
-    if (wasPending) {
+    if (typeof BOARDFISH_PRODUCTION === 'undefined' && wasPending) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const requestedAt = motionRenderRequestedAt;
+      const firedAt = now();
+      motionRenderRequestedAt = 0;
       recordMotionDebug('raf-fired', {
         requestedAt,
         firedAt,
@@ -277,10 +279,23 @@
         removed,
         source: meta.source || meta.sources || 'motion',
       });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     if (!hasObjectMotions()) {
-      if (removed) root.scheduleRender?.(true, true, 'motion-finished');
-      if (wasPending || removed) recordMotionDebug('finished', { removed });
+      if (removed) {
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          root.scheduleRender?.(true, true, 'motion-finished');
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        } else {
+          root.scheduleRender?.(true, true);
+        }
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined' && (wasPending || removed)) {
+        recordMotionDebug('finished', { removed });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return;
     }
     requestMotionFrame();
@@ -332,11 +347,15 @@
       startedAt - existing.startedAt >= 0 &&
       startedAt - existing.startedAt < JIGGLE_RETRIGGER_MIN_INTERVAL_MS
     ) {
-      recordMotionDebug('jiggle-coalesced', {
-        id: obj.id,
-        objectType: obj.type || '',
-        action: options.action || '',
-      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        recordMotionDebug('jiggle-coalesced', {
+          id: obj.id,
+          objectType: obj.type || '',
+          action: options.action || '',
+        });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       requestMotionFrame();
       return;
     }
@@ -365,19 +384,23 @@
       ...(handoff ? { handoff } : {}),
     };
     jelloObjectMotions.set(obj.id, motion);
-    recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
-      id: obj.id,
-      objectType: obj.type || '',
-      action: options.action || '',
-      phase: motion.phase,
-      delay: motion.delay,
-      duration: motion.duration,
-      amplitude: motion.amplitude,
-      translateXPx: motion.translateXPx || 0,
-      translateYPx: motion.translateYPx || 0,
-      xFreqHz: motion.xFreqHz || '',
-      yFreqHz: motion.yFreqHz || '',
-    });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
+        id: obj.id,
+        objectType: obj.type || '',
+        action: options.action || '',
+        phase: motion.phase,
+        delay: motion.delay,
+        duration: motion.duration,
+        amplitude: motion.amplitude,
+        translateXPx: motion.translateXPx || 0,
+        translateYPx: motion.translateYPx || 0,
+        xFreqHz: motion.xFreqHz || '',
+        yFreqHz: motion.yFreqHz || '',
+      });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     requestMotionFrame();
   };
 
@@ -433,11 +456,15 @@
       startedAt - existing.startedAt >= 0 &&
       startedAt - existing.startedAt < JIGGLE_RETRIGGER_MIN_INTERVAL_MS
     ) {
-      recordMotionDebug('jiggle-coalesced', {
-        id: spec.id,
-        objectType: 'text-selection',
-        action: options.action || '',
-      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        recordMotionDebug('jiggle-coalesced', {
+          id: spec.id,
+          objectType: 'text-selection',
+          action: options.action || '',
+        });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       requestMotionFrame();
       return;
     }
@@ -462,18 +489,22 @@
       ...(handoff ? { handoff } : {}),
     };
     textSelectionJelloMotions.set(spec.id, motion);
-    recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
-      id: spec.id,
-      objectType: 'text-selection',
-      action: options.action || '',
-      delay: motion.delay,
-      duration: motion.duration,
-      amplitude: motion.amplitude,
-      translateXPx: motion.translateXPx || 0,
-      translateYPx: motion.translateYPx || 0,
-      start: motion.start,
-      end: motion.end,
-    });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
+        id: spec.id,
+        objectType: 'text-selection',
+        action: options.action || '',
+        delay: motion.delay,
+        duration: motion.duration,
+        amplitude: motion.amplitude,
+        translateXPx: motion.translateXPx || 0,
+        translateYPx: motion.translateYPx || 0,
+        start: motion.start,
+        end: motion.end,
+      });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     requestMotionFrame();
   };
 
@@ -491,14 +522,8 @@
     };
   };
 
-  const screenPxToWorldValue = (value, options = {}) => {
-    const viewZoom = Number(options?.view?.zoom);
-    const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
-    return value / safeZoom;
-  };
-
   const jelloScaleForMotion = (motion, t) => {
-    const decay = Math.pow(1 - t, numberInRange(motion.decayPower, 2.15, 0.8, 4));
+    const decay = Math.pow(1 - t, motion.decayPower);
     const wobble = Math.sin(t * Math.PI * motion.oscillations) * motion.amplitude * decay;
     const rebound = Math.sin(t * Math.PI * motion.oscillations * 2) * motion.amplitude * motion.rebound * decay;
     return {
@@ -514,15 +539,17 @@
     const groupSide = groupSize > 1 ? numberInRange(motion.groupSide, 0, -1, 1) : 1;
     const xPx = point.x * normalizer.x * motion.translateXPx;
     const yPx = point.y * normalizer.y * motion.translateYPx;
+    const viewZoom = Number(options?.view?.zoom);
+    const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
     const result = {
-      groupTranslateX: screenPxToWorldValue(groupSize > 1 ? 0 : xPx, options),
-      groupTranslateY: screenPxToWorldValue(yPx, options),
+      groupTranslateX: (groupSize > 1 ? 0 : xPx) / safeZoom,
+      groupTranslateY: yPx / safeZoom,
     };
     if (motion.translateXPx) {
-      result.translateX = screenPxToWorldValue(xPx * groupSide, options);
+      result.translateX = xPx * groupSide / safeZoom;
     }
     if (motion.translateYPx) {
-      result.translateY = screenPxToWorldValue(yPx, options);
+      result.translateY = yPx / safeZoom;
     }
     if (motion.deformation) {
       const shape = copyJiggleShapeUnit(t, motion) * normalizer.shape;
@@ -582,7 +609,7 @@
     const cutoff = motion.startedAt + elapsedMs;
     const previousElapsed = cutoff - handoff.motion.startedAt;
     const previous = motionTransformAtElapsed(handoff.motion, previousElapsed, options);
-    const weight = smootherstep(elapsedMs / Math.max(1, handoff.duration));
+    const weight = smootherstep(elapsedMs / handoff.duration);
     return blendMotionTransforms(previous, transform, weight);
   };
 
@@ -619,40 +646,56 @@
     if (!motion || prefersReducedMotion()) return null;
     if (motion.start !== Math.min(start, end) || motion.end !== Math.max(start, end)) {
       textSelectionJelloMotions.delete(id);
-      recordMotionDebug('jiggle-cancelled', {
-        id,
-        objectType: 'text-selection',
-        reason: 'selection-range-changed',
-      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        recordMotionDebug('jiggle-cancelled', {
+          id,
+          objectType: 'text-selection',
+          reason: 'selection-range-changed',
+        });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return null;
     }
     const progress = motionProgress(motion, now());
     if (progress.done) {
       textSelectionJelloMotions.delete(id);
-      recordMotionDebug('jiggle-done', {
-        id,
-        objectType: 'text-selection',
-        t: 1,
-      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        recordMotionDebug('jiggle-done', {
+          id,
+          objectType: 'text-selection',
+          t: 1,
+        });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return null;
     }
     if (progress.waiting) {
       const transform = restingJelloTransformForMotion(motion, options, progress.elapsed);
-      recordMotionDebug('jiggle-waiting', {
-        id,
-        objectType: 'text-selection',
-        t: 0,
-        ...transform,
-      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        recordMotionDebug('jiggle-waiting', {
+          id,
+          objectType: 'text-selection',
+          t: 0,
+          ...transform,
+        });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return { opacity: 1, ...transform };
     }
     const transform = jelloTransformForMotion(motion, progress.t, options, progress.elapsed);
-    recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-progress' : 'jello-progress', {
-      id,
-      objectType: 'text-selection',
-      t: progress.t,
-      ...transform,
-    });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-progress' : 'jello-progress', {
+        id,
+        objectType: 'text-selection',
+        t: progress.t,
+        ...transform,
+      });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return {
       opacity: 1,
       ...transform,
@@ -681,36 +724,48 @@
     const progress = motionProgress(jello, cutoff);
     if (progress.done) {
       jelloObjectMotions.delete(obj.id);
-      recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-done' : 'jello-done', {
-        id: obj.id,
-        objectType: obj.type || '',
-        phase: jello.phase,
-        t: 1,
-      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-done' : 'jello-done', {
+          id: obj.id,
+          objectType: obj.type || '',
+          phase: jello.phase,
+          t: 1,
+        });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return jello.phase === 'exit' ? { opacity: 0, scale: 1, skip: true } : null;
     }
     if (progress.waiting) {
       const transform = restingJelloTransformForMotion(jello, options, progress.elapsed);
-      recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-waiting' : 'jello-waiting', {
-        id: obj.id,
-        objectType: obj.type || '',
-        phase: jello.phase,
-        t: 0,
-        ...transform,
-      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-waiting' : 'jello-waiting', {
+          id: obj.id,
+          objectType: obj.type || '',
+          phase: jello.phase,
+          t: 0,
+          ...transform,
+        });
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return { opacity: 1, ...transform };
     }
     const t = progress.t;
     const exitOpacity = jello.phase === 'exit' ? clamp01(1 - t) : 1;
     const transform = jelloTransformForMotion(jello, t, options, progress.elapsed);
-    recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-progress' : 'jello-progress', {
-      id: obj.id,
-      objectType: obj.type || '',
-      phase: jello.phase,
-      t,
-      opacity: exitOpacity,
-      ...transform,
-    });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-progress' : 'jello-progress', {
+        id: obj.id,
+        objectType: obj.type || '',
+        phase: jello.phase,
+        t,
+        opacity: exitOpacity,
+        ...transform,
+      });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return {
       opacity: exitOpacity,
       ...transform,
@@ -789,7 +844,9 @@
         ...(payload?.options || {}),
         ...(options || {}),
       }),
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       action,
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     };
     const hasExplicitObjects = hasOwn(payload, 'objects') || hasOwn(payload, 'addedObjects');
     const hasExplicitRemovedObjects = hasOwn(payload, 'removedObjects');

@@ -9,16 +9,18 @@ function imageVariantMemoryLimit() {
   return Math.max(minBytes, Math.min(maxBytes, Math.floor(deviceMemoryGb * 1024 * 1024 * 1024 / 4)));
 }
 var IMAGE_VARIANT_MEMORY_LIMIT = imageVariantMemoryLimit();
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 var VIEWPORT_PERF_MODES = {
   '1': { label: 'culling + scaled images', culling: true, scaling: true },
   '2': { label: 'scaled images only', culling: false, scaling: true },
   '3': { label: 'culling only', culling: true, scaling: false },
   '4': { label: 'none', culling: false, scaling: false },
 };
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 var imageScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
   memoryLimit: IMAGE_VARIANT_MEMORY_LIMIT,
   onEvict(entry) {
-    imageScaledVariantEvictionCount++;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantEvictionCount++;
     dropDrawableBitmapWarmup(entry?.bitmap);
   },
 });
@@ -29,7 +31,9 @@ var imageScaledBitmapFailures = new Map();
 var imageScaledBitmapPendingByteTotal = 0;
 var imageScaledBitmapBytes = 0;
 var imageScaledVariantRenderTimer = null;
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 var imageScaledVariantRenderCount = 0;
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 var imageScaledVariantQueue = [];
 var imageScaledVariantQueueScheduled = false;
 var imageScaledVariantQueueTimer = null;
@@ -41,6 +45,7 @@ var IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS = 0;
 var IMAGE_VARIANT_QUEUE_CONCURRENCY = 4;
 var IMAGE_VARIANT_ACTIVE_INPUT_PRIORITY_MS = 180;
 var IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT = 1.18;
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 var imageScaledVariantBuildCount = 0;
 var imageScaledVariantBuildTotalMs = 0;
 var imageScaledVariantBuildMaxMs = 0;
@@ -50,7 +55,9 @@ var imageScaledVariantEvictionCount = 0;
 var imageScaledVariantMemorySkipCount = 0;
 var imageScaledVariantActiveInputFullFallbackCount = 0;
 var imageScaledVariantPriorityBoostCount = 0;
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 var imageScaledVariantPrewarmTimer = null;
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 var imageScaledVariantPrewarmRunCount = 0;
 var imageScaledVariantPrewarmCandidateCount = 0;
 var imageScaledVariantPrewarmQueuedCount = 0;
@@ -61,6 +68,7 @@ var imageScaledVariantSourceReadyQueuedCount = 0;
 var imageScaledVariantSourceReadyReadyCount = 0;
 var imageScaledVariantSourceReadyNoSourceCount = 0;
 var imageScaledVariantSourceReadyFullScaleCount = 0;
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 var IMAGE_VARIANT_PREWARM_PAD_PX = 768;
 var viewportCullingEnabled = true;
 var VIEWPORT_IMAGE_SCALING_SUPPORTED = typeof createImageBitmap === 'function';
@@ -71,6 +79,7 @@ var drawableBitmapWarmupQueue = [];
 var drawableBitmapWarmupScheduled = false;
 var drawableBitmapWarmupQueued = typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
 var drawableBitmapWarmupReady = typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 var drawableBitmapWarmupQueuedCount = 0;
 var drawableBitmapWarmupWarmedCount = 0;
 var drawableBitmapWarmupTotalMs = 0;
@@ -81,6 +90,7 @@ var drawableBitmapWarmupErrorCount = 0;
 var drawableBitmapWarmupUnsupportedCount = 0;
 var drawableBitmapWarmupQueuedByKind = {};
 var drawableBitmapWarmupWarmedByKind = {};
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function isViewportImageScalingActive() {
   return VIEWPORT_IMAGE_SCALING_SUPPORTED && viewportImageScalingEnabled;
@@ -97,18 +107,6 @@ function isImageVariantDrawableSource(source) {
   return !!(source.complete && source.naturalWidth > 0) || !!(source.width > 0 && source.height > 0);
 }
 
-function drawableBitmapWarmupHas(set, source) {
-  try { return !!set?.has?.(source); } catch (_) { return false; }
-}
-
-function drawableBitmapWarmupAdd(set, source) {
-  try { set?.add?.(source); } catch (_) {}
-}
-
-function drawableBitmapWarmupDelete(set, source) {
-  try { set?.delete?.(source); } catch (_) {}
-}
-
 function drawableBitmapWarmupKind(meta = {}) {
   const kind = String(meta.kind || '');
   if (kind === 'full-image') return 'fullImage';
@@ -117,10 +115,12 @@ function drawableBitmapWarmupKind(meta = {}) {
   return 'other';
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function countDrawableBitmapWarmupKind(target, meta = {}) {
   const kind = drawableBitmapWarmupKind(meta);
   target[kind] = (target[kind] || 0) + 1;
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function drawableBitmapWarmupMaxEdge(meta = {}) {
   const kind = drawableBitmapWarmupKind(meta);
@@ -145,8 +145,8 @@ function drawableBitmapWarmupTargetSize(source, meta = {}) {
 
 function dropDrawableBitmapWarmup(source) {
   if (!source) return;
-  drawableBitmapWarmupDelete(drawableBitmapWarmupQueued, source);
-  drawableBitmapWarmupDelete(drawableBitmapWarmupReady, source);
+  drawableBitmapWarmupQueued.delete(source);
+  drawableBitmapWarmupReady.delete(source);
   if (drawableBitmapWarmupQueue.length) {
     let write = 0;
     for (let read = 0; read < drawableBitmapWarmupQueue.length; read++) {
@@ -163,7 +163,7 @@ function dropDrawableBitmapWarmupsForKey(key) {
   const kept = [];
   for (const task of drawableBitmapWarmupQueue) {
     if (task?.meta?.key === key) {
-      drawableBitmapWarmupDelete(drawableBitmapWarmupQueued, task.source);
+      drawableBitmapWarmupQueued.delete(task.source);
     } else {
       kept.push(task);
     }
@@ -175,67 +175,67 @@ function drawableBitmapWarmupResetSet() {
   return typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
 }
 
-function drawableBitmapWarmup2dContext(width = 1, height = 1) {
-  const w = Math.max(1, Math.trunc(Number(width) || 1));
-  const h = Math.max(1, Math.trunc(Number(height) || 1));
-  if (drawableBitmapWarmupContext) return drawableBitmapWarmupContext;
-  if (typeof OffscreenCanvas !== 'undefined') {
-    drawableBitmapWarmupCanvas = new OffscreenCanvas(w, h);
-  } else if (typeof document !== 'undefined') {
-    drawableBitmapWarmupCanvas = document.createElement('canvas');
-    drawableBitmapWarmupCanvas.width = w;
-    drawableBitmapWarmupCanvas.height = h;
+function drawableBitmapWarmup2dContext(width, height) {
+  if (!drawableBitmapWarmupCanvas && typeof OffscreenCanvas !== 'undefined') drawableBitmapWarmupCanvas = new OffscreenCanvas(width, height);
+  else if (!drawableBitmapWarmupCanvas && typeof document !== 'undefined') drawableBitmapWarmupCanvas = document.createElement('canvas');
+  if (!drawableBitmapWarmupCanvas) return null;
+  if (drawableBitmapWarmupCanvas.width !== width) drawableBitmapWarmupCanvas.width = width;
+  if (drawableBitmapWarmupCanvas.height !== height) drawableBitmapWarmupCanvas.height = height;
+  if (!drawableBitmapWarmupContext) {
+    drawableBitmapWarmupContext = drawableBitmapWarmupCanvas.getContext?.('2d', { alpha: false }) || null;
   }
-  const ctx = drawableBitmapWarmupCanvas?.getContext?.('2d', { alpha: false });
-  if (!ctx) return null;
-  if (drawableBitmapWarmupCanvas.width !== w) drawableBitmapWarmupCanvas.width = w;
-  if (drawableBitmapWarmupCanvas.height !== h) drawableBitmapWarmupCanvas.height = h;
-  try { ctx.imageSmoothingEnabled = false; } catch (_) {}
-  try { ctx.imageSmoothingQuality = 'low'; } catch (_) {}
-  drawableBitmapWarmupContext = ctx;
   return drawableBitmapWarmupContext;
 }
 
 function warmDrawableBitmapForDrawNow(source, meta = {}) {
-  if (!isImageVariantDrawableSource(source)) return { warmed: false, skipped: 'not-drawable' };
-  if (drawableBitmapWarmupHas(drawableBitmapWarmupReady, source)) return { warmed: false, skipped: 'already-warmed' };
+  if (!isImageVariantDrawableSource(source)) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { warmed: false, skipped: 'not-drawable' }
+      : false;
+  }
+  if (drawableBitmapWarmupReady.has(source)) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { warmed: false, skipped: 'already-warmed' }
+      : false;
+  }
   const target = drawableBitmapWarmupTargetSize(source, meta);
   const ctx = drawableBitmapWarmup2dContext(target.width, target.height);
   if (!ctx) {
-    drawableBitmapWarmupUnsupportedCount++;
-    return { warmed: false, skipped: 'unsupported' };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      drawableBitmapWarmupUnsupportedCount++;
+      return { warmed: false, skipped: 'unsupported' };
+    }
+    return false;
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const start = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   try {
-    if (drawableBitmapWarmupCanvas) {
-      if (drawableBitmapWarmupCanvas.width !== target.width) drawableBitmapWarmupCanvas.width = target.width;
-      if (drawableBitmapWarmupCanvas.height !== target.height) drawableBitmapWarmupCanvas.height = target.height;
-    }
     try { ctx.imageSmoothingEnabled = false; } catch (_) {}
-    try { ctx.imageSmoothingQuality = 'low'; } catch (_) {}
-    ctx.clearRect?.(0, 0, target.width, target.height);
-    if (target.sourceW > 0 && target.sourceH > 0) {
-      ctx.drawImage(source, 0, 0, target.sourceW, target.sourceH, 0, 0, target.width, target.height);
-    } else {
-      ctx.drawImage(source, 0, 0, target.width, target.height);
+    ctx.drawImage(source, 0, 0, target.sourceW, target.sourceH, 0, 0, target.width, target.height);
+    drawableBitmapWarmupReady.add(source);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      const ms = performance.now() - start;
+      const pixels = target.width * target.height;
+      drawableBitmapWarmupWarmedCount++;
+      countDrawableBitmapWarmupKind(drawableBitmapWarmupWarmedByKind, meta);
+      drawableBitmapWarmupTotalMs += ms;
+      drawableBitmapWarmupMaxMs = Math.max(drawableBitmapWarmupMaxMs, ms);
+      drawableBitmapWarmupTotalPixels += pixels;
+      drawableBitmapWarmupMaxPixels = Math.max(drawableBitmapWarmupMaxPixels, pixels);
+      if (typeof ViewportDebug !== 'undefined') {
+        ViewportDebug.count?.('drawableBitmapWarmup');
+        ViewportDebug.max?.('drawableBitmapWarmupMaxMs', ms);
+      }
+      return { warmed: true, ms, pixels, width: target.width, height: target.height, meta };
     }
-    const ms = performance.now() - start;
-    const pixels = target.width * target.height;
-    drawableBitmapWarmupAdd(drawableBitmapWarmupReady, source);
-    drawableBitmapWarmupWarmedCount++;
-    countDrawableBitmapWarmupKind(drawableBitmapWarmupWarmedByKind, meta);
-    drawableBitmapWarmupTotalMs += ms;
-    drawableBitmapWarmupMaxMs = Math.max(drawableBitmapWarmupMaxMs, ms);
-    drawableBitmapWarmupTotalPixels += pixels;
-    drawableBitmapWarmupMaxPixels = Math.max(drawableBitmapWarmupMaxPixels, pixels);
-    if (typeof ViewportDebug !== 'undefined') {
-      ViewportDebug.count?.('drawableBitmapWarmup');
-      ViewportDebug.max?.('drawableBitmapWarmupMaxMs', ms);
-    }
-    return { warmed: true, ms, pixels, width: target.width, height: target.height, meta };
+    return true;
   } catch (err) {
-    drawableBitmapWarmupErrorCount++;
-    return { warmed: false, skipped: 'error', error: String(err), meta };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      drawableBitmapWarmupErrorCount++;
+      return { warmed: false, skipped: 'error', error: String(err), meta };
+    }
+    return false;
   }
 }
 
@@ -252,7 +252,7 @@ function runDrawableBitmapWarmupQueue(options = {}) {
   while (drawableBitmapWarmupQueue.length && count < maxItems) {
     if (count > 0 && performance.now() - start >= budgetMs) break;
     const task = drawableBitmapWarmupQueue.shift();
-    drawableBitmapWarmupDelete(drawableBitmapWarmupQueued, task.source);
+    drawableBitmapWarmupQueued.delete(task.source);
     warmDrawableBitmapForDrawNow(task.source, task.meta);
     count++;
   }
@@ -275,14 +275,15 @@ function scheduleDrawableBitmapWarmupQueue() {
 
 function scheduleDrawableBitmapWarmup(source, meta = {}, options = {}) {
   if (!isImageVariantDrawableSource(source)) return false;
-  if (drawableBitmapWarmupHas(drawableBitmapWarmupReady, source) ||
-      drawableBitmapWarmupHas(drawableBitmapWarmupQueued, source)) {
+  if (drawableBitmapWarmupReady.has(source) || drawableBitmapWarmupQueued.has(source)) {
     return false;
   }
-  drawableBitmapWarmupAdd(drawableBitmapWarmupQueued, source);
+  drawableBitmapWarmupQueued.add(source);
   drawableBitmapWarmupQueue.push({ source, meta });
-  drawableBitmapWarmupQueuedCount++;
-  countDrawableBitmapWarmupKind(drawableBitmapWarmupQueuedByKind, meta);
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    drawableBitmapWarmupQueuedCount++;
+    countDrawableBitmapWarmupKind(drawableBitmapWarmupQueuedByKind, meta);
+  }
   if (options.immediate === true) {
     runDrawableBitmapWarmupQueue({
       force: true,
@@ -353,52 +354,61 @@ function clearScaledImageVariants(key = null) {
   imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
   clearTimeout(imageScaledVariantRenderTimer);
   imageScaledVariantRenderTimer = null;
-  imageScaledVariantRenderCount = 0;
-  imageScaledVariantBuildCount = 0;
-  imageScaledVariantBuildTotalMs = 0;
-  imageScaledVariantBuildMaxMs = 0;
-  imageScaledVariantResizeBitmapCount = 0;
-  imageScaledVariantCanvasFallbackCount = 0;
-  imageScaledVariantEvictionCount = 0;
-  imageScaledVariantMemorySkipCount = 0;
-  imageScaledVariantActiveInputFullFallbackCount = 0;
-  imageScaledVariantPriorityBoostCount = 0;
-  imageScaledVariantPrewarmRunCount = 0;
-  imageScaledVariantPrewarmCandidateCount = 0;
-  imageScaledVariantPrewarmQueuedCount = 0;
-  imageScaledVariantPrewarmReadyCount = 0;
-  imageScaledVariantPrewarmNoSourceCount = 0;
-  imageScaledVariantSourceReadyCandidateCount = 0;
-  imageScaledVariantSourceReadyQueuedCount = 0;
-  imageScaledVariantSourceReadyReadyCount = 0;
-  imageScaledVariantSourceReadyNoSourceCount = 0;
-  imageScaledVariantSourceReadyFullScaleCount = 0;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    imageScaledVariantRenderCount = 0;
+    imageScaledVariantBuildCount = 0;
+    imageScaledVariantBuildTotalMs = 0;
+    imageScaledVariantBuildMaxMs = 0;
+    imageScaledVariantResizeBitmapCount = 0;
+    imageScaledVariantCanvasFallbackCount = 0;
+    imageScaledVariantEvictionCount = 0;
+    imageScaledVariantMemorySkipCount = 0;
+    imageScaledVariantActiveInputFullFallbackCount = 0;
+    imageScaledVariantPriorityBoostCount = 0;
+    imageScaledVariantPrewarmRunCount = 0;
+    imageScaledVariantPrewarmCandidateCount = 0;
+    imageScaledVariantPrewarmQueuedCount = 0;
+    imageScaledVariantPrewarmReadyCount = 0;
+    imageScaledVariantPrewarmNoSourceCount = 0;
+    imageScaledVariantSourceReadyCandidateCount = 0;
+    imageScaledVariantSourceReadyQueuedCount = 0;
+    imageScaledVariantSourceReadyReadyCount = 0;
+    imageScaledVariantSourceReadyNoSourceCount = 0;
+    imageScaledVariantSourceReadyFullScaleCount = 0;
+  }
   drawableBitmapWarmupQueue.length = 0;
   drawableBitmapWarmupScheduled = false;
   drawableBitmapWarmupQueued = drawableBitmapWarmupResetSet();
   drawableBitmapWarmupReady = drawableBitmapWarmupResetSet();
-  drawableBitmapWarmupQueuedCount = 0;
-  drawableBitmapWarmupWarmedCount = 0;
-  drawableBitmapWarmupTotalMs = 0;
-  drawableBitmapWarmupMaxMs = 0;
-  drawableBitmapWarmupTotalPixels = 0;
-  drawableBitmapWarmupMaxPixels = 0;
-  drawableBitmapWarmupErrorCount = 0;
-  drawableBitmapWarmupUnsupportedCount = 0;
-  drawableBitmapWarmupQueuedByKind = {};
-  drawableBitmapWarmupWarmedByKind = {};
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    drawableBitmapWarmupQueuedCount = 0;
+    drawableBitmapWarmupWarmedCount = 0;
+    drawableBitmapWarmupTotalMs = 0;
+    drawableBitmapWarmupMaxMs = 0;
+    drawableBitmapWarmupTotalPixels = 0;
+    drawableBitmapWarmupMaxPixels = 0;
+    drawableBitmapWarmupErrorCount = 0;
+    drawableBitmapWarmupUnsupportedCount = 0;
+    drawableBitmapWarmupQueuedByKind = {};
+    drawableBitmapWarmupWarmedByKind = {};
+  }
   clearTimeout(imageScaledVariantPrewarmTimer);
   imageScaledVariantPrewarmTimer = null;
 }
 
-function scheduleScaledVariantReadyRender(countReadyVariant = true) {
-  if (countReadyVariant) imageScaledVariantRenderCount++;
+function scheduleScaledVariantReadyRender(
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  countReadyVariant = true
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  if (typeof BOARDFISH_PRODUCTION === 'undefined' && countReadyVariant) imageScaledVariantRenderCount++;
   invalidateOffscreen();
   if (typeof hasOpenInitialImagePreviews === 'function' && hasOpenInitialImagePreviews()) {
     const previewRelease = typeof releaseReadyOpenInitialImagePreviewsForOpen === 'function'
       ? releaseReadyOpenInitialImagePreviewsForOpen()
       : null;
-    if ((previewRelease?.released || previewRelease?.pending || previewRelease?.failed) &&
+    if (typeof BOARDFISH_PRODUCTION === 'undefined' &&
+      (previewRelease?.released || previewRelease?.pending || previewRelease?.failed) &&
       typeof OpenDebug !== 'undefined') {
       OpenDebug.step?.(null, 'open-preview-release', {
         ...previewRelease,
@@ -406,13 +416,17 @@ function scheduleScaledVariantReadyRender(countReadyVariant = true) {
       });
     }
     if (previewRelease?.released) {
-      const count = imageScaledVariantRenderCount;
-      imageScaledVariantRenderCount = 0;
-      scheduleRender(true, false, `open-preview-scaled-variant-release-${count}`);
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        const count = imageScaledVariantRenderCount;
+        imageScaledVariantRenderCount = 0;
+        scheduleRender(true, false, `open-preview-scaled-variant-release-${count}`);
+      } else {
+        scheduleRender(true, false);
+      }
       return;
     }
     if (!previewRelease || previewRelease.pending > 0) {
-      if (typeof OpenDebug !== 'undefined') OpenDebug.recordPreviewHeldRender?.({
+      if (typeof BOARDFISH_PRODUCTION === 'undefined' && typeof OpenDebug !== 'undefined') OpenDebug.recordPreviewHeldRender?.({
         source: 'image-scale-variant',
         pendingReadyVariants: imageScaledVariantRenderCount,
       });
@@ -425,17 +439,27 @@ function scheduleScaledVariantReadyRender(countReadyVariant = true) {
       const delay = Math.max(40, IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs);
       imageScaledVariantRenderTimer = setTimeout(() => {
         imageScaledVariantRenderTimer = null;
-        scheduleScaledVariantReadyRender(false);
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          scheduleScaledVariantReadyRender(false);
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        } else {
+          scheduleScaledVariantReadyRender();
+        }
       }, delay);
     }
     return;
   }
   if (imageScaledVariantRenderTimer) return;
   imageScaledVariantRenderTimer = setTimeout(() => {
-    const count = imageScaledVariantRenderCount;
     imageScaledVariantRenderTimer = null;
-    imageScaledVariantRenderCount = 0;
-    scheduleRender(true, false, `image-scale-variant-batch-${count}`);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      const count = imageScaledVariantRenderCount;
+      imageScaledVariantRenderCount = 0;
+      scheduleRender(true, false, `image-scale-variant-batch-${count}`);
+    } else {
+      scheduleRender(true, false);
+    }
   }, 120);
 }
 
@@ -462,7 +486,7 @@ function prioritizeScaledVariantQueue(pendingKey) {
     imageScaledVariantQueue.splice(index, 1);
     imageScaledVariantQueue.unshift(task);
   }
-  imageScaledVariantPriorityBoostCount++;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantPriorityBoostCount++;
   cancelScheduledScaledVariantQueue();
   scheduleScaledVariantQueue();
   return true;
@@ -470,24 +494,6 @@ function prioritizeScaledVariantQueue(pendingKey) {
 
 function shouldBuildScaledImageVariant(pendingKey, generation) {
   return generation === _imageStoreGeneration && imageScaledBitmapPending.has(pendingKey);
-}
-
-async function mapScaledVariantTasksWithConcurrency(items, limit, worker) {
-  if (typeof mapWithConcurrency === 'function') return mapWithConcurrency(items, limit, worker);
-  const out = new Array(items.length);
-  let next = 0;
-  const workerCount = Math.max(1, Math.min(Number(limit) || 1, items.length));
-  const workers = new Array(workerCount);
-  for (let i = 0; i < workerCount; i++) {
-    workers[i] = (async () => {
-      while (next < items.length) {
-        const index = next++;
-        out[index] = await worker(items[index], index);
-      }
-    })();
-  }
-  await Promise.all(workers);
-  return out;
 }
 
 async function createScaledImageVariantBitmap(source, sourceW, sourceH, scale) {
@@ -499,7 +505,7 @@ async function createScaledImageVariantBitmap(source, sourceW, sourceH, scale) {
       resizeHeight: h,
       resizeQuality: 'high',
     });
-    imageScaledVariantResizeBitmapCount++;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantResizeBitmapCount++;
     return bitmap;
   } catch (_) {
     if (typeof document === 'undefined') throw _;
@@ -510,65 +516,95 @@ async function createScaledImageVariantBitmap(source, sourceW, sourceH, scale) {
     setCanvasImageQuality(c);
     c.drawImage(source, 0, 0, w, h);
     const bitmap = await createImageBitmap(canvas);
-    imageScaledVariantCanvasFallbackCount++;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantCanvasFallbackCount++;
     return bitmap;
   }
 }
 
 async function buildScaledImageVariantNow(key, source, scale, options = {}) {
   if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key || !source || scale >= 1) {
-    return { key, scale, ready: false, skipped: 'disabled-or-invalid' };
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, ready: false, skipped: 'disabled-or-invalid' }
+      : false;
   }
   const pendingKey = `${key}:${scale}`;
   const map = imageScaledBitmapCache.get(key);
-  if (map?.has(scale)) return { key, scale, ready: true, skipped: 'already-ready' };
-  if (imageScaledBitmapPending.has(pendingKey)) return { key, scale, ready: false, skipped: 'pending' };
+  if (map?.has(scale)) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, ready: true, skipped: 'already-ready' }
+      : true;
+  }
+  if (imageScaledBitmapPending.has(pendingKey)) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, ready: false, skipped: 'pending' }
+      : false;
+  }
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
-  if (!sourceW || !sourceH) return { key, scale, ready: false, skipped: 'missing-size' };
+  if (!sourceW || !sourceH) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, ready: false, skipped: 'missing-size' }
+      : false;
+  }
   const estimatedBytes = scaledVariantEstimatedBytes(sourceW, sourceH, scale);
   if (imageScaledBitmapBytes + pendingScaledVariantBytes() + estimatedBytes > IMAGE_VARIANT_MEMORY_LIMIT) {
-    imageScaledVariantMemorySkipCount++;
-    recordScaledImageVariantFailure(key, scale, 'memory-limit');
-    return { key, scale, ready: false, skipped: 'memory-limit', estimatedBytes };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      imageScaledVariantMemorySkipCount++;
+      recordScaledImageVariantFailure(key, scale, 'memory-limit');
+      return { key, scale, ready: false, skipped: 'memory-limit', estimatedBytes };
+    }
+    recordScaledImageVariantFailure(key, scale);
+    return false;
   }
 
   imageScaledBitmapFailures.delete(pendingKey);
   imageScaledBitmapPending.add(pendingKey);
   addPendingScaledVariantBytes(pendingKey, estimatedBytes);
   const generation = _imageStoreGeneration;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const buildStart = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   let bitmap = null;
   try {
     bitmap = await createScaledImageVariantBitmap(source, sourceW, sourceH, scale);
     if (!shouldBuildScaledImageVariant(pendingKey, generation)) {
       bitmap.close?.();
-      return { key, scale, ready: false, skipped: 'stale', ms: performance.now() - buildStart };
+      return typeof BOARDFISH_PRODUCTION === 'undefined'
+        ? { key, scale, ready: false, skipped: 'stale', ms: performance.now() - buildStart }
+        : false;
     }
     const bytes = bitmapByteSize(bitmap);
     imageScaledBitmapStore.set(key, scale, { bitmap, bytes });
     imageScaledBitmapFailures.delete(pendingKey);
-    scheduleDrawableBitmapWarmup(bitmap, {
-      kind: 'scaled-variant',
-      key,
-      scale,
-      source: 'build-now',
-    }, { immediate: options.warmupImmediate === true, budgetMs: 8, maxItems: 1 });
+    const warmupMeta = { kind: 'scaled-variant', key };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') Object.assign(warmupMeta, { scale, source: 'build-now' });
+    scheduleDrawableBitmapWarmup(bitmap, warmupMeta, {
+      immediate: options.warmupImmediate === true,
+      budgetMs: 8,
+      maxItems: 1,
+    });
     bitmap = null;
     imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
     if (options.scheduleRender !== false) scheduleScaledVariantReadyRender();
-    return { key, scale, ready: true, bytes, ms: performance.now() - buildStart };
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, ready: true, bytes, ms: performance.now() - buildStart }
+      : true;
   } catch (err) {
     bitmap?.close?.();
     if (shouldBuildScaledImageVariant(pendingKey, generation)) {
-      recordScaledImageVariantFailure(key, scale, 'error');
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') recordScaledImageVariantFailure(key, scale, 'error');
+      else recordScaledImageVariantFailure(key, scale);
     }
-    return { key, scale, ready: false, skipped: 'error', error: String(err), ms: performance.now() - buildStart };
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, ready: false, skipped: 'error', error: String(err), ms: performance.now() - buildStart }
+      : false;
   } finally {
-    const buildMs = performance.now() - buildStart;
-    imageScaledVariantBuildCount++;
-    imageScaledVariantBuildTotalMs += buildMs;
-    imageScaledVariantBuildMaxMs = Math.max(imageScaledVariantBuildMaxMs, buildMs);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      const buildMs = performance.now() - buildStart;
+      imageScaledVariantBuildCount++;
+      imageScaledVariantBuildTotalMs += buildMs;
+      imageScaledVariantBuildMaxMs = Math.max(imageScaledVariantBuildMaxMs, buildMs);
+    }
     imageScaledBitmapPending.delete(pendingKey);
     removePendingScaledVariantBytes(pendingKey);
   }
@@ -637,36 +673,50 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
   const overscaleLimit = options.activeOverscale === true
     ? Math.max(1, Number(IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT) || 1)
     : 1;
-  let selectedScale = Infinity;
-  for (const scale of IMAGE_SCALE_LEVELS) {
-    if (sourceW * scale * overscaleLimit >= neededW &&
-        sourceH * scale * overscaleLimit >= neededH &&
-        scale < selectedScale) {
-      selectedScale = scale;
-    }
-  }
-  return Number.isFinite(selectedScale) ? selectedScale : 1;
+  const scale = IMAGE_SCALE_LEVELS[0];
+  return sourceW * scale * overscaleLimit >= neededW &&
+    sourceH * scale * overscaleLimit >= neededH ? scale : 1;
 }
 
 function queueScaledImageVariant(key, source, scale, options = {}) {
   if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key || !source || scale >= 1) {
-    return { key, scale, queued: false, skipped: 'disabled-or-invalid' };
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, queued: false, skipped: 'disabled-or-invalid' }
+      : false;
   }
   const pendingKey = `${key}:${scale}`;
   const map = imageScaledBitmapCache.get(key);
-  if (map?.has(scale)) return { key, scale, queued: false, skipped: 'already-ready' };
+  if (map?.has(scale)) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, queued: false, skipped: 'already-ready' }
+      : false;
+  }
   if (imageScaledBitmapPending.has(pendingKey)) {
-    const priorityBoosted = options.priority === true && prioritizeScaledVariantQueue(pendingKey);
-    return { key, scale, queued: false, skipped: 'pending', priorityBoosted };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const priorityBoosted = options.priority === true && prioritizeScaledVariantQueue(pendingKey);
+      return { key, scale, queued: false, skipped: 'pending', priorityBoosted };
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    if (options.priority === true) prioritizeScaledVariantQueue(pendingKey);
+    return false;
   }
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
-  if (!sourceW || !sourceH) return { key, scale, queued: false, skipped: 'missing-size' };
+  if (!sourceW || !sourceH) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { key, scale, queued: false, skipped: 'missing-size' }
+      : false;
+  }
   const estimatedBytes = scaledVariantEstimatedBytes(sourceW, sourceH, scale);
   if (imageScaledBitmapBytes + pendingScaledVariantBytes() + estimatedBytes > IMAGE_VARIANT_MEMORY_LIMIT) {
-    imageScaledVariantMemorySkipCount++;
-    recordScaledImageVariantFailure(key, scale, 'memory-limit');
-    return { key, scale, queued: false, skipped: 'memory-limit', estimatedBytes };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      imageScaledVariantMemorySkipCount++;
+      recordScaledImageVariantFailure(key, scale, 'memory-limit');
+      return { key, scale, queued: false, skipped: 'memory-limit', estimatedBytes };
+    }
+    recordScaledImageVariantFailure(key, scale);
+    return false;
   }
   imageScaledBitmapFailures.delete(pendingKey);
   imageScaledBitmapPending.add(pendingKey);
@@ -678,7 +728,9 @@ function queueScaledImageVariant(key, source, scale, options = {}) {
       removePendingScaledVariantBytes(pendingKey);
       return;
     }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const buildStart = performance.now();
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     let bitmap = null;
     try {
       bitmap = await createScaledImageVariantBitmap(source, sourceW, sourceH, scale);
@@ -689,65 +741,88 @@ function queueScaledImageVariant(key, source, scale, options = {}) {
       const bytes = bitmapByteSize(bitmap);
       imageScaledBitmapStore.set(key, scale, { bitmap, bytes });
       imageScaledBitmapFailures.delete(pendingKey);
-      scheduleDrawableBitmapWarmup(bitmap, {
-        kind: 'scaled-variant',
-        key,
-        scale,
-        source: 'queue',
-      });
+      const warmupMeta = { kind: 'scaled-variant', key };
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') Object.assign(warmupMeta, { scale, source: 'queue' });
+      scheduleDrawableBitmapWarmup(bitmap, warmupMeta);
       bitmap = null;
       imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
       scheduleScaledVariantReadyRender();
     } catch (_) {
       bitmap?.close?.();
       if (shouldBuildScaledImageVariant(pendingKey, generation)) {
-        recordScaledImageVariantFailure(key, scale, 'error');
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') recordScaledImageVariantFailure(key, scale, 'error');
+        else recordScaledImageVariantFailure(key, scale);
       }
     } finally {
-      const buildMs = performance.now() - buildStart;
-      imageScaledVariantBuildCount++;
-      imageScaledVariantBuildTotalMs += buildMs;
-      imageScaledVariantBuildMaxMs = Math.max(imageScaledVariantBuildMaxMs, buildMs);
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        const buildMs = performance.now() - buildStart;
+        imageScaledVariantBuildCount++;
+        imageScaledVariantBuildTotalMs += buildMs;
+        imageScaledVariantBuildMaxMs = Math.max(imageScaledVariantBuildMaxMs, buildMs);
+      }
       imageScaledBitmapPending.delete(pendingKey);
       removePendingScaledVariantBytes(pendingKey);
     }
   };
   task.variantKey = key;
   task.pendingKey = pendingKey;
-  task.generation = generation;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') task.generation = generation;
   enqueueScaledVariantTask(task, { priority: options.priority === true });
-  return { key, scale, queued: true, priority: options.priority === true, estimatedBytes };
+  return typeof BOARDFISH_PRODUCTION === 'undefined'
+    ? { key, scale, queued: true, priority: options.priority === true, estimatedBytes }
+    : true;
 }
 
 function queueScaledImageVariantForReadyImage(key, source, options = {}) {
-  imageScaledVariantSourceReadyCandidateCount++;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantSourceReadyCandidateCount++;
   if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key) {
-    imageScaledVariantSourceReadyNoSourceCount++;
-    return { queued: false, skipped: 'disabled-or-invalid' };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      imageScaledVariantSourceReadyNoSourceCount++;
+      return { queued: false, skipped: 'disabled-or-invalid' };
+    }
+    return false;
   }
   if (!isImageVariantDrawableSource(source)) {
-    imageScaledVariantSourceReadyNoSourceCount++;
-    return { key, queued: false, skipped: 'missing-source' };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      imageScaledVariantSourceReadyNoSourceCount++;
+      return { key, queued: false, skipped: 'missing-source' };
+    }
+    return false;
   }
   const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.25;
   if (!(scale > 0 && scale < 1)) {
-    imageScaledVariantSourceReadyFullScaleCount++;
-    return { key, scale, queued: false, skipped: 'full-scale' };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      imageScaledVariantSourceReadyFullScaleCount++;
+      return { key, scale, queued: false, skipped: 'full-scale' };
+    }
+    return false;
   }
   if (hasScaledImageVariant(key, scale)) {
-    imageScaledVariantSourceReadyReadyCount++;
-    return { key, scale, queued: false, skipped: 'already-ready' };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      imageScaledVariantSourceReadyReadyCount++;
+      return { key, scale, queued: false, skipped: 'already-ready' };
+    }
+    return false;
   }
   if (isScaledImageVariantPending(key, scale)) {
-    const priorityBoosted = options.priority === true && prioritizeScaledVariantQueue(`${key}:${scale}`);
-    imageScaledVariantSourceReadyReadyCount++;
-    return { key, scale, queued: false, skipped: 'pending', priorityBoosted };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const priorityBoosted = options.priority === true && prioritizeScaledVariantQueue(`${key}:${scale}`);
+      imageScaledVariantSourceReadyReadyCount++;
+      return { key, scale, queued: false, skipped: 'pending', priorityBoosted };
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    if (options.priority === true) prioritizeScaledVariantQueue(`${key}:${scale}`);
+    return false;
   }
   const result = queueScaledImageVariant(key, source, scale, {
     priority: options.priority === true,
   });
-  if (result?.queued) imageScaledVariantSourceReadyQueuedCount++;
-  return result || { key, scale, queued: false, skipped: 'not-queued' };
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    if (result?.queued) imageScaledVariantSourceReadyQueuedCount++;
+    return result || { key, scale, queued: false, skipped: 'not-queued' };
+  }
+  return result;
 }
 
 function queueScaledImageVariantForDraw(key, obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, options = {}) {
@@ -759,54 +834,67 @@ function queueScaledImageVariantForDraw(key, obj, source, view = { zoom, dpr: wi
 }
 
 async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
-  const startedAt = performance.now();
-  if (!isViewportImageScalingActive()) return { skipped: 'disabled' };
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const startedAt = typeof BOARDFISH_PRODUCTION === 'undefined' ? performance.now() : 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  if (!isViewportImageScalingActive()) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'disabled' } : undefined;
+  }
   const padPx = Number.isFinite(options.padPx) ? options.padPx : 0;
   const rect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(padPx) : null;
-  if (!rect) return { skipped: 'no-viewport' };
+  if (!rect) return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'no-viewport' } : undefined;
   const view = {
     zoom: typeof zoom !== 'undefined' ? zoom : 1,
     dpr: typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1,
   };
   const seen = new Set();
   const tasks = [];
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let candidates = 0;
   let alreadyReady = 0;
   let noSource = 0;
   let fullScale = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const obj of objects) {
     if (obj?.type !== 'image' || !obj.data?.imgKey || !objectIntersectsRect(obj, rect)) continue;
     const key = obj.data.imgKey;
     if (seen.has(key)) continue;
     seen.add(key);
-    candidates++;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') candidates++;
     const source = imageBitmapCache[key] || null;
     if (!isImageVariantDrawableSource(source)) {
-      noSource++;
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') noSource++;
       continue;
     }
     const scale = chooseImageScaleForDraw(obj, source, view);
     if (!(scale > 0 && scale < 1)) {
-      fullScale++;
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') fullScale++;
       continue;
     }
     if (hasScaledImageVariant(key, scale)) {
-      alreadyReady++;
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') alreadyReady++;
       continue;
     }
     tasks.push({ key, source, scale });
   }
   tasks.sort((a, b) => bitmapByteSize(b.source) - bitmapByteSize(a.source));
   const limit = Math.max(0, Math.floor(Number(options.limit) || tasks.length));
-  const selectedCount = Math.min(limit, tasks.length);
-  const selectedTasks = new Array(selectedCount);
-  for (let i = 0; i < selectedCount; i++) selectedTasks[i] = tasks[i];
+  const selectedTasks = tasks.slice(0, limit);
   const concurrency = Math.max(1, Math.min(8, Math.floor(Number(options.concurrency) || 4), selectedTasks.length || 1));
+  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+    await mapWithConcurrency(selectedTasks, concurrency, async ({ key, source, scale }) => {
+      await buildScaledImageVariantNow(key, source, scale, {
+        scheduleRender: false,
+        warmupImmediate: true,
+      });
+    });
+    return;
+  }
   let built = 0;
   let failed = 0;
   let skipped = 0;
   let bytes = 0;
-  const results = await mapScaledVariantTasksWithConcurrency(selectedTasks, concurrency, async ({ key, source, scale }) => {
+  const results = await mapWithConcurrency(selectedTasks, concurrency, async ({ key, source, scale }) => {
     const result = await buildScaledImageVariantNow(key, source, scale, {
       scheduleRender: false,
       warmupImmediate: true,
@@ -875,13 +963,22 @@ function scheduleScaledVariantFailurePreviewRelease() {
   setTimeout(() => {
     imageScaledVariantFailureReleaseScheduled = false;
     if (typeof hasOpenInitialImagePreviews === 'function' && hasOpenInitialImagePreviews()) {
-      scheduleScaledVariantReadyRender(false);
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        scheduleScaledVariantReadyRender(false);
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      } else {
+        scheduleScaledVariantReadyRender();
+      }
     }
   }, 0);
 }
 
 function recordScaledImageVariantFailure(key, scale, reason) {
-  imageScaledBitmapFailures.set(`${key}:${scale}`, reason || 'error');
+  imageScaledBitmapFailures.set(
+    `${key}:${scale}`,
+    typeof BOARDFISH_PRODUCTION === 'undefined' ? (reason || 'error') : true,
+  );
   scheduleScaledVariantFailurePreviewRelease();
 }
 
@@ -895,43 +992,57 @@ function isActiveViewportInput() {
 }
 
 function prewarmVisibleScaledImageVariants(options = {}) {
-  if (!isViewportImageScalingActive() || _boardOpening) return { skipped: 'disabled-or-opening' };
+  if (!isViewportImageScalingActive() || _boardOpening) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'disabled-or-opening' } : undefined;
+  }
   const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.25;
-  if (!(scale > 0 && scale < 1)) return { skipped: 'invalid-scale' };
+  if (!(scale > 0 && scale < 1)) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'invalid-scale' } : undefined;
+  }
   const padPx = Number.isFinite(options.padPx) ? options.padPx : IMAGE_VARIANT_PREWARM_PAD_PX;
   const rect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(padPx) : null;
-  if (!rect) return { skipped: 'no-viewport' };
+  if (!rect) return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'no-viewport' } : undefined;
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let candidates = 0;
   let ready = 0;
   let queued = 0;
   let noSource = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const obj of objects) {
     if (obj?.type !== 'image' || !obj.data?.imgKey || !objectIntersectsRect(obj, rect)) continue;
-    candidates++;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') candidates++;
     const key = obj.data.imgKey;
     if (hasScaledImageVariant(key, scale) || isScaledImageVariantPending(key, scale)) {
-      ready++;
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') ready++;
       continue;
     }
     const source = imageBitmapCache[key] || null;
     if (!isImageVariantDrawableSource(source)) {
-      noSource++;
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') noSource++;
       continue;
     }
     queueScaledImageVariant(key, source, scale);
-    queued++;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') queued++;
   }
 
-  imageScaledVariantPrewarmRunCount++;
-  imageScaledVariantPrewarmCandidateCount += candidates;
-  imageScaledVariantPrewarmReadyCount += ready;
-  imageScaledVariantPrewarmQueuedCount += queued;
-  imageScaledVariantPrewarmNoSourceCount += noSource;
-  return { candidates, ready, queued, noSource, scale, padPx };
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    imageScaledVariantPrewarmRunCount++;
+    imageScaledVariantPrewarmCandidateCount += candidates;
+    imageScaledVariantPrewarmReadyCount += ready;
+    imageScaledVariantPrewarmQueuedCount += queued;
+    imageScaledVariantPrewarmNoSourceCount += noSource;
+    return { candidates, ready, queued, noSource, scale, padPx };
+  }
 }
 
-function scheduleVisibleScaledVariantPrewarmAfterIdle(reason = 'viewport-settled', options = {}) {
+function scheduleVisibleScaledVariantPrewarmAfterIdle(
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  reason,
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  options = {}
+) {
+  if (typeof BOARDFISH_PRODUCTION === 'undefined' && reason === undefined) reason = 'viewport-settled';
   if (!isViewportImageScalingActive() || _boardOpening) return;
   clearTimeout(imageScaledVariantPrewarmTimer);
   const delay = Number.isFinite(options.delayMs) ? options.delayMs : IMAGE_VARIANT_INPUT_IDLE_MS;
@@ -939,45 +1050,55 @@ function scheduleVisibleScaledVariantPrewarmAfterIdle(reason = 'viewport-settled
     imageScaledVariantPrewarmTimer = null;
     const inputIdleMs = performance.now() - lastViewportInputAt;
     if (inputIdleMs < IMAGE_VARIANT_INPUT_IDLE_MS) {
-      scheduleVisibleScaledVariantPrewarmAfterIdle(reason, {
-        ...options,
-        delayMs: IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs,
-      });
+      const retryOptions = { ...options, delayMs: IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs };
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        scheduleVisibleScaledVariantPrewarmAfterIdle(reason, retryOptions);
+      } else {
+        scheduleVisibleScaledVariantPrewarmAfterIdle(retryOptions);
+      }
       return;
     }
-    prewarmVisibleScaledImageVariants({ ...options, reason });
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      prewarmVisibleScaledImageVariants({ ...options, reason });
+    } else {
+      prewarmVisibleScaledImageVariants(options);
+    }
   }, Math.max(0, delay));
 }
 
 function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }, options = {}) {
-  if (!isViewportImageScalingActive()) return { source: fullSource, scale: 1, targetScale: 1, disabled: true };
+  if (!isViewportImageScalingActive()) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { source: fullSource, scale: 1, targetScale: 1, disabled: true }
+      : { source: fullSource };
+  }
   const activeInput = options.activeInput === true || (options.activeInput !== false && isActiveViewportInput());
   const targetScale = chooseImageScaleForDraw(obj, fullSource, view, { activeOverscale: activeInput });
-  const map = imageScaledBitmapCache.get(key);
-  if (map && targetScale < 1) {
-    let selectedScale = 1;
-    for (const scale of IMAGE_SCALE_LEVELS) {
-      if (scale >= targetScale && map.has(scale) && scale < selectedScale) selectedScale = scale;
-    }
-    if (selectedScale < 1) {
-      const entry = imageScaledBitmapStore.get(key, selectedScale);
-      return { source: entry.bitmap, scale: selectedScale, targetScale };
-    }
+  const entry = targetScale < 1 ? imageScaledBitmapStore.get(key, targetScale) : null;
+  if (entry) {
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? { source: entry.bitmap, scale: targetScale, targetScale }
+      : { source: entry.bitmap };
   }
-  queueScaledImageVariantForDraw(key, obj, fullSource, view, { priority: activeInput, activeOverscale: activeInput });
+  queueScaledImageVariant(key, fullSource, targetScale, { priority: activeInput });
   if (activeInput && targetScale < 1 && isScaledImageVariantPending(key, targetScale)) {
-    imageScaledVariantActiveInputFullFallbackCount++;
-    return {
-      source: fullSource,
-      scale: 1,
-      targetScale,
-      scaledVariantPending: true,
-      activeInputFullFallback: true,
-    };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantActiveInputFullFallbackCount++;
+    return typeof BOARDFISH_PRODUCTION === 'undefined'
+      ? {
+          source: fullSource,
+          scale: 1,
+          targetScale,
+          scaledVariantPending: true,
+          activeInputFullFallback: true,
+        }
+      : { source: fullSource, activeInputFullFallback: true };
   }
-  return { source: fullSource, scale: 1, targetScale };
+  return typeof BOARDFISH_PRODUCTION === 'undefined'
+    ? { source: fullSource, scale: 1, targetScale }
+    : { source: fullSource };
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function setViewportPerfMode(modeKey) {
   const mode = VIEWPORT_PERF_MODES[String(modeKey)];
   if (!mode) return null;
@@ -1013,3 +1134,4 @@ function viewportPerfModeSummary(modeKey = null) {
     scaleLevels: viewportImageScalingEnabled ? IMAGE_SCALE_LEVELS.join(',') : 'off',
   };
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */

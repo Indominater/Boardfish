@@ -458,8 +458,8 @@ test('persisted container metadata refreshes Blob refs without changing image by
 
 test('ZIP32 writer rejects fields that would otherwise be silently truncated', async () => {
   const entry = { name: 'x'.repeat(0x10000), data: new Uint8Array([1]) };
-  assert.throws(
-    () => WebContainer.createZip([entry]),
+  await assert.rejects(
+    () => WebContainer.createZipBlob([entry], { materializeBytes: false }),
     /ZIP entry name is too long/,
   );
 });

@@ -19,7 +19,6 @@ function cloneObject(obj, runtimeTextCache = false) {
 function clearTextRuntimeCache(obj) {
   if (obj?.type !== 'text') return;
   delete obj._layoutCache;
-  delete obj._layoutCacheKey;
   delete obj._layoutCacheContent;
   delete obj._layoutCacheW;
   delete obj._layoutCacheScriptKey;
@@ -42,7 +41,6 @@ function cloneTextObjectRuntimeCaches(source, target) {
     source._layoutCacheW === target.w
   ) {
     target._layoutCache = source._layoutCache.map((line) => ({ ...line }));
-    target._layoutCacheKey = source._layoutCacheKey;
     target._layoutCacheContent = source._layoutCacheContent;
     target._layoutCacheW = source._layoutCacheW;
     target._layoutCacheScriptKey = source._layoutCacheScriptKey;
@@ -134,10 +132,12 @@ function loadHistoryHarness() {
       removeEventListener() {},
     },
     jsClipboard: null,
+    _jsClipboardToken: 0,
     objects: [],
     objectsMap: new Map(),
     selectedId: null,
     selectedIds: new Set(),
+    savedHistoryIndex: -1,
     editingId: null,
     _dirtyIds: new Set(),
     _caretBlinkInterval: null,
@@ -180,6 +180,7 @@ function loadHistoryHarness() {
     HistoryDebug: {
       count() {},
       end() {},
+      isEnabled() { return false; },
       max() {},
       start() { return {}; },
       step() {},
@@ -189,6 +190,7 @@ function loadHistoryHarness() {
       return list.map((obj) => cloneObject(obj, runtimeTextCache));
     },
     cloneTextObjectRuntimeCaches,
+    flushEditHistoryCheckpoint() { return false; },
     invalidateOffscreen() {},
     markDirty(id) {
       context._dirtyIds.add(id);
@@ -198,6 +200,7 @@ function loadHistoryHarness() {
       return null;
     },
     scheduleRender() {},
+    setTextEditMinLinesForSession(obj) { obj._editMinLines = 1; },
     enterEdit(id, options = {}) {
       context.enterEditCalls.push({ id, options: { ...(options || {}) } });
       context.editingId = id;
@@ -273,6 +276,8 @@ function setBoard(context, objects, selectedIds = []) {
   context.selectedId = selectedIds[selectedIds.length - 1] || null;
 }
 
+const historyImage = (key) => ({ id: key, type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: { imgKey: key } });
+
 function attachTextRuntimeCache(obj, content, label = content) {
   obj._layoutCache = [{
     text: label,
@@ -281,7 +286,6 @@ function attachTextRuntimeCache(obj, content, label = content) {
     endIndex: String(content).length,
     prefixWidths: [0, 10],
   }];
-  obj._layoutCacheKey = `${String(content).length}:${obj.w}:2:`;
   obj._layoutCacheContent = content;
   obj._layoutCacheW = obj.w;
   obj._layoutCacheScriptKey = '[]';
@@ -309,21 +313,55 @@ test('text-only history skips image cache pruning when no image cache state exis
   assert.deepEqual(context.imagePruneCalls, []);
 });
 
-test('history keeps image cache pruning when pruneable image state exists', () => {
+test('ordinary history pushes skip image cache pruning while prior entries retain deleted images', () => {
   const context = loadHistoryHarness();
-  context.imageStore = {
-    'img-1': 'data:image/png;base64,AQ==',
-    'img-unused': 'data:image/png;base64,Ag==',
-  };
-  setBoard(context, [
-    { id: 'image-1', type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: { imgKey: 'img-1' } },
-  ], ['image-1']);
+  setBoard(context, [historyImage('img-1')], ['img-1']);
 
   context.snapshot();
   setBoard(context, [], []);
   context.pushHistory('delete-selected');
 
-  assert.deepEqual(context.imagePruneCalls, [['img-1'], ['img-1']]);
+  assert.deepEqual(context.imagePruneCalls, []);
+});
+
+test('branching after undo prunes image caches after redo entries are discarded', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, [historyImage('img-1')]);
+  context.snapshot();
+  setBoard(context, [historyImage('img-2')]);
+  context.pushHistory('replace-image');
+  context.undo();
+  setBoard(context, [historyImage('img-3')]);
+  context.pushHistory('branch-image');
+
+  assert.deepEqual(context.imagePruneCalls, [['img-1', 'img-3']]);
+});
+
+test('MAX_HISTORY trimming prunes image caches after the oldest entry is discarded', () => {
+  const context = loadHistoryHarness();
+  context.MAX_HISTORY = 2;
+  setBoard(context, [historyImage('img-1')]);
+  context.snapshot();
+  setBoard(context, [historyImage('img-2')]);
+  context.pushHistory('replace-image-2');
+  setBoard(context, [historyImage('img-3')]);
+  context.pushHistory('replace-image-3');
+
+  assert.deepEqual(context.imagePruneCalls, [['img-2', 'img-3']]);
+});
+
+test('clipboard token changes trigger pruning and keep current clipboard image keys', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, []);
+  context.snapshot();
+  context.jsClipboard = { type: 'objects', objects: [], imageData: { 'img-old': 'old' } };
+  context._jsClipboardToken++;
+  context.pushHistory('clipboard-old');
+  context.jsClipboard = { type: 'objects', objects: [], imageData: { 'img-new': 'new' } };
+  context._jsClipboardToken++;
+  context.pushHistory('clipboard-new');
+
+  assert.deepEqual(context.imagePruneCalls, [['img-old'], ['img-new']]);
 });
 
 test('history entries and restores omit inert motion metadata', () => {

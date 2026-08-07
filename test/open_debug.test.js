@@ -12,6 +12,16 @@ function readSource(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
 
+function withoutDeveloperDiagnostics(source) {
+  const start = '/* BOARDFISH_DEV_DIAGNOSTICS_START */';
+  const end = '/* BOARDFISH_DEV_DIAGNOSTICS_END */';
+  assert.equal(source.split(start).length, source.split(end).length, 'developer diagnostic markers are unbalanced');
+  return source.replace(
+    /\/\* BOARDFISH_DEV_DIAGNOSTICS_START \*\/[\s\S]*?\/\* BOARDFISH_DEV_DIAGNOSTICS_END \*\//g,
+    '',
+  );
+}
+
 function waitForOpenRenderFrameSource() {
   const source = readSource('src/js/io_close.js');
   const start = source.indexOf('const waitForOpenRenderFrame =');
@@ -27,6 +37,41 @@ function visibleHydrationTimerSource() {
   assert.ok(start >= 0 && end > start, 'visible hydration timer source is missing');
   return source.slice(start, end);
 }
+
+test('developer open diagnostics tune the shared runtime hydration concurrency', () => {
+  const messages = [];
+  let exposed = null;
+  const context = {
+    DEBUG_TOOLS_ENABLED: true,
+    console: {
+      debug() {},
+      info(...args) { messages.push(args.join(' ')); },
+      table() {},
+      warn() {},
+    },
+    exposeDebug(value) {
+      exposed = value;
+    },
+    performance: {
+      now() { return 0; },
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(readSource('src/js/runtime_utils.js'), context, { filename: 'runtime_utils.js' });
+  vm.runInContext(readSource('src/js/debug_core.js'), context, { filename: 'debug_core.js' });
+  vm.runInContext(readSource('src/js/debug_open.js'), context, { filename: 'debug_open.js' });
+
+  assert.equal(context.getOpenHydrationConcurrency(), 8);
+  assert.equal(context.OpenDebug.hydrationConcurrency, 8);
+  assert.equal(context.OpenDebug.setHydrationConcurrency(12.8), 12);
+  assert.equal(context.getOpenHydrationConcurrency(), 12);
+  assert.equal(context.OpenDebug.hydrationConcurrency, 12);
+  assert.equal(context.OpenDebug.setHydrationConcurrency(99), 32);
+  assert.equal(context.OpenDebug.setHydrationConcurrency(-5), 1);
+  assert.equal(context.OpenDebug.setHydrationConcurrency(8), 8);
+  assert.equal(exposed.open, context.OpenDebug);
+  assert.match(messages.at(-1), /hydration concurrency set to 8/);
+});
 
 test('open render frame wait clears timeout after RAF settles', async () => {
   const activeTimers = new Set();
@@ -118,12 +163,13 @@ test('visible hydration idle timer rechecks stale open guards and can be cleared
   context.scheduleVisibleHydrationAfterIdle();
   timers[2]();
   assert.deepEqual(queued, ['img-1']);
-  assert.deepEqual(prewarmReasons, ['visible-hydration']);
+  assert.deepEqual(prewarmReasons, []);
 });
 
 test('open-board debugger covers the slow open phases developers need to inspect', () => {
   const openDebug = readSource('src/js/debug_open.js');
   const openIo = readSource('src/js/io_close.js');
+  const productionOpenIo = withoutDeveloperDiagnostics(openIo);
   const imageState = readSource('src/js/image_state.js');
   const imageVariants = readSource('src/js/image_variants.js');
   const viewport = readSource('src/js/viewport.js');
@@ -162,7 +208,8 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /function getReferencedHydratableImageKeys\(limit = Infinity, exclude = new Set\(\)\)/);
   assert.match(openIo, /const keys = getReferencedHydratableImageKeys\(\);/);
   assert.match(openIo, /pendingImages: getPendingHydratableImageKeys\(\)\.length/);
-  assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
+  assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);[\s\S]*?if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) \{\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
+  assert.match(withoutDeveloperDiagnostics(openIo), /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*await pendingReady;\s*return BoardfishImageStore\.hasDisplayImage\(key\);/);
   assert.match(openIo, /source: 'pending-cache'/);
   assert.match(openIo, /async function settleVisibleImageBitmapsForOpen/);
   assert.match(openIo, /while \(state\.settled < count\)/);
@@ -195,7 +242,8 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
   assert.match(openIo, /maxKey: slowest\?\.key/);
   assert.match(openIo, /previewMaxKey: preview\.maxKey/);
-  assert.match(openIo, /buildVisibleImagePreviewsForOpen\(visibleKeys, dbg, \{ includeCached: true \}\)/);
+  assert.match(openIo, /buildVisibleImagePreviewsForOpen\(visibleKeys[\s\S]*?, dbg[\s\S]*?, \{ includeCached: true \}/);
+  assert.match(productionOpenIo, /buildVisibleImagePreviewsForOpen\(visibleKeys\s*, \{ includeCached: true \}/);
   assert.match(openIo, /const previewReady = preview && preview\.pendingReady >= visibleKeys\.length/);
   assert.match(openIo, /previewPendingReady: preview\.pendingReady/);
   assert.match(openDebug, /openPreviewPendingReady/);
@@ -320,16 +368,23 @@ test('open-board failures show a readable pill message', () => {
 
 test('open-board loading does not wait for pill status update before reading the file', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
+  const productionBootstrap = withoutDeveloperDiagnostics(bootstrap);
 
-  assert.match(bootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard/);
-  assert.doesNotMatch(bootstrap, /await startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard/);
+  assert.match(bootstrap, /startPillTask\(\{ message: 'Opening' \}\);[\s\S]*?data = await invokeReadBoard\(filePath, dbg\);/);
+  assert.match(productionBootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*let data;\s*data = await invokeReadBoard\(filePath\);/);
+  assert.doesNotMatch(bootstrap, /await startPillTask\(\{ message: 'Opening' \}\)/);
 });
 
 test('open-board title target updates as soon as board data is applied', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
+  const productionBootstrap = withoutDeveloperDiagnostics(bootstrap);
 
   assert.match(
     bootstrap,
-    /applyBoardData\(data,[\s\S]*?\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);\s*await finishOpenedBoard\(dbg, data\);/,
+    /applyBoardData\(data, applyOptions\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);[\s\S]*?await finishOpenedBoard\(dbg, data\);/,
+  );
+  assert.match(
+    productionBootstrap,
+    /applyBoardData\(data, applyOptions\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);\s*await finishOpenedBoard\(\);/,
   );
 });

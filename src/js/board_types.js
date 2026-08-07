@@ -1,21 +1,13 @@
 'use strict';
 
 (function initBoardTypes(root) {
-  function loadBoardContract() {
-    const embedded = root.document?.getElementById?.('boardfish-board-contract')?.textContent;
-    if (embedded) return JSON.parse(embedded);
-    if (typeof require === 'function') return require('../shared/board_contract.json');
-    throw new Error('Boardfish board contract is unavailable');
-  }
-
-  const BOARD_CONTRACT = Object.freeze(loadBoardContract());
-  const BOARD_FORMAT = BOARD_CONTRACT.format;
-  const BOARD_VERSION_LEGACY = BOARD_CONTRACT.versions.legacy;
-  const BOARD_VERSION_CONTAINER = BOARD_CONTRACT.versions.container;
+  const BOARD_FORMAT = 'boardfish-container';
+  const BOARD_VERSION_LEGACY = 2;
+  const BOARD_VERSION_CONTAINER = 3;
   const SUPPORTED_BOARD_VERSIONS = Object.freeze([BOARD_VERSION_LEGACY, BOARD_VERSION_CONTAINER]);
   const OBJECT_TYPES = Object.freeze({
-    IMAGE: BOARD_CONTRACT.objectTypes[0],
-    TEXT: BOARD_CONTRACT.objectTypes[1],
+    IMAGE: 'image',
+    TEXT: 'text',
   });
   const IMAGE_REF_KINDS = Object.freeze({
     DATA_URL: 'data-url',
@@ -24,8 +16,8 @@
     STRING: 'string',
   });
   const VIEWPORT_LIMITS = Object.freeze({
-    MIN_ZOOM: BOARD_CONTRACT.viewport.minZoom,
-    MAX_ZOOM: BOARD_CONTRACT.viewport.maxZoom,
+    MIN_ZOOM: 0.01,
+    MAX_ZOOM: 100,
   });
 
   function isObject(value) {

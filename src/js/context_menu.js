@@ -2,24 +2,12 @@
 var ctxPos = { x: 0, y: 0 };
 var _lastBoardCursorClientX = null;
 var _lastBoardCursorClientY = null;
+const HAS_POINTER_EVENTS = 'PointerEvent' in window;
 const BOARD_CURSOR_CLIENT_EVENT_TYPES = Object.freeze([
-  'pointerover',
-  'pointerenter',
-  'pointermove',
-  'pointerdown',
-  'pointerup',
-  'mouseover',
-  'mouseenter',
-  'mousemove',
-  'mousedown',
-  'mouseup',
-  'click',
-  'dblclick',
-  'auxclick',
-  'contextmenu',
-  'dragenter',
-  'dragover',
-  'drop',
+  ...(HAS_POINTER_EVENTS
+    ? ['pointerover', 'pointerenter', 'pointermove', 'pointerdown', 'pointerup']
+    : ['mouseover', 'mouseenter', 'mousemove', 'mousedown', 'mouseup']),
+  'click', 'dblclick', 'auxclick', 'contextmenu', 'dragenter', 'dragover', 'drop',
 ]);
 
 function rememberBoardCursorClientPoint(event) {
@@ -45,7 +33,6 @@ function menuCommandWorldPoint(event = null) {
 }
 
 for (const type of BOARD_CURSOR_CLIENT_EVENT_TYPES) {
-  document.addEventListener(type, rememberBoardCursorClientPoint, true);
   window.addEventListener(type, rememberBoardCursorClientPoint, true);
 }
 
@@ -108,11 +95,6 @@ function closeCtxActions(reason) {
   closeFloatingSurface(ctxActions);
 }
 
-function syncCtxActionsWithMenu(reason) {
-  if (ctxMenu.classList.contains('visible')) return;
-  closeCtxActions(reason);
-}
-
 function alignCtxActionsToMenuRow(gap, viewport) {
   const layoutBox = (surface) => {
     const rect = surface.getBoundingClientRect();
@@ -160,11 +142,6 @@ function openCtxMenuAt(x, y) {
   alignCtxActionsToMenuRow(viewport.gap, viewport);
 }
 
-if (ctxActions) {
-  new MutationObserver(() => syncCtxActionsWithMenu('ctx-menu-visibility-sync'))
-    .observe(ctxMenu, { attributes: true, attributeFilter: ['class'] });
-}
-
 if (DEBUG_TOOLS_ENABLED) {
   for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
     document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:capture`, e), true);
@@ -206,14 +183,11 @@ function openExclusiveMenuAt(menu, menuId, x, y, reason) {
   openMenuAt(menu, x, y);
 }
 var _menuPointerCommand = null;
-var _menuMouseCommand = null;
 var _lastPointerMenuCommandAt = 0;
 
 function clearMenuCommandPressState() {
   _menuPointerCommand?.classList.remove('menu-pressed');
-  if (_menuMouseCommand !== _menuPointerCommand) _menuMouseCommand?.classList.remove('menu-pressed');
   _menuPointerCommand = null;
-  _menuMouseCommand = null;
 }
 
 var MENU_COMMANDS = {
@@ -298,6 +272,7 @@ const writeTextClipboardFromEditMenu = async (text, { allowEmpty = false } = {})
 };
 
 const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 'insertText' } = {}) => {
+  const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
   const selection = getTextEditSelectionState();
   if (!selection || !_editEl) return false;
   const inputTypeValue = String(inputType || '');
@@ -319,7 +294,9 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
       insertedText: replacementText,
     },
   };
-  if (typeof nextTextEditInputDebugSeq === 'function') replacementState._debugSeq = nextTextEditInputDebugSeq();
+  if (collectDiagnostics && typeof nextTextEditInputDebugSeq === 'function') {
+    replacementState._debugSeq = nextTextEditInputDebugSeq();
+  }
   if (immediateHistory) {
     beginTextEditHistoryAction(editingId, replacementState, { splitPending: true });
   }
@@ -329,30 +306,42 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   } else {
     _editEl.setSelectionRange(selection.start, selection.end, selection.direction);
   }
-  const debugNow = typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now();
-  const debugRound = typeof textEditorDebugRound === 'function'
-    ? textEditorDebugRound
-    : (value) => Math.round((Number(value) || 0) * 100) / 100;
-  const mutationStartedAt = debugNow();
-  const mutationResult = typeof replaceTextEditProxyRange === 'function'
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const debugNow = collectDiagnostics
+    ? (typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now())
+    : null;
+  const debugRound = collectDiagnostics
+    ? (typeof textEditorDebugRound === 'function'
+        ? textEditorDebugRound
+        : (value) => Math.round((Number(value) || 0) * 100) / 100)
+    : null;
+  const mutationStartedAt = collectDiagnostics ? debugNow() : 0;
+  const mutationResult =
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  typeof replaceTextEditProxyRange === 'function'
     ? replaceTextEditProxyRange(_editEl, replacementText, selection.start, selection.end, 'end', {
       deferDomValue: inputType && String(inputType).toLowerCase().startsWith('delete'),
     })
     : (() => {
       _editEl.setRangeText(replacementText, selection.start, selection.end, 'end');
-      return {
-        method: 'setRangeText',
-        setRangeTextMs: '',
-        valueAssignMs: '',
-        valueBuildMs: '',
-        valueSetMs: '',
-        logicalSetMs: '',
-        selectionSetMs: '',
-      };
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      return collectDiagnostics
+        ? {
+            method: 'setRangeText',
+            setRangeTextMs: '',
+            valueAssignMs: '',
+            valueBuildMs: '',
+            valueSetMs: '',
+            logicalSetMs: '',
+            selectionSetMs: '',
+          }
+        : null;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     })();
-  const mutationMs = debugRound(debugNow() - mutationStartedAt);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const nextValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
-  if (typeof recordTextEditorInputPerfStep === 'function') {
+  if (collectDiagnostics && typeof recordTextEditorInputPerfStep === 'function') {
+    const mutationMs = debugRound(debugNow() - mutationStartedAt);
     recordTextEditorInputPerfStep('menu-replace-textarea-mutated', {
       seq: replacementState._debugSeq ?? '',
       inputType,
@@ -377,10 +366,14 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
       ...(typeof textEditorSelectionDebugStats === 'function' ? textEditorSelectionDebugStats(selection, oldValue) : {}),
     });
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _caretVisible = true;
-  const dispatchStartedAt = debugNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const dispatchStartedAt = collectDiagnostics ? debugNow() : 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _editEl.dispatchEvent(new Event('input', { bubbles: true }));
-  if (typeof recordTextEditorInputPerfStep === 'function') {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (collectDiagnostics && typeof recordTextEditorInputPerfStep === 'function') {
     recordTextEditorInputPerfStep('menu-replace-input-dispatched', {
       seq: replacementState._debugSeq ?? '',
       inputType,
@@ -388,6 +381,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
       dispatchMs: debugRound(debugNow() - dispatchStartedAt),
     });
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (immediateHistory) flushEditHistoryCheckpoint();
   focusTextEditProxy();
   scheduleRender(true, false);
@@ -414,7 +408,8 @@ const copyTextEditSelection = async () => {
         ...selection,
       },
     });
-    scheduleRender(true, false, 'copy-text-selection');
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, false, 'copy-text-selection');
+    else scheduleRender(true, false);
   }
   await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
     allowEmpty: !!selectedText,
@@ -476,7 +471,7 @@ function runMenuCommand(button, source, commandEvent = null) {
     source,
   });
   if (source === 'pointerup' || source === 'mouseup') _lastPointerMenuCommandAt = performance.now();
-  const runWithDebug = () => {
+  const executeCommand = () => {
     MenuDebug.log('menu:command:start', { command, source });
     try {
       run(commandEvent);
@@ -487,9 +482,9 @@ function runMenuCommand(button, source, commandEvent = null) {
     }
   };
   if (source === 'pointerup') {
-    setTimeout(runWithDebug, 0);
+    setTimeout(executeCommand, 0);
   } else {
-    runWithDebug();
+    executeCommand();
   }
   return true;
 }
@@ -557,23 +552,9 @@ function runVisibleMenuCommandForShortcut(shortcutName) {
   return false;
 }
 
-function runAddImagesCommandFromShortcut() {
-  if (ctxMenu.classList.contains('visible')) {
-    runMenuCommand(addImageBtn, 'shortcut');
-    return;
-  }
-  ctxPos = boardCursorWorldPoint();
-  runMenuCommand(addImageBtn, 'shortcut');
-}
+function runAddImagesCommandFromShortcut() { runMenuCommand(addImageBtn, 'shortcut'); }
 
-function runAddTextCommandFromShortcut() {
-  if (ctxMenu.classList.contains('visible')) {
-    runMenuCommand(addTextBtn, 'shortcut');
-    return;
-  }
-  ctxPos = boardCursorWorldPoint();
-  runMenuCommand(addTextBtn, 'shortcut');
-}
+function runAddTextCommandFromShortcut() { runMenuCommand(addTextBtn, 'shortcut'); }
 
 function pointToObjectCenterDistanceSq(point, obj) {
   const dx = point.x - (obj.x + obj.w / 2);
@@ -617,7 +598,8 @@ function resetZoomToClosestObject() {
       window.innerWidth / 2 - center.x * targetZoom,
       window.innerHeight / 2 - center.y * targetZoom,
     );
-    scheduleTransform('reset-zoom');
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('reset-zoom');
+    else scheduleTransform();
     ViewportDebug.end(dbg, {
       mode: 'empty-board-center',
       centerX: center.x,
@@ -635,7 +617,8 @@ function resetZoomToClosestObject() {
     window.innerWidth / 2 - objectCenterX * targetZoom,
     window.innerHeight / 2 - objectCenterY * targetZoom,
   );
-  scheduleTransform('reset-zoom');
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('reset-zoom');
+  else scheduleTransform();
   ViewportDebug.end(dbg, {
     objectId: object.id,
     objectType: targetType,
@@ -668,14 +651,21 @@ const suppressZoomPillContextMenu = (e) => {
 island?.addEventListener('click', resetZoomFromPill);
 island?.addEventListener('contextmenu', suppressZoomPillContextMenu);
 
+const MENU_COMMAND_INPUT_FAMILY = HAS_POINTER_EVENTS ? 'pointer' : 'mouse';
+const MENU_COMMAND_DOWN_EVENT = HAS_POINTER_EVENTS ? 'pointerdown' : 'mousedown';
+const MENU_COMMAND_UP_EVENT = HAS_POINTER_EVENTS ? 'pointerup' : 'mouseup';
+const MENU_COMMAND_CANCEL_EVENTS = HAS_POINTER_EVENTS
+  ? ['pointercancel', 'pointerleave', 'lostpointercapture']
+  : ['mouseleave'];
+
 function onMenuPointerDown(e) {
   const button = e.target.closest?.('.ctx-item');
   if (!button || e.button !== 0) return;
-  e.stopPropagation();
+  if (HAS_POINTER_EVENTS) e.stopPropagation();
   clearMenuCommandPressState();
   _menuPointerCommand = button;
   button.classList.add('menu-pressed');
-  MenuDebug.log('menu:pointer-command:start', { command: menuCommandName(button), target: button.id });
+  MenuDebug.log(`menu:${MENU_COMMAND_INPUT_FAMILY}-command:start`, { command: menuCommandName(button), target: button.id });
 }
 
 function onMenuPointerUp(e) {
@@ -685,53 +675,19 @@ function onMenuPointerUp(e) {
   clearMenuCommandPressState();
   if (e.pointerType === 'touch') started.blur?.();
   if (button !== started) {
-    MenuDebug.log('menu:pointer-command:cancel', { started: started.id, ended: button?.id || '' });
+    MenuDebug.log(`menu:${MENU_COMMAND_INPUT_FAMILY}-command:cancel`, { started: started.id, ended: button?.id || '' });
     return;
   }
   e.preventDefault();
   e.stopPropagation();
-  runMenuCommand(button, 'pointerup', e);
+  runMenuCommand(button, MENU_COMMAND_UP_EVENT, e);
 }
 
-function onMenuMouseDown(e) {
-  const button = e.target.closest?.('.ctx-item');
-  if (!button || e.button !== 0) return;
-  _menuMouseCommand = button;
-  button.classList.add('menu-pressed');
-  MenuDebug.log('menu:mouse-command:start', { command: menuCommandName(button), target: button.id });
-}
-
-function onMenuMouseUp(e) {
-  if (!_menuMouseCommand || e.button !== 0) return;
-  const button = e.target.closest?.('.ctx-item');
-  const started = _menuMouseCommand;
-  clearMenuCommandPressState();
-  if (button !== started) {
-    MenuDebug.log('menu:mouse-command:cancel', { started: started.id, ended: button?.id || '' });
-    return;
-  }
-  e.preventDefault();
-  e.stopPropagation();
-  runMenuCommand(button, 'mouseup', e);
-}
-
-ctxMenu.addEventListener('pointerdown', onMenuPointerDown);
-ctxMenu.addEventListener('pointerup', onMenuPointerUp);
-objCtxMenu.addEventListener('pointerdown', onMenuPointerDown);
-objCtxMenu.addEventListener('pointerup', onMenuPointerUp);
-BoardfishDOM.textCtxMenu.addEventListener('pointerdown', onMenuPointerDown);
-BoardfishDOM.textCtxMenu.addEventListener('pointerup', onMenuPointerUp);
 for (const menu of [ctxMenu, objCtxMenu, BoardfishDOM.textCtxMenu]) {
-  menu.addEventListener('pointercancel', clearMenuCommandPressState);
-  menu.addEventListener('pointerleave', clearMenuCommandPressState);
-  menu.addEventListener('lostpointercapture', clearMenuCommandPressState);
+  menu.addEventListener(MENU_COMMAND_DOWN_EVENT, onMenuPointerDown);
+  menu.addEventListener(MENU_COMMAND_UP_EVENT, onMenuPointerUp);
+  for (const type of MENU_COMMAND_CANCEL_EVENTS) menu.addEventListener(type, clearMenuCommandPressState);
 }
-ctxMenu.addEventListener('mousedown', onMenuMouseDown);
-ctxMenu.addEventListener('mouseup', onMenuMouseUp);
-objCtxMenu.addEventListener('mousedown', onMenuMouseDown);
-objCtxMenu.addEventListener('mouseup', onMenuMouseUp);
-BoardfishDOM.textCtxMenu.addEventListener('mousedown', onMenuMouseDown);
-BoardfishDOM.textCtxMenu.addEventListener('mouseup', onMenuMouseUp);
 const contextMenuStopSurfaces = [ctxMenu, objCtxMenu, BoardfishDOM.textCtxMenu, ctxActions];
 for (const menu of contextMenuStopSurfaces) {
   if (!menu) continue;
@@ -900,69 +856,17 @@ document.addEventListener('click', (e) => {
   closeOpenMenusExcept('', 'document-click');
 });
 
-function ctxActionHotspotRect(button) {
-  const rect = button.getBoundingClientRect();
-  if (ctxActions?.contains(button)) {
-    return {
-      left: rect.left,
-      top: rect.top,
-      right: rect.right,
-      bottom: rect.bottom,
-    };
-  }
-  const inset = parseFloat(cssVar('--menu-shell-padding')) || 0;
-  if (!button.classList.contains('ctx-action-icon')) {
-    return {
-      left: rect.left + inset,
-      top: rect.top + inset,
-      right: rect.right - inset,
-      bottom: rect.bottom - inset,
-    };
-  }
-  const size = parseFloat(cssVar('--menu-item-height')) || Math.max(0, rect.height - inset * 2);
-  const cx = rect.left + rect.width / 2;
-  return {
-    left: cx - size / 2,
-    top: rect.top + inset,
-    right: cx + size / 2,
-    bottom: rect.bottom - inset,
-  };
-}
-
-function isCtxActionHotspotEvent(e, button) {
-  if (!button) return false;
-  if (!e.detail && e.clientX === 0 && e.clientY === 0) return true;
-  const hot = ctxActionHotspotRect(button);
-  return e.clientX >= hot.left && e.clientX <= hot.right && e.clientY >= hot.top && e.clientY <= hot.bottom;
-}
-
-function updateCtxActionHotspotState(e, active = false) {
-  const button = e.target.closest?.('.ctx-action-item');
-  for (let i = 0; i < ctxActionItems.length; i++) {
-    const item = ctxActionItems[i];
-    const hot = item === button && isCtxActionHotspotEvent(e, item);
-    item.classList.toggle('hotspot-hover', e.pointerType !== 'touch' && hot);
-    item.classList.toggle('hotspot-active', active && hot);
-  }
-}
-
 function clearCtxActionHotspotState() {
   for (let i = 0; i < ctxActionItems.length; i++) {
-    const item = ctxActionItems[i];
-    item.classList.remove('hotspot-hover', 'hotspot-active');
+    ctxActionItems[i].classList.remove('hotspot-active');
   }
 }
 
-ctxActions?.addEventListener('pointermove', (e) => updateCtxActionHotspotState(e));
 ctxActions?.addEventListener('pointerdown', (e) => {
   const button = e.target.closest?.('.ctx-action-item');
-  if (!isCtxActionHotspotEvent(e, button)) {
-    e.preventDefault();
-    e.stopPropagation();
-    clearCtxActionHotspotState();
-    return;
-  }
-  updateCtxActionHotspotState(e, true);
+  if (!button) return;
+  clearCtxActionHotspotState();
+  button.classList.add('hotspot-active');
 });
 ctxActions?.addEventListener('pointerup', clearCtxActionHotspotState);
 ctxActions?.addEventListener('pointerleave', clearCtxActionHotspotState);
@@ -970,7 +874,6 @@ ctxActions?.addEventListener('pointerleave', clearCtxActionHotspotState);
 darkModeMenuBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  if (ctxActions?.contains(e.currentTarget) && !isCtxActionHotspotEvent(e, e.currentTarget)) return;
   closeCtxMenu('command:dark-mode');
   Promise.resolve(toggleAppTheme()).finally(updateCtxActionStates);
 });

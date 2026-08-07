@@ -58,7 +58,7 @@ test('text edit math perf debugger is passive event recording only', () => {
   assert.match(source, /function textEditInputStepSummary/);
   assert.match(source, /function textEditInputStepTimeline/);
   assert.match(source, /traceDeleteInputs/);
-  assert.match(source, /maxLayoutPatchTotalMs/);
+  assert.doesNotMatch(source, /maxLayoutPatchTotalMs/);
   assert.match(source, /maxTextareaMutationMs/);
   assert.match(source, /textEditMathBegin/);
   assert.match(source, /textEditMathReport/);
@@ -266,13 +266,13 @@ test('jiggle debugger captures motion smoothness and animated image latency evid
   assert.match(motionSource, /recordMotionDebug\('raf-fired'/);
   assert.match(motionSource, /recordMotionDebug\('render-scheduled'/);
   assert.match(motionSource, /recordMotionDebug\(jello\.translateXPx \|\| jello\.translateYPx \? 'jiggle-progress'/);
-  assert.match(motionSource, /action,\s*\};/);
+  assert.match(motionSource, /action: options\.action \|\| ''/);
 
   assert.match(rendererSource, /lowLatencyImageDraws/);
   assert.match(rendererSource, /motionScaledImages/);
   assert.match(rendererSource, /motionFullFallbackImages/);
   assert.match(rendererSource, /imageSourceResolver\(key, obj, view, counters, \{ activeInput: lowLatencyImageMotion \}\)/);
-  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, fullImg, view, \{ activeInput: lowLatencyImageMotion \}\)/);
+  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, bitmap, view, \{ activeInput: lowLatencyImageMotion \}\)/);
 });
 
 test('text selection debugger includes focused enter and exit edit timings', () => {
@@ -314,6 +314,6 @@ test('text edit proxy disables native wrapping and browser text services', () =>
   assert.match(source, /autocapitalize', 'off'/);
   assert.match(source, /aria-label', 'Boardfish text editor'/);
   assert.doesNotMatch(source, /aria-hidden', 'true'/);
-  assert.match(source, /'contain:strict'/);
+  assert.match(source, /proxy\.style\.cssText = '[^']*contain:strict[^']*';/);
   assert.match(source, /configureTextEditProxyElement\(proxy\)/);
 });

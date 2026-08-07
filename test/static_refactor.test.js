@@ -84,8 +84,12 @@ test('startup manifest exposes only web variants', () => {
   assert.doesNotMatch(manifest, new RegExp(shellWord.toUpperCase()));
   assert.equal(webDev[0], 'web_env.js');
   assert.ok(webDev.includes('web_runtime.js'));
+  assert.ok(webDev.includes('runtime_utils.js'));
   assert.ok(webDev.includes('startup_debug.js'));
-  assert.ok(webPreview.includes('runtime_debug_noop.js'));
+  assert.ok(webPreview.includes('runtime_utils.js'));
+  assert.equal(webPreview[0], 'web_env.js');
+  assert.equal(webPreview.includes('runtime_debug_noop.js'), false);
+  assert.equal(fs.existsSync(path.join(root, 'src/js/runtime_debug_noop.js')), false);
   for (const file of [...webDev, ...webPreview]) {
     assert.doesNotMatch(file, new RegExp(bridgeWord, 'i'));
     assert.doesNotMatch(file, new RegExp(shellWord, 'i'));
@@ -257,6 +261,8 @@ test('image hydration queue processes until its time budget is consumed', () => 
   const imageState = readSource('src/js/image_state.js');
 
   assert.match(imageState, /while \(_imageHydrationQueue\.length && \(count === 0 \|\| performance\.now\(\) - batchStart < 6\)\)/);
+  assert.match(imageState, /function ensureImageDisplaySrc\(key[\s\S]*?, dbg = null[\s\S]*?\) \{/);
+  assert.doesNotMatch(imageState, /ensureImageDisplaySrc\(key, dbg\)\s*\.then/);
   assert.doesNotMatch(imageState, /count < 1 && performance\.now\(\) - batchStart < 6/);
 });
 

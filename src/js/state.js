@@ -34,46 +34,29 @@ function cloneStateTextScriptRanges(ranges = []) {
   return out;
 }
 
-function cloneStateLineAlign(lineAlign = []) {
-  const out = new Array(lineAlign.length);
-  for (let i = 0; i < lineAlign.length; i++) out[i] = lineAlign[i];
-  return out;
-}
-
 function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
   if (!Array.isArray(sourceScriptRanges) || !sourceScriptRanges.length) return [];
-  if (typeof normalizeTextScriptRangesForContent === 'function') {
-    const sourceKey = JSON.stringify(sourceScriptRanges);
-    if (
-      Array.isArray(obj._textScriptRangesCache) &&
-      obj._textScriptRangesCacheContent === content &&
-      obj._textScriptRangesCacheSourceKey === sourceKey
-    ) {
-      return cloneStateTextScriptRanges(obj._textScriptRangesCache);
-    }
-    return normalizeTextScriptRangesForContent(content, sourceScriptRanges);
+  if (
+    Array.isArray(obj._textScriptRangesCache) &&
+    obj._textScriptRangesCacheContent === content &&
+    obj._textScriptRangesCacheSourceKey === JSON.stringify(sourceScriptRanges)
+  ) {
+    return cloneStateTextScriptRanges(obj._textScriptRangesCache);
   }
-  return cloneStateTextScriptRanges(sourceScriptRanges);
+  return normalizeTextScriptRangesForContent(content, sourceScriptRanges);
 }
 
 function cloneObject(obj, runtimeTextCache = false) {
   HistoryDebug.count('cloneObjectCalls');
   const data = obj.type === 'image'
-    ? {
-        imgKey: obj.data.imgKey,
-        ...imageTransformFromObject(obj),
-      }
+    ? { ...obj.data }
     : (() => {
         const content = normalizeTextContent(obj.data.content);
         const textData = { content };
         const sourceLineAlign = obj.data?.lineAlign;
         if (Array.isArray(sourceLineAlign) && sourceLineAlign.length) {
-          if (typeof normalizeTextLineAlignForContent === 'function') {
-            const lineAlign = normalizeTextLineAlignForContent(content, sourceLineAlign);
-            if (lineAlign.length) textData.lineAlign = lineAlign;
-          } else {
-            textData.lineAlign = cloneStateLineAlign(sourceLineAlign);
-          }
+          const lineAlign = normalizeTextLineAlignForContent(content, sourceLineAlign);
+          if (lineAlign.length) textData.lineAlign = lineAlign;
         }
         const sourceScriptRanges = obj.data?.scriptRanges;
         if (Array.isArray(sourceScriptRanges) && sourceScriptRanges.length) {
@@ -92,24 +75,24 @@ function cloneObject(obj, runtimeTextCache = false) {
     z: obj.z,
     data,
   };
-  if (
-    runtimeTextCache &&
-    cloned.type === 'text' &&
-    typeof cloneTextObjectRuntimeCaches === 'function'
-  ) {
+  if (runtimeTextCache && cloned.type === 'text') {
     cloneTextObjectRuntimeCaches(obj, cloned);
   }
   return cloned;
 }
 
 function cloneObjects(list, runtimeTextCache = false) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = HistoryDebug.start('cloneObjects', { objectCount: list.length });
   const t0 = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   HistoryDebug.count('cloneObjectsCalls');
   HistoryDebug.count('clonedObjects', list.length);
   const clones = new Array(list.length);
   for (let i = 0; i < list.length; i++) clones[i] = cloneObject(list[i], runtimeTextCache);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const ms = performance.now() - t0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   HistoryDebug.max('maxCloneObjectsMs', ms);
   HistoryDebug.end(dbg, { objectCount: list.length, ms });
   return clones;
@@ -141,14 +124,18 @@ function sendSelectedToBack() {
 }
 
 function flipSelectedImages() {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = ClipDebug.start('flipSelectedImages', { selectedCount: selectedIds.size });
   let imageCount = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const flipped = BoardfishEditorState.commitMutation('flip-image', () => {
     let didFlip = false;
     for (const id of selectedIds) {
       const obj = objectsMap.get(id);
       if (!obj || obj.type !== 'image') continue;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       imageCount++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       obj.data.flipX = !obj.data.flipX;
       markDirty(obj.id);
       didFlip = true;

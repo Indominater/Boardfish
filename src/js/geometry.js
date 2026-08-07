@@ -5,7 +5,6 @@ function selectedBounds() {
   let y1 = Infinity;
   let x2 = -Infinity;
   let y2 = -Infinity;
-  let count = 0;
 
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
@@ -14,10 +13,9 @@ function selectedBounds() {
     y1 = Math.min(y1, obj.y);
     x2 = Math.max(x2, obj.x + obj.w);
     y2 = Math.max(y2, obj.y + obj.h);
-    count++;
   }
 
-  return count ? { x1, y1, x2, y2, count } : null;
+  return x1 === Infinity ? null : { x1, y1, x2, y2 };
 }
 
 function viewportWorldRect(padScreenPx = 0, view = { panX, panY, zoom }) {

@@ -87,6 +87,7 @@ function loadTextScriptEditorHelpers() {
       'globalThis.textEditBlankLineDeleteRange = textEditBlankLineDeleteRange;\n' +
       'globalThis.textEditScriptMarkerInsertionIndexAt = textEditScriptMarkerInsertionIndexAt;\n' +
       'globalThis.transformTextScriptRangesForInput = transformTextScriptRangesForInput;\n' +
+      'globalThis.updateTextLineAlignForInput = updateTextLineAlignForInput;\n' +
       'globalThis.replaceTextEditProxyRange = replaceTextEditProxyRange;\n' +
       'globalThis.tryNativeBoardfishTextSelectionPaste = tryNativeBoardfishTextSelectionPaste;\n',
     context,
@@ -94,6 +95,25 @@ function loadTextScriptEditorHelpers() {
   );
   return context;
 }
+
+test('newline-free input preserves the existing line-alignment array', () => {
+  const context = loadTextScriptEditorHelpers();
+  const lineAlign = ['center', 'right'];
+  const obj = { data: { lineAlign } };
+
+  context.updateTextLineAlignForInput(obj, 'one\ntwo', 1, 2, 'oXe\ntwo', 'X');
+
+  assert.equal(obj.data.lineAlign, lineAlign);
+});
+
+test('newline insertion inherits alignment without expanding trailing left entries', () => {
+  const context = loadTextScriptEditorHelpers();
+  const obj = { data: { lineAlign: ['center'] } };
+
+  context.updateTextLineAlignForInput(obj, 'one\ntwo', 3, 3, 'one\n\ntwo', '\n');
+
+  assert.deepEqual([...obj.data.lineAlign], ['center', 'center']);
+});
 
 function loadExitEditHarness() {
   const obj = {

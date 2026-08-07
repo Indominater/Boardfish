@@ -79,9 +79,8 @@ var CANVAS_THEME_COLOR_FALLBACKS = {
 };
 var _canvasThemeColorCache = { ...CANVAS_THEME_COLOR_FALLBACKS };
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 // StartupDebug is initialized by js/startup_debug.js.
-
-
 function logStartupStep(step, detail = {}) {
   StartupDebug.record(step, detail);
   if (!DEBUG_TOOLS_ENABLED) return;
@@ -89,6 +88,7 @@ function logStartupStep(step, detail = {}) {
     console.info('[Boardfish startup]', step, detail);
   } catch (_) {}
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function normalizeAppTheme(value, fallback = DEFAULT_APP_THEME) {
   const theme = String(value || '').toLowerCase();
@@ -129,10 +129,6 @@ function refreshCanvasThemeColorCache() {
   };
 }
 
-function cachedCanvasCssVar(name) {
-  return _canvasThemeColorCache?.[name] || '';
-}
-
 function repaintBoardForThemeChange() {
   if (typeof invalidateOffscreen === 'function') {
     invalidateOffscreen();
@@ -140,20 +136,31 @@ function repaintBoardForThemeChange() {
 
   const boardIsOpening = typeof _boardOpening !== 'undefined' && _boardOpening;
   if (!boardIsOpening && typeof drawBoard === 'function') {
-    if (typeof withRenderSource === 'function') {
-      withRenderSource('theme-change-sync', drawBoard);
-    } else {
-      drawBoard();
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      if (typeof withRenderSource === 'function') withRenderSource('theme-change-sync', drawBoard);
+      else drawBoard();
+      return 'sync-board';
     }
-    return 'sync-board';
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    drawBoard();
+    return;
   }
 
   if (typeof scheduleRender === 'function') {
-    scheduleRender(true, false, 'theme-change');
-    return 'scheduled-board';
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      scheduleRender(true, false, 'theme-change');
+      return 'scheduled-board';
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    scheduleRender(true, false);
+    return;
   }
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   return 'deferred-unavailable';
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
 function applyAppTheme(theme, {
@@ -166,9 +173,18 @@ function applyAppTheme(theme, {
   document.body.dataset.theme = appTheme;
   syncWebAppThemeColor(appTheme);
   refreshCanvasThemeColorCache();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (render && (changed || dirty)) {
-    logStartupStep('theme-canvas-repaint', { theme: appTheme, mode: repaintBoardForThemeChange() });
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const repaintMode = repaintBoardForThemeChange();
+      logStartupStep('theme-canvas-repaint', { theme: appTheme, mode: repaintMode });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    } else {
+      repaintBoardForThemeChange();
+    }
   }
   if (dirty) storeAppTheme();
   return Promise.resolve();
@@ -181,23 +197,21 @@ function toggleAppTheme() {
 }
 
 const startupTheme = loadStoredAppTheme();
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 logStartupStep('theme-bootstrap', { theme: startupTheme });
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 applyAppTheme(startupTheme, { render: false });
 
-function cssVar(name) {
-  return getComputedStyle(document.body).getPropertyValue(name).trim();
-}
-
 function boardBg() {
-  return cachedCanvasCssVar('--canvas-bg') || cssVar('--canvas-bg') || CANVAS_THEME_COLOR_FALLBACKS['--canvas-bg'];
+  return _canvasThemeColorCache['--canvas-bg'];
 }
 
 function canvasTextColor() {
-  return cachedCanvasCssVar('--canvas-text') || cssVar('--canvas-text') || CANVAS_THEME_COLOR_FALLBACKS['--canvas-text'];
+  return _canvasThemeColorCache['--canvas-text'];
 }
 
 function canvasSelectionHighlightColor() {
-  return cachedCanvasCssVar('--selection-highlight') || cssVar('--selection-highlight') || CANVAS_THEME_COLOR_FALLBACKS['--selection-highlight'];
+  return _canvasThemeColorCache['--selection-highlight'];
 }
 
 function fillBoardBackground(context, width, height) {

@@ -4,7 +4,7 @@
   const TOUCH_HOLD_DELAY_MS = 500;
   const TOUCH_MOVE_THRESHOLD_PX = 8;
 
-  function touchPoint(input) {
+  function touchPoint(input, sourceEvent = null) {
     if (!input) return null;
     const pointerId = input.pointerId ?? input.identifier;
     const x = Number(input.clientX);
@@ -12,13 +12,14 @@
     if (pointerId === undefined || pointerId === null || !Number.isFinite(x) || !Number.isFinite(y)) {
       return null;
     }
+    const event = sourceEvent || input.sourceEvent || input;
     return {
       id: String(pointerId),
       pointerId,
       x,
       y,
-      target: input.target || null,
-      sourceEvent: input.sourceEvent || input,
+      target: input.target || event?.target || null,
+      sourceEvent: event,
     };
   }
 
@@ -165,8 +166,8 @@
       return current;
     }
 
-    function pointerDown(input) {
-      const point = touchPoint(input);
+    function pointerDown(input, sourceEvent = null) {
+      const point = touchPoint(input, sourceEvent);
       if (!point) return false;
       clearHoldTimer();
       const stored = {
@@ -188,8 +189,8 @@
       return true;
     }
 
-    function pointerMove(input) {
-      const point = touchPoint(input);
+    function pointerMove(input, sourceEvent = null) {
+      const point = touchPoint(input, sourceEvent);
       const current = updateActivePoint(point);
       if (!current) return false;
 
@@ -216,13 +217,13 @@
       return true;
     }
 
-    function pointerMoves(inputs) {
+    function pointerMoves(inputs, sourceEvent = null) {
       if (mode !== 'pinch' || active.size < 2) {
         let handled = false;
         // pointerMove performs its own normalization. Passing an already
         // normalized point through it drops the sample because that point has
         // x/y rather than clientX/clientY (the one-finger TouchEvent path).
-        for (const sample of inputs || []) handled = pointerMove(sample) || handled;
+        for (let i = 0; i < (inputs?.length || 0); i++) handled = pointerMove(inputs[i], sourceEvent) || handled;
         return handled;
       }
 
@@ -230,16 +231,16 @@
       // Update the complete snapshot before deriving its absolute scale so
       // event ordering and movement speed cannot affect the zoom ratio.
       let lastPoint = null;
-      for (const sample of inputs || []) {
-        const point = touchPoint(sample);
+      for (let i = 0; i < (inputs?.length || 0); i++) {
+        const point = touchPoint(inputs[i], sourceEvent);
         if (!updateActivePoint(point)) continue;
         lastPoint = point;
       }
       return lastPoint ? emitPinch(lastPoint) : false;
     }
 
-    function finishPointer(input, cancelled = false) {
-      const point = touchPoint(input);
+    function finishPointer(input, cancelled = false, sourceEvent = null) {
+      const point = touchPoint(input, sourceEvent);
       const current = point ? active.get(point.id) : null;
       if (!point || !current) return false;
       clearHoldTimer();
@@ -310,8 +311,8 @@
       pointerDown,
       pointerMove,
       pointerMoves,
-      pointerUp: (input) => finishPointer(input, false),
-      pointerCancel: (input) => finishPointer(input, true),
+      pointerUp: (input, sourceEvent = null) => finishPointer(input, false, sourceEvent),
+      pointerCancel: (input, sourceEvent = null) => finishPointer(input, true, sourceEvent),
       cancel,
       hasPointer(pointerId) {
         return active.has(String(pointerId));
@@ -400,12 +401,18 @@
     target.dispatchEvent(makeTouchMouseEvent('mouseup', point, 0, 0));
     target.dispatchEvent(makeTouchMouseEvent('click', point, 0, 0));
     if (editingId && _editEl && typeof focusTextEditProxyNow === 'function') {
-      const obj = typeof objectsMap?.get === 'function' ? objectsMap.get(editingId) : null;
-      focusTextEditProxyNow(_editEl, obj, 'touch-tap-focus', {
-        phase: 'touch-tap',
-        clientX: point.x,
-        clientY: point.y,
-      });
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        const obj = typeof objectsMap?.get === 'function' ? objectsMap.get(editingId) : null;
+        focusTextEditProxyNow(_editEl, obj, 'touch-tap-focus', {
+          phase: 'touch-tap',
+          clientX: point.x,
+          clientY: point.y,
+        });
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      } else {
+        focusTextEditProxyNow(_editEl);
+      }
     }
   }
 
@@ -463,7 +470,8 @@
     if (applyTouchSelectionDrag(gesture)) return;
     if (!boardNavigationAllowed()) return;
     BoardfishViewportState.panBy(gesture.dx, gesture.dy);
-    scheduleTransform('touch-pan', gesture.event);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pan', gesture.event);
+    else scheduleTransform(gesture.event);
   }
 
   function beginTouchPinch() {
@@ -476,7 +484,8 @@
     if (!touchPinchStartViewport) beginTouchPinch();
     const next = pinchViewportFromGesture(touchPinchStartViewport, gesture);
     BoardfishViewportState.setZoomPan(next.zoom, next.panX, next.panY);
-    scheduleTransform('touch-pinch-zoom', gesture.event);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pinch-zoom', gesture.event);
+    else scheduleTransform(gesture.event);
   }
 
   const controller = createTouchGestureController({
@@ -553,17 +562,8 @@
     releaseTouchPointer(event);
   }
 
-  const touchInput = (touch, event) => ({
-    pointerId: touch.identifier,
-    clientX: touch.clientX,
-    clientY: touch.clientY,
-    target: touch.target || event.target,
-    sourceEvent: event,
-  });
   const forEachChangedTouch = (event, callback) => {
-    for (const touch of Array.from(event.changedTouches || [])) {
-      callback(touchInput(touch, event));
-    }
+    for (let i = 0; i < (event.changedTouches?.length || 0); i++) callback(event.changedTouches[i]);
   };
   const useAtomicTouchEvents = (
     typeof root.TouchEvent === 'function' && Number(root.navigator?.maxTouchPoints) > 0
@@ -574,16 +574,12 @@
       preventTouchDefault(event);
       markTouchCompatibilityWindow();
       if (!boardNavigationAllowed()) return;
-      forEachChangedTouch(event, (touch) => controller.pointerDown(touch));
+      forEachChangedTouch(event, (touch) => controller.pointerDown(touch, event));
     }, { passive: false });
     canvas.addEventListener('touchmove', (event) => {
       if (!controller.activeCount()) return;
       preventTouchDefault(event);
-      const touchSnapshot = Array.from(
-        event.touches || [],
-        (touch) => touchInput(touch, event),
-      );
-      controller.pointerMoves(touchSnapshot);
+      controller.pointerMoves(event.touches, event);
     }, { passive: false });
     canvas.addEventListener('touchend', (event) => {
       if (!controller.activeCount()) return;
@@ -593,19 +589,17 @@
         // A single touchend can report final coordinates for both contacts.
         // Commit that complete snapshot before removing either pointer so the
         // last zoom value cannot depend on changedTouches iteration order.
-        const finalTouchSnapshot = [
-          ...Array.from(event.touches || [], (touch) => touchInput(touch, event)),
-          ...Array.from(event.changedTouches || [], (touch) => touchInput(touch, event)),
-        ];
-        controller.pointerMoves(finalTouchSnapshot);
+        const finalTouchSnapshot = Array.from(event.touches || []);
+        forEachChangedTouch(event, (touch) => finalTouchSnapshot.push(touch));
+        controller.pointerMoves(finalTouchSnapshot, event);
       }
-      forEachChangedTouch(event, (touch) => controller.pointerUp(touch));
+      forEachChangedTouch(event, (touch) => controller.pointerUp(touch, event));
     }, { passive: false });
     canvas.addEventListener('touchcancel', (event) => {
       if (!controller.activeCount()) return;
       preventTouchDefault(event);
       markTouchCompatibilityWindow();
-      forEachChangedTouch(event, (touch) => controller.pointerCancel(touch));
+      forEachChangedTouch(event, (touch) => controller.pointerCancel(touch, event));
     }, { passive: false });
   } else {
     canvas.addEventListener('pointerdown', onTouchPointerDown, { passive: false });

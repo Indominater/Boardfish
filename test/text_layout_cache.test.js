@@ -1728,7 +1728,7 @@ test('auto-height keeps unwrapped logical lines exact without full layout cache'
   ]);
 });
 
-test('viewport text layout matches full layout for visible lines', () => {
+test('viewport text layout exactly matches inclusive visible-line boundaries', () => {
   const { context } = loadTextLayout({
     measureWidth(text) {
       return String(text).length;
@@ -1752,10 +1752,9 @@ test('viewport text layout matches full layout for visible lines', () => {
   textLayout.syncTextAutoHeight(obj);
 
   const visible = textLayout.getTextLayoutForViewport(obj, viewportRect);
-  const visibleInViewport = visible.filter((line) => line.y + context.LINE_H >= viewportRect.y1 && line.y <= viewportRect.y2);
 
   assert.equal(visible.totalLines, full.length);
-  assert.deepEqual(plain(visibleInViewport.map((line) => ({
+  assert.deepEqual(plain(visible.map((line) => ({
     text: line.text,
     startIndex: line.startIndex,
     endIndex: line.endIndex,
@@ -1768,6 +1767,16 @@ test('viewport text layout matches full layout for visible lines', () => {
     y: line.y,
     prefixWidths: Array.from(line.prefixWidths || []),
   }))));
+  const baseY = obj.y + context.TEXT_PAD;
+  const epsilon = 0.001;
+  for (const [y, lineYs] of [
+    [baseY - epsilon, []],
+    [baseY + context.LINE_H, [baseY, baseY + context.LINE_H]],
+    [baseY + context.LINE_H + epsilon, [baseY + context.LINE_H]],
+  ]) {
+    const actual = textLayout.getTextLayoutForViewport(obj, { y1: y, y2: y });
+    assert.deepEqual(plain(actual.map((line) => line.y)), lineYs);
+  }
 });
 
 test('auto-height count cache also stores line index for viewport reuse', () => {

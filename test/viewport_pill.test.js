@@ -184,11 +184,18 @@ function loadViewportCanvasSizeHarness({
   assert.ok(sectionStart > 0, 'canvas size tracking state is missing');
   const sectionEnd = source.indexOf('\nvar VIEWPORT_CULL_PADDING_PX', sectionStart);
   assert.ok(sectionEnd > sectionStart, 'canvas size tracking section is unterminated');
+  const fallbackReads = { clientWidth: 0, clientHeight: 0, innerWidth: 0, innerHeight: 0 };
   const boardCanvas = {
     width: innerWidth * dpr,
     height: innerHeight * dpr,
-    clientWidth,
-    clientHeight,
+    get clientWidth() {
+      fallbackReads.clientWidth++;
+      return clientWidth;
+    },
+    get clientHeight() {
+      fallbackReads.clientHeight++;
+      return clientHeight;
+    },
   };
   const context = {
     surfaceRect: { ...rect },
@@ -198,6 +205,7 @@ function loadViewportCanvasSizeHarness({
       },
     },
     boardCanvas,
+    fallbackReads,
     invalidations: 0,
     renders: [],
     observedTargets: [],
@@ -219,8 +227,14 @@ function loadViewportCanvasSizeHarness({
       }
     },
     window: {
-      innerWidth,
-      innerHeight,
+      get innerWidth() {
+        fallbackReads.innerWidth++;
+        return innerWidth;
+      },
+      get innerHeight() {
+        fallbackReads.innerHeight++;
+        return innerHeight;
+      },
       devicePixelRatio: dpr,
       visualViewport: {
         addEventListener(type, listener) {
@@ -344,6 +358,7 @@ test('canvas backing store follows the rendered surface instead of stale window 
   assert.equal(context.boardCanvas.height, 2160);
   assert.equal(context.invalidations, 1);
   assert.deepEqual(context.renders, [{ board: true, overlay: false }]);
+  assert.deepEqual(context.fallbackReads, { clientWidth: 0, clientHeight: 0, innerWidth: 0, innerHeight: 0 });
 
   assert.equal(context.resizeCanvas(), false);
   assert.equal(context.invalidations, 1);

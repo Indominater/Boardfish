@@ -166,10 +166,30 @@ test('an atomic touch snapshot updates both contacts before emitting zoom', () =
   assert.equal(pinchEvents[0].scale, 1.5);
 });
 
+test('array-like TouchList samples preserve their source event and fallback target', () => {
+  const harness = makeGestureHarness();
+  const target = {};
+  const downEvent = { type: 'touchstart', target };
+  const moveEvent = { type: 'touchmove', target };
+  harness.controller.pointerDown({ identifier: 1, clientX: 10, clientY: 10 }, downEvent);
+  harness.controller.pointerMoves({
+    0: { identifier: 1, clientX: 20, clientY: 10 },
+    length: 1,
+  }, moveEvent);
+
+  const pan = harness.events.find((event) => event.type === 'pan');
+  assert.equal(pan.event, moveEvent);
+  assert.equal(pan.target, target);
+});
+
 test('mobile browsers feed complete TouchEvent snapshots into the gesture controller', () => {
+  const changedTouchLoop = touchInputSource.match(/const forEachChangedTouch = \(event, callback\) => \{[\s\S]*?\n  \};/)?.[0] || '';
   assert.match(touchInputSource, /const useAtomicTouchEvents = \([\s\S]*navigator\?\.maxTouchPoints/);
-  assert.match(touchInputSource, /const touchSnapshot = Array\.from\(\s*event\.touches \|\| \[\],[\s\S]*controller\.pointerMoves\(touchSnapshot\);/);
-  assert.match(touchInputSource, /const finalTouchSnapshot = \[[\s\S]*event\.touches[\s\S]*event\.changedTouches[\s\S]*controller\.pointerMoves\(finalTouchSnapshot\);/);
+  assert.match(touchInputSource, /controller\.pointerMoves\(event\.touches, event\);/);
+  assert.match(touchInputSource, /const finalTouchSnapshot = Array\.from\(event\.touches[\s\S]*forEachChangedTouch\(event,[\s\S]*controller\.pointerMoves\(finalTouchSnapshot, event\);/);
+  assert.match(changedTouchLoop, /for \(let i = 0; i < \(event\.changedTouches\?\.length \|\| 0\); i\+\+\)/);
+  assert.doesNotMatch(touchInputSource, /const touchInput =/);
+  assert.doesNotMatch(touchInputSource, /Array\.from\(event\.changedTouches/);
   assert.doesNotMatch(touchInputSource, /event\.targetTouches \|\| event\.touches/);
 });
 

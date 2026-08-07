@@ -8,6 +8,7 @@ var _editHistoryTimer = null, _editHistoryLastContent = null;
 var EDIT_HISTORY_DEBOUNCE_MS = 500;
 var _textInputSelectionHistorySuppress = null, _editHistoryActionStartState = null;
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function canvasInputNow() {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
@@ -75,12 +76,7 @@ function canvasInputViewportDebugSnapshot(prefix = '') {
     [key('zoom')]: zoom,
   };
 }
-
-function canvasInputViewportResult(result) {
-  return result && typeof result === 'object'
-    ? result
-    : { panX, panY, zoom };
-}
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function selectionSetsEqual(a, b) {
   if (a.size !== b.size) return false;
@@ -97,72 +93,108 @@ function selectionIdsFromSet(set) {
   return ids;
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function canvasInputTextDebugLog(label, obj = null, meta = {}) {
   if (typeof TextSelDebug === 'undefined') return;
   TextSelDebug._logEditLifecycle?.(label, obj, meta);
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function focusTextEditProxyNow(proxy, obj = null, label = 'text-edit-focus', meta = {}) {
-  if (!proxy) return { focused: false, skipped: true, reason: 'missing-proxy', focusMs: '' };
-  if (typeof document !== 'undefined' && document.activeElement === proxy) {
-    const out = { focused: false, skipped: true, reason: 'already-active', focusMs: 0, activeElementIsProxy: true };
+function focusTextEditProxyNow(proxy
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , obj = null, label = null, meta = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+    if (!proxy || (typeof document !== 'undefined' && document.activeElement === proxy)) return false;
+    proxy.focus({ preventScroll: true });
+    return true;
+  } else {
+    if (label == null) label = 'text-edit-focus';
+    if (meta == null) meta = {};
+    if (!proxy) return { focused: false, skipped: true, reason: 'missing-proxy', focusMs: '' };
+    if (typeof document !== 'undefined' && document.activeElement === proxy) {
+      const out = { focused: false, skipped: true, reason: 'already-active', focusMs: 0, activeElementIsProxy: true };
+      canvasInputTextDebugLog(label, obj, { ...meta, ...out });
+      return out;
+    }
+    const focusStart = canvasInputNow();
+    proxy.focus({ preventScroll: true });
+    const out = {
+      focused: true,
+      skipped: false,
+      reason: '',
+      focusMs: canvasInputDebugRound(canvasInputNow() - focusStart),
+      activeElementIsProxy: typeof document !== 'undefined' ? document.activeElement === proxy : '',
+    };
     canvasInputTextDebugLog(label, obj, { ...meta, ...out });
     return out;
   }
-  const focusStart = canvasInputNow();
-  proxy.focus({ preventScroll: true });
-  const out = {
-    focused: true,
-    skipped: false,
-    reason: '',
-    focusMs: canvasInputDebugRound(canvasInputNow() - focusStart),
-    activeElementIsProxy: typeof document !== 'undefined' ? document.activeElement === proxy : '',
-  };
-  canvasInputTextDebugLog(label, obj, { ...meta, ...out });
-  return out;
 }
 
-function scheduleTextEditProxyFocus(proxy, obj = null, label = 'text-edit-focus-deferred', meta = {}) {
-  if (!proxy) return false;
-  if (typeof document !== 'undefined' && document.activeElement === proxy) {
-    canvasInputTextDebugLog(label, obj, {
-      ...meta,
-      skipped: true,
-      reason: 'already-active',
-      focusMs: 0,
-      activeElementIsProxy: true,
-    });
-    return false;
-  }
-  const scheduledAt = canvasInputNow();
-  const runFocus = () => {
-    if (_editEl !== proxy || !editingId) {
+function scheduleTextEditProxyFocus(proxy
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , obj = null, label = null, meta = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+    if (!proxy || (typeof document !== 'undefined' && document.activeElement === proxy)) return false;
+    const runFocus = () => {
+      if (_editEl === proxy && editingId) focusTextEditProxyNow(proxy);
+    };
+    if (typeof requestAnimationFrame === 'function' && typeof setTimeout === 'function') {
+      requestAnimationFrame(() => setTimeout(runFocus, 0));
+    } else if (typeof setTimeout === 'function') {
+      setTimeout(runFocus, 0);
+    } else {
+      runFocus();
+    }
+    return true;
+  } else {
+    if (label == null) label = 'text-edit-focus-deferred';
+    if (meta == null) meta = {};
+    if (!proxy) return false;
+    if (typeof document !== 'undefined' && document.activeElement === proxy) {
       canvasInputTextDebugLog(label, obj, {
         ...meta,
         skipped: true,
-        reason: 'stale-proxy',
+        reason: 'already-active',
+        focusMs: 0,
+        activeElementIsProxy: true,
+      });
+      return false;
+    }
+    const scheduledAt = canvasInputNow();
+    const runFocus = () => {
+      if (_editEl !== proxy || !editingId) {
+        canvasInputTextDebugLog(label, obj, {
+          ...meta,
+          skipped: true,
+          reason: 'stale-proxy',
+          scheduledDelayMs: canvasInputDebugRound(canvasInputNow() - scheduledAt),
+        });
+        return;
+      }
+      focusTextEditProxyNow(proxy, obj, label, {
+        ...meta,
         scheduledDelayMs: canvasInputDebugRound(canvasInputNow() - scheduledAt),
       });
-      return;
+    };
+    if (typeof requestAnimationFrame === 'function' && typeof setTimeout === 'function') {
+      requestAnimationFrame(() => setTimeout(runFocus, 0));
+    } else if (typeof setTimeout === 'function') {
+      setTimeout(runFocus, 0);
+    } else {
+      runFocus();
     }
-    focusTextEditProxyNow(proxy, obj, label, {
-      ...meta,
-      scheduledDelayMs: canvasInputDebugRound(canvasInputNow() - scheduledAt),
-    });
-  };
-  if (typeof requestAnimationFrame === 'function' && typeof setTimeout === 'function') {
-    requestAnimationFrame(() => setTimeout(runFocus, 0));
-  } else if (typeof setTimeout === 'function') {
-    setTimeout(runFocus, 0);
-  } else {
-    runFocus();
+    return true;
   }
-  return true;
 }
 
 function handleViewportWheel(e) {
   if (e.__boardfishViewportWheelHandled) return;
   try { e.__boardfishViewportWheelHandled = true; } catch (_) {}
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectDebug = ViewportDebug.isEnabled();
   const handlerStart = collectDebug ? canvasInputNow() : 0;
   const wheelMeta = collectDebug ? canvasInputWheelDebugMeta(e) : null;
@@ -180,6 +212,7 @@ function handleViewportWheel(e) {
       zoom,
     })
     : null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   try {
     ViewportDebug.count('wheel');
     e.preventDefault();
@@ -210,11 +243,9 @@ function handleViewportWheel(e) {
         ? Math.pow(0.995, e.deltaY)
         : e.deltaY < 0 ? 1.1 : 1 / 1.1;
       const requestedZoom = zoom * factor;
-      const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, requestedZoom));
-      const nextViewport = canvasInputViewportResult(
-        BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, newZoom),
-      );
-      scheduleTransform('wheel-zoom', e);
+      const nextViewport = BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, requestedZoom);
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('wheel-zoom', e);
+      else scheduleTransform(e);
       if (collectDebug) {
         const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
         const zoomDeltaPct = zoomBefore ? ((nextViewport.zoom / zoomBefore) - 1) * 100 : 0;
@@ -240,7 +271,7 @@ function handleViewportWheel(e) {
           zoomDeltaPct,
           factor,
           requestedZoom,
-          clamped: newZoom !== requestedZoom,
+          clamped: nextViewport.zoom !== requestedZoom,
           focusWorldX,
           focusWorldY,
           handlerMs,
@@ -248,7 +279,7 @@ function handleViewportWheel(e) {
         ViewportDebug.end(dbg, {
           mode: 'zoom',
           source: 'wheel-zoom',
-          newZoom,
+          newZoom: nextViewport.zoom,
           zoomBefore,
           zoomAfter: nextViewport.zoom,
           zoomDeltaPct,
@@ -268,8 +299,9 @@ function handleViewportWheel(e) {
     const zoomBefore = zoom;
     const appliedPanX = -e.deltaX;
     const appliedPanY = -e.deltaY;
-    const nextViewport = canvasInputViewportResult(BoardfishViewportState.panBy(appliedPanX, appliedPanY));
-    scheduleTransform('wheel-pan', e);
+    const nextViewport = BoardfishViewportState.panBy(appliedPanX, appliedPanY);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('wheel-pan', e);
+    else scheduleTransform(e);
     if (collectDebug) {
       const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
       const panDeltaX = nextViewport.panX - panXBefore;
@@ -312,36 +344,22 @@ function handleViewportWheel(e) {
 }
 
 canvas.addEventListener('wheel', handleViewportWheel, { passive: false });
-const viewportWheelSurfaces = [
-  typeof ctxMenu !== 'undefined' ? ctxMenu : null,
-  typeof objCtxMenu !== 'undefined' ? objCtxMenu : null,
-  typeof BoardfishDOM !== 'undefined' ? BoardfishDOM.textCtxMenu : null,
-  typeof ctxActions !== 'undefined' ? ctxActions : null,
-  typeof island !== 'undefined' ? island : null,
-];
-for (const surface of viewportWheelSurfaces) {
-  if (!surface) continue;
-  surface.addEventListener('wheel', handleViewportWheel, { passive: false });
-}
 
 function handleGlobalViewportWheel(e) {
   if (e.__boardfishViewportWheelHandled) return;
-  const viewportZoomGesture = e.ctrlKey || e.metaKey;
-  const insideViewportWheelSurface =
-    typeof isEventInsideViewportWheelSurface === 'function' &&
-    isEventInsideViewportWheelSurface(e);
-  if (!viewportZoomGesture && !insideViewportWheelSurface) return;
+  if (
+    !e.ctrlKey && !e.metaKey &&
+    (typeof isEventInsideViewportWheelSurface !== 'function' || !isEventInsideViewportWheelSurface(e))
+  ) return;
   handleViewportWheel(e);
 }
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('wheel', handleGlobalViewportWheel, { capture: true, passive: false });
 }
-document.addEventListener('wheel', handleGlobalViewportWheel, { capture: true, passive: false });
 
 // ─── Pan (spacebar + left click) ─────────────────────────────────────────────
 var _spaceDown = false,
   _rubberBandSelectionCleanup = null,
-  _rubberBandSelectionCancel = null,
   hideRubberBandSelectionVisual = null,
   cancelRubberBandSelection = null;
 
@@ -380,6 +398,7 @@ function dragItemsForSelection() {
 }
 
 function startMousePan(e) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectPanDebug = ViewportDebug.isEnabled();
   const startDebugMeta = collectPanDebug ? {
     ...canvasInputEventDebugMeta(e),
@@ -388,15 +407,19 @@ function startMousePan(e) {
   const panDbg = collectPanDebug
     ? ViewportDebug.start('mousePan', { startX: e.clientX, startY: e.clientY, ...startDebugMeta, panX, panY, zoom })
     : null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   e.preventDefault();
   e.stopPropagation();
   const startX = e.clientX, startY = e.clientY;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const startPanX = panX, startPanY = panY;
   const startZoom = zoom;
   const panStartedAt = collectPanDebug ? canvasInputNow() : 0;
   let moveCount = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   let lastClientX = startX;
   let lastClientY = startY;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectPanDebug) {
     ViewportDebug.recordPanZoom?.('mouse-pan-start', {
       mode: 'pan',
@@ -409,19 +432,24 @@ function startMousePan(e) {
       zoomBefore: startZoom,
     }, e);
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   function onMove(ev) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const collectDebug = ViewportDebug.isEnabled();
     const handlerStart = collectDebug ? canvasInputNow() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     try {
       ViewportDebug.count('mousePanMoves');
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const panXBefore = panX;
       const panYBefore = panY;
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const clientStepX = ev.clientX - lastClientX;
       const clientStepY = ev.clientY - lastClientY;
-      const nextViewport = canvasInputViewportResult(BoardfishViewportState.panBy(clientStepX, clientStepY));
-      scheduleTransform('mouse-pan', ev);
+      const nextViewport = BoardfishViewportState.panBy(clientStepX, clientStepY);
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('mouse-pan', ev);
+      else scheduleTransform(ev);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDebug) {
         const panDeltaX = nextViewport.panX - panXBefore;
         const panDeltaY = nextViewport.panY - panYBefore;
@@ -440,8 +468,8 @@ function startMousePan(e) {
           zoomAfter: nextViewport.zoom,
           startClientX: startX,
           startClientY: startY,
-          clientDeltaX: dx,
-          clientDeltaY: dy,
+          clientDeltaX: ev.clientX - startX,
+          clientDeltaY: ev.clientY - startY,
           clientStepX,
           clientStepY,
           panDeltaX,
@@ -452,14 +480,18 @@ function startMousePan(e) {
           handlerMs,
         }, ev);
       }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       lastClientX = ev.clientX;
       lastClientY = ev.clientY;
     } finally {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDebug) ViewportDebug.timing('mousePanHandler', canvasInputNow() - handlerStart);
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
   }
   function onUp(ev) {
     if (ev && !ev.__boardfishDragCancel && ev.button !== 0) return;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectPanDebug) {
       const panDeltaX = panX - startPanX;
       const panDeltaY = panY - startPanY;
@@ -498,6 +530,7 @@ function startMousePan(e) {
         cancelled: !!ev?.__boardfishDragCancel,
       });
     }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
   beginDocumentDrag({ move: onMove, up: onUp });
 }
@@ -511,7 +544,8 @@ function createSelectionDragSession(startClientX, startClientY) {
   const grpThreshold = 9 / (dragZoom * dragZoom);
   function applyGrpDrag(dx, dy) {
     for (const item of grpItems) { item.obj.x = item.startX + dx; item.obj.y = item.startY + dy; }
-    withRenderSource('group-drag', () => drawBoard());
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') withRenderSource('group-drag', () => drawBoard());
+    else drawBoard();
     updateSelectionOverlay();
   }
   const dragCommitter = createRafCommitter(({ dx, dy }) => applyGrpDrag(dx, dy));
@@ -557,16 +591,14 @@ function startSelectedRegionDrag(e) {
 
 hideRubberBandSelectionVisual = () => {
   finishRubberBandDrag();
-  _setStyleIfChanged(rubberBand, 'display', 'none', _rubberBandStyleState);
+  rubberBand.style.display = 'none';
 };
 
 cancelRubberBandSelection = (reason = 'cancel') => {
-  if (_rubberBandSelectionCancel) {
-    _rubberBandSelectionCancel(reason);
-    return true;
-  }
   if (!_rubberBandDragActive) return false;
-  hideRubberBandSelectionVisual();
+  const cancelEvent = { __boardfishRubberBandCancel: true, reason };
+  if (_rubberBandSelectionCleanup) _rubberBandSelectionCleanup(cancelEvent);
+  else hideRubberBandSelectionVisual();
   return true;
 };
 
@@ -591,23 +623,22 @@ function startRubberBandSelection(e, additive) {
   beginRubberBandDrag();
   let rbActive = false;
   let rbFinished = false;
+  const rbStyleCommitter = createRafCommitter(({ l, t, w, h }) => {
+    rubberBand.style.cssText = `display:block;left:${l}px;top:${t}px;width:${w}px;height:${h}px`;
+  });
   function onRbMove(ev) {
     const dx = ev.clientX - rbStartX, dy = ev.clientY - rbStartY;
     if (!rbActive && dx*dx + dy*dy > 16) rbActive = true;
     if (!rbActive) return;
     const l = Math.min(rbStartX, ev.clientX), t = Math.min(rbStartY, ev.clientY);
     const w = Math.abs(dx), h = Math.abs(dy);
-    _setStyleIfChanged(rubberBand, 'display', 'block', _rubberBandStyleState);
-    _setStyleIfChanged(rubberBand, 'left', l + 'px', _rubberBandStyleState);
-    _setStyleIfChanged(rubberBand, 'top', t + 'px', _rubberBandStyleState);
-    _setStyleIfChanged(rubberBand, 'width', w + 'px', _rubberBandStyleState);
-    _setStyleIfChanged(rubberBand, 'height', h + 'px', _rubberBandStyleState);
+    rbStyleCommitter.schedule({ l, t, w, h });
   }
   function onRbUp(ev) {
     if (rbFinished) return;
     rbFinished = true;
     _rubberBandSelectionCleanup = null;
-    _rubberBandSelectionCancel = null;
+    rbStyleCommitter.flush();
     hideRubberBandSelectionVisual();
     if (ev?.__boardfishRubberBandCancel) return;
     if (!rbActive) return;
@@ -629,12 +660,6 @@ function startRubberBandSelection(e, additive) {
     BoardfishEditorState.setSelection(selectionIdsFromSet(nextSelection));
     scheduleRender(true, true);
   }
-  _rubberBandSelectionCancel = (reason) => {
-    const cleanup = _rubberBandSelectionCleanup;
-    const cancelEvent = { __boardfishRubberBandCancel: true, reason };
-    if (cleanup) cleanup(cancelEvent);
-    else onRbUp(cancelEvent);
-  };
   _rubberBandSelectionCleanup = beginDocumentDrag({ move: onRbMove, up: onRbUp });
 }
 
@@ -711,10 +736,14 @@ function clearTextEditCaretHit(obj) {
 function startTextSelectionDrag(e, obj, wp) {
   if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
   TextSelDebug._logPointer?.('selection-drag-start', e, { objectId: obj?.id || '', wx: wp.x, wy: wp.y });
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const layoutStart = canvasInputNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const layout = getTextLayout(obj);
   TextSelDebug._logLayout?.('selection-drag-start-layout', obj, layout, canvasInputNow() - layoutStart);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const clickHitStart = canvasInputNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const clickHit = textCaretHitForPoint(layout, wp.x, wp.y, obj);
   TextSelDebug._logHitTiming?.('selection-drag-start-hit', obj, clickHit, canvasInputNow() - clickHitStart, {
     wx: wp.x,
@@ -723,11 +752,15 @@ function startTextSelectionDrag(e, obj, wp) {
   const clickIdx = clickHit.index;
   if (_editEl) {
     applyTextEditCaretHit(obj, _editEl, clickHit);
-    focusTextEditProxyNow(_editEl, obj, 'selection-drag-focus', {
-      phase: 'selection-drag',
-      clientX: e?.clientX ?? '',
-      clientY: e?.clientY ?? '',
-    });
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      focusTextEditProxyNow(_editEl, obj, 'selection-drag-focus', {
+        phase: 'selection-drag',
+        clientX: e?.clientX ?? '',
+        clientY: e?.clientY ?? '',
+      });
+    } else {
+      focusTextEditProxyNow(_editEl);
+    }
     TextSelDebug._logSelection('mouse-down', _editEl, obj);
     _caretVisible = true;
     scheduleRender(true, false);
@@ -735,7 +768,9 @@ function startTextSelectionDrag(e, obj, wp) {
   function onSelMove(ev) {
     const wp2 = toWorld(ev.clientX, ev.clientY);
     TextSelDebug._logPointer?.('selection-drag-move', ev, { objectId: obj?.id || '', wx: wp2.x, wy: wp2.y });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const hitStart = canvasInputNow();
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const endHit = textCaretHitForPoint(obj._layoutCache || layout, wp2.x, wp2.y, obj);
     TextSelDebug._logHitTiming?.('selection-drag-move-hit', obj, endHit, canvasInputNow() - hitStart, {
       wx: wp2.x,
@@ -759,9 +794,11 @@ function startTextSelectionDrag(e, obj, wp) {
   }
   function onSelUp(ev) {
     if (!ev || ev.__boardfishDragCancel) return;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const wp2 = toWorld(ev.clientX, ev.clientY);
     TextSelDebug._logPointer?.('selection-drag-end', ev, { objectId: obj?.id || '', wx: wp2.x, wy: wp2.y });
     if (_editEl) TextSelDebug._logSelection('mouse-up', _editEl, obj);
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
   beginDocumentDrag({ move: onSelMove, up: onSelUp });
 }
@@ -782,8 +819,11 @@ function startObjectDrag(e, obj) {
       item.obj.x = item.startX + dx;
       item.obj.y = item.startY + dy;
     }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const dragDbg = ViewportDebug.start('dragFrame', { items: dragItems.length });
-    withRenderSource('object-drag', () => drawBoard());
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') withRenderSource('object-drag', () => drawBoard());
+    else drawBoard();
     ViewportDebug.end(dragDbg);
     updateSelectionOverlay();
   }
@@ -800,6 +840,7 @@ function startObjectDrag(e, obj) {
     if (!moved) {
       if (!isSelected(obj.id)) selectObject(obj.id);
       if (canClickToEditText) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const clickEditStart = canvasInputNow();
         let clickEditStepStart = clickEditStart;
         const logClickEditStep = (label, meta = {}) => {
@@ -819,11 +860,14 @@ function startObjectDrag(e, obj) {
           });
           clickEditStepStart = t;
         };
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         logClickEditStep('click-to-edit-start', {
           hasEditProxy: !!_editEl,
           previousEditingId: editingId || '',
         });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const enterEditStart = canvasInputNow();
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         enterEdit(obj.id, { placeInitialCaret: false });
         logClickEditStep('click-to-edit-enter-edit', {
           enterEditMs: canvasInputDebugRound(canvasInputNow() - enterEditStart),
@@ -831,21 +875,27 @@ function startObjectDrag(e, obj) {
           editingId: editingId || '',
         });
         if (_editEl && ev) {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const worldStart = canvasInputNow();
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           const upPoint = toWorld(ev.clientX, ev.clientY);
           logClickEditStep('click-to-edit-world-point', {
             wx: upPoint.x,
             wy: upPoint.y,
             worldPointMs: canvasInputDebugRound(canvasInputNow() - worldStart),
           });
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const layoutStart = canvasInputNow();
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           const layout = getTextLayout(obj);
           logClickEditStep('click-to-edit-layout', {
             layoutMs: canvasInputDebugRound(canvasInputNow() - layoutStart),
             layoutLines: Array.isArray(layout) ? layout.length : '',
             layoutCached: Array.isArray(obj?._layoutCache),
           });
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const hitStart = canvasInputNow();
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           const clickHit = textCaretHitForPoint(layout, upPoint.x, upPoint.y, obj);
           logClickEditStep('click-to-edit-hit', {
             hitMs: canvasInputDebugRound(canvasInputNow() - hitStart),
@@ -853,7 +903,9 @@ function startObjectDrag(e, obj) {
             affinity: clickHit?.affinity || '',
             lineStartIndex: clickHit?.lineStartIndex ?? '',
           });
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const caretStart = canvasInputNow();
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           applyTextEditCaretHit(obj, _editEl, clickHit);
           logClickEditStep('click-to-edit-caret-applied', {
             caretApplyMs: canvasInputDebugRound(canvasInputNow() - caretStart),
@@ -867,27 +919,35 @@ function startObjectDrag(e, obj) {
           });
           TextSelDebug._logSelection('click-to-edit', _editEl, obj);
           _caretVisible = true;
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const renderStart = canvasInputNow();
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           scheduleRender(true, false);
           logClickEditStep('click-to-edit-render-scheduled', {
             renderScheduleMs: canvasInputDebugRound(canvasInputNow() - renderStart),
           });
-          const focusScheduled = scheduleTextEditProxyFocus(_editEl, obj, 'click-to-edit-focus-deferred', {
-            phase: 'click-to-edit',
-            clientX: ev?.clientX ?? '',
-            clientY: ev?.clientY ?? '',
-            startClientX: startX,
-            startClientY: startY,
-            selectedCount: selectedIds.size,
-            wasSelected,
-            canClickToEditText,
-            selectionStart: _editEl.selectionStart ?? '',
-            selectionEnd: _editEl.selectionEnd ?? '',
-          });
-          logClickEditStep('click-to-edit-focus-scheduled', {
-            focusScheduled,
-            activeElementIsProxy: typeof document !== 'undefined' ? document.activeElement === _editEl : '',
-          });
+          if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            const focusScheduled = scheduleTextEditProxyFocus(_editEl, obj, 'click-to-edit-focus-deferred', {
+                phase: 'click-to-edit',
+                clientX: ev?.clientX ?? '',
+                clientY: ev?.clientY ?? '',
+                startClientX: startX,
+                startClientY: startY,
+                selectedCount: selectedIds.size,
+                wasSelected,
+                canClickToEditText,
+                selectionStart: _editEl.selectionStart ?? '',
+                selectionEnd: _editEl.selectionEnd ?? '',
+              });
+            logClickEditStep('click-to-edit-focus-scheduled', {
+              focusScheduled,
+              activeElementIsProxy: typeof document !== 'undefined' ? document.activeElement === _editEl : '',
+            });
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          } else {
+            scheduleTextEditProxyFocus(_editEl);
+          }
         }
         logClickEditStep('click-to-edit-end', {
           hasEditProxy: !!_editEl,
@@ -906,7 +966,9 @@ function startObjectDrag(e, obj) {
 }
 
 canvas.addEventListener('mousedown', (e) => {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const mouseDownStart = canvasInputNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.button === 0 && _spaceDown)) {
     e.preventDefault();
     e.stopPropagation();
@@ -924,17 +986,36 @@ canvas.addEventListener('mousedown', (e) => {
   if (e.target !== canvas && e.target !== boardCanvas) return;
 
   e.preventDefault();
-  const cleanupStart = canvasInputNow();
-  const emptyTextDeleted = BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
-    preserveIds: editingId ? [editingId] : [],
-  });
-  const emptyTextCleanupMs = canvasInputDebugRound(canvasInputNow() - cleanupStart);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  let emptyTextDeleted = false;
+  let emptyTextCleanupMs = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const cleanupStart = canvasInputNow();
+    emptyTextDeleted = BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
+      preserveIds: editingId ? [editingId] : [],
+    });
+    emptyTextCleanupMs = canvasInputDebugRound(canvasInputNow() - cleanupStart);
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  } else {
+    BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
+      preserveIds: editingId ? [editingId] : [],
+    });
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const worldStart = canvasInputNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const wp = toWorld(e.clientX, e.clientY);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const worldPointMs = canvasInputDebugRound(canvasInputNow() - worldStart);
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const additive = e.metaKey || e.ctrlKey;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hitStart = canvasInputNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const obj = hitTest(wp.x, wp.y);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hitTestMs = canvasInputDebugRound(canvasInputNow() - hitStart);
   canvasInputTextDebugLog('canvas-mousedown-route', obj, {
     phase: 'canvas-mousedown',
@@ -957,6 +1038,7 @@ canvas.addEventListener('mousedown', (e) => {
     ms: canvasInputDebugRound(canvasInputNow() - mouseDownStart),
     totalMs: canvasInputDebugRound(canvasInputNow() - mouseDownStart),
   });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   // Multi-select: any click inside the bounding box (object or empty space) → drag group
   if (isMultiSelected() && !additive) {

@@ -158,6 +158,7 @@ function boardDataForSave() {
   }, { schema: BoardSchema, guessImageExtFromDataUrl: BoardfishExportUtils.guessImageExtFromDataUrl });
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function getBoardSaveMetrics(data) {
   return BoardfishBoardDocument.getBoardSaveMetrics(data, boardDocumentDeps());
 }
@@ -189,11 +190,13 @@ const shouldCollectOpenBoardMetrics = (dbg = null) => {
 const getBoardOpenDebugMetrics = (dbg, data) => {
   return shouldCollectOpenBoardMetrics(dbg) ? getBoardOpenMetrics(data) : {};
 };
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function imageRefKind(src) {
   return BoardfishBoardDocument.defaultImageRefKind(src);
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function getImageStoreOpenDebugSample(limit = 12) {
   return BoardfishBoardDocument.getImageStoreDebugSample(imageStore, boardDocumentDeps(), limit);
 }
@@ -209,6 +212,7 @@ const getOpenImageRuntimeDebugMetrics = (dbg = null) => {
 const getImageStoreOpenDebugSampleIfEnabled = (dbg = null) => {
   return isOpenDebugActive(dbg) ? getImageStoreOpenDebugSample() : [];
 };
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function boardLimitImageEntriesForData(data) {
   const entries = [];
@@ -231,7 +235,13 @@ function validateBoardPayloadForSave(data) {
   });
 }
 
-function validateBoardPayloadForOpen(board, debug = null) {
+function validateBoardPayloadForOpen(board
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , debug = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
   const boardJsonBytes = Number(debug?.board_json_bytes ?? debug?.boardJsonBytes ?? 0) || 0;
   const imageBytes = Number(debug?.image_bytes ?? debug?.imageBytes ?? 0);
   if (boardJsonBytes || Number.isFinite(imageBytes)) {
@@ -243,8 +253,13 @@ function validateBoardPayloadForOpen(board, debug = null) {
   } else {
     BoardfishWebLimits.assertBoardDataAllowed(board);
   }
+    return;
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  BoardfishWebLimits.assertBoardDataAllowed(board);
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function scheduleSaveFrameProbe(dbg, label) {
   if (!SaveDebug.enabled) return null;
   const scheduledAt = performance.now();
@@ -257,45 +272,69 @@ function scheduleSaveFrameProbe(dbg, label) {
     if (!done) SaveDebug.step(dbg, `${label}:pending`, { elapsedMs: performance.now() - scheduledAt });
   };
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-async function invokeSaveBoard(fileRef, dbg) {
-  const path = BoardfishRuntime.describeFileRef(fileRef);
-  if (typeof flushEditHistoryCheckpoint === 'function' && flushEditHistoryCheckpoint()) {
-    SaveDebug.step(dbg, 'flush-edit-history', { path, historyIndex });
+async function invokeSaveBoard(fileRef
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , dbg
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    const historyFlushed = typeof flushEditHistoryCheckpoint === 'function' && flushEditHistoryCheckpoint();
+    const path = BoardfishRuntime.describeFileRef(fileRef);
+    if (historyFlushed) SaveDebug.step(dbg, 'flush-edit-history', { path, historyIndex });
+    const dataStart = performance.now();
+    const data = boardDataForSave();
+    const metrics = getBoardSaveDebugMetrics(dbg, data);
+    SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...metrics });
+    validateBoardPayloadForSave(data);
+    const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
+    const result = await SaveDebug.wrap(
+      dbg,
+      BoardfishRuntime.WEB_COMMANDS.SAVE_BOARD,
+      () => BoardfishRuntime.saveBoard(fileRef, data, { imageStore }),
+      { path, ...metrics },
+    );
+    if (frameProbe) frameProbe();
+    return result;
   }
-  const dataStart = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
   const data = boardDataForSave();
-  const metrics = getBoardSaveDebugMetrics(dbg, data);
-  SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...metrics });
   validateBoardPayloadForSave(data);
-  const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
-  const command = BoardfishRuntime.WEB_COMMANDS.SAVE_BOARD;
-  const result = await SaveDebug.wrap(
-    dbg,
-    command,
-    () => BoardfishRuntime.saveBoard(fileRef, data, { imageStore }),
-    { path, ...metrics }
-  );
-  if (frameProbe) frameProbe();
-  return result;
+  return BoardfishRuntime.saveBoard(fileRef, data, { imageStore });
 }
 
-async function invokeReadBoard(fileRef, dbg) {
-  const path = BoardfishRuntime.describeFileRef(fileRef);
-  const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
-  const command = BoardfishRuntime.WEB_COMMANDS.READ_BOARD;
-  const result = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.readBoard(fileRef), { path });
-  if (frameProbe) frameProbe();
-  const board = result?.board || result;
-  if (isOpenDebugActive(dbg)) {
-    const boardMetrics = getBoardOpenMetrics(board);
-    if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...boardMetrics });
-    OpenDebug.step(dbg, 'read-board-shape', boardMetrics);
+async function invokeReadBoard(fileRef
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , dbg
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  const read = () => BoardfishRuntime.readBoard(fileRef);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    const path = BoardfishRuntime.describeFileRef(fileRef);
+    const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
+    const result = await OpenDebug.wrap(dbg, BoardfishRuntime.WEB_COMMANDS.READ_BOARD, read, { path });
+    if (frameProbe) frameProbe();
+    const board = result?.board || result;
+    if (isOpenDebugActive(dbg)) {
+      const boardMetrics = getBoardOpenMetrics(board);
+      if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...boardMetrics });
+      OpenDebug.step(dbg, 'read-board-shape', boardMetrics);
+    }
+    validateBoardPayloadForOpen(board, result?.debug);
+    return board;
   }
-  validateBoardPayloadForOpen(board, result?.debug);
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  const result = await read();
+  const board = result?.board || result;
+  validateBoardPayloadForOpen(board);
   return board;
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 function scheduleOpenFrameProbe(dbg, label) {
   if (!OpenDebug.enabled) return null;
   const scheduledAt = performance.now();
@@ -308,6 +347,7 @@ function scheduleOpenFrameProbe(dbg, label) {
     if (!done) OpenDebug.step(dbg, `${label}:pending`, { elapsedMs: performance.now() - scheduledAt });
   };
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function getVisibleWorldBounds() {
   return viewportWorldRect();
@@ -321,69 +361,178 @@ function getVisibleImageKeys(limit = Infinity) {
   const b = getVisibleWorldBounds();
   const keys = [];
   const seen = new Set();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const skipped = { nonImage: 0, outside: 0, missingKey: 0, nonHydratable: 0, cached: 0, duplicate: 0 };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
-    if (obj.type !== 'image') { skipped.nonImage++; continue; }
-    if (!objectIntersectsRect(obj, b)) { skipped.outside++; continue; }
+    if (obj.type !== 'image') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.nonImage++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (!objectIntersectsRect(obj, b)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.outside++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
     const key = obj.data.imgKey;
-    if (!key) { skipped.missingKey++; continue; }
-    if (seen.has(key)) { skipped.duplicate++; continue; }
+    if (!key) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.missingKey++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (seen.has(key)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.duplicate++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
     seen.add(key);
     const source = BoardfishImageStore.getSource(key);
-    if (!source) { skipped.missingKey++; continue; }
-    if (!isOpenHydratableImageSource(source)) { skipped.nonHydratable++; continue; }
-    if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
+    if (!source) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.missingKey++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (!isOpenHydratableImageSource(source)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.nonHydratable++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (BoardfishImageStore.hasDisplayImage(key)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.cached++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
     keys.push(key);
     if (keys.length >= limit) break;
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   getVisibleImageKeys.lastDebug = { visibleBounds: b, selected: keys.length, skipped };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return keys;
 }
-getVisibleImageKeys.lastDebug = null;
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
+if (typeof BOARDFISH_PRODUCTION === 'undefined') getVisibleImageKeys.lastDebug = null;
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function getReferencedHydratableImageKeys(limit = Infinity, exclude = new Set()) {
   const keys = [];
   const seen = new Set();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const skipped = { excluded: 0, nonImage: 0, missingKey: 0, missingStore: 0, nonHydratable: 0, cached: 0, duplicate: 0 };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const obj of objects) {
-    if (obj.type !== 'image') { skipped.nonImage++; continue; }
+    if (obj.type !== 'image') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.nonImage++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
     const key = obj.data?.imgKey;
-    if (!key) { skipped.missingKey++; continue; }
-    if (seen.has(key)) { skipped.duplicate++; continue; }
+    if (!key) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.missingKey++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (seen.has(key)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.duplicate++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
     seen.add(key);
-    if (exclude.has(key)) { skipped.excluded++; continue; }
+    if (exclude.has(key)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.excluded++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
     const source = BoardfishImageStore.getSource(key);
-    if (!source) { skipped.missingStore++; continue; }
-    if (!isOpenHydratableImageSource(source)) { skipped.nonHydratable++; continue; }
-    if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
+    if (!source) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.missingStore++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (!isOpenHydratableImageSource(source)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.nonHydratable++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (BoardfishImageStore.hasDisplayImage(key)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.cached++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
     keys.push(key);
     if (keys.length >= limit) break;
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   getReferencedHydratableImageKeys.lastDebug = { selected: keys.length, skipped };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return keys;
 }
-getReferencedHydratableImageKeys.lastDebug = null;
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
+if (typeof BOARDFISH_PRODUCTION === 'undefined') getReferencedHydratableImageKeys.lastDebug = null;
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function getPendingHydratableImageKeys(limit = Infinity, exclude = new Set()) {
   const keys = [];
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const skipped = { excluded: 0, nonHydratable: 0, cached: 0 };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const key of BoardfishImageStore.sourceKeys()) {
-    if (exclude.has(key)) { skipped.excluded++; continue; }
-    if (!isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) { skipped.nonHydratable++; continue; }
-    if (BoardfishImageStore.hasDisplayImage(key)) { skipped.cached++; continue; }
+    if (exclude.has(key)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.excluded++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (!isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.nonHydratable++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    if (BoardfishImageStore.hasDisplayImage(key)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      skipped.cached++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
     keys.push(key);
     if (keys.length >= limit) break;
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   getPendingHydratableImageKeys.lastDebug = { selected: keys.length, skipped };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return keys;
 }
-getPendingHydratableImageKeys.lastDebug = null;
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
+if (typeof BOARDFISH_PRODUCTION === 'undefined') getPendingHydratableImageKeys.lastDebug = null;
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-async function hydrateImageForDisplay(key, dbg = null) {
+async function hydrateImageForDisplay(key
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , dbg = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
   const source = BoardfishImageStore.getSource(key);
   if (BoardfishImageStore.hasDisplayImage(key) || !isOpenHydratableImageSource(source)) return false;
   const pendingReady = imageReadyPromises.get(key);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
   if (pendingReady) {
     const t0 = performance.now();
     const cacheMetrics = await pendingReady;
@@ -415,7 +564,6 @@ async function hydrateImageForDisplay(key, dbg = null) {
     resolveOnLoad: true,
   });
   const readyMs = performance.now() - readyStart;
-  const bitmapReady = !!imageBitmapCache[key];
   const displayReady = BoardfishImageStore.hasDisplayImage(key);
   OpenDebug.step(dbg, 'hydrate-image', {
     imgKey: key,
@@ -425,26 +573,61 @@ async function hydrateImageForDisplay(key, dbg = null) {
     ...(cacheMetrics || {}),
     dataUrlLen: display.dataUrlLen,
     source: display.source,
-    bitmapReady,
+    bitmapReady: !!imageBitmapCache[key],
     displayReady,
   });
   return displayReady;
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  if (pendingReady) {
+    await pendingReady;
+    return BoardfishImageStore.hasDisplayImage(key);
+  }
+  const display = await ensureImageDisplaySrc(key);
+  if (!display.src) return false;
+  await cacheImage(key, display.src, {
+    skipSourceRegistration: true,
+    resolveOnLoad: true,
+  });
+  return BoardfishImageStore.hasDisplayImage(key);
 }
 
-async function hydrateImageKeysWithLimit(keys, dbg, label, concurrency = OpenDebug.hydrationConcurrency) {
+async function hydrateImageKeysWithLimit(keys
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , dbg, label
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  , concurrency = getOpenHydrationConcurrency()
+) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, `${label}:start`, { count: keys.length, concurrency, ...getOpenImageRuntimeDebugMetrics(dbg) });
   const t0 = performance.now();
   let hydrated = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  let anyHydrated = false;
   await mapWithConcurrency(keys, concurrency, async (key) => {
     try {
-      if (await hydrateImageForDisplay(key, dbg)) hydrated++;
+      if (await hydrateImageForDisplay(key
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        , dbg
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      )) {
+        anyHydrated = true;
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        hydrated++;
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
     } catch (err) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       OpenDebug.step(dbg, `${label}:error`, { imgKey: key, error: String(err) });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-  });
+  }, false);
+  if (anyHydrated) invalidateOffscreen();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0, ...getOpenImageRuntimeDebugMetrics(dbg) });
-  if (hydrated) invalidateOffscreen();
-  return hydrated;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') return hydrated;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  return anyHydrated;
 }
 
 function truthyKeySet(keys) {
@@ -484,13 +667,19 @@ function getVisibleImagePreviewTasks(wanted, options = {}) {
   return tasks;
 }
 
-async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) {
+async function buildVisibleImagePreviewsForOpen(keys
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , dbg = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  , options = {}
+) {
   if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
   const pendingKeys = truthyKeySet(keys);
   const tasks = getVisibleImagePreviewTasks(pendingKeys, options);
   const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
-  const t0 = performance.now();
   const concurrency = Math.max(1, Math.min(8, tasks.length || 1));
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const t0 = performance.now();
   OpenDebug.step(dbg, 'open-preview-visible:start', {
     count: keys.length,
     selected: tasks.length,
@@ -499,21 +688,36 @@ async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) 
   });
   let built = 0;
   let ready = 0;
-  let pendingReady = 0;
   let failed = 0;
   let skipped = 0;
   let bytes = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  let pendingReady = 0;
   const results = await mapWithConcurrency(tasks, concurrency, async ({ key, obj }) => {
-    const result = await buildOpenInitialImagePreviewForOpen(key, obj, view, dbg);
+    const result = await buildOpenInitialImagePreviewForOpen(key, obj, view
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      , dbg
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    );
     if (result.ready) {
-      ready++;
       if (pendingKeys.has(key)) pendingReady++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      ready++;
       if (!result.skipped) built++;
       bytes += Number(result.bytes) || 0;
-    } else if (result.skipped === 'error') failed++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    else if (result.skipped === 'error') failed++;
     else skipped++;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return result;
-  });
+  },
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  typeof BOARDFISH_PRODUCTION === 'undefined' ? true :
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  false);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (!shouldCollectOpenBoardMetrics(dbg)) return { pendingReady };
   const resultRows = new Array(results.length);
   const slowResults = [];
@@ -560,6 +764,8 @@ async function buildVisibleImagePreviewsForOpen(keys, dbg = null, options = {}) 
   };
   OpenDebug.step(dbg, 'open-preview-visible:end', out);
   return out;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  return { pendingReady };
 }
 
 function countVisibleImageBitmapSettle(visibleKeys) {
@@ -577,6 +783,8 @@ function countVisibleImageBitmapSettle(visibleKeys) {
   }
   const count = visibleKeys.length;
   const settled = ready + failed + missingStore;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
   return {
     count,
     ready,
@@ -585,14 +793,24 @@ function countVisibleImageBitmapSettle(visibleKeys) {
     settled,
     pending: Math.max(0, count - settled),
   };
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  return { ready, settled };
 }
 
-async function settleVisibleImageBitmapsForOpen(keys, dbg = null) {
+async function settleVisibleImageBitmapsForOpen(keys
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , dbg = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
   const visibleKeys = truthyKeyList(keys);
   const count = visibleKeys.length;
   let state = countVisibleImageBitmapSettle(visibleKeys);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const before = state.ready;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!count || state.settled >= count) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', {
       count,
       before,
@@ -607,20 +825,27 @@ async function settleVisibleImageBitmapsForOpen(keys, dbg = null) {
       target: count,
     });
     return { count, before, after: state.ready, failed: state.failed, missingStore: state.missingStore, pending: state.pending, settled: state.settled, missing: Math.max(0, count - state.ready), target: count, ms: 0, skipped: true };
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    return null;
   }
 
   const startedAt = performance.now();
   const timeoutMs = 15000;
   const deadline = startedAt + timeoutMs;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let timedOut = false;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   while (state.settled < count) {
     await new Promise((resolve) => setTimeout(resolve, 12));
     state = countVisibleImageBitmapSettle(visibleKeys);
     if (performance.now() >= deadline) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       timedOut = true;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       break;
     }
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const ms = performance.now() - startedAt;
   const pendingKeys = [];
   if (timedOut) {
@@ -645,14 +870,23 @@ async function settleVisibleImageBitmapsForOpen(keys, dbg = null) {
     pendingKeys,
   });
   return { count, before, after: state.ready, failed: state.failed, missingStore: state.missingStore, pending: state.pending, settled: state.settled, missing: Math.max(0, count - state.ready), target: count, ms, timedOut, timeoutMs, pendingKeys };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  return null;
 }
 
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch') {
-  return hydrateImageKeysWithLimit(keys, dbg, label, OpenDebug.hydrationConcurrency);
+  return hydrateImageKeysWithLimit(keys, dbg, label, getOpenHydrationConcurrency());
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-async function hydrateAllImagesForOpen(dbg = null) {
+async function hydrateAllImagesForOpen(
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  dbg = null,
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
   const keys = getReferencedHydratableImageKeys();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const debugMeta = isOpenDebugActive(dbg)
     ? {
         ...(getReferencedHydratableImageKeys.lastDebug || {}),
@@ -661,38 +895,55 @@ async function hydrateAllImagesForOpen(dbg = null) {
       }
     : {};
   OpenDebug.step(dbg, 'hydrate-all:candidates', { count: keys.length, ...debugMeta });
-  return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    return hydrateImageBatchForOpen(keys, dbg, 'hydrate-all');
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  return hydrateImageKeysWithLimit(keys, getOpenHydrationConcurrency());
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
 const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
   const t0 = performance.now();
   return new Promise((resolve) => {
     let settled = false;
     let timeoutId = null;
-    const finish = (source) => {
+    const finish = (source = '') => {
       if (settled) return;
       settled = true;
       if (timeoutId != null) clearTimeout(timeoutId);
       OpenDebug.step(dbg, 'open-render-frame:settled', { reason, source, ms: performance.now() - t0 });
       resolve();
     };
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => finish('raf'));
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => finish('raf'));
+    }
     timeoutId = setTimeout(() => finish('timeout'), 80);
     if (settled) clearTimeout(timeoutId);
   });
 };
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 var _backgroundOpenHydrationRunning = false;
 const BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS = 180;
 
-async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 2, priorityKeys = []) {
+async function hydrateRemainingImagesForOpen(
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  dbg = null,
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  batchSize = 2,
+  priorityKeys = [],
+) {
   if (_backgroundOpenHydrationRunning) return;
   _backgroundOpenHydrationRunning = true;
   const generation = _imageStoreGeneration;
-  const totalStart = performance.now();
   const hydrationPriorityKeys = truthyKeyList(priorityKeys);
   let hydrationPriorityIndex = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const totalStart = performance.now();
   let batchCount = 0;
   let hydratedTotal = 0;
+  let hadBatch = false;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   try {
     while (!_boardOpening && generation === _imageStoreGeneration) {
       const inputIdleMs = typeof lastViewportInputAt !== 'undefined' && lastViewportInputAt > 0
@@ -720,22 +971,40 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 2, priority
         for (const key of remainingKeys) keys.push(key);
       }
       if (!keys.length) break;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      hadBatch = true;
       batchCount++;
-      hydratedTotal += await hydrateImageBatchForOpen(keys, dbg, 'hydrate-background');
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        const hydrated = await hydrateImageBatchForOpen(keys, dbg, 'hydrate-background');
+        hydratedTotal += hydrated;
+      } else
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      {
+        await hydrateImageKeysWithLimit(keys, getOpenHydrationConcurrency());
+      }
       const previewRelease = typeof releaseReadyOpenInitialImagePreviewsForOpen === 'function'
         ? releaseReadyOpenInitialImagePreviewsForOpen()
         : null;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (previewRelease?.released || previewRelease?.pending || previewRelease?.failed) {
         OpenDebug.step(dbg, 'open-preview-release', previewRelease);
       }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const previewStillHoldingRender = !!previewRelease && Number(previewRelease.pending) > 0;
       if (!previewStillHoldingRender || previewRelease?.released) {
-        scheduleRender(true, false, previewRelease?.released ? 'open-preview-release' : 'open-background-hydration');
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          scheduleRender(true, false, previewRelease?.released ? 'open-preview-release' : 'open-background-hydration');
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        } else {
+          scheduleRender(true, false);
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   } finally {
     _backgroundOpenHydrationRunning = false;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const remaining = getPendingHydratableImageKeys().length;
     const stale = generation !== _imageStoreGeneration;
     OpenDebug.step(dbg, 'hydrate-background:done', {
@@ -745,12 +1014,25 @@ async function hydrateRemainingImagesForOpen(dbg = null, batchSize = 2, priority
       stale,
       ms: performance.now() - totalStart,
     });
-    if (!stale && remaining === 0 && batchCount > 0) await waitForOpenRenderFrame(dbg, 'open-all-content-rendered');
+    if (!stale && remaining === 0 && hadBatch) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        await waitForOpenRenderFrame(dbg, 'open-all-content-rendered');
+      }
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
 }
 
-function queueVisibleImageHydration(limit = 3, dbg = null) {
-  for (const key of getVisibleImageKeys(limit)) queueImageHydration(key, dbg);
+function queueVisibleImageHydration(limit = 3
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , dbg = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  for (const key of getVisibleImageKeys(limit)) queueImageHydration(key
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , dbg
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  );
 }
 var _visibleHydrationTimer = null;
 const clearVisibleHydrationTimer = () => {
@@ -765,9 +1047,6 @@ function scheduleVisibleHydrationAfterIdle() {
     _visibleHydrationTimer = null;
     if (_boardOpening) return;
     queueVisibleImageHydration(1);
-    if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
-      scheduleVisibleScaledVariantPrewarmAfterIdle('visible-hydration');
-    }
   }, 180);
 }
 
@@ -782,24 +1061,48 @@ function getOpenHydrationMode() {
   return openHydrationMode;
 }
 
-async function finishOpenedBoard(dbg, data) {
+async function finishOpenedBoard(
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  dbg, data,
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:finishOpenedBoard:start', openMetrics);
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const hydrationMode = getOpenHydrationMode();
   let backgroundHydrationPriorityKeys = [];
   let skipInitialScaledPrewarm = false;
   if (hydrationMode === 'visible-first') {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const hydrateStart = performance.now();
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const visibleKeys = getVisibleImageKeys();
     backgroundHydrationPriorityKeys = visibleKeys;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const debugMeta = isOpenDebugActive(dbg)
       ? { ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() }
       : {};
     OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: visibleKeys.length, ...debugMeta });
-    const preview = await buildVisibleImagePreviewsForOpen(visibleKeys, dbg, { includeCached: true });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    const preview = await buildVisibleImagePreviewsForOpen(visibleKeys
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      , dbg
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      , { includeCached: true }
+    );
     const previewReady = preview && preview.pendingReady >= visibleKeys.length;
-    if (!previewReady) await hydrateImageKeysWithLimit(visibleKeys, dbg, 'hydrate-visible', OpenDebug.hydrationConcurrency);
+    if (!previewReady) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        await hydrateImageKeysWithLimit(visibleKeys, dbg, 'hydrate-visible', getOpenHydrationConcurrency());
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      } else {
+        await hydrateImageKeysWithLimit(visibleKeys, getOpenHydrationConcurrency());
+      }
+    }
     else {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       OpenDebug.step(dbg, 'hydrate-visible:end', {
         count: visibleKeys.length,
         hydrated: 0,
@@ -814,43 +1117,52 @@ async function finishOpenedBoard(dbg, data) {
         ms: performance.now() - hydrateStart,
         ...getOpenImageRuntimeMetrics(),
       });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       skipInitialScaledPrewarm = true;
     }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     PillDebug.log('open:hydrate-visible:end', { phaseMs: performance.now() - hydrateStart, visibleCount: visibleKeys?.length || 0, previewReady: preview?.ready ?? '' });
-    const bitmapSettle = previewReady
-      ? {
-          count: visibleKeys.length,
-          before: 0,
-          after: 0,
-          failed: 0,
-          missingStore: 0,
-          pending: 0,
-          settled: visibleKeys.length,
-          missing: 0,
-          target: visibleKeys.length,
-          ms: 0,
-          skipped: 'open-preview-ready',
-          previewReady: preview.ready,
-          previewPendingReady: preview.pendingReady,
-        }
-      : await settleVisibleImageBitmapsForOpen(visibleKeys, dbg);
-    if (previewReady) {
-      OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', bitmapSettle);
-    }
-    PillDebug.log('open:hydrate-visible:bitmap-settle', { phaseMs: bitmapSettle.ms, before: bitmapSettle.before, after: bitmapSettle.after, failed: bitmapSettle.failed, pending: bitmapSettle.pending, missing: bitmapSettle.missing });
-    if (isOpenDebugActive(dbg)) {
-      OpenDebug.step(dbg, 'hydrate-initial-policy', {
-        mode: 'visible-first',
-        visibleCount: visibleKeys?.length || 0,
-        visibleBitmapsReady: bitmapSettle.after,
-        visibleBitmapsFailed: bitmapSettle.failed,
-        visibleBitmapsMissing: bitmapSettle.missing,
-        visiblePreviewReady: bitmapSettle.previewReady ?? '',
-        visibleBitmapSettleMs: bitmapSettle.ms,
-        pendingImages: getPendingHydratableImageKeys().length,
-      });
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      const bitmapSettle = previewReady
+        ? {
+            count: visibleKeys.length,
+            before: 0,
+            after: 0,
+            failed: 0,
+            missingStore: 0,
+            pending: 0,
+            settled: visibleKeys.length,
+            missing: 0,
+            target: visibleKeys.length,
+            ms: 0,
+            skipped: 'open-preview-ready',
+            previewReady: preview.ready,
+            previewPendingReady: preview.pendingReady,
+          }
+        : await settleVisibleImageBitmapsForOpen(visibleKeys, dbg);
+      if (previewReady) {
+        OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', bitmapSettle);
+      }
+      PillDebug.log('open:hydrate-visible:bitmap-settle', { phaseMs: bitmapSettle.ms, before: bitmapSettle.before, after: bitmapSettle.after, failed: bitmapSettle.failed, pending: bitmapSettle.pending, missing: bitmapSettle.missing });
+      if (isOpenDebugActive(dbg)) {
+        OpenDebug.step(dbg, 'hydrate-initial-policy', {
+          mode: 'visible-first',
+          visibleCount: visibleKeys?.length || 0,
+          visibleBitmapsReady: bitmapSettle.after,
+          visibleBitmapsFailed: bitmapSettle.failed,
+          visibleBitmapsMissing: bitmapSettle.missing,
+          visiblePreviewReady: bitmapSettle.previewReady ?? '',
+          visibleBitmapSettleMs: bitmapSettle.ms,
+          pendingImages: getPendingHydratableImageKeys().length,
+        });
+      }
+    } else
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (!previewReady) {
+      await settleVisibleImageBitmapsForOpen(visibleKeys);
     }
   } else {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (isOpenDebugActive(dbg)) {
       OpenDebug.step(dbg, 'hydrate-initial-policy', {
         mode: 'all-before-open',
@@ -858,29 +1170,45 @@ async function finishOpenedBoard(dbg, data) {
       });
     }
     const hydrateStart = performance.now();
-    await hydrateAllImagesForOpen(dbg);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      await hydrateAllImagesForOpen(dbg);
+    } else
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    {
+      await hydrateAllImagesForOpen();
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (isPillDebugActive()) {
       PillDebug.log('open:hydrate-all:end', { phaseMs: performance.now() - hydrateStart, pendingImages: getPendingHydratableImageKeys().length });
     }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
   if (!skipInitialScaledPrewarm && typeof prewarmVisibleScaledImageVariantsForOpen === 'function') {
-    const prewarmStart = performance.now();
-    const prewarm = await prewarmVisibleScaledImageVariantsForOpen({
-      padPx: 0,
-      concurrency: 4,
-      reason: 'open-initial-render',
-    });
-    OpenDebug.step(dbg, 'prewarm-visible-scaled-variants', {
-      ms: performance.now() - prewarmStart,
-      ...prewarm,
-    });
-    PillDebug.log('open:prewarm-visible-scaled-variants:end', {
-      phaseMs: performance.now() - prewarmStart,
-      candidates: prewarm?.candidates ?? '',
-      built: prewarm?.built ?? '',
-      skipped: prewarm?.skipped ?? '',
-    });
-  } else if (skipInitialScaledPrewarm) {
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const prewarmStart = performance.now();
+      const prewarm = await prewarmVisibleScaledImageVariantsForOpen({
+        padPx: 0,
+        concurrency: 4,
+        reason: 'open-initial-render',
+      });
+      OpenDebug.step(dbg, 'prewarm-visible-scaled-variants', {
+        ms: performance.now() - prewarmStart,
+        ...prewarm,
+      });
+      PillDebug.log('open:prewarm-visible-scaled-variants:end', {
+        phaseMs: performance.now() - prewarmStart,
+        candidates: prewarm?.candidates ?? '',
+        built: prewarm?.built ?? '',
+        skipped: prewarm?.skipped ?? '',
+      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    } else {
+      await prewarmVisibleScaledImageVariantsForOpen({ padPx: 0, concurrency: 4 });
+    }
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  else if (skipInitialScaledPrewarm) {
     OpenDebug.step(dbg, 'prewarm-visible-scaled-variants', {
       skipped: 'open-preview-ready',
       ms: 0,
@@ -889,61 +1217,85 @@ async function finishOpenedBoard(dbg, data) {
       alreadyReady: 0,
     });
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _boardOpening = false;
-  const renderStart = performance.now();
-  PillDebug.log('open:initial-applyTransform:start');
-  const collectInitialRenderDebug = OpenDebug.beginInitialRenderDebug?.() === true;
-  try {
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const renderStart = performance.now();
+    PillDebug.log('open:initial-applyTransform:start');
+    const collectInitialRenderDebug = OpenDebug.beginInitialRenderDebug?.() === true;
+    try {
+      applyTransform();
+    } finally {
+      if (collectInitialRenderDebug) OpenDebug.endInitialRenderDebug?.();
+    }
+    const renderMs = performance.now() - renderStart;
+    const renderBreakdown = typeof getLastApplyTransformMeta === 'function'
+      ? getLastApplyTransformMeta()
+      : null;
+    const drawBreakdown = renderBreakdown?.drawBoard || null;
+    PillDebug.log('open:initial-applyTransform:end', { phaseMs: renderMs });
+    OpenDebug.step(dbg, 'initial-applyTransform', {
+      ms: renderMs,
+      totalMeasuredMs: renderBreakdown?.totalMeasuredMs ?? '',
+      drawMs: renderBreakdown?.drawMs ?? '',
+      saveViewportMs: renderBreakdown?.saveViewportMs ?? '',
+      overlayMs: renderBreakdown?.overlayMs ?? '',
+      overlaySkipped: renderBreakdown?.overlaySkipped ?? '',
+      drawBoardTotalMs: drawBreakdown?.totalMeasuredMs ?? '',
+      backgroundSetupMs: drawBreakdown?.backgroundSetupMs ?? '',
+      objectLoopMs: drawBreakdown?.objectLoopMs ?? '',
+      resetMs: drawBreakdown?.resetMs ?? '',
+      drawnImages: drawBreakdown?.drawnImages ?? '',
+      drawnText: drawBreakdown?.drawnText ?? '',
+      visibleObjects: drawBreakdown?.visibleObjects ?? '',
+      testedObjects: drawBreakdown?.testedObjects ?? '',
+      culledImages: drawBreakdown?.culledImages ?? '',
+      culledText: drawBreakdown?.culledText ?? '',
+      bitmapImages: drawBreakdown?.bitmapImages ?? '',
+      elementImages: drawBreakdown?.elementImages ?? '',
+      scaledImages: drawBreakdown?.scaledImages ?? '',
+      openPreviewImages: drawBreakdown?.openPreviewImages ?? '',
+      scaledFallbackFull: drawBreakdown?.scaledFallbackFull ?? '',
+      scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',
+      croppedImages: drawBreakdown?.croppedImages ?? '',
+    });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  } else {
     applyTransform();
-  } finally {
-    if (collectInitialRenderDebug) OpenDebug.endInitialRenderDebug?.();
   }
-  const renderMs = performance.now() - renderStart;
-  const renderBreakdown = typeof getLastApplyTransformMeta === 'function'
-    ? getLastApplyTransformMeta()
-    : null;
-  const drawBreakdown = renderBreakdown?.drawBoard || null;
-  PillDebug.log('open:initial-applyTransform:end', { phaseMs: renderMs });
-  OpenDebug.step(dbg, 'initial-applyTransform', {
-    ms: renderMs,
-    totalMeasuredMs: renderBreakdown?.totalMeasuredMs ?? '',
-    drawMs: renderBreakdown?.drawMs ?? '',
-    saveViewportMs: renderBreakdown?.saveViewportMs ?? '',
-    overlayMs: renderBreakdown?.overlayMs ?? '',
-    overlaySkipped: renderBreakdown?.overlaySkipped ?? '',
-    drawBoardTotalMs: drawBreakdown?.totalMeasuredMs ?? '',
-    backgroundSetupMs: drawBreakdown?.backgroundSetupMs ?? '',
-    objectLoopMs: drawBreakdown?.objectLoopMs ?? '',
-    resetMs: drawBreakdown?.resetMs ?? '',
-    drawnImages: drawBreakdown?.drawnImages ?? '',
-    drawnText: drawBreakdown?.drawnText ?? '',
-    visibleObjects: drawBreakdown?.visibleObjects ?? '',
-    testedObjects: drawBreakdown?.testedObjects ?? '',
-    culledImages: drawBreakdown?.culledImages ?? '',
-    culledText: drawBreakdown?.culledText ?? '',
-    bitmapImages: drawBreakdown?.bitmapImages ?? '',
-    elementImages: drawBreakdown?.elementImages ?? '',
-    scaledImages: drawBreakdown?.scaledImages ?? '',
-    openPreviewImages: drawBreakdown?.openPreviewImages ?? '',
-    scaledFallbackFull: drawBreakdown?.scaledFallbackFull ?? '',
-    scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',
-    croppedImages: drawBreakdown?.croppedImages ?? '',
-  });
-  const pillFinishReason = await finishPillTask({
-    beforeFinish: () => {
-      const shieldStart = performance.now();
-      if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
-      else openingShield.classList.remove('active');
-      OpenDebug.step(dbg, 'opening-shield:removed', { ms: performance.now() - shieldStart });
-      PillDebug.log('open:openingShield:removed', { reason: 'before-pill-hide' });
-    },
-  });
-  PillDebug.log('open:pillFinish:end', { pillFinishReason });
-  OpenDebug.end(dbg, { opened: true, ...openMetrics });
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const pillFinishReason = await finishPillTask({
+      beforeFinish: () => {
+        const shieldStart = performance.now();
+        if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
+        else openingShield.classList.remove('active');
+        OpenDebug.step(dbg, 'opening-shield:removed', { ms: performance.now() - shieldStart });
+        PillDebug.log('open:openingShield:removed', { reason: 'before-pill-hide' });
+      },
+    });
+    PillDebug.log('open:pillFinish:end', { pillFinishReason });
+    OpenDebug.end(dbg, { opened: true, ...openMetrics });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  } else {
+    await finishPillTask({
+      beforeFinish: () => {
+        if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
+        else openingShield.classList.remove('active');
+      },
+    });
+  }
   if (hydrationMode === 'visible-first') {
-    setTimeout(() => hydrateRemainingImagesForOpen(dbg, 2, backgroundHydrationPriorityKeys).catch((err) => {
-      OpenDebug.step(dbg, 'hydrate-background:error', { error: String(err) });
-    }), 80);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      setTimeout(() => hydrateRemainingImagesForOpen(dbg, 2, backgroundHydrationPriorityKeys).catch((err) => {
+        OpenDebug.step(dbg, 'hydrate-background:error', { error: String(err) });
+      }), 80);
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    } else {
+      setTimeout(() => hydrateRemainingImagesForOpen(2, backgroundHydrationPriorityKeys).catch(() => {}), 80);
+    }
   }
 }
 
@@ -952,9 +1304,10 @@ function applyBoardData(data, options = {}) {
   BoardfishWebLimits.assertBoardDataAllowed(data);
   const prune = BoardfishBoardDocument.pruneBoardDataImageStore(data);
   data = prune.data;
+  const deferRender = !!options.deferRender;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = options.dbg || null;
   const sourcesCached = !!options.sourcesCached;
-  const deferRender = !!options.deferRender;
   const endDebug = options.endDebug !== false;
   const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:applyBoardData:start', openMetrics);
@@ -964,27 +1317,37 @@ function applyBoardData(data, options = {}) {
     kept: prune.kept,
     referenced: prune.referenced,
   });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   clearJsClipboard();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const t0 = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   clearImageStore();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'clearImageStore', { ms: performance.now() - t0 });
 
   const imageStart = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   BoardfishImageStore.setSources(data.imageStore || {});
   const visibleFirstOpen = deferRender &&
     typeof getOpenHydrationMode === 'function' &&
     getOpenHydrationMode() === 'visible-first';
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let deferredInitialCacheImages = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const k of BoardfishImageStore.sourceKeys()) {
     const source = BoardfishImageStore.getSource(k);
     const n = parseInt(k.split('-')[1]);
     if (!isNaN(n) && n >= imgKeyCounter) imgKeyCounter = n + 1;
     if (visibleFirstOpen && isOpenHydratableImageSource(source)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       deferredInitialCacheImages++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       continue;
     }
     cacheImage(k, source);
   }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'cacheImage:start-all', {
     ms: performance.now() - imageStart,
     sourcesCached,
@@ -995,37 +1358,61 @@ function applyBoardData(data, options = {}) {
   OpenDebug.step(dbg, 'image-store-sample', { sample: getImageStoreOpenDebugSampleIfEnabled(dbg) });
 
   const stateStart = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (editingId) exitEdit();
   BoardfishEditorState.clearSelection();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const replaceStart = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   BoardfishEditorState.replaceBoardObjects(data.objects || [], { restoreCounters: false });
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'replaceBoardObjects', { ms: performance.now() - replaceStart, objectCount: objects.length });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   invalidateOffscreen();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'apply-state', { ms: performance.now() - stateStart, objectCount: objects.length });
 
   const countersStart = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   BoardfishEditorState.restoreObjectCountersFromObjects(objects);
   BoardfishEditorState.setViewport(data.viewport);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   if (!deferRender) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const renderStart = performance.now();
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     applyTransform();
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     OpenDebug.step(dbg, 'applyTransform', { ms: performance.now() - renderStart });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const historyStart = performance.now();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   boardHistory = []; historyIndex = -1; snapshot();
   markSaved(false);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'reset-boardHistory-markSaved', { ms: performance.now() - historyStart, historyLength: boardHistory.length, historyIndex });
   PillDebug.log('open:applyBoardData:end', openMetrics);
   if (endDebug) OpenDebug.end(dbg, { opened: true, ...openMetrics });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
-const runExclusiveBoardSave = (op, run) => {
+const runExclusiveBoardSave = (
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  op,
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  run,
+) => {
   if (runExclusiveBoardSave.inFlight) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const dbg = SaveDebug.start(`${op}:coalesced`, { reason: 'save-in-flight' });
     SaveDebug.end(dbg, { reused: true });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return runExclusiveBoardSave.inFlight;
   }
   const promise = Promise.resolve().then(run);
@@ -1038,14 +1425,30 @@ const runExclusiveBoardSave = (op, run) => {
 runExclusiveBoardSave.inFlight = null;
 
 const saveBoardAsImpl = async () => {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
   try {
     const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
-    const command = BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG;
-    const fileRef = await SaveDebug.wrap(dbg, command, () => BoardfishRuntime.saveFileDialog(defaultName), { defaultName });
+    const chooseFile = () => BoardfishRuntime.saveFileDialog(defaultName);
+    let fileRef;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      fileRef = await SaveDebug.wrap(
+        dbg,
+        BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG,
+        chooseFile,
+        { defaultName },
+      );
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    } else {
+      fileRef = await chooseFile();
+    }
     if (!fileRef) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       SaveDebug.end(dbg, { cancelled: true });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       releaseInputShield();
       return false;
     }
@@ -1054,33 +1457,52 @@ const saveBoardAsImpl = async () => {
       startMessage: 'Saving',
       successMessage: 'Saved',
       task: async () => {
-        await invokeSaveBoard(fileRef, dbg);
+        await invokeSaveBoard(fileRef
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          , dbg
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        );
         currentFileRef = fileRef;
         currentFilePath = BoardfishRuntime.describeFileRef(fileRef);
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         SaveDebug.step(dbg, 'markSaved:start');
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         markSaved();
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         SaveDebug.step(dbg, 'markSaved:end');
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       },
     });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     SaveDebug.end(dbg, { saved: true, path: currentFilePath });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return true;
   } catch (err) {
     releaseInputShield();
     console.error('Save failed:', err);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     SaveDebug.end(dbg, { saved: false, error: String(err) });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return false;
   }
 };
 
 async function saveBoardAs() {
-  return runExclusiveBoardSave('saveBoardAs', saveBoardAsImpl);
+  return runExclusiveBoardSave(
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    'saveBoardAs',
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    saveBoardAsImpl,
+  );
 }
 
 const saveBoardImpl = async () => {
   const target = BoardfishRuntime.canSaveToExistingTarget(currentFileRef) ? currentFileRef : null;
   if (target) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const path = BoardfishRuntime.describeFileRef(target);
     const dbg = SaveDebug.start('saveBoard', { path, objectCount: objects.length });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
     try {
       await runShieldedPillTask({
@@ -1088,18 +1510,30 @@ const saveBoardImpl = async () => {
         startMessage: 'Saving',
         successMessage: 'Saved',
         task: async () => {
-          await invokeSaveBoard(target, dbg);
+          await invokeSaveBoard(target
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            , dbg
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          );
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           SaveDebug.step(dbg, 'markSaved:start');
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
           markSaved();
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           SaveDebug.step(dbg, 'markSaved:end');
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
         },
       });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       SaveDebug.end(dbg, { saved: true, path });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return true;
     } catch (err) {
       releaseInputShield();
       console.error('Save failed:', err);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       SaveDebug.end(dbg, { saved: false, error: String(err) });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return false;
     }
   }
@@ -1107,32 +1541,69 @@ const saveBoardImpl = async () => {
 };
 
 async function saveBoard() {
-  return runExclusiveBoardSave('saveBoard', saveBoardImpl);
+  return runExclusiveBoardSave(
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    'saveBoard',
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    saveBoardImpl,
+  );
 }
 
 
 async function openBoardFileRef(fileRef) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const path = BoardfishRuntime.describeFileRef(fileRef);
   const dbg = OpenDebug.start('openBoardFileRef', { path, currentFilePath, objectCount: objects.length });
-  if (!(await confirmDirtyBeforeOpen(dbg))) return;
-  await openBoardFromPath(fileRef, dbg, 'Open failed:');
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    if (!(await confirmDirtyBeforeOpen(dbg))) return;
+    await openBoardFromPath(fileRef, dbg, 'Open failed:');
+    return;
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  if (!(await confirmDirtyBeforeOpen())) return;
+  await openBoardFromPath(fileRef, 'Open failed:');
 }
 
 async function openBoard() {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = OpenDebug.start('openBoard', { currentFilePath, objectCount: objects.length });
-
-  if (!(await confirmDirtyBeforeOpen(dbg))) return;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    if (!(await confirmDirtyBeforeOpen(dbg))) return;
+  } else
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  if (!(await confirmDirtyBeforeOpen())) return;
 
   try {
-    const command = BoardfishRuntime.WEB_COMMANDS.OPEN_FILE_DIALOG;
-    const fileRef = await OpenDebug.wrap(dbg, command, () => BoardfishRuntime.openFileDialog());
+    const chooseFile = () => BoardfishRuntime.openFileDialog();
+    let fileRef;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      fileRef = await OpenDebug.wrap(dbg, BoardfishRuntime.WEB_COMMANDS.OPEN_FILE_DIALOG, chooseFile);
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    } else {
+      fileRef = await chooseFile();
+    }
     if (!fileRef) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       OpenDebug.end(dbg, { cancelled: true });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return;
     }
-    await openBoardFromPath(fileRef, dbg, 'Open failed:');
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      await openBoardFromPath(fileRef, dbg, 'Open failed:');
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    } else {
+      await openBoardFromPath(fileRef, 'Open failed:');
+    }
   } catch (err) {
-    finishFailedOpen(dbg, err, 'Open failed:');
+    finishFailedOpen(
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      dbg,
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      err,
+      'Open failed:',
+    );
   }
 }
 

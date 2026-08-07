@@ -5,7 +5,8 @@
     let raf = null;
     let state = null;
 
-    function flush() {
+    function commit() {
+      raf = null;
       if (state === null) return;
       const nextState = state;
       state = null;
@@ -16,17 +17,11 @@
       schedule(nextState) {
         state = nextState;
         if (raf) return;
-        raf = requestAnimationFrame(() => {
-          raf = null;
-          flush();
-        });
+        raf = requestAnimationFrame(commit);
       },
       flush() {
-        if (raf) {
-          cancelAnimationFrame(raf);
-          raf = null;
-        }
-        flush();
+        if (raf) cancelAnimationFrame(raf);
+        commit();
       },
       get pending() { return state !== null; },
     };
@@ -37,8 +32,8 @@
     const cleanup = (event = null) => {
       if (!active) return;
       active = false;
-      document.removeEventListener(moveEvent, onMove);
-      document.removeEventListener(upEvent, onUp);
+      document.removeEventListener(moveEvent, move);
+      document.removeEventListener(upEvent, cleanup);
       if (typeof window !== 'undefined' && window.removeEventListener) {
         window.removeEventListener('blur', onCancel);
         window.removeEventListener('pagehide', onCancel);
@@ -49,8 +44,6 @@
       }
       up(event);
     };
-    const onMove = (event) => move(event);
-    const onUp = (event) => cleanup(event);
     const onCancel = (event) => cleanup({
       __boardfishDragCancel: true,
       type: event?.type || 'cancel',
@@ -62,8 +55,8 @@
         onCancel({ type: 'visibilitychange' });
       }
     };
-    document.addEventListener(moveEvent, onMove);
-    document.addEventListener(upEvent, onUp);
+    document.addEventListener(moveEvent, move);
+    document.addEventListener(upEvent, cleanup);
     if (typeof window !== 'undefined' && window.addEventListener) {
       window.addEventListener('blur', onCancel);
       window.addEventListener('pagehide', onCancel);

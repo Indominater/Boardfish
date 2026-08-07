@@ -327,9 +327,12 @@ test('cmd+arrow text alignment falls through while document text is selected', (
 });
 
 test('cmd+arrow text alignment still applies to selected text objects outside editing', () => {
-  const selectedIds = new Set(['text-1']);
+  const selectedIds = new Set(['text-1', 'image-1']);
   const textObject = { id: 'text-1', type: 'text', data: { content: 'one\ntwo' } };
-  const objectsMap = new Map([[textObject.id, textObject]]);
+  const objectsMap = new Map([
+    [textObject.id, textObject],
+    ['image-1', { id: 'image-1', type: 'image' }],
+  ]);
   const { calls, mainKeydown } = loadKeyboard({
     selectedIds,
     objectsMap,

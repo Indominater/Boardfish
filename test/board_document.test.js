@@ -112,7 +112,6 @@ test('strips runtime text layout caches from saved board data', () => {
     h: 900,
     z: 1,
     data: { content },
-    _layoutCacheKey: `${content}\n600\n20`,
     _layoutCache: Array.from({ length: 120 }, (_, index) => ({
       text: `line ${index}`,
       startIndex: index,

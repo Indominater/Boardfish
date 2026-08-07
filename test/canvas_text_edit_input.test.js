@@ -191,18 +191,13 @@ function loadRubberBandHarness() {
     panX: 0,
     panY: 0,
     _rubberBandDragActive: false,
-    _rubberBandStyleState: { display: '', left: '', top: '', width: '', height: '' },
     rubberBand: { style: {} },
+    rubberBandCommits: [],
     cleaned: 0,
     deselected: 0,
     motions: [],
     renders: [],
     selections: [],
-    _setStyleIfChanged(el, prop, value, state) {
-      if (state[prop] === value) return;
-      state[prop] = value;
-      el.style[prop] = value;
-    },
     beginRubberBandDrag() {
       context._rubberBandDragActive = true;
     },
@@ -236,7 +231,18 @@ function loadRubberBandHarness() {
     ViewportDebug: { isEnabled: () => false, start() { return {}; }, count() {}, end() {}, timing() {} },
     BoardfishViewportState: { zoomAroundClient() {}, panBy() {}, setPan() {} },
     scheduleTransform() {},
-    createRafCommitter: () => ({ schedule() {}, flush() {} }),
+    createRafCommitter(apply) {
+      let state = null;
+      const flush = () => {
+        if (state === null) return;
+        const nextState = state;
+        state = null;
+        apply(nextState);
+        context.rubberBandCommits.push(context.rubberBand.style.cssText);
+      };
+      context.flushRubberBandFrame = flush;
+      return { schedule(nextState) { state = nextState; }, flush };
+    },
     isBoardInputBlocked: () => false,
     isBoardNavigationAllowedWhileBlocked: () => false,
     isMultiSelected: () => false,
@@ -285,6 +291,23 @@ test('rubber-band selection still selects objects on normal mouse release', () =
   assert.equal(context.rubberBand.style.display, 'none');
   assert.deepEqual(context.selections, [['image-1']]);
   assert.deepEqual(context.motions, []);
+});
+
+test('rubber-band selection commits only the latest move in an animation frame', () => {
+  const context = loadRubberBandHarness();
+
+  context.startRubberBandSelection({ clientX: 0, clientY: 0 }, false);
+  context.drag.move({ clientX: 20, clientY: 20 });
+  context.drag.move({ clientX: 30, clientY: 40 });
+
+  assert.deepEqual(context.rubberBandCommits, []);
+  context.flushRubberBandFrame();
+  assert.deepEqual(context.rubberBandCommits, [
+    'display:block;left:0px;top:0px;width:30px;height:40px',
+  ]);
+
+  context.drag.up({ clientX: 30, clientY: 40 });
+  assert.equal(context.rubberBand.style.display, 'none');
 });
 
 test('click-release on an already selected text object enters edit mode', () => {

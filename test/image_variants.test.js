@@ -18,6 +18,7 @@ function loadImageVariants(options = {}) {
     clearTimeout() {},
     setTimeout() { return 0; },
     performance: { now: () => 0 },
+    mapWithConcurrency(items, _limit, worker) { return Promise.all(items.map(worker)); },
   };
   if (options.navigator) context.navigator = options.navigator;
 
@@ -48,6 +49,7 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
     clearTimeout() {},
     setTimeout() { return 0; },
     performance: { now: () => 0 },
+    mapWithConcurrency(items, _limit, worker) { return Promise.all(items.map(worker)); },
     _boardOpening: false,
     _imageStoreGeneration: 0,
     imageBitmapCache: {},
@@ -156,6 +158,7 @@ test('grouped bitmap cache keeps a group tracked when replacing its only variant
 test('chooses the smallest scaled variant that preserves display-pixel detail', () => {
   const context = loadImageVariants();
 
+  assert.deepEqual(Array.from(context.IMAGE_SCALE_LEVELS), [0.25]);
   assert.equal(scaleFor(context, { sourceW: 400, sourceH: 200, objW: 100, objH: 50, zoom: 1, dpr: 1 }), 0.25);
   assert.equal(scaleFor(context, { sourceW: 400, sourceH: 200, objW: 100.01, objH: 50, zoom: 1, dpr: 1 }), 1);
   assert.equal(scaleFor(context, { sourceW: 400, sourceH: 200, objW: 100, objH: 50.01, zoom: 1, dpr: 1 }), 1);
@@ -198,20 +201,37 @@ test('scaled variants round up so the bitmap is not below the qualifying size', 
 test('generic bitmap draw warmup samples the full source into a 1px canvas', () => {
   const context = loadImageVariants();
   const drawCalls = [];
+  let clearCalls = 0;
+  let smoothingWrites = 0;
+  let qualityWrites = 0;
+  let warmupCanvas = null;
   context.document = {
     createElement(name) {
       assert.equal(name, 'canvas');
-      return {
+      warmupCanvas = {
         width: 0,
         height: 0,
         getContext(type) {
           assert.equal(type, '2d');
-          return {
-            clearRect() {},
+          assert.equal(this.width, 1);
+          assert.equal(this.height, 1);
+          const drawContext = {
+            clearRect() { clearCalls++; },
             drawImage(...args) { drawCalls.push(args); },
           };
+          Object.defineProperty(drawContext, 'imageSmoothingEnabled', {
+            set(value) {
+              assert.equal(value, false);
+              smoothingWrites++;
+            },
+          });
+          Object.defineProperty(drawContext, 'imageSmoothingQuality', {
+            set() { qualityWrites++; },
+          });
+          return drawContext;
         },
       };
+      return warmupCanvas;
     },
   };
 
@@ -220,6 +240,10 @@ test('generic bitmap draw warmup samples the full source into a 1px canvas', () 
 
   assert.equal(result.warmed, true);
   assert.deepEqual(drawCalls[0], [source, 0, 0, 320, 180, 0, 0, 1, 1]);
+  assert.deepEqual({ width: warmupCanvas.width, height: warmupCanvas.height }, { width: 1, height: 1 });
+  assert.equal(smoothingWrites, 1);
+  assert.equal(qualityWrites, 0);
+  assert.equal(clearCalls, 0);
   assert.equal(context.drawableBitmapWarmupWarmedByKind.other, 1);
 });
 
@@ -861,7 +885,7 @@ test('low-zoom active navigation records visible full-size fallbacks until scale
   assert.match(source, /IMAGE_VARIANT_ACTIVE_INPUT_PRIORITY_MS/);
   assert.match(source, /IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT/);
   assert.match(source, /chooseImageScaleForDraw\(obj, fullSource, view, \{ activeOverscale: activeInput \}\)/);
-  assert.match(source, /queueScaledImageVariantForDraw\(key, obj, fullSource, view, \{ priority: activeInput, activeOverscale: activeInput \}\);/);
+  assert.match(source, /queueScaledImageVariant\(key, fullSource, targetScale, \{ priority: activeInput \}\);/);
   assert.match(source, /scaledVariantPending: true/);
   assert.match(source, /activeInputFullFallback: true/);
   assert.doesNotMatch(source, /source: null/);

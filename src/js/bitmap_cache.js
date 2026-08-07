@@ -28,7 +28,6 @@
     }
 
     function detachLruNode(node) {
-      if (!node) return;
       if (node.prev) node.prev.next = node.next;
       else if (lruHead === node) lruHead = node.next;
       if (node.next) node.next.prev = node.prev;
@@ -38,7 +37,6 @@
     }
 
     function appendLruNode(node) {
-      if (!node) return;
       node.prev = lruTail;
       node.next = null;
       if (lruTail) lruTail.next = node;
@@ -57,8 +55,6 @@
       }
       if (lruTail !== node) {
         detachLruNode(node);
-        appendLruNode(node);
-      } else if (!lruHead) {
         appendLruNode(node);
       }
       return entry;

@@ -2,8 +2,6 @@ export function setDefaultDebugFlag(enabled) {
   if (Object.prototype.hasOwnProperty.call(globalThis, '__BOARDFISH_DEBUG_TOOLS_ENABLED__')) return;
   Object.defineProperty(globalThis, '__BOARDFISH_DEBUG_TOOLS_ENABLED__', {
     value: !!enabled,
-    writable: false,
-    configurable: false,
   });
 }
 
