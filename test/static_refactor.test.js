@@ -262,8 +262,8 @@ test('image hydration queue processes until its time budget is consumed', () => 
   const imageState = readSource('src/js/image_state.js');
 
   assert.match(imageState, /while \(_imageHydrationQueue\.length && \(count === 0 \|\| performance\.now\(\) - batchStart < 6\)\)/);
-  assert.match(imageState, /function ensureImageDisplaySrc\(key[\s\S]*?, dbg = null[\s\S]*?\) \{/);
-  assert.doesNotMatch(imageState, /ensureImageDisplaySrc\(key, dbg\)\s*\.then/);
+  assert.match(imageState, /cacheImage\(key, source[\s\S]*?, dbg[\s\S]*?\);/);
+  assert.doesNotMatch(imageState, /ensureImageDisplaySrc/);
   assert.doesNotMatch(imageState, /count < 1 && performance\.now\(\) - batchStart < 6/);
 });
 

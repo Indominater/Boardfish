@@ -478,9 +478,9 @@
         const bitmap = deps.imageBitmapCache()[key];
         const lowLatencyImageMotion = !!options.motion;
         const selected = imageSourceResolver
-          ? imageSourceResolver(key, obj, view, { activeInput: lowLatencyImageMotion })
-          : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, { activeInput: lowLatencyImageMotion }) : null;
-        const img = selected?.source || null;
+          ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
+          : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
+        const img = selected?.source || selected || null;
         if (!isDrawableImageSource(img)) return;
         try {
           drawImageObj(context, obj, img, deps, view, viewportRect,
@@ -540,9 +540,9 @@
       const bitmap = deps.imageBitmapCache()[key];
       const lowLatencyImageMotion = !!options.motion;
       const selected = imageSourceResolver
-        ? imageSourceResolver(key, obj, view, counters, { activeInput: lowLatencyImageMotion })
-        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, { activeInput: lowLatencyImageMotion }) : null;
-      const img = selected?.source || null;
+        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
+        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
+      const img = selected?.source || selected || null;
       if (isDrawableImageSource(img)) {
         if (counters) {
           if (selected?.scale < 1) {

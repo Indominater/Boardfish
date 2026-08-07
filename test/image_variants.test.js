@@ -404,7 +404,7 @@ test('explicit active image draw preserves full-size fallback while scaled varia
     { w: 500, h: 500 },
     fullSource,
     { zoom: 0.1, dpr: 1 },
-    { activeInput: true },
+    true,
   );
 
   assert.equal(selected.source, fullSource);
@@ -475,7 +475,7 @@ test('priority scaled variants start during input without pulling background wor
   context.enqueueScaledVariantTask(async () => {
     starts.push('priority');
     await new Promise(() => {});
-  }, { priority: true });
+  }, true);
 
   assert.equal(backgroundTimer.cleared, true);
   assert.equal(clock.pending().length, 1);
@@ -884,8 +884,8 @@ test('low-zoom active navigation records visible full-size fallbacks until scale
 
   assert.match(source, /IMAGE_VARIANT_ACTIVE_INPUT_PRIORITY_MS/);
   assert.match(source, /IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT/);
-  assert.match(source, /chooseImageScaleForDraw\(obj, fullSource, view, \{ activeOverscale: activeInput \}\)/);
-  assert.match(source, /queueScaledImageVariant\(key, fullSource, targetScale, \{ priority: activeInput \}\);/);
+  assert.match(source, /chooseImageScaleForDraw\(obj, fullSource, view, activeInput\)/);
+  assert.match(source, /if \(targetScale < 1\) queueScaledImageVariant\(key, fullSource, targetScale, activeInput\);/);
   assert.match(source, /scaledVariantPending: true/);
   assert.match(source, /activeInputFullFallback: true/);
   assert.doesNotMatch(source, /source: null/);

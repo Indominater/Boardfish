@@ -538,28 +538,18 @@ async function hydrateImageForDisplay(key
     return displayReady;
   }
   const t0 = performance.now();
-  const fetchStart = performance.now();
-  const display = await ensureImageDisplaySrc(key, dbg);
-  const fetchMs = performance.now() - fetchStart;
-  if (!display.src) {
-    OpenDebug.step(dbg, 'hydrate-image:skip', { imgKey: key, reason: 'no-display-src', storeKind: imageRefKind(BoardfishImageStore.getSource(key)) });
-    return false;
-  }
   const readyStart = performance.now();
-  const cacheMetrics = await cacheImage(key, display.src, dbg, {
-    skipSourceRegistration: true,
-    resolveOnLoad: true,
-  });
+  const cacheMetrics = await cacheImage(key, source, dbg);
   const readyMs = performance.now() - readyStart;
   const displayReady = BoardfishImageStore.hasDisplayImage(key);
   OpenDebug.step(dbg, 'hydrate-image', {
     imgKey: key,
     ms: performance.now() - t0,
-    fetchMs,
+    fetchMs: 0,
     readyMs,
     ...(cacheMetrics || {}),
-    dataUrlLen: display.dataUrlLen,
-    source: display.source,
+    dataUrlLen: typeof source === 'string' ? source.length : 0,
+    source: typeof source === 'string' ? 'data-url' : 'web-blob',
     bitmapReady: !!imageBitmapCache[key],
     displayReady,
   });
@@ -570,12 +560,7 @@ async function hydrateImageForDisplay(key
     await pendingReady;
     return BoardfishImageStore.hasDisplayImage(key);
   }
-  const display = await ensureImageDisplaySrc(key);
-  if (!display.src) return false;
-  await cacheImage(key, display.src, {
-    skipSourceRegistration: true,
-    resolveOnLoad: true,
-  });
+  await cacheImage(key, source);
   return BoardfishImageStore.hasDisplayImage(key);
 }
 

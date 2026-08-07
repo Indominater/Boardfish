@@ -1145,8 +1145,7 @@ function clearTextMeasurementCaches() {
   scheduleRender(true, true);
 }
 
-function buildWrappedLines(obj, options = {}) {
-  const content = normalizeTextContent(obj?.data?.content || '');
+function buildWrappedLines(obj, options = {}, content = normalizeTextContent(obj?.data?.content || '')) {
   const scriptRanges = Array.isArray(options.scriptRanges)
     ? options.scriptRanges
     : getTextScriptRanges(obj);
@@ -1295,10 +1294,8 @@ function buildWrappedLines(obj, options = {}) {
   return { lines: result, lineCount: Math.max(1, knownLineCount || visualLineIndex), scriptKey, lineIndex };
 }
 
-function getWrappedLines(obj) {
+function getWrappedLines(obj, content, scriptRanges) {
   const cached = _linesCacheMap.get(obj.id);
-  const content = normalizeTextContent(obj.data?.content || '');
-  const scriptRanges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
   if (
     cached &&
@@ -1307,7 +1304,7 @@ function getWrappedLines(obj) {
     cached.scriptKey === scriptKey
   ) return cached.lines;
 
-  const wrapped = buildWrappedLines(obj, { scriptRanges, scriptKey, collectLineIndex: true });
+  const wrapped = buildWrappedLines(obj, { scriptRanges, scriptKey, collectLineIndex: true }, content);
   const result = wrapped.lines;
   setCachedTextWrappedLineIndex(obj, content, scriptKey, wrapped.lineIndex || [], wrapped.lineCount);
   _linesCacheMap.set(obj.id, { content, w: obj.w, scriptKey, lines: result, lineCount: wrapped.lineCount });
@@ -1972,9 +1969,9 @@ const deriveBracedTextScriptRangesFromContent = (content) => {
   return ranges;
 };
 
-const getTextScriptRanges = (obj) => {
+const getTextScriptRanges = (obj, content) => {
   if (!obj || obj.type !== 'text') return [];
-  const content = normalizeTextContent(obj.data?.content);
+  if (content == null) content = normalizeTextContent(obj.data?.content);
   const source = Array.isArray(obj.data?.scriptRanges) ? obj.data.scriptRanges : [];
   const sourceKey = source.length ? JSON.stringify(source) : '[]';
   if (
@@ -2712,9 +2709,8 @@ function syncAllTextAutoHeights() {
   return changed;
 }
 
-function calculateTextLayout(obj) {
-  const lines = getWrappedLines(obj);
-  const scriptRanges = getTextScriptRanges(obj);
+function calculateTextLayout(obj, content, scriptRanges) {
+  const lines = getWrappedLines(obj, content, scriptRanges);
   const scriptMetrics = scriptRanges.length
     ? getTextScriptLayoutMetricsForObject(obj, obj.data.content, scriptRanges)
     : null;
@@ -2923,7 +2919,8 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, scriptRanges, s
 
 function getTextLayout(obj) {
   const content = normalizeTextContent(obj.data?.content || '');
-  const scriptKey = (getTextScriptRanges(obj), obj._textScriptRangesCacheSourceKey || '[]');
+  const scriptRanges = getTextScriptRanges(obj, content);
+  const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
   const alignKey = textLayoutAlignKey(obj, content);
   if (
     obj._layoutCache &&
@@ -2943,7 +2940,7 @@ function getTextLayout(obj) {
   obj._layoutCacheScriptKey = scriptKey;
   obj._layoutCacheAlignKey = alignKey;
   obj._layoutCacheY = obj.y;
-  obj._layoutCache = calculateTextLayout(obj);
+  obj._layoutCache = calculateTextLayout(obj, content, scriptRanges);
   return obj._layoutCache;
 }
 
@@ -3227,10 +3224,6 @@ function cloneTextDrawStats(stats, cacheHit = false) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function isTextDrawBlankUnit(unit) {
-  return unit === ' ' || unit === '\u00a0';
-}
-
 function isTextDrawBatchingFontReady(font) {
   if (_textDrawBatchingEngineVerified == null) {
     const userAgent = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
@@ -3248,52 +3241,6 @@ function isTextDrawBatchingFontReady(font) {
   } catch (_) {
     return false;
   }
-}
-
-function isTextDrawBatchableAsciiUnit(unit, batchingFontReady) {
-  return batchingFontReady === true && TEXT_DRAW_BATCHABLE_ASCII_RE.test(String(unit ?? ''));
-}
-
-function isTextDrawUnsafeAsciiPair(previousText, nextText) {
-  return previousText.endsWith('t') && nextText === 't';
-}
-
-function appendTextDrawUnit(draws, unit, font, batchingFontReady) {
-  const batchable = isTextDrawBatchableAsciiUnit(unit.text, batchingFontReady);
-  const unitWidth = batchable
-    ? measureTextGlyphMetricsWithFont(unit.text, font).width
-    : 0;
-  const previous = draws[draws.length - 1] || null;
-  if (
-    batchable &&
-    previous?.batchable === true &&
-    previous.unitCount < TEXT_DRAW_BATCH_MAX_UNITS &&
-    !isTextDrawUnsafeAsciiPair(previous.text, unit.text) &&
-    Number.isFinite(unit.x) &&
-    Number.isFinite(previous.nextX) &&
-    Math.abs(unit.x - previous.nextX) <= TEXT_DRAW_BATCH_POSITION_EPSILON
-  ) {
-    previous.text += unit.text;
-    previous.nextX = unit.x + unitWidth;
-    previous.unitCount++;
-    return;
-  }
-  draws.push({
-    ...unit,
-    batchable,
-    nextX: batchable && Number.isFinite(unit.x) ? unit.x + unitWidth : NaN,
-    unitCount: 1,
-  });
-}
-
-function textDrawPlanCacheMatches(plan, line, text, scriptMetrics) {
-  return !!plan &&
-    plan.text === text &&
-    plan.startIndex === line.startIndex &&
-    plan.prefixWidths === line.prefixWidths &&
-    plan.scriptRanges === line.scriptRanges &&
-    plan.scriptMetrics === scriptMetrics &&
-    plan.font === FONT;
 }
 
 function setTextDrawPlanCache(line, plan) {
@@ -3354,7 +3301,7 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
       }
     }
     forEachTextSpacingUnit(text, (unit, unitStart, unitEnd) => {
-      if (isTextDrawBlankUnit(unit)) {
+      if (unit === ' ' || unit === '\u00a0') {
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           stats.skippedSpaces += Math.max(0, unitEnd - unitStart);
         }
@@ -3364,11 +3311,34 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
         stats.drawUnits++;
         stats.drawnChars += Math.max(0, unitEnd - unitStart);
       }
-      appendTextDrawUnit(run.draws, {
+      const x = line.prefixWidths?.[unitStart];
+      const batchable = batchingFontReady === true && TEXT_DRAW_BATCHABLE_ASCII_RE.test(unit);
+      const unitWidth = batchable
+        ? measureTextGlyphMetricsWithFont(unit, drawFont).width
+        : 0;
+      const previous = run.draws[run.draws.length - 1] || null;
+      if (
+        batchable &&
+        previous?.batchable === true &&
+        previous.unitCount < TEXT_DRAW_BATCH_MAX_UNITS &&
+        !(previous.text.endsWith('t') && unit === 't') &&
+        Number.isFinite(x) &&
+        Number.isFinite(previous.nextX) &&
+        Math.abs(x - previous.nextX) <= TEXT_DRAW_BATCH_POSITION_EPSILON
+      ) {
+        previous.text += unit;
+        previous.nextX = x + unitWidth;
+        previous.unitCount++;
+        return;
+      }
+      run.draws.push({
         text: unit,
         offset: unitStart,
-        x: line.prefixWidths?.[unitStart],
-      }, drawFont, batchingFontReady);
+        x,
+        batchable,
+        nextX: batchable && Number.isFinite(x) ? x + unitWidth : NaN,
+        unitCount: 1,
+      });
     }, i, j);
     if (run.draws.length) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') stats.drawCalls += run.draws.length;
@@ -3387,20 +3357,6 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
   };
   if (typeof BOARDFISH_PRODUCTION === 'undefined') plan.stats = stats;
   return plan;
-}
-
-function drawTextPlan(context, line, obj, plan) {
-  const baseX = lineBaseX(line, obj);
-  const previousFont = context.font;
-  for (const run of plan.runs) {
-    if (run.font) context.font = run.font;
-    const y = line.textY + run.offset;
-    for (const draw of run.draws) {
-      const x = Number.isFinite(draw.x) ? baseX + draw.x : lineXAtOffset(line, obj, draw.offset);
-      context.fillText(draw.text, x, y);
-    }
-    if (run.font && context.font !== previousFont) context.font = previousFont;
-  }
 }
 
 const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0
@@ -3427,9 +3383,15 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
     }
   }
   const cacheable = start === 0 && end === text.length && !!line.prefixWidths;
-  let plan = cacheable && textDrawPlanCacheMatches(line._textDrawPlanCache, line, text, scriptMetrics)
-    ? line._textDrawPlanCache
-    : null;
+  let plan = cacheable ? line._textDrawPlanCache : null;
+  if (
+    plan?.text !== text ||
+    plan.startIndex !== line.startIndex ||
+    plan.prefixWidths !== line.prefixWidths ||
+    plan.scriptRanges !== line.scriptRanges ||
+    plan.scriptMetrics !== scriptMetrics ||
+    plan.font !== FONT
+  ) plan = null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cacheHit = !!plan;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -3437,7 +3399,17 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
     plan = createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetrics);
     if (cacheable) setTextDrawPlanCache(line, plan);
   }
-  drawTextPlan(context, line, obj, plan);
+  const baseX = lineBaseX(line, obj);
+  const previousFont = context.font;
+  for (const run of plan.runs) {
+    if (run.font) context.font = run.font;
+    const y = line.textY + run.offset;
+    for (const draw of run.draws) {
+      const x = Number.isFinite(draw.x) ? baseX + draw.x : lineXAtOffset(line, obj, draw.offset);
+      context.fillText(draw.text, x, y);
+    }
+    if (run.font && context.font !== previousFont) context.font = previousFont;
+  }
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') return null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   return options.collectStats === false ? null : cloneTextDrawStats(plan.stats, cacheHit);

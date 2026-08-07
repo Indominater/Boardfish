@@ -3176,15 +3176,13 @@ function enterEdit(id, {
     const removedChars = removedText.length;
     const insertedChars = insertedText.length;
     const deletesContent = textEditInputTypeDeletesContent(inputType);
-    const removedNewlines = textEditorNewlineCount(removedText);
-    const insertedNewlines = textEditorNewlineCount(insertedText);
-    const deleteReducedLogicalLines = deletesContent && removedNewlines > insertedNewlines;
+    const deleteReducedLogicalLines = deletesContent &&
+      textEditorNewlineCount(removedText) > textEditorNewlineCount(insertedText);
     const selectedDeleteShrankText = deletesContent && !!inputState.hasSelection && removedChars > insertedChars;
     const deleteShrankPendingEdit = pendingSizeSyncBeforeAutoHeight &&
       deletesContent &&
       removedChars > insertedChars;
-    const layoutLineDelta = Number(obj._lastTextLayoutLineDelta);
-    const layoutRemovedLines = layoutPatched && Number.isFinite(layoutLineDelta) && layoutLineDelta < 0;
+    const layoutRemovedLines = layoutPatched && obj._lastTextLayoutLineDelta < 0;
     const forceAutoHeight = layoutRemovedLines || deleteReducedLogicalLines ||
       selectedDeleteShrankText || deleteShrankPendingEdit;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -3224,8 +3222,8 @@ function enterEdit(id, {
       ...autoHeightDebugBefore?.proxy,
       removedChars,
       insertedChars,
-      removedNewlines,
-      insertedNewlines,
+      removedNewlines: textEditorNewlineCount(removedText),
+      insertedNewlines: textEditorNewlineCount(insertedText),
       ...textEditorTextStats(obj.data.content, obj.data.scriptRanges),
     }));
     const nextSelectionState = textEditSelectionState(proxy);

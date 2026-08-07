@@ -131,7 +131,7 @@ test('cacheImage keeps an existing current bitmap and closes a racing duplicate'
   }));
   const src = 'data:image/png;base64,boardfish';
   context.imageStore['img-1'] = src;
-  const ready = context.cacheImage('img-1', src, null, { skipSourceRegistration: true });
+  const ready = context.cacheImage('img-1', src, null);
   assert.equal(rafs.length, 1);
 
   rafs.shift()();
@@ -168,7 +168,7 @@ test('cacheImage retries a stale in-flight web ref against its refreshed source'
   };
   context.imageStore['img-1'] = source;
 
-  const firstReady = context.cacheImage('img-1', source, null, { skipSourceRegistration: true });
+  const firstReady = context.cacheImage('img-1', source, null);
   assert.equal(rafs.length, 1);
   rafs.shift()();
   source.displaySrc = 'blob:after-save';
@@ -201,7 +201,7 @@ test('cacheImage queues full bitmap draw warmup for active-fallback safety', asy
   };
   context.imageStore['img-1'] = src;
 
-  const ready = context.cacheImage('img-1', src, null, { skipSourceRegistration: true });
+  const ready = context.cacheImage('img-1', src, null);
   assert.equal(rafs.length, 1);
   rafs.shift()();
   await ready;
@@ -228,7 +228,7 @@ test('cacheImage prioritizes the exact scaled replacement for an active open pre
   });
   context.imageStore['img-1'] = src;
 
-  const ready = context.cacheImage('img-1', src, null, { skipSourceRegistration: true });
+  const ready = context.cacheImage('img-1', src, null);
   rafs.shift()();
   await ready;
 
@@ -407,8 +407,8 @@ test('open preview draw queues scaled variant while keeping preview visible', ()
   const preview = { width: 50, height: 50, close() {} };
   const full = { width: 4000, height: 4000, close() {} };
   const queued = [];
-  context.queueScaledImageVariantForDraw = (key, obj, source, view, options) => {
-    queued.push({ key, objectId: obj.id, source, view, priority: options?.priority === true });
+  context.queueScaledImageVariantForDraw = (key, obj, source, view, priority) => {
+    queued.push({ key, objectId: obj.id, source, view, priority: priority === true });
     return 0.25;
   };
   context.isViewportImageScalingActive = () => true;

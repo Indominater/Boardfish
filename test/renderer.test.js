@@ -373,8 +373,8 @@ test('animated image motion bypasses static culling and uses low-latency variant
     objects: () => [obj],
     panX: () => 0,
     panY: () => 0,
-    selectImageSourceForDraw(key, selectedObj, fullSource, view, options) {
-      selectCalls.push({ key, selectedObj, fullSource, view, options });
+    selectImageSourceForDraw(key, selectedObj, fullSource, view, activeInput) {
+      selectCalls.push({ key, selectedObj, fullSource, view, activeInput });
       return { source, scale: 1, targetScale: 1 };
     },
     setCanvasImageQuality: () => {},
@@ -388,7 +388,7 @@ test('animated image motion bypasses static culling and uses low-latency variant
   const result = renderer.drawVisibleObjects(context, counters);
 
   assert.equal(result.drawnImages, 1);
-  assert.deepEqual(plain(selectCalls.map((call) => call.options)), [{ activeInput: true }]);
+  assert.deepEqual(plain(selectCalls.map((call) => call.activeInput)), [true]);
   assert.deepEqual(drawSmoothingEnabled, [false]);
   assert.equal(context.imageSmoothingEnabled, true);
   assert.deepEqual(drawQualities, ['high']);

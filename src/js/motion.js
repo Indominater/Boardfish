@@ -99,6 +99,9 @@
     ease: typeof options.ease === 'string' && options.ease.trim() ? options.ease.trim() : base.ease,
   });
   const normalizeCopyJiggleParams = (options = {}, base = copyJiggleDefaults) => ({
+    duration: numberInRange(options.duration, base.duration, 180, 1200),
+    translateXPx: numberInRange(options.translateXPx, base.translateXPx, 0, 48),
+    translateYPx: numberInRange(options.translateYPx, base.translateYPx, 0, 48),
     yFreqHz: numberInRange(options.yFreqHz, base.yFreqHz, 0.1, 12),
     xFreqHz: numberInRange(options.xFreqHz, base.xFreqHz, 0.1, 12),
     yDamping: numberInRange(options.yDamping, base.yDamping, 0.001, 0.999),
@@ -303,7 +306,7 @@
     if (!translateXPx && !translateYPx) {
       return { translateXPx, translateYPx };
     }
-    const params = normalizeCopyJiggleParams(options);
+    const params = options._copy || normalizeCopyJiggleParams(options);
     return {
       ...params,
       translateXPx,
@@ -768,10 +771,9 @@
   };
 
   const objectMotionForDraw = (obj, options = {}) => {
-    if (!obj?.id) return null;
-    const motion = jelloObjectMotions.size ? jelloMotionForDraw(obj, options) : null;
-    if (motion) lastDrawnObjectMotions.set(obj.id, motion);
-    else lastDrawnObjectMotions.delete(obj.id);
+    if (!obj?.id || (!jelloObjectMotions.size && !lastDrawnObjectMotions.size)) return null;
+    const motion = jelloMotionForDraw(obj, options);
+    if (motion) lastDrawnObjectMotions.set(obj.id, motion); else lastDrawnObjectMotions.delete(obj.id);
     return motion;
   };
 
@@ -813,13 +815,9 @@
   const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 
   const jiggleActionControlOptions = (options = {}) => {
-    const controls = {};
+    const controls = normalizeCopyJiggleParams(options);
+    controls._copy = { ...controls };
     if (hasOwn(options, 'includeText')) controls.includeText = options.includeText;
-    if (hasOwn(options, 'textMotion')) controls.textMotion = options.textMotion;
-    controls.duration = numberInRange(options.duration, copyJiggleDefaults.duration, 180, 1200);
-    controls.translateXPx = numberInRange(options.translateXPx, copyJiggleDefaults.translateXPx, 0, 48);
-    controls.translateYPx = numberInRange(options.translateYPx, copyJiggleDefaults.translateYPx, 0, 48);
-    Object.assign(controls, normalizeCopyJiggleParams(options));
     return controls;
   };
 

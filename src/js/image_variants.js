@@ -458,8 +458,8 @@ function scheduleScaledVariantReadyRender(
   }, waitForIdle ? Math.max(40, IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs) : 120);
 }
 
-function enqueueScaledVariantTask(task, options = {}) {
-  task.priority = options.priority === true;
+function enqueueScaledVariantTask(task, priority = false) {
+  task.priority = priority === true;
   if (task.priority) {
     imageScaledVariantQueue.unshift(task);
     cancelScheduledScaledVariantQueue();
@@ -517,7 +517,7 @@ async function createScaledImageVariantBitmap(source, sourceW, sourceH, scale) {
 }
 
 async function buildScaledImageVariantNow(key, source, scale, options = {}) {
-  if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key || !source || scale >= 1) {
+  if (!isViewportImageScalingActive() || !key || !source || scale >= 1) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: false, skipped: 'disabled-or-invalid' }
       : false;
@@ -657,7 +657,7 @@ function scheduleScaledVariantQueue() {
   imageScaledVariantQueueTimer = setTimeout(run, delay);
 }
 
-function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, options = {}) {
+function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, activeOverscale = false) {
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
   if (!sourceW || !sourceH) return 1;
@@ -665,7 +665,7 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
   const dpr = view?.dpr || window.devicePixelRatio || 1;
   const neededW = obj.w * viewZoom * dpr;
   const neededH = obj.h * viewZoom * dpr;
-  const overscaleLimit = options.activeOverscale === true
+  const overscaleLimit = activeOverscale === true
     ? Math.max(1, Number(IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT) || 1)
     : 1;
   const scale = IMAGE_SCALE_LEVELS[0];
@@ -673,8 +673,8 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
     sourceH * scale * overscaleLimit >= neededH ? scale : 1;
 }
 
-function queueScaledImageVariant(key, source, scale, options = {}) {
-  if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key || !source || scale >= 1) {
+function queueScaledImageVariant(key, source, scale, priority = false) {
+  if (!isViewportImageScalingActive() || !key || !source || scale >= 1) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, queued: false, skipped: 'disabled-or-invalid' }
       : false;
@@ -689,11 +689,11 @@ function queueScaledImageVariant(key, source, scale, options = {}) {
   if (imageScaledBitmapPending.has(pendingKey)) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const priorityBoosted = options.priority === true && prioritizeScaledVariantQueue(pendingKey);
+      const priorityBoosted = priority === true && prioritizeScaledVariantQueue(pendingKey);
       return { key, scale, queued: false, skipped: 'pending', priorityBoosted };
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    if (options.priority === true) prioritizeScaledVariantQueue(pendingKey);
+    if (priority === true) prioritizeScaledVariantQueue(pendingKey);
     return false;
   }
   const sourceW = source?.width || source?.naturalWidth || 0;
@@ -762,15 +762,15 @@ function queueScaledImageVariant(key, source, scale, options = {}) {
   task.variantKey = key;
   task.pendingKey = pendingKey;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') task.generation = generation;
-  enqueueScaledVariantTask(task, { priority: options.priority === true });
+  enqueueScaledVariantTask(task, priority);
   return typeof BOARDFISH_PRODUCTION === 'undefined'
-    ? { key, scale, queued: true, priority: options.priority === true, estimatedBytes }
+    ? { key, scale, queued: true, priority: priority === true, estimatedBytes }
     : true;
 }
 
 function queueScaledImageVariantForReadyImage(key, source, options = {}) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantSourceReadyCandidateCount++;
-  if (!isViewportImageScalingActive() || typeof createImageBitmap !== 'function' || !key) {
+  if (!isViewportImageScalingActive() || !key) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       imageScaledVariantSourceReadyNoSourceCount++;
       return { queued: false, skipped: 'disabled-or-invalid' };
@@ -810,9 +810,7 @@ function queueScaledImageVariantForReadyImage(key, source, options = {}) {
     if (options.priority === true) prioritizeScaledVariantQueue(`${key}:${scale}`);
     return false;
   }
-  const result = queueScaledImageVariant(key, source, scale, {
-    priority: options.priority === true,
-  });
+  const result = queueScaledImageVariant(key, source, scale, options.priority === true);
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     if (result?.queued) imageScaledVariantSourceReadyQueuedCount++;
     return result || { key, scale, queued: false, skipped: 'not-queued' };
@@ -820,11 +818,9 @@ function queueScaledImageVariantForReadyImage(key, source, options = {}) {
   return result;
 }
 
-function queueScaledImageVariantForDraw(key, obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, options = {}) {
-  const targetScale = chooseImageScaleForDraw(obj, source, view, {
-    activeOverscale: options.activeOverscale === true,
-  });
-  queueScaledImageVariant(key, source, targetScale, options);
+function queueScaledImageVariantForDraw(key, obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, priority = false, activeOverscale = false) {
+  const targetScale = chooseImageScaleForDraw(obj, source, view, activeOverscale);
+  if (targetScale < 1) queueScaledImageVariant(key, source, targetScale, priority);
   return targetScale;
 }
 
@@ -1061,21 +1057,21 @@ function scheduleVisibleScaledVariantPrewarmAfterIdle(
   }, Math.max(0, delay));
 }
 
-function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }, options = {}) {
+function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }, activeInput = null) {
   if (!isViewportImageScalingActive()) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { source: fullSource, scale: 1, targetScale: 1, disabled: true }
-      : { source: fullSource };
+      : fullSource;
   }
-  const activeInput = options.activeInput === true || (options.activeInput !== false && isActiveViewportInput());
-  const targetScale = chooseImageScaleForDraw(obj, fullSource, view, { activeOverscale: activeInput });
+  activeInput = activeInput === true || (activeInput !== false && isActiveViewportInput());
+  const targetScale = chooseImageScaleForDraw(obj, fullSource, view, activeInput);
   const entry = targetScale < 1 ? imageScaledBitmapStore.get(key, targetScale) : null;
   if (entry) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { source: entry.bitmap, scale: targetScale, targetScale }
-      : { source: entry.bitmap };
+      : entry.bitmap;
   }
-  queueScaledImageVariant(key, fullSource, targetScale, { priority: activeInput });
+  if (targetScale < 1) queueScaledImageVariant(key, fullSource, targetScale, activeInput);
   if (activeInput && targetScale < 1 && isScaledImageVariantPending(key, targetScale)) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantActiveInputFullFallbackCount++;
     return typeof BOARDFISH_PRODUCTION === 'undefined'
@@ -1090,7 +1086,7 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
   }
   return typeof BOARDFISH_PRODUCTION === 'undefined'
     ? { source: fullSource, scale: 1, targetScale }
-    : { source: fullSource };
+    : fullSource;
 }
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */

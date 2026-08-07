@@ -204,7 +204,6 @@ async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, o
       , null
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , {
-      resolveOnLoad: options.resolveOnLoad === true,
       readyRenderMinIntervalMs: options.readyRenderMinIntervalMs,
     });
     const display = BoardfishImageStore.getDisplayImage?.(imgKey) || {};
@@ -229,7 +228,6 @@ async function addImage(src, cx, cy, exactSize = false, existingImgKey = null, o
       InsertDebug.step(options.insertDebug, 'cache:queued', {
         source: options.source || '',
         imgKey,
-        resolveOnLoad: options.resolveOnLoad === true,
         sourceKind: imageSourceDebugInfo(src).kind,
         bitmapOnly: true,
       });
@@ -336,7 +334,6 @@ const insertWebImageFile = async (file, x, y
   const addOptions = {
     deferHistory: options.deferHistory,
     suppressProgressRender: options.suppressProgressRender,
-    resolveOnLoad: options.resolveOnLoad === true,
     webValidated: true,
     z: options.z,
     readyRenderMinIntervalMs: options.readyRenderMinIntervalMs,
@@ -470,7 +467,6 @@ async function insertImageFiles(files, x, y
           deferHistory: bulk,
           holdShield: true,
           suppressProgressRender: bulk,
-          resolveOnLoad: true,
           imgKey: newImgKey(),
           z: bulkZBase == null ? undefined : bulkZBase + acceptedIndex,
           readyRenderMinIntervalMs: bulk ? WEB_BULK_IMAGE_READY_RENDER_INTERVAL_MS : undefined,
