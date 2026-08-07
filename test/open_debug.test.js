@@ -363,7 +363,7 @@ test('open-board failures show a readable pill message', () => {
   assert.match(bootstrap, /duration: long_message/);
   assert.doesNotMatch(bootstrap, /Failed to open file:/);
   assert.match(styles, /#island \{[\s\S]*max-width: calc\(100vw - 32px\);/);
-  assert.match(styles, /#isl-zoom \{[\s\S]*white-space: normal;/);
+  assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text \{[\s\S]*white-space: normal;/);
 });
 
 test('open-board loading does not wait for pill status update before reading the file', () => {
@@ -387,4 +387,11 @@ test('open-board title target updates as soon as board data is applied', () => {
     productionBootstrap,
     /applyBoardData\(data, applyOptions\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);\s*await finishOpenedBoard\(\);/,
   );
+});
+
+test('open-board completion does not await synchronous pill cleanup', () => {
+  const ioClose = readSource('src/js/io_close.js');
+
+  assert.match(ioClose, /const pillFinishReason = finishPillTask\(\{/);
+  assert.doesNotMatch(ioClose, /await finishPillTask\(\{/);
 });

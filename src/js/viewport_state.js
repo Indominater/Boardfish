@@ -8,8 +8,6 @@
     let y1 = Infinity;
     let x2 = -Infinity;
     let y2 = -Infinity;
-    let count = 0;
-
     for (const obj of objectList || []) {
       if (obj?.type !== 'image' && obj?.type !== 'text') continue;
       if (
@@ -26,10 +24,9 @@
       y1 = Math.min(y1, obj.y, objectY2);
       x2 = Math.max(x2, obj.x, objectX2);
       y2 = Math.max(y2, obj.y, objectY2);
-      count++;
     }
 
-    return count ? { x1, y1, x2, y2, count } : null;
+    return x1 === Infinity ? null : { x1, y1, x2, y2 };
   }
 
   function clampPanToBoardMasterBox(

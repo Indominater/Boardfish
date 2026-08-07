@@ -241,17 +241,6 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function replaceObjectContentsInPlace(target, source) {
-  if (!target || !source) return target;
-  for (const key in target) {
-    if (Object.prototype.hasOwnProperty.call(target, key)) delete target[key];
-  }
-  for (const key in source) {
-    if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = source[key];
-  }
-  return target;
-}
-
 function hydrateRestoredTextCachesFromLiveObjects(restoredObjects = []) {
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
     for (const obj of restoredObjects || []) {
@@ -371,18 +360,14 @@ function pushHistory(reason = '', options = {}) {
   const entry = new Array(objects.length);
   for (let i = 0; i < objects.length; i++) {
     const o = objects[i];
+    const previous = prevMap.get(o.id);
     const runtimeTextCache = cacheEditingText && o.type === 'text' && o.id === editingId;
-    if (_dirtyIds.has(o.id) || !prevMap.has(o.id) || runtimeTextCache) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      cloned++;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      entry[i] = cloneObject(o, runtimeTextCache);
-      continue;
-    }
+    const shouldClone = _dirtyIds.has(o.id) || !previous || runtimeTextCache;
+    entry[i] = shouldClone ? cloneObject(o, runtimeTextCache) : previous;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    reused++;
+    if (shouldClone) cloned++;
+    else reused++;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    entry[i] = prevMap.get(o.id);
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.count('clonedObjects', cloned);
@@ -492,7 +477,6 @@ function restoreSnapshot(s, {
     editingId = null;
     _editEl = null;
   }
-  _editHistoryActionStartState = null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'clear-editing', clearEditMeta);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -510,7 +494,8 @@ function restoreSnapshot(s, {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
   if (preserveLiveEdit) {
-    replaceObjectContentsInPlace(liveEditObject, clonedSnapshotObjects[liveEditIndex]);
+    for (const key of Object.keys(liveEditObject)) delete liveEditObject[key];
+    Object.assign(liveEditObject, clonedSnapshotObjects[liveEditIndex]);
     clonedSnapshotObjects[liveEditIndex] = liveEditObject;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

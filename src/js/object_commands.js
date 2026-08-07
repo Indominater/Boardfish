@@ -110,7 +110,6 @@ function addText(wx, wy, content = '', options = {}) {
   BoardfishEditorState.addObject(obj);
   logStep('add-object-done', { objectId: obj.id, objectCountAfter: objects.length });
   selectObject(obj.id);
-  scheduleRender(true, false);
   logStep('render-scheduled', { objectId: obj.id });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const historyStartedAt = dbg && objectCommandDebugNow();
@@ -254,7 +253,7 @@ async function newBoard() {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const openingStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  await startPillTask({ message: 'Opening' });
+  startPillTask({ message: 'Opening' });
   BoardfishEditorState.resetBoardObjectState();
   OpenDebug.step(dbg, 'exitEdit', {});
   clearJsClipboard();

@@ -1917,6 +1917,21 @@ test('shift tab outdents selected text edit lines', () => {
   assert.equal(result.end, 13);
 });
 
+test('line indentation treats only LF as a line boundary', () => {
+  const { applyTextEditLineIndent } = loadTextEditorHelpers();
+  const value = 'alpha\u2028beta\ngamma\u2029delta';
+
+  const result = applyTextEditLineIndent(value, {
+    start: 0,
+    end: value.length,
+    direction: 'forward',
+  });
+
+  assert.equal(result.value, '\talpha\u2028beta\n\tgamma\u2029delta');
+  assert.equal(result.start, 1);
+  assert.equal(result.end, value.length + 2);
+});
+
 test('enter inserts a line break with the current line indentation', () => {
   const { applyTextEditLineBreakIndent } = loadTextEditorHelpers();
   const value = 'for each image\n    for each pixel';

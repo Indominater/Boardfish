@@ -217,17 +217,13 @@
     return removed;
   };
 
-  const hasObjectMotions = () => (
-    jelloObjectMotions.size || textSelectionJelloMotions.size
-  );
-
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let recordMotionDebug = null;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     const motionDebugMeta = () => ({
       jelloObjectMotions: jelloObjectMotions.size,
       textSelectionJelloMotions: textSelectionJelloMotions.size,
-      hasObjectMotions: !!hasObjectMotions(),
+      hasObjectMotions: !!(jelloObjectMotions.size || textSelectionJelloMotions.size),
     });
     recordMotionDebug = (stepName, meta = {}) => {
       root.ViewportDebug?.recordMotion?.(stepName, {
@@ -239,7 +235,7 @@
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   const requestMotionFrame = () => {
-    if (motionRenderPending || prefersReducedMotion()) return;
+    if (motionRenderPending) return;
     if (typeof root.scheduleRender !== 'function') return;
     motionRenderPending = true;
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -247,11 +243,11 @@
       const requestedAt = now();
       motionRenderRequestedAt = requestedAt;
       recordMotionDebug('raf-scheduled', { requestedAt, source: 'motion' });
-      root.scheduleRender?.(true, true, 'motion');
+      root.scheduleRender(true, true, 'motion');
       recordMotionDebug('render-scheduled', { source: 'motion' });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     } else {
-      root.scheduleRender?.(true, true);
+      root.scheduleRender(true, true);
     }
   };
 
@@ -261,7 +257,7 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) => {
     if (prefersReducedMotion()) return;
-    if (!motionRenderPending && !hasObjectMotions()) return;
+    if (!motionRenderPending && !(jelloObjectMotions.size || textSelectionJelloMotions.size)) return;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const wasPending = typeof BOARDFISH_PRODUCTION === 'undefined' && motionRenderPending;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -281,7 +277,7 @@
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    if (!hasObjectMotions()) {
+    if (!(jelloObjectMotions.size || textSelectionJelloMotions.size)) {
       if (removed) {
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -707,8 +703,7 @@
     const cutoff = now();
     const specs = [];
     for (const [id, motion] of textSelectionJelloMotions) {
-      const progress = motionProgress(motion, cutoff);
-      if (progress.done) {
+      if (cutoff - motion.startedAt >= motionEndElapsed(motion)) {
         textSelectionJelloMotions.delete(id);
         continue;
       }
@@ -774,7 +769,7 @@
 
   const objectMotionForDraw = (obj, options = {}) => {
     if (!obj?.id) return null;
-    const motion = hasObjectMotions() ? jelloMotionForDraw(obj, options) : null;
+    const motion = jelloObjectMotions.size ? jelloMotionForDraw(obj, options) : null;
     if (motion) lastDrawnObjectMotions.set(obj.id, motion);
     else lastDrawnObjectMotions.delete(obj.id);
     return motion;
@@ -785,7 +780,7 @@
   );
 
   const motionObjectsForDraw = () => {
-    if (prefersReducedMotion() || !hasObjectMotions()) return [];
+    if (prefersReducedMotion() || !jelloObjectMotions.size) return [];
     const objects = [];
     for (const motion of jelloObjectMotions.values()) {
       if (motion.phase === 'exit' && motion.obj) objects.push(motion.obj);

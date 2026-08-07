@@ -511,6 +511,8 @@ test('newImgKey skips keys already present in the live image store', () => {
 test('clearImageStore continues after an ImageBitmap close throws', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   let keptClosed = false;
+  const staleMetadataCache = context.imageMetadataCache;
+  staleMetadataCache['img-1'] = { width: 10, height: 10 };
   context.imageBitmapCache['img-1'] = {
     close() {
       throw new Error('already closed');
@@ -525,5 +527,7 @@ test('clearImageStore continues after an ImageBitmap close throws', () => {
   assert.doesNotThrow(() => context.clearImageStore());
 
   assert.equal(keptClosed, true);
+  assert.notEqual(context.imageMetadataCache, staleMetadataCache);
+  assert.deepEqual(Object.keys(context.imageMetadataCache), []);
   assert.deepEqual(Object.keys(context.imageBitmapCache), []);
 });

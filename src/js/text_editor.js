@@ -134,8 +134,8 @@ const textEditorCap = (prefix, name) => (
 
 const textEditorLayoutScriptKey = (obj) => {
   try {
-    if (typeof getTextScriptRangesForLayout === 'function') {
-      return JSON.stringify(getTextScriptRangesForLayout(obj));
+    if (typeof getTextScriptRanges === 'function') {
+      return JSON.stringify(getTextScriptRanges(obj));
     }
   } catch (_) {}
   return JSON.stringify(Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges : []);
@@ -301,7 +301,7 @@ function textEditProxyValue(proxy) {
 
 function setTextEditProxyLogicalValue(proxy, value = '', { domSynced = true } = {}) {
   if (!proxy) return '';
-  const text = normalizeTextContent(value);
+  const text = String(value ?? '');
   proxy._boardfishLogicalValue = text;
   proxy._boardfishDomValueStale = domSynced === false || String(proxy.value ?? '') !== text;
   return text;
@@ -314,7 +314,7 @@ function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
     return { synced: false, reason: 'missing-proxy' };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
-  const text = normalizeTextContent(value);
+  const text = String(value ?? '');
   if (!proxy._boardfishDomValueStale && String(proxy.value ?? '') === text) {
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') return false;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -383,7 +383,6 @@ const textEditSelectionState = (proxy) => {
 };
 
 const TEXT_EDIT_INDENT = '\t';
-const TEXT_EDIT_LEGACY_SPACE_INDENT_SIZE = 4;
 
 const textEditLineStartAt = (value, index) => {
   const text = String(value ?? '');
@@ -391,31 +390,6 @@ const textEditLineStartAt = (value, index) => {
   if (clamped <= 0) return 0;
   const newlineAt = text.lastIndexOf('\n', clamped - 1);
   return newlineAt === -1 ? 0 : newlineAt + 1;
-};
-
-const textEditSelectedLineStarts = (value, selection) => {
-  const text = String(value ?? '');
-  const start = Math.max(0, Math.min(selection?.start ?? 0, text.length));
-  const end = Math.max(0, Math.min(selection?.end ?? start, text.length));
-  const lastSelectedIndex = end > start ? end - 1 : start;
-  const firstLineStart = textEditLineStartAt(text, start);
-  const lastLineStart = textEditLineStartAt(text, lastSelectedIndex);
-  const starts = [];
-  let lineStart = firstLineStart;
-  while (lineStart <= lastLineStart) {
-    starts.push(lineStart);
-    const newlineAt = text.indexOf('\n', lineStart);
-    if (newlineAt === -1) break;
-    lineStart = newlineAt + 1;
-  }
-  return starts;
-};
-
-const textEditOutdentLengthAt = (value, lineStart) => {
-  if (value[lineStart] === '\t') return 1;
-  let count = 0;
-  while (count < TEXT_EDIT_LEGACY_SPACE_INDENT_SIZE && value[lineStart + count] === ' ') count++;
-  return count;
 };
 
 const textEditLineIndentAt = (value, index) => {
@@ -426,12 +400,6 @@ const textEditLineIndentAt = (value, index) => {
   return text.slice(lineStart, end);
 };
 
-const adjustTextEditIndexForRemoval = (index, start, length) => {
-  if (index <= start) return index;
-  if (index >= start + length) return index - length;
-  return start;
-};
-
 const applyTextEditLineIndent = (value, selection, { outdent = false } = {}) => {
   const text = String(value ?? '');
   const selectionState = {
@@ -439,40 +407,49 @@ const applyTextEditLineIndent = (value, selection, { outdent = false } = {}) => 
     end: Math.max(0, Math.min(selection?.end ?? selection?.start ?? 0, text.length)),
     direction: selection?.direction || 'none',
   };
-  const lineStarts = textEditSelectedLineStarts(text, selectionState);
-  const edits = [];
-  if (outdent) {
-    for (const lineStart of lineStarts) {
-      const length = textEditOutdentLengthAt(text, lineStart);
-      if (length > 0) edits.push({ lineStart, length });
-    }
-  } else {
-    for (const lineStart of lineStarts) edits.push({ lineStart, insert: TEXT_EDIT_INDENT });
-  }
-  if (!edits.length) return { ...selectionState, value: text, changed: false };
+  const lastSelectedIndex = selectionState.end > selectionState.start
+    ? selectionState.end - 1
+    : selectionState.start;
+  const firstLineStart = textEditLineStartAt(text, selectionState.start);
+  const lastLineStart = textEditLineStartAt(text, lastSelectedIndex);
+  if (
+    outdent &&
+    firstLineStart === lastLineStart &&
+    text[firstLineStart] !== TEXT_EDIT_INDENT &&
+    text[firstLineStart] !== ' '
+  ) return { ...selectionState, value: text, changed: false };
 
-  let nextValue = text;
+  const newlineAt = text.indexOf('\n', lastLineStart);
+  const blockEnd = newlineAt === -1 ? text.length : newlineAt;
+  const selectedText = text.slice(firstLineStart, blockEnd);
   let nextStart = selectionState.start;
   let nextEnd = selectionState.end;
-  for (let i = edits.length - 1; i >= 0; i--) {
-    const edit = edits[i];
-    if (edit.insert) {
-      nextValue = nextValue.slice(0, edit.lineStart) + edit.insert + nextValue.slice(edit.lineStart);
-      if (nextStart >= edit.lineStart) nextStart += edit.insert.length;
-      if (nextEnd >= edit.lineStart) nextEnd += edit.insert.length;
-    } else {
-      nextValue = nextValue.slice(0, edit.lineStart) + nextValue.slice(edit.lineStart + edit.length);
-      nextStart = adjustTextEditIndexForRemoval(nextStart, edit.lineStart, edit.length);
-      nextEnd = adjustTextEditIndexForRemoval(nextEnd, edit.lineStart, edit.length);
-    }
+  let nextSelectedText;
+  if (outdent) {
+    nextSelectedText = selectedText.replace(/(^|\n)(\t| {1,4})/g, (_, prefix, indent, offset) => {
+      const lineStart = firstLineStart + offset + prefix.length;
+      nextStart -= Math.min(indent.length, Math.max(0, selectionState.start - lineStart));
+      nextEnd -= Math.min(indent.length, Math.max(0, selectionState.end - lineStart));
+      return prefix;
+    });
+  } else {
+    if (selectionState.start >= firstLineStart) nextStart += TEXT_EDIT_INDENT.length;
+    if (selectionState.end >= firstLineStart) nextEnd += TEXT_EDIT_INDENT.length;
+    nextSelectedText = TEXT_EDIT_INDENT + selectedText.replace(/\n/g, (_, offset) => {
+      const lineStart = firstLineStart + offset + 1;
+      if (selectionState.start >= lineStart) nextStart += TEXT_EDIT_INDENT.length;
+      if (selectionState.end >= lineStart) nextEnd += TEXT_EDIT_INDENT.length;
+      return `\n${TEXT_EDIT_INDENT}`;
+    });
   }
+  if (nextSelectedText === selectedText) return { ...selectionState, value: text, changed: false };
 
   return {
-    value: nextValue,
+    value: text.slice(0, firstLineStart) + nextSelectedText + text.slice(blockEnd),
     start: nextStart,
     end: nextEnd,
     direction: selectionState.direction,
-    changed: nextValue !== text,
+    changed: true,
   };
 };
 
@@ -497,9 +474,7 @@ const applyTextEditLineBreakIndent = (value, selection) => {
   };
 };
 
-const textEditInputReplacement = (oldValue, nextValue, inputState = {}, inputType = '') => {
-  const oldText = normalizeTextContent(oldValue);
-  const nextText = normalizeTextContent(nextValue);
+const textEditInputReplacement = (oldText = '', nextText = '', inputState = {}, inputType = '') => {
   const baseStart = Math.max(0, Math.min(inputState.start ?? 0, oldText.length));
   const baseEnd = Math.max(baseStart, Math.min(inputState.end ?? baseStart, oldText.length));
   const selectedLength = baseEnd - baseStart;
@@ -531,8 +506,7 @@ const textEditInputReplacement = (oldValue, nextValue, inputState = {}, inputTyp
   };
 };
 
-const textEditBeforeInputReplacement = (value, selection = {}, event = null) => {
-  const text = normalizeTextContent(value);
+const textEditBeforeInputReplacement = (text = '', selection = {}, event = null) => {
   const start = Math.max(0, Math.min(selection.start ?? 0, text.length));
   const end = Math.max(start, Math.min(selection.end ?? start, text.length));
   const inputType = String(event?.inputType || '').toLowerCase();
@@ -552,8 +526,7 @@ const textEditBeforeInputReplacement = (value, selection = {}, event = null) => 
   return null;
 };
 
-const textEditBlankLineDeleteRange = (value, index, keyOrInputType = '') => {
-  const text = normalizeTextContent(value);
+const textEditBlankLineDeleteRange = (text = '', index, keyOrInputType = '') => {
   if (!text.includes('\n')) return null;
   const pos = Math.max(0, Math.min(Math.trunc(Number(index)) || 0, text.length));
   const key = String(keyOrInputType || '').toLowerCase();
@@ -3023,7 +2996,7 @@ function enterEdit(id, {
     proxy._boardfishPendingInputState = null;
 	    markDirty(id);
 	    logInputStep('motion-dirty-done');
-	    const oldValue = normalizeTextContent(inputState.value ?? obj.data.content ?? '');
+	    const oldValue = inputState.value ?? obj.data.content ?? '';
 	    let replacement = inputState.replacement || null;
 	    let synthesizedStaleReplacement = false;
 	    let nextRawValue = '';
@@ -3040,7 +3013,7 @@ function enterEdit(id, {
 	        oldValue.slice(replacementEnd)
 	      );
 	    } else {
-	      nextRawValue = normalizeTextContent(proxy.value);
+	      nextRawValue = proxy.value;
 	      replacement = replacement || textEditInputReplacement(oldValue, nextRawValue, inputState, inputType);
 	    }
 	    logInputStep('replacement-ready', () => ({

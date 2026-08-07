@@ -70,8 +70,6 @@
     function step(ctx, stepName, meta = {}) {
       if (!enabled || !ctx) return;
       const now = performance.now();
-      if (!ctx.steps) ctx.steps = {};
-      ctx.steps[stepName] = { ms: now - ctx.last, total: now - ctx.t0, meta: sanitize(meta) };
       push({ id: ctx.id, op: ctx.op, step: stepName, total: round(now - ctx.t0), dt: round(now - ctx.last), meta: sanitize(meta) });
       ctx.last = now;
     }

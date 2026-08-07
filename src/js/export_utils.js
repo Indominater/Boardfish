@@ -166,9 +166,8 @@
   async function imageSourceDownloadEntry(source, name) {
     if (typeof isWebImageRef === 'function' && isWebImageRef(source) && root.BoardfishWebBoardContainer?.bytesForImageSource) {
       try {
-        const data = typeof root.BoardfishWebBoardContainer.bytesForImageSourceAsync === 'function'
-          ? await root.BoardfishWebBoardContainer.bytesForImageSourceAsync(source)
-          : root.BoardfishWebBoardContainer.bytesForImageSource(source);
+        const data = source.__blob || await (typeof root.BoardfishWebBoardContainer.bytesForImageSourceAsync === 'function'
+          ? root.BoardfishWebBoardContainer.bytesForImageSourceAsync(source) : root.BoardfishWebBoardContainer.bytesForImageSource(source));
         if (!data) return null;
         const ext = source.ext === 'jpeg' ? 'jpg' : (source.ext || 'png');
         const entry = {
@@ -181,7 +180,7 @@
             phase: 'web-original',
             rendered: false,
             sourceKind: 'web-ref',
-            bytes: data.length,
+            bytes: data.size ?? data.length,
           };
         }
         return entry;
@@ -559,7 +558,7 @@
     } finally {
       await writable.close();
     }
-    return entry.data?.length || 0;
+    return entry.data?.size || entry.data?.length || 0;
   }
 
   async function saveImageObjectsToDirectory(imageObjs, directoryHandle

@@ -882,8 +882,8 @@ var ManualPerfDebug = (() => {
 
   function textEditScriptKey(obj) {
     try {
-      if (typeof getTextScriptRangesForLayout === 'function') {
-        return JSON.stringify(getTextScriptRangesForLayout(obj));
+      if (typeof getTextScriptRanges === 'function') {
+        return JSON.stringify(getTextScriptRanges(obj));
       }
     } catch (_) {}
     return JSON.stringify(Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges : []);

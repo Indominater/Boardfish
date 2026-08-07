@@ -237,6 +237,7 @@ body {
   transform: translateZ(0);
   -webkit-mask-image: -webkit-radial-gradient(white, black);
   mask-image: radial-gradient(white, black);
+  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 24px);
 }
 
 #ctx-menu,
@@ -254,17 +255,11 @@ body {
 
 #ctx-menu {
   width: var(--context-menu-width);
-  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 24px);
 }
 
-#obj-ctx-menu {
-  width: 192px;
-  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 24px);
-}
-
+#obj-ctx-menu,
 #text-ctx-menu {
   width: 192px;
-  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 24px);
 }
 
 #ctx-menu.visible,
@@ -281,7 +276,6 @@ body {
 
 #ctx-actions {
   width: calc(var(--menu-item-height) + (var(--menu-shell-padding) * 2) + 2px);
-  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 24px);
 }
 
 #ctx-actions.visible {
@@ -356,8 +350,6 @@ body {
   display: block;
   width: 20px;
   height: 20px;
-}
-.ctx-action-icon svg {
   fill: currentColor;
 }
 
@@ -472,13 +464,6 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-}
-
-#island * {
-  pointer-events: none;
-}
-
-.opening-shield-pill * {
   pointer-events: none;
 }
 
@@ -504,7 +489,8 @@ body {
   transform: none;
 }
 
-#isl-zoom {
+#isl-zoom,
+.opening-shield-pill-text {
   cursor: default;
   min-height: var(--menu-item-height);
   padding: var(--menu-item-padding);
@@ -531,28 +517,6 @@ body {
 
 .opening-shield-pill-text {
   --ui-highlight-nudge-transform: translateX(0);
-  cursor: default;
-  min-height: var(--menu-item-height);
-  padding: var(--menu-item-padding);
-  font: var(--text-font-style) var(--bold_text) var(--menu-item-font-size) var(--text-font-family);
-  line-height: var(--pill-text-line-height);
-  color: var(--firefox-menu-text);
-  background: transparent;
-  border-radius: var(--pill-radius);
-  letter-spacing: var(--menu-item-letter-spacing);
-  white-space: normal;
-  min-width: var(--pill-text-min-width);
-  max-width: var(--pill-text-max-width);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  overflow: hidden;
-  transform: var(--ui-highlight-nudge-transform);
-  transition:
-    background-color var(--smooth-slide-duration) var(--smooth-slide-ease),
-    color var(--smooth-slide-duration) var(--smooth-slide-ease),
-    transform var(--smooth-slide-duration) var(--smooth-slide-ease);
 }
 
 #opening-shield {

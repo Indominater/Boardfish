@@ -61,14 +61,7 @@ function syncPlatformShortcutLabels() {
   }
 }
 syncPlatformShortcutLabels();
-var APP_THEMES = {
-  light: {
-    webThemeColor: '#eaeaed',
-  },
-  dark: {
-    webThemeColor: '#1c1b22',
-  },
-};
+var appThemeMeta = document.querySelector('meta[name="theme-color"]');
 var DEFAULT_APP_THEME = 'dark';
 var appTheme = DEFAULT_APP_THEME;
 var APP_THEME_STORAGE_KEY = 'bf_app_theme';
@@ -109,12 +102,6 @@ function storeAppTheme() {
     localStorage.setItem(APP_THEME_STORAGE_KEY, appTheme);
   } catch (_) {}
 }
-
-const syncWebAppThemeColor = (theme = appTheme) => {
-  const nextTheme = normalizeAppTheme(theme);
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', APP_THEMES[nextTheme].webThemeColor);
-};
 
 function readCssVarFromStyle(style, name) {
   return style?.getPropertyValue?.(name)?.trim?.() || '';
@@ -171,7 +158,7 @@ function applyAppTheme(theme, {
   const changed = appTheme !== nextTheme;
   appTheme = nextTheme;
   document.body.dataset.theme = appTheme;
-  syncWebAppThemeColor(appTheme);
+  if (appThemeMeta) appThemeMeta.setAttribute('content', appTheme === 'dark' ? '#1c1b22' : '#eaeaed');
   refreshCanvasThemeColorCache();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
@@ -187,11 +174,10 @@ function applyAppTheme(theme, {
     }
   }
   if (dirty) storeAppTheme();
-  return Promise.resolve();
 }
 
 function toggleAppTheme() {
-  return applyAppTheme(appTheme === 'dark' ? 'light' : 'dark', {
+  applyAppTheme(appTheme === 'dark' ? 'light' : 'dark', {
     dirty: true,
   });
 }

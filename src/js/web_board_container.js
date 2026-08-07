@@ -757,7 +757,7 @@
     }
   }
 
-  function createWebImageRef({ path, mime, ext, bytes, blob, lazy }) {
+  function createWebImageRef({ path, mime, ext, bytes, blob, lazy, volatileBlob = false }) {
     const normalizedExt = normalizeImageExt(ext, mime);
     const normalizedMime = mime || mimeForExt(normalizedExt);
     const sourceBlob = isBlobLike(blob)
@@ -777,12 +777,15 @@
       });
     }
     if (sourceBlob) {
-      const holder = { blob: sourceBlob };
+      const holder = { blob: sourceBlob, volatile: volatileBlob === true };
       Object.defineProperty(ref, '__blobHolder', {
         value: holder,
       });
       Object.defineProperty(ref, '__blob', {
         get() { return holder.blob; },
+      });
+      Object.defineProperty(ref, '__blobVolatile', {
+        get() { return holder.volatile; },
       });
     }
     if (lazy?.containerBytes && lazy?.entry) {
@@ -796,13 +799,14 @@
     return ref;
   }
 
-  function replaceWebImageRefBlob(source, blob, crc = null) {
+  function replaceWebImageRefBlob(source, blob, crc = null, { volatile = false } = {}) {
     if (!isWebImageRef(source) || !source.__blobHolder || !isNativeBlobPart(blob)) return false;
     const typedBlob = blob.type === source.mime
       ? blob
       : blob.slice(0, blob.size, source.mime || 'image/png');
     const staleObjectUrl = source.objectUrl || '';
     source.__blobHolder.blob = typedBlob;
+    source.__blobHolder.volatile = volatile === true;
     source.bytes = typedBlob.size;
     if (source.objectUrl) delete source.objectUrl;
     if (source.dataUrl) delete source.dataUrl;
@@ -810,6 +814,51 @@
       try { root.URL.revokeObjectURL(staleObjectUrl); } catch (_) {}
     }
     if (Number.isInteger(crc)) cacheImageSourceCrc(source, typedBlob.size, crc >>> 0);
+    return true;
+  }
+
+  async function detachedBlobCopy(blob, mime = 'image/png') {
+    let copy = null;
+    if (typeof root.Response === 'function' && typeof blob?.stream === 'function') {
+      copy = await new root.Response(blob.stream(), {
+        headers: { 'Content-Type': mime || 'image/png' },
+      }).blob();
+    } else {
+      copy = new Blob([await blob.arrayBuffer()], { type: mime || 'image/png' });
+    }
+    if (Number(copy?.size) !== Number(blob?.size)) {
+      throw new Error('truncated image Blob while preparing board save');
+    }
+    return copy.type === mime ? copy : copy.slice(0, copy.size, mime || 'image/png');
+  }
+
+  async function stabilizeVolatileImageRefs(board, rawImageStore = {}) {
+    const imageStore = board?.imageStore || {};
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
+    let refreshed = 0;
+    let bytes = 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      const source = rawImageStore[key];
+      if (!source?.__blobHolder?.volatile || !isBlobLike(source.__blob)) continue;
+      const sourceBlob = source.__blob;
+      const cachedCrc = cachedImageSourceCrc(source, sourceBlob.size);
+      const stableBlob = await detachedBlobCopy(sourceBlob, source.mime || 'image/png');
+      if (!replaceWebImageRefBlob(source, stableBlob, cachedCrc, { volatile: false })) {
+        throw new Error(`failed to stabilize image source ${key}`);
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDiagnostics) {
+        refreshed++;
+        bytes += stableBlob.size;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    return { refreshed, bytes, skipped: '' };
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return true;
   }
 
@@ -1471,7 +1520,7 @@
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         nextSources[key] = canUseLazyRef
           ? (randomAccessBlob
-              ? createWebImageRef({ path, mime, ext, blob: imageBlob })
+              ? createWebImageRef({ path, mime, ext, blob: imageBlob, volatileBlob: true })
               : createWebImageRef({ path, mime, ext, lazy: { containerBytes, entry: imageEntry } }))
           : createWebImageRef({ path, mime, ext, bytes });
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1562,6 +1611,7 @@
     readBoardContainer,
     refreshBlobBackedImageRefsFromContainer,
     revokeImageSource,
+    stabilizeVolatileImageRefs,
   });
 
   root.BoardfishWebBoardContainer = api;

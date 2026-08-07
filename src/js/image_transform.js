@@ -14,8 +14,7 @@
   }
 
   function isSidewaysRotation(rotation) {
-    const normalized = normalizeRotation(rotation);
-    return normalized === 90 || normalized === 270;
+    return Math.abs(Number(rotation) || 0) % 180 === 90;
   }
 
   root.normalizeRotation = normalizeRotation;

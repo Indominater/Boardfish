@@ -211,11 +211,11 @@ test('dirty tracking treats net-empty boards as clean only against an empty save
   const objectCommands = readSource('src/js/object_commands.js');
   const match = io.match(/function isDirty\(\) \{([\s\S]*?)\n\}/);
   assert.ok(match, 'isDirty function is missing');
-  assert.match(io, /function isDefaultEmptyBoardState\(objectList = objects\) \{\s*return !hasPersistableBoardObjects\(objectList\);\s*\}/);
+  assert.doesNotMatch(io, /function (?:isPersistableBoardObject|hasPersistableBoardObjects)\(/);
+  assert.match(io, /function isDefaultEmptyBoardState\(objectList = objects\) \{[\s\S]*for \(const obj of objectList \|\| \[\]\)[\s\S]*return true;\s*\}/);
   assert.match(io, /function isSavedDefaultEmptyBoardState\(\) \{[\s\S]*boardHistory\[savedHistoryIndex\][\s\S]*\}/);
   assert.match(io, /function isCleanDefaultEmptyBoardState\(\) \{\s*return isDefaultEmptyBoardState\(objects\) && isSavedDefaultEmptyBoardState\(\);\s*\}/);
-  assert.match(match[1], /if \(isCleanDefaultEmptyBoardState\(\)\) return false;/);
-  assert.match(match[1], /historyIndex !== savedHistoryIndex \|\| _dirtyIds\.size > 0/);
+  assert.match(match[1], /return \(historyIndex !== savedHistoryIndex \|\| _dirtyIds\.size > 0\) && !isCleanDefaultEmptyBoardState\(\);/);
   assert.match(objectCommands, /if \(isCleanDefaultEmptyBoardState\(\) && !currentFilePath && !currentFileRef\) \{\s*return;\s*\}/);
 });
 
@@ -331,9 +331,12 @@ test('save validation reuses container serialization instead of stringifying the
   const saveEnd = runtime.indexOf('\n  const api =', saveStart);
   const saveSource = runtime.slice(saveStart, saveEnd);
   assert.ok(saveStart >= 0 && saveEnd > saveStart);
+  assert.ok(saveSource.indexOf('await stabilizeImageSources') >= 0);
+  assert.ok(saveSource.indexOf('await stabilizeImageSources') < saveSource.indexOf('createBoardContainerBlob'));
   assert.ok(saveSource.indexOf('await writeBlobToHandle') >= 0);
-  assert.ok(saveSource.indexOf('await writeBlobToHandle') < saveSource.indexOf('await ref.handle.getFile'));
-  assert.ok(saveSource.indexOf('await ref.handle.getFile') < saveSource.indexOf('refreshImageSources(board'));
+  assert.doesNotMatch(saveSource, /handle\.getFile|refreshImageSources/);
+  assert.match(runtime, /waitForFileOperation\(\(\) => writable\.write\(blob\), stage, timeoutMs\)/);
+  assert.match(runtime, /waitForFileOperation\([\s\S]*?\(\) => writable\.abort\(failure\)/);
 
   const saveDebug = readSource('src/js/debug_save.js');
   assert.match(saveDebug, /jsonBytes: e\.meta\?\.rust\?\.json_bytes \?\? ''/);

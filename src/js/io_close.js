@@ -5,26 +5,16 @@ var savedHistoryIndex = -1;
 var currentFilePath = null;
 var currentFileRef = null;
 
-function isPersistableBoardObject(obj) {
-  if (!obj) return false;
-  if (obj.type === 'text') {
+function isDefaultEmptyBoardState(objectList = objects) {
+  for (const obj of objectList || []) {
+    if (!obj) continue;
+    if (obj.type !== 'text') return false;
     const content = obj.data?.content;
-    return typeof isTextContentEmpty === 'function'
+    if ((typeof isTextContentEmpty === 'function'
       ? !isTextContentEmpty(content)
-      : String(content || '').trim() !== '';
+      : String(content || '').trim() !== '')) return false;
   }
   return true;
-}
-
-function hasPersistableBoardObjects(objectList = objects) {
-  for (const obj of objectList || []) {
-    if (isPersistableBoardObject(obj)) return true;
-  }
-  return false;
-}
-
-function isDefaultEmptyBoardState(objectList = objects) {
-  return !hasPersistableBoardObjects(objectList);
 }
 
 function isSavedDefaultEmptyBoardState() {
@@ -37,8 +27,7 @@ function isCleanDefaultEmptyBoardState() {
 }
 
 function isDirty() {
-  if (isCleanDefaultEmptyBoardState()) return false;
-  return historyIndex !== savedHistoryIndex || _dirtyIds.size > 0;
+  return (historyIndex !== savedHistoryIndex || _dirtyIds.size > 0) && !isCleanDefaultEmptyBoardState();
 }
 
 function markSaved(updateDocumentTitle = true) {
@@ -214,24 +203,21 @@ const getImageStoreOpenDebugSampleIfEnabled = (dbg = null) => {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function boardLimitImageEntriesForData(data) {
-  const entries = [];
+function boardLimitImageBytesForData(data) {
+  let bytes = 0;
   const store = data?.imageStore || {};
   for (const key in store) {
     if (!Object.prototype.hasOwnProperty.call(store, key)) continue;
-    entries.push({
-      key,
-      byteLength: BoardfishWebLimits.imageSourceByteLength(imageStore[key]),
-    });
+    bytes += BoardfishWebLimits.imageSourceByteLength(imageStore[key]);
   }
-  return entries;
+  return bytes;
 }
 
 function validateBoardPayloadForSave(data) {
   BoardfishWebLimits.validateBoardPayload({
     objectCount: data?.objects?.length || 0,
     boardJsonBytes: 0,
-    imageEntries: boardLimitImageEntriesForData(data),
+    imageBytes: boardLimitImageBytesForData(data),
   });
 }
 
@@ -1266,7 +1252,7 @@ async function finishOpenedBoard(
   }
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const pillFinishReason = await finishPillTask({
+    const pillFinishReason = finishPillTask({
       beforeFinish: () => {
         const shieldStart = performance.now();
         if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
@@ -1279,7 +1265,7 @@ async function finishOpenedBoard(
     OpenDebug.end(dbg, { opened: true, ...openMetrics });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   } else {
-    await finishPillTask({
+    finishPillTask({
       beforeFinish: () => {
         if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
         else openingShield.classList.remove('active');
@@ -1415,8 +1401,7 @@ const runExclusiveBoardSave = (
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return runExclusiveBoardSave.inFlight;
   }
-  const promise = Promise.resolve().then(run);
-  const tracked = promise.finally(() => {
+  const tracked = run().finally(() => {
     if (runExclusiveBoardSave.inFlight === tracked) runExclusiveBoardSave.inFlight = null;
   });
   runExclusiveBoardSave.inFlight = tracked;
@@ -1487,7 +1472,7 @@ const saveBoardAsImpl = async () => {
   }
 };
 
-async function saveBoardAs() {
+function saveBoardAs() {
   return runExclusiveBoardSave(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     'saveBoardAs',
@@ -1540,7 +1525,7 @@ const saveBoardImpl = async () => {
   return saveBoardAsImpl();
 };
 
-async function saveBoard() {
+function saveBoard() {
   return runExclusiveBoardSave(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     'saveBoard',

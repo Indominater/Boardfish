@@ -2,9 +2,7 @@
 
 (function initBoardTypes(root) {
   const BOARD_FORMAT = 'boardfish-container';
-  const BOARD_VERSION_LEGACY = 2;
   const BOARD_VERSION_CONTAINER = 3;
-  const SUPPORTED_BOARD_VERSIONS = Object.freeze([BOARD_VERSION_LEGACY, BOARD_VERSION_CONTAINER]);
   const OBJECT_TYPES = Object.freeze({
     IMAGE: 'image',
     TEXT: 'text',
@@ -25,7 +23,8 @@
   }
 
   function isSupportedBoardVersion(value) {
-    return SUPPORTED_BOARD_VERSIONS.includes(Number(value));
+    const version = Number(value);
+    return version === 2 || version === BOARD_VERSION_CONTAINER;
   }
 
   function isBoardObjectType(value) {

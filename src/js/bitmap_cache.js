@@ -109,11 +109,7 @@
     }
 
     function clear() {
-      while (groups.size) {
-        const first = groups.keys().next();
-        if (first.done) break;
-        removeGroup(first.value);
-      }
+      for (const key of groups.keys()) removeGroup(key);
       lruHead = null;
       lruTail = null;
       bytes = 0;

@@ -193,7 +193,7 @@ test('mobile browsers feed complete TouchEvent snapshots into the gesture contro
   assert.doesNotMatch(touchInputSource, /event\.targetTouches \|\| event\.touches/);
 });
 
-test('a simultaneous two-finger lift commits one coherent final separation', () => {
+test('a simultaneous two-finger lift commits one coherent final separation once', () => {
   const harness = makeGestureHarness();
   harness.controller.pointerDown(point(1, 0, 0));
   harness.controller.pointerDown(point(2, 100, 0));
@@ -207,7 +207,7 @@ test('a simultaneous two-finger lift commits one coherent final separation', () 
   const scales = harness.events
     .filter((event) => event.type === 'pinch')
     .map((event) => event.scale);
-  assert.deepEqual(scales, [1.5, 1.5]);
+  assert.deepEqual(scales, [1.5]);
 });
 
 test('pinch zoom follows separation instead of catching up after speed changes', () => {
@@ -239,7 +239,7 @@ test('dense and sparse pinch samples produce the same zoom at the same separatio
   assert.equal(finalScale([75]), 0.75);
 });
 
-test('a large pinch maps immediately to its exact separation without catch-up', () => {
+test('a large pinch maps immediately to its exact separation without a duplicate release update', () => {
   const harness = makeGestureHarness();
   harness.controller.pointerDown(point(1, 0, 0));
   harness.controller.pointerDown(point(2, 100, 0));
@@ -247,7 +247,7 @@ test('a large pinch maps immediately to its exact separation without catch-up', 
   harness.controller.pointerUp(point(2, 250, 0));
 
   const pinchEvents = harness.events.filter((event) => event.type === 'pinch');
-  assert.deepEqual(pinchEvents.map((event) => event.scale), [2.5, 2.5]);
+  assert.deepEqual(pinchEvents.map((event) => event.scale), [2.5]);
 });
 
 test('pinch viewport math keeps the original world point under the moving midpoint', () => {

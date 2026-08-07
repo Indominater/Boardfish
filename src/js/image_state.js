@@ -105,8 +105,7 @@ function renderImageToCanvas(obj, sourceImg = null) {
   const img = sourceImg || imageBitmapCache[obj.data.imgKey];
   const sourceW = img?.naturalWidth || img?.width || 0;
   const sourceH = img?.naturalHeight || img?.height || 0;
-  const ready = img && (img instanceof (typeof ImageBitmap !== 'undefined' ? ImageBitmap : Object) || img.complete || sourceW > 0);
-  if (!ready || !sourceW || !sourceH) {
+  if (!img || !sourceW || !sourceH) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     ClipDebug.end(dbg, { ready: false });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -117,12 +116,10 @@ function renderImageToCanvas(obj, sourceImg = null) {
   tmp.width = sideways ? sourceH : sourceW;
   tmp.height = sideways ? sourceW : sourceH;
   const tctx = tmp.getContext('2d');
-  tctx.save();
   tctx.translate(tmp.width / 2, tmp.height / 2);
   tctx.scale(transform.flipX ? -1 : 1, transform.flipY ? -1 : 1);
   if (transform.rotation) tctx.rotate((transform.rotation * Math.PI) / 180);
   tctx.drawImage(img, -sourceW / 2, -sourceH / 2, sourceW, sourceH);
-  tctx.restore();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   ClipDebug.end(dbg, { ready: true, width: tmp.width, height: tmp.height });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1335,9 +1332,7 @@ function clearImageStore() {
     revokeWebImageSource(imageStore[k]);
     delete imageStore[k];
   }
-  for (const k in imageMetadataCache) {
-    if (Object.prototype.hasOwnProperty.call(imageMetadataCache, k)) delete imageMetadataCache[k];
-  }
+  imageMetadataCache = {};
   for (const k in imageBitmapCache) {
     if (!Object.prototype.hasOwnProperty.call(imageBitmapCache, k)) continue;
     try { imageBitmapCache[k].close(); } catch (_) {}

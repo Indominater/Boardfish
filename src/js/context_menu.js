@@ -873,5 +873,6 @@ darkModeMenuBtn?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   closeCtxMenu('command:dark-mode');
-  Promise.resolve(toggleAppTheme()).finally(updateCtxActionStates);
+  toggleAppTheme();
+  updateCtxActionStates();
 });

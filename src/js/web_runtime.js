@@ -16,6 +16,10 @@
       },
     },
   ]);
+  const FILE_OPERATION_TIMEOUT_MS = 30000;
+  const FILE_OPERATION_MAX_TIMEOUT_MS = 5 * 60 * 1000;
+  const FILE_ABORT_TIMEOUT_MS = 5000;
+  const FILE_WRITE_MIN_BYTES_PER_SECOND = 2 * 1024 * 1024;
 
   function isAbortError(err) {
     return err?.name === 'AbortError';
@@ -65,11 +69,57 @@
 
   function canSaveToExistingTarget(ref) {
     if (!ref) return false;
-    return ref.kind === 'web-file-handle' || ref.kind === 'web-save-handle' || ref.kind === 'web-download';
+    return ref.unusable !== true && (ref.kind === 'web-file-handle' || ref.kind === 'web-save-handle');
   }
 
-  function hasFileSystemAccess() {
-    return typeof root.showOpenFilePicker === 'function' && typeof root.showSaveFilePicker === 'function';
+  function fileOperationTimeoutError(stage) {
+    const err = new Error(`board save timed out while ${stage}`);
+    err.name = 'TimeoutError';
+    err.boardfishSaveTargetUncertain = true;
+    return err;
+  }
+
+  function markSaveTargetUncertain(err) {
+    if (err && (typeof err === 'object' || typeof err === 'function')) {
+      try {
+        err.boardfishSaveTargetUncertain = true;
+        if (err.boardfishSaveTargetUncertain === true) return err;
+      } catch (_) {
+        // Some browser-provided errors are non-extensible; wrap them below.
+      }
+    }
+    const wrapped = new Error(err?.message || String(err || 'board save failed'));
+    wrapped.name = err?.name || 'Error';
+    wrapped.cause = err;
+    wrapped.boardfishSaveTargetUncertain = true;
+    return wrapped;
+  }
+
+  async function waitForFileOperation(run, stage, timeoutMs = FILE_OPERATION_TIMEOUT_MS) {
+    let timeoutId = 0;
+    const operation = Promise.resolve(run());
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(fileOperationTimeoutError(stage)), timeoutMs);
+    });
+    try {
+      return await Promise.race([operation, timeout]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
+  function fileWriteTimeoutMs(blob) {
+    const bytes = Math.max(0, Number(blob?.size) || 0);
+    const transferMs = bytes / FILE_WRITE_MIN_BYTES_PER_SECOND * 1000;
+    return Math.min(FILE_OPERATION_MAX_TIMEOUT_MS, FILE_OPERATION_TIMEOUT_MS + transferMs);
+  }
+
+  function hasOpenFileSystemAccess() {
+    return typeof root.showOpenFilePicker === 'function';
+  }
+
+  function hasSaveFileSystemAccess() {
+    return typeof root.showSaveFilePicker === 'function';
   }
 
   function pickFileWithInput(accept) {
@@ -122,7 +172,7 @@
   }
 
   async function openFileDialog() {
-    if (hasFileSystemAccess()) {
+    if (hasOpenFileSystemAccess()) {
       try {
         const handles = await root.showOpenFilePicker({
           multiple: false,
@@ -139,7 +189,7 @@
   }
 
   async function saveFileDialog(defaultName = 'board.bf') {
-    if (hasFileSystemAccess()) {
+    if (hasSaveFileSystemAccess()) {
       try {
         const handle = await root.showSaveFilePicker({
           suggestedName: defaultName || 'board.bf',
@@ -203,19 +253,46 @@
   async function ensureReadWritePermission(handle) {
     if (!handle?.queryPermission || !handle?.requestPermission) return true;
     const options = { mode: 'readwrite' };
-    if ((await handle.queryPermission(options)) === 'granted') return true;
-    return (await handle.requestPermission(options)) === 'granted';
+    const permission = await waitForFileOperation(
+      () => handle.queryPermission(options),
+      'checking file permission',
+    );
+    if (permission === 'granted') return true;
+    return (await waitForFileOperation(
+      () => handle.requestPermission(options),
+      'requesting file permission',
+    )) === 'granted';
   }
 
   async function writeBlobToHandle(handle, blob) {
     if (!(await ensureReadWritePermission(handle))) {
       throw new Error('write permission was not granted');
     }
-    const writable = await handle.createWritable();
+    const timeoutMs = fileWriteTimeoutMs(blob);
+    const writable = await waitForFileOperation(
+      () => handle.createWritable(),
+      'opening the board file',
+    );
+    let stage = 'writing the board file';
     try {
-      await writable.write(blob);
-    } finally {
-      await writable.close();
+      await waitForFileOperation(() => writable.write(blob), stage, timeoutMs);
+      stage = 'finishing the board file';
+      await waitForFileOperation(() => writable.close(), stage, timeoutMs);
+    } catch (err) {
+      let failure = err;
+      if (stage === 'finishing the board file') failure = markSaveTargetUncertain(failure);
+      if (typeof writable.abort === 'function') {
+        try {
+          await waitForFileOperation(
+            () => writable.abort(failure),
+            'aborting the board save',
+            FILE_ABORT_TIMEOUT_MS,
+          );
+        } catch (_) {
+          failure = markSaveTargetUncertain(failure);
+        }
+      }
+      throw failure;
     }
   }
 
@@ -228,17 +305,42 @@
     document.body.appendChild(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 
   async function saveBoard(ref, board, options = {}) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
     const totalStart = collectDiagnostics ? performance.now() : 0;
-    const createStart = collectDiagnostics ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const rawImageStore = options.imageStore || root.imageStore || {};
     const validateBoardPayload = root.BoardfishWebLimits?.validateBoardPayload;
+    const writesExistingHandle = ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle';
+    const stabilizeImageSources = root.BoardfishWebBoardContainer.stabilizeVolatileImageRefs;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    let imageSourceRefreshMs = 0;
+    let imageSourceRefreshCount = 0;
+    let imageSourceRefreshBytes = 0;
+    let imageSourceRefreshSkipped = '';
+    let imageSourceRefreshBacking = '';
+    let imageSourceRefreshError = '';
+    const stabilizeStart = collectDiagnostics ? performance.now() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (writesExistingHandle && typeof stabilizeImageSources === 'function') {
+      const stabilized = await stabilizeImageSources(board, rawImageStore);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDiagnostics) {
+        imageSourceRefreshMs = performance.now() - stabilizeStart;
+        imageSourceRefreshCount = Number(stabilized?.refreshed || 0);
+        imageSourceRefreshBytes = Number(stabilized?.bytes || 0);
+        imageSourceRefreshSkipped = stabilized?.skipped || '';
+        imageSourceRefreshBacking = imageSourceRefreshCount ? 'detached-memory' : 'already-stable';
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const createStart = collectDiagnostics ? performance.now() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const payload = await root.BoardfishWebBoardContainer.createBoardContainerBlob(
       board,
       rawImageStore,
@@ -249,93 +351,23 @@
     );
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const serializeMs = collectDiagnostics ? performance.now() - createStart : 0;
-    let imageSourceRefreshMs = 0;
-    let imageSourceRefreshCount = 0;
-    let imageSourceRefreshBytes = 0;
-    let imageSourceRefreshSkipped = '';
-    let imageSourceRefreshBacking = '';
-    let imageSourceRefreshError = '';
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const writesExistingHandle = ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle';
-    const refreshImageSources = root.BoardfishWebBoardContainer.refreshBlobBackedImageRefsFromContainer;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const writeStart = collectDiagnostics ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (writesExistingHandle) {
-      await writeBlobToHandle(ref.handle, payload.blob);
+      try {
+        await writeBlobToHandle(ref.handle, payload.blob);
+      } catch (err) {
+        if (err?.boardfishSaveTargetUncertain) ref.unusable = true;
+        throw err;
+      }
     } else {
       downloadBlob(payload.blob, fileNameFromRef(ref, 'board.bf'));
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const writeMs = collectDiagnostics ? performance.now() - writeStart : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (writesExistingHandle && typeof refreshImageSources === 'function') {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const refreshStart = collectDiagnostics ? performance.now() : 0;
-      let refresh = null;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      let refreshedFromSavedFile = false;
-      if (typeof ref.handle?.getFile === 'function') {
-        try {
-          const savedFile = await ref.handle.getFile();
-          if (savedFile && Number(savedFile.size) === Number(payload.blob.size)) {
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            refresh =
-            /* BOARDFISH_DEV_DIAGNOSTICS_END */
-            await refreshImageSources(board, rawImageStore, {
-              blob: savedFile,
-              imageArchiveEntries: payload.imageArchiveEntries,
-            });
-            refreshedFromSavedFile = true;
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            if (collectDiagnostics) imageSourceRefreshBacking = 'saved-file';
-            /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          } else {
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            imageSourceRefreshError = String(new Error(
-              'saved file size does not match the generated Boardfish container',
-            ));
-            /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          }
-        } catch (err) {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (collectDiagnostics) imageSourceRefreshError = String(err);
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        }
-      } else {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        imageSourceRefreshError = String(new Error(
-          'saved file handle cannot provide the persisted file snapshot',
-        ));
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
-      if (!refreshedFromSavedFile) {
-        try {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          refresh =
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          await refreshImageSources(board, rawImageStore, payload);
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (collectDiagnostics) imageSourceRefreshBacking = 'container-snapshot-fallback';
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        } catch (fallbackErr) {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (collectDiagnostics) {
-            imageSourceRefreshError += `; fallback refresh failed: ${String(fallbackErr)}`;
-            imageSourceRefreshBacking = 'unrefreshed';
-          }
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        }
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        imageSourceRefreshCount = Number(refresh?.refreshed || 0);
-        imageSourceRefreshBytes = Number(refresh?.bytes || 0);
-        imageSourceRefreshSkipped = refresh?.skipped || '';
-        imageSourceRefreshMs += performance.now() - refreshStart;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) return {
       format: 'container-web',

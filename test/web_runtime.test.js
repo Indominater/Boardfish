@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const WebContainer = require('../src/js/web_board_container.js');
 
 function loadWebRuntimeHarness({ clickSelectsFile = true } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'web_runtime.js'), 'utf8');
@@ -144,7 +145,6 @@ test('web save validates during the single container build and reports its actua
   const writes = [];
   const events = [];
   const savedBlob = new Blob([new Uint8Array([1, 2, 3])]);
-  const persistedBlob = new Blob([new Uint8Array([1, 2, 3])]);
   const rawImageStore = { 'img-1': 'source' };
   harness.context.BoardfishWebLimits = {
     validateBoardPayload(payload) {
@@ -152,6 +152,12 @@ test('web save validates during the single container build and reports its actua
     },
   };
   harness.context.BoardfishWebBoardContainer = {
+    async stabilizeVolatileImageRefs(board, imageStore) {
+      events.push('stabilize-image-sources');
+      assert.equal(board.objects.length, 1);
+      assert.equal(imageStore, rawImageStore);
+      return { refreshed: 1, bytes: 4, skipped: '' };
+    },
     async createBoardContainerBlob(board, imageStore, options) {
       events.push('create-container');
       assert.equal(board.objects.length, 1);
@@ -179,13 +185,6 @@ test('web save validates during the single container build and reports its actua
         zipBytes: 200,
       };
     },
-    async refreshBlobBackedImageRefsFromContainer(board, imageStore, container) {
-      events.push('refresh-saved-file');
-      assert.equal(board.objects.length, 1);
-      assert.equal(imageStore, rawImageStore);
-      assert.equal(container.blob, persistedBlob);
-      return { refreshed: 1, bytes: 4, skipped: '' };
-    },
   };
   const handle = {
     async createWritable() {
@@ -194,10 +193,6 @@ test('web save validates during the single container build and reports its actua
         async write(blob) { events.push('write'); writes.push(blob); },
         async close() { events.push('close'); },
       };
-    },
-    async getFile() {
-      events.push('get-file');
-      return persistedBlob;
     },
   };
   const board = { objects: [{ id: 'obj-1' }] };
@@ -220,16 +215,175 @@ test('web save validates during the single container build and reports its actua
   assert.equal(result.blob_image_bytes, 4);
   assert.equal(result.image_source_refresh_count, 1);
   assert.equal(result.image_source_refresh_bytes, 4);
-  assert.equal(result.image_source_refresh_backing, 'saved-file');
+  assert.equal(result.image_source_refresh_backing, 'detached-memory');
   assert.equal(result.image_source_refresh_error, '');
   assert.deepEqual(events, [
+    'stabilize-image-sources',
     'create-container',
     'create-writable',
     'write',
     'close',
-    'get-file',
-    'refresh-saved-file',
   ]);
+});
+
+test('same-handle saves detach File-backed images and remain readable across repeated overwrites', async () => {
+  const harness = loadWebRuntimeHarness();
+  const imageBytes = new Uint8Array(192 * 1024);
+  for (let i = 0; i < imageBytes.length; i++) imageBytes[i] = (i * 37) % 251;
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {
+      'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' },
+    },
+    objects: [
+      { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 10, z: 1, data: { imgKey: 'img-1' } },
+    ],
+  };
+  const initial = await WebContainer.createBoardContainerBlob(board, { 'img-1': imageBytes });
+  const opened = await WebContainer.readBoardContainer(
+    new File([initial.blob], 'repeated-save.bf', { type: 'application/octet-stream' }),
+    { lazyImageRefs: true, verifyImageCrc: false },
+  );
+  const rawImageStore = opened.board.imageStore;
+  assert.equal(rawImageStore['img-1'].__blobVolatile, true);
+  const replacedFileBlob = rawImageStore['img-1'].__blob;
+
+  harness.context.BoardfishWebLimits = { validateBoardPayload() {} };
+  harness.context.BoardfishWebBoardContainer = WebContainer;
+  let persisted = null;
+  let writableCount = 0;
+  const handle = {
+    async createWritable() {
+      writableCount++;
+      return {
+        async write(blob) {
+          assert.equal(blob instanceof Blob, true);
+          persisted = new Blob([await blob.arrayBuffer()], { type: 'application/octet-stream' });
+        },
+        async close() {},
+        async abort() {},
+      };
+    },
+  };
+  const ref = { kind: 'web-save-handle', handle, name: 'repeated-save.bf' };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await harness.context.BoardfishRuntime.saveBoard(ref, board, { imageStore: rawImageStore });
+    assert.ok(persisted);
+    const reopened = await WebContainer.readBoardContainer(persisted, {
+      lazyImageRefs: true,
+      verifyImageCrc: true,
+    });
+    assert.deepEqual(await WebContainer.bytesForImageSourceAsync(reopened.board.imageStore['img-1']), imageBytes);
+    if (attempt === 0) {
+      Object.defineProperties(replacedFileBlob, {
+        arrayBuffer: {
+          configurable: true,
+          value() { throw new Error('the overwritten File snapshot is no longer readable'); },
+        },
+        slice: {
+          configurable: true,
+          value() { throw new Error('the overwritten File snapshot is no longer sliceable'); },
+        },
+        stream: {
+          configurable: true,
+          value() { throw new Error('the overwritten File snapshot is no longer streamable'); },
+        },
+      });
+    }
+  }
+
+  assert.equal(writableCount, 3);
+  assert.equal(rawImageStore['img-1'].__blobVolatile, false);
+});
+
+test('failed writable streams abort without closing and allow the next save', async () => {
+  const harness = loadWebRuntimeHarness();
+  harness.context.BoardfishWebLimits = { validateBoardPayload() {} };
+  harness.context.BoardfishWebBoardContainer = {
+    async createBoardContainerBlob() {
+      return { blob: new Blob([new Uint8Array([1, 2, 3, 4])]) };
+    },
+  };
+  let attempt = 0;
+  let aborts = 0;
+  let closes = 0;
+  const handle = {
+    async createWritable() {
+      attempt++;
+      const shouldFail = attempt === 1;
+      return {
+        async write() {
+          if (shouldFail) throw new Error('simulated target write failure');
+        },
+        async close() {
+          closes++;
+        },
+        async abort() {
+          aborts++;
+        },
+      };
+    },
+  };
+  const ref = { kind: 'web-save-handle', handle, name: 'board.bf' };
+
+  await assert.rejects(
+    () => harness.context.BoardfishRuntime.saveBoard(ref, { objects: [] }),
+    /simulated target write failure/,
+  );
+  assert.equal(aborts, 1);
+  assert.equal(closes, 0);
+
+  await harness.context.BoardfishRuntime.saveBoard(ref, { objects: [] });
+  assert.equal(attempt, 2);
+  assert.equal(aborts, 1);
+  assert.equal(closes, 1);
+});
+
+test('a stalled write times out, aborts, and retires the uncertain target', async () => {
+  const harness = loadWebRuntimeHarness();
+  harness.context.BoardfishWebLimits = { validateBoardPayload() {} };
+  harness.context.BoardfishWebBoardContainer = {
+    async createBoardContainerBlob() {
+      return { blob: new Blob([new Uint8Array([1, 2, 3, 4])]) };
+    },
+  };
+  let aborts = 0;
+  const handle = {
+    async createWritable() {
+      return {
+        write() { return new Promise(() => {}); },
+        async close() {},
+        async abort() { aborts++; },
+      };
+    },
+  };
+  const ref = { kind: 'web-save-handle', handle, name: 'stalled-board.bf' };
+  const save = harness.context.BoardfishRuntime.saveBoard(ref, { objects: [] });
+  await new Promise(setImmediate);
+  harness.runTimers();
+
+  await assert.rejects(() => save, /timed out while writing the board file/);
+  assert.equal(aborts, 1);
+  assert.equal(ref.unusable, true);
+  assert.equal(harness.context.BoardfishRuntime.canSaveToExistingTarget(ref), false);
+});
+
+test('download refs are not reusable save targets', () => {
+  const harness = loadWebRuntimeHarness();
+  assert.equal(
+    harness.context.BoardfishRuntime.canSaveToExistingTarget({ kind: 'web-download', name: 'board.bf' }),
+    false,
+  );
+  assert.equal(
+    harness.context.BoardfishRuntime.canSaveToExistingTarget({ kind: 'web-save-handle', handle: {} }),
+    true,
+  );
+  assert.equal(
+    harness.context.BoardfishRuntime.canSaveToExistingTarget({ kind: 'web-save-handle', handle: {}, unusable: true }),
+    false,
+  );
 });
 
 test('failed web board validation revokes decoded image refs', async () => {

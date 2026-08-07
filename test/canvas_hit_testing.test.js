@@ -372,7 +372,7 @@ test('coarse pointers reuse the desktop context menu and island visual scale', (
   assert.match(styles, /#ctx-actions\s*\{[\s\S]*width: calc\(var\(--menu-item-height\) \+ \(var\(--menu-shell-padding\) \* 2\) \+ 2px\);[\s\S]*\}/);
   assert.match(styles, /\.ctx-action-item\s*\{[\s\S]*width: var\(--menu-item-height\);[\s\S]*height: var\(--menu-item-height\);[\s\S]*font: var\(--text-font-style\) var\(--bold_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
   assert.match(styles, /\.ctx-item\s*\{[\s\S]*height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--bold_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
-  assert.match(styles, /#isl-zoom\s*\{[\s\S]*min-height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--bold_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
+  assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text\s*\{[\s\S]*min-height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--bold_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
 });
 
 test('destructive dialog action uses shared danger color tokens', () => {
@@ -617,7 +617,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
 
   assert.match(drawSource, /const textSelectionSpecs = textSelectionJelloSpecsForDraw\(\);/);
   assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionJelloSkipIds\(textSelectionSpecs, editingId \|\| null\);/);
-  assert.match(drawSource, /const bypassEditOffscreenCache = options\.bypassEditOffscreenCache === true;/);
+  assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
   assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(\);\s*\}/);
   assert.match(drawSource, /if \(useEditOffscreenCache && !_offscreenDirty\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
@@ -629,7 +629,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
   const transformStart = viewportSource.indexOf('function applyTransform');
   const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
   const transformSource = viewportSource.slice(transformStart, transformEnd);
-  assert.match(transformSource, /drawBoard\(\{ bypassEditOffscreenCache: true \}\);/);
+  assert.match(transformSource, /drawBoard\(true\);/);
   assert.doesNotMatch(transformSource, /_rebuildOffscreen\(/);
 });
 
@@ -663,9 +663,9 @@ test('editing overlay keeps copied text selection highlighted while its jiggle i
   assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*textSelectionMotion \? \{ start: selStart, end: selEnd \} : null/);
 });
 
-test('overlapping text selection highlight runs collapse before fill', () => {
+test('overlapping text selection highlight runs share one path fill', () => {
   const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('const TEXT_SELECTION_RECT_EPSILON =');
+  const start = viewportSource.indexOf('function drawTextSelectionHighlight');
   const end = viewportSource.indexOf('const drawTextSelectionContentJello', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
@@ -706,15 +706,16 @@ test('overlapping text selection highlight runs collapse before fill', () => {
   assert.deepEqual(drawCalls, [
     ['save'],
     ['beginPath'],
-    ['rect', 0, 0, 60, 24],
+    ['rect', 0, 0, 40, 24],
+    ['rect', 20, 0, 40, 24],
     ['fill'],
     ['restore'],
   ]);
 });
 
-test('script text selection highlight removes base overlap before fill', () => {
+test('script text selection highlight shares one path fill with its base run', () => {
   const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('const TEXT_SELECTION_RECT_EPSILON =');
+  const start = viewportSource.indexOf('function drawTextSelectionHighlight');
   const end = viewportSource.indexOf('const drawTextSelectionContentJello', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
@@ -752,8 +753,8 @@ test('script text selection highlight removes base overlap before fill', () => {
 
   assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, [], 0, 10), true);
   assert.deepEqual(rectCalls, [
-    [40, -6, 30, 6],
     [0, 0, 100, 24],
+    [40, -6, 30, 17],
   ]);
 });
 

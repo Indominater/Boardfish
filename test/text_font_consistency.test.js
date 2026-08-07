@@ -60,7 +60,7 @@ test('DOM text uses the shared app font rendering defaults', () => {
   assert.deepEqual(fontWeightDeclarations, ['300 700']);
   assert.equal(
     [...css.matchAll(/font:\s*var\(--text-font-style\)\s+var\(--bold_text\)\s+var\(--menu-item-font-size\)\s+var\(--text-font-family\);/g)].length,
-    4
+    3
   );
   assert.equal(
     [...css.matchAll(/font:\s*var\(--text-font-style\)\s+var\(--regular_text\)\s+var\(--menu-item-font-size\)\s+var\(--text-font-family\);/g)].length,

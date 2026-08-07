@@ -86,13 +86,6 @@ function selectionSetsEqual(a, b) {
   return true;
 }
 
-function selectionIdsFromSet(set) {
-  const ids = new Array(set.size);
-  let write = 0;
-  for (const id of set) ids[write++] = id;
-  return ids;
-}
-
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 function canvasInputTextDebugLog(label, obj = null, meta = {}) {
   if (typeof TextSelDebug === 'undefined') return;
@@ -657,7 +650,7 @@ function startRubberBandSelection(e, additive) {
       }
     }
     if (selectionSetsEqual(nextSelection, selectedIds)) return;
-    BoardfishEditorState.setSelection(selectionIdsFromSet(nextSelection));
+    BoardfishEditorState.setSelection(nextSelection);
     scheduleRender(true, true);
   }
   _rubberBandSelectionCleanup = beginDocumentDrag({ move: onRbMove, up: onRbUp });
@@ -667,10 +660,10 @@ function toggleAdditiveSelection(obj) {
   const nextSelection = new Set(selectedIds);
   if (isSelected(obj.id)) {
     nextSelection.delete(obj.id);
-    BoardfishEditorState.setSelection(selectionIdsFromSet(nextSelection));
+    BoardfishEditorState.setSelection(nextSelection);
   } else {
     nextSelection.add(obj.id);
-    BoardfishEditorState.setSelection(selectionIdsFromSet(nextSelection), { primaryId: obj.id });
+    BoardfishEditorState.setSelection(nextSelection, { primaryId: obj.id });
     const addedObj = objectsMap.get(obj.id);
     if (addedObj) {
       bringObjectToFront(obj.id);

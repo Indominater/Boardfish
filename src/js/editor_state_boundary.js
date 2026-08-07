@@ -6,20 +6,6 @@
     selectedIds.clear();
   }
 
-  function idsToArray(ids = []) {
-    if (Array.isArray(ids)) return ids;
-    const out = [];
-    for (const id of ids || []) out.push(id);
-    return out;
-  }
-
-  function idListHas(ids = [], target = null) {
-    for (const id of ids || []) {
-      if (id === target) return true;
-    }
-    return false;
-  }
-
   function setSelectionState(ids = [], {
     primaryId = null,
     exitEditing = true,
@@ -27,13 +13,13 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const startedAt = root.performance?.now?.() ?? Date.now();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const nextIds = idsToArray(ids);
+    const nextIds = ids || [];
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const previousCount = selectedIds.size;
     const previousPrimaryId = selectedId || '';
     const previousEditingId = editingId || '';
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (exitEditing && editingId && !idListHas(nextIds, editingId)) exitEdit();
+    if (exitEditing && editingId && !(ids instanceof Set ? ids.has(editingId) : nextIds.includes(editingId))) exitEdit();
     selectedIds.clear();
     let lastExistingId = null;
     for (const id of nextIds) {

@@ -94,9 +94,7 @@
     const content = typeof data.content === 'string' ? data.content : '';
     const result = { content };
     if (Array.isArray(data.lineAlign) && data.lineAlign.length) {
-      const lineAlign = new Array(data.lineAlign.length);
-      for (let i = 0; i < data.lineAlign.length; i++) lineAlign[i] = data.lineAlign[i];
-      result.lineAlign = lineAlign;
+      result.lineAlign = data.lineAlign.slice();
     }
     if (Array.isArray(data.scriptRanges) && data.scriptRanges.length) {
       const scriptRanges = [];

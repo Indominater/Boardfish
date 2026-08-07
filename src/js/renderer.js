@@ -164,8 +164,8 @@
     crop.dh += top + bottom;
   }
 
-  function drawImageObjWithCurrentQuality(context, obj, img, deps, options = {}) {
-    const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (options.view.zoom * options.view.dpr);
+  function drawImageObjWithCurrentQuality(context, obj, img, deps, view, viewportRect) {
+    const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (view.zoom * view.dpr);
     const transform = deps.imageTransformFromObject(obj);
     if (deps.imageTransformNeedsRendering(transform)) {
       const sideways = deps.isSidewaysRotation(transform.rotation);
@@ -186,7 +186,7 @@
       return false;
     }
 
-    const crop = visibleImageCrop(obj, img, options.viewportRect);
+    const crop = visibleImageCrop(obj, img, viewportRect);
     if (crop === false) return null;
     if (crop) {
       applyImageCropDestinationOverdraw(crop, obj, edgeOverdraw);
@@ -203,14 +203,14 @@
     return false;
   }
 
-  function drawImageObj(context, obj, img, deps, options = {}) {
-    if (options.activeInputFullFallback !== true && options.lowLatency !== true) {
-      return drawImageObjWithCurrentQuality(context, obj, img, deps, options);
+  function drawImageObj(context, obj, img, deps, view, viewportRect, lowLatency) {
+    if (!lowLatency) {
+      return drawImageObjWithCurrentQuality(context, obj, img, deps, view, viewportRect);
     }
     const previousSmoothingEnabled = context.imageSmoothingEnabled;
     try { context.imageSmoothingEnabled = false; } catch (_) {}
     try {
-      return drawImageObjWithCurrentQuality(context, obj, img, deps, options);
+      return drawImageObjWithCurrentQuality(context, obj, img, deps, view, viewportRect);
     } finally {
       try { context.imageSmoothingEnabled = previousSmoothingEnabled; } catch (_) {}
     }
@@ -467,18 +467,10 @@
         const viewportRect = options.viewportRect || null;
         if (obj.type === 'text') {
           const layout = getTextLayoutForDraw(obj, viewportRect);
-          for (const line of layout) {
-            deps.drawTextLineRange(
-              context,
-              line,
-              obj,
-              0,
-              line.text?.length ?? 0,
-            );
-          }
-          return true;
+          for (const line of layout) deps.drawTextLineRange(context, line, obj);
+          return;
         }
-        if (obj.type !== 'image') return false;
+        if (obj.type !== 'image') return;
 
         const view = options.view || viewDefaults();
         const imageSourceResolver = options.imageSourceResolver || null;
@@ -489,18 +481,11 @@
           ? imageSourceResolver(key, obj, view, { activeInput: lowLatencyImageMotion })
           : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, { activeInput: lowLatencyImageMotion }) : null;
         const img = selected?.source || null;
-        if (!isDrawableImageSource(img)) return false;
+        if (!isDrawableImageSource(img)) return;
         try {
-          const cropped = drawImageObj(context, obj, img, deps, {
-            viewportRect,
-            view,
-            activeInputFullFallback: selected?.activeInputFullFallback === true,
-            lowLatency: lowLatencyImageMotion,
-          });
-          return cropped !== null;
-        } catch (_) {
-          return false;
-        }
+          drawImageObj(context, obj, img, deps, view, viewportRect,
+            selected?.activeInputFullFallback === true || lowLatencyImageMotion);
+        } catch (_) {}
       } else {
       const viewportRect = options.viewportRect || null;
       if (obj.type === 'text') {
@@ -585,12 +570,8 @@
           }
         }
         try {
-          const cropped = drawImageObj(context, obj, img, deps, {
-            viewportRect,
-            view,
-            activeInputFullFallback: selected?.activeInputFullFallback === true,
-            lowLatency: lowLatencyImageMotion,
-          });
+          const cropped = drawImageObj(context, obj, img, deps, view, viewportRect,
+            selected?.activeInputFullFallback === true || lowLatencyImageMotion);
           if (cropped === null) return false;
           if (counters) {
             recordImageDrawWarmStats(
@@ -658,19 +639,19 @@
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, motionOptions) : null;
           if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) return;
           if (motion?.skip) return;
-          const opacity = motion && Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
-          const scale = motion && Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
-          const scaleX = motion && Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
-          const scaleY = motion && Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
-          const scaleOriginX = motion && Number.isFinite(motion.scaleOriginX)
-            ? Math.max(0, Math.min(1, motion.scaleOriginX))
-            : 0.5;
-          const scaleOriginY = motion && Number.isFinite(motion.scaleOriginY)
-            ? Math.max(0, Math.min(1, motion.scaleOriginY))
-            : 0.5;
-          const translateX = motion && Number.isFinite(motion.translateX) ? motion.translateX : 0;
-          const translateY = motion && Number.isFinite(motion.translateY) ? motion.translateY : 0;
           if (motion && context.save) {
+            const opacity = Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
+            const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
+            const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
+            const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+            const scaleOriginX = Number.isFinite(motion.scaleOriginX)
+              ? Math.max(0, Math.min(1, motion.scaleOriginX))
+              : 0.5;
+            const scaleOriginY = Number.isFinite(motion.scaleOriginY)
+              ? Math.max(0, Math.min(1, motion.scaleOriginY))
+              : 0.5;
+            const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
+            const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
             context.save();
             context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
             if (translateX || translateY) context.translate(translateX, translateY);
@@ -722,35 +703,37 @@
         }
         if (countObject && counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
         if (motion?.skip) return;
-        const opacity = motion && Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
-        const scale = motion && Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
-        const scaleX = motion && Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
-        const scaleY = motion && Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
-        const scaleOriginX = motion && Number.isFinite(motion.scaleOriginX)
-          ? Math.max(0, Math.min(1, motion.scaleOriginX))
-          : 0.5;
-        const scaleOriginY = motion && Number.isFinite(motion.scaleOriginY)
-          ? Math.max(0, Math.min(1, motion.scaleOriginY))
-          : 0.5;
-        const translateX = motion && Number.isFinite(motion.translateX) ? motion.translateX : 0;
-        const translateY = motion && Number.isFinite(motion.translateY) ? motion.translateY : 0;
-        if (motion && countObject && counters) {
-          counters.motionObjects = (counters.motionObjects || 0) + 1;
-          if (obj.type === 'image') counters.motionImages = (counters.motionImages || 0) + 1;
-          else if (obj.type === 'text') counters.motionText = (counters.motionText || 0) + 1;
-          if (translateX || translateY) counters.motionTranslatedObjects = (counters.motionTranslatedObjects || 0) + 1;
-          if (scaleX !== 1 || scaleY !== 1) counters.motionScaledObjects = (counters.motionScaledObjects || 0) + 1;
-        }
-        if (motion && context.save) {
-          context.save();
-          context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
-          if (translateX || translateY) context.translate(translateX, translateY);
-          if (scaleX !== 1 || scaleY !== 1) {
-            const scalePivotX = obj.x + obj.w * scaleOriginX;
-            const scalePivotY = obj.y + obj.h * scaleOriginY;
-            context.translate(scalePivotX, scalePivotY);
-            context.scale(scaleX, scaleY);
-            context.translate(-scalePivotX, -scalePivotY);
+        if (motion) {
+          const opacity = Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
+          const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
+          const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
+          const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+          const scaleOriginX = Number.isFinite(motion.scaleOriginX)
+            ? Math.max(0, Math.min(1, motion.scaleOriginX))
+            : 0.5;
+          const scaleOriginY = Number.isFinite(motion.scaleOriginY)
+            ? Math.max(0, Math.min(1, motion.scaleOriginY))
+            : 0.5;
+          const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
+          const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
+          if (countObject && counters) {
+            counters.motionObjects = (counters.motionObjects || 0) + 1;
+            if (obj.type === 'image') counters.motionImages = (counters.motionImages || 0) + 1;
+            else if (obj.type === 'text') counters.motionText = (counters.motionText || 0) + 1;
+            if (translateX || translateY) counters.motionTranslatedObjects = (counters.motionTranslatedObjects || 0) + 1;
+            if (scaleX !== 1 || scaleY !== 1) counters.motionScaledObjects = (counters.motionScaledObjects || 0) + 1;
+          }
+          if (context.save) {
+            context.save();
+            context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
+            if (translateX || translateY) context.translate(translateX, translateY);
+            if (scaleX !== 1 || scaleY !== 1) {
+              const scalePivotX = obj.x + obj.w * scaleOriginX;
+              const scalePivotY = obj.y + obj.h * scaleOriginY;
+              context.translate(scalePivotX, scalePivotY);
+              context.scale(scaleX, scaleY);
+              context.translate(-scalePivotX, -scalePivotY);
+            }
           }
         }
         let drawn = false;

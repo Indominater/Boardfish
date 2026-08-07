@@ -17,7 +17,5 @@ export function loadLegacyScript(src) {
 }
 
 export async function loadScripts(scripts) {
-  for (const src of scripts) {
-    await loadLegacyScript(new URL(src, import.meta.url).href);
-  }
+  await Promise.all(scripts.map((src) => loadLegacyScript(new URL(src, import.meta.url).href)));
 }

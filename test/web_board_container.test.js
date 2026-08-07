@@ -456,6 +456,63 @@ test('persisted container metadata refreshes Blob refs without changing image by
   assert.deepEqual(await WebContainer.bytesForImageSourceAsync(reopened.board.imageStore['img-1']), imageBytes);
 });
 
+test('volatile File-backed image refs detach once before repeated saves', async () => {
+  const imageBytes = new Uint8Array(160 * 1024);
+  for (let i = 0; i < imageBytes.length; i++) imageBytes[i] = (i * 29) % 251;
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {
+      'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' },
+    },
+    objects: [
+      { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 10, z: 1, data: { imgKey: 'img-1' } },
+    ],
+  };
+  const initial = await WebContainer.createBoardContainerBlob(board, { 'img-1': imageBytes });
+  const opened = await WebContainer.readBoardContainer(
+    new File([initial.blob], 'volatile-board.bf', { type: 'application/octet-stream' }),
+    { lazyImageRefs: true, verifyImageCrc: false },
+  );
+  const source = opened.board.imageStore['img-1'];
+  const volatileBlob = source.__blob;
+  assert.equal(source.__blobVolatile, true);
+
+  const stabilized = await WebContainer.stabilizeVolatileImageRefs(board, opened.board.imageStore);
+  assert.deepEqual(stabilized, { refreshed: 1, bytes: imageBytes.length, skipped: '' });
+  assert.equal(source.__blobVolatile, false);
+  assert.notEqual(source.__blob, volatileBlob);
+
+  Object.defineProperties(volatileBlob, {
+    arrayBuffer: {
+      configurable: true,
+      value() { throw new Error('the replaced File snapshot is no longer readable'); },
+    },
+    slice: {
+      configurable: true,
+      value() { throw new Error('the replaced File snapshot is no longer sliceable'); },
+    },
+    stream: {
+      configurable: true,
+      value() { throw new Error('the replaced File snapshot is no longer streamable'); },
+    },
+  });
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const saved = await WebContainer.createBoardContainerBlob(board, opened.board.imageStore, {
+      materializeBytes: false,
+    });
+    const reopened = await WebContainer.readBoardContainer(saved.blob, {
+      lazyImageRefs: true,
+      verifyImageCrc: true,
+    });
+    assert.deepEqual(await WebContainer.bytesForImageSourceAsync(reopened.board.imageStore['img-1']), imageBytes);
+  }
+
+  const repeatedStabilize = await WebContainer.stabilizeVolatileImageRefs(board, opened.board.imageStore);
+  assert.deepEqual(repeatedStabilize, { refreshed: 0, bytes: 0, skipped: '' });
+});
+
 test('ZIP32 writer rejects fields that would otherwise be silently truncated', async () => {
   const entry = { name: 'x'.repeat(0x10000), data: new Uint8Array([1]) };
   await assert.rejects(

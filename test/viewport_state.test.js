@@ -25,7 +25,6 @@ test('board masterbox uses the outermost edges of every image and text box', () 
     y1: 50,
     x2: 400,
     y2: 600,
-    count: 2,
   });
 });
 

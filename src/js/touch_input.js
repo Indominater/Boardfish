@@ -241,17 +241,15 @@
 
     function finishPointer(input, cancelled = false, sourceEvent = null) {
       const point = touchPoint(input, sourceEvent);
-      const current = point ? active.get(point.id) : null;
-      if (!point || !current) return false;
+      const current = updateActivePoint(point);
+      if (!current) return false;
       clearHoldTimer();
-      current.x = point.x;
-      current.y = point.y;
-      current.sourceEvent = point.sourceEvent;
       const finishedMode = mode;
 
       // Commit the exact final separation before removing either pointer. This
-      // also confirms a legitimate large last move that had no follow-up event.
-      if (!cancelled && finishedMode === 'pinch') emitPinch(current);
+      // also confirms a legitimate last move without repeating a committed one.
+      if (!cancelled && finishedMode === 'pinch' &&
+          (current.x - current.previousX || current.y - current.previousY)) emitPinch(current);
 
       if (!cancelled && finishedMode === 'pending' && active.size === 1) {
         call('onTap', gesturePayload(current));

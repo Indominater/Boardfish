@@ -7,12 +7,7 @@ var _textMinWidthWarmCancel = null;
 var _textMinWidthWarmObjectId = '';
 const SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
 
-function selectionOverlayDevicePixelRatio() {
-  const value = typeof window !== 'undefined' ? Number(window.devicePixelRatio) : 1;
-  return Number.isFinite(value) && value > 0 ? value : 1;
-}
-
-function snappedSelectionOverlayScreenRect(x, y, width, height, dpr = selectionOverlayDevicePixelRatio(), padDevicePx = 0) {
+function snappedSelectionOverlayScreenRect(x, y, width, height, dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1, padDevicePx = 0) {
   const scale = Number.isFinite(Number(dpr)) && Number(dpr) > 0 ? Number(dpr) : 1;
   const rawX = Number.isFinite(Number(x)) ? Number(x) : 0;
   const rawY = Number.isFinite(Number(y)) ? Number(y) : 0;
@@ -34,13 +29,9 @@ function snappedSelectionOverlayScreenRect(x, y, width, height, dpr = selectionO
   };
 }
 
-function selectionOverlayImageEdgePadDevicePx(obj) {
-  return obj?.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0;
-}
-
 function selectionOverlaySelectedImageEdgePadDevicePx() {
   for (const id of selectedIds) {
-    if (selectionOverlayImageEdgePadDevicePx(objectsMap.get(id)) > 0) return SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX;
+    if (objectsMap.get(id)?.type === 'image') return SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX;
   }
   return 0;
 }
@@ -116,7 +107,7 @@ function selectionOverlayAnimatedScreenRect(resting, animated, padDevicePx = 0) 
     restingY,
     restingWidth,
     restingHeight,
-    selectionOverlayDevicePixelRatio(),
+    typeof window !== 'undefined' ? window.devicePixelRatio : 1,
     padDevicePx,
   );
   const deltaX = _cleanOverlay(animated.x1 * zoom + panX - restingX);
@@ -343,16 +334,6 @@ function _setStyleIfChanged(el, prop, value, state) {
   el.style[prop] = value;
 }
 
-function _setMultiBoxDisplayIfChanged(el, value) {
-  let state = _multiSelStyleState.get(el);
-  if (!state) {
-    state = { display: '', transform: '', width: '', height: '' };
-    _multiSelStyleState.set(el, state);
-  }
-  _setStyleIfChanged(el, 'display', value, state);
-  return state;
-}
-
 function selectionBoundsIntersectViewport(
   bounds,
   view = { zoom, panX, panY },
@@ -457,9 +438,10 @@ function updateMultiSelectionOverlay() {
     const rect = selectionOverlayAnimatedScreenRect(
       { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h },
       bounds,
-      selectionOverlayImageEdgePadDevicePx(obj),
+      obj?.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0,
     );
-    const state = _setMultiBoxDisplayIfChanged(box, 'block');
+    const state = _multiSelStyleState.get(box);
+    _setStyleIfChanged(box, 'display', 'block', state);
     _setStyleIfChanged(box, 'transform', `translate(${rect.x}px,${rect.y}px)`, state);
     _setStyleIfChanged(box, 'width', rect.width + 'px', state);
     _setStyleIfChanged(box, 'height', rect.height + 'px', state);

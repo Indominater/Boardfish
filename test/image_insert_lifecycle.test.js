@@ -175,6 +175,30 @@ test('editor selection changes do not allocate motion snapshots', () => {
   assert.equal(allocations, 0);
 });
 
+test('editor selection accepts sets without disrupting a retained live edit', () => {
+  const context = loadEditorStateBoundaryHarness();
+  const retainedIds = vm.runInContext("new Set(['obj-1', 'obj-2'])", context);
+  const replacementIds = vm.runInContext("new Set(['obj-2'])", context);
+  let exits = 0;
+  context.editingId = 'obj-1';
+  context.exitEdit = () => {
+    exits++;
+    context.editingId = null;
+  };
+
+  context.BoardfishEditorState.setSelection(retainedIds, { primaryId: 'obj-2' });
+
+  assert.equal(exits, 0);
+  assert.deepEqual([...context.selectedIds], ['obj-1', 'obj-2']);
+  assert.equal(context.selectedId, 'obj-2');
+
+  context.BoardfishEditorState.setSelection(replacementIds, { primaryId: 'obj-2' });
+
+  assert.equal(exits, 1);
+  assert.deepEqual([...context.selectedIds], ['obj-2']);
+  assert.equal(context.selectedId, 'obj-2');
+});
+
 test('board object replacement clears object layout without clearing reusable measurements', () => {
   const context = loadEditorStateBoundaryHarness();
   context.BoardfishEditorState.replaceBoardObjects([], { normalizeText: false, syncTextHeights: false });

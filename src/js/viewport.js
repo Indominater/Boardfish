@@ -422,115 +422,6 @@ const textSelectionRunsForOptions = (obj, layout, selStart, selEnd, options = {}
   return collectTextSelectionRuns(obj, layout, selStart, selEnd, { viewportRect: options.viewportRect || null });
 };
 
-const TEXT_SELECTION_RECT_EPSILON = 1e-7;
-
-const textSelectionSortedUniqueCoordinates = (values) => {
-  const sorted = [];
-  for (const value of values || []) {
-    if (Number.isFinite(value)) sorted.push(value);
-  }
-  sorted.sort((a, b) => a - b);
-  const unique = [];
-  for (const value of sorted) {
-    if (!unique.length || Math.abs(unique[unique.length - 1] - value) > TEXT_SELECTION_RECT_EPSILON) {
-      unique.push(value);
-    }
-  }
-  return unique;
-};
-
-const textSelectionHighlightRects = (runs = []) => {
-  const rects = [];
-  const yEdges = [];
-  for (const run of runs) {
-    const x1 = Math.min(Number(run.x1), Number(run.x2));
-    const x2 = Math.max(Number(run.x1), Number(run.x2));
-    const y1 = Number(run.y ?? run.line?.y);
-    const height = Number(run.height ?? LINE_H);
-    const y2 = y1 + height;
-    if (!(x2 - x1 > TEXT_SELECTION_RECT_EPSILON && y2 - y1 > TEXT_SELECTION_RECT_EPSILON)) continue;
-    rects.push({ x1, x2, y1, y2 });
-    yEdges.push(y1, y2);
-  }
-  if (rects.length === 0) return [];
-  if (rects.length === 1) {
-    const rect = rects[0];
-    return [{
-      x: rect.x1,
-      y: rect.y1,
-      w: rect.x2 - rect.x1,
-      h: rect.y2 - rect.y1,
-    }];
-  }
-
-  rects.sort((a, b) => a.y1 - b.y1 || a.y2 - b.y2 || a.x1 - b.x1 || a.x2 - b.x2);
-  const edges = textSelectionSortedUniqueCoordinates(yEdges);
-  const mergedRects = [];
-  let nextRectIndex = 0;
-  let activeRects = [];
-  for (let i = 0; i < edges.length - 1; i++) {
-    const y1 = edges[i];
-    const y2 = edges[i + 1];
-    if (!(y2 - y1 > TEXT_SELECTION_RECT_EPSILON)) continue;
-    while (
-      nextRectIndex < rects.length &&
-      rects[nextRectIndex].y1 <= y1 + TEXT_SELECTION_RECT_EPSILON
-    ) {
-      activeRects.push(rects[nextRectIndex]);
-      nextRectIndex++;
-    }
-    let activeWrite = 0;
-    for (let activeRead = 0; activeRead < activeRects.length; activeRead++) {
-      const rect = activeRects[activeRead];
-      if (rect.y2 >= y2 - TEXT_SELECTION_RECT_EPSILON) activeRects[activeWrite++] = rect;
-    }
-    activeRects.length = activeWrite;
-    const intervals = [];
-    for (const rect of activeRects) {
-      if (rect.y1 <= y1 + TEXT_SELECTION_RECT_EPSILON && rect.y2 >= y2 - TEXT_SELECTION_RECT_EPSILON) {
-        intervals.push({ x1: rect.x1, x2: rect.x2 });
-      }
-    }
-    intervals.sort((a, b) => a.x1 - b.x1 || a.x2 - b.x2);
-    const mergedIntervals = [];
-    for (const interval of intervals) {
-      const previous = mergedIntervals[mergedIntervals.length - 1];
-      if (previous && interval.x1 <= previous.x2 + TEXT_SELECTION_RECT_EPSILON) {
-        previous.x2 = Math.max(previous.x2, interval.x2);
-      } else {
-        mergedIntervals.push({ x1: interval.x1, x2: interval.x2 });
-      }
-    }
-    for (const interval of mergedIntervals) {
-      let mergedIntoPrevious = false;
-      for (let j = mergedRects.length - 1; j >= 0; j--) {
-        const previous = mergedRects[j];
-        if (
-          Math.abs(previous.x1 - interval.x1) <= TEXT_SELECTION_RECT_EPSILON &&
-          Math.abs(previous.x2 - interval.x2) <= TEXT_SELECTION_RECT_EPSILON &&
-          Math.abs(previous.y2 - y1) <= TEXT_SELECTION_RECT_EPSILON
-        ) {
-          previous.y2 = y2;
-          mergedIntoPrevious = true;
-          break;
-        }
-      }
-      if (!mergedIntoPrevious) mergedRects.push({ x1: interval.x1, x2: interval.x2, y1, y2 });
-    }
-  }
-  const out = new Array(mergedRects.length);
-  for (let i = 0; i < mergedRects.length; i++) {
-    const rect = mergedRects[i];
-    out[i] = {
-      x: rect.x1,
-      y: rect.y1,
-      w: rect.x2 - rect.x1,
-      h: rect.y2 - rect.y1,
-    };
-  }
-  return out;
-};
-
 const applyTextSelectionMotionTransform = (context, bounds, motion) => {
   if (!motion) return false;
   const scaleX = motion.scaleX ?? 1;
@@ -568,7 +459,7 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
       } else {
-        drawTextLineRange(context, line, obj, 0, line.text.length);
+        drawTextLineRange(context, line, obj);
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (stats) {
@@ -587,7 +478,7 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
       } else {
-        drawTextLineRange(context, line, obj, 0, line.text.length);
+        drawTextLineRange(context, line, obj);
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (stats) {
@@ -610,7 +501,7 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         drawTextLineRange(context, line, obj, o1, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
       } else {
-        drawTextLineRange(context, line, obj, o1, line.text.length);
+        drawTextLineRange(context, line, obj, o1);
       }
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -633,21 +524,16 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, opti
   context.fillStyle = typeof canvasSelectionHighlightColor === 'function'
     ? canvasSelectionHighlightColor()
     : 'rgba(10, 132, 255, 0.3)';
-  const pathFill = typeof context.beginPath === 'function' &&
-    typeof context.rect === 'function' &&
-    typeof context.fill === 'function';
-  if (pathFill) context.beginPath();
+  context.beginPath();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   for (const run of selection.runs) {
     TextSelDebug._logDraw(run.line, selStart, selEnd, run.x1, run.x2);
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const selectionRects = textSelectionHighlightRects(selection.runs);
-  for (const rect of selectionRects) {
-    if (pathFill) context.rect(rect.x, rect.y, rect.w, rect.h);
-    else context.fillRect(rect.x, rect.y, rect.w, rect.h);
+  for (const run of selection.runs) {
+    context.rect(run.x1, run.y, run.x2 - run.x1, run.height);
   }
-  if (pathFill && selectionRects.length) context.fill();
+  context.fill();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   TextSelDebug._logSelectionDraw?.({
     objectId: obj?.id || '',
@@ -655,7 +541,7 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd, opti
     selEnd,
     selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)),
     selectionRuns: selection.runs.length,
-    selectionRects: selectionRects.length,
+    selectionRects: selection.runs.length,
     ...(selection.metrics || {}),
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -941,8 +827,7 @@ function drawEditingTextOverlay(context, options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
-function drawBoard(options = {}) {
-  const bypassEditOffscreenCache = options.bypassEditOffscreenCache === true;
+function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectViewportDebug = ViewportDebug.isEnabled();
   const dbg = collectViewportDebug
@@ -1177,7 +1062,7 @@ function applyTransform(
   // Viewport transforms already require a direct redraw at the new pan/zoom.
   // Rebuilding the edit cache here would render the static scene twice in the
   // same frame; leave it dirty for the next non-navigation edit render.
-  drawBoard({ bypassEditOffscreenCache: true });
+  drawBoard(true);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const drawMs = collectTransformDebug ? performance.now() - drawStart : 0;
   if (collectTransformDebug) {

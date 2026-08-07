@@ -76,9 +76,7 @@
     return !!navigator.clipboard?.write && typeof ClipboardItem !== 'undefined' && typeof Blob !== 'undefined';
   }
 
-  async function writeClipboardItem(parts) {
-    await navigator.clipboard.write([new ClipboardItem(parts)]);
-  }
+  const writeClipboardItem = (parts) => navigator.clipboard.write([new ClipboardItem(parts)]);
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   function clipboardIoNow() {

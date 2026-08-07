@@ -33,23 +33,12 @@
     return isProductionBoardfishWeb();
   }
 
-  const state = {
-    enabled: configuredEnabled() && !doNotTrackEnabled(),
-    loaded: false,
-    token: configuredValue('BOARDFISH_CLOUDFLARE_ANALYTICS_TOKEN', DEFAULT_TOKEN),
-    scriptSrc: configuredValue('BOARDFISH_ANALYTICS_SCRIPT_SRC', DEFAULT_SCRIPT_SRC),
-  };
-
-  function loadScript() {
-    if (!state.enabled || state.loaded || !state.token || !root.document?.head) return false;
+  const token = configuredValue('BOARDFISH_CLOUDFLARE_ANALYTICS_TOKEN', DEFAULT_TOKEN);
+  if (configuredEnabled() && !doNotTrackEnabled() && token && root.document?.head) {
     const script = root.document.createElement('script');
     script.defer = true;
-    script.src = state.scriptSrc;
-    script.setAttribute('data-cf-beacon', JSON.stringify({ token: state.token }));
+    script.src = configuredValue('BOARDFISH_ANALYTICS_SCRIPT_SRC', DEFAULT_SCRIPT_SRC);
+    script.setAttribute('data-cf-beacon', JSON.stringify({ token }));
     root.document.head.appendChild(script);
-    state.loaded = true;
-    return true;
   }
-
-  loadScript();
 }(globalThis));
