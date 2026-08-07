@@ -133,7 +133,8 @@ test('web runtime owns local board file IO', () => {
   assert.match(io, /BoardfishRuntime\.openFileDialog\(\)/);
   assert.match(io, /BoardfishRuntime\.saveFileDialog\(defaultName\)/);
   assert.match(io, /BoardfishRuntime\.readBoard\(fileRef\)/);
-  assert.match(io, /BoardfishRuntime\.saveBoard\(fileRef, data, \{ imageStore \}\)/);
+  assert.match(io, /BoardfishRuntime\.saveBoard\(fileRef, data, \{ imageStore, \.\.\.options \}\)/);
+  assert.match(io, /invokeSaveBoard\(fileRef[\s\S]*?\{ sourceFileRef: currentFileRef \}/);
 });
 
 test('image storage is web-ref and data-url based', () => {
@@ -341,6 +342,15 @@ test('save validation reuses container serialization instead of stringifying the
   const saveDebug = readSource('src/js/debug_save.js');
   assert.match(saveDebug, /jsonBytes: e\.meta\?\.rust\?\.json_bytes \?\? ''/);
   assert.doesNotMatch(saveDebug, /e\.meta\?\.jsonBytes/);
+});
+
+test('failed saves leave a visible failure message in the viewport pill', () => {
+  const ioClose = readSource('src/js/io_close.js');
+  assert.match(
+    ioClose,
+    /function showSaveFailurePill\(\) \{\s*showIslandMsg\('Save failed', long_message\);\s*\}/,
+  );
+  assert.equal((ioClose.match(/showSaveFailurePill\(\);/g) || []).length, 2);
 });
 
 test('addText sizes multiline text without spreading all lines into Math.max', () => {

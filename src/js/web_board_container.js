@@ -15,6 +15,7 @@
   let utf8TextEncoder = null;
   let utf8TextDecoder = null;
   const imageSourceCrcCache = new WeakMap();
+  const imageSourceArchiveIdentityCache = new WeakMap();
 
   function textEncoder() {
     if (!utf8TextEncoder) utf8TextEncoder = new TextEncoder();
@@ -757,7 +758,7 @@
     }
   }
 
-  function createWebImageRef({ path, mime, ext, bytes, blob, lazy, volatileBlob = false }) {
+  function createWebImageRef({ path, mime, ext, bytes, blob, lazy, volatileBlob = false, archiveCrc = null }) {
     const normalizedExt = normalizeImageExt(ext, mime);
     const normalizedMime = mime || mimeForExt(normalizedExt);
     const sourceBlob = isBlobLike(blob)
@@ -795,6 +796,9 @@
           entry: lazy.entry,
         },
       });
+    }
+    if (Number.isInteger(archiveCrc)) {
+      cacheImageSourceArchiveIdentity(ref, byteLength, archiveCrc >>> 0);
     }
     return ref;
   }
@@ -883,6 +887,25 @@
     const identity = imageSourceCrcIdentity(source);
     if (!identity || !Number.isInteger(crc)) return false;
     imageSourceCrcCache.set(source, { identity, byteLength, crc: crc >>> 0 });
+    return true;
+  }
+
+  function archivedImageSourceIdentity(source, byteLength) {
+    const identity = imageSourceCrcIdentity(source);
+    if (!identity) return null;
+    const cached = imageSourceArchiveIdentityCache.get(source);
+    if (!cached || cached.identity !== identity || cached.byteLength !== byteLength) return null;
+    return cached;
+  }
+
+  function cacheImageSourceArchiveIdentity(source, byteLength, crc) {
+    const identity = imageSourceCrcIdentity(source);
+    if (!identity || !Number.isInteger(crc)) return false;
+    imageSourceArchiveIdentityCache.set(source, {
+      identity,
+      byteLength,
+      crc: crc >>> 0,
+    });
     return true;
   }
 
@@ -1182,6 +1205,79 @@
     return { refreshed, bytes, skipped: '' };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return true;
+  }
+
+  async function recoverMatchingVolatileImageRefsFromContainer(board, rawImageStore = {}, containerInput) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    const containerBlob = isNativeBlobPart(containerInput?.blob) ? containerInput.blob : containerInput;
+    if (!isNativeBlobPart(containerBlob)) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      return { refreshed: 0, bytes: 0, skipped: 'not-blob' };
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      return false;
+    }
+    const directory = await parseCentralDirectoryFromBlob(containerBlob);
+    const imageStore = board?.imageStore || {};
+    const replacements = [];
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      const source = rawImageStore[key];
+      if (!source?.__blobHolder?.volatile || !isBlobLike(source.__blob)) continue;
+      const manifest = manifestEntryForKey(board, key);
+      const resolved = resolveManifestImageEntry(directory.entries, key, manifest);
+      const byteLength = Number(source.bytes || source.__blob.size);
+      const expectedIdentity = archivedImageSourceIdentity(source, byteLength);
+      const persistedByteLength = zipEntryContentBytes(resolved.entry);
+      if (
+        !Number.isInteger(expectedIdentity?.crc) ||
+        resolved.entry.method !== ZIP_METHOD_STORED ||
+        persistedByteLength !== byteLength ||
+        (resolved.entry.crc >>> 0) !== (expectedIdentity.crc >>> 0)
+      ) {
+        throw new Error(`saved image source changed for ${key}`);
+      }
+      const blob = await compressedEntryBlob(
+        containerBlob,
+        resolved.entry,
+        source.mime || manifest.mime || 'image/png',
+      );
+      replacements.push({ source, blob, crc: expectedIdentity.crc });
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    let refreshed = 0;
+    let bytes = 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    for (const replacement of replacements) {
+      if (!replaceWebImageRefBlob(
+        replacement.source,
+        replacement.blob,
+        null,
+        { volatile: true },
+      )) {
+        throw new Error('failed to recover saved image source');
+      }
+      cacheImageSourceArchiveIdentity(
+        replacement.source,
+        replacement.blob.size,
+        replacement.crc,
+      );
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDiagnostics) {
+        refreshed++;
+        bytes += replacement.blob.size;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    return {
+      refreshed,
+      bytes,
+      skipped: refreshed ? '' : 'no-volatile-images',
+    };
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    return replacements.length > 0;
   }
 
   async function createBoardContainerBlob(board, rawImageStore = {}, options = {}) {
@@ -1520,7 +1616,14 @@
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         nextSources[key] = canUseLazyRef
           ? (randomAccessBlob
-              ? createWebImageRef({ path, mime, ext, blob: imageBlob, volatileBlob: true })
+              ? createWebImageRef({
+                  path,
+                  mime,
+                  ext,
+                  blob: imageBlob,
+                  volatileBlob: true,
+                  archiveCrc: imageEntry.crc,
+                })
               : createWebImageRef({ path, mime, ext, lazy: { containerBytes, entry: imageEntry } }))
           : createWebImageRef({ path, mime, ext, bytes });
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1609,6 +1712,7 @@
     bytesToDataUrl,
     isWebImageRef,
     readBoardContainer,
+    recoverMatchingVolatileImageRefsFromContainer,
     refreshBlobBackedImageRefsFromContainer,
     revokeImageSource,
     stabilizeVolatileImageRefs,

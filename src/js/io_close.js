@@ -264,6 +264,7 @@ async function invokeSaveBoard(fileRef
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  , options = {}
 ) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -279,7 +280,7 @@ async function invokeSaveBoard(fileRef
     const result = await SaveDebug.wrap(
       dbg,
       BoardfishRuntime.WEB_COMMANDS.SAVE_BOARD,
-      () => BoardfishRuntime.saveBoard(fileRef, data, { imageStore }),
+      () => BoardfishRuntime.saveBoard(fileRef, data, { imageStore, ...options }),
       { path, ...metrics },
     );
     if (frameProbe) frameProbe();
@@ -289,7 +290,7 @@ async function invokeSaveBoard(fileRef
   if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
   const data = boardDataForSave();
   validateBoardPayloadForSave(data);
-  return BoardfishRuntime.saveBoard(fileRef, data, { imageStore });
+  return BoardfishRuntime.saveBoard(fileRef, data, { imageStore, ...options });
 }
 
 async function invokeReadBoard(fileRef
@@ -1409,6 +1410,10 @@ const runExclusiveBoardSave = (
 };
 runExclusiveBoardSave.inFlight = null;
 
+function showSaveFailurePill() {
+  showIslandMsg('Save failed', long_message);
+}
+
 const saveBoardAsImpl = async () => {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
@@ -1446,6 +1451,7 @@ const saveBoardAsImpl = async () => {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           , dbg
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          , { sourceFileRef: currentFileRef }
         );
         currentFileRef = fileRef;
         currentFilePath = BoardfishRuntime.describeFileRef(fileRef);
@@ -1465,6 +1471,7 @@ const saveBoardAsImpl = async () => {
   } catch (err) {
     releaseInputShield();
     console.error('Save failed:', err);
+    showSaveFailurePill();
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     SaveDebug.end(dbg, { saved: false, error: String(err) });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1499,6 +1506,7 @@ const saveBoardImpl = async () => {
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
             , dbg
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
+            , { sourceFileRef: currentFileRef }
           );
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           SaveDebug.step(dbg, 'markSaved:start');
@@ -1516,6 +1524,7 @@ const saveBoardImpl = async () => {
     } catch (err) {
       releaseInputShield();
       console.error('Save failed:', err);
+      showSaveFailurePill();
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       SaveDebug.end(dbg, { saved: false, error: String(err) });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
