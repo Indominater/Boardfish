@@ -171,6 +171,34 @@ function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1, sele
   return context;
 }
 
+function loadMenuCommandHarness() {
+  const source = readSource('src/js/context_menu.js');
+  const match = source.match(/function menuCommandFromButton\(button\) \{[\s\S]*?\n\}\n\nfunction contextMenuSurfaceById/);
+  assert.ok(match, 'menu command dispatcher is missing');
+
+  const context = {
+    calls: [],
+    timers: [],
+    _lastPointerMenuCommandAt: 0,
+    performance: { now: () => 1000 },
+    console,
+    MenuDebug: { log() {} },
+    MENU_COMMANDS: {
+      'btn-open': (event) => context.calls.push(event),
+    },
+    setTimeout(callback) {
+      context.timers.push(callback);
+    },
+  };
+
+  vm.createContext(context);
+  vm.runInContext(
+    `${match[0].replace(/\n\nfunction contextMenuSurfaceById$/, '')}\nthis.runMenuCommand = runMenuCommand;`,
+    context,
+  );
+  return context;
+}
+
 test('hitTest returns the top object at the world point', () => {
   const context = loadViewportHitTest();
   const object = { id: 'obj-1' };
@@ -214,6 +242,19 @@ test('context menu command buttons use the button click point as the object cent
   assert.match(contextMenuSource, /function runAddImagesCommandFromShortcut\(\) \{ runMenuCommand\(addImageBtn, 'shortcut'\); \}/);
   assert.match(contextMenuSource, /function runAddTextCommandFromShortcut\(\) \{ runMenuCommand\(addTextBtn, 'shortcut'\); \}/);
   assert.doesNotMatch(contextMenuSource, /ctxPos = boardCursorWorldPoint\(\);/);
+});
+
+test('pointerup menu commands keep user activation and suppress the follow-up click', () => {
+  const context = loadMenuCommandHarness();
+  const button = { id: 'btn-open' };
+  const pointerEvent = { type: 'pointerup' };
+
+  assert.equal(context.runMenuCommand(button, 'pointerup', pointerEvent), true);
+  assert.deepEqual(context.calls, [pointerEvent]);
+  assert.deepEqual(context.timers, []);
+
+  assert.equal(context.runMenuCommand(button, 'click', { type: 'click' }), true);
+  assert.deepEqual(context.calls, [pointerEvent]);
 });
 
 test('text editing context menu uses text actions before object actions', () => {

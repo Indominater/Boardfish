@@ -271,6 +271,21 @@ test('web release preview preserves operational console warnings and errors', { 
   }
 });
 
+test('web release preview keeps dirty-state history helpers used by board commands', { timeout: 120_000 }, () => {
+  const readableBundle = buildAndReadReadableWebPreviewBundle();
+
+  assert.match(
+    readableBundle,
+    /function historyEntryObjects\(entry\) \{\s*return Array\.isArray\(entry\?\.objects\) \? entry\.objects : \[\];\s*\}/,
+    'release bundle dropped historyEntryObjects even though dirty tracking uses it',
+  );
+  assert.match(
+    readableBundle,
+    /isDefaultEmptyBoardState\(historyEntryObjects\(boardHistory\[savedHistoryIndex\]\)\)/,
+    'release dirty tracking no longer reads the saved history entry safely',
+  );
+});
+
 test('web release preview ships minified PWA assets', () => {
   const manifestSource = readSource('src/js/startup_manifest.mjs');
   const buildSource = readSource('scripts/build-runtime-assets.mjs');

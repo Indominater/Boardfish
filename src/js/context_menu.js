@@ -481,11 +481,9 @@ function runMenuCommand(button, source, commandEvent = null) {
       console.error('[Boardfish menu] command failed:', command, err);
     }
   };
-  if (source === 'pointerup') {
-    setTimeout(executeCommand, 0);
-  } else {
-    executeCommand();
-  }
+  // Keep activation-sensitive file pickers and text focus inside the trusted
+  // pointer event. The following click is still suppressed by the timestamp.
+  executeCommand();
   return true;
 }
 

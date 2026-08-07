@@ -123,6 +123,10 @@ function syncHistoryEditProxyDomValueForSelection(proxy, start, end) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
+function historyEntryObjects(entry) {
+  return Array.isArray(entry?.objects) ? entry.objects : [];
+}
+
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 function historyTextContentDebugMetrics(content) {
   const text = String(content ?? '');
@@ -171,10 +175,6 @@ function getHistoryEditStateDebugMetrics(editState = null, prefix = 'editState')
 
 function historyEntryReason(entry) {
   return entry?.reason || '';
-}
-
-function historyEntryObjects(entry) {
-  return Array.isArray(entry?.objects) ? entry.objects : [];
 }
 
 function getHistoryEntryDebugMetrics(entry, prefix = 'entry') {
