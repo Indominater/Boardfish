@@ -12,8 +12,8 @@ const DEFAULT_TEXT_BOX_LINE_H = 24;
 const DEFAULT_TEXT_BOX_PAD = 16;
 const DEFAULT_TEXT_BOX_HEIGHT = DEFAULT_TEXT_BOX_MIN_LINES * DEFAULT_TEXT_BOX_LINE_H + DEFAULT_TEXT_BOX_PAD * 2;
 
-function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}) {
-  const textLayoutSource = withTextLayout ? fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') + '\n' : '';
+function loadAddTextHarness({ syncedHeight = null } = {}) {
+  const textLayoutSource = fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') + '\n';
   const source = fs.readFileSync(path.join(root, 'src/js/object_commands.js'), 'utf8');
   let idCounter = 1;
   const context = {
@@ -83,7 +83,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     newId() {
       return `obj-${idCounter++}`;
     },
-    syncTextAutoHeight(obj, minLines = 1) {
+    testSyncTextAutoHeight(obj, minLines = 1) {
       const contentLines = String(obj.data?.content || '').split('\n').length;
       obj.h = syncedHeight ?? Math.max(minLines, contentLines) * context.LINE_H + context.TEXT_PAD * 2;
       return true;
@@ -107,7 +107,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     textByteLengthCalls: 0,
   };
   vm.createContext(context);
-  vm.runInContext(`${textLayoutSource}${source}\nglobalThis.addText = addText;\n`, context, {
+  vm.runInContext(`${textLayoutSource}syncTextAutoHeight = testSyncTextAutoHeight;\n${source}\nglobalThis.addText = addText;\n`, context, {
     filename: 'object_commands.js',
   });
   return context;
@@ -229,7 +229,7 @@ test('addText with pasted content stays in select mode by default', () => {
 });
 
 test('addText keeps deterministic braced script text editable', () => {
-  const context = loadAddTextHarness({ withTextLayout: true });
+  const context = loadAddTextHarness();
 
   context.addText(24, 48, 'e^{x^{2}+1}');
 

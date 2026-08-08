@@ -259,19 +259,6 @@
     context.globalCompositeOperation = 'source-over';
   }
 
-  function configureRendererTextContext(context) {
-    if (!context) return;
-    // Canvas width/height assignments reset context state. Reapply these values
-    // instead of caching by context identity so text remains aligned with the
-    // measurements after a resize or DPR change.
-    try { context.fontKerning = 'none'; } catch (_) {}
-    try { context.letterSpacing = '0px'; } catch (_) {}
-    try { context.fontStretch = 'normal'; } catch (_) {}
-    try { context.fontVariantCaps = 'normal'; } catch (_) {}
-    try { context.textAlign = 'left'; } catch (_) {}
-    try { context.direction = 'ltr'; } catch (_) {}
-  }
-
   function setWorldCanvasTransform(context, dpr, deps) {
     const scale = deps.zoom() * dpr;
     context.setTransform(scale, 0, 0, scale, deps.panX() * dpr, deps.panY() * dpr);
@@ -279,7 +266,14 @@
     context.font = deps.font;
     context.fillStyle = deps.canvasTextColor();
     context.textBaseline = 'alphabetic';
-    configureRendererTextContext(context);
+    if (context.textAlign !== 'left') {
+      try { context.fontKerning = 'none'; } catch (_) {}
+      try { context.letterSpacing = '0px'; } catch (_) {}
+      try { context.fontStretch = 'normal'; } catch (_) {}
+      try { context.fontVariantCaps = 'normal'; } catch (_) {}
+      try { context.textAlign = 'left'; } catch (_) {}
+      try { context.direction = 'ltr'; } catch (_) {}
+    }
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

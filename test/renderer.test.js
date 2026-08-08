@@ -775,7 +775,7 @@ test('production text drawing skips debug stats allocation', () => {
   assert.deepEqual(collectStatsOptions, [false]);
 });
 
-test('text context configuration is applied once per canvas render pass', () => {
+test('text context configuration persists until canvas state resets', () => {
   const BoardfishRenderer = loadRenderer();
   let configurationWrites = 0;
   const context = { fillStyle: '', textBaseline: '', setTransform() {} };
@@ -809,6 +809,7 @@ test('text context configuration is applied once per canvas render pass', () => 
     zoom: () => 1,
   });
 
+  renderer.setWorldCanvasTransform(context);
   renderer.setWorldCanvasTransform(context);
   renderer.drawSingleObj(context, text);
   renderer.drawSingleObj(context, text);
@@ -1779,6 +1780,7 @@ test('selection movement pulses can exclude text objects', () => {
 });
 
 test('preconfigured transition timing is applied to CSS variables', () => {
+  assert.equal(loadMotion().styleVars.size, 0);
   const { styleVars } = loadMotion({
     BoardfishSmoothSlideParams: {
       duration: 260,

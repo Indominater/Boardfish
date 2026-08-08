@@ -43,18 +43,12 @@
     normalizePath: true,
   });
   const JIGGLE_RETRIGGER_MIN_INTERVAL_MS = 48;
-  const smoothSlideDefaults = Object.freeze({
-    duration: 220,
-    ease: 'cubic-bezier(0.18, 0.9, 0.24, 1.18)',
-  });
   const COPY_JIGGLE_ACTIONS = new Set([
     'copy-selected-objects',
     'copy-text-object',
     'copy-text-selection',
   ]);
   let jelloParams = null;
-  let smoothSlideParams = null;
-  const copyJiggleNormalizerCache = new Map();
   let reducedMotionQuery;
   const prefersReducedMotion = () => {
     if (reducedMotionQuery === undefined) {
@@ -88,10 +82,6 @@
     squish: numberInRange(options.squish, base.squish, 0, 1.4),
     staggerMs: numberInRange(options.staggerMs, base.staggerMs, 0, 240),
   });
-  const normalizeSmoothSlideParams = (options = {}, base = smoothSlideDefaults) => ({
-    duration: numberInRange(options.duration, base.duration, 80, 900),
-    ease: typeof options.ease === 'string' && options.ease.trim() ? options.ease.trim() : base.ease,
-  });
   const normalizeCopyJiggleParams = (options = {}, base = copyJiggleDefaults) => ({
     duration: numberInRange(options.duration, base.duration, 180, 1200),
     translateXPx: numberInRange(options.translateXPx, base.translateXPx, 0, 48),
@@ -116,6 +106,7 @@
     normalizePath: options.normalizePath == null ? base.normalizePath : options.normalizePath !== false,
   });
   const copyJiggleParamKey = (p) => `${p.duration}|${p.yFreqHz}|${p.xFreqHz}|${p.yDamping}|${p.xDamping}|${p.yLagMs}|${p.attackMs}|${p.settleStart}|${p.sagGain}|${p.sagDecay}|${p.lateralCoupling}|${p.deformation}|${p.deformationLagMs}|${p.deformationFreqHz}|${p.deformationDamping}|${p.normalizePath ? 1 : 0}`;
+  const copyJiggleNormalizerCache = new Map([[copyJiggleParamKey(copyJiggleDefaults), Object.freeze({ x: 1.4635663223528887, y: 1.3800858435981482, shape: 1.6076214313650838 })]]);
   const dampedSpringImpulse = (timeSec, freqHz, dampingRatio) => {
     const zeta = numberInRange(dampingRatio, 0.5, 0.001, 0.999);
     const omega0 = 2 * Math.PI * freqHz;
@@ -184,15 +175,13 @@
     copyJiggleNormalizerCache.set(key, normalizer);
     return normalizer;
   };
-  const applySmoothSlideCssVars = () => {
-    const style = root.document?.documentElement?.style;
-    if (!style) return;
-    style.setProperty('--smooth-slide-duration', `${smoothSlideParams.duration}ms`);
-    style.setProperty('--smooth-slide-ease', smoothSlideParams.ease);
-  };
   jelloParams = normalizeJelloParams(root.BoardfishJelloParams || {});
-  smoothSlideParams = normalizeSmoothSlideParams(root.BoardfishSmoothSlideParams || {});
-  applySmoothSlideCssVars();
+  const smoothSlideOptions = root.BoardfishSmoothSlideParams;
+  if (smoothSlideOptions) {
+    const style = root.document?.documentElement?.style;
+    style?.setProperty('--smooth-slide-duration', `${numberInRange(smoothSlideOptions.duration, 220, 80, 900)}ms`);
+    style?.setProperty('--smooth-slide-ease', typeof smoothSlideOptions.ease === 'string' && smoothSlideOptions.ease.trim() ? smoothSlideOptions.ease.trim() : 'cubic-bezier(0.18, 0.9, 0.24, 1.18)');
+  }
 
   const motionEndElapsed = (motion) => Math.max(
     motion.delay + motion.duration,

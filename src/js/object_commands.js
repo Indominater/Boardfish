@@ -53,22 +53,13 @@ function addText(wx, wy, content = '', options = {}) {
   }
   content = textForTextObjectPaste(content);
   logStep('trim-done', () => objectCommandTextStats(content));
-  let sourceRanges = Array.isArray(options?.scriptRanges)
-    ? options.scriptRanges
-    : (typeof deriveBracedTextScriptRangesFromContent === 'function' ? deriveBracedTextScriptRangesFromContent(content) : []);
+  let sourceRanges = Array.isArray(options?.scriptRanges) ? options.scriptRanges : [];
   logStep('script-ranges-derived', () => objectCommandTextStats(content, sourceRanges));
-  if (typeof textScriptLinearToDeterministicBraces === 'function') {
-    content = normalizeTextContent(textScriptLinearToDeterministicBraces(content, sourceRanges));
-    sourceRanges = typeof deriveBracedTextScriptRangesFromContent === 'function'
-      ? deriveBracedTextScriptRangesFromContent(content)
-      : [];
-  }
+  content = textScriptLinearToDeterministicBraces(content, sourceRanges);
+  sourceRanges = deriveBracedTextScriptRangesFromContent(content);
   logStep('script-braces-normalized', () => objectCommandTextStats(content, sourceRanges));
   const data = { content };
-  if (typeof normalizeTextScriptRangesForContent === 'function') {
-    const scriptRanges = normalizeTextScriptRangesForContent(content, sourceRanges);
-    if (scriptRanges.length) data.scriptRanges = scriptRanges;
-  }
+  if (sourceRanges.length) data.scriptRanges = sourceRanges;
   logStep('script-ranges-normalized', () => objectCommandTextStats(content, data.scriptRanges));
   const textBytes = BoardfishWebLimits.textByteLength(content);
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
