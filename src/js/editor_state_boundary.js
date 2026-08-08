@@ -72,26 +72,6 @@
     return removed;
   }
 
-  function removeEmptyTextObjects({
-    ids = null,
-    preserveId = null,
-  } = {}) {
-    const candidateIds = ids ? new Set(ids) : null;
-    const idsToRemove = new Set();
-    for (const obj of objects) {
-      if (!obj || obj.type !== 'text') continue;
-      if (candidateIds && !candidateIds.has(obj.id)) continue;
-      if (obj.id === preserveId) continue;
-      if (!isTextContentEmpty(obj.data?.content)) continue;
-      idsToRemove.add(obj.id);
-    }
-    return idsToRemove.size ? removeObjectsById(idsToRemove) : 0;
-  }
-
-  function deleteEmptyTextObjects(reason = 'delete-empty-text', options = {}) {
-    return commitMutation(reason, () => removeEmptyTextObjects(options) > 0);
-  }
-
   function resetObjectCounters() {
     idCounter = 1;
     zCounter = 1;
@@ -168,8 +148,6 @@
     addObject,
     clearSelection: clearSelectionState,
     commitMutation,
-    deleteEmptyTextObjects,
-    removeEmptyTextObjects,
     removeObjectsById,
     replaceBoardObjects,
     resetBoardObjectState,

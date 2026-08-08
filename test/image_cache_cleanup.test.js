@@ -144,6 +144,54 @@ test('Blob-backed web refs decode directly without a display URL', async () => {
   assert.equal(context.imageBitmapCache['img-1'], bitmap);
 });
 
+test('cacheImage shares one in-flight decode promise per image key', async () => {
+  let decodes = 0;
+  const bitmap = { width: 16, height: 16, close() {} };
+  const { context, rafs } = loadImageState(async () => {
+    decodes++;
+    return bitmap;
+  });
+  const src = 'data:image/png;base64,boardfish';
+  context.imageStore['img-1'] = src;
+
+  const firstReady = context.cacheImage('img-1', src, null);
+  const secondReady = context.cacheImage('img-1', src, null);
+
+  assert.equal(secondReady, firstReady);
+  assert.equal(rafs.length, 1);
+  rafs.shift()();
+  await firstReady;
+  assert.equal(decodes, 1);
+  assert.equal(context.imageBitmapCache['img-1'], bitmap);
+});
+
+test('cacheImage retries after a failed shared decode promise', async () => {
+  let decodes = 0;
+  const bitmap = { width: 16, height: 16, close() {} };
+  const { context, rafs } = loadImageState(async () => {
+    decodes++;
+    if (decodes === 1) throw new Error('decode failed');
+    return bitmap;
+  });
+  const src = 'data:image/png;base64,boardfish';
+  context.imageStore['img-1'] = src;
+
+  const failedReady = context.cacheImage('img-1', src, null);
+  assert.equal(context.cacheImage('img-1', src, null), failedReady);
+  rafs.shift()();
+  assert.equal((await failedReady).cacheReadyStage, 'error');
+  assert.equal(context.imageBitmapFailed.has('img-1'), true);
+
+  const retryReady = context.cacheImage('img-1', src, null);
+  assert.notEqual(retryReady, failedReady);
+  assert.equal(rafs.length, 1);
+  rafs.shift()();
+  assert.equal((await retryReady).cacheReadyStage, 'bitmap');
+  assert.equal(decodes, 2);
+  assert.equal(context.imageBitmapFailed.has('img-1'), false);
+  assert.equal(context.imageBitmapCache['img-1'], bitmap);
+});
+
 test('cacheImage keeps an existing current bitmap and closes a racing duplicate', async () => {
   let resolveBitmap;
   const duplicate = { width: 16, height: 16, closed: false, close() { this.closed = true; } };

@@ -177,7 +177,7 @@ function loadExitEditHarness() {
       applyActionAnimation(action) { context.animations.push(action); },
     },
     BoardfishEditorState: {
-      removeEmptyTextObjects() {},
+      removeObjectsById() {},
     },
     clearInterval(id) { context.clearedIntervals.push(id); },
     clearTimeout(id) { context.clearedTimeouts.push(id); },
@@ -305,7 +305,7 @@ function loadLiveTextEditResizeHarness() {
       applyActionAnimation(action) { context.animations.push(action); },
     },
     BoardfishEditorState: {
-      removeEmptyTextObjects() {},
+      removeObjectsById() {},
     },
     beginTextEditHistoryAction() {},
     shouldCommitTextEditInputImmediately() { return false; },

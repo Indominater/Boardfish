@@ -282,7 +282,7 @@ test('text selection debugger includes focused enter and exit edit timings', () 
   assert.match(source, /maxClickToEditTotalMs/);
   assert.match(source, /maxEnterEditCallMs/);
   assert.match(source, /maxCanvasRouteMs/);
-  assert.match(source, /maxEmptyTextCleanupMs/);
+  assert.doesNotMatch(source, /EmptyTextCleanup/);
   assert.match(source, /maxHitTestMs/);
   assert.match(source, /maxCaretApplyMs/);
   assert.match(source, /maxScheduledDelayMs/);

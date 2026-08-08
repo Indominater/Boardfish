@@ -95,7 +95,7 @@ function loadCanvasWheelHarness() {
     BoardObjectGeometry: { topObjectAtWorldPoint: () => null },
     toWorld: () => ({ x: 0, y: 0 }),
     deselectAll() {},
-    BoardfishEditorState: { deleteEmptyTextObjects() {}, setSelection() {} },
+    BoardfishEditorState: { setSelection() {} },
   };
 
   vm.createContext(context);

@@ -111,15 +111,17 @@ function addText(wx, wy, content = '', options = {}) {
   logStep('add-object-done', { objectId: obj.id, objectCountAfter: objects.length });
   selectObject(obj.id);
   logStep('render-scheduled', { objectId: obj.id });
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const historyStartedAt = dbg && objectCommandDebugNow();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  pushHistory('add-text');
-  logStep('history-pushed', () => ({
-    objectId: obj.id,
-    historyMs: Math.round((objectCommandDebugNow() - historyStartedAt) * 100) / 100,
-  }));
   const shouldEnterEdit = !content || options?.editAfterCreate === true;
+  if (!shouldEnterEdit || options?.enterEditHistory === false) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const historyStartedAt = dbg && objectCommandDebugNow();
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    pushHistory('add-text');
+    logStep('history-pushed', () => ({
+      objectId: obj.id,
+      historyMs: Math.round((objectCommandDebugNow() - historyStartedAt) * 100) / 100,
+    }));
+  }
   if (shouldEnterEdit) {
     const enterEditOptions = content
       ? { history: options?.enterEditHistory !== false, placeInitialCaret: true }

@@ -23,7 +23,6 @@ function collectImageKeysFromObjects(sourceObjects, out) {
 
 function retainedImageKeysForCurrentAndHistory() {
   const keys = new Set();
-  collectImageKeysFromObjects(objects, keys);
   for (const entry of boardHistory) {
     collectImageKeysFromObjects(entry?.objects, keys);
   }

@@ -40,9 +40,9 @@ const trimWhitespaceOnlyEdgeLines = (value) => {
   return first <= last ? lines.slice(first, last + 1).join('\n') : '';
 };
 
-const textForClipboard = (value) => trimWhitespaceOnlyEdgeLines(value);
-const textSelectionForClipboard = (value) => trimWhitespaceOnlyEdgeLines(value);
-const textForTextObjectPaste = (value) => trimWhitespaceOnlyEdgeLines(value);
+const textForClipboard = trimWhitespaceOnlyEdgeLines;
+const textSelectionForClipboard = trimWhitespaceOnlyEdgeLines;
+const textForTextObjectPaste = trimWhitespaceOnlyEdgeLines;
 
 // Some external plain-text clipboards materialize source visual wraps as newlines.
 // Only unwrap high-confidence fixed-width prose; all other paste paths stay literal.
@@ -1294,9 +1294,8 @@ function textLogicalLineEndAt(text, start) {
 function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
   if (!obj || obj.type !== 'text') return [];
   const content = String(obj.data?.content || '');
-  const lineCount = textLogicalLineCount(content);
-  const firstLine = Math.max(0, Math.min(Math.trunc(Number(startLine)) || 0, Math.max(0, lineCount - 1)));
-  const lastLine = Math.max(firstLine, Math.min(Math.trunc(Number(endLine)) || firstLine, Math.max(0, lineCount - 1)));
+  const firstLine = Math.max(0, Math.trunc(Number(startLine)) || 0);
+  const lastLine = Math.max(firstLine, Math.trunc(Number(endLine)) || firstLine);
   const maxW = obj.w - TEXT_PAD * 2;
   const scriptRanges = Array.isArray(options.scriptRanges)
     ? options.scriptRanges
@@ -2042,10 +2041,8 @@ function createBaseTextScriptLayoutMetricsForLength(length) {
     states,
     caretStates,
     bracedStarts: new Uint8Array(count + 1),
-    bracedClosings: new Uint8Array(count + 1),
     bracedEnds: new Uint8Array(count + 1),
     linearEnds: new Uint8Array(count + 1),
-    anyEnds: new Uint8Array(count + 1),
   };
 }
 
@@ -2256,10 +2253,8 @@ function patchTextScriptLayoutMetricsForObjectAfterInput(obj, options = {}) {
       states: deleteTextMetricStateArray(oldMetrics.states, start, end),
       caretStates: deleteTextMetricCaretStateArray(oldMetrics.caretStates, start, end),
       bracedStarts: deleteTextMetricPositionByteArray(oldMetrics.bracedStarts, start, end, newContent.length + 1),
-      bracedClosings: deleteTextMetricPositionByteArray(oldMetrics.bracedClosings, start, end, newContent.length + 1),
       bracedEnds: deleteTextMetricPositionByteArray(oldMetrics.bracedEnds, start, end, newContent.length + 1),
       linearEnds: deleteTextMetricPositionByteArray(oldMetrics.linearEnds, start, end, newContent.length + 1),
-      anyEnds: deleteTextMetricPositionByteArray(oldMetrics.anyEnds, start, end, newContent.length + 1),
     };
     obj._textScriptLayoutMetrics = metrics;
     obj._textScriptLayoutMetricsContent = newContent;
@@ -2283,10 +2278,8 @@ function patchTextScriptLayoutMetricsForObjectAfterInput(obj, options = {}) {
     states: spliceTextMetricStateArray(oldMetrics.states, start, localMetrics.states),
     caretStates: spliceTextMetricCaretStateArray(oldMetrics.caretStates, start, localMetrics.caretStates),
     bracedStarts: spliceTextMetricPositionByteArray(oldMetrics.bracedStarts, start, localMetrics.bracedStarts, newContent.length + 1),
-    bracedClosings: spliceTextMetricPositionByteArray(oldMetrics.bracedClosings, start, localMetrics.bracedClosings, newContent.length + 1),
     bracedEnds: spliceTextMetricPositionByteArray(oldMetrics.bracedEnds, start, localMetrics.bracedEnds, newContent.length + 1),
     linearEnds: spliceTextMetricPositionByteArray(oldMetrics.linearEnds, start, localMetrics.linearEnds, newContent.length + 1),
-    anyEnds: spliceTextMetricPositionByteArray(oldMetrics.anyEnds, start, localMetrics.anyEnds, newContent.length + 1),
   };
   obj._textScriptLayoutMetrics = metrics;
   obj._textScriptLayoutMetricsContent = newContent;
@@ -2317,10 +2310,8 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
   const states = new Array(text.length);
   const caretStates = new Array(text.length + 1);
   const bracedStarts = new Uint8Array(text.length + 1);
-  const bracedClosings = new Uint8Array(text.length + 1);
   const bracedEnds = new Uint8Array(text.length + 1);
   const linearEnds = new Uint8Array(text.length + 1);
-  const anyEnds = new Uint8Array(text.length + 1);
   const starts = new Map();
   const ends = new Map();
   const addEvent = (map, index, range) => {
@@ -2340,7 +2331,6 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
     const range = { start, end, kind };
     addEvent(starts, start, range);
     addEvent(ends, end, range);
-    anyEnds[end] = 1;
     const markerIndex = start - 1;
     if (markerIndex >= 0 && markerIndex < hidden.length) hidden[markerIndex] = 1;
     if (isTextScriptBracedRange(text, range)) {
@@ -2349,7 +2339,6 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
       if (start >= 0 && start < hidden.length) hidden[start] = 1;
       if (end - 1 >= 0 && end - 1 < hidden.length) {
         hidden[end - 1] = 1;
-        bracedClosings[end - 1] = 1;
       }
     } else {
       linearEnds[end] = 1;
@@ -2408,10 +2397,8 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
     states,
     caretStates,
     bracedStarts,
-    bracedClosings,
     bracedEnds,
     linearEnds,
-    anyEnds,
   };
   _scriptIndexCache.set(cacheKey, result);
   trimMapCache(_scriptIndexCache, TEXT_SCRIPT_INDEX_CACHE_MAX_ENTRIES);
@@ -3306,7 +3293,7 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
     const bracedOpeningGap = !!metrics?.bracedStarts?.[rawIndex];
     if (bracedOpeningGap) continue;
 
-    const bracedRangeAtClosing = !!metrics?.bracedClosings?.[rawIndex];
+    const bracedRangeAtClosing = !!metrics?.bracedEnds?.[rawIndex + 1];
     const bracedRangeEnding = !!metrics?.bracedEnds?.[rawIndex];
     const linearRangeEnding = !!metrics?.linearEnds?.[rawIndex];
 
@@ -3316,10 +3303,10 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
       addCandidate(rawIndex, 'after');
     }
     if (bracedRangeAtClosing && !bracedRangeEnding) {
-      addCandidate(rawIndex, metrics?.anyEnds?.[rawIndex] ? 'after' : '');
+      addCandidate(rawIndex, linearRangeEnding ? 'after' : '');
     }
     if (!bracedRangeEnding && !linearRangeEnding && !bracedRangeAtClosing) {
-      addCandidate(rawIndex, metrics?.anyEnds?.[rawIndex] ? 'after' : '');
+      addCandidate(rawIndex);
     }
   }
 

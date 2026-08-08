@@ -618,16 +618,13 @@ const setTextEditMinLinesForSession = (obj, options = {}) => {
 };
 
 const resetTextEditPreservedMinLinesForInput = (obj) => {
-  if (!obj || obj.type !== 'text' || !obj._textEditPreservedMinLines) {
-    return { reset: false };
-  }
+  if (!obj || obj.type !== 'text' || !obj._textEditPreservedMinLines) return null;
   const previousMinLines = obj._editMinLines ?? '';
   const preservedMinLines = obj._textEditPreservedMinLines;
   const nextMinLines = textEditMinLinesForSession(obj, { preserveSize: false });
   obj._editMinLines = nextMinLines;
   delete obj._textEditPreservedMinLines;
   return {
-    reset: true,
     previousMinLines,
     preservedMinLines,
     nextMinLines,
@@ -645,11 +642,10 @@ const shouldDeferTextEditAutoHeightForInput = (obj, options = {}) => {
 const syncTextEditAutoHeightForInput = (obj, minLines = 1, options = {}) => {
   if (shouldDeferTextEditAutoHeightForInput(obj, options)) {
     obj._textEditPendingSizeSync = true;
-    return { heightChanged: false, deferred: true };
+    return false;
   }
-  const heightChanged = syncTextAutoHeight(obj, minLines);
   delete obj._textEditPendingSizeSync;
-  return { heightChanged, deferred: false };
+  return syncTextAutoHeight(obj, minLines);
 };
 
 const setTextScriptCaretAffinity = (obj, index, affinity) => {
@@ -3143,19 +3139,18 @@ function enterEdit(id, {
         }
       : null;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const autoHeightResult = syncTextEditAutoHeightForInput(obj, getTextMinLines(obj), {
+    const heightChanged = syncTextEditAutoHeightForInput(obj, getTextMinLines(obj), {
       forceSync: forceAutoHeight,
     });
-    const heightChanged = autoHeightResult.heightChanged;
     logInputStep('auto-height-done', () => ({
       heightChanged,
-      autoHeightDeferred: autoHeightResult.deferred,
+      autoHeightDeferred: !!obj._textEditPendingSizeSync,
       autoHeightForceSync: forceAutoHeight,
       autoHeightForceReason,
-      restoredMinLinesReset: restoredMinLinesReset.reset,
-      restoredPreviousMinLines: restoredMinLinesReset.previousMinLines ?? '',
-      restoredPreservedMinLines: restoredMinLinesReset.preservedMinLines ?? '',
-      restoredNextMinLines: restoredMinLinesReset.nextMinLines ?? '',
+      restoredMinLinesReset: !!restoredMinLinesReset,
+      restoredPreviousMinLines: restoredMinLinesReset?.previousMinLines ?? '',
+      restoredPreservedMinLines: restoredMinLinesReset?.preservedMinLines ?? '',
+      restoredNextMinLines: restoredMinLinesReset?.nextMinLines ?? '',
       pendingSizeSyncBeforeAutoHeight,
       pendingSizeSync: !!obj._textEditPendingSizeSync,
       width: obj.w,
@@ -4037,7 +4032,7 @@ function exitEdit() {
   const obj = objectsMap.get(id);
   if (obj) {
     if (isTextContentEmpty(obj.data.content)) {
-      BoardfishEditorState.removeEmptyTextObjects({ ids: [id] });
+      BoardfishEditorState.removeObjectsById([id]);
       delete obj._editStartContent;
       delete obj._editMinLines;
       delete obj._textEditPendingSizeSync;

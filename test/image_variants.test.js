@@ -925,7 +925,7 @@ test('undo-history lifecycle prunes image caches to current board, history, and 
   assert.match(imageStateSource, /revokeWebImageSource\(imageStore\[key\]\);/);
   assert.match(imageStateSource, /delete imageStore\[key\];/);
   assert.match(historySource, /function retainedImageKeysForCurrentAndHistory\(\)/);
-  assert.match(historySource, /collectImageKeysFromObjects\(objects, keys\)/);
+  assert.doesNotMatch(historySource, /collectImageKeysFromObjects\(objects, keys\)/);
   assert.match(historySource, /for \(const entry of boardHistory\)/);
   assert.match(historySource, /collectImageKeysFromObjects\(jsClipboard\?\.objects, keys\)/);
   assert.match(historySource, /const clipboardImageData = jsClipboard\?\.imageData \|\| \{\};/);

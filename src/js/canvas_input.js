@@ -467,7 +467,7 @@ function createSelectionDragSession(startClientX, startClientY) {
     else drawBoard();
     updateSelectionOverlay();
   }
-  const dragCommitter = createRafCommitter((dx, dy) => applyGrpDrag(dx, dy));
+  const dragCommitter = createRafCommitter(applyGrpDrag);
   function move(clientX, clientY) {
     if (finished || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
     const dx = (clientX - startClientX) / dragZoom;
@@ -705,7 +705,7 @@ function startObjectDrag(e, obj) {
     ViewportDebug.end(dragDbg);
     updateSelectionOverlay();
   }
-  const dragCommitter = createRafCommitter((dx, dy) => applyDrag(dx, dy));
+  const dragCommitter = createRafCommitter(applyDrag);
 
   function onMove(ev) {
     const dx = (ev.clientX - startX) / zoom;
@@ -860,23 +860,6 @@ canvas.addEventListener('mousedown', (e) => {
 
   e.preventDefault();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let emptyTextDeleted = false;
-  let emptyTextCleanupMs = 0;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const cleanupStart = canvasInputNow();
-    emptyTextDeleted = BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
-      preserveId: editingId,
-    });
-    emptyTextCleanupMs = canvasInputDebugRound(canvasInputNow() - cleanupStart);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  } else {
-    BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
-      preserveId: editingId,
-    });
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const worldStart = canvasInputNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const wp = toWorld(e.clientX, e.clientY);
@@ -901,8 +884,6 @@ canvas.addEventListener('mousedown', (e) => {
     detail: e.detail ?? '',
     additive,
     groupDrag,
-    emptyTextDeleted: !!emptyTextDeleted,
-    emptyTextCleanupMs,
     worldPointMs,
     hitTestMs,
     hitObjectId: obj?.id || '',

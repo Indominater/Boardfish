@@ -501,14 +501,13 @@
   const jelloTranslateForMotion = (motion, t, zoom = 1) => {
     const point = copyJiggleUnit(t, motion);
     const normalizer = motion.copyJiggleNormalizer || getCopyJiggleNormalizer(motion);
-    const groupSize = Math.max(1, Number(motion.groupSize) || 1);
-    const groupSide = groupSize > 1 ? numberInRange(motion.groupSide, 0, -1, 1) : 1;
+    const groupSide = motion.groupSize > 1 ? motion.groupSide : 1;
     const xPx = point.x * normalizer.x * motion.translateXPx;
     const yPx = point.y * normalizer.y * motion.translateYPx;
     const viewZoom = Number(zoom);
     const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
     const result = {
-      groupTranslateX: (groupSize > 1 ? 0 : xPx) / safeZoom,
+      groupTranslateX: (motion.groupSize > 1 ? 0 : xPx) / safeZoom,
       groupTranslateY: yPx / safeZoom,
     };
     if (motion.translateXPx) {
@@ -519,7 +518,7 @@
     }
     if (motion.deformation) {
       const shape = copyJiggleShapeUnit(t, motion) * normalizer.shape;
-      const shapeAsymmetry = groupSize > 1 ? 1 + groupSide * 0.06 : 1;
+      const shapeAsymmetry = motion.groupSize > 1 ? 1 + groupSide * 0.06 : 1;
       const strain = shape * motion.deformation * shapeAsymmetry;
       result.scaleX = Math.exp(-strain);
       result.scaleY = Math.exp(strain);

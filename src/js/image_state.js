@@ -751,9 +751,8 @@ function cacheImage(key, src
   const webRef = isWebImageRef(src);
   const displaySrc = webRef ? webImageDisplaySrc(src) : src;
   if (!webRef && (typeof displaySrc !== 'string' || !displaySrc)) return;
-  if (imageBitmapCache[key]) return imageReadyPromises.get(key) || Promise.resolve();
+  if (!imageBitmapFailed.delete(key) && imageReadyPromises.has(key)) return imageReadyPromises.get(key);
   const generation = _imageStoreGeneration;
-  imageBitmapFailed.delete(key);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cacheStart = performance.now();
   const cacheMetrics = {

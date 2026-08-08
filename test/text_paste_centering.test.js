@@ -100,6 +100,7 @@ function loadAddTextHarness({ syncedHeight = null, withTextLayout = false } = {}
     enterEdit(id, options = {}) {
       context.editCalls.push({ id, options });
       context.editedIds.push(id);
+      if (options.history !== false) context.pushHistory('text-edit-enter');
     },
     invalidateOffscreen() {},
     syncAllTextAutoHeights() {},
@@ -196,6 +197,7 @@ test('addText keeps top-left placement by default', () => {
   assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
   assert.equal(obj.w, DEFAULT_TEXT_BOX_HEIGHT * 8);
   assert.deepEqual(context.editedIds, [obj.id]);
+  assert.deepEqual(context.histories, ['text-edit-enter']);
 });
 
 test('addText retains full text diagnostics for an active debug capture', () => {

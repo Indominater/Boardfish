@@ -2,12 +2,10 @@
 
 (function initInteractionUtils(root) {
   function createRafCommitter(apply) {
-    let raf = null, pending = false, value0, value1, value2, value3;
+    let raf = null, value0, value1, value2, value3;
 
     function commit() {
       raf = null;
-      if (!pending) return;
-      pending = false;
       const next0 = value0, next1 = value1, next2 = value2, next3 = value3;
       value0 = value1 = value2 = value3 = undefined;
       apply(next0, next1, next2, next3);
@@ -16,15 +14,15 @@
     return {
       schedule(next0, next1, next2, next3) {
         value0 = next0; value1 = next1; value2 = next2; value3 = next3;
-        pending = true;
-        if (raf) return;
+        if (raf !== null) return;
         raf = requestAnimationFrame(commit);
       },
       flush() {
-        if (raf) cancelAnimationFrame(raf);
+        if (raf === null) return;
+        cancelAnimationFrame(raf);
         commit();
       },
-      get pending() { return pending; },
+      get pending() { return raf !== null; },
     };
   }
 
@@ -39,10 +37,8 @@
         window.removeEventListener('blur', onCancel);
         window.removeEventListener('pagehide', onCancel);
       }
-      if (document.removeEventListener) {
-        document.removeEventListener('visibilitychange', onVisibilityChange, true);
-        document.removeEventListener('pointercancel', onCancel, true);
-      }
+      document.removeEventListener('visibilitychange', onVisibilityChange, true);
+      document.removeEventListener('pointercancel', onCancel, true);
       up(event);
     };
     const onCancel = (event) => cleanup({
@@ -62,10 +58,8 @@
       window.addEventListener('blur', onCancel);
       window.addEventListener('pagehide', onCancel);
     }
-    if (document.addEventListener) {
-      document.addEventListener('visibilitychange', onVisibilityChange, true);
-      document.addEventListener('pointercancel', onCancel, true);
-    }
+    document.addEventListener('visibilitychange', onVisibilityChange, true);
+    document.addEventListener('pointercancel', onCancel, true);
     return cleanup;
   }
 

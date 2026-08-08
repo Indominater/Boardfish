@@ -85,14 +85,14 @@ test('rejects malformed unused image sources before pruning', () => {
   }), /imageStore\.img-unused must be a string or object/);
 });
 
-test('prunes unused sources and preserves duplicate references through round trips', () => {
+test('prunes unused sources and invisible empty text through round trips', () => {
   const board = BoardSchema.normalizeBoardData({
     imageStore: {
       'img-unused': 'data:image/png;base64,unused',
       'img-2': { path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
       'img-1': 'data:image/png;base64,AQID',
     },
-    objects: [imageObject('obj-1', 'img-1'), imageObject('obj-2', 'img-2', 2), imageObject('obj-3', 'img-1', 3)],
+    objects: [imageObject('obj-1', 'img-1'), { id: 'empty', type: 'text', x: 0, y: 0, w: 10, h: 10, z: 2, data: { content: ' \u200B' } }, imageObject('obj-2', 'img-2', 3), imageObject('obj-3', 'img-1', 4)],
   });
 
   assert.deepEqual(Object.keys(board.imageStore), ['img-1', 'img-2']);

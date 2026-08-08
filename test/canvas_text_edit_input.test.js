@@ -236,7 +236,6 @@ function loadRubberBandHarness() {
     },
     objectIntersectsRect() { return true; },
     BoardfishEditorState: {
-      deleteEmptyTextObjects() {},
       setSelection(ids) {
         context.selections.push(Array.from(ids));
         selectedIds.clear();
