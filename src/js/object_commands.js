@@ -197,7 +197,7 @@ function hideInputShield() {
 }
 
 function isBoardInputBlocked() {
-  return _boardOpening || _inputShieldStack.length > 0 || openingShield.classList.contains('active');
+  return _boardOpening || _inputShieldStack.length > 0;
 }
 
 function isBoardNavigationAllowedWhileBlocked() {

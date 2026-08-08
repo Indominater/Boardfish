@@ -105,11 +105,9 @@ var ManualPerfDebug = (() => {
 
   function boardImageMemorySummary(options = {}) {
     const store = typeof imageStore === 'undefined' ? {} : imageStore;
-    const metadataCache = typeof imageMetadataCache === 'undefined' ? {} : imageMetadataCache;
     const bitmapCache = typeof imageBitmapCache === 'undefined' ? {} : imageBitmapCache;
     const keys = new Set([
       ...safeObjectKeys(store),
-      ...safeObjectKeys(metadataCache),
       ...safeObjectKeys(bitmapCache),
     ]);
     const rows = [];
@@ -120,7 +118,6 @@ var ManualPerfDebug = (() => {
 
     for (const key of keys) {
       const source = store[key];
-      const metadata = metadataCache[key];
       const bitmap = bitmapCache[key];
       const sourceBytesForKey = sourceApproxBytes(source);
       const bitmapBytesForKey = drawableRgbaBytes(bitmap);
@@ -135,8 +132,8 @@ var ManualPerfDebug = (() => {
         sourceMB: mb(sourceBytesForKey),
         bitmapMB: mb(bitmapBytesForKey),
         totalEstimateMB: mb(sourceBytesForKey + bitmapBytesForKey),
-        imageW: metadata?.naturalWidth || metadata?.width || 0,
-        imageH: metadata?.naturalHeight || metadata?.height || 0,
+        imageW: bitmap?.width || 0,
+        imageH: bitmap?.height || 0,
         bitmapW: bitmap?.width || 0,
         bitmapH: bitmap?.height || 0,
       });
@@ -891,7 +888,7 @@ var ManualPerfDebug = (() => {
 
   function textEditAlignKey(obj, content) {
     try {
-      if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj, content);
+      if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj);
     } catch (_) {}
     return '';
   }

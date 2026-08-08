@@ -11,11 +11,12 @@ test('web image export writes original bytes to a picked folder', async () => {
     BoardfishImageStore: globalThis.BoardfishImageStore,
     ExportDebug: globalThis.ExportDebug,
     Blob: globalThis.Blob,
-    getRenderedImageDataUrl: globalThis.getRenderedImageDataUrl,
+    canvasToPngBlob: globalThis.canvasToPngBlob,
     imageNeedsRendering: globalThis.imageNeedsRendering,
     isWebImageRef: globalThis.isWebImageRef,
     performance: globalThis.performance,
     renderImageToCanvas: globalThis.renderImageToCanvas,
+    renderStoredImageToCanvas: globalThis.renderStoredImageToCanvas,
     showDirectoryPicker: globalThis.showDirectoryPicker,
   };
   const sourceBytes = new Uint8Array([1, 2, 3, 4]);
@@ -34,11 +35,11 @@ test('web image export writes original bytes to a picked folder', async () => {
       return {
         async createWritable() {
           return {
-            async write(blob) {
+            async write(data) {
               writes.push({
                 name,
-                bytes: new Uint8Array(await blob.arrayBuffer()),
-                type: blob.type,
+                data,
+                type: data.type || '',
               });
             },
             async close() {},
@@ -55,7 +56,6 @@ test('web image export writes original bytes to a picked folder', async () => {
     recordSaveStart() {},
     step() {},
   };
-  globalThis.getRenderedImageDataUrl = async () => '';
   globalThis.imageNeedsRendering = () => false;
   globalThis.isWebImageRef = (value) => globalThis.BoardfishWebBoardContainer.isWebImageRef(value);
   globalThis.renderImageToCanvas = () => null;
@@ -71,8 +71,28 @@ test('web image export writes original bytes to a picked folder', async () => {
     assert.equal(result.downloadedCount, 1);
     assert.equal(writes.length, 1);
     assert.match(writes[0].name, /^image_[0-9a-f]{6}\.png$/);
-    assert.deepEqual([...writes[0].bytes], [...sourceBytes]);
     assert.equal(writes[0].type, 'image/png');
+    assert.equal(writes[0].data, source.__blob);
+
+    const renderedBytes = new Uint8Array([137, 80, 78, 71]);
+    const renderedBlob = new Blob([renderedBytes], { type: 'image/png' });
+    Object.defineProperty(renderedBlob, 'arrayBuffer', {
+      value() { throw new Error('export should not materialize the encoded PNG'); },
+    });
+    let fallbackSource = null;
+    globalThis.BoardfishImageStore = { getSource: () => source };
+    globalThis.imageNeedsRendering = () => true;
+    globalThis.renderImageToCanvas = () => null;
+    globalThis.renderStoredImageToCanvas = async (_obj, value) => {
+      fallbackSource = value;
+      return { width: 8, height: 8 };
+    };
+    globalThis.canvasToPngBlob = async () => renderedBlob;
+    await globalThis.BoardfishExportUtils.downloadImageObjects(
+      [{ id: 'obj-2', type: 'image', data: { imgKey: 'img-2', rotation: 90 } }], null, { targetMode: 'folder' },
+    );
+    assert.equal(fallbackSource, source);
+    assert.equal(writes[1].data, renderedBlob);
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete globalThis[key];
@@ -94,14 +114,13 @@ test('web image export downloads each file when zip support is unavailable', asy
     BoardfishWebBoardContainer: globalThis.BoardfishWebBoardContainer,
     ExportDebug: globalThis.ExportDebug,
     document: globalThis.document,
-    getRenderedImageDataUrl: globalThis.getRenderedImageDataUrl,
     imageNeedsRendering: globalThis.imageNeedsRendering,
     performance: globalThis.performance,
     renderImageToCanvas: globalThis.renderImageToCanvas,
     setTimeout: globalThis.setTimeout,
     URL: globalThis.URL,
   };
-  const source = globalThis.BoardfishWebBoardContainer.bytesToDataUrl(new Uint8Array([1, 2, 3]), 'image/png');
+  const source = 'data:image/png;base64,AQID';
   const downloads = [];
   const objectUrls = [];
 
@@ -134,7 +153,6 @@ test('web image export downloads each file when zip support is unavailable', asy
       };
     },
   };
-  globalThis.getRenderedImageDataUrl = async () => '';
   globalThis.imageNeedsRendering = () => false;
   globalThis.renderImageToCanvas = () => null;
   globalThis.setTimeout = (fn) => {

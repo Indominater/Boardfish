@@ -7,14 +7,14 @@
   function touchPoint(input, sourceEvent = null) {
     if (!input) return null;
     const pointerId = input.pointerId ?? input.identifier;
-    const x = Number(input.clientX);
-    const y = Number(input.clientY);
+    const x = input.clientX;
+    const y = input.clientY;
     if (pointerId === undefined || pointerId === null || !Number.isFinite(x) || !Number.isFinite(y)) {
       return null;
     }
     const event = sourceEvent || input.sourceEvent || input;
     return {
-      id: String(pointerId),
+      id: pointerId,
       pointerId,
       x,
       y,
@@ -89,7 +89,7 @@
       return points;
     }
 
-    function gesturePayload(point, extra = {}) {
+    function gesturePayload(point, extra) {
       return {
         pointerId: point?.pointerId,
         x: point?.x,
@@ -313,7 +313,7 @@
       pointerCancel: (input, sourceEvent = null) => finishPointer(input, true, sourceEvent),
       cancel,
       hasPointer(pointerId) {
-        return active.has(String(pointerId));
+        return active.has(pointerId);
       },
       activeCount() {
         return active.size;

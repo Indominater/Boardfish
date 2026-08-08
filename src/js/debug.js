@@ -2198,7 +2198,6 @@ var ViewportDebug = (() => {
           source: e.meta?.source || '',
           totalMs: e.meta?.totalMeasuredMs ?? e.total ?? '',
           drawMs: e.meta?.drawMs ?? '',
-          saveViewportMs: e.meta?.saveViewportMs ?? '',
           overlayMs: e.meta?.overlayMs ?? '',
           panX: e.meta?.panX ?? '',
           panY: e.meta?.panY ?? '',
@@ -2477,16 +2476,14 @@ var ViewportDebug = (() => {
       .filter(obj => obj.type === 'image')
       .map(obj => {
         const key = obj.data?.imgKey || '';
-        const img = key ? imageMetadataCache[key] : null;
         const bitmap = key ? imageBitmapCache[key] : null;
         const src = key ? imageStore[key] : null;
         const ready = key ? imageReadyPromises.get(key) : null;
         let status = 'ok';
         if (!key) status = 'missing-key';
         else if (!src) status = 'missing-store';
-        else if (!img) status = 'missing-image-element';
         else if (imageBitmapFailed.has(key)) status = 'bitmap-failed-no-fallback';
-        else if (!bitmap) status = 'loaded-no-bitmap';
+        else if (!bitmap) status = 'missing-image-element';
         return {
           id: obj.id,
           key,
@@ -2497,10 +2494,10 @@ var ViewportDebug = (() => {
           h: Math.round(obj.h),
           sourceKind: typeof isWebImageRef === 'function' && isWebImageRef(src) ? 'web-ref' : typeof src,
           bytes: src?.bytes ?? '',
-          hasImg: !!img,
-          complete: !!img?.complete,
-          naturalW: img?.naturalWidth || 0,
-          naturalH: img?.naturalHeight || 0,
+          hasImg: !!bitmap,
+          complete: !!(bitmap?.width && bitmap?.height),
+          naturalW: bitmap?.width || 0,
+          naturalH: bitmap?.height || 0,
           hasBitmap: !!bitmap,
           bitmapFailed: key ? imageBitmapFailed.has(key) : false,
           hasReadyPromise: !!ready,
@@ -2625,7 +2622,7 @@ var ViewportDebug = (() => {
           visibleImages++;
           const key = obj.data?.imgKey;
           const bitmap = key ? imageBitmapCache[key] : null;
-          const fullSource = bitmap || imageMetadataCache[key] || null;
+          const fullSource = bitmap || null;
           const scalingActive = typeof isViewportImageScalingActive === 'function'
             ? isViewportImageScalingActive()
             : viewportImageScalingEnabled;
@@ -2831,8 +2828,6 @@ var ViewportDebug = (() => {
       maxTotalMs: Math.round(max('totalMs') * 100) / 100,
       avgDrawBoardMs: rows.length ? Math.round(sum('drawBoard') / rows.length * 100) / 100 : 0,
       maxDrawBoardMs: Math.round(max('drawBoard') * 100) / 100,
-      avgSaveViewportMs: rows.length ? Math.round(sum('saveViewport') / rows.length * 100) / 100 : 0,
-      maxSaveViewportMs: Math.round(max('saveViewport') * 100) / 100,
       avgOverlayMs: rows.length ? Math.round(sum('updateSelectionOverlay') / rows.length * 100) / 100 : 0,
       maxOverlayMs: Math.round(max('updateSelectionOverlay') * 100) / 100,
     };

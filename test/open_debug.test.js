@@ -287,7 +287,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'read-board-debug',
     'read-board-shape',
     'applyBoardData:start',
-    'prune-unreferenced-images',
     'clearImageStore',
     'cacheImage:start-all',
     'replaceBoardObjects',

@@ -247,14 +247,14 @@ function loadRubberBandHarness() {
     isBoardNavigationAllowedWhileBlocked: () => false,
     isMultiSelected: () => false,
     hasSelection: () => false,
-    hitTest: () => null,
+    BoardObjectGeometry: { topObjectAtWorldPoint: () => null },
     toWorld: () => ({ x: 0, y: 0 }),
   };
   context.windowEvent = (type) => {
     for (const fn of windowListeners.get(type) || []) fn();
   };
-  context.documentEvent = (type) => {
-    for (const fn of documentListeners.get(type) || []) fn();
+  context.documentEvent = (type, event) => {
+    for (const fn of documentListeners.get(type) || []) fn(event);
   };
 
   vm.createContext(context);
@@ -310,20 +310,39 @@ test('rubber-band selection commits only the latest move in an animation frame',
   assert.equal(context.rubberBand.style.display, 'none');
 });
 
+test('non-Space keydown skips board-pan state checks', () => {
+  const context = loadRubberBandHarness();
+  let blockedChecks = 0;
+  context.isBoardInputBlocked = () => { blockedChecks++; return false; };
+  context.documentEvent('keydown', { code: 'KeyA' });
+  assert.equal(blockedChecks, 0);
+});
+
 test('click-release on an already selected text object enters edit mode', () => {
   const context = loadCanvasInputHarness();
 
   context.startObjectDrag({ clientX: 12, clientY: 22 }, context.obj);
-  context.latestDrag().up({ clientX: 32, clientY: 42 });
+  context.latestDrag().up({ clientX: 32, clientY: 42, isTrusted: true });
 
   assert.deepEqual(context.entered, ['text-1']);
   assert.deepEqual(context.enterOptions, [{ placeInitialCaret: false }]);
   assert.deepEqual(context.editProxy.selection, [3, 3]);
-  assert.equal(context.editProxy.focused, false);
-  context.flushDeferredTasks();
   assert.equal(context.editProxy.focused, true);
   assert.deepEqual(context.hitPoint, { x: 32, y: 42 });
   assert.deepEqual(context.history, []);
+});
+
+test('synthetic click-to-edit leaves focus to the touch adapter', () => {
+  const context = loadCanvasInputHarness();
+
+  context.startObjectDrag({ clientX: 12, clientY: 22 }, context.obj);
+  context.latestDrag().up({ clientX: 32, clientY: 42, isTrusted: false });
+
+  assert.deepEqual(context.entered, ['text-1']);
+  assert.deepEqual(context.editProxy.selection, [3, 3]);
+  assert.equal(context.editProxy.focused, false);
+  context.flushDeferredTasks();
+  assert.equal(context.editProxy.focused, false);
 });
 
 test('dragging an already selected text object translates instead of entering edit mode', () => {

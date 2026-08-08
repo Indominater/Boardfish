@@ -239,15 +239,14 @@ function recordSelectionTextResizeStep(step, dragId, meta = {}) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const unsavedDialogOverlayForInputShield = document.getElementById('dialog-overlay');
-const unsavedDialogForInputShield = document.getElementById('dialog');
+var _dialogResolve = null;
 
 function isUnsavedDialogOpen() {
-  return !!unsavedDialogOverlayForInputShield?.classList.contains('show');
+  return _dialogResolve !== null;
 }
 
 function isEventInsideUnsavedDialog(e) {
-  return !!unsavedDialogForInputShield && e.target instanceof Node && unsavedDialogForInputShield.contains(e.target);
+  return !!unsavedDialog && e.target instanceof Node && unsavedDialog.contains(e.target);
 }
 
 const _inputEventPointElementCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
@@ -293,7 +292,8 @@ const isEventInsideVisibleIsland = (e) => {
 };
 
 const isEventInsideViewportWheelSurface = (e) => {
-  return isEventInsideVisibleContextMenu(e) || isEventInsideVisibleIsland(e);
+  return (e.target instanceof Node && canvas.contains(e.target)) ||
+    isEventInsideVisibleContextMenu(e) || isEventInsideVisibleIsland(e);
 };
 
 function isShieldInputAllowed(e) {
@@ -552,7 +552,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           minObjectScale = Math.max(minObjectScale, MIN_OBJECT_SIZE / snap.w, MIN_OBJECT_SIZE / snap.h);
         }
         minObjectScale = Math.min(1, minObjectScale);
-        function applyMultiResize({ scale }) {
+        const resizeCommitter = createRafCommitter(({ scale }) => {
           for (const snap of snapshots) {
             const o = objectsMap.get(snap.id);
             if (!o) continue;
@@ -561,9 +561,8 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             o.w = snap.w * scale;
             o.h = snap.h * scale;
           }
-          scheduleRender(true, true);
-        }
-        const resizeCommitter = createRafCommitter(applyMultiResize);
+          drawBoard(); updateSelectionOverlay();
+        });
 
         function onMultiMove(ev) {
           const dx = (ev.clientX - startX) / zoom;
@@ -687,14 +686,8 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const scheduleStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        const textGeometryChanged = isText && (
-          beforeX !== obj.x ||
-          beforeY !== obj.y ||
-          beforeW !== obj.w ||
-          beforeH !== obj.h
-        );
-        const renderBoard = !isText || textGeometryChanged;
-        scheduleRender(renderBoard, true);
+        if (!isText || textWidthChanged) drawBoard();
+        updateSelectionOverlay();
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (resizeDebugDragId) {
           const scheduleRenderMs = selectionResizeDebugRound(selectionResizeDebugNow() - scheduleStartedAt);
@@ -728,7 +721,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             autoHeightReason: autoHeightDebug?.autoHeightReason ?? '',
             layoutInvalidationMethod: autoHeightDebug?.layoutInvalidationMethod ?? '',
             pendingSizeSync: false,
-            renderBoard,
+            renderBoard: !isText || textWidthChanged,
             renderOverlay: true,
             scheduleRenderMs,
             applyMs: selectionResizeDebugRound(selectionResizeDebugNow() - applyStartedAt),

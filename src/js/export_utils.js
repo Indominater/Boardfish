@@ -117,28 +117,18 @@
     let width = 0;
     let height = 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const canvas = renderImageToCanvas(obj);
-    if (canvas) {
-      const blob = await canvasToPngBlob(canvas);
-      if (!blob) return null;
-      data = new Uint8Array(await blob.arrayBuffer());
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      width = canvas.width;
-      height = canvas.height;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    } else {
-      const dataUrl = await getRenderedImageDataUrl(obj
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        , dbg
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      );
-      if (!dataUrl || !root.BoardfishWebBoardContainer?.dataUrlToBytes) return null;
-      data = root.BoardfishWebBoardContainer.dataUrlToBytes(dataUrl);
-    }
+    const canvas = renderImageToCanvas(obj) || await renderStoredImageToCanvas(obj, source);
+    if (!canvas) return null;
+    data = await canvasToPngBlob(canvas);
+    if (!data) return null;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    width = canvas.width;
+    height = canvas.height;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       ExportDebug.step(dbg, 'web-export:rendered-blob', {
         imgKey: obj?.data?.imgKey,
-        bytes: data.length,
+        bytes: data.size ?? data.length,
         width,
         height,
         format: 'lossless-png',
@@ -155,7 +145,7 @@
         rendered: true,
         fallbackRender: true,
         sourceKind: imageSourceKind(source),
-        bytes: data.length,
+        bytes: data.size ?? data.length,
         width,
         height,
       };
@@ -330,7 +320,6 @@
 
     if (downloads.length === 1) {
       const item = downloads[0];
-      const blob = new Blob([item.data], { type: item.mime || 'image/png' });
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 1, method: target?.handle ? 'file-picker' : 'download' });
       }
@@ -341,7 +330,7 @@
       let saveStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       if (typeof BOARDFISH_PRODUCTION === 'undefined') saveStart = performance.now();
-      await saveExportBlob(blob, target, item.name);
+      await saveExportData(item.data, target, item.name, item.mime || 'image/png');
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         ExportDebug.recordSaveBatch?.({
           batchIndex: 1,
@@ -351,11 +340,11 @@
           savedCount: downloads.length,
           failedCount: 0,
           missingCount: 0,
-          bytesMB: Math.round(blob.size / 1024 / 1024 * 100) / 100,
+          bytesMB: Math.round((item.data.size ?? item.data.length) / 1024 / 1024 * 100) / 100,
           ms: performance.now() - saveStart,
           method: target?.handle ? 'file-picker' : 'download',
         });
-        ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round(blob.size / 1024 / 1024 * 100) / 100 });
+        ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round((item.data.size ?? item.data.length) / 1024 / 1024 * 100) / 100 });
       }
       if (typeof options.onProgress === 'function') {
         options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length, force: true });
@@ -377,15 +366,14 @@
       if (typeof BOARDFISH_PRODUCTION === 'undefined') savedBytes = 0;
       for (let i = 0; i < downloads.length; i++) {
         const item = downloads[i];
-        const blob = new Blob([item.data], { type: item.mime || 'image/png' });
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         let saveStart;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if (typeof BOARDFISH_PRODUCTION === 'undefined') saveStart = performance.now();
-        await saveExportBlob(blob, target, item.name);
+        await saveExportData(item.data, target, item.name, item.mime || 'image/png');
         savedCount++;
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-          savedBytes += blob.size;
+          savedBytes += item.data.size ?? item.data.length;
           ExportDebug.recordSaveBatch?.({
             batchIndex: i + 1,
             batchCount: downloads.length,
@@ -394,7 +382,7 @@
             savedCount: 1,
             failedCount: 0,
             missingCount: 0,
-            bytesMB: Math.round(blob.size / 1024 / 1024 * 100) / 100,
+            bytesMB: Math.round((item.data.size ?? item.data.length) / 1024 / 1024 * 100) / 100,
             ms: performance.now() - saveStart,
             method: 'download',
           });
@@ -422,19 +410,11 @@
       return { downloadedCount: savedCount, skippedCount, method: 'download' };
     }
 
-    const zipEntries = new Array(downloads.length);
-    for (let i = 0; i < downloads.length; i++) {
-      const item = downloads[i];
-      zipEntries[i] = {
-        name: item.name,
-        data: item.data,
-      };
-    }
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 2, method: target?.handle ? 'zip-file-picker' : 'zip' });
     }
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      await yieldToEventLoop(dbg, 'web-before-zip', { entryCount: zipEntries.length });
+      await yieldToEventLoop(dbg, 'web-before-zip', { entryCount: downloads.length });
     } else {
       await delay(0);
     }
@@ -443,12 +423,12 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       zipStart = performance.now();
-      ExportDebug.step(dbg, 'web-export:zip-start', { entryCount: zipEntries.length });
+      ExportDebug.step(dbg, 'web-export:zip-start', { entryCount: downloads.length });
     }
-    const zip = await root.BoardfishWebBoardContainer.createZipBlob(zipEntries, { materializeBytes: false });
+    const zip = await root.BoardfishWebBoardContainer.createZipBlob(downloads, { materializeBytes: false });
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       const zipMs = performance.now() - zipStart;
-      ExportDebug.step(dbg, 'web-export:zip-done', { entryCount: zipEntries.length, bytes: zip.byteLength, ms: zipMs });
+      ExportDebug.step(dbg, 'web-export:zip-done', { entryCount: downloads.length, bytes: zip.byteLength, ms: zipMs });
       ExportDebug.recordSaveBatch?.({
         batchIndex: 1,
         batchCount: 2,
@@ -461,7 +441,6 @@
         method: 'zip-build',
       });
     }
-    const blob = new Blob([zip.blob], { type: 'application/zip' });
     const filename = target?.filename || `images_${randomHex()}.zip`;
     if (typeof options.onProgress === 'function') {
       options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length, force: true });
@@ -470,7 +449,7 @@
     let saveStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') saveStart = performance.now();
-    await saveExportBlob(blob, target, filename);
+    await saveExportData(zip.blob, target, filename, 'application/zip');
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       ExportDebug.recordSaveBatch?.({
         batchIndex: 2,
@@ -554,7 +533,7 @@
     const fileHandle = await directoryHandle.getFileHandle(entry.name, { create: true });
     const writable = await fileHandle.createWritable();
     try {
-      await writable.write(new Blob([entry.data], { type: entry.mime || 'image/png' }));
+      await writable.write(entry.data);
     } finally {
       await writable.close();
     }
@@ -715,17 +694,17 @@
     };
   }
 
-  async function saveExportBlob(blob, target, fallbackName) {
+  async function saveExportData(data, target, fallbackName, type) {
     if (target?.handle) {
       const writable = await target.handle.createWritable();
       try {
-        await writable.write(blob);
+        await writable.write(data);
       } finally {
         await writable.close();
       }
       return true;
     }
-    downloadBlob(blob, fallbackName);
+    downloadBlob(data instanceof Blob && data.type === type ? data : new Blob([data], { type }), fallbackName);
     return false;
   }
 

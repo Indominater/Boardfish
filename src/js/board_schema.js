@@ -13,11 +13,6 @@
     isSupportedBoardVersion,
   } = BoardTypes;
 
-  function normalizeBoardRotation(value) {
-    if (typeof root.normalizeRotation === 'function') return root.normalizeRotation(value);
-    return ((Number(value) || 0) % 360 + 360) % 360;
-  }
-
   function normalizeViewport(viewport = {}) {
     return {
       panX: finiteNumber(viewport.panX),
@@ -78,7 +73,7 @@
       normalized.data.imgKey = data.imgKey;
       normalized.data.flipX = !!data.flipX;
       normalized.data.flipY = !!data.flipY;
-      normalized.data.rotation = normalizeBoardRotation(finiteNumber(data.rotation));
+      normalized.data.rotation = ((finiteNumber(data.rotation) % 360) + 360) % 360;
     }
     return normalized;
   }
@@ -91,26 +86,27 @@
     if (data.format != null && data.format !== BOARD_FORMAT) {
       throw new Error(`unsupported board format ${data.format}`);
     }
-    const imageStore = {};
-    if (isObject(data.imageStore)) {
-      for (const key in data.imageStore) {
-        if (!Object.prototype.hasOwnProperty.call(data.imageStore, key)) continue;
-        const value = data.imageStore[key];
-        if (!key) throw new Error('imageStore contains an empty key');
-        if (typeof value !== 'string' && !isObject(value)) {
-          throw new Error(`imageStore.${key} must be a string or object`);
-        }
-        imageStore[key] = value;
+    const sourceImageStore = isObject(data.imageStore) ? data.imageStore : {};
+    for (const key in sourceImageStore) {
+      if (!Object.prototype.hasOwnProperty.call(sourceImageStore, key)) continue;
+      const value = sourceImageStore[key];
+      if (!key) throw new Error('imageStore contains an empty key');
+      if (typeof value !== 'string' && !isObject(value)) {
+        throw new Error(`imageStore.${key} must be a string or object`);
       }
     }
     const objects = [];
     if (Array.isArray(data.objects)) {
       for (let i = 0; i < data.objects.length; i++) objects.push(normalizeObject(data.objects[i], i));
     }
+    const imageStore = {};
     for (const obj of objects) {
-      if (obj.type === OBJECT_TYPES.IMAGE && !Object.prototype.hasOwnProperty.call(imageStore, obj.data.imgKey)) {
+      if (obj.type !== OBJECT_TYPES.IMAGE) continue;
+      const key = obj.data.imgKey;
+      if (key === '__proto__' || !Object.prototype.hasOwnProperty.call(sourceImageStore, key)) {
         throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);
       }
+      imageStore[key] = sourceImageStore[key];
     }
     const normalized = {
       version: Number(data.version || 3),

@@ -646,6 +646,70 @@ test('open prewarm builds visible scaled variants before first render', async ()
   assert.equal(resizeOptions[0].resizeQuality, 'high');
 });
 
+test('visible variant prewarm keeps one timer and waits for the latest input', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const clock = installManualTimers(context);
+  let now = 1000;
+  context.performance.now = () => now;
+  context.lastViewportInputAt = now;
+  context.currentViewportWorldRect = () => ({});
+
+  context.scheduleVisibleScaledVariantPrewarmAfterIdle();
+  now = context.lastViewportInputAt = 1100;
+  context.scheduleVisibleScaledVariantPrewarmAfterIdle();
+  assert.equal(clock.timers.length, 1);
+  now = 1180;
+  clock.run(clock.pending()[0]);
+  assert.equal(clock.pending()[0].ms, 100);
+  now = 1280;
+  clock.run(clock.pending()[0]);
+  assert.equal(context.imageScaledVariantPrewarmRunCount, 1);
+});
+
+test('scaled variant ready render uses input activity at timer fire after input settles', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const clock = installManualTimers(context);
+  const renders = [];
+  let now = 1000;
+  context.performance.now = () => now;
+  context.lastViewportInputAt = 990;
+  context.scheduleRender = (...args) => { renders.push(args); };
+
+  context.scheduleScaledVariantReadyRender();
+  assert.equal(clock.pending().length, 1);
+  assert.equal(clock.pending()[0].ms, 170);
+
+  now = 1170;
+  clock.run(clock.pending()[0]);
+
+  assert.deepEqual(renders, [[true, null, 'image-scale-variant-batch-1']]);
+  assert.equal(clock.pending().length, 0);
+});
+
+test('scaled variant ready render defers when input starts before timer fire', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const clock = installManualTimers(context);
+  const renders = [];
+  let now = 1000;
+  context.performance.now = () => now;
+  context.lastViewportInputAt = 0;
+  context.scheduleRender = (...args) => { renders.push(args); };
+
+  context.scheduleScaledVariantReadyRender();
+  assert.equal(clock.pending().length, 1);
+  assert.equal(clock.pending()[0].ms, 120);
+
+  context.lastViewportInputAt = 990;
+  clock.run(clock.pending()[0]);
+  assert.deepEqual(renders, []);
+  assert.equal(clock.pending().length, 1);
+  assert.equal(clock.pending()[0].ms, 170);
+
+  now = 1170;
+  clock.run(clock.pending()[0]);
+  assert.deepEqual(renders, [[true, null, 'image-scale-variant-batch-1']]);
+});
+
 test('scaled variant ready render is held while opening previews are active', () => {
   const context = loadImageVariantsForPlatform(false);
   const renders = [];
@@ -684,7 +748,7 @@ test('scaled variant ready render is held while opening previews are active', ()
   assert.equal(timers.length, 1);
   timers[0]();
 
-  assert.deepEqual(renders, [[true, false, 'image-scale-variant-batch-1']]);
+  assert.deepEqual(renders, [[true, null, 'image-scale-variant-batch-1']]);
   assert.equal(context.imageScaledVariantRenderCount, 0);
 });
 
@@ -715,7 +779,7 @@ test('a ready scaled variant redraws immediately when its preview releases indep
   context.scheduleScaledVariantReadyRender();
 
   assert.equal(invalidated, 1);
-  assert.deepEqual(renders, [[true, false, 'open-preview-scaled-variant-release-1']]);
+  assert.deepEqual(renders, [[true, null, 'open-preview-scaled-variant-release-1']]);
   assert.equal(heldRenders.length, 0);
   assert.equal(context.imageScaledVariantRenderCount, 0);
 });
@@ -757,7 +821,7 @@ test('failed open previews do not hold scaled variant ready renders', () => {
   assert.equal(heldRenders.length, 0);
   assert.equal(timers.length, 1);
   timers[0]();
-  assert.deepEqual(renders, [[true, false, 'image-scale-variant-batch-1']]);
+  assert.deepEqual(renders, [[true, null, 'image-scale-variant-batch-1']]);
   assert.equal(context.imageScaledVariantRenderCount, 0);
 });
 
@@ -873,9 +937,9 @@ test('undo-history lifecycle prunes image caches to current board, history, and 
 test('async image cache writes use generation guards', () => {
   const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
 
-  assert.match(imageStateSource, /const isImageDisplayCacheRequestCurrent = \(key, src, generation\) =>/);
-  assert.match(imageStateSource, /if \(!isImageDisplayCacheRequestCurrent\(key, displaySrc, generation\)\)/);
-  assert.match(imageStateSource, /if \(isImageDisplayCacheRequestCurrent\(key, displaySrc, generation\)\) imageBitmapFailed\.add\(key\);/);
+  assert.match(imageStateSource, /const isImageDisplayCacheRequestCurrent = \(key, source, displaySrc, generation\) =>/);
+  assert.match(imageStateSource, /if \(!isImageDisplayCacheRequestCurrent\(key, src, displaySrc, generation\)\)/);
+  assert.match(imageStateSource, /if \(isImageDisplayCacheRequestCurrent\(key, src, displaySrc, generation\)\) imageBitmapFailed\.add\(key\);/);
 });
 
 test('low-zoom active navigation records visible full-size fallbacks until scaled variants are ready', () => {

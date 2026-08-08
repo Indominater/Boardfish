@@ -148,7 +148,9 @@ test('image storage is web-ref and data-url based', () => {
   assert.match(imageState, /const revokeWebImageSource = \(src\) =>/);
   assert.match(imageState, /const webImageDisplaySrc = \(src\) =>/);
   assert.match(imageState, /revokeWebImageSource\(imageStore\[key\]\);/);
-  assert.match(imageInsert, /createWebImageSourceFromBytes\(file, imgKey, bytes\)/);
+  assert.match(imageInsert, /createWebImageSourceFromBlob\(file, imgKey\)/);
+  assert.match(imageInsert, /file instanceof File[\s\S]*file\.arrayBuffer\(\)/);
+  assert.doesNotMatch(imageInsert, /readAsArrayBuffer/);
   assert.match(imageInsert, /const WEB_IMAGE_INSERT_CONCURRENCY = 3;/);
   assert.match(boardContainer, /createWebImageRef/);
   assert.match(boardContainer, /web: true/);
@@ -164,6 +166,7 @@ test('clipboard and debug tooling use browser clipboard paths', () => {
   assert.match(clipboardExport, /copy:web-clipboard-write-end/);
   assert.match(clipboardExport, /web-paste-browser/);
   assert.match(startupDebug, /method: 'browser-download'/);
+  assert.match(startupDebug, /await applyAppTheme\(targetTheme[^\n]+\n\s+await new Promise\(\(resolve\) => requestAnimationFrame\(resolve\)\);/);
   assert.doesNotMatch(startupDebug, /writeDebugLogFile/);
 });
 
@@ -235,6 +238,10 @@ test('dark mode icon is local and offline-safe', () => {
   assert.match(html, /id="ctx-btn-dark-mode"[\s\S]*<svg viewBox="0 0 24 24"/);
   assert.doesNotMatch(styles, /material-symbols-outlined/i);
   assert.doesNotMatch(sw, /fonts\.googleapis\.com|fonts\.gstatic\.com/i);
+  assert.match(sw, /if \(isCacheFirstAssetUrl\(url\)\)[\s\S]*\[a-f0-9\]\{12\}[\s\S]*cached\.then\(\(hit\) => hit \|\| fetchAndCacheRequest\(event, request, url\)\)/);
+  assert.match(sw, /const update = fetchAndCacheRequest[\s\S]*event\.waitUntil\(update\)/);
+  assert.match(sw, /event\.waitUntil\(caches\.open\(BOARDFISH_CACHE\)[\s\S]*cache\.put\(request, copy\)/);
+  assert.doesNotMatch(sw, /await cache\.put/);
 });
 
 test('fresh app sessions default to dark mode', () => {
@@ -250,6 +257,8 @@ test('fresh app sessions default to dark mode', () => {
   assert.match(app, /var DEFAULT_APP_THEME = 'dark';/);
   assert.match(app, /var appTheme = DEFAULT_APP_THEME;/);
   assert.match(app, /catch \(_\) \{\s*return DEFAULT_APP_THEME;\s*\}/);
+  assert.match(app, /function repaintBoardForThemeChange\(\)[\s\S]*scheduleRender\(true, false/);
+  assert.doesNotMatch(app.match(/function repaintBoardForThemeChange\(\)[\s\S]*?\n\}/)?.[0] || '', /drawBoard/);
 });
 
 test('dev server returns 400 for malformed URL encodings', () => {
@@ -269,7 +278,7 @@ test('image hydration queue processes until its time budget is consumed', () => 
 
 test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing size', () => {
   const viewport = readSource('src/js/viewport.js');
-  const start = viewport.indexOf('function _rebuildOffscreen()');
+  const start = viewport.indexOf('function _rebuildOffscreen(dpr, viewportRect)');
   const end = viewport.indexOf('\nfunction', start + 1);
   const source = viewport.slice(start, end > start ? end : undefined);
 
@@ -279,7 +288,8 @@ test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing
   assert.doesNotMatch(source, /scheduleRender/);
   assert.match(source, /if \(_offscreen\.width !== boardCanvas\.width\) _offscreen\.width = boardCanvas\.width;/);
   assert.match(source, /if \(_offscreen\.height !== boardCanvas\.height\) _offscreen\.height = boardCanvas\.height;/);
-  assert.match(source, /return ready;/);
+  assert.match(source, /_offscreenDirty = false;/);
+  assert.doesNotMatch(viewport, /_offscreen(?:Rebuilding|Version)/);
 });
 
 test('viewport transforms do not schedule an unbounded automatic text prewarm', () => {
@@ -302,22 +312,18 @@ test('background open hydration yields while viewport input is active', () => {
   assert.match(source, /batchSize = 2/);
   assert.match(source, /performance\.now\(\) - lastViewportInputAt/);
   assert.match(source, /inputIdleMs < BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS/);
-  assert.match(source, /hydrationPriorityKeys = truthyKeyList\(priorityKeys\)/);
+  assert.match(source, /\.\.\.truthyKeyList\(priorityKeys\)[\s\S]*\.\.\.getPendingHydratableImageKeys\(\)/);
   assert.match(source, /BoardfishImageStore\.hasDisplayImage\(key\)/);
-  assert.match(source, /getPendingHydratableImageKeys\(batchSize - keys\.length, selected\)/);
+  assert.doesNotMatch(source, /getPendingHydratableImageKeys\(batchSize - keys\.length/);
   assert.match(source, /await new Promise\(\(resolve\) => setTimeout/);
   assert.match(ioClose, /backgroundHydrationPriorityKeys = visibleKeys;/);
   assert.match(ioClose, /hydrateRemainingImagesForOpen\(dbg, 2, backgroundHydrationPriorityKeys\)/);
 });
 
-test('save validation reuses container serialization instead of stringifying the board twice', () => {
+test('save and open validation stay at the authoritative container boundaries', () => {
   const ioClose = readSource('src/js/io_close.js');
-  const validateStart = ioClose.indexOf('function validateBoardPayloadForSave');
-  const validateEnd = ioClose.indexOf('\nfunction validateBoardPayloadForOpen', validateStart);
-  const validateSource = ioClose.slice(validateStart, validateEnd);
-  assert.ok(validateStart >= 0 && validateEnd > validateStart);
-  assert.doesNotMatch(validateSource, /JSON\.stringify|TextEncoder|textByteLength/);
-  assert.match(validateSource, /boardJsonBytes: 0/);
+  assert.doesNotMatch(ioClose, /validateBoardPayloadFor(?:Save|Open)/);
+  assert.doesNotMatch(ioClose, /boardLimitImageBytesForData/);
 
   const container = readSource('src/js/web_board_container.js');
   const createStart = container.indexOf('async function createBoardContainerBlob');

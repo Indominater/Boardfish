@@ -70,6 +70,15 @@ function centralDirectoryEntryOffset(bytes, name) {
   throw new Error(`central entry not found: ${name}`);
 }
 
+test('ZIP CRC work yields on four-MiB budgets for bytes and one-MiB Blob reads', async (t) => {
+  let yields = 0;
+  globalThis.scheduler = { yield: () => { yields++; return Promise.resolve(); } };
+  t.after(() => { delete globalThis.scheduler; });
+  const bytes = new Uint8Array(5 * 1024 * 1024);
+  const countYields = async (data) => { yields = 0; await WebContainer.createZipBlob([{ name: 'payload.bin', data }], { materializeBytes: false }); return yields; };
+  assert.deepEqual([await countYields(bytes), await countYields(new Blob([bytes]))], [2, 2]);
+});
+
 function createDeflatedZipWithAdvertisedSize(name, data, advertisedSize) {
   const nameBytes = Buffer.from(name);
   const compressed = zlib.deflateRawSync(Buffer.from(data));
@@ -152,7 +161,7 @@ test('writes and reads Boardfish .bf containers in browser format', async () => 
   assert.equal(source.mime, 'image/png');
   assert.equal(source.ext, 'png');
   assert.equal(source.bytes, 4);
-  assert.equal(WebContainer.dataUrlForImageSource(source), imageStore['img-1']);
+  assert.deepEqual(WebContainer.bytesForImageSource(source), new Uint8Array([1, 2, 3, 4]));
   assert.equal(result.debug.image_bytes, 4);
   assert.equal(result.debug.format, 'container-web');
   assert.equal(typeof result.debug.total_ms, 'number');
@@ -172,6 +181,25 @@ test('writes and reads Boardfish .bf containers in browser format', async () => 
 
   const savedAgain = await WebContainer.createBoardContainerBlob(board, result.board.imageStore);
   assert.equal(savedAgain.imageBytes, 4);
+});
+
+test('read rejects unsupported image metadata during entry derivation', async () => {
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {
+      'img-1': { path: 'images/img-1.png', mime: 'text/plain', ext: 'png' },
+    },
+    objects: [],
+  };
+  const payload = await WebContainer.createBoardContainerBlob(board, {
+    'img-1': 'data:image/png;base64,AQIDBA==',
+  });
+
+  await assert.rejects(
+    () => WebContainer.readBoardContainer(payload.blob),
+    /unsupported image metadata/,
+  );
 });
 
 test('container creation validates the one exact UTF-8 board serialization before ZIP work', async () => {
@@ -289,8 +317,7 @@ test('reads Boardfish containers with lazy image refs for fast web opens', async
   assert.equal(result.debug.image_crc_count, 0);
   assert.equal(result.debug.warnings.length, 0);
   assert.equal(WebContainer.bytesForImageSource(source), null);
-  assert.equal((await WebContainer.bytesForImageSourceAsync(source))[0], 1);
-  assert.equal(await WebContainer.dataUrlForImageSourceAsync(source), imageStore['img-1']);
+  assert.deepEqual(await WebContainer.bytesForImageSourceAsync(source), new Uint8Array([1, 2, 3, 4]));
 });
 
 test('Blob lazy opens use range reads and preserve exact image bytes on re-save', async () => {
@@ -358,7 +385,6 @@ test('Blob lazy opens use range reads and preserve exact image bytes on re-save'
 
   const extracted = await WebContainer.bytesForImageSourceAsync(source);
   assert.deepEqual(extracted, imageBytes);
-  assert.equal(await WebContainer.dataUrlForImageSourceAsync(source), WebContainer.bytesToDataUrl(imageBytes, 'image/png'));
 
   let fullImageBlobReads = 0;
   Object.defineProperty(source.__blob, 'arrayBuffer', {
@@ -390,71 +416,6 @@ test('Blob lazy opens use range reads and preserve exact image bytes on re-save'
   assert.equal(savedAgain.imageEntries[0].path, 'images/img-1.png');
 });
 
-test('persisted container metadata refreshes Blob refs without changing image bytes', async () => {
-  const imageBytes = new Uint8Array(96 * 1024);
-  for (let i = 0; i < imageBytes.length; i++) imageBytes[i] = (i * 17) % 251;
-  const board = {
-    version: 3,
-    format: 'boardfish-container',
-    imageStore: {
-      'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' },
-    },
-    objects: [
-      { id: 'obj-1', type: 'image', x: 0, y: 0, w: 10, h: 10, z: 1, data: { imgKey: 'img-1' } },
-    ],
-  };
-  const initial = await WebContainer.createBoardContainerBlob(board, { 'img-1': imageBytes });
-  const opened = await WebContainer.readBoardContainer(initial.blob, {
-    lazyImageRefs: true,
-    verifyImageCrc: false,
-  });
-  const source = opened.board.imageStore['img-1'];
-  const originalSource = source;
-  const originalBlob = source.__blob;
-  const originalDisplaySrc = WebContainer.displaySrcForImageSource(source);
-  const saved = await WebContainer.createBoardContainerBlob(
-    board,
-    opened.board.imageStore,
-    { materializeBytes: false },
-  );
-  assert.equal(saved.zipMode, 'blob-parts');
-
-  const persistedBlob = new Blob([saved.blob], { type: saved.blob.type });
-  const persistedRefresh = await WebContainer.refreshBlobBackedImageRefsFromContainer(
-    board,
-    opened.board.imageStore,
-    { blob: persistedBlob, imageArchiveEntries: saved.imageArchiveEntries },
-  );
-  assert.equal(opened.board.imageStore['img-1'], originalSource);
-  assert.deepEqual(persistedRefresh, { refreshed: 1, bytes: imageBytes.length, skipped: '' });
-  assert.notEqual(source.__blob, originalBlob);
-  assert.equal(source.objectUrl, undefined);
-  const persistedDisplaySrc = WebContainer.displaySrcForImageSource(source);
-  if (originalDisplaySrc && persistedDisplaySrc) assert.notEqual(persistedDisplaySrc, originalDisplaySrc);
-
-  Object.defineProperties(originalBlob, {
-    arrayBuffer: {
-      configurable: true,
-      value() { throw new Error('stale image Blob is no longer readable'); },
-    },
-    slice: {
-      configurable: true,
-      value() { throw new Error('stale image Blob is no longer sliceable'); },
-    },
-  });
-
-  assert.deepEqual(await WebContainer.bytesForImageSourceAsync(source), imageBytes);
-  const savedAgain = await WebContainer.createBoardContainerBlob(board, opened.board.imageStore, {
-    materializeBytes: false,
-  });
-  assert.equal(savedAgain.crcComputedEntries, 1);
-  assert.equal(savedAgain.crcReusedEntries, 1);
-  const reopened = await WebContainer.readBoardContainer(savedAgain.blob, {
-    lazyImageRefs: true,
-    verifyImageCrc: true,
-  });
-  assert.deepEqual(await WebContainer.bytesForImageSourceAsync(reopened.board.imageStore['img-1']), imageBytes);
-});
 
 test('volatile File-backed image refs detach once before repeated saves', async () => {
   const imageBytes = new Uint8Array(160 * 1024);
@@ -592,7 +553,6 @@ test('Uint8Array lazy opens retain synchronous byte-backed compatibility', async
   assert.equal(source.__blob, undefined);
   assert.ok(source.__lazy?.containerBytes);
   assert.deepEqual(WebContainer.bytesForImageSource(source), new Uint8Array([1, 2, 3, 4]));
-  assert.equal(WebContainer.dataUrlForImageSource(source), imageStore['img-1']);
 });
 
 test('read validates advertised image bytes before materializing image entries', async () => {
@@ -688,9 +648,8 @@ test('creates byte-backed web image refs for inserted files', async () => {
 
   assert.equal(WebContainer.isWebImageRef(source), true);
   assert.equal(source.bytes, 5);
-  assert.equal(source.dataUrl ? source.dataUrl.startsWith('data:image/jpeg;base64,') : true, true);
-  assert.equal(WebContainer.bytesForImageSource(source).length, 5);
-  assert.equal(WebContainer.dataUrlForImageSource(source), 'data:image/jpeg;base64,AQIDBAU=');
+  assert.equal(WebContainer.displaySrcForImageSource(source), '');
+  assert.deepEqual(WebContainer.bytesForImageSource(source), new Uint8Array([1, 2, 3, 4, 5]));
 });
 
 test('rejects tiny malformed containers without raw DataView range errors', async () => {
@@ -739,6 +698,10 @@ test('image CRC mismatch is reported as a warning while preserving recoverable d
   assert.equal(result.debug.warnings[0].type, 'crc-mismatch');
   assert.equal(result.debug.warnings[0].path, 'images/img-1.png');
   assert.equal(WebContainer.bytesForImageSource(result.board.imageStore['img-1'])[0], 254);
+
+  const unchecked = await WebContainer.readBoardContainer(corrupt, { verifyImageCrc: false });
+  assert.equal(unchecked.debug.warnings.length, 0);
+  assert.equal(WebContainer.bytesForImageSource(unchecked.board.imageStore['img-1'])[0], 254);
 });
 
 test('Blob lazy refs preserve default image CRC warning behavior', async () => {

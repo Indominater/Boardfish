@@ -57,32 +57,6 @@
     }
   }
 
-  function u16(value) {
-    const out = new Uint8Array(2);
-    const view = new DataView(out.buffer);
-    view.setUint16(0, value, true);
-    return out;
-  }
-
-  function u32(value) {
-    const out = new Uint8Array(4);
-    const view = new DataView(out.buffer);
-    view.setUint32(0, value >>> 0, true);
-    return out;
-  }
-
-  function concatBytes(parts) {
-    let total = 0;
-    for (const part of parts) total += part.length;
-    const out = new Uint8Array(total);
-    let offset = 0;
-    for (const part of parts) {
-      out.set(part, offset);
-      offset += part.length;
-    }
-    return out;
-  }
-
   function makeCrcTable() {
     const table = new Uint32Array(256);
     for (let n = 0; n < 256; n++) {
@@ -96,10 +70,7 @@
   }
 
   function crc32(bytes) {
-    if (!crcTable) crcTable = makeCrcTable();
-    let crc = 0xFFFFFFFF;
-    crc = crc32Update(crc, bytes, 0, bytes.length);
-    return (crc ^ 0xFFFFFFFF) >>> 0;
+    return (crc32Update(0xFFFFFFFF, bytes) ^ 0xFFFFFFFF) >>> 0;
   }
 
   function crc32Update(crc, bytes, start = 0, end = bytes.length) {
@@ -121,35 +92,26 @@
     return new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  async function maybeYield(state) {
-    if (!state || state.everyMs <= 0) return;
-    const now = nowMs();
-    if (now - state.lastYieldAt < state.everyMs) return;
-    state.lastYieldAt = now;
-    await yieldToEventLoop();
-  }
+  const BYTE_CRC_CHUNK_SIZE = 4 * 1024 * 1024;
+  const BLOB_CRC_CHUNK_SIZE = 1024 * 1024;
 
-  async function crc32Async(bytes, yieldState = null) {
-    if (!crcTable) crcTable = makeCrcTable();
+  async function crc32Async(bytes) {
     let crc = 0xFFFFFFFF;
-    const chunkSize = 1024 * 1024;
-    for (let start = 0; start < bytes.length; start += chunkSize) {
-      crc = crc32Update(crc, bytes, start, Math.min(bytes.length, start + chunkSize));
-      await maybeYield(yieldState);
+    for (let start = 0; start < bytes.length; start += BYTE_CRC_CHUNK_SIZE) {
+      crc = crc32Update(crc, bytes, start, Math.min(bytes.length, start + BYTE_CRC_CHUNK_SIZE));
+      await yieldToEventLoop();
     }
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
 
-  async function crc32BlobAsync(blob, yieldState = null) {
-    if (!crcTable) crcTable = makeCrcTable();
+  async function crc32BlobAsync(blob) {
     let crc = 0xFFFFFFFF;
-    const chunkSize = 1024 * 1024;
-    for (let start = 0; start < blob.size; start += chunkSize) {
-      const end = Math.min(blob.size, start + chunkSize);
+    for (let start = 0; start < blob.size; start += BLOB_CRC_CHUNK_SIZE) {
+      const end = Math.min(blob.size, start + BLOB_CRC_CHUNK_SIZE);
       const chunk = new Uint8Array(await blob.slice(start, end).arrayBuffer());
       if (chunk.length !== end - start) throw new Error('truncated image Blob during save');
       crc = crc32Update(crc, chunk, 0, chunk.length);
-      await maybeYield(yieldState);
+      if (end === blob.size || end % BYTE_CRC_CHUNK_SIZE === 0) await yieldToEventLoop();
     }
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
@@ -177,48 +139,44 @@
       throw new Error('Boardfish container is too large for ZIP32');
     }
     const { time, date } = dosDateTime(entry.date);
+    const bytes = new Uint8Array(30 + name.length);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, ZIP_LOCAL_FILE_HEADER, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 0x0800, true);
+    view.setUint16(8, ZIP_METHOD_STORED, true);
+    view.setUint16(10, time, true);
+    view.setUint16(12, date, true);
+    view.setUint32(14, entry.crc, true);
+    view.setUint32(18, entry.byteLength, true);
+    view.setUint32(22, entry.byteLength, true);
+    view.setUint16(26, name.length, true);
+    bytes.set(name, 30);
     return {
       offset,
       name,
-      bytes: concatBytes([
-        u32(ZIP_LOCAL_FILE_HEADER),
-        u16(20),
-        u16(0x0800),
-        u16(ZIP_METHOD_STORED),
-        u16(time),
-        u16(date),
-        u32(entry.crc),
-        u32(entry.byteLength),
-        u32(entry.byteLength),
-        u16(name.length),
-        u16(0),
-        name,
-      ]),
+      bytes,
     };
   }
 
   function centralDirectoryHeader(entry, local) {
     const { time, date } = dosDateTime(entry.date);
-    return concatBytes([
-      u32(ZIP_CENTRAL_DIRECTORY),
-      u16(20),
-      u16(20),
-      u16(0x0800),
-      u16(ZIP_METHOD_STORED),
-      u16(time),
-      u16(date),
-      u32(entry.crc),
-      u32(entry.byteLength),
-      u32(entry.byteLength),
-      u16(local.name.length),
-      u16(0),
-      u16(0),
-      u16(0),
-      u16(0),
-      u32(0),
-      u32(local.offset),
-      local.name,
-    ]);
+    const bytes = new Uint8Array(46 + local.name.length);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, ZIP_CENTRAL_DIRECTORY, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 20, true);
+    view.setUint16(8, 0x0800, true);
+    view.setUint16(10, ZIP_METHOD_STORED, true);
+    view.setUint16(12, time, true);
+    view.setUint16(14, date, true);
+    view.setUint32(16, entry.crc, true);
+    view.setUint32(20, entry.byteLength, true);
+    view.setUint32(24, entry.byteLength, true);
+    view.setUint16(28, local.name.length, true);
+    view.setUint32(42, local.offset, true);
+    bytes.set(local.name, 46);
+    return bytes;
   }
 
   function endOfCentralDirectory(entryCount, centralSize, centralOffset) {
@@ -235,16 +193,14 @@
     ) {
       throw new Error('Boardfish container is too large for ZIP32');
     }
-    return concatBytes([
-      u32(ZIP_END_OF_CENTRAL_DIRECTORY),
-      u16(0),
-      u16(0),
-      u16(entryCount),
-      u16(entryCount),
-      u32(centralSize),
-      u32(centralOffset),
-      u16(0),
-    ]);
+    const bytes = new Uint8Array(ZIP_EOCD_MIN_SIZE);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, ZIP_END_OF_CENTRAL_DIRECTORY, true);
+    view.setUint16(8, entryCount, true);
+    view.setUint16(10, entryCount, true);
+    view.setUint32(12, centralSize, true);
+    view.setUint32(16, centralOffset, true);
+    return bytes;
   }
 
   async function createZipBlob(entries, options = {}) {
@@ -273,10 +229,6 @@
           : null,
       };
     }
-    const yieldState = {
-      everyMs: Number(options.yieldEveryMs) || 48,
-      lastYieldAt: nowMs(),
-    };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     let crcComputedEntries = 0;
     let crcReusedEntries = 0;
@@ -291,8 +243,8 @@
         continue;
       }
       entry.crc = isNativeBlobPart(entry.data)
-        ? await crc32BlobAsync(entry.data, yieldState)
-        : await crc32Async(entry.data, yieldState);
+        ? await crc32BlobAsync(entry.data)
+        : await crc32Async(entry.data);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDiagnostics) {
         crcComputedEntries++;
@@ -307,19 +259,19 @@
     const localParts = [];
     const centralParts = [];
     let offset = 0;
+    let centralSize = 0;
     for (const entry of normalized) {
       const local = localFileHeader(entry, offset);
-      entry.dataOffset = offset + local.bytes.length;
       localParts.push(local.bytes, entry.data);
       offset += local.bytes.length + entry.byteLength;
-      centralParts.push(centralDirectoryHeader(entry, local));
+      const central = centralDirectoryHeader(entry, local);
+      centralParts.push(central);
+      centralSize += central.length;
     }
     const centralOffset = offset;
-    const central = concatBytes(centralParts);
-    const eocd = endOfCentralDirectory(normalized.length, central.length, centralOffset);
-    localParts.push(central, eocd);
-    const byteLength = offset + central.length + eocd.length;
-    const blob = new Blob(localParts, { type: 'application/octet-stream' });
+    const eocd = endOfCentralDirectory(normalized.length, centralSize, centralOffset);
+    const byteLength = offset + centralSize + eocd.length;
+    const blob = new Blob(localParts.concat(centralParts, eocd), { type: 'application/octet-stream' });
     const keepBytesBelow = Number(options.keepBytesBelow) || 8 * 1024 * 1024;
     const materializeBytes = options.materializeBytes !== false;
     const isSmallPayload = byteLength <= keepBytesBelow;
@@ -328,13 +280,7 @@
       blob,
       bytes,
       byteLength,
-      entries: normalized.map((entry) => ({
-        name: entry.name,
-        byteLength: entry.byteLength,
-        crc: entry.crc,
-        blob: isNativeBlobPart(entry.data),
-        dataOffset: entry.dataOffset,
-      })),
+      crcs: normalized.map((entry) => entry.crc),
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) {
@@ -640,7 +586,6 @@
           if (action === 'continue') return out;
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        if (options.ignoreCrcMismatch === true) return out;
         throw new Error(`Boardfish container CRC mismatch for ${entry.name}`);
       }
     }
@@ -682,20 +627,6 @@
     throw new Error('base64 decoding is unavailable');
   }
 
-  function bytesToBase64(bytes) {
-    if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
-    if (typeof btoa !== 'function') throw new Error('base64 encoding is unavailable');
-    let out = '';
-    const chunkSize = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.subarray(i, i + chunkSize);
-      let binary = '';
-      for (let j = 0; j < chunk.length; j++) binary += String.fromCharCode(chunk[j]);
-      out += btoa(binary);
-    }
-    return out;
-  }
-
   function dataUrlParts(dataUrl) {
     const match = /^data:([^;,]+);base64,(.*)$/i.exec(String(dataUrl || ''));
     if (!match) throw new Error('expected image data URL');
@@ -710,10 +641,6 @@
     const base64 = dataUrlParts(dataUrl).base64.replace(/\s/g, '');
     const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
     return Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
-  }
-
-  function bytesToDataUrl(bytes, mime = 'image/png') {
-    return `data:${mime || 'image/png'};base64,${bytesToBase64(bytes)}`;
   }
 
   function extForMime(mime = '') {
@@ -737,27 +664,6 @@
     return value || extForMime(mime);
   }
 
-  function createObjectUrlForBytes(bytes, mime = 'image/png') {
-    if (typeof Blob === 'function' && root.URL?.createObjectURL) {
-      try {
-        return root.URL.createObjectURL(new Blob([bytes], { type: mime || 'image/png' }));
-      } catch (_) {
-        return '';
-      }
-    }
-    return '';
-  }
-
-  function createObjectUrlForBlob(blob, mime = 'image/png') {
-    if (!isBlobLike(blob) || !root.URL?.createObjectURL) return '';
-    try {
-      const typedBlob = blob.type === mime ? blob : blob.slice(0, blob.size, mime || 'image/png');
-      return root.URL.createObjectURL(typedBlob);
-    } catch (_) {
-      return '';
-    }
-  }
-
   function createWebImageRef({ path, mime, ext, bytes, blob, lazy, volatileBlob = false, archiveCrc = null }) {
     const normalizedExt = normalizeImageExt(ext, mime);
     const normalizedMime = mime || mimeForExt(normalizedExt);
@@ -778,15 +684,9 @@
       });
     }
     if (sourceBlob) {
-      const holder = { blob: sourceBlob, volatile: volatileBlob === true };
-      Object.defineProperty(ref, '__blobHolder', {
-        value: holder,
-      });
-      Object.defineProperty(ref, '__blob', {
-        get() { return holder.blob; },
-      });
-      Object.defineProperty(ref, '__blobVolatile', {
-        get() { return holder.volatile; },
+      Object.defineProperties(ref, {
+        __blob: { value: sourceBlob, writable: true },
+        __blobVolatile: { value: volatileBlob === true, writable: true },
       });
     }
     if (lazy?.containerBytes && lazy?.entry) {
@@ -804,13 +704,13 @@
   }
 
   function replaceWebImageRefBlob(source, blob, crc = null, { volatile = false } = {}) {
-    if (!isWebImageRef(source) || !source.__blobHolder || !isNativeBlobPart(blob)) return false;
+    if (!isWebImageRef(source) || !isBlobLike(source.__blob) || !isNativeBlobPart(blob)) return false;
     const typedBlob = blob.type === source.mime
       ? blob
       : blob.slice(0, blob.size, source.mime || 'image/png');
     const staleObjectUrl = source.objectUrl || '';
-    source.__blobHolder.blob = typedBlob;
-    source.__blobHolder.volatile = volatile === true;
+    source.__blob = typedBlob;
+    source.__blobVolatile = volatile === true;
     source.bytes = typedBlob.size;
     if (source.objectUrl) delete source.objectUrl;
     if (source.dataUrl) delete source.dataUrl;
@@ -846,7 +746,7 @@
     for (const key in imageStore) {
       if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
       const source = rawImageStore[key];
-      if (!source?.__blobHolder?.volatile || !isBlobLike(source.__blob)) continue;
+      if (!source?.__blobVolatile || !isBlobLike(source.__blob)) continue;
       const sourceBlob = source.__blob;
       const cachedCrc = cachedImageSourceCrc(source, sourceBlob.size);
       const stableBlob = await detachedBlobCopy(sourceBlob, source.mime || 'image/png');
@@ -938,37 +838,7 @@
   function displaySrcForImageSource(source) {
     if (typeof source === 'string') return source;
     if (!isWebImageRef(source)) return '';
-    if (source.objectUrl || source.dataUrl) return source.objectUrl || source.dataUrl;
-    const bytes = bytesForWebImageRef(source);
-    const blob = isBlobLike(source.__blob) ? source.__blob : null;
-    if (!blob && !bytes) return '';
-    const objectUrl = blob
-      ? createObjectUrlForBlob(blob, source.mime)
-      : createObjectUrlForBytes(bytes, source.mime);
-    if (objectUrl) {
-      source.objectUrl = objectUrl;
-      return objectUrl;
-    }
-    if (!bytes) return '';
-    source.dataUrl = bytesToDataUrl(bytes, source.mime);
-    return source.dataUrl;
-  }
-
-  function dataUrlForImageSource(source) {
-    if (typeof source === 'string') return source;
-    if (!isWebImageRef(source)) return '';
-    if (source.dataUrl) return source.dataUrl;
-    const bytes = bytesForWebImageRef(source);
-    return bytes ? bytesToDataUrl(bytes, source.mime) : '';
-  }
-
-  async function dataUrlForImageSourceAsync(source) {
-    const syncDataUrl = dataUrlForImageSource(source);
-    if (syncDataUrl) return syncDataUrl;
-    if (!isWebImageRef(source)) return '';
-    const bytes = await bytesForWebImageRefAsync(source);
-    if (!bytes) return '';
-    return bytesToDataUrl(bytes, source.mime);
+    return source.objectUrl || source.dataUrl || '';
   }
 
   function revokeImageSource(source) {
@@ -1017,15 +887,11 @@
 
   function resolveManifestImageEntry(entries, key, manifest = {}) {
     const candidates = candidateImageEntryPaths(key, manifest);
-    let path = candidates[0];
-    for (const candidate of candidates) {
-      if (!entries.has(candidate)) continue;
-      path = candidate;
-      break;
+    for (const path of candidates) {
+      const entry = entries.get(path);
+      if (entry) return { path, entry };
     }
-    const entry = entries.get(path);
-    if (!entry) throw new Error(`Boardfish file is missing ${path}`);
-    return { path, entry };
+    throw new Error(`Boardfish file is missing ${candidates[0]}`);
   }
 
   async function prepareLazyStoredImageBlobs(board, entries, containerBlob, concurrency = 8) {
@@ -1120,93 +986,6 @@
     return entries;
   }
 
-  function refreshBlobRefsFromCreatedContainer(rawImageStore, containerPayload) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const containerBlob = containerPayload?.blob;
-    const entries = containerPayload?.imageArchiveEntries;
-    if (!isNativeBlobPart(containerBlob) || !Array.isArray(entries)) return null;
-    const replacements = [];
-    for (const entry of entries) {
-      const source = rawImageStore[entry.key];
-      if (!source?.__blobHolder) continue;
-      const start = Number(entry.dataOffset);
-      const byteLength = Number(entry.byteLength);
-      const end = start + byteLength;
-      if (
-        !Number.isSafeInteger(start) ||
-        !Number.isSafeInteger(byteLength) ||
-        start < 0 ||
-        byteLength < 0 ||
-        end > containerBlob.size
-      ) {
-        throw new Error(`invalid saved image range ${entry.path || entry.key || ''}`);
-      }
-      const blob = containerBlob.slice(start, end, entry.mime || source.mime || 'image/png');
-      if (blob.size !== byteLength) throw new Error(`truncated saved image ${entry.path || entry.key || ''}`);
-      replacements.push({ source, blob, crc: entry.crc });
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    let bytes = 0;
-    let refreshed = 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    for (const replacement of replacements) {
-      if (!replaceWebImageRefBlob(replacement.source, replacement.blob, replacement.crc)) continue;
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        refreshed++;
-        bytes += replacement.blob.size;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    return { refreshed, bytes, skipped: '' };
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return true;
-  }
-
-  async function refreshBlobBackedImageRefsFromContainer(board, rawImageStore = {}, containerInput) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const createdRefresh = refreshBlobRefsFromCreatedContainer(rawImageStore, containerInput);
-    if (createdRefresh) return createdRefresh;
-    const containerBlob = isNativeBlobPart(containerInput?.blob) ? containerInput.blob : containerInput;
-    if (!isNativeBlobPart(containerBlob)) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      return { refreshed: 0, bytes: 0, skipped: 'not-blob' };
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return null;
-    }
-    const directory = await parseCentralDirectoryFromBlob(containerBlob);
-    const storedBlobs = await prepareLazyStoredImageBlobs(board, directory.entries, containerBlob, 8);
-    const imageStore = board?.imageStore || {};
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    let refreshed = 0;
-    let bytes = 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    for (const key in imageStore) {
-      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-      const source = rawImageStore[key];
-      if (!source?.__blobHolder) continue;
-      const manifest = manifestEntryForKey(board, key);
-      const resolved = resolveManifestImageEntry(directory.entries, key, manifest);
-      const blob = storedBlobs.get(resolved.path);
-      if (!blob || !replaceWebImageRefBlob(source, blob, resolved.entry.crc)) continue;
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        refreshed++;
-        bytes += blob.size;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    return { refreshed, bytes, skipped: '' };
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return true;
-  }
-
   async function recoverMatchingVolatileImageRefsFromContainer(board, rawImageStore = {}, containerInput) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
@@ -1224,7 +1003,7 @@
     for (const key in imageStore) {
       if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
       const source = rawImageStore[key];
-      if (!source?.__blobHolder?.volatile || !isBlobLike(source.__blob)) continue;
+      if (!source?.__blobVolatile || !isBlobLike(source.__blob)) continue;
       const manifest = manifestEntryForKey(board, key);
       const resolved = resolveManifestImageEntry(directory.entries, key, manifest);
       const byteLength = Number(source.bytes || source.__blob.size);
@@ -1357,25 +1136,14 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const zipMs = collectDiagnostics ? nowMs() - phaseStart : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const imageArchiveEntries = [];
     for (let i = 0; i < imageEntries.length; i++) {
       const entry = imageEntries[i];
-      const zipEntry = zip.entries[i + 1];
-      if (!zipEntry) continue;
-      cacheImageSourceCrc(entry.source, entry.byteLength, zipEntry.crc);
-      imageArchiveEntries.push({
-        key: entry.key,
-        path: entry.path,
-        mime: entry.mime,
-        byteLength: zipEntry.byteLength,
-        dataOffset: zipEntry.dataOffset,
-        crc: zipEntry.crc,
-      });
+      const crc = zip.crcs[i + 1];
+      if (crc !== undefined) cacheImageSourceCrc(entry.source, entry.byteLength, crc);
     }
     const result = {
       blob: zip.blob,
       bytes: zip.bytes,
-      imageArchiveEntries,
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) {
@@ -1524,6 +1292,10 @@
         const manifestExt = manifestObject.ext || '';
         const ext = manifestExt || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
         const mime = manifestObject.mime || mimeForExt(ext);
+        if (path.includes('\0')) throw new Error('Boardfish image entry path is invalid');
+        if (typeof mime !== 'string' || !/^image\/(?:png|jpe?g|webp|gif)$/.test(mime.toLowerCase())) {
+          throw new Error(`${path} has unsupported image metadata`);
+        }
         if (validateBoardPayload) {
           validateBoardPayload({
             objectCount,
@@ -1593,7 +1365,7 @@
                 return 'continue';
               },
               /* BOARDFISH_DEV_DIAGNOSTICS_END */
-              ignoreCrcMismatch: typeof BOARDFISH_PRODUCTION !== 'undefined',
+              verifyCrc: typeof BOARDFISH_PRODUCTION === 'undefined' && verifyImageCrc,
             },
           );
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1607,9 +1379,6 @@
           }
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
           imageBytes += bytes.length;
-        }
-        if (validateBoardPayload) {
-          validateBoardPayload({ objectCount, boardJsonBytes: boardJsonBytes.length, imageBytes });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const imageRefStart = collectDiagnostics ? nowMs() : 0;
@@ -1705,15 +1474,11 @@
     bytesForImageSource,
     bytesForImageSourceAsync,
     dataUrlByteLength,
-    dataUrlForImageSource,
-    dataUrlForImageSourceAsync,
     dataUrlToBytes,
     displaySrcForImageSource,
-    bytesToDataUrl,
     isWebImageRef,
     readBoardContainer,
     recoverMatchingVolatileImageRefsFromContainer,
-    refreshBlobBackedImageRefsFromContainer,
     revokeImageSource,
     stabilizeVolatileImageRefs,
   });

@@ -28,6 +28,8 @@ var rotateBtn         = BoardfishDOM.rotateBtn;
 var rubberBand       = BoardfishDOM.rubberBand;
 var addTextBtn       = BoardfishDOM.addTextBtn;
 var addImageBtn      = BoardfishDOM.addImageBtn;
+var dialogOverlay    = document.getElementById('dialog-overlay');
+var unsavedDialog    = document.getElementById('dialog');
 var IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 var COMMAND_KEY_LABEL = IS_MAC ? '\u2318' : 'Ctrl';
 var SHIFT_KEY_LABEL = IS_MAC ? '\u21e7' : 'Shift';
@@ -65,12 +67,11 @@ var appThemeMeta = document.querySelector('meta[name="theme-color"]');
 var DEFAULT_APP_THEME = 'dark';
 var appTheme = DEFAULT_APP_THEME;
 var APP_THEME_STORAGE_KEY = 'bf_app_theme';
-var CANVAS_THEME_COLOR_FALLBACKS = {
+var _canvasThemeColorCache = {
   '--canvas-bg': '#d6d8da',
   '--canvas-text': '#15141A',
   '--selection-highlight': 'rgba(10, 132, 255, 0.3)',
 };
-var _canvasThemeColorCache = { ...CANVAS_THEME_COLOR_FALLBACKS };
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 // StartupDebug is initialized by js/startup_debug.js.
@@ -103,37 +104,15 @@ function storeAppTheme() {
   } catch (_) {}
 }
 
-function readCssVarFromStyle(style, name) {
-  return style?.getPropertyValue?.(name)?.trim?.() || '';
-}
-
 function refreshCanvasThemeColorCache() {
   const style = getComputedStyle(document.body);
-  _canvasThemeColorCache = {
-    '--canvas-bg': readCssVarFromStyle(style, '--canvas-bg') || CANVAS_THEME_COLOR_FALLBACKS['--canvas-bg'],
-    '--canvas-text': readCssVarFromStyle(style, '--canvas-text') || CANVAS_THEME_COLOR_FALLBACKS['--canvas-text'],
-    '--selection-highlight': readCssVarFromStyle(style, '--selection-highlight') || CANVAS_THEME_COLOR_FALLBACKS['--selection-highlight'],
-  };
+  _canvasThemeColorCache['--canvas-bg'] = style.getPropertyValue('--canvas-bg').trim() || '#d6d8da';
+  _canvasThemeColorCache['--canvas-text'] = style.getPropertyValue('--canvas-text').trim() || '#15141A';
+  _canvasThemeColorCache['--selection-highlight'] = style.getPropertyValue('--selection-highlight').trim() || 'rgba(10, 132, 255, 0.3)';
 }
 
 function repaintBoardForThemeChange() {
-  if (typeof invalidateOffscreen === 'function') {
-    invalidateOffscreen();
-  }
-
-  const boardIsOpening = typeof _boardOpening !== 'undefined' && _boardOpening;
-  if (!boardIsOpening && typeof drawBoard === 'function') {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      if (typeof withRenderSource === 'function') withRenderSource('theme-change-sync', drawBoard);
-      else drawBoard();
-      return 'sync-board';
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    drawBoard();
-    return;
-  }
-
+  if (typeof invalidateOffscreen === 'function') invalidateOffscreen();
   if (typeof scheduleRender === 'function') {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -142,7 +121,6 @@ function repaintBoardForThemeChange() {
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     scheduleRender(true, false);
-    return;
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -188,10 +166,6 @@ logStartupStep('theme-bootstrap', { theme: startupTheme });
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 applyAppTheme(startupTheme, { render: false });
 
-function boardBg() {
-  return _canvasThemeColorCache['--canvas-bg'];
-}
-
 function canvasTextColor() {
   return _canvasThemeColorCache['--canvas-text'];
 }
@@ -201,6 +175,6 @@ function canvasSelectionHighlightColor() {
 }
 
 function fillBoardBackground(context, width, height) {
-  context.fillStyle = boardBg();
+  context.fillStyle = _canvasThemeColorCache['--canvas-bg'];
   context.fillRect(0, 0, width, height);
 }

@@ -106,9 +106,6 @@ function loadViewportPillHarness() {
     setTimeout() {
       return 1;
     },
-    localStorage: {
-      setItem() {},
-    },
     performance: {
       now: () => 0,
     },
@@ -332,22 +329,26 @@ test('zoom pill sync skips unchanged text writes', () => {
   assert.deepEqual(context.motionCalls, []);
 });
 
-test('board-only refreshes also schedule active selection overlays', () => {
+test('automatic board refreshes sync active overlays while explicit false opts out', () => {
   for (const options of [
     { selected: true, overlayVisible: false },
     { selected: false, overlayVisible: true },
   ]) {
     const context = loadViewportRenderSchedulerHarness(options);
-    context.scheduleRender(true, false, 'image-scale-variant-batch-1');
+    context.scheduleRender(true, null, 'image-scale-variant-batch-1');
     assert.equal(context.renderFlags().board, true);
     assert.equal(context.renderFlags().overlay, true);
     assert.deepEqual(context.scheduled, ['image-scale-variant-batch-1']);
   }
 
   const idle = loadViewportRenderSchedulerHarness();
-  idle.scheduleRender(true, false, 'background-refresh');
+  idle.scheduleRender(true, null, 'background-refresh');
   assert.equal(idle.renderFlags().board, true);
   assert.equal(idle.renderFlags().overlay, false);
+
+  const optedOut = loadViewportRenderSchedulerHarness({ selected: true });
+  optedOut.scheduleRender(true, false, 'text-only-refresh');
+  assert.equal(optedOut.renderFlags().overlay, false);
 });
 
 test('canvas backing store follows the rendered surface instead of stale window dimensions', () => {
@@ -357,12 +358,12 @@ test('canvas backing store follows the rendered surface instead of stale window 
   assert.equal(context.boardCanvas.width, 3320);
   assert.equal(context.boardCanvas.height, 2160);
   assert.equal(context.invalidations, 1);
-  assert.deepEqual(context.renders, [{ board: true, overlay: false }]);
+  assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
   assert.deepEqual(context.fallbackReads, { clientWidth: 0, clientHeight: 0, innerWidth: 0, innerHeight: 0 });
 
   assert.equal(context.resizeCanvas(), false);
   assert.equal(context.invalidations, 1);
-  assert.deepEqual(context.renders, [{ board: true, overlay: false }]);
+  assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
 });
 
 test('canvas size tracking observes the rendered surface exactly once', () => {
@@ -384,5 +385,5 @@ test('canvas size tracking observes the rendered surface exactly once', () => {
   context.resizeObserverCallback();
   assert.equal(context.boardCanvas.height, 2160);
   assert.equal(context.invalidations, 1);
-  assert.deepEqual(context.renders, [{ board: true, overlay: false }]);
+  assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
 });

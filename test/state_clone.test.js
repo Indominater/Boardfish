@@ -18,13 +18,6 @@ function loadStateCloneHarness() {
       max() {},
       start() { return {}; },
     },
-    imageTransformFromObject(obj) {
-      return {
-        flipX: !!obj.data?.flipX,
-        flipY: !!obj.data?.flipY,
-        rotation: Number(obj.data?.rotation) || 0,
-      };
-    },
     normalizeTextContent(value) {
       return String(value ?? '').replace(/\r\n?/g, '\n');
     },

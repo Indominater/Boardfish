@@ -1,28 +1,10 @@
 // ─── Viewport ─────────────────────────────────────────────────────────────────
 var panX = 0, panY = 0, zoom = 1;
-var _vpSaveTimer = null;
-var _vpSaveDueAt = 0;
 var drawSingleObj, resetCanvasToScreen, setWorldCanvasTransform, drawVisibleObjects;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var createDrawCounters;
 const VIEWPORT_TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
-function saveViewport() {
-  _vpSaveDueAt = performance.now() + 400;
-  if (_vpSaveTimer) return;
-  function flushViewportSave() {
-    const remainingMs = _vpSaveDueAt - performance.now();
-    if (remainingMs > 1) {
-      _vpSaveTimer = setTimeout(flushViewportSave, remainingMs);
-      return;
-    }
-    _vpSaveTimer = null;
-    localStorage.setItem('bf_vp', JSON.stringify({ panX, panY, zoom }));
-  }
-  _vpSaveTimer = setTimeout(flushViewportSave, 400);
-}
-
-
 // PillDebug and MenuDebug are initialized by js/viewport_debug_ui.js.
 var short_message = 1500;
 var long_message = 3 * short_message;
@@ -200,28 +182,20 @@ syncIslandZoomDisplay('init');
 var _offscreen = document.createElement('canvas');
 var _offCtx    = _offscreen.getContext('2d');
 var _offscreenDirty = true;
-var _offscreenRebuilding = false;
-var _offscreenVersion = 0;
 function invalidateOffscreen() {
   _offscreenDirty = true;
-  _offscreenVersion++;
 }
 
-function _rebuildOffscreen() {
-  if (_offscreenRebuilding) return false;
-  _offscreenRebuilding = true;
-  const rebuildVersion = _offscreenVersion;
+function _rebuildOffscreen(dpr, viewportRect) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length, version: rebuildVersion });
+  const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  const dpr = window.devicePixelRatio || 1;
   if (_offscreen.width !== boardCanvas.width) _offscreen.width = boardCanvas.width;
   if (_offscreen.height !== boardCanvas.height) _offscreen.height = boardCanvas.height;
   _offCtx.setTransform(1, 0, 0, 1, 0, 0);
   fillBoardBackground(_offCtx, _offscreen.width, _offscreen.height);
   setWorldCanvasTransform(_offCtx, dpr);
-  const viewportRect = currentViewportWorldRect(0);
   const drawOptions = { viewportRect, view: { zoom, dpr } };
   for (const obj of objects) {
     if (obj.type === 'text') continue;
@@ -231,13 +205,10 @@ function _rebuildOffscreen() {
   }
   resetCanvasToScreen(_offCtx);
 
-  _offscreenRebuilding = false;
-  const ready = rebuildVersion === _offscreenVersion;
-  if (ready) _offscreenDirty = false;
+  _offscreenDirty = false;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  ViewportDebug.end(dbg, { stale: !ready });
+  ViewportDebug.end(dbg);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return ready;
 }
 
 // ─── History delta tracking ───────────────────────────────────────────────────
@@ -280,8 +251,9 @@ function syncBoardCanvasBackingStore() {
 }
 
 function resizeCanvas() {
+  if (typeof _boardOpening !== 'undefined' && _boardOpening) return false;
   if (!syncBoardCanvasBackingStore()) return false;
-  scheduleRender(true, false);
+  scheduleRender(true);
   return true;
 }
 
@@ -305,14 +277,8 @@ function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view =
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
   const viewportRect = options.viewportRect || null;
   if (selStart === selEnd) return null;
-  let firstLine = null;
-  for (const line of layout) {
-    if (Array.isArray(line?.scriptRanges) && line.scriptRanges.length) {
-      firstLine = line;
-      break;
-    }
-  }
-  const content = normalizeTextContent(obj?.data?.content || '');
+  const firstLine = layout.find(line => Array.isArray(line?.scriptRanges) && line.scriptRanges.length) || null;
+  const content = firstLine ? normalizeTextContent(obj?.data?.content || '') : '';
   const scriptMetrics = firstLine?._scriptMetrics ||
     (firstLine && typeof getTextScriptLayoutMetricsForObject === 'function'
       ? getTextScriptLayoutMetricsForObject(obj, content, firstLine.scriptRanges || [])
@@ -321,6 +287,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
       ? getTextScriptLayoutMetrics(content, firstLine.scriptRanges || [])
       : null);
   const isHiddenAt = (line, globalIndex) => {
+    if (!firstLine) return false;
     if (scriptMetrics && typeof textScriptMetricsHiddenAt === 'function') {
       return textScriptMetricsHiddenAt(scriptMetrics, globalIndex);
     }
@@ -328,6 +295,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
       isTextScriptMarkerHiddenAt(line.scriptRanges || [], globalIndex, content);
   };
   const stateAt = (line, globalIndex) => {
+    if (!firstLine) return BASE_TEXT_SCRIPT_STATE;
     if (scriptMetrics && typeof textScriptMetricsStateAt === 'function') {
       return textScriptMetricsStateAt(scriptMetrics, globalIndex);
     }
@@ -370,7 +338,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
           continue;
         }
         const state = stateAt(line, globalIndex);
-        let j = i + 1;
+        let j = firstLine ? i + 1 : o1;
         while (j < o1) {
           const nextGlobalIndex = line.startIndex + j;
           if (isHiddenAt(line, nextGlobalIndex)) break;
@@ -414,7 +382,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
 
 const textSelectionMotionForOptions = (obj, selStart, selEnd, options = {}) => {
   if (Object.prototype.hasOwnProperty.call(options, 'motion')) return options.motion || null;
-  return globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, { view: options.view }) || null;
+  return globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, options.view?.zoom) || null;
 };
 
 const textSelectionRunsForOptions = (obj, layout, selStart, selEnd, options = {}) => {
@@ -608,7 +576,7 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, view = { z
     if (!obj || obj.type !== 'text') continue;
     if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
-    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(spec.id, spec.start, spec.end, { view }) || null;
+    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(spec.id, spec.start, spec.end, view.zoom) || null;
     if (!motion) continue;
     const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
     if (!drawTextSelectionHighlight(context, obj, layout, spec.start, spec.end, { requireMotion: true, motion, selection })) continue;
@@ -709,7 +677,7 @@ function drawEditingTextOverlay(context, options = {}) {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
-  const view = options.view || { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
+  const view = options.view || { zoom, dpr: window.devicePixelRatio || 1 };
   const viewportRect = options.viewportRect || currentViewportWorldRect(0);
   const copiedSelectionSpec = textSelectionJelloSpecForId(options.textSelectionSpecs || [], obj.id);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -727,7 +695,7 @@ function drawEditingTextOverlay(context, options = {}) {
     editCaretDrawn: false,
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, { view, viewportRect });
+  const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, view.zoom);
   if (motion?.skip) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     return stats;
@@ -741,7 +709,7 @@ function drawEditingTextOverlay(context, options = {}) {
     const liveStart = Math.min(liveSelStart, liveSelEnd);
     const liveEnd = Math.max(liveSelStart, liveSelEnd);
     const copiedMotion = copiedSelectionSpec
-      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, copiedSelectionSpec.start, copiedSelectionSpec.end, { view }) || null
+      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, copiedSelectionSpec.start, copiedSelectionSpec.end, view.zoom) || null
       : null;
     const liveMatchesCopied = copiedSelectionSpec &&
       liveStart === copiedSelectionSpec.start &&
@@ -762,7 +730,7 @@ function drawEditingTextOverlay(context, options = {}) {
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const textSelectionMotion = useCopiedSelectionMotion ? copiedMotion : selStart !== selEnd
-      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, { view }) || null
+      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, view.zoom) || null
       : null;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const selectionStart = collectDebug ? performance.now() : 0;
@@ -874,9 +842,9 @@ function drawBoard(bypassEditOffscreenCache = false) {
   if (editingId) {
     const useEditOffscreenCache = !bypassEditOffscreenCache;
     if (useEditOffscreenCache && _offscreenDirty) {
-      _rebuildOffscreen();
+      _rebuildOffscreen(dpr, viewportRect);
     }
-    if (useEditOffscreenCache && !_offscreenDirty) {
+    if (useEditOffscreenCache) {
       // Blit the cached background/image layer, then draw text directly so its
       // antialiasing is identical to the normal canvas path.
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -934,17 +902,15 @@ function drawBoard(bypassEditOffscreenCache = false) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const editStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const overlayView = { zoom, panX, panY, dpr };
+    const overlayView = { zoom, dpr };
     drawTextSelectionJelloOverlays(ctx, viewportRect, overlayView, textSelectionSpecs);
     const editOptions = { view: overlayView, viewportRect, textSelectionSpecs };
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
       drawEditingTextOverlay(ctx, editOptions);
-      resetCanvasToScreen(ctx);
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       editOptions.collectDebug = collectDrawDebug;
       const editStats = drawEditingTextOverlay(ctx, editOptions);
-      resetCanvasToScreen(ctx);
       if (collectDrawDebug) {
         drawPhases.editingOverlayMs = performance.now() - editStart;
         if (editStats) Object.assign(drawPhases, editStats);
@@ -977,16 +943,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    drawTextSelectionJelloOverlays(ctx, viewportRect, { zoom, panX, panY, dpr }, textSelectionSpecs);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const resetStart = collectDrawDebug ? performance.now() : 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    resetCanvasToScreen(ctx);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDrawDebug) {
-      drawPhases.resetMs = performance.now() - resetStart;
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    drawTextSelectionJelloOverlays(ctx, viewportRect, { zoom, dpr }, textSelectionSpecs);
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDrawDebug) {
@@ -1030,10 +987,6 @@ function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
-function hitTest(wx, wy) {
-  return BoardObjectGeometry.topObjectAtWorldPoint({ x: wx, y: wy });
-}
-
 function applyTransform(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   frameDbg = null
@@ -1069,17 +1022,6 @@ function applyTransform(
     if (collectViewportDebug) {
       ViewportDebug.step(dbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
       ViewportDebug.step(frameDbg, 'drawBoard', { ms: drawMs, ...(_lastDrawBoardMeta || {}) });
-    }
-  }
-  const saveStart = collectTransformDebug ? performance.now() : 0;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  saveViewport();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const saveMs = collectTransformDebug ? performance.now() - saveStart : 0;
-  if (collectTransformDebug) {
-    if (collectViewportDebug) {
-      ViewportDebug.step(dbg, 'saveViewport', { ms: saveMs });
-      ViewportDebug.step(frameDbg, 'saveViewport', { ms: saveMs });
     }
   }
   const overlayStart = collectTransformDebug ? performance.now() : 0;
@@ -1130,7 +1072,6 @@ function applyTransform(
       getLastApplyTransformMeta.last = {
         totalMeasuredMs,
         drawMs,
-        saveViewportMs: saveMs,
         overlayMs,
         ...baseMeta,
         drawBoard: _lastDrawBoardMeta ? { ..._lastDrawBoardMeta } : null,
@@ -1139,7 +1080,6 @@ function applyTransform(
         ViewportDebug.end(dbg, {
           totalMeasuredMs,
           drawMs,
-          saveViewportMs: saveMs,
           overlayMs,
           ...baseMeta,
         });
@@ -1194,7 +1134,6 @@ const TEXT_DRAW_WARMUP_TARGET_BOARD = 'board';
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function setCanvasImageQuality(context) {
-  context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
 }
 
@@ -1213,9 +1152,6 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   currentViewportWorldRect,
   drawTextLineRange,
   getTextLayoutForViewport,
-  imageTransformFromObject,
-  imageTransformNeedsRendering,
-  isSidewaysRotation,
   objectIntersectsRect,
   motionObjectsForDraw: globalThis.BoardfishMotion?.motionObjectsForDraw,
   objectMotionForDraw: globalThis.BoardfishMotion?.objectMotionForDraw,
@@ -1226,8 +1162,6 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
 if (typeof BOARDFISH_PRODUCTION === 'undefined') createDrawCounters = boardRenderer.createDrawCounters;
 
 const BoardObjectGeometry = BoardfishObjectGeometry.createObjectGeometry({
-  imageTransformFromObject,
-  isSidewaysRotation,
   objects: () => objects,
 });
 
@@ -2017,15 +1951,11 @@ function scheduleTransform(
   else scheduleFrame();
 }
 
-function scheduleRender(board = true, overlay = true, source = null) {
+function scheduleRender(board = true, overlay = null, source = null) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && source == null) source = 'render';
   if (board) _needBoardRender = true;
-  // Drawing samples object motion before painting the canvas. Keep the DOM
-  // outlines in that same frame whenever a selection surface is active, even
-  // for callers that otherwise request a board-only image/cache refresh.
   if (
-    overlay ||
-    (board && (
+    overlay ?? (board && (
       hasSelection() ||
       selOverlay.classList.contains('visible') ||
       multiSelOverlay.classList.contains('visible')

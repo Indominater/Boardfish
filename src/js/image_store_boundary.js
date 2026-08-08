@@ -24,39 +24,12 @@
     return true;
   }
 
-  function setSources(nextSources = {}) {
-    const sources = nextSources || {};
-    for (const key in sources) {
-      if (!Object.prototype.hasOwnProperty.call(sources, key)) continue;
-      const source = sources[key];
-      const hadSource = Object.hasOwn(imageStore, key);
-      const previous = imageStore[key];
-      const changed = hadSource && previous !== source;
-      if (changed && typeof invalidateImageSourceCachesForKey === 'function') {
-        invalidateImageSourceCachesForKey(key);
-      }
-      if (changed && previous && typeof BoardfishWebBoardContainer !== 'undefined') {
-        BoardfishWebBoardContainer.revokeImageSource?.(previous);
-      }
-      imageStore[key] = source;
-    }
-    return imageStore;
-  }
-
   function getDisplayImage(key) {
-    return imageMetadataCache[key] || (imageBitmapCache[key] ? {
-      width: imageBitmapCache[key].width || 0,
-      height: imageBitmapCache[key].height || 0,
-      naturalWidth: imageBitmapCache[key].width || 0,
-      naturalHeight: imageBitmapCache[key].height || 0,
-      complete: true,
-      src: '',
-      currentSrc: '',
-    } : null);
+    return imageBitmapCache[key] || null;
   }
 
   function hasDisplayImage(key) {
-    return !!(imageMetadataCache[key] || imageBitmapCache[key]);
+    return !!imageBitmapCache[key];
   }
 
   function sourceKeys() {
@@ -69,7 +42,6 @@
     hasDisplayImage,
     hasSource,
     setSource,
-    setSources,
     sourceKeys,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

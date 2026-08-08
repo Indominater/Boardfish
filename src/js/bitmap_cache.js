@@ -38,7 +38,6 @@
 
     function appendLruNode(node) {
       node.prev = lruTail;
-      node.next = null;
       if (lruTail) lruTail.next = node;
       else lruHead = node;
       lruTail = node;
@@ -46,18 +45,12 @@
 
     function touchEntry(key, slot, entry) {
       let node = entryNodes.get(entry);
+      if (node && lruTail === node) return;
       if (!node) {
         node = { key, slot, entry, prev: null, next: null };
         entryNodes.set(entry, node);
-      } else {
-        node.key = key;
-        node.slot = slot;
-      }
-      if (lruTail !== node) {
-        detachLruNode(node);
-        appendLruNode(node);
-      }
-      return entry;
+      } else detachLruNode(node);
+      appendLruNode(node);
     }
 
     function untrackEntry(entry) {
@@ -116,8 +109,7 @@
     }
 
     function prune() {
-      if (bytes <= memoryLimit) return 0;
-      let evicted = 0;
+      if (bytes <= memoryLimit) return;
       while (bytes > memoryLimit && lruHead) {
         const node = lruHead;
         const group = groups.get(node.key);
@@ -128,10 +120,8 @@
           continue;
         }
         evictEntry(node.key, group, node.slot, node.entry, true);
-        evicted++;
       }
       bytes = Math.max(0, bytes);
-      return evicted;
     }
 
     return {

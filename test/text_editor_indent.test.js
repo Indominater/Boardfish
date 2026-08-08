@@ -344,6 +344,18 @@ function makeBeforeInputEvent(inputType, data = '') {
   };
 }
 
+test('entering edit preserves an already canonical line-alignment cache key', () => {
+  const context = loadLiveTextEditResizeHarness();
+  context.obj.data = { content: 'a\nb', lineAlign: ['center'] };
+  const lineAlign = context.obj.data.lineAlign;
+  const layout = context.getTextLayout(context.obj);
+
+  context.enterEdit(context.obj.id, { history: false });
+
+  assert.equal(context.obj.data.lineAlign, lineAlign);
+  assert.equal(context.getTextLayout(context.obj), layout);
+});
+
 function makeKeyEvent(key, overrides = {}) {
   return {
     type: 'keydown',

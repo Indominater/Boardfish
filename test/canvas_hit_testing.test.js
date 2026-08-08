@@ -34,25 +34,6 @@ function cssBlocksForPrelude(source, prelude) {
   return blocks;
 }
 
-function loadViewportHitTest() {
-  const source = readSource('src/js/viewport.js');
-  const match = source.match(/function hitTest\(wx, wy\) \{[\s\S]*?\n\}/);
-  assert.ok(match, 'viewport hitTest function is missing');
-
-  const context = {
-    nextObject: null,
-    BoardObjectGeometry: {
-      topObjectAtWorldPoint(point) {
-        context.lastPoint = point;
-        return context.nextObject;
-      },
-    },
-  };
-  vm.createContext(context);
-  vm.runInContext(`${match[0]}\nthis.hitTest = hitTest;`, context);
-  return context;
-}
-
 function loadCanvasWheelHarness() {
   const listeners = { window: [], document: [], canvas: [], island: [] };
   const makeTarget = (name) => ({
@@ -111,7 +92,7 @@ function loadCanvasWheelHarness() {
     isBoardNavigationAllowedWhileBlocked: () => false,
     isMultiSelected: () => false,
     hasSelection: () => false,
-    hitTest: () => null,
+    BoardObjectGeometry: { topObjectAtWorldPoint: () => null },
     toWorld: () => ({ x: 0, y: 0 }),
     deselectAll() {},
     BoardfishEditorState: { deleteEmptyTextObjects() {}, setSelection() {} },
@@ -199,20 +180,12 @@ function loadMenuCommandHarness() {
   return context;
 }
 
-test('hitTest returns the top object at the world point', () => {
-  const context = loadViewportHitTest();
-  const object = { id: 'obj-1' };
-
-  context.nextObject = object;
-  assert.equal(context.hitTest(10, 20), object);
-  assert.equal(context.lastPoint.x, 10);
-  assert.equal(context.lastPoint.y, 20);
-});
-
 test('canvas and context menu use regular hit testing', () => {
+  const canvasInputSource = readSource('src/js/canvas_input.js');
   const contextMenuSource = readSource('src/js/context_menu.js');
 
-  assert.match(contextMenuSource, /hitTest\(wp\.x, wp\.y\)/);
+  assert.match(canvasInputSource, /BoardObjectGeometry\.topObjectAtWorldPoint\(wp\)/);
+  assert.match(contextMenuSource, /BoardObjectGeometry\.topObjectAtWorldPoint\(wp\)/);
 });
 
 test('background context menu clears object selection before opening', () => {
@@ -280,15 +253,15 @@ test('wheel zoom over visible floating UI uses the viewport wheel handler', () =
   const selectionSource = readSource('src/js/selection_input.js');
   const styles = readSource('src/styles.css');
 
-  assert.match(inputSource, /function handleGlobalViewportWheel\(e\) \{[\s\S]*if \(e\.__boardfishViewportWheelHandled\) return;[\s\S]*!e\.ctrlKey && !e\.metaKey &&[\s\S]*!isEventInsideViewportWheelSurface\(e\)[\s\S]*\) return;\s*handleViewportWheel\(e\);[\s\S]*\}/);
-  assert.match(inputSource, /window\.addEventListener\('wheel', handleGlobalViewportWheel, \{ capture: true, passive: false \}\);/);
-  assert.doesNotMatch(inputSource, /document\.addEventListener\('wheel', handleGlobalViewportWheel/);
+  assert.match(inputSource, /function handleViewportWheel\(e\) \{\s*if \(!e\.ctrlKey && !e\.metaKey && !isEventInsideViewportWheelSurface\(e\)\) return;/);
+  assert.match(inputSource, /window\.addEventListener\('wheel', handleViewportWheel, \{ capture: true, passive: false \}\);/);
+  assert.doesNotMatch(inputSource, /canvas\.addEventListener\('wheel'/);
   assert.doesNotMatch(inputSource, /viewportWheelSurfaces/);
-  assert.match(inputSource, /const requestedZoom = zoom \* factor;\s*const nextViewport = BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, requestedZoom\);/);
+  assert.match(inputSource, /const requestedZoom = zoom \* factor;\s*BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, requestedZoom\);/);
   assert.doesNotMatch(inputSource, /const newZoom = Math\.min\(ZOOM_MAX/);
   assert.match(selectionSource, /document\.elementFromPoint\(x, y\)/);
   assert.match(selectionSource, /if \(e\.target instanceof Node && e\.target\.nodeType === 1\) return false;/);
-  assert.match(selectionSource, /const isEventInsideViewportWheelSurface = \(e\) => \{[\s\S]*isEventInsideVisibleContextMenu\(e\) \|\| isEventInsideVisibleIsland\(e\);[\s\S]*\};/);
+  assert.match(selectionSource, /const isEventInsideViewportWheelSurface = \(e\) => \{[\s\S]*canvas\.contains\(e\.target\)[\s\S]*isEventInsideVisibleContextMenu\(e\) \|\| isEventInsideVisibleIsland\(e\);[\s\S]*\};/);
   assert.match(selectionSource, /const isEventInsideVisibleContextMenu = \(e\) => \{[\s\S]*isEventInsideVisibleSurface\(e, ctxMenu\)[\s\S]*isEventInsideVisibleSurface\(e, objCtxMenu\)[\s\S]*isEventInsideVisibleSurface\(e, ctxActions\)[\s\S]*\};/);
   assert.match(styles, /#island \{[\s\S]*overscroll-behavior: none;[\s\S]*touch-action: none;/);
 });
@@ -610,7 +583,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.doesNotMatch(viewportSource, /shouldUseEditOffscreenCache|editOffscreenCacheKind|setEditOffscreenCacheKind/);
 
   const drawStart = viewportSource.indexOf('function drawBoard');
-  const drawEnd = viewportSource.indexOf('function hitTest', drawStart);
+  const drawEnd = viewportSource.indexOf('function applyTransform', drawStart);
   assert.notEqual(drawStart, -1);
   assert.notEqual(drawEnd, -1);
   const drawSource = viewportSource.slice(drawStart, drawEnd);
@@ -619,12 +592,12 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionJelloSkipIds\(textSelectionSpecs, editingId \|\| null\);/);
   assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
   assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
-  assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(\);\s*\}/);
-  assert.match(drawSource, /if \(useEditOffscreenCache && !_offscreenDirty\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
+  assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
+  assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
   assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
   assert.match(drawSource, /const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
   assert.match(drawSource, /const visibleOptions = \{ viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
-  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, \{ zoom, panX, panY, dpr \}, textSelectionSpecs\);/);
+  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, \{ zoom, dpr \}, textSelectionSpecs\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');
   const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
@@ -774,7 +747,7 @@ test('unsaved changes dialog suppresses browser context menu without closing', (
   const handlerBlock = ioCloseSource.match(/unsavedDialog\.addEventListener\('contextmenu', \(e\) => \{[\s\S]*?\n\}\);/);
 
   assert.ok(handlerBlock, 'dialog contextmenu suppressor is missing');
-  assert.match(ioCloseSource, /var unsavedDialog = document\.getElementById\('dialog'\);/);
+  assert.match(readSource('src/app.js'), /var unsavedDialog\s*= document\.getElementById\('dialog'\);/);
   assert.match(handlerBlock[0], /e\.preventDefault\(\);/);
   assert.match(handlerBlock[0], /e\.stopPropagation\(\);/);
   assert.doesNotMatch(handlerBlock[0], /_dialogClose|classList\.remove/);

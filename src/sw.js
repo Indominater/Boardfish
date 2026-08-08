@@ -1,7 +1,7 @@
 'use strict';
 
 const BOARDFISH_CACHE = 'boardfish-web-v3';
-const BOARDFISH_STATIC_ASSETS = [
+const BOARDFISH_APP_SHELL = [
   './',
   './index.html',
   './styles.css',
@@ -9,11 +9,8 @@ const BOARDFISH_STATIC_ASSETS = [
   './boardfish-icon.png',
   './boardfish-icon-192.png',
   './fonts/Geist.woff2',
+  /* BOARDFISH_BUILD_ASSETS */
 ];
-const BOARDFISH_BUILD_ASSETS = [];
-const BOARDFISH_APP_SHELL = new Array(BOARDFISH_STATIC_ASSETS.length + BOARDFISH_BUILD_ASSETS.length);
-for (let i = 0; i < BOARDFISH_STATIC_ASSETS.length; i++) BOARDFISH_APP_SHELL[i] = BOARDFISH_STATIC_ASSETS[i];
-for (let i = 0; i < BOARDFISH_BUILD_ASSETS.length; i++) BOARDFISH_APP_SHELL[BOARDFISH_STATIC_ASSETS.length + i] = BOARDFISH_BUILD_ASSETS[i];
 const BOARDFISH_APP_SHELL_URLS = new Set();
 for (const asset of BOARDFISH_APP_SHELL) {
   BOARDFISH_APP_SHELL_URLS.add(new URL(asset, self.location.href).href);
@@ -28,20 +25,18 @@ function isAppShellUrl(url) {
 }
 
 function isCacheFirstAssetUrl(url) {
-  return isBoardfishBundleUrl(url) ||
-    /\/fonts\/Geist\.woff2$/.test(url.pathname) ||
-    /\/boardfish-icon(?:-192)?\.png$/.test(url.pathname);
+  return isBoardfishBundleUrl(url) || /\/(?:fonts\/Geist\.woff2|boardfish-icon(?:-192)?\.png)$/.test(url.pathname);
 }
 
 function shouldCacheRequest(request, url) {
   return request.mode === 'navigate' || isAppShellUrl(url) || isBoardfishBundleUrl(url);
 }
 
-async function fetchAndCacheRequest(request, url) {
+async function fetchAndCacheRequest(event, request, url) {
   const response = await fetch(request);
-  if (response && response.ok && response.type === 'basic' && shouldCacheRequest(request, url)) {
-    const cache = await caches.open(BOARDFISH_CACHE);
-    await cache.put(request, response.clone());
+  if (response.ok && response.type === 'basic' && shouldCacheRequest(request, url)) {
+    const copy = response.clone();
+    event.waitUntil(caches.open(BOARDFISH_CACHE).then((cache) => cache.put(request, copy)).catch(() => {}));
   }
   return response;
 }
@@ -87,32 +82,27 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
-  if (!request || request.method !== 'GET') return;
+  if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
   if (isCacheFirstAssetUrl(url)) {
-    const update = fetchAndCacheRequest(request, url).catch(() => null);
-    event.waitUntil(update);
-    event.respondWith((async () => {
-      const cached = await caches.match(request);
-      if (cached) return cached;
-      const response = await update;
-      if (response) return response;
-      throw new TypeError('Boardfish cache-first asset fetch failed');
-    })());
+    const cached = caches.match(request);
+    if (/\.[a-f0-9]{12}\.min\.js$/.test(url.pathname)) {
+      event.respondWith(cached.then((hit) => hit || fetchAndCacheRequest(event, request, url)));
+    } else {
+      const update = fetchAndCacheRequest(event, request, url).catch(() => null);
+      event.waitUntil(update);
+      event.respondWith(cached.then(async (hit) => hit || await update || Promise.reject(new TypeError('Boardfish cache-first asset fetch failed'))));
+    }
     return;
   }
 
-  event.respondWith((async () => {
-    try {
-      return await fetchAndCacheRequest(request, url);
-    } catch (error) {
-      const cached = await caches.match(request);
-      if (cached) return cached;
-      if (request.mode === 'navigate') return caches.match('./index.html');
-      throw error;
-    }
-  })());
+  event.respondWith(fetchAndCacheRequest(event, request, url).catch(async (error) => {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    if (request.mode === 'navigate') return caches.match('./index.html');
+    throw error;
+  }));
 });

@@ -322,6 +322,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
       const eventStart = events.length;
       const startAt = performance.now();
       await applyAppTheme(targetTheme, { dirty: false });
+      await new Promise((resolve) => requestAnimationFrame(resolve));
 
       for (let frame = 0; frame < frames; frame++) {
         if (frame > 0) await new Promise((resolve) => requestAnimationFrame(resolve));

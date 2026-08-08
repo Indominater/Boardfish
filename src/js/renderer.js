@@ -166,9 +166,9 @@
 
   function drawImageObjWithCurrentQuality(context, obj, img, deps, view, viewportRect) {
     const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (view.zoom * view.dpr);
-    const transform = deps.imageTransformFromObject(obj);
-    if (deps.imageTransformNeedsRendering(transform)) {
-      const sideways = deps.isSidewaysRotation(transform.rotation);
+    const transform = obj.data;
+    if (transform.flipX || transform.flipY || transform.rotation) {
+      const sideways = Math.abs(Number(transform.rotation) || 0) % 180 === 90;
       const drawW = sideways ? obj.h : obj.w;
       const drawH = sideways ? obj.w : obj.h;
       context.save();
@@ -235,8 +235,9 @@
     try { context.direction = 'ltr'; } catch (_) {}
   }
 
-  function setWorldCanvasTransform(context, dpr, view, deps) {
-    context.setTransform(view.zoom * dpr, 0, 0, view.zoom * dpr, view.panX * dpr, view.panY * dpr);
+  function setWorldCanvasTransform(context, dpr, deps) {
+    const scale = deps.zoom() * dpr;
+    context.setTransform(scale, 0, 0, scale, deps.panX() * dpr, deps.panY() * dpr);
     deps.setCanvasImageQuality(context);
     context.font = deps.font;
     context.fillStyle = deps.canvasTextColor();
@@ -451,8 +452,6 @@
     function viewDefaults() {
       return {
         zoom: deps.zoom(),
-        panX: deps.panX(),
-        panY: deps.panY(),
         dpr: deps.dpr(),
       };
     }
@@ -627,16 +626,15 @@
         const imageSourceResolver = options.imageSourceResolver || null;
         const skipText = options.skipText === true;
         const onlyText = options.onlyText === true;
-        const objectMotionForDraw = typeof deps.objectMotionForDraw === 'function' ? deps.objectMotionForDraw : null;
-        const motionObjectsForDraw = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw : null;
+        const motionObjects = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw() : undefined;
+        const objectMotionForDraw = motionObjects === null || typeof deps.objectMotionForDraw !== 'function' ? null : deps.objectMotionForDraw;
         const cullingEnabled = deps.viewportCullingEnabled();
-        const motionOptions = { view, viewportRect };
         const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
         const drawObject = (obj) => {
           if (obj.id === skipId || skipIds?.has(obj.id)) return;
           if (skipText && obj.type === 'text') return;
           if (onlyText && obj.type !== 'text') return;
-          const motion = objectMotionForDraw ? objectMotionForDraw(obj, motionOptions) : null;
+          const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
           if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) return;
           if (motion?.skip) return;
           if (motion && context.save) {
@@ -672,7 +670,7 @@
         };
 
         for (const obj of deps.objects()) drawObject(obj);
-        for (const obj of motionObjectsForDraw?.(motionOptions) || []) drawObject(obj);
+        for (const obj of motionObjects || []) drawObject(obj);
         return;
       } else {
       const skipId = options.skipId || null;
@@ -684,10 +682,9 @@
       const imageSourceResolver = options.imageSourceResolver || null;
       const skipText = options.skipText === true;
       const onlyText = options.onlyText === true;
-      const objectMotionForDraw = typeof deps.objectMotionForDraw === 'function' ? deps.objectMotionForDraw : null;
-      const motionObjectsForDraw = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw : null;
+      const motionObjects = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw() : undefined;
+      const objectMotionForDraw = motionObjects === null || typeof deps.objectMotionForDraw !== 'function' ? null : deps.objectMotionForDraw;
       const cullingEnabled = deps.viewportCullingEnabled();
-      const motionOptions = { view, viewportRect };
       const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
       let drawnImages = 0;
       let drawnText = 0;
@@ -696,7 +693,7 @@
         if (obj.id === skipId || skipIds?.has(obj.id)) return;
         if (skipText && obj.type === 'text') return;
         if (onlyText && obj.type !== 'text') return;
-        const motion = objectMotionForDraw ? objectMotionForDraw(obj, motionOptions) : null;
+        const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
           if (countObject) countCulledObject(obj, counters);
           return;
@@ -796,7 +793,7 @@
       for (const obj of deps.objects()) {
         drawObject(obj, true);
       }
-      for (const obj of motionObjectsForDraw?.(motionOptions) || []) {
+      for (const obj of motionObjects || []) {
         drawObject(obj, false);
       }
       return { drawnImages, drawnText };
@@ -807,7 +804,7 @@
       drawSingleObj,
       drawVisibleObjects,
       resetCanvasToScreen,
-      setWorldCanvasTransform: (context, dpr = deps.dpr(), view = viewDefaults()) => setWorldCanvasTransform(context, dpr, view, deps),
+      setWorldCanvasTransform: (context, dpr = deps.dpr()) => setWorldCanvasTransform(context, dpr, deps),
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') renderer.createDrawCounters = createDrawCounters;
     return Object.freeze(renderer);

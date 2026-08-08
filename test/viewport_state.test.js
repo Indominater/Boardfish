@@ -145,12 +145,13 @@ function loadViewportStateHarness({
   zoom = 1,
   width = 1000,
   height = 800,
+  dpr = 1,
 } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/viewport_state.js'), 'utf8');
   const context = {
     console,
-    innerWidth: width,
-    innerHeight: height,
+    devicePixelRatio: dpr,
+    boardCanvas: { width: width * dpr, height: height * dpr },
     objects,
   };
   vm.createContext(context);

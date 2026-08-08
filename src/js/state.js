@@ -37,9 +37,8 @@ function cloneStateTextScriptRanges(ranges = []) {
 function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
   if (!Array.isArray(sourceScriptRanges) || !sourceScriptRanges.length) return [];
   if (
-    Array.isArray(obj._textScriptRangesCache) &&
-    obj._textScriptRangesCacheContent === content &&
-    obj._textScriptRangesCacheSourceKey === JSON.stringify(sourceScriptRanges)
+    obj._textScriptRangesCache === sourceScriptRanges &&
+    obj._textScriptRangesCacheContent === content
   ) {
     return cloneStateTextScriptRanges(obj._textScriptRangesCache);
   }
@@ -153,7 +152,7 @@ function rotateSelectedImages(dir) {
     for (const id of selectedIds) {
       const obj = objectsMap.get(id);
       if (!obj || obj.type !== 'image') continue;
-      const transform = imageTransformFromObject(obj);
+      const transform = obj.data;
       const current = transform.rotation;
       const oddFlip = transform.flipX !== transform.flipY;
       const delta = (dir === 'cw') !== oddFlip ? 90 : 270;

@@ -268,15 +268,6 @@
     throw new Error('unsupported web file reference');
   }
 
-  function revokeBoardImageSources(board) {
-    const revoke = root.BoardfishWebBoardContainer?.revokeImageSource;
-    if (typeof revoke !== 'function') return;
-    const store = board?.imageStore || {};
-    for (const key in store) {
-      if (Object.prototype.hasOwnProperty.call(store, key)) revoke(store[key]);
-    }
-  }
-
   async function readBoard(ref) {
     const file = await fileFromRef(ref);
     if (!file) throw new Error('no Boardfish file selected');
@@ -286,24 +277,15 @@
         root.BoardfishWebLimits.boardContentLimitMessage()
       );
     }
-    let result = null;
-    try {
-      result = await root.BoardfishWebBoardContainer.readBoardContainer(file, {
-        lazyImageRefs: true,
-        verifyImageCrc: false,
-        maxBoardContentBytes: root.BoardfishWebLimits?.LIMITS?.maxBoardContentBytes,
-        validateBoardPayload: root.BoardfishWebLimits?.validateBoardPayload,
-      });
-      await root.BoardfishWebLimits?.validateOpenedImageEntries(result.imageEntries || []);
-      const opened = {
-        board: result.board,
-      };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') opened.debug = result.debug;
-      return opened;
-    } catch (err) {
-      if (result?.board) revokeBoardImageSources(result.board);
-      throw err;
-    }
+    const result = await root.BoardfishWebBoardContainer.readBoardContainer(file, {
+      lazyImageRefs: true,
+      verifyImageCrc: false,
+      maxBoardContentBytes: root.BoardfishWebLimits?.LIMITS?.maxBoardContentBytes,
+      validateBoardPayload: root.BoardfishWebLimits?.validateBoardPayload,
+    });
+    const opened = { board: result.board };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') opened.debug = result.debug;
+    return opened;
   }
 
   async function ensureReadWritePermission(handle) {

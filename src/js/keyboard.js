@@ -5,14 +5,6 @@ function isShortcutKey(e, letter) {
   return e.key.toLowerCase() === normalizedLetter || e.code === `Key${normalizedLetter.toUpperCase()}`;
 }
 
-function hasExactCommandModifier(e, { shift = false, alt = false } = {}) {
-  return e.ctrlKey !== e.metaKey && e.shiftKey === shift && e.altKey === alt;
-}
-
-function hasNoShortcutModifiers(e) {
-  return !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
-}
-
 function isEditableTextShortcutTarget(target) {
   if (!target) return false;
   if (target.isContentEditable) return true;
@@ -149,16 +141,24 @@ function pasteAtViewportCenterFromShortcut() {
 }
 
 document.addEventListener('keydown', (e) => {
+  const command = e.ctrlKey !== e.metaKey && !e.altKey;
+  const commandOnly = command && !e.shiftKey, shiftCommandOnly = command && e.shiftKey;
+  const noShortcutModifiers = !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
   if (isBrowserFindShortcut(e)) {
-    const commandFind = hasExactCommandModifier(e) && isShortcutKey(e, 'f');
-    if (!(commandFind && canTransformSelectedImagesFromKeyboard())) {
-      if (!commandFind) consumeShortcutEvent(e);
-      return;
+    const commandFind = commandOnly && isShortcutKey(e, 'f');
+    if (commandFind && canTransformSelectedImagesFromKeyboard()) {
+      consumeShortcutEvent(e);
+      runShortcutCommand('flip-image', () => {
+        flipSelectedImages();
+      });
+    } else if (!commandFind) {
+      consumeShortcutEvent(e);
     }
+    return;
   }
   if (e.key === 'Alt') { e.preventDefault(); return; }
 
-  if (hasNoShortcutModifiers(e) && isShortcutKey(e, 'n') && !editingId && !e.repeat) {
+  if (noShortcutModifiers && isShortcutKey(e, 'n') && !editingId && !e.repeat) {
     consumeShortcutEvent(e);
     runShortcutCommand('new-board', () => {
       if (!isBoardInputBlocked()) newBoard();
@@ -166,13 +166,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'v') && contextMenusOpenForShortcut()) {
+  if (commandOnly && isShortcutKey(e, 'v') && contextMenusOpenForShortcut()) {
     consumeShortcutEvent(e);
     runShortcutCommand('paste', pasteAtViewportCenterFromShortcut);
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'c')) {
+  if (commandOnly && isShortcutKey(e, 'c')) {
     if (e.repeat) {
       if (!editingId || contextMenusOpenForShortcut()) consumeShortcutEvent(e);
       return;
@@ -192,7 +192,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasExactCommandModifier(e) && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+  if (commandOnly && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
     const direction = e.key === 'ArrowRight' ? 'right' : 'left';
     if (
       hasActiveTextEditAlignmentContext() &&
@@ -212,7 +212,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'r')) {
+  if (commandOnly && isShortcutKey(e, 'r')) {
     if (!canTransformSelectedImagesFromKeyboard()) return;
     consumeShortcutEvent(e);
     runShortcutCommand('rotate-image', () => {
@@ -221,28 +221,19 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'f')) {
-    if (!canTransformSelectedImagesFromKeyboard()) return;
-    consumeShortcutEvent(e);
-    runShortcutCommand('flip-image', () => {
-      flipSelectedImages();
-    });
-    return;
-  }
-
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'i') && !editingId) {
+  if (commandOnly && isShortcutKey(e, 'i') && !editingId) {
     consumeShortcutEvent(e);
     runShortcutCommand('add-images', runAddImagesCommandFromShortcut);
     return;
   }
 
-  if (hasNoShortcutModifiers(e) && isShortcutKey(e, 't') && !editingId && !e.repeat) {
+  if (noShortcutModifiers && isShortcutKey(e, 't') && !editingId && !e.repeat) {
     consumeShortcutEvent(e);
     runShortcutCommand('add-text', runAddTextCommandFromShortcut);
     return;
   }
 
-  if (hasNoShortcutModifiers(e) && e.key === 'Enter') {
+  if (noShortcutModifiers && e.key === 'Enter') {
     if (enterSelectedTextEditFromKeyboard(e)) {
       consumeShortcutEvent(e);
       return;
@@ -256,25 +247,25 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'o') && !editingId) {
+  if (commandOnly && isShortcutKey(e, 'o') && !editingId) {
     consumeShortcutEvent(e);
     runShortcutCommand('open', openBoard);
     return;
   }
 
-  if (hasExactCommandModifier(e, { shift: true }) && isShortcutKey(e, 's')) {
+  if (shiftCommandOnly && isShortcutKey(e, 's')) {
     consumeShortcutEvent(e);
     runShortcutCommand('save-as', saveBoardAs);
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 's')) {
+  if (commandOnly && isShortcutKey(e, 's')) {
     consumeShortcutEvent(e);
     runShortcutCommand('save', saveBoard);
     return;
   }
 
-  if (hasExactCommandModifier(e) && (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0')) {
+  if (commandOnly && (e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0')) {
     consumeShortcutEvent(e);
     runShortcutCommand('reset-zoom', resetZoomToClosestObject);
     return;
@@ -282,7 +273,7 @@ document.addEventListener('keydown', (e) => {
 
   if (isBoardInputBlocked()) { consumeShortcutEvent(e); return; }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'a')) {
+  if (commandOnly && isShortcutKey(e, 'a')) {
     if (!editingId) {
       consumeShortcutEvent(e);
       runShortcutCommand('select-all', selectAllObjects);
@@ -290,7 +281,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasNoShortcutModifiers(e) && (e.key === 'Backspace' || e.key === 'Delete')) {
+  if (noShortcutModifiers && (e.key === 'Backspace' || e.key === 'Delete')) {
     if (contextMenusOpenForShortcut()) {
       consumeShortcutEvent(e);
       runShortcutCommand('delete', () => {
@@ -305,13 +296,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasExactCommandModifier(e) && (e.code === 'BracketLeft' || e.key === '[') && !editingId) {
+  if (commandOnly && (e.code === 'BracketLeft' || e.key === '[') && !editingId) {
     consumeShortcutEvent(e);
     runShortcutCommand('move-to-back', sendSelectedToBack);
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'e') && !editingId) {
+  if (commandOnly && isShortcutKey(e, 'e') && !editingId) {
     const imageObjs = BoardfishExportUtils.selectedImageObjects();
     if (contextMenusOpenForShortcut() || imageObjs.length) {
       consumeShortcutEvent(e);
@@ -327,31 +318,31 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'x') && !editingId) {
+  if (commandOnly && isShortcutKey(e, 'x') && !editingId) {
     consumeShortcutEvent(e);
     runShortcutCommand('cut', cutSelected);
     return;
   }
 
-  if (hasExactCommandModifier(e, { shift: true }) && isShortcutKey(e, 'z')) {
+  if (shiftCommandOnly && isShortcutKey(e, 'z')) {
     consumeShortcutEvent(e);
     runShortcutCommand('redo', redo);
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'y')) {
+  if (commandOnly && isShortcutKey(e, 'y')) {
     consumeShortcutEvent(e);
     runShortcutCommand('redo', redo);
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'z')) {
+  if (commandOnly && isShortcutKey(e, 'z')) {
     consumeShortcutEvent(e);
     runShortcutCommand('undo', undo);
     return;
   }
 
-  if (hasExactCommandModifier(e) && isShortcutKey(e, 'd') && !editingId) {
+  if (commandOnly && isShortcutKey(e, 'd') && !editingId) {
     consumeShortcutEvent(e);
     runShortcutCommand('duplicate', duplicateSelected);
   }

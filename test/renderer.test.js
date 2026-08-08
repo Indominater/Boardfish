@@ -153,9 +153,6 @@ test('image renderer crops untransformed images to the visible viewport', () => 
     getWrappedLines: () => [],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({}),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     objectIntersectsRect: () => true,
     objects: () => [obj],
@@ -246,9 +243,6 @@ test('image renderer overdraws image edges by one device pixel at the current vi
     getWrappedLines: () => [],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     objectIntersectsRect: () => true,
     objects: () => [obj],
@@ -298,9 +292,6 @@ test('image renderer keeps active full fallback visible with temporary disabled 
     getWrappedLines: () => [],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     objectIntersectsRect: () => true,
     objects: () => [obj],
@@ -364,9 +355,6 @@ test('animated image motion bypasses static culling and uses low-latency variant
     getWrappedLines: () => [],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     objectIntersectsRect: () => false,
     objectMotionForDraw: () => ({ opacity: 1, translateY: -3 }),
@@ -423,9 +411,6 @@ test('renderer does not redraw finished exit-motion objects', () => {
     getWrappedLines: () => [],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     motionObjectsForDraw: () => [removedObj],
     objectIntersectsRect: () => true,
@@ -475,9 +460,6 @@ test('renderer can skip text while drawing visible objects', () => {
     getWrappedLines: () => [{ text: 'hidden' }],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     objectIntersectsRect: () => true,
     objects: () => [image, text],
@@ -533,9 +515,6 @@ test('renderer can draw only text while drawing visible objects', () => {
     getTextLayout: () => [{ text: 'drawn', y: 0 }],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     objectIntersectsRect: () => true,
     objects: () => [image, text],
@@ -993,9 +972,6 @@ test('renderer applies object motion translation and non-uniform scaling around 
     getWrappedLines: () => [],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     objectIntersectsRect: () => true,
     objectMotionForDraw: () => ({ opacity: 1, translateY: -3, scaleX: 1.08, scaleY: 0.94 }),
@@ -1048,9 +1024,6 @@ test('renderer applies motion scaling around the requested fractional object ori
     getWrappedLines: () => [],
     imageBitmapCache: () => ({ 'img-1': source }),
     imageStore: () => ({ 'img-1': 'source' }),
-    imageTransformFromObject: () => ({ flipX: false, flipY: false, rotation: 0 }),
-    imageTransformNeedsRendering: () => false,
-    isSidewaysRotation: () => false,
     lineHeight: 24,
     objectIntersectsRect: () => true,
     objectMotionForDraw: () => ({
@@ -1137,7 +1110,7 @@ test('text duplicate action is no-animation and empty image duplicate payloads s
   assert.equal(motion.applyActionAnimation('image-object-duplicate', { objects: [] }), false);
 
   setTime(100);
-  const activeMotion = motion.objectMotionForDraw(text, { view: { zoom: 1 } });
+  const activeMotion = motion.objectMotionForDraw(text, 1);
   assert.equal(activeMotion, null);
 
   setTime(260);
@@ -1153,15 +1126,15 @@ test('copy object jiggle uses fixed screen-distance translation independent of o
   setTime(0);
   assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [narrow] }), true);
   setTime(100);
-  const narrowAtZoom1 = motion.objectMotionForDraw(narrow, { view: { zoom: 1 } });
-  const narrowAtZoom2 = motion.objectMotionForDraw(narrow, { view: { zoom: 2 } });
+  const narrowAtZoom1 = motion.objectMotionForDraw(narrow, 1);
+  const narrowAtZoom2 = motion.objectMotionForDraw(narrow, 2);
   setTime(420);
-  const narrowLate = motion.objectMotionForDraw(narrow, { view: { zoom: 1 } });
+  const narrowLate = motion.objectMotionForDraw(narrow, 1);
 
   setTime(1000);
   assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [wide] }), true);
   setTime(1100);
-  const wideAtZoom1 = motion.objectMotionForDraw(wide, { view: { zoom: 1 } });
+  const wideAtZoom1 = motion.objectMotionForDraw(wide, 1);
 
   assert.notEqual(narrowAtZoom1.translateX, 0);
   assert.notEqual(narrowAtZoom1.translateY, 0);
@@ -1183,12 +1156,12 @@ test('object motion exposes the exact transform most recently used for drawing',
   setTime(0);
   assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [text] }), true);
   setTime(100);
-  const drawnMotion = motion.objectMotionForDraw(text, { view: { zoom: 1 } });
+  const drawnMotion = motion.objectMotionForDraw(text, 1);
 
   assert.strictEqual(motion.getLastDrawnObjectMotion(text), drawnMotion);
 
   setTime(501);
-  assert.equal(motion.objectMotionForDraw(text, { view: { zoom: 1 } }), null);
+  assert.equal(motion.objectMotionForDraw(text, 1), null);
   assert.equal(motion.getLastDrawnObjectMotion(text), null);
 });
 
@@ -1200,14 +1173,14 @@ test('motion cleanup preserves the last rendered transform until the next object
   setTime(0);
   assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
   setTime(100);
-  const lastRendered = motion.objectMotionForDraw(image, { view: { zoom: 1 } });
+  const lastRendered = motion.objectMotionForDraw(image, 1);
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
 
   setTime(700);
   motion.afterViewportRenderFrame({ source: 'late-board-frame' });
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
 
-  assert.equal(motion.objectMotionForDraw(image, { view: { zoom: 1 } }), null);
+  assert.equal(motion.objectMotionForDraw(image, 1), null);
   assert.equal(motion.getLastDrawnObjectMotion(image), null);
 });
 
@@ -1219,13 +1192,13 @@ test('starting a new motion does not discard the transform still on screen', () 
   setTime(0);
   assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
   setTime(100);
-  const lastRendered = motion.objectMotionForDraw(image, { view: { zoom: 1 } });
+  const lastRendered = motion.objectMotionForDraw(image, 1);
 
   setTime(600);
   assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
 
-  const nextRendered = motion.objectMotionForDraw(image, { view: { zoom: 1 } });
+  const nextRendered = motion.objectMotionForDraw(image, 1);
   assert.ok(nextRendered);
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), nextRendered);
 });
@@ -1239,17 +1212,17 @@ test('copy text selection jiggle uses fixed screen-distance translation independ
     textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
   }), true);
   setTime(100);
-  const shortAtZoom1 = motion.textSelectionMotionForDraw('text-1', 2, 9, { view: { zoom: 1 } });
-  const shortAtZoom2 = motion.textSelectionMotionForDraw('text-1', 2, 9, { view: { zoom: 2 } });
+  const shortAtZoom1 = motion.textSelectionMotionForDraw('text-1', 2, 9, 1);
+  const shortAtZoom2 = motion.textSelectionMotionForDraw('text-1', 2, 9, 2);
   setTime(420);
-  const shortLate = motion.textSelectionMotionForDraw('text-1', 2, 9, { view: { zoom: 1 } });
+  const shortLate = motion.textSelectionMotionForDraw('text-1', 2, 9, 1);
 
   setTime(1000);
   assert.equal(motion.applyActionAnimation('copy-text-selection', {
     textSelection: { id: 'text-1', start: 2, end: 40, hasSelection: true },
   }), true);
   setTime(1100);
-  const longAtZoom1 = motion.textSelectionMotionForDraw('text-1', 2, 40, { view: { zoom: 1 } });
+  const longAtZoom1 = motion.textSelectionMotionForDraw('text-1', 2, 40, 1);
 
   assert.notEqual(shortAtZoom1.translateX, 0);
   assert.notEqual(shortAtZoom1.translateY, 0);
@@ -1274,7 +1247,7 @@ test('copy jiggle normalizes per-axis waveform to configured screen-pixel distan
   assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [obj] }), true);
   for (let i = 0; i < 192; i += 1) {
     setTime(i * 500 / 192);
-    const frame = motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+    const frame = motion.objectMotionForDraw(obj, 1);
     if (!frame) continue;
     maxX = Math.max(maxX, Math.abs(frame.translateX || 0));
     maxY = Math.max(maxY, Math.abs(frame.translateY || 0));
@@ -1287,7 +1260,7 @@ test('copy jiggle normalizes per-axis waveform to configured screen-pixel distan
   assert.ok(Math.abs(maxY - 10.75) < 0.000001, `expected max Y of 10.75px, got ${maxY}`);
 
   setTime(501);
-  assert.equal(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }), null);
+  assert.equal(motion.objectMotionForDraw(obj, 1), null);
 });
 
 test('grouped copy jiggle is geometry-ordered with shared vertical and mirrored lateral motion', () => {
@@ -1301,7 +1274,7 @@ test('grouped copy jiggle is geometry-ordered with shared vertical and mirrored 
     setTime(100);
     return new Map(objects.map((obj) => [
       obj.id,
-      plain(motion.objectMotionForDraw(obj, { view: { zoom: 1 } })),
+      plain(motion.objectMotionForDraw(obj, 1)),
     ]));
   };
 
@@ -1330,10 +1303,10 @@ test('copy jiggle retrigger continues from the transform currently on screen', (
   setTime(0);
   assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
   setTime(117);
-  const before = plain(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }));
+  const before = plain(motion.objectMotionForDraw(obj, 1));
 
   assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
-  const after = plain(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }));
+  const after = plain(motion.objectMotionForDraw(obj, 1));
 
   for (const field of ['translateX', 'translateY', 'scaleX', 'scaleY']) {
     assertClose(after[field], before[field], 1e-7, `${field} jumped when jiggle was retriggered`);
@@ -1342,7 +1315,7 @@ test('copy jiggle retrigger continues from the transform currently on screen', (
   assert.equal(after.scaleOriginY, before.scaleOriginY);
 
   setTime(618);
-  assert.equal(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }), null);
+  assert.equal(motion.objectMotionForDraw(obj, 1), null);
 });
 
 test('rapid and repeated copy retriggers stay within the configured motion envelope', () => {
@@ -1360,7 +1333,7 @@ test('rapid and repeated copy retriggers stay within the configured motion envel
       if (triggers.has(time)) {
         assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
       }
-      const frame = motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+      const frame = motion.objectMotionForDraw(obj, 1);
       if (!frame) continue;
       maxX = Math.max(maxX, Math.abs(frame.translateX || 0));
       maxY = Math.max(maxY, Math.abs(frame.translateY || 0));
@@ -1397,11 +1370,11 @@ test('copy jiggle transform is invariant to intermediate sampling cadence', () =
       const stepMs = 1000 / cadenceHz;
       for (let time = stepMs; time < 333; time += stepMs) {
         setTime(time);
-        assert.ok(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }));
+        assert.ok(motion.objectMotionForDraw(obj, 1));
       }
     }
     setTime(333);
-    return plain(motion.objectMotionForDraw(obj, { view: { zoom: 1 } }));
+    return plain(motion.objectMotionForDraw(obj, 1));
   };
 
   const unsampled = captureAt333Ms(0);
@@ -1417,7 +1390,7 @@ test('short retrigger stays active for its longer carry and preserves area throu
   const options = { duration: 180, carryDurationMs: 320 };
   const at = (time) => {
     setTime(time);
-    return motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+    return motion.objectMotionForDraw(obj, 1);
   };
   const velocity = (from, to, durationMs, fields) => fields.map((field) => (
     (to[field] - from[field]) / durationMs
@@ -1463,7 +1436,7 @@ test('copy jiggle has cubic-rest boundaries, decaying extrema, and exact termina
   const obj = { id: 'settling-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
   const at = (time) => {
     setTime(time);
-    return motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+    return motion.objectMotionForDraw(obj, 1);
   };
 
   setTime(0);
@@ -1517,7 +1490,7 @@ test('copy jiggle deformation preserves area and exposes a stable upper anchor',
   let deformedSamples = 0;
   for (const time of [40, 80, 120, 180, 240]) {
     setTime(time);
-    const frame = motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+    const frame = motion.objectMotionForDraw(obj, 1);
     assert.ok(Number.isFinite(frame.scaleX));
     assert.ok(Number.isFinite(frame.scaleY));
     assertClose(frame.scaleX * frame.scaleY, 1, 0.0025, `deformation changed area at ${time}ms`);
@@ -1538,12 +1511,26 @@ test('copy jiggle drives frames through the viewport scheduler', () => {
   assert.deepEqual(renderCalls, [{ board: true, overlay: true, source: 'motion' }]);
 
   setTime(16);
-  const frame = motion.objectMotionForDraw(obj, { view: { zoom: 1 } });
+  const frame = motion.objectMotionForDraw(obj, 1);
   assert.ok(frame);
   motion.afterViewportRenderFrame({ source: 'motion' });
 
   assert.equal(renderCalls.length, 2);
   assert.deepEqual(renderCalls[1], { board: true, overlay: true, source: 'motion' });
+});
+
+test('empty motion state bypasses reduced-motion media queries', () => {
+  let mediaQueries = 0;
+  const { context } = loadMotion({
+    matchMedia() {
+      mediaQueries++;
+      return { matches: false };
+    },
+  });
+
+  context.BoardfishMotion.afterViewportRenderFrame();
+  assert.equal(context.BoardfishMotion.motionObjectsForDraw(), null);
+  assert.equal(mediaQueries, 0);
 });
 
 test('text selection copy feedback uses the jello set', () => {
@@ -1629,5 +1616,5 @@ test('object jello removal stays drawable until the exit pulse completes', () =>
 
   setTime(220);
   assert.deepEqual(plain(context.BoardfishMotion.objectMotionForDraw(obj)), { opacity: 0, scale: 1, skip: true });
-  assert.equal(context.BoardfishMotion.motionObjectsForDraw().length, 0);
+  assert.equal(context.BoardfishMotion.motionObjectsForDraw(), null);
 });

@@ -44,15 +44,11 @@ function updateTitle() {
 
 
 // ─── Unsaved changes dialog ───────────────────────────────────────────────────
-var dialogOverlay = document.getElementById('dialog-overlay');
-var unsavedDialog = document.getElementById('dialog');
-var _dialogResolve = null;
-
 function _dialogClose(result) {
   dialogOverlay.classList.remove('show');
-  updateInputShieldVisual();
   const r = _dialogResolve;
   _dialogResolve = null;
+  updateInputShieldVisual();
   if (r) r(result);
 }
 
@@ -79,35 +75,20 @@ function showUnsavedDialog() {
   });
 }
 
-const copyOpeningFreezeCanvas = (sourceCanvas, cloneCanvas) => {
-  if (!sourceCanvas || !cloneCanvas) return false;
-  cloneCanvas.width = sourceCanvas.width || 1;
-  cloneCanvas.height = sourceCanvas.height || 1;
-  try {
-    cloneCanvas.getContext('2d')?.drawImage(sourceCanvas, 0, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const appendOpeningFreezeBoard = () => {
   const rect = boardCanvas?.getBoundingClientRect?.();
   if (!rect || rect.width <= 0 || rect.height <= 0) return;
-  const clone = document.createElement('canvas');
-  copyOpeningFreezeCanvas(boardCanvas, clone);
-  clone.className = 'opening-freeze-canvas';
-  Object.assign(clone.style, {
+  Object.assign(boardCanvas.style, {
     left: `${rect.left}px`,
     top: `${rect.top}px`,
     width: `${rect.width}px`,
     height: `${rect.height}px`,
   });
-  openingShield.appendChild(clone);
+  openingShield.appendChild(boardCanvas);
 };
 
 const beginOpeningFreeze = () => {
-  if (!openingShield) return;
+  if (!openingShield || boardCanvas.parentNode === openingShield) return;
   openingShield.replaceChildren();
   openingShield.style.background = canvas ? getComputedStyle(canvas).backgroundColor : '';
   openingShield.classList.add('opening-freeze', 'active');
@@ -116,9 +97,12 @@ const beginOpeningFreeze = () => {
 
 const endOpeningFreeze = () => {
   if (!openingShield) return;
+  canvas.prepend(boardCanvas);
+  boardCanvas.removeAttribute('style');
   openingShield.classList.remove('active', 'opening-freeze');
   openingShield.replaceChildren();
   openingShield.style.background = '';
+  resizeCanvas();
 };
 
 // ─── Save / Open ─────────────────────────────────────────────────────────────
@@ -203,48 +187,6 @@ const getImageStoreOpenDebugSampleIfEnabled = (dbg = null) => {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function boardLimitImageBytesForData(data) {
-  let bytes = 0;
-  const store = data?.imageStore || {};
-  for (const key in store) {
-    if (!Object.prototype.hasOwnProperty.call(store, key)) continue;
-    bytes += BoardfishWebLimits.imageSourceByteLength(imageStore[key]);
-  }
-  return bytes;
-}
-
-function validateBoardPayloadForSave(data) {
-  BoardfishWebLimits.validateBoardPayload({
-    objectCount: data?.objects?.length || 0,
-    boardJsonBytes: 0,
-    imageBytes: boardLimitImageBytesForData(data),
-  });
-}
-
-function validateBoardPayloadForOpen(board
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  , debug = null
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-) {
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-  const boardJsonBytes = Number(debug?.board_json_bytes ?? debug?.boardJsonBytes ?? 0) || 0;
-  const imageBytes = Number(debug?.image_bytes ?? debug?.imageBytes ?? 0);
-  if (boardJsonBytes || Number.isFinite(imageBytes)) {
-    BoardfishWebLimits.validateBoardPayload({
-      objectCount: board?.objects?.length || 0,
-      boardJsonBytes,
-      imageBytes,
-    });
-  } else {
-    BoardfishWebLimits.assertBoardDataAllowed(board);
-  }
-    return;
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  BoardfishWebLimits.assertBoardDataAllowed(board);
-}
-
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 function scheduleSaveFrameProbe(dbg, label) {
   if (!SaveDebug.enabled) return null;
@@ -275,7 +217,6 @@ async function invokeSaveBoard(fileRef
     const data = boardDataForSave();
     const metrics = getBoardSaveDebugMetrics(dbg, data);
     SaveDebug.step(dbg, 'boardData', { ms: performance.now() - dataStart, path, ...metrics });
-    validateBoardPayloadForSave(data);
     const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
     const result = await SaveDebug.wrap(
       dbg,
@@ -289,7 +230,6 @@ async function invokeSaveBoard(fileRef
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
   const data = boardDataForSave();
-  validateBoardPayloadForSave(data);
   return BoardfishRuntime.saveBoard(fileRef, data, { imageStore, ...options });
 }
 
@@ -311,14 +251,11 @@ async function invokeReadBoard(fileRef
       if (result && result.debug) OpenDebug.step(dbg, 'read-board-debug', { rust: result.debug, ...boardMetrics });
       OpenDebug.step(dbg, 'read-board-shape', boardMetrics);
     }
-    validateBoardPayloadForOpen(board, result?.debug);
     return board;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const result = await read();
-  const board = result?.board || result;
-  validateBoardPayloadForOpen(board);
-  return board;
+  return result?.board || result;
 }
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -908,8 +845,6 @@ async function hydrateRemainingImagesForOpen(
   if (_backgroundOpenHydrationRunning) return;
   _backgroundOpenHydrationRunning = true;
   const generation = _imageStoreGeneration;
-  const hydrationPriorityKeys = truthyKeyList(priorityKeys);
-  let hydrationPriorityIndex = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const totalStart = performance.now();
   let batchCount = 0;
@@ -917,6 +852,11 @@ async function hydrateRemainingImagesForOpen(
   let hadBatch = false;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   try {
+    const hydrationKeys = [...new Set([
+      ...truthyKeyList(priorityKeys),
+      ...getPendingHydratableImageKeys(),
+    ])];
+    let hydrationIndex = 0;
     while (!_boardOpening && generation === _imageStoreGeneration) {
       const inputIdleMs = typeof lastViewportInputAt !== 'undefined' && lastViewportInputAt > 0
         ? performance.now() - lastViewportInputAt
@@ -929,18 +869,11 @@ async function hydrateRemainingImagesForOpen(
         continue;
       }
       const keys = [];
-      const selected = new Set();
-      while (keys.length < batchSize && hydrationPriorityIndex < hydrationPriorityKeys.length) {
-        const key = hydrationPriorityKeys[hydrationPriorityIndex++];
-        if (selected.has(key)) continue;
+      while (keys.length < batchSize && hydrationIndex < hydrationKeys.length) {
+        const key = hydrationKeys[hydrationIndex++];
         const source = BoardfishImageStore.getSource(key);
         if (BoardfishImageStore.hasDisplayImage(key) || !isOpenHydratableImageSource(source)) continue;
-        selected.add(key);
         keys.push(key);
-      }
-      if (keys.length < batchSize) {
-        const remainingKeys = getPendingHydratableImageKeys(batchSize - keys.length, selected);
-        for (const key of remainingKeys) keys.push(key);
       }
       if (!keys.length) break;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -966,10 +899,10 @@ async function hydrateRemainingImagesForOpen(
       if (!previewStillHoldingRender || previewRelease?.released) {
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          scheduleRender(true, false, previewRelease?.released ? 'open-preview-release' : 'open-background-hydration');
+          scheduleRender(true, null, previewRelease?.released ? 'open-preview-release' : 'open-background-hydration');
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
         } else {
-          scheduleRender(true, false);
+          scheduleRender(true);
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -1128,11 +1061,8 @@ async function finishOpenedBoard(
           pendingImages: getPendingHydratableImageKeys().length,
         });
       }
-    } else
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (!previewReady) {
-      await settleVisibleImageBitmapsForOpen(visibleKeys);
     }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   } else {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (isOpenDebugActive(dbg)) {
@@ -1211,13 +1141,11 @@ async function finishOpenedBoard(
       ms: renderMs,
       totalMeasuredMs: renderBreakdown?.totalMeasuredMs ?? '',
       drawMs: renderBreakdown?.drawMs ?? '',
-      saveViewportMs: renderBreakdown?.saveViewportMs ?? '',
       overlayMs: renderBreakdown?.overlayMs ?? '',
       overlaySkipped: renderBreakdown?.overlaySkipped ?? '',
       drawBoardTotalMs: drawBreakdown?.totalMeasuredMs ?? '',
       backgroundSetupMs: drawBreakdown?.backgroundSetupMs ?? '',
       objectLoopMs: drawBreakdown?.objectLoopMs ?? '',
-      resetMs: drawBreakdown?.resetMs ?? '',
       drawnImages: drawBreakdown?.drawnImages ?? '',
       drawnText: drawBreakdown?.drawnText ?? '',
       visibleObjects: drawBreakdown?.visibleObjects ?? '',
@@ -1273,9 +1201,6 @@ async function finishOpenedBoard(
 
 function applyBoardData(data, options = {}) {
   data = BoardSchema.normalizeBoardData(data);
-  BoardfishWebLimits.assertBoardDataAllowed(data);
-  const prune = BoardfishBoardDocument.pruneBoardDataImageStore(data);
-  data = prune.data;
   const deferRender = !!options.deferRender;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = options.dbg || null;
@@ -1284,11 +1209,6 @@ function applyBoardData(data, options = {}) {
   const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:applyBoardData:start', openMetrics);
   OpenDebug.step(dbg, 'applyBoardData:start', openMetrics);
-  OpenDebug.step(dbg, 'prune-unreferenced-images', {
-    removed: prune.removed,
-    kept: prune.kept,
-    referenced: prune.referenced,
-  });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   clearJsClipboard();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1300,7 +1220,7 @@ function applyBoardData(data, options = {}) {
 
   const imageStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  BoardfishImageStore.setSources(data.imageStore || {});
+  imageStore = data.imageStore || {};
   const visibleFirstOpen = deferRender &&
     typeof getOpenHydrationMode === 'function' &&
     getOpenHydrationMode() === 'visible-first';

@@ -72,6 +72,8 @@ test('web data URL image validation measures bytes without decoding payload', as
 test('web board content estimate ignores runtime text layout cache fields', () => {
   const previousObjects = globalThis.objects;
   const previousImageStore = globalThis.imageStore;
+  const originalEncode = TextEncoder.prototype.encode;
+  let estimatedJson = '';
   const previousViewport = {
     panX: globalThis.panX,
     panY: globalThis.panY,
@@ -89,16 +91,30 @@ test('web board content estimate ignores runtime text layout cache fields', () =
     w: 240,
     h: 120,
     z: 1,
-    data: { content: 'hello' },
+    data: {
+      content: 'hello',
+      lineAlign: ['center'],
+      scriptRanges: [{ start: 2, end: 4, kind: 'sup' }],
+    },
     _layoutCache: {
       toJSON() {
         throw new Error('runtime layout cache should not be serialized');
       },
     },
   }];
+  TextEncoder.prototype.encode = function captureEstimatedJson(value) {
+    estimatedJson = String(value);
+    return originalEncode.call(this, value);
+  };
   try {
     assert.equal(WebLimits.canAcceptAdditionalContentBytes(0, 1, { notifyUser: false }), true);
+    const { _layoutCache, ...object } = globalThis.objects[0];
+    assert.deepEqual(JSON.parse(estimatedJson), {
+      viewport: { panX: 0, panY: 0, zoom: 1 },
+      objects: [object],
+    });
   } finally {
+    TextEncoder.prototype.encode = originalEncode;
     if (previousObjects === undefined) delete globalThis.objects;
     else globalThis.objects = previousObjects;
     if (previousImageStore === undefined) delete globalThis.imageStore;
@@ -127,42 +143,10 @@ test('web board content limit carries a short user-facing message', () => {
   );
 });
 
-test('web image pixel cap is not enforced', async () => {
-  const previousCreateImageBitmap = globalThis.createImageBitmap;
-  globalThis.createImageBitmap = async () => ({
-    width: 8001,
-    height: 8001,
-    close() {},
-  });
-  try {
-    await assert.doesNotReject(
-      () => WebLimits.validateOpenedImageEntries([
-        {
-          path: 'images/huge.png',
-          mime: 'image/png',
-          bytes: new Uint8Array([1, 2, 3]),
-        },
-      ]),
-    );
-  } finally {
-    if (previousCreateImageBitmap) globalThis.createImageBitmap = previousCreateImageBitmap;
-    else delete globalThis.createImageBitmap;
-  }
-});
-
-test('opened image entry metadata rejects unsupported image types', async () => {
-  await assert.rejects(
-    () => WebLimits.validateOpenedImageEntries([
-      { path: 'images/img-1.txt', mime: 'text/plain', byteLength: 4 },
-    ]),
-    /unsupported image metadata/,
-  );
-});
-
 test('board JSON estimate uses UTF-8 byte length rather than UTF-16 string length', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src/js/board_limits.js'), 'utf8');
 
-  assert.match(source, /return textByteLength\(json\) \+ 1024;/);
+  assert.match(source, /return total \+ textByteLength\(json\) \+ 1024;/);
   assert.doesNotMatch(source, /JSON\.stringify\(\{[\s\S]*\}\)\.length \+ 1024/);
 });
 

@@ -10,6 +10,10 @@ function readFixture(name) {
   return JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
 }
 
+function imageObject(id, imgKey, z = 1) {
+  return { id, type: 'image', x: 0, y: 0, w: 10, h: 10, z, data: { imgKey } };
+}
+
 test('normalizes valid board data from shared v3 fixture', () => {
   const board = BoardSchema.normalizeBoardData(readFixture('valid_v3_board.json'));
 
@@ -68,12 +72,32 @@ test('rejects image objects with missing image sources', () => {
       version: 3,
       format: 'boardfish-container',
       imageStore: {},
-      objects: [
-        { id: 'obj-1', type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: { imgKey: 'img-1' } },
-      ],
+      objects: [imageObject('obj-1', 'img-1')],
     }),
     /references missing image/
   );
+});
+
+test('rejects malformed unused image sources before pruning', () => {
+  assert.throws(() => BoardSchema.normalizeBoardData({
+    imageStore: { 'img-unused': 42 },
+    objects: [],
+  }), /imageStore\.img-unused must be a string or object/);
+});
+
+test('prunes unused sources and preserves duplicate references through round trips', () => {
+  const board = BoardSchema.normalizeBoardData({
+    imageStore: {
+      'img-unused': 'data:image/png;base64,unused',
+      'img-2': { path: 'images/img-2.png', mime: 'image/png', ext: 'png' },
+      'img-1': 'data:image/png;base64,AQID',
+    },
+    objects: [imageObject('obj-1', 'img-1'), imageObject('obj-2', 'img-2', 2), imageObject('obj-3', 'img-1', 3)],
+  });
+
+  assert.deepEqual(Object.keys(board.imageStore), ['img-1', 'img-2']);
+  assert.deepEqual(board.objects.map((obj) => obj.data.imgKey), ['img-1', 'img-2', 'img-1']);
+  assert.deepEqual(BoardSchema.normalizeBoardData(JSON.parse(JSON.stringify(board))), board);
 });
 
 test('rejects unsupported versions and formats', () => {

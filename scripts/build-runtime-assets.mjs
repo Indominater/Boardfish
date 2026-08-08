@@ -285,10 +285,10 @@ async function writeIndex(outDir, scriptTag, preloadScript) {
 
 async function writeServiceWorker(outDir, buildAssets) {
   const source = await readFile(path.join(srcRoot, 'sw.js'), 'utf8');
-  const assets = buildAssets.map((asset) => `./${asset}`);
+  const assets = buildAssets.map((asset) => `  './${asset}',`).join('\n');
   const next = source.replace(
-    /const BOARDFISH_BUILD_ASSETS = \[\];/,
-    `const BOARDFISH_BUILD_ASSETS = ${JSON.stringify(assets)};`,
+    '  /* BOARDFISH_BUILD_ASSETS */',
+    assets,
   );
   await writeFile(path.join(outDir, 'sw.js'), next);
 }

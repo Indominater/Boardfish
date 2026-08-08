@@ -18,12 +18,10 @@
       ) {
         continue;
       }
-      const objectX2 = obj.x + obj.w;
-      const objectY2 = obj.y + obj.h;
-      x1 = Math.min(x1, obj.x, objectX2);
-      y1 = Math.min(y1, obj.y, objectY2);
-      x2 = Math.max(x2, obj.x, objectX2);
-      y2 = Math.max(y2, obj.y, objectY2);
+      x1 = Math.min(x1, obj.x);
+      y1 = Math.min(y1, obj.y);
+      x2 = Math.max(x2, obj.x + obj.w);
+      y2 = Math.max(y2, obj.y + obj.h);
     }
 
     return x1 === Infinity ? null : { x1, y1, x2, y2 };
@@ -80,15 +78,11 @@
     };
   }
 
-  function currentBoardObjects() {
-    return typeof objects !== 'undefined' && Array.isArray(objects) ? objects : [];
-  }
-
   function currentBoardSurfaceSize() {
-    if (typeof boardSurfaceCssSize === 'function') return boardSurfaceCssSize();
+    const dpr = root.devicePixelRatio || 1;
     return {
-      width: Number(root.innerWidth) || 0,
-      height: Number(root.innerHeight) || 0,
+      width: boardCanvas.width / dpr,
+      height: boardCanvas.height / dpr,
     };
   }
 
@@ -100,7 +94,7 @@
   ) {
     const constrained = clampPanToBoardMasterBox(
       { panX: nextPanX, panY: nextPanY, zoom: nextZoom },
-      currentBoardObjects(),
+      objects,
       currentBoardSurfaceSize(),
       lockAtBoundary ? { panX, panY, zoom } : null,
     );

@@ -77,6 +77,8 @@ function loadSelectionInputHarness(objects, options = {}) {
     ctxActions: createElement('ctx-actions'),
     island: createElement('island'),
     openingShield: createElement('opening-shield'),
+    dialogOverlay: createElement('dialog-overlay'),
+    unsavedDialog: createElement('dialog'),
     _boardOpening: false,
     _inputShieldStack: [],
     selectedIds,
@@ -98,6 +100,7 @@ function loadSelectionInputHarness(objects, options = {}) {
     timeoutDelay: null,
     timeoutHandler: null,
     EDIT_HISTORY_DEBOUNCE_MS: 500,
+    drawBoardCalls: 0,
     renders: [],
     syncedTextIds: [],
     motionPulses: [],
@@ -128,6 +131,7 @@ function loadSelectionInputHarness(objects, options = {}) {
         flush() {},
       };
     },
+    drawBoard() { context.drawBoardCalls++; },
     scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
     syncTextAutoHeight(obj) {
       context.syncedTextIds.push(obj.id);
@@ -517,6 +521,8 @@ test('single image resize uses the smaller implied scale and anchors the opposit
   assert.equal(Math.round(image.h), 110);
   assert.equal(Math.round(image.x + image.w), 220);
   assert.equal(Math.round(image.y + image.h), 100);
+  assert.equal(context.drawBoardCalls, 1);
+  assert.deepEqual(context.renders, []);
   assert.deepEqual(context.motionPulses, []);
 });
 
@@ -761,13 +767,13 @@ test('large text resize updates auto-height and board content during drag', () =
   assert.equal(text.w, 280);
   assert.equal(text.h, 120);
   assert.deepEqual(context.syncedTextIds, ['text-a']);
-  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true });
+  assert.equal(context.drawBoardCalls, 1);
 
   context.drag.up();
 
   assert.equal(text.h, 120);
   assert.deepEqual(context.syncedTextIds, ['text-a']);
-  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true });
+  assert.equal(context.drawBoardCalls, 1);
 });
 
 test('large text resize skips board redraw when clamped width is unchanged', () => {
@@ -803,16 +809,13 @@ test('large text resize skips board redraw when clamped width is unchanged', () 
   assert.equal(text.w, 100);
   assert.equal(text.h, 120);
   assert.deepEqual(context.syncedTextIds, ['text-a']);
-  assert.deepEqual(context.renders, [
-    { board: true, overlay: true },
-    { board: false, overlay: true },
-  ]);
+  assert.equal(context.drawBoardCalls, 1);
 
   context.drag.up();
 
   assert.equal(text.h, 120);
   assert.deepEqual(context.syncedTextIds, ['text-a']);
-  assert.deepEqual(context.renders.at(-1), { board: false, overlay: true });
+  assert.equal(context.drawBoardCalls, 1);
 });
 
 test('large text resize records live cache-keyed auto-height debug evidence', () => {

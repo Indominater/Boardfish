@@ -74,6 +74,7 @@ function loadClipboardExportHarness(options = {}) {
     copiedTexts: [],
     debugEnds: [],
     debugSteps: [],
+    insertedImages: [],
     jello: [],
     objectJello: [],
     deleted: 0,
@@ -111,6 +112,7 @@ function loadClipboardExportHarness(options = {}) {
       },
     },
     editingId: null,
+    objects: [],
     selectedIds: new Set([selectedObject.id]),
     textObject,
     selectedObject,
@@ -167,6 +169,8 @@ function loadClipboardExportHarness(options = {}) {
     },
     markJsClipboardWebTokenWritten() {},
     imageNeedsRendering: options.imageNeedsRendering || (() => false),
+    imageFileDebugName: (file, fallback = 'clipboard-image') => file?.name || `${fallback}.${file?.type === 'image/jpeg' ? 'jpg' : 'png'}`,
+    async insertImageFiles(files, x, y, source) { calls.insertedImages.push({ files, x, y, source }); context.objects.push({}); },
     isWebImageRef: options.isWebImageRef || (() => false),
     normalizeTextContent(value) {
       return String(value ?? '').replace(/\r\n?/g, '\n');
@@ -200,7 +204,7 @@ function loadClipboardExportHarness(options = {}) {
     },
   };
   vm.createContext(context);
-  vm.runInContext(`${source}\nglobalThis.copySelected = copySelected;\nglobalThis.cutSelected = cutSelected;\n`, context, {
+  vm.runInContext(`${source}\nglobalThis.copySelected = copySelected;\nglobalThis.cutSelected = cutSelected;\nglobalThis.pasteWebImageBlob = pasteWebImageBlob;\n`, context, {
     filename: 'clipboard_export_init.js',
   });
   return context;
@@ -222,6 +226,7 @@ function loadClipboardPasteObjectsHarness() {
     added: [],
     editCalls: [],
     histories: [],
+    clones: 0,
     selections: [],
     synced: [],
     textBytes: [],
@@ -245,12 +250,14 @@ function loadClipboardPasteObjectsHarness() {
       objects: [sourceTextObject],
       imageData: {},
     },
+    _jsClipboardWebMaybeStale: false,
     _pasteInProgress: false,
     historyIndex: 0,
     zCounter: 1,
     BoardfishClipboardIO: {
       describeClipboardData() { return {}; },
       readBoardfishClipboardTokenFromEvent() { return ''; },
+      readBoardfishClipboardTokenFromBrowser() { calls.histories.push('browser-token-read'); return Promise.resolve({ checked: true, token: '' }); },
     },
     BoardfishEditorState: {
       addObject(obj) {
@@ -283,6 +290,7 @@ function loadClipboardPasteObjectsHarness() {
       step() {},
     },
     cloneObjects(list) {
+      calls.clones++;
       return JSON.parse(JSON.stringify(list));
     },
     jsClipboardStillCurrent() {
@@ -583,6 +591,20 @@ test('copying an untransformed web PNG image writes source bytes without renderi
   assert.equal(context.calls.debugEnds.at(-1).path, 'image-web-source-png');
 });
 
+test('pasting an image retains typed Blobs and only adds a MIME view when missing', async () => {
+  const context = loadClipboardExportHarness();
+  const bytes = new Uint8Array([137, 80, 78, 71]);
+  const typed = new Blob([bytes], { type: 'image/png' });
+  Object.defineProperty(typed, 'arrayBuffer', { value() { throw new Error('paste should not materialize Blob bytes'); } });
+  await context.pasteWebImageBlob(typed, 10, 20, 'web-paste-browser');
+  assert.equal(context.calls.insertedImages[0].files[0], typed);
+  const untyped = new Blob([bytes]);
+  await context.pasteWebImageBlob(untyped, 30, 40, 'web-paste-event');
+  const typedView = context.calls.insertedImages[1].files[0];
+  assert.deepEqual({ type: typedView.type, size: typedView.size }, { type: 'image/png', size: untyped.size });
+  assert.deepEqual(new Uint8Array(await typedView.arrayBuffer()), bytes);
+});
+
 test('copying a text object omits whitespace-only lines at plain clipboard edges', async () => {
   const context = loadClipboardExportHarness();
   context.textObject.data.content = '   \n\t\n  first line  \n second line\t \n   \n\t';
@@ -610,9 +632,7 @@ test('copying highlighted text omits whitespace-only lines at selection edges', 
 test('pasting Boardfish text objects strips whitespace-only edge lines from the pasted clone', async () => {
   const { context, sourceTextObject } = loadClipboardPasteObjectsHarness();
 
-  await context.pasteAtPos(300, 200, {
-    getData() { return ''; },
-  });
+  await context.pasteAtPos(300, 200);
 
   assert.equal(context.calls.added.length, 1);
   assert.equal(context.calls.added[0].data.content, 'first line\nsecond line');
@@ -628,6 +648,8 @@ test('pasting Boardfish text objects strips whitespace-only edge lines from the 
 test('object-limit rejection happens before pasted text trimming and measurement', async () => {
   const { context } = loadClipboardPasteObjectsHarness();
   context.BoardfishWebLimits.canAddObjects = () => false;
-  await context.pasteAtPos(300, 200, { getData: () => '' });
-  assert.deepEqual([context.calls.synced, context.calls.textBytes, context.calls.added, context.calls.histories], [[], [], [], []]);
+  context._jsClipboardWebMaybeStale = true;
+  await context.pasteAtPos(300, 200);
+  assert.equal(context.calls.clones, 0);
+  assert.deepEqual([context.calls.synced, context.calls.textBytes, context.calls.added, context.calls.histories], [[], [], [], ['browser-token-read']]);
 });

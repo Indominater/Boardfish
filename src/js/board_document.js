@@ -57,54 +57,11 @@
     return keys;
   }
 
-  function pruneImageStoreForObjects(imageStore = {}, objects = []) {
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-    const referenced = referencedImageKeys(objects);
-    const pruned = {};
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    let removed = 0;
-    let kept = 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const store = imageStore || {};
-    for (const key in store) {
-      if (!Object.prototype.hasOwnProperty.call(store, key)) continue;
-      const src = store[key];
-      if (referenced.has(key)) {
-        pruned[key] = src;
-        if (collectDiagnostics) kept++;
-      } else {
-        if (collectDiagnostics) removed++;
-      }
-    }
-    return collectDiagnostics
-      ? { imageStore: pruned, removed, kept, referenced: referenced.size }
-      : { imageStore: pruned };
-  }
-
-  function pruneBoardDataImageStore(data = {}) {
-    const result = pruneImageStoreForObjects(data.imageStore || {}, data.objects || []);
-    const pruned = {
-      data: {
-        ...data,
-        imageStore: result.imageStore,
-      },
-    };
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      Object.assign(pruned, {
-        removed: result.removed,
-        kept: result.kept,
-        referenced: result.referenced,
-      });
-    }
-    return pruned;
-  }
-
   function createBoardDataForSave({ viewport, imageStore, objects }, deps = {}) {
-    const referenced = referencedImageKeys(objects);
     const imageManifest = {};
     const store = imageStore || {};
-    for (const key in store) {
-      if (!Object.prototype.hasOwnProperty.call(store, key) || !referenced.has(key)) continue;
+    for (const key of referencedImageKeys(objects)) {
+      if (!Object.prototype.hasOwnProperty.call(store, key)) continue;
       imageManifest[key] = imageMetaForBoardFile(key, store[key], deps);
     }
     const data = {
@@ -310,7 +267,6 @@
   const api = {
     createBoardDataForSave,
     defaultImageRefKind,
-    pruneBoardDataImageStore,
     referencedImageKeys,
   };
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {

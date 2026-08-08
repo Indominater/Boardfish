@@ -1,6 +1,5 @@
 // ─── Image store (keeps base64 data OUT of boardHistory snapshots) ─────────────────
 var imageStore = {};
-var imageMetadataCache = {}; // key -> lightweight display metadata; no decoded image element retained.
 var imageBitmapCache = {}; // key -> ImageBitmap (GPU-resident, never evicted by WebKit)
 var imageBitmapFailed = new Set();
 var imgKeyCounter = 1;
@@ -35,14 +34,6 @@ const isWebImageRef = (src) => {
 const webImageDisplaySrc = (src) => {
   if (!isWebImageRef(src)) return '';
   return BoardfishWebBoardContainer.displaySrcForImageSource?.(src) || '';
-};
-
-const webImageDataUrl = async (src) => {
-  if (!isWebImageRef(src)) return '';
-  if (typeof BoardfishWebBoardContainer.dataUrlForImageSourceAsync === 'function') {
-    return await BoardfishWebBoardContainer.dataUrlForImageSourceAsync(src) || '';
-  }
-  return BoardfishWebBoardContainer.dataUrlForImageSource?.(src) || '';
 };
 
 const revokeWebImageSource = (src) => {
@@ -81,20 +72,20 @@ function imageSourceDebugInfo(src) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const isImageDisplayCacheRequestCurrent = (key, src, generation) => {
+const isImageDisplayCacheRequestCurrent = (key, source, displaySrc, generation) => {
   if (generation !== _imageStoreGeneration) return false;
   const stored = imageStore[key];
-  if (typeof stored === 'string') return stored === src;
-  if (isWebImageRef(stored)) return !!src && webImageDisplaySrc(stored) === src;
-  return false;
+  if (stored !== source) return false;
+  if (typeof stored === 'string') return stored === displaySrc;
+  return isWebImageRef(stored) && (!displaySrc || webImageDisplaySrc(stored) === displaySrc);
 };
 
 function imageNeedsRendering(obj) {
-  return imageTransformNeedsRendering(imageTransformFromObject(obj));
+  return !!(obj.data?.flipX || obj.data?.flipY || obj.data?.rotation);
 }
 
 function renderImageToCanvas(obj, sourceImg = null) {
-  const transform = imageTransformFromObject(obj);
+  const transform = obj.data;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = ClipDebug.start('renderImageToCanvas', {
     id: obj?.id,
@@ -111,7 +102,7 @@ function renderImageToCanvas(obj, sourceImg = null) {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return null;
   }
-  const sideways = isSidewaysRotation(transform.rotation);
+  const sideways = Math.abs(Number(transform.rotation) || 0) % 180 === 90;
   const tmp = document.createElement('canvas');
   tmp.width = sideways ? sourceH : sourceW;
   tmp.height = sideways ? sourceW : sourceH;
@@ -140,154 +131,16 @@ function canvasToPngBlob(canvas) {
   });
 }
 
-async function getRenderedImageDataUrl(obj
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  , dbg = null
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-) {
-  const imgKey = obj?.data?.imgKey;
-  const transform = imageTransformFromObject(obj);
-  const needsRender = imageTransformNeedsRendering(transform);
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const baseMeta = {
-    objectId: obj?.id,
-    imgKey,
-    ...transform,
-    needsRender,
-    storedKind: isWebImageRef(imageStore[imgKey]) ? 'web-ref' : typeof imageStore[imgKey],
-    storedMB: Math.round(imageStoreBytesEstimate(imageStore[imgKey]) / 1024 / 1024 * 100) / 100,
-  };
-  const totalStart = performance.now();
-  const sourceStart = performance.now();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const src = await ensureImageDataUrl(imgKey);
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const sourceMs = performance.now() - sourceStart;
-  const sourceKind = typeof imageStore[imgKey] === 'string' ? 'data-url' : baseMeta.storedKind;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (!src || !needsRender) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    ExportDebug.step(dbg, 'render:done', {
-      ...baseMeta,
-      sourceKind,
-      sourceMs,
-      totalRenderMs: performance.now() - totalStart,
-      hasDataUrl: !!src,
-      passthrough: true,
-      dataUrlLen: src?.length || 0,
-      dataUrlMB: Math.round((src?.length || 0) / 1024 / 1024 * 100) / 100,
-    });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return src;
-  }
-
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const bitmapStart = performance.now();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const bitmap = await createImageBitmapForSource(src, src).catch((
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    err
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  ) => {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    ExportDebug.step(dbg, 'render:image-bitmap-error', { ...baseMeta, sourceMs, error: String(err) });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return null;
-  });
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const loadMs = performance.now() - bitmapStart;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (!bitmap) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    ExportDebug.step(dbg, 'render:done', {
-      ...baseMeta,
-      sourceKind,
-      sourceMs,
-      loadMs,
-      totalRenderMs: performance.now() - totalStart,
-      hasDataUrl: false,
-      ok: false,
-      error: 'image bitmap failed',
-    });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return '';
-  }
-
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const drawStart = performance.now();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+async function renderStoredImageToCanvas(obj, source = imageStore[obj?.data?.imgKey]) {
+  const webRef = isWebImageRef(source);
+  const displaySrc = webRef ? webImageDisplaySrc(source) : source;
+  if (!webRef && (typeof displaySrc !== 'string' || !displaySrc)) return null;
+  const bitmap = await createImageBitmapForSource(source, displaySrc).catch(() => null);
+  if (!bitmap) return null;
   const canvas = renderImageToCanvas(obj, bitmap);
   bitmap.close?.();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const drawMs = performance.now() - drawStart;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (!canvas) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    ExportDebug.step(dbg, 'render:done', {
-      ...baseMeta,
-      sourceKind,
-      sourceMs,
-      loadMs,
-      drawMs,
-      totalRenderMs: performance.now() - totalStart,
-      hasDataUrl: false,
-      ok: false,
-      error: 'canvas render failed',
-    });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return '';
-  }
-
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const encodeStart = performance.now();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const dataUrl = canvas.toDataURL('image/png');
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const encodeMs = performance.now() - encodeStart;
-  ExportDebug.step(dbg, 'render:done', {
-    ...baseMeta,
-    sourceKind,
-    sourceMs,
-    loadMs,
-    drawMs,
-    encodeMs,
-    totalRenderMs: performance.now() - totalStart,
-    width: canvas.width,
-    height: canvas.height,
-    megapixels: Math.round(canvas.width * canvas.height / 10000) / 100,
-    hasDataUrl: !!dataUrl,
-    ok: !!dataUrl,
-    dataUrlLen: dataUrl.length,
-    dataUrlMB: Math.round(dataUrl.length / 1024 / 1024 * 100) / 100,
-  });
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return dataUrl;
+  return canvas;
 }
-
-const imageMetadataFromBitmap = (bitmap, src = '') => {
-  const width = Number(bitmap?.width || bitmap?.naturalWidth || 0) || 0;
-  const height = Number(bitmap?.height || bitmap?.naturalHeight || 0) || 0;
-  return {
-    width,
-    height,
-    naturalWidth: width,
-    naturalHeight: height,
-    complete: width > 0 && height > 0,
-    src: src || '',
-    currentSrc: src || '',
-  };
-};
-
-const setImageDisplayMetadata = (key, bitmap, src = '') => {
-  if (!key || !bitmap) return null;
-  const metadata = imageMetadataFromBitmap(bitmap, src);
-  imageMetadataCache[key] = metadata;
-  return metadata;
-};
-
-const getImageDisplayMetadata = (key) => {
-  return imageMetadataCache[key] || (imageBitmapCache[key] ? imageMetadataFromBitmap(imageBitmapCache[key]) : null);
-};
 
 const bitmapSourceFromImageSource = async (source, displaySrc) => {
   if (typeof isWebImageRef === 'function' && isWebImageRef(source)) {
@@ -319,10 +172,7 @@ const createImageBitmapForSource = async (source, displaySrc) => {
 const openPreviewTargetForObject = (obj, view = {}) => {
   const dpr = Number(view.dpr || (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
   const z = Math.max(0.001, Number(view.zoom || 1));
-  const transform = typeof imageTransformFromObject === 'function'
-    ? imageTransformFromObject(obj)
-    : { rotation: 0 };
-  const sideways = typeof isSidewaysRotation === 'function' && isSidewaysRotation(transform.rotation);
+  const sideways = Math.abs(Number(obj?.data?.rotation) || 0) % 180 === 90;
   const worldW = Math.max(1, sideways ? Number(obj?.h || 0) : Number(obj?.w || 0));
   const worldH = Math.max(1, sideways ? Number(obj?.w || 0) : Number(obj?.h || 0));
   return {
@@ -544,9 +394,9 @@ function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, options = {}
         if (requestEpoch === imageOpenPreviewRequestEpoch) {
           if (typeof scheduleRender === 'function') {
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            scheduleRender(true, false, options.source || 'open-preview-dynamic-ready');
+            scheduleRender(true, null, options.source || 'open-preview-dynamic-ready');
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
-            if (typeof BOARDFISH_PRODUCTION !== 'undefined') scheduleRender(true, false);
+            if (typeof BOARDFISH_PRODUCTION !== 'undefined') scheduleRender(true);
           }
         } else {
           clearOpenInitialImagePreviews(key);
@@ -773,26 +623,14 @@ function scheduleImageReadyRender(
   const intervalMs = Number(options.minIntervalMs) > 0
     ? Number(options.minIntervalMs)
     : (_bulkImageInsertDepth > 0 ? BULK_IMAGE_READY_RENDER_INTERVAL_MS : IMAGE_READY_RENDER_INTERVAL_MS);
-  if (now - _imageReadyLastRender > intervalMs) {
-    _imageReadyLastRender = now;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    scheduleRender(true, false, source);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') scheduleRender(true, false);
-  } else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    scheduleRender(false, true, `${source}-overlay`);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') scheduleRender(false, true);
-  }
+  if (now - _imageReadyLastRender <= intervalMs) return;
+  _imageReadyLastRender = now;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  scheduleRender(true, null, source);
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  if (typeof BOARDFISH_PRODUCTION !== 'undefined') scheduleRender(true);
 }
 
-async function ensureImageDataUrl(key) {
-  const src = imageStore[key];
-  if (typeof src === 'string') return src;
-  if (isWebImageRef(src)) return webImageDataUrl(src);
-  return '';
-}
 var _imageHydrationScheduled = false;
 var _imageHydrationQueue = [];
 var _imageHydrationQueued = new Set();
@@ -803,7 +641,7 @@ function queueImageHydration(key
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   const source = imageStore[key];
-  if (!source || getImageDisplayMetadata(key) || _imageHydrationQueued.has(key)) return;
+  if (!source || imageBitmapCache[key] || _imageHydrationQueued.has(key)) return;
   if (typeof source !== 'string' && !isWebImageRef(source)) return;
   _imageHydrationQueued.add(key);
   _imageHydrationQueue.push({
@@ -833,7 +671,7 @@ function processImageHydrationQueue() {
     } = _imageHydrationQueue.shift();
     _imageHydrationQueued.delete(key);
     const source = imageStore[key];
-    if (!source || getImageDisplayMetadata(key)) continue;
+    if (!source || imageBitmapCache[key]) continue;
     if (typeof source !== 'string' && !isWebImageRef(source)) continue;
     count++;
     try {
@@ -923,14 +761,10 @@ function cacheImage(key, src
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   , options = {}
 ) {
-  const displaySrc = isWebImageRef(src) ? webImageDisplaySrc(src) : src;
-  if (typeof displaySrc !== 'string' || !displaySrc) return;
-  const cachedDisplay = getImageDisplayMetadata(key);
-  if (cachedDisplay) {
-    const cachedSrc = cachedDisplay.currentSrc || cachedDisplay.src || '';
-    if (cachedSrc === displaySrc) return imageReadyPromiseForKey(key);
-    removeImageRuntimeCachesForKey(key);
-  }
+  const webRef = isWebImageRef(src);
+  const displaySrc = webRef ? webImageDisplaySrc(src) : src;
+  if (!webRef && (typeof displaySrc !== 'string' || !displaySrc)) return;
+  if (imageBitmapCache[key]) return imageReadyPromiseForKey(key);
   const generation = _imageStoreGeneration;
   imageBitmapFailed.delete(key);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -976,12 +810,14 @@ function cacheImage(key, src
     cacheMetrics.cacheReadyStage = stage;
     cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const metadata = getImageDisplayMetadata(key);
+    const bitmap = imageBitmapCache[key];
+    const width = bitmap?.width || 0;
+    const height = bitmap?.height || 0;
     const dimensions = {
-      width: metadata?.width || 0,
-      height: metadata?.height || 0,
-      naturalWidth: metadata?.naturalWidth || 0,
-      naturalHeight: metadata?.naturalHeight || 0,
+      width,
+      height,
+      naturalWidth: width,
+      naturalHeight: height,
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     resolveReady({ ...cacheMetrics, ...dimensions });
@@ -1012,7 +848,7 @@ function cacheImage(key, src
       const bitmapMs = performance.now() - bitmapStart;
       cacheMetrics.cacheBitmapMs = bitmapMs;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (!isImageDisplayCacheRequestCurrent(key, displaySrc, generation)) {
+      if (!isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation)) {
         bitmap.close?.();
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         ViewportDebug.step(vpDbg, 'createImageBitmap:stale', { ms: bitmapMs });
@@ -1022,7 +858,6 @@ function cacheImage(key, src
         const selectedBitmap = imageBitmapCache[key] || bitmap;
         if (imageBitmapCache[key]) bitmap.close?.();
         else imageBitmapCache[key] = bitmap;
-        setImageDisplayMetadata(key, selectedBitmap, displaySrc);
         if (typeof scheduleDrawableBitmapWarmup === 'function') {
           const warmupMeta = { kind: 'full-image', key };
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1065,7 +900,7 @@ function cacheImage(key, src
       const bitmapMs = performance.now() - bitmapStart;
       cacheMetrics.cacheBitmapMs = bitmapMs;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (isImageDisplayCacheRequestCurrent(key, displaySrc, generation)) imageBitmapFailed.add(key);
+      if (isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation)) imageBitmapFailed.add(key);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       ViewportDebug.count('imageBitmapFailures');
       ViewportDebug.max('maxImageBitmapMs', bitmapMs);
@@ -1074,7 +909,7 @@ function cacheImage(key, src
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
 
-    if (!isImageDisplayCacheRequestCurrent(key, displaySrc, generation)) {
+    if (!isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation)) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
       ViewportDebug.end(vpDbg, { key, stale: true });
@@ -1193,17 +1028,10 @@ function cacheImage(key, src
 const removeImageRuntimeCachesForKey = (key) => {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const removed = {
-    displayImages: 0,
     bitmaps: 0,
     bitmapFailures: 0,
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (imageMetadataCache[key]) {
-    delete imageMetadataCache[key];
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    removed.displayImages++;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
   if (imageBitmapCache[key]) {
     if (typeof dropDrawableBitmapWarmup === 'function') dropDrawableBitmapWarmup(imageBitmapCache[key]);
     try { imageBitmapCache[key].close(); } catch (_) {}
@@ -1250,14 +1078,12 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
   }
   const keys = new Set();
   addImageRuntimeObjectKeysToSet(keys, imageStore);
-  addImageRuntimeObjectKeysToSet(keys, imageMetadataCache);
   addImageRuntimeObjectKeysToSet(keys, imageBitmapCache);
   for (const key of imageBitmapFailed) keys.add(key);
   let removedSource = false;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const result = {
     removedSources: 0,
-    removedDisplayImages: 0,
     removedBitmaps: 0,
     removedBitmapFailures: 0,
   };
@@ -1277,7 +1103,6 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     removeImageRuntimeCachesForKey(key);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    result.removedDisplayImages += removed.displayImages;
     result.removedBitmaps += removed.bitmaps;
     result.removedBitmapFailures += removed.bitmapFailures;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1296,14 +1121,13 @@ function clearImageStore() {
   for (const k in imageStore) {
     if (!Object.prototype.hasOwnProperty.call(imageStore, k)) continue;
     revokeWebImageSource(imageStore[k]);
-    delete imageStore[k];
   }
-  imageMetadataCache = {};
+  imageStore = {};
   for (const k in imageBitmapCache) {
     if (!Object.prototype.hasOwnProperty.call(imageBitmapCache, k)) continue;
     try { imageBitmapCache[k].close(); } catch (_) {}
-    delete imageBitmapCache[k];
   }
+  imageBitmapCache = {};
   clearOpenInitialImagePreviews();
   clearScaledImageVariants();
   imageBitmapFailed.clear();

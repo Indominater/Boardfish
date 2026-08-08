@@ -127,6 +127,7 @@ function readCurrentWebPreviewBundle() {
   const html = readSource('dist-web/index.html');
   const match = html.match(/<script\s+src="(assets\/boardfish-web-preview\.[a-f0-9]{12}\.min\.js)"><\/script>/);
   assert.ok(match, 'web preview index is missing its cache-busted runtime bundle');
+  assert.ok(readSource('dist-web/sw.js').includes(`'./${match[1]}',`), 'service worker is missing its cache-busted runtime bundle');
   return readSource(path.join('dist-web', match[1]));
 }
 

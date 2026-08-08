@@ -537,11 +537,6 @@ body {
   animation: none !important;
   transition: none !important;
 }
-.opening-freeze-canvas {
-  position: absolute;
-  display: block;
-}
-
 #rubber-band {
   display: none;
   position: fixed;

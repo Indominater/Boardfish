@@ -349,7 +349,6 @@ var OpenDebug = (() => {
         ms: e.meta?.ms ?? '',
         totalMeasuredMs: e.meta?.totalMeasuredMs ?? '',
         drawMs: e.meta?.drawMs ?? '',
-        saveViewportMs: e.meta?.saveViewportMs ?? '',
         overlayMs: e.meta?.overlayMs ?? '',
         drawBoardTotalMs: e.meta?.drawBoardTotalMs ?? '',
         objectLoopMs: e.meta?.objectLoopMs ?? '',
@@ -636,7 +635,6 @@ var OpenDebug = (() => {
       initialDrawMs: initialRender?.meta?.drawMs ?? '',
       initialDrawBoardMs: initialRender?.meta?.drawBoardTotalMs ?? '',
       initialObjectLoopMs: initialRender?.meta?.objectLoopMs ?? '',
-      initialSaveViewportMs: initialRender?.meta?.saveViewportMs ?? '',
       initialOverlayMs: initialRender?.meta?.overlayMs ?? '',
       initialVisibleObjects: initialRender?.meta?.visibleObjects ?? '',
       initialDrawnImages: initialRender?.meta?.drawnImages ?? '',
@@ -720,7 +718,6 @@ var OpenDebug = (() => {
     if (numberValue(summaryRow.decodeQueueWaitMaxMs) > 50) findings.push(previewFirstPaintReady ? 'Post-open image decode queue wait is visible during background hydration; tune only if after-open readiness matters.' : 'Image decode queue wait is visible; tune open hydration concurrency only after checking bitmap decode time.');
     if (numberValue(summaryRow.bitmapDecodeMaxMs) > 100) findings.push(previewFirstPaintReady ? 'At least one background bitmap decode is slow; inspect the largest images if full-board readiness matters.' : 'At least one bitmap decode is slow; inspect the largest images and their dimensions.');
     if (numberValue(summaryRow.initialObjectLoopMs) > 50) findings.push('First draw spends significant time in the object loop; inspect object counts, visible counts, and culling.');
-    if (numberValue(summaryRow.initialSaveViewportMs) > 50) findings.push('Viewport persistence is contributing to first render time.');
     if (numberValue(summaryRow.initialScaledFallbackFull) || numberValue(summaryRow.initialScaledVariantPendingImages)) findings.push('Scaled image variants were missing during first draw; prewarm timing may be worth testing.');
     if (numberValue(summaryRow.scaledPrewarmBuilt) > 0 && numberValue(summaryRow.initialScaledFallbackFull) === 0) findings.push('Initial scaled variant prewarm covered the first draw.');
     if (summaryRow.scaledPrewarmSkipped === 'open-preview-ready') findings.push('Scaled variant prewarm was skipped because opening previews were ready for first draw.');
@@ -856,7 +853,6 @@ var OpenDebug = (() => {
       initialRenderMs: initialRender?.meta?.ms ?? '',
       initialTransformMeasuredMs: initialRender?.meta?.totalMeasuredMs ?? '',
       initialDrawMs: initialRender?.meta?.drawMs ?? '',
-      initialSaveViewportMs: initialRender?.meta?.saveViewportMs ?? '',
       initialOverlayMs: initialRender?.meta?.overlayMs ?? '',
       initialDrawBoardMs: initialRender?.meta?.drawBoardTotalMs ?? '',
       initialObjectLoopMs: initialRender?.meta?.objectLoopMs ?? '',
@@ -904,9 +900,7 @@ var OpenDebug = (() => {
       findings.push(`Opening previews were released together after full visible bitmaps were ready (${summaryRow.openPreviewReleaseReleased} released).`);
     }
     if (Number(summaryRow.initialRenderMs) > 50) {
-      if (Number(summaryRow.initialSaveViewportMs) > 50 && Number(summaryRow.initialSaveViewportMs) > Number(summaryRow.initialDrawMs || 0)) {
-        findings.push('Initial render is over budget due mostly to viewport persistence.');
-      } else if (Number(summaryRow.initialDrawMs) > 50 || Number(summaryRow.initialDrawBoardMs) > 50) {
+      if (Number(summaryRow.initialDrawMs) > 50 || Number(summaryRow.initialDrawBoardMs) > 50) {
         findings.push('Initial render is over budget due mostly to first canvas draw.');
       } else {
         findings.push('Initial render is over budget; inspect initial applyTransform breakdown fields.');

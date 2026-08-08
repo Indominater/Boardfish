@@ -399,7 +399,12 @@ test('cmd+f falls through to browser find when no image can flip', () => {
 test('cmd+f flips selected images when available', () => {
   const selectedIds = new Set(['obj-1']);
   const objectsMap = new Map([['obj-1', { id: 'obj-1', type: 'image' }]]);
-  const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
+  let blockedChecks = 0;
+  const { calls, mainKeydown } = loadKeyboard({
+    selectedIds,
+    objectsMap,
+    isBoardInputBlocked: () => !(++blockedChecks),
+  });
   const event = keyEvent({ key: 'f', code: 'KeyF', metaKey: true });
 
   mainKeydown(event);
@@ -409,6 +414,7 @@ test('cmd+f flips selected images when available', () => {
   assert.deepEqual(calls, [
     ['flipSelectedImages'],
   ]);
+  assert.equal(blockedChecks, 1);
 });
 
 test('cmd+y is consumed as redo before browser actions', () => {

@@ -90,93 +90,35 @@
     return 0;
   }
 
-  function textDataForJsonEstimate(data = {}) {
-    const content = typeof data.content === 'string' ? data.content : '';
-    const result = { content };
-    if (Array.isArray(data.lineAlign) && data.lineAlign.length) {
-      result.lineAlign = data.lineAlign.slice();
-    }
-    if (Array.isArray(data.scriptRanges) && data.scriptRanges.length) {
-      const scriptRanges = [];
-      for (const range of data.scriptRanges) {
-        const kind = range?.kind === 'sup' || range?.kind === 'sub' ? range.kind : '';
-        if (!kind) continue;
-        scriptRanges.push({
-          start: Math.max(0, Math.trunc(Number(range?.start)) || 0),
-          end: Math.max(0, Math.trunc(Number(range?.end)) || 0),
-          kind,
-        });
-      }
-      if (scriptRanges.length) result.scriptRanges = scriptRanges;
-    }
-    return result;
-  }
-
-  function imageDataForJsonEstimate(data = {}) {
-    return {
-      imgKey: typeof data.imgKey === 'string' ? data.imgKey : '',
-      flipX: !!data.flipX,
-      flipY: !!data.flipY,
-      rotation: Number.isFinite(data.rotation) ? data.rotation : 0,
-    };
-  }
-
-  function objectForJsonEstimate(obj = {}) {
-    const type = obj.type === 'image' ? 'image' : 'text';
-    return {
-      id: typeof obj.id === 'string' ? obj.id : '',
-      type,
-      x: Number.isFinite(obj.x) ? obj.x : 0,
-      y: Number.isFinite(obj.y) ? obj.y : 0,
-      w: Number.isFinite(obj.w) ? obj.w : 1,
-      h: Number.isFinite(obj.h) ? obj.h : 1,
-      z: Number.isFinite(obj.z) ? obj.z : 0,
-      data: type === 'image' ? imageDataForJsonEstimate(obj.data) : textDataForJsonEstimate(obj.data),
-    };
-  }
-
-  function referencedImageKeys() {
-    if (root.BoardfishBoardDocument?.referencedImageKeys && Array.isArray(root.objects)) {
-      return root.BoardfishBoardDocument.referencedImageKeys(root.objects);
-    }
-    const keys = new Set();
+  function currentContentBytes() {
     const store = root.imageStore || {};
-    for (const key in store) {
-      if (Object.prototype.hasOwnProperty.call(store, key)) keys.add(key);
-    }
-    return keys;
-  }
-
-  function currentImageContentBytes() {
-    const store = root.imageStore || {};
-    const referenced = referencedImageKeys();
+    const referenced = root.BoardfishBoardDocument?.referencedImageKeys && Array.isArray(root.objects)
+      ? root.BoardfishBoardDocument.referencedImageKeys(root.objects)
+      : Object.keys(store);
     let total = 0;
     for (const key of referenced) total += imageSourceByteLength(store[key]);
-    return total;
-  }
-
-  function currentBoardJsonEstimateBytes(additionalObjectCount = 0) {
     try {
       const objects = Array.isArray(root.objects) ? root.objects : [];
-      const cleanObjects = [];
-      for (const obj of objects) cleanObjects.push(objectForJsonEstimate(obj));
-      for (let i = 0; i < additionalObjectCount; i++) cleanObjects.push({});
+      const cleanObjects = objects.map(({ id, type, x, y, w, h, z, data }) => ({ id, type, x, y, w, h, z, data }));
       const json = JSON.stringify({
         viewport: { panX: root.panX || 0, panY: root.panY || 0, zoom: root.zoom || 1 },
         objects: cleanObjects,
       });
-      return textByteLength(json) + 1024;
+      return total + textByteLength(json) + 1024;
     } catch (_) {
-      return 1024;
+      return total + 1024;
     }
   }
 
-  function projectedContentBytes(additionalImageBytes = 0, additionalObjectCount = 0) {
-    return currentImageContentBytes() + Math.max(0, Number(additionalImageBytes) || 0) + currentBoardJsonEstimateBytes(additionalObjectCount);
+  function projectedContentBytes(additionalImageBytes = 0, additionalObjectCount = 0, baseBytes = currentContentBytes()) {
+    const objectCount = Array.isArray(root.objects) ? root.objects.length : 0;
+    let additionalObjectBytes = 0;
+    for (let i = 0; i < additionalObjectCount; i++) additionalObjectBytes += (objectCount || i) ? 3 : 2;
+    return baseBytes + Math.max(0, Number(additionalImageBytes) || 0) + additionalObjectBytes;
   }
 
   function canAcceptAdditionalContentBytes(additionalImageBytes = 0, additionalObjectCount = 0, options = {}) {
-    const projected = projectedContentBytes(additionalImageBytes, additionalObjectCount);
+    const projected = projectedContentBytes(additionalImageBytes, additionalObjectCount, options.baseBytes);
     if (projected <= LIMITS.maxBoardContentBytes) return true;
     return rejectLimit(boardContentLimitMessage(), options);
   }
@@ -221,23 +163,6 @@
     return true;
   }
 
-  async function validateOpenedImageEntries(imageEntries = []) {
-    if (!Array.isArray(imageEntries)) throw new Error('Boardfish image entries metadata is invalid');
-    for (const entry of imageEntries) {
-      const path = typeof entry?.path === 'string' ? entry.path : '';
-      const mime = typeof entry?.mime === 'string' ? entry.mime.toLowerCase() : '';
-      const byteLength = Number(entry?.byteLength ?? entry?.bytes?.length ?? entry?.bytes ?? 0);
-      if (!path || path.includes('\0')) throw new Error('Boardfish image entry path is invalid');
-      if (!/^image\/(?:png|jpe?g|webp|gif)$/.test(mime)) {
-        throw new Error(`${path} has unsupported image metadata`);
-      }
-      if (!Number.isFinite(byteLength) || byteLength < 0) {
-        throw new Error(`${path} has invalid image metadata`);
-      }
-    }
-    return true;
-  }
-
   function assertBoardDataAllowed(board) {
     assertObjectCountAllowed(board?.objects?.length || 0, 'board');
     return true;
@@ -249,6 +174,7 @@
     boardContentLimitMessage,
     canAcceptAdditionalContentBytes,
     canAddObjects,
+    currentContentBytes,
     imageSourceByteLength,
     isLimitedRuntime,
     limitError,
@@ -256,7 +182,6 @@
     textByteLength,
     validateBoardPayload,
     validateDataUrlImage,
-    validateOpenedImageEntries,
   });
 
   root.BoardfishWebLimits = api;

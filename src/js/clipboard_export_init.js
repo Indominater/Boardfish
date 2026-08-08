@@ -111,20 +111,6 @@ const clipboardTextMetricsForObjects = (items = []) => {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const clipboardImageBlobName = (blob, fallback = 'clipboard-image') => {
-  if (blob?.name) return blob.name;
-  const ext = blob?.type === 'image/jpeg' ? 'jpg' : 'png';
-  return `${fallback}.${ext}`;
-};
-
-const normalizeClipboardImageBlob = (blob, fallback = 'clipboard-image') => {
-  if (!blob) return null;
-  if (typeof File === 'function' && !(blob instanceof File)) {
-    return new File([blob], clipboardImageBlobName(blob, fallback), { type: blob.type || 'image/png' });
-  }
-  return blob;
-};
-
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 const clipboardNow = () => (
   typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -238,24 +224,20 @@ async function pasteWebImageBlob(blob, wx, wy
   , source, dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
-  const file = normalizeClipboardImageBlob(blob
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    , source
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  );
-  if (!file) return false;
+  if (!blob) return false;
+  const imageBlob = blob.type ? blob : blob.slice(0, blob.size, 'image/png');
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const objectCountBefore = objects.length;
   if (collectClipboardDiagnostics) {
     ClipDebug.step(dbg, `${source}:insert-start`, {
-      fileName: clipboardImageBlobName(file, source),
-      fileSize: file.size ?? '',
-      fileType: file.type || '',
+      fileName: imageFileDebugName(imageBlob, source),
+      fileSize: imageBlob.size ?? '',
+      fileType: imageBlob.type || '',
       objectCountBefore,
     });
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  await insertImageFiles([file], wx, wy
+  await insertImageFiles([imageBlob], wx, wy
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     , source
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -668,37 +650,33 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
   }
   _pasteInProgress = true;
   try {
-    const webClipboardToken = jsClipboard
-      ? await readWebClipboardTokenForPaste(clipboardData
+    if (jsClipboard && (clipboardData || _jsClipboardWebMaybeStale)) {
+      const webClipboardToken = await readWebClipboardTokenForPaste(clipboardData
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         , dbg
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      )
-      : { checked: false, token: '' };
-    let clipboardIsCurrent = true;
-    if (jsClipboard) {
-      const currentOptions = {
-        webClipboardTokenChecked: webClipboardToken.checked,
-        webClipboardToken: webClipboardToken.token,
-      };
-      clipboardIsCurrent = jsClipboardStillCurrent(
+      );
+      if (!jsClipboardStillCurrent(
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         dbg,
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        currentOptions
-      );
-    }
-    if (jsClipboard && !clipboardIsCurrent) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectClipboardDiagnostics) {
-        ClipDebug.step(dbg, 'clear-stale-jsClipboard', { expectedToken: _jsClipboardWebToken });
+        {
+          webClipboardTokenChecked: webClipboardToken.checked,
+          webClipboardToken: webClipboardToken.token,
+        }
+      )) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        if (collectClipboardDiagnostics) {
+          ClipDebug.step(dbg, 'clear-stale-jsClipboard', { expectedToken: _jsClipboardWebToken });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        clearJsClipboard();
       }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      clearJsClipboard();
     }
     if (jsClipboard) {
       if (jsClipboard.type === 'objects') {
         const sourceObjects = jsClipboard.objects || [];
+        if (!sourceObjects.length || !BoardfishWebLimits.canAddObjects(sourceObjects.length)) return;
         const imgData = jsClipboard.imageData || {};
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const imageCount = collectClipboardDiagnostics && ClipDebug.enabled
@@ -723,33 +701,6 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        if (!clones.length) {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (collectClipboardDiagnostics) ClipDebug.end(dbg, { skipped: 'empty-jsClipboard' });
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          return;
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const objectLimitStart = collectClipboardDiagnostics ? clipboardNow() : 0;
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        const canAddObjects = BoardfishWebLimits.canAddObjects(clones.length);
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectClipboardDiagnostics) {
-          ClipDebug.step(dbg, 'paste:object-limit-done', {
-            objectCount: clones.length,
-            accepted: canAddObjects,
-            ms: clipboardElapsedMs(objectLimitStart),
-          });
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        if (!canAddObjects) {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (collectClipboardDiagnostics) {
-            ClipDebug.end(dbg, { skipped: 'web-object-limit', objectCount: clones.length });
-          }
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          return;
-        }
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         let trimmedTextObjects = 0;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */

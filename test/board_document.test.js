@@ -74,7 +74,6 @@ test('prunes unreferenced image store entries from saved board data', () => {
     { id: 'obj-2', type: 'text', x: 0, y: 0, w: 10, h: 20, z: 2, data: { text: 'hello' } },
     { id: 'obj-3', type: 'image', x: 5, y: 5, w: 20, h: 10, z: 3, data: { imgKey: 'img-2' } },
   ];
-
   const data = BoardDocument.createBoardDataForSave({
     viewport: { panX: 0, panY: 0, zoom: 1 },
     imageStore,

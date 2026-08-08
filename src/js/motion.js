@@ -55,25 +55,19 @@
   let jelloParams = null;
   let smoothSlideParams = null;
   const copyJiggleNormalizerCache = new Map();
-  let reducedMotionQueryReady = false;
-  let reducedMotionQuery = null;
-
-  const reducedMotionMediaQuery = () => {
-    if (reducedMotionQueryReady) return reducedMotionQuery;
-    reducedMotionQueryReady = true;
-    try {
-      reducedMotionQuery = root.matchMedia?.('(prefers-reduced-motion: reduce)') || null;
-    } catch (_) {
-      reducedMotionQuery = null;
+  let reducedMotionQuery;
+  const prefersReducedMotion = () => {
+    if (reducedMotionQuery === undefined) {
+      try {
+        reducedMotionQuery = root.matchMedia?.('(prefers-reduced-motion: reduce)') || null;
+      } catch (_) {
+        reducedMotionQuery = null;
+      }
     }
-    return reducedMotionQuery;
+    return !!reducedMotionQuery?.matches;
   };
 
-  const prefersReducedMotion = () => !!reducedMotionMediaQuery()?.matches;
-
-  const now = () => (
-    root.performance?.now ? root.performance.now() : Date.now()
-  );
+  const now = () => root.performance?.now ? root.performance.now() : Date.now();
 
   const clamp01 = (value) => Math.max(0, Math.min(1, value));
   const smootherstep = (value) => {
@@ -259,8 +253,7 @@
     meta = {},
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) => {
-    if (prefersReducedMotion()) return;
-    if (!motionRenderPending && !(jelloObjectMotions.size || textSelectionJelloMotions.size)) return;
+    if ((!motionRenderPending && !(jelloObjectMotions.size || textSelectionJelloMotions.size)) || prefersReducedMotion()) return;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const wasPending = typeof BOARDFISH_PRODUCTION === 'undefined' && motionRenderPending;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -335,7 +328,7 @@
   };
 
   const noteObjectJello = (obj, options = {}) => {
-    if (!obj?.id || (options.includeText === false && obj.type === 'text') || prefersReducedMotion()) return;
+    if (!obj?.id || (options.includeText === false && obj.type === 'text')) return;
     const amplitude = numberInRange(options.amplitude, jelloParams.amplitude, 0, 0.24);
     if (amplitude <= 0) return;
     const startedAt = Number.isFinite(options.startedAt) ? options.startedAt : now();
@@ -445,7 +438,7 @@
   };
 
   const noteTextSelectionJello = (spec = {}, options = {}) => {
-    if (!spec?.id || !spec.hasSelection || prefersReducedMotion()) return;
+    if (!spec?.id || !spec.hasSelection) return;
     const amplitude = numberInRange(options.amplitude, jelloParams.amplitude, 0, 0.24);
     if (amplitude <= 0) return;
     const startedAt = now();
@@ -531,14 +524,14 @@
     };
   };
 
-  const jelloTranslateForMotion = (motion, t, options = {}) => {
+  const jelloTranslateForMotion = (motion, t, zoom = 1) => {
     const point = copyJiggleUnit(t, motion);
     const normalizer = motion.copyJiggleNormalizer || getCopyJiggleNormalizer(motion);
     const groupSize = Math.max(1, Number(motion.groupSize) || 1);
     const groupSide = groupSize > 1 ? numberInRange(motion.groupSide, 0, -1, 1) : 1;
     const xPx = point.x * normalizer.x * motion.translateXPx;
     const yPx = point.y * normalizer.y * motion.translateYPx;
-    const viewZoom = Number(options?.view?.zoom);
+    const viewZoom = Number(zoom);
     const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
     const result = {
       groupTranslateX: (groupSize > 1 ? 0 : xPx) / safeZoom,
@@ -595,31 +588,31 @@
     return result;
   };
 
-  const motionTransformAtElapsed = (motion, elapsedMs, options = {}) => {
+  const motionTransformAtElapsed = (motion, elapsedMs, zoom = 1) => {
     const elapsed = Math.max(0, Number(elapsedMs) || 0);
     const localElapsed = elapsed - motion.delay;
     const t = localElapsed <= 0 ? 0 : clamp01(localElapsed / motion.duration);
-    return jelloTransformForMotion(motion, t, options, elapsed);
+    return jelloTransformForMotion(motion, t, zoom, elapsed);
   };
 
-  const applyMotionHandoff = (transform, motion, elapsedMs, options = {}) => {
+  const applyMotionHandoff = (transform, motion, elapsedMs, zoom = 1) => {
     const handoff = motion.handoff;
     if (!handoff || elapsedMs >= handoff.duration) return transform;
     const cutoff = motion.startedAt + elapsedMs;
     const previousElapsed = cutoff - handoff.motion.startedAt;
-    const previous = motionTransformAtElapsed(handoff.motion, previousElapsed, options);
+    const previous = motionTransformAtElapsed(handoff.motion, previousElapsed, zoom);
     const weight = smootherstep(elapsedMs / handoff.duration);
     return blendMotionTransforms(previous, transform, weight);
   };
 
-  const jelloTransformForMotion = (motion, t, options = {}, elapsedMs = t * motion.duration) => {
+  const jelloTransformForMotion = (motion, t, zoom = 1, elapsedMs = t * motion.duration) => {
     const transform = motion.translateXPx || motion.translateYPx
-      ? jelloTranslateForMotion(motion, t, options)
+      ? jelloTranslateForMotion(motion, t, zoom)
       : jelloScaleForMotion(motion, t);
-    return applyMotionHandoff(transform, motion, Math.max(0, elapsedMs), options);
+    return applyMotionHandoff(transform, motion, Math.max(0, elapsedMs), zoom);
   };
 
-  const restingJelloTransformForMotion = (motion, options = {}, elapsedMs = 0) => {
+  const restingJelloTransformForMotion = (motion, zoom = 1, elapsedMs = 0) => {
     if (motion.translateXPx || motion.translateYPx) {
       return applyMotionHandoff({
         translateX: 0,
@@ -632,15 +625,15 @@
           scaleOriginX: motion.scaleOriginX,
           scaleOriginY: motion.scaleOriginY,
         } : {}),
-      }, motion, Math.max(0, elapsedMs), options);
+      }, motion, Math.max(0, elapsedMs), zoom);
     }
     return applyMotionHandoff({
       scaleX: 1,
       scaleY: 1,
-    }, motion, Math.max(0, elapsedMs), options);
+    }, motion, Math.max(0, elapsedMs), zoom);
   };
 
-  const textSelectionMotionForDraw = (id, start, end, options = {}) => {
+  const textSelectionMotionForDraw = (id, start, end, zoom = 1) => {
     const motion = textSelectionJelloMotions.get(id);
     if (!motion || prefersReducedMotion()) return null;
     if (motion.start !== Math.min(start, end) || motion.end !== Math.max(start, end)) {
@@ -671,7 +664,7 @@
       return null;
     }
     if (progress.waiting) {
-      const transform = restingJelloTransformForMotion(motion, options, progress.elapsed);
+      const transform = restingJelloTransformForMotion(motion, zoom, progress.elapsed);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         recordMotionDebug('jiggle-waiting', {
@@ -684,7 +677,7 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return { opacity: 1, ...transform };
     }
-    const transform = jelloTransformForMotion(motion, progress.t, options, progress.elapsed);
+    const transform = jelloTransformForMotion(motion, progress.t, zoom, progress.elapsed);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-progress' : 'jello-progress', {
@@ -702,7 +695,7 @@
   };
 
   const textSelectionJelloSpecsForDraw = () => {
-    if (prefersReducedMotion()) return [];
+    if (!textSelectionJelloMotions.size || prefersReducedMotion()) return [];
     const cutoff = now();
     const specs = [];
     for (const [id, motion] of textSelectionJelloMotions) {
@@ -715,7 +708,7 @@
     return specs;
   };
 
-  const jelloMotionForDraw = (obj, options = {}) => {
+  const jelloMotionForDraw = (obj, zoom = 1) => {
     const jello = jelloObjectMotions.get(obj?.id);
     if (!jello || prefersReducedMotion()) return null;
     const cutoff = now();
@@ -735,7 +728,7 @@
       return jello.phase === 'exit' ? { opacity: 0, scale: 1, skip: true } : null;
     }
     if (progress.waiting) {
-      const transform = restingJelloTransformForMotion(jello, options, progress.elapsed);
+      const transform = restingJelloTransformForMotion(jello, zoom, progress.elapsed);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-waiting' : 'jello-waiting', {
@@ -751,7 +744,7 @@
     }
     const t = progress.t;
     const exitOpacity = jello.phase === 'exit' ? clamp01(1 - t) : 1;
-    const transform = jelloTransformForMotion(jello, t, options, progress.elapsed);
+    const transform = jelloTransformForMotion(jello, t, zoom, progress.elapsed);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-progress' : 'jello-progress', {
@@ -770,9 +763,9 @@
     };
   };
 
-  const objectMotionForDraw = (obj, options = {}) => {
+  const objectMotionForDraw = (obj, zoom = 1) => {
     if (!obj?.id || (!jelloObjectMotions.size && !lastDrawnObjectMotions.size)) return null;
-    const motion = jelloMotionForDraw(obj, options);
+    const motion = jelloMotionForDraw(obj, zoom);
     if (motion) lastDrawnObjectMotions.set(obj.id, motion); else lastDrawnObjectMotions.delete(obj.id);
     return motion;
   };
@@ -782,7 +775,7 @@
   );
 
   const motionObjectsForDraw = () => {
-    if (prefersReducedMotion() || !jelloObjectMotions.size) return [];
+    if (!jelloObjectMotions.size || prefersReducedMotion()) { lastDrawnObjectMotions.clear(); return null; }
     const objects = [];
     for (const motion of jelloObjectMotions.values()) {
       if (motion.phase === 'exit' && motion.obj) objects.push(motion.obj);
@@ -814,33 +807,20 @@
 
   const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 
-  const jiggleActionControlOptions = (options = {}) => {
-    const controls = normalizeCopyJiggleParams(options);
-    controls._copy = { ...controls };
-    if (hasOwn(options, 'includeText')) controls.includeText = options.includeText;
-    return controls;
-  };
-
-  const actionOptionsForSet = (options = {}) => ({
-    ...jelloParams,
-    ...jiggleActionControlOptions(options),
-  });
-
   const applyActionAnimation = (action, payload = {}, options = {}) => {
     if (!COPY_JIGGLE_ACTIONS.has(action)) {
       if (typeof payload?.after === 'function') payload.after();
       return false;
     }
+    if (prefersReducedMotion()) return false;
 
-    const motionOptions = {
-      ...actionOptionsForSet({
-        ...(payload?.options || {}),
-        ...(options || {}),
-      }),
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      action,
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    };
+    const actionOptions = { ...(payload?.options || {}), ...(options || {}) };
+    const copyOptions = normalizeCopyJiggleParams(actionOptions);
+    const motionOptions = { ...jelloParams, ...copyOptions, _copy: copyOptions };
+    if (hasOwn(actionOptions, 'includeText')) motionOptions.includeText = actionOptions.includeText;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    motionOptions.action = action;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const hasExplicitObjects = hasOwn(payload, 'objects') || hasOwn(payload, 'addedObjects');
     const hasExplicitRemovedObjects = hasOwn(payload, 'removedObjects');
     const objects = hasExplicitObjects

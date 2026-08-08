@@ -141,9 +141,9 @@ const textEditorLayoutScriptKey = (obj) => {
   return JSON.stringify(Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges : []);
 };
 
-const textEditorLayoutAlignKey = (obj, content) => {
+const textEditorLayoutAlignKey = (obj) => {
   try {
-    if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj, content);
+    if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj);
   } catch (_) {}
   return '';
 };
@@ -161,7 +161,7 @@ const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
   }
   const text = normalizeTextContent(content ?? obj.data?.content ?? '');
   const scriptKey = textEditorLayoutScriptKey(obj);
-  const alignKey = textEditorLayoutAlignKey(obj, text);
+  const alignKey = textEditorLayoutAlignKey(obj);
   const lineH = Number(typeof LINE_H !== 'undefined' ? LINE_H : 24) || 24;
   const pad = Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 16) || 16;
   const activeEditingId = typeof editingId !== 'undefined' ? editingId : '';
@@ -303,7 +303,7 @@ function setTextEditProxyLogicalValue(proxy, value = '', { domSynced = true } = 
   if (!proxy) return '';
   const text = String(value ?? '');
   proxy._boardfishLogicalValue = text;
-  proxy._boardfishDomValueStale = domSynced === false || String(proxy.value ?? '') !== text;
+  proxy._boardfishDomValueStale = !domSynced;
   return text;
 }
 
@@ -346,8 +346,8 @@ function setTextEditProxySelectionRange(proxy, start, end = start, direction = '
   const max = text.length;
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, max));
   const to = Math.max(from, Math.min(Math.trunc(Number(end ?? start)) || from, max));
-  const domLength = String(proxy.value ?? '').length;
-  const domStale = !!proxy._boardfishDomValueStale || String(proxy.value ?? '') !== text;
+  const domValue = String(proxy.value ?? ''), domLength = domValue.length;
+  const domStale = !!proxy._boardfishDomValueStale || domValue !== text;
   const shouldSyncDom = options.syncDom === true || (domStale && (from > domLength || to > domLength));
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
     const synced = shouldSyncDom ? syncTextEditProxyDomValue(proxy, text, { start: from, end: to, direction }) : false;
@@ -584,7 +584,6 @@ const invalidateTextEditObjectLayout = (obj) => {
   if (typeof clearTextObjectLayoutRuntime === 'function') clearTextObjectLayoutRuntime(obj);
   else {
     delete obj._layoutCache;
-    if (typeof _linesCacheMap !== 'undefined') _linesCacheMap.delete(obj.id);
   }
 };
 
@@ -721,15 +720,13 @@ const isBetterNestedTextEditScriptRange = (candidate, current) => (
 
 const textEditScriptRanges = (obj) => obj ? getTextScriptRanges(obj) : [];
 
-const setTextEditScriptRangesForContent = (obj, content, ranges = []) => {
+const setTextEditScriptRangesForContent = (obj, ranges = []) => {
   if (!obj || obj.type !== 'text') return;
-  const normalizedContent = normalizeTextContent(content);
-  const nextRanges = cloneTextEditScriptRangeList(ranges);
-  if (nextRanges.length) obj.data.scriptRanges = nextRanges;
+  if (ranges.length) obj.data.scriptRanges = ranges;
   else delete obj.data.scriptRanges;
-  obj._textScriptRangesCache = nextRanges;
-  obj._textScriptRangesCacheContent = normalizedContent;
-  obj._textScriptRangesCacheSourceKey = JSON.stringify(nextRanges);
+  obj._textScriptRangesCache = ranges;
+  obj._textScriptRangesCacheContent = obj.data.content;
+  obj._textScriptRangesCacheSourceKey = JSON.stringify(ranges);
 };
 
 const textEditScriptRangeContext = (ranges = []) => {
@@ -855,10 +852,14 @@ const normalizeTextObjectToEditableScriptBraces = (obj) => {
   return true;
 };
 
-const normalizeTextEditVisibleCaretIndex = (obj, index, direction = 'forward') => {
+const textEditScriptSnapshot = (obj) => {
   const text = normalizeTextContent(obj?.data?.content || '');
   const ranges = textEditScriptRanges(obj);
-  const context = textEditScriptRangeContext(ranges);
+  return { text, ranges, context: textEditScriptRangeContext(ranges) };
+};
+
+const normalizeTextEditVisibleCaretIndex = (obj, index, direction = 'forward', snapshot = null) => {
+  const { text, context } = snapshot || textEditScriptSnapshot(obj);
   const hasBracedRangeStartingAt = (pos) => {
     for (const range of textEditContextList(context, 'byStart', pos)) {
       if (isTextScriptBracedRange(text, range)) return true;
@@ -876,36 +877,19 @@ const normalizeTextEditVisibleCaretIndex = (obj, index, direction = 'forward') =
   return pos;
 };
 
-const moveTextEditVisibleCaret = (obj, index, direction = 'forward') => {
+const moveTextEditVisibleCaret = (obj, index, direction = 'forward', snapshot = null) => {
+  const scriptSnapshot = snapshot || textEditScriptSnapshot(obj);
   const backward = direction === 'backward';
-  const current = normalizeTextEditVisibleCaretIndex(obj, index, backward ? 'backward' : 'forward');
+  const current = normalizeTextEditVisibleCaretIndex(obj, index, backward ? 'backward' : 'forward', scriptSnapshot);
   const stepped = current + (backward ? -1 : 1);
-  return normalizeTextEditVisibleCaretIndex(obj, stepped, backward ? 'backward' : 'forward');
+  return normalizeTextEditVisibleCaretIndex(obj, stepped, backward ? 'backward' : 'forward', scriptSnapshot);
 };
 
-const textEditCanExitScriptLayerAt = (obj, index, affinity = '') => {
-  if (!obj || affinity === 'after') return false;
-  const pos = normalizeTextEditVisibleCaretIndex(obj, index, 'forward');
-  for (const range of textEditScriptRanges(obj)) {
-    if (range.end === pos && isTextScriptRangeActiveAt(range, pos, affinity)) return true;
-  }
-  return false;
-};
-
-const textEditCanEnterScriptLayerAt = (obj, index, affinity = '') => {
-  if (!obj || affinity !== 'after') return false;
-  const pos = normalizeTextEditVisibleCaretIndex(obj, index, 'backward');
-  for (const range of textEditScriptRanges(obj)) {
-    if (range.end === pos) return true;
-  }
-  return false;
-};
-
-const moveTextEditCaretScriptLayer = (obj, index, direction = 'forward') => {
-  const pos = normalizeTextEditVisibleCaretIndex(obj, index, direction);
+const moveTextEditCaretScriptLayer = (obj, index, direction = 'forward', snapshot = null) => {
+  const scriptSnapshot = snapshot || textEditScriptSnapshot(obj);
+  const { text, ranges, context } = scriptSnapshot;
+  const pos = normalizeTextEditVisibleCaretIndex(obj, index, direction, scriptSnapshot);
   const affinity = obj?._textScriptCaretIndex === pos ? obj._textScriptCaretAffinity : '';
-  const text = normalizeTextContent(obj?.data?.content || '');
-  const ranges = textEditScriptRanges(obj);
   if (direction === 'forward') {
     let bracedClose = null;
     for (const range of ranges) {
@@ -926,17 +910,11 @@ const moveTextEditCaretScriptLayer = (obj, index, direction = 'forward') => {
       return { index: bracedEnd.end - 1, affinity: 'after' };
     }
   }
-  if (
-    direction === 'forward' &&
-    pos >= text.length &&
-    textEditCanEnterScriptLayerAt(obj, pos, affinity)
-  ) {
+  const endsScriptLayer = textEditContextList(context, 'byEnd', pos).length > 0;
+  if (endsScriptLayer && direction === 'forward' && (affinity !== 'after' || pos >= text.length)) {
     return { index: pos, affinity: 'after' };
   }
-  if (direction === 'forward' && textEditCanExitScriptLayerAt(obj, pos, affinity)) {
-    return { index: pos, affinity: 'after' };
-  }
-  if (direction === 'backward' && textEditCanEnterScriptLayerAt(obj, pos, affinity)) {
+  if (endsScriptLayer && direction === 'backward' && affinity === 'after') {
     return { index: pos, affinity: '' };
   }
   return null;
@@ -1159,14 +1137,13 @@ const textEditVisibleSelectionReplacementRange = (obj, selection) => {
   return replacementRange;
 };
 
-const textEditVisibleDeleteRange = (obj, index, key) => {
+const textEditVisibleDeleteRange = (obj, index, key, snapshot = null) => {
   if (!obj || (key !== 'Backspace' && key !== 'Delete')) return null;
-  const text = normalizeTextContent(obj.data?.content || '');
-  const ranges = textEditScriptRanges(obj);
-  const rangeContext = textEditScriptRangeContext(ranges);
+  const scriptSnapshot = snapshot || textEditScriptSnapshot(obj);
+  const { text, ranges, context: rangeContext } = scriptSnapshot;
   if (!text.length) return null;
   const backward = key === 'Backspace';
-  const caret = normalizeTextEditVisibleCaretIndex(obj, index, backward ? 'backward' : 'forward');
+  const caret = normalizeTextEditVisibleCaretIndex(obj, index, backward ? 'backward' : 'forward', scriptSnapshot);
   const blankLineRange = textEditBlankLineDeleteRange(text, caret, key);
   if (blankLineRange) {
     return {
@@ -1186,7 +1163,7 @@ const textEditVisibleDeleteRange = (obj, index, key) => {
   }
   if (target < 0 || target >= text.length) return null;
 
-  return textEditVisibleSelectionDeleteRange(obj, { start: target, end: target + 1 });
+  return textEditVisibleSelectionDeleteRange(obj, { start: target, end: target + 1 }, text, ranges, rangeContext);
 };
 
 const textEditScriptMarkerInsertionIndexAt = (obj, index) => {
@@ -1308,7 +1285,6 @@ const textSelectionBracedRangeNeedsCompletion = (content, range, start, end) => 
 
 const completeTextSelectionBracedScriptRanges = (content, start, end, selectedText, rangeEntries = [], sourceRanges = []) => {
   let text = normalizeTextContent(selectedText);
-  const entries = cloneTextEditScriptRangeList(rangeEntries);
   const missingClosings = [];
   for (const range of sourceRanges || []) {
     if (range.end <= start) continue;
@@ -1323,7 +1299,7 @@ const completeTextSelectionBracedScriptRanges = (content, start, end, selectedTe
     const closeIndex = text.length;
     text += '}';
     let entry = null;
-    for (const item of entries) {
+    for (const item of rangeEntries) {
       if (item.sourceRange !== range) continue;
       entry = item;
       break;
@@ -1331,7 +1307,7 @@ const completeTextSelectionBracedScriptRanges = (content, start, end, selectedTe
     if (entry) {
       entry.end = closeIndex + 1;
     } else {
-      entries.push({
+      rangeEntries.push({
         start: relativeStart,
         end: closeIndex + 1,
         kind: range.kind,
@@ -1342,7 +1318,7 @@ const completeTextSelectionBracedScriptRanges = (content, start, end, selectedTe
 
   return {
     text,
-    scriptRanges: entriesToTextScriptRanges(entries),
+    scriptRanges: entriesToTextScriptRanges(rangeEntries),
   };
 };
 
@@ -1375,9 +1351,9 @@ const createTextSelectionClipboardPayload = (obj, selection) => {
     ? normalizeTextScriptRangesForContent(completed.text, completed.scriptRanges)
     : completed.scriptRanges;
   const clipboardText = typeof textScriptLinearToDeterministicBraces === 'function'
-    ? textScriptLinearToDeterministicBraces(completed.text, normalizedScriptRanges)
+    ? textScriptLinearToDeterministicBraces(completed.text, normalizedScriptRanges, { normalized: true })
     : typeof textContentWithCanonicalScriptBraces === 'function'
-      ? textContentWithCanonicalScriptBraces(completed.text, normalizedScriptRanges)
+      ? textContentWithCanonicalScriptBraces(completed.text, normalizedScriptRanges, { normalized: true })
     : completed.text;
   const clipboardScriptRanges = typeof deriveBracedTextScriptRangesFromContent === 'function' &&
     typeof normalizeTextScriptRangesForContent === 'function'
@@ -1463,9 +1439,7 @@ const cloneTextScriptRangesForEdit = (ranges = []) => {
 
 const sortAndDedupeTextScriptRanges = (ranges = []) => {
   const source = Array.isArray(ranges) ? ranges : [];
-  if (areTextScriptRangesSortedUniqueForEdit(source)) {
-    return cloneTextScriptRangesForEdit(source);
-  }
+  if (areTextScriptRangesSortedUniqueForEdit(source)) return source;
   const sorted = [];
   for (const range of source) {
     if (isFiniteTextScriptRangeForEdit(range)) {
@@ -1700,8 +1674,8 @@ const transformTextScriptRangesForInput = (oldRanges, {
   caretAffinity = '',
 } = {}) => {
   if (typeof normalizeTextScriptRangesForContent !== 'function') return [];
-  const oldText = normalizeTextContent(oldValue);
-  const nextText = normalizeTextContent(newValue);
+  const oldText = String(oldValue ?? '');
+  const nextText = String(newValue ?? '');
   const editStart = Math.max(0, Math.min(start, oldText.length));
   const editEnd = Math.max(editStart, Math.min(end, oldText.length));
   const inserted = String(insertedText ?? '');
@@ -2304,12 +2278,11 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
-const textForTextEditPaste = (value) => {
-  const text = normalizeTextContent(value);
-  return typeof textForTextObjectPaste === 'function'
-    ? textForTextObjectPaste(text)
-    : text;
-};
+const textForTextEditPaste = (value) => (
+  typeof textForTextObjectPaste === 'function'
+    ? textForTextObjectPaste(value)
+    : normalizeTextContent(value)
+);
 
 const editableTextScriptPayload = (payload = {}) => {
   const brace = typeof textScriptLinearToDeterministicBraces === 'function'
@@ -2387,7 +2360,6 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
       ...textEditorTextStats(editablePayload.text, editablePayload.scriptRanges),
     };
   }
-  inputState.scriptCaretRanges = textScriptCaretRangesForEditState(inputState.scriptRanges, selection.start, inputState.scriptCaretAffinity);
   beginTextEditHistoryAction(id, inputState, {
     splitPending: shouldCommitTextEditInputImmediately(inputType, inputState.hasSelection),
   });
@@ -2440,7 +2412,6 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
       ...textEditorTextStats(pastedText, []),
     };
   }
-  inputState.scriptCaretRanges = textScriptCaretRangesForEditState(scriptRanges, selection.start, inputState.scriptCaretAffinity);
   beginTextEditHistoryAction(id, inputState, {
     splitPending: shouldCommitTextEditInputImmediately(inputType, inputState.hasSelection),
   });
@@ -2543,7 +2514,6 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   inputState.debug = dbg;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  inputState.scriptCaretRanges = textScriptCaretRangesForEditState(inputState.scriptRanges, inputState.start, inputState.scriptCaretAffinity);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const historyStartedAt = textEditorDebugNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -2595,17 +2565,6 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
     inputType,
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (options.immediateHistory) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const flushStartedAt = textEditorDebugNow();
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    flushEditHistoryCheckpoint();
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    logStep('paste:text-edit-immediate-history-flushed', {
-      flushMs: Math.round((textEditorDebugNow() - flushStartedAt) * 100) / 100,
-    });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-replace-end', {
     inputType,
@@ -2708,9 +2667,11 @@ function enterEdit(id, {
     if (typeof normalizeTextLineAlignForContent === 'function' && Array.isArray(obj.data?.lineAlign)) {
       const beforeLineAlign = obj.data.lineAlign || [];
       const lineAlign = normalizeTextLineAlignForContent(obj.data.content, obj.data.lineAlign);
-      if (lineAlign.length) obj.data.lineAlign = lineAlign;
-      else delete obj.data.lineAlign;
-      lineAlignNormalized = !textEditFlatArrayEqual(beforeLineAlign, obj.data.lineAlign || []);
+      lineAlignNormalized = !textEditFlatArrayEqual(beforeLineAlign, lineAlign);
+      if (lineAlignNormalized) {
+        if (lineAlign.length) obj.data.lineAlign = lineAlign;
+        else delete obj.data.lineAlign;
+      }
     }
   }
   logStep('enter-normalize', {
@@ -2817,7 +2778,6 @@ function enterEdit(id, {
           value: currentProxyValue,
           scriptRanges: textEditScriptRanges(obj),
           scriptCaretAffinity: boundaryInsertion?.affinity || '',
-          scriptCaretRanges: [],
           inputType,
           replacement: {
             start: insertIndex,
@@ -2852,11 +2812,6 @@ function enterEdit(id, {
           value: currentProxyValue,
           scriptRanges: textEditScriptRanges(obj),
           scriptCaretAffinity: boundaryInsertion.affinity,
-          scriptCaretRanges: textScriptCaretRangesForEditState(
-            textEditScriptRanges(obj),
-            boundaryInsertion.index,
-            boundaryInsertion.affinity
-          ),
           inputType,
           replacement: {
             start: boundaryInsertion.index,
@@ -2887,7 +2842,6 @@ function enterEdit(id, {
         value: currentProxyValue,
         scriptRanges: textEditScriptRanges(obj),
         scriptCaretAffinity: '',
-        scriptCaretRanges: [],
         inputType,
         replacement: {
           start: replacementRange.start,
@@ -2919,7 +2873,6 @@ function enterEdit(id, {
       value: currentProxyValue,
       scriptRanges,
       scriptCaretAffinity,
-      scriptCaretRanges: textScriptCaretRangesForEditState(scriptRanges, selection.start, scriptCaretAffinity),
       inputType: event?.inputType || '',
     };
     if (nativeReplacement) pendingInputState.replacement = nativeReplacement;
@@ -3100,7 +3053,7 @@ function enterEdit(id, {
     logInputStep('caret-ranges-preserved', {
       preservedCaretRangeCount: Array.isArray(preservedCaretRanges) ? preservedCaretRanges.length : 0,
     });
-    setTextEditScriptRangesForContent(obj, obj.data.content, scriptResult.ranges || []);
+    setTextEditScriptRangesForContent(obj, scriptResult.ranges || []);
     if (proxy.selectionStart === proxy.selectionEnd) {
       const normalizedCaret = normalizeTextEditVisibleCaretIndex(obj, proxy.selectionStart, 'forward');
       if (normalizedCaret !== proxy.selectionStart) {
@@ -3226,11 +3179,7 @@ function enterEdit(id, {
       insertedNewlines: textEditorNewlineCount(insertedText),
       ...textEditorTextStats(obj.data.content, obj.data.scriptRanges),
     }));
-    const nextSelectionState = textEditSelectionState(proxy);
-    _textInputSelectionHistorySuppress = {
-      start: nextSelectionState.start,
-      end: nextSelectionState.end,
-    };
+    _textInputSelectionHistorySuppress = textEditSelectionState(proxy);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const historyPushed = recordTextEditInputHistory(id, {
       inputType,
@@ -3261,7 +3210,7 @@ function enterEdit(id, {
 	      ...textEditorObjectDebugStats(obj),
 	      ...textEditorSizeDebugStats(obj, obj.data.content, 'inputEnd'),
 	      ...textEditorProxySizeDebugStats(proxy),
-	      ...textEditorSelectionDebugStats(nextSelectionState, textEditProxyValue(proxy)),
+	      ...textEditorSelectionDebugStats(_textInputSelectionHistorySuppress, textEditProxyValue(proxy)),
 	    }));
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (inputState.nativePasteEndMeta && dbg) {
@@ -3617,7 +3566,6 @@ function enterEdit(id, {
       });
       proxy.setRangeText('', deletion.start, deletion.end, 'start');
       dispatchTextEditInputEvent(proxy, inputType);
-      flushEditHistoryCheckpoint();
       return;
     }
 
@@ -3646,15 +3594,16 @@ function enterEdit(id, {
       flushEditHistoryCheckpoint();
       const selection = textEditSelectionState(proxy);
       const direction = e.key === 'ArrowLeft' ? 'backward' : 'forward';
+      const scriptSnapshot = textEditScriptSnapshot(obj);
       let nextPos;
       let scriptLayerMove = false;
       if (selection.hasSelection && !e.shiftKey) {
-        nextPos = normalizeTextEditVisibleCaretIndex(obj, direction === 'backward' ? selection.start : selection.end, direction);
+        nextPos = normalizeTextEditVisibleCaretIndex(obj, direction === 'backward' ? selection.start : selection.end, direction, scriptSnapshot);
         setTextEditProxySelectionRange(proxy, nextPos, nextPos, 'none');
       } else if (e.shiftKey) {
         const activePos = selection.direction === 'backward' ? selection.start : selection.end;
         const anchorPos = selection.direction === 'backward' ? selection.end : selection.start;
-        nextPos = moveTextEditVisibleCaret(obj, activePos, direction);
+        nextPos = moveTextEditVisibleCaret(obj, activePos, direction, scriptSnapshot);
         setTextEditProxySelectionRange(
           proxy,
           Math.min(anchorPos, nextPos),
@@ -3662,7 +3611,7 @@ function enterEdit(id, {
           anchorPos <= nextPos ? 'forward' : 'backward'
         );
       } else {
-        const layerMove = moveTextEditCaretScriptLayer(obj, selection.start, direction);
+        const layerMove = moveTextEditCaretScriptLayer(obj, selection.start, direction, scriptSnapshot);
         if (layerMove) {
           nextPos = layerMove.index;
           setTextEditProxySelectionRange(proxy, nextPos, nextPos, 'none');
@@ -3674,7 +3623,7 @@ function enterEdit(id, {
           }
           scriptLayerMove = true;
         } else {
-          nextPos = moveTextEditVisibleCaret(obj, selection.start, direction);
+          nextPos = moveTextEditVisibleCaret(obj, selection.start, direction, scriptSnapshot);
           setTextEditProxySelectionRange(proxy, nextPos, nextPos, 'none');
         }
       }
@@ -3713,7 +3662,8 @@ function enterEdit(id, {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const deleteRangeStartedAt = textEditorDebugNow();
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        const caret = normalizeTextEditVisibleCaretIndex(obj, selection.start, direction);
+        const scriptSnapshot = textEditScriptSnapshot(obj);
+        const caret = normalizeTextEditVisibleCaretIndex(obj, selection.start, direction, scriptSnapshot);
         deleteCaret = caret;
         if (caret !== selection.start) proxy.setSelectionRange(caret, caret, 'none');
         normalizedSelection = {
@@ -3723,7 +3673,7 @@ function enterEdit(id, {
           hasSelection: false,
         };
         blankLineDelete = !!textEditBlankLineDeleteRange(textEditProxyValue(proxy), caret, e.key);
-        deletion = textEditVisibleDeleteRange(obj, caret, e.key);
+        deletion = textEditVisibleDeleteRange(obj, caret, e.key, scriptSnapshot);
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           deleteRangeMs = textEditorDebugRound(textEditorDebugNow() - deleteRangeStartedAt);
         }
@@ -3759,11 +3709,6 @@ function enterEdit(id, {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const deleteDebugSeq = pendingInputState._debugSeq;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        pendingInputState.scriptCaretRanges = textScriptCaretRangesForEditState(
-          pendingInputState.scriptRanges,
-          pendingInputState.start,
-          pendingInputState.scriptCaretAffinity
-        );
         beginTextEditHistoryAction(id, pendingInputState, {
           splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
         });
@@ -3886,13 +3831,12 @@ function enterEdit(id, {
       }
 
       // Find the line containing refPos
-      let refLineIdx = layout.length - 1;
-      for (let i = 0; i < layout.length; i++) {
-        const ln = layout[i];
-        if (refPos >= ln.startIndex && refPos <= (ln.caretEndIndex ?? ln.endIndex ?? (ln.startIndex + ln.text.length))) {
-          refLineIdx = i; break;
-        }
+      let lo = 0, hi = layout.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1, ln = layout[mid];
+        if (refPos <= (ln.caretEndIndex ?? ln.endIndex ?? (ln.startIndex + ln.text.length))) hi = mid; else lo = mid + 1;
       }
+      const refLineIdx = lo;
       const refLine = layout[refLineIdx];
 
       // Caret world-x in the reference line

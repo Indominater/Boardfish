@@ -80,8 +80,6 @@ function loadImageState(createImageBitmap) {
     ViewportDebug: noopDebugApi(),
     ClipDebug: noopDebugApi(),
     clearScaledImageVariants() {},
-    isSidewaysRotation: () => false,
-    imageTransformFromObject: () => ({ rotation: 0, flipX: false, flipY: false }),
     setCanvasImageQuality() {},
     createImageBitmap,
   };
@@ -95,7 +93,7 @@ function loadImageState(createImageBitmap) {
       'globalThis.releaseReadyOpenInitialImagePreviewsForOpen = releaseReadyOpenInitialImagePreviewsForOpen;\n' +
       'globalThis.resolveOpenInitialImageSourceForDraw = resolveOpenInitialImageSourceForDraw;\n' +
       'globalThis.bitmapSourceFromImageSource = bitmapSourceFromImageSource;\n' +
-      'globalThis.ensureImageDataUrl = ensureImageDataUrl;\n' +
+      'globalThis.scheduleImageReadyRender = scheduleImageReadyRender;\n' +
       'globalThis.clearImageStore = clearImageStore;\n',
     context,
     { filename: 'image_state.js' },
@@ -103,23 +101,47 @@ function loadImageState(createImageBitmap) {
   return { context, rafs, timers };
 }
 
-test('Blob-backed web refs feed exact Blobs to bitmap decode and async data URL conversion', async () => {
+test('throttled image readiness does not schedule an overlay-only frame', () => {
+  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+  const renders = [];
+  let invalidations = 0;
+  let now = 1000;
+  context.performance.now = () => now;
+  context.invalidateOffscreen = () => { invalidations++; };
+  context.scheduleRender = (...args) => { renders.push(args); };
+
+  context.scheduleImageReadyRender('first-ready', { minIntervalMs: 120 });
+  now = 1050;
+  context.scheduleImageReadyRender('throttled-ready', { minIntervalMs: 120 });
+
+  assert.equal(invalidations, 2);
+  assert.deepEqual(renders, [[true, null, 'first-ready']]);
+});
+
+test('Blob-backed web refs decode directly without a display URL', async () => {
   const bytes = new Uint8Array([1, 2, 3, 4]);
   const blob = new Blob([bytes], { type: 'image/png' });
   const source = { web: true, mime: 'image/png', bytes: bytes.length, __blob: blob };
-  const { context } = loadImageState(() => Promise.resolve({ close() {} }));
+  const decoded = [];
+  const bitmap = { width: 4, height: 3, close() {} };
+  const { context, rafs } = loadImageState(async (value) => {
+    decoded.push(value);
+    return bitmap;
+  });
   context.BoardfishWebBoardContainer = {
     isWebImageRef: (value) => value?.web === true,
     blobForImageSource: (value) => value?.__blob || null,
-    dataUrlForImageSourceAsync: async (value) => {
-      const sourceBytes = new Uint8Array(await value.__blob.arrayBuffer());
-      return `data:image/png;base64,${Buffer.from(sourceBytes).toString('base64')}`;
-    },
+    displaySrcForImageSource: () => '',
   };
   context.imageStore['img-1'] = source;
 
   assert.equal(await context.bitmapSourceFromImageSource(source, ''), blob);
-  assert.equal(await context.ensureImageDataUrl('img-1'), 'data:image/png;base64,AQIDBA==');
+  const ready = context.cacheImage('img-1', source, null);
+  assert.equal(rafs.length, 1);
+  rafs.shift()();
+  await ready;
+  assert.equal(decoded[0], blob);
+  assert.equal(context.imageBitmapCache['img-1'], bitmap);
 });
 
 test('cacheImage keeps an existing current bitmap and closes a racing duplicate', async () => {
@@ -238,13 +260,11 @@ test('cacheImage prioritizes the exact scaled replacement for an active open pre
   assert.equal(queued[0].options.priority, true);
 });
 
-test('removeImageRuntimeCachesForKey clears runtime display state for the removed image only', () => {
+test('removeImageRuntimeCachesForKey clears runtime bitmap state for the removed image only', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   const removedBitmap = { closed: false, close() { this.closed = true; } };
   const keptBitmap = { closed: false, close() { this.closed = true; } };
 
-  context.imageMetadataCache['img-1'] = { width: 10 };
-  context.imageMetadataCache['img-2'] = { width: 20 };
   context.imageBitmapCache['img-1'] = removedBitmap;
   context.imageBitmapCache['img-2'] = keptBitmap;
   context.imageBitmapFailed.add('img-1');
@@ -252,11 +272,9 @@ test('removeImageRuntimeCachesForKey clears runtime display state for the remove
 
   context.removeImageRuntimeCachesForKey('img-1');
 
-  assert.equal(Object.hasOwn(context.imageMetadataCache, 'img-1'), false);
   assert.equal(Object.hasOwn(context.imageBitmapCache, 'img-1'), false);
   assert.equal(context.imageBitmapFailed.has('img-1'), false);
   assert.equal(removedBitmap.closed, true);
-  assert.equal(Object.hasOwn(context.imageMetadataCache, 'img-2'), true);
   assert.equal(Object.hasOwn(context.imageBitmapCache, 'img-2'), true);
   assert.equal(context.imageBitmapFailed.has('img-2'), true);
   assert.equal(keptBitmap.closed, false);
@@ -511,8 +529,6 @@ test('newImgKey skips keys already present in the live image store', () => {
 test('clearImageStore continues after an ImageBitmap close throws', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   let keptClosed = false;
-  const staleMetadataCache = context.imageMetadataCache;
-  staleMetadataCache['img-1'] = { width: 10, height: 10 };
   context.imageBitmapCache['img-1'] = {
     close() {
       throw new Error('already closed');
@@ -527,7 +543,5 @@ test('clearImageStore continues after an ImageBitmap close throws', () => {
   assert.doesNotThrow(() => context.clearImageStore());
 
   assert.equal(keptClosed, true);
-  assert.notEqual(context.imageMetadataCache, staleMetadataCache);
-  assert.deepEqual(Object.keys(context.imageMetadataCache), []);
   assert.deepEqual(Object.keys(context.imageBitmapCache), []);
 });

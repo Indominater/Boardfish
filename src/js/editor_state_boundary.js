@@ -60,7 +60,6 @@
       const obj = objects[read];
       if (idsToRemove.has(obj.id)) {
         objectsMap.delete(obj.id);
-        _linesCacheMap.delete(obj.id);
         selectedIds.delete(obj.id);
         if (selectedId === obj.id) selectedId = null;
         removed++;
@@ -78,10 +77,7 @@
     preserveIds = [],
   } = {}) {
     const candidateIds = ids ? new Set(ids) : null;
-    const preserved = new Set();
-    for (const id of preserveIds || []) {
-      if (id) preserved.add(id);
-    }
+    const preserved = new Set(preserveIds || []);
     const idsToRemove = [];
     for (const obj of objects) {
       if (!obj || obj.type !== 'text') continue;
@@ -90,7 +86,7 @@
       if (!isTextContentEmpty(obj.data?.content)) continue;
       idsToRemove.push(obj.id);
     }
-    return removeObjectsById(idsToRemove);
+    return idsToRemove.length ? removeObjectsById(idsToRemove) : 0;
   }
 
   function deleteEmptyTextObjects(reason = 'delete-empty-text', options = {}) {
@@ -104,7 +100,6 @@
       });
       return;
     }
-    _linesCacheMap.clear();
     _prefixCache.clear();
   }
 

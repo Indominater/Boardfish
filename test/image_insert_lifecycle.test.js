@@ -9,14 +9,15 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const WebContainer = require('../src/js/web_board_container.js');
 
-function loadWebImageSourceHarness({ BlobImpl = Blob, boardContainer = null } = {}) {
+function loadWebImageSourceHarness({ boardContainer = null } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
   const start = source.indexOf('const webImageExtForFile =');
   const end = source.indexOf('\nconst rollbackImageInsertSource =', start);
   assert.ok(start >= 0 && end > start, 'web image source helpers are missing');
   const calls = [];
   const context = {
-    Blob: BlobImpl,
+    Blob,
+    File,
     BoardfishWebBoardContainer: boardContainer || {
       createWebImageRef(options) {
         calls.push(options);
@@ -27,7 +28,7 @@ function loadWebImageSourceHarness({ BlobImpl = Blob, boardContainer = null } = 
   vm.createContext(context);
   vm.runInContext(
     `${source.slice(start, end)}\n` +
-      'globalThis.createWebImageSourceFromBytes = createWebImageSourceFromBytes;\n',
+      'globalThis.createWebImageSourceFromBlob = createWebImageSourceFromBlob;\n',
     context,
     { filename: 'image_insert.js' },
   );
@@ -49,7 +50,6 @@ function loadEditorStateBoundaryHarness() {
     objectsMap: new Map([[obj1.id, obj1], [obj2.id, obj2]]),
     selectedId: 'obj-1',
     selectedIds: new Set(['obj-1']),
-    _linesCacheMap: new Map([[obj1.id, []]]),
     _prefixCache: new Map(),
     _boardOpening: false,
     textLayoutCacheClears,
@@ -80,15 +80,15 @@ function loadEditorStateBoundaryHarness() {
   return context;
 }
 
-test('inserted image bytes become an immutable exact-byte Blob source', async () => {
+test('inserted image Blob is retained without materializing its bytes', async () => {
   const context = loadWebImageSourceHarness();
   const bytes = new Uint8Array([0, 1, 127, 128, 254, 255]);
+  const blob = new Blob([bytes], { type: 'image/jpeg' });
+  Object.defineProperty(blob, 'arrayBuffer', {
+    value() { throw new Error('insert should not materialize Blob bytes'); },
+  });
 
-  const source = context.createWebImageSourceFromBytes(
-    { type: 'image/jpeg' },
-    'img-7',
-    bytes,
-  );
+  const source = await context.createWebImageSourceFromBlob(blob, 'img-7');
   const options = context.calls[0];
 
   assert.equal(source.web, true);
@@ -96,39 +96,31 @@ test('inserted image bytes become an immutable exact-byte Blob source', async ()
   assert.equal(options.mime, 'image/jpeg');
   assert.equal(options.ext, 'jpg');
   assert.equal(options.bytes, undefined);
-  assert.equal(options.blob instanceof Blob, true);
+  assert.equal(options.blob, blob);
   assert.equal(options.blob.type, 'image/jpeg');
-  assert.deepEqual(new Uint8Array(await options.blob.arrayBuffer()), bytes);
-
-  bytes.fill(42);
   assert.deepEqual(
-    new Uint8Array(await options.blob.arrayBuffer()),
+    new Uint8Array(await options.blob.slice().arrayBuffer()),
     new Uint8Array([0, 1, 127, 128, 254, 255]),
   );
 });
 
-test('inserted image source retains byte-backed fallback without Blob', () => {
-  const context = loadWebImageSourceHarness({ BlobImpl: null });
-  const bytes = new Uint8Array([1, 2, 3, 4]);
+test('inserted File bytes detach from their potentially volatile source', async () => {
+  const context = loadWebImageSourceHarness();
+  const bytes = new Uint8Array([9, 8, 7, 6]);
+  const file = new File([bytes], 'source.png', { type: 'image/png' });
+  await context.createWebImageSourceFromBlob(file, 'img-file');
+  const stored = context.calls[0].blob;
 
-  context.createWebImageSourceFromBytes({ type: 'image/png' }, 'img-2', bytes);
-  const options = context.calls[0];
-
-  assert.equal(options.path, 'images/img-2.png');
-  assert.equal(options.mime, 'image/png');
-  assert.equal(options.ext, 'png');
-  assert.equal(options.blob, undefined);
-  assert.equal(options.bytes, bytes);
+  assert.notEqual(stored, file);
+  assert.equal(stored.type, 'image/png');
+  assert.deepEqual(new Uint8Array(await stored.arrayBuffer()), bytes);
 });
 
 test('inserted immutable Blob sources reuse CRC without changing saved bytes', async () => {
   const context = loadWebImageSourceHarness({ boardContainer: WebContainer });
   const bytes = new Uint8Array([0, 17, 34, 51, 68, 85, 255]);
-  const source = context.createWebImageSourceFromBytes(
-    { type: 'image/png' },
-    'img-9',
-    bytes,
-  );
+  const blob = new Blob([bytes], { type: 'image/png' });
+  const source = await context.createWebImageSourceFromBlob(blob, 'img-9');
   const board = {
     version: 3,
     format: 'boardfish-container',
@@ -142,6 +134,7 @@ test('inserted immutable Blob sources reuse CRC without changing saved bytes', a
   };
 
   assert.equal(source.__blob instanceof Blob, true);
+  assert.equal(source.__blob, blob);
   assert.equal(source.__bytes, undefined);
   const first = await WebContainer.createBoardContainerBlob(board, { 'img-9': source });
   const second = await WebContainer.createBoardContainerBlob(board, { 'img-9': source });

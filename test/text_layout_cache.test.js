@@ -689,11 +689,16 @@ test('cloned text runtime caches preserve cached minimum width', () => {
     data: { content: source.data.content },
   };
   const width = textLayout.getTextMinWidth(source);
+  const layout = textLayout.getTextLayout(source);
+  const metrics = layout[0]._scriptMetrics = {};
+  layout[0]._textDrawPlanCache = {};
   const prefixCacheSize = textLayout.prefixCacheSize;
 
   textLayout.cloneTextObjectRuntimeCaches(source, target);
 
   assert.deepEqual(plain(target._textMinWidthWordSegmentCache), plain(source._textMinWidthWordSegmentCache));
+  assert.equal(target._layoutCache[0]._scriptMetrics, metrics);
+  assert.equal('_textDrawPlanCache' in target._layoutCache[0], false);
   assert.equal(textLayout.getTextMinWidth(target), width);
   assert.equal(textLayout.prefixCacheSize, prefixCacheSize);
 });
@@ -824,6 +829,9 @@ test('line alignment offsets caret positions within the text box', () => {
   [line] = textLayout.getTextLayout(obj);
   assert.equal(line.align, 'right');
   assert.equal(textLayout.lineXAtOffset(line, obj, 0), 34);
+
+  obj.data.lineAlign = ['center'];
+  assert.equal(textLayout.getTextLayout(obj)[0].align, 'center');
 });
 
 test('text caret x centers between neighboring glyph ink bounds', () => {

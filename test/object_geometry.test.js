@@ -7,8 +7,6 @@ const { createObjectGeometry } = require('../src/js/object_geometry.js');
 
 function createGeometry(overrides = {}) {
   return createObjectGeometry({
-    imageTransformFromObject: (obj) => obj.data || {},
-    isSidewaysRotation: (rotation) => rotation === 90 || rotation === 270,
     objects: () => [],
     ...overrides,
   });
@@ -34,8 +32,11 @@ test('topmost hit-testing follows the rendered shape of rotated images', () => {
     data: { flipX: false, flipY: false, rotation: 90 },
   };
   const geometry = createGeometry({ objects: () => [image] });
-  assert.equal(geometry.topObjectAtWorldPoint({ x: 50, y: 25 }), image);
-  assert.equal(geometry.topObjectAtWorldPoint({ x: -10, y: 25 }), null);
+  for (const rotation of [0, 90, 180, 270, -90, 45]) {
+    image.data.rotation = rotation;
+    assert.equal(geometry.topObjectAtWorldPoint({ x: 50, y: 25 }), image);
+    assert.equal(geometry.topObjectAtWorldPoint({ x: -100, y: -100 }), null);
+  }
 });
 
 test('image hit-testing includes rendered edges and rejects points just outside them', () => {

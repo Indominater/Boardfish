@@ -11,8 +11,8 @@ const BOARD_CURSOR_CLIENT_EVENT_TYPES = Object.freeze([
 ]);
 
 function rememberBoardCursorClientPoint(event) {
-  const x = Number(event?.clientX);
-  const y = Number(event?.clientY);
+  const x = event?.clientX;
+  const y = event?.clientY;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return;
   _lastBoardCursorClientX = x;
   _lastBoardCursorClientY = y;
@@ -26,8 +26,8 @@ function boardCursorWorldPoint() {
 }
 
 function menuCommandWorldPoint(event = null) {
-  const x = Number(event?.clientX);
-  const y = Number(event?.clientY);
+  const x = event?.clientX;
+  const y = event?.clientY;
   if (Number.isFinite(x) && Number.isFinite(y)) return toWorld(x, y);
   return boardCursorWorldPoint();
 }
@@ -70,8 +70,6 @@ function clampMenuCoord(value, size, start, end, margin = MENU_VIEWPORT_EDGE_MAR
 }
 
 function openMenuAt(menu, x, y) {
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
   menu.classList.add('visible');
   const rect = menu.getBoundingClientRect();
   const bounds = menuViewportBounds();
@@ -96,38 +94,29 @@ function closeCtxActions(reason) {
 }
 
 function alignCtxActionsToMenuRow(gap, viewport) {
-  const layoutBox = (surface) => {
-    const rect = surface.getBoundingClientRect();
-    const left = parseFloat(surface.style.left);
-    const top = parseFloat(surface.style.top);
-    return {
-      left: Number.isFinite(left) ? left : rect.left,
-      top: Number.isFinite(top) ? top : rect.top,
-      width: surface.offsetWidth || rect.width,
-    };
-  };
-  const menuBox = layoutBox(ctxMenu);
-  const actionBox = layoutBox(ctxActions);
+  const openedMenuLeft = parseFloat(ctxMenu.style.left);
+  const menuWidth = ctxMenu.offsetWidth;
+  const actionWidth = ctxActions.offsetWidth;
   const edgeGap = gap;
   const minActionLeft = viewport.left + edgeGap;
   const maxActionRight = viewport.right - edgeGap;
-  const maxActionLeft = Math.max(minActionLeft, maxActionRight - actionBox.width);
-  let menuLeft = menuBox.left <= viewport.left + MENU_VIEWPORT_EDGE_MARGIN ? minActionLeft : menuBox.left;
-  let actionLeft = menuLeft + menuBox.width + gap;
+  const maxActionLeft = Math.max(minActionLeft, maxActionRight - actionWidth);
+  let menuLeft = openedMenuLeft <= viewport.left + MENU_VIEWPORT_EDGE_MARGIN ? minActionLeft : openedMenuLeft;
+  let actionLeft = menuLeft + menuWidth + gap;
 
-  if (actionLeft + actionBox.width > maxActionRight) {
+  if (actionLeft + actionWidth > maxActionRight) {
     actionLeft = maxActionLeft;
-    menuLeft = actionLeft - gap - menuBox.width;
+    menuLeft = actionLeft - gap - menuWidth;
   }
 
   if (menuLeft < minActionLeft) {
     menuLeft = minActionLeft;
-    actionLeft = Math.min(maxActionLeft, menuLeft + menuBox.width + gap);
+    actionLeft = Math.min(maxActionLeft, menuLeft + menuWidth + gap);
   }
 
   ctxMenu.style.left = `${Math.round(menuLeft)}px`;
   ctxActions.style.left = `${Math.round(actionLeft)}px`;
-  ctxActions.style.top = `${Math.round(menuBox.top)}px`;
+  ctxActions.style.top = ctxMenu.style.top;
 }
 
 function openCtxMenuAt(x, y) {
@@ -382,9 +371,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
     });
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (immediateHistory) flushEditHistoryCheckpoint();
   focusTextEditProxy();
-  scheduleRender(true, false);
   return true;
 };
 
@@ -780,7 +767,7 @@ function showCanvasContextMenuAt(clientX, clientY) {
   const wp = toWorld(clientX, clientY);
   MenuDebug.log('canvas:contextmenu', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
 
-  const obj = hitTest(wp.x, wp.y);
+  const obj = BoardObjectGeometry.topObjectAtWorldPoint(wp);
 
   if (editingId && obj?.id === editingId) {
     showTextEditContextMenuAt(clientX, clientY);
