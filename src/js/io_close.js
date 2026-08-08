@@ -238,12 +238,11 @@ async function invokeReadBoard(fileRef
   , dbg
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
-  const read = () => BoardfishRuntime.readBoard(fileRef);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     const path = BoardfishRuntime.describeFileRef(fileRef);
     const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
-    const result = await OpenDebug.wrap(dbg, BoardfishRuntime.WEB_COMMANDS.READ_BOARD, read, { path });
+    const result = await OpenDebug.wrap(dbg, BoardfishRuntime.WEB_COMMANDS.READ_BOARD, () => BoardfishRuntime.readBoard(fileRef), { path });
     if (frameProbe) frameProbe();
     const board = result?.board || result;
     if (isOpenDebugActive(dbg)) {
@@ -254,7 +253,7 @@ async function invokeReadBoard(fileRef
     return board;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const result = await read();
+  const result = await BoardfishRuntime.readBoard(fileRef);
   return result?.board || result;
 }
 
@@ -557,16 +556,14 @@ function truthyKeyList(keys) {
   return list;
 }
 
-function getVisibleImagePreviewTasks(wanted, options = {}) {
-  const includeCached = options.includeCached === true;
+function getVisibleImagePreviewTasks() {
   const rect = getVisibleWorldBounds();
   const tasksByKey = new Map();
   for (let i = objects.length - 1; i >= 0; i--) {
     const obj = objects[i];
     if (obj?.type !== 'image' || !obj.data?.imgKey || !objectIntersectsRect(obj, rect)) continue;
     const key = obj.data.imgKey;
-    if (!includeCached && !wanted.has(key)) continue;
-    if (includeCached && !isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) continue;
+    if (!isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) continue;
     const area = Math.max(1, Number(obj.w || 0)) * Math.max(1, Number(obj.h || 0));
     const previous = tasksByKey.get(key);
     if (!previous || area > previous.area) tasksByKey.set(key, { key, obj, area });
@@ -580,11 +577,10 @@ async function buildVisibleImagePreviewsForOpen(keys
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  , options = {}
 ) {
   if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
   const pendingKeys = truthyKeySet(keys);
-  const tasks = getVisibleImagePreviewTasks(pendingKeys, options);
+  const tasks = getVisibleImagePreviewTasks();
   const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
   const concurrency = Math.max(1, Math.min(8, tasks.length || 1));
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -592,7 +588,7 @@ async function buildVisibleImagePreviewsForOpen(keys
   OpenDebug.step(dbg, 'open-preview-visible:start', {
     count: keys.length,
     selected: tasks.length,
-    includeCached: options.includeCached === true,
+    includeCached: true,
     concurrency,
   });
   let built = 0;
@@ -994,7 +990,6 @@ async function finishOpenedBoard(
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , dbg
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      , { includeCached: true }
     );
     const previewReady = preview && preview.pendingReady >= visibleKeys.length;
     if (!previewReady) {
@@ -1253,6 +1248,7 @@ function applyBoardData(data, options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (editingId) exitEdit();
   BoardfishEditorState.clearSelection();
+  clearTextLayoutCaches({ objectLayout: false });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const replaceStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */

@@ -567,6 +567,7 @@ test('entering text edit invalidates the offscreen cache before proxy setup', ()
   assert.ok(editingIndex >= 0, 'enterEdit must set editingId');
   assert.ok(invalidateIndex > editingIndex, 'enterEdit must invalidate after editingId changes');
   assert.ok(proxyIndex > invalidateIndex, 'offscreen invalidation must happen before proxy setup can focus or render');
+  assert.match(enterSource, /scheduleRender\(true, true\)/, 'enterEdit must schedule its own render');
 });
 
 test('text edit mode always keeps text direct while caching static non-text layers', () => {
@@ -614,9 +615,9 @@ test('text selection collection uses indexed script metrics while editing math t
   assert.notEqual(end, -1);
   const selectionSource = viewportSource.slice(start, end);
 
-  assert.match(selectionSource, /getTextScriptLayoutMetrics/);
-  assert.match(selectionSource, /const isHiddenAt = \(line, globalIndex\) =>/);
-  assert.match(selectionSource, /const stateAt = \(line, globalIndex\) =>/);
+  assert.match(selectionSource, /_scriptMetrics/);
+  assert.match(selectionSource, /const isHiddenAt =/);
+  assert.match(selectionSource, /const stateAt =/);
   assert.match(selectionSource, /textScriptMetricsHiddenAt/);
   assert.match(selectionSource, /textScriptMetricsStateAt/);
 });

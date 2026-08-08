@@ -27,7 +27,8 @@ var _textDrawBatchingEngineVerified = null;
 var _textDrawBatchingVerifiedFonts = new Set();
 
 function normalizeTextContent(value) {
-  return String(value ?? '').replace(/\r\n?/g, '\n');
+  const text = String(value ?? '');
+  return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text;
 }
 
 const trimWhitespaceOnlyEdgeLines = (value) => {
@@ -248,28 +249,22 @@ function forEachTextSpacingUnit(value, callback, start = 0, end = null) {
   }
 }
 
-const measureTextWithConsistentGlyphSpacing = (text) => {
-  const value = String(text ?? '');
-  let width = 0;
-  let previousUnit = null;
-  const font = _measureCtx.font || FONT;
-  forEachTextSpacingUnit(value, (unit) => {
-    width += textGlyphPairSpacing(previousUnit, unit, font);
-    width += measureTextGlyphMetricsWithFont(unit, font).width;
-    previousUnit = unit;
-  });
-  return width;
-};
-
 function measureRawTextWWithFont(text, font, cache) {
   const value = String(text ?? '');
-  if (cache.has(value)) return cache.get(value);
+  const cached = cache.get(value);
+  if (cached !== undefined) return cached;
   if (cache.size >= TEXT_MEASURE_CACHE_MAX_ENTRIES) {
     cache.delete(cache.keys().next().value);
   }
   const previousFont = _measureCtx.font;
   if (previousFont !== font) _measureCtx.font = font;
-  const width = measureTextWithConsistentGlyphSpacing(value);
+  let width = 0;
+  let previousUnit = null;
+  forEachTextSpacingUnit(value, (unit) => {
+    width += textGlyphPairSpacing(previousUnit, unit, font);
+    width += measureTextGlyphMetricsWithFont(unit, font).width;
+    previousUnit = unit;
+  });
   if (_measureCtx.font !== previousFont) _measureCtx.font = previousFont;
   cache.set(value, width);
   return width;
@@ -320,10 +315,6 @@ function measureTextW(text) {
   const widths = getPrefixWidths(value);
   return widths[widths.length - 1] || 0;
 }
-
-const measureVisibleLineTextW = (text) => {
-  return measureTextW(String(text ?? '').replace(/[ \t]+$/g, ''));
-};
 
 function refreshTextMetrics() {
   _measureCtx.font = FONT;
@@ -399,14 +390,7 @@ const textGlyphMetricsInkWidth = (metrics) => {
   return Number.isFinite(inkWidth) ? Math.max(0, inkWidth) : 0;
 };
 
-const textSpacingUnitCanUseInkGap = (unit) => {
-  const value = String(unit ?? '');
-  return !!value && !/\s/.test(value);
-};
-
-const textGlyphPairSpacingCacheKey = (previousUnit, nextUnit, font = FONT) => {
-  const previous = String(previousUnit ?? '');
-  const next = String(nextUnit ?? '');
+const textGlyphPairSpacingCacheKey = (previous, next, font = FONT) => {
   if (
     font === FONT &&
     previous.length === 1 &&
@@ -428,7 +412,7 @@ function textGlyphPairSpacing(previousUnit, nextUnit, font = FONT) {
   if (cached !== undefined) return cached;
 
   let spacing = 0;
-  if (textSpacingUnitCanUseInkGap(previous) && textSpacingUnitCanUseInkGap(next)) {
+  if (previous && next && !/\s/.test(previous) && !/\s/.test(next)) {
     const previousMetrics = measureTextGlyphMetricsWithFont(previous, font);
     const nextMetrics = measureTextGlyphMetricsWithFont(next, font);
     if (
@@ -697,10 +681,6 @@ function getPrefixWidths(text) {
   return pw;
 }
 
-function measureStyledTextW(text, state) {
-  return measureRawTextWForDepth(text, state?.depth || 0);
-}
-
 function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], content = '', scriptMetrics = null) {
   const value = String(text ?? '');
   if (!Array.isArray(scriptRanges) || !scriptRanges.length) {
@@ -745,7 +725,7 @@ function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], conte
         width += spacing;
         pw[i + unitStart] = width;
       }
-      width += measureStyledTextW(unit, state);
+      width += measureRawTextWForDepth(unit, state?.depth || 0);
       for (let pos = unitStart + 1; pos <= unitEnd; pos++) pw[i + pos] = width;
       previousUnit = unit;
     });
@@ -1538,7 +1518,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
 
   const layout = obj._layoutCache;
   const insertedLineCount = textNewlineCount(insertedText);
-  const removedLineCount = textNewlineCount(oldContent.slice(start, end));
+  const removedLineCount = textNewlineCount(oldContent, start, end);
   const endLineProbe = end > start && removedLineCount > 0 ? end : (end > start ? end - 1 : end);
   const oldRange = {
     startLine: textLayoutLogicalLineIndexAtContentIndex(layout, start),
@@ -1672,16 +1652,21 @@ const TEXT_SCRIPT_KINDS = Object.freeze(['sup', 'sub']);
 
 const normalizeTextLineAlignValue = (value) => TEXT_LINE_ALIGN_VALUES.includes(value) ? value : 'left';
 
-const textNewlineCount = (value) => {
-  const text = normalizeTextContent(value);
+const textNewlineCount = (value, start = 0, end = Infinity) => {
+  const text = String(value ?? '');
+  const stop = Math.min(end, text.length);
   let count = 0;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\n') count++;
+  if (stop < text.length) {
+    for (let i = start; i < stop; i++) {
+      if (text[i] === '\n') count++;
+    }
+    return count;
   }
+  for (let i = text.indexOf('\n', start); i >= 0; i = text.indexOf('\n', i + 1)) count++;
   return count;
 };
 
-const textLogicalLineCount = (value) => textNewlineCount(value) + 1;
+const textLogicalLineCount = (value) => textNewlineCount(normalizeTextContent(value)) + 1;
 
 const normalizeTextLineAlignForContent = (content, lineAlign = []) => {
   const source = Array.isArray(lineAlign) ? lineAlign : [];
@@ -2338,7 +2323,6 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
   const anyEnds = new Uint8Array(text.length + 1);
   const starts = new Map();
   const ends = new Map();
-  const indexedRanges = [];
   const addEvent = (map, index, range) => {
     const list = map.get(index);
     if (list) list.push(range);
@@ -2354,7 +2338,6 @@ function getTextScriptLayoutMetrics(content, scriptRanges = []) {
     const end = Math.max(start, Math.min(rawEnd, text.length));
     if (!kind || end <= start) continue;
     const range = { start, end, kind };
-    indexedRanges.push(range);
     addEvent(starts, start, range);
     addEvent(ends, end, range);
     anyEnds[end] = 1;
@@ -2939,16 +2922,12 @@ function getTextLayoutForViewport(obj, viewportRect = null) {
   return getTextLayoutForLineRange(obj, first, last);
 }
 
-const textLineVisibleEndOffset = (line) => {
+function lineVisibleWidth(line) {
+  if (!line?.prefixWidths) return measureTextW(String(line?.text || '').replace(/[ \t]+$/g, ''));
   const text = String(line?.text ?? '');
   let end = text.length;
   while (end > 0 && (text[end - 1] === ' ' || text[end - 1] === '\t')) end--;
-  return end;
-};
-
-function lineVisibleWidth(line) {
-  if (!line?.prefixWidths) return measureVisibleLineTextW(line?.text || '');
-  return line.prefixWidths[textLineVisibleEndOffset(line)] || 0;
+  return line.prefixWidths[end] || 0;
 }
 
 function lineBaseX(line, obj) {
@@ -2976,33 +2955,6 @@ function lineHitOffsetForX(line, wx, obj) {
     else lo = mid + 1;
   }
   return lo;
-}
-
-function lineNearestCaretOffsetsForX(line, wx, obj) {
-  const textLength = String(line?.text ?? '').length;
-  const pw = line?.prefixWidths;
-  if (!pw || pw.length < textLength + 1) return [0];
-  const target = wx - lineBaseX(line, obj);
-  let lo = 0;
-  let hi = textLength;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (pw[mid] < target) lo = mid + 1;
-    else hi = mid;
-  }
-
-  const right = lo;
-  const left = Math.max(0, right - 1);
-  const bestOffset = Math.abs(target - pw[left]) <= Math.abs(target - pw[right]) ? left : right;
-  const bestX = pw[bestOffset];
-  const epsilon = 1e-7;
-  let first = bestOffset;
-  while (first > 0 && Math.abs(pw[first - 1] - bestX) <= epsilon) first--;
-  let last = bestOffset;
-  while (last < textLength && Math.abs(pw[last + 1] - bestX) <= epsilon) last++;
-  const offsets = [];
-  for (let offset = first; offset <= last; offset++) offsets.push(offset);
-  return offsets;
 }
 
 function lineCaretXAtOffset(line, obj, offset) {
@@ -3222,22 +3174,19 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
   const text = String(line.text ?? '');
   const start = Math.max(0, Math.min(startOffset, text.length));
   const end = Math.max(start, Math.min(endOffset, text.length));
-  const ranges = line.scriptRanges || [];
-  const hasScriptRanges = ranges.length > 0;
-  let scriptMetrics = null;
-  if (hasScriptRanges) {
-    scriptMetrics = line._scriptMetrics || null;
-    if (!scriptMetrics) {
-      const content = normalizeTextContent(obj.data?.content ?? line.content ?? text);
-      scriptMetrics = getTextScriptLayoutMetricsForObject(obj, content, ranges);
-    }
-  }
   const cacheable = start === 0 && end === text.length && !!line.prefixWidths;
   let plan = cacheable ? line._textDrawPlanCache : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cacheHit = !!plan;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!plan) {
+    const ranges = line.scriptRanges || [];
+    const hasScriptRanges = ranges.length > 0;
+    let scriptMetrics = line._scriptMetrics || null;
+    if (hasScriptRanges && !scriptMetrics) {
+      const content = normalizeTextContent(obj.data?.content ?? line.content ?? text);
+      scriptMetrics = getTextScriptLayoutMetricsForObject(obj, content, ranges);
+    }
     plan = createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetrics);
     if (cacheable) line._textDrawPlanCache = plan;
   }
@@ -3298,27 +3247,12 @@ const textLayoutLineForHit = (layout, wy) => {
   return layout[lo] || layout[layout.length - 1];
 };
 
-const textLayoutContentForHit = (line, obj) => {
-  if (typeof obj?._layoutCacheContent === 'string') return obj._layoutCacheContent;
-  if (typeof line?.content === 'string') return line.content;
-  return normalizeTextContent(obj?.data?.content ?? line?.text ?? '');
-};
-
-const textLayoutCaretCenterYForHit = (line, obj, index, affinity = '', metrics = null) => {
-  const state = metrics
-    ? textScriptMetricsCaretStateAt(metrics, index, affinity)
-    : textScriptCaretStateForHit(obj, index, affinity);
-  if (state?.depth > 0) {
-    const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
-    const textY = Number.isFinite(line.textY) ? line.textY : line.y + TEXT_BASELINE_Y_OFFSET;
-    const y = textY + state.offset - (TEXT_BASELINE_Y_OFFSET * scale);
-    return y + (LINE_H * scale) / 2;
-  }
-  return line.y + LINE_H / 2;
-};
-
 const textLayoutCaretHitCandidates = (line, wx, obj) => {
-  const content = textLayoutContentForHit(line, obj);
+  const content = typeof obj?._layoutCacheContent === 'string'
+    ? obj._layoutCacheContent
+    : typeof line?.content === 'string'
+      ? line.content
+      : normalizeTextContent(obj?.data?.content ?? line?.text ?? '');
   const ranges = line?.scriptRanges || [];
   const metrics = ranges.length
     ? line._scriptMetrics || getTextScriptLayoutMetricsForObject(obj, content, ranges)
@@ -3330,14 +3264,44 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
     const key = `${caretIndex}:${affinity}`;
     if (seen.has(key)) return;
     seen.add(key);
+    const state = metrics
+      ? textScriptMetricsCaretStateAt(metrics, caretIndex, affinity)
+      : textScriptCaretStateForHit(obj, caretIndex, affinity);
+    let centerY = line.y + LINE_H / 2;
+    if (state?.depth > 0) {
+      const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
+      const textY = Number.isFinite(line.textY) ? line.textY : line.y + TEXT_BASELINE_Y_OFFSET;
+      centerY = textY + state.offset - (TEXT_BASELINE_Y_OFFSET * scale) + (LINE_H * scale) / 2;
+    }
     candidates.push({
       index: caretIndex,
       affinity,
-      centerY: textLayoutCaretCenterYForHit(line, obj, caretIndex, affinity, metrics),
+      centerY,
     });
   };
 
-  for (const offset of lineNearestCaretOffsetsForX(line, wx, obj)) {
+  const textLength = String(line?.text ?? '').length;
+  const pw = line?.prefixWidths;
+  let first = 0;
+  let last = 0;
+  if (pw && pw.length >= textLength + 1) {
+    const target = wx - lineBaseX(line, obj);
+    let lo = 0;
+    let hi = textLength;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (pw[mid] < target) lo = mid + 1;
+      else hi = mid;
+    }
+    const left = Math.max(0, lo - 1);
+    const bestOffset = Math.abs(target - pw[left]) <= Math.abs(target - pw[lo]) ? left : lo;
+    const bestX = pw[bestOffset];
+    first = bestOffset;
+    while (first > 0 && Math.abs(pw[first - 1] - bestX) <= 1e-7) first--;
+    last = bestOffset;
+    while (last < textLength && Math.abs(pw[last + 1] - bestX) <= 1e-7) last++;
+  }
+  for (let offset = first; offset <= last; offset++) {
     const rawIndex = Math.max(0, Math.min(line.startIndex + offset, content.length));
     const bracedOpeningGap = !!metrics?.bracedStarts?.[rawIndex];
     if (bracedOpeningGap) continue;

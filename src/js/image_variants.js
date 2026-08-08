@@ -503,7 +503,7 @@ async function createScaledImageVariantBitmap(source, sourceW, sourceH, scale) {
     canvas.width = w;
     canvas.height = h;
     const c = canvas.getContext('2d');
-    setCanvasImageQuality(c);
+    c.imageSmoothingQuality = 'high';
     c.drawImage(source, 0, 0, w, h);
     const bitmap = await createImageBitmap(canvas);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantCanvasFallbackCount++;

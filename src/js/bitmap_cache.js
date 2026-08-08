@@ -96,7 +96,6 @@
         close(entry);
         bytes -= entryBytes(entry);
       }
-      group.clear();
       groups.delete(key);
       bytes = Math.max(0, bytes);
     }

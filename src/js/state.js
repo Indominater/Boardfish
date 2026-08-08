@@ -9,7 +9,6 @@ var idCounter  = 1;
 var _boardOpening = false;
 var _bulkImageInsertDepth = 0;
 var _bulkImageInsertAdded = 0;
-var _bulkImageInsertLastRender = 0;
 var _imageReadyLastRender = 0;
 
 function rebuildObjectsMap() {
@@ -21,49 +20,37 @@ function newId() {
   let id = '';
   do {
     id = 'obj-' + (idCounter++);
-  } while (objectsMap?.has?.(id));
+  } while (objectsMap.has(id));
   return id;
-}
-
-function cloneStateTextScriptRanges(ranges = []) {
-  const out = new Array(ranges.length);
-  for (let i = 0; i < ranges.length; i++) {
-    const range = ranges[i];
-    out[i] = { ...range };
-  }
-  return out;
 }
 
 function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
   if (!Array.isArray(sourceScriptRanges) || !sourceScriptRanges.length) return [];
-  if (
-    obj._textScriptRangesCache === sourceScriptRanges &&
-    obj._textScriptRangesCacheContent === content
-  ) {
-    return cloneStateTextScriptRanges(obj._textScriptRangesCache);
+  if (obj._textScriptRangesCache !== sourceScriptRanges || obj._textScriptRangesCacheContent !== content) {
+    return normalizeTextScriptRangesForContent(content, sourceScriptRanges);
   }
-  return normalizeTextScriptRangesForContent(content, sourceScriptRanges);
+  const out = new Array(sourceScriptRanges.length);
+  for (let i = 0; i < sourceScriptRanges.length; i++) out[i] = { ...sourceScriptRanges[i] };
+  return out;
 }
 
 function cloneObject(obj, runtimeTextCache = false) {
   HistoryDebug.count('cloneObjectCalls');
-  const data = obj.type === 'image'
-    ? { ...obj.data }
-    : (() => {
-        const content = normalizeTextContent(obj.data.content);
-        const textData = { content };
-        const sourceLineAlign = obj.data?.lineAlign;
-        if (Array.isArray(sourceLineAlign) && sourceLineAlign.length) {
-          const lineAlign = normalizeTextLineAlignForContent(content, sourceLineAlign);
-          if (lineAlign.length) textData.lineAlign = lineAlign;
-        }
-        const sourceScriptRanges = obj.data?.scriptRanges;
-        if (Array.isArray(sourceScriptRanges) && sourceScriptRanges.length) {
-          const scriptRanges = cloneTextScriptRangesForObject(obj, content, sourceScriptRanges);
-          if (scriptRanges.length) textData.scriptRanges = scriptRanges;
-        }
-        return textData;
-      })();
+  let data = obj.type === 'image' ? { ...obj.data } : null;
+  if (!data) {
+    const content = obj._editStartContent == null ? normalizeTextContent(obj.data.content) : obj.data.content;
+    data = { content };
+    const sourceLineAlign = obj.data?.lineAlign;
+    if (Array.isArray(sourceLineAlign) && sourceLineAlign.length) {
+      const lineAlign = normalizeTextLineAlignForContent(content, sourceLineAlign);
+      if (lineAlign.length) data.lineAlign = lineAlign;
+    }
+    const sourceScriptRanges = obj.data?.scriptRanges;
+    if (Array.isArray(sourceScriptRanges) && sourceScriptRanges.length) {
+      const scriptRanges = cloneTextScriptRangesForObject(obj, content, sourceScriptRanges);
+      if (scriptRanges.length) data.scriptRanges = scriptRanges;
+    }
+  }
   const cloned = {
     id: obj.id,
     type: obj.type,
@@ -97,11 +84,14 @@ function cloneObjects(list, runtimeTextCache = false) {
   return clones;
 }
 
-function bringObjectToFront(id) {
-  const idx = objects.findIndex((o) => o.id === id);
-  if (idx < 0 || idx === objects.length - 1) return;
-  const [obj] = objects.splice(idx, 1);
+function bringObjectToFront(obj) {
+  if (objects[objects.length - 1] === obj) return;
+  const idx = objects.indexOf(obj);
+  if (idx < 0) return;
+  objects.splice(idx, 1);
   objects.push(obj);
+  markDirty(obj.id);
+  obj.z = ++zCounter;
 }
 
 function sendSelectedToBack() {
@@ -113,10 +103,8 @@ function sendSelectedToBack() {
       if (selectedIds.has(o.id)) selected.push(o);
       else rest.push(o);
     }
-    if (!selected.length) return false;
-    objects.length = 0;
-    for (const obj of selected) objects.push(obj);
-    for (const obj of rest) objects.push(obj);
+    if (!selected.length || !rest.length) return false;
+    objects = selected.concat(rest);
     for (const obj of selected) markDirty(obj.id);
     return true;
   });

@@ -1,5 +1,7 @@
 'use strict';
 
+const EDITABLE_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
+
 function isShortcutKey(e, letter) {
   const normalizedLetter = letter.toLowerCase();
   return e.key.toLowerCase() === normalizedLetter || e.code === `Key${normalizedLetter.toUpperCase()}`;
@@ -12,15 +14,7 @@ function isEditableTextShortcutTarget(target) {
   if (tagName === 'textarea') return true;
   if (tagName !== 'input') return false;
   const type = String(target.type || '').toLowerCase();
-  return !type || [
-    'text',
-    'search',
-    'url',
-    'tel',
-    'email',
-    'password',
-    'number',
-  ].includes(type);
+  return !type || EDITABLE_INPUT_TYPES.has(type);
 }
 
 function hasDocumentTextSelectionForShortcut() {

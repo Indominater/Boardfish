@@ -65,15 +65,6 @@ const textEditorTextStats = (value, scriptRanges = []) => {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const textEditorNewlineCount = (value) => {
-  const text = String(value ?? '');
-  let count = 0;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\n') count++;
-  }
-  return count;
-};
-
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 const textEditorSelectionDebugStats = (selection = {}, value = '') => {
   const text = String(value ?? '');
@@ -166,7 +157,7 @@ const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
   const pad = Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 16) || 16;
   const activeEditingId = typeof editingId !== 'undefined' ? editingId : '';
   const minLines = obj.id === activeEditingId ? (Math.max(1, Math.trunc(Number(obj._editMinLines)) || 1)) : 1;
-  const logicalLines = Math.max(1, textEditorNewlineCount(text) + 1);
+  const logicalLines = Math.max(1, textNewlineCount(text) + 1);
   const layoutCacheValid = Array.isArray(obj._layoutCache) &&
     obj._layoutCacheContent === text &&
     obj._layoutCacheW === obj.w &&
@@ -1891,11 +1882,11 @@ const updateTextLineAlignForInput = (obj, oldValue, oldStart, oldEnd, nextValue,
   if (!Array.isArray(obj.data?.lineAlign)) return;
   oldStart = Math.max(0, Math.min(oldStart ?? 0, oldValue.length));
   oldEnd = Math.max(oldStart, Math.min(oldEnd ?? oldStart, oldValue.length));
-  const removedLineCount = textEditorNewlineCount(oldValue.slice(oldStart, oldEnd));
-  const insertedLineCount = textEditorNewlineCount(insertedText);
+  const removedLineCount = textNewlineCount(oldValue, oldStart, oldEnd);
+  const insertedLineCount = textNewlineCount(insertedText);
   if (!removedLineCount && !insertedLineCount) return;
   const oldAlign = normalizeTextLineAlignForContent(oldValue, obj.data.lineAlign);
-  const lineIndex = textEditorNewlineCount(oldValue.slice(0, oldStart));
+  const lineIndex = textNewlineCount(oldValue, 0, oldStart);
   const baseAlign = oldAlign[lineIndex] || 'left';
   const spliceStart = lineIndex + 1;
   const suffixStart = Math.min(spliceStart + removedLineCount, oldAlign.length);
@@ -3125,12 +3116,11 @@ function enterEdit(id, {
     const replacementStart = Math.max(0, Math.min(replacement.start ?? 0, oldValue.length));
     const replacementEnd = Math.max(replacementStart, Math.min(replacement.end ?? replacementStart, oldValue.length));
     const insertedText = String(replacement.insertedText || '');
-    const removedText = oldValue.slice(replacementStart, replacementEnd);
-    const removedChars = removedText.length;
+    const removedChars = replacementEnd - replacementStart;
     const insertedChars = insertedText.length;
     const deletesContent = textEditInputTypeDeletesContent(inputType);
     const deleteReducedLogicalLines = deletesContent &&
-      textEditorNewlineCount(removedText) > textEditorNewlineCount(insertedText);
+      textNewlineCount(oldValue, replacementStart, replacementEnd) > textNewlineCount(insertedText);
     const selectedDeleteShrankText = deletesContent && !!inputState.hasSelection && removedChars > insertedChars;
     const deleteShrankPendingEdit = pendingSizeSyncBeforeAutoHeight &&
       deletesContent &&
@@ -3175,8 +3165,8 @@ function enterEdit(id, {
       ...autoHeightDebugBefore?.proxy,
       removedChars,
       insertedChars,
-      removedNewlines: textEditorNewlineCount(removedText),
-      insertedNewlines: textEditorNewlineCount(insertedText),
+      removedNewlines: textNewlineCount(oldValue, replacementStart, replacementEnd),
+      insertedNewlines: textNewlineCount(insertedText),
       ...textEditorTextStats(obj.data.content, obj.data.scriptRanges),
     }));
     _textInputSelectionHistorySuppress = textEditSelectionState(proxy);

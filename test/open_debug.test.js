@@ -242,8 +242,8 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
   assert.match(openIo, /maxKey: slowest\?\.key/);
   assert.match(openIo, /previewMaxKey: preview\.maxKey/);
-  assert.match(openIo, /buildVisibleImagePreviewsForOpen\(visibleKeys[\s\S]*?, dbg[\s\S]*?, \{ includeCached: true \}/);
-  assert.match(productionOpenIo, /buildVisibleImagePreviewsForOpen\(visibleKeys\s*, \{ includeCached: true \}/);
+  assert.match(openIo, /buildVisibleImagePreviewsForOpen\(visibleKeys[\s\S]*?, dbg/);
+  assert.match(productionOpenIo, /buildVisibleImagePreviewsForOpen\(visibleKeys\s*\)/);
   assert.match(openIo, /const previewReady = preview && preview\.pendingReady >= visibleKeys\.length/);
   assert.match(openIo, /previewPendingReady: preview\.pendingReady/);
   assert.match(openDebug, /openPreviewPendingReady/);

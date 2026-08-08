@@ -825,21 +825,17 @@ for (const id in MENU_COMMANDS) {
 }
 
 
-document.addEventListener('pointerdown', (e) => {
-  if (isContextMenuSurfaceEvent(e)) {
-    MenuDebug.log('document-pointerdown:inside-menu');
-    return;
-  }
-  closeOpenMenusExcept('', 'document-pointerdown');
-});
-
-document.addEventListener('click', (e) => {
-  if (isContextMenuSurfaceEvent(e)) {
-    MenuDebug.log('document-click:inside-menu');
-    return;
-  }
-  closeOpenMenusExcept('', 'document-click');
-});
+for (const type of ['pointerdown', 'click']) {
+  const reason = `document-${type}`;
+  document.addEventListener(type, (e) => {
+    if (!hasOpenContextMenu()) return;
+    if (isContextMenuSurfaceEvent(e)) {
+      MenuDebug.log(`${reason}:inside-menu`);
+      return;
+    }
+    closeOpenMenusExcept('', reason);
+  });
+}
 
 function clearCtxActionHotspotState() {
   for (let i = 0; i < ctxActionItems.length; i++) {

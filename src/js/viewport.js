@@ -223,11 +223,10 @@ function markDirty(id) {
 
 var _canvasResizeObserver = null;
 var _visualViewportResizeListening = false;
+var _boardSurfaceCssSizeCache = null;
 
 function boardSurfaceCssSize() {
-  const rect = typeof canvas?.getBoundingClientRect === 'function'
-    ? canvas.getBoundingClientRect()
-    : null;
+  const rect = _boardSurfaceCssSizeCache || canvas?.getBoundingClientRect?.();
   let width = Number(rect?.width), height = Number(rect?.height);
   if (!(width > 0)) width = Number(boardCanvas?.clientWidth);
   if (!(width > 0)) width = Number(window.innerWidth);
@@ -235,7 +234,7 @@ function boardSurfaceCssSize() {
   if (!(height > 0)) height = Number(boardCanvas?.clientHeight);
   if (!(height > 0)) height = Number(window.innerHeight);
   if (!(height > 0)) height = 1;
-  return { width, height };
+  return _boardSurfaceCssSizeCache = { width, height };
 }
 
 function syncBoardCanvasBackingStore() {
@@ -250,7 +249,8 @@ function syncBoardCanvasBackingStore() {
   return true;
 }
 
-function resizeCanvas() {
+function resizeCanvas(surface = null) {
+  _boardSurfaceCssSizeCache = surface?.width > 0 && surface?.height > 0 ? surface : null;
   if (typeof _boardOpening !== 'undefined' && _boardOpening) return false;
   if (!syncBoardCanvasBackingStore()) return false;
   scheduleRender(true);
@@ -259,10 +259,10 @@ function resizeCanvas() {
 
 function startCanvasSizeTracking() {
   if (!_canvasResizeObserver && typeof ResizeObserver === 'function') {
-    _canvasResizeObserver = new ResizeObserver(() => resizeCanvas());
+    _canvasResizeObserver = new ResizeObserver(entries => resizeCanvas(entries?.[0]?.contentRect));
     _canvasResizeObserver.observe(canvas);
   }
-  if (!_visualViewportResizeListening && window.visualViewport?.addEventListener) {
+  if (!_canvasResizeObserver && !_visualViewportResizeListening && window.visualViewport?.addEventListener) {
     window.visualViewport.addEventListener('resize', resizeCanvas);
     _visualViewportResizeListening = true;
   }
@@ -277,92 +277,64 @@ function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view =
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
   const viewportRect = options.viewportRect || null;
   if (selStart === selEnd) return null;
-  const firstLine = layout.find(line => Array.isArray(line?.scriptRanges) && line.scriptRanges.length) || null;
-  const content = firstLine ? normalizeTextContent(obj?.data?.content || '') : '';
-  const scriptMetrics = firstLine?._scriptMetrics ||
-    (firstLine && typeof getTextScriptLayoutMetricsForObject === 'function'
-      ? getTextScriptLayoutMetricsForObject(obj, content, firstLine.scriptRanges || [])
-      : null) ||
-    (firstLine && typeof getTextScriptLayoutMetrics === 'function'
-      ? getTextScriptLayoutMetrics(content, firstLine.scriptRanges || [])
-      : null);
-  const isHiddenAt = (line, globalIndex) => {
-    if (!firstLine) return false;
-    if (scriptMetrics && typeof textScriptMetricsHiddenAt === 'function') {
-      return textScriptMetricsHiddenAt(scriptMetrics, globalIndex);
-    }
-    return typeof isTextScriptMarkerHiddenAt === 'function' &&
-      isTextScriptMarkerHiddenAt(line.scriptRanges || [], globalIndex, content);
-  };
-  const stateAt = (line, globalIndex) => {
-    if (!firstLine) return BASE_TEXT_SCRIPT_STATE;
-    if (scriptMetrics && typeof textScriptMetricsStateAt === 'function') {
-      return textScriptMetricsStateAt(scriptMetrics, globalIndex);
-    }
-    return typeof textScriptStateAt === 'function'
-      ? textScriptStateAt(line.scriptRanges || [], globalIndex)
-      : { key: '', depth: 0, offset: 0, scale: 1 };
-  };
+  const scriptMetrics = layout[0]?._scriptMetrics || null;
+  const isHiddenAt = scriptMetrics ? textScriptMetricsHiddenAt : null;
+  const stateAt = scriptMetrics ? textScriptMetricsStateAt : null;
   const runs = [];
   let left = Infinity;
   let top = Infinity;
   let right = -Infinity;
   let bottom = -Infinity;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let scannedLines = 0;
   let selectedLines = 0;
   let hiddenChars = 0;
-  const selectionBoxForState = (line, state) => {
-    if (state?.depth > 0) {
-      return {
-        y: line.textY + state.offset - (TEXT_BASELINE_Y_OFFSET * state.scale),
-        height: LINE_H * state.scale,
-      };
-    }
-    return { y: line.y, height: LINE_H };
-  };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const line of layout) {
     if (!textLayoutLineIntersectsViewport(line, viewportRect)) continue;
-    scannedLines++;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */ scannedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
     if (h0 < h1) {
-      selectedLines++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const o0 = h0 - ls, o1 = h1 - ls;
       const endX = lineEndX(line, obj);
       let i = o0;
       while (i < o1) {
         const globalIndex = line.startIndex + i;
-        if (isHiddenAt(line, globalIndex)) {
-          hiddenChars++;
+        if (isHiddenAt && isHiddenAt(scriptMetrics, globalIndex)) {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */ hiddenChars++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
           i++;
           continue;
         }
-        const state = stateAt(line, globalIndex);
-        let j = firstLine ? i + 1 : o1;
+        const state = stateAt ? stateAt(scriptMetrics, globalIndex) : BASE_TEXT_SCRIPT_STATE;
+        let j = stateAt ? i + 1 : o1;
         while (j < o1) {
           const nextGlobalIndex = line.startIndex + j;
-          if (isHiddenAt(line, nextGlobalIndex)) break;
-          const nextState = stateAt(line, nextGlobalIndex);
+          if (isHiddenAt(scriptMetrics, nextGlobalIndex)) break;
+          const nextState = stateAt(scriptMetrics, nextGlobalIndex);
           if (nextState.key !== state.key) break;
           j++;
         }
         const x1 = i < line.text.length ? lineXAtOffset(line, obj, i) : endX;
         const x2 = j < line.text.length ? lineXAtOffset(line, obj, j) : endX;
-        const box = selectionBoxForState(line, state);
+        const scaled = state?.depth > 0;
+        const y = scaled ? line.textY + state.offset - TEXT_BASELINE_Y_OFFSET * state.scale : line.y;
+        const height = scaled ? LINE_H * state.scale : LINE_H;
         const run = {
           line,
           x1,
           x2,
-          y: box.y,
-          height: box.height,
+          y,
+          height,
           startOffset: i,
           endOffset: j,
         };
         runs.push(run);
         if (x1 < left) left = x1;
-        if (box.y < top) top = box.y;
+        if (y < top) top = y;
         if (x2 > right) right = x2;
-        if (box.y + box.height > bottom) bottom = box.y + box.height;
+        if (y + height > bottom) bottom = y + height;
         i = j;
       }
     }
@@ -371,12 +343,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
   return {
     runs,
     bounds: { left, top, right, bottom },
-    metrics: {
-      scannedLines,
-      selectedLines,
-      hiddenChars,
-      selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)),
-    },
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */ metrics: { scannedLines, selectedLines, hiddenChars, selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)) }, /* BOARDFISH_DEV_DIAGNOSTICS_END */
   };
 };
 
@@ -810,7 +777,6 @@ function drawBoard(bypassEditOffscreenCache = false) {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
-  // Native window geometry can settle without a final window.resize event.
   // Keep canvas pixels in the same CSS coordinate space as DOM selections.
   syncBoardCanvasBackingStore();
   const hasOpenPreviewFallback = typeof hasOpenInitialImagePreviews === 'function' &&
@@ -1133,10 +1099,6 @@ const TEXT_DRAW_WARMUP_TARGET_OFFSCREEN = 'offscreen';
 const TEXT_DRAW_WARMUP_TARGET_BOARD = 'board';
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function setCanvasImageQuality(context) {
-  context.imageSmoothingQuality = 'high';
-}
-
 const boardRenderer = BoardfishRenderer.createBoardRenderer({
   objects: () => objects,
   imageStore: () => imageStore,
@@ -1156,7 +1118,6 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   motionObjectsForDraw: globalThis.BoardfishMotion?.motionObjectsForDraw,
   objectMotionForDraw: globalThis.BoardfishMotion?.objectMotionForDraw,
   selectImageSourceForDraw,
-  setCanvasImageQuality,
 });
 ({ drawSingleObj, resetCanvasToScreen, setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
 if (typeof BOARDFISH_PRODUCTION === 'undefined') createDrawCounters = boardRenderer.createDrawCounters;

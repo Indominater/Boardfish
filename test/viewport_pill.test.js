@@ -378,11 +378,10 @@ test('canvas size tracking observes the rendered surface exactly once', () => {
   assert.equal(context.resizeObserverInstances, 1);
   assert.equal(context.observedTargets.length, 1);
   assert.strictEqual(context.observedTargets[0], context.canvas);
-  assert.equal(context.visualViewportListeners.length, 1);
-  assert.equal(context.visualViewportListeners[0].type, 'resize');
+  assert.equal(context.visualViewportListeners.length, 0);
 
   context.surfaceRect.height = 1080;
-  context.resizeObserverCallback();
+  context.resizeObserverCallback([{ contentRect: context.surfaceRect }]);
   assert.equal(context.boardCanvas.height, 2160);
   assert.equal(context.invalidations, 1);
   assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);

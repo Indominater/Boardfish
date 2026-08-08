@@ -110,9 +110,9 @@ test('throttled image readiness does not schedule an overlay-only frame', () => 
   context.invalidateOffscreen = () => { invalidations++; };
   context.scheduleRender = (...args) => { renders.push(args); };
 
-  context.scheduleImageReadyRender('first-ready', { minIntervalMs: 120 });
+  context.scheduleImageReadyRender('first-ready');
   now = 1050;
-  context.scheduleImageReadyRender('throttled-ready', { minIntervalMs: 120 });
+  context.scheduleImageReadyRender('throttled-ready');
 
   assert.equal(invalidations, 2);
   assert.deepEqual(renders, [[true, null, 'first-ready']]);

@@ -192,10 +192,13 @@ test('editor selection accepts sets without disrupting a retained live edit', ()
   assert.equal(context.selectedId, 'obj-2');
 });
 
-test('board object replacement clears object layout without clearing reusable measurements', () => {
+test('board object replacement retains content-keyed caches while reset clears them', () => {
   const context = loadEditorStateBoundaryHarness();
   context.BoardfishEditorState.replaceBoardObjects([], { normalizeText: false, syncTextHeights: false });
-  assert.deepEqual(context.textLayoutCacheClears, [{ objectLayout: true }]);
+  assert.deepEqual(context.textLayoutCacheClears, []);
+
+  context.BoardfishEditorState.resetBoardObjectState();
+  assert.deepEqual(context.textLayoutCacheClears, [{}]);
 });
 
 test('failed web image inserts revoke unadopted web image sources', () => {
@@ -203,7 +206,7 @@ test('failed web image inserts revoke unadopted web image sources', () => {
 
   assert.match(source, /const cleanupFailedWebImageInsertSource = \(imgKey, imageSource\) =>/);
   assert.match(source, /if \(!obj\) cleanupFailedWebImageInsertSource\(imgKey, imageSource\);/);
-  assert.match(source, /catch \(err\) \{[\s\S]*cleanupFailedWebImageInsertSource\(imgKey, imageSource\);[\s\S]*throw err;/);
+  assert.match(source, /catch \(err\) \{\s*rollbackSource\(\);/);
   assert.match(source, /BoardfishWebBoardContainer\.revokeImageSource\?\.\(imageSource\);/);
 });
 

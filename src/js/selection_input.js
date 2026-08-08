@@ -1,7 +1,6 @@
 // ─── Screen-space selection overlay ──────────────────────────────────────────
 var _selOverlayStyleState = { transform: '', width: '', height: '' };
 var _multiSelBoxes = [];
-var _multiSelStyleState = new WeakMap();
 var _rubberBandDragActive = false;
 var _textMinWidthWarmCancel = null;
 var _textMinWidthWarmObjectId = '';
@@ -340,14 +339,11 @@ function selectionBoundsIntersectViewport(
   surface = null,
 ) {
   if (!bounds) return false;
-  const size = surface || (
-    typeof boardSurfaceCssSize === 'function'
-      ? boardSurfaceCssSize()
-      : {
-          width: Number(typeof window !== 'undefined' ? window.innerWidth : 0) || 0,
-          height: Number(typeof window !== 'undefined' ? window.innerHeight : 0) || 0,
-        }
-  );
+  const size = surface || globalThis._boardSurfaceCssSizeCache ||
+    (typeof boardSurfaceCssSize === 'function' ? boardSurfaceCssSize() : {
+      width: Number(typeof window !== 'undefined' ? window.innerWidth : 0) || 0,
+      height: Number(typeof window !== 'undefined' ? window.innerHeight : 0) || 0,
+    });
   const width = Number(size?.width) || 0;
   const height = Number(size?.height) || 0;
   if (width <= 0 || height <= 0) return true;
@@ -403,13 +399,11 @@ const proportionalScaleFromHandleDrag = function proportionalScaleFromHandleDrag
 function hideMultiSelectionOverlay() {
   if (!multiSelOverlay) return;
   if (multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.remove('visible');
-  trimMultiSelectionBoxes(0);
 }
 
 const trimMultiSelectionBoxes = (maxCount = 0) => {
   while (_multiSelBoxes.length > maxCount) {
     const box = _multiSelBoxes.pop();
-    _multiSelStyleState.delete(box);
     box?.parentNode?.removeChild(box);
   }
 };
@@ -423,8 +417,8 @@ function updateMultiSelectionOverlay() {
   while (_multiSelBoxes.length < selectedIds.size) {
     const box = document.createElement('div');
     box.className = 'multi-sel-box';
+    box._styleState = { display: '', transform: '', width: '', height: '' };
     _multiSelBoxes.push(box);
-    _multiSelStyleState.set(box, { display: '', transform: '', width: '', height: '' });
     multiSelOverlay.appendChild(box);
   }
 
@@ -440,7 +434,7 @@ function updateMultiSelectionOverlay() {
       bounds,
       obj?.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0,
     );
-    const state = _multiSelStyleState.get(box);
+    const state = box._styleState;
     _setStyleIfChanged(box, 'display', 'block', state);
     _setStyleIfChanged(box, 'transform', `translate(${rect.x}px,${rect.y}px)`, state);
     _setStyleIfChanged(box, 'width', rect.width + 'px', state);
@@ -552,7 +546,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           minObjectScale = Math.max(minObjectScale, MIN_OBJECT_SIZE / snap.w, MIN_OBJECT_SIZE / snap.h);
         }
         minObjectScale = Math.min(1, minObjectScale);
-        const resizeCommitter = createRafCommitter(({ scale }) => {
+        const resizeCommitter = createRafCommitter((scale) => {
           for (const snap of snapshots) {
             const o = objectsMap.get(snap.id);
             if (!o) continue;
@@ -568,7 +562,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           const dx = (ev.clientX - startX) / zoom;
           const dy = (ev.clientY - startY) / zoom;
           const scale = proportionalScaleFromHandleDrag(anchorPoint, handlePoint, dx, dy, minObjectScale);
-          resizeCommitter.schedule({ scale });
+          resizeCommitter.schedule(scale);
         }
 
         beginDocumentDrag({
@@ -638,15 +632,13 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
 
-      function applyResize(state) {
+      function applyResize(x, y, w, h) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const applyStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         const beforeX = obj.x;
         const beforeY = obj.y;
         const beforeW = obj.w;
         const beforeH = obj.h;
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const layoutCacheHadValue = !!obj._layoutCache;
         const layoutCacheLinesBefore = Array.isArray(obj._layoutCache) ? obj._layoutCache.length : '';
         if (resizeDebugDragId) {
@@ -656,21 +648,21 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             beforeY,
             beforeW,
             beforeH,
-            x: state.x,
-            y: state.y,
-            w: state.w,
-            h: state.h,
+            x,
+            y,
+            w,
+            h,
             layoutCacheHadValue,
             layoutCacheLinesBefore,
           });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         const isText = obj.type === 'text';
-        const textWidthChanged = isText && obj.w !== state.w;
-        obj.x = state.x;
-        obj.y = state.y;
-        obj.w = state.w;
-        if (!isText) obj.h = state.h;
+        const textWidthChanged = isText && obj.w !== w;
+        obj.x = x;
+        obj.y = y;
+        obj.w = w;
+        if (!isText) obj.h = h;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         let autoHeightDebug = null;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -770,7 +762,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           if (resizeWest) { w = Math.max(minTextW, ow - dx); x = ox + ow - w; }
         }
 
-        resizeCommitter.schedule({ x, y, w, h });
+        resizeCommitter.schedule(x, y, w, h);
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (resizeDebugDragId) {
           recordSelectionTextResizeStep('move', resizeDebugDragId, {
@@ -866,11 +858,7 @@ function selectObject(id) {
   if (editingId && editingId !== id) exitEdit();
   BoardfishEditorState.setSelection([id], { primaryId: id, exitEditing: false });
   const obj = objectsMap.get(id);
-  if (obj) {
-    bringObjectToFront(id);
-    markDirty(id);
-    obj.z = ++zCounter;
-  }
+  if (obj) bringObjectToFront(obj);
   scheduleTextMinWidthWarm(obj);
   scheduleRender(true, true);
 }

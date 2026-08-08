@@ -4,25 +4,6 @@
   const TOUCH_HOLD_DELAY_MS = 500;
   const TOUCH_MOVE_THRESHOLD_PX = 8;
 
-  function touchPoint(input, sourceEvent = null) {
-    if (!input) return null;
-    const pointerId = input.pointerId ?? input.identifier;
-    const x = input.clientX;
-    const y = input.clientY;
-    if (pointerId === undefined || pointerId === null || !Number.isFinite(x) || !Number.isFinite(y)) {
-      return null;
-    }
-    const event = sourceEvent || input.sourceEvent || input;
-    return {
-      id: pointerId,
-      pointerId,
-      x,
-      y,
-      target: input.target || event?.target || null,
-      sourceEvent: event,
-    };
-  }
-
   function twoPointerGeometry(points) {
     const [first, second] = points;
     const dx = second.x - first.x;
@@ -80,15 +61,6 @@
       holdTimer = null;
     }
 
-    function activePoints(limit = Infinity) {
-      const points = [];
-      for (const point of active.values()) {
-        points.push(point);
-        if (points.length >= limit) break;
-      }
-      return points;
-    }
-
     function gesturePayload(point, extra) {
       return {
         pointerId: point?.pointerId,
@@ -105,7 +77,7 @@
 
     function startHold(point) {
       clearHoldTimer();
-      const pointerId = point.id;
+      const pointerId = point.pointerId;
       holdTimer = scheduleTimer(() => {
         holdTimer = null;
         const current = active.get(pointerId);
@@ -121,8 +93,7 @@
     function startPinch(sourceEvent = null) {
       clearHoldTimer();
       if (active.size < 2) return false;
-      const points = activePoints(2);
-      const geometry = twoPointerGeometry(points);
+      const geometry = twoPointerGeometry(active.values());
       mode = 'pinch';
       pinchStart = geometry;
       call('onPinchStart', {
@@ -131,8 +102,7 @@
         startCenterY: geometry.centerY,
         startDistance: geometry.distance,
         scale: 1,
-        pointers: points,
-        event: sourceEvent || points[points.length - 1]?.sourceEvent || null,
+        event: sourceEvent,
         activeCount: active.size,
       });
       return true;
@@ -140,58 +110,62 @@
 
     function emitPinch(point) {
       if (mode !== 'pinch' || active.size < 2 || !pinchStart) return false;
-      const points = activePoints(2);
-      const geometry = twoPointerGeometry(points);
+      const geometry = twoPointerGeometry(active.values());
       call('onPinch', {
         ...geometry,
         startCenterX: pinchStart.centerX,
         startCenterY: pinchStart.centerY,
         startDistance: pinchStart.distance,
         scale: geometry.distance / pinchStart.distance,
-        pointers: points,
         event: point?.sourceEvent || null,
         activeCount: active.size,
       });
       return true;
     }
 
-    function updateActivePoint(point) {
-      const current = point ? active.get(point.id) : null;
-      if (!point || !current) return null;
+    function updateActivePoint(input, sourceEvent = null) {
+      if (!input) return null;
+      const pointerId = input.pointerId ?? input.identifier;
+      const x = input.clientX;
+      const y = input.clientY;
+      const current = active.get(pointerId);
+      if (!current || !Number.isFinite(x) || !Number.isFinite(y)) return null;
       current.previousX = current.x;
       current.previousY = current.y;
-      current.x = point.x;
-      current.y = point.y;
-      current.sourceEvent = point.sourceEvent;
+      current.x = x;
+      current.y = y;
+      current.sourceEvent = sourceEvent || input.sourceEvent || input;
       return current;
     }
 
     function pointerDown(input, sourceEvent = null) {
-      const point = touchPoint(input, sourceEvent);
-      if (!point) return false;
+      const pointerId = input?.pointerId ?? input?.identifier;
+      const x = input?.clientX;
+      const y = input?.clientY;
+      if (pointerId === undefined || pointerId === null || !Number.isFinite(x) || !Number.isFinite(y)) return false;
       clearHoldTimer();
+      const event = sourceEvent || input.sourceEvent || input;
       const stored = {
-        ...point,
-        startX: point.x,
-        startY: point.y,
-        previousX: point.x,
-        previousY: point.y,
+        pointerId, x, y,
+        target: input.target || event?.target || null,
+        sourceEvent: event,
+        startX: x, startY: y,
+        previousX: x, previousY: y,
       };
-      active.set(point.id, stored);
+      active.set(pointerId, stored);
       if (active.size === 1) {
         mode = 'pending';
         pinchStart = null;
         startHold(stored);
         call('onPressStart', gesturePayload(stored));
       } else {
-        startPinch(point.sourceEvent);
+        startPinch(event);
       }
       return true;
     }
 
     function pointerMove(input, sourceEvent = null) {
-      const point = touchPoint(input, sourceEvent);
-      const current = updateActivePoint(point);
+      const current = updateActivePoint(input, sourceEvent);
       if (!current) return false;
 
       if (mode === 'pending') {
@@ -213,16 +187,13 @@
         return true;
       }
 
-      emitPinch(point);
+      emitPinch(current);
       return true;
     }
 
     function pointerMoves(inputs, sourceEvent = null) {
       if (mode !== 'pinch' || active.size < 2) {
         let handled = false;
-        // pointerMove performs its own normalization. Passing an already
-        // normalized point through it drops the sample because that point has
-        // x/y rather than clientX/clientY (the one-finger TouchEvent path).
         for (let i = 0; i < (inputs?.length || 0); i++) handled = pointerMove(inputs[i], sourceEvent) || handled;
         return handled;
       }
@@ -232,16 +203,15 @@
       // event ordering and movement speed cannot affect the zoom ratio.
       let lastPoint = null;
       for (let i = 0; i < (inputs?.length || 0); i++) {
-        const point = touchPoint(inputs[i], sourceEvent);
-        if (!updateActivePoint(point)) continue;
-        lastPoint = point;
+        const current = updateActivePoint(inputs[i], sourceEvent);
+        if (!current) continue;
+        lastPoint = current;
       }
       return lastPoint ? emitPinch(lastPoint) : false;
     }
 
     function finishPointer(input, cancelled = false, sourceEvent = null) {
-      const point = touchPoint(input, sourceEvent);
-      const current = updateActivePoint(point);
+      const current = updateActivePoint(input, sourceEvent);
       if (!current) return false;
       clearHoldTimer();
       const finishedMode = mode;
@@ -255,18 +225,18 @@
         call('onTap', gesturePayload(current));
       }
 
-      active.delete(point.id);
+      active.delete(current.pointerId);
       if (finishedMode === 'pinch') {
         call('onPinchEnd', gesturePayload(current, { cancelled, activeCount: active.size }));
       }
 
       if (active.size >= 2) {
-        startPinch(point.sourceEvent);
+        startPinch(current.sourceEvent);
         return true;
       }
 
       if (active.size === 1 && finishedMode === 'pinch') {
-        const remaining = activePoints(1)[0];
+        const remaining = active.values().next().value;
         remaining.startX = remaining.x;
         remaining.startY = remaining.y;
         remaining.previousX = remaining.x;
@@ -288,7 +258,7 @@
     function cancel(reason = 'cancel') {
       if (!active.size && mode === 'idle') return false;
       const finishedMode = mode;
-      const point = activePoints(1)[0] || null;
+      const point = active.values().next().value || null;
       clearHoldTimer();
       active.clear();
       mode = 'idle';

@@ -164,7 +164,7 @@
     crop.dh += top + bottom;
   }
 
-  function drawImageObjWithCurrentQuality(context, obj, img, deps, view, viewportRect) {
+  function drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect) {
     const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (view.zoom * view.dpr);
     const transform = obj.data;
     if (transform.flipX || transform.flipY || transform.rotation) {
@@ -203,14 +203,14 @@
     return false;
   }
 
-  function drawImageObj(context, obj, img, deps, view, viewportRect, lowLatency) {
+  function drawImageObj(context, obj, img, view, viewportRect, lowLatency) {
     if (!lowLatency) {
-      return drawImageObjWithCurrentQuality(context, obj, img, deps, view, viewportRect);
+      return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     }
     const previousSmoothingEnabled = context.imageSmoothingEnabled;
     try { context.imageSmoothingEnabled = false; } catch (_) {}
     try {
-      return drawImageObjWithCurrentQuality(context, obj, img, deps, view, viewportRect);
+      return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     } finally {
       try { context.imageSmoothingEnabled = previousSmoothingEnabled; } catch (_) {}
     }
@@ -238,7 +238,7 @@
   function setWorldCanvasTransform(context, dpr, deps) {
     const scale = deps.zoom() * dpr;
     context.setTransform(scale, 0, 0, scale, deps.panX() * dpr, deps.panY() * dpr);
-    deps.setCanvasImageQuality(context);
+    context.imageSmoothingQuality = 'high';
     context.font = deps.font;
     context.fillStyle = deps.canvasTextColor();
     context.textBaseline = 'alphabetic';
@@ -474,15 +474,14 @@
         const view = options.view || viewDefaults();
         const imageSourceResolver = options.imageSourceResolver || null;
         const key = obj.data.imgKey;
-        const bitmap = deps.imageBitmapCache()[key];
         const lowLatencyImageMotion = !!options.motion;
         const selected = imageSourceResolver
           ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
-          : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
+          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
         const img = selected?.source || selected || null;
         if (!isDrawableImageSource(img)) return;
         try {
-          drawImageObj(context, obj, img, deps, view, viewportRect,
+          drawImageObj(context, obj, img, view, viewportRect,
             selected?.activeInputFullFallback === true || lowLatencyImageMotion);
         } catch (_) {}
       } else {
@@ -569,7 +568,7 @@
           }
         }
         try {
-          const cropped = drawImageObj(context, obj, img, deps, view, viewportRect,
+          const cropped = drawImageObj(context, obj, img, view, viewportRect,
             selected?.activeInputFullFallback === true || lowLatencyImageMotion);
           if (cropped === null) return false;
           if (counters) {

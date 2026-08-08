@@ -67,10 +67,10 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
     selectObject(id) { selectedIds.clear(); selectedIds.add(id); },
     exitEdit() {},
     createRafCommitter(apply) {
-      let state = null;
+      let args = null;
       return {
-        schedule(nextState) { state = nextState; },
-        flush() { if (state) apply(state); state = null; },
+        schedule(...nextArgs) { args = nextArgs; },
+        flush() { if (args) apply(...args); args = null; },
       };
     },
     beginDocumentDrag(handlers) { dragHandlers.push(handlers); },
@@ -131,6 +131,25 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
       context.hitPoint = { x: wx, y: wy };
       return 3;
     },
+    layoutHitTestCaret(...args) { return { index: context.layoutHitTest(...args), affinity: '' }; },
+    setTextScriptCaretAffinity(target, index, affinity) {
+      target._textScriptCaretIndex = target._textEditCaretIndex = index;
+      target._textScriptCaretAffinity = affinity;
+      delete target._textEditCaretLineStartIndex;
+    },
+    clearTextScriptCaretAffinity(target) {
+      delete target._textScriptCaretIndex;
+      delete target._textScriptCaretAffinity;
+    },
+    setTextEditCaretIndex(target, index, options = {}) {
+      target._textEditCaretIndex = index;
+      if (Number.isFinite(options.lineStartIndex)) target._textEditCaretLineStartIndex = options.lineStartIndex;
+    },
+    clearTextEditCaretIndex(target) {
+      delete target._textEditCaretIndex;
+      delete target._textEditCaretLineStartIndex;
+    },
+    flushEditHistoryCheckpoint() {},
     TextSelDebug: { _logSelection(type) { context.logs.push(type); } },
     scheduleRender(select, overlay) { context.renders.push({ select, overlay }); },
     scheduleTransform() {},
@@ -232,16 +251,16 @@ function loadRubberBandHarness() {
     BoardfishViewportState: { zoomAroundClient() {}, panBy() {}, setPan() {} },
     scheduleTransform() {},
     createRafCommitter(apply) {
-      let state = null;
+      let args = null;
       const flush = () => {
-        if (state === null) return;
-        const nextState = state;
-        state = null;
-        apply(nextState);
+        if (args === null) return;
+        const nextArgs = args;
+        args = null;
+        apply(...nextArgs);
         context.rubberBandCommits.push(context.rubberBand.style.cssText);
       };
       context.flushRubberBandFrame = flush;
-      return { schedule(nextState) { state = nextState; }, flush };
+      return { schedule(...nextArgs) { args = nextArgs; }, flush };
     },
     isBoardInputBlocked: () => false,
     isBoardNavigationAllowedWhileBlocked: () => false,

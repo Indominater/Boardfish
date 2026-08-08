@@ -467,14 +467,14 @@ function createSelectionDragSession(startClientX, startClientY) {
     else drawBoard();
     updateSelectionOverlay();
   }
-  const dragCommitter = createRafCommitter(({ dx, dy }) => applyGrpDrag(dx, dy));
+  const dragCommitter = createRafCommitter((dx, dy) => applyGrpDrag(dx, dy));
   function move(clientX, clientY) {
     if (finished || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
     const dx = (clientX - startClientX) / dragZoom;
     const dy = (clientY - startClientY) / dragZoom;
     if (!grpMoved && dx*dx + dy*dy > grpThreshold) grpMoved = true;
     if (!grpMoved) return false;
-    dragCommitter.schedule({ dx, dy });
+    dragCommitter.schedule(dx, dy);
     return true;
   }
   function finish() {
@@ -542,7 +542,7 @@ function startRubberBandSelection(e, additive) {
   beginRubberBandDrag();
   let rbActive = false;
   let rbFinished = false;
-  const rbStyleCommitter = createRafCommitter(({ l, t, w, h }) => {
+  const rbStyleCommitter = createRafCommitter((l, t, w, h) => {
     rubberBand.style.cssText = `display:block;left:${l}px;top:${t}px;width:${w}px;height:${h}px`;
   });
   function onRbMove(ev) {
@@ -551,7 +551,7 @@ function startRubberBandSelection(e, additive) {
     if (!rbActive) return;
     const l = Math.min(rbStartX, ev.clientX), t = Math.min(rbStartY, ev.clientY);
     const w = Math.abs(dx), h = Math.abs(dy);
-    rbStyleCommitter.schedule({ l, t, w, h });
+    rbStyleCommitter.schedule(l, t, w, h);
   }
   function onRbUp(ev) {
     if (rbFinished) return;
@@ -590,19 +590,9 @@ function toggleAdditiveSelection(obj) {
   } else {
     nextSelection.add(obj.id);
     BoardfishEditorState.setSelection(nextSelection, { primaryId: obj.id });
-    const addedObj = objectsMap.get(obj.id);
-    if (addedObj) {
-      bringObjectToFront(obj.id);
-      markDirty(obj.id);
-      addedObj.z = ++zCounter;
-    }
+    bringObjectToFront(obj);
   }
   scheduleRender(true, true);
-}
-
-function textCaretHitForPoint(layout, wx, wy, obj) {
-  if (typeof layoutHitTestCaret === 'function') return layoutHitTestCaret(layout, wx, wy, obj);
-  return { index: layoutHitTest(layout, wx, wy, obj), affinity: '' };
 }
 
 function applyTextEditCaretHit(obj, proxy, hit) {
@@ -610,50 +600,23 @@ function applyTextEditCaretHit(obj, proxy, hit) {
   const textContent = obj.data?.content || '';
   const textLength = textContent.length;
   const index = Math.max(0, Math.min(Math.trunc(hit.index ?? 0), textLength));
-  if (typeof setTextEditProxySelectionRange === 'function') {
-    setTextEditProxySelectionRange(proxy, index, index, 'none', { value: textContent });
-  } else {
-    proxy.setSelectionRange(index, index, 'none');
-  }
+  setTextEditProxySelectionRange(proxy, index, index, 'none', { value: textContent });
   if (hit.affinity) {
-    if (typeof setTextScriptCaretAffinity === 'function') {
-      setTextScriptCaretAffinity(obj, index, hit.affinity);
-    } else {
-      obj._textScriptCaretIndex = index;
-      obj._textScriptCaretAffinity = hit.affinity;
-      obj._textEditCaretIndex = index;
-    }
+    setTextScriptCaretAffinity(obj, index, hit.affinity);
   } else {
-    if (typeof clearTextScriptCaretAffinity === 'function') clearTextScriptCaretAffinity(obj);
-    else {
-      delete obj._textScriptCaretIndex;
-      delete obj._textScriptCaretAffinity;
-    }
-    if (typeof setTextEditCaretIndex === 'function') {
-      setTextEditCaretIndex(obj, index, { lineStartIndex: hit.lineStartIndex });
-    } else {
-      obj._textEditCaretIndex = index;
-      if (Number.isFinite(hit.lineStartIndex)) obj._textEditCaretLineStartIndex = hit.lineStartIndex;
-    }
+    clearTextScriptCaretAffinity(obj);
+    setTextEditCaretIndex(obj, index, { lineStartIndex: hit.lineStartIndex });
   }
 }
 
 function clearTextEditCaretHit(obj) {
   if (!obj) return;
-  if (typeof clearTextScriptCaretAffinity === 'function') clearTextScriptCaretAffinity(obj);
-  else {
-    delete obj._textScriptCaretIndex;
-    delete obj._textScriptCaretAffinity;
-  }
-  if (typeof clearTextEditCaretIndex === 'function') clearTextEditCaretIndex(obj);
-  else {
-    delete obj._textEditCaretIndex;
-    delete obj._textEditCaretLineStartIndex;
-  }
+  clearTextScriptCaretAffinity(obj);
+  clearTextEditCaretIndex(obj);
 }
 
 function startTextSelectionDrag(e, obj, wp) {
-  if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
+  flushEditHistoryCheckpoint();
   TextSelDebug._logPointer?.('selection-drag-start', e, { objectId: obj?.id || '', wx: wp.x, wy: wp.y });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const layoutStart = canvasInputNow();
@@ -663,7 +626,7 @@ function startTextSelectionDrag(e, obj, wp) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const clickHitStart = canvasInputNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const clickHit = textCaretHitForPoint(layout, wp.x, wp.y, obj);
+  const clickHit = layoutHitTestCaret(layout, wp.x, wp.y, obj);
   TextSelDebug._logHitTiming?.('selection-drag-start-hit', obj, clickHit, canvasInputNow() - clickHitStart, {
     wx: wp.x,
     wy: wp.y,
@@ -690,7 +653,7 @@ function startTextSelectionDrag(e, obj, wp) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const hitStart = canvasInputNow();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const endHit = textCaretHitForPoint(obj._layoutCache || layout, wp2.x, wp2.y, obj);
+    const endHit = layoutHitTestCaret(obj._layoutCache || layout, wp2.x, wp2.y, obj);
     TextSelDebug._logHitTiming?.('selection-drag-move-hit', obj, endHit, canvasInputNow() - hitStart, {
       wx: wp2.x,
       wy: wp2.y,
@@ -699,11 +662,7 @@ function startTextSelectionDrag(e, obj, wp) {
     if (_editEl) {
       const start = Math.min(clickIdx, endIdx);
       const end = Math.max(clickIdx, endIdx);
-      if (typeof setTextEditProxySelectionRange === 'function') {
-        setTextEditProxySelectionRange(_editEl, start, end, 'none', { value: obj.data?.content || '' });
-      } else {
-        _editEl.setSelectionRange(start, end);
-      }
+      setTextEditProxySelectionRange(_editEl, start, end, 'none', { value: obj.data?.content || '' });
       if (clickIdx === endIdx) applyTextEditCaretHit(obj, _editEl, endHit);
       else clearTextEditCaretHit(obj);
       TextSelDebug._logSelection('mouse-drag', _editEl, obj);
@@ -746,14 +705,14 @@ function startObjectDrag(e, obj) {
     ViewportDebug.end(dragDbg);
     updateSelectionOverlay();
   }
-  const dragCommitter = createRafCommitter(({ dx, dy }) => applyDrag(dx, dy));
+  const dragCommitter = createRafCommitter((dx, dy) => applyDrag(dx, dy));
 
   function onMove(ev) {
     const dx = (ev.clientX - startX) / zoom;
     const dy = (ev.clientY - startY) / zoom;
     if (!moved && dx*dx + dy*dy > moveThreshold) moved = true;
     if (!moved) return;
-    dragCommitter.schedule({ dx, dy });
+    dragCommitter.schedule(dx, dy);
   }
   function onUp(ev) {
     if (!moved) {
@@ -815,7 +774,7 @@ function startObjectDrag(e, obj) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const hitStart = canvasInputNow();
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          const clickHit = textCaretHitForPoint(layout, upPoint.x, upPoint.y, obj);
+          const clickHit = layoutHitTestCaret(layout, upPoint.x, upPoint.y, obj);
           logClickEditStep('click-to-edit-hit', {
             hitMs: canvasInputDebugRound(canvasInputNow() - hitStart),
             returnedIdx: clickHit?.index ?? '',
@@ -838,13 +797,6 @@ function startObjectDrag(e, obj) {
           });
           TextSelDebug._logSelection('click-to-edit', _editEl, obj);
           _caretVisible = true;
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          const renderStart = canvasInputNow();
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          scheduleRender(true, false);
-          logClickEditStep('click-to-edit-render-scheduled', {
-            renderScheduleMs: canvasInputDebugRound(canvasInputNow() - renderStart),
-          });
           if (ev?.isTrusted) {
             if (typeof BOARDFISH_PRODUCTION === 'undefined') {
               /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -915,13 +867,13 @@ canvas.addEventListener('mousedown', (e) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const cleanupStart = canvasInputNow();
     emptyTextDeleted = BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
-      preserveIds: editingId ? [editingId] : [],
+      preserveId: editingId,
     });
     emptyTextCleanupMs = canvasInputDebugRound(canvasInputNow() - cleanupStart);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   } else {
     BoardfishEditorState.deleteEmptyTextObjects('delete-empty-text', {
-      preserveIds: editingId ? [editingId] : [],
+      preserveId: editingId,
     });
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -932,10 +884,11 @@ canvas.addEventListener('mousedown', (e) => {
   const worldPointMs = canvasInputDebugRound(canvasInputNow() - worldStart);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const additive = e.metaKey || e.ctrlKey;
+  const groupDrag = isMultiSelected() && !additive && rectContainsPoint(selectedBounds(), wp);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hitStart = canvasInputNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const obj = BoardObjectGeometry.topObjectAtWorldPoint(wp);
+  const obj = groupDrag ? null : BoardObjectGeometry.topObjectAtWorldPoint(wp);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hitTestMs = canvasInputDebugRound(canvasInputNow() - hitStart);
   canvasInputTextDebugLog('canvas-mousedown-route', obj, {
@@ -947,6 +900,7 @@ canvas.addEventListener('mousedown', (e) => {
     button: e.button,
     detail: e.detail ?? '',
     additive,
+    groupDrag,
     emptyTextDeleted: !!emptyTextDeleted,
     emptyTextCleanupMs,
     worldPointMs,
@@ -962,12 +916,7 @@ canvas.addEventListener('mousedown', (e) => {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   // Multi-select: any click inside the bounding box (object or empty space) → drag group
-  if (isMultiSelected() && !additive) {
-    if (rectContainsPoint(selectedBounds(), wp)) {
-      if (startGroupDrag(e)) return;
-      return;
-    }
-  }
+  if (groupDrag) { startGroupDrag(e); return; }
 
   if (!obj) {
     startRubberBandSelection(e, additive);

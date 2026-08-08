@@ -67,8 +67,7 @@ const readWebClipboardTokenForPaste = async (clipboardData
 
 const noteTextObjectCopyFeedback = (obj) => {
   if (obj?.type !== 'text') return false;
-  const text = normalizeTextContent(obj.data?.content);
-  if (!text.length) return false;
+  if (!String(obj.data?.content ?? '')) return false;
   globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-object', {
     objects: [obj],
   });
@@ -162,11 +161,7 @@ const createWebSourcePngClipboardBlob = (obj, source
   if (typeof Blob === 'undefined') return null;
   const container = globalThis.BoardfishWebBoardContainer;
   if (!container?.bytesForImageSource) return null;
-  const isDirectWebSource = (
-    (typeof isWebImageRef === 'function' && isWebImageRef(source)) ||
-    (typeof source === 'string' && /^data:image\/png[;,]/i.test(source))
-  );
-  if (!isDirectWebSource || webSourceClipboardMime(source) !== 'image/png') return null;
+  if (webSourceClipboardMime(source) !== 'image/png') return null;
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const startedAt = collectClipboardDiagnostics ? clipboardNow() : 0;

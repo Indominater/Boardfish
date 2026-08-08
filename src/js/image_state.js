@@ -482,10 +482,17 @@ function clearOpenInitialImagePreviews(key = null) {
   imageOpenPreviewBitmapCache.clear();
 }
 
-function openInitialPreviewReleaseTargetScale(key, entry) {
+function openInitialPreviewIsCoveredByDrawSource(key, entry) {
+  if (imageBitmapFailed.has(key)) return true;
   const fullSource = imageBitmapCache[key] || null;
-  if (!fullSource || typeof chooseImageScaleForDraw !== 'function') return 1;
-  return chooseImageScaleForDraw(
+  if (!fullSource) return false;
+  if (typeof chooseImageScaleForDraw !== 'function' ||
+    typeof isViewportImageScalingActive !== 'function' ||
+    !isViewportImageScalingActive() ||
+    typeof hasScaledImageVariant !== 'function') {
+    return true;
+  }
+  const targetScale = chooseImageScaleForDraw(
     {
       w: Math.max(1, Number(entry?.objectW || 0) || Number(entry?.targetWidth || 1) || 1),
       h: Math.max(1, Number(entry?.objectH || 0) || Number(entry?.targetHeight || 1) || 1),
@@ -496,18 +503,6 @@ function openInitialPreviewReleaseTargetScale(key, entry) {
       dpr: Number(entry?.viewDpr || 0) || (typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1),
     },
   );
-}
-
-function openInitialPreviewIsCoveredByDrawSource(key, entry) {
-  if (imageBitmapFailed.has(key)) return true;
-  const fullSource = imageBitmapCache[key] || null;
-  if (!fullSource) return false;
-  if (typeof isViewportImageScalingActive !== 'function' ||
-    !isViewportImageScalingActive() ||
-    typeof hasScaledImageVariant !== 'function') {
-    return true;
-  }
-  const targetScale = openInitialPreviewReleaseTargetScale(key, entry);
   return !(targetScale > 0 && targetScale < 1) ||
     hasScaledImageVariant(key, targetScale) ||
     (typeof hasScaledImageVariantFailure === 'function' && hasScaledImageVariantFailure(key, targetScale));
@@ -614,15 +609,12 @@ const BULK_IMAGE_READY_RENDER_INTERVAL_MS = 450;
 
 function scheduleImageReadyRender(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  source = 'image-load',
+  source = 'image-load'
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  options = {}
 ) {
   invalidateOffscreen();
   const now = performance.now();
-  const intervalMs = Number(options.minIntervalMs) > 0
-    ? Number(options.minIntervalMs)
-    : (_bulkImageInsertDepth > 0 ? BULK_IMAGE_READY_RENDER_INTERVAL_MS : IMAGE_READY_RENDER_INTERVAL_MS);
+  const intervalMs = _bulkImageInsertDepth > 0 ? BULK_IMAGE_READY_RENDER_INTERVAL_MS : IMAGE_READY_RENDER_INTERVAL_MS;
   if (now - _imageReadyLastRender <= intervalMs) return;
   _imageReadyLastRender = now;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -729,10 +721,6 @@ function processImageDecodeQueue() {
   }
 }
 
-function imageReadyPromiseForKey(key) {
-  return imageReadyPromises.get(key) || Promise.resolve();
-}
-
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 const isDebugApiEnabled = (api) => {
   return !!(api && (api.enabled === true || api.isEnabled?.() === true));
@@ -759,12 +747,11 @@ function cacheImage(key, src
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  , options = {}
 ) {
   const webRef = isWebImageRef(src);
   const displaySrc = webRef ? webImageDisplaySrc(src) : src;
   if (!webRef && (typeof displaySrc !== 'string' || !displaySrc)) return;
-  if (imageBitmapCache[key]) return imageReadyPromiseForKey(key);
+  if (imageBitmapCache[key]) return imageReadyPromises.get(key) || Promise.resolve();
   const generation = _imageStoreGeneration;
   imageBitmapFailed.delete(key);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -855,9 +842,9 @@ function cacheImage(key, src
         OpenDebug.step(dbg, 'cache-image:createImageBitmap:stale', { imgKey: key, ms: bitmapMs });
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       } else {
-        const selectedBitmap = imageBitmapCache[key] || bitmap;
-        if (imageBitmapCache[key]) bitmap.close?.();
-        else imageBitmapCache[key] = bitmap;
+        let selectedBitmap = imageBitmapCache[key];
+        if (selectedBitmap) bitmap.close?.();
+        else imageBitmapCache[key] = selectedBitmap = bitmap;
         if (typeof scheduleDrawableBitmapWarmup === 'function') {
           const warmupMeta = { kind: 'full-image', key };
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -957,9 +944,8 @@ function cacheImage(key, src
     if (!deferBitmapReadyRenderForOpenPreview) {
       scheduleImageReadyRender(
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        'image-bitmap-ready',
+        'image-bitmap-ready'
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        { minIntervalMs: options.readyRenderMinIntervalMs }
       );
     }
     if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {

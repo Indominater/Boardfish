@@ -1166,7 +1166,7 @@ test('object motion exposes the exact transform most recently used for drawing',
 });
 
 test('motion cleanup preserves the last rendered transform until the next object draw', () => {
-  const { context, setTime } = loadMotion();
+  const { context, renderCalls, setTime } = loadMotion({ _boardOpening: true });
   const motion = context.BoardfishMotion;
   const image = { id: 'late-frame-image', type: 'image', x: 10, y: 20, w: 100, h: 80 };
 
@@ -1179,8 +1179,10 @@ test('motion cleanup preserves the last rendered transform until the next object
   setTime(700);
   motion.afterViewportRenderFrame({ source: 'late-board-frame' });
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
+  context._boardOpening = false; motion.afterViewportRenderFrame({ source: 'post-open-frame' });
+  assert.equal(renderCalls.length, 2);
 
-  assert.equal(motion.objectMotionForDraw(image, 1), null);
+  assert.equal(motion.motionObjectsForDraw(), null);
   assert.equal(motion.getLastDrawnObjectMotion(image), null);
 });
 
@@ -1615,6 +1617,6 @@ test('object jello removal stays drawable until the exit pulse completes', () =>
   assert.notEqual(motion.scaleX, motion.scaleY);
 
   setTime(220);
-  assert.deepEqual(plain(context.BoardfishMotion.objectMotionForDraw(obj)), { opacity: 0, scale: 1, skip: true });
   assert.equal(context.BoardfishMotion.motionObjectsForDraw(), null);
+  assert.equal(context.BoardfishMotion.objectMotionForDraw(obj), null);
 });

@@ -510,7 +510,6 @@ function restoreSnapshot(s, {
   BoardfishEditorState.replaceBoardObjects(clonedSnapshotObjects, {
     normalizeText: false,
     syncTextHeights: false,
-    preserveTextRuntimeCaches: true,
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const replaceBoardObjectsMs = performance.now() - replaceStart;

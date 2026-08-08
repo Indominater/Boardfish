@@ -5,7 +5,6 @@
     const IMAGE_UNIT_EPSILON = 1e-9;
 
     function objectContainsWorldPoint(obj, point) {
-      if (!obj || !point) return false;
       if (obj.type !== 'image') {
         return point.x >= obj.x && point.x <= obj.x + obj.w && point.y >= obj.y && point.y <= obj.y + obj.h;
       }

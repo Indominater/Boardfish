@@ -6,8 +6,7 @@
   }
 
   function guessImageExtForObjectExport(obj) {
-    const src = BoardfishImageStore.getSource(obj?.data?.imgKey);
-    return imageNeedsRendering(obj) ? 'png' : guessImageExtForSource(src);
+    return imageNeedsRendering(obj) ? 'png' : guessImageExtForSource(BoardfishImageStore.getSource(obj?.data?.imgKey));
   }
 
   function guessImageExtForSource(src) {

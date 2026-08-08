@@ -34,5 +34,5 @@ function rectContainsPoint(rect, point) {
 }
 
 function objectIntersectsRect(obj, rect) {
-  return !!obj && !!rect && obj.x <= rect.x2 && obj.x + obj.w >= rect.x1 && obj.y <= rect.y2 && obj.y + obj.h >= rect.y1;
+  return obj.x <= rect.x2 && obj.x + obj.w >= rect.x1 && obj.y <= rect.y2 && obj.y + obj.h >= rect.y1;
 }

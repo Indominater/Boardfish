@@ -16,13 +16,13 @@ test('createRafCommitter coalesces scheduled state and supports flush', () => {
   const applied = [];
 
   try {
-    const committer = Interaction.createRafCommitter((state) => applied.push(state));
-    committer.schedule({ value: 1 });
-    committer.schedule({ value: 2 });
+    const committer = Interaction.createRafCommitter((...values) => applied.push(values));
+    committer.schedule(1, 2, 3, 4);
+    committer.schedule(5, 6, 7, 8);
     assert.equal(committer.pending, true);
     assert.deepEqual(applied, []);
     callback();
-    assert.deepEqual(applied, [{ value: 2 }]);
+    assert.deepEqual(applied, [[5, 6, 7, 8]]);
     assert.equal(committer.pending, false);
   } finally {
     globalThis.requestAnimationFrame = previousRequest;

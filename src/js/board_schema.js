@@ -54,10 +54,10 @@
       if (Array.isArray(data.scriptRanges)) {
         const scriptRanges = [];
         for (const range of data.scriptRanges) {
-          const kind = ['sup', 'sub'].includes(range?.kind) ? range.kind : '';
+          const kind = range?.kind;
           const start = Math.trunc(Number(range?.start));
           const end = Math.trunc(Number(range?.end));
-          if (!kind || !Number.isFinite(start) || !Number.isFinite(end)) continue;
+          if ((kind !== 'sup' && kind !== 'sub') || !Number.isFinite(start) || !Number.isFinite(end)) continue;
           scriptRanges.push({
             start: Math.max(0, start),
             end: Math.max(0, end),
@@ -95,27 +95,25 @@
         throw new Error(`imageStore.${key} must be a string or object`);
       }
     }
-    const objects = [];
-    if (Array.isArray(data.objects)) {
-      for (let i = 0; i < data.objects.length; i++) objects.push(normalizeObject(data.objects[i], i));
-    }
-    const imageStore = {};
-    for (const obj of objects) {
-      if (obj.type !== OBJECT_TYPES.IMAGE) continue;
-      const key = obj.data.imgKey;
-      if (key === '__proto__' || !Object.prototype.hasOwnProperty.call(sourceImageStore, key)) {
-        throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);
+    const objects = [], imageStore = {};
+    if (Array.isArray(data.objects)) for (let i = 0; i < data.objects.length; i++) {
+      const obj = normalizeObject(data.objects[i], i);
+      if (obj.type === OBJECT_TYPES.IMAGE) {
+        const key = obj.data.imgKey;
+        if (key === '__proto__' || !Object.prototype.hasOwnProperty.call(sourceImageStore, key)) {
+          throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);
+        }
+        imageStore[key] = sourceImageStore[key];
       }
-      imageStore[key] = sourceImageStore[key];
+      objects.push(obj);
     }
-    const normalized = {
+    return {
       version: Number(data.version || 3),
       format: BOARD_FORMAT,
       viewport: normalizeViewport(data.viewport),
       imageStore,
       objects,
     };
-    return normalized;
   }
 
   const api = {

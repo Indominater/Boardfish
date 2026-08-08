@@ -155,9 +155,6 @@ function loadHistoryHarness() {
       replaceBoardObjects(nextObjects, options = {}) {
         context.replaceBoardObjectsOptions.push({ ...(options || {}) });
         context.objects = nextObjects;
-        if (options.preserveTextRuntimeCaches !== true) {
-          for (const obj of context.objects) clearTextRuntimeCache(obj);
-        }
         if (context.collapseTextOnReplace && options.syncTextHeights !== false) {
           for (const obj of context.objects) {
             if (obj?.type === 'text') obj.h = 32;
@@ -855,7 +852,7 @@ test('undoing and redoing text edits restore active text runtime layout caches',
   assert.equal(restored._textScriptRangesCacheContent, 'before');
   assert.equal(restored._textScriptLayoutMetricsContent, 'before');
   assert.equal(context.replaceBoardObjectsOptions.at(-1).normalizeText, false);
-  assert.equal(context.replaceBoardObjectsOptions.at(-1).preserveTextRuntimeCaches, true);
+  assert.equal('preserveTextRuntimeCaches' in context.replaceBoardObjectsOptions.at(-1), false);
 
   context.redo();
 
@@ -873,7 +870,7 @@ test('undoing and redoing text edits restore active text runtime layout caches',
   assert.equal(restored._textScriptRangesCacheContent, 'after');
   assert.equal(restored._textScriptLayoutMetricsContent, 'after');
   assert.equal(context.replaceBoardObjectsOptions.at(-1).normalizeText, false);
-  assert.equal(context.replaceBoardObjectsOptions.at(-1).preserveTextRuntimeCaches, true);
+  assert.equal('preserveTextRuntimeCaches' in context.replaceBoardObjectsOptions.at(-1), false);
 });
 
 test('undoing and redoing text edits hydrate unchanged text runtime caches from live objects', () => {

@@ -127,7 +127,7 @@ function loadSelectionInputHarness(objects, options = {}) {
     beginDocumentDrag(handlers) { context.drag = handlers; },
     createRafCommitter(apply) {
       return {
-        schedule(state) { apply(state); },
+        schedule(...args) { apply(...args); },
         flush() {},
       };
     },

@@ -102,16 +102,15 @@
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   function supportedClipboardImageFile(items = [], files = []) {
-    const isSupportedImageType = (type) => type === 'image/png' || type === 'image/jpeg';
     for (const item of items) {
-      if (item.kind === 'file' && isSupportedImageType(item.type)) {
+      if (item.kind === 'file' && (item.type === 'image/png' || item.type === 'image/jpeg')) {
         const file = item.getAsFile?.();
         if (file) return file;
         break;
       }
     }
     for (const file of files) {
-      if (isSupportedImageType(file.type)) return file;
+      if (file.type === 'image/png' || file.type === 'image/jpeg') return file;
     }
     return null;
   }

@@ -49,7 +49,7 @@
   }
 
   function removeObjectsById(ids = []) {
-    const idsToRemove = new Set(ids);
+    const idsToRemove = ids instanceof Set ? ids : new Set(ids);
     if (!idsToRemove.size) {
       if (selectedId && !selectedIds.has(selectedId)) selectedId = null;
       return 0;
@@ -74,33 +74,22 @@
 
   function removeEmptyTextObjects({
     ids = null,
-    preserveIds = [],
+    preserveId = null,
   } = {}) {
     const candidateIds = ids ? new Set(ids) : null;
-    const preserved = new Set(preserveIds || []);
-    const idsToRemove = [];
+    const idsToRemove = new Set();
     for (const obj of objects) {
       if (!obj || obj.type !== 'text') continue;
       if (candidateIds && !candidateIds.has(obj.id)) continue;
-      if (preserved.has(obj.id)) continue;
+      if (obj.id === preserveId) continue;
       if (!isTextContentEmpty(obj.data?.content)) continue;
-      idsToRemove.push(obj.id);
+      idsToRemove.add(obj.id);
     }
-    return idsToRemove.length ? removeObjectsById(idsToRemove) : 0;
+    return idsToRemove.size ? removeObjectsById(idsToRemove) : 0;
   }
 
   function deleteEmptyTextObjects(reason = 'delete-empty-text', options = {}) {
     return commitMutation(reason, () => removeEmptyTextObjects(options) > 0);
-  }
-
-  function clearTextLayoutState(options = {}) {
-    if (typeof clearTextLayoutCaches === 'function') {
-      clearTextLayoutCaches({
-        objectLayout: options.objectLayout !== false,
-      });
-      return;
-    }
-    _prefixCache.clear();
   }
 
   function resetObjectCounters() {
@@ -126,10 +115,8 @@
     normalizeText = true,
     syncTextHeights = true,
     restoreCounters = true,
-    preserveTextRuntimeCaches = false,
   } = {}) {
     objects = Array.isArray(nextObjects) ? nextObjects : [];
-    clearTextLayoutState({ objectLayout: preserveTextRuntimeCaches !== true });
     if (normalizeText) {
       for (const obj of objects) {
         if (obj?.type !== 'text') continue;
@@ -158,7 +145,7 @@
     clearSelectionState();
     objects = [];
     objectsMap.clear();
-    clearTextLayoutState();
+    clearTextLayoutCaches();
     resetObjectCounters();
   }
 
@@ -168,24 +155,12 @@
   }
 
   function commitMutation(reason, mutate, options = {}) {
-    const history = options.history === undefined ? true : options.history;
-    const invalidate = options.invalidate === undefined ? false : options.invalidate;
-    const renderBoard = options.renderBoard === undefined ? true : options.renderBoard;
-    const renderOverlay = options.renderOverlay === undefined ? true : options.renderOverlay;
-    const result = typeof mutate === 'function' ? mutate() : undefined;
+    const result = mutate();
     if (!result) return result;
-    if (invalidate && typeof invalidateOffscreen === 'function') invalidateOffscreen();
-    if (typeof scheduleRender === 'function') {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        const renderSource = options.renderSource === undefined
-          ? reason || 'mutation'
-          : options.renderSource;
-        scheduleRender(renderBoard, renderOverlay, renderSource);
-      } else {
-        scheduleRender(renderBoard, renderOverlay);
-      }
-    }
-    if (history && typeof pushHistory === 'function') pushHistory(reason);
+    if (options.invalidate) invalidateOffscreen();
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, reason || 'mutation');
+    else scheduleRender(true, true);
+    pushHistory(reason);
     return result;
   }
 

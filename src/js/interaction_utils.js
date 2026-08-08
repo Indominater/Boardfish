@@ -2,20 +2,21 @@
 
 (function initInteractionUtils(root) {
   function createRafCommitter(apply) {
-    let raf = null;
-    let state = null;
+    let raf = null, pending = false, value0, value1, value2, value3;
 
     function commit() {
       raf = null;
-      if (state === null) return;
-      const nextState = state;
-      state = null;
-      apply(nextState);
+      if (!pending) return;
+      pending = false;
+      const next0 = value0, next1 = value1, next2 = value2, next3 = value3;
+      value0 = value1 = value2 = value3 = undefined;
+      apply(next0, next1, next2, next3);
     }
 
     return {
-      schedule(nextState) {
-        state = nextState;
+      schedule(next0, next1, next2, next3) {
+        value0 = next0; value1 = next1; value2 = next2; value3 = next3;
+        pending = true;
         if (raf) return;
         raf = requestAnimationFrame(commit);
       },
@@ -23,7 +24,7 @@
         if (raf) cancelAnimationFrame(raf);
         commit();
       },
-      get pending() { return state !== null; },
+      get pending() { return pending; },
     };
   }
 
