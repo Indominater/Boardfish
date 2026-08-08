@@ -1,9 +1,10 @@
-name: Deploy Web App
+name: Deploy Production and Beta Web Apps
 
 on:
   push:
     branches:
       - main
+      - beta
     paths:
       - '.github/workflows/web.yml'
       - 'src/**'
@@ -29,27 +30,81 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout production source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: production
+
+      - name: Resolve beta source
+        id: beta_ref
+        shell: bash
+        run: |
+          set +e
+          git -C production ls-remote --exit-code --heads origin beta >/dev/null 2>&1
+          status=$?
+          set -e
+
+          case "$status" in
+            0) echo "ref=beta" >> "$GITHUB_OUTPUT" ;;
+            2) echo "ref=main" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::Unable to determine whether the beta branch exists."
+              exit "$status"
+              ;;
+          esac
+
+      - name: Checkout beta source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.beta_ref.outputs.ref }}
+          path: beta-source
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: |
+            production/package-lock.json
+            beta-source/package-lock.json
 
-      - name: Install dependencies
+      - name: Install production dependencies
         run: npm ci --prefer-offline --no-audit --fund=false
+        working-directory: production
 
-      - name: Check web source syntax
+      - name: Check production web source syntax
         run: npm run check:js-syntax
+        working-directory: production
 
-      - name: Build web preview
+      - name: Build production web app
         run: npm run web:build
+        working-directory: production
+
+      - name: Install beta dependencies
+        run: npm ci --prefer-offline --no-audit --fund=false
+        working-directory: beta-source
+
+      - name: Check beta web source syntax
+        run: npm run check:js-syntax
+        working-directory: beta-source
+
+      - name: Build beta web app
+        run: npm run web:build
+        working-directory: beta-source
+
+      - name: Assemble production and beta site
+        shell: bash
+        run: |
+          mkdir -p dist-web/beta
+          cp -R production/dist-web/. dist-web/
+          cp -R beta-source/dist-web/. dist-web/beta/
+          sed -i 's#</head>#  <meta name="robots" content="noindex, nofollow" />\n</head>#' dist-web/beta/index.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload web app
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: dist-web
 

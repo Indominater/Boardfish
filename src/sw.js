@@ -1,6 +1,9 @@
 'use strict';
 
-const BOARDFISH_CACHE = 'boardfish-web-v3';
+const BOARDFISH_CACHE_VERSION = 'v4';
+const BOARDFISH_CACHE_NAMESPACE =
+  `boardfish-pwa-${encodeURIComponent(self.registration.scope)}::`;
+const BOARDFISH_CACHE = `${BOARDFISH_CACHE_NAMESPACE}${BOARDFISH_CACHE_VERSION}`;
 const BOARDFISH_APP_SHELL = [
   './',
   './index.html',
@@ -30,6 +33,11 @@ function isCacheFirstAssetUrl(url) {
 
 function shouldCacheRequest(request, url) {
   return request.mode === 'navigate' || isAppShellUrl(url) || isBoardfishBundleUrl(url);
+}
+
+async function matchCurrentCache(request) {
+  const cache = await caches.open(BOARDFISH_CACHE);
+  return cache.match(request);
 }
 
 async function fetchAndCacheRequest(event, request, url) {
@@ -69,7 +77,8 @@ self.addEventListener('activate', (event) => {
       .then((keys) => {
         const deletions = [];
         for (const key of keys) {
-          if (key.startsWith('boardfish-web-') && key !== BOARDFISH_CACHE) {
+          const isCurrentScopeCache = key.startsWith(BOARDFISH_CACHE_NAMESPACE);
+          if (isCurrentScopeCache && key !== BOARDFISH_CACHE) {
             deletions.push(caches.delete(key));
           }
         }
@@ -88,7 +97,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (isCacheFirstAssetUrl(url)) {
-    const cached = caches.match(request);
+    const cached = matchCurrentCache(request);
     if (/\.[a-f0-9]{12}\.min\.js$/.test(url.pathname)) {
       event.respondWith(cached.then((hit) => hit || fetchAndCacheRequest(event, request, url)));
     } else {
@@ -100,9 +109,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(fetchAndCacheRequest(event, request, url).catch(async (error) => {
-    const cached = await caches.match(request);
+    const cached = await matchCurrentCache(request);
     if (cached) return cached;
-    if (request.mode === 'navigate') return caches.match('./index.html');
+    if (request.mode === 'navigate') return matchCurrentCache('./index.html');
     throw error;
   }));
 });

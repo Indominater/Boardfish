@@ -5,6 +5,11 @@
   const DEFAULT_SCRIPT_SRC = 'https://static.cloudflareinsights.com/beacon.min.js';
   const PRODUCTION_HOST = 'indominater.github.io';
   const PRODUCTION_PATH_PREFIX = '/Boardfish';
+  const BETA_PATH_PREFIX = `${PRODUCTION_PATH_PREFIX}/beta`;
+
+  function pathIsWithin(pathname, rootPath) {
+    return pathname === rootPath || pathname.startsWith(`${rootPath}/`);
+  }
 
   function isProductionBoardfishWeb() {
     const location = root.location;
@@ -12,7 +17,8 @@
     return (
       location.protocol === 'https:' &&
       location.hostname === PRODUCTION_HOST &&
-      location.pathname.startsWith(PRODUCTION_PATH_PREFIX)
+      pathIsWithin(location.pathname, PRODUCTION_PATH_PREFIX) &&
+      !pathIsWithin(location.pathname, BETA_PATH_PREFIX)
     );
   }
 

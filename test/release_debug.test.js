@@ -292,6 +292,7 @@ test('web release preview ships minified PWA assets', () => {
   const buildSource = readSource('scripts/build-runtime-assets.mjs');
   const serverSource = readSource('scripts/serve-web.mjs');
   const workflowSource = readSource('.github/workflows/web.yml');
+  const readmeSource = readSource('README.md');
   const packageJson = readJson('package.json');
 
   assert.doesNotMatch(manifestSource, /WEB_PREVIEW_SCRIPTS[\s\S]*'runtime_debug_noop\.js'/);
@@ -307,6 +308,13 @@ test('web release preview ships minified PWA assets', () => {
   assert.match(serverSource, /devMode \? 'src' : 'dist-web'/);
   assert.match(workflowSource, /npm run web:build/);
   assert.match(workflowSource, /path: dist-web/);
+  assert.match(workflowSource, /branches:\s*\n\s*- main\s*\n\s*- beta/);
+  assert.match(workflowSource, /ref: \$\{\{ steps\.beta_ref\.outputs\.ref \}\}/);
+  assert.match(workflowSource, /cp -R production\/dist-web\/\. dist-web\//);
+  assert.match(workflowSource, /cp -R beta-source\/dist-web\/\. dist-web\/beta\//);
+  assert.match(workflowSource, /noindex, nofollow/);
+  assert.match(workflowSource, /actions\/upload-pages-artifact@v4/);
+  assert.doesNotMatch(readmeSource, /\/Boardfish\/beta(?:\/|\b)/i);
   assert.equal(packageJson.scripts.web, 'npm run web:preview');
   assert.equal(packageJson.scripts.build, 'npm run web:build');
   assert.equal(packageJson.scripts.check, 'npm run check:js-syntax && npm test && npm run check:static');
