@@ -273,8 +273,7 @@ function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view =
   return viewportWorldRect(padScreenPx, view);
 }
 
-const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) => {
-  const viewportRect = options.viewportRect || null;
+const collectTextSelectionRuns = (obj, layout, selStart, selEnd, viewportRect = null) => {
   if (selStart === selEnd) return null;
   const scriptMetrics = layout[0]?._scriptMetrics || null;
   const isHiddenAt = scriptMetrics ? textScriptMetricsHiddenAt : null;
@@ -290,7 +289,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd, options = {}) =
   let hiddenChars = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const line of layout) {
-    if (!textLayoutLineIntersectsViewport(line, viewportRect)) continue;
+    if (viewportRect && !textLayoutLineIntersectsViewport(line, viewportRect)) continue;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ scannedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const ls = line.startIndex, textEnd = ls + line.text.length;
     const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
@@ -353,7 +352,7 @@ const textSelectionMotionForOptions = (obj, selStart, selEnd, options = {}) => {
 
 const textSelectionRunsForOptions = (obj, layout, selStart, selEnd, options = {}) => {
   if (Object.prototype.hasOwnProperty.call(options, 'selection')) return options.selection || null;
-  return collectTextSelectionRuns(obj, layout, selStart, selEnd, { viewportRect: options.viewportRect || null });
+  return collectTextSelectionRuns(obj, layout, selStart, selEnd, options.viewportRect || null);
 };
 
 const applyTextSelectionMotionTransform = (context, bounds, motion) => {
@@ -598,7 +597,7 @@ function drawCaret(context, obj, layout, selStart, options = {}) {
       if (placeCaretOnLine(line)) break;
     }
   }
-  if (!caretLine || !textLayoutLineIntersectsViewport(caretLine, options.viewportRect || null)) return false;
+  if (!caretLine) return false;
   const viewZoom = Number(options.view?.zoom ?? zoom);
   const caretZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
   const caretWidth = 2 / caretZoom;
@@ -621,7 +620,7 @@ const applyObjectMotionForDraw = (context, obj, motion) => {
   const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
   const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
   const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
-  context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
+  context.globalAlpha = opacity;
   if (translateX || translateY) context.translate(translateX, translateY);
   if (scaleX !== 1 || scaleY !== 1) {
     const scalePivotX = obj.x + obj.w * scaleOriginX;
@@ -699,7 +698,7 @@ function drawEditingTextOverlay(context, options = {}) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const selectionStart = collectDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd, { viewportRect });
+    const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDebug) {
       stats.editSelectionMs = performance.now() - selectionStart;
@@ -741,14 +740,14 @@ function drawEditingTextOverlay(context, options = {}) {
     if (selStart === selEnd) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const caretStart = collectDebug ? performance.now() : 0;
-      const drawn = drawCaret(context, obj, layout, selStart, { viewportRect, view });
+      const drawn = drawCaret(context, obj, layout, selStart, { view });
       if (collectDebug) {
         stats.editCaretMs = performance.now() - caretStart;
         stats.editCaretDrawn = !!drawn;
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        drawCaret(context, obj, layout, selStart, { viewportRect, view });
+        drawCaret(context, obj, layout, selStart, { view });
       }
     }
   } finally {

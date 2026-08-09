@@ -244,12 +244,11 @@
     if (!lowLatency) {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     }
-    const previousSmoothingEnabled = context.imageSmoothingEnabled;
     try { context.imageSmoothingEnabled = false; } catch (_) {}
     try {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     } finally {
-      try { context.imageSmoothingEnabled = previousSmoothingEnabled; } catch (_) {}
+      try { context.imageSmoothingEnabled = true; } catch (_) {}
     }
   }
 
@@ -681,7 +680,7 @@
             const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
             const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
             context.save();
-            context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
+            context.globalAlpha = opacity;
             if (translateX || translateY) context.translate(translateX, translateY);
             if (scaleX !== 1 || scaleY !== 1) {
               const scalePivotX = obj.x + obj.w * scaleOriginX;
@@ -755,7 +754,7 @@
           }
           if (context.save) {
             context.save();
-            context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * opacity;
+            context.globalAlpha = opacity;
             if (translateX || translateY) context.translate(translateX, translateY);
             if (scaleX !== 1 || scaleY !== 1) {
               const scalePivotX = obj.x + obj.w * scaleOriginX;

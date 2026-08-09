@@ -867,31 +867,22 @@
     return `images/${key}.${ext}`;
   }
 
-  function candidateImageEntryPaths(key, manifest = {}) {
-    const paths = [
-      imageEntryPath(key, manifest),
+  function resolveManifestImageEntry(entries, key, manifest = {}) {
+    const path = imageEntryPath(key, manifest);
+    const entry = entries.get(path);
+    if (entry) return { path, entry };
+    for (const fallbackPath of [
       `images/${key}.${normalizeImageExt(manifest.ext, manifest.mime)}`,
       `images/${key}.png`,
       `images/${key}.jpg`,
       `images/${key}.jpeg`,
       `images/${key}.webp`,
       `images/${key}.gif`,
-    ];
-    const out = [];
-    for (const path of paths) {
-      if (!path || out.includes(path)) continue;
-      out.push(path);
+    ]) {
+      const fallbackEntry = entries.get(fallbackPath);
+      if (fallbackEntry) return { path: fallbackPath, entry: fallbackEntry };
     }
-    return out;
-  }
-
-  function resolveManifestImageEntry(entries, key, manifest = {}) {
-    const candidates = candidateImageEntryPaths(key, manifest);
-    for (const path of candidates) {
-      const entry = entries.get(path);
-      if (entry) return { path, entry };
-    }
-    throw new Error(`Boardfish file is missing ${candidates[0]}`);
+    throw new Error(`Boardfish file is missing ${path}`);
   }
 
   async function prepareLazyStoredImageBlobs(board, entries, containerBlob, concurrency = 8) {
