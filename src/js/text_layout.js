@@ -180,7 +180,6 @@ const TEXT_WRAPPED_WIDTH_CACHE_MAX_ENTRIES = 12;
 const TEXT_VIEWPORT_LAYOUT_RANGE_CACHE_MAX_ENTRIES = 48;
 const TEXT_VIEWPORT_LAYOUT_LINE_CACHE_MAX_ENTRIES = 8192;
 const TEXT_EXACT_PREFIX_MAX_CHARS = 384;
-const TEXT_TAB_SIZE_SPACES = 8;
 const BASE_TEXT_SCRIPT_STATE = Object.freeze({
   depth: 0,
   font: FONT,
@@ -297,7 +296,7 @@ function measureRawTextWForDepth(text, depth = 0) {
 }
 
 const textTabStopWidth = () => {
-  const width = measureRawTextW(' '.repeat(TEXT_TAB_SIZE_SPACES));
+  const width = measureRawTextW('        ');
   return width > 0 ? width : FONT_SIZE * 4;
 };
 

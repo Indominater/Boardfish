@@ -492,11 +492,7 @@ test('copying a selected text object jiggles immediately while clipboard write c
   assert.deepEqual(context.calls.jello, []);
   assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['text-1']]);
   assert.equal(context.calls.pulses, 0);
-  assert.deepEqual(context.calls.renders, [{
-    board: true,
-    overlay: true,
-    source: 'copy-text-object',
-  }]);
+  assert.deepEqual(context.calls.renders, []);
 
   assert.equal(await copyPromise, true);
   assert.equal(context.calls.pendingTextCopyResolves.length, 1);

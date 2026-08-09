@@ -65,20 +65,6 @@ const readWebClipboardTokenForPaste = async (clipboardData
   }
 };
 
-const noteTextObjectCopyFeedback = (obj) => {
-  if (obj?.type !== 'text') return false;
-  if (!String(obj.data?.content ?? '')) return false;
-  globalThis.BoardfishMotion?.applyCopyFeedback?.({
-    objects: [obj],
-  });
-  scheduleRender(true, true
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    , 'copy-text-object'
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  );
-  return true;
-};
-
 const trimPastedTextObjectContent = (obj) => {
   if (obj?.type !== 'text') return false;
   if (!obj.data) obj.data = {};
@@ -365,9 +351,7 @@ const copySelected = (options = {}) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return false;
   }
-  if (animateCopy && obj.type === 'text' && !noteTextObjectCopyFeedback(obj)) {
-    globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
-  }
+  if (animateCopy && obj.type === 'text') globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cloneStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;

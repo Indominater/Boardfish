@@ -39,11 +39,9 @@
   const springImpulse = (timeSec, decay, omegaD) =>
     Math.exp(-decay * timeSec) * Math.sin(omegaD * timeSec);
 
-  const jiggleUnit = (t) => {
-    const timeSec = t * 0.5;
+  const jiggleUnit = (timeSec, settle) => {
     const attackSec = 0.044;
     const xAttack = smootherstep(timeSec / attackSec);
-    const settle = 1 - smootherstep((t - 0.84) / 0.16000000000000003);
     const yTimeSec = timeSec - 0.016;
     const yAttack = yTimeSec > 0 ? smootherstep(yTimeSec / attackSec) : 0;
     const xBase = springImpulse(timeSec, 9.933715970650928, 27.476232850677572);
@@ -60,11 +58,10 @@
     };
   };
 
-  const jiggleShapeUnit = (t) => {
-    const shapeTimeSec = t * 0.5 - 0.044;
+  const jiggleShapeUnit = (timeSec, settle) => {
+    const shapeTimeSec = timeSec - 0.044;
     if (shapeTimeSec <= 0) return 0;
     const attack = smootherstep(shapeTimeSec / 0.044);
-    const settle = 1 - smootherstep((t - 0.84) / 0.16000000000000003);
     return springImpulse(shapeTimeSec, 6.3334507896370225, 18.7513199475259) * attack * settle;
   };
 
@@ -145,13 +142,15 @@
   };
 
   const jiggleTransform = (motion, t, zoom = 1) => {
-    const point = jiggleUnit(t);
+    const timeSec = t * 0.5;
+    const settle = 1 - smootherstep((t - 0.84) / 0.16000000000000003);
+    const point = jiggleUnit(timeSec, settle);
     const groupSide = motion.groupSize > 1 ? motion.groupSide : 1;
     const xPx = point.x * NORMALIZE_X * 5;
     const yPx = point.y * NORMALIZE_Y * 10.75;
     const viewZoom = Number(zoom);
     const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
-    const shape = jiggleShapeUnit(t) * NORMALIZE_SHAPE;
+    const shape = jiggleShapeUnit(timeSec, settle) * NORMALIZE_SHAPE;
     const strain = shape * 0.028 * (motion.groupSize > 1 ? 1 + groupSide * 0.06 : 1);
     return {
       groupTranslateX: (motion.groupSize > 1 ? 0 : xPx) / safeZoom,

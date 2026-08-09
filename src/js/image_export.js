@@ -27,7 +27,6 @@ async function saveSelectedImage() {
       targetMode: 'file',
       onStart: () => {
         busyPill = startPillTask({ message: 'Exporting', progress: true });
-        updatePillTask(busyPill, 'Exporting');
         ExportDebug.step(dbg, 'web-export:pill-start', { imageCount: 1 });
       },
       onProgress: ({ phase, preparedCount, finishedCount }) => {

@@ -112,14 +112,11 @@
     return !!(source.complete && source.naturalWidth > 0);
   }
 
-  function inverseObjectMotionViewportRect(obj, rect, motion) {
-    if (!rect || !motion) return rect;
-    // Text layout and image crops are chosen before the canvas motion transform,
-    // so map the visible destination back into the object's source coordinates.
-    const x1 = Number(rect.x1), y1 = Number(rect.y1);
-    const x2 = Number(rect.x2), y2 = Number(rect.y2);
-    if (![x1, y1, x2, y2].every(Number.isFinite)) return rect;
-
+  function applyObjectMotion(context, obj, rect, motion
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , counters = null
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) {
     const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
     const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
     const scaleOriginX = Number.isFinite(motion.scaleOriginX)
@@ -130,6 +127,32 @@
       : 0.5;
     const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
     const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (counters) {
+      counters.motionObjects = (counters.motionObjects || 0) + 1;
+      if (obj.type === 'image') counters.motionImages = (counters.motionImages || 0) + 1;
+      else if (obj.type === 'text') counters.motionText = (counters.motionText || 0) + 1;
+      if (translateX || translateY) counters.motionTranslatedObjects = (counters.motionTranslatedObjects || 0) + 1;
+      if (scaleX !== 1 || scaleY !== 1) counters.motionScaledObjects = (counters.motionScaledObjects || 0) + 1;
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (context.save) {
+      context.save();
+      if (translateX || translateY) context.translate(translateX, translateY);
+      if (scaleX !== 1 || scaleY !== 1) {
+        const scalePivotX = obj.x + obj.w * scaleOriginX;
+        const scalePivotY = obj.y + obj.h * scaleOriginY;
+        context.translate(scalePivotX, scalePivotY);
+        context.scale(scaleX, scaleY);
+        context.translate(-scalePivotX, -scalePivotY);
+      }
+    }
+    if (!rect) return rect;
+    // Text layout and image crops are chosen before the canvas motion transform,
+    // so map the visible destination back into the object's source coordinates.
+    const x1 = Number(rect.x1), y1 = Number(rect.y1);
+    const x2 = Number(rect.x2), y2 = Number(rect.y2);
+    if (![x1, y1, x2, y2].every(Number.isFinite)) return rect;
     const objX = Number.isFinite(obj?.x) ? obj.x : 0;
     const objY = Number.isFinite(obj?.y) ? obj.y : 0;
     const objW = Number.isFinite(obj?.w) ? obj.w : 0;
@@ -666,32 +689,12 @@
           if (onlyText && obj.type !== 'text') continue;
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
           if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) continue;
-          if (motion && context.save) {
-            const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
-            const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
-            const scaleOriginX = Number.isFinite(motion.scaleOriginX)
-              ? Math.max(0, Math.min(1, motion.scaleOriginX))
-              : 0.5;
-            const scaleOriginY = Number.isFinite(motion.scaleOriginY)
-              ? Math.max(0, Math.min(1, motion.scaleOriginY))
-              : 0.5;
-            const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
-            const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
-            context.save();
-            if (translateX || translateY) context.translate(translateX, translateY);
-            if (scaleX !== 1 || scaleY !== 1) {
-              const scalePivotX = obj.x + obj.w * scaleOriginX;
-              const scalePivotY = obj.y + obj.h * scaleOriginY;
-              context.translate(scalePivotX, scalePivotY);
-              context.scale(scaleX, scaleY);
-              context.translate(-scalePivotX, -scalePivotY);
-            }
-          }
+          const objectViewportRect = motion
+            ? applyObjectMotion(context, obj, viewportRect, motion)
+            : viewportRect;
           try {
             drawOptions.motion = motion;
-            drawOptions.viewportRect = motion
-              ? inverseObjectMotionViewportRect(obj, viewportRect, motion)
-              : viewportRect;
+            drawOptions.viewportRect = objectViewportRect;
             drawSingleObj(context, obj, drawOptions);
           } finally {
             if (motion && context.restore) context.restore();
@@ -723,36 +726,9 @@
           continue;
         }
         if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
-        if (motion) {
-          const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
-          const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
-          const scaleOriginX = Number.isFinite(motion.scaleOriginX)
-            ? Math.max(0, Math.min(1, motion.scaleOriginX))
-            : 0.5;
-          const scaleOriginY = Number.isFinite(motion.scaleOriginY)
-            ? Math.max(0, Math.min(1, motion.scaleOriginY))
-            : 0.5;
-          const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
-          const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
-          if (counters) {
-            counters.motionObjects = (counters.motionObjects || 0) + 1;
-            if (obj.type === 'image') counters.motionImages = (counters.motionImages || 0) + 1;
-            else if (obj.type === 'text') counters.motionText = (counters.motionText || 0) + 1;
-            if (translateX || translateY) counters.motionTranslatedObjects = (counters.motionTranslatedObjects || 0) + 1;
-            if (scaleX !== 1 || scaleY !== 1) counters.motionScaledObjects = (counters.motionScaledObjects || 0) + 1;
-          }
-          if (context.save) {
-            context.save();
-            if (translateX || translateY) context.translate(translateX, translateY);
-            if (scaleX !== 1 || scaleY !== 1) {
-              const scalePivotX = obj.x + obj.w * scaleOriginX;
-              const scalePivotY = obj.y + obj.h * scaleOriginY;
-              context.translate(scalePivotX, scalePivotY);
-              context.scale(scaleX, scaleY);
-              context.translate(-scalePivotX, -scalePivotY);
-            }
-          }
-        }
+        const objectViewportRect = motion
+          ? applyObjectMotion(context, obj, viewportRect, motion, counters)
+          : viewportRect;
         let drawn = false;
         const objectDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
         const before = counters ? {
@@ -799,9 +775,7 @@
         } : null;
         try {
           drawOptions.motion = motion;
-          drawOptions.viewportRect = motion
-            ? inverseObjectMotionViewportRect(obj, viewportRect, motion)
-            : viewportRect;
+          drawOptions.viewportRect = objectViewportRect;
           drawn = drawSingleObj(context, obj, counters, drawOptions);
         } finally {
           if (motion && context.restore) context.restore();

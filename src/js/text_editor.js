@@ -788,26 +788,24 @@ const textEditScriptRangesAreBraced = (content, ranges = []) => {
   return true;
 };
 
-const normalizeTextObjectScriptRangesForEdit = (obj, content) => {
-  if (!obj || obj.type !== 'text' || !Array.isArray(obj.data?.scriptRanges)) return false;
-  const beforeScriptRanges = obj.data.scriptRanges || [];
-  const beforeKey = textEditScriptRangesKey(beforeScriptRanges);
-  if (textEditHasCurrentScriptRangeCache(obj, content, beforeKey)) return false;
-  const scriptRanges = normalizeTextScriptRangesForContent(content, beforeScriptRanges);
-  if (scriptRanges.length) obj.data.scriptRanges = scriptRanges;
-  else delete obj.data.scriptRanges;
-  return !textEditScriptRangesEqual(beforeScriptRanges, obj.data.scriptRanges || []);
-};
-
 const normalizeTextObjectToEditableScriptBraces = (obj) => {
   if (!obj || obj.type !== 'text') return false;
   const current = normalizeTextContent(obj.data?.content || '');
-  const sourceRanges = Array.isArray(obj.data?.scriptRanges) ? obj.data.scriptRanges : [];
-  const sourceKey = textEditScriptRangesKey(sourceRanges);
+  const sourceIsArray = Array.isArray(obj.data?.scriptRanges);
+  let sourceRanges = sourceIsArray ? obj.data.scriptRanges : [];
+  let sourceKey = textEditScriptRangesKey(sourceRanges);
+  let sourceCacheCurrent = textEditHasCurrentScriptRangeCache(obj, current, sourceKey);
+  if (sourceIsArray && !sourceCacheCurrent) {
+    sourceRanges = normalizeTextScriptRangesForContent(current, sourceRanges);
+    if (sourceRanges.length) obj.data.scriptRanges = sourceRanges;
+    else delete obj.data.scriptRanges;
+    sourceKey = textEditScriptRangesKey(sourceRanges);
+    sourceCacheCurrent = textEditHasCurrentScriptRangeCache(obj, current, sourceKey);
+  }
   if (!sourceRanges.length && !/[\^_]/.test(current)) return false;
   if (
     sourceRanges.length &&
-    textEditHasCurrentScriptRangeCache(obj, current, sourceKey) &&
+    sourceCacheCurrent &&
     textEditScriptRangesAreBraced(current, sourceRanges)
   ) {
     return false;
@@ -1960,8 +1958,6 @@ const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSel
         ...selection,
       },
     });
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, false, 'copy-text-selection');
-    else scheduleRender(true, false);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     logStep('copy:text-selection-feedback-done', textStats);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -2600,7 +2596,6 @@ function enterEdit(id, {
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   let contentNormalized = false;
-  let scriptRangesNormalized = false;
   let bracesNormalized = false;
   let lineAlignNormalized = false;
   if (normalizeForEdit !== false) {
@@ -2611,7 +2606,6 @@ function enterEdit(id, {
       markDirty(obj.id);
       contentNormalized = true;
     }
-    scriptRangesNormalized = normalizeTextObjectScriptRangesForEdit(obj, obj.data.content);
     bracesNormalized = normalizeTextObjectToEditableScriptBraces(obj);
     if (bracesNormalized) {
       markDirty(obj.id);
@@ -2629,7 +2623,6 @@ function enterEdit(id, {
   logStep('enter-normalize', {
     skipped: normalizeForEdit === false,
     contentNormalized,
-    scriptRangesNormalized,
     bracesNormalized,
     lineAlignNormalized,
   });

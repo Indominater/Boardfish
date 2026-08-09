@@ -385,8 +385,6 @@ const copyTextEditSelection = async () => {
         ...selection,
       },
     });
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, false, 'copy-text-selection');
-    else scheduleRender(true, false);
   }
   await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
     allowEmpty: !!selectedText,
