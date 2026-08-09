@@ -113,16 +113,15 @@
   }
 
   function inverseObjectMotionViewportRect(obj, rect, motion) {
-    if (!rect || !motion || motion.skip) return rect;
+    if (!rect || !motion) return rect;
     // Text layout and image crops are chosen before the canvas motion transform,
     // so map the visible destination back into the object's source coordinates.
     const x1 = Number(rect.x1), y1 = Number(rect.y1);
     const x2 = Number(rect.x2), y2 = Number(rect.y2);
     if (![x1, y1, x2, y2].every(Number.isFinite)) return rect;
 
-    const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
-    const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
-    const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+    const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
+    const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
     const scaleOriginX = Number.isFinite(motion.scaleOriginX)
       ? Math.max(0, Math.min(1, motion.scaleOriginX))
       : 0.5;
@@ -645,6 +644,10 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , options = {}
     ) {
+      const objectMotionForDraw = (
+        typeof deps.objectMotionForDraw === 'function' &&
+        (typeof deps.hasObjectMotionsForDraw !== 'function' || deps.hasObjectMotionsForDraw())
+      ) ? deps.objectMotionForDraw : null;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         const skipId = options.skipId || null;
         const skipIds = options.skipIds && typeof options.skipIds.has === 'function'
@@ -655,8 +658,6 @@
         const imageSourceResolver = options.imageSourceResolver || null;
         const skipText = options.skipText === true;
         const onlyText = options.onlyText === true;
-        const motionObjects = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw() : undefined;
-        const objectMotionForDraw = motionObjects === null || typeof deps.objectMotionForDraw !== 'function' ? null : deps.objectMotionForDraw;
         const cullingEnabled = deps.viewportCullingEnabled();
         const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
         const drawObject = (obj) => {
@@ -665,12 +666,9 @@
           if (onlyText && obj.type !== 'text') return;
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
           if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) return;
-          if (motion?.skip) return;
           if (motion && context.save) {
-            const opacity = Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
-            const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
-            const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
-            const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+            const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
+            const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
             const scaleOriginX = Number.isFinite(motion.scaleOriginX)
               ? Math.max(0, Math.min(1, motion.scaleOriginX))
               : 0.5;
@@ -680,7 +678,6 @@
             const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
             const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
             context.save();
-            context.globalAlpha = opacity;
             if (translateX || translateY) context.translate(translateX, translateY);
             if (scaleX !== 1 || scaleY !== 1) {
               const scalePivotX = obj.x + obj.w * scaleOriginX;
@@ -702,7 +699,6 @@
         };
 
         for (const obj of deps.objects()) drawObject(obj);
-        for (const obj of motionObjects || []) drawObject(obj);
         return;
       } else {
       const skipId = options.skipId || null;
@@ -714,8 +710,6 @@
       const imageSourceResolver = options.imageSourceResolver || null;
       const skipText = options.skipText === true;
       const onlyText = options.onlyText === true;
-      const motionObjects = typeof deps.motionObjectsForDraw === 'function' ? deps.motionObjectsForDraw() : undefined;
-      const objectMotionForDraw = motionObjects === null || typeof deps.objectMotionForDraw !== 'function' ? null : deps.objectMotionForDraw;
       const cullingEnabled = deps.viewportCullingEnabled();
       const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
       let drawnImages = 0;
@@ -731,12 +725,9 @@
           return;
         }
         if (countObject && counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
-        if (motion?.skip) return;
         if (motion) {
-          const opacity = Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
-          const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
-          const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
-          const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+          const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
+          const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
           const scaleOriginX = Number.isFinite(motion.scaleOriginX)
             ? Math.max(0, Math.min(1, motion.scaleOriginX))
             : 0.5;
@@ -754,7 +745,6 @@
           }
           if (context.save) {
             context.save();
-            context.globalAlpha = opacity;
             if (translateX || translateY) context.translate(translateX, translateY);
             if (scaleX !== 1 || scaleY !== 1) {
               const scalePivotX = obj.x + obj.w * scaleOriginX;
@@ -827,9 +817,6 @@
 
       for (const obj of deps.objects()) {
         drawObject(obj, true);
-      }
-      for (const obj of motionObjects || []) {
-        drawObject(obj, false);
       }
       return { drawnImages, drawnText };
       }

@@ -1954,7 +1954,7 @@ const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSel
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
   if (editingId === id && _editEl === proxy) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
+    globalThis.BoardfishMotion?.applyCopyFeedback?.({
       textSelection: {
         id,
         ...selection,
@@ -2898,8 +2898,6 @@ function enterEdit(id, {
 	    }));
     pendingInputState = null;
     proxy._boardfishPendingInputState = null;
-	    markDirty(id);
-	    logInputStep('motion-dirty-done');
 	    const oldValue = inputState.value ?? obj.data.content ?? '';
 	    let replacement = inputState.replacement || null;
 	    let synthesizedStaleReplacement = false;
@@ -2935,6 +2933,8 @@ function enterEdit(id, {
       ...textEditorTextStats(replacement.insertedText, inputState.insertedScriptRanges),
     }));
 	    obj.data.content = nextRawValue;
+	    markDirty(id);
+	    logInputStep('motion-dirty-done');
 	    if (proxy._boardfishDomValueStale) {
 	      if (synthesizedStaleReplacement) {
 	        const caret = Math.max(0, Math.min(

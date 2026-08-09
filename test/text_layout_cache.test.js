@@ -692,11 +692,16 @@ test('cloned text runtime caches preserve cached minimum width', () => {
   const layout = textLayout.getTextLayout(source);
   const metrics = layout[0]._scriptMetrics = {};
   layout[0]._textDrawPlanCache = {};
+  source._textWrappedLineIndexCacheContent = source.data.content;
+  source._textWrappedLineIndexCacheW = source.w;
+  source._textWrappedLineIndexCacheScriptKey = '[]';
+  source._textWrappedLineIndexCache = { lineCount: 2, entries: [{ start: 0, end: 10 }] };
   const prefixCacheSize = textLayout.prefixCacheSize;
 
   textLayout.cloneTextObjectRuntimeCaches(source, target);
 
-  assert.deepEqual(plain(target._textMinWidthWordSegmentCache), plain(source._textMinWidthWordSegmentCache));
+  assert.equal(target._textMinWidthWordSegmentCache, source._textMinWidthWordSegmentCache);
+  assert.equal(target._textWrappedLineIndexCache, source._textWrappedLineIndexCache);
   assert.equal(target._layoutCache[0]._scriptMetrics, metrics);
   assert.equal('_textDrawPlanCache' in target._layoutCache[0], false);
   assert.equal(textLayout.getTextMinWidth(target), width);

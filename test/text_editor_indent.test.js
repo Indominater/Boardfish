@@ -56,7 +56,7 @@ function loadTextScriptEditorHelpers() {
     animations: [],
     _caretVisible: false,
     BoardfishMotion: {
-      applyActionAnimation(action) { context.animations.push(action); },
+      applyCopyFeedback(payload) { context.animations.push(payload); },
     },
     shouldCommitTextEditInputImmediately() { return false; },
     flushEditHistoryCheckpoint() { context.flushedHistory = true; return false; },
@@ -174,7 +174,7 @@ function loadExitEditHarness() {
       },
     },
     BoardfishMotion: {
-      applyActionAnimation(action) { context.animations.push(action); },
+      applyCopyFeedback(payload) { context.animations.push(payload); },
     },
     BoardfishEditorState: {
       removeObjectsById() {},
@@ -302,7 +302,7 @@ function loadLiveTextEditResizeHarness() {
       getSelection() { return { removeAllRanges() {} }; },
     },
     BoardfishMotion: {
-      applyActionAnimation(action) { context.animations.push(action); },
+      applyCopyFeedback(payload) { context.animations.push(payload); },
     },
     BoardfishEditorState: {
       removeObjectsById() {},

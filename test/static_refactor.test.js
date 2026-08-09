@@ -170,14 +170,12 @@ test('clipboard and debug tooling use browser clipboard paths', () => {
   assert.doesNotMatch(startupDebug, /writeDebugLogFile/);
 });
 
-test('motion policy is copy-only and browser find stays native', () => {
+test('motion API is specialized to copy feedback and browser find stays native', () => {
   const motion = readSource('src/js/motion.js');
   const keyboard = readSource('src/js/keyboard.js');
 
-  assert.match(motion, /COPY_JIGGLE_ACTIONS/);
-  assert.match(motion, /'copy-selected-objects'/);
-  assert.match(motion, /'copy-text-object'/);
-  assert.match(motion, /'copy-text-selection'/);
+  assert.match(motion, /const applyCopyFeedback =/);
+  assert.doesNotMatch(motion, /applyActionAnimation|COPY_JIGGLE_ACTIONS/);
   assert.doesNotMatch(motion, /browser-find-shortcut/);
   assert.doesNotMatch(motion, /appWindow/);
   assert.doesNotMatch(motion, new RegExp('app-' + 'window'));
@@ -317,7 +315,7 @@ test('background open hydration yields while viewport input is active', () => {
   assert.match(source, /batchSize = 2/);
   assert.match(source, /performance\.now\(\) - lastViewportInputAt/);
   assert.match(source, /inputIdleMs < BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS/);
-  assert.match(source, /\.\.\.truthyKeyList\(priorityKeys\)[\s\S]*\.\.\.getPendingHydratableImageKeys\(\)/);
+  assert.match(source, /\.\.\.priorityKeys[\s\S]*\.\.\.getPendingHydratableImageKeys\(\)/);
   assert.match(source, /BoardfishImageStore\.hasDisplayImage\(key\)/);
   assert.doesNotMatch(source, /getPendingHydratableImageKeys\(batchSize - keys\.length/);
   assert.match(source, /await new Promise\(\(resolve\) => setTimeout/);

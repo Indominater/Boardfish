@@ -483,12 +483,6 @@ function clearTextObjectLayoutRuntime(obj, options = {}) {
 
 const cloneTextLayoutRuntimeLine = ({ _textDrawPlanCache, ...clone }) => clone;
 
-const cloneTextWrappedLineIndexEntries = (entries = []) => {
-  const out = new Array(entries.length);
-  for (let i = 0; i < entries.length; i++) out[i] = { ...entries[i] };
-  return out;
-};
-
 const cloneTextLayoutRuntimeLines = (lines = []) => {
   const out = new Array(lines.length);
   for (let i = 0; i < lines.length; i++) out[i] = cloneTextLayoutRuntimeLine(lines[i]);
@@ -563,7 +557,7 @@ function cloneTextObjectRuntimeCaches(source, target) {
     source._textMinWidthWordSegmentCacheContent === content &&
     typeof source._textMinWidthWordSegmentCacheScriptKey === 'string'
   ) {
-    target._textMinWidthWordSegmentCache = { ...source._textMinWidthWordSegmentCache };
+    target._textMinWidthWordSegmentCache = source._textMinWidthWordSegmentCache;
     target._textMinWidthWordSegmentCacheContent = source._textMinWidthWordSegmentCacheContent;
     target._textMinWidthWordSegmentCacheScriptKey = source._textMinWidthWordSegmentCacheScriptKey;
   }
@@ -601,10 +595,7 @@ function cloneTextObjectRuntimeCaches(source, target) {
     target._textWrappedLineIndexCacheContent = source._textWrappedLineIndexCacheContent;
     target._textWrappedLineIndexCacheW = source._textWrappedLineIndexCacheW;
     target._textWrappedLineIndexCacheScriptKey = source._textWrappedLineIndexCacheScriptKey;
-    target._textWrappedLineIndexCache = {
-      lineCount: source._textWrappedLineIndexCache.lineCount,
-      entries: cloneTextWrappedLineIndexEntries(source._textWrappedLineIndexCache.entries),
-    };
+    target._textWrappedLineIndexCache = source._textWrappedLineIndexCache;
   }
 
   if (

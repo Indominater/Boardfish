@@ -379,7 +379,7 @@ const copyTextEditSelection = async () => {
   const value = _editEl && typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl?.value ?? '');
   const selectedText = selection?.hasSelection && _editEl ? value.slice(selection.start, selection.end) : '';
   if (selectedText) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-selection', {
+    globalThis.BoardfishMotion?.applyCopyFeedback?.({
       textSelection: {
         id: editingId,
         ...selection,

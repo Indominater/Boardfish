@@ -51,7 +51,7 @@ function addText(wx, wy, content = '', options = {}) {
     logStep('object-limit-denied');
     return;
   }
-  content = textForTextObjectPaste(content);
+  if (!options.contentPrepared) content = textForTextObjectPaste(content);
   logStep('trim-done', () => objectCommandTextStats(content));
   let sourceRanges = Array.isArray(options?.scriptRanges) ? options.scriptRanges : [];
   logStep('script-ranges-derived', () => objectCommandTextStats(content, sourceRanges));

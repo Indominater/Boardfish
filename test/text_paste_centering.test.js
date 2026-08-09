@@ -220,6 +220,14 @@ test('addText strips whitespace-only lines at pasted text edges', () => {
   assert.deepEqual(context.editedIds, []);
 });
 
+test('addText preserves content that the external-paste path already prepared', () => {
+  const context = loadAddTextHarness();
+
+  context.addText(24, 48, '  prepared  ', { contentPrepared: true });
+
+  assert.equal(context.added[0].data.content, '  prepared  ');
+});
+
 test('addText with pasted content stays in select mode by default', () => {
   const context = loadAddTextHarness();
 
@@ -255,7 +263,7 @@ test('outside clipboard text is pasted at the same center point as canvas object
     wx: 640,
     wy: 360,
     content: 'outside text',
-    options: { anchor: 'center' },
+    options: { anchor: 'center', contentPrepared: true },
   }]);
 });
 
@@ -277,7 +285,7 @@ test('browser clipboard text paste stays in select mode for the new text box', a
     wx: 640,
     wy: 360,
     content: 'browser text',
-    options: { anchor: 'center' },
+    options: { anchor: 'center', contentPrepared: true },
   }]);
 });
 

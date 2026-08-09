@@ -538,24 +538,6 @@ async function hydrateImageKeysWithLimit(keys
   return anyHydrated;
 }
 
-function truthyKeySet(keys) {
-  const set = new Set();
-  if (!Array.isArray(keys)) return set;
-  for (const key of keys) {
-    if (key) set.add(key);
-  }
-  return set;
-}
-
-function truthyKeyList(keys) {
-  const list = [];
-  if (!Array.isArray(keys)) return list;
-  for (const key of keys) {
-    if (key) list.push(key);
-  }
-  return list;
-}
-
 function getVisibleImagePreviewTasks() {
   const rect = getVisibleWorldBounds();
   const tasksByKey = new Map();
@@ -579,7 +561,7 @@ async function buildVisibleImagePreviewsForOpen(keys
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
-  const pendingKeys = truthyKeySet(keys);
+  const pendingKeys = new Set(keys);
   const tasks = getVisibleImagePreviewTasks();
   const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
   const concurrency = Math.max(1, Math.min(8, tasks.length || 1));
@@ -708,7 +690,7 @@ async function settleVisibleImageBitmapsForOpen(keys
   , dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
-  const visibleKeys = truthyKeyList(keys);
+  const visibleKeys = keys;
   const count = visibleKeys.length;
   let state = countVisibleImageBitmapSettle(visibleKeys);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -849,7 +831,7 @@ async function hydrateRemainingImagesForOpen(
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   try {
     const hydrationKeys = [...new Set([
-      ...truthyKeyList(priorityKeys),
+      ...priorityKeys,
       ...getPendingHydratableImageKeys(),
     ])];
     let hydrationIndex = 0;

@@ -151,16 +151,13 @@ function loadSelectionInputHarness(objects, options = {}) {
       context.historyOptions.push(historyOptions);
     },
     BoardfishMotion: {
-      applyActionAnimation(_action, payload = {}, options = {}) {
+      applyCopyFeedback(payload = {}) {
         if (!payload.selection) return false;
-        context.motionPulses.push({ ...(payload.options || {}), ...options });
+        context.motionPulses.push({});
         return true;
       },
       getLastDrawnObjectMotion(obj) {
         return options.objectMotions?.get(obj?.id) || null;
-      },
-      pulseSelection(options = {}) {
-        context.motionPulses.push(options);
       },
     },
   };
@@ -884,7 +881,6 @@ test('save flushes a pending text edit checkpoint into the saved baseline', () =
   assert.equal(context.flushEditHistoryCheckpoint(), true);
   assert.equal(context._editHistoryTimer, null);
   assert.equal(context._editHistoryLastContent, 'after');
-  assert.deepEqual(context.dirty, [text.id]);
   assert.deepEqual(context.history, ['text-edit-checkpoint']);
 });
 

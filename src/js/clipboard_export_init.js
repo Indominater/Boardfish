@@ -68,7 +68,7 @@ const readWebClipboardTokenForPaste = async (clipboardData
 const noteTextObjectCopyFeedback = (obj) => {
   if (obj?.type !== 'text') return false;
   if (!String(obj.data?.content ?? '')) return false;
-  globalThis.BoardfishMotion?.applyActionAnimation?.('copy-text-object', {
+  globalThis.BoardfishMotion?.applyCopyFeedback?.({
     objects: [obj],
   });
   scheduleRender(true, true
@@ -354,7 +354,7 @@ const copySelected = (options = {}) => {
       });
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (animateCopy) globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { selection: true });
+    if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ selection: true });
     return true;
   }
 
@@ -366,7 +366,7 @@ const copySelected = (options = {}) => {
     return false;
   }
   if (animateCopy && obj.type === 'text' && !noteTextObjectCopyFeedback(obj)) {
-    globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { objects: [obj] });
+    globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -544,7 +544,7 @@ const copySelected = (options = {}) => {
         if (collectClipboardDiagnostics) ClipDebug.end(dbg, writeMeta);
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if (copied && animateCopy) {
-          globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { objects: [obj] });
+          globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
         }
       }
     };
@@ -602,7 +602,7 @@ const copySelected = (options = {}) => {
     ClipDebug.end(dbg, { path: 'object-jsClipboard', type: obj.type || '' });
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (animateCopy) globalThis.BoardfishMotion?.applyActionAnimation?.('copy-selected-objects', { objects: [obj] });
+  if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
   return true;
 };
 
@@ -884,9 +884,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (eventText && eventText.trim()) {
-      const text = typeof textForExternalTextObjectPaste === 'function'
-        ? textForExternalTextObjectPaste(eventText)
-        : eventText;
+      const text = textForExternalTextObjectPaste(eventText);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const objectCountBefore = collectClipboardDiagnostics ? objects.length : 0;
       const addStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
@@ -900,9 +898,9 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       addText(wx, wy, text,
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        dbg ? { anchor: 'center', debug: dbg } :
+        dbg ? { anchor: 'center', contentPrepared: true, debug: dbg } :
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        { anchor: 'center' }
+        { anchor: 'center', contentPrepared: true }
       );
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectClipboardDiagnostics) {
@@ -955,10 +953,8 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         });
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      const text = typeof textForExternalTextObjectPaste === 'function'
-        ? textForExternalTextObjectPaste(browserText)
-        : browserText;
-      if (text && text.trim()) {
+      const text = textForExternalTextObjectPaste(browserText);
+      if (text) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const objectCountBefore = collectClipboardDiagnostics ? objects.length : 0;
         const addStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
@@ -972,9 +968,9 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         addText(wx, wy, text,
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          dbg ? { anchor: 'center', debug: dbg } :
+          dbg ? { anchor: 'center', contentPrepared: true, debug: dbg } :
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          { anchor: 'center' }
+          { anchor: 'center', contentPrepared: true }
         );
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (collectClipboardDiagnostics) {
@@ -994,7 +990,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         ClipDebug.end(dbg, {
           path: 'web-text',
           textLen: text?.length || 0,
-          textObjectCount: text && text.trim() ? 1 : 0,
+          textObjectCount: text ? 1 : 0,
           textCharCount: text?.length || 0,
           largestTextChars: text?.length || 0,
           objectCountAfter: objects.length,

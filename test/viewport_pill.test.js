@@ -89,7 +89,6 @@ function loadViewportPillHarness() {
   const source = fs.readFileSync(path.join(root, 'src', 'js', 'viewport.js'), 'utf8');
   const prefixEnd = source.indexOf('var _offscreen = document.createElement');
   assert.ok(prefixEnd > 0, 'viewport pill bootstrap section is missing');
-  const motionCalls = [];
   const openingShield = createElement('opening-shield');
   openingShield.classList.add('active', 'opening-freeze');
   const island = createElement('island');
@@ -112,13 +111,6 @@ function loadViewportPillHarness() {
     PillDebug: {
       log() {},
     },
-    BoardfishMotion: {
-      applyActionAnimation(_action, payload = {}) {
-        if (payload.pill) motionCalls.push(islZoom.textContent);
-        return !!payload.pill;
-      },
-    },
-    motionCalls,
   };
 
   vm.createContext(context);
@@ -131,7 +123,6 @@ function loadViewportPillHarness() {
     context,
     { filename: 'viewport.js' },
   );
-  motionCalls.length = 0;
   return context;
 }
 
@@ -276,35 +267,27 @@ test('opening shield pill text mirrors the zoom pill visual motion surface', () 
   assert.match(styles, /\.opening-shield-pill-text\s*\{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);/);
 });
 
-test('pill messages update without dispatching inert animation policy', () => {
+test('pill messages update without redundant text writes', () => {
   const context = loadViewportPillHarness();
 
   context.showIslandMsg('Saved');
-  assert.deepEqual(context.motionCalls, []);
   assert.equal(context.islZoom.textContent, 'Saved');
   assert.equal(context.island.dataset.mode, 'message');
   assert.equal(context.island.title, '');
 
-  context.motionCalls.length = 0;
   context.showIslandMsg('Saved');
-  assert.deepEqual(context.motionCalls, []);
 
   context.showIslandMsg('Copied');
-  assert.deepEqual(context.motionCalls, []);
   assert.equal(context.islZoom.textContent, 'Copied');
 });
 
-test('busy pill progress updates without dispatching inert animation policy', () => {
+test('busy pill progress updates in place', () => {
   const context = loadViewportPillHarness();
   const busyPill = context.startPillTask({ message: '0/2', progress: true });
-  assert.deepEqual(context.motionCalls, []);
 
-  context.motionCalls.length = 0;
   context.updatePillTask(busyPill, '0/2');
-  assert.deepEqual(context.motionCalls, []);
 
   context.updatePillTask(busyPill, '1/2');
-  assert.deepEqual(context.motionCalls, []);
 
   const openingPill = context.openingShield.querySelector('.opening-shield-pill');
   assert.equal(openingPill.firstElementChild.textContent, '1/2');
@@ -320,13 +303,11 @@ test('zoom pill sync skips unchanged text writes', () => {
   const writesAfterInit = context.islZoom.textContentWriteCount();
   context.syncIslandZoomDisplay('same-zoom');
   assert.equal(context.islZoom.textContentWriteCount(), writesAfterInit);
-  assert.deepEqual(context.motionCalls, []);
 
   context.zoom = 2;
   context.syncIslandZoomDisplay('zoom-changed');
   assert.equal(context.islZoom.textContent, '200%');
   assert.equal(context.islZoom.textContentWriteCount(), writesAfterInit + 1);
-  assert.deepEqual(context.motionCalls, []);
 });
 
 test('automatic board refreshes sync active overlays while explicit false opts out', () => {

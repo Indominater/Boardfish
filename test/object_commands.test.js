@@ -45,9 +45,6 @@ function loadDuplicateHarness() {
         context.selectedIds = new Set(ids);
       },
     },
-    BoardfishMotion: {
-      applyActionAnimation() {},
-    },
     cloneObject(obj) {
       return JSON.parse(JSON.stringify(obj));
     },

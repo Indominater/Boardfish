@@ -998,7 +998,6 @@ function pushEditHistoryIfChanged(id) {
   if (!obj) return false;
   if (_editHistoryLastContent === null) _editHistoryLastContent = obj.data.content;
   if (obj.data.content === _editHistoryLastContent) return false;
-  markDirty(id);
   const beforeEditState = consumeTextEditHistoryActionStartState(id);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logTextEditHistoryDebug('history-push', id, null, beforeEditState, {

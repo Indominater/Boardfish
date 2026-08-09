@@ -2,54 +2,24 @@
 
 (() => {
   const root = typeof globalThis !== 'undefined' ? globalThis : window;
-  const jelloObjectMotions = new Map();
-  const textSelectionJelloMotions = new Map();
+  const objectMotions = new Map();
+  const textSelectionMotions = new Map();
   // Keep the sampled transform until the renderer samples this object again;
   // async motion cleanup must not move DOM outlines ahead of canvas pixels.
   const lastDrawnObjectMotions = new Map();
+  const EMPTY_SPECS = Object.freeze([]);
+  const DURATION_MS = 500;
+  const CARRY_DURATION_MS = 180;
+  const RETRIGGER_MIN_INTERVAL_MS = 48;
+  const NORMALIZE_X = 1.4635663223528887;
+  const NORMALIZE_Y = 1.3800858435981482;
+  const NORMALIZE_SHAPE = 1.6076214313650838;
   let motionRenderPending = false;
+  let reducedMotionQuery;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let motionRenderRequestedAt = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const jelloDefaults = Object.freeze({
-    amplitude: 0.062,
-    duration: 520,
-    oscillations: 6.5,
-    rebound: 0.22,
-    squish: 0.68,
-    staggerMs: 18,
-  });
-  const copyJiggleDefaults = Object.freeze({
-    duration: 500,
-    translateXPx: 5.0,
-    translateYPx: 10.75,
-    yFreqHz: 3.55,
-    xFreqHz: 4.65,
-    yDamping: 0.24,
-    xDamping: 0.34,
-    yLagMs: 16,
-    attackMs: 44,
-    settleStart: 0.84,
-    sagGain: 0.08,
-    sagDecay: 3.2,
-    lateralCoupling: 0.16,
-    deformation: 0.028,
-    deformationLagMs: 28,
-    deformationFreqHz: 3.15,
-    deformationDamping: 0.32,
-    scaleOriginX: 0.5,
-    scaleOriginY: 0.12,
-    carryDurationMs: 180,
-    normalizePath: true,
-  });
-  const JIGGLE_RETRIGGER_MIN_INTERVAL_MS = 48;
-  const COPY_JIGGLE_ACTIONS = new Set([
-    'copy-selected-objects',
-    'copy-text-object',
-    'copy-text-selection',
-  ]);
-  let jelloParams = null;
-  let reducedMotionQuery;
+
   const prefersReducedMotion = () => {
     if (reducedMotionQuery === undefined) {
       try {
@@ -60,76 +30,33 @@
     }
     return !!reducedMotionQuery?.matches;
   };
-
   const now = () => root.performance?.now ? root.performance.now() : Date.now();
-
   const clamp01 = (value) => Math.max(0, Math.min(1, value));
   const smootherstep = (value) => {
     const t = clamp01(value);
     return t * t * t * (t * (t * 6 - 15) + 10);
   };
-  const numberInRange = (value, fallback, min, max) => {
-    if (value == null || value === '') return fallback;
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return fallback;
-    return Math.max(min, Math.min(max, numeric));
-  };
-  const normalizeJelloParams = (options = {}, base = jelloDefaults) => ({
-    amplitude: numberInRange(options.amplitude, base.amplitude, 0, 0.24),
-    duration: numberInRange(options.duration, base.duration, 180, 1200),
-    oscillations: numberInRange(options.oscillations, base.oscillations, 1, 16),
-    rebound: numberInRange(options.rebound, base.rebound, 0, 0.8),
-    squish: numberInRange(options.squish, base.squish, 0, 1.4),
-    staggerMs: numberInRange(options.staggerMs, base.staggerMs, 0, 240),
-  });
-  const normalizeCopyJiggleParams = (options = {}, base = copyJiggleDefaults) => ({
-    duration: numberInRange(options.duration, base.duration, 180, 1200),
-    translateXPx: numberInRange(options.translateXPx, base.translateXPx, 0, 48),
-    translateYPx: numberInRange(options.translateYPx, base.translateYPx, 0, 48),
-    yFreqHz: numberInRange(options.yFreqHz, base.yFreqHz, 0.1, 12),
-    xFreqHz: numberInRange(options.xFreqHz, base.xFreqHz, 0.1, 12),
-    yDamping: numberInRange(options.yDamping, base.yDamping, 0.001, 0.999),
-    xDamping: numberInRange(options.xDamping, base.xDamping, 0.001, 0.999),
-    yLagMs: numberInRange(options.yLagMs, base.yLagMs, 0, 160),
-    attackMs: numberInRange(options.attackMs, base.attackMs, 0, 240),
-    settleStart: numberInRange(options.settleStart, base.settleStart, 0, 0.99),
-    sagGain: numberInRange(options.sagGain, base.sagGain, -1, 1),
-    sagDecay: numberInRange(options.sagDecay, base.sagDecay, 0, 12),
-    lateralCoupling: numberInRange(options.lateralCoupling, base.lateralCoupling, -1, 1),
-    deformation: numberInRange(options.deformation, base.deformation, 0, 0.12),
-    deformationLagMs: numberInRange(options.deformationLagMs, base.deformationLagMs, 0, 180),
-    deformationFreqHz: numberInRange(options.deformationFreqHz, base.deformationFreqHz, 0.1, 12),
-    deformationDamping: numberInRange(options.deformationDamping, base.deformationDamping, 0.001, 0.999),
-    scaleOriginX: numberInRange(options.scaleOriginX, base.scaleOriginX, 0, 1),
-    scaleOriginY: numberInRange(options.scaleOriginY, base.scaleOriginY, 0, 1),
-    carryDurationMs: numberInRange(options.carryDurationMs, base.carryDurationMs, 80, 320),
-    normalizePath: options.normalizePath == null ? base.normalizePath : options.normalizePath !== false,
-  });
-  const copyJiggleParamKey = (p) => `${p.duration}|${p.yFreqHz}|${p.xFreqHz}|${p.yDamping}|${p.xDamping}|${p.yLagMs}|${p.attackMs}|${p.settleStart}|${p.sagGain}|${p.sagDecay}|${p.lateralCoupling}|${p.deformation}|${p.deformationLagMs}|${p.deformationFreqHz}|${p.deformationDamping}|${p.normalizePath ? 1 : 0}`;
-  const copyJiggleNormalizerCache = new Map([[copyJiggleParamKey(copyJiggleDefaults), Object.freeze({ x: 1.4635663223528887, y: 1.3800858435981482, shape: 1.6076214313650838 })]]);
-  const dampedSpringImpulse = (timeSec, freqHz, dampingRatio) => {
-    const zeta = numberInRange(dampingRatio, 0.5, 0.001, 0.999);
+  const springImpulse = (timeSec, freqHz, dampingRatio) => {
     const omega0 = 2 * Math.PI * freqHz;
-    const omegaD = omega0 * Math.sqrt(1 - zeta * zeta);
-    return Math.exp(-zeta * omega0 * timeSec) * Math.sin(omegaD * timeSec);
+    const omegaD = omega0 * Math.sqrt(1 - dampingRatio * dampingRatio);
+    return Math.exp(-dampingRatio * omega0 * timeSec) * Math.sin(omegaD * timeSec);
   };
-  const copyJiggleUnit = (t, p) => {
-    const durationSec = p.duration / 1000;
-    const timeSec = t * durationSec;
-    const attackSec = Math.max(0.001, p.attackMs / 1000);
+
+  const jiggleUnit = (t) => {
+    const timeSec = t * (DURATION_MS / 1000);
+    const attackSec = Math.max(0.001, 44 / 1000);
     const xAttack = smootherstep(timeSec / attackSec);
-    const settle = 1 - smootherstep((t - p.settleStart) / Math.max(0.001, 1 - p.settleStart));
-    const yTimeSec = timeSec - p.yLagMs / 1000;
+    const settle = 1 - smootherstep((t - 0.84) / Math.max(0.001, 1 - 0.84));
+    const yTimeSec = timeSec - 16 / 1000;
     const yAttack = yTimeSec > 0 ? smootherstep(yTimeSec / attackSec) : 0;
-    const xBase = dampedSpringImpulse(timeSec, p.xFreqHz, p.xDamping);
-    const yBase = yTimeSec > 0 ? dampedSpringImpulse(yTimeSec, p.yFreqHz, p.yDamping) : 0;
+    const xBase = springImpulse(timeSec, 4.65, 0.34);
+    const yBase = yTimeSec > 0 ? springImpulse(yTimeSec, 3.55, 0.24) : 0;
     const coupledX = (
-      (yTimeSec > 0 ? dampedSpringImpulse(yTimeSec, p.yFreqHz * 1.32, p.yDamping + 0.08) : 0)
-      * p.lateralCoupling
+      (yTimeSec > 0 ? springImpulse(yTimeSec, 3.55 * 1.32, 0.24 + 0.08) : 0) * 0.16
     );
-    const sagRise = Math.max(p.sagDecay + 6, p.sagDecay * 3.5);
+    const sagRise = Math.max(3.2 + 6, 3.2 * 3.5);
     const sag = yTimeSec > 0
-      ? (Math.exp(-p.sagDecay * yTimeSec) - Math.exp(-sagRise * yTimeSec)) * p.sagGain
+      ? (Math.exp(-3.2 * yTimeSec) - Math.exp(-sagRise * yTimeSec)) * 0.08
       : 0;
     return {
       x: (xBase * xAttack + coupledX * yAttack) * settle,
@@ -137,83 +64,23 @@
     };
   };
 
-  const copyJiggleShapeUnit = (t, p) => {
-    if (!p.deformation) return 0;
-    const durationSec = p.duration / 1000;
-    const timeSec = t * durationSec;
-    const shapeTimeSec = timeSec - (p.yLagMs + p.deformationLagMs) / 1000;
+  const jiggleShapeUnit = (t) => {
+    const timeSec = t * (DURATION_MS / 1000);
+    const shapeTimeSec = timeSec - (16 + 28) / 1000;
     if (shapeTimeSec <= 0) return 0;
-    const attack = smootherstep(shapeTimeSec / Math.max(0.001, p.attackMs / 1000));
-    const settle = 1 - smootherstep((t - p.settleStart) / Math.max(0.001, 1 - p.settleStart));
-    return dampedSpringImpulse(
-      shapeTimeSec,
-      p.deformationFreqHz,
-      p.deformationDamping,
-    ) * attack * settle;
-  };
-  const getCopyJiggleNormalizer = (p) => {
-    if (!p.normalizePath) return { x: 1, y: 1, shape: 1 };
-    const key = copyJiggleParamKey(p);
-    const cached = copyJiggleNormalizerCache.get(key);
-    if (cached) return cached;
-    let maxX = 0.0001;
-    let maxY = 0.0001;
-    let maxShape = 0.0001;
-    const samples = 192;
-    for (let i = 0; i <= samples; i += 1) {
-      const point = copyJiggleUnit(i / samples, p);
-      maxX = Math.max(maxX, Math.abs(point.x));
-      maxY = Math.max(maxY, Math.abs(point.y));
-      maxShape = Math.max(maxShape, Math.abs(copyJiggleShapeUnit(i / samples, p)));
-    }
-    const normalizer = Object.freeze({
-      x: 1 / maxX,
-      y: 1 / maxY,
-      shape: 1 / maxShape,
-    });
-    if (copyJiggleNormalizerCache.size > 32) copyJiggleNormalizerCache.clear();
-    copyJiggleNormalizerCache.set(key, normalizer);
-    return normalizer;
-  };
-  jelloParams = normalizeJelloParams(root.BoardfishJelloParams || {});
-  const smoothSlideOptions = root.BoardfishSmoothSlideParams;
-  if (smoothSlideOptions) {
-    const style = root.document?.documentElement?.style;
-    style?.setProperty('--smooth-slide-duration', `${numberInRange(smoothSlideOptions.duration, 220, 80, 900)}ms`);
-    style?.setProperty('--smooth-slide-ease', typeof smoothSlideOptions.ease === 'string' && smoothSlideOptions.ease.trim() ? smoothSlideOptions.ease.trim() : 'cubic-bezier(0.18, 0.9, 0.24, 1.18)');
-  }
-
-  const motionEndElapsed = (motion) => Math.max(
-    motion.delay + motion.duration,
-    Number(motion.handoff?.duration) || 0,
-  );
-
-  const pruneFinishedObjectMotions = () => {
-    const cutoff = now();
-    let removed = 0;
-    for (const motions of [jelloObjectMotions, textSelectionJelloMotions]) {
-      for (const [id, motion] of motions) {
-        const endElapsed = motionEndElapsed(motion);
-        if (cutoff - motion.startedAt >= endElapsed + 80) {
-          motions.delete(id);
-          removed++;
-        }
-      }
-    }
-    return removed;
+    const attack = smootherstep(shapeTimeSec / Math.max(0.001, 44 / 1000));
+    const settle = 1 - smootherstep((t - 0.84) / Math.max(0.001, 1 - 0.84));
+    return springImpulse(shapeTimeSec, 3.15, 0.32) * attack * settle;
   };
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let recordMotionDebug = null;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    const motionDebugMeta = () => ({
-      jelloObjectMotions: jelloObjectMotions.size,
-      textSelectionJelloMotions: textSelectionJelloMotions.size,
-      hasObjectMotions: !!(jelloObjectMotions.size || textSelectionJelloMotions.size),
-    });
     recordMotionDebug = (stepName, meta = {}) => {
       root.ViewportDebug?.recordMotion?.(stepName, {
-        ...motionDebugMeta(),
+        jelloObjectMotions: objectMotions.size,
+        textSelectionJelloMotions: textSelectionMotions.size,
+        hasObjectMotions: !!(objectMotions.size || textSelectionMotions.size),
         ...meta,
       });
     };
@@ -221,8 +88,7 @@
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   const requestMotionFrame = () => {
-    if (motionRenderPending) return;
-    if (typeof root.scheduleRender !== 'function') return;
+    if (motionRenderPending || typeof root.scheduleRender !== 'function') return;
     motionRenderPending = true;
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -237,17 +103,31 @@
     }
   };
 
+  const pruneFinishedMotions = () => {
+    const cutoff = now();
+    let removed = 0;
+    for (const motions of [objectMotions, textSelectionMotions]) {
+      for (const [id, motion] of motions) {
+        if (cutoff - motion.startedAt >= DURATION_MS + 80) {
+          motions.delete(id);
+          removed++;
+        }
+      }
+    }
+    return removed;
+  };
+
   const afterViewportRenderFrame = (
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     meta = {},
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) => {
-    if ((!motionRenderPending && !(jelloObjectMotions.size || textSelectionJelloMotions.size)) || prefersReducedMotion()) return;
+    if ((!motionRenderPending && !(objectMotions.size || textSelectionMotions.size)) || prefersReducedMotion()) return;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const wasPending = typeof BOARDFISH_PRODUCTION === 'undefined' && motionRenderPending;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     motionRenderPending = false;
-    const removed = root._boardOpening === true ? pruneFinishedObjectMotions() : 0;
+    const removed = root._boardOpening === true ? pruneFinishedMotions() : 0;
     if (typeof BOARDFISH_PRODUCTION === 'undefined' && wasPending) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const requestedAt = motionRenderRequestedAt;
@@ -262,559 +142,248 @@
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    if (!(jelloObjectMotions.size || textSelectionJelloMotions.size)) {
+    if (!(objectMotions.size || textSelectionMotions.size)) {
       if (removed) requestMotionFrame();
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined' && (wasPending || removed)) {
-        recordMotionDebug('finished', { removed });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return;
     }
     requestMotionFrame();
   };
 
-  const copyJiggleMotionFields = (options = {}) => {
-    const translateXPx = numberInRange(options.translateXPx, 0, 0, 48);
-    const translateYPx = numberInRange(options.translateYPx, 0, 0, 48);
-    if (!translateXPx && !translateYPx) {
-      return { translateXPx, translateYPx };
-    }
-    const params = options._copy || normalizeCopyJiggleParams(options);
-    return {
-      ...params,
-      translateXPx,
-      translateYPx,
-      copyJiggleNormalizer: params.copyJiggleNormalizer ||
-        (params.copyJiggleNormalizer = getCopyJiggleNormalizer(params)),
-    };
-  };
-
-  const transformNumber = (transform, key, fallback) => (
-    Number.isFinite(transform?.[key]) ? transform[key] : fallback
-  );
-
-  const motionHandoff = (motion, cutoff, durationMs) => {
-    if (!motion) return null;
-    const elapsed = cutoff - motion.startedAt;
-    if (elapsed < 0 || elapsed >= motionEndElapsed(motion)) return null;
-    return {
-      duration: numberInRange(durationMs, copyJiggleDefaults.carryDurationMs, 80, 320),
-      motion,
-    };
-  };
-
-  const noteObjectJello = (obj, options = {}) => {
-    if (!obj?.id || (options.includeText === false && obj.type === 'text')) return;
-    const amplitude = numberInRange(options.amplitude, jelloParams.amplitude, 0, 0.24);
-    if (amplitude <= 0) return;
-    const startedAt = Number.isFinite(options.startedAt) ? options.startedAt : now();
-    const existing = jelloObjectMotions.get(obj.id);
-    if (
-      existing &&
-      existing.phase === (options.phase === 'exit' ? 'exit' : 'pulse') &&
-      startedAt - existing.startedAt >= 0 &&
-      startedAt - existing.startedAt < JIGGLE_RETRIGGER_MIN_INTERVAL_MS
-    ) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        recordMotionDebug('jiggle-coalesced', {
-          id: obj.id,
-          objectType: obj.type || '',
-          action: options.action || '',
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      requestMotionFrame();
-      return;
-    }
-    const handoff = motionHandoff(
-      existing,
-      startedAt,
-      options.carryDurationMs,
-    );
-    const baseMotion = {
-      obj: options.phase === 'exit' ? obj : null,
-      phase: options.phase === 'exit' ? 'exit' : 'pulse',
-      startedAt,
-      delay: Math.max(0, Number(options.delay) || 0),
-      duration: numberInRange(options.duration, jelloParams.duration, 180, 1200),
-      amplitude,
-      oscillations: numberInRange(options.oscillations, jelloParams.oscillations, 1, 16),
-      rebound: numberInRange(options.rebound, jelloParams.rebound, 0, 0.8),
-      squish: numberInRange(options.squish, jelloParams.squish, 0, 1.4),
-      decayPower: numberInRange(options.decayPower, 2.15, 0.8, 4),
-      groupSide: numberInRange(options.groupSide, 1, -1, 1),
-      groupSize: Math.max(1, Number(options.groupSize) || 1),
-    };
-    const motion = {
-      ...baseMotion,
-      ...copyJiggleMotionFields(options),
-      ...(handoff ? { handoff } : {}),
-    };
-    jelloObjectMotions.set(obj.id, motion);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
-        id: obj.id,
-        objectType: obj.type || '',
-        action: options.action || '',
-        phase: motion.phase,
-        delay: motion.delay,
-        duration: motion.duration,
-        amplitude: motion.amplitude,
-        translateXPx: motion.translateXPx || 0,
-        translateYPx: motion.translateYPx || 0,
-        xFreqHz: motion.xFreqHz || '',
-        yFreqHz: motion.yFreqHz || '',
-      });
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    requestMotionFrame();
-  };
-
-  const noteObjectsJello = (items, options = {}) => {
-    const list = Array.isArray(items) ? items : [];
-    const stagger = numberInRange(options.staggerMs, jelloParams.staggerMs, 0, 240);
-    const hasTranslation = !!(
-      numberInRange(options.translateXPx, 0, 0, 48) ||
-      numberInRange(options.translateYPx, 0, 0, 48)
-    );
-    const startedAt = now();
-    const ranked = list.filter((obj) => (
-      obj?.id && !(options.includeText === false && obj.type === 'text')
-    )).sort((a, b) => {
-      const ax = (Number(a?.x) || 0) + (Number(a?.w) || 0) / 2;
-      const bx = (Number(b?.x) || 0) + (Number(b?.w) || 0) / 2;
-      if (ax !== bx) return ax - bx;
-      const ay = (Number(a?.y) || 0) + (Number(a?.h) || 0) / 2;
-      const by = (Number(b?.y) || 0) + (Number(b?.h) || 0) / 2;
-      if (ay !== by) return ay - by;
-      return String(a?.id || '').localeCompare(String(b?.id || ''));
-    });
-    ranked.forEach((obj, index) => {
-      const groupSide = ranked.length > 1 ? -1 + (index * 2) / (ranked.length - 1) : 1;
-      noteObjectJello(obj, {
-        ...options,
-        startedAt,
-        groupSide,
-        groupSize: ranked.length,
-        delay: hasTranslation ? 0 : Math.min(index * stagger, 160),
-      });
-    });
-  };
-
-  const noteObjectsJelloRemoved = (items, options = {}) => {
-    const list = Array.isArray(items) ? items : [];
-    const stagger = numberInRange(options.staggerMs, jelloParams.staggerMs, 0, 240);
-    list.forEach((obj, index) => noteObjectJello(obj, {
-      ...options,
-      phase: 'exit',
-      delay: Math.min(index * stagger, 160),
-    }));
-  };
-
-  const noteTextSelectionJello = (spec = {}, options = {}) => {
-    if (!spec?.id || !spec.hasSelection) return;
-    const amplitude = numberInRange(options.amplitude, jelloParams.amplitude, 0, 0.24);
-    if (amplitude <= 0) return;
-    const startedAt = now();
-    const existing = textSelectionJelloMotions.get(spec.id);
-    if (
-      existing &&
-      startedAt - existing.startedAt >= 0 &&
-      startedAt - existing.startedAt < JIGGLE_RETRIGGER_MIN_INTERVAL_MS
-    ) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        recordMotionDebug('jiggle-coalesced', {
-          id: spec.id,
-          objectType: 'text-selection',
-          action: options.action || '',
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      requestMotionFrame();
-      return;
-    }
-    const handoff = existing && existing.start === Math.min(spec.start, spec.end) && existing.end === Math.max(spec.start, spec.end)
-      ? motionHandoff(existing, startedAt, options.carryDurationMs)
-      : null;
-    const baseMotion = {
-      startedAt,
-      delay: Math.max(0, Number(options.delay) || 0),
-      duration: numberInRange(options.duration, jelloParams.duration, 180, 1200),
-      amplitude,
-      oscillations: numberInRange(options.oscillations, jelloParams.oscillations, 1, 16),
-      rebound: numberInRange(options.rebound, jelloParams.rebound, 0, 0.8),
-      squish: numberInRange(options.squish, jelloParams.squish, 0, 1.4),
-      decayPower: numberInRange(options.decayPower, 2.15, 0.8, 4),
-      start: Math.min(spec.start, spec.end),
-      end: Math.max(spec.start, spec.end),
-    };
-    const motion = {
-      ...baseMotion,
-      ...copyJiggleMotionFields(options),
-      ...(handoff ? { handoff } : {}),
-    };
-    textSelectionJelloMotions.set(spec.id, motion);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-start' : 'jello-start', {
-        id: spec.id,
-        objectType: 'text-selection',
-        action: options.action || '',
-        delay: motion.delay,
-        duration: motion.duration,
-        amplitude: motion.amplitude,
-        translateXPx: motion.translateXPx || 0,
-        translateYPx: motion.translateYPx || 0,
-        start: motion.start,
-        end: motion.end,
-      });
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    requestMotionFrame();
-  };
-
-  const jelloScaleForMotion = (motion, t) => {
-    const decay = Math.pow(1 - t, motion.decayPower);
-    const wobble = Math.sin(t * Math.PI * motion.oscillations) * motion.amplitude * decay;
-    const rebound = Math.sin(t * Math.PI * motion.oscillations * 2) * motion.amplitude * motion.rebound * decay;
-    return {
-      scaleX: 1 + wobble + rebound,
-      scaleY: 1 - wobble * motion.squish,
-    };
-  };
-
-  const jelloTranslateForMotion = (motion, t, zoom = 1) => {
-    const point = copyJiggleUnit(t, motion);
-    const normalizer = motion.copyJiggleNormalizer || getCopyJiggleNormalizer(motion);
+  const jiggleTransform = (motion, t, zoom = 1) => {
+    const point = jiggleUnit(t);
     const groupSide = motion.groupSize > 1 ? motion.groupSide : 1;
-    const xPx = point.x * normalizer.x * motion.translateXPx;
-    const yPx = point.y * normalizer.y * motion.translateYPx;
+    const xPx = point.x * NORMALIZE_X * 5;
+    const yPx = point.y * NORMALIZE_Y * 10.75;
     const viewZoom = Number(zoom);
     const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
-    const result = {
+    const shape = jiggleShapeUnit(t) * NORMALIZE_SHAPE;
+    const strain = shape * 0.028 * (motion.groupSize > 1 ? 1 + groupSide * 0.06 : 1);
+    return {
       groupTranslateX: (motion.groupSize > 1 ? 0 : xPx) / safeZoom,
       groupTranslateY: yPx / safeZoom,
+      translateX: xPx * groupSide / safeZoom,
+      translateY: yPx / safeZoom,
+      scaleX: Math.exp(-strain),
+      scaleY: Math.exp(strain),
+      scaleOriginX: 0.5,
+      scaleOriginY: 0.12,
     };
-    if (motion.translateXPx) {
-      result.translateX = xPx * groupSide / safeZoom;
-    }
-    if (motion.translateYPx) {
-      result.translateY = yPx / safeZoom;
-    }
-    if (motion.deformation) {
-      const shape = copyJiggleShapeUnit(t, motion) * normalizer.shape;
-      const shapeAsymmetry = motion.groupSize > 1 ? 1 + groupSide * 0.06 : 1;
-      const strain = shape * motion.deformation * shapeAsymmetry;
-      result.scaleX = Math.exp(-strain);
-      result.scaleY = Math.exp(strain);
-      result.scaleOriginX = motion.scaleOriginX;
-      result.scaleOriginY = motion.scaleOriginY;
-    }
-    return result;
   };
 
-  const blendMotionTransforms = (previous, next, weight) => {
+  const blendTransforms = (previous, next, weight) => {
     const t = clamp01(weight);
     const blend = (a, b) => a + (b - a) * t;
-    const result = {};
-    for (const key of ['translateX', 'translateY', 'groupTranslateX', 'groupTranslateY']) {
-      if (!Number.isFinite(previous?.[key]) && !Number.isFinite(next?.[key])) continue;
-      result[key] = blend(transformNumber(previous, key, 0), transformNumber(next, key, 0));
-    }
-    const hasScale = (
-      Number.isFinite(previous?.scaleX) ||
-      Number.isFinite(previous?.scaleY) ||
-      Number.isFinite(next?.scaleX) ||
-      Number.isFinite(next?.scaleY)
-    );
-    if (hasScale) {
-      const previousScaleX = Math.max(0.01, transformNumber(previous, 'scaleX', 1));
-      const previousScaleY = Math.max(0.01, transformNumber(previous, 'scaleY', 1));
-      const nextScaleX = Math.max(0.01, transformNumber(next, 'scaleX', 1));
-      const nextScaleY = Math.max(0.01, transformNumber(next, 'scaleY', 1));
-      result.scaleX = Math.exp(blend(Math.log(previousScaleX), Math.log(nextScaleX)));
-      result.scaleY = Math.exp(blend(Math.log(previousScaleY), Math.log(nextScaleY)));
-      result.scaleOriginX = blend(
-        transformNumber(previous, 'scaleOriginX', 0.5),
-        transformNumber(next, 'scaleOriginX', 0.5),
-      );
-      result.scaleOriginY = blend(
-        transformNumber(previous, 'scaleOriginY', 0.5),
-        transformNumber(next, 'scaleOriginY', 0.5),
-      );
-    }
-    return result;
+    return {
+      translateX: blend(previous.translateX, next.translateX),
+      translateY: blend(previous.translateY, next.translateY),
+      groupTranslateX: blend(previous.groupTranslateX, next.groupTranslateX),
+      groupTranslateY: blend(previous.groupTranslateY, next.groupTranslateY),
+      scaleX: Math.exp(blend(Math.log(previous.scaleX), Math.log(next.scaleX))),
+      scaleY: Math.exp(blend(Math.log(previous.scaleY), Math.log(next.scaleY))),
+      scaleOriginX: blend(previous.scaleOriginX, next.scaleOriginX),
+      scaleOriginY: blend(previous.scaleOriginY, next.scaleOriginY),
+    };
   };
 
-  const motionTransformAtElapsed = (motion, elapsedMs, zoom = 1) => {
+  const transformAtElapsed = (motion, elapsedMs, zoom = 1) => {
     const elapsed = Math.max(0, Number(elapsedMs) || 0);
-    const localElapsed = elapsed - motion.delay;
-    const t = localElapsed <= 0 ? 0 : clamp01(localElapsed / motion.duration);
-    return jelloTransformForMotion(motion, t, zoom, elapsed);
+    const transform = jiggleTransform(motion, clamp01(elapsed / DURATION_MS), zoom);
+    if (!motion.handoff || elapsed >= CARRY_DURATION_MS) return transform;
+    const previousElapsed = motion.startedAt + elapsed - motion.handoff.startedAt;
+    const previous = transformAtElapsed(motion.handoff, previousElapsed, zoom);
+    return blendTransforms(previous, transform, smootherstep(elapsed / CARRY_DURATION_MS));
   };
 
-  const applyMotionHandoff = (transform, motion, elapsedMs, zoom = 1) => {
-    const handoff = motion.handoff;
-    if (!handoff || elapsedMs >= handoff.duration) return transform;
-    const cutoff = motion.startedAt + elapsedMs;
-    const previousElapsed = cutoff - handoff.motion.startedAt;
-    const previous = motionTransformAtElapsed(handoff.motion, previousElapsed, zoom);
-    const weight = smootherstep(elapsedMs / handoff.duration);
-    return blendMotionTransforms(previous, transform, weight);
+  const handoffAt = (motion, cutoff) => {
+    if (!motion) return null;
+    const elapsed = cutoff - motion.startedAt;
+    return elapsed >= 0 && elapsed < DURATION_MS ? motion : null;
   };
 
-  const jelloTransformForMotion = (motion, t, zoom = 1, elapsedMs = t * motion.duration) => {
-    const transform = motion.translateXPx || motion.translateYPx
-      ? jelloTranslateForMotion(motion, t, zoom)
-      : jelloScaleForMotion(motion, t);
-    return applyMotionHandoff(transform, motion, Math.max(0, elapsedMs), zoom);
+  const compareObjectGeometry = (a, b) => {
+    const ax = (Number(a?.x) || 0) + (Number(a?.w) || 0) / 2;
+    const bx = (Number(b?.x) || 0) + (Number(b?.w) || 0) / 2;
+    if (ax !== bx) return ax - bx;
+    const ay = (Number(a?.y) || 0) + (Number(a?.h) || 0) / 2;
+    const by = (Number(b?.y) || 0) + (Number(b?.h) || 0) / 2;
+    if (ay !== by) return ay - by;
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
   };
 
-  const restingJelloTransformForMotion = (motion, zoom = 1, elapsedMs = 0) => {
-    if (motion.translateXPx || motion.translateYPx) {
-      return applyMotionHandoff({
-        translateX: 0,
-        translateY: 0,
-        groupTranslateX: 0,
-        groupTranslateY: 0,
-        ...(motion.deformation ? {
-          scaleX: 1,
-          scaleY: 1,
-          scaleOriginX: motion.scaleOriginX,
-          scaleOriginY: motion.scaleOriginY,
-        } : {}),
-      }, motion, Math.max(0, elapsedMs), zoom);
+  const noteObject = (obj, startedAt, groupSide, groupSize) => {
+    if (!obj?.id) return;
+    const existing = objectMotions.get(obj.id);
+    if (existing && startedAt - existing.startedAt >= 0 && startedAt - existing.startedAt < RETRIGGER_MIN_INTERVAL_MS) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-coalesced', { id: obj.id, objectType: obj.type || '' });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      return;
     }
-    return applyMotionHandoff({
-      scaleX: 1,
-      scaleY: 1,
-    }, motion, Math.max(0, elapsedMs), zoom);
+    const handoff = handoffAt(existing, startedAt);
+    objectMotions.set(obj.id, {
+      startedAt,
+      groupSide,
+      groupSize,
+      ...(handoff ? { handoff } : {}),
+    });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-start', { id: obj.id, objectType: obj.type || '' });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  };
+
+  const noteObjects = (items) => {
+    const ranked = (Array.isArray(items) ? items : []).filter((obj) => obj?.id).sort(compareObjectGeometry);
+    if (!ranked.length) return false;
+    const startedAt = now();
+    for (let index = 0; index < ranked.length; index++) {
+      noteObject(
+        ranked[index],
+        startedAt,
+        ranked.length > 1 ? -1 + (index * 2) / (ranked.length - 1) : 1,
+        ranked.length,
+      );
+    }
+    requestMotionFrame();
+    return true;
+  };
+
+  const noteTextSelection = (spec) => {
+    if (!spec?.id || !spec.hasSelection) return;
+    const startedAt = now();
+    const existing = textSelectionMotions.get(spec.id);
+    if (existing && startedAt - existing.startedAt >= 0 && startedAt - existing.startedAt < RETRIGGER_MIN_INTERVAL_MS) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-coalesced', { id: spec.id, objectType: 'text-selection' });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      requestMotionFrame();
+      return;
+    }
+    const start = Math.min(spec.start, spec.end);
+    const end = Math.max(spec.start, spec.end);
+    const handoff = existing && existing.start === start && existing.end === end
+      ? handoffAt(existing, startedAt)
+      : null;
+    textSelectionMotions.set(spec.id, {
+      startedAt,
+      start,
+      end,
+      groupSide: 1,
+      groupSize: 1,
+      ...(handoff ? { handoff } : {}),
+    });
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-start', { id: spec.id, objectType: 'text-selection', start, end });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    requestMotionFrame();
   };
 
   const textSelectionMotionForDraw = (id, start, end, zoom = 1) => {
-    const motion = textSelectionJelloMotions.get(id);
+    const motion = textSelectionMotions.get(id);
     if (!motion || prefersReducedMotion()) return null;
     if (motion.start !== Math.min(start, end) || motion.end !== Math.max(start, end)) {
-      textSelectionJelloMotions.delete(id);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        recordMotionDebug('jiggle-cancelled', {
-          id,
-          objectType: 'text-selection',
-          reason: 'selection-range-changed',
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      textSelectionMotions.delete(id);
       return null;
     }
     const elapsed = now() - motion.startedAt;
-    if (elapsed >= motionEndElapsed(motion)) {
-      textSelectionJelloMotions.delete(id);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        recordMotionDebug('jiggle-done', {
-          id,
-          objectType: 'text-selection',
-          t: 1,
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (elapsed >= DURATION_MS) {
+      textSelectionMotions.delete(id);
       return null;
     }
-    if (elapsed < motion.delay) {
-      const transform = restingJelloTransformForMotion(motion, zoom, elapsed);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        recordMotionDebug('jiggle-waiting', {
-          id,
-          objectType: 'text-selection',
-          t: 0,
-          ...transform,
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      transform.opacity = 1;
-      return transform;
-    }
-    const t = clamp01((elapsed - motion.delay) / motion.duration);
-    const transform = jelloTransformForMotion(motion, t, zoom, elapsed);
+    const transform = transformAtElapsed(motion, elapsed, zoom);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      recordMotionDebug(motion.translateXPx || motion.translateYPx ? 'jiggle-progress' : 'jello-progress', {
-        id,
-        objectType: 'text-selection',
-        t,
-        ...transform,
-      });
-    }
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-progress', { id, objectType: 'text-selection', t: clamp01(elapsed / DURATION_MS), ...transform });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    transform.opacity = 1;
     return transform;
   };
 
   const textSelectionJelloSpecsForDraw = () => {
-    if (!textSelectionJelloMotions.size || prefersReducedMotion()) return [];
+    if (!textSelectionMotions.size || prefersReducedMotion()) return EMPTY_SPECS;
     const cutoff = now();
     const specs = [];
-    for (const [id, motion] of textSelectionJelloMotions) {
-      if (cutoff - motion.startedAt >= motionEndElapsed(motion)) {
-        textSelectionJelloMotions.delete(id);
-        continue;
+    for (const [id, motion] of textSelectionMotions) {
+      if (cutoff - motion.startedAt >= DURATION_MS) {
+        textSelectionMotions.delete(id);
+      } else {
+        specs.push({ id, start: motion.start, end: motion.end });
       }
-      specs.push({ id, start: motion.start, end: motion.end });
     }
-    return specs;
-  };
-
-  const jelloMotionForDraw = (obj, zoom = 1) => {
-    const jello = jelloObjectMotions.get(obj?.id);
-    if (!jello || prefersReducedMotion()) return null;
-    const cutoff = now();
-    const elapsed = cutoff - jello.startedAt;
-    if (elapsed >= motionEndElapsed(jello)) {
-      jelloObjectMotions.delete(obj.id);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-done' : 'jello-done', {
-          id: obj.id,
-          objectType: obj.type || '',
-          phase: jello.phase,
-          t: 1,
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return jello.phase === 'exit' ? { opacity: 0, scale: 1, skip: true } : null;
-    }
-    if (elapsed < jello.delay) {
-      const transform = restingJelloTransformForMotion(jello, zoom, elapsed);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-waiting' : 'jello-waiting', {
-          id: obj.id,
-          objectType: obj.type || '',
-          phase: jello.phase,
-          t: 0,
-          ...transform,
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      transform.opacity = 1;
-      return transform;
-    }
-    const t = clamp01((elapsed - jello.delay) / jello.duration);
-    const exitOpacity = jello.phase === 'exit' ? clamp01(1 - t) : 1;
-    const transform = jelloTransformForMotion(jello, t, zoom, elapsed);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      recordMotionDebug(jello.translateXPx || jello.translateYPx ? 'jiggle-progress' : 'jello-progress', {
-        id: obj.id,
-        objectType: obj.type || '',
-        phase: jello.phase,
-        t,
-        opacity: exitOpacity,
-        ...transform,
-      });
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    transform.opacity = exitOpacity;
-    return transform;
+    return specs.length ? specs : EMPTY_SPECS;
   };
 
   const objectMotionForDraw = (obj, zoom = 1) => {
-    if (!obj?.id || (!jelloObjectMotions.size && !lastDrawnObjectMotions.size)) return null;
-    const motion = jelloMotionForDraw(obj, zoom);
-    if (motion) lastDrawnObjectMotions.set(obj.id, motion); else lastDrawnObjectMotions.delete(obj.id);
-    return motion;
+    if (!obj?.id || (!objectMotions.size && !lastDrawnObjectMotions.size)) return null;
+    const motion = objectMotions.get(obj.id);
+    if (!motion || prefersReducedMotion()) {
+      lastDrawnObjectMotions.delete(obj.id);
+      return null;
+    }
+    const elapsed = now() - motion.startedAt;
+    if (elapsed >= DURATION_MS) {
+      objectMotions.delete(obj.id);
+      lastDrawnObjectMotions.delete(obj.id);
+      return null;
+    }
+    const transform = transformAtElapsed(motion, elapsed, zoom);
+    lastDrawnObjectMotions.set(obj.id, transform);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-progress', { id: obj.id, objectType: obj.type || '', t: clamp01(elapsed / DURATION_MS), ...transform });
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    return transform;
   };
 
   const getLastDrawnObjectMotion = (obj) => (
     obj?.id ? lastDrawnObjectMotions.get(obj.id) || null : null
   );
 
-  const motionObjectsForDraw = () => {
-    if (!jelloObjectMotions.size || prefersReducedMotion()) { lastDrawnObjectMotions.clear(); return null; }
-    const cutoff = now(), objects = [];
-    for (const [id, motion] of jelloObjectMotions) {
-      if (cutoff - motion.startedAt >= motionEndElapsed(motion)) {
-        jelloObjectMotions.delete(id);
-        lastDrawnObjectMotions.delete(id);
-        continue;
-      }
-      if (motion.phase === 'exit' && motion.obj) objects.push(motion.obj);
-    }
-    return jelloObjectMotions.size ? objects : null;
-  };
-
-  const pulseSelection = (options = {}) => {
-    const selectedIds = root.selectedIds;
-    const objectsMap = root.objectsMap;
-    if (!selectedIds?.size || !objectsMap?.get) return;
-    const selectedObjects = [];
-    for (const id of selectedIds) {
-      const obj = objectsMap.get(id);
-      if (obj) selectedObjects.push(obj);
-    }
-    noteObjectsJello(selectedObjects, options);
-  };
-
-  const asObjectList = (items) => Array.isArray(items) ? items : items ? [items] : [];
-
-  const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
-
-  const applyActionAnimation = (action, payload = {}, options = {}) => {
-    if (!COPY_JIGGLE_ACTIONS.has(action)) {
-      if (typeof payload?.after === 'function') payload.after();
+  const hasObjectMotionsForDraw = () => {
+    if (!objectMotions.size) {
+      lastDrawnObjectMotions.clear();
       return false;
     }
-    if (prefersReducedMotion()) return false;
-
-    const actionOptions = { ...(payload?.options || {}), ...(options || {}) };
-    const copyOptions = normalizeCopyJiggleParams(actionOptions);
-    const motionOptions = { ...jelloParams, ...copyOptions, _copy: copyOptions };
-    if (hasOwn(actionOptions, 'includeText')) motionOptions.includeText = actionOptions.includeText;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    motionOptions.action = action;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const hasExplicitObjects = hasOwn(payload, 'objects') || hasOwn(payload, 'addedObjects');
-    const hasExplicitRemovedObjects = hasOwn(payload, 'removedObjects');
-    const objects = hasExplicitObjects
-      ? asObjectList(hasOwn(payload, 'objects') ? payload.objects : payload.addedObjects)
-      : [];
-    const removedObjects = hasExplicitRemovedObjects ? asObjectList(payload.removedObjects) : [];
-
-    if (payload?.textSelection) {
-      noteTextSelectionJello(payload.textSelection, motionOptions);
-      return true;
+    if (prefersReducedMotion()) {
+      lastDrawnObjectMotions.clear();
+      return false;
     }
-    if (payload?.selection) {
-      pulseSelection(motionOptions);
-      return true;
+    const cutoff = now();
+    for (const [id, motion] of objectMotions) {
+      if (cutoff - motion.startedAt >= DURATION_MS) {
+        objectMotions.delete(id);
+        lastDrawnObjectMotions.delete(id);
+      }
     }
-    let applied = false;
-    if (objects.some(Boolean)) {
-      noteObjectsJello(objects, motionOptions);
-      applied = true;
-    }
-    if (removedObjects.some(Boolean)) {
-      noteObjectsJelloRemoved(removedObjects, motionOptions);
-      applied = true;
-    }
-    return applied;
+    return objectMotions.size > 0;
   };
 
-  const api = Object.freeze({
+  const copySelection = () => {
+    if (!root.selectedIds?.size || !root.objectsMap?.get) return;
+    const selectedObjects = [];
+    for (const id of root.selectedIds) {
+      const obj = root.objectsMap.get(id);
+      if (obj) selectedObjects.push(obj);
+    }
+    noteObjects(selectedObjects);
+  };
+
+  const applyCopyFeedback = (payload = {}) => {
+    if (prefersReducedMotion()) return false;
+    if (payload.textSelection) {
+      noteTextSelection(payload.textSelection);
+      return true;
+    }
+    if (payload.selection) {
+      copySelection();
+      return true;
+    }
+    return noteObjects(payload.objects);
+  };
+
+  root.BoardfishMotion = Object.freeze({
     afterViewportRenderFrame,
-    applyActionAnimation,
+    applyCopyFeedback,
     getLastDrawnObjectMotion,
-    motionObjectsForDraw,
+    hasObjectMotionsForDraw,
     objectMotionForDraw,
     textSelectionJelloSpecsForDraw,
     textSelectionMotionForDraw,
   });
-
-  root.BoardfishMotion = api;
 })();

@@ -25,20 +25,10 @@ function loadRenderer(overrides = {}) {
 
 function loadMotion(overrides = {}) {
   let currentTime = 0;
-  const styleVars = new Map();
   const timers = [];
   const renderCalls = [];
   const context = {
     console: { ...console, warn() {} },
-    document: {
-      documentElement: {
-        style: {
-          setProperty(name, value) {
-            styleVars.set(name, value);
-          },
-        },
-      },
-    },
     matchMedia: () => ({ matches: false }),
     performance: { now: () => currentTime },
     requestAnimationFrame: () => 0,
@@ -60,7 +50,6 @@ function loadMotion(overrides = {}) {
   return {
     context,
     renderCalls,
-    styleVars,
     timers,
     setTime(ms) {
       currentTime = ms;
@@ -518,50 +507,6 @@ test('animated image cropping inverse-maps translation and non-uniform scale', (
   drawImageCalls[0].slice(1).forEach((value, index) => {
     assertClose(value, expectedCrop[index]);
   });
-});
-
-test('renderer does not redraw finished exit-motion objects', () => {
-  const BoardfishRenderer = loadRenderer();
-  const drawImageCalls = [];
-  const context = {
-    drawImage(...args) {
-      drawImageCalls.push(args);
-    },
-  };
-  const source = {
-    complete: true,
-    naturalWidth: 20,
-    naturalHeight: 20,
-    width: 20,
-    height: 20,
-  };
-  const removedObj = { id: 'removed-1', type: 'image', x: 0, y: 0, w: 20, h: 20, data: { imgKey: 'img-1' } };
-  const renderer = BoardfishRenderer.createBoardRenderer({
-    canvasTextColor: () => '#fff',
-    currentViewportWorldRect: () => ({ x1: -10, y1: -10, x2: 40, y2: 40 }),
-    dpr: () => 1,
-    getWrappedLines: () => [],
-    imageBitmapCache: () => ({ 'img-1': source }),
-    imageStore: () => ({ 'img-1': 'source' }),
-    lineHeight: 24,
-    motionObjectsForDraw: () => [removedObj],
-    objectIntersectsRect: () => true,
-    objectMotionForDraw: () => ({ opacity: 0, scale: 0.92, skip: true }),
-    objects: () => [],
-    panX: () => 0,
-    panY: () => 0,
-    selectImageSourceForDraw: () => ({ source, scale: 1, targetScale: 1 }),
-    setCanvasImageQuality: () => {},
-    textBaselineYOffset: () => 0,
-    textPad: 4,
-    viewportCullingEnabled: () => true,
-    zoom: () => 1,
-  });
-
-  const result = renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters());
-
-  assert.equal(result.drawnImages, 0);
-  assert.deepEqual(drawImageCalls, []);
 });
 
 test('renderer can skip text while drawing visible objects', () => {
@@ -1248,64 +1193,14 @@ test('renderer applies motion scaling around the requested fractional object ori
   assert.deepEqual(calls.at(-1), ['restore']);
 });
 
-test('preconfigured jello settings are used by object draw motion', () => {
-  const { context, setTime } = loadMotion({
-    BoardfishJelloParams: {
-      amplitude: 0.12,
-      duration: 700,
-      oscillations: 9,
-      rebound: 0.4,
-      squish: 0.9,
-      staggerMs: 30,
-    },
-  });
-
-  const obj = { id: 'obj-1' };
-  context.BoardfishMotion.applyActionAnimation('copy-selected-objects', { objects: [obj] }, {
-    translateXPx: 0,
-    translateYPx: 0,
-  });
-  setTime(100);
-  const motion = context.BoardfishMotion.objectMotionForDraw(obj);
-
-  assert.equal(motion.opacity, 1);
-  assert.notEqual(motion.scaleX, 1);
-  assert.notEqual(motion.scaleY, 1);
-  assert.notEqual(motion.scaleX, motion.scaleY);
-});
-
-test('action animation policy keeps quiet actions inert and animates copy actions', () => {
+test('copy feedback stays inert for an empty payload and animates copied objects', () => {
   const { context } = loadMotion();
   const motion = context.BoardfishMotion;
-  assert.equal(motion.applyActionAnimation('text-edit-type'), false);
-  const quietObj = { id: 'quiet-1', type: 'text' };
-  assert.equal(motion.applyActionAnimation('text-box-resize', { objects: [quietObj] }), false);
-  assert.equal(motion.applyActionAnimation('object-delete', { removedObjects: [quietObj] }), false);
-  assert.equal(motion.applyActionAnimation('browser-find-shortcut'), false);
-  assert.equal(motion.objectMotionForDraw(quietObj), null);
+  assert.equal(motion.applyCopyFeedback(), false);
 
   const copiedImage = { id: 'copied-image', type: 'image' };
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [copiedImage] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [copiedImage] }), true);
   assert.ok(motion.objectMotionForDraw(copiedImage));
-  assert.equal(motion.applyActionAnimation('missing-action-for-test'), false);
-});
-
-test('text duplicate action is no-animation and empty image duplicate payloads stay inert', () => {
-  const { context, setTime } = loadMotion();
-  const motion = context.BoardfishMotion;
-  const text = { id: 'text-1', type: 'text' };
-  context.selectedIds = new Set([text.id]);
-  context.objectsMap = new Map([[text.id, text]]);
-
-  assert.equal(motion.applyActionAnimation('text-box-duplicate', { objects: [text] }), false);
-  assert.equal(motion.applyActionAnimation('image-object-duplicate', { objects: [] }), false);
-
-  setTime(100);
-  const activeMotion = motion.objectMotionForDraw(text, 1);
-  assert.equal(activeMotion, null);
-
-  setTime(260);
-  assert.equal(motion.objectMotionForDraw(text), null);
 });
 
 test('copy object jiggle uses fixed screen-distance translation independent of object width', () => {
@@ -1315,7 +1210,7 @@ test('copy object jiggle uses fixed screen-distance translation independent of o
   const wide = { id: 'wide-text', type: 'text', w: 800, h: 32 };
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [narrow] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [narrow] }), true);
   setTime(100);
   const narrowAtZoom1 = motion.objectMotionForDraw(narrow, 1);
   const narrowAtZoom2 = motion.objectMotionForDraw(narrow, 2);
@@ -1323,7 +1218,7 @@ test('copy object jiggle uses fixed screen-distance translation independent of o
   const narrowLate = motion.objectMotionForDraw(narrow, 1);
 
   setTime(1000);
-  assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [wide] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [wide] }), true);
   setTime(1100);
   const wideAtZoom1 = motion.objectMotionForDraw(wide, 1);
 
@@ -1339,13 +1234,25 @@ test('copy object jiggle uses fixed screen-distance translation independent of o
   assert.ok(Math.abs(narrowAtZoom1.translateY - narrowAtZoom2.translateY * 2) < 0.000001);
 });
 
+test('specialized copy feedback preserves the established trajectory sample', () => {
+  const { context, setTime } = loadMotion();
+  const obj = { id: 'sample' };
+  context.BoardfishMotion.applyCopyFeedback({ objects: [obj] });
+  setTime(100);
+  const frame = context.BoardfishMotion.objectMotionForDraw(obj, 1);
+  assertClose(frame.translateX, 1.4203122564703126);
+  assertClose(frame.translateY, 9.617025715383868);
+  assertClose(frame.scaleX, 0.9729837533668357);
+  assertClose(frame.scaleY, 1.0277663902811114);
+});
+
 test('object motion exposes the exact transform most recently used for drawing', () => {
   const { context, setTime } = loadMotion();
   const motion = context.BoardfishMotion;
   const text = { id: 'copied-text', type: 'text' };
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [text] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [text] }), true);
   setTime(100);
   const drawnMotion = motion.objectMotionForDraw(text, 1);
 
@@ -1362,7 +1269,7 @@ test('motion cleanup preserves the last rendered transform until the next object
   const image = { id: 'late-frame-image', type: 'image', x: 10, y: 20, w: 100, h: 80 };
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [image] }), true);
   setTime(100);
   const lastRendered = motion.objectMotionForDraw(image, 1);
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
@@ -1373,7 +1280,7 @@ test('motion cleanup preserves the last rendered transform until the next object
   context._boardOpening = false; motion.afterViewportRenderFrame({ source: 'post-open-frame' });
   assert.equal(renderCalls.length, 2);
 
-  assert.equal(motion.motionObjectsForDraw(), null);
+  assert.equal(motion.hasObjectMotionsForDraw(), false);
   assert.equal(motion.getLastDrawnObjectMotion(image), null);
 });
 
@@ -1383,12 +1290,12 @@ test('starting a new motion does not discard the transform still on screen', () 
   const image = { id: 'restarted-image', type: 'image', x: 10, y: 20, w: 100, h: 80 };
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [image] }), true);
   setTime(100);
   const lastRendered = motion.objectMotionForDraw(image, 1);
 
   setTime(600);
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [image] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [image] }), true);
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
 
   const nextRendered = motion.objectMotionForDraw(image, 1);
@@ -1401,7 +1308,7 @@ test('copy text selection jiggle uses fixed screen-distance translation independ
   const motion = context.BoardfishMotion;
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-text-selection', {
+  assert.equal(motion.applyCopyFeedback({
     textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
   }), true);
   setTime(100);
@@ -1411,7 +1318,7 @@ test('copy text selection jiggle uses fixed screen-distance translation independ
   const shortLate = motion.textSelectionMotionForDraw('text-1', 2, 9, 1);
 
   setTime(1000);
-  assert.equal(motion.applyActionAnimation('copy-text-selection', {
+  assert.equal(motion.applyCopyFeedback({
     textSelection: { id: 'text-1', start: 2, end: 40, hasSelection: true },
   }), true);
   setTime(1100);
@@ -1437,7 +1344,7 @@ test('copy jiggle normalizes per-axis waveform to configured screen-pixel distan
   let maxY = 0;
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-text-object', { objects: [obj] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [obj] }), true);
   for (let i = 0; i < 192; i += 1) {
     setTime(i * 500 / 192);
     const frame = motion.objectMotionForDraw(obj, 1);
@@ -1463,7 +1370,7 @@ test('grouped copy jiggle is geometry-ordered with shared vertical and mirrored 
     const { context, setTime } = loadMotion();
     const motion = context.BoardfishMotion;
     setTime(0);
-    assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects }), true);
+    assert.equal(motion.applyCopyFeedback({ objects }), true);
     setTime(100);
     return new Map(objects.map((obj) => [
       obj.id,
@@ -1494,11 +1401,11 @@ test('copy jiggle retrigger continues from the transform currently on screen', (
   const obj = { id: 'retriggered-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [obj] }), true);
   setTime(117);
   const before = plain(motion.objectMotionForDraw(obj, 1));
 
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [obj] }), true);
   const after = plain(motion.objectMotionForDraw(obj, 1));
 
   for (const field of ['translateX', 'translateY', 'scaleX', 'scaleY']) {
@@ -1524,7 +1431,7 @@ test('rapid and repeated copy retriggers stay within the configured motion envel
     for (let time = 0; time < end; time += 1) {
       setTime(time);
       if (triggers.has(time)) {
-        assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+        assert.equal(motion.applyCopyFeedback({ objects: [obj] }), true);
       }
       const frame = motion.objectMotionForDraw(obj, 1);
       if (!frame) continue;
@@ -1558,7 +1465,7 @@ test('copy jiggle transform is invariant to intermediate sampling cadence', () =
     const obj = { id: 'cadence-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
 
     setTime(0);
-    assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+    assert.equal(motion.applyCopyFeedback({ objects: [obj] }), true);
     if (cadenceHz) {
       const stepMs = 1000 / cadenceHz;
       for (let time = stepMs; time < 333; time += stepMs) {
@@ -1576,53 +1483,6 @@ test('copy jiggle transform is invariant to intermediate sampling cadence', () =
   assert.deepEqual(captureAt333Ms(120), unsampled);
 });
 
-test('short retrigger stays active for its longer carry and preserves area through exact rest', () => {
-  const { context, setTime } = loadMotion();
-  const motion = context.BoardfishMotion;
-  const obj = { id: 'long-carry-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
-  const options = { duration: 180, carryDurationMs: 320 };
-  const at = (time) => {
-    setTime(time);
-    return motion.objectMotionForDraw(obj, 1);
-  };
-  const velocity = (from, to, durationMs, fields) => fields.map((field) => (
-    (to[field] - from[field]) / durationMs
-  ));
-  const norm = (values) => Math.hypot(...values);
-
-  setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }, options), true);
-  const beforePrevious = plain(at(89.75));
-  const before = plain(at(90));
-
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }, options), true);
-  const after = plain(at(90));
-  for (const field of ['translateX', 'translateY', 'scaleX', 'scaleY']) {
-    assertClose(after[field], before[field], 1e-7, `${field} jumped on long-carry retrigger`);
-  }
-
-  const afterNext = plain(at(90.25));
-  const assertVelocityContinuity = (fields, label) => {
-    const beforeVelocity = velocity(beforePrevious, before, 0.25, fields);
-    const afterVelocity = velocity(after, afterNext, 0.25, fields);
-    const discontinuity = norm(afterVelocity.map((value, index) => value - beforeVelocity[index]));
-    const reference = Math.max(norm(beforeVelocity), norm(afterVelocity), 1e-9);
-    assert.ok(discontinuity <= reference * 0.05, `${label} velocity changed discontinuously at retrigger`);
-  };
-  assertVelocityContinuity(['translateX', 'translateY'], 'translation');
-  assertVelocityContinuity(['scaleX', 'scaleY'], 'deformation');
-
-  for (const time of [91, 120, 180, 250, 270, 271, 320, 400, 409.9]) {
-    const frame = at(time);
-    assert.ok(frame, `motion ended before carry rest at ${time}ms`);
-    assertClose(frame.scaleX * frame.scaleY, 1, 1e-7, `carry changed deformation area at ${time}ms`);
-  }
-  assert.ok(motionRestDistance(at(409.9)) < 1e-7, 'carry did not approach exact terminal rest');
-
-  assert.equal(at(410), null);
-  assert.equal(motion.getLastDrawnObjectMotion(obj), null);
-});
-
 test('copy jiggle has cubic-rest boundaries, decaying extrema, and exact terminal rest', () => {
   const { context, setTime } = loadMotion();
   const motion = context.BoardfishMotion;
@@ -1633,7 +1493,7 @@ test('copy jiggle has cubic-rest boundaries, decaying extrema, and exact termina
   };
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [obj] }), true);
 
   const startFrame = at(0);
   const startHalfMs = motionRestDistance(at(0.5));
@@ -1679,7 +1539,7 @@ test('copy jiggle deformation preserves area and exposes a stable upper anchor',
   const obj = { id: 'deforming-image', type: 'image', x: 20, y: 30, w: 80, h: 90 };
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [obj] }), true);
   let deformedSamples = 0;
   for (const time of [40, 80, 120, 180, 240]) {
     setTime(time);
@@ -1700,7 +1560,7 @@ test('copy jiggle drives frames through the viewport scheduler', () => {
   const obj = { id: 'copied-image', type: 'image' };
 
   setTime(0);
-  assert.equal(motion.applyActionAnimation('copy-selected-objects', { objects: [obj] }), true);
+  assert.equal(motion.applyCopyFeedback({ objects: [obj] }), true);
   assert.deepEqual(renderCalls, [{ board: true, overlay: true, source: 'motion' }]);
 
   setTime(16);
@@ -1722,25 +1582,27 @@ test('empty motion state bypasses reduced-motion media queries', () => {
   });
 
   context.BoardfishMotion.afterViewportRenderFrame();
-  assert.equal(context.BoardfishMotion.motionObjectsForDraw(), null);
+  assert.equal(context.BoardfishMotion.hasObjectMotionsForDraw(), false);
   assert.equal(mediaQueries, 0);
 });
 
-test('text selection copy feedback uses the jello set', () => {
+test('copy feedback stays disabled under reduced motion', () => {
+  const { context } = loadMotion({ matchMedia: () => ({ matches: true }) });
+  assert.equal(context.BoardfishMotion.applyCopyFeedback({ objects: [{ id: 'obj-1' }] }), false);
+  assert.equal(context.BoardfishMotion.hasObjectMotionsForDraw(), false);
+});
+
+test('text selection copy feedback uses fixed translation and deformation', () => {
   const { context, setTime } = loadMotion();
-  context.BoardfishMotion.applyActionAnimation('copy-text-selection', {
+  context.BoardfishMotion.applyCopyFeedback({
     textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
-  }, {
-    duration: 700,
-    amplitude: 0.12,
-    translateXPx: 0,
-    translateYPx: 0,
   });
 
   setTime(100);
   const motion = context.BoardfishMotion.textSelectionMotionForDraw('text-1', 2, 9);
 
-  assert.equal(motion.opacity, 1);
+  assert.notEqual(motion.translateX, 0);
+  assert.notEqual(motion.translateY, 0);
   assert.notEqual(motion.scaleX, 1);
   assert.notEqual(motion.scaleY, 1);
   assert.notEqual(motion.scaleX, motion.scaleY);
@@ -1748,21 +1610,19 @@ test('text selection copy feedback uses the jello set', () => {
 
 test('text selection jello exposes active full-range draw specs', () => {
   const { context, setTime } = loadMotion();
-  context.BoardfishMotion.applyActionAnimation('copy-text-selection', {
+  context.BoardfishMotion.applyCopyFeedback({
     textSelection: { id: 'text-1', start: 0, end: 17, hasSelection: true },
-  }, {
-    duration: 200,
   });
 
   assert.deepEqual(plain(context.BoardfishMotion.textSelectionJelloSpecsForDraw()), [
     { id: 'text-1', start: 0, end: 17 },
   ]);
 
-  setTime(260);
+  setTime(500);
   assert.deepEqual(plain(context.BoardfishMotion.textSelectionJelloSpecsForDraw()), []);
 });
 
-test('selection movement pulses can exclude text objects', () => {
+test('selection copy feedback resolves every selected object', () => {
   const { context, setTime } = loadMotion();
   const image = { id: 'img-1', type: 'image' };
   const text = { id: 'text-1', type: 'text' };
@@ -1772,43 +1632,9 @@ test('selection movement pulses can exclude text objects', () => {
     [text.id, text],
   ]);
 
-  context.BoardfishMotion.applyActionAnimation('copy-selected-objects', { selection: true }, { includeText: false });
+  context.BoardfishMotion.applyCopyFeedback({ selection: true });
   setTime(100);
 
   assert.ok(context.BoardfishMotion.objectMotionForDraw(image));
-  assert.equal(context.BoardfishMotion.objectMotionForDraw(text), null);
-});
-
-test('preconfigured transition timing is applied to CSS variables', () => {
-  assert.equal(loadMotion().styleVars.size, 0);
-  const { styleVars } = loadMotion({
-    BoardfishSmoothSlideParams: {
-      duration: 260,
-      ease: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-    },
-  });
-  assert.equal(styleVars.get('--smooth-slide-duration'), '260ms');
-  assert.equal(styleVars.get('--smooth-slide-ease'), 'cubic-bezier(0.2, 0.8, 0.2, 1)');
-});
-
-test('object jello removal stays drawable until the exit pulse completes', () => {
-  const { context, setTime } = loadMotion();
-  const obj = { id: 'obj-1' };
-  context.BoardfishMotion.applyActionAnimation('copy-selected-objects', { removedObjects: [obj] }, {
-    duration: 200,
-    amplitude: 0.1,
-    translateXPx: 0,
-    translateYPx: 0,
-  });
-
-  assert.deepEqual(plain(context.BoardfishMotion.motionObjectsForDraw().map((item) => item.id)), ['obj-1']);
-
-  setTime(100);
-  const motion = context.BoardfishMotion.objectMotionForDraw(obj);
-  assert.ok(motion.opacity > 0 && motion.opacity < 1);
-  assert.notEqual(motion.scaleX, motion.scaleY);
-
-  setTime(220);
-  assert.equal(context.BoardfishMotion.motionObjectsForDraw(), null);
-  assert.equal(context.BoardfishMotion.objectMotionForDraw(obj), null);
+  assert.ok(context.BoardfishMotion.objectMotionForDraw(text));
 });

@@ -87,9 +87,6 @@ function loadKeyboard(overrides = {}) {
     redo: () => calls.push(['redo']),
     undo: () => calls.push(['undo']),
     duplicateSelected: () => calls.push(['duplicateSelected']),
-    BoardfishMotion: {
-      applyActionAnimation: (name) => calls.push(['motion', name]),
-    },
   };
   context.globalThis = context;
   Object.assign(context, overrides);

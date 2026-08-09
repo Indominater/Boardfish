@@ -138,17 +138,12 @@ function loadClipboardExportHarness(options = {}) {
     },
     BoardfishWebBoardContainer: options.BoardfishWebBoardContainer,
     BoardfishMotion: {
-      applyActionAnimation(action, payload = {}) {
+      applyCopyFeedback(payload = {}) {
         if (payload.textSelection) calls.jello.push({ ...payload.textSelection });
-        if (payload.objects) calls.objectJello.push({
-          action,
-          ids: payload.objects.map((obj) => obj.id),
-        });
+        if (payload.objects) calls.objectJello.push(payload.objects.map((obj) => obj.id));
         if (payload.selection) calls.pulses++;
-        return action !== 'menu-command-press';
+        return true;
       },
-      noteTextSelectionJello(spec) { calls.jello.push({ ...spec }); },
-      pulseSelection() { calls.pulses++; },
     },
     ClipDebug: {
       end(_dbg, meta = {}) { calls.debugEnds.push({ ...meta }); },
@@ -273,7 +268,7 @@ function loadClipboardPasteObjectsHarness() {
       setSource() {},
     },
     BoardfishMotion: {
-      applyActionAnimation() {},
+      applyCopyFeedback() {},
     },
     BoardfishWebLimits: {
       canAddObjects() { return true; },
@@ -357,7 +352,7 @@ function loadTextEditCopyHarness(value) {
       },
     },
     BoardfishMotion: {
-      applyActionAnimation(_action, payload = {}) {
+      applyCopyFeedback(payload = {}) {
         if (payload.textSelection) calls.jello.push({ ...payload.textSelection });
       },
     },
@@ -495,14 +490,7 @@ test('copying a selected text object jiggles immediately while clipboard write c
 
   assert.deepEqual(context.calls.copiedTexts, [context.textObject.data.content]);
   assert.deepEqual(context.calls.jello, []);
-  const objectJello = context.calls.objectJello.map((call) => ({
-    action: call.action,
-    ids: [...call.ids],
-  }));
-  assert.deepEqual(objectJello, [{
-    action: 'copy-text-object',
-    ids: ['text-1'],
-  }]);
+  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['text-1']]);
   assert.equal(context.calls.pulses, 0);
   assert.deepEqual(context.calls.renders, [{
     board: true,
@@ -581,13 +569,7 @@ test('copying an untransformed web PNG image writes source bytes without renderi
 
   context.calls.resolveNextCopiedImage();
   assert.equal(await copyPromise, true);
-  assert.deepEqual(context.calls.objectJello.map((call) => ({
-    action: call.action,
-    ids: [...call.ids],
-  })), [{
-    action: 'copy-selected-objects',
-    ids: ['image-1'],
-  }]);
+  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-1']]);
   assert.equal(context.calls.debugSteps.some((entry) => entry.step === 'copy:web-source-png-blob'), true);
   assert.equal(context.calls.debugEnds.at(-1).path, 'image-web-source-png');
 });

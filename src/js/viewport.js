@@ -363,7 +363,6 @@ const applyTextSelectionMotionTransform = (context, bounds, motion) => {
   const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
   const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
   const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
-  context.globalAlpha = (Number.isFinite(context.globalAlpha) ? context.globalAlpha : 1) * (motion.opacity ?? 1);
   if (translateX || translateY) context.translate(translateX, translateY);
   if (scaleX !== 1 || scaleY !== 1) {
     const scalePivotX = bounds.left + (bounds.right - bounds.left) * scaleOriginX;
@@ -610,17 +609,14 @@ function drawCaret(context, obj, layout, selStart, options = {}) {
 }
 
 const applyObjectMotionForDraw = (context, obj, motion) => {
-  if (!motion || motion.skip || !context.save) return false;
+  if (!motion || !context.save) return false;
   context.save();
-  const opacity = Number.isFinite(motion.opacity) ? Math.max(0, Math.min(1, motion.opacity)) : 1;
-  const scale = Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
-  const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
-  const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
+  const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
+  const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
   const scaleOriginX = Number.isFinite(motion.scaleOriginX) ? Math.max(0, Math.min(1, motion.scaleOriginX)) : 0.5;
   const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
   const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
   const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
-  context.globalAlpha = opacity;
   if (translateX || translateY) context.translate(translateX, translateY);
   if (scaleX !== 1 || scaleY !== 1) {
     const scalePivotX = obj.x + obj.w * scaleOriginX;
@@ -659,12 +655,6 @@ function drawEditingTextOverlay(context, options = {}) {
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, view.zoom);
-  if (motion?.skip) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    return stats;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return;
-  }
   const restoreMotion = applyObjectMotionForDraw(context, obj, motion);
   try {
     const liveSelStart = _editEl ? _editEl.selectionStart : 0;
@@ -1108,7 +1098,7 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   drawTextLineRange,
   getTextLayoutForViewport,
   objectIntersectsRect,
-  motionObjectsForDraw: globalThis.BoardfishMotion?.motionObjectsForDraw,
+  hasObjectMotionsForDraw: globalThis.BoardfishMotion?.hasObjectMotionsForDraw,
   objectMotionForDraw: globalThis.BoardfishMotion?.objectMotionForDraw,
   selectImageSourceForDraw,
 });

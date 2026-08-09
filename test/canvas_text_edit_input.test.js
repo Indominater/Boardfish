@@ -245,7 +245,7 @@ function loadRubberBandHarness() {
       },
     },
     BoardfishMotion: {
-      applyActionAnimation(action) { context.motions.push(action); },
+      applyCopyFeedback(payload) { context.motions.push(payload); },
     },
     scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
     ViewportDebug: { isEnabled: () => false, start() { return {}; }, count() {}, end() {}, timing() {} },

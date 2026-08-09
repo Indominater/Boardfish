@@ -262,11 +262,10 @@ test('jiggle debugger captures motion smoothness and animated image latency evid
   assert.match(viewportSource, /motionSummary,/);
   assert.match(viewportSource, /motionTimeline,/);
 
-  assert.match(motionSource, /recordMotionDebug\(motion\.translateXPx \|\| motion\.translateYPx \? 'jiggle-start'/);
+  assert.match(motionSource, /recordMotionDebug\('jiggle-start'/);
   assert.match(motionSource, /recordMotionDebug\('raf-fired'/);
   assert.match(motionSource, /recordMotionDebug\('render-scheduled'/);
-  assert.match(motionSource, /recordMotionDebug\(jello\.translateXPx \|\| jello\.translateYPx \? 'jiggle-progress'/);
-  assert.match(motionSource, /action: options\.action \|\| ''/);
+  assert.match(motionSource, /recordMotionDebug\('jiggle-progress'/);
 
   assert.match(rendererSource, /lowLatencyImageDraws/);
   assert.match(rendererSource, /motionScaledImages/);
