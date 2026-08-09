@@ -3,8 +3,7 @@
 const EDITABLE_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
 
 function isShortcutKey(e, letter) {
-  const normalizedLetter = letter.toLowerCase();
-  return e.key.toLowerCase() === normalizedLetter || e.code === `Key${normalizedLetter.toUpperCase()}`;
+  return e.key.toLowerCase() === letter || e.code === `Key${letter.toUpperCase()}`;
 }
 
 function isEditableTextShortcutTarget(target) {
@@ -151,7 +150,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Alt') { e.preventDefault(); return; }
 
-  if (noShortcutModifiers && isShortcutKey(e, 'n') && !editingId && !e.repeat) {
+  if (noShortcutModifiers && !editingId && !e.repeat && isShortcutKey(e, 'n')) {
     consumeShortcutEvent(e);
     runShortcutCommand('new-board', () => {
       if (!isBoardInputBlocked()) newBoard();
@@ -214,13 +213,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (commandOnly && isShortcutKey(e, 'i') && !editingId) {
+  if (commandOnly && !editingId && isShortcutKey(e, 'i')) {
     consumeShortcutEvent(e);
     runShortcutCommand('add-images', runAddImagesCommandFromShortcut);
     return;
   }
 
-  if (noShortcutModifiers && isShortcutKey(e, 't') && !editingId && !e.repeat) {
+  if (noShortcutModifiers && !editingId && !e.repeat && isShortcutKey(e, 't')) {
     consumeShortcutEvent(e);
     runShortcutCommand('add-text', runAddTextCommandFromShortcut);
     return;
@@ -240,7 +239,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (commandOnly && isShortcutKey(e, 'o') && !editingId) {
+  if (commandOnly && !editingId && isShortcutKey(e, 'o')) {
     consumeShortcutEvent(e);
     runShortcutCommand('open', openBoard);
     return;
@@ -289,13 +288,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (commandOnly && (e.code === 'BracketLeft' || e.key === '[') && !editingId) {
+  if (commandOnly && !editingId && (e.code === 'BracketLeft' || e.key === '[')) {
     consumeShortcutEvent(e);
     runShortcutCommand('move-to-back', sendSelectedToBack);
     return;
   }
 
-  if (commandOnly && isShortcutKey(e, 'e') && !editingId) {
+  if (commandOnly && !editingId && isShortcutKey(e, 'e')) {
     const imageObjs = BoardfishExportUtils.selectedImageObjects();
     if (contextMenusOpenForShortcut() || imageObjs.length) {
       consumeShortcutEvent(e);
@@ -311,7 +310,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (commandOnly && isShortcutKey(e, 'x') && !editingId) {
+  if (commandOnly && !editingId && isShortcutKey(e, 'x')) {
     consumeShortcutEvent(e);
     runShortcutCommand('cut', cutSelected);
     return;
@@ -335,7 +334,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (commandOnly && isShortcutKey(e, 'd') && !editingId) {
+  if (commandOnly && !editingId && isShortcutKey(e, 'd')) {
     consumeShortcutEvent(e);
     runShortcutCommand('duplicate', duplicateSelected);
   }

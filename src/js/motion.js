@@ -36,27 +36,23 @@
     const t = clamp01(value);
     return t * t * t * (t * (t * 6 - 15) + 10);
   };
-  const springImpulse = (timeSec, freqHz, dampingRatio) => {
-    const omega0 = 2 * Math.PI * freqHz;
-    const omegaD = omega0 * Math.sqrt(1 - dampingRatio * dampingRatio);
-    return Math.exp(-dampingRatio * omega0 * timeSec) * Math.sin(omegaD * timeSec);
-  };
+  const springImpulse = (timeSec, decay, omegaD) =>
+    Math.exp(-decay * timeSec) * Math.sin(omegaD * timeSec);
 
   const jiggleUnit = (t) => {
-    const timeSec = t * (DURATION_MS / 1000);
-    const attackSec = Math.max(0.001, 44 / 1000);
+    const timeSec = t * 0.5;
+    const attackSec = 0.044;
     const xAttack = smootherstep(timeSec / attackSec);
-    const settle = 1 - smootherstep((t - 0.84) / Math.max(0.001, 1 - 0.84));
-    const yTimeSec = timeSec - 16 / 1000;
+    const settle = 1 - smootherstep((t - 0.84) / 0.16000000000000003);
+    const yTimeSec = timeSec - 0.016;
     const yAttack = yTimeSec > 0 ? smootherstep(yTimeSec / attackSec) : 0;
-    const xBase = springImpulse(timeSec, 4.65, 0.34);
-    const yBase = yTimeSec > 0 ? springImpulse(yTimeSec, 3.55, 0.24) : 0;
+    const xBase = springImpulse(timeSec, 9.933715970650928, 27.476232850677572);
+    const yBase = yTimeSec > 0 ? springImpulse(yTimeSec, 5.353273881717007, 21.653388109167604) : 0;
     const coupledX = (
-      (yTimeSec > 0 ? springImpulse(yTimeSec, 3.55 * 1.32, 0.24 + 0.08) : 0) * 0.16
+      (yTimeSec > 0 ? springImpulse(yTimeSec, 9.421762031821933, 27.89482072193853) : 0) * 0.16
     );
-    const sagRise = Math.max(3.2 + 6, 3.2 * 3.5);
     const sag = yTimeSec > 0
-      ? (Math.exp(-3.2 * yTimeSec) - Math.exp(-sagRise * yTimeSec)) * 0.08
+      ? (Math.exp(-3.2 * yTimeSec) - Math.exp(-11.200000000000001 * yTimeSec)) * 0.08
       : 0;
     return {
       x: (xBase * xAttack + coupledX * yAttack) * settle,
@@ -65,12 +61,11 @@
   };
 
   const jiggleShapeUnit = (t) => {
-    const timeSec = t * (DURATION_MS / 1000);
-    const shapeTimeSec = timeSec - (16 + 28) / 1000;
+    const shapeTimeSec = t * 0.5 - 0.044;
     if (shapeTimeSec <= 0) return 0;
-    const attack = smootherstep(shapeTimeSec / Math.max(0.001, 44 / 1000));
-    const settle = 1 - smootherstep((t - 0.84) / Math.max(0.001, 1 - 0.84));
-    return springImpulse(shapeTimeSec, 3.15, 0.32) * attack * settle;
+    const attack = smootherstep(shapeTimeSec / 0.044);
+    const settle = 1 - smootherstep((t - 0.84) / 0.16000000000000003);
+    return springImpulse(shapeTimeSec, 6.3334507896370225, 18.7513199475259) * attack * settle;
   };
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

@@ -645,12 +645,14 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
   }
   _pasteInProgress = true;
   try {
+    let browserClipboardItems = null;
     if (jsClipboard && (clipboardData || _jsClipboardWebMaybeStale)) {
       const webClipboardToken = await readWebClipboardTokenForPaste(clipboardData
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         , dbg
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       );
+      browserClipboardItems = webClipboardToken.items || null;
       if (!jsClipboardStillCurrent(
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         dbg,
@@ -926,11 +928,23 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     }
     const releaseInputShield = acquireInputShield();
     try {
-      const imageBlob = await BoardfishClipboardIO.readClipboardImageBlobFromBrowser(
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        dbg
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      const clipboardItems = browserClipboardItems || (
+        navigator.clipboard?.read ? await navigator.clipboard.read() : []
       );
+      let imageBlob = null;
+      for (const item of clipboardItems) {
+        for (const type of item.types) {
+          if (type !== 'image/png' && type !== 'image/jpeg') continue;
+          imageBlob = await item.getType(type);
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          if (collectClipboardDiagnostics) {
+            ClipDebug.step(dbg, 'browser-image-blob', { type, blobSize: imageBlob.size });
+          }
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          break;
+        }
+        if (imageBlob) break;
+      }
       if (imageBlob) {
         releaseInputShield();
         await pasteWebImageBlob(imageBlob, wx, wy

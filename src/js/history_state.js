@@ -239,45 +239,14 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function hydrateRestoredTextCachesFromLiveObjects(restoredObjects = []) {
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    for (const obj of restoredObjects || []) {
-      if (!obj || obj.type !== 'text' || !obj.id) continue;
-      const live = objectsMap.get(obj.id);
-      if (!live || live === obj || live.type !== 'text') continue;
-      cloneTextObjectRuntimeCaches(live, obj);
-    }
-    return;
+function cloneObjectsForHistoryRestore(snapshotObjects = []) {
+  const clones = new Array(snapshotObjects.length);
+  for (let i = 0; i < snapshotObjects.length; i++) {
+    const clone = clones[i] = cloneObject(snapshotObjects[i], true);
+    const live = clone.type === 'text' && clone.id ? objectsMap.get(clone.id) : null;
+    if (live && live !== clone && live.type === 'text') cloneTextObjectRuntimeCaches(live, clone);
   }
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let candidates = 0;
-  let hydrated = 0;
-  let layoutCaches = 0;
-  let scriptRangeCaches = 0;
-  let scriptMetricCaches = 0;
-  for (const obj of restoredObjects || []) {
-    if (!obj || obj.type !== 'text' || !obj.id) continue;
-    const live = objectsMap.get(obj.id);
-    if (!live || live === obj || live.type !== 'text') continue;
-    candidates++;
-    const hadLayout = Array.isArray(obj._layoutCache);
-    const hadScriptRanges = Array.isArray(obj._textScriptRangesCache);
-    const hadScriptMetrics = !!obj._textScriptLayoutMetrics;
-    cloneTextObjectRuntimeCaches(live, obj);
-    const hasLayout = Array.isArray(obj._layoutCache);
-    const hasScriptRanges = Array.isArray(obj._textScriptRangesCache);
-    const hasScriptMetrics = !!obj._textScriptLayoutMetrics;
-    const changed = (!hadLayout && hasLayout) ||
-      (!hadScriptRanges && hasScriptRanges) ||
-      (!hadScriptMetrics && hasScriptMetrics);
-    if (!changed) continue;
-    hydrated++;
-    if (!hadLayout && hasLayout) layoutCaches++;
-    if (!hadScriptRanges && hasScriptRanges) scriptRangeCaches++;
-    if (!hadScriptMetrics && hasScriptMetrics) scriptMetricCaches++;
-  }
-  return { candidates, hydrated, layoutCaches, scriptRangeCaches, scriptMetricCaches };
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  return clones;
 }
 
 function snapshot() {
@@ -482,15 +451,7 @@ function restoreSnapshot(s, {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cloneObjectsStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const clonedSnapshotObjects = cloneObjects(snapshotObjects, true);
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    hydrateRestoredTextCachesFromLiveObjects(clonedSnapshotObjects);
-  } else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const liveCacheHydrateMeta = hydrateRestoredTextCachesFromLiveObjects(clonedSnapshotObjects);
-    HistoryDebug.step(dbg, 'hydrate-live-text-caches', liveCacheHydrateMeta);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
+  const clonedSnapshotObjects = cloneObjectsForHistoryRestore(snapshotObjects);
   if (preserveLiveEdit) {
     for (const key of Object.keys(liveEditObject)) delete liveEditObject[key];
     Object.assign(liveEditObject, clonedSnapshotObjects[liveEditIndex]);

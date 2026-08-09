@@ -152,6 +152,7 @@ function loadViewportStateHarness({
     console,
     devicePixelRatio: dpr,
     boardCanvas: { width: width * dpr, height: height * dpr },
+    boardSurfaceCssSize: () => ({ width, height }),
     objects,
   };
   vm.createContext(context);

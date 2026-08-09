@@ -24,7 +24,7 @@ var imageScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
     dropDrawableBitmapWarmup(entry?.bitmap);
   },
 });
-var imageScaledBitmapCache = imageScaledBitmapStore.groups; // key -> Map(scale -> { bitmap, bytes })
+var imageScaledBitmapCache = imageScaledBitmapStore.groups; // key -> Map(scale -> LRU node)
 var imageScaledBitmapPending = new Map(); // pending key -> estimated bytes
 var imageScaledBitmapFailures = new Map();
 var imageScaledBitmapPendingByteTotal = 0;
@@ -518,8 +518,7 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
       : false;
   }
   const pendingKey = `${key}:${scale}`;
-  const map = imageScaledBitmapCache.get(key);
-  if (map?.has(scale)) {
+  if (imageScaledBitmapStore.has(key, scale)) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: true, skipped: 'already-ready' }
       : true;
@@ -672,8 +671,7 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
       : false;
   }
   const pendingKey = `${key}:${scale}`;
-  const map = imageScaledBitmapCache.get(key);
-  if (map?.has(scale)) {
+  if (imageScaledBitmapStore.has(key, scale)) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, queued: false, skipped: 'already-ready' }
       : false;
@@ -908,7 +906,7 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
 }
 
 function hasScaledImageVariant(key, scale) {
-  return !!imageScaledBitmapCache.get(key)?.has(scale);
+  return imageScaledBitmapStore.has(key, scale);
 }
 
 function isScaledImageVariantPending(key, scale) {

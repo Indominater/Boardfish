@@ -78,14 +78,6 @@
     };
   }
 
-  function currentBoardSurfaceSize() {
-    const dpr = root.devicePixelRatio || 1;
-    return {
-      width: boardCanvas.width / dpr,
-      height: boardCanvas.height / dpr,
-    };
-  }
-
   function constrainPan(
     nextPanX = panX,
     nextPanY = panY,
@@ -95,7 +87,7 @@
     const constrained = clampPanToBoardMasterBox(
       { panX: nextPanX, panY: nextPanY, zoom: nextZoom },
       objects,
-      currentBoardSurfaceSize(),
+      boardSurfaceCssSize(),
       lockAtBoundary ? { panX, panY, zoom } : null,
     );
     panX = constrained.panX;

@@ -8,7 +8,6 @@
     onEvict = null,
   }) {
     const groups = new Map();
-    const entryNodes = new WeakMap();
     let lruHead = null;
     let lruTail = null;
     let bytes = 0;
@@ -43,58 +42,46 @@
       lruTail = node;
     }
 
-    function touchEntry(key, slot, entry) {
-      let node = entryNodes.get(entry);
-      if (node && lruTail === node) return;
-      if (!node) {
-        node = { key, slot, entry, prev: null, next: null };
-        entryNodes.set(entry, node);
-      } else detachLruNode(node);
+    function touchNode(node) {
+      if (lruTail === node) return;
+      detachLruNode(node);
       appendLruNode(node);
     }
 
-    function untrackEntry(entry) {
-      const node = entryNodes.get(entry);
-      if (!node) return;
+    function evictNode(group, node, notify = false, dropEmptyGroup = true) {
       detachLruNode(node);
-      entryNodes.delete(entry);
-    }
-
-    function evictEntry(key, group, slot, entry, notify = false, dropEmptyGroup = true) {
-      untrackEntry(entry);
-      close(entry);
-      bytes -= entryBytes(entry);
-      group.delete(slot);
-      if (dropEmptyGroup && !group.size) groups.delete(key);
-      if (notify && onEvict) onEvict(entry, key, slot);
+      close(node.entry);
+      bytes -= entryBytes(node.entry);
+      group.delete(node.slot);
+      if (dropEmptyGroup && !group.size) groups.delete(node.key);
+      if (notify && onEvict) onEvict(node.entry, node.key, node.slot);
     }
 
     function set(key, slot, entry) {
       const group = getGroup(key);
       const existing = group.get(slot);
-      if (existing) {
-        evictEntry(key, group, slot, existing, false, false);
-      }
-      group.set(slot, entry);
-      touchEntry(key, slot, entry);
+      if (existing) evictNode(group, existing, false, false);
+      const node = { key, slot, entry, prev: null, next: null };
+      group.set(slot, node);
+      appendLruNode(node);
       bytes += entryBytes(entry);
       prune();
       return entry;
     }
 
     function get(key, slot) {
-      const entry = groups.get(key)?.get(slot) || null;
-      if (entry) touchEntry(key, slot, entry);
-      return entry;
+      const node = groups.get(key)?.get(slot) || null;
+      if (node) touchNode(node);
+      return node?.entry || null;
     }
 
     function removeGroup(key) {
       const group = groups.get(key);
       if (!group) return;
-      for (const entry of group.values()) {
-        untrackEntry(entry);
-        close(entry);
-        bytes -= entryBytes(entry);
+      for (const node of group.values()) {
+        detachLruNode(node);
+        close(node.entry);
+        bytes -= entryBytes(node.entry);
       }
       groups.delete(key);
       bytes = Math.max(0, bytes);
@@ -112,13 +99,7 @@
       while (bytes > memoryLimit && lruHead) {
         const node = lruHead;
         const group = groups.get(node.key);
-        const entry = group?.get(node.slot) || null;
-        if (entry !== node.entry) {
-          detachLruNode(node);
-          entryNodes.delete(node.entry);
-          continue;
-        }
-        evictEntry(node.key, group, node.slot, node.entry, true);
+        evictNode(group, node, true);
       }
       bytes = Math.max(0, bytes);
     }
@@ -127,6 +108,7 @@
       groups,
       get bytes() { return bytes; },
       get,
+      has: (key, slot) => groups.get(key)?.has(slot) || false,
       set,
       removeGroup,
       clear,

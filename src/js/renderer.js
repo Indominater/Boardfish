@@ -660,12 +660,12 @@
         const onlyText = options.onlyText === true;
         const cullingEnabled = deps.viewportCullingEnabled();
         const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
-        const drawObject = (obj) => {
-          if (obj.id === skipId || skipIds?.has(obj.id)) return;
-          if (skipText && obj.type === 'text') return;
-          if (onlyText && obj.type !== 'text') return;
+        for (const obj of deps.objects()) {
+          if (obj.id === skipId || skipIds?.has(obj.id)) continue;
+          if (skipText && obj.type === 'text') continue;
+          if (onlyText && obj.type !== 'text') continue;
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
-          if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) return;
+          if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) continue;
           if (motion && context.save) {
             const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
             const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
@@ -696,9 +696,7 @@
           } finally {
             if (motion && context.restore) context.restore();
           }
-        };
-
-        for (const obj of deps.objects()) drawObject(obj);
+        }
         return;
       } else {
       const skipId = options.skipId || null;
@@ -714,17 +712,17 @@
       const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
       let drawnImages = 0;
       let drawnText = 0;
-      const drawObject = (obj, countObject = true) => {
-        if (countObject && counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if (obj.id === skipId || skipIds?.has(obj.id)) return;
-        if (skipText && obj.type === 'text') return;
-        if (onlyText && obj.type !== 'text') return;
+      for (const obj of deps.objects()) {
+        if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
+        if (obj.id === skipId || skipIds?.has(obj.id)) continue;
+        if (skipText && obj.type === 'text') continue;
+        if (onlyText && obj.type !== 'text') continue;
         const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
-          if (countObject) countCulledObject(obj, counters);
-          return;
+          countCulledObject(obj, counters);
+          continue;
         }
-        if (countObject && counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
+        if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
         if (motion) {
           const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
           const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
@@ -736,7 +734,7 @@
             : 0.5;
           const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
           const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
-          if (countObject && counters) {
+          if (counters) {
             counters.motionObjects = (counters.motionObjects || 0) + 1;
             if (obj.type === 'image') counters.motionImages = (counters.motionImages || 0) + 1;
             else if (obj.type === 'text') counters.motionText = (counters.motionText || 0) + 1;
@@ -813,10 +811,6 @@
         }
         if (obj.type === 'image' && drawn) drawnImages++;
         else if (obj.type === 'text') drawnText++;
-      };
-
-      for (const obj of deps.objects()) {
-        drawObject(obj, true);
       }
       return { drawnImages, drawnText };
       }

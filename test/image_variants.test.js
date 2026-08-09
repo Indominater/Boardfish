@@ -151,7 +151,7 @@ test('grouped bitmap cache keeps a group tracked when replacing its only variant
   store.set('img-a', 0.25, { id: 'a2', bytes: 4 });
 
   assert.equal(store.get('img-a', 0.25).id, 'a2');
-  assert.equal(store.groups.get('img-a').get(0.25).id, 'a2');
+  assert.equal(store.groups.get('img-a').get(0.25).entry.id, 'a2');
   assert.deepEqual(closed, ['a1']);
   assert.equal(store.bytes, 4);
 });

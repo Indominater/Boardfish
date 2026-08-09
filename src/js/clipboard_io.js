@@ -269,42 +269,12 @@
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  async function readClipboardImageBlobFromBrowser(
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    dbg = null
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  ) {
-    if (!navigator.clipboard?.read) return null;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectClipboardIoDiagnostics) ClipDebug.step(dbg, 'browser-clipboard-read:start');
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const items = await navigator.clipboard.read();
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectClipboardIoDiagnostics) {
-      ClipDebug.step(dbg, 'browser-clipboard-read:ok', { itemCount: items.length });
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    for (const item of items) {
-      for (const type of item.types) {
-        if (type !== 'image/png' && type !== 'image/jpeg') continue;
-        const blob = await item.getType(type);
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectClipboardIoDiagnostics) {
-          ClipDebug.step(dbg, 'browser-image-blob', { type, blobSize: blob.size });
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        return blob;
-      }
-    }
-    return null;
-  }
-
   async function readBoardfishClipboardTokenFromBrowser(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     dbg = null
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) {
-    if (!navigator.clipboard?.read) return { checked: false, token: '' };
+    if (!navigator.clipboard?.read) return { checked: false, token: '', items: null };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectClipboardIoDiagnostics) {
       ClipDebug.step(dbg, 'browser-clipboard-token-read:start');
@@ -321,14 +291,14 @@
         ClipDebug.step(dbg, 'browser-clipboard-token-read:ok', { tokenFound: !!token });
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return { checked: true, token };
+      return { checked: true, token, items };
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectClipboardIoDiagnostics) {
       ClipDebug.step(dbg, 'browser-clipboard-token-read:ok', { tokenFound: false });
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return { checked: true, token: '' };
+    return { checked: true, token: '', items };
   }
 
   async function copyBoardfishTokenToClipboard(token
@@ -392,7 +362,6 @@
     copyTextToClipboard,
     readBoardfishClipboardTokenFromBrowser,
     readBoardfishClipboardTokenFromEvent,
-    readClipboardImageBlobFromBrowser,
     readClipboardImageFileFromEvent,
     readClipboardTextFromEvent,
   };

@@ -140,7 +140,6 @@ function loadPasteHarness({ browserText = '', normalizeExternalText = (value) =>
     BoardfishClipboardIO: {
       describeClipboardData() { return {}; },
       readClipboardImageFileFromEvent() { return null; },
-      readClipboardImageBlobFromBrowser() { return Promise.resolve(null); },
       readClipboardTextFromEvent(clipboardData) {
         return clipboardData?.getData?.('text/plain') || '';
       },

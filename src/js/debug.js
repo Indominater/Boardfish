@@ -2532,11 +2532,11 @@ var ViewportDebug = (() => {
     const byScale = {};
     let variantCount = 0;
     for (const map of imageScaledBitmapCache.values()) {
-      for (const [scale, entry] of map.entries()) {
+      for (const [scale, node] of map.entries()) {
         variantCount++;
         if (!byScale[scale]) byScale[scale] = { count: 0, mb: 0 };
         byScale[scale].count++;
-        byScale[scale].mb += (entry.bytes || 0) / 1024 / 1024;
+        byScale[scale].mb += (node.entry.bytes || 0) / 1024 / 1024;
       }
     }
     const rows = Object.entries(byScale).map(([scale, row]) => ({
@@ -2631,7 +2631,7 @@ var ViewportDebug = (() => {
             const sourceW = fullSource?.width || fullSource?.naturalWidth || 0;
             const sourceH = fullSource?.height || fullSource?.naturalHeight || 0;
             visibleScaledVariantMB += scaledVariantEstimatedBytes(sourceW, sourceH, targetScale) / 1024 / 1024;
-            if (imageScaledBitmapCache.get(key)?.has(targetScale)) visibleImagesWithScaledVariant++;
+            if (imageScaledBitmapStore.has(key, targetScale)) visibleImagesWithScaledVariant++;
             else visibleImagesMissingScaledVariant++;
           }
         } else culledImages++;
