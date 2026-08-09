@@ -57,6 +57,7 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
     currentViewportWorldRect() { return null; },
     invalidateOffscreen() {},
     scheduleRender() {},
+    queueVisibleImageHydration() {},
   };
   if (supportsCreateImageBitmap) {
     context.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
@@ -646,24 +647,49 @@ test('open prewarm builds visible scaled variants before first render', async ()
   assert.equal(resizeOptions[0].resizeQuality, 'high');
 });
 
-test('visible variant prewarm keeps one timer and waits for the latest input', () => {
+test('visible image idle work shares one timer and waits for the latest input', () => {
   const context = loadImageVariantsForPlatform(false);
   const clock = installManualTimers(context);
+  const hydrations = [];
   let now = 1000;
   context.performance.now = () => now;
   context.lastViewportInputAt = now;
   context.currentViewportWorldRect = () => ({});
+  context.queueVisibleImageHydration = (limit) => hydrations.push(limit);
 
-  context.scheduleVisibleScaledVariantPrewarmAfterIdle();
+  context.scheduleVisibleImageWorkAfterIdle();
+  context._boardOpening = true;
+  clock.run(clock.pending()[0]);
+  assert.deepEqual(hydrations, []);
+  context._boardOpening = false;
+  context.scheduleVisibleImageWorkAfterIdle();
   now = context.lastViewportInputAt = 1100;
-  context.scheduleVisibleScaledVariantPrewarmAfterIdle();
-  assert.equal(clock.timers.length, 1);
+  context.scheduleVisibleImageWorkAfterIdle();
+  assert.equal(clock.pending().length, 1);
   now = 1180;
   clock.run(clock.pending()[0]);
   assert.equal(clock.pending()[0].ms, 100);
   now = 1280;
   clock.run(clock.pending()[0]);
+  assert.deepEqual(hydrations, [1]);
   assert.equal(context.imageScaledVariantPrewarmRunCount, 1);
+  context.scheduleVisibleImageWorkAfterIdle();
+  context.clearScaledImageVariants();
+  assert.equal(clock.pending().length, 0);
+});
+
+test('visible image idle work hydrates when scaled variants are unavailable', () => {
+  const context = loadImageVariantsForPlatform(false, false);
+  const clock = installManualTimers(context);
+  const hydrations = [];
+  context.performance.now = () => 180;
+  context.queueVisibleImageHydration = (limit) => hydrations.push(limit);
+
+  context.scheduleVisibleImageWorkAfterIdle();
+  clock.run(clock.pending()[0]);
+
+  assert.deepEqual(hydrations, [1]);
+  assert.equal(context.imageScaledVariantPrewarmRunCount, 0);
 });
 
 test('scaled variant ready render uses input activity at timer fire after input settles', () => {

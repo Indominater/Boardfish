@@ -363,6 +363,7 @@ function loadTextEditCopyHarness(value) {
     },
     MenuDebug: { log() {} },
     clearJsClipboard() {},
+    focusTextEditProxyNow(proxy) { proxy?.focus({ preventScroll: true }); },
     scheduleRender(board, overlay, sourceName) {
       calls.renders.push({ board, overlay, source: sourceName });
     },

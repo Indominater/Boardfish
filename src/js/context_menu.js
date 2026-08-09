@@ -225,17 +225,7 @@ const getTextEditSelectionState = () => {
   };
 };
 
-const focusTextEditProxy = () => {
-  if (!_editEl) return;
-  _editEl.focus({ preventScroll: true });
-};
-
-const selectedTextForEditMenu = () => {
-  const selection = getTextEditSelectionState();
-  if (!selection?.hasSelection || !_editEl) return '';
-  const value = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
-  return value.slice(selection.start, selection.end);
-};
+const focusTextEditProxy = () => focusTextEditProxyNow(_editEl);
 
 const readTextClipboardForEditMenu = async () => {
   try {
@@ -264,12 +254,12 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
   const selection = getTextEditSelectionState();
   if (!selection || !_editEl) return false;
-  const inputTypeValue = String(inputType || '');
+  const inputTypeValue = String(inputType || '').toLowerCase();
   const normalizedText = normalizeTextContent(text);
-  const replacementText = inputTypeValue.toLowerCase().includes('paste') && typeof textForTextObjectPaste === 'function'
+  const replacementText = inputTypeValue.includes('paste') && typeof textForTextObjectPaste === 'function'
     ? textForTextObjectPaste(normalizedText)
     : normalizedText;
-  if (inputTypeValue.toLowerCase().includes('paste') && !replacementText) return false;
+  if (inputTypeValue.includes('paste') && !replacementText) return false;
   const oldValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
   const obj = objectsMap.get(editingId);
   const replacementState = {
@@ -309,7 +299,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   typeof replaceTextEditProxyRange === 'function'
     ? replaceTextEditProxyRange(_editEl, replacementText, selection.start, selection.end, 'end', {
-      deferDomValue: inputType && String(inputType).toLowerCase().startsWith('delete'),
+      deferDomValue: inputTypeValue.startsWith('delete'),
     })
     : (() => {
       _editEl.setRangeText(replacementText, selection.start, selection.end, 'end');
@@ -405,7 +395,7 @@ const copyTextEditSelection = async () => {
 };
 
 const deleteTextEditSelection = () => {
-  if (!selectedTextForEditMenu()) {
+  if (!getTextEditSelectionState()?.hasSelection) {
     focusTextEditProxy();
     return;
   }

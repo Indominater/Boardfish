@@ -104,13 +104,6 @@ function storeAppTheme() {
   } catch (_) {}
 }
 
-function refreshCanvasThemeColorCache() {
-  const style = getComputedStyle(document.body);
-  _canvasThemeColorCache['--canvas-bg'] = style.getPropertyValue('--canvas-bg').trim() || '#d6d8da';
-  _canvasThemeColorCache['--canvas-text'] = style.getPropertyValue('--canvas-text').trim() || '#15141A';
-  _canvasThemeColorCache['--selection-highlight'] = style.getPropertyValue('--selection-highlight').trim() || 'rgba(10, 132, 255, 0.3)';
-}
-
 function repaintBoardForThemeChange() {
   if (typeof invalidateOffscreen === 'function') invalidateOffscreen();
   if (typeof scheduleRender === 'function') {
@@ -137,7 +130,8 @@ function applyAppTheme(theme, {
   appTheme = nextTheme;
   document.body.dataset.theme = appTheme;
   if (appThemeMeta) appThemeMeta.setAttribute('content', appTheme === 'dark' ? '#1c1b22' : '#eaeaed');
-  refreshCanvasThemeColorCache();
+  _canvasThemeColorCache['--canvas-bg'] = appTheme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
+  _canvasThemeColorCache['--canvas-text'] = appTheme === 'dark' ? '#fbfbfe' : '#15141A';
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */

@@ -947,8 +947,8 @@ function cacheImage(key, src
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       );
     }
-    if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
-      scheduleVisibleScaledVariantPrewarmAfterIdle(
+    if (typeof scheduleVisibleImageWorkAfterIdle === 'function') {
+      scheduleVisibleImageWorkAfterIdle(
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         'image-ready'
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1101,7 +1101,6 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
 };
 
 function clearImageStore() {
-  if (typeof clearVisibleHydrationTimer === 'function') clearVisibleHydrationTimer();
   _imageStoreGeneration++;
   for (const k in imageStore) {
     if (!Object.prototype.hasOwnProperty.call(imageStore, k)) continue;

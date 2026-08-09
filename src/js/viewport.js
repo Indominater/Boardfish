@@ -193,7 +193,7 @@ function _rebuildOffscreen(dpr, viewportRect) {
 
   if (_offscreen.width !== boardCanvas.width) _offscreen.width = boardCanvas.width;
   if (_offscreen.height !== boardCanvas.height) _offscreen.height = boardCanvas.height;
-  _offCtx.setTransform(1, 0, 0, 1, 0, 0);
+  resetCanvasToScreen(_offCtx);
   fillBoardBackground(_offCtx, _offscreen.width, _offscreen.height);
   setWorldCanvasTransform(_offCtx, dpr);
   const drawOptions = { viewportRect, view: { zoom, dpr } };
@@ -203,8 +203,6 @@ function _rebuildOffscreen(dpr, viewportRect) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') drawSingleObj(_offCtx, obj, null, drawOptions);
     else drawSingleObj(_offCtx, obj, drawOptions);
   }
-  resetCanvasToScreen(_offCtx);
-
   _offscreenDirty = false;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   ViewportDebug.end(dbg);
@@ -492,7 +490,6 @@ const drawTextSelectionContentJello = (context, obj, layout, selStart, selEnd, o
   if (!motion) return false;
   context.save();
   applyTextSelectionMotionTransform(context, selection.bounds, motion);
-  context.fillStyle = canvasTextColor();
   for (const run of selection.runs) {
     if (run.endOffset > run.startOffset) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -602,7 +599,6 @@ function drawCaret(context, obj, layout, selStart, options = {}) {
     }
   }
   if (!caretLine || !textLayoutLineIntersectsViewport(caretLine, options.viewportRect || null)) return false;
-  context.fillStyle = canvasTextColor();
   const viewZoom = Number(options.view?.zoom ?? zoom);
   const caretZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
   const caretWidth = 2 / caretZoom;
@@ -1007,15 +1003,14 @@ function applyTransform(
     }
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  scheduleVisibleHydrationAfterIdle();
   // The frame already laid out and drew the visible text. The legacy automatic
   // prewarm rescanned up to 100 large text objects in one unbounded main-thread
   // callback, which could delay the next gesture. Keep prewarm available to the
   // explicit performance debugger, but do not run it after navigation.
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
+    scheduleVisibleImageWorkAfterIdle(_activeRenderSource || 'transform');
   } else {
-    scheduleVisibleScaledVariantPrewarmAfterIdle();
+    scheduleVisibleImageWorkAfterIdle();
   }
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
     syncIslandZoomDisplay();
@@ -1138,18 +1133,15 @@ function withRenderSource(source, fn) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function finishMotionViewportRenderFrame(source, meta = {}) {
-  const finishFrame = globalThis.BoardfishMotion?.afterViewportRenderFrame;
-  if (typeof finishFrame !== 'function') return;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    finishFrame({
-      source: source || _activeRenderSource || 'render',
-      ...meta,
-    });
-  } else {
-    finishFrame();
-  }
-}
+var finishMotionViewportRenderFrame = globalThis.BoardfishMotion?.afterViewportRenderFrame || (() => {});
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
+finishMotionViewportRenderFrame = (source, meta = {}) => {
+  globalThis.BoardfishMotion?.afterViewportRenderFrame?.({
+    source: source || _activeRenderSource || 'render',
+    ...meta,
+  });
+};
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 function textPrewarmLogicalLineCount(content) {

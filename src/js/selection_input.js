@@ -296,7 +296,6 @@ const isEventInsideViewportWheelSurface = (e) => {
 };
 
 function isShieldInputAllowed(e) {
-  if (!isBoardInputBlocked()) return !isUnsavedDialogOpen() || isEventInsideUnsavedDialog(e);
   if (isUnsavedDialogOpen()) return isEventInsideUnsavedDialog(e);
   if (isEventInsideVisibleContextMenu(e)) return true;
   if (_boardOpening || !_inputShieldStack.length) return false;
@@ -317,6 +316,7 @@ function blockShieldInput(e) {
       return;
     }
   }
+  if (!_boardOpening && !_inputShieldStack.length && _dialogResolve === null) return;
   if (isShieldInputAllowed(e)) return;
   ViewportDebug.recordShieldBlock?.(e, { reason: 'input-shield' });
   if (e.cancelable) e.preventDefault();

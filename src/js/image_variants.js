@@ -1000,27 +1000,30 @@ function prewarmVisibleScaledImageVariants(options = {}) {
   }
 }
 
-function scheduleVisibleScaledVariantPrewarmAfterIdle(
+function scheduleVisibleImageWorkAfterIdle(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   reason,
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   options = {}
 ) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && reason === undefined) reason = 'viewport-settled';
-  if (!isViewportImageScalingActive() || _boardOpening) return;
+  if (_boardOpening) return;
   if (imageScaledVariantPrewarmTimer !== null) return;
   imageScaledVariantPrewarmTimer = setTimeout(() => {
     imageScaledVariantPrewarmTimer = null;
+    if (_boardOpening) return;
     const inputIdleMs = performance.now() - lastViewportInputAt;
     if (inputIdleMs < IMAGE_VARIANT_INPUT_IDLE_MS) {
       const retryOptions = { ...options, delayMs: IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs };
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        scheduleVisibleScaledVariantPrewarmAfterIdle(reason, retryOptions);
+        scheduleVisibleImageWorkAfterIdle(reason, retryOptions);
       } else {
-        scheduleVisibleScaledVariantPrewarmAfterIdle(retryOptions);
+        scheduleVisibleImageWorkAfterIdle(retryOptions);
       }
       return;
     }
+    queueVisibleImageHydration(1);
+    if (!isViewportImageScalingActive()) return;
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       prewarmVisibleScaledImageVariants({ ...options, reason });
     } else {

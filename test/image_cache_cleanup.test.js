@@ -70,7 +70,7 @@ function loadImageState(createImageBitmap) {
     },
     invalidateOffscreen() {},
     scheduleRender() {},
-    scheduleVisibleScaledVariantPrewarmAfterIdle() {},
+    scheduleVisibleImageWorkAfterIdle() {},
     _bulkImageInsertDepth: 0,
     _boardOpening: false,
     _imageReadyLastRender: 0,
@@ -556,10 +556,10 @@ test('open preview fallback queues dynamic previews for active low-zoom fallback
   assert.deepEqual(renderSources, ['open-preview-dynamic-ready']);
 });
 
-test('clearImageStore clears any pending visible hydration timer hook', () => {
+test('clearImageStore clears shared scaled image work', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   let clears = 0;
-  context.clearVisibleHydrationTimer = () => { clears++; };
+  context.clearScaledImageVariants = () => { clears++; };
 
   context.clearImageStore(false);
 

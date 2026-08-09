@@ -256,8 +256,6 @@ function measureRawTextWWithFont(text, font, cache) {
   if (cache.size >= TEXT_MEASURE_CACHE_MAX_ENTRIES) {
     cache.delete(cache.keys().next().value);
   }
-  const previousFont = _measureCtx.font;
-  if (previousFont !== font) _measureCtx.font = font;
   let width = 0;
   let previousUnit = null;
   forEachTextSpacingUnit(value, (unit) => {
@@ -265,7 +263,6 @@ function measureRawTextWWithFont(text, font, cache) {
     width += measureTextGlyphMetricsWithFont(unit, font).width;
     previousUnit = unit;
   });
-  if (_measureCtx.font !== previousFont) _measureCtx.font = previousFont;
   cache.set(value, width);
   return width;
 }
@@ -363,10 +360,8 @@ function measureTextGlyphMetricsWithFont(text, font = FONT) {
     return hit;
   }
 
-  const previousFont = _measureCtx.font;
-  if (previousFont !== font) _measureCtx.font = font;
+  if (_measureCtx.font !== font) _measureCtx.font = font;
   const metrics = _measureCtx.measureText(value);
-  if (_measureCtx.font !== previousFont) _measureCtx.font = previousFont;
 
   const measuredWidth = Number(metrics?.width);
   const width = Number.isFinite(measuredWidth) ? measuredWidth : 0;

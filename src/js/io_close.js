@@ -935,21 +935,6 @@ function queueVisibleImageHydration(limit = 3
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   );
 }
-var _visibleHydrationTimer = null;
-const clearVisibleHydrationTimer = () => {
-  clearTimeout(_visibleHydrationTimer);
-  _visibleHydrationTimer = null;
-};
-
-function scheduleVisibleHydrationAfterIdle() {
-  if (_boardOpening) return;
-  clearVisibleHydrationTimer();
-  _visibleHydrationTimer = setTimeout(() => {
-    _visibleHydrationTimer = null;
-    if (_boardOpening) return;
-    queueVisibleImageHydration(1);
-  }, 180);
-}
 
 var openHydrationMode = 'visible-first';
 var OPEN_HYDRATION_MODES = new Set(['all-before-open', 'visible-first']);
