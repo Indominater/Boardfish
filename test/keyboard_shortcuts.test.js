@@ -62,7 +62,6 @@ function loadKeyboard(overrides = {}) {
     toWorld: (x, y) => ({ x: x + 1, y: y + 1 }),
     hasSelection: () => false,
     applyTextLineAlignmentRange: () => false,
-    textLogicalLineCount: () => 1,
     markDirty: () => calls.push(['markDirty']),
     scheduleRender: () => calls.push(['scheduleRender']),
     pushHistory: () => calls.push(['pushHistory']),
@@ -340,7 +339,6 @@ test('cmd+arrow text alignment still applies to selected text objects outside ed
       calls.push(['align', obj.id, startLine, endLine, direction]);
       return true;
     },
-    textLogicalLineCount: () => 2,
     markDirty: (id) => calls.push(['markDirty', id]),
     scheduleRender: (board, overlay, reason) => calls.push(['scheduleRender', board, overlay, reason]),
     pushHistory: (reason) => calls.push(['pushHistory', reason]),
@@ -352,7 +350,7 @@ test('cmd+arrow text alignment still applies to selected text objects outside ed
   assert.equal(event.defaultPrevented, true);
   assert.equal(event.propagationStopped, true);
   assert.deepEqual(calls, [
-    ['align', 'text-1', 0, 1, 'right'],
+    ['align', 'text-1', 0, Infinity, 'right'],
     ['markDirty', 'text-1'],
     ['scheduleRender', true, true, 'text-align'],
     ['pushHistory', 'text-align'],

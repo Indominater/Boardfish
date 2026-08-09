@@ -74,14 +74,13 @@ const enterSelectedTextEditFromKeyboard = (e) => {
 };
 
 const applySelectedTextAlignmentFromKeyboard = (direction) => {
-  if (editingId || isBoardInputBlocked() || typeof applyTextLineAlignmentRange !== 'function') return false;
+  if (editingId || isBoardInputBlocked()) return false;
   if (!selectedIds?.size || !objectsMap?.get) return false;
   let changed = false;
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (obj?.type !== 'text') continue;
-    const lineCount = typeof textLogicalLineCount === 'function' ? textLogicalLineCount(obj.data?.content || '') : 1;
-    if (applyTextLineAlignmentRange(obj, 0, Math.max(0, lineCount - 1), direction)) {
+    if (applyTextLineAlignmentRange(obj, 0, Infinity, direction)) {
       markDirty(obj.id);
       changed = true;
     }

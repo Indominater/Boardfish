@@ -1723,8 +1723,8 @@ const applyTextLineAlignmentRange = (obj, startLine = 0, endLine = startLine, di
     changed = true;
   }
   if (!changed) return false;
-  const normalized = normalizeTextLineAlignForContent(content, next);
-  if (normalized.length) obj.data.lineAlign = normalized;
+  while (next.length && next[next.length - 1] === 'left') next.pop();
+  if (next.length) obj.data.lineAlign = next;
   else delete obj.data.lineAlign;
   clearTextObjectLayoutRuntime(obj, { script: false });
   return true;

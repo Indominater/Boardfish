@@ -323,12 +323,11 @@
   }
 
   function boardNavigationAllowed() {
-    if (typeof isBoardInputBlocked !== 'function' || !isBoardInputBlocked()) return true;
-    return typeof isBoardNavigationAllowedWhileBlocked === 'function' && isBoardNavigationAllowedWhileBlocked();
+    return !isBoardInputBlocked() || isBoardNavigationAllowedWhileBlocked();
   }
 
   function boardPressAllowed() {
-    return typeof isBoardInputBlocked !== 'function' || !isBoardInputBlocked();
+    return !isBoardInputBlocked();
   }
 
   function markTouchCompatibilityWindow() {
@@ -368,7 +367,7 @@
     target.dispatchEvent(makeTouchMouseEvent('mousedown', point, 0, 1));
     target.dispatchEvent(makeTouchMouseEvent('mouseup', point, 0, 0));
     target.dispatchEvent(makeTouchMouseEvent('click', point, 0, 0));
-    if (editingId && _editEl && typeof focusTextEditProxyNow === 'function') {
+    if (editingId && _editEl) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const obj = typeof objectsMap?.get === 'function' ? objectsMap.get(editingId) : null;
@@ -392,13 +391,7 @@
 
   function beginTouchPan(gesture) {
     finishTouchSelectionDrag();
-    if (
-      gesture?.resumedFromPinch ||
-      !boardPressAllowed() ||
-      typeof startSelectedRegionDrag !== 'function'
-    ) {
-      return false;
-    }
+    if (gesture?.resumedFromPinch || !boardPressAllowed()) return false;
     const startX = Number(gesture.startX);
     const startY = Number(gesture.startY);
     if (!Number.isFinite(startX) || !Number.isFinite(startY)) return false;

@@ -226,7 +226,8 @@ var _visualViewportResizeListening = false;
 var _boardSurfaceCssSizeCache = null;
 
 function boardSurfaceCssSize() {
-  const rect = _boardSurfaceCssSizeCache || canvas?.getBoundingClientRect?.();
+  if (_boardSurfaceCssSizeCache) return _boardSurfaceCssSizeCache;
+  const rect = canvas?.getBoundingClientRect?.();
   let width = Number(rect?.width), height = Number(rect?.height);
   if (!(width > 0)) width = Number(boardCanvas?.clientWidth);
   if (!(width > 0)) width = Number(window.innerWidth);
@@ -1011,12 +1012,10 @@ function applyTransform(
   // prewarm rescanned up to 100 large text objects in one unbounded main-thread
   // callback, which could delay the next gesture. Keep prewarm available to the
   // explicit performance debugger, but do not run it after navigation.
-  if (typeof scheduleVisibleScaledVariantPrewarmAfterIdle === 'function') {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
-    } else {
-      scheduleVisibleScaledVariantPrewarmAfterIdle();
-    }
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    scheduleVisibleScaledVariantPrewarmAfterIdle(_activeRenderSource || 'transform');
+  } else {
+    scheduleVisibleScaledVariantPrewarmAfterIdle();
   }
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
     syncIslandZoomDisplay();

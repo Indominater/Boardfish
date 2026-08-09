@@ -47,6 +47,8 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
     zoom: 1,
     panX: 0,
     panY: 0,
+    isBoardInputBlocked: () => false,
+    isBoardNavigationAllowedWhileBlocked: () => false,
     entered: [],
     enterOptions: [],
     history: [],
