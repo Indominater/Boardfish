@@ -1570,7 +1570,7 @@ var ViewportDebug = (() => {
       !!openingShield?.classList?.contains?.('active');
     return {
       shieldActive,
-      inputShieldCount: typeof _inputShieldCount !== 'undefined' ? _inputShieldCount : '',
+      inputShieldCount: typeof _inputShieldStack !== 'undefined' ? _inputShieldStack.length : '',
       boardOpening: typeof _boardOpening !== 'undefined' ? !!_boardOpening : '',
       rubberBandDragActive: typeof _rubberBandDragActive !== 'undefined' ? !!_rubberBandDragActive : '',
       spaceDown: typeof _spaceDown !== 'undefined' ? !!_spaceDown : '',

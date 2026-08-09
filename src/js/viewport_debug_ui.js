@@ -188,7 +188,7 @@ var MenuDebug = (() => {
       ctxDisplay: getComputedStyle(ctxMenu).display,
       objDisplay: getComputedStyle(objCtxMenu).display,
       shieldActive: openingShield.classList.contains('active'),
-      inputShieldCount: _inputShieldCount,
+      inputShieldCount: _inputShieldStack.length,
       boardOpening: _boardOpening,
       active: elementLabel(active),
       elementAtPointer: elementLabel(point),

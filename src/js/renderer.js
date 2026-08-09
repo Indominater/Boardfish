@@ -107,9 +107,7 @@
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   function isDrawableImageSource(source) {
-    if (!source) return false;
-    if (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) return true;
-    return !!(source.complete && source.naturalWidth > 0);
+    return source?.width > 0;
   }
 
   function applyObjectMotion(context, obj, rect, motion
@@ -136,16 +134,14 @@
       if (scaleX !== 1 || scaleY !== 1) counters.motionScaledObjects = (counters.motionScaledObjects || 0) + 1;
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (context.save) {
-      context.save();
-      if (translateX || translateY) context.translate(translateX, translateY);
-      if (scaleX !== 1 || scaleY !== 1) {
-        const scalePivotX = obj.x + obj.w * scaleOriginX;
-        const scalePivotY = obj.y + obj.h * scaleOriginY;
-        context.translate(scalePivotX, scalePivotY);
-        context.scale(scaleX, scaleY);
-        context.translate(-scalePivotX, -scalePivotY);
-      }
+    context.save();
+    if (translateX || translateY) context.translate(translateX, translateY);
+    if (scaleX !== 1 || scaleY !== 1) {
+      const scalePivotX = obj.x + obj.w * scaleOriginX;
+      const scalePivotY = obj.y + obj.h * scaleOriginY;
+      context.translate(scalePivotX, scalePivotY);
+      context.scale(scaleX, scaleY);
+      context.translate(-scalePivotX, -scalePivotY);
     }
     if (!rect) return rect;
     // Text layout and image crops are chosen before the canvas motion transform,
@@ -266,11 +262,11 @@
     if (!lowLatency) {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     }
-    try { context.imageSmoothingEnabled = false; } catch (_) {}
+    context.imageSmoothingEnabled = false;
     try {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     } finally {
-      try { context.imageSmoothingEnabled = true; } catch (_) {}
+      context.imageSmoothingEnabled = true;
     }
   }
 
@@ -697,7 +693,7 @@
             drawOptions.viewportRect = objectViewportRect;
             drawSingleObj(context, obj, drawOptions);
           } finally {
-            if (motion && context.restore) context.restore();
+            if (motion) context.restore();
           }
         }
         return;
@@ -778,7 +774,7 @@
           drawOptions.viewportRect = objectViewportRect;
           drawn = drawSingleObj(context, obj, counters, drawOptions);
         } finally {
-          if (motion && context.restore) context.restore();
+          if (motion) context.restore();
           if (counters && typeof performance !== 'undefined') {
             recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, motion, deps);
           }

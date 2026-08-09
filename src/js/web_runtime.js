@@ -277,15 +277,12 @@
         root.BoardfishWebLimits.boardContentLimitMessage()
       );
     }
-    const result = await root.BoardfishWebBoardContainer.readBoardContainer(file, {
+    return root.BoardfishWebBoardContainer.readBoardContainer(file, {
       lazyImageRefs: true,
       verifyImageCrc: false,
       maxBoardContentBytes: root.BoardfishWebLimits?.LIMITS?.maxBoardContentBytes,
       validateBoardPayload: root.BoardfishWebLimits?.validateBoardPayload,
     });
-    const opened = { board: result.board };
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') opened.debug = result.debug;
-    return opened;
   }
 
   async function ensureReadWritePermission(handle) {

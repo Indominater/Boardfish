@@ -39,32 +39,6 @@
   const springImpulse = (timeSec, decay, omegaD) =>
     Math.exp(-decay * timeSec) * Math.sin(omegaD * timeSec);
 
-  const jiggleUnit = (timeSec, settle) => {
-    const attackSec = 0.044;
-    const xAttack = smootherstep(timeSec / attackSec);
-    const yTimeSec = timeSec - 0.016;
-    const yAttack = yTimeSec > 0 ? smootherstep(yTimeSec / attackSec) : 0;
-    const xBase = springImpulse(timeSec, 9.933715970650928, 27.476232850677572);
-    const yBase = yTimeSec > 0 ? springImpulse(yTimeSec, 5.353273881717007, 21.653388109167604) : 0;
-    const coupledX = (
-      (yTimeSec > 0 ? springImpulse(yTimeSec, 9.421762031821933, 27.89482072193853) : 0) * 0.16
-    );
-    const sag = yTimeSec > 0
-      ? (Math.exp(-3.2 * yTimeSec) - Math.exp(-11.200000000000001 * yTimeSec)) * 0.08
-      : 0;
-    return {
-      x: (xBase * xAttack + coupledX * yAttack) * settle,
-      y: (yBase + sag) * yAttack * settle,
-    };
-  };
-
-  const jiggleShapeUnit = (timeSec, settle) => {
-    const shapeTimeSec = timeSec - 0.044;
-    if (shapeTimeSec <= 0) return 0;
-    const attack = smootherstep(shapeTimeSec / 0.044);
-    return springImpulse(shapeTimeSec, 6.3334507896370225, 18.7513199475259) * attack * settle;
-  };
-
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let recordMotionDebug = null;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -144,13 +118,26 @@
   const jiggleTransform = (motion, t, zoom = 1) => {
     const timeSec = t * 0.5;
     const settle = 1 - smootherstep((t - 0.84) / 0.16000000000000003);
-    const point = jiggleUnit(timeSec, settle);
+    const attackSec = 0.044;
+    const xAttack = smootherstep(timeSec / attackSec);
+    const yTimeSec = timeSec - 0.016;
+    const yAttack = yTimeSec > 0 ? smootherstep(yTimeSec / attackSec) : 0;
+    const xBase = springImpulse(timeSec, 9.933715970650928, 27.476232850677572);
+    const yBase = yTimeSec > 0 ? springImpulse(yTimeSec, 5.353273881717007, 21.653388109167604) : 0;
+    const coupledX = (yTimeSec > 0 ? springImpulse(yTimeSec, 9.421762031821933, 27.89482072193853) : 0) * 0.16;
+    const sag = yTimeSec > 0
+      ? (Math.exp(-3.2 * yTimeSec) - Math.exp(-11.200000000000001 * yTimeSec)) * 0.08
+      : 0;
     const groupSide = motion.groupSize > 1 ? motion.groupSide : 1;
-    const xPx = point.x * NORMALIZE_X * 5;
-    const yPx = point.y * NORMALIZE_Y * 10.75;
+    const xPx = (xBase * xAttack + coupledX * yAttack) * settle * NORMALIZE_X * 5;
+    const yPx = (yBase + sag) * yAttack * settle * NORMALIZE_Y * 10.75;
     const viewZoom = Number(zoom);
     const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
-    const shape = jiggleShapeUnit(timeSec, settle) * NORMALIZE_SHAPE;
+    const shapeTimeSec = timeSec - 0.044;
+    const shapeAttack = shapeTimeSec > 0 ? smootherstep(shapeTimeSec / 0.044) : 0;
+    const shape = (shapeTimeSec > 0
+      ? springImpulse(shapeTimeSec, 6.3334507896370225, 18.7513199475259) * shapeAttack * settle
+      : 0) * NORMALIZE_SHAPE;
     const strain = shape * 0.028 * (motion.groupSize > 1 ? 1 + groupSide * 0.06 : 1);
     return {
       groupTranslateX: (motion.groupSize > 1 ? 0 : xPx) / safeZoom,
@@ -214,12 +201,9 @@
       return;
     }
     const handoff = handoffAt(existing, startedAt);
-    objectMotions.set(obj.id, {
-      startedAt,
-      groupSide,
-      groupSize,
-      ...(handoff ? { handoff } : {}),
-    });
+    const motion = { startedAt, groupSide, groupSize };
+    if (handoff) motion.handoff = handoff;
+    objectMotions.set(obj.id, motion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-start', { id: obj.id, objectType: obj.type || '' });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -257,14 +241,9 @@
     const handoff = existing && existing.start === start && existing.end === end
       ? handoffAt(existing, startedAt)
       : null;
-    textSelectionMotions.set(spec.id, {
-      startedAt,
-      start,
-      end,
-      groupSide: 1,
-      groupSize: 1,
-      ...(handoff ? { handoff } : {}),
-    });
+    const motion = { startedAt, start, end, groupSide: 1, groupSize: 1 };
+    if (handoff) motion.handoff = handoff;
+    textSelectionMotions.set(spec.id, motion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-start', { id: spec.id, objectType: 'text-selection', start, end });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */

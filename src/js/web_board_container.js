@@ -1246,9 +1246,9 @@
       validateBoardPayload({ objectCount, boardJsonBytes: boardJsonBytes.length, imageBytes: 0 });
     }
     const nextSources = {};
-    const imageEntries = [];
     let imageBytes = 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const imageEntries = [];
     let imageReadMs = 0;
     let imageReadMaxMs = 0;
     let imageReadMaxKey = '';
@@ -1391,7 +1391,6 @@
           if (canUseLazyRef) lazyImageRefCount++;
           else eagerImageRefCount++;
         }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         imageEntries.push({
           key,
           path,
@@ -1399,11 +1398,8 @@
           ext,
           byteLength: canUseLazyRef ? advertisedImageBytes : bytes.length,
           compressedSize: imageEntry.compressedSize,
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
           warnings: entryWarnings,
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
         });
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (collectDiagnostics) imageRefMs += nowMs() - imageRefStart;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
@@ -1420,9 +1416,9 @@
         ...board,
         imageStore: nextSources,
       },
-      imageEntries,
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    result.imageEntries = imageEntries;
     if (collectDiagnostics) {
       result.debug = {
         format: 'container-web',

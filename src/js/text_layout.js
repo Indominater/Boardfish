@@ -1770,7 +1770,7 @@ const normalizeTextScriptRangesForContent = (content, scriptRanges = []) => {
     const key = `${range.start}:${range.end}:${range.kind}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    normalized.push({ ...range });
+    normalized.push(range);
   }
   return normalized;
 };

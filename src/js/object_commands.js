@@ -126,7 +126,6 @@ function addText(wx, wy, content = '', options = {}) {
   }
   logStep('end', { objectId: obj.id, objectCountAfter: objects.length });
 }
-var _inputShieldCount = 0;
 var _inputShieldStack = [];
 var _inputShieldReleases = [];
 
@@ -157,14 +156,12 @@ function acquireInputShield(options = {}) {
     released: false,
   };
   _inputShieldStack.push(token);
-  _inputShieldCount = _inputShieldStack.length;
   updateInputShieldVisual();
   return () => {
     if (token.released) return;
     token.released = true;
     const index = _inputShieldStack.indexOf(token);
     if (index !== -1) _inputShieldStack.splice(index, 1);
-    _inputShieldCount = _inputShieldStack.length;
     updateInputShieldVisual();
     if (!_inputShieldStack.length && !_boardOpening) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(false, true, 'input-shield-release');
@@ -180,7 +177,6 @@ function hideInputShield() {
   const release = _inputShieldReleases.pop();
   if (release) release();
   else {
-    _inputShieldCount = Math.max(0, _inputShieldCount - 1);
     updateInputShieldVisual();
     if (!_inputShieldStack.length && !_boardOpening) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(false, true, 'input-shield-release');

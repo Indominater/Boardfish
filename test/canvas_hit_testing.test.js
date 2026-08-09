@@ -411,7 +411,6 @@ test('text edit caret honors visual line preference at wrapped line start', () =
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textLayoutLineIntersectsViewport: () => true,
     textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
@@ -468,7 +467,6 @@ test('text edit caret passes consumed soft-wrap space offsets to layout', () => 
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textLayoutLineIntersectsViewport: () => true,
     textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
@@ -511,7 +509,6 @@ test('text edit caret stays inside content bounds at low zoom', () => {
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textLayoutLineIntersectsViewport: () => true,
     textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
@@ -528,10 +525,8 @@ test('text edit caret stays inside content bounds at low zoom', () => {
   };
   const obj = { x: 10, y: 0, w: 40, h: 24 };
   const layout = [{ text: 'abc', startIndex: 0, endIndex: 3, caretEndIndex: 3, y: 0 }];
-  const view = { zoom: 0.25 };
-
-  assert.equal(context.drawCaret(canvasContext, obj, layout, 0, { view }), true);
-  assert.equal(context.drawCaret(canvasContext, obj, layout, 3, { view }), true);
+  assert.equal(context.drawCaret(canvasContext, obj, layout, 0, 0.25), true);
+  assert.equal(context.drawCaret(canvasContext, obj, layout, 3, 0.25), true);
   assert.deepEqual(fillRects, [
     [26, 0, 8, 24],
     [26, 0, 8, 24],
@@ -598,7 +593,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
   assert.match(drawSource, /const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
   assert.match(drawSource, /const visibleOptions = \{ viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
-  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, \{ zoom, dpr \}, textSelectionSpecs\);/);
+  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, zoom, textSelectionSpecs\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');
   const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
@@ -610,7 +605,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
 test('text selection collection uses indexed script metrics while editing math text', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('const collectTextSelectionRuns =');
-  const end = viewportSource.indexOf('const textSelectionMotionForOptions', start);
+  const end = viewportSource.indexOf('const applyTextSelectionMotionTransform', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const selectionSource = viewportSource.slice(start, end);
@@ -630,7 +625,7 @@ test('editing overlay keeps copied text selection highlighted while its jiggle i
   assert.notEqual(end, -1);
   const overlaySource = viewportSource.slice(start, end);
 
-  assert.match(overlaySource, /const copiedSelectionSpec = textSelectionJelloSpecForId\(options\.textSelectionSpecs \|\| \[\], obj\.id\);/);
+  assert.match(overlaySource, /const copiedSelectionSpec = textSelectionJelloSpecForId\(textSelectionSpecs, obj\.id\);/);
   assert.match(overlaySource, /const useCopiedSelectionMotion = !!copiedMotion && \(liveSelStart === liveSelEnd \|\| liveMatchesCopied\);/);
   assert.match(overlaySource, /const selStart = useCopiedSelectionMotion \? copiedSelectionSpec\.start : liveSelStart;/);
   assert.match(overlaySource, /const selEnd\s+= useCopiedSelectionMotion \? copiedSelectionSpec\.end\s+: liveSelEnd;/);
@@ -656,8 +651,6 @@ test('overlapping text selection highlight runs share one path fill', () => {
     LINE_H: 24,
     TextSelDebug: { _logDraw() {} },
     applyTextSelectionMotionTransform() {},
-    textSelectionMotionForOptions() { return null; },
-    textSelectionRunsForOptions() { return selection; },
   };
   vm.createContext(context);
   vm.runInContext(
@@ -676,7 +669,7 @@ test('overlapping text selection highlight runs share one path fill', () => {
     fillRect(...args) { drawCalls.push(['fillRect', ...args]); },
   };
 
-  assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, [], 0, 10), true);
+  assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection, null), true);
   assert.deepEqual(drawCalls, [
     ['save'],
     ['beginPath'],
@@ -706,8 +699,6 @@ test('script text selection highlight shares one path fill with its base run', (
     LINE_H: 24,
     TextSelDebug: { _logDraw() {} },
     applyTextSelectionMotionTransform() {},
-    textSelectionMotionForOptions() { return null; },
-    textSelectionRunsForOptions() { return selection; },
   };
   vm.createContext(context);
   vm.runInContext(
@@ -725,7 +716,7 @@ test('script text selection highlight shares one path fill with its base run', (
     fill() {},
   };
 
-  assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, [], 0, 10), true);
+  assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection, null), true);
   assert.deepEqual(rectCalls, [
     [0, 0, 100, 24],
     [40, -6, 30, 17],
