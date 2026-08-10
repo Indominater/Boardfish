@@ -211,9 +211,5 @@ function isSelected(id) {
 }
 
 function getFirstSelectedObject() {
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (obj) return obj;
-  }
-  return null;
+  return objectsMap.get(selectedId) || null;
 }

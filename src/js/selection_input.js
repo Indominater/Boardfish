@@ -449,11 +449,9 @@ function updateSelectionOverlay() {
     selectionOverlaySelectedImageEdgePadDevicePx(),
   );
   const multiSelected = isMultiSelected();
-  selOverlay.classList.toggle('multi', multiSelected);
-  selOverlay.classList.toggle('editing', !!editingId);
-  selOverlay.classList.toggle('text-resize', !multiSelected && firstSelectedObj.type === 'text');
+  const nextClasses = `visible${multiSelected ? ' multi' : ''}${editingId ? ' editing' : ''}${!multiSelected && firstSelectedObj.type === 'text' ? ' text-resize' : ''}`;
+  if (selOverlay.className !== nextClasses) selOverlay.className = nextClasses;
   updateMultiSelectionOverlay(hasMotion);
-  if (!selOverlay.classList.contains('visible')) selOverlay.classList.add('visible');
 }
 
 const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {

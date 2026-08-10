@@ -1015,7 +1015,3 @@ document.addEventListener('paste', (e) => {
     : toWorld(window.innerWidth / 2, window.innerHeight / 2);
   pasteAtPos(point.x, point.y, e.clipboardData);
 });
-
-// ─── Init ────────────────────────────────────────────────────────────────────
-
-window.addEventListener('resize', resizeCanvas);

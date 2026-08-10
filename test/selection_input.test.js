@@ -362,6 +362,10 @@ test('selection overlay expands snapped outline edges to cover object bounds', (
   assert.equal(context.selOverlay.style.width, '101px');
   assert.equal(context.selOverlay.style.height, '41.5px');
   assert.equal(context.motionLookups, 0);
+  assert.equal(context.selOverlay.className, 'visible text-resize');
+  context.editingId = text.id;
+  context.updateSelectionOverlay();
+  assert.equal(context.selOverlay.className, 'visible editing text-resize');
 });
 
 test('selection overlay follows fixed-screen-distance copy motion at zoom', () => {
@@ -494,6 +498,8 @@ test('selection surfaces share the same outline color token', () => {
   assert.match(styles, /--selection-outline:\s*rgba\(10,\s*132,\s*255,\s*1\);/);
   assert.match(styles, /--selection-highlight:\s*rgba\(10,\s*132,\s*255,\s*0\.3\);/);
   assert.match(styles, /--text-edit-outline:\s*var\(--selection-outline\);/);
+  assert.match(styles, /#canvas\.panning, #canvas\.panning \.s-handle \{ cursor: grabbing !important; \}/);
+  assert.doesNotMatch(styles, /#canvas\.panning\s+\*/);
   assert.match(styles, /\.multi-sel-box\s*\{[\s\S]*box-shadow:\s*inset 0 0 0 1px var\(--selection-outline\);/);
   assert.match(styles, /#rubber-band\s*\{[\s\S]*border:\s*1px solid var\(--selection-outline\);/);
 });

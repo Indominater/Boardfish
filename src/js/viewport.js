@@ -222,7 +222,6 @@ function markDirty(id) {
 // ─── Canvas resize ────────────────────────────────────────────────────────────
 
 var _canvasResizeObserver = null;
-var _visualViewportResizeListening = false;
 var _boardSurfaceCssSizeCache = null;
 
 function boardSurfaceCssSize() {
@@ -252,7 +251,7 @@ function syncBoardCanvasBackingStore(write = true) {
 }
 
 function resizeCanvas(surface = null) {
-  _boardSurfaceCssSizeCache = surface?.width > 0 && surface?.height > 0 ? surface : null;
+  _boardSurfaceCssSizeCache = surface?.width > 0 && surface?.height > 0 ? surface : surface?.type === 'resize' && _canvasResizeObserver?.observe && _boardSurfaceCssSizeCache;
   if (typeof _boardOpening !== 'undefined' && _boardOpening) return false;
   if (!syncBoardCanvasBackingStore(false)) return false;
   // Changing a canvas backing dimension clears its visible pixels. Defer that
@@ -263,14 +262,13 @@ function resizeCanvas(surface = null) {
 }
 
 function startCanvasSizeTracking() {
-  if (!_canvasResizeObserver && typeof ResizeObserver === 'function') {
-    _canvasResizeObserver = new ResizeObserver(entries => resizeCanvas(entries?.[0]?.contentRect));
-    _canvasResizeObserver.observe(canvas);
-  }
-  if (!_canvasResizeObserver && !_visualViewportResizeListening && window.visualViewport?.addEventListener) {
-    window.visualViewport.addEventListener('resize', resizeCanvas);
-    _visualViewportResizeListening = true;
-  }
+  if (_canvasResizeObserver) return;
+  _canvasResizeObserver = typeof ResizeObserver === 'function'
+    ? new ResizeObserver(entries => resizeCanvas(entries?.[0]?.contentRect))
+    : window.visualViewport || window;
+  if (_canvasResizeObserver.observe) _canvasResizeObserver.observe(canvas);
+  else _canvasResizeObserver.addEventListener('resize', resizeCanvas);
+  window.addEventListener?.('resize', resizeCanvas);
 }
 
 var VIEWPORT_CULL_PADDING_PX = 256;

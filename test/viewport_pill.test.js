@@ -205,8 +205,10 @@ function loadViewportCanvasSizeHarness({
   };
   const context = {
     surfaceRect: { ...rect },
+    surfaceRectReads: 0,
     canvas: {
       getBoundingClientRect() {
+        context.surfaceRectReads++;
         return context.surfaceRect;
       },
     },
@@ -218,6 +220,7 @@ function loadViewportCanvasSizeHarness({
     observedTargets: [],
     resizeObserverInstances: 0,
     visualViewportListeners: [],
+    windowResizeListeners: [],
     invalidateOffscreen() {
       context.invalidations++;
     },
@@ -247,6 +250,11 @@ function loadViewportCanvasSizeHarness({
         addEventListener(type, listener) {
           context.visualViewportListeners.push({ type, listener });
         },
+      },
+      addEventListener(type, listener) {
+        if (type === 'resize' && !context.windowResizeListeners.includes(listener)) {
+          context.windowResizeListeners.push(listener);
+        }
       },
     },
   };
@@ -389,6 +397,7 @@ test('canvas size tracking observes the rendered surface exactly once', () => {
   assert.equal(context.observedTargets.length, 1);
   assert.strictEqual(context.observedTargets[0], context.canvas);
   assert.equal(context.visualViewportListeners.length, 0);
+  assert.equal(context.windowResizeListeners.length, 1);
 
   context.surfaceRect.height = 1080;
   context.resizeObserverCallback([{ contentRect: context.surfaceRect }]);
@@ -401,6 +410,29 @@ test('canvas size tracking observes the rendered surface exactly once', () => {
   assert.equal(context.boardCanvas.height, 2160);
   assert.deepEqual(context.backingWrites, { width: 0, height: 1 });
   assert.equal(context.invalidations, 1);
+});
+
+test('window resize preserves observed CSS size while refreshing DPR backing dimensions', () => {
+  const context = loadViewportCanvasSizeHarness({
+    rect: { width: 100, height: 100 },
+    clientWidth: 100,
+    clientHeight: 100,
+    innerWidth: 100,
+    innerHeight: 100,
+    dpr: 2,
+  });
+  assert.equal(context.resizeCanvas(), false);
+  context.startCanvasSizeTracking();
+  assert.equal(context.surfaceRectReads, 1);
+
+  context.window.devicePixelRatio = 3;
+  context.windowResizeListeners[0]({ type: 'resize' });
+  assert.equal(context.surfaceRectReads, 1);
+  assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
+
+  assert.equal(context.syncBoardCanvasBackingStore(), true);
+  assert.equal(context.boardCanvas.width, 300);
+  assert.equal(context.boardCanvas.height, 300);
 });
 
 test('keyboard-style resize bursts apply only the latest backing-store height', () => {

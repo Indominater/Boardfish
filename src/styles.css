@@ -131,8 +131,7 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-#canvas.panning    { cursor: grabbing !important; }
-#canvas.panning    * { cursor: grabbing !important; }
+#canvas.panning, #canvas.panning .s-handle { cursor: grabbing !important; }
 
 #board-canvas {
   position: absolute;
