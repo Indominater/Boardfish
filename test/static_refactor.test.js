@@ -273,10 +273,20 @@ test('dev server returns 400 for malformed URL encodings', () => {
 test('image hydration queue processes until its time budget is consumed', () => {
   const imageState = readSource('src/js/image_state.js');
 
-  assert.match(imageState, /while \(_imageHydrationQueue\.length && \(count === 0 \|\| performance\.now\(\) - batchStart < 6\)\)/);
+  assert.match(imageState, /var _imageHydrationQueue = new Map\(\);/);
+  assert.match(imageState, /if \(count > 0 && performance\.now\(\) - batchStart >= 6\) break;/);
+  assert.doesNotMatch(imageState, /_imageHydrationQueued/);
   assert.match(imageState, /cacheImage\(key, source[\s\S]*?, dbg[\s\S]*?\);/);
   assert.doesNotMatch(imageState, /ensureImageDisplaySrc/);
   assert.doesNotMatch(imageState, /count < 1 && performance\.now\(\) - batchStart < 6/);
+});
+
+test('drawable bitmap warmup queue reuses one insertion-ordered map', () => {
+  const imageVariants = readSource('src/js/image_variants.js');
+
+  assert.match(imageVariants, /var drawableBitmapWarmupQueue = new Map\(\);/);
+  assert.match(imageVariants, /for \(const \[source, meta\] of drawableBitmapWarmupQueue\)/);
+  assert.doesNotMatch(imageVariants, /var drawableBitmapWarmupQueued =/);
 });
 
 test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing size', () => {

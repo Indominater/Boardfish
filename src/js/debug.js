@@ -2580,7 +2580,7 @@ var ViewportDebug = (() => {
       sourceReadyNoSource: imageScaledVariantSourceReadyNoSourceCount,
       sourceReadyFullScale: imageScaledVariantSourceReadyFullScaleCount,
       drawWarmupQueued: drawableBitmapWarmupQueuedCount,
-      drawWarmupPending: drawableBitmapWarmupQueue.length,
+      drawWarmupPending: drawableBitmapWarmupQueue.size,
 	      drawWarmupWarmed: drawableBitmapWarmupWarmedCount,
 	      drawWarmupAvgMs: drawableBitmapWarmupWarmedCount ? Math.round(drawableBitmapWarmupTotalMs / drawableBitmapWarmupWarmedCount * 10) / 10 : 0,
 	      drawWarmupMaxMs: Math.round(drawableBitmapWarmupMaxMs * 10) / 10,

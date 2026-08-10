@@ -269,17 +269,18 @@
     return transform;
   };
 
-  const textSelectionJelloSpecsForDraw = () => {
-    if (!textSelectionMotions.size || prefersReducedMotion()) return EMPTY_SPECS;
+  const textSelectionJelloSpecsForDraw = (raw = false) => {
+    if (!textSelectionMotions.size || prefersReducedMotion()) return raw ? null : EMPTY_SPECS;
     const cutoff = now();
-    const specs = [];
+    const specs = raw ? null : [];
     for (const [id, motion] of textSelectionMotions) {
       if (cutoff - motion.startedAt >= DURATION_MS) {
         textSelectionMotions.delete(id);
-      } else {
+      } else if (!raw) {
         specs.push({ id, start: motion.start, end: motion.end });
       }
     }
+    if (raw) return textSelectionMotions.size ? textSelectionMotions : null;
     return specs.length ? specs : EMPTY_SPECS;
   };
 

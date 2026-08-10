@@ -1611,9 +1611,11 @@ test('text selection jello exposes active full-range draw specs', () => {
   assert.deepEqual(plain(context.BoardfishMotion.textSelectionJelloSpecsForDraw()), [
     { id: 'text-1', start: 0, end: 17 },
   ]);
+  assert.equal(context.BoardfishMotion.textSelectionJelloSpecsForDraw(true).get('text-1').end, 17);
 
   setTime(500);
   assert.deepEqual(plain(context.BoardfishMotion.textSelectionJelloSpecsForDraw()), []);
+  assert.equal(context.BoardfishMotion.textSelectionJelloSpecsForDraw(true), null);
 });
 
 test('selection copy feedback resolves every selected object', () => {

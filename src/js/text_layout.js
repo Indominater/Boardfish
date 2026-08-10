@@ -2406,10 +2406,6 @@ const textScriptCaretStateAt = (obj, index) => {
   return textScriptStateFromRanges(activeTextScriptRangesAt(ranges, index, { includeEnd: true, affinity }));
 };
 
-const textScriptCaretStateForHit = (obj, index, affinity = '') => (
-  textScriptStateFromRanges(activeTextScriptRangesAt(getTextScriptRanges(obj), index, { includeEnd: true, affinity }))
-);
-
 const getTextMinWidthWordSegment = (obj) => {
   const empty = { text: '', word: '', width: 0, lineIndex: -1, startOffset: 0, endOffset: 0 };
   if (!obj || obj.type !== 'text') return empty;
@@ -3203,15 +3199,11 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
     ? line._scriptMetrics || getTextScriptLayoutMetricsForObject(obj, content, ranges)
     : null;
   const candidates = [];
-  const seen = new Set();
   const addCandidate = (index, affinity = '') => {
     const caretIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), content.length));
-    const key = `${caretIndex}:${affinity}`;
-    if (seen.has(key)) return;
-    seen.add(key);
     const state = metrics
       ? textScriptMetricsCaretStateAt(metrics, caretIndex, affinity)
-      : textScriptCaretStateForHit(obj, caretIndex, affinity);
+      : BASE_TEXT_SCRIPT_STATE;
     let centerY = line.y + LINE_H / 2;
     if (state?.depth > 0) {
       const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
@@ -3251,21 +3243,12 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
     const bracedOpeningGap = !!metrics?.bracedStarts?.[rawIndex];
     if (bracedOpeningGap) continue;
 
-    const bracedRangeAtClosing = !!metrics?.bracedEnds?.[rawIndex + 1];
     const bracedRangeEnding = !!metrics?.bracedEnds?.[rawIndex];
     const linearRangeEnding = !!metrics?.linearEnds?.[rawIndex];
 
     if (bracedRangeEnding) addCandidate(rawIndex, 'after');
-    if (linearRangeEnding) {
-      addCandidate(rawIndex, '');
-      addCandidate(rawIndex, 'after');
-    }
-    if (bracedRangeAtClosing && !bracedRangeEnding) {
-      addCandidate(rawIndex, linearRangeEnding ? 'after' : '');
-    }
-    if (!bracedRangeEnding && !linearRangeEnding && !bracedRangeAtClosing) {
-      addCandidate(rawIndex);
-    }
+    if (!bracedRangeEnding || linearRangeEnding) addCandidate(rawIndex);
+    if (linearRangeEnding && !bracedRangeEnding) addCandidate(rawIndex, 'after');
   }
 
   return candidates;

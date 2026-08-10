@@ -584,8 +584,8 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.notEqual(drawEnd, -1);
   const drawSource = viewportSource.slice(drawStart, drawEnd);
 
-  assert.match(drawSource, /const textSelectionSpecs = textSelectionJelloSpecsForDraw\(\);/);
-  assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionJelloSkipIds\(textSelectionSpecs, editingId \|\| null\);/);
+  assert.match(drawSource, /const textSelectionMotions = globalThis\.BoardfishMotion\?\.textSelectionJelloSpecsForDraw\?\.\(true\) \|\| null;/);
+  assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionMotions;/);
   assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
   assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
@@ -593,7 +593,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
   assert.match(drawSource, /const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
   assert.match(drawSource, /const visibleOptions = \{ viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
-  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, zoom, textSelectionSpecs\);/);
+  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, zoom, textSelectionMotions\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');
   const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
@@ -625,7 +625,7 @@ test('editing overlay keeps copied text selection highlighted while its jiggle i
   assert.notEqual(end, -1);
   const overlaySource = viewportSource.slice(start, end);
 
-  assert.match(overlaySource, /const copiedSelectionSpec = textSelectionJelloSpecForId\(textSelectionSpecs, obj\.id\);/);
+  assert.match(overlaySource, /const copiedSelectionSpec = textSelectionMotions\?\.get\(obj\.id\) \|\| null;/);
   assert.match(overlaySource, /const useCopiedSelectionMotion = !!copiedMotion && \(liveSelStart === liveSelEnd \|\| liveMatchesCopied\);/);
   assert.match(overlaySource, /const selStart = useCopiedSelectionMotion \? copiedSelectionSpec\.start : liveSelStart;/);
   assert.match(overlaySource, /const selEnd\s+= useCopiedSelectionMotion \? copiedSelectionSpec\.end\s+: liveSelEnd;/);

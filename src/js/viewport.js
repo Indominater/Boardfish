@@ -491,38 +491,17 @@ const drawTextSelectionContentJello = (context, obj, selection, motion) => {
   return true;
 };
 
-const textSelectionJelloSpecsForDraw = () => (
-  globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.() || []
-);
-
-const textSelectionJelloSpecForId = (specs = [], id = null) => {
-  for (const spec of specs) {
-    if (spec?.id && spec.id === id) return spec;
-  }
-  return null;
-};
-
-const textSelectionJelloSkipIds = (specs = [], exceptId = null) => {
-  let ids = null;
-  for (const spec of specs) {
-    if (!spec?.id || spec.id === exceptId) continue;
-    if (!ids) ids = new Set();
-    ids.add(spec.id);
-  }
-  return ids;
-};
-
-const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom = zoom, specs = null) => {
-  specs = Array.isArray(specs) ? specs : textSelectionJelloSpecsForDraw();
-  if (!specs.length) return 0;
+const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom = zoom, motions = null) => {
+  motions ||= globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.(true);
+  if (!motions?.size) return 0;
   let drawn = 0;
-  for (const spec of specs) {
-    if (spec.id === editingId) continue;
-    const obj = objectsMap.get(spec.id);
+  for (const [id, spec] of motions) {
+    if (id === editingId) continue;
+    const obj = objectsMap.get(id);
     if (!obj || obj.type !== 'text') continue;
     if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
-    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(spec.id, spec.start, spec.end, viewZoom) || null;
+    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(id, spec.start, spec.end, viewZoom) || null;
     if (!motion) continue;
     const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
     if (!drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion)) continue;
@@ -613,7 +592,7 @@ function drawEditingTextOverlay(
   context,
   viewZoom = zoom,
   viewportRect = currentViewportWorldRect(0),
-  textSelectionSpecs = [],
+  textSelectionMotions = null,
   /* BOARDFISH_DEV_DIAGNOSTICS_START */ collectDebug = false, /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   const obj = objectsMap.get(editingId);
@@ -623,7 +602,7 @@ function drawEditingTextOverlay(
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
-  const copiedSelectionSpec = textSelectionJelloSpecForId(textSelectionSpecs, obj.id);
+  const copiedSelectionSpec = textSelectionMotions?.get(obj.id) || null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const stats = collectDebug ? {
     editLayoutMs: 0,
@@ -763,8 +742,8 @@ function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = currentViewportWorldRect(0);
-  const textSelectionSpecs = textSelectionJelloSpecsForDraw();
-  const copiedSelectionSkipIds = textSelectionJelloSkipIds(textSelectionSpecs, editingId || null);
+  const textSelectionMotions = globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.(true) || null;
+  const copiedSelectionSkipIds = textSelectionMotions;
   let openInitialImageSourceResolver = hasOpenPreviewFallback && typeof resolveOpenInitialImageSourceForDraw === 'function'
     ? resolveOpenInitialImageSourceForDraw
     : null;
@@ -838,12 +817,12 @@ function drawBoard(bypassEditOffscreenCache = false) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const editStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionSpecs);
+    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionMotions);
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionSpecs);
+      drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionMotions);
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const editStats = drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionSpecs, collectDrawDebug);
+      const editStats = drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionMotions, collectDrawDebug);
       if (collectDrawDebug) {
         drawPhases.editingOverlayMs = performance.now() - editStart;
         if (editStats) Object.assign(drawPhases, editStats);
@@ -876,7 +855,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionSpecs);
+    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionMotions);
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDrawDebug) {

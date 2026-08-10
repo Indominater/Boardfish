@@ -623,8 +623,7 @@ function scheduleImageReadyRender(
 }
 
 var _imageHydrationScheduled = false;
-var _imageHydrationQueue = [];
-var _imageHydrationQueued = new Set();
+var _imageHydrationQueue = new Map();
 
 function queueImageHydration(key
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -632,15 +631,13 @@ function queueImageHydration(key
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   const source = imageStore[key];
-  if (!source || imageBitmapCache[key] || _imageHydrationQueued.has(key)) return;
+  if (!source || imageBitmapCache[key] || _imageHydrationQueue.has(key)) return;
   if (typeof source !== 'string' && !isWebImageRef(source)) return;
-  _imageHydrationQueued.add(key);
-  _imageHydrationQueue.push({
-    key,
+  _imageHydrationQueue.set(key
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    dbg,
+    , dbg
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  });
+  );
   scheduleImageHydration();
 }
 
@@ -654,13 +651,13 @@ function processImageHydrationQueue() {
   _imageHydrationScheduled = false;
   const batchStart = performance.now();
   let count = 0;
-  while (_imageHydrationQueue.length && (count === 0 || performance.now() - batchStart < 6)) {
-    const { key
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      , dbg
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    } = _imageHydrationQueue.shift();
-    _imageHydrationQueued.delete(key);
+  for (const [key
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , dbg
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ] of _imageHydrationQueue) {
+    if (count > 0 && performance.now() - batchStart >= 6) break;
+    _imageHydrationQueue.delete(key);
     const source = imageStore[key];
     if (!source || imageBitmapCache[key]) continue;
     if (typeof source !== 'string' && !isWebImageRef(source)) continue;
@@ -681,7 +678,7 @@ function processImageHydrationQueue() {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
   }
-  if (_imageHydrationQueue.length) scheduleImageHydration();
+  if (_imageHydrationQueue.size) scheduleImageHydration();
 }
 
 function enqueueImageDecode(task) {
@@ -1042,14 +1039,7 @@ const removeImageRuntimeCachesForKey = (key) => {
 const invalidateImageSourceCachesForKey = (key) => {
   if (!key) return;
   _imageStoreGeneration++;
-  _imageHydrationQueued.delete(key);
-  let write = 0;
-  for (let read = 0; read < _imageHydrationQueue.length; read++) {
-    const item = _imageHydrationQueue[read];
-    if (item?.key === key) continue;
-    _imageHydrationQueue[write++] = item;
-  }
-  _imageHydrationQueue.length = write;
+  _imageHydrationQueue.delete(key);
   removeImageRuntimeCachesForKey(key);
 };
 
@@ -1115,8 +1105,7 @@ function clearImageStore() {
   clearScaledImageVariants();
   imageBitmapFailed.clear();
   imageReadyPromises.clear();
-  _imageHydrationQueue.length = 0;
-  _imageHydrationQueued.clear();
+  _imageHydrationQueue.clear();
   _imageHydrationScheduled = false;
   _imageDecodeQueue.length = 0;
   _imageDecodeActive = 0;

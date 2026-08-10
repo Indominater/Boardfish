@@ -74,9 +74,8 @@ var VIEWPORT_IMAGE_SCALING_SUPPORTED = typeof createImageBitmap === 'function';
 var viewportImageScalingEnabled = VIEWPORT_IMAGE_SCALING_SUPPORTED;
 var drawableBitmapWarmupCanvas = null;
 var drawableBitmapWarmupContext = null;
-var drawableBitmapWarmupQueue = [];
+var drawableBitmapWarmupQueue = new Map();
 var drawableBitmapWarmupScheduled = false;
-var drawableBitmapWarmupQueued = typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
 var drawableBitmapWarmupReady = typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var drawableBitmapWarmupQueuedCount = 0;
@@ -144,34 +143,15 @@ function drawableBitmapWarmupTargetSize(source, meta = {}) {
 
 function dropDrawableBitmapWarmup(source) {
   if (!source) return;
-  drawableBitmapWarmupQueued.delete(source);
+  drawableBitmapWarmupQueue.delete(source);
   drawableBitmapWarmupReady.delete(source);
-  if (drawableBitmapWarmupQueue.length) {
-    let write = 0;
-    for (let read = 0; read < drawableBitmapWarmupQueue.length; read++) {
-      const task = drawableBitmapWarmupQueue[read];
-      if (task?.source === source) continue;
-      drawableBitmapWarmupQueue[write++] = task;
-    }
-    drawableBitmapWarmupQueue.length = write;
-  }
 }
 
 function dropDrawableBitmapWarmupsForKey(key) {
-  if (!key || !drawableBitmapWarmupQueue.length) return;
-  let write = 0;
-  for (const task of drawableBitmapWarmupQueue) {
-    if (task?.meta?.key === key) {
-      drawableBitmapWarmupQueued.delete(task.source);
-    } else {
-      drawableBitmapWarmupQueue[write++] = task;
-    }
+  if (!key || !drawableBitmapWarmupQueue.size) return;
+  for (const [source, meta] of drawableBitmapWarmupQueue) {
+    if (meta?.key === key) drawableBitmapWarmupQueue.delete(source);
   }
-  drawableBitmapWarmupQueue.length = write;
-}
-
-function drawableBitmapWarmupResetSet() {
-  return typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
 }
 
 function drawableBitmapWarmup2dContext(width, height) {
@@ -248,14 +228,13 @@ function runDrawableBitmapWarmupQueue(options = {}) {
   const maxItems = Math.max(1, Math.trunc(Number(options.maxItems) || 4));
   const start = performance.now();
   let count = 0;
-  while (drawableBitmapWarmupQueue.length && count < maxItems) {
-    if (count > 0 && performance.now() - start >= budgetMs) break;
-    const task = drawableBitmapWarmupQueue.shift();
-    drawableBitmapWarmupQueued.delete(task.source);
-    warmDrawableBitmapForDrawNow(task.source, task.meta);
+  for (const [source, meta] of drawableBitmapWarmupQueue) {
+    if (count >= maxItems || (count > 0 && performance.now() - start >= budgetMs)) break;
+    drawableBitmapWarmupQueue.delete(source);
+    warmDrawableBitmapForDrawNow(source, meta);
     count++;
   }
-  if (drawableBitmapWarmupQueue.length) scheduleDrawableBitmapWarmupQueue();
+  if (drawableBitmapWarmupQueue.size) scheduleDrawableBitmapWarmupQueue();
 }
 
 function scheduleDrawableBitmapWarmupQueue() {
@@ -274,11 +253,10 @@ function scheduleDrawableBitmapWarmupQueue() {
 
 function scheduleDrawableBitmapWarmup(source, meta = {}, options = {}) {
   if (!isImageVariantDrawableSource(source)) return false;
-  if (drawableBitmapWarmupReady.has(source) || drawableBitmapWarmupQueued.has(source)) {
+  if (drawableBitmapWarmupReady.has(source) || drawableBitmapWarmupQueue.has(source)) {
     return false;
   }
-  drawableBitmapWarmupQueued.add(source);
-  drawableBitmapWarmupQueue.push({ source, meta });
+  drawableBitmapWarmupQueue.set(source, meta);
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     drawableBitmapWarmupQueuedCount++;
     countDrawableBitmapWarmupKind(drawableBitmapWarmupQueuedByKind, meta);
@@ -372,10 +350,9 @@ function clearScaledImageVariants(key = null) {
     imageScaledVariantSourceReadyNoSourceCount = 0;
     imageScaledVariantSourceReadyFullScaleCount = 0;
   }
-  drawableBitmapWarmupQueue.length = 0;
+  drawableBitmapWarmupQueue.clear();
   drawableBitmapWarmupScheduled = false;
-  drawableBitmapWarmupQueued = drawableBitmapWarmupResetSet();
-  drawableBitmapWarmupReady = drawableBitmapWarmupResetSet();
+  drawableBitmapWarmupReady = typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     drawableBitmapWarmupQueuedCount = 0;
     drawableBitmapWarmupWarmedCount = 0;
