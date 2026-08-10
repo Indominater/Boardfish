@@ -2640,10 +2640,7 @@ function getTextLayout(obj) {
   return obj._layoutCache;
 }
 
-function getTextLayoutForLineRange(obj, firstLineIndex = 0, lastLineIndex = firstLineIndex) {
-  if (!obj || obj.type !== 'text') return [];
-  const first = Math.max(0, Math.trunc(Number(firstLineIndex)) || 0);
-  const last = Math.max(first, Math.trunc(Number(lastLineIndex)) || first);
+function getTextLayoutForLineRange(obj, first = 0, last = first) {
   const content = String(obj.data?.content || '');
   const scriptRanges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
@@ -2751,14 +2748,10 @@ function getTextLayoutForLineRange(obj, firstLineIndex = 0, lastLineIndex = firs
   return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, wrapped.lineCount);
 }
 
-function getTextLayoutForViewport(obj, viewportRect = null) {
-  if (!viewportRect || !obj || obj.type !== 'text') return getTextLayout(obj);
-  const y1 = Number(viewportRect.y1);
-  const y2 = Number(viewportRect.y2);
-  if (!Number.isFinite(y1) || !Number.isFinite(y2)) return getTextLayout(obj);
+function getTextLayoutForViewport(obj, viewportRect) {
   const baseY = obj.y + TEXT_PAD;
-  const first = Math.max(0, Math.ceil((Math.min(y1, y2) - baseY - LINE_H) / LINE_H));
-  const last = Math.floor((Math.max(y1, y2) - baseY) / LINE_H);
+  const first = Math.max(0, Math.ceil((viewportRect.y1 - baseY - LINE_H) / LINE_H));
+  const last = Math.floor((viewportRect.y2 - baseY) / LINE_H);
   if (last < first) return [];
   return getTextLayoutForLineRange(obj, first, last);
 }
@@ -3003,18 +2996,12 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
   return plan;
 }
 
-const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line?.text?.length ?? 0
+const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , options = {}
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) => {
-  if (!context || !line || !obj) {
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') return null;
-    return createTextDrawStats();
-  }
-  const text = String(line.text ?? '');
-  const start = Math.max(0, Math.min(startOffset, text.length));
-  const end = Math.max(start, Math.min(endOffset, text.length));
+  const text = line.text;
   const cacheable = start === 0 && end === text.length && !!line.prefixWidths;
   let plan = cacheable ? line._textDrawPlanCache : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

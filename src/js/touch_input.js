@@ -63,14 +63,12 @@
 
     function gesturePayload(point, extra) {
       return {
-        pointerId: point?.pointerId,
         x: point?.x,
         y: point?.y,
         startX: point?.startX,
         startY: point?.startY,
         target: point?.target || null,
         event: point?.sourceEvent || null,
-        activeCount: active.size,
         ...extra,
       };
     }
@@ -100,10 +98,8 @@
         ...geometry,
         startCenterX: geometry.centerX,
         startCenterY: geometry.centerY,
-        startDistance: geometry.distance,
         scale: 1,
         event: sourceEvent,
-        activeCount: active.size,
       });
       return true;
     }
@@ -115,10 +111,8 @@
         ...geometry,
         startCenterX: pinchStart.centerX,
         startCenterY: pinchStart.centerY,
-        startDistance: pinchStart.distance,
         scale: geometry.distance / pinchStart.distance,
         event: point?.sourceEvent || null,
-        activeCount: active.size,
       });
       return true;
     }
@@ -227,7 +221,7 @@
 
       active.delete(current.pointerId);
       if (finishedMode === 'pinch') {
-        call('onPinchEnd', gesturePayload(current, { cancelled, activeCount: active.size }));
+        call('onPinchEnd', gesturePayload(current, { cancelled }));
       }
 
       if (active.size >= 2) {
@@ -250,7 +244,7 @@
       if (active.size === 0) {
         mode = 'idle';
         pinchStart = null;
-        call('onGestureEnd', gesturePayload(current, { cancelled, finishedMode, activeCount: 0 }));
+        call('onGestureEnd', gesturePayload(current, { cancelled, finishedMode }));
       }
       return true;
     }
@@ -264,13 +258,12 @@
       mode = 'idle';
       pinchStart = null;
       if (finishedMode === 'pinch') {
-        call('onPinchEnd', gesturePayload(point, { cancelled: true, reason, activeCount: 0 }));
+        call('onPinchEnd', gesturePayload(point, { cancelled: true, reason }));
       }
       call('onGestureEnd', gesturePayload(point, {
         cancelled: true,
         reason,
         finishedMode,
-        activeCount: 0,
       }));
       return true;
     }

@@ -735,14 +735,13 @@ test('text edit mode always keeps text direct while caching static non-text laye
   const drawSource = viewportSource.slice(drawStart, drawEnd);
 
   assert.match(drawSource, /const textSelectionMotions = globalThis\.BoardfishMotion\?\.textSelectionJelloSpecsForDraw\?\.\(true\) \|\| null;/);
-  assert.match(drawSource, /const copiedSelectionSkipIds = textSelectionMotions;/);
   assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
   assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
   assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
-  assert.match(drawSource, /const visibleOptions = \{ skipId: editingId, skipIds: copiedSelectionSkipIds, viewportRect, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
-  assert.match(drawSource, /const visibleOptions = \{ viewportRect, skipIds: copiedSelectionSkipIds, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
+  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*const visibleOptions = \{ skipId: editingId, skipIds: textSelectionMotions, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
+  assert.match(drawSource, /const visibleOptions = \{ skipId: editingId, skipIds: textSelectionMotions, viewportRect, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
+  assert.match(drawSource, /const visibleOptions = \{ viewportRect, skipIds: textSelectionMotions, imageSourceResolver: openInitialImageSourceResolver \};[\s\S]*drawVisibleObjects\(ctx, visibleOptions\);[\s\S]*drawVisibleObjects\(ctx, counters, visibleOptions\);/);
   assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, zoom, textSelectionMotions\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');

@@ -2528,21 +2528,12 @@ var ViewportDebug = (() => {
   }
 
   function imageScaleCacheSummary(options = {}) {
-    const byScale = {};
-    let variantCount = 0;
-    for (const map of imageScaledBitmapCache.values()) {
-      for (const [scale, node] of map.entries()) {
-        variantCount++;
-        if (!byScale[scale]) byScale[scale] = { count: 0, mb: 0 };
-        byScale[scale].count++;
-        byScale[scale].mb += (node.entry.bytes || 0) / 1024 / 1024;
-      }
-    }
-    const rows = Object.entries(byScale).map(([scale, row]) => ({
-      scale,
-      count: row.count,
-      mb: Math.round(row.mb * 100) / 100,
-    }));
+    const variantCount = imageScaledBitmapCache.size;
+    const rows = variantCount ? [{
+      scale: IMAGE_SCALE_LEVELS[0],
+      count: variantCount,
+      mb: Math.round(imageScaledBitmapBytes / 1024 / 1024 * 100) / 100,
+    }] : [];
     const out = {
       variants: variantCount,
       cacheMB: Math.round(imageScaledBitmapBytes / 1024 / 1024 * 100) / 100,

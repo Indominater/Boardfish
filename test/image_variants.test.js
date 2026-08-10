@@ -25,11 +25,6 @@ function loadImageVariants(options = {}) {
   vm.createContext(context);
   vm.runInContext('globalThis.window = globalThis; window.devicePixelRatio = 1;', context);
   vm.runInContext(
-    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'bitmap_cache.js'), 'utf8'),
-    context,
-    { filename: 'bitmap_cache.js' },
-  );
-  vm.runInContext(
     fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_variants.js'), 'utf8'),
     context,
     { filename: 'image_variants.js' },
@@ -65,11 +60,6 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
 
   vm.createContext(context);
   vm.runInContext('globalThis.window = globalThis; window.devicePixelRatio = 1;', context);
-  vm.runInContext(
-    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'bitmap_cache.js'), 'utf8'),
-    context,
-    { filename: 'bitmap_cache.js' },
-  );
   vm.runInContext(
     fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_variants.js'), 'utf8'),
     context,
@@ -113,47 +103,38 @@ function scaleFor(context, options) {
   );
 }
 
-test('grouped bitmap cache prunes the least recently used variant', () => {
+test('scaled bitmap cache evicts the oldest fixed-scale variant', () => {
   const context = loadImageVariants();
-  const closed = [];
-  const evicted = [];
-  const store = context.BoardfishBitmapCache.createGroupedLruCache({
-    memoryLimit: 10,
-    closeEntry: (entry) => closed.push(entry.id),
-    entryBytes: (entry) => entry.bytes,
-    onEvict: (entry, key, slot) => evicted.push({ id: entry.id, key, slot }),
-  });
+  const bitmap = (id) => ({ id, closed: false, close() { this.closed = true; } });
+  const a = bitmap('a'), b = bitmap('b'), c = bitmap('c');
+  context.IMAGE_VARIANT_MEMORY_LIMIT = 10;
 
-  store.set('img-a', 0.25, { id: 'a', bytes: 4 });
-  store.set('img-b', 0.25, { id: 'b', bytes: 4 });
-  store.get('img-a', 0.25);
-  store.set('img-c', 0.25, { id: 'c', bytes: 4 });
+  context.setScaledImageVariant('img-a', { bitmap: a, bytes: 4 });
+  context.setScaledImageVariant('img-b', { bitmap: b, bytes: 4 });
+  context.imageScaledBitmapCache.get('img-a');
+  context.setScaledImageVariant('img-c', { bitmap: c, bytes: 4 });
 
-  assert.equal(store.get('img-a', 0.25).id, 'a');
-  assert.equal('lastUsed' in store.get('img-a', 0.25), false);
-  assert.equal(store.get('img-b', 0.25), null);
-  assert.equal(store.get('img-c', 0.25).id, 'c');
-  assert.deepEqual(closed, ['b']);
-  assert.deepEqual(evicted, [{ id: 'b', key: 'img-b', slot: 0.25 }]);
-  assert.equal(store.bytes, 8);
+  assert.equal(context.imageScaledBitmapCache.has('img-a'), false);
+  assert.equal(context.imageScaledBitmapCache.get('img-b').bitmap, b);
+  assert.equal(context.imageScaledBitmapCache.get('img-c').bitmap, c);
+  assert.equal(a.closed, true);
+  assert.equal(b.closed, false);
+  assert.equal(context.imageScaledBitmapBytes, 8);
+  assert.equal(context.imageScaledVariantEvictionCount, 1);
 });
 
-test('grouped bitmap cache keeps a group tracked when replacing its only variant', () => {
+test('scaled bitmap cache closes replacements and tracks their bytes', () => {
   const context = loadImageVariants();
-  const closed = [];
-  const store = context.BoardfishBitmapCache.createGroupedLruCache({
-    memoryLimit: 12,
-    closeEntry: (entry) => closed.push(entry.id),
-    entryBytes: (entry) => entry.bytes,
-  });
+  const first = { closed: false, close() { this.closed = true; } };
+  const second = { closed: false, close() { this.closed = true; } };
 
-  store.set('img-a', 0.25, { id: 'a1', bytes: 4 });
-  store.set('img-a', 0.25, { id: 'a2', bytes: 4 });
+  context.setScaledImageVariant('img-a', { bitmap: first, bytes: 4 });
+  context.setScaledImageVariant('img-a', { bitmap: second, bytes: 6 });
 
-  assert.equal(store.get('img-a', 0.25).id, 'a2');
-  assert.equal(store.groups.get('img-a').get(0.25).entry.id, 'a2');
-  assert.deepEqual(closed, ['a1']);
-  assert.equal(store.bytes, 4);
+  assert.equal(context.imageScaledBitmapCache.get('img-a').bitmap, second);
+  assert.equal(first.closed, true);
+  assert.equal(second.closed, false);
+  assert.equal(context.imageScaledBitmapBytes, 6);
 });
 
 test('chooses the smallest scaled variant that preserves display-pixel detail', () => {

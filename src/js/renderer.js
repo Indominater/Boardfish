@@ -2,7 +2,6 @@
 
 (function initBoardRenderer(root) {
   const IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
-  const IMAGE_EDGE_EPSILON = 1e-9;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -197,12 +196,10 @@
           let dw = cropWidth;
           let dh = cropHeight;
           if (edgeOverdraw > 0) {
-            const cropRight = dx + dw;
-            const cropBottom = dy + dh;
-            const left = Math.abs(dx - obj.x) <= IMAGE_EDGE_EPSILON ? edgeOverdraw : 0;
-            const top = Math.abs(dy - obj.y) <= IMAGE_EDGE_EPSILON ? edgeOverdraw : 0;
-            const right = Math.abs(cropRight - objRight) <= IMAGE_EDGE_EPSILON ? edgeOverdraw : 0;
-            const bottom = Math.abs(cropBottom - objBottom) <= IMAGE_EDGE_EPSILON ? edgeOverdraw : 0;
+            const left = x1 === obj.x ? edgeOverdraw : 0;
+            const top = y1 === obj.y ? edgeOverdraw : 0;
+            const right = x2 === objRight ? edgeOverdraw : 0;
+            const bottom = y2 === objBottom ? edgeOverdraw : 0;
             dx -= left;
             dy -= top;
             dw += left + right;

@@ -17,14 +17,7 @@ var VIEWPORT_PERF_MODES = {
   '4': { label: 'none', culling: false, scaling: false },
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
-var imageScaledBitmapStore = BoardfishBitmapCache.createGroupedLruCache({
-  memoryLimit: IMAGE_VARIANT_MEMORY_LIMIT,
-  onEvict(entry) {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantEvictionCount++;
-    dropDrawableBitmapWarmup(entry?.bitmap);
-  },
-});
-var imageScaledBitmapCache = imageScaledBitmapStore.groups; // key -> Map(scale -> LRU node)
+var imageScaledBitmapCache = new Map(); // key -> { bitmap, bytes }
 var imageScaledBitmapPending = new Map(); // pending key -> estimated bytes
 var imageScaledBitmapFailures = new Map();
 var imageScaledBitmapPendingByteTotal = 0;
@@ -284,9 +277,38 @@ function removePendingScaledVariantBytes(key) {
   }
 }
 
+function removeScaledImageVariant(key, evicted = false) {
+  const entry = imageScaledBitmapCache.get(key);
+  if (!entry) return false;
+  imageScaledBitmapCache.delete(key);
+  imageScaledBitmapBytes -= entry.bytes || 0;
+  entry.bitmap?.close?.();
+  if (evicted) {
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantEvictionCount++;
+    dropDrawableBitmapWarmup(entry.bitmap);
+  }
+  return true;
+}
+
+function setScaledImageVariant(key, entry) {
+  removeScaledImageVariant(key);
+  imageScaledBitmapCache.set(key, entry);
+  imageScaledBitmapBytes += entry.bytes || 0;
+  while (imageScaledBitmapBytes > IMAGE_VARIANT_MEMORY_LIMIT && imageScaledBitmapCache.size) {
+    removeScaledImageVariant(imageScaledBitmapCache.keys().next().value, true);
+  }
+  return entry;
+}
+
+function clearScaledImageVariantCache() {
+  for (const entry of imageScaledBitmapCache.values()) entry.bitmap?.close?.();
+  imageScaledBitmapCache.clear();
+  imageScaledBitmapBytes = 0;
+}
+
 function clearScaledImageVariants(key = null) {
   if (key) {
-    imageScaledBitmapStore.removeGroup(key);
+    removeScaledImageVariant(key);
     dropDrawableBitmapWarmupsForKey(key);
     if (imageScaledVariantQueue.length) {
       let write = 0;
@@ -306,17 +328,15 @@ function clearScaledImageVariants(key = null) {
     for (const failedKey of imageScaledBitmapFailures.keys()) {
       if (failedKey.startsWith(`${key}:`)) imageScaledBitmapFailures.delete(failedKey);
     }
-    imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
     return;
   }
-  imageScaledBitmapStore.clear();
+  clearScaledImageVariantCache();
   imageScaledBitmapPending.clear();
   imageScaledBitmapFailures.clear();
   imageScaledVariantFailureReleaseScheduled = false;
   imageScaledBitmapPendingByteTotal = 0;
   imageScaledVariantQueue.length = 0;
   cancelScheduledScaledVariantQueue();
-  imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
   clearTimeout(imageScaledVariantRenderTimer);
   imageScaledVariantRenderTimer = null;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -480,7 +500,7 @@ async function createScaledImageVariantBitmap(source, sourceW, sourceH, scale) {
 }
 
 async function buildScaledImageVariantNow(key, source, scale, options = {}) {
-  if (!isViewportImageScalingActive() || !key || !source || scale >= 1) {
+  if (!isViewportImageScalingActive() || !key || !source || scale !== IMAGE_SCALE_LEVELS[0]) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: false, skipped: 'disabled-or-invalid' }
       : false;
@@ -530,7 +550,7 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
         : false;
     }
     const bytes = bitmapByteSize(bitmap);
-    imageScaledBitmapStore.set(key, scale, { bitmap, bytes });
+    setScaledImageVariant(key, { bitmap, bytes });
     const warmupMeta = { kind: 'scaled-variant', key };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') Object.assign(warmupMeta, { scale, source: 'build-now' });
     scheduleDrawableBitmapWarmup(bitmap, warmupMeta, {
@@ -539,7 +559,6 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
       maxItems: 1,
     });
     bitmap = null;
-    imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
     if (options.scheduleRender !== false) scheduleScaledVariantReadyRender();
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: true, bytes, ms: performance.now() - buildStart }
@@ -630,7 +649,7 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
 }
 
 function queueScaledImageVariant(key, source, scale, priority = false) {
-  if (!isViewportImageScalingActive() || !key || !source || scale >= 1) {
+  if (!isViewportImageScalingActive() || !key || !source || scale !== IMAGE_SCALE_LEVELS[0]) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, queued: false, skipped: 'disabled-or-invalid' }
       : false;
@@ -687,12 +706,11 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
         return;
       }
       const bytes = bitmapByteSize(bitmap);
-      imageScaledBitmapStore.set(key, scale, { bitmap, bytes });
+      setScaledImageVariant(key, { bitmap, bytes });
       const warmupMeta = { kind: 'scaled-variant', key };
       if (typeof BOARDFISH_PRODUCTION === 'undefined') Object.assign(warmupMeta, { scale, source: 'queue' });
       scheduleDrawableBitmapWarmup(bitmap, warmupMeta);
       bitmap = null;
-      imageScaledBitmapBytes = imageScaledBitmapStore.bytes;
       scheduleScaledVariantReadyRender();
     } catch (_) {
       bitmap?.close?.();
@@ -736,7 +754,7 @@ function queueScaledImageVariantForReadyImage(key, source, options = {}) {
     return false;
   }
   const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.25;
-  if (!(scale > 0 && scale < 1)) {
+  if (scale !== IMAGE_SCALE_LEVELS[0]) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       imageScaledVariantSourceReadyFullScaleCount++;
       return { key, scale, queued: false, skipped: 'full-scale' };
@@ -870,7 +888,7 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
 }
 
 function hasScaledImageVariant(key, scale) {
-  return !!imageScaledBitmapStore.get(key, scale, false);
+  return scale === IMAGE_SCALE_LEVELS[0] && imageScaledBitmapCache.has(key);
 }
 
 function isScaledImageVariantPending(key, scale) {
@@ -922,7 +940,7 @@ function prewarmVisibleScaledImageVariants(options = {}) {
     return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'disabled-or-opening' } : undefined;
   }
   const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.25;
-  if (!(scale > 0 && scale < 1)) {
+  if (scale !== IMAGE_SCALE_LEVELS[0]) {
     return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'invalid-scale' } : undefined;
   }
   const padPx = Number.isFinite(options.padPx) ? options.padPx : IMAGE_VARIANT_PREWARM_PAD_PX;
@@ -1002,7 +1020,7 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
   }
   activeInput = activeInput === true || (activeInput !== false && isActiveViewportInput());
   const targetScale = chooseImageScaleForDraw(obj, fullSource, view, activeInput);
-  const entry = targetScale < 1 ? imageScaledBitmapStore.get(key, targetScale, false) : null;
+  const entry = targetScale < 1 ? imageScaledBitmapCache.get(key) : null;
   if (entry) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { source: entry.bitmap, scale: targetScale, targetScale }
