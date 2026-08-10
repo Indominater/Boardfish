@@ -31,6 +31,7 @@ var exportSep         = requireAppElement('obj-sep-export');
 var imageActionsSep   = requireAppElement('obj-sep-image-actions');
 var layerActionsSep   = requireAppElement('obj-sep-layer-actions');
 var deleteSep         = requireAppElement('obj-sep-delete');
+var sortImagesBtn     = requireAppElement('obj-btn-sort-images');
 var flipBtn           = requireAppElement('obj-btn-flip');
 var rotateBtn         = requireAppElement('obj-btn-rotate');
 var rubberBand       = requireAppElement('rubber-band');

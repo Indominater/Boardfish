@@ -1,0 +1,422 @@
+'use strict';
+
+(function initImageLayout(root) {
+  const DEFAULT_IMAGE_MAX_DIMENSION = 600;
+  const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
+  // Unrestricted row partitioning is exponential. Keep common selections exact
+  // and use bounded deterministic refinement for larger boards.
+  const EXACT_PARTITION_IMAGE_LIMIT = 13;
+  const LOCAL_IMPROVEMENT_STEP_FACTOR = 4;
+
+  const finitePositiveNumber = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  };
+
+  const numericTolerance = (...values) => (
+    Math.max(1, ...values.map((value) => Math.abs(Number(value) || 0))) * 1e-12
+  );
+
+  const compareIds = (left, right) => {
+    const a = String(left);
+    const b = String(right);
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+  };
+
+  const compareNumberArrays = (left, right) => {
+    const count = Math.min(left.length, right.length);
+    for (let i = 0; i < count; i++) {
+      if (left[i] !== right[i]) return left[i] - right[i];
+    }
+    return left.length - right.length;
+  };
+
+  function normalizedImageItems(images, rowHeight) {
+    const items = [];
+    const seenIds = new Set();
+    for (let sourceIndex = 0; sourceIndex < images.length; sourceIndex++) {
+      const image = images[sourceIndex];
+      if (!image || image.id == null || seenIds.has(String(image.id))) continue;
+      const sourceWidth = finitePositiveNumber(image.w);
+      const sourceHeight = finitePositiveNumber(image.h);
+      if (sourceWidth == null || sourceHeight == null) continue;
+      const width = sourceWidth / sourceHeight * rowHeight;
+      if (!Number.isFinite(width) || width <= 0) continue;
+      seenIds.add(String(image.id));
+      items.push({
+        id: image.id,
+        sortId: String(image.id),
+        width,
+        sourceIndex,
+      });
+    }
+    items.sort((a, b) => (
+      b.width - a.width || compareIds(a.sortId, b.sortId) || a.sourceIndex - b.sourceIndex
+    ));
+    for (let rank = 0; rank < items.length; rank++) items[rank].rank = rank;
+    return items;
+  }
+
+  function canonicalRows(rows) {
+    const canonical = rows.map((row) => {
+      const items = row.items.slice().sort((a, b) => a.rank - b.rank);
+      let width = 0;
+      for (const item of items) width += item.width;
+      return { items, width, ranks: items.map((item) => item.rank) };
+    });
+    canonical.sort((a, b) => {
+      const tolerance = numericTolerance(a.width, b.width);
+      if (Math.abs(a.width - b.width) > tolerance) return b.width - a.width;
+      return compareNumberArrays(a.ranks, b.ranks);
+    });
+    return canonical;
+  }
+
+  function exactPartitionsByRowCount(items, requestedRowCounts) {
+    const itemCount = items.length;
+    const rowCounts = [...new Set(requestedRowCounts)]
+      .filter((rowCount) => Number.isInteger(rowCount) && rowCount >= 1 && rowCount <= itemCount)
+      .sort((a, b) => a - b);
+    const maxRowCount = rowCounts[rowCounts.length - 1] || 1;
+    const stateCount = 1 << itemCount;
+    const fullMask = stateCount - 1;
+    const subsetCounts = new Uint8Array(stateCount);
+    const subsetWidths = new Float64Array(stateCount);
+    for (let mask = 1; mask < stateCount; mask++) {
+      const bit = mask & -mask;
+      const rank = 31 - Math.clz32(bit);
+      const previous = mask ^ bit;
+      subsetCounts[mask] = subsetCounts[previous] + 1;
+      subsetWidths[mask] = subsetWidths[previous] + items[rank].width;
+    }
+
+    // With a fixed target and row count, the variable part of the requested
+    // squared error is just the sum of squared row widths.
+    const costs = new Array(itemCount + 1);
+    const choices = new Array(itemCount + 1);
+    costs[1] = new Float64Array(stateCount);
+    for (let mask = 1; mask < stateCount; mask++) {
+      costs[1][mask] = subsetWidths[mask] * subsetWidths[mask];
+    }
+
+    for (let rowCount = 2; rowCount <= maxRowCount; rowCount++) {
+      const previousCosts = costs[rowCount - 1];
+      const nextCosts = new Float64Array(stateCount);
+      const nextChoices = new Int32Array(stateCount);
+      nextCosts.fill(Infinity);
+      nextChoices.fill(-1);
+      for (let mask = 1; mask < stateCount; mask++) {
+        if (subsetCounts[mask] < rowCount) continue;
+        const anchoredBit = mask & -mask;
+        const availableForRemainingRows = mask ^ anchoredBit;
+        for (
+          let remainingMask = availableForRemainingRows;
+          remainingMask;
+          remainingMask = (remainingMask - 1) & availableForRemainingRows
+        ) {
+          if (subsetCounts[remainingMask] < rowCount - 1) continue;
+          const previousCost = previousCosts[remainingMask];
+          if (!Number.isFinite(previousCost)) continue;
+          const rowMask = mask ^ remainingMask;
+          const rowWidth = subsetWidths[rowMask];
+          const candidateCost = previousCost + rowWidth * rowWidth;
+          const currentCost = nextCosts[mask];
+          const tolerance = numericTolerance(candidateCost, currentCost);
+          if (
+            candidateCost < currentCost - tolerance ||
+            (
+              Math.abs(candidateCost - currentCost) <= tolerance &&
+              (nextChoices[mask] < 0 || remainingMask < nextChoices[mask])
+            )
+          ) {
+            nextCosts[mask] = candidateCost;
+            nextChoices[mask] = remainingMask;
+          }
+        }
+      }
+      costs[rowCount] = nextCosts;
+      choices[rowCount] = nextChoices;
+    }
+
+    const partitions = new Array(itemCount + 1);
+    for (const rowCount of rowCounts) {
+      let mask = fullMask;
+      let rowsRemaining = rowCount;
+      const rows = [];
+      while (rowsRemaining > 1) {
+        const remainingMask = choices[rowsRemaining][mask];
+        if (remainingMask < 0) break;
+        const rowMask = mask ^ remainingMask;
+        const rowItems = [];
+        for (let rank = 0; rank < itemCount; rank++) {
+          if (rowMask & (1 << rank)) rowItems.push(items[rank]);
+        }
+        rows.push({ items: rowItems });
+        mask = remainingMask;
+        rowsRemaining--;
+      }
+      if (rowsRemaining === 1 && mask) {
+        const rowItems = [];
+        for (let rank = 0; rank < itemCount; rank++) {
+          if (mask & (1 << rank)) rowItems.push(items[rank]);
+        }
+        rows.push({ items: rowItems });
+      }
+      partitions[rowCount] = canonicalRows(rows);
+    }
+    return partitions;
+  }
+
+  const operationKeyCompare = (left, right) => {
+    if (!right) return -1;
+    return compareNumberArrays(left.key, right.key);
+  };
+
+  function bestImprovingOperation(rows) {
+    let best = null;
+    let currentCost = 0;
+    for (const row of rows) currentCost += row.width * row.width;
+    const improvementTolerance = numericTolerance(currentCost);
+
+    for (let from = 0; from < rows.length; from++) {
+      const source = rows[from];
+      if (source.items.length <= 1) continue;
+      for (const item of source.items) {
+        for (let to = 0; to < rows.length; to++) {
+          if (to === from) continue;
+          const target = rows[to];
+          const delta = (
+            (source.width - item.width) ** 2 +
+            (target.width + item.width) ** 2 -
+            source.width ** 2 -
+            target.width ** 2
+          );
+          if (delta >= -improvementTolerance) continue;
+          const operation = {
+            type: 'move',
+            delta,
+            from,
+            to,
+            item,
+            key: [0, item.rank, from, to],
+          };
+          const bestTolerance = numericTolerance(delta, best?.delta ?? 0);
+          if (
+            !best ||
+            delta < best.delta - bestTolerance ||
+            (Math.abs(delta - best.delta) <= bestTolerance && operationKeyCompare(operation, best) < 0)
+          ) best = operation;
+        }
+      }
+    }
+
+    for (let leftIndex = 0; leftIndex < rows.length; leftIndex++) {
+      const left = rows[leftIndex];
+      for (let rightIndex = leftIndex + 1; rightIndex < rows.length; rightIndex++) {
+        const right = rows[rightIndex];
+        for (const leftItem of left.items) {
+          for (const rightItem of right.items) {
+            if (leftItem === rightItem) continue;
+            const nextLeftWidth = left.width - leftItem.width + rightItem.width;
+            const nextRightWidth = right.width - rightItem.width + leftItem.width;
+            const delta = (
+              nextLeftWidth ** 2 + nextRightWidth ** 2 -
+              left.width ** 2 - right.width ** 2
+            );
+            if (delta >= -improvementTolerance) continue;
+            const operation = {
+              type: 'swap',
+              delta,
+              from: leftIndex,
+              to: rightIndex,
+              item: leftItem,
+              otherItem: rightItem,
+              key: [1, leftItem.rank, rightItem.rank, leftIndex, rightIndex],
+            };
+            const bestTolerance = numericTolerance(delta, best?.delta ?? 0);
+            if (
+              !best ||
+              delta < best.delta - bestTolerance ||
+              (Math.abs(delta - best.delta) <= bestTolerance && operationKeyCompare(operation, best) < 0)
+            ) best = operation;
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  function applyImprovingOperation(rows, operation) {
+    const source = rows[operation.from];
+    const target = rows[operation.to];
+    if (operation.type === 'move') {
+      source.items.splice(source.items.indexOf(operation.item), 1);
+      target.items.push(operation.item);
+    } else {
+      const sourceIndex = source.items.indexOf(operation.item);
+      const targetIndex = target.items.indexOf(operation.otherItem);
+      source.items[sourceIndex] = operation.otherItem;
+      target.items[targetIndex] = operation.item;
+    }
+    for (const row of [source, target]) {
+      row.items.sort((a, b) => a.rank - b.rank);
+      row.width = row.items.reduce((sum, item) => sum + item.width, 0);
+    }
+  }
+
+  function balancedGreedyPartition(items, rowCount) {
+    const rows = Array.from({ length: rowCount }, (_, index) => ({ index, items: [], width: 0 }));
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+      const item = items[itemIndex];
+      let target = rows[itemIndex];
+      if (itemIndex >= rowCount) {
+        target = rows[0];
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          const tolerance = numericTolerance(row.width, target.width);
+          if (
+            row.width < target.width - tolerance ||
+            (Math.abs(row.width - target.width) <= tolerance && row.index < target.index)
+          ) target = row;
+        }
+      }
+      target.items.push(item);
+      target.width += item.width;
+    }
+
+    const maxSteps = Math.max(1, items.length * LOCAL_IMPROVEMENT_STEP_FACTOR);
+    for (let step = 0; step < maxSteps; step++) {
+      const operation = bestImprovingOperation(rows);
+      if (!operation) break;
+      applyImprovingOperation(rows, operation);
+    }
+    return canonicalRows(rows);
+  }
+
+  const goldenErrorForRows = (rows, idealWidth) => {
+    let error = 0;
+    for (const row of rows) error += (row.width - idealWidth) ** 2;
+    return error;
+  };
+
+  const theoreticalRowErrorLowerBound = (totalWidth, rowHeight, rowCount) => {
+    const idealWidth = GOLDEN_RATIO * rowCount * rowHeight;
+    return (totalWidth - rowCount * idealWidth) ** 2 / rowCount;
+  };
+
+  function planGoldenRatioImageLayout(images, center = {}, options = {}) {
+    if (!Array.isArray(images)) return null;
+    const rowHeight = finitePositiveNumber(options.rowHeight) || DEFAULT_IMAGE_MAX_DIMENSION;
+    const items = normalizedImageItems(images, rowHeight);
+    if (!items.length) return null;
+    const centerX = Number.isFinite(Number(center.x)) ? Number(center.x) : 0;
+    const centerY = Number.isFinite(Number(center.y)) ? Number(center.y) : 0;
+    const totalWidth = items.reduce((sum, item) => sum + item.width, 0);
+    if (!Number.isFinite(totalWidth)) return null;
+    const candidates = [];
+    for (let rowCount = 1; rowCount <= items.length; rowCount++) {
+      candidates.push({
+        rowCount,
+        lowerBound: theoreticalRowErrorLowerBound(totalWidth, rowHeight, rowCount),
+      });
+    }
+    if (candidates.some((candidate) => !Number.isFinite(candidate.lowerBound))) return null;
+    candidates.sort((a, b) => a.lowerBound - b.lowerBound || a.rowCount - b.rowCount);
+
+    let exactPartitions = null;
+    if (items.length <= EXACT_PARTITION_IMAGE_LIMIT) {
+      const provisional = candidates[0];
+      const provisionalIdealWidth = GOLDEN_RATIO * provisional.rowCount * rowHeight;
+      const provisionalRows = balancedGreedyPartition(items, provisional.rowCount);
+      const upperBound = goldenErrorForRows(provisionalRows, provisionalIdealWidth);
+      if (!Number.isFinite(upperBound)) return null;
+      const possibleRowCounts = candidates
+        .filter((candidate) => (
+          candidate.lowerBound <= upperBound + numericTolerance(candidate.lowerBound, upperBound)
+        ))
+        .map((candidate) => candidate.rowCount);
+      exactPartitions = exactPartitionsByRowCount(items, possibleRowCounts);
+    }
+
+    let best = null;
+    for (const candidate of candidates) {
+      if (
+        best &&
+        candidate.lowerBound > best.error + numericTolerance(candidate.lowerBound, best.error)
+      ) continue;
+      if (exactPartitions && !exactPartitions[candidate.rowCount]) continue;
+      const idealWidth = GOLDEN_RATIO * candidate.rowCount * rowHeight;
+      const rows = exactPartitions
+        ? exactPartitions[candidate.rowCount]
+        : balancedGreedyPartition(items, candidate.rowCount);
+      if (
+        rows.length !== candidate.rowCount ||
+        rows.some((row) => !row.items.length) ||
+        rows.reduce((count, row) => count + row.items.length, 0) !== items.length
+      ) return null;
+      const error = goldenErrorForRows(rows, idealWidth);
+      if (!Number.isFinite(error)) return null;
+      const tolerance = numericTolerance(error, best?.error ?? 0);
+      if (
+        !best ||
+        error < best.error - tolerance ||
+        (Math.abs(error - best.error) <= tolerance && candidate.rowCount < best.rowCount)
+      ) {
+        best = { rows, rowCount: candidate.rowCount, idealWidth, error };
+      }
+    }
+    if (!best) return null;
+
+    const occupiedWidth = best.rows.reduce((width, row) => Math.max(width, row.width), 0);
+    const height = best.rowCount * rowHeight;
+    const left = centerX - occupiedWidth / 2;
+    const top = centerY - height / 2;
+    const placements = [];
+    const rows = best.rows.map((row, rowIndex) => {
+      let cursorX = left;
+      const itemIds = [];
+      for (let column = 0; column < row.items.length; column++) {
+        const item = row.items[column];
+        itemIds.push(item.id);
+        placements.push({
+          id: item.id,
+          row: rowIndex,
+          column,
+          x: cursorX,
+          y: top + rowIndex * rowHeight,
+          w: item.width,
+          h: rowHeight,
+        });
+        cursorX += item.width;
+      }
+      return {
+        y: top + rowIndex * rowHeight,
+        width: row.width,
+        itemIds,
+      };
+    });
+
+    return {
+      rowHeight,
+      rowCount: best.rowCount,
+      idealWidth: best.idealWidth,
+      occupiedWidth,
+      height,
+      error: best.error,
+      left,
+      top,
+      rows,
+      placements,
+    };
+  }
+
+  const api = Object.freeze({
+    DEFAULT_IMAGE_MAX_DIMENSION,
+    GOLDEN_RATIO,
+    planGoldenRatioImageLayout,
+  });
+  root.BoardfishImageLayout = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : globalThis);

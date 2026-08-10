@@ -151,6 +151,60 @@ function rotateSelectedImages(dir) {
   }, { invalidate: true });
 }
 
+const imageSortGeometryMatches = (obj, placement) => {
+  const matches = (left, right) => (
+    Math.abs(left - right) <= Math.max(1, Math.abs(left), Math.abs(right)) * 1e-12
+  );
+  return matches(obj.x, placement.x) && matches(obj.y, placement.y) &&
+    matches(obj.w, placement.w) && matches(obj.h, placement.h);
+};
+
+function sortSelectedImages(anchorPoint = null) {
+  const selectedImages = [];
+  for (const obj of objects) {
+    if (!selectedIds.has(obj.id) || obj.type !== 'image') continue;
+    if (!(Number.isFinite(obj.w) && obj.w > 0 && Number.isFinite(obj.h) && obj.h > 0)) continue;
+    selectedImages.push(obj);
+  }
+  if (selectedImages.length < 2) return false;
+
+  const center = (
+    anchorPoint &&
+    Number.isFinite(Number(anchorPoint.x)) &&
+    Number.isFinite(Number(anchorPoint.y))
+  )
+    ? { x: Number(anchorPoint.x), y: Number(anchorPoint.y) }
+    : (typeof boardCursorWorldPoint === 'function' ? boardCursorWorldPoint() : { x: 0, y: 0 });
+  const layout = BoardfishImageLayout.planGoldenRatioImageLayout(selectedImages, center);
+  if (!layout || layout.placements.length < 2) return false;
+  const placementById = new Map(layout.placements.map((placement) => [placement.id, placement]));
+  let geometryChanged = false;
+  for (const obj of selectedImages) {
+    const placement = placementById.get(obj.id);
+    if (!placement) continue;
+    if (!imageSortGeometryMatches(obj, placement)) {
+      geometryChanged = true;
+      break;
+    }
+  }
+  if (!geometryChanged) return false;
+
+  return BoardfishEditorState.commitMutation('sort-images', () => {
+    let changed = false;
+    for (const obj of selectedImages) {
+      const placement = placementById.get(obj.id);
+      if (!placement) continue;
+      obj.x = placement.x;
+      obj.y = placement.y;
+      obj.w = placement.w;
+      obj.h = placement.h;
+      markDirty(obj.id);
+      changed = true;
+    }
+    return changed;
+  }, { invalidate: true });
+}
+
 function isMultiSelected() {
   return selectedIds.size > 1;
 }

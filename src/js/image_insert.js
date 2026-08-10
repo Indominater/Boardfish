@@ -29,11 +29,11 @@ function finishBulkImageInsert({ pushHistoryEntry = true } = {}) {
 function fitImageSize(naturalW, naturalH) {
   let w = naturalW;
   let h = naturalH;
-  const MAX = 600;
+  const MAX = BoardfishImageLayout.DEFAULT_IMAGE_MAX_DIMENSION;
   if (w > MAX || h > MAX) {
     const scale = MAX / Math.max(w, h);
-    w = Math.round(w * scale);
-    h = Math.round(h * scale);
+    w = Math.max(1, Math.round(w * scale));
+    h = Math.max(1, Math.round(h * scale));
   }
   return { w, h };
 }

@@ -203,6 +203,11 @@ var MENU_COMMANDS = {
     duplicateSelected(point);
   },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
+  'obj-btn-sort-images': (event) => {
+    const point = menuCommandWorldPoint(event);
+    closeObjCtxMenu('command:sort-images');
+    sortSelectedImages(point);
+  },
   'obj-btn-flip': () => { flipSelectedImages(); },
   'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
   'obj-btn-save-image': () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); },
@@ -705,6 +710,7 @@ function updateObjMenuActions() {
   const showDelete = selectedCount >= 1;
   copyBtn.style.display = '';
   imageActionsSep.style.display = showImageActions ? 'block' : 'none';
+  sortImagesBtn.style.display = imageCount >= 2 ? '' : 'none';
   flipBtn.style.display = showImageActions ? '' : 'none';
   rotateBtn.style.display = showImageActions ? '' : 'none';
   layerActionsSep.style.display = showLayerActions ? 'block' : 'none';

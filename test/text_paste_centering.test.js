@@ -194,7 +194,7 @@ test('addText keeps top-left placement by default', () => {
   assert.equal(obj.x, 24);
   assert.equal(obj.y, 48);
   assert.equal(obj.h, DEFAULT_TEXT_BOX_HEIGHT);
-  assert.equal(obj.w, DEFAULT_TEXT_BOX_HEIGHT * 8);
+  assert.equal(obj.w, DEFAULT_TEXT_BOX_HEIGHT * 6);
   assert.deepEqual(context.editedIds, [obj.id]);
   assert.deepEqual(context.histories, ['text-edit-enter']);
 });

@@ -283,7 +283,7 @@ const textScriptScaleForDepth = (depth) => Math.pow(TEXT_SCRIPT_FONT_SCALE, text
 
 function defaultTextBoxSize() {
   const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-  return { w: h * 8, h };
+  return { w: h * 6, h };
 }
 
 const textFontForScriptDepth = (depth) => {
