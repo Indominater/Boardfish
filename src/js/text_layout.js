@@ -94,15 +94,6 @@ const externalTextBoundaryLooksContinuous = (previousLine, nextLine) => {
   );
 };
 
-const externalTextMedian = (values) => {
-  if (!values.length) return 0;
-  const sorted = values.slice().sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
-};
-
 const shouldUnwrapExternalTextBlock = (lines) => {
   if (!Array.isArray(lines) || lines.length < 3) return false;
   if (lines.some(externalTextLineLooksStructured)) return false;
@@ -115,11 +106,15 @@ const shouldUnwrapExternalTextBlock = (lines) => {
 
   const bodyWidths = lines.slice(0, -1).map((line) => String(line ?? '').trim().length);
   if (!bodyWidths.length) return false;
-  const referenceWidth = Math.max(...bodyWidths);
-  if (externalTextMedian(bodyWidths) < EXTERNAL_TEXT_SOFT_WRAP_MIN_MEDIAN_CHARS) return false;
-  if (bodyWidths.some((width) => width < referenceWidth * 0.55)) return false;
-  const clusteredWidths = bodyWidths.filter((width) => width >= referenceWidth * 0.7).length;
-  if (clusteredWidths / bodyWidths.length < 0.75) return false;
+  bodyWidths.sort((a, b) => a - b);
+  const middle = Math.floor(bodyWidths.length / 2);
+  const median = bodyWidths.length % 2
+    ? bodyWidths[middle]
+    : (bodyWidths[middle - 1] + bodyWidths[middle]) / 2;
+  const referenceWidth = bodyWidths[bodyWidths.length - 1];
+  if (median < EXTERNAL_TEXT_SOFT_WRAP_MIN_MEDIAN_CHARS) return false;
+  if (bodyWidths[0] < referenceWidth * 0.55) return false;
+  if (bodyWidths[Math.floor(bodyWidths.length * 0.25)] < referenceWidth * 0.7) return false;
 
   let continuousBoundaries = 0;
   for (let index = 1; index < lines.length; index++) {
@@ -1438,31 +1433,6 @@ function layoutLineFromWrappedLine(obj, line, lineIndex, scriptRanges, scriptMet
   return setTextLayoutLineScriptMetrics(layoutLine, scriptMetrics);
 }
 
-function wrappedLineIndexFromLayout(layout) {
-  const lines = Array.isArray(layout) ? layout : [];
-  const entries = [];
-  for (let visualLineIndex = 0; visualLineIndex < lines.length; visualLineIndex++) {
-    const line = lines[visualLineIndex];
-    const logicalLineIndex = line.logicalLineIndex || 0;
-    let entry = entries[entries.length - 1];
-    if (!entry || entry.logicalLineIndex !== logicalLineIndex) {
-      entry = {
-        logicalLineIndex,
-        startIndex: line.startIndex,
-        endIndex: line.endIndex,
-        visualStart: visualLineIndex,
-        visualEnd: visualLineIndex,
-      };
-      entries.push(entry);
-    } else {
-      entry.startIndex = Math.min(entry.startIndex, line.startIndex);
-      entry.endIndex = Math.max(entry.endIndex, line.endIndex);
-      entry.visualEnd = visualLineIndex;
-    }
-  }
-  return entries;
-}
-
 function patchTextObjectLayoutAfterInput(obj, options = {}) {
   if (!obj || obj.type !== 'text' || !Array.isArray(obj._layoutCache)) return false;
   const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
@@ -1592,7 +1562,6 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   obj._layoutCacheScriptKey = scriptKey;
   obj._layoutCacheAlignKey = alignKey;
   obj._layoutCacheY = obj.y;
-  setCachedTextWrappedLineIndex(obj, newContent, scriptKey, wrappedLineIndexFromLayout(layout), layout.length);
 
   if (collectDiagnostics) {
     debug.ok = true;

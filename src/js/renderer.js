@@ -156,50 +156,6 @@
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  function visibleImageCrop(obj, img, rect) {
-    if (!rect || !(obj?.w > 0) || !(obj?.h > 0)) return null;
-    const x1 = Math.max(obj.x, rect.x1);
-    const y1 = Math.max(obj.y, rect.y1);
-    const x2 = Math.min(obj.x + obj.w, rect.x2);
-    const y2 = Math.min(obj.y + obj.h, rect.y2);
-    if (!(x2 > x1 && y2 > y1)) return false;
-    if (x1 === obj.x && y1 === obj.y && x2 === obj.x + obj.w && y2 === obj.y + obj.h) return null;
-    const sourceWidth = img?.width || img?.naturalWidth || 0;
-    const sourceHeight = img?.height || img?.naturalHeight || 0;
-    if (!(sourceWidth > 0 && sourceHeight > 0)) return null;
-    return {
-      sx: (x1 - obj.x) / obj.w * sourceWidth,
-      sy: (y1 - obj.y) / obj.h * sourceHeight,
-      sw: (x2 - x1) / obj.w * sourceWidth,
-      sh: (y2 - y1) / obj.h * sourceHeight,
-      dx: x1,
-      dy: y1,
-      dw: x2 - x1,
-      dh: y2 - y1,
-    };
-  }
-
-  function nearlyEqual(a, b) {
-    return Math.abs(a - b) <= IMAGE_EDGE_EPSILON;
-  }
-
-  function applyImageCropDestinationOverdraw(crop, obj, edge) {
-    if (!(edge > 0)) return;
-    const cropRight = crop.dx + crop.dw;
-    const cropBottom = crop.dy + crop.dh;
-    const objRight = obj.x + obj.w;
-    const objBottom = obj.y + obj.h;
-    const left = nearlyEqual(crop.dx, obj.x) ? edge : 0;
-    const top = nearlyEqual(crop.dy, obj.y) ? edge : 0;
-    const right = nearlyEqual(cropRight, objRight) ? edge : 0;
-    const bottom = nearlyEqual(cropBottom, objBottom) ? edge : 0;
-    if (!(left || top || right || bottom)) return;
-    crop.dx -= left;
-    crop.dy -= top;
-    crop.dw += left + right;
-    crop.dh += top + bottom;
-  }
-
   function drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect) {
     const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (view.zoom * view.dpr);
     const transform = obj.data;
@@ -222,12 +178,50 @@
       return false;
     }
 
-    const crop = visibleImageCrop(obj, img, viewportRect);
-    if (crop === false) return null;
-    if (crop) {
-      applyImageCropDestinationOverdraw(crop, obj, edgeOverdraw);
-      context.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, crop.dx, crop.dy, crop.dw, crop.dh);
-      return true;
+    if (viewportRect && obj.w > 0 && obj.h > 0) {
+      const objRight = obj.x + obj.w;
+      const objBottom = obj.y + obj.h;
+      const x1 = Math.max(obj.x, viewportRect.x1);
+      const y1 = Math.max(obj.y, viewportRect.y1);
+      const x2 = Math.min(objRight, viewportRect.x2);
+      const y2 = Math.min(objBottom, viewportRect.y2);
+      if (!(x2 > x1 && y2 > y1)) return null;
+      if (x1 !== obj.x || y1 !== obj.y || x2 !== objRight || y2 !== objBottom) {
+        const sourceWidth = img?.width || img?.naturalWidth || 0;
+        const sourceHeight = img?.height || img?.naturalHeight || 0;
+        if (sourceWidth > 0 && sourceHeight > 0) {
+          const cropWidth = x2 - x1;
+          const cropHeight = y2 - y1;
+          let dx = x1;
+          let dy = y1;
+          let dw = cropWidth;
+          let dh = cropHeight;
+          if (edgeOverdraw > 0) {
+            const cropRight = dx + dw;
+            const cropBottom = dy + dh;
+            const left = Math.abs(dx - obj.x) <= IMAGE_EDGE_EPSILON ? edgeOverdraw : 0;
+            const top = Math.abs(dy - obj.y) <= IMAGE_EDGE_EPSILON ? edgeOverdraw : 0;
+            const right = Math.abs(cropRight - objRight) <= IMAGE_EDGE_EPSILON ? edgeOverdraw : 0;
+            const bottom = Math.abs(cropBottom - objBottom) <= IMAGE_EDGE_EPSILON ? edgeOverdraw : 0;
+            dx -= left;
+            dy -= top;
+            dw += left + right;
+            dh += top + bottom;
+          }
+          context.drawImage(
+            img,
+            (x1 - obj.x) / obj.w * sourceWidth,
+            (y1 - obj.y) / obj.h * sourceHeight,
+            cropWidth / obj.w * sourceWidth,
+            cropHeight / obj.h * sourceHeight,
+            dx,
+            dy,
+            dw,
+            dh,
+          );
+          return true;
+        }
+      }
     }
     context.drawImage(
       img,

@@ -194,7 +194,6 @@ function loadSelectionInputHarness(objects, options = {}) {
       'globalThis.beginSelectionHandleDrag = beginSelectionHandleDrag;\n' +
       'globalThis.updateSelectionOverlay = updateSelectionOverlay;\n' +
       'globalThis.selectionBoundsIntersectViewport = selectionBoundsIntersectViewport;\n' +
-      'globalThis.snappedSelectionOverlayScreenRect = snappedSelectionOverlayScreenRect;\n' +
       'globalThis.flushEditHistoryCheckpoint = flushEditHistoryCheckpoint;\n' +
       'globalThis.beginTextEditHistoryAction = beginTextEditHistoryAction;\n' +
       'globalThis.recordTextEditInputHistory = recordTextEditInputHistory;\n' +
@@ -362,11 +361,6 @@ test('selection overlay expands snapped outline edges to cover object bounds', (
   assert.equal(context.selOverlay.style.transform, 'translate(10px,20px)');
   assert.equal(context.selOverlay.style.width, '101px');
   assert.equal(context.selOverlay.style.height, '41.5px');
-  const snapped = context.snappedSelectionOverlayScreenRect(10.35, 20.45, 100.6, 40.6, 2);
-  assert.equal(snapped.x, 10);
-  assert.equal(snapped.y, 20);
-  assert.equal(snapped.width, 101);
-  assert.equal(snapped.height, 41.5);
   assert.equal(context.motionLookups, 0);
 });
 

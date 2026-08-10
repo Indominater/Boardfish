@@ -6,12 +6,18 @@ var _textMinWidthWarmCancel = null;
 var _textMinWidthWarmObjectId = '';
 const SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
 
-function snappedSelectionOverlayScreenRect(x, y, width, height, dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1, padDevicePx = 0) {
-  const scale = Number.isFinite(Number(dpr)) && Number(dpr) > 0 ? Number(dpr) : 1;
-  const rawX = Number.isFinite(Number(x)) ? Number(x) : 0;
-  const rawY = Number.isFinite(Number(y)) ? Number(y) : 0;
-  const rawW = Math.max(0, Number.isFinite(Number(width)) ? Number(width) : 0);
-  const rawH = Math.max(0, Number.isFinite(Number(height)) ? Number(height) : 0);
+function setSelectionOverlayScreenRect(element, state, resting, animated, padDevicePx = 0) {
+  if (!resting || !animated) return;
+  const restingX = resting.x1 * zoom + panX;
+  const restingY = resting.y1 * zoom + panY;
+  const restingWidth = (resting.x2 - resting.x1) * zoom;
+  const restingHeight = (resting.y2 - resting.y1) * zoom;
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
+  const scale = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  const rawX = Number.isFinite(restingX) ? restingX : 0;
+  const rawY = Number.isFinite(restingY) ? restingY : 0;
+  const rawW = Math.max(0, Number.isFinite(restingWidth) ? restingWidth : 0);
+  const rawH = Math.max(0, Number.isFinite(restingHeight) ? restingHeight : 0);
   const pad = Math.max(0, Number.isFinite(Number(padDevicePx)) ? Number(padDevicePx) : 0) / scale;
   const minDevicePixel = 1 / scale;
   const x1 = Math.floor((rawX - pad) * scale) / scale;
@@ -20,12 +26,15 @@ function snappedSelectionOverlayScreenRect(x, y, width, height, dpr = typeof win
   let y2 = Math.ceil((rawY + rawH + pad) * scale) / scale;
   if (rawW > 0 && x2 <= x1) x2 = x1 + minDevicePixel;
   if (rawH > 0 && y2 <= y1) y2 = y1 + minDevicePixel;
-  return {
-    x: x1,
-    y: y1,
-    width: Math.max(0, x2 - x1),
-    height: Math.max(0, y2 - y1),
-  };
+  const snappedWidth = Math.max(0, x2 - x1);
+  const snappedHeight = Math.max(0, y2 - y1);
+  const deltaX = _cleanOverlay(animated.x1 * zoom + panX - restingX);
+  const deltaY = _cleanOverlay(animated.y1 * zoom + panY - restingY);
+  const deltaWidth = _cleanOverlay((animated.x2 - animated.x1) * zoom - restingWidth);
+  const deltaHeight = _cleanOverlay((animated.y2 - animated.y1) * zoom - restingHeight);
+  _setStyleIfChanged(element, 'transform', `translate(${_cleanOverlay(x1 + deltaX)}px,${_cleanOverlay(y1 + deltaY)}px)`, state);
+  _setStyleIfChanged(element, 'width', _cleanOverlay(Math.max(0, snappedWidth + deltaWidth)) + 'px', state);
+  _setStyleIfChanged(element, 'height', _cleanOverlay(Math.max(0, snappedHeight + deltaHeight)) + 'px', state);
 }
 
 function selectionOverlaySelectedImageEdgePadDevicePx() {
@@ -35,10 +44,10 @@ function selectionOverlaySelectedImageEdgePadDevicePx() {
   return 0;
 }
 
-function selectionOverlayObjectBounds(obj, hasMotion) {
+function selectionOverlayObjectBounds(obj) {
   if (!obj) return null;
-  const motion = hasMotion && globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj);
-  if (!motion) return { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h };
+  const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj);
+  if (!motion) return null;
   const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
   const scalePivotX = obj.x + obj.w * scaleOriginX;
   const scalePivotY = obj.y + obj.h * scaleOriginY;
@@ -53,7 +62,7 @@ function selectionOverlayObjectBounds(obj, hasMotion) {
 function selectionOverlaySelectedBounds(resting, obj, hasMotion) {
   if (!hasMotion) return resting;
   if (selectedIds.size === 1) {
-    return selectionOverlayObjectBounds(obj, true) || resting;
+    return selectionOverlayObjectBounds(obj) || resting;
   }
   let translateX = 0;
   let translateY = 0;
@@ -79,32 +88,6 @@ function selectionOverlaySelectedBounds(resting, obj, hasMotion) {
 function _cleanOverlay(value) {
   if (Math.abs(value) < 1e-9) return 0;
   return Math.round(value * 1e9) / 1e9;
-}
-
-function selectionOverlayAnimatedScreenRect(resting, animated, padDevicePx = 0) {
-  if (!resting || !animated) return null;
-  const restingX = resting.x1 * zoom + panX;
-  const restingY = resting.y1 * zoom + panY;
-  const restingWidth = (resting.x2 - resting.x1) * zoom;
-  const restingHeight = (resting.y2 - resting.y1) * zoom;
-  const snappedResting = snappedSelectionOverlayScreenRect(
-    restingX,
-    restingY,
-    restingWidth,
-    restingHeight,
-    typeof window !== 'undefined' ? window.devicePixelRatio : 1,
-    padDevicePx,
-  );
-  const deltaX = _cleanOverlay(animated.x1 * zoom + panX - restingX);
-  const deltaY = _cleanOverlay(animated.y1 * zoom + panY - restingY);
-  const deltaWidth = _cleanOverlay((animated.x2 - animated.x1) * zoom - restingWidth);
-  const deltaHeight = _cleanOverlay((animated.y2 - animated.y1) * zoom - restingHeight);
-  return {
-    x: _cleanOverlay(snappedResting.x + deltaX),
-    y: _cleanOverlay(snappedResting.y + deltaY),
-    width: _cleanOverlay(Math.max(0, snappedResting.width + deltaWidth)),
-    height: _cleanOverlay(Math.max(0, snappedResting.height + deltaHeight)),
-  };
 }
 
 function beginRubberBandDrag() {
@@ -412,19 +395,18 @@ function updateMultiSelectionOverlay(hasMotion) {
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
-    const bounds = selectionOverlayObjectBounds(obj, hasMotion);
-    if (!bounds) continue;
+    const resting = { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h };
+    const bounds = hasMotion ? selectionOverlayObjectBounds(obj) || resting : resting;
     const box = _multiSelBoxes[selectedIdx++];
-    const rect = selectionOverlayAnimatedScreenRect(
-      { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h },
-      bounds,
-      obj?.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0,
-    );
     const state = box._styleState;
     _setStyleIfChanged(box, 'display', 'block', state);
-    _setStyleIfChanged(box, 'transform', `translate(${rect.x}px,${rect.y}px)`, state);
-    _setStyleIfChanged(box, 'width', rect.width + 'px', state);
-    _setStyleIfChanged(box, 'height', rect.height + 'px', state);
+    setSelectionOverlayScreenRect(
+      box,
+      state,
+      resting,
+      bounds,
+      obj.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0,
+    );
   }
 
   trimMultiSelectionBoxes(selectedIdx);
@@ -467,15 +449,13 @@ function updateSelectionOverlay() {
     return;
   }
 
-  const screenRect = selectionOverlayAnimatedScreenRect(
+  setSelectionOverlayScreenRect(
+    selOverlay,
+    _selOverlayStyleState,
     resting,
     bounds,
     selectionOverlaySelectedImageEdgePadDevicePx(),
   );
-
-  _setStyleIfChanged(selOverlay, 'transform', `translate(${screenRect.x}px,${screenRect.y}px)`, _selOverlayStyleState);
-  _setStyleIfChanged(selOverlay, 'width', screenRect.width + 'px', _selOverlayStyleState);
-  _setStyleIfChanged(selOverlay, 'height', screenRect.height + 'px', _selOverlayStyleState);
   const multiSelected = isMultiSelected();
   selOverlay.classList.toggle('multi', multiSelected);
   selOverlay.classList.toggle('editing', !!editingId);

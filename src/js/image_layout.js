@@ -72,7 +72,7 @@
 
   function canonicalRows(rows) {
     const canonical = rows.map((row) => {
-      const items = row.items.slice().sort((a, b) => a.rank - b.rank);
+      const items = row.items.sort((a, b) => a.rank - b.rank);
       let width = 0;
       for (const item of items) width += item.width;
       return { items, width, ranks: items.map((item) => item.rank) };
@@ -87,10 +87,7 @@
 
   function exactPartitionsByRowCount(items, requestedRowCounts) {
     const itemCount = items.length;
-    const rowCounts = [...new Set(requestedRowCounts)]
-      .filter((rowCount) => Number.isInteger(rowCount) && rowCount >= 1 && rowCount <= itemCount)
-      .sort((a, b) => a - b);
-    const maxRowCount = rowCounts[rowCounts.length - 1] || 1;
+    const maxRowCount = Math.max(...requestedRowCounts);
     const stateCount = 1 << itemCount;
     const fullMask = stateCount - 1;
     const subsetCounts = new Uint8Array(stateCount);
@@ -152,7 +149,7 @@
     }
 
     const partitions = new Array(itemCount + 1);
-    for (const rowCount of rowCounts) {
+    for (const rowCount of requestedRowCounts) {
       let mask = fullMask;
       let rowsRemaining = rowCount;
       const rows = [];
