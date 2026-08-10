@@ -424,7 +424,7 @@
     if (!boardNavigationAllowed()) return;
     BoardfishViewportState.panBy(gesture.dx, gesture.dy);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pan', gesture.event);
-    else scheduleTransform(gesture.event);
+    else scheduleTransform();
   }
 
   function beginTouchPinch() {
@@ -437,7 +437,7 @@
     const next = pinchViewportFromGesture(touchPinchStartViewport, gesture);
     BoardfishViewportState.setZoomPan(next.zoom, next.panX, next.panY);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pinch-zoom', gesture.event);
-    else scheduleTransform(gesture.event);
+    else scheduleTransform();
   }
 
   const controller = createTouchGestureController({

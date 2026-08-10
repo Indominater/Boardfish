@@ -2757,8 +2757,7 @@ function getTextLayoutForViewport(obj, viewportRect) {
 }
 
 function lineVisibleWidth(line) {
-  if (!line?.prefixWidths) return measureTextW(String(line?.text || '').replace(/[ \t]+$/g, ''));
-  const text = String(line?.text ?? '');
+  const text = String(line.text ?? '');
   let end = text.length;
   while (end > 0 && (text[end - 1] === ' ' || text[end - 1] === '\t')) end--;
   return line.prefixWidths[end] || 0;
@@ -2776,9 +2775,8 @@ function lineXAtOffset(line, obj, offset) {
 }
 
 function lineHitOffsetForX(line, wx, obj) {
-  const textLength = String(line?.text ?? '').length;
-  const pw = line?.prefixWidths;
-  if (!pw || pw.length < textLength + 1) return 0;
+  const textLength = line.text.length;
+  const pw = line.prefixWidths;
   const target = wx - lineBaseX(line, obj);
   let lo = 0;
   let hi = textLength;
@@ -2822,7 +2820,7 @@ function lineCaretXAtOffset(line, obj, offset) {
   let previousState = BASE_TEXT_SCRIPT_STATE;
   let nextState = BASE_TEXT_SCRIPT_STATE;
   if (ranges.length) {
-    const scriptMetrics = line._scriptMetrics || getTextScriptLayoutMetricsForObject(obj, content, ranges);
+    const scriptMetrics = line._scriptMetrics;
     const previousIndex = (line.startIndex || 0) + clamped - 1;
     const nextIndex = (line.startIndex || 0) + clamped;
     if (
@@ -2956,7 +2954,7 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
         stats.drawUnits++;
         stats.drawnChars += Math.max(0, unitEnd - unitStart);
       }
-      const x = line.prefixWidths?.[unitStart];
+      const x = line.prefixWidths[unitStart];
       const batchable = batchingFontReady === true && TEXT_DRAW_BATCHABLE_ASCII_RE.test(unit);
       const unitWidth = batchable
         ? measureTextGlyphMetricsWithFont(unit, drawFont).width
@@ -2967,8 +2965,6 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
         previous?.batchable === true &&
         previous.unitCount < TEXT_DRAW_BATCH_MAX_UNITS &&
         !(previous.text.endsWith('t') && unit === 't') &&
-        Number.isFinite(x) &&
-        Number.isFinite(previous.nextX) &&
         Math.abs(x - previous.nextX) <= TEXT_DRAW_BATCH_POSITION_EPSILON
       ) {
         previous.text += unit;
@@ -2978,10 +2974,9 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
       }
       run.draws.push({
         text: unit,
-        offset: unitStart,
         x,
         batchable,
-        nextX: batchable && Number.isFinite(x) ? x + unitWidth : NaN,
+        nextX: batchable ? x + unitWidth : NaN,
         unitCount: 1,
       });
     }, i, j);
@@ -3002,7 +2997,7 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) => {
   const text = line.text;
-  const cacheable = start === 0 && end === text.length && !!line.prefixWidths;
+  const cacheable = start === 0 && end === text.length;
   let plan = cacheable ? line._textDrawPlanCache : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cacheHit = !!plan;
@@ -3010,12 +3005,7 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
   if (!plan) {
     const ranges = line.scriptRanges || [];
     const hasScriptRanges = ranges.length > 0;
-    let scriptMetrics = line._scriptMetrics || null;
-    if (hasScriptRanges && !scriptMetrics) {
-      const content = normalizeTextContent(obj.data?.content ?? line.content ?? text);
-      scriptMetrics = getTextScriptLayoutMetricsForObject(obj, content, ranges);
-    }
-    plan = createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetrics);
+    plan = createTextDrawPlan(line, text, start, end, hasScriptRanges, line._scriptMetrics);
     if (cacheable) line._textDrawPlanCache = plan;
   }
   const baseX = lineBaseX(line, obj);
@@ -3024,8 +3014,7 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
     if (run.font) context.font = run.font;
     const y = line.textY + run.offset;
     for (const draw of run.draws) {
-      const x = Number.isFinite(draw.x) ? baseX + draw.x : lineXAtOffset(line, obj, draw.offset);
-      context.fillText(draw.text, x, y);
+      context.fillText(draw.text, baseX + draw.x, y);
     }
     if (run.font && context.font !== previousFont) context.font = previousFont;
   }
@@ -3079,7 +3068,7 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
       : normalizeTextContent(obj?.data?.content ?? line?.text ?? '');
   const ranges = line?.scriptRanges || [];
   const metrics = ranges.length
-    ? line._scriptMetrics || getTextScriptLayoutMetricsForObject(obj, content, ranges)
+    ? line._scriptMetrics
     : null;
   const candidates = [];
   const addCandidate = (index, affinity = '') => {
@@ -3100,27 +3089,23 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
     });
   };
 
-  const textLength = String(line?.text ?? '').length;
-  const pw = line?.prefixWidths;
-  let first = 0;
-  let last = 0;
-  if (pw && pw.length >= textLength + 1) {
-    const target = wx - lineBaseX(line, obj);
-    let lo = 0;
-    let hi = textLength;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (pw[mid] < target) lo = mid + 1;
-      else hi = mid;
-    }
-    const left = Math.max(0, lo - 1);
-    const bestOffset = Math.abs(target - pw[left]) <= Math.abs(target - pw[lo]) ? left : lo;
-    const bestX = pw[bestOffset];
-    first = bestOffset;
-    while (first > 0 && Math.abs(pw[first - 1] - bestX) <= 1e-7) first--;
-    last = bestOffset;
-    while (last < textLength && Math.abs(pw[last + 1] - bestX) <= 1e-7) last++;
+  const textLength = line.text.length;
+  const pw = line.prefixWidths;
+  const target = wx - lineBaseX(line, obj);
+  let lo = 0;
+  let hi = textLength;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (pw[mid] < target) lo = mid + 1;
+    else hi = mid;
   }
+  const left = Math.max(0, lo - 1);
+  const bestOffset = Math.abs(target - pw[left]) <= Math.abs(target - pw[lo]) ? left : lo;
+  const bestX = pw[bestOffset];
+  let first = bestOffset;
+  while (first > 0 && Math.abs(pw[first - 1] - bestX) <= 1e-7) first--;
+  let last = bestOffset;
+  while (last < textLength && Math.abs(pw[last + 1] - bestX) <= 1e-7) last++;
   for (let offset = first; offset <= last; offset++) {
     const rawIndex = Math.max(0, Math.min(line.startIndex + offset, content.length));
     const bracedOpeningGap = !!metrics?.bracedStarts?.[rawIndex];

@@ -366,12 +366,39 @@ test('dragging an already selected text object translates instead of entering ed
 
   context.startObjectDrag({ clientX: 12, clientY: 22 }, context.obj);
   context.latestDrag().move({ clientX: 22, clientY: 22 });
+  assert.equal(context.obj.x, 20);
+  assert.equal(context.obj.y, 20);
+  assert.deepEqual(context.renders.at(-1), { select: true, overlay: true });
   context.latestDrag().up({ clientX: 22, clientY: 22 });
 
   assert.deepEqual(context.entered, []);
-  assert.equal(context.obj.x, 20);
-  assert.equal(context.obj.y, 20);
   assert.deepEqual(context.history, ['drag']);
+});
+
+test('a selected rotated object outside selection bounds stays on the coalesced group-drag path', () => {
+  const context = loadCanvasInputHarness();
+  const peer = { id: 'image-2', type: 'image', x: 300, y: 400, w: 40, h: 40, data: {} };
+  context.obj.type = 'image';
+  context.obj.data = { rotation: 45 };
+  context.objectsMap.set(peer.id, peer);
+  context.selectedIds.add(peer.id);
+  context.isMultiSelected = () => context.selectedIds.size > 1;
+  context.BoardObjectGeometry = { topObjectAtWorldPoint: () => context.obj };
+
+  context.dispatchCanvas('mousedown', {
+    button: 0,
+    target: context.canvas,
+    clientX: 200,
+    clientY: 200,
+    metaKey: false,
+    ctrlKey: false,
+    preventDefault() {},
+  });
+  context.latestDrag().move({ clientX: 210, clientY: 205 });
+  context.latestDrag().up({ clientX: 210, clientY: 205 });
+
+  assert.deepEqual([context.obj.x, context.obj.y, peer.x, peer.y], [20, 25, 310, 405]);
+  assert.deepEqual(context.history, ['group-drag']);
 });
 
 test('dragging from inside a selected region moves the selection on touch', () => {

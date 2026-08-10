@@ -195,16 +195,14 @@
           let dy = y1;
           let dw = cropWidth;
           let dh = cropHeight;
-          if (edgeOverdraw > 0) {
-            const left = x1 === obj.x ? edgeOverdraw : 0;
-            const top = y1 === obj.y ? edgeOverdraw : 0;
-            const right = x2 === objRight ? edgeOverdraw : 0;
-            const bottom = y2 === objBottom ? edgeOverdraw : 0;
-            dx -= left;
-            dy -= top;
-            dw += left + right;
-            dh += top + bottom;
-          }
+          const left = x1 === obj.x ? edgeOverdraw : 0;
+          const top = y1 === obj.y ? edgeOverdraw : 0;
+          const right = x2 === objRight ? edgeOverdraw : 0;
+          const bottom = y2 === objBottom ? edgeOverdraw : 0;
+          dx -= left;
+          dy -= top;
+          dw += left + right;
+          dh += top + bottom;
           context.drawImage(
             img,
             (x1 - obj.x) / obj.w * sourceWidth,

@@ -11,11 +11,8 @@ const BOARD_CURSOR_CLIENT_EVENT_TYPES = Object.freeze([
 ]);
 
 function rememberBoardCursorClientPoint(event) {
-  const x = event?.clientX;
-  const y = event?.clientY;
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-  _lastBoardCursorClientX = x;
-  _lastBoardCursorClientY = y;
+  _lastBoardCursorClientX = event.clientX;
+  _lastBoardCursorClientY = event.clientY;
 }
 
 function boardCursorWorldPoint() {

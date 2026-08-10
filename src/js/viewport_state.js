@@ -47,21 +47,14 @@
       const viewportIsRightOfMasterBox = currentPanX <= minPanX + PAN_BOUNDARY_EPSILON;
       const viewportIsAboveMasterBox = currentPanY >= maxPanY - PAN_BOUNDARY_EPSILON;
       const viewportIsBelowMasterBox = currentPanY <= minPanY + PAN_BOUNDARY_EPSILON;
-      const boundaryLocked = viewportIsLeftOfMasterBox ||
-        viewportIsRightOfMasterBox ||
-        viewportIsAboveMasterBox ||
-        viewportIsBelowMasterBox;
-
-      if (boundaryLocked) {
-        const recoverFromHorizontalEdge =
-          (viewportIsLeftOfMasterBox && !viewportIsRightOfMasterBox && nextPanX < currentPanX) ||
-          (viewportIsRightOfMasterBox && !viewportIsLeftOfMasterBox && nextPanX > currentPanX);
-        const recoverFromVerticalEdge =
-          (viewportIsAboveMasterBox && !viewportIsBelowMasterBox && nextPanY < currentPanY) ||
-          (viewportIsBelowMasterBox && !viewportIsAboveMasterBox && nextPanY > currentPanY);
-
-        nextPanX = recoverFromHorizontalEdge ? nextPanX : currentPanX;
-        nextPanY = recoverFromVerticalEdge ? nextPanY : currentPanY;
+      if (viewportIsLeftOfMasterBox || viewportIsRightOfMasterBox ||
+          viewportIsAboveMasterBox || viewportIsBelowMasterBox) {
+        const recoverFromHorizontalEdge = viewportIsLeftOfMasterBox !== viewportIsRightOfMasterBox &&
+          (viewportIsLeftOfMasterBox ? nextPanX < currentPanX : nextPanX > currentPanX);
+        const recoverFromVerticalEdge = viewportIsAboveMasterBox !== viewportIsBelowMasterBox &&
+          (viewportIsAboveMasterBox ? nextPanY < currentPanY : nextPanY > currentPanY);
+        if (!recoverFromHorizontalEdge) nextPanX = currentPanX;
+        if (!recoverFromVerticalEdge) nextPanY = currentPanY;
       }
     }
 
@@ -82,7 +75,7 @@
       { panX: nextPanX, panY: nextPanY, zoom: nextZoom },
       objects,
       boardSurfaceCssSize(),
-      lockAtBoundary ? { panX, panY, zoom } : null,
+      lockAtBoundary ? { panX, panY } : null,
     );
     panX = constrained.panX;
     panY = constrained.panY;

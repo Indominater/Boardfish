@@ -300,7 +300,7 @@ test('source-ready images queue the low zoom scaled variant before first draw', 
   assert.equal(context.imageScaledVariantSourceReadyCandidateCount, 1);
   assert.equal(context.imageScaledVariantSourceReadyQueuedCount, 1);
   assert.equal(context.imageScaledVariantQueue.length, 1);
-  assert.equal(context.imageScaledVariantQueue[0].pendingKey, 'img-1:0.25');
+  assert.equal(context.imageScaledVariantQueue[0].key, 'img-1');
 });
 
 test('source-ready preview priority promotes an already pending scaled replacement', () => {
@@ -401,11 +401,11 @@ test('explicit active image draw preserves full-size fallback while scaled varia
 test('active low-zoom navigation prioritizes visible pending scaled variants', () => {
   const context = loadImageVariantsForPlatform(false);
   const fullSource = { width: 4000, height: 4000 };
-  const pendingKeys = () => Array.from(context.imageScaledVariantQueue, (task) => task.pendingKey);
+  const pendingKeys = () => Array.from(context.imageScaledVariantQueue, (task) => task.key);
 
   context.queueScaledImageVariant('img-1', fullSource, 0.25);
   context.queueScaledImageVariant('img-2', fullSource, 0.25);
-  assert.deepEqual(pendingKeys(), ['img-1:0.25', 'img-2:0.25']);
+  assert.deepEqual(pendingKeys(), ['img-1', 'img-2']);
 
   context.performance.now = () => 1000;
   context.lastViewportInputAt = 990;
@@ -416,7 +416,7 @@ test('active low-zoom navigation prioritizes visible pending scaled variants', (
     { zoom: 0.1, dpr: 1 },
   );
 
-  assert.deepEqual(pendingKeys(), ['img-2:0.25', 'img-1:0.25']);
+  assert.deepEqual(pendingKeys(), ['img-2', 'img-1']);
   assert.equal(context.imageScaledVariantPriorityBoostCount, 1);
 });
 
@@ -481,11 +481,11 @@ test('promoting the sole pending scaled variant wakes its delayed queue timer', 
     starts++;
     await new Promise(() => {});
   };
-  task.pendingKey = 'img-1:0.25';
+  task.key = 'img-1';
 
   context.enqueueScaledVariantTask(task);
   const backgroundTimer = clock.pending()[0];
-  const promoted = context.prioritizeScaledVariantQueue(task.pendingKey);
+  const promoted = context.prioritizeScaledVariantQueue(task.key);
 
   assert.equal(promoted, true);
   assert.equal(task.priority, true);
@@ -872,7 +872,7 @@ test('clearing scaled variants for one key removes queued work for that key', ()
   context.clearScaledImageVariants('img-1');
 
   assert.equal(context.imageScaledVariantQueue.length, 1);
-  assert.equal(context.imageScaledVariantQueue[0].variantKey, 'img-2');
+  assert.equal(context.imageScaledVariantQueue[0].key, 'img-2');
   assert.equal(context.isScaledImageVariantPending('img-1', 0.25), false);
   assert.equal(context.isScaledImageVariantPending('img-2', 0.25), true);
 });

@@ -293,7 +293,6 @@ test('cacheImage prioritizes the exact scaled replacement for an active open pre
     return { key, scale: 0.25, queued: true };
   };
   context.imageOpenPreviewBitmapCache.set('img-1', {
-    generation: context._imageStoreGeneration,
     bitmap: { width: 100, height: 75, close() {} },
   });
   context.imageStore['img-1'] = src;
@@ -334,11 +333,9 @@ test('ready open previews release independently while other previews remain pend
   const previewTwo = { closed: false, close() { this.closed = true; } };
 
   context.imageOpenPreviewBitmapCache.set('img-1', {
-    generation: context._imageStoreGeneration,
     bitmap: previewOne,
   });
   context.imageOpenPreviewBitmapCache.set('img-2', {
-    generation: context._imageStoreGeneration,
     bitmap: previewTwo,
   });
   context.imageBitmapCache['img-1'] = { width: 10, height: 10, close() {} };
@@ -381,7 +378,6 @@ test('open previews wait for scaled variants before releasing full bitmap handof
   context.chooseImageScaleForDraw = () => 0.25;
   context.hasScaledImageVariant = () => variantReady;
   context.imageOpenPreviewBitmapCache.set('img-1', {
-    generation: context._imageStoreGeneration,
     bitmap: preview,
     objectW: 500,
     objectH: 500,
@@ -426,7 +422,6 @@ test('open preview falls back to the exact full bitmap after a terminal scaled v
   context.hasScaledImageVariantFailure = () => true;
   context.selectImageSourceForDraw = (_key, _obj, source) => ({ source, scale: 1, targetScale: 0.25 });
   context.imageOpenPreviewBitmapCache.set('img-1', {
-    generation: context._imageStoreGeneration,
     bitmap: preview,
     objectW: 500,
     objectH: 500,
@@ -451,7 +446,6 @@ test('open preview remains drawable when the exact full bitmap decode fails', ()
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   const preview = { width: 50, height: 50, closed: false, close() { this.closed = true; } };
   context.imageOpenPreviewBitmapCache.set('img-1', {
-    generation: context._imageStoreGeneration,
     bitmap: preview,
   });
   context.imageBitmapFailed.add('img-1');
@@ -481,7 +475,6 @@ test('open preview draw queues scaled variant while keeping preview visible', ()
   context.chooseImageScaleForDraw = () => 0.25;
   context.hasScaledImageVariant = () => false;
   context.imageOpenPreviewBitmapCache.set('img-1', {
-    generation: context._imageStoreGeneration,
     bitmap: preview,
   });
   context.imageBitmapCache['img-1'] = full;
@@ -522,7 +515,6 @@ test('open preview fallback queues dynamic previews for active low-zoom fallback
   context.imageStore['img-1'] = src;
   context.imageBitmapCache['img-1'] = full;
   context.imageOpenPreviewBitmapCache.set('img-open', {
-    generation: context._imageStoreGeneration,
     bitmap: existingPreview,
   });
   context.selectImageSourceForDraw = () => ({

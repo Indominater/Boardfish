@@ -20,20 +20,19 @@ function selectedBounds() {
 
 function viewportWorldRect(
   padScreenPx = 0,
-  view = { panX, panY, zoom },
   surface = null,
 ) {
-  const z = Math.max(view.zoom, 0.001);
+  const z = Math.max(zoom, 0.001);
   const pad = padScreenPx / z;
   const surfaceWidth = Number(surface?.width);
   const surfaceHeight = Number(surface?.height);
   const width = surfaceWidth > 0 ? surfaceWidth : window.innerWidth;
   const height = surfaceHeight > 0 ? surfaceHeight : window.innerHeight;
   return {
-    x1: -view.panX / z - pad,
-    y1: -view.panY / z - pad,
-    x2: (width - view.panX) / z + pad,
-    y2: (height - view.panY) / z + pad,
+    x1: -panX / z - pad,
+    y1: -panY / z - pad,
+    x2: (width - panX) / z + pad,
+    y2: (height - panY) / z + pad,
   };
 }
 

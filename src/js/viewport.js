@@ -238,18 +238,13 @@ function boardSurfaceCssSize() {
   return _boardSurfaceCssSizeCache = { width, height };
 }
 
-function boardCanvasBackingStoreSize() {
+function syncBoardCanvasBackingStore(write = true) {
   const dpr = window.devicePixelRatio || 1;
   const surface = boardSurfaceCssSize();
-  return {
-    width: Math.max(1, Math.round(surface.width * dpr)),
-    height: Math.max(1, Math.round(surface.height * dpr)),
-  };
-}
-
-function syncBoardCanvasBackingStore() {
-  const { width, height } = boardCanvasBackingStoreSize();
+  const width = Math.max(1, Math.round(surface.width * dpr));
+  const height = Math.max(1, Math.round(surface.height * dpr));
   if (boardCanvas.width === width && boardCanvas.height === height) return false;
+  if (!write) return true;
   if (boardCanvas.width !== width) boardCanvas.width = width;
   if (boardCanvas.height !== height) boardCanvas.height = height;
   invalidateOffscreen();
@@ -259,8 +254,7 @@ function syncBoardCanvasBackingStore() {
 function resizeCanvas(surface = null) {
   _boardSurfaceCssSizeCache = surface?.width > 0 && surface?.height > 0 ? surface : null;
   if (typeof _boardOpening !== 'undefined' && _boardOpening) return false;
-  const { width, height } = boardCanvasBackingStoreSize();
-  if (boardCanvas.width === width && boardCanvas.height === height) return false;
+  if (!syncBoardCanvasBackingStore(false)) return false;
   // Changing a canvas backing dimension clears its visible pixels. Defer that
   // reset to drawBoard so keyboard-driven resize bursts keep the previous frame
   // visible and the eventual clear + redraw happen together before paint.
@@ -281,8 +275,8 @@ function startCanvasSizeTracking() {
 
 var VIEWPORT_CULL_PADDING_PX = 256;
 
-function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view = { panX, panY, zoom }) {
-  return viewportWorldRect(padScreenPx, view, boardSurfaceCssSize());
+function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX) {
+  return viewportWorldRect(padScreenPx, boardSurfaceCssSize());
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
@@ -1815,8 +1809,8 @@ function scheduleFrame(
 function scheduleTransform(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   source = null,
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   inputEvent = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   const now = performance.now();
   lastViewportInputAt = now;

@@ -18,7 +18,7 @@ var VIEWPORT_PERF_MODES = {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 var imageScaledBitmapCache = new Map(); // key -> { bitmap, bytes }
-var imageScaledBitmapPending = new Map(); // pending key -> estimated bytes
+var imageScaledBitmapPending = new Map(); // image key -> estimated bytes
 var imageScaledBitmapFailures = new Map();
 var imageScaledBitmapPendingByteTotal = 0;
 var imageScaledBitmapBytes = 0;
@@ -314,20 +314,14 @@ function clearScaledImageVariants(key = null) {
       let write = 0;
       for (let read = 0; read < imageScaledVariantQueue.length; read++) {
         const task = imageScaledVariantQueue[read];
-        if (task?.variantKey === key) continue;
+        if (task?.key === key) continue;
         imageScaledVariantQueue[write++] = task;
       }
       imageScaledVariantQueue.length = write;
       if (!imageScaledVariantQueue.length) cancelScheduledScaledVariantQueue();
     }
-    for (const pendingKey of imageScaledBitmapPending.keys()) {
-      if (pendingKey.startsWith(`${key}:`)) {
-        removePendingScaledVariantBytes(pendingKey);
-      }
-    }
-    for (const failedKey of imageScaledBitmapFailures.keys()) {
-      if (failedKey.startsWith(`${key}:`)) imageScaledBitmapFailures.delete(failedKey);
-    }
+    removePendingScaledVariantBytes(key);
+    imageScaledBitmapFailures.delete(key);
     return;
   }
   clearScaledImageVariantCache();
@@ -452,9 +446,9 @@ function enqueueScaledVariantTask(task, priority = false) {
   scheduleScaledVariantQueue();
 }
 
-function prioritizeScaledVariantQueue(pendingKey) {
-  if (!pendingKey || !imageScaledVariantQueue.length) return false;
-  const index = imageScaledVariantQueue.findIndex((task) => task?.pendingKey === pendingKey);
+function prioritizeScaledVariantQueue(key) {
+  if (!key || !imageScaledVariantQueue.length) return false;
+  const index = imageScaledVariantQueue.findIndex((task) => task?.key === key);
   if (index < 0) return false;
   const task = imageScaledVariantQueue[index];
   const boosted = task.priority !== true || index > 0;
@@ -470,8 +464,8 @@ function prioritizeScaledVariantQueue(pendingKey) {
   return true;
 }
 
-function shouldBuildScaledImageVariant(pendingKey, generation) {
-  return generation === _imageStoreGeneration && imageScaledBitmapPending.has(pendingKey);
+function shouldBuildScaledImageVariant(key, generation) {
+  return generation === _imageStoreGeneration && imageScaledBitmapPending.has(key);
 }
 
 async function createScaledImageVariantBitmap(source, sourceW, sourceH, scale) {
@@ -505,13 +499,12 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
       ? { key, scale, ready: false, skipped: 'disabled-or-invalid' }
       : false;
   }
-  const pendingKey = `${key}:${scale}`;
   if (hasScaledImageVariant(key, scale)) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: true, skipped: 'already-ready' }
       : true;
   }
-  if (imageScaledBitmapPending.has(pendingKey)) {
+  if (imageScaledBitmapPending.has(key)) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: false, skipped: 'pending' }
       : false;
@@ -534,8 +527,8 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
     return false;
   }
 
-  imageScaledBitmapFailures.delete(pendingKey);
-  addPendingScaledVariantBytes(pendingKey, estimatedBytes);
+  imageScaledBitmapFailures.delete(key);
+  addPendingScaledVariantBytes(key, estimatedBytes);
   const generation = _imageStoreGeneration;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const buildStart = performance.now();
@@ -543,7 +536,7 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
   let bitmap = null;
   try {
     bitmap = await createScaledImageVariantBitmap(source, sourceW, sourceH, scale);
-    if (!shouldBuildScaledImageVariant(pendingKey, generation)) {
+    if (!shouldBuildScaledImageVariant(key, generation)) {
       bitmap.close?.();
       return typeof BOARDFISH_PRODUCTION === 'undefined'
         ? { key, scale, ready: false, skipped: 'stale', ms: performance.now() - buildStart }
@@ -565,7 +558,7 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
       : true;
   } catch (err) {
     bitmap?.close?.();
-    if (shouldBuildScaledImageVariant(pendingKey, generation)) {
+    if (shouldBuildScaledImageVariant(key, generation)) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') recordScaledImageVariantFailure(key, scale, 'error');
       else recordScaledImageVariantFailure(key, scale);
     }
@@ -579,7 +572,7 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
       imageScaledVariantBuildTotalMs += buildMs;
       imageScaledVariantBuildMaxMs = Math.max(imageScaledVariantBuildMaxMs, buildMs);
     }
-    removePendingScaledVariantBytes(pendingKey);
+    removePendingScaledVariantBytes(key);
   }
 }
 
@@ -636,13 +629,11 @@ function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.deviceP
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
   if (!sourceW || !sourceH) return 1;
-  const viewZoom = Math.max(view?.zoom || zoom || 1, 0.0001);
-  const dpr = view?.dpr || window.devicePixelRatio || 1;
+  const viewZoom = view.zoom;
+  const dpr = view.dpr;
   const neededW = obj.w * viewZoom * dpr;
   const neededH = obj.h * viewZoom * dpr;
-  const overscaleLimit = activeOverscale === true
-    ? Math.max(1, Number(IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT) || 1)
-    : 1;
+  const overscaleLimit = activeOverscale === true ? IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT : 1;
   const scale = IMAGE_SCALE_LEVELS[0];
   return sourceW * scale * overscaleLimit >= neededW &&
     sourceH * scale * overscaleLimit >= neededH ? scale : 1;
@@ -654,20 +645,19 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
       ? { key, scale, queued: false, skipped: 'disabled-or-invalid' }
       : false;
   }
-  const pendingKey = `${key}:${scale}`;
   if (hasScaledImageVariant(key, scale)) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, queued: false, skipped: 'already-ready' }
       : false;
   }
-  if (imageScaledBitmapPending.has(pendingKey)) {
+  if (imageScaledBitmapPending.has(key)) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const priorityBoosted = priority === true && prioritizeScaledVariantQueue(pendingKey);
+      const priorityBoosted = priority === true && prioritizeScaledVariantQueue(key);
       return { key, scale, queued: false, skipped: 'pending', priorityBoosted };
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    if (priority === true) prioritizeScaledVariantQueue(pendingKey);
+    if (priority === true) prioritizeScaledVariantQueue(key);
     return false;
   }
   const sourceW = source?.width || source?.naturalWidth || 0;
@@ -687,12 +677,12 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
     recordScaledImageVariantFailure(key, scale);
     return false;
   }
-  imageScaledBitmapFailures.delete(pendingKey);
-  addPendingScaledVariantBytes(pendingKey, estimatedBytes);
+  imageScaledBitmapFailures.delete(key);
+  addPendingScaledVariantBytes(key, estimatedBytes);
   const generation = _imageStoreGeneration;
   const task = async () => {
-    if (!shouldBuildScaledImageVariant(pendingKey, generation)) {
-      removePendingScaledVariantBytes(pendingKey);
+    if (!shouldBuildScaledImageVariant(key, generation)) {
+      removePendingScaledVariantBytes(key);
       return;
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -701,7 +691,7 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
     let bitmap = null;
     try {
       bitmap = await createScaledImageVariantBitmap(source, sourceW, sourceH, scale);
-      if (!shouldBuildScaledImageVariant(pendingKey, generation)) {
+      if (!shouldBuildScaledImageVariant(key, generation)) {
         bitmap.close?.();
         return;
       }
@@ -714,7 +704,7 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
       scheduleScaledVariantReadyRender();
     } catch (_) {
       bitmap?.close?.();
-      if (shouldBuildScaledImageVariant(pendingKey, generation)) {
+      if (shouldBuildScaledImageVariant(key, generation)) {
         if (typeof BOARDFISH_PRODUCTION === 'undefined') recordScaledImageVariantFailure(key, scale, 'error');
         else recordScaledImageVariantFailure(key, scale);
       }
@@ -725,11 +715,10 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
         imageScaledVariantBuildTotalMs += buildMs;
         imageScaledVariantBuildMaxMs = Math.max(imageScaledVariantBuildMaxMs, buildMs);
       }
-      removePendingScaledVariantBytes(pendingKey);
+      removePendingScaledVariantBytes(key);
     }
   };
-  task.variantKey = key;
-  task.pendingKey = pendingKey;
+  task.key = key;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') task.generation = generation;
   enqueueScaledVariantTask(task, priority);
   return typeof BOARDFISH_PRODUCTION === 'undefined'
@@ -892,11 +881,11 @@ function hasScaledImageVariant(key, scale) {
 }
 
 function isScaledImageVariantPending(key, scale) {
-  return imageScaledBitmapPending.has(`${key}:${scale}`);
+  return scale === IMAGE_SCALE_LEVELS[0] && imageScaledBitmapPending.has(key);
 }
 
 function hasScaledImageVariantFailure(key, scale) {
-  return imageScaledBitmapFailures.has(`${key}:${scale}`);
+  return scale === IMAGE_SCALE_LEVELS[0] && imageScaledBitmapFailures.has(key);
 }
 
 function scheduleScaledVariantFailurePreviewRelease() {
@@ -920,7 +909,7 @@ function scheduleScaledVariantFailurePreviewRelease() {
 
 function recordScaledImageVariantFailure(key, scale, reason) {
   imageScaledBitmapFailures.set(
-    `${key}:${scale}`,
+    key,
     typeof BOARDFISH_PRODUCTION === 'undefined' ? (reason || 'error') : true,
   );
   scheduleScaledVariantFailurePreviewRelease();

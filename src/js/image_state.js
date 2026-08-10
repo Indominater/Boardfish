@@ -192,7 +192,7 @@ async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}
     return { ready: false };
   }
   const current = imageOpenPreviewBitmapCache.get(key);
-  if (current?.generation === _imageStoreGeneration && current.bitmap) {
+  if (current?.bitmap) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     return { key, ready: true, skipped: 'already-ready', width: current.bitmap.width, height: current.bitmap.height };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -262,7 +262,6 @@ async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}
     previous?.bitmap?.close?.();
     imageOpenPreviewBitmapCache.set(key, {
       bitmap,
-      generation,
       width: bitmap.width,
       height: bitmap.height,
       targetWidth: target.width,
@@ -425,16 +424,11 @@ function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, options = {}
   return true;
 }
 
-function hasOpenInitialImagePreviews() {
-  for (const entry of imageOpenPreviewBitmapCache.values()) {
-    if (entry?.generation === _imageStoreGeneration && entry.bitmap) return true;
-  }
-  return false;
-}
+const hasOpenInitialImagePreviews = () => imageOpenPreviewBitmapCache.size > 0;
 
 function hasBlockingOpenInitialImagePreviewsForOpen() {
   for (const [key, entry] of imageOpenPreviewBitmapCache.entries()) {
-    if (entry?.generation === _imageStoreGeneration && entry.bitmap && !imageBitmapFailed.has(key)) return true;
+    if (entry?.bitmap && !imageBitmapFailed.has(key)) return true;
   }
   return false;
 }
@@ -506,7 +500,7 @@ function releaseReadyOpenInitialImagePreviewsForOpen() {
   let pending = 0;
   let released = 0;
   for (const [key, entry] of imageOpenPreviewBitmapCache.entries()) {
-    if (!entry?.bitmap || entry.generation !== _imageStoreGeneration) {
+    if (!entry?.bitmap) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       stale++;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -542,13 +536,13 @@ function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: wind
   , activeInput = false
 ) {
   let entry = imageOpenPreviewBitmapCache.get(key);
-  if (entry?.generation === _imageStoreGeneration && entry.bitmap &&
+  if (entry?.bitmap &&
       !imageBitmapFailed.has(key) &&
       openInitialPreviewIsCoveredByDrawSource(key, entry)) {
     clearOpenInitialImagePreviews(key);
     entry = null;
   }
-  if (entry?.generation === _imageStoreGeneration && entry.bitmap) {
+  if (entry?.bitmap) {
     const fullSource = imageBitmapCache[key] || null;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const targetScale =
@@ -838,7 +832,7 @@ function cacheImage(key, src
         }
         if (typeof queueScaledImageVariantForReadyImage === 'function') {
           const previewEntry = imageOpenPreviewBitmapCache.get(key);
-          const previewPriority = previewEntry?.generation === generation && !!previewEntry.bitmap;
+          const previewPriority = !!previewEntry?.bitmap;
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const variantQueue =
           /* BOARDFISH_DEV_DIAGNOSTICS_END */

@@ -175,7 +175,7 @@ function handleViewportWheel(e) {
       const requestedZoom = zoom * factor;
       BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, requestedZoom);
       if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('wheel-zoom', e);
-      else scheduleTransform(e);
+      else scheduleTransform();
       if (collectDebug) {
         const { panXBefore, panYBefore, zoomBefore } = beforeMeta;
         const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
@@ -227,7 +227,7 @@ function handleViewportWheel(e) {
     ViewportDebug.count('wheelPan');
     BoardfishViewportState.panBy(-e.deltaX, -e.deltaY);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('wheel-pan', e);
-    else scheduleTransform(e);
+    else scheduleTransform();
     if (collectDebug) {
       const { panXBefore, panYBefore, zoomBefore } = beforeMeta;
       const appliedPanX = -e.deltaX, appliedPanY = -e.deltaY;
@@ -367,7 +367,7 @@ function startMousePan(e) {
       const clientStepY = ev.clientY - lastClientY;
       BoardfishViewportState.panBy(clientStepX, clientStepY);
       if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('mouse-pan', ev);
-      else scheduleTransform(ev);
+      else scheduleTransform();
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDebug) {
         const panDeltaX = panX - panXBefore;
@@ -569,15 +569,11 @@ function startRubberBandSelection(e, additive) {
 
 function toggleAdditiveSelection(obj) {
   const nextSelection = new Set(selectedIds);
-  if (isSelected(obj.id)) {
-    nextSelection.delete(obj.id);
-    BoardfishEditorState.setSelection(nextSelection);
-  } else {
-    nextSelection.add(obj.id);
-    BoardfishEditorState.setSelection(nextSelection, { primaryId: obj.id });
-    bringObjectToFront(obj);
-  }
-  scheduleRender(true, true);
+  const selecting = !isSelected(obj.id);
+  if (selecting) nextSelection.add(obj.id); else nextSelection.delete(obj.id);
+  BoardfishEditorState.setSelection(nextSelection, selecting ? { primaryId: obj.id } : {});
+  if (selecting) bringObjectToFront(obj);
+  scheduleRender(selecting, true);
 }
 
 function applyTextEditCaretHit(obj, proxy, hit) {
@@ -677,27 +673,14 @@ function startObjectDrag(e, obj) {
   let moved = false;
   const moveThreshold = 9 / (zoom * zoom);
 
-  function applyDrag(dx, dy) {
-    for (const item of dragItems) {
-      item.obj.x = item.startX + dx;
-      item.obj.y = item.startY + dy;
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const dragDbg = ViewportDebug.start('dragFrame', { items: dragItems.length });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') withRenderSource('object-drag', () => drawBoard());
-    else drawBoard();
-    ViewportDebug.end(dragDbg);
-    updateSelectionOverlay();
-  }
-  const dragCommitter = createRafCommitter(applyDrag);
-
   function onMove(ev) {
     const dx = (ev.clientX - startX) / zoom;
     const dy = (ev.clientY - startY) / zoom;
     if (!moved && dx*dx + dy*dy > moveThreshold) moved = true;
     if (!moved) return;
-    dragCommitter.schedule(dx, dy);
+    for (const item of dragItems) { item.obj.x = item.startX + dx; item.obj.y = item.startY + dy; }
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'object-drag');
+    else scheduleRender(true, true);
   }
   function onUp(ev) {
     if (!moved) {
@@ -815,7 +798,6 @@ function startObjectDrag(e, obj) {
       }
       return;
     }
-    dragCommitter.flush();
     pushHistory('drag', { dirty: dragItems });
   }
   beginDocumentDrag({ move: onMove, up: onUp });
@@ -851,11 +833,13 @@ canvas.addEventListener('mousedown', (e) => {
   const worldPointMs = canvasInputDebugRound(canvasInputNow() - worldStart);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const additive = e.metaKey || e.ctrlKey;
-  const groupDrag = isMultiSelected() && !additive && rectContainsPoint(selectedBounds(), wp);
+  const canGroupDrag = isMultiSelected() && !additive;
+  const groupDragFromBounds = canGroupDrag && rectContainsPoint(selectedBounds(), wp);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hitStart = canvasInputNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const obj = groupDrag ? null : BoardObjectGeometry.topObjectAtWorldPoint(wp);
+  const obj = groupDragFromBounds ? null : BoardObjectGeometry.topObjectAtWorldPoint(wp);
+  const groupDrag = groupDragFromBounds || (canGroupDrag && isSelected(obj?.id));
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hitTestMs = canvasInputDebugRound(canvasInputNow() - hitStart);
   canvasInputTextDebugLog('canvas-mousedown-route', obj, {
@@ -880,7 +864,7 @@ canvas.addEventListener('mousedown', (e) => {
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  // Multi-select: any click inside the bounding box (object or empty space) → drag group
+  // Multi-select: drag from its bounds or a rotated selected object extending beyond them.
   if (groupDrag) { startGroupDrag(e); return; }
 
   if (!obj) {
