@@ -710,10 +710,11 @@ function updateObjMenuActions() {
   const showExport = imageCount >= 1;
   const showDelete = selectedCount >= 1;
   copyBtn.style.display = '';
-  objectActionsSep.style.display = showLayerActions ? 'block' : 'none';
+  objectActionsSep.style.display = showImageActions ? 'block' : 'none';
   flipBtn.style.display = showImageActions ? '' : 'none';
   rotateBtn.style.display = showImageActions ? '' : 'none';
   arrangeImagesBtn.style.display = imageCount >= 2 ? '' : 'none';
+  layerActionsSep.style.display = showLayerActions ? 'block' : 'none';
   moveToBackBtn.style.display = showLayerActions ? '' : 'none';
   saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
   saveImagesBtn.firstElementChild.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';

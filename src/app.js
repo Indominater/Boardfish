@@ -29,6 +29,7 @@ var saveImageBtn      = requireAppElement('obj-btn-save-image');
 var saveImagesBtn     = requireAppElement('obj-btn-save-images');
 var exportSep         = requireAppElement('obj-sep-export');
 var objectActionsSep  = requireAppElement('obj-sep-object-actions');
+var layerActionsSep   = requireAppElement('obj-sep-layer-actions');
 var deleteSep         = requireAppElement('obj-sep-delete');
 var arrangeImagesBtn  = requireAppElement('obj-btn-arrange-images');
 var flipBtn           = requireAppElement('obj-btn-flip');

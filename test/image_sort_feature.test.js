@@ -226,6 +226,7 @@ function loadObjectMenuVisibilityHarness() {
     arrangeImagesBtn: element(),
     flipBtn: element(),
     rotateBtn: element(),
+    layerActionsSep: element(),
     moveToBackBtn: element(),
     saveImageBtn: element(),
     saveImagesBtn: { style: {}, firstElementChild: { textContent: '' } },
@@ -261,6 +262,13 @@ test('object menu shows Arrange only when at least two selected objects are imag
   assert.equal(visibleFor(['image-a', 'image-b', 'text-a']), true);
   assert.equal(visibleFor(['text-a']), false);
   assert.equal(visibleFor(['image-a', 'stale-image-id']), false);
+
+  visibleFor(['text-a']);
+  assert.equal(context.objectActionsSep.style.display, 'none');
+  assert.equal(context.layerActionsSep.style.display, 'block');
+  visibleFor(['image-a', 'image-b']);
+  assert.equal(context.objectActionsSep.style.display, 'block');
+  assert.equal(context.layerActionsSep.style.display, 'block');
 });
 
 test('Arrange menu integration uses the activation pointer and shared paste size', () => {
@@ -279,14 +287,16 @@ test('Arrange menu integration uses the activation pointer and shared paste size
   const flipIndex = indexSource.indexOf('id="obj-btn-flip"');
   const rotateIndex = indexSource.indexOf('id="obj-btn-rotate"');
   const arrangeIndex = indexSource.indexOf('id="obj-btn-arrange-images"');
+  const layerSeparatorIndex = indexSource.indexOf('id="obj-sep-layer-actions"');
   const moveToBackIndex = indexSource.indexOf('id="obj-btn-move-to-back"');
   assert.ok(objectSeparatorIndex < flipIndex);
   assert.ok(flipIndex < rotateIndex);
   assert.ok(rotateIndex < arrangeIndex);
-  assert.ok(arrangeIndex < moveToBackIndex);
-  assert.doesNotMatch(indexSource, /obj-sep-layer-actions/);
+  assert.ok(arrangeIndex < layerSeparatorIndex);
+  assert.ok(layerSeparatorIndex < moveToBackIndex);
   assert.match(appSource, /arrangeImagesBtn\s*= requireAppElement\('obj-btn-arrange-images'\)/);
   assert.match(appSource, /objectActionsSep\s*= requireAppElement\('obj-sep-object-actions'\)/);
+  assert.match(appSource, /layerActionsSep\s*= requireAppElement\('obj-sep-layer-actions'\)/);
   assert.match(
     appSource,
     /'arrange-images': COMMAND_KEY_LABEL \+ 'J'/,
@@ -296,7 +306,8 @@ test('Arrange menu integration uses the activation pointer and shared paste size
     /'obj-btn-arrange-images': \(event\) => \{\s*const point = menuCommandWorldPoint\(event\);\s*closeObjCtxMenu\('command:arrange-images'\);\s*sortSelectedImages\(point\);\s*\}/,
   );
   assert.match(contextMenuSource, /'arrange-images': \[\['obj-ctx-menu', 'obj-btn-arrange-images'\]\]/);
-  assert.match(contextMenuSource, /objectActionsSep\.style\.display = showLayerActions \? 'block' : 'none';/);
+  assert.match(contextMenuSource, /objectActionsSep\.style\.display = showImageActions \? 'block' : 'none';/);
+  assert.match(contextMenuSource, /layerActionsSep\.style\.display = showLayerActions \? 'block' : 'none';/);
   assert.match(contextMenuSource, /arrangeImagesBtn\.style\.display = imageCount >= 2 \? '' : 'none';/);
   assert.match(imageInsertSource, /const MAX = BoardfishImageLayout\.DEFAULT_IMAGE_MAX_DIMENSION;/);
   assert.match(imageInsertSource, /w = Math\.max\(1, Math\.round\(w \* scale\)\);/);
