@@ -1043,7 +1043,6 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
   addImageRuntimeObjectKeysToSet(keys, imageStore);
   addImageRuntimeObjectKeysToSet(keys, imageBitmapCache);
   for (const key of imageBitmapFailed) keys.add(key);
-  let removedSource = false;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const result = {
     removedSources: 0,
@@ -1056,7 +1055,6 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
     if (Object.hasOwn(imageStore, key)) {
       revokeWebImageSource(imageStore[key]);
       delete imageStore[key];
-      removedSource = true;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       result.removedSources++;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1069,9 +1067,6 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
     result.removedBitmaps += removed.bitmaps;
     result.removedBitmapFailures += removed.bitmapFailures;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
-  if (removedSource) {
-    _imageStoreGeneration++;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   return result;

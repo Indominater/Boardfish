@@ -175,7 +175,11 @@ function sortSelectedImages(anchorPoint = null) {
   )
     ? { x: Number(anchorPoint.x), y: Number(anchorPoint.y) }
     : (typeof boardCursorWorldPoint === 'function' ? boardCursorWorldPoint() : { x: 0, y: 0 });
-  const layout = BoardfishImageLayout.planGoldenRatioImageLayout(selectedImages, center);
+  const layout = BoardfishImageLayout.planGoldenRatioImageLayout(
+    selectedImages,
+    center,
+    { shuffleOrder: true },
+  );
   if (!layout || layout.placements.length < 2) return false;
   let geometryChanged = false;
   for (const placement of layout.placements) {

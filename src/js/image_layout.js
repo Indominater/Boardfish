@@ -31,6 +31,19 @@
     return left.length - right.length;
   };
 
+  function shuffledCopy(values, random) {
+    const shuffled = values.slice();
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const sample = Number(random());
+      const boundedSample = Number.isFinite(sample)
+        ? Math.min(Math.max(sample, 0), 1 - Number.EPSILON)
+        : 0;
+      const swapIndex = Math.floor(boundedSample * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    return shuffled;
+  }
+
   function normalizedImageItems(images, rowHeight) {
     const items = [];
     const seenIds = new Set();
@@ -367,12 +380,21 @@
     }
     if (!best) return null;
 
+    let presentationRows = best.rows;
+    if (options.shuffleOrder === true) {
+      // Preserve the optimized membership and score; randomize only presentation order.
+      const random = typeof options.random === 'function' ? options.random : Math.random;
+      presentationRows = shuffledCopy(best.rows, random).map((row) => ({
+        ...row,
+        items: shuffledCopy(row.items, random),
+      }));
+    }
     const occupiedWidth = best.rows.reduce((width, row) => Math.max(width, row.width), 0);
     const height = best.rowCount * rowHeight;
     const left = centerX - occupiedWidth / 2;
     const top = centerY - height / 2;
     const placements = [];
-    const rows = best.rows.map((row, rowIndex) => {
+    const rows = presentationRows.map((row, rowIndex) => {
       let cursorX = left;
       const itemIds = [];
       for (let column = 0; column < row.items.length; column++) {

@@ -307,7 +307,6 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
     if (h0 < h1) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const o0 = h0 - ls, o1 = h1 - ls;
-      const endX = lineXAtOffset(line, obj, line.text.length);
       let i = o0;
       while (i < o1) {
         const globalIndex = line.startIndex + i;
@@ -325,8 +324,8 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
           if (nextState.key !== state.key) break;
           j++;
         }
-        const x1 = i < line.text.length ? lineXAtOffset(line, obj, i) : endX;
-        const x2 = j < line.text.length ? lineXAtOffset(line, obj, j) : endX;
+        const x1 = lineXAtOffset(line, obj, i);
+        const x2 = lineXAtOffset(line, obj, j);
         const scaled = state?.depth > 0;
         const y = scaled ? line.textY + state.offset - TEXT_BASELINE_Y_OFFSET * state.scale : line.y;
         const height = scaled ? LINE_H * state.scale : LINE_H;
@@ -619,14 +618,12 @@ function drawEditingTextOverlay(
   try {
     const liveSelStart = _editEl ? _editEl.selectionStart : 0;
     const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;
-    const liveStart = Math.min(liveSelStart, liveSelEnd);
-    const liveEnd = Math.max(liveSelStart, liveSelEnd);
     const copiedMotion = copiedSelectionSpec
       ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, copiedSelectionSpec.start, copiedSelectionSpec.end, viewZoom) || null
       : null;
     const liveMatchesCopied = copiedSelectionSpec &&
-      liveStart === copiedSelectionSpec.start &&
-      liveEnd === copiedSelectionSpec.end;
+      liveSelStart === copiedSelectionSpec.start &&
+      liveSelEnd === copiedSelectionSpec.end;
     const useCopiedSelectionMotion = !!copiedMotion && (liveSelStart === liveSelEnd || liveMatchesCopied);
     const selStart = useCopiedSelectionMotion ? copiedSelectionSpec.start : liveSelStart;
     const selEnd   = useCopiedSelectionMotion ? copiedSelectionSpec.end   : liveSelEnd;

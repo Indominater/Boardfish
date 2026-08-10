@@ -71,6 +71,44 @@ test('golden image layout exactly minimizes the squared row-width error for a sm
   assert.equal(layout.rows[1].y - layout.rows[0].y, 600);
 });
 
+test('golden image layout can shuffle rows and images without changing the optimized shape', () => {
+  const images = [
+    { id: 'a', w: 3, h: 1 },
+    { id: 'b', w: 2, h: 1 },
+    { id: 'c', w: 1, h: 1 },
+    { id: 'd', w: 0.5, h: 1 },
+  ];
+  const center = { x: 500, y: 700 };
+  const canonical = ImageLayout.planGoldenRatioImageLayout(images, center);
+  const samples = [0, 0, 0];
+  let sampleIndex = 0;
+
+  const shuffled = ImageLayout.planGoldenRatioImageLayout(images, center, {
+    shuffleOrder: true,
+    random: () => samples[sampleIndex++],
+  });
+
+  assert.equal(sampleIndex, 3);
+  assert.deepEqual(shuffled.rows.map((row) => row.itemIds), [['c', 'b'], ['d', 'a']]);
+  assert.deepEqual(shuffled.rows.map((row) => row.width), [1800, 2100]);
+  assert.equal(shuffled.rowCount, canonical.rowCount);
+  assert.equal(shuffled.error, canonical.error);
+  assert.equal(shuffled.occupiedWidth, canonical.occupiedWidth);
+  assert.equal(shuffled.height, canonical.height);
+  assert.equal(shuffled.left, canonical.left);
+  assert.equal(shuffled.top, canonical.top);
+
+  for (let rowIndex = 0; rowIndex < shuffled.rows.length; rowIndex++) {
+    const placements = shuffled.placements
+      .filter((placement) => placement.row === rowIndex)
+      .sort((a, b) => a.column - b.column);
+    assert.equal(placements[0].x, shuffled.left);
+    for (let column = 1; column < placements.length; column++) {
+      assert.equal(placements[column].x, placements[column - 1].x + placements[column - 1].w);
+    }
+  }
+});
+
 test('golden image layout row membership and order are independent of selection order', () => {
   const images = [
     { id: 'equal-b', w: 1, h: 1 },

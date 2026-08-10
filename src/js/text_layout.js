@@ -1082,7 +1082,6 @@ function clearTextMeasurementCaches() {
   refreshTextMetrics();
   clearTextLayoutCaches({ measurements: true });
   syncAllTextAutoHeights();
-  invalidateOffscreen();
   scheduleRender(true, true);
 }
 

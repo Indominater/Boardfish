@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const readSource = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 
-function loadSortCommandHarness(sourceObjects, selectedIds) {
+function loadSortCommandHarness(sourceObjects, selectedIds, randomValues = [0.999999]) {
   const calls = {
     commits: [],
     dirty: [],
@@ -17,9 +17,16 @@ function loadSortCommandHarness(sourceObjects, selectedIds) {
     invalidations: 0,
     renders: 0,
   };
+  let randomIndex = 0;
+  const testMath = Object.create(Math);
+  testMath.random = () => {
+    const index = Math.min(randomIndex++, randomValues.length - 1);
+    return randomValues[index] ?? 0.999999;
+  };
   const context = {
     console,
     calls,
+    Math: testMath,
     performance: { now: () => 0 },
     HistoryDebug: {
       count() {},
@@ -109,6 +116,52 @@ test('sortSelectedImages resizes and packs only selected images in one undoable 
   assert.deepEqual(context.calls.histories, ['sort-images']);
 });
 
+test('sortSelectedImages shuffles optimized rows and images before placing them', () => {
+  const objects = [
+    { id: 'a', type: 'image', x: 0, y: 0, w: 3, h: 1, z: 1, data: {} },
+    { id: 'b', type: 'image', x: 0, y: 0, w: 2, h: 1, z: 2, data: {} },
+    { id: 'c', type: 'image', x: 0, y: 0, w: 1, h: 1, z: 3, data: {} },
+    { id: 'd', type: 'image', x: 0, y: 0, w: 0.5, h: 1, z: 4, data: {} },
+  ];
+  const context = loadSortCommandHarness(
+    objects,
+    objects.map((obj) => obj.id),
+    [0, 0, 0],
+  );
+
+  assert.equal(context.sortSelectedImages({ x: 500, y: 700 }), true);
+
+  const geometry = Object.fromEntries(objects.map((obj) => [
+    obj.id,
+    [obj.x, obj.y, obj.w, obj.h],
+  ]));
+  assert.deepEqual(geometry, {
+    a: [-250, 700, 1800, 600],
+    b: [50, 100, 1200, 600],
+    c: [-550, 100, 600, 600],
+    d: [-550, 700, 300, 600],
+  });
+  assert.equal(geometry.c[0] + geometry.c[2], geometry.b[0]);
+  assert.equal(geometry.d[0] + geometry.d[2], geometry.a[0]);
+  assert.deepEqual(context.calls.histories, ['sort-images']);
+});
+
+test('sortSelectedImages samples a fresh presentation order on each invocation', () => {
+  const objects = [
+    { id: 'a', type: 'image', x: 0, y: 0, w: 1, h: 1, z: 1, data: {} },
+    { id: 'b', type: 'image', x: 0, y: 0, w: 1, h: 1, z: 2, data: {} },
+  ];
+  const context = loadSortCommandHarness(objects, ['a', 'b'], [0.999999, 0]);
+
+  assert.equal(context.sortSelectedImages({ x: 1000, y: 1000 }), true);
+  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 400], ['b', 1000]]);
+
+  assert.equal(context.sortSelectedImages({ x: 1000, y: 1000 }), true);
+  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 1000], ['b', 400]]);
+  assert.equal(context.calls.commits.length, 2);
+  assert.deepEqual(context.calls.histories, ['sort-images', 'sort-images']);
+});
+
 test('sortSelectedImages rechecks that at least two valid images are selected', () => {
   const objects = [
     { id: 'image-a', type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: {} },
@@ -169,11 +222,10 @@ function loadObjectMenuVisibilityHarness() {
     selectedIds: new Set(),
     objectsMap: new Map(),
     copyBtn: element(),
-    imageActionsSep: element(),
+    objectActionsSep: element(),
     arrangeImagesBtn: element(),
     flipBtn: element(),
     rotateBtn: element(),
-    layerActionsSep: element(),
     moveToBackBtn: element(),
     saveImageBtn: element(),
     saveImagesBtn: { style: {}, firstElementChild: { textContent: '' } },
@@ -190,7 +242,7 @@ function loadObjectMenuVisibilityHarness() {
   return context;
 }
 
-test('object menu shows Arrange Images only when at least two selected objects are images', () => {
+test('object menu shows Arrange only when at least two selected objects are images', () => {
   const context = loadObjectMenuVisibilityHarness();
   const imageA = { id: 'image-a', type: 'image' };
   const imageB = { id: 'image-b', type: 'image' };
@@ -211,7 +263,7 @@ test('object menu shows Arrange Images only when at least two selected objects a
   assert.equal(visibleFor(['image-a', 'stale-image-id']), false);
 });
 
-test('Arrange Images menu integration uses the activation pointer and shared paste size', () => {
+test('Arrange menu integration uses the activation pointer and shared paste size', () => {
   const indexSource = readSource('src/index.html');
   const appSource = readSource('src/app.js');
   const contextMenuSource = readSource('src/js/context_menu.js');
@@ -220,16 +272,21 @@ test('Arrange Images menu integration uses the activation pointer and shared pas
 
   assert.match(
     indexSource,
-    /id="obj-btn-arrange-images"[^>]*>[\s\S]*?Arrange Images[\s\S]*?data-shortcut="arrange-images"/,
+    /id="obj-btn-arrange-images"[^>]*><span class="ctx-label">Arrange<\/span><span class="ctx-shortcut" data-shortcut="arrange-images">/,
   );
+  assert.doesNotMatch(indexSource, />Arrange Images</);
+  const objectSeparatorIndex = indexSource.indexOf('id="obj-sep-object-actions"');
+  const flipIndex = indexSource.indexOf('id="obj-btn-flip"');
   const rotateIndex = indexSource.indexOf('id="obj-btn-rotate"');
-  const layerSeparatorIndex = indexSource.indexOf('id="obj-sep-layer-actions"');
   const arrangeIndex = indexSource.indexOf('id="obj-btn-arrange-images"');
   const moveToBackIndex = indexSource.indexOf('id="obj-btn-move-to-back"');
-  assert.ok(rotateIndex < layerSeparatorIndex);
-  assert.ok(layerSeparatorIndex < moveToBackIndex);
-  assert.ok(moveToBackIndex < arrangeIndex);
+  assert.ok(objectSeparatorIndex < flipIndex);
+  assert.ok(flipIndex < rotateIndex);
+  assert.ok(rotateIndex < arrangeIndex);
+  assert.ok(arrangeIndex < moveToBackIndex);
+  assert.doesNotMatch(indexSource, /obj-sep-layer-actions/);
   assert.match(appSource, /arrangeImagesBtn\s*= requireAppElement\('obj-btn-arrange-images'\)/);
+  assert.match(appSource, /objectActionsSep\s*= requireAppElement\('obj-sep-object-actions'\)/);
   assert.match(
     appSource,
     /'arrange-images': COMMAND_KEY_LABEL \+ 'J'/,
@@ -239,6 +296,7 @@ test('Arrange Images menu integration uses the activation pointer and shared pas
     /'obj-btn-arrange-images': \(event\) => \{\s*const point = menuCommandWorldPoint\(event\);\s*closeObjCtxMenu\('command:arrange-images'\);\s*sortSelectedImages\(point\);\s*\}/,
   );
   assert.match(contextMenuSource, /'arrange-images': \[\['obj-ctx-menu', 'obj-btn-arrange-images'\]\]/);
+  assert.match(contextMenuSource, /objectActionsSep\.style\.display = showLayerActions \? 'block' : 'none';/);
   assert.match(contextMenuSource, /arrangeImagesBtn\.style\.display = imageCount >= 2 \? '' : 'none';/);
   assert.match(imageInsertSource, /const MAX = BoardfishImageLayout\.DEFAULT_IMAGE_MAX_DIMENSION;/);
   assert.match(imageInsertSource, /w = Math\.max\(1, Math\.round\(w \* scale\)\);/);

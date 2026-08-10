@@ -1311,7 +1311,7 @@ const createTextSelectionClipboardPayload = (obj, selection) => {
     : completed.text;
   const clipboardScriptRanges = typeof deriveBracedTextScriptRangesFromContent === 'function' &&
     typeof normalizeTextScriptRangesForContent === 'function'
-    ? normalizeTextScriptRangesForContent(clipboardText, deriveBracedTextScriptRangesFromContent(clipboardText))
+    ? deriveBracedTextScriptRangesFromContent(clipboardText)
     : normalizedScriptRanges;
   return {
     type: 'text-selection',
@@ -2215,11 +2215,8 @@ const editableTextScriptPayload = (payload = {}) => {
       ? brace(payload.text || '', payload.scriptRanges || [])
       : (payload.text || '')
   );
-  const derivedRanges = typeof deriveBracedTextScriptRangesFromContent === 'function'
+  const scriptRanges = typeof deriveBracedTextScriptRangesFromContent === 'function'
     ? deriveBracedTextScriptRangesFromContent(text)
-    : [];
-  const scriptRanges = typeof normalizeTextScriptRangesForContent === 'function'
-    ? normalizeTextScriptRangesForContent(text, derivedRanges)
     : [];
   return { text, scriptRanges };
 };
@@ -3828,10 +3825,6 @@ function enterEdit(id, {
     else scheduleRender(true, false);
   }, 500);
 
-  // Offscreen is now stale: it was built with this object; now we exclude it
-  invalidateOffscreen();
-  logStep('enter-offscreen-invalidated');
-
   if (placeInitialCaret) {
     proxy.focus({ preventScroll: true });
     proxy.setSelectionRange(proxy.value.length, proxy.value.length);
@@ -3935,14 +3928,6 @@ function exitEdit() {
     proxyRemoveMs: textEditorDebugRound(textEditorDebugNow() - proxyRemoveStart),
     domProxyChars: typeof proxy?.value === 'string' ? proxy.value.length : '',
     domValueStale: !!proxy?._boardfishDomValueStale,
-  });
-
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const invalidateStart = textEditorDebugNow();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  invalidateOffscreen();
-  logStep('exit-offscreen-invalidated', objAtStart, {
-    invalidateOffscreenMs: textEditorDebugRound(textEditorDebugNow() - invalidateStart),
   });
 
   const obj = objectsMap.get(id);
