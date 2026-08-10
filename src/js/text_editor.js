@@ -3783,8 +3783,14 @@ function enterEdit(id, {
   let _prevSelStart = -1, _prevSelEnd = -1;
   _selChangeListener = () => {
     if (document.activeElement !== proxy) return;
-    const currentObj = objectsMap.get(id);
     let s = proxy.selectionStart, e = proxy.selectionEnd;
+    const suppressed = _textInputSelectionHistorySuppress;
+    if (typeof suppressed?.hasSelection === 'boolean' && suppressed.start === s && suppressed.end === e) {
+      _textInputSelectionHistorySuppress = null;
+      _prevSelStart = s; _prevSelEnd = e; _caretVisible = true;
+      return;
+    }
+    const currentObj = objectsMap.get(id);
     if (currentObj && s === e) {
       const normalizedCaret = normalizeTextEditVisibleCaretIndex(currentObj, s, 'forward');
       if (normalizedCaret !== s) {
@@ -3795,16 +3801,8 @@ function enterEdit(id, {
     }
     if (s === _prevSelStart && e === _prevSelEnd && _caretVisible) return;
     _prevSelStart = s; _prevSelEnd = e;
-    if (
-      _textInputSelectionHistorySuppress &&
-      _textInputSelectionHistorySuppress.start === s &&
-      _textInputSelectionHistorySuppress.end === e
-    ) {
-      _textInputSelectionHistorySuppress = null;
-    } else {
-      _textInputSelectionHistorySuppress = null;
-      flushEditHistoryCheckpoint();
-    }
+    _textInputSelectionHistorySuppress = null;
+    if (!suppressed || suppressed.start !== s || suppressed.end !== e) flushEditHistoryCheckpoint();
     TextSelDebug._logSelection('selectionchange', proxy);
     _caretVisible = true;
     if (currentObj) {

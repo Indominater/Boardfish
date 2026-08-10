@@ -336,9 +336,8 @@ test('cmd+arrow text alignment still applies to selected text objects outside ed
       calls.push(['align', obj.id, startLine, endLine, direction]);
       return true;
     },
-    markDirty: (id) => calls.push(['markDirty', id]),
     scheduleRender: (board, overlay, reason) => calls.push(['scheduleRender', board, overlay, reason]),
-    pushHistory: (reason) => calls.push(['pushHistory', reason]),
+    pushHistory: (reason, { dirty } = {}) => calls.push(['pushHistory', reason, [...dirty]]),
   });
   const event = keyEvent({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true });
 
@@ -348,9 +347,8 @@ test('cmd+arrow text alignment still applies to selected text objects outside ed
   assert.equal(event.propagationStopped, true);
   assert.deepEqual(calls, [
     ['align', 'text-1', 0, Infinity, 'right'],
-    ['markDirty', 'text-1'],
     ['scheduleRender', true, true, 'text-align'],
-    ['pushHistory', 'text-align'],
+    ['pushHistory', 'text-align', ['text-1']],
   ]);
 });
 

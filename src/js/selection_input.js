@@ -556,8 +556,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           move: onMultiMove,
           up() {
             resizeCommitter.flush();
-            for (const snap of snapshots) markDirty(snap.id);
-            pushHistory('multi-resize');
+            pushHistory('multi-resize', { dirty: snapshots });
           },
         });
         return;

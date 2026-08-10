@@ -149,6 +149,7 @@ function loadSelectionInputHarness(objects, options = {}) {
     getTextMinLines: () => 1,
     markDirty(id) { context.dirty.push(id); },
     pushHistory(reason, historyOptions = {}) {
+      for (const item of historyOptions.dirty || []) context.dirty.push(item?.obj?.id ?? item?.id ?? item);
       context.history.push(reason);
       context.historyOptions.push(historyOptions);
     },

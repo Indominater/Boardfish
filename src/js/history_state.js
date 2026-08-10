@@ -296,6 +296,7 @@ function snapshot() {
 // Unchanged objects share the previous snapshot's reference (safe since
 // restoreSnapshot always deep-clones before mutating).
 function pushHistory(reason = '', options = {}) {
+  if (options.dirty) for (const item of options.dirty) _dirtyIds.add(item?.obj?.id ?? item?.id ?? item);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = HistoryDebug.start('pushHistory', {
     reason,
@@ -447,7 +448,6 @@ function restoreSnapshot(s, {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'clear-editing', clearEditMeta);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const prevSelectedIds = new Set(selectedIds);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cloneObjectsStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -490,15 +490,18 @@ function restoreSnapshot(s, {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'invalidate-offscreen', { invalidateOffscreenMs: performance.now() - invalidateStart });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  // Preserve selection for objects that still exist in the restored state
+  if (editingId && !selectedIds.has(editingId)) exitEdit();
+  const obj = editState?.id ? objectsMap.get(editState.id) : null;
+  // Restore the final selection before the scheduled frame
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const selectionStart = performance.now();
+  const previousSelectedCount = selectedIds.size;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  BoardfishEditorState.setSelection(prevSelectedIds, { exitEditing: false });
+  BoardfishEditorState.setSelection(obj?.type === 'text' ? [obj.id] : new Set(selectedIds), { exitEditing: false });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'restore-selection', {
     setSelectionMs: performance.now() - selectionStart,
-    previousSelectedCount: prevSelectedIds.size,
+    previousSelectedCount,
     selectedCount: selectedIds.size,
   });
   const renderStart = performance.now();
@@ -519,7 +522,6 @@ function restoreSnapshot(s, {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
-  const obj = objectsMap.get(editState.id);
   if (!obj || obj.type !== 'text') {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const ms = performance.now() - t0;
@@ -535,15 +537,6 @@ function restoreSnapshot(s, {
     objectWidth: obj.w,
     objectHeight: obj.h,
     ...getHistoryEditStateDebugMetrics(editState, 'editState'),
-  });
-  const editSelectionStart = performance.now();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  HistoryDebug.step(dbg, 'restore-edit-selection', {
-    setSelectionMs: performance.now() - editSelectionStart,
-    selectedCount: selectedIds.size,
-    editStateId: editState.id,
   });
   const enterEditStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */

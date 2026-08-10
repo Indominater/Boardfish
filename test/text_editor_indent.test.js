@@ -85,6 +85,8 @@ function loadTextScriptEditorHelpers() {
       'globalThis.textEditVisibleSelectionDeleteRange = textEditVisibleSelectionDeleteRange;\n' +
       'globalThis.textEditVisibleDeleteRange = textEditVisibleDeleteRange;\n' +
       'globalThis.textEditBlankLineDeleteRange = textEditBlankLineDeleteRange;\n' +
+      'globalThis.textNewlineCount = textNewlineCount;\n' +
+      'globalThis.textLogicalLineRangeForSelection = textLogicalLineRangeForSelection;\n' +
       'globalThis.textEditScriptMarkerInsertionIndexAt = textEditScriptMarkerInsertionIndexAt;\n' +
       'globalThis.transformTextScriptRangesForInput = transformTextScriptRangesForInput;\n' +
       'globalThis.updateTextLineAlignForInput = updateTextLineAlignForInput;\n' +
@@ -113,6 +115,9 @@ test('newline insertion inherits alignment without expanding trailing left entri
   context.updateTextLineAlignForInput(obj, 'one\ntwo', 3, 3, 'one\n\ntwo', '\n');
 
   assert.deepEqual([...obj.data.lineAlign], ['center', 'center']);
+  const longText = `${'x'.repeat(80)}\nsecond\nthird`;
+  assert.equal(context.textNewlineCount(longText, 0, longText.length - 1), 2);
+  assert.deepEqual({ ...context.textLogicalLineRangeForSelection(longText, { start: 81, end: longText.length }) }, { startLine: 1, endLine: 2 });
 });
 
 function loadExitEditHarness() {
@@ -266,6 +271,7 @@ function loadLiveTextEditResizeHarness() {
     histories: [],
     renders: [],
     animations: [],
+    flushes: 0,
     TextSelDebug: { _logSelection() {}, _logHit() {}, _logDraw() {} },
     document: {
       activeElement: null,
@@ -295,7 +301,7 @@ function loadLiveTextEditResizeHarness() {
       createEvent() {
         return { initEvent(type) { this.type = type; } };
       },
-      addEventListener() {},
+      addEventListener(type, fn) { if (type === 'selectionchange') context.selectionChange = fn; },
       removeEventListener() {},
     },
     window: {
@@ -310,7 +316,7 @@ function loadLiveTextEditResizeHarness() {
     beginTextEditHistoryAction() {},
     shouldCommitTextEditInputImmediately() { return false; },
     recordTextEditInputHistory() {},
-    flushEditHistoryCheckpoint() { return false; },
+    flushEditHistoryCheckpoint() { context.flushes++; return false; },
     markDirty(id) { context.dirty.push(id); },
     pushHistory(reason) { context.histories.push(reason); },
     pushEditHistoryIfChanged() { return false; },
@@ -417,6 +423,16 @@ test('typing a script marker auto-opens braces and closing brace completes the r
   assert.deepEqual(JSON.parse(JSON.stringify(obj.data.scriptRanges)), [
     { start: 2, end: 5, kind: 'sub' },
   ]);
+  const renderCount = context.renders.length;
+  context.selectionChange();
+  assert.equal(context.renders.length, renderCount);
+  assert.equal(context.flushes, 0);
+  assert.equal(context._caretVisible, true);
+  context._textInputSelectionHistorySuppress = { start: 2, end: 2 };
+  context.proxy.setSelectionRange(2, 2, 'none');
+  context.selectionChange();
+  assert.equal(context.proxy.selectionStart, 3);
+  assert.equal(context.flushes, 1);
 });
 
 test('deleting an auto-opened script brace leaves an unrendered marker', () => {

@@ -148,6 +148,7 @@ function loadHistoryHarness() {
     _selChangeListener: null,
     _editEl: null,
     enterEditCalls: [],
+    selectionCalls: [],
     replaceBoardObjectsOptions: [],
     collapseTextOnReplace: false,
     imagePruneCalls,
@@ -164,6 +165,7 @@ function loadHistoryHarness() {
         return nextObjects;
       },
       setSelection(ids = []) {
+        context.selectionCalls.push([...ids]);
         context.selectedIds.clear();
         context.selectedId = null;
         for (const id of ids) {
@@ -304,8 +306,7 @@ test('text-only history skips image cache pruning when no image cache state exis
 
   context.snapshot();
   context.objectsMap.get('text-1').data.content = 'hello world';
-  context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint');
+  context.pushHistory('text-edit-checkpoint', { dirty: [{ obj: context.objectsMap.get('text-1') }] });
 
   assert.deepEqual(context.imagePruneCalls, []);
 });
@@ -474,12 +475,14 @@ test('undoing a text run restores the caret saved before the run started', () =>
   assert.equal(context.editingId, 'text-1');
   assert.equal(context._editEl.selectionStart, 8);
   assert.equal(context._editEl.selectionEnd, 8);
+  assert.deepEqual(context.selectionCalls, [['text-1']]);
 
   context.redo();
 
   assert.equal(context.objectsMap.get('text-1').data.content, 'one two INSERT three');
   assert.equal(context._editEl.selectionStart, 14);
   assert.equal(context._editEl.selectionEnd, 14);
+  assert.deepEqual(context.selectionCalls, [['text-1'], ['text-1']]);
 });
 
 test('undoing a selected text replacement restores the replaced highlight range', () => {

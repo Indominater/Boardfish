@@ -1641,13 +1641,13 @@ const textNewlineCount = (value, start = 0, end = Infinity) => {
   const text = String(value ?? '');
   const stop = Math.min(end, text.length);
   let count = 0;
-  if (stop < text.length) {
-    for (let i = start; i < stop; i++) {
-      if (text[i] === '\n') count++;
-    }
+  if (stop < text.length && stop - start < 64) {
+    for (let i = start; i < stop; i++) if (text[i] === '\n') count++;
     return count;
   }
-  for (let i = text.indexOf('\n', start); i >= 0; i = text.indexOf('\n', i + 1)) count++;
+  const bounded = stop < text.length;
+  const range = bounded ? text.slice(start, stop) : text;
+  for (let i = range.indexOf('\n', bounded ? 0 : start); i >= 0; i = range.indexOf('\n', i + 1)) count++;
   return count;
 };
 
@@ -1673,14 +1673,8 @@ const textLogicalLineRangeForSelection = (value, selection = {}) => {
   const from = Math.min(start, end);
   const to = Math.max(start, end);
   const lastIndex = to > from ? to - 1 : from;
-  let startLine = 0;
-  let endLine = 0;
-  for (let i = 0; i < lastIndex; i++) {
-    if (text[i] !== '\n') continue;
-    endLine++;
-    if (i < from) startLine++;
-  }
-  return { startLine, endLine };
+  const endLine = textNewlineCount(text, 0, lastIndex);
+  return { startLine: from === lastIndex ? endLine : textNewlineCount(text, 0, from), endLine };
 };
 
 const cycleTextLineAlignValue = (align, direction) => {

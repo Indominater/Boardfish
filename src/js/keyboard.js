@@ -75,19 +75,16 @@ const enterSelectedTextEditFromKeyboard = (e) => {
 const applySelectedTextAlignmentFromKeyboard = (direction) => {
   if (editingId || isBoardInputBlocked()) return false;
   if (!selectedIds?.size || !objectsMap?.get) return false;
-  let changed = false;
+  const dirty = [];
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (obj?.type !== 'text') continue;
-    if (applyTextLineAlignmentRange(obj, 0, Infinity, direction)) {
-      markDirty(obj.id);
-      changed = true;
-    }
+    if (applyTextLineAlignmentRange(obj, 0, Infinity, direction)) dirty.push(obj.id);
   }
-  if (!changed) return false;
+  if (!dirty.length) return false;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'text-align');
   else scheduleRender(true, true);
-  pushHistory('text-align');
+  pushHistory('text-align', { dirty });
   return true;
 };
 

@@ -482,8 +482,7 @@ function createSelectionDragSession(startClientX, startClientY) {
     finished = true;
     if (!grpMoved) return false;
     dragCommitter.flush();
-    for (const item of grpItems) markDirty(item.obj.id);
-    pushHistory('group-drag');
+    pushHistory('group-drag', { dirty: grpItems });
     return true;
   }
   return Object.freeze({ move, finish });
@@ -817,8 +816,7 @@ function startObjectDrag(e, obj) {
       return;
     }
     dragCommitter.flush();
-    for (const item of dragItems) markDirty(item.obj.id);
-    pushHistory('drag');
+    pushHistory('drag', { dirty: dragItems });
   }
   beginDocumentDrag({ move: onMove, up: onUp });
   return true;

@@ -1065,7 +1065,6 @@ var HistoryDebug = (() => {
         e.step === 'restore-selection' ||
         e.step === 'renderAll-scheduled' ||
         e.step === 'motion-replay' ||
-        e.step === 'restore-edit-selection' ||
         e.step === 'enter-edit-restored' ||
         e.step === 'restore-edit-caret' ||
         e.step === 'flush-edit-history' ||
