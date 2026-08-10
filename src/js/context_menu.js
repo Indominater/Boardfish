@@ -203,9 +203,9 @@ var MENU_COMMANDS = {
     duplicateSelected(point);
   },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
-  'obj-btn-sort-images': (event) => {
+  'obj-btn-arrange-images': (event) => {
     const point = menuCommandWorldPoint(event);
-    closeObjCtxMenu('command:sort-images');
+    closeObjCtxMenu('command:arrange-images');
     sortSelectedImages(point);
   },
   'obj-btn-flip': () => { flipSelectedImages(); },
@@ -516,6 +516,7 @@ var SHORTCUT_MENU_COMMANDS = {
   'move-to-back': [['obj-ctx-menu', 'obj-btn-move-to-back']],
   'flip-image': [['obj-ctx-menu', 'obj-btn-flip']],
   'rotate-image': [['obj-ctx-menu', 'obj-btn-rotate']],
+  'arrange-images': [['obj-ctx-menu', 'obj-btn-arrange-images']],
   'export-image': [
     ['obj-ctx-menu', 'obj-btn-save-image'],
     ['obj-ctx-menu', 'obj-btn-save-images'],
@@ -710,7 +711,7 @@ function updateObjMenuActions() {
   const showDelete = selectedCount >= 1;
   copyBtn.style.display = '';
   imageActionsSep.style.display = showImageActions ? 'block' : 'none';
-  sortImagesBtn.style.display = imageCount >= 2 ? '' : 'none';
+  arrangeImagesBtn.style.display = imageCount >= 2 ? '' : 'none';
   flipBtn.style.display = showImageActions ? '' : 'none';
   rotateBtn.style.display = showImageActions ? '' : 'none';
   layerActionsSep.style.display = showLayerActions ? 'block' : 'none';

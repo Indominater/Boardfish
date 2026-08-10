@@ -170,7 +170,7 @@ function loadObjectMenuVisibilityHarness() {
     objectsMap: new Map(),
     copyBtn: element(),
     imageActionsSep: element(),
-    sortImagesBtn: element(),
+    arrangeImagesBtn: element(),
     flipBtn: element(),
     rotateBtn: element(),
     layerActionsSep: element(),
@@ -190,7 +190,7 @@ function loadObjectMenuVisibilityHarness() {
   return context;
 }
 
-test('object menu shows Sort Images only when at least two selected objects are images', () => {
+test('object menu shows Arrange Images only when at least two selected objects are images', () => {
   const context = loadObjectMenuVisibilityHarness();
   const imageA = { id: 'image-a', type: 'image' };
   const imageB = { id: 'image-b', type: 'image' };
@@ -200,7 +200,7 @@ test('object menu shows Sort Images only when at least two selected objects are 
   const visibleFor = (ids) => {
     context.selectedIds = new Set(ids);
     context.updateObjMenuActions();
-    return context.sortImagesBtn.style.display !== 'none';
+    return context.arrangeImagesBtn.style.display !== 'none';
   };
 
   assert.equal(visibleFor(['image-a']), false);
@@ -211,20 +211,36 @@ test('object menu shows Sort Images only when at least two selected objects are 
   assert.equal(visibleFor(['image-a', 'stale-image-id']), false);
 });
 
-test('Sort Images menu integration uses the activation pointer and shared paste size', () => {
+test('Arrange Images menu integration uses the activation pointer and shared paste size', () => {
   const indexSource = readSource('src/index.html');
   const appSource = readSource('src/app.js');
   const contextMenuSource = readSource('src/js/context_menu.js');
   const imageInsertSource = readSource('src/js/image_insert.js');
   const manifestSource = readSource('src/js/startup_manifest.mjs');
 
-  assert.match(indexSource, /id="obj-btn-sort-images"[^>]*>[\s\S]*Sort Images/);
-  assert.match(appSource, /sortImagesBtn\s*= requireAppElement\('obj-btn-sort-images'\)/);
+  assert.match(
+    indexSource,
+    /id="obj-btn-arrange-images"[^>]*>[\s\S]*?Arrange Images[\s\S]*?data-shortcut="arrange-images"/,
+  );
+  const rotateIndex = indexSource.indexOf('id="obj-btn-rotate"');
+  const layerSeparatorIndex = indexSource.indexOf('id="obj-sep-layer-actions"');
+  const arrangeIndex = indexSource.indexOf('id="obj-btn-arrange-images"');
+  const moveToBackIndex = indexSource.indexOf('id="obj-btn-move-to-back"');
+  assert.ok(rotateIndex < layerSeparatorIndex);
+  assert.ok(layerSeparatorIndex < arrangeIndex);
+  assert.ok(arrangeIndex < moveToBackIndex);
+  assert.match(appSource, /arrangeImagesBtn\s*= requireAppElement\('obj-btn-arrange-images'\)/);
+  assert.match(appSource, /var OPTION_KEY_LABEL = IS_MAC \? '\\u2325' : 'Alt';/);
+  assert.match(
+    appSource,
+    /'arrange-images': IS_MAC\s*\? \[OPTION_KEY_LABEL, COMMAND_KEY_LABEL, 'A'\]\s*: \[COMMAND_KEY_LABEL, OPTION_KEY_LABEL, 'A'\]/,
+  );
   assert.match(
     contextMenuSource,
-    /'obj-btn-sort-images': \(event\) => \{\s*const point = menuCommandWorldPoint\(event\);\s*closeObjCtxMenu\('command:sort-images'\);\s*sortSelectedImages\(point\);\s*\}/,
+    /'obj-btn-arrange-images': \(event\) => \{\s*const point = menuCommandWorldPoint\(event\);\s*closeObjCtxMenu\('command:arrange-images'\);\s*sortSelectedImages\(point\);\s*\}/,
   );
-  assert.match(contextMenuSource, /sortImagesBtn\.style\.display = imageCount >= 2 \? '' : 'none';/);
+  assert.match(contextMenuSource, /'arrange-images': \[\['obj-ctx-menu', 'obj-btn-arrange-images'\]\]/);
+  assert.match(contextMenuSource, /arrangeImagesBtn\.style\.display = imageCount >= 2 \? '' : 'none';/);
   assert.match(imageInsertSource, /const MAX = BoardfishImageLayout\.DEFAULT_IMAGE_MAX_DIMENSION;/);
   assert.match(imageInsertSource, /w = Math\.max\(1, Math\.round\(w \* scale\)\);/);
   assert.match(imageInsertSource, /h = Math\.max\(1, Math\.round\(h \* scale\)\);/);

@@ -31,7 +31,7 @@ var exportSep         = requireAppElement('obj-sep-export');
 var imageActionsSep   = requireAppElement('obj-sep-image-actions');
 var layerActionsSep   = requireAppElement('obj-sep-layer-actions');
 var deleteSep         = requireAppElement('obj-sep-delete');
-var sortImagesBtn     = requireAppElement('obj-btn-sort-images');
+var arrangeImagesBtn  = requireAppElement('obj-btn-arrange-images');
 var flipBtn           = requireAppElement('obj-btn-flip');
 var rotateBtn         = requireAppElement('obj-btn-rotate');
 var rubberBand       = requireAppElement('rubber-band');
@@ -45,6 +45,7 @@ var dialogOverlay    = document.getElementById('dialog-overlay');
 var unsavedDialog    = document.getElementById('dialog');
 var IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
 var COMMAND_KEY_LABEL = IS_MAC ? '\u2318' : 'Ctrl';
+var OPTION_KEY_LABEL = IS_MAC ? '\u2325' : 'Alt';
 var SHIFT_KEY_LABEL = IS_MAC ? '\u21e7' : 'Shift';
 var MENU_VIEWPORT_EDGE_MARGIN = 12;
 var MENU_SHORTCUTS = {
@@ -60,6 +61,9 @@ var MENU_SHORTCUTS = {
   'move-to-back': [COMMAND_KEY_LABEL, '['],
   'flip-image': [COMMAND_KEY_LABEL, 'F'],
   'rotate-image': [COMMAND_KEY_LABEL, 'R'],
+  'arrange-images': IS_MAC
+    ? [OPTION_KEY_LABEL, COMMAND_KEY_LABEL, 'A']
+    : [COMMAND_KEY_LABEL, OPTION_KEY_LABEL, 'A'],
   'export-image': [COMMAND_KEY_LABEL, 'E'],
   'export-images': [COMMAND_KEY_LABEL, 'E'],
   delete: ['Delete'],

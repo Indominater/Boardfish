@@ -35,16 +35,25 @@ function hasActiveTextEditAlignmentContext() {
   return !!editingId && typeof _editEl !== 'undefined' && !!_editEl;
 }
 
-const hasSelectedImagesForKeyboardTransform = () => {
-  if (!selectedIds?.size || !objectsMap?.get) return false;
+const selectedImageCountForKeyboardAction = () => {
+  if (!selectedIds?.size || !objectsMap?.get) return 0;
+  let count = 0;
   for (const id of selectedIds) {
-    if (objectsMap.get(id)?.type === 'image') return true;
+    if (objectsMap.get(id)?.type === 'image') count++;
   }
-  return false;
+  return count;
+};
+
+const hasSelectedImagesForKeyboardTransform = () => {
+  return selectedImageCountForKeyboardAction() >= 1;
 };
 
 const canTransformSelectedImagesFromKeyboard = () => {
   return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardTransform();
+};
+
+const canArrangeSelectedImagesFromKeyboard = () => {
+  return !editingId && !isBoardInputBlocked() && selectedImageCountForKeyboardAction() >= 2;
 };
 
 const selectedTextObjectForKeyboardEdit = () => {
@@ -129,9 +138,18 @@ function pasteAtViewportCenterFromShortcut() {
   pasteAtPos(point.x, point.y);
 }
 
+function arrangeImagesAtCursorFromShortcut() {
+  if (editingId || typeof sortSelectedImages !== 'function') return;
+  const point = typeof boardCursorWorldPoint === 'function'
+    ? boardCursorWorldPoint()
+    : toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  sortSelectedImages(point);
+}
+
 document.addEventListener('keydown', (e) => {
   const command = e.ctrlKey !== e.metaKey && !e.altKey;
   const commandOnly = command && !e.shiftKey, shiftCommandOnly = command && e.shiftKey;
+  const optionCommandOnly = e.ctrlKey !== e.metaKey && e.altKey && !e.shiftKey;
   const noShortcutModifiers = !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
   if (isBrowserFindShortcut(e)) {
     const commandFind = commandOnly && isShortcutKey(e, 'f');
@@ -205,6 +223,14 @@ document.addEventListener('keydown', (e) => {
     runShortcutCommand('rotate-image', () => {
       rotateSelectedImages('cw');
     });
+    return;
+  }
+
+  if (optionCommandOnly && isShortcutKey(e, 'a')) {
+    if (!canArrangeSelectedImagesFromKeyboard()) return;
+    consumeShortcutEvent(e);
+    if (e.repeat) return;
+    runShortcutCommand('arrange-images', arrangeImagesAtCursorFromShortcut);
     return;
   }
 
