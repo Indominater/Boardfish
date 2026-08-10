@@ -841,10 +841,10 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
   }
   tasks.sort((a, b) => bitmapByteSize(b.source) - bitmapByteSize(a.source));
   const limit = Math.max(0, Math.floor(Number(options.limit) || tasks.length));
-  const selectedTasks = tasks.slice(0, limit);
-  const concurrency = Math.max(1, Math.min(8, Math.floor(Number(options.concurrency) || 4), selectedTasks.length || 1));
+  if (tasks.length > limit) tasks.length = limit;
+  const concurrency = Math.max(1, Math.min(8, Math.floor(Number(options.concurrency) || 4), tasks.length || 1));
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    await mapWithConcurrency(selectedTasks, concurrency, async ({ key, source, scale }) => {
+    await mapWithConcurrency(tasks, concurrency, async ({ key, source, scale }) => {
       await buildScaledImageVariantNow(key, source, scale, {
         scheduleRender: false,
         warmupImmediate: true,
@@ -856,7 +856,7 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
   let failed = 0;
   let skipped = 0;
   let bytes = 0;
-  const results = await mapWithConcurrency(selectedTasks, concurrency, async ({ key, source, scale }) => {
+  const results = await mapWithConcurrency(tasks, concurrency, async ({ key, source, scale }) => {
     const result = await buildScaledImageVariantNow(key, source, scale, {
       scheduleRender: false,
       warmupImmediate: true,
@@ -889,7 +889,7 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
   }
   return {
     candidates,
-    selected: selectedTasks.length,
+    selected: tasks.length,
     built,
     alreadyReady,
     noSource,
@@ -1002,7 +1002,7 @@ function scheduleVisibleImageWorkAfterIdle(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   reason,
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  options = {}
+  delayMs = IMAGE_VARIANT_INPUT_IDLE_MS
 ) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && reason === undefined) reason = 'viewport-settled';
   if (_boardOpening) return;
@@ -1012,22 +1012,22 @@ function scheduleVisibleImageWorkAfterIdle(
     if (_boardOpening) return;
     const inputIdleMs = performance.now() - lastViewportInputAt;
     if (inputIdleMs < IMAGE_VARIANT_INPUT_IDLE_MS) {
-      const retryOptions = { ...options, delayMs: IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        scheduleVisibleImageWorkAfterIdle(reason, retryOptions);
-      } else {
-        scheduleVisibleImageWorkAfterIdle(retryOptions);
-      }
+      scheduleVisibleImageWorkAfterIdle(
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        reason,
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs
+      );
       return;
     }
     queueVisibleImageHydration(1);
     if (!isViewportImageScalingActive()) return;
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      prewarmVisibleScaledImageVariants({ ...options, reason });
-    } else {
-      prewarmVisibleScaledImageVariants(options);
-    }
-  }, Math.max(0, Number.isFinite(options.delayMs) ? options.delayMs : IMAGE_VARIANT_INPUT_IDLE_MS));
+    prewarmVisibleScaledImageVariants(
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      { reason }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    );
+  }, Math.max(0, delayMs));
 }
 
 function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }, activeInput = null) {

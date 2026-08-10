@@ -346,11 +346,11 @@ function getVisibleImageKeys(limit = Infinity) {
 if (typeof BOARDFISH_PRODUCTION === 'undefined') getVisibleImageKeys.lastDebug = null;
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function getReferencedHydratableImageKeys(limit = Infinity, exclude = new Set()) {
+function getReferencedHydratableImageKeys() {
   const keys = [];
   const seen = new Set();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const skipped = { excluded: 0, nonImage: 0, missingKey: 0, missingStore: 0, nonHydratable: 0, cached: 0, duplicate: 0 };
+  const skipped = { nonImage: 0, missingKey: 0, missingStore: 0, nonHydratable: 0, cached: 0, duplicate: 0 };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const obj of objects) {
     if (obj.type !== 'image') {
@@ -373,12 +373,6 @@ function getReferencedHydratableImageKeys(limit = Infinity, exclude = new Set())
       continue;
     }
     seen.add(key);
-    if (exclude.has(key)) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      skipped.excluded++;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      continue;
-    }
     const source = BoardfishImageStore.getSource(key);
     if (!source) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -399,7 +393,6 @@ function getReferencedHydratableImageKeys(limit = Infinity, exclude = new Set())
       continue;
     }
     keys.push(key);
-    if (keys.length >= limit) break;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   getReferencedHydratableImageKeys.lastDebug = { selected: keys.length, skipped };
@@ -410,18 +403,12 @@ function getReferencedHydratableImageKeys(limit = Infinity, exclude = new Set())
 if (typeof BOARDFISH_PRODUCTION === 'undefined') getReferencedHydratableImageKeys.lastDebug = null;
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function getPendingHydratableImageKeys(limit = Infinity, exclude = new Set()) {
+function getPendingHydratableImageKeys() {
   const keys = [];
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const skipped = { excluded: 0, nonHydratable: 0, cached: 0 };
+  const skipped = { nonHydratable: 0, cached: 0 };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const key of BoardfishImageStore.sourceKeys()) {
-    if (exclude.has(key)) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      skipped.excluded++;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      continue;
-    }
     if (!isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       skipped.nonHydratable++;
@@ -435,7 +422,6 @@ function getPendingHydratableImageKeys(limit = Infinity, exclude = new Set()) {
       continue;
     }
     keys.push(key);
-    if (keys.length >= limit) break;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   getPendingHydratableImageKeys.lastDebug = { selected: keys.length, skipped };

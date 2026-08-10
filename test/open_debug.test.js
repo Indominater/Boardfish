@@ -148,7 +148,7 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /deferredInitialCacheImages\+\+;/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
   assert.match(openIo, /typeof source === 'string' \|\| isWebImageRef\(source\)/);
-  assert.match(openIo, /function getReferencedHydratableImageKeys\(limit = Infinity, exclude = new Set\(\)\)/);
+  assert.match(openIo, /function getReferencedHydratableImageKeys\(\)/);
   assert.match(openIo, /const keys = getReferencedHydratableImageKeys\(\);/);
   assert.match(openIo, /pendingImages: getPendingHydratableImageKeys\(\)\.length/);
   assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);[\s\S]*?if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) \{\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
