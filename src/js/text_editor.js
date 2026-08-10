@@ -2915,13 +2915,6 @@ function enterEdit(id, {
 	      } else {
 	        setTextEditProxyLogicalValue(proxy, obj.data.content, { domSynced: false });
 	      }
-	    } else if (proxy.value !== obj.data.content) {
-	      const start = proxy.selectionStart;
-	      const end = proxy.selectionEnd;
-	      const direction = proxy.selectionDirection || 'none';
-	      proxy.value = obj.data.content;
-	      setTextEditProxyLogicalValue(proxy, obj.data.content, { domSynced: true });
-	      proxy.setSelectionRange(start, end, direction);
 	    } else {
 	      setTextEditProxyLogicalValue(proxy, obj.data.content, { domSynced: true });
 	    }

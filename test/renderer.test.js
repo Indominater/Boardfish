@@ -405,7 +405,6 @@ test('animated image motion draws an image that jiggles into the viewport', () =
     save() {},
     restore() {},
     translate() {},
-    scale() {},
   };
   const renderer = BoardfishRenderer.createBoardRenderer({
     canvasTextColor: () => '#fff',
@@ -463,8 +462,7 @@ test('animated image cropping inverse-maps translation and non-uniform scale', (
     },
     save() {},
     restore() {},
-    translate() {},
-    scale() {},
+    transform() {},
   };
   const renderer = BoardfishRenderer.createBoardRenderer({
     canvasTextColor: () => '#fff',
@@ -1089,8 +1087,7 @@ test('renderer applies object motion translation and non-uniform scaling around 
     globalAlpha: 1,
     save() { calls.push(['save']); },
     restore() { calls.push(['restore']); },
-    translate(x, y) { calls.push(['translate', x, y]); },
-    scale(x, y) { calls.push(['scale', x, y]); },
+    transform(...args) { calls.push(['transform', ...args]); },
     drawImage(...args) { calls.push(['drawImage', ...args]); },
   };
   const source = {
@@ -1124,12 +1121,12 @@ test('renderer applies object motion translation and non-uniform scaling around 
 
   renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters());
 
-  assert.deepEqual(calls.slice(0, 5), [
+  const originX = obj.x + obj.w / 2;
+  const originY = obj.y + obj.h / 2;
+  assert.deepEqual(calls.slice(0, 2), [
     ['save'],
-    ['translate', 0, -3],
-    ['translate', 30, 35],
-    ['scale', 1.08, 0.94],
-    ['translate', -30, -35],
+    ['transform', 1.08, 0, 0, 0.94,
+      originX * (1 - 1.08), -3 + originY * (1 - 0.94)],
   ]);
   assert.deepEqual(calls.at(-1), ['restore']);
 });
@@ -1141,8 +1138,7 @@ test('renderer applies motion scaling around the requested fractional object ori
     globalAlpha: 1,
     save() { calls.push(['save']); },
     restore() { calls.push(['restore']); },
-    translate(x, y) { calls.push(['translate', x, y]); },
-    scale(x, y) { calls.push(['scale', x, y]); },
+    transform(...args) { calls.push(['transform', ...args]); },
     drawImage(...args) { calls.push(['drawImage', ...args]); },
   };
   const source = {
@@ -1184,11 +1180,9 @@ test('renderer applies motion scaling around the requested fractional object ori
 
   const originX = obj.x + obj.w * 0.5;
   const originY = obj.y + obj.h * 0.12;
-  assert.deepEqual(calls.slice(0, 4), [
+  assert.deepEqual(calls.slice(0, 2), [
     ['save'],
-    ['translate', originX, originY],
-    ['scale', 1.05, 1 / 1.05],
-    ['translate', -originX, -originY],
+    ['transform', 1.05, 0, 0, 1 / 1.05, originX * (1 - 1.05), originY * (1 - 1 / 1.05)],
   ]);
   assert.deepEqual(calls.at(-1), ['restore']);
 });

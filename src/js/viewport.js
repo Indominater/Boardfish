@@ -354,14 +354,12 @@ const applyTextSelectionMotionTransform = (context, bounds, motion) => {
   const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
   const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
   const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
-  if (translateX || translateY) context.translate(translateX, translateY);
   if (scaleX !== 1 || scaleY !== 1) {
     const scalePivotX = bounds.left + (bounds.right - bounds.left) * scaleOriginX;
     const scalePivotY = bounds.top + (bounds.bottom - bounds.top) * scaleOriginY;
-    context.translate(scalePivotX, scalePivotY);
-    context.scale(scaleX, scaleY);
-    context.translate(-scalePivotX, -scalePivotY);
-  }
+    context.transform(scaleX, 0, 0, scaleY,
+      translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
+  } else if (translateX || translateY) context.translate(translateX, translateY);
   return true;
 };
 
@@ -602,14 +600,12 @@ const applyObjectMotionForDraw = (context, obj, motion) => {
   const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
   const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
   const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
-  if (translateX || translateY) context.translate(translateX, translateY);
   if (scaleX !== 1 || scaleY !== 1) {
     const scalePivotX = obj.x + obj.w * scaleOriginX;
     const scalePivotY = obj.y + obj.h * scaleOriginY;
-    context.translate(scalePivotX, scalePivotY);
-    context.scale(scaleX, scaleY);
-    context.translate(-scalePivotX, -scalePivotY);
-  }
+    context.transform(scaleX, 0, 0, scaleY,
+      translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
+  } else if (translateX || translateY) context.translate(translateX, translateY);
   return true;
 };
 

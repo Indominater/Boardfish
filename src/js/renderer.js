@@ -135,14 +135,12 @@
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     context.save();
-    if (translateX || translateY) context.translate(translateX, translateY);
     if (scaleX !== 1 || scaleY !== 1) {
       const scalePivotX = obj.x + obj.w * scaleOriginX;
       const scalePivotY = obj.y + obj.h * scaleOriginY;
-      context.translate(scalePivotX, scalePivotY);
-      context.scale(scaleX, scaleY);
-      context.translate(-scalePivotX, -scalePivotY);
-    }
+      context.transform(scaleX, 0, 0, scaleY,
+        translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
+    } else if (translateX || translateY) context.translate(translateX, translateY);
     if (!rect) return rect;
     // Text layout and image crops are chosen before the canvas motion transform,
     // so map the visible destination back into the object's source coordinates.
