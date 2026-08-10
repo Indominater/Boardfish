@@ -74,6 +74,7 @@ function loadSelectionInputHarness(objects, options = {}) {
     rubberBand: createElement('rubber-band'),
     ctxMenu: createElement('ctx-menu'),
     objCtxMenu: createElement('obj-ctx-menu'),
+    textCtxMenu: createElement('text-ctx-menu'),
     ctxActions: createElement('ctx-actions'),
     island: createElement('island'),
     openingShield: createElement('opening-shield'),
@@ -101,6 +102,7 @@ function loadSelectionInputHarness(objects, options = {}) {
     timeoutHandler: null,
     EDIT_HISTORY_DEBOUNCE_MS: 500,
     drawBoardCalls: 0,
+    motionLookups: 0,
     renders: [],
     syncedTextIds: [],
     motionPulses: [],
@@ -156,8 +158,12 @@ function loadSelectionInputHarness(objects, options = {}) {
         context.motionPulses.push({});
         return true;
       },
-      getLastDrawnObjectMotion(obj) {
-        return options.objectMotions?.get(obj?.id) || null;
+      hasLastDrawnObjectMotions() {
+        return !!options.objectMotions?.size;
+      },
+      getLastDrawnObjectMotion(value) {
+        context.motionLookups++;
+        return options.objectMotions?.get(typeof value === 'string' ? value : value?.id) || null;
       },
     },
   };
@@ -360,6 +366,7 @@ test('selection overlay expands snapped outline edges to cover object bounds', (
   assert.equal(snapped.y, 20);
   assert.equal(snapped.width, 101);
   assert.equal(snapped.height, 41.5);
+  assert.equal(context.motionLookups, 0);
 });
 
 test('selection overlay follows fixed-screen-distance copy motion at zoom', () => {

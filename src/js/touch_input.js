@@ -390,7 +390,6 @@
   }
 
   function beginTouchPan(gesture) {
-    finishTouchSelectionDrag();
     if (gesture?.resumedFromPinch || !boardPressAllowed()) return false;
     const startX = Number(gesture.startX);
     const startY = Number(gesture.startY);
@@ -442,7 +441,6 @@
 
   function applyTouchPinch(gesture) {
     if (!boardNavigationAllowed()) return;
-    if (!touchPinchStartViewport) beginTouchPinch();
     const next = pinchViewportFromGesture(touchPinchStartViewport, gesture);
     BoardfishViewportState.setZoomPan(next.zoom, next.panX, next.panY);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pinch-zoom', gesture.event);
@@ -456,7 +454,6 @@
     onPan: applyTouchPan,
     onPinchStart: beginTouchPinch,
     onPinch: applyTouchPinch,
-    onPinchEnd: () => { touchPinchStartViewport = null; },
     onGestureEnd: (gesture) => {
       finishTouchSelectionDrag(gesture);
       touchPinchStartViewport = null;

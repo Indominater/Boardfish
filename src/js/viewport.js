@@ -11,6 +11,7 @@ var long_message = 3 * short_message;
 var _islMsgActive = false;
 var _islMsgTimer = null;
 var _islMsgToken = 0;
+var _islandSyncedZoom = NaN;
 
 const formatZoomPercent = (value = zoom) => {
   const pct = Math.max(0, (Number.isFinite(value) ? value : 1) * 100);
@@ -70,6 +71,7 @@ function setIslandVisible(visible) {
 
 const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
   if (_islMsgActive) return;
+  _islandSyncedZoom = zoom;
   const zoomText = formatZoomPercent();
   if (island.dataset.mode === 'zoom' && islZoom.textContent === zoomText && island.classList.contains('visible')) return;
   if (islZoom.textContent !== zoomText) islZoom.textContent = zoomText;
@@ -984,11 +986,13 @@ function applyTransform(
   } else {
     scheduleVisibleImageWorkAfterIdle();
   }
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    syncIslandZoomDisplay();
-  } else {
+  if (_islandSyncedZoom !== zoom) syncIslandZoomDisplay(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    syncIslandZoomDisplay(_activeRenderSource || 'transform');
+    _activeRenderSource || 'transform'
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  );
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const baseMeta = {
       overlaySkipped: !needsOverlayUpdate,
       source: _activeRenderSource,

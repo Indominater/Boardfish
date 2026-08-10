@@ -137,7 +137,7 @@ if (DEBUG_TOOLS_ENABLED) {
     document.addEventListener(type, (e) => MenuDebug.logDomEvent(`document:${type}:bubble`, e), false);
     ctxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`ctx-menu:${type}`, e));
     objCtxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`obj-ctx-menu:${type}`, e));
-    BoardfishDOM.textCtxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`text-ctx-menu:${type}`, e));
+    textCtxMenu.addEventListener(type, (e) => MenuDebug.logDomEvent(`text-ctx-menu:${type}`, e));
   }
 }
 
@@ -157,7 +157,7 @@ function closeObjCtxMenu(reason) {
 const closeTextCtxMenu = (reason) => {
   MenuDebug.log('text-ctx-menu:close', { reason });
   clearMenuCommandPressState();
-  closeFloatingSurface(BoardfishDOM.textCtxMenu);
+  closeFloatingSurface(textCtxMenu);
 };
 
 function closeOpenMenusExcept(activeMenuId = '', reason = 'menu-switch') {
@@ -465,7 +465,7 @@ function runMenuCommand(button, source, commandEvent = null) {
 function contextMenuSurfaceById(id) {
   if (id === 'ctx-menu') return ctxMenu;
   if (id === 'obj-ctx-menu') return objCtxMenu;
-  if (id === 'text-ctx-menu') return BoardfishDOM.textCtxMenu;
+  if (id === 'text-ctx-menu') return textCtxMenu;
   return null;
 }
 
@@ -473,7 +473,7 @@ function hasOpenContextMenu() {
   return !!(
     ctxMenu.classList.contains('visible') ||
     objCtxMenu.classList.contains('visible') ||
-    BoardfishDOM.textCtxMenu.classList.contains('visible')
+    textCtxMenu.classList.contains('visible')
   );
 }
 
@@ -656,12 +656,12 @@ function onMenuPointerUp(e) {
   runMenuCommand(button, MENU_COMMAND_UP_EVENT, e);
 }
 
-for (const menu of [ctxMenu, objCtxMenu, BoardfishDOM.textCtxMenu]) {
+for (const menu of [ctxMenu, objCtxMenu, textCtxMenu]) {
   menu.addEventListener(MENU_COMMAND_DOWN_EVENT, onMenuPointerDown);
   menu.addEventListener(MENU_COMMAND_UP_EVENT, onMenuPointerUp);
   for (const type of MENU_COMMAND_CANCEL_EVENTS) menu.addEventListener(type, clearMenuCommandPressState);
 }
-const contextMenuStopSurfaces = [ctxMenu, objCtxMenu, BoardfishDOM.textCtxMenu, ctxActions];
+const contextMenuStopSurfaces = [ctxMenu, objCtxMenu, textCtxMenu, ctxActions];
 for (const menu of contextMenuStopSurfaces) {
   if (!menu) continue;
   for (const type of ['click', 'contextmenu']) {
@@ -676,7 +676,7 @@ function isContextMenuSurfaceEvent(e) {
   return !!(e?.target instanceof Node && (
     ctxMenu.contains(e.target) ||
     objCtxMenu.contains(e.target) ||
-    BoardfishDOM.textCtxMenu.contains(e.target) ||
+    textCtxMenu.contains(e.target) ||
     ctxActions?.contains(e.target)
   ));
 }
@@ -718,10 +718,10 @@ const updateTextEditMenuActions = async () => {
   const hasSelection = !!selection?.hasSelection;
   const clipboardText = await readTextClipboardForEditMenu();
   const showPaste = clipboardText.length > 0;
-  BoardfishDOM.textCopyBtn.style.display = hasSelection ? '' : 'none';
-  BoardfishDOM.textPasteBtn.style.display = showPaste ? '' : 'none';
-  BoardfishDOM.textDeleteSep.style.display = hasSelection ? 'block' : 'none';
-  BoardfishDOM.textDeleteBtn.style.display = hasSelection ? '' : 'none';
+  textCopyBtn.style.display = hasSelection ? '' : 'none';
+  textPasteBtn.style.display = showPaste ? '' : 'none';
+  textDeleteSep.style.display = hasSelection ? 'block' : 'none';
+  textDeleteBtn.style.display = hasSelection ? '' : 'none';
   return hasSelection || showPaste;
 };
 
@@ -737,11 +737,11 @@ const showTextEditContextMenuAt = async (clientX, clientY) => {
     MenuDebug.log('text-ctx-menu:blocked-empty', { x: clientX, y: clientY });
     return;
   }
-  openExclusiveMenuAt(BoardfishDOM.textCtxMenu, 'text-ctx-menu', clientX, clientY, 'show-text-menu:edit');
+  openExclusiveMenuAt(textCtxMenu, 'text-ctx-menu', clientX, clientY, 'show-text-menu:edit');
   focusTextEditProxy();
   MenuDebug.log('text-ctx-menu:open', {
     hasSelection: !!getTextEditSelectionState()?.hasSelection,
-    pasteVisible: BoardfishDOM.textPasteBtn.style.display !== 'none',
+    pasteVisible: textPasteBtn.style.display !== 'none',
     x: clientX,
     y: clientY,
   });

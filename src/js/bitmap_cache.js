@@ -28,11 +28,10 @@
 
     function detachLruNode(node) {
       if (node.prev) node.prev.next = node.next;
-      else if (lruHead === node) lruHead = node.next;
+      else lruHead = node.next;
       if (node.next) node.next.prev = node.prev;
-      else if (lruTail === node) lruTail = node.prev;
-      node.prev = null;
-      node.next = null;
+      else lruTail = node.prev;
+      node.prev = node.next = null;
     }
 
     function appendLruNode(node) {
@@ -88,9 +87,9 @@
     }
 
     function clear() {
-      for (const key of groups.keys()) removeGroup(key);
-      lruHead = null;
-      lruTail = null;
+      for (const group of groups.values()) for (const node of group.values()) close(node.entry);
+      groups.clear();
+      lruHead = lruTail = null;
       bytes = 0;
     }
 

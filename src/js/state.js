@@ -29,9 +29,7 @@ function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
   if (obj._textScriptRangesCache !== sourceScriptRanges || obj._textScriptRangesCacheContent !== content) {
     return normalizeTextScriptRangesForContent(content, sourceScriptRanges);
   }
-  const out = new Array(sourceScriptRanges.length);
-  for (let i = 0; i < sourceScriptRanges.length; i++) out[i] = { ...sourceScriptRanges[i] };
-  return out;
+  return cloneTextScriptRanges(sourceScriptRanges);
 }
 
 function cloneObject(obj, runtimeTextCache = false) {
@@ -105,7 +103,6 @@ function sendSelectedToBack() {
     }
     if (!selected.length || !rest.length) return false;
     objects = selected.concat(rest);
-    for (const obj of selected) markDirty(obj.id);
     return true;
   });
 }

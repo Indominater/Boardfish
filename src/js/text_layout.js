@@ -32,17 +32,24 @@ function normalizeTextContent(value) {
 }
 
 const trimWhitespaceOnlyEdgeLines = (value) => {
-  const lines = normalizeTextContent(value).split('\n');
-  let first = 0;
-  let last = lines.length - 1;
-  while (first <= last && !/\S/.test(lines[first])) first++;
-  while (last >= first && !/\S/.test(lines[last])) last--;
-  return first <= last ? lines.slice(first, last + 1).join('\n') : '';
+  const text = normalizeTextContent(value);
+  if (!text.includes('\n')) return /\S/.test(text) ? text : '';
+  return /\S/.test(text) ? text.replace(/^(?:[^\S\n]*\n)+|(?:\n[^\S\n]*)+$/g, '') : '';
 };
 
 const textForClipboard = trimWhitespaceOnlyEdgeLines;
 const textSelectionForClipboard = trimWhitespaceOnlyEdgeLines;
 const textForTextObjectPaste = trimWhitespaceOnlyEdgeLines;
+
+const cloneTextScriptRanges = (ranges = []) => {
+  const source = Array.isArray(ranges) ? ranges : [];
+  const out = new Array(source.length);
+  for (let i = 0; i < source.length; i++) {
+    const { start, end, kind } = source[i];
+    out[i] = { start, end, kind };
+  }
+  return out;
+};
 
 // Some external plain-text clipboards materialize source visual wraps as newlines.
 // Only unwrap high-confidence fixed-width prose; all other paste paths stay literal.
@@ -622,9 +629,7 @@ const clearTextLayoutCaches = (options = {}) => {
   _scriptIndexCache.clear();
   if (options.measurements) clearMeasuredTextWidthCache();
   if (options.objectLayout !== false) {
-    for (const obj of objects) {
-      clearTextObjectLayoutRuntime(obj, { lines: false });
-    }
+    for (const obj of objects) clearTextObjectLayoutRuntime(obj);
   }
 };
 

@@ -159,15 +159,15 @@ function dropDrawableBitmapWarmup(source) {
 
 function dropDrawableBitmapWarmupsForKey(key) {
   if (!key || !drawableBitmapWarmupQueue.length) return;
-  const kept = [];
+  let write = 0;
   for (const task of drawableBitmapWarmupQueue) {
     if (task?.meta?.key === key) {
       drawableBitmapWarmupQueued.delete(task.source);
     } else {
-      kept.push(task);
+      drawableBitmapWarmupQueue[write++] = task;
     }
   }
-  drawableBitmapWarmupQueue = kept;
+  drawableBitmapWarmupQueue.length = write;
 }
 
 function drawableBitmapWarmupResetSet() {
@@ -844,12 +844,11 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
   if (tasks.length > limit) tasks.length = limit;
   const concurrency = Math.max(1, Math.min(8, Math.floor(Number(options.concurrency) || 4), tasks.length || 1));
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    await mapWithConcurrency(tasks, concurrency, async ({ key, source, scale }) => {
-      await buildScaledImageVariantNow(key, source, scale, {
+    await mapWithConcurrency(tasks, concurrency, ({ key, source, scale }) =>
+      buildScaledImageVariantNow(key, source, scale, {
         scheduleRender: false,
         warmupImmediate: true,
-      });
-    });
+      }), false);
     return;
   }
   let built = 0;

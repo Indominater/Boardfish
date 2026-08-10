@@ -35,20 +35,11 @@ function selectionOverlaySelectedImageEdgePadDevicePx() {
   return 0;
 }
 
-function selectionOverlayObjectBounds(obj) {
+function selectionOverlayObjectBounds(obj, hasMotion) {
   if (!obj) return null;
-  const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj) || null;
-  const scale = motion && Number.isFinite(motion.scale) ? Math.max(0.01, motion.scale) : 1;
-  const scaleX = motion && Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : scale;
-  const scaleY = motion && Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : scale;
-  const scaleOriginX = motion && Number.isFinite(motion.scaleOriginX)
-    ? Math.max(0, Math.min(1, motion.scaleOriginX))
-    : 0.5;
-  const scaleOriginY = motion && Number.isFinite(motion.scaleOriginY)
-    ? Math.max(0, Math.min(1, motion.scaleOriginY))
-    : 0.5;
-  const translateX = motion && Number.isFinite(motion.translateX) ? motion.translateX : 0;
-  const translateY = motion && Number.isFinite(motion.translateY) ? motion.translateY : 0;
+  const motion = hasMotion && globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj);
+  if (!motion) return { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h };
+  const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
   const scalePivotX = obj.x + obj.w * scaleOriginX;
   const scalePivotY = obj.y + obj.h * scaleOriginY;
   return {
@@ -59,24 +50,19 @@ function selectionOverlayObjectBounds(obj) {
   };
 }
 
-function selectionOverlaySelectedBounds(resting, obj) {
+function selectionOverlaySelectedBounds(resting, obj, hasMotion) {
+  if (!hasMotion) return resting;
   if (selectedIds.size === 1) {
-    return selectionOverlayObjectBounds(obj) || resting;
+    return selectionOverlayObjectBounds(obj, true) || resting;
   }
   let translateX = 0;
   let translateY = 0;
   let motionCount = 0;
   for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (!obj) continue;
-    const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj) || null;
+    const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(id) || null;
     if (!motion) continue;
-    translateX += Number.isFinite(motion.groupTranslateX)
-      ? motion.groupTranslateX
-      : Number.isFinite(motion.translateX) ? motion.translateX : 0;
-    translateY += Number.isFinite(motion.groupTranslateY)
-      ? motion.groupTranslateY
-      : Number.isFinite(motion.translateY) ? motion.translateY : 0;
+    translateX += motion.groupTranslateX ?? motion.translateX ?? 0;
+    translateY += motion.groupTranslateY ?? motion.translateY ?? 0;
     motionCount++;
   }
   if (!motionCount) return resting;
@@ -281,7 +267,7 @@ const isEventInsideVisibleContextMenu = (e) => {
   return (
     isEventInsideVisibleSurface(e, ctxMenu) ||
     isEventInsideVisibleSurface(e, objCtxMenu) ||
-    isEventInsideVisibleSurface(e, typeof BoardfishDOM !== 'undefined' ? BoardfishDOM.textCtxMenu : null) ||
+    isEventInsideVisibleSurface(e, textCtxMenu) ||
     isEventInsideVisibleSurface(e, ctxActions)
   );
 };
@@ -408,7 +394,7 @@ const trimMultiSelectionBoxes = (maxCount = 0) => {
   }
 };
 
-function updateMultiSelectionOverlay() {
+function updateMultiSelectionOverlay(hasMotion) {
   if (!multiSelOverlay || !isMultiSelected()) {
     hideMultiSelectionOverlay();
     return;
@@ -426,7 +412,7 @@ function updateMultiSelectionOverlay() {
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
-    const bounds = selectionOverlayObjectBounds(obj);
+    const bounds = selectionOverlayObjectBounds(obj, hasMotion);
     if (!bounds) continue;
     const box = _multiSelBoxes[selectedIdx++];
     const rect = selectionOverlayAnimatedScreenRect(
@@ -467,7 +453,8 @@ function updateSelectionOverlay() {
   }
 
   const resting = selectedBounds();
-  const bounds = resting && selectionOverlaySelectedBounds(resting, firstSelectedObj);
+  const hasMotion = !!globalThis.BoardfishMotion?.hasLastDrawnObjectMotions?.();
+  const bounds = resting && selectionOverlaySelectedBounds(resting, firstSelectedObj, hasMotion);
   if (!bounds) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
@@ -493,7 +480,7 @@ function updateSelectionOverlay() {
   selOverlay.classList.toggle('multi', multiSelected);
   selOverlay.classList.toggle('editing', !!editingId);
   selOverlay.classList.toggle('text-resize', !multiSelected && firstSelectedObj.type === 'text');
-  updateMultiSelectionOverlay();
+  updateMultiSelectionOverlay(hasMotion);
   if (!selOverlay.classList.contains('visible')) selOverlay.classList.add('visible');
 }
 

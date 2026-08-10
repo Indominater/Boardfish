@@ -521,20 +521,6 @@ cancelRubberBandSelection = (reason = 'cancel') => {
   return true;
 };
 
-if (typeof window !== 'undefined' && window.addEventListener) {
-  window.addEventListener('blur', () => cancelRubberBandSelection('window-blur'));
-  window.addEventListener('pagehide', () => cancelRubberBandSelection('pagehide'));
-}
-
-if (typeof document !== 'undefined' && document.addEventListener) {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden' || document.hidden) {
-      cancelRubberBandSelection('document-hidden');
-    }
-  });
-  document.addEventListener('pointercancel', () => cancelRubberBandSelection('pointercancel'), true);
-}
-
 function startRubberBandSelection(e, additive) {
   cancelRubberBandSelection('restart');
   if (!additive) deselectAll();
@@ -559,7 +545,7 @@ function startRubberBandSelection(e, additive) {
     _rubberBandSelectionCleanup = null;
     rbStyleCommitter.flush();
     hideRubberBandSelectionVisual();
-    if (ev?.__boardfishRubberBandCancel) return;
+    if (ev?.__boardfishRubberBandCancel || ev?.__boardfishDragCancel) return;
     if (!rbActive) return;
     const x1 = Math.min(rbStartX, ev.clientX), y1 = Math.min(rbStartY, ev.clientY);
     const x2 = Math.max(rbStartX, ev.clientX), y2 = Math.max(rbStartY, ev.clientY);

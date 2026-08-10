@@ -29,6 +29,9 @@ function loadStateCloneHarness() {
       calls.scriptRanges++;
       return Array.isArray(scriptRanges) ? scriptRanges.map((range) => ({ ...range })) : [];
     },
+    cloneTextScriptRanges(ranges = []) {
+      return ranges.map(({ start, end, kind }) => ({ start, end, kind }));
+    },
     cloneTextObjectRuntimeCaches(source, target) {
       target._runtimeCopiedFrom = source.id;
       return target;

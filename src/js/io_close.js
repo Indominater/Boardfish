@@ -220,7 +220,7 @@ async function invokeSaveBoard(fileRef
     const frameProbe = scheduleSaveFrameProbe(dbg, 'save-frame-probe');
     const result = await SaveDebug.wrap(
       dbg,
-      BoardfishRuntime.WEB_COMMANDS.SAVE_BOARD,
+      'web_save_board',
       () => BoardfishRuntime.saveBoard(fileRef, data, { imageStore, ...options }),
       { path, ...metrics },
     );
@@ -242,7 +242,7 @@ async function invokeReadBoard(fileRef
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     const path = BoardfishRuntime.describeFileRef(fileRef);
     const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
-    const result = await OpenDebug.wrap(dbg, BoardfishRuntime.WEB_COMMANDS.READ_BOARD, () => BoardfishRuntime.readBoard(fileRef), { path });
+    const result = await OpenDebug.wrap(dbg, 'web_read_board', () => BoardfishRuntime.readBoard(fileRef), { path });
     if (frameProbe) frameProbe();
     const board = result?.board || result;
     if (isOpenDebugActive(dbg)) {
@@ -1281,7 +1281,7 @@ const saveBoardAsImpl = async () => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       fileRef = await SaveDebug.wrap(
         dbg,
-        BoardfishRuntime.WEB_COMMANDS.SAVE_FILE_DIALOG,
+        'web_save_file_dialog',
         chooseFile,
         { defaultName },
       );
@@ -1426,7 +1426,7 @@ async function openBoard() {
     let fileRef;
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      fileRef = await OpenDebug.wrap(dbg, BoardfishRuntime.WEB_COMMANDS.OPEN_FILE_DIALOG, chooseFile);
+      fileRef = await OpenDebug.wrap(dbg, 'web_open_file_dialog', chooseFile);
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     } else {
       fileRef = await chooseFile();

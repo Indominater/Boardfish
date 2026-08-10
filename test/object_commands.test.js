@@ -32,7 +32,6 @@ function loadDuplicateHarness() {
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
-      isLimitedRuntime() { return true; },
       textByteLength(text) { return String(text ?? '').length; },
     },
     BoardfishEditorState: {

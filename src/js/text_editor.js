@@ -677,24 +677,6 @@ const clearTextEditCaretIndex = (obj) => {
   delete obj._textEditCaretLineStartIndex;
 };
 
-const cloneTextEditScriptRangeList = (ranges = []) => {
-  const source = Array.isArray(ranges) ? ranges : [];
-  const out = new Array(source.length);
-  for (let i = 0; i < source.length; i++) {
-    out[i] = { ...source[i] };
-  }
-  return out;
-};
-
-const entriesToTextScriptRanges = (entries = []) => {
-  const out = new Array(entries.length);
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    out[i] = { start: entry.start, end: entry.end, kind: entry.kind };
-  }
-  return out;
-};
-
 const isBetterNestedTextEditScriptRange = (candidate, current) => (
   !current ||
   candidate.start > current.start ||
@@ -1290,7 +1272,7 @@ const completeTextSelectionBracedScriptRanges = (content, start, end, selectedTe
 
   return {
     text,
-    scriptRanges: entriesToTextScriptRanges(rangeEntries),
+    scriptRanges: cloneTextScriptRanges(rangeEntries),
   };
 };
 
@@ -1344,7 +1326,7 @@ const textSelectionPayloadFromBoardfishClipboardValue = (clipboard) => {
     const text = normalizeTextContent(clipboard.text || '');
     const scriptRanges = typeof normalizeTextScriptRangesForContent === 'function'
       ? normalizeTextScriptRangesForContent(text, clipboard.scriptRanges || [])
-      : cloneTextEditScriptRangeList(clipboard.scriptRanges || []);
+      : cloneTextScriptRanges(clipboard.scriptRanges || []);
     return { type: 'text-selection', text, scriptRanges };
   }
   if (clipboard.type === 'objects') {
@@ -1398,15 +1380,6 @@ const areTextScriptRangesSortedUniqueForEdit = (ranges = []) => {
     previous = range;
   }
   return true;
-};
-
-const cloneTextScriptRangesForEdit = (ranges = []) => {
-  const out = new Array(ranges.length);
-  for (let i = 0; i < ranges.length; i++) {
-    const range = ranges[i];
-    out[i] = { start: range.start, end: range.end, kind: range.kind };
-  }
-  return out;
 };
 
 const sortAndDedupeTextScriptRanges = (ranges = []) => {
@@ -1565,7 +1538,7 @@ const deriveBracedTextScriptRangesAroundEdit = (content, start, end) => {
 };
 
 const textScriptActiveRangesAtIndex = (ranges, index, options = {}) => (
-  cloneTextScriptRangesForEdit(activeTextScriptRangesAt(ranges, index, options))
+  cloneTextScriptRanges(activeTextScriptRangesAt(ranges, index, options))
 );
 
 const textScriptCaretRangesForEditState = (scriptRanges, index, affinity = '') => (
@@ -1821,7 +1794,7 @@ const textScriptCaretRangesAfterInput = (inputState = {}, {
   const end = inputState.end ?? start;
   if (!textEditInputTypeDeletesContent(type) || inputState.hasSelection || start !== end) return null;
   const caretRanges = Array.isArray(inputState.scriptCaretRanges)
-    ? cloneTextEditScriptRangeList(inputState.scriptCaretRanges)
+    ? cloneTextScriptRanges(inputState.scriptCaretRanges)
     : textScriptCaretRangesForEditState(inputState.scriptRanges || [], start, inputState.scriptCaretAffinity || '');
   if (!caretRanges.length) return [];
   const edit = replacement || textEditInputReplacement(oldValue, newValue, inputState, type);

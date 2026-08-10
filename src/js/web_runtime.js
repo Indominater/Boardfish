@@ -1,13 +1,6 @@
 'use strict';
 
 (function initBoardfishRuntime(root) {
-  const WEB_COMMANDS = Object.freeze({
-    OPEN_FILE_DIALOG: 'web_open_file_dialog',
-    READ_BOARD: 'web_read_board',
-    SAVE_BOARD: 'web_save_board',
-    SAVE_FILE_DIALOG: 'web_save_file_dialog',
-  });
-
   const BOARD_FILE_TYPES = Object.freeze([
     {
       description: 'Boardfish board',
@@ -481,10 +474,8 @@
   }
 
   const api = Object.freeze({
-    WEB_COMMANDS,
     canSaveToExistingTarget,
     describeFileRef,
-    fileRefsAreSameEntry,
     fileNameFromRef,
     fileRefFromFile: webFileRef,
     openFileDialog,

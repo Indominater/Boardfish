@@ -483,7 +483,6 @@ function clearOpenInitialImagePreviews(key = null) {
 }
 
 function openInitialPreviewIsCoveredByDrawSource(key, entry) {
-  if (imageBitmapFailed.has(key)) return true;
   const fullSource = imageBitmapCache[key] || null;
   if (!fullSource) return false;
   if (typeof chooseImageScaleForDraw !== 'function' ||

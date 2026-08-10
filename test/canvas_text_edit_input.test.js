@@ -187,14 +187,13 @@ function addListener(listeners, type, fn) {
 }
 
 function loadRubberBandHarness() {
-  const windowListeners = new Map();
   const documentListeners = new Map();
   const selectedIds = new Set();
   const objects = [{ id: 'image-1', type: 'image', x: 0, y: 0, w: 50, h: 50, data: {} }];
   const context = {
     console,
     window: {
-      addEventListener(type, fn) { addListener(windowListeners, type, fn); },
+      addEventListener() {},
     },
     canvas: { addEventListener() {}, classList: { add() {}, remove() {} } },
     boardCanvas: {},
@@ -270,9 +269,6 @@ function loadRubberBandHarness() {
     BoardObjectGeometry: { topObjectAtWorldPoint: () => null },
     toWorld: () => ({ x: 0, y: 0 }),
   };
-  context.windowEvent = (type) => {
-    for (const fn of windowListeners.get(type) || []) fn();
-  };
   context.documentEvent = (type, event) => {
     for (const fn of documentListeners.get(type) || []) fn(event);
   };
@@ -286,16 +282,16 @@ function loadRubberBandHarness() {
   return context;
 }
 
-test('rubber-band selection cancels on window blur without selecting objects', () => {
+test('rubber-band selection honors shared drag cancellation without selecting objects', () => {
   const context = loadRubberBandHarness();
 
   context.startRubberBandSelection({ clientX: 0, clientY: 0 }, false);
   context.drag.move({ clientX: 20, clientY: 20 });
-  context.windowEvent('blur');
+  context.drag.up({ __boardfishDragCancel: true, type: 'blur' });
 
   assert.equal(context._rubberBandDragActive, false);
   assert.equal(context.rubberBand.style.display, 'none');
-  assert.equal(context.cleaned, 1);
+  assert.equal(context.cleaned, 0);
   assert.deepEqual(context.selections, []);
   assert.deepEqual(context.motions, []);
 });

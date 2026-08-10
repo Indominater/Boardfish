@@ -304,9 +304,8 @@
     return transform;
   };
 
-  const getLastDrawnObjectMotion = (obj) => (
-    obj?.id ? lastDrawnObjectMotions.get(obj.id) || null : null
-  );
+  const getLastDrawnObjectMotion = (value) => lastDrawnObjectMotions.get(typeof value === 'string' ? value : value?.id) || null;
+  const hasLastDrawnObjectMotions = () => lastDrawnObjectMotions.size > 0;
 
   const hasObjectMotionsForDraw = () => {
     if (!objectMotions.size) {
@@ -354,6 +353,7 @@
     afterViewportRenderFrame,
     applyCopyFeedback,
     getLastDrawnObjectMotion,
+    hasLastDrawnObjectMotions,
     hasObjectMotionsForDraw,
     objectMotionForDraw,
     textSelectionJelloSpecsForDraw,

@@ -7,10 +7,6 @@
     maxBoardContentBytes: 500 * MB,
   });
 
-  function isLimitedRuntime() {
-    return true;
-  }
-
   function formatBytes(bytes) {
     const mb = Math.round((Number(bytes) || 0) / MB * 10) / 10;
     return `${mb} MB`;
@@ -122,26 +118,6 @@
     return rejectLimit(boardContentLimitMessage(), options);
   }
 
-  function validateImageBytes(bytes, options = {}) {
-    try {
-      const normalizedBytes = Number(bytes || 0);
-      canAcceptAdditionalContentBytes(normalizedBytes, 1, { notifyUser: false, throwError: true });
-      return { bytes: normalizedBytes };
-    } catch (err) {
-      return rejectLimit(err?.boardfishUserMessage || err?.message || String(err), options);
-    }
-  }
-
-  function dataUrlImageBytesForValidation(dataUrl) {
-    const text = String(dataUrl || '');
-    if (!/^data:[^;,]+;base64,/i.test(text)) return 0;
-    return dataUrlByteLength(text);
-  }
-
-  async function validateDataUrlImage(dataUrl, options = {}) {
-    return validateImageBytes(dataUrlImageBytesForValidation(dataUrl), options);
-  }
-
   function validateBoardPayload({ objectCount: nextObjectCount = 0, boardJsonBytes = 0, imageBytes = null, imageEntries = [] } = {}) {
     assertObjectCountAllowed(nextObjectCount, 'board');
     let totalImageBytes = Number(imageBytes);
@@ -162,25 +138,17 @@
     return true;
   }
 
-  function assertBoardDataAllowed(board) {
-    assertObjectCountAllowed(board?.objects?.length || 0, 'board');
-    return true;
-  }
-
   const api = Object.freeze({
     LIMITS,
-    assertBoardDataAllowed,
     boardContentLimitMessage,
     canAcceptAdditionalContentBytes,
     canAddObjects,
     currentContentBytes,
     imageSourceByteLength,
-    isLimitedRuntime,
     limitError,
     notify,
     textByteLength,
     validateBoardPayload,
-    validateDataUrlImage,
   });
 
   root.BoardfishWebLimits = api;
