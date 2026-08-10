@@ -73,6 +73,11 @@
     return !!navigator.clipboard?.write && typeof ClipboardItem !== 'undefined' && typeof Blob !== 'undefined';
   }
 
+  function usesAndroidClipboard() {
+    const platform = String(navigator.userAgentData?.platform || '');
+    return /^android$/i.test(platform) || /\bandroid\b/i.test(String(navigator.userAgent || ''));
+  }
+
   const writeClipboardItem = (parts) => navigator.clipboard.write([new ClipboardItem(parts)]);
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -323,37 +328,72 @@
     }
   }
 
-  async function copyImageBlobToClipboard(blob, token = ''
+  function copyImageBlobToClipboard(blobOrPromise, token = ''
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     , dbg = null
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) {
-    if (token && supportsRichClipboardWrite()) {
-      const dataUrl = await blobToDataUrl(blob).catch((err) => {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectClipboardIoDiagnostics) {
-          ClipDebug.step(dbg, 'web-clipboard-image-html-miss', { error: String(err) });
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        return '';
+    const directBlob = typeof Blob !== 'undefined' && blobOrPromise instanceof Blob
+      ? blobOrPromise
+      : null;
+    const blobPromise = directBlob
+      ? Promise.resolve(directBlob)
+      : Promise.resolve(blobOrPromise).then((blob) => {
+        if (!blob) throw new Error('failed to create clipboard PNG');
+        return blob;
       });
+    const imagePart = directBlob || blobPromise;
+    const writeImageOnly = () => {
       try {
-        const parts = { 'image/png': blob };
-        if (dataUrl) {
-          parts['text/html'] = new Blob([imageClipboardHtml(token, dataUrl)], { type: 'text/html' });
-        }
-        await writeClipboardItem(parts);
-        return { boardfishTokenWritten: !!dataUrl };
+        return Promise.resolve(writeClipboardItem({ 'image/png': imagePart }))
+          .then(() => ({ boardfishTokenWritten: false }));
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    };
+    // Chromium's Android clipboard backend commits HTML ahead of PNG, so a
+    // multi-representation image item becomes a text/HTML clip there.
+    if (usesAndroidClipboard()) return writeImageOnly();
+    if (token && supportsRichClipboardWrite()) {
+      const htmlBlobPromise = blobPromise
+        .then((blob) => blobToDataUrl(blob))
+        .catch((err) => {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          if (collectClipboardIoDiagnostics) {
+            ClipDebug.step(dbg, 'web-clipboard-image-html-miss', { error: String(err) });
+          }
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          return '';
+        })
+        .then((dataUrl) => new Blob([imageClipboardHtml(token, dataUrl)], { type: 'text/html' }));
+      let richWrite;
+      try {
+        // ClipboardItem accepts promised representations. Starting write() before
+        // image encoding finishes keeps it inside the trusted copy gesture on mobile.
+        richWrite = writeClipboardItem({
+          'image/png': imagePart,
+          'text/html': htmlBlobPromise,
+        });
       } catch (err) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (collectClipboardIoDiagnostics) {
           ClipDebug.step(dbg, 'web-clipboard-rich-image-miss', { error: String(err) });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        return writeImageOnly();
       }
+      return Promise.resolve(richWrite)
+        .then(() => ({ boardfishTokenWritten: true }))
+        .catch((err) => {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          if (collectClipboardIoDiagnostics) {
+            ClipDebug.step(dbg, 'web-clipboard-rich-image-miss', { error: String(err) });
+          }
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          return writeImageOnly();
+        });
     }
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-    return { boardfishTokenWritten: false };
+    return writeImageOnly();
   }
 
   const clipboardIoApi = {

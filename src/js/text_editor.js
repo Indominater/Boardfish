@@ -2028,6 +2028,7 @@ const boardfishTextClipboardStillCurrent = async (event = null
     });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   } else if (
+    (typeof _jsClipboardWebMaybeStale === 'undefined' || _jsClipboardWebMaybeStale) &&
     typeof BoardfishClipboardIO !== 'undefined' &&
     typeof BoardfishClipboardIO.readBoardfishClipboardTokenFromBrowser === 'function'
   ) {

@@ -168,14 +168,32 @@ function loadViewportCanvasSizeHarness({
   dpr = 2,
 } = {}) {
   const source = fs.readFileSync(path.join(root, 'src', 'js', 'viewport.js'), 'utf8');
+  const geometrySource = fs.readFileSync(path.join(root, 'src', 'js', 'geometry.js'), 'utf8');
   const sectionStart = source.indexOf('var _canvasResizeObserver = null;');
   assert.ok(sectionStart > 0, 'canvas size tracking state is missing');
   const sectionEnd = source.indexOf('\nvar VIEWPORT_CULL_PADDING_PX', sectionStart);
   assert.ok(sectionEnd > sectionStart, 'canvas size tracking section is unterminated');
+  const viewportRectEnd = source.indexOf('\nconst collectTextSelectionRuns', sectionEnd);
+  assert.ok(viewportRectEnd > sectionEnd, 'viewport rectangle section is unterminated');
   const fallbackReads = { clientWidth: 0, clientHeight: 0, innerWidth: 0, innerHeight: 0 };
+  const backingWrites = { width: 0, height: 0 };
+  let backingWidth = innerWidth * dpr;
+  let backingHeight = innerHeight * dpr;
   const boardCanvas = {
-    width: innerWidth * dpr,
-    height: innerHeight * dpr,
+    get width() {
+      return backingWidth;
+    },
+    set width(value) {
+      backingWrites.width++;
+      backingWidth = value;
+    },
+    get height() {
+      return backingHeight;
+    },
+    set height(value) {
+      backingWrites.height++;
+      backingHeight = value;
+    },
     get clientWidth() {
       fallbackReads.clientWidth++;
       return clientWidth;
@@ -193,6 +211,7 @@ function loadViewportCanvasSizeHarness({
       },
     },
     boardCanvas,
+    backingWrites,
     fallbackReads,
     invalidations: 0,
     renders: [],
@@ -233,8 +252,11 @@ function loadViewportCanvasSizeHarness({
   };
   vm.createContext(context);
   vm.runInContext(
-    `${source.slice(sectionStart, sectionEnd)}\n` +
+    'var panX = 0, panY = 0, zoom = 1;\n' +
+      `${geometrySource}\n` +
+      `${source.slice(sectionStart, viewportRectEnd)}\n` +
       'globalThis.resizeCanvas = resizeCanvas;\n' +
+      'globalThis.syncBoardCanvasBackingStore = syncBoardCanvasBackingStore;\n' +
       'globalThis.startCanvasSizeTracking = startCanvasSizeTracking;\n',
     context,
     { filename: 'viewport-canvas-size.js' },
@@ -332,15 +354,22 @@ test('automatic board refreshes sync active overlays while explicit false opts o
   assert.equal(optedOut.renderFlags().overlay, false);
 });
 
-test('canvas backing store follows the rendered surface instead of stale window dimensions', () => {
+test('canvas resize keeps visible pixels until the render frame syncs the backing store', () => {
   const context = loadViewportCanvasSizeHarness();
 
   assert.equal(context.resizeCanvas(), true);
   assert.equal(context.boardCanvas.width, 3320);
-  assert.equal(context.boardCanvas.height, 2160);
-  assert.equal(context.invalidations, 1);
+  assert.equal(context.boardCanvas.height, 2060);
+  assert.deepEqual(context.backingWrites, { width: 0, height: 0 });
+  assert.equal(context.invalidations, 0);
   assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
   assert.deepEqual(context.fallbackReads, { clientWidth: 0, clientHeight: 0, innerWidth: 0, innerHeight: 0 });
+
+  assert.equal(context.syncBoardCanvasBackingStore(), true);
+  assert.equal(context.boardCanvas.width, 3320);
+  assert.equal(context.boardCanvas.height, 2160);
+  assert.deepEqual(context.backingWrites, { width: 0, height: 1 });
+  assert.equal(context.invalidations, 1);
 
   assert.equal(context.resizeCanvas(), false);
   assert.equal(context.invalidations, 1);
@@ -363,7 +392,60 @@ test('canvas size tracking observes the rendered surface exactly once', () => {
 
   context.surfaceRect.height = 1080;
   context.resizeObserverCallback([{ contentRect: context.surfaceRect }]);
-  assert.equal(context.boardCanvas.height, 2160);
-  assert.equal(context.invalidations, 1);
+  assert.equal(context.boardCanvas.height, 2060);
+  assert.deepEqual(context.backingWrites, { width: 0, height: 0 });
+  assert.equal(context.invalidations, 0);
   assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
+
+  assert.equal(context.syncBoardCanvasBackingStore(), true);
+  assert.equal(context.boardCanvas.height, 2160);
+  assert.deepEqual(context.backingWrites, { width: 0, height: 1 });
+  assert.equal(context.invalidations, 1);
+});
+
+test('keyboard-style resize bursts apply only the latest backing-store height', () => {
+  const context = loadViewportCanvasSizeHarness({
+    rect: { width: 390, height: 500 },
+    clientWidth: 390,
+    clientHeight: 500,
+    innerWidth: 390,
+    innerHeight: 500,
+    dpr: 2,
+  });
+  context.startCanvasSizeTracking();
+
+  for (const height of [620, 730, 844]) {
+    context.resizeObserverCallback([{ contentRect: { width: 390, height } }]);
+  }
+
+  assert.equal(context.boardCanvas.width, 780);
+  assert.equal(context.boardCanvas.height, 1000);
+  assert.deepEqual(context.backingWrites, { width: 0, height: 0 });
+  assert.equal(context.invalidations, 0);
+  assert.equal(context.renders.length, 3);
+
+  assert.equal(context.syncBoardCanvasBackingStore(), true);
+  assert.equal(context.boardCanvas.width, 780);
+  assert.equal(context.boardCanvas.height, 1688);
+  assert.deepEqual(context.backingWrites, { width: 0, height: 1 });
+  assert.equal(context.invalidations, 1);
+});
+
+test('viewport culling follows the observed board surface while keyboard geometry settles', () => {
+  const context = loadViewportCanvasSizeHarness({
+    rect: { width: 390, height: 844 },
+    clientWidth: 390,
+    clientHeight: 844,
+    innerWidth: 390,
+    innerHeight: 500,
+    dpr: 2,
+  });
+
+  const visibleWorld = context.currentViewportWorldRect(0);
+  assert.equal(visibleWorld.x2, 390);
+  assert.equal(visibleWorld.y2, 844);
+  assert.equal(
+    context.objectIntersectsRect({ type: 'image', x: 20, y: 700, w: 80, h: 80 }, visibleWorld),
+    true,
+  );
 });

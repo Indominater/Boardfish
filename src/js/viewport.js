@@ -238,14 +238,20 @@ function boardSurfaceCssSize() {
   return _boardSurfaceCssSizeCache = { width, height };
 }
 
-function syncBoardCanvasBackingStore() {
+function boardCanvasBackingStoreSize() {
   const dpr = window.devicePixelRatio || 1;
   const surface = boardSurfaceCssSize();
-  const width = Math.max(1, Math.round(surface.width * dpr));
-  const height = Math.max(1, Math.round(surface.height * dpr));
+  return {
+    width: Math.max(1, Math.round(surface.width * dpr)),
+    height: Math.max(1, Math.round(surface.height * dpr)),
+  };
+}
+
+function syncBoardCanvasBackingStore() {
+  const { width, height } = boardCanvasBackingStoreSize();
   if (boardCanvas.width === width && boardCanvas.height === height) return false;
-  boardCanvas.width = width;
-  boardCanvas.height = height;
+  if (boardCanvas.width !== width) boardCanvas.width = width;
+  if (boardCanvas.height !== height) boardCanvas.height = height;
   invalidateOffscreen();
   return true;
 }
@@ -253,7 +259,11 @@ function syncBoardCanvasBackingStore() {
 function resizeCanvas(surface = null) {
   _boardSurfaceCssSizeCache = surface?.width > 0 && surface?.height > 0 ? surface : null;
   if (typeof _boardOpening !== 'undefined' && _boardOpening) return false;
-  if (!syncBoardCanvasBackingStore()) return false;
+  const { width, height } = boardCanvasBackingStoreSize();
+  if (boardCanvas.width === width && boardCanvas.height === height) return false;
+  // Changing a canvas backing dimension clears its visible pixels. Defer that
+  // reset to drawBoard so keyboard-driven resize bursts keep the previous frame
+  // visible and the eventual clear + redraw happen together before paint.
   scheduleRender(true);
   return true;
 }
@@ -272,7 +282,7 @@ function startCanvasSizeTracking() {
 var VIEWPORT_CULL_PADDING_PX = 256;
 
 function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX, view = { panX, panY, zoom }) {
-  return viewportWorldRect(padScreenPx, view);
+  return viewportWorldRect(padScreenPx, view, boardSurfaceCssSize());
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {

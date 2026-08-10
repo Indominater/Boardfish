@@ -372,6 +372,9 @@ const copySelected = (options = {}) => {
     if (src) imgData[obj.data.imgKey] = src;
   }
   setJsClipboard({ type: 'objects', objects: [cloned], imageData: imgData });
+  if (animateCopy && obj.type === 'image') {
+    globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
+  }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectClipboardDiagnostics) {
     ClipDebug.step(dbg, 'set-jsClipboard', {
@@ -472,7 +475,7 @@ const copySelected = (options = {}) => {
   }
 
   if (obj.type === 'image') {
-    const writeWebPngBlob = async (blob
+    const writeWebPngBlob = async (blobOrPromise
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , path, meta = null
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -480,18 +483,17 @@ const copySelected = (options = {}) => {
       const webToken = globalThis.getJsClipboardWebToken?.() || '';
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const writeMeta = collectClipboardDiagnostics
-        ? { path, blobSize: blob?.size ?? '', ...meta }
+        ? { path, blobSize: blobOrPromise?.size ?? '', ...meta }
         : null;
       const startedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      let copied = false;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectClipboardDiagnostics) {
         ClipDebug.step(dbg, 'copy:web-clipboard-write-start', writeMeta);
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       try {
-        const result = await BoardfishClipboardIO.copyImageBlobToClipboard(blob, webToken
+        const result = await BoardfishClipboardIO.copyImageBlobToClipboard(blobOrPromise, webToken
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           , dbg
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -509,7 +511,6 @@ const copySelected = (options = {}) => {
           , dbg
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
         );
-        copied = true;
         return true;
       } catch (err) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -527,9 +528,6 @@ const copySelected = (options = {}) => {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (collectClipboardDiagnostics) ClipDebug.end(dbg, writeMeta);
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        if (copied && animateCopy) {
-          globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
-        }
       }
     };
     const storedSource = BoardfishImageStore.getSource(obj.data.imgKey);
@@ -549,7 +547,6 @@ const copySelected = (options = {}) => {
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       );
     }
-    let pngBlob = null;
     const canvas = renderImageToCanvas(obj);
     if (!canvas) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -559,27 +556,23 @@ const copySelected = (options = {}) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return false;
     }
-    return (async () => {
-      try {
-        pngBlob = await canvasToPngBlob(canvas);
-        if (!pngBlob) {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (collectClipboardDiagnostics) {
-            ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'blob-null' });
-          }
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          return false;
-        }
-        return await writeWebPngBlob(pngBlob
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          , 'image-web-rendered'
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        );
-      } catch (err) {
-        console.error('[copy] clipboard.write FAILED:', err);
-        return false;
-      }
-    })();
+    let pngBlobPromise;
+    try {
+      pngBlobPromise = Promise.resolve(canvasToPngBlob(canvas)).then((blob) => {
+        if (!blob) throw new Error('failed to create clipboard PNG');
+        return blob;
+      });
+    } catch (err) {
+      console.error('[copy] clipboard.write FAILED:', err);
+      return false;
+    }
+    // Pass the pending encode into ClipboardItem so clipboard.write starts in
+    // the trusted copy gesture instead of after canvas.toBlob completes.
+    return writeWebPngBlob(pngBlobPromise
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      , 'image-web-rendered'
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    );
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectClipboardDiagnostics) {

@@ -98,6 +98,55 @@ function loadTextScriptEditorHelpers() {
   return context;
 }
 
+function loadTextClipboardFreshnessHarness({ maybeStale = false } = {}) {
+  const source = fs.readFileSync(path.join(root, 'src/js/text_editor.js'), 'utf8');
+  const start = source.indexOf('const boardfishTextClipboardStillCurrent');
+  const end = source.indexOf('const readBoardfishTextClipboardPayloadForPaste', start);
+  assert.ok(start >= 0 && end > start, 'Boardfish text clipboard freshness helper is missing');
+
+  const calls = {
+    browserTokenReads: 0,
+    currentOptions: null,
+  };
+  const context = {
+    Promise,
+    calls,
+    jsClipboard: { type: 'text-selection', text: 'copied text', scriptRanges: [] },
+    _jsClipboardWebMaybeStale: maybeStale,
+    BoardfishClipboardIO: {
+      readBoardfishClipboardTokenFromBrowser() {
+        calls.browserTokenReads++;
+        return Promise.resolve({ checked: true, token: 'bf-token' });
+      },
+    },
+    jsClipboardStillCurrent(_dbg, options) {
+      calls.currentOptions = options;
+      return true;
+    },
+    textEditorDebugNow() {
+      return 0;
+    },
+    textEditorClipStep() {},
+  };
+
+  vm.createContext(context);
+  vm.runInContext(
+    `${source.slice(start, end)}\n` +
+      'this.boardfishTextClipboardStillCurrent = boardfishTextClipboardStillCurrent;\n',
+    context,
+  );
+  return context;
+}
+
+test('fresh in-app text clipboard skips browser token authorization', async () => {
+  const context = loadTextClipboardFreshnessHarness({ maybeStale: false });
+
+  assert.equal(await context.boardfishTextClipboardStillCurrent(), true);
+  assert.equal(context.calls.browserTokenReads, 0);
+  assert.equal(context.calls.currentOptions.webClipboardTokenChecked, false);
+  assert.equal(context.calls.currentOptions.webClipboardToken, '');
+});
+
 test('newline-free input preserves the existing line-alignment array', () => {
   const context = loadTextScriptEditorHelpers();
   const lineAlign = ['center', 'right'];

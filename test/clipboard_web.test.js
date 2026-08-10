@@ -79,6 +79,7 @@ function loadClipboardExportHarness(options = {}) {
     objectJello: [],
     deleted: 0,
     pendingImageCopyResolves: [],
+    pendingPngBlobResolves: [],
     pendingTextCopyResolves: [],
     pulses: 0,
     renderImageToCanvas: 0,
@@ -89,9 +90,19 @@ function loadClipboardExportHarness(options = {}) {
       resolve(result);
     },
     resolveNextCopiedImage(result = { boardfishTokenWritten: true }) {
-      const resolve = calls.pendingImageCopyResolves.shift();
-      if (!resolve) throw new Error('No pending image copy to resolve');
-      resolve(result);
+      const pending = calls.pendingImageCopyResolves.shift();
+      if (!pending) throw new Error('No pending image copy to resolve');
+      pending.resolve(result);
+    },
+    rejectNextCopiedImage(error = new Error('clipboard image write failed')) {
+      const pending = calls.pendingImageCopyResolves.shift();
+      if (!pending) throw new Error('No pending image copy to reject');
+      pending.reject(error);
+    },
+    resolveNextPngBlob(blob = options.renderedBlob || null) {
+      const pending = calls.pendingPngBlobResolves.shift();
+      if (!pending) throw new Error('No pending PNG blob to resolve');
+      pending.resolve(blob);
     },
   };
   const context = {
@@ -118,12 +129,13 @@ function loadClipboardExportHarness(options = {}) {
     selectedObject,
     calls,
     BoardfishClipboardIO: {
-      copyImageBlobToClipboard(blob, token) {
-        calls.copiedImages.push({ blob, token });
-        if (options.deferCopyImage) {
-          return new Promise((resolve) => calls.pendingImageCopyResolves.push(resolve));
-        }
-        return Promise.resolve({ boardfishTokenWritten: true });
+      copyImageBlobToClipboard(blobOrPromise, token) {
+        calls.copiedImages.push({ blob: blobOrPromise, token });
+        const blobPromise = Promise.resolve(blobOrPromise);
+        const writePromise = options.deferCopyImage
+          ? new Promise((resolve, reject) => calls.pendingImageCopyResolves.push({ resolve, reject }))
+          : Promise.resolve({ boardfishTokenWritten: true });
+        return Promise.all([blobPromise, writePromise]).then(([, result]) => result);
       },
       copyTextToClipboard(text) {
         calls.copiedTexts.push(text);
@@ -176,6 +188,9 @@ function loadClipboardExportHarness(options = {}) {
     },
     canvasToPngBlob() {
       calls.canvasToPngBlob++;
+      if (options.deferCanvasToPngBlob) {
+        return new Promise((resolve, reject) => calls.pendingPngBlobResolves.push({ resolve, reject }));
+      }
       return Promise.resolve(options.renderedBlob || null);
     },
     textForClipboard(value) {
@@ -419,7 +434,7 @@ test('web js clipboard without a browser marker is invalidated after leaving the
   }), false);
 });
 
-test('clipboard IO extracts and writes Boardfish web clipboard markers', async () => {
+test('clipboard IO writes rich desktop markers and PNG-only Android images synchronously', async () => {
   const previous = {
     ClipboardItem: globalThis.ClipboardItem,
     ClipDebug: globalThis.ClipDebug,
@@ -438,9 +453,12 @@ test('clipboard IO extracts and writes Boardfish web clipboard markers', async (
     Object.defineProperty(globalThis, 'navigator', {
       configurable: true,
       value: {
+        userAgent: '',
+        userAgentData: { platform: '' },
         clipboard: {
           async write(items) {
             writes.push(items[0]);
+            await Promise.all(Object.values(items[0].parts).map((part) => Promise.resolve(part)));
           },
         },
       },
@@ -462,16 +480,75 @@ test('clipboard IO extracts and writes Boardfish web clipboard markers', async (
     assert.equal(await writes[0].parts['text/plain'].text(), '');
     assert.match(await writes[0].parts['text/html'].text(), /boardfish-clipboard:bf-written/);
 
-    const imageResult = await ClipboardIO.copyImageBlobToClipboard(
-      new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
-      'bf-image',
-    );
-    assert.equal(imageResult.boardfishTokenWritten, true);
+    let resolveImageBlob;
+    const pendingImageBlob = new Promise((resolve) => { resolveImageBlob = resolve; });
+    let imageCopySettled = false;
+    const imageCopyPromise = ClipboardIO.copyImageBlobToClipboard(pendingImageBlob, 'bf-image')
+      .then((result) => {
+        imageCopySettled = true;
+        return result;
+      });
+
+    // The browser write must begin in the copy event, before PNG encoding or
+    // the HTML data URL representation has finished.
     assert.equal(writes.length, 2);
-    assert.ok(writes[1].parts['image/png']);
-    const imageHtml = await writes[1].parts['text/html'].text();
+    assert.equal(typeof writes[1].parts['image/png']?.then, 'function');
+    assert.equal(typeof writes[1].parts['text/html']?.then, 'function');
+    await Promise.resolve();
+    assert.equal(imageCopySettled, false);
+
+    resolveImageBlob(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }));
+    const imageResult = await imageCopyPromise;
+    assert.equal(imageResult.boardfishTokenWritten, true);
+    const imageBlob = await writes[1].parts['image/png'];
+    assert.equal(imageBlob.type, 'image/png');
+    const imageHtmlBlob = await writes[1].parts['text/html'];
+    const imageHtml = await imageHtmlBlob.text();
     assert.match(imageHtml, /boardfish-clipboard:bf-image/);
     assert.match(imageHtml, /<img src="data:image\/png;base64,AQID" alt="">/);
+
+    globalThis.navigator.userAgentData.platform = 'Android';
+    let resolveAndroidImageBlob;
+    const pendingAndroidImageBlob = new Promise((resolve) => { resolveAndroidImageBlob = resolve; });
+    const androidCopyPromise = ClipboardIO.copyImageBlobToClipboard(
+      pendingAndroidImageBlob,
+      'bf-android-image',
+    );
+    assert.equal(writes.length, 3);
+    assert.deepEqual(Object.keys(writes[2].parts), ['image/png']);
+    assert.equal(typeof writes[2].parts['image/png']?.then, 'function');
+    resolveAndroidImageBlob(new Blob([new Uint8Array([4, 5, 6])], { type: 'image/png' }));
+    const androidResult = await androidCopyPromise;
+    assert.equal(androidResult.boardfishTokenWritten, false);
+
+    globalThis.navigator.userAgentData.platform = '';
+    globalThis.navigator.userAgent = 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36';
+    const androidUaBlob = new Blob([new Uint8Array([7, 8, 9])], { type: 'image/png' });
+    const androidUaResult = await ClipboardIO.copyImageBlobToClipboard(
+      androidUaBlob,
+      'bf-android-ua-image',
+    );
+    assert.equal(writes.length, 4);
+    assert.deepEqual(Object.keys(writes[3].parts), ['image/png']);
+    assert.equal(writes[3].parts['image/png'], androidUaBlob);
+    assert.equal(androidUaResult.boardfishTokenWritten, false);
+
+    globalThis.navigator.userAgent = '';
+    class DirectBlobOnlyClipboardItem {
+      constructor(parts) {
+        if (Object.values(parts).some((part) => typeof part?.then === 'function')) {
+          throw new TypeError('promised clipboard representations are unsupported');
+        }
+        this.parts = parts;
+      }
+    }
+    globalThis.ClipboardItem = DirectBlobOnlyClipboardItem;
+    const legacyBlob = new Blob([new Uint8Array([10, 11, 12])], { type: 'image/png' });
+    const legacyResult = await ClipboardIO.copyImageBlobToClipboard(legacyBlob, 'bf-legacy-image');
+    assert.equal(writes.length, 5);
+    assert.deepEqual(Object.keys(writes[4].parts), ['image/png']);
+    assert.equal(writes[4].parts['image/png'], legacyBlob);
+    assert.equal(legacyResult.boardfishTokenWritten, false);
   } finally {
     delete require.cache[require.resolve('../src/js/clipboard_io.js')];
     if (previous.ClipboardItem === undefined) delete globalThis.ClipboardItem;
@@ -512,6 +589,41 @@ test('cutting a selected object copies without jiggle and deletes immediately', 
   assert.equal(context.calls.pulses, 0);
   assert.equal(context.calls.deleted, 1);
   assert.equal(context.calls.pendingTextCopyResolves.length, 1);
+});
+
+test('cutting a selected image keeps copy feedback disabled after the system write settles', async () => {
+  const pngBytes = new Uint8Array([137, 80, 78, 71]);
+  const imageSource = { web: true, mime: 'image/png' };
+  const imageObject = {
+    id: 'image-cut',
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 64,
+    h: 64,
+    z: 1,
+    data: { imgKey: 'img-cut' },
+  };
+  const context = loadClipboardExportHarness({
+    selectedObject: imageObject,
+    imageSource,
+    BoardfishWebBoardContainer: {
+      blobForImageSource() { return new Blob([pngBytes], { type: 'image/png' }); },
+      bytesForImageSource() { return pngBytes; },
+    },
+    isWebImageRef: (source) => source?.web === true,
+    deferCopyImage: true,
+  });
+
+  assert.equal(context.cutSelected(), true);
+  assert.equal(context.calls.copiedImages.length, 1);
+  assert.deepEqual(context.calls.objectJello, []);
+  assert.equal(context.calls.deleted, 1);
+
+  context.calls.resolveNextCopiedImage();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(context.calls.objectJello, []);
 });
 
 test('copying an untransformed web PNG image writes source bytes without rendering', async () => {
@@ -561,13 +673,91 @@ test('copying an untransformed web PNG image writes source bytes without renderi
     new Uint8Array(await context.calls.copiedImages[0].blob.arrayBuffer()),
     pngBytes,
   );
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-1']]);
 
   context.calls.resolveNextCopiedImage();
   assert.equal(await copyPromise, true);
   assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-1']]);
   assert.equal(context.calls.debugSteps.some((entry) => entry.step === 'copy:web-source-png-blob'), true);
   assert.equal(context.calls.debugEnds.at(-1).path, 'image-web-source-png');
+});
+
+test('copying a transformed image starts the clipboard write before PNG encoding finishes', async () => {
+  const renderedBlob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+  const imageObject = {
+    id: 'image-transformed',
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 64,
+    h: 64,
+    z: 1,
+    data: { imgKey: 'img-transformed', rotation: 90 },
+  };
+  const context = loadClipboardExportHarness({
+    selectedObject: imageObject,
+    imageNeedsRendering: () => true,
+    renderedCanvas: {},
+    renderedBlob,
+    deferCanvasToPngBlob: true,
+    deferCopyImage: true,
+  });
+
+  let copySettled = false;
+  const copyPromise = context.copySelected().then((result) => {
+    copySettled = true;
+    return result;
+  });
+
+  assert.equal(context.calls.renderImageToCanvas, 1);
+  assert.equal(context.calls.canvasToPngBlob, 1);
+  assert.equal(context.calls.copiedImages.length, 1);
+  assert.equal(context.calls.copiedImages[0].token, 'web-token');
+  assert.equal(typeof context.calls.copiedImages[0].blob?.then, 'function');
+  assert.equal(copySettled, false);
+  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
+
+  context.calls.resolveNextPngBlob();
+  assert.equal(await context.calls.copiedImages[0].blob, renderedBlob);
+  assert.equal(copySettled, false);
+  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
+
+  context.calls.resolveNextCopiedImage();
+  assert.equal(await copyPromise, true);
+  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
+});
+
+test('a rejected system image write reports failure after exactly one immediate image jiggle', async () => {
+  const pngBytes = new Uint8Array([137, 80, 78, 71]);
+  const imageSource = { web: true, mime: 'image/png' };
+  const imageObject = {
+    id: 'image-failed-copy',
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 64,
+    h: 64,
+    z: 1,
+    data: { imgKey: 'img-failed-copy' },
+  };
+  const context = loadClipboardExportHarness({
+    selectedObject: imageObject,
+    imageSource,
+    BoardfishWebBoardContainer: {
+      blobForImageSource() { return new Blob([pngBytes], { type: 'image/png' }); },
+      bytesForImageSource() { return pngBytes; },
+    },
+    isWebImageRef: (source) => source?.web === true,
+    deferCopyImage: true,
+  });
+
+  context.console = { error() {} };
+  const copyPromise = context.copySelected();
+  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-failed-copy']]);
+  context.calls.rejectNextCopiedImage();
+
+  assert.equal(await copyPromise, false);
+  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-failed-copy']]);
 });
 
 test('pasting an image retains typed Blobs and only adds a MIME view when missing', async () => {

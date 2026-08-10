@@ -180,6 +180,105 @@ function loadMenuCommandHarness() {
   return context;
 }
 
+function loadTextEditMenuHarness() {
+  const source = readSource('src/js/context_menu.js');
+  const start = source.indexOf('const updateTextEditMenuActions');
+  const end = source.indexOf('function showCanvasContextMenuAt', start);
+  assert.ok(start >= 0 && end > start, 'text edit menu helpers are missing');
+
+  const calls = {
+    clipboardReads: 0,
+    focuses: 0,
+    opens: [],
+  };
+  const context = {
+    calls,
+    editingId: 'text-1',
+    navigator: {
+      clipboard: {
+        readText() {
+          calls.clipboardReads++;
+          return Promise.resolve('clipboard text');
+        },
+      },
+    },
+    textCopyBtn: { style: {} },
+    textPasteBtn: { style: {} },
+    textDeleteSep: { style: {} },
+    textDeleteBtn: { style: {} },
+    textCtxMenu: {},
+    getTextEditSelectionState() {
+      return { hasSelection: false };
+    },
+    focusTextEditProxy() {
+      calls.focuses++;
+    },
+    closeOpenMenusExcept() {},
+    openExclusiveMenuAt(...args) {
+      calls.opens.push(args);
+    },
+    MenuDebug: { log() {} },
+  };
+
+  vm.createContext(context);
+  vm.runInContext(
+    `${source.slice(start, end)}\n` +
+      'this.showTextEditContextMenuAt = showTextEditContextMenuAt;\n',
+    context,
+  );
+  return context;
+}
+
+function loadTextEditPasteHarness() {
+  const source = readSource('src/js/context_menu.js');
+  const readStart = source.indexOf('const readTextClipboardForEditMenu');
+  const readEnd = source.indexOf('const writeTextClipboardFromEditMenu', readStart);
+  const pasteStart = source.indexOf('const pasteTextIntoEditSelection');
+  const pasteEnd = source.indexOf('function menuCommandFromButton', pasteStart);
+  assert.ok(readStart >= 0 && readEnd > readStart, 'text clipboard reader is missing');
+  assert.ok(pasteStart >= 0 && pasteEnd > pasteStart, 'text edit paste helper is missing');
+
+  const calls = {
+    clipboardReadActivations: [],
+    internalPasteAttempts: 0,
+    replacements: [],
+  };
+  const context = {
+    Promise,
+    calls,
+    clipboardActivation: true,
+    navigator: {
+      clipboard: {
+        readText() {
+          calls.clipboardReadActivations.push(context.clipboardActivation);
+          return Promise.resolve('external text');
+        },
+      },
+    },
+    currentBoardfishTextSelectionClipboardPayload() {
+      return null;
+    },
+    pasteBoardfishTextSelectionIntoEditSelection() {
+      calls.internalPasteAttempts++;
+      return Promise.resolve(false);
+    },
+    clearJsClipboard() {},
+    focusTextEditProxy() {},
+    replaceTextEditSelection(text, options) {
+      calls.replacements.push({ text, options });
+    },
+    MenuDebug: { log() {} },
+  };
+
+  vm.createContext(context);
+  vm.runInContext(
+    `${source.slice(readStart, readEnd)}\n${source.slice(pasteStart, pasteEnd)}\n` +
+      'this.pasteTextIntoEditSelection = pasteTextIntoEditSelection;\n',
+    context,
+  );
+  return context;
+}
+
 test('canvas and context menu use regular hit testing', () => {
   const canvasInputSource = readSource('src/js/canvas_input.js');
   const contextMenuSource = readSource('src/js/context_menu.js');
@@ -235,8 +334,6 @@ test('text editing context menu uses text actions before object actions', () => 
   const indexSource = readSource('src/index.html');
 
   assert.match(contextMenuSource, /if \(editingId && obj\?\.id === editingId\) \{\s*showTextEditContextMenuAt\(clientX, clientY\);\s*return;\s*\}/);
-  assert.match(contextMenuSource, /const showPaste = clipboardText\.length > 0;/);
-  assert.match(contextMenuSource, /return hasSelection \|\| showPaste;/);
 
   const textMenuStart = indexSource.indexOf('<div id="text-ctx-menu">');
   assert.notEqual(textMenuStart, -1);
@@ -246,6 +343,59 @@ test('text editing context menu uses text actions before object actions', () => 
   assert.equal(textMenu.indexOf('id="text-btn-cut"'), -1);
   assert.ok(textMenu.indexOf('id="text-btn-paste"') < textMenu.indexOf('id="text-sep-delete"'));
   assert.ok(textMenu.indexOf('id="text-sep-delete"') < textMenu.indexOf('id="text-btn-delete"'));
+});
+
+test('opening the text editing context menu keeps Paste visible without reading the clipboard', async () => {
+  const context = loadTextEditMenuHarness();
+
+  await context.showTextEditContextMenuAt(24, 48);
+
+  assert.equal(context.calls.clipboardReads, 0);
+  assert.equal(context.textPasteBtn.style.display, '');
+  assert.equal(context.textCopyBtn.style.display, 'none');
+  assert.equal(context.textDeleteSep.style.display, 'none');
+  assert.equal(context.textDeleteBtn.style.display, 'none');
+  assert.equal(context.calls.opens.length, 1);
+  assert.equal(context.calls.opens[0][0], context.textCtxMenu);
+  assert.deepEqual(context.calls.opens[0].slice(1), ['text-ctx-menu', 24, 48, 'show-text-menu:edit']);
+});
+
+test('external text Paste starts its clipboard read before user activation expires', async () => {
+  const context = loadTextEditPasteHarness();
+  const activationExpires = Promise.resolve().then(() => {
+    context.clipboardActivation = false;
+  });
+
+  const paste = context.pasteTextIntoEditSelection();
+  await Promise.all([activationExpires, paste]);
+
+  assert.deepEqual(context.calls.clipboardReadActivations, [true]);
+  assert.equal(context.calls.internalPasteAttempts, 0);
+  assert.equal(context.calls.replacements.length, 1);
+  assert.equal(context.calls.replacements[0].text, 'external text');
+  assert.equal(context.calls.replacements[0].options.immediateHistory, true);
+  assert.equal(context.calls.replacements[0].options.inputType, 'insertFromPaste');
+});
+
+test('stale internal text candidate primes external fallback before user activation expires', async () => {
+  const context = loadTextEditPasteHarness();
+  context._jsClipboardWebMaybeStale = true;
+  context.currentBoardfishTextSelectionClipboardPayload = () => ({
+    type: 'text-selection',
+    text: 'stale internal text',
+    scriptRanges: [],
+  });
+  const activationExpires = Promise.resolve().then(() => {
+    context.clipboardActivation = false;
+  });
+
+  const paste = context.pasteTextIntoEditSelection();
+  await Promise.all([activationExpires, paste]);
+
+  assert.deepEqual(context.calls.clipboardReadActivations, [true]);
+  assert.equal(context.calls.internalPasteAttempts, 1);
+  assert.equal(context.calls.replacements.length, 1);
+  assert.equal(context.calls.replacements[0].text, 'external text');
 });
 
 test('wheel zoom over visible floating UI uses the viewport wheel handler', () => {

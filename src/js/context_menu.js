@@ -401,14 +401,25 @@ const deleteTextEditSelection = () => {
 };
 
 const pasteTextIntoEditSelection = async () => {
-  if (
-    typeof pasteBoardfishTextSelectionIntoEditSelection === 'function' &&
-    await pasteBoardfishTextSelectionIntoEditSelection({ immediateHistory: true })
-  ) {
+  const hasBoardfishTextPayload = (
+    typeof currentBoardfishTextSelectionClipboardPayload === 'function' &&
+    !!currentBoardfishTextSelectionClipboardPayload()
+  );
+  const pendingBoardfishPaste = (
+    hasBoardfishTextPayload &&
+    typeof pasteBoardfishTextSelectionIntoEditSelection === 'function'
+  ) ? pasteBoardfishTextSelectionIntoEditSelection({ immediateHistory: true }) : null;
+  const pendingExternalText = (
+    !hasBoardfishTextPayload || (
+      typeof _jsClipboardWebMaybeStale !== 'undefined' &&
+      _jsClipboardWebMaybeStale
+    )
+  ) ? readTextClipboardForEditMenu() : null;
+  if (pendingBoardfishPaste && await pendingBoardfishPaste) {
     focusTextEditProxy();
     return;
   }
-  const text = await readTextClipboardForEditMenu();
+  const text = await (pendingExternalText || readTextClipboardForEditMenu());
   if (!text) {
     focusTextEditProxy();
     return;
@@ -706,16 +717,17 @@ function updateObjMenuActions() {
   deleteBtn.style.display = showDelete ? '' : 'none';
 }
 
-const updateTextEditMenuActions = async () => {
+const updateTextEditMenuActions = () => {
   const selection = getTextEditSelectionState();
   const hasSelection = !!selection?.hasSelection;
-  const clipboardText = await readTextClipboardForEditMenu();
-  const showPaste = clipboardText.length > 0;
   textCopyBtn.style.display = hasSelection ? '' : 'none';
-  textPasteBtn.style.display = showPaste ? '' : 'none';
+  // Clipboard contents cannot be probed just to build a menu: mobile browsers
+  // may gate that read behind their own Paste control. Keep the action
+  // available and defer the protected read until the user invokes it.
+  textPasteBtn.style.display = '';
   textDeleteSep.style.display = hasSelection ? 'block' : 'none';
   textDeleteBtn.style.display = hasSelection ? '' : 'none';
-  return hasSelection || showPaste;
+  return true;
 };
 
 const showTextEditContextMenuAt = async (clientX, clientY) => {
