@@ -191,7 +191,6 @@ const BASE_TEXT_SCRIPT_STATE = Object.freeze({
   depth: 0,
   font: FONT,
   key: '',
-  kinds: Object.freeze([]),
   offset: 0,
   scale: 1,
 });
@@ -277,9 +276,10 @@ function measureRawTextW(text) {
   return measureRawTextWWithFont(text, FONT, _mwCache);
 }
 
-const textScriptSizeDepthForDepth = (depth) => Math.min(TEXT_SCRIPT_MAX_SIZE_DEPTH, Math.max(0, depth || 0));
-
-const textScriptScaleForDepth = (depth) => Math.pow(TEXT_SCRIPT_FONT_SCALE, textScriptSizeDepthForDepth(depth));
+const textScriptScaleForDepth = (depth) => Math.pow(
+  TEXT_SCRIPT_FONT_SCALE,
+  Math.min(TEXT_SCRIPT_MAX_SIZE_DEPTH, Math.max(0, depth || 0)),
+);
 
 function defaultTextBoxSize() {
   const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
@@ -1625,12 +1625,11 @@ function getTextAutoHeight(obj, minLines = 1) {
 }
 
 const isTextWordSeparator = (ch) => ch === ' ' || ch === '\t';
-const isTextLineSeparator = (ch) => ch === '\n';
-const isTextWordOrLineSeparator = (ch) => isTextWordSeparator(ch) || isTextLineSeparator(ch);
-const TEXT_LINE_ALIGN_VALUES = Object.freeze(['left', 'center', 'right']);
-const TEXT_SCRIPT_KINDS = Object.freeze(['sup', 'sub']);
+const isTextWordOrLineSeparator = (ch) => isTextWordSeparator(ch) || ch === '\n';
 
-const normalizeTextLineAlignValue = (value) => TEXT_LINE_ALIGN_VALUES.includes(value) ? value : 'left';
+const normalizeTextLineAlignValue = (value) => (
+  value === 'center' || value === 'right' ? value : 'left'
+);
 
 const textNewlineCount = (value, start = 0, end = Infinity) => {
   const text = String(value ?? '');
@@ -1648,9 +1647,9 @@ const textNewlineCount = (value, start = 0, end = Infinity) => {
 
 const textLogicalLineCount = (value) => textNewlineCount(normalizeTextContent(value)) + 1;
 
-const normalizeTextLineAlignForContent = (content, lineAlign = []) => {
+const normalizeTextLineAlignForContent = (content, lineAlign = [], lineCount = textLogicalLineCount(content)) => {
   const source = Array.isArray(lineAlign) ? lineAlign : [];
-  const result = new Array(Math.min(textLogicalLineCount(content), source.length));
+  const result = new Array(Math.min(lineCount, source.length));
   for (let i = 0; i < result.length; i++) result[i] = normalizeTextLineAlignValue(source[i]);
   while (result.length && result[result.length - 1] === 'left') result.pop();
   return result;
@@ -1674,10 +1673,8 @@ const textLogicalLineRangeForSelection = (value, selection = {}) => {
 
 const cycleTextLineAlignValue = (align, direction) => {
   const current = normalizeTextLineAlignValue(align);
-  const index = TEXT_LINE_ALIGN_VALUES.indexOf(current);
-  const delta = direction === 'left' ? -1 : 1;
-  const nextIndex = Math.max(0, Math.min(TEXT_LINE_ALIGN_VALUES.length - 1, index + delta));
-  return TEXT_LINE_ALIGN_VALUES[nextIndex];
+  if (direction === 'left') return current === 'right' ? 'center' : 'left';
+  return current === 'left' ? 'center' : 'right';
 };
 
 const applyTextLineAlignmentRange = (obj, startLine = 0, endLine = startLine, direction = 'right') => {
@@ -1688,8 +1685,8 @@ const applyTextLineAlignmentRange = (obj, startLine = 0, endLine = startLine, di
   if (!count) return false;
   const start = Math.max(0, Math.min(Math.trunc(Number(startLine)) || 0, count - 1));
   const end = Math.max(start, Math.min(Math.trunc(Number(endLine)) || start, count - 1));
-  const next = normalizeTextLineAlignForContent(content, obj.data.lineAlign);
-  while (next.length < count) next.push('left');
+  const next = normalizeTextLineAlignForContent(content, obj.data.lineAlign, count);
+  while (next.length <= end) next.push('left');
   let changed = false;
   for (let i = start; i <= end; i++) {
     const aligned = cycleTextLineAlignValue(next[i], direction);
@@ -1705,7 +1702,7 @@ const applyTextLineAlignmentRange = (obj, startLine = 0, endLine = startLine, di
   return true;
 };
 
-const normalizeTextScriptKind = (kind) => TEXT_SCRIPT_KINDS.includes(kind) ? kind : '';
+const normalizeTextScriptKind = (kind) => kind === 'sup' || kind === 'sub' ? kind : '';
 const textScriptMarkerForKind = (kind) => kind === 'sub' ? '_' : '^';
 const textScriptKindForMarker = (marker) => marker === '^' ? 'sup' : marker === '_' ? 'sub' : '';
 const isTextScriptBracedRange = (text, range) => {
@@ -1951,25 +1948,22 @@ const activeTextScriptRangesAt = (ranges, index, { includeEnd = false, affinity 
   return active;
 };
 
-const textScriptOffsetForKind = (kind) => kind === 'sub' ? TEXT_SCRIPT_SUB_OFFSET : TEXT_SCRIPT_SUP_OFFSET;
-
 const textScriptStateFromRanges = (activeRanges) => {
   const ranges = activeRanges || [];
   if (!ranges.length) return BASE_TEXT_SCRIPT_STATE;
+  let depth = 0;
+  let key = '';
   let offset = 0;
-  const kinds = [];
   for (let i = 0; i < ranges.length; i++) {
     const kind = normalizeTextScriptKind(ranges[i]?.kind);
     if (!kind) continue;
-    kinds.push(kind);
-    offset += textScriptOffsetForKind(kind) * textScriptScaleForDepth(i);
+    key += (depth++ ? '/' : '') + kind;
+    offset += (kind === 'sub' ? TEXT_SCRIPT_SUB_OFFSET : TEXT_SCRIPT_SUP_OFFSET) * textScriptScaleForDepth(i);
   }
-  const depth = kinds.length;
   return {
     depth,
     font: textFontForScriptDepth(depth),
-    key: depth ? kinds.join('/') : '',
-    kinds,
+    key,
     offset,
     scale: textScriptScaleForDepth(depth),
   };

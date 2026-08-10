@@ -116,6 +116,8 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) {
     const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
+    const pivotX = obj.x + obj.w * scaleOriginX;
+    const pivotY = obj.y + obj.h * scaleOriginY;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (counters) {
       counters.motionObjects = (counters.motionObjects || 0) + 1;
@@ -127,17 +129,13 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     context.save();
     if (scaleX !== 1 || scaleY !== 1) {
-      const scalePivotX = obj.x + obj.w * scaleOriginX;
-      const scalePivotY = obj.y + obj.h * scaleOriginY;
       context.transform(scaleX, 0, 0, scaleY,
-        translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
+        translateX + pivotX * (1 - scaleX), translateY + pivotY * (1 - scaleY));
     } else if (translateX || translateY) context.translate(translateX, translateY);
     if (!rect) return rect;
     // Text layout and image crops are chosen before the canvas motion transform,
     // so map the visible destination back into the object's source coordinates.
     const { x1, y1, x2, y2 } = rect;
-    const pivotX = obj.x + obj.w * scaleOriginX;
-    const pivotY = obj.y + obj.h * scaleOriginY;
     const sourceX1 = pivotX + (x1 - translateX - pivotX) / scaleX;
     const sourceX2 = pivotX + (x2 - translateX - pivotX) / scaleX;
     const sourceY1 = pivotY + (y1 - translateY - pivotY) / scaleY;

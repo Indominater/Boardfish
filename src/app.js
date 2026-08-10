@@ -44,42 +44,30 @@ var textDeleteSep    = requireAppElement('text-sep-delete');
 var dialogOverlay    = document.getElementById('dialog-overlay');
 var unsavedDialog    = document.getElementById('dialog');
 var IS_MAC = /Mac/.test(navigator.platform) || /Mac/.test(navigator.userAgent);
-var COMMAND_KEY_LABEL = IS_MAC ? '\u2318' : 'Ctrl';
-var OPTION_KEY_LABEL = IS_MAC ? '\u2325' : 'Alt';
-var SHIFT_KEY_LABEL = IS_MAC ? '\u21e7' : 'Shift';
+var COMMAND_KEY_LABEL = IS_MAC ? '\u2318' : 'Ctrl+';
+var SHIFT_KEY_LABEL = IS_MAC ? '\u21e7' : 'Shift+';
 var MENU_VIEWPORT_EDGE_MARGIN = 12;
 var MENU_SHORTCUTS = {
-  'new-board': ['N'],
-  'add-text': ['T'],
-  'add-images': [COMMAND_KEY_LABEL, 'I'],
-  paste: [COMMAND_KEY_LABEL, 'V'],
-  save: [COMMAND_KEY_LABEL, 'S'],
-  'save-as': IS_MAC ? [SHIFT_KEY_LABEL, COMMAND_KEY_LABEL, 'S'] : [COMMAND_KEY_LABEL, SHIFT_KEY_LABEL, 'S'],
-  open: [COMMAND_KEY_LABEL, 'O'],
-  copy: [COMMAND_KEY_LABEL, 'C'],
-  duplicate: [COMMAND_KEY_LABEL, 'D'],
-  'move-to-back': [COMMAND_KEY_LABEL, '['],
-  'flip-image': [COMMAND_KEY_LABEL, 'F'],
-  'rotate-image': [COMMAND_KEY_LABEL, 'R'],
-  'arrange-images': IS_MAC
-    ? [OPTION_KEY_LABEL, COMMAND_KEY_LABEL, 'A']
-    : [COMMAND_KEY_LABEL, OPTION_KEY_LABEL, 'A'],
-  'export-image': [COMMAND_KEY_LABEL, 'E'],
-  'export-images': [COMMAND_KEY_LABEL, 'E'],
-  delete: ['Delete'],
+  'new-board': 'N',
+  'add-text': 'T',
+  'add-images': COMMAND_KEY_LABEL + 'I',
+  paste: COMMAND_KEY_LABEL + 'V',
+  save: COMMAND_KEY_LABEL + 'S',
+  'save-as': IS_MAC ? SHIFT_KEY_LABEL + COMMAND_KEY_LABEL + 'S' : COMMAND_KEY_LABEL + SHIFT_KEY_LABEL + 'S',
+  open: COMMAND_KEY_LABEL + 'O',
+  copy: COMMAND_KEY_LABEL + 'C',
+  duplicate: COMMAND_KEY_LABEL + 'D',
+  'move-to-back': COMMAND_KEY_LABEL + '[',
+  'flip-image': COMMAND_KEY_LABEL + 'F',
+  'rotate-image': COMMAND_KEY_LABEL + 'R',
+  'arrange-images': COMMAND_KEY_LABEL + 'J',
+  'export-image': COMMAND_KEY_LABEL + 'E',
+  delete: 'Delete',
 };
 
-function formatShortcut(keys) {
-  return IS_MAC ? keys.join('') : keys.join('+');
+for (const item of document.querySelectorAll('[data-shortcut]')) {
+  item.textContent = MENU_SHORTCUTS[item.dataset.shortcut] || '';
 }
-
-function syncPlatformShortcutLabels() {
-  for (const item of document.querySelectorAll('[data-shortcut]')) {
-    const keys = MENU_SHORTCUTS[item.dataset.shortcut];
-    item.textContent = keys ? formatShortcut(keys) : '';
-  }
-}
-syncPlatformShortcutLabels();
 var appThemeMeta = document.querySelector('meta[name="theme-color"]');
 var DEFAULT_APP_THEME = 'dark';
 var appTheme = DEFAULT_APP_THEME;

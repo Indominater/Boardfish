@@ -149,7 +149,6 @@ function arrangeImagesAtCursorFromShortcut() {
 document.addEventListener('keydown', (e) => {
   const command = e.ctrlKey !== e.metaKey && !e.altKey;
   const commandOnly = command && !e.shiftKey, shiftCommandOnly = command && e.shiftKey;
-  const optionCommandOnly = e.ctrlKey !== e.metaKey && e.altKey && !e.shiftKey;
   const noShortcutModifiers = !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
   if (isBrowserFindShortcut(e)) {
     const commandFind = commandOnly && isShortcutKey(e, 'f');
@@ -226,7 +225,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  if (optionCommandOnly && isShortcutKey(e, 'a')) {
+  if (commandOnly && isShortcutKey(e, 'j')) {
     if (!canArrangeSelectedImagesFromKeyboard()) return;
     consumeShortcutEvent(e);
     if (e.repeat) return;

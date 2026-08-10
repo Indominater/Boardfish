@@ -162,7 +162,7 @@ test('paste sizing keeps extreme-aspect images positive while using the shared c
 function loadObjectMenuVisibilityHarness() {
   const source = readSource('src/js/context_menu.js');
   const start = source.indexOf('function updateObjMenuActions() {');
-  const end = source.indexOf('\nconst updateTextEditMenuActions', start);
+  const end = source.indexOf('\nconst showTextEditContextMenuAt', start);
   assert.ok(start >= 0 && end > start, 'object menu action updater is missing');
   const element = () => ({ style: {} });
   const context = {
@@ -227,13 +227,12 @@ test('Arrange Images menu integration uses the activation pointer and shared pas
   const arrangeIndex = indexSource.indexOf('id="obj-btn-arrange-images"');
   const moveToBackIndex = indexSource.indexOf('id="obj-btn-move-to-back"');
   assert.ok(rotateIndex < layerSeparatorIndex);
-  assert.ok(layerSeparatorIndex < arrangeIndex);
-  assert.ok(arrangeIndex < moveToBackIndex);
+  assert.ok(layerSeparatorIndex < moveToBackIndex);
+  assert.ok(moveToBackIndex < arrangeIndex);
   assert.match(appSource, /arrangeImagesBtn\s*= requireAppElement\('obj-btn-arrange-images'\)/);
-  assert.match(appSource, /var OPTION_KEY_LABEL = IS_MAC \? '\\u2325' : 'Alt';/);
   assert.match(
     appSource,
-    /'arrange-images': IS_MAC\s*\? \[OPTION_KEY_LABEL, COMMAND_KEY_LABEL, 'A'\]\s*: \[COMMAND_KEY_LABEL, OPTION_KEY_LABEL, 'A'\]/,
+    /'arrange-images': COMMAND_KEY_LABEL \+ 'J'/,
   );
   assert.match(
     contextMenuSource,

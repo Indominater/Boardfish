@@ -182,9 +182,6 @@ body {
   border-radius: var(--ui-radius);
   box-shadow: var(--selection-handle-shadow);
   pointer-events: all;
-  transition:
-    background-color var(--smooth-slide-duration) var(--smooth-slide-ease),
-    box-shadow var(--smooth-slide-duration) var(--smooth-slide-ease);
 }
 .s-handle[data-dir="nw"] { top: -4px;    left: -4px;   cursor: nw-resize; }
 .s-handle[data-dir="ne"] { top: -4px;    right: -4px;  cursor: ne-resize; }
@@ -324,10 +321,7 @@ body {
   overflow: hidden;
   text-decoration: none;
   transform: var(--ui-highlight-nudge-transform);
-  transition:
-    background-color var(--smooth-slide-duration) var(--smooth-slide-ease),
-    transform var(--smooth-slide-duration) var(--smooth-slide-ease),
-    color var(--smooth-slide-duration) var(--smooth-slide-ease);
+  transition: transform var(--smooth-slide-duration) var(--smooth-slide-ease);
 }
 .ctx-action-item::before {
   content: "";
@@ -380,8 +374,6 @@ body {
   transform: var(--ui-highlight-nudge-transform);
   transition:
     background-color var(--smooth-slide-duration) var(--smooth-slide-ease),
-    color var(--smooth-slide-duration) var(--smooth-slide-ease),
-    opacity var(--smooth-slide-duration) var(--smooth-slide-ease),
     transform var(--smooth-slide-duration) var(--smooth-slide-ease);
 }
 .ctx-label {
@@ -569,12 +561,6 @@ body {
 #dialog {
   position: relative;
   width: 250px;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-#dialog-body {
   display: flex;
   flex-direction: column;
   gap: 0;

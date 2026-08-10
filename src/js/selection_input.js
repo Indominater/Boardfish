@@ -504,6 +504,8 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         const anchorPoint = boundsCornerPoint(bounds, oppositeSelectionDir(dir));
         if (!handlePoint || !anchorPoint) return;
 
+        const MIN_OBJECT_SIZE = 100;
+        let minObjectScale = 0;
         const snapshots = [];
         for (const id of selectedIds) {
           const o = objectsMap.get(id);
@@ -524,14 +526,10 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             y: o.y,
             w: o.w, h: o.h,
           });
+          minObjectScale = Math.max(minObjectScale, MIN_OBJECT_SIZE / o.w, MIN_OBJECT_SIZE / o.h);
         }
         if (!snapshots.length) return;
 
-        const MIN_OBJECT_SIZE = 100;
-        let minObjectScale = 0;
-        for (const snap of snapshots) {
-          minObjectScale = Math.max(minObjectScale, MIN_OBJECT_SIZE / snap.w, MIN_OBJECT_SIZE / snap.h);
-        }
         minObjectScale = Math.min(1, minObjectScale);
         const resizeCommitter = createRafCommitter((scale) => {
           for (const snap of snapshots) {

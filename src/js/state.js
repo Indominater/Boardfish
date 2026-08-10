@@ -177,12 +177,9 @@ function sortSelectedImages(anchorPoint = null) {
     : (typeof boardCursorWorldPoint === 'function' ? boardCursorWorldPoint() : { x: 0, y: 0 });
   const layout = BoardfishImageLayout.planGoldenRatioImageLayout(selectedImages, center);
   if (!layout || layout.placements.length < 2) return false;
-  const placementById = new Map(layout.placements.map((placement) => [placement.id, placement]));
   let geometryChanged = false;
-  for (const obj of selectedImages) {
-    const placement = placementById.get(obj.id);
-    if (!placement) continue;
-    if (!imageSortGeometryMatches(obj, placement)) {
+  for (const placement of layout.placements) {
+    if (!imageSortGeometryMatches(objectsMap.get(placement.id), placement)) {
       geometryChanged = true;
       break;
     }
@@ -190,18 +187,15 @@ function sortSelectedImages(anchorPoint = null) {
   if (!geometryChanged) return false;
 
   return BoardfishEditorState.commitMutation('sort-images', () => {
-    let changed = false;
-    for (const obj of selectedImages) {
-      const placement = placementById.get(obj.id);
-      if (!placement) continue;
+    for (const placement of layout.placements) {
+      const obj = objectsMap.get(placement.id);
       obj.x = placement.x;
       obj.y = placement.y;
       obj.w = placement.w;
       obj.h = placement.h;
       markDirty(obj.id);
-      changed = true;
     }
-    return changed;
+    return true;
   }, { invalidate: true });
 }
 

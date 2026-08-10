@@ -477,19 +477,17 @@ const drawTextSelectionContentJello = (context, obj, selection, motion) => {
   context.save();
   applyTextSelectionMotionTransform(context, selection.bounds, motion);
   for (const run of selection.runs) {
-    if (run.endOffset > run.startOffset) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        drawTextLineRange(
-          context,
-          run.line,
-          obj,
-          run.startOffset,
-          run.endOffset,
-          VIEWPORT_TEXT_DRAW_STATS_DISABLED,
-        );
-      } else {
-        drawTextLineRange(context, run.line, obj, run.startOffset, run.endOffset);
-      }
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      drawTextLineRange(
+        context,
+        run.line,
+        obj,
+        run.startOffset,
+        run.endOffset,
+        VIEWPORT_TEXT_DRAW_STATS_DISABLED,
+      );
+    } else {
+      drawTextLineRange(context, run.line, obj, run.startOffset, run.endOffset);
     }
   }
   context.restore();

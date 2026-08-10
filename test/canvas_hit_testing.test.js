@@ -182,7 +182,7 @@ function loadMenuCommandHarness() {
 
 function loadTextEditMenuHarness() {
   const source = readSource('src/js/context_menu.js');
-  const start = source.indexOf('const updateTextEditMenuActions');
+  const start = source.indexOf('const showTextEditContextMenuAt');
   const end = source.indexOf('function showCanvasContextMenuAt', start);
   assert.ok(start >= 0 && end > start, 'text edit menu helpers are missing');
 
@@ -345,10 +345,10 @@ test('text editing context menu uses text actions before object actions', () => 
   assert.ok(textMenu.indexOf('id="text-sep-delete"') < textMenu.indexOf('id="text-btn-delete"'));
 });
 
-test('opening the text editing context menu keeps Paste visible without reading the clipboard', async () => {
+test('opening the text editing context menu keeps Paste visible without reading the clipboard', () => {
   const context = loadTextEditMenuHarness();
 
-  await context.showTextEditContextMenuAt(24, 48);
+  context.showTextEditContextMenuAt(24, 48);
 
   assert.equal(context.calls.clipboardReads, 0);
   assert.equal(context.textPasteBtn.style.display, '');

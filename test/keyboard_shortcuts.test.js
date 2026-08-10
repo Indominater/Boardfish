@@ -379,7 +379,7 @@ test('cmd+r rotates selected images when available', () => {
   ]);
 });
 
-test('option+cmd+a arranges two selected images at the cursor point', () => {
+test('cmd+j arranges two selected images at the cursor point', () => {
   const selectedIds = new Set(['image-1', 'text-1', 'image-2']);
   const objectsMap = new Map([
     ['image-1', { id: 'image-1', type: 'image' }],
@@ -392,10 +392,9 @@ test('option+cmd+a arranges two selected images at the cursor point', () => {
     boardCursorWorldPoint: () => ({ x: 41, y: 42 }),
   });
   const event = keyEvent({
-    key: 'å',
-    code: 'KeyA',
+    key: 'j',
+    code: 'KeyJ',
     metaKey: true,
-    altKey: true,
   });
 
   mainKeydown(event);
@@ -405,7 +404,7 @@ test('option+cmd+a arranges two selected images at the cursor point', () => {
   assert.deepEqual(calls, [['sortSelectedImages', 41, 42]]);
 });
 
-test('ctrl+alt+a is the non-Mac arrange images equivalent', () => {
+test('ctrl+j is the non-Mac arrange images equivalent', () => {
   const selectedIds = new Set(['image-1', 'image-2']);
   const objectsMap = new Map([
     ['image-1', { id: 'image-1', type: 'image' }],
@@ -413,10 +412,9 @@ test('ctrl+alt+a is the non-Mac arrange images equivalent', () => {
   ]);
   const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
   const event = keyEvent({
-    key: 'a',
-    code: 'KeyA',
+    key: 'j',
+    code: 'KeyJ',
     ctrlKey: true,
-    altKey: true,
   });
 
   mainKeydown(event);
@@ -434,10 +432,9 @@ test('arrange images shortcut stays native unless at least two images are select
   ]);
   const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
   const event = keyEvent({
-    key: 'å',
-    code: 'KeyA',
+    key: 'j',
+    code: 'KeyJ',
     metaKey: true,
-    altKey: true,
   });
 
   mainKeydown(event);

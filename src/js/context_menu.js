@@ -724,9 +724,9 @@ function updateObjMenuActions() {
   deleteBtn.style.display = showDelete ? '' : 'none';
 }
 
-const updateTextEditMenuActions = () => {
-  const selection = getTextEditSelectionState();
-  const hasSelection = !!selection?.hasSelection;
+const showTextEditContextMenuAt = (clientX, clientY) => {
+  focusTextEditProxy();
+  const hasSelection = !!getTextEditSelectionState()?.hasSelection;
   textCopyBtn.style.display = hasSelection ? '' : 'none';
   // Clipboard contents cannot be probed just to build a menu: mobile browsers
   // may gate that read behind their own Paste control. Keep the action
@@ -734,21 +734,7 @@ const updateTextEditMenuActions = () => {
   textPasteBtn.style.display = '';
   textDeleteSep.style.display = hasSelection ? 'block' : 'none';
   textDeleteBtn.style.display = hasSelection ? '' : 'none';
-  return true;
-};
-
-const showTextEditContextMenuAt = async (clientX, clientY) => {
-  const requestId = (showTextEditContextMenuAt.requestId || 0) + 1;
-  showTextEditContextMenuAt.requestId = requestId;
-  focusTextEditProxy();
-  const hasVisibleActions = await updateTextEditMenuActions();
-  if (requestId !== showTextEditContextMenuAt.requestId || !editingId) return;
-  if (!hasVisibleActions) {
-    closeOpenMenusExcept('', 'text-ctx-menu:empty');
-    focusTextEditProxy();
-    MenuDebug.log('text-ctx-menu:blocked-empty', { x: clientX, y: clientY });
-    return;
-  }
+  if (!editingId) return;
   openExclusiveMenuAt(textCtxMenu, 'text-ctx-menu', clientX, clientY, 'show-text-menu:edit');
   focusTextEditProxy();
   MenuDebug.log('text-ctx-menu:open', {

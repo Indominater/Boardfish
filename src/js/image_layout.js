@@ -13,9 +13,7 @@
     return Number.isFinite(number) && number > 0 ? number : null;
   };
 
-  const numericTolerance = (...values) => (
-    Math.max(1, ...values.map((value) => Math.abs(Number(value) || 0))) * 1e-12
-  );
+  const numericTolerance = (a, b) => Math.max(1, Math.abs(a || 0), Math.abs(b || 0)) * 1e-12;
 
   const compareIds = (left, right) => {
     const a = String(left);
