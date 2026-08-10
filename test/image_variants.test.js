@@ -908,7 +908,7 @@ test('clearing the final queued scaled variant cancels its delayed timer', () =>
 
   assert.equal(delayedTimer.cleared, true);
   assert.equal(context.imageScaledVariantQueue.length, 0);
-  assert.equal(context.imageScaledVariantQueueScheduled, false);
+  assert.equal(context.imageScaledVariantQueueTimer, null);
   assert.equal(context.imageScaledVariantQueueTimer, null);
   assert.equal(context.isScaledImageVariantPending('img-1', 0.25), false);
 });

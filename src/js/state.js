@@ -24,14 +24,6 @@ function newId() {
   return id;
 }
 
-function cloneTextScriptRangesForObject(obj, content, sourceScriptRanges) {
-  if (!Array.isArray(sourceScriptRanges) || !sourceScriptRanges.length) return [];
-  if (obj._textScriptRangesCache !== sourceScriptRanges || obj._textScriptRangesCacheContent !== content) {
-    return normalizeTextScriptRangesForContent(content, sourceScriptRanges);
-  }
-  return cloneTextScriptRanges(sourceScriptRanges);
-}
-
 function cloneObject(obj, runtimeTextCache = false) {
   HistoryDebug.count('cloneObjectCalls');
   let data = obj.type === 'image' ? { ...obj.data } : null;
@@ -45,7 +37,9 @@ function cloneObject(obj, runtimeTextCache = false) {
     }
     const sourceScriptRanges = obj.data?.scriptRanges;
     if (Array.isArray(sourceScriptRanges) && sourceScriptRanges.length) {
-      const scriptRanges = cloneTextScriptRangesForObject(obj, content, sourceScriptRanges);
+      const scriptRanges = obj._textScriptRangesCache !== sourceScriptRanges || obj._textScriptRangesCacheContent !== content
+        ? normalizeTextScriptRangesForContent(content, sourceScriptRanges)
+        : cloneTextScriptRanges(sourceScriptRanges);
       if (scriptRanges.length) data.scriptRanges = scriptRanges;
     }
   }

@@ -1290,16 +1290,11 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
     ? options.scriptRanges
     : getTextScriptRanges(obj);
   const scriptMetrics = options.scriptMetrics || null;
-  const visualLineStartByLogicalLine = options.visualLineStartByLogicalLine instanceof Map
-    ? options.visualLineStartByLogicalLine
-    : null;
-  const logicalLineEntriesByIndex = options.logicalLineEntriesByIndex instanceof Map
-    ? options.logicalLineEntriesByIndex
-    : null;
+  const lineIndexEntries = Array.isArray(options.lineIndexEntries) ? options.lineIndexEntries : null;
   let visualLineOffset = 0;
   const result = [];
   const pushLine = (start, end, nextStart = end, caretEnd = end, logicalLineIndex = 0, prefixWidths = null) => {
-    const visualStart = visualLineStartByLogicalLine?.get(logicalLineIndex);
+    const visualStart = lineIndexEntries?.[logicalLineIndex]?.visualStart;
     const visualOffset = visualLineOffset++;
     result.push({
       text: content.slice(start, end),
@@ -1315,7 +1310,7 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
 
   for (let logicalLineIndex = firstLine; logicalLineIndex <= lastLine; logicalLineIndex++) {
     visualLineOffset = 0;
-    const indexedLine = logicalLineEntriesByIndex?.get(logicalLineIndex) || null;
+    const indexedLine = lineIndexEntries?.[logicalLineIndex] || null;
     const paraStart = indexedLine
       ? Math.max(0, Math.min(Math.trunc(Number(indexedLine.startIndex)) || 0, content.length))
       : textLogicalLineStartAt(content, logicalLineIndex);
@@ -2628,23 +2623,13 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, scriptRanges, s
   const firstEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, first);
   const lastEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, actualLast);
   if (!firstEntry || !lastEntry) return null;
-  const visualLineStartByLogicalLine = new Map();
-  const logicalLineEntriesByIndex = new Map();
-  for (let i = firstEntry.index; i <= lastEntry.index; i++) {
-    const entry = lineIndexCache.entries[i];
-    if (entry) {
-      visualLineStartByLogicalLine.set(entry.logicalLineIndex, entry.visualStart);
-      logicalLineEntriesByIndex.set(entry.logicalLineIndex, entry);
-    }
-  }
   const scriptMetrics = scriptRanges.length
     ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
     : null;
   const wrappedSourceLines = wrapTextLogicalLineRange(obj, firstEntry.entry.logicalLineIndex, lastEntry.entry.logicalLineIndex, {
     scriptRanges,
     scriptMetrics,
-    visualLineStartByLogicalLine,
-    logicalLineEntriesByIndex,
+    lineIndexEntries: lineIndexCache.entries,
   });
   const wrappedLines = [];
   for (const line of wrappedSourceLines) {

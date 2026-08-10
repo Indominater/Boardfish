@@ -83,7 +83,6 @@
         bytes -= entryBytes(node.entry);
       }
       groups.delete(key);
-      bytes = Math.max(0, bytes);
     }
 
     function clear() {
@@ -100,7 +99,6 @@
         const group = groups.get(node.key);
         evictNode(group, node, true);
       }
-      bytes = Math.max(0, bytes);
     }
 
     return {

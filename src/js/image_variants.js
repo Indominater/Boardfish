@@ -34,7 +34,6 @@ var imageScaledVariantRenderTimer = null;
 var imageScaledVariantRenderCount = 0;
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 var imageScaledVariantQueue = [];
-var imageScaledVariantQueueScheduled = false;
 var imageScaledVariantQueueTimer = null;
 var imageScaledVariantQueueActive = 0;
 var imageScaledVariantFailureReleaseScheduled = false;
@@ -100,8 +99,6 @@ function bitmapByteSize(bitmap) {
 
 function isImageVariantDrawableSource(source) {
   if (!source) return false;
-  const ImageBitmapCtor = typeof ImageBitmap !== 'undefined' ? ImageBitmap : null;
-  if (ImageBitmapCtor && source instanceof ImageBitmapCtor) return true;
   return !!(source.complete && source.naturalWidth > 0) || !!(source.width > 0 && source.height > 0);
 }
 
@@ -120,18 +117,12 @@ function countDrawableBitmapWarmupKind(target, meta = {}) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function drawableBitmapWarmupMaxEdge(meta = {}) {
-  const kind = drawableBitmapWarmupKind(meta);
-  if (kind === 'scaledVariant' || kind === 'openPreview') return 512;
-  if (kind === 'fullImage') return 256;
-  return 1;
-}
-
 function drawableBitmapWarmupTargetSize(source, meta = {}) {
   const sourceW = source?.width || source?.naturalWidth || 0;
   const sourceH = source?.height || source?.naturalHeight || 0;
   if (!(sourceW > 0 && sourceH > 0)) return { sourceW, sourceH, width: 1, height: 1 };
-  const maxEdge = Math.max(1, Math.trunc(Number(drawableBitmapWarmupMaxEdge(meta)) || 1));
+  const kind = drawableBitmapWarmupKind(meta);
+  const maxEdge = kind === 'scaledVariant' || kind === 'openPreview' ? 512 : kind === 'fullImage' ? 256 : 1;
   const scale = Math.min(1, maxEdge / Math.max(sourceW, sourceH));
   return {
     sourceW,
@@ -576,7 +567,6 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
 function cancelScheduledScaledVariantQueue() {
   if (imageScaledVariantQueueTimer !== null) clearTimeout(imageScaledVariantQueueTimer);
   imageScaledVariantQueueTimer = null;
-  imageScaledVariantQueueScheduled = false;
 }
 
 function scaledVariantQueueTaskIdleThresholdMs(task) {
@@ -590,8 +580,7 @@ function scheduleScaledVariantQueue() {
   const concurrency = Math.max(1, Math.trunc(Number(IMAGE_VARIANT_QUEUE_CONCURRENCY) || 1));
   if (imageScaledVariantQueueActive >= concurrency) return;
   if (!imageScaledVariantQueue.length) return;
-  if (imageScaledVariantQueueScheduled) return;
-  imageScaledVariantQueueScheduled = true;
+  if (imageScaledVariantQueueTimer !== null) return;
   const runReadyTasks = () => {
     while (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
       const task = imageScaledVariantQueue[0];
@@ -613,7 +602,6 @@ function scheduleScaledVariantQueue() {
   };
   const run = () => {
     imageScaledVariantQueueTimer = null;
-    imageScaledVariantQueueScheduled = false;
     runReadyTasks();
     if (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
       scheduleScaledVariantQueue();

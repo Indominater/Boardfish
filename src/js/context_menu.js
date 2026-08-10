@@ -692,22 +692,18 @@ function updateObjMenuActions() {
   const showLayerActions = selectedCount >= 1;
   const showExport = imageCount >= 1;
   const showDelete = selectedCount >= 1;
-  if (copyBtn) copyBtn.style.display = '';
-  if (imageActionsSep) imageActionsSep.style.display = showImageActions ? 'block' : 'none';
-  if (flipBtn) flipBtn.style.display = showImageActions ? '' : 'none';
-  if (rotateBtn) rotateBtn.style.display = showImageActions ? '' : 'none';
-  if (layerActionsSep) layerActionsSep.style.display = showLayerActions ? 'block' : 'none';
-  if (moveToBackBtn) moveToBackBtn.style.display = showLayerActions ? '' : 'none';
-  if (saveImageBtn) saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
-  if (saveImagesBtn) {
-    const label = saveImagesBtn.querySelector?.('.ctx-label');
-    if (label) label.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
-    else saveImagesBtn.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
-    saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';
-  }
-  if (exportSep) exportSep.style.display = showExport ? 'block' : 'none';
-  if (deleteSep) deleteSep.style.display = showDelete ? 'block' : 'none';
-  if (deleteBtn) deleteBtn.style.display = showDelete ? '' : 'none';
+  copyBtn.style.display = '';
+  imageActionsSep.style.display = showImageActions ? 'block' : 'none';
+  flipBtn.style.display = showImageActions ? '' : 'none';
+  rotateBtn.style.display = showImageActions ? '' : 'none';
+  layerActionsSep.style.display = showLayerActions ? 'block' : 'none';
+  moveToBackBtn.style.display = showLayerActions ? '' : 'none';
+  saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
+  saveImagesBtn.firstElementChild.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
+  saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';
+  exportSep.style.display = showExport ? 'block' : 'none';
+  deleteSep.style.display = showDelete ? 'block' : 'none';
+  deleteBtn.style.display = showDelete ? '' : 'none';
 }
 
 const updateTextEditMenuActions = async () => {

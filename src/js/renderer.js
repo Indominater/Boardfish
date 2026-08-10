@@ -645,18 +645,14 @@
       ) ? deps.objectMotionForDraw : null;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         const skipId = options.skipId || null;
-        const skipIds = options.skipIds && typeof options.skipIds.has === 'function'
-          ? options.skipIds
-          : Array.isArray(options.skipIds) ? new Set(options.skipIds) : null;
+        const skipIds = options.skipIds;
         const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
         const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
         const imageSourceResolver = options.imageSourceResolver || null;
-        const skipText = options.skipText === true;
         const onlyText = options.onlyText === true;
         const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
         for (const obj of deps.objects()) {
           if (obj.id === skipId || skipIds?.has(obj.id)) continue;
-          if (skipText && obj.type === 'text') continue;
           if (onlyText && obj.type !== 'text') continue;
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
           if (!motion && !deps.objectIntersectsRect(obj, viewportRect)) continue;
@@ -674,13 +670,10 @@
         return;
       } else {
       const skipId = options.skipId || null;
-      const skipIds = options.skipIds && typeof options.skipIds.has === 'function'
-        ? options.skipIds
-        : Array.isArray(options.skipIds) ? new Set(options.skipIds) : null;
+      const skipIds = options.skipIds;
       const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
       const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
       const imageSourceResolver = options.imageSourceResolver || null;
-      const skipText = options.skipText === true;
       const onlyText = options.onlyText === true;
       const cullingEnabled = deps.viewportCullingEnabled();
       const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
@@ -689,7 +682,6 @@
       for (const obj of deps.objects()) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
         if (obj.id === skipId || skipIds?.has(obj.id)) continue;
-        if (skipText && obj.type === 'text') continue;
         if (onlyText && obj.type !== 'text') continue;
         const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {

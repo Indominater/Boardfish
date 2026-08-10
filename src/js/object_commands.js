@@ -65,12 +65,7 @@ function addText(wx, wy, content = '', options = {}) {
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
   logStep('content-limit-done', { textBytes, accepted });
   if (!accepted) return;
-  const defaultSize = typeof defaultTextBoxSize === 'function'
-    ? defaultTextBoxSize()
-      : (() => {
-        const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-        return { w: h * 8, h };
-      })();
+  const defaultSize = defaultTextBoxSize();
   let w = content ? 200 : defaultSize.w;
   let h = content ? LINE_H + TEXT_PAD * 2 : defaultSize.h;
   if (content) {
@@ -288,10 +283,8 @@ function duplicateSelected(anchorPoint = null) {
   }
   if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
 
-  const cloned = new Array(selectedObjects.length);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (let i = 0; i < selectedObjects.length; i++) {
-    const obj = cloned[i] = cloneObject(selectedObjects[i]);
+  for (const obj of selectedObjects) {
     minX = Math.min(minX, obj.x);
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x + obj.w);
@@ -309,7 +302,8 @@ function duplicateSelected(anchorPoint = null) {
   const dx = center.x - (minX + maxX) / 2;
   const dy = center.y - (minY + maxY) / 2;
   const duplicatedIds = [];
-  for (const obj of cloned) {
+  for (const source of selectedObjects) {
+    const obj = cloneObject(source);
     obj.id = newId();
     obj.x += dx;
     obj.y += dy;

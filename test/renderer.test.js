@@ -507,55 +507,6 @@ test('animated image cropping inverse-maps translation and non-uniform scale', (
   });
 });
 
-test('renderer can skip text while drawing visible objects', () => {
-  const BoardfishRenderer = loadRenderer();
-  const drawImageCalls = [];
-  const fillTextCalls = [];
-  const context = {
-    drawImage(...args) {
-      drawImageCalls.push(args);
-    },
-    fillText(...args) {
-      fillTextCalls.push(args);
-    },
-  };
-  const source = {
-    complete: true,
-    naturalWidth: 20,
-    naturalHeight: 20,
-    width: 20,
-    height: 20,
-  };
-  const image = { id: 'img-1', type: 'image', x: 0, y: 0, w: 20, h: 20, data: { imgKey: 'img-1' } };
-  const text = { id: 'text-1', type: 'text', x: 0, y: 0, w: 20, h: 20 };
-  const renderer = BoardfishRenderer.createBoardRenderer({
-    canvasTextColor: () => '#fff',
-    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 30, y2: 30 }),
-    dpr: () => 1,
-    getWrappedLines: () => [{ text: 'hidden' }],
-    imageBitmapCache: () => ({ 'img-1': source }),
-    imageStore: () => ({ 'img-1': 'source' }),
-    lineHeight: 24,
-    objectIntersectsRect: () => true,
-    objects: () => [image, text],
-    panX: () => 0,
-    panY: () => 0,
-    selectImageSourceForDraw: () => ({ source, scale: 1, targetScale: 1 }),
-    setCanvasImageQuality: () => {},
-    textBaselineYOffset: () => 0,
-    textPad: 4,
-    viewportCullingEnabled: () => true,
-    zoom: () => 1,
-  });
-
-  const result = renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters(), { skipText: true });
-
-  assert.equal(result.drawnImages, 1);
-  assert.equal(result.drawnText, 0);
-  assert.equal(drawImageCalls.length, 1);
-  assert.deepEqual(fillTextCalls, []);
-});
-
 test('renderer can draw only text while drawing visible objects', () => {
   const BoardfishRenderer = loadRenderer();
   const drawImageCalls = [];
