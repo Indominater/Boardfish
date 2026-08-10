@@ -862,7 +862,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       ClipDebug.step(dbg, 'paste:event-text-read-done', clipboardTextStats(eventText));
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (eventText && eventText.trim()) {
+    if (/\S/.test(eventText)) {
       const text = textForExternalTextObjectPaste(eventText);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const objectCountBefore = collectClipboardDiagnostics ? objects.length : 0;

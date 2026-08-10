@@ -11,11 +11,6 @@ var _bulkImageInsertDepth = 0;
 var _bulkImageInsertAdded = 0;
 var _imageReadyLastRender = 0;
 
-function rebuildObjectsMap() {
-  objectsMap.clear();
-  for (const obj of objects) objectsMap.set(obj.id, obj);
-}
-
 function newId() {
   let id = '';
   do {

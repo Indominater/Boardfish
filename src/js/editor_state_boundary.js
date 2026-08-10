@@ -97,24 +97,23 @@
     restoreCounters = true,
   } = {}) {
     objects = Array.isArray(nextObjects) ? nextObjects : [];
-    if (normalizeText) {
-      for (const obj of objects) {
-        if (obj?.type !== 'text') continue;
-        if (!obj.data) obj.data = {};
-        obj.data.content = normalizeTextContent(obj.data?.content);
-        if (typeof normalizeTextLineAlignForContent === 'function' && Array.isArray(obj.data.lineAlign)) {
-          const lineAlign = normalizeTextLineAlignForContent(obj.data.content, obj.data.lineAlign);
-          if (lineAlign.length) obj.data.lineAlign = lineAlign;
-          else delete obj.data.lineAlign;
-        }
-        if (typeof normalizeTextScriptRangesForContent === 'function' && Array.isArray(obj.data.scriptRanges)) {
-          const scriptRanges = normalizeTextScriptRangesForContent(obj.data.content, obj.data.scriptRanges);
-          if (scriptRanges.length) obj.data.scriptRanges = scriptRanges;
-          else delete obj.data.scriptRanges;
-        }
+    objectsMap.clear();
+    for (const obj of objects) {
+      objectsMap.set(obj.id, obj);
+      if (!normalizeText || obj?.type !== 'text') continue;
+      if (!obj.data) obj.data = {};
+      obj.data.content = normalizeTextContent(obj.data?.content);
+      if (typeof normalizeTextLineAlignForContent === 'function' && Array.isArray(obj.data.lineAlign)) {
+        const lineAlign = normalizeTextLineAlignForContent(obj.data.content, obj.data.lineAlign);
+        if (lineAlign.length) obj.data.lineAlign = lineAlign;
+        else delete obj.data.lineAlign;
+      }
+      if (typeof normalizeTextScriptRangesForContent === 'function' && Array.isArray(obj.data.scriptRanges)) {
+        const scriptRanges = normalizeTextScriptRangesForContent(obj.data.content, obj.data.scriptRanges);
+        if (scriptRanges.length) obj.data.scriptRanges = scriptRanges;
+        else delete obj.data.scriptRanges;
       }
     }
-    rebuildObjectsMap();
     if (syncTextHeights) syncAllTextAutoHeights();
     if (restoreCounters) restoreObjectCountersFromObjects(objects);
     return objects;

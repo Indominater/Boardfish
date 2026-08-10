@@ -1257,23 +1257,6 @@ function textLayoutLogicalLineIndexAtContentIndex(layout, index, fallback = 0) {
   return Math.max(0, Math.trunc(Number(line?.logicalLineIndex)) || 0);
 }
 
-function textLogicalLineStartAt(text, lineIndex) {
-  const target = Math.max(0, Math.trunc(Number(lineIndex)) || 0);
-  if (target <= 0) return 0;
-  let line = 0;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] !== '\n') continue;
-    line++;
-    if (line === target) return i + 1;
-  }
-  return text.length;
-}
-
-function textLogicalLineEndAt(text, start) {
-  const newlineAt = text.indexOf('\n', start);
-  return newlineAt === -1 ? text.length : newlineAt;
-}
-
 function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
   if (!obj || obj.type !== 'text') return [];
   const content = String(obj.data?.content || '');
@@ -1285,6 +1268,7 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
     : getTextScriptRanges(obj);
   const scriptMetrics = options.scriptMetrics || null;
   const lineIndexEntries = Array.isArray(options.lineIndexEntries) ? options.lineIndexEntries : null;
+  let nextParaStart = Math.max(0, Math.min(Math.trunc(Number(options.startIndex)) || 0, content.length));
   let visualLineOffset = 0;
   const result = [];
   const pushLine = (start, end, nextStart = end, caretEnd = end, logicalLineIndex = 0, prefixWidths = null) => {
@@ -1307,10 +1291,12 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
     const indexedLine = lineIndexEntries?.[logicalLineIndex] || null;
     const paraStart = indexedLine
       ? Math.max(0, Math.min(Math.trunc(Number(indexedLine.startIndex)) || 0, content.length))
-      : textLogicalLineStartAt(content, logicalLineIndex);
+      : nextParaStart;
+    const newlineAt = indexedLine ? -1 : content.indexOf('\n', paraStart);
     const paraEnd = indexedLine
       ? Math.max(paraStart, Math.min(Math.trunc(Number(indexedLine.endIndex)) || paraStart, content.length))
-      : textLogicalLineEndAt(content, paraStart);
+      : (newlineAt === -1 ? content.length : newlineAt);
+    nextParaStart = Math.min(paraEnd + 1, content.length);
     if (paraStart === paraEnd) {
       pushLine(paraStart, paraStart, paraStart, paraStart, logicalLineIndex);
       continue;
@@ -1520,6 +1506,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   const newWrapped = wrapTextLogicalLineRange(obj, newRange.startLine, newRange.endLine, {
     scriptRanges,
     scriptMetrics,
+    startIndex: layout[oldSplice.start].startIndex,
   });
 
   const insertedLayout = new Array(newWrapped.length);
@@ -1634,9 +1621,8 @@ const textLogicalLineRangeForSelection = (value, selection = {}) => {
   const end = Math.max(0, Math.min(selection.end ?? start, text.length));
   const from = Math.min(start, end);
   const to = Math.max(start, end);
-  const lastIndex = to > from ? to - 1 : from;
-  const endLine = textNewlineCount(text, 0, lastIndex);
-  return { startLine: from === lastIndex ? endLine : textNewlineCount(text, 0, from), endLine };
+  const startLine = textNewlineCount(text, 0, from);
+  return { startLine, endLine: startLine + (to > from ? textNewlineCount(text, from, to - 1) : 0) };
 };
 
 const cycleTextLineAlignValue = (align, direction) => {

@@ -324,7 +324,6 @@ function duplicateSelected(anchorPoint = null) {
 function deleteSelected() {
   if (!hasSelection() || editingId) return;
   BoardfishEditorState.removeObjectsById(selectedIds);
-  BoardfishEditorState.clearSelection();
   scheduleRender(true, true);
   pushHistory('delete-selected');
 }

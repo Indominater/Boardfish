@@ -538,20 +538,10 @@ const textEditBlankLineDeleteRange = (text = '', index, keyOrInputType = '') => 
 
 const trimmedTextSelectionForClipboard = (value) => {
   const text = normalizeTextContent(value);
-  const lines = text.split('\n');
-  let first = 0;
-  let last = lines.length - 1;
-  while (first <= last && !/\S/.test(lines[first])) first++;
-  while (last >= first && !/\S/.test(lines[last])) last--;
-  if (first > last) return { text: '', start: 0, end: 0 };
-  let start = 0;
-  for (let i = 0; i < first; i++) start += lines[i].length + 1;
-  let end = start;
-  for (let i = first; i <= last; i++) {
-    end += lines[i].length;
-    if (i < last) end++;
-  }
-  return { text: text.slice(start, end), start, end };
+  const trimmed = textSelectionForClipboard(text);
+  if (!trimmed) return { text: '', start: 0, end: 0 };
+  const start = text.indexOf(trimmed);
+  return { text: trimmed, start, end: start + trimmed.length };
 };
 
 const dispatchTextEditInputEvent = (proxy, inputType) => {
@@ -1322,13 +1312,7 @@ const createTextSelectionClipboardPayload = (obj, selection) => {
 
 const textSelectionPayloadFromBoardfishClipboardValue = (clipboard) => {
   if (!clipboard) return null;
-  if (clipboard.type === 'text-selection') {
-    const text = normalizeTextContent(clipboard.text || '');
-    const scriptRanges = typeof normalizeTextScriptRangesForContent === 'function'
-      ? normalizeTextScriptRangesForContent(text, clipboard.scriptRanges || [])
-      : cloneTextScriptRanges(clipboard.scriptRanges || []);
-    return { type: 'text-selection', text, scriptRanges };
-  }
+  if (clipboard.type === 'text-selection') return clipboard;
   if (clipboard.type === 'objects') {
     const objects = clipboard.objects || [];
     if (objects.length !== 1 || objects[0]?.type !== 'text') return null;
