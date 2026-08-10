@@ -68,9 +68,9 @@
       return entry;
     }
 
-    function get(key, slot) {
+    function get(key, slot, touch = true) {
       const node = groups.get(key)?.get(slot) || null;
-      if (node) touchNode(node);
+      if (node && touch) touchNode(node);
       return node?.entry || null;
     }
 
@@ -107,7 +107,6 @@
       groups,
       get bytes() { return bytes; },
       get,
-      has: (key, slot) => groups.get(key)?.has(slot) || false,
       set,
       removeGroup,
       clear,

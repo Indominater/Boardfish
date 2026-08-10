@@ -452,9 +452,9 @@ function clearTextObjectLayoutRuntime(obj, options = {}) {
     delete obj._textClipboardCacheValue;
   }
   if (options.minWidth !== false) {
-    delete obj._textMinWidthWordSegmentCache;
-    delete obj._textMinWidthWordSegmentCacheContent;
-    delete obj._textMinWidthWordSegmentCacheScriptKey;
+    delete obj._textMinWidthCache;
+    delete obj._textMinWidthCacheContent;
+    delete obj._textMinWidthCacheScriptKey;
   }
   if (options.prefix !== false) {
     delete obj._textParagraphPrefixCache;
@@ -559,13 +559,13 @@ function cloneTextObjectRuntimeCaches(source, target) {
   }
 
   if (
-    source._textMinWidthWordSegmentCache &&
-    source._textMinWidthWordSegmentCacheContent === content &&
-    typeof source._textMinWidthWordSegmentCacheScriptKey === 'string'
+    Number.isFinite(source._textMinWidthCache) &&
+    source._textMinWidthCacheContent === content &&
+    typeof source._textMinWidthCacheScriptKey === 'string'
   ) {
-    target._textMinWidthWordSegmentCache = source._textMinWidthWordSegmentCache;
-    target._textMinWidthWordSegmentCacheContent = source._textMinWidthWordSegmentCacheContent;
-    target._textMinWidthWordSegmentCacheScriptKey = source._textMinWidthWordSegmentCacheScriptKey;
+    target._textMinWidthCache = source._textMinWidthCache;
+    target._textMinWidthCacheContent = source._textMinWidthCacheContent;
+    target._textMinWidthCacheScriptKey = source._textMinWidthCacheScriptKey;
   }
 
   if (
@@ -1911,9 +1911,7 @@ const textContentWithCanonicalScriptBraces = (content, scriptRanges = [], option
   return out.join('');
 };
 
-const textScriptLinearToDeterministicBraces = (content, scriptRanges = [], options = {}) => (
-  textContentWithCanonicalScriptBraces(content, scriptRanges, options)
-);
+const textScriptLinearToDeterministicBraces = textContentWithCanonicalScriptBraces;
 
 const textObjectContentForClipboard = (obj) => {
   if (!obj || obj.type !== 'text') return '';
@@ -2406,29 +2404,25 @@ const textScriptCaretStateAt = (obj, index) => {
   return textScriptStateFromRanges(activeTextScriptRangesAt(ranges, index, { includeEnd: true, affinity }));
 };
 
-const getTextMinWidthWordSegment = (obj) => {
-  const empty = { text: '', word: '', width: 0, lineIndex: -1, startOffset: 0, endOffset: 0 };
-  if (!obj || obj.type !== 'text') return empty;
-
+const getTextMinWidth = (obj) => {
+  const paddedMinimum = TEXT_PAD * 2 + 1;
+  if (!obj || obj.type !== 'text') return paddedMinimum;
   const content = normalizeTextContent(obj.data?.content || '');
   const scriptRanges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
   if (
-    obj._textMinWidthWordSegmentCacheContent === content &&
-    obj._textMinWidthWordSegmentCacheScriptKey === scriptKey &&
-    obj._textMinWidthWordSegmentCache
+    obj._textMinWidthCacheContent === content &&
+    obj._textMinWidthCacheScriptKey === scriptKey &&
+    Number.isFinite(obj._textMinWidthCache)
   ) {
-    return obj._textMinWidthWordSegmentCache;
+    return obj._textMinWidthCache;
   }
-  const lines = content.split('\n');
   const scriptMetrics = scriptRanges.length
     ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
     : null;
-  let best = empty;
+  let bestWidth = 0;
   let contentOffset = 0;
-
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-    const line = lines[lineIndex];
+  for (const line of content.split('\n')) {
     const prefixWidths = getTextObjectParagraphPrefixWidthsForNormalizedContent(
       obj,
       content,
@@ -2440,46 +2434,24 @@ const getTextMinWidthWordSegment = (obj) => {
     );
     let i = 0;
     while (i < line.length && isTextWordSeparator(line[i])) i++;
-
     let isFirstWord = true;
     while (i < line.length) {
       if (!isFirstWord) {
         while (i < line.length && isTextWordSeparator(line[i])) i++;
         if (i >= line.length) break;
       }
-
       const wordStart = i;
       while (i < line.length && !isTextWordSeparator(line[i])) i++;
-      const wordEnd = i;
       const segmentStart = isFirstWord ? 0 : wordStart;
-      const text = line.slice(segmentStart, wordEnd);
-      const width = Math.max(0, prefixWidths[wordEnd] - prefixWidths[segmentStart]);
-
-      if (width > best.width) {
-        best = {
-          text,
-          word: line.slice(wordStart, wordEnd),
-          width,
-          lineIndex,
-          startOffset: contentOffset + segmentStart,
-          endOffset: contentOffset + wordEnd,
-        };
-      }
+      const width = Math.max(0, prefixWidths[i] - prefixWidths[segmentStart]);
+      if (width > bestWidth) bestWidth = width;
       isFirstWord = false;
     }
-
     contentOffset += line.length + 1;
   }
-
-  obj._textMinWidthWordSegmentCacheContent = content;
-  obj._textMinWidthWordSegmentCacheScriptKey = scriptKey;
-  obj._textMinWidthWordSegmentCache = best;
-  return best;
-};
-
-const getTextMinWidth = (obj) => {
-  if (!obj || obj.type !== 'text') return TEXT_PAD * 2 + 1;
-  return Math.ceil(getTextMinWidthWordSegment(obj).width + TEXT_PAD * 2 + 1);
+  obj._textMinWidthCacheContent = content;
+  obj._textMinWidthCacheScriptKey = scriptKey;
+  return obj._textMinWidthCache = Math.ceil(bestWidth + paddedMinimum);
 };
 
 const getTextRenderedContentWidth = (obj) => {
@@ -2512,21 +2484,6 @@ function syncAllTextAutoHeights() {
     }
   }
   return changed;
-}
-
-function calculateTextLayout(obj, content, scriptRanges) {
-  const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
-  const wrapped = buildWrappedLines(obj, { scriptRanges, scriptKey, collectLineIndex: true }, content);
-  setCachedTextWrappedLineIndex(obj, content, scriptKey, wrapped.lineIndex || [], wrapped.lineCount);
-  const lines = wrapped.lines;
-  const scriptMetrics = scriptRanges.length
-    ? getTextScriptLayoutMetricsForObject(obj, obj.data.content, scriptRanges)
-    : null;
-  const layout = new Array(lines.length);
-  for (let i = 0; i < lines.length; i++) {
-    layout[i] = layoutLineFromWrappedLine(obj, lines[i], i, scriptRanges, scriptMetrics);
-  }
-  return layout;
 }
 
 function textLayoutAlignKey(obj) {
@@ -2736,7 +2693,17 @@ function getTextLayout(obj) {
   obj._layoutCacheScriptKey = scriptKey;
   obj._layoutCacheAlignKey = alignKey;
   obj._layoutCacheY = obj.y;
-  obj._layoutCache = calculateTextLayout(obj, content, scriptRanges);
+  const wrapped = buildWrappedLines(obj, { scriptRanges, scriptKey, collectLineIndex: true }, content);
+  setCachedTextWrappedLineIndex(obj, content, scriptKey, wrapped.lineIndex || [], wrapped.lineCount);
+  const lines = wrapped.lines;
+  const scriptMetrics = scriptRanges.length
+    ? getTextScriptLayoutMetricsForObject(obj, obj.data.content, scriptRanges)
+    : null;
+  const layout = new Array(lines.length);
+  for (let i = 0; i < lines.length; i++) {
+    layout[i] = layoutLineFromWrappedLine(obj, lines[i], i, scriptRanges, scriptMetrics);
+  }
+  obj._layoutCache = layout;
   return obj._layoutCache;
 }
 
@@ -3147,10 +3114,6 @@ const drawTextLineRange = (context, line, obj, startOffset = 0, endOffset = line
   return options.collectStats === false ? null : cloneTextDrawStats(plan.stats, cacheHit);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
-
-function lineEndX(line, obj) {
-  return lineXAtOffset(line, obj, line.text.length);
-}
 
 const normalizeTextLayoutHitCaretIndex = (line, index, direction = 'forward', obj = null) => {
   const text = normalizeTextContent(obj?.data?.content ?? line?.content ?? line?.text ?? '');

@@ -115,16 +115,7 @@
     , counters = null
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) {
-    const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
-    const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
-    const scaleOriginX = Number.isFinite(motion.scaleOriginX)
-      ? Math.max(0, Math.min(1, motion.scaleOriginX))
-      : 0.5;
-    const scaleOriginY = Number.isFinite(motion.scaleOriginY)
-      ? Math.max(0, Math.min(1, motion.scaleOriginY))
-      : 0.5;
-    const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
-    const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
+    const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (counters) {
       counters.motionObjects = (counters.motionObjects || 0) + 1;
@@ -144,15 +135,9 @@
     if (!rect) return rect;
     // Text layout and image crops are chosen before the canvas motion transform,
     // so map the visible destination back into the object's source coordinates.
-    const x1 = Number(rect.x1), y1 = Number(rect.y1);
-    const x2 = Number(rect.x2), y2 = Number(rect.y2);
-    if (![x1, y1, x2, y2].every(Number.isFinite)) return rect;
-    const objX = Number.isFinite(obj?.x) ? obj.x : 0;
-    const objY = Number.isFinite(obj?.y) ? obj.y : 0;
-    const objW = Number.isFinite(obj?.w) ? obj.w : 0;
-    const objH = Number.isFinite(obj?.h) ? obj.h : 0;
-    const pivotX = objX + objW * scaleOriginX;
-    const pivotY = objY + objH * scaleOriginY;
+    const { x1, y1, x2, y2 } = rect;
+    const pivotX = obj.x + obj.w * scaleOriginX;
+    const pivotY = obj.y + obj.h * scaleOriginY;
     const sourceX1 = pivotX + (x1 - translateX - pivotX) / scaleX;
     const sourceX2 = pivotX + (x2 - translateX - pivotX) / scaleX;
     const sourceY1 = pivotY + (y1 - translateY - pivotY) / scaleY;
@@ -495,13 +480,6 @@
   function createBoardRenderer(deps) {
     const getTextLayoutForDraw = deps.getTextLayoutForViewport || deps.getTextLayout;
 
-    function viewDefaults() {
-      return {
-        zoom: deps.zoom(),
-        dpr: deps.dpr(),
-      };
-    }
-
     function drawSingleObj(context, obj
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , counters = null
@@ -517,7 +495,7 @@
         }
         if (obj.type !== 'image') return;
 
-        const view = options.view || viewDefaults();
+        const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
         const imageSourceResolver = options.imageSourceResolver || null;
         const key = obj.data.imgKey;
         const lowLatencyImageMotion = !!options.motion;
@@ -578,7 +556,7 @@
       }
       if (obj.type !== 'image') return false;
 
-      const view = options.view || viewDefaults();
+      const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
       const imageSourceResolver = options.imageSourceResolver || null;
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
@@ -671,18 +649,17 @@
           ? options.skipIds
           : Array.isArray(options.skipIds) ? new Set(options.skipIds) : null;
         const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
-        const view = options.view || viewDefaults();
+        const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
         const imageSourceResolver = options.imageSourceResolver || null;
         const skipText = options.skipText === true;
         const onlyText = options.onlyText === true;
-        const cullingEnabled = deps.viewportCullingEnabled();
         const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
         for (const obj of deps.objects()) {
           if (obj.id === skipId || skipIds?.has(obj.id)) continue;
           if (skipText && obj.type === 'text') continue;
           if (onlyText && obj.type !== 'text') continue;
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
-          if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) continue;
+          if (!motion && !deps.objectIntersectsRect(obj, viewportRect)) continue;
           const objectViewportRect = motion
             ? applyObjectMotion(context, obj, viewportRect, motion)
             : viewportRect;
@@ -701,7 +678,7 @@
         ? options.skipIds
         : Array.isArray(options.skipIds) ? new Set(options.skipIds) : null;
       const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
-      const view = options.view || viewDefaults();
+      const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
       const imageSourceResolver = options.imageSourceResolver || null;
       const skipText = options.skipText === true;
       const onlyText = options.onlyText === true;

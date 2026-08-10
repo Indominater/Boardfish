@@ -83,7 +83,6 @@ function loadTextLayout({
     `globalThis.__testTextLayout = {
       measureTextW,
       textForExternalTextObjectPaste,
-      getTextMinWidthWordSegment,
       getTextMinWidth,
       getTextLayout,
       getTextLayoutForViewport,
@@ -610,14 +609,6 @@ test('text minimum width includes leading indentation before the first word', ()
   };
 
   assert.equal(textLayout.getTextMinWidth(obj), 103);
-  assert.deepEqual(plain(textLayout.getTextMinWidthWordSegment(obj)), {
-    text: '    Boardfish',
-    word: 'Boardfish',
-    width: 70,
-    lineIndex: 1,
-    startOffset: 10,
-    endOffset: 23,
-  });
 });
 
 test('text minimum width treats spaces between words as separators', () => {
@@ -638,14 +629,6 @@ test('text minimum width treats spaces between words as separators', () => {
   };
 
   assert.equal(textLayout.getTextMinWidth(obj), 95);
-  assert.deepEqual(plain(textLayout.getTextMinWidthWordSegment(obj)), {
-    text: '        pixel',
-    word: 'pixel',
-    width: 62,
-    lineIndex: 1,
-    startOffset: 24,
-    endOffset: 37,
-  });
 });
 
 test('text minimum width builds prefix widths once per logical line', () => {
@@ -700,7 +683,7 @@ test('cloned text runtime caches preserve cached minimum width', () => {
 
   textLayout.cloneTextObjectRuntimeCaches(source, target);
 
-  assert.equal(target._textMinWidthWordSegmentCache, source._textMinWidthWordSegmentCache);
+  assert.equal(target._textMinWidthCache, source._textMinWidthCache);
   assert.equal(target._textWrappedLineIndexCache, source._textWrappedLineIndexCache);
   assert.equal(target._layoutCache[0]._scriptMetrics, metrics);
   assert.equal('_textDrawPlanCache' in target._layoutCache[0], false);

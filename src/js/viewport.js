@@ -297,7 +297,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
     if (h0 < h1) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const o0 = h0 - ls, o1 = h1 - ls;
-      const endX = lineEndX(line, obj);
+      const endX = lineXAtOffset(line, obj, line.text.length);
       let i = o0;
       while (i < o1) {
         const globalIndex = line.startIndex + i;
@@ -348,12 +348,7 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
 
 const applyTextSelectionMotionTransform = (context, bounds, motion) => {
   if (!motion) return false;
-  const scaleX = motion.scaleX ?? 1;
-  const scaleY = motion.scaleY ?? 1;
-  const scaleOriginX = Number.isFinite(motion.scaleOriginX) ? Math.max(0, Math.min(1, motion.scaleOriginX)) : 0.5;
-  const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
-  const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
-  const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
+  const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
   if (scaleX !== 1 || scaleY !== 1) {
     const scalePivotX = bounds.left + (bounds.right - bounds.left) * scaleOriginX;
     const scalePivotY = bounds.top + (bounds.bottom - bounds.top) * scaleOriginY;
@@ -492,7 +487,6 @@ const drawTextSelectionContentJello = (context, obj, selection, motion) => {
 };
 
 const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom = zoom, motions = null) => {
-  motions ||= globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.(true);
   if (!motions?.size) return 0;
   let drawn = 0;
   for (const [id, spec] of motions) {
@@ -528,7 +522,7 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
     const off = Math.max(0, selStart - ls);
     cx = typeof lineCaretXAtOffset === 'function'
       ? lineCaretXAtOffset(line, obj, off)
-      : off < line.text.length ? lineXAtOffset(line, obj, off) : lineEndX(line, obj);
+      : lineXAtOffset(line, obj, off < line.text.length ? off : line.text.length);
     const state = typeof textScriptCaretStateAt === 'function'
       ? textScriptCaretStateAt(obj, selStart)
       : { depth: 0, offset: 0, scale: 1 };
@@ -573,12 +567,7 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
 const applyObjectMotionForDraw = (context, obj, motion) => {
   if (!motion || !context.save) return false;
   context.save();
-  const scaleX = Number.isFinite(motion.scaleX) ? Math.max(0.01, motion.scaleX) : 1;
-  const scaleY = Number.isFinite(motion.scaleY) ? Math.max(0.01, motion.scaleY) : 1;
-  const scaleOriginX = Number.isFinite(motion.scaleOriginX) ? Math.max(0, Math.min(1, motion.scaleOriginX)) : 0.5;
-  const scaleOriginY = Number.isFinite(motion.scaleOriginY) ? Math.max(0, Math.min(1, motion.scaleOriginY)) : 0.5;
-  const translateX = Number.isFinite(motion.translateX) ? motion.translateX : 0;
-  const translateY = Number.isFinite(motion.translateY) ? motion.translateY : 0;
+  const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
   if (scaleX !== 1 || scaleY !== 1) {
     const scalePivotX = obj.x + obj.w * scaleOriginX;
     const scalePivotY = obj.y + obj.h * scaleOriginY;

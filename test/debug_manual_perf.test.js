@@ -118,8 +118,8 @@ test('text resize perf debugger captures resize and follow-up input evidence', (
   assert.match(source, /maxResizeClearLayoutMs/);
   assert.match(source, /maxResizeScheduleRenderMs/);
   assert.match(source, /maxResizeEventAgeMs/);
-  assert.match(source, /_textMinWidthWordSegmentCache/);
-  assert.doesNotMatch(source, /_textMinWidthCache/);
+  assert.match(source, /_textMinWidthCache/);
+  assert.doesNotMatch(source, /_textMinWidthWordSegmentCache/);
   assert.match(source, /paragraphPrefixCacheEntries/);
   assert.match(source, /wrappedLineCountCachePresent/);
   assert.match(source, /scriptMetricsCachePresent/);

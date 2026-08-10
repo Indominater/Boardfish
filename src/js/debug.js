@@ -2630,7 +2630,7 @@ var ViewportDebug = (() => {
             const sourceW = fullSource?.width || fullSource?.naturalWidth || 0;
             const sourceH = fullSource?.height || fullSource?.naturalHeight || 0;
             visibleScaledVariantMB += scaledVariantEstimatedBytes(sourceW, sourceH, targetScale) / 1024 / 1024;
-            if (imageScaledBitmapStore.has(key, targetScale)) visibleImagesWithScaledVariant++;
+            if (hasScaledImageVariant(key, targetScale)) visibleImagesWithScaledVariant++;
             else visibleImagesMissingScaledVariant++;
           }
         } else culledImages++;

@@ -3,7 +3,15 @@
 (function initViewportStateBoundary(root) {
   const PAN_BOUNDARY_EPSILON = 0.000001;
 
-  function boardMasterBox(objectList = []) {
+  function clampPanToBoardMasterBox(
+    viewport = {},
+    objectList = [],
+    surface = {},
+    currentViewport = null,
+  ) {
+    const nextZoom = Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
+    let nextPanX = Number.isFinite(viewport.panX) ? viewport.panX : 0;
+    let nextPanY = Number.isFinite(viewport.panY) ? viewport.panY : 0;
     let x1 = Infinity;
     let y1 = Infinity;
     let x2 = -Infinity;
@@ -23,28 +31,14 @@
       x2 = Math.max(x2, obj.x + obj.w);
       y2 = Math.max(y2, obj.y + obj.h);
     }
-
-    return x1 === Infinity ? null : { x1, y1, x2, y2 };
-  }
-
-  function clampPanToBoardMasterBox(
-    viewport = {},
-    objectList = [],
-    surface = {},
-    currentViewport = null,
-  ) {
-    const nextZoom = Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
-    let nextPanX = Number.isFinite(viewport.panX) ? viewport.panX : 0;
-    let nextPanY = Number.isFinite(viewport.panY) ? viewport.panY : 0;
-    const masterBox = boardMasterBox(objectList);
-    if (!masterBox) return { panX: nextPanX, panY: nextPanY, zoom: nextZoom };
+    if (x1 === Infinity) return { panX: nextPanX, panY: nextPanY, zoom: nextZoom };
 
     const width = Number.isFinite(surface.width) ? Math.max(0, surface.width) : 0;
     const height = Number.isFinite(surface.height) ? Math.max(0, surface.height) : 0;
-    const minPanX = -masterBox.x2 * nextZoom;
-    const maxPanX = width - masterBox.x1 * nextZoom;
-    const minPanY = -masterBox.y2 * nextZoom;
-    const maxPanY = height - masterBox.y1 * nextZoom;
+    const minPanX = -x2 * nextZoom;
+    const maxPanX = width - x1 * nextZoom;
+    const minPanY = -y2 * nextZoom;
+    const maxPanY = height - y1 * nextZoom;
 
     if (currentViewport) {
       const currentPanX = Number.isFinite(currentViewport.panX) ? currentViewport.panX : nextPanX;
@@ -148,7 +142,6 @@
   }
 
   const api = Object.freeze({
-    boardMasterBox,
     clampPanToBoardMasterBox,
     constrainPan,
     panBy,

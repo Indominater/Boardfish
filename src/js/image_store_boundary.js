@@ -24,10 +24,6 @@
     return true;
   }
 
-  function getDisplayImage(key) {
-    return imageBitmapCache[key] || null;
-  }
-
   function hasDisplayImage(key) {
     return !!imageBitmapCache[key];
   }
@@ -37,7 +33,6 @@
   }
 
   root.BoardfishImageStore = Object.freeze({
-    getDisplayImage,
     getSource,
     hasDisplayImage,
     hasSource,

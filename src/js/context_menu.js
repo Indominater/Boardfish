@@ -446,19 +446,16 @@ function runMenuCommand(button, source, commandEvent = null) {
     source,
   });
   if (source === 'pointerup' || source === 'mouseup') _lastPointerMenuCommandAt = performance.now();
-  const executeCommand = () => {
-    MenuDebug.log('menu:command:start', { command, source });
-    try {
-      run(commandEvent);
-      MenuDebug.log('menu:command:end', { command, source });
-    } catch (err) {
-      MenuDebug.log('menu:command:error', { command, source, error: String(err) });
-      console.error('[Boardfish menu] command failed:', command, err);
-    }
-  };
   // Keep activation-sensitive file pickers and text focus inside the trusted
   // pointer event. The following click is still suppressed by the timestamp.
-  executeCommand();
+  MenuDebug.log('menu:command:start', { command, source });
+  try {
+    run(commandEvent);
+    MenuDebug.log('menu:command:end', { command, source });
+  } catch (err) {
+    MenuDebug.log('menu:command:error', { command, source, error: String(err) });
+    console.error('[Boardfish menu] command failed:', command, err);
+  }
   return true;
 }
 

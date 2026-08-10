@@ -137,9 +137,7 @@ document.addEventListener('keydown', (e) => {
     const commandFind = commandOnly && isShortcutKey(e, 'f');
     if (commandFind && canTransformSelectedImagesFromKeyboard()) {
       consumeShortcutEvent(e);
-      runShortcutCommand('flip-image', () => {
-        flipSelectedImages();
-      });
+      runShortcutCommand('flip-image', flipSelectedImages);
     } else if (!commandFind) {
       consumeShortcutEvent(e);
     }

@@ -158,9 +158,8 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
       , null
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     );
-    const display = BoardfishImageStore.getDisplayImage?.(imgKey) || {};
-    const naturalW = Number(cacheMetrics?.naturalWidth || display.naturalWidth || display.width || imageBitmapCache[imgKey]?.width || 0);
-    const naturalH = Number(cacheMetrics?.naturalHeight || display.naturalHeight || display.height || imageBitmapCache[imgKey]?.height || 0);
+    const naturalW = Number(cacheMetrics?.naturalWidth || 0);
+    const naturalH = Number(cacheMetrics?.naturalHeight || 0);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       ViewportDebug.step(dbg, 'bitmap-ready', { width: naturalW, height: naturalH, ms: performance.now() - t0 });
     }

@@ -1161,7 +1161,7 @@ var ManualPerfDebug = (() => {
       scriptRanges: textObjectScriptRangeCount(obj),
       layoutCachePresent: !!obj?._layoutCache,
       layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
-      minWidthCachePresent: !!obj?._textMinWidthWordSegmentCache,
+      minWidthCachePresent: Number.isFinite(obj?._textMinWidthCache),
       paragraphPrefixCacheEntries: obj?._textParagraphPrefixCache?.size || 0,
       wrappedLineCountCachePresent: Number.isFinite(obj?._textWrappedLineCountCacheValue),
       wrappedLineCountCacheW: Number.isFinite(obj?._textWrappedLineCountCacheW) ? obj._textWrappedLineCountCacheW : '',

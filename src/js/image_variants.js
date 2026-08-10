@@ -495,7 +495,7 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
       : false;
   }
   const pendingKey = `${key}:${scale}`;
-  if (imageScaledBitmapStore.has(key, scale)) {
+  if (hasScaledImageVariant(key, scale)) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: true, skipped: 'already-ready' }
       : true;
@@ -648,7 +648,7 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
       : false;
   }
   const pendingKey = `${key}:${scale}`;
-  if (imageScaledBitmapStore.has(key, scale)) {
+  if (hasScaledImageVariant(key, scale)) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, queued: false, skipped: 'already-ready' }
       : false;
@@ -882,7 +882,7 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
 }
 
 function hasScaledImageVariant(key, scale) {
-  return imageScaledBitmapStore.has(key, scale);
+  return !!imageScaledBitmapStore.get(key, scale, false);
 }
 
 function isScaledImageVariantPending(key, scale) {
@@ -1014,7 +1014,7 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
   }
   activeInput = activeInput === true || (activeInput !== false && isActiveViewportInput());
   const targetScale = chooseImageScaleForDraw(obj, fullSource, view, activeInput);
-  const entry = targetScale < 1 ? imageScaledBitmapStore.get(key, targetScale) : null;
+  const entry = targetScale < 1 ? imageScaledBitmapStore.get(key, targetScale, false) : null;
   if (entry) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { source: entry.bitmap, scale: targetScale, targetScale }

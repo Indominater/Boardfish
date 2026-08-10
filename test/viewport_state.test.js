@@ -8,30 +8,15 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 const {
-  boardMasterBox,
   clampPanToBoardMasterBox,
 } = require('../src/js/viewport_state.js');
-
-test('board masterbox uses the outermost edges of every image and text box', () => {
-  const bounds = boardMasterBox([
-    { type: 'image', x: 100, y: 200, w: 300, h: 400 },
-    { type: 'text', x: -50, y: 50, w: 25, h: 25 },
-    { type: 'shape', x: -1000, y: -1000, w: 2000, h: 2000 },
-    { type: 'text', x: Number.NaN, y: 0, w: 10, h: 10 },
-  ]);
-
-  assert.deepEqual(bounds, {
-    x1: -50,
-    y1: 50,
-    x2: 400,
-    y2: 600,
-  });
-});
 
 test('viewport panning stops at the masterbox on all four sides', () => {
   const objects = [
     { type: 'image', x: 100, y: 200, w: 300, h: 400 },
     { type: 'text', x: -50, y: 50, w: 25, h: 25 },
+    { type: 'shape', x: -1000, y: -1000, w: 2000, h: 2000 },
+    { type: 'text', x: Number.NaN, y: 0, w: 10, h: 10 },
   ];
   const surface = { width: 1000, height: 800 };
   const zoom = 2;

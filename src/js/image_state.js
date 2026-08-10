@@ -26,20 +26,9 @@ function newImgKey() {
   return key;
 }
 
-const isWebImageRef = (src) => {
-  return typeof BoardfishWebBoardContainer !== 'undefined' &&
-    !!BoardfishWebBoardContainer?.isWebImageRef?.(src);
-};
-
-const webImageDisplaySrc = (src) => {
-  if (!isWebImageRef(src)) return '';
-  return BoardfishWebBoardContainer.displaySrcForImageSource?.(src) || '';
-};
-
-const revokeWebImageSource = (src) => {
-  if (!isWebImageRef(src)) return false;
-  return BoardfishWebBoardContainer.revokeImageSource?.(src) || false;
-};
+const isWebImageRef = (src) => !!globalThis.BoardfishWebBoardContainer?.isWebImageRef?.(src);
+const webImageDisplaySrc = (src) => typeof src === 'string' ? '' : globalThis.BoardfishWebBoardContainer?.displaySrcForImageSource?.(src) || '';
+const revokeWebImageSource = (src) => globalThis.BoardfishWebBoardContainer?.revokeImageSource?.(src) || false;
 
 function imageStoreBytesEstimate(src) {
   if (typeof src === 'string') return src.length;
