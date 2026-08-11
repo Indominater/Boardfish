@@ -395,8 +395,8 @@ function scheduleScaledVariantReadyRender(
       return;
     }
   }
-  const inputIdleMs = performance.now() - lastViewportInputAt;
   if (imageScaledVariantRenderTimer) return;
+  const inputIdleMs = performance.now() - lastViewportInputAt;
   imageScaledVariantRenderTimer = setTimeout(() => {
     imageScaledVariantRenderTimer = null;
     if (isActiveViewportInput()) {
@@ -561,30 +561,20 @@ function cancelScheduledScaledVariantQueue() {
   imageScaledVariantQueueTimer = null;
 }
 
-function scaledVariantQueueTaskIdleThresholdMs(task) {
-  return task?.priority === true
-    ? IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS
-    : IMAGE_VARIANT_INPUT_IDLE_MS;
-}
-
 function scheduleScaledVariantQueue() {
   const concurrency = IMAGE_VARIANT_QUEUE_CONCURRENCY;
   if (imageScaledVariantQueueActive >= concurrency) return;
   if (!imageScaledVariantQueue.length) return;
   if (imageScaledVariantQueueTimer !== null) return;
   const inputIdleMs = activeViewportInputIdleMs();
-  const idleThresholdMs = scaledVariantQueueTaskIdleThresholdMs(imageScaledVariantQueue[0]);
+  const idleThresholdMs = imageScaledVariantQueue[0].priority === true ? IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS : IMAGE_VARIANT_INPUT_IDLE_MS;
   const delay = inputIdleMs < idleThresholdMs ? idleThresholdMs - inputIdleMs : 0;
   imageScaledVariantQueueTimer = setTimeout(() => {
     imageScaledVariantQueueTimer = null;
     while (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
       const task = imageScaledVariantQueue[0];
-      if (!task) {
-        imageScaledVariantQueue.shift();
-        continue;
-      }
       const inputIdleMs = activeViewportInputIdleMs();
-      if (inputIdleMs < scaledVariantQueueTaskIdleThresholdMs(task)) break;
+      if (inputIdleMs < (task.priority === true ? IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS : IMAGE_VARIANT_INPUT_IDLE_MS)) break;
       imageScaledVariantQueue.shift();
       imageScaledVariantQueueActive++;
       task()

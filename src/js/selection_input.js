@@ -7,7 +7,6 @@ var _textMinWidthWarmObjectId = '';
 const SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
 
 function setSelectionOverlayScreenRect(element, state, resting, animated, padDevicePx = 0) {
-  if (!resting || !animated) return;
   const restingX = resting.x1 * zoom + panX;
   const restingY = resting.y1 * zoom + panY;
   const restingWidth = (resting.x2 - resting.x1) * zoom;
@@ -286,14 +285,6 @@ function _setStyleIfChanged(el, prop, value, state) {
   el.style[prop] = value;
 }
 
-function selectionBoundsIntersectViewport(bounds) {
-  if (!bounds) return false;
-  const { width, height } = _boardSurfaceCssSizeCache || boardSurfaceCssSize();
-  const screenX1 = bounds.x1 * zoom + panX, screenY1 = bounds.y1 * zoom + panY;
-  const screenX2 = bounds.x2 * zoom + panX, screenY2 = bounds.y2 * zoom + panY;
-  return screenX1 < width && screenX2 > 0 && screenY1 < height && screenY2 > 0;
-}
-
 const oppositeSelectionDir = function oppositeSelectionDir(dir) {
   if (dir === 'nw') return 'se';
   if (dir === 'ne') return 'sw';
@@ -314,13 +305,6 @@ function hideMultiSelectionOverlay() {
   if (!multiSelOverlay) return;
   if (multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.remove('visible');
 }
-
-const trimMultiSelectionBoxes = (maxCount = 0) => {
-  while (_multiSelBoxes.length > maxCount) {
-    const box = _multiSelBoxes.pop();
-    box?.parentNode?.removeChild(box);
-  }
-};
 
 function updateMultiSelectionOverlay(hasMotion, multiSelected) {
   if (!multiSelOverlay || !multiSelected) {
@@ -356,7 +340,10 @@ function updateMultiSelectionOverlay(hasMotion, multiSelected) {
     );
   }
 
-  trimMultiSelectionBoxes(selectedIdx);
+  while (_multiSelBoxes.length > selectedIdx) {
+    const box = _multiSelBoxes.pop();
+    box?.parentNode?.removeChild(box);
+  }
 
   if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
   return imageEdgePad;
@@ -391,7 +378,10 @@ function updateSelectionOverlay() {
     BoardfishEditorState.clearSelection();
     return;
   }
-  if (!selectionBoundsIntersectViewport(bounds)) {
+  const { width, height } = _boardSurfaceCssSizeCache || boardSurfaceCssSize();
+  const screenX1 = bounds.x1 * zoom + panX, screenY1 = bounds.y1 * zoom + panY;
+  const screenX2 = bounds.x2 * zoom + panX, screenY2 = bounds.y2 * zoom + panY;
+  if (!(screenX1 < width && screenX2 > 0 && screenY1 < height && screenY2 > 0)) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
     return;

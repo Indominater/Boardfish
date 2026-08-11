@@ -117,5 +117,5 @@ test('canvas selection highlight uses the shared stylesheet color token', () => 
   const viewport = readSource('src/js/viewport.js');
 
   assert.match(css, /--selection-highlight:\s*rgba\(10,\s*132,\s*255,\s*0\.3\);/);
-  assert.match(viewport, /context\.fillStyle = _canvasThemeColorCache\['--selection-highlight'\]/);
+  assert.match(viewport, /context\.fillStyle = 'rgba\(10, 132, 255, 0\.3\)'/);
 });

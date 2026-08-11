@@ -194,7 +194,6 @@ function loadSelectionInputHarness(objects, options = {}) {
     `${source}\n` +
       'globalThis.beginSelectionHandleDrag = beginSelectionHandleDrag;\n' +
       'globalThis.updateSelectionOverlay = updateSelectionOverlay;\n' +
-      'globalThis.selectionBoundsIntersectViewport = selectionBoundsIntersectViewport;\n' +
       'globalThis.flushEditHistoryCheckpoint = flushEditHistoryCheckpoint;\n' +
       'globalThis.beginTextEditHistoryAction = beginTextEditHistoryAction;\n' +
       'globalThis.recordTextEditInputHistory = recordTextEditInputHistory;\n' +
@@ -205,7 +204,6 @@ function loadSelectionInputHarness(objects, options = {}) {
 }
 
 test('selection chrome is hidden when its box only touches a viewport edge', () => {
-  const context = loadSelectionInputHarness([]);
   const bounds = { x1: 100, y1: 200, x2: 300, y2: 400 };
   for (const [view, visible] of [
     [{ zoom: 1, panX: 900, panY: 0 }, false],
@@ -214,8 +212,12 @@ test('selection chrome is hidden when its box only touches a viewport edge', () 
     [{ zoom: 1, panX: 0, panY: -400 }, false],
     [{ zoom: 2, panX: 0, panY: 0 }, true],
   ]) {
+    const context = loadSelectionInputHarness([{
+      id: 'object-a', type: 'rect', x: bounds.x1, y: bounds.y1, w: bounds.x2 - bounds.x1, h: bounds.y2 - bounds.y1,
+    }]);
     Object.assign(context, view);
-    assert.equal(context.selectionBoundsIntersectViewport(bounds), visible);
+    context.updateSelectionOverlay();
+    assert.equal(context.selOverlay.className.startsWith('visible'), visible);
   }
 });
 

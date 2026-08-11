@@ -72,11 +72,8 @@ var appThemeMeta = document.querySelector('meta[name="theme-color"]');
 var DEFAULT_APP_THEME = 'dark';
 var appTheme = DEFAULT_APP_THEME;
 var APP_THEME_STORAGE_KEY = 'bf_app_theme';
-var _canvasThemeColorCache = {
-  '--canvas-bg': '#d6d8da',
-  '--canvas-text': '#15141A',
-  '--selection-highlight': 'rgba(10, 132, 255, 0.3)',
-};
+var _canvasBackgroundColor;
+var _canvasTextColor;
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 // StartupDebug is initialized by js/startup_debug.js.
@@ -135,8 +132,8 @@ function applyAppTheme(theme, {
   appTheme = nextTheme;
   document.body.dataset.theme = appTheme;
   if (appThemeMeta) appThemeMeta.setAttribute('content', appTheme === 'dark' ? '#1c1b22' : '#eaeaed');
-  _canvasThemeColorCache['--canvas-bg'] = appTheme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
-  _canvasThemeColorCache['--canvas-text'] = appTheme === 'dark' ? '#fbfbfe' : '#15141A';
+  _canvasBackgroundColor = appTheme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
+  _canvasTextColor = appTheme === 'dark' ? '#fbfbfe' : '#15141A';
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -166,10 +163,10 @@ logStartupStep('theme-bootstrap', { theme: startupTheme });
 applyAppTheme(startupTheme, { render: false });
 
 function canvasTextColor() {
-  return _canvasThemeColorCache['--canvas-text'];
+  return _canvasTextColor;
 }
 
 function fillBoardBackground(context, width, height) {
-  context.fillStyle = _canvasThemeColorCache['--canvas-bg'];
+  context.fillStyle = _canvasBackgroundColor;
   context.fillRect(0, 0, width, height);
 }

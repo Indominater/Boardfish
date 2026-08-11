@@ -291,10 +291,8 @@ function measureRawTextWForDepth(text, depth = 0) {
 }
 
 var _textTabStopWidth;
-const textTabStopWidth = () => ((_textTabStopWidth ??= measureRawTextW('        ')) > 0 ? _textTabStopWidth : FONT_SIZE * 4);
-
 const textWidthAfterTab = (currentWidth) => {
-  const tabStop = textTabStopWidth();
+  const tabStop = (_textTabStopWidth ??= measureRawTextW('        ')) > 0 ? _textTabStopWidth : FONT_SIZE * 4;
   return (Math.floor(currentWidth / tabStop) + 1) * tabStop;
 };
 

@@ -124,10 +124,10 @@ function addImageObject(imgKey, cx, cy, w, h, options = {}) {
   const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z, data: { imgKey, flipX: false, flipY: false, rotation: 0 } };
   BoardfishEditorState.addObject(obj);
   if (editingId) exitEdit();
-  BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
   if (_bulkImageInsertDepth > 0) {
     _bulkImageInsertAdded++;
   } else {
+    BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'add-image');
     else scheduleRender(true, true);
     pushHistory('add-image');
@@ -405,12 +405,7 @@ async function insertImageFiles(files, x, y
     if (bulk) {
       const ids = addedIds.filter(Boolean);
       const primaryId = ids[ids.length - 1];
-      if (primaryId) {
-        BoardfishEditorState.setSelection(ids, {
-          primaryId,
-          exitEditing: false,
-        });
-      }
+      if (primaryId) BoardfishEditorState.setSelection(ids, { primaryId, exitEditing: false });
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         const historyAdded = finishBulkImageInsert();
         InsertDebug.step(dbg, 'bulk:end', { source, added, historyAdded });

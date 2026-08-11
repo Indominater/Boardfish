@@ -427,7 +427,7 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, stats =
 function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, motion) {
   context.save();
   if (motion) applyTextSelectionMotionTransform(context, selection.bounds, motion);
-  context.fillStyle = _canvasThemeColorCache['--selection-highlight'];
+  context.fillStyle = 'rgba(10, 132, 255, 0.3)';
   context.beginPath();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   for (const run of selection.runs) {

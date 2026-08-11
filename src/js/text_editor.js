@@ -2022,12 +2022,7 @@ const readBoardfishTextClipboardPayloadForPaste = async (event = null
 };
 
 const setPendingTextEditInputState = (proxy, state) => {
-  if (!proxy) return;
-  if (typeof proxy._boardfishSetPendingInputState === 'function') {
-    proxy._boardfishSetPendingInputState(state);
-  } else {
-    proxy._boardfishPendingInputState = state;
-  }
+  proxy?._boardfishSetPendingInputState?.(state);
 };
 
 const isTextEditProxyDomStale = (proxy, logicalValue = null) => {
@@ -2741,7 +2736,7 @@ function enterEdit(id, {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   });
 	  proxy.addEventListener('input', (event) => {
-	    const inputState = pendingInputState || proxy._boardfishPendingInputState || textEditSelectionState(proxy);
+	    const inputState = pendingInputState || textEditSelectionState(proxy);
 	    const inputType = event?.inputType || inputState.inputType || '';
 	    /* BOARDFISH_DEV_DIAGNOSTICS_START */
 	    const dbg = inputState.debug || null;
@@ -2774,7 +2769,7 @@ function enterEdit(id, {
 	      proxyChars: textEditProxyValue(proxy).length,
 	      domProxyChars: proxy.value.length,
 	      domValueStale: !!proxy._boardfishDomValueStale,
-	      pendingInputState: !!pendingInputState || !!proxy._boardfishPendingInputState,
+	      pendingInputState: !!pendingInputState,
 	      textEditCaretIndex: obj._textEditCaretIndex ?? '',
 	      textEditCaretLineStartIndex: obj._textEditCaretLineStartIndex ?? '',
 	      ...textEditorCaretLineDebugStats(obj, inputState.start ?? proxy.selectionStart, 'inputStartCaret'),
@@ -2785,7 +2780,6 @@ function enterEdit(id, {
 	      ...textEditorSelectionDebugStats(inputState, inputState.value ?? obj.data.content ?? ''),
 	    }));
     pendingInputState = null;
-    proxy._boardfishPendingInputState = null;
 	    const oldValue = inputState.value ?? obj.data.content ?? '';
 	    let replacement = inputState.replacement || null;
 	    let synthesizedStaleReplacement = false;

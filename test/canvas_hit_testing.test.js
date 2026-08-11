@@ -795,7 +795,6 @@ test('overlapping text selection highlight runs share one path fill', () => {
   const drawCalls = [];
   const context = {
     LINE_H: 24,
-    _canvasThemeColorCache: { '--selection-highlight': 'rgba(10, 132, 255, 0.3)' },
     TextSelDebug: { _logDraw() {} },
     applyTextSelectionMotionTransform() {},
   };
@@ -844,7 +843,6 @@ test('script text selection highlight shares one path fill with its base run', (
   const rectCalls = [];
   const context = {
     LINE_H: 24,
-    _canvasThemeColorCache: { '--selection-highlight': 'rgba(10, 132, 255, 0.3)' },
     TextSelDebug: { _logDraw() {} },
     applyTextSelectionMotionTransform() {},
   };
