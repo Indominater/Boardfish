@@ -435,11 +435,9 @@
       baseOffset: tailOffset,
       containerSize,
     });
-    const centralBytes = await blobRangeToBytes(
-      blob,
-      info.centralOffset,
-      info.centralOffset + info.centralSize,
-    );
+    const centralBytes = info.centralOffset >= tailOffset
+      ? tailBytes.subarray(info.centralOffset - tailOffset, info.centralOffset - tailOffset + info.centralSize)
+      : await blobRangeToBytes(blob, info.centralOffset, info.centralOffset + info.centralSize);
     return {
       entries: parseCentralDirectoryBytes(centralBytes, info.entryCount, info.centralSize),
       tailBytes: tailBytes.length,

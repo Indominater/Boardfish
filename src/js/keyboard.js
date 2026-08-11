@@ -93,7 +93,7 @@ const applySelectedTextAlignmentFromKeyboard = (direction) => {
   if (!dirty.length) return false;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'text-align');
   else scheduleRender(true, true);
-  pushHistory('text-align', { dirty });
+  pushHistory('text-align', dirty);
   return true;
 };
 

@@ -278,7 +278,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
     replacementState._debugSeq = nextTextEditInputDebugSeq();
   }
   if (immediateHistory) {
-    beginTextEditHistoryAction(editingId, replacementState, { splitPending: true });
+    beginTextEditHistoryAction(editingId, replacementState);
   }
   if (typeof setPendingTextEditInputState === 'function') setPendingTextEditInputState(_editEl, replacementState);
   if (typeof setTextEditProxySelectionRange === 'function') {

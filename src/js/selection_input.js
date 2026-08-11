@@ -482,7 +482,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           move: onMultiMove,
           up() {
             resizeCommitter.flush();
-            pushHistory('multi-resize', { dirty: snapshots });
+            pushHistory('multi-resize', snapshots);
           },
         });
         return;
@@ -803,15 +803,14 @@ function hideMenus() {
 const normalizeTextEditHistoryState = (id, state = null) => {
   const targetId = id || state?.id || editingId;
   if (!targetId) return null;
-  const proxyValue = typeof textEditProxyValue === 'function' && _editEl
-    ? textEditProxyValue(_editEl)
-    : (typeof _editEl?.value === 'string' ? _editEl.value : '');
+  const obj = objectsMap.get(targetId);
   const valueLength = typeof state?.value === 'string'
     ? state.value.length
-    : (_editEl ? proxyValue.length : (objectsMap.get(targetId)?.data?.content?.length || 0));
+    : (_editEl
+        ? (typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl).length : (_editEl.value?.length || 0))
+        : (obj?.data?.content?.length || 0));
   const start = Math.max(0, Math.min(state?.start ?? state?.selectionStart ?? _editEl?.selectionStart ?? 0, valueLength));
   const end = Math.max(0, Math.min(state?.end ?? state?.selectionEnd ?? start, valueLength));
-  const obj = objectsMap.get(targetId);
   const rawScriptCaretIndex = state?.scriptCaretIndex ?? state?.textScriptCaretIndex ?? obj?._textScriptCaretIndex;
   const scriptCaretIndexValue = Number(rawScriptCaretIndex ?? start);
   const scriptCaretIndex = Number.isFinite(scriptCaretIndexValue)
@@ -869,8 +868,12 @@ const logTextEditHistoryDebug = (label, id, state = null, normalized = null, ext
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const beginTextEditHistoryAction = (id = editingId, state = null, { splitPending = false } = {}) => {
+const beginTextEditHistoryAction = (id = editingId, state = null) => {
   if (!id) return null;
+  const splitPending = shouldCommitTextEditInputImmediately(
+    state?.inputType,
+    state?.hasSelection ?? (state?.start !== state?.end),
+  );
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hadPendingStart = !!(_editHistoryActionStartState && _editHistoryActionStartState.id === id);
   const hadTimer = !!_editHistoryTimer;
@@ -899,27 +902,20 @@ const beginTextEditHistoryAction = (id = editingId, state = null, { splitPending
   return _editHistoryActionStartState;
 };
 
-const consumeTextEditHistoryActionStartState = (id) => {
-  const state = _editHistoryActionStartState?.id === id ? _editHistoryActionStartState : null;
-  _editHistoryActionStartState = null;
-  return state;
-};
-
 function pushEditHistoryIfChanged(id) {
   const obj = objectsMap.get(id);
   if (!obj) return false;
   if (_editHistoryLastContent === null) _editHistoryLastContent = obj.data.content;
   if (obj.data.content === _editHistoryLastContent) return false;
-  const beforeEditState = consumeTextEditHistoryActionStartState(id);
+  const beforeEditState = _editHistoryActionStartState?.id === id ? _editHistoryActionStartState : null;
+  _editHistoryActionStartState = null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logTextEditHistoryDebug('history-push', id, null, beforeEditState, {
     previousContentChars: String(_editHistoryLastContent || '').length,
     nextContentChars: String(obj.data.content || '').length,
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  pushHistory('text-edit-checkpoint', {
-    beforeEditState,
-  });
+  pushHistory('text-edit-checkpoint', null, beforeEditState);
   _editHistoryLastContent = obj.data.content;
   return true;
 }
@@ -938,28 +934,18 @@ function flushEditHistoryCheckpoint() {
   return pushEditHistoryIfChanged(editingId);
 }
 
-function scheduleEditHistoryCheckpoint(id) {
+const shouldCommitTextEditInputImmediately = (inputType = '', hadSelection = false) =>
+  hadSelection || inputType.includes('Paste') || inputType.includes('Cut');
+
+const recordTextEditInputHistory = (id, inputType = '', hadSelection = false) => {
+  if (shouldCommitTextEditInputImmediately(inputType, hadSelection)) {
+    clearEditHistoryCheckpointTimer();
+    return pushEditHistoryIfChanged(id);
+  }
   clearEditHistoryCheckpointTimer();
   _editHistoryTimer = setTimeout(() => {
     _editHistoryTimer = null;
     pushEditHistoryIfChanged(id);
   }, EDIT_HISTORY_DEBOUNCE_MS);
-}
-
-const shouldCommitTextEditInputImmediately = (inputType = '', hadSelection = false) => {
-  const value = String(inputType || '').toLowerCase();
-  return !!hadSelection || value.includes('paste') || value.includes('cut');
-};
-
-const recordTextEditInputHistory = (id, {
-  inputType = '',
-  hadSelection = false,
-  immediate = false,
-} = {}) => {
-  if (immediate || shouldCommitTextEditInputImmediately(inputType, hadSelection)) {
-    clearEditHistoryCheckpointTimer();
-    return pushEditHistoryIfChanged(id);
-  }
-  scheduleEditHistoryCheckpoint(id);
   return false;
 };

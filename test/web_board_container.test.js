@@ -376,6 +376,7 @@ test('Blob lazy opens use range reads and preserve exact image bytes on re-save'
   assert.equal(opened.debug.read_mode, 'blob-random-access');
   assert.equal(opened.debug.random_access, true);
   assert.ok(sliceRanges.length >= 5);
+  assert.equal(materializedRanges.length, 4);
   assert.ok(sliceRanges.every((range) => range.end - range.start < input.size));
   assert.equal(materializedRanges.some((range) => range.end - range.start === imageBytes.length), false);
   assert.equal(source.__blob instanceof Blob, true);

@@ -58,7 +58,6 @@ var imageScaledVariantSourceReadyCandidateCount = 0;
 var imageScaledVariantSourceReadyQueuedCount = 0;
 var imageScaledVariantSourceReadyReadyCount = 0;
 var imageScaledVariantSourceReadyNoSourceCount = 0;
-var imageScaledVariantSourceReadyFullScaleCount = 0;
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 var IMAGE_VARIANT_PREWARM_PAD_PX = 768;
 var viewportCullingEnabled = true;
@@ -202,14 +201,13 @@ function warmDrawableBitmapForDrawNow(source, meta = {}) {
   }
 }
 
-function runDrawableBitmapWarmupQueue(options = {}) {
-  const force = options.force === true;
+function runDrawableBitmapWarmupQueue(force = false, budgetMs = 4, maxItems = 4) {
   if (!force && typeof isActiveViewportInput === 'function' && isActiveViewportInput()) {
     scheduleDrawableBitmapWarmupQueue();
     return;
   }
-  const budgetMs = Math.max(1, Number(options.budgetMs) || 4);
-  const maxItems = Math.max(1, Math.trunc(Number(options.maxItems) || 4));
+  budgetMs = Math.max(1, Number(budgetMs) || 4);
+  maxItems = Math.max(1, Math.trunc(Number(maxItems) || 4));
   const start = performance.now();
   let count = 0;
   for (const [source, meta] of drawableBitmapWarmupQueue) {
@@ -235,7 +233,7 @@ function scheduleDrawableBitmapWarmupQueue() {
   }
 }
 
-function scheduleDrawableBitmapWarmup(source, meta = {}, options = {}) {
+function scheduleDrawableBitmapWarmup(source, meta = {}, immediate = false, budgetMs = 4, maxItems = 1) {
   if (!isImageVariantDrawableSource(source)) return false;
   if (drawableBitmapWarmupReady.has(source) || drawableBitmapWarmupQueue.has(source)) {
     return false;
@@ -245,15 +243,8 @@ function scheduleDrawableBitmapWarmup(source, meta = {}, options = {}) {
     drawableBitmapWarmupQueuedCount++;
     countDrawableBitmapWarmupKind(drawableBitmapWarmupQueuedByKind, meta);
   }
-  if (options.immediate === true) {
-    runDrawableBitmapWarmupQueue({
-      force: true,
-      budgetMs: options.budgetMs,
-      maxItems: options.maxItems || 1,
-    });
-  } else {
-    scheduleDrawableBitmapWarmupQueue();
-  }
+  if (immediate === true) runDrawableBitmapWarmupQueue(true, budgetMs, maxItems || 1);
+  else scheduleDrawableBitmapWarmupQueue();
   return true;
 }
 
@@ -353,7 +344,6 @@ function clearScaledImageVariants(key = null) {
     imageScaledVariantSourceReadyQueuedCount = 0;
     imageScaledVariantSourceReadyReadyCount = 0;
     imageScaledVariantSourceReadyNoSourceCount = 0;
-    imageScaledVariantSourceReadyFullScaleCount = 0;
   }
   drawableBitmapWarmupQueue.clear();
   drawableBitmapWarmupScheduled = false;
@@ -493,7 +483,7 @@ async function createScaledImageVariantBitmap(source, sourceW, sourceH, scale) {
   }
 }
 
-async function buildScaledImageVariantNow(key, source, scale, options = {}) {
+async function buildScaledImageVariantNow(key, source, scale, scheduleRender = true, warmupImmediate = false) {
   if (!isViewportImageScalingActive() || !key || !source || scale !== IMAGE_SCALE_LEVELS[0]) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: false, skipped: 'disabled-or-invalid' }
@@ -546,13 +536,9 @@ async function buildScaledImageVariantNow(key, source, scale, options = {}) {
     setScaledImageVariant(key, { bitmap, bytes });
     const warmupMeta = { kind: 'scaled-variant', key };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') Object.assign(warmupMeta, { scale, source: 'build-now' });
-    scheduleDrawableBitmapWarmup(bitmap, warmupMeta, {
-      immediate: options.warmupImmediate === true,
-      budgetMs: 8,
-      maxItems: 1,
-    });
+    scheduleDrawableBitmapWarmup(bitmap, warmupMeta, warmupImmediate === true, 8);
     bitmap = null;
-    if (options.scheduleRender !== false) scheduleScaledVariantReadyRender();
+    if (scheduleRender !== false) scheduleScaledVariantReadyRender();
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { key, scale, ready: true, bytes, ms: performance.now() - buildStart }
       : true;
@@ -722,7 +708,7 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
     : true;
 }
 
-function queueScaledImageVariantForReadyImage(key, source, options = {}) {
+function queueScaledImageVariantForReadyImage(key, source, priority = false) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantSourceReadyCandidateCount++;
   if (!isViewportImageScalingActive() || !key) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -738,15 +724,8 @@ function queueScaledImageVariantForReadyImage(key, source, options = {}) {
     }
     return false;
   }
-  const scale = Number(options.scale) || IMAGE_SCALE_LEVELS[0] || 0.25;
-  if (scale !== IMAGE_SCALE_LEVELS[0]) {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      imageScaledVariantSourceReadyFullScaleCount++;
-      return { key, scale, queued: false, skipped: 'full-scale' };
-    }
-    return false;
-  }
-  const result = queueScaledImageVariant(key, source, scale, options.priority === true);
+  const scale = IMAGE_SCALE_LEVELS[0];
+  const result = queueScaledImageVariant(key, source, scale, priority === true);
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     if (result?.queued) imageScaledVariantSourceReadyQueuedCount++;
     else if (result?.skipped === 'already-ready' || result?.skipped === 'pending') {
@@ -763,14 +742,14 @@ function queueScaledImageVariantForDraw(key, obj, source, view = { zoom, dpr: wi
   return targetScale;
 }
 
-async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
+async function prewarmVisibleScaledImageVariantsForOpen(concurrency = 4, padPx = 0, limit = 0) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const startedAt = typeof BOARDFISH_PRODUCTION === 'undefined' ? performance.now() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!isViewportImageScalingActive()) {
     return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'disabled' } : undefined;
   }
-  const padPx = Number.isFinite(options.padPx) ? options.padPx : 0;
+  padPx = Number.isFinite(padPx) ? padPx : 0;
   const rect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(padPx) : null;
   if (!rect) return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'no-viewport' } : undefined;
   const view = {
@@ -807,16 +786,12 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
     }
     tasks.push({ key, source, scale });
   }
-  tasks.sort((a, b) => bitmapByteSize(b.source) - bitmapByteSize(a.source));
-  const limit = Math.max(0, Math.floor(Number(options.limit) || tasks.length));
-  if (tasks.length > limit) tasks.length = limit;
-  const concurrency = Math.max(1, Math.min(8, Math.floor(Number(options.concurrency) || 4), tasks.length || 1));
+  limit = Math.max(0, Math.floor(Number(limit) || tasks.length));
+  if (tasks.length > limit) tasks.sort((a, b) => bitmapByteSize(b.source) - bitmapByteSize(a.source)).length = limit;
+  concurrency = Math.max(1, Math.min(8, Math.floor(Number(concurrency) || 4), tasks.length || 1));
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
     await mapWithConcurrency(tasks, concurrency, ({ key, source, scale }) =>
-      buildScaledImageVariantNow(key, source, scale, {
-        scheduleRender: false,
-        warmupImmediate: true,
-      }), false);
+      buildScaledImageVariantNow(key, source, scale, false, true), false);
     return;
   }
   let built = 0;
@@ -824,10 +799,7 @@ async function prewarmVisibleScaledImageVariantsForOpen(options = {}) {
   let skipped = 0;
   let bytes = 0;
   const results = await mapWithConcurrency(tasks, concurrency, async ({ key, source, scale }) => {
-    const result = await buildScaledImageVariantNow(key, source, scale, {
-      scheduleRender: false,
-      warmupImmediate: true,
-    });
+    const result = await buildScaledImageVariantNow(key, source, scale, false, true);
     if (result.ready && !result.skipped) {
       built++;
       bytes += Number(result.bytes) || 0;

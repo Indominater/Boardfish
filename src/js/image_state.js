@@ -277,11 +277,8 @@ async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       Object.assign(warmupMeta, { objectId: obj.id || '', source: options.source || '' });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      scheduleDrawableBitmapWarmup(bitmap, warmupMeta, {
-        immediate: options.warmupImmediate === true || (typeof _boardOpening !== 'undefined' && _boardOpening),
-        budgetMs: 8,
-        maxItems: 1,
-      });
+      scheduleDrawableBitmapWarmup(bitmap, warmupMeta,
+        options.warmupImmediate === true || (typeof _boardOpening !== 'undefined' && _boardOpening), 8);
     }
     bitmap = null;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -839,9 +836,7 @@ function cacheImage(key, src
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const variantQueue =
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          queueScaledImageVariantForReadyImage(key, selectedBitmap, {
-            priority: previewPriority,
-          });
+          queueScaledImageVariantForReadyImage(key, selectedBitmap, previewPriority);
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           OpenDebug.step(dbg, 'cache-image:queue-scaled-variant', {
             imgKey: key,

@@ -80,6 +80,7 @@ test('one-finger movement beyond the tap slop pans without tapping', () => {
 
   harness.controller.pointerMove(point(1, 20, 10));
   harness.controller.pointerMove(point(1, 24, 16));
+  harness.controller.pointerMove(point(1, 24, 16));
   harness.controller.pointerUp(point(1, 24, 16));
 
   assert.deepEqual(harness.events.map((event) => event.type), ['pan-start', 'pan', 'pan']);
@@ -133,6 +134,7 @@ test('two touches pinch around their midpoint and can resume as a pan', () => {
 
   const pinchStart = harness.events.find((event) => event.type === 'pinch-start');
   const pinchEvents = harness.events.filter((event) => event.type === 'pinch');
+  assert.equal(pinchEvents.length, 5);
   const pinch = pinchEvents[pinchEvents.length - 1];
   assert.equal(pinchStart.centerX, 50);
   assert.equal(pinchStart.distance, 100);

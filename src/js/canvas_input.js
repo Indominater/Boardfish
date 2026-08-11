@@ -358,13 +358,14 @@ function startMousePan(e) {
     const handlerStart = collectDebug ? canvasInputNow() : 0;
     try {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      ViewportDebug.count('mousePanMoves');
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const panXBefore = panX;
       const panYBefore = panY;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const clientStepX = ev.clientX - lastClientX;
       const clientStepY = ev.clientY - lastClientY;
+      if (!clientStepX && !clientStepY) return;
+      ViewportDebug.count('mousePanMoves');
       BoardfishViewportState.panBy(clientStepX, clientStepY);
       if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('mouse-pan', ev);
       else scheduleTransform();
@@ -482,7 +483,7 @@ function createSelectionDragSession(startClientX, startClientY) {
     finished = true;
     if (!grpMoved) return false;
     dragCommitter.flush();
-    pushHistory('group-drag', { dirty: grpItems });
+    pushHistory('group-drag', grpItems);
     return true;
   }
   return { move, finish };
@@ -793,7 +794,7 @@ function startObjectDrag(e, obj) {
       }
       return;
     }
-    pushHistory('drag', { dirty: [obj.id] });
+    pushHistory('drag', [obj.id]);
   }
   beginDocumentDrag({ move: onMove, up: onUp });
   return true;

@@ -1037,11 +1037,7 @@ async function finishOpenedBoard(
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const prewarmStart = performance.now();
-      const prewarm = await prewarmVisibleScaledImageVariantsForOpen({
-        padPx: 0,
-        concurrency: 4,
-        reason: 'open-initial-render',
-      });
+      const prewarm = await prewarmVisibleScaledImageVariantsForOpen(4);
       OpenDebug.step(dbg, 'prewarm-visible-scaled-variants', {
         ms: performance.now() - prewarmStart,
         ...prewarm,
@@ -1054,7 +1050,7 @@ async function finishOpenedBoard(
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     } else {
-      await prewarmVisibleScaledImageVariantsForOpen({ padPx: 0, concurrency: 4 });
+      await prewarmVisibleScaledImageVariantsForOpen(4);
     }
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

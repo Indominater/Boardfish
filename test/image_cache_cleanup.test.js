@@ -288,8 +288,8 @@ test('cacheImage prioritizes the exact scaled replacement for an active open pre
   const queued = [];
   const { context, rafs } = loadImageState(() => Promise.resolve(bitmap));
   const src = 'data:image/png;base64,boardfish';
-  context.queueScaledImageVariantForReadyImage = (key, source, options) => {
-    queued.push({ key, source, options });
+  context.queueScaledImageVariantForReadyImage = (key, source, priority) => {
+    queued.push({ key, source, priority });
     return { key, scale: 0.25, queued: true };
   };
   context.imageOpenPreviewBitmapCache.set('img-1', {
@@ -304,7 +304,7 @@ test('cacheImage prioritizes the exact scaled replacement for an active open pre
   assert.equal(queued.length, 1);
   assert.equal(queued[0].key, 'img-1');
   assert.equal(queued[0].source, bitmap);
-  assert.equal(queued[0].options.priority, true);
+  assert.equal(queued[0].priority, true);
 });
 
 test('removeImageRuntimeCachesForKey clears runtime bitmap state for the removed image only', () => {

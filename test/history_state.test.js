@@ -306,7 +306,7 @@ test('text-only history skips image cache pruning when no image cache state exis
 
   context.snapshot();
   context.objectsMap.get('text-1').data.content = 'hello world';
-  context.pushHistory('text-edit-checkpoint', { dirty: [{ obj: context.objectsMap.get('text-1') }] });
+  context.pushHistory('text-edit-checkpoint', [{ obj: context.objectsMap.get('text-1') }]);
 
   assert.deepEqual(context.imagePruneCalls, []);
 });
@@ -460,13 +460,11 @@ test('undoing a text run restores the caret saved before the run started', () =>
   context._editEl.selectionStart = 14;
   context._editEl.selectionEnd = 14;
   context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint', {
-    beforeEditState: {
+  context.pushHistory('text-edit-checkpoint', null, {
       id: 'text-1',
       selectionStart: 8,
       selectionEnd: 8,
       selectionDirection: 'none',
-    },
   });
 
   context.undo();
@@ -509,13 +507,11 @@ test('undoing a selected text replacement restores the replaced highlight range'
   context._editEl.selectionEnd = 9;
   context._editEl.selectionDirection = 'none';
   context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint', {
-    beforeEditState: {
+  context.pushHistory('text-edit-checkpoint', null, {
       id: 'text-1',
       selectionStart: 4,
       selectionEnd: 7,
       selectionDirection: 'forward',
-    },
   });
 
   context.undo();
@@ -561,13 +557,11 @@ test('undoing a selected replacement syncs stale proxy DOM before restoring high
   context._editEl.selectionEnd = 8;
   context._editEl.selectionDirection = 'none';
   context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint', {
-    beforeEditState: {
+  context.pushHistory('text-edit-checkpoint', null, {
       id: 'text-1',
       selectionStart: 7,
       selectionEnd: 20,
       selectionDirection: 'forward',
-    },
   });
 
   context.undo();
@@ -640,7 +634,7 @@ test('immediate text edit history actions replace stale start selection', () => 
     start: 4,
     end: 7,
     direction: 'forward',
-  }, { splitPending: true });
+  });
 
   assert.deepEqual(JSON.parse(JSON.stringify(state)), {
     id: 'text-1',
@@ -671,7 +665,7 @@ test('text edit history start state clamps selection to captured pre-edit value'
     end: 20,
     direction: 'forward',
     value: oldValue,
-  }, { splitPending: true });
+  });
 
   assert.deepEqual(JSON.parse(JSON.stringify(state)), {
     id: 'text-1',
@@ -706,15 +700,13 @@ test('undoing a script-boundary delete restores the saved script caret affinity'
   context._editEl.selectionStart = 0;
   context._editEl.selectionEnd = 0;
   context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint', {
-    beforeEditState: {
+  context.pushHistory('text-edit-checkpoint', null, {
       id: 'text-1',
       selectionStart: 10,
       selectionEnd: 10,
       selectionDirection: 'none',
       scriptCaretIndex: 10,
       scriptCaretAffinity: 'after',
-    },
   });
 
   context.undo();
@@ -757,13 +749,11 @@ test('undoing and redoing text edits preserve restored text box dimensions', () 
   context._editEl.selectionStart = 0;
   context._editEl.selectionEnd = 0;
   context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint', {
-    beforeEditState: {
+  context.pushHistory('text-edit-checkpoint', null, {
       id: 'text-1',
       selectionStart: 11,
       selectionEnd: 11,
       selectionDirection: 'none',
-    },
   });
 
   context.undo();
@@ -830,13 +820,11 @@ test('undoing and redoing text edits restore active text runtime layout caches',
   context._editEl.selectionEnd = 5;
   attachTextRuntimeCache(text, 'after', 'cached-after');
   context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint', {
-    beforeEditState: {
+  context.pushHistory('text-edit-checkpoint', null, {
       id: 'text-1',
       selectionStart: 6,
       selectionEnd: 6,
       selectionDirection: 'none',
-    },
   });
 
   context.undo();
@@ -904,13 +892,11 @@ test('undoing and redoing text edits hydrate unchanged text runtime caches from 
   context._editEl.selectionEnd = 5;
   attachTextRuntimeCache(edited, 'after', 'cached-after');
   context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint', {
-    beforeEditState: {
+  context.pushHistory('text-edit-checkpoint', null, {
       id: 'text-1',
       selectionStart: 6,
       selectionEnd: 6,
       selectionDirection: 'none',
-    },
   });
 
   context.undo();

@@ -422,61 +422,35 @@ function textGlyphPairSpacing(previousUnit, nextUnit, font = FONT) {
   return spacing;
 }
 
-function clearTextObjectLayoutRuntime(obj, options = {}) {
+function clearTextObjectLayoutRuntime(obj, options) {
   if (!obj) return;
-  delete obj._layoutCache;
-  delete obj._layoutCacheContent;
-  delete obj._layoutCacheW;
-  delete obj._layoutCacheScriptKey;
-  delete obj._layoutCacheAlignKey;
-  delete obj._layoutCacheY;
-  if (options.script !== false) {
-    if (options.scriptRanges !== false) {
-      delete obj._textScriptRangesCache;
-      delete obj._textScriptRangesCacheContent;
-      delete obj._textScriptRangesCacheSourceKey;
+  obj._layoutCache = obj._layoutCacheContent = obj._layoutCacheScriptKey =
+    obj._layoutCacheAlignKey = null;
+  if (options?.script !== false) {
+    if (options?.scriptRanges !== false) {
+      obj._textScriptRangesCache = obj._textScriptRangesCacheContent =
+        obj._textScriptRangesCacheSourceKey = null;
     }
-    delete obj._textScriptLayoutMetrics;
-    delete obj._textScriptLayoutMetricsContent;
-    delete obj._textScriptLayoutMetricsScriptKey;
-    delete obj._textClipboardCacheContent;
-    delete obj._textClipboardCacheScriptKey;
-    delete obj._textClipboardCacheValue;
+    obj._textScriptLayoutMetrics = obj._textScriptLayoutMetricsContent =
+      obj._textScriptLayoutMetricsScriptKey = obj._textClipboardCacheContent =
+      obj._textClipboardCacheScriptKey = obj._textClipboardCacheValue = null;
   }
-  if (options.minWidth !== false) {
-    delete obj._textMinWidthCache;
-    delete obj._textMinWidthCacheContent;
-    delete obj._textMinWidthCacheScriptKey;
+  if (options?.minWidth !== false) {
+    obj._textMinWidthCache = obj._textMinWidthCacheContent = obj._textMinWidthCacheScriptKey = null;
   }
-  if (options.prefix !== false) {
-    delete obj._textParagraphPrefixCache;
-    delete obj._textParagraphPrefixCacheContent;
-    delete obj._textParagraphPrefixCacheScriptKey;
+  if (options?.prefix !== false) {
+    obj._textParagraphPrefixCache = obj._textParagraphPrefixCacheContent =
+      obj._textParagraphPrefixCacheScriptKey = null;
   }
-  delete obj._textWrappedLineCountCacheContent;
-  delete obj._textWrappedLineCountCacheW;
-  delete obj._textWrappedLineCountCacheScriptKey;
-  delete obj._textWrappedLineCountCacheValue;
-  delete obj._textWrappedLineIndexCacheContent;
-  delete obj._textWrappedLineIndexCacheW;
-  delete obj._textWrappedLineIndexCacheScriptKey;
-  delete obj._textWrappedLineIndexCache;
-  delete obj._textWrappedLineIndexWidthCacheContent;
-  delete obj._textWrappedLineIndexWidthCacheScriptKey;
-  delete obj._textWrappedLineIndexWidthCache;
-  delete obj._textViewportLayoutRangeCacheContent;
-  delete obj._textViewportLayoutRangeCacheW;
-  delete obj._textViewportLayoutRangeCacheScriptKey;
-  delete obj._textViewportLayoutRangeCacheAlignKey;
-  delete obj._textViewportLayoutRangeCacheY;
-  delete obj._textViewportLayoutRangeCache;
-  delete obj._textViewportLayoutLineCacheContent;
-  delete obj._textViewportLayoutLineCacheW;
-  delete obj._textViewportLayoutLineCacheScriptKey;
-  delete obj._textViewportLayoutLineCacheAlignKey;
-  delete obj._textViewportLayoutLineCacheY;
-  delete obj._textViewportLayoutLineCacheLineCount;
-  delete obj._textViewportLayoutLineCache;
+  obj._textWrappedLineCountCacheContent = obj._textWrappedLineCountCacheScriptKey =
+    obj._textWrappedLineCountCacheValue = obj._textWrappedLineIndexCacheContent =
+    obj._textWrappedLineIndexCacheScriptKey = obj._textWrappedLineIndexCache =
+    obj._textWrappedLineIndexWidthCacheContent = obj._textWrappedLineIndexWidthCacheScriptKey =
+    obj._textWrappedLineIndexWidthCache = obj._textViewportLayoutRangeCacheContent =
+    obj._textViewportLayoutRangeCacheScriptKey = obj._textViewportLayoutRangeCacheAlignKey =
+    obj._textViewportLayoutRangeCache = obj._textViewportLayoutLineCacheContent =
+    obj._textViewportLayoutLineCacheScriptKey = obj._textViewportLayoutLineCacheAlignKey =
+    obj._textViewportLayoutLineCache = null;
 }
 
 const cloneTextLayoutRuntimeLine = ({ _textDrawPlanCache, ...clone }) => clone;
@@ -1409,7 +1383,6 @@ function layoutLineFromWrappedLine(obj, line, lineIndex, scriptRanges, scriptMet
 function patchTextObjectLayoutAfterInput(obj, options = {}) {
   if (!obj || obj.type !== 'text' || !Array.isArray(obj._layoutCache)) return false;
   const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-  obj._lastTextLayoutLineDelta = null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const debug = collectDiagnostics ? {
     ok: false,
@@ -2993,19 +2966,12 @@ const normalizeTextLayoutHitCaretIndex = (line, index, direction = 'forward', ob
   const text = normalizeTextContent(obj?.data?.content ?? line?.content ?? line?.text ?? '');
   const ranges = line?.scriptRanges || [];
   let pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
+  if (!ranges.length) return pos;
   const step = direction === 'backward' ? -1 : 1;
-  const shouldSkip = () => {
-    for (const range of ranges) {
-      if (isTextScriptBracedRange(text, range)) {
-        if (range.start === pos) return true;
-      } else if (range.start === pos + 1) {
-        return true;
-      }
-    }
-    return false;
-  };
   let guard = text.length + 1;
-  while (guard-- > 0 && pos >= 0 && pos <= text.length && shouldSkip()) {
+  while (guard-- > 0 && pos >= 0 && pos <= text.length && ranges.some((range) => (
+    isTextScriptBracedRange(text, range) ? range.start === pos : range.start === pos + 1
+  ))) {
     pos += step;
     if (pos < 0) return 0;
     if (pos > text.length) return text.length;

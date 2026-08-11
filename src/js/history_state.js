@@ -295,8 +295,8 @@ function snapshot() {
 // Delta push: only deep-clones objects that changed since last snapshot.
 // Unchanged objects share the previous snapshot's reference (safe since
 // restoreSnapshot always deep-clones before mutating).
-function pushHistory(reason = '', options = {}) {
-  if (options.dirty) for (const item of options.dirty) _dirtyIds.add(item?.obj?.id ?? item?.id ?? item);
+function pushHistory(reason = '', dirty = null, beforeEditState = null) {
+  if (dirty) for (const item of dirty) _dirtyIds.add(item?.obj?.id ?? item?.id ?? item);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = HistoryDebug.start('pushHistory', {
     reason,
@@ -351,7 +351,7 @@ function pushHistory(reason = '', options = {}) {
     reason,
     objects: entry,
     editState,
-    beforeEditState: options.beforeEditState || null,
+    beforeEditState,
   });
   historyIndex++;
   historyEntriesDropped = trimHistory() || historyEntriesDropped;
@@ -370,9 +370,7 @@ function pushHistory(reason = '', options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
-function restoreSnapshot(s, {
-  editStateOverride = undefined,
-} = {}) {
+function restoreSnapshot(s, editStateOverride) {
   const snapshotObjects = s?.objects || [];
   const snapshotEditState = s?.editState || null;
   const editState = editStateOverride === undefined ? snapshotEditState : editStateOverride;
@@ -756,9 +754,7 @@ function undo() {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const restoreStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  restoreSnapshot(boardHistory[historyIndex], {
-    editStateOverride: undoEditState,
-  });
+  restoreSnapshot(boardHistory[historyIndex], undoEditState);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'restore-done', {
     restoreMs: performance.now() - restoreStart,

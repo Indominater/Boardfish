@@ -153,14 +153,12 @@
       }
 
       if (mode === 'pan') {
-        call('onPan', gesturePayload(current, {
-          dx: current.x - current.previousX,
-          dy: current.y - current.previousY,
-        }));
+        const dx = current.x - current.previousX, dy = current.y - current.previousY;
+        if (dx || dy) call('onPan', gesturePayload(current, { dx, dy }));
         return true;
       }
 
-      emitPinch(current);
+      if (current.x - current.previousX || current.y - current.previousY) emitPinch(current);
       return true;
     }
 
@@ -274,7 +272,6 @@
     return;
   }
 
-  const syntheticMouseEvents = new WeakSet();
   let touchPinchStartViewport = null;
   let touchSelectionDrag = null;
   let suppressCompatibilityMouseUntil = 0;
@@ -324,7 +321,6 @@
       button,
       buttons,
     });
-    syntheticMouseEvents.add(event);
     return event;
   }
 
@@ -420,7 +416,7 @@
   });
 
   function shouldSuppressCompatibilityMouse(event) {
-    if (syntheticMouseEvents.has(event)) return false;
+    if (!event.isTrusted) return false;
     const firesTouchEvents = event?.sourceCapabilities?.firesTouchEvents;
     if (firesTouchEvents === false) return false;
     return controller.activeCount() > 0 || touchInputNow() <= suppressCompatibilityMouseUntil;

@@ -291,7 +291,7 @@ test('source-ready images queue the low zoom scaled variant before first draw', 
   const context = loadImageVariantsForPlatform(false);
   const source = { width: 4000, height: 3000 };
 
-  const result = context.queueScaledImageVariantForReadyImage('img-1', source, { scale: 0.25 });
+  const result = context.queueScaledImageVariantForReadyImage('img-1', source);
 
   assert.equal(result.key, 'img-1');
   assert.equal(result.scale, 0.25);
@@ -309,10 +309,7 @@ test('source-ready preview priority promotes an already pending scaled replaceme
   context.queueScaledImageVariant('img-1', source, 0.25);
   assert.equal(context.imageScaledVariantQueue[0].priority, false);
 
-  const result = context.queueScaledImageVariantForReadyImage('img-1', source, {
-    scale: 0.25,
-    priority: true,
-  });
+  const result = context.queueScaledImageVariantForReadyImage('img-1', source, true);
 
   assert.equal(result.queued, false);
   assert.equal(result.skipped, 'pending');
@@ -503,10 +500,7 @@ test('active navigation can keep a nearly large enough 0.25x variant instead of 
   context.performance.now = () => 1000;
   context.lastViewportInputAt = 990;
 
-  await context.buildScaledImageVariantNow('img-1', fullSource, 0.25, {
-    scheduleRender: false,
-    warmupImmediate: true,
-  });
+  await context.buildScaledImageVariantNow('img-1', fullSource, 0.25, false, true);
 
   const active = context.selectImageSourceForDraw(
     'img-1',
@@ -616,7 +610,7 @@ test('open prewarm builds visible scaled variants before first render', async ()
     { id: 'obj-2', type: 'image', x: 5000, y: 5000, w: 500, h: 500, data: { imgKey: 'img-2' } },
   ];
 
-  const result = await context.prewarmVisibleScaledImageVariantsForOpen({ concurrency: 2 });
+  const result = await context.prewarmVisibleScaledImageVariantsForOpen(2);
 
   assert.equal(result.candidates, 1);
   assert.equal(result.built, 1);
@@ -906,7 +900,6 @@ test('scaled image variant skips do not create empty cache groups', () => {
   const tooLarge = context.queueScaledImageVariantForReadyImage(
     'img-too-large',
     { width: 100000, height: 100000 },
-    { scale: 0.25 },
   );
   assert.equal(tooLarge.queued, false);
   assert.equal(tooLarge.skipped, 'memory-limit');

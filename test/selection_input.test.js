@@ -149,10 +149,10 @@ function loadSelectionInputHarness(objects, options = {}) {
     },
     getTextMinLines: () => 1,
     markDirty(id) { context.dirty.push(id); },
-    pushHistory(reason, historyOptions = {}) {
-      for (const item of historyOptions.dirty || []) context.dirty.push(item?.obj?.id ?? item?.id ?? item);
+    pushHistory(reason, dirty, beforeEditState) {
+      for (const item of dirty || []) context.dirty.push(item?.obj?.id ?? item?.id ?? item);
       context.history.push(reason);
-      context.historyOptions.push(historyOptions);
+      context.historyOptions.push({ beforeEditState });
     },
     BoardfishMotion: {
       applyCopyFeedback(payload = {}) {
@@ -898,10 +898,7 @@ test('continuous text edits debounce into a 500ms checkpoint', () => {
     direction: 'none',
   });
 
-  assert.equal(context.recordTextEditInputHistory(text.id, {
-    inputType: 'deleteContentBackward',
-    hadSelection: false,
-  }), false);
+  assert.equal(context.recordTextEditInputHistory(text.id, 'deleteContentBackward'), false);
 
   assert.equal(context.timeoutDelay, 500);
   assert.deepEqual(context.history, []);
@@ -927,7 +924,7 @@ test('selection replace and paste text edits commit without debounce', () => {
     context._editHistoryTimer = 42;
     context._editHistoryLastContent = 'before';
 
-    assert.equal(context.recordTextEditInputHistory(text.id, meta), true);
+    assert.equal(context.recordTextEditInputHistory(text.id, meta.inputType, meta.hadSelection), true);
     assert.equal(context._editHistoryTimer, null);
     assert.equal(context.timeoutDelay, null);
     assert.deepEqual(context.history, ['text-edit-checkpoint']);

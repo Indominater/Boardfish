@@ -338,7 +338,7 @@ test('cmd+arrow text alignment still applies to selected text objects outside ed
       return true;
     },
     scheduleRender: (board, overlay, reason) => calls.push(['scheduleRender', board, overlay, reason]),
-    pushHistory: (reason, { dirty } = {}) => calls.push(['pushHistory', reason, [...dirty]]),
+    pushHistory: (reason, dirty) => calls.push(['pushHistory', reason, [...dirty]]),
   });
   const event = keyEvent({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true });
 

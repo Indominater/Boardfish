@@ -790,16 +790,11 @@ const textEditScriptSnapshot = (obj) => {
 
 const normalizeTextEditVisibleCaretIndex = (obj, index, direction = 'forward', snapshot = null) => {
   const { text, context } = snapshot || textEditScriptSnapshot(obj);
-  const hasBracedRangeStartingAt = (pos) => {
-    for (const range of textEditContextList(context, 'byStart', pos)) {
-      if (isTextScriptBracedRange(text, range)) return true;
-    }
-    return false;
-  };
   let pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
+  if (!context) return pos;
   const step = direction === 'backward' ? -1 : 1;
   let guard = text.length + 1;
-  while (guard-- > 0 && hasBracedRangeStartingAt(pos)) {
+  while (guard-- > 0 && context.byStart.get(pos)?.some((range) => isTextScriptBracedRange(text, range))) {
     pos += step;
     if (pos < 0) return 0;
     if (pos > text.length) return text.length;
@@ -2246,9 +2241,7 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
       ...textEditorTextStats(editablePayload.text, editablePayload.scriptRanges),
     };
   }
-  beginTextEditHistoryAction(id, inputState, {
-    splitPending: shouldCommitTextEditInputImmediately(inputType, inputState.hasSelection),
-  });
+  beginTextEditHistoryAction(id, inputState);
   setPendingTextEditInputState(proxy, inputState);
   return {
     text: editablePayload.text,
@@ -2298,9 +2291,7 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
       ...textEditorTextStats(pastedText, []),
     };
   }
-  beginTextEditHistoryAction(id, inputState, {
-    splitPending: shouldCommitTextEditInputImmediately(inputType, inputState.hasSelection),
-  });
+  beginTextEditHistoryAction(id, inputState);
   setPendingTextEditInputState(proxy, inputState);
   return {
     text: pastedText,
@@ -2403,9 +2394,7 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const historyStartedAt = textEditorDebugNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  beginTextEditHistoryAction(id, inputState, {
-    splitPending: shouldCommitTextEditInputImmediately(inputType, inputState.hasSelection),
-  });
+  beginTextEditHistoryAction(id, inputState);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-history-action-ready', {
     historyActionMs: Math.round((textEditorDebugNow() - historyStartedAt) * 100) / 100,
@@ -2667,9 +2656,7 @@ function enterEdit(id, {
             insertedText,
           },
         };
-        beginTextEditHistoryAction(id, pendingInputState, {
-          splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
-        });
+        beginTextEditHistoryAction(id, pendingInputState);
         proxy.setSelectionRange(insertIndex, insertIndex, 'none');
         proxy.setRangeText(insertedText, insertIndex, insertIndex, 'end');
         dispatchTextEditInputEvent(proxy, inputType);
@@ -2701,9 +2688,7 @@ function enterEdit(id, {
             insertedText: event.data,
           },
         };
-        beginTextEditHistoryAction(id, pendingInputState, {
-          splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
-        });
+        beginTextEditHistoryAction(id, pendingInputState);
         proxy.setSelectionRange(boundaryInsertion.index, boundaryInsertion.index, 'none');
         proxy.setRangeText(event.data, boundaryInsertion.index, boundaryInsertion.index, 'end');
         dispatchTextEditInputEvent(proxy, inputType);
@@ -2731,9 +2716,7 @@ function enterEdit(id, {
           insertedText: event.data,
         },
       };
-      beginTextEditHistoryAction(id, pendingInputState, {
-        splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
-      });
+      beginTextEditHistoryAction(id, pendingInputState);
       proxy.setSelectionRange(replacementRange.start, replacementRange.end, selection.direction || 'none');
       proxy.setRangeText(event.data, replacementRange.start, replacementRange.end, 'end');
       dispatchTextEditInputEvent(proxy, inputType);
@@ -2772,9 +2755,7 @@ function enterEdit(id, {
       if (domSyncBeforeNativeInput.synced) pendingInputState.domSyncedBeforeNativeInput = true;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    beginTextEditHistoryAction(id, pendingInputState, {
-      splitPending: shouldCommitTextEditInputImmediately(pendingInputState.inputType, pendingInputState.hasSelection),
-    });
+    beginTextEditHistoryAction(id, pendingInputState);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     recordInputSetupStep('beforeinput-state-ready', event, pendingInputState, {
       nativeReplacement: !!nativeReplacement,
@@ -3054,16 +3035,10 @@ function enterEdit(id, {
     }));
     _textInputSelectionHistorySuppress = textEditSelectionState(proxy);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const historyPushed = recordTextEditInputHistory(id, {
-      inputType,
-      hadSelection: !!inputState.hasSelection,
-    });
+    const historyPushed = recordTextEditInputHistory(id, inputType, !!inputState.hasSelection);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      recordTextEditInputHistory(id, {
-        inputType,
-        hadSelection: !!inputState.hasSelection,
-      });
+      recordTextEditInputHistory(id, inputType, !!inputState.hasSelection);
     }
     logInputStep('history-recorded', {
       historyPushed,
@@ -3376,9 +3351,7 @@ function enterEdit(id, {
         scriptCaretAffinity: obj._textScriptCaretIndex === proxy.selectionStart ? obj._textScriptCaretAffinity : '',
         inputType,
       };
-      beginTextEditHistoryAction(id, pendingInputState, {
-        splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
-      });
+      beginTextEditHistoryAction(id, pendingInputState);
       proxy.value = indentResult.value;
       setTextEditProxyLogicalValue(proxy, indentResult.value);
       proxy.setSelectionRange(indentResult.start, indentResult.end, indentResult.direction);
@@ -3400,9 +3373,7 @@ function enterEdit(id, {
         scriptCaretAffinity: obj._textScriptCaretIndex === proxy.selectionStart ? obj._textScriptCaretAffinity : '',
         inputType,
       };
-      beginTextEditHistoryAction(id, pendingInputState, {
-        splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
-      });
+      beginTextEditHistoryAction(id, pendingInputState);
       proxy.value = lineBreakResult.value;
       setTextEditProxyLogicalValue(proxy, lineBreakResult.value);
       proxy.setSelectionRange(lineBreakResult.start, lineBreakResult.end, lineBreakResult.direction);
@@ -3434,9 +3405,7 @@ function enterEdit(id, {
           insertedText: '',
         },
       };
-      beginTextEditHistoryAction(id, pendingInputState, {
-        splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
-      });
+      beginTextEditHistoryAction(id, pendingInputState);
       proxy.setRangeText('', deletion.start, deletion.end, 'start');
       dispatchTextEditInputEvent(proxy, inputType);
       return;
@@ -3576,9 +3545,7 @@ function enterEdit(id, {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const deleteDebugSeq = pendingInputState._debugSeq;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        beginTextEditHistoryAction(id, pendingInputState, {
-          splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
-        });
+        beginTextEditHistoryAction(id, pendingInputState);
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const deleteSetupMeta = {
           key: e.key,
