@@ -155,13 +155,9 @@ test('image renderer crops untransformed images to the visible viewport', () => 
     zoom: () => 1,
   });
 
-  renderer.drawVisibleObjects(context, null, {
-    viewportRect: { x1: 0, y1: 25, x2: 60, y2: 45 },
-  });
+  renderer.drawVisibleObjects(context, null, { x1: 0, y1: 25, x2: 60, y2: 45 });
   drawImageCalls.length = 0;
-  const result = renderer.drawVisibleObjects(context, counters, {
-    viewportRect: { x1: 0, y1: 25, x2: 60, y2: 45 },
-  });
+  const result = renderer.drawVisibleObjects(context, counters, { x1: 0, y1: 25, x2: 60, y2: 45 });
 
   assert.equal(result.drawnImages, 1);
   assert.equal(result.drawnText, 0);
@@ -186,9 +182,7 @@ test('image renderer crops untransformed images to the visible viewport', () => 
 
   drawImageCalls.length = 0;
   const warmCounters = BoardfishRenderer.createDrawCounters();
-  renderer.drawVisibleObjects(context, warmCounters, {
-    viewportRect: { x1: 0, y1: 25, x2: 60, y2: 45 },
-  });
+  renderer.drawVisibleObjects(context, warmCounters, { x1: 0, y1: 25, x2: 60, y2: 45 });
 
   assert.equal(warmCounters.imageSourceFirstDraws, 0);
   assert.equal(warmCounters.imageSourceWarmDraws, 1);
@@ -198,9 +192,7 @@ test('image renderer crops untransformed images to the visible viewport', () => 
   const nextContextCounters = BoardfishRenderer.createDrawCounters();
   renderer.drawVisibleObjects({
     drawImage() {},
-  }, nextContextCounters, {
-    viewportRect: { x1: 0, y1: 25, x2: 60, y2: 45 },
-  });
+  }, nextContextCounters, { x1: 0, y1: 25, x2: 60, y2: 45 });
 
   assert.equal(nextContextCounters.imageSourceFirstDraws, 0);
   assert.equal(nextContextCounters.imageSourceWarmDraws, 1);
@@ -245,10 +237,9 @@ test('image renderer overdraws image edges by one device pixel at the current vi
     zoom: () => 1,
   });
 
-  renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters(), {
-    viewportRect: { x1: 0, y1: 0, x2: 100, y2: 100 },
-    view: { zoom: 2, dpr: 2, panX: 0, panY: 0 },
-  });
+  renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters(),
+    { x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, undefined, undefined,
+    { zoom: 2, dpr: 2, panX: 0, panY: 0 });
 
   assert.deepEqual(drawImageCalls, [[source, 9.75, 19.75, 40.5, 30.5]]);
 });
@@ -496,7 +487,7 @@ test('animated image cropping inverse-maps translation and non-uniform scale', (
   renderer.drawVisibleObjects(
     context,
     BoardfishRenderer.createDrawCounters(),
-    { viewportRect: { x1: 0, y1: 0, x2: 100, y2: 100 } },
+    { x1: 0, y1: 0, x2: 100, y2: 100 },
   );
 
   assert.equal(drawImageCalls.length, 1);
@@ -554,7 +545,9 @@ test('renderer can draw only text while drawing visible objects', () => {
     zoom: () => 1,
   });
 
-  const result = renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters(), { onlyText: true });
+  const result = renderer.drawVisibleObjects(
+    context, BoardfishRenderer.createDrawCounters(), undefined, undefined, undefined, undefined, true,
+  );
 
   assert.equal(result.drawnImages, 0);
   assert.equal(result.drawnText, 1);
@@ -588,9 +581,9 @@ test('renderer can skip arbitrary object ids while drawing visible objects', () 
     zoom: () => 1,
   });
 
-  const result = renderer.drawVisibleObjects({}, BoardfishRenderer.createDrawCounters(), {
-    skipIds: new Set(['text-a']),
-  });
+  const result = renderer.drawVisibleObjects(
+    {}, BoardfishRenderer.createDrawCounters(), undefined, new Set(['text-a']),
+  );
 
   assert.equal(result.drawnText, 1);
   assert.deepEqual(drawnText, ['draw']);
@@ -841,10 +834,9 @@ test('text renderer keeps direct rich rendering', () => {
     zoom: () => 1,
   });
 
-  renderer.drawVisibleObjects(context, counters, {
-    viewportRect: { x1: 0, y1: 0, x2: 300, y2: 160 },
-    view: { zoom: 1, panX: 0, panY: 0, dpr: 2 },
-  });
+  renderer.drawVisibleObjects(context, counters,
+    { x1: 0, y1: 0, x2: 300, y2: 160 }, undefined, undefined, undefined, undefined,
+    { zoom: 1, panX: 0, panY: 0, dpr: 2 });
 
   assert.deepEqual(drawnLines, ['cached one', 'cached two']);
   assert.deepEqual(drawImageCalls, []);
@@ -956,7 +948,7 @@ test('animated text draws source lines that jiggle down into the viewport', () =
   const result = renderer.drawVisibleObjects(
     context,
     BoardfishRenderer.createDrawCounters(),
-    { viewportRect },
+    viewportRect,
   );
 
   assert.equal(result.drawnText, 1);

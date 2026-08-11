@@ -793,7 +793,7 @@ var TextSelDebug = (() => {
       ? textEditProxyValue(_editEl)
       : String(_editEl.value ?? '');
     if (typeof setTextEditProxySelectionRange === 'function') {
-      setTextEditProxySelectionRange(_editEl, 0, value.length, 'none', { value });
+      setTextEditProxySelectionRange(_editEl, 0, value.length, 'none', value);
     } else {
       _editEl.setSelectionRange(0, value.length, 'none');
     }

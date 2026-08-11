@@ -580,12 +580,12 @@ function applyTextEditCaretHit(obj, proxy, hit) {
   if (!obj || !proxy || !hit) return;
   const textContent = obj.data?.content || '';
   const index = hit.index;
-  setTextEditProxySelectionRange(proxy, index, index, 'none', { value: textContent });
+  setTextEditProxySelectionRange(proxy, index, index, 'none', textContent);
   if (hit.affinity) {
     setTextScriptCaretAffinity(obj, index, hit.affinity);
   } else {
     clearTextScriptCaretAffinity(obj);
-    setTextEditCaretIndex(obj, index, { lineStartIndex: hit.lineStartIndex });
+    setTextEditCaretIndex(obj, index, hit.lineStartIndex);
   }
 }
 
@@ -638,7 +638,7 @@ function startTextSelectionDrag(e, obj, wp) {
       const end = Math.max(clickIdx, endIdx);
       if (clickIdx === endIdx) applyTextEditCaretHit(obj, _editEl, endHit);
       else {
-        setTextEditProxySelectionRange(_editEl, start, end, 'none', { value: obj.data?.content || '' });
+        setTextEditProxySelectionRange(_editEl, start, end, 'none', obj.data?.content || '');
         clearTextScriptCaretAffinity(obj);
         clearTextEditCaretIndex(obj);
       }

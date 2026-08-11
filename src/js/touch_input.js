@@ -15,27 +15,6 @@
     };
   }
 
-  function pinchViewportFromGesture(viewport = {}, gesture = {}, limits = {}) {
-    const startZoom = Math.max(0.0001, Number(viewport.zoom) || 1);
-    const minZoom = Number.isFinite(limits.minZoom) ? limits.minZoom : 0.01;
-    const maxZoom = Number.isFinite(limits.maxZoom) ? limits.maxZoom : 100;
-    const scale = Math.max(0.0001, Number(gesture.scale) || 1);
-    const nextZoom = Math.min(maxZoom, Math.max(minZoom, startZoom * scale));
-    const startCenterX = Number(gesture.startCenterX) || 0;
-    const startCenterY = Number(gesture.startCenterY) || 0;
-    const centerX = Number.isFinite(gesture.centerX) ? gesture.centerX : startCenterX;
-    const centerY = Number.isFinite(gesture.centerY) ? gesture.centerY : startCenterY;
-    const startPanX = Number(viewport.panX) || 0;
-    const startPanY = Number(viewport.panY) || 0;
-    const anchorWorldX = (startCenterX - startPanX) / startZoom;
-    const anchorWorldY = (startCenterY - startPanY) / startZoom;
-    return {
-      zoom: nextZoom,
-      panX: centerX - anchorWorldX * nextZoom,
-      panY: centerY - anchorWorldY * nextZoom,
-    };
-  }
-
   function createTouchGestureController(options = {}) {
     const holdDelayMs = Number.isFinite(options.holdDelayMs)
       ? Math.max(0, options.holdDelayMs)
@@ -287,7 +266,6 @@
     TOUCH_HOLD_DELAY_MS,
     TOUCH_MOVE_THRESHOLD_PX,
     createTouchGestureController,
-    pinchViewportFromGesture,
   });
   root.BoardfishTouchInput = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -416,8 +394,14 @@
 
   function applyTouchPinch(gesture) {
     if (!boardNavigationAllowed()) return;
-    const next = pinchViewportFromGesture(touchPinchStartViewport, gesture);
-    BoardfishViewportState.setZoomPan(next.zoom, next.panX, next.panY);
+    const start = touchPinchStartViewport;
+    const nextZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, start.zoom * gesture.scale));
+    const scale = nextZoom / start.zoom;
+    BoardfishViewportState.setZoomPan(
+      nextZoom,
+      gesture.centerX - (gesture.startCenterX - start.panX) * scale,
+      gesture.centerY - (gesture.startCenterY - start.panY) * scale,
+    );
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pinch-zoom', gesture.event);
     else scheduleTransform();
   }

@@ -290,7 +290,7 @@ function textEditProxyValue(proxy) {
   return String(proxy?.value ?? '');
 }
 
-function setTextEditProxyLogicalValue(proxy, value = '', { domSynced = true } = {}) {
+function setTextEditProxyLogicalValue(proxy, value = '', domSynced = true) {
   if (!proxy) return '';
   const text = String(value ?? '');
   proxy._boardfishLogicalValue = text;
@@ -313,7 +313,7 @@ function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
   proxy.value = text;
-  setTextEditProxyLogicalValue(proxy, text, { domSynced: true });
+  setTextEditProxyLogicalValue(proxy, text);
   if (selection && typeof proxy.setSelectionRange === 'function') {
     const max = text.length;
     const start = Math.max(0, Math.min(Math.trunc(Number(selection.start)) || 0, max));
@@ -326,20 +326,20 @@ function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
-function setTextEditProxySelectionRange(proxy, start, end = start, direction = 'none', options = {}) {
+function setTextEditProxySelectionRange(proxy, start, end = start, direction = 'none', value) {
   if (!proxy || typeof proxy.setSelectionRange !== 'function') {
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') return false;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     return { set: false, synced: false, reason: 'missing-proxy' };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
-  const text = options.value ?? textEditProxyValue(proxy);
+  const text = value ?? textEditProxyValue(proxy);
   const max = text.length;
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, max));
   const to = Math.max(from, Math.min(Math.trunc(Number(end ?? start)) || from, max));
   const domValue = String(proxy.value ?? ''), domLength = domValue.length;
   const domStale = !!proxy._boardfishDomValueStale || domValue !== text;
-  const shouldSyncDom = options.syncDom === true || (domStale && (from > domLength || to > domLength));
+  const shouldSyncDom = domStale && (from > domLength || to > domLength);
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
     const synced = shouldSyncDom ? syncTextEditProxyDomValue(proxy, text, { start: from, end: to, direction }) : false;
     if (!synced) proxy.setSelectionRange(from, to, direction);
@@ -391,7 +391,7 @@ const textEditLineIndentAt = (value, index) => {
   return text.slice(lineStart, end);
 };
 
-const applyTextEditLineIndent = (value, selection, { outdent = false } = {}) => {
+const applyTextEditLineIndent = (value, selection, outdent = false) => {
   const text = String(value ?? '');
   const selectionState = {
     start: Math.max(0, Math.min(selection?.start ?? 0, text.length)),
@@ -576,7 +576,7 @@ const exactTextEditLineCountForHeight = (height) => {
   return Math.abs(lines - rounded) < 1e-6 ? Math.max(1, rounded) : 0;
 };
 
-const textEditMinLinesForSession = (obj, { preserveSize = false } = {}) => {
+const textEditMinLinesForSession = (obj, preserveSize = false) => {
   if (!obj || obj.type !== 'text') return 1;
   const currentLines = exactTextEditLineCountForHeight(obj.h);
   if (preserveSize && currentLines > 1) return currentLines;
@@ -585,12 +585,12 @@ const textEditMinLinesForSession = (obj, { preserveSize = false } = {}) => {
     : 1;
 };
 
-const setTextEditMinLinesForSession = (obj, options = {}) => {
+const setTextEditMinLinesForSession = (obj, preserveSize = false) => {
   if (!obj || obj.type !== 'text') return 1;
-  const minLines = textEditMinLinesForSession(obj, options);
+  const minLines = textEditMinLinesForSession(obj, preserveSize);
   obj._editMinLines = minLines;
-  const normalMinLines = textEditMinLinesForSession(obj, { preserveSize: false });
-  if (options.preserveSize && minLines > normalMinLines) {
+  const normalMinLines = textEditMinLinesForSession(obj);
+  if (preserveSize && minLines > normalMinLines) {
     obj._textEditPreservedMinLines = minLines;
   } else {
     delete obj._textEditPreservedMinLines;
@@ -602,7 +602,7 @@ const resetTextEditPreservedMinLinesForInput = (obj) => {
   if (!obj || obj.type !== 'text' || !obj._textEditPreservedMinLines) return null;
   const previousMinLines = obj._editMinLines ?? '';
   const preservedMinLines = obj._textEditPreservedMinLines;
-  const nextMinLines = textEditMinLinesForSession(obj, { preserveSize: false });
+  const nextMinLines = textEditMinLinesForSession(obj);
   obj._editMinLines = nextMinLines;
   delete obj._textEditPreservedMinLines;
   return {
@@ -612,16 +612,16 @@ const resetTextEditPreservedMinLinesForInput = (obj) => {
   };
 };
 
-const shouldDeferTextEditAutoHeightForInput = (obj, options = {}) => {
-  if (options.forceSync) return false;
+const shouldDeferTextEditAutoHeightForInput = (obj, forceSync = false) => {
+  if (forceSync) return false;
   if (!obj || obj.type !== 'text') return false;
   if (String(obj._editStartContent ?? '') === '') return false;
   const contentLength = String(obj.data?.content || '').length;
   return contentLength >= TEXT_EDIT_DEFER_AUTO_HEIGHT_CHARS;
 };
 
-const syncTextEditAutoHeightForInput = (obj, minLines = 1, options = {}) => {
-  if (shouldDeferTextEditAutoHeightForInput(obj, options)) {
+const syncTextEditAutoHeightForInput = (obj, minLines = 1, forceSync = false) => {
+  if (shouldDeferTextEditAutoHeightForInput(obj, forceSync)) {
     obj._textEditPendingSizeSync = true;
     return false;
   }
@@ -643,16 +643,16 @@ const clearTextScriptCaretAffinity = (obj) => {
   delete obj._textScriptCaretAffinity;
 };
 
-const setTextEditCaretIndex = (obj, index, options = {}) => {
+const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false) => {
   if (!obj) return;
   const length = (obj.data?.content || '').length;
   const nextIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), length));
-  if (obj._textEditCaretIndex !== nextIndex || options.clearLineStartIndex === true) {
+  if (obj._textEditCaretIndex !== nextIndex || clearLineStartIndex) {
     delete obj._textEditCaretLineStartIndex;
   }
   obj._textEditCaretIndex = nextIndex;
-  if (Number.isFinite(options.lineStartIndex)) {
-    obj._textEditCaretLineStartIndex = Math.max(0, Math.min(Math.trunc(options.lineStartIndex), length));
+  if (Number.isFinite(lineStartIndex)) {
+    obj._textEditCaretLineStartIndex = Math.max(0, Math.min(Math.trunc(lineStartIndex), length));
   }
 };
 
@@ -669,15 +669,6 @@ const isBetterNestedTextEditScriptRange = (candidate, current) => (
 );
 
 const textEditScriptRanges = (obj) => obj ? getTextScriptRanges(obj) : [];
-
-const setTextEditScriptRangesForContent = (obj, ranges = []) => {
-  if (!obj || obj.type !== 'text') return;
-  if (ranges.length) obj.data.scriptRanges = ranges;
-  else delete obj.data.scriptRanges;
-  obj._textScriptRangesCache = ranges;
-  obj._textScriptRangesCacheContent = obj.data.content;
-  obj._textScriptRangesCacheSourceKey = JSON.stringify(ranges);
-};
 
 const textEditScriptRangeContext = (ranges = []) => {
   if (!ranges.length) return null;
@@ -1516,12 +1507,12 @@ const deriveBracedTextScriptRangesAroundEdit = (content, start, end) => {
   return ranges;
 };
 
-const textScriptActiveRangesAtIndex = (ranges, index, options = {}) => (
-  cloneTextScriptRanges(activeTextScriptRangesAt(ranges, index, options))
+const textScriptActiveRangesAtIndex = (ranges, index, includeEnd = false, affinity = '') => (
+  cloneTextScriptRanges(activeTextScriptRangesAt(ranges, index, includeEnd, affinity))
 );
 
 const textScriptCaretRangesForEditState = (scriptRanges, index, affinity = '') => (
-  textScriptActiveRangesAtIndex(scriptRanges || [], index, { includeEnd: true, affinity })
+  textScriptActiveRangesAtIndex(scriptRanges || [], index, true, affinity)
 );
 
 const textScriptRangeEndingAt = (ranges, index) => {
@@ -1534,12 +1525,12 @@ const textScriptRangeEndingAt = (ranges, index) => {
 
 const setTextScriptCaretAffinityForRanges = (obj, index, desiredRanges = []) => {
   const ranges = textEditScriptRanges(obj);
-  const defaultRanges = textScriptActiveRangesAtIndex(ranges, index, { includeEnd: true });
+  const defaultRanges = textScriptActiveRangesAtIndex(ranges, index, true);
   if (textScriptRangesEqual(defaultRanges, desiredRanges)) {
     clearTextScriptCaretAffinity(obj);
     return;
   }
-  const afterRanges = textScriptActiveRangesAtIndex(ranges, index, { includeEnd: true, affinity: 'after' });
+  const afterRanges = textScriptActiveRangesAtIndex(ranges, index, true, 'after');
   if (textScriptRangesEqual(afterRanges, desiredRanges)) {
     setTextScriptCaretAffinity(obj, index, 'after');
     return;
@@ -2079,14 +2070,14 @@ const isTextEditProxyDomStale = (proxy, logicalValue = null) => {
   return !!proxy._boardfishDomValueStale || String(proxy.value ?? '') !== value;
 };
 
-const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end', options = {}) => {
+const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end', deferDomValue = false) => {
   const value = textEditProxyValue(proxy);
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, value.length));
   const to = Math.max(from, Math.min(Math.trunc(Number(end)) || from, value.length));
   const inserted = normalizeTextContent(text);
   const nextLength = value.length + inserted.length - (to - from);
   const largeValue = value.length + inserted.length > TEXT_EDIT_DIRECT_TEXTAREA_REPLACE_CHARS;
-  const deferDomValue = options.deferDomValue === true && nextLength > TEXT_EDIT_DEFER_DOM_REPLACE_CHARS;
+  deferDomValue = deferDomValue && nextLength > TEXT_EDIT_DEFER_DOM_REPLACE_CHARS;
   if (largeValue) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const buildStartedAt = textEditorDebugNow();
@@ -2100,7 +2091,7 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const logicalStartedAt = textEditorDebugNow();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      setTextEditProxyLogicalValue(proxy, nextValue, { domSynced: false });
+      setTextEditProxyLogicalValue(proxy, nextValue, false);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const logicalSetMs = textEditorDebugRound(textEditorDebugNow() - logicalStartedAt);
       const selectionStartedAt = textEditorDebugNow();
@@ -2126,7 +2117,7 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
     const assignStartedAt = textEditorDebugNow();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     proxy.value = nextValue;
-    setTextEditProxyLogicalValue(proxy, nextValue, { domSynced: true });
+    setTextEditProxyLogicalValue(proxy, nextValue);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const valueSetMs = textEditorDebugRound(textEditorDebugNow() - assignStartedAt);
     const selectionStartedAt = textEditorDebugNow();
@@ -2159,7 +2150,7 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
   proxy.setRangeText(inserted, from, to, selectionMode);
-  setTextEditProxyLogicalValue(proxy, proxy.value, { domSynced: true });
+  setTextEditProxyLogicalValue(proxy, proxy.value);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const ms = textEditorDebugRound(textEditorDebugNow() - rangeTextStartedAt);
   return {
@@ -2425,9 +2416,9 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const selectionStartedAt = textEditorDebugNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  setTextEditProxySelectionRange(proxy, replacementRange.start, replacementRange.end, selection.direction || 'none', {
-    value: currentProxyValue,
-  });
+  setTextEditProxySelectionRange(
+    proxy, replacementRange.start, replacementRange.end, selection.direction || 'none', currentProxyValue,
+  );
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-selection-range-set', {
     selectionSetMs: Math.round((textEditorDebugNow() - selectionStartedAt) * 100) / 100,
@@ -2575,7 +2566,7 @@ function enterEdit(id, {
   });
   clearTextScriptCaretAffinity(obj);
   obj._editStartContent = obj.data.content;
-  setTextEditMinLinesForSession(obj, { preserveSize });
+  setTextEditMinLinesForSession(obj, preserveSize);
   _editHistoryLastContent = obj.data.content;
   clearTimeout(_editHistoryTimer);
   _editHistoryTimer = null;
@@ -2587,7 +2578,7 @@ function enterEdit(id, {
   const proxy = document.createElement('textarea');
   configureTextEditProxyElement(proxy);
   proxy.value = obj.data.content;
-  setTextEditProxyLogicalValue(proxy, obj.data.content, { domSynced: true });
+  setTextEditProxyLogicalValue(proxy, obj.data.content);
   document.body.appendChild(proxy);
   _editEl = proxy;
   const proxyAttr = (name) => (
@@ -2609,8 +2600,8 @@ function enterEdit(id, {
 
   let pendingInputState = null;
   proxy._boardfishSetPendingInputState = (state) => { pendingInputState = state; };
-  proxy._boardfishSetLogicalValue = (value, options = {}) => {
-    setTextEditProxyLogicalValue(proxy, value, options);
+  proxy._boardfishSetLogicalValue = (value, domSynced = true) => {
+    setTextEditProxyLogicalValue(proxy, value, domSynced);
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const recordInputSetupStep = (step, event, state = {}, extra = {}) => {
@@ -2887,10 +2878,10 @@ function enterEdit(id, {
 	          direction: 'none',
 	        });
 	      } else {
-	        setTextEditProxyLogicalValue(proxy, obj.data.content, { domSynced: false });
+	        setTextEditProxyLogicalValue(proxy, obj.data.content, false);
 	      }
 	    } else {
-	      setTextEditProxyLogicalValue(proxy, obj.data.content, { domSynced: true });
+	      setTextEditProxyLogicalValue(proxy, obj.data.content);
 	    }
 	    logInputStep('content-normalized', {
 	      proxyChars: textEditProxyValue(proxy).length,
@@ -2937,7 +2928,12 @@ function enterEdit(id, {
     logInputStep('caret-ranges-preserved', {
       preservedCaretRangeCount: Array.isArray(preservedCaretRanges) ? preservedCaretRanges.length : 0,
     });
-    setTextEditScriptRangesForContent(obj, scriptResult.ranges || []);
+    const scriptRanges = scriptResult.ranges || [];
+    if (scriptRanges.length) obj.data.scriptRanges = scriptRanges;
+    else delete obj.data.scriptRanges;
+    obj._textScriptRangesCache = scriptRanges;
+    obj._textScriptRangesCacheContent = obj.data.content;
+    obj._textScriptRangesCacheSourceKey = scriptRanges.length ? JSON.stringify(scriptRanges) : '[]';
     let selectionStart = proxy.selectionStart, selectionEnd = proxy.selectionEnd;
     const selectionCollapsed = selectionStart === selectionEnd;
     if (selectionCollapsed) {
@@ -2948,7 +2944,7 @@ function enterEdit(id, {
       }
     }
     const closedScript = replacement.insertedText === '}' && selectionCollapsed &&
-      textScriptRangeEndingAt(scriptResult.ranges || [], selectionStart);
+      textScriptRangeEndingAt(scriptRanges, selectionStart);
     if (closedScript) {
       setTextScriptCaretAffinity(obj, selectionStart, 'after');
     } else if (Array.isArray(preservedCaretRanges) && selectionCollapsed) {
@@ -2958,7 +2954,7 @@ function enterEdit(id, {
     } else if (obj._textScriptCaretIndex !== selectionStart) {
       clearTextScriptCaretAffinity(obj);
     }
-    if (selectionCollapsed) setTextEditCaretIndex(obj, selectionStart, { clearLineStartIndex: true });
+    if (selectionCollapsed) setTextEditCaretIndex(obj, selectionStart, null, true);
     else clearTextEditCaretIndex(obj);
     logInputStep('caret-updated', () => ({
       selectionStart,
@@ -3033,9 +3029,7 @@ function enterEdit(id, {
         }
       : null;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const heightChanged = syncTextEditAutoHeightForInput(obj, getTextMinLines(obj), {
-      forceSync: forceAutoHeight,
-    });
+    const heightChanged = syncTextEditAutoHeightForInput(obj, getTextMinLines(obj), forceAutoHeight);
     logInputStep('auto-height-done', () => ({
       heightChanged,
       autoHeightDeferred: !!obj._textEditPendingSizeSync,
@@ -3369,7 +3363,7 @@ function enterEdit(id, {
       e.preventDefault();
       const currentProxyValue = textEditProxyValue(proxy);
       const selection = textEditSelectionState(proxy);
-      const indentResult = applyTextEditLineIndent(currentProxyValue, selection, { outdent: e.shiftKey });
+      const indentResult = applyTextEditLineIndent(currentProxyValue, selection, e.shiftKey);
       if (!indentResult.changed) {
         scheduleRender(true, false);
         return;
@@ -3386,7 +3380,7 @@ function enterEdit(id, {
         splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
       });
       proxy.value = indentResult.value;
-      setTextEditProxyLogicalValue(proxy, indentResult.value, { domSynced: true });
+      setTextEditProxyLogicalValue(proxy, indentResult.value);
       proxy.setSelectionRange(indentResult.start, indentResult.end, indentResult.direction);
       dispatchTextEditInputEvent(proxy, inputType);
       return;
@@ -3410,7 +3404,7 @@ function enterEdit(id, {
         splitPending: shouldCommitTextEditInputImmediately(inputType, pendingInputState.hasSelection),
       });
       proxy.value = lineBreakResult.value;
-      setTextEditProxyLogicalValue(proxy, lineBreakResult.value, { domSynced: true });
+      setTextEditProxyLogicalValue(proxy, lineBreakResult.value);
       proxy.setSelectionRange(lineBreakResult.start, lineBreakResult.end, lineBreakResult.direction);
       dispatchTextEditInputEvent(proxy, inputType);
       return;
@@ -3452,9 +3446,7 @@ function enterEdit(id, {
       e.preventDefault();
       flushEditHistoryCheckpoint();
       const currentProxyValue = textEditProxyValue(proxy);
-      setTextEditProxySelectionRange(proxy, 0, currentProxyValue.length, 'none', {
-        value: currentProxyValue,
-      });
+      setTextEditProxySelectionRange(proxy, 0, currentProxyValue.length, 'none', currentProxyValue);
       TextSelDebug._logSelection('select-all', proxy);
       scheduleRender(true, false);
       return;
@@ -3619,16 +3611,16 @@ function enterEdit(id, {
         });
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const mutationStartedAt = textEditorDebugNow();
-        const mutationResult = replaceTextEditProxyRange(proxy, replacement.insertedText, replacement.start, replacement.end, 'start', {
-          deferDomValue: true,
-        });
+        const mutationResult = replaceTextEditProxyRange(
+          proxy, replacement.insertedText, replacement.start, replacement.end, 'start', true,
+        );
         const textareaMutationMs = textEditorDebugRound(textEditorDebugNow() - mutationStartedAt);
         const logicalProxyValue = textEditProxyValue(proxy);
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-          replaceTextEditProxyRange(proxy, replacement.insertedText, replacement.start, replacement.end, 'start', {
-            deferDomValue: true,
-          });
+          replaceTextEditProxyRange(
+            proxy, replacement.insertedText, replacement.start, replacement.end, 'start', true,
+          );
         }
         recordTextEditorInputPerfStep('keydown-delete-textarea-mutated', {
           seq: deleteDebugSeq,

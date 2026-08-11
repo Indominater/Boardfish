@@ -759,7 +759,7 @@ test('left arrows step through visible characters after closing a braced script'
 
   obj.data = { content: 'e^{x^{2}+1}' };
   context.proxy.value = obj.data.content;
-  context.proxy._boardfishSetLogicalValue(obj.data.content, { domSynced: true });
+  context.proxy._boardfishSetLogicalValue(obj.data.content);
   context.proxy.setSelectionRange(context.proxy.value.length, context.proxy.value.length, 'none');
   obj._textScriptCaretIndex = context.proxy.value.length;
   obj._textScriptCaretAffinity = 'after';
@@ -1148,7 +1148,7 @@ test('large synthetic proxy replacement can defer the textarea DOM value', () =>
       setRangeTextCalled = true;
     },
   };
-  const result = replaceTextEditProxyRange(proxy, '', 10, 30, 'start', { deferDomValue: true });
+  const result = replaceTextEditProxyRange(proxy, '', 10, 30, 'start', true);
 
   assert.equal(setRangeTextCalled, false);
   assert.equal(result.method, 'logical');
@@ -1381,7 +1381,7 @@ test('paste after stale proxy restore uses logical text before copy', () => {
 
   context.enterEdit(obj.id, { history: false });
   obj.data.content = 'hello ';
-  context.proxy._boardfishSetLogicalValue('hello ', { domSynced: false });
+  context.proxy._boardfishSetLogicalValue('hello ', false);
   context.proxy.setSelectionRange(6, 6, 'none');
 
   const paste = {
@@ -1986,7 +1986,7 @@ test('shift tab outdents selected text edit lines', () => {
     start: 4,
     end: 20,
     direction: 'forward',
-  }, { outdent: true });
+  }, true);
 
   assert.equal(result.changed, true);
   assert.equal(result.value, 'one\ntwo\nthree');
@@ -2136,7 +2136,7 @@ test('typing after history restore uses logical text when proxy DOM value is sta
 
   context.enterEdit(obj.id, { history: false });
   obj.data.content = 'hello ';
-  context.proxy._boardfishSetLogicalValue('hello ', { domSynced: false });
+  context.proxy._boardfishSetLogicalValue('hello ', false);
   context.proxy.setSelectionRange(6, 6, 'none');
 
   typeNativeText(context.proxy, 'X');
@@ -2155,7 +2155,7 @@ test('delete input without beforeinput uses logical text when proxy DOM value is
   context.enterEdit(obj.id, { history: false });
   obj.data.content = 'abc';
   context.proxy.value = 'aXXbc';
-  context.proxy._boardfishSetLogicalValue('abc', { domSynced: false });
+  context.proxy._boardfishSetLogicalValue('abc', false);
   context.proxy.setSelectionRange(1, 1, 'none');
 
   context.proxy.value = 'aXbc';
@@ -2178,7 +2178,7 @@ test('cmd+a syncs a stale short edit proxy before selecting the full logical tex
   const logicalValue = `${'x'.repeat(25_000)}tail`;
   obj.data.content = logicalValue;
   context.proxy.value = 'old';
-  context.proxy._boardfishSetLogicalValue(logicalValue, { domSynced: false });
+  context.proxy._boardfishSetLogicalValue(logicalValue, false);
   context.proxy.setSelectionRange(3, 3, 'none');
 
   const key = makeKeyEvent('a', { metaKey: true });

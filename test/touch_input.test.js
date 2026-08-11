@@ -251,24 +251,6 @@ test('a large pinch maps immediately to its exact separation without a duplicate
   assert.deepEqual(pinchEvents.map((event) => event.scale), [2.5]);
 });
 
-test('pinch viewport math keeps the original world point under the moving midpoint', () => {
-  const next = TouchInput.pinchViewportFromGesture(
-    { panX: 10, panY: 20, zoom: 1 },
-    {
-      startCenterX: 100,
-      startCenterY: 120,
-      centerX: 110,
-      centerY: 130,
-      scale: 2,
-    },
-    { minZoom: 0.01, maxZoom: 100 },
-  );
-
-  assert.deepEqual(next, { panX: -70, panY: -70, zoom: 2 });
-  assert.equal((110 - next.panX) / next.zoom, 90);
-  assert.equal((130 - next.panY) / next.zoom, 100);
-});
-
 test('cancelling a pending touch clears the hold timer without a click', () => {
   const harness = makeGestureHarness();
   harness.controller.pointerDown(point(1, 0, 0));

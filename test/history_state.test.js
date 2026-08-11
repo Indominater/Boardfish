@@ -77,7 +77,7 @@ function makeEditProxy({
     _boardfishLogicalValue: value,
     _boardfishDomValueStale: false,
     setRangeTextCalls: [],
-    _boardfishSetLogicalValue(nextValue, { domSynced = true } = {}) {
+    _boardfishSetLogicalValue(nextValue, domSynced = true) {
       this._boardfishLogicalValue = String(nextValue ?? '');
       this._boardfishDomValueStale = domSynced === false || this.value !== this._boardfishLogicalValue;
     },
@@ -255,7 +255,7 @@ test('text edit history state clamps against logical proxy length when DOM is st
   const obj = { id: 'text-1', type: 'text', data: { content: '0123456789' } };
   context.objectsMap.set(obj.id, obj);
   context._editEl = makeEditProxy({ value: '0123', selectionStart: 4, selectionEnd: 4 });
-  context._editEl._boardfishSetLogicalValue(obj.data.content, { domSynced: false });
+  context._editEl._boardfishSetLogicalValue(obj.data.content, false);
 
   const normalized = context.normalizeTextEditHistoryState(obj.id, {
     start: 0,
@@ -504,7 +504,7 @@ test('undoing a selected text replacement restores the replaced highlight range'
   const text = context.objectsMap.get('text-1');
   text.data.content = 'one PASTE three';
   context._editEl.value = text.data.content;
-  context._editEl._boardfishSetLogicalValue(text.data.content, { domSynced: true });
+  context._editEl._boardfishSetLogicalValue(text.data.content);
   context._editEl.selectionStart = 9;
   context._editEl.selectionEnd = 9;
   context._editEl.selectionDirection = 'none';
@@ -556,7 +556,7 @@ test('undoing a selected replacement syncs stale proxy DOM before restoring high
   const text = context.objectsMap.get('text-1');
   text.data.content = pasted;
   context._editEl.value = pasted;
-  context._editEl._boardfishSetLogicalValue(pasted, { domSynced: true });
+  context._editEl._boardfishSetLogicalValue(pasted);
   context._editEl.selectionStart = 8;
   context._editEl.selectionEnd = 8;
   context._editEl.selectionDirection = 'none';

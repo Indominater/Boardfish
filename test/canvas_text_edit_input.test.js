@@ -114,8 +114,8 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
       if (typeof proxy?._boardfishLogicalValue === 'string') return proxy._boardfishLogicalValue;
       return String(proxy?.value ?? '');
     },
-    setTextEditProxySelectionRange(proxy, start, end = start, direction = 'none', options = {}) {
-      const text = String(options.value ?? context.textEditProxyValue(proxy));
+    setTextEditProxySelectionRange(proxy, start, end = start, direction = 'none', value) {
+      const text = String(value ?? context.textEditProxyValue(proxy));
       const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, text.length));
       const to = Math.max(from, Math.min(Math.trunc(Number(end ?? start)) || from, text.length));
       const domLength = String(proxy.value ?? '').length;
@@ -143,9 +143,9 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
       delete target._textScriptCaretIndex;
       delete target._textScriptCaretAffinity;
     },
-    setTextEditCaretIndex(target, index, options = {}) {
+    setTextEditCaretIndex(target, index, lineStartIndex = null) {
       target._textEditCaretIndex = index;
-      if (Number.isFinite(options.lineStartIndex)) target._textEditCaretLineStartIndex = options.lineStartIndex;
+      if (Number.isFinite(lineStartIndex)) target._textEditCaretLineStartIndex = lineStartIndex;
     },
     clearTextEditCaretIndex(target) {
       delete target._textEditCaretIndex;

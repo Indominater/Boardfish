@@ -366,10 +366,7 @@ const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options = {}) => {
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const stats = options.stats || null;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, stats = null) => {
   if (!selectionGap) {
     for (const line of layout) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -643,7 +640,7 @@ function drawEditingTextOverlay(
         obj,
         layout,
         textSelectionMotion ? { start: selStart, end: selEnd } : null,
-        { stats },
+        stats,
       );
     } else {
       drawTextLayoutStatic(
@@ -743,12 +740,11 @@ function drawBoard(bypassEditOffscreenCache = false) {
       const textStart = collectDrawDebug ? performance.now() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       setWorldCanvasTransform(ctx, dpr);
-      const visibleOptions = { skipId: editingId, skipIds: textSelectionMotions, viewportRect, imageSourceResolver: openInitialImageSourceResolver, onlyText: true };
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        drawVisibleObjects(ctx, visibleOptions);
+        drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true);
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const drawn = drawVisibleObjects(ctx, counters, visibleOptions);
+        const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true);
         if (collectDrawDebug) {
           drawPhases.offscreenTextDrawMs = performance.now() - textStart;
           drawnText += drawn.drawnText;
@@ -768,12 +764,11 @@ function drawBoard(bypassEditOffscreenCache = false) {
       }
       const objectsStart = collectDrawDebug ? performance.now() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      const visibleOptions = { skipId: editingId, skipIds: textSelectionMotions, viewportRect, imageSourceResolver: openInitialImageSourceResolver };
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        drawVisibleObjects(ctx, visibleOptions);
+        drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId);
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const drawn = drawVisibleObjects(ctx, counters, visibleOptions);
+        const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId);
         if (collectDrawDebug) {
           drawPhases.objectLoopMs = performance.now() - objectsStart;
           drawnImages += drawn.drawnImages;
@@ -811,12 +806,11 @@ function drawBoard(bypassEditOffscreenCache = false) {
     }
     const objectsStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const visibleOptions = { viewportRect, skipIds: textSelectionMotions, imageSourceResolver: openInitialImageSourceResolver };
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      drawVisibleObjects(ctx, visibleOptions);
+      drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver);
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const drawn = drawVisibleObjects(ctx, counters, visibleOptions);
+      const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver);
       if (collectDrawDebug) {
         drawPhases.objectLoopMs = performance.now() - objectsStart;
         drawnImages = drawn.drawnImages;

@@ -2490,7 +2490,7 @@ var ManualPerfDebug = (() => {
       : String(_editEl.value ?? '');
     if (highlight) {
       if (typeof setTextEditProxySelectionRange === 'function') {
-        setTextEditProxySelectionRange(_editEl, range.start, range.end, range.direction || 'forward', { value });
+        setTextEditProxySelectionRange(_editEl, range.start, range.end, range.direction || 'forward', value);
       } else {
         _editEl.setSelectionRange(range.start, range.end, range.direction || 'forward');
       }
@@ -2501,11 +2501,11 @@ var ManualPerfDebug = (() => {
       }
     } else {
       if (typeof setTextEditProxySelectionRange === 'function') {
-        setTextEditProxySelectionRange(_editEl, range.start, range.start, 'none', { value });
+        setTextEditProxySelectionRange(_editEl, range.start, range.start, 'none', value);
       } else {
         _editEl.setSelectionRange(range.start, range.start, 'none');
       }
-      if (typeof setTextEditCaretIndex === 'function') setTextEditCaretIndex(obj, range.start, { clearLineStartIndex: true });
+      if (typeof setTextEditCaretIndex === 'function') setTextEditCaretIndex(obj, range.start, null, true);
       else obj._textEditCaretIndex = range.start;
     }
     _caretVisible = true;

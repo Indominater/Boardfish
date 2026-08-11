@@ -83,7 +83,7 @@ var drawableBitmapWarmupWarmedByKind = {};
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function isViewportImageScalingActive() {
-  return VIEWPORT_IMAGE_SCALING_SUPPORTED && viewportImageScalingEnabled;
+  return viewportImageScalingEnabled;
 }
 
 function bitmapByteSize(bitmap) {

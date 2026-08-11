@@ -186,9 +186,9 @@
       const y2 = Math.min(objBottom, viewportRect.y2);
       if (!(x2 > x1 && y2 > y1)) return null;
       if (x1 !== obj.x || y1 !== obj.y || x2 !== objRight || y2 !== objBottom) {
-        const sourceWidth = img?.width || img?.naturalWidth || 0;
-        const sourceHeight = img?.height || img?.naturalHeight || 0;
-        if (sourceWidth > 0 && sourceHeight > 0) {
+        const sourceWidth = img.width;
+        const sourceHeight = img.height || img.naturalHeight;
+        if (sourceHeight > 0) {
           const cropWidth = x2 - x1;
           const cropHeight = y2 - y1;
           let dx = x1;
@@ -623,19 +623,18 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , counters
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      , options = {}
+      , viewportRect = deps.currentViewportWorldRect()
+      , skipIds
+      , imageSourceResolver = null
+      , skipId = null
+      , onlyText = false
+      , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
       const objectMotionForDraw = (
         typeof deps.objectMotionForDraw === 'function' &&
         (typeof deps.hasObjectMotionsForDraw !== 'function' || deps.hasObjectMotionsForDraw())
       ) ? deps.objectMotionForDraw : null;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        const skipId = options.skipId || null;
-        const skipIds = options.skipIds;
-        const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
-        const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
-        const imageSourceResolver = options.imageSourceResolver || null;
-        const onlyText = options.onlyText === true;
         for (const obj of deps.objects()) {
           if (obj.id === skipId || skipIds?.has(obj.id)) continue;
           if (onlyText && obj.type !== 'text') continue;
@@ -652,12 +651,6 @@
         }
         return;
       } else {
-      const skipId = options.skipId || null;
-      const skipIds = options.skipIds;
-      const viewportRect = options.viewportRect || deps.currentViewportWorldRect();
-      const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
-      const imageSourceResolver = options.imageSourceResolver || null;
-      const onlyText = options.onlyText === true;
       const cullingEnabled = deps.viewportCullingEnabled();
       let drawnImages = 0;
       let drawnText = 0;

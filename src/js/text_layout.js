@@ -760,11 +760,7 @@ function getCachedTextWrappedLineCount(obj, text, scriptKey) {
     obj._textWrappedLineCountCacheScriptKey === scriptKey &&
     Number.isFinite(obj._textWrappedLineCountCacheValue)
   ) {
-    return Math.max(1, Math.trunc(Number(obj._textWrappedLineCountCacheValue)) || 1);
-  }
-  const cachedIndex = getCachedTextWrappedLineIndex(obj, text, scriptKey);
-  if (cachedIndex) {
-    return Math.max(1, Math.trunc(Number(cachedIndex.lineCount)) || 1);
+    return obj._textWrappedLineCountCacheValue;
   }
   return null;
 }
@@ -1222,9 +1218,10 @@ function getWrappedLineCount(obj, text) {
   if (!obj || obj.type !== 'text') return 1;
   const scriptRanges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
-  const cachedCount = getCachedTextWrappedLineCount(obj, text, scriptKey);
+  const cachedCount = getCachedTextWrappedLineCount(obj, text, scriptKey)
+    ?? getCachedTextWrappedLineIndex(obj, text, scriptKey)?.lineCount;
   if (cachedCount != null) {
-    return cachedCount;
+    return Math.max(1, Math.trunc(Number(cachedCount)) || 1);
   }
   const wrapped = buildWrappedLines(obj, { scriptRanges, scriptKey, collect: false, collectLineIndex: true });
   setCachedTextWrappedLineIndex(obj, text, scriptKey, wrapped.lineIndex || [], wrapped.lineCount);
@@ -1867,7 +1864,7 @@ const isTextScriptMarkerHiddenAt = (ranges, index, content = '') => {
   return false;
 };
 
-const activeTextScriptRangesAt = (ranges, index, { includeEnd = false, affinity = '' } = {}) => {
+const activeTextScriptRangesAt = (ranges, index, includeEnd = false, affinity = '') => {
   const active = [];
   for (const range of ranges || []) {
     if (index < range.start || index > range.end) continue;
@@ -1907,8 +1904,7 @@ const textScriptStateAt = (ranges, index) => {
 };
 
 function textScriptMetricsStateAt(metrics, index) {
-  const pos = Math.max(0, Math.trunc(Number(index)) || 0);
-  return metrics?.states?.[pos] || BASE_TEXT_SCRIPT_STATE;
+  return metrics?.states?.[index] || BASE_TEXT_SCRIPT_STATE;
 }
 
 function textScriptMetricsCaretStateAt(metrics, index, affinity = '') {
@@ -1920,8 +1916,7 @@ function textScriptMetricsCaretStateAt(metrics, index, affinity = '') {
 }
 
 function textScriptMetricsHiddenAt(metrics, index) {
-  const pos = Math.trunc(Number(index));
-  return Number.isFinite(pos) && !!metrics?.hidden?.[pos];
+  return !!metrics?.hidden?.[index];
 }
 
 function createBaseTextScriptLayoutMetricsForLength(length) {
@@ -2323,7 +2318,7 @@ function getTextScriptLayoutMetricsForObject(obj, content, scriptRanges = [], sc
 const textScriptCaretStateAt = (obj, index) => {
   const ranges = getTextScriptRanges(obj);
   const affinity = obj?._textScriptCaretIndex === index ? obj._textScriptCaretAffinity : '';
-  return textScriptStateFromRanges(activeTextScriptRangesAt(ranges, index, { includeEnd: true, affinity }));
+  return textScriptStateFromRanges(activeTextScriptRangesAt(ranges, index, true, affinity));
 };
 
 const getTextMinWidth = (obj) => {
@@ -2632,8 +2627,8 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
     return setTextLayoutTotalLines(obj._layoutCache.slice(first, last + 1), obj._layoutCache.length);
   }
 
-  const knownLineCount = getCachedTextWrappedLineCount(obj, content, scriptKey);
   const lineIndexCache = getCachedTextWrappedLineIndex(obj, content, scriptKey);
+  const knownLineCount = lineIndexCache?.lineCount ?? getCachedTextWrappedLineCount(obj, content, scriptKey);
   if (!lineIndexCache) {
     const wrapped = buildWrappedLines(obj, {
       scriptRanges,

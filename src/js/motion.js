@@ -128,7 +128,8 @@
     const sag = yTimeSec > 0
       ? (Math.exp(-3.2 * yTimeSec) - Math.exp(-11.200000000000001 * yTimeSec)) * 0.08
       : 0;
-    const groupSide = motion.groupSize > 1 ? motion.groupSide : 1;
+    const grouped = motion.groupSize > 1;
+    const groupSide = grouped ? motion.groupSide : 1;
     const xPx = (xBase * xAttack + coupledX * yAttack) * settle * NORMALIZE_X * 5;
     const yPx = (yBase + sag) * yAttack * settle * NORMALIZE_Y * 10.75;
     const shapeTimeSec = timeSec - 0.044;
@@ -136,10 +137,9 @@
     const shape = (shapeTimeSec > 0
       ? springImpulse(shapeTimeSec, 6.3334507896370225, 18.7513199475259) * shapeAttack * settle
       : 0) * NORMALIZE_SHAPE;
-    const strain = shape * 0.028 * (motion.groupSize > 1 ? 1 + groupSide * 0.06 : 1);
+    const strain = shape * 0.028 * (grouped ? 1 + groupSide * 0.06 : 1);
     return {
-      groupTranslateX: (motion.groupSize > 1 ? 0 : xPx) / zoom,
-      groupTranslateY: yPx / zoom,
+      groupTranslateX: (grouped ? 0 : xPx) / zoom,
       translateX: xPx * groupSide / zoom,
       translateY: yPx / zoom,
       scaleX: Math.exp(-strain),
@@ -150,17 +150,15 @@
   };
 
   const blendTransforms = (previous, next, weight) => {
-    const t = clamp01(weight);
-    const blend = (a, b) => a + (b - a) * t;
+    const blend = (a, b) => a + (b - a) * weight;
     return {
       translateX: blend(previous.translateX, next.translateX),
       translateY: blend(previous.translateY, next.translateY),
       groupTranslateX: blend(previous.groupTranslateX, next.groupTranslateX),
-      groupTranslateY: blend(previous.groupTranslateY, next.groupTranslateY),
       scaleX: Math.exp(blend(Math.log(previous.scaleX), Math.log(next.scaleX))),
       scaleY: Math.exp(blend(Math.log(previous.scaleY), Math.log(next.scaleY))),
-      scaleOriginX: blend(previous.scaleOriginX, next.scaleOriginX),
-      scaleOriginY: blend(previous.scaleOriginY, next.scaleOriginY),
+      scaleOriginX: 0.5,
+      scaleOriginY: 0.12,
     };
   };
 

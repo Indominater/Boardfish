@@ -282,7 +282,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   }
   if (typeof setPendingTextEditInputState === 'function') setPendingTextEditInputState(_editEl, replacementState);
   if (typeof setTextEditProxySelectionRange === 'function') {
-    setTextEditProxySelectionRange(_editEl, selection.start, selection.end, selection.direction, { value: oldValue });
+    setTextEditProxySelectionRange(_editEl, selection.start, selection.end, selection.direction, oldValue);
   } else {
     _editEl.setSelectionRange(selection.start, selection.end, selection.direction);
   }
@@ -299,9 +299,9 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   const mutationResult =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   typeof replaceTextEditProxyRange === 'function'
-    ? replaceTextEditProxyRange(_editEl, replacementText, selection.start, selection.end, 'end', {
-      deferDomValue: inputTypeValue.startsWith('delete'),
-    })
+    ? replaceTextEditProxyRange(
+      _editEl, replacementText, selection.start, selection.end, 'end', inputTypeValue.startsWith('delete'),
+    )
     : (() => {
       _editEl.setRangeText(replacementText, selection.start, selection.end, 'end');
       /* BOARDFISH_DEV_DIAGNOSTICS_START */

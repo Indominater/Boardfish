@@ -76,7 +76,7 @@ function setHistoryEditProxyLogicalValue(proxy, value = '') {
   const nextValue = String(value ?? '');
   const domSynced = String(proxy.value ?? '') === nextValue;
   if (typeof proxy._boardfishSetLogicalValue === 'function') {
-    proxy._boardfishSetLogicalValue(nextValue, { domSynced });
+    proxy._boardfishSetLogicalValue(nextValue, domSynced);
     return;
   }
   proxy._boardfishLogicalValue = nextValue;
@@ -545,7 +545,7 @@ function restoreSnapshot(s, {
     reusedEditProxy = true;
     setHistoryEditProxyLogicalValue(_editEl, obj.data?.content);
     obj._editStartContent = obj.data.content;
-    setTextEditMinLinesForSession(obj, { preserveSize: true });
+    setTextEditMinLinesForSession(obj, true);
     _editHistoryLastContent = obj.data.content;
     _editHistoryActionStartState = null;
   } else {
