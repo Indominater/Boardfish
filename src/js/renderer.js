@@ -471,10 +471,12 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , counters = null
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      , options = {}
+      , viewportRect = null
+      , view = null
+      , imageSourceResolver = null
+      , motion = null
     ) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        const viewportRect = options.viewportRect || null;
         if (obj.type === 'text') {
           const layout = getTextLayoutForDraw(obj, viewportRect);
           for (const line of layout) deps.drawTextLineRange(context, line, obj);
@@ -482,10 +484,9 @@
         }
         if (obj.type !== 'image') return;
 
-        const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
-        const imageSourceResolver = options.imageSourceResolver || null;
+        view ||= { zoom: deps.zoom(), dpr: deps.dpr() };
         const key = obj.data.imgKey;
-        const lowLatencyImageMotion = !!options.motion;
+        const lowLatencyImageMotion = !!motion;
         const selected = imageSourceResolver
           ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
           : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
@@ -496,7 +497,6 @@
             selected?.activeInputFullFallback === true || lowLatencyImageMotion);
         } catch (_) {}
       } else {
-      const viewportRect = options.viewportRect || null;
       if (obj.type === 'text') {
         const layoutStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
         const layout = getTextLayoutForDraw(obj, viewportRect);
@@ -543,11 +543,10 @@
       }
       if (obj.type !== 'image') return false;
 
-      const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
-      const imageSourceResolver = options.imageSourceResolver || null;
+      view ||= { zoom: deps.zoom(), dpr: deps.dpr() };
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
-      const lowLatencyImageMotion = !!options.motion;
+      const lowLatencyImageMotion = !!motion;
       const selected = imageSourceResolver
         ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
         : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
@@ -637,7 +636,6 @@
         const view = options.view || { zoom: deps.zoom(), dpr: deps.dpr() };
         const imageSourceResolver = options.imageSourceResolver || null;
         const onlyText = options.onlyText === true;
-        const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
         for (const obj of deps.objects()) {
           if (obj.id === skipId || skipIds?.has(obj.id)) continue;
           if (onlyText && obj.type !== 'text') continue;
@@ -647,9 +645,7 @@
             ? applyObjectMotion(context, obj, viewportRect, motion)
             : viewportRect;
           try {
-            drawOptions.motion = motion;
-            drawOptions.viewportRect = objectViewportRect;
-            drawSingleObj(context, obj, drawOptions);
+            drawSingleObj(context, obj, objectViewportRect, view, imageSourceResolver, motion);
           } finally {
             if (motion) context.restore();
           }
@@ -663,7 +659,6 @@
       const imageSourceResolver = options.imageSourceResolver || null;
       const onlyText = options.onlyText === true;
       const cullingEnabled = deps.viewportCullingEnabled();
-      const drawOptions = { view, imageSourceResolver, motion: null, viewportRect };
       let drawnImages = 0;
       let drawnText = 0;
       for (const obj of deps.objects()) {
@@ -724,9 +719,7 @@
           imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
-          drawOptions.motion = motion;
-          drawOptions.viewportRect = objectViewportRect;
-          drawn = drawSingleObj(context, obj, counters, drawOptions);
+          drawn = drawSingleObj(context, obj, counters, objectViewportRect, view, imageSourceResolver, motion);
         } finally {
           if (motion) context.restore();
           if (counters && typeof performance !== 'undefined') {

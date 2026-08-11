@@ -95,7 +95,7 @@ test('text renderer uses the viewport-aware rich layout path', () => {
     lineHeight: 24,
   });
 
-  renderer.drawSingleObj({}, obj, null, { viewportRect });
+  renderer.drawSingleObj({}, obj, null, viewportRect);
 
   assert.deepEqual(drawnLines, ['one', 'two']);
 });

@@ -1499,10 +1499,9 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   obj._lastTextLayoutLineDelta = layoutLineDelta;
 
   const yChanged = obj._layoutCacheY !== obj.y;
-  for (let i = 0; i < oldSplice.start; i++) {
+  for (let i = yChanged || oldScriptRanges.length || scriptRanges.length ? 0 : oldSplice.start; i < oldSplice.start; i++) {
     const line = layout[i];
     line.scriptRanges = scriptRanges;
-    line.align = textLineAlignAt(obj, line.logicalLineIndex || 0);
     if (yChanged) {
       line.y = obj.y + TEXT_PAD + i * LINE_H;
       line.textY = line.y + TEXT_BASELINE_Y_OFFSET;
@@ -2491,13 +2490,6 @@ function getCachedTextViewportLayoutLines(obj, content, scriptKey, alignKey, fir
   return setTextLayoutTotalLines(layout, totalLines);
 }
 
-function setCachedTextViewportLayoutLines(obj, content, scriptKey, alignKey, first, layout, totalLines) {
-  const cache = ensureTextViewportLayoutLineCache(obj, content, scriptKey, alignKey, totalLines);
-  if (!cache || !Array.isArray(layout)) return;
-  for (let i = 0; i < layout.length; i++) cache.set(first + i, layout[i]);
-  trimMapCache(cache, TEXT_VIEWPORT_LAYOUT_LINE_CACHE_MAX_ENTRIES);
-}
-
 function setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, totalLines) {
   if (!obj || obj.type !== 'text' || !Array.isArray(layout)) return layout;
   if (
@@ -2517,7 +2509,9 @@ function setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, fir
     obj._textViewportLayoutRangeCache = new Map();
   }
   const out = setTextLayoutTotalLines(layout, totalLines);
-  setCachedTextViewportLayoutLines(obj, content, scriptKey, alignKey, first, out, totalLines);
+  const lineCache = ensureTextViewportLayoutLineCache(obj, content, scriptKey, alignKey, totalLines);
+  for (let i = 0; i < out.length; i++) lineCache.set(first + i, out[i]);
+  trimMapCache(lineCache, TEXT_VIEWPORT_LAYOUT_LINE_CACHE_MAX_ENTRIES);
   obj._textViewportLayoutRangeCache.set(`${first}:${last}`, out);
   trimMapCache(obj._textViewportLayoutRangeCache, TEXT_VIEWPORT_LAYOUT_RANGE_CACHE_MAX_ENTRIES);
   return out;
@@ -2559,26 +2553,21 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, scriptRanges, s
     scriptMetrics,
     lineIndexEntries: lineIndexCache.entries,
   });
-  const wrappedLines = [];
+  const layout = [];
   for (const line of wrappedSourceLines) {
     if (
       Number.isFinite(line?.visualLineIndex) &&
       line.visualLineIndex >= first &&
       line.visualLineIndex <= actualLast
     ) {
-      wrappedLines.push(line);
+      layout.push(layoutLineFromWrappedLine(
+        obj,
+        line,
+        line.visualLineIndex,
+        scriptRanges,
+        scriptMetrics,
+      ));
     }
-  }
-  const layout = new Array(wrappedLines.length);
-  for (let i = 0; i < wrappedLines.length; i++) {
-    const line = wrappedLines[i];
-    layout[i] = layoutLineFromWrappedLine(
-      obj,
-      line,
-      line.visualLineIndex,
-      scriptRanges,
-      scriptMetrics,
-    );
   }
   return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, totalLines);
 }

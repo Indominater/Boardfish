@@ -558,6 +558,26 @@ test('clearImageStore clears shared scaled image work', () => {
   assert.equal(clears, 1);
 });
 
+test('clearImageStore keeps in-flight decodes in the concurrency count', async () => {
+  const pending = [];
+  const { context, rafs } = loadImageState(() => new Promise((resolve) => pending.push(resolve)));
+  const queue = (key) => {
+    const source = `data:image/png;base64,${key}`;
+    context.imageStore[key] = source;
+    context.cacheImage(key, source);
+  };
+  queue('old-1');
+  queue('old-2');
+  rafs.shift()();
+  await Promise.resolve();
+  context.clearImageStore();
+  queue('new-1');
+  rafs.shift()();
+  await Promise.resolve();
+  assert.equal(pending.length, 2);
+  for (const resolve of pending) resolve({ width: 1, height: 1, close() {} });
+});
+
 test('newImgKey skips keys already present in the live image store', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
 

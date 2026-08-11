@@ -198,12 +198,12 @@ function _rebuildOffscreen(dpr, viewportRect) {
   resetCanvasToScreen(_offCtx);
   fillBoardBackground(_offCtx, _offscreen.width, _offscreen.height);
   setWorldCanvasTransform(_offCtx, dpr);
-  const drawOptions = { viewportRect, view: { zoom, dpr } };
+  const view = { zoom, dpr };
   for (const obj of objects) {
     if (obj.type === 'text') continue;
     if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) continue;
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') drawSingleObj(_offCtx, obj, null, drawOptions);
-    else drawSingleObj(_offCtx, obj, drawOptions);
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') drawSingleObj(_offCtx, obj, null, viewportRect, view);
+    else drawSingleObj(_offCtx, obj, viewportRect, view);
   }
   _offscreenDirty = false;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -511,12 +511,8 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
     const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
     if (!(selStart >= ls && selStart <= le)) return false;
     const off = Math.max(0, selStart - ls);
-    cx = typeof lineCaretXAtOffset === 'function'
-      ? lineCaretXAtOffset(line, obj, off)
-      : lineXAtOffset(line, obj, off < line.text.length ? off : line.text.length);
-    const state = typeof textScriptCaretStateAt === 'function'
-      ? textScriptCaretStateAt(obj, selStart)
-      : { depth: 0, offset: 0, scale: 1 };
+    cx = lineCaretXAtOffset(line, obj, off);
+    const state = textScriptCaretStateAt(obj, selStart);
     if (state?.depth > 0) {
       const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
       const textY = Number.isFinite(line.textY) ? line.textY : line.y + TEXT_BASELINE_Y_OFFSET;
@@ -544,9 +540,7 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
     }
   }
   if (!caretLine) return false;
-  viewZoom = Number(viewZoom);
-  const caretZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
-  const caretWidth = 2 / caretZoom;
+  const caretWidth = 2 / viewZoom;
   const contentLeft = obj.x + TEXT_PAD;
   const contentRight = Math.max(contentLeft, obj.x + obj.w - TEXT_PAD);
   const maxCaretX = Math.max(contentLeft, contentRight - caretWidth);

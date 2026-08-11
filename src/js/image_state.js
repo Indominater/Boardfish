@@ -1090,7 +1090,6 @@ function clearImageStore() {
   _imageHydrationQueue.clear();
   _imageHydrationScheduled = false;
   _imageDecodeQueue.length = 0;
-  _imageDecodeActive = 0;
   _imageDecodeScheduled = false;
   _imageReadyLastRender = 0;
   imgKeyCounter = 1;
