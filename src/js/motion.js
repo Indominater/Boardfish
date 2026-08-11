@@ -180,13 +180,11 @@
   };
 
   const compareObjectGeometry = (a, b) => {
-    const ax = (Number(a?.x) || 0) + (Number(a?.w) || 0) / 2;
-    const bx = (Number(b?.x) || 0) + (Number(b?.w) || 0) / 2;
+    const ax = a.x + a.w / 2, bx = b.x + b.w / 2;
     if (ax !== bx) return ax - bx;
-    const ay = (Number(a?.y) || 0) + (Number(a?.h) || 0) / 2;
-    const by = (Number(b?.y) || 0) + (Number(b?.h) || 0) / 2;
+    const ay = a.y + a.h / 2, by = b.y + b.h / 2;
     if (ay !== by) return ay - by;
-    return String(a?.id || '').localeCompare(String(b?.id || ''));
+    return a.id.localeCompare(b.id);
   };
 
   const noteObject = (obj, startedAt, groupSide, groupSize) => {

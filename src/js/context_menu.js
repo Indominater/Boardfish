@@ -732,9 +732,8 @@ const showTextEditContextMenuAt = (clientX, clientY) => {
   textDeleteBtn.style.display = hasSelection ? '' : 'none';
   if (!editingId) return;
   openExclusiveMenuAt(textCtxMenu, 'text-ctx-menu', clientX, clientY, 'show-text-menu:edit');
-  focusTextEditProxy();
   MenuDebug.log('text-ctx-menu:open', {
-    hasSelection: !!getTextEditSelectionState()?.hasSelection,
+    hasSelection,
     pasteVisible: textPasteBtn.style.display !== 'none',
     x: clientX,
     y: clientY,

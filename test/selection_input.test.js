@@ -90,6 +90,7 @@ function loadSelectionInputHarness(objects, options = {}) {
     zoom: 1,
     panX: 0,
     panY: 0,
+    _boardSurfaceCssSizeCache: { width: 1000, height: 800 },
     dirty: [],
     history: [],
     historyOptions: [],
@@ -206,28 +207,16 @@ function loadSelectionInputHarness(objects, options = {}) {
 test('selection chrome is hidden when its box only touches a viewport edge', () => {
   const context = loadSelectionInputHarness([]);
   const bounds = { x1: 100, y1: 200, x2: 300, y2: 400 };
-  const surface = { width: 1000, height: 800 };
-
-  assert.equal(
-    context.selectionBoundsIntersectViewport(bounds, { zoom: 1, panX: 900, panY: 0 }, surface),
-    false,
-  );
-  assert.equal(
-    context.selectionBoundsIntersectViewport(bounds, { zoom: 1, panX: -300, panY: 0 }, surface),
-    false,
-  );
-  assert.equal(
-    context.selectionBoundsIntersectViewport(bounds, { zoom: 1, panX: 0, panY: 600 }, surface),
-    false,
-  );
-  assert.equal(
-    context.selectionBoundsIntersectViewport(bounds, { zoom: 1, panX: 0, panY: -400 }, surface),
-    false,
-  );
-  assert.equal(
-    context.selectionBoundsIntersectViewport(bounds, { zoom: 2, panX: 0, panY: 0 }, surface),
-    true,
-  );
+  for (const [view, visible] of [
+    [{ zoom: 1, panX: 900, panY: 0 }, false],
+    [{ zoom: 1, panX: -300, panY: 0 }, false],
+    [{ zoom: 1, panX: 0, panY: 600 }, false],
+    [{ zoom: 1, panX: 0, panY: -400 }, false],
+    [{ zoom: 2, panX: 0, panY: 0 }, true],
+  ]) {
+    Object.assign(context, view);
+    assert.equal(context.selectionBoundsIntersectViewport(bounds), visible);
+  }
 });
 
 test('shielded system key cancels active rubber-band selection before blocking input', () => {

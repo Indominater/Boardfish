@@ -97,13 +97,6 @@ const applySelectedTextAlignmentFromKeyboard = (direction) => {
   return true;
 };
 
-const isBrowserFindShortcut = (e) => {
-  const commandFind = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'f');
-  const findByLetter = (e.ctrlKey || e.metaKey) && isShortcutKey(e, 'g') && !e.altKey;
-  const findNext = e.key === 'F3' || e.code === 'F3';
-  return commandFind || findByLetter || findNext;
-};
-
 function consumeShortcutEvent(e) {
   if (e.cancelable !== false) e.preventDefault();
   e.stopPropagation();
@@ -147,7 +140,7 @@ document.addEventListener('keydown', (e) => {
   const command = e.ctrlKey !== e.metaKey && !e.altKey;
   const commandOnly = command && !e.shiftKey, shiftCommandOnly = command && e.shiftKey;
   const noShortcutModifiers = !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
-  if (isBrowserFindShortcut(e)) {
+  if (((e.ctrlKey || e.metaKey) && (isShortcutKey(e, 'f') || (isShortcutKey(e, 'g') && !e.altKey))) || e.key === 'F3' || e.code === 'F3') {
     const commandFind = commandOnly && isShortcutKey(e, 'f');
     if (commandFind && canTransformSelectedImagesFromKeyboard()) {
       consumeShortcutEvent(e);

@@ -18,16 +18,10 @@ function selectedBounds() {
   return x1 === Infinity ? null : { x1, y1, x2, y2 };
 }
 
-function viewportWorldRect(
-  padScreenPx = 0,
-  surface = null,
-) {
+function viewportWorldRect(padScreenPx = 0) {
   const z = Math.max(zoom, 0.001);
   const pad = padScreenPx / z;
-  const surfaceWidth = Number(surface?.width);
-  const surfaceHeight = Number(surface?.height);
-  const width = surfaceWidth > 0 ? surfaceWidth : window.innerWidth;
-  const height = surfaceHeight > 0 ? surfaceHeight : window.innerHeight;
+  const { width, height } = boardSurfaceCssSize();
   return {
     x1: -panX / z - pad,
     y1: -panY / z - pad,

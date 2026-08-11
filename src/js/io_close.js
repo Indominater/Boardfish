@@ -1205,7 +1205,7 @@ function applyBoardData(data, options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const replaceStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  BoardfishEditorState.replaceBoardObjects(data.objects || [], { restoreCounters: false });
+  BoardfishEditorState.replaceBoardObjects(data.objects || []);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'replaceBoardObjects', { ms: performance.now() - replaceStart, objectCount: objects.length });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1215,7 +1215,7 @@ function applyBoardData(data, options = {}) {
 
   const countersStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  BoardfishEditorState.restoreObjectCountersFromObjects(objects);
+  BoardfishEditorState.restoreObjectCounters();
   BoardfishEditorState.setViewport(data.viewport);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });

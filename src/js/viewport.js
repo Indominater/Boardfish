@@ -274,7 +274,7 @@ function startCanvasSizeTracking() {
 var VIEWPORT_CULL_PADDING_PX = 256;
 
 function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX) {
-  return viewportWorldRect(padScreenPx, boardSurfaceCssSize());
+  return viewportWorldRect(padScreenPx);
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {

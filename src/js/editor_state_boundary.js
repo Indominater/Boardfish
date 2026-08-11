@@ -77,9 +77,9 @@
     zCounter = 1;
   }
 
-  function restoreObjectCountersFromObjects(objectsSnapshot = objects) {
+  function restoreObjectCounters() {
     resetObjectCounters();
-    for (const obj of objectsSnapshot) {
+    for (const obj of objects) {
       const idNumber = parseInt(String(obj.id || '').split('-')[1]);
       if (!isNaN(idNumber) && idNumber >= idCounter) idCounter = idNumber + 1;
       if (obj.z >= zCounter) zCounter = obj.z + 1;
@@ -94,7 +94,6 @@
   function replaceBoardObjects(nextObjects = [], {
     normalizeText = true,
     syncTextHeights = true,
-    restoreCounters = true,
   } = {}) {
     objects = Array.isArray(nextObjects) ? nextObjects : [];
     objectsMap.clear();
@@ -115,7 +114,6 @@
       }
     }
     if (syncTextHeights) syncAllTextAutoHeights();
-    if (restoreCounters) restoreObjectCountersFromObjects(objects);
     return objects;
   }
 
@@ -150,7 +148,7 @@
     removeObjectsById,
     replaceBoardObjects,
     resetBoardObjectState,
-    restoreObjectCountersFromObjects,
+    restoreObjectCounters,
     setSelection: setSelectionState,
     setBoardOpening,
     setViewport: setViewportState,

@@ -91,7 +91,7 @@ function renderImageToCanvas(obj, sourceImg = null) {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return null;
   }
-  const sideways = Math.abs(Number(transform.rotation) || 0) % 180 === 90;
+  const sideways = Math.abs(transform.rotation) % 180 === 90;
   const tmp = document.createElement('canvas');
   tmp.width = sideways ? sourceH : sourceW;
   tmp.height = sideways ? sourceW : sourceH;
@@ -161,7 +161,7 @@ const createImageBitmapForSource = async (source, displaySrc) => {
 const openPreviewTargetForObject = (obj, view = {}) => {
   const dpr = Number(view.dpr || (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
   const z = Math.max(0.001, Number(view.zoom || 1));
-  const sideways = Math.abs(Number(obj?.data?.rotation) || 0) % 180 === 90;
+  const sideways = Math.abs(obj?.data?.rotation) % 180 === 90;
   const worldW = Math.max(1, sideways ? Number(obj?.h || 0) : Number(obj?.w || 0));
   const worldH = Math.max(1, sideways ? Number(obj?.w || 0) : Number(obj?.h || 0));
   return {

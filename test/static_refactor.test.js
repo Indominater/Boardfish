@@ -179,7 +179,7 @@ test('motion API is specialized to copy feedback and browser find stays native',
   assert.doesNotMatch(motion, /browser-find-shortcut/);
   assert.doesNotMatch(motion, /appWindow/);
   assert.doesNotMatch(motion, new RegExp('app-' + 'window'));
-  assert.match(keyboard, /isBrowserFindShortcut/);
+  assert.match(keyboard, /isShortcutKey\(e, 'f'\).*isShortcutKey\(e, 'g'\).*e\.key === 'F3'/);
   assert.doesNotMatch(keyboard, /browser-find-shortcut/);
 });
 

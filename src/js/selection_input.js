@@ -287,26 +287,11 @@ function _setStyleIfChanged(el, prop, value, state) {
   el.style[prop] = value;
 }
 
-function selectionBoundsIntersectViewport(
-  bounds,
-  view,
-  surface = null,
-) {
+function selectionBoundsIntersectViewport(bounds) {
   if (!bounds) return false;
-  const size = surface || globalThis._boardSurfaceCssSizeCache ||
-    (typeof boardSurfaceCssSize === 'function' ? boardSurfaceCssSize() : {
-      width: Number(typeof window !== 'undefined' ? window.innerWidth : 0) || 0,
-      height: Number(typeof window !== 'undefined' ? window.innerHeight : 0) || 0,
-    });
-  const width = Number(size?.width) || 0;
-  const height = Number(size?.height) || 0;
-  if (width <= 0 || height <= 0) return true;
-
-  const scale = view?.zoom ?? zoom;
-  const offsetX = view?.panX ?? panX;
-  const offsetY = view?.panY ?? panY;
-  const screenX1 = bounds.x1 * scale + offsetX, screenY1 = bounds.y1 * scale + offsetY;
-  const screenX2 = bounds.x2 * scale + offsetX, screenY2 = bounds.y2 * scale + offsetY;
+  const { width, height } = _boardSurfaceCssSizeCache || boardSurfaceCssSize();
+  const screenX1 = bounds.x1 * zoom + panX, screenY1 = bounds.y1 * zoom + panY;
+  const screenX2 = bounds.x2 * zoom + panX, screenY2 = bounds.y2 * zoom + panY;
   return screenX1 < width && screenX2 > 0 && screenY1 < height && screenY2 > 0;
 }
 
@@ -324,28 +309,6 @@ const boundsCornerPoint = function boundsCornerPoint(bounds, dir) {
     x: dir.includes('e') ? bounds.x2 : bounds.x1,
     y: dir.includes('s') ? bounds.y2 : bounds.y1,
   };
-};
-
-const proportionalScaleFromHandleDrag = function proportionalScaleFromHandleDrag(anchor, handlePoint, dx, dy, minScale) {
-  if (!anchor || !handlePoint || !Number.isFinite(dx) || !Number.isFinite(dy) || !Number.isFinite(minScale)) return 1;
-  const vx = handlePoint.x - anchor.x;
-  const vy = handlePoint.y - anchor.y;
-  const pointerX = handlePoint.x + dx;
-  const pointerY = handlePoint.y + dy;
-  let scale = Infinity;
-  let hasScale = false;
-  if (Math.abs(vx) > 1e-9) {
-    hasScale = true;
-    const value = (pointerX - anchor.x) / vx;
-    if (Number.isFinite(value) && value < scale) scale = value;
-  }
-  if (Math.abs(vy) > 1e-9) {
-    hasScale = true;
-    const value = (pointerY - anchor.y) / vy;
-    if (Number.isFinite(value) && value < scale) scale = value;
-  }
-  if (!hasScale) return 1;
-  return Math.max(minScale, scale);
 };
 
 function hideMultiSelectionOverlay() {
@@ -511,7 +474,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         function onMultiMove(ev) {
           const dx = (ev.clientX - startX) / zoom;
           const dy = (ev.clientY - startY) / zoom;
-          const scale = proportionalScaleFromHandleDrag(anchorPoint, handlePoint, dx, dy, minObjectScale);
+          const scale = Math.max(minObjectScale, Math.min((handlePoint.x + dx - anchorPoint.x) / (handlePoint.x - anchorPoint.x), (handlePoint.y + dy - anchorPoint.y) / (handlePoint.y - anchorPoint.y)));
           resizeCommitter.schedule(scale);
         }
 

@@ -159,7 +159,7 @@
     const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (view.zoom * view.dpr);
     const transform = obj.data;
     if (transform.flipX || transform.flipY || transform.rotation) {
-      const sideways = Math.abs(Number(transform.rotation) || 0) % 180 === 90;
+      const sideways = Math.abs(transform.rotation) % 180 === 90;
       const drawW = sideways ? obj.h : obj.w;
       const drawH = sideways ? obj.w : obj.h;
       context.save();
