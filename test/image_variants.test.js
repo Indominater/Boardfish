@@ -949,7 +949,7 @@ test('low-zoom active navigation records visible full-size fallbacks until scale
   assert.match(source, /IMAGE_VARIANT_ACTIVE_INPUT_PRIORITY_MS/);
   assert.match(source, /IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT/);
   assert.match(source, /chooseImageScaleForDraw\(obj, fullSource, view, activeInput\)/);
-  assert.match(source, /if \(targetScale < 1\) queueScaledImageVariant\(key, fullSource, targetScale, activeInput\);/);
+  assert.match(source, /if \(targetScale < 1\) \{[\s\S]*queueScaledImageVariant\(key, fullSource, targetScale, activeInput\);/);
   assert.match(source, /scaledVariantPending: true/);
   assert.match(source, /activeInputFullFallback: true/);
   assert.doesNotMatch(source, /source: null/);

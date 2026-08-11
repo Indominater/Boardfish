@@ -79,12 +79,7 @@
   }
 
   function panBy(dx = 0, dy = 0) {
-    constrainPan(
-      panX + (Number(dx) || 0),
-      panY + (Number(dy) || 0),
-      zoom,
-      true,
-    );
+    constrainPan(panX + dx, panY + dy, zoom, true);
   }
 
   function zoomAroundClient(clientX, clientY, nextZoom) {

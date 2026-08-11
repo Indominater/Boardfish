@@ -274,11 +274,6 @@ const textScriptScaleForDepth = (depth) => Math.pow(
   Math.min(TEXT_SCRIPT_MAX_SIZE_DEPTH, Math.max(0, depth || 0)),
 );
 
-function defaultTextBoxSize() {
-  const h = NEW_TEXT_EDIT_MIN_LINES * LINE_H + TEXT_PAD * 2;
-  return { w: h * 6, h };
-}
-
 const textFontForScriptDepth = (depth) => {
   if (!(depth > 0)) return FONT;
   return textFontForSize(Math.max(1, FONT_SIZE * textScriptScaleForDepth(depth)));
@@ -2381,7 +2376,6 @@ function textLayoutAlignKey(obj) {
 }
 
 function syncTextLayoutLinePositions(obj, layout) {
-  if (!Array.isArray(layout)) return;
   for (let i = 0; i < layout.length; i++) {
     const y = obj.y + TEXT_PAD + i * LINE_H;
     layout[i].y = y;
@@ -2390,13 +2384,11 @@ function syncTextLayoutLinePositions(obj, layout) {
 }
 
 function setTextLayoutTotalLines(layout, totalLines) {
-  if (!Array.isArray(layout)) return layout;
   layout.totalLines = Math.max(layout.length, Math.trunc(Number(totalLines)) || layout.length);
   return layout;
 }
 
 function getCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last) {
-  if (!obj || obj.type !== 'text') return null;
   const cache = obj._textViewportLayoutRangeCache;
   if (
     !cache ||
@@ -2418,7 +2410,6 @@ function getCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, fir
 }
 
 function ensureTextViewportLayoutLineCache(obj, content, scriptKey, alignKey, totalLines = 0) {
-  if (!obj || obj.type !== 'text') return null;
   if (
     obj._textViewportLayoutLineCacheContent !== content ||
     obj._textViewportLayoutLineCacheW !== obj.w ||
@@ -2459,7 +2450,6 @@ function getCachedTextViewportLayoutLines(obj, content, scriptKey, alignKey, fir
 }
 
 function setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, totalLines) {
-  if (!obj || obj.type !== 'text' || !Array.isArray(layout)) return layout;
   if (
     obj._textViewportLayoutRangeCacheContent !== content ||
     obj._textViewportLayoutRangeCacheW !== obj.w ||

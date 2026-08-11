@@ -11,13 +11,13 @@ function beginBulkImageInsert() {
   _bulkImageInsertAdded = 0;
 }
 
-function finishBulkImageInsert({ pushHistoryEntry = true } = {}) {
+function finishBulkImageInsert() {
   if (_bulkImageInsertDepth > 0) _bulkImageInsertDepth--;
   if (_bulkImageInsertDepth === 0 && _bulkImageInsertAdded > 0) {
     invalidateOffscreen();
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'bulk-image-insert');
     else scheduleRender(true, true);
-    if (pushHistoryEntry) pushHistory('bulk-image-insert');
+    pushHistory('bulk-image-insert');
   }
   const added = _bulkImageInsertAdded;
   if (_bulkImageInsertDepth === 0) {
@@ -46,10 +46,6 @@ const webImageExtForFile = (file) => (
   file?.type === 'image/jpeg' ? 'jpg' : 'png'
 );
 
-const webImageMimeForFile = (file) => (
-  file?.type === 'image/jpeg' ? 'image/jpeg' : 'image/png'
-);
-
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 let imageFileDebugName = null;
 if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -59,15 +55,15 @@ if (typeof BOARDFISH_PRODUCTION === 'undefined') {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const createWebImageSourceFromBlob = async (file, imgKey) => {
+const createWebImageSourceFromBlob = (file, imgKey) => {
   const ext = webImageExtForFile(file);
-  const mime = webImageMimeForFile(file);
+  const mime = file.type;
   return BoardfishWebBoardContainer.createWebImageRef({
     path: `images/${imgKey}.${ext}`,
     mime,
     ext,
     blob: typeof File === 'function' && file instanceof File
-      ? new Blob([await file.arrayBuffer()], { type: mime })
+      ? new Blob([file], { type: mime })
       : file,
   });
 };
@@ -140,26 +136,25 @@ function addImageObject(imgKey, cx, cy, w, h, options = {}) {
 }
 
 async function addImage(src, cx, cy, imgKey, options = {}) {
-  const displaySrc = webImageDisplaySrc(src);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let dbg = null;
   let t0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    dbg = ViewportDebug.start('addImage', { src: displaySrc, cx, cy, imgKey, bitmapOnly: true });
+    dbg = ViewportDebug.start('addImage', { src: webImageDisplaySrc(src), cx, cy, imgKey, bitmapOnly: true });
     t0 = performance.now();
     ViewportDebug.count('imageAdds');
   }
   const rollbackSource = createImageInsertSourceRollback(imgKey, src);
   try {
     BoardfishImageStore.setSource(imgKey, src);
-    const cacheMetrics = await cacheImage(imgKey, src
+    await cacheImage(imgKey, src
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , null
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     );
-    const naturalW = Number(cacheMetrics?.naturalWidth || 0);
-    const naturalH = Number(cacheMetrics?.naturalHeight || 0);
+    const naturalW = Number(imageBitmapCache[imgKey]?.width || 0);
+    const naturalH = Number(imageBitmapCache[imgKey]?.height || 0);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       ViewportDebug.step(dbg, 'bitmap-ready', { width: naturalW, height: naturalH, ms: performance.now() - t0 });
     }
@@ -245,7 +240,7 @@ const insertWebImageFile = async (file, x, y
   let fileName;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') fileName = imageFileDebugName(file);
-  const imageSource = await createWebImageSourceFromBlob(file, imgKey);
+  const imageSource = createWebImageSourceFromBlob(file, imgKey);
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     const detachedFile = typeof File === 'function' && file instanceof File;
     InsertDebug.step(dbg, 'read:end', {
@@ -254,7 +249,7 @@ const insertWebImageFile = async (file, x, y
       fileSize: file.size,
       fileType: file.type,
       bytes: file.size,
-      readMode: detachedFile ? 'array-buffer' : 'blob-reference',
+      readMode: detachedFile ? 'blob-copy' : 'blob-reference',
       skipped: detachedFile ? '' : 'immutable-blob',
     });
   }
@@ -417,10 +412,10 @@ async function insertImageFiles(files, x, y
         });
       }
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        const historyAdded = finishBulkImageInsert({ pushHistoryEntry: added > 0 });
+        const historyAdded = finishBulkImageInsert();
         InsertDebug.step(dbg, 'bulk:end', { source, added, historyAdded });
       } else {
-        finishBulkImageInsert({ pushHistoryEntry: added > 0 });
+        finishBulkImageInsert();
       }
     }
     hideInputShield();

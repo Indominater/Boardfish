@@ -222,6 +222,7 @@ test('selection chrome is hidden when its box only touches a viewport edge', () 
 test('shielded system key cancels active rubber-band selection before blocking input', () => {
   const context = loadSelectionInputHarness([]);
   context._rubberBandDragActive = true;
+  context._inputShieldStack.push('rubber-band');
   context.cancelCalls = [];
   context.cancelRubberBandSelection = (reason) => {
     context.cancelCalls.push(reason);

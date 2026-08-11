@@ -8,9 +8,8 @@
       if (obj.type !== 'image') {
         return point.x >= obj.x && point.x <= obj.x + obj.w && point.y >= obj.y && point.y <= obj.y + obj.h;
       }
-      if (obj.w <= 0 || obj.h <= 0) return false;
-      const transform = obj.data || {};
-      const rotationDegrees = Number(transform.rotation) || 0;
+      const transform = obj.data;
+      const rotationDegrees = transform.rotation;
       if (rotationDegrees % 90 === 0) {
         return point.x >= obj.x - obj.w * IMAGE_UNIT_EPSILON &&
           point.x <= obj.x + obj.w * (1 + IMAGE_UNIT_EPSILON) &&

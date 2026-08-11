@@ -448,15 +448,11 @@ function runMenuCommand(button, source, commandEvent = null) {
     MenuDebug.log('menu:click-command:suppressed', { command });
     return true;
   }
-  const commandSurface = button.id.startsWith('obj-')
+  MenuDebug.log(button.id.startsWith('obj-')
     ? 'obj-ctx-menu:command'
     : button.id.startsWith('text-')
       ? 'text-ctx-menu:command'
-      : 'ctx-menu:command';
-  MenuDebug.log(commandSurface, {
-    command,
-    source,
-  });
+      : 'ctx-menu:command', { command, source });
   if (source === 'pointerup' || source === 'mouseup') _lastPointerMenuCommandAt = performance.now();
   // Keep activation-sensitive file pickers and text focus inside the trusted
   // pointer event. The following click is still suppressed by the timestamp.

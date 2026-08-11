@@ -267,46 +267,19 @@ const textEditNavigationKeys = new Set([
   'PageDown',
 ]);
 
-function configureTextEditProxyElement(proxy) {
-  if (!proxy) return;
-  const setAttr = (name, value) => {
-    if (typeof proxy.setAttribute === 'function') proxy.setAttribute(name, value);
-    else proxy[name] = value;
-  };
-  proxy.id = 'editor-proxy';
-  proxy.wrap = 'off';
-  proxy.spellcheck = false;
-  proxy.tabIndex = -1;
-  setAttr('autocomplete', 'off');
-  setAttr('autocorrect', 'off');
-  setAttr('autocapitalize', 'off');
-  setAttr('aria-label', 'Boardfish text editor');
-  if (!proxy.style) proxy.style = {};
-  proxy.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;resize:none;overflow:hidden;white-space:pre;contain:strict;transform:translate(-100vw,-100vh)';
-}
-
 function textEditProxyValue(proxy) {
-  if (typeof proxy?._boardfishLogicalValue === 'string') return proxy._boardfishLogicalValue;
-  return String(proxy?.value ?? '');
+  return proxy._boardfishLogicalValue ?? proxy.value;
 }
 
 function setTextEditProxyLogicalValue(proxy, value = '', domSynced = true) {
-  if (!proxy) return '';
   const text = String(value ?? '');
   proxy._boardfishLogicalValue = text;
   proxy._boardfishDomValueStale = !domSynced;
-  return text;
 }
 
 function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
-  if (!proxy) {
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') return false;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    return { synced: false, reason: 'missing-proxy' };
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
   const text = String(value ?? '');
-  if (!proxy._boardfishDomValueStale && String(proxy.value ?? '') === text) {
+  if (!proxy._boardfishDomValueStale && proxy.value === text) {
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') return false;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     return { synced: false, reason: 'dom-current' };
@@ -314,7 +287,7 @@ function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
   }
   proxy.value = text;
   setTextEditProxyLogicalValue(proxy, text);
-  if (selection && typeof proxy.setSelectionRange === 'function') {
+  if (selection) {
     const max = text.length;
     const start = Math.max(0, Math.min(Math.trunc(Number(selection.start)) || 0, max));
     const end = Math.max(start, Math.min(Math.trunc(Number(selection.end ?? start)) || start, max));
@@ -327,17 +300,11 @@ function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
 }
 
 function setTextEditProxySelectionRange(proxy, start, end = start, direction = 'none', value) {
-  if (!proxy || typeof proxy.setSelectionRange !== 'function') {
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') return false;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    return { set: false, synced: false, reason: 'missing-proxy' };
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
   const text = value ?? textEditProxyValue(proxy);
   const max = text.length;
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, max));
   const to = Math.max(from, Math.min(Math.trunc(Number(end ?? start)) || from, max));
-  const domValue = String(proxy.value ?? ''), domLength = domValue.length;
+  const domValue = proxy.value, domLength = domValue.length;
   const domStale = !!proxy._boardfishDomValueStale || domValue !== text;
   const shouldSyncDom = domStale && (from > domLength || to > domLength);
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
@@ -363,12 +330,12 @@ function setTextEditProxySelectionRange(proxy, start, end = start, direction = '
 
 const textEditSelectionState = (proxy) => {
   const valueLength = textEditProxyValue(proxy).length;
-  const start = Math.max(0, Math.min(proxy?.selectionStart ?? 0, valueLength));
-  const end = Math.max(0, Math.min(proxy?.selectionEnd ?? start, valueLength));
+  const start = Math.max(0, Math.min(proxy.selectionStart, valueLength));
+  const end = Math.max(0, Math.min(proxy.selectionEnd, valueLength));
   return {
     start,
     end,
-    direction: proxy?.selectionDirection || 'none',
+    direction: proxy.selectionDirection || 'none',
     hasSelection: start !== end,
   };
 };
@@ -589,8 +556,7 @@ const setTextEditMinLinesForSession = (obj, preserveSize = false) => {
   if (!obj || obj.type !== 'text') return 1;
   const minLines = textEditMinLinesForSession(obj, preserveSize);
   obj._editMinLines = minLines;
-  const normalMinLines = textEditMinLinesForSession(obj);
-  if (preserveSize && minLines > normalMinLines) {
+  if (preserveSize && minLines > textEditMinLinesForSession(obj)) {
     obj._textEditPreservedMinLines = minLines;
   } else {
     delete obj._textEditPreservedMinLines;
@@ -2565,23 +2531,28 @@ function enterEdit(id, {
   });
 
   const proxy = document.createElement('textarea');
-  configureTextEditProxyElement(proxy);
+  proxy.id = 'editor-proxy';
+  proxy.wrap = 'off';
+  proxy.spellcheck = false;
+  proxy.tabIndex = -1;
+  proxy.setAttribute('autocomplete', 'off');
+  proxy.setAttribute('autocorrect', 'off');
+  proxy.setAttribute('autocapitalize', 'off');
+  proxy.setAttribute('aria-label', 'Boardfish text editor');
+  proxy.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;resize:none;overflow:hidden;white-space:pre;contain:strict;transform:translate(-100vw,-100vh)';
   proxy.value = obj.data.content;
   setTextEditProxyLogicalValue(proxy, obj.data.content);
   document.body.appendChild(proxy);
   _editEl = proxy;
-  const proxyAttr = (name) => (
-    typeof proxy.getAttribute === 'function' ? proxy.getAttribute(name) : (proxy[name] || '')
-  );
   logStep('enter-proxy-ready', {
     proxyChars: proxy.value.length,
-    proxyWrap: proxy.wrap || proxyAttr('wrap') || '',
+    proxyWrap: proxy.wrap || proxy.getAttribute('wrap') || '',
     proxySpellcheck: proxy.spellcheck,
-    proxyAutocomplete: proxyAttr('autocomplete'),
-    proxyAutocorrect: proxyAttr('autocorrect'),
-    proxyAutocapitalize: proxyAttr('autocapitalize'),
-    proxyAriaHidden: proxyAttr('aria-hidden'),
-    proxyAriaLabel: proxyAttr('aria-label'),
+    proxyAutocomplete: proxy.getAttribute('autocomplete'),
+    proxyAutocorrect: proxy.getAttribute('autocorrect'),
+    proxyAutocapitalize: proxy.getAttribute('autocapitalize'),
+    proxyAriaHidden: proxy.getAttribute('aria-hidden'),
+    proxyAriaLabel: proxy.getAttribute('aria-label'),
     proxyContain: proxy.style.contain || '',
     proxyWhiteSpace: proxy.style.whiteSpace || '',
     proxyOverflow: proxy.style.overflow || '',

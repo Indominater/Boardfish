@@ -259,8 +259,8 @@ function isShieldInputAllowed(e) {
 }
 
 function blockShieldInput(e) {
+  if (!_boardOpening && !_inputShieldStack.length && _dialogResolve === null) return;
   if (
-    _rubberBandDragActive &&
     e.type === 'keydown' &&
     (e.key === 'Escape' || e.key === 'Meta' || e.key === 'OS' || e.metaKey)
   ) {
@@ -270,7 +270,6 @@ function blockShieldInput(e) {
       return;
     }
   }
-  if (!_boardOpening && !_inputShieldStack.length && _dialogResolve === null) return;
   if (isShieldInputAllowed(e)) return;
   ViewportDebug.recordShieldBlock?.(e, { reason: 'input-shield' });
   if (e.cancelable) e.preventDefault();
@@ -449,7 +448,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             continue;
           }
           snapshots.push({
-            id,
+            obj: o,
             x: o.x,
             y: o.y,
             w: o.w, h: o.h,
@@ -461,8 +460,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         minObjectScale = Math.min(1, minObjectScale);
         const resizeCommitter = createRafCommitter((scale) => {
           for (const snap of snapshots) {
-            const o = objectsMap.get(snap.id);
-            if (!o) continue;
+            const o = snap.obj;
             o.x = anchorPoint.x + (snap.x - anchorPoint.x) * scale;
             o.y = anchorPoint.y + (snap.y - anchorPoint.y) * scale;
             o.w = snap.w * scale;

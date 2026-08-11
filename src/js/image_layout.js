@@ -15,13 +15,7 @@
 
   const numericTolerance = (a, b) => Math.max(1, Math.abs(a || 0), Math.abs(b || 0)) * 1e-12;
 
-  const compareIds = (left, right) => {
-    const a = String(left);
-    const b = String(right);
-    if (a < b) return -1;
-    if (a > b) return 1;
-    return 0;
-  };
+  const compareIds = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
   const compareNumberArrays = (left, right) => {
     const count = Math.min(left.length, right.length);
@@ -281,7 +275,7 @@
       target.width += item.width;
     }
 
-    const maxSteps = Math.max(1, items.length * LOCAL_IMPROVEMENT_STEP_FACTOR);
+    const maxSteps = items.length * LOCAL_IMPROVEMENT_STEP_FACTOR;
     for (let step = 0; step < maxSteps; step++) {
       const operation = bestImprovingOperation(rows);
       if (!operation) break;
@@ -409,11 +403,6 @@
       const rows = exactPartitions
         ? exactPartitions[candidate.rowCount]
         : balancedGreedyPartition(items, candidate.rowCount);
-      if (
-        rows.length !== candidate.rowCount ||
-        rows.some((row) => !row.items.length) ||
-        rows.reduce((count, row) => count + row.items.length, 0) !== items.length
-      ) return null;
       const error = goldenErrorForRows(rows, idealWidth);
       if (!Number.isFinite(error)) return null;
       const tolerance = numericTolerance(error, best?.error ?? 0);

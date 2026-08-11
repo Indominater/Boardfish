@@ -169,10 +169,6 @@ function canvasTextColor() {
   return _canvasThemeColorCache['--canvas-text'];
 }
 
-function canvasSelectionHighlightColor() {
-  return _canvasThemeColorCache['--selection-highlight'];
-}
-
 function fillBoardBackground(context, width, height) {
   context.fillStyle = _canvasThemeColorCache['--canvas-bg'];
   context.fillRect(0, 0, width, height);

@@ -278,7 +278,6 @@ function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX) {
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
-  if (selStart === selEnd) return null;
   const scriptMetrics = layout[0]?._scriptMetrics || null;
   const isHiddenAt = scriptMetrics ? textScriptMetricsHiddenAt : null;
   const stateAt = scriptMetrics ? textScriptMetricsStateAt : null;
@@ -426,12 +425,9 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, stats =
 };
 
 function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, motion) {
-  if (!selection) return false;
   context.save();
   if (motion) applyTextSelectionMotionTransform(context, selection.bounds, motion);
-  context.fillStyle = typeof canvasSelectionHighlightColor === 'function'
-    ? canvasSelectionHighlightColor()
-    : 'rgba(10, 132, 255, 0.3)';
+  context.fillStyle = _canvasThemeColorCache['--selection-highlight'];
   context.beginPath();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   for (const run of selection.runs) {
@@ -488,14 +484,13 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom =
     const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(id, spec.start, spec.end, viewZoom) || null;
     if (!motion) continue;
     const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
-    if (!drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion)) continue;
+    if (!selection || !drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion)) continue;
     drawTextLayoutStatic(context, obj, layout, { start: spec.start, end: spec.end });
     drawTextSelectionContentJello(context, obj, selection, motion);
   }
 };
 
 function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
-  if (!_caretVisible) return false;
   let cx = obj.x + TEXT_PAD, cy = obj.y + TEXT_PAD;
   let caretHeight = LINE_H;
   let caretLine = null;
@@ -618,7 +613,7 @@ function drawEditingTextOverlay(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const selectionStart = collectDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const selection = collectTextSelectionRuns(obj, layout, selStart, selEnd);
+    const selection = selStart === selEnd ? null : collectTextSelectionRuns(obj, layout, selStart, selEnd);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDebug) {
       stats.editSelectionMs = performance.now() - selectionStart;
@@ -629,7 +624,7 @@ function drawEditingTextOverlay(
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-    drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, textSelectionMotion);
+    if (selection) drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, textSelectionMotion);
 
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const textDrawStart = collectDebug ? performance.now() : 0;
@@ -657,7 +652,7 @@ function drawEditingTextOverlay(
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-    if (selStart === selEnd) {
+    if (selStart === selEnd && _caretVisible) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const caretStart = collectDebug ? performance.now() : 0;
       const drawn = drawCaret(context, obj, layout, selStart, viewZoom);

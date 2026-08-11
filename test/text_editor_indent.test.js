@@ -188,7 +188,7 @@ function loadExitEditHarness() {
     obj,
     objectsMap: new Map([[obj.id, obj]]),
     editingId: obj.id,
-    _editEl: { remove() { context.removedProxy = true; } },
+    _editEl: { value: '', remove() { context.removedProxy = true; } },
     _caretBlinkInterval: 7,
     _selChangeListener: null,
     _editHistoryTimer: null,
@@ -279,6 +279,8 @@ function loadLiveTextEditResizeHarness() {
     selectionEnd: 0,
     selectionDirection: 'none',
     listeners: {},
+    setAttribute(name, value) { this[name] = String(value); },
+    getAttribute(name) { return this[name] ?? null; },
     addEventListener(type, fn) { this.listeners[type] = fn; },
     dispatchEvent(event) {
       this.listeners[event.type]?.(event);

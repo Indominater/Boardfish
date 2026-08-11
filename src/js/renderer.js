@@ -105,10 +105,6 @@
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  function isDrawableImageSource(source) {
-    return source?.width > 0;
-  }
-
   function applyObjectMotion(context, obj, rect, motion
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     , counters = null
@@ -484,14 +480,13 @@
         }
         if (obj.type !== 'image') return;
 
-        view ||= { zoom: deps.zoom(), dpr: deps.dpr() };
         const key = obj.data.imgKey;
         const lowLatencyImageMotion = !!motion;
         const selected = imageSourceResolver
           ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
           : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
         const img = selected?.source || selected || null;
-        if (!isDrawableImageSource(img)) return;
+        if (!(img?.width > 0)) return;
         try {
           drawImageObj(context, obj, img, view, viewportRect,
             selected?.activeInputFullFallback === true || lowLatencyImageMotion);
@@ -543,7 +538,6 @@
       }
       if (obj.type !== 'image') return false;
 
-      view ||= { zoom: deps.zoom(), dpr: deps.dpr() };
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
       const lowLatencyImageMotion = !!motion;
@@ -551,7 +545,7 @@
         ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
         : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
       const img = selected?.source || selected || null;
-      if (isDrawableImageSource(img)) {
+      if (img?.width > 0) {
         if (counters) {
           if (selected?.scale < 1) {
             counters.scaledImages = (counters.scaledImages || 0) + 1;
@@ -630,10 +624,8 @@
       , onlyText = false
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
-      const objectMotionForDraw = (
-        typeof deps.objectMotionForDraw === 'function' &&
-        (typeof deps.hasObjectMotionsForDraw !== 'function' || deps.hasObjectMotionsForDraw())
-      ) ? deps.objectMotionForDraw : null;
+      const objectMotionForDraw =
+        deps.hasObjectMotionsForDraw?.() === false ? null : deps.objectMotionForDraw;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         for (const obj of deps.objects()) {
           if (obj.id === skipId || skipIds?.has(obj.id)) continue;

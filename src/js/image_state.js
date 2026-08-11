@@ -262,11 +262,6 @@ async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}
     previous?.bitmap?.close?.();
     imageOpenPreviewBitmapCache.set(key, {
       bitmap,
-      width: bitmap.width,
-      height: bitmap.height,
-      targetWidth: target.width,
-      targetHeight: target.height,
-      objectId: obj.id || '',
       objectW: Number(obj.w || 0) || 0,
       objectH: Number(obj.h || 0) || 0,
       viewZoom: Number(view.zoom || 0) || 0,
@@ -465,16 +460,11 @@ function clearOpenInitialImagePreviews(key = null) {
 function openInitialPreviewIsCoveredByDrawSource(key, entry) {
   const fullSource = imageBitmapCache[key] || null;
   if (!fullSource) return false;
-  if (typeof chooseImageScaleForDraw !== 'function' ||
-    typeof isViewportImageScalingActive !== 'function' ||
-    !isViewportImageScalingActive() ||
-    typeof hasScaledImageVariant !== 'function') {
-    return true;
-  }
+  if (!isViewportImageScalingActive()) return true;
   const targetScale = chooseImageScaleForDraw(
     {
-      w: Math.max(1, Number(entry?.objectW || 0) || Number(entry?.targetWidth || 1) || 1),
-      h: Math.max(1, Number(entry?.objectH || 0) || Number(entry?.targetHeight || 1) || 1),
+      w: Math.max(1, Number(entry?.objectW || 0) || 1),
+      h: Math.max(1, Number(entry?.objectH || 0) || 1),
     },
     fullSource,
     {
@@ -484,7 +474,7 @@ function openInitialPreviewIsCoveredByDrawSource(key, entry) {
   );
   return !(targetScale > 0 && targetScale < 1) ||
     hasScaledImageVariant(key, targetScale) ||
-    (typeof hasScaledImageVariantFailure === 'function' && hasScaledImageVariantFailure(key, targetScale));
+    hasScaledImageVariantFailure(key, targetScale);
 }
 
 function releaseReadyOpenInitialImagePreviewsForOpen() {
@@ -544,7 +534,7 @@ function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: wind
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const targetScale =
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    fullSource && typeof queueScaledImageVariantForDraw === 'function'
+    fullSource
       ? queueScaledImageVariantForDraw(key, obj, fullSource, view, true, activeInput === true)
       : 0.25;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -553,7 +543,7 @@ function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: wind
     return entry.bitmap;
   }
   const fullSource = imageBitmapCache[key] || null;
-  const selected = fullSource && typeof selectImageSourceForDraw === 'function'
+  const selected = fullSource
     ? selectImageSourceForDraw(key, obj, fullSource, view, activeInput)
     : null;
   if (selected?.activeInputFullFallback === true && hasOpenInitialImagePreviews()) {
@@ -772,7 +762,6 @@ function cacheImage(key, src
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     cacheMetrics.cacheReadyStage = stage;
     cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const bitmap = imageBitmapCache[key];
     const width = bitmap?.width || 0;
     const height = bitmap?.height || 0;
@@ -782,11 +771,10 @@ function cacheImage(key, src
       naturalWidth: width,
       naturalHeight: height,
     };
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     resolveReady({ ...cacheMetrics, ...dimensions });
     return;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    resolveReady(dimensions);
+    resolveReady();
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const queuedAt = performance.now();

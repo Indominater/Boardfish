@@ -80,6 +80,8 @@ function loadImageState(createImageBitmap) {
     ViewportDebug: noopDebugApi(),
     ClipDebug: noopDebugApi(),
     clearScaledImageVariants() {},
+    isViewportImageScalingActive() { return false; },
+    hasScaledImageVariantFailure() { return false; },
     setCanvasImageQuality() {},
     createImageBitmap,
   };
@@ -543,7 +545,7 @@ test('open preview fallback queues dynamic previews for active low-zoom fallback
   timers.shift().callback();
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(context.imageOpenPreviewBitmapCache.get('img-1').width, 40);
+  assert.equal(context.imageOpenPreviewBitmapCache.get('img-1').bitmap.width, 40);
   assert.equal(bitmapSources[0], full);
   assert.deepEqual(renderSources, ['open-preview-dynamic-ready']);
 });

@@ -65,9 +65,8 @@ function addText(wx, wy, content = '', options = {}) {
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
   logStep('content-limit-done', { textBytes, accepted });
   if (!accepted) return;
-  const defaultSize = defaultTextBoxSize();
-  let w = content ? 200 : defaultSize.w;
-  let h = content ? LINE_H + TEXT_PAD * 2 : defaultSize.h;
+  const h = (content ? 1 : NEW_TEXT_EDIT_MIN_LINES) * LINE_H + TEXT_PAD * 2;
+  let w = content ? 200 : h * 6;
   if (content) {
     const lines = content.split('\n');
     const charW = 9.2, pad = 8;

@@ -40,16 +40,14 @@
       holdTimer = null;
     }
 
-    function gesturePayload(point, extra) {
-      return {
-        x: point?.x,
-        y: point?.y,
-        startX: point?.startX,
-        startY: point?.startY,
-        target: point?.target || null,
-        event: point?.sourceEvent || null,
-        ...extra,
-      };
+    function gesturePayload(point, extra = {}) {
+      extra.x = point?.x;
+      extra.y = point?.y;
+      extra.startX = point?.startX;
+      extra.startY = point?.startY;
+      extra.target = point?.target || null;
+      extra.event = point?.sourceEvent || null;
+      return extra;
     }
 
     function startHold(point) {

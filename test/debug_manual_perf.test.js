@@ -305,7 +305,6 @@ test('text selection debugger includes focused enter and exit edit timings', () 
 test('text edit proxy disables native wrapping and browser text services', () => {
   const source = readSource('src/js/text_editor.js');
 
-  assert.match(source, /function configureTextEditProxyElement/);
   assert.match(source, /proxy\.wrap = 'off'/);
   assert.match(source, /proxy\.spellcheck = false/);
   assert.match(source, /autocomplete', 'off'/);
@@ -314,5 +313,4 @@ test('text edit proxy disables native wrapping and browser text services', () =>
   assert.match(source, /aria-label', 'Boardfish text editor'/);
   assert.doesNotMatch(source, /aria-hidden', 'true'/);
   assert.match(source, /proxy\.style\.cssText = '[^']*contain:strict[^']*';/);
-  assert.match(source, /configureTextEditProxyElement\(proxy\)/);
 });
