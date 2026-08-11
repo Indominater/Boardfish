@@ -78,11 +78,6 @@ const externalTextLineStartsLowercase = (line) => {
   return !!first && first.toLocaleLowerCase() === first && first.toLocaleUpperCase() !== first;
 };
 
-const externalTextLineStartsUppercase = (line) => {
-  const first = String(line ?? '').trimStart().charAt(0);
-  return !!first && first.toLocaleUpperCase() === first && first.toLocaleLowerCase() !== first;
-};
-
 const externalTextBoundaryLooksContinuous = (previousLine, nextLine) => {
   const previous = String(previousLine ?? '').trimEnd();
   const next = String(nextLine ?? '').trimStart();
@@ -97,15 +92,17 @@ const externalTextBoundaryLooksContinuous = (previousLine, nextLine) => {
 const shouldUnwrapExternalTextBlock = (lines) => {
   if (!Array.isArray(lines) || lines.length < 3) return false;
   if (lines.some(externalTextLineLooksStructured)) return false;
-  if (lines.filter(externalTextLineStartsUppercase).length / lines.length >= 0.8) return false;
-  const pipeTableLines = lines.filter((line) => {
+  let uppercaseLines = 0;
+  let pipeTableLines = 0;
+  const bodyWidths = lines.map((line) => {
     const trimmed = String(line ?? '').trim();
-    return /^\|/.test(trimmed) && /\|$/.test(trimmed);
-  }).length;
-  if (pipeTableLines >= 2) return false;
-
-  const bodyWidths = lines.slice(0, -1).map((line) => String(line ?? '').trim().length);
-  if (!bodyWidths.length) return false;
+    const first = trimmed.charAt(0);
+    if (first && first.toLocaleUpperCase() === first && first.toLocaleLowerCase() !== first) uppercaseLines++;
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) pipeTableLines++;
+    return trimmed.length;
+  });
+  bodyWidths.pop();
+  if (uppercaseLines / lines.length >= 0.8 || pipeTableLines >= 2) return false;
   bodyWidths.sort((a, b) => a - b);
   const middle = Math.floor(bodyWidths.length / 2);
   const median = bodyWidths.length % 2
@@ -124,13 +121,14 @@ const shouldUnwrapExternalTextBlock = (lines) => {
 };
 
 const unwrapExternalTextBlock = (lines) => {
-  let result = String(lines[0] ?? '').trimEnd();
+  let previous = String(lines[0] ?? '').trimEnd();
+  const parts = [previous];
   for (let index = 1; index < lines.length; index++) {
     const next = String(lines[index] ?? '').trimStart();
-    const separator = /[-‐‑‒–—]$/.test(result) ? '' : ' ';
-    result += separator + next;
+    parts.push(/[-‐‑‒–—]$/.test(previous) ? '' : ' ', next);
+    previous = next;
   }
-  return result;
+  return parts.join('');
 };
 
 const textForExternalTextObjectPaste = (value) => {
@@ -435,9 +433,11 @@ function clearTextObjectLayoutRuntime(obj, options = {}) {
   delete obj._layoutCacheAlignKey;
   delete obj._layoutCacheY;
   if (options.script !== false) {
-    delete obj._textScriptRangesCache;
-    delete obj._textScriptRangesCacheContent;
-    delete obj._textScriptRangesCacheSourceKey;
+    if (options.scriptRanges !== false) {
+      delete obj._textScriptRangesCache;
+      delete obj._textScriptRangesCacheContent;
+      delete obj._textScriptRangesCacheSourceKey;
+    }
     delete obj._textScriptLayoutMetrics;
     delete obj._textScriptLayoutMetricsContent;
     delete obj._textScriptLayoutMetricsScriptKey;
@@ -2758,19 +2758,22 @@ function lineXAtOffset(line, obj, offset) {
   return lineBaseX(line, obj) + line.prefixWidths[Math.max(0, Math.min(offset, line.text.length))];
 }
 
-function lineHitOffsetForX(line, wx, obj) {
+function lineHitOffsetForX(line, wx, obj, nearest = false) {
   const textLength = line.text.length;
   const pw = line.prefixWidths;
   const target = wx - lineBaseX(line, obj);
-  let lo = 0;
-  let hi = textLength;
+  let lo = 0, hi = textLength;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    const threshold = pw[mid] + (pw[mid + 1] - pw[mid]) / 2;
-    if (target < threshold) hi = mid;
-    else lo = mid + 1;
+    if (nearest ? pw[mid] < target : target >= pw[mid] + (pw[mid + 1] - pw[mid]) / 2) lo = mid + 1;
+    else hi = mid;
   }
-  return lo;
+  if (!nearest) return lo;
+  const left = Math.max(0, lo - 1);
+  let offset = Math.abs(target - pw[left]) <= Math.abs(target - pw[lo]) ? left : lo;
+  const x = pw[offset];
+  while (offset > 0 && Math.abs(pw[offset - 1] - x) <= 1e-7) offset--;
+  return offset;
 }
 
 function lineCaretXAtOffset(line, obj, offset) {
@@ -3071,23 +3074,11 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
     });
   };
 
-  const textLength = line.text.length;
   const pw = line.prefixWidths;
-  const target = wx - lineBaseX(line, obj);
-  let lo = 0;
-  let hi = textLength;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (pw[mid] < target) lo = mid + 1;
-    else hi = mid;
-  }
-  const left = Math.max(0, lo - 1);
-  const bestOffset = Math.abs(target - pw[left]) <= Math.abs(target - pw[lo]) ? left : lo;
-  const bestX = pw[bestOffset];
-  let first = bestOffset;
-  while (first > 0 && Math.abs(pw[first - 1] - bestX) <= 1e-7) first--;
-  let last = bestOffset;
-  while (last < textLength && Math.abs(pw[last + 1] - bestX) <= 1e-7) last++;
+  const first = lineHitOffsetForX(line, wx, obj, true);
+  const bestX = pw[first];
+  let last = first;
+  while (last < line.text.length && Math.abs(pw[last + 1] - bestX) <= 1e-7) last++;
   for (let offset = first; offset <= last; offset++) {
     const rawIndex = Math.max(0, Math.min(line.startIndex + offset, content.length));
     const bracedOpeningGap = !!metrics?.bracedStarts?.[rawIndex];
@@ -3104,11 +3095,16 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
   return candidates;
 };
 
-function layoutHitTestCaret(layout, wx, wy, obj) {
+function layoutHitTestCaret(layout, wx, wy, obj, legacyScalar = false) {
   if (!layout.length) return { index: 0, affinity: '' };
   const line = textLayoutLineForHit(layout, wy);
   if (!line.text.length) return { index: line.startIndex, affinity: '', lineStartIndex: line.startIndex };
-  const candidates = textLayoutCaretHitCandidates(line, wx, obj);
+  if (!legacyScalar && !line.scriptRanges?.length) {
+    const hitIndex = line.startIndex + lineHitOffsetForX(line, wx, obj, true);
+    TextSelDebug._logHit(wx, wy, obj, line, hitIndex, line.prefixWidths);
+    return { index: hitIndex, affinity: '', lineStartIndex: line.startIndex };
+  }
+  const candidates = legacyScalar ? [] : textLayoutCaretHitCandidates(line, wx, obj);
   if (candidates.length) {
     let hit = candidates[0];
     let hitDistance = Math.abs(hit.centerY - wy);
@@ -3140,14 +3136,4 @@ function layoutHitTestCaret(layout, wx, wy, obj) {
   return { index: hitIndex, affinity: '', lineStartIndex: line.startIndex };
 }
 
-function layoutHitTest(layout, wx, wy, obj) {
-  if (!layout.length) return 0;
-  const line = textLayoutLineForHit(layout, wy);
-  if (!line.text.length) return line.startIndex;
-  const pw = line.prefixWidths;
-  const offset = lineHitOffsetForX(line, wx, obj);
-  const direction = offset < line.text.length ? 'forward' : 'backward';
-  const hitIndex = normalizeTextLayoutHitCaretIndex(line, line.startIndex + offset, direction, obj);
-  TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
-  return hitIndex;
-}
+const layoutHitTest = (layout, wx, wy, obj) => layoutHitTestCaret(layout, wx, wy, obj, true).index;

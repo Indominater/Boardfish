@@ -121,7 +121,9 @@
       const x = input.clientX;
       const y = input.clientY;
       const current = active.get(pointerId);
-      if (!current || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+      if (!current) return null;
+      if (input.pointerType === 'touch') preventTouchDefault(input);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
       current.previousX = current.x;
       current.previousY = current.y;
       current.x = x;
@@ -272,9 +274,6 @@
       pointerUp: (input, sourceEvent = null) => finishPointer(input, false, sourceEvent),
       pointerCancel: (input, sourceEvent = null) => finishPointer(input, true, sourceEvent),
       cancel,
-      hasPointer(pointerId) {
-        return active.has(pointerId);
-      },
       activeCount() {
         return active.size;
       },
@@ -475,24 +474,19 @@
   }
 
   function onTouchPointerMove(event) {
-    if (event.pointerType !== 'touch' || !controller.hasPointer(event.pointerId)) return;
-    preventTouchDefault(event);
+    if (event.pointerType !== 'touch') return;
     controller.pointerMove(event);
   }
 
   function onTouchPointerUp(event) {
-    if (event.pointerType !== 'touch' || !controller.hasPointer(event.pointerId)) return;
-    preventTouchDefault(event);
+    if (event.pointerType !== 'touch' || !controller.pointerUp(event)) return;
     markTouchCompatibilityWindow();
-    controller.pointerUp(event);
     releaseTouchPointer(event);
   }
 
   function onTouchPointerCancel(event) {
-    if (event.pointerType !== 'touch' || !controller.hasPointer(event.pointerId)) return;
-    preventTouchDefault(event);
+    if (event.pointerType !== 'touch' || !controller.pointerCancel(event)) return;
     markTouchCompatibilityWindow();
-    controller.pointerCancel(event);
     releaseTouchPointer(event);
   }
 

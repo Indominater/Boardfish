@@ -296,7 +296,7 @@
     return error;
   };
 
-  function randomizeScorePreservingMembership(rows, idealWidth, random) {
+  function randomizeScorePreservingMembership(rows, random) {
     const randomizedRows = rows.map((row) => ({
       ...row,
       items: row.items.slice(),
@@ -321,7 +321,6 @@
     }
     for (const row of randomizedRows) row.ranks = row.items.map((item) => item.rank);
 
-    const originalError = goldenErrorForRows(randomizedRows, idealWidth);
     let selectedSwap = null;
     let tiedChoiceCount = 1;
     for (let leftIndex = 0; leftIndex < randomizedRows.length; leftIndex++) {
@@ -333,14 +332,7 @@
             if (leftItem.width === rightItem.width) continue;
             const leftWidth = left.width - leftItem.width + rightItem.width;
             const rightWidth = right.width - rightItem.width + leftItem.width;
-            let candidateError = 0;
-            for (let rowIndex = 0; rowIndex < randomizedRows.length; rowIndex++) {
-              const width = rowIndex === leftIndex
-                ? leftWidth
-                : (rowIndex === rightIndex ? rightWidth : randomizedRows[rowIndex].width);
-              candidateError += (width - idealWidth) ** 2;
-            }
-            if (candidateError !== originalError) continue;
+            if (leftWidth !== right.width || rightWidth !== left.width) continue;
             tiedChoiceCount++;
             if (randomUnit(random) < 1 / tiedChoiceCount) {
               selectedSwap = { leftIndex, rightIndex, leftItem, rightItem, leftWidth, rightWidth };
@@ -443,8 +435,7 @@
     if (!best) return null;
 
     if (randomizeTies) {
-      best.rows = randomizeScorePreservingMembership(best.rows, best.idealWidth, random);
-      best.error = goldenErrorForRows(best.rows, best.idealWidth);
+      best.rows = randomizeScorePreservingMembership(best.rows, random);
     }
 
     let presentationRows = best.rows;

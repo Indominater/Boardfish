@@ -590,12 +590,6 @@ function applyTextEditCaretHit(obj, proxy, hit) {
   }
 }
 
-function clearTextEditCaretHit(obj) {
-  if (!obj) return;
-  clearTextScriptCaretAffinity(obj);
-  clearTextEditCaretIndex(obj);
-}
-
 function startTextSelectionDrag(e, obj, wp) {
   flushEditHistoryCheckpoint();
   TextSelDebug._logPointer?.('selection-drag-start', e, { objectId: obj?.id || '', wx: wp.x, wy: wp.y });
@@ -643,9 +637,12 @@ function startTextSelectionDrag(e, obj, wp) {
     if (_editEl) {
       const start = Math.min(clickIdx, endIdx);
       const end = Math.max(clickIdx, endIdx);
-      setTextEditProxySelectionRange(_editEl, start, end, 'none', { value: obj.data?.content || '' });
       if (clickIdx === endIdx) applyTextEditCaretHit(obj, _editEl, endHit);
-      else clearTextEditCaretHit(obj);
+      else {
+        setTextEditProxySelectionRange(_editEl, start, end, 'none', { value: obj.data?.content || '' });
+        clearTextScriptCaretAffinity(obj);
+        clearTextEditCaretIndex(obj);
+      }
       TextSelDebug._logSelection('mouse-drag', _editEl, obj);
       _caretVisible = true;
       scheduleRender(true, false);

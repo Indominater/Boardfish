@@ -560,17 +560,12 @@ const dispatchTextEditInputEvent = (proxy, inputType) => {
   proxy.dispatchEvent(event);
 };
 
-const invalidateTextEditObjectLayout = (obj) => {
-  if (!obj) return;
-  clearTextObjectLayoutRuntime(obj);
-};
-
 const syncFreshTextEditWidth = (obj) => {
   if (!obj || obj.type !== 'text' || obj._editStartContent !== '') return false;
   const width = getTextRenderedContentWidth(obj);
   if (!Number.isFinite(width) || width <= obj.w) return false;
   obj.w = width;
-  invalidateTextEditObjectLayout(obj);
+  clearTextObjectLayoutRuntime(obj);
   return true;
 };
 
@@ -792,7 +787,7 @@ const normalizeTextObjectToEditableScriptBraces = (obj) => {
   obj.data.content = content;
   if (scriptRanges?.length) obj.data.scriptRanges = scriptRanges;
   else delete obj.data.scriptRanges;
-  invalidateTextEditObjectLayout(obj);
+  clearTextObjectLayoutRuntime(obj);
   return true;
 };
 
@@ -2557,7 +2552,7 @@ function enterEdit(id, {
     const normalized = normalizeTextContent(obj.data.content);
     if (normalized !== obj.data.content) {
       obj.data.content = normalized;
-      invalidateTextEditObjectLayout(obj);
+      clearTextObjectLayoutRuntime(obj);
       markDirty(obj.id);
       contentNormalized = true;
     }
@@ -2987,7 +2982,7 @@ function enterEdit(id, {
       end: replacement.end,
       insertedText: replacement.insertedText,
     });
-    if (!layoutPatched) invalidateTextEditObjectLayout(obj);
+    if (!layoutPatched) clearTextObjectLayoutRuntime(obj, { scriptRanges: false });
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       const layoutPatchDebug = obj._lastTextLayoutPatchDebug || {};
       logInputStep(layoutPatched ? 'layout-patched' : 'layout-invalidated', {
