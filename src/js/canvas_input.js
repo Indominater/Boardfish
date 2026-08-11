@@ -579,8 +579,7 @@ function toggleAdditiveSelection(obj) {
 function applyTextEditCaretHit(obj, proxy, hit) {
   if (!obj || !proxy || !hit) return;
   const textContent = obj.data?.content || '';
-  const textLength = textContent.length;
-  const index = Math.max(0, Math.min(Math.trunc(hit.index ?? 0), textLength));
+  const index = hit.index;
   setTextEditProxySelectionRange(proxy, index, index, 'none', { value: textContent });
   if (hit.affinity) {
     setTextScriptCaretAffinity(obj, index, hit.affinity);
@@ -665,8 +664,7 @@ function startObjectDrag(e, obj) {
   const canClickToEditText = obj.type === 'text' && wasSelected && selectedIds.size === 1;
   if (!wasSelected) selectObject(obj.id);
 
-  const startX = e.clientX, startY = e.clientY;
-  const dragItems = dragItemsForSelection();
+  const startX = e.clientX, startY = e.clientY, objectStartX = obj.x, objectStartY = obj.y;
   let moved = false;
   const moveThreshold = 9 / (zoom * zoom);
 
@@ -675,7 +673,7 @@ function startObjectDrag(e, obj) {
     const dy = (ev.clientY - startY) / zoom;
     if (!moved && dx*dx + dy*dy > moveThreshold) moved = true;
     if (!moved) return;
-    for (const item of dragItems) { item.obj.x = item.startX + dx; item.obj.y = item.startY + dy; }
+    obj.x = objectStartX + dx; obj.y = objectStartY + dy;
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'object-drag');
     else scheduleRender(true, true);
   }
@@ -795,7 +793,7 @@ function startObjectDrag(e, obj) {
       }
       return;
     }
-    pushHistory('drag', { dirty: dragItems });
+    pushHistory('drag', { dirty: [obj.id] });
   }
   beginDocumentDrag({ move: onMove, up: onUp });
   return true;

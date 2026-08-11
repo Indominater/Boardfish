@@ -3030,7 +3030,6 @@ const normalizeTextLayoutHitCaretIndex = (line, index, direction = 'forward', ob
 };
 
 const textLayoutLineForHit = (layout, wy) => {
-  if (!layout.length) return null;
   let lo = 0;
   let hi = layout.length - 1;
   while (lo < hi) {
@@ -3038,37 +3037,19 @@ const textLayoutLineForHit = (layout, wy) => {
     if (wy < layout[mid].y + LINE_H) hi = mid;
     else lo = mid + 1;
   }
-  return layout[lo] || layout[layout.length - 1];
+  return layout[lo];
 };
 
-const textLayoutCaretHitCandidates = (line, wx, obj) => {
+const textLayoutCaretHit = (line, wx, wy, obj) => {
   const content = typeof obj?._layoutCacheContent === 'string'
     ? obj._layoutCacheContent
-    : typeof line?.content === 'string'
+    : typeof line.content === 'string'
       ? line.content
-      : normalizeTextContent(obj?.data?.content ?? line?.text ?? '');
-  const ranges = line?.scriptRanges || [];
-  const metrics = ranges.length
-    ? line._scriptMetrics
-    : null;
-  const candidates = [];
-  const addCandidate = (index, affinity = '') => {
-    const caretIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), content.length));
-    const state = metrics
-      ? textScriptMetricsCaretStateAt(metrics, caretIndex, affinity)
-      : BASE_TEXT_SCRIPT_STATE;
-    let centerY = line.y + LINE_H / 2;
-    if (state?.depth > 0) {
-      const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
-      const textY = Number.isFinite(line.textY) ? line.textY : line.y + TEXT_BASELINE_Y_OFFSET;
-      centerY = textY + state.offset - (TEXT_BASELINE_Y_OFFSET * scale) + (LINE_H * scale) / 2;
-    }
-    candidates.push({
-      index: caretIndex,
-      affinity,
-      centerY,
-    });
-  };
+      : normalizeTextContent(obj?.data?.content ?? line.text ?? '');
+  const metrics = line._scriptMetrics;
+  let hitIndex = null;
+  let hitAffinity = '';
+  let hitDistance = Infinity;
 
   const pw = line.prefixWidths;
   const first = lineHitOffsetForX(line, wx, obj, true);
@@ -3077,18 +3058,46 @@ const textLayoutCaretHitCandidates = (line, wx, obj) => {
   while (last < line.text.length && Math.abs(pw[last + 1] - bestX) <= 1e-7) last++;
   for (let offset = first; offset <= last; offset++) {
     const rawIndex = Math.max(0, Math.min(line.startIndex + offset, content.length));
-    const bracedOpeningGap = !!metrics?.bracedStarts?.[rawIndex];
-    if (bracedOpeningGap) continue;
+    if (metrics?.bracedStarts?.[rawIndex]) continue;
 
     const bracedRangeEnding = !!metrics?.bracedEnds?.[rawIndex];
     const linearRangeEnding = !!metrics?.linearEnds?.[rawIndex];
 
-    if (bracedRangeEnding) addCandidate(rawIndex, 'after');
-    if (!bracedRangeEnding || linearRangeEnding) addCandidate(rawIndex);
-    if (linearRangeEnding && !bracedRangeEnding) addCandidate(rawIndex, 'after');
+    const candidateCount = linearRangeEnding ? 2 : 1;
+    for (let candidate = 0; candidate < candidateCount; candidate++) {
+      const affinity = candidate
+        ? (bracedRangeEnding ? '' : 'after')
+        : (bracedRangeEnding ? 'after' : '');
+      const state = metrics
+        ? textScriptMetricsCaretStateAt(metrics, rawIndex, affinity)
+        : BASE_TEXT_SCRIPT_STATE;
+      let centerY = line.y + LINE_H / 2;
+      if (state?.depth > 0) {
+        const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
+        const textY = Number.isFinite(line.textY) ? line.textY : line.y + TEXT_BASELINE_Y_OFFSET;
+        centerY = textY + state.offset - (TEXT_BASELINE_Y_OFFSET * scale) + (LINE_H * scale) / 2;
+      }
+      const distance = Math.abs(centerY - wy);
+      if (
+        hitIndex === null ||
+        distance < hitDistance ||
+        (distance === hitDistance && rawIndex < hitIndex) ||
+        (
+          distance === hitDistance &&
+          rawIndex === hitIndex &&
+          affinity.localeCompare(hitAffinity) < 0
+        )
+      ) {
+        hitIndex = rawIndex;
+        hitAffinity = affinity;
+        hitDistance = distance;
+      }
+    }
   }
 
-  return candidates;
+  return hitIndex === null
+    ? null
+    : { index: hitIndex, affinity: hitAffinity, lineStartIndex: line.startIndex };
 };
 
 function layoutHitTestCaret(layout, wx, wy, obj, legacyScalar = false) {
@@ -3100,28 +3109,10 @@ function layoutHitTestCaret(layout, wx, wy, obj, legacyScalar = false) {
     TextSelDebug._logHit(wx, wy, obj, line, hitIndex, line.prefixWidths);
     return { index: hitIndex, affinity: '', lineStartIndex: line.startIndex };
   }
-  const candidates = legacyScalar ? [] : textLayoutCaretHitCandidates(line, wx, obj);
-  if (candidates.length) {
-    let hit = candidates[0];
-    let hitDistance = Math.abs(hit.centerY - wy);
-    for (let i = 1; i < candidates.length; i++) {
-      const candidate = candidates[i];
-      const candidateDistance = Math.abs(candidate.centerY - wy);
-      if (
-        candidateDistance < hitDistance ||
-        (candidateDistance === hitDistance && candidate.index < hit.index) ||
-        (
-          candidateDistance === hitDistance &&
-          candidate.index === hit.index &&
-          String(candidate.affinity).localeCompare(String(hit.affinity)) < 0
-        )
-      ) {
-        hit = candidate;
-        hitDistance = candidateDistance;
-      }
-    }
+  const hit = legacyScalar ? null : textLayoutCaretHit(line, wx, wy, obj);
+  if (hit) {
     TextSelDebug._logHit(wx, wy, obj, line, hit.index, line.prefixWidths);
-    return { index: hit.index, affinity: hit.affinity || '', lineStartIndex: line.startIndex };
+    return hit;
   }
 
   const pw = line.prefixWidths;
