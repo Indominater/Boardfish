@@ -138,12 +138,9 @@ function pasteAtViewportCenterFromShortcut() {
   pasteAtPos(point.x, point.y);
 }
 
-function arrangeImagesAtCursorFromShortcut() {
+function arrangeSelectedImagesFromShortcut() {
   if (editingId || typeof sortSelectedImages !== 'function') return;
-  const point = typeof boardCursorWorldPoint === 'function'
-    ? boardCursorWorldPoint()
-    : toWorld(window.innerWidth / 2, window.innerHeight / 2);
-  sortSelectedImages(point);
+  sortSelectedImages();
 }
 
 document.addEventListener('keydown', (e) => {
@@ -229,7 +226,7 @@ document.addEventListener('keydown', (e) => {
     if (!canArrangeSelectedImagesFromKeyboard()) return;
     consumeShortcutEvent(e);
     if (e.repeat) return;
-    runShortcutCommand('arrange-images', arrangeImagesAtCursorFromShortcut);
+    runShortcutCommand('arrange-images', arrangeSelectedImagesFromShortcut);
     return;
   }
 

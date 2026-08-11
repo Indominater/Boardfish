@@ -154,7 +154,7 @@ const imageSortGeometryMatches = (obj, placement) => {
     matches(obj.w, placement.w) && matches(obj.h, placement.h);
 };
 
-function sortSelectedImages(anchorPoint = null) {
+function sortSelectedImages() {
   const selectedImages = [];
   for (const obj of objects) {
     if (!selectedIds.has(obj.id) || obj.type !== 'image') continue;
@@ -163,13 +163,18 @@ function sortSelectedImages(anchorPoint = null) {
   }
   if (selectedImages.length < 2) return false;
 
-  const center = (
-    anchorPoint &&
-    Number.isFinite(Number(anchorPoint.x)) &&
-    Number.isFinite(Number(anchorPoint.y))
-  )
-    ? { x: Number(anchorPoint.x), y: Number(anchorPoint.y) }
-    : (typeof boardCursorWorldPoint === 'function' ? boardCursorWorldPoint() : { x: 0, y: 0 });
+  const bounds = typeof selectedBounds === 'function' ? selectedBounds() : null;
+  if (
+    !bounds ||
+    !Number.isFinite(bounds.x1) ||
+    !Number.isFinite(bounds.y1) ||
+    !Number.isFinite(bounds.x2) ||
+    !Number.isFinite(bounds.y2)
+  ) return false;
+  const center = {
+    x: (bounds.x1 + bounds.x2) / 2,
+    y: (bounds.y1 + bounds.y2) / 2,
+  };
   const layout = BoardfishImageLayout.planGoldenRatioImageLayout(
     selectedImages,
     center,

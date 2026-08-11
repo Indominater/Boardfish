@@ -51,6 +51,21 @@ function loadSortCommandHarness(sourceObjects, selectedIds, randomValues = [0.99
   context.objects = sourceObjects;
   context.objectsMap = new Map(sourceObjects.map((obj) => [obj.id, obj]));
   context.selectedIds = new Set(selectedIds);
+  context.selectedBounds = () => {
+    let x1 = Infinity;
+    let y1 = Infinity;
+    let x2 = -Infinity;
+    let y2 = -Infinity;
+    for (const id of context.selectedIds) {
+      const obj = context.objectsMap.get(id);
+      if (!obj) continue;
+      x1 = Math.min(x1, obj.x);
+      y1 = Math.min(y1, obj.y);
+      x2 = Math.max(x2, obj.x + obj.w);
+      y2 = Math.max(y2, obj.y + obj.h);
+    }
+    return x1 === Infinity ? null : { x1, y1, x2, y2 };
+  };
   context.markDirty = (id) => calls.dirty.push(id);
   context.invalidateOffscreen = () => { calls.invalidations++; };
   context.scheduleRender = () => { calls.renders++; };
@@ -69,7 +84,7 @@ function loadSortCommandHarness(sourceObjects, selectedIds, randomValues = [0.99
   return context;
 }
 
-test('sortSelectedImages resizes and packs only selected images in one undoable mutation', () => {
+test('sortSelectedImages centers the new rectangle on the whole selection box', () => {
   const imageDataA = { imgKey: 'key-a', flipX: true, flipY: false, rotation: 90 };
   const imageDataB = { imgKey: 'key-b', flipX: false, flipY: true, rotation: 0 };
   const objects = [
@@ -83,17 +98,17 @@ test('sortSelectedImages resizes and packs only selected images in one undoable 
   const selection = ['text-a', 'image-b', 'image-a'];
   const context = loadSortCommandHarness(objects, selection);
 
-  assert.equal(context.sortSelectedImages({ x: 1000, y: 1000 }), true);
+  assert.equal(context.sortSelectedImages(), true);
 
   const imageA = objects[2];
   const imageB = objects[0];
   assert.deepEqual(
     [imageA.x, imageA.y, imageA.w, imageA.h],
-    [400, 700, 600, 600],
+    [-490, -230, 600, 600],
   );
   assert.deepEqual(
     [imageB.x, imageB.y, imageB.w, imageB.h],
-    [1000, 700, 600, 600],
+    [110, -230, 600, 600],
   );
   assert.equal(imageA.x + imageA.w, imageB.x);
   assert.equal(imageA.data, imageDataA);
@@ -112,7 +127,7 @@ test('sortSelectedImages resizes and packs only selected images in one undoable 
   assert.equal(context.calls.invalidations, 1);
   assert.equal(context.calls.renders, 1);
 
-  assert.equal(context.sortSelectedImages({ x: 1000, y: 1000 }), false);
+  assert.equal(context.sortSelectedImages(), false);
   assert.equal(context.calls.commits.length, 1);
   assert.deepEqual(context.calls.histories, ['sort-images']);
 });
@@ -130,17 +145,17 @@ test('sortSelectedImages shuffles optimized rows and images before placing them'
     [0, 0, 0],
   );
 
-  assert.equal(context.sortSelectedImages({ x: 500, y: 700 }), true);
+  assert.equal(context.sortSelectedImages(), true);
 
   const geometry = Object.fromEntries(objects.map((obj) => [
     obj.id,
     [obj.x, obj.y, obj.w, obj.h],
   ]));
   assert.deepEqual(geometry, {
-    a: [-250, 700, 1800, 600],
-    b: [50, 100, 1200, 600],
-    c: [-550, 100, 600, 600],
-    d: [-550, 700, 300, 600],
+    a: [-748.5, 0.5, 1800, 600],
+    b: [-448.5, -599.5, 1200, 600],
+    c: [-1048.5, -599.5, 600, 600],
+    d: [-1048.5, 0.5, 300, 600],
   });
   assert.equal(geometry.c[0] + geometry.c[2], geometry.b[0]);
   assert.equal(geometry.d[0] + geometry.d[2], geometry.a[0]);
@@ -154,11 +169,11 @@ test('sortSelectedImages samples a fresh presentation order on each invocation',
   ];
   const context = loadSortCommandHarness(objects, ['a', 'b'], [0.999999, 0]);
 
-  assert.equal(context.sortSelectedImages({ x: 1000, y: 1000 }), true);
-  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 1000], ['b', 400]]);
+  assert.equal(context.sortSelectedImages(), true);
+  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 0.5], ['b', -599.5]]);
 
-  assert.equal(context.sortSelectedImages({ x: 1000, y: 1000 }), true);
-  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 400], ['b', 1000]]);
+  assert.equal(context.sortSelectedImages(), true);
+  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', -599.5], ['b', 0.5]]);
   assert.equal(context.calls.commits.length, 2);
   assert.deepEqual(context.calls.histories, ['sort-images', 'sort-images']);
 });
@@ -192,9 +207,9 @@ test('sortSelectedImages samples fresh row membership when optimal partitions ti
       .join('|');
   };
 
-  assert.equal(context.sortSelectedImages({ x: 0, y: 0 }), true);
+  assert.equal(context.sortSelectedImages(), true);
   const firstMembership = membership();
-  assert.equal(context.sortSelectedImages({ x: 0, y: 0 }), true);
+  assert.equal(context.sortSelectedImages(), true);
 
   assert.notEqual(membership(), firstMembership);
   assert.equal(new Set(objects.map((obj) => obj.y)).size, 2);
@@ -208,7 +223,7 @@ test('sortSelectedImages rechecks that at least two valid images are selected', 
   ];
   const context = loadSortCommandHarness(objects, ['image-a', 'text-a', 'stale-image-id']);
 
-  assert.equal(context.sortSelectedImages({ x: 20, y: 30 }), false);
+  assert.equal(context.sortSelectedImages(), false);
   assert.deepEqual(context.calls.commits, []);
   assert.deepEqual(context.calls.histories, []);
 });
@@ -221,8 +236,8 @@ test('sortSelectedImages does not add a floating-point-only history entry on rep
   ];
   const context = loadSortCommandHarness(objects, objects.map((obj) => obj.id));
 
-  assert.equal(context.sortSelectedImages({ x: 100, y: 200 }), true);
-  assert.equal(context.sortSelectedImages({ x: 100, y: 200 }), false);
+  assert.equal(context.sortSelectedImages(), true);
+  assert.equal(context.sortSelectedImages(), false);
   assert.equal(context.calls.commits.length, 1);
   assert.deepEqual(context.calls.histories, ['sort-images']);
 });
@@ -310,7 +325,7 @@ test('object menu shows Arrange only when at least two selected objects are imag
   assert.equal(context.layerActionsSep.style.display, 'block');
 });
 
-test('Arrange menu integration uses the activation pointer and shared paste size', () => {
+test('Arrange menu integration is selection-centered and uses the shared paste size', () => {
   const indexSource = readSource('src/index.html');
   const appSource = readSource('src/app.js');
   const contextMenuSource = readSource('src/js/context_menu.js');
@@ -343,7 +358,7 @@ test('Arrange menu integration uses the activation pointer and shared paste size
   );
   assert.match(
     contextMenuSource,
-    /'obj-btn-arrange-images': \(event\) => \{\s*const point = menuCommandWorldPoint\(event\);\s*closeObjCtxMenu\('command:arrange-images'\);\s*sortSelectedImages\(point\);\s*\}/,
+    /'obj-btn-arrange-images': \(\) => \{\s*closeObjCtxMenu\('command:arrange-images'\);\s*sortSelectedImages\(\);\s*\}/,
   );
   assert.match(contextMenuSource, /'arrange-images': \[\['obj-ctx-menu', 'obj-btn-arrange-images'\]\]/);
   assert.match(contextMenuSource, /objectActionsSep\.style\.display = showImageActions \? 'block' : 'none';/);

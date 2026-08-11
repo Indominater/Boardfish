@@ -67,7 +67,7 @@ function loadKeyboard(overrides = {}) {
     pushHistory: () => calls.push(['pushHistory']),
     rotateSelectedImages: () => calls.push(['rotateSelectedImages']),
     flipSelectedImages: () => calls.push(['flipSelectedImages']),
-    sortSelectedImages: (point) => calls.push(['sortSelectedImages', point.x, point.y]),
+    sortSelectedImages: (...args) => calls.push(['sortSelectedImages', ...args]),
     runAddImagesCommandFromShortcut: () => calls.push(['runAddImagesCommandFromShortcut']),
     runAddTextCommandFromShortcut: () => calls.push(['runAddTextCommandFromShortcut']),
     hideMenus: () => calls.push(['hideMenus']),
@@ -379,7 +379,7 @@ test('cmd+r rotates selected images when available', () => {
   ]);
 });
 
-test('cmd+j arranges two selected images at the cursor point', () => {
+test('cmd+j arranges two selected images without consulting the cursor point', () => {
   const selectedIds = new Set(['image-1', 'text-1', 'image-2']);
   const objectsMap = new Map([
     ['image-1', { id: 'image-1', type: 'image' }],
@@ -389,7 +389,7 @@ test('cmd+j arranges two selected images at the cursor point', () => {
   const { calls, mainKeydown } = loadKeyboard({
     selectedIds,
     objectsMap,
-    boardCursorWorldPoint: () => ({ x: 41, y: 42 }),
+    boardCursorWorldPoint: () => { throw new Error('Arrange must not consult the cursor'); },
   });
   const event = keyEvent({
     key: 'j',
@@ -401,7 +401,7 @@ test('cmd+j arranges two selected images at the cursor point', () => {
 
   assert.equal(event.defaultPrevented, true);
   assert.equal(event.propagationStopped, true);
-  assert.deepEqual(calls, [['sortSelectedImages', 41, 42]]);
+  assert.deepEqual(calls, [['sortSelectedImages']]);
 });
 
 test('ctrl+j is the non-Mac arrange images equivalent', () => {
@@ -421,7 +421,7 @@ test('ctrl+j is the non-Mac arrange images equivalent', () => {
 
   assert.equal(event.defaultPrevented, true);
   assert.equal(event.propagationStopped, true);
-  assert.deepEqual(calls, [['sortSelectedImages', 501, 401]]);
+  assert.deepEqual(calls, [['sortSelectedImages']]);
 });
 
 test('arrange images shortcut stays native unless at least two images are selected', () => {

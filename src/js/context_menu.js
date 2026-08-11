@@ -200,10 +200,9 @@ var MENU_COMMANDS = {
     duplicateSelected(point);
   },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
-  'obj-btn-arrange-images': (event) => {
-    const point = menuCommandWorldPoint(event);
+  'obj-btn-arrange-images': () => {
     closeObjCtxMenu('command:arrange-images');
-    sortSelectedImages(point);
+    sortSelectedImages();
   },
   'obj-btn-flip': () => { flipSelectedImages(); },
   'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
