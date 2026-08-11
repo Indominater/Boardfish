@@ -730,7 +730,8 @@ function cacheImage(key, src
   const webRef = isWebImageRef(src);
   const displaySrc = webRef ? webImageDisplaySrc(src) : src;
   if (!webRef && (typeof displaySrc !== 'string' || !displaySrc)) return;
-  if (!imageBitmapFailed.delete(key) && imageReadyPromises.has(key)) return imageReadyPromises.get(key);
+  let ready;
+  if (!imageBitmapFailed.delete(key) && (ready = imageReadyPromises.get(key))) return ready;
   const generation = _imageStoreGeneration;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cacheStart = performance.now();
@@ -762,8 +763,8 @@ function cacheImage(key, src
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   let resolveReady;
   let readyResolved = false;
-  const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
-  imageReadyPromises.set(key, readyPromise);
+  ready = new Promise((resolve) => { resolveReady = resolve; });
+  imageReadyPromises.set(key, ready);
   function resolveReadyOnce(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     stage
@@ -807,13 +808,15 @@ function cacheImage(key, src
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const bitmapStart = performance.now();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    let same;
     try {
       const bitmap = await createImageBitmapForSource(src, displaySrc);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const bitmapMs = performance.now() - bitmapStart;
       cacheMetrics.cacheBitmapMs = bitmapMs;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (!isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation)) {
+      same = isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation);
+      if (!same) {
         bitmap.close?.();
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         ViewportDebug.step(vpDbg, 'createImageBitmap:stale', { ms: bitmapMs });
@@ -865,7 +868,8 @@ function cacheImage(key, src
       const bitmapMs = performance.now() - bitmapStart;
       cacheMetrics.cacheBitmapMs = bitmapMs;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation)) imageBitmapFailed.add(key);
+      same = isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation);
+      if (same) imageBitmapFailed.add(key);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       ViewportDebug.count('imageBitmapFailures');
       ViewportDebug.max('maxImageBitmapMs', bitmapMs);
@@ -874,13 +878,13 @@ function cacheImage(key, src
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
 
-    if (!isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation)) {
+    if (!same) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       cacheMetrics.cacheTotalMs = performance.now() - cacheStart;
       ViewportDebug.end(vpDbg, { key, stale: true });
       OpenDebug.step(dbg, 'cache-image:stale', { imgKey: key, ms: cacheMetrics.cacheTotalMs });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (imageReadyPromises.get(key) === readyPromise) imageReadyPromises.delete(key);
+      if (imageReadyPromises.get(key) === ready) imageReadyPromises.delete(key);
       if (!imageBitmapCache[key]) queueImageHydration(key
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         , dbg
@@ -986,7 +990,7 @@ function cacheImage(key, src
     });
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return readyPromise;
+  return ready;
 }
 
 const removeImageRuntimeCachesForKey = (key) => {

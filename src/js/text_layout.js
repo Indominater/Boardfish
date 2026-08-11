@@ -701,18 +701,17 @@ function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], conte
       j++;
     }
 
-    const segment = value.slice(i, j);
     let previousUnit = null;
-    forEachTextSpacingUnit(segment, (unit, unitStart, unitEnd) => {
+    forEachTextSpacingUnit(value, (unit, unitStart, unitEnd) => {
       const spacing = textGlyphPairSpacing(previousUnit, unit, state.font || FONT);
       if (spacing) {
         width += spacing;
-        pw[i + unitStart] = width;
+        pw[unitStart] = width;
       }
       width += measureRawTextWForDepth(unit, state?.depth || 0);
-      for (let pos = unitStart + 1; pos <= unitEnd; pos++) pw[i + pos] = width;
+      for (let pos = unitStart + 1; pos <= unitEnd; pos++) pw[pos] = width;
       previousUnit = unit;
-    });
+    }, i, j);
     width = pw[j];
     i = j;
   }
@@ -1450,24 +1449,14 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   const insertedLineCount = textNewlineCount(insertedText);
   const removedLineCount = textNewlineCount(oldContent, start, end);
   const endLineProbe = end > start && removedLineCount > 0 ? end : (end > start ? end - 1 : end);
-  const oldRange = {
-    startLine: textLayoutLogicalLineIndexAtContentIndex(layout, start),
-    endLine: textLayoutLogicalLineIndexAtContentIndex(layout, endLineProbe),
-  };
-  const newRange = {
-    startLine: oldRange.startLine,
-    endLine: oldRange.startLine + insertedLineCount,
-  };
+  const oldStartLine = textLayoutLogicalLineIndexAtContentIndex(layout, start);
+  const oldEndLine = textLayoutLogicalLineIndexAtContentIndex(layout, endLineProbe);
+  const newEndLine = oldStartLine + insertedLineCount;
   const logicalLineDelta = insertedLineCount - removedLineCount;
 
   const oldScriptKey = obj._layoutCacheScriptKey || '';
-  let oldScriptRanges = [];
-  for (const line of layout) {
-    if (!Array.isArray(line?.scriptRanges)) continue;
-    oldScriptRanges = line.scriptRanges;
-    break;
-  }
-  const oldSplice = textLayoutSpliceRangeForLogicalLines(layout, oldRange.startLine, oldRange.endLine);
+  const oldScriptRanges = layout[0]?.scriptRanges || [];
+  const oldSplice = textLayoutSpliceRangeForLogicalLines(layout, oldStartLine, oldEndLine);
 
   const scriptRanges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
@@ -1498,7 +1487,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
     debug.scriptMetricsOperation = scriptMetricsPatchDebug.operation || '';
   }
 
-  const newWrapped = wrapTextLogicalLineRange(obj, newRange.startLine, newRange.endLine, {
+  const newWrapped = wrapTextLogicalLineRange(obj, oldStartLine, newEndLine, {
     scriptRanges,
     scriptMetrics,
     startIndex: layout[oldSplice.start].startIndex,

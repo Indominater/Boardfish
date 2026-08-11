@@ -14,6 +14,19 @@ const approximatelyEqual = (actual, expected, tolerance = 1e-9) => {
 
 const placementMap = (layout) => new Map(layout.placements.map((placement) => [placement.id, placement]));
 
+const seededRandom = (initialSeed) => {
+  let seed = initialSeed >>> 0;
+  return () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+};
+
+const rowMembershipSignature = (layout) => layout.rows
+  .map((row) => row.itemIds.slice().sort().join(','))
+  .sort()
+  .join('|');
+
 test('golden image layout uses the shared 600-unit height and current displayed aspect ratio', () => {
   const images = [
     { id: 'wide', w: 600, h: 300 },
@@ -109,6 +122,112 @@ test('golden image layout can shuffle rows and images without changing the optim
   }
 });
 
+test('golden image layout randomly selects across every tied exact partition', () => {
+  const images = Array.from('abcdef', (id) => ({ id, w: 1, h: 1 }));
+  const canonical = ImageLayout.planGoldenRatioImageLayout(
+    images,
+    { x: 0, y: 0 },
+    { rowHeight: 1 },
+  );
+  const signatures = new Set();
+
+  for (let seed = 1; seed <= 256; seed++) {
+    const layout = ImageLayout.planGoldenRatioImageLayout(
+      images,
+      { x: 0, y: 0 },
+      { rowHeight: 1, randomizeTies: true, random: seededRandom(seed) },
+    );
+    signatures.add(rowMembershipSignature(layout));
+    assert.equal(layout.rowCount, 2);
+    assert.deepEqual(layout.rows.map((row) => row.width), [3, 3]);
+    approximatelyEqual(layout.error, canonical.error);
+    assert.deepEqual(
+      layout.placements.map((placement) => placement.id).sort(),
+      Array.from('abcdef'),
+    );
+  }
+
+  // Six labeled images split 3-and-3 have ten unordered optimal partitions.
+  assert.equal(signatures.size, 10);
+});
+
+test('golden image layout randomizes exact unequal-width swaps in exact partitions', () => {
+  const widths = [2, 2, 1, 3, 1];
+  const images = widths.map((w, index) => ({ id: `image-${index}`, w, h: 1 }));
+  const widthById = new Map(images.map((image) => [image.id, image.w]));
+  const compositionSignature = (layout) => layout.rows
+    .map((row) => row.itemIds.map((id) => widthById.get(id)).sort((a, b) => a - b).join(','))
+    .sort()
+    .join('|');
+  const canonical = ImageLayout.planGoldenRatioImageLayout(
+    images,
+    { x: 0, y: 0 },
+    { rowHeight: 1 },
+  );
+  const compositions = new Set();
+
+  for (let seed = 1; seed <= 64; seed++) {
+    const layout = ImageLayout.planGoldenRatioImageLayout(
+      images,
+      { x: 0, y: 0 },
+      { rowHeight: 1, randomizeTies: true, random: seededRandom(seed) },
+    );
+    compositions.add(compositionSignature(layout));
+    assert.equal(layout.error, canonical.error);
+    assert.equal(
+      layout.error,
+      layout.rows.reduce((sum, row) => sum + (row.width - layout.idealWidth) ** 2, 0),
+    );
+  }
+
+  assert.equal(compositions.size, 2);
+});
+
+test('golden image layout never trades score for randomized tie-breaking', () => {
+  const images = [3, 2, 1, 0.5].map((w, index) => ({
+    id: String.fromCharCode(97 + index),
+    w,
+    h: 1,
+  }));
+  const canonical = ImageLayout.planGoldenRatioImageLayout(
+    images,
+    { x: 0, y: 0 },
+    { rowHeight: 1 },
+  );
+
+  for (let seed = 1; seed <= 32; seed++) {
+    const randomized = ImageLayout.planGoldenRatioImageLayout(
+      images,
+      { x: 0, y: 0 },
+      { rowHeight: 1, randomizeTies: true, random: seededRandom(seed) },
+    );
+    assert.equal(rowMembershipSignature(randomized), rowMembershipSignature(canonical));
+    assert.equal(randomized.error, canonical.error);
+  }
+});
+
+test('golden image layout excludes tolerance-close scores from exact tie randomization', () => {
+  const images = [1 + 5e-7, 1 - 5e-7, 1, 1, 1, 1].map((w, index) => ({
+    id: `image-${index}`,
+    w,
+    h: 1,
+  }));
+  const canonical = ImageLayout.planGoldenRatioImageLayout(
+    images,
+    { x: 0, y: 0 },
+    { rowHeight: 1 },
+  );
+
+  for (let seed = 1; seed <= 32; seed++) {
+    const randomized = ImageLayout.planGoldenRatioImageLayout(
+      images,
+      { x: 0, y: 0 },
+      { rowHeight: 1, randomizeTies: true, random: seededRandom(seed) },
+    );
+    assert.equal(randomized.error, canonical.error);
+  }
+});
+
 test('golden image layout row membership and order are independent of selection order', () => {
   const images = [
     { id: 'equal-b', w: 1, h: 1 },
@@ -170,6 +289,84 @@ test('golden image layout remains deterministic and complete at the board object
     Number.isFinite(placement.x) && Number.isFinite(placement.y) &&
     Number.isFinite(placement.w) && placement.w > 0 && placement.h === 600
   )), true);
+});
+
+test('golden image layout randomizes equal-score memberships in the large-selection heuristic', () => {
+  const images = Array.from({ length: 15 }, (_, index) => ({
+    id: `image-${index}`,
+    w: 1,
+    h: 1,
+  }));
+  const canonical = ImageLayout.planGoldenRatioImageLayout(
+    images,
+    { x: 0, y: 0 },
+    { rowHeight: 1 },
+  );
+  const signatures = new Set();
+
+  for (let seed = 1; seed <= 32; seed++) {
+    const layout = ImageLayout.planGoldenRatioImageLayout(
+      images,
+      { x: 0, y: 0 },
+      { rowHeight: 1, randomizeTies: true, random: seededRandom(seed) },
+    );
+    signatures.add(rowMembershipSignature(layout));
+    assert.equal(layout.rowCount, canonical.rowCount);
+    assert.deepEqual(layout.rows.map((row) => row.width), [5, 5, 5]);
+    assert.equal(layout.error, canonical.error);
+  }
+
+  assert.ok(signatures.size > 1);
+});
+
+test('golden image layout randomizes exact unequal-width heuristic swaps only', () => {
+  const widths = [
+    0.6, 0.3, 0.6, 1.2, 0.9, 0.3, 0.5, 0.9, 0.8,
+    0.1, 0.5, 0.1, 0.2, 1.3, 1.1, 1.1, 0.1,
+  ];
+  const images = widths.map((w, index) => ({ id: `image-${index}`, w, h: 1 }));
+  const widthById = new Map(images.map((image) => [image.id, image.w]));
+  const compositionSignature = (layout) => layout.rows
+    .map((row) => row.itemIds.map((id) => widthById.get(id)).sort((a, b) => a - b).join(','))
+    .sort()
+    .join('|');
+  const canonical = ImageLayout.planGoldenRatioImageLayout(
+    images,
+    { x: 0, y: 0 },
+    { rowHeight: 1 },
+  );
+  const compositions = new Set();
+
+  for (let seed = 1; seed <= 64; seed++) {
+    const layout = ImageLayout.planGoldenRatioImageLayout(
+      images,
+      { x: 0, y: 0 },
+      { rowHeight: 1, randomizeTies: true, random: seededRandom(seed) },
+    );
+    compositions.add(compositionSignature(layout));
+    assert.equal(layout.error, canonical.error);
+  }
+
+  assert.ok(compositions.size > 1);
+});
+
+test('golden image layout excludes tolerance-close scores from heuristic tie randomization', () => {
+  const widths = [1 + 1e-6, 1 - 1e-6, ...Array(13).fill(1)];
+  const images = widths.map((w, index) => ({ id: `image-${index}`, w, h: 1 }));
+  const canonical = ImageLayout.planGoldenRatioImageLayout(
+    images,
+    { x: 0, y: 0 },
+    { rowHeight: 1 },
+  );
+
+  for (let seed = 1; seed <= 32; seed++) {
+    const randomized = ImageLayout.planGoldenRatioImageLayout(
+      images,
+      { x: 0, y: 0 },
+      { rowHeight: 1, randomizeTies: true, random: seededRandom(seed) },
+    );
+    assert.equal(randomized.error, canonical.error);
+  }
 });
 
 test('golden image layout keeps every heuristic row nonempty for extreme finite ratios', () => {

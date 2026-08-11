@@ -348,7 +348,6 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
 };
 
 const applyTextSelectionMotionTransform = (context, bounds, motion) => {
-  if (!motion) return false;
   const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
   if (scaleX !== 1 || scaleY !== 1) {
     const scalePivotX = bounds.left + (bounds.right - bounds.left) * scaleOriginX;
@@ -356,7 +355,6 @@ const applyTextSelectionMotionTransform = (context, bounds, motion) => {
     context.transform(scaleX, 0, 0, scaleY,
       translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
   } else if (translateX || translateY) context.translate(translateX, translateY);
-  return true;
 };
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -431,9 +429,9 @@ const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options
 };
 
 function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, motion) {
-  if (selStart === selEnd || !selection) return false;
+  if (!selection) return false;
   context.save();
-  applyTextSelectionMotionTransform(context, selection.bounds, motion);
+  if (motion) applyTextSelectionMotionTransform(context, selection.bounds, motion);
   context.fillStyle = typeof canvasSelectionHighlightColor === 'function'
     ? canvasSelectionHighlightColor()
     : 'rgba(10, 132, 255, 0.3)';
@@ -463,7 +461,6 @@ function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, m
 }
 
 const drawTextSelectionContentJello = (context, obj, selection, motion) => {
-  if (!selection || !motion) return false;
   context.save();
   applyTextSelectionMotionTransform(context, selection.bounds, motion);
   for (const run of selection.runs) {
@@ -481,7 +478,6 @@ const drawTextSelectionContentJello = (context, obj, selection, motion) => {
     }
   }
   context.restore();
-  return true;
 };
 
 const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom = zoom, motions = null) => {
@@ -560,7 +556,6 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
 }
 
 const applyObjectMotionForDraw = (context, obj, motion) => {
-  if (!motion || !context.save) return false;
   context.save();
   const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
   if (scaleX !== 1 || scaleY !== 1) {
@@ -569,7 +564,6 @@ const applyObjectMotionForDraw = (context, obj, motion) => {
     context.transform(scaleX, 0, 0, scaleY,
       translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
   } else if (translateX || translateY) context.translate(translateX, translateY);
-  return true;
 };
 
 function drawEditingTextOverlay(
@@ -602,7 +596,7 @@ function drawEditingTextOverlay(
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, viewZoom);
-  const restoreMotion = applyObjectMotionForDraw(context, obj, motion);
+  if (motion) applyObjectMotionForDraw(context, obj, motion);
   try {
     const liveSelStart = _editEl ? _editEl.selectionStart : 0;
     const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;
@@ -665,7 +659,7 @@ function drawEditingTextOverlay(
         textSelectionMotion ? { start: selStart, end: selEnd } : null,
       );
     }
-    drawTextSelectionContentJello(context, obj, selection, textSelectionMotion);
+    if (selection && textSelectionMotion) drawTextSelectionContentJello(context, obj, selection, textSelectionMotion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDebug) {
       stats.editTextDrawMs = performance.now() - textDrawStart;
@@ -686,7 +680,7 @@ function drawEditingTextOverlay(
       }
     }
   } finally {
-    if (restoreMotion) context.restore();
+    if (motion) context.restore();
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   return stats;

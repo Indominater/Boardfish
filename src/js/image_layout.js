@@ -31,14 +31,17 @@
     return left.length - right.length;
   };
 
+  const randomUnit = (random) => {
+    const sample = Number(random());
+    return Number.isFinite(sample)
+      ? Math.min(Math.max(sample, 0), 1 - Number.EPSILON)
+      : 0;
+  };
+
   function shuffledCopy(values, random) {
     const shuffled = values.slice();
     for (let index = shuffled.length - 1; index > 0; index--) {
-      const sample = Number(random());
-      const boundedSample = Number.isFinite(sample)
-        ? Math.min(Math.max(sample, 0), 1 - Number.EPSILON)
-        : 0;
-      const swapIndex = Math.floor(boundedSample * (index + 1));
+      const swapIndex = Math.floor(randomUnit(random) * (index + 1));
       [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
     }
     return shuffled;
@@ -293,6 +296,74 @@
     return error;
   };
 
+  function randomizeScorePreservingMembership(rows, idealWidth, random) {
+    const randomizedRows = rows.map((row) => ({
+      ...row,
+      items: row.items.slice(),
+      ranks: row.ranks.slice(),
+    }));
+    const slotsByWidth = new Map();
+    for (let rowIndex = 0; rowIndex < randomizedRows.length; rowIndex++) {
+      const row = randomizedRows[rowIndex];
+      for (let itemIndex = 0; itemIndex < row.items.length; itemIndex++) {
+        const item = row.items[itemIndex];
+        if (!slotsByWidth.has(item.width)) slotsByWidth.set(item.width, []);
+        slotsByWidth.get(item.width).push({ rowIndex, itemIndex, item });
+      }
+    }
+    for (const slots of slotsByWidth.values()) {
+      if (slots.length < 2) continue;
+      const shuffledItems = shuffledCopy(slots.map((slot) => slot.item), random);
+      for (let index = 0; index < slots.length; index++) {
+        const slot = slots[index];
+        randomizedRows[slot.rowIndex].items[slot.itemIndex] = shuffledItems[index];
+      }
+    }
+    for (const row of randomizedRows) row.ranks = row.items.map((item) => item.rank);
+
+    const originalError = goldenErrorForRows(randomizedRows, idealWidth);
+    let selectedSwap = null;
+    let tiedChoiceCount = 1;
+    for (let leftIndex = 0; leftIndex < randomizedRows.length; leftIndex++) {
+      const left = randomizedRows[leftIndex];
+      for (let rightIndex = leftIndex + 1; rightIndex < randomizedRows.length; rightIndex++) {
+        const right = randomizedRows[rightIndex];
+        for (const leftItem of left.items) {
+          for (const rightItem of right.items) {
+            if (leftItem.width === rightItem.width) continue;
+            const leftWidth = left.width - leftItem.width + rightItem.width;
+            const rightWidth = right.width - rightItem.width + leftItem.width;
+            let candidateError = 0;
+            for (let rowIndex = 0; rowIndex < randomizedRows.length; rowIndex++) {
+              const width = rowIndex === leftIndex
+                ? leftWidth
+                : (rowIndex === rightIndex ? rightWidth : randomizedRows[rowIndex].width);
+              candidateError += (width - idealWidth) ** 2;
+            }
+            if (candidateError !== originalError) continue;
+            tiedChoiceCount++;
+            if (randomUnit(random) < 1 / tiedChoiceCount) {
+              selectedSwap = { leftIndex, rightIndex, leftItem, rightItem, leftWidth, rightWidth };
+            }
+          }
+        }
+      }
+    }
+    if (!selectedSwap) return randomizedRows;
+
+    const left = randomizedRows[selectedSwap.leftIndex];
+    const right = randomizedRows[selectedSwap.rightIndex];
+    const leftItemIndex = left.items.indexOf(selectedSwap.leftItem);
+    const rightItemIndex = right.items.indexOf(selectedSwap.rightItem);
+    left.items[leftItemIndex] = selectedSwap.rightItem;
+    right.items[rightItemIndex] = selectedSwap.leftItem;
+    left.width = selectedSwap.leftWidth;
+    right.width = selectedSwap.rightWidth;
+    left.ranks = left.items.map((item) => item.rank);
+    right.ranks = right.items.map((item) => item.rank);
+    return randomizedRows;
+  }
+
   const theoreticalRowErrorLowerBound = (totalWidth, rowHeight, rowCount) => {
     const idealWidth = GOLDEN_RATIO * rowCount * rowHeight;
     return (totalWidth - rowCount * idealWidth) ** 2 / rowCount;
@@ -303,6 +374,8 @@
     const rowHeight = finitePositiveNumber(options.rowHeight) || DEFAULT_IMAGE_MAX_DIMENSION;
     const items = normalizedImageItems(images, rowHeight);
     if (!items.length) return null;
+    const randomizeTies = options.randomizeTies === true;
+    const random = typeof options.random === 'function' ? options.random : Math.random;
     const centerX = Number.isFinite(Number(center.x)) ? Number(center.x) : 0;
     const centerY = Number.isFinite(Number(center.y)) ? Number(center.y) : 0;
     const totalWidth = items.reduce((sum, item) => sum + item.width, 0);
@@ -333,6 +406,7 @@
     }
 
     let best = null;
+    let bestTieCount = 0;
     for (const candidate of candidates) {
       if (
         best &&
@@ -351,20 +425,31 @@
       const error = goldenErrorForRows(rows, idealWidth);
       if (!Number.isFinite(error)) return null;
       const tolerance = numericTolerance(error, best?.error ?? 0);
-      if (
-        !best ||
-        error < best.error - tolerance ||
-        (Math.abs(error - best.error) <= tolerance && candidate.rowCount < best.rowCount)
-      ) {
+      if (!best || error < best.error - tolerance) {
         best = { rows, rowCount: candidate.rowCount, idealWidth, error };
+        bestTieCount = 1;
+      } else if (Math.abs(error - best.error) <= tolerance) {
+        if (randomizeTies && error === best.error) {
+          bestTieCount++;
+          if (randomUnit(random) < 1 / bestTieCount) {
+            best = { rows, rowCount: candidate.rowCount, idealWidth, error };
+          }
+        } else if (candidate.rowCount < best.rowCount) {
+          best = { rows, rowCount: candidate.rowCount, idealWidth, error };
+          bestTieCount = 1;
+        }
       }
     }
     if (!best) return null;
 
+    if (randomizeTies) {
+      best.rows = randomizeScorePreservingMembership(best.rows, best.idealWidth, random);
+      best.error = goldenErrorForRows(best.rows, best.idealWidth);
+    }
+
     let presentationRows = best.rows;
     if (options.shuffleOrder === true) {
-      // Preserve the optimized membership and score; randomize only presentation order.
-      const random = typeof options.random === 'function' ? options.random : Math.random;
+      // Membership ties are settled above; randomize row and in-row presentation too.
       presentationRows = shuffledCopy(best.rows, random).map((row) => ({
         ...row,
         items: shuffledCopy(row.items, random),

@@ -30,10 +30,9 @@
       return Math.abs(localX) <= obj.w * halfTolerance && Math.abs(localY) <= obj.h * halfTolerance;
     }
 
-    function topObjectAtWorldPoint(point, objectsList = deps.objects(), predicate = null) {
+    function topObjectAtWorldPoint(point, objectsList = deps.objects()) {
       for (let i = objectsList.length - 1; i >= 0; i--) {
         const obj = objectsList[i];
-        if (predicate && !predicate(obj)) continue;
         if (objectContainsWorldPoint(obj, point)) return obj;
       }
       return null;

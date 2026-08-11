@@ -173,7 +173,7 @@ function sortSelectedImages(anchorPoint = null) {
   const layout = BoardfishImageLayout.planGoldenRatioImageLayout(
     selectedImages,
     center,
-    { shuffleOrder: true },
+    { shuffleOrder: true, randomizeTies: true },
   );
   if (!layout || layout.placements.length < 2) return false;
   let geometryChanged = false;

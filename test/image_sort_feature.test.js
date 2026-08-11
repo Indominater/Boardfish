@@ -20,6 +20,7 @@ function loadSortCommandHarness(sourceObjects, selectedIds, randomValues = [0.99
   let randomIndex = 0;
   const testMath = Object.create(Math);
   testMath.random = () => {
+    if (typeof randomValues === 'function') return randomValues();
     const index = Math.min(randomIndex++, randomValues.length - 1);
     return randomValues[index] ?? 0.999999;
   };
@@ -154,11 +155,49 @@ test('sortSelectedImages samples a fresh presentation order on each invocation',
   const context = loadSortCommandHarness(objects, ['a', 'b'], [0.999999, 0]);
 
   assert.equal(context.sortSelectedImages({ x: 1000, y: 1000 }), true);
-  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 400], ['b', 1000]]);
+  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 1000], ['b', 400]]);
 
   assert.equal(context.sortSelectedImages({ x: 1000, y: 1000 }), true);
-  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 1000], ['b', 400]]);
+  assert.deepEqual(objects.map((obj) => [obj.id, obj.x]), [['a', 400], ['b', 1000]]);
   assert.equal(context.calls.commits.length, 2);
+  assert.deepEqual(context.calls.histories, ['sort-images', 'sort-images']);
+});
+
+test('sortSelectedImages samples fresh row membership when optimal partitions tie', () => {
+  const objects = Array.from('abcdef', (id, index) => ({
+    id,
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    z: index,
+    data: {},
+  }));
+  let seed = 1;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+  const context = loadSortCommandHarness(objects, objects.map((obj) => obj.id), random);
+  const membership = () => {
+    const rows = new Map();
+    for (const obj of objects) {
+      if (!rows.has(obj.y)) rows.set(obj.y, []);
+      rows.get(obj.y).push(obj.id);
+    }
+    return [...rows.values()]
+      .map((ids) => ids.sort().join(''))
+      .sort()
+      .join('|');
+  };
+
+  assert.equal(context.sortSelectedImages({ x: 0, y: 0 }), true);
+  const firstMembership = membership();
+  assert.equal(context.sortSelectedImages({ x: 0, y: 0 }), true);
+
+  assert.notEqual(membership(), firstMembership);
+  assert.equal(new Set(objects.map((obj) => obj.y)).size, 2);
   assert.deepEqual(context.calls.histories, ['sort-images', 'sort-images']);
 });
 
@@ -276,6 +315,7 @@ test('Arrange menu integration uses the activation pointer and shared paste size
   const appSource = readSource('src/app.js');
   const contextMenuSource = readSource('src/js/context_menu.js');
   const imageInsertSource = readSource('src/js/image_insert.js');
+  const stateSource = readSource('src/js/state.js');
   const manifestSource = readSource('src/js/startup_manifest.mjs');
 
   assert.match(
@@ -309,6 +349,7 @@ test('Arrange menu integration uses the activation pointer and shared paste size
   assert.match(contextMenuSource, /objectActionsSep\.style\.display = showImageActions \? 'block' : 'none';/);
   assert.match(contextMenuSource, /layerActionsSep\.style\.display = showLayerActions \? 'block' : 'none';/);
   assert.match(contextMenuSource, /arrangeImagesBtn\.style\.display = imageCount >= 2 \? '' : 'none';/);
+  assert.match(stateSource, /\{ shuffleOrder: true, randomizeTies: true \}/);
   assert.match(imageInsertSource, /const MAX = BoardfishImageLayout\.DEFAULT_IMAGE_MAX_DIMENSION;/);
   assert.match(imageInsertSource, /w = Math\.max\(1, Math\.round\(w \* scale\)\);/);
   assert.match(imageInsertSource, /h = Math\.max\(1, Math\.round\(h \* scale\)\);/);

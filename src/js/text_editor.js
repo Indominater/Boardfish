@@ -469,12 +469,12 @@ const textEditInputReplacement = (oldText = '', nextText = '', inputState = {}, 
   const baseStart = Math.max(0, Math.min(inputState.start ?? 0, oldText.length));
   const baseEnd = Math.max(baseStart, Math.min(inputState.end ?? baseStart, oldText.length));
   const selectedLength = baseEnd - baseStart;
-  const lowerType = String(inputType || inputState.inputType || '').toLowerCase();
+  const type = String(inputType || inputState.inputType || '');
 
-  if (!selectedLength && lowerType.startsWith('delete')) {
+  if (!selectedLength && type.startsWith('delete')) {
     const removedLength = Math.max(0, oldText.length - nextText.length);
     if (removedLength > 0) {
-      if (lowerType.includes('backward')) {
+      if (type.includes('Backward')) {
         return {
           start: Math.max(0, baseStart - removedLength),
           end: baseStart,
@@ -500,19 +500,19 @@ const textEditInputReplacement = (oldText = '', nextText = '', inputState = {}, 
 const textEditBeforeInputReplacement = (text = '', selection = {}, event = null) => {
   const start = Math.max(0, Math.min(selection.start ?? 0, text.length));
   const end = Math.max(start, Math.min(selection.end ?? start, text.length));
-  const inputType = String(event?.inputType || '').toLowerCase();
-  if (inputType === 'inserttext' || inputType === 'insertcompositiontext') {
+  const inputType = String(event?.inputType || '');
+  if (inputType === 'insertText' || inputType === 'insertCompositionText') {
     return { start, end, insertedText: String(event?.data ?? '') };
   }
-  if (inputType === 'insertlinebreak' || inputType === 'insertparagraph') {
+  if (inputType === 'insertLineBreak' || inputType === 'insertParagraph') {
     return { start, end, insertedText: '\n' };
   }
   if (inputType.startsWith('delete')) {
     if (start !== end) return { start, end, insertedText: '' };
     const blankLineRange = textEditBlankLineDeleteRange(text, start, inputType);
     if (blankLineRange) return blankLineRange;
-    if (inputType.includes('backward')) return { start: Math.max(0, start - 1), end: start, insertedText: '' };
-    if (inputType.includes('forward')) return { start, end: Math.min(text.length, end + 1), insertedText: '' };
+    if (inputType.includes('Backward')) return { start: Math.max(0, start - 1), end: start, insertedText: '' };
+    if (inputType.includes('Forward')) return { start, end: Math.min(text.length, end + 1), insertedText: '' };
   }
   return null;
 };
@@ -520,9 +520,9 @@ const textEditBeforeInputReplacement = (text = '', selection = {}, event = null)
 const textEditBlankLineDeleteRange = (text = '', index, keyOrInputType = '') => {
   if (!text.includes('\n')) return null;
   const pos = Math.max(0, Math.min(Math.trunc(Number(index)) || 0, text.length));
-  const key = String(keyOrInputType || '').toLowerCase();
-  if (!key.includes('delete') && !key.includes('backspace')) return null;
-  const backward = key.includes('backspace') || key.includes('backward');
+  const key = String(keyOrInputType || '');
+  if (key !== 'Delete' && key !== 'Backspace' && !key.startsWith('delete')) return null;
+  const backward = key === 'Backspace' || key.includes('Backward');
   const before = text.lastIndexOf('\n', Math.max(0, pos - 1));
   const start = before < 0 ? 0 : before + 1;
   const after = text.indexOf('\n', pos);
@@ -1765,7 +1765,7 @@ const transformTextScriptRangesForInput = (oldRanges, {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
-const textEditInputTypeDeletesContent = (inputType = '') => String(inputType || '').toLowerCase().startsWith('delete');
+const textEditInputTypeDeletesContent = (inputType = '') => String(inputType || '').startsWith('delete');
 
 const textScriptCaretRangesAfterInput = (inputState = {}, {
   oldValue = '',
@@ -3535,7 +3535,6 @@ function enterEdit(id, {
       let deleteRangeMs = 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       let deleteCaret = selection.start;
-      let blankLineDelete = false;
       if (selection.hasSelection) {
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           const deleteRangeStartedAt = textEditorDebugNow();
@@ -3558,7 +3557,6 @@ function enterEdit(id, {
           direction: 'none',
           hasSelection: false,
         };
-        blankLineDelete = !!textEditBlankLineDeleteRange(textEditProxyValue(proxy), caret, e.key);
         deletion = textEditVisibleDeleteRange(obj, caret, e.key, scriptSnapshot);
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           deleteRangeMs = textEditorDebugRound(textEditorDebugNow() - deleteRangeStartedAt);
@@ -3602,7 +3600,6 @@ function enterEdit(id, {
         const deleteSetupMeta = {
           key: e.key,
           deleteCaret,
-          blankLineDelete,
           deleteRangeMs,
           replacementBuildMs,
           keydownDeleteSetupMs: textEditorDebugRound(textEditorDebugNow() - deleteKeyStartedAt),
@@ -3683,7 +3680,6 @@ function enterEdit(id, {
         inputType: e.key === 'Backspace' ? 'deleteContentBackward' : 'deleteContentForward',
         key: e.key,
         deleteCaret,
-        blankLineDelete,
         deleteRangeMs,
         keydownDeleteSetupMs: textEditorDebugRound(textEditorDebugNow() - deleteKeyStartedAt),
         deletionStart: deletion?.start ?? '',

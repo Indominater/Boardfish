@@ -945,8 +945,8 @@ test('async image cache writes use generation guards', () => {
   const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
 
   assert.match(imageStateSource, /const isImageDisplayCacheRequestCurrent = \(key, source, displaySrc, generation\) =>/);
-  assert.match(imageStateSource, /if \(!isImageDisplayCacheRequestCurrent\(key, src, displaySrc, generation\)\)/);
-  assert.match(imageStateSource, /if \(isImageDisplayCacheRequestCurrent\(key, src, displaySrc, generation\)\) imageBitmapFailed\.add\(key\);/);
+  assert.match(imageStateSource, /same = isImageDisplayCacheRequestCurrent\(key, src, displaySrc, generation\);/);
+  assert.match(imageStateSource, /if \(same\) imageBitmapFailed\.add\(key\);/);
 });
 
 test('low-zoom active navigation records visible full-size fallbacks until scaled variants are ready', () => {
