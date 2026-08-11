@@ -1561,6 +1561,24 @@ test('text selection jello exposes active full-range draw specs', () => {
   assert.equal(context.BoardfishMotion.textSelectionJelloSpecsForDraw(true), null);
 });
 
+test('text selection copy feedback can be cancelled before the selected text changes', () => {
+  const { context } = loadMotion();
+  context.BoardfishMotion.applyCopyFeedback({
+    textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
+  });
+  context.BoardfishMotion.applyCopyFeedback({
+    textSelection: { id: 'text-2', start: 4, end: 12, hasSelection: true },
+  });
+
+  assert.equal(context.BoardfishMotion.cancelTextSelectionMotion('text-1'), true);
+  assert.equal(context.BoardfishMotion.textSelectionMotionForDraw('text-1', 2, 9), null);
+  assert.ok(context.BoardfishMotion.textSelectionMotionForDraw('text-2', 4, 12));
+  assert.deepEqual(plain(context.BoardfishMotion.textSelectionJelloSpecsForDraw()), [
+    { id: 'text-2', start: 4, end: 12 },
+  ]);
+  assert.equal(context.BoardfishMotion.cancelTextSelectionMotion('missing'), false);
+});
+
 test('selection copy feedback resolves every selected object', () => {
   const { context, setTime } = loadMotion();
   const image = { id: 'img-1', type: 'image' };

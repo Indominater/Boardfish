@@ -1790,7 +1790,12 @@ const applyTextEditAlignmentFromKeyboard = (direction = 'right', id = editingId,
   return true;
 };
 
-const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSelectionState(proxy)) => {
+const copyTextEditSelectionFromProxy = async (
+  id,
+  proxy,
+  selection = textEditSelectionState(proxy),
+  options = {},
+) => {
   if (!selection?.hasSelection || !proxy) return false;
   const sourceValue = textEditProxyValue(proxy);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1852,7 +1857,7 @@ const copyTextEditSelectionFromProxy = async (id, proxy, selection = textEditSel
     logStep('copy:text-selection-clear-jsClipboard', textStats);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
-  if (editingId === id && _editEl === proxy) {
+  if (options.animateCopy !== false && editingId === id && _editEl === proxy) {
     globalThis.BoardfishMotion?.applyCopyFeedback?.({
       textSelection: {
         id,
@@ -3360,8 +3365,9 @@ function enterEdit(id, {
 
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'x' && proxy.selectionStart !== proxy.selectionEnd) {
       e.preventDefault();
-      copyTextEditSelectionFromProxy(id, proxy);
       const selection = textEditSelectionState(proxy);
+      globalThis.BoardfishMotion?.cancelTextSelectionMotion?.(id);
+      copyTextEditSelectionFromProxy(id, proxy, selection, { animateCopy: false });
       const deletion = textEditVisibleSelectionDeleteRange(obj, selection) || selection;
       const inputType = 'deleteByCut';
       pendingInputState = {

@@ -130,16 +130,11 @@
     if (!rect) return rect;
     // Text layout and image crops are chosen before the canvas motion transform,
     // so map the visible destination back into the object's source coordinates.
-    const { x1, y1, x2, y2 } = rect;
-    const sourceX1 = pivotX + (x1 - translateX - pivotX) / scaleX;
-    const sourceX2 = pivotX + (x2 - translateX - pivotX) / scaleX;
-    const sourceY1 = pivotY + (y1 - translateY - pivotY) / scaleY;
-    const sourceY2 = pivotY + (y2 - translateY - pivotY) / scaleY;
     return {
-      x1: Math.min(sourceX1, sourceX2),
-      y1: Math.min(sourceY1, sourceY2),
-      x2: Math.max(sourceX1, sourceX2),
-      y2: Math.max(sourceY1, sourceY2),
+      x1: pivotX + (rect.x1 - translateX - pivotX) / scaleX,
+      y1: pivotY + (rect.y1 - translateY - pivotY) / scaleY,
+      x2: pivotX + (rect.x2 - translateX - pivotX) / scaleX,
+      y2: pivotY + (rect.y2 - translateY - pivotY) / scaleY,
     };
   }
 

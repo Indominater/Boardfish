@@ -298,7 +298,9 @@ function loadLiveTextEditResizeHarness() {
     },
     setRangeText(text, start, end, selectionMode = 'preserve') {
       this.value = this.value.slice(0, start) + text + this.value.slice(end);
-      if (selectionMode === 'end') {
+      if (selectionMode === 'start') {
+        this.setSelectionRange(start, start, 'none');
+      } else if (selectionMode === 'end') {
         const pos = start + text.length;
         this.setSelectionRange(pos, pos, 'none');
       }
@@ -437,6 +439,48 @@ function typeNativeText(proxy, text) {
   proxy.dispatchEvent({ type: 'input', inputType: 'insertText', data: text });
   return before;
 }
+
+test('cmd+x copies highlighted text without copy feedback before deleting it', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const copiedTexts = [];
+  const cutOperations = [];
+  obj.data = { content: 'alpha beta gamma' };
+  context.BoardfishClipboardIO = {
+    copyTextToClipboard(text) {
+      copiedTexts.push(text);
+      cutOperations.push(['copy', text]);
+      return Promise.resolve({});
+    },
+  };
+  context.BoardfishMotion.cancelTextSelectionMotion = (id) => {
+    cutOperations.push(['cancel', id]);
+  };
+
+  context.enterEdit(obj.id, { history: false });
+  context.proxy.setSelectionRange(6, 10, 'forward');
+
+  const copy = makeKeyEvent('c', { metaKey: true });
+  context.proxy.dispatchEvent(copy);
+  assert.equal(copy.prevented, true);
+  assert.deepEqual(copiedTexts, ['beta']);
+  assert.equal(context.animations.length, 1);
+  assert.equal(context.animations[0].textSelection.id, obj.id);
+
+  context.animations.length = 0;
+  cutOperations.length = 0;
+  const cut = makeKeyEvent('x', { metaKey: true });
+  context.proxy.dispatchEvent(cut);
+
+  assert.equal(cut.prevented, true);
+  assert.deepEqual(copiedTexts, ['beta', 'beta']);
+  assert.deepEqual(context.animations, []);
+  assert.deepEqual(cutOperations, [['cancel', obj.id], ['copy', 'beta']]);
+  assert.equal(context.proxy.value, 'alpha  gamma');
+  assert.equal(context.proxy.selectionStart, 6);
+  assert.equal(context.proxy.selectionEnd, 6);
+  assert.equal(obj.data.content, 'alpha  gamma');
+});
 
 test('typing a script marker auto-opens braces and closing brace completes the range', () => {
   const context = loadLiveTextEditResizeHarness();

@@ -263,6 +263,8 @@
     return transform;
   };
 
+  const cancelTextSelectionMotion = (id) => textSelectionMotions.delete(id);
+
   const textSelectionJelloSpecsForDraw = (raw = false) => {
     if (!textSelectionMotions.size || prefersReducedMotion()) return raw ? null : EMPTY_SPECS;
     const cutoff = now();
@@ -347,6 +349,7 @@
   root.BoardfishMotion = Object.freeze({
     afterViewportRenderFrame,
     applyCopyFeedback,
+    cancelTextSelectionMotion,
     getLastDrawnObjectMotion,
     hasLastDrawnObjectMotions,
     hasObjectMotionsForDraw,

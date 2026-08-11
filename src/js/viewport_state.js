@@ -19,18 +19,11 @@
     for (let i = 0; i < objects.length; i++) {
       const obj = objects[i];
       if (obj?.type !== 'image' && obj?.type !== 'text') continue;
-      if (
-        !Number.isFinite(obj.x) ||
-        !Number.isFinite(obj.y) ||
-        !Number.isFinite(obj.w) ||
-        !Number.isFinite(obj.h)
-      ) {
-        continue;
-      }
-      const right = obj.x + obj.w;
-      const bottom = obj.y + obj.h;
-      if (obj.x < x1) x1 = obj.x;
-      if (obj.y < y1) y1 = obj.y;
+      const { x, y, w, h } = obj;
+      const right = x + w, bottom = y + h;
+      if (!Number.isFinite(right) || !Number.isFinite(bottom)) continue;
+      if (x < x1) x1 = x;
+      if (y < y1) y1 = y;
       if (right > x2) x2 = right;
       if (bottom > y2) y2 = bottom;
     }

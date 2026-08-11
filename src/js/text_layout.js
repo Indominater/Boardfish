@@ -535,7 +535,7 @@ function cloneTextObjectRuntimeCaches(source, target) {
     source._textParagraphPrefixCacheContent === content &&
     typeof source._textParagraphPrefixCacheScriptKey === 'string'
   ) {
-    target._textParagraphPrefixCache = new Map(source._textParagraphPrefixCache.entries());
+    target._textParagraphPrefixCache = source._textParagraphPrefixCache;
     target._textParagraphPrefixCacheContent = source._textParagraphPrefixCacheContent;
     target._textParagraphPrefixCacheScriptKey = source._textParagraphPrefixCacheScriptKey;
   }
