@@ -29,13 +29,6 @@ function setSelectionOverlayScreenRect(element, state, resting, animated, padDev
   _setStyleIfChanged(element, 'height', _cleanOverlay(Math.max(0, snappedHeight + deltaHeight)) + 'px', state);
 }
 
-function selectionOverlaySelectedImageEdgePadDevicePx() {
-  for (const id of selectedIds) {
-    if (objectsMap.get(id)?.type === 'image') return SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX;
-  }
-  return 0;
-}
-
 function selectionOverlayObjectBounds(obj) {
   if (!obj) return null;
   const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj);
@@ -369,21 +362,22 @@ const trimMultiSelectionBoxes = (maxCount = 0) => {
   }
 };
 
-function updateMultiSelectionOverlay(hasMotion) {
-  if (!multiSelOverlay || !isMultiSelected()) {
+function updateMultiSelectionOverlay(hasMotion, multiSelected) {
+  if (!multiSelOverlay || !multiSelected) {
     hideMultiSelectionOverlay();
-    return;
+    return 0;
   }
 
   while (_multiSelBoxes.length < selectedIds.size) {
     const box = document.createElement('div');
     box.className = 'multi-sel-box';
-    box._styleState = { display: '', transform: '', width: '', height: '' };
+    box._styleState = { transform: '', width: '', height: '' };
     _multiSelBoxes.push(box);
     multiSelOverlay.appendChild(box);
   }
 
   let selectedIdx = 0;
+  let imageEdgePad = 0;
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
@@ -391,19 +385,21 @@ function updateMultiSelectionOverlay(hasMotion) {
     const bounds = hasMotion ? selectionOverlayObjectBounds(obj) || resting : resting;
     const box = _multiSelBoxes[selectedIdx++];
     const state = box._styleState;
-    _setStyleIfChanged(box, 'display', 'block', state);
+    const pad = obj.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0;
+    imageEdgePad ||= pad;
     setSelectionOverlayScreenRect(
       box,
       state,
       resting,
       bounds,
-      obj.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0,
+      pad,
     );
   }
 
   trimMultiSelectionBoxes(selectedIdx);
 
   if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
+  return imageEdgePad;
 }
 
 function updateSelectionOverlay() {
@@ -441,17 +437,18 @@ function updateSelectionOverlay() {
     return;
   }
 
+  const multiSelected = isMultiSelected();
+  const imageEdgePad = updateMultiSelectionOverlay(hasMotion, multiSelected) ||
+    (firstSelectedObj.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0);
   setSelectionOverlayScreenRect(
     selOverlay,
     _selOverlayStyleState,
     resting,
     bounds,
-    selectionOverlaySelectedImageEdgePadDevicePx(),
+    imageEdgePad,
   );
-  const multiSelected = isMultiSelected();
   const nextClasses = `visible${multiSelected ? ' multi' : ''}${editingId ? ' editing' : ''}${!multiSelected && firstSelectedObj.type === 'text' ? ' text-resize' : ''}`;
   if (selOverlay.className !== nextClasses) selOverlay.className = nextClasses;
-  updateMultiSelectionOverlay(hasMotion);
 }
 
 const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {

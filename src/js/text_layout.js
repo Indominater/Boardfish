@@ -3003,8 +3003,7 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
   const cacheHit = !!plan;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!plan) {
-    const ranges = line.scriptRanges || [];
-    const hasScriptRanges = ranges.length > 0;
+    const hasScriptRanges = line.scriptRanges?.length > 0;
     plan = createTextDrawPlan(line, text, start, end, hasScriptRanges, line._scriptMetrics);
     if (cacheable) line._textDrawPlanCache = plan;
   }

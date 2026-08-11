@@ -72,7 +72,7 @@
 
   function canonicalRows(rows) {
     const canonical = rows.map((row) => {
-      const items = row.items.sort((a, b) => a.rank - b.rank);
+      const items = row.items;
       let width = 0;
       for (const item of items) width += item.width;
       return { items, width, ranks: items.map((item) => item.rank) };
@@ -195,12 +195,7 @@
         for (let to = 0; to < rows.length; to++) {
           if (to === from) continue;
           const target = rows[to];
-          const delta = (
-            (source.width - item.width) ** 2 +
-            (target.width + item.width) ** 2 -
-            source.width ** 2 -
-            target.width ** 2
-          );
+          const delta = 2 * item.width * (target.width - source.width + item.width);
           if (delta >= -improvementTolerance) continue;
           const operation = {
             type: 'move',
@@ -226,13 +221,8 @@
         const right = rows[rightIndex];
         for (const leftItem of left.items) {
           for (const rightItem of right.items) {
-            if (leftItem === rightItem) continue;
-            const nextLeftWidth = left.width - leftItem.width + rightItem.width;
-            const nextRightWidth = right.width - rightItem.width + leftItem.width;
-            const delta = (
-              nextLeftWidth ** 2 + nextRightWidth ** 2 -
-              left.width ** 2 - right.width ** 2
-            );
+            const widthDelta = rightItem.width - leftItem.width;
+            const delta = 2 * widthDelta * (left.width - right.width + widthDelta);
             if (delta >= -improvementTolerance) continue;
             const operation = {
               type: 'swap',
@@ -353,7 +343,7 @@
       if (
         best &&
         candidate.lowerBound > best.error + numericTolerance(candidate.lowerBound, best.error)
-      ) continue;
+      ) break;
       if (exactPartitions && !exactPartitions[candidate.rowCount]) continue;
       const idealWidth = GOLDEN_RATIO * candidate.rowCount * rowHeight;
       const rows = exactPartitions

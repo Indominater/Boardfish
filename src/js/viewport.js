@@ -369,7 +369,6 @@ const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, options = {}) => {
-  context.fillStyle = canvasTextColor();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const stats = options.stats || null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */

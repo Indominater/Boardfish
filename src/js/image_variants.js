@@ -593,7 +593,11 @@ function scheduleScaledVariantQueue() {
   if (imageScaledVariantQueueActive >= concurrency) return;
   if (!imageScaledVariantQueue.length) return;
   if (imageScaledVariantQueueTimer !== null) return;
-  const runReadyTasks = () => {
+  const inputIdleMs = activeViewportInputIdleMs();
+  const idleThresholdMs = scaledVariantQueueTaskIdleThresholdMs(imageScaledVariantQueue[0]);
+  const delay = inputIdleMs < idleThresholdMs ? idleThresholdMs - inputIdleMs : 0;
+  imageScaledVariantQueueTimer = setTimeout(() => {
+    imageScaledVariantQueueTimer = null;
     while (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
       const task = imageScaledVariantQueue[0];
       if (!task) {
@@ -611,18 +615,10 @@ function scheduleScaledVariantQueue() {
           if (imageScaledVariantQueue.length) scheduleScaledVariantQueue();
         });
     }
-  };
-  const run = () => {
-    imageScaledVariantQueueTimer = null;
-    runReadyTasks();
     if (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
       scheduleScaledVariantQueue();
     }
-  };
-  const inputIdleMs = activeViewportInputIdleMs();
-  const idleThresholdMs = scaledVariantQueueTaskIdleThresholdMs(imageScaledVariantQueue[0]);
-  const delay = inputIdleMs < idleThresholdMs ? idleThresholdMs - inputIdleMs : 0;
-  imageScaledVariantQueueTimer = setTimeout(run, delay);
+  }, delay);
 }
 
 function chooseImageScaleForDraw(obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, activeOverscale = false) {
