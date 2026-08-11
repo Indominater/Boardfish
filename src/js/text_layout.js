@@ -326,10 +326,8 @@ function refreshTextMetrics() {
 var _prefixCache = new Map();
 
 const trimMapCache = (map, maxEntries) => {
-  while (map.size > maxEntries) {
-    const oldest = map.keys().next().value;
-    map.delete(oldest);
-  }
+  const keys = map.keys();
+  while (map.size > maxEntries) map.delete(keys.next().value);
 };
 
 const textLayoutDebugNow = () => (
@@ -982,10 +980,8 @@ function textPrefixWidthsSlice(prefixWidths, from, to) {
   const start = Math.max(0, Math.min(Math.trunc(Number(from)) || 0, Math.max(0, (source?.length || 1) - 1)));
   const end = Math.max(start, Math.min(Math.trunc(Number(to)) || start, Math.max(0, (source?.length || 1) - 1)));
   const out = new Float64Array(end - start + 1);
-  const base = Number(source?.[start]) || 0;
-  for (let index = start; index <= end; index++) {
-    out[index - start] = Math.max(0, (Number(source?.[index]) || 0) - base);
-  }
+  const base = source[start] || 0;
+  for (let index = start; index <= end; index++) out[index - start] = Math.max(0, (source[index] || 0) - base);
   return out;
 }
 

@@ -131,8 +131,6 @@
     const groupSide = motion.groupSize > 1 ? motion.groupSide : 1;
     const xPx = (xBase * xAttack + coupledX * yAttack) * settle * NORMALIZE_X * 5;
     const yPx = (yBase + sag) * yAttack * settle * NORMALIZE_Y * 10.75;
-    const viewZoom = Number(zoom);
-    const safeZoom = Number.isFinite(viewZoom) && viewZoom > 0 ? viewZoom : 1;
     const shapeTimeSec = timeSec - 0.044;
     const shapeAttack = shapeTimeSec > 0 ? smootherstep(shapeTimeSec / 0.044) : 0;
     const shape = (shapeTimeSec > 0
@@ -140,10 +138,10 @@
       : 0) * NORMALIZE_SHAPE;
     const strain = shape * 0.028 * (motion.groupSize > 1 ? 1 + groupSide * 0.06 : 1);
     return {
-      groupTranslateX: (motion.groupSize > 1 ? 0 : xPx) / safeZoom,
-      groupTranslateY: yPx / safeZoom,
-      translateX: xPx * groupSide / safeZoom,
-      translateY: yPx / safeZoom,
+      groupTranslateX: (motion.groupSize > 1 ? 0 : xPx) / zoom,
+      groupTranslateY: yPx / zoom,
+      translateX: xPx * groupSide / zoom,
+      translateY: yPx / zoom,
       scaleX: Math.exp(-strain),
       scaleY: Math.exp(strain),
       scaleOriginX: 0.5,
@@ -167,7 +165,7 @@
   };
 
   const transformAtElapsed = (motion, elapsedMs, zoom = 1) => {
-    const elapsed = Math.max(0, Number(elapsedMs) || 0);
+    const elapsed = Math.max(0, elapsedMs);
     const transform = jiggleTransform(motion, clamp01(elapsed / DURATION_MS), zoom);
     if (!motion.handoff || elapsed >= CARRY_DURATION_MS) return transform;
     const previousElapsed = motion.startedAt + elapsed - motion.handoff.startedAt;

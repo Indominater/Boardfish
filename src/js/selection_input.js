@@ -289,7 +289,7 @@ function _setStyleIfChanged(el, prop, value, state) {
 
 function selectionBoundsIntersectViewport(
   bounds,
-  view = { zoom, panX, panY },
+  view,
   surface = null,
 ) {
   if (!bounds) return false;
@@ -302,9 +302,9 @@ function selectionBoundsIntersectViewport(
   const height = Number(size?.height) || 0;
   if (width <= 0 || height <= 0) return true;
 
-  const scale = Number.isFinite(view?.zoom) && view.zoom > 0 ? view.zoom : 1;
-  const offsetX = Number.isFinite(view?.panX) ? view.panX : 0;
-  const offsetY = Number.isFinite(view?.panY) ? view.panY : 0;
+  const scale = view?.zoom ?? zoom;
+  const offsetX = view?.panX ?? panX;
+  const offsetY = view?.panY ?? panY;
   const screenX1 = bounds.x1 * scale + offsetX, screenY1 = bounds.y1 * scale + offsetY;
   const screenX2 = bounds.x2 * scale + offsetX, screenY2 = bounds.y2 * scale + offsetY;
   return screenX1 < width && screenX2 > 0 && screenY1 < height && screenY2 > 0;
