@@ -277,19 +277,15 @@ function duplicateSelected(anchorPoint = null) {
   }
   if (!selectedObjects.length || !BoardfishWebLimits.canAddObjects(selectedObjects.length)) return;
   let additionalTextBytes = 0;
-  for (const obj of selectedObjects) {
-    if (obj?.type !== 'text') continue;
-    additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
-  }
-  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
-
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const obj of selectedObjects) {
+    if (obj?.type === 'text') additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
     minX = Math.min(minX, obj.x);
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x + obj.w);
     maxY = Math.max(maxY, obj.y + obj.h);
   }
+  if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
   const center = (
     anchorPoint &&
     Number.isFinite(Number(anchorPoint.x)) &&

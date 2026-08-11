@@ -60,12 +60,9 @@
         id: image.id,
         sortId: String(image.id),
         width,
-        sourceIndex,
       });
     }
-    items.sort((a, b) => (
-      b.width - a.width || compareIds(a.sortId, b.sortId) || a.sourceIndex - b.sourceIndex
-    ));
+    items.sort((a, b) => b.width - a.width || compareIds(a.sortId, b.sortId));
     for (let rank = 0; rank < items.length; rank++) items[rank].rank = rank;
     return items;
   }
@@ -102,15 +99,13 @@
 
     // With a fixed target and row count, the variable part of the requested
     // squared error is just the sum of squared row widths.
-    const costs = new Array(itemCount + 1);
     const choices = new Array(itemCount + 1);
-    costs[1] = new Float64Array(stateCount);
+    let previousCosts = new Float64Array(stateCount);
     for (let mask = 1; mask < stateCount; mask++) {
-      costs[1][mask] = subsetWidths[mask] * subsetWidths[mask];
+      previousCosts[mask] = subsetWidths[mask] * subsetWidths[mask];
     }
 
     for (let rowCount = 2; rowCount <= maxRowCount; rowCount++) {
-      const previousCosts = costs[rowCount - 1];
       const nextCosts = new Float64Array(stateCount);
       const nextChoices = new Int32Array(stateCount);
       nextCosts.fill(Infinity);
@@ -126,7 +121,6 @@
         ) {
           if (subsetCounts[remainingMask] < rowCount - 1) continue;
           const previousCost = previousCosts[remainingMask];
-          if (!Number.isFinite(previousCost)) continue;
           const rowMask = mask ^ remainingMask;
           const rowWidth = subsetWidths[rowMask];
           const candidateCost = previousCost + rowWidth * rowWidth;
@@ -144,7 +138,7 @@
           }
         }
       }
-      costs[rowCount] = nextCosts;
+      previousCosts = nextCosts;
       choices[rowCount] = nextChoices;
     }
 

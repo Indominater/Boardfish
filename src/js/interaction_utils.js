@@ -6,9 +6,7 @@
 
     function commit() {
       raf = null;
-      const next0 = value0, next1 = value1, next2 = value2, next3 = value3;
-      value0 = value1 = value2 = value3 = undefined;
-      apply(next0, next1, next2, next3);
+      apply(value0, value1, value2, value3);
     }
 
     return {

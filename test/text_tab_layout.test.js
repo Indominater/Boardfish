@@ -120,6 +120,7 @@ test('text script ranges hide the marker and draw following text smaller', () =>
   assert.equal(stats.scriptRuns, 1);
   assert.equal(stats.hiddenChars, 1);
   assert.equal(stats.fontSwitches, 1);
+  assert.equal(context.font, "normal 400 16px 'Geist Sans', system-ui");
 });
 
 test('text script hit testing skips hidden script marker caret stops', () => {

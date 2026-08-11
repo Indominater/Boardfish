@@ -107,13 +107,11 @@
     function emitPinch(point) {
       if (mode !== 'pinch' || active.size < 2 || !pinchStart) return false;
       const geometry = twoPointerGeometry(active.values());
-      call('onPinch', {
-        ...geometry,
-        startCenterX: pinchStart.centerX,
-        startCenterY: pinchStart.centerY,
-        scale: geometry.distance / pinchStart.distance,
-        event: point?.sourceEvent || null,
-      });
+      geometry.startCenterX = pinchStart.centerX;
+      geometry.startCenterY = pinchStart.centerY;
+      geometry.scale = geometry.distance / pinchStart.distance;
+      geometry.event = point?.sourceEvent || null;
+      call('onPinch', geometry);
       return true;
     }
 
@@ -198,8 +196,7 @@
       let lastPoint = null;
       for (let i = 0; i < (inputs?.length || 0); i++) {
         const current = updateActivePoint(inputs[i], sourceEvent);
-        if (!current) continue;
-        lastPoint = current;
+        if (current && (current.x - current.previousX || current.y - current.previousY)) lastPoint = current;
       }
       return lastPoint ? emitPinch(lastPoint) : false;
     }
@@ -384,27 +381,12 @@
 
   function beginTouchPan(gesture) {
     if (gesture?.resumedFromPinch || !boardPressAllowed()) return false;
-    const startX = Number(gesture.startX);
-    const startY = Number(gesture.startY);
-    if (!Number.isFinite(startX) || !Number.isFinite(startY)) return false;
     const drag = startSelectedRegionDrag({
-      clientX: startX,
-      clientY: startY,
-      button: 0,
-      buttons: 1,
-      sourceEvent: gesture.event || null,
+      clientX: gesture.startX,
+      clientY: gesture.startY,
     });
-    if (!drag || typeof drag.move !== 'function' || typeof drag.finish !== 'function') return false;
+    if (!drag) return false;
     touchSelectionDrag = drag;
-    return true;
-  }
-
-  function applyTouchSelectionDrag(gesture) {
-    if (!touchSelectionDrag) return false;
-    const x = Number(gesture.x);
-    const y = Number(gesture.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return true;
-    touchSelectionDrag.move(x, y);
     return true;
   }
 
@@ -412,15 +394,16 @@
     if (!touchSelectionDrag) return false;
     const drag = touchSelectionDrag;
     touchSelectionDrag = null;
-    const x = Number(gesture?.x);
-    const y = Number(gesture?.y);
-    if (Number.isFinite(x) && Number.isFinite(y)) drag.move(x, y);
+    drag.move(gesture?.x, gesture?.y);
     drag.finish();
     return true;
   }
 
   function applyTouchPan(gesture) {
-    if (applyTouchSelectionDrag(gesture)) return;
+    if (touchSelectionDrag) {
+      touchSelectionDrag.move(gesture.x, gesture.y);
+      return;
+    }
     if (!boardNavigationAllowed()) return;
     BoardfishViewportState.panBy(gesture.dx, gesture.dy);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pan', gesture.event);

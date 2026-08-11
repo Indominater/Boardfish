@@ -126,6 +126,7 @@ function loadTextLayout({
       get cache() { return _mwCache; },
       get prefixCacheSize() { return _prefixCache.size; },
       get scriptIndexCacheSize() { return _scriptIndexCache.size; },
+      get tabStopWidthCache() { return _textTabStopWidth; },
       get glyphPairSpacingCacheSize() { return _glyphPairSpacingCache.size; },
       get glyphPairSpacingCacheMaxEntries() { return TEXT_GLYPH_PAIR_SPACING_CACHE_MAX_ENTRIES; },
       maxEntries: TEXT_MEASURE_CACHE_MAX_ENTRIES,
@@ -324,6 +325,20 @@ test('text measurement cache clears with other measurement caches', () => {
   textLayout.clearTextLayoutCaches({ measurements: true });
 
   assert.equal(textLayout.cache.size, 0);
+});
+
+test('tab-stop width is reused until measurement caches clear', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+
+  assert.equal(textLayout.tabStopWidthCache, undefined);
+  textLayout.measureTextW('\t');
+  textLayout.measureTextW('a\t');
+  assert.equal(textLayout.tabStopWidthCache, 8);
+  textLayout.clearTextLayoutCaches({ measurements: true });
+  assert.equal(textLayout.tabStopWidthCache, undefined);
+  textLayout.measureTextW('\t');
+  assert.equal(textLayout.tabStopWidthCache, 8);
 });
 
 test('text measurement uses single-glyph advances for consistent spacing', () => {

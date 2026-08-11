@@ -485,7 +485,7 @@ function createSelectionDragSession(startClientX, startClientY) {
     pushHistory('group-drag', { dirty: grpItems });
     return true;
   }
-  return Object.freeze({ move, finish });
+  return { move, finish };
 }
 
 function startGroupDrag(e) {

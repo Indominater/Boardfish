@@ -105,10 +105,9 @@ test('an atomic one-finger touch snapshot is not discarded during normalization'
 test('mobile pan routing gives selected-region drags to the object drag path', () => {
   assert.match(touchInputSource, /onPanStart:\s*beginTouchPan/);
   assert.match(touchInputSource, /function beginTouchPan\([\s\S]*startSelectedRegionDrag\(/);
-  assert.match(touchInputSource, /function applyTouchSelectionDrag\([\s\S]*touchSelectionDrag\.move\(x, y\)/);
-  assert.match(touchInputSource, /function finishTouchSelectionDrag\([\s\S]*drag\.move\(x, y\)[\s\S]*drag\.finish\(\)/);
+  assert.match(touchInputSource, /function finishTouchSelectionDrag\([\s\S]*drag\.move\(gesture\?\.x, gesture\?\.y\)[\s\S]*drag\.finish\(\)/);
   assert.doesNotMatch(touchInputSource, /document\.dispatchEvent\(makeTouchMouseEvent\('(mousemove|mouseup)'/);
-  assert.match(touchInputSource, /function applyTouchPan\(gesture\) \{\s*if \(applyTouchSelectionDrag\(gesture\)\) return;/);
+  assert.match(touchInputSource, /function applyTouchPan\(gesture\) \{\s*if \(touchSelectionDrag\) \{\s*touchSelectionDrag\.move\(gesture\.x, gesture\.y\);/);
 });
 
 test('press and hold maps to one right-click long press and suppresses tap', () => {
@@ -151,14 +150,16 @@ test('two touches pinch around their midpoint and can resume as a pan', () => {
   assert.equal(harness.events.some((event) => event.type === 'tap'), false);
 });
 
-test('an atomic touch snapshot updates both contacts before emitting zoom', () => {
+test('an atomic touch snapshot updates both contacts and ignores an unchanged repeat', () => {
   const harness = makeGestureHarness();
   harness.controller.pointerDown(point(1, 100, 0));
   harness.controller.pointerDown(point(2, 200, 0));
-  harness.controller.pointerMoves([
+  const snapshot = [
     point(1, 75, 0),
     point(2, 225, 0),
-  ]);
+  ];
+  harness.controller.pointerMoves(snapshot);
+  harness.controller.pointerMoves(snapshot);
 
   const pinchEvents = harness.events.filter((event) => event.type === 'pinch');
   assert.equal(pinchEvents.length, 1);

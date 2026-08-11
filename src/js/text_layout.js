@@ -297,10 +297,8 @@ function measureRawTextWForDepth(text, depth = 0) {
   return measureRawTextWWithFont(text, font, cache);
 }
 
-const textTabStopWidth = () => {
-  const width = measureRawTextW('        ');
-  return width > 0 ? width : FONT_SIZE * 4;
-};
+var _textTabStopWidth;
+const textTabStopWidth = () => ((_textTabStopWidth ??= measureRawTextW('        ')) > 0 ? _textTabStopWidth : FONT_SIZE * 4);
 
 const textWidthAfterTab = (currentWidth) => {
   const tabStop = textTabStopWidth();
@@ -345,6 +343,7 @@ const textLayoutDebugNow = () => (
 const textLayoutDebugRound = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
 const clearMeasuredTextWidthCache = () => {
+  _textTabStopWidth = undefined;
   _mwCache.clear();
   _fontMeasureCaches.clear();
   _glyphMetricsCache.clear();
@@ -781,8 +780,6 @@ function setCachedTextWrappedLineCount(obj, text, scriptKey, lineCount) {
   obj._textWrappedLineCountCacheValue = Math.max(1, Math.trunc(Number(lineCount)) || 1);
 }
 
-const textWrappedLineWidthCacheKey = (width) => String(width);
-
 function getTextWrappedLineIndexWidthCache(obj, text, scriptKey) {
   if (!obj || obj.type !== 'text') return null;
   const cache = obj._textWrappedLineIndexWidthCache;
@@ -836,15 +833,14 @@ function getCachedTextWrappedLineIndex(obj, text, scriptKey) {
     return cache;
   }
   const widthCache = getTextWrappedLineIndexWidthCache(obj, text, scriptKey);
-  const widthKey = textWrappedLineWidthCacheKey(obj.w);
-  const widthCached = widthCache?.get(widthKey);
+  const widthCached = widthCache?.get(obj.w);
   if (
     widthCached &&
     Array.isArray(widthCached.entries) &&
     Number.isFinite(widthCached.lineCount)
   ) {
-    widthCache.delete(widthKey);
-    widthCache.set(widthKey, widthCached);
+    widthCache.delete(obj.w);
+    widthCache.set(obj.w, widthCached);
     return promoteCachedTextWrappedLineIndex(obj, text, scriptKey, obj.w, widthCached);
   }
   return null;
@@ -864,9 +860,8 @@ function setCachedTextWrappedLineIndex(obj, text, scriptKey, entries, lineCount)
   setCachedTextWrappedLineCount(obj, text, scriptKey, count);
   const widthCache = ensureTextWrappedLineIndexWidthCache(obj, text, scriptKey);
   if (widthCache) {
-    const widthKey = textWrappedLineWidthCacheKey(obj.w);
-    if (widthCache.has(widthKey)) widthCache.delete(widthKey);
-    widthCache.set(widthKey, cache);
+    widthCache.delete(obj.w);
+    widthCache.set(obj.w, cache);
     trimMapCache(widthCache, TEXT_WRAPPED_WIDTH_CACHE_MAX_ENTRIES);
   }
 }
@@ -3008,14 +3003,13 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
     if (cacheable) line._textDrawPlanCache = plan;
   }
   const baseX = lineBaseX(line, obj);
-  const previousFont = context.font;
   for (const run of plan.runs) {
     if (run.font) context.font = run.font;
     const y = line.textY + run.offset;
     for (const draw of run.draws) {
       context.fillText(draw.text, baseX + draw.x, y);
     }
-    if (run.font && context.font !== previousFont) context.font = previousFont;
+    if (run.font) context.font = FONT;
   }
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') return null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

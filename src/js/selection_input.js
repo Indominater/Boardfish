@@ -305,10 +305,8 @@ function selectionBoundsIntersectViewport(
   const scale = Number.isFinite(view?.zoom) && view.zoom > 0 ? view.zoom : 1;
   const offsetX = Number.isFinite(view?.panX) ? view.panX : 0;
   const offsetY = Number.isFinite(view?.panY) ? view.panY : 0;
-  const screenX1 = Math.min(bounds.x1, bounds.x2) * scale + offsetX;
-  const screenY1 = Math.min(bounds.y1, bounds.y2) * scale + offsetY;
-  const screenX2 = Math.max(bounds.x1, bounds.x2) * scale + offsetX;
-  const screenY2 = Math.max(bounds.y1, bounds.y2) * scale + offsetY;
+  const screenX1 = bounds.x1 * scale + offsetX, screenY1 = bounds.y1 * scale + offsetY;
+  const screenX2 = bounds.x2 * scale + offsetX, screenY2 = bounds.y2 * scale + offsetY;
   return screenX1 < width && screenX2 > 0 && screenY1 < height && screenY2 > 0;
 }
 
