@@ -387,9 +387,7 @@ const textGlyphPairSpacingCacheKey = (previous, next, font = FONT) => {
   return `${fontValue.length}:${fontValue}${previous.length}:${previous}${next}`;
 };
 
-function textGlyphPairSpacing(previousUnit, nextUnit, font = FONT) {
-  const previous = String(previousUnit ?? '');
-  const next = String(nextUnit ?? '');
+function textGlyphPairSpacing(previous, next, font = FONT) {
   if (!previous || !next || /\s/.test(previous) || /\s/.test(next)) return 0;
   const cacheKey = textGlyphPairSpacingCacheKey(previous, next, font);
   const cached = _glyphPairSpacingCache.get(cacheKey);
@@ -2862,9 +2860,7 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
       }
       const x = line.prefixWidths[unitStart];
       const batchable = batchingFontReady === true && TEXT_DRAW_BATCHABLE_ASCII_RE.test(unit);
-      const unitWidth = batchable
-        ? measureTextGlyphMetricsWithFont(unit, drawFont).width
-        : 0;
+      const unitWidth = batchable ? measureRawTextWForDepth(unit, state.depth) : 0;
       const previous = run.draws[run.draws.length - 1] || null;
       if (
         batchable &&
