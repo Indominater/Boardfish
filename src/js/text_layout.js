@@ -2882,9 +2882,8 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
     }
     i = j;
   }
-  const plan = { runs };
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') plan.stats = stats;
-  return plan;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') runs.stats = stats;
+  return runs;
 }
 
 const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
@@ -2904,7 +2903,7 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
     if (cacheable) line._textDrawPlanCache = plan;
   }
   const baseX = lineBaseX(line, obj);
-  for (const run of plan.runs) {
+  for (const run of plan) {
     if (run.font) context.font = run.font;
     const y = line.textY + run.offset;
     for (const draw of run.draws) {
@@ -2991,7 +2990,7 @@ const textLayoutCaretHit = (line, wx, wy, obj) => {
         (
           distance === hitDistance &&
           rawIndex === hitIndex &&
-          affinity.localeCompare(hitAffinity) < 0
+          affinity < hitAffinity
         )
       ) {
         hitIndex = rawIndex;

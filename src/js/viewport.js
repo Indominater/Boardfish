@@ -450,7 +450,6 @@ function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, m
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   context.restore();
-  return true;
 }
 
 const drawTextSelectionContentJello = (context, obj, selection, motion) => {
@@ -484,7 +483,8 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom =
     const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(id, spec, viewZoom) || null;
     if (!motion) continue;
     const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
-    if (!selection || !drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion)) continue;
+    if (!selection) continue;
+    drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion);
     drawTextLayoutStatic(context, obj, layout, { start: spec.start, end: spec.end });
     drawTextSelectionContentJello(context, obj, selection, motion);
   }

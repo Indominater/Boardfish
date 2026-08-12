@@ -817,7 +817,7 @@ test('overlapping text selection highlight runs share one path fill', () => {
     fillRect(...args) { drawCalls.push(['fillRect', ...args]); },
   };
 
-  assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection, null), true);
+  context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection, null);
   assert.deepEqual(drawCalls, [
     ['save'],
     ['beginPath'],
@@ -864,7 +864,7 @@ test('script text selection highlight shares one path fill with its base run', (
     fill() {},
   };
 
-  assert.equal(context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection, null), true);
+  context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection, null);
   assert.deepEqual(rectCalls, [
     [0, 0, 100, 24],
     [40, -6, 30, 17],
