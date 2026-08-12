@@ -80,7 +80,7 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
     withRenderSource(_source, fn) { fn(); },
     drawBoard() {},
     updateSelectionOverlay() {},
-    markDirty(id) { context.dirty = id; },
+    markDirty(obj) { context.dirty = obj.id; },
     pushHistory(reason) { context.history.push(reason); },
     enterEdit(id, options = {}) {
       context.entered.push(id);

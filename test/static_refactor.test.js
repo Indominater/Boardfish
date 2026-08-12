@@ -215,8 +215,8 @@ test('dirty tracking treats net-empty boards as clean only against an empty save
   assert.ok(match, 'isDirty function is missing');
   assert.doesNotMatch(io, /function (?:isPersistableBoardObject|hasPersistableBoardObjects)\(/);
   assert.match(io, /function isDefaultEmptyBoardState\(objectList = objects\) \{[\s\S]*for \(const obj of objectList \|\| \[\]\)[\s\S]*return true;\s*\}/);
-  assert.match(io, /function isSavedDefaultEmptyBoardState\(\) \{[\s\S]*boardHistory\[savedHistoryIndex\][\s\S]*\}/);
-  assert.match(io, /function isCleanDefaultEmptyBoardState\(\) \{\s*return isDefaultEmptyBoardState\(objects\) && isSavedDefaultEmptyBoardState\(\);\s*\}/);
+  assert.doesNotMatch(io, /function isSavedDefaultEmptyBoardState\(\)/);
+  assert.match(io, /function isCleanDefaultEmptyBoardState\(\) \{[\s\S]*savedHistoryIndex >= 0[\s\S]*historyEntryObjects\(boardHistory\[savedHistoryIndex\]\)[\s\S]*\}/);
   assert.match(match[1], /return \(historyIndex !== savedHistoryIndex \|\| _dirtyIds\.size > 0\) && !isCleanDefaultEmptyBoardState\(\);/);
   assert.match(objectCommands, /if \(isCleanDefaultEmptyBoardState\(\) && !currentFilePath && !currentFileRef\) \{\s*return;\s*\}/);
 });

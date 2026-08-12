@@ -536,7 +536,7 @@ test('text edit caret height follows script formatting', () => {
   assert.notEqual(end, -1);
   const drawCaretSource = viewportSource.slice(start, end);
 
-  assert.match(drawCaretSource, /textScriptCaretStateAt/);
+  assert.match(drawCaretSource, /textScriptMetricsCaretStateAt/);
   assert.match(drawCaretSource, /caretHeight = LINE_H \* scale;/);
   assert.match(drawCaretSource, /TEXT_BASELINE_Y_OFFSET \* scale/);
 });
@@ -561,7 +561,7 @@ test('text edit caret honors visual line preference at wrapped line start', () =
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
+    textScriptMetricsCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
   vm.runInContext(
@@ -614,7 +614,7 @@ test('text edit caret passes consumed soft-wrap space offsets to layout', () => 
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
+    textScriptMetricsCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
   vm.runInContext(
@@ -656,7 +656,7 @@ test('text edit caret stays inside content bounds at low zoom', () => {
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textScriptCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
+    textScriptMetricsCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
   vm.runInContext(

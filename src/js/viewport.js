@@ -213,8 +213,10 @@ function _rebuildOffscreen(dpr, viewportRect) {
 
 // ─── History delta tracking ───────────────────────────────────────────────────
 var _dirtyIds = new Set();
-function markDirty(id) {
-  const wasDirty = isDirty();
+function markDirty(obj) {
+  const id = obj.id;
+  const wasDirty = (_dirtyIds.has(id) &&
+    (obj.type !== 'text' || !isTextContentEmpty(obj.data?.content))) || isDirty();
   _dirtyIds.add(id);
   if (!wasDirty) updateTitle();
 }
@@ -293,49 +295,48 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const line of layout) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ scannedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const ls = line.startIndex, textEnd = ls + line.text.length;
-    const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
-    if (h0 < h1) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      const o0 = h0 - ls, o1 = h1 - ls;
-      let i = o0;
-      while (i < o1) {
-        const globalIndex = line.startIndex + i;
-        if (isHiddenAt && isHiddenAt(scriptMetrics, globalIndex)) {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */ hiddenChars++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          i++;
-          continue;
-        }
-        const state = stateAt ? stateAt(scriptMetrics, globalIndex) : BASE_TEXT_SCRIPT_STATE;
-        let j = stateAt ? i + 1 : o1;
-        while (j < o1) {
-          const nextGlobalIndex = line.startIndex + j;
-          if (isHiddenAt(scriptMetrics, nextGlobalIndex)) break;
-          const nextState = stateAt(scriptMetrics, nextGlobalIndex);
-          if (nextState.key !== state.key) break;
-          j++;
-        }
-        const x1 = lineXAtOffset(line, obj, i);
-        const x2 = lineXAtOffset(line, obj, j);
-        const scaled = state?.depth > 0;
-        const y = scaled ? line.textY + state.offset - TEXT_BASELINE_Y_OFFSET * state.scale : line.y;
-        const height = scaled ? LINE_H * state.scale : LINE_H;
-        const run = {
-          line,
-          x1,
-          x2,
-          y,
-          height,
-          startOffset: i,
-          endOffset: j,
-        };
-        runs.push(run);
-        if (x1 < left) left = x1;
-        if (y < top) top = y;
-        if (x2 > right) right = x2;
-        if (y + height > bottom) bottom = y + height;
-        i = j;
+    const ls = line.startIndex;
+    if (ls >= selEnd) break;
+    const o0 = Math.max(0, selStart - ls), o1 = Math.min(line.text.length, selEnd - ls);
+    if (o0 >= o1) continue;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    let i = o0;
+    while (i < o1) {
+      const globalIndex = line.startIndex + i;
+      if (isHiddenAt && isHiddenAt(scriptMetrics, globalIndex)) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */ hiddenChars++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        i++;
+        continue;
       }
+      const state = stateAt ? stateAt(scriptMetrics, globalIndex) : BASE_TEXT_SCRIPT_STATE;
+      let j = stateAt ? i + 1 : o1;
+      while (j < o1) {
+        const nextGlobalIndex = line.startIndex + j;
+        if (isHiddenAt(scriptMetrics, nextGlobalIndex)) break;
+        const nextState = stateAt(scriptMetrics, nextGlobalIndex);
+        if (nextState.key !== state.key) break;
+        j++;
+      }
+      const x1 = lineXAtOffset(line, obj, i);
+      const x2 = lineXAtOffset(line, obj, j);
+      const scaled = state?.depth > 0;
+      const y = scaled ? line.textY + state.offset - TEXT_BASELINE_Y_OFFSET * state.scale : line.y;
+      const height = scaled ? LINE_H * state.scale : LINE_H;
+      const run = {
+        line,
+        x1,
+        x2,
+        y,
+        height,
+        startOffset: i,
+        endOffset: j,
+      };
+      runs.push(run);
+      if (x1 < left) left = x1;
+      if (y < top) top = y;
+      if (x2 > right) right = x2;
+      if (y + height > bottom) bottom = y + height;
+      i = j;
     }
   }
   if (!runs.length) return null;
@@ -504,7 +505,8 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
     if (!(selStart >= ls && selStart <= le)) return false;
     const off = Math.max(0, selStart - ls);
     cx = lineCaretXAtOffset(line, obj, off);
-    const state = textScriptCaretStateAt(obj, selStart);
+    const affinity = obj?._textScriptCaretIndex === selStart ? obj._textScriptCaretAffinity : '';
+    const state = textScriptMetricsCaretStateAt(line._scriptMetrics, selStart, affinity);
     if (state?.depth > 0) {
       const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
       const textY = Number.isFinite(line.textY) ? line.textY : line.y + TEXT_BASELINE_Y_OFFSET;

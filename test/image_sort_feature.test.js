@@ -66,7 +66,7 @@ function loadSortCommandHarness(sourceObjects, selectedIds, randomValues = [0.99
     }
     return x1 === Infinity ? null : { x1, y1, x2, y2 };
   };
-  context.markDirty = (id) => calls.dirty.push(id);
+  context.markDirty = (obj) => calls.dirty.push(obj.id);
   context.invalidateOffscreen = () => { calls.invalidations++; };
   context.scheduleRender = () => { calls.renders++; };
   context.pushHistory = (reason) => calls.histories.push(reason);

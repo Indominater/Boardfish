@@ -2275,12 +2275,6 @@ function getTextScriptLayoutMetricsForObject(obj, content, scriptRanges = [], sc
   return metrics;
 }
 
-const textScriptCaretStateAt = (obj, index) => {
-  const ranges = getTextScriptRanges(obj);
-  const affinity = obj?._textScriptCaretIndex === index ? obj._textScriptCaretAffinity : '';
-  return textScriptStateFromRanges(activeTextScriptRangesAt(ranges, index, true, affinity));
-};
-
 const getTextMinWidth = (obj) => {
   const paddedMinimum = TEXT_PAD * 2 + 1;
   if (!obj || obj.type !== 'text') return paddedMinimum;
@@ -2356,7 +2350,7 @@ function syncAllTextAutoHeights() {
   let changed = false;
   for (const obj of objects) {
     if (syncTextAutoHeight(obj)) {
-      markDirty(obj.id);
+      markDirty(obj);
       changed = true;
     }
   }

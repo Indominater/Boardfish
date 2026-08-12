@@ -1421,22 +1421,16 @@ const fastNormalizeTextScriptRangesAfterPlainDelete = (content, scriptRanges = [
 
 const shiftTextScriptRangesForPlainOutsideEdit = (oldRanges = [], {
   editStart = 0,
-  editEnd = editStart,
   delta = 0,
 } = {}) => {
-  const ranges = [];
-  for (const range of Array.isArray(oldRanges) ? oldRanges : []) {
-    const start = Math.trunc(Number(range?.start));
-    const end = Math.trunc(Number(range?.end));
-    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
-    const nextRange = { start, end, kind: range.kind };
-    if (end <= editStart) {
-      // unchanged
-    } else if (start >= editEnd) {
-      nextRange.start += delta;
-      nextRange.end += delta;
-    }
-    ranges.push(nextRange);
+  const ranges = new Array(oldRanges.length);
+  for (let i = 0; i < oldRanges.length; i++) {
+    const range = oldRanges[i];
+    ranges[i] = range.end <= editStart ? range : {
+      start: range.start + delta,
+      end: range.end + delta,
+      kind: range.kind,
+    };
   }
   return ranges;
 };
@@ -1563,7 +1557,7 @@ const transformTextScriptRangesForInput = (oldRanges, {
   if (hasInsertedScriptRanges) plainSkipInfo.reason = 'inserted-script-ranges';
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!hasInsertedScriptRanges && plainSkipInfo.ok) {
-    const ranges = shiftTextScriptRangesForPlainOutsideEdit(oldRanges, { editStart, editEnd, delta });
+    const ranges = shiftTextScriptRangesForPlainOutsideEdit(oldRanges, { editStart, delta });
     if (localDerivedRanges.length) {
       for (const range of localDerivedRanges) ranges.push({ ...range });
     }
@@ -2480,12 +2474,12 @@ function enterEdit(id, {
     if (normalized !== obj.data.content) {
       obj.data.content = normalized;
       clearTextObjectLayoutRuntime(obj);
-      markDirty(obj.id);
+      markDirty(obj);
       contentNormalized = true;
     }
     bracesNormalized = normalizeTextObjectToEditableScriptBraces(obj);
     if (bracesNormalized) {
-      markDirty(obj.id);
+      markDirty(obj);
     }
     if (Array.isArray(obj.data?.lineAlign)) {
       const beforeLineAlign = obj.data.lineAlign || [];
@@ -2799,7 +2793,7 @@ function enterEdit(id, {
       ...textEditorTextStats(replacement.insertedText, inputState.insertedScriptRanges),
     }));
 	    obj.data.content = nextRawValue;
-	    markDirty(id);
+	    markDirty(obj);
 	    logInputStep('motion-dirty-done');
 	    if (proxy._boardfishDomValueStale) {
 	      if (synthesizedStaleReplacement) {
@@ -3876,7 +3870,7 @@ function exitEdit() {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const markDirtyStart = textEditorDebugNow();
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        markDirty(id);
+        markDirty(obj);
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         markDirtyMs = textEditorDebugRound(textEditorDebugNow() - markDirtyStart);
         /* BOARDFISH_DEV_DIAGNOSTICS_END */

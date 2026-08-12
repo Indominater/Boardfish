@@ -148,9 +148,9 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /deferredInitialCacheImages\+\+;/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
   assert.match(openIo, /typeof source === 'string' \|\| isWebImageRef\(source\)/);
-  assert.match(openIo, /function getReferencedHydratableImageKeys\(\)/);
-  assert.match(openIo, /const keys = getReferencedHydratableImageKeys\(\);/);
-  assert.match(openIo, /pendingImages: getPendingHydratableImageKeys\(\)\.length/);
+  assert.doesNotMatch(openIo, /function getReferencedHydratableImageKeys\(\)/);
+  assert.match(openIo, /const keys = getPendingHydratableImageKeys\(\);/);
+  assert.match(openIo, /pendingImages: keys\.length/);
   assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);[\s\S]*?if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) \{\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
   assert.match(withoutDeveloperDiagnostics(openIo), /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*await pendingReady;\s*return BoardfishImageStore\.hasDisplayImage\(key\);/);
   assert.match(openIo, /source: 'pending-cache'/);
@@ -185,8 +185,8 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
   assert.match(openIo, /maxKey: slowest\?\.key/);
   assert.match(openIo, /previewMaxKey: preview\.maxKey/);
-  assert.match(openIo, /buildVisibleImagePreviewsForOpen\(visibleKeys[\s\S]*?, dbg/);
-  assert.match(productionOpenIo, /buildVisibleImagePreviewsForOpen\(visibleKeys,\s*previewTasks\s*\)/);
+  assert.match(openIo, /buildVisibleImagePreviewsForOpen\(previewTasks[\s\S]*?, dbg/);
+  assert.match(productionOpenIo, /buildVisibleImagePreviewsForOpen\(previewTasks\s*\)/);
   assert.match(openIo, /const previewReady = preview && preview\.pendingReady >= visibleKeys\.length/);
   assert.match(openIo, /previewPendingReady: preview\.pendingReady/);
   assert.match(openDebug, /openPreviewPendingReady/);

@@ -77,7 +77,7 @@ function bringObjectToFront(obj) {
   if (idx < 0) return;
   objects.splice(idx, 1);
   objects.push(obj);
-  markDirty(obj.id);
+  markDirty(obj);
   obj.z = ++zCounter;
 }
 
@@ -110,7 +110,7 @@ function flipSelectedImages() {
       imageCount++;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       obj.data.flipX = !obj.data.flipX;
-      markDirty(obj.id);
+      markDirty(obj);
       didFlip = true;
     }
     return didFlip;
@@ -139,7 +139,7 @@ function rotateSelectedImages(dir) {
       obj.h = nextH;
       obj.x = cx - nextW / 2;
       obj.y = cy - nextH / 2;
-      markDirty(obj.id);
+      markDirty(obj);
       rotated = true;
     }
     return rotated;
@@ -192,7 +192,7 @@ function sortSelectedImages() {
       obj.y = placement.y;
       obj.w = placement.w;
       obj.h = placement.h;
-      markDirty(obj.id);
+      markDirty(obj);
     }
     return true;
   }, { invalidate: true });

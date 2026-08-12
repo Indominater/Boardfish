@@ -52,13 +52,6 @@ const canArrangeSelectedImagesFromKeyboard = () => {
   return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardAction(2);
 };
 
-const selectedTextObjectForKeyboardEdit = () => {
-  if (!selectedIds || selectedIds.size !== 1 || !objectsMap?.get) return null;
-  const [id] = selectedIds;
-  const obj = objectsMap.get(id);
-  return obj?.type === 'text' ? obj : null;
-};
-
 const enterSelectedTextEditFromKeyboard = (e) => {
   if (
     editingId ||
@@ -71,8 +64,9 @@ const enterSelectedTextEditFromKeyboard = (e) => {
   ) {
     return false;
   }
-  const obj = selectedTextObjectForKeyboardEdit();
-  if (!obj) return false;
+  if (selectedIds?.size !== 1 || !objectsMap?.get) return false;
+  const [id] = selectedIds, obj = objectsMap.get(id);
+  if (obj?.type !== 'text') return false;
   enterEdit(obj.id, { placeInitialCaret: true });
   return true;
 };
@@ -133,6 +127,7 @@ function arrangeSelectedImagesFromShortcut() {
 }
 
 document.addEventListener('keydown', (e) => {
+  if (editingId && e.key?.length === 1 && e.code !== 'F3' && !e.ctrlKey && !e.metaKey && !e.altKey && !isBoardInputBlocked()) return;
   const command = e.ctrlKey !== e.metaKey && !e.altKey;
   const commandOnly = command && !e.shiftKey, shiftCommandOnly = command && e.shiftKey;
   const noShortcutModifiers = !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
