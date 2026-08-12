@@ -70,13 +70,13 @@ function centralDirectoryEntryOffset(bytes, name) {
   throw new Error(`central entry not found: ${name}`);
 }
 
-test('ZIP CRC work yields on four-MiB budgets for bytes and one-MiB Blob reads', async (t) => {
+test('ZIP CRC work yields on one-MiB budgets', async (t) => {
   let yields = 0;
   globalThis.scheduler = { yield: () => { yields++; return Promise.resolve(); } };
   t.after(() => { delete globalThis.scheduler; });
   const bytes = new Uint8Array(5 * 1024 * 1024);
   const countYields = async (data) => { yields = 0; await WebContainer.createZipBlob([{ name: 'payload.bin', data }], { materializeBytes: false }); return yields; };
-  assert.deepEqual([await countYields(bytes), await countYields(new Blob([bytes]))], [2, 2]);
+  assert.deepEqual([await countYields(bytes), await countYields(new Blob([bytes]))], [5, 5]);
 });
 
 function createDeflatedZipWithAdvertisedSize(name, data, advertisedSize) {

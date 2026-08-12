@@ -88,26 +88,25 @@
     return new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  const BYTE_CRC_CHUNK_SIZE = 4 * 1024 * 1024;
-  const BLOB_CRC_CHUNK_SIZE = 1024 * 1024;
+  const CRC_CHUNK_SIZE = 1024 * 1024;
 
   async function crc32Async(bytes, yieldFinal = false) {
     let crc = 0xFFFFFFFF;
-    for (let start = 0; start < bytes.length; start += BYTE_CRC_CHUNK_SIZE) {
-      crc = crc32Update(crc, bytes, start, Math.min(bytes.length, start + BYTE_CRC_CHUNK_SIZE));
-      if (yieldFinal || start + BYTE_CRC_CHUNK_SIZE < bytes.length) await yieldToEventLoop();
+    for (let start = 0; start < bytes.length; start += CRC_CHUNK_SIZE) {
+      crc = crc32Update(crc, bytes, start, Math.min(bytes.length, start + CRC_CHUNK_SIZE));
+      if (yieldFinal || start + CRC_CHUNK_SIZE < bytes.length) await yieldToEventLoop();
     }
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
 
   async function crc32BlobAsync(blob) {
     let crc = 0xFFFFFFFF;
-    for (let start = 0; start < blob.size; start += BLOB_CRC_CHUNK_SIZE) {
-      const end = Math.min(blob.size, start + BLOB_CRC_CHUNK_SIZE);
+    for (let start = 0; start < blob.size; start += CRC_CHUNK_SIZE) {
+      const end = Math.min(blob.size, start + CRC_CHUNK_SIZE);
       const chunk = new Uint8Array(await blob.slice(start, end).arrayBuffer());
       if (chunk.length !== end - start) throw new Error('truncated image Blob during save');
       crc = crc32Update(crc, chunk, 0, chunk.length);
-      if (end === blob.size || end % BYTE_CRC_CHUNK_SIZE === 0) await yieldToEventLoop();
+      await yieldToEventLoop();
     }
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
