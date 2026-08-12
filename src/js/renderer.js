@@ -234,8 +234,6 @@
 
   function resetCanvasToScreen(context) {
     context.setTransform(1, 0, 0, 1, 0, 0);
-    context.globalAlpha = 1;
-    context.globalCompositeOperation = 'source-over';
   }
 
   function setWorldCanvasTransform(context, dpr, deps) {
@@ -244,7 +242,6 @@
     context.imageSmoothingQuality = 'high';
     context.font = deps.font;
     context.fillStyle = deps.canvasTextColor();
-    context.textBaseline = 'alphabetic';
     if (context.textAlign !== 'left') {
       try { context.fontKerning = 'none'; } catch (_) {}
       try { context.letterSpacing = '0px'; } catch (_) {}
@@ -622,8 +619,7 @@
         deps.hasObjectMotionsForDraw?.() === false ? null : deps.objectMotionForDraw;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         for (const obj of deps.objects()) {
-          if (obj.id === skipId || skipIds?.has(obj.id)) continue;
-          if (onlyText && obj.type !== 'text') continue;
+          if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
           if (!motion && !deps.objectIntersectsRect(obj, viewportRect)) continue;
           const objectViewportRect = motion
@@ -642,8 +638,7 @@
       let drawnText = 0;
       for (const obj of deps.objects()) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if (obj.id === skipId || skipIds?.has(obj.id)) continue;
-        if (onlyText && obj.type !== 'text') continue;
+        if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
         const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
           countCulledObject(obj, counters);

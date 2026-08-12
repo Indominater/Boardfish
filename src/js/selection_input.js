@@ -469,10 +469,12 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
       const obj = objectsMap.get(selectedId);
       if (!obj) return;
 
-      const { x: ox, y: oy, w: ow, h: oh } = obj;
+      const { x: ox, y: oy, w: ow, h: oh, type } = obj;
       const MIN_OBJECT_SIZE = 100;
+      const isText = type === 'text';
+      const minScale = type === 'image' && Math.min(1, Math.max(MIN_OBJECT_SIZE / ow, MIN_OBJECT_SIZE / oh));
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const resizeDebugActive = obj.type === 'text' && !!selectionInputPerfDebugApi()?.isTextResizeTraceActive?.();
+      const resizeDebugActive = isText && !!selectionInputPerfDebugApi()?.isTextResizeTraceActive?.();
       const resizeDebugBase = resizeDebugActive
         ? {
             ...selectionResizeTextObjectStats(obj),
@@ -508,8 +510,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         let minWidthMs = '';
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-        if (obj.type === 'image') {
-          const minScale = Math.min(1, Math.max(MIN_OBJECT_SIZE / ow, MIN_OBJECT_SIZE / oh));
+        if (type === 'image') {
           const scale = Math.max(minScale, Math.min(
             (resizeEast ? ow + dx : ow - dx) / ow,
             (resizeSouth ? oh + dy : oh - dy) / oh,
@@ -530,7 +531,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           if (resizeDebugDragId) minWidthMs = selectionResizeDebugRound(selectionResizeDebugNow() - minWidthStartedAt);
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
           if (resizeEast) w = Math.max(dragMinTextW, ow + dx);
-          h = oh;
           if (resizeWest) { w = Math.max(dragMinTextW, ow - dx); x = ox + ow - w; }
         }
 
@@ -576,7 +576,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        const isText = obj.type === 'text';
         const textWidthChanged = isText && obj.w !== w;
         obj.x = x;
         obj.y = y;

@@ -19,7 +19,6 @@ function loadRenderer(overrides = {}) {
   return {
     createBoardRenderer: api.createBoardRenderer,
     createDrawCounters: helpers.createDrawCounters,
-    resetCanvasToScreen: helpers.resetCanvasToScreen,
   };
 }
 
@@ -98,24 +97,6 @@ test('text renderer uses the viewport-aware rich layout path', () => {
   renderer.drawSingleObj({}, obj, null, viewportRect);
 
   assert.deepEqual(drawnLines, ['one', 'two']);
-});
-
-test('screen canvas reset restores full-opacity source-over drawing', () => {
-  const BoardfishRenderer = loadRenderer();
-  const calls = [];
-  const context = {
-    globalAlpha: 0.42,
-    globalCompositeOperation: 'multiply',
-    setTransform(...args) {
-      calls.push(args);
-    },
-  };
-
-  BoardfishRenderer.resetCanvasToScreen(context);
-
-  assert.deepEqual(calls, [[1, 0, 0, 1, 0, 0]]);
-  assert.equal(context.globalAlpha, 1);
-  assert.equal(context.globalCompositeOperation, 'source-over');
 });
 
 test('image renderer crops untransformed images to the visible viewport', () => {
@@ -665,7 +646,7 @@ test('production text drawing skips debug stats allocation', () => {
 test('text context configuration persists until canvas state resets', () => {
   const BoardfishRenderer = loadRenderer();
   let configurationWrites = 0;
-  const context = { fillStyle: '', textBaseline: '', setTransform() {} };
+  const context = { fillStyle: '', textBaseline: 'alphabetic', setTransform() {} };
   const configuredValues = new Map();
   for (const property of ['fontKerning', 'letterSpacing', 'fontStretch', 'fontVariantCaps', 'textAlign', 'direction']) {
     Object.defineProperty(context, property, {

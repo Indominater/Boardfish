@@ -51,7 +51,6 @@
     }
 
     function startHold(point) {
-      clearHoldTimer();
       const pointerId = point.pointerId;
       holdTimer = scheduleTimer(() => {
         holdTimer = null;
@@ -66,7 +65,6 @@
     }
 
     function startPinch(sourceEvent = null) {
-      clearHoldTimer();
       const geometry = twoPointerGeometry(active.values());
       mode = 'pinch';
       pinchX = geometry.startCenterX = geometry.centerX;

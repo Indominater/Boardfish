@@ -281,11 +281,6 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
     beginTextEditHistoryAction(editingId, replacementState);
   }
   if (typeof setPendingTextEditInputState === 'function') setPendingTextEditInputState(_editEl, replacementState);
-  if (typeof setTextEditProxySelectionRange === 'function') {
-    setTextEditProxySelectionRange(_editEl, selection.start, selection.end, selection.direction, oldValue);
-  } else {
-    _editEl.setSelectionRange(selection.start, selection.end, selection.direction);
-  }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const debugNow = collectDiagnostics
     ? (typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now())

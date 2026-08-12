@@ -278,13 +278,13 @@ function setTextEditProxyLogicalValue(proxy, value = '', domSynced = true) {
 }
 
 function syncTextEditProxyDomValue(proxy, value = '', selection = null) {
-  const text = String(value ?? '');
-  if (!proxy._boardfishDomValueStale && proxy.value === text) {
+  if (!proxy._boardfishDomValueStale) {
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') return false;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     return { synced: false, reason: 'dom-current' };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
+  const text = String(value ?? '');
   proxy.value = text;
   setTextEditProxyLogicalValue(proxy, text);
   if (selection) {
@@ -304,9 +304,7 @@ function setTextEditProxySelectionRange(proxy, start, end = start, direction = '
   const max = text.length;
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, max));
   const to = Math.max(from, Math.min(Math.trunc(Number(end ?? start)) || from, max));
-  const domValue = proxy.value, domLength = domValue.length;
-  const domStale = !!proxy._boardfishDomValueStale || domValue !== text;
-  const shouldSyncDom = domStale && (from > domLength || to > domLength);
+  const shouldSyncDom = !!proxy._boardfishDomValueStale && to > proxy.value.length;
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
     const synced = shouldSyncDom ? syncTextEditProxyDomValue(proxy, text, { start: from, end: to, direction }) : false;
     if (!synced) proxy.setSelectionRange(from, to, direction);
@@ -2336,17 +2334,6 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   setPendingTextEditInputState(proxy, inputState);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const selectionStartedAt = textEditorDebugNow();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  setTextEditProxySelectionRange(
-    proxy, replacementRange.start, replacementRange.end, selection.direction || 'none', currentProxyValue,
-  );
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  logStep('paste:text-edit-selection-range-set', {
-    selectionSetMs: Math.round((textEditorDebugNow() - selectionStartedAt) * 100) / 100,
-    replacementStart: replacementRange.start,
-    replacementEnd: replacementRange.end,
-  });
   const mutationResult = replaceTextEditProxyRange(proxy, text, replacementRange.start, replacementRange.end, 'end');
   logStep('paste:text-edit-range-text-set', {
     setRangeTextMs: mutationResult.setRangeTextMs,
@@ -2595,7 +2582,6 @@ function enterEdit(id, {
           },
         };
         beginTextEditHistoryAction(id, pendingInputState);
-        proxy.setSelectionRange(insertIndex, insertIndex, 'none');
         proxy.setRangeText(insertedText, insertIndex, insertIndex, 'end');
         dispatchTextEditInputEvent(proxy, inputType);
         return;
@@ -2627,7 +2613,6 @@ function enterEdit(id, {
           },
         };
         beginTextEditHistoryAction(id, pendingInputState);
-        proxy.setSelectionRange(boundaryInsertion.index, boundaryInsertion.index, 'none');
         proxy.setRangeText(event.data, boundaryInsertion.index, boundaryInsertion.index, 'end');
         dispatchTextEditInputEvent(proxy, inputType);
         return;
@@ -2655,7 +2640,6 @@ function enterEdit(id, {
         },
       };
       beginTextEditHistoryAction(id, pendingInputState);
-      proxy.setSelectionRange(replacementRange.start, replacementRange.end, selection.direction || 'none');
       proxy.setRangeText(event.data, replacementRange.start, replacementRange.end, 'end');
       dispatchTextEditInputEvent(proxy, inputType);
       return;
@@ -3419,7 +3403,6 @@ function enterEdit(id, {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const selection = textEditSelectionState(proxy);
       const direction = e.key === 'Backspace' ? 'backward' : 'forward';
-      let normalizedSelection = selection;
       let deletion = null;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       let deleteRangeMs = 0;
@@ -3441,12 +3424,8 @@ function enterEdit(id, {
         const caret = normalizeTextEditVisibleCaretIndex(obj, selection.start, direction, scriptSnapshot);
         deleteCaret = caret;
         if (caret !== selection.start) proxy.setSelectionRange(caret, caret, 'none');
-        normalizedSelection = {
-          start: caret,
-          end: caret,
-          direction: 'none',
-          hasSelection: false,
-        };
+        selection.start = selection.end = caret;
+        selection.direction = 'none';
         deletion = textEditVisibleDeleteRange(obj, caret, e.key, scriptSnapshot);
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           deleteRangeMs = textEditorDebugRound(textEditorDebugNow() - deleteRangeStartedAt);
@@ -3463,10 +3442,10 @@ function enterEdit(id, {
         const replacementBuildMs = textEditorDebugRound(textEditorDebugNow() - replacementStartedAt);
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         pendingInputState = {
-          ...normalizedSelection,
+          ...selection,
           value: textEditProxyValue(proxy),
           scriptRanges: textEditScriptRanges(obj),
-          scriptCaretAffinity: !normalizedSelection.hasSelection && obj._textScriptCaretIndex === normalizedSelection.start ? obj._textScriptCaretAffinity : '',
+          scriptCaretAffinity: !selection.hasSelection && obj._textScriptCaretIndex === selection.start ? obj._textScriptCaretAffinity : '',
           inputType,
           replacement,
         };
@@ -3569,7 +3548,7 @@ function enterEdit(id, {
         textEditCaretIndex: obj._textEditCaretIndex ?? '',
         textEditCaretLineStartIndex: obj._textEditCaretLineStartIndex ?? '',
         ...textEditorEventDebugStats(e),
-        ...textEditorSelectionDebugStats(normalizedSelection, textEditProxyValue(proxy)),
+        ...textEditorSelectionDebugStats(selection, textEditProxyValue(proxy)),
         ...textEditorCaretLineDebugStats(obj, deleteCaret, 'deleteCaret'),
       });
     }
