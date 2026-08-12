@@ -1213,7 +1213,7 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
   const scriptRanges = Array.isArray(options.scriptRanges)
     ? options.scriptRanges
     : getTextScriptRanges(obj);
-  const scriptMetrics = options.scriptMetrics || null;
+  const metrics = options.scriptMetrics;
   const lineIndexEntries = Array.isArray(options.lineIndexEntries) ? options.lineIndexEntries : null;
   let nextParaStart = Math.max(0, Math.min(Math.trunc(Number(options.startIndex)) || 0, content.length));
   let visualLineOffset = 0;
@@ -1252,9 +1252,9 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
     const paragraphHasTab = textRangeIncludesTab(content, paraStart, paraEnd);
     const paragraphPrefixWidths = paragraphHasTab
       ? null
-      : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd, scriptRanges, '', scriptMetrics);
+      : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd, scriptRanges, '', metrics);
     const paragraphRangeWidth = (start, end) => {
-      if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end, scriptRanges);
+      if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end, scriptRanges, metrics);
       const from = Math.max(0, Math.min(start - paraStart, paragraphPrefixWidths.length - 1));
       const to = Math.max(from, Math.min(end - paraStart, paragraphPrefixWidths.length - 1));
       return Math.max(0, paragraphPrefixWidths[to] - paragraphPrefixWidths[from]);

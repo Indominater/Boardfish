@@ -268,11 +268,7 @@
   let touchSelectionDrag = null;
   let suppressCompatibilityMouseUntil = 0;
 
-  function touchInputNow() {
-    return typeof performance !== 'undefined' && typeof performance.now === 'function'
-      ? performance.now()
-      : Date.now();
-  }
+  const touchInputNow = () => root.performance?.now?.() ?? Date.now();
 
   function preventTouchDefault(event) {
     if (event?.cancelable) event.preventDefault();

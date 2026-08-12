@@ -1818,15 +1818,11 @@ function scheduleTransform(
 function scheduleRender(board = true, overlay = null, source = null) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && source == null) source = 'render';
   if (board) _needBoardRender = true;
-  if (
-    overlay ?? (board && (
-      hasSelection() ||
-      selOverlay.classList.contains('visible') ||
-      multiSelOverlay.classList.contains('visible')
-    ))
-  ) {
-    _needOverlayRender = true;
-  }
+  _needOverlayRender ||= !!(overlay ?? (board && (
+    hasSelection() ||
+    selOverlay.classList.contains('visible') ||
+    multiSelOverlay.classList.contains('visible')
+  )));
   if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleFrame(source);
   else scheduleFrame();
 }

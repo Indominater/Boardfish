@@ -198,18 +198,15 @@ const _inputEventPointElementCache = typeof WeakMap !== 'undefined' ? new WeakMa
 
 function pointedElementForInputEvent(e) {
   if (!e || (typeof e !== 'object' && typeof e !== 'function')) return null;
-  if (_inputEventPointElementCache) {
-    try {
-      if (_inputEventPointElementCache.has(e)) return _inputEventPointElementCache.get(e);
-    } catch (_) {}
-  }
+  const cached = _inputEventPointElementCache?.get(e);
+  if (cached !== undefined) return cached;
   const x = Number(e?.clientX);
   const y = Number(e?.clientY);
   const pointed = Number.isFinite(x) && Number.isFinite(y)
     ? document.elementFromPoint(x, y)
     : null;
   const element = pointed instanceof Node ? pointed : null;
-  try { _inputEventPointElementCache?.set(e, element); } catch (_) {}
+  _inputEventPointElementCache?.set(e, element);
   return element;
 }
 
@@ -576,7 +573,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        const textWidthChanged = isText && obj.w !== w;
+        const render = !isText || obj.w !== w;
         obj.x = x;
         obj.y = y;
         obj.w = w;
@@ -584,7 +581,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         let autoHeightDebug = null;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        if (isText && textWidthChanged) {
+        if (isText && render) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const clearStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
           const clearLayoutMs = resizeDebugDragId ? selectionResizeDebugRound(selectionResizeDebugNow() - clearStartedAt) : '';
@@ -607,8 +604,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const scheduleStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        if (!isText || textWidthChanged) drawBoard();
-        updateSelectionOverlay();
+        if (render) drawBoard(), updateSelectionOverlay();
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (resizeDebugDragId) {
           const scheduleRenderMs = selectionResizeDebugRound(selectionResizeDebugNow() - scheduleStartedAt);
@@ -642,8 +638,8 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             autoHeightReason: autoHeightDebug?.autoHeightReason ?? '',
             layoutInvalidationMethod: autoHeightDebug?.layoutInvalidationMethod ?? '',
             pendingSizeSync: false,
-            renderBoard: !isText || textWidthChanged,
-            renderOverlay: true,
+            renderBoard: render,
+            renderOverlay: render,
             scheduleRenderMs,
             applyMs: selectionResizeDebugRound(selectionResizeDebugNow() - applyStartedAt),
           });
