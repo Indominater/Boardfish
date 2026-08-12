@@ -319,8 +319,7 @@ function refreshTextMetrics() {
 var _prefixCache = new Map();
 
 const trimMapCache = (map, maxEntries) => {
-  const keys = map.keys();
-  while (map.size > maxEntries) map.delete(keys.next().value);
+  while (map.size > maxEntries) map.delete(map.keys().next().value);
 };
 
 const textLayoutDebugNow = () => (
@@ -2872,22 +2871,18 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
       const previous = run.draws[run.draws.length - 1] || null;
       if (
         batchable &&
-        previous?.batchable === true &&
-        previous.unitCount < TEXT_DRAW_BATCH_MAX_UNITS &&
+        previous?.text.length < TEXT_DRAW_BATCH_MAX_UNITS &&
         !(previous.text.endsWith('t') && unit === 't') &&
         Math.abs(x - previous.nextX) <= TEXT_DRAW_BATCH_POSITION_EPSILON
       ) {
         previous.text += unit;
         previous.nextX = x + unitWidth;
-        previous.unitCount++;
         return;
       }
       run.draws.push({
         text: unit,
         x,
-        batchable,
         nextX: batchable ? x + unitWidth : NaN,
-        unitCount: 1,
       });
     }, i, j);
     if (run.draws.length) {

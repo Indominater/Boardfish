@@ -129,9 +129,10 @@ function loadSelectionInputHarness(objects, options = {}) {
     },
     beginDocumentDrag(handlers) { context.drag = handlers; },
     createRafCommitter(apply) {
+      let args = null;
       return {
-        schedule(...args) { apply(...args); },
-        flush() {},
+        schedule(...next) { args = next; if (!options.deferRaf) this.flush(); },
+        flush() { if (args) { const next = args; args = null; apply(...next); } },
       };
     },
     drawBoard() { context.drawBoardCalls++; },
@@ -641,6 +642,7 @@ test('single text horizontal resize reuses measured minimum width during one dra
   const text = { id: 'text-a', type: 'text', x: 0, y: 0, w: 200, h: 40, data: { content: 'wide' } };
   let minWidthCalls = 0;
   const context = loadSelectionInputHarness([text], {
+    deferRaf: true,
     getTextMinWidth() {
       minWidthCalls++;
       return 90;
@@ -659,6 +661,7 @@ test('single text horizontal resize reuses measured minimum width during one dra
   context.drag.move({ clientX: -80, clientY: 0 });
   context.drag.move({ clientX: -70, clientY: 0 });
   context.drag.move({ clientX: -60, clientY: 0 });
+  assert.equal(minWidthCalls, 0);
   context.drag.up();
 
   assert.equal(minWidthCalls, 1);

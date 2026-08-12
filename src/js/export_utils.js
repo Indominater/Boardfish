@@ -78,10 +78,9 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , extra = {}
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      , force = false
     ) => {
       const text = progressText(totalCount, preparedCount);
-      if (!force && text === currentProgressText) return;
+      if (text === currentProgressText) return;
       currentProgressText = text;
       updatePillTask(busyPill, text);
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -323,7 +322,7 @@
         ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 1, method: target?.handle ? 'file-picker' : 'download' });
       }
       if (typeof options.onProgress === 'function') {
-        options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length, force: true });
+        options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length });
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       let saveStart;
@@ -346,7 +345,7 @@
         ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round((item.data.size ?? item.data.length) / 1024 / 1024 * 100) / 100 });
       }
       if (typeof options.onProgress === 'function') {
-        options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length, force: true });
+        options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length });
       }
       return { downloadedCount: downloads.length, skippedCount, method: target?.handle ? 'file-picker' : 'download' };
     }
@@ -356,7 +355,7 @@
         ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: 1, batchCount: downloads.length, method: 'download' });
       }
       if (typeof options.onProgress === 'function') {
-        options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length, force: true });
+        options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length });
       }
       let savedCount = 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -392,7 +391,6 @@
             preparedCount: downloads.length,
             finishedCount: savedCount,
             totalCount: imageObjs.length,
-            force: i === downloads.length - 1,
           });
         }
         if (i % 2 === 1 || i === downloads.length - 1) {
@@ -442,7 +440,7 @@
     }
     const filename = target?.filename || `images_${randomHex()}.zip`;
     if (typeof options.onProgress === 'function') {
-      options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length, force: true });
+      options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length });
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     let saveStart;
@@ -465,7 +463,7 @@
       ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round(zip.byteLength / 1024 / 1024 * 100) / 100 });
     }
     if (typeof options.onProgress === 'function') {
-      options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length, force: true });
+      options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length });
     }
     return {
       downloadedCount: downloads.length,
@@ -654,7 +652,6 @@
           preparedCount: savedCount + failedCount + skippedCount,
           finishedCount: savedCount + failedCount + skippedCount,
           totalCount: imageObjs.length,
-          force: true,
         });
       }
       if (i % 2 === 1 || i === imageObjs.length - 1) {

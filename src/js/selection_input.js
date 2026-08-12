@@ -497,32 +497,63 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
       let resizeFinalizing = false;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-      function syncTextResizeAutoHeight(reason) {
-        if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-          syncTextAutoHeight(obj, getTextMinLines(obj));
-          return;
-        }
+      let dragMinTextW = null;
+      function applyResize(clientX, clientY, eventZoom, ev) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const diagnosticReason = reason || 'resize';
-        const clearStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
-        // Resize changes are already guarded by width-aware layout cache keys.
-        // Keeping the caches lets auto-height and the live redraw share wrapping work.
-        const clearLayoutMs = resizeDebugDragId ? selectionResizeDebugRound(selectionResizeDebugNow() - clearStartedAt) : '';
-        const heightBeforeAuto = resizeDebugDragId ? obj.h : 0;
-        const autoHeightStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
-        syncTextAutoHeight(obj, getTextMinLines(obj));
-        if (!resizeDebugDragId) return null;
-        return {
-          clearLayoutMs,
-          autoHeightMs: selectionResizeDebugRound(selectionResizeDebugNow() - autoHeightStartedAt),
-          autoHeightChanged: obj.h !== heightBeforeAuto,
-          autoHeightReason: diagnosticReason,
-          layoutInvalidationMethod: 'cache-keyed',
-        };
+        const moveStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
+        const dx = (clientX - startX) / eventZoom;
+        const dy = (clientY - startY) / eventZoom;
+        let x = ox, y = oy, w = ow, h = oh;
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        let minTextW;
+        let minWidthMs = '';
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-      function applyResize(x, y, w, h) {
+        if (obj.type === 'image') {
+          const minScale = Math.min(1, Math.max(MIN_OBJECT_SIZE / ow, MIN_OBJECT_SIZE / oh));
+          const scale = Math.max(minScale, Math.min(
+            (resizeEast ? ow + dx : ow - dx) / ow,
+            (resizeSouth ? oh + dy : oh - dy) / oh,
+          ));
+          w = ow * scale;
+          h = oh * scale;
+          if (resizeWest) x = ox + ow - w;
+          if (resizeNorth) y = oy + oh - h;
+        } else {
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          const minWidthStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          if (dragMinTextW == null) {
+            dragMinTextW = typeof getTextMinWidth === 'function' ? getTextMinWidth(obj) : MIN_OBJECT_SIZE;
+          }
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          minTextW = dragMinTextW;
+          if (resizeDebugDragId) minWidthMs = selectionResizeDebugRound(selectionResizeDebugNow() - minWidthStartedAt);
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          if (resizeEast) w = Math.max(dragMinTextW, ow + dx);
+          h = oh;
+          if (resizeWest) { w = Math.max(dragMinTextW, ow - dx); x = ox + ow - w; }
+        }
+
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        if (resizeDebugDragId) {
+          recordSelectionTextResizeStep('move', resizeDebugDragId, {
+            ...selectionResizeEventMeta(ev),
+            objectId: obj.id,
+            dir,
+            dx,
+            dy,
+            x,
+            y,
+            w,
+            h,
+            minTextW,
+            minWidthMs,
+            moveMs: selectionResizeDebugRound(selectionResizeDebugNow() - moveStartedAt),
+          });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const applyStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
         const beforeX = obj.x;
@@ -557,13 +588,24 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         let autoHeightDebug = null;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if (isText && textWidthChanged) {
-          if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-            syncTextResizeAutoHeight();
-          } else {
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            autoHeightDebug = syncTextResizeAutoHeight(resizeFinalizing ? 'resize-final' : 'resize');
-            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          const clearStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+          const clearLayoutMs = resizeDebugDragId ? selectionResizeDebugRound(selectionResizeDebugNow() - clearStartedAt) : '';
+          const heightBeforeAuto = resizeDebugDragId ? obj.h : 0;
+          const autoHeightStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          syncTextAutoHeight(obj, getTextMinLines(obj));
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          if (resizeDebugDragId) {
+            autoHeightDebug = {
+              clearLayoutMs,
+              autoHeightMs: selectionResizeDebugRound(selectionResizeDebugNow() - autoHeightStartedAt),
+              autoHeightChanged: obj.h !== heightBeforeAuto,
+              autoHeightReason: resizeFinalizing ? 'resize-final' : 'resize',
+              layoutInvalidationMethod: 'cache-keyed',
+            };
           }
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const scheduleStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
@@ -612,69 +654,9 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
       const resizeCommitter = createRafCommitter(applyResize);
-      let dragMinTextW = null;
-
-      function onMove(ev) {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const moveStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        const dx = (ev.clientX - startX) / zoom;
-        const dy = (ev.clientY - startY) / zoom;
-        let x = ox, y = oy, w = ow, h = oh;
-        let minTextW;
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        let minWidthMs = '';
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-        if (obj.type === 'image') {
-          const minScale = Math.min(1, Math.max(MIN_OBJECT_SIZE / ow, MIN_OBJECT_SIZE / oh));
-          const scale = Math.max(minScale, Math.min(
-            (resizeEast ? ow + dx : ow - dx) / ow,
-            (resizeSouth ? oh + dy : oh - dy) / oh,
-          ));
-          w = ow * scale;
-          h = oh * scale;
-          if (resizeWest) x = ox + ow - w;
-          if (resizeNorth) y = oy + oh - h;
-        } else {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          const minWidthStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          if (dragMinTextW == null) {
-            dragMinTextW = typeof getTextMinWidth === 'function' ? getTextMinWidth(obj) : MIN_OBJECT_SIZE;
-          }
-          minTextW = dragMinTextW;
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (resizeDebugDragId) minWidthMs = selectionResizeDebugRound(selectionResizeDebugNow() - minWidthStartedAt);
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          if (resizeEast) w = Math.max(minTextW, ow + dx);
-          h = oh;
-          if (resizeWest) { w = Math.max(minTextW, ow - dx); x = ox + ow - w; }
-        }
-
-        resizeCommitter.schedule(x, y, w, h);
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (resizeDebugDragId) {
-          recordSelectionTextResizeStep('move', resizeDebugDragId, {
-            ...selectionResizeEventMeta(ev),
-            objectId: obj.id,
-            dir,
-            dx,
-            dy,
-            x,
-            y,
-            w,
-            h,
-            minTextW,
-            minWidthMs,
-            moveMs: selectionResizeDebugRound(selectionResizeDebugNow() - moveStartedAt),
-          });
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
 
       beginDocumentDrag({
-        move: onMove,
+        move: (ev) => resizeCommitter.schedule(ev.clientX, ev.clientY, zoom, ev),
         up() {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (resizeDebugDragId) {

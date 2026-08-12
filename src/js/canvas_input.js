@@ -665,14 +665,12 @@ function startObjectDrag(e, obj) {
 
   const startX = e.clientX, startY = e.clientY, objectStartX = obj.x, objectStartY = obj.y;
   let moved = false;
-  const moveThreshold = 9 / (zoom * zoom);
 
   function onMove(ev) {
-    const dx = (ev.clientX - startX) / zoom;
-    const dy = (ev.clientY - startY) / zoom;
-    if (!moved && dx*dx + dy*dy > moveThreshold) moved = true;
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (!moved && dx*dx + dy*dy > 9) moved = true;
     if (!moved) return;
-    obj.x = objectStartX + dx; obj.y = objectStartY + dy;
+    obj.x = objectStartX + dx / zoom; obj.y = objectStartY + dy / zoom;
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'object-drag');
     else scheduleRender(true, true);
   }

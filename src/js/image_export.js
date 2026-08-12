@@ -97,16 +97,16 @@ async function exportImageBatch({
         ExportDebug.step(dbg, 'web-export:pill-start', { imageCount: imageObjs.length });
       },
       onProgress: typeof BOARDFISH_PRODUCTION === 'undefined'
-        ? ({ phase, preparedCount, finishedCount, totalCount, force }) => {
+        ? ({ phase, preparedCount, finishedCount, totalCount }) => {
           if (!updateProgress) return;
           updateProgress(phase || 'prepare-progress', preparedCount ?? finishedCount ?? imageObjs.length, {
             finishedCount: finishedCount ?? '',
             totalCount: totalCount ?? imageObjs.length,
-          }, force === true);
+          });
         }
-        : ({ preparedCount, finishedCount, force }) => {
+        : ({ preparedCount, finishedCount }) => {
           if (!updateProgress) return;
-          updateProgress(preparedCount ?? finishedCount ?? imageObjs.length, force === true);
+          updateProgress(preparedCount ?? finishedCount ?? imageObjs.length);
         },
     });
     const downloadedCount = downloadResult?.downloadedCount || 0;

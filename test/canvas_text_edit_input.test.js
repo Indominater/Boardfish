@@ -361,15 +361,16 @@ test('synthetic click-to-edit leaves focus to the touch adapter', () => {
   assert.equal(context.editProxy.focused, false);
 });
 
-test('dragging an already selected text object translates instead of entering edit mode', () => {
-  const context = loadCanvasInputHarness();
+test('drag threshold stays in client pixels while object translation follows zoom', () => {
+  const context = loadCanvasInputHarness(); context.zoom = 2;
 
   context.startObjectDrag({ clientX: 12, clientY: 22 }, context.obj);
-  context.latestDrag().move({ clientX: 22, clientY: 22 });
-  assert.equal(context.obj.x, 20);
+  context.latestDrag().move({ clientX: 15, clientY: 22 }); assert.equal(context.obj.x, 10);
+  context.latestDrag().move({ clientX: 16, clientY: 22 });
+  assert.equal(context.obj.x, 12);
   assert.equal(context.obj.y, 20);
   assert.deepEqual(context.renders.at(-1), { select: true, overlay: true });
-  context.latestDrag().up({ clientX: 22, clientY: 22 });
+  context.latestDrag().up({ clientX: 16, clientY: 22 });
 
   assert.deepEqual(context.entered, []);
   assert.deepEqual(context.history, ['drag']);
