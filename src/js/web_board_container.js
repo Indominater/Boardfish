@@ -69,10 +69,6 @@
     return table;
   }
 
-  function crc32(bytes) {
-    return (crc32Update(0xFFFFFFFF, bytes) ^ 0xFFFFFFFF) >>> 0;
-  }
-
   function crc32Update(crc, bytes, start = 0, end = bytes.length) {
     if (!crcTable) crcTable = makeCrcTable();
     for (let i = start; i < end; i++) {
@@ -95,11 +91,11 @@
   const BYTE_CRC_CHUNK_SIZE = 4 * 1024 * 1024;
   const BLOB_CRC_CHUNK_SIZE = 1024 * 1024;
 
-  async function crc32Async(bytes) {
+  async function crc32Async(bytes, yieldFinal = false) {
     let crc = 0xFFFFFFFF;
     for (let start = 0; start < bytes.length; start += BYTE_CRC_CHUNK_SIZE) {
       crc = crc32Update(crc, bytes, start, Math.min(bytes.length, start + BYTE_CRC_CHUNK_SIZE));
-      await yieldToEventLoop();
+      if (yieldFinal || start + BYTE_CRC_CHUNK_SIZE < bytes.length) await yieldToEventLoop();
     }
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
@@ -244,7 +240,7 @@
       }
       entry.crc = isNativeBlobPart(entry.data)
         ? await crc32BlobAsync(entry.data)
-        : await crc32Async(entry.data);
+        : await crc32Async(entry.data, true);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDiagnostics) {
         crcComputedEntries++;
@@ -561,7 +557,7 @@
     return uncompressedSize;
   }
 
-  function validateReadZipEntry(out, entry, options = {}) {
+  async function validateReadZipEntry(out, entry, options = {}) {
     const limit = Number(options.maxBytes);
     if (Number.isFinite(limit) && out.length > limit) {
       throwEntryTooLarge(entry, out.length, options);
@@ -570,7 +566,7 @@
       throw new Error(`invalid Boardfish container entry size ${entry.name}`);
     }
     if (options.verifyCrc !== false && Number.isFinite(Number(entry.crc))) {
-      const actualCrc = crc32(out);
+      const actualCrc = await crc32Async(out);
       if ((entry.crc >>> 0) !== actualCrc) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const mismatch = {
@@ -1318,7 +1314,7 @@
             const view = randomAccessBlob
               ? new Uint8Array(await imageBlob.arrayBuffer())
               : compressedEntryBytes(containerBytes, imageEntry);
-            const actualCrc = crc32(view);
+            const actualCrc = await crc32Async(view);
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
             if (collectDiagnostics) {
               imageCrcMs += nowMs() - crcStart;
@@ -1409,12 +1405,8 @@
     }
     containerBytes = null;
 
-    const result = {
-      board: {
-        ...board,
-        imageStore: nextSources,
-      },
-    };
+    board.imageStore = nextSources;
+    const result = { board };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     result.imageEntries = imageEntries;
     if (collectDiagnostics) {

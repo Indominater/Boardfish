@@ -204,8 +204,13 @@
   };
 
   const noteObjects = (items) => {
-    const ranked = (Array.isArray(items) ? items : []).filter((obj) => obj?.id).sort(compareObjectGeometry);
+    const fromIds = !!items && items === root.selectedIds, ranked = [];
+    for (const item of (fromIds || Array.isArray(items) ? items : [])) {
+      const obj = fromIds ? root.objectsMap?.get?.(item) : item;
+      if (obj?.id) ranked.push(obj);
+    }
     if (!ranked.length) return false;
+    if (ranked.length > 1) ranked.sort(compareObjectGeometry);
     const startedAt = now();
     for (let index = 0; index < ranked.length; index++) {
       noteObject(
@@ -323,15 +328,7 @@
     return objectMotions.size > 0;
   };
 
-  const copySelection = () => {
-    if (!root.selectedIds?.size || !root.objectsMap?.get) return;
-    const selectedObjects = [];
-    for (const id of root.selectedIds) {
-      const obj = root.objectsMap.get(id);
-      if (obj) selectedObjects.push(obj);
-    }
-    noteObjects(selectedObjects);
-  };
+  const copySelection = () => noteObjects(root.selectedIds);
 
   const applyCopyFeedback = (payload = {}) => {
     if (prefersReducedMotion()) return false;

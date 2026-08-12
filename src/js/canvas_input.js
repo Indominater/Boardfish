@@ -283,23 +283,6 @@ var _spaceDown = false,
   hideRubberBandSelectionVisual = null,
   cancelRubberBandSelection = null;
 
-document.addEventListener('keydown', (e) => {
-  if (e.code !== 'Space') return;
-  if (isBoardInputBlocked() && !isBoardNavigationAllowedWhileBlocked()) {
-    e.preventDefault();
-    return;
-  }
-  if (_rubberBandDragActive) {
-    e.preventDefault();
-    return;
-  }
-  if (editingId) return;
-  e.preventDefault();
-  if (e.repeat) return;
-  _spaceDown = true;
-  canvas.classList.add('panning');
-});
-
 document.addEventListener('keyup', (e) => {
   if (e.code !== 'Space') return;
   if (_spaceDown || !editingId) e.preventDefault();

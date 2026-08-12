@@ -340,7 +340,7 @@ const copySelected = (options = {}) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return false;
   }
-  if (animateCopy && obj.type === 'text') globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
+  if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cloneStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
@@ -356,9 +356,6 @@ const copySelected = (options = {}) => {
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   setJsClipboard({ type: 'objects', objects: [cloned] });
-  if (animateCopy && obj.type === 'image') {
-    globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
-  }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectClipboardDiagnostics) {
     ClipDebug.step(dbg, 'set-jsClipboard', {
@@ -563,7 +560,6 @@ const copySelected = (options = {}) => {
     ClipDebug.end(dbg, { path: 'object-jsClipboard', type: obj.type || '' });
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
   return true;
 };
 

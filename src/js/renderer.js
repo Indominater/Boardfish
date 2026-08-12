@@ -219,11 +219,12 @@
     return false;
   }
 
-  function drawImageObj(context, obj, img, view, viewportRect, lowLatency) {
+  function drawImageObj(context, obj, img, view, viewportRect, lowLatency, motion) {
     if (!lowLatency) {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     }
     context.imageSmoothingEnabled = false;
+    if (motion) return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     try {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     } finally {
@@ -483,8 +484,7 @@
         const img = selected?.source || selected || null;
         if (!(img?.width > 0)) return;
         try {
-          drawImageObj(context, obj, img, view, viewportRect,
-            selected?.activeInputFullFallback === true || lowLatencyImageMotion);
+          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
         } catch (_) {}
       } else {
       if (obj.type === 'text') {
@@ -567,8 +567,7 @@
           }
         }
         try {
-          const cropped = drawImageObj(context, obj, img, view, viewportRect,
-            selected?.activeInputFullFallback === true || lowLatencyImageMotion);
+          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
           if (cropped === null) return false;
           if (counters) {
             recordImageDrawWarmStats(

@@ -326,14 +326,6 @@ test('rubber-band selection commits only the latest move in an animation frame',
   assert.equal(context.rubberBand.style.display, 'none');
 });
 
-test('non-Space keydown skips board-pan state checks', () => {
-  const context = loadRubberBandHarness();
-  let blockedChecks = 0;
-  context.isBoardInputBlocked = () => { blockedChecks++; return false; };
-  context.documentEvent('keydown', { code: 'KeyA' });
-  assert.equal(blockedChecks, 0);
-});
-
 test('click-release on an already selected text object enters edit mode', () => {
   const context = loadCanvasInputHarness();
 

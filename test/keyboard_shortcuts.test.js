@@ -50,7 +50,11 @@ function loadKeyboard(overrides = {}) {
     objectsMap: new Map(),
     editingId: null,
     _editEl: null,
+    _spaceDown: false,
+    _rubberBandDragActive: false,
+    canvas: { classList: { add: (name) => calls.push([name]) } },
     isBoardInputBlocked: () => false,
+    isBoardNavigationAllowedWhileBlocked: () => false,
     hasOpenContextMenu: () => false,
     runVisibleMenuCommandForShortcut: () => false,
     closeOpenMenusExcept: (activeMenuId, reason) => calls.push(['close', activeMenuId, reason]),
@@ -107,6 +111,26 @@ test('keyboard shortcuts register the app command handler in capture phase', () 
 
   assert.equal(keydownListeners.length, 1);
   assert.equal(keydownListeners[0].options, true);
+});
+
+test('Space pan preserves blocked, editing, repeat, and initial-press behavior', () => {
+  const cases = [
+    [{}, true, true],
+    [{ editingId: 'text-1' }, false, false],
+    [{ _rubberBandDragActive: true }, true, false],
+    [{ editingId: 'text-1', _rubberBandDragActive: true }, true, false],
+    [{ isBoardInputBlocked: () => true }, true, false],
+    [{ repeat: true }, true, false],
+    [{ cancelBubble: true }, false, false],
+  ];
+  for (const [overrides, prevented, pans] of cases) {
+    const { calls, context, mainKeydown } = loadKeyboard(overrides);
+    const event = keyEvent({ key: ' ', code: 'Space', repeat: !!overrides.repeat, cancelBubble: !!overrides.cancelBubble });
+    mainKeydown(event);
+    assert.equal(event.defaultPrevented, prevented);
+    assert.equal(context._spaceDown, pans);
+    assert.equal(calls.some(([name]) => name === 'panning'), pans);
+  }
 });
 
 test('plain n is consumed and runs new board', () => {

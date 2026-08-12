@@ -127,6 +127,15 @@ function arrangeSelectedImagesFromShortcut() {
 }
 
 document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    if (e.cancelBubble) return;
+    const blocked = (isBoardInputBlocked() && !isBoardNavigationAllowedWhileBlocked()) || _rubberBandDragActive;
+    if (blocked || !editingId) e.preventDefault();
+    if (blocked || editingId || e.repeat) return;
+    _spaceDown = true;
+    canvas.classList.add('panning');
+    return;
+  }
   if (editingId && e.key?.length === 1 && e.code !== 'F3' && !e.ctrlKey && !e.metaKey && !e.altKey && !isBoardInputBlocked()) return;
   const command = e.ctrlKey !== e.metaKey && !e.altKey;
   const commandOnly = command && !e.shiftKey, shiftCommandOnly = command && e.shiftKey;

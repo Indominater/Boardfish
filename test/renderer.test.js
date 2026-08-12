@@ -315,8 +315,8 @@ test('animated image motion bypasses static culling and uses low-latency variant
       drawQualities.push(this.imageSmoothingQuality);
     },
     globalAlpha: 1,
-    save() {},
-    restore() {},
+    save() { this.savedSmoothing = this.imageSmoothingEnabled; },
+    restore() { this.imageSmoothingEnabled = this.savedSmoothing; },
     translate() {},
     scale() {},
   };
