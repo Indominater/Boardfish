@@ -352,7 +352,6 @@
   function endOfCentralDirectoryInfo(bytes, { baseOffset = 0, containerSize = bytes?.length || 0 } = {}) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const eocdOffset = findEndOfCentralDirectory(bytes);
-    ensureByteRange(bytes, eocdOffset, ZIP_EOCD_MIN_SIZE, 'invalid Boardfish container directory');
     const diskNumber = view.getUint16(eocdOffset + 4, true);
     const centralDisk = view.getUint16(eocdOffset + 6, true);
     const diskEntryCount = view.getUint16(eocdOffset + 8, true);
@@ -380,15 +379,12 @@
     };
   }
 
-  function parseCentralDirectoryBytes(bytes, entryCount, centralSize = bytes.length) {
+  function parseCentralDirectoryBytes(bytes, entryCount) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    if (centralSize > bytes.length) throw invalidContainerError('invalid Boardfish container directory');
     const entries = new Map();
     let offset = 0;
-    const centralEnd = centralSize;
     for (let i = 0; i < entryCount; i++) {
       ensureByteRange(bytes, offset, 46, 'invalid Boardfish container entry');
-      if (offset + 46 > centralEnd) throw invalidContainerError('invalid Boardfish container entry');
       if (view.getUint32(offset, true) !== ZIP_CENTRAL_DIRECTORY) {
         throw invalidContainerError('invalid Boardfish container entry');
       }
@@ -406,7 +402,7 @@
       const nameStart = offset + 46;
       const nextOffset = nameStart + nameLength + extraLength + commentLength;
       ensureByteRange(bytes, nameStart, nameLength, 'invalid Boardfish container entry name');
-      if (nextOffset > centralEnd) throw invalidContainerError('invalid Boardfish container entry');
+      if (nextOffset > bytes.length) throw invalidContainerError('invalid Boardfish container entry');
       const name = utf8Decode(bytes.subarray(nameStart, nameStart + nameLength));
       entries.set(name, { name, method, crc, compressedSize, uncompressedSize, localOffset });
       offset = nextOffset;
@@ -417,7 +413,7 @@
   function parseCentralDirectory(bytes) {
     const info = endOfCentralDirectoryInfo(bytes, { containerSize: bytes.length });
     const centralBytes = bytes.subarray(info.centralOffset, info.centralOffset + info.centralSize);
-    return parseCentralDirectoryBytes(centralBytes, info.entryCount, info.centralSize);
+    return parseCentralDirectoryBytes(centralBytes, info.entryCount);
   }
 
   async function parseCentralDirectoryFromBlob(blob) {
@@ -434,7 +430,7 @@
       ? tailBytes.subarray(info.centralOffset - tailOffset, info.centralOffset - tailOffset + info.centralSize)
       : await blobRangeToBytes(blob, info.centralOffset, info.centralOffset + info.centralSize);
     return {
-      entries: parseCentralDirectoryBytes(centralBytes, info.entryCount, info.centralSize),
+      entries: parseCentralDirectoryBytes(centralBytes, info.entryCount),
       tailBytes: tailBytes.length,
       centralBytes: centralBytes.length,
     };
@@ -871,7 +867,7 @@
     }
     const out = new Map();
     let next = 0;
-    const workerCount = Math.max(1, Math.min(Math.trunc(Number(concurrency)) || 1, tasks.length || 1));
+    const workerCount = Math.min(Math.max(1, Math.trunc(Number(concurrency)) || 1), tasks.length);
     await Promise.all(Array.from({ length: workerCount }, async () => {
       while (next < tasks.length) {
         const task = tasks[next++];

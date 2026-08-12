@@ -93,7 +93,6 @@ function hideIsland(reason = 'hide') {
   clearTimeout(_islMsgTimer);
   _islMsgTimer = null;
   _islMsgActive = false;
-  islZoom.textContent = '';
   hideOpeningShieldPill();
   syncIslandZoomDisplay(reason);
   PillDebug.log('hideIsland', { reason });

@@ -107,11 +107,7 @@
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    if (!(objectMotions.size || textSelectionMotions.size)) {
-      if (removed) requestMotionFrame();
-      return;
-    }
-    requestMotionFrame();
+    if (objectMotions.size || textSelectionMotions.size || removed) requestMotionFrame();
   };
 
   const jiggleTransform = (motion, t, zoom = 1) => {

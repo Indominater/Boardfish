@@ -2860,7 +2860,6 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
       }
       const x = line.prefixWidths[unitStart];
       const batchable = batchingFontReady === true && TEXT_DRAW_BATCHABLE_ASCII_RE.test(unit);
-      const unitWidth = batchable ? measureRawTextWForDepth(unit, state.depth) : 0;
       const previous = run.draws[run.draws.length - 1] || null;
       if (
         batchable &&
@@ -2869,13 +2868,12 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
         Math.abs(x - previous.nextX) <= TEXT_DRAW_BATCH_POSITION_EPSILON
       ) {
         previous.text += unit;
-        previous.nextX = x + unitWidth;
         return;
       }
       run.draws.push({
         text: unit,
         x,
-        nextX: batchable ? x + unitWidth : NaN,
+        nextX: batchable ? x + measureRawTextWForDepth(unit, state.depth) : NaN,
       });
     }, i, j);
     if (run.draws.length) {

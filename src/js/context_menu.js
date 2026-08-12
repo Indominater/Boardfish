@@ -694,9 +694,6 @@ function updateObjMenuActions() {
   const multiSelected = isMultiSelected();
   const showImageActions = imageCount >= 1;
   const showLayerActions = selectedCount >= 1;
-  const showExport = imageCount >= 1;
-  const showDelete = selectedCount >= 1;
-  copyBtn.style.display = '';
   objectActionsSep.style.display = showImageActions ? 'block' : 'none';
   flipBtn.style.display = showImageActions ? '' : 'none';
   rotateBtn.style.display = showImageActions ? '' : 'none';
@@ -706,9 +703,9 @@ function updateObjMenuActions() {
   saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
   saveImagesBtn.firstElementChild.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
   saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';
-  exportSep.style.display = showExport ? 'block' : 'none';
-  deleteSep.style.display = showDelete ? 'block' : 'none';
-  deleteBtn.style.display = showDelete ? '' : 'none';
+  exportSep.style.display = showImageActions ? 'block' : 'none';
+  deleteSep.style.display = showLayerActions ? 'block' : 'none';
+  deleteBtn.style.display = showLayerActions ? '' : 'none';
 }
 
 const showTextEditContextMenuAt = (clientX, clientY) => {
@@ -718,7 +715,6 @@ const showTextEditContextMenuAt = (clientX, clientY) => {
   // Clipboard contents cannot be probed just to build a menu: mobile browsers
   // may gate that read behind their own Paste control. Keep the action
   // available and defer the protected read until the user invokes it.
-  textPasteBtn.style.display = '';
   textDeleteSep.style.display = hasSelection ? 'block' : 'none';
   textDeleteBtn.style.display = hasSelection ? '' : 'none';
   if (!editingId) return;

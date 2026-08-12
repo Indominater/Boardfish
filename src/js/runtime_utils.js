@@ -16,7 +16,7 @@ function setOpenHydrationConcurrency(value) {
 async function mapWithConcurrency(items, limit, worker, collectResults = true) {
   const out = collectResults ? new Array(items.length) : null;
   let next = 0;
-  const workerCount = Math.max(1, Math.min(Number(limit) || 1, items.length));
+  const workerCount = Math.min(Math.max(1, Number(limit) || 1), items.length);
   await Promise.all(Array.from({ length: workerCount }, async () => {
     while (next < items.length) {
       const index = next++;

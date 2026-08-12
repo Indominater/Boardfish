@@ -627,8 +627,6 @@ const isBetterNestedTextEditScriptRange = (candidate, current) => (
   (candidate.start === current.start && candidate.end < current.end)
 );
 
-const textEditScriptRanges = (obj) => obj ? getTextScriptRanges(obj) : [];
-
 const textEditScriptRangeContext = (ranges = []) => {
   if (!ranges.length) return null;
   const byStart = new Map();
@@ -738,7 +736,7 @@ const normalizeTextObjectToEditableScriptBraces = (obj) => {
 
 const textEditScriptSnapshot = (obj) => {
   const text = obj?.data?.content || '';
-  const ranges = textEditScriptRanges(obj);
+  const ranges = getTextScriptRanges(obj);
   return { text, ranges, context: textEditScriptRangeContext(ranges) };
 };
 
@@ -819,7 +817,7 @@ const textEditScriptRangeVisibleBounds = (content, range) => {
 const textEditBaseChildScriptDeleteRange = (obj, baseIndex, content = null, ranges = null, context = null) => {
   if (!obj) return null;
   const text = content == null ? normalizeTextContent(obj.data?.content || '') : String(content ?? '');
-  const scriptRanges = ranges || textEditScriptRanges(obj);
+  const scriptRanges = ranges || getTextScriptRanges(obj);
   const rangeContext = context || textEditScriptRangeContext(scriptRanges);
   const start = Math.max(0, Math.min(Math.trunc(baseIndex ?? 0), text.length));
   if (start >= text.length || isTextEditScriptHiddenAtFast(start, text, rangeContext)) return null;
@@ -860,7 +858,7 @@ const textEditScriptRootBaseIndexForRange = (ranges, range, context = textEditSc
 const textEditCompoundScriptDeleteRangeBeforeCaret = (obj, index, content = null, ranges = null, context = null) => {
   if (!obj) return null;
   const text = content == null ? normalizeTextContent(obj.data?.content || '') : String(content ?? '');
-  const scriptRanges = ranges || textEditScriptRanges(obj);
+  const scriptRanges = ranges || getTextScriptRanges(obj);
   const rangeContext = context || textEditScriptRangeContext(scriptRanges);
   const pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
   let best = null;
@@ -878,7 +876,7 @@ const textEditCompoundScriptDeleteRangeBeforeCaret = (obj, index, content = null
 const textEditVisibleSelectionDeleteRange = (obj, selection, content = null, ranges = null, context = null) => {
   if (!obj) return null;
   const text = content == null ? normalizeTextContent(obj.data?.content || '') : String(content ?? '');
-  const scriptRanges = ranges || textEditScriptRanges(obj);
+  const scriptRanges = ranges || getTextScriptRanges(obj);
   let start = Math.max(0, Math.min(selection?.start ?? 0, text.length));
   let end = Math.max(start, Math.min(selection?.end ?? start, text.length));
   if (start === end) return null;
@@ -923,7 +921,7 @@ const textEditStructuralDeleteReplacement = (obj, deletion) => {
   const end = Math.max(start, Math.min(deletion?.end ?? start, text.length));
   const fallback = { start, end, insertedText: '', insertedScriptRanges: [] };
   if (!obj || start === end) return fallback;
-  const ranges = textEditScriptRanges(obj);
+  const ranges = getTextScriptRanges(obj);
   let range = null;
   for (const candidate of ranges) {
     if (
@@ -962,7 +960,7 @@ const textEditStructuralDeleteReplacement = (obj, deletion) => {
 const normalizeTextEditSelectionForLayerReplacement = (obj, selection, content = null, ranges = null) => {
   if (!obj || !selection?.hasSelection) return selection;
   const text = content == null ? obj.data?.content || '' : String(content ?? '');
-  const scriptRanges = ranges || textEditScriptRanges(obj);
+  const scriptRanges = ranges || getTextScriptRanges(obj);
   let start = Math.max(0, Math.min(selection.start ?? 0, text.length));
   const end = Math.max(start, Math.min(selection.end ?? start, text.length));
   for (const range of scriptRanges) {
@@ -985,7 +983,7 @@ const normalizeTextEditSelectionForLayerReplacement = (obj, selection, content =
 
 const textEditVisibleSelectionReplacementRange = (obj, selection) => {
   const text = obj?.data?.content || '';
-  const ranges = textEditScriptRanges(obj);
+  const ranges = getTextScriptRanges(obj);
   const rangeContext = textEditScriptRangeContext(ranges);
   const replacementSelection = normalizeTextEditSelectionForLayerReplacement(obj, selection, text, ranges);
   if (!replacementSelection?.hasSelection) return replacementSelection;
@@ -1046,7 +1044,7 @@ const textEditVisibleDeleteRange = (obj, index, key, snapshot = null) => {
 const textEditScriptMarkerInsertionIndexAt = (obj, index) => {
   if (!obj) return null;
   const text = obj.data?.content || '';
-  const ranges = textEditScriptRanges(obj);
+  const ranges = getTextScriptRanges(obj);
   const rangeContext = textEditScriptRangeContext(ranges);
   const pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
   let currentRange = null;
@@ -1091,7 +1089,7 @@ const textEditBracedScriptBoundaryInsertionAt = (obj, index) => {
   const affinity = obj._textScriptCaretIndex === pos ? obj._textScriptCaretAffinity : '';
   if (affinity === 'after') return null;
   let range = null;
-  for (const item of textEditScriptRanges(obj)) {
+  for (const item of getTextScriptRanges(obj)) {
     if (item.end !== pos || !isTextScriptBracedRange(text, item)) continue;
     if (isBetterNestedTextEditScriptRange(item, range)) range = item;
   }
@@ -1201,7 +1199,7 @@ const completeTextSelectionBracedScriptRanges = (content, start, end, selectedTe
 
 const createTextSelectionClipboardPayload = (obj, selection) => {
   const content = normalizeTextContent(obj?.data?.content || '');
-  const sourceRanges = textEditScriptRanges(obj);
+  const sourceRanges = getTextScriptRanges(obj);
   const { start: rawStart, end: rawEnd } = normalizeTextSelectionScriptHiddenBounds(content, selection, sourceRanges);
   const trimmed = trimmedTextSelectionForClipboard(content.slice(rawStart, rawEnd));
   const start = rawStart + trimmed.start;
@@ -1448,14 +1446,6 @@ const deriveBracedTextScriptRangesAroundEdit = (content, start, end) => {
   return ranges;
 };
 
-const textScriptActiveRangesAtIndex = (ranges, index, includeEnd = false, affinity = '') => (
-  cloneTextScriptRanges(activeTextScriptRangesAt(ranges, index, includeEnd, affinity))
-);
-
-const textScriptCaretRangesForEditState = (scriptRanges, index, affinity = '') => (
-  textScriptActiveRangesAtIndex(scriptRanges || [], index, true, affinity)
-);
-
 const textScriptRangeEndingAt = (ranges, index) => {
   let best = null;
   for (const range of ranges || []) {
@@ -1465,13 +1455,13 @@ const textScriptRangeEndingAt = (ranges, index) => {
 };
 
 const setTextScriptCaretAffinityForRanges = (obj, index, desiredRanges = []) => {
-  const ranges = textEditScriptRanges(obj);
-  const defaultRanges = textScriptActiveRangesAtIndex(ranges, index, true);
+  const ranges = getTextScriptRanges(obj);
+  const defaultRanges = activeTextScriptRangesAt(ranges, index, true);
   if (textScriptRangesEqual(defaultRanges, desiredRanges)) {
     clearTextScriptCaretAffinity(obj);
     return;
   }
-  const afterRanges = textScriptActiveRangesAtIndex(ranges, index, true, 'after');
+  const afterRanges = activeTextScriptRangesAt(ranges, index, true, 'after');
   if (textScriptRangesEqual(afterRanges, desiredRanges)) {
     setTextScriptCaretAffinity(obj, index, 'after');
     return;
@@ -1485,7 +1475,7 @@ const exitTextScriptForLineBreak = (obj, proxy) => {
   if (pos !== proxy.selectionEnd) return false;
   const affinity = obj._textScriptCaretIndex === pos ? obj._textScriptCaretAffinity : '';
   let nextPos = -Infinity;
-  for (const range of textEditScriptRanges(obj)) {
+  for (const range of getTextScriptRanges(obj)) {
     if (isTextScriptRangeActiveAt(range, pos, affinity) && range.end > nextPos) nextPos = range.end;
   }
   if (!Number.isFinite(nextPos)) return false;
@@ -1699,7 +1689,7 @@ const textScriptCaretRangesAfterInput = (inputState = {}, {
   if (!String(type || '').startsWith('delete') || inputState.hasSelection || start !== end) return null;
   const caretRanges = Array.isArray(inputState.scriptCaretRanges)
     ? cloneTextScriptRanges(inputState.scriptCaretRanges)
-    : textScriptCaretRangesForEditState(inputState.scriptRanges || [], start, inputState.scriptCaretAffinity || '');
+    : activeTextScriptRangesAt(inputState.scriptRanges || [], start, true, inputState.scriptCaretAffinity || '');
   if (!caretRanges.length) return [];
   const edit = replacement || textEditInputReplacement(oldValue, newValue, inputState, type);
   const transformed = transformTextScriptRangesForInput(caretRanges, {
@@ -2150,7 +2140,7 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
   const inputState = {
     ...selection,
     value: currentProxyValue,
-    scriptRanges: textEditScriptRanges(obj),
+    scriptRanges: getTextScriptRanges(obj),
     scriptCaretAffinity: obj._textScriptCaretIndex === selection.start ? obj._textScriptCaretAffinity : '',
     insertedScriptRanges: editablePayload.scriptRanges || [],
     inputType,
@@ -2194,7 +2184,7 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
   if (pastedText !== rawPastedText) return false;
 
   const inputType = options.inputType || 'insertFromPaste';
-  const scriptRanges = textEditScriptRanges(obj);
+  const scriptRanges = getTextScriptRanges(obj);
   const currentProxyValue = textEditProxyValue(proxy);
   if (isTextEditProxyDomStale(proxy, currentProxyValue)) return false;
   const inputState = {
@@ -2309,7 +2299,7 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   const inputState = {
     ...selection,
     value: currentProxyValue,
-    scriptRanges: textEditScriptRanges(obj),
+    scriptRanges: getTextScriptRanges(obj),
     scriptCaretAffinity: boundaryInsertion?.affinity || (obj._textScriptCaretIndex === selection.start ? obj._textScriptCaretAffinity : ''),
     insertedScriptRanges: editablePayload.scriptRanges || [],
     inputType,
@@ -2572,7 +2562,7 @@ function enterEdit(id, {
           direction: 'none',
           hasSelection: false,
           value: currentProxyValue,
-          scriptRanges: textEditScriptRanges(obj),
+          scriptRanges: getTextScriptRanges(obj),
           scriptCaretAffinity: boundaryInsertion?.affinity || '',
           inputType,
           replacement: {
@@ -2603,7 +2593,7 @@ function enterEdit(id, {
           direction: 'none',
           hasSelection: false,
           value: currentProxyValue,
-          scriptRanges: textEditScriptRanges(obj),
+          scriptRanges: getTextScriptRanges(obj),
           scriptCaretAffinity: boundaryInsertion.affinity,
           inputType,
           replacement: {
@@ -2630,7 +2620,7 @@ function enterEdit(id, {
       pendingInputState = {
         ...selection,
         value: currentProxyValue,
-        scriptRanges: textEditScriptRanges(obj),
+        scriptRanges: getTextScriptRanges(obj),
         scriptCaretAffinity: '',
         inputType,
         replacement: {
@@ -2652,7 +2642,7 @@ function enterEdit(id, {
       selection = textEditSelectionState(proxy);
       currentProxyValue = textEditProxyValue(proxy);
     }
-    const scriptRanges = textEditScriptRanges(obj);
+    const scriptRanges = getTextScriptRanges(obj);
     const scriptCaretAffinity = obj._textScriptCaretIndex === selection.start ? obj._textScriptCaretAffinity : '';
     const nativeReplacement = textEditBeforeInputReplacement(currentProxyValue, selection, event);
     pendingInputState = {
@@ -2796,7 +2786,7 @@ function enterEdit(id, {
     logInputStep('line-align-done', {
       lineAlignCount: Array.isArray(obj.data?.lineAlign) ? obj.data.lineAlign.length : 0,
     });
-    const scriptTransformInputRanges = inputState.scriptRanges || textEditScriptRanges(obj);
+    const scriptTransformInputRanges = inputState.scriptRanges || getTextScriptRanges(obj);
     const scriptResult = transformTextScriptRangesForInput(scriptTransformInputRanges, {
       oldValue,
       newValue: obj.data.content,
@@ -3268,7 +3258,7 @@ function enterEdit(id, {
       pendingInputState = {
         ...selection,
         value: currentProxyValue,
-        scriptRanges: textEditScriptRanges(obj),
+        scriptRanges: getTextScriptRanges(obj),
         scriptCaretAffinity: obj._textScriptCaretIndex === proxy.selectionStart ? obj._textScriptCaretAffinity : '',
         inputType,
       };
@@ -3290,7 +3280,7 @@ function enterEdit(id, {
       pendingInputState = {
         ...selection,
         value: currentProxyValue,
-        scriptRanges: textEditScriptRanges(obj),
+        scriptRanges: getTextScriptRanges(obj),
         scriptCaretAffinity: obj._textScriptCaretIndex === proxy.selectionStart ? obj._textScriptCaretAffinity : '',
         inputType,
       };
@@ -3318,7 +3308,7 @@ function enterEdit(id, {
       pendingInputState = {
         ...selection,
         value: textEditProxyValue(proxy),
-        scriptRanges: textEditScriptRanges(obj),
+        scriptRanges: getTextScriptRanges(obj),
         scriptCaretAffinity: '',
         inputType,
         replacement: {
@@ -3444,7 +3434,7 @@ function enterEdit(id, {
         pendingInputState = {
           ...selection,
           value: textEditProxyValue(proxy),
-          scriptRanges: textEditScriptRanges(obj),
+          scriptRanges: getTextScriptRanges(obj),
           scriptCaretAffinity: !selection.hasSelection && obj._textScriptCaretIndex === selection.start ? obj._textScriptCaretAffinity : '',
           inputType,
           replacement,

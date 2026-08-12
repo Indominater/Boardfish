@@ -458,7 +458,7 @@
   }
 
   const forEachChangedTouch = (event, callback) => {
-    for (let i = 0; i < (event.changedTouches?.length || 0); i++) callback(event.changedTouches[i]);
+    for (let i = 0; i < (event.changedTouches?.length || 0); i++) callback(event.changedTouches[i], event);
   };
   const useAtomicTouchEvents = (
     typeof root.TouchEvent === 'function' && Number(root.navigator?.maxTouchPoints) > 0
@@ -469,7 +469,7 @@
       preventTouchDefault(event);
       markTouchCompatibilityWindow();
       if (!boardNavigationAllowed()) return;
-      forEachChangedTouch(event, (touch) => controller.pointerDown(touch, event));
+      forEachChangedTouch(event, controller.pointerDown);
     }, { passive: false });
     canvas.addEventListener('touchmove', (event) => {
       if (!controller.activeCount()) return;
@@ -488,13 +488,13 @@
         forEachChangedTouch(event, (touch) => finalTouchSnapshot.push(touch));
         controller.pointerMoves(finalTouchSnapshot, event);
       }
-      forEachChangedTouch(event, (touch) => controller.pointerUp(touch, event));
+      forEachChangedTouch(event, controller.pointerUp);
     }, { passive: false });
     canvas.addEventListener('touchcancel', (event) => {
       if (!controller.activeCount()) return;
       preventTouchDefault(event);
       markTouchCompatibilityWindow();
-      forEachChangedTouch(event, (touch) => controller.pointerCancel(touch, event));
+      forEachChangedTouch(event, controller.pointerCancel);
     }, { passive: false });
   } else {
     canvas.addEventListener('pointerdown', onTouchPointerDown, { passive: false });

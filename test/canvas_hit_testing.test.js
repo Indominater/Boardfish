@@ -203,7 +203,7 @@ function loadTextEditMenuHarness() {
       },
     },
     textCopyBtn: { style: {} },
-    textPasteBtn: { style: {} },
+    textPasteBtn: { style: { display: '' } },
     textDeleteSep: { style: {} },
     textDeleteBtn: { style: {} },
     textCtxMenu: {},
