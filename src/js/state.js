@@ -23,13 +23,10 @@ function cloneObject(obj, runtimeTextCache = false) {
   HistoryDebug.count('cloneObjectCalls');
   let data = obj.type === 'image' ? { ...obj.data } : null;
   if (!data) {
-    const content = obj._editStartContent == null ? normalizeTextContent(obj.data.content) : obj.data.content;
+    const content = obj.data.content;
     data = { content };
     const sourceLineAlign = obj.data?.lineAlign;
-    if (Array.isArray(sourceLineAlign) && sourceLineAlign.length) {
-      const lineAlign = normalizeTextLineAlignForContent(content, sourceLineAlign);
-      if (lineAlign.length) data.lineAlign = lineAlign;
-    }
+    if (Array.isArray(sourceLineAlign) && sourceLineAlign.length) data.lineAlign = sourceLineAlign.slice();
     const sourceScriptRanges = obj.data?.scriptRanges;
     if (Array.isArray(sourceScriptRanges) && sourceScriptRanges.length) {
       const scriptRanges = obj._textScriptRangesCache !== sourceScriptRanges || obj._textScriptRangesCacheContent !== content

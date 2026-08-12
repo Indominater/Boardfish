@@ -563,7 +563,7 @@ function cloneTextObjectRuntimeCaches(source, target) {
     target._textWrappedLineIndexCache = source._textWrappedLineIndexCache;
   }
 
-  if (
+  if (!target._layoutCache &&
     Array.isArray(source._layoutCache) &&
     source._layoutCacheContent === content &&
     source._layoutCacheW === target.w &&
@@ -684,13 +684,7 @@ function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], conte
   return pw;
 }
 
-function getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, text, paraStart, paraEnd, scriptRanges = [], scriptKey = '', scriptMetrics = null) {
-  const start = Math.max(0, Math.min(Math.trunc(Number(paraStart)) || 0, text.length));
-  const end = Math.max(start, Math.min(Math.trunc(Number(paraEnd)) || start, text.length));
-  if (textRangeIncludesTab(text, start, end) || !obj || obj.type !== 'text') {
-    return getTextRangePrefixWidths(text.slice(start, end), start, scriptRanges, text, scriptMetrics);
-  }
-
+function getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, text, start, end, scriptRanges = [], scriptKey = '', scriptMetrics = null) {
   const normalizedScriptKey = scriptKey || JSON.stringify(Array.isArray(scriptRanges) ? scriptRanges : []);
   if (
     obj._textParagraphPrefixCacheContent !== text ||

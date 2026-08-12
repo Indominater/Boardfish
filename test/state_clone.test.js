@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function loadStateCloneHarness() {
-  const calls = { lineAlign: 0, scriptRanges: 0 };
+  const calls = { scriptRanges: 0 };
   const context = {
     calls,
     HistoryDebug: {
@@ -17,13 +17,6 @@ function loadStateCloneHarness() {
       end() {},
       max() {},
       start() { return {}; },
-    },
-    normalizeTextContent(value) {
-      return String(value ?? '').replace(/\r\n?/g, '\n');
-    },
-    normalizeTextLineAlignForContent(_content, lineAlign) {
-      calls.lineAlign++;
-      return Array.isArray(lineAlign) ? lineAlign.filter((value) => value !== 'left') : [];
     },
     normalizeTextScriptRangesForContent(_content, scriptRanges) {
       calls.scriptRanges++;
@@ -48,7 +41,7 @@ function loadStateCloneHarness() {
   return context;
 }
 
-test('text clone skips optional metadata normalizers when metadata is absent', () => {
+test('text clone copies canonical content without normalization', () => {
   const context = loadStateCloneHarness();
   const clone = context.__stateClone.cloneObject({
     id: 'text-1',
@@ -58,7 +51,7 @@ test('text clone skips optional metadata normalizers when metadata is absent', (
     w: 3,
     h: 4,
     z: 5,
-    data: { content: 'hello\r\nworld' },
+    data: { content: 'hello\nworld' },
   });
 
   assert.deepEqual(plain(clone), {
@@ -71,12 +64,12 @@ test('text clone skips optional metadata normalizers when metadata is absent', (
     z: 5,
     data: { content: 'hello\nworld' },
   });
-  assert.deepEqual(context.calls, { lineAlign: 0, scriptRanges: 0 });
+  assert.deepEqual(context.calls, { scriptRanges: 0 });
 });
 
-test('text clone still normalizes present optional metadata', () => {
+test('text clone copies canonical line alignment independently', () => {
   const context = loadStateCloneHarness();
-  const clone = context.__stateClone.cloneObject({
+  const source = {
     id: 'text-1',
     type: 'text',
     x: 1,
@@ -89,14 +82,16 @@ test('text clone still normalizes present optional metadata', () => {
       lineAlign: ['center'],
       scriptRanges: [{ start: 2, end: 4, kind: 'sup' }],
     },
-  });
+  };
+  const clone = context.__stateClone.cloneObject(source);
 
   assert.deepEqual(plain(clone.data), {
     content: 'hello',
     lineAlign: ['center'],
     scriptRanges: [{ start: 2, end: 4, kind: 'sup' }],
   });
-  assert.deepEqual(context.calls, { lineAlign: 1, scriptRanges: 1 });
+  assert.deepEqual(context.calls, { scriptRanges: 1 });
+  assert.notEqual(clone.data.lineAlign, source.data.lineAlign);
 });
 
 test('text clone reuses current normalized script range cache', () => {
@@ -123,7 +118,7 @@ test('text clone reuses current normalized script range cache', () => {
     content: 'hello',
     scriptRanges: [{ start: 2, end: 4, kind: 'sup' }],
   });
-  assert.deepEqual(context.calls, { lineAlign: 0, scriptRanges: 0 });
+  assert.deepEqual(context.calls, { scriptRanges: 0 });
   assert.notEqual(clone.data.scriptRanges[0], scriptRanges[0]);
 });
 

@@ -27,11 +27,6 @@ function retainedImageKeysForCurrentAndHistory() {
     collectImageKeysFromObjects(entry?.objects, keys);
   }
   collectImageKeysFromObjects(jsClipboard?.objects, keys);
-  const clipboardImageData = jsClipboard?.imageData || {};
-  for (const key in clipboardImageData) {
-    if (!Object.prototype.hasOwnProperty.call(clipboardImageData, key)) continue;
-    if (key) keys.add(key);
-  }
   return keys;
 }
 
@@ -243,8 +238,7 @@ function cloneObjectsForHistoryRestore(snapshotObjects = []) {
   const clones = new Array(snapshotObjects.length);
   for (let i = 0; i < snapshotObjects.length; i++) {
     const clone = clones[i] = cloneObject(snapshotObjects[i], true);
-    const live = clone.type === 'text' && clone.id ? objectsMap.get(clone.id) : null;
-    if (live && live !== clone && live.type === 'text') cloneTextObjectRuntimeCaches(live, clone);
+    if (clone.type === 'text') cloneTextObjectRuntimeCaches(objectsMap.get(clone.id), clone);
   }
   return clones;
 }

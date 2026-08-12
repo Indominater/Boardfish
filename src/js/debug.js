@@ -46,10 +46,8 @@ var ClipDebug = (() => {
       textCharCount: e.meta?.textCharCount ?? '',
       largestTextChars: e.meta?.largestTextChars ?? '',
       trimmedTextObjects: e.meta?.trimmedTextObjects ?? '',
-      additionalImageBytes: e.meta?.additionalImageBytes ?? '',
       additionalTextBytes: e.meta?.additionalTextBytes ?? '',
       processed: e.meta?.processed ?? '',
-      registeredImages: e.meta?.registeredImages ?? '',
       accepted: e.meta?.accepted ?? '',
       historyIndex: e.meta?.historyIndex ?? '',
       queueMs: e.meta?.queueMs ?? '',
@@ -518,7 +516,6 @@ var ClipDebug = (() => {
     const trimDone = latest('paste:text-trim-done');
     const objectLimitDone = latest('paste:object-limit-done');
     const contentLimitDone = latest('paste:content-limit-done');
-    const registerImagesDone = latest('paste:register-images-done');
     const historyStart = latest('paste:boardHistory-start');
     const historyDone = latest('paste:boardHistory-done');
     const end = latest('end');
@@ -545,8 +542,6 @@ var ClipDebug = (() => {
       contentLimitMs: contentLimitDone?.meta?.ms ?? '',
       contentLimitAccepted: contentLimitDone?.meta?.accepted ?? '',
       additionalTextBytes: contentLimitDone?.meta?.additionalTextBytes ?? '',
-      additionalImageBytes: contentLimitDone?.meta?.additionalImageBytes ?? '',
-      registerImagesMs: registerImagesDone?.meta?.ms ?? '',
       historyMs: typeof historyStart?.total === 'number' && typeof historyDone?.total === 'number'
         ? Math.round((historyDone.total - historyStart.total) * 100) / 100
         : '',
@@ -873,7 +868,7 @@ var ClipDebug = (() => {
     const copyEnd = [...events].reverse().find(e => (e.op === 'copySelected' || e.op === 'copyTextEditSelection') && e.step === 'end');
     const pasteEnd = [...events].reverse().find(e => (e.op === 'pasteAtPos' || e.op === 'pasteTextEditSelection') && e.step === 'end');
     const copyProgress = latest('copy:multi-progress');
-    const pasteProgress = latest('paste:objects-add-progress') || latest('paste:register-images-progress');
+    const pasteProgress = latest('paste:objects-add-progress');
     const out = {
       lastOp: last?.op || '',
       lastStep: last?.step || '',
@@ -887,7 +882,6 @@ var ClipDebug = (() => {
       pasteTextChars: pasteEnd?.meta?.textCharCount ?? pasteEnd?.meta?.textLen ?? pasteProgress?.meta?.textCharCount ?? '',
       largestTextChars: pasteEnd?.meta?.largestTextChars ?? pasteProgress?.meta?.largestTextChars ?? '',
       processed: pasteProgress?.meta?.processed ?? copyProgress?.meta?.processed ?? '',
-      registeredImages: pasteEnd?.meta?.registeredImages ?? pasteProgress?.meta?.registeredImages ?? '',
       historyIndex: pasteEnd?.meta?.historyIndex ?? '',
       objectCountBefore: pasteEnd?.meta?.objectCountBefore ?? '',
       objectCountAfter: pasteEnd?.meta?.objectCountAfter ?? '',

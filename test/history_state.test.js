@@ -352,10 +352,10 @@ test('clipboard token changes trigger pruning and keep current clipboard image k
   const context = loadHistoryHarness();
   setBoard(context, []);
   context.snapshot();
-  context.jsClipboard = { type: 'objects', objects: [], imageData: { 'img-old': 'old' } };
+  context.jsClipboard = { type: 'objects', objects: [historyImage('img-old')] };
   context._jsClipboardToken++;
   context.pushHistory('clipboard-old');
-  context.jsClipboard = { type: 'objects', objects: [], imageData: { 'img-new': 'new' } };
+  context.jsClipboard = { type: 'objects', objects: [historyImage('img-new')] };
   context._jsClipboardToken++;
   context.pushHistory('clipboard-new');
 

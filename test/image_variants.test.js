@@ -928,9 +928,8 @@ test('undo-history lifecycle prunes image caches to current board, history, and 
   assert.doesNotMatch(historySource, /collectImageKeysFromObjects\(objects, keys\)/);
   assert.match(historySource, /for \(const entry of boardHistory\)/);
   assert.match(historySource, /collectImageKeysFromObjects\(jsClipboard\?\.objects, keys\)/);
-  assert.match(historySource, /const clipboardImageData = jsClipboard\?\.imageData \|\| \{\};/);
-  assert.match(historySource, /for \(const key in clipboardImageData\)/);
-  assert.match(historySource, /keys\.add\(key\)/);
+  assert.doesNotMatch(historySource, /jsClipboard\?\.imageData/);
+  assert.match(historySource, /out\.add\(key\)/);
   assert.match(historySource, /pruneImageCachesToKeys\(retainedKeys\)/);
 });
 

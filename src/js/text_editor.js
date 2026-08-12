@@ -1503,11 +1503,6 @@ const exitTextScriptForLineBreak = (obj, proxy) => {
   return true;
 };
 
-const textScriptCaretAffinityForInput = (obj, proxy, selection) => {
-  const start = selection?.start ?? proxy?.selectionStart ?? 0;
-  return obj?._textScriptCaretIndex === start ? obj._textScriptCaretAffinity : '';
-};
-
 const transformTextScriptRangesForInput = (oldRanges, {
   oldValue = '',
   newValue = '',
@@ -1517,11 +1512,12 @@ const transformTextScriptRangesForInput = (oldRanges, {
   insertedScriptRanges = [],
   caretAffinity = '',
 } = {}) => {
+  const inserted = String(insertedText ?? '');
+  if (typeof BOARDFISH_PRODUCTION !== 'undefined' && !oldRanges?.length && !insertedScriptRanges?.length && !/[\^_{}]/.test(inserted)) return { ranges: [], active: null };
   const oldText = String(oldValue ?? '');
   const nextText = String(newValue ?? '');
   const editStart = Math.max(0, Math.min(start, oldText.length));
   const editEnd = Math.max(editStart, Math.min(end, oldText.length));
-  const inserted = String(insertedText ?? '');
   const insertedLength = inserted.length;
   const removedLength = editEnd - editStart;
   const delta = insertedLength - removedLength;
@@ -2680,7 +2676,7 @@ function enterEdit(id, {
       currentProxyValue = textEditProxyValue(proxy);
     }
     const scriptRanges = textEditScriptRanges(obj);
-    const scriptCaretAffinity = textScriptCaretAffinityForInput(obj, proxy, selection);
+    const scriptCaretAffinity = obj._textScriptCaretIndex === selection.start ? obj._textScriptCaretAffinity : '';
     const nativeReplacement = textEditBeforeInputReplacement(currentProxyValue, selection, event);
     pendingInputState = {
       ...selection,

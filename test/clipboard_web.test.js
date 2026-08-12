@@ -75,6 +75,7 @@ function loadClipboardExportHarness(options = {}) {
     debugEnds: [],
     debugSteps: [],
     insertedImages: [],
+    jsClipboards: [],
     jello: [],
     objectJello: [],
     deleted: 0,
@@ -205,7 +206,8 @@ function loadClipboardExportHarness(options = {}) {
     scheduleRender(board, overlay, sourceName) {
       calls.renders.push({ board, overlay, source: sourceName });
     },
-    setJsClipboard() {
+    setJsClipboard(value) {
+      calls.jsClipboards.push(value);
       return 'clip-token';
     },
     deleteSelected() {
@@ -258,7 +260,6 @@ function loadClipboardPasteObjectsHarness() {
     jsClipboard: {
       type: 'objects',
       objects: [sourceTextObject],
-      imageData: {},
     },
     _jsClipboardWebMaybeStale: false,
     _pasteInProgress: false,
@@ -406,7 +407,7 @@ function loadTextEditCopyHarness(value) {
 test('web js clipboard stays current only while its browser clipboard marker matches', async () => {
   const context = loadClipboardStateHarness();
 
-  context.setJsClipboard({ type: 'objects', objects: [{ id: 'obj-1' }], imageData: {} });
+  context.setJsClipboard({ type: 'objects', objects: [{ id: 'obj-1' }] });
   const token = context.getJsClipboardWebToken();
   context.markJsClipboardWebTokenWritten(token);
 
@@ -424,7 +425,7 @@ test('web js clipboard stays current only while its browser clipboard marker mat
 test('web js clipboard without a browser marker is invalidated after leaving the page', async () => {
   const context = loadClipboardStateHarness();
 
-  context.setJsClipboard({ type: 'objects', objects: [{ id: 'obj-1' }], imageData: {} });
+  context.setJsClipboard({ type: 'objects', objects: [{ id: 'obj-1' }] });
   context.forceJsClipboardSetAt(Date.now() - 1000);
   context.markJsClipboardMaybeStaleFromWebBlur();
 
@@ -565,6 +566,7 @@ test('copying a selected text object jiggles immediately while clipboard write c
 
   const copyPromise = context.copySelected();
 
+  assert.equal('imageData' in context.calls.jsClipboards[0], false);
   assert.deepEqual(context.calls.copiedTexts, [context.textObject.data.content]);
   assert.deepEqual(context.calls.jello, []);
   assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['text-1']]);
