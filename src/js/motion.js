@@ -137,26 +137,26 @@
     const shape = (shapeTimeSec > 0
       ? springImpulse(shapeTimeSec, 6.3334507896370225, 18.7513199475259) * shapeAttack * settle
       : 0) * NORMALIZE_SHAPE;
-    const strain = shape * 0.028 * (grouped ? 1 + groupSide * 0.06 : 1);
+    const scaleY = Math.exp(shape * 0.028 * (grouped ? 1 + groupSide * 0.06 : 1));
     return {
       groupTranslateX: (grouped ? 0 : xPx) / zoom,
       translateX: xPx * groupSide / zoom,
       translateY: yPx / zoom,
-      scaleX: Math.exp(-strain),
-      scaleY: Math.exp(strain),
+      scaleX: 1 / scaleY,
+      scaleY,
       scaleOriginX: 0.5,
       scaleOriginY: 0.12,
     };
   };
 
   const blendTransforms = (previous, next, weight) => {
-    const blend = (a, b) => a + (b - a) * weight;
+    const blend = (a, b) => a + (b - a) * weight, scaleY = Math.exp(blend(Math.log(previous.scaleY), Math.log(next.scaleY)));
     return {
       translateX: blend(previous.translateX, next.translateX),
       translateY: blend(previous.translateY, next.translateY),
       groupTranslateX: blend(previous.groupTranslateX, next.groupTranslateX),
-      scaleX: Math.exp(blend(Math.log(previous.scaleX), Math.log(next.scaleX))),
-      scaleY: Math.exp(blend(Math.log(previous.scaleY), Math.log(next.scaleY))),
+      scaleX: 1 / scaleY,
+      scaleY,
       scaleOriginX: 0.5,
       scaleOriginY: 0.12,
     };

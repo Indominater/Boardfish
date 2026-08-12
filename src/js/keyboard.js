@@ -35,25 +35,21 @@ function hasActiveTextEditAlignmentContext() {
   return !!editingId && typeof _editEl !== 'undefined' && !!_editEl;
 }
 
-const selectedImageCountForKeyboardAction = () => {
-  if (!selectedIds?.size || !objectsMap?.get) return 0;
+const hasSelectedImagesForKeyboardAction = (minimum = 1) => {
+  if (!selectedIds?.size || !objectsMap?.get) return false;
   let count = 0;
   for (const id of selectedIds) {
-    if (objectsMap.get(id)?.type === 'image') count++;
+    if (objectsMap.get(id)?.type === 'image' && ++count >= minimum) return true;
   }
-  return count;
-};
-
-const hasSelectedImagesForKeyboardTransform = () => {
-  return selectedImageCountForKeyboardAction() >= 1;
+  return false;
 };
 
 const canTransformSelectedImagesFromKeyboard = () => {
-  return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardTransform();
+  return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardAction();
 };
 
 const canArrangeSelectedImagesFromKeyboard = () => {
-  return !editingId && !isBoardInputBlocked() && selectedImageCountForKeyboardAction() >= 2;
+  return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardAction(2);
 };
 
 const selectedTextObjectForKeyboardEdit = () => {

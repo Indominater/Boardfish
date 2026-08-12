@@ -280,10 +280,16 @@ const isOpenHydratableImageSource = (source) => {
   return typeof source === 'string' || isWebImageRef(source);
 };
 
-function getVisibleImageKeys(limit = Infinity) {
+function updateVisibleImagePreviewTask(tasks, key, obj) {
+  const area = Math.max(1, Number(obj.w || 0)) * Math.max(1, Number(obj.h || 0));
+  const previous = tasks.get(key);
+  if (!previous || area > previous.area) tasks.set(key, { key, obj, area });
+}
+
+function getVisibleImageKeys(limit = Infinity, previewTasks = null) {
   const b = getVisibleWorldBounds();
   const keys = [];
-  const seen = new Set();
+  const seen = previewTasks || new Set();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const skipped = { nonImage: 0, outside: 0, missingKey: 0, nonHydratable: 0, cached: 0, duplicate: 0 };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -309,12 +315,14 @@ function getVisibleImageKeys(limit = Infinity) {
       continue;
     }
     if (seen.has(key)) {
+      if (previewTasks?.get(key)) updateVisibleImagePreviewTask(previewTasks, key, obj);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       skipped.duplicate++;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       continue;
     }
-    seen.add(key);
+    if (previewTasks) previewTasks.set(key, null);
+    else seen.add(key);
     const source = BoardfishImageStore.getSource(key);
     if (!source) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -328,6 +336,7 @@ function getVisibleImageKeys(limit = Infinity) {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       continue;
     }
+    if (previewTasks) updateVisibleImagePreviewTask(previewTasks, key, obj);
     if (BoardfishImageStore.hasDisplayImage(key)) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       skipped.cached++;
@@ -524,31 +533,15 @@ async function hydrateImageKeysWithLimit(keys
   return anyHydrated;
 }
 
-function getVisibleImagePreviewTasks() {
-  const rect = getVisibleWorldBounds();
-  const tasksByKey = new Map();
-  for (let i = objects.length - 1; i >= 0; i--) {
-    const obj = objects[i];
-    if (obj?.type !== 'image' || !obj.data?.imgKey || !objectIntersectsRect(obj, rect)) continue;
-    const key = obj.data.imgKey;
-    if (!isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) continue;
-    const area = Math.max(1, Number(obj.w || 0)) * Math.max(1, Number(obj.h || 0));
-    const previous = tasksByKey.get(key);
-    if (!previous || area > previous.area) tasksByKey.set(key, { key, obj, area });
-  }
-  const tasks = [];
-  for (const task of tasksByKey.values()) tasks.push(task);
-  return tasks;
-}
-
-async function buildVisibleImagePreviewsForOpen(keys
+async function buildVisibleImagePreviewsForOpen(keys, previewTasks
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
   const pendingKeys = new Set(keys);
-  const tasks = getVisibleImagePreviewTasks();
+  const tasks = [];
+  for (const task of previewTasks.values()) if (task) tasks.push(task);
   const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
   const concurrency = Math.max(1, Math.min(8, tasks.length || 1));
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -931,7 +924,8 @@ async function finishOpenedBoard(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const hydrateStart = performance.now();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const visibleKeys = getVisibleImageKeys();
+    const previewTasks = new Map();
+    const visibleKeys = getVisibleImageKeys(Infinity, previewTasks);
     backgroundHydrationPriorityKeys = visibleKeys;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const debugMeta = isOpenDebugActive(dbg)
@@ -939,7 +933,7 @@ async function finishOpenedBoard(
       : {};
     OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: visibleKeys.length, ...debugMeta });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const preview = await buildVisibleImagePreviewsForOpen(visibleKeys
+    const preview = await buildVisibleImagePreviewsForOpen(visibleKeys, previewTasks
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , dbg
       /* BOARDFISH_DEV_DIAGNOSTICS_END */

@@ -168,16 +168,12 @@
     return partitions;
   }
 
-  const operationKeyCompare = (left, right) => {
-    if (!right) return -1;
-    return compareNumberArrays(left.key, right.key);
-  };
-
-  function bestImprovingOperation(rows) {
+  function bestImprovingOperation(rows, keyBase) {
     let best = null;
     let currentCost = 0;
     for (const row of rows) currentCost += row.width * row.width;
     const improvementTolerance = numericTolerance(currentCost);
+    const swapKeyBase = keyBase ** 4;
 
     for (let from = 0; from < rows.length; from++) {
       const source = rows[from];
@@ -188,20 +184,13 @@
           const target = rows[to];
           const delta = 2 * item.width * (target.width - source.width + item.width);
           if (delta >= -improvementTolerance) continue;
-          const operation = {
-            type: 'move',
-            delta,
-            from,
-            to,
-            item,
-            key: [0, item.rank, from, to],
-          };
+          const key = (item.rank * keyBase + from) * keyBase + to;
           const bestTolerance = numericTolerance(delta, best?.delta ?? 0);
           if (
             !best ||
             delta < best.delta - bestTolerance ||
-            (Math.abs(delta - best.delta) <= bestTolerance && operationKeyCompare(operation, best) < 0)
-          ) best = operation;
+            (Math.abs(delta - best.delta) <= bestTolerance && key < best.key)
+          ) best = { type: 'move', delta, from, to, item, key };
         }
       }
     }
@@ -215,21 +204,15 @@
             const widthDelta = rightItem.width - leftItem.width;
             const delta = 2 * widthDelta * (left.width - right.width + widthDelta);
             if (delta >= -improvementTolerance) continue;
-            const operation = {
-              type: 'swap',
-              delta,
-              from: leftIndex,
-              to: rightIndex,
-              item: leftItem,
-              otherItem: rightItem,
-              key: [1, leftItem.rank, rightItem.rank, leftIndex, rightIndex],
-            };
+            const key = swapKeyBase + (
+              (leftItem.rank * keyBase + rightItem.rank) * keyBase + leftIndex
+            ) * keyBase + rightIndex;
             const bestTolerance = numericTolerance(delta, best?.delta ?? 0);
             if (
               !best ||
               delta < best.delta - bestTolerance ||
-              (Math.abs(delta - best.delta) <= bestTolerance && operationKeyCompare(operation, best) < 0)
-            ) best = operation;
+              (Math.abs(delta - best.delta) <= bestTolerance && key < best.key)
+            ) best = { type: 'swap', delta, from: leftIndex, to: rightIndex, item: leftItem, otherItem: rightItem, key };
           }
         }
       }
@@ -277,7 +260,7 @@
 
     const maxSteps = items.length * LOCAL_IMPROVEMENT_STEP_FACTOR;
     for (let step = 0; step < maxSteps; step++) {
-      const operation = bestImprovingOperation(rows);
+      const operation = bestImprovingOperation(rows, items.length + 1);
       if (!operation) break;
       applyImprovingOperation(rows, operation);
     }
@@ -294,7 +277,6 @@
     const randomizedRows = rows.map((row) => ({
       ...row,
       items: row.items.slice(),
-      ranks: row.ranks.slice(),
     }));
     const slotsByWidth = new Map();
     for (let rowIndex = 0; rowIndex < randomizedRows.length; rowIndex++) {

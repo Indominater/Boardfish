@@ -28,7 +28,7 @@
     const active = new Map();
     let mode = 'idle';
     let holdTimer = null;
-    let pinchStart = null;
+    let pinchX, pinchY, pinchDistance = 0;
 
     const call = (name, payload) => {
       if (typeof options[name] === 'function') options[name](payload);
@@ -67,26 +67,22 @@
 
     function startPinch(sourceEvent = null) {
       clearHoldTimer();
-      if (active.size < 2) return false;
       const geometry = twoPointerGeometry(active.values());
       mode = 'pinch';
-      pinchStart = geometry;
-      call('onPinchStart', {
-        ...geometry,
-        startCenterX: geometry.centerX,
-        startCenterY: geometry.centerY,
-        scale: 1,
-        event: sourceEvent,
-      });
-      return true;
+      pinchX = geometry.startCenterX = geometry.centerX;
+      pinchY = geometry.startCenterY = geometry.centerY;
+      pinchDistance = geometry.distance;
+      geometry.scale = 1;
+      geometry.event = sourceEvent;
+      call('onPinchStart', geometry);
     }
 
     function emitPinch(point) {
-      if (mode !== 'pinch' || active.size < 2 || !pinchStart) return false;
+      if (mode !== 'pinch' || active.size < 2 || !pinchDistance) return false;
       const geometry = twoPointerGeometry(active.values());
-      geometry.startCenterX = pinchStart.centerX;
-      geometry.startCenterY = pinchStart.centerY;
-      geometry.scale = geometry.distance / pinchStart.distance;
+      geometry.startCenterX = pinchX;
+      geometry.startCenterY = pinchY;
+      geometry.scale = geometry.distance / pinchDistance;
       geometry.event = point?.sourceEvent || null;
       call('onPinch', geometry);
       return true;
@@ -126,7 +122,7 @@
       active.set(pointerId, stored);
       if (active.size === 1) {
         mode = 'pending';
-        pinchStart = null;
+        pinchDistance = 0;
         startHold(stored);
         call('onPressStart', gesturePayload(stored));
       } else {
@@ -210,14 +206,14 @@
         remaining.previousX = remaining.x;
         remaining.previousY = remaining.y;
         mode = 'pan';
-        pinchStart = null;
+        pinchDistance = 0;
         call('onPanStart', gesturePayload(remaining, { resumedFromPinch: true }));
         return true;
       }
 
       if (active.size === 0) {
         mode = 'idle';
-        pinchStart = null;
+        pinchDistance = 0;
         call('onGestureEnd', gesturePayload(current, { cancelled, finishedMode }));
       }
       return true;
@@ -230,7 +226,7 @@
       clearHoldTimer();
       active.clear();
       mode = 'idle';
-      pinchStart = null;
+      pinchDistance = 0;
       if (finishedMode === 'pinch') {
         call('onPinchEnd', gesturePayload(point, { cancelled: true, reason }));
       }

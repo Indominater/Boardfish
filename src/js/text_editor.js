@@ -485,11 +485,9 @@ const textEditBeforeInputReplacement = (text = '', selection = {}, event = null)
 };
 
 const textEditBlankLineDeleteRange = (text = '', index, keyOrInputType = '') => {
-  if (!text.includes('\n')) return null;
   const pos = Math.max(0, Math.min(Math.trunc(Number(index)) || 0, text.length));
-  const key = String(keyOrInputType || '');
-  if (key !== 'Delete' && key !== 'Backspace' && !key.startsWith('delete')) return null;
-  const backward = key === 'Backspace' || key.includes('Backward');
+  const backward = keyOrInputType === 'Backspace' || keyOrInputType.includes('Backward');
+  if (backward ? pos > 0 && text[pos - 1] !== '\n' : !' \t\n'.includes(text[pos] || '\n')) return null;
   const before = text.lastIndexOf('\n', Math.max(0, pos - 1));
   const start = before < 0 ? 0 : before + 1;
   const after = text.indexOf('\n', pos);
@@ -546,17 +544,14 @@ const exactTextEditLineCountForHeight = (height) => {
 const textEditMinLinesForSession = (obj, preserveSize = false) => {
   if (!obj || obj.type !== 'text') return 1;
   const currentLines = exactTextEditLineCountForHeight(obj.h);
-  if (preserveSize && currentLines > 1) return currentLines;
-  return normalizeTextContent(obj._editStartContent ?? obj.data?.content ?? '') === ''
-    ? NEW_TEXT_EDIT_MIN_LINES
-    : 1;
+  return preserveSize && currentLines > 1 ? currentLines : 1;
 };
 
 const setTextEditMinLinesForSession = (obj, preserveSize = false) => {
   if (!obj || obj.type !== 'text') return 1;
   const minLines = textEditMinLinesForSession(obj, preserveSize);
   obj._editMinLines = minLines;
-  if (preserveSize && minLines > textEditMinLinesForSession(obj)) {
+  if (preserveSize && minLines > 1) {
     obj._textEditPreservedMinLines = minLines;
   } else {
     delete obj._textEditPreservedMinLines;
@@ -703,8 +698,7 @@ const textEditHasCurrentScriptRangeCache = (obj, content, sourceKey) => (
   obj._textScriptRangesCacheSourceKey === sourceKey
 );
 
-const textEditScriptRangesAreBraced = (content, ranges = []) => {
-  const text = normalizeTextContent(content);
+const textEditScriptRangesAreBraced = (text, ranges = []) => {
   if (!Array.isArray(ranges) || !ranges.length) return false;
   for (const range of ranges) {
     if (!isTextScriptBracedRange(text, range)) return false;
@@ -714,7 +708,7 @@ const textEditScriptRangesAreBraced = (content, ranges = []) => {
 
 const normalizeTextObjectToEditableScriptBraces = (obj) => {
   if (!obj || obj.type !== 'text') return false;
-  const current = normalizeTextContent(obj.data?.content || '');
+  const current = obj.data.content;
   const sourceIsArray = Array.isArray(obj.data?.scriptRanges);
   let sourceRanges = sourceIsArray ? obj.data.scriptRanges : [];
   let sourceKey = textEditScriptRangesKey(sourceRanges);
@@ -894,10 +888,11 @@ const textEditVisibleSelectionDeleteRange = (obj, selection, content = null, ran
   if (!obj) return null;
   const text = content == null ? normalizeTextContent(obj.data?.content || '') : String(content ?? '');
   const scriptRanges = ranges || textEditScriptRanges(obj);
-  const rangeContext = context || textEditScriptRangeContext(scriptRanges);
   let start = Math.max(0, Math.min(selection?.start ?? 0, text.length));
   let end = Math.max(start, Math.min(selection?.end ?? start, text.length));
   if (start === end) return null;
+  if (!scriptRanges.length) return { start, end };
+  const rangeContext = context || textEditScriptRangeContext(scriptRanges);
 
   let changed = true;
   while (changed) {
@@ -905,7 +900,7 @@ const textEditVisibleSelectionDeleteRange = (obj, selection, content = null, ran
     let expandedStart = true;
     while (expandedStart) {
       expandedStart = false;
-      for (const range of scriptRanges || []) {
+      for (const range of scriptRanges) {
         const markerIndex = range.start - 1;
         const visibleBounds = textEditScriptRangeVisibleBounds(text, range);
         if (markerIndex < 0 || markerIndex >= start) continue;
@@ -1783,10 +1778,9 @@ const applyTextEditAlignmentFromKeyboard = (direction = 'right', id = editingId,
     else scheduleRender(true, false);
     return true;
   }
-  markDirty(id);
   if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'text-align');
   else scheduleRender(true, true);
-  pushHistory('text-align');
+  pushHistory('text-align', [id]);
   return true;
 };
 
@@ -2128,24 +2122,14 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
-const textForTextEditPaste = (value) => (
-  typeof textForTextObjectPaste === 'function'
-    ? textForTextObjectPaste(value)
-    : normalizeTextContent(value)
-);
-
 const editableTextScriptPayload = (payload = {}) => {
-  const brace = typeof textScriptLinearToDeterministicBraces === 'function'
-    ? textScriptLinearToDeterministicBraces
-    : (typeof textContentWithCanonicalScriptBraces === 'function' ? textContentWithCanonicalScriptBraces : null);
-  const text = textForTextEditPaste(
-    typeof brace === 'function'
-      ? brace(payload.text || '', payload.scriptRanges || [])
-      : (payload.text || '')
-  );
-  const scriptRanges = typeof deriveBracedTextScriptRangesFromContent === 'function'
-    ? deriveBracedTextScriptRangesFromContent(text)
-    : [];
+  const source = payload.text || '';
+  const sourceRanges = payload.scriptRanges || [];
+  if (!sourceRanges.length && !/[\^_]/.test(source)) {
+    return { text: textForTextObjectPaste(source), scriptRanges: [] };
+  }
+  const text = textForTextObjectPaste(textScriptLinearToDeterministicBraces(source, sourceRanges));
+  const scriptRanges = deriveBracedTextScriptRangesFromContent(text);
   return { text, scriptRanges };
 };
 
@@ -2224,7 +2208,7 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
   if (textEditBracedScriptBoundaryInsertionAt(obj, selection.start)) return false;
 
   const rawPastedText = normalizeTextContent(text || '');
-  const pastedText = textForTextEditPaste(rawPastedText);
+  const pastedText = textForTextObjectPaste(rawPastedText);
   if (!pastedText) return false;
   if (pastedText !== rawPastedText) return false;
 

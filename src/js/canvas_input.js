@@ -461,8 +461,8 @@ function createSelectionDragSession(startClientX, startClientY) {
   const dragZoom = Math.max(0.0001, zoom);
   let grpMoved = false;
   let finished = false;
-  const grpThreshold = 9 / (dragZoom * dragZoom);
   function applyGrpDrag(dx, dy) {
+    dx /= dragZoom; dy /= dragZoom;
     for (const item of grpItems) { item.obj.x = item.startX + dx; item.obj.y = item.startY + dy; }
     if (typeof BOARDFISH_PRODUCTION === 'undefined') withRenderSource('group-drag', () => drawBoard());
     else drawBoard();
@@ -471,9 +471,9 @@ function createSelectionDragSession(startClientX, startClientY) {
   const dragCommitter = createRafCommitter(applyGrpDrag);
   function move(clientX, clientY) {
     if (finished || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
-    const dx = (clientX - startClientX) / dragZoom;
-    const dy = (clientY - startClientY) / dragZoom;
-    if (!grpMoved && dx*dx + dy*dy > grpThreshold) grpMoved = true;
+    const dx = clientX - startClientX;
+    const dy = clientY - startClientY;
+    if (!grpMoved && dx*dx + dy*dy > 9) grpMoved = true;
     if (!grpMoved) return false;
     dragCommitter.schedule(dx, dy);
     return true;
@@ -528,16 +528,14 @@ function startRubberBandSelection(e, additive) {
   beginRubberBandDrag();
   let rbActive = false;
   let rbFinished = false;
-  const rbStyleCommitter = createRafCommitter((l, t, w, h) => {
-    rubberBand.style.cssText = `display:block;left:${l}px;top:${t}px;width:${w}px;height:${h}px`;
+  const rbStyleCommitter = createRafCommitter((x, y, dx, dy) => {
+    rubberBand.style.cssText = `display:block;left:${Math.min(rbStartX, x)}px;top:${Math.min(rbStartY, y)}px;width:${Math.abs(dx)}px;height:${Math.abs(dy)}px`;
   });
   function onRbMove(ev) {
     const dx = ev.clientX - rbStartX, dy = ev.clientY - rbStartY;
     if (!rbActive && dx*dx + dy*dy > 16) rbActive = true;
     if (!rbActive) return;
-    const l = Math.min(rbStartX, ev.clientX), t = Math.min(rbStartY, ev.clientY);
-    const w = Math.abs(dx), h = Math.abs(dy);
-    rbStyleCommitter.schedule(l, t, w, h);
+    rbStyleCommitter.schedule(ev.clientX, ev.clientY, dx, dy);
   }
   function onRbUp(ev) {
     if (rbFinished) return;

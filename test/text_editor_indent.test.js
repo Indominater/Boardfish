@@ -371,7 +371,7 @@ function loadLiveTextEditResizeHarness() {
     recordTextEditInputHistory() {},
     flushEditHistoryCheckpoint() { context.flushes++; return false; },
     markDirty(id) { context.dirty.push(id); },
-    pushHistory(reason) { context.histories.push(reason); },
+    pushHistory(reason, dirty) { if (dirty) context.dirty.push(...dirty); context.histories.push(reason); },
     pushEditHistoryIfChanged() { return false; },
     scheduleRender(board, overlay, reason) { context.renders.push({ board, overlay, reason }); },
     invalidateOffscreen() {},

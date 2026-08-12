@@ -19,8 +19,8 @@ function setSelectionOverlayScreenRect(element, state, resting, animated, padDev
   const y2 = Math.ceil((restingY + restingHeight + pad) * scale) / scale;
   const snappedWidth = x2 - x1;
   const snappedHeight = y2 - y1;
-  const deltaX = _cleanOverlay(animated.x1 * zoom + panX - restingX);
-  const deltaY = _cleanOverlay(animated.y1 * zoom + panY - restingY);
+  const deltaX = _cleanOverlay((animated.x1 - resting.x1) * zoom);
+  const deltaY = _cleanOverlay((animated.y1 - resting.y1) * zoom);
   const deltaWidth = _cleanOverlay((animated.x2 - animated.x1) * zoom - restingWidth);
   const deltaHeight = _cleanOverlay((animated.y2 - animated.y1) * zoom - restingHeight);
   _setStyleIfChanged(element, 'transform', `translate(${_cleanOverlay(x1 + deltaX)}px,${_cleanOverlay(y1 + deltaY)}px)`, state);
@@ -33,14 +33,9 @@ function selectionOverlayObjectBounds(obj) {
   const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj);
   if (!motion) return null;
   const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
-  const scalePivotX = obj.x + obj.w * scaleOriginX;
-  const scalePivotY = obj.y + obj.h * scaleOriginY;
-  return {
-    x1: scalePivotX + (obj.x - scalePivotX) * scaleX + translateX,
-    y1: scalePivotY + (obj.y - scalePivotY) * scaleY + translateY,
-    x2: scalePivotX + (obj.x + obj.w - scalePivotX) * scaleX + translateX,
-    y2: scalePivotY + (obj.y + obj.h - scalePivotY) * scaleY + translateY,
-  };
+  const x1 = obj.x + obj.w * scaleOriginX * (1 - scaleX) + translateX;
+  const y1 = obj.y + obj.h * scaleOriginY * (1 - scaleY) + translateY;
+  return { x1, y1, x2: x1 + obj.w * scaleX, y2: y1 + obj.h * scaleY };
 }
 
 function selectionOverlaySelectedBounds(resting, obj, hasMotion) {
@@ -448,7 +443,9 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         if (!snapshots.length) return;
 
         minObjectScale = Math.min(1, minObjectScale);
-        const resizeCommitter = createRafCommitter((scale) => {
+        const resizeCommitter = createRafCommitter((x, y, eventZoom) => {
+          const dx = (x - startX) / eventZoom, dy = (y - startY) / eventZoom;
+          const scale = Math.max(minObjectScale, Math.min((handlePoint.x + dx - anchorPoint.x) / (handlePoint.x - anchorPoint.x), (handlePoint.y + dy - anchorPoint.y) / (handlePoint.y - anchorPoint.y)));
           for (const snap of snapshots) {
             const o = snap.obj;
             o.x = anchorPoint.x + (snap.x - anchorPoint.x) * scale;
@@ -459,15 +456,8 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           drawBoard(); updateSelectionOverlay();
         });
 
-        function onMultiMove(ev) {
-          const dx = (ev.clientX - startX) / zoom;
-          const dy = (ev.clientY - startY) / zoom;
-          const scale = Math.max(minObjectScale, Math.min((handlePoint.x + dx - anchorPoint.x) / (handlePoint.x - anchorPoint.x), (handlePoint.y + dy - anchorPoint.y) / (handlePoint.y - anchorPoint.y)));
-          resizeCommitter.schedule(scale);
-        }
-
         beginDocumentDrag({
-          move: onMultiMove,
+          move: (ev) => resizeCommitter.schedule(ev.clientX, ev.clientY, zoom),
           up() {
             resizeCommitter.flush();
             pushHistory('multi-resize', snapshots);
@@ -710,19 +700,9 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
               h: obj.h,
             });
           }
-          const markStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          markDirty(obj.id);
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (resizeDebugDragId) {
-            recordSelectionTextResizeStep('mark-dirty', resizeDebugDragId, {
-              objectId: obj.id,
-              markDirtyMs: selectionResizeDebugRound(selectionResizeDebugNow() - markStartedAt),
-            });
-          }
           const historyStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          pushHistory('resize');
+          pushHistory('resize', [obj.id]);
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (resizeDebugDragId) {
             recordSelectionTextResizeStep('history-pushed', resizeDebugDragId, {

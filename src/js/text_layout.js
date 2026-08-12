@@ -703,18 +703,17 @@ function getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, text, paraS
     obj._textParagraphPrefixCacheScriptKey = normalizedScriptKey;
   }
 
-  const cacheKey = `${start}:${end}`;
-  const cached = obj._textParagraphPrefixCache.get(cacheKey);
+  const cached = obj._textParagraphPrefixCache.get(start);
   if (cached) {
     if (obj._textParagraphPrefixCache.size >= TEXT_PARAGRAPH_PREFIX_CACHE_MAX_ENTRIES) {
-      obj._textParagraphPrefixCache.delete(cacheKey);
-      obj._textParagraphPrefixCache.set(cacheKey, cached);
+      obj._textParagraphPrefixCache.delete(start);
+      obj._textParagraphPrefixCache.set(start, cached);
     }
     return cached;
   }
 
   const widths = getTextRangePrefixWidths(text.slice(start, end), start, scriptRanges, text, scriptMetrics);
-  obj._textParagraphPrefixCache.set(cacheKey, widths);
+  obj._textParagraphPrefixCache.set(start, widths);
   trimMapCache(obj._textParagraphPrefixCache, TEXT_PARAGRAPH_PREFIX_CACHE_MAX_ENTRIES);
   return widths;
 }
@@ -930,8 +929,7 @@ function prewarmTextObjectLayoutRuntimeCaches(obj, options = {}) {
   };
 }
 
-function measureTextRangeW(content, start, end, scriptRanges = []) {
-  const text = normalizeTextContent(content);
+function measureTextRangeW(text, start, end, scriptRanges = []) {
   const from = Math.max(0, Math.min(start, text.length));
   const to = Math.max(from, Math.min(end, text.length));
   const widths = getTextRangePrefixWidths(text.slice(from, to), from, scriptRanges, text);
@@ -1661,14 +1659,10 @@ const normalizeTextScriptRangesForContent = (content, scriptRanges = []) => {
 };
 
 const findBalancedTextScriptEnd = (text, start) => {
-  const open = text[start];
-  const pairs = { '(': ')', '[': ']', '{': '}' };
-  const close = pairs[open];
-  if (!close) return -1;
   let depth = 0;
   for (let i = start; i < text.length; i++) {
-    if (text[i] === open) depth++;
-    else if (text[i] === close) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') {
       depth--;
       if (depth === 0) return i + 1;
     }
