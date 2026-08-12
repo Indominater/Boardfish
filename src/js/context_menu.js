@@ -572,13 +572,13 @@ function resetZoomToClosestObject() {
   const { object, targetType, distanceSq, center } = closestResetZoomObjectToViewportCenter();
   const targetZoom = 1;
   if (!object) {
-    BoardfishViewportState.setZoomPan(
+    const changed = BoardfishViewportState.setZoomPan(
       targetZoom,
       window.innerWidth / 2 - center.x * targetZoom,
       window.innerHeight / 2 - center.y * targetZoom,
     );
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('reset-zoom');
-    else scheduleTransform();
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(changed, 'reset-zoom');
+    else scheduleTransform(changed);
     ViewportDebug.end(dbg, {
       mode: 'empty-board-center',
       centerX: center.x,
@@ -591,13 +591,13 @@ function resetZoomToClosestObject() {
   }
   const objectCenterX = object.x + object.w / 2;
   const objectCenterY = object.y + object.h / 2;
-  BoardfishViewportState.setZoomPan(
+  const changed = BoardfishViewportState.setZoomPan(
     targetZoom,
     window.innerWidth / 2 - objectCenterX * targetZoom,
     window.innerHeight / 2 - objectCenterY * targetZoom,
   );
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('reset-zoom');
-  else scheduleTransform();
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(changed, 'reset-zoom');
+  else scheduleTransform(changed);
   ViewportDebug.end(dbg, {
     objectId: object.id,
     objectType: targetType,

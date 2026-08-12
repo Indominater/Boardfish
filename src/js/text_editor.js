@@ -633,10 +633,8 @@ const textEditScriptRanges = (obj) => obj ? getTextScriptRanges(obj) : [];
 
 const textEditScriptRangeContext = (ranges = []) => {
   if (!ranges.length) return null;
-  const byMarker = new Map();
   const byStart = new Map();
   const byEnd = new Map();
-  const byClose = new Map();
   const add = (map, key, range) => {
     if (!Number.isFinite(key)) return;
     const list = map.get(key);
@@ -644,23 +642,21 @@ const textEditScriptRangeContext = (ranges = []) => {
     else map.set(key, [range]);
   };
   for (const range of ranges) {
-    add(byMarker, Math.trunc(Number(range.start)) - 1, range);
     add(byStart, Math.trunc(Number(range.start)), range);
     add(byEnd, Math.trunc(Number(range.end)), range);
-    add(byClose, Math.trunc(Number(range.end)) - 1, range);
   }
-  return { byMarker, byStart, byEnd, byClose };
+  return { byStart, byEnd };
 };
 
 const textEditContextList = (context, key, index) => context?.[key]?.get(index) || [];
 
 const isTextEditScriptHiddenAtFast = (index, text, context) => {
   if (!context) return false;
-  if (textEditContextList(context, 'byMarker', index).length) return true;
+  if (textEditContextList(context, 'byStart', index + 1).length) return true;
   for (const range of textEditContextList(context, 'byStart', index)) {
     if (isTextScriptBracedRange(text, range)) return true;
   }
-  for (const range of textEditContextList(context, 'byClose', index)) {
+  for (const range of textEditContextList(context, 'byEnd', index + 1)) {
     if (isTextScriptBracedRange(text, range)) return true;
   }
   return false;
@@ -834,9 +830,8 @@ const textEditBaseChildScriptDeleteRange = (obj, baseIndex, content = null, rang
   let changed = true;
   while (changed) {
     changed = false;
-    for (const range of textEditContextList(rangeContext, 'byMarker', end)) {
+    for (const range of textEditContextList(rangeContext, 'byStart', end + 1)) {
       const markerIndex = range.start - 1;
-      if (markerIndex !== end) continue;
       if (textEditScriptRangeEndingAtContainsIndex(scriptRanges, start, markerIndex, rangeContext)) continue;
       if (!isTextEditScriptHiddenAtFast(markerIndex, text, rangeContext)) continue;
       if (range.end > end) {
@@ -849,14 +844,13 @@ const textEditBaseChildScriptDeleteRange = (obj, baseIndex, content = null, rang
   return end > start + 1 ? { start, end } : null;
 };
 
-const textEditScriptRootBaseIndexForRange = (ranges, range) => {
+const textEditScriptRootBaseIndexForRange = (ranges, range, context = textEditScriptRangeContext(ranges)) => {
   let markerIndex = (range?.start ?? 0) - 1;
   if (markerIndex <= 0) return markerIndex - 1;
   let guard = (ranges || []).length + 1;
   while (guard-- > 0) {
     let previous = null;
-    for (const item of ranges || []) {
-      if (item.end !== markerIndex) continue;
+    for (const item of textEditContextList(context, 'byEnd', markerIndex)) {
       if (!previous || item.start < previous.start) previous = item;
     }
     if (!previous) break;
@@ -873,8 +867,7 @@ const textEditCompoundScriptDeleteRangeBeforeCaret = (obj, index, content = null
   const pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
   let best = null;
   for (const range of textEditContextList(rangeContext, 'byEnd', pos)) {
-    if (range.end !== pos) continue;
-    const baseIndex = textEditScriptRootBaseIndexForRange(scriptRanges, range);
+    const baseIndex = textEditScriptRootBaseIndexForRange(scriptRanges, range, rangeContext);
     const candidate = textEditBaseChildScriptDeleteRange(obj, baseIndex, text, scriptRanges, rangeContext);
     if (!candidate || candidate.end !== pos) continue;
     if (!best || candidate.start < best.start || (candidate.start === best.start && candidate.end > best.end)) {
@@ -1111,7 +1104,7 @@ const textEditBracedScriptBoundaryInsertionAt = (obj, index) => {
 const isTextScriptHiddenOpeningOrMarkerAt = (ranges, index, content = '', context = null) => {
   if (index < 0) return false;
   const rangeContext = context || textEditScriptRangeContext(ranges);
-  if (textEditContextList(rangeContext, 'byMarker', index).length) return true;
+  if (textEditContextList(rangeContext, 'byStart', index + 1).length) return true;
   for (const range of textEditContextList(rangeContext, 'byStart', index)) {
     if (isTextScriptBracedRange(content, range)) return true;
   }
@@ -1120,7 +1113,7 @@ const isTextScriptHiddenOpeningOrMarkerAt = (ranges, index, content = '', contex
 
 const textScriptHiddenClosingBraceRangeAt = (ranges, index, content = '', context = null) => {
   if (index < 0 || content[index] !== '}') return null;
-  const candidates = context ? textEditContextList(context, 'byClose', index) : (ranges || []);
+  const candidates = context ? textEditContextList(context, 'byEnd', index + 1) : (ranges || []);
   for (const range of candidates) {
     if (!isTextScriptBracedRange(content, range)) continue;
     if (range.end - 1 !== index) continue;

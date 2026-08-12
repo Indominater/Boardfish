@@ -201,13 +201,13 @@ test('board object replacement retains content-keyed caches while reset clears t
   assert.deepEqual(context.textLayoutCacheClears, [{}]);
 });
 
-test('failed web image inserts revoke unadopted web image sources', () => {
+test('failed web image inserts roll back their adopted source once', () => {
   const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
 
-  assert.match(source, /const cleanupFailedWebImageInsertSource = \(imgKey, imageSource\) =>/);
-  assert.match(source, /if \(!obj\) cleanupFailedWebImageInsertSource\(imgKey, imageSource\);/);
+  assert.match(source, /const rollbackImageInsertSource = \(imgKey, source, hadPreviousSource = false, previousSource\) =>/);
+  assert.match(source, /if \(!obj\) rollbackSource\(\);/);
   assert.match(source, /catch \(err\) \{\s*rollbackSource\(\);/);
-  assert.match(source, /BoardfishWebBoardContainer\.revokeImageSource\?\.\(imageSource\);/);
+  assert.doesNotMatch(source, /cleanupFailedWebImageInsertSource|revokeImageSource/);
 });
 
 test('web image insert rejects a whole supported batch that would exceed object limit', () => {

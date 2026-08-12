@@ -372,9 +372,8 @@
       return;
     }
     if (!boardNavigationAllowed()) return;
-    BoardfishViewportState.panBy(gesture.dx, gesture.dy);
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pan', gesture.event);
-    else scheduleTransform();
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(BoardfishViewportState.panBy(gesture.dx, gesture.dy), 'touch-pan', gesture.event);
+    else scheduleTransform(BoardfishViewportState.panBy(gesture.dx, gesture.dy));
   }
 
   function beginTouchPinch() {
@@ -387,13 +386,13 @@
     const start = touchPinchStartViewport;
     const nextZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, start.zoom * gesture.scale));
     const scale = nextZoom / start.zoom;
-    BoardfishViewportState.setZoomPan(
+    const changed = BoardfishViewportState.setZoomPan(
       nextZoom,
       gesture.centerX - (gesture.startCenterX - start.panX) * scale,
       gesture.centerY - (gesture.startCenterY - start.panY) * scale,
     );
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('touch-pinch-zoom', gesture.event);
-    else scheduleTransform();
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(changed, 'touch-pinch-zoom', gesture.event);
+    else scheduleTransform(changed);
   }
 
   const controller = createTouchGestureController({

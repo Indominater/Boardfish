@@ -702,15 +702,9 @@
     const typedBlob = blob.type === source.mime
       ? blob
       : blob.slice(0, blob.size, source.mime || 'image/png');
-    const staleObjectUrl = source.objectUrl || '';
     source.__blob = typedBlob;
     source.__blobVolatile = volatile === true;
     source.bytes = typedBlob.size;
-    if (source.objectUrl) delete source.objectUrl;
-    if (source.dataUrl) delete source.dataUrl;
-    if (staleObjectUrl && root.URL?.revokeObjectURL) {
-      try { root.URL.revokeObjectURL(staleObjectUrl); } catch (_) {}
-    }
     if (Number.isInteger(crc)) cacheImageSourceCrc(source, typedBlob.size, crc >>> 0);
     return true;
   }
@@ -761,7 +755,7 @@
   }
 
   function isWebImageRef(source) {
-    return !!(source && typeof source === 'object' && source.web === true && (source.objectUrl || source.dataUrl || source.__bytes || source.__blob || source.__lazy));
+    return !!(source && typeof source === 'object' && source.web === true && (source.__bytes || source.__blob || source.__lazy));
   }
 
   function imageSourceCrcIdentity(source) {
@@ -827,22 +821,6 @@
     const blob = blobForWebImageRef(source);
     if (!blob) return null;
     return new Uint8Array(await blob.arrayBuffer());
-  }
-
-  function displaySrcForImageSource(source) {
-    if (typeof source === 'string') return source;
-    if (!isWebImageRef(source)) return '';
-    return source.objectUrl || source.dataUrl || '';
-  }
-
-  function revokeImageSource(source) {
-    if (!isWebImageRef(source) || !source.objectUrl || !root.URL?.revokeObjectURL) return false;
-    try {
-      root.URL.revokeObjectURL(source.objectUrl);
-      return true;
-    } catch (_) {
-      return false;
-    }
   }
 
   function manifestEntryForKey(board, key) {
@@ -1255,153 +1233,146 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     let lazyStoredImageBlobs = null;
 
-    try {
-      if (randomAccessBlob && lazyImageRefs) {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const headerStart = collectDiagnostics ? nowMs() : 0;
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        lazyStoredImageBlobs = await prepareLazyStoredImageBlobs(board, entries, randomAccessBlob, 8);
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectDiagnostics) imageHeaderReadMs = nowMs() - headerStart;
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (randomAccessBlob && lazyImageRefs) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const headerStart = collectDiagnostics ? nowMs() : 0;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      lazyStoredImageBlobs = await prepareLazyStoredImageBlobs(board, entries, randomAccessBlob, 8);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDiagnostics) imageHeaderReadMs = nowMs() - headerStart;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    const imageStore = board.imageStore || {};
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      const manifest = imageStore[key];
+      const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
+      const resolvedImage = resolveManifestImageEntry(entries, key, manifestObject);
+      const path = resolvedImage.path;
+      const imageEntry = resolvedImage.entry;
+      const advertisedImageBytes = zipEntryContentBytes(imageEntry);
+      const manifestExt = manifestObject.ext || '';
+      const ext = manifestExt || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
+      const mime = manifestObject.mime || mimeForExt(ext);
+      if (path.includes('\0')) throw new Error('Boardfish image entry path is invalid');
+      if (typeof mime !== 'string' || !/^image\/(?:png|jpe?g|webp|gif)$/.test(mime.toLowerCase())) {
+        throw new Error(`${path} has unsupported image metadata`);
       }
-      const imageStore = board.imageStore || {};
-      for (const key in imageStore) {
-        if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-        const manifest = imageStore[key];
-        const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
-        const resolvedImage = resolveManifestImageEntry(entries, key, manifestObject);
-        const path = resolvedImage.path;
-        const imageEntry = resolvedImage.entry;
-        const advertisedImageBytes = zipEntryContentBytes(imageEntry);
-        const manifestExt = manifestObject.ext || '';
-        const ext = manifestExt || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
-        const mime = manifestObject.mime || mimeForExt(ext);
-        if (path.includes('\0')) throw new Error('Boardfish image entry path is invalid');
-        if (typeof mime !== 'string' || !/^image\/(?:png|jpe?g|webp|gif)$/.test(mime.toLowerCase())) {
-          throw new Error(`${path} has unsupported image metadata`);
+      if (validateBoardPayload) {
+        validateBoardPayload({
+          objectCount,
+          boardJsonBytes: boardJsonBytes.length,
+          imageBytes: imageBytes + advertisedImageBytes,
+        });
+      }
+      const remainingBytes = Number.isFinite(maxBoardContentBytes)
+        ? maxBoardContentBytes - boardJsonBytes.length - imageBytes
+        : undefined;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const entryWarnings = [];
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      let bytes = null;
+      let imageBlob = null;
+      const canUseLazyRef = lazyImageRefs && imageEntry.method === ZIP_METHOD_STORED;
+      if (canUseLazyRef) {
+        assertStoredEntrySize(imageEntry);
+        imageBytes += advertisedImageBytes;
+        if (randomAccessBlob) {
+          const untypedBlob = lazyStoredImageBlobs?.get(path);
+          if (!untypedBlob) throw new Error(`Boardfish file is missing ${path}`);
+          imageBlob = untypedBlob.type === mime
+            ? untypedBlob
+            : untypedBlob.slice(0, untypedBlob.size, mime);
         }
-        if (validateBoardPayload) {
-          validateBoardPayload({
-            objectCount,
-            boardJsonBytes: boardJsonBytes.length,
-            imageBytes: imageBytes + advertisedImageBytes,
-          });
-        }
-        const remainingBytes = Number.isFinite(maxBoardContentBytes)
-          ? maxBoardContentBytes - boardJsonBytes.length - imageBytes
-          : undefined;
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const entryWarnings = [];
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        let bytes = null;
-        let imageBlob = null;
-        const canUseLazyRef = lazyImageRefs && imageEntry.method === ZIP_METHOD_STORED;
-        if (canUseLazyRef) {
-          assertStoredEntrySize(imageEntry);
-          imageBytes += advertisedImageBytes;
-          if (randomAccessBlob) {
-            const untypedBlob = lazyStoredImageBlobs?.get(path);
-            if (!untypedBlob) throw new Error(`Boardfish file is missing ${path}`);
-            imageBlob = untypedBlob.type === mime
-              ? untypedBlob
-              : untypedBlob.slice(0, untypedBlob.size, mime);
-          }
-          if (verifyImageCrc && Number.isFinite(Number(imageEntry.crc))) {
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            const crcStart = collectDiagnostics ? nowMs() : 0;
-            /* BOARDFISH_DEV_DIAGNOSTICS_END */
-            const view = randomAccessBlob
-              ? new Uint8Array(await imageBlob.arrayBuffer())
-              : compressedEntryBytes(containerBytes, imageEntry);
-            const actualCrc = await crc32Async(view);
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            if (collectDiagnostics) {
-              imageCrcMs += nowMs() - crcStart;
-              imageCrcCount++;
-            }
-            /* BOARDFISH_DEV_DIAGNOSTICS_END */
-            if ((imageEntry.crc >>> 0) !== actualCrc) {
-              /* BOARDFISH_DEV_DIAGNOSTICS_START */
-              const warning = {
-                type: 'crc-mismatch',
-                path: imageEntry.name,
-                expected: imageEntry.crc >>> 0,
-                actual: actualCrc,
-              };
-              entryWarnings.push(warning);
-              if (collectDiagnostics) warnings.push(warning);
-              /* BOARDFISH_DEV_DIAGNOSTICS_END */
-            }
-          }
-        } else {
+        if (verifyImageCrc && Number.isFinite(Number(imageEntry.crc))) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          const imageReadStart = collectDiagnostics ? nowMs() : 0;
+          const crcStart = collectDiagnostics ? nowMs() : 0;
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          bytes = await (randomAccessBlob ? readZipEntryFromBlob : readZipEntry)(
-            randomAccessBlob || containerBytes,
-            imageEntry,
-            {
-              maxBytes: remainingBytes,
-              /* BOARDFISH_DEV_DIAGNOSTICS_START */
-              onCrcMismatch(warning) {
-                entryWarnings.push(warning);
-                if (collectDiagnostics) warnings.push(warning);
-                return 'continue';
-              },
-              /* BOARDFISH_DEV_DIAGNOSTICS_END */
-              verifyCrc: typeof BOARDFISH_PRODUCTION === 'undefined' && verifyImageCrc,
-            },
-          );
+          const view = randomAccessBlob
+            ? new Uint8Array(await imageBlob.arrayBuffer())
+            : compressedEntryBytes(containerBytes, imageEntry);
+          const actualCrc = await crc32Async(view);
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (collectDiagnostics) {
-            const entryReadMs = nowMs() - imageReadStart;
-            imageReadMs += entryReadMs;
-            if (entryReadMs > imageReadMaxMs) {
-              imageReadMaxMs = entryReadMs;
-              imageReadMaxKey = key;
-            }
+            imageCrcMs += nowMs() - crcStart;
+            imageCrcCount++;
           }
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          imageBytes += bytes.length;
+          if ((imageEntry.crc >>> 0) !== actualCrc) {
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            const warning = {
+              type: 'crc-mismatch',
+              path: imageEntry.name,
+              expected: imageEntry.crc >>> 0,
+              actual: actualCrc,
+            };
+            entryWarnings.push(warning);
+            if (collectDiagnostics) warnings.push(warning);
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          }
         }
+      } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const imageRefStart = collectDiagnostics ? nowMs() : 0;
+        const imageReadStart = collectDiagnostics ? nowMs() : 0;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        nextSources[key] = canUseLazyRef
-          ? (randomAccessBlob
-              ? createWebImageRef({
-                  path,
-                  mime,
-                  ext,
-                  blob: imageBlob,
-                  volatileBlob: true,
-                  archiveCrc: imageEntry.crc,
-                })
-              : createWebImageRef({ path, mime, ext, lazy: { containerBytes, entry: imageEntry } }))
-          : createWebImageRef({ path, mime, ext, bytes });
+        bytes = await (randomAccessBlob ? readZipEntryFromBlob : readZipEntry)(
+          randomAccessBlob || containerBytes,
+          imageEntry,
+          {
+            maxBytes: remainingBytes,
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            onCrcMismatch(warning) {
+              entryWarnings.push(warning);
+              if (collectDiagnostics) warnings.push(warning);
+              return 'continue';
+            },
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+            verifyCrc: typeof BOARDFISH_PRODUCTION === 'undefined' && verifyImageCrc,
+          },
+        );
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (collectDiagnostics) {
-          if (canUseLazyRef) lazyImageRefCount++;
-          else eagerImageRefCount++;
+          const entryReadMs = nowMs() - imageReadStart;
+          imageReadMs += entryReadMs;
+          if (entryReadMs > imageReadMaxMs) {
+            imageReadMaxMs = entryReadMs;
+            imageReadMaxKey = key;
+          }
         }
-        imageEntries.push({
-          key,
-          path,
-          mime,
-          ext,
-          byteLength: canUseLazyRef ? advertisedImageBytes : bytes.length,
-          compressedSize: imageEntry.compressedSize,
-          warnings: entryWarnings,
-        });
-        if (collectDiagnostics) imageRefMs += nowMs() - imageRefStart;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        imageBytes += bytes.length;
       }
-    } catch (err) {
-      for (const key in nextSources) {
-        if (Object.prototype.hasOwnProperty.call(nextSources, key)) revokeImageSource(nextSources[key]);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const imageRefStart = collectDiagnostics ? nowMs() : 0;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      nextSources[key] = canUseLazyRef
+        ? (randomAccessBlob
+            ? createWebImageRef({
+                path,
+                mime,
+                ext,
+                blob: imageBlob,
+                volatileBlob: true,
+                archiveCrc: imageEntry.crc,
+              })
+            : createWebImageRef({ path, mime, ext, lazy: { containerBytes, entry: imageEntry } }))
+        : createWebImageRef({ path, mime, ext, bytes });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDiagnostics) {
+        if (canUseLazyRef) lazyImageRefCount++;
+        else eagerImageRefCount++;
       }
-      throw err;
+      imageEntries.push({
+        key,
+        path,
+        mime,
+        ext,
+        byteLength: canUseLazyRef ? advertisedImageBytes : bytes.length,
+        compressedSize: imageEntry.compressedSize,
+        warnings: entryWarnings,
+      });
+      if (collectDiagnostics) imageRefMs += nowMs() - imageRefStart;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     containerBytes = null;
 
@@ -1452,11 +1423,9 @@
     bytesForImageSourceAsync,
     dataUrlByteLength,
     dataUrlToBytes,
-    displaySrcForImageSource,
     isWebImageRef,
     readBoardContainer,
     recoverMatchingVolatileImageRefsFromContainer,
-    revokeImageSource,
     stabilizeVolatileImageRefs,
   });
 

@@ -27,8 +27,6 @@ function newImgKey() {
 }
 
 const isWebImageRef = (src) => !!globalThis.BoardfishWebBoardContainer?.isWebImageRef?.(src);
-const webImageDisplaySrc = (src) => typeof src === 'string' ? '' : globalThis.BoardfishWebBoardContainer?.displaySrcForImageSource?.(src) || '';
-const revokeWebImageSource = (src) => globalThis.BoardfishWebBoardContainer?.revokeImageSource?.(src) || false;
 
 function imageStoreBytesEstimate(src) {
   if (typeof src === 'string') return src.length;
@@ -42,7 +40,7 @@ function imageSourceDebugInfo(src) {
     return {
       kind: 'web-ref',
       length: Number(src.bytes || 0) || '',
-      prefix: webImageDisplaySrc(src).slice(0, 96) || src.path || '',
+      prefix: src.path || '',
     };
   }
   if (typeof src !== 'string') {
@@ -61,13 +59,9 @@ function imageSourceDebugInfo(src) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const isImageDisplayCacheRequestCurrent = (key, source, displaySrc, generation) => {
-  if (generation !== _imageStoreGeneration) return false;
-  const stored = imageStore[key];
-  if (stored !== source) return false;
-  if (typeof stored === 'string') return stored === displaySrc;
-  return isWebImageRef(stored) && (!displaySrc || webImageDisplaySrc(stored) === displaySrc);
-};
+const isImageDisplayCacheRequestCurrent = (key, source, generation) => (
+  generation === _imageStoreGeneration && imageStore[key] === source
+);
 
 function imageNeedsRendering(obj) {
   return !!(obj.data?.flipX || obj.data?.flipY || obj.data?.rotation);
@@ -121,17 +115,15 @@ function canvasToPngBlob(canvas) {
 }
 
 async function renderStoredImageToCanvas(obj, source = imageStore[obj?.data?.imgKey]) {
-  const webRef = isWebImageRef(source);
-  const displaySrc = webRef ? webImageDisplaySrc(source) : source;
-  if (!webRef && (typeof displaySrc !== 'string' || !displaySrc)) return null;
-  const bitmap = await createImageBitmapForSource(source, displaySrc).catch(() => null);
+  if (!isWebImageRef(source) && (typeof source !== 'string' || !source)) return null;
+  const bitmap = await createImageBitmapForSource(source).catch(() => null);
   if (!bitmap) return null;
   const canvas = renderImageToCanvas(obj, bitmap);
   bitmap.close?.();
   return canvas;
 }
 
-const bitmapSourceFromImageSource = async (source, displaySrc) => {
+const bitmapSourceFromImageSource = async (source) => {
   if (typeof isWebImageRef === 'function' && isWebImageRef(source)) {
     const container = globalThis.BoardfishWebBoardContainer;
     const blob = container?.blobForImageSource?.(source);
@@ -142,19 +134,19 @@ const bitmapSourceFromImageSource = async (source, displaySrc) => {
     }
   }
   if (source && typeof Blob !== 'undefined' && source instanceof Blob) return source;
-  if (typeof displaySrc === 'string' && displaySrc && typeof fetch === 'function') {
-    const response = await fetch(displaySrc);
-    if (!response.ok && !displaySrc.startsWith('data:') && !displaySrc.startsWith('blob:')) {
+  if (typeof source === 'string' && source && typeof fetch === 'function') {
+    const response = await fetch(source);
+    if (!response.ok && !source.startsWith('data:') && !source.startsWith('blob:')) {
       throw new Error(`image fetch failed: ${response.status}`);
     }
     return response.blob();
   }
-  return displaySrc;
+  return source;
 };
 
-const createImageBitmapForSource = async (source, displaySrc) => {
+const createImageBitmapForSource = async (source) => {
   if (typeof createImageBitmap !== 'function') throw new Error('createImageBitmap unavailable');
-  const bitmapSource = await bitmapSourceFromImageSource(source, displaySrc);
+  const bitmapSource = await bitmapSourceFromImageSource(source);
   return createImageBitmap(bitmapSource);
 };
 
@@ -239,7 +231,7 @@ async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}
       }
     }
     if (!bitmap) {
-      bitmapSource = await bitmapSourceFromImageSource(source, '');
+      bitmapSource = await bitmapSourceFromImageSource(source);
       bitmap = await createImageBitmap(bitmapSource, {
         resizeWidth: target.width,
         resizeHeight: target.height,
@@ -714,9 +706,7 @@ function cacheImage(key, src
   , dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
-  const webRef = isWebImageRef(src);
-  const displaySrc = webRef ? webImageDisplaySrc(src) : src;
-  if (!webRef && (typeof displaySrc !== 'string' || !displaySrc)) return;
+  if (!isWebImageRef(src) && (typeof src !== 'string' || !src)) return;
   let ready;
   if (!imageBitmapFailed.delete(key) && (ready = imageReadyPromises.get(key))) return ready;
   const generation = _imageStoreGeneration;
@@ -731,8 +721,8 @@ function cacheImage(key, src
     cacheRenderSkipped: '',
     cacheReadyStage: '',
   };
-  const vpDbg = ViewportDebug.start('cacheImage', { key, src: displaySrc, bitmapOnly: true });
   const srcInfo = imageSourceDebugInfo(src);
+  const vpDbg = ViewportDebug.start('cacheImage', { key, src: srcInfo.prefix, bitmapOnly: true });
   OpenDebug.step(dbg, 'cache-image:source', {
     imgKey: key,
     sourceKind: srcInfo.kind,
@@ -795,12 +785,12 @@ function cacheImage(key, src
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     let same;
     try {
-      const bitmap = await createImageBitmapForSource(src, displaySrc);
+      const bitmap = await createImageBitmapForSource(src);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const bitmapMs = performance.now() - bitmapStart;
       cacheMetrics.cacheBitmapMs = bitmapMs;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      same = isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation);
+      same = isImageDisplayCacheRequestCurrent(key, src, generation);
       if (!same) {
         bitmap.close?.();
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -851,7 +841,7 @@ function cacheImage(key, src
       const bitmapMs = performance.now() - bitmapStart;
       cacheMetrics.cacheBitmapMs = bitmapMs;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      same = isImageDisplayCacheRequestCurrent(key, src, displaySrc, generation);
+      same = isImageDisplayCacheRequestCurrent(key, src, generation);
       if (same) imageBitmapFailed.add(key);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       ViewportDebug.count('imageBitmapFailures');
@@ -955,7 +945,7 @@ function cacheImage(key, src
     );
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  ViewportDebug.step(vpDbg, 'set-src', { src: displaySrc, bitmapOnly: true });
+  ViewportDebug.step(vpDbg, 'set-src', { src: srcInfo.prefix, bitmapOnly: true });
   OpenDebug.step(dbg, 'cache-image:set-src', {
     imgKey: key,
     sourceKind: srcInfo.kind,
@@ -1034,7 +1024,6 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
   for (const key of keys) {
     if (retainedKeys.has(key)) continue;
     if (Object.hasOwn(imageStore, key)) {
-      revokeWebImageSource(imageStore[key]);
       delete imageStore[key];
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       result.removedSources++;
@@ -1056,10 +1045,6 @@ const pruneImageCachesToKeys = (retainedKeys = new Set()) => {
 
 function clearImageStore() {
   _imageStoreGeneration++;
-  for (const k in imageStore) {
-    if (!Object.prototype.hasOwnProperty.call(imageStore, k)) continue;
-    revokeWebImageSource(imageStore[k]);
-  }
   imageStore = {};
   for (const k in imageBitmapCache) {
     if (!Object.prototype.hasOwnProperty.call(imageBitmapCache, k)) continue;
@@ -1071,7 +1056,6 @@ function clearImageStore() {
   imageBitmapFailed.clear();
   imageReadyPromises.clear();
   _imageHydrationQueue.clear();
-  _imageHydrationScheduled = false;
   _imageDecodeQueue.length = 0;
   _imageDecodeScheduled = false;
   _imageReadyLastRender = 0;

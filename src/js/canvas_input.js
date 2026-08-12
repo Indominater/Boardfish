@@ -173,9 +173,8 @@ function handleViewportWheel(e) {
         ? Math.pow(0.995, e.deltaY)
         : e.deltaY < 0 ? 1.1 : 1 / 1.1;
       const requestedZoom = zoom * factor;
-      BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, requestedZoom);
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('wheel-zoom', e);
-      else scheduleTransform();
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, requestedZoom), 'wheel-zoom', e);
+      else scheduleTransform(BoardfishViewportState.zoomAroundClient(e.clientX, e.clientY, requestedZoom));
       if (collectDebug) {
         const { panXBefore, panYBefore, zoomBefore } = beforeMeta;
         const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
@@ -225,9 +224,8 @@ function handleViewportWheel(e) {
     }
 
     ViewportDebug.count('wheelPan');
-    BoardfishViewportState.panBy(-e.deltaX, -e.deltaY);
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('wheel-pan', e);
-    else scheduleTransform();
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(BoardfishViewportState.panBy(-e.deltaX, -e.deltaY), 'wheel-pan', e);
+    else scheduleTransform(BoardfishViewportState.panBy(-e.deltaX, -e.deltaY));
     if (collectDebug) {
       const { panXBefore, panYBefore, zoomBefore } = beforeMeta;
       const appliedPanX = -e.deltaX, appliedPanY = -e.deltaY;
@@ -349,9 +347,8 @@ function startMousePan(e) {
       const clientStepY = ev.clientY - lastClientY;
       if (!clientStepX && !clientStepY) return;
       ViewportDebug.count('mousePanMoves');
-      BoardfishViewportState.panBy(clientStepX, clientStepY);
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform('mouse-pan', ev);
-      else scheduleTransform();
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(BoardfishViewportState.panBy(clientStepX, clientStepY), 'mouse-pan', ev);
+      else scheduleTransform(BoardfishViewportState.panBy(clientStepX, clientStepY));
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDebug) {
         const panDeltaX = panX - panXBefore;

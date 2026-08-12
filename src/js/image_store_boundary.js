@@ -17,9 +17,6 @@
     if (changed && typeof invalidateImageSourceCachesForKey === 'function') {
       invalidateImageSourceCachesForKey(key);
     }
-    if (changed && previous && typeof BoardfishWebBoardContainer !== 'undefined') {
-      BoardfishWebBoardContainer.revokeImageSource?.(previous);
-    }
     imageStore[key] = source;
     return true;
   }

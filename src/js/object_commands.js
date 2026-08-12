@@ -53,14 +53,10 @@ function addText(wx, wy, content = '', options = {}) {
   }
   if (!options.contentPrepared) content = textForTextObjectPaste(content);
   logStep('trim-done', () => objectCommandTextStats(content));
-  let sourceRanges = Array.isArray(options?.scriptRanges) ? options.scriptRanges : [];
+  const sourceRanges = Array.isArray(options?.scriptRanges) ? options.scriptRanges : [];
   logStep('script-ranges-derived', () => objectCommandTextStats(content, sourceRanges));
   content = textScriptLinearToDeterministicBraces(content, sourceRanges);
-  sourceRanges = deriveBracedTextScriptRangesFromContent(content);
-  logStep('script-braces-normalized', () => objectCommandTextStats(content, sourceRanges));
   const data = { content };
-  if (sourceRanges.length) data.scriptRanges = sourceRanges;
-  logStep('script-ranges-normalized', () => objectCommandTextStats(content, data.scriptRanges));
   const textBytes = BoardfishWebLimits.textByteLength(content);
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
   logStep('content-limit-done', { textBytes, accepted });
@@ -76,9 +72,11 @@ function addText(wx, wy, content = '', options = {}) {
     }
     w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
   }
-  logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content, data.scriptRanges) }));
-
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
+  getTextScriptRanges(obj);
+  logStep('script-braces-normalized', () => objectCommandTextStats(content, data.scriptRanges));
+  logStep('script-ranges-normalized', () => objectCommandTextStats(content, data.scriptRanges));
+  logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content, data.scriptRanges) }));
   const heightChanged = syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
   logStep('auto-height-done', () => ({
     objectId: obj.id,

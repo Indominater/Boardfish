@@ -632,7 +632,6 @@ test('copying an untransformed web PNG image writes source bytes without renderi
   const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const imageSource = {
     web: true,
-    objectUrl: 'blob:test-image',
     mime: 'image/png',
     bytes: pngBytes.length,
   };

@@ -1,6 +1,6 @@
 // ─── Screen-space selection overlay ──────────────────────────────────────────
 var _selOverlayStyleState = { transform: '', width: '', height: '' };
-var _multiSelBoxes = [];
+var _multiSelBoxes = [], _multiSelMotions = [];
 var _rubberBandDragActive = false;
 var _textMinWidthWarmCancel = null;
 var _textMinWidthWarmObjectId = '';
@@ -28,9 +28,8 @@ function setSelectionOverlayScreenRect(element, state, resting, animated, padDev
   _setStyleIfChanged(element, 'height', _cleanOverlay(Math.max(0, snappedHeight + deltaHeight)) + 'px', state);
 }
 
-function selectionOverlayObjectBounds(obj) {
+function selectionOverlayObjectBounds(obj, motion = obj && globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj)) {
   if (!obj) return null;
-  const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj);
   if (!motion) return null;
   const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
   const x1 = obj.x + obj.w * scaleOriginX * (1 - scaleX) + translateX;
@@ -43,11 +42,10 @@ function selectionOverlaySelectedBounds(resting, obj, hasMotion) {
   if (selectedIds.size === 1) {
     return selectionOverlayObjectBounds(obj) || resting;
   }
-  let translateX = 0;
-  let translateY = 0;
-  let motionCount = 0;
+  let translateX = 0, translateY = 0, motionCount = 0;
+  _multiSelMotions.length = 0;
   for (const id of selectedIds) {
-    const motion = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(id) || null;
+    const motion = _multiSelMotions[_multiSelMotions.length] = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(id) || null;
     if (!motion) continue;
     translateX += motion.groupTranslateX ?? motion.translateX ?? 0;
     translateY += motion.groupTranslateY ?? motion.translateY ?? 0;
@@ -315,13 +313,13 @@ function updateMultiSelectionOverlay(hasMotion, multiSelected) {
     multiSelOverlay.appendChild(box);
   }
 
-  let selectedIdx = 0;
-  let imageEdgePad = 0;
+  let selectedIdx = 0, motionIdx = 0, imageEdgePad = 0;
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
+    const motion = hasMotion ? _multiSelMotions[motionIdx++] : null;
     if (!obj) continue;
     const resting = { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h };
-    const bounds = hasMotion ? selectionOverlayObjectBounds(obj) || resting : resting;
+    const bounds = hasMotion ? selectionOverlayObjectBounds(obj, motion) || resting : resting;
     const box = _multiSelBoxes[selectedIdx++];
     const state = box._styleState;
     const pad = obj.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0;

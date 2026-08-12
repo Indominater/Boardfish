@@ -472,6 +472,7 @@ test('multi-selection keeps a stable outer outline while object boxes follow sec
   assert.equal(context._multiSelBoxes[0].style.width, '106px');
   assert.equal(context._multiSelBoxes[1].style.transform, 'translate(211px,-4.5px)');
   assert.equal(context._multiSelBoxes[1].style.width, '98px');
+  assert.equal(context.motionLookups, objects.length);
 });
 
 test('image selection overlay covers renderer edge overdraw', () => {

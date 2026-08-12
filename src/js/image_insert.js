@@ -68,12 +68,7 @@ const createWebImageSourceFromBlob = (file, imgKey) => {
   });
 };
 
-const rollbackImageInsertSource = ({
-  imgKey,
-  source,
-  hadPreviousSource = false,
-  previousSource = undefined,
-} = {}) => {
+const rollbackImageInsertSource = (imgKey, source, hadPreviousSource = false, previousSource) => {
   if (
     imgKey
     && typeof imageStore !== 'undefined'
@@ -103,15 +98,8 @@ const createImageInsertSourceRollback = (imgKey, source) => {
   return () => {
     if (rolledBack) return false;
     rolledBack = true;
-    return rollbackImageInsertSource({ imgKey, source, hadPreviousSource, previousSource });
+    return rollbackImageInsertSource(imgKey, source, hadPreviousSource, previousSource);
   };
-};
-
-const cleanupFailedWebImageInsertSource = (imgKey, imageSource) => {
-  rollbackImageInsertSource({ imgKey, source: imageSource });
-  if (typeof BoardfishWebBoardContainer !== 'undefined') {
-    BoardfishWebBoardContainer.revokeImageSource?.(imageSource);
-  }
 };
 
 var _pendingImageInsertPoint = null;
@@ -141,7 +129,7 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
   let t0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    dbg = ViewportDebug.start('addImage', { src: webImageDisplaySrc(src), cx, cy, imgKey, bitmapOnly: true });
+    dbg = ViewportDebug.start('addImage', { src: imageSourceDebugInfo(src).prefix, cx, cy, imgKey, bitmapOnly: true });
     t0 = performance.now();
     ViewportDebug.count('imageAdds');
   }
@@ -264,12 +252,10 @@ const insertWebImageFile = async (file, x, y
       imgKey,
       sourceKind: sourceInfo.kind,
       bytes: file.size,
-      objectUrl: !!imageSource.objectUrl,
     });
   }
   if (typeof BOARDFISH_PRODUCTION === 'undefined') options.insertDebug = dbg;
   const obj = await addImage(imageSource, x, y, imgKey, options);
-  if (!obj) cleanupFailedWebImageInsertSource(imgKey, imageSource);
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     InsertDebug.end(dbg, {
       added: !!obj,

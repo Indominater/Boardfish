@@ -1249,17 +1249,18 @@ test('copy text selection jiggle uses fixed screen-distance translation independ
     textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
   }), true);
   setTime(100);
-  const shortAtZoom1 = motion.textSelectionMotionForDraw('text-1', 2, 9, 1);
-  const shortAtZoom2 = motion.textSelectionMotionForDraw('text-1', 2, 9, 2);
+  const shortSpec = motion.textSelectionJelloSpecsForDraw().get('text-1');
+  const shortAtZoom1 = motion.textSelectionMotionForDraw('text-1', shortSpec, 1);
+  const shortAtZoom2 = motion.textSelectionMotionForDraw('text-1', shortSpec, 2);
   setTime(420);
-  const shortLate = motion.textSelectionMotionForDraw('text-1', 2, 9, 1);
+  const shortLate = motion.textSelectionMotionForDraw('text-1', shortSpec, 1);
 
   setTime(1000);
   assert.equal(motion.applyCopyFeedback({
     textSelection: { id: 'text-1', start: 2, end: 40, hasSelection: true },
   }), true);
   setTime(1100);
-  const longAtZoom1 = motion.textSelectionMotionForDraw('text-1', 2, 40, 1);
+  const longAtZoom1 = motion.textSelectionMotionForDraw('text-1', motion.textSelectionJelloSpecsForDraw().get('text-1'), 1);
 
   assert.notEqual(shortAtZoom1.translateX, 0);
   assert.notEqual(shortAtZoom1.translateY, 0);
@@ -1536,7 +1537,8 @@ test('text selection copy feedback uses fixed translation and deformation', () =
   });
 
   setTime(100);
-  const motion = context.BoardfishMotion.textSelectionMotionForDraw('text-1', 2, 9);
+  const motions = context.BoardfishMotion.textSelectionJelloSpecsForDraw();
+  const motion = context.BoardfishMotion.textSelectionMotionForDraw('text-1', motions.get('text-1'));
 
   assert.notEqual(motion.translateX, 0);
   assert.notEqual(motion.translateY, 0);
@@ -1551,14 +1553,11 @@ test('text selection jello exposes active full-range draw specs', () => {
     textSelection: { id: 'text-1', start: 0, end: 17, hasSelection: true },
   });
 
-  assert.deepEqual(plain(context.BoardfishMotion.textSelectionJelloSpecsForDraw()), [
-    { id: 'text-1', start: 0, end: 17 },
-  ]);
-  assert.equal(context.BoardfishMotion.textSelectionJelloSpecsForDraw(true).get('text-1').end, 17);
+  const motions = context.BoardfishMotion.textSelectionJelloSpecsForDraw();
+  assert.deepEqual(plain(motions.get('text-1')), { startedAt: 0, start: 0, end: 17, groupSide: 1, groupSize: 1 });
 
   setTime(500);
-  assert.deepEqual(plain(context.BoardfishMotion.textSelectionJelloSpecsForDraw()), []);
-  assert.equal(context.BoardfishMotion.textSelectionJelloSpecsForDraw(true), null);
+  assert.equal(context.BoardfishMotion.textSelectionJelloSpecsForDraw(), null);
 });
 
 test('text selection copy feedback can be cancelled before the selected text changes', () => {
@@ -1571,11 +1570,10 @@ test('text selection copy feedback can be cancelled before the selected text cha
   });
 
   assert.equal(context.BoardfishMotion.cancelTextSelectionMotion('text-1'), true);
-  assert.equal(context.BoardfishMotion.textSelectionMotionForDraw('text-1', 2, 9), null);
-  assert.ok(context.BoardfishMotion.textSelectionMotionForDraw('text-2', 4, 12));
-  assert.deepEqual(plain(context.BoardfishMotion.textSelectionJelloSpecsForDraw()), [
-    { id: 'text-2', start: 4, end: 12 },
-  ]);
+  const motions = context.BoardfishMotion.textSelectionJelloSpecsForDraw();
+  assert.equal(context.BoardfishMotion.textSelectionMotionForDraw('text-1', motions.get('text-1')), null);
+  assert.ok(context.BoardfishMotion.textSelectionMotionForDraw('text-2', motions.get('text-2')));
+  assert.deepEqual([...motions.keys()], ['text-2']);
   assert.equal(context.BoardfishMotion.cancelTextSelectionMotion('missing'), false);
 });
 

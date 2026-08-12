@@ -7,7 +7,6 @@
   // Keep the sampled transform until the renderer samples this object again;
   // async motion cleanup must not move DOM outlines ahead of canvas pixels.
   const lastDrawnObjectMotions = new Map();
-  const EMPTY_SPECS = Object.freeze([]);
   const DURATION_MS = 500;
   const CARRY_DURATION_MS = 180;
   const RETRIGGER_MIN_INTERVAL_MS = 48;
@@ -249,13 +248,8 @@
     requestMotionFrame();
   };
 
-  const textSelectionMotionForDraw = (id, start, end, zoom = 1) => {
-    const motion = textSelectionMotions.get(id);
-    if (!motion || prefersReducedMotion()) return null;
-    if (motion.start !== Math.min(start, end) || motion.end !== Math.max(start, end)) {
-      textSelectionMotions.delete(id);
-      return null;
-    }
+  const textSelectionMotionForDraw = (id, motion, zoom = 1) => {
+    if (!motion) return null;
     const elapsed = now() - motion.startedAt;
     if (elapsed >= DURATION_MS) {
       textSelectionMotions.delete(id);
@@ -270,19 +264,13 @@
 
   const cancelTextSelectionMotion = (id) => textSelectionMotions.delete(id);
 
-  const textSelectionJelloSpecsForDraw = (raw = false) => {
-    if (!textSelectionMotions.size || prefersReducedMotion()) return raw ? null : EMPTY_SPECS;
+  const textSelectionJelloSpecsForDraw = () => {
+    if (!textSelectionMotions.size || prefersReducedMotion()) return null;
     const cutoff = now();
-    const specs = raw ? null : [];
     for (const [id, motion] of textSelectionMotions) {
-      if (cutoff - motion.startedAt >= DURATION_MS) {
-        textSelectionMotions.delete(id);
-      } else if (!raw) {
-        specs.push({ id, start: motion.start, end: motion.end });
-      }
+      if (cutoff - motion.startedAt >= DURATION_MS) textSelectionMotions.delete(id);
     }
-    if (raw) return textSelectionMotions.size ? textSelectionMotions : null;
-    return specs.length ? specs : EMPTY_SPECS;
+    return textSelectionMotions.size ? textSelectionMotions : null;
   };
 
   const objectMotionForDraw = (obj, zoom = 1) => {

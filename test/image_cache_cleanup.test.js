@@ -133,11 +133,10 @@ test('Blob-backed web refs decode directly without a display URL', async () => {
   context.BoardfishWebBoardContainer = {
     isWebImageRef: (value) => value?.web === true,
     blobForImageSource: (value) => value?.__blob || null,
-    displaySrcForImageSource: () => '',
   };
   context.imageStore['img-1'] = source;
 
-  assert.equal(await context.bitmapSourceFromImageSource(source, ''), blob);
+  assert.equal(await context.bitmapSourceFromImageSource(source), blob);
   const ready = context.cacheImage('img-1', source, null);
   assert.equal(rafs.length, 1);
   rafs.shift()();
@@ -218,7 +217,7 @@ test('cacheImage keeps an existing current bitmap and closes a racing duplicate'
   assert.equal(duplicate.closed, true);
 });
 
-test('cacheImage retries a stale in-flight web ref against its refreshed source', async () => {
+test('cacheImage retries a stale in-flight web ref against its replacement source', async () => {
   const firstBitmap = { width: 16, height: 16, closed: false, close() { this.closed = true; } };
   const secondBitmap = { width: 16, height: 16, closed: false, close() { this.closed = true; } };
   const decodedSources = [];
@@ -226,25 +225,26 @@ test('cacheImage retries a stale in-flight web ref against its refreshed source'
     decodedSources.push(blob);
     return decodedSources.length === 1 ? firstBitmap : secondBitmap;
   });
-  const source = {
+  const firstSource = {
     web: true,
     mime: 'image/png',
     bytes: 1,
-    displaySrc: 'blob:before-save',
-    blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
+    __blob: new Blob([new Uint8Array([1])], { type: 'image/png' }),
+  };
+  const secondSource = {
+    ...firstSource,
+    __blob: new Blob([new Uint8Array([2])], { type: 'image/png' }),
   };
   context.BoardfishWebBoardContainer = {
     isWebImageRef: (value) => value?.web === true,
-    displaySrcForImageSource: (value) => value.displaySrc,
-    blobForImageSource: (value) => value.blob,
+    blobForImageSource: (value) => value.__blob,
   };
-  context.imageStore['img-1'] = source;
+  context.imageStore['img-1'] = firstSource;
 
-  const firstReady = context.cacheImage('img-1', source, null);
+  const firstReady = context.cacheImage('img-1', firstSource, null);
   assert.equal(rafs.length, 1);
   rafs.shift()();
-  source.displaySrc = 'blob:after-save';
-  source.blob = new Blob([new Uint8Array([1])], { type: 'image/png' });
+  context.imageStore['img-1'] = secondSource;
   assert.equal((await firstReady).cacheReadyStage, 'stale');
   assert.equal(firstBitmap.closed, true);
   assert.equal(context.imageBitmapCache['img-1'], undefined);

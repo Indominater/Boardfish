@@ -268,10 +268,8 @@ function removeScaledImageVariant(key, evicted = false) {
   imageScaledBitmapCache.delete(key);
   imageScaledBitmapBytes -= entry.bytes || 0;
   entry.bitmap?.close?.();
-  if (evicted) {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantEvictionCount++;
-    dropDrawableBitmapWarmup(entry.bitmap);
-  }
+  dropDrawableBitmapWarmup(entry.bitmap);
+  if (typeof BOARDFISH_PRODUCTION === 'undefined' && evicted) imageScaledVariantEvictionCount++;
   return true;
 }
 
@@ -312,7 +310,6 @@ function clearScaledImageVariants(key = null) {
   clearScaledImageVariantCache();
   imageScaledBitmapPending.clear();
   imageScaledBitmapFailures.clear();
-  imageScaledVariantFailureReleaseScheduled = false;
   imageScaledBitmapPendingByteTotal = 0;
   imageScaledVariantQueue.length = 0;
   cancelScheduledScaledVariantQueue();
@@ -340,7 +337,6 @@ function clearScaledImageVariants(key = null) {
     imageScaledVariantSourceReadyNoSourceCount = 0;
   }
   drawableBitmapWarmupQueue.clear();
-  drawableBitmapWarmupScheduled = false;
   drawableBitmapWarmupReady = typeof WeakSet !== 'undefined' ? new WeakSet() : new Set();
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     drawableBitmapWarmupQueuedCount = 0;

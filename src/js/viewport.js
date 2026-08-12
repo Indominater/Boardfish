@@ -482,7 +482,7 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom =
     if (!obj || obj.type !== 'text') continue;
     if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
-    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(id, spec.start, spec.end, viewZoom) || null;
+    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(id, spec, viewZoom) || null;
     if (!motion) continue;
     const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
     if (!selection || !drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion)) continue;
@@ -589,12 +589,13 @@ function drawEditingTextOverlay(
     const liveSelStart = _editEl ? _editEl.selectionStart : 0;
     const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;
     const copiedMotion = copiedSelectionSpec
-      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, copiedSelectionSpec.start, copiedSelectionSpec.end, viewZoom) || null
+      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, copiedSelectionSpec, viewZoom) || null
       : null;
     const liveMatchesCopied = copiedSelectionSpec &&
       liveSelStart === copiedSelectionSpec.start &&
       liveSelEnd === copiedSelectionSpec.end;
     const useCopiedSelectionMotion = !!copiedMotion && (liveSelStart === liveSelEnd || liveMatchesCopied);
+    if (copiedSelectionSpec && !useCopiedSelectionMotion) globalThis.BoardfishMotion?.cancelTextSelectionMotion?.(obj.id);
     const selStart = useCopiedSelectionMotion ? copiedSelectionSpec.start : liveSelStart;
     const selEnd   = useCopiedSelectionMotion ? copiedSelectionSpec.end   : liveSelEnd;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -609,9 +610,7 @@ function drawEditingTextOverlay(
       stats.editCulledLines = Math.max(0, stats.editLayoutLines - layout.length);
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const textSelectionMotion = useCopiedSelectionMotion ? copiedMotion : selStart !== selEnd
-      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, selStart, selEnd, viewZoom) || null
-      : null;
+    const textSelectionMotion = useCopiedSelectionMotion ? copiedMotion : null;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const selectionStart = collectDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -706,7 +705,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = currentViewportWorldRect(0);
-  const textSelectionMotions = globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.(true) || null;
+  const textSelectionMotions = globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.() || null;
   let openInitialImageSourceResolver = hasOpenPreviewFallback && typeof resolveOpenInitialImageSourceForDraw === 'function'
     ? resolveOpenInitialImageSourceForDraw
     : null;
@@ -1783,13 +1782,15 @@ function scheduleFrame(
 }
 
 function scheduleTransform(
+  changed
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  source = null,
+  , source = null,
   inputEvent = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   const now = performance.now();
   lastViewportInputAt = now;
+  if (changed === false && !editingId) return;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     if (source == null) source = 'transform';
     const eventAt = viewportEventTime(inputEvent);

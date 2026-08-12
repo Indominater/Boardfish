@@ -129,9 +129,11 @@ test('scaled bitmap cache closes replacements and tracks their bytes', () => {
   const second = { closed: false, close() { this.closed = true; } };
 
   context.setScaledImageVariant('img-a', { bitmap: first, bytes: 4 });
+  context.drawableBitmapWarmupQueue.set(first, { key: 'img-a' });
   context.setScaledImageVariant('img-a', { bitmap: second, bytes: 6 });
 
   assert.equal(context.imageScaledBitmapCache.get('img-a').bitmap, second);
+  assert.equal(context.drawableBitmapWarmupQueue.has(first), false);
   assert.equal(first.closed, true);
   assert.equal(second.closed, false);
   assert.equal(context.imageScaledBitmapBytes, 6);
@@ -922,7 +924,6 @@ test('undo-history lifecycle prunes image caches to current board, history, and 
   const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
 
   assert.match(imageStateSource, /const pruneImageCachesToKeys = \(retainedKeys = new Set\(\)\) =>/);
-  assert.match(imageStateSource, /revokeWebImageSource\(imageStore\[key\]\);/);
   assert.match(imageStateSource, /delete imageStore\[key\];/);
   assert.match(historySource, /function retainedImageKeysForCurrentAndHistory\(\)/);
   assert.doesNotMatch(historySource, /collectImageKeysFromObjects\(objects, keys\)/);
@@ -936,8 +937,8 @@ test('undo-history lifecycle prunes image caches to current board, history, and 
 test('async image cache writes use generation guards', () => {
   const imageStateSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_state.js'), 'utf8');
 
-  assert.match(imageStateSource, /const isImageDisplayCacheRequestCurrent = \(key, source, displaySrc, generation\) =>/);
-  assert.match(imageStateSource, /same = isImageDisplayCacheRequestCurrent\(key, src, displaySrc, generation\);/);
+  assert.match(imageStateSource, /generation === _imageStoreGeneration && imageStore\[key\] === source/);
+  assert.match(imageStateSource, /same = isImageDisplayCacheRequestCurrent\(key, src, generation\);/);
   assert.match(imageStateSource, /if \(same\) imageBitmapFailed\.add\(key\);/);
 });
 

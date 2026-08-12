@@ -107,16 +107,16 @@ test('wheel and drag state methods share the same constrained pan path', () => {
     objects: [{ type: 'image', x: 100, y: 200, w: 300, h: 400 }],
   });
 
-  context.BoardfishViewportState.panBy(100000, -100000);
+  assert.equal(context.BoardfishViewportState.panBy(100000, -100000), true);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: 900, panY: -600, zoom: 1 });
 
-  context.BoardfishViewportState.setPan(-100000, 100000);
+  assert.equal(context.BoardfishViewportState.setPan(-100000, 100000), true);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: -400, panY: 600, zoom: 1 });
 });
 
 test('zooming around a client point keeps its world-space anchor fixed', () => {
   const context = loadViewportStateHarness({ panX: 10, panY: 20, zoom: 2 });
-  context.BoardfishViewportState.zoomAroundClient(110, 220, 4);
+  assert.equal(context.BoardfishViewportState.zoomAroundClient(110, 220, 4), true);
 
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: -90, panY: -180, zoom: 4 });
 });
@@ -128,12 +128,12 @@ test('pan state stays fully locked at an edge until movement returns toward the 
     panY: 0,
   });
 
-  context.BoardfishViewportState.panBy(50, 75);
+  assert.equal(context.BoardfishViewportState.panBy(50, 75), false);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: 900, panY: 0, zoom: 1 });
 
-  context.BoardfishViewportState.panBy(-25, 75);
+  assert.equal(context.BoardfishViewportState.panBy(-25, 75), true);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: 875, panY: 0, zoom: 1 });
 
-  context.BoardfishViewportState.panBy(0, 75);
+  assert.equal(context.BoardfishViewportState.panBy(0, 75), true);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: 875, panY: 75, zoom: 1 });
 });

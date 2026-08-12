@@ -390,23 +390,22 @@ const textGlyphPairSpacingCacheKey = (previous, next, font = FONT) => {
 function textGlyphPairSpacing(previousUnit, nextUnit, font = FONT) {
   const previous = String(previousUnit ?? '');
   const next = String(nextUnit ?? '');
+  if (!previous || !next || /\s/.test(previous) || /\s/.test(next)) return 0;
   const cacheKey = textGlyphPairSpacingCacheKey(previous, next, font);
   const cached = _glyphPairSpacingCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
   let spacing = 0;
-  if (previous && next && !/\s/.test(previous) && !/\s/.test(next)) {
-    const previousMetrics = measureTextGlyphMetricsWithFont(previous, font);
-    const nextMetrics = measureTextGlyphMetricsWithFont(next, font);
-    if (
-      previousMetrics.hasInkBounds &&
-      nextMetrics.hasInkBounds &&
-      textGlyphMetricsInkWidth(previousMetrics) > TEXT_GLYPH_MIN_INK_WIDTH &&
-      textGlyphMetricsInkWidth(nextMetrics) > TEXT_GLYPH_MIN_INK_WIDTH
-    ) {
-      const naturalGap = previousMetrics.width - nextMetrics.left - previousMetrics.right;
-      if (Number.isFinite(naturalGap)) spacing = Math.max(0, TEXT_GLYPH_MIN_GAP - naturalGap);
-    }
+  const previousMetrics = measureTextGlyphMetricsWithFont(previous, font);
+  const nextMetrics = measureTextGlyphMetricsWithFont(next, font);
+  if (
+    previousMetrics.hasInkBounds &&
+    nextMetrics.hasInkBounds &&
+    textGlyphMetricsInkWidth(previousMetrics) > TEXT_GLYPH_MIN_INK_WIDTH &&
+    textGlyphMetricsInkWidth(nextMetrics) > TEXT_GLYPH_MIN_INK_WIDTH
+  ) {
+    const naturalGap = previousMetrics.width - nextMetrics.left - previousMetrics.right;
+    if (Number.isFinite(naturalGap)) spacing = Math.max(0, TEXT_GLYPH_MIN_GAP - naturalGap);
   }
 
   _glyphPairSpacingCache.set(cacheKey, spacing);
@@ -576,7 +575,7 @@ function cloneTextObjectRuntimeCaches(source, target) {
     target._layoutCacheScriptKey = source._layoutCacheScriptKey;
     target._layoutCacheAlignKey = textLayoutAlignKey(target);
     target._layoutCacheY = target.y;
-    syncTextLayoutLinePositions(target, target._layoutCache);
+    if (source._layoutCacheY !== target.y) syncTextLayoutLinePositions(target, target._layoutCache);
   }
 
   return target;
@@ -922,10 +921,10 @@ function prewarmTextObjectLayoutRuntimeCaches(obj, options = {}) {
   };
 }
 
-function measureTextRangeW(text, start, end, scriptRanges = []) {
+function measureTextRangeW(text, start, end, scriptRanges = [], scriptMetrics = null) {
   const from = Math.max(0, Math.min(start, text.length));
   const to = Math.max(from, Math.min(end, text.length));
-  const widths = getTextRangePrefixWidths(text.slice(from, to), from, scriptRanges, text);
+  const widths = getTextRangePrefixWidths(text.slice(from, to), from, scriptRanges, text, scriptMetrics);
   return widths[widths.length - 1] || 0;
 }
 
@@ -1029,6 +1028,9 @@ function buildWrappedLines(obj, options = {}, content = String(obj?.data?.conten
     ? options.scriptRanges
     : getTextScriptRanges(obj);
   const scriptKey = options.scriptKey || JSON.stringify(scriptRanges);
+  const scriptMetrics = scriptRanges.length
+    ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
+    : null;
   const firstLineIndex = Math.max(0, Math.trunc(Number(options.firstLineIndex)) || 0);
   const lastLineIndex = options.lastLineIndex == null
     ? Infinity
@@ -1089,9 +1091,9 @@ function buildWrappedLines(obj, options = {}, content = String(obj?.data?.conten
       const paragraphHasTab = textRangeIncludesTab(content, paraStart, paraEnd);
       const paragraphPrefixWidths = paragraphHasTab
         ? null
-        : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd, scriptRanges, scriptKey);
+        : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd, scriptRanges, scriptKey, scriptMetrics);
       const paragraphRangeWidth = (start, end) => {
-        if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end, scriptRanges);
+        if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end, scriptRanges, scriptMetrics);
         const from = Math.max(0, Math.min(start - paraStart, paragraphPrefixWidths.length - 1));
         const to = Math.max(from, Math.min(end - paraStart, paragraphPrefixWidths.length - 1));
         return Math.max(0, paragraphPrefixWidths[to] - paragraphPrefixWidths[from]);
@@ -1169,7 +1171,7 @@ function buildWrappedLines(obj, options = {}, content = String(obj?.data?.conten
     logicalLineIndex++;
   }
 
-  return { lines: result, lineCount: Math.max(1, knownLineCount || visualLineIndex), scriptKey, lineIndex };
+  return { lines: result, lineCount: Math.max(1, knownLineCount || visualLineIndex), scriptKey, scriptMetrics, lineIndex };
 }
 
 function getWrappedLineCount(obj, text) {
@@ -1400,7 +1402,9 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   const removedLineCount = textNewlineCount(oldContent, start, end);
   const endLineProbe = end > start && removedLineCount > 0 ? end : (end > start ? end - 1 : end);
   const oldStartLine = textLayoutLogicalLineIndexAtContentIndex(layout, start);
-  const oldEndLine = textLayoutLogicalLineIndexAtContentIndex(layout, endLineProbe);
+  const oldEndLine = endLineProbe === start
+    ? oldStartLine
+    : textLayoutLogicalLineIndexAtContentIndex(layout, endLineProbe);
   const newEndLine = oldStartLine + insertedLineCount;
   const logicalLineDelta = insertedLineCount - removedLineCount;
 
@@ -2137,10 +2141,10 @@ function patchTextScriptLayoutMetricsForObjectAfterInput(obj, options = {}) {
   return metrics;
 }
 
-function getTextScriptLayoutMetrics(content, scriptRanges = []) {
+function getTextScriptLayoutMetrics(content, scriptRanges = [], scriptKey = '') {
   const text = normalizeTextContent(content);
   const ranges = Array.isArray(scriptRanges) ? scriptRanges : [];
-  const cacheKey = `${text}\n${JSON.stringify(ranges)}`;
+  const cacheKey = `${text}\n${scriptKey || JSON.stringify(ranges)}`;
   const hit = _scriptIndexCache.get(cacheKey);
   if (hit) {
     _scriptIndexCache.delete(cacheKey);
@@ -2259,7 +2263,7 @@ function getTextScriptLayoutMetricsForObject(obj, content, scriptRanges = [], sc
   ) {
     return obj._textScriptLayoutMetrics;
   }
-  const metrics = getTextScriptLayoutMetrics(text, ranges);
+  const metrics = getTextScriptLayoutMetrics(text, ranges, scriptKey);
   if (obj) {
     obj._textScriptLayoutMetrics = metrics;
     obj._textScriptLayoutMetricsContent = text;
@@ -2534,9 +2538,7 @@ function getTextLayout(obj) {
   const wrapped = buildWrappedLines(obj, { scriptRanges, scriptKey, collectLineIndex: true }, content);
   setCachedTextWrappedLineIndex(obj, content, scriptKey, wrapped.lineIndex || [], wrapped.lineCount);
   const lines = wrapped.lines;
-  const scriptMetrics = scriptRanges.length
-    ? getTextScriptLayoutMetricsForObject(obj, obj.data.content, scriptRanges)
-    : null;
+  const { scriptMetrics } = wrapped;
   const layout = new Array(lines.length);
   for (let i = 0; i < lines.length; i++) {
     layout[i] = layoutLineFromWrappedLine(obj, lines[i], i, scriptRanges, scriptMetrics);
@@ -2584,9 +2586,7 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
     } else {
       setCachedTextWrappedLineCount(obj, content, scriptKey, wrapped.lineCount);
     }
-    const scriptMetrics = scriptRanges.length
-      ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
-      : null;
+    const { scriptMetrics } = wrapped;
     const layout = new Array(wrapped.lines.length);
     for (let i = 0; i < wrapped.lines.length; i++) {
       const line = wrapped.lines[i];
@@ -2636,9 +2636,7 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
     lastLineIndex: last,
     knownLineCount,
   });
-  const scriptMetrics = scriptRanges.length
-    ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
-    : null;
+  const { scriptMetrics } = wrapped;
   const layout = new Array(wrapped.lines.length);
   for (let i = 0; i < wrapped.lines.length; i++) {
     const line = wrapped.lines[i];

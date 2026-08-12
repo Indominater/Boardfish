@@ -79,12 +79,12 @@ function loadCanvasWheelHarness() {
     BoardfishViewportState: {
       zoomAroundClient(clientX, clientY, nextZoom) {
         context.zoom = nextZoom;
-        context.zoomCalls.push({ clientX, clientY, nextZoom });
+        context.zoomCalls.push({ clientX, clientY, nextZoom }); return true;
       },
-      panBy() {},
+      panBy() { return true; },
     },
-    scheduleTransform(source, event) {
-      context.transforms.push({ source, event });
+    scheduleTransform(changed, source, event) {
+      context.transforms.push({ changed, source, event });
     },
     createRafCommitter: () => ({ schedule() {}, flush() {} }),
     beginDocumentDrag() {},
@@ -134,10 +134,10 @@ function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1, sele
       setZoomPan(nextZoom, nextPanX, nextPanY) {
         context.zoom = nextZoom;
         context.panX = nextPanX;
-        context.panY = nextPanY;
+        context.panY = nextPanY; return true;
       },
     },
-    scheduleTransform(sourceName) {
+    scheduleTransform(changed, sourceName) {
       context.transforms.push(sourceName);
     },
     deselectAll() {
@@ -401,13 +401,15 @@ test('stale internal text candidate primes external fallback before user activat
 test('wheel zoom over visible floating UI uses the viewport wheel handler', () => {
   const inputSource = readSource('src/js/canvas_input.js');
   const selectionSource = readSource('src/js/selection_input.js');
+  const viewportSource = readSource('src/js/viewport.js');
   const styles = readSource('src/styles.css');
 
   assert.match(inputSource, /function handleViewportWheel\(e\) \{\s*if \(!e\.ctrlKey && !e\.metaKey && !isEventInsideViewportWheelSurface\(e\)\) return;/);
   assert.match(inputSource, /window\.addEventListener\('wheel', handleViewportWheel, \{ capture: true, passive: false \}\);/);
   assert.doesNotMatch(inputSource, /canvas\.addEventListener\('wheel'/);
   assert.doesNotMatch(inputSource, /viewportWheelSurfaces/);
-  assert.match(inputSource, /const requestedZoom = zoom \* factor;\s*BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, requestedZoom\);/);
+  assert.match(inputSource, /const requestedZoom = zoom \* factor;\s*if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) scheduleTransform\(BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, requestedZoom\), 'wheel-zoom', e\);/);
+  assert.match(viewportSource, /lastViewportInputAt = now;\s*if \(changed === false && !editingId\) return;/);
   assert.doesNotMatch(inputSource, /const newZoom = Math\.min\(ZOOM_MAX/);
   assert.match(selectionSource, /document\.elementFromPoint\(x, y\)/);
   assert.match(selectionSource, /if \(e\.target instanceof Node && e\.target\.nodeType === 1\) return false;/);
@@ -731,7 +733,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.notEqual(drawEnd, -1);
   const drawSource = viewportSource.slice(drawStart, drawEnd);
 
-  assert.match(drawSource, /const textSelectionMotions = globalThis\.BoardfishMotion\?\.textSelectionJelloSpecsForDraw\?\.\(true\) \|\| null;/);
+  assert.match(drawSource, /const textSelectionMotions = globalThis\.BoardfishMotion\?\.textSelectionJelloSpecsForDraw\?\.\(\) \|\| null;/);
   assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
   assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);

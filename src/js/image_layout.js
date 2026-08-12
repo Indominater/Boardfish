@@ -126,7 +126,7 @@
           if (
             candidateCost < currentCost - tolerance ||
             (
-              Math.abs(candidateCost - currentCost) <= tolerance &&
+              candidateCost - currentCost <= tolerance &&
               (nextChoices[mask] < 0 || remainingMask < nextChoices[mask])
             )
           ) {
@@ -189,7 +189,7 @@
           if (
             !best ||
             delta < best.delta - bestTolerance ||
-            (Math.abs(delta - best.delta) <= bestTolerance && key < best.key)
+            (delta - best.delta <= bestTolerance && key < best.key)
           ) best = { type: 'move', delta, from, to, item, key };
         }
       }
@@ -211,7 +211,7 @@
             if (
               !best ||
               delta < best.delta - bestTolerance ||
-              (Math.abs(delta - best.delta) <= bestTolerance && key < best.key)
+              (delta - best.delta <= bestTolerance && key < best.key)
             ) best = { type: 'swap', delta, from: leftIndex, to: rightIndex, item: leftItem, otherItem: rightItem, key };
           }
         }
@@ -250,7 +250,7 @@
           const tolerance = numericTolerance(row.width, target.width);
           if (
             row.width < target.width - tolerance ||
-            (Math.abs(row.width - target.width) <= tolerance && row.index < target.index)
+            (row.width - target.width <= tolerance && row.index < target.index)
           ) target = row;
         }
       }
@@ -274,13 +274,9 @@
   };
 
   function randomizeScorePreservingMembership(rows, random) {
-    const randomizedRows = rows.map((row) => ({
-      ...row,
-      items: row.items.slice(),
-    }));
     const slotsByWidth = new Map();
-    for (let rowIndex = 0; rowIndex < randomizedRows.length; rowIndex++) {
-      const row = randomizedRows[rowIndex];
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex];
       for (let itemIndex = 0; itemIndex < row.items.length; itemIndex++) {
         const item = row.items[itemIndex];
         if (!slotsByWidth.has(item.width)) slotsByWidth.set(item.width, []);
@@ -292,17 +288,15 @@
       const shuffledItems = shuffledCopy(slots.map((slot) => slot.item), random);
       for (let index = 0; index < slots.length; index++) {
         const slot = slots[index];
-        randomizedRows[slot.rowIndex].items[slot.itemIndex] = shuffledItems[index];
+        rows[slot.rowIndex].items[slot.itemIndex] = shuffledItems[index];
       }
     }
-    for (const row of randomizedRows) row.ranks = row.items.map((item) => item.rank);
-
     let selectedSwap = null;
     let tiedChoiceCount = 1;
-    for (let leftIndex = 0; leftIndex < randomizedRows.length; leftIndex++) {
-      const left = randomizedRows[leftIndex];
-      for (let rightIndex = leftIndex + 1; rightIndex < randomizedRows.length; rightIndex++) {
-        const right = randomizedRows[rightIndex];
+    for (let leftIndex = 0; leftIndex < rows.length; leftIndex++) {
+      const left = rows[leftIndex];
+      for (let rightIndex = leftIndex + 1; rightIndex < rows.length; rightIndex++) {
+        const right = rows[rightIndex];
         for (const leftItem of left.items) {
           for (const rightItem of right.items) {
             if (leftItem.width === rightItem.width) continue;
@@ -317,19 +311,17 @@
         }
       }
     }
-    if (!selectedSwap) return randomizedRows;
+    if (!selectedSwap) return rows;
 
-    const left = randomizedRows[selectedSwap.leftIndex];
-    const right = randomizedRows[selectedSwap.rightIndex];
+    const left = rows[selectedSwap.leftIndex];
+    const right = rows[selectedSwap.rightIndex];
     const leftItemIndex = left.items.indexOf(selectedSwap.leftItem);
     const rightItemIndex = right.items.indexOf(selectedSwap.rightItem);
     left.items[leftItemIndex] = selectedSwap.rightItem;
     right.items[rightItemIndex] = selectedSwap.leftItem;
     left.width = selectedSwap.leftWidth;
     right.width = selectedSwap.rightWidth;
-    left.ranks = left.items.map((item) => item.rank);
-    right.ranks = right.items.map((item) => item.rank);
-    return randomizedRows;
+    return rows;
   }
 
   const theoreticalRowErrorLowerBound = (totalWidth, rowHeight, rowCount) => {
@@ -391,7 +383,7 @@
       if (!best || error < best.error - tolerance) {
         best = { rows, rowCount: candidate.rowCount, idealWidth, error };
         bestTieCount = 1;
-      } else if (Math.abs(error - best.error) <= tolerance) {
+      } else if (error - best.error <= tolerance) {
         if (randomizeTies && error === best.error) {
           bestTieCount++;
           if (randomUnit(random) < 1 / bestTieCount) {
