@@ -2354,9 +2354,9 @@ function textLayoutAlignKey(obj) {
   return obj?.data?.lineAlign?.length ? obj.data.lineAlign : '';
 }
 
-function syncTextLayoutLinePositions(obj, layout) {
+function syncTextLayoutLinePositions(obj, layout, first = 0) {
   for (let i = 0; i < layout.length; i++) {
-    const y = obj.y + TEXT_PAD + i * LINE_H;
+    const y = obj.y + TEXT_PAD + (first + i) * LINE_H;
     layout[i].y = y;
     layout[i].textY = y + TEXT_BASELINE_Y_OFFSET;
   }
@@ -2376,7 +2376,7 @@ function getCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, fir
     obj._textViewportLayoutRangeCacheW !== obj.w ||
     obj._textViewportLayoutRangeCacheScriptKey !== scriptKey ||
     obj._textViewportLayoutRangeCacheAlignKey !== alignKey ||
-    obj._textViewportLayoutRangeCacheY !== obj.y
+    obj._textViewportY !== obj.y
   ) {
     return null;
   }
@@ -2394,7 +2394,6 @@ function ensureTextViewportLayoutLineCache(obj, content, scriptKey, alignKey, to
     obj._textViewportLayoutLineCacheW !== obj.w ||
     obj._textViewportLayoutLineCacheScriptKey !== scriptKey ||
     obj._textViewportLayoutLineCacheAlignKey !== alignKey ||
-    obj._textViewportLayoutLineCacheY !== obj.y ||
     !obj._textViewportLayoutLineCache ||
     typeof obj._textViewportLayoutLineCache.set !== 'function'
   ) {
@@ -2402,7 +2401,6 @@ function ensureTextViewportLayoutLineCache(obj, content, scriptKey, alignKey, to
     obj._textViewportLayoutLineCacheW = obj.w;
     obj._textViewportLayoutLineCacheScriptKey = scriptKey;
     obj._textViewportLayoutLineCacheAlignKey = alignKey;
-    obj._textViewportLayoutLineCacheY = obj.y;
     obj._textViewportLayoutLineCacheLineCount = Math.max(0, Math.trunc(Number(totalLines)) || 0);
     obj._textViewportLayoutLineCache = new Map();
   } else if (totalLines > 0) {
@@ -2425,7 +2423,8 @@ function getCachedTextViewportLayoutLines(obj, content, scriptKey, alignKey, fir
     if (!line) return null;
     layout.push(line);
   }
-  return setTextLayoutTotalLines(layout, totalLines);
+  syncTextLayoutLinePositions(obj, layout, first);
+  return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, totalLines);
 }
 
 function setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, totalLines) {
@@ -2434,7 +2433,7 @@ function setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, fir
     obj._textViewportLayoutRangeCacheW !== obj.w ||
     obj._textViewportLayoutRangeCacheScriptKey !== scriptKey ||
     obj._textViewportLayoutRangeCacheAlignKey !== alignKey ||
-    obj._textViewportLayoutRangeCacheY !== obj.y ||
+    obj._textViewportY !== obj.y ||
     !obj._textViewportLayoutRangeCache ||
     typeof obj._textViewportLayoutRangeCache.set !== 'function'
   ) {
@@ -2442,7 +2441,7 @@ function setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, fir
     obj._textViewportLayoutRangeCacheW = obj.w;
     obj._textViewportLayoutRangeCacheScriptKey = scriptKey;
     obj._textViewportLayoutRangeCacheAlignKey = alignKey;
-    obj._textViewportLayoutRangeCacheY = obj.y;
+    obj._textViewportY = obj.y;
     obj._textViewportLayoutRangeCache = new Map();
   }
   const out = setTextLayoutTotalLines(layout, totalLines);

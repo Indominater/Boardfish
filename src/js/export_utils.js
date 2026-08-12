@@ -516,17 +516,7 @@
     }
   }
 
-  async function ensureDirectoryWritePermission(handle) {
-    if (!handle?.queryPermission || !handle?.requestPermission) return true;
-    const options = { mode: 'readwrite' };
-    if ((await handle.queryPermission(options)) === 'granted') return true;
-    return (await handle.requestPermission(options)) === 'granted';
-  }
-
   async function writeEntryToDirectory(directoryHandle, entry) {
-    if (!(await ensureDirectoryWritePermission(directoryHandle))) {
-      throw new Error('write permission was not granted');
-    }
     const fileHandle = await directoryHandle.getFileHandle(entry.name, { create: true });
     const writable = await fileHandle.createWritable();
     try {

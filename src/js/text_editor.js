@@ -2762,7 +2762,7 @@ function enterEdit(id, {
 	      replacement = textEditBeforeInputReplacement(oldValue, inputState, event);
 	      synthesizedStaleReplacement = !!replacement;
 	    }
-	    if (proxy._boardfishDomValueStale && replacement) {
+	    if (proxy._boardfishDomValueStale && replacement && !replacement.insertedScriptRanges) {
 	      const replacementStart = Math.max(0, Math.min(replacement.start ?? 0, oldValue.length));
 	      const replacementEnd = Math.max(replacementStart, Math.min(replacement.end ?? replacementStart, oldValue.length));
 	      nextRawValue = normalizeTextContent(
@@ -2771,7 +2771,7 @@ function enterEdit(id, {
 	        oldValue.slice(replacementEnd)
 	      );
 	    } else {
-	      nextRawValue = proxy.value;
+	      nextRawValue = replacement?.insertedScriptRanges ? textEditProxyValue(proxy) : proxy.value;
 	      replacement = replacement || textEditInputReplacement(oldValue, nextRawValue, inputState, inputType);
 	    }
 	    logInputStep('replacement-ready', () => ({
@@ -2826,7 +2826,7 @@ function enterEdit(id, {
       start: replacement.start,
       end: replacement.end,
       insertedText: replacement.insertedText,
-      insertedScriptRanges: inputState.insertedScriptRanges || [],
+      insertedScriptRanges: inputState.insertedScriptRanges || replacement.insertedScriptRanges || [],
       caretAffinity: inputState.scriptCaretAffinity || '',
     });
     logInputStep('script-ranges-transformed', {
@@ -3475,17 +3475,11 @@ function enterEdit(id, {
           scriptRanges: textEditScriptRanges(obj),
           scriptCaretAffinity: !normalizedSelection.hasSelection && obj._textScriptCaretIndex === normalizedSelection.start ? obj._textScriptCaretAffinity : '',
           inputType,
-          replacement: {
-            start: replacement.start,
-            end: replacement.end,
-            insertedText: replacement.insertedText,
-          },
+          replacement,
         };
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           pendingInputState._debugSeq = nextTextEditInputDebugSeq();
-        }
-        if (replacement.insertedScriptRanges.length) {
-          pendingInputState.insertedScriptRanges = replacement.insertedScriptRanges;
+          if (replacement.insertedScriptRanges.length) pendingInputState.insertedScriptRanges = replacement.insertedScriptRanges;
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const deleteDebugSeq = pendingInputState._debugSeq;
