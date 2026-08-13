@@ -2591,7 +2591,8 @@ var ViewportDebug = (() => {
   }
 
   function cullingSummary() {
-    const rect = currentViewportWorldRect();
+    const paddingPx = 0;
+    const rect = currentViewportWorldRect(paddingPx);
     let visibleImages = 0;
     let visibleText = 0;
     let culledImages = 0;
@@ -2625,10 +2626,10 @@ var ViewportDebug = (() => {
       }
     }
     const out = {
-      paddingPx: VIEWPORT_CULL_PADDING_PX,
+      paddingPx,
       enabled: viewportCullingEnabled,
       zoom: Math.round(zoom * 1000) / 1000,
-      padWorld: Math.round((VIEWPORT_CULL_PADDING_PX / Math.max(zoom, 0.001)) * 100) / 100,
+      padWorld: Math.round((paddingPx / Math.max(zoom, 0.001)) * 100) / 100,
       visibleImages,
       culledImages,
       visibleImagesWithScaledVariant,

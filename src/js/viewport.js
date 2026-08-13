@@ -269,9 +269,7 @@ function startCanvasSizeTracking() {
   window.addEventListener?.('resize', resizeCanvas);
 }
 
-var VIEWPORT_CULL_PADDING_PX = 256;
-
-function currentViewportWorldRect(padScreenPx = VIEWPORT_CULL_PADDING_PX) {
+function currentViewportWorldRect(padScreenPx = 0) {
   return viewportWorldRect(padScreenPx);
 }
 
