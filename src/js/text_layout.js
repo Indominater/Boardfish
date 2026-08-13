@@ -2702,17 +2702,16 @@ function lineCaretXAtOffset(line, obj, offset) {
     : lineStart + text.length;
   const maxOffset = Math.max(text.length, caretEnd - lineStart);
   const clamped = Math.max(0, Math.min(Math.trunc(Number(offset)) || 0, maxOffset));
-  const logicalX = clamped <= text.length
-    ? lineXAtOffset(line, obj, clamped)
-    : lineBaseX(line, obj) + (
-      getTextRangePrefixWidths(
+  const baseX = lineBaseX(line, obj);
+  const logicalX = baseX + (clamped <= text.length
+    ? line.prefixWidths[clamped]
+    : getTextRangePrefixWidths(
         content.slice(lineStart, lineStart + clamped),
         lineStart,
         line?.scriptRanges || [],
         content,
         line?._scriptMetrics || null,
-      )[clamped] || 0
-    );
+      )[clamped] || 0);
   if (clamped <= 0 || clamped >= text.length) return logicalX;
 
   const previousChar = text[clamped - 1];
@@ -2749,8 +2748,8 @@ function lineCaretXAtOffset(line, obj, offset) {
     return logicalX;
   }
 
-  const previousInkRight = lineXAtOffset(line, obj, clamped - 1) + previousMetrics.right;
-  const nextInkLeft = lineXAtOffset(line, obj, clamped) - nextMetrics.left;
+  const previousInkRight = baseX + line.prefixWidths[clamped - 1] + previousMetrics.right;
+  const nextInkLeft = logicalX - nextMetrics.left;
   if (!Number.isFinite(previousInkRight) || !Number.isFinite(nextInkLeft)) return logicalX;
   return (previousInkRight + nextInkLeft) / 2;
 }

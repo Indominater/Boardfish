@@ -20,7 +20,6 @@
         cancelAnimationFrame(raf);
         commit();
       },
-      get pending() { return raf !== null; },
     };
   }
 

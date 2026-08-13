@@ -655,7 +655,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           if (resizeDebugDragId) {
             recordSelectionTextResizeStep('up-start', resizeDebugDragId, {
               objectId: obj.id,
-              pendingBeforeFlush: !!resizeCommitter.pending,
             });
           }
           const flushStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;

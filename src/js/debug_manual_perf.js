@@ -1374,7 +1374,6 @@ var ManualPerfDebug = (() => {
       markDirtyMs: event.markDirtyMs,
       historyMs: event.historyMs,
       historyReason: event.historyReason,
-      pendingBeforeFlush: event.pendingBeforeFlush,
     }));
     if (options.table !== false) console.table(rows);
     return rows;

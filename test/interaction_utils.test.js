@@ -21,12 +21,10 @@ test('createRafCommitter coalesces scheduled state and supports flush', () => {
     committer.schedule(1, 2, 3, 4);
     committer.schedule(5, 6, 7, 8);
     assert.equal(requestCount, 1);
-    assert.equal(committer.pending, true);
     assert.deepEqual(applied, []);
     committer.flush();
     assert.deepEqual(cancelled, [0]);
     assert.deepEqual(applied, [[5, 6, 7, 8]]);
-    assert.equal(committer.pending, false);
   } finally {
     globalThis.requestAnimationFrame = previousRequest;
     globalThis.cancelAnimationFrame = previousCancel;
