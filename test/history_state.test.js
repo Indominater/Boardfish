@@ -194,6 +194,11 @@ function loadHistoryHarness() {
       return list.map((obj) => cloneObject(obj, runtimeTextCache));
     },
     cloneTextObjectRuntimeCaches,
+    textEditProxyValue(proxy) { return proxy._boardfishLogicalValue ?? proxy.value; },
+    setTextEditProxyLogicalValue(proxy, value = '', domSynced = true) {
+      proxy._boardfishLogicalValue = String(value ?? '');
+      proxy._boardfishDomValueStale = !domSynced;
+    },
     flushEditHistoryCheckpoint() { return false; },
     invalidateOffscreen() {},
     markDirty(id) {

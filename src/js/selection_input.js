@@ -28,7 +28,7 @@ function setSelectionOverlayScreenRect(element, state, resting, animated, padDev
   _setStyleIfChanged(element, 'height', _cleanOverlay(Math.max(0, snappedHeight + deltaHeight)) + 'px', state);
 }
 
-function selectionOverlayObjectBounds(obj, motion = obj && globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(obj)) {
+function selectionOverlayObjectBounds(obj, motion = obj && BoardfishMotion.getLastDrawnObjectMotion(obj)) {
   if (!obj) return null;
   if (!motion) return null;
   const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
@@ -288,7 +288,7 @@ function updateSelectionOverlay() {
   }
 
   const resting = selectedBounds();
-  const hasMotion = !!globalThis.BoardfishMotion?.hasLastDrawnObjectMotions?.();
+  const hasMotion = BoardfishMotion.hasLastDrawnObjectMotions();
   let bounds = resting;
   if (resting && hasMotion) {
     if (selectedIds.size === 1) {
@@ -297,7 +297,7 @@ function updateSelectionOverlay() {
       let translateX = 0, translateY = 0, motionCount = 0;
       _multiSelMotions.length = 0;
       for (const id of selectedIds) {
-        const motion = _multiSelMotions[_multiSelMotions.length] = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(id) || null;
+        const motion = _multiSelMotions[_multiSelMotions.length] = BoardfishMotion.getLastDrawnObjectMotion(id);
         if (!motion) continue;
         translateX += motion.groupTranslateX ?? motion.translateX ?? 0;
         translateY += motion.groupTranslateY ?? motion.translateY ?? 0;

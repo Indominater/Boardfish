@@ -2467,9 +2467,6 @@ function enterEdit(id, {
 
   let pendingInputState = null;
   proxy._boardfishSetPendingInputState = (state) => { pendingInputState = state; };
-  proxy._boardfishSetLogicalValue = (value, domSynced = true) => {
-    setTextEditProxyLogicalValue(proxy, value, domSynced);
-  };
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const recordInputSetupStep = (step, event, state = {}, extra = {}) => {
     const inputType = event?.inputType || state.inputType || '';

@@ -61,26 +61,9 @@ const isHistoryDebugEnabled = () => HistoryDebug.enabled === true || HistoryDebu
 const historyDebugRound = (value) => Math.round((Number(value) || 0) * 100) / 100;
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function historyEditProxyValue(proxy) {
-  if (typeof proxy?._boardfishLogicalValue === 'string') return proxy._boardfishLogicalValue;
-  return String(proxy?.value ?? '');
-}
-
-function setHistoryEditProxyLogicalValue(proxy, value = '') {
-  if (!proxy) return;
-  const nextValue = String(value ?? '');
-  const domSynced = String(proxy.value ?? '') === nextValue;
-  if (typeof proxy._boardfishSetLogicalValue === 'function') {
-    proxy._boardfishSetLogicalValue(nextValue, domSynced);
-    return;
-  }
-  proxy._boardfishLogicalValue = nextValue;
-  proxy._boardfishDomValueStale = !domSynced;
-}
-
 function syncHistoryEditProxyDomValueForSelection(proxy, start, end) {
   const domValue = String(proxy?.value ?? '');
-  const logicalValue = historyEditProxyValue(proxy);
+  const logicalValue = textEditProxyValue(proxy);
   const selectionStart = Math.max(0, Math.trunc(Number(start)) || 0);
   const selectionEnd = Math.max(selectionStart, Math.trunc(Number(end)) || selectionStart);
   const stale = !!proxy?._boardfishDomValueStale || domValue !== logicalValue;
@@ -88,7 +71,7 @@ function syncHistoryEditProxyDomValueForSelection(proxy, start, end) {
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
     if (proxy && stale && needsSelectionRange) {
       proxy.value = logicalValue;
-      setHistoryEditProxyLogicalValue(proxy, logicalValue);
+      setTextEditProxyLogicalValue(proxy, logicalValue);
     }
     return;
   }
@@ -105,7 +88,7 @@ function syncHistoryEditProxyDomValueForSelection(proxy, start, end) {
   }
   const startedAt = performance.now();
   proxy.value = logicalValue;
-  setHistoryEditProxyLogicalValue(proxy, logicalValue);
+  setTextEditProxyLogicalValue(proxy, logicalValue);
   return {
     synced: true,
     reason: selectionStart !== selectionEnd ? 'restore-highlight' : 'selection-outside-stale-dom',
@@ -536,7 +519,7 @@ function restoreSnapshot(s, editStateOverride) {
   let reusedEditProxy = false;
   if (preserveLiveEdit && _editEl === liveEditProxy && obj === liveEditObject) {
     reusedEditProxy = true;
-    setHistoryEditProxyLogicalValue(_editEl, obj.data?.content);
+    setTextEditProxyLogicalValue(_editEl, obj.data.content, _editEl.value === obj.data.content);
     obj._editStartContent = obj.data.content;
     setTextEditMinLinesForSession(obj, true);
     _editHistoryLastContent = obj.data.content;
@@ -554,7 +537,7 @@ function restoreSnapshot(s, editStateOverride) {
     enterEditMs: performance.now() - enterEditStart,
     editStateId: editState.id,
     reusedEditProxy,
-    proxyChars: historyEditProxyValue(_editEl).length,
+    proxyChars: textEditProxyValue(_editEl).length,
     objectWidth: obj.w,
     objectHeight: obj.h,
     ...getHistoryTextDebugMetrics([obj]),
@@ -569,7 +552,7 @@ function restoreSnapshot(s, editStateOverride) {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
-  const max = historyEditProxyValue(_editEl).length;
+  const max = textEditProxyValue(_editEl).length;
   const start = Math.max(0, Math.min(editState.selectionStart ?? max, max));
   const end = Math.max(0, Math.min(editState.selectionEnd ?? max, max));
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

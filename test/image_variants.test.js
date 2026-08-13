@@ -53,6 +53,8 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
     invalidateOffscreen() {},
     scheduleRender() {},
     queueVisibleImageHydration() {},
+    hasOpenInitialImagePreviews() { return false; },
+    releaseReadyOpenInitialImagePreviewsForOpen() { return { pending: 1 }; },
   };
   if (supportsCreateImageBitmap) {
     context.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });

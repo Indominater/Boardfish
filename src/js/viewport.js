@@ -475,7 +475,7 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom =
     if (!obj || obj.type !== 'text') continue;
     if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
-    const motion = globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(id, spec, viewZoom) || null;
+    const motion = BoardfishMotion.textSelectionMotionForDraw(id, spec, viewZoom);
     if (!motion) continue;
     const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
     if (!selection) continue;
@@ -562,7 +562,7 @@ function drawEditingTextOverlay(
     editCaretDrawn: false,
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, viewZoom);
+  const motion = BoardfishMotion.objectMotionForDraw(obj, viewZoom);
   if (motion) {
     context.save();
     const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
@@ -577,13 +577,13 @@ function drawEditingTextOverlay(
     const liveSelStart = _editEl ? _editEl.selectionStart : 0;
     const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;
     const copiedMotion = copiedSelectionSpec
-      ? globalThis.BoardfishMotion?.textSelectionMotionForDraw?.(obj.id, copiedSelectionSpec, viewZoom) || null
+      ? BoardfishMotion.textSelectionMotionForDraw(obj.id, copiedSelectionSpec, viewZoom)
       : null;
     const liveMatchesCopied = copiedSelectionSpec &&
       liveSelStart === copiedSelectionSpec.start &&
       liveSelEnd === copiedSelectionSpec.end;
     const useCopiedSelectionMotion = !!copiedMotion && (liveSelStart === liveSelEnd || liveMatchesCopied);
-    if (copiedSelectionSpec && !useCopiedSelectionMotion) globalThis.BoardfishMotion?.cancelTextSelectionMotion?.(obj.id);
+    if (copiedSelectionSpec && !useCopiedSelectionMotion) BoardfishMotion.cancelTextSelectionMotion(obj.id);
     const selStart = useCopiedSelectionMotion ? copiedSelectionSpec.start : liveSelStart;
     const selEnd   = useCopiedSelectionMotion ? copiedSelectionSpec.end   : liveSelEnd;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -679,8 +679,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
   }
   // Keep canvas pixels in the same CSS coordinate space as DOM selections.
   syncBoardCanvasBackingStore();
-  const hasOpenPreviewFallback = typeof hasOpenInitialImagePreviews === 'function' &&
-    hasOpenInitialImagePreviews();
+  const hasOpenPreviewFallback = hasOpenInitialImagePreviews();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;
   const collectOpenPreviewFallbackDebug = OpenDebug.enabled === true && hasOpenPreviewFallback;
@@ -693,13 +692,10 @@ function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = currentViewportWorldRect(0);
-  const textSelectionMotions = globalThis.BoardfishMotion?.textSelectionJelloSpecsForDraw?.() || null;
-  let openInitialImageSourceResolver = hasOpenPreviewFallback && typeof resolveOpenInitialImageSourceForDraw === 'function'
-    ? resolveOpenInitialImageSourceForDraw
-    : null;
+  const textSelectionMotions = BoardfishMotion.textSelectionJelloSpecsForDraw();
+  let openInitialImageSourceResolver = hasOpenPreviewFallback ? resolveOpenInitialImageSourceForDraw : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (!openInitialImageSourceResolver && collectOpenInitialRenderDebug &&
-      typeof resolveOpenInitialImageSourceForDraw === 'function') {
+  if (!openInitialImageSourceResolver && collectOpenInitialRenderDebug) {
     openInitialImageSourceResolver = resolveOpenInitialImageSourceForDraw;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1007,8 +1003,8 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   drawTextLineRange,
   getTextLayoutForViewport,
   objectIntersectsRect,
-  hasObjectMotionsForDraw: globalThis.BoardfishMotion?.hasObjectMotionsForDraw,
-  objectMotionForDraw: globalThis.BoardfishMotion?.objectMotionForDraw,
+  hasObjectMotionsForDraw: BoardfishMotion.hasObjectMotionsForDraw,
+  objectMotionForDraw: BoardfishMotion.objectMotionForDraw,
   selectImageSourceForDraw,
 });
 ({ drawSingleObj, resetCanvasToScreen, setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
@@ -1031,10 +1027,10 @@ function withRenderSource(source, fn) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-var finishMotionViewportRenderFrame = globalThis.BoardfishMotion?.afterViewportRenderFrame || (() => {});
+var finishMotionViewportRenderFrame = BoardfishMotion.afterViewportRenderFrame;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 finishMotionViewportRenderFrame = (source, meta = {}) => {
-  globalThis.BoardfishMotion?.afterViewportRenderFrame?.({
+  BoardfishMotion.afterViewportRenderFrame({
     source: source || _activeRenderSource || 'render',
     ...meta,
   });

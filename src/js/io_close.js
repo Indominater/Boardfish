@@ -762,19 +762,17 @@ async function hydrateRemainingImagesForOpen(
       {
         await hydrateImageKeysWithLimit(keys, getOpenHydrationConcurrency());
       }
-      const previewRelease = typeof releaseReadyOpenInitialImagePreviewsForOpen === 'function'
-        ? releaseReadyOpenInitialImagePreviewsForOpen()
-        : null;
+      const previewRelease = releaseReadyOpenInitialImagePreviewsForOpen();
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (previewRelease?.released || previewRelease?.pending || previewRelease?.failed) {
+      if (previewRelease.released || previewRelease.pending || previewRelease.failed) {
         OpenDebug.step(dbg, 'open-preview-release', previewRelease);
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      const previewStillHoldingRender = !!previewRelease && Number(previewRelease.pending) > 0;
-      if (!previewStillHoldingRender || previewRelease?.released) {
+      const previewStillHoldingRender = Number(previewRelease.pending) > 0;
+      if (!previewStillHoldingRender || previewRelease.released) {
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          scheduleRender(true, null, previewRelease?.released ? 'open-preview-release' : 'open-background-hydration');
+          scheduleRender(true, null, previewRelease.released ? 'open-preview-release' : 'open-background-hydration');
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
         } else {
           scheduleRender(true);

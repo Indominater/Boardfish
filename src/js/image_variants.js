@@ -361,19 +361,17 @@ function scheduleScaledVariantReadyRender(
 ) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && countReadyVariant) imageScaledVariantRenderCount++;
   invalidateOffscreen();
-  if (typeof hasOpenInitialImagePreviews === 'function' && hasOpenInitialImagePreviews()) {
-    const previewRelease = typeof releaseReadyOpenInitialImagePreviewsForOpen === 'function'
-      ? releaseReadyOpenInitialImagePreviewsForOpen()
-      : null;
+  if (hasOpenInitialImagePreviews()) {
+    const previewRelease = releaseReadyOpenInitialImagePreviewsForOpen();
     if (typeof BOARDFISH_PRODUCTION === 'undefined' &&
-      (previewRelease?.released || previewRelease?.pending || previewRelease?.failed) &&
+      (previewRelease.released || previewRelease.pending || previewRelease.failed) &&
       typeof OpenDebug !== 'undefined') {
       OpenDebug.step?.(null, 'open-preview-release', {
         ...previewRelease,
         source: 'image-scale-variant',
       });
     }
-    if (previewRelease?.released) {
+    if (previewRelease.released) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         const count = imageScaledVariantRenderCount;
         imageScaledVariantRenderCount = 0;
@@ -383,7 +381,7 @@ function scheduleScaledVariantReadyRender(
       }
       return;
     }
-    if (!previewRelease || previewRelease.pending > 0) {
+    if (previewRelease.pending > 0) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined' && typeof OpenDebug !== 'undefined') OpenDebug.recordPreviewHeldRender?.({
         source: 'image-scale-variant',
         pendingReadyVariants: imageScaledVariantRenderCount,
@@ -836,13 +834,11 @@ function hasScaledImageVariantFailure(key, scale) {
 }
 
 function scheduleScaledVariantFailurePreviewRelease() {
-  if (imageScaledVariantFailureReleaseScheduled ||
-      typeof hasOpenInitialImagePreviews !== 'function' ||
-      !hasOpenInitialImagePreviews()) return;
+  if (imageScaledVariantFailureReleaseScheduled || !hasOpenInitialImagePreviews()) return;
   imageScaledVariantFailureReleaseScheduled = true;
   setTimeout(() => {
     imageScaledVariantFailureReleaseScheduled = false;
-    if (typeof hasOpenInitialImagePreviews === 'function' && hasOpenInitialImagePreviews()) {
+    if (hasOpenInitialImagePreviews()) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         scheduleScaledVariantReadyRender(false);

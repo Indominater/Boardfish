@@ -9,9 +9,9 @@
     nextZoom = zoom,
     lockAtBoundary = false,
   ) {
-    nextZoom = Number.isFinite(nextZoom) && nextZoom > 0 ? nextZoom : 1;
-    nextPanX = Number.isFinite(nextPanX) ? nextPanX : 0;
-    nextPanY = Number.isFinite(nextPanY) ? nextPanY : 0;
+    nextZoom = Number.isFinite(nextZoom) ? (nextZoom > 0 ? nextZoom : 1) : zoom;
+    nextPanX = Number.isFinite(nextPanX) ? nextPanX : panX;
+    nextPanY = Number.isFinite(nextPanY) ? nextPanY : panY;
     let x1 = Infinity;
     let y1 = Infinity;
     let x2 = -Infinity;
@@ -60,11 +60,7 @@
   }
 
   function setViewport(viewport = {}) {
-    return constrainPan(
-      Number.isFinite(viewport.panX) ? viewport.panX : panX,
-      Number.isFinite(viewport.panY) ? viewport.panY : panY,
-      Number.isFinite(viewport.zoom) ? viewport.zoom : zoom,
-    );
+    return constrainPan(viewport.panX, viewport.panY, viewport.zoom);
   }
 
   function reset() {
@@ -88,20 +84,11 @@
   }
 
   function setPan(nextPanX, nextPanY) {
-    return constrainPan(
-      Number.isFinite(nextPanX) ? nextPanX : panX,
-      Number.isFinite(nextPanY) ? nextPanY : panY,
-      zoom,
-      true,
-    );
+    return constrainPan(nextPanX, nextPanY, zoom, true);
   }
 
   function setZoomPan(nextZoom, nextPanX, nextPanY) {
-    return constrainPan(
-      Number.isFinite(nextPanX) ? nextPanX : panX,
-      Number.isFinite(nextPanY) ? nextPanY : panY,
-      Number.isFinite(nextZoom) ? nextZoom : zoom,
-    );
+    return constrainPan(nextPanX, nextPanY, nextZoom);
   }
 
   const api = Object.freeze({

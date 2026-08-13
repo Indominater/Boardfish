@@ -40,6 +40,11 @@ test('viewport panning remains unchanged inside the limits and on an empty board
   assert.deepEqual(applyViewportState({}, 'setViewport', viewport), viewport);
 });
 
+test('invalid zoom-pan input retains the viewport', () => {
+  const viewport = { panX: 12, panY: -34, zoom: 1.25 };
+  assert.deepEqual(applyViewportState(viewport, 'setZoomPan', NaN, NaN, Infinity), viewport);
+});
+
 test('a masterbox edge permits only the direction that returns toward the board', () => {
   const objects = [{ type: 'image', x: 100, y: 200, w: 300, h: 400 }];
   const cases = [

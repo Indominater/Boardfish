@@ -187,7 +187,7 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openDebug, /openPreviewPendingReady/);
   assert.match(openIo, /releaseReadyOpenInitialImagePreviewsForOpen/);
   assert.match(openIo, /open-preview-release/);
-  assert.match(openIo, /previewRelease\?\.released \? 'open-preview-release' : 'open-background-hydration'/);
+  assert.match(openIo, /previewRelease\.released \? 'open-preview-release' : 'open-background-hydration'/);
   assert.match(openDebug, /open-preview-fallback-draw/);
   assert.match(imageState, /buildOpenInitialImagePreviewForOpen/);
   assert.match(imageState, /hasOpenInitialImagePreviews/);

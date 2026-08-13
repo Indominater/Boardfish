@@ -83,7 +83,7 @@ test('startup manifest exposes only web variants', () => {
   assert.doesNotMatch(manifest, /VARIANT_SCRIPTS/);
   assert.doesNotMatch(manifest, new RegExp(shellWord.toUpperCase()));
   assert.equal(webDev[0], 'web_env.js');
-  assert.ok(webDev.includes('web_runtime.js'));
+  assert.ok(webDev.includes('web_runtime.js') && [webDev, webPreview].every(files => files.indexOf('motion.js') >= 0 && files.indexOf('motion.js') < Math.min(files.indexOf('viewport.js'), files.indexOf('selection_input.js'))));
   assert.ok(webDev.includes('runtime_utils.js'));
   assert.ok(webDev.includes('startup_debug.js'));
   assert.ok(webPreview.includes('runtime_utils.js'));

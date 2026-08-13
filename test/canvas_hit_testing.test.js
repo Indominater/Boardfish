@@ -733,7 +733,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.notEqual(drawEnd, -1);
   const drawSource = viewportSource.slice(drawStart, drawEnd);
 
-  assert.match(drawSource, /const textSelectionMotions = globalThis\.BoardfishMotion\?\.textSelectionJelloSpecsForDraw\?\.\(\) \|\| null;/);
+  assert.match(drawSource, /const textSelectionMotions = BoardfishMotion\.textSelectionJelloSpecsForDraw\(\);/);
   assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
   assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
