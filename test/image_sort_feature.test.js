@@ -351,8 +351,9 @@ test('Arrange menu integration is selection-centered and uses the shared paste s
   );
   assert.match(
     contextMenuSource,
-    /'obj-btn-arrange-images': \(\) => \{\s*closeObjCtxMenu\('command:arrange-images'\);\s*sortSelectedImages\(\);\s*\}/,
+    /'obj-btn-arrange-images': \(\) => \{\s*sortSelectedImages\(\);\s*\}/,
   );
+  assert.doesNotMatch(contextMenuSource, /closeObjCtxMenu\('command:arrange-images'\)/);
   assert.match(contextMenuSource, /'arrange-images': \[\['obj-ctx-menu', 'obj-btn-arrange-images'\]\]/);
   assert.match(contextMenuSource, /objectActionsSep\.style\.display = showImageActions \? 'block' : 'none';/);
   assert.doesNotMatch(contextMenuSource, /showLayerActions|layerActionsSep|moveToBackBtn|deleteSep|deleteBtn/);
