@@ -700,10 +700,12 @@ function getCachedTextWrappedLineIndex(obj, text, scriptKey) {
   if (
     cache &&
     Array.isArray(cache.entries) &&
+    cache.entries.length &&
     obj._textWrappedLineIndexCacheContent === text &&
     obj._textWrappedLineIndexCacheW === obj.w &&
     obj._textWrappedLineIndexCacheScriptKey === scriptKey &&
-    Number.isFinite(cache.lineCount)
+    Number.isInteger(cache.lineCount) &&
+    cache.lineCount > 0
   ) {
     return cache;
   }
@@ -716,7 +718,9 @@ function getCachedTextWrappedLineIndex(obj, text, scriptKey) {
   if (
     widthCached &&
     Array.isArray(widthCached.entries) &&
-    Number.isFinite(widthCached.lineCount)
+    widthCached.entries.length &&
+    Number.isInteger(widthCached.lineCount) &&
+    widthCached.lineCount > 0
   ) {
     widthCache.delete(obj.w);
     widthCache.set(obj.w, widthCached);
@@ -771,8 +775,7 @@ function ensureCachedTextWrappedLineIndex(obj, content, scriptRanges, scriptKey)
 }
 
 function textWrappedLineIndexEntryForVisual(cache, visualLineIndex) {
-  const entries = cache?.entries || [];
-  if (!entries.length) return null;
+  const entries = cache.entries;
   const lineCount = Math.max(1, Math.trunc(Number(cache.lineCount)) || 1);
   const target = Math.max(0, Math.min(Math.trunc(Number(visualLineIndex)) || 0, lineCount - 1));
   let lo = 0;
@@ -2378,8 +2381,8 @@ function ensureTextViewportLayoutLineCache(obj, content, scriptKey, alignKey, to
 
 function getCachedTextViewportLayoutLines(obj, content, scriptKey, alignKey, first, last) {
   const cache = ensureTextViewportLayoutLineCache(obj, content, scriptKey, alignKey);
-  const totalLines = Math.trunc(Number(obj?._textViewportLayoutLineCacheLineCount)) || 0;
-  if (!cache || totalLines <= 0 || first >= totalLines) return null;
+  const totalLines = Math.trunc(Number(obj._textViewportLayoutLineCacheLineCount)) || 0;
+  if (totalLines <= 0 || first >= totalLines) return null;
   const actualLast = Math.min(last, totalLines - 1);
   const layout = [];
   for (let index = first; index <= actualLast; index++) {
@@ -2419,9 +2422,8 @@ function setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, fir
 
 function textViewportLayoutLineCacheMissingSpans(obj, content, scriptKey, alignKey, first, last, totalLines) {
   const cache = ensureTextViewportLayoutLineCache(obj, content, scriptKey, alignKey, totalLines);
-  const count = Math.max(0, Math.trunc(Number(totalLines)) || 0);
-  if (!cache || count <= 0 || first >= count) return [];
-  const actualLast = Math.min(last, count - 1);
+  if (first >= totalLines) return [];
+  const actualLast = Math.min(last, totalLines - 1);
   const spans = [];
   let spanStart = null;
   for (let index = first; index <= actualLast; index++) {
@@ -2437,14 +2439,13 @@ function textViewportLayoutLineCacheMissingSpans(obj, content, scriptKey, alignK
 }
 
 function buildTextViewportLayoutRangeFromLineIndex(obj, content, scriptRanges, scriptKey, alignKey, first, last, lineIndexCache) {
-  const totalLines = Math.max(1, Math.trunc(Number(lineIndexCache?.lineCount)) || 1);
+  const totalLines = lineIndexCache.lineCount;
   if (first >= totalLines) {
     return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, [], totalLines);
   }
   const actualLast = Math.min(last, totalLines - 1);
   const firstEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, first);
   const lastEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, actualLast);
-  if (!firstEntry || !lastEntry) return null;
   const scriptMetrics = scriptRanges.length
     ? getTextScriptLayoutMetricsForObject(obj, content, scriptRanges, scriptKey)
     : null;
@@ -2531,8 +2532,8 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
   }
 
   const lineIndexCache = getCachedTextWrappedLineIndex(obj, content, scriptKey);
-  const knownLineCount = lineIndexCache?.lineCount ?? getCachedTextWrappedLineCount(obj, content, scriptKey);
   if (!lineIndexCache) {
+    const knownLineCount = getCachedTextWrappedLineCount(obj, content, scriptKey);
     const wrapped = buildWrappedLines(obj, {
       scriptRanges,
       scriptKey,
@@ -2560,7 +2561,7 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
     }
     return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, wrapped.lineCount);
   }
-  const totalLineCount = Math.max(1, Math.trunc(Number(lineIndexCache?.lineCount)) || 1);
+  const totalLineCount = lineIndexCache.lineCount;
   const missingSpans = textViewportLayoutLineCacheMissingSpans(obj, content, scriptKey, alignKey, first, last, totalLineCount);
   if (missingSpans.length) {
     const actualLast = Math.min(last, totalLineCount - 1);
@@ -2575,7 +2576,7 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
       if (assembled) return assembled;
     }
   }
-  const indexedLayout = buildTextViewportLayoutRangeFromLineIndex(
+  return buildTextViewportLayoutRangeFromLineIndex(
     obj,
     content,
     scriptRanges,
@@ -2585,30 +2586,6 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
     last,
     lineIndexCache,
   );
-  if (indexedLayout) {
-    return indexedLayout;
-  }
-
-  const wrapped = buildWrappedLines(obj, {
-    scriptRanges,
-    scriptKey,
-    firstLineIndex: first,
-    lastLineIndex: last,
-    knownLineCount,
-  });
-  const { scriptMetrics } = wrapped;
-  const layout = new Array(wrapped.lines.length);
-  for (let i = 0; i < wrapped.lines.length; i++) {
-    const line = wrapped.lines[i];
-    layout[i] = layoutLineFromWrappedLine(
-      obj,
-      line,
-      Number.isFinite(line?.visualLineIndex) ? line.visualLineIndex : first + i,
-      scriptRanges,
-      scriptMetrics,
-    );
-  }
-  return setCachedTextViewportLayoutRange(obj, content, scriptKey, alignKey, first, last, layout, wrapped.lineCount);
 }
 
 function getTextLayoutForViewport(obj, viewportRect) {

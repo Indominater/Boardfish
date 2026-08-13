@@ -272,10 +272,10 @@
     }
     for (const slots of slotsByWidth.values()) {
       if (slots.length < 2) continue;
-      const shuffledItems = shuffledCopy(slots.map((slot) => slot.item), random);
+      const shuffledSlots = shuffledCopy(slots, random);
       for (let index = 0; index < slots.length; index++) {
         const slot = slots[index];
-        rows[slot.rowIndex].items[slot.itemIndex] = shuffledItems[index];
+        rows[slot.rowIndex].items[slot.itemIndex] = shuffledSlots[index].item;
       }
     }
     let selectedSwap = null;
@@ -388,20 +388,17 @@
       best.rows = randomizeScorePreservingMembership(best.rows, random);
     }
 
-    let presentationRows = best.rows;
     if (options.shuffleOrder === true) {
       // Membership ties are settled above; randomize row and in-row presentation too.
-      presentationRows = shuffledCopy(best.rows, random).map((row) => ({
-        ...row,
-        items: shuffledCopy(row.items, random),
-      }));
+      best.rows = shuffledCopy(best.rows, random);
+      for (const row of best.rows) row.items = shuffledCopy(row.items, random);
     }
     const occupiedWidth = best.rows.reduce((width, row) => Math.max(width, row.width), 0);
     const height = best.rowCount * rowHeight;
     const left = centerX - occupiedWidth / 2;
     const top = centerY - height / 2;
     const placements = [];
-    const rows = presentationRows.map((row, rowIndex) => {
+    const rows = best.rows.map((row, rowIndex) => {
       let cursorX = left;
       const itemIds = [];
       for (let column = 0; column < row.items.length; column++) {

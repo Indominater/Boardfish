@@ -78,7 +78,7 @@
     return normalized;
   }
 
-  function normalizeBoardData(data) {
+  function normalizeBoardData(data, skipImageValidation = false) {
     if (!isObject(data)) throw new Error('board data must be an object');
     if (data.version != null && !isSupportedBoardVersion(data.version)) {
       throw new Error(`unsupported board version ${data.version}`);
@@ -87,7 +87,7 @@
       throw new Error(`unsupported board format ${data.format}`);
     }
     const sourceImageStore = isObject(data.imageStore) ? data.imageStore : {};
-    for (const key in sourceImageStore) {
+    if (!skipImageValidation) for (const key in sourceImageStore) {
       if (!Object.prototype.hasOwnProperty.call(sourceImageStore, key)) continue;
       const value = sourceImageStore[key];
       if (!key) throw new Error('imageStore contains an empty key');

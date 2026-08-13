@@ -153,13 +153,12 @@ const imageSortGeometryMatches = (obj, placement) => {
 function sortSelectedImages() {
   const selectedImages = [];
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-  for (const obj of objects) {
-    if (!selectedIds.has(obj.id)) continue;
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj) continue;
     x1 = Math.min(x1, obj.x); y1 = Math.min(y1, obj.y);
     x2 = Math.max(x2, obj.x + obj.w); y2 = Math.max(y2, obj.y + obj.h);
-    if (obj.type !== 'image') continue;
-    if (!(Number.isFinite(obj.w) && obj.w > 0 && Number.isFinite(obj.h) && obj.h > 0)) continue;
-    selectedImages.push(obj);
+    if (obj.type === 'image') selectedImages.push(obj);
   }
   if (selectedImages.length < 2 || !isFinite(x1) || !isFinite(y1) || !isFinite(x2) || !isFinite(y2)) return false;
   const center = {

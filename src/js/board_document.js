@@ -57,20 +57,16 @@
   }
 
   function createBoardDataForSave({ viewport, imageStore, objects }, deps = {}) {
-    const imageManifest = {};
-    const store = imageStore || {};
-    for (const key of referencedImageKeys(objects)) {
-      if (!Object.prototype.hasOwnProperty.call(store, key)) continue;
-      imageManifest[key] = imageMetaForBoardFile(key, store[key], deps);
-    }
-    const data = {
+    const data = deps.schema.normalizeBoardData({
       version: BoardTypes.BOARD_VERSION_CONTAINER,
       format: BoardTypes.BOARD_FORMAT,
       viewport,
-      imageStore: imageManifest,
+      imageStore: imageStore || {},
       objects,
-    };
-    if (deps.schema?.normalizeBoardData) return deps.schema.normalizeBoardData(data);
+    }, true);
+    for (const key in data.imageStore) {
+      data.imageStore[key] = imageMetaForBoardFile(key, data.imageStore[key], deps);
+    }
     return data;
   }
 

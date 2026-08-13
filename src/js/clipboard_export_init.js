@@ -340,7 +340,8 @@ const copySelected = (options = {}) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return false;
   }
-  if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
+  // Images animate only after writeWebPngBlob succeeds; high-resolution copy work starves jiggle frames.
+  if (animateCopy && obj.type !== 'image') globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const cloneStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
@@ -492,6 +493,7 @@ const copySelected = (options = {}) => {
           , dbg
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
         );
+        if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
         return true;
       } catch (err) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */

@@ -80,8 +80,8 @@
   function restoreObjectCounters() {
     resetObjectCounters();
     for (const obj of objects) {
-      const idNumber = parseInt(String(obj.id || '').split('-')[1]);
-      if (!isNaN(idNumber) && idNumber >= idCounter) idCounter = idNumber + 1;
+      const idNumber = parseInt(obj.id.slice(4));
+      if (idNumber >= idCounter) idCounter = idNumber + 1;
       if (obj.z >= zCounter) zCounter = obj.z + 1;
     }
   }

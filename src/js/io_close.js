@@ -1044,8 +1044,8 @@ function applyBoardData(data, options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const k of BoardfishImageStore.sourceKeys()) {
     const source = BoardfishImageStore.getSource(k);
-    const n = parseInt(k.split('-')[1]);
-    if (!isNaN(n) && n >= imgKeyCounter) imgKeyCounter = n + 1;
+    const n = parseInt(k.slice(4));
+    if (n >= imgKeyCounter) imgKeyCounter = n + 1;
     if (visibleFirstOpen && isOpenHydratableImageSource(source)) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       deferredInitialCacheImages++;

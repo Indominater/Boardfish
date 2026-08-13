@@ -270,7 +270,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   if (immediateHistory) {
     beginTextEditHistoryAction(editingId, replacementState);
   }
-  if (typeof setPendingTextEditInputState === 'function') setPendingTextEditInputState(_editEl, replacementState);
+  _editEl?._boardfishSetPendingInputState?.(replacementState);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const debugNow = collectDiagnostics
     ? (typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now())
@@ -665,9 +665,7 @@ function isContextMenuSurfaceEvent(e) {
 function updateObjMenuActions() {
   let imageCount = 0;
   for (const id of selectedIds) {
-    const o = objectsMap.get(id);
-    if (!o) continue;
-    if (o.type === 'image') imageCount++;
+    if (objectsMap.get(id)?.type === 'image' && ++imageCount === 2) break;
   }
   const multiSelected = isMultiSelected();
   const showImageActions = imageCount >= 1;

@@ -259,8 +259,6 @@ const nextTextEditInputDebugSeq = () => ++textEditInputDebugSeq;
 const textEditNavigationKeys = new Set([
   'ArrowLeft',
   'ArrowRight',
-  'ArrowUp',
-  'ArrowDown',
   'Home',
   'End',
   'PageUp',
@@ -1700,7 +1698,10 @@ const updateTextLineAlignForInput = (obj, oldValue, oldStart, oldEnd, insertedTe
   else delete obj.data.lineAlign;
 };
 
-const applyTextEditAlignmentFromKeyboard = (direction = 'right', id = editingId, proxy = _editEl) => {
+const applyTextEditAlignmentFromKeyboard = (
+  direction = 'right', id = editingId, proxy = _editEl,
+  wakeCaret = typeof _caretVisible !== 'undefined' && !_caretVisible,
+) => {
   if (!id || !proxy) return false;
   if (typeof isBoardInputBlocked === 'function' && isBoardInputBlocked()) return false;
   if (
@@ -1719,14 +1720,11 @@ const applyTextEditAlignmentFromKeyboard = (direction = 'right', id = editingId,
   const range = textLogicalLineRangeForSelection(content, selection);
   if (typeof _caretVisible !== 'undefined') _caretVisible = true;
   const changed = applyTextLineAlignmentRange(obj, range.startLine, range.endLine, direction);
-  if (!changed) {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, false, 'text-align');
-    else scheduleRender(true, false);
-    return true;
+  if (changed || wakeCaret) {
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, changed, 'text-align');
+    else scheduleRender(true, changed);
   }
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'text-align');
-  else scheduleRender(true, true);
-  pushHistory('text-align', [id]);
+  if (changed) pushHistory('text-align', [id]);
   return true;
 };
 
@@ -1961,10 +1959,6 @@ const readBoardfishTextClipboardPayloadForPaste = async (event = null
   return currentBoardfishTextSelectionClipboardPayload();
 };
 
-const setPendingTextEditInputState = (proxy, state) => {
-  proxy?._boardfishSetPendingInputState?.(state);
-};
-
 const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end', deferDomValue = false) => {
   const value = textEditProxyValue(proxy);
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, value.length));
@@ -2132,7 +2126,7 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
     };
   }
   beginTextEditHistoryAction(id, inputState);
-  setPendingTextEditInputState(proxy, inputState);
+  proxy?._boardfishSetPendingInputState?.(inputState);
   return {
     text: editablePayload.text,
     scriptRanges: editablePayload.scriptRanges || [],
@@ -2182,7 +2176,7 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
     };
   }
   beginTextEditHistoryAction(id, inputState);
-  setPendingTextEditInputState(proxy, inputState);
+  proxy?._boardfishSetPendingInputState?.(inputState);
   return {
     text: pastedText,
     scriptRanges: [],
@@ -2291,7 +2285,7 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
     inputType,
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  setPendingTextEditInputState(proxy, inputState);
+  proxy?._boardfishSetPendingInputState?.(inputState);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const mutationResult = replaceTextEditProxyRange(proxy, text, replacementRange.start, replacementRange.end, 'end');
   logStep('paste:text-edit-range-text-set', {
@@ -2445,7 +2439,6 @@ function enterEdit(id, {
   });
 
   const proxy = document.createElement('textarea');
-  proxy.id = 'editor-proxy';
   proxy.wrap = 'off';
   proxy.spellcheck = false;
   proxy.tabIndex = -1;
@@ -3215,10 +3208,9 @@ function enterEdit(id, {
       }
     });
   });
-  proxy.addEventListener('blur', () => {
-    flushEditHistoryCheckpoint();
-  });
+  proxy.addEventListener('blur', flushEditHistoryCheckpoint);
   proxy.addEventListener('keydown', (e) => {
+    const wakeCaret = !_caretVisible;
     _caretVisible = true;
 
     if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -3227,7 +3219,7 @@ function enterEdit(id, {
       const selection = textEditSelectionState(proxy);
       const indentResult = applyTextEditLineIndent(currentProxyValue, selection, e.shiftKey);
       if (!indentResult.changed) {
-        scheduleRender(true, false);
+        if (wakeCaret) scheduleRender(true, false);
         return;
       }
       const inputType = e.shiftKey ? 'deleteContentBackward' : 'insertText';
@@ -3311,7 +3303,7 @@ function enterEdit(id, {
 
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       e.preventDefault();
-      applyTextEditAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left', id, proxy);
+      applyTextEditAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left', id, proxy, wakeCaret);
       return;
     }
 
@@ -3580,7 +3572,7 @@ function enterEdit(id, {
     }
 
     if (textEditNavigationKeys.has(e.key)) flushEditHistoryCheckpoint();
-    scheduleRender(true, false);
+    if (wakeCaret) scheduleRender(true, false);
   });
 
   logStep('enter-listeners-ready');

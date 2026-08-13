@@ -674,7 +674,7 @@ test('copying an untransformed web PNG image writes source bytes without renderi
     new Uint8Array(await context.calls.copiedImages[0].blob.arrayBuffer()),
     pngBytes,
   );
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-1']]);
+  assert.deepEqual(context.calls.objectJello, []);
 
   context.calls.resolveNextCopiedImage();
   assert.equal(await copyPromise, true);
@@ -716,19 +716,19 @@ test('copying a transformed image starts the clipboard write before PNG encoding
   assert.equal(context.calls.copiedImages[0].token, 'web-token');
   assert.equal(typeof context.calls.copiedImages[0].blob?.then, 'function');
   assert.equal(copySettled, false);
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
+  assert.deepEqual(context.calls.objectJello, []);
 
   context.calls.resolveNextPngBlob();
   assert.equal(await context.calls.copiedImages[0].blob, renderedBlob);
   assert.equal(copySettled, false);
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
+  assert.deepEqual(context.calls.objectJello, []);
 
   context.calls.resolveNextCopiedImage();
   assert.equal(await copyPromise, true);
   assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
 });
 
-test('a rejected system image write reports failure after exactly one immediate image jiggle', async () => {
+test('a rejected system image write reports failure without copy feedback', async () => {
   const pngBytes = new Uint8Array([137, 80, 78, 71]);
   const imageSource = { web: true, mime: 'image/png' };
   const imageObject = {
@@ -754,11 +754,11 @@ test('a rejected system image write reports failure after exactly one immediate 
 
   context.console = { error() {} };
   const copyPromise = context.copySelected();
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-failed-copy']]);
+  assert.deepEqual(context.calls.objectJello, []);
   context.calls.rejectNextCopiedImage();
 
   assert.equal(await copyPromise, false);
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-failed-copy']]);
+  assert.deepEqual(context.calls.objectJello, []);
 });
 
 test('pasting an image retains typed Blobs and only adds a MIME view when missing', async () => {

@@ -296,20 +296,15 @@
   }
 
   function makeTouchMouseEvent(type, point, button, buttons) {
-    const event = new MouseEvent(type, {
+    return new MouseEvent(type, {
       bubbles: true,
       cancelable: true,
-      composed: true,
-      view: root,
       detail: 1,
       clientX: point.x,
       clientY: point.y,
-      screenX: point.x,
-      screenY: point.y,
       button,
       buttons,
     });
-    return event;
   }
 
   function dispatchTouchLeftClick(point) {
