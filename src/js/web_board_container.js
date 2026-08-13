@@ -1188,6 +1188,14 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     let lazyStoredImageBlobs = null;
     const imageStore = board.imageStore || {};
+    const imageRecords = [];
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      const manifest = imageStore[key];
+      const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
+      const { path, entry: imageEntry } = resolveManifestImageEntry(entries, key, manifestObject);
+      imageRecords.push({ key, manifestObject, path, imageEntry });
+    }
 
     if (randomAccessBlob && lazyImageRefs) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1195,14 +1203,10 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const tasks = [];
       const seen = new Set();
-      for (const key in imageStore) {
-        if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-        const manifest = imageStore[key];
-        const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
-        const resolved = resolveManifestImageEntry(entries, key, manifestObject);
-        if (resolved.entry.method !== ZIP_METHOD_STORED || seen.has(resolved.path)) continue;
-        seen.add(resolved.path);
-        tasks.push(resolved);
+      for (const record of imageRecords) {
+        if (record.imageEntry.method !== ZIP_METHOD_STORED || seen.has(record.path)) continue;
+        seen.add(record.path);
+        tasks.push(record);
       }
       lazyStoredImageBlobs = new Map();
       let next = 0;
@@ -1210,20 +1214,14 @@
       await Promise.all(Array.from({ length: workerCount }, async () => {
         while (next < tasks.length) {
           const task = tasks[next++];
-          lazyStoredImageBlobs.set(task.path, await compressedEntryBlob(randomAccessBlob, task.entry));
+          lazyStoredImageBlobs.set(task.path, await compressedEntryBlob(randomAccessBlob, task.imageEntry));
         }
       }));
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDiagnostics) imageHeaderReadMs = nowMs() - headerStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    for (const key in imageStore) {
-      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-      const manifest = imageStore[key];
-      const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
-      const resolvedImage = resolveManifestImageEntry(entries, key, manifestObject);
-      const path = resolvedImage.path;
-      const imageEntry = resolvedImage.entry;
+    for (const { key, manifestObject, path, imageEntry } of imageRecords) {
       const advertisedImageBytes = zipEntryContentBytes(imageEntry);
       const manifestExt = manifestObject.ext || '';
       const ext = manifestExt || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
@@ -1397,7 +1395,10 @@
     bytesForImageSourceAsync,
     dataUrlByteLength,
     dataUrlToBytes,
+    extForMime,
     isWebImageRef,
+    mimeForExt,
+    normalizeImageExt,
     readBoardContainer,
     recoverMatchingVolatileImageRefsFromContainer,
     stabilizeVolatileImageRefs,

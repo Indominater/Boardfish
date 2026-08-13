@@ -89,42 +89,41 @@ function closeCtxActions(reason) {
   closeFloatingSurface(ctxActions);
 }
 
-function alignCtxActionsToMenuRow(gap, viewport) {
-  const openedMenuLeft = parseFloat(ctxMenu.style.left);
-  const menuWidth = ctxMenu.offsetWidth;
-  const actionWidth = ctxActions.offsetWidth;
-  const edgeGap = gap;
-  const minActionLeft = viewport.left + edgeGap;
-  const maxActionRight = viewport.right - edgeGap;
-  const maxActionLeft = Math.max(minActionLeft, maxActionRight - actionWidth);
-  let menuLeft = openedMenuLeft <= viewport.left + MENU_VIEWPORT_EDGE_MARGIN ? minActionLeft : openedMenuLeft;
-  let actionLeft = menuLeft + menuWidth + gap;
-
-  if (actionLeft + actionWidth > maxActionRight) {
-    actionLeft = maxActionLeft;
-    menuLeft = actionLeft - gap - menuWidth;
-  }
-
-  if (menuLeft < minActionLeft) {
-    menuLeft = minActionLeft;
-    actionLeft = Math.min(maxActionLeft, menuLeft + menuWidth + gap);
-  }
-
-  ctxMenu.style.left = `${Math.round(menuLeft)}px`;
-  ctxActions.style.left = `${Math.round(actionLeft)}px`;
-  ctxActions.style.top = ctxMenu.style.top;
-}
-
 function openCtxMenuAt(x, y) {
   closeOpenMenusExcept('ctx-menu', 'open-ctx-menu');
-  const viewport = openMenuAt(ctxMenu, x, y);
   if (!ctxActions || !ctxActionItems.length) {
+    openMenuAt(ctxMenu, x, y);
     return;
   }
 
   updateCtxActionStates();
+  ctxMenu.classList.add('visible');
   ctxActions.classList.add('visible');
-  alignCtxActionsToMenuRow(viewport.gap, viewport);
+  const viewport = menuViewportBounds();
+  const menuWidth = ctxMenu.offsetWidth;
+  const menuHeight = ctxMenu.offsetHeight;
+  const actionWidth = ctxActions.offsetWidth;
+  const edgeGap = viewport.gap;
+  const minActionLeft = viewport.left + edgeGap;
+  const maxActionRight = viewport.right - edgeGap;
+  const maxActionLeft = Math.max(minActionLeft, maxActionRight - actionWidth);
+  let menuLeft = Math.round(clampMenuCoord(x, menuWidth, viewport.left, viewport.right));
+  let actionLeft = menuLeft + menuWidth + edgeGap;
+
+  if (menuLeft <= viewport.left + MENU_VIEWPORT_EDGE_MARGIN) menuLeft = minActionLeft;
+  if (actionLeft + actionWidth > maxActionRight) {
+    actionLeft = maxActionLeft;
+    menuLeft = actionLeft - edgeGap - menuWidth;
+  }
+  if (menuLeft < minActionLeft) {
+    menuLeft = minActionLeft;
+    actionLeft = Math.min(maxActionLeft, menuLeft + menuWidth + edgeGap);
+  }
+
+  ctxMenu.style.left = `${Math.round(menuLeft)}px`;
+  ctxMenu.style.top = `${Math.round(clampMenuCoord(y, menuHeight, viewport.top, viewport.bottom))}px`;
+  ctxActions.style.left = `${Math.round(actionLeft)}px`;
+  ctxActions.style.top = ctxMenu.style.top;
 }
 
 if (DEBUG_TOOLS_ENABLED) {

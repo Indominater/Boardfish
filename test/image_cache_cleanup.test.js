@@ -80,8 +80,11 @@ function loadImageState(createImageBitmap) {
     ViewportDebug: noopDebugApi(),
     ClipDebug: noopDebugApi(),
     clearScaledImageVariants() {},
+    dropDrawableBitmapWarmup() {},
     isViewportImageScalingActive() { return false; },
     hasScaledImageVariantFailure() { return false; },
+    queueScaledImageVariantForReadyImage() {},
+    scheduleDrawableBitmapWarmup() {},
     setCanvasImageQuality() {},
     createImageBitmap,
   };

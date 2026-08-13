@@ -166,6 +166,7 @@ function loadClipboardExportHarness(options = {}) {
     cloneObject(obj) {
       return { ...obj, data: { ...obj.data } };
     },
+    clearTextObjectLayoutRuntime(obj) { delete obj._layoutCache; },
     getFirstSelectedObject() {
       return selectedObject;
     },
@@ -201,6 +202,9 @@ function loadClipboardExportHarness(options = {}) {
       while (first <= last && !/\S/.test(lines[first])) first++;
       while (last >= first && !/\S/.test(lines[last])) last--;
       return first <= last ? lines.slice(first, last + 1).join('\n') : '';
+    },
+    textObjectContentForClipboard(obj) {
+      return context.textForClipboard(obj?.data?.content);
     },
     resizeCanvas() {},
     scheduleRender(board, overlay, sourceName) {
@@ -304,6 +308,7 @@ function loadClipboardPasteObjectsHarness() {
       calls.clones++;
       return JSON.parse(JSON.stringify(list));
     },
+    clearTextObjectLayoutRuntime(obj) { delete obj._layoutCache; },
     jsClipboardStillCurrent() {
       return Promise.resolve(true);
     },

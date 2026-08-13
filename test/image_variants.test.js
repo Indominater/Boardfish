@@ -18,7 +18,9 @@ function loadImageVariants(options = {}) {
     clearTimeout() {},
     setTimeout() { return 0; },
     performance: { now: () => 0 },
+    hasOpenInitialImagePreviews() { return false; },
     mapWithConcurrency(items, _limit, worker) { return Promise.all(items.map(worker)); },
+    releaseReadyOpenInitialImagePreviewsForOpen() { return { pending: 0, released: 0 }; },
   };
   if (options.navigator) context.navigator = options.navigator;
 
@@ -48,11 +50,13 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
     _boardOpening: false,
     _imageStoreGeneration: 0,
     imageBitmapCache: {},
+    hasOpenInitialImagePreviews() { return false; },
     objects: [],
     currentViewportWorldRect() { return null; },
     invalidateOffscreen() {},
     scheduleRender() {},
     queueVisibleImageHydration() {},
+    releaseReadyOpenInitialImagePreviewsForOpen() { return { pending: 0, released: 0 }; },
   };
   if (supportsCreateImageBitmap) {
     context.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
@@ -734,6 +738,7 @@ test('scaled variant ready render is held while opening previews are active', ()
     },
   };
   context.hasOpenInitialImagePreviews = () => true;
+  context.releaseReadyOpenInitialImagePreviewsForOpen = () => ({ pending: 1, released: 0 });
 
   context.scheduleScaledVariantReadyRender();
 

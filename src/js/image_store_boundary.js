@@ -14,9 +14,7 @@
     const hadSource = Object.hasOwn(imageStore, key);
     const previous = imageStore[key];
     const changed = hadSource && previous !== source;
-    if (changed && typeof invalidateImageSourceCachesForKey === 'function') {
-      invalidateImageSourceCachesForKey(key);
-    }
+    if (changed) invalidateImageSourceCachesForKey(key);
     imageStore[key] = source;
     return true;
   }
@@ -26,7 +24,7 @@
   }
 
   function sourceKeys() {
-    return Object.keys(imageStore || {});
+    return Object.keys(imageStore);
   }
 
   root.BoardfishImageStore = Object.freeze({

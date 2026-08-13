@@ -10,9 +10,7 @@ function isDefaultEmptyBoardState(objectList = objects) {
     if (!obj) continue;
     if (obj.type !== 'text') return false;
     const content = obj.data?.content;
-    if ((typeof isTextContentEmpty === 'function'
-      ? !isTextContentEmpty(content)
-      : String(content || '').trim() !== '')) return false;
+    if (!isTextContentEmpty(content)) return false;
   }
   return true;
 }
@@ -207,7 +205,7 @@ async function invokeSaveBoard(fileRef
 ) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    const historyFlushed = typeof flushEditHistoryCheckpoint === 'function' && flushEditHistoryCheckpoint();
+    const historyFlushed = flushEditHistoryCheckpoint();
     const path = BoardfishRuntime.describeFileRef(fileRef);
     if (historyFlushed) SaveDebug.step(dbg, 'flush-edit-history', { path, historyIndex });
     const dataStart = performance.now();
@@ -225,7 +223,7 @@ async function invokeSaveBoard(fileRef
     return result;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
+  flushEditHistoryCheckpoint();
   const data = boardDataForSave();
   return BoardfishRuntime.saveBoard(fileRef, data, { imageStore, ...options });
 }
@@ -478,7 +476,6 @@ async function buildVisibleImagePreviewsForOpen(previewTasks
   , dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
-  if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
   const tasks = [];
   for (const task of previewTasks.values()) if (task) tasks.push(task);
   const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
@@ -762,9 +759,7 @@ async function hydrateRemainingImagesForOpen(
       {
         await hydrateImageKeysWithLimit(keys, getOpenHydrationConcurrency());
       }
-      const previewRelease = typeof releaseReadyOpenInitialImagePreviewsForOpen === 'function'
-        ? releaseReadyOpenInitialImagePreviewsForOpen()
-        : null;
+      const previewRelease = releaseReadyOpenInitialImagePreviewsForOpen();
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (previewRelease?.released || previewRelease?.pending || previewRelease?.failed) {
         OpenDebug.step(dbg, 'open-preview-release', previewRelease);
@@ -908,7 +903,7 @@ async function finishOpenedBoard(
     }
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (!skipInitialScaledPrewarm && typeof prewarmVisibleScaledImageVariantsForOpen === 'function') {
+  if (!skipInitialScaledPrewarm) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const prewarmStart = performance.now();
@@ -988,8 +983,7 @@ async function finishOpenedBoard(
     const pillFinishReason = finishPillTask({
       beforeFinish: () => {
         const shieldStart = performance.now();
-        if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
-        else openingShield.classList.remove('active');
+        endOpeningFreeze();
         OpenDebug.step(dbg, 'opening-shield:removed', { ms: performance.now() - shieldStart });
         PillDebug.log('open:openingShield:removed', { reason: 'before-pill-hide' });
       },
@@ -1000,8 +994,7 @@ async function finishOpenedBoard(
   } else {
     finishPillTask({
       beforeFinish: () => {
-        if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
-        else openingShield.classList.remove('active');
+        endOpeningFreeze();
       },
     });
   }
