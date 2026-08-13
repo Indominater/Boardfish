@@ -186,6 +186,7 @@ test('web debug tools are controlled by the web dev flag', () => {
   const startupDebugSource = readSource('src/js/startup_debug.js');
   const webDevSource = readSource('src/js/main.web.dev.mjs');
   const webEnvSource = readSource('src/js/web_env.js');
+  const serverSource = readSource('scripts/serve-web.mjs');
 
   assert.doesNotMatch(startupDebugSource, /AGENTS: Flip only this flag/);
   assert.doesNotMatch(startupDebugSource, /\bconst DEBUG_TOOLS_ENABLED = (true|false);/);
@@ -194,10 +195,13 @@ test('web debug tools are controlled by the web dev flag', () => {
   assert.match(startupDebugSource, /createNoopStartupDebug\(\)/);
   assert.match(
     webDevSource,
-    /const \[webEnvScript, \.\.\.remainingScripts\] = WEB_DEV_SCRIPTS;[\s\S]*await loadScripts\(\[webEnvScript\]\);[\s\S]*setDefaultDebugFlag\(globalThis\.__BOARDFISH_WEB_DEV_MODE__ === true\);[\s\S]*await loadScripts\(remainingScripts\);/,
+    /import \{ loadScripts \} from '.\/startup_loader\.mjs';[\s\S]*await loadScripts\(WEB_DEV_SCRIPTS\);/,
   );
-  assert.match(webEnvSource, /'__BOARDFISH_WEB_DEV_MODE__'/);
+  assert.doesNotMatch(webDevSource, /webEnvScript|remainingScripts|setDefaultDebugFlag/);
+  assert.match(webEnvSource, /'__BOARDFISH_DEBUG_TOOLS_ENABLED__'/);
   assert.match(webEnvSource, /value: false/);
+  assert.match(serverSource, /'__BOARDFISH_DEBUG_TOOLS_ENABLED__'/);
+  assert.doesNotMatch(`${webDevSource}\n${webEnvSource}\n${serverSource}`, /__BOARDFISH_WEB_DEV_MODE__/);
 });
 
 test('release sources do not contain enabled debugger switches', () => {

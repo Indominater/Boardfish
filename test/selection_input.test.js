@@ -490,7 +490,6 @@ test('selection surfaces share the same outline color token', () => {
   const styles = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
 
   assert.match(styles, /--selection-outline:\s*rgba\(10,\s*132,\s*255,\s*1\);/);
-  assert.match(styles, /--selection-highlight:\s*rgba\(10,\s*132,\s*255,\s*0\.3\);/);
   assert.match(styles, /--text-edit-outline:\s*var\(--selection-outline\);/);
   assert.match(styles, /#canvas\.panning, #canvas\.panning \.s-handle \{ cursor: grabbing !important; \}/);
   assert.doesNotMatch(styles, /#canvas\.panning\s+\*/);

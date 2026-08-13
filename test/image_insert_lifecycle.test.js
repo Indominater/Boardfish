@@ -205,7 +205,7 @@ test('failed web image inserts roll back their adopted source once', () => {
   const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
 
   assert.match(source, /const rollbackImageInsertSource = \(imgKey, source, hadPreviousSource = false, previousSource\) =>/);
-  assert.match(source, /if \(!obj\) rollbackSource\(\);/);
+  assert.match(source, /if \(!\(naturalW > 0 && naturalH > 0\)\) \{\s*rollbackSource\(\);/);
   assert.match(source, /catch \(err\) \{\s*rollbackSource\(\);/);
   assert.doesNotMatch(source, /cleanupFailedWebImageInsertSource|revokeImageSource/);
 });
@@ -217,6 +217,9 @@ test('web image insert rejects a whole supported batch that would exceed object 
   assert.match(source, /supportedFiles\.push\(file\);/);
   assert.match(source, /BoardfishWebLimits\.canAddObjects\(supportedFiles\.length\)/);
   assert.doesNotMatch(source, /accepted\.length >= maxObjects/);
+  assert.equal((source.match(/BoardfishWebLimits\.canAddObjects\(/g) || []).length, 2);
+  assert.match(source, /const imgKey = newImgKey\(\);\s*const insertOptions = \{\s*z:/);
+  assert.doesNotMatch(source, /\baddImageObject\b|insertOptions\.imgKey/);
 });
 
 test('file picker image insertion freezes the command point before files are chosen', () => {

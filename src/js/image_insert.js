@@ -84,25 +84,6 @@ const createImageInsertSourceRollback = (imgKey, source) => {
 
 var _pendingImageInsertPoint = null;
 
-function addImageObject(imgKey, cx, cy, w, h, options = {}) {
-  if (!BoardfishWebLimits.canAddObjects(1)) return null;
-  const explicitZ = Number.isFinite(options.z) ? Number(options.z) : null;
-  const z = explicitZ == null ? ++zCounter : explicitZ;
-  if (explicitZ != null) zCounter = Math.max(zCounter, explicitZ);
-  const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z, data: { imgKey, flipX: false, flipY: false, rotation: 0 } };
-  BoardfishEditorState.addObject(obj);
-  if (editingId) exitEdit();
-  if (_bulkImageInsertDepth > 0) {
-    _bulkImageInsertAdded++;
-  } else {
-    BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'add-image');
-    else scheduleRender(true, true);
-    pushHistory('add-image');
-  }
-  return obj;
-}
-
 async function addImage(src, cx, cy, imgKey, options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let dbg = null;
@@ -152,22 +133,34 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
         bitmapOnly: true,
       });
     }
-    const obj = addImageObject(imgKey, cx, cy, w, h, options);
+    const explicitZ = Number.isFinite(options.z) ? Number(options.z) : null;
+    const z = explicitZ == null ? ++zCounter : explicitZ;
+    if (explicitZ != null) zCounter = Math.max(zCounter, explicitZ);
+    const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z, data: { imgKey, flipX: false, flipY: false, rotation: 0 } };
+    BoardfishEditorState.addObject(obj);
+    if (editingId) exitEdit();
+    if (_bulkImageInsertDepth > 0) {
+      _bulkImageInsertAdded++;
+    } else {
+      BoardfishEditorState.setSelection([obj.id], { primaryId: obj.id, exitEditing: false });
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'add-image');
+      else scheduleRender(true, true);
+      pushHistory('add-image');
+    }
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       InsertDebug.step(options.insertDebug, 'object:add', {
         source: options.source || '',
         imgKey,
-        objectId: obj?.id || '',
+        objectId: obj.id,
         w,
         h,
-        z: obj?.z ?? '',
+        z: obj.z,
       });
     }
-    if (!obj) rollbackSource();
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       const total = performance.now() - t0;
       ViewportDebug.max('maxImageAddMs', total);
-      ViewportDebug.end(dbg, { id: obj?.id || '', imgKey, total, added: !!obj, bitmapOnly: true });
+      ViewportDebug.end(dbg, { id: obj.id, imgKey, total, added: true, bitmapOnly: true });
     }
     return obj;
   } catch (err) {
@@ -298,12 +291,11 @@ async function insertImageFiles(files, x, y
         fileDbg = InsertDebug.start('insertImage', { source, fileName: file.name, fileSize: file.size, fileType: file.type });
       }
       try {
+        const imgKey = newImgKey();
         const insertOptions = {
-          imgKey: newImgKey(),
           z: bulkZBase == null ? undefined : bulkZBase + acceptedIndex,
         };
         if (typeof BOARDFISH_PRODUCTION === 'undefined') insertOptions.source = source;
-        const imgKey = insertOptions.imgKey || newImgKey();
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         let fileName;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */

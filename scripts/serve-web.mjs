@@ -37,7 +37,7 @@ function webEnvSource() {
   return `'use strict';
 
 (function initBoardfishWebEnv(root) {
-  Object.defineProperty(root, '__BOARDFISH_WEB_DEV_MODE__', {
+  Object.defineProperty(root, '__BOARDFISH_DEBUG_TOOLS_ENABLED__', {
     value: ${devMode ? 'true' : 'false'},
     writable: false,
     configurable: false,
