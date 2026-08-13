@@ -106,7 +106,7 @@ function loadCanvasWheelHarness() {
 
 function loadResetZoomHarness({ objects = [], panX = 0, panY = 0, zoom = 1, selectedIds = [], editingId = null } = {}) {
   const source = readSource('src/js/context_menu.js');
-  const match = source.match(/function pointToObjectCenterDistanceSq\(point, obj\) \{[\s\S]*?\r?\n\r?\nconst resetZoomFromPill/);
+  const match = source.match(/function resetZoomToClosestObject\(\) \{[\s\S]*?\r?\n\r?\nconst resetZoomFromPill/);
   assert.ok(match, 'reset zoom functions are missing');
 
   const context = {
@@ -413,7 +413,7 @@ test('wheel zoom over visible floating UI uses the viewport wheel handler', () =
   assert.doesNotMatch(inputSource, /const newZoom = Math\.min\(ZOOM_MAX/);
   assert.match(selectionSource, /document\.elementFromPoint\(x, y\)/);
   assert.match(selectionSource, /if \(e\.target instanceof Node && e\.target\.nodeType === 1\) return false;/);
-  assert.match(selectionSource, /const isEventInsideViewportWheelSurface = \(e\) => \{[\s\S]*canvas\.contains\(e\.target\)[\s\S]*isEventInsideVisibleContextMenu\(e\) \|\| isEventInsideVisibleIsland\(e\);[\s\S]*\};/);
+  assert.match(selectionSource, /const isEventInsideViewportWheelSurface = \(e\) => \{[\s\S]*canvas\.contains\(e\.target\)[\s\S]*isEventInsideVisibleContextMenu\(e\) \|\| isEventInsideVisibleSurface\(e, island\);[\s\S]*\};/);
   assert.match(selectionSource, /const isEventInsideVisibleContextMenu = \(e\) => \{[\s\S]*isEventInsideVisibleSurface\(e, ctxMenu\)[\s\S]*isEventInsideVisibleSurface\(e, objCtxMenu\)[\s\S]*isEventInsideVisibleSurface\(e, ctxActions\)[\s\S]*\};/);
   assert.match(styles, /#island \{[\s\S]*overscroll-behavior: none;[\s\S]*touch-action: none;/);
 });
@@ -533,7 +533,7 @@ test('zoom pill stays out of keyboard focus and Space reset paths', () => {
 test('text edit caret height follows script formatting', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
-  const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
+  const end = viewportSource.indexOf('function drawEditingTextOverlay', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const drawCaretSource = viewportSource.slice(start, end);
@@ -546,7 +546,7 @@ test('text edit caret height follows script formatting', () => {
 test('text edit caret honors visual line preference at wrapped line start', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
-  const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
+  const end = viewportSource.indexOf('function drawEditingTextOverlay', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
 
@@ -597,7 +597,7 @@ test('text edit caret honors visual line preference at wrapped line start', () =
 test('text edit caret passes consumed soft-wrap space offsets to layout', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
-  const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
+  const end = viewportSource.indexOf('function drawEditingTextOverlay', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
 
@@ -641,7 +641,7 @@ test('text edit caret passes consumed soft-wrap space offsets to layout', () => 
 test('text edit caret stays inside content bounds at low zoom', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
-  const end = viewportSource.indexOf('const applyObjectMotionForDraw', start);
+  const end = viewportSource.indexOf('function drawEditingTextOverlay', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
 
@@ -955,4 +955,6 @@ test('reset zoom clears selected and edited objects before zooming', () => {
   assert.equal(context.editingId, null);
   assert.equal(context.zoom, 1);
   assert.deepEqual(context.transforms, ['reset-zoom']);
+  assert.equal(context.debugEnd.objectId, image.id);
+  assert.equal(context.debugEnd.objectType, 'image');
 });

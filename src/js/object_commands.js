@@ -73,8 +73,7 @@ function addText(wx, wy, content = '', options = {}) {
     w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
   }
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
-  getTextScriptRanges(obj);
-  logStep('script-braces-normalized', () => objectCommandTextStats(content, data.scriptRanges));
+  logStep('script-braces-normalized', () => objectCommandTextStats(content, getTextScriptRanges(obj)));
   logStep('script-ranges-normalized', () => objectCommandTextStats(content, data.scriptRanges));
   logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content, data.scriptRanges) }));
   const heightChanged = syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);

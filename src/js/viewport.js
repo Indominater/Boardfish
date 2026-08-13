@@ -213,11 +213,8 @@ function _rebuildOffscreen(dpr, viewportRect) {
 // ─── History delta tracking ───────────────────────────────────────────────────
 var _dirtyIds = new Set();
 function markDirty(obj) {
-  const id = obj.id;
-  const wasDirty = (_dirtyIds.has(id) &&
-    (obj.type !== 'text' || !isTextContentEmpty(obj.data?.content))) || isDirty();
-  _dirtyIds.add(id);
-  if (!wasDirty) updateTitle();
+  _dirtyIds.add(obj.id);
+  updateTitle();
 }
 
 // ─── Canvas resize ────────────────────────────────────────────────────────────
@@ -542,17 +539,6 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
   return true;
 }
 
-const applyObjectMotionForDraw = (context, obj, motion) => {
-  context.save();
-  const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
-  if (scaleX !== 1 || scaleY !== 1) {
-    const scalePivotX = obj.x + obj.w * scaleOriginX;
-    const scalePivotY = obj.y + obj.h * scaleOriginY;
-    context.transform(scaleX, 0, 0, scaleY,
-      translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
-  } else if (translateX || translateY) context.translate(translateX, translateY);
-};
-
 function drawEditingTextOverlay(
   context,
   viewZoom = zoom,
@@ -583,7 +569,16 @@ function drawEditingTextOverlay(
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const motion = globalThis.BoardfishMotion?.objectMotionForDraw(obj, viewZoom);
-  if (motion) applyObjectMotionForDraw(context, obj, motion);
+  if (motion) {
+    context.save();
+    const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
+    if (scaleX !== 1 || scaleY !== 1) {
+      const scalePivotX = obj.x + obj.w * scaleOriginX;
+      const scalePivotY = obj.y + obj.h * scaleOriginY;
+      context.transform(scaleX, 0, 0, scaleY,
+        translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
+    } else if (translateX || translateY) context.translate(translateX, translateY);
+  }
   try {
     const liveSelStart = _editEl ? _editEl.selectionStart : 0;
     const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;

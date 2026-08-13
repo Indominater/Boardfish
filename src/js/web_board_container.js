@@ -704,21 +704,6 @@
     return true;
   }
 
-  async function detachedBlobCopy(blob, mime = 'image/png') {
-    let copy = null;
-    if (typeof root.Response === 'function' && typeof blob?.stream === 'function') {
-      copy = await new root.Response(blob.stream(), {
-        headers: { 'Content-Type': mime || 'image/png' },
-      }).blob();
-    } else {
-      copy = new Blob([await blob.arrayBuffer()], { type: mime || 'image/png' });
-    }
-    if (Number(copy?.size) !== Number(blob?.size)) {
-      throw new Error('truncated image Blob while preparing board save');
-    }
-    return copy.type === mime ? copy : copy.slice(0, copy.size, mime || 'image/png');
-  }
-
   async function stabilizeVolatileImageRefs(board, rawImageStore = {}) {
     const imageStore = board?.imageStore || {};
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -732,7 +717,19 @@
       if (!source?.__blobVolatile || !isBlobLike(source.__blob)) continue;
       const sourceBlob = source.__blob;
       const cachedCrc = cachedImageSourceCrc(source, sourceBlob.size);
-      const stableBlob = await detachedBlobCopy(sourceBlob, source.mime || 'image/png');
+      const mime = source.mime || 'image/png';
+      let stableBlob = null;
+      if (typeof root.Response === 'function' && typeof sourceBlob?.stream === 'function') {
+        stableBlob = await new root.Response(sourceBlob.stream(), {
+          headers: { 'Content-Type': mime || 'image/png' },
+        }).blob();
+      } else {
+        stableBlob = new Blob([await sourceBlob.arrayBuffer()], { type: mime || 'image/png' });
+      }
+      if (Number(stableBlob?.size) !== Number(sourceBlob?.size)) {
+        throw new Error('truncated image Blob while preparing board save');
+      }
+      if (stableBlob.type !== mime) stableBlob = stableBlob.slice(0, stableBlob.size, mime || 'image/png');
       if (!replaceWebImageRefBlob(source, stableBlob, cachedCrc, { volatile: false })) {
         throw new Error(`failed to stabilize image source ${key}`);
       }
@@ -810,14 +807,6 @@
     return new Blob([bytes], { type: source?.mime || 'image/png' });
   }
 
-  async function bytesForWebImageRefAsync(source) {
-    const bytes = bytesForWebImageRef(source);
-    if (bytes) return bytes;
-    const blob = blobForWebImageRef(source);
-    if (!blob) return null;
-    return new Uint8Array(await blob.arrayBuffer());
-  }
-
   function manifestEntryForKey(board, key) {
     const entry = board?.imageStore?.[key];
     return entry && typeof entry === 'object' ? entry : {};
@@ -852,31 +841,6 @@
     throw new Error(`Boardfish file is missing ${path}`);
   }
 
-  async function prepareLazyStoredImageBlobs(board, entries, containerBlob, concurrency = 8) {
-    const tasks = [];
-    const seen = new Set();
-    const imageStore = board?.imageStore || {};
-    for (const key in imageStore) {
-      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-      const manifest = imageStore[key];
-      const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
-      const resolved = resolveManifestImageEntry(entries, key, manifestObject);
-      if (resolved.entry.method !== ZIP_METHOD_STORED || seen.has(resolved.path)) continue;
-      seen.add(resolved.path);
-      tasks.push(resolved);
-    }
-    const out = new Map();
-    let next = 0;
-    const workerCount = Math.min(Math.max(1, Math.trunc(Number(concurrency)) || 1), tasks.length);
-    await Promise.all(Array.from({ length: workerCount }, async () => {
-      while (next < tasks.length) {
-        const task = tasks[next++];
-        out.set(task.path, await compressedEntryBlob(containerBlob, task.entry));
-      }
-    }));
-    return out;
-  }
-
   function mimeForImageSource(source, manifest = {}) {
     if (typeof manifest.mime === 'string' && manifest.mime) return manifest.mime;
     if (isWebImageRef(source) && source.mime) return source.mime;
@@ -907,41 +871,13 @@
 
   async function bytesForImageSourceAsync(source) {
     if (isWebImageRef(source)) {
-      const bytes = await bytesForWebImageRefAsync(source);
+      const bytes = bytesForWebImageRef(source);
       if (bytes) return bytes;
+      const blob = blobForWebImageRef(source);
+      if (blob) return new Uint8Array(await blob.arrayBuffer());
     }
     if (isBlobLike(source)) return new Uint8Array(await source.arrayBuffer());
     return bytesForImageSource(source);
-  }
-
-  async function buildImageEntries(board, rawImageStore = {}) {
-    const entries = [];
-    const imageStore = board?.imageStore || {};
-    for (const key in imageStore) {
-      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-      const manifest = manifestEntryForKey(board, key);
-      const source = rawImageStore[key];
-      const sourceBlob = isWebImageRef(source) && isNativeBlobPart(source.__blob)
-        ? source.__blob
-        : (isNativeBlobPart(source) ? source : null);
-      const bytes = sourceBlob ? null : await bytesForImageSourceAsync(source);
-      const data = sourceBlob || bytes;
-      if (!data) throw new Error(`web .bf save is missing image bytes for ${key}`);
-      const byteLength = sourceBlob ? Number(sourceBlob.size) : bytes.length;
-      entries.push({
-        key,
-        path: canonicalImageEntryPath(key, manifest),
-        mime: mimeForImageSource(source, manifest),
-        ext: manifest.ext || '',
-        source,
-        data,
-        bytes,
-        byteLength,
-        crc: cachedImageSourceCrc(source, byteLength),
-        blob: !!sourceBlob,
-      });
-    }
-    return entries;
   }
 
   async function recoverMatchingVolatileImageRefsFromContainer(board, rawImageStore = {}, containerInput) {
@@ -1053,7 +989,32 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const imageEntries = await buildImageEntries(board, rawImageStore);
+    const imageEntries = [];
+    const imageStore = board?.imageStore || {};
+    for (const key in imageStore) {
+      if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+      const manifest = manifestEntryForKey(board, key);
+      const source = rawImageStore[key];
+      const sourceBlob = isWebImageRef(source) && isNativeBlobPart(source.__blob)
+        ? source.__blob
+        : (isNativeBlobPart(source) ? source : null);
+      const bytes = sourceBlob ? null : await bytesForImageSourceAsync(source);
+      const data = sourceBlob || bytes;
+      if (!data) throw new Error(`web .bf save is missing image bytes for ${key}`);
+      const byteLength = sourceBlob ? Number(sourceBlob.size) : bytes.length;
+      imageEntries.push({
+        key,
+        path: canonicalImageEntryPath(key, manifest),
+        mime: mimeForImageSource(source, manifest),
+        ext: manifest.ext || '',
+        source,
+        data,
+        bytes,
+        byteLength,
+        crc: cachedImageSourceCrc(source, byteLength),
+        blob: !!sourceBlob,
+      });
+    }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const imageEntriesMs = collectDiagnostics ? nowMs() - phaseStart : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1227,17 +1188,36 @@
     let imageHeaderReadMs = 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     let lazyStoredImageBlobs = null;
+    const imageStore = board.imageStore || {};
 
     if (randomAccessBlob && lazyImageRefs) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const headerStart = collectDiagnostics ? nowMs() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      lazyStoredImageBlobs = await prepareLazyStoredImageBlobs(board, entries, randomAccessBlob, 8);
+      const tasks = [];
+      const seen = new Set();
+      for (const key in imageStore) {
+        if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
+        const manifest = imageStore[key];
+        const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
+        const resolved = resolveManifestImageEntry(entries, key, manifestObject);
+        if (resolved.entry.method !== ZIP_METHOD_STORED || seen.has(resolved.path)) continue;
+        seen.add(resolved.path);
+        tasks.push(resolved);
+      }
+      lazyStoredImageBlobs = new Map();
+      let next = 0;
+      const workerCount = Math.min(8, tasks.length);
+      await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (next < tasks.length) {
+          const task = tasks[next++];
+          lazyStoredImageBlobs.set(task.path, await compressedEntryBlob(randomAccessBlob, task.entry));
+        }
+      }));
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDiagnostics) imageHeaderReadMs = nowMs() - headerStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    const imageStore = board.imageStore || {};
     for (const key in imageStore) {
       if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
       const manifest = imageStore[key];

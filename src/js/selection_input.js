@@ -37,31 +37,6 @@ function selectionOverlayObjectBounds(obj, motion = obj && globalThis.BoardfishM
   return { x1, y1, x2: x1 + obj.w * scaleX, y2: y1 + obj.h * scaleY };
 }
 
-function selectionOverlaySelectedBounds(resting, obj, hasMotion) {
-  if (!hasMotion) return resting;
-  if (selectedIds.size === 1) {
-    return selectionOverlayObjectBounds(obj) || resting;
-  }
-  let translateX = 0, translateY = 0, motionCount = 0;
-  _multiSelMotions.length = 0;
-  for (const id of selectedIds) {
-    const motion = _multiSelMotions[_multiSelMotions.length] = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(id) || null;
-    if (!motion) continue;
-    translateX += motion.groupTranslateX ?? motion.translateX ?? 0;
-    translateY += motion.groupTranslateY ?? motion.translateY ?? 0;
-    motionCount++;
-  }
-  if (!motionCount) return resting;
-  translateX /= motionCount;
-  translateY /= motionCount;
-  return {
-    x1: resting.x1 + translateX,
-    y1: resting.y1 + translateY,
-    x2: resting.x2 + translateX,
-    y2: resting.y2 + translateY,
-  };
-}
-
 function _cleanOverlay(value) {
   if (Math.abs(value) < 1e-9) return 0;
   return Math.round(value * 1e9) / 1e9;
@@ -229,13 +204,9 @@ const isEventInsideVisibleContextMenu = (e) => {
   );
 };
 
-const isEventInsideVisibleIsland = (e) => {
-  return isEventInsideVisibleSurface(e, island);
-};
-
 const isEventInsideViewportWheelSurface = (e) => {
   return (e.target instanceof Node && canvas.contains(e.target)) ||
-    isEventInsideVisibleContextMenu(e) || isEventInsideVisibleIsland(e);
+    isEventInsideVisibleContextMenu(e) || isEventInsideVisibleSurface(e, island);
 };
 
 function isShieldInputAllowed(e) {
@@ -296,49 +267,6 @@ function hideMultiSelectionOverlay() {
   if (multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.remove('visible');
 }
 
-function updateMultiSelectionOverlay(hasMotion, multiSelected) {
-  if (!multiSelOverlay || !multiSelected) {
-    hideMultiSelectionOverlay();
-    return 0;
-  }
-
-  while (_multiSelBoxes.length < selectedIds.size) {
-    const box = document.createElement('div');
-    box.className = 'multi-sel-box';
-    box._styleState = { transform: '', width: '', height: '' };
-    _multiSelBoxes.push(box);
-    multiSelOverlay.appendChild(box);
-  }
-
-  let selectedIdx = 0, motionIdx = 0, imageEdgePad = 0;
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    const motion = hasMotion ? _multiSelMotions[motionIdx++] : null;
-    if (!obj) continue;
-    const resting = { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h };
-    const bounds = hasMotion ? selectionOverlayObjectBounds(obj, motion) || resting : resting;
-    const box = _multiSelBoxes[selectedIdx++];
-    const state = box._styleState;
-    const pad = obj.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0;
-    imageEdgePad ||= pad;
-    setSelectionOverlayScreenRect(
-      box,
-      state,
-      resting,
-      bounds,
-      pad,
-    );
-  }
-
-  while (_multiSelBoxes.length > selectedIdx) {
-    const box = _multiSelBoxes.pop();
-    box?.parentNode?.removeChild(box);
-  }
-
-  if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
-  return imageEdgePad;
-}
-
 function updateSelectionOverlay() {
   if (isBoardInputBlocked() && !shouldKeepSelectionOverlayWhileBlocked()) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
@@ -361,7 +289,32 @@ function updateSelectionOverlay() {
 
   const resting = selectedBounds();
   const hasMotion = !!globalThis.BoardfishMotion?.hasLastDrawnObjectMotions?.();
-  const bounds = resting && selectionOverlaySelectedBounds(resting, firstSelectedObj, hasMotion);
+  let bounds = resting;
+  if (resting && hasMotion) {
+    if (selectedIds.size === 1) {
+      bounds = selectionOverlayObjectBounds(firstSelectedObj) || resting;
+    } else {
+      let translateX = 0, translateY = 0, motionCount = 0;
+      _multiSelMotions.length = 0;
+      for (const id of selectedIds) {
+        const motion = _multiSelMotions[_multiSelMotions.length] = globalThis.BoardfishMotion?.getLastDrawnObjectMotion?.(id) || null;
+        if (!motion) continue;
+        translateX += motion.groupTranslateX ?? motion.translateX ?? 0;
+        translateY += motion.groupTranslateY ?? motion.translateY ?? 0;
+        motionCount++;
+      }
+      if (motionCount) {
+        translateX /= motionCount;
+        translateY /= motionCount;
+        bounds = {
+          x1: resting.x1 + translateX,
+          y1: resting.y1 + translateY,
+          x2: resting.x2 + translateX,
+          y2: resting.y2 + translateY,
+        };
+      }
+    }
+  }
   if (!bounds) {
     if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
     hideMultiSelectionOverlay();
@@ -378,8 +331,39 @@ function updateSelectionOverlay() {
   }
 
   const multiSelected = isMultiSelected();
-  const imageEdgePad = updateMultiSelectionOverlay(hasMotion, multiSelected) ||
-    (firstSelectedObj.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0);
+  let imageEdgePad = 0;
+  if (!multiSelOverlay || !multiSelected) {
+    hideMultiSelectionOverlay();
+  } else {
+    while (_multiSelBoxes.length < selectedIds.size) {
+      const box = document.createElement('div');
+      box.className = 'multi-sel-box';
+      box._styleState = { transform: '', width: '', height: '' };
+      _multiSelBoxes.push(box);
+      multiSelOverlay.appendChild(box);
+    }
+    let selectedIdx = 0, motionIdx = 0;
+    for (const id of selectedIds) {
+      const obj = objectsMap.get(id);
+      const motion = hasMotion ? _multiSelMotions[motionIdx++] : null;
+      if (!obj) continue;
+      const resting = { x1: obj.x, y1: obj.y, x2: obj.x + obj.w, y2: obj.y + obj.h };
+      const bounds = hasMotion ? selectionOverlayObjectBounds(obj, motion) || resting : resting;
+      const box = _multiSelBoxes[selectedIdx++];
+      const state = box._styleState;
+      const pad = obj.type === 'image' ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX : 0;
+      imageEdgePad ||= pad;
+      setSelectionOverlayScreenRect(box, state, resting, bounds, pad);
+    }
+    while (_multiSelBoxes.length > selectedIdx) {
+      const box = _multiSelBoxes.pop();
+      box?.parentNode?.removeChild(box);
+    }
+    if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
+  }
+  imageEdgePad ||= firstSelectedObj.type === 'image'
+    ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX
+    : 0;
   setSelectionOverlayScreenRect(
     selOverlay,
     _selOverlayStyleState,

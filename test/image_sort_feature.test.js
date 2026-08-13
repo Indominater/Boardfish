@@ -244,15 +244,15 @@ test('sortSelectedImages does not add a floating-point-only history entry on rep
 
 test('paste sizing keeps extreme-aspect images positive while using the shared cap', () => {
   const source = readSource('src/js/image_insert.js');
-  const start = source.indexOf('function fitImageSize(naturalW, naturalH) {');
-  const end = source.indexOf('\nconst isWebInsertImageFile', start);
-  assert.ok(start >= 0 && end > start, 'image fit helper is missing');
+  const start = source.indexOf('    let w = naturalW, h = naturalH;');
+  const end = source.indexOf("\n    if (typeof BOARDFISH_PRODUCTION === 'undefined')", start);
+  assert.ok(start >= 0 && end > start, 'inline image sizing is missing');
   const context = {
     BoardfishImageLayout: { DEFAULT_IMAGE_MAX_DIMENSION: 600 },
   };
   vm.createContext(context);
   vm.runInContext(
-    `${source.slice(start, end)}\nglobalThis.fitImageSize = fitImageSize;\n`,
+    `globalThis.fitImageSize = (naturalW, naturalH) => {${source.slice(start, end)}; return { w, h };};\n`,
     context,
   );
 
@@ -365,7 +365,7 @@ test('Arrange menu integration is selection-centered and uses the shared paste s
   assert.match(contextMenuSource, /layerActionsSep\.style\.display = showLayerActions \? 'block' : 'none';/);
   assert.match(contextMenuSource, /arrangeImagesBtn\.style\.display = imageCount >= 2 \? '' : 'none';/);
   assert.match(stateSource, /\{ shuffleOrder: true, randomizeTies: true \}/);
-  assert.match(imageInsertSource, /const MAX = BoardfishImageLayout\.DEFAULT_IMAGE_MAX_DIMENSION;/);
+  assert.match(imageInsertSource, /const maxDimension = BoardfishImageLayout\.DEFAULT_IMAGE_MAX_DIMENSION;/);
   assert.match(imageInsertSource, /w = Math\.max\(1, Math\.round\(w \* scale\)\);/);
   assert.match(imageInsertSource, /h = Math\.max\(1, Math\.round\(h \* scale\)\);/);
   assert.equal((manifestSource.match(/'image_layout\.js'/g) || []).length, 2);

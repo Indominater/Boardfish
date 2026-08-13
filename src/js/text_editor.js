@@ -571,23 +571,6 @@ const resetTextEditPreservedMinLinesForInput = (obj) => {
   };
 };
 
-const shouldDeferTextEditAutoHeightForInput = (obj, forceSync = false) => {
-  if (forceSync) return false;
-  if (!obj || obj.type !== 'text') return false;
-  if (String(obj._editStartContent ?? '') === '') return false;
-  const contentLength = String(obj.data?.content || '').length;
-  return contentLength >= TEXT_EDIT_DEFER_AUTO_HEIGHT_CHARS;
-};
-
-const syncTextEditAutoHeightForInput = (obj, minLines = 1, forceSync = false) => {
-  if (shouldDeferTextEditAutoHeightForInput(obj, forceSync)) {
-    obj._textEditPendingSizeSync = true;
-    return false;
-  }
-  delete obj._textEditPendingSizeSync;
-  return syncTextAutoHeight(obj, minLines);
-};
-
 const setTextScriptCaretAffinity = (obj, index, affinity) => {
   if (!obj) return;
   obj._textScriptCaretIndex = index;
@@ -1990,12 +1973,6 @@ const setPendingTextEditInputState = (proxy, state) => {
   proxy?._boardfishSetPendingInputState?.(state);
 };
 
-const isTextEditProxyDomStale = (proxy, logicalValue = null) => {
-  if (!proxy) return false;
-  const value = logicalValue == null ? textEditProxyValue(proxy) : normalizeTextContent(logicalValue);
-  return !!proxy._boardfishDomValueStale || String(proxy.value ?? '') !== value;
-};
-
 const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end', deferDomValue = false) => {
   const value = textEditProxyValue(proxy);
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, value.length));
@@ -2136,7 +2113,7 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
 
   const inputType = options.inputType || 'insertFromPaste';
   const currentProxyValue = textEditProxyValue(proxy);
-  if (isTextEditProxyDomStale(proxy, currentProxyValue)) return false;
+  if (proxy._boardfishDomValueStale || proxy.value !== currentProxyValue) return false;
   const inputState = {
     ...selection,
     value: currentProxyValue,
@@ -2186,7 +2163,7 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
   const inputType = options.inputType || 'insertFromPaste';
   const scriptRanges = getTextScriptRanges(obj);
   const currentProxyValue = textEditProxyValue(proxy);
-  if (isTextEditProxyDomStale(proxy, currentProxyValue)) return false;
+  if (proxy._boardfishDomValueStale || proxy.value !== currentProxyValue) return false;
   const inputState = {
     ...selection,
     value: currentProxyValue,
@@ -2454,6 +2431,7 @@ function enterEdit(id, {
       if (lineAlignNormalized) {
         if (lineAlign.length) obj.data.lineAlign = lineAlign;
         else delete obj.data.lineAlign;
+        markDirty(obj);
       }
     }
   }
@@ -2921,7 +2899,19 @@ function enterEdit(id, {
         }
       : null;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const heightChanged = syncTextEditAutoHeightForInput(obj, getTextMinLines(obj), forceAutoHeight);
+    let heightChanged;
+    if (
+      !forceAutoHeight &&
+      obj?.type === 'text' &&
+      String(obj._editStartContent ?? '') !== '' &&
+      String(obj.data?.content || '').length >= TEXT_EDIT_DEFER_AUTO_HEIGHT_CHARS
+    ) {
+      obj._textEditPendingSizeSync = true;
+      heightChanged = false;
+    } else {
+      delete obj._textEditPendingSizeSync;
+      heightChanged = syncTextAutoHeight(obj, getTextMinLines(obj));
+    }
     logInputStep('auto-height-done', () => ({
       heightChanged,
       autoHeightDeferred: !!obj._textEditPendingSizeSync,
@@ -3584,7 +3574,7 @@ function enterEdit(id, {
       } else if (targetIdx >= layout.length) {
         newPos = textEditProxyValue(proxy).length;
       } else {
-        newPos = layoutHitTest([layout[targetIdx]], caretX, layout[targetIdx].y, obj);
+        newPos = layoutHitTestCaret([layout[targetIdx]], caretX, layout[targetIdx].y, obj, true).index;
       }
 
       if (e.shiftKey) {

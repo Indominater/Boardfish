@@ -122,6 +122,7 @@ function makeEditProxy({
 
 function loadHistoryHarness() {
   const imagePruneCalls = [];
+  const titleStates = [];
   const context = {
     console,
     performance: { now: () => 0 },
@@ -137,7 +138,6 @@ function loadHistoryHarness() {
     objectsMap: new Map(),
     selectedId: null,
     selectedIds: new Set(),
-    savedHistoryIndex: -1,
     editingId: null,
     _dirtyIds: new Set(),
     _caretBlinkInterval: null,
@@ -152,6 +152,11 @@ function loadHistoryHarness() {
     replaceBoardObjectsOptions: [],
     collapseTextOnReplace: false,
     imagePruneCalls,
+    titleStates,
+    titleState() {
+      const entry = context.boardHistory[context.historyIndex];
+      titleStates.push({ revision: entry?.revision, dirtyCount: context._dirtyIds.size });
+    },
     BoardfishEditorState: {
       replaceBoardObjects(nextObjects, options = {}) {
         context.replaceBoardObjectsOptions.push({ ...(options || {}) });
@@ -212,7 +217,7 @@ function loadHistoryHarness() {
         selectionDirection: 'none',
       });
     },
-    updateTitle() {},
+    updateTitle() { context.titleState(); },
   };
 
   vm.createContext(context);
@@ -382,6 +387,23 @@ test('history entries and restores omit inert motion metadata', () => {
   assert.equal(context.objectsMap.get('image-1').data.flipX, true);
 });
 
+test('undo synchronizes the title as soon as restored history becomes clean', () => {
+  const context = loadHistoryHarness();
+  setBoard(context, [historyImage('img-1')]);
+  context.snapshot();
+  const savedRevision = context.boardHistory[context.historyIndex].revision;
+  context.objectsMap.get('img-1').x = 20;
+  context.markDirty('img-1');
+  context.pushHistory('move-image');
+  context.titleStates.length = 0;
+  context.invalidateOffscreen = () => { throw new Error('restore failed'); };
+
+  assert.throws(() => context.undo(), /restore failed/);
+  assert.equal(context.boardHistory[context.historyIndex].revision, savedRevision);
+  assert.equal(context._dirtyIds.size, 0);
+  assert.deepEqual(context.titleStates, [{ revision: savedRevision, dirtyCount: 0 }]);
+});
+
 test('undo flushes a pending text edit checkpoint before restoring it', () => {
   const context = loadHistoryHarness();
   setBoard(context, [
@@ -434,6 +456,10 @@ test('undoing first text run restores the edit-entry snapshot and stays editing'
   context.undo();
 
   assert.equal(context.objectsMap.get('text-1').data.content, 'before');
+  assert.equal(
+    context.boardHistory[context.historyIndex].revision,
+    context.boardHistory[0].revision,
+  );
   assert.equal(context.editingId, 'text-1');
   assert.equal(context._editEl.selectionStart, 6);
   assert.equal(context._editEl.selectionEnd, 6);

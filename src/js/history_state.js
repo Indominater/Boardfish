@@ -1,6 +1,7 @@
 // ─── History ──────────────────────────────────────────────────────────────────
 var boardHistory = [];
 var historyIndex = -1;
+var _historyRevision = 0;
 var MAX_HISTORY = 50;
 var _historyImageCacheClipboardToken = _jsClipboardToken;
 function trimHistory() {
@@ -8,7 +9,6 @@ function trimHistory() {
     const trim = boardHistory.length - MAX_HISTORY;
     boardHistory.splice(0, trim);
     historyIndex = Math.max(-1, historyIndex - trim);
-    savedHistoryIndex = Math.max(-1, savedHistoryIndex - trim);
     return true;
   }
   return false;
@@ -266,6 +266,7 @@ function snapshot() {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   boardHistory.push({
     reason: 'snapshot',
+    revision: ++_historyRevision,
     objects: objectsSnapshot,
     editState,
   });
@@ -291,6 +292,7 @@ function snapshot() {
 // restoreSnapshot always deep-clones before mutating).
 function pushHistory(reason = '', dirty = null, beforeEditState = null) {
   if (dirty) for (const item of dirty) _dirtyIds.add(item?.obj?.id ?? item?.id ?? item);
+  const contentChanged = _dirtyIds.size > 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = HistoryDebug.start('pushHistory', {
     reason,
@@ -343,6 +345,7 @@ function pushHistory(reason = '', dirty = null, beforeEditState = null) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   boardHistory.push({
     reason,
+    revision: reason === 'text-edit-enter' && !contentChanged ? prevEntry?.revision : ++_historyRevision,
     objects: entry,
     editState,
     beforeEditState,
@@ -473,6 +476,7 @@ function restoreSnapshot(s, editStateOverride) {
   HistoryDebug.step(dbg, 'normalize-text', { objectCount: objects.length });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _dirtyIds.clear();
+  updateTitle();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'rebuild-caches', { objectCount: objectsMap.size });
   HistoryDebug.step(dbg, 'preserve-text-heights');
@@ -756,9 +760,6 @@ function undo() {
     historyIndex,
     ...getHistoryTextDebugMetrics(objects),
   });
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  updateTitle();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.end(dbg, {
     historyLength: boardHistory.length,
     historyIndex,
@@ -823,9 +824,6 @@ function redo() {
     historyIndex,
     ...getHistoryTextDebugMetrics(objects),
   });
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  updateTitle();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.end(dbg, {
     historyLength: boardHistory.length,
     historyIndex,

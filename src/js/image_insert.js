@@ -2,10 +2,6 @@
 
 const WEB_IMAGE_INSERT_CONCURRENCY = 3;
 
-const webImageInsertConcurrency = (count) => (
-  Math.max(1, Math.min(WEB_IMAGE_INSERT_CONCURRENCY, Number(count) || 1))
-);
-
 function beginBulkImageInsert() {
   _bulkImageInsertDepth++;
   _bulkImageInsertAdded = 0;
@@ -25,22 +21,6 @@ function finishBulkImageInsert() {
   }
   return added;
 }
-
-function fitImageSize(naturalW, naturalH) {
-  let w = naturalW;
-  let h = naturalH;
-  const MAX = BoardfishImageLayout.DEFAULT_IMAGE_MAX_DIMENSION;
-  if (w > MAX || h > MAX) {
-    const scale = MAX / Math.max(w, h);
-    w = Math.max(1, Math.round(w * scale));
-    h = Math.max(1, Math.round(h * scale));
-  }
-  return { w, h };
-}
-
-const isWebInsertImageFile = (file) => (
-  file?.type === 'image/png' || file?.type === 'image/jpeg'
-);
 
 const webImageExtForFile = (file) => (
   file?.type === 'image/jpeg' ? 'jpg' : 'png'
@@ -155,7 +135,13 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
       }
       return null;
     }
-    const { w, h } = fitImageSize(naturalW, naturalH);
+    let w = naturalW, h = naturalH;
+    const maxDimension = BoardfishImageLayout.DEFAULT_IMAGE_MAX_DIMENSION;
+    if (w > maxDimension || h > maxDimension) {
+      const scale = maxDimension / Math.max(w, h);
+      w = Math.max(1, Math.round(w * scale));
+      h = Math.max(1, Math.round(h * scale));
+    }
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       ViewportDebug.step(dbg, 'size-object', { w, h });
       ViewportDebug.step(dbg, 'cache-registered', { imgKey, bitmapOnly: true });
@@ -217,60 +203,6 @@ async function pickAndInsertImages(x, y) {
   fileInput.click();
 }
 
-const insertWebImageFile = async (file, x, y
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  , dbg
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  , options = {}
-) => {
-  const imgKey = options.imgKey || newImgKey();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let fileName;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') fileName = imageFileDebugName(file);
-  const imageSource = createWebImageSourceFromBlob(file, imgKey);
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    const detachedFile = typeof File === 'function' && file instanceof File;
-    InsertDebug.step(dbg, 'read:end', {
-      source: options.source,
-      fileName,
-      fileSize: file.size,
-      fileType: file.type,
-      bytes: file.size,
-      readMode: detachedFile ? 'blob-copy' : 'blob-reference',
-      skipped: detachedFile ? '' : 'immutable-blob',
-    });
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let sourceInfo;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    sourceInfo = imageSourceDebugInfo(imageSource);
-    InsertDebug.step(dbg, 'web-ref:create', {
-      source: options.source,
-      fileName,
-      imgKey,
-      sourceKind: sourceInfo.kind,
-      bytes: file.size,
-    });
-  }
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') options.insertDebug = dbg;
-  const obj = await addImage(imageSource, x, y, imgKey, options);
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    InsertDebug.end(dbg, {
-      added: !!obj,
-      source: options.source,
-      fileName,
-      fileSize: file.size,
-      fileType: file.type,
-      imgKey,
-      sourceKind: sourceInfo.kind,
-      bytes: file.size,
-    });
-  }
-  return obj;
-};
-
 async function insertImageFiles(files, x, y
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , source = 'file-input'
@@ -299,7 +231,7 @@ async function insertImageFiles(files, x, y
   const supportedFiles = [];
   let acceptedBytes = 0;
   for (const file of files) {
-    if (!isWebInsertImageFile(file)) {
+    if (file?.type !== 'image/png' && file?.type !== 'image/jpeg') {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         dropped.type++;
         InsertDebug.step(dbg, 'file:skip', { source, fileName: file?.name || '', fileSize: file?.size ?? '', fileType: file?.type || '', skipped: 'unsupported-type' });
@@ -344,7 +276,7 @@ async function insertImageFiles(files, x, y
     }
     return;
   }
-  const concurrency = webImageInsertConcurrency(accepted.length);
+  const concurrency = Math.min(WEB_IMAGE_INSERT_CONCURRENCY, accepted.length);
   const bulkZBase = bulk ? zCounter + 1 : null;
   const addedIds = new Array(accepted.length);
   showInputShield();
@@ -371,12 +303,51 @@ async function insertImageFiles(files, x, y
           z: bulkZBase == null ? undefined : bulkZBase + acceptedIndex,
         };
         if (typeof BOARDFISH_PRODUCTION === 'undefined') insertOptions.source = source;
-        const obj = await insertWebImageFile(file, x, y
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          , fileDbg
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          , insertOptions
-        );
+        const imgKey = insertOptions.imgKey || newImgKey();
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        let fileName;
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') fileName = imageFileDebugName(file);
+        const imageSource = createWebImageSourceFromBlob(file, imgKey);
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          const detachedFile = typeof File === 'function' && file instanceof File;
+          InsertDebug.step(fileDbg, 'read:end', {
+            source: insertOptions.source,
+            fileName,
+            fileSize: file.size,
+            fileType: file.type,
+            bytes: file.size,
+            readMode: detachedFile ? 'blob-copy' : 'blob-reference',
+            skipped: detachedFile ? '' : 'immutable-blob',
+          });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        let sourceInfo;
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          sourceInfo = imageSourceDebugInfo(imageSource);
+          InsertDebug.step(fileDbg, 'web-ref:create', {
+            source: insertOptions.source,
+            fileName,
+            imgKey,
+            sourceKind: sourceInfo.kind,
+            bytes: file.size,
+          });
+          insertOptions.insertDebug = fileDbg;
+        }
+        const obj = await addImage(imageSource, x, y, imgKey, insertOptions);
+        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          InsertDebug.end(fileDbg, {
+            added: !!obj,
+            source: insertOptions.source,
+            fileName,
+            fileSize: file.size,
+            fileType: file.type,
+            imgKey,
+            sourceKind: sourceInfo.kind,
+            bytes: file.size,
+          });
+        }
         if (obj) {
           addedIds[acceptedIndex] = obj.id;
           added++;

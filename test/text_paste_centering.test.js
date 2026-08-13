@@ -107,7 +107,7 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
     textByteLengthCalls: 0,
   };
   vm.createContext(context);
-  vm.runInContext(`${textLayoutSource}syncTextAutoHeight = testSyncTextAutoHeight;\n${source}\nglobalThis.addText = addText;\n`, context, {
+  vm.runInContext(`${textLayoutSource}syncTextAutoHeight = (obj, minLines) => (getTextScriptRanges(obj), testSyncTextAutoHeight(obj, minLines));\n${source}\nglobalThis.addText = addText;\n`, context, {
     filename: 'object_commands.js',
   });
   return context;

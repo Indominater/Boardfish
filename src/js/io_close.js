@@ -1,7 +1,7 @@
 // ─── Dirty tracking ───────────────────────────────────────────────────────────
 
-// historyIndex at last save (or open). -1 means never saved.
-var savedHistoryIndex = -1;
+var savedHistoryRevision;
+var savedDefaultEmptyBoard = false;
 var currentFilePath = null;
 var currentFileRef = null;
 
@@ -18,25 +18,25 @@ function isDefaultEmptyBoardState(objectList = objects) {
 }
 
 function isCleanDefaultEmptyBoardState() {
-  return savedHistoryIndex >= 0 && savedHistoryIndex < boardHistory.length &&
-    isDefaultEmptyBoardState(objects) &&
-    isDefaultEmptyBoardState(historyEntryObjects(boardHistory[savedHistoryIndex]));
+  return savedDefaultEmptyBoard && isDefaultEmptyBoardState(objects);
 }
 
 function isDirty() {
-  return (historyIndex !== savedHistoryIndex || _dirtyIds.size > 0) && !isCleanDefaultEmptyBoardState();
+  const revision = boardHistory[historyIndex]?.revision;
+  return (_dirtyIds.size > 0 || revision === undefined || revision !== savedHistoryRevision) && !isCleanDefaultEmptyBoardState();
 }
 
 function markSaved(updateDocumentTitle = true) {
   _dirtyIds.clear();
-  savedHistoryIndex = historyIndex;
+  savedHistoryRevision = boardHistory[historyIndex]?.revision;
+  savedDefaultEmptyBoard = isDefaultEmptyBoardState();
   if (updateDocumentTitle) updateTitle();
 }
 
 function updateTitle() {
   const fileName = BoardfishRuntime?.fileNameFromRef?.(currentFileRef || currentFilePath, '') || '';
   const title = fileName ? `${isDirty() ? '* ' : ''}${fileName}` : 'Boardfish';
-  document.title = title;
+  if (document.title !== title) document.title = title;
 }
 
 

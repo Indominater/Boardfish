@@ -274,19 +274,9 @@ const textScriptScaleForDepth = (depth) => Math.pow(
   Math.min(TEXT_SCRIPT_MAX_SIZE_DEPTH, Math.max(0, depth || 0)),
 );
 
-const textFontForScriptDepth = (depth) => {
-  if (!(depth > 0)) return FONT;
-  return textFontForSize(Math.max(1, FONT_SIZE * textScriptScaleForDepth(depth)));
-};
-
-function measureRawTextWForDepth(text, depth = 0) {
-  if (!(depth > 0)) return measureRawTextW(text);
-  const font = textFontForScriptDepth(depth);
+function measureRawTextWWithScriptFont(text, font) {
   let cache = _fontMeasureCaches.get(font);
-  if (!cache) {
-    cache = new Map();
-    _fontMeasureCaches.set(font, cache);
-  }
+  if (!cache) _fontMeasureCaches.set(font, cache = new Map());
   return measureRawTextWWithFont(text, font, cache);
 }
 
@@ -449,30 +439,6 @@ const cloneTextLayoutRuntimeLines = (lines = []) => {
   for (let i = 0; i < lines.length; i++) out[i] = cloneTextLayoutRuntimeLine(lines[i]);
   return out;
 };
-
-function replaceArraySegmentInPlace(target, start, deleteCount, inserted = []) {
-  if (!Array.isArray(target)) return target;
-  const source = Array.isArray(inserted) ? inserted : [];
-  const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, target.length));
-  const removeCount = Math.max(0, Math.min(Math.trunc(Number(deleteCount)) || 0, target.length - from));
-  const insertCount = source.length;
-  const suffixStart = from + removeCount;
-  const suffixLength = target.length - suffixStart;
-  const newLength = from + insertCount + suffixLength;
-  if (insertCount > removeCount) {
-    target.length = newLength;
-    for (let i = suffixLength - 1; i >= 0; i--) {
-      target[from + insertCount + i] = target[suffixStart + i];
-    }
-  } else if (insertCount < removeCount) {
-    for (let i = 0; i < suffixLength; i++) {
-      target[from + insertCount + i] = target[suffixStart + i];
-    }
-    target.length = newLength;
-  }
-  for (let i = 0; i < insertCount; i++) target[from + i] = source[i];
-  return target;
-}
 
 function cloneTextObjectRuntimeCaches(source, target) {
   if (!source || !target || source.type !== 'text' || target.type !== 'text') return target;
@@ -669,7 +635,7 @@ function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], conte
         width += spacing;
         pw[unitStart] = width;
       }
-      width += measureRawTextWForDepth(unit, state?.depth || 0);
+      width += state.depth ? measureRawTextWWithScriptFont(unit, state.font) : measureRawTextW(unit);
       for (let pos = unitStart + 1; pos <= unitEnd; pos++) pw[pos] = width;
       previousUnit = unit;
     }, i, j);
@@ -681,16 +647,15 @@ function getTextRangePrefixWidths(text, rangeStart = 0, scriptRanges = [], conte
 }
 
 function getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, text, start, end, scriptRanges = [], scriptKey = '', scriptMetrics = null) {
-  const normalizedScriptKey = scriptKey || JSON.stringify(Array.isArray(scriptRanges) ? scriptRanges : []);
   if (
     obj._textParagraphPrefixCacheContent !== text ||
-    obj._textParagraphPrefixCacheScriptKey !== normalizedScriptKey ||
+    obj._textParagraphPrefixCacheScriptKey !== scriptKey ||
     !obj._textParagraphPrefixCache ||
     typeof obj._textParagraphPrefixCache.get !== 'function'
   ) {
     obj._textParagraphPrefixCache = new Map();
     obj._textParagraphPrefixCacheContent = text;
-    obj._textParagraphPrefixCacheScriptKey = normalizedScriptKey;
+    obj._textParagraphPrefixCacheScriptKey = scriptKey;
   }
 
   const cached = obj._textParagraphPrefixCache.get(start);
@@ -729,45 +694,6 @@ function setCachedTextWrappedLineCount(obj, text, scriptKey, lineCount) {
   obj._textWrappedLineCountCacheValue = Math.max(1, Math.trunc(Number(lineCount)) || 1);
 }
 
-function getTextWrappedLineIndexWidthCache(obj, text, scriptKey) {
-  if (!obj || obj.type !== 'text') return null;
-  const cache = obj._textWrappedLineIndexWidthCache;
-  if (
-    obj._textWrappedLineIndexWidthCacheContent === text &&
-    obj._textWrappedLineIndexWidthCacheScriptKey === scriptKey &&
-    cache &&
-    typeof cache.get === 'function'
-  ) {
-    return cache;
-  }
-  return null;
-}
-
-function ensureTextWrappedLineIndexWidthCache(obj, text, scriptKey) {
-  if (!obj || obj.type !== 'text') return null;
-  if (
-    obj._textWrappedLineIndexWidthCacheContent !== text ||
-    obj._textWrappedLineIndexWidthCacheScriptKey !== scriptKey ||
-    !obj._textWrappedLineIndexWidthCache ||
-    typeof obj._textWrappedLineIndexWidthCache.set !== 'function'
-  ) {
-    obj._textWrappedLineIndexWidthCacheContent = text;
-    obj._textWrappedLineIndexWidthCacheScriptKey = scriptKey;
-    obj._textWrappedLineIndexWidthCache = new Map();
-  }
-  return obj._textWrappedLineIndexWidthCache;
-}
-
-function promoteCachedTextWrappedLineIndex(obj, text, scriptKey, width, cache) {
-  if (!obj || !cache || !Array.isArray(cache.entries) || !Number.isFinite(cache.lineCount)) return null;
-  obj._textWrappedLineIndexCacheContent = text;
-  obj._textWrappedLineIndexCacheW = width;
-  obj._textWrappedLineIndexCacheScriptKey = scriptKey;
-  obj._textWrappedLineIndexCache = cache;
-  setCachedTextWrappedLineCount(obj, obj._textWrappedLineIndexCacheContent, scriptKey, cache.lineCount);
-  return cache;
-}
-
 function getCachedTextWrappedLineIndex(obj, text, scriptKey) {
   if (!obj || obj.type !== 'text') return null;
   const cache = obj._textWrappedLineIndexCache;
@@ -781,7 +707,11 @@ function getCachedTextWrappedLineIndex(obj, text, scriptKey) {
   ) {
     return cache;
   }
-  const widthCache = getTextWrappedLineIndexWidthCache(obj, text, scriptKey);
+  const widthCache = obj._textWrappedLineIndexWidthCacheContent === text &&
+    obj._textWrappedLineIndexWidthCacheScriptKey === scriptKey &&
+    typeof obj._textWrappedLineIndexWidthCache?.get === 'function'
+      ? obj._textWrappedLineIndexWidthCache
+      : null;
   const widthCached = widthCache?.get(obj.w);
   if (
     widthCached &&
@@ -790,7 +720,12 @@ function getCachedTextWrappedLineIndex(obj, text, scriptKey) {
   ) {
     widthCache.delete(obj.w);
     widthCache.set(obj.w, widthCached);
-    return promoteCachedTextWrappedLineIndex(obj, text, scriptKey, obj.w, widthCached);
+    obj._textWrappedLineIndexCacheContent = text;
+    obj._textWrappedLineIndexCacheW = obj.w;
+    obj._textWrappedLineIndexCacheScriptKey = scriptKey;
+    obj._textWrappedLineIndexCache = widthCached;
+    setCachedTextWrappedLineCount(obj, text, scriptKey, widthCached.lineCount);
+    return widthCached;
   }
   return null;
 }
@@ -807,12 +742,19 @@ function setCachedTextWrappedLineIndex(obj, text, scriptKey, entries, lineCount)
   };
   obj._textWrappedLineIndexCache = cache;
   setCachedTextWrappedLineCount(obj, text, scriptKey, count);
-  const widthCache = ensureTextWrappedLineIndexWidthCache(obj, text, scriptKey);
-  if (widthCache) {
-    widthCache.delete(obj.w);
-    widthCache.set(obj.w, cache);
-    trimMapCache(widthCache, TEXT_WRAPPED_WIDTH_CACHE_MAX_ENTRIES);
+  if (
+    obj._textWrappedLineIndexWidthCacheContent !== text ||
+    obj._textWrappedLineIndexWidthCacheScriptKey !== scriptKey ||
+    typeof obj._textWrappedLineIndexWidthCache?.set !== 'function'
+  ) {
+    obj._textWrappedLineIndexWidthCacheContent = text;
+    obj._textWrappedLineIndexWidthCacheScriptKey = scriptKey;
+    obj._textWrappedLineIndexWidthCache = new Map();
   }
+  const widthCache = obj._textWrappedLineIndexWidthCache;
+  widthCache.delete(obj.w);
+  widthCache.set(obj.w, cache);
+  trimMapCache(widthCache, TEXT_WRAPPED_WIDTH_CACHE_MAX_ENTRIES);
 }
 
 function ensureCachedTextWrappedLineIndex(obj, content, scriptRanges, scriptKey) {
@@ -1250,7 +1192,7 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
     const paragraphHasTab = textRangeIncludesTab(content, paraStart, paraEnd);
     const paragraphPrefixWidths = paragraphHasTab
       ? null
-      : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd, scriptRanges, '', metrics);
+      : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd, scriptRanges, obj._textScriptRangesCacheSourceKey || '[]', metrics);
     const paragraphRangeWidth = (start, end) => {
       if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end, scriptRanges, metrics);
       const from = Math.max(0, Math.min(start - paraStart, paragraphPrefixWidths.length - 1));
@@ -1478,7 +1420,25 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
     line.textY = line.y + TEXT_BASELINE_Y_OFFSET;
     setTextLayoutLineScriptMetrics(line, scriptMetrics);
   }
-  replaceArraySegmentInPlace(layout, oldSplice.start, removedLayoutCount, insertedLayout);
+  {
+    const from = oldSplice.start;
+    const insertCount = insertedLayout.length;
+    const suffixStart = from + removedLayoutCount;
+    const suffixLength = layout.length - suffixStart;
+    const newLength = from + insertCount + suffixLength;
+    if (insertCount > removedLayoutCount) {
+      layout.length = newLength;
+      for (let i = suffixLength - 1; i >= 0; i--) {
+        layout[from + insertCount + i] = layout[suffixStart + i];
+      }
+    } else if (insertCount < removedLayoutCount) {
+      for (let i = 0; i < suffixLength; i++) {
+        layout[from + insertCount + i] = layout[suffixStart + i];
+      }
+      layout.length = newLength;
+    }
+    for (let i = 0; i < insertCount; i++) layout[from + i] = insertedLayout[i];
+  }
 
   obj._layoutCacheContent = newContent;
   obj._layoutCacheScriptKey = scriptKey;
@@ -1499,18 +1459,20 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   return true;
 }
 
-function getCachedTextLayoutLineCount(obj, text) {
-  if (!obj || obj.type !== 'text' || !Array.isArray(obj._layoutCache)) return null;
-  if (obj._layoutCacheContent !== text || obj._layoutCacheW !== obj.w) return null;
-  const scriptKey = (getTextScriptRanges(obj), obj._textScriptRangesCacheSourceKey || '[]');
-  const alignKey = textLayoutAlignKey(obj);
-  if (obj._layoutCacheScriptKey !== scriptKey || obj._layoutCacheAlignKey !== alignKey) return null;
-  return Math.max(1, obj._layoutCache.length);
-}
-
 function getTextAutoHeight(obj, minLines = 1) {
   const content = String(obj?.data?.content || '');
-  const lineCount = getCachedTextLayoutLineCount(obj, content) ?? getWrappedLineCount(obj, content);
+  const cachedLineCount = obj?.type === 'text' &&
+    Array.isArray(obj._layoutCache) &&
+    obj._layoutCacheContent === content &&
+    obj._layoutCacheW === obj.w &&
+    obj._layoutCacheScriptKey === (
+      getTextScriptRanges(obj),
+      obj._textScriptRangesCacheSourceKey || '[]'
+    ) &&
+    obj._layoutCacheAlignKey === textLayoutAlignKey(obj)
+      ? Math.max(1, obj._layoutCache.length)
+      : null;
+  const lineCount = cachedLineCount ?? getWrappedLineCount(obj, content);
   return Math.max(minLines, lineCount) * LINE_H + TEXT_PAD * 2;
 }
 
@@ -1845,12 +1807,13 @@ const textScriptStateFromRanges = (activeRanges) => {
     key += (depth++ ? '/' : '') + kind;
     offset += (kind === 'sub' ? TEXT_SCRIPT_SUB_OFFSET : TEXT_SCRIPT_SUP_OFFSET) * textScriptScaleForDepth(i);
   }
+  const scale = textScriptScaleForDepth(depth);
   return {
     depth,
-    font: textFontForScriptDepth(depth),
+    font: depth > 0 ? textFontForSize(Math.max(1, FONT_SIZE * scale)) : FONT,
     key,
     offset,
-    scale: textScriptScaleForDepth(depth),
+    scale,
   };
 };
 
@@ -1872,22 +1835,6 @@ function textScriptMetricsCaretStateAt(metrics, index, affinity = '') {
 
 function textScriptMetricsHiddenAt(metrics, index) {
   return !!metrics?.hidden?.[index];
-}
-
-function createBaseTextScriptLayoutMetricsForLength(length) {
-  const count = Math.max(0, Math.trunc(Number(length)) || 0);
-  const states = new Array(count);
-  const caretStates = new Array(count + 1);
-  states.fill(BASE_TEXT_SCRIPT_STATE);
-  caretStates.fill(BASE_TEXT_SCRIPT_STATE);
-  return {
-    hidden: new Uint8Array(count),
-    states,
-    caretStates,
-    bracedStarts: new Uint8Array(count + 1),
-    bracedEnds: new Uint8Array(count + 1),
-    linearEnds: new Uint8Array(count + 1),
-  };
 }
 
 function spliceTextMetricByteArray(oldArray, start, insertedArray, newLength) {
@@ -2114,9 +2061,21 @@ function patchTextScriptLayoutMetricsForObjectAfterInput(obj, options = {}) {
     return metrics;
   }
 
-  const localMetrics = insertedRanges.length
-    ? getTextScriptLayoutMetrics(insertedText, insertedRanges)
-    : createBaseTextScriptLayoutMetricsForLength(insertedText.length);
+  let localMetrics;
+  if (insertedRanges.length) {
+    localMetrics = getTextScriptLayoutMetrics(insertedText, insertedRanges);
+  } else {
+    const states = new Array(insertedText.length).fill(BASE_TEXT_SCRIPT_STATE);
+    const caretStates = new Array(insertedText.length + 1).fill(BASE_TEXT_SCRIPT_STATE);
+    localMetrics = {
+      hidden: new Uint8Array(insertedText.length),
+      states,
+      caretStates,
+      bracedStarts: new Uint8Array(insertedText.length + 1),
+      bracedEnds: new Uint8Array(insertedText.length + 1),
+      linearEnds: new Uint8Array(insertedText.length + 1),
+    };
+  }
   const metrics = {
     hidden: spliceTextMetricByteArray(oldMetrics.hidden, start, localMetrics.hidden, newContent.length),
     states: spliceTextMetricStateArray(oldMetrics.states, start, localMetrics.states),
@@ -2872,7 +2831,7 @@ function createTextDrawPlan(line, text, start, end, hasScriptRanges, scriptMetri
       run.draws.push({
         text: unit,
         x,
-        nextX: batchable ? x + measureRawTextWForDepth(unit, state.depth) : NaN,
+        nextX: batchable ? x + (state.depth ? measureRawTextWWithScriptFont(unit, drawFont) : measureRawTextW(unit)) : NaN,
       });
     }, i, j);
     if (run.draws.length) {
@@ -2931,17 +2890,6 @@ const normalizeTextLayoutHitCaretIndex = (line, index, direction = 'forward', ob
     if (pos > text.length) return text.length;
   }
   return pos;
-};
-
-const textLayoutLineForHit = (layout, wy) => {
-  let lo = 0;
-  let hi = layout.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (wy < layout[mid].y + LINE_H) hi = mid;
-    else lo = mid + 1;
-  }
-  return layout[lo];
 };
 
 const textLayoutCaretHit = (line, wx, wy, obj) => {
@@ -3006,7 +2954,14 @@ const textLayoutCaretHit = (line, wx, wy, obj) => {
 
 function layoutHitTestCaret(layout, wx, wy, obj, legacyScalar = false) {
   if (!layout.length) return { index: 0, affinity: '' };
-  const line = textLayoutLineForHit(layout, wy);
+  let lo = 0;
+  let hi = layout.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (wy < layout[mid].y + LINE_H) hi = mid;
+    else lo = mid + 1;
+  }
+  const line = layout[lo];
   if (!line.text.length) return { index: line.startIndex, affinity: '', lineStartIndex: line.startIndex };
   if (!legacyScalar && !line.scriptRanges?.length) {
     const hitIndex = line.startIndex + lineHitOffsetForX(line, wx, obj, true);
@@ -3026,5 +2981,3 @@ function layoutHitTestCaret(layout, wx, wy, obj, legacyScalar = false) {
   TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
   return { index: hitIndex, affinity: '', lineStartIndex: line.startIndex };
 }
-
-const layoutHitTest = (layout, wx, wy, obj) => layoutHitTestCaret(layout, wx, wy, obj, true).index;

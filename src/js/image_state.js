@@ -739,7 +739,6 @@ function cacheImage(key, src
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   let resolveReady;
-  let readyResolved = false;
   ready = new Promise((resolve) => { resolveReady = resolve; });
   imageReadyPromises.set(key, ready);
   function resolveReadyOnce(
@@ -747,8 +746,6 @@ function cacheImage(key, src
     stage
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) {
-    if (readyResolved) return;
-    readyResolved = true;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     cacheMetrics.cacheReadyStage = stage;
     cacheMetrics.cacheTotalMs = performance.now() - cacheStart;

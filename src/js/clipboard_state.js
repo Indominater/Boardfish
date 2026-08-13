@@ -10,14 +10,6 @@ var _jsClipboardWebMaybeStale = false;
 var _jsClipboardWebTokenCounter = 0;
 var _pasteInProgress = false;
 
-const createJsClipboardWebToken = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `bf-${crypto.randomUUID()}`;
-  }
-  _jsClipboardWebTokenCounter++;
-  return `bf-${Date.now().toString(36)}-${_jsClipboardWebTokenCounter.toString(36)}`;
-};
-
 const getJsClipboardWebToken = () => _jsClipboardWebToken;
 
 const markJsClipboardWebTokenWritten = (token = _jsClipboardWebToken
@@ -48,7 +40,9 @@ const markJsClipboardMaybeStaleFromWebBlur = () => {
 function setJsClipboard(value) {
   jsClipboard = value;
   _jsClipboardSetAt = Date.now();
-  _jsClipboardWebToken = createJsClipboardWebToken();
+  _jsClipboardWebToken = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? `bf-${crypto.randomUUID()}`
+    : (++_jsClipboardWebTokenCounter, `bf-${Date.now().toString(36)}-${_jsClipboardWebTokenCounter.toString(36)}`);
   _jsClipboardWebTokenWritten = false;
   _jsClipboardWebMaybeStale = false;
   return ++_jsClipboardToken;

@@ -272,18 +272,18 @@ test('web release preview preserves operational console warnings and errors', { 
   }
 });
 
-test('web release preview keeps dirty-state history helpers used by board commands', { timeout: 120_000 }, () => {
+test('web release preview keeps content-revision dirty tracking used by board commands', { timeout: 120_000 }, () => {
   const readableBundle = buildAndReadReadableWebPreviewBundle();
 
   assert.match(
     readableBundle,
-    /function historyEntryObjects\(entry\) \{\s*return Array\.isArray\(entry\?\.objects\) \? entry\.objects : \[\];\s*\}/,
-    'release bundle dropped historyEntryObjects even though dirty tracking uses it',
+    /reason\w* === "text-edit-enter" && !contentChanged \? prevEntry\?\.revision : \+\+_historyRevision/,
+    'release bundle dropped no-op edit revision inheritance',
   );
   assert.match(
     readableBundle,
-    /isDefaultEmptyBoardState\(historyEntryObjects\(boardHistory\[savedHistoryIndex\]\)\)/,
-    'release dirty tracking no longer reads the saved history entry safely',
+    /savedDefaultEmptyBoard && isDefaultEmptyBoardState\(objects\)/,
+    'release dirty tracking no longer preserves the saved empty-board baseline',
   );
 });
 

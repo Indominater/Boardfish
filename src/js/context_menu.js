@@ -530,13 +530,9 @@ function runAddImagesCommandFromShortcut() { runMenuCommand(addImageBtn, 'shortc
 
 function runAddTextCommandFromShortcut() { runMenuCommand(addTextBtn, 'shortcut'); }
 
-function pointToObjectCenterDistanceSq(point, obj) {
-  const dx = point.x - (obj.x + obj.w / 2);
-  const dy = point.y - (obj.y + obj.h / 2);
-  return dx * dx + dy * dy;
-}
-
-function closestResetZoomObjectToViewportCenter() {
+function resetZoomToClosestObject() {
+  const dbg = ViewportDebug.start('resetZoom', { panX, panY, zoom, objectCount: objects.length });
+  if (selectedIds.size || editingId) deselectAll();
   const center = toWorld(window.innerWidth / 2, window.innerHeight / 2);
   let closestImage = null;
   let closestImageDistanceSq = Infinity;
@@ -544,27 +540,22 @@ function closestResetZoomObjectToViewportCenter() {
   let closestTextDistanceSq = Infinity;
   for (const obj of objects) {
     if (obj?.type !== 'image' && obj?.type !== 'text') continue;
-    const distanceSq = pointToObjectCenterDistanceSq(center, obj);
+    const dx = center.x - (obj.x + obj.w / 2);
+    const dy = center.y - (obj.y + obj.h / 2);
+    const candidateDistanceSq = dx * dx + dy * dy;
     if (obj.type === 'image') {
-      if (distanceSq < closestImageDistanceSq) {
+      if (candidateDistanceSq < closestImageDistanceSq) {
         closestImage = obj;
-        closestImageDistanceSq = distanceSq;
+        closestImageDistanceSq = candidateDistanceSq;
       }
-    } else if (distanceSq < closestTextDistanceSq) {
+    } else if (candidateDistanceSq < closestTextDistanceSq) {
       closestText = obj;
-      closestTextDistanceSq = distanceSq;
+      closestTextDistanceSq = candidateDistanceSq;
     }
   }
   const targetType = closestImage ? 'image' : 'text';
-  const closest = closestImage || closestText;
-  const closestDistanceSq = closestImage ? closestImageDistanceSq : closestTextDistanceSq;
-  return { object: closest, targetType, distanceSq: closestDistanceSq, center };
-}
-
-function resetZoomToClosestObject() {
-  const dbg = ViewportDebug.start('resetZoom', { panX, panY, zoom, objectCount: objects.length });
-  if (selectedIds.size || editingId) deselectAll();
-  const { object, targetType, distanceSq, center } = closestResetZoomObjectToViewportCenter();
+  const object = closestImage || closestText;
+  const distanceSq = closestImage ? closestImageDistanceSq : closestTextDistanceSq;
   const targetZoom = 1;
   if (!object) {
     const changed = BoardfishViewportState.setZoomPan(

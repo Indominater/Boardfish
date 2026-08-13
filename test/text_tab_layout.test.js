@@ -56,7 +56,6 @@ function loadTextLayout({ scaleMeasureWithFont = false } = {}) {
       drawTextLineRange,
       getPrefixWidths,
       getTextLayout,
-      layoutHitTest,
       layoutHitTestCaret,
       lineXAtOffset,
       measureTextW,
@@ -140,7 +139,7 @@ test('text script hit testing skips hidden script marker caret stops', () => {
   const [line] = textLayout.getTextLayout(obj);
   const markerX = textLayout.lineXAtOffset(line, obj, 1);
 
-  assert.equal(textLayout.layoutHitTest([line], markerX - 0.01, line.y, obj), 2);
+  assert.equal(textLayout.layoutHitTestCaret([line], markerX - 0.01, line.y, obj, true).index, 2);
 });
 
 test('text caret hit at wrapped line start records the visual line', () => {
@@ -193,7 +192,7 @@ test('braced text script hit testing keeps the marker-side caret boundary', () =
   const [line] = textLayout.getTextLayout(obj);
   const innerMarkerX = textLayout.lineXAtOffset(line, obj, 4);
 
-  assert.equal(textLayout.layoutHitTest([line], innerMarkerX - 0.01, line.y + 8, obj), 4);
+  assert.equal(textLayout.layoutHitTestCaret([line], innerMarkerX - 0.01, line.y + 8, obj, true).index, 4);
 });
 
 test('braced text script hit testing picks the closest vertical caret layer', () => {

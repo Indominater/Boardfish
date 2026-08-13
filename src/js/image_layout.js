@@ -17,14 +17,6 @@
 
   const compareIds = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 
-  const compareNumberArrays = (left, right) => {
-    const count = Math.min(left.length, right.length);
-    for (let i = 0; i < count; i++) {
-      if (left[i] !== right[i]) return left[i] - right[i];
-    }
-    return left.length - right.length;
-  };
-
   const randomUnit = (random) => {
     const sample = Number(random());
     return Number.isFinite(sample)
@@ -69,12 +61,12 @@
       const items = row.items;
       let width = 0;
       for (const item of items) width += item.width;
-      return { items, width, ranks: items.map((item) => item.rank) };
+      return { items, width };
     });
     canonical.sort((a, b) => {
       const tolerance = numericTolerance(a.width, b.width);
       if (Math.abs(a.width - b.width) > tolerance) return b.width - a.width;
-      return compareNumberArrays(a.ranks, b.ranks);
+      return a.items[0].rank - b.items[0].rank;
     });
     return canonical;
   }
