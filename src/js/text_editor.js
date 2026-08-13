@@ -540,9 +540,9 @@ const exactTextEditLineCountForHeight = (height) => {
 };
 
 const textEditMinLinesForSession = (obj, preserveSize = false) => {
-  if (!obj || obj.type !== 'text') return 1;
+  if (!obj || obj.type !== 'text' || !preserveSize) return 1;
   const currentLines = exactTextEditLineCountForHeight(obj.h);
-  return preserveSize && currentLines > 1 ? currentLines : 1;
+  return currentLines > 1 ? currentLines : 1;
 };
 
 const setTextEditMinLinesForSession = (obj, preserveSize = false) => {
@@ -558,17 +558,10 @@ const setTextEditMinLinesForSession = (obj, preserveSize = false) => {
 };
 
 const resetTextEditPreservedMinLinesForInput = (obj) => {
-  if (!obj || obj.type !== 'text' || !obj._textEditPreservedMinLines) return null;
-  const previousMinLines = obj._editMinLines ?? '';
-  const preservedMinLines = obj._textEditPreservedMinLines;
-  const nextMinLines = textEditMinLinesForSession(obj);
-  obj._editMinLines = nextMinLines;
+  if (!obj || obj.type !== 'text' || !obj._textEditPreservedMinLines) return false;
+  obj._editMinLines = 1;
   delete obj._textEditPreservedMinLines;
-  return {
-    previousMinLines,
-    preservedMinLines,
-    nextMinLines,
-  };
+  return true;
 };
 
 const setTextScriptCaretAffinity = (obj, index, affinity) => {
@@ -1686,9 +1679,8 @@ const textScriptCaretRangesAfterInput = (inputState = {}, {
   return Array.isArray(transformed?.ranges) ? transformed.ranges : [];
 };
 
-const updateTextLineAlignForInput = (obj, oldValue, oldStart, oldEnd, nextValue, insertedText) => {
-  if (!obj) return;
-  if (!Array.isArray(obj.data?.lineAlign)) return;
+const updateTextLineAlignForInput = (obj, oldValue, oldStart, oldEnd, insertedText) => {
+  if (!obj || !Array.isArray(obj.data?.lineAlign)) return;
   oldStart = Math.max(0, Math.min(oldStart ?? 0, oldValue.length));
   oldEnd = Math.max(oldStart, Math.min(oldEnd ?? oldStart, oldValue.length));
   const removedLineCount = textNewlineCount(oldValue, oldStart, oldEnd);
@@ -1700,11 +1692,11 @@ const updateTextLineAlignForInput = (obj, oldValue, oldStart, oldEnd, nextValue,
   const spliceStart = lineIndex + 1;
   const suffixStart = Math.min(spliceStart + removedLineCount, oldAlign.length);
   const nextAlign = new Array(spliceStart + insertedLineCount + oldAlign.length - suffixStart);
-  for (let i = 0; i < spliceStart; i++) nextAlign[i] = oldAlign[i];
+  for (let i = 0; i < spliceStart; i++) nextAlign[i] = oldAlign[i] || 'left';
   for (let i = 0; i < insertedLineCount; i++) nextAlign[spliceStart + i] = baseAlign;
   for (let i = suffixStart; i < oldAlign.length; i++) nextAlign[spliceStart + insertedLineCount + i - suffixStart] = oldAlign[i];
-  const normalized = normalizeTextLineAlignForContent(nextValue, nextAlign);
-  if (normalized.length) obj.data.lineAlign = normalized;
+  while (nextAlign[nextAlign.length - 1] === 'left') nextAlign.pop();
+  if (nextAlign.length) obj.data.lineAlign = nextAlign;
   else delete obj.data.lineAlign;
 };
 
@@ -2520,8 +2512,6 @@ function enterEdit(id, {
     let selection = textEditSelectionState(proxy);
     let currentProxyValue = textEditProxyValue(proxy);
     const insertedMarker = event?.inputType === 'insertText' &&
-      typeof event.data === 'string' &&
-      event.data.length === 1 &&
       textScriptKindForMarker(event.data);
     if (selection.start === selection.end && insertedMarker) {
       const boundaryInsertion = textEditBracedScriptBoundaryInsertionAt(obj, selection.start);
@@ -2760,7 +2750,7 @@ function enterEdit(id, {
 	      synthesizedStaleReplacement,
 	      contentChars: obj.data.content.length,
 	    });
-    updateTextLineAlignForInput(obj, oldValue, replacement.start, replacement.end, obj.data.content, replacement.insertedText);
+    updateTextLineAlignForInput(obj, oldValue, replacement.start, replacement.end, replacement.insertedText);
     logInputStep('line-align-done', {
       lineAlignCount: Array.isArray(obj.data?.lineAlign) ? obj.data.lineAlign.length : 0,
     });
@@ -2875,8 +2865,7 @@ function enterEdit(id, {
     const removedChars = replacementEnd - replacementStart;
     const insertedChars = insertedText.length;
     const deletesContent = String(inputType || '').startsWith('delete');
-    const deleteReducedLogicalLines = deletesContent &&
-      textNewlineCount(oldValue, replacementStart, replacementEnd) > textNewlineCount(insertedText);
+    const deleteReducedLogicalLines = deletesContent && textRangeIncludes(oldValue, replacementStart, replacementEnd, '\n');
     const selectedDeleteShrankText = deletesContent && !!inputState.hasSelection && removedChars > insertedChars;
     const deleteShrankPendingEdit = pendingSizeSyncBeforeAutoHeight &&
       deletesContent &&
@@ -2918,9 +2907,6 @@ function enterEdit(id, {
       autoHeightForceSync: forceAutoHeight,
       autoHeightForceReason,
       restoredMinLinesReset: !!restoredMinLinesReset,
-      restoredPreviousMinLines: restoredMinLinesReset?.previousMinLines ?? '',
-      restoredPreservedMinLines: restoredMinLinesReset?.preservedMinLines ?? '',
-      restoredNextMinLines: restoredMinLinesReset?.nextMinLines ?? '',
       pendingSizeSyncBeforeAutoHeight,
       pendingSizeSync: !!obj._textEditPendingSizeSync,
       width: obj.w,

@@ -176,7 +176,7 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
 
 fileInput.addEventListener('change', async () => {
   const files = fileInput.files || [];
-  const insertPoint = _pendingImageInsertPoint || ctxPos;
+  const insertPoint = _pendingImageInsertPoint;
   try {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       await insertImageFiles(files, insertPoint.x, insertPoint.y, 'file-input');

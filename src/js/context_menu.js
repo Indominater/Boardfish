@@ -1,5 +1,4 @@
 // ─── Context menu ─────────────────────────────────────────────────────────────
-var ctxPos = { x: 0, y: 0 };
 var _lastBoardCursorClientX = null;
 var _lastBoardCursorClientY = null;
 const HAS_POINTER_EVENTS = 'PointerEvent' in window;
@@ -675,28 +674,21 @@ function isContextMenuSurfaceEvent(e) {
 
 function updateObjMenuActions() {
   let imageCount = 0;
-  let selectedCount = 0;
   for (const id of selectedIds) {
     const o = objectsMap.get(id);
     if (!o) continue;
-    selectedCount++;
     if (o.type === 'image') imageCount++;
   }
   const multiSelected = isMultiSelected();
   const showImageActions = imageCount >= 1;
-  const showLayerActions = selectedCount >= 1;
   objectActionsSep.style.display = showImageActions ? 'block' : 'none';
   flipBtn.style.display = showImageActions ? '' : 'none';
   rotateBtn.style.display = showImageActions ? '' : 'none';
   arrangeImagesBtn.style.display = imageCount >= 2 ? '' : 'none';
-  layerActionsSep.style.display = showLayerActions ? 'block' : 'none';
-  moveToBackBtn.style.display = showLayerActions ? '' : 'none';
   saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
   saveImagesBtn.firstElementChild.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
   saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';
   exportSep.style.display = showImageActions ? 'block' : 'none';
-  deleteSep.style.display = showLayerActions ? 'block' : 'none';
-  deleteBtn.style.display = showLayerActions ? '' : 'none';
 }
 
 const showTextEditContextMenuAt = (clientX, clientY) => {
@@ -737,7 +729,6 @@ function showCanvasContextMenuAt(clientX, clientY) {
   // the group menu.
   if (isMultiSelected()) {
     if (rectContainsPoint(selectedBounds(), wp) && (!obj || isSelected(obj.id))) {
-      ctxPos = wp;
       updateObjMenuActions();
       openExclusiveMenuAt(objCtxMenu, 'obj-ctx-menu', clientX, clientY, 'show-obj-menu:multi');
       MenuDebug.log('obj-ctx-menu:open', { reason: 'multi', x: clientX, y: clientY });
@@ -757,14 +748,12 @@ function showCanvasContextMenuAt(clientX, clientY) {
   });
   if (obj) {
     if (!isSelected(obj.id)) selectObject(obj.id);
-    ctxPos = wp;
     updateObjMenuActions();
     openExclusiveMenuAt(objCtxMenu, 'obj-ctx-menu', clientX, clientY, 'show-obj-menu:object');
     MenuDebug.log('obj-ctx-menu:open', { reason: 'object', objectId: obj.id, objectType: obj.type, x: clientX, y: clientY });
     return;
   }
   if (selectedIds.size) deselectAll();
-  ctxPos = wp;
   openCtxMenuAt(clientX, clientY);
   MenuDebug.log('ctx-menu:open', { x: clientX, y: clientY, wx: wp.x, wy: wp.y });
 }

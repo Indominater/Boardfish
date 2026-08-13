@@ -275,18 +275,13 @@ function loadObjectMenuVisibilityHarness() {
   const context = {
     selectedIds: new Set(),
     objectsMap: new Map(),
-    copyBtn: element(),
     objectActionsSep: element(),
     arrangeImagesBtn: element(),
     flipBtn: element(),
     rotateBtn: element(),
-    layerActionsSep: element(),
-    moveToBackBtn: element(),
     saveImageBtn: element(),
     saveImagesBtn: { style: {}, firstElementChild: { textContent: '' } },
     exportSep: element(),
-    deleteSep: element(),
-    deleteBtn: element(),
   };
   context.isMultiSelected = () => context.selectedIds.size > 1;
   vm.createContext(context);
@@ -319,10 +314,8 @@ test('object menu shows Arrange only when at least two selected objects are imag
 
   visibleFor(['text-a']);
   assert.equal(context.objectActionsSep.style.display, 'none');
-  assert.equal(context.layerActionsSep.style.display, 'block');
   visibleFor(['image-a', 'image-b']);
   assert.equal(context.objectActionsSep.style.display, 'block');
-  assert.equal(context.layerActionsSep.style.display, 'block');
 });
 
 test('Arrange menu integration is selection-centered and uses the shared paste size', () => {
@@ -351,7 +344,7 @@ test('Arrange menu integration is selection-centered and uses the shared paste s
   assert.ok(layerSeparatorIndex < moveToBackIndex);
   assert.match(appSource, /arrangeImagesBtn\s*= requireAppElement\('obj-btn-arrange-images'\)/);
   assert.match(appSource, /objectActionsSep\s*= requireAppElement\('obj-sep-object-actions'\)/);
-  assert.match(appSource, /layerActionsSep\s*= requireAppElement\('obj-sep-layer-actions'\)/);
+  assert.doesNotMatch(appSource, /layerActionsSep|moveToBackBtn|deleteSep|deleteBtn|copyBtn/);
   assert.match(
     appSource,
     /'arrange-images': COMMAND_KEY_LABEL \+ 'J'/,
@@ -362,7 +355,7 @@ test('Arrange menu integration is selection-centered and uses the shared paste s
   );
   assert.match(contextMenuSource, /'arrange-images': \[\['obj-ctx-menu', 'obj-btn-arrange-images'\]\]/);
   assert.match(contextMenuSource, /objectActionsSep\.style\.display = showImageActions \? 'block' : 'none';/);
-  assert.match(contextMenuSource, /layerActionsSep\.style\.display = showLayerActions \? 'block' : 'none';/);
+  assert.doesNotMatch(contextMenuSource, /showLayerActions|layerActionsSep|moveToBackBtn|deleteSep|deleteBtn/);
   assert.match(contextMenuSource, /arrangeImagesBtn\.style\.display = imageCount >= 2 \? '' : 'none';/);
   assert.match(stateSource, /\{ shuffleOrder: true, randomizeTies: true \}/);
   assert.match(imageInsertSource, /const maxDimension = BoardfishImageLayout\.DEFAULT_IMAGE_MAX_DIMENSION;/);

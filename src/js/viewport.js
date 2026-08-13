@@ -488,48 +488,44 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom =
 };
 
 function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
-  let cx = obj.x + TEXT_PAD, cy = obj.y + TEXT_PAD;
-  let caretHeight = LINE_H;
   let caretLine = null;
   const preferredLineStart = obj?._textEditCaretIndex === selStart &&
     Number.isFinite(obj?._textEditCaretLineStartIndex)
     ? obj._textEditCaretLineStartIndex
     : null;
-  const placeCaretOnLine = (line) => {
-    const ls = line.startIndex;
-    const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
-    if (!(selStart >= ls && selStart <= le)) return false;
-    const off = Math.max(0, selStart - ls);
-    cx = lineCaretXAtOffset(line, obj, off);
-    const affinity = obj?._textScriptCaretIndex === selStart ? obj._textScriptCaretAffinity : '';
-    const state = textScriptMetricsCaretStateAt(line._scriptMetrics, selStart, affinity);
-    if (state?.depth > 0) {
-      const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
-      const textY = Number.isFinite(line.textY) ? line.textY : line.y + TEXT_BASELINE_Y_OFFSET;
-      cy = textY + state.offset - (TEXT_BASELINE_Y_OFFSET * scale);
-      caretHeight = LINE_H * scale;
-    } else {
-      cy = line.y;
-      caretHeight = LINE_H;
-    }
-    caretLine = line;
-    return true;
-  };
   if (preferredLineStart != null) {
-    let preferredLine = null;
     for (const line of layout) {
       if (line.startIndex !== preferredLineStart) continue;
-      preferredLine = line;
+      const ls = line.startIndex;
+      const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
+      if (selStart >= ls && selStart <= le) caretLine = line;
       break;
     }
-    if (preferredLine) placeCaretOnLine(preferredLine);
   }
   if (!caretLine) {
     for (const line of layout) {
-      if (placeCaretOnLine(line)) break;
+      const ls = line.startIndex;
+      const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
+      if (selStart >= ls && selStart <= le) {
+        caretLine = line;
+        break;
+      }
     }
   }
   if (!caretLine) return false;
+  const ls = caretLine.startIndex;
+  const off = Math.max(0, selStart - ls);
+  let cx = lineCaretXAtOffset(caretLine, obj, off);
+  let cy = caretLine.y;
+  let caretHeight = LINE_H;
+  const affinity = obj?._textScriptCaretIndex === selStart ? obj._textScriptCaretAffinity : '';
+  const state = textScriptMetricsCaretStateAt(caretLine._scriptMetrics, selStart, affinity);
+  if (state?.depth > 0) {
+    const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
+    const textY = Number.isFinite(caretLine.textY) ? caretLine.textY : caretLine.y + TEXT_BASELINE_Y_OFFSET;
+    cy = textY + state.offset - (TEXT_BASELINE_Y_OFFSET * scale);
+    caretHeight = LINE_H * scale;
+  }
   const caretWidth = 2 / viewZoom;
   const contentLeft = obj.x + TEXT_PAD;
   const contentRight = Math.max(contentLeft, obj.x + obj.w - TEXT_PAD);

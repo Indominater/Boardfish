@@ -152,7 +152,7 @@ test('newline-free input preserves the existing line-alignment array', () => {
   const lineAlign = ['center', 'right'];
   const obj = { data: { lineAlign } };
 
-  context.updateTextLineAlignForInput(obj, 'one\ntwo', 1, 2, 'oXe\ntwo', 'X');
+  context.updateTextLineAlignForInput(obj, 'one\ntwo', 1, 2, 'X');
 
   assert.equal(obj.data.lineAlign, lineAlign);
 });
@@ -161,7 +161,7 @@ test('newline insertion inherits alignment without expanding trailing left entri
   const context = loadTextScriptEditorHelpers();
   const obj = { data: { lineAlign: ['center'] } };
 
-  context.updateTextLineAlignForInput(obj, 'one\ntwo', 3, 3, 'one\n\ntwo', '\n');
+  context.updateTextLineAlignForInput(obj, 'one\ntwo', 3, 3, '\n');
 
   assert.deepEqual([...obj.data.lineAlign], ['center', 'center']);
   const longText = `${'x'.repeat(80)}\nsecond\nthird`;

@@ -182,28 +182,20 @@
         if (sourceHeight > 0) {
           const cropWidth = x2 - x1;
           const cropHeight = y2 - y1;
-          let dx = x1;
-          let dy = y1;
-          let dw = cropWidth;
-          let dh = cropHeight;
           const left = x1 === obj.x ? edgeOverdraw : 0;
           const top = y1 === obj.y ? edgeOverdraw : 0;
           const right = x2 === objRight ? edgeOverdraw : 0;
           const bottom = y2 === objBottom ? edgeOverdraw : 0;
-          dx -= left;
-          dy -= top;
-          dw += left + right;
-          dh += top + bottom;
           context.drawImage(
             img,
             (x1 - obj.x) / obj.w * sourceWidth,
             (y1 - obj.y) / obj.h * sourceHeight,
             cropWidth / obj.w * sourceWidth,
             cropHeight / obj.h * sourceHeight,
-            dx,
-            dy,
-            dw,
-            dh,
+            x1 - left,
+            y1 - top,
+            cropWidth + (left + right),
+            cropHeight + (top + bottom),
           );
           return true;
         }

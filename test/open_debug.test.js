@@ -127,7 +127,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'openPreviewBreakdown',
     'hydrationBreakdown',
     'cacheImageBreakdown',
-    'setHydrationMode',
     'setHydrationConcurrency',
     'optimizationReport',
     'beginInitialRenderDebug',
@@ -140,17 +139,13 @@ test('open-board debugger covers the slow open phases developers need to inspect
   ]) {
     assert.match(openDebug, new RegExp(`\\b${method}\\b`), `OpenDebug is missing ${method}`);
   }
-  assert.match(openDebug, /let hydrationMode = 'visible-first';/);
-  assert.match(openIo, /var openHydrationMode = 'visible-first';/);
-  assert.match(openIo, /function getOpenHydrationMode\(\)/);
-  assert.match(openIo, /const hydrationMode = getOpenHydrationMode\(\);/);
-  assert.match(openIo, /const visibleFirstOpen = deferRender &&/);
+  assert.doesNotMatch(openDebug, /setHydrationMode|all-before-open/);
+  assert.doesNotMatch(openIo, /openHydrationMode|getOpenHydrationMode|hydrateAllImagesForOpen|all-before-open/);
+  assert.match(openIo, /const visibleFirstOpen = deferRender;/);
   assert.match(openIo, /deferredInitialCacheImages\+\+;/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
   assert.match(openIo, /typeof source === 'string' \|\| isWebImageRef\(source\)/);
   assert.doesNotMatch(openIo, /function getReferencedHydratableImageKeys\(\)/);
-  assert.match(openIo, /const keys = getPendingHydratableImageKeys\(\);/);
-  assert.match(openIo, /pendingImages: keys\.length/);
   assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);[\s\S]*?if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) \{\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
   assert.match(withoutDeveloperDiagnostics(openIo), /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*await pendingReady;\s*return BoardfishImageStore\.hasDisplayImage\(key\);/);
   assert.match(openIo, /source: 'pending-cache'/);
@@ -240,7 +235,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'open-preview-visible:start',
     'open-preview-visible:end',
     'open-preview-release',
-    'hydrate-all:candidates',
     'prewarm-visible-scaled-variants',
     'hydrate-background:done',
     'initial-applyTransform',

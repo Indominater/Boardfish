@@ -2,7 +2,6 @@
 
 var OpenDebug = (() => {
   const MAX_EVENTS = 5000;
-  let hydrationMode = 'visible-first';
   let initialRenderDebugDepth = 0;
   let latestOpenContext = null;
 
@@ -29,18 +28,6 @@ var OpenDebug = (() => {
     if (DEBUG_TOOLS_ENABLED) console.info('Boardfish open debugger disabled.');
   }
   const setVerbose = core.setVerbose;
-
-  function setHydrationMode(mode) {
-    const allowed = new Set(['all-before-open', 'visible-first']);
-    if (!allowed.has(mode)) {
-      console.warn(`[Boardfish open] Unknown hydration mode "${mode}". Use "all-before-open" or "visible-first".`);
-      return hydrationMode;
-    }
-    hydrationMode = mode;
-    if (typeof setOpenHydrationMode === 'function') setOpenHydrationMode(mode);
-    console.info(`[Boardfish open] hydration mode set to ${hydrationMode}`);
-    return hydrationMode;
-  }
 
   function setHydrationConcurrency(value) {
     const concurrency = setOpenHydrationConcurrency(value);
@@ -158,7 +145,6 @@ var OpenDebug = (() => {
       'hydrate-initial-policy',
       'prewarm-visible-scaled-variants',
       'hydrate-visible:end',
-      'hydrate-all:end',
       'hydrate-background:done',
       'initial-applyTransform',
       'end',
@@ -224,7 +210,7 @@ var OpenDebug = (() => {
       hydrated: last?.meta?.hydrated ?? '',
       remaining: last?.meta?.remaining ?? '',
       error: last?.meta?.error || '',
-      hydrationMode,
+      hydrationMode: 'visible-first',
       hydrationConcurrency: getOpenHydrationConcurrency(),
     }];
     console.table(rows);
@@ -244,7 +230,7 @@ var OpenDebug = (() => {
       maxImageMs: Math.round(max('ms') * 100) / 100,
       maxFetchMs: Math.round(max('fetchMs') * 100) / 100,
       concurrency: getOpenHydrationConcurrency(),
-      mode: hydrationMode,
+      mode: 'visible-first',
     };
     console.table([out]);
     return out;
@@ -541,7 +527,6 @@ var OpenDebug = (() => {
     const historyReset = findStep('reset-boardHistory-markSaved');
     const initialPolicy = findStep('hydrate-initial-policy');
     const visibleHydrate = findStep('hydrate-visible:end');
-    const allHydrate = findStep('hydrate-all:end');
     const bitmapSettle = findStep('hydrate-visible:bitmap-settle');
     const initialRender = findStep('initial-applyTransform');
     const openPreview = findStep('open-preview-visible:end');
@@ -549,7 +534,7 @@ var OpenDebug = (() => {
     const shieldRemoved = findStep('opening-shield:removed');
     const backgroundDone = findLastStep('hydrate-background:done');
     const endEvent = findLastStep('end');
-    const hydrationEnd = visibleHydrate || allHydrate;
+    const hydrationEnd = visibleHydrate;
     const previewFirstPaintReady = visibleHydrate?.meta?.skipped === 'open-preview-ready' ||
       (
         numberValue(openPreview?.meta?.ready) > 0 &&
@@ -562,7 +547,7 @@ var OpenDebug = (() => {
     const cacheErrors = rows.filter(e => /cache-image:.*:error$/.test(e.step || ''));
     const previewStats = openPreviewRuntimeStats(rows);
     const summaryRow = {
-      mode: initialPolicy?.meta?.mode || hydrationMode,
+      mode: initialPolicy?.meta?.mode || 'visible-first',
       objectCount: shape?.meta?.objectCount ?? endEvent?.meta?.objectCount ?? '',
       imageCount: shape?.meta?.imageCount ?? endEvent?.meta?.imageCount ?? '',
       imageObjectCount: shape?.meta?.imageObjectCount ?? '',
@@ -786,7 +771,6 @@ var OpenDebug = (() => {
     const findLastStep = (step) => [...rows].reverse().find(e => e.step === step) || null;
     const initialPolicy = findStep('hydrate-initial-policy');
     const visibleHydrate = findStep('hydrate-visible:end');
-    const allHydrate = findStep('hydrate-all:end');
     const bitmapSettle = findStep('hydrate-visible:bitmap-settle');
     const backgroundDone = findLastStep('hydrate-background:done');
     const initialRender = findStep('initial-applyTransform');
@@ -803,7 +787,7 @@ var OpenDebug = (() => {
     const applyState = findStep('apply-state');
     const cacheStartAll = findStep('cacheImage:start-all');
     const openingShieldRemoved = findStep('opening-shield:removed');
-    const hydrationEnd = visibleHydrate || allHydrate;
+    const hydrationEnd = visibleHydrate;
     const previewFirstPaintReady = visibleHydrate?.meta?.skipped === 'open-preview-ready' ||
       (
         numberValue(openPreview?.meta?.ready) > 0 &&
@@ -812,7 +796,7 @@ var OpenDebug = (() => {
       numberValue(initialRender?.meta?.openPreviewImages) > 0;
     const previewStats = openPreviewRuntimeStats(rows);
     const summaryRow = {
-      mode: initialPolicy?.meta?.mode || hydrationMode,
+      mode: initialPolicy?.meta?.mode || 'visible-first',
       objectCount: shape?.meta?.objectCount ?? endEvent?.meta?.objectCount ?? '',
       imageCount: shape?.meta?.imageCount ?? endEvent?.meta?.imageCount ?? '',
       filePickerMs: fileDialog?.meta?.ms ?? fileDialog?.dt ?? '',
@@ -871,9 +855,6 @@ var OpenDebug = (() => {
       backgroundRemainingImages: backgroundDone?.meta?.remaining ?? '',
     };
     const findings = [];
-    if (summaryRow.mode === 'all-before-open' && Number(summaryRow.imageCount) > Number(summaryRow.initialHydratedImages || 0)) {
-      findings.push('The open waited for non-visible image hydration; visible-first avoids that critical-path work.');
-    }
     if (Number(summaryRow.rustImageReadMs) > Number(summaryRow.initialHydrationMs || 0)) {
       findings.push('Board file image extraction is the largest measured open phase.');
     }
@@ -923,7 +904,6 @@ var OpenDebug = (() => {
     enable,
     disable,
     setVerbose,
-    setHydrationMode,
     setHydrationConcurrency,
     start,
     step,
@@ -952,7 +932,6 @@ var OpenDebug = (() => {
       report,
       reset,
     get enabled() { return core.enabled; },
-    get hydrationMode() { return hydrationMode; },
     get hydrationConcurrency() { return getOpenHydrationConcurrency(); },
     get events() { return events.slice(); },
   };

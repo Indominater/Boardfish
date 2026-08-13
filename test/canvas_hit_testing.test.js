@@ -291,7 +291,7 @@ test('background context menu clears object selection before opening', () => {
   const contextMenuSource = readSource('src/js/context_menu.js');
   const styles = readSource('src/styles.css');
 
-  assert.match(contextMenuSource, /if \(obj\) \{[\s\S]*obj-ctx-menu:open[\s\S]*return;[\s\S]*\}\s*if \(selectedIds\.size\) deselectAll\(\);\s*ctxPos = wp;\s*openCtxMenuAt\(clientX, clientY\);/);
+  assert.match(contextMenuSource, /if \(obj\) \{[\s\S]*obj-ctx-menu:open[\s\S]*return;[\s\S]*\}\s*if \(selectedIds\.size\) deselectAll\(\);\s*openCtxMenuAt\(clientX, clientY\);/);
   assert.doesNotMatch(contextMenuSource, /addTextBtn\.disabled|addImageBtn\.disabled|updateCtxMenuActions|button\??\.disabled|reason: 'disabled'/);
   assert.doesNotMatch(styles, /\.ctx-item:disabled|aria-disabled/);
 });
@@ -313,7 +313,7 @@ test('context menu command buttons use the button click point as the object cent
   assert.match(contextMenuSource, /runMenuCommand\(event\.currentTarget, 'click', event\);/);
   assert.match(contextMenuSource, /function runAddImagesCommandFromShortcut\(\) \{ runMenuCommand\(addImageBtn, 'shortcut'\); \}/);
   assert.match(contextMenuSource, /function runAddTextCommandFromShortcut\(\) \{ runMenuCommand\(addTextBtn, 'shortcut'\); \}/);
-  assert.doesNotMatch(contextMenuSource, /ctxPos = boardCursorWorldPoint\(\);/);
+  assert.doesNotMatch(contextMenuSource, /\bctxPos\b/);
 });
 
 test('pointerup menu commands keep user activation and suppress the follow-up click', () => {

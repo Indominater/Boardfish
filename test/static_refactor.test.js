@@ -331,8 +331,7 @@ test('background open hydration yields while viewport input is active', () => {
   assert.match(source, /BoardfishImageStore\.hasDisplayImage\(key\)/);
   assert.doesNotMatch(source, /getPendingHydratableImageKeys\(batchSize - keys\.length/);
   assert.match(source, /await new Promise\(\(resolve\) => setTimeout/);
-  assert.match(ioClose, /backgroundHydrationPriorityKeys = visibleKeys;/);
-  assert.match(ioClose, /hydrateRemainingImagesForOpen\(dbg, 2, backgroundHydrationPriorityKeys\)/);
+  assert.match(ioClose, /hydrateRemainingImagesForOpen\(dbg, 2, visibleKeys\)/);
 });
 
 test('save and open validation stay at the authoritative container boundaries', () => {

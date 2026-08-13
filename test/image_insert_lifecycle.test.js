@@ -227,7 +227,8 @@ test('file picker image insertion freezes the command point before files are cho
 
   assert.match(source, /var _pendingImageInsertPoint = null;/);
   assert.match(source, /_pendingImageInsertPoint = \{ x, y \};[\s\S]*fileInput\.click\(\);/);
-  assert.match(source, /const insertPoint = _pendingImageInsertPoint \|\| ctxPos;/);
+  assert.match(source, /const insertPoint = _pendingImageInsertPoint;/);
+  assert.doesNotMatch(source, /\bctxPos\b/);
   assert.match(source, /insertImageFiles\(files, insertPoint\.x, insertPoint\.y, 'file-input'\)/);
   assert.match(source, /finally \{[\s\S]*_pendingImageInsertPoint = null;[\s\S]*fileInput\.value = '';/);
 });

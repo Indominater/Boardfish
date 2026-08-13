@@ -878,8 +878,8 @@ function textPrefixWidthsSlice(prefixWidths, from, to) {
   return out;
 }
 
-function textRangeIncludesTab(text, start, end) {
-  const index = text.indexOf('\t', start);
+function textRangeIncludes(text, start, end, character = '\t') {
+  const index = text.indexOf(character, start);
   return index !== -1 && index < end;
 }
 
@@ -1028,7 +1028,7 @@ function buildWrappedLines(obj, options = {}, content = String(obj?.data?.conten
     if (paraStart === paraEnd) {
       pushLine(paraStart, paraStart, paraStart, paraStart, logicalLineIndex);
     } else {
-      const paragraphHasTab = textRangeIncludesTab(content, paraStart, paraEnd);
+      const paragraphHasTab = textRangeIncludes(content, paraStart, paraEnd);
       const paragraphPrefixWidths = paragraphHasTab
         ? null
         : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd, scriptRanges, scriptKey, scriptMetrics);
@@ -1189,7 +1189,7 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
       continue;
     }
 
-    const paragraphHasTab = textRangeIncludesTab(content, paraStart, paraEnd);
+    const paragraphHasTab = textRangeIncludes(content, paraStart, paraEnd);
     const paragraphPrefixWidths = paragraphHasTab
       ? null
       : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd, scriptRanges, obj._textScriptRangesCacheSourceKey || '[]', metrics);
