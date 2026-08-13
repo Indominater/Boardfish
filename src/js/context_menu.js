@@ -75,13 +75,13 @@ function openMenuAt(menu, x, y) {
 }
 
 const closeFloatingSurface = (surface) => {
-  surface?.classList.remove('visible');
+  surface.classList.remove('visible');
 };
 
-var ctxActionItems = ctxActions ? ctxActions.getElementsByClassName('ctx-action-item') : [];
+var ctxActionItems = ctxActions.getElementsByClassName('ctx-action-item');
 
 function updateCtxActionStates() {
-  if (darkModeMenuBtn) darkModeMenuBtn.setAttribute('aria-pressed', appTheme === 'dark' ? 'true' : 'false');
+  darkModeMenuBtn.setAttribute('aria-pressed', appTheme === 'dark' ? 'true' : 'false');
 }
 
 function closeCtxActions(reason) {
@@ -89,15 +89,20 @@ function closeCtxActions(reason) {
   closeFloatingSurface(ctxActions);
 }
 
-function alignCtxActionsToMenuRow(gap, viewport) {
-  const openedMenuLeft = parseFloat(ctxMenu.style.left);
+function openCtxMenuAt(x, y) {
+  closeOpenMenusExcept('ctx-menu', 'open-ctx-menu');
+  updateCtxActionStates();
+  ctxMenu.classList.add('visible');
+  ctxActions.classList.add('visible');
+  const { gap, left, right, top, bottom } = menuViewportBounds();
+  const menuRect = ctxMenu.getBoundingClientRect();
   const menuWidth = ctxMenu.offsetWidth;
   const actionWidth = ctxActions.offsetWidth;
-  const edgeGap = gap;
-  const minActionLeft = viewport.left + edgeGap;
-  const maxActionRight = viewport.right - edgeGap;
+  const minActionLeft = left + gap;
+  const maxActionRight = right - gap;
   const maxActionLeft = Math.max(minActionLeft, maxActionRight - actionWidth);
-  let menuLeft = openedMenuLeft <= viewport.left + MENU_VIEWPORT_EDGE_MARGIN ? minActionLeft : openedMenuLeft;
+  let menuLeft = Math.round(clampMenuCoord(x, menuRect.width, left, right));
+  if (menuLeft <= left + MENU_VIEWPORT_EDGE_MARGIN) menuLeft = minActionLeft;
   let actionLeft = menuLeft + menuWidth + gap;
 
   if (actionLeft + actionWidth > maxActionRight) {
@@ -111,20 +116,9 @@ function alignCtxActionsToMenuRow(gap, viewport) {
   }
 
   ctxMenu.style.left = `${Math.round(menuLeft)}px`;
+  ctxMenu.style.top = `${Math.round(clampMenuCoord(y, menuRect.height, top, bottom))}px`;
   ctxActions.style.left = `${Math.round(actionLeft)}px`;
   ctxActions.style.top = ctxMenu.style.top;
-}
-
-function openCtxMenuAt(x, y) {
-  closeOpenMenusExcept('ctx-menu', 'open-ctx-menu');
-  const viewport = openMenuAt(ctxMenu, x, y);
-  if (!ctxActions || !ctxActionItems.length) {
-    return;
-  }
-
-  updateCtxActionStates();
-  ctxActions.classList.add('visible');
-  alignCtxActionsToMenuRow(viewport.gap, viewport);
 }
 
 if (DEBUG_TOOLS_ENABLED) {
@@ -654,7 +648,6 @@ for (const menu of [ctxMenu, objCtxMenu, textCtxMenu]) {
 }
 const contextMenuStopSurfaces = [ctxMenu, objCtxMenu, textCtxMenu, ctxActions];
 for (const menu of contextMenuStopSurfaces) {
-  if (!menu) continue;
   for (const type of ['click', 'contextmenu']) {
     menu.addEventListener(type, (e) => {
       e.stopPropagation();
@@ -668,7 +661,7 @@ function isContextMenuSurfaceEvent(e) {
     ctxMenu.contains(e.target) ||
     objCtxMenu.contains(e.target) ||
     textCtxMenu.contains(e.target) ||
-    ctxActions?.contains(e.target)
+    ctxActions.contains(e.target)
   ));
 }
 
@@ -791,16 +784,16 @@ function clearCtxActionHotspotState() {
   }
 }
 
-ctxActions?.addEventListener('pointerdown', (e) => {
+ctxActions.addEventListener('pointerdown', (e) => {
   const button = e.target.closest?.('.ctx-action-item');
   if (!button) return;
   clearCtxActionHotspotState();
   button.classList.add('hotspot-active');
 });
-ctxActions?.addEventListener('pointerup', clearCtxActionHotspotState);
-ctxActions?.addEventListener('pointerleave', clearCtxActionHotspotState);
+ctxActions.addEventListener('pointerup', clearCtxActionHotspotState);
+ctxActions.addEventListener('pointerleave', clearCtxActionHotspotState);
 
-darkModeMenuBtn?.addEventListener('click', (e) => {
+darkModeMenuBtn.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   closeCtxMenu('command:dark-mode');

@@ -12,7 +12,7 @@ var boardCanvas = requireAppElement('board-canvas');
 var ctx         = boardCanvas.getContext('2d');
 if (!ctx) throw new Error('board canvas 2D context is unavailable');
 var ctxMenu     = requireAppElement('ctx-menu');
-var ctxActions  = document.getElementById('ctx-actions');
+var ctxActions  = requireAppElement('ctx-actions');
 var darkModeMenuBtn = requireAppElement('ctx-btn-dark-mode');
 var fileInput   = requireAppElement('file-input');
 var selOverlay  = requireAppElement('sel-overlay');

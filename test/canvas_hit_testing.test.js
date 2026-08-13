@@ -459,7 +459,7 @@ test('context actions use native hover and explicit pressed state', () => {
   const styles = readSource('src/styles.css');
 
   assert.doesNotMatch(source, /isCtxActionHotspotEvent|updateCtxActionHotspotState|addEventListener\('pointermove'/);
-  assert.match(source, /ctxActions\?\.addEventListener\('pointerdown',[\s\S]*button\.classList\.add\('hotspot-active'\);/);
+  assert.match(source, /ctxActions\.addEventListener\('pointerdown',[\s\S]*button\.classList\.add\('hotspot-active'\);/);
   assert.match(source, /function clearCtxActionHotspotState\(\) \{[\s\S]*classList\.remove\('hotspot-active'\);[\s\S]*\}/);
   assert.match(source, /addEventListener\('pointerup', clearCtxActionHotspotState\)/);
   assert.match(source, /addEventListener\('pointerleave', clearCtxActionHotspotState\)/);

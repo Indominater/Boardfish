@@ -180,17 +180,18 @@
     return a.id.localeCompare(b.id);
   };
 
-  const noteObject = (obj, startedAt, groupSide, groupSize) => {
+  const noteObject = (obj, startedAt, groupSide, groupSize, cohortKey) => {
     if (!obj?.id) return;
     const existing = objectMotions.get(obj.id);
-    if (existing && startedAt - existing.startedAt >= 0 && startedAt - existing.startedAt < RETRIGGER_MIN_INTERVAL_MS) {
+    const sameCohort = existing?.cohortKey === cohortKey;
+    if (sameCohort && startedAt - existing.startedAt >= 0 && startedAt - existing.startedAt < RETRIGGER_MIN_INTERVAL_MS) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-coalesced', { id: obj.id, objectType: obj.type || '' });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return;
     }
-    const handoff = handoffAt(existing, startedAt);
-    const motion = { startedAt, groupSide, groupSize };
+    const handoff = sameCohort ? handoffAt(existing, startedAt) : null;
+    const motion = { startedAt, groupSide, groupSize, cohortKey };
     if (handoff) motion.handoff = handoff;
     objectMotions.set(obj.id, motion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -207,12 +208,14 @@
     if (!ranked.length) return false;
     if (ranked.length > 1) ranked.sort(compareObjectGeometry);
     const startedAt = now();
+    const cohortKey = JSON.stringify(ranked.map(obj => obj.id));
     for (let index = 0; index < ranked.length; index++) {
       noteObject(
         ranked[index],
         startedAt,
         ranked.length > 1 ? -1 + (index * 2) / (ranked.length - 1) : 1,
         ranked.length,
+        cohortKey,
       );
     }
     requestMotionFrame();

@@ -1314,6 +1314,43 @@ test('grouped copy jiggle is geometry-ordered with shared vertical and mirrored 
   assert.ok(Math.abs(forwardLeft.translateX) < Math.abs(forwardLeft.translateY));
 });
 
+test('single-image copy state does not desynchronize a later grouped copy jiggle', () => {
+  const left = { id: 'left', type: 'image', x: 20, y: 30, w: 80, h: 90 };
+  const right = { id: 'right', type: 'image', x: 140, y: 30, w: 80, h: 90 };
+  const capture = (priorCopyAge) => {
+    const { context, setTime } = loadMotion();
+    const motion = context.BoardfishMotion;
+    context.objectsMap = new Map([[left.id, left], [right.id, right]]);
+    context.selectedIds = new Set([left.id, right.id]);
+    const groupStartedAt = priorCopyAge ?? 117;
+
+    if (priorCopyAge !== null) {
+      setTime(0);
+      assert.equal(motion.applyCopyFeedback({ objects: [left] }), true);
+      setTime(priorCopyAge);
+      assert.ok(motion.objectMotionForDraw(left, 1));
+    } else {
+      setTime(groupStartedAt);
+    }
+
+    assert.equal(motion.applyCopyFeedback({ selection: true }), true);
+    setTime(groupStartedAt + 100);
+    return {
+      left: plain(motion.objectMotionForDraw(left, 1)),
+      right: plain(motion.objectMotionForDraw(right, 1)),
+    };
+  };
+
+  const fresh = capture(null);
+  for (const priorCopyAge of [32, 117]) {
+    assert.deepEqual(
+      capture(priorCopyAge),
+      fresh,
+      `prior single copy at ${priorCopyAge}ms changed grouped motion`,
+    );
+  }
+});
+
 test('copy jiggle retrigger continues from the transform currently on screen', () => {
   const { context, setTime } = loadMotion();
   const motion = context.BoardfishMotion;
