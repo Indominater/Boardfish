@@ -4,6 +4,7 @@ const BOARDFISH_CACHE_VERSION = 'v4';
 const BOARDFISH_CACHE_NAMESPACE =
   `boardfish-pwa-${encodeURIComponent(self.registration.scope)}::`;
 const BOARDFISH_CACHE = `${BOARDFISH_CACHE_NAMESPACE}${BOARDFISH_CACHE_VERSION}`;
+const currentCache = caches.open(BOARDFISH_CACHE);
 const BOARDFISH_APP_SHELL = [
   './',
   './index.html',
@@ -35,22 +36,21 @@ function shouldCacheRequest(request, url) {
   return request.mode === 'navigate' || isAppShellUrl(url) || isBoardfishBundleUrl(url);
 }
 
-async function matchCurrentCache(request) {
-  const cache = await caches.open(BOARDFISH_CACHE);
-  return cache.match(request);
+function matchCurrentCache(request) {
+  return currentCache.then((cache) => cache.match(request));
 }
 
 async function fetchAndCacheRequest(event, request, url) {
   const response = await fetch(request);
   if (response.ok && response.type === 'basic' && shouldCacheRequest(request, url)) {
     const copy = response.clone();
-    event.waitUntil(caches.open(BOARDFISH_CACHE).then((cache) => cache.put(request, copy)).catch(() => {}));
+    event.waitUntil(currentCache.then((cache) => cache.put(request, copy)).catch(() => {}));
   }
   return response;
 }
 
 async function pruneCurrentCache() {
-  const cache = await caches.open(BOARDFISH_CACHE);
+  const cache = await currentCache;
   const requests = await cache.keys();
   const deletions = [];
   for (const request of requests) {
@@ -64,7 +64,7 @@ async function pruneCurrentCache() {
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(BOARDFISH_CACHE)
+    currentCache
       .then((cache) => cache.addAll(BOARDFISH_APP_SHELL))
       .catch(() => {})
       .then(() => self.skipWaiting()),

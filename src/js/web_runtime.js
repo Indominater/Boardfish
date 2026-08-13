@@ -77,11 +77,8 @@
     if (!firstHandle || !secondHandle) return null;
     if (firstHandle === secondHandle) return true;
 
-    const comparisons = [
-      [firstHandle, secondHandle],
-      [secondHandle, firstHandle],
-    ];
-    for (const [handle, otherHandle] of comparisons) {
+    for (const handle of [firstHandle, secondHandle]) {
+      const otherHandle = handle === firstHandle ? secondHandle : firstHandle;
       if (typeof handle?.isSameEntry !== 'function') continue;
       try {
         return !!(await waitForFileOperation(

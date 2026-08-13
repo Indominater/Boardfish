@@ -240,10 +240,10 @@ test('dark mode icon is local and offline-safe', () => {
   assert.doesNotMatch(sw, /fonts\.googleapis\.com|fonts\.gstatic\.com/i);
   assert.match(sw, /if \(isCacheFirstAssetUrl\(url\)\)[\s\S]*\[a-f0-9\]\{12\}[\s\S]*cached\.then\(\(hit\) => hit \|\| fetchAndCacheRequest\(event, request, url\)\)/);
   assert.match(sw, /const update = fetchAndCacheRequest[\s\S]*event\.waitUntil\(update\)/);
-  assert.match(sw, /event\.waitUntil\(caches\.open\(BOARDFISH_CACHE\)[\s\S]*cache\.put\(request, copy\)/);
+  assert.match(sw, /const currentCache = caches\.open\(BOARDFISH_CACHE\);[\s\S]*event\.waitUntil\(currentCache\.then\(\(cache\) => cache\.put\(request, copy\)/);
   assert.match(sw, /BOARDFISH_CACHE_NAMESPACE[\s\S]*encodeURIComponent\(self\.registration\.scope\)/);
   assert.match(sw, /key\.startsWith\(BOARDFISH_CACHE_NAMESPACE\)/);
-  assert.match(sw, /function matchCurrentCache\(request\)[\s\S]*cache\.match\(request\)/);
+  assert.match(sw, /function matchCurrentCache\(request\)[\s\S]*currentCache\.then\(\(cache\) => cache\.match\(request\)\)/);
   assert.doesNotMatch(sw, /caches\.match\(/);
   assert.doesNotMatch(sw, /boardfish-web-v\d/);
   assert.doesNotMatch(sw, /await cache\.put/);

@@ -990,6 +990,12 @@
     if (collectDiagnostics) phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const imageEntries = [];
+    const zipEntries = [{ name: 'board.json', data: boardBytes }];
+    let imageBytes = 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    let blobImageBytes = 0;
+    let byteArrayImageBytes = 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const imageStore = board?.imageStore || {};
     for (const key in imageStore) {
       if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
@@ -1002,7 +1008,7 @@
       const data = sourceBlob || bytes;
       if (!data) throw new Error(`web .bf save is missing image bytes for ${key}`);
       const byteLength = sourceBlob ? Number(sourceBlob.size) : bytes.length;
-      imageEntries.push({
+      const entry = {
         key,
         path: canonicalImageEntryPath(key, manifest),
         mime: mimeForImageSource(source, manifest),
@@ -1013,27 +1019,20 @@
         byteLength,
         crc: cachedImageSourceCrc(source, byteLength),
         blob: !!sourceBlob,
-      });
+      };
+      imageEntries.push(entry);
+      imageBytes += byteLength;
+      zipEntries.push({ name: entry.path, data, crc: entry.crc });
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDiagnostics) {
+        if (sourceBlob) blobImageBytes += byteLength;
+        else byteArrayImageBytes += byteLength;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const imageEntriesMs = collectDiagnostics ? nowMs() - phaseStart : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    let imageBytes = 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    let blobImageBytes = 0;
-    let byteArrayImageBytes = 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const zipEntries = [{ name: 'board.json', data: boardBytes }];
-    for (const entry of imageEntries) {
-      imageBytes += entry.byteLength;
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        if (entry.blob) blobImageBytes += entry.byteLength;
-        else byteArrayImageBytes += entry.byteLength;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      zipEntries.push({ name: entry.path, data: entry.data, crc: entry.crc });
-    }
     if (validateBoardPayload) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDiagnostics) phaseStart = nowMs();

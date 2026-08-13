@@ -272,7 +272,7 @@
   const objectMotionForDraw = (obj, zoom = 1) => {
     if (!obj?.id || (!objectMotions.size && !lastDrawnObjectMotions.size)) return null;
     const motion = objectMotions.get(obj.id);
-    if (!motion || prefersReducedMotion()) {
+    if (!motion) {
       lastDrawnObjectMotions.delete(obj.id);
       return null;
     }
@@ -299,7 +299,7 @@
       return false;
     }
     if (prefersReducedMotion()) {
-      lastDrawnObjectMotions.clear();
+      objectMotions.clear(); lastDrawnObjectMotions.clear();
       return false;
     }
     const cutoff = now();

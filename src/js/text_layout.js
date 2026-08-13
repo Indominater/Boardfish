@@ -1290,6 +1290,8 @@ function layoutLineFromWrappedLine(obj, line, lineIndex, scriptRanges, scriptMet
   )
     ? line.prefixWidths
     : getTextRangePrefixWidths(line.text, line.startIndex, scriptRanges, obj.data.content, scriptMetrics);
+  let visibleEnd = line.text.length;
+  while (visibleEnd && isTextWordSeparator(line.text[visibleEnd - 1])) visibleEnd--;
   const layoutLine = {
     text: line.text,
     startIndex: line.startIndex,
@@ -1302,6 +1304,7 @@ function layoutLineFromWrappedLine(obj, line, lineIndex, scriptRanges, scriptMet
     y,
     textY: y + TEXT_BASELINE_Y_OFFSET,
     prefixWidths,
+    visibleWidth: prefixWidths[visibleEnd] || 0,
   };
   return setTextLayoutLineScriptMetrics(layoutLine, scriptMetrics);
 }
@@ -2283,7 +2286,7 @@ const getTextRenderedContentWidth = (obj) => {
   if (!obj || obj.type !== 'text') return TEXT_PAD * 2 + 1;
   let maxLineW = 0;
   for (const line of getTextLayout(obj)) {
-    maxLineW = Math.max(maxLineW, lineVisibleWidth(line));
+    maxLineW = Math.max(maxLineW, line.visibleWidth);
   }
   return Math.max(getTextMinWidth(obj), Math.ceil(maxLineW + TEXT_PAD * 2 + 1));
 };
@@ -2616,17 +2619,10 @@ function getTextLayoutForViewport(obj, viewportRect) {
   return getTextLayoutForLineRange(obj, first, last);
 }
 
-function lineVisibleWidth(line) {
-  const text = String(line.text ?? '');
-  let end = text.length;
-  while (end > 0 && (text[end - 1] === ' ' || text[end - 1] === '\t')) end--;
-  return line.prefixWidths[end] || 0;
-}
-
 function lineBaseX(line, obj) {
   const base = obj.x + TEXT_PAD;
   if (line?.align !== 'right' && line?.align !== 'center') return base;
-  const extra = Math.max(0, obj.w - TEXT_PAD * 2 - lineVisibleWidth(line));
+  const extra = Math.max(0, obj.w - TEXT_PAD * 2 - line.visibleWidth);
   return base + (line.align === 'right' ? extra : extra / 2);
 }
 

@@ -81,14 +81,13 @@ function bringObjectToFront(obj) {
 function sendSelectedToBack() {
   if (!selectedIds.size) return;
   BoardfishEditorState.commitMutation('send-selected-to-back', () => {
-    // Pull out selected objects (preserving their relative order), prepend to front.
-    const selected = [], rest = [];
+    const reordered = new Array(objects.length);
+    let selectedCount = 0, restIndex = selectedIds.size;
     for (const o of objects) {
-      if (selectedIds.has(o.id)) selected.push(o);
-      else rest.push(o);
+      reordered[selectedIds.has(o.id) ? selectedCount++ : restIndex++] = o;
     }
-    if (!selected.length || !rest.length) return false;
-    objects = selected.concat(rest);
+    if (!selectedCount || selectedCount === objects.length) return false;
+    objects = reordered;
     return true;
   });
 }

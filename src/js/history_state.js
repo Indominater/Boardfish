@@ -309,11 +309,6 @@ function pushHistory(reason = '', dirty = null, beforeEditState = null) {
   boardHistory.length = historyIndex + 1;
   const prevEntry = historyIndex >= 0 ? boardHistory[historyIndex] : null;
   const prevObjects = prevEntry?.objects || [];
-  const prevMap = new Map();
-  for (const o of prevObjects) prevMap.set(o.id, o);
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  HistoryDebug.step(dbg, 'build-prev-map', { objectCount: prevObjects.length });
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const cacheEditingText = !!editingId && (
     reason === 'text-edit-checkpoint' || reason === 'text-edit-enter'
   );
@@ -324,7 +319,9 @@ function pushHistory(reason = '', dirty = null, beforeEditState = null) {
   const entry = new Array(objects.length);
   for (let i = 0; i < objects.length; i++) {
     const o = objects[i];
-    const previous = prevMap.get(o.id);
+    const previous = prevObjects[i]?.id === o.id
+      ? prevObjects[i]
+      : prevObjects.find((item) => item.id === o.id);
     const runtimeTextCache = cacheEditingText && o.type === 'text' && o.id === editingId;
     const shouldClone = _dirtyIds.has(o.id) || !previous || runtimeTextCache;
     entry[i] = shouldClone ? cloneObject(o, runtimeTextCache) : previous;

@@ -15,8 +15,6 @@
 
   const numericTolerance = (a, b) => Math.max(1, Math.abs(a || 0), Math.abs(b || 0)) * 1e-12;
 
-  const compareIds = (a, b) => a < b ? -1 : a > b ? 1 : 0;
-
   const randomUnit = (random) => {
     const sample = Number(random());
     return Number.isFinite(sample)
@@ -38,37 +36,34 @@
     const seenIds = new Set();
     for (let sourceIndex = 0; sourceIndex < images.length; sourceIndex++) {
       const image = images[sourceIndex];
-      if (!image || image.id == null || seenIds.has(String(image.id))) continue;
+      if (!image || image.id == null) continue;
+      const sortId = String(image.id);
+      if (seenIds.has(sortId)) continue;
       const sourceWidth = finitePositiveNumber(image.w);
       const sourceHeight = finitePositiveNumber(image.h);
       if (sourceWidth == null || sourceHeight == null) continue;
       const width = sourceWidth / sourceHeight * rowHeight;
       if (!Number.isFinite(width) || width <= 0) continue;
-      seenIds.add(String(image.id));
+      seenIds.add(sortId);
       items.push({
         id: image.id,
-        sortId: String(image.id),
+        sortId,
         width,
       });
     }
-    items.sort((a, b) => b.width - a.width || compareIds(a.sortId, b.sortId));
+    items.sort((a, b) => b.width - a.width || (a.sortId < b.sortId ? -1 : a.sortId > b.sortId ? 1 : 0));
     for (let rank = 0; rank < items.length; rank++) items[rank].rank = rank;
     return items;
   }
 
   function canonicalRows(rows) {
-    const canonical = rows.map((row) => {
-      const items = row.items;
-      let width = 0;
-      for (const item of items) width += item.width;
-      return { items, width };
-    });
-    canonical.sort((a, b) => {
+    for (const row of rows) row.width ??= row.items.reduce((sum, item) => sum + item.width, 0);
+    rows.sort((a, b) => {
       const tolerance = numericTolerance(a.width, b.width);
       if (Math.abs(a.width - b.width) > tolerance) return b.width - a.width;
       return a.items[0].rank - b.items[0].rank;
     });
-    return canonical;
+    return rows;
   }
 
   function exactPartitionsByRowCount(items, requestedRowCounts) {

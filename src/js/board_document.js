@@ -42,9 +42,8 @@
       return { path, mime, ext };
     }
     const comma = typeof src === 'string' ? src.indexOf(',') : -1;
-    const header = comma > 0 ? src.slice(0, comma) : '';
     const ext = guessImageExtFromDataUrl(src);
-    const mime = header ? mimeFromDataUrl(src) : mimeForExt(ext);
+    const mime = comma > 0 ? mimeFromDataUrl(src) : mimeForExt(ext);
     return { path: `images/${imgKey}.${ext}`, mime, ext };
   }
 
