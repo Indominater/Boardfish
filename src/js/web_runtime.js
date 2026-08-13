@@ -473,7 +473,6 @@
   const api = Object.freeze({
     canSaveToExistingTarget,
     describeFileRef,
-    downloadBlob,
     fileNameFromRef,
     fileRefFromFile: webFileRef,
     openFileDialog,

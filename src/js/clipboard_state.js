@@ -89,11 +89,17 @@ function jsClipboardStillCurrent(
   return current;
 }
 
-window.addEventListener('blur', markJsClipboardMaybeStaleFromWebBlur);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') markJsClipboardMaybeStaleFromWebBlur();
-});
-Object.assign(globalThis, {
-  getJsClipboardWebToken,
-  markJsClipboardWebTokenWritten,
-});
+if (typeof window !== 'undefined') {
+  window.addEventListener('blur', markJsClipboardMaybeStaleFromWebBlur);
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') markJsClipboardMaybeStaleFromWebBlur();
+  });
+}
+if (typeof globalThis !== 'undefined') {
+  Object.assign(globalThis, {
+    getJsClipboardWebToken,
+    markJsClipboardWebTokenWritten,
+  });
+}

@@ -65,7 +65,6 @@ function loadTextScriptEditorHelpers() {
     pushHistory(reason) { context.histories.push(reason); },
     scheduleRender(board, overlay, reason) { context.renders.push({ board, overlay, reason }); },
     syncAllTextAutoHeights() {},
-    Event,
   };
   vm.createContext(context);
   vm.runInContext(
@@ -92,7 +91,6 @@ function loadTextScriptEditorHelpers() {
       'globalThis.transformTextScriptRangesForInput = transformTextScriptRangesForInput;\n' +
       'globalThis.updateTextLineAlignForInput = updateTextLineAlignForInput;\n' +
       'globalThis.replaceTextEditProxyRange = replaceTextEditProxyRange;\n' +
-      'globalThis.replaceTextEditSelectionWithPayload = replaceTextEditSelectionWithPayload;\n' +
       'globalThis.tryNativeBoardfishTextSelectionPaste = tryNativeBoardfishTextSelectionPaste;\n',
     context,
     { filename: 'text_script_editor_helpers.js' },
@@ -1179,17 +1177,14 @@ test('large text paste proxy replacement assigns value directly instead of setRa
   assert.equal(proxy.selectionEnd, largePrefix.length + 'PASTE'.length);
 });
 
-test('shared large selection deletion defers the textarea DOM value', () => {
-  const context = loadTextScriptEditorHelpers();
+test('large synthetic proxy replacement can defer the textarea DOM value', () => {
+  const { replaceTextEditProxyRange } = loadTextScriptEditorHelpers();
   let setRangeTextCalled = false;
-  let pendingState = null;
   const largeText = `${'a'.repeat(25000)}tail`;
-  const obj = { id: 'text-1', type: 'text', data: { content: largeText } };
   const proxy = {
     value: largeText,
-    selectionStart: 10,
-    selectionEnd: 30,
-    selectionDirection: 'none',
+    selectionStart: 0,
+    selectionEnd: 0,
     setSelectionRange(start, end, direction = 'none') {
       this.selectionStart = start;
       this.selectionEnd = end;
@@ -1198,27 +1193,16 @@ test('shared large selection deletion defers the textarea DOM value', () => {
     setRangeText() {
       setRangeTextCalled = true;
     },
-    dispatchEvent() {},
-    _boardfishSetPendingInputState(state) { pendingState = state; },
   };
-  context.objectsMap = new Map([[obj.id, obj]]);
-  context.beginTextEditHistoryAction = () => {};
+  const result = replaceTextEditProxyRange(proxy, '', 10, 30, 'start', true);
 
-  const replaced = context.replaceTextEditSelectionWithPayload(obj.id, proxy, {
-    text: '', scriptRanges: [],
-  }, {
-    selection: { start: 10, end: 30, direction: 'none', hasSelection: true },
-    inputType: 'deleteContentBackward',
-  });
-
-  assert.equal(replaced, true);
   assert.equal(setRangeTextCalled, false);
+  assert.equal(result.method, 'logical');
   assert.equal(proxy.value, largeText);
   assert.equal(proxy._boardfishLogicalValue, `${largeText.slice(0, 10)}${largeText.slice(30)}`);
   assert.equal(proxy._boardfishDomValueStale, true);
   assert.equal(proxy.selectionStart, 10);
   assert.equal(proxy.selectionEnd, 10);
-  assert.equal(pendingState.replacement.insertedText, '');
 });
 
 test('small proxy replacement starts from logical text when DOM value is stale', () => {

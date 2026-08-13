@@ -2220,16 +2220,12 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
     ...textEditorTextStats(payload.text, payload.scriptRanges),
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const inputType = options.inputType || 'insertFromPaste';
-  const deletesContent = inputType.startsWith('delete');
-  const editablePayload = deletesContent
-    ? { text: '', scriptRanges: [] }
-    : editableTextScriptPayload(payload);
+  const editablePayload = editableTextScriptPayload(payload);
   const text = editablePayload.text;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-editable-payload-done', textEditorTextStats(text, editablePayload.scriptRanges));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (!text && !deletesContent) {
+  if (!text) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     logStep('paste:text-edit-replace-empty');
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -2257,6 +2253,7 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   const replacementRange = selection.hasSelection
     ? textEditVisibleSelectionReplacementRange(obj, selection)
     : selection;
+  const inputType = options.inputType || 'insertFromPaste';
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-replacement-range-ready', {
     inputType,
@@ -2296,9 +2293,7 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   setPendingTextEditInputState(proxy, inputState);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const mutationResult = replaceTextEditProxyRange(
-    proxy, text, replacementRange.start, replacementRange.end, 'end', deletesContent,
-  );
+  const mutationResult = replaceTextEditProxyRange(proxy, text, replacementRange.start, replacementRange.end, 'end');
   logStep('paste:text-edit-range-text-set', {
     setRangeTextMs: mutationResult.setRangeTextMs,
     valueAssignMs: mutationResult.valueAssignMs,
@@ -2311,9 +2306,7 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    replaceTextEditProxyRange(
-      proxy, text, replacementRange.start, replacementRange.end, 'end', deletesContent,
-    );
+    replaceTextEditProxyRange(proxy, text, replacementRange.start, replacementRange.end, 'end');
   }
   _caretVisible = true;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

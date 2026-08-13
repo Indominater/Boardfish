@@ -361,8 +361,10 @@ function scheduleScaledVariantReadyRender(
 ) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && countReadyVariant) imageScaledVariantRenderCount++;
   invalidateOffscreen();
-  if (hasOpenInitialImagePreviews()) {
-    const previewRelease = releaseReadyOpenInitialImagePreviewsForOpen();
+  if (typeof hasOpenInitialImagePreviews === 'function' && hasOpenInitialImagePreviews()) {
+    const previewRelease = typeof releaseReadyOpenInitialImagePreviewsForOpen === 'function'
+      ? releaseReadyOpenInitialImagePreviewsForOpen()
+      : null;
     if (typeof BOARDFISH_PRODUCTION === 'undefined' &&
       (previewRelease?.released || previewRelease?.pending || previewRelease?.failed) &&
       typeof OpenDebug !== 'undefined') {
@@ -687,14 +689,26 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
 
 function queueScaledImageVariantForReadyImage(key, source, priority = false) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantSourceReadyCandidateCount++;
+  if (!viewportImageScalingEnabled || !key) {
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      imageScaledVariantSourceReadyNoSourceCount++;
+      return { queued: false, skipped: 'disabled-or-invalid' };
+    }
+    return false;
+  }
+  if (!isImageVariantDrawableSource(source)) {
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      imageScaledVariantSourceReadyNoSourceCount++;
+      return { key, queued: false, skipped: 'missing-source' };
+    }
+    return false;
+  }
   const scale = IMAGE_SCALE_LEVELS[0];
   const result = queueScaledImageVariant(key, source, scale, priority);
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     if (result?.queued) imageScaledVariantSourceReadyQueuedCount++;
     else if (result?.skipped === 'already-ready' || result?.skipped === 'pending') {
       imageScaledVariantSourceReadyReadyCount++;
-    } else if (result?.skipped === 'disabled-or-invalid' || result?.skipped === 'missing-size') {
-      imageScaledVariantSourceReadyNoSourceCount++;
     }
     return result || { key, scale, queued: false, skipped: 'not-queued' };
   }
@@ -823,11 +837,12 @@ function hasScaledImageVariantFailure(key, scale) {
 
 function scheduleScaledVariantFailurePreviewRelease() {
   if (imageScaledVariantFailureReleaseScheduled ||
+      typeof hasOpenInitialImagePreviews !== 'function' ||
       !hasOpenInitialImagePreviews()) return;
   imageScaledVariantFailureReleaseScheduled = true;
   setTimeout(() => {
     imageScaledVariantFailureReleaseScheduled = false;
-    if (hasOpenInitialImagePreviews()) {
+    if (typeof hasOpenInitialImagePreviews === 'function' && hasOpenInitialImagePreviews()) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         scheduleScaledVariantReadyRender(false);

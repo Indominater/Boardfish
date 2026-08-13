@@ -21,7 +21,6 @@ function loadDirtyTitleHarness() {
     },
     boardHistory: [],
     historyIndex: -1,
-    isTextContentEmpty(value) { return !/[^\s\u200B-\u200D\uFEFF]/.test(String(value ?? '')); },
     objects: [],
     _dirtyIds: new Set(),
     window: {
