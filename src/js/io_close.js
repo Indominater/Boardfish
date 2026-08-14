@@ -1085,7 +1085,7 @@ function applyBoardData(data
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const historyStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  boardHistory = []; historyIndex = -1; snapshot();
+  snapshot();
   markSaved(false);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'reset-boardHistory-markSaved', { ms: performance.now() - historyStart, historyLength: boardHistory.length, historyIndex });

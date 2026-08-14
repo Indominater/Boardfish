@@ -227,6 +227,7 @@ function cloneObjectsForHistoryRestore(snapshotObjects = []) {
 }
 
 function snapshot() {
+  boardHistory = []; historyIndex = -1;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = HistoryDebug.start('snapshot', {
     objectCount: objects.length,
@@ -237,8 +238,6 @@ function snapshot() {
   const t0 = performance.now();
   HistoryDebug.count('snapshots');
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  let historyEntriesDropped = boardHistory.length > historyIndex + 1;
-  boardHistory.length = historyIndex + 1;
   const objectsSnapshot = cloneObjects(objects);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'cloneObjects', { objectCount: objectsSnapshot.length, ...getHistoryTextDebugMetrics(objectsSnapshot) });
@@ -255,14 +254,7 @@ function snapshot() {
   });
   historyIndex = boardHistory.length - 1;
   _dirtyIds.clear();
-  historyEntriesDropped = trimHistory() || historyEntriesDropped;
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    pruneImageCachesAfterHistoryChange(undefined, historyEntriesDropped);
-  } else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    pruneImageCachesAfterHistoryChange('snapshot', historyEntriesDropped);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
+  _historyImageCacheClipboardToken = _jsClipboardToken;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const ms = performance.now() - t0;
   HistoryDebug.max('maxSnapshotMs', ms);

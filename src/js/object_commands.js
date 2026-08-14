@@ -244,7 +244,6 @@ async function newBoard() {
   BoardfishViewportState.reset();
   clearImageStore(true);
   OpenDebug.step(dbg, 'clearImageStore', {});
-  boardHistory = []; historyIndex = -1;
   snapshot();
   markSaved();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -265,22 +264,21 @@ async function newBoard() {
 // ─── Duplicate ────────────────────────────────────────────────────────────────
 
 function duplicateSelected(anchorPoint = null) {
-  if (!selectedIds.size || editingId) return;
+  if (!selectedIds.size || editingId || !BoardfishWebLimits.canAddObjects(selectedIds.size)) return;
   const selectedObjects = [];
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (obj) selectedObjects.push(obj);
-  }
-  if (!selectedObjects.length || !BoardfishWebLimits.canAddObjects(selectedObjects.length)) return;
   let additionalTextBytes = 0;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const obj of selectedObjects) {
+  for (const id of selectedIds) {
+    const obj = objectsMap.get(id);
+    if (!obj) continue;
+    selectedObjects.push(obj);
     if (obj?.type === 'text') additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
     minX = Math.min(minX, obj.x);
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x + obj.w);
     maxY = Math.max(maxY, obj.y + obj.h);
   }
+  if (!selectedObjects.length) return;
   if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
   const center = (
     anchorPoint &&
