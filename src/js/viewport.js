@@ -64,7 +64,7 @@ const setPillMessageText = (text) => {
 };
 
 function setIslandVisible(visible) {
-  if (island.classList.contains('visible') !== visible) island.classList.toggle('visible', visible);
+  island.classList.toggle('visible', visible);
   const ariaHidden = visible ? 'false' : 'true';
   if (island.getAttribute?.('aria-hidden') !== ariaHidden) island.setAttribute('aria-hidden', ariaHidden);
 }

@@ -147,15 +147,10 @@
     view.setUint32(22, entry.byteLength, true);
     view.setUint16(26, name.length, true);
     bytes.set(name, 30);
-    return {
-      offset,
-      name,
-      bytes,
-    };
+    return { offset, name, bytes, time, date };
   }
 
   function centralDirectoryHeader(entry, local) {
-    const { time, date } = dosDateTime(entry.date);
     const bytes = new Uint8Array(46 + local.name.length);
     const view = new DataView(bytes.buffer);
     view.setUint32(0, ZIP_CENTRAL_DIRECTORY, true);
@@ -163,8 +158,8 @@
     view.setUint16(6, 20, true);
     view.setUint16(8, 0x0800, true);
     view.setUint16(10, ZIP_METHOD_STORED, true);
-    view.setUint16(12, time, true);
-    view.setUint16(14, date, true);
+    view.setUint16(12, local.time, true);
+    view.setUint16(14, local.date, true);
     view.setUint32(16, entry.crc, true);
     view.setUint32(20, entry.byteLength, true);
     view.setUint32(24, entry.byteLength, true);

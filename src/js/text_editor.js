@@ -1343,11 +1343,9 @@ const plainEditScriptNormalizeSkipInfo = (oldRanges = [], {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
-const fastNormalizeTextScriptRangesAfterPlainDelete = (content, scriptRanges = []) => {
-  const text = normalizeTextContent(content);
+const fastNormalizeTextScriptRangesAfterPlainDelete = (text, scriptRanges = []) => {
   const normalized = [];
-  const seen = new Set();
-  for (const source of Array.isArray(scriptRanges) ? scriptRanges : []) {
+  for (const source of scriptRanges) {
     const kind = normalizeTextScriptKind(source?.kind);
     if (!kind) continue;
     const rawStart = Math.trunc(Number(source?.start));
@@ -1373,13 +1371,9 @@ const fastNormalizeTextScriptRangesAfterPlainDelete = (content, scriptRanges = [
       }
       if (!valid) continue;
     }
-    const key = `${start}:${end}:${kind}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
     normalized.push({ start, end, kind });
   }
-  normalized.sort((a, b) => a.start - b.start || a.end - b.end || String(a.kind).localeCompare(String(b.kind)));
-  return normalized;
+  return sortAndDedupeTextScriptRanges(normalized);
 };
 
 const shiftTextScriptRangesForPlainOutsideEdit = (oldRanges = [], {
@@ -1398,10 +1392,7 @@ const shiftTextScriptRangesForPlainOutsideEdit = (oldRanges = [], {
   return ranges;
 };
 
-const deriveBracedTextScriptRangesAroundEdit = (content, start, end) => {
-  const text = normalizeTextContent(content);
-  const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, text.length));
-  const to = Math.max(from, Math.min(Math.trunc(Number(end)) || from, text.length));
+const deriveBracedTextScriptRangesAroundEdit = (text, from, to) => {
   const previousNewline = text.lastIndexOf('\n', Math.max(0, from - 1));
   const scanStart = previousNewline === -1 ? 0 : previousNewline + 1;
   const nextNewline = text.indexOf('\n', to);
@@ -1684,7 +1675,7 @@ const updateTextLineAlignForInput = (obj, oldValue, oldStart, oldEnd, insertedTe
   const removedLineCount = textNewlineCount(oldValue, oldStart, oldEnd);
   const insertedLineCount = textNewlineCount(insertedText);
   if (!removedLineCount && !insertedLineCount) return;
-  const oldAlign = normalizeTextLineAlignForContent(oldValue, obj.data.lineAlign);
+  const oldAlign = obj.data.lineAlign;
   const lineIndex = textNewlineCount(oldValue, 0, oldStart);
   const baseAlign = oldAlign[lineIndex] || 'left';
   const spliceStart = lineIndex + 1;

@@ -504,10 +504,26 @@ test('releasing a dragged text highlight does not open the text edit menu', () =
 
   context.startTextSelectionDrag({ clientX: 12, clientY: 22 }, context.obj, { x: 12, y: 22 });
   context.latestDrag().move({ clientX: 42, clientY: 22 });
+  const renderCount = context.renders.length;
+  context.latestDrag().move({ clientX: 42, clientY: 22 });
   context.latestDrag().up?.({ button: 0, clientX: 42, clientY: 22 });
 
   assert.deepEqual(context.editProxy.selection, [1, 4]);
+  assert.equal(context.renders.length, renderCount);
   assert.deepEqual(context.menus, []);
+});
+
+test('ending text edit makes its active selection drag inert', () => {
+  const context = loadCanvasInputHarness();
+  context.editingId = context.obj.id;
+  context._editEl = context.editProxy;
+  context.startTextSelectionDrag({ clientX: 12, clientY: 22 }, context.obj, { x: 12, y: 22 });
+  const renderCount = context.renders.length;
+
+  context._editEl = null;
+  context.latestDrag().move({ clientX: 42, clientY: 22 });
+
+  assert.equal(context.renders.length, renderCount);
 });
 
 test('dragging text highlight syncs stale short edit proxy before selecting logical tail', () => {

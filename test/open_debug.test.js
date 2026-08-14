@@ -141,8 +141,8 @@ test('open-board debugger covers the slow open phases developers need to inspect
   }
   assert.doesNotMatch(openDebug, /setHydrationMode|all-before-open/);
   assert.doesNotMatch(openIo, /openHydrationMode|getOpenHydrationMode|hydrateAllImagesForOpen|all-before-open/);
-  assert.match(openIo, /const visibleFirstOpen = deferRender;/);
-  assert.match(openIo, /deferredInitialCacheImages\+\+;/);
+  assert.match(openIo, /visibleFirstOpen: true,/);
+  assert.doesNotMatch(productionOpenIo, /BoardfishImageStore\.getSource\(k\)|cacheImage\(k,/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
   assert.match(openIo, /typeof source === 'string' \|\| isWebImageRef\(source\)/);
   assert.doesNotMatch(openIo, /function getReferencedHydratableImageKeys\(\)/);
@@ -317,11 +317,11 @@ test('open-board title target updates as soon as board data is applied', () => {
 
   assert.match(
     bootstrap,
-    /applyBoardData\(data, applyOptions\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);[\s\S]*?await finishOpenedBoard\(dbg, data\);/,
+    /applyBoardData\(data[\s\S]*?, dbg[\s\S]*?\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);[\s\S]*?await finishOpenedBoard\(dbg, data\);/,
   );
   assert.match(
     productionBootstrap,
-    /applyBoardData\(data, applyOptions\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);\s*await finishOpenedBoard\(\);/,
+    /applyBoardData\(data\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);\s*await finishOpenedBoard\(\);/,
   );
 });
 

@@ -570,6 +570,7 @@ function applyTextEditCaretHit(obj, proxy, hit) {
 
 function startTextSelectionDrag(e, obj, wp) {
   flushEditHistoryCheckpoint();
+  const el = _editEl;
   TextSelDebug._logPointer?.('selection-drag-start', e, { objectId: obj?.id || '', wx: wp.x, wy: wp.y });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const layoutStart = canvasInputNow();
@@ -585,22 +586,21 @@ function startTextSelectionDrag(e, obj, wp) {
     wy: wp.y,
   });
   const clickIdx = clickHit.index;
-  if (_editEl) {
-    applyTextEditCaretHit(obj, _editEl, clickHit);
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      focusTextEditProxyNow(_editEl, obj, 'selection-drag-focus', {
-        phase: 'selection-drag',
-        clientX: e?.clientX ?? '',
-        clientY: e?.clientY ?? '',
-      });
-    } else {
-      focusTextEditProxyNow(_editEl);
-    }
-    TextSelDebug._logSelection('mouse-down', _editEl, obj);
-    _caretVisible = true;
-    scheduleRender(true, false);
+  applyTextEditCaretHit(obj, el, clickHit);
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    focusTextEditProxyNow(el, obj, 'selection-drag-focus', {
+      phase: 'selection-drag',
+      clientX: e?.clientX ?? '',
+      clientY: e?.clientY ?? '',
+    });
+  } else {
+    focusTextEditProxyNow(el);
   }
+  TextSelDebug._logSelection('mouse-down', el, obj);
+  _caretVisible = true;
+  scheduleRender(true, false);
   function onSelMove(ev) {
+    if (_editEl !== el) return;
     const wp2 = toWorld(ev.clientX, ev.clientY);
     TextSelDebug._logPointer?.('selection-drag-move', ev, { objectId: obj?.id || '', wx: wp2.x, wy: wp2.y });
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -612,19 +612,17 @@ function startTextSelectionDrag(e, obj, wp) {
       wy: wp2.y,
     });
     const endIdx = endHit.index;
-    if (_editEl) {
-      const start = Math.min(clickIdx, endIdx);
-      const end = Math.max(clickIdx, endIdx);
-      if (clickIdx === endIdx) applyTextEditCaretHit(obj, _editEl, endHit);
-      else {
-        setTextEditProxySelectionRange(_editEl, start, end, 'none', obj.data?.content || '');
-        clearTextScriptCaretAffinity(obj);
-        clearTextEditCaretIndex(obj);
-      }
-      TextSelDebug._logSelection('mouse-drag', _editEl, obj);
-      _caretVisible = true;
-      scheduleRender(true, false);
-    }
+    const start = Math.min(clickIdx, endIdx);
+    const end = Math.max(clickIdx, endIdx);
+    if (clickIdx === endIdx) applyTextEditCaretHit(obj, el, endHit);
+    else if (el.selectionStart !== start || el.selectionEnd !== end) {
+      setTextEditProxySelectionRange(el, start, end, 'none', obj.data?.content || '');
+      clearTextScriptCaretAffinity(obj);
+      clearTextEditCaretIndex(obj);
+    } else return;
+    TextSelDebug._logSelection('mouse-drag', el, obj);
+    _caretVisible = true;
+    scheduleRender(true, false);
   }
   function onSelUp(ev) {
     if (!ev || ev.__boardfishDragCancel) return;

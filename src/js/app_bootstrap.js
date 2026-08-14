@@ -64,13 +64,11 @@ var finishFailedOpen;
       } else
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       data = await invokeReadBoard(filePath);
-      const applyOptions = { deferRender: true };
+      applyBoardData(data
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        Object.assign(applyOptions, { dbg, sourcesCached: true, endDebug: false });
-      }
+        , dbg
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      applyBoardData(data, applyOptions);
+      );
       currentFileRef = filePath;
       currentFilePath = fileLabel;
       updateTitle();

@@ -473,7 +473,7 @@ function restoreSnapshot(s, editStateOverride) {
   const selectionStart = performance.now();
   const previousSelectedCount = selectedIds.size;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  BoardfishEditorState.setSelection(obj?.type === 'text' ? [obj.id] : new Set(selectedIds), { exitEditing: false });
+  BoardfishEditorState.setSelection(obj?.type === 'text' ? [obj.id] : [...selectedIds], { exitEditing: false });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'restore-selection', {
     setSelectionMs: performance.now() - selectionStart,

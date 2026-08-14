@@ -1014,13 +1014,13 @@ async function finishOpenedBoard(
   }
 }
 
-function applyBoardData(data, options = {}) {
-  data = BoardSchema.normalizeBoardData(data);
-  const deferRender = !!options.deferRender;
+function applyBoardData(data
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const dbg = options.dbg || null;
-  const sourcesCached = !!options.sourcesCached;
-  const endDebug = options.endDebug !== false;
+  , dbg = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  data = BoardSchema.normalizeBoardData(data);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:applyBoardData:start', openMetrics);
   OpenDebug.step(dbg, 'applyBoardData:start', openMetrics);
@@ -1036,28 +1036,22 @@ function applyBoardData(data, options = {}) {
   const imageStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   imageStore = data.imageStore || {};
-  const visibleFirstOpen = deferRender;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let deferredInitialCacheImages = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const k of BoardfishImageStore.sourceKeys()) {
-    const source = BoardfishImageStore.getSource(k);
     const n = parseInt(k.slice(4));
     if (n >= imgKeyCounter) imgKeyCounter = n + 1;
-    if (visibleFirstOpen && isOpenHydratableImageSource(source)) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      deferredInitialCacheImages++;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      continue;
-    }
-    cacheImage(k, source);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (isOpenHydratableImageSource(BoardfishImageStore.getSource(k))) deferredInitialCacheImages++;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'cacheImage:start-all', {
     ms: performance.now() - imageStart,
-    sourcesCached,
+    sourcesCached: true,
     deferredInitialCacheImages,
-    visibleFirstOpen,
+    visibleFirstOpen: true,
     ...getOpenImageRuntimeDebugMetrics(dbg),
   });
   OpenDebug.step(dbg, 'image-store-sample', { sample: getImageStoreOpenDebugSampleIfEnabled(dbg) });
@@ -1086,16 +1080,6 @@ function applyBoardData(data, options = {}) {
   OpenDebug.step(dbg, 'restore-counters-viewport', { ms: performance.now() - countersStart, panX, panY, zoom });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  if (!deferRender) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const renderStart = performance.now();
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    applyTransform();
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    OpenDebug.step(dbg, 'applyTransform', { ms: performance.now() - renderStart });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
-
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const historyStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1104,7 +1088,6 @@ function applyBoardData(data, options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'reset-boardHistory-markSaved', { ms: performance.now() - historyStart, historyLength: boardHistory.length, historyIndex });
   PillDebug.log('open:applyBoardData:end', openMetrics);
-  if (endDebug) OpenDebug.end(dbg, { opened: true, ...openMetrics });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 

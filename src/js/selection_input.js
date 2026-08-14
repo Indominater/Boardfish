@@ -263,25 +263,24 @@ const boundsCornerPoint = function boundsCornerPoint(bounds, dir) {
 };
 
 function hideMultiSelectionOverlay() {
-  if (!multiSelOverlay) return;
-  if (multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.remove('visible');
+  multiSelOverlay.classList.toggle('visible', false);
 }
 
 function updateSelectionOverlay() {
   if (isBoardInputBlocked() && !shouldKeepSelectionOverlayWhileBlocked()) {
-    if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
+    selOverlay.classList.toggle('visible', false);
     hideMultiSelectionOverlay();
     return;
   }
   if (!hasSelection()) {
-    if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
+    selOverlay.classList.toggle('visible', false);
     hideMultiSelectionOverlay();
     return;
   }
 
   const firstSelectedObj = getFirstSelectedObject();
   if (!firstSelectedObj) {
-    if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
+    selOverlay.classList.toggle('visible', false);
     hideMultiSelectionOverlay();
     BoardfishEditorState.clearSelection();
     return;
@@ -316,7 +315,7 @@ function updateSelectionOverlay() {
     }
   }
   if (!bounds) {
-    if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
+    selOverlay.classList.toggle('visible', false);
     hideMultiSelectionOverlay();
     BoardfishEditorState.clearSelection();
     return;
@@ -325,14 +324,14 @@ function updateSelectionOverlay() {
   const screenX1 = bounds.x1 * zoom + panX, screenY1 = bounds.y1 * zoom + panY;
   const screenX2 = bounds.x2 * zoom + panX, screenY2 = bounds.y2 * zoom + panY;
   if (!(screenX1 < width && screenX2 > 0 && screenY1 < height && screenY2 > 0)) {
-    if (selOverlay.classList.contains('visible')) selOverlay.classList.remove('visible');
+    selOverlay.classList.toggle('visible', false);
     hideMultiSelectionOverlay();
     return;
   }
 
   const multiSelected = isMultiSelected();
   let imageEdgePad = 0;
-  if (!multiSelOverlay || !multiSelected) {
+  if (!multiSelected) {
     hideMultiSelectionOverlay();
   } else {
     while (_multiSelBoxes.length < selectedIds.size) {
@@ -359,7 +358,7 @@ function updateSelectionOverlay() {
       const box = _multiSelBoxes.pop();
       box?.parentNode?.removeChild(box);
     }
-    if (!multiSelOverlay.classList.contains('visible')) multiSelOverlay.classList.add('visible');
+    multiSelOverlay.classList.toggle('visible', true);
   }
   imageEdgePad ||= firstSelectedObj.type === 'image'
     ? SELECTION_IMAGE_EDGE_OVERDRAW_DEVICE_PX
