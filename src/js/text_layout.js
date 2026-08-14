@@ -33,8 +33,7 @@ function normalizeTextContent(value) {
 
 const trimWhitespaceOnlyEdgeLines = (value) => {
   const text = normalizeTextContent(value);
-  if (!text.includes('\n')) return /\S/.test(text) ? text : '';
-  return /\S/.test(text) ? text.replace(/^(?:[^\S\n]*\n)+|(?:\n[^\S\n]*)+$/g, '') : '';
+  return /\S/.test(text) ? (text.includes('\n') ? text.replace(/^(?:[^\S\n]*\n)+|(?:\n[^\S\n]*)+$/g, '') : text) : '';
 };
 
 const textForClipboard = trimWhitespaceOnlyEdgeLines;
