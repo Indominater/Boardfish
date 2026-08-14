@@ -1398,14 +1398,13 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   obj._lastTextLayoutLineDelta = layoutLineDelta;
 
   const yChanged = obj._layoutCacheY !== obj.y;
-  for (let i = yChanged || oldScriptRanges.length || scriptRanges.length ? 0 : oldSplice.start; i < oldSplice.start; i++) {
-    const line = layout[i];
-    line.scriptRanges = scriptRanges;
-    if (yChanged) {
-      line.y = obj.y + TEXT_PAD + i * LINE_H;
-      line.textY = line.y + TEXT_BASELINE_Y_OFFSET;
-    }
-    setTextLayoutLineScriptMetrics(line, scriptMetrics);
+  if (oldSplice.start && (oldScriptRanges.length || scriptRanges.length)) {
+    layout[0].scriptRanges = scriptRanges;
+    setTextLayoutLineScriptMetrics(layout[0], scriptMetrics);
+  }
+  if (yChanged) for (let i = 0; i < oldSplice.start; i++) {
+    layout[i].y = obj.y + TEXT_PAD + i * LINE_H;
+    layout[i].textY = layout[i].y + TEXT_BASELINE_Y_OFFSET;
   }
   for (let i = oldSplice.end; i < layout.length; i++) {
     const line = layout[i];
@@ -1603,15 +1602,10 @@ const normalizeTextScriptRangesForContent = (content, scriptRanges = []) => {
     ranges.push({ start, end, kind });
   }
   ranges.sort((a, b) => a.start - b.start || a.end - b.end);
-  const normalized = [];
-  const seen = new Set();
-  for (const range of ranges) {
-    const key = `${range.start}:${range.end}:${range.kind}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    normalized.push(range);
-  }
-  return normalized;
+  return ranges.filter((range, index) => !index ||
+    range.start !== ranges[index - 1].start ||
+    range.end !== ranges[index - 1].end ||
+    range.kind !== ranges[index - 1].kind);
 };
 
 const findBalancedTextScriptEnd = (text, start) => {

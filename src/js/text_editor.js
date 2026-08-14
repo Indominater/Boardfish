@@ -1021,27 +1021,17 @@ const textEditScriptMarkerInsertionIndexAt = (obj, index) => {
   const ranges = getTextScriptRanges(obj);
   const rangeContext = textEditScriptRangeContext(ranges);
   const pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
-  let currentRange = null;
-  for (const range of ranges) {
-    if (range.start !== pos && range.start - 1 !== pos) continue;
-    currentRange = range;
-    break;
-  }
+  const currentRange = rangeContext?.byStart.get(pos)?.[0] ||
+    rangeContext?.byStart.get(pos + 1)?.[0];
   if (!currentRange) return null;
 
   let insertIndex = currentRange.start - 1;
-  if (!isTextEditScriptHiddenAtFast(insertIndex, text, rangeContext)) return null;
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const range of ranges) {
-      const markerIndex = range.start - 1;
-      if (markerIndex < 0 || markerIndex >= insertIndex) continue;
-      if (range.end !== insertIndex) continue;
-      if (!isTextEditScriptHiddenAtFast(markerIndex, text, rangeContext)) continue;
-      insertIndex = markerIndex;
-      changed = true;
-    }
+  while (true) {
+    const previous = rangeContext.byEnd.get(insertIndex)?.find(
+      (range) => range.start > 0 && range.start - 1 < insertIndex
+    );
+    if (!previous) break;
+    insertIndex = previous.start - 1;
   }
   return insertIndex;
 };
