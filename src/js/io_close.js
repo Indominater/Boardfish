@@ -353,11 +353,12 @@ if (typeof BOARDFISH_PRODUCTION === 'undefined') getVisibleImageKeys.lastDebug =
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function getPendingHydratableImageKeys() {
-  const keys = [];
+  const keys = Object.keys(imageStore);
+  let write = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const skipped = { nonHydratable: 0, cached: 0 };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  for (const key of BoardfishImageStore.sourceKeys()) {
+  for (const key of keys) {
     if (!isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       skipped.nonHydratable++;
@@ -370,8 +371,9 @@ function getPendingHydratableImageKeys() {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       continue;
     }
-    keys.push(key);
+    keys[write++] = key;
   }
+  keys.length = write;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   getPendingHydratableImageKeys.lastDebug = { selected: keys.length, skipped };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1039,7 +1041,7 @@ function applyBoardData(data
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let deferredInitialCacheImages = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  for (const k of BoardfishImageStore.sourceKeys()) {
+  for (const k of Object.keys(imageStore)) {
     const n = parseInt(k.slice(4));
     if (n >= imgKeyCounter) imgKeyCounter = n + 1;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */

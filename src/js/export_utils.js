@@ -1,6 +1,8 @@
 'use strict';
 
 (function initExportUtils(root) {
+  const { extForMime, mimeForExt: mimeForImageExt } = root.BoardfishBoardTypes ||
+    (typeof require === 'function' ? require('./board_types.js') : null);
   function guessImageExtFromDataUrl(dataUrl) {
     return extForMime(dataUrlMime(dataUrl));
   }
@@ -696,22 +698,6 @@
 
   function dataUrlMime(dataUrl) {
     return /^data:([^;,]+);base64,/i.exec(String(dataUrl || ''))?.[1] || 'image/png';
-  }
-
-  function extForMime(mime = '') {
-    const value = String(mime || '').toLowerCase();
-    if (value === 'image/jpeg' || value === 'image/jpg') return 'jpg';
-    if (value === 'image/webp') return 'webp';
-    if (value === 'image/gif') return 'gif';
-    return 'png';
-  }
-
-  function mimeForImageExt(ext = '') {
-    const value = String(ext || '').replace(/^\./, '').toLowerCase();
-    if (value === 'jpg' || value === 'jpeg') return 'image/jpeg';
-    if (value === 'webp') return 'image/webp';
-    if (value === 'gif') return 'image/gif';
-    return 'image/png';
   }
 
   function withImageExtension(name, ext) {

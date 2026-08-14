@@ -160,8 +160,6 @@ function loadMenuCommandHarness() {
   const context = {
     calls: [],
     timers: [],
-    _lastPointerMenuCommandAt: 0,
-    performance: { now: () => 1000 },
     console,
     MenuDebug: { log() {} },
     MENU_COMMANDS: {
@@ -325,8 +323,12 @@ test('pointerup menu commands keep user activation and suppress the follow-up cl
   assert.deepEqual(context.calls, [pointerEvent]);
   assert.deepEqual(context.timers, []);
 
-  assert.equal(context.runMenuCommand(button, 'click', { type: 'click' }), true);
+  assert.equal(context.runMenuCommand(button, 'click', { type: 'click', detail: 1 }), true);
   assert.deepEqual(context.calls, [pointerEvent]);
+
+  const keyboardClick = { type: 'click', detail: 0 };
+  assert.equal(context.runMenuCommand(button, 'click', keyboardClick), true);
+  assert.deepEqual(context.calls, [pointerEvent, keyboardClick]);
 });
 
 test('text editing context menu uses text actions before object actions', () => {
@@ -774,10 +776,10 @@ test('editing overlay keeps copied text selection highlighted while its jiggle i
   const overlaySource = viewportSource.slice(start, end);
 
   assert.match(overlaySource, /const copiedSelectionSpec = textSelectionMotions\?\.get\(obj\.id\) \|\| null;/);
-  assert.match(overlaySource, /const useCopiedSelectionMotion = !!copiedMotion && \(liveSelStart === liveSelEnd \|\| liveMatchesCopied\);/);
-  assert.match(overlaySource, /const selStart = useCopiedSelectionMotion \? copiedSelectionSpec\.start : liveSelStart;/);
-  assert.match(overlaySource, /const selEnd\s+= useCopiedSelectionMotion \? copiedSelectionSpec\.end\s+: liveSelEnd;/);
-  assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*textSelectionMotion \? \{ start: selStart, end: selEnd \} : null/);
+  assert.match(overlaySource, /const useCopiedSelectionMotion = copiedSelectionSpec && \(liveSelStart === liveSelEnd \|\| liveMatchesCopied\);/);
+  assert.match(overlaySource, /const selStart = copiedMotion \? copiedSelectionSpec\.start : liveSelStart;/);
+  assert.match(overlaySource, /const selEnd\s+= copiedMotion \? copiedSelectionSpec\.end\s+: liveSelEnd;/);
+  assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*copiedMotion \? \{ start: selStart, end: selEnd \} : null/);
 });
 
 test('overlapping text selection highlight runs share one path fill', () => {

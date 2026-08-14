@@ -166,7 +166,7 @@ async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  , options = {}
+  , sourceBitmap = null
 ) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const t0 = performance.now();
@@ -205,7 +205,7 @@ async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}
   let sourceFallbackError = '';
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   try {
-    const preferredSource = options.sourceBitmap || null;
+    const preferredSource = sourceBitmap;
     const preferredW = preferredSource?.width || preferredSource?.naturalWidth || 0;
     const preferredH = preferredSource?.height || preferredSource?.naturalHeight || 0;
     let bitmapSource = null;
@@ -261,10 +261,10 @@ async function buildOpenInitialImagePreviewForOpen(key, obj, view = {}
     });
     const warmupMeta = { kind: 'open-preview', key };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    Object.assign(warmupMeta, { objectId: obj.id || '', source: options.source || '' });
+    Object.assign(warmupMeta, { objectId: obj.id || '', source: sourceBitmap ? 'open-preview-dynamic-ready' : '' });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     scheduleDrawableBitmapWarmup(bitmap, warmupMeta,
-      options.warmupImmediate === true || (typeof _boardOpening !== 'undefined' && _boardOpening), 8);
+      !!sourceBitmap || (typeof _boardOpening !== 'undefined' && _boardOpening), 8);
     bitmap = null;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     return {
@@ -311,7 +311,7 @@ function scheduleOpenInitialImagePreviewRequestQueue() {
   }, 0);
 }
 
-function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, options = {}) {
+function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, sourceBitmap = null) {
   if (typeof createImageBitmap !== 'function') return false;
   if (!key || !obj || imageOpenPreviewBitmapCache.has(key) || imageOpenPreviewRequestPending.has(key)) return false;
   const source = imageStore[key];
@@ -320,7 +320,6 @@ function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, options = {}
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const queuedAt = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const sourceBitmap = options.sourceBitmap || null;
   imageOpenPreviewRequestPending.add(key);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (typeof OpenDebug !== 'undefined' && typeof OpenDebug.recordDynamicPreview === 'function') {
@@ -329,7 +328,7 @@ function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, options = {}
     OpenDebug.recordDynamicPreview({
       imgKey: key,
       objectId: obj.id || '',
-      reason: options.reason || '',
+      reason: 'active-input-full-fallback',
       queued: true,
       pending: imageOpenPreviewRequestPending.size,
       queuedCount: imageOpenPreviewRequestQueue.length + 1,
@@ -347,24 +346,17 @@ function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, options = {}
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     try {
       if (requestEpoch !== imageOpenPreviewRequestEpoch || imageStore[key] !== source) return;
-      const buildOptions = {
-        warmupImmediate: true,
-        sourceBitmap,
-      };
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      buildOptions.source = options.source || 'open-preview-dynamic-ready';
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const result = await buildOpenInitialImagePreviewForOpen(key, obj, view
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         , null
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        , buildOptions
+        , sourceBitmap
       );
       if (result?.ready) {
         if (requestEpoch === imageOpenPreviewRequestEpoch) {
           if (typeof scheduleRender === 'function') {
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            scheduleRender(true, null, options.source || 'open-preview-dynamic-ready');
+            scheduleRender(true, null, 'open-preview-dynamic-ready');
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
             if (typeof BOARDFISH_PRODUCTION !== 'undefined') scheduleRender(true);
           }
@@ -378,7 +370,7 @@ function requestOpenInitialImagePreviewForDraw(key, obj, view = {}, options = {}
         OpenDebug.recordDynamicPreview({
           imgKey: key,
           objectId: obj.id || '',
-          reason: options.reason || '',
+          reason: 'active-input-full-fallback',
           queuedMs: startedAt - queuedAt,
           waitMs: startedAt - queuedAt,
           buildMs: result?.ms ?? '',
@@ -537,15 +529,7 @@ function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: wind
     ? selectImageSourceForDraw(key, obj, fullSource, view, activeInput)
     : null;
   if (selected?.activeInputFullFallback === true && hasOpenInitialImagePreviews()) {
-    const previewOptions = { sourceBitmap: fullSource };
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    Object.assign(previewOptions, {
-      reason: 'active-input-full-fallback',
-      source: 'open-preview-dynamic-ready',
-    });
-    const requested =
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    requestOpenInitialImagePreviewForDraw(key, obj, view, previewOptions);
+    const requested = requestOpenInitialImagePreviewForDraw(key, obj, view, fullSource);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (requested && counters) {
       counters.dynamicOpenPreviewRequests = (counters.dynamicOpenPreviewRequests || 0) + 1;

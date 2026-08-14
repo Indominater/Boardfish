@@ -25,15 +25,10 @@
     return !!imageBitmapCache[key];
   }
 
-  function sourceKeys() {
-    return Object.keys(imageStore || {});
-  }
-
   root.BoardfishImageStore = Object.freeze({
     getSource,
     hasDisplayImage,
     hasSource,
     setSource,
-    sourceKeys,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1,12 +1,12 @@
 export const WEB_DEV_SCRIPTS = Object.freeze([
   'web_env.js',
+  'board_types.js',
   'web_board_container.js',
   'board_limits.js',
   'web_runtime.js',
   'runtime_utils.js',
   'object_geometry.js',
   'interaction_utils.js',
-  'board_types.js',
   'image_layout.js',
   'debug_core.js',
   'renderer.js',
@@ -52,13 +52,13 @@ export const WEB_DEV_SCRIPTS = Object.freeze([
 
 export const WEB_PREVIEW_SCRIPTS = Object.freeze([
   'web_env.js',
+  'board_types.js',
   'web_board_container.js',
   'board_limits.js',
   'web_runtime.js',
   'runtime_utils.js',
   'object_geometry.js',
   'interaction_utils.js',
-  'board_types.js',
   'image_layout.js',
   'renderer.js',
   'board_schema.js',

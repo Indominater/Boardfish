@@ -162,7 +162,6 @@ function openExclusiveMenuAt(menu, menuId, x, y, reason) {
   openMenuAt(menu, x, y);
 }
 var _menuPointerCommand = null;
-var _lastPointerMenuCommandAt = 0;
 
 function clearMenuCommandPressState() {
   _menuPointerCommand?.classList.remove('menu-pressed');
@@ -423,24 +422,18 @@ function menuCommandName(button) {
 }
 
 function runMenuCommand(button, source, commandEvent = null) {
+  if (source === 'click' && commandEvent?.detail !== 0) return true;
   const run = menuCommandFromButton(button);
   const command = menuCommandName(button);
   if (!run) {
     MenuDebug.log('menu:command:missing', { command, source, target: button?.id || '' });
     return false;
   }
-  if ((source === 'click' || source === 'mouseup') && performance.now() - _lastPointerMenuCommandAt < 800) {
-    MenuDebug.log('menu:click-command:suppressed', { command });
-    return true;
-  }
   MenuDebug.log(button.id.startsWith('obj-')
     ? 'obj-ctx-menu:command'
     : button.id.startsWith('text-')
       ? 'text-ctx-menu:command'
       : 'ctx-menu:command', { command, source });
-  if (source === 'pointerup' || source === 'mouseup') _lastPointerMenuCommandAt = performance.now();
-  // Keep activation-sensitive file pickers and text focus inside the trusted
-  // pointer event. The following click is still suppressed by the timestamp.
   MenuDebug.log('menu:command:start', { command, source });
   try {
     run(commandEvent);
@@ -644,14 +637,11 @@ for (const menu of [ctxMenu, objCtxMenu, textCtxMenu]) {
   for (const type of MENU_COMMAND_CANCEL_EVENTS) menu.addEventListener(type, clearMenuCommandPressState);
 }
 const contextMenuStopSurfaces = [ctxMenu, objCtxMenu, textCtxMenu, ctxActions];
-for (const menu of contextMenuStopSurfaces) {
-  for (const type of ['click', 'contextmenu']) {
-    menu.addEventListener(type, (e) => {
-      e.stopPropagation();
-      if (type === 'contextmenu') e.preventDefault();
-    });
-  }
+function suppressContextMenuSurface(e) {
+  e.preventDefault();
+  e.stopPropagation();
 }
+for (const menu of contextMenuStopSurfaces) menu.addEventListener('contextmenu', suppressContextMenuSurface);
 
 function isContextMenuSurfaceEvent(e) {
   return !!(e?.target instanceof Node && (
@@ -761,17 +751,14 @@ for (const id in MENU_COMMANDS) {
 }
 
 
-for (const type of ['pointerdown', 'click']) {
-  const reason = `document-${type}`;
-  document.addEventListener(type, (e) => {
-    if (!hasOpenContextMenu()) return;
-    if (isContextMenuSurfaceEvent(e)) {
-      MenuDebug.log(`${reason}:inside-menu`);
-      return;
-    }
-    closeOpenMenusExcept('', reason);
-  });
-}
+document.addEventListener(HAS_POINTER_EVENTS ? 'pointerdown' : 'mousedown', (e) => {
+  if (!hasOpenContextMenu()) return;
+  if (isContextMenuSurfaceEvent(e)) {
+    MenuDebug.log('document-outside-press:inside-menu');
+    return;
+  }
+  closeOpenMenusExcept('', 'document-outside-press');
+});
 
 function clearCtxActionHotspotState() {
   for (let i = 0; i < ctxActionItems.length; i++) {

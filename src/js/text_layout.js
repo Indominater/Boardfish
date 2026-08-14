@@ -194,8 +194,7 @@ var _glyphMetricsCache = new Map();
 var _glyphPairSpacingCache = new Map();
 var _textGraphemeSegmenter = null;
 
-function forEachTextSpacingUnit(value, callback, start = 0, end = null) {
-  const text = String(value ?? '');
+function forEachTextSpacingUnit(text, callback, start = 0, end = null) {
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, text.length));
   const to = Math.max(from, Math.min(end == null ? text.length : Math.trunc(Number(end)) || 0, text.length));
   if (from >= to) return;
@@ -442,7 +441,7 @@ const cloneTextLayoutRuntimeLines = (lines = []) => {
 
 function cloneTextObjectRuntimeCaches(source, target) {
   if (!source || !target || source.type !== 'text' || target.type !== 'text') return target;
-  const content = String(target.data?.content || '');
+  const content = target.data.content;
   const sourceScriptKey = Array.isArray(source.data?.scriptRanges)
     ? JSON.stringify(source.data.scriptRanges)
     : '[]';
@@ -965,7 +964,7 @@ function clearTextMeasurementCaches() {
   scheduleRender(true, true);
 }
 
-function buildWrappedLines(obj, options = {}, content = String(obj?.data?.content || '')) {
+function buildWrappedLines(obj, options = {}, content = obj.data.content) {
   const scriptRanges = Array.isArray(options.scriptRanges)
     ? options.scriptRanges
     : getTextScriptRanges(obj);
@@ -1148,7 +1147,7 @@ function textLayoutLogicalLineIndexAtContentIndex(layout, index, fallback = 0) {
 
 function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
   if (!obj || obj.type !== 'text') return [];
-  const content = String(obj.data?.content || '');
+  const content = obj.data.content;
   const firstLine = Math.max(0, Math.trunc(Number(startLine)) || 0);
   const lastLine = Math.max(firstLine, Math.trunc(Number(endLine)) || firstLine);
   const maxW = obj.w - TEXT_PAD * 2;
@@ -1462,7 +1461,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
 }
 
 function getTextAutoHeight(obj, minLines = 1) {
-  const content = String(obj?.data?.content || '');
+  const content = obj.data.content;
   const cachedLineCount = obj?.type === 'text' &&
     Array.isArray(obj._layoutCache) &&
     obj._layoutCacheContent === content &&
@@ -1644,7 +1643,7 @@ const deriveBracedTextScriptRangesFromContent = (content) => {
 
 const getTextScriptRanges = (obj, content) => {
   if (!obj || obj.type !== 'text') return [];
-  if (content == null) content = String(obj.data?.content ?? '');
+  if (content == null) content = obj.data.content;
   const cached = obj._textScriptRangesCache;
   const source = Array.isArray(obj.data?.scriptRanges)
     ? obj.data.scriptRanges
@@ -2468,7 +2467,7 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, scriptRanges, s
 }
 
 function getTextLayout(obj) {
-  const content = String(obj.data?.content || '');
+  const content = obj.data.content;
   const scriptRanges = getTextScriptRanges(obj, content);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
   const alignKey = textLayoutAlignKey(obj);
@@ -2503,7 +2502,7 @@ function getTextLayout(obj) {
 }
 
 function getTextLayoutForLineRange(obj, first = 0, last = first) {
-  const content = String(obj.data?.content || '');
+  const content = obj.data.content;
   const scriptRanges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
   const alignKey = textLayoutAlignKey(obj);

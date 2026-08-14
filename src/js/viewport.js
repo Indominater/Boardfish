@@ -491,24 +491,16 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
     Number.isFinite(obj?._textEditCaretLineStartIndex)
     ? obj._textEditCaretLineStartIndex
     : null;
-  if (preferredLineStart != null) {
-    for (const line of layout) {
-      if (line.startIndex !== preferredLineStart) continue;
-      const ls = line.startIndex;
-      const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
-      if (selStart >= ls && selStart <= le) caretLine = line;
+  for (const line of layout) {
+    const ls = line.startIndex;
+    const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
+    if (selStart < ls || selStart > le) continue;
+    if (ls === preferredLineStart) {
+      caretLine = line;
       break;
     }
-  }
-  if (!caretLine) {
-    for (const line of layout) {
-      const ls = line.startIndex;
-      const le = line.caretEndIndex ?? line.endIndex ?? (ls + line.text.length);
-      if (selStart >= ls && selStart <= le) {
-        caretLine = line;
-        break;
-      }
-    }
+    caretLine ||= line;
+    if (preferredLineStart == null) break;
   }
   if (!caretLine) return false;
   const ls = caretLine.startIndex;
@@ -576,16 +568,16 @@ function drawEditingTextOverlay(
   try {
     const liveSelStart = _editEl ? _editEl.selectionStart : 0;
     const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;
-    const copiedMotion = copiedSelectionSpec
-      ? BoardfishMotion.textSelectionMotionForDraw(obj.id, copiedSelectionSpec, viewZoom)
-      : null;
     const liveMatchesCopied = copiedSelectionSpec &&
       liveSelStart === copiedSelectionSpec.start &&
       liveSelEnd === copiedSelectionSpec.end;
-    const useCopiedSelectionMotion = !!copiedMotion && (liveSelStart === liveSelEnd || liveMatchesCopied);
-    if (copiedSelectionSpec && !useCopiedSelectionMotion) BoardfishMotion.cancelTextSelectionMotion(obj.id);
-    const selStart = useCopiedSelectionMotion ? copiedSelectionSpec.start : liveSelStart;
-    const selEnd   = useCopiedSelectionMotion ? copiedSelectionSpec.end   : liveSelEnd;
+    const useCopiedSelectionMotion = copiedSelectionSpec && (liveSelStart === liveSelEnd || liveMatchesCopied);
+    const copiedMotion = useCopiedSelectionMotion
+      ? BoardfishMotion.textSelectionMotionForDraw(obj.id, copiedSelectionSpec, viewZoom)
+      : null;
+    if (copiedSelectionSpec && !copiedMotion) BoardfishMotion.cancelTextSelectionMotion(obj.id);
+    const selStart = copiedMotion ? copiedSelectionSpec.start : liveSelStart;
+    const selEnd   = copiedMotion ? copiedSelectionSpec.end   : liveSelEnd;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const layoutStart = collectDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -598,7 +590,6 @@ function drawEditingTextOverlay(
       stats.editCulledLines = Math.max(0, stats.editLayoutLines - layout.length);
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const textSelectionMotion = useCopiedSelectionMotion ? copiedMotion : null;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const selectionStart = collectDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -613,7 +604,7 @@ function drawEditingTextOverlay(
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-    if (selection) drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, textSelectionMotion);
+    if (selection) drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, copiedMotion);
 
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const textDrawStart = collectDebug ? performance.now() : 0;
@@ -623,7 +614,7 @@ function drawEditingTextOverlay(
         context,
         obj,
         layout,
-        textSelectionMotion ? { start: selStart, end: selEnd } : null,
+        copiedMotion ? { start: selStart, end: selEnd } : null,
         stats,
       );
     } else {
@@ -631,10 +622,10 @@ function drawEditingTextOverlay(
         context,
         obj,
         layout,
-        textSelectionMotion ? { start: selStart, end: selEnd } : null,
+        copiedMotion ? { start: selStart, end: selEnd } : null,
       );
     }
-    if (selection && textSelectionMotion) drawTextSelectionContentJello(context, obj, selection, textSelectionMotion);
+    if (selection && copiedMotion) drawTextSelectionContentJello(context, obj, selection, copiedMotion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDebug) {
       stats.editTextDrawMs = performance.now() - textDrawStart;

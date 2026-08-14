@@ -312,7 +312,6 @@
     const target = touchMouseTarget(point);
     target.dispatchEvent(makeTouchMouseEvent('mousedown', point, 0, 1));
     target.dispatchEvent(makeTouchMouseEvent('mouseup', point, 0, 0));
-    target.dispatchEvent(makeTouchMouseEvent('click', point, 0, 0));
     if (editingId && _editEl) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */

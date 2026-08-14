@@ -3,30 +3,10 @@
 (function initBoardDocument(root) {
   const BoardTypes = root.BoardfishBoardTypes ||
     (typeof require === 'function' ? require('./board_types.js') : null);
+  const { extForMime, mimeForExt, normalizeImageExt } = BoardTypes;
 
   function defaultImageRefKind(src) {
     return BoardTypes.imageRefKind(src);
-  }
-
-  function extForMime(mime = '') {
-    const value = String(mime || '').toLowerCase();
-    if (value === 'image/jpeg' || value === 'image/jpg') return 'jpg';
-    if (value === 'image/webp') return 'webp';
-    if (value === 'image/gif') return 'gif';
-    return 'png';
-  }
-
-  function mimeForExt(ext = '') {
-    const value = String(ext || '').replace(/^\./, '').toLowerCase();
-    if (value === 'jpg' || value === 'jpeg') return 'image/jpeg';
-    if (value === 'webp') return 'image/webp';
-    if (value === 'gif') return 'image/gif';
-    return 'image/png';
-  }
-
-  function normalizeImageExt(ext = '', mime = '') {
-    const value = String(ext || '').replace(/^\./, '').toLowerCase();
-    return value || extForMime(mime);
   }
 
   function mimeFromDataUrl(dataUrl = '') {

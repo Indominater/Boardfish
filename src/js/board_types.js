@@ -47,16 +47,40 @@
     return typeof src;
   }
 
+  function extForMime(mime = '') {
+    const value = String(mime || '').toLowerCase();
+    if (value === 'image/jpeg' || value === 'image/jpg') return 'jpg';
+    if (value === 'image/webp') return 'webp';
+    if (value === 'image/gif') return 'gif';
+    return 'png';
+  }
+
+  function mimeForExt(ext = '') {
+    const value = String(ext || '').replace(/^\./, '').toLowerCase();
+    if (value === 'jpg' || value === 'jpeg') return 'image/jpeg';
+    if (value === 'webp') return 'image/webp';
+    if (value === 'gif') return 'image/gif';
+    return 'image/png';
+  }
+
+  function normalizeImageExt(ext = '', mime = '') {
+    const value = String(ext || '').replace(/^\./, '').toLowerCase();
+    return value || extForMime(mime);
+  }
+
   const api = Object.freeze({
     BOARD_FORMAT,
     BOARD_VERSION_CONTAINER,
     OBJECT_TYPES,
     clampZoom,
+    extForMime,
     finiteNumber,
     imageRefKind,
     isBoardObjectType,
     isObject,
     isSupportedBoardVersion,
+    mimeForExt,
+    normalizeImageExt,
   });
 
   root.BoardfishBoardTypes = api;

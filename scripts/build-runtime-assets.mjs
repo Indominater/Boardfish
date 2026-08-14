@@ -227,6 +227,7 @@ async function compileProductionBundle(source) {
   const define = {
     BOARDFISH_PRODUCTION: 'true',
     DEBUG_TOOLS_ENABLED: 'false',
+    module: 'undefined', require: 'undefined',
     console: RUNTIME_CONSOLE_SENTINEL,
     'OpenDebug.hydrationConcurrency': 'openHydrationConcurrency',
   };

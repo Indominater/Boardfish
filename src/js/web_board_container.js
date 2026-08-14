@@ -1,6 +1,8 @@
 'use strict';
 
 (function initWebBoardContainer(root) {
+  const { extForMime, mimeForExt, normalizeImageExt } = root.BoardfishBoardTypes ||
+    (typeof require === 'function' ? require('./board_types.js') : null);
   const ZIP_LOCAL_FILE_HEADER = 0x04034b50;
   const ZIP_CENTRAL_DIRECTORY = 0x02014b50;
   const ZIP_END_OF_CENTRAL_DIRECTORY = 0x06054b50;
@@ -625,27 +627,6 @@
     const base64 = dataUrlParts(dataUrl).base64.replace(/\s/g, '');
     const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
     return Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
-  }
-
-  function extForMime(mime = '') {
-    const value = String(mime || '').toLowerCase();
-    if (value === 'image/jpeg' || value === 'image/jpg') return 'jpg';
-    if (value === 'image/webp') return 'webp';
-    if (value === 'image/gif') return 'gif';
-    return 'png';
-  }
-
-  function mimeForExt(ext = '') {
-    const value = String(ext || '').replace(/^\./, '').toLowerCase();
-    if (value === 'jpg' || value === 'jpeg') return 'image/jpeg';
-    if (value === 'webp') return 'image/webp';
-    if (value === 'gif') return 'image/gif';
-    return 'image/png';
-  }
-
-  function normalizeImageExt(ext = '', mime = '') {
-    const value = String(ext || '').replace(/^\./, '').toLowerCase();
-    return value || extForMime(mime);
   }
 
   function createWebImageRef({ path, mime, ext, bytes, blob, lazy, volatileBlob = false, archiveCrc = null }) {
