@@ -328,7 +328,7 @@ test('Arrange menu integration is selection-centered and uses the shared paste s
 
   assert.match(
     indexSource,
-    /id="obj-btn-arrange-images"[^>]*><span class="ctx-label">Arrange<\/span><span class="ctx-shortcut" data-shortcut="arrange-images">/,
+    /id="obj-btn-arrange-images"[^>]*><span class="ctx-label">Arrange<\/span><span class="ctx-shortcut" data-mac-shortcut="⌘J">Ctrl\+J<\/span>/,
   );
   assert.doesNotMatch(indexSource, />Arrange Images</);
   const objectSeparatorIndex = indexSource.indexOf('id="obj-sep-object-actions"');
@@ -345,10 +345,6 @@ test('Arrange menu integration is selection-centered and uses the shared paste s
   assert.match(appSource, /arrangeImagesBtn\s*= requireAppElement\('obj-btn-arrange-images'\)/);
   assert.match(appSource, /objectActionsSep\s*= requireAppElement\('obj-sep-object-actions'\)/);
   assert.doesNotMatch(appSource, /layerActionsSep|moveToBackBtn|deleteSep|deleteBtn|copyBtn/);
-  assert.match(
-    appSource,
-    /'arrange-images': COMMAND_KEY_LABEL \+ 'J'/,
-  );
   assert.match(
     contextMenuSource,
     /'obj-btn-arrange-images': \(\) => \{\s*sortSelectedImages\(\);\s*\}/,

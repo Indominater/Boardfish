@@ -106,7 +106,7 @@ function loadImageState(createImageBitmap) {
   return { context, rafs, timers };
 }
 
-test('throttled image readiness does not schedule an overlay-only frame', () => {
+test('image readiness throttles board frames and skips work during board opening', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   const renders = [];
   let invalidations = 0;
@@ -115,12 +115,16 @@ test('throttled image readiness does not schedule an overlay-only frame', () => 
   context.invalidateOffscreen = () => { invalidations++; };
   context.scheduleRender = (...args) => { renders.push(args); };
 
-  context.scheduleImageReadyRender('first-ready');
+  context.scheduleImageReadyRender();
   now = 1050;
-  context.scheduleImageReadyRender('throttled-ready');
+  context.scheduleImageReadyRender();
 
   assert.equal(invalidations, 2);
-  assert.deepEqual(renders, [[true, null, 'first-ready']]);
+  assert.deepEqual(renders, [[true, null, 'image-bitmap-ready']]);
+
+  context._boardOpening = true;
+  context.scheduleImageReadyRender();
+  assert.deepEqual([invalidations, renders.length], [2, 1]);
 });
 
 test('Blob-backed web refs decode directly without a display URL', async () => {

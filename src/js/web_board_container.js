@@ -202,20 +202,19 @@
     if (!Array.isArray(entries) || entries.length >= ZIP16_SENTINEL) {
       throw new Error('Boardfish container has too many ZIP entries');
     }
-    const normalized = new Array(entries.length);
+    const normalized = new Array(entries.length), defaultDate = new Date();
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       let data;
       if (isNativeBlobPart(entry.data)) data = entry.data;
       else if (isBlobLike(entry.data)) data = await blobToBytes(entry.data);
       else data = entry.data instanceof Uint8Array ? entry.data : new Uint8Array(entry.data || []);
-      const hasSuppliedCrc = entry.crc !== null && entry.crc !== undefined;
-      const suppliedCrc = hasSuppliedCrc ? Number(entry.crc) : NaN;
+      const suppliedCrc = entry.crc === null || entry.crc === undefined ? NaN : Number(entry.crc);
       normalized[i] = {
         name: entry.name,
         data,
         byteLength: isNativeBlobPart(data) ? Number(data.size) : data.length,
-        date: entry.date || new Date(),
+        date: entry.date || defaultDate,
         crc: Number.isInteger(suppliedCrc) && suppliedCrc >= 0 && suppliedCrc <= 0xFFFFFFFF
           ? suppliedCrc >>> 0
           : null,

@@ -550,18 +550,15 @@ const addImageRuntimeObjectKeysToSet = (keys, value) => {
 const IMAGE_READY_RENDER_INTERVAL_MS = 120;
 const BULK_IMAGE_READY_RENDER_INTERVAL_MS = 450;
 
-function scheduleImageReadyRender(
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  source = 'image-load'
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-) {
+function scheduleImageReadyRender() {
+  if (_boardOpening) return;
   invalidateOffscreen();
   const now = performance.now();
   const intervalMs = _bulkImageInsertDepth > 0 ? BULK_IMAGE_READY_RENDER_INTERVAL_MS : IMAGE_READY_RENDER_INTERVAL_MS;
   if (now - _imageReadyLastRender <= intervalMs) return;
   _imageReadyLastRender = now;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  scheduleRender(true, null, source);
+  scheduleRender(true, null, 'image-bitmap-ready');
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') scheduleRender(true);
 }
@@ -871,20 +868,12 @@ function cacheImage(key, src
     const renderScheduleStart = performance.now();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const deferBitmapReadyRenderForOpenPreview = hasBlockingOpenInitialImagePreviewsForOpen();
-    if (!deferBitmapReadyRenderForOpenPreview) {
-      scheduleImageReadyRender(
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        'image-bitmap-ready'
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      );
-    }
-    if (typeof scheduleVisibleImageWorkAfterIdle === 'function') {
-      scheduleVisibleImageWorkAfterIdle(
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        'image-ready'
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      );
-    }
+    if (!deferBitmapReadyRenderForOpenPreview) scheduleImageReadyRender();
+    scheduleVisibleImageWorkAfterIdle(
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      'image-ready'
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    );
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     cacheMetrics.cacheRenderScheduleMs = performance.now() - renderScheduleStart;
     cacheMetrics.cacheRenderSkipped = deferBitmapReadyRenderForOpenPreview ? 'open-preview-held' : '';
