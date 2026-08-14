@@ -727,7 +727,7 @@ async function prewarmVisibleScaledImageVariantsForOpen(concurrency = 4, padPx =
     return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'disabled' } : undefined;
   }
   padPx = Number.isFinite(padPx) ? padPx : 0;
-  const rect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(padPx) : null;
+  const rect = typeof viewportWorldRect === 'function' ? viewportWorldRect(padPx) : null;
   if (!rect) return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'no-viewport' } : undefined;
   const view = {
     zoom: typeof zoom !== 'undefined' ? zoom : 1,
@@ -876,7 +876,7 @@ function prewarmVisibleScaledImageVariants(options = {}) {
     return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'invalid-scale' } : undefined;
   }
   const padPx = Number.isFinite(options.padPx) ? options.padPx : IMAGE_VARIANT_PREWARM_PAD_PX;
-  const rect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(padPx) : null;
+  const rect = typeof viewportWorldRect === 'function' ? viewportWorldRect(padPx) : null;
   if (!rect) return typeof BOARDFISH_PRODUCTION === 'undefined' ? { skipped: 'no-viewport' } : undefined;
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

@@ -146,9 +146,9 @@ var TextSelDebug = (() => {
   function visibleLineCount(layout = []) {
     if (!Array.isArray(layout) || !layout.length) return 0;
     let viewportRect = null;
-    if (typeof currentViewportWorldRect === 'function') {
+    if (typeof viewportWorldRect === 'function') {
       try {
-        viewportRect = currentViewportWorldRect(0);
+        viewportRect = viewportWorldRect(0);
       } catch (_) {
         viewportRect = null;
       }
@@ -213,9 +213,9 @@ var TextSelDebug = (() => {
     let firstLine = -1;
     let lastLine = -1;
     let viewportRect = null;
-    if (typeof currentViewportWorldRect === 'function') {
+    if (typeof viewportWorldRect === 'function') {
       try {
-        viewportRect = currentViewportWorldRect(0);
+        viewportRect = viewportWorldRect(0);
       } catch (_) {
         viewportRect = null;
       }

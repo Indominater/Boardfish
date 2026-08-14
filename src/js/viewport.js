@@ -269,10 +269,6 @@ function startCanvasSizeTracking() {
   window.addEventListener?.('resize', resizeCanvas);
 }
 
-function currentViewportWorldRect(padScreenPx = 0) {
-  return viewportWorldRect(padScreenPx);
-}
-
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
   const scriptMetrics = layout[0]?._scriptMetrics || null;
   const isHiddenAt = scriptMetrics ? textScriptMetricsHiddenAt : null;
@@ -528,7 +524,7 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
 function drawEditingTextOverlay(
   context,
   viewZoom = zoom,
-  viewportRect = currentViewportWorldRect(0),
+  viewportRect = viewportWorldRect(0),
   textSelectionMotions = null,
   /* BOARDFISH_DEV_DIAGNOSTICS_START */ collectDebug = false, /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
@@ -682,7 +678,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
   let drawnText = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const dpr = window.devicePixelRatio || 1;
-  const viewportRect = currentViewportWorldRect(0);
+  const viewportRect = viewportWorldRect(0);
   const textSelectionMotions = BoardfishMotion.textSelectionJelloSpecsForDraw();
   let openInitialImageSourceResolver = hasOpenPreviewFallback ? resolveOpenInitialImageSourceForDraw : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -990,7 +986,7 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   font: FONT,
   lineHeight: LINE_H,
   canvasTextColor,
-  currentViewportWorldRect,
+  currentViewportWorldRect: viewportWorldRect,
   drawTextLineRange,
   getTextLayoutForViewport,
   objectIntersectsRect,
@@ -1336,11 +1332,11 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
   const drawWarmupTarget = requestedDrawWarmupTarget === TEXT_DRAW_WARMUP_TARGET_BOARD && drawWarmupRestore && !drawWarmupBoardSnapshot
     ? TEXT_DRAW_WARMUP_TARGET_OFFSCREEN
     : requestedDrawWarmupTarget;
-  const viewportRect = typeof currentViewportWorldRect === 'function'
-    ? currentViewportWorldRect(padScreenPx)
+  const viewportRect = typeof viewportWorldRect === 'function'
+    ? viewportWorldRect(padScreenPx)
     : null;
-  const exactViewportRect = typeof currentViewportWorldRect === 'function'
-    ? currentViewportWorldRect(0)
+  const exactViewportRect = typeof viewportWorldRect === 'function'
+    ? viewportWorldRect(0)
     : viewportRect;
   const dbg = ViewportDebug.start('visibleTextLayoutPrewarm', {
     source,

@@ -129,6 +129,7 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
     },
     toWorld(clientX, clientY) { return { x: clientX, y: clientY }; },
     getTextLayout() { return [{ text: 'hello', startIndex: 0, prefixWidths: new Float64Array([0]) }]; },
+    getTextLayoutForViewport() { return context.getTextLayout(); },
     layoutHitTest(_layout, wx, wy) {
       context.hitPoint = { x: wx, y: wy };
       return 3;

@@ -703,7 +703,7 @@ function startObjectDrag(e, obj) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const layoutStart = canvasInputNow();
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          const layout = getTextLayout(obj);
+          const layout = getTextLayoutForViewport(obj, { y1: upPoint.y, y2: upPoint.y });
           logClickEditStep('click-to-edit-layout', {
             layoutMs: canvasInputDebugRound(canvasInputNow() - layoutStart),
             layoutLines: Array.isArray(layout) ? layout.length : '',
@@ -712,7 +712,7 @@ function startObjectDrag(e, obj) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const hitStart = canvasInputNow();
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          const clickHit = layoutHitTestCaret(layout, upPoint.x, upPoint.y, obj);
+          const clickHit = layoutHitTestCaret(layout.length ? layout : getTextLayout(obj), upPoint.x, upPoint.y, obj);
           logClickEditStep('click-to-edit-hit', {
             hitMs: canvasInputDebugRound(canvasInputNow() - hitStart),
             returnedIdx: clickHit?.index ?? '',

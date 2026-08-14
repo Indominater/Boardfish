@@ -2160,7 +2160,7 @@ var ManualPerfDebug = (() => {
 
   function textBoardSummary(options = {}) {
     const includeLayout = options.layout === true;
-    const viewportRect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(0) : null;
+    const viewportRect = typeof viewportWorldRect === 'function' ? viewportWorldRect(0) : null;
     const rows = [];
     let totalChars = 0;
     let totalLogicalLines = 0;
@@ -2253,7 +2253,7 @@ var ManualPerfDebug = (() => {
       });
     }
 
-    const viewportRect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(0) : null;
+    const viewportRect = typeof viewportWorldRect === 'function' ? viewportWorldRect(0) : null;
     const visibleOnly = options.visibleOnly === true;
     const rows = [];
     const startedAt = performance.now();
@@ -2439,7 +2439,7 @@ var ManualPerfDebug = (() => {
     const selectedChars = Number.isFinite(selectionStart) && Number.isFinite(selectionEnd)
       ? Math.abs(selectionEnd - selectionStart)
       : '';
-    const viewportRect = typeof currentViewportWorldRect === 'function' ? currentViewportWorldRect(0) : null;
+    const viewportRect = typeof viewportWorldRect === 'function' ? viewportWorldRect(0) : null;
     return sanitizePerfMeta({
       mode: options.mode || largeTextPanningSession?.mode || '',
       objectId: obj?.id || '',

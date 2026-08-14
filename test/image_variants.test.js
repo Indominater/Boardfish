@@ -49,7 +49,7 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
     _imageStoreGeneration: 0,
     imageBitmapCache: {},
     objects: [],
-    currentViewportWorldRect() { return null; },
+    viewportWorldRect() { return null; },
     invalidateOffscreen() {},
     scheduleRender() {},
     queueVisibleImageHydration() {},
@@ -598,7 +598,7 @@ test('open prewarm builds visible scaled variants before first render', async ()
   context.zoom = 0.2;
   context.window.devicePixelRatio = 2;
   context._boardOpening = true;
-  context.currentViewportWorldRect = () => ({ x1: -10, y1: -10, x2: 1000, y2: 1000 });
+  context.viewportWorldRect = () => ({ x1: -10, y1: -10, x2: 1000, y2: 1000 });
   context.objectIntersectsRect = (obj, rect) => (
     obj.x < rect.x2 && obj.x + obj.w > rect.x1 &&
     obj.y < rect.y2 && obj.y + obj.h > rect.y1
@@ -633,7 +633,7 @@ test('visible image idle work shares one timer and waits for the latest input', 
   let now = 1000;
   context.performance.now = () => now;
   context.lastViewportInputAt = now;
-  context.currentViewportWorldRect = () => ({});
+  context.viewportWorldRect = () => ({});
   context.queueVisibleImageHydration = (limit) => hydrations.push(limit);
 
   context.scheduleVisibleImageWorkAfterIdle();

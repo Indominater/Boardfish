@@ -171,10 +171,8 @@ function loadViewportCanvasSizeHarness({
   const geometrySource = fs.readFileSync(path.join(root, 'src', 'js', 'geometry.js'), 'utf8');
   const sectionStart = source.indexOf('var _canvasResizeObserver = null;');
   assert.ok(sectionStart > 0, 'canvas size tracking state is missing');
-  const viewportRectStart = source.indexOf('\nfunction currentViewportWorldRect', sectionStart);
-  assert.ok(viewportRectStart > sectionStart, 'viewport rectangle helper is missing');
-  const viewportRectEnd = source.indexOf('\nconst collectTextSelectionRuns', viewportRectStart);
-  assert.ok(viewportRectEnd > viewportRectStart, 'viewport rectangle section is unterminated');
+  const viewportRectEnd = source.indexOf('\nconst collectTextSelectionRuns', sectionStart);
+  assert.ok(viewportRectEnd > sectionStart, 'viewport rectangle section is unterminated');
   const fallbackReads = { clientWidth: 0, clientHeight: 0, innerWidth: 0, innerHeight: 0 };
   const backingWrites = { width: 0, height: 0 };
   let backingWidth = innerWidth * dpr;
@@ -473,7 +471,7 @@ test('viewport culling follows the observed board surface while keyboard geometr
     dpr: 2,
   });
 
-  const visibleWorld = context.currentViewportWorldRect();
+  const visibleWorld = context.viewportWorldRect();
   assert.equal(visibleWorld.x2, 390);
   assert.equal(visibleWorld.y2, 844);
   assert.equal(

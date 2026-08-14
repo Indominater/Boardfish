@@ -1161,8 +1161,16 @@
     let eagerImageRefCount = 0;
     let imageHeaderReadMs = 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    let lazyStoredImageBlobs = null;
+    let lazyStoredImageBlobs = null, recordIndex = 0;
+    const records = randomAccessBlob && lazyImageRefs ? [] : null;
     const imageStore = board.imageStore || {};
+    const resolve = (key, manifest) => {
+      const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
+      const { path, entry } = resolveManifestImageEntry(entries, key, manifestObject);
+      const size = zipEntryContentBytes(entry);
+      const ext = manifestObject.ext || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
+      return { path, entry, size, ext, mime: manifestObject.mime || mimeForExt(ext) };
+    };
 
     if (randomAccessBlob && lazyImageRefs) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1172,12 +1180,11 @@
       const seen = new Set();
       for (const key in imageStore) {
         if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-        const manifest = imageStore[key];
-        const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
-        const resolved = resolveManifestImageEntry(entries, key, manifestObject);
-        if (resolved.entry.method !== ZIP_METHOD_STORED || seen.has(resolved.path)) continue;
-        seen.add(resolved.path);
-        tasks.push(resolved);
+        const record = resolve(key, imageStore[key]);
+        records.push(record);
+        if (record.entry.method !== ZIP_METHOD_STORED || seen.has(record.path)) continue;
+        seen.add(record.path);
+        tasks.push(record);
       }
       lazyStoredImageBlobs = new Map();
       let next = 0;
@@ -1185,7 +1192,7 @@
       await Promise.all(Array.from({ length: workerCount }, async () => {
         while (next < tasks.length) {
           const task = tasks[next++];
-          lazyStoredImageBlobs.set(task.path, await compressedEntryBlob(randomAccessBlob, task.entry));
+          lazyStoredImageBlobs.set(task.path, await compressedEntryBlob(randomAccessBlob, task.entry, task.mime));
         }
       }));
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1194,15 +1201,7 @@
     }
     for (const key in imageStore) {
       if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
-      const manifest = imageStore[key];
-      const manifestObject = manifest && typeof manifest === 'object' ? manifest : {};
-      const resolvedImage = resolveManifestImageEntry(entries, key, manifestObject);
-      const path = resolvedImage.path;
-      const imageEntry = resolvedImage.entry;
-      const advertisedImageBytes = zipEntryContentBytes(imageEntry);
-      const manifestExt = manifestObject.ext || '';
-      const ext = manifestExt || normalizeImageExt(path.split('.').pop(), manifestObject.mime);
-      const mime = manifestObject.mime || mimeForExt(ext);
+      const { path, entry: imageEntry, size: advertisedImageBytes, ext, mime } = records?.[recordIndex++] || resolve(key, imageStore[key]);
       if (path.includes('\0')) throw new Error('Boardfish image entry path is invalid');
       if (typeof mime !== 'string' || !/^image\/(?:png|jpe?g|webp|gif)$/.test(mime.toLowerCase())) {
         throw new Error(`${path} has unsupported image metadata`);

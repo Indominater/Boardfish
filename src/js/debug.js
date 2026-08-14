@@ -1536,8 +1536,8 @@ var ViewportDebug = (() => {
 
   function viewportStateMeta() {
     const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
-    const rect = typeof currentViewportWorldRect === 'function'
-      ? currentViewportWorldRect(0)
+    const rect = typeof viewportWorldRect === 'function'
+      ? viewportWorldRect(0)
       : null;
     return {
       panX: typeof panX !== 'undefined' ? panX : '',
@@ -2592,7 +2592,7 @@ var ViewportDebug = (() => {
 
   function cullingSummary() {
     const paddingPx = 0;
-    const rect = currentViewportWorldRect(paddingPx);
+    const rect = viewportWorldRect(paddingPx);
     let visibleImages = 0;
     let visibleText = 0;
     let culledImages = 0;
