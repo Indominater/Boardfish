@@ -791,7 +791,7 @@ function textWrappedLineIndexEntryForVisual(cache, visualLineIndex) {
 function prewarmTextObjectLayoutRuntimeCaches(obj, options = {}) {
   if (!obj || obj.type !== 'text') return { available: false, reason: 'not-text' };
   const startedAt = textLayoutDebugNow();
-  const content = normalizeTextContent(obj.data?.content || '');
+  const content = obj.data?.content || '';
   const scriptRanges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
   const beforePrefixEntries = obj._textParagraphPrefixCache?.size || 0;
@@ -1499,9 +1499,7 @@ const textNewlineCount = (value, start = 0, end = Infinity) => {
   return count;
 };
 
-const textLogicalLineCount = (value) => textNewlineCount(normalizeTextContent(value)) + 1;
-
-const normalizeTextLineAlignForContent = (content, lineAlign = [], lineCount = textLogicalLineCount(content)) => {
+const normalizeTextLineAlignForContent = (content, lineAlign = [], lineCount = textNewlineCount(content) + 1) => {
   const source = Array.isArray(lineAlign) ? lineAlign : [];
   const result = new Array(Math.min(lineCount, source.length));
   for (let i = 0; i < result.length; i++) result[i] = normalizeTextLineAlignValue(source[i]);
@@ -1533,8 +1531,8 @@ const cycleTextLineAlignValue = (align, direction) => {
 const applyTextLineAlignmentRange = (obj, startLine = 0, endLine = startLine, direction = 'right') => {
   if (!obj || obj.type !== 'text') return false;
   if (!obj.data) obj.data = {};
-  const content = normalizeTextContent(obj.data.content);
-  const count = textLogicalLineCount(content);
+  const content = obj.data.content || '';
+  const count = textNewlineCount(content) + 1;
   if (!count) return false;
   const start = Math.max(0, Math.min(Math.trunc(Number(startLine)) || 0, count - 1));
   const end = Math.max(start, Math.min(Math.trunc(Number(endLine)) || start, count - 1));
@@ -1756,7 +1754,7 @@ const textScriptLinearToDeterministicBraces = textContentWithCanonicalScriptBrac
 
 const textObjectContentForClipboard = (obj) => {
   if (!obj || obj.type !== 'text') return '';
-  const content = normalizeTextContent(obj.data?.content || '');
+  const content = obj.data?.content || '';
   const ranges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
   if (
@@ -2234,7 +2232,7 @@ function getTextScriptLayoutMetricsForObject(obj, content, scriptRanges = [], sc
 const getTextMinWidth = (obj) => {
   const paddedMinimum = TEXT_PAD * 2 + 1;
   if (!obj || obj.type !== 'text') return paddedMinimum;
-  const content = normalizeTextContent(obj.data?.content || '');
+  const content = obj.data?.content || '';
   const scriptRanges = getTextScriptRanges(obj);
   const scriptKey = obj._textScriptRangesCacheSourceKey || '[]';
   if (
@@ -2845,7 +2843,7 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
 };
 
 const normalizeTextLayoutHitCaretIndex = (line, index, direction = 'forward', obj = null) => {
-  const text = normalizeTextContent(obj?.data?.content ?? line?.content ?? line?.text ?? '');
+  const text = String(obj?.data?.content ?? line?.content ?? line?.text ?? '');
   const ranges = line?.scriptRanges || [];
   let pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
   if (!ranges.length) return pos;
@@ -2866,7 +2864,7 @@ const textLayoutCaretHit = (line, wx, wy, obj) => {
     ? obj._layoutCacheContent
     : typeof line.content === 'string'
       ? line.content
-      : normalizeTextContent(obj?.data?.content ?? line.text ?? '');
+      : String(obj?.data?.content ?? line.text ?? '');
   const metrics = line._scriptMetrics;
   let hitIndex = null;
   let hitAffinity = '';

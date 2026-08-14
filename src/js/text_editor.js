@@ -790,7 +790,7 @@ const textEditScriptRangeVisibleBounds = (content, range) => {
 
 const textEditBaseChildScriptDeleteRange = (obj, baseIndex, content = null, ranges = null, context = null) => {
   if (!obj) return null;
-  const text = content == null ? normalizeTextContent(obj.data?.content || '') : String(content ?? '');
+  const text = content == null ? obj.data?.content || '' : String(content ?? '');
   const scriptRanges = ranges || getTextScriptRanges(obj);
   const rangeContext = context || textEditScriptRangeContext(scriptRanges);
   const start = Math.max(0, Math.min(Math.trunc(baseIndex ?? 0), text.length));
@@ -831,7 +831,7 @@ const textEditScriptRootBaseIndexForRange = (ranges, range, context = textEditSc
 
 const textEditCompoundScriptDeleteRangeBeforeCaret = (obj, index, content = null, ranges = null, context = null) => {
   if (!obj) return null;
-  const text = content == null ? normalizeTextContent(obj.data?.content || '') : String(content ?? '');
+  const text = content == null ? obj.data?.content || '' : String(content ?? '');
   const scriptRanges = ranges || getTextScriptRanges(obj);
   const rangeContext = context || textEditScriptRangeContext(scriptRanges);
   const pos = Math.max(0, Math.min(Math.trunc(index ?? 0), text.length));
@@ -849,7 +849,7 @@ const textEditCompoundScriptDeleteRangeBeforeCaret = (obj, index, content = null
 
 const textEditVisibleSelectionDeleteRange = (obj, selection, content = null, ranges = null, context = null) => {
   if (!obj) return null;
-  const text = content == null ? normalizeTextContent(obj.data?.content || '') : String(content ?? '');
+  const text = content == null ? obj.data?.content || '' : String(content ?? '');
   const scriptRanges = ranges || getTextScriptRanges(obj);
   let start = Math.max(0, Math.min(selection?.start ?? 0, text.length));
   let end = Math.max(start, Math.min(selection?.end ?? start, text.length));
@@ -1172,7 +1172,7 @@ const completeTextSelectionBracedScriptRanges = (content, start, end, selectedTe
 };
 
 const createTextSelectionClipboardPayload = (obj, selection) => {
-  const content = normalizeTextContent(obj?.data?.content || '');
+  const content = obj?.data?.content || '';
   const sourceRanges = getTextScriptRanges(obj);
   const { start: rawStart, end: rawEnd } = normalizeTextSelectionScriptHiddenBounds(content, selection, sourceRanges);
   const trimmed = trimmedTextSelectionForClipboard(content.slice(rawStart, rawEnd));
@@ -1222,7 +1222,7 @@ const textSelectionPayloadFromBoardfishClipboardValue = (clipboard) => {
     const objects = clipboard.objects || [];
     if (objects.length !== 1 || objects[0]?.type !== 'text') return null;
     const source = objects[0];
-    const content = normalizeTextContent(source.data?.content || '');
+    const content = source.data?.content || '';
     return createTextSelectionClipboardPayload(source, {
       start: 0,
       end: content.length,
@@ -2386,37 +2386,14 @@ function enterEdit(id, {
     totalMs: Math.round((stepStart - enterStart) * 100) / 100,
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  let contentNormalized = false;
   let bracesNormalized = false;
-  let lineAlignNormalized = false;
   if (normalizeForEdit !== false) {
-    const normalized = normalizeTextContent(obj.data.content);
-    if (normalized !== obj.data.content) {
-      obj.data.content = normalized;
-      clearTextObjectLayoutRuntime(obj);
-      markDirty(obj);
-      contentNormalized = true;
-    }
     bracesNormalized = normalizeTextObjectToEditableScriptBraces(obj);
-    if (bracesNormalized) {
-      markDirty(obj);
-    }
-    if (Array.isArray(obj.data?.lineAlign)) {
-      const beforeLineAlign = obj.data.lineAlign || [];
-      const lineAlign = normalizeTextLineAlignForContent(obj.data.content, obj.data.lineAlign);
-      lineAlignNormalized = !textEditFlatArrayEqual(beforeLineAlign, lineAlign);
-      if (lineAlignNormalized) {
-        if (lineAlign.length) obj.data.lineAlign = lineAlign;
-        else delete obj.data.lineAlign;
-        markDirty(obj);
-      }
-    }
+    if (bracesNormalized) markDirty(obj);
   }
   logStep('enter-normalize', {
     skipped: normalizeForEdit === false,
-    contentNormalized,
     bracesNormalized,
-    lineAlignNormalized,
   });
   clearTextScriptCaretAffinity(obj);
   obj._editStartContent = obj.data.content;
