@@ -785,7 +785,6 @@ function textWrappedLineIndexEntryForVisual(cache, visualLineIndex) {
     if ((entries[mid]?.visualStart || 0) <= target) lo = mid;
     else hi = mid - 1;
   }
-  if (target > (entries[lo]?.visualEnd || 0) && lo + 1 < entries.length) lo++;
   return { entry: entries[lo], index: lo };
 }
 
@@ -1287,10 +1286,7 @@ function setTextLayoutLineScriptMetrics(line, metrics) {
 
 function layoutLineFromWrappedLine(obj, line, lineIndex, scriptRanges, scriptMetrics) {
   const y = obj.y + TEXT_PAD + lineIndex * LINE_H;
-  const prefixWidths = (
-    line?.prefixWidths &&
-    line.prefixWidths.length === String(line.text ?? '').length + 1
-  )
+  const prefixWidths = line.prefixWidths?.length === line.text.length + 1
     ? line.prefixWidths
     : getTextRangePrefixWidths(line.text, line.startIndex, scriptRanges, obj.data.content, scriptMetrics);
   let visibleEnd = line.text.length;
