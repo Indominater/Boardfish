@@ -283,7 +283,7 @@ test('image renderer keeps active full fallback visible with temporary disabled 
   assert.equal(counters.activeInputFullFallbackImages, 1);
 });
 
-test('viewport navigation keeps culling and gives visible images the same low-latency path on every input surface', () => {
+test('viewport navigation keeps culling and uses the canonical image draw path', () => {
   const BoardfishRenderer = loadRenderer();
   const selectCalls = [];
   const drawSmoothingEnabled = [];
@@ -347,11 +347,11 @@ test('viewport navigation keeps culling and gives visible images the same low-la
   const result = renderer.drawVisibleObjects(context, counters);
 
   assert.equal(result.drawnImages, 1);
-  assert.deepEqual(plain(selectCalls.map((call) => call.activeInput)), [true]);
-  assert.equal(selectCalls[0].view.activeInput, true);
-  assert.deepEqual(drawSmoothingEnabled, [false]);
+  assert.deepEqual(plain(selectCalls.map((call) => call.activeInput)), [false]);
+  assert.equal(selectCalls[0].view.activeInput, undefined);
+  assert.deepEqual(drawSmoothingEnabled, [true]);
   assert.equal(context.imageSmoothingEnabled, true);
-  assert.equal(counters.lowLatencyImageDraws, 1);
+  assert.equal(counters.lowLatencyImageDraws, 0);
   assert.equal(counters.motionImages, 0);
   assert.equal(counters.culledImages, 1);
 });

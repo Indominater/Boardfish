@@ -435,7 +435,7 @@ test('web js clipboard without a browser marker is invalidated after leaving the
   }), false);
 });
 
-test('clipboard IO writes rich desktop markers and PNG-only Android images synchronously', async () => {
+test('clipboard IO writes the same rich image representations on every reported platform', async () => {
   const previous = {
     ClipboardItem: globalThis.ClipboardItem,
     ClipDebug: globalThis.ClipDebug,
@@ -516,11 +516,13 @@ test('clipboard IO writes rich desktop markers and PNG-only Android images synch
       'bf-android-image',
     );
     assert.equal(writes.length, 3);
-    assert.deepEqual(Object.keys(writes[2].parts), ['image/png']);
+    assert.deepEqual(Object.keys(writes[2].parts), ['image/png', 'text/html']);
     assert.equal(typeof writes[2].parts['image/png']?.then, 'function');
+    assert.equal(typeof writes[2].parts['text/html']?.then, 'function');
     resolveAndroidImageBlob(new Blob([new Uint8Array([4, 5, 6])], { type: 'image/png' }));
     const androidResult = await androidCopyPromise;
-    assert.equal(androidResult.boardfishTokenWritten, false);
+    assert.equal(androidResult.boardfishTokenWritten, true);
+    assert.match(await (await writes[2].parts['text/html']).text(), /boardfish-clipboard:bf-android-image/);
 
     globalThis.navigator.userAgentData.platform = '';
     globalThis.navigator.userAgent = 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36';
@@ -530,9 +532,10 @@ test('clipboard IO writes rich desktop markers and PNG-only Android images synch
       'bf-android-ua-image',
     );
     assert.equal(writes.length, 4);
-    assert.deepEqual(Object.keys(writes[3].parts), ['image/png']);
+    assert.deepEqual(Object.keys(writes[3].parts), ['image/png', 'text/html']);
     assert.equal(writes[3].parts['image/png'], androidUaBlob);
-    assert.equal(androidUaResult.boardfishTokenWritten, false);
+    assert.equal(androidUaResult.boardfishTokenWritten, true);
+    assert.match(await (await writes[3].parts['text/html']).text(), /boardfish-clipboard:bf-android-ua-image/);
 
     globalThis.navigator.userAgent = '';
     class DirectBlobOnlyClipboardItem {

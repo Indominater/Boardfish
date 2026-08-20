@@ -475,6 +475,98 @@ async function hydrateImageKeysWithLimit(keys
   return anyHydrated;
 }
 
+function createOpenTextWarmupTarget() {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2048;
+    canvas.height = 512;
+    const context = canvas.getContext?.('2d') || null;
+    return context ? { canvas, context } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function warmOpenTextLineForDraw(target, obj, line) {
+  if (!target?.context || !line || !String(line.text ?? '').length) return false;
+  const context = target.context;
+  const dpr = typeof window !== 'undefined' ? (Number(window.devicePixelRatio) || 1) : 1;
+  const viewZoom = typeof zoom !== 'undefined' ? (Number(zoom) || 1) : 1;
+  const deviceScale = Math.max(0.25, Math.min(4, viewZoom * dpr));
+  const margin = 12;
+  const baseX = (Number(obj?.x) || 0) + TEXT_PAD;
+  const textY = Number(line.textY) || 0;
+  try {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.font = FONT;
+    context.textBaseline = 'alphabetic';
+    context.fillStyle = canvasTextColor();
+    context.setTransform(
+      deviceScale,
+      0,
+      0,
+      deviceScale,
+      margin - baseX * deviceScale,
+      margin + LINE_H * deviceScale - textY * deviceScale,
+    );
+    drawTextLineRange(context, line, obj);
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    try { context.setTransform(1, 0, 0, 1, 0, 0); } catch (_) {}
+  }
+}
+
+async function hydrateTextDrawCachesForOpen(
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  dbg = null
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  const startedAt = performance.now();
+  const fontSet = typeof document !== 'undefined' ? document.fonts : null;
+  if (fontSet?.ready) {
+    try { await fontSet.ready; } catch (_) {}
+  }
+
+  const warmupTarget = createOpenTextWarmupTarget();
+  let textObjects = 0;
+  let textLines = 0;
+  let warmedLines = 0;
+  let chars = 0;
+  let batchStartedAt = performance.now();
+  for (const obj of objects) {
+    if (obj?.type !== 'text') continue;
+    textObjects++;
+    const content = String(obj.data?.content ?? '');
+    chars += content.length;
+    const layout = getTextLayout(obj);
+    for (const line of layout) {
+      prepareTextLineForDraw(line);
+      textLines++;
+      if (warmOpenTextLineForDraw(warmupTarget, obj, line)) warmedLines++;
+      if (performance.now() - batchStartedAt >= 8) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        batchStartedAt = performance.now();
+      }
+    }
+  }
+
+  const result = {
+    textObjects,
+    textLines,
+    warmedLines,
+    chars,
+    warmupAvailable: !!warmupTarget,
+    ms: performance.now() - startedAt,
+  };
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  OpenDebug.step(dbg, 'hydrate-text-draw-caches', result);
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  return result;
+}
+
 async function buildVisibleImagePreviewsForOpen(previewTasks
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
@@ -709,100 +801,6 @@ const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-var _backgroundOpenHydrationRunning = false;
-const BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS = 180;
-
-async function hydrateRemainingImagesForOpen(
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  dbg = null,
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  batchSize = 2,
-  priorityKeys = [],
-) {
-  if (_backgroundOpenHydrationRunning) return;
-  _backgroundOpenHydrationRunning = true;
-  const generation = _imageStoreGeneration;
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const totalStart = performance.now();
-  let batchCount = 0;
-  let hydratedTotal = 0;
-  let hadBatch = false;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  try {
-    const hydrationKeys = [...new Set([
-      ...priorityKeys,
-      ...getPendingHydratableImageKeys(),
-    ])];
-    let hydrationIndex = 0;
-    while (!_boardOpening && generation === _imageStoreGeneration) {
-      const inputIdleMs = typeof lastViewportInputAt !== 'undefined' && lastViewportInputAt > 0
-        ? performance.now() - lastViewportInputAt
-        : Infinity;
-      if (inputIdleMs < BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS) {
-        await new Promise((resolve) => setTimeout(
-          resolve,
-          Math.max(16, BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS - inputIdleMs),
-        ));
-        continue;
-      }
-      const keys = [];
-      while (keys.length < batchSize && hydrationIndex < hydrationKeys.length) {
-        const key = hydrationKeys[hydrationIndex++];
-        const source = BoardfishImageStore.getSource(key);
-        if (BoardfishImageStore.hasDisplayImage(key) || !isOpenHydratableImageSource(source)) continue;
-        keys.push(key);
-      }
-      if (!keys.length) break;
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      hadBatch = true;
-      batchCount++;
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        const hydrated = await hydrateImageBatchForOpen(keys, dbg, 'hydrate-background');
-        hydratedTotal += hydrated;
-      } else
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      {
-        await hydrateImageKeysWithLimit(keys, getOpenHydrationConcurrency());
-      }
-      const previewRelease = releaseReadyOpenInitialImagePreviewsForOpen();
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (previewRelease.released || previewRelease.pending || previewRelease.failed) {
-        OpenDebug.step(dbg, 'open-preview-release', previewRelease);
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      const previewStillHoldingRender = Number(previewRelease.pending) > 0;
-      if (!previewStillHoldingRender || previewRelease.released) {
-        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          scheduleRender(true, null, previewRelease.released ? 'open-preview-release' : 'open-background-hydration');
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        } else {
-          scheduleRender(true);
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  } finally {
-    _backgroundOpenHydrationRunning = false;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const remaining = getPendingHydratableImageKeys().length;
-    const stale = generation !== _imageStoreGeneration;
-    OpenDebug.step(dbg, 'hydrate-background:done', {
-      batchCount,
-      hydrated: hydratedTotal,
-      remaining,
-      stale,
-      ms: performance.now() - totalStart,
-    });
-    if (!stale && remaining === 0 && hadBatch) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        await waitForOpenRenderFrame(dbg, 'open-all-content-rendered');
-      }
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
-}
-
 function queueVisibleImageHydration(limit = 3
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
@@ -824,120 +822,72 @@ async function finishOpenedBoard(
   const openMetrics = getBoardOpenDebugMetrics(dbg, data);
   PillDebug.log('open:finishOpenedBoard:start', openMetrics);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  let skipInitialScaledPrewarm = false;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const hydrateStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const previewTasks = new Map();
-  const visibleKeys = getVisibleImageKeys(Infinity, previewTasks);
+  const visibleKeys = getVisibleImageKeys(Infinity);
+  const hydrationKeys = [...new Set([
+    ...visibleKeys,
+    ...getPendingHydratableImageKeys(),
+  ])];
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const debugMeta = isOpenDebugActive(dbg)
     ? { ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() }
     : {};
-  OpenDebug.step(dbg, 'hydrate-visible:candidates', { count: visibleKeys.length, ...debugMeta });
+  OpenDebug.step(dbg, 'hydrate-all:candidates', {
+    count: hydrationKeys.length,
+    visibleCount: visibleKeys.length,
+    ...debugMeta,
+  });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const preview = await buildVisibleImagePreviewsForOpen(previewTasks
+  let imageHydrationPromise;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    , dbg
+    imageHydrationPromise = hydrateImageKeysWithLimit(
+      hydrationKeys,
+      dbg,
+      'hydrate-all',
+      getOpenHydrationConcurrency(),
+    );
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  } else {
+    imageHydrationPromise = hydrateImageKeysWithLimit(
+      hydrationKeys,
+      getOpenHydrationConcurrency(),
+    );
+  }
+  const textHydrationPromise = hydrateTextDrawCachesForOpen(
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    dbg
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   );
-  const previewReady = preview && preview.pendingReady >= visibleKeys.length;
-  if (!previewReady) {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      await hydrateImageKeysWithLimit(visibleKeys, dbg, 'hydrate-visible', getOpenHydrationConcurrency());
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    } else {
-      await hydrateImageKeysWithLimit(visibleKeys, getOpenHydrationConcurrency());
-    }
-  }
-  else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    OpenDebug.step(dbg, 'hydrate-visible:end', {
-      count: visibleKeys.length,
-      hydrated: 0,
-      previewReady: preview.ready,
-      previewPendingReady: preview.pendingReady,
-      previewBuilt: preview.built,
-      previewMB: preview.mb,
-      previewMaxMs: preview.maxMs,
-      previewMaxKey: preview.maxKey,
-      skipped: 'open-preview-ready',
-      concurrency: preview.concurrency,
-      ms: performance.now() - hydrateStart,
-      ...getOpenImageRuntimeMetrics(),
-    });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    skipInitialScaledPrewarm = true;
-  }
+  const [imageHydrated, textHydration] = await Promise.all([
+    imageHydrationPromise,
+    textHydrationPromise,
+  ]);
+  const imageDrawCaches = await settleOpenImageDrawCaches(getOpenHydrationConcurrency());
+  clearOpenInitialImagePreviews();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  PillDebug.log('open:hydrate-visible:end', { phaseMs: performance.now() - hydrateStart, visibleCount: visibleKeys?.length || 0, previewReady: preview?.ready ?? '' });
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    const bitmapSettle = previewReady
-      ? {
-          count: visibleKeys.length,
-          before: 0,
-          after: 0,
-          failed: 0,
-          missingStore: 0,
-          pending: 0,
-          settled: visibleKeys.length,
-          missing: 0,
-          target: visibleKeys.length,
-          ms: 0,
-          skipped: 'open-preview-ready',
-          previewReady: preview.ready,
-          previewPendingReady: preview.pendingReady,
-        }
-      : await settleVisibleImageBitmapsForOpen(visibleKeys, dbg);
-    if (previewReady) {
-      OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', bitmapSettle);
-    }
-    PillDebug.log('open:hydrate-visible:bitmap-settle', { phaseMs: bitmapSettle.ms, before: bitmapSettle.before, after: bitmapSettle.after, failed: bitmapSettle.failed, pending: bitmapSettle.pending, missing: bitmapSettle.missing });
-    if (isOpenDebugActive(dbg)) {
-      OpenDebug.step(dbg, 'hydrate-initial-policy', {
-        mode: 'visible-first',
-        visibleCount: visibleKeys?.length || 0,
-        visibleBitmapsReady: bitmapSettle.after,
-        visibleBitmapsFailed: bitmapSettle.failed,
-        visibleBitmapsMissing: bitmapSettle.missing,
-        visiblePreviewReady: bitmapSettle.previewReady ?? '',
-        visibleBitmapSettleMs: bitmapSettle.ms,
-        pendingImages: getPendingHydratableImageKeys().length,
-      });
-    }
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (!skipInitialScaledPrewarm && typeof prewarmVisibleScaledImageVariantsForOpen === 'function') {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const prewarmStart = performance.now();
-      const prewarm = await prewarmVisibleScaledImageVariantsForOpen(4);
-      OpenDebug.step(dbg, 'prewarm-visible-scaled-variants', {
-        ms: performance.now() - prewarmStart,
-        ...prewarm,
-      });
-      PillDebug.log('open:prewarm-visible-scaled-variants:end', {
-        phaseMs: performance.now() - prewarmStart,
-        candidates: prewarm?.candidates ?? '',
-        built: prewarm?.built ?? '',
-        skipped: prewarm?.skipped ?? '',
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    } else {
-      await prewarmVisibleScaledImageVariantsForOpen(4);
-    }
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  else if (skipInitialScaledPrewarm) {
-    OpenDebug.step(dbg, 'prewarm-visible-scaled-variants', {
-      skipped: 'open-preview-ready',
-      ms: 0,
-      built: 0,
-      candidates: 0,
-      alreadyReady: 0,
-    });
-  }
+  const pendingImages = getPendingHydratableImageKeys().length;
+  OpenDebug.step(dbg, 'settle-open-image-draw-caches', imageDrawCaches);
+  OpenDebug.step(dbg, 'hydrate-initial-policy', {
+    mode: 'all-before-interaction',
+    imageCount: hydrationKeys.length,
+    visibleCount: visibleKeys.length,
+    imageHydrated,
+    pendingImages,
+    textObjects: textHydration.textObjects,
+    textLines: textHydration.textLines,
+    textChars: textHydration.chars,
+    phaseMs: performance.now() - hydrateStart,
+  });
+  PillDebug.log('open:hydrate-all:end', {
+    phaseMs: performance.now() - hydrateStart,
+    imageCount: hydrationKeys.length,
+    pendingImages,
+    textObjects: textHydration.textObjects,
+    textLines: textHydration.textLines,
+  });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _boardOpening = false;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -1005,15 +955,6 @@ async function finishOpenedBoard(
       },
     });
   }
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    setTimeout(() => hydrateRemainingImagesForOpen(dbg, 2, visibleKeys).catch((err) => {
-      OpenDebug.step(dbg, 'hydrate-background:error', { error: String(err) });
-    }), 80);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  } else {
-    setTimeout(() => hydrateRemainingImagesForOpen(2, visibleKeys).catch(() => {}), 80);
-  }
 }
 
 function applyBoardData(data
@@ -1053,7 +994,7 @@ function applyBoardData(data
     ms: performance.now() - imageStart,
     sourcesCached: true,
     deferredInitialCacheImages,
-    visibleFirstOpen: true,
+    allContentBeforeInteraction: true,
     ...getOpenImageRuntimeDebugMetrics(dbg),
   });
   OpenDebug.step(dbg, 'image-store-sample', { sample: getImageStoreOpenDebugSampleIfEnabled(dbg) });

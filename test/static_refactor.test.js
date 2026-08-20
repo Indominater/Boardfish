@@ -293,7 +293,7 @@ test('drawable bitmap warmup queue reuses one insertion-ordered map', () => {
 
 test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing size', () => {
   const viewport = readSource('src/js/viewport.js');
-  const start = viewport.indexOf('function _rebuildOffscreen(dpr, viewportRect, lowLatencyFrame = false)');
+  const start = viewport.indexOf('function _rebuildOffscreen(dpr, viewportRect)');
   const end = viewport.indexOf('\nfunction', start + 1);
   const source = viewport.slice(start, end > start ? end : undefined);
 
@@ -317,21 +317,26 @@ test('viewport transforms do not schedule an unbounded automatic text prewarm', 
   assert.match(viewport, /function prewarmVisibleTextLayoutCaches\(options = \{\}\)/);
 });
 
-test('background open hydration yields while viewport input is active', () => {
+test('open hydration finishes all image and text draw caches before interaction', () => {
   const ioClose = readSource('src/js/io_close.js');
-  const start = ioClose.indexOf('async function hydrateRemainingImagesForOpen');
-  const end = ioClose.indexOf('\nfunction queueVisibleImageHydration', start);
+  const imageVariants = readSource('src/js/image_variants.js');
+  const start = ioClose.indexOf('async function finishOpenedBoard');
+  const end = ioClose.indexOf('\nfunction applyBoardData', start);
   const source = ioClose.slice(start, end > start ? end : undefined);
 
-  assert.match(ioClose, /const BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS = 180;/);
-  assert.match(source, /batchSize = 2/);
-  assert.match(source, /performance\.now\(\) - lastViewportInputAt/);
-  assert.match(source, /inputIdleMs < BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS/);
-  assert.match(source, /\.\.\.priorityKeys[\s\S]*\.\.\.getPendingHydratableImageKeys\(\)/);
-  assert.match(source, /BoardfishImageStore\.hasDisplayImage\(key\)/);
-  assert.doesNotMatch(source, /getPendingHydratableImageKeys\(batchSize - keys\.length/);
-  assert.match(source, /await new Promise\(\(resolve\) => setTimeout/);
-  assert.match(ioClose, /hydrateRemainingImagesForOpen\(dbg, 2, visibleKeys\)/);
+  assert.match(source, /const hydrationKeys = \[\.\.\.new Set\(\[[\s\S]*\.\.\.visibleKeys,[\s\S]*\.\.\.getPendingHydratableImageKeys\(\)/);
+  assert.match(source, /hydrateImageKeysWithLimit\([\s\S]*hydrationKeys[\s\S]*'hydrate-all'/);
+  assert.match(source, /hydrateTextDrawCachesForOpen/);
+  assert.match(source, /await Promise\.all\(\[[\s\S]*imageHydrationPromise,[\s\S]*textHydrationPromise/);
+  assert.match(source, /await settleOpenImageDrawCaches\(getOpenHydrationConcurrency\(\)\);/);
+  assert.ok(source.indexOf('settleOpenImageDrawCaches') < source.indexOf('_boardOpening = false;'));
+  assert.match(source, /mode: 'all-before-interaction'/);
+  assert.doesNotMatch(ioClose, /hydrateRemainingImagesForOpen|BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS/);
+  assert.match(ioClose, /async function hydrateTextDrawCachesForOpen/);
+  assert.match(ioClose, /const layout = getTextLayout\(obj\);[\s\S]*prepareTextLineForDraw\(line\);[\s\S]*warmOpenTextLineForDraw/);
+  assert.match(imageVariants, /async function settleOpenImageDrawCaches/);
+  assert.match(imageVariants, /while \(imageScaledVariantQueue\.length\)/);
+  assert.match(imageVariants, /for \(const \[source, meta\] of drawableBitmapWarmupQueue\)/);
 });
 
 test('save and open validation stay at the authoritative container boundaries', () => {

@@ -94,6 +94,8 @@ function loadTextLayout({
       patchTextObjectLayoutAfterInput,
       clearTextLayoutCaches,
       clearTextObjectLayoutRuntime,
+      prepareTextLineForDraw,
+      prepareTextLayoutForDraw,
       drawTextLineRange,
       lineCaretXAtOffset,
       lineXAtOffset,
@@ -452,6 +454,27 @@ test('text drawing places each glyph at measured prefix positions', () => {
   assert.equal(cachedStats.skippedSpaces, 1);
   assert.equal(cachedStats.planCacheHits, 1);
   assert.equal(cachedStats.planCacheMisses, 0);
+});
+
+test('opening hydration can prepare every text draw plan before the first canvas draw', () => {
+  const { context } = loadTextLayout();
+  const textLayout = context.__testTextLayout;
+  const obj = {
+    id: 'text-hydrate',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 80,
+    data: { content: 'first line\nsecond line' },
+  };
+  const layout = textLayout.getTextLayout(obj);
+
+  assert.equal(textLayout.prepareTextLayoutForDraw(layout), 2);
+
+  const stats = textLayout.drawTextLineRange({ fillText() {} }, layout[0], obj);
+  assert.equal(stats.planCacheHits, 1);
+  assert.equal(stats.planCacheMisses, 0);
 });
 
 test('text drawing ignores stale fast requests and preserves measured positions', () => {

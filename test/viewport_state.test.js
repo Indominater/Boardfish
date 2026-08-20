@@ -127,21 +127,18 @@ test('zooming around a client point keeps its world-space anchor fixed', () => {
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: -90, panY: -180, zoom: 4 });
 });
 
-test('viewport rendering has no mobile-only transform preview branch', () => {
+test('viewport rendering uses one native-quality branch on every platform', () => {
   const viewportSource = fs.readFileSync(path.join(root, 'src/js/viewport.js'), 'utf8');
   const styles = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
 
   assert.doesNotMatch(viewportSource, /BoardfishViewportPreview|viewportTransformPreview|touch-pinch-preview/);
   assert.doesNotMatch(styles, /viewport-transform-preview/);
   assert.match(viewportSource, /function applyTransform\([\s\S]*drawBoard\(true\)/);
-  assert.match(viewportSource, /function scheduleTransform\([\s\S]*scheduleViewportInputSettleRender\(\)/);
-  assert.match(viewportSource, /isViewportInputActive: isActiveViewportInput/);
-  assert.match(viewportSource, /const lowLatencyFrame = isActiveViewportInput\(\);/);
-  assert.doesNotMatch(viewportSource, /hasActiveMotionsForDraw/);
-  assert.match(viewportSource, /const dpr = boardCanvasRenderDpr\(lowLatencyFrame\);/);
-  assert.match(viewportSource, /const view = \{ zoom, dpr, activeInput: lowLatencyFrame \};/);
-  assert.match(viewportSource, /function restoreBoardCanvasQualityIfSettled\(\)[\s\S]*scheduleRender\(true/);
-  assert.doesNotMatch(viewportSource, /boardCanvasRenderDpr[\s\S]{0,500}(?:userAgent|pointerType|ontouchstart|matchMedia)/);
+  assert.match(viewportSource, /function scheduleTransform\([\s\S]*lastViewportInputAt = now;[\s\S]*scheduleFrame/);
+  assert.doesNotMatch(viewportSource, /scheduleViewportInputSettleRender|restoreBoardCanvasQualityIfSettled/);
+  assert.doesNotMatch(viewportSource, /isViewportInputActive: isActiveViewportInput/);
+  assert.doesNotMatch(viewportSource, /lowLatencyFrame|boardCanvasRenderDpr|INTERACTIVE_CANVAS_DPR_MAX/);
+  assert.match(viewportSource, /function syncBoardCanvasBackingStore\(write = true\) \{\s*const dpr = window\.devicePixelRatio \|\| 1;/);
 });
 
 test('pan state stays fully locked at an edge until movement returns toward the board', () => {

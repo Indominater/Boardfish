@@ -410,7 +410,8 @@ test('wheel zoom over visible floating UI uses the viewport wheel handler', () =
   assert.doesNotMatch(inputSource, /canvas\.addEventListener\('wheel'/);
   assert.doesNotMatch(inputSource, /viewportWheelSurfaces/);
   assert.match(inputSource, /const requestedZoom = zoom \* factor;\s*if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) scheduleTransform\(BoardfishViewportState\.zoomAroundClient\(e\.clientX, e\.clientY, requestedZoom\), 'wheel-zoom', e\);/);
-  assert.match(viewportSource, /lastViewportInputAt = now;\s*scheduleViewportInputSettleRender\(\);\s*if \(changed === false && !editingId\) return;/);
+  assert.match(viewportSource, /lastViewportInputAt = now;\s*if \(changed === false && !editingId\) return;/);
+  assert.doesNotMatch(viewportSource, /scheduleViewportInputSettleRender/);
   assert.doesNotMatch(inputSource, /const newZoom = Math\.min\(ZOOM_MAX/);
   assert.match(selectionSource, /document\.elementFromPoint\(x, y\)/);
   assert.match(selectionSource, /if \(e\.target instanceof Node && e\.target\.nodeType === 1\) return false;/);
@@ -721,11 +722,11 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.match(drawSource, /const textSelectionMotions = BoardfishMotion\.textSelectionJelloSpecsForDraw\(\);/);
   assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
   assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
-  assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect, lowLatencyFrame\);\s*\}/);
+  assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
   assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true, view\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true, view\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, false, view\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, false, view\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, null, false, view\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, null, false, view\);/);
+  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true\);/);
+  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId\);/);
+  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver\);/);
   assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, zoom, textSelectionMotions\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');

@@ -1,14 +1,7 @@
 'use strict';
 
 var IMAGE_SCALE_LEVELS = [0.25];
-function imageVariantMemoryLimit() {
-  const maxBytes = 1024 * 1024 * 1024;
-  const minBytes = 64 * 1024 * 1024;
-  const deviceMemoryGb = typeof navigator !== 'undefined' ? Number(navigator.deviceMemory) : NaN;
-  if (!Number.isFinite(deviceMemoryGb) || deviceMemoryGb <= 0) return maxBytes;
-  return Math.max(minBytes, Math.min(maxBytes, Math.floor(deviceMemoryGb * 1024 * 1024 * 1024 / 4)));
-}
-var IMAGE_VARIANT_MEMORY_LIMIT = imageVariantMemoryLimit();
+var IMAGE_VARIANT_MEMORY_LIMIT = 1024 * 1024 * 1024;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var VIEWPORT_PERF_MODES = {
   '1': { label: 'culling + scaled images', culling: true, scaling: true },
@@ -817,6 +810,58 @@ async function prewarmVisibleScaledImageVariantsForOpen(concurrency = 4, padPx =
     padPx,
     ms: performance.now() - startedAt,
     results: resultRows,
+  };
+}
+
+async function settleOpenImageDrawCaches(concurrency = IMAGE_VARIANT_QUEUE_CONCURRENCY) {
+  const startedAt = performance.now();
+  const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
+  concurrency = Math.max(1, Math.min(8, Math.floor(Number(concurrency) || IMAGE_VARIANT_QUEUE_CONCURRENCY)));
+  let scaledTasks = 0;
+  let drawableWarmups = 0;
+
+  // Source hydration queues the shared 0.25x variant for every bitmap. Drain
+  // that same queue before input is enabled so no device starts zooming while
+  // another device is still building its draw sources in the background.
+  cancelScheduledScaledVariantQueue();
+  while (imageScaledVariantQueueActive > 0) {
+    await yieldToBrowser();
+    cancelScheduledScaledVariantQueue();
+  }
+  while (imageScaledVariantQueue.length) {
+    cancelScheduledScaledVariantQueue();
+    const tasks = imageScaledVariantQueue.splice(0);
+    scaledTasks += tasks.length;
+    await mapWithConcurrency(tasks, concurrency, (task) => task(), false);
+    while (imageScaledVariantQueueActive > 0) {
+      await yieldToBrowser();
+      cancelScheduledScaledVariantQueue();
+    }
+  }
+
+  // Drawing each decoded source once transfers the expensive first-use work
+  // out of the first zoom/copy animation. Keep yielding so the opening pill can
+  // continue to paint while a large board is prepared.
+  let batchStartedAt = performance.now();
+  let batchCount = 0;
+  for (const [source, meta] of drawableBitmapWarmupQueue) {
+    drawableBitmapWarmupQueue.delete(source);
+    warmDrawableBitmapForDrawNow(source, meta);
+    drawableWarmups++;
+    batchCount++;
+    if (batchCount >= 8 || performance.now() - batchStartedAt >= 8) {
+      await yieldToBrowser();
+      batchStartedAt = performance.now();
+      batchCount = 0;
+    }
+  }
+
+  return {
+    scaledTasks,
+    drawableWarmups,
+    pendingScaledVariants: imageScaledBitmapPending.size,
+    pendingDrawableWarmups: drawableBitmapWarmupQueue.size,
+    ms: performance.now() - startedAt,
   };
 }
 

@@ -452,16 +452,14 @@
         if (obj.type !== 'image') return;
 
         const key = obj.data.imgKey;
-        // Viewport navigation is input-surface agnostic: touch, wheel, and drag
-        // all request the same inexpensive image draw while a transform is live.
-        const lowLatencyImageDraw = !!motion || view?.activeInput === true;
+        const lowLatencyImageMotion = !!motion;
         const selected = imageSourceResolver
-          ? imageSourceResolver(key, obj, view, lowLatencyImageDraw ? true : null)
-          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageDraw ? true : null);
+          ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
+          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
         const img = selected?.source || selected || null;
         if (!(img?.width > 0)) return;
         try {
-          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageDraw, motion);
+          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
         } catch (_) {}
       } else {
       if (obj.type === 'text') {
@@ -512,12 +510,10 @@
 
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
-      // Do not turn an absent override into `false`: the image selector uses
-      // null to retain its shared viewport-activity detection.
-      const lowLatencyImageDraw = !!motion || view?.activeInput === true;
+      const lowLatencyImageMotion = !!motion;
       const selected = imageSourceResolver
-        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageDraw ? true : null)
-        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageDraw ? true : null) : null;
+        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
+        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
       const img = selected?.source || selected || null;
       if (img?.width > 0) {
         if (counters) {
@@ -538,7 +534,7 @@
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
             if (motion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
           }
-          if (lowLatencyImageDraw) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
+          if (lowLatencyImageMotion) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
           if (bitmap || selected?.scale < 1) counters.bitmapImages++;
           else {
             counters.elementImages++;
@@ -546,7 +542,7 @@
           }
         }
         try {
-          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageDraw, motion);
+          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
           if (cropped === null) return false;
           if (counters) {
             recordImageDrawWarmStats(
@@ -595,11 +591,7 @@
       , imageSourceResolver = null
       , skipId = null
       , onlyText = false
-      , view = {
-        zoom: deps.zoom(),
-        dpr: deps.dpr(),
-        activeInput: deps.isViewportInputActive?.() === true,
-      }
+      , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
       const objectMotionForDraw =
         deps.hasObjectMotionsForDraw?.() === false ? null : deps.objectMotionForDraw;

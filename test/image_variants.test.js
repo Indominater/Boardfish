@@ -327,10 +327,35 @@ test('scaled image variant cache stays bounded with web headroom cap', () => {
   assert.equal(context.IMAGE_VARIANT_MEMORY_LIMIT, 1024 * 1024 * 1024);
 });
 
-test('scaled image variant cache scales down on low-memory devices', () => {
+test('scaled image variant cache uses the same budget on low-memory reported devices', () => {
   const context = loadImageVariants({ navigator: { deviceMemory: 1 } });
 
-  assert.equal(context.IMAGE_VARIANT_MEMORY_LIMIT, 256 * 1024 * 1024);
+  assert.equal(context.IMAGE_VARIANT_MEMORY_LIMIT, 1024 * 1024 * 1024);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_variants.js'), 'utf8');
+  assert.doesNotMatch(source, /deviceMemory|userAgent|\bAndroid\b/);
+});
+
+test('open image cache settle drains every scaled task and drawable warmup', async () => {
+  const context = loadImageVariants();
+  const calls = [];
+  context.imageScaledVariantQueue.push(
+    async () => calls.push('scaled-a'),
+    async () => calls.push('scaled-b'),
+  );
+  context.drawableBitmapWarmupQueue.set(
+    { width: 20, height: 10 },
+    { kind: 'full-image', key: 'img-a' },
+  );
+
+  const result = await context.settleOpenImageDrawCaches(2);
+
+  assert.deepEqual(calls.sort(), ['scaled-a', 'scaled-b']);
+  assert.equal(context.imageScaledVariantQueue.length, 0);
+  assert.equal(context.drawableBitmapWarmupQueue.size, 0);
+  assert.equal(result.scaledTasks, 2);
+  assert.equal(result.drawableWarmups, 1);
+  assert.equal(result.pendingScaledVariants, 0);
+  assert.equal(result.pendingDrawableWarmups, 0);
 });
 
 test('scaled image variants are platform-independent when createImageBitmap is available', () => {

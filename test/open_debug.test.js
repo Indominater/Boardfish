@@ -25,7 +25,7 @@ function withoutDeveloperDiagnostics(source) {
 function waitForOpenRenderFrameSource() {
   const source = readSource('src/js/io_close.js');
   const start = source.indexOf('const waitForOpenRenderFrame =');
-  const end = source.indexOf('\nvar _backgroundOpenHydrationRunning', start);
+  const end = source.indexOf('\nfunction queueVisibleImageHydration', start);
   assert.ok(start >= 0 && end > start, 'waitForOpenRenderFrame source is missing');
   return source.slice(start, end);
 }
@@ -139,24 +139,35 @@ test('open-board debugger covers the slow open phases developers need to inspect
   ]) {
     assert.match(openDebug, new RegExp(`\\b${method}\\b`), `OpenDebug is missing ${method}`);
   }
-  assert.doesNotMatch(openDebug, /setHydrationMode|all-before-open/);
-  assert.doesNotMatch(openIo, /openHydrationMode|getOpenHydrationMode|hydrateAllImagesForOpen|all-before-open/);
-  assert.match(openIo, /visibleFirstOpen: true,/);
-  assert.doesNotMatch(productionOpenIo, /BoardfishImageStore\.getSource\(k\)|cacheImage\(k,/);
+  const finishStart = openIo.indexOf('async function finishOpenedBoard');
+  const finishEnd = openIo.indexOf('\nfunction applyBoardData', finishStart);
+  const finishSource = openIo.slice(finishStart, finishEnd);
+  const productionFinishSource = productionOpenIo.slice(
+    productionOpenIo.indexOf('async function finishOpenedBoard'),
+    productionOpenIo.indexOf('\nfunction applyBoardData'),
+  );
+
+  assert.match(openIo, /allContentBeforeInteraction: true,/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
   assert.match(openIo, /typeof source === 'string' \|\| isWebImageRef\(source\)/);
-  assert.doesNotMatch(openIo, /function getReferencedHydratableImageKeys\(\)/);
   assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);[\s\S]*?if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) \{\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
   assert.match(withoutDeveloperDiagnostics(openIo), /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*await pendingReady;\s*return BoardfishImageStore\.hasDisplayImage\(key\);/);
   assert.match(openIo, /source: 'pending-cache'/);
-  assert.match(openIo, /async function settleVisibleImageBitmapsForOpen/);
-  assert.match(openIo, /while \(state\.settled < count\)/);
-  assert.match(openIo, /const timeoutMs = 15000;/);
-  assert.match(openIo, /timedOut/);
-  assert.match(openIo, /pendingKeys/);
-  assert.match(openIo, /hydrate-visible:bitmap-settle/);
-  assert.match(openDebug, /visibleBitmapSettleMs/);
-  assert.match(openDebug, /visibleBitmapsFailed/);
+  assert.match(finishSource, /const hydrationKeys = \[\.\.\.new Set\(\[[\s\S]*\.\.\.visibleKeys,[\s\S]*\.\.\.getPendingHydratableImageKeys\(\)/);
+  assert.match(finishSource, /hydrateImageKeysWithLimit\([\s\S]*hydrationKeys,[\s\S]*dbg,[\s\S]*'hydrate-all'/);
+  assert.match(productionFinishSource, /hydrateImageKeysWithLimit\(\s*hydrationKeys,\s*getOpenHydrationConcurrency\(\),\s*\)/);
+  assert.match(finishSource, /hydrateTextDrawCachesForOpen/);
+  assert.match(finishSource, /await Promise\.all\(\[[\s\S]*imageHydrationPromise,[\s\S]*textHydrationPromise/);
+  assert.match(finishSource, /await settleOpenImageDrawCaches\(getOpenHydrationConcurrency\(\)\);/);
+  assert.ok(finishSource.indexOf('settleOpenImageDrawCaches') < finishSource.indexOf('_boardOpening = false;'));
+  assert.match(finishSource, /mode: 'all-before-interaction'/);
+  assert.doesNotMatch(finishSource, /buildVisibleImagePreviewsForOpen|hydrateRemainingImagesForOpen|setTimeout\(/);
+  assert.doesNotMatch(openIo, /hydrateRemainingImagesForOpen|BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS/);
+  assert.match(openIo, /async function hydrateTextDrawCachesForOpen/);
+  assert.match(openIo, /const layout = getTextLayout\(obj\);[\s\S]*prepareTextLineForDraw\(line\);[\s\S]*warmOpenTextLineForDraw/);
+  assert.match(imageVariants, /async function settleOpenImageDrawCaches/);
+  assert.match(imageVariants, /while \(imageScaledVariantQueue\.length\)/);
+  assert.match(imageVariants, /for \(const \[source, meta\] of drawableBitmapWarmupQueue\)/);
   assert.match(imageState, /var MAX_IMAGE_DECODE_ACTIVE = 2;/);
   assert.match(imageState, /const MAX_OPEN_IMAGE_DECODE_ACTIVE = 8;/);
   assert.match(imageState, /_boardOpening[\s\S]*MAX_OPEN_IMAGE_DECODE_ACTIVE[\s\S]*MAX_IMAGE_DECODE_ACTIVE/);
@@ -165,42 +176,11 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /OpenDebug\.beginInitialRenderDebug\?\.\(\)/);
   assert.match(openIo, /OpenDebug\.endInitialRenderDebug\?\.\(\)/);
   assert.match(viewport, /OpenDebug\.isInitialRenderDebugActive\?\.\(\) === true/);
-  assert.match(viewport, /resolveOpenInitialImageSourceForDraw/);
-  assert.match(viewport, /hasOpenInitialImagePreviews/);
-  assert.match(viewport, /openPreviewFallback/);
-  assert.match(viewport, /collectOpenPreviewFallbackDebug/);
-  assert.match(viewport, /OpenDebug\.recordPreviewFallbackDraw/);
   assert.match(openIo, /drawBoardTotalMs: drawBreakdown\?\.totalMeasuredMs/);
   assert.match(openDebug, /initialDrawMs: initialRender\?\.meta\?\.drawMs/);
-  assert.match(openDebug, /initialOpenPreviewImages/);
-  assert.match(openDebug, /openPreviewMs/);
-  assert.match(openDebug, /openPreviewMaxMs/);
-  assert.match(openDebug, /openPreviewBreakdown/);
-  assert.match(openDebug, /scaledPrewarmSkipped/);
   assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
-  assert.match(openIo, /maxKey: slowest\?\.key/);
-  assert.match(openIo, /previewMaxKey: preview\.maxKey/);
-  assert.match(openIo, /buildVisibleImagePreviewsForOpen\(previewTasks[\s\S]*?, dbg/);
-  assert.match(productionOpenIo, /buildVisibleImagePreviewsForOpen\(previewTasks\s*\)/);
-  assert.match(openIo, /const previewReady = preview && preview\.pendingReady >= visibleKeys\.length/);
-  assert.match(openIo, /previewPendingReady: preview\.pendingReady/);
-  assert.match(openDebug, /openPreviewPendingReady/);
-  assert.match(openIo, /releaseReadyOpenInitialImagePreviewsForOpen/);
-  assert.match(openIo, /open-preview-release/);
-  assert.match(openIo, /previewRelease\.released \? 'open-preview-release' : 'open-background-hydration'/);
-  assert.match(openDebug, /open-preview-fallback-draw/);
-  assert.match(imageState, /buildOpenInitialImagePreviewForOpen/);
-  assert.match(imageState, /hasOpenInitialImagePreviews/);
-  assert.match(imageState, /hasBlockingOpenInitialImagePreviewsForOpen/);
-  assert.match(imageState, /releaseReadyOpenInitialImagePreviewsForOpen/);
-  assert.match(imageState, /deferBitmapReadyRenderForOpenPreview/);
-  assert.match(imageState, /open-preview-held/);
-  assert.match(imageState, /cacheRenderSkipped/);
-  assert.match(imageState, /clearOpenInitialImagePreviews\(key\)/);
-  assert.match(openIo, /previewStillHoldingRender/);
   assert.match(openDebug, /decodeQueueWaitMaxMs/);
   assert.match(openDebug, /bitmapDecodeMaxMs/);
-  assert.match(openDebug, /scaledPrewarmMs/);
   assert.match(openDebug, /rustBoardJsonReadMs/);
   assert.match(openDebug, /rustImageReadMaxMs/);
   assert.match(openDebug, /rustImageRefMs/);
@@ -210,17 +190,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openDebug, /filePickerMs/);
   assert.match(openDebug, /appCriticalPathMs/);
   assert.match(openDebug, /postReadCriticalPathMs/);
-  assert.match(openDebug, /openPreviewFallbackDrawCount/);
-  assert.match(openDebug, /openPreviewFallbackMissingMax/);
-  assert.match(openDebug, /openPreviewHeldRenderSkips/);
-  assert.match(openDebug, /openPreviewHeldVariantRenderSkips/);
-  assert.match(openDebug, /openPreviewDynamicRequests/);
-  assert.match(openDebug, /openPreviewDynamicCompletions/);
-  assert.match(openDebug, /open-preview-dynamic/);
-  assert.match(openDebug, /openPreviewReleaseRemaining/);
-  assert.match(openDebug, /open-preview-render-held/);
-  assert.match(imageVariants, /recordPreviewHeldRender/);
-
   for (const phase of [
     'read-board-debug',
     'read-board-shape',
@@ -231,12 +200,10 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'apply-state',
     'restore-counters-viewport',
     'hydrate-initial-policy',
-    'hydrate-visible:candidates',
-    'open-preview-visible:start',
-    'open-preview-visible:end',
-    'open-preview-release',
-    'prewarm-visible-scaled-variants',
-    'hydrate-background:done',
+    'hydrate-all:candidates',
+    'hydrate-text-draw-caches',
+    'settle-open-image-draw-caches',
+    'open:hydrate-all:end',
     'initial-applyTransform',
   ]) {
     assert.match(openIo, new RegExp(phase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `open flow is missing ${phase}`);

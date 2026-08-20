@@ -73,11 +73,6 @@
     return !!navigator.clipboard?.write && typeof ClipboardItem !== 'undefined' && typeof Blob !== 'undefined';
   }
 
-  function usesAndroidClipboard() {
-    const platform = String(navigator.userAgentData?.platform || '');
-    return /^android$/i.test(platform) || /\bandroid\b/i.test(String(navigator.userAgent || ''));
-  }
-
   const writeClipboardItem = (parts) => navigator.clipboard.write([new ClipboardItem(parts)]);
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -351,9 +346,6 @@
         return Promise.reject(err);
       }
     };
-    // Chromium's Android clipboard backend commits HTML ahead of PNG, so a
-    // multi-representation image item becomes a text/HTML clip there.
-    if (usesAndroidClipboard()) return writeImageOnly();
     if (token && supportsRichClipboardWrite()) {
       const htmlBlobPromise = blobPromise
         .then((blob) => blobToDataUrl(blob))
@@ -369,7 +361,7 @@
       let richWrite;
       try {
         // ClipboardItem accepts promised representations. Starting write() before
-        // image encoding finishes keeps it inside the trusted copy gesture on mobile.
+        // image encoding finishes keeps it inside the trusted copy gesture.
         richWrite = writeClipboardItem({
           'image/png': imagePart,
           'text/html': htmlBlobPromise,

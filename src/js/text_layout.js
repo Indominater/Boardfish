@@ -1725,6 +1725,26 @@ function createTextDrawPlan(line, text, start, end) {
   return runs;
 }
 
+function prepareTextLineForDraw(line) {
+  if (!line) return null;
+  const text = String(line.text ?? '');
+  if (!line._textDrawPlanCache) {
+    line._textDrawPlanCache = createTextDrawPlan(line, text, 0, text.length);
+  }
+  return line._textDrawPlanCache;
+}
+
+function prepareTextLayoutForDraw(layout) {
+  if (!Array.isArray(layout)) return 0;
+  let prepared = 0;
+  for (const line of layout) {
+    if (!line) continue;
+    prepareTextLineForDraw(line);
+    prepared++;
+  }
+  return prepared;
+}
+
 const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , options = {}
@@ -1737,8 +1757,9 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
   const cacheHit = !!plan;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!plan) {
-    plan = createTextDrawPlan(line, text, start, end);
-    if (cacheable) line._textDrawPlanCache = plan;
+    plan = cacheable
+      ? prepareTextLineForDraw(line)
+      : createTextDrawPlan(line, text, start, end);
   }
   const baseX = lineBaseX(obj);
   for (const run of plan) {
