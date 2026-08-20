@@ -205,6 +205,42 @@ function loadViewportInputSettleHarness() {
   };
 }
 
+function loadBoardCanvasQualityRestoreHarness() {
+  const source = fs.readFileSync(path.join(root, 'src', 'js', 'viewport.js'), 'utf8');
+  const functionStart = source.indexOf('function restoreBoardCanvasQualityIfSettled()');
+  const functionEnd = source.indexOf('\n}\n\n/* BOARDFISH_DEV_DIAGNOSTICS_START */', functionStart);
+  assert.ok(functionStart > 0, 'canvas quality restore function is missing');
+  assert.ok(functionEnd > functionStart, 'canvas quality restore function is unterminated');
+  const renders = [];
+  let activeInput = false;
+  let activeMotion = false;
+  let invalidations = 0;
+  const context = {
+    BoardfishMotion: {
+      hasActiveMotionsForDraw: () => activeMotion,
+    },
+    isActiveViewportInput: () => activeInput,
+    invalidateOffscreen: () => invalidations++,
+    scheduleRender: (...args) => renders.push(args),
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    'var _lastBoardFrameLowLatency = false;\n' +
+      `${source.slice(functionStart, functionEnd + 2)}\n` +
+      'globalThis.restoreBoardCanvasQualityIfSettled = restoreBoardCanvasQualityIfSettled;\n' +
+      'globalThis.setLastFrameLowLatency = value => { _lastBoardFrameLowLatency = value; };\n',
+    context,
+    { filename: 'viewport-quality-restore.js' },
+  );
+  return {
+    context,
+    renders,
+    invalidations: () => invalidations,
+    setActiveInput(value) { activeInput = value; },
+    setActiveMotion(value) { activeMotion = value; },
+  };
+}
+
 function loadViewportCanvasSizeHarness({
   rect = { width: 1660, height: 1080 },
   clientWidth = 1660,
@@ -308,6 +344,7 @@ function loadViewportCanvasSizeHarness({
       `${geometrySource}\n` +
       `${source.slice(sectionStart, viewportRectEnd)}\n` +
       'globalThis.resizeCanvas = resizeCanvas;\n' +
+      'globalThis.boardCanvasRenderDpr = boardCanvasRenderDpr;\n' +
       'globalThis.syncBoardCanvasBackingStore = syncBoardCanvasBackingStore;\n' +
       'globalThis.startCanvasSizeTracking = startCanvasSizeTracking;\n',
     context,
@@ -427,6 +464,28 @@ test('viewport input settles once after the latest gesture sample and restores a
   assert.deepEqual(harness.renders, [[true, null, 'viewport-input-settled']]);
 });
 
+test('a low-latency frame restores exactly once after both input and copy motion settle', () => {
+  const harness = loadBoardCanvasQualityRestoreHarness();
+  const { context } = harness;
+
+  context.restoreBoardCanvasQualityIfSettled();
+  assert.equal(harness.invalidations(), 0);
+
+  context.setLastFrameLowLatency(true);
+  harness.setActiveInput(true);
+  context.restoreBoardCanvasQualityIfSettled();
+  harness.setActiveInput(false);
+  harness.setActiveMotion(true);
+  context.restoreBoardCanvasQualityIfSettled();
+  assert.equal(harness.invalidations(), 0);
+
+  harness.setActiveMotion(false);
+  context.restoreBoardCanvasQualityIfSettled();
+  context.restoreBoardCanvasQualityIfSettled();
+  assert.equal(harness.invalidations(), 1);
+  assert.deepEqual(harness.renders, [[true, null, 'low-latency-frame-settled']]);
+});
+
 test('canvas resize keeps visible pixels until the render frame syncs the backing store', () => {
   const context = loadViewportCanvasSizeHarness();
 
@@ -447,6 +506,30 @@ test('canvas resize keeps visible pixels until the render frame syncs the backin
   assert.equal(context.resizeCanvas(), false);
   assert.equal(context.invalidations, 1);
   assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
+});
+
+test('active viewport and copy frames cap only backing resolution and restore native DPR', () => {
+  const context = loadViewportCanvasSizeHarness({
+    rect: { width: 390, height: 844 },
+    clientWidth: 390,
+    clientHeight: 844,
+    innerWidth: 390,
+    innerHeight: 844,
+    dpr: 3,
+  });
+
+  assert.equal(context.boardCanvasRenderDpr(false), 3);
+  assert.equal(context.boardCanvasRenderDpr(true), 1.5);
+  assert.equal(context.syncBoardCanvasBackingStore(true, context.boardCanvasRenderDpr(true)), true);
+  assert.equal(context.boardCanvas.width, 585);
+  assert.equal(context.boardCanvas.height, 1266);
+
+  assert.equal(context.syncBoardCanvasBackingStore(), true);
+  assert.equal(context.boardCanvas.width, 1170);
+  assert.equal(context.boardCanvas.height, 2532);
+
+  context.window.devicePixelRatio = 1;
+  assert.equal(context.boardCanvasRenderDpr(true), 1);
 });
 
 test('canvas size tracking observes the rendered surface exactly once', () => {

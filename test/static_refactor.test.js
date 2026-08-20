@@ -293,7 +293,7 @@ test('drawable bitmap warmup queue reuses one insertion-ordered map', () => {
 
 test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing size', () => {
   const viewport = readSource('src/js/viewport.js');
-  const start = viewport.indexOf('function _rebuildOffscreen(dpr, viewportRect)');
+  const start = viewport.indexOf('function _rebuildOffscreen(dpr, viewportRect, lowLatencyFrame = false)');
   const end = viewport.indexOf('\nfunction', start + 1);
   const source = viewport.slice(start, end > start ? end : undefined);
 

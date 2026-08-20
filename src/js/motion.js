@@ -296,13 +296,15 @@
   const getLastDrawnObjectMotion = (value) => lastDrawnObjectMotions.get(typeof value === 'string' ? value : value?.id) || null;
   const hasLastDrawnObjectMotions = () => lastDrawnObjectMotions.size > 0;
 
-  const hasObjectMotionsForDraw = () => {
-    if (!objectMotions.size) {
+  const pruneDrawableMotions = () => {
+    if (!(objectMotions.size || textSelectionMotions.size)) {
       lastDrawnObjectMotions.clear();
       return false;
     }
     if (prefersReducedMotion()) {
-      objectMotions.clear(); lastDrawnObjectMotions.clear();
+      objectMotions.clear();
+      textSelectionMotions.clear();
+      lastDrawnObjectMotions.clear();
       return false;
     }
     const cutoff = now();
@@ -312,6 +314,16 @@
         lastDrawnObjectMotions.delete(id);
       }
     }
+    for (const [id, motion] of textSelectionMotions) {
+      if (cutoff - motion.startedAt >= DURATION_MS) textSelectionMotions.delete(id);
+    }
+    if (!objectMotions.size) lastDrawnObjectMotions.clear();
+    return objectMotions.size > 0 || textSelectionMotions.size > 0;
+  };
+
+  const hasActiveMotionsForDraw = () => pruneDrawableMotions();
+  const hasObjectMotionsForDraw = () => {
+    pruneDrawableMotions();
     return objectMotions.size > 0;
   };
 
@@ -335,6 +347,7 @@
     applyCopyFeedback,
     cancelTextSelectionMotion,
     getLastDrawnObjectMotion,
+    hasActiveMotionsForDraw,
     hasLastDrawnObjectMotions,
     hasObjectMotionsForDraw,
     objectMotionForDraw,

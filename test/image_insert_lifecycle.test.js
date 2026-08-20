@@ -36,6 +36,64 @@ function loadWebImageSourceHarness({ boardContainer = null } = {}) {
   return context;
 }
 
+function loadAddImageHarness({ width = 1200, height = 300 } = {}) {
+  const source = fs.readFileSync(path.join(root, 'src/js/image_insert.js'), 'utf8');
+  const calls = {
+    histories: [],
+    objects: [],
+    renders: [],
+    selections: [],
+  };
+  const imageStore = {};
+  const context = {
+    Blob,
+    File,
+    BOARDFISH_PRODUCTION: true,
+    _bulkImageInsertAdded: 0,
+    _bulkImageInsertDepth: 0,
+    editingId: null,
+    imageBitmapCache: {
+      'img-paste': { width, height },
+    },
+    imageStore,
+    zCounter: 0,
+    calls,
+    BoardfishEditorState: {
+      addObject(obj) {
+        calls.objects.push(obj);
+      },
+      setSelection(ids, options = {}) {
+        calls.selections.push({ ids: [...ids], options: { ...options } });
+      },
+    },
+    BoardfishImageStore: {
+      getSource(key) {
+        return imageStore[key];
+      },
+      setSource(key, value) {
+        imageStore[key] = value;
+      },
+    },
+    cacheImage: async () => true,
+    canvas: { addEventListener() {} },
+    fileInput: {
+      addEventListener() {},
+      click() {},
+      value: '',
+    },
+    newId: () => 'obj-paste',
+    pushHistory(reason) {
+      calls.histories.push(reason);
+    },
+    scheduleRender(...args) {
+      calls.renders.push(args);
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(source, context, { filename: 'image_insert.js' });
+  return context;
+}
+
 function loadEditorStateBoundaryHarness() {
   const source = fs.readFileSync(path.join(root, 'src/js/editor_state_boundary.js'), 'utf8');
   const obj1 = { id: 'obj-1', type: 'image', z: 1 };
@@ -146,6 +204,28 @@ test('inserted immutable Blob sources reuse CRC without changing saved bytes', a
   assert.equal(second.crcReusedEntries, 1);
   const reopened = await WebContainer.readBoardContainer(second.blob);
   assert.deepEqual(WebContainer.bytesForImageSource(reopened.board.imageStore['img-9']), bytes);
+});
+
+test('decoded image insertion owns its size cap after image layout removal', async () => {
+  const context = loadAddImageHarness();
+  const imageSource = { web: true, mime: 'image/png' };
+
+  const obj = await context.addImage(imageSource, 500, 400, 'img-paste');
+
+  assert.ok(obj);
+  assert.equal(obj.w, 600);
+  assert.equal(obj.h, 150);
+  assert.equal(obj.x, 200);
+  assert.equal(obj.y, 325);
+  assert.equal(context.imageStore['img-paste'], imageSource);
+  assert.equal(context.calls.objects[0], obj);
+  assert.deepEqual(context.calls.selections, [{
+    ids: ['obj-paste'],
+    options: { primaryId: 'obj-paste', exitEditing: false },
+  }]);
+  assert.deepEqual(context.calls.renders, [[true, true]]);
+  assert.deepEqual(context.calls.histories, ['add-image']);
+  assert.equal('BoardfishImageLayout' in context, false);
 });
 
 test('editor selection changes do not allocate motion snapshots', () => {

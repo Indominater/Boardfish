@@ -1,6 +1,7 @@
 'use strict';
 
 const WEB_IMAGE_INSERT_CONCURRENCY = 3;
+const IMAGE_INSERT_MAX_DIMENSION = 600;
 
 function beginBulkImageInsert() {
   _bulkImageInsertDepth++;
@@ -117,7 +118,7 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
       return null;
     }
     let w = naturalW, h = naturalH;
-    const maxDimension = BoardfishImageLayout.DEFAULT_IMAGE_MAX_DIMENSION;
+    const maxDimension = IMAGE_INSERT_MAX_DIMENSION;
     if (w > maxDimension || h > maxDimension) {
       const scale = maxDimension / Math.max(w, h);
       w = Math.max(1, Math.round(w * scale));

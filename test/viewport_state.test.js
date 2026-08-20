@@ -136,6 +136,11 @@ test('viewport rendering has no mobile-only transform preview branch', () => {
   assert.match(viewportSource, /function applyTransform\([\s\S]*drawBoard\(true\)/);
   assert.match(viewportSource, /function scheduleTransform\([\s\S]*scheduleViewportInputSettleRender\(\)/);
   assert.match(viewportSource, /isViewportInputActive: isActiveViewportInput/);
+  assert.match(viewportSource, /const lowLatencyFrame = isActiveViewportInput\(\) \|\| BoardfishMotion\.hasActiveMotionsForDraw\(\);/);
+  assert.match(viewportSource, /const dpr = boardCanvasRenderDpr\(lowLatencyFrame\);/);
+  assert.match(viewportSource, /const view = \{ zoom, dpr, activeInput: lowLatencyFrame \};/);
+  assert.match(viewportSource, /function restoreBoardCanvasQualityIfSettled\(\)[\s\S]*scheduleRender\(true/);
+  assert.doesNotMatch(viewportSource, /boardCanvasRenderDpr[\s\S]{0,500}(?:userAgent|pointerType|ontouchstart|matchMedia)/);
 });
 
 test('pan state stays fully locked at an edge until movement returns toward the board', () => {
