@@ -269,8 +269,8 @@ test('jiggle debugger captures motion smoothness and animated image latency evid
   assert.match(rendererSource, /lowLatencyImageDraws/);
   assert.match(rendererSource, /motionScaledImages/);
   assert.match(rendererSource, /motionFullFallbackImages/);
-  assert.match(rendererSource, /imageSourceResolver\(key, obj, view, counters, lowLatencyImageMotion\)/);
-  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, bitmap, view, lowLatencyImageMotion\)/);
+  assert.match(rendererSource, /imageSourceResolver\(key, obj, view, counters, lowLatencyImageDraw \? true : null\)/);
+  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, bitmap, view, lowLatencyImageDraw \? true : null\)/);
 });
 
 test('text selection debugger includes focused enter and exit edit timings', () => {

@@ -134,6 +134,8 @@ test('viewport rendering has no mobile-only transform preview branch', () => {
   assert.doesNotMatch(viewportSource, /BoardfishViewportPreview|viewportTransformPreview|touch-pinch-preview/);
   assert.doesNotMatch(styles, /viewport-transform-preview/);
   assert.match(viewportSource, /function applyTransform\([\s\S]*drawBoard\(true\)/);
+  assert.match(viewportSource, /function scheduleTransform\([\s\S]*scheduleViewportInputSettleRender\(\)/);
+  assert.match(viewportSource, /isViewportInputActive: isActiveViewportInput/);
 });
 
 test('pan state stays fully locked at an edge until movement returns toward the board', () => {

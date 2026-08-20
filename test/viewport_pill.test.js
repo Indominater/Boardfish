@@ -160,6 +160,51 @@ function loadViewportRenderSchedulerHarness({ selected = false, overlayVisible =
   return context;
 }
 
+function loadViewportInputSettleHarness() {
+  const source = fs.readFileSync(path.join(root, 'src', 'js', 'viewport.js'), 'utf8');
+  const functionStart = source.indexOf('function scheduleViewportInputSettleRender(');
+  assert.ok(functionStart > 0, 'viewport input settle scheduler is missing');
+  const functionEnd = source.indexOf('\n}', functionStart);
+  assert.ok(functionEnd > functionStart, 'viewport input settle scheduler is unterminated');
+  let now = 1000;
+  const timers = [];
+  const renders = [];
+  let invalidations = 0;
+  const context = {
+    _boardOpening: false,
+    lastViewportInputAt: now,
+    performance: { now: () => now },
+    setTimeout(callback, ms) {
+      timers.push({ callback, ms });
+      return timers.length;
+    },
+    invalidateOffscreen() {
+      invalidations++;
+    },
+    scheduleRender(...args) {
+      renders.push(args);
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    'const VIEWPORT_INPUT_SETTLE_MS = 180;\n' +
+      'var _viewportInputSettleRenderTimer = null;\n' +
+      `${source.slice(functionStart, functionEnd + 2)}\n` +
+      'globalThis.scheduleViewportInputSettleRender = scheduleViewportInputSettleRender;\n',
+    context,
+    { filename: 'viewport-input-settle.js' },
+  );
+  return {
+    context,
+    timers,
+    renders,
+    invalidations: () => invalidations,
+    setNow(value) {
+      now = value;
+    },
+  };
+}
+
 function loadViewportCanvasSizeHarness({
   rect = { width: 1660, height: 1080 },
   clientWidth = 1660,
@@ -359,6 +404,27 @@ test('automatic board refreshes sync active overlays while explicit false opts o
   const optedOut = loadViewportRenderSchedulerHarness({ selected: true });
   optedOut.scheduleRender(true, false, 'text-only-refresh');
   assert.equal(optedOut.renderFlags().overlay, false);
+});
+
+test('viewport input settles once after the latest gesture sample and restores a full-quality frame', () => {
+  const harness = loadViewportInputSettleHarness();
+
+  harness.context.scheduleViewportInputSettleRender();
+  harness.context.scheduleViewportInputSettleRender();
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0].ms, 180);
+
+  harness.context.lastViewportInputAt = 1100;
+  harness.setNow(1180);
+  harness.timers[0].callback();
+  assert.equal(harness.renders.length, 0);
+  assert.equal(harness.timers.length, 2);
+  assert.equal(harness.timers[1].ms, 100);
+
+  harness.setNow(1280);
+  harness.timers[1].callback();
+  assert.equal(harness.invalidations(), 1);
+  assert.deepEqual(harness.renders, [[true, null, 'viewport-input-settled']]);
 });
 
 test('canvas resize keeps visible pixels until the render frame syncs the backing store', () => {

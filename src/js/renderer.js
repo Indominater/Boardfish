@@ -452,14 +452,16 @@
         if (obj.type !== 'image') return;
 
         const key = obj.data.imgKey;
-        const lowLatencyImageMotion = !!motion;
+        // Viewport navigation is input-surface agnostic: touch, wheel, and drag
+        // all request the same inexpensive image draw while a transform is live.
+        const lowLatencyImageDraw = !!motion || view?.activeInput === true;
         const selected = imageSourceResolver
-          ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
-          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
+          ? imageSourceResolver(key, obj, view, lowLatencyImageDraw ? true : null)
+          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageDraw ? true : null);
         const img = selected?.source || selected || null;
         if (!(img?.width > 0)) return;
         try {
-          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
+          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageDraw, motion);
         } catch (_) {}
       } else {
       if (obj.type === 'text') {
@@ -510,10 +512,12 @@
 
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
-      const lowLatencyImageMotion = !!motion;
+      // Do not turn an absent override into `false`: the image selector uses
+      // null to retain its shared viewport-activity detection.
+      const lowLatencyImageDraw = !!motion || view?.activeInput === true;
       const selected = imageSourceResolver
-        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
-        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
+        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageDraw ? true : null)
+        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageDraw ? true : null) : null;
       const img = selected?.source || selected || null;
       if (img?.width > 0) {
         if (counters) {
@@ -522,19 +526,19 @@
             counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
             counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
             if (selected?.openPreview) counters.openPreviewImages = (counters.openPreviewImages || 0) + 1;
-            if (lowLatencyImageMotion) counters.motionScaledImages = (counters.motionScaledImages || 0) + 1;
+            if (motion) counters.motionScaledImages = (counters.motionScaledImages || 0) + 1;
           } else if (selected?.targetScale < 1) {
             counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
-            if (lowLatencyImageMotion) counters.motionFullFallbackImages = (counters.motionFullFallbackImages || 0) + 1;
+            if (motion) counters.motionFullFallbackImages = (counters.motionFullFallbackImages || 0) + 1;
             if (selected?.activeInputFullFallback) {
               counters.activeInputFullFallbackImages = (counters.activeInputFullFallbackImages || 0) + 1;
-              if (lowLatencyImageMotion) counters.motionActiveInputFullFallbackImages = (counters.motionActiveInputFullFallbackImages || 0) + 1;
+              if (motion) counters.motionActiveInputFullFallbackImages = (counters.motionActiveInputFullFallbackImages || 0) + 1;
             }
           } else if (selected?.scale === 1 && selected?.targetScale === 1) {
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
-            if (lowLatencyImageMotion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
+            if (motion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
           }
-          if (lowLatencyImageMotion) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
+          if (lowLatencyImageDraw) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
           if (bitmap || selected?.scale < 1) counters.bitmapImages++;
           else {
             counters.elementImages++;
@@ -542,7 +546,7 @@
           }
         }
         try {
-          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
+          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageDraw, motion);
           if (cropped === null) return false;
           if (counters) {
             recordImageDrawWarmStats(
@@ -591,7 +595,11 @@
       , imageSourceResolver = null
       , skipId = null
       , onlyText = false
-      , view = { zoom: deps.zoom(), dpr: deps.dpr() }
+      , view = {
+        zoom: deps.zoom(),
+        dpr: deps.dpr(),
+        activeInput: deps.isViewportInputActive?.() === true,
+      }
     ) {
       const objectMotionForDraw =
         deps.hasObjectMotionsForDraw?.() === false ? null : deps.objectMotionForDraw;

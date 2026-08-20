@@ -283,6 +283,79 @@ test('image renderer keeps active full fallback visible with temporary disabled 
   assert.equal(counters.activeInputFullFallbackImages, 1);
 });
 
+test('viewport navigation keeps culling and gives visible images the same low-latency path on every input surface', () => {
+  const BoardfishRenderer = loadRenderer();
+  const selectCalls = [];
+  const drawSmoothingEnabled = [];
+  const source = {
+    complete: true,
+    naturalWidth: 2000,
+    naturalHeight: 1200,
+    width: 2000,
+    height: 1200,
+  };
+  const obj = {
+    id: 'viewport-image',
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: 1000,
+    h: 600,
+    data: { imgKey: 'img-1' },
+  };
+  const offscreenObj = {
+    id: 'offscreen-image',
+    type: 'image',
+    x: 5000,
+    y: 5000,
+    w: 1000,
+    h: 600,
+    data: { imgKey: 'img-2' },
+  };
+  const context = {
+    imageSmoothingEnabled: true,
+    imageSmoothingQuality: 'high',
+    drawImage() {
+      drawSmoothingEnabled.push(this.imageSmoothingEnabled);
+    },
+  };
+  const renderer = BoardfishRenderer.createBoardRenderer({
+    canvasTextColor: () => '#fff',
+    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 1000, y2: 600 }),
+    dpr: () => 2,
+    getWrappedLines: () => [],
+    imageBitmapCache: () => ({ 'img-1': source, 'img-2': source }),
+    imageStore: () => ({ 'img-1': 'source', 'img-2': 'source' }),
+    isViewportInputActive: () => true,
+    lineHeight: 24,
+    objectIntersectsRect: (selectedObj) => selectedObj.id === obj.id,
+    objects: () => [obj, offscreenObj],
+    panX: () => 0,
+    panY: () => 0,
+    selectImageSourceForDraw(key, selectedObj, fullSource, view, activeInput) {
+      selectCalls.push({ key, selectedObj, fullSource, view, activeInput });
+      return { source, scale: 1, targetScale: 1 };
+    },
+    setCanvasImageQuality: () => {},
+    textBaselineYOffset: () => 0,
+    textPad: 4,
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+  });
+
+  const counters = BoardfishRenderer.createDrawCounters();
+  const result = renderer.drawVisibleObjects(context, counters);
+
+  assert.equal(result.drawnImages, 1);
+  assert.deepEqual(plain(selectCalls.map((call) => call.activeInput)), [true]);
+  assert.equal(selectCalls[0].view.activeInput, true);
+  assert.deepEqual(drawSmoothingEnabled, [false]);
+  assert.equal(context.imageSmoothingEnabled, true);
+  assert.equal(counters.lowLatencyImageDraws, 1);
+  assert.equal(counters.motionImages, 0);
+  assert.equal(counters.culledImages, 1);
+});
+
 test('animated image motion bypasses static culling and uses low-latency variant selection', () => {
   const BoardfishRenderer = loadRenderer();
   const drawSmoothingEnabled = [];

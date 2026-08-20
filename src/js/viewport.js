@@ -911,6 +911,8 @@ var _frameRaf = null;
 var _needTransform = false;
 var _needBoardRender = false;
 var _needOverlayRender = false;
+var _viewportInputSettleRenderTimer = null;
+const VIEWPORT_INPUT_SETTLE_MS = IMAGE_VARIANT_ACTIVE_INPUT_PRIORITY_MS;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var _frameScheduledAt = 0;
 var _frameSources = [];
@@ -951,6 +953,7 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   objectIntersectsRect,
   hasObjectMotionsForDraw: BoardfishMotion.hasObjectMotionsForDraw,
   objectMotionForDraw: BoardfishMotion.objectMotionForDraw,
+  isViewportInputActive: isActiveViewportInput,
   selectImageSourceForDraw,
 });
 ({ drawSingleObj, resetCanvasToScreen, setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
@@ -1718,6 +1721,7 @@ function scheduleTransform(
 ) {
   const now = performance.now();
   lastViewportInputAt = now;
+  scheduleViewportInputSettleRender();
   if (changed === false && !editingId) return;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     if (source == null) source = 'transform';
@@ -1741,6 +1745,25 @@ function scheduleTransform(
   _needTransform = true;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleFrame(source);
   else scheduleFrame();
+}
+
+function scheduleViewportInputSettleRender(delayMs = VIEWPORT_INPUT_SETTLE_MS) {
+  if (_viewportInputSettleRenderTimer !== null) return;
+  _viewportInputSettleRenderTimer = setTimeout(() => {
+    _viewportInputSettleRenderTimer = null;
+    const remainingMs = VIEWPORT_INPUT_SETTLE_MS - (performance.now() - lastViewportInputAt);
+    if (remainingMs > 0) {
+      scheduleViewportInputSettleRender(remainingMs);
+      return;
+    }
+    if (_boardOpening) return;
+    invalidateOffscreen();
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      scheduleRender(true, null, 'viewport-input-settled');
+    } else {
+      scheduleRender(true);
+    }
+  }, Math.max(0, delayMs));
 }
 
 function scheduleRender(board = true, overlay = null, source = null) {
