@@ -9,21 +9,12 @@ const vm = require('node:vm');
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function loadStateCloneHarness() {
-  const calls = { scriptRanges: 0 };
   const context = {
-    calls,
     HistoryDebug: {
       count() {},
       end() {},
       max() {},
       start() { return {}; },
-    },
-    normalizeTextScriptRangesForContent(_content, scriptRanges) {
-      calls.scriptRanges++;
-      return Array.isArray(scriptRanges) ? scriptRanges.map((range) => ({ ...range })) : [];
-    },
-    cloneTextScriptRanges(ranges = []) {
-      return ranges.map(({ start, end, kind }) => ({ start, end, kind }));
     },
     cloneTextObjectRuntimeCaches(source, target) {
       target._runtimeCopiedFrom = source.id;
@@ -64,7 +55,6 @@ test('text clone copies canonical content without normalization', () => {
     z: 5,
     data: { content: 'hello\nworld' },
   });
-  assert.deepEqual(context.calls, { scriptRanges: 0 });
 });
 
 test('text clone copies canonical line alignment independently', () => {
@@ -80,7 +70,6 @@ test('text clone copies canonical line alignment independently', () => {
     data: {
       content: 'hello',
       lineAlign: ['center'],
-      scriptRanges: [{ start: 2, end: 4, kind: 'sup' }],
     },
   };
   const clone = context.__stateClone.cloneObject(source);
@@ -88,38 +77,8 @@ test('text clone copies canonical line alignment independently', () => {
   assert.deepEqual(plain(clone.data), {
     content: 'hello',
     lineAlign: ['center'],
-    scriptRanges: [{ start: 2, end: 4, kind: 'sup' }],
   });
-  assert.deepEqual(context.calls, { scriptRanges: 1 });
   assert.notEqual(clone.data.lineAlign, source.data.lineAlign);
-});
-
-test('text clone reuses current normalized script range cache', () => {
-  const context = loadStateCloneHarness();
-  const scriptRanges = [{ start: 2, end: 4, kind: 'sup' }];
-  const clone = context.__stateClone.cloneObject({
-    id: 'text-1',
-    type: 'text',
-    x: 1,
-    y: 2,
-    w: 3,
-    h: 4,
-    z: 5,
-    data: {
-      content: 'hello',
-      scriptRanges,
-    },
-    _textScriptRangesCache: scriptRanges,
-    _textScriptRangesCacheContent: 'hello',
-    _textScriptRangesCacheSourceKey: JSON.stringify(scriptRanges),
-  });
-
-  assert.deepEqual(plain(clone.data), {
-    content: 'hello',
-    scriptRanges: [{ start: 2, end: 4, kind: 'sup' }],
-  });
-  assert.deepEqual(context.calls, { scriptRanges: 0 });
-  assert.notEqual(clone.data.scriptRanges[0], scriptRanges[0]);
 });
 
 test('text clone copies runtime caches only when requested', () => {

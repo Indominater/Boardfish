@@ -6,23 +6,23 @@ var ManualPerfDebug = (() => {
   let sessionStartMemory = null;
   let largeTextPanningSession = null;
   let nextLargeTextPanningSessionId = 1;
-  let textEditMathSession = null;
+  let textEditSession = null;
   let nextTextEditMathSessionId = 1;
-  let textEditMathEventsActive = false;
-  let textEditMathLastEventAt = 0;
+  let textEditEventsActive = false;
+  let textEditLastEventAt = 0;
   let textEditInputStepLastAt = 0;
   let textResizeSession = null;
   let nextTextResizeSessionId = 1;
   let nextTextResizeDragId = 1;
   let textResizeLastEventAt = 0;
   const markers = [];
-  const textEditMathEvents = [];
+  const textEditEvents = [];
   const textEditInputSteps = [];
   const textResizeEvents = [];
-  const TEXT_EDIT_MATH_MAX_EVENTS = 10000;
+  const TEXT_EDIT_MAX_EVENTS = 10000;
   const TEXT_EDIT_INPUT_MAX_STEPS = 5000;
   const TEXT_RESIZE_MAX_EVENTS = 5000;
-  const TEXT_EDIT_MATH_EVENT_TYPES = [
+  const TEXT_EDIT_EVENT_TYPES = [
     'wheel',
     'pointerdown',
     'pointermove',
@@ -343,14 +343,14 @@ var ManualPerfDebug = (() => {
             startSnapshot: largeTextPanningSession.startSnapshot || null,
           }
         : null,
-      textEditMathSession: textEditMathSession
+      textEditSession: textEditSession
         ? {
-            id: textEditMathSession.id,
-            active: textEditMathEventsActive,
-            startedAt: textEditMathSession.startedAt,
-            events: textEditMathEvents.length,
+            id: textEditSession.id,
+            active: textEditEventsActive,
+            startedAt: textEditSession.startedAt,
+            events: textEditEvents.length,
             inputSteps: textEditInputSteps.length,
-            startSnapshot: textEditMathSession.startSnapshot,
+            startSnapshot: textEditSession.startSnapshot,
           }
         : null,
       textResizeSession: textResizeSession
@@ -359,7 +359,7 @@ var ManualPerfDebug = (() => {
             active: true,
             startedAt: textResizeSession.startedAt,
             resizeEvents: textResizeEvents.length,
-            textEditEvents: textEditMathEvents.length,
+            textEditEvents: textEditEvents.length,
             inputSteps: textEditInputSteps.length,
             startSnapshot: textResizeSession.startSnapshot,
           }
@@ -849,10 +849,6 @@ var ManualPerfDebug = (() => {
     return boardObjects().filter(obj => obj?.type === 'text');
   }
 
-  function textObjectScriptRangeCount(obj) {
-    return Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges.length : 0;
-  }
-
   function countTextLines(content) {
     const value = normalizeTextContent(content);
     return value ? value.split('\n').length : 0;
@@ -877,15 +873,6 @@ var ManualPerfDebug = (() => {
     return Math.abs(lines - rounded) < 1e-6 ? Math.max(1, rounded) : '';
   }
 
-  function textEditScriptKey(obj) {
-    try {
-      if (typeof getTextScriptRanges === 'function') {
-        return JSON.stringify(getTextScriptRanges(obj));
-      }
-    } catch (_) {}
-    return JSON.stringify(Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges : []);
-  }
-
   function textEditAlignKey(obj, content) {
     try {
       if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj);
@@ -896,12 +883,10 @@ var ManualPerfDebug = (() => {
   function textEditCachedLineInfo(obj, content = '') {
     if (!obj || obj.type !== 'text') return { lines: '', source: '' };
     const text = normalizeTextContent(content);
-    const scriptKey = textEditScriptKey(obj);
     const alignKey = textEditAlignKey(obj, text);
     const layoutCacheValid = Array.isArray(obj._layoutCache) &&
       obj._layoutCacheContent === text &&
       obj._layoutCacheW === obj.w &&
-      obj._layoutCacheScriptKey === scriptKey &&
       obj._layoutCacheAlignKey === alignKey;
     if (layoutCacheValid) return { lines: Math.max(1, obj._layoutCache.length), source: 'layout-cache' };
     const wrappedIndex = obj._textWrappedLineIndexCache;
@@ -909,7 +894,6 @@ var ManualPerfDebug = (() => {
       Array.isArray(wrappedIndex.entries) &&
       obj._textWrappedLineIndexCacheContent === text &&
       obj._textWrappedLineIndexCacheW === obj.w &&
-      obj._textWrappedLineIndexCacheScriptKey === scriptKey &&
       Number.isFinite(wrappedIndex.lineCount);
     if (wrappedIndexValid) {
       return {
@@ -919,7 +903,6 @@ var ManualPerfDebug = (() => {
     }
     const wrappedCountValid = obj._textWrappedLineCountCacheContent === text &&
       obj._textWrappedLineCountCacheW === obj.w &&
-      obj._textWrappedLineCountCacheScriptKey === scriptKey &&
       Number.isFinite(obj._textWrappedLineCountCacheValue);
     if (wrappedCountValid) {
       return {
@@ -930,7 +913,6 @@ var ManualPerfDebug = (() => {
     const widthCache = obj._textWrappedLineIndexWidthCache;
     const widthCached = widthCache &&
       obj._textWrappedLineIndexWidthCacheContent === text &&
-      obj._textWrappedLineIndexWidthCacheScriptKey === scriptKey &&
       typeof widthCache.get === 'function'
       ? widthCache.get(String(obj.w))
       : null;
@@ -1003,7 +985,7 @@ var ManualPerfDebug = (() => {
     return `${String(target.tagName || target.nodeName || '').toLowerCase()}${id}${className}`;
   }
 
-  function textEditMathShortcutFromEvent(event = null) {
+  function textEditShortcutFromEvent(event = null) {
     const type = event?.type || '';
     if (type !== 'keydown' && type !== 'keyup') return '';
     const key = String(event?.key || '').toLowerCase();
@@ -1021,7 +1003,7 @@ var ManualPerfDebug = (() => {
       : value;
   }
 
-  function textEditMathSnapshot() {
+  function textEditSnapshot() {
     const id = typeof editingId !== 'undefined' ? (editingId || '') : '';
     const obj = id && typeof objectsMap !== 'undefined' ? objectsMap.get(id) : null;
     const domProxyValue = typeof _editEl?.value === 'string' ? _editEl.value : null;
@@ -1041,8 +1023,6 @@ var ManualPerfDebug = (() => {
       selectionStart: _editEl?.selectionStart ?? '',
       selectionEnd: _editEl?.selectionEnd ?? '',
       selectionDirection: _editEl?.selectionDirection || '',
-      scriptRanges: textObjectScriptRangeCount(obj),
-      scriptCaretAffinity: obj?._textScriptCaretAffinity || '',
       objectW: obj?.w ?? '',
       objectH: obj?.h ?? '',
       editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
@@ -1059,7 +1039,7 @@ var ManualPerfDebug = (() => {
     });
   }
 
-  function textEditMathEventMeta(event) {
+  function textEditEventMeta(event) {
     const eventAt = eventTimestampMs(event);
     const now = performance.now();
     const id = typeof editingId !== 'undefined' ? (editingId || '') : '';
@@ -1072,11 +1052,11 @@ var ManualPerfDebug = (() => {
       : domValueLength;
     const meta = {
       at: round(now),
-      gapMs: textEditMathLastEventAt ? now - textEditMathLastEventAt : '',
+      gapMs: textEditLastEventAt ? now - textEditLastEventAt : '',
       eventType: event?.type || '',
       eventAgeMs: Math.max(0, now - eventAt),
       inputType: event?.inputType || '',
-      shortcut: textEditMathShortcutFromEvent(event),
+      shortcut: textEditShortcutFromEvent(event),
       dataLength: typeof event?.data === 'string' ? event.data.length : '',
       key: event?.key || '',
       code: event?.code || '',
@@ -1117,14 +1097,14 @@ var ManualPerfDebug = (() => {
         ? Math.abs(selectionEnd - selectionStart)
         : '',
     };
-    textEditMathLastEventAt = now;
+    textEditLastEventAt = now;
     return sanitizePerfMeta(meta);
   }
 
   function recordTextEditMathEvent(event) {
-    if (!textEditMathEventsActive) return;
-    textEditMathEvents.push(textEditMathEventMeta(event));
-    if (textEditMathEvents.length > TEXT_EDIT_MATH_MAX_EVENTS) textEditMathEvents.shift();
+    if (!textEditEventsActive) return;
+    textEditEvents.push(textEditEventMeta(event));
+    if (textEditEvents.length > TEXT_EDIT_MAX_EVENTS) textEditEvents.shift();
   }
 
   function textResizeSelectedTextObject(objectId = '') {
@@ -1158,7 +1138,6 @@ var ManualPerfDebug = (() => {
       h: obj?.h ?? '',
       contentChars: includeContent ? content.length : '',
       logicalLines: includeContent ? countTextLines(content) : '',
-      scriptRanges: textObjectScriptRangeCount(obj),
       layoutCachePresent: !!obj?._layoutCache,
       layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
       minWidthCachePresent: Number.isFinite(obj?._textMinWidthCache),
@@ -1168,7 +1147,6 @@ var ManualPerfDebug = (() => {
       wrappedLineIndexCacheEntries: obj?._textWrappedLineIndexCache?.entries?.length ?? '',
       wrappedLineIndexCacheLines: obj?._textWrappedLineIndexCache?.lineCount ?? '',
       wrappedLineIndexWidthCacheSize: obj?._textWrappedLineIndexWidthCache?.size ?? '',
-      scriptMetricsCachePresent: !!obj?._textScriptLayoutMetrics,
       pendingSizeSync: !!obj?._textEditPendingSizeSync,
       zoom: typeof zoom !== 'undefined' ? zoom : '',
       panX: typeof panX !== 'undefined' ? panX : '',
@@ -1345,7 +1323,6 @@ var ManualPerfDebug = (() => {
       minTextW: event.minTextW,
       contentChars: event.contentChars,
       logicalLines: event.logicalLines,
-      scriptRanges: event.scriptRanges,
       layoutCacheHadValue: event.layoutCacheHadValue,
       layoutCacheLinesBefore: event.layoutCacheLinesBefore,
       layoutCachePresent: event.layoutCachePresent,
@@ -1357,7 +1334,6 @@ var ManualPerfDebug = (() => {
       wrappedLineIndexCacheEntries: event.wrappedLineIndexCacheEntries,
       wrappedLineIndexCacheLines: event.wrappedLineIndexCacheLines,
       wrappedLineIndexWidthCacheSize: event.wrappedLineIndexWidthCacheSize,
-      scriptMetricsCachePresent: event.scriptMetricsCachePresent,
       clearLayoutMs: event.clearLayoutMs,
       autoHeightMs: event.autoHeightMs,
       autoHeightChanged: event.autoHeightChanged,
@@ -1421,7 +1397,6 @@ var ManualPerfDebug = (() => {
       maxWrappedLineIndexCacheEntries: resize.maxWrappedLineIndexCacheEntries ?? '',
       endWrappedLineIndexWidthCacheSize: report.endSnapshot?.wrappedLineIndexWidthCacheSize ?? '',
       maxWrappedLineIndexWidthCacheSize: resize.maxWrappedLineIndexWidthCacheSize ?? '',
-      endScriptMetricsCachePresent: report.endSnapshot?.scriptMetricsCachePresent ?? '',
       domEvents: events.events ?? '',
       pointermove: events.pointermove ?? '',
       mousemove: events.mousemove ?? '',
@@ -1446,14 +1421,14 @@ var ManualPerfDebug = (() => {
   }
 
   function setTextEditMathListeners(active) {
-    if (typeof document === 'undefined' || textEditMathEventsActive === active) return;
-    for (const type of TEXT_EDIT_MATH_EVENT_TYPES) {
+    if (typeof document === 'undefined' || textEditEventsActive === active) return;
+    for (const type of TEXT_EDIT_EVENT_TYPES) {
       document[active ? 'addEventListener' : 'removeEventListener'](type, recordTextEditMathEvent, { capture: true, passive: true });
     }
-    textEditMathEventsActive = active;
+    textEditEventsActive = active;
   }
 
-  function textEditMathEventSummary(events = textEditMathEvents) {
+  function textEditEventSummary(events = textEditEvents) {
     const counts = {};
     const inputTypes = {};
     const shortcuts = {};
@@ -1522,8 +1497,8 @@ var ManualPerfDebug = (() => {
   }
 
   function isTextEditInputTraceActive(inputType = '') {
-    if (!textEditMathEventsActive || !textEditMathSession?.traceTextInput) return false;
-    const options = textEditMathSession.traceTextInput;
+    if (!textEditEventsActive || !textEditSession?.traceTextInput) return false;
+    const options = textEditSession.traceTextInput;
     if (options.allInputs) return true;
     const value = String(inputType || '').toLowerCase();
     if (options.deleteInputs !== false && isDeleteLikeTextInput(value)) return true;
@@ -1661,9 +1636,6 @@ var ManualPerfDebug = (() => {
       selectionEnd: step.selectionEnd,
       selectedChars: step.selectedChars,
       selectionDirection: step.selectionDirection,
-      scriptRangeCount: step.scriptRangeCount,
-      scriptTransformFastPath: step.scriptTransformFastPath,
-      scriptTransformSkipReason: step.scriptTransformSkipReason,
       layoutPatched: step.layoutPatched,
       layoutPatchOldLines: step.layoutPatchOldLines,
       layoutPatchNewLines: step.layoutPatchNewLines,
@@ -1738,9 +1710,9 @@ var ManualPerfDebug = (() => {
     return rows;
   }
 
-  function textEditMathTimeline(options = {}) {
-    const limit = Math.max(1, Math.min(TEXT_EDIT_MATH_MAX_EVENTS, Number(options.limit) || 200));
-    const rows = textEditMathEvents.slice(-limit).map(event => ({
+  function textEditTimeline(options = {}) {
+    const limit = Math.max(1, Math.min(TEXT_EDIT_MAX_EVENTS, Number(options.limit) || 200));
+    const rows = textEditEvents.slice(-limit).map(event => ({
       at: event.at,
       gapMs: event.gapMs,
       eventType: event.eventType,
@@ -1817,7 +1789,7 @@ var ManualPerfDebug = (() => {
     };
   }
 
-  function textEditMathHeadline(report = {}) {
+  function textEditHeadline(report = {}) {
     const eventSummary = report.eventSummary || {};
     const inputStepSummary = report.inputStepSummary || {};
     const frame = report.viewport?.frameSummary || {};
@@ -1865,7 +1837,6 @@ var ManualPerfDebug = (() => {
       heightDeltaFromLogicalEnd: report.endSnapshot?.heightDeltaFromLogical ?? '',
       heightDeltaFromCachedEnd: report.endSnapshot?.heightDeltaFromCached ?? '',
       layoutCacheLinesEnd: report.endSnapshot?.layoutCacheLines ?? '',
-      scriptRangesEnd: report.endSnapshot?.scriptRanges ?? '',
       frames: frame.frames ?? '',
       slowFramesOver16ms: frame.slowFramesOver16ms ?? '',
       maxFrameMs: frame.maxFrameMs ?? '',
@@ -1899,7 +1870,7 @@ var ManualPerfDebug = (() => {
     };
   }
 
-  function textEditMathBegin(options = {}) {
+  function textEditBegin(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
       console.warn('[Boardfish perf] Debug tools are disabled in this build.');
       return null;
@@ -1916,17 +1887,17 @@ var ManualPerfDebug = (() => {
       BoardfishDebug.history.reset();
     }
     markers.length = 0;
-    textEditMathEvents.length = 0;
+    textEditEvents.length = 0;
     textEditInputSteps.length = 0;
-    textEditMathLastEventAt = 0;
+    textEditLastEventAt = 0;
     textEditInputStepLastAt = 0;
-    const id = `text-edit-math-${nextTextEditMathSessionId++}`;
+    const id = `text-edit-${nextTextEditMathSessionId++}`;
     const traceTextInput = options.traceTextInput !== false;
-    textEditMathSession = {
+    textEditSession = {
       id,
       startedAt: new Date().toISOString(),
       startedAtMs: performance.now(),
-      startSnapshot: textEditMathSnapshot(),
+      startSnapshot: textEditSnapshot(),
       traceTextInput: traceTextInput
         ? {
             allInputs: options.traceAllTextInputs === true,
@@ -1947,16 +1918,16 @@ var ManualPerfDebug = (() => {
     setTextEditMathListeners(true);
     const out = {
       sessionId: id,
-      startedAt: textEditMathSession.startedAt,
+      startedAt: textEditSession.startedAt,
       mode: 'passive-event-recording',
-      startSnapshot: textEditMathSession.startSnapshot,
-      recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES.slice(),
+      startSnapshot: textEditSession.startSnapshot,
+      recordedEventTypes: TEXT_EDIT_EVENT_TYPES.slice(),
       historyRecording: options.history !== false,
-      textInputStepTracing: textEditMathSession.traceTextInput,
-      next: 'Do the edit/delete interaction manually, then run finishDebug({ label: "text-box-shrink-after-undo", perf: [["textEditMathReport", { limit: 1200, eventLimit: 1200, inputStepLimit: 1200 }]], history: ["textUndoRedoReport", "largeTextReport"], clipboard: ["textClipboardReport"], textSel: ["performanceSummary", "clipboardReport", "editLifecycleReport"] }).',
+      textInputStepTracing: textEditSession.traceTextInput,
+      next: 'Do the edit/delete interaction manually, then run finishDebug({ label: "text-box-shrink-after-undo", perf: [["textEditReport", { limit: 1200, eventLimit: 1200, inputStepLimit: 1200 }]], history: ["textUndoRedoReport", "largeTextReport"], clipboard: ["textClipboardReport"], textSel: ["performanceSummary", "clipboardReport", "editLifecycleReport"] }).',
     };
     if (options.log !== false) {
-      console.group('[Boardfish perf] text edit math passive recorder');
+      console.group('[Boardfish perf] text edit passive recorder');
       console.table([{ sessionId: id, mode: out.mode, editingId: out.startSnapshot.editingId, valueLength: out.startSnapshot.valueLength }]);
       console.info(out.next);
       console.log(out);
@@ -1965,25 +1936,25 @@ var ManualPerfDebug = (() => {
     return out;
   }
 
-  function textEditMathReport(options = {}) {
+  function textEditReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
       console.warn('[Boardfish perf] Debug tools are disabled in this build.');
       return null;
     }
     if (options.stop !== false) setTextEditMathListeners(false);
-    const session = textEditMathSession;
-    const events = textEditMathEvents.slice();
+    const session = textEditSession;
+    const events = textEditEvents.slice();
     const inputSteps = textEditInputSteps.slice();
-    const endSnapshot = textEditMathSnapshot();
+    const endSnapshot = textEditSnapshot();
     const out = {
-      label: options.label || 'text-edit-math-passive-events',
+      label: options.label || 'text-edit-passive-events',
       reportedAt: new Date().toISOString(),
       sessionId: session?.id || null,
       mode: 'passive-event-recording',
       startSnapshot: session?.startSnapshot || null,
       endSnapshot,
-      eventSummary: textEditMathEventSummary(events),
-      eventTimeline: textEditMathTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? 400 }),
+      eventSummary: textEditEventSummary(events),
+      eventTimeline: textEditTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? 400 }),
       inputStepSummary: textEditInputStepSummary(inputSteps),
       inputStepTimeline: textEditInputStepTimeline({ table: false, limit: options.inputStepLimit ?? options.limit ?? 400 }),
       viewport: viewportEventReport(options),
@@ -1993,16 +1964,16 @@ var ManualPerfDebug = (() => {
         'Passive report only: no board mutation, synthetic input, board viewport change, text layout measurement, cache clearing, memory snapshot, restore, or clipboard copy.',
       ],
     };
-    out.headline = textEditMathHeadline(out);
+    out.headline = textEditHeadline(out);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.clear !== false) {
-      textEditMathSession = null;
-      textEditMathLastEventAt = 0;
+      textEditSession = null;
+      textEditLastEventAt = 0;
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
-      console.group('[Boardfish perf] text edit math passive report');
+      console.group('[Boardfish perf] text edit passive report');
       console.table([out.headline]);
       console.log(out);
       console.groupEnd();
@@ -2032,10 +2003,10 @@ var ManualPerfDebug = (() => {
     }
     markers.length = 0;
     textResizeEvents.length = 0;
-    textEditMathEvents.length = 0;
+    textEditEvents.length = 0;
     textEditInputSteps.length = 0;
     textResizeLastEventAt = 0;
-    textEditMathLastEventAt = 0;
+    textEditLastEventAt = 0;
     textEditInputStepLastAt = 0;
     const id = `text-resize-${nextTextResizeSessionId++}`;
     const startedAt = new Date().toISOString();
@@ -2048,11 +2019,11 @@ var ManualPerfDebug = (() => {
           pasteInputs: options.tracePasteInputs !== false,
         }
       : null;
-    textEditMathSession = {
+    textEditSession = {
       id: `${id}:text-input`,
       startedAt,
       startedAtMs,
-      startSnapshot: textEditMathSnapshot(),
+      startSnapshot: textEditSnapshot(),
       traceTextInput: traceConfig,
       options: sanitizePerfMeta({
         owner: id,
@@ -2070,9 +2041,9 @@ var ManualPerfDebug = (() => {
       startedAt,
       startedAtMs,
       startSnapshot: textResizeSnapshot({ includeContent: true }),
-      textEditStartSnapshot: textEditMathSession.startSnapshot,
+      textEditStartSnapshot: textEditSession.startSnapshot,
       traceTextInput: traceConfig,
-      options: textEditMathSession.options,
+      options: textEditSession.options,
       currentDragId: '',
     };
     setTextEditMathListeners(true);
@@ -2082,7 +2053,7 @@ var ManualPerfDebug = (() => {
       mode: 'passive-text-resize-and-input-recording',
       startSnapshot: textResizeSession.startSnapshot,
       textEditStartSnapshot: textResizeSession.textEditStartSnapshot,
-      recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES.slice(),
+      recordedEventTypes: TEXT_EDIT_EVENT_TYPES.slice(),
       historyRecording: options.history !== false,
       textSelectionRecording: options.textSelection !== false,
       textInputStepTracing: traceConfig,
@@ -2113,7 +2084,7 @@ var ManualPerfDebug = (() => {
     if (options.stop !== false) setTextEditMathListeners(false);
     const session = textResizeSession;
     const events = textResizeEvents.slice();
-    const domEvents = textEditMathEvents.slice();
+    const domEvents = textEditEvents.slice();
     const inputSteps = textEditInputSteps.slice();
     const out = {
       label: options.label || 'large-text-resize-input-delay',
@@ -2123,11 +2094,11 @@ var ManualPerfDebug = (() => {
       startSnapshot: session?.startSnapshot || null,
       endSnapshot: textResizeSnapshot({ includeContent: true }),
       textEditStartSnapshot: session?.textEditStartSnapshot || null,
-      textEditEndSnapshot: textEditMathSnapshot(),
+      textEditEndSnapshot: textEditSnapshot(),
       resizeSummary: textResizeSummary(events),
       resizeTimeline: textResizeTimeline({ table: false, limit: options.resizeLimit ?? options.limit ?? 800 }),
-      eventSummary: textEditMathEventSummary(domEvents),
-      eventTimeline: textEditMathTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? 800 }),
+      eventSummary: textEditEventSummary(domEvents),
+      eventTimeline: textEditTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? 800 }),
       inputStepSummary: textEditInputStepSummary(inputSteps),
       inputStepTimeline: textEditInputStepTimeline({ table: false, limit: options.inputStepLimit ?? options.limit ?? 800 }),
       viewport: viewportEventReport(options),
@@ -2144,9 +2115,9 @@ var ManualPerfDebug = (() => {
     lastJson = JSON.stringify(out, null, 2);
     if (options.clear !== false) {
       textResizeSession = null;
-      textEditMathSession = null;
+      textEditSession = null;
       textResizeLastEventAt = 0;
-      textEditMathLastEventAt = 0;
+      textEditLastEventAt = 0;
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
@@ -2169,8 +2140,6 @@ var ManualPerfDebug = (() => {
     let maxChars = 0;
     let maxLogicalLines = 0;
     let maxRenderedLines = 0;
-    let totalScriptRanges = 0;
-    let maxScriptRanges = 0;
 
     for (const obj of textObjectList()) {
       const content = normalizeTextContent(obj.data?.content || '');
@@ -2185,20 +2154,16 @@ var ManualPerfDebug = (() => {
         totalRenderedLines += renderedLines;
         maxRenderedLines = Math.max(maxRenderedLines, renderedLines);
       }
-      const scriptRanges = textObjectScriptRangeCount(obj);
       if (visible) visibleTextObjects++;
       totalChars += chars;
       totalLogicalLines += logicalLines;
       maxChars = Math.max(maxChars, chars);
       maxLogicalLines = Math.max(maxLogicalLines, logicalLines);
-      totalScriptRanges += scriptRanges;
-      maxScriptRanges = Math.max(maxScriptRanges, scriptRanges);
       rows.push({
         id: obj.id,
         chars,
         logicalLines,
         renderedLines,
-        scriptRanges,
         visible,
         x: round(obj.x),
         y: round(obj.y),
@@ -2218,8 +2183,6 @@ var ManualPerfDebug = (() => {
       maxChars,
       maxLogicalLines,
       maxRenderedLines: includeLayout ? maxRenderedLines : '',
-      totalScriptRanges,
-      maxScriptRanges,
       avgCharsPerTextObject: rows.length ? round(totalChars / rows.length) : 0,
       avgLogicalLinesPerTextObject: rows.length ? round(totalLogicalLines / rows.length) : 0,
       topTextObjects: rows.slice(0, rowLimit),
@@ -2234,8 +2197,6 @@ var ManualPerfDebug = (() => {
         maxChars: out.maxChars,
         maxLogicalLines: out.maxLogicalLines,
         maxRenderedLines: out.maxRenderedLines,
-        totalScriptRanges: out.totalScriptRanges,
-        maxScriptRanges: out.maxScriptRanges,
       }]);
       if (out.topTextObjects.length) console.table(out.topTextObjects);
     }
@@ -2272,7 +2233,6 @@ var ManualPerfDebug = (() => {
       const t0 = performance.now();
       const layout = getTextLayout(obj);
       const ms = performance.now() - t0;
-      const scriptRanges = textObjectScriptRangeCount(obj);
       objectCount++;
       renderedLines += layout.length;
       chars += content.length;
@@ -2284,7 +2244,6 @@ var ManualPerfDebug = (() => {
         chars: content.length,
         logicalLines: countTextLines(content),
         renderedLines: layout.length,
-        scriptRanges,
         visible,
       });
     }
@@ -2459,7 +2418,6 @@ var ManualPerfDebug = (() => {
       selectedChars,
       contentChars: content.length,
       logicalLines: countTextLines(content),
-      scriptRanges: textObjectScriptRangeCount(obj),
       layoutCachePresent: !!obj?._layoutCache,
       layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
       wrappedLineIndexPresent: !!obj?._textWrappedLineIndexCache,
@@ -2467,7 +2425,6 @@ var ManualPerfDebug = (() => {
       wrappedLineIndexLines: obj?._textWrappedLineIndexCache?.lineCount ?? '',
       wrappedLineCountCachePresent: Number.isFinite(obj?._textWrappedLineCountCacheValue),
       paragraphPrefixCacheEntries: obj?._textParagraphPrefixCache?.size ?? '',
-      scriptMetricsCachePresent: !!obj?._textScriptLayoutMetrics,
       x: obj?.x ?? '',
       y: obj?.y ?? '',
       w: obj?.w ?? '',
@@ -2557,7 +2514,6 @@ var ManualPerfDebug = (() => {
       history: false,
       preserveSize: true,
       placeInitialCaret: false,
-      normalizeForEdit: options.normalizeForEdit === true,
     });
     const range = largeTextSelectionRangeForObject(obj, options);
     const highlighted = normalizedMode === 'edit-highlight';
@@ -2597,9 +2553,9 @@ var ManualPerfDebug = (() => {
       TextSelDebug.reset?.();
     }
     markers.length = 0;
-    textEditMathEvents.length = 0;
+    textEditEvents.length = 0;
     textEditInputSteps.length = 0;
-    textEditMathLastEventAt = 0;
+    textEditLastEventAt = 0;
     textEditInputStepLastAt = 0;
   }
 
@@ -2666,11 +2622,11 @@ var ManualPerfDebug = (() => {
         eventLoopGapThresholdMs: options.eventLoopGapThresholdMs ?? '',
       }),
     };
-    textEditMathSession = {
+    textEditSession = {
       id: `${id}:dom-events`,
       startedAt,
       startedAtMs,
-      startSnapshot: textEditMathSnapshot(),
+      startSnapshot: textEditSnapshot(),
       traceTextInput: traceConfig,
       options: sanitizePerfMeta({
         owner: id,
@@ -2689,7 +2645,7 @@ var ManualPerfDebug = (() => {
       startSnapshot,
       layoutPrewarm,
       memoryStart: sessionStartMemory,
-      recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES.slice(),
+      recordedEventTypes: TEXT_EDIT_EVENT_TYPES.slice(),
       next: `Pan the already-open board through the four variants, then run finishDebug({ label: "${largeTextPanningLabelForMode(mode)}", perf: [["largeTextPanningReport"]] }).`,
     };
     if (options.log !== false) {
@@ -2784,7 +2740,7 @@ var ManualPerfDebug = (() => {
     }
     if (options.stop !== false) setTextEditMathListeners(false);
     const session = largeTextPanningSession;
-    const events = textEditMathEvents.slice();
+    const events = textEditEvents.slice();
     const mode = session?.mode || normalizeLargeTextPanningMode(options.mode ?? options.scenario ?? options.state);
     const endSnapshot = largeTextInteractionSnapshot({ objectId: session?.objectId || options.objectId || '', mode });
     const memoryEnd = options.memory === false ? null : await memorySnapshot('large-text-panning-finish', { ...options, table: false });
@@ -2816,8 +2772,8 @@ var ManualPerfDebug = (() => {
         layout: options.layout === true,
         limit: options.textLimit ?? options.limit ?? 20,
       }),
-      eventSummary: textEditMathEventSummary(events),
-      eventTimeline: textEditMathTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? TEXT_EDIT_MATH_MAX_EVENTS }),
+      eventSummary: textEditEventSummary(events),
+      eventTimeline: textEditTimeline({ table: false, limit: options.eventLimit ?? options.limit ?? TEXT_EDIT_MAX_EVENTS }),
       viewport,
       viewportEvents,
       textSelection: largeTextSelectionDebugReport(options),
@@ -2840,8 +2796,8 @@ var ManualPerfDebug = (() => {
     lastJson = JSON.stringify(out, null, 2);
     if (options.clear !== false) {
       largeTextPanningSession = null;
-      textEditMathSession = null;
-      textEditMathLastEventAt = 0;
+      textEditSession = null;
+      textEditLastEventAt = 0;
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
@@ -2871,9 +2827,9 @@ var ManualPerfDebug = (() => {
     wheelZoomTest,
     textBoardSummary,
     measureTextLayoutPass,
-    textEditMathBegin,
-    textEditMathReport,
-    textEditMathTimeline,
+    textEditBegin,
+    textEditReport,
+    textEditTimeline,
     textEditInputStepTimeline,
     isTextEditInputTraceActive,
     recordTextEditInputStep,

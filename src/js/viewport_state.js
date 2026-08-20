@@ -12,22 +12,9 @@
     nextZoom = Number.isFinite(nextZoom) ? (nextZoom > 0 ? nextZoom : 1) : zoom;
     nextPanX = Number.isFinite(nextPanX) ? nextPanX : panX;
     nextPanY = Number.isFinite(nextPanY) ? nextPanY : panY;
-    let x1 = Infinity;
-    let y1 = Infinity;
-    let x2 = -Infinity;
-    let y2 = -Infinity;
-    for (let i = 0; i < objects.length; i++) {
-      const obj = objects[i];
-      if (obj?.type !== 'image' && obj?.type !== 'text') continue;
-      const { x, y, w, h } = obj;
-      const right = x + w, bottom = y + h;
-      if (!Number.isFinite(right) || !Number.isFinite(bottom)) continue;
-      if (x < x1) x1 = x;
-      if (y < y1) y1 = y;
-      if (right > x2) x2 = right;
-      if (bottom > y2) y2 = bottom;
-    }
-    if (x1 !== Infinity) {
+    const bounds = _masterBounds ||= objectBounds(objects, null, true);
+    if (bounds) {
+      const { x1, y1, x2, y2 } = bounds;
       const { width, height } = boardSurfaceCssSize();
       const minPanX = -x2 * nextZoom;
       const maxPanX = width - x1 * nextZoom;
@@ -91,10 +78,29 @@
     return constrainPan(nextPanX, nextPanY, nextZoom);
   }
 
+  function screenTransformBetween(from = {}, to = {}) {
+    const fromZoom = Number(from.zoom);
+    const toZoom = Number(to.zoom);
+    if (!(fromZoom > 0) || !(toZoom > 0)) {
+      return { scale: 1, translateX: 0, translateY: 0 };
+    }
+    const scale = toZoom / fromZoom;
+    const fromPanX = Number.isFinite(Number(from.panX)) ? Number(from.panX) : 0;
+    const fromPanY = Number.isFinite(Number(from.panY)) ? Number(from.panY) : 0;
+    const toPanX = Number.isFinite(Number(to.panX)) ? Number(to.panX) : fromPanX;
+    const toPanY = Number.isFinite(Number(to.panY)) ? Number(to.panY) : fromPanY;
+    return {
+      scale,
+      translateX: toPanX - fromPanX * scale,
+      translateY: toPanY - fromPanY * scale,
+    };
+  }
+
   const api = Object.freeze({
     constrainPan,
     panBy,
     reset,
+    screenTransformBetween,
     setPan,
     setViewport,
     setZoomPan,

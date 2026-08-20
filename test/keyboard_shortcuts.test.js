@@ -71,7 +71,6 @@ function loadKeyboard(overrides = {}) {
     pushHistory: () => calls.push(['pushHistory']),
     rotateSelectedImages: () => calls.push(['rotateSelectedImages']),
     flipSelectedImages: () => calls.push(['flipSelectedImages']),
-    sortSelectedImages: (...args) => calls.push(['sortSelectedImages', ...args]),
     runAddImagesCommandFromShortcut: () => calls.push(['runAddImagesCommandFromShortcut']),
     runAddTextCommandFromShortcut: () => calls.push(['runAddTextCommandFromShortcut']),
     hideMenus: () => calls.push(['hideMenus']),
@@ -401,71 +400,6 @@ test('cmd+r rotates selected images when available', () => {
   assert.deepEqual(calls, [
     ['rotateSelectedImages'],
   ]);
-});
-
-test('cmd+j arranges two selected images without consulting the cursor point', () => {
-  const selectedIds = new Set(['image-1', 'text-1', 'image-2']);
-  const objectsMap = new Map([
-    ['image-1', { id: 'image-1', type: 'image' }],
-    ['text-1', { id: 'text-1', type: 'text' }],
-    ['image-2', { id: 'image-2', type: 'image' }],
-  ]);
-  const { calls, mainKeydown } = loadKeyboard({
-    selectedIds,
-    objectsMap,
-    boardCursorWorldPoint: () => { throw new Error('Arrange must not consult the cursor'); },
-  });
-  const event = keyEvent({
-    key: 'j',
-    code: 'KeyJ',
-    metaKey: true,
-  });
-
-  mainKeydown(event);
-
-  assert.equal(event.defaultPrevented, true);
-  assert.equal(event.propagationStopped, true);
-  assert.deepEqual(calls, [['sortSelectedImages']]);
-});
-
-test('ctrl+j is the non-Mac arrange images equivalent', () => {
-  const selectedIds = new Set(['image-1', 'image-2']);
-  const objectsMap = new Map([
-    ['image-1', { id: 'image-1', type: 'image' }],
-    ['image-2', { id: 'image-2', type: 'image' }],
-  ]);
-  const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
-  const event = keyEvent({
-    key: 'j',
-    code: 'KeyJ',
-    ctrlKey: true,
-  });
-
-  mainKeydown(event);
-
-  assert.equal(event.defaultPrevented, true);
-  assert.equal(event.propagationStopped, true);
-  assert.deepEqual(calls, [['sortSelectedImages']]);
-});
-
-test('arrange images shortcut stays native unless at least two images are selected', () => {
-  const selectedIds = new Set(['image-1', 'text-1']);
-  const objectsMap = new Map([
-    ['image-1', { id: 'image-1', type: 'image' }],
-    ['text-1', { id: 'text-1', type: 'text' }],
-  ]);
-  const { calls, mainKeydown } = loadKeyboard({ selectedIds, objectsMap });
-  const event = keyEvent({
-    key: 'j',
-    code: 'KeyJ',
-    metaKey: true,
-  });
-
-  mainKeydown(event);
-
-  assert.equal(event.defaultPrevented, false);
-  assert.equal(event.propagationStopped, false);
-  assert.deepEqual(calls, []);
 });
 
 test('cmd+f falls through to browser find when no image can flip', () => {

@@ -77,7 +77,7 @@ function motionRestDistance(motion) {
   );
 }
 
-test('text renderer uses the viewport-aware rich layout path', () => {
+test('text renderer uses the viewport-aware layout path', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnLines = [];
   const viewportRect = { x1: 0, y1: 0, x2: 200, y2: 100 };
@@ -700,7 +700,7 @@ test('text context configuration persists until canvas state resets', () => {
   });
 });
 
-test('text renderer keeps rich text drawing at low zoom instead of switching to fast text', () => {
+test('text renderer keeps measured text drawing at low zoom instead of switching to fast text', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnText = [];
   const rects = [];
@@ -727,11 +727,7 @@ test('text renderer keeps rich text drawing at low zoom instead of switching to 
         drawUnits: line.text.length,
         drawCalls: 2,
         runs: 1,
-        plainRuns: 1,
-        scriptRuns: 0,
         skippedTabs: 0,
-        hiddenChars: 0,
-        fontSwitches: 0,
       };
     },
     getTextLayout() {
@@ -758,17 +754,15 @@ test('text renderer keeps rich text drawing at low zoom instead of switching to 
   assert.equal(counters.textLines, 1);
   assert.equal(counters.drawnTextLines, 1);
   assert.equal(counters.culledTextLines, 0);
-  assert.equal(counters.richTextChars, 4);
-  assert.equal(counters.richTextDrawUnits, 4);
-  assert.equal(counters.richTextDrawCalls, 2);
-  assert.equal(counters.richTextRuns, 1);
-  assert.equal(counters.richTextPlainRuns, 1);
-  assert.equal(counters.richTextScriptRuns, 0);
-  assert.equal(counters.maxRichTextDrawUnitsPerLine, 4);
-  assert.equal(counters.maxRichTextDrawCallsPerLine, 2);
+  assert.equal(counters.textChars, 4);
+  assert.equal(counters.textDrawUnits, 4);
+  assert.equal(counters.textDrawCalls, 2);
+  assert.equal(counters.textRuns, 1);
+  assert.equal(counters.maxTextDrawUnitsPerLine, 4);
+  assert.equal(counters.maxTextDrawCallsPerLine, 2);
 });
 
-test('text renderer keeps direct rich rendering', () => {
+test('text renderer keeps direct text rendering', () => {
   const BoardfishRenderer = loadRenderer();
   const drawImageCalls = [];
   const drawnLines = [];
@@ -792,8 +786,6 @@ test('text renderer keeps direct rich rendering', () => {
         drawnChars: line.text.length,
         drawUnits: line.text.length,
         runs: 1,
-        plainRuns: 1,
-        scriptRuns: 0,
       };
     },
     getTextLayout() {
@@ -823,10 +815,10 @@ test('text renderer keeps direct rich rendering', () => {
   assert.deepEqual(drawImageCalls, []);
   assert.equal(counters.textLines, 2);
   assert.equal(counters.drawnTextLines, 2);
-  assert.equal(counters.richTextDirectDraws, 1);
+  assert.equal(counters.textDirectDraws, 1);
 });
 
-test('animated text keeps direct rich rendering', () => {
+test('animated text keeps direct text rendering', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnLines = [];
   const context = {
@@ -851,12 +843,10 @@ test('animated text keeps direct rich rendering', () => {
         drawnChars: line.text.length,
         drawUnits: line.text.length,
         runs: 1,
-        plainRuns: 1,
-        scriptRuns: 0,
       };
     },
     getTextLayout() {
-      return [{ text: 'moving rich text', y: 20, textY: 36 }];
+      return [{ text: 'moving text', y: 20, textY: 36 }];
     },
     getWrappedLines: () => [],
     lineHeight: 24,
@@ -874,8 +864,8 @@ test('animated text keeps direct rich rendering', () => {
 
   renderer.drawVisibleObjects(context, counters);
 
-  assert.deepEqual(drawnLines, ['moving rich text']);
-  assert.equal(counters.richTextDirectDraws, 1);
+  assert.deepEqual(drawnLines, ['moving text']);
+  assert.equal(counters.textDirectDraws, 1);
 });
 
 test('animated text draws source lines that jiggle down into the viewport', () => {
@@ -936,7 +926,7 @@ test('animated text draws source lines that jiggle down into the viewport', () =
   assert.deepEqual(drawnLines, ['above', 'visible']);
 });
 
-test('text renderer records slow rich text line timing rows for debug captures', () => {
+test('text renderer records slow text line timing rows for debug captures', () => {
   let now = 0;
   const BoardfishRenderer = loadRenderer({
     performance: {
@@ -958,12 +948,8 @@ test('text renderer records slow rich text line timing rows for debug captures',
         drawnChars: line.text.length,
         drawUnits: line.text.length,
         runs: 1,
-        plainRuns: 1,
-        scriptRuns: 0,
         skippedTabs: 0,
         skippedSpaces: 1,
-        hiddenChars: 0,
-        fontSwitches: 0,
         planCacheHits: 1,
         planCacheMisses: 0,
       };
@@ -988,9 +974,9 @@ test('text renderer records slow rich text line timing rows for debug captures',
 
   renderer.drawVisibleObjects({ fillStyle: '', textBaseline: '' }, counters);
 
-  assert.equal(counters.richTextLineDrawMs, 2);
-  assert.equal(counters.maxRichTextLineDrawMs, 1);
-  assert.equal(counters.slowRichTextLineDraws, 2);
+  assert.equal(counters.textLineDrawMs, 2);
+  assert.equal(counters.maxTextLineDrawMs, 1);
+  assert.equal(counters.slowTextLineDrawCount, 2);
   assert.equal(counters.slowTextLineDraws.length, 2);
   const lineRows = counters.slowTextLineDraws.slice().sort((a, b) => a.lineIndex - b.lineIndex);
   assert.equal(lineRows[0].objectId, 'text-1');
@@ -999,8 +985,8 @@ test('text renderer records slow rich text line timing rows for debug captures',
   assert.equal(lineRows[0].drawUnits, 10);
   assert.equal(lineRows[1].logicalLineIndex, 1);
   assert.equal(lineRows[1].sample, 'second line');
-  assert.equal(counters.slowDrawObjects[0].richTextLineDrawMs, 2);
-  assert.equal(counters.slowDrawObjects[0].slowRichTextLineDraws, 2);
+  assert.equal(counters.slowDrawObjects[0].textLineDrawMs, 2);
+  assert.equal(counters.slowDrawObjects[0].slowTextLineDrawCount, 2);
   assert.equal(counters.slowDrawObjects[0].slowTextLineRows.length, 2);
 });
 

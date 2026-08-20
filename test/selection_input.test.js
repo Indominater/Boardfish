@@ -137,10 +137,10 @@ function loadSelectionInputHarness(objects, options = {}) {
     },
     drawBoard() { context.drawBoardCalls++; },
     scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
-    syncTextAutoHeight(obj) {
+    syncTextAutoHeight(obj, minLines) {
       context.syncedTextIds.push(obj.id);
       if (options.syncTextAutoHeight) {
-        return options.syncTextAutoHeight(obj, context);
+        return options.syncTextAutoHeight(obj, context, minLines);
       }
       obj.h = Math.max(32, Math.round(obj.h));
       return true;
@@ -148,7 +148,13 @@ function loadSelectionInputHarness(objects, options = {}) {
     getTextMinWidth(obj) {
       return options.getTextMinWidth ? options.getTextMinWidth(obj, context) : 100;
     },
-    getTextMinLines: () => 1,
+    getTextMinLines: (obj) => obj?.id === context.editingId ? (obj._editMinLines || 1) : 1,
+    resetTextEditPreservedMinLines(obj) {
+      if (!obj || obj.type !== 'text' || !obj._textEditPreservedMinLines) return false;
+      obj._editMinLines = 1;
+      delete obj._textEditPreservedMinLines;
+      return true;
+    },
     markDirty(obj) { context.dirty.push(obj.id); },
     pushHistory(reason, dirty, beforeEditState) {
       for (const item of dirty || []) context.dirty.push(item?.obj?.id ?? item?.id ?? item);
@@ -550,6 +556,44 @@ test('single text horizontal resize anchors the opposite side after auto-height 
   assert.equal(text.w, 240);
   assert.equal(text.h, 80);
   assert.deepEqual(context.motionPulses, []);
+});
+
+test('resizing an undo-restored text edit releases its preserved height minimum', () => {
+  const text = {
+    id: 'text-a',
+    type: 'text',
+    x: 0,
+    y: 0,
+    w: 200,
+    h: 632,
+    data: { content: 'word '.repeat(5000) },
+    _editMinLines: 25,
+    _textEditPreservedMinLines: 25,
+  };
+  const context = loadSelectionInputHarness([text], {
+    syncTextAutoHeight(obj, _context, minLines) {
+      obj.h = Math.max(10, minLines) * 24 + 32;
+      return true;
+    },
+  });
+  context.editingId = text.id;
+
+  context.beginSelectionHandleDrag({
+    dataset: { dir: 'e' },
+  }, {
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  context.drag.move({ clientX: 80, clientY: 0 });
+  context.drag.up();
+
+  assert.equal(text.w, 280);
+  assert.equal(text.h, 272);
+  assert.equal(text._editMinLines, 1);
+  assert.equal(text._textEditPreservedMinLines, undefined);
 });
 
 test('single text horizontal resize clamps to the measured word minimum width', () => {

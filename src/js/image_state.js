@@ -298,15 +298,14 @@ function scheduleOpenInitialImagePreviewRequestQueue() {
   imageOpenPreviewRequestScheduled = true;
   setTimeout(() => {
     imageOpenPreviewRequestScheduled = false;
+    const done = () => {
+      imageOpenPreviewRequestActive--;
+      if (imageOpenPreviewRequestQueue.length) scheduleOpenInitialImagePreviewRequestQueue();
+    };
     while (imageOpenPreviewRequestActive < MAX_DYNAMIC_OPEN_PREVIEW_ACTIVE && imageOpenPreviewRequestQueue.length) {
       const task = imageOpenPreviewRequestQueue.shift();
       imageOpenPreviewRequestActive++;
-      task()
-        .catch(() => {})
-        .finally(() => {
-          imageOpenPreviewRequestActive = Math.max(0, imageOpenPreviewRequestActive - 1);
-          if (imageOpenPreviewRequestQueue.length) scheduleOpenInitialImagePreviewRequestQueue();
-        });
+      task().then(done, done);
     }
   }, 0);
 }
@@ -646,15 +645,14 @@ function processImageDecodeQueue() {
   const activeLimit = (typeof _boardOpening !== 'undefined' && _boardOpening)
     ? MAX_OPEN_IMAGE_DECODE_ACTIVE
     : MAX_IMAGE_DECODE_ACTIVE;
+  const done = () => {
+    _imageDecodeActive--;
+    if (_imageDecodeQueue.length) scheduleImageDecodeQueue();
+  };
   while (_imageDecodeActive < activeLimit && _imageDecodeQueue.length) {
     const task = _imageDecodeQueue.shift();
     _imageDecodeActive++;
-    task()
-      .catch(() => {})
-      .finally(() => {
-        _imageDecodeActive = Math.max(0, _imageDecodeActive - 1);
-        if (_imageDecodeQueue.length) scheduleImageDecodeQueue();
-      });
+    task().then(done, done);
   }
 }
 

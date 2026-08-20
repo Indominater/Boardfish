@@ -71,26 +71,22 @@
       textCharCount: 0,
       largestTextChars: 0,
       largestTextLayoutLines: 0,
-      richTextChars: 0,
-      richTextDrawnChars: 0,
-      richTextDrawUnits: 0,
-      richTextDrawCalls: 0,
-      richTextRuns: 0,
-      richTextPlainRuns: 0,
-      richTextScriptRuns: 0,
-      richTextSkippedTabs: 0,
-      richTextSkippedSpaces: 0,
-      richTextHiddenChars: 0,
-      richTextFontSwitches: 0,
-      richTextPlanCacheHits: 0,
-      richTextPlanCacheMisses: 0,
-      richTextLineDrawMs: 0,
-      maxRichTextLineDrawMs: 0,
-      slowRichTextLineDraws: 0,
-      maxRichTextDrawUnitsPerLine: 0,
-      maxRichTextDrawCallsPerLine: 0,
-      maxRichTextRunsPerLine: 0,
-      richTextDirectDraws: 0,
+      textChars: 0,
+      textDrawnChars: 0,
+      textDrawUnits: 0,
+      textDrawCalls: 0,
+      textRuns: 0,
+      textSkippedTabs: 0,
+      textSkippedSpaces: 0,
+      textPlanCacheHits: 0,
+      textPlanCacheMisses: 0,
+      textLineDrawMs: 0,
+      maxTextLineDrawMs: 0,
+      slowTextLineDrawCount: 0,
+      maxTextDrawUnitsPerLine: 0,
+      maxTextDrawCallsPerLine: 0,
+      maxTextRunsPerLine: 0,
+      textDirectDraws: 0,
       imageSourceDraws: 0,
       imageSourceFirstDraws: 0,
       imageSourceWarmDraws: 0,
@@ -272,43 +268,39 @@
     counters[key] = list;
   }
 
-  function addRichTextDrawStats(counters, stats) {
+  function addTextDrawStats(counters, stats) {
     const add = (field, sourceField = field) => {
       counters[field] = (counters[field] || 0) + (Number(stats[sourceField]) || 0);
     };
-    add('richTextChars', 'chars');
-    add('richTextDrawnChars', 'drawnChars');
-    add('richTextDrawUnits', 'drawUnits');
-    add('richTextDrawCalls', 'drawCalls');
-    add('richTextRuns', 'runs');
-    add('richTextPlainRuns', 'plainRuns');
-    add('richTextScriptRuns', 'scriptRuns');
-    add('richTextSkippedTabs', 'skippedTabs');
-    add('richTextSkippedSpaces', 'skippedSpaces');
-    add('richTextHiddenChars', 'hiddenChars');
-    add('richTextFontSwitches', 'fontSwitches');
-    add('richTextPlanCacheHits', 'planCacheHits');
-    add('richTextPlanCacheMisses', 'planCacheMisses');
-    counters.maxRichTextDrawUnitsPerLine = Math.max(
-      counters.maxRichTextDrawUnitsPerLine || 0,
+    add('textChars', 'chars');
+    add('textDrawnChars', 'drawnChars');
+    add('textDrawUnits', 'drawUnits');
+    add('textDrawCalls', 'drawCalls');
+    add('textRuns', 'runs');
+    add('textSkippedTabs', 'skippedTabs');
+    add('textSkippedSpaces', 'skippedSpaces');
+    add('textPlanCacheHits', 'planCacheHits');
+    add('textPlanCacheMisses', 'planCacheMisses');
+    counters.maxTextDrawUnitsPerLine = Math.max(
+      counters.maxTextDrawUnitsPerLine || 0,
       Number(stats.drawUnits) || 0,
     );
-    counters.maxRichTextDrawCallsPerLine = Math.max(
-      counters.maxRichTextDrawCallsPerLine || 0,
+    counters.maxTextDrawCallsPerLine = Math.max(
+      counters.maxTextDrawCallsPerLine || 0,
       Number(stats.drawCalls) || 0,
     );
-    counters.maxRichTextRunsPerLine = Math.max(
-      counters.maxRichTextRunsPerLine || 0,
+    counters.maxTextRunsPerLine = Math.max(
+      counters.maxTextRunsPerLine || 0,
       Number(stats.runs) || 0,
     );
   }
 
-  function recordRichTextLineDraw(counters, obj, line, lineIndex, stats, ms, deps) {
+  function recordTextLineDraw(counters, obj, line, lineIndex, stats, ms, deps) {
     if (!counters || !Number.isFinite(ms) || ms < 0) return;
-    counters.richTextLineDrawMs = (counters.richTextLineDrawMs || 0) + ms;
-    counters.maxRichTextLineDrawMs = Math.max(counters.maxRichTextLineDrawMs || 0, ms);
+    counters.textLineDrawMs = (counters.textLineDrawMs || 0) + ms;
+    counters.maxTextLineDrawMs = Math.max(counters.maxTextLineDrawMs || 0, ms);
     if (ms < SLOW_TEXT_LINE_DRAW_THRESHOLD_MS) return;
-    counters.slowRichTextLineDraws = (counters.slowRichTextLineDraws || 0) + 1;
+    counters.slowTextLineDrawCount = (counters.slowTextLineDrawCount || 0) + 1;
     const viewZoom = Number(deps?.zoom?.()) || 0;
     const viewDpr = Number(deps?.dpr?.()) || 1;
     const deviceScale = Math.max(viewZoom, 0) * Math.max(viewDpr, 1);
@@ -326,11 +318,8 @@
       drawUnits: Number(stats?.drawUnits) || 0,
       drawCalls: Number(stats?.drawCalls) || 0,
       runs: Number(stats?.runs) || 0,
-      plainRuns: Number(stats?.plainRuns) || 0,
-      scriptRuns: Number(stats?.scriptRuns) || 0,
       skippedSpaces: Number(stats?.skippedSpaces) || 0,
       skippedTabs: Number(stats?.skippedTabs) || 0,
-      hiddenChars: Number(stats?.hiddenChars) || 0,
       planCacheHits: Number(stats?.planCacheHits) || 0,
       planCacheMisses: Number(stats?.planCacheMisses) || 0,
       y: Number.isFinite(Number(line?.y)) ? roundDebugMs(Number(line.y)) : '',
@@ -376,18 +365,16 @@
       row.textLines = drawCounterValue(counters, 'textLines') - before.textLines;
       row.drawnTextLines = drawCounterValue(counters, 'drawnTextLines') - before.drawnTextLines;
       row.culledTextLines = drawCounterValue(counters, 'culledTextLines') - before.culledTextLines;
-      row.richTextDrawUnits = drawCounterValue(counters, 'richTextDrawUnits') - before.richTextDrawUnits;
-      row.richTextDrawCalls = drawCounterValue(counters, 'richTextDrawCalls') - before.richTextDrawCalls;
-      row.richTextRuns = drawCounterValue(counters, 'richTextRuns') - before.richTextRuns;
-      row.richTextScriptRuns = drawCounterValue(counters, 'richTextScriptRuns') - before.richTextScriptRuns;
-      row.richTextSkippedTabs = drawCounterValue(counters, 'richTextSkippedTabs') - before.richTextSkippedTabs;
-      row.richTextSkippedSpaces = drawCounterValue(counters, 'richTextSkippedSpaces') - before.richTextSkippedSpaces;
-      row.richTextHiddenChars = drawCounterValue(counters, 'richTextHiddenChars') - before.richTextHiddenChars;
-      row.richTextPlanCacheHits = drawCounterValue(counters, 'richTextPlanCacheHits') - before.richTextPlanCacheHits;
-      row.richTextPlanCacheMisses = drawCounterValue(counters, 'richTextPlanCacheMisses') - before.richTextPlanCacheMisses;
-      row.richTextLineDrawMs = roundDebugMs(drawCounterValue(counters, 'richTextLineDrawMs') - before.richTextLineDrawMs);
-      row.slowRichTextLineDraws = drawCounterValue(counters, 'slowRichTextLineDraws') - before.slowRichTextLineDraws;
-      row.richTextDirectDraws = drawCounterValue(counters, 'richTextDirectDraws') - before.richTextDirectDraws;
+      row.textDrawUnits = drawCounterValue(counters, 'textDrawUnits') - before.textDrawUnits;
+      row.textDrawCalls = drawCounterValue(counters, 'textDrawCalls') - before.textDrawCalls;
+      row.textRuns = drawCounterValue(counters, 'textRuns') - before.textRuns;
+      row.textSkippedTabs = drawCounterValue(counters, 'textSkippedTabs') - before.textSkippedTabs;
+      row.textSkippedSpaces = drawCounterValue(counters, 'textSkippedSpaces') - before.textSkippedSpaces;
+      row.textPlanCacheHits = drawCounterValue(counters, 'textPlanCacheHits') - before.textPlanCacheHits;
+      row.textPlanCacheMisses = drawCounterValue(counters, 'textPlanCacheMisses') - before.textPlanCacheMisses;
+      row.textLineDrawMs = roundDebugMs(drawCounterValue(counters, 'textLineDrawMs') - before.textLineDrawMs);
+      row.slowTextLineDrawCount = drawCounterValue(counters, 'slowTextLineDrawCount') - before.slowTextLineDrawCount;
+      row.textDirectDraws = drawCounterValue(counters, 'textDirectDraws') - before.textDirectDraws;
       row.slowTextLineRows = [];
       const slowLineRows = Array.isArray(counters.slowTextLineDraws) ? counters.slowTextLineDraws : [];
       for (const lineRow of slowLineRows) {
@@ -395,10 +382,9 @@
         row.slowTextLineRows.push({ ...lineRow });
         if (row.slowTextLineRows.length >= 6) break;
       }
-      row.richTextUnitsPerLine = row.drawnTextLines > 0
-        ? Math.round(row.richTextDrawUnits / row.drawnTextLines * 100) / 100
+      row.textUnitsPerLine = row.drawnTextLines > 0
+        ? Math.round(row.textDrawUnits / row.drawnTextLines * 100) / 100
         : 0;
-      row.scriptRanges = Array.isArray(obj.data?.scriptRanges) ? obj.data.scriptRanges.length : 0;
       const lineHeightDevicePx = deps
         ? (Number(deps.lineHeight || 0) || 0) *
           Math.max(Number(deps.zoom?.()) || 0, 0) *
@@ -492,7 +478,7 @@
           counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
           counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
         }
-        if (counters) counters.richTextDirectDraws = (counters.richTextDirectDraws || 0) + 1;
+        if (counters) counters.textDirectDraws = (counters.textDirectDraws || 0) + 1;
         let drawnLineCount = 0;
         let layoutLineIndex = -1;
         for (const line of layout) {
@@ -507,9 +493,9 @@
             line.text?.length ?? 0,
             counters ? TEXT_DRAW_STATS_ENABLED : TEXT_DRAW_STATS_DISABLED,
           );
-          if (counters && drawStats) addRichTextDrawStats(counters, drawStats);
+          if (counters && drawStats) addTextDrawStats(counters, drawStats);
           if (counters && typeof performance !== 'undefined') {
-            recordRichTextLineDraw(counters, obj, line, layoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
+            recordTextLineDraw(counters, obj, line, layoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
           }
         }
         if (counters) {
@@ -667,18 +653,16 @@
           motionActiveInputFullFallbackImages: drawCounterValue(counters, 'motionActiveInputFullFallbackImages'),
           scaledImageScaleTotal: drawCounterValue(counters, 'scaledImageScaleTotal'),
           scaledImageTargetScaleTotal: drawCounterValue(counters, 'scaledImageTargetScaleTotal'),
-          richTextDrawUnits: drawCounterValue(counters, 'richTextDrawUnits'),
-          richTextDrawCalls: drawCounterValue(counters, 'richTextDrawCalls'),
-          richTextRuns: drawCounterValue(counters, 'richTextRuns'),
-          richTextScriptRuns: drawCounterValue(counters, 'richTextScriptRuns'),
-          richTextSkippedTabs: drawCounterValue(counters, 'richTextSkippedTabs'),
-          richTextSkippedSpaces: drawCounterValue(counters, 'richTextSkippedSpaces'),
-          richTextHiddenChars: drawCounterValue(counters, 'richTextHiddenChars'),
-          richTextPlanCacheHits: drawCounterValue(counters, 'richTextPlanCacheHits'),
-          richTextPlanCacheMisses: drawCounterValue(counters, 'richTextPlanCacheMisses'),
-          richTextLineDrawMs: drawCounterValue(counters, 'richTextLineDrawMs'),
-          slowRichTextLineDraws: drawCounterValue(counters, 'slowRichTextLineDraws'),
-          richTextDirectDraws: drawCounterValue(counters, 'richTextDirectDraws'),
+          textDrawUnits: drawCounterValue(counters, 'textDrawUnits'),
+          textDrawCalls: drawCounterValue(counters, 'textDrawCalls'),
+          textRuns: drawCounterValue(counters, 'textRuns'),
+          textSkippedTabs: drawCounterValue(counters, 'textSkippedTabs'),
+          textSkippedSpaces: drawCounterValue(counters, 'textSkippedSpaces'),
+          textPlanCacheHits: drawCounterValue(counters, 'textPlanCacheHits'),
+          textPlanCacheMisses: drawCounterValue(counters, 'textPlanCacheMisses'),
+          textLineDrawMs: drawCounterValue(counters, 'textLineDrawMs'),
+          slowTextLineDrawCount: drawCounterValue(counters, 'slowTextLineDrawCount'),
+          textDirectDraws: drawCounterValue(counters, 'textDirectDraws'),
           imageSourceFirstDraws: drawCounterValue(counters, 'imageSourceFirstDraws'),
           imageSourceWarmDraws: drawCounterValue(counters, 'imageSourceWarmDraws'),
           imageContextFirstDraws: drawCounterValue(counters, 'imageContextFirstDraws'),

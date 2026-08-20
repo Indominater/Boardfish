@@ -71,7 +71,6 @@ function openMenuAt(menu, x, y) {
   const bounds = menuViewportBounds();
   menu.style.left = `${Math.round(clampMenuCoord(x, rect.width, bounds.left, bounds.right))}px`;
   menu.style.top = `${Math.round(clampMenuCoord(y, rect.height, bounds.top, bounds.bottom))}px`;
-  return bounds;
 }
 
 const closeFloatingSurface = (surface) => {
@@ -95,13 +94,12 @@ function openCtxMenuAt(x, y) {
   ctxMenu.classList.add('visible');
   ctxActions.classList.add('visible');
   const { gap, left, right, top, bottom } = menuViewportBounds();
-  const menuRect = ctxMenu.getBoundingClientRect();
-  const menuWidth = ctxMenu.offsetWidth;
+  const { width: menuWidth, height: menuHeight } = ctxMenu.getBoundingClientRect();
   const actionWidth = ctxActions.offsetWidth;
   const minActionLeft = left + gap;
   const maxActionRight = right - gap;
   const maxActionLeft = Math.max(minActionLeft, maxActionRight - actionWidth);
-  let menuLeft = Math.round(clampMenuCoord(x, menuRect.width, left, right));
+  let menuLeft = Math.round(clampMenuCoord(x, menuWidth, left, right));
   if (menuLeft <= left + MENU_VIEWPORT_EDGE_MARGIN) menuLeft = minActionLeft;
   let actionLeft = menuLeft + menuWidth + gap;
 
@@ -116,7 +114,7 @@ function openCtxMenuAt(x, y) {
   }
 
   ctxMenu.style.left = `${Math.round(menuLeft)}px`;
-  ctxMenu.style.top = `${Math.round(clampMenuCoord(y, menuRect.height, top, bottom))}px`;
+  ctxMenu.style.top = `${Math.round(clampMenuCoord(y, menuHeight, top, bottom))}px`;
   ctxActions.style.left = `${Math.round(actionLeft)}px`;
   ctxActions.style.top = ctxMenu.style.top;
 }
@@ -192,7 +190,6 @@ var MENU_COMMANDS = {
     duplicateSelected(point);
   },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
-  'obj-btn-arrange-images': () => { sortSelectedImages(); },
   'obj-btn-flip': () => { flipSelectedImages(); },
   'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
   'obj-btn-save-image': () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); },
@@ -251,11 +248,9 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
     : normalizedText;
   if (inputTypeValue.includes('paste') && !replacementText) return false;
   const oldValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
-  const obj = objectsMap.get(editingId);
   const replacementState = {
     ...selection,
     value: oldValue,
-    scriptRanges: typeof textEditScriptRanges === 'function' && obj ? textEditScriptRanges(obj) : [],
     inputType,
     replacement: {
       start: selection.start,
@@ -486,7 +481,6 @@ var SHORTCUT_MENU_COMMANDS = {
   'move-to-back': [['obj-ctx-menu', 'obj-btn-move-to-back']],
   'flip-image': [['obj-ctx-menu', 'obj-btn-flip']],
   'rotate-image': [['obj-ctx-menu', 'obj-btn-rotate']],
-  'arrange-images': [['obj-ctx-menu', 'obj-btn-arrange-images']],
   'export-image': [
     ['obj-ctx-menu', 'obj-btn-save-image'],
     ['obj-ctx-menu', 'obj-btn-save-images'],
@@ -662,7 +656,6 @@ function updateObjMenuActions() {
   objectActionsSep.style.display = showImageActions ? 'block' : 'none';
   flipBtn.style.display = showImageActions ? '' : 'none';
   rotateBtn.style.display = showImageActions ? '' : 'none';
-  arrangeImagesBtn.style.display = imageCount >= 2 ? '' : 'none';
   saveImageBtn.style.display = !multiSelected && imageCount === 1 ? '' : 'none';
   saveImagesBtn.firstElementChild.textContent = imageCount === 1 ? 'Export Image' : 'Export Images';
   saveImagesBtn.style.display = multiSelected && imageCount >= 1 ? '' : 'none';

@@ -27,13 +27,6 @@ function cloneObject(obj, runtimeTextCache = false) {
     data = { content };
     const sourceLineAlign = obj.data?.lineAlign;
     if (Array.isArray(sourceLineAlign) && sourceLineAlign.length) data.lineAlign = sourceLineAlign.slice();
-    const sourceScriptRanges = obj.data?.scriptRanges;
-    if (Array.isArray(sourceScriptRanges) && sourceScriptRanges.length) {
-      const scriptRanges = obj._textScriptRangesCache !== sourceScriptRanges || obj._textScriptRangesCacheContent !== content
-        ? normalizeTextScriptRangesForContent(content, sourceScriptRanges)
-        : cloneTextScriptRanges(sourceScriptRanges);
-      if (scriptRanges.length) data.scriptRanges = scriptRanges;
-    }
   }
   const cloned = {
     id: obj.id,
@@ -139,57 +132,6 @@ function rotateSelectedImages(dir) {
       rotated = true;
     }
     return rotated;
-  }, { invalidate: true });
-}
-
-const imageSortGeometryMatches = (obj, placement) => {
-  const matches = (left, right) => (
-    Math.abs(left - right) <= Math.max(1, Math.abs(left), Math.abs(right)) * 1e-12
-  );
-  return matches(obj.x, placement.x) && matches(obj.y, placement.y) &&
-    matches(obj.w, placement.w) && matches(obj.h, placement.h);
-};
-
-function sortSelectedImages() {
-  const selectedImages = [];
-  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (!obj) continue;
-    x1 = Math.min(x1, obj.x); y1 = Math.min(y1, obj.y);
-    x2 = Math.max(x2, obj.x + obj.w); y2 = Math.max(y2, obj.y + obj.h);
-    if (obj.type === 'image') selectedImages.push(obj);
-  }
-  if (selectedImages.length < 2 || !isFinite(x1) || !isFinite(y1) || !isFinite(x2) || !isFinite(y2)) return false;
-  const center = {
-    x: (x1 + x2) / 2,
-    y: (y1 + y2) / 2,
-  };
-  const layout = BoardfishImageLayout.planGoldenRatioImageLayout(
-    selectedImages,
-    center,
-    { shuffleOrder: true, randomizeTies: true },
-  );
-  if (!layout || layout.placements.length < 2) return false;
-  let geometryChanged = false;
-  for (const placement of layout.placements) {
-    if (!imageSortGeometryMatches(objectsMap.get(placement.id), placement)) {
-      geometryChanged = true;
-      break;
-    }
-  }
-  if (!geometryChanged) return false;
-
-  return BoardfishEditorState.commitMutation('sort-images', () => {
-    for (const placement of layout.placements) {
-      const obj = objectsMap.get(placement.id);
-      obj.x = placement.x;
-      obj.y = placement.y;
-      obj.w = placement.w;
-      obj.h = placement.h;
-      markDirty(obj);
-    }
-    return true;
   }, { invalidate: true });
 }
 

@@ -179,7 +179,6 @@ var TextSelDebug = (() => {
       culledLines: lines.length ? Math.max(0, lines.length - visibleLineCount(lines)) : 0,
       largestLineChars,
       prefixEntries,
-      scriptRanges: Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges.length : 0,
     };
   }
 
@@ -197,7 +196,6 @@ var TextSelDebug = (() => {
       culledLines: '',
       largestLineChars: '',
       prefixEntries: '',
-      scriptRanges: Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges.length : 0,
     };
   }
 
@@ -349,7 +347,6 @@ var TextSelDebug = (() => {
       source: e.source || '',
       fallbackTextChars: e.fallbackTextChars ?? '',
       candidateTextLen: e.candidateTextLen ?? '',
-      candidateScriptRangeCount: e.candidateScriptRangeCount ?? '',
       sourceTextLen: e.sourceTextLen ?? '',
       oldChars: e.oldChars ?? '',
       nextChars: e.nextChars ?? '',
@@ -359,7 +356,6 @@ var TextSelDebug = (() => {
       textBytes: e.textBytes ?? '',
       textLineCount: e.textLineCount ?? '',
       largestLineChars: e.largestLineChars ?? '',
-      scriptRangeCount: e.scriptRangeCount ?? '',
       replacementStart: e.replacementStart ?? '',
       replacementEnd: e.replacementEnd ?? '',
       replacementChars: e.replacementChars ?? '',
@@ -388,8 +384,6 @@ var TextSelDebug = (() => {
       setRangeTextMs: e.setRangeTextMs ?? '',
       dispatchMs: e.dispatchMs ?? '',
       contentNormalized: e.contentNormalized ?? '',
-      scriptRangesNormalized: e.scriptRangesNormalized ?? '',
-      bracesNormalized: e.bracesNormalized ?? '',
       lineAlignNormalized: e.lineAlignNormalized ?? '',
       autoHeightDeferred: e.autoHeightDeferred ?? '',
       pendingSizeSync: e.pendingSizeSync ?? '',
@@ -512,7 +506,6 @@ var TextSelDebug = (() => {
       wx: e.wx != null ? round(e.wx) : '',
       wy: e.wy != null ? round(e.wy) : '',
       returnedIdx: e.returnedIdx ?? '',
-      affinity: e.affinity || '',
       lineStartIndex: e.lineStartIndex ?? '',
       selStart: e.selStart ?? '',
       selEnd: e.selEnd ?? '',
@@ -974,7 +967,6 @@ var TextSelDebug = (() => {
         label,
         objectId: obj?.id || '',
         returnedIdx: hit?.index ?? '',
-        affinity: hit?.affinity || '',
         lineStartIndex: hit?.lineStartIndex ?? '',
         ms: round(ms),
         ...layoutMetrics(obj),

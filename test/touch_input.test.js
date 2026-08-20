@@ -196,6 +196,13 @@ test('mobile browsers feed complete TouchEvent snapshots into the gesture contro
   assert.doesNotMatch(touchInputSource, /event\.targetTouches \|\| event\.touches/);
 });
 
+test('mobile pinch zoom uses the compositor preview and commits it when the pinch ends', () => {
+  assert.match(touchInputSource, /function beginTouchPinch\(\)[\s\S]*BoardfishViewportPreview\?\.begin/);
+  assert.match(touchInputSource, /function applyTouchPinch\(gesture\)[\s\S]*BoardfishViewportPreview\?\.update/);
+  assert.match(touchInputSource, /onPinchEnd:[\s\S]*finishTouchPinch\(gesture\)/);
+  assert.match(touchInputSource, /function finishTouchPinch\(gesture = null\)[\s\S]*BoardfishViewportPreview\?\.commit/);
+});
+
 test('a simultaneous two-finger lift commits one coherent final separation once', () => {
   const harness = makeGestureHarness();
   harness.controller.pointerDown(point(1, 0, 0));

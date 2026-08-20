@@ -367,11 +367,13 @@
   function beginTouchPinch() {
     finishTouchSelectionDrag();
     touchPinchStartViewport = { panX, panY, zoom };
+    globalThis.BoardfishViewportPreview?.begin?.();
   }
 
   function applyTouchPinch(gesture) {
     if (!boardNavigationAllowed()) return;
     const start = touchPinchStartViewport;
+    if (!start) return;
     const nextZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, start.zoom * gesture.scale));
     const scale = nextZoom / start.zoom;
     const changed = BoardfishViewportState.setZoomPan(
@@ -379,8 +381,16 @@
       gesture.centerX - (gesture.startCenterX - start.panX) * scale,
       gesture.centerY - (gesture.startCenterY - start.panY) * scale,
     );
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(changed, 'touch-pinch-zoom', gesture.event);
-    else scheduleTransform(changed);
+    const previewed = globalThis.BoardfishViewportPreview?.update?.(gesture.event) === true;
+    if (!previewed) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(changed, 'touch-pinch-zoom', gesture.event);
+      else scheduleTransform(changed);
+    }
+  }
+
+  function finishTouchPinch(gesture = null) {
+    touchPinchStartViewport = null;
+    globalThis.BoardfishViewportPreview?.commit?.(gesture?.event || null);
   }
 
   const controller = createTouchGestureController({
@@ -390,9 +400,12 @@
     onPan: applyTouchPan,
     onPinchStart: beginTouchPinch,
     onPinch: applyTouchPinch,
+    onPinchEnd: (gesture) => {
+      if (controller.activeCount() < 2) finishTouchPinch(gesture);
+    },
     onGestureEnd: (gesture) => {
       finishTouchSelectionDrag(gesture);
-      touchPinchStartViewport = null;
+      if (touchPinchStartViewport) finishTouchPinch(gesture);
     },
   });
 
@@ -429,7 +442,6 @@
     if (event.pointerType !== 'touch') return;
     preventTouchDefault(event);
     markTouchCompatibilityWindow();
-    if (!boardNavigationAllowed()) return;
     captureTouchPointer(event);
     controller.pointerDown(event);
   }

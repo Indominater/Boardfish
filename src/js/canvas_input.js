@@ -560,12 +560,7 @@ function applyTextEditCaretHit(obj, proxy, hit) {
   const textContent = obj.data?.content || '';
   const index = hit.index;
   setTextEditProxySelectionRange(proxy, index, index, 'none', textContent);
-  if (hit.affinity) {
-    setTextScriptCaretAffinity(obj, index, hit.affinity);
-  } else {
-    clearTextScriptCaretAffinity(obj);
-    setTextEditCaretIndex(obj, index, hit.lineStartIndex);
-  }
+  setTextEditCaretIndex(obj, index, hit.lineStartIndex);
 }
 
 function startTextSelectionDrag(e, obj, wp) {
@@ -617,7 +612,6 @@ function startTextSelectionDrag(e, obj, wp) {
     if (clickIdx === endIdx) applyTextEditCaretHit(obj, el, endHit);
     else if (el.selectionStart !== start || el.selectionEnd !== end) {
       setTextEditProxySelectionRange(el, start, end, 'none', obj.data?.content || '');
-      clearTextScriptCaretAffinity(obj);
       clearTextEditCaretIndex(obj);
     } else return;
     TextSelDebug._logSelection('mouse-drag', el, obj);
@@ -716,7 +710,6 @@ function startObjectDrag(e, obj) {
           logClickEditStep('click-to-edit-hit', {
             hitMs: canvasInputDebugRound(canvasInputNow() - hitStart),
             returnedIdx: clickHit?.index ?? '',
-            affinity: clickHit?.affinity || '',
             lineStartIndex: clickHit?.lineStartIndex ?? '',
           });
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -728,8 +721,6 @@ function startObjectDrag(e, obj) {
             selectionStart: _editEl.selectionStart ?? '',
             selectionEnd: _editEl.selectionEnd ?? '',
             selectionDirection: _editEl.selectionDirection || 'none',
-            scriptCaretIndex: obj._textScriptCaretIndex ?? '',
-            scriptCaretAffinity: obj._textScriptCaretAffinity || '',
             textEditCaretIndex: obj._textEditCaretIndex ?? '',
             textEditCaretLineStartIndex: obj._textEditCaretLineStartIndex ?? '',
           });
@@ -778,11 +769,6 @@ canvas.addEventListener('mousedown', (e) => {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const mouseDownStart = canvasInputNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (isBoardInputBlocked() && !(isBoardNavigationAllowedWhileBlocked() && e.button === 0 && _spaceDown)) {
-    e.preventDefault();
-    e.stopPropagation();
-    return;
-  }
   // Spacebar pan
   if (e.button === 0 && _spaceDown) {
     startMousePan(e);

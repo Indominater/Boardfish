@@ -51,21 +51,6 @@
         while (align.length && align[align.length - 1] === 'left') align.pop();
         if (align.length) normalized.data.lineAlign = align;
       }
-      if (Array.isArray(data.scriptRanges)) {
-        const scriptRanges = [];
-        for (const range of data.scriptRanges) {
-          const kind = range?.kind;
-          const start = Math.trunc(Number(range?.start));
-          const end = Math.trunc(Number(range?.end));
-          if ((kind !== 'sup' && kind !== 'sub') || !Number.isFinite(start) || !Number.isFinite(end)) continue;
-          scriptRanges.push({
-            start: Math.max(0, start),
-            end: Math.max(0, end),
-            kind,
-          });
-        }
-        if (scriptRanges.length) normalized.data.scriptRanges = scriptRanges;
-      }
     } else {
       if (typeof data.imgKey !== 'string' || !data.imgKey) {
         throw new Error(`image object ${obj.id} is missing imgKey`);

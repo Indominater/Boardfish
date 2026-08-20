@@ -95,6 +95,7 @@
     normalizeText = true,
     syncTextHeights = true,
   } = {}) {
+    _masterBounds = null;
     objects = Array.isArray(nextObjects) ? nextObjects : [];
     objectsMap.clear();
     for (const obj of objects) {
@@ -107,11 +108,6 @@
         if (lineAlign.length) obj.data.lineAlign = lineAlign;
         else delete obj.data.lineAlign;
       }
-      if (typeof normalizeTextScriptRangesForContent === 'function' && Array.isArray(obj.data.scriptRanges)) {
-        const scriptRanges = normalizeTextScriptRangesForContent(obj.data.content, obj.data.scriptRanges);
-        if (scriptRanges.length) obj.data.scriptRanges = scriptRanges;
-        else delete obj.data.scriptRanges;
-      }
     }
     if (syncTextHeights) syncAllTextAutoHeights();
     return objects;
@@ -121,6 +117,7 @@
     if (editingId) exitEdit();
     clearSelectionState();
     objects = [];
+    _masterBounds = null;
     objectsMap.clear();
     clearTextLayoutCaches();
     resetObjectCounters();

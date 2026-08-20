@@ -115,7 +115,6 @@ test('strips runtime text layout caches from saved board data', () => {
       text: `line ${index}`,
       startIndex: index,
       endIndex: index + 1,
-      scriptRanges: [],
       content,
       prefixWidths: [0, 10],
     })),

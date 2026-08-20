@@ -107,7 +107,7 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
     textByteLengthCalls: 0,
   };
   vm.createContext(context);
-  vm.runInContext(`${textLayoutSource}syncTextAutoHeight = (obj, minLines) => (getTextScriptRanges(obj), testSyncTextAutoHeight(obj, minLines));\n${source}\nglobalThis.addText = addText;\n`, context, {
+  vm.runInContext(`${textLayoutSource}syncTextAutoHeight = testSyncTextAutoHeight;\n${source}\nglobalThis.addText = addText;\n`, context, {
     filename: 'object_commands.js',
   });
   return context;
@@ -204,7 +204,7 @@ test('addText retains full text diagnostics for an active debug capture', () => 
 
   context.addText(24, 48, 'first\nsecond', { debug: {} });
 
-  assert.equal(context.textByteLengthCalls, 8);
+  assert.equal(context.textByteLengthCalls, 5);
   assert.equal(context.debugSteps[0].step, 'addText:start');
   assert.equal(context.debugSteps[0].meta.textLineCount, 2);
 });
@@ -233,20 +233,6 @@ test('addText with pasted content stays in select mode by default', () => {
   context.addText(24, 48, 'pasted text');
 
   assert.deepEqual(context.editCalls, []);
-});
-
-test('addText keeps deterministic braced script text editable', () => {
-  const context = loadAddTextHarness();
-
-  context.addText(24, 48, 'e^{x^{2}+1}');
-
-  const obj = context.added[0];
-  assert.equal(obj.data.content, 'e^{x^{2}+1}');
-  assert.deepEqual(JSON.parse(JSON.stringify(obj.data.scriptRanges)), [
-    { start: 2, end: 11, kind: 'sup' },
-    { start: 5, end: 8, kind: 'sup' },
-  ]);
-  assert.deepEqual(context.editedIds, []);
 });
 
 test('outside clipboard text is pasted at the same center point as canvas objects', async () => {

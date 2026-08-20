@@ -385,7 +385,6 @@ test('stale internal text candidate primes external fallback before user activat
   context.currentBoardfishTextSelectionClipboardPayload = () => ({
     type: 'text-selection',
     text: 'stale internal text',
-    scriptRanges: [],
   });
   const activationExpires = Promise.resolve().then(() => {
     context.clipboardActivation = false;
@@ -532,19 +531,6 @@ test('zoom pill stays out of keyboard focus and Space reset paths', () => {
   assert.doesNotMatch(contextMenuSource, /document\.activeElement === island/);
 });
 
-test('text edit caret height follows script formatting', () => {
-  const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
-  const end = viewportSource.indexOf('function drawEditingTextOverlay', start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  const drawCaretSource = viewportSource.slice(start, end);
-
-  assert.match(drawCaretSource, /textScriptMetricsCaretStateAt/);
-  assert.match(drawCaretSource, /caretHeight = LINE_H \* scale;/);
-  assert.match(drawCaretSource, /TEXT_BASELINE_Y_OFFSET \* scale/);
-});
-
 test('text edit caret honors visual line preference at wrapped line start', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawCaret(context, obj, layout, selStart');
@@ -565,7 +551,6 @@ test('text edit caret honors visual line preference at wrapped line start', () =
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textScriptMetricsCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
   vm.runInContext(
@@ -618,7 +603,6 @@ test('text edit caret passes consumed soft-wrap space offsets to layout', () => 
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textScriptMetricsCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
   vm.runInContext(
@@ -660,7 +644,6 @@ test('text edit caret stays inside content bounds at low zoom', () => {
     lineEndX(line, obj) {
       return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
-    textScriptMetricsCaretStateAt: () => ({ depth: 0, offset: 0, scale: 1 }),
   };
   vm.createContext(context);
   vm.runInContext(
@@ -752,21 +735,6 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.doesNotMatch(transformSource, /_rebuildOffscreen\(/);
 });
 
-test('text selection collection uses indexed script metrics while editing math text', () => {
-  const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('const collectTextSelectionRuns =');
-  const end = viewportSource.indexOf('const applyTextSelectionMotionTransform', start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  const selectionSource = viewportSource.slice(start, end);
-
-  assert.match(selectionSource, /_scriptMetrics/);
-  assert.match(selectionSource, /const isHiddenAt =/);
-  assert.match(selectionSource, /const stateAt =/);
-  assert.match(selectionSource, /textScriptMetricsHiddenAt/);
-  assert.match(selectionSource, /textScriptMetricsStateAt/);
-});
-
 test('editing overlay keeps copied text selection highlighted while its jiggle is active', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawEditingTextOverlay');
@@ -827,49 +795,6 @@ test('overlapping text selection highlight runs share one path fill', () => {
     ['rect', 20, 0, 40, 24],
     ['fill'],
     ['restore'],
-  ]);
-});
-
-test('script text selection highlight shares one path fill with its base run', () => {
-  const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('function drawTextSelectionHighlight');
-  const end = viewportSource.indexOf('const drawTextSelectionContentJello', start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-
-  const selection = {
-    bounds: { left: 0, top: -6, right: 100, bottom: 24 },
-    runs: [
-      { line: { y: 0 }, x1: 0, x2: 100, y: 0, height: 24 },
-      { line: { y: 0 }, x1: 40, x2: 70, y: -6, height: 17 },
-    ],
-  };
-  const rectCalls = [];
-  const context = {
-    LINE_H: 24,
-    TextSelDebug: { _logDraw() {} },
-    applyTextSelectionMotionTransform() {},
-  };
-  vm.createContext(context);
-  vm.runInContext(
-    `${viewportSource.slice(start, end)}\n` +
-      'globalThis.drawTextSelectionHighlight = drawTextSelectionHighlight;\n',
-    context,
-  );
-
-  const canvasContext = {
-    fillStyle: '',
-    save() {},
-    restore() {},
-    beginPath() {},
-    rect(...args) { rectCalls.push(args); },
-    fill() {},
-  };
-
-  context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection, null);
-  assert.deepEqual(rectCalls, [
-    [0, 0, 100, 24],
-    [40, -6, 30, 17],
   ]);
 });
 

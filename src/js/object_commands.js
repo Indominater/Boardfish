@@ -7,7 +7,7 @@ const objectCommandDebugNow = () => (
     : Date.now()
 );
 
-const objectCommandTextStats = (value, scriptRanges = []) => {
+const objectCommandTextStats = (value) => {
   const text = String(value ?? '');
   const lines = text ? text.split('\n') : [];
   let largestLineChars = 0;
@@ -17,7 +17,6 @@ const objectCommandTextStats = (value, scriptRanges = []) => {
     textLineCount: lines.length,
     largestLineChars,
     textBytes: BoardfishWebLimits.textByteLength(text),
-    scriptRangeCount: Array.isArray(scriptRanges) ? scriptRanges.length : '',
   };
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -53,9 +52,6 @@ function addText(wx, wy, content = '', options = {}) {
   }
   if (!options.contentPrepared) content = textForTextObjectPaste(content);
   logStep('trim-done', () => objectCommandTextStats(content));
-  const sourceRanges = Array.isArray(options?.scriptRanges) ? options.scriptRanges : [];
-  logStep('script-ranges-derived', () => objectCommandTextStats(content, sourceRanges));
-  content = textScriptLinearToDeterministicBraces(content, sourceRanges);
   const data = { content };
   const textBytes = BoardfishWebLimits.textByteLength(content);
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
@@ -73,16 +69,14 @@ function addText(wx, wy, content = '', options = {}) {
     w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
   }
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
-  logStep('script-braces-normalized', () => objectCommandTextStats(content, getTextScriptRanges(obj)));
-  logStep('script-ranges-normalized', () => objectCommandTextStats(content, data.scriptRanges));
-  logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content, data.scriptRanges) }));
+  logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content) }));
   const heightChanged = syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
   logStep('auto-height-done', () => ({
     objectId: obj.id,
     heightChanged,
     w: obj.w,
     h: obj.h,
-    ...objectCommandTextStats(content, data.scriptRanges),
+    ...objectCommandTextStats(content),
   }));
   if (options?.anchor === 'center') {
     obj.x = wx - obj.w / 2;

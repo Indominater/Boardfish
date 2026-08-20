@@ -1,21 +1,22 @@
 'use strict';
 
-function selectedBounds() {
-  let x1 = Infinity;
-  let y1 = Infinity;
-  let x2 = -Infinity;
-  let y2 = -Infinity;
+var _masterBounds = null;
 
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (!obj) continue;
-    x1 = Math.min(x1, obj.x);
-    y1 = Math.min(y1, obj.y);
-    x2 = Math.max(x2, obj.x + obj.w);
-    y2 = Math.max(y2, obj.y + obj.h);
+function objectBounds(items, map = null, boardObjectsOnly = false) {
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const item of items) {
+    const obj = map ? map.get(item) : item;
+    if (!obj || (boardObjectsOnly && obj.type !== 'image' && obj.type !== 'text')) continue;
+    const right = obj.x + obj.w, bottom = obj.y + obj.h;
+    if (boardObjectsOnly && (!Number.isFinite(right) || !Number.isFinite(bottom))) continue;
+    x1 = Math.min(x1, obj.x); y1 = Math.min(y1, obj.y);
+    x2 = Math.max(x2, right); y2 = Math.max(y2, bottom);
   }
-
   return x1 === Infinity ? null : { x1, y1, x2, y2 };
+}
+
+function selectedBounds() {
+  return objectBounds(selectedIds, objectsMap);
 }
 
 function viewportWorldRect(padScreenPx = 0) {

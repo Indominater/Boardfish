@@ -201,10 +201,7 @@
       setTimeout(() => {
         if (settled) return;
         focusHandler = () => {
-          if (focusHandler) {
-            root.removeEventListener('focus', focusHandler);
-            focusHandler = null;
-          }
+          focusHandler = null;
           focusCancelTimer = setTimeout(() => {
             focusCancelTimer = 0;
             if (!input.files?.length) done(null);

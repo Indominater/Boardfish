@@ -52,6 +52,7 @@ function loadEditorStateBoundaryHarness() {
     selectedIds: new Set(['obj-1']),
     _prefixCache: new Map(),
     _boardOpening: false,
+    _masterBounds: null,
     textLayoutCacheClears,
     BoardfishViewportState: {
       setViewport() {},

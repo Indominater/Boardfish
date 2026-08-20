@@ -144,8 +144,6 @@ function getHistoryEditStateDebugMetrics(editState = null, prefix = 'editState')
     [`${prefix}SelectionEnd`]: end,
     [`${prefix}SelectedChars`]: Math.abs(end - start),
     [`${prefix}SelectionDirection`]: editState.selectionDirection || 'none',
-    [`${prefix}ScriptCaretIndex`]: editState.scriptCaretIndex ?? '',
-    [`${prefix}ScriptCaretAffinity`]: editState.scriptCaretAffinity || '',
   };
 }
 
@@ -266,6 +264,7 @@ function snapshot() {
 // Unchanged objects share the previous snapshot's reference (safe since
 // restoreSnapshot always deep-clones before mutating).
 function pushHistory(reason = '', dirty = null, beforeEditState = null) {
+  if (dirty) _masterBounds = null;
   if (dirty) for (const item of dirty) _dirtyIds.add(item?.obj?.id ?? item?.id ?? item);
   const contentChanged = _dirtyIds.size > 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -521,7 +520,6 @@ function restoreSnapshot(s, editStateOverride) {
       history: false,
       preserveSize: true,
       placeInitialCaret: false,
-      normalizeForEdit: false,
     });
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -601,8 +599,6 @@ function restoreSnapshot(s, editStateOverride) {
     selectionEnd: end,
     selectedChars: Math.abs(end - start),
     selectionDirection: editState.selectionDirection || 'none',
-    scriptCaretIndex: editState.scriptCaretIndex ?? '',
-    scriptCaretAffinity: editState.scriptCaretAffinity || '',
   });
   if (typeof TextSelDebug !== 'undefined') {
     TextSelDebug._logHistoryAction?.('history-restore-edit-caret', {
@@ -623,17 +619,8 @@ function restoreSnapshot(s, editStateOverride) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (start === end) {
     obj._textEditCaretIndex = start;
-    if (editState.scriptCaretIndex === start && editState.scriptCaretAffinity) {
-      obj._textScriptCaretIndex = start;
-      obj._textScriptCaretAffinity = editState.scriptCaretAffinity;
-    } else {
-      delete obj._textScriptCaretIndex;
-      delete obj._textScriptCaretAffinity;
-    }
   } else {
     delete obj._textEditCaretIndex;
-    delete obj._textScriptCaretIndex;
-    delete obj._textScriptCaretAffinity;
   }
   if (liveSelectionListenerRemoved && _selChangeListener) {
     document.addEventListener('selectionchange', _selChangeListener);
@@ -652,22 +639,12 @@ function restoreSnapshot(s, editStateOverride) {
 function captureEditState() {
   if (!editingId) return null;
   if (!_editEl) return { id: editingId, selectionStart: 0, selectionEnd: 0, selectionDirection: 'none' };
-  const state = {
+  return {
     id: editingId,
     selectionStart: _editEl.selectionStart,
     selectionEnd: _editEl.selectionEnd,
     selectionDirection: _editEl.selectionDirection || 'none',
   };
-  const obj = objectsMap.get(editingId);
-  if (
-    state.selectionStart === state.selectionEnd &&
-    obj?._textScriptCaretIndex === state.selectionStart &&
-    obj?._textScriptCaretAffinity
-  ) {
-    state.scriptCaretIndex = obj._textScriptCaretIndex;
-    state.scriptCaretAffinity = obj._textScriptCaretAffinity;
-  }
-  return state;
 }
 
 function undo() {

@@ -26,7 +26,6 @@ var saveImageBtn      = requireAppElement('obj-btn-save-image');
 var saveImagesBtn     = requireAppElement('obj-btn-save-images');
 var exportSep         = requireAppElement('obj-sep-export');
 var objectActionsSep  = requireAppElement('obj-sep-object-actions');
-var arrangeImagesBtn  = requireAppElement('obj-btn-arrange-images');
 var flipBtn           = requireAppElement('obj-btn-flip');
 var rotateBtn         = requireAppElement('obj-btn-rotate');
 var rubberBand       = requireAppElement('rubber-band');

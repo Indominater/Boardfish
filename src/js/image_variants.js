@@ -565,18 +565,17 @@ function scheduleScaledVariantQueue() {
   const delay = inputIdleMs < idleThresholdMs ? idleThresholdMs - inputIdleMs : 0;
   imageScaledVariantQueueTimer = setTimeout(() => {
     imageScaledVariantQueueTimer = null;
+    const done = () => {
+      imageScaledVariantQueueActive--;
+      if (imageScaledVariantQueue.length) scheduleScaledVariantQueue();
+    };
     while (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
       const task = imageScaledVariantQueue[0];
       const inputIdleMs = activeViewportInputIdleMs();
       if (inputIdleMs < (task.priority === true ? IMAGE_VARIANT_ACTIVE_INPUT_QUEUE_DELAY_MS : IMAGE_VARIANT_INPUT_IDLE_MS)) break;
       imageScaledVariantQueue.shift();
       imageScaledVariantQueueActive++;
-      task()
-        .catch(() => {})
-        .finally(() => {
-          imageScaledVariantQueueActive = Math.max(0, imageScaledVariantQueueActive - 1);
-          if (imageScaledVariantQueue.length) scheduleScaledVariantQueue();
-        });
+      task().then(done, done);
     }
     if (imageScaledVariantQueue.length && imageScaledVariantQueueActive < concurrency) {
       scheduleScaledVariantQueue();

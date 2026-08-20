@@ -270,9 +270,6 @@ function startCanvasSizeTracking() {
 }
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
-  const scriptMetrics = layout[0]?._scriptMetrics || null;
-  const isHiddenAt = scriptMetrics ? textScriptMetricsHiddenAt : null;
-  const stateAt = scriptMetrics ? textScriptMetricsStateAt : null;
   const runs = [];
   let left = Infinity;
   let top = Infinity;
@@ -281,7 +278,6 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let scannedLines = 0;
   let selectedLines = 0;
-  let hiddenChars = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const line of layout) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ scannedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -290,50 +286,20 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
     const o0 = Math.max(0, selStart - ls), o1 = Math.min(line.text.length, selEnd - ls);
     if (o0 >= o1) continue;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    let i = o0;
-    while (i < o1) {
-      const globalIndex = line.startIndex + i;
-      if (isHiddenAt && isHiddenAt(scriptMetrics, globalIndex)) {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */ hiddenChars++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        i++;
-        continue;
-      }
-      const state = stateAt ? stateAt(scriptMetrics, globalIndex) : BASE_TEXT_SCRIPT_STATE;
-      let j = stateAt ? i + 1 : o1;
-      while (j < o1) {
-        const nextGlobalIndex = line.startIndex + j;
-        if (isHiddenAt(scriptMetrics, nextGlobalIndex)) break;
-        const nextState = stateAt(scriptMetrics, nextGlobalIndex);
-        if (nextState.key !== state.key) break;
-        j++;
-      }
-      const x1 = lineXAtOffset(line, obj, i);
-      const x2 = lineXAtOffset(line, obj, j);
-      const scaled = state?.depth > 0;
-      const y = scaled ? line.textY + state.offset - TEXT_BASELINE_Y_OFFSET * state.scale : line.y;
-      const height = scaled ? LINE_H * state.scale : LINE_H;
-      const run = {
-        line,
-        x1,
-        x2,
-        y,
-        height,
-        startOffset: i,
-        endOffset: j,
-      };
-      runs.push(run);
-      if (x1 < left) left = x1;
-      if (y < top) top = y;
-      if (x2 > right) right = x2;
-      if (y + height > bottom) bottom = y + height;
-      i = j;
-    }
+    const x1 = lineXAtOffset(line, obj, o0);
+    const x2 = lineXAtOffset(line, obj, o1);
+    const run = { line, x1, x2, y: line.y, height: LINE_H, startOffset: o0, endOffset: o1 };
+    runs.push(run);
+    if (x1 < left) left = x1;
+    if (line.y < top) top = line.y;
+    if (x2 > right) right = x2;
+    if (line.y + LINE_H > bottom) bottom = line.y + LINE_H;
   }
   if (!runs.length) return null;
   return {
     runs,
     bounds: { left, top, right, bottom },
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */ metrics: { scannedLines, selectedLines, hiddenChars, selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)) }, /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */ metrics: { scannedLines, selectedLines, selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)) }, /* BOARDFISH_DEV_DIAGNOSTICS_END */
   };
 };
 
@@ -501,17 +467,9 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
   if (!caretLine) return false;
   const ls = caretLine.startIndex;
   const off = Math.max(0, selStart - ls);
-  let cx = lineCaretXAtOffset(caretLine, obj, off);
-  let cy = caretLine.y;
-  let caretHeight = LINE_H;
-  const affinity = obj?._textScriptCaretIndex === selStart ? obj._textScriptCaretAffinity : '';
-  const state = textScriptMetricsCaretStateAt(caretLine._scriptMetrics, selStart, affinity);
-  if (state?.depth > 0) {
-    const scale = Number.isFinite(state.scale) && state.scale > 0 ? state.scale : 1;
-    const textY = Number.isFinite(caretLine.textY) ? caretLine.textY : caretLine.y + TEXT_BASELINE_Y_OFFSET;
-    cy = textY + state.offset - (TEXT_BASELINE_Y_OFFSET * scale);
-    caretHeight = LINE_H * scale;
-  }
+  const cx = lineCaretXAtOffset(caretLine, obj, off);
+  const cy = caretLine.y;
+  const caretHeight = LINE_H;
   const caretWidth = 2 / viewZoom;
   const contentLeft = obj.x + TEXT_PAD;
   const contentRight = Math.max(contentLeft, obj.x + obj.w - TEXT_PAD);
@@ -650,6 +608,7 @@ function drawEditingTextOverlay(
 }
 
 function drawBoard(bypassEditOffscreenCache = false) {
+  if (!bypassEditOffscreenCache) _masterBounds = null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectViewportDebug = ViewportDebug.isEnabled();
   const dbg = collectViewportDebug
@@ -952,6 +911,99 @@ var _frameRaf = null;
 var _needTransform = false;
 var _needBoardRender = false;
 var _needOverlayRender = false;
+var _viewportTransformPreview = null;
+var VIEWPORT_TRANSFORM_PREVIEW_REDRAW_MS = 32;
+
+function viewportTransformPreviewActive() {
+  return !!_viewportTransformPreview;
+}
+
+function setViewportTransformPreviewCss() {
+  const preview = _viewportTransformPreview;
+  if (!preview) return false;
+  const transform = BoardfishViewportState.screenTransformBetween(
+    preview.base,
+    { panX, panY, zoom },
+  );
+  const clean = (value) => Math.round(value * 1000000) / 1000000;
+  canvas.style.setProperty(
+    '--viewport-transform-preview',
+    `matrix(${clean(transform.scale)}, 0, 0, ${clean(transform.scale)}, ${clean(transform.translateX)}, ${clean(transform.translateY)})`,
+  );
+  return true;
+}
+
+function requestViewportTransformPreviewFrame(inputEvent = null, force = false) {
+  const preview = _viewportTransformPreview;
+  if (!preview || preview.renderPending) return false;
+  const now = performance.now();
+  if (!force && now - preview.lastRenderedAt < VIEWPORT_TRANSFORM_PREVIEW_REDRAW_MS) return false;
+  preview.renderPending = true;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    scheduleTransform(true, preview.commitPending ? 'touch-pinch-commit' : 'touch-pinch-preview', inputEvent);
+  } else {
+    scheduleTransform(true);
+  }
+  return true;
+}
+
+function beginViewportTransformPreview() {
+  if (_boardOpening) return false;
+  if (_viewportTransformPreview) {
+    _viewportTransformPreview.commitPending = false;
+    return true;
+  }
+  const startedAt = performance.now();
+  _viewportTransformPreview = {
+    base: { panX, panY, zoom },
+    commitPending: false,
+    lastRenderedAt: startedAt,
+    renderPending: false,
+  };
+  canvas.style.setProperty('--viewport-transform-preview', 'matrix(1, 0, 0, 1, 0, 0)');
+  canvas.classList.add('viewport-transform-preview');
+  return true;
+}
+
+function updateViewportTransformPreview(inputEvent = null) {
+  const preview = _viewportTransformPreview;
+  if (!preview) return false;
+  lastViewportInputAt = performance.now();
+  setViewportTransformPreviewCss();
+  requestViewportTransformPreviewFrame(inputEvent);
+  return true;
+}
+
+function commitViewportTransformPreview(inputEvent = null) {
+  const preview = _viewportTransformPreview;
+  if (!preview) return false;
+  setViewportTransformPreviewCss();
+  preview.commitPending = true;
+  requestViewportTransformPreviewFrame(inputEvent, true);
+  return true;
+}
+
+function finishViewportTransformPreviewFrame() {
+  const preview = _viewportTransformPreview;
+  if (!preview) return false;
+  const committed = preview.commitPending;
+  preview.base = { panX, panY, zoom };
+  preview.lastRenderedAt = performance.now();
+  preview.renderPending = false;
+  canvas.style.setProperty('--viewport-transform-preview', 'matrix(1, 0, 0, 1, 0, 0)');
+  if (!committed) return true;
+  canvas.classList.remove('viewport-transform-preview');
+  canvas.style.removeProperty('--viewport-transform-preview');
+  _viewportTransformPreview = null;
+  return true;
+}
+
+globalThis.BoardfishViewportPreview = Object.freeze({
+  active: viewportTransformPreviewActive,
+  begin: beginViewportTransformPreview,
+  commit: commitViewportTransformPreview,
+  update: updateViewportTransformPreview,
+});
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var _frameScheduledAt = 0;
 var _frameSources = [];
@@ -1465,7 +1517,6 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
       totalLines,
       fullLineCacheLines,
       fullLineCacheMs: fullLineCacheLines ? Math.round(fullLineCacheMs * 100) / 100 : '',
-      scriptRanges: Array.isArray(obj.data?.scriptRanges) ? obj.data.scriptRanges.length : 0,
       paragraphPrefixCacheEntries: obj._textParagraphPrefixCache?.size ?? '',
       runtimePrefixCacheEntriesAdded: runtimePrewarm?.prefixCacheEntriesAdded ?? '',
       runtimePrewarmMs: runtimePrewarm?.totalMs ?? '',
@@ -1479,7 +1530,6 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
       drawWarmupRestoreMs: drawWarmupStats?.restoreMs ?? '',
       drawWarmupSource,
       wrappedLineIndexEntries: obj._textWrappedLineIndexCache?.entries?.length ?? '',
-      scriptMetricsCachePresent: !!obj._textScriptLayoutMetrics,
     });
   }
 
@@ -1660,9 +1710,10 @@ function scheduleFrame(
     }
     _frameSources = [];
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const doTransform = _needTransform;
+    let doTransform = _needTransform;
     const doBoard = _needBoardRender;
     const doOverlay = _needOverlayRender;
+    if (viewportTransformPreviewActive() && (doBoard || doOverlay)) doTransform = true;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const inputAt = doTransform ? _frameInputAt : 0;
     const inputSource = doTransform ? _frameInputSource : '';
@@ -1697,13 +1748,21 @@ function scheduleFrame(
 
     if (doTransform) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        applyTransform();
+        try {
+          applyTransform();
+        } finally {
+          finishViewportTransformPreviewFrame();
+        }
         finishMotionViewportRenderFrame();
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         ViewportDebug.count('transformFrames');
         const transformStart = collectDebug ? performance.now() : 0;
-        withRenderSource(sourceLabel || 'transform', () => applyTransform(frameDbg));
+        try {
+          withRenderSource(sourceLabel || 'transform', () => applyTransform(frameDbg));
+        } finally {
+          finishViewportTransformPreviewFrame();
+        }
         if (collectDebug) ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
         finishMotionViewportRenderFrame(sourceLabel || 'transform', { doTransform, doBoard: true, doOverlay: true });
         if (collectDebug) ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sourceLabel });
@@ -1788,12 +1847,14 @@ function scheduleTransform(
 
 function scheduleRender(board = true, overlay = null, source = null) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && source == null) source = 'render';
+  if (board) _masterBounds = null;
   if (board) _needBoardRender = true;
   _needOverlayRender ||= !!(overlay ?? (board && (
     hasSelection() ||
     selOverlay.classList.contains('visible') ||
     multiSelOverlay.classList.contains('visible')
   )));
+  if (globalThis.BoardfishViewportPreview?.active?.() && (_needBoardRender || _needOverlayRender)) _needTransform = true;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleFrame(source);
   else scheduleFrame();
 }

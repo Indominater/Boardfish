@@ -21,15 +21,8 @@ function clearTextRuntimeCache(obj) {
   delete obj._layoutCache;
   delete obj._layoutCacheContent;
   delete obj._layoutCacheW;
-  delete obj._layoutCacheScriptKey;
   delete obj._layoutCacheAlignKey;
   delete obj._layoutCacheY;
-  delete obj._textScriptRangesCache;
-  delete obj._textScriptRangesCacheContent;
-  delete obj._textScriptRangesCacheSourceKey;
-  delete obj._textScriptLayoutMetrics;
-  delete obj._textScriptLayoutMetricsContent;
-  delete obj._textScriptLayoutMetricsScriptKey;
 }
 
 function cloneTextObjectRuntimeCaches(source, target) {
@@ -43,19 +36,8 @@ function cloneTextObjectRuntimeCaches(source, target) {
     target._layoutCache = source._layoutCache.map((line) => ({ ...line }));
     target._layoutCacheContent = source._layoutCacheContent;
     target._layoutCacheW = source._layoutCacheW;
-    target._layoutCacheScriptKey = source._layoutCacheScriptKey;
     target._layoutCacheAlignKey = source._layoutCacheAlignKey;
     target._layoutCacheY = target.y;
-  }
-  if (source._textScriptRangesCacheContent === content && Array.isArray(source._textScriptRangesCache)) {
-    target._textScriptRangesCache = source._textScriptRangesCache.map((range) => ({ ...range }));
-    target._textScriptRangesCacheContent = source._textScriptRangesCacheContent;
-    target._textScriptRangesCacheSourceKey = source._textScriptRangesCacheSourceKey;
-  }
-  if (source._textScriptLayoutMetricsContent === content && source._textScriptLayoutMetrics) {
-    target._textScriptLayoutMetrics = source._textScriptLayoutMetrics;
-    target._textScriptLayoutMetricsContent = source._textScriptLayoutMetricsContent;
-    target._textScriptLayoutMetricsScriptKey = source._textScriptLayoutMetricsScriptKey;
   }
   return target;
 }
@@ -297,15 +279,8 @@ function attachTextRuntimeCache(obj, content, label = content) {
   }];
   obj._layoutCacheContent = content;
   obj._layoutCacheW = obj.w;
-  obj._layoutCacheScriptKey = '[]';
   obj._layoutCacheAlignKey = '';
   obj._layoutCacheY = obj.y;
-  obj._textScriptRangesCache = [];
-  obj._textScriptRangesCacheContent = content;
-  obj._textScriptRangesCacheSourceKey = '[]';
-  obj._textScriptLayoutMetrics = { label };
-  obj._textScriptLayoutMetricsContent = content;
-  obj._textScriptLayoutMetricsScriptKey = '[]';
 }
 
 test('text-only history skips image cache pruning when no image cache state exists', () => {
@@ -606,40 +581,6 @@ test('undoing a selected replacement syncs stale proxy DOM before restoring high
   assert.equal(context._editEl.selectionDirection, 'forward');
 });
 
-test('text edit history start state preserves script caret affinity', () => {
-  const context = loadTextEditHistoryStateHarness();
-  const obj = {
-    id: 'text-1',
-    type: 'text',
-    data: { content: 'e_{i}^{2x}' },
-    _textScriptCaretIndex: 10,
-    _textScriptCaretAffinity: 'after',
-  };
-  context.objectsMap.set(obj.id, obj);
-  context._editEl = makeEditProxy({
-    value: obj.data.content,
-    selectionStart: 10,
-    selectionEnd: 10,
-    selectionDirection: 'none',
-  });
-
-  const state = context.beginTextEditHistoryAction('text-1', {
-    start: 10,
-    end: 10,
-    direction: 'none',
-    scriptCaretAffinity: 'after',
-  });
-
-  assert.deepEqual(JSON.parse(JSON.stringify(state)), {
-    id: 'text-1',
-    selectionStart: 10,
-    selectionEnd: 10,
-    selectionDirection: 'none',
-    scriptCaretIndex: 10,
-    scriptCaretAffinity: 'after',
-  });
-});
-
 test('immediate text edit history actions replace stale start selection', () => {
   const context = loadTextEditHistoryStateHarness();
   const obj = {
@@ -706,63 +647,17 @@ test('text edit history start state clamps selection to captured pre-edit value'
   });
 });
 
-test('undoing a script-boundary delete restores the saved script caret affinity', () => {
-  const context = loadHistoryHarness();
-  setBoard(context, [
-    { id: 'text-1', type: 'text', x: 0, y: 0, w: 200, h: 80, z: 1, data: { content: 'e_{i}^{2x}' } },
-  ], ['text-1']);
-  context.snapshot();
-
-  context.editingId = 'text-1';
-  context._editEl = makeEditProxy({
-    value: 'e_{i}^{2x}',
-    selectionStart: 10,
-    selectionEnd: 10,
-    selectionDirection: 'none',
-  });
-  const original = context.objectsMap.get('text-1');
-  original._textScriptCaretIndex = 10;
-  original._textScriptCaretAffinity = 'after';
-  context.pushHistory('text-edit-enter');
-
-  const text = context.objectsMap.get('text-1');
-  text.data.content = '';
-  delete text.data.scriptRanges;
-  context._editEl.selectionStart = 0;
-  context._editEl.selectionEnd = 0;
-  context.markDirty('text-1');
-  context.pushHistory('text-edit-checkpoint', null, {
-      id: 'text-1',
-      selectionStart: 10,
-      selectionEnd: 10,
-      selectionDirection: 'none',
-      scriptCaretIndex: 10,
-      scriptCaretAffinity: 'after',
-  });
-
-  context.undo();
-
-  const restored = context.objectsMap.get('text-1');
-  assert.equal(restored.data.content, 'e_{i}^{2x}');
-  assert.equal(context.editingId, 'text-1');
-  assert.equal(context._editEl.selectionStart, 10);
-  assert.equal(context._editEl.selectionEnd, 10);
-  assert.equal(restored._textEditCaretIndex, 10);
-  assert.equal(restored._textScriptCaretIndex, 10);
-  assert.equal(restored._textScriptCaretAffinity, 'after');
-});
-
 test('undoing and redoing text edits preserve restored text box dimensions', () => {
   const context = loadHistoryHarness();
   context.collapseTextOnReplace = true;
   setBoard(context, [
-    { id: 'text-1', type: 'text', x: 0, y: 0, w: 920, h: 370, z: 1, data: { content: 'e^{x^{2}+1}' } },
+    { id: 'text-1', type: 'text', x: 0, y: 0, w: 920, h: 370, z: 1, data: { content: 'plain value' } },
   ], ['text-1']);
   context.snapshot();
 
   context.editingId = 'text-1';
   context._editEl = makeEditProxy({
-    value: 'e^{x^{2}+1}',
+    value: 'plain value',
     selectionStart: 11,
     selectionEnd: 11,
     selectionDirection: 'none',
@@ -790,7 +685,7 @@ test('undoing and redoing text edits preserve restored text box dimensions', () 
   context.undo();
 
   let restored = context.objectsMap.get('text-1');
-  assert.equal(restored.data.content, 'e^{x^{2}+1}');
+  assert.equal(restored.data.content, 'plain value');
   assert.equal(restored.w, 920);
   assert.equal(restored.h, 370);
   assert.equal(restored, text);
@@ -815,7 +710,7 @@ test('undoing and redoing text edits preserve restored text box dimensions', () 
   assert.equal(context.editingId, 'text-1');
   assert.equal(context._editEl, liveProxy);
   assert.equal(context._editEl._boardfishLogicalValue, restored.data.content);
-  assert.equal(context._editEl.value, 'e^{x^{2}+1}');
+  assert.equal(context._editEl.value, 'plain value');
   assert.equal(context._editEl._boardfishDomValueStale, true);
   assert.equal(liveProxy.focused, false);
   assert.equal(liveProxy.setRangeTextCalls.length, 0);
@@ -871,8 +766,6 @@ test('undoing and redoing text edits restore active text runtime layout caches',
   assert.equal(liveProxy.setRangeTextCalls.length, 0);
   assert.equal(restored._layoutCacheContent, 'before');
   assert.equal(restored._layoutCache[0].text, 'cached-before');
-  assert.equal(restored._textScriptRangesCacheContent, 'before');
-  assert.equal(restored._textScriptLayoutMetricsContent, 'before');
   assert.equal(context.replaceBoardObjectsOptions.at(-1).normalizeText, false);
   assert.equal('preserveTextRuntimeCaches' in context.replaceBoardObjectsOptions.at(-1), false);
 
@@ -889,8 +782,6 @@ test('undoing and redoing text edits restore active text runtime layout caches',
   assert.equal(liveProxy.setRangeTextCalls.length, 0);
   assert.equal(restored._layoutCacheContent, 'after');
   assert.equal(restored._layoutCache[0].text, 'cached-after');
-  assert.equal(restored._textScriptRangesCacheContent, 'after');
-  assert.equal(restored._textScriptLayoutMetricsContent, 'after');
   assert.equal(context.replaceBoardObjectsOptions.at(-1).normalizeText, false);
   assert.equal('preserveTextRuntimeCaches' in context.replaceBoardObjectsOptions.at(-1), false);
 });
@@ -937,8 +828,6 @@ test('undoing and redoing text edits hydrate unchanged text runtime caches from 
   assert.equal(restoredUnchanged.data.content, 'unchanged');
   assert.equal(restoredUnchanged._layoutCacheContent, 'unchanged');
   assert.equal(restoredUnchanged._layoutCache[0].text, 'live-unchanged-cache');
-  assert.equal(restoredUnchanged._textScriptRangesCacheContent, 'unchanged');
-  assert.equal(restoredUnchanged._textScriptLayoutMetricsContent, 'unchanged');
 
   context.redo();
 

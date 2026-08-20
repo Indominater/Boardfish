@@ -135,15 +135,6 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
       return 3;
     },
     layoutHitTestCaret(...args) { return { index: context.layoutHitTest(...args), affinity: '' }; },
-    setTextScriptCaretAffinity(target, index, affinity) {
-      target._textScriptCaretIndex = target._textEditCaretIndex = index;
-      target._textScriptCaretAffinity = affinity;
-      delete target._textEditCaretLineStartIndex;
-    },
-    clearTextScriptCaretAffinity(target) {
-      delete target._textScriptCaretIndex;
-      delete target._textScriptCaretAffinity;
-    },
     setTextEditCaretIndex(target, index, lineStartIndex = null) {
       target._textEditCaretIndex = index;
       if (Number.isFinite(lineStartIndex)) target._textEditCaretLineStartIndex = lineStartIndex;
@@ -558,22 +549,6 @@ test('releasing a caret-only text click does not open the text edit menu', () =>
 
   assert.deepEqual(context.editProxy.selection, [2, 2]);
   assert.deepEqual(context.menus, []);
-});
-
-test('text click preserves script caret affinity from rich hit testing', () => {
-  const context = loadCanvasInputHarness();
-  context.obj.data.content = 'e^{x^{2}}';
-  context.editProxy.value = context.obj.data.content;
-  context.editingId = context.obj.id;
-  context._editEl = context.editProxy;
-  context.layoutHitTestCaret = () => ({ index: 8, affinity: 'after' });
-
-  context.startTextSelectionDrag({ clientX: 12, clientY: 22 }, context.obj, { x: 12, y: 22 });
-
-  assert.deepEqual(context.editProxy.selection, [8, 8]);
-  assert.equal(context.obj._textEditCaretIndex, 8);
-  assert.equal(context.obj._textScriptCaretIndex, 8);
-  assert.equal(context.obj._textScriptCaretAffinity, 'after');
 });
 
 test('text click stores visual line preference at wrapped line start', () => {

@@ -23,16 +23,16 @@ function functionSource(source, name) {
   return source.slice(start, next);
 }
 
-test('text edit math perf debugger is passive event recording only', () => {
+test('text edit perf debugger is passive event recording only', () => {
   const source = readSource('src/js/debug_manual_perf.js');
-  const beginSource = functionSource(source, 'textEditMathBegin');
-  const reportSource = functionSource(source, 'textEditMathReport');
+  const beginSource = functionSource(source, 'textEditBegin');
+  const reportSource = functionSource(source, 'textEditReport');
   const combined = `${beginSource}\n${reportSource}`;
 
-  assert.match(source, /const TEXT_EDIT_MATH_EVENT_TYPES = \[[\s\S]*'wheel'[\s\S]*'pointermove'[\s\S]*'mousemove'[\s\S]*'beforeinput'[\s\S]*'input'[\s\S]*'paste'[\s\S]*'copy'[\s\S]*'cut'[\s\S]*'selectionchange'/);
+  assert.match(source, /const TEXT_EDIT_EVENT_TYPES = \[[\s\S]*'wheel'[\s\S]*'pointermove'[\s\S]*'mousemove'[\s\S]*'beforeinput'[\s\S]*'input'[\s\S]*'paste'[\s\S]*'copy'[\s\S]*'cut'[\s\S]*'selectionchange'/);
   assert.match(source, /deltaX: event\?\.deltaX/);
   assert.match(source, /clientX: event\?\.clientX/);
-  assert.match(source, /shortcut: textEditMathShortcutFromEvent\(event\)/);
+  assert.match(source, /shortcut: textEditShortcutFromEvent\(event\)/);
   assert.match(source, /historyTextUndoRedoReport/);
   assert.match(source, /historyMaxProxyValueSetMs/);
   assert.match(source, /historyMaxProxyValueDiffMs/);
@@ -60,9 +60,9 @@ test('text edit math perf debugger is passive event recording only', () => {
   assert.match(source, /traceDeleteInputs/);
   assert.doesNotMatch(source, /maxLayoutPatchTotalMs/);
   assert.match(source, /maxTextareaMutationMs/);
-  assert.match(source, /textEditMathBegin/);
-  assert.match(source, /textEditMathReport/);
-  assert.match(source, /textEditMathTimeline/);
+  assert.match(source, /textEditBegin/);
+  assert.match(source, /textEditReport/);
+  assert.match(source, /textEditTimeline/);
   assert.match(source, /textEditInputStepTimeline/);
   assert.match(combined, /mode: 'passive-event-recording'/);
   assert.match(combined, /BoardfishDebug\.viewport\.enable/);
@@ -122,7 +122,6 @@ test('text resize perf debugger captures resize and follow-up input evidence', (
   assert.doesNotMatch(source, /_textMinWidthWordSegmentCache/);
   assert.match(source, /paragraphPrefixCacheEntries/);
   assert.match(source, /wrappedLineCountCachePresent/);
-  assert.match(source, /scriptMetricsCachePresent/);
   assert.match(source, /layoutCacheLinesBefore/);
   assert.match(source, /layoutInvalidationMethod/);
   assert.match(source, /startParagraphPrefixCacheEntries/);
@@ -137,7 +136,7 @@ test('text resize perf debugger captures resize and follow-up input evidence', (
   assert.match(combined, /setTextEditMathListeners\(false\)/);
   assert.match(combined, /resizeSummary: textResizeSummary\(events\)/);
   assert.match(combined, /resizeTimeline: textResizeTimeline/);
-  assert.match(combined, /eventSummary: textEditMathEventSummary\(domEvents\)/);
+  assert.match(combined, /eventSummary: textEditEventSummary\(domEvents\)/);
   assert.match(combined, /inputStepSummary: textEditInputStepSummary\(inputSteps\)/);
   assert.match(combined, /viewport: viewportEventReport\(options\)/);
   assert.match(combined, /history: historyTextUndoRedoReport\(options\)/);
@@ -179,9 +178,9 @@ test('large text panning debugger records the four large-text viewport scenarios
   assert.match(combined, /resetLargeTextPanningRecorders\(options\)/);
   assert.match(combined, /setTextEditMathListeners\(true\)/);
   assert.match(combined, /setTextEditMathListeners\(false\)/);
-  assert.match(combined, /recordedEventTypes: TEXT_EDIT_MATH_EVENT_TYPES\.slice\(\)/);
-  assert.match(combined, /eventSummary: textEditMathEventSummary\(events\)/);
-  assert.match(combined, /eventTimeline: textEditMathTimeline/);
+  assert.match(combined, /recordedEventTypes: TEXT_EDIT_EVENT_TYPES\.slice\(\)/);
+  assert.match(combined, /eventSummary: textEditEventSummary\(events\)/);
+  assert.match(combined, /eventTimeline: textEditTimeline/);
   assert.match(combined, /viewportEvents/);
   assert.match(combined, /BoardfishDebug\.viewport\.events/);
   assert.match(combined, /largeTextSelectionDebugReport\(options\)/);

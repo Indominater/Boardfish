@@ -48,10 +48,6 @@ const canTransformSelectedImagesFromKeyboard = () => {
   return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardAction();
 };
 
-const canArrangeSelectedImagesFromKeyboard = () => {
-  return !editingId && !isBoardInputBlocked() && hasSelectedImagesForKeyboardAction(2);
-};
-
 const enterSelectedTextEditFromKeyboard = (e) => {
   if (
     editingId ||
@@ -119,11 +115,6 @@ function pasteAtViewportCenterFromShortcut() {
     ? boardCursorWorldPoint()
     : toWorld(window.innerWidth / 2, window.innerHeight / 2);
   pasteAtPos(point.x, point.y);
-}
-
-function arrangeSelectedImagesFromShortcut() {
-  if (editingId || typeof sortSelectedImages !== 'function') return;
-  sortSelectedImages();
 }
 
 document.addEventListener('keydown', (e) => {
@@ -212,14 +203,6 @@ document.addEventListener('keydown', (e) => {
     runShortcutCommand('rotate-image', () => {
       rotateSelectedImages('cw');
     });
-    return;
-  }
-
-  if (commandOnly && isShortcutKey(e, 'j')) {
-    if (!canArrangeSelectedImagesFromKeyboard()) return;
-    consumeShortcutEvent(e);
-    if (e.repeat) return;
-    runShortcutCommand('arrange-images', arrangeSelectedImagesFromShortcut);
     return;
   }
 

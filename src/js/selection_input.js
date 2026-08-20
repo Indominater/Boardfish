@@ -140,7 +140,6 @@ function selectionResizeTextObjectStats(obj) {
     objectId: obj?.id || '',
     contentChars: content.length,
     logicalLines: selectionResizeTextLineCount(content),
-    scriptRanges: Array.isArray(obj?.data?.scriptRanges) ? obj.data.scriptRanges.length : 0,
     layoutCachePresent: !!obj?._layoutCache,
     layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
     minWidthCachePresent: Number.isFinite(obj?._textMinWidthCache),
@@ -150,7 +149,6 @@ function selectionResizeTextObjectStats(obj) {
     wrappedLineIndexCacheEntries: obj?._textWrappedLineIndexCache?.entries?.length ?? '',
     wrappedLineIndexCacheLines: obj?._textWrappedLineIndexCache?.lineCount ?? '',
     wrappedLineIndexWidthCacheSize: obj?._textWrappedLineIndexWidthCache?.size ?? '',
-    scriptMetricsCachePresent: !!obj?._textScriptLayoutMetrics,
   };
 }
 
@@ -571,6 +569,7 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
           const heightBeforeAuto = resizeDebugDragId ? obj.h : 0;
           const autoHeightStartedAt = resizeDebugDragId ? selectionResizeDebugNow() : 0;
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          resetTextEditPreservedMinLines(obj);
           syncTextAutoHeight(obj, getTextMinLines(obj));
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (resizeDebugDragId) {
@@ -614,7 +613,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             wrappedLineIndexCacheEntries: obj._textWrappedLineIndexCache?.entries?.length ?? '',
             wrappedLineIndexCacheLines: obj._textWrappedLineIndexCache?.lineCount ?? '',
             wrappedLineIndexWidthCacheSize: obj._textWrappedLineIndexWidthCache?.size ?? '',
-            scriptMetricsCachePresent: !!obj._textScriptLayoutMetrics,
             clearLayoutMs: autoHeightDebug?.clearLayoutMs ?? '',
             autoHeightMs: autoHeightDebug?.autoHeightMs ?? '',
             autoHeightChanged: autoHeightDebug?.autoHeightChanged ?? '',
@@ -736,24 +734,12 @@ const normalizeTextEditHistoryState = (id, state = null) => {
         : (obj?.data?.content?.length || 0));
   const start = Math.max(0, Math.min(state?.start ?? state?.selectionStart ?? _editEl?.selectionStart ?? 0, valueLength));
   const end = Math.max(0, Math.min(state?.end ?? state?.selectionEnd ?? start, valueLength));
-  const rawScriptCaretIndex = state?.scriptCaretIndex ?? state?.textScriptCaretIndex ?? obj?._textScriptCaretIndex;
-  const scriptCaretIndexValue = Number(rawScriptCaretIndex ?? start);
-  const scriptCaretIndex = Number.isFinite(scriptCaretIndexValue)
-    ? Math.max(0, Math.min(scriptCaretIndexValue, valueLength))
-    : start;
-  const scriptCaretAffinity = state?.scriptCaretAffinity ?? state?.textScriptCaretAffinity ??
-    (obj?._textScriptCaretIndex === start ? obj?._textScriptCaretAffinity : '');
-  const normalized = {
+  return {
     id: targetId,
     selectionStart: start,
     selectionEnd: end,
     selectionDirection: state?.direction || state?.selectionDirection || _editEl?.selectionDirection || 'none',
   };
-  if (start === end && scriptCaretIndex === start && scriptCaretAffinity) {
-    normalized.scriptCaretIndex = scriptCaretIndex;
-    normalized.scriptCaretAffinity = scriptCaretAffinity;
-  }
-  return normalized;
 };
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
