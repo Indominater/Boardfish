@@ -464,7 +464,7 @@ test('viewport input settles once after the latest gesture sample and restores a
   assert.deepEqual(harness.renders, [[true, null, 'viewport-input-settled']]);
 });
 
-test('a low-latency frame restores exactly once after both input and copy motion settle', () => {
+test('a low-latency frame restores once input settles even while copy motion is active', () => {
   const harness = loadBoardCanvasQualityRestoreHarness();
   const { context } = harness;
 
@@ -476,10 +476,6 @@ test('a low-latency frame restores exactly once after both input and copy motion
   context.restoreBoardCanvasQualityIfSettled();
   harness.setActiveInput(false);
   harness.setActiveMotion(true);
-  context.restoreBoardCanvasQualityIfSettled();
-  assert.equal(harness.invalidations(), 0);
-
-  harness.setActiveMotion(false);
   context.restoreBoardCanvasQualityIfSettled();
   context.restoreBoardCanvasQualityIfSettled();
   assert.equal(harness.invalidations(), 1);
@@ -508,7 +504,7 @@ test('canvas resize keeps visible pixels until the render frame syncs the backin
   assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
 });
 
-test('active viewport and copy frames cap only backing resolution and restore native DPR', () => {
+test('active viewport frames cap only backing resolution and restore native DPR', () => {
   const context = loadViewportCanvasSizeHarness({
     rect: { width: 390, height: 844 },
     clientWidth: 390,

@@ -630,11 +630,10 @@ function drawBoard(bypassEditOffscreenCache = false) {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
-  // Pinch, wheel, drag, and copy feedback all use the same frame profile. A
-  // high-density phone and a Retina Mac therefore share the same interaction
-  // budget, while culling and all world-space behavior stay on the canonical
-  // renderer path. The next settled frame restores native DPR.
-  const lowLatencyFrame = isActiveViewportInput() || BoardfishMotion.hasActiveMotionsForDraw();
+  // Only live viewport manipulation lowers the backing resolution. Copy
+  // feedback keeps its per-object low-latency image path, but stays at native
+  // DPR so canvas text retains stable antialiasing and alpha throughout.
+  const lowLatencyFrame = isActiveViewportInput();
   _lastBoardFrameLowLatency = lowLatencyFrame;
   const dpr = boardCanvasRenderDpr(lowLatencyFrame);
   const view = { zoom, dpr, activeInput: lowLatencyFrame };
@@ -1004,7 +1003,7 @@ finishMotionViewportRenderFrame = (source, meta = {}) => {
 
 function restoreBoardCanvasQualityIfSettled() {
   if (!_lastBoardFrameLowLatency) return;
-  if (isActiveViewportInput() || BoardfishMotion.hasActiveMotionsForDraw()) return;
+  if (isActiveViewportInput()) return;
   _lastBoardFrameLowLatency = false;
   invalidateOffscreen();
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {

@@ -1180,27 +1180,6 @@ test('copy feedback stays inert for an empty payload and animates copied objects
   assert.ok(motion.objectMotionForDraw(copiedImage));
 });
 
-test('shared low-latency frame state covers object and text-selection copy motion', () => {
-  const { context, setTime } = loadMotion();
-  const motion = context.BoardfishMotion;
-  const copiedImage = { id: 'copied-image', type: 'image' };
-
-  assert.equal(motion.hasActiveMotionsForDraw(), false);
-  setTime(0);
-  motion.applyCopyFeedback({ objects: [copiedImage] });
-  assert.equal(motion.hasActiveMotionsForDraw(), true);
-  setTime(500);
-  assert.equal(motion.hasActiveMotionsForDraw(), false);
-
-  setTime(1000);
-  motion.applyCopyFeedback({
-    textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
-  });
-  assert.equal(motion.hasActiveMotionsForDraw(), true);
-  setTime(1500);
-  assert.equal(motion.hasActiveMotionsForDraw(), false);
-});
-
 test('copy object jiggle uses fixed screen-distance translation independent of object width', () => {
   const { context, setTime } = loadMotion();
   const motion = context.BoardfishMotion;
