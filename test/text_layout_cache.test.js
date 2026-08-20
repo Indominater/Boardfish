@@ -91,7 +91,6 @@ function loadTextLayout({
       getTextRenderedContentWidth,
       syncTextAutoHeight,
       prewarmTextObjectLayoutRuntimeCaches,
-      applyTextLineAlignmentRange,
       patchTextObjectLayoutAfterInput,
       clearTextLayoutCaches,
       clearTextObjectLayoutRuntime,
@@ -799,7 +798,7 @@ test('text rendered content width uses the visible line width', () => {
   assert.equal(textLayout.getTextRenderedContentWidth(obj), 46);
 });
 
-test('line alignment offsets caret positions within the text box', () => {
+test('text lines always start at the left padding', () => {
   const { context } = loadTextLayout();
   const textLayout = context.__testTextLayout;
   const obj = {
@@ -809,24 +808,12 @@ test('line alignment offsets caret positions within the text box', () => {
     y: 0,
     w: 44,
     h: 40,
-    data: { content: 'abcd' },
+    data: { content: 'abcd', lineAlign: ['right'] },
   };
 
-  let [line] = textLayout.getTextLayout(obj);
+  const [line] = textLayout.getTextLayout(obj);
   assert.equal(textLayout.lineXAtOffset(line, obj, 0), 26);
-
-  assert.equal(textLayout.applyTextLineAlignmentRange(obj, 0, 0, 'right'), true);
-  [line] = textLayout.getTextLayout(obj);
-  assert.equal(line.align, 'center');
-  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 30);
-
-  assert.equal(textLayout.applyTextLineAlignmentRange(obj, 0, 0, 'right'), true);
-  [line] = textLayout.getTextLayout(obj);
-  assert.equal(line.align, 'right');
-  assert.equal(textLayout.lineXAtOffset(line, obj, 0), 34);
-
-  obj.data.lineAlign = ['center'];
-  assert.equal(textLayout.getTextLayout(obj)[0].align, 'center');
+  assert.equal(Object.hasOwn(line, 'align'), false);
 });
 
 test('text caret x centers between neighboring glyph ink bounds', () => {
@@ -1012,7 +999,6 @@ test('large text insertion patches cached layout instead of rebuilding every lin
     logicalLineIndex: line.logicalLineIndex,
     y: line.y,
     textY: line.textY,
-    align: line.align,
   }));
 
   assert.ok(patchedLayout.length > 300);

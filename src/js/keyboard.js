@@ -16,25 +16,6 @@ function isEditableTextShortcutTarget(target) {
   return !type || EDITABLE_INPUT_TYPES.has(type);
 }
 
-function hasDocumentTextSelectionForShortcut() {
-  if (typeof window === 'undefined' || typeof window.getSelection !== 'function') return false;
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed) return false;
-  return String(selection) !== '';
-}
-
-function hasTextEditingOrSelectionContextForShortcut(e) {
-  return !!editingId ||
-    (typeof _editEl !== 'undefined' && !!_editEl) ||
-    isEditableTextShortcutTarget(e.target) ||
-    (typeof document !== 'undefined' && isEditableTextShortcutTarget(document.activeElement)) ||
-    hasDocumentTextSelectionForShortcut();
-}
-
-function hasActiveTextEditAlignmentContext() {
-  return !!editingId && typeof _editEl !== 'undefined' && !!_editEl;
-}
-
 const hasSelectedImagesForKeyboardAction = (minimum = 1) => {
   if (!selectedIds?.size || !objectsMap?.get) return false;
   let count = 0;
@@ -64,22 +45,6 @@ const enterSelectedTextEditFromKeyboard = (e) => {
   const [id] = selectedIds, obj = objectsMap.get(id);
   if (obj?.type !== 'text') return false;
   enterEdit(obj.id, { placeInitialCaret: true });
-  return true;
-};
-
-const applySelectedTextAlignmentFromKeyboard = (direction) => {
-  if (editingId || isBoardInputBlocked()) return false;
-  if (!selectedIds?.size || !objectsMap?.get) return false;
-  const dirty = [];
-  for (const id of selectedIds) {
-    const obj = objectsMap.get(id);
-    if (obj?.type !== 'text') continue;
-    if (applyTextLineAlignmentRange(obj, 0, Infinity, direction)) dirty.push(obj.id);
-  }
-  if (!dirty.length) return false;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'text-align');
-  else scheduleRender(true, true);
-  pushHistory('text-align', dirty);
   return true;
 };
 
@@ -174,26 +139,6 @@ document.addEventListener('keydown', (e) => {
       runShortcutCommand('copy', copySelected);
       return;
     }
-    return;
-  }
-
-  if (commandOnly && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-    const direction = e.key === 'ArrowRight' ? 'right' : 'left';
-    if (
-      hasActiveTextEditAlignmentContext() &&
-      typeof applyTextEditAlignmentFromKeyboard === 'function'
-    ) {
-      consumeShortcutEvent(e);
-      runShortcutCommand(`text-align-${direction}`, () => {
-        applyTextEditAlignmentFromKeyboard(direction);
-      });
-      return;
-    }
-    if (hasTextEditingOrSelectionContextForShortcut(e)) return;
-    consumeShortcutEvent(e);
-    runShortcutCommand(`text-align-${direction}`, () => {
-      applySelectedTextAlignmentFromKeyboard(direction);
-    });
     return;
   }
 

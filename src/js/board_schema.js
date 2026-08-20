@@ -42,15 +42,6 @@
     };
     if (obj.type === OBJECT_TYPES.TEXT) {
       normalized.data.content = typeof data.content === 'string' ? data.content : '';
-      if (Array.isArray(data.lineAlign)) {
-        const align = new Array(data.lineAlign.length);
-        for (let i = 0; i < data.lineAlign.length; i++) {
-          const value = data.lineAlign[i];
-          align[i] = value === 'center' || value === 'right' || value === 'left' ? value : 'left';
-        }
-        while (align.length && align[align.length - 1] === 'left') align.pop();
-        if (align.length) normalized.data.lineAlign = align;
-      }
     } else {
       if (typeof data.imgKey !== 'string' || !data.imgKey) {
         throw new Error(`image object ${obj.id} is missing imgKey`);

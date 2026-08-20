@@ -25,8 +25,6 @@ function cloneObject(obj, runtimeTextCache = false) {
   if (!data) {
     const content = obj.data.content;
     data = { content };
-    const sourceLineAlign = obj.data?.lineAlign;
-    if (Array.isArray(sourceLineAlign) && sourceLineAlign.length) data.lineAlign = sourceLineAlign.slice();
   }
   const cloned = {
     id: obj.id,

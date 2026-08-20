@@ -12,7 +12,6 @@ Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in th
 - Lag-free navigation across massive boards supporting 500 MB of images and text
 - Losslessly add images via clipboard, drag and drop, or the file picker
 - Multi-select, translate, scale, flip, rotate, copy, paste, and duplicate
-- Align text left, center, or right
 - Export one image, selected images, or all images
 - Losslessly copy images back to your clipboard
 - Save everything locally as a portable .bf file

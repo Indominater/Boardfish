@@ -77,8 +77,6 @@ function loadTextEditorIntegrationHelpers() {
       'globalThis.textEditInputReplacement = textEditInputReplacement;\n' +
       'globalThis.textEditBlankLineDeleteRange = textEditBlankLineDeleteRange;\n' +
       'globalThis.textNewlineCount = textNewlineCount;\n' +
-      'globalThis.textLogicalLineRangeForSelection = textLogicalLineRangeForSelection;\n' +
-      'globalThis.updateTextLineAlignForInput = updateTextLineAlignForInput;\n' +
       'globalThis.replaceTextEditProxyRange = replaceTextEditProxyRange;\n' +
       'globalThis.tryNativeBoardfishTextSelectionPaste = tryNativeBoardfishTextSelectionPaste;\n',
     context,
@@ -136,26 +134,10 @@ test('fresh in-app text clipboard skips browser token authorization', async () =
   assert.equal(context.calls.currentOptions.webClipboardToken, '');
 });
 
-test('newline-free input preserves the existing line-alignment array', () => {
+test('text newline count handles bounded long ranges', () => {
   const context = loadTextEditorIntegrationHelpers();
-  const lineAlign = ['center', 'right'];
-  const obj = { data: { lineAlign } };
-
-  context.updateTextLineAlignForInput(obj, 'one\ntwo', 1, 2, 'X');
-
-  assert.equal(obj.data.lineAlign, lineAlign);
-});
-
-test('newline insertion inherits alignment without expanding trailing left entries', () => {
-  const context = loadTextEditorIntegrationHelpers();
-  const obj = { data: { lineAlign: ['center'] } };
-
-  context.updateTextLineAlignForInput(obj, 'one\ntwo', 3, 3, '\n');
-
-  assert.deepEqual([...obj.data.lineAlign], ['center', 'center']);
   const longText = `${'x'.repeat(80)}\nsecond\nthird`;
   assert.equal(context.textNewlineCount(longText, 0, longText.length - 1), 2);
-  assert.deepEqual({ ...context.textLogicalLineRangeForSelection(longText, { start: 81, end: longText.length }) }, { startLine: 1, endLine: 2 });
 });
 
 function loadExitEditHarness() {
@@ -386,15 +368,13 @@ function makeBeforeInputEvent(inputType, data = '') {
   };
 }
 
-test('entering edit preserves an already canonical line-alignment cache key', () => {
+test('entering edit preserves an already valid text layout cache', () => {
   const context = loadLiveTextEditResizeHarness();
-  context.obj.data = { content: 'a\nb', lineAlign: ['center'] };
-  const lineAlign = context.obj.data.lineAlign;
+  context.obj.data = { content: 'a\nb' };
   const layout = context.getTextLayout(context.obj);
 
   context.enterEdit(context.obj.id, { history: false });
 
-  assert.equal(context.obj.data.lineAlign, lineAlign);
   assert.equal(context.getTextLayout(context.obj), layout);
 });
 
@@ -465,7 +445,7 @@ test('cmd+x copies highlighted text without copy feedback before deleting it', (
   assert.equal(obj.data.content, 'alpha  gamma');
 });
 
-test('cmd+right while editing aligns the current caret line', () => {
+test('cmd+arrow while editing is left to native caret navigation', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   obj.data = { content: 'one\ntwo\nthree' };
@@ -479,61 +459,11 @@ test('cmd+right while editing aligns the current caret line', () => {
   const key = makeKeyEvent('ArrowRight', { metaKey: true });
   context.proxy.dispatchEvent(key);
 
-  assert.equal(key.prevented, true);
-  assert.deepEqual([...obj.data.lineAlign], ['left', 'center']);
+  assert.equal(key.prevented, false);
   assert.equal(context.proxy.selectionStart, 5);
   assert.equal(context.proxy.selectionEnd, 5);
-  assert.deepEqual(context.dirty, [obj.id]);
-  assert.deepEqual(context.histories, ['text-align']);
-  assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
-  assert.deepEqual(context.animations, []);
-});
-
-test('cmd+left while editing aligns the current caret line leftward', () => {
-  const context = loadLiveTextEditResizeHarness();
-  const { obj } = context;
-  obj.data = { content: 'one\ntwo\nthree', lineAlign: ['left', 'right', 'right'] };
-
-  context.enterEdit(obj.id, { history: false });
-  context.dirty.length = 0;
-  context.histories.length = 0;
-  context.renders.length = 0;
-  context.animations.length = 0;
-  context.proxy.setSelectionRange(5, 5, 'none');
-  const key = makeKeyEvent('ArrowLeft', { metaKey: true });
-  context.proxy.dispatchEvent(key);
-
-  assert.equal(key.prevented, true);
-  assert.deepEqual([...obj.data.lineAlign], ['left', 'center', 'right']);
-  assert.equal(context.proxy.selectionStart, 5);
-  assert.equal(context.proxy.selectionEnd, 5);
-  assert.deepEqual(context.dirty, [obj.id]);
-  assert.deepEqual(context.histories, ['text-align']);
-  assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
-  assert.deepEqual(context.animations, []);
-});
-
-test('cmd+right while editing highlighted text aligns the highlighted lines', () => {
-  const context = loadLiveTextEditResizeHarness();
-  const { obj } = context;
-  obj.data = { content: 'one\ntwo\nthree' };
-
-  context.enterEdit(obj.id, { history: false });
-  context.dirty.length = 0;
-  context.histories.length = 0;
-  context.renders.length = 0;
-  context.animations.length = 0;
-  context.proxy.setSelectionRange(4, obj.data.content.length, 'forward');
-  const key = makeKeyEvent('ArrowRight', { metaKey: true });
-  context.proxy.dispatchEvent(key);
-
-  assert.equal(key.prevented, true);
-  assert.deepEqual([...obj.data.lineAlign], ['left', 'center', 'center']);
-  assert.equal(context.proxy.selectionStart, 4);
-  assert.equal(context.proxy.selectionEnd, obj.data.content.length);
-  assert.deepEqual(context.dirty, [obj.id]);
-  assert.deepEqual(context.histories, ['text-align']);
-  assert.deepEqual(context.renders, [{ board: true, overlay: true, reason: 'text-align' }]);
+  assert.deepEqual(context.dirty, []);
+  assert.deepEqual(context.histories, []);
   assert.deepEqual(context.animations, []);
 });
 
@@ -1179,6 +1109,28 @@ test('backspace after a tab on a blank line removes only the tab', () => {
   assert.equal(obj._textEditCaretLineStartIndex, undefined);
 });
 
+test('enter expands a large existing text box immediately', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  const largeText = `${'word '.repeat(4100)}tail`;
+  obj.data = { content: largeText };
+  obj.w = 1_000_000;
+  obj.h = TEST_LINE_H + TEST_TEXT_PAD * 2;
+
+  context.enterEdit(obj.id, { history: false });
+  context.renders = [];
+  context.proxy.setSelectionRange(largeText.length, largeText.length, 'none');
+  const key = makeKeyEvent('Enter');
+
+  context.proxy.dispatchEvent(key);
+
+  assert.equal(key.prevented, true);
+  assert.equal(obj.data.content, `${largeText}\n`);
+  assert.equal(obj.h, 2 * TEST_LINE_H + TEST_TEXT_PAD * 2);
+  assert.equal(obj._textEditPendingSizeSync, undefined);
+  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
+});
+
 test('large existing text edit defers auto-height until exit', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
@@ -1502,7 +1454,6 @@ test('exiting unchanged existing text keeps cached layout and skips size history
     _layoutCacheContent: 'Hi',
     _layoutCacheW: context.obj.w,
     _layoutCacheScriptKey: '[]',
-    _layoutCacheAlignKey: '',
     _layoutCacheY: context.obj.y,
   });
   context._editHistoryLastContent = 'Hi';

@@ -65,7 +65,6 @@ function loadKeyboard(overrides = {}) {
     enterEdit: (id, options = {}) => calls.push(['enterEdit', id, options]),
     toWorld: (x, y) => ({ x: x + 1, y: y + 1 }),
     hasSelection: () => false,
-    applyTextLineAlignmentRange: () => false,
     markDirty: () => calls.push(['markDirty']),
     scheduleRender: () => calls.push(['scheduleRender']),
     pushHistory: () => calls.push(['pushHistory']),
@@ -295,58 +294,7 @@ test('plain enter does not edit text objects in a multi-selection', () => {
   assert.deepEqual(calls, []);
 });
 
-test('cmd+arrow text alignment applies to the active text edit', () => {
-  const { calls, mainKeydown } = loadKeyboard({
-    editingId: 'text-1',
-    _editEl: {},
-    applyTextEditAlignmentFromKeyboard: (direction) => {
-      calls.push(['alignEdit', direction]);
-      return true;
-    },
-  });
-  const event = keyEvent({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true });
-
-  mainKeydown(event);
-
-  assert.equal(event.defaultPrevented, true);
-  assert.equal(event.propagationStopped, true);
-  assert.deepEqual(calls, [['alignEdit', 'right']]);
-});
-
-test('cmd+arrow text alignment falls through for editable DOM targets', () => {
-  const { calls, mainKeydown } = loadKeyboard();
-  const event = keyEvent({
-    key: 'ArrowRight',
-    code: 'ArrowRight',
-    metaKey: true,
-    target: { tagName: 'INPUT', type: 'text' },
-  });
-
-  mainKeydown(event);
-
-  assert.equal(event.defaultPrevented, false);
-  assert.equal(event.propagationStopped, false);
-  assert.deepEqual(calls, []);
-});
-
-test('cmd+arrow text alignment falls through while document text is selected', () => {
-  const { calls, mainKeydown } = loadKeyboard({
-    window: {
-      innerWidth: 1000,
-      innerHeight: 800,
-      getSelection: () => ({ isCollapsed: false, toString: () => 'selected text' }),
-    },
-  });
-  const event = keyEvent({ key: 'ArrowLeft', code: 'ArrowLeft', metaKey: true });
-
-  mainKeydown(event);
-
-  assert.equal(event.defaultPrevented, false);
-  assert.equal(event.propagationStopped, false);
-  assert.deepEqual(calls, []);
-});
-
-test('cmd+arrow text alignment still applies to selected text objects outside editing', () => {
+test('cmd+arrow is not a board shortcut for selected text objects', () => {
   const selectedIds = new Set(['text-1', 'image-1']);
   const textObject = { id: 'text-1', type: 'text', data: { content: 'one\ntwo' } };
   const objectsMap = new Map([
@@ -356,24 +304,14 @@ test('cmd+arrow text alignment still applies to selected text objects outside ed
   const { calls, mainKeydown } = loadKeyboard({
     selectedIds,
     objectsMap,
-    applyTextLineAlignmentRange: (obj, startLine, endLine, direction) => {
-      calls.push(['align', obj.id, startLine, endLine, direction]);
-      return true;
-    },
-    scheduleRender: (board, overlay, reason) => calls.push(['scheduleRender', board, overlay, reason]),
-    pushHistory: (reason, dirty) => calls.push(['pushHistory', reason, [...dirty]]),
   });
   const event = keyEvent({ key: 'ArrowRight', code: 'ArrowRight', metaKey: true });
 
   mainKeydown(event);
 
-  assert.equal(event.defaultPrevented, true);
-  assert.equal(event.propagationStopped, true);
-  assert.deepEqual(calls, [
-    ['align', 'text-1', 0, Infinity, 'right'],
-    ['scheduleRender', true, true, 'text-align'],
-    ['pushHistory', 'text-align', ['text-1']],
-  ]);
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(event.propagationStopped, false);
+  assert.deepEqual(calls, []);
 });
 
 test('cmd+r falls through to browser reload when no image can rotate', () => {

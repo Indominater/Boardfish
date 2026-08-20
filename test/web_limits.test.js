@@ -54,7 +54,6 @@ test('web board content estimate ignores runtime text layout cache fields', () =
     z: 1,
     data: {
       content: 'hello',
-      lineAlign: ['center'],
     },
     _layoutCache: {
       toJSON() {

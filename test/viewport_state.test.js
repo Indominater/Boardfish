@@ -108,62 +108,6 @@ function applyViewportState(options, method, ...args) {
   return { ...context.viewportSnapshot() };
 }
 
-function loadViewportPreviewHarness() {
-  const source = fs.readFileSync(path.join(root, 'src/js/viewport.js'), 'utf8');
-  const start = source.indexOf('var _viewportTransformPreview = null;');
-  const end = source.indexOf('/* BOARDFISH_DEV_DIAGNOSTICS_START */', start);
-  assert.ok(start > 0 && end > start, 'viewport transform preview section is missing');
-  let now = 0;
-  const css = new Map();
-  const classes = new Set();
-  const scheduled = [];
-  const context = {
-    console,
-    _boardOpening: false,
-    lastViewportInputAt: 0,
-    canvas: {
-      classList: {
-        add(value) { classes.add(value); },
-        contains(value) { return classes.has(value); },
-        remove(value) { classes.delete(value); },
-      },
-      style: {
-        getPropertyValue(name) { return css.get(name) || ''; },
-        removeProperty(name) { css.delete(name); },
-        setProperty(name, value) { css.set(name, value); },
-      },
-    },
-    performance: { now: () => now },
-    BoardfishViewportState: {
-      screenTransformBetween(from, to) {
-        const scale = to.zoom / from.zoom;
-        return {
-          scale,
-          translateX: to.panX - from.panX * scale,
-          translateY: to.panY - from.panY * scale,
-        };
-      },
-    },
-    scheduleTransform(changed, sourceName, event) {
-      scheduled.push({ changed, source: sourceName, event });
-    },
-  };
-  vm.createContext(context);
-  vm.runInContext(
-    'var panX = 0, panY = 0, zoom = 1;\n' +
-      `${source.slice(start, end)}\n` +
-      'globalThis.finishPreviewFrame = finishViewportTransformPreviewFrame;\n' +
-      'globalThis.setPreviewViewport = (x, y, z) => { panX = x; panY = y; zoom = z; };\n',
-    context,
-    { filename: 'viewport-transform-preview.js' },
-  );
-  context.setNow = (value) => { now = value; };
-  context.css = css;
-  context.classes = classes;
-  context.scheduled = scheduled;
-  return context;
-}
-
 test('wheel and drag state methods share the same constrained pan path', () => {
   const context = loadViewportStateHarness({
     objects: [{ type: 'image', x: 100, y: 200, w: 300, h: 400 }],
@@ -183,52 +127,13 @@ test('zooming around a client point keeps its world-space anchor fixed', () => {
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: -90, panY: -180, zoom: 4 });
 });
 
-test('viewport preview transform maps already-rendered screen pixels to the next viewport', () => {
-  const context = loadViewportStateHarness();
-  const from = { panX: 10, panY: -20, zoom: 2 };
-  const to = { panX: -30, panY: 50, zoom: 3 };
-  const transform = { ...context.BoardfishViewportState.screenTransformBetween(from, to) };
+test('viewport rendering has no mobile-only transform preview branch', () => {
+  const viewportSource = fs.readFileSync(path.join(root, 'src/js/viewport.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(root, 'src/styles.css'), 'utf8');
 
-  assert.deepEqual(transform, { scale: 1.5, translateX: -45, translateY: 80 });
-  const world = { x: 75, y: 40 };
-  const rendered = {
-    x: world.x * from.zoom + from.panX,
-    y: world.y * from.zoom + from.panY,
-  };
-  assert.equal(rendered.x * transform.scale + transform.translateX, world.x * to.zoom + to.panX);
-  assert.equal(rendered.y * transform.scale + transform.translateY, world.y * to.zoom + to.panY);
-});
-
-test('pinch preview throttles canvas redraws, rebases, and clears after its final frame', () => {
-  const context = loadViewportPreviewHarness();
-  const preview = context.BoardfishViewportPreview;
-  const event = { timeStamp: 10 };
-
-  context.setNow(0);
-  assert.equal(preview.begin(), true);
-  assert.equal(context.classes.has('viewport-transform-preview'), true);
-
-  context.setPreviewViewport(-20, 30, 1.5);
-  context.setNow(10);
-  assert.equal(preview.update(event), true);
-  assert.equal(context.css.get('--viewport-transform-preview'), 'matrix(1.5, 0, 0, 1.5, -20, 30)');
-  assert.deepEqual(context.scheduled, []);
-
-  context.setNow(40);
-  preview.update(event);
-  assert.deepEqual(context.scheduled, [{ changed: true, source: 'touch-pinch-preview', event }]);
-  assert.equal(context.finishPreviewFrame(), true);
-  assert.equal(context.css.get('--viewport-transform-preview'), 'matrix(1, 0, 0, 1, 0, 0)');
-  assert.equal(preview.active(), true);
-
-  context.setPreviewViewport(-10, 50, 2);
-  context.setNow(45);
-  assert.equal(preview.commit(event), true);
-  assert.equal(context.scheduled.at(-1).source, 'touch-pinch-commit');
-  assert.equal(context.finishPreviewFrame(), true);
-  assert.equal(preview.active(), false);
-  assert.equal(context.classes.has('viewport-transform-preview'), false);
-  assert.equal(context.css.has('--viewport-transform-preview'), false);
+  assert.doesNotMatch(viewportSource, /BoardfishViewportPreview|viewportTransformPreview|touch-pinch-preview/);
+  assert.doesNotMatch(styles, /viewport-transform-preview/);
+  assert.match(viewportSource, /function applyTransform\([\s\S]*drawBoard\(true\)/);
 });
 
 test('pan state stays fully locked at an edge until movement returns toward the board', () => {

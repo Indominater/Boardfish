@@ -21,7 +21,6 @@ function clearTextRuntimeCache(obj) {
   delete obj._layoutCache;
   delete obj._layoutCacheContent;
   delete obj._layoutCacheW;
-  delete obj._layoutCacheAlignKey;
   delete obj._layoutCacheY;
 }
 
@@ -36,7 +35,6 @@ function cloneTextObjectRuntimeCaches(source, target) {
     target._layoutCache = source._layoutCache.map((line) => ({ ...line }));
     target._layoutCacheContent = source._layoutCacheContent;
     target._layoutCacheW = source._layoutCacheW;
-    target._layoutCacheAlignKey = source._layoutCacheAlignKey;
     target._layoutCacheY = target.y;
   }
   return target;
@@ -279,7 +277,6 @@ function attachTextRuntimeCache(obj, content, label = content) {
   }];
   obj._layoutCacheContent = content;
   obj._layoutCacheW = obj.w;
-  obj._layoutCacheAlignKey = '';
   obj._layoutCacheY = obj.y;
 }
 

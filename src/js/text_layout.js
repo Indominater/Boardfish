@@ -365,7 +365,7 @@ function textGlyphPairSpacing(previous, next, font = FONT) {
 
 function clearTextObjectLayoutRuntime(obj, options) {
   if (!obj) return;
-  obj._layoutCache = obj._layoutCacheContent = obj._layoutCacheAlignKey = null;
+  obj._layoutCache = obj._layoutCacheContent = null;
   if (options?.minWidth !== false) {
     obj._textMinWidthCache = obj._textMinWidthCacheContent = null;
   }
@@ -375,9 +375,8 @@ function clearTextObjectLayoutRuntime(obj, options) {
   obj._textWrappedLineCountCacheContent = obj._textWrappedLineCountCacheValue =
     obj._textWrappedLineIndexCacheContent = obj._textWrappedLineIndexCache =
     obj._textWrappedLineIndexWidthCacheContent = obj._textWrappedLineIndexWidthCache =
-    obj._textViewportLayoutRangeCacheContent = obj._textViewportLayoutRangeCacheAlignKey =
-    obj._textViewportLayoutRangeCache = obj._textViewportLayoutLineCacheContent =
-    obj._textViewportLayoutLineCacheAlignKey = obj._textViewportLayoutLineCache = null;
+    obj._textViewportLayoutRangeCacheContent = obj._textViewportLayoutRangeCache =
+    obj._textViewportLayoutLineCacheContent = obj._textViewportLayoutLineCache = null;
 }
 
 const cloneTextLayoutRuntimeLine = ({ _textDrawPlanCache, ...clone }) => clone;
@@ -432,14 +431,11 @@ function cloneTextObjectRuntimeCaches(source, target) {
   if (!target._layoutCache &&
     Array.isArray(source._layoutCache) &&
     source._layoutCacheContent === content &&
-    source._layoutCacheW === target.w &&
-    source._layoutCacheAlignKey === textLayoutAlignKey(source) &&
-    String(source.data?.lineAlign) === String(target.data?.lineAlign)
+    source._layoutCacheW === target.w
   ) {
     target._layoutCache = cloneTextLayoutRuntimeLines(source._layoutCache);
     target._layoutCacheContent = source._layoutCacheContent;
     target._layoutCacheW = source._layoutCacheW;
-    target._layoutCacheAlignKey = textLayoutAlignKey(target);
     target._layoutCacheY = target.y;
     if (source._layoutCacheY !== target.y) syncTextLayoutLinePositions(target, target._layoutCache);
   }
@@ -1099,7 +1095,6 @@ function layoutLineFromWrappedLine(obj, line, lineIndex) {
     caretEndIndex: line.caretEndIndex,
     nextStartIndex: line.nextStartIndex,
     logicalLineIndex: line.logicalLineIndex || 0,
-    align: textLineAlignAt(obj, line.logicalLineIndex || 0),
     y,
     textY: y + TEXT_BASELINE_Y_OFFSET,
     prefixWidths,
@@ -1152,8 +1147,6 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
 
   const oldSplice = textLayoutSpliceRangeForLogicalLines(layout, oldStartLine, oldEndLine);
 
-  const alignKey = textLayoutAlignKey(obj);
-
   const newWrapped = wrapTextLogicalLineRange(obj, oldStartLine, newEndLine, {
     startIndex: layout[oldSplice.start].startIndex,
   });
@@ -1180,7 +1173,6 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
     if (Number.isFinite(line.caretEndIndex)) line.caretEndIndex += deltaChars;
     if (Number.isFinite(line.nextStartIndex)) line.nextStartIndex += deltaChars;
     line.logicalLineIndex = (line.logicalLineIndex || 0) + logicalLineDelta;
-    line.align = textLineAlignAt(obj, line.logicalLineIndex || 0);
     line.y = obj.y + TEXT_PAD + lineIndex * LINE_H;
     line.textY = line.y + TEXT_BASELINE_Y_OFFSET;
   }
@@ -1205,7 +1197,6 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   }
 
   obj._layoutCacheContent = newContent;
-  obj._layoutCacheAlignKey = alignKey;
   obj._layoutCacheY = obj.y;
 
   if (collectDiagnostics) {
@@ -1226,8 +1217,7 @@ function getTextAutoHeight(obj, minLines = 1) {
   const cachedLineCount = obj?.type === 'text' &&
     Array.isArray(obj._layoutCache) &&
     obj._layoutCacheContent === content &&
-    obj._layoutCacheW === obj.w &&
-    obj._layoutCacheAlignKey === textLayoutAlignKey(obj)
+    obj._layoutCacheW === obj.w
       ? Math.max(1, obj._layoutCache.length)
       : null;
   const lineCount = cachedLineCount ?? getWrappedLineCount(obj, content);
@@ -1236,10 +1226,6 @@ function getTextAutoHeight(obj, minLines = 1) {
 
 const isTextWordSeparator = (ch) => ch === ' ' || ch === '\t';
 const isTextWordOrLineSeparator = (ch) => isTextWordSeparator(ch) || ch === '\n';
-
-const normalizeTextLineAlignValue = (value) => (
-  value === 'center' || value === 'right' ? value : 'left'
-);
 
 const textNewlineCount = (value, start = 0, end = Infinity) => {
   const text = String(value ?? '');
@@ -1253,60 +1239,6 @@ const textNewlineCount = (value, start = 0, end = Infinity) => {
   const range = bounded ? text.slice(start, stop) : text;
   for (let i = range.indexOf('\n', bounded ? 0 : start); i >= 0; i = range.indexOf('\n', i + 1)) count++;
   return count;
-};
-
-const normalizeTextLineAlignForContent = (content, lineAlign = [], lineCount = textNewlineCount(content) + 1) => {
-  const source = Array.isArray(lineAlign) ? lineAlign : [];
-  const result = new Array(Math.min(lineCount, source.length));
-  for (let i = 0; i < result.length; i++) result[i] = normalizeTextLineAlignValue(source[i]);
-  while (result.length && result[result.length - 1] === 'left') result.pop();
-  return result;
-};
-
-const textLineAlignAt = (obj, logicalLineIndex = 0) => {
-  const align = obj?.data?.lineAlign?.[logicalLineIndex];
-  return normalizeTextLineAlignValue(align);
-};
-
-const textLogicalLineRangeForSelection = (value, selection = {}) => {
-  const text = normalizeTextContent(value);
-  const start = Math.max(0, Math.min(selection.start ?? 0, text.length));
-  const end = Math.max(0, Math.min(selection.end ?? start, text.length));
-  const from = Math.min(start, end);
-  const to = Math.max(start, end);
-  const startLine = textNewlineCount(text, 0, from);
-  return { startLine, endLine: startLine + (to > from ? textNewlineCount(text, from, to - 1) : 0) };
-};
-
-const cycleTextLineAlignValue = (align, direction) => {
-  const current = normalizeTextLineAlignValue(align);
-  if (direction === 'left') return current === 'right' ? 'center' : 'left';
-  return current === 'left' ? 'center' : 'right';
-};
-
-const applyTextLineAlignmentRange = (obj, startLine = 0, endLine = startLine, direction = 'right') => {
-  if (!obj || obj.type !== 'text') return false;
-  if (!obj.data) obj.data = {};
-  const content = obj.data.content || '';
-  const count = textNewlineCount(content) + 1;
-  if (!count) return false;
-  const start = Math.max(0, Math.min(Math.trunc(Number(startLine)) || 0, count - 1));
-  const end = Math.max(start, Math.min(Math.trunc(Number(endLine)) || start, count - 1));
-  const next = normalizeTextLineAlignForContent(content, obj.data.lineAlign, count);
-  while (next.length <= end) next.push('left');
-  let changed = false;
-  for (let i = start; i <= end; i++) {
-    const aligned = cycleTextLineAlignValue(next[i], direction);
-    if (aligned === next[i]) continue;
-    next[i] = aligned;
-    changed = true;
-  }
-  if (!changed) return false;
-  while (next.length && next[next.length - 1] === 'left') next.pop();
-  if (next.length) obj.data.lineAlign = next;
-  else delete obj.data.lineAlign;
-  clearTextObjectLayoutRuntime(obj);
-  return true;
 };
 
 const getTextMinWidth = (obj) => {
@@ -1381,10 +1313,6 @@ function syncAllTextAutoHeights() {
   return changed;
 }
 
-function textLayoutAlignKey(obj) {
-  return obj?.data?.lineAlign?.length ? obj.data.lineAlign : '';
-}
-
 function syncTextLayoutLinePositions(obj, layout, first = 0) {
   for (let i = 0; i < layout.length; i++) {
     const y = obj.y + TEXT_PAD + (first + i) * LINE_H;
@@ -1398,14 +1326,13 @@ function setTextLayoutTotalLines(layout, totalLines) {
   return layout;
 }
 
-function getCachedTextViewportLayoutRange(obj, content, alignKey, first, last) {
+function getCachedTextViewportLayoutRange(obj, content, first, last) {
   const cache = obj._textViewportLayoutRangeCache;
   if (
     !cache ||
     typeof cache.get !== 'function' ||
     obj._textViewportLayoutRangeCacheContent !== content ||
     obj._textViewportLayoutRangeCacheW !== obj.w ||
-    obj._textViewportLayoutRangeCacheAlignKey !== alignKey ||
     obj._textViewportY !== obj.y
   ) {
     return null;
@@ -1418,17 +1345,15 @@ function getCachedTextViewportLayoutRange(obj, content, alignKey, first, last) {
   return layout;
 }
 
-function ensureTextViewportLayoutLineCache(obj, content, alignKey, totalLines = 0) {
+function ensureTextViewportLayoutLineCache(obj, content, totalLines = 0) {
   if (
     obj._textViewportLayoutLineCacheContent !== content ||
     obj._textViewportLayoutLineCacheW !== obj.w ||
-    obj._textViewportLayoutLineCacheAlignKey !== alignKey ||
     !obj._textViewportLayoutLineCache ||
     typeof obj._textViewportLayoutLineCache.set !== 'function'
   ) {
     obj._textViewportLayoutLineCacheContent = content;
     obj._textViewportLayoutLineCacheW = obj.w;
-    obj._textViewportLayoutLineCacheAlignKey = alignKey;
     obj._textViewportLayoutLineCacheLineCount = Math.max(0, Math.trunc(Number(totalLines)) || 0);
     obj._textViewportLayoutLineCache = new Map();
   } else if (totalLines > 0) {
@@ -1440,8 +1365,8 @@ function ensureTextViewportLayoutLineCache(obj, content, alignKey, totalLines = 
   return obj._textViewportLayoutLineCache;
 }
 
-function getCachedTextViewportLayoutLines(obj, content, alignKey, first, last) {
-  const cache = ensureTextViewportLayoutLineCache(obj, content, alignKey);
+function getCachedTextViewportLayoutLines(obj, content, first, last) {
+  const cache = ensureTextViewportLayoutLineCache(obj, content);
   const totalLines = Math.trunc(Number(obj._textViewportLayoutLineCacheLineCount)) || 0;
   if (totalLines <= 0 || first >= totalLines) return null;
   const actualLast = Math.min(last, totalLines - 1);
@@ -1452,26 +1377,24 @@ function getCachedTextViewportLayoutLines(obj, content, alignKey, first, last) {
     layout.push(line);
   }
   syncTextLayoutLinePositions(obj, layout, first);
-  return setCachedTextViewportLayoutRange(obj, content, alignKey, first, last, layout, totalLines);
+  return setCachedTextViewportLayoutRange(obj, content, first, last, layout, totalLines);
 }
 
-function setCachedTextViewportLayoutRange(obj, content, alignKey, first, last, layout, totalLines) {
+function setCachedTextViewportLayoutRange(obj, content, first, last, layout, totalLines) {
   if (
     obj._textViewportLayoutRangeCacheContent !== content ||
     obj._textViewportLayoutRangeCacheW !== obj.w ||
-    obj._textViewportLayoutRangeCacheAlignKey !== alignKey ||
     obj._textViewportY !== obj.y ||
     !obj._textViewportLayoutRangeCache ||
     typeof obj._textViewportLayoutRangeCache.set !== 'function'
   ) {
     obj._textViewportLayoutRangeCacheContent = content;
     obj._textViewportLayoutRangeCacheW = obj.w;
-    obj._textViewportLayoutRangeCacheAlignKey = alignKey;
     obj._textViewportY = obj.y;
     obj._textViewportLayoutRangeCache = new Map();
   }
   const out = setTextLayoutTotalLines(layout, totalLines);
-  const lineCache = ensureTextViewportLayoutLineCache(obj, content, alignKey, totalLines);
+  const lineCache = ensureTextViewportLayoutLineCache(obj, content, totalLines);
   for (let i = 0; i < out.length; i++) lineCache.set(first + i, out[i]);
   trimMapCache(lineCache, TEXT_VIEWPORT_LAYOUT_LINE_CACHE_MAX_ENTRIES);
   obj._textViewportLayoutRangeCache.set(`${first}:${last}`, out);
@@ -1479,8 +1402,8 @@ function setCachedTextViewportLayoutRange(obj, content, alignKey, first, last, l
   return out;
 }
 
-function textViewportLayoutLineCacheMissingSpans(obj, content, alignKey, first, last, totalLines) {
-  const cache = ensureTextViewportLayoutLineCache(obj, content, alignKey, totalLines);
+function textViewportLayoutLineCacheMissingSpans(obj, content, first, last, totalLines) {
+  const cache = ensureTextViewportLayoutLineCache(obj, content, totalLines);
   if (first >= totalLines) return [];
   const actualLast = Math.min(last, totalLines - 1);
   const spans = [];
@@ -1497,10 +1420,10 @@ function textViewportLayoutLineCacheMissingSpans(obj, content, alignKey, first, 
   return spans;
 }
 
-function buildTextViewportLayoutRangeFromLineIndex(obj, content, alignKey, first, last, lineIndexCache) {
+function buildTextViewportLayoutRangeFromLineIndex(obj, content, first, last, lineIndexCache) {
   const totalLines = lineIndexCache.lineCount;
   if (first >= totalLines) {
-    return setCachedTextViewportLayoutRange(obj, content, alignKey, first, last, [], totalLines);
+    return setCachedTextViewportLayoutRange(obj, content, first, last, [], totalLines);
   }
   const actualLast = Math.min(last, totalLines - 1);
   const firstEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, first);
@@ -1522,17 +1445,15 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, alignKey, first
       ));
     }
   }
-  return setCachedTextViewportLayoutRange(obj, content, alignKey, first, last, layout, totalLines);
+  return setCachedTextViewportLayoutRange(obj, content, first, last, layout, totalLines);
 }
 
 function getTextLayout(obj) {
   const content = obj.data.content;
-  const alignKey = textLayoutAlignKey(obj);
   if (
     obj._layoutCache &&
     obj._layoutCacheContent === content &&
-    obj._layoutCacheW === obj.w &&
-    obj._layoutCacheAlignKey === alignKey
+    obj._layoutCacheW === obj.w
   ) {
     if (obj._layoutCacheY !== obj.y) {
       syncTextLayoutLinePositions(obj, obj._layoutCache);
@@ -1542,7 +1463,6 @@ function getTextLayout(obj) {
   }
   obj._layoutCacheContent = content;
   obj._layoutCacheW = obj.w;
-  obj._layoutCacheAlignKey = alignKey;
   obj._layoutCacheY = obj.y;
   const wrapped = buildWrappedLines(obj, { collectLineIndex: true }, content);
   setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
@@ -1557,16 +1477,14 @@ function getTextLayout(obj) {
 
 function getTextLayoutForLineRange(obj, first = 0, last = first) {
   const content = obj.data.content;
-  const alignKey = textLayoutAlignKey(obj);
-  const cachedRangeLayout = getCachedTextViewportLayoutRange(obj, content, alignKey, first, last);
+  const cachedRangeLayout = getCachedTextViewportLayoutRange(obj, content, first, last);
   if (cachedRangeLayout) return cachedRangeLayout;
-  const cachedLineLayout = getCachedTextViewportLayoutLines(obj, content, alignKey, first, last);
+  const cachedLineLayout = getCachedTextViewportLayoutLines(obj, content, first, last);
   if (cachedLineLayout) return cachedLineLayout;
   if (
     obj._layoutCache &&
     obj._layoutCacheContent === content &&
-    obj._layoutCacheW === obj.w &&
-    obj._layoutCacheAlignKey === alignKey
+    obj._layoutCacheW === obj.w
   ) {
     if (obj._layoutCacheY !== obj.y) {
       syncTextLayoutLinePositions(obj, obj._layoutCache);
@@ -1598,10 +1516,10 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
         Number.isFinite(line?.visualLineIndex) ? line.visualLineIndex : first + i,
       );
     }
-    return setCachedTextViewportLayoutRange(obj, content, alignKey, first, last, layout, wrapped.lineCount);
+    return setCachedTextViewportLayoutRange(obj, content, first, last, layout, wrapped.lineCount);
   }
   const totalLineCount = lineIndexCache.lineCount;
-  const missingSpans = textViewportLayoutLineCacheMissingSpans(obj, content, alignKey, first, last, totalLineCount);
+  const missingSpans = textViewportLayoutLineCacheMissingSpans(obj, content, first, last, totalLineCount);
   if (missingSpans.length) {
     const actualLast = Math.min(last, totalLineCount - 1);
     const requestedLineCount = first <= actualLast ? actualLast - first + 1 : 0;
@@ -1609,16 +1527,15 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
     for (const span of missingSpans) missingLineCount += span.last - span.first + 1;
     if (requestedLineCount > 0 && missingLineCount < requestedLineCount) {
       for (const span of missingSpans) {
-        buildTextViewportLayoutRangeFromLineIndex(obj, content, alignKey, span.first, span.last, lineIndexCache);
+        buildTextViewportLayoutRangeFromLineIndex(obj, content, span.first, span.last, lineIndexCache);
       }
-      const assembled = getCachedTextViewportLayoutLines(obj, content, alignKey, first, last);
+      const assembled = getCachedTextViewportLayoutLines(obj, content, first, last);
       if (assembled) return assembled;
     }
   }
   return buildTextViewportLayoutRangeFromLineIndex(
     obj,
     content,
-    alignKey,
     first,
     last,
     lineIndexCache,
@@ -1633,21 +1550,18 @@ function getTextLayoutForViewport(obj, viewportRect) {
   return getTextLayoutForLineRange(obj, first, last);
 }
 
-function lineBaseX(line, obj) {
-  const base = obj.x + TEXT_PAD;
-  if (line?.align !== 'right' && line?.align !== 'center') return base;
-  const extra = Math.max(0, obj.w - TEXT_PAD * 2 - line.visibleWidth);
-  return base + (line.align === 'right' ? extra : extra / 2);
+function lineBaseX(obj) {
+  return obj.x + TEXT_PAD;
 }
 
 function lineXAtOffset(line, obj, offset) {
-  return lineBaseX(line, obj) + line.prefixWidths[Math.max(0, Math.min(offset, line.text.length))];
+  return lineBaseX(obj) + line.prefixWidths[Math.max(0, Math.min(offset, line.text.length))];
 }
 
 function lineHitOffsetForX(line, wx, obj, nearest = false) {
   const textLength = line.text.length;
   const pw = line.prefixWidths;
-  const target = wx - lineBaseX(line, obj);
+  const target = wx - lineBaseX(obj);
   let lo = 0, hi = textLength;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
@@ -1671,7 +1585,7 @@ function lineCaretXAtOffset(line, obj, offset) {
     : lineStart + text.length;
   const maxOffset = Math.max(text.length, caretEnd - lineStart);
   const clamped = Math.max(0, Math.min(Math.trunc(Number(offset)) || 0, maxOffset));
-  const baseX = lineBaseX(line, obj);
+  const baseX = lineBaseX(obj);
   const logicalX = baseX + (clamped <= text.length
     ? line.prefixWidths[clamped]
     : getPrefixWidths(content.slice(lineStart, lineStart + clamped))[clamped] || 0);
@@ -1826,7 +1740,7 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
     plan = createTextDrawPlan(line, text, start, end);
     if (cacheable) line._textDrawPlanCache = plan;
   }
-  const baseX = lineBaseX(line, obj);
+  const baseX = lineBaseX(obj);
   for (const run of plan) {
     for (const draw of run.draws) {
       context.fillText(draw.text, baseX + draw.x, line.textY);

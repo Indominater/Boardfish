@@ -122,13 +122,6 @@ const textEditorCap = (prefix, name) => (
   prefix ? `${prefix}${name.charAt(0).toUpperCase()}${name.slice(1)}` : name
 );
 
-const textEditorLayoutAlignKey = (obj) => {
-  try {
-    if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj);
-  } catch (_) {}
-  return '';
-};
-
 const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
   const key = (name) => textEditorCap(prefix, name);
   if (!obj || obj.type !== 'text') {
@@ -141,7 +134,6 @@ const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
     };
   }
   const text = normalizeTextContent(content ?? obj.data?.content ?? '');
-  const alignKey = textEditorLayoutAlignKey(obj);
   const lineH = Number(typeof LINE_H !== 'undefined' ? LINE_H : 24) || 24;
   const pad = Number(typeof TEXT_PAD !== 'undefined' ? TEXT_PAD : 16) || 16;
   const activeEditingId = typeof editingId !== 'undefined' ? editingId : '';
@@ -149,8 +141,7 @@ const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
   const logicalLines = Math.max(1, textNewlineCount(text) + 1);
   const layoutCacheValid = Array.isArray(obj._layoutCache) &&
     obj._layoutCacheContent === text &&
-    obj._layoutCacheW === obj.w &&
-    obj._layoutCacheAlignKey === alignKey;
+    obj._layoutCacheW === obj.w;
   const wrappedCountValid = obj._textWrappedLineCountCacheContent === text &&
     obj._textWrappedLineCountCacheW === obj.w &&
     Number.isFinite(obj._textWrappedLineCountCacheValue);
@@ -591,57 +582,6 @@ const textSelectionPayloadFromBoardfishClipboardValue = (clipboard) => {
 const currentBoardfishTextSelectionClipboardPayload = () => (
   textSelectionPayloadFromBoardfishClipboardValue(typeof jsClipboard !== 'undefined' ? jsClipboard : null)
 );
-
-const updateTextLineAlignForInput = (obj, oldValue, oldStart, oldEnd, insertedText) => {
-  if (!obj || !Array.isArray(obj.data?.lineAlign)) return;
-  oldStart = Math.max(0, Math.min(oldStart ?? 0, oldValue.length));
-  oldEnd = Math.max(oldStart, Math.min(oldEnd ?? oldStart, oldValue.length));
-  const removedLineCount = textNewlineCount(oldValue, oldStart, oldEnd);
-  const insertedLineCount = textNewlineCount(insertedText);
-  if (!removedLineCount && !insertedLineCount) return;
-  const oldAlign = obj.data.lineAlign;
-  const lineIndex = textNewlineCount(oldValue, 0, oldStart);
-  const baseAlign = oldAlign[lineIndex] || 'left';
-  const spliceStart = lineIndex + 1;
-  const suffixStart = Math.min(spliceStart + removedLineCount, oldAlign.length);
-  const nextAlign = new Array(spliceStart + insertedLineCount + oldAlign.length - suffixStart);
-  for (let i = 0; i < spliceStart; i++) nextAlign[i] = oldAlign[i] || 'left';
-  for (let i = 0; i < insertedLineCount; i++) nextAlign[spliceStart + i] = baseAlign;
-  for (let i = suffixStart; i < oldAlign.length; i++) nextAlign[spliceStart + insertedLineCount + i - suffixStart] = oldAlign[i];
-  while (nextAlign[nextAlign.length - 1] === 'left') nextAlign.pop();
-  if (nextAlign.length) obj.data.lineAlign = nextAlign;
-  else delete obj.data.lineAlign;
-};
-
-const applyTextEditAlignmentFromKeyboard = (
-  direction = 'right', id = editingId, proxy = _editEl,
-  wakeCaret = typeof _caretVisible !== 'undefined' && !_caretVisible,
-) => {
-  if (!id || !proxy) return false;
-  if (typeof isBoardInputBlocked === 'function' && isBoardInputBlocked()) return false;
-  if (
-    typeof applyTextLineAlignmentRange !== 'function' ||
-    typeof textLogicalLineRangeForSelection !== 'function'
-  ) {
-    return false;
-  }
-  const obj = objectsMap.get(id);
-  if (!obj || obj.type !== 'text') return false;
-  if (typeof flushEditHistoryCheckpoint === 'function') flushEditHistoryCheckpoint();
-  if (!obj.data) obj.data = {};
-  const content = textEditProxyValue(proxy);
-  if (obj.data.content !== content) obj.data.content = content;
-  const selection = textEditSelectionState(proxy);
-  const range = textLogicalLineRangeForSelection(content, selection);
-  if (typeof _caretVisible !== 'undefined') _caretVisible = true;
-  const changed = applyTextLineAlignmentRange(obj, range.startLine, range.endLine, direction);
-  if (changed || wakeCaret) {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, changed, 'text-align');
-    else scheduleRender(true, changed);
-  }
-  if (changed) pushHistory('text-align', [id]);
-  return true;
-};
 
 const copyTextEditSelectionFromProxy = async (
   id,
@@ -1481,10 +1421,6 @@ function enterEdit(id, {
 	      synthesizedStaleReplacement,
 	      contentChars: obj.data.content.length,
 	    });
-    updateTextLineAlignForInput(obj, oldValue, replacement.start, replacement.end, replacement.insertedText);
-    logInputStep('line-align-done', {
-      lineAlignCount: Array.isArray(obj.data?.lineAlign) ? obj.data.lineAlign.length : 0,
-    });
     const selectionStart = proxy.selectionStart;
     const selectionEnd = proxy.selectionEnd;
     if (selectionStart === selectionEnd) setTextEditCaretIndex(obj, selectionStart, null, true);
@@ -1538,8 +1474,9 @@ function enterEdit(id, {
       deletesContent &&
       removedChars > insertedChars;
     const layoutRemovedLines = layoutPatched && obj._lastTextLayoutLineDelta < 0;
+    const insertsLineBreak = inputType === 'insertLineBreak' || inputType === 'insertParagraph';
     const forceAutoHeight = layoutRemovedLines || deleteReducedLogicalLines ||
-      selectedDeleteShrankText || deleteShrankPendingEdit;
+      selectedDeleteShrankText || deleteShrankPendingEdit || insertsLineBreak;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const autoHeightForceReason = layoutRemovedLines
       ? 'layout-line-removal'
@@ -1547,7 +1484,9 @@ function enterEdit(id, {
         ? 'logical-line-delete'
         : (selectedDeleteShrankText
           ? 'selected-delete'
-          : (deleteShrankPendingEdit ? 'pending-size-delete' : '')));
+          : (deleteShrankPendingEdit
+            ? 'pending-size-delete'
+            : (insertsLineBreak ? 'line-break-insert' : ''))));
     const autoHeightDebugBefore = shouldLogInput
       ? {
           size: textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight'),
@@ -1958,12 +1897,6 @@ function enterEdit(id, {
       setTextEditProxySelectionRange(proxy, 0, currentProxyValue.length, 'none', currentProxyValue);
       TextSelDebug._logSelection('select-all', proxy);
       scheduleRender(true, false);
-      return;
-    }
-
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-      e.preventDefault();
-      applyTextEditAlignmentFromKeyboard(e.key === 'ArrowRight' ? 'right' : 'left', id, proxy, wakeCaret);
       return;
     }
 

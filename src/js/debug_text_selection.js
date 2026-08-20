@@ -384,7 +384,6 @@ var TextSelDebug = (() => {
       setRangeTextMs: e.setRangeTextMs ?? '',
       dispatchMs: e.dispatchMs ?? '',
       contentNormalized: e.contentNormalized ?? '',
-      lineAlignNormalized: e.lineAlignNormalized ?? '',
       autoHeightDeferred: e.autoHeightDeferred ?? '',
       pendingSizeSync: e.pendingSizeSync ?? '',
       contentChanged: e.contentChanged ?? '',

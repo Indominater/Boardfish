@@ -196,11 +196,9 @@ test('mobile browsers feed complete TouchEvent snapshots into the gesture contro
   assert.doesNotMatch(touchInputSource, /event\.targetTouches \|\| event\.touches/);
 });
 
-test('mobile pinch zoom uses the compositor preview and commits it when the pinch ends', () => {
-  assert.match(touchInputSource, /function beginTouchPinch\(\)[\s\S]*BoardfishViewportPreview\?\.begin/);
-  assert.match(touchInputSource, /function applyTouchPinch\(gesture\)[\s\S]*BoardfishViewportPreview\?\.update/);
-  assert.match(touchInputSource, /onPinchEnd:[\s\S]*finishTouchPinch\(gesture\)/);
-  assert.match(touchInputSource, /function finishTouchPinch\(gesture = null\)[\s\S]*BoardfishViewportPreview\?\.commit/);
+test('mobile pinch zoom uses the canonical viewport frame scheduler', () => {
+  assert.match(touchInputSource, /function applyTouchPinch\(gesture\)[\s\S]*BoardfishViewportState\.setZoomPan\([\s\S]*scheduleTransform\(changed, 'touch-pinch-zoom', gesture\.event\)/);
+  assert.doesNotMatch(touchInputSource, /BoardfishViewportPreview|viewport-transform-preview|touch-pinch-preview/);
 });
 
 test('a simultaneous two-finger lift commits one coherent final separation once', () => {

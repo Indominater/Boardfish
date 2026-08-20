@@ -873,21 +873,12 @@ var ManualPerfDebug = (() => {
     return Math.abs(lines - rounded) < 1e-6 ? Math.max(1, rounded) : '';
   }
 
-  function textEditAlignKey(obj, content) {
-    try {
-      if (typeof textLayoutAlignKey === 'function') return textLayoutAlignKey(obj);
-    } catch (_) {}
-    return '';
-  }
-
   function textEditCachedLineInfo(obj, content = '') {
     if (!obj || obj.type !== 'text') return { lines: '', source: '' };
     const text = normalizeTextContent(content);
-    const alignKey = textEditAlignKey(obj, text);
     const layoutCacheValid = Array.isArray(obj._layoutCache) &&
       obj._layoutCacheContent === text &&
-      obj._layoutCacheW === obj.w &&
-      obj._layoutCacheAlignKey === alignKey;
+      obj._layoutCacheW === obj.w;
     if (layoutCacheValid) return { lines: Math.max(1, obj._layoutCache.length), source: 'layout-cache' };
     const wrappedIndex = obj._textWrappedLineIndexCache;
     const wrappedIndexValid = wrappedIndex &&

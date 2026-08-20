@@ -138,14 +138,6 @@ body {
   touch-action: none;
 }
 
-#canvas.viewport-transform-preview #board-canvas,
-#canvas.viewport-transform-preview #sel-overlay,
-#canvas.viewport-transform-preview #multi-sel-overlay {
-  transform: var(--viewport-transform-preview, none);
-  transform-origin: 0 0;
-  will-change: transform;
-}
-
 #file-input {
   display: none;
 }

@@ -367,7 +367,6 @@
   function beginTouchPinch() {
     finishTouchSelectionDrag();
     touchPinchStartViewport = { panX, panY, zoom };
-    globalThis.BoardfishViewportPreview?.begin?.();
   }
 
   function applyTouchPinch(gesture) {
@@ -381,16 +380,12 @@
       gesture.centerX - (gesture.startCenterX - start.panX) * scale,
       gesture.centerY - (gesture.startCenterY - start.panY) * scale,
     );
-    const previewed = globalThis.BoardfishViewportPreview?.update?.(gesture.event) === true;
-    if (!previewed) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(changed, 'touch-pinch-zoom', gesture.event);
-      else scheduleTransform(changed);
-    }
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleTransform(changed, 'touch-pinch-zoom', gesture.event);
+    else scheduleTransform(changed);
   }
 
-  function finishTouchPinch(gesture = null) {
+  function finishTouchPinch() {
     touchPinchStartViewport = null;
-    globalThis.BoardfishViewportPreview?.commit?.(gesture?.event || null);
   }
 
   const controller = createTouchGestureController({
@@ -400,12 +395,12 @@
     onPan: applyTouchPan,
     onPinchStart: beginTouchPinch,
     onPinch: applyTouchPinch,
-    onPinchEnd: (gesture) => {
-      if (controller.activeCount() < 2) finishTouchPinch(gesture);
+    onPinchEnd: () => {
+      if (controller.activeCount() < 2) finishTouchPinch();
     },
     onGestureEnd: (gesture) => {
       finishTouchSelectionDrag(gesture);
-      if (touchPinchStartViewport) finishTouchPinch(gesture);
+      if (touchPinchStartViewport) finishTouchPinch();
     },
   });
 

@@ -57,6 +57,10 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
     renders: [],
     logs: [],
     viewportPans: [],
+    viewportZoomPans: [],
+    viewportTransforms: [],
+    ZOOM_MIN: 0.01,
+    ZOOM_MAX: 100,
     obj,
     isSelected(id) { return selectedIds.has(id); },
     selectedBounds() {
@@ -146,9 +150,19 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
     flushEditHistoryCheckpoint() {},
     TextSelDebug: { _logSelection(type) { context.logs.push(type); } },
     scheduleRender(select, overlay) { context.renders.push({ select, overlay }); },
-    scheduleTransform() {},
+    scheduleTransform(changed, source, event) {
+      context.viewportTransforms.push({ changed, source, event });
+    },
     BoardfishViewportState: {
       panBy(dx, dy) { context.viewportPans.push({ dx, dy }); },
+      setZoomPan(nextZoom, nextPanX, nextPanY) {
+        const changed = context.zoom !== nextZoom || context.panX !== nextPanX || context.panY !== nextPanY;
+        context.zoom = nextZoom;
+        context.panX = nextPanX;
+        context.panY = nextPanY;
+        context.viewportZoomPans.push({ zoom: nextZoom, panX: nextPanX, panY: nextPanY });
+        return changed;
+      },
     },
     showTextEditContextMenuAt(clientX, clientY) { context.menus.push({ clientX, clientY }); },
   };
@@ -461,6 +475,44 @@ test('a mobile TouchEvent drag outside the selection pans the viewport', () => {
   assert.deepEqual(context.viewportPans, [{ dx: 12, dy: 15 }]);
   assert.deepEqual({ x: context.obj.x, y: context.obj.y }, { x: 10, y: 20 });
   assert.deepEqual(context.history, []);
+});
+
+test('a mobile pinch schedules the same canonical viewport transform frame as desktop zoom', () => {
+  const context = loadCanvasInputHarness({ selected: false, touchInput: true });
+  const touch = (identifier, clientX, clientY) => ({
+    identifier,
+    clientX,
+    clientY,
+    target: context.canvas,
+  });
+  const dispatchTouch = (type, touches, changedTouches) => {
+    const event = {
+      type,
+      target: context.canvas,
+      touches,
+      changedTouches,
+      cancelable: true,
+      preventDefault() {},
+    };
+    context.dispatchCanvas(type, event);
+    return event;
+  };
+
+  const first = touch(1, 100, 100);
+  const second = touch(2, 200, 100);
+  dispatchTouch('touchstart', [first], [first]);
+  dispatchTouch('touchstart', [first, second], [second]);
+  const movedFirst = touch(1, 75, 100);
+  const movedSecond = touch(2, 225, 100);
+  const moveEvent = dispatchTouch('touchmove', [movedFirst, movedSecond], [movedFirst, movedSecond]);
+
+  assert.deepEqual(context.viewportZoomPans, [{ zoom: 1.5, panX: -75, panY: -50 }]);
+  assert.equal(context.viewportTransforms.length, 1);
+  assert.deepEqual(context.viewportTransforms[0], {
+    changed: true,
+    source: 'touch-pinch-zoom',
+    event: moveEvent,
+  });
 });
 
 test('selected-region touch drag commits the exact final lift position once', () => {

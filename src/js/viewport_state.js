@@ -78,29 +78,10 @@
     return constrainPan(nextPanX, nextPanY, nextZoom);
   }
 
-  function screenTransformBetween(from = {}, to = {}) {
-    const fromZoom = Number(from.zoom);
-    const toZoom = Number(to.zoom);
-    if (!(fromZoom > 0) || !(toZoom > 0)) {
-      return { scale: 1, translateX: 0, translateY: 0 };
-    }
-    const scale = toZoom / fromZoom;
-    const fromPanX = Number.isFinite(Number(from.panX)) ? Number(from.panX) : 0;
-    const fromPanY = Number.isFinite(Number(from.panY)) ? Number(from.panY) : 0;
-    const toPanX = Number.isFinite(Number(to.panX)) ? Number(to.panX) : fromPanX;
-    const toPanY = Number.isFinite(Number(to.panY)) ? Number(to.panY) : fromPanY;
-    return {
-      scale,
-      translateX: toPanX - fromPanX * scale,
-      translateY: toPanY - fromPanY * scale,
-    };
-  }
-
   const api = Object.freeze({
     constrainPan,
     panBy,
     reset,
-    screenTransformBetween,
     setPan,
     setViewport,
     setZoomPan,

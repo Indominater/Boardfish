@@ -103,11 +103,6 @@
       if (!normalizeText || obj?.type !== 'text') continue;
       if (!obj.data) obj.data = {};
       obj.data.content = normalizeTextContent(obj.data?.content);
-      if (typeof normalizeTextLineAlignForContent === 'function' && Array.isArray(obj.data.lineAlign)) {
-        const lineAlign = normalizeTextLineAlignForContent(obj.data.content, obj.data.lineAlign);
-        if (lineAlign.length) obj.data.lineAlign = lineAlign;
-        else delete obj.data.lineAlign;
-      }
     }
     if (syncTextHeights) syncAllTextAutoHeights();
     return objects;

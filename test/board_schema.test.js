@@ -66,6 +66,26 @@ test('strips unsupported transient board fields', () => {
   assert.equal(Object.hasOwn(board, 'transientPanelState'), false);
 });
 
+test('strips retired text alignment metadata', () => {
+  const board = BoardSchema.normalizeBoardData({
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: {},
+    objects: [{
+      id: 'text-1',
+      type: 'text',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 60,
+      z: 1,
+      data: { content: 'hello', lineAlign: ['right'] },
+    }],
+  });
+
+  assert.deepEqual(board.objects[0].data, { content: 'hello' });
+});
+
 test('rejects image objects with missing image sources', () => {
   assert.throws(
     () => BoardSchema.normalizeBoardData({

@@ -911,99 +911,6 @@ var _frameRaf = null;
 var _needTransform = false;
 var _needBoardRender = false;
 var _needOverlayRender = false;
-var _viewportTransformPreview = null;
-var VIEWPORT_TRANSFORM_PREVIEW_REDRAW_MS = 32;
-
-function viewportTransformPreviewActive() {
-  return !!_viewportTransformPreview;
-}
-
-function setViewportTransformPreviewCss() {
-  const preview = _viewportTransformPreview;
-  if (!preview) return false;
-  const transform = BoardfishViewportState.screenTransformBetween(
-    preview.base,
-    { panX, panY, zoom },
-  );
-  const clean = (value) => Math.round(value * 1000000) / 1000000;
-  canvas.style.setProperty(
-    '--viewport-transform-preview',
-    `matrix(${clean(transform.scale)}, 0, 0, ${clean(transform.scale)}, ${clean(transform.translateX)}, ${clean(transform.translateY)})`,
-  );
-  return true;
-}
-
-function requestViewportTransformPreviewFrame(inputEvent = null, force = false) {
-  const preview = _viewportTransformPreview;
-  if (!preview || preview.renderPending) return false;
-  const now = performance.now();
-  if (!force && now - preview.lastRenderedAt < VIEWPORT_TRANSFORM_PREVIEW_REDRAW_MS) return false;
-  preview.renderPending = true;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    scheduleTransform(true, preview.commitPending ? 'touch-pinch-commit' : 'touch-pinch-preview', inputEvent);
-  } else {
-    scheduleTransform(true);
-  }
-  return true;
-}
-
-function beginViewportTransformPreview() {
-  if (_boardOpening) return false;
-  if (_viewportTransformPreview) {
-    _viewportTransformPreview.commitPending = false;
-    return true;
-  }
-  const startedAt = performance.now();
-  _viewportTransformPreview = {
-    base: { panX, panY, zoom },
-    commitPending: false,
-    lastRenderedAt: startedAt,
-    renderPending: false,
-  };
-  canvas.style.setProperty('--viewport-transform-preview', 'matrix(1, 0, 0, 1, 0, 0)');
-  canvas.classList.add('viewport-transform-preview');
-  return true;
-}
-
-function updateViewportTransformPreview(inputEvent = null) {
-  const preview = _viewportTransformPreview;
-  if (!preview) return false;
-  lastViewportInputAt = performance.now();
-  setViewportTransformPreviewCss();
-  requestViewportTransformPreviewFrame(inputEvent);
-  return true;
-}
-
-function commitViewportTransformPreview(inputEvent = null) {
-  const preview = _viewportTransformPreview;
-  if (!preview) return false;
-  setViewportTransformPreviewCss();
-  preview.commitPending = true;
-  requestViewportTransformPreviewFrame(inputEvent, true);
-  return true;
-}
-
-function finishViewportTransformPreviewFrame() {
-  const preview = _viewportTransformPreview;
-  if (!preview) return false;
-  const committed = preview.commitPending;
-  preview.base = { panX, panY, zoom };
-  preview.lastRenderedAt = performance.now();
-  preview.renderPending = false;
-  canvas.style.setProperty('--viewport-transform-preview', 'matrix(1, 0, 0, 1, 0, 0)');
-  if (!committed) return true;
-  canvas.classList.remove('viewport-transform-preview');
-  canvas.style.removeProperty('--viewport-transform-preview');
-  _viewportTransformPreview = null;
-  return true;
-}
-
-globalThis.BoardfishViewportPreview = Object.freeze({
-  active: viewportTransformPreviewActive,
-  begin: beginViewportTransformPreview,
-  commit: commitViewportTransformPreview,
-  update: updateViewportTransformPreview,
-});
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var _frameScheduledAt = 0;
 var _frameSources = [];
@@ -1710,10 +1617,9 @@ function scheduleFrame(
     }
     _frameSources = [];
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    let doTransform = _needTransform;
+    const doTransform = _needTransform;
     const doBoard = _needBoardRender;
     const doOverlay = _needOverlayRender;
-    if (viewportTransformPreviewActive() && (doBoard || doOverlay)) doTransform = true;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const inputAt = doTransform ? _frameInputAt : 0;
     const inputSource = doTransform ? _frameInputSource : '';
@@ -1748,21 +1654,13 @@ function scheduleFrame(
 
     if (doTransform) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        try {
-          applyTransform();
-        } finally {
-          finishViewportTransformPreviewFrame();
-        }
+        applyTransform();
         finishMotionViewportRenderFrame();
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         ViewportDebug.count('transformFrames');
         const transformStart = collectDebug ? performance.now() : 0;
-        try {
-          withRenderSource(sourceLabel || 'transform', () => applyTransform(frameDbg));
-        } finally {
-          finishViewportTransformPreviewFrame();
-        }
+        withRenderSource(sourceLabel || 'transform', () => applyTransform(frameDbg));
         if (collectDebug) ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
         finishMotionViewportRenderFrame(sourceLabel || 'transform', { doTransform, doBoard: true, doOverlay: true });
         if (collectDebug) ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sourceLabel });
@@ -1854,7 +1752,6 @@ function scheduleRender(board = true, overlay = null, source = null) {
     selOverlay.classList.contains('visible') ||
     multiSelOverlay.classList.contains('visible')
   )));
-  if (globalThis.BoardfishViewportPreview?.active?.() && (_needBoardRender || _needOverlayRender)) _needTransform = true;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleFrame(source);
   else scheduleFrame();
 }

@@ -57,7 +57,7 @@ test('text clone copies canonical content without normalization', () => {
   });
 });
 
-test('text clone copies canonical line alignment independently', () => {
+test('text clone drops retired line alignment metadata', () => {
   const context = loadStateCloneHarness();
   const source = {
     id: 'text-1',
@@ -76,9 +76,7 @@ test('text clone copies canonical line alignment independently', () => {
 
   assert.deepEqual(plain(clone.data), {
     content: 'hello',
-    lineAlign: ['center'],
   });
-  assert.notEqual(clone.data.lineAlign, source.data.lineAlign);
 });
 
 test('text clone copies runtime caches only when requested', () => {
