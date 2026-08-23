@@ -149,8 +149,7 @@ function loadViewportRenderSchedulerHarness({ selected = false, overlayVisible =
   vm.createContext(context);
   vm.runInContext(
     'var _needBoardRender = false;\n' +
-      'var _needOverlayRender = false;\n' +
-      'var _masterBounds = {};\n' +
+    'var _needOverlayRender = false;\n' +
       `${source.slice(functionStart, functionEnd + 2)}\n` +
       'globalThis.scheduleRender = scheduleRender;\n' +
       'globalThis.renderFlags = () => ({ board: _needBoardRender, overlay: _needOverlayRender });\n',

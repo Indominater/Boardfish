@@ -264,7 +264,6 @@ function snapshot() {
 // Unchanged objects share the previous snapshot's reference (safe since
 // restoreSnapshot always deep-clones before mutating).
 function pushHistory(reason = '', dirty = null, beforeEditState = null) {
-  if (dirty) _masterBounds = null;
   if (dirty) for (const item of dirty) _dirtyIds.add(item?.obj?.id ?? item?.id ?? item);
   const contentChanged = _dirtyIds.size > 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

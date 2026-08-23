@@ -16,7 +16,7 @@
   --text-letter-spacing: 0px;
   --text-direction: ltr;
   --regular_text: 400;
-  --bold_text: 500;
+  --bold_text: 450;
   --white_font: #fbfbfe;
   --white_font_rgb: 251, 251, 254;
   --firefox-menu-bg: #42414d;
@@ -28,8 +28,8 @@
   --firefox-menu-active-bg: var(--menu_pressed_bg);
   --firefox-menu-separator: var(--menu_hover_bg);
   --firefox-menu-shadow:
-    0 8px 24px rgba(0,0,0,0.32),
-    0 0 0 1px rgba(0,0,0,0.10);
+    0 8px 24px rgba(0,0,0,0.1),
+    0 0 0 1px rgba(0,0,0,0.3);
   --ui-radius: 25px;
   --pill-radius: 999px;
   --menu-shell-radius: var(--ui-radius);
@@ -106,8 +106,8 @@ body {
   font-variant-caps: var(--text-font-variant-caps);
   letter-spacing: var(--text-letter-spacing);
   direction: var(--text-direction);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 @supports (height: 100dvh) {
@@ -227,8 +227,6 @@ body {
   display: none;
   isolation: isolate;
   transform: translateZ(0);
-  -webkit-mask-image: -webkit-radial-gradient(white, black);
-  mask-image: radial-gradient(white, black);
   max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 24px);
 }
 

@@ -608,7 +608,6 @@ function drawEditingTextOverlay(
 }
 
 function drawBoard(bypassEditOffscreenCache = false) {
-  if (!bypassEditOffscreenCache) _masterBounds = null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectViewportDebug = ViewportDebug.isEnabled();
   const dbg = collectViewportDebug
@@ -1745,7 +1744,6 @@ function scheduleTransform(
 
 function scheduleRender(board = true, overlay = null, source = null) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && source == null) source = 'render';
-  if (board) _masterBounds = null;
   if (board) _needBoardRender = true;
   _needOverlayRender ||= !!(overlay ?? (board && (
     hasSelection() ||

@@ -95,7 +95,6 @@
     normalizeText = true,
     syncTextHeights = true,
   } = {}) {
-    _masterBounds = null;
     objects = Array.isArray(nextObjects) ? nextObjects : [];
     objectsMap.clear();
     for (const obj of objects) {
@@ -112,7 +111,6 @@
     if (editingId) exitEdit();
     clearSelectionState();
     objects = [];
-    _masterBounds = null;
     objectsMap.clear();
     clearTextLayoutCaches();
     resetObjectCounters();

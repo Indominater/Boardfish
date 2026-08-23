@@ -1,14 +1,11 @@
 'use strict';
 
-var _masterBounds = null;
-
-function objectBounds(items, map = null, boardObjectsOnly = false) {
+function objectBounds(items, map = null) {
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
   for (const item of items) {
     const obj = map ? map.get(item) : item;
-    if (!obj || (boardObjectsOnly && obj.type !== 'image' && obj.type !== 'text')) continue;
+    if (!obj) continue;
     const right = obj.x + obj.w, bottom = obj.y + obj.h;
-    if (boardObjectsOnly && (!Number.isFinite(right) || !Number.isFinite(bottom))) continue;
     x1 = Math.min(x1, obj.x); y1 = Math.min(y1, obj.y);
     x2 = Math.max(x2, right); y2 = Math.max(y2, bottom);
   }

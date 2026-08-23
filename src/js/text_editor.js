@@ -649,17 +649,7 @@ const copyTextEditSelectionFromProxy = async (
     logStep('copy:text-selection-clear-jsClipboard', textStats);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
-  if (options.animateCopy !== false && editingId === id && _editEl === proxy) {
-    globalThis.BoardfishMotion?.applyCopyFeedback?.({
-      textSelection: {
-        id,
-        ...selection,
-      },
-    });
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    logStep('copy:text-selection-feedback-done', textStats);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
+  const shouldAnimateCopy = options.animateCopy !== false && editingId === id && _editEl === proxy;
   const meta = {};
   if (typeof getJsClipboardWebToken === 'function') {
     const webToken = getJsClipboardWebToken();
@@ -693,6 +683,18 @@ const copyTextEditSelectionFromProxy = async (
             markJsClipboardWebTokenWritten(meta.boardfishToken);
           }
         }
+      }
+      // A large text write can occupy the main thread; start jiggle only once it settles.
+      if (shouldAnimateCopy && editingId === id && _editEl === proxy) {
+        globalThis.BoardfishMotion?.applyCopyFeedback?.({
+          textSelection: {
+            id,
+            ...selection,
+          },
+        });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        logStep('copy:text-selection-feedback-done', textStats);
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logStep('copy:web-text-clipboard-write-end', {

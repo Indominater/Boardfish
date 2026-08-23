@@ -403,7 +403,7 @@ function typeNativeText(proxy, text) {
   return before;
 }
 
-test('cmd+x copies highlighted text without copy feedback before deleting it', () => {
+test('cmd+x copies highlighted text without copy feedback before deleting it', async () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   const copiedTexts = [];
@@ -427,6 +427,9 @@ test('cmd+x copies highlighted text without copy feedback before deleting it', (
   context.proxy.dispatchEvent(copy);
   assert.equal(copy.prevented, true);
   assert.deepEqual(copiedTexts, ['beta']);
+  assert.equal(context.animations.length, 0);
+  await Promise.resolve();
+  await Promise.resolve();
   assert.equal(context.animations.length, 1);
   assert.equal(context.animations[0].textSelection.id, obj.id);
 
