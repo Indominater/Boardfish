@@ -33,11 +33,19 @@ function markSaved(updateDocumentTitle = true) {
   if (updateDocumentTitle) updateTitle();
 }
 
-function updateTitle() {
+function updateTitle(force = false) {
   const fileName = BoardfishRuntime?.fileNameFromRef?.(currentFileRef || currentFilePath, '') || '';
   const title = fileName ? `${isDirty() ? '* ' : ''}${fileName}` : 'Boardfish';
-  if (document.title !== title) document.title = title;
+  if (force || document.title !== title) document.title = title;
 }
+
+const reassertTitle = () => updateTitle(true);
+
+window.addEventListener('focus', reassertTitle);
+window.addEventListener('pageshow', reassertTitle);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') reassertTitle();
+});
 
 
 // ─── Unsaved changes dialog ───────────────────────────────────────────────────

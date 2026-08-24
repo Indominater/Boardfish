@@ -31,7 +31,6 @@ test('DOM text uses the shared app font rendering defaults', () => {
     "--text-font-family: 'Geist Sans', system-ui;",
     '--text-font-style: normal;',
     '--regular_text: 400;',
-    '--bold_text: 450;',
     '--text-font-kerning: none;',
     '--text-font-stretch: normal;',
     '--text-font-variant-caps: normal;',
@@ -59,12 +58,8 @@ test('DOM text uses the shared app font rendering defaults', () => {
     .map((match) => match[1].trim());
   assert.deepEqual(fontWeightDeclarations, ['300 700']);
   assert.equal(
-    [...css.matchAll(/font:\s*var\(--text-font-style\)\s+var\(--bold_text\)\s+var\(--menu-item-font-size\)\s+var\(--text-font-family\);/g)].length,
-    3
-  );
-  assert.equal(
     [...css.matchAll(/font:\s*var\(--text-font-style\)\s+var\(--regular_text\)\s+var\(--menu-item-font-size\)\s+var\(--text-font-family\);/g)].length,
-    2
+    5
   );
   assert.match(css, /\.ctx-shortcut\s*\{[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*line-height: inherit;[\s\S]*\}/);
   assert.match(html, /id="ctx-btn-dark-mode"[\s\S]*<svg viewBox="0 0 24 24"/);

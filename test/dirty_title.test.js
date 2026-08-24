@@ -13,6 +13,8 @@ function loadDirtyTitleHarness() {
   const end = source.indexOf('// ─── Unsaved changes dialog');
   let title = 'Boardfish';
   let titleWrites = 0;
+  const windowListeners = new Map();
+  const documentListeners = new Map();
   const context = {
     BoardfishRuntime: {
       fileNameFromRef(ref, fallback = '') {
@@ -23,14 +25,21 @@ function loadDirtyTitleHarness() {
     historyIndex: -1,
     objects: [],
     _dirtyIds: new Set(),
+    windowListeners,
+    documentListeners,
     window: {
       addEventListener(type, handler) {
         if (type === 'beforeunload') context.beforeUnloadHandler = handler;
+        else windowListeners.set(type, handler);
       },
     },
     document: {
+      visibilityState: 'visible',
       get title() { return title; },
       set title(value) { title = value; titleWrites++; },
+      addEventListener(type, handler) {
+        documentListeners.set(type, handler);
+      },
     },
   };
   vm.createContext(context);
@@ -111,4 +120,26 @@ test('unsaved new boards never show a dirty star and identical titles skip write
   assert.equal(context.isDirty(), true);
   assert.equal(context.document.title, 'Boardfish');
   assert.equal(context.titleWrites, 0);
+});
+
+test('current file title is forcibly reasserted when the page resumes', () => {
+  const context = loadDirtyTitleHarness();
+  context.setCurrentFilePath('/boards/resumed.bf');
+  context.objects = [{ id: 'text-1', type: 'text', data: { content: 'saved' } }];
+  addHistory(context, 1);
+  context.markSaved();
+  const initialWrites = context.titleWrites;
+
+  context.windowListeners.get('focus')();
+  assert.equal(context.document.title, 'resumed.bf');
+  assert.equal(context.titleWrites, initialWrites + 1);
+
+  context.document.visibilityState = 'hidden';
+  context.documentListeners.get('visibilitychange')();
+  assert.equal(context.titleWrites, initialWrites + 1);
+
+  context.document.visibilityState = 'visible';
+  context.documentListeners.get('visibilitychange')();
+  context.windowListeners.get('pageshow')();
+  assert.equal(context.titleWrites, initialWrites + 3);
 });

@@ -241,6 +241,44 @@ const textEditNavigationKeys = new Set([
   'PageDown',
 ]);
 
+const textEditWordSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+  ? new Intl.Segmenter(undefined, { granularity: 'word' })
+  : null;
+
+function textEditWordBoundary(value, index, direction) {
+  const text = String(value ?? '');
+  const position = Math.max(0, Math.min(Math.trunc(Number(index)) || 0, text.length));
+  const moveRight = direction === 'right' || Number(direction) > 0;
+
+  if (textEditWordSegmenter) {
+    let previousWordStart = 0;
+    for (const part of textEditWordSegmenter.segment(text)) {
+      if (!part.isWordLike) continue;
+      const start = part.index;
+      const end = start + part.segment.length;
+      if (moveRight) {
+        if (end > position) return end;
+        continue;
+      }
+      if (start >= position) break;
+      previousWordStart = start;
+      if (end >= position) break;
+    }
+    return moveRight ? text.length : previousWordStart;
+  }
+
+  const isWordChar = (char) => /[A-Za-z0-9_]/.test(char || '');
+  let cursor = position;
+  if (moveRight) {
+    while (cursor < text.length && !isWordChar(text[cursor])) cursor++;
+    while (cursor < text.length && isWordChar(text[cursor])) cursor++;
+  } else {
+    while (cursor > 0 && !isWordChar(text[cursor - 1])) cursor--;
+    while (cursor > 0 && isWordChar(text[cursor - 1])) cursor--;
+  }
+  return cursor;
+}
+
 function textEditProxyValue(proxy) {
   return proxy._boardfishLogicalValue ?? proxy.value;
 }
@@ -1897,6 +1935,54 @@ function enterEdit(id, {
       const currentProxyValue = textEditProxyValue(proxy);
       setTextEditProxySelectionRange(proxy, 0, currentProxyValue.length, 'none', currentProxyValue);
       TextSelDebug._logSelection('select-all', proxy);
+      scheduleRender(true, false);
+      return;
+    }
+
+    if (
+      (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+      e.altKey && !e.ctrlKey && !e.metaKey && !e.isComposing
+    ) {
+      e.preventDefault();
+      flushEditHistoryCheckpoint();
+      const currentProxyValue = textEditProxyValue(proxy);
+      const selection = textEditSelectionState(proxy);
+      syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
+      const moveRight = e.key === 'ArrowRight';
+      let reference = moveRight ? selection.end : selection.start;
+      let anchor = reference;
+      if (e.shiftKey) {
+        const backward = selection.direction === 'backward';
+        reference = backward ? selection.start : selection.end;
+        anchor = backward ? selection.end : selection.start;
+      }
+      const nextPosition = textEditWordBoundary(
+        currentProxyValue,
+        reference,
+        moveRight ? 'right' : 'left',
+      );
+      if (e.shiftKey) {
+        const start = Math.min(anchor, nextPosition);
+        const end = Math.max(anchor, nextPosition);
+        setTextEditProxySelectionRange(
+          proxy,
+          start,
+          end,
+          nextPosition < anchor ? 'backward' : 'forward',
+          currentProxyValue,
+        );
+        if (start === end) setTextEditCaretIndex(obj, start);
+        else clearTextEditCaretIndex(obj);
+      } else {
+        setTextEditProxySelectionRange(
+          proxy,
+          nextPosition,
+          nextPosition,
+          'none',
+          currentProxyValue,
+        );
+        setTextEditCaretIndex(obj, nextPosition);
+      }
       scheduleRender(true, false);
       return;
     }

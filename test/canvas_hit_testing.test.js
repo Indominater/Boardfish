@@ -497,9 +497,9 @@ test('coarse pointers reuse the desktop context menu and island visual scale', (
   assert.match(styles, /--menu-item-font-size:\s*13px;/);
   assert.doesNotMatch(coarseStyles, /--menu-item-(height|line-height|padding|font-size):/);
   assert.match(styles, /#ctx-actions\s*\{[\s\S]*width: calc\(var\(--menu-item-height\) \+ \(var\(--menu-shell-padding\) \* 2\) \+ 2px\);[\s\S]*\}/);
-  assert.match(styles, /\.ctx-action-item\s*\{[\s\S]*width: var\(--menu-item-height\);[\s\S]*height: var\(--menu-item-height\);[\s\S]*font: var\(--text-font-style\) var\(--bold_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
-  assert.match(styles, /\.ctx-item\s*\{[\s\S]*height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--bold_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
-  assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text\s*\{[\s\S]*min-height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--bold_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
+  assert.match(styles, /\.ctx-action-item\s*\{[\s\S]*width: var\(--menu-item-height\);[\s\S]*height: var\(--menu-item-height\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
+  assert.match(styles, /\.ctx-item\s*\{[\s\S]*height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
+  assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text\s*\{[\s\S]*min-height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
 });
 
 test('destructive dialog action uses shared danger color tokens', () => {

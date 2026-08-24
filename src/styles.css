@@ -16,7 +16,6 @@
   --text-letter-spacing: 0px;
   --text-direction: ltr;
   --regular_text: 400;
-  --bold_text: 450;
   --white_font: #fbfbfe;
   --white_font_rgb: 251, 251, 254;
   --firefox-menu-bg: #42414d;
@@ -297,7 +296,7 @@ body {
   min-width: var(--menu-item-height);
   width: var(--menu-item-height);
   height: var(--menu-item-height);
-  font: var(--text-font-style) var(--bold_text) var(--menu-item-font-size) var(--text-font-family);
+  font: var(--text-font-style) var(--regular_text) var(--menu-item-font-size) var(--text-font-family);
   line-height: var(--menu-item-line-height);
   color: var(--firefox-menu-text);
   background: transparent;
@@ -352,7 +351,7 @@ body {
   width: 100%;
   height: var(--menu-item-height);
   padding: var(--menu-item-padding);
-  font: var(--text-font-style) var(--bold_text) var(--menu-item-font-size) var(--text-font-family);
+  font: var(--text-font-style) var(--regular_text) var(--menu-item-font-size) var(--text-font-family);
   line-height: var(--menu-item-line-height);
   color: var(--firefox-menu-text);
   background: transparent;
@@ -479,7 +478,7 @@ body {
   cursor: default;
   min-height: var(--menu-item-height);
   padding: var(--menu-item-padding);
-  font: var(--text-font-style) var(--bold_text) var(--menu-item-font-size) var(--text-font-family);
+  font: var(--text-font-style) var(--regular_text) var(--menu-item-font-size) var(--text-font-family);
   line-height: var(--pill-text-line-height);
   color: var(--firefox-menu-text);
   background: transparent;

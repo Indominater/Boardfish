@@ -470,6 +470,54 @@ test('cmd+arrow while editing is left to native caret navigation', () => {
   assert.deepEqual(context.animations, []);
 });
 
+test('option+arrow moves to word boundaries after typing inside a word', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'alpha relationships, beta' };
+
+  context.enterEdit(obj.id, { history: false });
+  const wordStart = obj.data.content.indexOf('relationships');
+  context.proxy.setSelectionRange(wordStart + 4, wordStart + 4, 'none');
+  typeNativeText(context.proxy, 'X');
+
+  const optionRight = makeKeyEvent('ArrowRight', { altKey: true });
+  context.proxy.dispatchEvent(optionRight);
+  assert.equal(optionRight.prevented, true);
+  assert.equal(context.proxy.selectionStart, obj.data.content.indexOf(','));
+  assert.equal(context.proxy.selectionEnd, obj.data.content.indexOf(','));
+
+  context.proxy.setSelectionRange(wordStart + 8, wordStart + 8, 'none');
+  const optionLeft = makeKeyEvent('ArrowLeft', { altKey: true });
+  context.proxy.dispatchEvent(optionLeft);
+  assert.equal(optionLeft.prevented, true);
+  assert.equal(context.proxy.selectionStart, wordStart);
+  assert.equal(context.proxy.selectionEnd, wordStart);
+});
+
+test('shift+option+arrow extends a text selection by whole words', () => {
+  const context = loadLiveTextEditResizeHarness();
+  const { obj } = context;
+  obj.data = { content: 'alpha relationships, beta' };
+
+  context.enterEdit(obj.id, { history: false });
+  const wordStart = obj.data.content.indexOf('relationships');
+  context.proxy.setSelectionRange(wordStart + 4, wordStart + 4, 'none');
+
+  const shiftOptionRight = makeKeyEvent('ArrowRight', { altKey: true, shiftKey: true });
+  context.proxy.dispatchEvent(shiftOptionRight);
+  assert.equal(shiftOptionRight.prevented, true);
+  assert.equal(context.proxy.selectionStart, wordStart + 4);
+  assert.equal(context.proxy.selectionEnd, obj.data.content.indexOf(','));
+  assert.equal(context.proxy.selectionDirection, 'forward');
+
+  const shiftOptionLeft = makeKeyEvent('ArrowLeft', { altKey: true, shiftKey: true });
+  context.proxy.dispatchEvent(shiftOptionLeft);
+  assert.equal(shiftOptionLeft.prevented, true);
+  assert.equal(context.proxy.selectionStart, wordStart);
+  assert.equal(context.proxy.selectionEnd, wordStart + 4);
+  assert.equal(context.proxy.selectionDirection, 'backward');
+});
+
 test('large text paste proxy replacement assigns value directly instead of setRangeText', () => {
   const { replaceTextEditProxyRange } = loadTextEditorIntegrationHelpers();
   let setRangeTextCalled = false;
