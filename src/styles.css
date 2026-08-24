@@ -40,7 +40,7 @@
   --menu-item-font-size: 13px;
   --menu-item-letter-spacing: var(--text-letter-spacing);
   --menu-item-line-height: 32px;
-  --context-menu-width: 208px;
+  --context-menu-width: 192px;
   --pill-text-line-height: 18px;
   --pill-text-min-width: 44px;
   --pill-text-max-width: min(680px, calc(100vw - 56px));

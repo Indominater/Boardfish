@@ -352,13 +352,14 @@ function getVisibleImageKeys(limit = Infinity, previewTasks = null) {
 if (typeof BOARDFISH_PRODUCTION === 'undefined') getVisibleImageKeys.lastDebug = null;
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function getPendingHydratableImageKeys() {
-  const keys = Object.keys(imageStore);
-  let write = 0;
+function getPendingHydratableImageKeys(keys = []) {
+  const seen = new Set(keys);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const initialCount = keys.length;
   const skipped = { nonHydratable: 0, cached: 0 };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  for (const key of keys) {
+  for (const key of Object.keys(imageStore)) {
+    if (seen.has(key)) continue;
     if (!isOpenHydratableImageSource(BoardfishImageStore.getSource(key))) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       skipped.nonHydratable++;
@@ -371,11 +372,10 @@ function getPendingHydratableImageKeys() {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       continue;
     }
-    keys[write++] = key;
+    keys.push(key);
   }
-  keys.length = write;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  getPendingHydratableImageKeys.lastDebug = { selected: keys.length, skipped };
+  getPendingHydratableImageKeys.lastDebug = { selected: keys.length - initialCount, skipped };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return keys;
 }
@@ -826,10 +826,7 @@ async function finishOpenedBoard(
   const hydrateStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const visibleKeys = getVisibleImageKeys(Infinity);
-  const hydrationKeys = [...new Set([
-    ...visibleKeys,
-    ...getPendingHydratableImageKeys(),
-  ])];
+  const hydrationKeys = getPendingHydratableImageKeys([...visibleKeys]);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const debugMeta = isOpenDebugActive(dbg)
     ? { ...(getVisibleImageKeys.lastDebug || {}), ...getOpenImageRuntimeMetrics() }
@@ -938,8 +935,7 @@ async function finishOpenedBoard(
     const pillFinishReason = finishPillTask({
       beforeFinish: () => {
         const shieldStart = performance.now();
-        if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
-        else openingShield.classList.remove('active');
+        endOpeningFreeze();
         OpenDebug.step(dbg, 'opening-shield:removed', { ms: performance.now() - shieldStart });
         PillDebug.log('open:openingShield:removed', { reason: 'before-pill-hide' });
       },
@@ -948,12 +944,7 @@ async function finishOpenedBoard(
     OpenDebug.end(dbg, { opened: true, ...openMetrics });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   } else {
-    finishPillTask({
-      beforeFinish: () => {
-        if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
-        else openingShield.classList.remove('active');
-      },
-    });
+    finishPillTask({ beforeFinish: endOpeningFreeze });
   }
 }
 

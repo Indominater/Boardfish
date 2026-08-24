@@ -54,8 +54,7 @@ var finishFailedOpen;
     try {
       const fileLabel = BoardfishRuntime.describeFileRef(filePath);
       _boardOpening = true;
-      if (typeof beginOpeningFreeze === 'function') beginOpeningFreeze();
-      else openingShield.classList.add('active');
+      beginOpeningFreeze();
       startPillTask({ message: 'Opening' });
       let data;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -144,10 +143,7 @@ var finishFailedOpen;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     _boardOpening = false;
     finishPillTask({
-      beforeFinish: () => {
-        if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
-        else openingShield.classList.remove('active');
-      },
+      beforeFinish: endOpeningFreeze,
       finalMsg: message,
       duration: long_message,
     });

@@ -134,7 +134,7 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
         bitmapOnly: true,
       });
     }
-    const explicitZ = Number.isFinite(options.z) ? Number(options.z) : null;
+    const explicitZ = Number.isFinite(options.z) ? options.z : null;
     const z = explicitZ == null ? ++zCounter : explicitZ;
     if (explicitZ != null) zCounter = Math.max(zCounter, explicitZ);
     const obj = { id: newId(), type: 'image', x: cx - w / 2, y: cy - h / 2, w, h, z, data: { imgKey, flipX: false, flipY: false, rotation: 0 } };

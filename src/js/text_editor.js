@@ -549,8 +549,8 @@ const clearTextEditCaretIndex = (obj) => {
   delete obj._textEditCaretLineStartIndex;
 };
 
-const textEditVisibleSelectionReplacementRange = (obj, selection = {}) => {
-  const length = String(obj?.data?.content ?? '').length;
+const textEditVisibleSelectionReplacementRange = (content, selection = {}) => {
+  const length = String(content ?? '').length;
   const first = Math.max(0, Math.min(Math.trunc(Number(selection.start)) || 0, length));
   const second = Math.max(0, Math.min(Math.trunc(Number(selection.end ?? first)) || 0, length));
   const start = Math.min(first, second);
@@ -558,9 +558,9 @@ const textEditVisibleSelectionReplacementRange = (obj, selection = {}) => {
   return { ...selection, start, end, hasSelection: start !== end };
 };
 
-const createTextSelectionClipboardPayload = (obj, selection = {}) => {
-  const content = String(obj?.data?.content ?? '');
-  const range = textEditVisibleSelectionReplacementRange(obj, selection);
+const createTextSelectionClipboardPayload = (value, selection = {}) => {
+  const content = String(value ?? '');
+  const range = textEditVisibleSelectionReplacementRange(content, selection);
   return {
     type: 'text-selection',
     text: textSelectionForClipboard(content.slice(range.start, range.end)),
@@ -576,7 +576,7 @@ const textSelectionPayloadFromBoardfishClipboardValue = (clipboard) => {
   const source = clipboard.objects?.length === 1 ? clipboard.objects[0] : null;
   if (source?.type !== 'text') return null;
   const content = String(source.data?.content ?? '');
-  return createTextSelectionClipboardPayload(source, { start: 0, end: content.length });
+  return createTextSelectionClipboardPayload(content, { start: 0, end: content.length });
 };
 
 const currentBoardfishTextSelectionClipboardPayload = () => (
@@ -614,15 +614,14 @@ const copyTextEditSelectionFromProxy = async (
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const obj = objectsMap.get(id);
-  const sourceObj = obj ? { ...obj, data: { ...obj.data, content: sourceValue } } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('copy:text-selection-payload-start', {
-    sourceFound: !!sourceObj,
+    sourceFound: !!obj,
     ...textEditorSelectionDebugStats(selection, sourceValue),
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const payload = sourceObj
-    ? createTextSelectionClipboardPayload(sourceObj, selection)
+  const payload = obj
+    ? createTextSelectionClipboardPayload(sourceValue, selection)
     : { type: 'text-selection', text: textSelectionForClipboard(sourceValue.slice(selection.start, selection.end)) };
   const clipboardText = payload.text;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1072,7 +1071,7 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   }
   let selection = options.selection || textEditSelectionState(proxy);
   const replacementRange = selection.hasSelection
-    ? textEditVisibleSelectionReplacementRange(obj, selection)
+    ? textEditVisibleSelectionReplacementRange(obj.data?.content, selection)
     : selection;
   const inputType = options.inputType || 'insertFromPaste';
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

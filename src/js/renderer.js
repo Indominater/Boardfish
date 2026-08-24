@@ -176,6 +176,8 @@
         const sourceWidth = img.width;
         const sourceHeight = img.height || img.naturalHeight;
         if (sourceHeight > 0) {
+          const sx = sourceWidth / obj.w;
+          const sy = sourceHeight / obj.h;
           const cropWidth = x2 - x1;
           const cropHeight = y2 - y1;
           const left = x1 === obj.x ? edgeOverdraw : 0;
@@ -184,10 +186,10 @@
           const bottom = y2 === objBottom ? edgeOverdraw : 0;
           context.drawImage(
             img,
-            (x1 - obj.x) / obj.w * sourceWidth,
-            (y1 - obj.y) / obj.h * sourceHeight,
-            cropWidth / obj.w * sourceWidth,
-            cropHeight / obj.h * sourceHeight,
+            (x1 - obj.x) * sx,
+            (y1 - obj.y) * sy,
+            cropWidth * sx,
+            cropHeight * sy,
             x1 - left,
             y1 - top,
             cropWidth + (left + right),
@@ -217,26 +219,6 @@
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     } finally {
       context.imageSmoothingEnabled = true;
-    }
-  }
-
-  function resetCanvasToScreen(context) {
-    context.setTransform(1, 0, 0, 1, 0, 0);
-  }
-
-  function setWorldCanvasTransform(context, dpr, deps) {
-    const scale = deps.zoom() * dpr;
-    context.setTransform(scale, 0, 0, scale, deps.panX() * dpr, deps.panY() * dpr);
-    context.imageSmoothingQuality = 'high';
-    context.font = deps.font;
-    context.fillStyle = deps.canvasTextColor();
-    if (context.textAlign !== 'left') {
-      try { context.fontKerning = 'none'; } catch (_) {}
-      try { context.letterSpacing = '0px'; } catch (_) {}
-      try { context.fontStretch = 'normal'; } catch (_) {}
-      try { context.fontVariantCaps = 'normal'; } catch (_) {}
-      try { context.textAlign = 'left'; } catch (_) {}
-      try { context.direction = 'ltr'; } catch (_) {}
     }
   }
 
@@ -433,6 +415,22 @@
 
   function createBoardRenderer(deps) {
     const getTextLayoutForDraw = deps.getTextLayoutForViewport || deps.getTextLayout;
+
+    function setWorldCanvasTransform(context, dpr = deps.dpr()) {
+      const scale = deps.zoom() * dpr;
+      context.setTransform(scale, 0, 0, scale, deps.panX() * dpr, deps.panY() * dpr);
+      context.fillStyle = deps.canvasTextColor();
+      if (context.textAlign !== 'left') {
+        context.imageSmoothingQuality = 'high';
+        context.font = deps.font;
+        try { context.fontKerning = 'none'; } catch (_) {}
+        try { context.letterSpacing = '0px'; } catch (_) {}
+        try { context.fontStretch = 'normal'; } catch (_) {}
+        try { context.fontVariantCaps = 'normal'; } catch (_) {}
+        try { context.textAlign = 'left'; } catch (_) {}
+        try { context.direction = 'ltr'; } catch (_) {}
+      }
+    }
 
     function drawSingleObj(context, obj
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -686,8 +684,7 @@
     const renderer = {
       drawSingleObj,
       drawVisibleObjects,
-      resetCanvasToScreen,
-      setWorldCanvasTransform: (context, dpr = deps.dpr()) => setWorldCanvasTransform(context, dpr, deps),
+      setWorldCanvasTransform,
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') renderer.createDrawCounters = createDrawCounters;
     return Object.freeze(renderer);

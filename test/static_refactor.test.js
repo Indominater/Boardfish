@@ -324,7 +324,8 @@ test('open hydration finishes all image and text draw caches before interaction'
   const end = ioClose.indexOf('\nfunction applyBoardData', start);
   const source = ioClose.slice(start, end > start ? end : undefined);
 
-  assert.match(source, /const hydrationKeys = \[\.\.\.new Set\(\[[\s\S]*\.\.\.visibleKeys,[\s\S]*\.\.\.getPendingHydratableImageKeys\(\)/);
+  assert.match(ioClose, /function getPendingHydratableImageKeys\(keys = \[\]\) \{\s*const seen = new Set\(keys\);/);
+  assert.match(source, /const visibleKeys = getVisibleImageKeys\(Infinity\);\s*const hydrationKeys = getPendingHydratableImageKeys\(\[\.\.\.visibleKeys\]\);/);
   assert.match(source, /hydrateImageKeysWithLimit\([\s\S]*hydrationKeys[\s\S]*'hydrate-all'/);
   assert.match(source, /hydrateTextDrawCachesForOpen/);
   assert.match(source, /await Promise\.all\(\[[\s\S]*imageHydrationPromise,[\s\S]*textHydrationPromise/);

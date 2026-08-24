@@ -57,7 +57,7 @@ function addText(wx, wy, content = '', options = {}) {
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
   logStep('content-limit-done', { textBytes, accepted });
   if (!accepted) return;
-  const h = (content ? 1 : NEW_TEXT_EDIT_MIN_LINES) * LINE_H + TEXT_PAD * 2;
+  const h = LINE_H + TEXT_PAD * 2;
   let w = content ? 200 : h * 6;
   if (content) {
     const lines = content.split('\n');
@@ -70,7 +70,7 @@ function addText(wx, wy, content = '', options = {}) {
   }
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
   logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content) }));
-  const heightChanged = syncTextAutoHeight(obj, content ? 1 : NEW_TEXT_EDIT_MIN_LINES);
+  const heightChanged = syncTextAutoHeight(obj);
   logStep('auto-height-done', () => ({
     objectId: obj.id,
     heightChanged,
@@ -222,8 +222,7 @@ async function newBoard() {
   const dbg = OpenDebug.start('newBoard', { objectCount: objects.length });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   BoardfishEditorState.setBoardOpening(true);
-  if (typeof beginOpeningFreeze === 'function') beginOpeningFreeze();
-  else openingShield.classList.add('active');
+  beginOpeningFreeze();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const openingStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -246,12 +245,7 @@ async function newBoard() {
   OpenDebug.step(dbg, 'workDone', { elapsed });
   _boardOpening = false;
   applyTransform();
-  finishPillTask({
-    beforeFinish: () => {
-      if (typeof endOpeningFreeze === 'function') endOpeningFreeze();
-      else openingShield.classList.remove('active');
-    },
-  });
+  finishPillTask({ beforeFinish: endOpeningFreeze });
   OpenDebug.end(dbg, { totalMs: elapsed });
 }
 

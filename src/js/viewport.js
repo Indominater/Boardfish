@@ -1,6 +1,6 @@
 // ─── Viewport ─────────────────────────────────────────────────────────────────
 var panX = 0, panY = 0, zoom = 1;
-var drawSingleObj, resetCanvasToScreen, setWorldCanvasTransform, drawVisibleObjects;
+var drawSingleObj, setWorldCanvasTransform, drawVisibleObjects;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var createDrawCounters;
 const VIEWPORT_TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
@@ -194,7 +194,7 @@ function _rebuildOffscreen(dpr, viewportRect) {
 
   if (_offscreen.width !== boardCanvas.width) _offscreen.width = boardCanvas.width;
   if (_offscreen.height !== boardCanvas.height) _offscreen.height = boardCanvas.height;
-  resetCanvasToScreen(_offCtx);
+  _offCtx.resetTransform();
   fillBoardBackground(_offCtx, _offscreen.width, _offscreen.height);
   setWorldCanvasTransform(_offCtx, dpr);
   const view = { zoom, dpr };
@@ -656,7 +656,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const blitStart = collectDrawDebug ? performance.now() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      resetCanvasToScreen(ctx);
+      ctx.resetTransform();
       ctx.drawImage(_offscreen, 0, 0);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectDrawDebug) {
@@ -680,7 +680,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const setupStart = collectDrawDebug ? performance.now() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      resetCanvasToScreen(ctx);
+      ctx.resetTransform();
       fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
       setWorldCanvasTransform(ctx, dpr);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -722,7 +722,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const setupStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    resetCanvasToScreen(ctx);
+    ctx.resetTransform();
     fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
     setWorldCanvasTransform(ctx, dpr);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -952,7 +952,7 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   objectMotionForDraw: BoardfishMotion.objectMotionForDraw,
   selectImageSourceForDraw,
 });
-({ drawSingleObj, resetCanvasToScreen, setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
+({ drawSingleObj, setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
 if (typeof BOARDFISH_PRODUCTION === 'undefined') createDrawCounters = boardRenderer.createDrawCounters;
 
 const BoardObjectGeometry = BoardfishObjectGeometry.createObjectGeometry({

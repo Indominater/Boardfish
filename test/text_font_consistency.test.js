@@ -31,7 +31,7 @@ test('DOM text uses the shared app font rendering defaults', () => {
     "--text-font-family: 'Geist Sans', system-ui;",
     '--text-font-style: normal;',
     '--regular_text: 400;',
-    '--bold_text: 500;',
+    '--bold_text: 450;',
     '--text-font-kerning: none;',
     '--text-font-stretch: normal;',
     '--text-font-variant-caps: normal;',

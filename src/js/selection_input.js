@@ -11,12 +11,13 @@ function setSelectionOverlayScreenRect(element, state, resting, animated, padDev
   const restingY = resting.y1 * zoom + panY;
   const restingWidth = (resting.x2 - resting.x1) * zoom;
   const restingHeight = (resting.y2 - resting.y1) * zoom;
-  const scale = window.devicePixelRatio || 1;
-  const pad = padDevicePx / scale;
-  const x1 = Math.floor((restingX - pad) * scale) / scale;
-  const y1 = Math.floor((restingY - pad) * scale) / scale;
-  const x2 = Math.ceil((restingX + restingWidth + pad) * scale) / scale;
-  const y2 = Math.ceil((restingY + restingHeight + pad) * scale) / scale;
+  const dpr = window.devicePixelRatio || 1;
+  const px = 1 / dpr;
+  const pad = padDevicePx * px;
+  const x1 = Math.floor((restingX - pad) * dpr) * px;
+  const y1 = Math.floor((restingY - pad) * dpr) * px;
+  const x2 = Math.ceil((restingX + restingWidth + pad) * dpr) * px;
+  const y2 = Math.ceil((restingY + restingHeight + pad) * dpr) * px;
   const snappedWidth = x2 - x1;
   const snappedHeight = y2 - y1;
   const deltaX = _cleanOverlay((animated.x1 - resting.x1) * zoom);
@@ -386,11 +387,12 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
       if (isMultiSelected()) {
         const bounds = selectedBounds();
         if (!bounds) return;
-        const origBW = bounds.x2 - bounds.x1, origBH = bounds.y2 - bounds.y1;
-        if (origBW <= 0 || origBH <= 0) return;
         const handlePoint = boundsCornerPoint(bounds, dir);
         const anchorPoint = boundsCornerPoint(bounds, oppositeSelectionDir(dir));
         if (!handlePoint || !anchorPoint) return;
+        const spanX = handlePoint.x - anchorPoint.x;
+        const spanY = handlePoint.y - anchorPoint.y;
+        if (!spanX || !spanY) return;
 
         const MIN_OBJECT_SIZE = 100;
         let minObjectScale = 0;
@@ -420,8 +422,9 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
 
         minObjectScale = Math.min(1, minObjectScale);
         const resizeCommitter = createRafCommitter((x, y, eventZoom) => {
-          const dx = (x - startX) / eventZoom, dy = (y - startY) / eventZoom;
-          const scale = Math.max(minObjectScale, Math.min((handlePoint.x + dx - anchorPoint.x) / (handlePoint.x - anchorPoint.x), (handlePoint.y + dy - anchorPoint.y) / (handlePoint.y - anchorPoint.y)));
+          const invZoom = 1 / eventZoom;
+          const dx = (x - startX) * invZoom, dy = (y - startY) * invZoom;
+          const scale = Math.max(minObjectScale, Math.min((spanX + dx) / spanX, (spanY + dy) / spanY));
           for (const snap of snapshots) {
             const o = snap.obj;
             o.x = anchorPoint.x + (snap.x - anchorPoint.x) * scale;

@@ -467,6 +467,7 @@ test('web js clipboard without a browser marker is invalidated after leaving the
 
 test('clipboard IO writes the same rich image representations on every reported platform', async () => {
   const previous = {
+    BoardfishWebLimits: globalThis.BoardfishWebLimits,
     ClipboardItem: globalThis.ClipboardItem,
     ClipDebug: globalThis.ClipDebug,
     navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator'),
@@ -479,6 +480,7 @@ test('clipboard IO writes the same rich image representations on every reported 
   }
 
   try {
+    globalThis.BoardfishWebLimits = { textByteLength: (text) => Buffer.byteLength(String(text)) };
     globalThis.ClipboardItem = FakeClipboardItem;
     globalThis.ClipDebug = { step() {} };
     Object.defineProperty(globalThis, 'navigator', {
@@ -583,8 +585,23 @@ test('clipboard IO writes the same rich image representations on every reported 
     assert.deepEqual(Object.keys(writes[4].parts), ['image/png']);
     assert.equal(writes[4].parts['image/png'], legacyBlob);
     assert.equal(legacyResult.boardfishTokenWritten, false);
+
+    const textResult = await ClipboardIO.copyTextToClipboard(
+      'A&<\r\nB\rC\nD',
+      null,
+      { boardfishToken: 'bf-rich-text' },
+    );
+    assert.equal(textResult.boardfishTokenWritten, true);
+    assert.equal(writes.length, 6);
+    assert.equal(await writes[5].parts['text/plain'].text(), 'A&<\r\nB\rC\nD');
+    assert.equal(
+      await writes[5].parts['text/html'].text(),
+      '<!--boardfish-clipboard:bf-rich-text--><div>A&amp;&lt;<br>B<br>C<br>D</div>',
+    );
   } finally {
     delete require.cache[require.resolve('../src/js/clipboard_io.js')];
+    if (previous.BoardfishWebLimits === undefined) delete globalThis.BoardfishWebLimits;
+    else globalThis.BoardfishWebLimits = previous.BoardfishWebLimits;
     if (previous.ClipboardItem === undefined) delete globalThis.ClipboardItem;
     else globalThis.ClipboardItem = previous.ClipboardItem;
     if (previous.ClipDebug === undefined) delete globalThis.ClipDebug;

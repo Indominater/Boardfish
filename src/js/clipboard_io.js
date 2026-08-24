@@ -10,15 +10,11 @@
     return token ? `<!--boardfish-clipboard:${token}-->` : '';
   }
 
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;');
-  }
-
   function textToClipboardHtml(text, token) {
     const marker = createBoardfishClipboardMarker(token);
-    const html = escapeHtml(text).replace(/\r\n|\r|\n/g, '<br>');
+    const html = String(text ?? '').replace(/[&<]|\r\n?|\n/g, (value) => (
+      value === '&' ? '&amp;' : value === '<' ? '&lt;' : '<br>'
+    ));
     return `${marker}<div>${html}</div>`;
   }
 

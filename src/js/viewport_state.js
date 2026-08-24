@@ -1,5 +1,7 @@
 'use strict';
 
+const ZOOM_MIN = 0.01, ZOOM_MAX = 100;
+
 (function initViewportStateBoundary(root) {
   function applyViewportState(
     nextPanX = panX,
@@ -31,9 +33,7 @@
   }
 
   function zoomAroundClient(clientX, clientY, nextZoom) {
-    const minZoom = typeof ZOOM_MIN === 'number' ? ZOOM_MIN : 0.01;
-    const maxZoom = typeof ZOOM_MAX === 'number' ? ZOOM_MAX : 100;
-    const normalizedZoom = Math.min(maxZoom, Math.max(minZoom, nextZoom));
+    const normalizedZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoom));
     const scale = normalizedZoom / zoom;
     const nextPanX = clientX - (clientX - panX) * scale;
     const nextPanY = clientY - (clientY - panY) * scale;

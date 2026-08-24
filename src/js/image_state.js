@@ -935,9 +935,10 @@ const removeImageRuntimeCachesForKey = (key) => {
     bitmapFailures: 0,
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (imageBitmapCache[key]) {
-    dropDrawableBitmapWarmup(imageBitmapCache[key]);
-    try { imageBitmapCache[key].close(); } catch (_) {}
+  const bitmap = imageBitmapCache[key];
+  if (bitmap) {
+    dropDrawableBitmapWarmup(bitmap);
+    try { bitmap.close(); } catch (_) {}
     delete imageBitmapCache[key];
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     removed.bitmaps++;

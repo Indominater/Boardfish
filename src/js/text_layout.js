@@ -3,7 +3,6 @@
 var FONT_SIZE = 16;
 var LINE_H    = 24;
 var TEXT_PAD  = 16;
-var NEW_TEXT_EDIT_MIN_LINES = 1;
 const regular_text = 400;
 const TEXT_FONT_STYLE = 'normal';
 const TEXT_FONT_FAMILY = "'Geist Sans', system-ui";
@@ -221,26 +220,22 @@ function forEachTextSpacingUnit(text, callback, start = 0, end = null) {
   }
 }
 
-function measureRawTextWWithFont(text, font, cache) {
+function measureRawTextW(text) {
   const value = String(text ?? '');
-  const cached = cache.get(value);
+  const cached = _mwCache.get(value);
   if (cached !== undefined) return cached;
-  if (cache.size >= TEXT_MEASURE_CACHE_MAX_ENTRIES) {
-    cache.delete(cache.keys().next().value);
+  if (_mwCache.size >= TEXT_MEASURE_CACHE_MAX_ENTRIES) {
+    _mwCache.delete(_mwCache.keys().next().value);
   }
   let width = 0;
   let previousUnit = null;
   forEachTextSpacingUnit(value, (unit) => {
-    width += textGlyphPairSpacing(previousUnit, unit, font);
-    width += measureTextGlyphMetricsWithFont(unit, font).width;
+    width += textGlyphPairSpacing(previousUnit, unit);
+    width += measureTextGlyphMetricsWithFont(unit).width;
     previousUnit = unit;
   });
-  cache.set(value, width);
+  _mwCache.set(value, width);
   return width;
-}
-
-function measureRawTextW(text) {
-  return measureRawTextWWithFont(text, FONT, _mwCache);
 }
 
 var _textTabStopWidth;
@@ -1664,7 +1659,8 @@ function createTextDrawPlan(line, text, start, end) {
     stats = createTextDrawStats();
     stats.chars = end - start;
   }
-  const runs = [];
+  const draws = [];
+  let batchingFontReady;
   let i = start;
   while (i < end) {
     if (text[i] === '\t') {
@@ -1679,10 +1675,8 @@ function createTextDrawPlan(line, text, start, end) {
       if (text[j] === '\t') break;
       j++;
     }
-    const run = {
-      draws: [],
-    };
-    const batchingFontReady = isTextDrawBatchingFontReady(FONT);
+    const runStart = draws.length;
+    batchingFontReady ??= isTextDrawBatchingFontReady(FONT);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       stats.runs++;
     }
@@ -1699,7 +1693,7 @@ function createTextDrawPlan(line, text, start, end) {
       }
       const x = line.prefixWidths[unitStart];
       const batchable = batchingFontReady === true && TEXT_DRAW_BATCHABLE_ASCII_RE.test(unit);
-      const previous = run.draws[run.draws.length - 1] || null;
+      const previous = draws.length > runStart ? draws[draws.length - 1] : null;
       if (
         batchable &&
         previous?.text.length < TEXT_DRAW_BATCH_MAX_UNITS &&
@@ -1709,20 +1703,17 @@ function createTextDrawPlan(line, text, start, end) {
         previous.text += unit;
         return;
       }
-      run.draws.push({
+      draws.push({
         text: unit,
         x,
         nextX: batchable ? x + measureRawTextW(unit) : NaN,
       });
     }, i, j);
-    if (run.draws.length) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') stats.drawCalls += run.draws.length;
-      runs.push(run);
-    }
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') stats.drawCalls += draws.length - runStart;
     i = j;
   }
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') runs.stats = stats;
-  return runs;
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') draws.stats = stats;
+  return draws;
 }
 
 function prepareTextLineForDraw(line) {
@@ -1762,10 +1753,8 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
       : createTextDrawPlan(line, text, start, end);
   }
   const baseX = lineBaseX(obj);
-  for (const run of plan) {
-    for (const draw of run.draws) {
-      context.fillText(draw.text, baseX + draw.x, line.textY);
-    }
+  for (const draw of plan) {
+    context.fillText(draw.text, baseX + draw.x, line.textY);
   }
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') return null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
