@@ -122,6 +122,22 @@ test('frontend source has no removed bridge or window chrome calls', () => {
   }
 });
 
+test('browser tab always uses the fixed Boardfish title', () => {
+  const html = readSource('src/index.html');
+  const runtimeFiles = [
+    ...listFiles('src', (file) => /\.(js|mjs)$/.test(file)),
+    ...listFiles('scripts', (file) => /\.(js|mjs)$/.test(file)),
+  ];
+
+  assert.equal((html.match(/<title\b/gi) || []).length, 1);
+  assert.match(html, /<title>Boardfish<\/title>/);
+  for (const file of runtimeFiles) {
+    const source = readSource(file);
+    assert.doesNotMatch(source, /\bdocument\s*\.\s*title\b/, `${file} changes the browser tab title`);
+    assert.doesNotMatch(source, /\b(?:updateDocumentTitle|updateTitle|reassertTitle)\b/, `${file} contains dynamic tab-title code`);
+  }
+});
+
 test('web runtime owns local board file IO', () => {
   const runtime = readSource('src/js/web_runtime.js');
   const io = readSource('src/js/io_close.js');

@@ -102,7 +102,6 @@ function makeEditProxy({
 
 function loadHistoryHarness() {
   const imagePruneCalls = [];
-  const titleStates = [];
   const context = {
     console,
     performance: { now: () => 0 },
@@ -132,11 +131,6 @@ function loadHistoryHarness() {
     replaceBoardObjectsOptions: [],
     collapseTextOnReplace: false,
     imagePruneCalls,
-    titleStates,
-    titleState() {
-      const entry = context.boardHistory[context.historyIndex];
-      titleStates.push({ revision: entry?.revision, dirtyCount: context._dirtyIds.size });
-    },
     BoardfishEditorState: {
       replaceBoardObjects(nextObjects, options = {}) {
         context.replaceBoardObjectsOptions.push({ ...(options || {}) });
@@ -202,7 +196,6 @@ function loadHistoryHarness() {
         selectionDirection: 'none',
       });
     },
-    updateTitle() { context.titleState(); },
   };
 
   vm.createContext(context);
@@ -364,7 +357,7 @@ test('history entries and restores omit inert motion metadata', () => {
   assert.equal(context.objectsMap.get('image-1').data.flipX, true);
 });
 
-test('undo synchronizes the title as soon as restored history becomes clean', () => {
+test('undo clears transient dirty ids before rebuilding caches', () => {
   const context = loadHistoryHarness();
   setBoard(context, [historyImage('img-1')]);
   context.snapshot();
@@ -372,13 +365,11 @@ test('undo synchronizes the title as soon as restored history becomes clean', ()
   context.objectsMap.get('img-1').x = 20;
   context.markDirty('img-1');
   context.pushHistory('move-image');
-  context.titleStates.length = 0;
   context.invalidateOffscreen = () => { throw new Error('restore failed'); };
 
   assert.throws(() => context.undo(), /restore failed/);
   assert.equal(context.boardHistory[context.historyIndex].revision, savedRevision);
   assert.equal(context._dirtyIds.size, 0);
-  assert.deepEqual(context.titleStates, [{ revision: savedRevision, dirtyCount: 0 }]);
 });
 
 test('undo flushes a pending text edit checkpoint before restoring it', () => {

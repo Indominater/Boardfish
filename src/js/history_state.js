@@ -329,7 +329,6 @@ function pushHistory(reason = '', dirty = null, beforeEditState = null) {
     pruneImageCachesAfterHistoryChange(reason || 'pushHistory', historyEntriesDropped);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
-  updateTitle();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const ms = performance.now() - t0;
   HistoryDebug.max('maxPushHistoryMs', ms);
@@ -446,7 +445,6 @@ function restoreSnapshot(s, editStateOverride) {
   HistoryDebug.step(dbg, 'normalize-text', { objectCount: objects.length });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _dirtyIds.clear();
-  updateTitle();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'rebuild-caches', { objectCount: objectsMap.size });
   HistoryDebug.step(dbg, 'preserve-text-heights');

@@ -26,27 +26,11 @@ function isDirty() {
   return (_dirtyIds.size > 0 || revision === undefined || revision !== savedHistoryRevision) && !isCleanDefaultEmptyBoardState();
 }
 
-function markSaved(updateDocumentTitle = true) {
+function markSaved() {
   _dirtyIds.clear();
   savedHistoryRevision = boardHistory[historyIndex]?.revision;
   savedDefaultEmptyBoard = isDefaultEmptyBoardState();
-  if (updateDocumentTitle) updateTitle();
 }
-
-function updateTitle(force = false) {
-  const fileName = BoardfishRuntime?.fileNameFromRef?.(currentFileRef || currentFilePath, '') || '';
-  const title = fileName ? `${isDirty() ? '* ' : ''}${fileName}` : 'Boardfish';
-  if (force || document.title !== title) document.title = title;
-}
-
-const reassertTitle = () => updateTitle(true);
-
-window.addEventListener('focus', reassertTitle);
-window.addEventListener('pageshow', reassertTitle);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') reassertTitle();
-});
-
 
 // ─── Unsaved changes dialog ───────────────────────────────────────────────────
 function _dialogClose(result) {
@@ -1026,7 +1010,7 @@ function applyBoardData(data
   const historyStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   snapshot();
-  markSaved(false);
+  markSaved();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'reset-boardHistory-markSaved', { ms: performance.now() - historyStart, historyLength: boardHistory.length, historyIndex });
   PillDebug.log('open:applyBoardData:end', openMetrics);

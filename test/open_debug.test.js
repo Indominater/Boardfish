@@ -279,17 +279,17 @@ test('open-board loading does not wait for pill status update before reading the
   assert.doesNotMatch(bootstrap, /await startPillTask\(\{ message: 'Opening' \}\)/);
 });
 
-test('open-board title target updates as soon as board data is applied', () => {
+test('open-board file target updates as soon as board data is applied', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const productionBootstrap = withoutDeveloperDiagnostics(bootstrap);
 
   assert.match(
     bootstrap,
-    /applyBoardData\(data[\s\S]*?, dbg[\s\S]*?\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);[\s\S]*?await finishOpenedBoard\(dbg, data\);/,
+    /applyBoardData\(data[\s\S]*?, dbg[\s\S]*?\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;[\s\S]*?await finishOpenedBoard\(dbg, data\);/,
   );
   assert.match(
     productionBootstrap,
-    /applyBoardData\(data\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*updateTitle\(\);\s*await finishOpenedBoard\(\);/,
+    /applyBoardData\(data\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*await finishOpenedBoard\(\);/,
   );
 });
 

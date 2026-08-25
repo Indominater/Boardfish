@@ -70,7 +70,6 @@ var finishFailedOpen;
       );
       currentFileRef = filePath;
       currentFilePath = fileLabel;
-      updateTitle();
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (typeof BOARDFISH_PRODUCTION === 'undefined') await finishOpenedBoard(dbg, data);
       else

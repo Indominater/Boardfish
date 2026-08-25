@@ -214,7 +214,6 @@ function _rebuildOffscreen(dpr, viewportRect) {
 var _dirtyIds = new Set();
 function markDirty(obj) {
   _dirtyIds.add(obj.id);
-  updateTitle();
 }
 
 // ─── Canvas resize ────────────────────────────────────────────────────────────
