@@ -1,4 +1,4 @@
-name: Deploy Production and Beta Web Apps
+name: Deploy Production, Beta, and Legacy Web Apps
 
 on:
   push:
@@ -60,6 +60,12 @@ jobs:
           ref: ${{ steps.beta_ref.outputs.ref }}
           path: beta-source
 
+      - name: Checkout legacy source
+        uses: actions/checkout@v4
+        with:
+          ref: legacy-2026-08-27
+          path: legacy-source
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -67,6 +73,7 @@ jobs:
           cache-dependency-path: |
             production/package-lock.json
             beta-source/package-lock.json
+            legacy-source/package-lock.json
 
       - name: Install production dependencies
         run: npm ci --prefer-offline --no-audit --fund=false
@@ -92,13 +99,28 @@ jobs:
         run: npm run web:build
         working-directory: beta-source
 
-      - name: Assemble production and beta site
+      - name: Install legacy dependencies
+        run: npm ci --prefer-offline --no-audit --fund=false
+        working-directory: legacy-source
+
+      - name: Check legacy web source syntax
+        run: npm run check:js-syntax
+        working-directory: legacy-source
+
+      - name: Build legacy web app
+        run: npm run web:build
+        working-directory: legacy-source
+
+      - name: Assemble production, beta, and legacy site
         shell: bash
         run: |
-          mkdir -p dist-web/beta
+          mkdir -p dist-web/beta dist-web/legacy
           cp -R production/dist-web/. dist-web/
           cp -R beta-source/dist-web/. dist-web/beta/
-          sed -i 's#</head>#  <meta name="robots" content="noindex, nofollow" />\n</head>#' dist-web/beta/index.html
+          cp -R legacy-source/dist-web/. dist-web/legacy/
+          for preview in beta legacy; do
+            sed -i 's#</head>#  <meta name="robots" content="noindex, nofollow" />\n</head>#' "dist-web/$preview/index.html"
+          done
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

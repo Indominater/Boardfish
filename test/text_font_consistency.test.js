@@ -48,8 +48,8 @@ test('DOM text uses the shared app font rendering defaults', () => {
     'font-variant-caps: var(--text-font-variant-caps);',
     'letter-spacing: var(--text-letter-spacing);',
     'direction: var(--text-direction);',
-    '-webkit-font-smoothing: antialiased;',
-    '-moz-osx-font-smoothing: grayscale;',
+    '-webkit-font-smoothing: auto;',
+    '-moz-osx-font-smoothing: auto;',
   ]) {
     assert.ok(css.includes(bodyDeclaration), `body does not apply ${bodyDeclaration}`);
   }
