@@ -459,6 +459,7 @@ test('hover effects are limited to hover-capable fine pointers', () => {
 test('context actions use native hover and explicit pressed state', () => {
   const source = readSource('src/js/context_menu.js');
   const styles = readSource('src/styles.css');
+  const indexSource = readSource('src/index.html');
 
   assert.doesNotMatch(source, /isCtxActionHotspotEvent|updateCtxActionHotspotState|addEventListener\('pointermove'/);
   assert.match(source, /ctxActions\.addEventListener\('pointerdown',[\s\S]*button\.classList\.add\('hotspot-active'\);/);
@@ -467,6 +468,8 @@ test('context actions use native hover and explicit pressed state', () => {
   assert.match(source, /addEventListener\('pointerleave', clearCtxActionHotspotState\)/);
   assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.ctx-action-item:hover::before/);
   assert.match(styles, /\.ctx-action-item\.hotspot-active::before/);
+  assert.match(styles, /#ctx-actions\.visible\s*\{[\s\S]*gap: 8px;/);
+  assert.doesNotMatch(indexSource, /ctx-action-sep/);
 });
 
 test('menu rows clear explicit pressed state on release, cancellation, and close', () => {
@@ -500,6 +503,16 @@ test('coarse pointers reuse the desktop context menu and island visual scale', (
   assert.match(styles, /\.ctx-action-item\s*\{[\s\S]*width: var\(--menu-item-height\);[\s\S]*height: var\(--menu-item-height\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
   assert.match(styles, /\.ctx-item\s*\{[\s\S]*height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
   assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text\s*\{[\s\S]*min-height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
+});
+
+test('menu borders and separators share a secondary color while shortcuts use their own tone', () => {
+  const styles = readSource('src/styles.css');
+
+  assert.match(styles, /--menu-secondary-color:\s*#70707a;/);
+  assert.match(styles, /--menu-shortcut-color:\s*#b8b8bc;/);
+  assert.match(styles, /--firefox-menu-border:\s*var\(--menu-secondary-color\);/);
+  assert.match(styles, /--firefox-menu-separator:\s*var\(--menu-secondary-color\);/);
+  assert.match(styles, /\.ctx-shortcut\s*\{[\s\S]*color: var\(--menu-shortcut-color\);[\s\S]*\}/);
 });
 
 test('destructive dialog action uses shared danger color tokens', () => {
@@ -680,7 +693,7 @@ test('text edit overlay draws only visible layout lines', () => {
   assert.doesNotMatch(overlaySource, /visibleTextLayoutLines/);
   assert.match(overlaySource, /editVisibleLines/);
   assert.match(overlaySource, /editCulledLines/);
-  assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*?context,\s*obj,\s*layout,/);
+  assert.match(overlaySource, /for \(const line of layout\)[\s\S]*drawTextLineRange\(context, line, obj/);
 });
 
 test('entering text edit invalidates the offscreen cache before proxy setup', () => {
@@ -719,15 +732,13 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.notEqual(drawEnd, -1);
   const drawSource = viewportSource.slice(drawStart, drawEnd);
 
-  assert.match(drawSource, /const textSelectionMotions = BoardfishMotion\.textSelectionJelloSpecsForDraw\(\);/);
   assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
   assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
   assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver\);/);
-  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, zoom, textSelectionMotions\);/);
+  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, openInitialImageSourceResolver, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, openInitialImageSourceResolver, editingId, true\);/);
+  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, openInitialImageSourceResolver, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, openInitialImageSourceResolver, editingId\);/);
+  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, openInitialImageSourceResolver\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, openInitialImageSourceResolver\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');
   const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
@@ -736,30 +747,81 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.doesNotMatch(transformSource, /_rebuildOffscreen\(/);
 });
 
-test('editing overlay keeps copied text selection highlighted while its jiggle is active', () => {
+test('editing overlay draws the live selection and restores the caret when it collapses', () => {
   const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('function drawEditingTextOverlay');
+  const start = viewportSource.indexOf('const collectTextSelectionRuns');
   const end = viewportSource.indexOf('function drawBoard', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
-  const overlaySource = viewportSource.slice(start, end);
+  const obj = { id: 'text-a', type: 'text', x: 10, y: 20, w: 140, h: 80 };
+  const layout = [
+    { text: 'hello', startIndex: 0, endIndex: 5, y: 36 },
+    { text: 'world', startIndex: 6, endIndex: 11, y: 60 },
+  ];
+  layout.totalLines = 5;
+  const drawCalls = [];
+  const context = {
+    LINE_H: 24,
+    TEXT_PAD: 16,
+    VIEWPORT_TEXT_DRAW_STATS_DISABLED: {},
+    objectsMap: new Map([[obj.id, obj]]),
+    editingId: obj.id,
+    _editEl: { selectionStart: 1, selectionEnd: 4 },
+    _caretVisible: true,
+    performance: { now: () => 100 },
+    TextSelDebug: { _logDraw() {} },
+    getTextLayoutForViewport: () => layout,
+    lineXAtOffset: (_line, object, offset) => object.x + 16 + offset * 8,
+    lineCaretXAtOffset: (_line, object, offset) => object.x + 16 + offset * 8,
+    drawTextLineRange(_context, line, _obj, from = 0, to = line.text.length) {
+      drawCalls.push(['text', line.text, from, to]);
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(viewportSource.slice(start, end), context);
+  const canvasContext = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    rect(...args) { drawCalls.push(['selection', ...args]); },
+    fill() {},
+    fillRect(...args) { drawCalls.push(['caret', ...args]); },
+  };
+  const viewport = { x1: 0, y1: 0, x2: 500, y2: 100 };
 
-  assert.match(overlaySource, /const copiedSelectionSpec = textSelectionMotions\?\.get\(obj\.id\) \|\| null;/);
-  assert.match(overlaySource, /const useCopiedSelectionMotion = copiedSelectionSpec && \(liveSelStart === liveSelEnd \|\| liveMatchesCopied\);/);
-  assert.match(overlaySource, /const selStart = copiedMotion \? copiedSelectionSpec\.start : liveSelStart;/);
-  assert.match(overlaySource, /const selEnd\s+= copiedMotion \? copiedSelectionSpec\.end\s+: liveSelEnd;/);
-  assert.match(overlaySource, /drawTextLayoutStatic\([\s\S]*copiedMotion \? \{ start: selStart, end: selEnd \} : null/);
+  const selectedStats = context.drawEditingTextOverlay(canvasContext, 1, viewport, true);
+  assert.deepEqual(drawCalls, [
+    ['selection', 34, 36, 24, 24],
+    ['text', 'hello', 0, 5],
+    ['text', 'world', 0, 5],
+  ]);
+  assert.equal(selectedStats.editSelectionRuns, 1);
+  assert.equal(selectedStats.editSelectedChars, 3);
+  assert.equal(selectedStats.editDrawnTextLines, 2);
+  assert.equal(selectedStats.editCulledLines, 3);
+  assert.equal(selectedStats.editCaretDrawn, false);
+
+  drawCalls.length = 0;
+  context._editEl.selectionStart = 8;
+  context._editEl.selectionEnd = 8;
+  const caretStats = context.drawEditingTextOverlay(canvasContext, 1, viewport, true);
+  assert.deepEqual(drawCalls, [
+    ['text', 'hello', 0, 5],
+    ['text', 'world', 0, 5],
+    ['caret', 41, 60, 2, 24],
+  ]);
+  assert.equal(caretStats.editSelectionRuns, 0);
+  assert.equal(caretStats.editCaretDrawn, true);
 });
 
 test('overlapping text selection highlight runs share one path fill', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawTextSelectionHighlight');
-  const end = viewportSource.indexOf('const drawTextSelectionContentJello', start);
+  const end = viewportSource.indexOf('function drawCaret', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
 
   const selection = {
-    bounds: { left: 0, top: 0, right: 40, bottom: 24 },
     runs: [
       { line: { y: 0 }, x1: 0, x2: 40, y: 0, height: 24 },
       { line: { y: 0 }, x1: 20, x2: 60, y: 0, height: 24 },
@@ -769,7 +831,6 @@ test('overlapping text selection highlight runs share one path fill', () => {
   const context = {
     LINE_H: 24,
     TextSelDebug: { _logDraw() {} },
-    applyTextSelectionMotionTransform() {},
   };
   vm.createContext(context);
   vm.runInContext(
@@ -788,7 +849,7 @@ test('overlapping text selection highlight runs share one path fill', () => {
     fillRect(...args) { drawCalls.push(['fillRect', ...args]); },
   };
 
-  context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection, null);
+  context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection);
   assert.deepEqual(drawCalls, [
     ['save'],
     ['beginPath'],

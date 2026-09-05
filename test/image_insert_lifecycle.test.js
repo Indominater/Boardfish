@@ -227,7 +227,7 @@ test('decoded image insertion owns its size cap after image layout removal', asy
   assert.equal('BoardfishImageLayout' in context, false);
 });
 
-test('editor selection changes do not allocate motion snapshots', () => {
+test('editor selection changes reuse the existing selection set', () => {
   const context = loadEditorStateBoundaryHarness();
   let allocations = 0;
   context.Set = class CountingSet extends Set {

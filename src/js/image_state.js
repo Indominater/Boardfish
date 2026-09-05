@@ -501,7 +501,6 @@ function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: wind
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , counters = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  , activeInput = false
 ) {
   let entry = imageOpenPreviewBitmapCache.get(key);
   if (entry?.bitmap &&
@@ -516,7 +515,7 @@ function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: wind
     const targetScale =
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     fullSource
-      ? queueScaledImageVariantForDraw(key, obj, fullSource, view, true, activeInput === true)
+      ? queueScaledImageVariantForDraw(key, obj, fullSource, view, true)
       : 0.25;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     return { source: entry.bitmap, scale: 0.25, targetScale, openPreview: true };
@@ -525,7 +524,7 @@ function resolveOpenInitialImageSourceForDraw(key, obj, view = { zoom, dpr: wind
   }
   const fullSource = imageBitmapCache[key] || null;
   const selected = fullSource
-    ? selectImageSourceForDraw(key, obj, fullSource, view, activeInput)
+    ? selectImageSourceForDraw(key, obj, fullSource, view)
     : null;
   if (selected?.activeInputFullFallback === true && hasOpenInitialImagePreviews()) {
     const requested = requestOpenInitialImagePreviewForDraw(key, obj, view, fullSource);

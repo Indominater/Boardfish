@@ -47,16 +47,6 @@
       scaledFallbackFull: 0,
       activeInputFullFallbackImages: 0,
       scaledVariantPendingImages: 0,
-      motionObjects: 0,
-      motionImages: 0,
-      motionText: 0,
-      motionTranslatedObjects: 0,
-      motionScaledObjects: 0,
-      lowLatencyImageDraws: 0,
-      motionScaledImages: 0,
-      motionFullScaleImages: 0,
-      motionFullFallbackImages: 0,
-      motionActiveInputFullFallbackImages: 0,
       fullScaleImages: 0,
       scaledImageScaleTotal: 0,
       scaledImageTargetScaleTotal: 0,
@@ -100,39 +90,6 @@
     };
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-  function applyObjectMotion(context, obj, rect, motion
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    , counters = null
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  ) {
-    const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
-    const pivotX = obj.x + obj.w * scaleOriginX;
-    const pivotY = obj.y + obj.h * scaleOriginY;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (counters) {
-      counters.motionObjects = (counters.motionObjects || 0) + 1;
-      if (obj.type === 'image') counters.motionImages = (counters.motionImages || 0) + 1;
-      else if (obj.type === 'text') counters.motionText = (counters.motionText || 0) + 1;
-      if (translateX || translateY) counters.motionTranslatedObjects = (counters.motionTranslatedObjects || 0) + 1;
-      if (scaleX !== 1 || scaleY !== 1) counters.motionScaledObjects = (counters.motionScaledObjects || 0) + 1;
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    context.save();
-    if (scaleX !== 1 || scaleY !== 1) {
-      context.transform(scaleX, 0, 0, scaleY,
-        translateX + pivotX * (1 - scaleX), translateY + pivotY * (1 - scaleY));
-    } else if (translateX || translateY) context.translate(translateX, translateY);
-    if (!rect) return rect;
-    // Text layout and image crops are chosen before the canvas motion transform,
-    // so map the visible destination back into the object's source coordinates.
-    return {
-      x1: pivotX + (rect.x1 - translateX - pivotX) / scaleX,
-      y1: pivotY + (rect.y1 - translateY - pivotY) / scaleY,
-      x2: pivotX + (rect.x2 - translateX - pivotX) / scaleX,
-      y2: pivotY + (rect.y2 - translateY - pivotY) / scaleY,
-    };
-  }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   function countCulledObject(obj, counters = null) {
@@ -209,12 +166,11 @@
     return false;
   }
 
-  function drawImageObj(context, obj, img, view, viewportRect, lowLatency, motion) {
+  function drawImageObj(context, obj, img, view, viewportRect, lowLatency) {
     if (!lowLatency) {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     }
     context.imageSmoothingEnabled = false;
-    if (motion) return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     try {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     } finally {
@@ -332,14 +288,13 @@
     }
   }
 
-  function recordSlowDrawObject(counters, obj, ms, before, drawn, motion = null, deps = null) {
+  function recordSlowDrawObject(counters, obj, ms, before, drawn, deps = null) {
     if (!counters || !obj || !Number.isFinite(ms) || ms <= 0) return;
     const row = {
       id: obj.id || '',
       type: obj.type || '',
       ms: Math.round(ms * 100) / 100,
       drawn: !!drawn,
-      motion: !!motion,
     };
     if (obj.type === 'text') {
       row.chars = String(obj.data?.content || '').length;
@@ -399,11 +354,6 @@
       row.fallbackFull = drawCounterValue(counters, 'scaledFallbackFull') > before.scaledFallbackFull;
       row.activeInputFullFallback = drawCounterValue(counters, 'activeInputFullFallbackImages') > before.activeInputFullFallbackImages;
       row.scaledVariantPending = drawCounterValue(counters, 'scaledVariantPendingImages') > before.scaledVariantPendingImages;
-      row.lowLatencyImageDraw = drawCounterValue(counters, 'lowLatencyImageDraws') > before.lowLatencyImageDraws;
-      row.motionScaledImage = drawCounterValue(counters, 'motionScaledImages') > before.motionScaledImages;
-      row.motionFullScaleImage = drawCounterValue(counters, 'motionFullScaleImages') > before.motionFullScaleImages;
-      row.motionFullFallbackImage = drawCounterValue(counters, 'motionFullFallbackImages') > before.motionFullFallbackImages;
-      row.motionActiveInputFullFallback = drawCounterValue(counters, 'motionActiveInputFullFallbackImages') > before.motionActiveInputFullFallbackImages;
       row.firstSourceDraw = drawCounterValue(counters, 'imageSourceFirstDraws') > before.imageSourceFirstDraws;
       row.firstContextDraw = drawCounterValue(counters, 'imageContextFirstDraws') > before.imageContextFirstDraws;
       row.warmSourceDraw = drawCounterValue(counters, 'imageSourceWarmDraws') > before.imageSourceWarmDraws;
@@ -439,7 +389,6 @@
       , viewportRect = null
       , view = null
       , imageSourceResolver = null
-      , motion = null
     ) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         if (obj.type === 'text') {
@@ -450,14 +399,13 @@
         if (obj.type !== 'image') return;
 
         const key = obj.data.imgKey;
-        const lowLatencyImageMotion = !!motion;
         const selected = imageSourceResolver
-          ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
-          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
+          ? imageSourceResolver(key, obj, view)
+          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view);
         const img = selected?.source || selected || null;
         if (!(img?.width > 0)) return;
         try {
-          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
+          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true);
         } catch (_) {}
       } else {
       if (obj.type === 'text') {
@@ -508,10 +456,9 @@
 
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
-      const lowLatencyImageMotion = !!motion;
       const selected = imageSourceResolver
-        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
-        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
+        ? imageSourceResolver(key, obj, view, counters)
+        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view) : null;
       const img = selected?.source || selected || null;
       if (img?.width > 0) {
         if (counters) {
@@ -520,19 +467,14 @@
             counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
             counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
             if (selected?.openPreview) counters.openPreviewImages = (counters.openPreviewImages || 0) + 1;
-            if (motion) counters.motionScaledImages = (counters.motionScaledImages || 0) + 1;
           } else if (selected?.targetScale < 1) {
             counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
-            if (motion) counters.motionFullFallbackImages = (counters.motionFullFallbackImages || 0) + 1;
             if (selected?.activeInputFullFallback) {
               counters.activeInputFullFallbackImages = (counters.activeInputFullFallbackImages || 0) + 1;
-              if (motion) counters.motionActiveInputFullFallbackImages = (counters.motionActiveInputFullFallbackImages || 0) + 1;
             }
           } else if (selected?.scale === 1 && selected?.targetScale === 1) {
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
-            if (motion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
           }
-          if (lowLatencyImageMotion) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
           if (bitmap || selected?.scale < 1) counters.bitmapImages++;
           else {
             counters.elementImages++;
@@ -540,7 +482,7 @@
           }
         }
         try {
-          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
+          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true);
           if (cropped === null) return false;
           if (counters) {
             recordImageDrawWarmStats(
@@ -585,27 +527,16 @@
       , counters
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , viewportRect = deps.currentViewportWorldRect()
-      , skipIds
       , imageSourceResolver = null
       , skipId = null
       , onlyText = false
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
-      const objectMotionForDraw =
-        deps.hasObjectMotionsForDraw?.() === false ? null : deps.objectMotionForDraw;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         for (const obj of deps.objects()) {
-          if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
-          const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
-          if (!motion && !deps.objectIntersectsRect(obj, viewportRect)) continue;
-          const objectViewportRect = motion
-            ? applyObjectMotion(context, obj, viewportRect, motion)
-            : viewportRect;
-          try {
-            drawSingleObj(context, obj, objectViewportRect, view, imageSourceResolver, motion);
-          } finally {
-            if (motion) context.restore();
-          }
+          if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
+          if (!deps.objectIntersectsRect(obj, viewportRect)) continue;
+          drawSingleObj(context, obj, viewportRect, view, imageSourceResolver);
         }
         return;
       } else {
@@ -614,16 +545,12 @@
       let drawnText = 0;
       for (const obj of deps.objects()) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
-        const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
-        if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
+        if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
+        if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect)) {
           countCulledObject(obj, counters);
           continue;
         }
         if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
-        const objectViewportRect = motion
-          ? applyObjectMotion(context, obj, viewportRect, motion, counters)
-          : viewportRect;
         let drawn = false;
         const objectDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
         const before = counters ? {
@@ -639,16 +566,6 @@
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
           activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
           scaledVariantPendingImages: drawCounterValue(counters, 'scaledVariantPendingImages'),
-          motionObjects: drawCounterValue(counters, 'motionObjects'),
-          motionImages: drawCounterValue(counters, 'motionImages'),
-          motionText: drawCounterValue(counters, 'motionText'),
-          motionTranslatedObjects: drawCounterValue(counters, 'motionTranslatedObjects'),
-          motionScaledObjects: drawCounterValue(counters, 'motionScaledObjects'),
-          lowLatencyImageDraws: drawCounterValue(counters, 'lowLatencyImageDraws'),
-          motionScaledImages: drawCounterValue(counters, 'motionScaledImages'),
-          motionFullScaleImages: drawCounterValue(counters, 'motionFullScaleImages'),
-          motionFullFallbackImages: drawCounterValue(counters, 'motionFullFallbackImages'),
-          motionActiveInputFullFallbackImages: drawCounterValue(counters, 'motionActiveInputFullFallbackImages'),
           scaledImageScaleTotal: drawCounterValue(counters, 'scaledImageScaleTotal'),
           scaledImageTargetScaleTotal: drawCounterValue(counters, 'scaledImageTargetScaleTotal'),
           textDrawUnits: drawCounterValue(counters, 'textDrawUnits'),
@@ -667,11 +584,10 @@
           imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
-          drawn = drawSingleObj(context, obj, counters, objectViewportRect, view, imageSourceResolver, motion);
+          drawn = drawSingleObj(context, obj, counters, viewportRect, view, imageSourceResolver);
         } finally {
-          if (motion) context.restore();
           if (counters && typeof performance !== 'undefined') {
-            recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, motion, deps);
+            recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, deps);
           }
         }
         if (obj.type === 'image' && drawn) drawnImages++;

@@ -337,7 +337,7 @@ test('clipboard token changes trigger pruning and keep current clipboard image k
   assert.deepEqual(context.imagePruneCalls, [['img-old'], ['img-new']]);
 });
 
-test('history entries and restores omit inert motion metadata', () => {
+test('history restores image flips on undo and redo', () => {
   const context = loadHistoryHarness();
   setBoard(context, [
     { id: 'image-1', type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: { imgKey: 'img-1', flipX: false } },
@@ -347,9 +347,6 @@ test('history entries and restores omit inert motion metadata', () => {
   context.objects[0].data.flipX = true;
   context.markDirty('image-1');
   context.pushHistory('flip-image-x');
-
-  assert.equal('motion' in context.boardHistory[0], false);
-  assert.equal('motion' in context.boardHistory[1], false);
 
   context.undo();
   assert.equal(context.objectsMap.get('image-1').data.flipX, false);

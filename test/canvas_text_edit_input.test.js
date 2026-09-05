@@ -221,7 +221,6 @@ function loadRubberBandHarness() {
     rubberBandCommits: [],
     cleaned: 0,
     deselected: 0,
-    motions: [],
     renders: [],
     selections: [],
     beginRubberBandDrag() {
@@ -248,9 +247,6 @@ function loadRubberBandHarness() {
         selectedIds.clear();
         for (const id of ids) selectedIds.add(id);
       },
-    },
-    BoardfishMotion: {
-      applyCopyFeedback(payload) { context.motions.push(payload); },
     },
     scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
     ViewportDebug: { isEnabled: () => false, start() { return {}; }, count() {}, end() {}, timing() {} },
@@ -299,7 +295,6 @@ test('rubber-band selection honors shared drag cancellation without selecting ob
   assert.equal(context.rubberBand.style.display, 'none');
   assert.equal(context.cleaned, 0);
   assert.deepEqual(context.selections, []);
-  assert.deepEqual(context.motions, []);
 });
 
 test('rubber-band selection still selects objects on normal mouse release', () => {
@@ -312,7 +307,6 @@ test('rubber-band selection still selects objects on normal mouse release', () =
   assert.equal(context._rubberBandDragActive, false);
   assert.equal(context.rubberBand.style.display, 'none');
   assert.deepEqual(context.selections, [['image-1']]);
-  assert.deepEqual(context.motions, []);
 });
 
 test('rubber-band selection commits only the latest move in an animation frame', () => {

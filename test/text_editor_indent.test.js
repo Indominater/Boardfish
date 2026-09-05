@@ -53,11 +53,7 @@ function loadTextEditorIntegrationHelpers() {
     dirty: [],
     histories: [],
     renders: [],
-    animations: [],
     _caretVisible: false,
-    BoardfishMotion: {
-      applyCopyFeedback(payload) { context.animations.push(payload); },
-    },
     shouldCommitTextEditInputImmediately() { return false; },
     flushEditHistoryCheckpoint() { context.flushedHistory = true; return false; },
     invalidateOffscreen() {},
@@ -169,7 +165,6 @@ function loadExitEditHarness() {
     dirty: [],
     histories: [],
     editHistoryPushes: [],
-    animations: [],
     renders: [],
     clearedIntervals: [],
     clearedTimeouts: [],
@@ -197,9 +192,6 @@ function loadExitEditHarness() {
       getSelection() {
         return { removeAllRanges() { context.removedRanges = true; } };
       },
-    },
-    BoardfishMotion: {
-      applyCopyFeedback(payload) { context.animations.push(payload); },
     },
     BoardfishEditorState: {
       removeObjectsById() {},
@@ -288,7 +280,6 @@ function loadLiveTextEditResizeHarness() {
     dirty: [],
     histories: [],
     renders: [],
-    animations: [],
     flushes: 0,
     TextSelDebug: { _logSelection() {}, _logHit() {}, _logDraw() {} },
     document: {
@@ -324,9 +315,6 @@ function loadLiveTextEditResizeHarness() {
     },
     window: {
       getSelection() { return { removeAllRanges() {} }; },
-    },
-    BoardfishMotion: {
-      applyCopyFeedback(payload) { context.animations.push(payload); },
     },
     BoardfishEditorState: {
       removeObjectsById() {},
@@ -403,7 +391,7 @@ function typeNativeText(proxy, text) {
   return before;
 }
 
-test('cmd+x copies highlighted text without copy feedback before deleting it', async () => {
+test('cmd+x copies highlighted text before deleting it', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   const copiedTexts = [];
@@ -416,9 +404,6 @@ test('cmd+x copies highlighted text without copy feedback before deleting it', a
       return Promise.resolve({});
     },
   };
-  context.BoardfishMotion.cancelTextSelectionMotion = (id) => {
-    cutOperations.push(['cancel', id]);
-  };
 
   context.enterEdit(obj.id, { history: false });
   context.proxy.setSelectionRange(6, 10, 'forward');
@@ -427,28 +412,24 @@ test('cmd+x copies highlighted text without copy feedback before deleting it', a
   context.proxy.dispatchEvent(copy);
   assert.equal(copy.prevented, true);
   assert.deepEqual(copiedTexts, ['beta']);
-  assert.equal(context.animations.length, 0);
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(context.animations.length, 1);
-  assert.equal(context.animations[0].textSelection.id, obj.id);
+  assert.equal(context.proxy.value, 'alpha beta gamma');
+  assert.equal(context.proxy.selectionStart, 6);
+  assert.equal(context.proxy.selectionEnd, 10);
 
-  context.animations.length = 0;
   cutOperations.length = 0;
   const cut = makeKeyEvent('x', { metaKey: true });
   context.proxy.dispatchEvent(cut);
 
   assert.equal(cut.prevented, true);
   assert.deepEqual(copiedTexts, ['beta', 'beta']);
-  assert.deepEqual(context.animations, []);
-  assert.deepEqual(cutOperations, [['cancel', obj.id], ['copy', 'beta']]);
+  assert.deepEqual(cutOperations, [['copy', 'beta']]);
   assert.equal(context.proxy.value, 'alpha  gamma');
   assert.equal(context.proxy.selectionStart, 6);
   assert.equal(context.proxy.selectionEnd, 6);
   assert.equal(obj.data.content, 'alpha  gamma');
 });
 
-test('cmd+arrow while editing is left to native caret navigation', () => {
+test('cmd+right while editing moves to the current canvas line end', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   obj.data = { content: 'one\ntwo\nthree' };
@@ -457,17 +438,15 @@ test('cmd+arrow while editing is left to native caret navigation', () => {
   context.dirty.length = 0;
   context.histories.length = 0;
   context.renders.length = 0;
-  context.animations.length = 0;
   context.proxy.setSelectionRange(5, 5, 'none');
   const key = makeKeyEvent('ArrowRight', { metaKey: true });
   context.proxy.dispatchEvent(key);
 
-  assert.equal(key.prevented, false);
-  assert.equal(context.proxy.selectionStart, 5);
-  assert.equal(context.proxy.selectionEnd, 5);
+  assert.equal(key.prevented, true);
+  assert.equal(context.proxy.selectionStart, 7);
+  assert.equal(context.proxy.selectionEnd, 7);
   assert.deepEqual(context.dirty, []);
   assert.deepEqual(context.histories, []);
-  assert.deepEqual(context.animations, []);
 });
 
 test('option+arrow moves to word boundaries after typing inside a word', () => {
@@ -918,6 +897,38 @@ test('shift tab outdents selected text edit lines', () => {
   assert.equal(result.end, 13);
 });
 
+test('indentation updates preserve every cached logical line and its indices', () => {
+  const cases = [
+    { value: ' a\n b\n c', start: 3, end: 3, outdent: true, expected: ' a\nb\n c' },
+    { value: '    a\n\tb\n  c\nkeep', start: 0, end: 12, outdent: true, expected: 'a\nb\nc\nkeep' },
+    { value: 'a\nb\nc\nkeep', start: 1, end: 5, outdent: false, expected: '\ta\n\tb\n\tc\nkeep' },
+  ];
+  const summarize = (layout) => Array.from(layout, (line) => ({
+    text: line.text,
+    start: line.startIndex,
+    end: line.endIndex,
+    caretEnd: line.caretEndIndex,
+    logicalLine: line.logicalLineIndex,
+  }));
+  for (const scenario of cases) {
+    const context = loadLiveTextEditResizeHarness();
+    context.obj.data.content = scenario.value;
+    context.enterEdit(context.obj.id, { history: false });
+    context.getTextLayout(context.obj);
+    context.proxy.setSelectionRange(scenario.start, scenario.end);
+
+    context.proxy.dispatchEvent(makeKeyEvent('Tab', { shiftKey: scenario.outdent }));
+
+    assert.equal(context.obj.data.content, scenario.expected);
+    const fresh = {
+      id: 'fresh-layout', type: 'text', x: context.obj.x, y: context.obj.y,
+      w: context.obj.w, h: context.obj.h, data: { content: scenario.expected },
+    };
+    assert.deepEqual(summarize(context.getTextLayout(context.obj)), summarize(context.getTextLayout(fresh)));
+    assert.equal(context.obj.h, scenario.expected.split('\n').length * TEST_LINE_H + TEST_TEXT_PAD * 2);
+  }
+});
+
 test('line indentation treats only LF as a line boundary', () => {
   const { applyTextEditLineIndent } = loadTextEditorHelpers();
   const value = 'alpha\u2028beta\ngamma\u2029delta';
@@ -959,6 +970,28 @@ test('enter preserves mixed tab and space indentation', () => {
   });
 
   assert.equal(result.value, '\t  save rgba\n\t  ');
+});
+
+test('enter within leading whitespace preserves the moved text indentation', () => {
+  for (const [value, start, expected, caret] of [
+    ['    foo', 0, '\n    foo', 1],
+    ['    foo', 2, '  \n    foo', 5],
+    ['\t  foo', 0, '\n\t  foo', 1],
+    ['\t  foo', 1, '\t\n\t  foo', 3],
+  ]) {
+    const context = loadLiveTextEditResizeHarness();
+    context.obj.data.content = value;
+    context.enterEdit(context.obj.id, { history: false });
+    context.getTextLayout(context.obj);
+    context.proxy.setSelectionRange(start, start);
+
+    context.proxy.dispatchEvent(makeKeyEvent('Enter'));
+
+    assert.equal(context.obj.data.content, expected);
+    assert.equal(context.proxy.selectionStart, caret);
+    assert.equal(context.proxy.selectionEnd, caret);
+    assert.deepEqual(Array.from(context.getTextLayout(context.obj), (line) => line.text), expected.split('\n'));
+  }
 });
 
 test('enter replaces selected text using the first selected line indentation', () => {

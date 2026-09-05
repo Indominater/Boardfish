@@ -401,29 +401,6 @@ test('active low-zoom navigation preserves full-size fallback while scaled varia
   assert.equal(context.imageScaledVariantActiveInputFullFallbackCount, 1);
 });
 
-test('explicit active image draw preserves full-size fallback while scaled variant is pending', () => {
-  const context = loadImageVariantsForPlatform(false);
-  context.performance.now = () => 1000;
-  context.lastViewportInputAt = 0;
-  const fullSource = { width: 4000, height: 4000 };
-
-  const selected = context.selectImageSourceForDraw(
-    'img-1',
-    { w: 500, h: 500 },
-    fullSource,
-    { zoom: 0.1, dpr: 1 },
-    true,
-  );
-
-  assert.equal(selected.source, fullSource);
-  assert.equal(selected.scale, 1);
-  assert.equal(selected.targetScale, 0.25);
-  assert.equal(selected.scaledVariantPending, true);
-  assert.equal(selected.activeInputFullFallback, true);
-  assert.equal(context.isScaledImageVariantPending('img-1', 0.25), true);
-  assert.equal(context.imageScaledVariantActiveInputFullFallbackCount, 1);
-});
-
 test('active low-zoom navigation prioritizes visible pending scaled variants', () => {
   const context = loadImageVariantsForPlatform(false);
   const fullSource = { width: 4000, height: 4000 };

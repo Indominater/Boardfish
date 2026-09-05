@@ -1009,7 +1009,6 @@ var HistoryDebug = (() => {
         e.step === 'replace-board-objects' ||
         e.step === 'restore-selection' ||
         e.step === 'renderAll-scheduled' ||
-        e.step === 'motion-replay' ||
         e.step === 'enter-edit-restored' ||
         e.step === 'restore-edit-caret' ||
         e.step === 'flush-edit-history' ||
@@ -1146,7 +1145,6 @@ var HistoryDebug = (() => {
         replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
         setSelectionMs: e.meta?.setSelectionMs ?? '',
         renderScheduleMs: e.meta?.renderScheduleMs ?? '',
-        motionReplayMs: e.meta?.motionReplayMs ?? '',
         enterEditMs: e.meta?.enterEditMs ?? '',
         reusedEditProxy: e.meta?.reusedEditProxy ?? '',
         proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
@@ -1198,7 +1196,6 @@ var HistoryDebug = (() => {
       maxSetSelectionRangeMs: max('setSelectionRangeMs'),
       maxFocusMs: max('focusMs'),
       maxRenderScheduleMs: max('renderScheduleMs'),
-      maxMotionReplayMs: max('motionReplayMs'),
       maxTextCharCount: max('textCharCount'),
       maxLargestTextChars: max('largestTextChars'),
       maxRuntimeTextLayoutLines: max('runtimeTextLayoutLines'),
@@ -1296,11 +1293,6 @@ var ViewportDebug = (() => {
     panZoomPanEvents: 0,
     panZoomZoomEvents: 0,
     panZoomBlockedEvents: 0,
-    motionEvents: 0,
-    motionJiggleStarts: 0,
-    motionJiggleProgressSamples: 0,
-    motionRafTicks: 0,
-    motionRenderSchedules: 0,
     frameScheduleEvents: 0,
     maxFrameScheduleSources: 0,
     maxPanDistancePx: 0,
@@ -1617,24 +1609,6 @@ var ViewportDebug = (() => {
     });
   }
 
-  function recordMotion(stepName, meta = {}) {
-    if (!enabled) return;
-    const payload = sanitize({
-      ...viewportStateMeta(),
-      ...meta,
-    });
-    stats.motionEvents++;
-    if (stepName === 'jiggle-start') stats.motionJiggleStarts++;
-    if (stepName === 'jiggle-progress') stats.motionJiggleProgressSamples++;
-    if (stepName === 'raf-fired') stats.motionRafTicks++;
-    if (stepName === 'render-scheduled') stats.motionRenderSchedules++;
-    push({
-      op: 'motion',
-      step: stepName,
-      meta: payload,
-    });
-  }
-
   function onRawInputCapture(event) {
     if (!enabled) return;
     try {
@@ -1668,7 +1642,7 @@ var ViewportDebug = (() => {
     startRawInputMonitor(options);
 
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["jiggleReport", "panZoomReport", "report", "summary", "frameSummary", "motionSummary", "motionTimeline", "panZoomSummary", "panZoomTimeline", "wheelSummary", "drawSummary", "slowFrames", "eventLoopTimeline", "rawInputTimeline", "imageHealth", "dump"] }) to collect results.');
+    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["panZoomReport", "report", "summary", "frameSummary", "panZoomSummary", "panZoomTimeline", "wheelSummary", "drawSummary", "slowFrames", "eventLoopTimeline", "rawInputTimeline", "imageHealth", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -1818,11 +1792,6 @@ var ViewportDebug = (() => {
       { metric: 'panZoomPanEvents', value: stats.panZoomPanEvents },
       { metric: 'panZoomZoomEvents', value: stats.panZoomZoomEvents },
       { metric: 'panZoomBlockedEvents', value: stats.panZoomBlockedEvents },
-      { metric: 'motionEvents', value: stats.motionEvents },
-      { metric: 'motionJiggleStarts', value: stats.motionJiggleStarts },
-      { metric: 'motionJiggleProgressSamples', value: stats.motionJiggleProgressSamples },
-      { metric: 'motionRafTicks', value: stats.motionRafTicks },
-      { metric: 'motionRenderSchedules', value: stats.motionRenderSchedules },
       { metric: 'frameScheduleEvents', value: stats.frameScheduleEvents },
       { metric: 'maxFrameScheduleSources', value: stats.maxFrameScheduleSources },
       { metric: 'maxPanDistancePx', value: Math.round(stats.maxPanDistancePx * 100) / 100 },
@@ -2209,16 +2178,6 @@ var ViewportDebug = (() => {
         dynamicOpenPreviewRequests: e.steps?.drawBoard?.meta?.dynamicOpenPreviewRequests ?? 0,
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? 0,
         activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? 0,
-        motionObjects: e.steps?.drawBoard?.meta?.motionObjects ?? 0,
-        motionImages: e.steps?.drawBoard?.meta?.motionImages ?? 0,
-        motionText: e.steps?.drawBoard?.meta?.motionText ?? 0,
-        motionTranslatedObjects: e.steps?.drawBoard?.meta?.motionTranslatedObjects ?? 0,
-        motionScaledObjects: e.steps?.drawBoard?.meta?.motionScaledObjects ?? 0,
-        lowLatencyImageDraws: e.steps?.drawBoard?.meta?.lowLatencyImageDraws ?? 0,
-        motionScaledImages: e.steps?.drawBoard?.meta?.motionScaledImages ?? 0,
-        motionFullScaleImages: e.steps?.drawBoard?.meta?.motionFullScaleImages ?? 0,
-        motionFullFallbackImages: e.steps?.drawBoard?.meta?.motionFullFallbackImages ?? 0,
-        motionActiveInputFullFallbackImages: e.steps?.drawBoard?.meta?.motionActiveInputFullFallbackImages ?? 0,
         imageSourceFirstDraws: e.steps?.drawBoard?.meta?.imageSourceFirstDraws ?? 0,
         imageSourceWarmDraws: e.steps?.drawBoard?.meta?.imageSourceWarmDraws ?? 0,
         imageContextFirstDraws: e.steps?.drawBoard?.meta?.imageContextFirstDraws ?? 0,
@@ -2301,26 +2260,6 @@ var ViewportDebug = (() => {
       maxScaledFallbackFull: Math.max(max('scaledFallbackFull'), slowMax('scaledFallbackFull')),
       avgActiveInputFullFallbackImages: draws.length ? Math.round(sum('activeInputFullFallbackImages') / draws.length * 100) / 100 : 0,
       maxActiveInputFullFallbackImages: Math.max(max('activeInputFullFallbackImages'), slowMax('activeInputFullFallbackImages')),
-      avgMotionObjects: draws.length ? Math.round(sum('motionObjects') / draws.length * 100) / 100 : 0,
-      maxMotionObjects: Math.max(max('motionObjects'), slowMax('motionObjects')),
-      avgMotionImages: draws.length ? Math.round(sum('motionImages') / draws.length * 100) / 100 : 0,
-      maxMotionImages: Math.max(max('motionImages'), slowMax('motionImages')),
-      avgMotionText: draws.length ? Math.round(sum('motionText') / draws.length * 100) / 100 : 0,
-      maxMotionText: Math.max(max('motionText'), slowMax('motionText')),
-      avgMotionTranslatedObjects: draws.length ? Math.round(sum('motionTranslatedObjects') / draws.length * 100) / 100 : 0,
-      maxMotionTranslatedObjects: Math.max(max('motionTranslatedObjects'), slowMax('motionTranslatedObjects')),
-      avgMotionScaledObjects: draws.length ? Math.round(sum('motionScaledObjects') / draws.length * 100) / 100 : 0,
-      maxMotionScaledObjects: Math.max(max('motionScaledObjects'), slowMax('motionScaledObjects')),
-      avgLowLatencyImageDraws: draws.length ? Math.round(sum('lowLatencyImageDraws') / draws.length * 100) / 100 : 0,
-      maxLowLatencyImageDraws: Math.max(max('lowLatencyImageDraws'), slowMax('lowLatencyImageDraws')),
-      avgMotionScaledImages: draws.length ? Math.round(sum('motionScaledImages') / draws.length * 100) / 100 : 0,
-      maxMotionScaledImages: Math.max(max('motionScaledImages'), slowMax('motionScaledImages')),
-      avgMotionFullScaleImages: draws.length ? Math.round(sum('motionFullScaleImages') / draws.length * 100) / 100 : 0,
-      maxMotionFullScaleImages: Math.max(max('motionFullScaleImages'), slowMax('motionFullScaleImages')),
-      avgMotionFullFallbackImages: draws.length ? Math.round(sum('motionFullFallbackImages') / draws.length * 100) / 100 : 0,
-      maxMotionFullFallbackImages: Math.max(max('motionFullFallbackImages'), slowMax('motionFullFallbackImages')),
-      avgMotionActiveInputFullFallbackImages: draws.length ? Math.round(sum('motionActiveInputFullFallbackImages') / draws.length * 100) / 100 : 0,
-      maxMotionActiveInputFullFallbackImages: Math.max(max('motionActiveInputFullFallbackImages'), slowMax('motionActiveInputFullFallbackImages')),
       avgScaledVariantPendingImages: draws.length ? Math.round(sum('scaledVariantPendingImages') / draws.length * 100) / 100 : 0,
       maxScaledVariantPendingImages: max('scaledVariantPendingImages'),
       avgScaledImageScale: sum('scaledImages') ? Math.round(sum('scaledImageScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
@@ -2650,16 +2589,6 @@ var ViewportDebug = (() => {
         dynamicOpenPreviewRequests: e.steps?.drawBoard?.meta?.dynamicOpenPreviewRequests ?? '',
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? '',
         activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? '',
-        motionObjects: e.steps?.drawBoard?.meta?.motionObjects ?? '',
-        motionImages: e.steps?.drawBoard?.meta?.motionImages ?? '',
-        motionText: e.steps?.drawBoard?.meta?.motionText ?? '',
-        motionTranslatedObjects: e.steps?.drawBoard?.meta?.motionTranslatedObjects ?? '',
-        motionScaledObjects: e.steps?.drawBoard?.meta?.motionScaledObjects ?? '',
-        lowLatencyImageDraws: e.steps?.drawBoard?.meta?.lowLatencyImageDraws ?? '',
-        motionScaledImages: e.steps?.drawBoard?.meta?.motionScaledImages ?? '',
-        motionFullScaleImages: e.steps?.drawBoard?.meta?.motionFullScaleImages ?? '',
-        motionFullFallbackImages: e.steps?.drawBoard?.meta?.motionFullFallbackImages ?? '',
-        motionActiveInputFullFallbackImages: e.steps?.drawBoard?.meta?.motionActiveInputFullFallbackImages ?? '',
         imageSourceFirstDraws: e.steps?.drawBoard?.meta?.imageSourceFirstDraws ?? '',
         imageSourceWarmDraws: e.steps?.drawBoard?.meta?.imageSourceWarmDraws ?? '',
         imageContextFirstDraws: e.steps?.drawBoard?.meta?.imageContextFirstDraws ?? '',
@@ -2807,258 +2736,6 @@ var ViewportDebug = (() => {
     return rows;
   }
 
-  function sourceIncludesMotion(value) {
-    return String(value || '').split(',').map(item => item.trim()).includes('motion') ||
-      String(value || '').includes('motion');
-  }
-
-  function motionRows() {
-    return events
-      .filter(e => e.op === 'motion')
-      .map(e => ({ at: e.at, step: e.step, ...(e.meta || {}) }));
-  }
-
-  function motionFrameRows() {
-    const starts = new Map();
-    for (const e of events) {
-      if (e.op === 'frame' && e.step === 'start') starts.set(e.id, { at: e.at, ...(e.meta || {}) });
-    }
-    return events
-      .filter(e => e.op === 'frame' && e.step === 'end')
-      .map(e => {
-        const startMeta = starts.get(e.id) || {};
-        const source = e.meta?.sources || startMeta.inputSource || '';
-        return {
-          id: e.id,
-          at: e.at,
-          source,
-          queueMs: startMeta.queueMs ?? '',
-          inputAgeMs: startMeta.inputAgeMs ?? '',
-          rafGap: startMeta.rafGap ?? '',
-          frameMs: e.meta?.frameMs ?? '',
-          doTransform: e.meta?.doTransform ?? '',
-          doBoard: e.meta?.doBoard ?? '',
-          doOverlay: e.meta?.doOverlay ?? '',
-          slow: e.meta?.slow ?? '',
-        };
-      })
-      .filter(row => sourceIncludesMotion(row.source));
-  }
-
-  function motionDrawRows() {
-    return events
-      .filter(e => e.op === 'drawBoard' && e.step === 'end' && !e.meta?.skipped && sourceIncludesMotion(e.meta?.source))
-      .map(e => ({
-        at: e.at,
-        drawMs: e.meta?.totalMeasuredMs ?? e.total ?? '',
-        objectLoopMs: e.meta?.objectLoopMs ?? '',
-        drawnImages: e.meta?.drawnImages ?? '',
-        drawnText: e.meta?.drawnText ?? '',
-        motionObjects: e.meta?.motionObjects ?? '',
-        motionImages: e.meta?.motionImages ?? '',
-        motionText: e.meta?.motionText ?? '',
-        motionTranslatedObjects: e.meta?.motionTranslatedObjects ?? '',
-        motionScaledObjects: e.meta?.motionScaledObjects ?? '',
-        lowLatencyImageDraws: e.meta?.lowLatencyImageDraws ?? '',
-        motionScaledImages: e.meta?.motionScaledImages ?? '',
-        motionFullScaleImages: e.meta?.motionFullScaleImages ?? '',
-        motionFullFallbackImages: e.meta?.motionFullFallbackImages ?? '',
-        motionActiveInputFullFallbackImages: e.meta?.motionActiveInputFullFallbackImages ?? '',
-        scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
-        activeInputFullFallbackImages: e.meta?.activeInputFullFallbackImages ?? '',
-        scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
-        croppedImages: e.meta?.croppedImages ?? '',
-        imageSourceFirstDraws: e.meta?.imageSourceFirstDraws ?? '',
-        imageSourceWarmDraws: e.meta?.imageSourceWarmDraws ?? '',
-        imageContextFirstDraws: e.meta?.imageContextFirstDraws ?? '',
-        imageContextWarmDraws: e.meta?.imageContextWarmDraws ?? '',
-        slowDrawObjects: (e.meta?.slowDrawObjects || []).map(row => ({ ...row })),
-      }));
-  }
-
-  function motionSummary() {
-    const rows = motionRows();
-    const starts = rows.filter(row => row.step === 'jiggle-start' || row.step === 'jello-start');
-    const jiggleStarts = rows.filter(row => row.step === 'jiggle-start');
-    const progress = rows.filter(row => row.step === 'jiggle-progress' || row.step === 'jello-progress');
-    const rafFired = rows.filter(row => row.step === 'raf-fired');
-    const renderScheduled = rows.filter(row => row.step === 'render-scheduled');
-    const frames = motionFrameRows();
-    const draws = motionDrawRows();
-    const progressGaps = [];
-    const lastProgressById = new Map();
-    for (const row of progress) {
-      const key = `${row.id || ''}:${row.objectType || ''}`;
-      const previousAt = lastProgressById.get(key);
-      if (previousAt != null) progressGaps.push(row.at - previousAt);
-      lastProgressById.set(key, row.at);
-    }
-    const firstProgressLatencies = [];
-    for (const start of starts) {
-      const match = progress.find(row => row.at >= start.at && row.id === start.id && row.objectType === start.objectType);
-      if (match) firstProgressLatencies.push(match.at - start.at);
-    }
-    const sumValues = (items, field) => items.reduce((value, row) => value + (Number(row[field]) || 0), 0);
-    const maxValue = (items, field) => items.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
-    const sumList = (items) => items.reduce((value, item) => value + (Number(item) || 0), 0);
-    const maxList = (items) => items.reduce((value, item) => Math.max(value, Number(item) || 0), 0);
-    const out = {
-      motionEvents: rows.length,
-      starts: starts.length,
-      jiggleStarts: jiggleStarts.length,
-      imageJiggleStarts: jiggleStarts.filter(row => row.objectType === 'image').length,
-      textJiggleStarts: jiggleStarts.filter(row => row.objectType === 'text').length,
-      textSelectionJiggleStarts: jiggleStarts.filter(row => row.objectType === 'text-selection').length,
-      progressSamples: progress.length,
-      rafTicks: rafFired.length,
-      renderSchedules: renderScheduled.length,
-      motionFrames: frames.length,
-      slowMotionFramesOver16ms: frames.filter(row => row.slow || Number(row.frameMs) > 16.7).length,
-      motionDraws: draws.length,
-      avgMotionFrameMs: frames.length ? round(sumValues(frames, 'frameMs') / frames.length) : 0,
-      maxMotionFrameMs: round(maxValue(frames, 'frameMs')),
-      avgMotionRafGapMs: frames.length ? round(sumValues(frames, 'rafGap') / frames.length) : 0,
-      maxMotionRafGapMs: round(maxValue(frames, 'rafGap')),
-      avgMotionQueueMs: frames.length ? round(sumValues(frames, 'queueMs') / frames.length) : 0,
-      maxMotionQueueMs: round(maxValue(frames, 'queueMs')),
-      avgProgressGapMs: progressGaps.length ? round(sumList(progressGaps) / progressGaps.length) : 0,
-      maxProgressGapMs: round(maxList(progressGaps)),
-      progressGapsOver16ms: progressGaps.filter(gap => gap > 16.7).length,
-      progressGapsOver32ms: progressGaps.filter(gap => gap > 32).length,
-      avgFirstProgressLatencyMs: firstProgressLatencies.length ? round(sumList(firstProgressLatencies) / firstProgressLatencies.length) : 0,
-      maxFirstProgressLatencyMs: round(maxList(firstProgressLatencies)),
-      avgMotionDrawMs: draws.length ? round(sumValues(draws, 'drawMs') / draws.length) : 0,
-      maxMotionDrawMs: round(maxValue(draws, 'drawMs')),
-      avgMotionObjectLoopMs: draws.length ? round(sumValues(draws, 'objectLoopMs') / draws.length) : 0,
-      maxMotionObjectLoopMs: round(maxValue(draws, 'objectLoopMs')),
-      maxMotionImages: maxValue(draws, 'motionImages'),
-      maxLowLatencyImageDraws: maxValue(draws, 'lowLatencyImageDraws'),
-      maxMotionScaledImages: maxValue(draws, 'motionScaledImages'),
-      maxMotionFullScaleImages: maxValue(draws, 'motionFullScaleImages'),
-      maxMotionFullFallbackImages: maxValue(draws, 'motionFullFallbackImages'),
-      maxMotionActiveInputFullFallbackImages: maxValue(draws, 'motionActiveInputFullFallbackImages'),
-      maxScaledVariantPendingImages: maxValue(draws, 'scaledVariantPendingImages'),
-      firstAt: rows[0]?.at ?? '',
-      lastAt: rows[rows.length - 1]?.at ?? '',
-      durationMs: rows.length > 1 ? round(rows[rows.length - 1].at - rows[0].at) : 0,
-    };
-    console.table([out]);
-    return out;
-  }
-
-  function motionTimeline(options = {}) {
-    const opts = options && typeof options === 'object' ? options : { limit: options };
-    const limit = Math.max(1, Number(opts.limit) || 240);
-    const motionEvents = motionRows();
-    if (!motionEvents.length) {
-      console.table([]);
-      return [];
-    }
-    const firstAt = motionEvents[0]?.at ?? -Infinity;
-    const lastAt = motionEvents[motionEvents.length - 1]?.at ?? Infinity;
-    const windowStart = Number.isFinite(Number(opts.beforeMs)) ? firstAt - Number(opts.beforeMs) : firstAt;
-    const windowEnd = Number.isFinite(Number(opts.afterMs)) ? lastAt + Number(opts.afterMs) : lastAt + 80;
-    const timeline = [];
-    for (const row of motionEvents) {
-      timeline.push({
-        at: row.at,
-        kind: 'motion',
-        step: row.step,
-        id: row.id || '',
-        objectType: row.objectType || '',
-        action: row.action || '',
-        t: row.t ?? '',
-        translateX: row.translateX ?? '',
-        translateY: row.translateY ?? '',
-        scaleX: row.scaleX ?? '',
-        scaleY: row.scaleY ?? '',
-        opacity: row.opacity ?? '',
-        waitMs: row.waitMs ?? '',
-        duration: row.duration ?? '',
-        jelloObjectMotions: row.jelloObjectMotions ?? '',
-        textSelectionJelloMotions: row.textSelectionJelloMotions ?? '',
-      });
-    }
-    for (const e of events) {
-      if (e.at < windowStart || e.at > windowEnd) continue;
-      if (e.op === 'frameSchedule' && (sourceIncludesMotion(e.meta?.source) || sourceIncludesMotion(e.meta?.inputSource))) {
-        timeline.push({
-          at: e.at,
-          kind: 'frameSchedule',
-          step: e.step,
-          source: e.meta?.source || '',
-          pendingSources: e.meta?.pendingSources ?? '',
-          rafPending: e.meta?.rafPending ?? '',
-          needBoardRender: e.meta?.needBoardRender ?? '',
-          needOverlayRender: e.meta?.needOverlayRender ?? '',
-        });
-      } else if (e.op === 'frame' && e.step === 'end' && sourceIncludesMotion(e.meta?.sources)) {
-        timeline.push({
-          at: e.at,
-          kind: 'frame',
-          step: 'end',
-          source: e.meta?.sources || '',
-          frameMs: e.meta?.frameMs ?? '',
-          doBoard: e.meta?.doBoard ?? '',
-          doOverlay: e.meta?.doOverlay ?? '',
-          slow: e.meta?.slow ?? '',
-        });
-      } else if (e.op === 'drawBoard' && e.step === 'end' && sourceIncludesMotion(e.meta?.source)) {
-        timeline.push({
-          at: e.at,
-          kind: 'drawBoard',
-          step: 'end',
-          source: e.meta?.source || '',
-          drawMs: e.meta?.totalMeasuredMs ?? e.total ?? '',
-          objectLoopMs: e.meta?.objectLoopMs ?? '',
-          motionImages: e.meta?.motionImages ?? '',
-          lowLatencyImageDraws: e.meta?.lowLatencyImageDraws ?? '',
-          motionScaledImages: e.meta?.motionScaledImages ?? '',
-          motionFullFallbackImages: e.meta?.motionFullFallbackImages ?? '',
-          motionActiveInputFullFallbackImages: e.meta?.motionActiveInputFullFallbackImages ?? '',
-          scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
-        });
-      } else if (e.op === 'eventLoop' || e.op === 'longTask') {
-        timeline.push({
-          at: e.at,
-          kind: e.op,
-          step: e.step,
-          gapMs: e.meta?.gapMs ?? '',
-          overMs: e.meta?.overMs ?? '',
-          durationMs: e.meta?.duration ?? '',
-        });
-      }
-    }
-    timeline.sort((a, b) => a.at - b.at);
-    const rows = timeline.slice(-limit).map((row, index, list) => ({
-      ...row,
-      timelineGapMs: index ? round(row.at - list[index - 1].at) : '',
-    }));
-    console.table(rows);
-    return rows;
-  }
-
-  function jiggleReport(options = {}) {
-    const opts = options && typeof options === 'object' ? options : { limit: options };
-    const out = {
-      motionSummary: motionSummary(),
-      motionTimeline: motionTimeline({
-        limit: opts.timelineLimit ?? opts.limit ?? 400,
-        beforeMs: opts.beforeMs,
-        afterMs: opts.afterMs,
-      }),
-      frameSummary: frameSummary(),
-      drawSummary: drawSummary(),
-      slowFrames: slowFrames(opts.slowFrames ?? opts.limit ?? 80),
-      imageScaleCache: imageScaleCacheSummary({ table: opts.cacheTable === true }),
-      eventLoopTimeline: eventLoopTimeline(opts.eventLoopLimit ?? opts.limit ?? 160),
-      rawInputTimeline: rawInputTimeline(opts.rawInputLimit ?? opts.limit ?? 160),
-    };
-    if (opts.details === true) out.slowFrameDetails = slowFrameDetails(opts.detailLimit ?? 8);
-    if (opts.log !== false) console.log(out);
-    return out;
-  }
-
   function panZoomReport(options = {}) {
     const opts = options && typeof options === 'object' ? options : { limit: options };
     const out = {
@@ -3151,9 +2828,7 @@ var ViewportDebug = (() => {
     frameEnd,
     recordPanZoom,
     recordFrameSchedule,
-    recordMotion,
     report,
-    jiggleReport,
     panZoomReport,
     summary,
     frameSummary,
@@ -3174,8 +2849,6 @@ var ViewportDebug = (() => {
     frameScheduleTimeline,
     recordRawInput,
     recordShieldBlock,
-    motionSummary,
-    motionTimeline,
     panZoomSummary,
     panZoomTimeline,
     wheelSummary,

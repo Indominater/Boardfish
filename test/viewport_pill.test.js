@@ -273,7 +273,11 @@ function loadViewportCanvasSizeHarness({
 test('opening shield pill text mirrors the zoom pill visual motion surface', () => {
   const styles = fs.readFileSync(path.join(root, 'src', 'styles.css'), 'utf8');
 
-  assert.match(styles, /--pill-radius:\s*999px;/);
+  assert.match(styles, /--ui-corner-shape:\s*squircle;/);
+  assert.match(styles, /--ui-radius:\s*16px;/);
+  assert.match(styles, /--pill-radius:\s*16px;/);
+  assert.match(styles, /\*\s*\{[\s\S]*corner-shape: var\(--ui-corner-shape\);[\s\S]*\}/);
+  assert.match(styles, /\*::before,\s*\*::after\s*\{\s*corner-shape: var\(--ui-corner-shape\);\s*\}/);
   assert.match(styles, /--menu-item-radius:\s*var\(--pill-radius\);/);
   assert.match(styles, /--pill-text-line-height:\s*18px;/);
   assert.match(styles, /--pill-text-min-width:\s*44px;/);

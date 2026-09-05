@@ -358,13 +358,9 @@ const copyTextEditSelection = async () => {
   }
   const value = _editEl && typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl?.value ?? '');
   const selectedText = selection?.hasSelection && _editEl ? value.slice(selection.start, selection.end) : '';
-  const feedback = selectedText ? { id: editingId, ...selection } : null;
-  const copied = await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
+  await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
     allowEmpty: !!selectedText,
   });
-  if (copied && feedback && editingId === feedback.id && _editEl) {
-    globalThis.BoardfishMotion?.applyCopyFeedback?.({ textSelection: feedback });
-  }
   focusTextEditProxy();
 };
 

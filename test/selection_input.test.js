@@ -103,10 +103,8 @@ function loadSelectionInputHarness(objects, options = {}) {
     timeoutHandler: null,
     EDIT_HISTORY_DEBOUNCE_MS: 500,
     drawBoardCalls: 0,
-    motionLookups: 0,
     renders: [],
     syncedTextIds: [],
-    motionPulses: [],
     isMultiSelected: () => selectedIds.size > 1,
     selectedBounds: () => objectBounds(objects),
     hasSelection: () => selectedIds.size > 0,
@@ -160,20 +158,6 @@ function loadSelectionInputHarness(objects, options = {}) {
       for (const item of dirty || []) context.dirty.push(item?.obj?.id ?? item?.id ?? item);
       context.history.push(reason);
       context.historyOptions.push({ beforeEditState });
-    },
-    BoardfishMotion: {
-      applyCopyFeedback(payload = {}) {
-        if (!payload.selection) return false;
-        context.motionPulses.push({});
-        return true;
-      },
-      hasLastDrawnObjectMotions() {
-        return !!options.objectMotions?.size;
-      },
-      getLastDrawnObjectMotion(value) {
-        context.motionLookups++;
-        return options.objectMotions?.get(typeof value === 'string' ? value : value?.id) || null;
-      },
     },
   };
   context.documentEvent = (type, init = {}) => {
@@ -293,7 +277,6 @@ test('multi-selection resize leaves text objects unchanged', () => {
   assert.deepEqual(context.syncedTextIds, []);
   assert.deepEqual(context.dirty, ['image-a']);
   assert.deepEqual(context.history, ['multi-resize']);
-  assert.deepEqual(context.motionPulses, []);
 });
 
 test('multi-selection resize anchors the opposite rectangle corner', () => {
@@ -360,125 +343,48 @@ test('selection overlay expands snapped outline edges to cover object bounds', (
   assert.equal(context.selOverlay.style.transform, 'translate(10px,20px)');
   assert.equal(context.selOverlay.style.width, '101px');
   assert.equal(context.selOverlay.style.height, '41.5px');
-  assert.equal(context.motionLookups, 0);
   assert.equal(context.selOverlay.className, 'visible text-resize');
   context.editingId = text.id;
   context.updateSelectionOverlay();
   assert.equal(context.selOverlay.className, 'visible editing text-resize');
 });
 
-test('selection overlay follows fixed-screen-distance copy motion at zoom', () => {
+test('selection overlay follows object bounds at zoom', () => {
   const text = { id: 'text-a', type: 'text', x: 10, y: 20, w: 100, h: 40, data: { content: 'hello' } };
-  const objectMotions = new Map([[
-    text.id,
-    { translateX: 5 / 2, translateY: 10.75 / 2 },
-  ]]);
-  const context = loadSelectionInputHarness([text], { objectMotions, devicePixelRatio: 2 });
+  const context = loadSelectionInputHarness([text], { devicePixelRatio: 2 });
   context.zoom = 2;
 
-  context.updateSelectionOverlay();
-
-  assert.equal(context.selOverlay.style.transform, 'translate(25px,50.75px)');
-  assert.equal(context.selOverlay.style.width, '200px');
-  assert.equal(context.selOverlay.style.height, '80px');
-
-  objectMotions.delete(text.id);
   context.updateSelectionOverlay();
 
   assert.equal(context.selOverlay.style.transform, 'translate(20px,40px)');
   assert.equal(context.selOverlay.style.width, '200px');
   assert.equal(context.selOverlay.style.height, '80px');
-});
 
-test('selection overlay matches translated non-uniform scaling around the object center', () => {
-  const text = { id: 'text-a', type: 'text', x: 10, y: 20, w: 100, h: 40, data: { content: 'hello' } };
-  const objectMotions = new Map([[
-    text.id,
-    { translateX: 2, translateY: 3, scaleX: 1.25, scaleY: 0.5 },
-  ]]);
-  const context = loadSelectionInputHarness([text], { objectMotions, devicePixelRatio: 2 });
-
+  text.x += 5;
+  text.y += 10;
   context.updateSelectionOverlay();
 
-  assert.equal(context.selOverlay.style.transform, 'translate(-0.5px,33px)');
-  assert.equal(context.selOverlay.style.width, '125px');
-  assert.equal(context.selOverlay.style.height, '20px');
+  assert.equal(context.selOverlay.style.transform, 'translate(30px,60px)');
+  assert.equal(context.selOverlay.style.width, '200px');
+  assert.equal(context.selOverlay.style.height, '80px');
 });
 
-test('selection overlay matches deformation around the requested upper attachment origin', () => {
-  const text = { id: 'text-a', type: 'text', x: 10, y: 20, w: 100, h: 40, data: { content: 'hello' } };
-  const objectMotions = new Map([[
-    text.id,
-    {
-      translateX: 2,
-      translateY: 3,
-      scaleX: 1.25,
-      scaleY: 0.8,
-      scaleOriginX: 0.5,
-      scaleOriginY: 0.12,
-    },
-  ]]);
-  const context = loadSelectionInputHarness([text], { objectMotions, devicePixelRatio: 2 });
-
-  context.updateSelectionOverlay();
-
-  assert.equal(context.selOverlay.style.transform, 'translate(-0.5px,23.96px)');
-  assert.equal(context.selOverlay.style.width, '125px');
-  assert.equal(context.selOverlay.style.height, '32px');
-});
-
-test('fractional animated translation stays continuous without changing snapped outline dimensions', () => {
-  const text = { id: 'text-a', type: 'text', x: 10.2, y: 20.2, w: 100.6, h: 40.6, data: { content: 'hello' } };
-  const objectMotions = new Map([[text.id, { translateX: 0.2, translateY: 0.2 }]]);
-  const context = loadSelectionInputHarness([text], { objectMotions, devicePixelRatio: 1 });
-
-  context.updateSelectionOverlay();
-  assert.equal(context.selOverlay.style.transform, 'translate(10.2px,20.2px)');
-  assert.equal(context.selOverlay.style.width, '101px');
-  assert.equal(context.selOverlay.style.height, '41px');
-
-  objectMotions.set(text.id, { translateX: 0.9, translateY: 0.9 });
-  context.updateSelectionOverlay();
-  assert.equal(context.selOverlay.style.transform, 'translate(10.9px,20.9px)');
-  assert.equal(context.selOverlay.style.width, '101px');
-  assert.equal(context.selOverlay.style.height, '41px');
-});
-
-test('multi-selection keeps a stable outer outline while object boxes follow secondary motion', () => {
+test('multi-selection outlines cover the group and each object', () => {
   const objects = [
     { id: 'image-a', type: 'image', x: 0, y: 0, w: 100, h: 100, data: {} },
     { id: 'image-b', type: 'image', x: 200, y: 0, w: 100, h: 100, data: {} },
   ];
-  const objectMotions = new Map([
-    ['image-a', {
-      translateX: -5,
-      translateY: 2,
-      scaleX: 1.04,
-      scaleY: 1 / 1.04,
-      scaleOriginX: 0.5,
-      scaleOriginY: 0.12,
-    }],
-    ['image-b', {
-      translateX: 10,
-      translateY: -3,
-      scaleX: 0.96,
-      scaleY: 1 / 0.96,
-      scaleOriginX: 0.5,
-      scaleOriginY: 0.12,
-    }],
-  ]);
-  const context = loadSelectionInputHarness(objects, { objectMotions });
+  const context = loadSelectionInputHarness(objects);
 
   context.updateSelectionOverlay();
 
-  assert.equal(context.selOverlay.style.transform, 'translate(1.5px,-1.5px)');
+  assert.equal(context.selOverlay.style.transform, 'translate(-1px,-1px)');
   assert.equal(context.selOverlay.style.width, '302px');
   assert.equal(context.selOverlay.style.height, '102px');
-  assert.equal(context._multiSelBoxes[0].style.transform, 'translate(-8px,1.461538462px)');
-  assert.equal(context._multiSelBoxes[0].style.width, '106px');
-  assert.equal(context._multiSelBoxes[1].style.transform, 'translate(211px,-4.5px)');
-  assert.equal(context._multiSelBoxes[1].style.width, '98px');
-  assert.equal(context.motionLookups, objects.length);
+  assert.equal(context._multiSelBoxes[0].style.transform, 'translate(-1px,-1px)');
+  assert.equal(context._multiSelBoxes[0].style.width, '102px');
+  assert.equal(context._multiSelBoxes[1].style.transform, 'translate(199px,-1px)');
+  assert.equal(context._multiSelBoxes[1].style.width, '102px');
 });
 
 test('image selection overlay covers renderer edge overdraw', () => {
@@ -527,7 +433,6 @@ test('single image resize uses the smaller implied scale and anchors the opposit
   assert.equal(Math.round(image.y + image.h), 100);
   assert.equal(context.drawBoardCalls, 1);
   assert.deepEqual(context.renders, []);
-  assert.deepEqual(context.motionPulses, []);
 });
 
 test('single text horizontal resize anchors the opposite side after auto-height sync', () => {
@@ -555,7 +460,6 @@ test('single text horizontal resize anchors the opposite side after auto-height 
   assert.equal(text.y, 0);
   assert.equal(text.w, 240);
   assert.equal(text.h, 80);
-  assert.deepEqual(context.motionPulses, []);
 });
 
 test('resizing an undo-restored text edit releases its preserved height minimum', () => {

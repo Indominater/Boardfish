@@ -705,8 +705,8 @@ function queueScaledImageVariantForReadyImage(key, source, priority = false) {
   return result;
 }
 
-function queueScaledImageVariantForDraw(key, obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, priority = false, activeOverscale = false) {
-  const targetScale = chooseImageScaleForDraw(obj, source, view, activeOverscale);
+function queueScaledImageVariantForDraw(key, obj, source, view = { zoom, dpr: window.devicePixelRatio || 1 }, priority = false) {
+  const targetScale = chooseImageScaleForDraw(obj, source, view);
   if (targetScale < 1) queueScaledImageVariant(key, source, targetScale, priority);
   return targetScale;
 }
@@ -840,7 +840,7 @@ async function settleOpenImageDrawCaches(concurrency = IMAGE_VARIANT_QUEUE_CONCU
   }
 
   // Drawing each decoded source once transfers the expensive first-use work
-  // out of the first zoom/copy animation. Keep yielding so the opening pill can
+  // out of the first viewport interaction. Keep yielding so the opening pill can
   // continue to paint while a large board is prepared.
   let batchStartedAt = performance.now();
   let batchCount = 0;
@@ -988,13 +988,13 @@ function scheduleVisibleImageWorkAfterIdle(
   }, Math.max(0, delayMs));
 }
 
-function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }, activeInput = null) {
+function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: window.devicePixelRatio || 1 }) {
   if (!viewportImageScalingEnabled) {
     return typeof BOARDFISH_PRODUCTION === 'undefined'
       ? { source: fullSource, scale: 1, targetScale: 1, disabled: true }
       : fullSource;
   }
-  activeInput = activeInput === true || (activeInput !== false && isActiveViewportInput());
+  const activeInput = isActiveViewportInput();
   const targetScale = chooseImageScaleForDraw(obj, fullSource, view, activeInput);
   if (targetScale < 1) {
     const entry = imageScaledBitmapCache.get(key);

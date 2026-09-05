@@ -78,14 +78,12 @@ function loadClipboardExportHarness(options = {}) {
     debugSteps: [],
     insertedImages: [],
     jsClipboards: [],
-    jello: [],
-    objectJello: [],
+    writtenTokens: [],
     deleted: 0,
     pendingImageCopyResolves: [],
     pendingPngBlobResolves: [],
     pendingTextCopyResolves: [],
     pendingTokenCopyResolves: [],
-    pulses: 0,
     renderImageToCanvas: 0,
     renders: [],
     resolveNextCopiedText(result = { boardfishTokenWritten: true }) {
@@ -171,14 +169,6 @@ function loadClipboardExportHarness(options = {}) {
       getSource() { return options.imageSource || ''; },
     },
     BoardfishWebBoardContainer: options.BoardfishWebBoardContainer,
-    BoardfishMotion: {
-      applyCopyFeedback(payload = {}) {
-        if (payload.textSelection) calls.jello.push({ ...payload.textSelection });
-        if (payload.objects) calls.objectJello.push(payload.objects.map((obj) => obj.id));
-        if (payload.selection) calls.pulses++;
-        return true;
-      },
-    },
     ClipDebug: {
       end(_dbg, meta = {}) { calls.debugEnds.push({ ...meta }); },
       start() { return {}; },
@@ -196,7 +186,7 @@ function loadClipboardExportHarness(options = {}) {
     getJsClipboardWebToken() {
       return 'web-token';
     },
-    markJsClipboardWebTokenWritten() {},
+    markJsClipboardWebTokenWritten(token) { calls.writtenTokens.push(token); },
     imageNeedsRendering: options.imageNeedsRendering || (() => false),
     imageFileDebugName: (file, fallback = 'clipboard-image') => file?.name || `${fallback}.${file?.type === 'image/jpeg' ? 'jpg' : 'png'}`,
     async insertImageFiles(files, x, y, source) { calls.insertedImages.push({ files, x, y, source }); context.objects.push({}); },
@@ -304,9 +294,6 @@ function loadClipboardPasteObjectsHarness() {
       hasSource() { return true; },
       setSource() {},
     },
-    BoardfishMotion: {
-      applyCopyFeedback() {},
-    },
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
@@ -367,7 +354,7 @@ function loadTextEditCopyHarness(value, options = {}) {
   assert.ok(start >= 0 && end > start, 'text edit copy helpers are missing');
   const calls = {
     copiedTexts: [],
-    jello: [],
+    focused: 0,
     pendingTextCopyResolves: [],
     renders: [],
     resolveNextCopiedText(result = {}) {
@@ -381,7 +368,7 @@ function loadTextEditCopyHarness(value, options = {}) {
     selectionStart: 0,
     selectionEnd: value.length,
     selectionDirection: 'none',
-    focus() {},
+    focus() { calls.focused++; },
   };
   const context = {
     console,
@@ -395,11 +382,6 @@ function loadTextEditCopyHarness(value, options = {}) {
           return new Promise((resolve, reject) => calls.pendingTextCopyResolves.push({ resolve, reject }));
         }
         return Promise.resolve();
-      },
-    },
-    BoardfishMotion: {
-      applyCopyFeedback(payload = {}) {
-        if (payload.textSelection) calls.jello.push({ ...payload.textSelection });
       },
     },
     MenuDebug: { log() {} },
@@ -611,40 +593,39 @@ test('clipboard IO writes the same rich image representations on every reported 
   }
 });
 
-test('copying a selected text object jiggles after its clipboard write finishes', async () => {
+test('copying a selected text object records its browser token after the clipboard write finishes', async () => {
   const context = loadClipboardExportHarness({ deferCopyText: true });
 
   const copyResult = context.copySelected();
 
   assert.equal('imageData' in context.calls.jsClipboards[0], false);
   assert.deepEqual(context.calls.copiedTexts, [context.textObject.data.content]);
-  assert.deepEqual(context.calls.jello, []);
-  assert.deepEqual(context.calls.objectJello, []);
-  assert.equal(context.calls.pulses, 0);
+  assert.deepEqual(context.calls.writtenTokens, []);
   assert.deepEqual(context.calls.renders, []);
 
   assert.equal(copyResult, true);
   assert.equal(context.calls.pendingTextCopyResolves.length, 1);
   context.calls.resolveNextCopiedText();
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['text-1']]);
+  await new Promise(setImmediate);
+  assert.deepEqual(context.calls.writtenTokens, ['web-token']);
 });
 
-test('a failed text write does not start copy feedback', async () => {
+test('a failed text write is reported without recording its browser token', async () => {
   const context = loadClipboardExportHarness({ deferCopyText: true });
-  context.console = { error() {} };
+  const errors = [];
+  context.console = { error(...args) { errors.push(args); } };
 
   assert.equal(context.copySelected(), true);
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.writtenTokens, []);
   context.calls.rejectNextCopiedText();
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise(setImmediate);
 
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.writtenTokens, []);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0][0], '[copy] writeText FAILED:');
 });
 
-test('copying an ordinary object starts feedback after its in-app clipboard copy', () => {
+test('copying an ordinary object populates the in-app clipboard synchronously', () => {
   const shape = {
     id: 'shape-1',
     type: 'rectangle',
@@ -661,10 +642,10 @@ test('copying an ordinary object starts feedback after its in-app clipboard copy
   assert.equal(context.calls.jsClipboards.length, 1);
   assert.equal(context.calls.jsClipboards[0].type, 'objects');
   assert.deepEqual([...context.calls.jsClipboards[0].objects].map((obj) => obj.id), ['shape-1']);
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['shape-1']]);
+  assert.deepEqual(context.calls.writtenTokens, []);
 });
 
-test('copying multiple objects jiggles after the browser clipboard marker settles', async () => {
+test('copying multiple objects records their browser token after the marker write settles', async () => {
   const first = {
     id: 'shape-1',
     type: 'rectangle',
@@ -693,30 +674,26 @@ test('copying multiple objects jiggles after the browser clipboard marker settle
   assert.equal(context.copySelected(), true);
   assert.deepEqual([...context.calls.jsClipboards[0].objects].map((obj) => obj.id), ['shape-1', 'shape-2']);
   assert.deepEqual(context.calls.copiedTokens, ['web-token']);
-  assert.equal(context.calls.pulses, 0);
+  assert.deepEqual(context.calls.writtenTokens, []);
 
   context.calls.resolveNextCopiedToken();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(context.calls.pulses, 1);
+  await new Promise(setImmediate);
+  assert.deepEqual(context.calls.writtenTokens, ['web-token']);
 });
 
-test('cutting a selected object copies without jiggle and deletes immediately', () => {
+test('cutting a selected object starts copying and deletes immediately', () => {
   const context = loadClipboardExportHarness({ deferCopyText: true });
 
   const cutResult = context.cutSelected();
 
   assert.equal(cutResult, true);
   assert.deepEqual(context.calls.copiedTexts, [context.textObject.data.content]);
-  assert.deepEqual(context.calls.jello, []);
-  assert.deepEqual(context.calls.objectJello, []);
-  assert.equal(context.calls.pulses, 0);
+  assert.deepEqual(context.calls.writtenTokens, []);
   assert.equal(context.calls.deleted, 1);
   assert.equal(context.calls.pendingTextCopyResolves.length, 1);
 });
 
-test('cutting a selected image keeps copy feedback disabled after the system write settles', async () => {
+test('cutting a selected image deletes immediately and records the completed clipboard write', async () => {
   const pngBytes = new Uint8Array([137, 80, 78, 71]);
   const imageSource = { web: true, mime: 'image/png' };
   const imageObject = {
@@ -742,13 +719,12 @@ test('cutting a selected image keeps copy feedback disabled after the system wri
 
   assert.equal(context.cutSelected(), true);
   assert.equal(context.calls.copiedImages.length, 1);
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.writtenTokens, []);
   assert.equal(context.calls.deleted, 1);
 
   context.calls.resolveNextCopiedImage();
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.deepEqual(context.calls.objectJello, []);
+  await new Promise(setImmediate);
+  assert.deepEqual(context.calls.writtenTokens, ['web-token']);
 });
 
 test('copying an untransformed web PNG image writes source bytes without rendering', async () => {
@@ -797,11 +773,11 @@ test('copying an untransformed web PNG image writes source bytes without renderi
     new Uint8Array(await context.calls.copiedImages[0].blob.arrayBuffer()),
     pngBytes,
   );
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.writtenTokens, []);
 
   context.calls.resolveNextCopiedImage();
   assert.equal(await copyPromise, true);
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-1']]);
+  assert.deepEqual(context.calls.writtenTokens, ['web-token']);
   assert.equal(context.calls.debugSteps.some((entry) => entry.step === 'copy:web-source-png-blob'), true);
   assert.equal(context.calls.debugEnds.at(-1).path, 'image-web-source-png');
 });
@@ -839,19 +815,19 @@ test('copying a transformed image starts the clipboard write before PNG encoding
   assert.equal(context.calls.copiedImages[0].token, 'web-token');
   assert.equal(typeof context.calls.copiedImages[0].blob?.then, 'function');
   assert.equal(copySettled, false);
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.writtenTokens, []);
 
   context.calls.resolveNextPngBlob();
   assert.equal(await context.calls.copiedImages[0].blob, renderedBlob);
   assert.equal(copySettled, false);
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.writtenTokens, []);
 
   context.calls.resolveNextCopiedImage();
   assert.equal(await copyPromise, true);
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
+  assert.deepEqual(context.calls.writtenTokens, ['web-token']);
 });
 
-test('a rejected system image write does not start copy feedback', async () => {
+test('a rejected system image write returns failure without recording its browser token', async () => {
   const pngBytes = new Uint8Array([137, 80, 78, 71]);
   const imageSource = { web: true, mime: 'image/png' };
   const imageObject = {
@@ -877,11 +853,11 @@ test('a rejected system image write does not start copy feedback', async () => {
 
   context.console = { error() {} };
   const copyPromise = context.copySelected();
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.writtenTokens, []);
   context.calls.rejectNextCopiedImage();
 
   assert.equal(await copyPromise, false);
-  assert.deepEqual(context.calls.objectJello, []);
+  assert.deepEqual(context.calls.writtenTokens, []);
 });
 
 test('pasting an image retains typed Blobs and only adds a MIME view when missing', async () => {
@@ -913,33 +889,21 @@ test('copying highlighted text omits whitespace-only lines at selection edges', 
   await context.copyTextEditSelection();
 
   assert.deepEqual(context.calls.copiedTexts, ['  first line  \n second line\t ']);
-  assert.deepEqual(context.calls.jello, [{
-    id: 'text-1',
-    start: 0,
-    end: context._editEl.value.length,
-    direction: 'none',
-    hasSelection: true,
-  }]);
+  assert.equal(context.calls.focused, 1);
 });
 
-test('copying highlighted text jiggles after the context-menu clipboard write finishes', async () => {
+test('copying highlighted text restores focus after the context-menu clipboard write finishes', async () => {
   const context = loadTextEditCopyHarness('selected text', { deferCopyText: true });
 
   const copyPromise = context.copyTextEditSelection();
 
   assert.deepEqual(context.calls.copiedTexts, ['selected text']);
-  assert.deepEqual(context.calls.jello, []);
+  assert.equal(context.calls.focused, 0);
   assert.equal(context.calls.pendingTextCopyResolves.length, 1);
 
   context.calls.resolveNextCopiedText();
   await copyPromise;
-  assert.deepEqual(context.calls.jello, [{
-    id: 'text-1',
-    start: 0,
-    end: 'selected text'.length,
-    direction: 'none',
-    hasSelection: true,
-  }]);
+  assert.equal(context.calls.focused, 1);
 });
 
 test('pasting Boardfish text objects strips whitespace-only edge lines from the pasted clone', async () => {

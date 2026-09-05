@@ -83,7 +83,7 @@ test('startup manifest exposes only web variants', () => {
   assert.doesNotMatch(manifest, /VARIANT_SCRIPTS/);
   assert.doesNotMatch(manifest, new RegExp(shellWord.toUpperCase()));
   assert.equal(webDev[0], 'web_env.js');
-  assert.ok(webDev.includes('web_runtime.js') && [webDev, webPreview].every(files => files.indexOf('motion.js') >= 0 && files.indexOf('motion.js') < Math.min(files.indexOf('viewport.js'), files.indexOf('selection_input.js'))));
+  assert.ok(webDev.includes('web_runtime.js'));
   assert.ok(webDev.includes('runtime_utils.js'));
   assert.ok(webDev.includes('startup_debug.js'));
   assert.ok(webPreview.includes('runtime_utils.js'));
@@ -186,15 +186,9 @@ test('clipboard and debug tooling use browser clipboard paths', () => {
   assert.doesNotMatch(startupDebug, /writeDebugLogFile/);
 });
 
-test('motion API is specialized to copy feedback and browser find stays native', () => {
-  const motion = readSource('src/js/motion.js');
+test('browser find stays native', () => {
   const keyboard = readSource('src/js/keyboard.js');
 
-  assert.match(motion, /const applyCopyFeedback =/);
-  assert.doesNotMatch(motion, /applyActionAnimation|COPY_JIGGLE_ACTIONS/);
-  assert.doesNotMatch(motion, /browser-find-shortcut/);
-  assert.doesNotMatch(motion, /appWindow/);
-  assert.doesNotMatch(motion, new RegExp('app-' + 'window'));
   assert.match(keyboard, /isShortcutKey\(e, 'f'\).*isShortcutKey\(e, 'g'\).*e\.key === 'F3'/);
   assert.doesNotMatch(keyboard, /browser-find-shortcut/);
 });

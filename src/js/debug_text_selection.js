@@ -387,7 +387,6 @@ var TextSelDebug = (() => {
       autoHeightDeferred: e.autoHeightDeferred ?? '',
       pendingSizeSync: e.pendingSizeSync ?? '',
       contentChanged: e.contentChanged ?? '',
-      motionMs: e.motionMs ?? '',
       timersMs: e.timersMs ?? '',
       selectionListenerRemoved: e.selectionListenerRemoved ?? '',
       proxyRemoveMs: e.proxyRemoveMs ?? '',
@@ -649,7 +648,6 @@ var TextSelDebug = (() => {
       maxFocusMs: max('focusMs'),
       maxScheduledDelayMs: max('scheduledDelayMs'),
       maxCaretApplyMs: max('caretApplyMs'),
-      maxMotionMs: max('motionMs'),
       maxRenderScheduleMs: max('renderScheduleMs'),
     };
     console.table([summary]);
@@ -675,7 +673,6 @@ var TextSelDebug = (() => {
       latestDomValueStale: latest?.domValueStale ?? '',
       maxExitStepMs: max('ms'),
       maxExitTotalMs: max('totalMs'),
-      maxMotionMs: max('motionMs'),
       maxTimersMs: max('timersMs'),
       maxProxyRemoveMs: max('proxyRemoveMs'),
       maxInvalidateOffscreenMs: max('invalidateOffscreenMs'),

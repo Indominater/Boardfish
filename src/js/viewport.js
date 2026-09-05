@@ -270,10 +270,6 @@ function startCanvasSizeTracking() {
 
 const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
   const runs = [];
-  let left = Infinity;
-  let top = Infinity;
-  let right = -Infinity;
-  let bottom = -Infinity;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let scannedLines = 0;
   let selectedLines = 0;
@@ -287,29 +283,13 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const x1 = lineXAtOffset(line, obj, o0);
     const x2 = lineXAtOffset(line, obj, o1);
-    const run = { line, x1, x2, y: line.y, height: LINE_H, startOffset: o0, endOffset: o1 };
-    runs.push(run);
-    if (x1 < left) left = x1;
-    if (line.y < top) top = line.y;
-    if (x2 > right) right = x2;
-    if (line.y + LINE_H > bottom) bottom = line.y + LINE_H;
+    runs.push({ line, x1, x2, y: line.y, height: LINE_H });
   }
   if (!runs.length) return null;
   return {
     runs,
-    bounds: { left, top, right, bottom },
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ metrics: { scannedLines, selectedLines, selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)) }, /* BOARDFISH_DEV_DIAGNOSTICS_END */
   };
-};
-
-const applyTextSelectionMotionTransform = (context, bounds, motion) => {
-  const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
-  if (scaleX !== 1 || scaleY !== 1) {
-    const scalePivotX = bounds.left + (bounds.right - bounds.left) * scaleOriginX;
-    const scalePivotY = bounds.top + (bounds.bottom - bounds.top) * scaleOriginY;
-    context.transform(scaleX, 0, 0, scaleY,
-      translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
-  } else if (translateX || translateY) context.translate(translateX, translateY);
 };
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -321,68 +301,8 @@ const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, stats = null) => {
-  if (!selectionGap) {
-    for (const line of layout) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
-      } else {
-        drawTextLineRange(context, line, obj);
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (stats) {
-        stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
-    return;
-  }
-  const selStart = Math.min(selectionGap.start, selectionGap.end);
-  const selEnd = Math.max(selectionGap.start, selectionGap.end);
-  for (const line of layout) {
-    const ls = line.startIndex, textEnd = ls + line.text.length;
-    const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
-    if (h0 >= h1) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
-      } else {
-        drawTextLineRange(context, line, obj);
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (stats) {
-        stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      continue;
-    }
-    const o0 = h0 - ls, o1 = h1 - ls;
-    const hasBefore = o0 > 0;
-    const hasAfter = o1 < line.text.length;
-    if (hasBefore) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        drawTextLineRange(context, line, obj, 0, o0, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
-      } else {
-        drawTextLineRange(context, line, obj, 0, o0);
-      }
-    }
-    if (hasAfter) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        drawTextLineRange(context, line, obj, o1, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
-      } else {
-        drawTextLineRange(context, line, obj, o1);
-      }
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (stats && (hasBefore || hasAfter)) {
-      stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
-};
-
-function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, motion) {
+function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection) {
   context.save();
-  if (motion) applyTextSelectionMotionTransform(context, selection.bounds, motion);
   context.fillStyle = 'rgba(10, 132, 255, 0.3)';
   context.beginPath();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -407,44 +327,6 @@ function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, m
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   context.restore();
 }
-
-const drawTextSelectionContentJello = (context, obj, selection, motion) => {
-  context.save();
-  applyTextSelectionMotionTransform(context, selection.bounds, motion);
-  for (const run of selection.runs) {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      drawTextLineRange(
-        context,
-        run.line,
-        obj,
-        run.startOffset,
-        run.endOffset,
-        VIEWPORT_TEXT_DRAW_STATS_DISABLED,
-      );
-    } else {
-      drawTextLineRange(context, run.line, obj, run.startOffset, run.endOffset);
-    }
-  }
-  context.restore();
-};
-
-const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom = zoom, motions = null) => {
-  if (!motions?.size) return;
-  for (const [id, spec] of motions) {
-    if (id === editingId) continue;
-    const obj = objectsMap.get(id);
-    if (!obj || obj.type !== 'text') continue;
-    if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
-    const layout = getTextLayout(obj);
-    const motion = BoardfishMotion.textSelectionMotionForDraw(id, spec, viewZoom);
-    if (!motion) continue;
-    const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
-    if (!selection) continue;
-    drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion);
-    drawTextLayoutStatic(context, obj, layout, { start: spec.start, end: spec.end });
-    drawTextSelectionContentJello(context, obj, selection, motion);
-  }
-};
 
 function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
   let caretLine = null;
@@ -482,7 +364,6 @@ function drawEditingTextOverlay(
   context,
   viewZoom = zoom,
   viewportRect = viewportWorldRect(0),
-  textSelectionMotions = null,
   /* BOARDFISH_DEV_DIAGNOSTICS_START */ collectDebug = false, /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   const obj = objectsMap.get(editingId);
@@ -492,7 +373,6 @@ function drawEditingTextOverlay(
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
-  const copiedSelectionSpec = textSelectionMotions?.get(obj.id) || null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const stats = collectDebug ? {
     editLayoutMs: 0,
@@ -507,99 +387,67 @@ function drawEditingTextOverlay(
     editCaretDrawn: false,
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const motion = BoardfishMotion.objectMotionForDraw(obj, viewZoom);
-  if (motion) {
-    context.save();
-    const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
-    if (scaleX !== 1 || scaleY !== 1) {
-      const scalePivotX = obj.x + obj.w * scaleOriginX;
-      const scalePivotY = obj.y + obj.h * scaleOriginY;
-      context.transform(scaleX, 0, 0, scaleY,
-        translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
-    } else if (translateX || translateY) context.translate(translateX, translateY);
+  const selStart = _editEl ? _editEl.selectionStart : 0;
+  const selEnd = _editEl ? _editEl.selectionEnd : 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const layoutStart = collectDebug ? performance.now() : 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  const layout = getTextLayoutForViewport(obj, viewportRect);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (collectDebug) {
+    stats.editLayoutMs = performance.now() - layoutStart;
+    stats.editLayoutLines = Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length);
+    stats.editVisibleLines = layout.length;
+    stats.editCulledLines = Math.max(0, stats.editLayoutLines - layout.length);
   }
-  try {
-    const liveSelStart = _editEl ? _editEl.selectionStart : 0;
-    const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;
-    const liveMatchesCopied = copiedSelectionSpec &&
-      liveSelStart === copiedSelectionSpec.start &&
-      liveSelEnd === copiedSelectionSpec.end;
-    const useCopiedSelectionMotion = copiedSelectionSpec && (liveSelStart === liveSelEnd || liveMatchesCopied);
-    const copiedMotion = useCopiedSelectionMotion
-      ? BoardfishMotion.textSelectionMotionForDraw(obj.id, copiedSelectionSpec, viewZoom)
-      : null;
-    if (copiedSelectionSpec && !copiedMotion) BoardfishMotion.cancelTextSelectionMotion(obj.id);
-    const selStart = copiedMotion ? copiedSelectionSpec.start : liveSelStart;
-    const selEnd   = copiedMotion ? copiedSelectionSpec.end   : liveSelEnd;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const layoutStart = collectDebug ? performance.now() : 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const layout = getTextLayoutForViewport(obj, viewportRect);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDebug) {
-      stats.editLayoutMs = performance.now() - layoutStart;
-      stats.editLayoutLines = Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length);
-      stats.editVisibleLines = layout.length;
-      stats.editCulledLines = Math.max(0, stats.editLayoutLines - layout.length);
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const selectionStart = collectDebug ? performance.now() : 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const selection = selStart === selEnd ? null : collectTextSelectionRuns(obj, layout, selStart, selEnd);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDebug) {
-      stats.editSelectionMs = performance.now() - selectionStart;
-      stats.editSelectionRuns = selection?.runs?.length || 0;
-      stats.editSelectedChars = Math.abs((selEnd ?? 0) - (selStart ?? 0));
-      stats.editSelectionLines = selection?.metrics?.selectedLines || 0;
-      stats.editSelectionVisibleLines = selection?.metrics?.scannedLines || 0;
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const selectionStart = collectDebug ? performance.now() : 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  const selection = selStart === selEnd ? null : collectTextSelectionRuns(obj, layout, selStart, selEnd);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (collectDebug) {
+    stats.editSelectionMs = performance.now() - selectionStart;
+    stats.editSelectionRuns = selection?.runs?.length || 0;
+    stats.editSelectedChars = Math.abs((selEnd ?? 0) - (selStart ?? 0));
+    stats.editSelectionLines = selection?.metrics?.selectedLines || 0;
+    stats.editSelectionVisibleLines = selection?.metrics?.scannedLines || 0;
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-    if (selection) drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, copiedMotion);
+  if (selection) drawTextSelectionHighlight(context, obj, selStart, selEnd, selection);
 
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const textDrawStart = collectDebug ? performance.now() : 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const textDrawStart = collectDebug ? performance.now() : 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  for (const line of layout) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      drawTextLayoutStatic(
-        context,
-        obj,
-        layout,
-        copiedMotion ? { start: selStart, end: selEnd } : null,
-        stats,
-      );
+      drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
     } else {
-      drawTextLayoutStatic(
-        context,
-        obj,
-        layout,
-        copiedMotion ? { start: selStart, end: selEnd } : null,
-      );
+      drawTextLineRange(context, line, obj);
     }
-    if (selection && copiedMotion) drawTextSelectionContentJello(context, obj, selection, copiedMotion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (stats) stats.editDrawnTextLines++;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (collectDebug) {
+    stats.editTextDrawMs = performance.now() - textDrawStart;
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+
+  if (selStart === selEnd && _caretVisible) {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const caretStart = collectDebug ? performance.now() : 0;
+    const drawn = drawCaret(context, obj, layout, selStart, viewZoom);
     if (collectDebug) {
-      stats.editTextDrawMs = performance.now() - textDrawStart;
+      stats.editCaretMs = performance.now() - caretStart;
+      stats.editCaretDrawn = !!drawn;
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-    if (selStart === selEnd && _caretVisible) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const caretStart = collectDebug ? performance.now() : 0;
-      const drawn = drawCaret(context, obj, layout, selStart, viewZoom);
-      if (collectDebug) {
-        stats.editCaretMs = performance.now() - caretStart;
-        stats.editCaretDrawn = !!drawn;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        drawCaret(context, obj, layout, selStart, viewZoom);
-      }
+    if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+      drawCaret(context, obj, layout, selStart, viewZoom);
     }
-  } finally {
-    if (motion) context.restore();
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   return stats;
@@ -636,7 +484,6 @@ function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = viewportWorldRect(0);
-  const textSelectionMotions = BoardfishMotion.textSelectionJelloSpecsForDraw();
   let openInitialImageSourceResolver = hasOpenPreviewFallback ? resolveOpenInitialImageSourceForDraw : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (!openInitialImageSourceResolver && collectOpenInitialRenderDebug) {
@@ -665,10 +512,10 @@ function drawBoard(bypassEditOffscreenCache = false) {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       setWorldCanvasTransform(ctx, dpr);
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true);
+        drawVisibleObjects(ctx, viewportRect, openInitialImageSourceResolver, editingId, true);
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true);
+        const drawn = drawVisibleObjects(ctx, counters, viewportRect, openInitialImageSourceResolver, editingId, true);
         if (collectDrawDebug) {
           drawPhases.offscreenTextDrawMs = performance.now() - textStart;
           drawnText += drawn.drawnText;
@@ -689,10 +536,10 @@ function drawBoard(bypassEditOffscreenCache = false) {
       const objectsStart = collectDrawDebug ? performance.now() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId);
+        drawVisibleObjects(ctx, viewportRect, openInitialImageSourceResolver, editingId);
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId);
+        const drawn = drawVisibleObjects(ctx, counters, viewportRect, openInitialImageSourceResolver, editingId);
         if (collectDrawDebug) {
           drawPhases.objectLoopMs = performance.now() - objectsStart;
           drawnImages += drawn.drawnImages;
@@ -705,12 +552,11 @@ function drawBoard(bypassEditOffscreenCache = false) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const editStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionMotions);
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionMotions);
+      drawEditingTextOverlay(ctx, zoom, viewportRect);
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const editStats = drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionMotions, collectDrawDebug);
+      const editStats = drawEditingTextOverlay(ctx, zoom, viewportRect, collectDrawDebug);
       if (collectDrawDebug) {
         drawPhases.editingOverlayMs = performance.now() - editStart;
         if (editStats) Object.assign(drawPhases, editStats);
@@ -731,10 +577,10 @@ function drawBoard(bypassEditOffscreenCache = false) {
     const objectsStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver);
+      drawVisibleObjects(ctx, viewportRect, openInitialImageSourceResolver);
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver);
+      const drawn = drawVisibleObjects(ctx, counters, viewportRect, openInitialImageSourceResolver);
       if (collectDrawDebug) {
         drawPhases.objectLoopMs = performance.now() - objectsStart;
         drawnImages = drawn.drawnImages;
@@ -742,7 +588,6 @@ function drawBoard(bypassEditOffscreenCache = false) {
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionMotions);
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDrawDebug) {
@@ -947,8 +792,6 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   drawTextLineRange,
   getTextLayoutForViewport,
   objectIntersectsRect,
-  hasObjectMotionsForDraw: BoardfishMotion.hasObjectMotionsForDraw,
-  objectMotionForDraw: BoardfishMotion.objectMotionForDraw,
   selectImageSourceForDraw,
 });
 ({ drawSingleObj, setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
@@ -969,16 +812,6 @@ function withRenderSource(source, fn) {
     _activeRenderSource = prev;
   }
 }
-/* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-var finishMotionViewportRenderFrame = BoardfishMotion.afterViewportRenderFrame;
-/* BOARDFISH_DEV_DIAGNOSTICS_START */
-finishMotionViewportRenderFrame = (source, meta = {}) => {
-  BoardfishMotion.afterViewportRenderFrame({
-    source: source || _activeRenderSource || 'render',
-    ...meta,
-  });
-};
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1653,14 +1486,12 @@ function scheduleFrame(
     if (doTransform) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         applyTransform();
-        finishMotionViewportRenderFrame();
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         ViewportDebug.count('transformFrames');
         const transformStart = collectDebug ? performance.now() : 0;
         withRenderSource(sourceLabel || 'transform', () => applyTransform(frameDbg));
         if (collectDebug) ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
-        finishMotionViewportRenderFrame(sourceLabel || 'transform', { doTransform, doBoard: true, doOverlay: true });
         if (collectDebug) ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sourceLabel });
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
@@ -1689,15 +1520,6 @@ function scheduleFrame(
         ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
-    if (doBoard) {
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        finishMotionViewportRenderFrame();
-      } else {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        finishMotionViewportRenderFrame(sourceLabel || 'board', { doTransform, doBoard, doOverlay });
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDebug) {

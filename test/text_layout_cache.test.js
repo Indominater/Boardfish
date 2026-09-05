@@ -15,6 +15,7 @@ function loadTextLayout({
   fontCheck = () => true,
   userAgent = 'Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36',
   trackSegmenter = false,
+  withoutSegmenter = false,
 } = {}) {
   const measured = [];
   const segmented = [];
@@ -73,6 +74,7 @@ function loadTextLayout({
       },
     };
   }
+  if (withoutSegmenter) context.Intl = {};
   vm.createContext(context);
   vm.runInContext(
     fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'text_layout.js'), 'utf8'),
@@ -98,6 +100,7 @@ function loadTextLayout({
       prepareTextLayoutForDraw,
       drawTextLineRange,
       lineCaretXAtOffset,
+      lineHitOffsetForX,
       lineXAtOffset,
       layoutHitTestCaret,
       spacingUnits(value, start = 0, end = null) {
@@ -1662,4 +1665,132 @@ test('viewport line cache keeps blank lines during full range prewarm', () => {
     assert.equal(full[i].y - full[i - 1].y, context.LINE_H);
   }
   assert.equal(textLayout.hasObjectLayoutCache(obj), false);
+});
+
+function textRegressionObject(context, content, width) {
+  return {
+    id: 'textbox-regression', type: 'text', x: 0, y: 0,
+    w: context.TEXT_PAD * 2 + width, h: 40, data: { content },
+  };
+}
+
+function assertViewportLayoutMatchesFull(context, content, width, verify) {
+  const api = context.__testTextLayout;
+  const fullObject = textRegressionObject(context, content, width);
+  const full = api.getTextLayout(fullObject);
+  const viewportObject = textRegressionObject(context, content, width);
+  api.getTextAutoHeight(viewportObject);
+  assert.equal(api.hasObjectLayoutCache(viewportObject), false);
+  const viewport = api.getTextLayoutForLineRange(viewportObject, 0, full.length + 2);
+  const fields = (layout) => Array.from(layout, (line) => ({
+    text: line.text, start: line.startIndex, end: line.endIndex,
+    caretEnd: line.caretEndIndex, next: line.nextStartIndex,
+    prefix: Array.from(line.prefixWidths),
+  }));
+  assert.deepEqual(fields(viewport), fields(full));
+  verify(full, fullObject);
+  verify(viewport, viewportObject);
+}
+
+test('wrapping keeps the last fitting word when the endpoint is its separator', () => {
+  const { context } = loadTextLayout();
+  for (const content of ['abc def ghi', 'abc def  ghi']) {
+    assertViewportLayoutMatchesFull(context, content, 7, (lines) => {
+      assert.deepEqual(Array.from(lines, (line) => line.text), ['abc def', 'ghi']);
+    });
+  }
+});
+
+test('long words emit one fitted chunk per row without extra one-character rows', () => {
+  const { context } = loadTextLayout();
+  for (const length of [385, 400, 401]) {
+    assertViewportLayoutMatchesFull(context, 'a'.repeat(length), 10, (lines) => {
+      assert.equal(lines.length, Math.ceil(length / 10));
+      assert.ok(lines.slice(0, -1).every((line) => line.text.length === 10));
+      assert.equal(lines.map((line) => line.text).join(''), 'a'.repeat(length));
+    });
+  }
+});
+
+test('wrapping and line endpoints exclude pair spacing for the next omitted glyph', () => {
+  const { context } = loadTextLayout({
+    measureWidth: (text) => text.length * 10,
+    measureTextMetrics: (text, { width }) => ({
+      actualBoundingBoxLeft: text === 'T' ? 3 : 0,
+      actualBoundingBoxRight: width,
+    }),
+  });
+  const api = context.__testTextLayout;
+  const availableWidth = api.measureTextW('aT');
+  assertViewportLayoutMatchesFull(context, 'aTT', availableWidth, (lines) => {
+    assert.deepEqual(Array.from(lines, (line) => line.text), ['aT', 'T']);
+    for (const line of lines) {
+      assert.equal(line.prefixWidths[0], 0);
+      assert.equal(line.prefixWidths.at(-1), api.measureTextW(line.text));
+    }
+  });
+  assertViewportLayoutMatchesFull(context, 'T'.repeat(400), api.measureTextW('TT'), (lines) => {
+    assert.equal(lines.length, 200);
+    assert.ok(lines.every((line) => line.text === 'TT'));
+    assert.ok(lines.every((line) => line.prefixWidths.at(-1) === api.measureTextW('TT')));
+  });
+});
+
+test('viewport line index retains the complete caret range of overflow trailing spaces', () => {
+  const { context } = loadTextLayout();
+  for (const content of ['abc    \ndef', `${'abc '.repeat(100)}   \ndef`]) {
+    assertViewportLayoutMatchesFull(context, content, 4, (lines) => {
+      const previousLine = lines.at(-2);
+      assert.equal(previousLine.caretEndIndex, content.indexOf('\n'));
+      assert.equal(previousLine.nextStartIndex, content.indexOf('\n'));
+    });
+  }
+});
+
+for (const withoutSegmenter of [false, true]) {
+  test(`Unicode hit tests expose complete graphemes${withoutSegmenter ? ' without Intl.Segmenter' : ''}`, () => {
+    const { context } = loadTextLayout({ withoutSegmenter });
+    const api = context.__testTextLayout;
+    for (const grapheme of ['😀', 'a\u0301', '👨‍👩‍👧‍👦', '🇨🇦', '👍🏽', '1\uFE0F\u20E3']) {
+      const obj = textRegressionObject(context, `${grapheme}x`, 100);
+      const [line] = api.getTextLayout(obj);
+      for (const nearest of [false, true]) {
+        for (let x = 0; x <= line.prefixWidths.at(-1); x += 0.1) {
+          const offset = api.lineHitOffsetForX(line, context.TEXT_PAD + x, obj, nearest);
+          assert.ok([0, grapheme.length, grapheme.length + 1].includes(offset), `${JSON.stringify(grapheme)} hit offset ${offset}`);
+        }
+        assert.equal(api.lineHitOffsetForX(line, context.TEXT_PAD + grapheme.length * 0.75, obj, nearest), grapheme.length);
+      }
+    }
+  });
+
+  test(`narrow wrapping preserves oversized Unicode graphemes${withoutSegmenter ? ' without Intl.Segmenter' : ''}`, () => {
+    const { context } = loadTextLayout({ withoutSegmenter });
+    for (const grapheme of ['😀', 'a\u0301', '👨‍👩‍👧‍👦', '🇨🇦', '👍🏽', '1\uFE0F\u20E3']) {
+      for (const repeats of [2, 200]) {
+        assertViewportLayoutMatchesFull(context, grapheme.repeat(repeats), 1, (lines) => {
+          assert.equal(lines.length, repeats);
+          assert.ok(lines.every((line) => line.text === grapheme));
+        });
+      }
+    }
+  });
+}
+
+test('Unicode caret centering uses the complete neighboring grapheme ink bounds', () => {
+  const { context } = loadTextLayout({
+    measureWidth: (text) => text.length * 10,
+    measureTextMetrics: (text, { width }) => ({
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: width,
+    }),
+  });
+  const api = context.__testTextLayout;
+  for (const grapheme of ['😀', 'a\u0301', '👨‍👩‍👧‍👦', '🇨🇦']) {
+    const obj = textRegressionObject(context, `${grapheme}A`, 500);
+    const [line] = api.getTextLayout(obj);
+    const previousInkRight = context.TEXT_PAD + api.measureTextW(grapheme);
+    const nextInkLeft = api.lineXAtOffset(line, obj, grapheme.length);
+    assert.equal(api.lineCaretXAtOffset(line, obj, grapheme.length), (previousInkRight + nextInkLeft) / 2);
+  }
 });

@@ -17,20 +17,22 @@
   --text-direction: ltr;
   --regular_text: 400;
   --white_font: #fbfbfe;
-  --white_font_rgb: 251, 251, 254;
+  --menu-secondary-color: #70707a;
+  --menu-shortcut-color: #b8b8bc;
   --firefox-menu-bg: #42414d;
-  --firefox-menu-border: #777681;
+  --firefox-menu-border: var(--menu-secondary-color);
   --firefox-menu-text: var(--white_font);
   --menu_hover_bg: #5e5d69;
   --menu_pressed_bg: #7b7a84;
   --firefox-menu-hover-bg: var(--menu_hover_bg);
   --firefox-menu-active-bg: var(--menu_pressed_bg);
-  --firefox-menu-separator: var(--menu_hover_bg);
+  --firefox-menu-separator: var(--menu-secondary-color);
   --firefox-menu-shadow:
     0 8px 24px rgba(0,0,0,0.1),
     0 0 0 1px rgba(0,0,0,0.3);
-  --ui-radius: 25px;
-  --pill-radius: 999px;
+  --ui-corner-shape: squircle;
+  --ui-radius: 16px;
+  --pill-radius: 16px;
   --menu-shell-radius: var(--ui-radius);
   --menu-shell-padding: 8px;
   --menu-item-height: 32px;
@@ -65,7 +67,16 @@ body[data-theme="dark"] {
   --canvas-bg: var(--canvas-bg-dark);
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  corner-shape: var(--ui-corner-shape);
+}
+*::before,
+*::after {
+  corner-shape: var(--ui-corner-shape);
+}
 
 button {
   outline: none;
@@ -270,7 +281,7 @@ body {
 #ctx-actions.visible {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 8px;
 }
 
 /* Highlight-nudge interaction partition. Add .ui-highlight-nudge to opt new controls in. */
@@ -339,10 +350,6 @@ body {
   fill: currentColor;
 }
 
-.ctx-action-sep {
-  width: 100%;
-}
-
 .ctx-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -375,7 +382,7 @@ body {
   white-space: nowrap;
 }
 .ctx-shortcut {
-  color: rgba(var(--white_font_rgb), 0.7);
+  color: var(--menu-shortcut-color);
   font: var(--text-font-style) var(--regular_text) var(--menu-item-font-size) var(--text-font-family);
   line-height: inherit;
   justify-self: end;

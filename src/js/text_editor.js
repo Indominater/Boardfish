@@ -418,6 +418,11 @@ const applyTextEditLineIndent = (value, selection, outdent = false) => {
     end: nextEnd,
     direction: selectionState.direction,
     changed: true,
+    replacement: {
+      start: firstLineStart,
+      end: blockEnd,
+      insertedText: nextSelectedText,
+    },
   };
 };
 
@@ -430,7 +435,9 @@ const applyTextEditLineBreakIndent = (value, selection) => {
   };
   const start = Math.min(selectionState.start, selectionState.end);
   const end = Math.max(selectionState.start, selectionState.end);
-  const insert = '\n' + textEditLineIndentAt(text, start);
+  // Indentation after the caret is already retained in the unchanged suffix.
+  const indent = textEditLineIndentAt(text, start).slice(0, start - textEditLineStartAt(text, start));
+  const insert = '\n' + indent;
   const nextValue = text.slice(0, start) + insert + text.slice(end);
   const nextCaret = start + insert.length;
   return {
@@ -568,8 +575,15 @@ const resetTextEditPreservedMinLines = (obj) => {
   return true;
 };
 
-const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false) => {
+const resetTextEditNavigation = (obj) => {
   if (!obj) return;
+  delete obj._textEditPreferredX;
+  delete obj._textEditNavigationSelection;
+};
+
+const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false, preserveNavigation = false) => {
+  if (!obj) return;
+  if (!preserveNavigation) resetTextEditNavigation(obj);
   const length = (obj.data?.content || '').length;
   const nextIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), length));
   if (obj._textEditCaretIndex !== nextIndex || clearLineStartIndex) {
@@ -583,8 +597,56 @@ const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStart
 
 const clearTextEditCaretIndex = (obj) => {
   if (!obj) return;
+  resetTextEditNavigation(obj);
   delete obj._textEditCaretIndex;
   delete obj._textEditCaretLineStartIndex;
+};
+
+// A soft wrap has two visual positions for the same text index. Keep the row
+// selected by a click/navigation, or choose the side approached by an arrow.
+const textEditCaretLineAtIndex = (obj, layout, index, affinity = null) => {
+  if (!layout.length) return -1;
+  let lo = 0, hi = layout.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const line = layout[mid];
+    const end = line.caretEndIndex ?? line.endIndex ?? (line.startIndex + line.text.length);
+    if (index <= end) hi = mid;
+    else lo = mid + 1;
+  }
+  const preferred = affinity == null && obj?._textEditCaretIndex === index
+    ? obj._textEditCaretLineStartIndex : null;
+  let result = lo;
+  // Crossing consumed wrap whitespace reaches the next row's beginning. A
+  // hard word wrap, in contrast, still has a caret at the preceding row's end.
+  const line = layout[lo];
+  const visibleEnd = line.endIndex ?? (line.startIndex + line.text.length);
+  if (index > visibleEnd && layout[lo + 1]?.startIndex === index) result = lo + 1;
+  for (let i = lo; i < layout.length && layout[i].startIndex <= index; i++) {
+    if (layout[i].startIndex === preferred) return i;
+    if (affinity === 'forward') result = i;
+  }
+  return result;
+};
+
+const rememberTextEditNavigationSelection = (obj, proxy, index, lineStartIndex) => {
+  setTextEditCaretIndex(obj, index, lineStartIndex, true, true);
+  obj._textEditNavigationSelection = {
+    start: proxy.selectionStart,
+    end: proxy.selectionEnd,
+    direction: proxy.selectionDirection || 'none',
+  };
+};
+
+const applyTextEditNavigationSelection = (obj, proxy, selection, index, lineStartIndex, extend) => {
+  const anchor = selection.direction === 'backward' ? selection.end : selection.start;
+  if (extend) {
+    setTextEditProxySelectionRange(proxy, Math.min(anchor, index), Math.max(anchor, index),
+      index < anchor ? 'backward' : 'forward');
+  } else {
+    setTextEditProxySelectionRange(proxy, index, index, 'none');
+  }
+  rememberTextEditNavigationSelection(obj, proxy, index, lineStartIndex);
 };
 
 const textEditVisibleSelectionReplacementRange = (content, selection = {}) => {
@@ -625,7 +687,6 @@ const copyTextEditSelectionFromProxy = async (
   id,
   proxy,
   selection = textEditSelectionState(proxy),
-  options = {},
 ) => {
   if (!selection?.hasSelection || !proxy) return false;
   const sourceValue = textEditProxyValue(proxy);
@@ -686,7 +747,6 @@ const copyTextEditSelectionFromProxy = async (
     logStep('copy:text-selection-clear-jsClipboard', textStats);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
-  const shouldAnimateCopy = options.animateCopy !== false && editingId === id && _editEl === proxy;
   const meta = {};
   if (typeof getJsClipboardWebToken === 'function') {
     const webToken = getJsClipboardWebToken();
@@ -720,18 +780,6 @@ const copyTextEditSelectionFromProxy = async (
             markJsClipboardWebTokenWritten(meta.boardfishToken);
           }
         }
-      }
-      // A large text write can occupy the main thread; start jiggle only once it settles.
-      if (shouldAnimateCopy && editingId === id && _editEl === proxy) {
-        globalThis.BoardfishMotion?.applyCopyFeedback?.({
-          textSelection: {
-            id,
-            ...selection,
-          },
-        });
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        logStep('copy:text-selection-feedback-done', textStats);
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logStep('copy:web-text-clipboard-write-end', {
@@ -1290,6 +1338,7 @@ function enterEdit(id, {
   });
 
   let pendingInputState = null;
+  let pendingNativeNavigation = null;
   proxy._boardfishSetPendingInputState = (state) => { pendingInputState = state; };
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const recordInputSetupStep = (step, event, state = {}, extra = {}) => {
@@ -1319,6 +1368,8 @@ function enterEdit(id, {
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   proxy.addEventListener('beforeinput', (event) => {
+    resetTextEditNavigation(obj);
+    pendingNativeNavigation = null;
     if (pendingInputState?.nativePasteHandled && event?.inputType === 'insertFromPaste') {
       return;
     }
@@ -1435,7 +1486,7 @@ function enterEdit(id, {
     }));
 	    obj.data.content = nextRawValue;
 	    markDirty(obj);
-	    logInputStep('motion-dirty-done');
+	    logInputStep('content-dirty-done');
 	    if (proxy._boardfishDomValueStale) {
 	      if (synthesizedStaleReplacement) {
 	        const caret = Math.max(0, Math.min(
@@ -1857,6 +1908,10 @@ function enterEdit(id, {
   proxy.addEventListener('keydown', (e) => {
     const wakeCaret = !_caretVisible;
     _caretVisible = true;
+    pendingNativeNavigation = null;
+    if (!['ArrowUp', 'ArrowDown', 'Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) {
+      resetTextEditNavigation(obj);
+    }
 
     if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
@@ -1872,6 +1927,7 @@ function enterEdit(id, {
         ...selection,
         value: currentProxyValue,
         inputType,
+        replacement: indentResult.replacement,
       };
       beginTextEditHistoryAction(id, pendingInputState);
       proxy.value = indentResult.value;
@@ -1909,8 +1965,7 @@ function enterEdit(id, {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'x' && proxy.selectionStart !== proxy.selectionEnd) {
       e.preventDefault();
       const selection = textEditSelectionState(proxy);
-      globalThis.BoardfishMotion?.cancelTextSelectionMotion?.(id);
-      copyTextEditSelectionFromProxy(id, proxy, selection, { animateCopy: false });
+      copyTextEditSelectionFromProxy(id, proxy, selection);
       const deletion = selection;
       const inputType = 'deleteByCut';
       pendingInputState = {
@@ -1950,39 +2005,19 @@ function enterEdit(id, {
       syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
       const moveRight = e.key === 'ArrowRight';
       let reference = moveRight ? selection.end : selection.start;
-      let anchor = reference;
       if (e.shiftKey) {
         const backward = selection.direction === 'backward';
         reference = backward ? selection.start : selection.end;
-        anchor = backward ? selection.end : selection.start;
       }
       const nextPosition = textEditWordBoundary(
         currentProxyValue,
         reference,
         moveRight ? 'right' : 'left',
       );
-      if (e.shiftKey) {
-        const start = Math.min(anchor, nextPosition);
-        const end = Math.max(anchor, nextPosition);
-        setTextEditProxySelectionRange(
-          proxy,
-          start,
-          end,
-          nextPosition < anchor ? 'backward' : 'forward',
-          currentProxyValue,
-        );
-        if (start === end) setTextEditCaretIndex(obj, start);
-        else clearTextEditCaretIndex(obj);
-      } else {
-        setTextEditProxySelectionRange(
-          proxy,
-          nextPosition,
-          nextPosition,
-          'none',
-          currentProxyValue,
-        );
-        setTextEditCaretIndex(obj, nextPosition);
-      }
+      const layout = getTextLayout(obj);
+      const lineIndex = textEditCaretLineAtIndex(obj, layout, nextPosition, moveRight ? 'backward' : 'forward');
+      applyTextEditNavigationSelection(obj, proxy, selection, nextPosition,
+        layout[lineIndex]?.startIndex, e.shiftKey);
       scheduleRender(true, false);
       return;
     }
@@ -2126,67 +2161,74 @@ function enterEdit(id, {
       });
     }
 
-    // The 1px-wide proxy treats all content as a single column, so the browser's
-    // own up/down logic navigates char-by-char instead of line-by-line. Intercept
-    // and compute line navigation from the canvas layout instead.
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    // Command arrows use the canvas rows, since the hidden textarea is unwrapped.
+    if (e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing &&
+        ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
       e.preventDefault();
       flushEditHistoryCheckpoint();
+      resetTextEditNavigation(obj);
+      const selection = textEditSelectionState(proxy);
       const layout = getTextLayout(obj);
-      if (!layout.length) { scheduleRender(true, false); return; }
-
-      const isUp = e.key === 'ArrowUp';
-
-      // Which end of the selection to navigate from
-      let refPos;
-      if (e.shiftKey) {
-        const d = proxy.selectionDirection;
-        refPos = d === 'backward' ? proxy.selectionStart : proxy.selectionEnd;
+      const towardStart = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+      const reference = e.shiftKey
+        ? (selection.direction === 'backward' ? selection.start : selection.end)
+        : (towardStart ? selection.start : selection.end);
+      const lineIndex = textEditCaretLineAtIndex(obj, layout, reference);
+      const line = layout[lineIndex];
+      let position, lineStart;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        position = towardStart ? 0 : textEditProxyValue(proxy).length;
+        lineStart = (towardStart ? layout[0] : layout[layout.length - 1])?.startIndex;
       } else {
-        refPos = isUp ? proxy.selectionStart : proxy.selectionEnd;
+        position = towardStart ? (line?.startIndex ?? 0)
+          : (line?.caretEndIndex ?? line?.endIndex ?? ((line?.startIndex ?? 0) + (line?.text.length ?? 0)));
+        lineStart = line?.startIndex;
       }
-
-      // Find the line containing refPos
-      let lo = 0, hi = layout.length - 1;
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1, ln = layout[mid];
-        if (refPos <= (ln.caretEndIndex ?? ln.endIndex ?? (ln.startIndex + ln.text.length))) hi = mid; else lo = mid + 1;
-      }
-      const refLineIdx = lo;
-      const refLine = layout[refLineIdx];
-
-      // Caret world-x in the reference line
-      const off = Math.min(refPos - refLine.startIndex, refLine.text.length);
-      const caretX = lineCaretXAtOffset(refLine, obj, off);
-
-      // Find nearest position in the target line
-      const targetIdx = isUp ? refLineIdx - 1 : refLineIdx + 1;
-      let newPos;
-      if (targetIdx < 0) {
-        newPos = 0;
-      } else if (targetIdx >= layout.length) {
-        newPos = textEditProxyValue(proxy).length;
-      } else {
-        newPos = layoutHitTestCaret([layout[targetIdx]], caretX, layout[targetIdx].y, obj, true).index;
-      }
-
-      if (e.shiftKey) {
-        const d = proxy.selectionDirection;
-        const anchorPos = d === 'backward' ? proxy.selectionEnd : proxy.selectionStart;
-        setTextEditProxySelectionRange(
-          proxy,
-          Math.min(anchorPos, newPos), Math.max(anchorPos, newPos),
-          anchorPos <= newPos ? 'forward' : 'backward'
-        );
-      } else {
-        setTextEditProxySelectionRange(proxy, newPos, newPos, 'none');
-      }
-
+      applyTextEditNavigationSelection(obj, proxy, selection, position, lineStart, e.shiftKey);
       scheduleRender(true, false);
       return;
     }
 
-    if (textEditNavigationKeys.has(e.key)) flushEditHistoryCheckpoint();
+    // Navigate canvas rows and retain the requested column through short lines.
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.isComposing) {
+      e.preventDefault();
+      flushEditHistoryCheckpoint();
+      const layout = getTextLayout(obj);
+      if (!layout.length) { scheduleRender(true, false); return; }
+      const selection = textEditSelectionState(proxy);
+      const isUp = e.key === 'ArrowUp';
+      const refPos = e.shiftKey
+        ? (selection.direction === 'backward' ? selection.start : selection.end)
+        : (isUp ? selection.start : selection.end);
+      const refLineIdx = textEditCaretLineAtIndex(obj, layout, refPos);
+      const refLine = layout[refLineIdx];
+      const caretX = obj._textEditPreferredX ?? lineCaretXAtOffset(refLine, obj,
+        Math.max(0, Math.min(refPos - refLine.startIndex, refLine.text.length)));
+      const targetIdx = isUp ? refLineIdx - 1 : refLineIdx + 1;
+      let hit;
+      if (targetIdx < 0) {
+        hit = { index: 0, lineStartIndex: layout[0].startIndex };
+      } else if (targetIdx >= layout.length) {
+        hit = { index: textEditProxyValue(proxy).length, lineStartIndex: layout[layout.length - 1].startIndex };
+      } else {
+        hit = layoutHitTestCaret([layout[targetIdx]], caretX, layout[targetIdx].y, obj);
+      }
+      applyTextEditNavigationSelection(obj, proxy, selection, hit.index, hit.lineStartIndex, e.shiftKey);
+      obj._textEditPreferredX = caretX;
+      scheduleRender(true, false);
+      return;
+    }
+
+    if (textEditNavigationKeys.has(e.key)) {
+      flushEditHistoryCheckpoint();
+      const selection = textEditSelectionState(proxy);
+      // Native navigation must see the latest text even when a large edit left
+      // the textarea value deferred; otherwise it can enter deleted positions.
+      syncTextEditProxyDomValue(proxy, textEditProxyValue(proxy), selection);
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        pendingNativeNavigation = { ...selection, key: e.key };
+      }
+    }
     if (wakeCaret) scheduleRender(true, false);
   });
 
@@ -2210,12 +2252,31 @@ function enterEdit(id, {
     TextSelDebug._logSelection('selectionchange', proxy);
     _caretVisible = true;
     if (currentObj) {
-      if (s === e) setTextEditCaretIndex(currentObj, s);
-      else clearTextEditCaretIndex(currentObj);
+      const direction = proxy.selectionDirection || 'none';
+      const navigation = currentObj._textEditNavigationSelection;
+      const nativeNavigation = pendingNativeNavigation;
+      if (nativeNavigation && (s !== nativeNavigation.start || e !== nativeNavigation.end ||
+          direction !== nativeNavigation.direction)) {
+        const index = direction === 'backward' ? s : e;
+        const layout = getTextLayout(currentObj);
+        const lineIndex = textEditCaretLineAtIndex(currentObj, layout, index,
+          nativeNavigation.key === 'ArrowLeft' ? 'forward' : 'backward');
+        rememberTextEditNavigationSelection(currentObj, proxy, index, layout[lineIndex]?.startIndex);
+        pendingNativeNavigation = null;
+      } else if (!navigation || navigation.start !== s || navigation.end !== e || navigation.direction !== direction) {
+        if (s === e) setTextEditCaretIndex(currentObj, s);
+        else clearTextEditCaretIndex(currentObj);
+      }
     }
     scheduleRender(true, false);
   };
   document.addEventListener('selectionchange', _selChangeListener);
+  proxy.addEventListener('keyup', (event) => {
+    if (pendingNativeNavigation?.key !== event.key) return;
+    // A browser may dispatch keyup before the queued selectionchange event.
+    _selChangeListener();
+    pendingNativeNavigation = null;
+  });
   logStep('enter-selection-listener-ready');
 
   _caretVisible = true;

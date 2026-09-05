@@ -257,8 +257,7 @@ async function pasteWebImageBlob(blob, wx, wy
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
-const copySelected = (options = {}) => {
-  const animateCopy = options.animateCopy !== false;
+const copySelected = () => {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = collectClipboardDiagnostics
     ? ClipDebug.start('copySelected', { selectedCount: selectedIds.size })
@@ -322,7 +321,7 @@ const copySelected = (options = {}) => {
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     setJsClipboard({ type: 'objects', objects: clonedObjs });
-    const webClipboardWrite = writeWebClipboardTokenForJsClipboard(
+    writeWebClipboardTokenForJsClipboard(
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       dbg, { objectCount: clonedObjs.length, imageCount }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -342,13 +341,6 @@ const copySelected = (options = {}) => {
       });
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    // The in-app clipboard is populated above; wait until its browser marker write settles
-    // before starting the full-selection jiggle.
-    if (animateCopy) {
-      webClipboardWrite
-        .then(() => globalThis.BoardfishMotion?.applyCopyFeedback?.({ selection: true }))
-        .catch((err) => console.error('[copy] copy feedback FAILED:', err));
-    }
     return true;
   }
 
@@ -431,8 +423,6 @@ const copySelected = (options = {}) => {
           , dbg
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
         );
-        // Do not start a full-board jiggle while large clipboard serialization is running.
-        if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
       })
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       .then(() => {
@@ -511,8 +501,6 @@ const copySelected = (options = {}) => {
           , dbg
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
         );
-        // Wait for PNG encoding and the system write before scheduling jiggle frames.
-        if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
         return true;
       } catch (err) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -581,8 +569,6 @@ const copySelected = (options = {}) => {
     ClipDebug.end(dbg, { path: 'object-jsClipboard', type: obj.type || '' });
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  // Non-text/image objects are copied synchronously into the in-app clipboard.
-  if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
   return true;
 };
 
@@ -590,7 +576,7 @@ const cutSelected = () => {
   if (!hasSelection() || editingId) return false;
   let copyResult = false;
   try {
-    copyResult = copySelected({ animateCopy: false });
+    copyResult = copySelected();
   } catch (err) {
     console.error('[cut] copySelected FAILED:', err);
     return false;
