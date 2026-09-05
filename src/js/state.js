@@ -19,7 +19,7 @@ function newId() {
   return id;
 }
 
-function cloneObject(obj, runtimeTextCache = false) {
+function cloneObject(obj, runtimeTextCache = false, preserveDrawPlans = true) {
   HistoryDebug.count('cloneObjectCalls');
   let data = obj.type === 'image' ? { ...obj.data } : null;
   if (!data) {
@@ -37,7 +37,7 @@ function cloneObject(obj, runtimeTextCache = false) {
     data,
   };
   if (runtimeTextCache && cloned.type === 'text') {
-    cloneTextObjectRuntimeCaches(obj, cloned);
+    cloneTextObjectRuntimeCaches(obj, cloned, preserveDrawPlans);
   }
   return cloned;
 }

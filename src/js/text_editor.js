@@ -251,20 +251,12 @@ function textEditWordBoundary(value, index, direction) {
   const moveRight = direction === 'right' || Number(direction) > 0;
 
   if (textEditWordSegmenter) {
-    let previousWordStart = 0;
-    for (const part of textEditWordSegmenter.segment(text)) {
-      if (!part.isWordLike) continue;
-      const start = part.index;
-      const end = start + part.segment.length;
-      if (moveRight) {
-        if (end > position) return end;
-        continue;
-      }
-      if (start >= position) break;
-      previousWordStart = start;
-      if (end >= position) break;
+    const segments = textEditWordSegmenter.segment(text);
+    let part = segments.containing(moveRight ? position : position - 1);
+    while (part && !part.isWordLike) {
+      part = segments.containing(moveRight ? part.index + part.segment.length : part.index - 1);
     }
-    return moveRight ? text.length : previousWordStart;
+    return part ? part.index + (moveRight ? part.segment.length : 0) : moveRight ? text.length : 0;
   }
 
   const isWordChar = (char) => /[A-Za-z0-9_]/.test(char || '');

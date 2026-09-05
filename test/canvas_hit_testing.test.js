@@ -749,7 +749,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
 
 test('editing overlay draws the live selection and restores the caret when it collapses', () => {
   const viewportSource = readSource('src/js/viewport.js');
-  const start = viewportSource.indexOf('const collectTextSelectionRuns');
+  const start = viewportSource.indexOf('function drawTextSelectionHighlight');
   const end = viewportSource.indexOf('function drawBoard', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
@@ -821,15 +821,14 @@ test('overlapping text selection highlight runs share one path fill', () => {
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
 
-  const selection = {
-    runs: [
-      { line: { y: 0 }, x1: 0, x2: 40, y: 0, height: 24 },
-      { line: { y: 0 }, x1: 20, x2: 60, y: 0, height: 24 },
-    ],
-  };
+  const layout = [
+    { text: 'abcdefghij', startIndex: 0, x: 0, y: 0 },
+    { text: 'abcdefghij', startIndex: 0, x: 20, y: 0 },
+  ];
   const drawCalls = [];
   const context = {
     LINE_H: 24,
+    lineXAtOffset: (line, _obj, offset) => line.x + offset * 4,
     TextSelDebug: { _logDraw() {} },
   };
   vm.createContext(context);
@@ -849,7 +848,7 @@ test('overlapping text selection highlight runs share one path fill', () => {
     fillRect(...args) { drawCalls.push(['fillRect', ...args]); },
   };
 
-  context.drawTextSelectionHighlight(canvasContext, {}, 0, 10, selection);
+  context.drawTextSelectionHighlight(canvasContext, {}, layout, 0, 10);
   assert.deepEqual(drawCalls, [
     ['save'],
     ['beginPath'],

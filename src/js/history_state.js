@@ -297,7 +297,7 @@ function pushHistory(reason = '', dirty = null, beforeEditState = null) {
       (byId ||= new Map(prevObjects.map(o => [o.id, o]))).get(o.id);
     const runtimeTextCache = cacheEditingText && o.type === 'text' && o.id === editingId;
     const shouldClone = _dirtyIds.has(o.id) || !previous || runtimeTextCache;
-    entry[i] = shouldClone ? cloneObject(o, runtimeTextCache) : previous;
+    entry[i] = shouldClone ? cloneObject(o, runtimeTextCache, false) : previous;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (shouldClone) cloned++;
     else reused++;

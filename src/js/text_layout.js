@@ -174,14 +174,7 @@ function forEachTextSpacingUnit(text, callback, start = 0, end = null) {
   if (from >= to) return;
   const hasGraphemeSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function';
 
-  let asciiOnly = true;
-  for (let index = from; index < to; index++) {
-    if (text.charCodeAt(index) > 0x7F) {
-      asciiOnly = false;
-      break;
-    }
-  }
-  if (asciiOnly) {
+  if (!/[^\x00-\x7F]/.test(text.slice(from, to))) {
     let index = from;
     while (index < to) {
       // Intl.Segmenter treats CRLF as one grapheme; the code-point fallback
@@ -395,13 +388,7 @@ function clearTextObjectLayoutRuntime(obj, options) {
 
 const cloneTextLayoutRuntimeLine = ({ _textDrawPlanCache, ...clone }) => clone;
 
-const cloneTextLayoutRuntimeLines = (lines = []) => {
-  const out = new Array(lines.length);
-  for (let i = 0; i < lines.length; i++) out[i] = cloneTextLayoutRuntimeLine(lines[i]);
-  return out;
-};
-
-function cloneTextObjectRuntimeCaches(source, target) {
+function cloneTextObjectRuntimeCaches(source, target, preserveDrawPlans = true) {
   if (!source || !target || source.type !== 'text' || target.type !== 'text') return target;
   const content = target.data.content;
   if (
@@ -447,7 +434,9 @@ function cloneTextObjectRuntimeCaches(source, target) {
     source._layoutCacheContent === content &&
     source._layoutCacheW === target.w
   ) {
-    target._layoutCache = cloneTextLayoutRuntimeLines(source._layoutCache);
+    target._layoutCache = source._layoutCache.map(
+      preserveDrawPlans ? (line) => ({ ...line }) : cloneTextLayoutRuntimeLine,
+    );
     target._layoutCacheContent = source._layoutCacheContent;
     target._layoutCacheW = source._layoutCacheW;
     target._layoutCacheY = target.y;

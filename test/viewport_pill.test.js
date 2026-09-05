@@ -171,7 +171,7 @@ function loadViewportCanvasSizeHarness({
   const geometrySource = fs.readFileSync(path.join(root, 'src', 'js', 'geometry.js'), 'utf8');
   const sectionStart = source.indexOf('var _canvasResizeObserver = null;');
   assert.ok(sectionStart > 0, 'canvas size tracking state is missing');
-  const viewportRectEnd = source.indexOf('\nconst collectTextSelectionRuns', sectionStart);
+  const viewportRectEnd = source.indexOf('\nfunction drawTextSelectionHighlight', sectionStart);
   assert.ok(viewportRectEnd > sectionStart, 'viewport rectangle section is unterminated');
   const fallbackReads = { clientWidth: 0, clientHeight: 0, innerWidth: 0, innerHeight: 0 };
   const backingWrites = { width: 0, height: 0 };

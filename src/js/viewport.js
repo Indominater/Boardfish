@@ -268,11 +268,10 @@ function startCanvasSizeTracking() {
   window.addEventListener?.('resize', resizeCanvas);
 }
 
-const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
-  const runs = [];
+function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd) {
+  let selectedLines = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let scannedLines = 0;
-  let selectedLines = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const line of layout) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ scannedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -280,17 +279,38 @@ const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
     if (ls >= selEnd) break;
     const o0 = Math.max(0, selStart - ls), o1 = Math.min(line.text.length, selEnd - ls);
     if (o0 >= o1) continue;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const x1 = lineXAtOffset(line, obj, o0);
     const x2 = lineXAtOffset(line, obj, o1);
-    runs.push({ line, x1, x2, y: line.y, height: LINE_H });
+    if (!selectedLines) {
+      context.save();
+      context.fillStyle = 'rgba(10, 132, 255, 0.3)';
+      context.beginPath();
+    }
+    selectedLines++;
+    context.rect(x1, line.y, x2 - x1, LINE_H);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    TextSelDebug._logDraw(line, selStart, selEnd, x1, x2);
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
-  if (!runs.length) return null;
-  return {
-    runs,
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */ metrics: { scannedLines, selectedLines, selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)) }, /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  };
-};
+  if (!selectedLines) return null;
+  context.fill();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  TextSelDebug._logSelectionDraw?.({
+    objectId: obj?.id || '',
+    selStart,
+    selEnd,
+    selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)),
+    selectionRuns: selectedLines,
+    selectionRects: selectedLines,
+    scannedLines,
+    selectedLines,
+  });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  context.restore();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  return { scannedLines, selectedLines };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+}
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
@@ -300,33 +320,6 @@ const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
   return y + LINE_H >= viewportRect.y1 && y <= viewportRect.y2;
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection) {
-  context.save();
-  context.fillStyle = 'rgba(10, 132, 255, 0.3)';
-  context.beginPath();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  for (const run of selection.runs) {
-    TextSelDebug._logDraw(run.line, selStart, selEnd, run.x1, run.x2);
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  for (const run of selection.runs) {
-    context.rect(run.x1, run.y, run.x2 - run.x1, run.height);
-  }
-  context.fill();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  TextSelDebug._logSelectionDraw?.({
-    objectId: obj?.id || '',
-    selStart,
-    selEnd,
-    selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)),
-    selectionRuns: selection.runs.length,
-    selectionRects: selection.runs.length,
-    ...(selection.metrics || {}),
-  });
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  context.restore();
-}
 
 function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
   let caretLine = null;
@@ -404,18 +397,16 @@ function drawEditingTextOverlay(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const selectionStart = collectDebug ? performance.now() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const selection = selStart === selEnd ? null : collectTextSelectionRuns(obj, layout, selStart, selEnd);
+  const selection = selStart === selEnd ? null : drawTextSelectionHighlight(context, obj, layout, selStart, selEnd);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDebug) {
     stats.editSelectionMs = performance.now() - selectionStart;
-    stats.editSelectionRuns = selection?.runs?.length || 0;
+    stats.editSelectionRuns = selection?.selectedLines || 0;
     stats.editSelectedChars = Math.abs((selEnd ?? 0) - (selStart ?? 0));
-    stats.editSelectionLines = selection?.metrics?.selectedLines || 0;
-    stats.editSelectionVisibleLines = selection?.metrics?.scannedLines || 0;
+    stats.editSelectionLines = selection?.selectedLines || 0;
+    stats.editSelectionVisibleLines = selection?.scannedLines || 0;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-  if (selection) drawTextSelectionHighlight(context, obj, selStart, selEnd, selection);
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const textDrawStart = collectDebug ? performance.now() : 0;
