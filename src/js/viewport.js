@@ -349,7 +349,21 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
   const contentRight = Math.max(contentLeft, obj.x + obj.w - TEXT_PAD);
   const maxCaretX = Math.max(contentLeft, contentRight - caretWidth);
   const caretX = Math.max(contentLeft, Math.min(cx - caretWidth / 2, maxCaretX));
-  context.fillRect(caretX, cy, caretWidth, caretHeight);
+  const transform = context.getTransform?.();
+  if (transform?.a > 0 && transform.b === 0 && transform.c === 0) {
+    // Match border rasterization: use whole device pixels, even while panning
+    // or zooming. Keep the text layout and its logical caret positions intact.
+    const scale = transform.a;
+    // Canvas2D may expose a float32-rounded transform scale.
+    const deviceWidth = caretWidth * scale;
+    const pixelWidth = Math.max(1, Math.floor(deviceWidth + deviceWidth * 1e-6));
+    const pixelLeft = Math.round(contentLeft * scale + transform.e);
+    const pixelRight = Math.max(pixelLeft, Math.round(contentRight * scale + transform.e) - pixelWidth);
+    const pixelX = Math.max(pixelLeft, Math.min(Math.round(caretX * scale + transform.e), pixelRight));
+    context.fillRect((pixelX - transform.e) / scale, cy, pixelWidth / scale, caretHeight);
+  } else {
+    context.fillRect(caretX, cy, caretWidth, caretHeight);
+  }
   return true;
 }
 

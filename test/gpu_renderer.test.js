@@ -178,6 +178,149 @@ test('large images are tiled at native resolution with filtering gutters and a b
   assert.ok(f.rasterDraws.some(args => args[1] === 253 && args[3] === 256));
 });
 
+test('an 8192px image displayed at 2048px stays resident instead of reuploading native tiles on every pan', async () => {
+  const f = fixture();await f.context.ready;
+  const image = { width: 8192, height: 8192 };
+  for (const [index, zoom] of [.25, .24, .2, .25].entries()) {
+    const before = f.context.getStats();
+    f.context.beginFrame([]);
+    f.context.setTransform(zoom, 0, 0, zoom, index * .125, -index * .25);
+    f.context.drawImage(image, 0, 0);
+    f.context.endFrame();
+    const after = f.context.getStats();
+    assert.equal(after.imageUploads - before.imageUploads, index === 0 ? 1 : 0);
+    assert.equal(after.imageDrawCalls - before.imageDrawCalls, 1);
+    assert.equal(after.imageBytes, 2048 * 2048 * 4);
+    assert.equal(after.imageEvictions, 0);
+  }
+  assert.equal(f.context.getStats().imageUploadBytes, 2048 * 2048 * 4);
+});
+
+test('quarter and full source transitions reuse retained display resolutions around the zoom boundary', async () => {
+  const f = fixture();await f.context.ready;
+  const full = { width: 4096, height: 2048 }, quarter = { width: 1024, height: 512 };
+  // Representative source selections around the existing active-input cutoff:
+  // the quarter bitmap is sufficient below it, and the full bitmap is selected above it.
+  for (const [index, zoom] of [.69, .71, .695, .705, .69, .71].entries()) {
+    const before = f.context.getStats();
+    f.context.setTransform(zoom, 0, 0, zoom, index, -index);
+    f.context.drawImage(zoom < .7 ? quarter : full, 0, 0, 1728, 864);
+    const after = f.context.getStats();
+    assert.equal(after.imageUploads - before.imageUploads, index < 2 ? 1 : 0);
+    assert.equal(after.imageDrawCalls - before.imageDrawCalls, 1);
+  }
+  assert.equal(f.context.getStats().imageBytes, (1024 * 512 + 2048 * 1024) * 4);
+  assert.equal(f.context.getStats().imageCount, 2);
+  assert.equal(f.context.getStats().imageEvictions, 0);
+});
+
+test('cropped image panning reuses a fixed downsampled tile grid and uploads only newly exposed tiles', async () => {
+  const f = fixture();await f.context.ready;
+  const image = { width: 16384, height: 1024 };
+  const drawCrop = start => f.context.drawImage(image, start, 0, 4096, 1024, 10, 20, 1024, 256);
+  drawCrop(0);
+  assert.equal(f.context.getStats().imageUploads, 1);
+  drawCrop(1024);
+  assert.equal(f.context.getStats().imageUploads, 1);
+  drawCrop(5000);
+  assert.equal(f.context.getStats().imageUploads, 2);
+  for (const start of [4999, 5001, 0, 1024]) drawCrop(start);
+  assert.equal(f.context.getStats().imageUploads, 2);
+  assert.equal(f.rasterDraws.length, 2);
+  // Both tiles sample the same complete source on one global 4096px grid.
+  assert.deepEqual(f.rasterDraws.map(args => args.slice(1).map(value => value + 0)), [
+    [0, 0, 16384, 1024, 0, 0, 4096, 256],
+    [0, 0, 16384, 1024, -2047, 0, 4096, 256],
+  ]);
+});
+
+test('odd source dimensions preserve the complete image and crop endpoints after downsampling', async () => {
+  const f = fixture();await f.context.ready;
+  const image = { width: 1001, height: 501 };
+  f.context.drawImage(image, 13, 17, 250.25, 125.25);
+  const upload = callsNamed(f, 'texImage2D').at(-1).args.at(-1);
+  assert.deepEqual([upload.width, upload.height], [251, 126]);
+  const fullUv = callsNamed(f, 'uniform4fv').filter(call => call.args[0] === 'sourceRect').at(-1).args[1];
+  assert.ok(fullUv.every((value, index) => Math.abs(value - [0, 0, 1, 1][index]) < 1e-12));
+  const fullRect = callsNamed(f, 'uniform4f').at(-1).args.slice(1);
+  assert.ok(fullRect.every((value, index) => Math.abs(value - [0, 0, 250.25, 125.25][index]) < 1e-12));
+  f.context.drawImage(image, 1, 1, 1000, 500, 23, 29, 250, 125);
+  assert.equal(f.context.getStats().imageUploads, 1);
+  const uv = callsNamed(f, 'uniform4fv').filter(call => call.args[0] === 'sourceRect').at(-1).args[1];
+  assert.ok(Math.abs(uv[0] - 1 / 1001) < 1e-12);
+  assert.ok(Math.abs(uv[1] - 1 / 501) < 1e-12);
+  assert.ok(Math.abs(uv[0] + uv[2] - 1) < 1e-12);
+  assert.ok(Math.abs(uv[1] + uv[3] - 1) < 1e-12);
+  const cropRect = callsNamed(f, 'uniform4f').at(-1).args.slice(1);
+  assert.ok(cropRect.every((value, index) => Math.abs(value - [0, 0, 250, 125][index]) < 1e-12));
+});
+
+test('image resolution follows physical scale through flips, rotation, anisotropy, and shear', async () => {
+  const f = fixture();await f.context.ready;
+  const image = { width: 1024, height: 512 };
+  f.context.setTransform(.25, 0, 0, .25, 0, 0);
+  f.context.drawImage(image, 0, 0);
+  assert.equal(f.context.getStats().imageBytes, 256 * 128 * 4);
+  f.context.setTransform(0, -.25, -.25, 0, 10, -20);
+  f.context.drawImage(image, 0, 0);
+  assert.equal(f.context.getStats().imageUploads, 1);
+  f.context.setTransform(.125, 0, 0, .4, 0, 0);
+  f.context.drawImage(image, 0, 0);
+  assert.equal(callsNamed(f, 'texImage2D').at(-1).args.at(-1).width, 512);
+  // Each column length is below .5, but shear stretches diagonal detail above
+  // .5. The renderer must retain native detail rather than choose a half level.
+  f.context.setTransform(.4, 0, .25, .4, 0, 0);
+  f.context.drawImage(image, 0, 0);
+  assert.equal(callsNamed(f, 'texImage2D').at(-1).args.at(-1), image);
+  assert.equal(f.context.getStats().imageUploads, 3);
+});
+
+test('nearest filtering keeps native pixels and mutable image sources refresh retained levels', async () => {
+  const f = fixture();await f.context.ready;
+  const image = { width: 1024, height: 512 };
+  f.context.imageSmoothingEnabled = false;
+  f.context.drawImage(image, 0, 0, 256, 128);
+  assert.equal(callsNamed(f, 'texImage2D').at(-1).args.at(-1), image);
+  f.context.imageSmoothingEnabled = true;
+  const dynamic = { width: 1024, height: 512, getContext() {} };
+  f.context.drawImage(dynamic, 0, 0, 256, 128);
+  const first = f.context.getStats();
+  f.context.drawImage(dynamic, 10, 20, 256, 128);
+  const second = f.context.getStats();
+  assert.equal(second.imageUploads, first.imageUploads + 1);
+  assert.equal(second.imageBytes, first.imageBytes);
+  assert.equal(second.textureCount, first.textureCount);
+  assert.equal(callsNamed(f, 'texImage2D').at(-1).args.at(-1).width, 256);
+});
+
+test('image pyramid levels respect the cache budget and reset cleanly after context loss or source replacement', async () => {
+  const f = fixture({ maxImageBytes: 400000 });await f.context.ready;
+  const image = { width: 1024, height: 1024, src: 'first.png' };
+  for (const edge of [64, 128, 256, 512]) {
+    f.context.drawImage(image, 0, 0, edge, edge);
+    assert.ok(f.context.getStats().imageBytes <= 400000);
+  }
+  assert.ok(f.context.getStats().imageEvictions > 0);
+  f.context.drawImage(image, 0, 0, 64, 64);
+  f.context.drawImage(image, 0, 0, 256, 256);
+  assert.equal(f.context.getStats().textureCount, 2);
+  image.src = 'replacement.png';
+  f.context.drawImage(image, 0, 0, 64, 64);
+  assert.equal(f.context.getStats().textureCount, 1);
+  assert.equal(f.context.getStats().imageBytes, 64 * 64 * 4);
+  f.events.get('webglcontextlost')({ preventDefault() {} });
+  assert.equal(f.context.getStats().imageBytes, 0);
+  assert.equal(f.context.getStats().textureCount, 0);
+  f.events.get('webglcontextrestored')();await f.context.ready;
+  const before = f.context.getStats().imageUploads;
+  f.context.drawImage(image, 0, 0, 64, 64);
+  assert.equal(f.context.getStats().imageUploads, before + 1);
+  f.context.resetResources();
+  assert.equal(f.context.getStats().imageBytes, 0);
+  assert.equal(f.context.getStats().textureCount, 0);
+  assert.equal(f.context.getStats().imageCount, 0);
+});
+
 test('Unicode fallback retains exact-density raster textures and rebuilds only when density changes', async () => {
   const f = fixture();await f.context.ready;const obj = object();
   assert.equal(f.context.drawTextLayout([line('漢', 0, obj)], obj), false);

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boardfish image compositor benchmark</title>
+  <style>
+    :root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #17171b; color: #ededf2; }
+    body { max-width: 1120px; margin: auto; padding: 16px; }
+    h1 { font-size: 23px; margin: 0 0 8px; } p, li { line-height: 1.45; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+    select, button { font:inherit; padding:6px; color:inherit; background:#303038; border:1px solid #555561; border-radius:4px; }
+    #panels { display:flex; gap:12px; } figure { margin:0; } figcaption { margin-bottom:7px; }
+    canvas { display:block; width:340px; height:224px; outline:1px solid #555; } a { color:#b7b7ff; }
+    #status { min-height:22px; } pre { background:#222228; padding:12px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+    .scroll { overflow:auto; } table { border-collapse:collapse; font-variant-numeric:tabular-nums; }
+    th,td { padding:6px 12px; border-bottom:1px solid #444; text-align:right; } th:first-child,td:first-child { text-align:left; }
+  </style>
+</head>
+<body>
+  <h1>Boardfish image compositor benchmark</h1>
+  <p>Immutable full and quarter-size image sources isolate renderer upload and retention costs around a source-resolution boundary. All three panels use the same application image drawing and viewport crop code.</p>
+  <div class="controls">
+    <select id="workload"><option value="modest">Modest: 3 × 2048 × 1536</option><option value="pressure">Pressure: 6 × 4096 × 3072</option></select>
+    <select id="motion"><option value="boundary">Alternate 68% / 72%</option><option value="pan">Pan at 72%</option><option value="native">Pan at native source density</option></select>
+    <select id="dpr"><option value="1">DPR 1</option><option value="2">DPR 2</option></select>
+    <select id="clipping"><option value="app">Application viewport crop</option><option value="uncropped">Uncropped upload stress</option></select>
+    <button id="run" disabled>Run 90 frames per renderer</button>
+    <button id="pixels" disabled>Crop / rotation / alpha check</button>
+    <button id="seams" disabled>Odd-size tile seam check</button>
+  </div>
+  <p id="status">Loading renderers…</p>
+  <div class="scroll"><div id="panels">
+    <figure><figcaption>GPU before image fix</figcaption><canvas id="before"></canvas><a id="before-png" download>Native PNG</a></figure>
+    <figure><figcaption>Current GPU</figcaption><canvas id="current"></canvas><a id="current-png" download>Native PNG</a></figure>
+    <figure><figcaption>Canvas2D</figcaption><canvas id="canvas2d"></canvas><a id="canvas2d-png" download>Native PNG</a></figure>
+  </div></div>
+  <div id="summary"></div>
+  <details><summary>Method and limits</summary><ul>
+    <li>Sources are prepared ImageBitmaps before any timing. Quarter sources contain one quarter of each original dimension. Object dimensions are chosen so the quarter/full boundary is 70.71% at the selected DPR.</li>
+    <li>Application viewport cropping is enabled by default through the actual Boardfish renderer. The optional uncropped stress case submits whole images. The pressure fixture exceeds the old GPU renderer's 128 MiB budget at full resolution. Native density cannot reduce retained image resolution.</li>
+    <li>Each renderer warms both source choices, then runs two measured blocks. Renderer order reverses in the second block. CPU submission and requestAnimationFrame intervals are separate metrics. No screenshot, readback, GPU finish or synchronization occurs inside measured frames.</li>
+    <li>Raster image differences include browser resampling filters; a numerical pixel difference is not alone a visual-quality verdict. Inspect the unscaled PNGs for seams, crop edges, flips and translucent overlaps.</li>
+    <li>The optional baseline file loads only with <code>?baseline=1</code>. Create it with <code>git show 5841044:src/js/gpu_renderer.js &gt; src/dev/gpu-image-renderer-before.js</code>, then delete it after comparison. Current GPU and Canvas2D remain runnable without it.</li>
+  </ul></details>
+  <details open><summary>Results JSON</summary><pre id="json">No run yet.</pre></details>
+  <script src="../fonts/geist-ascii-msdf.js"></script>
+  <script>
+    if (new URLSearchParams(location.search).get('baseline') === '1') document.write('<script src="gpu-image-renderer-before.js"><\/script>');
+  </script>
+  <script>window.BoardfishGpuRendererBefore = window.BoardfishGpuRenderer || null;</script>
+  <script src="../js/gpu_renderer.js"></script>
+  <script src="../js/renderer.js"></script>
+  <script src="gpu-image-benchmark.js"></script>
+</body>
+</html>

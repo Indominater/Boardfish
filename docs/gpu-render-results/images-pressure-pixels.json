@@ -1,0 +1,35 @@
+{
+  "kind": "crop-rotation-alpha",
+  "dpr": 2,
+  "scale": 0.72,
+  "pixelChecks": {
+    "before": {
+      "width": 680,
+      "height": 448,
+      "meanAbsoluteChannelDifference": 0.211,
+      "maxChannelDifference": 75,
+      "pixelsDifferingByMoreThan12": 3217,
+      "checksum": "3ceedbd5"
+    },
+    "current": {
+      "width": 680,
+      "height": 448,
+      "meanAbsoluteChannelDifference": 0.955,
+      "maxChannelDifference": 75,
+      "pixelsDifferingByMoreThan12": 19938,
+      "checksum": "8b2fc980"
+    },
+    "canvas2d": {
+      "width": 680,
+      "height": 448,
+      "meanAbsoluteChannelDifference": 0,
+      "maxChannelDifference": 0,
+      "pixelsDifferingByMoreThan12": 0,
+      "checksum": "2ea727ee"
+    }
+  },
+  "hardware": {
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
+    "maxTextureSize": 16384
+  }
+}

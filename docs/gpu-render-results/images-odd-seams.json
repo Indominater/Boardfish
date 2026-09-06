@@ -1,0 +1,115 @@
+{
+  "kind": "odd-source-tile-seam",
+  "source": [
+    8193,
+    2049
+  ],
+  "level": [
+    4097,
+    1025
+  ],
+  "tileBoundaryInLevelPixels": 2048,
+  "renderedSourceDensity": 0.5,
+  "comparison": "same GPU path: original odd-size source versus a single globally downsized immutable bitmap; ignores two outer viewport pixels",
+  "phases": [
+    {
+      "phase": 0,
+      "groups": {
+        "seam": {
+          "testedPixels": 1320,
+          "pixelsWithRgbDifferenceOver3": 0,
+          "meanAbsoluteChannelDifference": 0,
+          "maximumChannelDifference": 0
+        },
+        "away": {
+          "testedPixels": 72600,
+          "pixelsWithRgbDifferenceOver3": 0,
+          "meanAbsoluteChannelDifference": 0.025,
+          "maximumChannelDifference": 2
+        }
+      }
+    },
+    {
+      "phase": 0.25,
+      "groups": {
+        "seam": {
+          "testedPixels": 1320,
+          "pixelsWithRgbDifferenceOver3": 0,
+          "meanAbsoluteChannelDifference": 0,
+          "maximumChannelDifference": 0
+        },
+        "away": {
+          "testedPixels": 72600,
+          "pixelsWithRgbDifferenceOver3": 0,
+          "meanAbsoluteChannelDifference": 0.024,
+          "maximumChannelDifference": 2
+        }
+      }
+    },
+    {
+      "phase": 0.5,
+      "groups": {
+        "seam": {
+          "testedPixels": 1540,
+          "pixelsWithRgbDifferenceOver3": 0,
+          "meanAbsoluteChannelDifference": 0,
+          "maximumChannelDifference": 0
+        },
+        "away": {
+          "testedPixels": 72380,
+          "pixelsWithRgbDifferenceOver3": 0,
+          "meanAbsoluteChannelDifference": 0.023,
+          "maximumChannelDifference": 2
+        }
+      }
+    },
+    {
+      "phase": 0.75,
+      "groups": {
+        "seam": {
+          "testedPixels": 1320,
+          "pixelsWithRgbDifferenceOver3": 0,
+          "meanAbsoluteChannelDifference": 0,
+          "maximumChannelDifference": 0
+        },
+        "away": {
+          "testedPixels": 72600,
+          "pixelsWithRgbDifferenceOver3": 0,
+          "meanAbsoluteChannelDifference": 0.023,
+          "maximumChannelDifference": 1
+        }
+      }
+    }
+  ],
+  "counterDelta": {
+    "frames": 8,
+    "drawCalls": 32,
+    "textDrawCalls": 0,
+    "imageDrawCalls": 24,
+    "rectangleDrawCalls": 8,
+    "glyphsDrawn": 0,
+    "bufferUploads": 0,
+    "bufferUploadBytes": 0,
+    "imageUploads": 6,
+    "imageUploadBytes": 33628200,
+    "imageEvictions": 0,
+    "atlasUploads": 0,
+    "fallbackRasterizations": 0,
+    "contextLosses": 0,
+    "frameDrawCalls": 4,
+    "frameBufferUploads": 0,
+    "frameGlyphsDrawn": 0,
+    "frame": 8,
+    "bufferBytes": 0,
+    "imageBytes": 33628200,
+    "fallbackBytes": 0,
+    "chunkCount": 0,
+    "imageCount": 2,
+    "textureCount": 6,
+    "atlasBytes": 0
+  },
+  "hardware": {
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
+    "maxTextureSize": 16384
+  }
+}

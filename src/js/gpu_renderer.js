@@ -130,7 +130,7 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const stats = { frames:0, drawCalls:0, textDrawCalls:0, imageDrawCalls:0,
       rectangleDrawCalls:0, glyphsDrawn:0, bufferUploads:0, bufferUploadBytes:0,
-      imageUploads:0, atlasUploads:0, fallbackRasterizations:0, contextLosses:0,
+      imageUploads:0, imageUploadBytes:0, imageEvictions:0, atlasUploads:0, fallbackRasterizations:0, contextLosses:0,
       frameDrawCalls:0, frameBufferUploads:0, frameGlyphsDrawn:0 };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
@@ -276,7 +276,10 @@
       while((bufferBytes>bufferLimit||chunks.size>chunkLimit)&&chunks.size) {
         const [key,chunk]=chunks.entries().next().value;deleteChunk(key,chunk);
       }
-      while(imageBytes>imageLimit&&textures.size)deleteTexture(textures.keys().next().value);
+      while(imageBytes>imageLimit&&textures.size) {
+        deleteTexture(textures.keys().next().value);
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.imageEvictions++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
     }
     function deleteFallback(key,entry) {
       fallback.delete(key);fallbackBytes-=entry.bytes;
@@ -451,18 +454,40 @@
       }
     }
     function imageDimensions(source) { return [source.naturalWidth||source.videoWidth||source.width,source.naturalHeight||source.videoHeight||source.height]; }
-    function sourceTexture(source,owner,tx,ty,sw,sh) {
-      const key=`${tx},${ty}`;let record=owner.tiles.get(key);
+    function imageLevel(width,height,sw,sh,dw,dh) {
+      // Retain a power-of-two resolution pyramid, capped at native resolution.
+      // Minified images supply at least one texel per device pixel, without
+      // allocating full-size images
+      // just above the CPU quarter-bitmap cutoff. Crop and camera position do
+      // not affect the level or its tile grid. Use the largest singular value
+      // so rotation, flips, anisotropic scaling and shear preserve detail.
+      const m=current.matrix,x=dw/sw,y=dh/sh;
+      const aa=(m[0]*m[0]+m[1]*m[1])*x*x,bb=(m[2]*m[2]+m[3]*m[3])*y*y;
+      const ab=(m[0]*m[2]+m[1]*m[3])*x*y;
+      const density=Math.sqrt((aa+bb+Math.hypot(aa-bb,2*ab))/2);
+      const exponent=current.imageSmoothingEnabled&&Number.isFinite(density)&&density>0
+        ? Math.max(-Math.ceil(Math.log2(Math.max(width,height))),Math.min(0,Math.ceil(Math.log2(density)-1e-10))) : 0;
+      const scale=2**exponent;
+      return {exponent,width:Math.max(1,Math.ceil(width*scale)),height:Math.max(1,Math.ceil(height*scale))};
+    }
+    function sourceTexture(source,owner,level,tx,ty,sw,sh) {
+      const key=`${level.exponent}:${tx},${ty}`;let record=owner.tiles.get(key);
       const dynamic=!immutableCanvases.has(source)&&(typeof source.getContext==='function'||typeof source.requestVideoFrameCallback==='function');
       if(record&&!dynamic) { textures.delete(record);textures.set(record,true);return record; }
-      // One source-pixel gutter gives adjacent tiles the same bilinear samples
-      // as a single texture, including crops and rotated/flipped images.
+      // Gutters are measured in level texels. Downsample the entire source on
+      // one global grid, clipped by the tile canvas, so filtering can read past
+      // tile boundaries and odd source dimensions keep the same sample phase.
       const ux=Math.max(0,tx-1),uy=Math.max(0,ty-1);
-      const uw=Math.min(owner.width,tx+sw+1)-ux,uh=Math.min(owner.height,ty+sh+1)-uy;
+      const uw=Math.min(level.width,tx+sw+1)-ux,uh=Math.min(level.height,ty+sh+1)-uy;
       let upload=source;
-      if(ux||uy||uw!==owner.width||uh!==owner.height) {
+      if(level.exponent||ux||uy||uw!==owner.width||uh!==owner.height) {
         const tile=makeCanvas();tile.width=uw;tile.height=uh;
-        tile.getContext('2d').drawImage(source,ux,uy,uw,uh,0,0,uw,uh);upload=tile;
+        const ctx=tile.getContext('2d');
+        if(level.exponent) {
+          ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+          ctx.drawImage(source,0,0,owner.width,owner.height,-ux,-uy,level.width,level.height);
+        } else ctx.drawImage(source,ux,uy,uw,uh,0,0,uw,uh);
+        upload=tile;
       }
       if(!record) {
         record={key,owner,texture:gl.createTexture(),bytes:uw*uh*4,width:uw,height:uh,x:ux,y:uy};
@@ -473,7 +498,7 @@
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);
       gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL,gl.BROWSER_DEFAULT_WEBGL);
       gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,upload);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.imageUploads++; /* BOARDFISH_DEV_DIAGNOSTICS_END */return record;
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.imageUploads++;stats.imageUploadBytes+=record.bytes; /* BOARDFISH_DEV_DIAGNOSTICS_END */return record;
     }
     function drawImage(source,...args) {
       if(lost||disposed||!source)return;
@@ -488,7 +513,12 @@
       // flipping is represented by the current transform instead.
       if(sw<0){sx+=sw;sw=-sw;}if(sh<0){sy+=sh;sh=-sh;}
       if(dw<0){dx+=dw;dw=-dw;}if(dh<0){dy+=dh;dh=-dh;}
-      const x1=Math.max(0,sx),y1=Math.max(0,sy),x2=Math.min(width,sx+sw),y2=Math.min(height,sy+sh);
+      const level=imageLevel(width,height,sw,sh,dw,dh);
+      // Actual rounded dimensions, rather than the nominal power of two,
+      // preserve the image's complete extent for odd-sized sources and crops.
+      sx*=level.width/width;sw*=level.width/width;
+      sy*=level.height/height;sh*=level.height/height;
+      const x1=Math.max(0,sx),y1=Math.max(0,sy),x2=Math.min(level.width,sx+sw),y2=Math.min(level.height,sy+sh);
       if(x2<=x1||y2<=y1)return;
       let owner=images.get(source);
       const version=source.currentSrc||source.src||'';
@@ -498,9 +528,9 @@
       if(!owner) { owner={source,width,height,version,tiles:new Map()};images.set(source,owner); }
       for(let ty=Math.floor(y1/tileSize)*tileSize;ty<y2;ty+=tileSize) {
         for(let tx=Math.floor(x1/tileSize)*tileSize;tx<x2;tx+=tileSize) {
-          const tw=Math.min(tileSize,width-tx),th=Math.min(tileSize,height-ty);
+          const tw=Math.min(tileSize,level.width-tx),th=Math.min(tileSize,level.height-ty);
           const left=Math.max(x1,tx),top=Math.max(y1,ty),right=Math.min(x2,tx+tw),bottom=Math.min(y2,ty+th);
-          const record=sourceTexture(source,owner,tx,ty,tw,th);
+          const record=sourceTexture(source,owner,level,tx,ty,tw,th);
           quad(dx+(left-sx)*dw/sw,dy+(top-sy)*dh/sh,(right-left)*dw/sw,(bottom-top)*dh/sh,
             record.texture,[(left-record.x)/record.width,(top-record.y)/record.height,(right-left)/record.width,(bottom-top)/record.height],[1,1,1,current.globalAlpha]);
           trimResources();

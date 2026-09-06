@@ -61,8 +61,11 @@ Resource caches have explicit limits: 64 MiB of glyph buffers, 4,096 chunks,
 128 MiB of image textures, and 16 MiB of compatibility text rasters. Buffer
 allocation respects the aggregate budget before uploading. Requests exceeding
 the retained geometry budget use the compatibility path rather than omitting
-text. Image sources larger than a texture limit use tiles with sampling gutters,
-preserving image resolution, cropping, flipping, rotation, and alpha blending.
+text. Images retain a power-of-two resolution pyramid selected from their device
+pixel density, capped at native resolution. Each level uses tiles with sampling
+gutters, preserving cropping, flipping, rotation, and alpha blending. This avoids
+uploading native-resolution tiles for heavily minified images; see
+[the image regression analysis and measurements](gpu-image-renderer.md).
 Context restoration reconstructs both font resources and rebuilds scene resources
 from application data on the next draw.
 

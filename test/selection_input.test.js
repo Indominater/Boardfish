@@ -405,7 +405,7 @@ test('selection surfaces share the same outline color token', () => {
   assert.match(styles, /--text-edit-outline:\s*var\(--selection-outline\);/);
   assert.match(styles, /#canvas\.panning, #canvas\.panning \.s-handle \{ cursor: grabbing !important; \}/);
   assert.doesNotMatch(styles, /#canvas\.panning\s+\*/);
-  assert.match(styles, /\.multi-sel-box\s*\{[\s\S]*box-shadow:\s*inset 0 0 0 1px var\(--selection-outline\);/);
+  assert.match(styles, /\.multi-sel-box\s*\{[\s\S]*border:\s*1px solid var\(--selection-outline\);/);
   assert.match(styles, /#rubber-band\s*\{[\s\S]*border:\s*1px solid var\(--selection-outline\);/);
 });
 

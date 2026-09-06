@@ -681,6 +681,83 @@ test('text edit caret stays inside content bounds at low zoom', () => {
   ]);
 });
 
+function loadDeviceCaretDrawingHarness() {
+  const source = readSource('src/js/viewport.js');
+  const start = source.indexOf('function drawCaret(context, obj, layout, selStart');
+  const end = source.indexOf('function drawEditingTextOverlay', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  return vm.runInNewContext(`${source.slice(start, end)}\ndrawCaret`, {
+    LINE_H: 24,
+    TEXT_PAD: 16,
+    zoom: 1,
+    lineCaretXAtOffset(line, obj, offset) { return obj.x + 16 + offset * 10.3; },
+  });
+}
+
+test('text edit caret keeps a whole device-pixel width across display scales and moving origins', () => {
+  const drawCaret = loadDeviceCaretDrawingHarness();
+  const obj = { x: 10.13, y: 0, w: 120, h: 24 };
+  const layout = [{ text: 'abc', startIndex: 0, endIndex: 3, y: 0.27 }];
+  const before = JSON.stringify({ obj, layout });
+  for (const dpr of [1, 1.25, 1.5, 1.75, 2]) {
+    for (const viewZoom of [0.1, 0.25, 0.7, 1, 1.3, 2.75]) {
+      for (const pan of [-3.75, -0.1, 0, 0.2, 0.5, 1.1]) {
+        // Chrome's Canvas2D transform can round its scale to float32 precision.
+        const scale = Math.fround(dpr * viewZoom);
+        const transform = { a: scale, b: 0, c: 0, d: scale, e: pan * dpr, f: 0.37 * dpr };
+        const previousTransform = { ...transform };
+        const rectangles = [];
+        const context = {
+          getTransform: () => transform,
+          fillRect(...rect) { rectangles.push(rect); },
+        };
+        for (const offset of [0, 1, 2, 3]) {
+          assert.equal(drawCaret(context, obj, layout, offset, viewZoom), true);
+        }
+        for (const [x, y, width, height] of rectangles) {
+          const pixelX = x * scale + transform.e;
+          const pixelWidth = width * scale;
+          assert.ok(Math.abs(pixelX - Math.round(pixelX)) < 1e-9, `fractional caret edge at ${dpr}/${viewZoom}/${pan}`);
+          assert.ok(Math.abs(pixelWidth - Math.floor(2 * dpr)) < 1e-9, `changing caret width at ${dpr}/${viewZoom}/${pan}`);
+          assert.equal(y, layout[0].y);
+          assert.equal(height, 24);
+        }
+        assert.deepEqual(transform, previousTransform);
+      }
+    }
+  }
+  assert.equal(JSON.stringify({ obj, layout }), before);
+});
+
+test('pixel-aligned text edit caret remains inside narrow content at low zoom', () => {
+  const drawCaret = loadDeviceCaretDrawingHarness();
+  const obj = { x: 10.13, y: 0, w: 40, h: 24 };
+  const layout = [{ text: 'abc', startIndex: 0, endIndex: 3, y: 0 }];
+  for (const dpr of [1, 1.25, 1.5, 1.75, 2]) {
+    for (const pan of [-3.75, -0.1, 0, 0.2, 0.5, 1.1]) {
+      const viewZoom = 0.25;
+      const scale = dpr * viewZoom;
+      const transform = { a: scale, b: 0, c: 0, d: scale, e: pan * dpr, f: 0 };
+      const left = Math.round((obj.x + 16) * scale + transform.e);
+      const right = Math.round((obj.x + obj.w - 16) * scale + transform.e);
+      const rectangles = [];
+      const context = {
+        getTransform: () => transform,
+        fillRect(...rect) { rectangles.push(rect); },
+      };
+      drawCaret(context, obj, layout, 0, viewZoom);
+      drawCaret(context, obj, layout, 3, viewZoom);
+      for (const [x, , width] of rectangles) {
+        const pixelX = x * scale + transform.e;
+        assert.ok(pixelX >= left - 1e-9);
+        assert.ok(pixelX + width * scale <= right + 1e-9);
+        assert.ok(Math.abs(width * scale - Math.floor(2 * dpr)) < 1e-9);
+      }
+    }
+  }
+});
+
 test('text edit overlay draws only visible layout lines', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawEditingTextOverlay');
