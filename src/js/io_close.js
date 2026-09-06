@@ -474,7 +474,7 @@ function createOpenTextWarmupTarget() {
 }
 
 function warmOpenTextLineForDraw(target, obj, line) {
-  if (!target?.context || !line || !String(line.text ?? '').length) return false;
+  if (!target?.context || !line || !String(line.text ?? '').length) return;
   const context = target.context;
   const dpr = typeof window !== 'undefined' ? (Number(window.devicePixelRatio) || 1) : 1;
   const viewZoom = typeof zoom !== 'undefined' ? (Number(zoom) || 1) : 1;
@@ -493,10 +493,7 @@ function warmOpenTextLineForDraw(target, obj, line) {
       margin + LINE_H * deviceScale - textY * deviceScale,
     );
     drawTextLineRange(context, line, obj);
-    return true;
-  } catch (_) {
-    return false;
-  }
+  } catch (_) {}
 }
 
 async function hydrateTextDrawCachesForOpen(
@@ -504,7 +501,6 @@ async function hydrateTextDrawCachesForOpen(
   dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
-  const startedAt = performance.now();
   const fontSet = typeof document !== 'undefined' ? document.fonts : null;
   if (fontSet?.ready) {
     try { await fontSet.ready; } catch (_) {}
@@ -514,22 +510,13 @@ async function hydrateTextDrawCachesForOpen(
   if (gpuContext?.ready) await gpuContext.ready;
   const warmupTarget = gpuContext ? null : createOpenTextWarmupTarget();
   beginTextRasterFrame();
-  let textObjects = 0;
-  let textLines = 0;
-  let warmedLines = 0;
-  let chars = 0;
   let batchStartedAt = performance.now();
   for (const obj of objects) {
     if (obj?.type !== 'text') continue;
-    textObjects++;
-    const content = String(obj.data?.content ?? '');
-    chars += content.length;
     const layout = getTextLayout(obj);
     if (gpuContext?.prepareTextLayout?.(layout, obj, {
       fontSize: FONT_SIZE, padding: TEXT_PAD, lineHeight: LINE_H,
     })) {
-      textLines += layout.length;
-      warmedLines += layout.length;
       if (performance.now() - batchStartedAt >= 8) {
         await new Promise((resolve) => setTimeout(resolve, 0));
         batchStartedAt = performance.now();
@@ -538,27 +525,16 @@ async function hydrateTextDrawCachesForOpen(
     }
     for (const line of layout) {
       prepareTextLineForDraw(line);
-      textLines++;
-      if (warmOpenTextLineForDraw(warmupTarget, obj, line)) warmedLines++;
+      warmOpenTextLineForDraw(warmupTarget, obj, line);
       if (performance.now() - batchStartedAt >= 8) {
         await new Promise((resolve) => setTimeout(resolve, 0));
         batchStartedAt = performance.now();
       }
     }
   }
-
-  const result = {
-    textObjects,
-    textLines,
-    warmedLines,
-    chars,
-    warmupAvailable: !!(warmupTarget || gpuContext),
-    ms: performance.now() - startedAt,
-  };
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  OpenDebug.step(dbg, 'hydrate-text-draw-caches', result);
+  OpenDebug.step(dbg, 'hydrate-text-draw-caches');
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return result;
 }
 
 function queueVisibleImageHydration(limit = 3
@@ -618,7 +594,7 @@ async function finishOpenedBoard(
     dbg
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   );
-  const [imageHydrated, textHydration] = await Promise.all([
+  await Promise.all([
     imageHydrationPromise,
     textHydrationPromise,
   ]);
@@ -630,19 +606,13 @@ async function finishOpenedBoard(
     mode: 'all-before-interaction',
     imageCount: hydrationKeys.length,
     visibleCount: visibleKeys.length,
-    imageHydrated,
     pendingImages,
-    textObjects: textHydration.textObjects,
-    textLines: textHydration.textLines,
-    textChars: textHydration.chars,
     phaseMs: performance.now() - hydrateStart,
   });
   PillDebug.log('open:hydrate-all:end', {
     phaseMs: performance.now() - hydrateStart,
     imageCount: hydrationKeys.length,
     pendingImages,
-    textObjects: textHydration.textObjects,
-    textLines: textHydration.textLines,
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _boardOpening = false;

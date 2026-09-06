@@ -70,14 +70,13 @@ function bringObjectToFront(obj) {
 }
 
 function sendSelectedToBack() {
-  if (!selectedIds.size) return;
+  if (!selectedIds.size || selectedIds.size === objectsMap.size) return;
   BoardfishEditorState.commitMutation('send-selected-to-back', () => {
     const reordered = new Array(objects.length);
     let selectedCount = 0, restIndex = selectedIds.size;
     for (const o of objects) {
       reordered[selectedIds.has(o.id) ? selectedCount++ : restIndex++] = o;
     }
-    if (!selectedCount || selectedCount === objects.length) return false;
     objects = reordered;
     return true;
   });

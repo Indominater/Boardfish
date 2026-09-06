@@ -524,7 +524,6 @@ const syncFreshTextEditWidth = (obj) => {
   const width = getTextRenderedContentWidth(obj);
   if (!Number.isFinite(width) || width <= obj.w) return false;
   obj.w = width;
-  clearTextObjectLayoutRuntime(obj);
   return true;
 };
 
@@ -965,67 +964,6 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
     selectionSetMs: '',
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-};
-
-const synchronousBoardfishClipboardTokenFromPasteEvent = (event) => {
-  if (
-    !event?.clipboardData ||
-    typeof BoardfishClipboardIO === 'undefined' ||
-    typeof BoardfishClipboardIO.readBoardfishClipboardTokenFromEvent !== 'function'
-  ) {
-    return '';
-  }
-  return BoardfishClipboardIO.readBoardfishClipboardTokenFromEvent(event.clipboardData);
-};
-
-const boardfishPasteEventMatchesCurrentTextSelectionClipboard = (event) => {
-  const eventToken = synchronousBoardfishClipboardTokenFromPasteEvent(event);
-  const currentToken = typeof getJsClipboardWebToken === 'function' ? getJsClipboardWebToken() : '';
-  return !!eventToken && !!currentToken && eventToken === currentToken;
-};
-
-const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) => {
-  if (!proxy || !payload || !options.event) return false;
-  const obj = objectsMap.get(id);
-  if (!obj) return false;
-  const selection = options.selection || textEditSelectionState(proxy);
-  if (selection.hasSelection) return false;
-  if (!boardfishPasteEventMatchesCurrentTextSelectionClipboard(options.event)) return false;
-
-  const fallbackText = normalizeTextContent(options.fallbackText || '');
-  const pastedText = textForTextObjectPaste(payload.text || '');
-  if (!pastedText || fallbackText !== pastedText) return false;
-
-  const inputType = options.inputType || 'insertFromPaste';
-  const currentProxyValue = textEditProxyValue(proxy);
-  if (proxy._boardfishDomValueStale || proxy.value !== currentProxyValue) return false;
-  const inputState = {
-    ...selection,
-    value: currentProxyValue,
-    inputType,
-    replacement: {
-      start: selection.start,
-      end: selection.end,
-      insertedText: pastedText,
-    },
-    nativePasteHandled: true,
-  };
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    inputState.debug = options.debug || null;
-    inputState.nativePasteEndMeta = {
-      path: 'jsClipboard-text-selection-native',
-      pasted: true,
-      textObjectCount: 1,
-      textCharCount: pastedText.length,
-      largestTextChars: pastedText.length,
-      ...textEditorTextStats(pastedText),
-    };
-  }
-  beginTextEditHistoryAction(id, inputState);
-  proxy?._boardfishSetPendingInputState?.(inputState);
-  return {
-    text: pastedText,
-  };
 };
 
 const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
@@ -1639,10 +1577,40 @@ function enterEdit(id, {
       pasteStepStartedAt = now;
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const candidate = currentBoardfishTextSelectionClipboardPayload();
     const fallbackText = typeof BoardfishClipboardIO !== 'undefined'
       ? BoardfishClipboardIO.readClipboardTextFromEvent?.(event.clipboardData) || ''
       : '';
+    const selection = eventSelection;
+    if (fallbackText) {
+      const nativeExternalOptions = {
+        event,
+        selection,
+        inputType: 'insertFromPaste',
+      };
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        nativeExternalOptions.debug = dbg;
+      }
+      const nativeExternalPaste = tryNativeExternalTextPaste(id, proxy, fallbackText, nativeExternalOptions);
+      if (nativeExternalPaste) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        logPasteStep('paste:text-edit-native-event-text-allowed', {
+          source: 'event-text',
+          textLen: nativeExternalPaste.text.length,
+          ...textEditorTextStats(nativeExternalPaste.text),
+          ...textEditorSelectionDebugStats(selection, proxy.value),
+        });
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        return;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      logPasteStep('paste:text-edit-native-event-text-skipped', {
+        source: 'event-text',
+        fallbackTextChars: fallbackText.length,
+        selectedChars: selection.end - selection.start,
+      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    const candidate = currentBoardfishTextSelectionClipboardPayload();
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     logPasteStep('paste:text-edit-event-read-done', {
       ...textEditorEventDebugStats(event),
@@ -1665,68 +1633,6 @@ function enterEdit(id, {
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return;
-    }
-    const selection = eventSelection;
-    if (candidate) {
-      const nativePasteOptions = {
-        event,
-        selection,
-        fallbackText,
-        inputType: 'insertFromPaste',
-      };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') nativePasteOptions.debug = dbg;
-      const nativePaste = tryNativeBoardfishTextSelectionPaste(id, proxy, candidate, nativePasteOptions);
-      if (nativePaste) {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        logPasteStep('paste:text-edit-native-textarea-allowed', {
-          source: 'jsClipboard-text-selection',
-          textLen: nativePaste.text.length,
-          ...textEditorTextStats(nativePaste.text),
-          ...textEditorSelectionDebugStats(selection, proxy.value),
-        });
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        return;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      logPasteStep('paste:text-edit-native-textarea-skipped', {
-        source: 'jsClipboard-text-selection',
-        hasToken: !!synchronousBoardfishClipboardTokenFromPasteEvent(event),
-        tokenMatches: boardfishPasteEventMatchesCurrentTextSelectionClipboard(event),
-        selectedChars: selection.end - selection.start,
-        fallbackTextChars: fallbackText.length,
-        candidateTextLen: candidate?.text?.length ?? '',
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
-    if (fallbackText) {
-      const nativeExternalOptions = {
-        event,
-        selection,
-        inputType: 'insertFromPaste',
-      };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        nativeExternalOptions.debug = dbg;
-        nativeExternalOptions.path = candidate ? 'fallback-event-text-native' : 'event-text-native';
-      }
-      const nativeExternalPaste = tryNativeExternalTextPaste(id, proxy, fallbackText, nativeExternalOptions);
-      if (nativeExternalPaste) {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        logPasteStep('paste:text-edit-native-event-text-allowed', {
-          source: candidate ? 'fallback-event-text' : 'event-text',
-          textLen: nativeExternalPaste.text.length,
-          ...textEditorTextStats(nativeExternalPaste.text),
-          ...textEditorSelectionDebugStats(selection, proxy.value),
-        });
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        return;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      logPasteStep('paste:text-edit-native-event-text-skipped', {
-        source: candidate ? 'fallback-event-text' : 'event-text',
-        fallbackTextChars: fallbackText.length,
-        selectedChars: selection.end - selection.start,
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     event.preventDefault();
     if (!candidate) {

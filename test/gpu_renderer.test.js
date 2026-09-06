@@ -64,6 +64,7 @@ function line(text, row, obj, prefix = null) {
 }
 const object = () => ({ id: 'obj-1', type: 'text', x: 20, y: 30 });
 const callsNamed = (f, name) => f.calls.filter(call => call.name === name);
+const quadSize = f => callsNamed(f, 'uniform2f').filter(call => call.args[0] === 'size').at(-1).args.slice(1);
 
 test('font initialization resolves failure, and shader failure is a clean nullable factory result', async () => {
   const failed = fixture({ loadImage: () => Promise.reject(new Error('missing atlas')) });
@@ -149,7 +150,7 @@ test('world-origin cancellation happens in CPU doubles for text and image/select
   f.context.fillRect(obj.x, obj.y, 2, 24);
   matrix = callsNamed(f, 'uniformMatrix3fv').at(-1).args[2];
   assert.equal(matrix[6], .25);assert.equal(matrix[7], .5);
-  assert.deepEqual(callsNamed(f, 'uniform4f').at(-1).args.slice(1), [0, 0, 2, 24]);
+  assert.deepEqual(quadSize(f), [2, 24]);
 });
 
 test('images, rectangles, and text preserve submission order and image textures stay resident', async () => {
@@ -242,8 +243,8 @@ test('odd source dimensions preserve the complete image and crop endpoints after
   assert.deepEqual([upload.width, upload.height], [251, 126]);
   const fullUv = callsNamed(f, 'uniform4fv').filter(call => call.args[0] === 'sourceRect').at(-1).args[1];
   assert.ok(fullUv.every((value, index) => Math.abs(value - [0, 0, 1, 1][index]) < 1e-12));
-  const fullRect = callsNamed(f, 'uniform4f').at(-1).args.slice(1);
-  assert.ok(fullRect.every((value, index) => Math.abs(value - [0, 0, 250.25, 125.25][index]) < 1e-12));
+  const fullRect = quadSize(f);
+  assert.ok(fullRect.every((value, index) => Math.abs(value - [250.25, 125.25][index]) < 1e-12));
   f.context.drawImage(image, 1, 1, 1000, 500, 23, 29, 250, 125);
   assert.equal(f.context.getStats().imageUploads, 1);
   const uv = callsNamed(f, 'uniform4fv').filter(call => call.args[0] === 'sourceRect').at(-1).args[1];
@@ -251,8 +252,8 @@ test('odd source dimensions preserve the complete image and crop endpoints after
   assert.ok(Math.abs(uv[1] - 1 / 501) < 1e-12);
   assert.ok(Math.abs(uv[0] + uv[2] - 1) < 1e-12);
   assert.ok(Math.abs(uv[1] + uv[3] - 1) < 1e-12);
-  const cropRect = callsNamed(f, 'uniform4f').at(-1).args.slice(1);
-  assert.ok(cropRect.every((value, index) => Math.abs(value - [0, 0, 250, 125][index]) < 1e-12));
+  const cropRect = quadSize(f);
+  assert.ok(cropRect.every((value, index) => Math.abs(value - [250, 125][index]) < 1e-12));
 });
 
 test('image resolution follows physical scale through flips, rotation, anisotropy, and shear', async () => {
@@ -354,7 +355,7 @@ test('overlapping translucent selection rectangles fill their union once', async
   f.context.fillStyle = '#fff8';
   f.context.beginPath();f.context.rect(0, 0, 10, 20);f.context.rect(5, 0, 10, 20);f.context.fill();
   assert.equal(f.context.getStats().rectangleDrawCalls, 1);
-  assert.deepEqual(callsNamed(f, 'uniform4f').at(-1).args.slice(1), [0, 0, 15, 20]);
+  assert.deepEqual(quadSize(f), [15, 20]);
 });
 
 test('moving a baseline to a distant world origin does not invalidate retained geometry', async () => {

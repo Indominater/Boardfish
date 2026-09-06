@@ -242,10 +242,9 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   const selection = getTextEditSelectionState();
   if (!selection || !_editEl) return false;
   const inputTypeValue = String(inputType || '').toLowerCase();
-  const normalizedText = normalizeTextContent(text);
   const replacementText = inputTypeValue.includes('paste') && typeof textForTextObjectPaste === 'function'
-    ? textForTextObjectPaste(normalizedText)
-    : normalizedText;
+    ? textForTextObjectPaste(text)
+    : normalizeTextContent(text);
   if (inputTypeValue.includes('paste') && !replacementText) return false;
   const oldValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
   const replacementState = {

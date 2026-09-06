@@ -63,12 +63,12 @@
     precision highp float;
     uniform mat3 transform;
     uniform vec2 viewport;
-    uniform vec4 rect;
+    uniform vec2 size;
     uniform vec4 sourceRect;
     out vec2 uv;
     void main() {
       vec2 corner=vec2(gl_VertexID&1,(gl_VertexID>>1)&1);
-      vec2 p=(transform*vec3(rect.xy+corner*rect.zw,1.)).xy;
+      vec2 p=(transform*vec3(corner*size,1.)).xy;
       gl_Position=vec4(p.x/viewport.x*2.-1.,1.-p.y/viewport.y*2.,0.,1.);
       uv=sourceRect.xy+corner*sourceRect.zw;
     }`;
@@ -90,7 +90,7 @@
       a[0]*b[2]+a[2]*b[3],a[1]*b[2]+a[3]*b[3],
       a[0]*b[4]+a[2]*b[5]+a[4],a[1]*b[4]+a[3]*b[5]+a[5]];
   }
-  function matrix3(m) { return [m[0],m[1],0,m[2],m[3],0,m[4],m[5],1]; }
+  function matrix3(m,x,y) { return [m[0],m[1],0,m[2],m[3],0,m[0]*x+m[2]*y+m[4],m[1]*x+m[3]*y+m[5],1]; }
   function state() {
     return { matrix: IDENTITY, fillStyle:'#000000', globalAlpha:1,
       globalCompositeOperation:'source-over', imageSmoothingEnabled:true,
@@ -164,7 +164,7 @@
     }
     function initialize() {
       textProgram=program(VERTEX,FRAGMENT,['transform','viewport','fontSize','glyphs','atlas','unitRange','color','deviceEm']);
-      quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','rect','sourceRect','image','color','textured']);
+      quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','size','sourceRect','image','color','textured']);
       textVao=gl.createVertexArray(); quadVao=gl.createVertexArray();
       gl.disable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.disable(gl.DITHER);
       gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
@@ -246,15 +246,15 @@
       if(current.globalCompositeOperation==='copy')gl.disable(gl.BLEND);else gl.enable(gl.BLEND);
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ function drew(kind) { stats.drawCalls++;stats.frameDrawCalls++;stats[kind]++; } /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    function quad(x,y,w,h,texture,uv=[0,0,1,1],tint=color()) {
+    function quad(x,y,w,h,texture,uv,tint=color()) {
       if(lost||disposed||!w||!h)return;
       setup(quadProgram);gl.bindVertexArray(quadVao);
-      gl.uniformMatrix3fv(quadProgram.locations.transform,false,matrix3(multiply(current.matrix,[1,0,0,1,x,y])));
-      gl.uniform4f(quadProgram.locations.rect,0,0,w,h);
-      gl.uniform4fv(quadProgram.locations.sourceRect,uv);
+      gl.uniformMatrix3fv(quadProgram.locations.transform,false,matrix3(current.matrix,x,y));
+      gl.uniform2f(quadProgram.locations.size,w,h);
       gl.uniform4fv(quadProgram.locations.color,tint);
       gl.uniform1i(quadProgram.locations.textured,texture?1:0);
       if(texture) {
+        gl.uniform4fv(quadProgram.locations.sourceRect,uv);
         gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);
         textureParameters(current.imageSmoothingEnabled?gl.LINEAR:gl.NEAREST);
         gl.uniform1i(quadProgram.locations.image,0);
@@ -413,7 +413,7 @@
         gl.uniform1f(textProgram.locations.fontSize,settings.fontSize);
         gl.uniform1f(textProgram.locations.deviceEm,deviceEm);
         const x=obj.x+settings.padding,y=obj.y+settings.padding+chunk.index*ROWS_PER_CHUNK*settings.lineHeight;
-        gl.uniformMatrix3fv(textProgram.locations.transform,false,matrix3(multiply(current.matrix,[1,0,0,1,x,y])));
+        gl.uniformMatrix3fv(textProgram.locations.transform,false,matrix3(current.matrix,x,y));
         gl.bindBuffer(gl.ARRAY_BUFFER,chunk.buffer);
         gl.vertexAttribPointer(0,3,gl.FLOAT,false,INSTANCE_BYTES,first.start*INSTANCE_BYTES);
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,count);
@@ -597,7 +597,7 @@
       clearRect(x,y,w,h){
         if(lost||disposed)return;
         const old=current.globalCompositeOperation;current.globalCompositeOperation='copy';
-        quad(x,y,w,h,null,[0,0,1,1],[0,0,0,0]);current.globalCompositeOperation=old;
+        quad(x,y,w,h,null,null,[0,0,0,0]);current.globalCompositeOperation=old;
       },
       beginPath(){path=[];},rect(x,y,w,h){path.push([x,y,w,h]);},fill:fillPath,
       drawImage,fillText,

@@ -74,7 +74,7 @@ function loadTextEditorIntegrationHelpers() {
       'globalThis.textEditBlankLineDeleteRange = textEditBlankLineDeleteRange;\n' +
       'globalThis.textNewlineCount = textNewlineCount;\n' +
       'globalThis.replaceTextEditProxyRange = replaceTextEditProxyRange;\n' +
-      'globalThis.tryNativeBoardfishTextSelectionPaste = tryNativeBoardfishTextSelectionPaste;\n',
+      'globalThis.tryNativeExternalTextPaste = tryNativeExternalTextPaste;\n',
     context,
     { filename: 'text_editor_integration_helpers.js' },
   );
@@ -586,7 +586,7 @@ test('small proxy replacement starts from logical text when DOM value is stale',
 
 test('verified Boardfish text selection paste can use native textarea insertion', () => {
   const context = loadTextEditorIntegrationHelpers();
-  const { tryNativeBoardfishTextSelectionPaste } = context;
+  const { tryNativeExternalTextPaste } = context;
   const obj = {
     id: 'text-1',
     type: 'text',
@@ -614,10 +614,7 @@ test('verified Boardfish text selection paste can use native textarea insertion'
     },
   };
 
-  const result = tryNativeBoardfishTextSelectionPaste(obj.id, proxy, {
-    type: 'text-selection',
-    text: 'PASTE',
-  }, {
+  const result = tryNativeExternalTextPaste(obj.id, proxy, 'PASTE', {
     event: { clipboardData: {} },
     selection: { start: 6, end: 6, direction: 'none', hasSelection: false },
     fallbackText: 'PASTE',
@@ -630,7 +627,7 @@ test('verified Boardfish text selection paste can use native textarea insertion'
   assert.equal(pendingState.replacement.start, 6);
   assert.equal(pendingState.replacement.end, 6);
   assert.equal(pendingState.replacement.insertedText, 'PASTE');
-  assert.equal(pendingState.nativePasteEndMeta.path, 'jsClipboard-text-selection-native');
+  assert.equal(pendingState.nativePasteEndMeta.path, 'event-text-native');
   assert.equal(historyAction.id, obj.id);
 });
 
@@ -686,7 +683,7 @@ test('native Boardfish paste keeps pending state through beforeinput', () => {
 
   assert.equal(obj.data.content, 'hello Boardfish text');
   assert.ok(clipEvents.some((event) => event.step === 'text-edit-input:end'));
-  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'jsClipboard-text-selection-native'));
+  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'event-text-native'));
   assert.equal(clipEvents.some((event) => event.step === 'paste:text-edit-range-text-set'), false);
 });
 
@@ -741,9 +738,8 @@ test('external paste with stale Boardfish clipboard can use native textarea inse
   context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste', data: 'outside text' });
 
   assert.equal(obj.data.content, 'hello outside text');
-  assert.ok(clipEvents.some((event) => event.step === 'paste:text-edit-native-textarea-skipped'));
   assert.ok(clipEvents.some((event) => event.step === 'paste:text-edit-native-event-text-allowed'));
-  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'fallback-event-text-native'));
+  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'event-text-native'));
   assert.equal(clipEvents.some((event) => event.step === 'paste:text-edit-range-text-set'), false);
 });
 
