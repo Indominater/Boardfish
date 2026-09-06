@@ -1,299 +1,213 @@
 # Text rendering architecture
 
-Boardfish renders ASCII text with a shared font atlas and retained WebGL2 glyph
-geometry. It composites each textbox into the existing Canvas2D board in object
-order. The hidden textarea still handles input; the existing layout engine owns
-wrapping, spacing, selection, and caret positions.
+Boardfish stores plain text and implements its editor over Canvas2D. A textarea
+provides input and selection state; the canvas draws the visible text, selection,
+and caret. There is no rich-text document model to remove. The expensive recurring
+work was replaying text drawing commands after the layout was already cached.
 
-This replaces repeated text rasterization and per-row bitmap compositing with
-batched glyph rendering. It adds no horizontal glyph culling, navigation delay,
-deferred text repaint, or change to the existing viewport-layout policy.
+## Findings from the codebase
 
-## Codebase findings
+- `src/js/text_layout.js` owns font measurement, character positions, wrapping,
+  caret hit testing, and draw plans. The existing plan cache saves JavaScript
+  layout work, but a cached plan still issues `fillText` for its constituent runs
+  whenever it is drawn. ASCII batching reduces the number of runs without
+  retaining the rendered result.
+- `src/js/renderer.js` draws text through `drawTextLineRange`. Images already
+  arrive as decoded bitmap sources, with reusable scaled variants managed by
+  `src/js/image_variants.js`. A ready image generally needs one destination
+  `drawImage`; a text line could require many destination `fillText` calls.
+- `src/js/viewport.js` repaints the board for navigation. During editing it caches
+  background and images, then redraws the unchanged text and edited text. Text
+  therefore needs reusable pixels in both ordinary and editing paths.
+- `src/js/io_close.js` prepares text layouts and draw plans when opening a board.
+  Its scratch-canvas warmup previously discarded the pixels it generated. The
+  shared line drawing function now populates reusable raster entries during this
+  existing work.
+- `src/js/state.js`, `src/js/history_state.js`, and
+  `src/js/editor_state_boundary.js` manage object identity, text changes, and
+  history snapshots. Raster resources belong to runtime state and never enter
+  history snapshots or saved board files.
+- `src/js/board_schema.js` serializes text as `data.content`.
+  `src/js/clipboard_export_init.js` copies text as plain text. Image exports use a
+  separate path. The renderer change does not require a board-format change.
+- `src/js/board_limits.js` allows 100 objects and 500 MiB of board content.
+  `src/js/viewport_state.js` permits zoom from 0.01 to 100. Large text documents
+  and extreme zoom make one full-textbox raster an unsuitable memory policy.
 
-- [text_layout.js](../src/js/text_layout.js) handles native font measurement,
-  prefix positions, wrapping, hit testing, and draw plans. Its general path uses
-  grapheme iteration, font/string cache keys, and pair-spacing cache lookups.
-  Caching a draw plan avoids repeated layout but still leaves text drawing work.
-- [text_raster.js](../src/js/text_raster.js) previously improved repaint cost by
-  retaining complete line bitmaps at discrete raster densities. A cold line still
-  replayed `fillText`; a warm frame still checked state, looked up cached pixels,
-  and composited each row. Every new density could allocate another set of pixels.
-  Long rows and an over-budget working set fell back to direct drawing.
-- [renderer.js](../src/js/renderer.js) already draws decoded images, generally
-  with one `drawImage` per object. [image_variants.js](../src/js/image_variants.js)
-  retains scaled image sources. Text needed a similarly reusable representation
-  without storing an image for every line and zoom level.
-- [viewport.js](../src/js/viewport.js) includes both normal board repainting and
-  the editing overlay. Both now use the atlas renderer, so entering editing does
-  not switch between two primary text rendering methods. Selection and caret
-  drawing remain in Canvas2D.
-- [io_close.js](../src/js/io_close.js) warms layouts when a board opens. Once the
-  GPU renderer is ready, ASCII rows skip the former per-line draw-plan/raster
-  warmup. Existing readiness and fallback handling still apply.
-- [state.js](../src/js/state.js), [history_state.js](../src/js/history_state.js),
-  and [editor_state_boundary.js](../src/js/editor_state_boundary.js) preserve
-  runtime layout identities where appropriate. New GPU resources are managed
-  outside serialized objects. [board_schema.js](../src/js/board_schema.js) still
-  stores text as `data.content`; clipboard and board formats are unchanged.
-- Board limits permit large documents and zoom ranges from 0.01 to 100. Retaining
-  one raster of an entire textbox would make resource use depend heavily on its
-  empty area and zoom. Glyph geometry instead scales with drawable characters.
+## Retained ASCII line rasters
 
-## ASCII layout tables
+`src/js/text_raster.js` adds a bounded cache of rendered text lines. On the first
+draw of an eligible line, the existing immutable draw plan is rendered to one or
+more small CPU-backed staging canvases and synchronously transferred to immutable
+`ImageBitmap` tiles. Later frames composite those pixels with `drawImage`. Browsers
+without the synchronous bitmap API retain the canvas instead. The
+text content, glyph positions, wrapping, and selection geometry still come from
+the existing layout engine.
 
-Printable ASCII and tabs have a dedicated prefix-width path. A font-specific
-`Float64Array(128)` holds lazily measured advances and a
-`Float64Array(128 * 128)` holds pair adjustments. After relevant entries are
-measured, each new paragraph uses indexed lookups instead of constructing font
-keys, testing whitespace with regular expressions, and updating an LRU map for
-every character. The two tables occupy 132,096 bytes, excluding small JavaScript
-object overhead.
+The normal board renderer and active editor both call `drawTextLineRange`, so
+they use the same cache and rasterization. This avoids maintaining different
+text appearances when editing starts or ends. Printable ASCII and tabs are
+eligible. Other existing content, partial-line draws, unsupported canvas state,
+and entries exceeding resource limits retain the direct text path; stored text
+is never stripped or replaced.
 
-These values come from the existing native measurements. They retain the app's
-minimum ink-gap rule, row-local tab stops, boundary-spacing corrections, and
-baseline offset. Atlas advances do not replace these values. Measurement
-invalidation clears the tables along with the existing layout caches.
+The cache is keyed by draw-plan identity, font, text color, raster density, and
+local ink bounds. Object position and canvas translation are excluded. Panning,
+moving a textbox, and changing its selection can reuse its rendered pixels.
+Content or wrapping changes create a new plan, so stale pixels cannot be reused
+for different text.
 
-Tabbed ASCII paragraphs use a forward width scan to find each row's fitted end.
-This removes repeated substring/prefix reconstruction during binary width
-searches. Word-break and consumed-whitespace handling still use the existing
-rules, and every row consumes at least one character even when the first glyph
-or tab exceeds its width. Non-ASCII content keeps the general grapheme path.
+Raster density rounds upward in steps of the square root of two, with a minimum
+density of one eighth of a device pixel per world unit. Zoom and device-pixel-ratio changes
+reuse an entry within a density step or synchronously construct a new entry.
+The selected density is at least the current destination density. This keeps
+allocation bounded across small zoom changes without waiting for a gesture to
+finish. Cached raster text can have different antialiasing from direct browser
+text at fractional coordinates, so visual checks remain part of verification.
+Tiles use bilinear sampling: their density already matches or exceeds the
+destination density, so expensive photo resampling is unnecessary.
 
-## Shared font atlas
+Horizontal tiling bounds individual canvas dimensions. Tiles have gutters and
+use source crops when composited so neighboring tiles do not double-blend their
+overlap. Measured ink bounds select which glyphs touch each tile during construction,
+including glyphs crossing tile boundaries. All tiles are drawn, without horizontal
+viewport culling; tile construction never depends on viewport position.
 
-[geist-ascii-msdf.png](../src/fonts/geist-ascii-msdf.png) is a static 512 × 512 RGB
-multi-channel signed distance field (MSDF). Its
-[metadata](../src/fonts/geist-ascii-msdf.json) describes 95 printable ASCII
-characters, U+0020–U+007E. Space has metrics but no drawable quad; tabs advance
-through layout without an atlas glyph. The atlas uses 64 pixels per em and an
-8-pixel distance range.
+Default resource limits are:
 
-It is generated from the repository's Geist 1.401 variable font with `wght=400`,
-matching the app's font. Metadata records the source SHA-256, version, weight,
-and pinned generation tools. The
-[generation instructions](../scripts/generate-ascii-font.md) include a repeatable
-build and a `--check` mode that verifies both generated files. Generation tools
-are not runtime dependencies; the font's [OFL notice](../src/fonts/geist-ascii-OFL.txt)
-is included with the assets.
-
-The fragment shader reconstructs coverage from the median RGB distance and its
-screen-space derivative, following the
-[MSDFgen reference shader](https://github.com/Chlumsky/msdfgen#using-a-multi-channel-distance-field).
-The texture is uploaded as linear distance data with image color conversion and
-premultiplication disabled. Scaling changes a shader uniform, so it does not
-generate another font texture or re-rasterize each line at a new density.
-
-MSDF preserves scalable contours and sharp corners, but its finite source field
-is an approximation. It does not reproduce native browser font hinting,
-subpixel antialiasing, or every fractional-coordinate raster exactly. Small text,
-thin strokes, extreme magnification, and light/dark backgrounds require visual
-inspection in addition to layout tests.
-
-## Retained geometry and Canvas2D composition
-
-[text_gpu.js](../src/js/text_gpu.js) stores eight floats per drawable character:
-a local destination rectangle and an atlas UV rectangle. Each instance occupies
-32 GPU-buffer bytes. Character positions come directly from each line's existing
-prefix-width array; glyph bounds are offset around the existing baseline.
-
-Rows are grouped into stable bands of 32 visual rows in textbox-local coordinates.
-Each geometry chunk covers at most 4,096 text positions, with spaces and tabs
-omitted from uploaded instance storage. Stable interior bands remain reusable
-when the existing viewport layout gains or loses a row; changed edge groups need
-rebuilding. A long row is split into multiple chunks, so its character count
-does not demand a very wide source texture.
-
-Cache identities include immutable line text/prefix identities, character ranges,
-and relative row offsets. Panning, zooming, object translation, and text color
-changes use uniforms and reuse buffers. Editing or rewrapping creates new geometry
-for affected groups; unchanged groups can remain cached. Warm draws still assemble
-chunk descriptors and issue batches, but do not scan each character or upload its
-vertices again.
-
-Each chunk uses one
-[`drawArraysInstanced`](https://registry.khronos.org/webgl/specs/latest/2.0/#3.7.9)
-call. All glyphs of the requested rows are submitted, including those beyond the
-horizontal canvas edges. The GPU performs normal framebuffer clipping. The output
-surface covers the intersection of textbox ink bounds and destination canvas;
-this bounds scratch storage without shortening the submitted text.
-
-A shared transparent WebGL2 scratch canvas draws one textbox, then one Canvas2D
-`drawImage` composites its result into the board. The destination transform is
-saved, temporarily reset for this device-pixel copy, and restored. Premultiplied
-alpha and source-over blending preserve transparent edges and existing clipping.
-Empty or fully clipped text needs no destination copy.
-
-The bridge happens at the textbox's original position in the ordered object draw
-loop. Consequently an image between two text objects remains between them, and
-later Canvas2D selections/carets remain ordered correctly. This is a WebGL text
-renderer with a Canvas2D composition bridge, not a replacement of the whole board
-renderer. Cross-surface copies and synchronization are part of its performance
-cost; the benchmark's GPU path includes that bridge.
-
-## Budgets, lifecycle, and fallback
-
-| Resource | Default policy |
+| Resource | Limit |
 | --- | --- |
-| Retained glyph instance buffers | 16 MiB total |
-| Retained geometry chunks | 512 entries |
-| Text positions per chunk | At most 4,096 |
-| Rows per stable geometry band | 32 |
-| Atlas GPU storage | 1 MiB, uploaded as 512 × 512 RGBA |
-| Shared scratch framebuffer | 64 MiB; grows by powers of two as needed within the byte budget, destination dimensions, and device texture/renderbuffer limits |
+| Retained raster bytes | 64 MiB |
+| Retained line/density entries | 2,048 |
+| Raster bytes for one line entry | 4 MiB |
+| Width or height of one canvas | 4,096 pixels |
 
-Geometry entries use least-recently-used eviction. Entries used in the current
-frame are protected across textboxes, preventing an oversized repeated scan from
-continually evicting useful buffers. Each textbox is preflighted before
-composition. If its geometry cannot fit or required resources cannot be allocated,
-that call falls back without leaving a partially composited textbox.
+Entries are evicted in least-recently-used order before allocation. Entries used
+in the current frame are protected; excess lines draw directly when the working
+set exceeds the budget. This prevents a sequential scan of more than 2,048 rows
+from evicting every entry just before its next use. It does not omit any content.
+Disposal closes bitmaps and releases staging canvas backing storage. Clearing text caches or changing text color
+also releases retained rasters. The limits count RGBA canvas dimensions,
+including tile gutters; they do not measure browser overhead or GPU copies.
+Very wide lines or extreme zoom can fall back to direct rendering rather than
+attempting oversized allocation.
 
-The GPU path requires loaded Geist metrics, the expected font, printable ASCII
-with tabs, supported Canvas2D state, and a positive uniform scale/translation.
-While atlas initialization is pending, after WebGL2/asset/shader failure, on
-context loss, or for unsupported content/state/resource requirements, the caller
-uses the retained line-raster path. That path in turn uses direct `fillText` for
-unsupported states, partial ranges, non-ASCII text, or oversized raster entries.
-Existing Unicode content is neither stripped nor changed. Text remains drawable
-while initialization proceeds; readiness schedules a normal repaint.
+This changes the representation of stable text between frames. Existing frame
+scheduling, viewport culling, and immediate rendering remain the same. It does
+not add delayed text rendering, hide text while navigating, or reduce horizontal
+coverage. It also does not eliminate the cold cost of layout, raster generation,
+or rewrapping after a width change.
 
-`clearTextLayoutCaches` clears retained GPU geometry and compatibility rasters.
-Font-measurement changes additionally reset ASCII tables and layout measurements.
-The shared atlas/pipeline survives a geometry clear, while its scratch canvas
-shrinks to 1 × 1. Context loss drops invalid
-resource handles and switches to fallback; restoration rebuilds the pipeline and
-subsequently rebuilds needed geometry. Explicit renderer disposal deletes buffers,
-texture, VAO, and program, releases the decoded atlas image, and shrinks its canvas.
-No GPU buffer or bitmap enters board data, history snapshots, or clipboard content.
+## Why this approach
 
-The 16 MiB limit covers instance-buffer payloads only. The retained atlas image,
-GPU texture, scratch framebuffer, Canvas2D destination, temporary geometry arrays,
-driver allocations, and browser composition copies consume additional memory.
-`atlasBytes` and `surfaceBytes` estimate four bytes per pixel; they are not a
-complete GPU/heap measurement. The fallback raster cache independently allows
-64 MiB, 2,048 line/density entries, 4 MiB per line, and 4,096-pixel tiles. Resource
-behavior therefore needs browser/device measurement, consistent with
-[WebGL memory guidance](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices).
+Direct HTML text would give layout and painting ownership to the browser. In
+this application it also requires reconciling custom wrapping and hit testing,
+editor selection, zoom transforms, and arbitrary image/text stacking with DOM
+elements. It is a possible broader redesign, but it does not by itself establish
+a faster renderer for Boardfish's workload.
+
+A shared ASCII glyph atlas can keep glyph resources small. A Canvas2D atlas that
+issues `drawImage` per character still incurs a JavaScript/API call per character.
+Retained glyph geometry with batched GPU draws is the more substantial option,
+but requires a GPU rendering pipeline and a solution for image/text stacking.
+The existing board acquires a Canvas2D context; a separate GPU text layer above
+it cannot represent every interleaved object order.
+
+Retained line rasters fit the current drawing pipeline, preserve its geometry,
+and amortize repeated text rendering with bounded memory. They also provide a
+measurable intermediate architecture before committing to a full GPU renderer.
+This follows the browser's established [pre-rendering pattern](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas).
+Transferred bitmaps are explicitly [closed when evicted](https://developer.mozilla.org/en-US/docs/Web/API/OffscreenCanvas/transferToImageBitmap).
 
 ## Diagnostics and verification
 
-`getTextGpuStats()` reports readiness, context loss, cache entries and bytes,
-estimated atlas/surface bytes, batches, glyph counts, uploads, hits/misses,
-evictions, fallbacks, and the last error. Renderer reports add `textGpuObjects`,
-`textGpuBatches`, and `textGpuUploadedBytes`. `textDrawCalls` counts destination
-composition calls; GPU batches are reported separately. Existing
-`getTextRasterCacheStats()` and raster counters describe fallback work. Cache
-counters accumulate over the renderer lifetime; compare deltas around a workload.
-Production builds strip developer diagnostic instrumentation.
+Developer draw reports distinguish work submitted to the destination canvas from
+work used to construct a cached raster:
 
-Run the repository checks and build:
+| Field | Meaning |
+| --- | --- |
+| `textDrawCalls` | Destination text calls, including raster blits or direct fallback |
+| `textRasterDrawCalls` | Destination raster blits |
+| `textRasterCacheHits` | Lines drawn from an existing raster entry |
+| `textRasterCacheMisses` | Lines that successfully built a raster entry for this draw |
+| `textRasterizedDrawCalls` | Text calls used to construct new raster entries |
+| `textDirectDraws` | Objects with at least one direct text drawing call |
 
-```sh
-npm run check
-npm run web:build
-```
+These renderer counters describe ordinary text-object draws; editing overlay
+timings are reported separately. `getTextRasterCacheStats()` reports cache-wide
+hits, misses, fallbacks, evictions, draw calls, retained bytes, and entry count,
+including edited text. These are runtime cache totals, so compare deltas over the
+measured interval. `clearTextRasterCache()` releases entries while preserving the
+lifetime counters.
 
-Focused structural tests are `test/text_gpu.test.js` and
-`test/text_ascii_layout.test.js`. They cover geometry positions and UV orientation,
-complete horizontal glyph submission, stable bands, buffer reuse, budgets,
-current-frame protection, context loss/restoration, every printable ASCII pair,
-tab wrapping parity, and large tabbed paragraphs. Existing text/editor/renderer
-tests cover surrounding behavior. Most Node rendering tests use mocked contexts,
-so passing them establishes contracts rather than real GPU speed or pixel quality.
+The existing performance tools in `src/js/debug_manual_perf.js` can collect cold
+and warm layout passes, navigation, editing, resizing, and memory reports. For
+before/after comparisons, keep text, viewport, culling, input sequence, and build
+mode identical. Include many short boxes, a long unbroken line, wrapped ASCII
+paragraphs, many short lines, tabs, and interleaved text/images. Check fractional
+pan and zoom, DPR 1/2, edit entry, selection and caret movement, insertions,
+rewrapping, history restoration, theme changes, and font readiness.
 
-Serve `npm run web:dev` and open `/dev/text-render-benchmark.html`. The
-[benchmark page](../src/dev/text-render-benchmark.html) offers direct text, retained
-line rasters, GPU text including composition, a prebuilt image reference, and an
-empty-destination baseline. It explicitly reports an unavailable GPU path instead
-of benchmarking a silent fallback as GPU text.
+Measure cold preparation separately from warm frames and record both frame
+latency and retained memory. Zero destination `fillText` calls on a warm eligible
+line demonstrates reuse, but is not a measured wall-clock speedup. Node tests use
+mock canvas contexts, so browser raster/compositor behavior requires a real
+browser measurement. Production builds strip developer diagnostic code and must
+also be checked.
 
-- Run **renderer verification** for camera/color reuse, one-row navigation,
-  edits, width changes, a 6,000-character row, clipping, and image/text ordering.
-- Run **mounted canvas animation comparison** in a foreground visible tab. Select
-  prose, code, a wide row, and the dense board across DPR 1/2 and several scales.
-  Eight alternating blocks supply 10 warmup plus 45 measured frames each, yielding
-  90 measured frames per rendering path. The image source is prebuilt outside
-  timing; its cost is a compositing reference, not an image decoding benchmark.
-- Use snapshot replay and CPU readback as separate stress/completion modes.
-  Snapshot transfer does not establish GPU completion or presentation. Full-canvas
-  `getImageData` includes readback costs and can alter browser acceleration behavior.
-- Inspect the visual comparison for all ASCII punctuation, f/tt combinations,
-  descenders, tabs, light/dark text, fractional origins, and zoom extremes. In the
-  real app also check edit entry, selection/caret movement, resize, undo/redo,
-  theme changes, font readiness, and overlapping image/text objects.
+### Browser performance results
 
-Keep text, layout, viewport coverage, DPR, input sequence, browser, and build mode
-identical between comparisons. Measure layout, cold GPU preparation, warm draw
-submission, frame pacing, and memory separately. Mounted rAF intervals include
-browser scheduling and rendering pressure; they are neither precise GPU latency
-nor confirmed presentation timestamps. Fewer calls or faster submission alone
-does not prove a higher application frame rate. Browser coverage and performance
-claims should name the tested browser/device, and release builds need a smoke check.
+Measured locally on September 6, 2026, in Chromium through the Codex in-app
+browser. The reproducible page is `src/dev/text-render-benchmark.html`, served by
+`npm run web:dev` at `/dev/text-render-benchmark.html`; it is excluded from the
+production build. These runs use a 1,024 by 640 CSS-pixel destination, DPR 2,
+30 samples per path, four warmups, and identical text/layout/coverage.
 
-## Measured results
+The **mounted-canvas animation comparison** uses a visible HTML canvas with its
+default accelerated context, identical fractional panning steps, and no destination
+pixel readback or bitmap transfer. Four alternating blocks (direct, retained,
+retained, direct) each include 10 warmup frames and 45 measured frames. The dense
+36,246-character workload at 25% zoom and DPR 2 produced:
 
-The final mounted-canvas run on September 6, 2026 at 06:48 UTC used Chromium 152
-in the Codex in-app browser on the local Mac. The visible canvas was 1,024 × 640
-CSS pixels at an explicitly selected DPR of 2 and 25% zoom. The dense workload
-contained 267,279 characters across 24 textboxes; the prepared viewport submitted
-36,246 characters across 642 rows and six textboxes. Each path supplied 90 measured
-frames, with no hidden-tab frames. The GPU path includes its Canvas2D bridge.
+| Metric | Direct text | Retained text |
+| --- | --- | --- |
+| Draw submission median / p95 | 7.2 / 7.6 ms | 4.3 / 4.6 ms |
+| Next animation-frame interval median / p95 | 16.7 / 33.4 ms | 16.7 / 17.8 ms |
+| Frame intervals over 25 ms | 13 of 90 | 0 of 90 |
+| Samples while document was hidden | 0 | 0 |
 
-| Path | Draw submission median / p95 | rAF interval median / p95 | Intervals >25 ms |
-| --- | --- | --- | --- |
-| Direct text | 7.2 / 7.6 ms | 16.7 / 33.4 ms | 12 / 90 |
-| Retained line rasters | 4.2 / 4.6 ms | 16.7 / 16.8 ms | 0 / 90 |
-| GPU atlas with Canvas2D composition | 1.0 / 1.4 ms | 16.7 / 16.8 ms | 0 / 90 |
-| Prebuilt single-image reference | 0.1 / 0.2 ms | 16.7 / 17.2 ms | 0 / 90 |
+This demonstrates lower draw work and improved frame pacing for the tested
+workload. Animation-frame intervals include browser scheduling and rendering
+pressure; they are not precise GPU latency or a guarantee for every board/device.
 
-The GPU path reduced median warm drawing submission time by 4.2× relative to the
-existing line cache. Both paths maintained approximately 60 Hz frame pacing in
-this run; this is not a 4.2× application frame-rate claim. A prebuilt single image
-remains cheaper than rendering all glyphs and compositing six textboxes.
+Snapshot replay transfers the output to a bitmap after each sample, without
+reading pixels into JavaScript. It measures draw submission plus snapshot
+handling, **not GPU completion, presented-frame latency, or application FPS**.
 
-Warm GPU frames used 24 instanced batches and six destination copies, versus 642
-destination copies for retained rows. Upload counters did not increase during
-the animation, and there were no GPU fallbacks. The retained geometry used
-983,040 bytes across 24 chunks, with a 1,048,576-byte atlas and a 1,310,720-byte
-scratch surface. These payload estimates exclude the decoded atlas image, driver
-overhead, destination canvas, and other browser allocations.
+| Workload | Zoom | Submitted characters | Direct median / p95 | Retained median / p95 | Destination calls: before → after |
+| --- | --- | --- | --- | --- | --- |
+| Prose | 25% | 9,204 | 5.4 / 5.9 ms | 0.9 / 1.2 ms | 4,607 text → 107 image |
+| Prose | 100% | 2,324 | 1.5 / 3.1 ms | 0.3 / 0.8 ms | 1,167 text → 27 image |
+| Indented code | 100% | 571 | 0.4 / 0.5 ms | 0.2 / 0.4 ms | 323 text → 27 image |
+| 24 large textboxes | 25% | 36,246 | 20.1 / 21.9 ms | 4.3 / 4.8 ms | 18,258 text → 642 image |
+| 24 large textboxes | 100% | 4,440 | 1.7 / 2.0 ms | 0.6 / 1.0 ms | 2,250 text → 81 image |
 
-Cold GPU submission took 19.4 ms with the atlas/pipeline already initialized and
-the viewport layout prepared. This is not total cold board-open latency. The
-animation uses prepared rows and fractional horizontal camera movement; it does
-not measure dynamic layout work during vertical navigation. Separate real-browser
-verification passed one-row navigation reuse, edits, rewrapping, color and zoom
-changes, a 6,000-character unwrapped row at 100× zoom, transform restoration,
-Unicode fallback, and interleaved image/text composition.
+The dense 25% case retained 6,737,676 bytes. Its initial raster preparation took
+65 ms in this run, separately from 7.7 ms of layout/plan preparation. This change
+amortizes that cold work; it does not eliminate it. A deliberately very wide
+6,000-character unwrapped row exceeded the per-line byte limit at 100% zoom and
+above, used the direct fallback, and showed no material speedup.
 
-Production smoke checks covered typing ASCII and tabs, wrapping, selection/caret
-display, and undo/redo without browser console errors. Visual comparisons at DPR
-1 and 2 showed the expected antialiasing differences from native text. Performance
-and visual coverage here are limited to Chromium on this Mac; Safari, Firefox,
-mobile hardware, and unusually small or large text need their own measurements.
+The separate **CPU readback stress mode** requests all destination pixels through
+`getImageData` on every sample. In that mode, the dense 25% case improved from
+18.5 to 12.2 ms median, but prose at 100% regressed from 4.2 to 6.1 ms and prose
+at 200% from 3.9 to 7.3 ms. Readback changes canvas backend behavior and adds
+pixel transfers; do not treat snapshot wins as universal rendering gains.
+Early mutable-canvas and GPU-backed-staging variants were slower in this stress
+mode and were replaced during development. The final staging path requests
+CPU storage and transfers immutable bitmaps synchronously.
 
-`npm run check` passed all 547 main tests and 25 static guard tests, and
-`npm run web:build` produced the production bundle successfully.
-
-## Historical line-raster measurements
-
-The previous implementation's repository notes recorded a September 6, 2026
-Chromium run in the Codex in-app browser. These results describe the earlier
-line-raster change and do not measure the new MSDF renderer.
-
-The mounted 1,024 × 640 CSS-pixel canvas at DPR 2 and 25% zoom submitted 36,246
-characters. Direct text took 7.2 / 7.6 ms median/p95 submission; retained rows took
-4.3 / 4.6 ms. Of 90 intervals per path, direct had 13 over 25 ms and retained had
-none. Retained output still needed 642 destination image calls.
-
-In its separate snapshot replay, that dense case retained 6,737,676 bytes and
-took 65 ms for initial raster preparation plus 7.7 ms for layout/plans. A
-6,000-character unwrapped row exceeded the 4 MiB line limit at 100% zoom and above,
-fell back to direct text, and gained no material speedup.
-
-CPU readback stress showed why submission improvements need qualified claims:
-the dense case improved from 18.5 to 12.2 ms median, while prose at 100% regressed
-from 4.2 to 6.1 ms and prose at 200% from 3.9 to 7.3 ms. Those readback timings
-include pixel transfer and backend effects; they are not mounted-canvas frame
-latencies or predictions for the new GPU bridge.
+Visual checks covered the ASCII alphabet and punctuation, tabs, f/tt cases,
+descenders, light/dark colors, fractional pan and 125% zoom. Wrapping and selection
+geometry remain unchanged; pixel antialiasing is not identical. The production
+bundle was also checked for text entry and selection with no browser errors.

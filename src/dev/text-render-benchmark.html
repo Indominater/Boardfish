@@ -39,15 +39,15 @@
   </div>
   <p id="completion-note"></p>
   <p id="status" role="status">Loading the text renderer and Geist font...</p>
-  <div class="scroll"><table id="results" hidden><thead><tr><th>Workload / scale</th><th>Submitted chars</th><th>Layout + plans ms</th><th>Cold retained ms</th><th>Cold GPU ms</th><th>Direct median / p95 ms</th><th>Retained median / p95 ms</th><th>GPU median / p95 ms</th><th>Image median / p95 ms</th><th>Retained / GPU</th><th>Direct / retained / GPU destination calls</th><th>Cache bytes</th></tr></thead><tbody></tbody></table></div>
+  <div class="scroll"><table id="results" hidden><thead><tr><th>Workload / scale</th><th>Submitted chars</th><th>Layout + plans ms</th><th>Cold retained ms</th><th>Direct median / p95 ms</th><th>Retained median / p95 ms</th><th>Image median / p95 ms</th><th>Warm speedup</th><th>Direct text / retained text + image calls</th><th>Cache bytes</th></tr></thead><tbody></tbody></table></div>
   <details><summary>Measurement method and limits</summary>
     <ul>
       <li>Deterministic ASCII prose, tab-indented code, a 6,000-character unwrapped row, and a board containing 24 large textboxes. Every mode receives the same objects, viewport rows, transforms, color, and prepared glyph positions. There is no horizontal text culling, pan/zoom delay, or adaptive omission in this harness.</li>
       <li>Layout + plans is a separate cold measurement. Cold retained is the first draw after clearing the raster cache, with layout already prepared. A font measurement cache reset precedes each case.</li>
-      <li>Warm paths receive four warmup iterations. Samples rotate the order of direct, retained, GPU, image, and empty paths to reduce ordering bias. Every path in a run uses the same completion method. Each sample clears the destination, applies the transform, draws, and performs the selected completion operation before stopping the timer. JSON reports submission time and an empty-destination completion baseline separately.</li>
+      <li>Warm paths receive four warmup iterations. Samples rotate the order of direct, retained, image, and empty paths to reduce ordering bias. Every path in a run uses the same completion method. Each sample clears the destination, applies the transform, draws, and performs the selected completion operation before stopping the timer. JSON reports submission time and an empty-destination completion baseline separately.</li>
       <li><strong>Bitmap snapshot</strong> uses a hidden <code>OffscreenCanvas</code> destination and calls <code>transferToImageBitmap().close()</code> after drawing. This finalizes a snapshot without reading destination pixels into CPU memory. Times include snapshot transfer and resource handling. They are <strong>snapshot completion timings</strong>, not GPU fence timings, presented frames, or end-to-end application FPS. The source bitmap is prebuilt outside timing; the destination is cleared before the next sample.</li>
       <li><strong>CPU readback</strong> uses an HTML canvas destination and requests the <strong>entire canvas</strong> with <code>getImageData</code>. This forces CPU-readable pixel completion but includes readback overhead and may change browser canvas acceleration heuristics. This mode remains useful as a readback stress comparison. Bitmap snapshot is disabled when the required OffscreenCanvas APIs are unavailable; the page then selects CPU readback and explains the fallback.</li>
-      <li>Direct explicitly replays the existing plan's <code>fillText</code> calls. Retained calls the previous line-raster <code>drawTextLineRange</code>. GPU calls the new <code>drawTextLayoutGpu</code>, including its GPU-to-Canvas2D composition; it fails explicitly if the new path is unavailable. The image reference is a prebuilt, same-resolution bitmap of exactly the direct output, drawn once under the same transform; its creation is excluded. It is a lower-bound compositing reference, not an image decoding benchmark.</li>
+      <li>Direct explicitly replays the existing plan's <code>fillText</code> calls. Retained calls the real <code>drawTextLineRange</code>. The image reference is a prebuilt, same-resolution bitmap of exactly the direct output, drawn once under the same transform; its creation is excluded. It is a lower-bound compositing reference, not an image decoding benchmark.</li>
       <li>Draw calls are counted in separate, untimed passes on the destination context. Raster-construction work is represented in cold time and cache diagnostics. Cache bytes are reported by the implementation; destination/image pixel storage is separately estimated at four bytes per pixel. Browser/GPU overhead and JavaScript heap are not included in that estimate.</li>
       <li>Run in a foreground tab, close unrelated heavy work, and compare within the same browser/device. Differences at fractional positions can reflect bitmap resampling. Inspect visual samples in addition to timings. No text-editing or clipboard behavior is changed by this page.</li>
     </ul>
@@ -55,20 +55,14 @@
   <h2>Mounted canvas animation comparison</h2>
   <div class="controls">
     <button id="run-animation" class="primary" type="button" disabled>Run animation comparison</button>
-    <label>Workload <select id="animation-workload"><option>24 large textboxes</option><option>Prose</option><option>Indented code</option><option>Wide ASCII row</option></select></label>
-    <label>Zoom multiplier <input id="animation-scale" type="number" min="0.01" max="100" step="0.01" value="0.25"></label>
-    <span>Selected DPR · 90 measured frames per path</span>
+    <span>24 large textboxes · 25% zoom · selected DPR · 90 measured frames per path</span>
   </div>
-  <p>This comparison draws into the visible canvas below with its default 2D context, without pixel readback or bitmap transfer. Eight blocks run retained, GPU, image, direct, direct, image, GPU, retained; each has 10 warmup frames and 45 measured frames. The text paths draw the same prepared rows; the image is a prebuilt capture used as a compositing reference, with an identical repeating 0.375px translation step. Keep this canvas visible and the tab in the foreground.</p>
+  <p>This comparison draws into the visible canvas below with its default 2D context, without pixel readback or bitmap transfer. Four blocks run direct, retained, retained, direct; each has 10 warmup frames and 45 measured frames. Both paths draw the same prepared rows and all their tiles, with an identical repeating 0.375px translation step. Keep this canvas visible and the tab in the foreground.</p>
   <p>Draw submission measures callback work. The interval until the next animation callback measures actual mounted-canvas rAF pacing, including scheduling and rendering pressure. These intervals are not precise GPU latency, confirmed presentation timestamps, or a full application interaction benchmark.</p>
   <p id="animation-status" role="status">Ready after the font loads. This comparison starts only when requested.</p>
   <canvas id="animation-canvas" width="1024" height="640" aria-label="Live direct and retained text animation"></canvas>
   <pre id="animation-summary">No animation comparison run yet.</pre>
   <details><summary>Animation comparison JSON</summary><pre id="animation-json">No animation comparison run yet.</pre></details>
-  <h2>Renderer verification</h2>
-  <button id="verify" type="button" disabled>Run renderer verification</button>
-  <p>Checks retained geometry across camera and color changes, a one-row vertical shift, text edits, resizing, very wide text, clipping, and image/text composition with the real browser renderer.</p>
-  <pre id="verification">No verification run yet.</pre>
   <h2>Visual comparison</h2>
   <div class="controls">
     <label>Scale <select id="visual-scale"><option value="0.25">25%</option><option value="0.5">50%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="2">200%</option><option value="4">400%</option><option value="8">800%</option><option value="16">1600%</option><option value="64">6400%</option><option value="100">10000%</option></select></label>
@@ -83,7 +77,7 @@ Tabs:	alpha	beta	gamma
 Whitespace:   one  two   three     trailing spaces    </textarea>
   </div>
   <p id="visual-status" role="status"></p>
-  <div class="previews"><figure><figcaption>Direct glyph draw plan</figcaption><canvas id="direct-preview"></canvas></figure><figure><figcaption>GPU ASCII atlas renderer</figcaption><canvas id="retained-preview"></canvas></figure></div>
+  <div class="previews"><figure><figcaption>Direct glyph draw plan</figcaption><canvas id="direct-preview"></canvas></figure><figure><figcaption>Retained renderer</figcaption><canvas id="retained-preview"></canvas></figure></div>
   <details><summary>Full benchmark JSON</summary><pre id="json">No benchmark run yet.</pre></details>
   <script>
     var objects = [];
@@ -94,7 +88,6 @@ Whitespace:   one  two   three     trailing spaces    </textarea>
     function syncAllTextAutoHeights() {}
   </script>
   <script src="../js/text_raster.js"></script>
-  <script src="../js/text_gpu.js"></script>
   <script src="../js/text_layout.js"></script>
   <script src="text-render-benchmark.js"></script>
 </body>

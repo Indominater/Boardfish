@@ -59,50 +59,6 @@ test('text renderer separates retained blits from cold raster and direct draw wo
   assert.equal(counters.textDirectDraws, 0);
 });
 
-test('GPU text batches composite in the existing image/text object order', () => {
-  const api = loadRenderer();
-  const calls = [];
-  const objects = [
-    { id: 'text-under', type: 'text', data: { content: 'under' } },
-    { id: 'image', type: 'image', x: 0, y: 0, w: 10, h: 10, data: { imgKey: 'image' } },
-    { id: 'text-over', type: 'text', data: { content: 'over' } },
-  ];
-  const source = { width: 10, height: 10 };
-  const renderer = api.createBoardRenderer({
-    objects: () => objects,
-    zoom: () => 1, dpr: () => 1, viewportCullingEnabled: () => true,
-    objectIntersectsRect: () => true,
-    getTextLayout: (obj) => [{ text: obj.data.content }],
-    drawTextLayoutGpu(_context, layout, obj) {
-      assert.equal(layout[0].text, obj.data.content);
-      calls.push(obj.id);
-      return { drawCalls: 1, batches: 1, uploadedBytes: 32 };
-    },
-    drawTextLineRange() { assert.fail('GPU success must not replay line draws'); },
-    imageBitmapCache: () => ({ image: source }),
-    selectImageSourceForDraw: () => ({ source }),
-  });
-  const counters = api.createDrawCounters();
-  renderer.drawVisibleObjects({ drawImage() { calls.push('image'); } }, counters, { x1: 0, y1: 0, x2: 100, y2: 100 });
-  assert.deepEqual(calls, ['text-under', 'image', 'text-over']);
-  assert.equal(counters.textGpuObjects, 2);
-  assert.equal(counters.textDrawCalls, 2);
-  assert.equal(counters.drawnTextLines, 2);
-  assert.equal(counters.textRasterizedDrawCalls, 0);
-});
-
-test('GPU unavailability draws every original line synchronously', () => {
-  const api = loadRenderer();
-  const calls = [];
-  const renderer = api.createBoardRenderer({
-    getTextLayout: () => [{ text: 'ASCII' }, { text: 'legacy café' }],
-    drawTextLayoutGpu: () => null,
-    drawTextLineRange(_context, line) { calls.push(line.text); },
-  });
-  renderer.drawSingleObj({}, { type: 'text', data: { content: 'ASCII\nlegacy café' } });
-  assert.deepEqual(calls, ['ASCII', 'legacy café']);
-});
-
 test('image renderer crops untransformed images to the visible viewport', () => {
   const BoardfishRenderer = loadRenderer();
   const drawImageCalls = [];

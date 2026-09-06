@@ -6,7 +6,6 @@ var finishFailedOpen;
 
 {
   document.fonts?.ready.then(clearTextMeasurementCaches).catch(() => {});
-  getTextGpuRenderer();
   startCanvasSizeTracking();
   resizeCanvas();
   snapshot();

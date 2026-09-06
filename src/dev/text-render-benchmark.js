@@ -16,26 +16,6 @@
   };
   let downloadURL;
   let sampleChecksum = 0;
-  const groupedEntries = new WeakMap();
-
-  function drawGpu(context, entries) {
-    getTextGpuRenderer()?.beginFrame?.();
-    let groups = groupedEntries.get(entries);
-    if (!groups) {
-      groups = [];
-      for (const { obj, line } of entries) {
-        let group = groups[groups.length - 1];
-        if (group?.obj !== obj) groups.push(group = { obj, layout: [] });
-        group.layout.push(line);
-      }
-      groupedEntries.set(entries, groups);
-    }
-    for (const { obj, layout } of groups) {
-      if (!drawTextLayoutGpu(context, layout, obj)) {
-        throw new Error('GPU path unavailable; this benchmark does not label fallback draws as GPU results.');
-      }
-    }
-  }
 
   function supportsBitmapSnapshots() {
     if (typeof OffscreenCanvas !== 'function') return false;
@@ -213,7 +193,6 @@
     const draw = {
       direct: () => drawDirect(context, prepared.entries),
       retained: () => drawRetained(context, prepared.entries),
-      gpu: () => drawGpu(context, prepared.entries),
       image: () => context.drawImage(imageSource, prepared.viewport.x1, prepared.viewport.y1,
         config.width / config.scale, config.height / config.scale),
       empty: () => {},
@@ -222,13 +201,10 @@
     const cacheBefore = cacheStats();
     const coldRetained = timedDraw(context, config, draw.retained);
     const cacheAfterCold = cacheStats();
-    clearTextGpuCache();
-    const coldGpu = timedDraw(context, config, draw.gpu);
-    const gpuAfterCold = getTextGpuStats();
     for (let i = 0; i < WARMUP_FRAMES; i++) {
       for (const mode of Object.keys(draw)) timedDraw(context, config, draw[mode]);
     }
-    const samples = { direct: [], retained: [], gpu: [], image: [], empty: [] };
+    const samples = { direct: [], retained: [], image: [], empty: [] };
     const modes = Object.keys(draw);
     for (let i = 0; i < sampleCount; i++) {
       for (let j = 0; j < modes.length; j++) {
@@ -249,8 +225,6 @@
       submittedCharacters: prepared.entries.reduce((sum, entry) => sum + entry.line.text.length, 0),
       layoutAndPlansMs: round(prepared.layoutAndPlansMs),
       coldRetained: { submitMs: round(coldRetained.submitMs), completedMs: round(coldRetained.completedMs) },
-      coldGpu: { submitMs: round(coldGpu.submitMs), completedMs: round(coldGpu.completedMs) },
-      gpuAfterCold, gpuAfterWarm: getTextGpuStats(),
       warm: results, destinationCalls: calls,
       speedup: results.retained.medianMs > 0 ? round(results.direct.medianMs / results.retained.medianMs) : null,
       cacheBefore, cacheAfterCold, cacheAfterWarm: cacheStats(),
@@ -277,10 +251,9 @@
     const bytes = stats.bytes ?? stats.estimatedBytes ?? stats.totalBytes ?? stats.byteLength ?? null;
     const values = [
       `${result.workload} / ${result.scale * 100}%`, result.submittedCharacters.toLocaleString(),
-      result.layoutAndPlansMs, result.coldRetained.completedMs, result.coldGpu.completedMs,
-      format('direct'), format('retained'), format('gpu'), format('image'),
-      `${round(result.warm.retained.medianMs / result.warm.gpu.medianMs)}x`,
-      `${result.destinationCalls.direct.fillText} / ${result.destinationCalls.retained.drawImage} / ${result.destinationCalls.gpu.drawImage}`,
+      result.layoutAndPlansMs, result.coldRetained.completedMs, format('direct'), format('retained'), format('image'),
+      result.speedup == null ? 'n/a' : `${result.speedup}x`,
+      `${result.destinationCalls.direct.fillText} / ${result.destinationCalls.retained.fillText} + ${result.destinationCalls.retained.drawImage}`,
       bytes == null ? 'see JSON' : Number(bytes).toLocaleString(),
     ];
     for (const value of values) { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); }
@@ -299,7 +272,7 @@
     const scales = $('scales').value.split(',').map(Number);
     const completionMode = $('completion').value;
     const output = {
-      version: 3, timestamp: new Date().toISOString(), userAgent: navigator.userAgent,
+      version: 2, timestamp: new Date().toISOString(), userAgent: navigator.userAgent,
       hardwareConcurrency: navigator.hardwareConcurrency, browserDevicePixelRatio: devicePixelRatio,
       canvas: { cssWidth: WIDTH, cssHeight: HEIGHT, dpr }, samplesPerPath: sampleCount, warmupFrames: WARMUP_FRAMES,
       completionMode, completion: COMPLETION_DESCRIPTIONS[completionMode], bitmapSnapshotsAvailable,
@@ -337,7 +310,7 @@
     }
   }
 
-  function runAnimationBlock(context, entries, config, mode, imageSource) {
+  function runAnimationBlock(context, entries, config, mode) {
     const warmupFrames = 10;
     const measuredFrames = 45;
     return new Promise((resolve, reject) => {
@@ -357,9 +330,7 @@
           const started = performance.now();
           setupContext(context, { ...config, offset });
           if (mode === 'direct') drawDirect(context, entries);
-          else if (mode === 'retained') drawRetained(context, entries);
-          else if (mode === 'gpu') drawGpu(context, entries);
-          else context.drawImage(imageSource, 0, 0, config.width / config.scale, config.height / config.scale);
+          else drawRetained(context, entries);
           const submissionMs = performance.now() - started;
           pendingSample = frameIndex >= warmupFrames
             ? { submissionMs, offsetCssPx: offset, foreground: document.visibilityState === 'visible' }
@@ -391,21 +362,20 @@
 
   async function runAnimationComparison() {
     for (const id of ['run', 'run-animation', 'preview']) $(id).disabled = true;
-    const config = { width: WIDTH, height: HEIGHT, dpr: clamp($('dpr').value, 1, 4),
-      scale: clamp($('animation-scale').value, 0.01, 100), offset: 0 };
-    const order = ['retained', 'gpu', 'image', 'direct', 'direct', 'image', 'gpu', 'retained'];
+    const config = { width: WIDTH, height: HEIGHT, dpr: clamp($('dpr').value, 1, 4), scale: 0.25, offset: 0 };
+    const order = ['direct', 'retained', 'retained', 'direct'];
     const output = {
       version: 1, timestamp: new Date().toISOString(), userAgent: navigator.userAgent,
       browserDevicePixelRatio: devicePixelRatio,
       canvas: { cssWidth: WIDTH, cssHeight: HEIGHT, dpr: config.dpr, type: 'HTMLCanvasElement', contextOptions: 'default' },
-      workload: $('animation-workload').value, scale: config.scale, blockOrder: order,
+      workload: '24 large textboxes', scale: config.scale, blockOrder: order,
       warmupFramesPerBlock: 10, measuredFramesPerBlock: 45,
       method: 'Mounted visible canvas, one draw per rAF callback, no destination readback or bitmap transfer. rAF interval is the time until the next callback, not precise GPU latency or a confirmed presentation timestamp.',
       translation: 'Same repeating sequence per block: ((frameIndex % 16) - 8) * 0.375 CSS pixels on both axes.',
       blocks: [],
     };
     try {
-      $('animation-status').textContent = 'Preparing layout, retained pixels, GPU geometry, and image reference...';
+      $('animation-status').textContent = 'Preparing the large-board layout and retained pixels...';
       const canvas = $('animation-canvas');
       canvas.width = Math.ceil(WIDTH * config.dpr);
       canvas.height = Math.ceil(HEIGHT * config.dpr);
@@ -425,30 +395,19 @@
       setupContext(context, config);
       drawRetained(context, prepared.entries);
       output.cacheAfterPreparation = cacheStats();
-      clearTextGpuCache();
-      const coldStart = performance.now();
-      drawGpu(context, prepared.entries);
-      output.coldGpuSubmissionMs = round(performance.now() - coldStart);
-      output.gpuAfterPreparation = getTextGpuStats();
-      const source = createCanvas(config.width, config.height, config.dpr);
-      setupContext(source.getContext('2d'), config);
-      drawDirect(source.getContext('2d'), prepared.entries);
-      const imageSource = await createImageBitmap(source);
-      const samplesByMode = { direct: [], retained: [], gpu: [], image: [] };
+      const samplesByMode = { direct: [], retained: [] };
       for (let index = 0; index < order.length; index++) {
         const mode = order[index];
-        $('animation-status').textContent = `Animation block ${index + 1}/${order.length}: ${mode}; 10 warmup + 45 measured frames. Keep this canvas visible.`;
-        const samples = await runAnimationBlock(context, prepared.entries, config, mode, imageSource);
+        $('animation-status').textContent = `Animation block ${index + 1}/4: ${mode}; 10 warmup + 45 measured frames. Keep this canvas visible.`;
+        const samples = await runAnimationBlock(context, prepared.entries, config, mode);
         samplesByMode[mode].push(...samples);
         output.blocks.push({ mode, ...summarizeAnimation(samples) });
       }
-      imageSource.close();
-      source.width = source.height = 1;
-      for (const mode of Object.keys(samplesByMode)) output[mode] = summarizeAnimation(samplesByMode[mode]);
+      output.direct = summarizeAnimation(samplesByMode.direct);
+      output.retained = summarizeAnimation(samplesByMode.retained);
       output.cacheAfterAnimation = cacheStats();
-      output.gpuAfterAnimation = getTextGpuStats();
       $('animation-json').textContent = JSON.stringify(output, null, 2);
-      $('animation-summary').textContent = ['direct', 'retained', 'gpu', 'image'].map((mode) => {
+      $('animation-summary').textContent = ['direct', 'retained'].map((mode) => {
         const result = output[mode];
         return `${mode}: ${result.sampleCount} frames; submission median/p95 ${result.submission.medianMs}/${result.submission.p95Ms} ms; ` +
           `rAF interval median/p95 ${result.rafInterval.medianMs}/${result.rafInterval.p95Ms} ms; ` +
@@ -483,8 +442,7 @@
       return context;
     });
     drawDirect(contexts[0], entries);
-    try { drawGpu(contexts[1], entries); }
-    catch (error) { $('visual-status').textContent = error.message; return; }
+    drawRetained(contexts[1], entries);
     const a = contexts[0].getImageData(0, 0, contexts[0].canvas.width, contexts[0].canvas.height).data;
     const b = contexts[1].getImageData(0, 0, contexts[1].canvas.width, contexts[1].canvas.height).data;
     let absoluteDifference = 0;
@@ -504,70 +462,6 @@
       'Pixel differences are a diagnostic, not a perceptual quality score.';
   }
 
-  function runVerification() {
-    const results = [];
-    const check = (name, condition, detail = {}) => {
-      results.push({ name, passed: !!condition, ...detail });
-      if (!condition) throw new Error(name);
-    };
-    const canvas = createCanvas(1024, 640, 2);
-    const context = canvas.getContext('2d');
-    const config = { width: 1024, height: 640, dpr: 2, scale: 0.25, offset: 0 };
-    const obj = makeObject('verify', Array.from({ length: 160 }, (_, i) => `Row ${i}: ASCII f/tt [] {},.; 0123456789`).join('\n'), 0, 0, 900);
-    const draw = (layout, target = obj, changes = {}) => {
-      setupContext(context, { ...config, ...changes });
-      getTextGpuRenderer().beginFrame?.();
-      const result = drawTextLayoutGpu(context, layout, target);
-      check('GPU draw completed', result, { batches: result?.batches, uploadedBytes: result?.uploadedBytes });
-      return result;
-    };
-    try {
-      clearTextGpuCache();
-      const layout = getTextLayout(obj);
-      draw(layout.slice(0, 100));
-      const warm = draw(layout.slice(0, 100), obj, { scale: 1.415, offset: 0.375, color: '#fbfbfe', background: '#1c1b22' });
-      check('Pan, zoom across raster bucket, and theme reuse all geometry', warm.uploadedBytes === 0);
-      const vertical = draw(layout.slice(1, 101));
-      check('One-row vertical shift reuses interior geometry bands', vertical.cacheHits > 0 && vertical.uploadedBytes < getTextGpuStats().bytes);
-      const content = obj.data.content;
-      obj.data.content = 'X' + content;
-      patchTextObjectLayoutAfterInput(obj, { oldContent: content, newContent: obj.data.content, start: 0, end: 0, insertedText: 'X' });
-      const edited = draw(getTextLayout(obj).slice(0, 100));
-      check('One-character edit reuses unaffected bands', edited.cacheHits > 0 && edited.uploadedBytes > 0);
-      obj.w = 240;
-      check('Width change redraws rewrapped geometry', draw(getTextLayout(obj).slice(0, 100)).uploadedBytes > 0);
-      const wide = makeObject('wide-verify', 'Wfi/tt0123456789'.repeat(400).slice(0, 6000), 0, 0, 1000000);
-      const wideLayout = getTextLayout(wide);
-      const wideDraw = draw(wideLayout, wide, { scale: 1 });
-      check('All 6000 characters of a wide row reach the GPU', wideDraw.glyphs === 6000);
-      const zoomed = draw(wideLayout, wide, { scale: 100, offset: -1800 });
-      check('100x zoom reuses glyph texture and geometry', zoomed.uploadedBytes === 0);
-      const text = makeObject('order-verify', 'MMMMMMMM', 0, 0, 500);
-      const textLayout = getTextLayout(text);
-      draw(textLayout, text, { scale: 1, color: '#000000' });
-      context.resetTransform();
-      const picture = createCanvas(200, 100, 1);
-      const pictureContext = picture.getContext('2d');
-      pictureContext.fillStyle = '#ff0000'; pictureContext.fillRect(0, 0, 200, 100);
-      context.drawImage(picture, 0, 0, 400, 200);
-      const covered = context.getImageData(0, 0, 400, 200).data;
-      check('An image above GPU text covers it', covered.every((value, i) => value === (i % 4 === 0 || i % 4 === 3 ? 255 : 0)));
-      context.setTransform(2, 0, 0, 2, 0, 0); context.fillStyle = '#000000';
-      check('A later text object composites above an image', drawTextLayoutGpu(context, textLayout, text));
-      const over = context.getImageData(0, 0, 400, 200).data;
-      check('Later text has visible ink over the image', over.some((value, i) => i % 4 === 0 && value < 128));
-      const matrix = context.getTransform();
-      check('GPU composition restores the board transform', matrix.a === 2 && matrix.e === 0);
-      check('Legacy Unicode requests the compatibility renderer', !drawTextLayoutGpu(context, getTextLayout(makeObject('legacy', 'café')), text));
-      results.push({ stats: getTextGpuStats() });
-    } catch (error) {
-      results.push({ error: String(error.stack || error) });
-    } finally {
-      canvas.width = canvas.height = 1;
-      $('verification').textContent = JSON.stringify(results, null, 2);
-    }
-  }
-
   $('dpr').value = Math.min(4, devicePixelRatio || 1);
   if (!bitmapSnapshotsAvailable) {
     $('completion').querySelector('option[value="snapshot"]').disabled = true;
@@ -578,15 +472,12 @@
   $('run').addEventListener('click', runBenchmark);
   $('run-animation').addEventListener('click', runAnimationComparison);
   $('preview').addEventListener('click', renderComparison);
-  $('verify').addEventListener('click', runVerification);
   for (const id of ['visual-scale', 'visual-offset', 'visual-theme']) $(id).addEventListener('change', renderComparison);
-  document.fonts.load("400 16px 'Geist Sans'").then(() => document.fonts.ready).then(async () => {
+  document.fonts.load("400 16px 'Geist Sans'").then(() => document.fonts.ready).then(() => {
     clearTextMeasurementCaches();
-    if (!(await getTextGpuRenderer().ready)) throw new Error('GPU atlas initialization failed.');
     $('run').disabled = false;
     $('run-animation').disabled = false;
     $('preview').disabled = false;
-    $('verify').disabled = false;
     $('status').textContent = `Ready. Geist loaded. Raster diagnostics ${typeof getTextRasterCacheStats === 'function' ? 'available' : 'unavailable; check renderer integration before interpreting results'}.`;
     renderComparison();
   }).catch((error) => { $('status').textContent = `Initialization failed: ${error.stack || error}`; });
