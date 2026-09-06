@@ -1550,7 +1550,7 @@ function enterEdit(id, {
     const removedChars = replacementEnd - replacementStart;
     const insertedChars = insertedText.length;
     const deletesContent = String(inputType || '').startsWith('delete');
-    const deleteReducedLogicalLines = deletesContent && textRangeIncludes(oldValue, replacementStart, replacementEnd, '\n');
+    const deleteReducedLogicalLines = deletesContent && oldValue.slice(replacementStart, replacementEnd).includes('\n');
     const selectedDeleteShrankText = deletesContent && !!inputState.hasSelection && removedChars > insertedChars;
     const deleteShrankPendingEdit = pendingSizeSyncBeforeAutoHeight &&
       deletesContent &&

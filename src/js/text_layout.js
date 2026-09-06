@@ -764,11 +764,6 @@ function textGraphemeOffset(prefixWidths, offset, forward = false) {
   return boundaries[!forward && boundaries[index] > bounded ? Math.max(0, index - 1) : index];
 }
 
-function textRangeIncludes(text, start, end, character = '\t') {
-  const index = text.indexOf(character, start);
-  return index !== -1 && index < end;
-}
-
 const findTextWrapEndByWidth = (rangeWidth, start, end, maxW, boundaryAt = (index) => index) => {
   let lo = boundaryAt(start + 1, true);
   let hi = end;
@@ -845,7 +840,7 @@ function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, 
 }
 
 function wrapTextParagraph(obj, content, paraStart, paraEnd, maxW, pushLine, collectPrefixWidths = true) {
-  const paragraphHasTab = textRangeIncludes(content, paraStart, paraEnd);
+  const paragraphHasTab = content.slice(paraStart, paraEnd).includes('\t');
   const paragraphPrefixWidths = getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd);
   const boundaryAt = (index, forward = false) => paraStart + textGraphemeOffset(paragraphPrefixWidths, index - paraStart, forward);
   const rangeWidth = (start, end) => paragraphHasTab
