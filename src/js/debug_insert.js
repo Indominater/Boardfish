@@ -4,18 +4,12 @@ var InsertDebug = (() => {
   const MAX_EVENTS = 5000;
   const BREAKDOWN_LIMIT = 200;
 
-  function round(value) {
-    return round2(value);
-  }
-
-  function sanitize(meta = {}) {
-    return sanitizeDebugMeta(meta);
-  }
+  const round = round2;
 
   const recorder = createDebugRecorder({
     maxEvents: MAX_EVENTS,
     label: '[Boardfish insert]',
-    sanitize,
+    sanitize: sanitizeDebugMeta,
     onEnable() {
       console.info('Boardfish insert debugger enabled. Use finishDebug({ insert: ["report", "imageBreakdown", "fileBreakdown", "phaseSummary", "summary", "dump"] }) to collect results.');
     },
@@ -28,12 +22,6 @@ var InsertDebug = (() => {
     return recorder._events;
   }
 
-  function enable(options = {}) {
-    recorder.enable(options);
-  }
-  function disable() {
-    recorder.disable();
-  }
   function rows(filterStart = false) {
     return events()
       .filter(e => !filterStart || e.step !== 'start')
@@ -189,8 +177,8 @@ var InsertDebug = (() => {
   }
 
   return {
-    enable,
-    disable,
+    enable: recorder.enable,
+    disable: recorder.disable,
     setVerbose: recorder.setVerbose,
     start: recorder.start,
     step: recorder.step,

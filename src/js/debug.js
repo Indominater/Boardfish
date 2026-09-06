@@ -3,14 +3,10 @@ var ClipDebug = (() => {
 
   const MAX_EVENTS = 2000;
 
-  function sanitize(value) {
-    return sanitizeDebugMeta(value);
-  }
-
   const core = createDebugRecorder({
     maxEvents: MAX_EVENTS,
     label: '[Boardfish clipboard]',
-    sanitize,
+    sanitize: sanitizeDebugMeta,
   });
   const events = core._events;
 
@@ -892,9 +888,7 @@ var HistoryDebug = (() => {
     maxCloneObjectsMs: 0,
   };
 
-  function round(value) {
-    return round2(value);
-  }
+  const round = round2;
 
   function sanitize(value) {
     return sanitizeDebugMeta(value, { redactPattern: null, roundNumbers: true });

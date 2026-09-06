@@ -814,11 +814,7 @@
   }
 
   function bytesForImageSource(source) {
-    if (isWebImageRef(source)) {
-      const bytes = bytesForWebImageRef(source);
-      if (bytes) return bytes;
-      return null;
-    }
+    if (isWebImageRef(source)) return bytesForWebImageRef(source);
     if (typeof source === 'string') return dataUrlToBytes(source);
     if (source instanceof Uint8Array) return source;
     if (source instanceof ArrayBuffer) return new Uint8Array(source);

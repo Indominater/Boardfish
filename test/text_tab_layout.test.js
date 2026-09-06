@@ -50,7 +50,6 @@ function loadTextLayout() {
       getTextLayout,
       layoutHitTestCaret,
       lineXAtOffset,
-      measureTextW,
       get textPad() { return TEXT_PAD; },
     };`,
     context,
@@ -65,7 +64,7 @@ test('text tab measurement advances to the next eight-space tab stop', () => {
   assert.deepEqual(Array.from(textLayout.getPrefixWidths('\tX')), [0, 8, 9]);
   assert.deepEqual(Array.from(textLayout.getPrefixWidths('a\tX')), [0, 1, 8, 9]);
   assert.deepEqual(Array.from(textLayout.getPrefixWidths('abcdefgh\tX')), [0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17]);
-  assert.equal(textLayout.measureTextW('a\tX'), 9);
+  assert.equal(textLayout.getPrefixWidths('a\tX').at(-1), 9);
 });
 
 test('text caret hit at wrapped line start records the visual line', () => {

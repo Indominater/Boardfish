@@ -169,7 +169,6 @@ function configureTextCanvasContext(context) {
 var _measureCanvas = document.createElement('canvas');
 var _measureCtx = _measureCanvas.getContext('2d');
 configureTextCanvasContext(_measureCtx);
-_measureCtx.font = FONT;
 refreshTextMetrics();
 const TEXT_MEASURE_CACHE_MAX_ENTRIES = 4096;
 const TEXT_PREFIX_CACHE_MAX_ENTRIES = 2048;
@@ -272,13 +271,6 @@ const textWidthAfterTab = (currentWidth) => {
   const tabStop = (_textTabStopWidth ??= measureRawTextW('        ')) > 0 ? _textTabStopWidth : FONT_SIZE * 4;
   return (Math.floor(currentWidth / tabStop) + 1) * tabStop;
 };
-
-function measureTextW(text) {
-  const value = String(text ?? '');
-  if (!value.includes('\t')) return measureRawTextW(value);
-  const widths = getPrefixWidths(value);
-  return widths[widths.length - 1] || 0;
-}
 
 function refreshTextMetrics() {
   _measureCtx.font = FONT;
@@ -522,10 +514,6 @@ function getPrefixWidths(text) {
   _prefixCache.set(value, pw);
   trimMapCache(_prefixCache, TEXT_PREFIX_CACHE_MAX_ENTRIES);
   return pw;
-}
-
-function getTextRangePrefixWidths(text) {
-  return getPrefixWidths(String(text ?? ''));
 }
 
 function getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, text, start, end) {
@@ -1206,7 +1194,6 @@ function getTextAutoHeight(obj, minLines = 1) {
 }
 
 const isTextWordSeparator = (ch) => ch === ' ' || ch === '\t';
-const isTextWordOrLineSeparator = (ch) => isTextWordSeparator(ch) || ch === '\n';
 
 const textNewlineCount = (value, start = 0, end = Infinity) => {
   const text = String(value ?? '');
@@ -1721,17 +1708,6 @@ function prepareTextLineForDraw(line) {
     line._textDrawPlanCache.rasterEligible = /^[\x20-\x7e\t]*$/.test(text);
   }
   return line._textDrawPlanCache;
-}
-
-function prepareTextLayoutForDraw(layout) {
-  if (!Array.isArray(layout)) return 0;
-  let prepared = 0;
-  for (const line of layout) {
-    if (!line) continue;
-    prepareTextLineForDraw(line);
-    prepared++;
-  }
-  return prepared;
 }
 
 function textDrawPlanRasterBounds(plan, font) {

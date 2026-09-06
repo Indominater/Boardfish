@@ -313,18 +313,16 @@
     target.dispatchEvent(makeTouchMouseEvent('mousedown', point, 0, 1));
     target.dispatchEvent(makeTouchMouseEvent('mouseup', point, 0, 0));
     if (editingId && _editEl) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      focusTextEditProxyNow(_editEl
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const obj = typeof objectsMap?.get === 'function' ? objectsMap.get(editingId) : null;
-        focusTextEditProxyNow(_editEl, obj, 'touch-tap-focus', {
+        , typeof objectsMap?.get === 'function' ? objectsMap.get(editingId) : null,
+        'touch-tap-focus', {
           phase: 'touch-tap',
           clientX: point.x,
           clientY: point.y,
-        });
+        }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      } else {
-        focusTextEditProxyNow(_editEl);
-      }
+      );
     }
   }
 

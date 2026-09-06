@@ -9,9 +9,7 @@ var PillDebug = (() => {
   const t0 = performance.now();
   let longTaskObserver = null;
 
-  function round(value) {
-    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
-  }
+  const round = round2;
 
   function snapshot() {
     const style = getComputedStyle(islZoom);
@@ -161,9 +159,7 @@ var MenuDebug = (() => {
   let nextId = 1;
   const events = [];
 
-  function round(value) {
-    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
-  }
+  const round = round2;
 
   function elementLabel(el) {
     if (!el) return '';

@@ -33,9 +33,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
   let lastResult = null;
   let lastJson = '';
 
-  function round(value) {
-    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
-  }
+  const round = round2;
 
   function colorToRgb(value) {
     const probe = document.createElement('span');

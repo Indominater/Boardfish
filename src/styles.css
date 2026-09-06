@@ -430,19 +430,19 @@ body {
   right: 0;
   width: fit-content;
   margin-inline: auto;
-}
-#island {
   position: fixed;
   bottom: max(5%, calc(var(--safe-area-bottom) + 12px));
   display: none;
   align-items: center;
+  border-radius: var(--pill-radius);
+  max-width: calc(100vw - 32px);
+}
+#island {
   z-index: 9000;
   pointer-events: auto;
   cursor: pointer;
   overscroll-behavior: none;
   touch-action: none;
-  border-radius: var(--pill-radius);
-  max-width: calc(100vw - 32px);
 }
 
 #island[data-mode="message"] {
@@ -451,14 +451,8 @@ body {
 }
 
 .opening-shield-pill {
-  position: fixed;
-  bottom: max(5%, calc(var(--safe-area-bottom) + 12px));
-  display: none;
-  align-items: center;
   z-index: 100000;
   pointer-events: none;
-  border-radius: var(--pill-radius);
-  max-width: calc(100vw - 32px);
 }
 
 #island *,

@@ -83,7 +83,8 @@ function loadTextLayout({
   );
   vm.runInContext(
     `globalThis.__testTextLayout = {
-      measureTextW,
+      measureRawTextW,
+      getPrefixWidths,
       textForExternalTextObjectPaste,
       getTextMinWidth,
       getTextLayout,
@@ -97,7 +98,6 @@ function loadTextLayout({
       clearTextLayoutCaches,
       clearTextObjectLayoutRuntime,
       prepareTextLineForDraw,
-      prepareTextLayoutForDraw,
       drawTextLineRange,
       lineCaretXAtOffset,
       lineHitOffsetForX,
@@ -301,16 +301,16 @@ test('text measurement cache evicts oldest entry without changing cache size', (
   const textLayout = context.__testTextLayout;
   const initialMeasures = measured.length;
 
-  assert.equal(textLayout.measureTextW('k0'), 2);
-  assert.equal(textLayout.measureTextW('k0'), 2);
+  assert.equal(textLayout.measureRawTextW('k0'), 2);
+  assert.equal(textLayout.measureRawTextW('k0'), 2);
   assert.equal(measured.length, initialMeasures + 2);
 
   for (let i = 1; i < textLayout.maxEntries; i++) {
-    textLayout.measureTextW(`k${i}`);
+    textLayout.measureRawTextW(`k${i}`);
   }
   assert.equal(textLayout.cache.size, textLayout.maxEntries);
 
-  textLayout.measureTextW('overflow');
+  textLayout.measureRawTextW('overflow');
 
   assert.equal(textLayout.cache.size, textLayout.maxEntries);
   assert.equal(textLayout.cache.has('k0'), false);
@@ -322,7 +322,7 @@ test('text measurement cache clears with other measurement caches', () => {
   const { context } = loadTextLayout();
   const textLayout = context.__testTextLayout;
 
-  textLayout.measureTextW('cached');
+  textLayout.measureRawTextW('cached');
   assert.equal(textLayout.cache.size, 1);
 
   textLayout.clearTextLayoutCaches({ measurements: true });
@@ -335,12 +335,12 @@ test('tab-stop width is reused until measurement caches clear', () => {
   const textLayout = context.__testTextLayout;
 
   assert.equal(textLayout.tabStopWidthCache, undefined);
-  textLayout.measureTextW('\t');
-  textLayout.measureTextW('a\t');
+  textLayout.getPrefixWidths('\t');
+  textLayout.getPrefixWidths('a\t');
   assert.equal(textLayout.tabStopWidthCache, 8);
   textLayout.clearTextLayoutCaches({ measurements: true });
   assert.equal(textLayout.tabStopWidthCache, undefined);
-  textLayout.measureTextW('\t');
+  textLayout.getPrefixWidths('\t');
   assert.equal(textLayout.tabStopWidthCache, 8);
 });
 
@@ -354,9 +354,9 @@ test('text measurement uses single-glyph advances for consistent spacing', () =>
   const textLayout = context.__testTextLayout;
   const initialMeasures = measured.length;
 
-  assert.equal(textLayout.measureTextW('YY'), 2);
-  assert.equal(textLayout.measureTextW('XY'), 2);
-  assert.equal(textLayout.measureTextW('XX'), 2);
+  assert.equal(textLayout.measureRawTextW('YY'), 2);
+  assert.equal(textLayout.measureRawTextW('XY'), 2);
+  assert.equal(textLayout.measureRawTextW('XX'), 2);
 
   assert.ok(!measured.slice(initialMeasures).includes('YY'));
   assert.ok(!measured.slice(initialMeasures).includes('XY'));
@@ -391,7 +391,7 @@ test('text layout adds a small advance when neighboring glyph ink would touch', 
   const [line] = textLayout.getTextLayout(obj);
   const calls = [];
 
-  assert.equal(textLayout.measureTextW('YY'), 20.5);
+  assert.equal(textLayout.measureRawTextW('YY'), 20.5);
   assert.equal(textLayout.lineXAtOffset(line, obj, 1), 26.5);
   assert.equal(textLayout.lineXAtOffset(line, obj, 2), 36.5);
 
@@ -459,7 +459,7 @@ test('text drawing places each glyph at measured prefix positions', () => {
   assert.equal(cachedStats.planCacheMisses, 0);
 });
 
-test('opening hydration can prepare every text draw plan before the first canvas draw', () => {
+test('preparing individual text lines populates the draw plan cache before canvas drawing', () => {
   const { context } = loadTextLayout();
   const textLayout = context.__testTextLayout;
   const obj = {
@@ -473,7 +473,7 @@ test('opening hydration can prepare every text draw plan before the first canvas
   };
   const layout = textLayout.getTextLayout(obj);
 
-  assert.equal(textLayout.prepareTextLayoutForDraw(layout), 2);
+  for (const line of layout) textLayout.prepareTextLineForDraw(line);
 
   const stats = textLayout.drawTextLineRange({ fillText() {} }, layout[0], obj);
   assert.equal(stats.planCacheHits, 1);
@@ -1721,18 +1721,18 @@ test('wrapping and line endpoints exclude pair spacing for the next omitted glyp
     }),
   });
   const api = context.__testTextLayout;
-  const availableWidth = api.measureTextW('aT');
+  const availableWidth = api.measureRawTextW('aT');
   assertViewportLayoutMatchesFull(context, 'aTT', availableWidth, (lines) => {
     assert.deepEqual(Array.from(lines, (line) => line.text), ['aT', 'T']);
     for (const line of lines) {
       assert.equal(line.prefixWidths[0], 0);
-      assert.equal(line.prefixWidths.at(-1), api.measureTextW(line.text));
+      assert.equal(line.prefixWidths.at(-1), api.measureRawTextW(line.text));
     }
   });
-  assertViewportLayoutMatchesFull(context, 'T'.repeat(400), api.measureTextW('TT'), (lines) => {
+  assertViewportLayoutMatchesFull(context, 'T'.repeat(400), api.measureRawTextW('TT'), (lines) => {
     assert.equal(lines.length, 200);
     assert.ok(lines.every((line) => line.text === 'TT'));
-    assert.ok(lines.every((line) => line.prefixWidths.at(-1) === api.measureTextW('TT')));
+    assert.ok(lines.every((line) => line.prefixWidths.at(-1) === api.measureRawTextW('TT')));
   });
 });
 
@@ -1789,7 +1789,7 @@ test('Unicode caret centering uses the complete neighboring grapheme ink bounds'
   for (const grapheme of ['😀', 'a\u0301', '👨‍👩‍👧‍👦', '🇨🇦']) {
     const obj = textRegressionObject(context, `${grapheme}A`, 500);
     const [line] = api.getTextLayout(obj);
-    const previousInkRight = context.TEXT_PAD + api.measureTextW(grapheme);
+    const previousInkRight = context.TEXT_PAD + api.measureRawTextW(grapheme);
     const nextInkLeft = api.lineXAtOffset(line, obj, grapheme.length);
     assert.equal(api.lineCaretXAtOffset(line, obj, grapheme.length), (previousInkRight + nextInkLeft) / 2);
   }

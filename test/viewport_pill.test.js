@@ -282,14 +282,14 @@ test('opening shield pill text mirrors the zoom pill visual motion surface', () 
   assert.match(styles, /--pill-text-line-height:\s*18px;/);
   assert.match(styles, /--pill-text-min-width:\s*44px;/);
   assert.match(styles, /--pill-text-max-width:\s*min\(680px, calc\(100vw - 56px\)\);/);
-  for (const selector of ['#island', '.opening-shield-pill', '#isl-zoom,\n.opening-shield-pill-text']) {
+  for (const selector of ['#island,\n.opening-shield-pill', '#isl-zoom,\n.opening-shield-pill-text']) {
     const start = styles.lastIndexOf(`\n${selector} {`);
     assert.notEqual(start, -1, `${selector} style block is missing`);
     const end = styles.indexOf('\n}', start);
     assert.notEqual(end, -1, `${selector} style block is unterminated`);
     const block = styles.slice(start, end);
     assert.match(block, /border-radius: var\(--pill-radius\);/);
-    if (selector === '#island' || selector === '.opening-shield-pill') continue;
+    if (selector === '#island,\n.opening-shield-pill') continue;
     assert.match(block, /line-height: var\(--pill-text-line-height\);/);
     assert.match(block, /min-width: var\(--pill-text-min-width\);/);
     assert.match(block, /max-width: var\(--pill-text-max-width\);/);

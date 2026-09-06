@@ -34,13 +34,12 @@ function pruneImageCachesAfterHistoryChange(reason, historyEntriesDropped = fals
   if (!historyEntriesDropped && _historyImageCacheClipboardToken === _jsClipboardToken) return;
   _historyImageCacheClipboardToken = _jsClipboardToken;
   const retainedKeys = retainedImageKeysForCurrentAndHistory();
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    pruneImageCachesToKeys(retainedKeys);
-    return;
-  }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const diagnosticReason = reason === undefined ? 'history-change' : reason;
-  const imageResult = pruneImageCachesToKeys(retainedKeys);
+  const imageResult =
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  pruneImageCachesToKeys(retainedKeys);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const removedImageCaches = (imageResult?.removedSources || 0) +
     (imageResult?.removedAssetUrls || 0) +
     (imageResult?.removedBitmaps || 0) +
@@ -322,13 +321,10 @@ function pushHistory(reason = '', dirty = null, beforeEditState = null) {
   });
   historyIndex++;
   historyEntriesDropped = trimHistory() || historyEntriesDropped;
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    pruneImageCachesAfterHistoryChange(undefined, historyEntriesDropped);
-  } else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    pruneImageCachesAfterHistoryChange(reason || 'pushHistory', historyEntriesDropped);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
+  pruneImageCachesAfterHistoryChange(
+    typeof BOARDFISH_PRODUCTION === 'undefined' ? reason || 'pushHistory' : undefined,
+    historyEntriesDropped,
+  );
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const ms = performance.now() - t0;
   HistoryDebug.max('maxPushHistoryMs', ms);
@@ -543,15 +539,9 @@ function restoreSnapshot(s, editStateOverride) {
   const start = Math.max(0, Math.min(editState.selectionStart ?? max, max));
   const end = Math.max(0, Math.min(editState.selectionEnd ?? max, max));
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let proxyDomSync;
+  const proxyDomSync =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    syncHistoryEditProxyDomValueForSelection(_editEl, start, end);
-  } else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    proxyDomSync = syncHistoryEditProxyDomValueForSelection(_editEl, start, end);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
+  syncHistoryEditProxyDomValueForSelection(_editEl, start, end);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const setSelectionRangeStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -653,15 +643,9 @@ function undo() {
     ...getHistoryTextDebugMetrics(objects),
   });
   const flushStart = performance.now();
-  let flushedCheckpoint = false;
+  const flushedCheckpoint = !!
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    flushEditHistoryCheckpoint();
-  } else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    flushedCheckpoint = !!flushEditHistoryCheckpoint();
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
+  flushEditHistoryCheckpoint();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'flush-edit-history', {
     flushedCheckpoint,

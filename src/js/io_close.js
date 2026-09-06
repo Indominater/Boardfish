@@ -269,16 +269,10 @@ const isOpenHydratableImageSource = (source) => {
   return typeof source === 'string' || isWebImageRef(source);
 };
 
-function updateVisibleImagePreviewTask(tasks, key, obj) {
-  const area = Math.max(1, Number(obj.w || 0)) * Math.max(1, Number(obj.h || 0));
-  const previous = tasks.get(key);
-  if (!previous || area > previous.area) tasks.set(key, { key, obj, area });
-}
-
-function getVisibleImageKeys(limit = Infinity, previewTasks = null) {
+function getVisibleImageKeys(limit = Infinity) {
   const b = getVisibleWorldBounds();
   const keys = [];
-  const seen = previewTasks || new Set();
+  const seen = new Set();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const skipped = { nonImage: 0, outside: 0, missingKey: 0, nonHydratable: 0, cached: 0, duplicate: 0 };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -304,14 +298,12 @@ function getVisibleImageKeys(limit = Infinity, previewTasks = null) {
       continue;
     }
     if (seen.has(key)) {
-      if (previewTasks?.get(key)) updateVisibleImagePreviewTask(previewTasks, key, obj);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       skipped.duplicate++;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       continue;
     }
-    if (previewTasks) previewTasks.set(key, null);
-    else seen.add(key);
+    seen.add(key);
     const source = BoardfishImageStore.getSource(key);
     if (!source) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -325,7 +317,6 @@ function getVisibleImageKeys(limit = Infinity, previewTasks = null) {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       continue;
     }
-    if (previewTasks) updateVisibleImagePreviewTask(previewTasks, key, obj);
     if (BoardfishImageStore.hasDisplayImage(key)) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       skipped.cached++;
@@ -574,240 +565,6 @@ async function hydrateTextDrawCachesForOpen(
   return result;
 }
 
-async function buildVisibleImagePreviewsForOpen(previewTasks
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  , dbg = null
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-) {
-  if (typeof buildOpenInitialImagePreviewForOpen !== 'function') return null;
-  const tasks = [];
-  for (const task of previewTasks.values()) if (task) tasks.push(task);
-  const view = { zoom, panX, panY, dpr: window.devicePixelRatio || 1 };
-  const concurrency = Math.max(1, Math.min(8, tasks.length || 1));
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const t0 = performance.now();
-  OpenDebug.step(dbg, 'open-preview-visible:start', {
-    count: tasks.length,
-    selected: tasks.length,
-    includeCached: true,
-    concurrency,
-  });
-  let built = 0;
-  let ready = 0;
-  let failed = 0;
-  let skipped = 0;
-  let bytes = 0;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  let pendingReady = 0;
-  const results = await mapWithConcurrency(tasks, concurrency, async ({ key, obj }) => {
-    const result = await buildOpenInitialImagePreviewForOpen(key, obj, view
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      , dbg
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    );
-    if (result.ready) {
-      pendingReady++;
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      ready++;
-      if (!result.skipped) built++;
-      bytes += Number(result.bytes) || 0;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    else if (result.skipped === 'error') failed++;
-    else skipped++;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return result;
-  },
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  typeof BOARDFISH_PRODUCTION === 'undefined' ? true :
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  false);
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (!shouldCollectOpenBoardMetrics(dbg)) return { pendingReady };
-  const resultRows = new Array(results.length);
-  const slowResults = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    const row = {
-      key: result?.key || '',
-      ready: result?.ready === true,
-      skipped: result?.skipped || '',
-      width: result?.width ?? '',
-      height: result?.height ?? '',
-      ms: result?.ms ?? '',
-      error: result?.error || '',
-    };
-    resultRows[i] = row;
-    const rowMs = Number(row.ms) || 0;
-    let insertAt = slowResults.length;
-    while (insertAt > 0 && rowMs > (Number(slowResults[insertAt - 1].ms) || 0)) insertAt--;
-    if (insertAt < 24) {
-      slowResults.splice(insertAt, 0, row);
-      if (slowResults.length > 24) slowResults.pop();
-    }
-  }
-  const slowest = slowResults[0] || null;
-  const sampleResults = resultRows.slice(0, 24);
-  const out = {
-    count: tasks.length,
-    selected: tasks.length,
-    ready,
-    pendingReady,
-    built,
-    failed,
-    skipped,
-    bytes,
-    mb: Math.round(bytes / 1024 / 1024 * 100) / 100,
-    concurrency,
-    ms: performance.now() - t0,
-    maxMs: slowest?.ms ?? '',
-    maxKey: slowest?.key || '',
-    maxWidth: slowest?.width ?? '',
-    maxHeight: slowest?.height ?? '',
-    results: sampleResults,
-    slowResults,
-  };
-  OpenDebug.step(dbg, 'open-preview-visible:end', out);
-  return out;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return { pendingReady };
-}
-
-function countVisibleImageBitmapSettle(visibleKeys) {
-  let ready = 0;
-  let failed = 0;
-  let missingStore = 0;
-  for (const key of visibleKeys) {
-    if (imageBitmapCache[key]) {
-      ready++;
-    } else if (imageBitmapFailed.has(key)) {
-      failed++;
-    } else if (!BoardfishImageStore.hasSource(key)) {
-      missingStore++;
-    }
-  }
-  const count = visibleKeys.length;
-  const settled = ready + failed + missingStore;
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-  return {
-    count,
-    ready,
-    failed,
-    missingStore,
-    settled,
-    pending: Math.max(0, count - settled),
-  };
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return { ready, settled };
-}
-
-async function settleVisibleImageBitmapsForOpen(keys
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  , dbg = null
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-) {
-  const visibleKeys = keys;
-  const count = visibleKeys.length;
-  let state = countVisibleImageBitmapSettle(visibleKeys);
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const before = state.ready;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (!count || state.settled >= count) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', {
-      count,
-      before,
-      after: state.ready,
-      failed: state.failed,
-      missingStore: state.missingStore,
-      pending: state.pending,
-      settled: state.settled,
-      missing: Math.max(0, count - state.ready),
-      ms: 0,
-      skipped: !count ? 'no-visible-images' : 'already-ready',
-      target: count,
-    });
-    return { count, before, after: state.ready, failed: state.failed, missingStore: state.missingStore, pending: state.pending, settled: state.settled, missing: Math.max(0, count - state.ready), target: count, ms: 0, skipped: true };
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    return null;
-  }
-
-  const startedAt = performance.now();
-  const timeoutMs = 15000;
-  const deadline = startedAt + timeoutMs;
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let timedOut = false;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  while (state.settled < count) {
-    await new Promise((resolve) => setTimeout(resolve, 12));
-    state = countVisibleImageBitmapSettle(visibleKeys);
-    if (performance.now() >= deadline) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      timedOut = true;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      break;
-    }
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const ms = performance.now() - startedAt;
-  const pendingKeys = [];
-  if (timedOut) {
-    for (const key of visibleKeys) {
-      const source = BoardfishImageStore.getSource(key);
-      if (source && !imageBitmapCache[key] && !imageBitmapFailed.has(key)) pendingKeys.push(key);
-    }
-  }
-  OpenDebug.step(dbg, 'hydrate-visible:bitmap-settle', {
-    count,
-    before,
-    after: state.ready,
-    failed: state.failed,
-    missingStore: state.missingStore,
-    pending: state.pending,
-    settled: state.settled,
-    missing: Math.max(0, count - state.ready),
-    target: count,
-    ms,
-    timedOut,
-    timeoutMs,
-    pendingKeys,
-  });
-  return { count, before, after: state.ready, failed: state.failed, missingStore: state.missingStore, pending: state.pending, settled: state.settled, missing: Math.max(0, count - state.ready), target: count, ms, timedOut, timeoutMs, pendingKeys };
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return null;
-}
-
-/* BOARDFISH_DEV_DIAGNOSTICS_START */
-async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch') {
-  return hydrateImageKeysWithLimit(keys, dbg, label, getOpenHydrationConcurrency());
-}
-/* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-/* BOARDFISH_DEV_DIAGNOSTICS_START */
-const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
-  const t0 = performance.now();
-  return new Promise((resolve) => {
-    let settled = false;
-    let timeoutId = null;
-    const finish = (source = '') => {
-      if (settled) return;
-      settled = true;
-      if (timeoutId != null) clearTimeout(timeoutId);
-      OpenDebug.step(dbg, 'open-render-frame:settled', { reason, source, ms: performance.now() - t0 });
-      resolve();
-    };
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => finish('raf'));
-    }
-    timeoutId = setTimeout(() => finish('timeout'), 80);
-    if (settled) clearTimeout(timeoutId);
-  });
-};
-/* BOARDFISH_DEV_DIAGNOSTICS_END */
-
 function queueVisibleImageHydration(limit = 3
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
@@ -870,7 +627,6 @@ async function finishOpenedBoard(
     textHydrationPromise,
   ]);
   const imageDrawCaches = await settleOpenImageDrawCaches(getOpenHydrationConcurrency());
-  clearOpenInitialImagePreviews();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const pendingImages = getPendingHydratableImageKeys().length;
   OpenDebug.step(dbg, 'settle-open-image-draw-caches', imageDrawCaches);

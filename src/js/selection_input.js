@@ -251,12 +251,7 @@ function hideMultiSelectionOverlay() {
 }
 
 function updateSelectionOverlay() {
-  if (isBoardInputBlocked() && !shouldKeepSelectionOverlayWhileBlocked()) {
-    selOverlay.classList.toggle('visible', false);
-    hideMultiSelectionOverlay();
-    return;
-  }
-  if (!hasSelection()) {
+  if ((isBoardInputBlocked() && !shouldKeepSelectionOverlayWhileBlocked()) || !hasSelection()) {
     selOverlay.classList.toggle('visible', false);
     hideMultiSelectionOverlay();
     return;
@@ -807,11 +802,10 @@ const shouldCommitTextEditInputImmediately = (inputType = '', hadSelection = fal
   hadSelection || inputType.includes('Paste') || inputType.includes('Cut');
 
 const recordTextEditInputHistory = (id, inputType = '', hadSelection = false) => {
+  clearEditHistoryCheckpointTimer();
   if (shouldCommitTextEditInputImmediately(inputType, hadSelection)) {
-    clearEditHistoryCheckpointTimer();
     return pushEditHistoryIfChanged(id);
   }
-  clearEditHistoryCheckpointTimer();
   _editHistoryTimer = setTimeout(() => {
     _editHistoryTimer = null;
     pushEditHistoryIfChanged(id);

@@ -526,14 +526,6 @@ var ManualPerfDebug = (() => {
     };
   }
 
-  function panningHeadline(viewportReport = {}) {
-    return viewportNavigationHeadline(viewportReport);
-  }
-
-  function zoomingHeadline(viewportReport = {}) {
-    return viewportNavigationHeadline(viewportReport);
-  }
-
   function panningReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
       console.warn('[Boardfish perf] Debug tools are disabled in this build.');
@@ -552,7 +544,7 @@ var ManualPerfDebug = (() => {
       viewport,
       markers: markers.slice(),
     };
-    out.headline = panningHeadline(viewport);
+    out.headline = viewportNavigationHeadline(viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -616,7 +608,7 @@ var ManualPerfDebug = (() => {
     out.deltaY = deltaY;
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.testPoint = point;
-    out.headline = panningHeadline(out.viewport);
+    out.headline = viewportNavigationHeadline(out.viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -649,7 +641,7 @@ var ManualPerfDebug = (() => {
       viewport,
       markers: markers.slice(),
     };
-    out.headline = zoomingHeadline(viewport);
+    out.headline = viewportNavigationHeadline(viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -755,7 +747,7 @@ var ManualPerfDebug = (() => {
     out.deltaY = deltaY;
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.testPoint = point;
-    out.headline = zoomingHeadline(out.viewport);
+    out.headline = viewportNavigationHeadline(out.viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -833,7 +825,7 @@ var ManualPerfDebug = (() => {
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.start = start;
     out.end = end;
-    out.headline = panningHeadline(out.viewport);
+    out.headline = viewportNavigationHeadline(out.viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {

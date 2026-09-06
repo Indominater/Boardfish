@@ -813,9 +813,9 @@ test('text edit mode caches static images only for the Canvas2D fallback and kee
   assert.match(drawSource, /const useEditOffscreenCache = !ctx\.isBoardfishGpuContext && !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
   assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, openInitialImageSourceResolver, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, openInitialImageSourceResolver, editingId, true\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, openInitialImageSourceResolver, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, openInitialImageSourceResolver, editingId\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, openInitialImageSourceResolver\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, openInitialImageSourceResolver\);/);
+  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, null, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, null, editingId, true\);/);
+  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, null, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, null, editingId\);/);
+  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');
   const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);

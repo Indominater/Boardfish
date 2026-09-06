@@ -348,8 +348,7 @@ const textEditLineStartAt = (value, index) => {
   const text = String(value ?? '');
   const clamped = Math.max(0, Math.min(index ?? 0, text.length));
   if (clamped <= 0) return 0;
-  const newlineAt = text.lastIndexOf('\n', clamped - 1);
-  return newlineAt === -1 ? 0 : newlineAt + 1;
+  return text.lastIndexOf('\n', clamped - 1) + 1;
 };
 
 const applyTextEditLineIndent = (value, selection, outdent = false) => {
@@ -536,15 +535,9 @@ const exactTextEditLineCountForHeight = (height) => {
   return Math.abs(lines - rounded) < 1e-6 ? Math.max(1, rounded) : 0;
 };
 
-const textEditMinLinesForSession = (obj, preserveSize = false) => {
-  if (!obj || obj.type !== 'text' || !preserveSize) return 1;
-  const currentLines = exactTextEditLineCountForHeight(obj.h);
-  return currentLines > 1 ? currentLines : 1;
-};
-
 const setTextEditMinLinesForSession = (obj, preserveSize = false) => {
   if (!obj || obj.type !== 'text') return 1;
-  const minLines = textEditMinLinesForSession(obj, preserveSize);
+  const minLines = (preserveSize && exactTextEditLineCountForHeight(obj.h)) || 1;
   obj._editMinLines = minLines;
   if (preserveSize && minLines > 1) {
     obj._textEditPreservedMinLines = minLines;
@@ -746,25 +739,21 @@ const copyTextEditSelectionFromProxy = async (
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   let writePromise;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+  writePromise = BoardfishClipboardIO.copyTextToClipboard(clipboardText,
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const clipboardOptions = { ...meta, ...textStats };
-    writePromise = BoardfishClipboardIO.copyTextToClipboard(clipboardText, dbg, clipboardOptions);
+    dbg,
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  } else {
-    writePromise = BoardfishClipboardIO.copyTextToClipboard(clipboardText, meta);
-  }
+    typeof BOARDFISH_PRODUCTION === 'undefined' ? { ...meta, ...textStats } : meta,
+  );
   writePromise
     .then((result) => {
       if (result?.boardfishTokenWritten && meta.boardfishToken) {
         if (typeof markJsClipboardWebTokenWritten === 'function') {
-          if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          markJsClipboardWebTokenWritten(meta.boardfishToken
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            markJsClipboardWebTokenWritten(meta.boardfishToken, dbg);
+            , dbg
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          } else {
-            markJsClipboardWebTokenWritten(meta.boardfishToken);
-          }
+          );
         }
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -957,14 +946,9 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const rangeTextStartedAt = textEditorDebugNow();
+  const domSyncResult =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    syncTextEditProxyDomValue(proxy, value);
-  } else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    var domSyncResult = syncTextEditProxyDomValue(proxy, value);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
+  syncTextEditProxyDomValue(proxy, value);
   proxy.setRangeText(inserted, from, to, selectionMode);
   setTextEditProxyLogicalValue(proxy, proxy.value);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1233,7 +1217,6 @@ const pasteBoardfishTextSelectionIntoEditSelection = async (options = {}) => {
   textEditorClipStep(dbg, 'paste:text-selection-js-payload-ready', textEditorTextStats(payload.text));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const pasteOptions = {
-    immediateHistory: options.immediateHistory,
     selection: options.selection,
     inputType: 'insertFromPaste',
   };
@@ -1372,16 +1355,12 @@ function enterEdit(id, {
       pendingInputState._debugSeq = nextTextEditInputDebugSeq();
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    let domSyncBeforeNativeInput = null;
+    const domSyncBeforeNativeInput =
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
-    } else {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      domSyncBeforeNativeInput = syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
-      if (domSyncBeforeNativeInput.synced) pendingInputState.domSyncedBeforeNativeInput = true;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
+    syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (domSyncBeforeNativeInput.synced) pendingInputState.domSyncedBeforeNativeInput = true;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     beginTextEditHistoryAction(id, pendingInputState);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     recordInputSetupStep('beforeinput-state-ready', event, pendingInputState, {
@@ -1600,11 +1579,9 @@ function enterEdit(id, {
     }));
     _textInputSelectionHistorySuppress = textEditSelectionState(proxy);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const historyPushed = recordTextEditInputHistory(id, inputType, !!inputState.hasSelection);
+    const historyPushed =
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      recordTextEditInputHistory(id, inputType, !!inputState.hasSelection);
-    }
+    recordTextEditInputHistory(id, inputType, !!inputState.hasSelection);
     logInputStep('history-recorded', {
       historyPushed,
       hadSelection: !!inputState.hasSelection,
@@ -1764,9 +1741,12 @@ function enterEdit(id, {
         replaceOptions.source = 'event-text';
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const pasted = replaceTextEditSelectionWithPayload(id, proxy, {
+      const pasted =
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      replaceTextEditSelectionWithPayload(id, proxy, {
         text: fallbackText,
       }, replaceOptions);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       dbgApi?.end?.(dbg, {
         path: 'event-text',
         pasted,
@@ -1779,11 +1759,6 @@ function enterEdit(id, {
         ...textEditorTextStats(fallbackText),
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, replaceOptions);
-      }
       return;
     }
     const pasteOptions = {
@@ -1791,7 +1766,6 @@ function enterEdit(id, {
       proxy,
       event,
       selection,
-      immediateHistory: false,
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') pasteOptions.debug = dbg;
     pasteBoardfishTextSelectionIntoEditSelection(pasteOptions).then((pasted) => {
@@ -1820,9 +1794,12 @@ function enterEdit(id, {
         fallbackOptions.source = 'fallback-event-text';
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const fallbackPasted = replaceTextEditSelectionWithPayload(id, proxy, {
+      const fallbackPasted =
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      replaceTextEditSelectionWithPayload(id, proxy, {
         text: fallbackText,
       }, fallbackOptions);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       dbgApi?.end?.(dbg, {
         path: 'fallback-event-text',
         pasted: fallbackPasted,
@@ -1835,11 +1812,6 @@ function enterEdit(id, {
         ...textEditorTextStats(fallbackText),
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, fallbackOptions);
-      }
     }).catch((err) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logPasteStep('paste:text-edit-js-payload-error', { error: String(err) });
@@ -1863,9 +1835,12 @@ function enterEdit(id, {
         fallbackOptions.source = 'error-fallback-event-text';
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const fallbackPasted = replaceTextEditSelectionWithPayload(id, proxy, {
+      const fallbackPasted =
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      replaceTextEditSelectionWithPayload(id, proxy, {
         text: fallbackText,
       }, fallbackOptions);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       dbgApi?.end?.(dbg, {
         path: 'error-fallback-event-text',
         error: String(err),
@@ -1879,11 +1854,6 @@ function enterEdit(id, {
         ...textEditorTextStats(fallbackText),
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, fallbackOptions);
-      }
     });
   });
   proxy.addEventListener('blur', flushEditHistoryCheckpoint);
@@ -2079,17 +2049,15 @@ function enterEdit(id, {
         });
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const mutationStartedAt = textEditorDebugNow();
-        const mutationResult = replaceTextEditProxyRange(
+        const mutationResult =
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        replaceTextEditProxyRange(
           proxy, replacement.insertedText, replacement.start, replacement.end, 'start', true,
         );
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const textareaMutationMs = textEditorDebugRound(textEditorDebugNow() - mutationStartedAt);
         const logicalProxyValue = textEditProxyValue(proxy);
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-          replaceTextEditProxyRange(
-            proxy, replacement.insertedText, replacement.start, replacement.end, 'start', true,
-          );
-        }
         recordTextEditorInputPerfStep('keydown-delete-textarea-mutated', {
           seq: deleteDebugSeq,
           inputType,

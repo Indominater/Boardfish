@@ -548,10 +548,7 @@ const copySelected = () => {
     }
     let pngBlobPromise;
     try {
-      pngBlobPromise = Promise.resolve(canvasToPngBlob(canvas)).then((blob) => {
-        if (!blob) throw new Error('failed to create clipboard PNG');
-        return blob;
-      });
+      pngBlobPromise = canvasToPngBlob(canvas);
     } catch (err) {
       console.error('[copy] clipboard.write FAILED:', err);
       return false;

@@ -16,11 +16,10 @@ function isEditableTextShortcutTarget(target) {
   return !type || EDITABLE_INPUT_TYPES.has(type);
 }
 
-const hasSelectedImagesForKeyboardAction = (minimum = 1) => {
+const hasSelectedImagesForKeyboardAction = () => {
   if (!selectedIds?.size || !objectsMap?.get) return false;
-  let count = 0;
   for (const id of selectedIds) {
-    if (objectsMap.get(id)?.type === 'image' && ++count >= minimum) return true;
+    if (objectsMap.get(id)?.type === 'image') return true;
   }
   return false;
 };
