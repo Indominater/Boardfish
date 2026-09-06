@@ -342,6 +342,15 @@ test('zoom pill sync skips unchanged text writes', () => {
   assert.equal(context.islZoom.textContentWriteCount(), writesAfterInit + 1);
 });
 
+test('zoom pill shows whole percentages throughout the supported range', () => {
+  const context = loadViewportPillHarness();
+  for (const [zoom, label] of [[0.1, '10%'], [0.104, '10%'], [0.105, '11%'], [1.2345, '123%'], [10, '1000%']]) {
+    context.zoom = zoom;
+    context.syncIslandZoomDisplay('zoom-changed');
+    assert.equal(context.islZoom.textContent, label);
+  }
+});
+
 test('automatic board refreshes sync active overlays while explicit false opts out', () => {
   for (const options of [
     { selected: true, overlayVisible: false },

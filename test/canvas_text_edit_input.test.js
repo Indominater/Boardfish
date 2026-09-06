@@ -59,8 +59,7 @@ function loadCanvasInputHarness({ selected = true, touchInput = false } = {}) {
     viewportPans: [],
     viewportZoomPans: [],
     viewportTransforms: [],
-    ZOOM_MIN: 0.01,
-    ZOOM_MAX: 100,
+    BoardfishBoardTypes: require('../src/js/board_types.js'),
     obj,
     isSelected(id) { return selectedIds.has(id); },
     selectedBounds() {
@@ -507,6 +506,40 @@ test('a mobile pinch schedules the same canonical viewport transform frame as de
     source: 'touch-pinch-zoom',
     event: moveEvent,
   });
+});
+
+test('touch pinch clamps both zoom endpoints while retaining its anchor and allowing pan', () => {
+  for (const [distance, fartherDistance, expectedZoom] of [[2000, 3000, 10], [1, 0.5, 0.1]]) {
+    const context = loadCanvasInputHarness({ selected: false, touchInput: true });
+    context.panX = 10.125;
+    context.panY = -20.25;
+    const initial = { panX: context.panX, panY: context.panY, zoom: context.zoom };
+    const contacts = (span, centerX = 150, centerY = 100) => [
+      { identifier: 1, clientX: centerX - span / 2, clientY: centerY, target: context.canvas },
+      { identifier: 2, clientX: centerX + span / 2, clientY: centerY, target: context.canvas },
+    ];
+    const dispatch = (type, touches) => context.dispatchCanvas(type, {
+      type, target: context.canvas, touches, changedTouches: touches,
+      cancelable: true, preventDefault() {},
+    });
+    dispatch('touchstart', contacts(100));
+    dispatch('touchmove', contacts(distance));
+    const bounded = context.viewportZoomPans.at(-1);
+    assert.equal(bounded.zoom, expectedZoom);
+    assert.ok(Math.abs((150 - bounded.panX) / expectedZoom - (150 - initial.panX) / initial.zoom) < 1e-10);
+    assert.ok(Math.abs((100 - bounded.panY) / expectedZoom - (100 - initial.panY) / initial.zoom) < 1e-10);
+    assert.equal(context.viewportTransforms.at(-1).changed, true);
+
+    dispatch('touchmove', contacts(fartherDistance));
+    assert.deepEqual(context.viewportZoomPans.at(-1), bounded);
+    assert.equal(context.viewportTransforms.at(-1).changed, false);
+
+    dispatch('touchmove', contacts(fartherDistance, 160, 115));
+    assert.deepEqual(context.viewportZoomPans.at(-1), {
+      zoom: expectedZoom, panX: bounded.panX + 10, panY: bounded.panY + 15,
+    });
+    assert.equal(context.viewportTransforms.at(-1).changed, true);
+  }
 });
 
 test('selected-region touch drag commits the exact final lift position once', () => {

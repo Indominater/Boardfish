@@ -373,7 +373,7 @@
     if (!boardNavigationAllowed()) return;
     const start = touchPinchStartViewport;
     if (!start) return;
-    const nextZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, start.zoom * gesture.scale));
+    const nextZoom = BoardfishBoardTypes.clampZoom(start.zoom * gesture.scale, start.zoom);
     const scale = nextZoom / start.zoom;
     const changed = BoardfishViewportState.setZoomPan(
       nextZoom,

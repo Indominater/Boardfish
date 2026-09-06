@@ -352,14 +352,6 @@ const textEditLineStartAt = (value, index) => {
   return newlineAt === -1 ? 0 : newlineAt + 1;
 };
 
-const textEditLineIndentAt = (value, index) => {
-  const text = String(value ?? '');
-  const lineStart = textEditLineStartAt(text, index);
-  let end = lineStart;
-  while (end < text.length && (text[end] === ' ' || text[end] === '\t')) end++;
-  return text.slice(lineStart, end);
-};
-
 const applyTextEditLineIndent = (value, selection, outdent = false) => {
   const text = String(value ?? '');
   const selectionState = {
@@ -428,8 +420,10 @@ const applyTextEditLineBreakIndent = (value, selection) => {
   const start = Math.min(selectionState.start, selectionState.end);
   const end = Math.max(selectionState.start, selectionState.end);
   // Indentation after the caret is already retained in the unchanged suffix.
-  const indent = textEditLineIndentAt(text, start).slice(0, start - textEditLineStartAt(text, start));
-  const insert = '\n' + indent;
+  const lineStart = textEditLineStartAt(text, start);
+  let indentEnd = lineStart;
+  while (indentEnd < start && (text[indentEnd] === ' ' || text[indentEnd] === '\t')) indentEnd++;
+  const insert = '\n' + text.slice(lineStart, indentEnd);
   const nextValue = text.slice(0, start) + insert + text.slice(end);
   const nextCaret = start + insert.length;
   return {

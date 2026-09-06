@@ -22,7 +22,9 @@ The two atlases are loaded before the MSDF backend begins drawing text:
 | Reading/minification | 96 | 32 | Below 128 device pixels per em |
 | Magnification | 192 | 4 | At least 128 device pixels per em |
 
-Effective size is `16 × zoom × DPR`. The wider distance range supports small
+Viewport zoom ranges from 10% to 1000%. Effective size is `16 × zoom × DPR`.
+Both resources are needed within this range: the large resource starts at 800%
+zoom at DPR 1 and 400% at DPR 2. The wider distance range supports small
 text and minification; the narrow, higher-resolution resource reduces contour
 quantization at extreme zoom. Both resources are immutable and already loaded,
 so crossing the threshold requires no upload or deferred sharpening. The pair
@@ -118,7 +120,8 @@ at rest. Both renderers had 16.7 ms median next-frame intervals; cached lines
 had seven intervals above 25 ms and GPU text had none. This supports reduced
 CPU work and improved scheduling headroom, not a proportional FPS claim.
 
-Fourteen additional scale checks covered 1–10000% zoom at DPR 2. Moving the test
+Fourteen additional scale checks covered the then-supported 1–10000% zoom range
+at DPR 2. The current benchmark covers 10%–1000%. Moving the test
 glyph to coordinates (10,000,000, 10,000,000) and compensating the camera produced
 identical pixels at every scale, with no geometry uploads after initial layout
 preparation. The test follows a glyph stem at extreme magnification. Below one

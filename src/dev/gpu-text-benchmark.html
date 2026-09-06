@@ -29,7 +29,7 @@
   <p>The production renderer and bundled font atlas run against the current retained Canvas2D line renderer, using identical Boardfish layouts. Both mounted canvases stay at 400 × 256 CSS pixels.</p>
   <div class="controls">
     <label>DPR <select id="dpr"><option value="1" selected>1</option><option value="2">2</option></select></label>
-    <label>Zoom <select id="scale"><option value="0.01">1%</option><option value="0.1">10%</option><option value="0.25">25%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="2">200%</option><option value="4">400%</option><option value="10">1000%</option><option value="100">10000%</option></select></label>
+    <label>Zoom <select id="scale"><option value="0.1">10%</option><option value="0.25">25%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="2">200%</option><option value="4">400%</option><option value="10">1000%</option></select></label>
     <button id="reading" type="button" disabled>Reading comparison</button>
     <button id="dense" type="button" disabled>Dense comparison</button>
     <button id="zoom" type="button" disabled>Continuous zoom</button>
@@ -51,7 +51,7 @@
     <li>CPU submission and requestAnimationFrame intervals are distinct metrics. No GPU finish, fence, readback, screenshot, or timer query occurs inside timed frames. Frame intervals include browser scheduling; they are not GPU execution or confirmed presentation times.</li>
     <li>Cold first-draw preparation, GPU resource statistics before/after runs, and numeric counter deltas are reported separately. Atlas download/decode/upload timing is retained from renderer initialization. Native PNGs and pixel probes run only outside timing.</li>
     <li>Lifecycle checks exercise content replacement, wrapping width, movement, removal, reused IDs, and repeated static frames. Context restoration is an explicit separate action. Pixel checks verify nonblank text and known opaque image order; human inspection of the PNGs is still required for small-text quality.</li>
-    <li>Scale and precision checks visit 1% through 10000% immediately, with a glyph stem centered at extreme zoom. Moving both object coordinates to ten million world units and compensating the camera must preserve the same final pixels without geometry uploads. Native reading samples at 16, 20, and 28 device pixels per em are exported separately. The 1% sample has no legibility requirement.</li>
+    <li>Scale and precision checks visit 10% through 1000% immediately, with a glyph stem centered at high zoom. Moving both object coordinates to ten million world units and compensating the camera must preserve the same final pixels without geometry uploads. Native reading samples at 16, 20, and 28 device pixels per em are exported separately.</li>
     <li>Run with both panels fully visible in a foreground tab. DPR is an explicit backing-store setting; JSON also records the browser DPR. Use the native PNGs to inspect pixels without browser scaling.</li>
   </ul></details>
   <details open><summary>Results JSON</summary><pre id="json">No run yet.</pre></details>

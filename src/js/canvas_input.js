@@ -177,11 +177,11 @@ function handleViewportWheel(e) {
       if (collectDebug) {
         const { panXBefore, panYBefore, zoomBefore } = beforeMeta;
         const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
-        const zoomDeltaPct = zoomBefore ? ((zoom / zoomBefore) - 1) * 100 : 0;
+        const zoomDeltaPct = ((zoom / zoomBefore) - 1) * 100;
         const panDeltaX = panX - panXBefore;
         const panDeltaY = panY - panYBefore;
-        const focusWorldX = (e.clientX - panXBefore) / Math.max(zoomBefore || 1, 0.0001);
-        const focusWorldY = (e.clientY - panYBefore) / Math.max(zoomBefore || 1, 0.0001);
+        const focusWorldX = (e.clientX - panXBefore) / zoomBefore;
+        const focusWorldY = (e.clientY - panYBefore) / zoomBefore;
         ViewportDebug.recordPanZoom?.('wheel-zoom', {
           mode: 'zoom',
           source: 'wheel-zoom',
@@ -437,7 +437,7 @@ function startMousePan(e) {
 function createSelectionDragSession(startClientX, startClientY) {
   const grpItems = dragItemsForSelection();
   if (!grpItems.length) return null;
-  const dragZoom = Math.max(0.0001, zoom);
+  const dragZoom = zoom;
   let grpMoved = false;
   let finished = false;
   function applyGrpDrag(dx, dy) {

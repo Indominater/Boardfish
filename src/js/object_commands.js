@@ -60,13 +60,13 @@ function addText(wx, wy, content = '', options = {}) {
   const h = LINE_H + TEXT_PAD * 2;
   let w = content ? 200 : h * 6;
   if (content) {
-    const lines = content.split('\n');
-    const charW = 9.2, pad = 8;
     let maxLineLen = 1;
-    for (const line of lines) {
-      if (line.length > maxLineLen) maxLineLen = line.length;
+    for (let start = 0; start < content.length && maxLineLen < 75;) {
+      const end = content.indexOf('\n', start);
+      maxLineLen = Math.max(maxLineLen, (end < 0 ? content.length : end) - start);
+      start = end < 0 ? content.length : end + 1;
     }
-    w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
+    w = Math.min(Math.max(Math.round(maxLineLen * 9.2 + 16), 120), 700);
   }
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
   logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content) }));

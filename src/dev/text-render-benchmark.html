@@ -32,7 +32,7 @@
   <div class="controls">
     <label>Samples per path <input id="samples" type="number" min="8" max="120" value="30"></label>
     <label>Device pixel ratio <input id="dpr" type="number" min="1" max="4" step="0.25" value="1"></label>
-    <label>Scales <select id="scales"><option value="0.25,1,2,4">25%, 100%, 200%, 400%</option><option value="1">100% only</option><option value="0.1,0.5,1,1.25,2,4,8">Extended: 10% through 800%</option></select></label>
+    <label>Scales <select id="scales"><option value="0.25,1,2,4">25%, 100%, 200%, 400%</option><option value="1">100% only</option><option value="0.1,0.5,1,1.25,2,4,8,10">Extended: 10% through 1000%</option></select></label>
     <label>Completion <select id="completion"><option value="snapshot">Bitmap snapshot</option><option value="readback">CPU readback</option></select></label>
     <button id="run" class="primary" type="button" disabled>Run benchmark</button>
     <a id="download" hidden download="boardfish-text-benchmark.json">Download results JSON</a>
@@ -65,7 +65,7 @@
   <details><summary>Animation comparison JSON</summary><pre id="animation-json">No animation comparison run yet.</pre></details>
   <h2>Visual comparison</h2>
   <div class="controls">
-    <label>Scale <select id="visual-scale"><option value="0.25">25%</option><option value="0.5">50%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="2">200%</option><option value="4">400%</option><option value="8">800%</option><option value="16">1600%</option><option value="64">6400%</option><option value="100">10000%</option></select></label>
+    <label>Scale <select id="visual-scale"><option value="0.1">10%</option><option value="0.25">25%</option><option value="0.5">50%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="2">200%</option><option value="4">400%</option><option value="8">800%</option><option value="10">1000%</option></select></label>
     <label>Pixel origin <select id="visual-offset"><option value="0">Integer</option><option value="0.375">Fractional 0.375px</option></select></label>
     <label>Theme <select id="visual-theme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
     <button id="preview" type="button" disabled>Update comparison</button>

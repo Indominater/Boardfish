@@ -1,14 +1,12 @@
 'use strict';
 
-const ZOOM_MIN = 0.01, ZOOM_MAX = 100;
-
 (function initViewportStateBoundary(root) {
   function applyViewportState(
     nextPanX = panX,
     nextPanY = panY,
     nextZoom = zoom,
   ) {
-    nextZoom = Number.isFinite(nextZoom) ? (nextZoom > 0 ? nextZoom : 1) : zoom;
+    nextZoom = BoardfishBoardTypes.clampZoom(nextZoom, zoom);
     nextPanX = Number.isFinite(nextPanX) ? nextPanX : panX;
     nextPanY = Number.isFinite(nextPanY) ? nextPanY : panY;
     const changed = panX !== nextPanX || panY !== nextPanY || zoom !== nextZoom;
@@ -33,7 +31,8 @@ const ZOOM_MIN = 0.01, ZOOM_MAX = 100;
   }
 
   function zoomAroundClient(clientX, clientY, nextZoom) {
-    const normalizedZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoom));
+    const normalizedZoom = BoardfishBoardTypes.clampZoom(nextZoom, zoom);
+    if (normalizedZoom === zoom) return false;
     const scale = normalizedZoom / zoom;
     const nextPanX = clientX - (clientX - panX) * scale;
     const nextPanY = clientY - (clientY - panY) * scale;

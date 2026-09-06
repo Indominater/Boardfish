@@ -13,10 +13,7 @@
     MISSING: 'missing',
     STRING: 'string',
   });
-  const VIEWPORT_LIMITS = Object.freeze({
-    MIN_ZOOM: 0.01,
-    MAX_ZOOM: 100,
-  });
+  const MIN_ZOOM = 0.1, MAX_ZOOM = 10;
 
   function isObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -37,7 +34,7 @@
 
   function clampZoom(value, fallback = 1) {
     const zoom = finiteNumber(value, fallback);
-    return Math.max(VIEWPORT_LIMITS.MIN_ZOOM, Math.min(VIEWPORT_LIMITS.MAX_ZOOM, zoom));
+    return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
   }
 
   function imageRefKind(src) {

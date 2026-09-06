@@ -35,7 +35,7 @@ function loadViewportStateHarness({
   zoom = 1,
 } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/viewport_state.js'), 'utf8');
-  const context = { console };
+  const context = { console, BoardfishBoardTypes: require('../src/js/board_types.js') };
   vm.createContext(context);
   vm.runInContext(
     `var panX = ${panX}; var panY = ${panY}; var zoom = ${zoom};\n` +
@@ -68,6 +68,38 @@ test('zooming around a client point keeps its world-space anchor fixed', () => {
   assert.equal(context.BoardfishViewportState.zoomAroundClient(110, 220, 4), true);
 
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: -90, panY: -180, zoom: 4 });
+});
+
+test('every explicit viewport setter clamps zoom to 10 through 1000 percent', () => {
+  for (const [requested, expected] of [[-1, 0.1], [0.01, 0.1], [0.1, 0.1], [10, 10], [100, 10]]) {
+    const viewport = { panX: 12, panY: -34, zoom: expected };
+    assert.deepEqual(applyViewportState({}, 'setViewport', { ...viewport, zoom: requested }), viewport);
+    assert.deepEqual(applyViewportState({}, 'setZoomPan', requested, 12, -34), viewport);
+  }
+});
+
+test('zoom endpoints preserve the cursor anchor and repeated clamped input is a no-op', () => {
+  const clientX = 110.25, clientY = 220.75;
+  for (const [requested, expected] of [[0.001, 0.1], [100, 10]]) {
+    const initial = { panX: 10.125, panY: 20.625, zoom: 2 };
+    const context = loadViewportStateHarness(initial);
+    assert.equal(context.BoardfishViewportState.zoomAroundClient(clientX, clientY, requested), true);
+    const bounded = { ...context.viewportSnapshot() };
+    assert.equal(bounded.zoom, expected);
+    assert.ok(Math.abs((clientX - bounded.panX) / expected - (clientX - initial.panX) / initial.zoom) < 1e-10);
+    assert.ok(Math.abs((clientY - bounded.panY) / expected - (clientY - initial.panY) / initial.zoom) < 1e-10);
+    assert.equal(context.BoardfishViewportState.zoomAroundClient(clientX, clientY, requested), false);
+    assert.deepEqual({ ...context.viewportSnapshot() }, bounded);
+  }
+});
+
+test('invalid cursor zoom input leaves the viewport unchanged', () => {
+  const initial = { panX: 12.125, panY: -34.625, zoom: 1.25 };
+  for (const requested of [NaN, Infinity, -Infinity, undefined]) {
+    const context = loadViewportStateHarness(initial);
+    assert.equal(context.BoardfishViewportState.zoomAroundClient(110, 220, requested), false);
+    assert.deepEqual({ ...context.viewportSnapshot() }, initial);
+  }
 });
 
 test('viewport rendering uses one native-quality branch on every platform', () => {

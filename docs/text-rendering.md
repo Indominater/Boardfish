@@ -35,8 +35,9 @@ work was replaying text drawing commands after the layout was already cached.
   `src/js/clipboard_export_init.js` copies text as plain text. Image exports use a
   separate path. The renderer change does not require a board-format change.
 - `src/js/board_limits.js` allows 100 objects and 500 MiB of board content.
-  `src/js/viewport_state.js` permits zoom from 0.01 to 100. Large text documents
-  and extreme zoom make one full-textbox raster an unsuitable memory policy.
+  `src/js/viewport_state.js` permits zoom from 0.1 to 10 (10%–1000%). Large text
+  documents and high device pixel densities make one full-textbox raster an
+  unsuitable memory policy.
 
 ## Retained ASCII line rasters
 

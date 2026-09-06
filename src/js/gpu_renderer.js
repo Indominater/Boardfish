@@ -16,7 +16,6 @@
     layout(location=0) in vec3 instance;
     uniform mat3 transform;
     uniform vec2 viewport;
-    uniform vec2 origin;
     uniform float fontSize;
     uniform sampler2D glyphs;
     out vec2 uv;
@@ -25,7 +24,7 @@
       vec2 corner=vec2(gl_VertexID&1, (gl_VertexID>>1)&1);
       vec4 plane=texelFetch(glyphs,ivec2(int(instance.z),0),0);
       vec4 atlas=texelFetch(glyphs,ivec2(int(instance.z),1),0);
-      vec2 local=origin+instance.xy+(plane.xy+corner*plane.zw)*fontSize;
+      vec2 local=instance.xy+(plane.xy+corner*plane.zw)*fontSize;
       vec2 pixel=(transform*vec3(local,1.)).xy;
       gl_Position=vec4(pixel.x/viewport.x*2.-1.,1.-pixel.y/viewport.y*2.,0.,1.);
       uv=atlas.xy+corner*atlas.zw;
@@ -93,7 +92,7 @@
   }
   function matrix3(m) { return [m[0],m[1],0,m[2],m[3],0,m[4],m[5],1]; }
   function state() {
-    return { matrix: IDENTITY.slice(), fillStyle:'#000000', globalAlpha:1,
+    return { matrix: IDENTITY, fillStyle:'#000000', globalAlpha:1,
       globalCompositeOperation:'source-over', imageSmoothingEnabled:true,
       imageSmoothingQuality:'high', font:'16px sans-serif', textBaseline:'alphabetic',
       textAlign:'left', direction:'ltr', fontKerning:'none', letterSpacing:'0px',
@@ -121,7 +120,7 @@
     let textProgram, quadProgram, textVao, quadVao;
     let fontResources = [];
     let lost = false, disposed = false, fontReady = false, generation = 0;
-    let frame = 0, bufferBytes = 0, imageBytes = 0, fallbackBytes = 0;
+    let bufferBytes = 0, imageBytes = 0, fallbackBytes = 0;
     let measurementCanvas, measurementContext, colorContext;
     let ready = Promise.resolve(false);
     const colorCache = new Map();
@@ -164,7 +163,7 @@
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     }
     function initialize() {
-      textProgram=program(VERTEX,FRAGMENT,['transform','viewport','origin','fontSize','glyphs','atlas','unitRange','color','deviceEm']);
+      textProgram=program(VERTEX,FRAGMENT,['transform','viewport','fontSize','glyphs','atlas','unitRange','color','deviceEm']);
       quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','rect','sourceRect','image','color','textured']);
       textVao=gl.createVertexArray(); quadVao=gl.createVertexArray();
       gl.disable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.disable(gl.DITHER);
@@ -240,17 +239,17 @@
       colorCache.set(key,color);return color;
     }
     function color() { const c=rgba(current.fillStyle);return [c[0],c[1],c[2],c[3]*current.globalAlpha]; }
-    function setup(value,originX=0,originY=0) {
+    function setup(value) {
       gl.useProgram(value.value);
       gl.viewport(0,0,canvas.width,canvas.height);
-      gl.uniformMatrix3fv(value.locations.transform,false,matrix3(multiply(current.matrix,[1,0,0,1,originX,originY])));
       gl.uniform2f(value.locations.viewport,canvas.width,canvas.height);
       if(current.globalCompositeOperation==='copy')gl.disable(gl.BLEND);else gl.enable(gl.BLEND);
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ function drew(kind) { stats.drawCalls++;stats.frameDrawCalls++;stats[kind]++; } /* BOARDFISH_DEV_DIAGNOSTICS_END */
     function quad(x,y,w,h,texture,uv=[0,0,1,1],tint=color()) {
       if(lost||disposed||!w||!h)return;
-      setup(quadProgram,x,y);gl.bindVertexArray(quadVao);
+      setup(quadProgram);gl.bindVertexArray(quadVao);
+      gl.uniformMatrix3fv(quadProgram.locations.transform,false,matrix3(multiply(current.matrix,[1,0,0,1,x,y])));
       gl.uniform4f(quadProgram.locations.rect,0,0,w,h);
       gl.uniform4fv(quadProgram.locations.sourceRect,uv);
       gl.uniform4fv(quadProgram.locations.color,tint);
@@ -284,7 +283,7 @@
     function deleteFallback(key,entry) {
       fallback.delete(key);fallbackBytes-=entry.bytes;
       const owner=images.get(entry.source);
-      if(owner)for(const record of Array.from(owner.tiles.values()))deleteTexture(record);
+      if(owner)for(const record of owner.tiles.values())deleteTexture(record);
       if(images.get(entry.source)===owner)images.delete(entry.source);
       immutableCanvases.delete(entry.source);
       // Image owners hold source canvases strongly. Release both representations
@@ -302,7 +301,7 @@
     }
     function resetResources() {
       clearTextCache();
-      for(const record of Array.from(textures.keys()))deleteTexture(record);
+      for(const record of textures.keys())deleteTexture(record);
       images.clear();
     }
     function objectKey(obj) {
@@ -415,7 +414,6 @@
         gl.uniform1f(textProgram.locations.deviceEm,deviceEm);
         const x=obj.x+settings.padding,y=obj.y+settings.padding+chunk.index*ROWS_PER_CHUNK*settings.lineHeight;
         gl.uniformMatrix3fv(textProgram.locations.transform,false,matrix3(multiply(current.matrix,[1,0,0,1,x,y])));
-        gl.uniform2f(textProgram.locations.origin,0,0);
         gl.bindBuffer(gl.ARRAY_BUFFER,chunk.buffer);
         gl.vertexAttribPointer(0,3,gl.FLOAT,false,INSTANCE_BYTES,first.start*INSTANCE_BYTES);
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,count);
@@ -523,7 +521,7 @@
       let owner=images.get(source);
       const version=source.currentSrc||source.src||'';
       if(owner&&(owner.width!==width||owner.height!==height||owner.version!==version)) {
-        for(const record of Array.from(owner.tiles.values()))deleteTexture(record);owner=null;
+        for(const record of owner.tiles.values())deleteTexture(record);owner=null;
       }
       if(!owner) { owner={source,width,height,version,tiles:new Map()};images.set(source,owner); }
       for(let ty=Math.floor(y1/tileSize)*tileSize;ty<y2;ty+=tileSize) {
@@ -536,7 +534,6 @@
           trimResources();
         }
       }
-      trimResources();
     }
     function configureMeasurement(context) {
       for(const key of ['font','fontKerning','letterSpacing','wordSpacing','fontStretch','fontVariantCaps','textAlign','direction','textBaseline']) {
@@ -585,13 +582,13 @@
     const context={
       canvas,isBoardfishGpuContext:true,
       get fontReady(){return fontReady;},get ready(){return ready;},
-      save(){stack.push({...current,matrix:current.matrix.slice()});},
+      save(){stack.push({...current});},
       restore(){if(stack.length)current=stack.pop();},
       setTransform(...values){
         if(values.length===1&&typeof values[0]==='object') {const m=values[0];current.matrix=[m.a??m.m11??1,m.b??m.m12??0,m.c??m.m21??0,m.d??m.m22??1,m.e??m.m41??0,m.f??m.m42??0];}
-        else if(values.length===6&&values.every(Number.isFinite))current.matrix=values.slice();
+        else if(values.length===6&&values.every(Number.isFinite))current.matrix=values;
       },
-      resetTransform(){current.matrix=IDENTITY.slice();},
+      resetTransform(){current.matrix=IDENTITY;},
       getTransform(){const [a,b,c,d,e,f]=current.matrix;return {a,b,c,d,e,f,is2D:true};},
       transform(...values){if(values.length===6&&values.every(Number.isFinite))current.matrix=multiply(current.matrix,values);},
       translate(x,y){current.matrix=multiply(current.matrix,[1,0,0,1,x,y]);},
@@ -609,14 +606,14 @@
       drawTextLayout,
       prepareTextLayout(layout,obj,style){const result=prepare(layout,obj,style);trimResources();return result!==null;},
       beginFrame(objects){
-        frame++;/* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.frames++;stats.frameDrawCalls=stats.frameBufferUploads=stats.frameGlyphsDrawn=0; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.frames++;stats.frameDrawCalls=stats.frameBufferUploads=stats.frameGlyphsDrawn=0; /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if(objects) {
           const live=new Set();for(const obj of objects)if(obj?.type==='text')live.add(objectKey(obj));
           for(const [key,chunk] of chunks)if(!live.has(chunk.objectKey))deleteChunk(key,chunk);
         }
       },
       endFrame(){trimResources();},clearTextCache,resetResources,
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */ getStats(){return {...stats,fontReady,lost,frame,bufferBytes,imageBytes,fallbackBytes,chunkCount:chunks.size,imageCount:images.size,textureCount:textures.size,atlasBytes:fontResources.reduce((bytes,resource)=>bytes+(resource.ready?resource.font.width*resource.font.height*4+4096:0),0)};}, /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */ getStats(){return {...stats,fontReady,lost,frame:stats.frames,bufferBytes,imageBytes,fallbackBytes,chunkCount:chunks.size,imageCount:images.size,textureCount:textures.size,atlasBytes:fontResources.reduce((bytes,resource)=>bytes+(resource.ready?resource.font.width*resource.font.height*4+4096:0),0)};}, /* BOARDFISH_DEV_DIAGNOSTICS_END */
       dispose(){
         if(disposed)return;resetResources();disposed=true;fontReady=false;generation++;
         canvas.removeEventListener?.('webglcontextlost',lostContext);canvas.removeEventListener?.('webglcontextrestored',restoredContext);

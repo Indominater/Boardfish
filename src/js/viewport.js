@@ -13,13 +13,6 @@ var _islMsgTimer = null;
 var _islMsgToken = 0;
 var _islandSyncedZoom = NaN;
 
-const formatZoomPercent = (value = zoom) => {
-  const pct = Math.max(0, (Number.isFinite(value) ? value : 1) * 100);
-  if (pct >= 10) return `${Math.round(pct)}%`;
-  if (pct >= 1) return `${(Math.round(pct * 10) / 10).toFixed(1)}%`;
-  return `${Math.max(0.1, Math.round(pct * 10) / 10)}%`;
-};
-
 const isOpeningFreezeActive = () => {
   return !!openingShield?.classList.contains('active') && openingShield.classList.contains('opening-freeze');
 };
@@ -72,7 +65,7 @@ function setIslandVisible(visible) {
 const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
   if (_islMsgActive) return;
   _islandSyncedZoom = zoom;
-  const zoomText = formatZoomPercent();
+  const zoomText = `${Math.round(zoom * 100)}%`;
   if (island.dataset.mode === 'zoom' && islZoom.textContent === zoomText && island.classList.contains('visible')) return;
   if (islZoom.textContent !== zoomText) islZoom.textContent = zoomText;
   if (island.dataset.mode !== 'zoom') island.dataset.mode = 'zoom';

@@ -17,14 +17,13 @@ function selectedBounds() {
 }
 
 function viewportWorldRect(padScreenPx = 0) {
-  const z = Math.max(zoom, 0.001);
-  const pad = padScreenPx / z;
+  const pad = padScreenPx / zoom;
   const { width, height } = boardSurfaceCssSize();
   return {
-    x1: -panX / z - pad,
-    y1: -panY / z - pad,
-    x2: (width - panX) / z + pad,
-    y2: (height - panY) / z + pad,
+    x1: -panX / zoom - pad,
+    y1: -panY / zoom - pad,
+    x2: (width - panX) / zoom + pad,
+    y2: (height - panY) / zoom + pad,
   };
 }
 

@@ -429,10 +429,10 @@
     draw('gpu');
     const layoutPreparationDelta = delta(layoutPreparationBefore, stats());
     const glyph = measureTextGlyphMetricsWithFont('H', FONT);
-    // Follow the left stem so the 10000% sample retains visible glyph ink.
+    // Follow the left stem so the 1000% sample retains visible glyph ink.
     const anchorX = TEXT_PAD - glyph.left + 0.65;
     const anchorY = TEXT_PAD + TEXT_BASELINE_Y_OFFSET - glyph.ascent * 0.5;
-    const scales = [0.01, 0.03, 0.1, 0.18, 0.25, 0.5, 1, 1.25, 1.75, 2, 4, 10, 25, 100];
+    const scales = [0.1, 0.18, 0.25, 0.5, 1, 1.25, 1.75, 2, 4, 10];
     const checks = [], startStats = stats();
     for (const scale of scales) {
       const images = [], uploadCounts = [];
