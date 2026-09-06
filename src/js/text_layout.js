@@ -166,8 +166,7 @@ function configureTextCanvasContext(context) {
   try { context.direction = 'ltr'; } catch (_) {}
 }
 
-var _measureCanvas = document.createElement('canvas');
-var _measureCtx = _measureCanvas.getContext('2d');
+var _measureCtx = document.createElement('canvas').getContext('2d');
 configureTextCanvasContext(_measureCtx);
 refreshTextMetrics();
 const TEXT_MEASURE_CACHE_MAX_ENTRIES = 4096;

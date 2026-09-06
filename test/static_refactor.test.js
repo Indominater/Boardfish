@@ -39,11 +39,8 @@ function jsSourceFiles() {
   ];
 }
 
-function manifestScripts(name) {
-  const source = readSource('src/js/startup_manifest.mjs');
-  const match = source.match(new RegExp(`export const ${name} = Object\\.freeze\\(\\[([\\s\\S]*?)\\]\\);`));
-  assert.ok(match, `${name} is missing`);
-  return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+async function manifestScripts(name) {
+  return (await import('../src/js/startup_manifest.mjs'))[name];
 }
 
 test('repository no longer contains the removed app shell', () => {
@@ -75,10 +72,10 @@ test('package scripts and dependencies are web-only', () => {
   assert.doesNotMatch(lock, new RegExp(bridgeWord, 'i'));
 });
 
-test('startup manifest exposes only web variants', () => {
+test('startup manifest exposes only web variants', async () => {
   const manifest = readSource('src/js/startup_manifest.mjs');
-  const webDev = manifestScripts('WEB_DEV_SCRIPTS');
-  const webPreview = manifestScripts('WEB_PREVIEW_SCRIPTS');
+  const webDev = await manifestScripts('WEB_DEV_SCRIPTS');
+  const webPreview = await manifestScripts('WEB_PREVIEW_SCRIPTS');
 
   assert.doesNotMatch(manifest, /VARIANT_SCRIPTS/);
   assert.doesNotMatch(manifest, new RegExp(shellWord.toUpperCase()));

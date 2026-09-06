@@ -39,10 +39,6 @@ var PillDebug = (() => {
     return entry;
   }
 
-  function log(event, data = {}) {
-    return push(event, data);
-  }
-
   function enable() {
     if (!DEBUG_TOOLS_ENABLED) return;
     enabled = true;
@@ -147,7 +143,7 @@ var PillDebug = (() => {
     }
   }
 
-  return { enable, disable, setVerbose, reset, dump, summary, timeline, diagnose, log, get enabled() { return enabled; } };
+  return { enable, disable, setVerbose, reset, dump, summary, timeline, diagnose, log: push, get enabled() { return enabled; } };
 })();
 exposeDebug({ pill: PillDebug });
 
@@ -252,8 +248,6 @@ var MenuDebug = (() => {
     return rows;
   }
 
-  function log(event, data = {}) { return push(event, data); }
-
   function logDomEvent(label, event) {
     lastPointerEvent = event;
     push(label, {
@@ -276,7 +270,7 @@ var MenuDebug = (() => {
     events: eventsCopy,
     last,
     summary,
-    log,
+    log: push,
     logDomEvent,
     get enabled() { return enabled; },
   };

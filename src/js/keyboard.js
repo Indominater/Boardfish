@@ -136,7 +136,6 @@ document.addEventListener('keydown', (e) => {
     if (!editingId) {
       consumeShortcutEvent(e);
       runShortcutCommand('copy', copySelected);
-      return;
     }
     return;
   }

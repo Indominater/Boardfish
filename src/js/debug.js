@@ -1007,8 +1007,7 @@ var HistoryDebug = (() => {
         e.step === 'restore-edit-caret' ||
         e.step === 'flush-edit-history' ||
         e.step === 'restore-done'
-      ))
-      .filter(e => (
+      ) && (
         Number(e.meta?.textCharCount || 0) ||
         Number(e.meta?.largestTextChars || 0) ||
         Number(e.meta?.runtimeTextLayoutLines || 0) ||

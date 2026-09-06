@@ -62,7 +62,6 @@ async function exportImageBatch({
   skipMeta = null,
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   errorLabel,
-  clearSelectionAfter = false,
 }) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = ExportDebug.start(op, startMeta);
@@ -117,7 +116,7 @@ async function exportImageBatch({
     ExportDebug.end(dbg, { saved, imageCount: imageObjs.length, ...downloadResult });
     if (downloadedCount > 0) {
       finishPillTask({
-        beforeFinish: () => BoardfishExportUtils.finishImageExportInputShield(clearSelectionAfter && imageObjs.length),
+        beforeFinish: hideInputShield,
         busyPill,
         finalMsg: downloadedCount === 1 ? '1 Image Exported' : `${downloadedCount} Images Exported`,
       });

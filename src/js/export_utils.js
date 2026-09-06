@@ -726,15 +726,9 @@
     return selectedObjs;
   }
 
-  function finishImageExportInputShield(clearSelection) {
-    hideInputShield();
-    if (clearSelection) deselectAll();
-  }
-
   root.BoardfishExportUtils = Object.freeze({
     createProgressUpdater,
     downloadImageObjects,
-    finishImageExportInputShield,
     guessImageExtForObjectExport,
     guessImageExtFromDataUrl,
     randomHex,

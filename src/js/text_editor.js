@@ -967,10 +967,6 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
-const editableTextPayload = (payload = {}) => ({
-  text: textForTextObjectPaste(payload.text || ''),
-});
-
 const synchronousBoardfishClipboardTokenFromPasteEvent = (event) => {
   if (
     !event?.clipboardData ||
@@ -997,8 +993,8 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
   if (!boardfishPasteEventMatchesCurrentTextSelectionClipboard(options.event)) return false;
 
   const fallbackText = normalizeTextContent(options.fallbackText || '');
-  const editablePayload = editableTextPayload(payload);
-  if (!editablePayload.text || fallbackText !== editablePayload.text) return false;
+  const pastedText = textForTextObjectPaste(payload.text || '');
+  if (!pastedText || fallbackText !== pastedText) return false;
 
   const inputType = options.inputType || 'insertFromPaste';
   const currentProxyValue = textEditProxyValue(proxy);
@@ -1010,7 +1006,7 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
     replacement: {
       start: selection.start,
       end: selection.end,
-      insertedText: editablePayload.text,
+      insertedText: pastedText,
     },
     nativePasteHandled: true,
   };
@@ -1020,15 +1016,15 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
       path: 'jsClipboard-text-selection-native',
       pasted: true,
       textObjectCount: 1,
-      textCharCount: editablePayload.text.length,
-      largestTextChars: editablePayload.text.length,
-      ...textEditorTextStats(editablePayload.text),
+      textCharCount: pastedText.length,
+      largestTextChars: pastedText.length,
+      ...textEditorTextStats(pastedText),
     };
   }
   beginTextEditHistoryAction(id, inputState);
   proxy?._boardfishSetPendingInputState?.(inputState);
   return {
-    text: editablePayload.text,
+    text: pastedText,
   };
 };
 
@@ -1107,8 +1103,7 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
     ...textEditorTextStats(payload.text),
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const editablePayload = editableTextPayload(payload);
-  const text = editablePayload.text;
+  const text = textForTextObjectPaste(payload.text || '');
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-editable-payload-done', textEditorTextStats(text));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -2280,10 +2275,9 @@ function exitEdit() {
   const exitStart = textEditorDebugNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const id = editingId;
-  const objAtStart = objectsMap.get(id);
   const proxy = _editEl;
-  const proxyLogicalValue = textEditProxyValue(proxy);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const objAtStart = objectsMap.get(id);
   let stepStart = exitStart;
   const logStep = (label, obj = objAtStart, meta = {}) => {
     const t = textEditorDebugNow();
@@ -2299,7 +2293,7 @@ function exitEdit() {
     phase: 'exit',
     ms: 0,
     totalMs: 0,
-    proxyChars: proxyLogicalValue.length,
+    proxyChars: textEditProxyValue(proxy).length,
     domProxyChars: typeof proxy?.value === 'string' ? proxy.value.length : '',
     domValueStale: !!proxy?._boardfishDomValueStale,
     selectionStart: proxy?.selectionStart ?? '',

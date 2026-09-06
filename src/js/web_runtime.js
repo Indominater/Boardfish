@@ -160,14 +160,6 @@
     return Math.min(FILE_OPERATION_MAX_TIMEOUT_MS, FILE_OPERATION_TIMEOUT_MS + transferMs);
   }
 
-  function hasOpenFileSystemAccess() {
-    return typeof root.showOpenFilePicker === 'function';
-  }
-
-  function hasSaveFileSystemAccess() {
-    return typeof root.showSaveFilePicker === 'function';
-  }
-
   function pickFileWithInput(accept) {
     return new Promise((resolve) => {
       const input = document.createElement('input');
@@ -215,7 +207,7 @@
   }
 
   async function openFileDialog() {
-    if (hasOpenFileSystemAccess()) {
+    if (typeof root.showOpenFilePicker === 'function') {
       try {
         const handles = await root.showOpenFilePicker({
           multiple: false,
@@ -232,7 +224,7 @@
   }
 
   async function saveFileDialog(defaultName = 'board.bf') {
-    if (hasSaveFileSystemAccess()) {
+    if (typeof root.showSaveFilePicker === 'function') {
       try {
         const handle = await root.showSaveFilePicker({
           suggestedName: defaultName || 'board.bf',

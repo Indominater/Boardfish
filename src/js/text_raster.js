@@ -55,7 +55,7 @@
     const maxEntries = positiveLimit(options.maxEntries, 2048);
     const maxLineBytes = positiveLimit(options.maxLineBytes, DEFAULT_MAX_LINE_BYTES);
     const maxDimension = positiveLimit(options.maxDimension, 4096);
-    let plans = new WeakMap();
+    const plans = new WeakMap();
     const entries = new Map();
     let bytes = 0;
     let frame = 0;
@@ -89,7 +89,6 @@
 
     function clear() {
       for (const entry of entries.keys()) removeEntry(entry);
-      plans = new WeakMap();
     }
 
     function beginFrame() {
@@ -164,14 +163,11 @@
             if (!target) throw new Error('No text raster context');
             target.font = style.font;
             target.fillStyle = style.fillStyle;
-            target.textBaseline = 'alphabetic';
             target.textAlign = 'left';
             target.direction = 'ltr';
             target.fontKerning = 'none';
             target.fontStretch = 'normal';
             target.fontVariantCaps = 'normal';
-            target.letterSpacing = '0px';
-            target.wordSpacing = '0px';
             target.setTransform(scale, 0, 0, scale, TILE_GUTTER - left - offset, -top);
             // Optional measured ink extents avoid repainting glyphs that cannot
             // touch this tile. This only constructs complete line tiles; it is

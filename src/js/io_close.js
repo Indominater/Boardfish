@@ -261,16 +261,12 @@ function scheduleOpenFrameProbe(dbg, label) {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-function getVisibleWorldBounds() {
-  return viewportWorldRect();
-}
-
 const isOpenHydratableImageSource = (source) => {
   return typeof source === 'string' || isWebImageRef(source);
 };
 
 function getVisibleImageKeys(limit = Infinity) {
-  const b = getVisibleWorldBounds();
+  const b = viewportWorldRect();
   const keys = [];
   const seen = new Set();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

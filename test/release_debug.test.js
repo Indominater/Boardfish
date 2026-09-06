@@ -111,11 +111,8 @@ function readJson(relativePath) {
   return JSON.parse(readSource(relativePath));
 }
 
-function manifestScripts(name) {
-  const source = readSource('src/js/startup_manifest.mjs');
-  const match = source.match(new RegExp(`export const ${name} = Object\\.freeze\\(\\[([\\s\\S]*?)\\]\\);`));
-  assert.ok(match, `${name} is missing`);
-  return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+async function manifestScripts(name) {
+  return (await import('../src/js/startup_manifest.mjs'))[name];
 }
 
 let builtWebPreviewBundle = null;
@@ -217,9 +214,9 @@ test('release sources do not contain enabled debugger switches', () => {
   }
 });
 
-test('web manifests preserve developer diagnostics and exclude them from release', () => {
-  const webDevScripts = manifestScripts('WEB_DEV_SCRIPTS');
-  const webPreviewScripts = manifestScripts('WEB_PREVIEW_SCRIPTS');
+test('web manifests preserve developer diagnostics and exclude them from release', async () => {
+  const webDevScripts = await manifestScripts('WEB_DEV_SCRIPTS');
+  const webPreviewScripts = await manifestScripts('WEB_PREVIEW_SCRIPTS');
   const diagnosticScripts = webDevScripts.filter((script) => WEB_DEV_DIAGNOSTIC_SCRIPTS.includes(script));
 
   assert.equal(webDevScripts[0], 'web_env.js', 'developer mode bootstrap must load before diagnostics');

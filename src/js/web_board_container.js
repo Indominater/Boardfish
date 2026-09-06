@@ -19,22 +19,12 @@
   const imageSourceCrcCache = new WeakMap();
   const imageSourceArchiveIdentityCache = new WeakMap();
 
-  function textEncoder() {
-    if (!utf8TextEncoder) utf8TextEncoder = new TextEncoder();
-    return utf8TextEncoder;
-  }
-
-  function textDecoder() {
-    if (!utf8TextDecoder) utf8TextDecoder = new TextDecoder();
-    return utf8TextDecoder;
-  }
-
   function utf8Encode(text) {
-    return textEncoder().encode(String(text));
+    return (utf8TextEncoder ||= new TextEncoder()).encode(String(text));
   }
 
   function utf8Decode(bytes) {
-    return textDecoder().decode(bytes);
+    return (utf8TextDecoder ||= new TextDecoder()).decode(bytes);
   }
 
   function unsupportedContainerError() {

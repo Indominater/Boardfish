@@ -452,15 +452,13 @@ var OpenDebug = (() => {
     return Math.round(numberValue(value) * 100) / 100;
   }
 
-  function sumMeta(rows, step, field) {
+  function sumMeta(rows, field) {
     return roundMs(rows
-      .filter(e => e.step === step)
       .reduce((sum, event) => sum + numberValue(event.meta?.[field]), 0));
   }
 
-  function maxMeta(rows, step, field) {
+  function maxMeta(rows, field) {
     return roundMs(rows
-      .filter(e => e.step === step)
       .reduce((max, event) => Math.max(max, numberValue(event.meta?.[field])), 0));
   }
 
@@ -632,12 +630,12 @@ var OpenDebug = (() => {
       initialScaledVariantPendingImages: initialRender?.meta?.scaledVariantPendingImages ?? '',
       decodeCount: bitmapRows.length,
       decodeQueueStarts: decodeQueueStarts.length,
-      decodeQueueWaitTotalMs: sumMeta(rows, 'cache-image:decode-queue:start', 'queueWaitMs'),
-      decodeQueueWaitMaxMs: maxMeta(rows, 'cache-image:decode-queue:start', 'queueWaitMs'),
-      bitmapDecodeTotalMs: sumMeta(rows, 'cache-image:createImageBitmap', 'ms'),
-      bitmapDecodeMaxMs: maxMeta(rows, 'cache-image:createImageBitmap', 'ms'),
-      imageCacheTotalMs: sumMeta(rows, 'cache-image:done', 'ms'),
-      imageCacheMaxMs: maxMeta(rows, 'cache-image:done', 'ms'),
+      decodeQueueWaitTotalMs: sumMeta(decodeQueueStarts, 'queueWaitMs'),
+      decodeQueueWaitMaxMs: maxMeta(decodeQueueStarts, 'queueWaitMs'),
+      bitmapDecodeTotalMs: sumMeta(bitmapRows, 'ms'),
+      bitmapDecodeMaxMs: maxMeta(bitmapRows, 'ms'),
+      imageCacheTotalMs: sumMeta(cacheDoneRows, 'ms'),
+      imageCacheMaxMs: maxMeta(cacheDoneRows, 'ms'),
       imageCacheErrors: cacheErrors.length,
       backgroundHydrationMs: backgroundDone?.meta?.ms ?? '',
       backgroundHydratedImages: backgroundDone?.meta?.hydrated ?? '',

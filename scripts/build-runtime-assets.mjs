@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, stat, writeFile, copyFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile, copyFile, cp } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -132,24 +132,10 @@ async function resetDir(dir) {
   await mkdir(resolved, { recursive: true });
 }
 
-async function copyDir(from, to) {
-  await mkdir(to, { recursive: true });
-  for (const entry of await readdir(from)) {
-    const source = path.join(from, entry);
-    const target = path.join(to, entry);
-    const info = await stat(source);
-    if (info.isDirectory()) {
-      await copyDir(source, target);
-    } else {
-      await copyFile(source, target);
-    }
-  }
-}
-
 async function copyStaticAssets(outDir) {
   await copyFile(path.join(srcRoot, 'styles.css'), path.join(outDir, 'styles.css'));
   await copyFile(path.join(srcRoot, 'boardfish-icon.png'), path.join(outDir, 'boardfish-icon.png'));
-  await copyDir(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'));
+  await cp(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'), { recursive: true, dereference: true });
   await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
   await copyFile(path.join(srcRoot, 'boardfish-icon-192.png'), path.join(outDir, 'boardfish-icon-192.png'));
 }
@@ -182,14 +168,11 @@ function normalizeQualifiedDiagnosticApis(source) {
 }
 
 function inlineProductionDiagnosticFlags(source) {
-  let next = source;
-  for (const flag of PRODUCTION_FALSE_DIAGNOSTIC_FLAGS) {
-    next = next.replace(
-      new RegExp(`\\b(?:const|let|var)\\s+${escapeRegExp(flag)}\\s*=\\s*[^;]+;`, 'g'),
-      '',
-    );
-  }
-  return next;
+  const flags = PRODUCTION_FALSE_DIAGNOSTIC_FLAGS.map(escapeRegExp).join('|');
+  return source.replace(
+    new RegExp(`\\b(?:const|let|var)\\s+(?:${flags})\\s*=\\s*[^;]+;`, 'g'),
+    '',
+  );
 }
 
 function stripMarkedDeveloperDiagnostics(source) {
