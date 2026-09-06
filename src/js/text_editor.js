@@ -384,14 +384,9 @@ const applyTextEditLineIndent = (value, selection, outdent = false) => {
       return prefix;
     });
   } else {
+    nextSelectedText = TEXT_EDIT_INDENT + selectedText.split('\n').join('\n' + TEXT_EDIT_INDENT);
     if (selectionState.start >= firstLineStart) nextStart += TEXT_EDIT_INDENT.length;
-    if (selectionState.end >= firstLineStart) nextEnd += TEXT_EDIT_INDENT.length;
-    nextSelectedText = TEXT_EDIT_INDENT + selectedText.replace(/\n/g, (_, offset) => {
-      const lineStart = firstLineStart + offset + 1;
-      if (selectionState.start >= lineStart) nextStart += TEXT_EDIT_INDENT.length;
-      if (selectionState.end >= lineStart) nextEnd += TEXT_EDIT_INDENT.length;
-      return `\n${TEXT_EDIT_INDENT}`;
-    });
+    if (selectionState.end >= firstLineStart) nextEnd += nextSelectedText.length - selectedText.length;
   }
   if (nextSelectedText === selectedText) return { ...selectionState, value: text, changed: false };
 
@@ -874,11 +869,10 @@ const readBoardfishTextClipboardPayloadForPaste = async (event = null
   return currentBoardfishTextSelectionClipboardPayload();
 };
 
-const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end', deferDomValue = false) => {
+const replaceTextEditProxyRange = (proxy, inserted, start, end, selectionMode = 'end', deferDomValue = false) => {
   const value = textEditProxyValue(proxy);
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, value.length));
   const to = Math.max(from, Math.min(Math.trunc(Number(end)) || from, value.length));
-  const inserted = normalizeTextContent(text);
   const nextLength = value.length + inserted.length - (to - from);
   const largeValue = value.length + inserted.length > TEXT_EDIT_DIRECT_TEXTAREA_REPLACE_CHARS;
   deferDomValue = deferDomValue && nextLength > TEXT_EDIT_DEFER_DOM_REPLACE_CHARS;
