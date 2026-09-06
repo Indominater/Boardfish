@@ -58,7 +58,7 @@ function addText(wx, wy, content = '', options = {}) {
   logStep('content-limit-done', { textBytes, accepted });
   if (!accepted) return;
   const h = LINE_H + TEXT_PAD * 2;
-  let w = content ? 200 : h * 6;
+  let w;
   if (content) {
     let maxLineLen = 1;
     for (let start = 0; start < content.length && maxLineLen < 75;) {
@@ -67,6 +67,8 @@ function addText(wx, wy, content = '', options = {}) {
       start = end < 0 ? content.length : end + 1;
     }
     w = Math.min(Math.max(Math.round(maxLineLen * 9.2 + 16), 120), 700);
+  } else {
+    w = h * 6;
   }
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
   logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content) }));
@@ -235,7 +237,7 @@ async function newBoard() {
   currentFilePath = null;
   currentFileRef = null;
   BoardfishViewportState.reset();
-  clearImageStore(true);
+  clearImageStore();
   OpenDebug.step(dbg, 'clearImageStore', {});
   snapshot();
   markSaved();

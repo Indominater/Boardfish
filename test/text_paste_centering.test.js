@@ -49,7 +49,6 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
     zCounter: 1,
     LINE_H: DEFAULT_TEXT_BOX_LINE_H,
     TEXT_PAD: DEFAULT_TEXT_BOX_PAD,
-    NEW_TEXT_EDIT_MIN_LINES: DEFAULT_TEXT_BOX_MIN_LINES,
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },

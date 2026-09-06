@@ -126,10 +126,6 @@ function loadEditorStateBoundaryHarness() {
     normalizeTextContent(value) {
       return String(value || '');
     },
-    rebuildObjectsMap() {
-      context.objectsMap.clear();
-      for (const obj of context.objects) context.objectsMap.set(obj.id, obj);
-    },
     syncAllTextAutoHeights() {},
     updateInputShieldVisual() {},
   };

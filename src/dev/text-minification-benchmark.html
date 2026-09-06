@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boardfish low-zoom text benchmark</title>
+  <style>
+    @font-face { font-family: 'Geist Sans'; src: url('/fonts/Geist.woff2') format('woff2'); font-weight: 300 700; font-display: block; }
+    :root { color-scheme: dark; font: 14px 'Geist Sans', system-ui, sans-serif; background: #17171b; color: #ededf2; }
+    body { max-width: 1000px; margin: auto; padding: 18px; }
+    h1 { margin: 0 0 9px; font-size: 23px; } p, li { color: #c5c5ce; line-height: 1.45; }
+    .controls { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 10px; background: #25252b; border-radius: 6px; }
+    label { display: inline-flex; align-items: center; gap: 6px; }
+    select, button { font: inherit; color: inherit; background: #303038; border: 1px solid #555561; border-radius: 4px; padding: 7px; }
+    button { cursor: pointer; } button:disabled { opacity: .5; cursor: progress; }
+    #status { min-height: 22px; } .scroll { overflow-x: auto; }
+    #panels { display: grid; grid-template-columns: repeat(2, 400px); gap: 16px; width: max-content; }
+    figure { margin: 0; } figcaption { margin-bottom: 8px; font-weight: 600; }
+    canvas { display: block; width: 400px; height: 256px; outline: 1px solid #484850; }
+    a { display: inline-block; color: #b7b7ff; margin: 8px 10px 0 0; }
+    pre { background: #222228; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; max-height: 520px; overflow-y: auto; }
+    details { margin: 14px 0; } table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+    th, td { border-bottom: 1px solid #44444d; padding: 8px 6px; text-align: right; } th:first-child, td:first-child { text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Low-zoom text stability and performance</h1>
+  <p>Three textboxes contain exactly 100,000 characters each. Pan across columns, visible rows, and retained geometry chunks at 10% zoom. Both panels remain mounted at 400 × 256 CSS pixels.</p>
+  <div class="controls">
+    <label>DPR <select id="dpr" disabled><option value="1">1</option><option value="2">2</option></select></label>
+    <label>Zoom <select id="zoom" disabled><option value="0.1">10%</option><option value="0.125">12.5%</option></select></label>
+    <button id="run-all" disabled>Run all</button>
+    <button id="phase" disabled>Measure subpixel phases</button>
+    <button id="performance" disabled>Measure dense panning</button>
+    <button id="animate" disabled>Animate panning</button>
+  </div>
+  <p id="status" role="status">Loading the font and both renderers…</p>
+  <div class="scroll"><div id="panels">
+    <figure><figcaption id="before-caption">Previous GPU renderer</figcaption><canvas id="before" aria-label="Previous text renderer"></canvas><a id="before-png" download>Native PNG</a></figure>
+    <figure><figcaption>Current GPU renderer</figcaption><canvas id="after" aria-label="Current text renderer"></canvas><a id="after-png" download>Native PNG</a></figure>
+  </div></div>
+  <p id="fixture-label">Dense fixture: 3 × 100,000 characters, 3,500 world-pixel textbox widths.</p>
+  <div id="summary"></div>
+  <a id="json-download" download="boardfish-text-minification.json" hidden>Download results JSON</a>
+  <details><summary>Method and limits</summary><ul>
+    <li>Run all measures 10% and 12.5% at DPR 1 and 2. DPR changes backing-store resolution while both panels retain their CSS dimensions. The 12.5% case aligns ordinary text baselines to integer physical pixel rows.</li>
+    <li>Phase sweeps move eight isolated repeated-character lines horizontally and vertically through 64 positions spanning one physical pixel. Each line remains fully inside the canvas. Integrated row brightness measures retained ink, independently of where that ink lands. This detects disappearing punctuation and row brightness pulses; it does not require identical pixels while moving.</li>
+    <li>Pixel readback and PNG capture occur only in untimed phase sweeps or after measured blocks. Per-row energy samples, minimum, maximum, mean, and peak-to-peak percentage are included in JSON.</li>
+    <li>Dense panning uses live getTextLayoutForViewport calls on three separate 100,000-character textboxes. Four 60-frame blocks alternate previous/current then current/previous, with 12 warmup frames per block. Each renderer owns independent layout objects. Camera paths cross row and 64-row chunk boundaries.</li>
+    <li>CPU submission includes visible-object filtering, live viewport layout, and GPU command submission. RequestAnimationFrame intervals include browser scheduling; they are not direct GPU timings or confirmation of presentation. No readback, GPU finish, fence, or screenshot occurs inside timed frames.</li>
+    <li>Keep both panels fully visible in a foreground tab. Resource counter deltas distinguish geometry preparation from recurring camera updates. To compare the old renderer, run <code>git show 07aa2fa:src/js/gpu_renderer.js &gt; src/dev/gpu-text-before.js</code> and open this page with <code>?baseline=1</code>; remove the temporary file afterward. Without a baseline, both panels use the current renderer and JSON identifies the comparison as unavailable.</li>
+  </ul></details>
+  <details><summary>Results JSON</summary><pre id="json">No run yet.</pre></details>
+  <script>
+    var objects = [];
+    var editingId = null;
+    var TextSelDebug = { _logHit: function () {} };
+    function scheduleRender() {}
+    function markDirty() {}
+    function invalidateOffscreen() {}
+  </script>
+  <script src="/js/text_raster.js"></script>
+  <script src="/js/text_layout.js"></script>
+  <script src="/fonts/geist-ascii-msdf.js"></script>
+  <script src="/fonts/geist-ascii-integral.js"></script>
+  <script>
+    if (new URLSearchParams(location.search).get('baseline') === '1') document.write('<script src="gpu-text-before.js"><\/script>');
+  </script>
+  <script>if (window.BoardfishGpuRenderer) window.BoardfishGpuRendererBefore = window.BoardfishGpuRenderer;</script>
+  <script src="/js/gpu_renderer.js"></script>
+  <script src="text-minification-benchmark.js"></script>
+</body>
+</html>

@@ -28,7 +28,7 @@ const webImageExtForFile = (file) => (
 );
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
-let imageFileDebugName = null;
+let imageFileDebugName;
 if (typeof BOARDFISH_PRODUCTION === 'undefined') {
   imageFileDebugName = (file, fallback = 'clipboard-image') => (
     file?.name || `${fallback}.${webImageExtForFile(file)}`
@@ -59,7 +59,7 @@ const rollbackImageInsertSource = (imgKey, source, hadPreviousSource = false, pr
     if (hadPreviousSource) {
       BoardfishImageStore.setSource(imgKey, previousSource);
     } else {
-      if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey, source);
+      if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey);
       delete imageStore[imgKey];
     }
     return true;
@@ -87,7 +87,7 @@ var _pendingImageInsertPoint = null;
 
 async function addImage(src, cx, cy, imgKey, options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let dbg = null;
+  let dbg;
   let t0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -204,7 +204,7 @@ async function insertImageFiles(files, x, y
 ) {
   const fileCount = files.length;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let dbg = null;
+  let dbg;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     dbg = InsertDebug.start('insertImages', { source, fileCount });
@@ -216,7 +216,7 @@ async function insertImageFiles(files, x, y
   let added = 0;
   const accepted = [];
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let dropped = null;
+  let dropped;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     dropped = { type: 0, objectLimit: 0, contentLimit: 0 };
@@ -286,7 +286,7 @@ async function insertImageFiles(files, x, y
     }
     await mapWithConcurrency(accepted, concurrency, async (file, acceptedIndex) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      let fileDbg = null;
+      let fileDbg;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         fileDbg = InsertDebug.start('insertImage', { source, fileName: file.name, fileSize: file.size, fileType: file.type });

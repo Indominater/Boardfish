@@ -155,7 +155,7 @@ const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
   const widthCached = widthCache &&
     obj._textWrappedLineIndexWidthCacheContent === text &&
     typeof widthCache.get === 'function'
-    ? widthCache.get(String(obj.w))
+    ? widthCache.get(obj.w)
     : null;
   const widthCacheValid = widthCached &&
     Array.isArray(widthCached.entries) &&
@@ -317,7 +317,7 @@ function setTextEditProxySelectionRange(proxy, start, end = start, direction = '
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const syncResult = shouldSyncDom
     ? syncTextEditProxyDomValue(proxy, text, { start: from, end: to, direction })
-    : { synced: false, reason: shouldSyncDom ? 'sync-skipped' : 'selection-fits-dom' };
+    : { synced: false, reason: 'selection-fits-dom' };
   if (!syncResult.synced) proxy.setSelectionRange(from, to, direction);
   return {
     set: true,
@@ -409,7 +409,6 @@ const applyTextEditLineBreakIndent = (value, selection) => {
   const selectionState = {
     start: Math.max(0, Math.min(selection?.start ?? 0, text.length)),
     end: Math.max(0, Math.min(selection?.end ?? selection?.start ?? 0, text.length)),
-    direction: selection?.direction || 'none',
   };
   const start = Math.min(selectionState.start, selectionState.end);
   const end = Math.max(selectionState.start, selectionState.end);
@@ -499,7 +498,7 @@ const textEditBlankLineDeleteRange = (text = '', index, keyOrInputType = '') => 
 };
 
 const dispatchTextEditInputEvent = (proxy, inputType) => {
-  let event = null;
+  let event;
   try {
     event = typeof InputEvent === 'function'
       ? new InputEvent('input', { bubbles: true, inputType })
@@ -1285,9 +1284,6 @@ function enterEdit(id, {
     const domSyncBeforeNativeInput =
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (domSyncBeforeNativeInput.synced) pendingInputState.domSyncedBeforeNativeInput = true;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     beginTextEditHistoryAction(id, pendingInputState);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     recordInputSetupStep('beforeinput-state-ready', event, pendingInputState, {
@@ -1345,7 +1341,7 @@ function enterEdit(id, {
 	    const oldValue = inputState.value ?? obj.data.content ?? '';
 	    let replacement = inputState.replacement || null;
 	    let synthesizedStaleReplacement = false;
-	    let nextRawValue = '';
+	    let nextRawValue;
 	    if (proxy._boardfishDomValueStale && !replacement) {
 	      replacement = textEditBeforeInputReplacement(oldValue, inputState, event);
 	      synthesizedStaleReplacement = !!replacement;
@@ -1874,7 +1870,7 @@ function enterEdit(id, {
       const deleteKeyStartedAt = textEditorDebugNow();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const selection = textEditSelectionState(proxy);
-      let deletion = null;
+      let deletion;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       let deleteRangeMs = 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */

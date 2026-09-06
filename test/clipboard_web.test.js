@@ -291,7 +291,6 @@ function loadClipboardPasteObjectsHarness() {
       },
     },
     BoardfishImageStore: {
-      hasSource() { return true; },
       setSource() {},
     },
     BoardfishWebLimits: {

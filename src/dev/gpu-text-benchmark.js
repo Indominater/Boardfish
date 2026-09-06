@@ -396,7 +396,7 @@
   }
 
   async function restoreContext() {
-    await prepare('context', { scale: 1 });
+    await prepare('context');
     draw('gpu'); const before = pixelSummary('gpu');
     const gl = canvases.gpu.getContext('webgl2');
     const extension = gl?.getExtension('WEBGL_lose_context');
@@ -517,6 +517,7 @@
       const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
       const timer = setTimeout(() => rejectReady(new Error('Timed out loading production GPU font atlas.')), 15000);
       contexts.gpu = BoardfishGpuRenderer.createContext(canvases.gpu, {
+        integralFont: { ...BoardfishAsciiIntegralFont, atlasURL: '../fonts/geist-ascii-integral.png' },
         font: {
           ...BoardfishAsciiFont, atlasURL: '../fonts/geist-ascii-msdf.png',
           ...(BoardfishAsciiFont.largeFont ? {

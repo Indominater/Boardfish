@@ -277,8 +277,8 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 // ─── Pan (spacebar + left click) ─────────────────────────────────────────────
 var _spaceDown = false,
   _rubberBandSelectionCleanup = null,
-  hideRubberBandSelectionVisual = null,
-  cancelRubberBandSelection = null;
+  hideRubberBandSelectionVisual,
+  cancelRubberBandSelection;
 
 document.addEventListener('keyup', (e) => {
   if (e.code !== 'Space') return;

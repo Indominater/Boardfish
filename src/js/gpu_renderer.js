@@ -10,6 +10,7 @@
   const DEFAULT_IMAGE_BYTES = 128 * 1024 * 1024;
   const DEFAULT_FALLBACK_BYTES = 16 * 1024 * 1024;
   const ASCII = /^[\x20-\x7e\t]*$/;
+  const ASCII_DOCUMENT = /^[\x09\x0a\x0d\x20-\x7e]*$/;
   const IDENTITY = [1, 0, 0, 1, 0, 0];
   const VERTEX = `#version 300 es
     precision highp float;
@@ -17,18 +18,26 @@
     uniform mat3 transform;
     uniform vec2 viewport;
     uniform float fontSize;
+    uniform vec2 pixelPadding;
     uniform sampler2D glyphs;
     out vec2 uv;
     flat out vec4 glyphBounds;
+    out vec2 glyphPosition;
+    flat out int glyphCode;
     void main() {
       vec2 corner=vec2(gl_VertexID&1, (gl_VertexID>>1)&1);
       vec4 plane=texelFetch(glyphs,ivec2(int(instance.z),0),0);
       vec4 atlas=texelFetch(glyphs,ivec2(int(instance.z),1),0);
-      vec2 local=instance.xy+(plane.xy+corner*plane.zw)*fontSize;
+      // A fragment shader cannot recover a subpixel quad that missed all pixel
+      // centers. Include the entire pixel filter footprint around the glyph.
+      vec2 point=plane.xy+corner*plane.zw+(corner*2.-1.)*pixelPadding;
+      vec2 local=instance.xy+point*fontSize;
       vec2 pixel=(transform*vec3(local,1.)).xy;
       gl_Position=vec4(pixel.x/viewport.x*2.-1.,1.-pixel.y/viewport.y*2.,0.,1.);
-      uv=atlas.xy+corner*atlas.zw;
+      uv=atlas.xy+(point-plane.xy)/plane.zw*atlas.zw;
       glyphBounds=vec4(atlas.xy,atlas.xy+atlas.zw);
+      glyphPosition=point;
+      glyphCode=int(instance.z);
     }`;
   const FRAGMENT = `#version 300 es
     precision highp float;
@@ -36,14 +45,45 @@
     uniform vec2 unitRange;
     uniform vec4 color;
     uniform float deviceEm;
+    uniform bool areaFiltered;
+    uniform sampler2D integralAtlas;
+    uniform bool integralFloat;
+    uniform vec4 integralInfo;
+    uniform vec3 integralGrid;
     in vec2 uv;
     flat in vec4 glyphBounds;
+    in vec2 glyphPosition;
+    flat in int glyphCode;
     out vec4 result;
     float median3(vec3 v) { return max(min(v.r,v.g),min(max(v.r,v.g),v.b)); }
     float coverage(vec2 p,float range) {
       return clamp((median3(texture(atlas,clamp(p,glyphBounds.xy,glyphBounds.zw)).rgb)-.5)*range+.5,0.,1.);
     }
+    float integral(vec2 p) {
+      int index=glyphCode-32,columns=int(integralInfo.w);
+      vec2 tile=vec2(index%columns,index/columns)*integralInfo.z;
+      vec2 q=clamp((p-integralGrid.yz)*integralGrid.x,vec2(0.),vec2(integralInfo.z-1.));
+      if(integralFloat)return texture(integralAtlas,(tile+q+.5)/integralInfo.xy).r;
+      // Decode before interpolating on devices without float texture filtering.
+      // Low-precision RGB8 hardware interpolation can amplify byte carries.
+      ivec2 p0=ivec2(tile+floor(q)),p1=ivec2(tile+min(floor(q)+1.,vec2(integralInfo.z-1.)));
+      vec2 f=fract(q);vec3 weights=vec3(65536.,256.,1.);
+      return mix(mix(dot(texelFetch(integralAtlas,p0,0).rgb,weights),dot(texelFetch(integralAtlas,ivec2(p1.x,p0.y),0).rgb,weights),f.x),
+        mix(dot(texelFetch(integralAtlas,ivec2(p0.x,p1.y),0).rgb,weights),dot(texelFetch(integralAtlas,p1,0).rgb,weights),f.x),f.y);
+    }
+    float areaCoverage() {
+      vec2 footprint=abs(dFdx(glyphPosition))+abs(dFdy(glyphPosition));
+      vec2 lo=glyphPosition-footprint*.5,hi=glyphPosition+footprint*.5;
+      float sum=integral(hi)-integral(vec2(lo.x,hi.y))-integral(vec2(hi.x,lo.y))+integral(lo);
+      return clamp(sum/max(footprint.x*footprint.y*integralGrid.x*integralGrid.x,1e-8),0.,1.);
+    }
     void main() {
+      float area=areaFiltered?areaCoverage():0.;
+      if(areaFiltered&&deviceEm<=8.) {
+        float a=area*color.a;
+        result=vec4(color.rgb*a,a);
+        return;
+      }
       vec2 dx=dFdx(uv),dy=dFdy(uv);
       float range=max(.5*dot(unitRange,1./max(fwidth(uv),vec2(1e-8))),1.);
       float a;
@@ -56,6 +96,7 @@
            coverage(uv-x+y,subRange)+coverage(uv+x+y,subRange))*.25;
         a=mix(integrated,coverage(uv,range),smoothstep(24.,32.,deviceEm));
       } else a=coverage(uv,range);
+      if(areaFiltered)a=mix(area,a,smoothstep(8.,12.,deviceEm));
       a*=color.a;
       result=vec4(color.rgb*a,a);
     }`;
@@ -77,12 +118,16 @@
     uniform sampler2D image;
     uniform vec4 color;
     uniform bool textured;
+    uniform bool coverageMask;
     in vec2 uv;
     out vec4 result;
     void main() {
       // Browser image uploads are premultiplied; MSDF uploads are deliberately
       // linear data and use their separate shader above.
-      result=textured?texture(image,uv)*color.a:vec4(color.rgb*color.a,color.a);
+      if(coverageMask) {
+        float a=clamp(texture(image,uv).r,0.,1.)*color.a;
+        result=vec4(color.rgb*a,a);
+      } else result=textured?texture(image,uv)*color.a:vec4(color.rgb*color.a,color.a);
     }`;
 
   function multiply(a, b) {
@@ -108,6 +153,7 @@
     if (!gl) return null;
     const makeCanvas = options.createCanvas || (() => root.document.createElement('canvas'));
     const font = options.font;
+    const integralFont = options.integralFont || root.BoardfishAsciiIntegralFont;
     const bufferLimit = Math.max(INSTANCE_BYTES, options.maxBufferBytes || DEFAULT_BUFFER_BYTES);
     const chunkLimit = Math.max(1, Math.trunc(options.maxChunks || DEFAULT_CHUNK_LIMIT));
     const imageLimit = Math.max(4, options.maxImageBytes || DEFAULT_IMAGE_BYTES);
@@ -116,13 +162,16 @@
     const anonymousIds = new WeakMap();
     const immutableCanvases = new WeakSet();
     const asciiPrefixes = new WeakMap();
+    const asciiObjects = new WeakMap();
     let anonymousId = 0, current = state(), stack = [], path = [];
     let textProgram, quadProgram, textVao, quadVao;
     let fontResources = [];
+    let coverageTarget = null;
+    let floatCoverage = false, floatIntegral = false;
     let lost = false, disposed = false, fontReady = false, generation = 0;
     let bufferBytes = 0, imageBytes = 0, fallbackBytes = 0;
     let measurementCanvas, measurementContext, colorContext;
-    let ready = Promise.resolve(false);
+    let ready;
     const colorCache = new Map();
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     const tileSize = Math.min(2048, maxTextureSize - 2);
@@ -130,6 +179,7 @@
     const stats = { frames:0, drawCalls:0, textDrawCalls:0, imageDrawCalls:0,
       rectangleDrawCalls:0, glyphsDrawn:0, bufferUploads:0, bufferUploadBytes:0,
       imageUploads:0, imageUploadBytes:0, imageEvictions:0, atlasUploads:0, fallbackRasterizations:0, contextLosses:0,
+      areaTextDraws:0, coverageComposites:0, coverageTargetAllocations:0,
       frameDrawCalls:0, frameBufferUploads:0, frameGlyphsDrawn:0 };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
@@ -163,13 +213,16 @@
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     }
     function initialize() {
-      textProgram=program(VERTEX,FRAGMENT,['transform','viewport','fontSize','glyphs','atlas','unitRange','color','deviceEm']);
-      quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','size','sourceRect','image','color','textured']);
+      floatCoverage=!!gl.getExtension('EXT_color_buffer_float');
+      floatIntegral=!!gl.getExtension('OES_texture_float_linear');
+      textProgram=program(VERTEX,FRAGMENT,['transform','viewport','fontSize','pixelPadding','glyphs','atlas','unitRange','color','deviceEm','areaFiltered','integralAtlas','integralFloat','integralInfo','integralGrid']);
+      quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','size','sourceRect','image','color','textured','coverageMask']);
       textVao=gl.createVertexArray(); quadVao=gl.createVertexArray();
       gl.disable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.disable(gl.DITHER);
       gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
-      fontResources=[font,...(font.largeFont?[font.largeFont]:[])].map(description=>{
+      fontResources=[font,...(font.largeFont?[font.largeFont]:[]),...(integralFont?[integralFont]:[])].map(description=>{
+        if(description===integralFont)return {font:description,integral:true,glyphTexture:null,atlasTexture:null,ready:false};
         const metadata = new Float32Array(128*2*4);
         for(let code=0;code<128;code++) {
           const glyph=description.glyphs[code],p=glyph?.planeBounds,a=glyph?.atlasBounds;
@@ -204,7 +257,16 @@
           textureParameters(gl.LINEAR);
           gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);
           gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL,gl.NONE);
-          gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
+          if(resource.integral&&floatIntegral) {
+            // One small startup decode; pan and zoom never read back or upload.
+            const source=makeCanvas();source.width=description.width;source.height=description.height;
+            const context=source.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
+            const pixels=context.getImageData(0,0,source.width,source.height).data;
+            const values=new Float32Array(source.width*source.height);
+            for(let i=0;i<values.length;i++)values[i]=(pixels[i*4]*65536+pixels[i*4+1]*256+pixels[i*4+2])/255;
+            source.width=source.height=0;
+            gl.texImage2D(gl.TEXTURE_2D,0,gl.R32F,description.width,description.height,0,gl.RED,gl.FLOAT,values);
+          } else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
           /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.atlasUploads++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
           resource.ready=true;return true;
         });
@@ -253,6 +315,7 @@
       gl.uniform2f(quadProgram.locations.size,w,h);
       gl.uniform4fv(quadProgram.locations.color,tint);
       gl.uniform1i(quadProgram.locations.textured,texture?1:0);
+      gl.uniform1i(quadProgram.locations.coverageMask,0);
       if(texture) {
         gl.uniform4fv(quadProgram.locations.sourceRect,uv);
         gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);
@@ -299,8 +362,34 @@
       for(const [key,chunk] of chunks)deleteChunk(key,chunk);
       for(const [key,entry] of fallback)deleteFallback(key,entry);
     }
+    function releaseCoverageTarget() {
+      if(!coverageTarget)return;
+      if(!lost) {
+        gl.deleteFramebuffer(coverageTarget.framebuffer);
+        gl.deleteTexture(coverageTarget.texture);
+      }
+      coverageTarget=null;
+    }
+    function getCoverageTarget() {
+      if(coverageTarget?.width===canvas.width&&coverageTarget?.height===canvas.height)return coverageTarget;
+      releaseCoverageTarget();
+      if(!canvas.width||!canvas.height||canvas.width>maxTextureSize||canvas.height>maxTextureSize)return null;
+      const texture=gl.createTexture(),framebuffer=gl.createFramebuffer();
+      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);
+      textureParameters(gl.NEAREST);
+      gl.texImage2D(gl.TEXTURE_2D,0,floatCoverage?gl.R16F:gl.R8,canvas.width,canvas.height,0,gl.RED,floatCoverage?gl.HALF_FLOAT:gl.UNSIGNED_BYTE,null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texture,0);
+      const complete=gl.checkFramebufferStatus(gl.FRAMEBUFFER)===gl.FRAMEBUFFER_COMPLETE;
+      gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+      if(!complete) { gl.deleteFramebuffer(framebuffer);gl.deleteTexture(texture);return null; }
+      coverageTarget={texture,framebuffer,width:canvas.width,height:canvas.height};
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.coverageTargetAllocations++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      return coverageTarget;
+    }
     function resetResources() {
       clearTextCache();
+      releaseCoverageTarget();
       for(const record of textures.keys())deleteTexture(record);
       images.clear();
     }
@@ -315,6 +404,16 @@
     }
     function prepare(layout,obj,style) {
       if(!fontReady||lost||disposed||!Array.isArray(layout)||!obj)return null;
+      const content=obj.data?.content;
+      if(typeof content==='string') {
+        let checked=asciiObjects.get(obj);
+        if(!checked||checked.content!==content) {
+          checked={content,supported:ASCII_DOCUMENT.test(content)};asciiObjects.set(obj,checked);
+        }
+        // A Unicode row entering/leaving the viewport must not switch every
+        // other row in this textbox between raster and distance-field rendering.
+        if(!checked.supported)return null;
+      }
       const settings=optionsFor(style),key=objectKey(obj),groups=new Map();
       for(const line of layout) {
         const text=String(line.text??'');
@@ -341,21 +440,30 @@
             if(chunks.size<chunkLimit)break;
             if(!protectedChunks.has(candidate))deleteChunk(candidateKey,candidate);
           }
-          chunk={objectKey:key,index:group.index,rows:new Map(),buffer:gl.createBuffer(),bytes:0,count:0,offsets:new Map(),dirty:true};
+          chunk={objectKey:key,index:group.index,rows:new Map(),buffer:gl.createBuffer(),bytes:0,offsets:new Map(),dirty:true};
           chunks.set(chunkKey,chunk);
         }
+        const changedRows=new Set();
+        let count=chunk.bytes/INSTANCE_BYTES;
         for(const {line,row} of group.lines) {
           const old=chunk.rows.get(row);
           // Subtracting translated world coordinates can differ by a few ULPs.
           // A micro-world-pixel canonical baseline prevents movement-only uploads.
           const baseline=Math.round((Number.isFinite(line.textY)?line.textY-line.y:settings.baselineOffset)*1e6)/1e6;
           if(!old||old.text!==line.text||old.prefix!==line.prefixWidths||old.baseline!==baseline) {
-            chunk.rows.set(row,{text:line.text,prefix:line.prefixWidths,baseline});chunk.dirty=true;
+            let glyphCount=0;
+            for(let i=0;i<line.text.length;i++)if(line.text.charCodeAt(i)>32) {
+              glyphCount++;
+              // A single row that cannot fit must fall back before allocating
+              // any new instance array, even for enormous legacy text rows.
+              if(protectedBytes+glyphCount*INSTANCE_BYTES>bufferLimit) { deleteChunk(chunkKey,chunk);return null; }
+            }
+            count+=glyphCount-(old?.glyphCount??chunk.offsets.get(row)?.count??0);
+            chunk.rows.set(row,{text:line.text,prefix:line.prefixWidths,baseline,glyphCount});
+            changedRows.add(row);chunk.dirty=true;
           }
         }
         if(chunk.dirty) {
-          let count=0;
-          for(const entry of chunk.rows.values())for(let i=0;i<entry.text.length;i++)if(entry.text.charCodeAt(i)>32)count++;
           // Extremely wide legacy rows retain the compatible raster path rather
           // than attempting a device-sized allocation or dropping characters.
           const nextBytes=count*INSTANCE_BYTES;
@@ -367,21 +475,39 @@
             if(candidate===chunk||protectedChunks.has(candidate))continue;
             deleteChunk(candidateKey,candidate);
           }
-          const data=new Float32Array(count*3);let offset=0;
-          chunk.offsets.clear();
-          for(const row of Array.from(chunk.rows.keys()).sort((a,b)=>a-b)) {
-            const entry=chunk.rows.get(row),start=offset/3;
-            for(let i=0;i<entry.text.length;i++) {
-              const code=entry.text.charCodeAt(i);if(code<=32)continue;
-              data[offset++]=entry.prefix[i];
-              data[offset++]=(row-group.index*ROWS_PER_CHUNK)*settings.lineHeight+entry.baseline;
-              data[offset++]=code;
+          try {
+            // Keep exactly one CPU instance array per retained GPU buffer.
+            // Panning usually exposes only a few rows: copy the other rows in
+            // native code instead of decoding every retained glyph again.
+            // The limit is checked above before creating this temporary
+            // replacement; retained CPU bytes match the bounded GPU bytes.
+            const data=new Float32Array(count*3),offsets=new Map();let offset=0;
+            chunk.left=Infinity;chunk.right=-Infinity;chunk.baselineMin=Infinity;chunk.baselineMax=-Infinity;
+            for(const row of Array.from(chunk.rows.keys()).sort((a,b)=>a-b)) {
+              const entry=chunk.rows.get(row),start=offset/3,previous=chunk.offsets.get(row);
+              chunk.left=Math.min(chunk.left,entry.prefix[0]||0);
+              chunk.right=Math.max(chunk.right,entry.prefix[entry.text.length]||0);
+              chunk.baselineMin=Math.min(chunk.baselineMin,entry.baseline);
+              chunk.baselineMax=Math.max(chunk.baselineMax,entry.baseline);
+              if(chunk.data&&previous&&!changedRows.has(row)) {
+                data.set(chunk.data.subarray(previous.start*3,(previous.start+previous.count)*3),offset);
+                offset+=previous.count*3;
+              } else for(let i=0;i<entry.text.length;i++) {
+                const code=entry.text.charCodeAt(i);if(code<=32)continue;
+                data[offset++]=entry.prefix[i];
+                data[offset++]=(row-group.index*ROWS_PER_CHUNK)*settings.lineHeight+entry.baseline;
+                data[offset++]=code;
+              }
+              offsets.set(row,{start,count:offset/3-start});
             }
-            chunk.offsets.set(row,{start,count:offset/3-start});
+            gl.bindBuffer(gl.ARRAY_BUFFER,chunk.buffer);gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
+            bufferBytes+=data.byteLength-chunk.bytes;chunk.bytes=data.byteLength;
+            chunk.data=data;chunk.offsets=offsets;chunk.dirty=false;
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.bufferUploads++;stats.frameBufferUploads++;stats.bufferUploadBytes+=data.byteLength; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          } catch(_) {
+            // Changed row metadata must never outlive a failed replacement.
+            deleteChunk(chunkKey,chunk);return null;
           }
-          gl.bindBuffer(gl.ARRAY_BUFFER,chunk.buffer);gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
-          bufferBytes+=data.byteLength-chunk.bytes;chunk.bytes=data.byteLength;chunk.count=count;chunk.dirty=false;
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.bufferUploads++;stats.frameBufferUploads++;stats.bufferUploadBytes+=data.byteLength; /* BOARDFISH_DEV_DIAGNOSTICS_END */
         }
         // Map order is the resource LRU; movement and camera changes touch only
         // references and uniforms, never retained glyph bytes.
@@ -395,9 +521,52 @@
     function drawTextLayout(layout,obj,style) {
       const prepared=prepare(layout,obj,style);if(!prepared)return false;
       if(!prepared.length)return true;
+      const settings=prepared[0].settings,m=current.matrix;
+      const deviceEm=settings.fontSize*Math.max(Math.hypot(m[0],m[1]),Math.hypot(m[2],m[3]));
+      const integralResource=fontResources.find(resource=>resource.integral);
+      // Board text is axis aligned. A rotated/sheared transform keeps MSDF:
+      // a rectangular integral is not an exact rotated pixel footprint.
+      const areaFiltered=!!(integralResource?.ready&&deviceEm<12&&m[1]===0&&m[2]===0&&m[0]&&m[3]);
+      const target=areaFiltered?getCoverageTarget():null;
+      let bounds;
+      if(target) {
+        let left=Infinity,right=-Infinity,top=Infinity,bottom=-Infinity;
+        for(const {chunk,group} of prepared) {
+          if(!Number.isFinite(chunk.left))continue;
+          // Chunk x bounds may include retained offscreen rows, conservatively.
+          // Only their device-space rectangle is cleared and composited.
+          const x=m[0]*(obj.x+settings.padding)+m[4];
+          const y=m[3]*(obj.y+settings.padding)+m[5];
+          const a=x+m[0]*(chunk.left-settings.fontSize),b=x+m[0]*(chunk.right+settings.fontSize);
+          const c=y+m[3]*(group.first*settings.lineHeight+chunk.baselineMin-settings.fontSize*1.5);
+          const d=y+m[3]*(group.last*settings.lineHeight+chunk.baselineMax+settings.fontSize);
+          left=Math.min(left,a,b);right=Math.max(right,a,b);
+          top=Math.min(top,c,d);bottom=Math.max(bottom,c,d);
+        }
+        bounds=[Math.max(0,Math.floor(left-1)),Math.max(0,Math.floor(top-1)),Math.min(canvas.width,Math.ceil(right+1)),Math.min(canvas.height,Math.ceil(bottom+1))];
+        if(!(bounds[2]>bounds[0]&&bounds[3]>bounds[1]))return true;
+        gl.bindFramebuffer(gl.FRAMEBUFFER,target.framebuffer);
+        gl.enable(gl.SCISSOR_TEST);
+        gl.scissor(bounds[0],canvas.height-bounds[3],bounds[2]-bounds[0],bounds[3]-bounds[1]);
+        gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+      }
       setup(textProgram);gl.bindVertexArray(textVao);
+      if(target) { gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE); }
       gl.uniform1i(textProgram.locations.atlas,0);gl.uniform1i(textProgram.locations.glyphs,1);
-      gl.uniform4fv(textProgram.locations.color,color());
+      gl.uniform4fv(textProgram.locations.color,target?[1,1,1,1]:color());
+      gl.uniform1i(textProgram.locations.areaFiltered,target?1:0);
+      gl.uniform2f(textProgram.locations.pixelPadding,
+        target ? .5/(Math.abs(m[0])*settings.fontSize) : 0,
+        target ? .5/(Math.abs(m[3])*settings.fontSize) : 0);
+      if(target) {
+        const description=integralResource.font;
+        gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,integralResource.atlasTexture);
+        gl.uniform1i(textProgram.locations.integralAtlas,2);
+        gl.uniform1i(textProgram.locations.integralFloat,floatIntegral?1:0);
+        gl.uniform4fv(textProgram.locations.integralInfo,[description.width,description.height,description.cellSize,description.columns]);
+        gl.uniform3f(textProgram.locations.integralGrid,description.emSize,description.originX,description.originY);
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.areaTextDraws++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
       gl.enableVertexAttribArray(0);gl.vertexAttribDivisor(0,1);
       for(const {chunk,group,settings} of prepared) {
         const first=chunk.offsets.get(group.first),last=chunk.offsets.get(group.last);
@@ -405,7 +574,7 @@
         const deviceEm=settings.fontSize*Math.max(Math.hypot(current.matrix[0],current.matrix[1]),Math.hypot(current.matrix[2],current.matrix[3]));
         // Both detail levels are uploaded before first use. Changing scale only
         // selects immutable resources; it never rerasterizes or uploads glyphs.
-        const resource=deviceEm>=128&&fontResources.length>1?fontResources[1]:fontResources[0];
+        const resource=deviceEm>=128&&font.largeFont?fontResources[1]:fontResources[0];
         const description=resource.font;
         gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,resource.atlasTexture);
         gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,resource.glyphTexture);
@@ -418,6 +587,23 @@
         gl.vertexAttribPointer(0,3,gl.FLOAT,false,INSTANCE_BYTES,first.start*INSTANCE_BYTES);
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,count);
         /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.glyphsDrawn+=count;stats.frameGlyphsDrawn+=count;drew('textDrawCalls'); /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
+      if(target) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.disable(gl.SCISSOR_TEST);
+        gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
+        // Accumulate coverage before source-over. Independently source-overing
+        // glyphs would lose ink whenever adjacent letters share a tiny pixel.
+        setup(quadProgram);gl.bindVertexArray(quadVao);
+        gl.uniformMatrix3fv(quadProgram.locations.transform,false,matrix3(IDENTITY,bounds[0],bounds[1]));
+        gl.uniform2f(quadProgram.locations.size,bounds[2]-bounds[0],bounds[3]-bounds[1]);
+        gl.uniform4fv(quadProgram.locations.color,color());
+        gl.uniform1i(quadProgram.locations.coverageMask,1);
+        gl.uniform1i(quadProgram.locations.textured,1);
+        gl.uniform4fv(quadProgram.locations.sourceRect,[bounds[0]/canvas.width,1-bounds[1]/canvas.height,(bounds[2]-bounds[0])/canvas.width,-(bounds[3]-bounds[1])/canvas.height]);
+        gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,target.texture);
+        gl.uniform1i(quadProgram.locations.image,0);
+        gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.coverageComposites++;drew('textDrawCalls'); /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
       trimResources();
       return true;
@@ -571,6 +757,7 @@
     function lostContext(event) {
       event.preventDefault();lost=true;fontReady=false;generation++;/* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.contextLosses++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
       chunks.clear();images.clear();textures.clear();bufferBytes=imageBytes=0;
+      coverageTarget=null;
       try { options.onLost?.(); } catch(error) { report(error); }
     }
     function restoredContext() {
@@ -612,13 +799,13 @@
         }
       },
       endFrame(){trimResources();},clearTextCache,resetResources,
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */ getStats(){return {...stats,fontReady,lost,frame:stats.frames,bufferBytes,imageBytes,fallbackBytes,chunkCount:chunks.size,imageCount:images.size,textureCount:textures.size,atlasBytes:fontResources.reduce((bytes,resource)=>bytes+(resource.ready?resource.font.width*resource.font.height*4+4096:0),0)};}, /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */ getStats(){return {...stats,fontReady,lost,frame:stats.frames,bufferBytes,imageBytes,fallbackBytes,floatCoverage,floatIntegral,coverageBytes:coverageTarget?coverageTarget.width*coverageTarget.height*(floatCoverage?2:1):0,chunkCount:chunks.size,imageCount:images.size,textureCount:textures.size,atlasBytes:fontResources.reduce((bytes,resource)=>bytes+(resource.ready?resource.font.width*resource.font.height*4+(resource.glyphTexture?4096:0):0),0)};}, /* BOARDFISH_DEV_DIAGNOSTICS_END */
       dispose(){
         if(disposed)return;resetResources();disposed=true;fontReady=false;generation++;
         canvas.removeEventListener?.('webglcontextlost',lostContext);canvas.removeEventListener?.('webglcontextrestored',restoredContext);
         if(!lost) {
           for(const resource of fontResources) {
-            if(resource.atlasTexture)gl.deleteTexture(resource.atlasTexture);gl.deleteTexture(resource.glyphTexture);
+            if(resource.atlasTexture)gl.deleteTexture(resource.atlasTexture);if(resource.glyphTexture)gl.deleteTexture(resource.glyphTexture);
           }
           if(textProgram)gl.deleteProgram(textProgram.value);if(quadProgram)gl.deleteProgram(quadProgram.value);
           if(textVao)gl.deleteVertexArray(textVao);if(quadVao)gl.deleteVertexArray(quadVao);

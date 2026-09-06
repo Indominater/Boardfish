@@ -201,7 +201,7 @@
     gl.uniform3fv(uniforms.uColor, FOREGROUND);
     const initMs = performance.now() - started;
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-    let texture = null, count = 0, atlasInfo = null;
+    let texture = null, count;
 
     function update(config, prepared) {
       const density = config.scale * config.dpr;
@@ -273,7 +273,7 @@
       atlasCanvas.height = 1;
       const error = gl.getError();
       if (error !== gl.NO_ERROR) throw new Error(`WebGL resource setup failed: 0x${error.toString(16)}`);
-      atlasInfo = {
+      const atlasInfo = {
         density, glyphs: GLYPHS, phaseVariantsPerGlyph: PHASES * PHASES,
         width: atlasWidth, height: atlasHeight, cellWidth, cellHeight,
         textureBytes: bytes, peakAtlasCanvasBytes: bytes,

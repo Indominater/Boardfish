@@ -17,7 +17,7 @@ const TEXT_DRAW_BATCH_MAX_UNITS = 2;
 // rendering in Chromium. Keep fallback fonts, other engines, f/F ligatures,
 // the contextual "tt" alternate, punctuation, and complex scripts exact.
 const TEXT_DRAW_BATCHABLE_ASCII_RE = /^[A-EG-Za-eg-z0-9]$/;
-var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
+var TEXT_BASELINE_Y_OFFSET;
 var _textDrawBatchingEngineVerified = null;
 var _textDrawBatchingVerifiedFonts = new Set();
 var _textRasterCache = null;
@@ -777,7 +777,7 @@ function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, 
     const previousLineStart = lineStart;
     let cursor = lineStart;
     let bestEnd = lineStart;
-    let bestNext = lineStart;
+    let bestNext;
 
     while (cursor < paraEnd) {
       const wordStart = nextNonSpaceIndex(content, cursor, paraEnd);
@@ -816,14 +816,8 @@ function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, 
 
     // A long word or trailing spaces already emitted this row above.
     if (lineStart !== previousLineStart) continue;
-    if (bestEnd > lineStart) {
-      pushLine(lineStart, bestEnd, bestNext, bestNext);
-      lineStart = bestNext;
-    } else {
-      const lineEnd = boundaryAt(lineStart + 1, true);
-      pushLine(lineStart, lineEnd, lineEnd, lineEnd);
-      lineStart = lineEnd;
-    }
+    pushLine(lineStart, bestEnd, bestNext, bestNext);
+    lineStart = bestNext;
   }
 }
 
@@ -995,7 +989,7 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
   const maxW = obj.w - TEXT_PAD * 2;
   const lineIndexEntries = Array.isArray(options.lineIndexEntries) ? options.lineIndexEntries : null;
   let nextParaStart = Math.max(0, Math.min(Math.trunc(Number(options.startIndex)) || 0, content.length));
-  let visualLineOffset = 0;
+  let visualLineOffset;
   const result = [];
   const pushLine = (start, end, nextStart = end, caretEnd = end, logicalLineIndex = 0, prefixWidths = null) => {
     const visualStart = lineIndexEntries?.[logicalLineIndex]?.visualStart;
@@ -1078,7 +1072,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   const debug = collectDiagnostics ? {
     ok: false,
     reason: '',
-    oldLayoutLines: Array.isArray(obj._layoutCache) ? obj._layoutCache.length : 0,
+    oldLayoutLines: obj._layoutCache.length,
   } : null;
   const fail = (reason) => {
     if (collectDiagnostics) {
@@ -1592,7 +1586,6 @@ function lineCaretXAtOffset(line, obj, offset) {
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 function createTextDrawStats() {
   return {
-    chars: 0,
     drawnChars: 0,
     drawUnits: 0,
     drawCalls: 0,
@@ -1634,7 +1627,7 @@ function isTextDrawBatchingFontReady(font) {
 
 function createTextDrawPlan(line, text, start, end) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let stats = null;
+  let stats;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     stats = createTextDrawStats();

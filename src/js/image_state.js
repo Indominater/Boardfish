@@ -12,7 +12,7 @@ const MAX_OPEN_IMAGE_DECODE_ACTIVE = 8;
 var imageReadyPromises = new Map();
 
 function newImgKey() {
-  let key = '';
+  let key;
   do {
     key = 'img-' + (imgKeyCounter++);
   } while (Object.hasOwn(imageStore, key));
@@ -469,11 +469,7 @@ function cacheImage(key, src
     const renderScheduleStart = performance.now();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     scheduleImageReadyRender();
-    scheduleVisibleImageWorkAfterIdle(
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      'image-ready'
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    );
+    scheduleVisibleImageWorkAfterIdle();
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     cacheMetrics.cacheRenderScheduleMs = performance.now() - renderScheduleStart;
     cacheMetrics.cacheTotalMs = performance.now() - cacheStart;

@@ -115,7 +115,7 @@ test('GPU editing redraws ordered scene objects inside one frame without an imag
     ctx: context, objects, editingId: 'editing', _boardOpening: false, _offscreenDirty: true,
     ViewportDebug: { isEnabled: () => false }, OpenDebug: {},
     window: { devicePixelRatio: 2 }, boardCanvas: { width: 400, height: 256 }, zoom: 1,
-    syncBoardCanvasBackingStore() {}, hasOpenInitialImagePreviews: () => false,
+    syncBoardCanvasBackingStore() {},
     viewportWorldRect: () => ({ x1: 0, y1: 0, x2: 200, y2: 128 }),
     _rebuildOffscreen() { assert.fail('GPU scene resources already retain images'); },
     fillBoardBackground() { calls.push('background'); }, setWorldCanvasTransform() {},

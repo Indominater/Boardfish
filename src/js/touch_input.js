@@ -28,7 +28,7 @@
     const active = new Map();
     let mode = 'idle';
     let holdTimer = null;
-    let pinchX, pinchY, pinchDistance = 0;
+    let pinchX, pinchY, pinchDistance;
 
     const call = (name, payload) => {
       if (typeof options[name] === 'function') options[name](payload);
@@ -76,7 +76,7 @@
     }
 
     function emitPinch(point) {
-      if (mode !== 'pinch' || active.size < 2 || !pinchDistance) return false;
+      if (mode !== 'pinch' || active.size < 2) return false;
       const geometry = twoPointerGeometry(active.values());
       geometry.startCenterX = pinchX;
       geometry.startCenterY = pinchY;
@@ -120,9 +120,7 @@
       active.set(pointerId, stored);
       if (active.size === 1) {
         mode = 'pending';
-        pinchDistance = 0;
         startHold(stored);
-        call('onPressStart', gesturePayload(stored));
       } else {
         startPinch(event);
       }
@@ -204,14 +202,12 @@
         remaining.previousX = remaining.x;
         remaining.previousY = remaining.y;
         mode = 'pan';
-        pinchDistance = 0;
         call('onPanStart', gesturePayload(remaining, { resumedFromPinch: true }));
         return true;
       }
 
       if (active.size === 0) {
         mode = 'idle';
-        pinchDistance = 0;
         call('onGestureEnd', gesturePayload(current, { cancelled, finishedMode }));
       }
       return true;
@@ -224,7 +220,6 @@
       clearHoldTimer();
       active.clear();
       mode = 'idle';
-      pinchDistance = 0;
       if (finishedMode === 'pinch') {
         call('onPinchEnd', gesturePayload(point, { cancelled: true, reason }));
       }

@@ -41,7 +41,6 @@ function pruneImageCachesAfterHistoryChange(reason, historyEntriesDropped = fals
   pruneImageCachesToKeys(retainedKeys);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const removedImageCaches = (imageResult?.removedSources || 0) +
-    (imageResult?.removedAssetUrls || 0) +
     (imageResult?.removedBitmaps || 0) +
     (imageResult?.removedBitmapFailures || 0);
   if (removedImageCaches) {

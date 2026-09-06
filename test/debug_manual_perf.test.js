@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..');
 
@@ -22,6 +23,29 @@ function functionSource(source, name) {
   const next = Math.min(...boundaries);
   return source.slice(start, next);
 }
+
+test('manual text diagnostics find cached line counts for numeric widths', () => {
+  const content = 'Text wrapped across three lines';
+  const obj = {
+    type: 'text',
+    w: 240,
+    _textWrappedLineIndexWidthCacheContent: content,
+    _textWrappedLineIndexWidthCache: new Map([
+      [240, { entries: [{ text: content }], lineCount: 3 }],
+    ]),
+  };
+  const context = vm.createContext({ normalizeTextContent: (value) => String(value ?? '') });
+  vm.runInContext(functionSource(readSource('src/js/debug_manual_perf.js'), 'textEditCachedLineInfo'), context);
+
+  const cached = context.textEditCachedLineInfo(obj, content);
+  assert.equal(cached.lines, 3);
+  assert.equal(cached.source, 'wrapped-width-cache');
+
+  obj.w = 480;
+  assert.equal(context.textEditCachedLineInfo(obj, content).lines, '');
+  obj.w = 240;
+  assert.equal(context.textEditCachedLineInfo(obj, 'Changed content').lines, '');
+});
 
 test('text edit perf debugger is passive event recording only', () => {
   const source = readSource('src/js/debug_manual_perf.js');

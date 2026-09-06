@@ -6,6 +6,12 @@ text, selection, and carets in the same ordered canvas. Canvas2D remains the
 compatibility backend when WebGL2 initialization fails. Existing non-ASCII text
 remains stored and displayed through the compatible text raster path.
 
+Small text now also uses an immutable summed-area font atlas and a shared
+coverage mask. See [stable text at low zoom](text-minification.md) for the
+pixel-area filter, retained-row preparation improvements, memory costs, and the
+10%/12.5% pan measurements. The earlier measurements below describe the original
+MSDF implementation; the current small-text behavior is documented there.
+
 ## Representation and sharpness
 
 Each ink glyph occupies 12 bytes of instance data: local x, local y, and ASCII
@@ -31,10 +37,12 @@ so crossing the threshold requires no upload or deferred sharpening. The pair
 costs 565,413 compressed PNG bytes and approximately 7.6 MiB of GPU texture data
 including glyph metadata. Generation is documented in [ascii-font-atlas.md](ascii-font-atlas.md).
 
-The fragment shader reconstructs coverage from linear MSDF data. Below 32 device
-pixels per em it integrates four half-pixel samples, blending continuously into
+At 12 device pixels per em and above, the fragment shader reconstructs coverage
+from linear MSDF data. Below 32 it integrates four half-pixel samples, blending continuously into
 the single-sample path between 24 and 32. Sampling is bounded to the current
-glyph so tiny glyphs cannot sample their packed neighbors. This is grayscale
+glyph so samples cannot reach packed neighbors. Below 12, the
+[area-coverage path](text-minification.md#pixel-area-coverage) supplies minification
+and blends into MSDF between eight and twelve pixels per em. This is grayscale
 antialiasing with unchanged glyph positions, not ClearType or OS font hinting.
 Text appearance is independent of whether navigation is active.
 

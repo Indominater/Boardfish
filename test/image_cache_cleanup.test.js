@@ -84,7 +84,6 @@ function loadImageState(createImageBitmap) {
     scheduleDrawableBitmapWarmup() {},
     queueScaledImageVariantForReadyImage() {},
     isViewportImageScalingActive() { return false; },
-    hasScaledImageVariantFailure() { return false; },
     setCanvasImageQuality() {},
     createImageBitmap,
   };
@@ -335,7 +334,7 @@ test('clearImageStore clears shared scaled image work', () => {
   let clears = 0;
   context.clearScaledImageVariants = () => { clears++; };
 
-  context.clearImageStore(false);
+  context.clearImageStore();
 
   assert.equal(clears, 1);
 });

@@ -12,7 +12,7 @@ var _bulkImageInsertAdded = 0;
 var _imageReadyLastRender = 0;
 
 function newId() {
-  let id = '';
+  let id;
   do {
     id = 'obj-' + (idCounter++);
   } while (objectsMap.has(id));

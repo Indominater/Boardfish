@@ -1314,7 +1314,7 @@ var ViewportDebug = (() => {
   };
   let lastRafAt = 0;
   let eventLoopTimer = null;
-  let eventLoopLastTick = 0;
+  let eventLoopLastTick;
   let longTaskObserver = null;
   let rawInputMonitorActive = false;
   const EVENT_LOOP_INTERVAL_MS = 50;
@@ -1379,7 +1379,6 @@ var ViewportDebug = (() => {
     if (!eventLoopTimer) return;
     clearInterval(eventLoopTimer);
     eventLoopTimer = null;
-    eventLoopLastTick = 0;
   }
 
   function startLongTaskObserver() {

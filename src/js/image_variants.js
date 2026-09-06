@@ -552,7 +552,6 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
     }
   };
   task.key = key;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') task.generation = generation;
   enqueueScaledVariantTask(task, priority);
   return typeof BOARDFISH_PRODUCTION === 'undefined'
     ? { key, scale, queued: true, priority: priority === true, estimatedBytes }
@@ -701,13 +700,7 @@ function prewarmVisibleScaledImageVariants(options = {}) {
   }
 }
 
-function scheduleVisibleImageWorkAfterIdle(
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  reason,
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  delayMs = IMAGE_VARIANT_INPUT_IDLE_MS
-) {
-  if (typeof BOARDFISH_PRODUCTION === 'undefined' && reason === undefined) reason = 'viewport-settled';
+function scheduleVisibleImageWorkAfterIdle(delayMs = IMAGE_VARIANT_INPUT_IDLE_MS) {
   if (_boardOpening) return;
   if (imageScaledVariantPrewarmTimer !== null) return;
   imageScaledVariantPrewarmTimer = setTimeout(() => {
@@ -715,21 +708,12 @@ function scheduleVisibleImageWorkAfterIdle(
     if (_boardOpening) return;
     const inputIdleMs = performance.now() - lastViewportInputAt;
     if (inputIdleMs < IMAGE_VARIANT_INPUT_IDLE_MS) {
-      scheduleVisibleImageWorkAfterIdle(
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        reason,
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs
-      );
+      scheduleVisibleImageWorkAfterIdle(IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs);
       return;
     }
     queueVisibleImageHydration(1);
     if (!viewportImageScalingEnabled) return;
-    prewarmVisibleScaledImageVariants(
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      { reason }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    );
+    prewarmVisibleScaledImageVariants();
   }, Math.max(0, delayMs));
 }
 

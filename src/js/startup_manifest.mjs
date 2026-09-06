@@ -13,6 +13,7 @@ export const WEB_DEV_SCRIPTS = Object.freeze([
   'board_document.js',
   'startup_debug.js',
   '../fonts/geist-ascii-msdf.js',
+  '../fonts/geist-ascii-integral.js',
   'gpu_renderer.js',
   '../app.js',
   'geometry.js',

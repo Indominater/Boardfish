@@ -47,7 +47,7 @@
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let yieldToEventLoop = null;
+  let yieldToEventLoop;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     yieldToEventLoop = async (dbg, phase, meta = {}) => {
       const t0 = performance.now();
@@ -112,18 +112,13 @@
       if (sourceEntry) return sourceEntry;
     }
 
-    let data = null;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    let width = 0;
-    let height = 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const canvas = renderImageToCanvas(obj) || await renderStoredImageToCanvas(obj, source);
     if (!canvas) return null;
-    data = await canvasToPngBlob(canvas);
+    const data = await canvasToPngBlob(canvas);
     if (!data) return null;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    width = canvas.width;
-    height = canvas.height;
+    const width = canvas.width;
+    const height = canvas.height;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       ExportDebug.step(dbg, 'web-export:rendered-blob', {
@@ -198,8 +193,8 @@
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let imageSourceKind = null;
-  let recordWebResolveEntry = null;
+  let imageSourceKind;
+  let recordWebResolveEntry;
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     imageSourceKind = (source) => {
       if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return 'web-ref';

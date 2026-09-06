@@ -571,7 +571,7 @@ const copySelected = () => {
 
 const cutSelected = () => {
   if (!hasSelection() || editingId) return false;
-  let copyResult = false;
+  let copyResult;
   try {
     copyResult = copySelected();
   } catch (err) {

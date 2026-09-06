@@ -435,10 +435,10 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         const dx = (clientX - startX) / eventZoom;
         const dy = (clientY - startY) / eventZoom;
-        let x = ox, y = oy, w = ow, h = oh;
+        let x = ox, y = oy, w, h = oh;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         let minTextW;
-        let minWidthMs = '';
+        let minWidthMs;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
         if (type === 'image') {

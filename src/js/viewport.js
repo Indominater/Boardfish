@@ -11,7 +11,7 @@ var long_message = 3 * short_message;
 var _islMsgActive = false;
 var _islMsgTimer = null;
 var _islMsgToken = 0;
-var _islandSyncedZoom = NaN;
+var _islandSyncedZoom;
 
 const isOpeningFreezeActive = () => {
   return !!openingShield?.classList.contains('active') && openingShield.classList.contains('opening-freeze');
@@ -373,15 +373,8 @@ function drawEditingTextOverlay(
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const stats = collectDebug ? {
-    editLayoutMs: 0,
-    editSelectionMs: 0,
-    editTextDrawMs: 0,
     editCaretMs: 0,
-    editLayoutLines: 0,
-    editVisibleLines: 0,
-    editCulledLines: 0,
     editDrawnTextLines: 0,
-    editSelectionRuns: 0,
     editCaretDrawn: false,
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -681,11 +674,7 @@ function applyTransform(
   // prewarm rescanned up to 100 large text objects in one unbounded main-thread
   // callback, which could delay the next gesture. Keep prewarm available to the
   // explicit performance debugger, but do not run it after navigation.
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    scheduleVisibleImageWorkAfterIdle(_activeRenderSource || 'transform');
-  } else {
-    scheduleVisibleImageWorkAfterIdle();
-  }
+  scheduleVisibleImageWorkAfterIdle();
   if (_islandSyncedZoom !== zoom) syncIslandZoomDisplay(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     _activeRenderSource || 'transform'
@@ -748,7 +737,7 @@ var _needTransform = false;
 var _needBoardRender = false;
 var _needOverlayRender = false;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
-var _frameScheduledAt = 0;
+var _frameScheduledAt;
 var _frameSources = [];
 var _activeRenderSource = 'direct';
 var _lastDrawBoardMeta = null;
@@ -973,7 +962,7 @@ function warmTextLayoutDrawLines(obj, layout, options = {}) {
   let warmedLines = 0;
   let drawUnits = 0;
   let maxLineMs = 0;
-  let restoreMs = 0;
+  let restoreMs;
   let errors = 0;
 
   try {

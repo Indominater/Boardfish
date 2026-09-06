@@ -55,7 +55,7 @@ function loadTextEditorIntegrationHelpers() {
     renders: [],
     _caretVisible: false,
     shouldCommitTextEditInputImmediately() { return false; },
-    flushEditHistoryCheckpoint() { context.flushedHistory = true; return false; },
+    flushEditHistoryCheckpoint() { return false; },
     invalidateOffscreen() {},
     markDirty(obj) { context.dirty.push(obj.id); },
     pushHistory(reason) { context.histories.push(reason); },
@@ -70,6 +70,7 @@ function loadTextEditorIntegrationHelpers() {
       'globalThis.createTextSelectionClipboardPayload = createTextSelectionClipboardPayload;\n' +
       'globalThis.textSelectionPayloadFromBoardfishClipboardValue = textSelectionPayloadFromBoardfishClipboardValue;\n' +
       'globalThis.syncFreshTextEditWidth = syncFreshTextEditWidth;\n' +
+      'globalThis.textEditorSizeDebugStats = textEditorSizeDebugStats;\n' +
       'globalThis.textEditInputReplacement = textEditInputReplacement;\n' +
       'globalThis.textEditBlankLineDeleteRange = textEditBlankLineDeleteRange;\n' +
       'globalThis.textNewlineCount = textNewlineCount;\n' +
@@ -136,6 +137,29 @@ test('text newline count handles bounded long ranges', () => {
   assert.equal(context.textNewlineCount(longText, 0, longText.length - 1), 2);
 });
 
+test('text size diagnostics reuse numeric width caches after resizing back', () => {
+  const context = loadTextEditorIntegrationHelpers();
+  const content = 'Text wrapped across three lines';
+  const obj = {
+    id: 'text-cache', type: 'text', w: 240,
+    h: 3 * TEST_LINE_H + TEST_TEXT_PAD * 2,
+    data: { content },
+  };
+  context.setCachedTextWrappedLineIndex(obj, content, [{ text: content }], 3);
+  obj.w = 480;
+  context.setCachedTextWrappedLineIndex(obj, content, [{ text: content }], 1);
+  obj.w = 240;
+
+  const stats = context.textEditorSizeDebugStats(obj);
+  assert.equal(stats.cachedLines, 3);
+  assert.equal(stats.cachedLineSource, 'wrapped-width-cache');
+  assert.equal(stats.expectedCachedHeight, obj.h);
+  assert.equal(stats.heightDeltaFromCached, 0);
+
+  obj.data.content = 'Changed content';
+  assert.equal(context.textEditorSizeDebugStats(obj).cachedLines, '');
+});
+
 function loadExitEditHarness() {
   const obj = {
     id: 'text-1',
@@ -190,7 +214,7 @@ function loadExitEditHarness() {
     },
     window: {
       getSelection() {
-        return { removeAllRanges() { context.removedRanges = true; } };
+        return { removeAllRanges() {} };
       },
     },
     BoardfishEditorState: {
@@ -202,7 +226,7 @@ function loadExitEditHarness() {
     pushEditHistoryIfChanged(id) { context.editHistoryPushes.push(id); return false; },
     pushHistory(reason) { context.histories.push(reason); },
     scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
-    invalidateOffscreen() { context.invalidated = true; },
+    invalidateOffscreen() {},
   };
   vm.createContext(context);
   vm.runInContext(
@@ -1533,7 +1557,6 @@ test('exiting unchanged existing text keeps cached layout and skips size history
     _layoutCache: cachedLayout,
     _layoutCacheContent: 'Hi',
     _layoutCacheW: context.obj.w,
-    _layoutCacheScriptKey: '[]',
     _layoutCacheY: context.obj.y,
   });
   context._editHistoryLastContent = 'Hi';

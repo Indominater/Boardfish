@@ -1,7 +1,7 @@
 'use strict';
 
 (function initWebBoardContainer(root) {
-  const { extForMime, mimeForExt, normalizeImageExt } = root.BoardfishBoardTypes ||
+  const { mimeForExt, normalizeImageExt } = root.BoardfishBoardTypes ||
     (typeof require === 'function' ? require('./board_types.js') : null);
   const ZIP_LOCAL_FILE_HEADER = 0x04034b50;
   const ZIP_CENTRAL_DIRECTORY = 0x02014b50;
@@ -361,7 +361,6 @@
       entryCount,
       centralSize,
       centralOffset,
-      eocdOffset: absoluteEocdOffset,
     };
   }
 
@@ -673,7 +672,7 @@
       const sourceBlob = source.__blob;
       const cachedCrc = cachedImageSourceCrc(source, sourceBlob.size);
       const mime = source.mime || 'image/png';
-      let stableBlob = null;
+      let stableBlob;
       if (typeof root.Response === 'function' && typeof sourceBlob?.stream === 'function') {
         stableBlob = await new root.Response(sourceBlob.stream(), {
           headers: { 'Content-Type': mime || 'image/png' },
@@ -1044,17 +1043,17 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
     const startedAt = collectDiagnostics ? nowMs() : 0;
-    let phaseStart = startedAt;
+    let phaseStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const randomAccessBlob = isBlobLike(input) ? input : null;
     let containerBytes = null;
-    let entries = null;
+    let entries;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     let readMs = 0;
-    let zipOpenMs = 0;
+    let zipOpenMs;
     let zipTailBytes = 0;
     let centralDirectoryBytes = 0;
-    let containerFileBytes = 0;
+    let containerFileBytes;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (randomAccessBlob) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */

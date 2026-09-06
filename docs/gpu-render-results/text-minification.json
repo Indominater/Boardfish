@@ -1,0 +1,173 @@
+{
+  "benchmark": "Boardfish text minification",
+  "recordedAtUtc": "2026-09-06T20:58Z",
+  "reportKind": "aggregate measurement summary",
+  "containsRawSamples": false,
+  "baseline": {
+    "description": "Previous retained MSDF renderer compared with summed-area text coverage and retained CPU row reuse",
+    "reproductionRevision": "07aa2fa",
+    "sourcePath": "src/js/gpu_renderer.js",
+    "optionalBenchmarkPath": "src/dev/gpu-text-before.js"
+  },
+  "environment": {
+    "browser": "Chrome 152",
+    "platform": "macOS",
+    "actualBrowserDprApproximate": 1.11,
+    "explicitBackingStoreDprs": [1, 2],
+    "panelCount": 2,
+    "panelCssWidth": 400,
+    "panelCssHeight": 256,
+    "bothPanelsMounted": true,
+    "bothPanelsFullyVisible": true,
+    "foregroundTab": true
+  },
+  "phaseMethod": {
+    "glyphs": [".", "_", "-", "i", "|", "H", "e", "A"],
+    "repetitionsPerGlyph": 180,
+    "axes": ["x", "y"],
+    "positionsPerAxis": 64,
+    "physicalPixelTravel": 0.984375,
+    "rowPhaseSamplesPerRendererPerConfiguration": 1024,
+    "brightnessMetric": "Integrated foreground contribution over each isolated row",
+    "variationMetric": "100 * (maximum - minimum) / mean, reporting the worst glyph/axis in each configuration",
+    "zeroSampleThreshold": 0.0001,
+    "readbackTimed": false
+  },
+  "densePanningMethod": {
+    "textboxCount": 3,
+    "charactersPerTextbox": 100000,
+    "textboxWidthWorldPixels": 3500,
+    "liveViewportLayoutEachFrame": true,
+    "independentRendererLayoutObjects": true,
+    "crossesRowsAndChunks": true,
+    "blockOrder": ["previous", "current", "current", "previous"],
+    "framesPerBlock": 60,
+    "warmupFramesPerBlock": 12,
+    "cpuMetric": "Visible-object filtering, live viewport layout, and WebGL command submission",
+    "readbackTimed": false
+  },
+  "configurations": [
+    {
+      "zoom": 0.1,
+      "dpr": 1,
+      "worstRowBrightnessVariationPercent": { "previous": 285.6314, "current": 3.9788 },
+      "zeroRowPhaseSamples": { "previous": 145, "current": 0 },
+      "cpuSubmissionMs": {
+        "previous": { "p50": 0.5, "p95": 2.1, "mean": 0.8217 },
+        "current": { "p50": 0.3, "p95": 0.9, "mean": 0.3417 }
+      }
+    },
+    {
+      "zoom": 0.125,
+      "dpr": 1,
+      "worstRowBrightnessVariationPercent": { "previous": 199.6159, "current": 2.2187 },
+      "zeroRowPhaseSamples": { "previous": 31, "current": 0 },
+      "cpuSubmissionMs": {
+        "previous": { "p50": 0.4, "p95": 2, "mean": 0.6508 },
+        "current": { "p50": 0.5, "p95": 1.1, "mean": 0.6233 }
+      }
+    },
+    {
+      "zoom": 0.1,
+      "dpr": 2,
+      "worstRowBrightnessVariationPercent": { "previous": 33.0279, "current": 1.2629 },
+      "zeroRowPhaseSamples": { "previous": 0, "current": 0 },
+      "cpuSubmissionMs": {
+        "previous": { "p50": 0.2, "p95": 2.1, "mean": 0.7575 },
+        "current": { "p50": 0.6, "p95": 1.1, "mean": 0.6658 }
+      }
+    },
+    {
+      "zoom": 0.125,
+      "dpr": 2,
+      "worstRowBrightnessVariationPercent": { "previous": 37.5207, "current": 1.1023 },
+      "zeroRowPhaseSamples": { "previous": 0, "current": 0 },
+      "cpuSubmissionMs": {
+        "previous": { "p50": 0.5, "p95": 2.2, "mean": 0.8833 },
+        "current": { "p50": 0.4, "p95": 0.8, "mean": 0.3825 }
+      }
+    }
+  ],
+  "animationScheduling": {
+    "scope": "Both renderers across the four measured configurations",
+    "rafMedianMsApproximate": 16.7,
+    "maximumRafIntervalMs": 17.7,
+    "intervalsAbove25Ms": 0
+  },
+  "currentRendererWarmRepeatedBlocks": {
+    "bufferUploads": 0,
+    "imageUploads": 0,
+    "atlasUploads": 0
+  },
+  "additionalChecks": {
+    "builtProductionApp": {
+      "fixtureType": ".bf board file",
+      "textboxCount": 3,
+      "charactersPerTextbox": 100000,
+      "zoom": 0.1,
+      "theme": "light",
+      "actions": ["open board", "pan", "scroll"],
+      "observedErrors": 0
+    },
+    "coordinatePrecision": {
+      "zoomScales": [0.1, 0.18, 0.25, 0.5, 1, 1.25, 1.75, 2, 4, 10],
+      "worldOriginsCompared": [[0, 0], [10000000, 10000000]],
+      "compensatingCameraTransform": true,
+      "identicalPixelsAtAllScales": true,
+      "movementGeometryUploads": 0
+    },
+    "nativeReadingInspection": {
+      "physicalPixelsPerEm": [16, 20, 28],
+      "observation": "Text remained visually sharp in native pixel inspection"
+    },
+    "lowZoomContextRestoration": {
+      "zoom": 0.1,
+      "inkPixelsPrevious": 534,
+      "inkPixelsRestored": 534,
+      "checksumPrevious": "f5b5d1ed",
+      "checksumRestored": "f5b5d1ed",
+      "fontsReadyAfterRestoration": true,
+      "coverageResourcesRebuilt": true
+    },
+    "continuousZoomMotionConsistency": {
+      "scaleCount": 180,
+      "minimumZoom": 0.18,
+      "maximumZoom": 4,
+      "comparedZoom": 1.371927,
+      "motionChecksum": "f78319c3",
+      "restChecksum": "f78319c3",
+      "uploadCountersRecorded": false
+    },
+    "portableBrowserPhaseSweep": {
+      "zoom": 0.1,
+      "dpr": 1,
+      "query": "?baseline=1&portable=1",
+      "disabledExtensions": ["EXT_color_buffer_float", "OES_texture_float_linear"],
+      "integralSampling": "Decode packed bytes before manual bilinear interpolation",
+      "coverageTarget": "R8",
+      "worstRowBrightnessVariationPercent": {
+        "previous": 285.6314,
+        "currentPortable": 12.6799,
+        "currentDefaultFloat": 3.9788
+      },
+      "currentZeroRowPhaseSamples": 0,
+      "observedErrors": 0,
+      "timingRecorded": false
+    },
+    "finalSourceChecks": {
+      "fullSuiteTestsPassed": 569,
+      "separateStaticTestsPassed": 25,
+      "javascriptSyntaxPassed": true,
+      "productionSourceChecksPassed": true
+    }
+  },
+  "limits": [
+    "This summary omits raw per-phase and per-frame samples. A fresh benchmark run can download those samples.",
+    "CPU submission and requestAnimationFrame scheduling are not direct GPU execution or presentation measurements.",
+    "Current p95 and mean submission times were lower in all four configurations; two p50 values increased.",
+    "No universal speedup or frame-rate improvement is claimed.",
+    "Final 8-bit output and finite coverage/texture/accumulation precision leave measured residual brightness variation.",
+    "No zero-aliasing claim is made for all text, transforms, devices, or browsers.",
+    "Results were measured on one macOS device and browser; other capability paths, GPUs, operating systems, and browser engines may differ."
+  ]
+}

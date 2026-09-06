@@ -273,10 +273,7 @@ var ManualPerfDebug = (() => {
       ? options.prewarmScaledImages
       : {};
     const scaledImagePrewarm = options.prewarmScaledImages && typeof prewarmVisibleScaledImageVariants === 'function'
-      ? prewarmVisibleScaledImageVariants({
-          reason: 'perf-begin',
-          ...scaledImagePrewarmOptions,
-        })
+      ? prewarmVisibleScaledImageVariants(scaledImagePrewarmOptions)
       : null;
     const textLayoutPrewarmOptions = options.prewarmTextLayout && typeof options.prewarmTextLayout === 'object'
       ? options.prewarmTextLayout
@@ -897,7 +894,7 @@ var ManualPerfDebug = (() => {
     const widthCached = widthCache &&
       obj._textWrappedLineIndexWidthCacheContent === text &&
       typeof widthCache.get === 'function'
-      ? widthCache.get(String(obj.w))
+      ? widthCache.get(obj.w)
       : null;
     if (widthCached && Array.isArray(widthCached.entries) && Number.isFinite(widthCached.lineCount)) {
       return {
@@ -1147,7 +1144,7 @@ var ManualPerfDebug = (() => {
     const now = performance.now();
     const entry = sanitizePerfMeta({
       at: round(now),
-      sinceStartMs: textResizeSession ? now - textResizeSession.startedAtMs : '',
+      sinceStartMs: now - textResizeSession.startedAtMs,
       gapMs: textResizeLastEventAt ? now - textResizeLastEventAt : '',
       step,
       ...meta,
@@ -2330,10 +2327,10 @@ var ManualPerfDebug = (() => {
       return texts.slice().sort((a, b) => (
         normalizeTextContent(b?.data?.content || '').length -
         normalizeTextContent(a?.data?.content || '').length
-      ))[0] || null;
+      ))[0];
     }
     const index = Math.max(0, Math.min(texts.length - 1, Math.trunc(Number(options.objectIndex) || 0)));
-    return texts[index] || null;
+    return texts[index];
   }
 
   function textIndexAtLine(content, targetLine) {

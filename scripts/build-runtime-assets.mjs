@@ -101,7 +101,6 @@ const PRODUCTION_FALSE_DIAGNOSTIC_FLAGS = Object.freeze([
   'collectDrawDebug',
   'collectViewportDebug',
   'collectOpenInitialRenderDebug',
-  'collectOpenPreviewFallbackDebug',
   'collectTransformDebug',
   'collectInitialRenderDebug',
   'collectClipboardDiagnostics',
