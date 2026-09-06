@@ -27,6 +27,7 @@ function clearTextRasterCache() {
 }
 
 function beginTextRasterFrame() {
+  _textGpuRenderer?.beginFrame?.();
   if (typeof BoardfishTextRaster === 'undefined') return;
   _textRasterCache ??= BoardfishTextRaster.createTextRasterCache();
   _textRasterCache.beginFrame();
@@ -184,6 +185,7 @@ var _mwCache = new Map();
 var _glyphMetricsCache = new Map();
 var _glyphPairSpacingCache = new Map();
 var _textGraphemeSegmenter = null;
+var _asciiTextMetrics = null;
 
 function forEachTextSpacingUnit(text, callback, start = 0, end = null) {
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, text.length));
@@ -309,6 +311,7 @@ const textLayoutDebugRound = (value) => Math.round((Number(value) || 0) * 100) /
 
 const clearMeasuredTextWidthCache = () => {
   _textTabStopWidth = undefined;
+  _asciiTextMetrics = null;
   _mwCache.clear();
   _glyphMetricsCache.clear();
   _glyphPairSpacingCache.clear();
@@ -389,6 +392,69 @@ function textGlyphPairSpacing(previous, next, font = FONT) {
   return spacing;
 }
 
+// ASCII has a finite alphabet. Keep advances and pair adjustments in indexed
+// storage so building a new paragraph does not run a regex, construct font keys,
+// or maintain an LRU cache for each character. The general path remains available
+// for existing content containing other scripts or control characters.
+function getAsciiTextMetrics() {
+  if (!_asciiTextMetrics || _asciiTextMetrics.font !== FONT) {
+    _asciiTextMetrics = {
+      font: FONT,
+      widths: new Float64Array(128).fill(NaN),
+      pairs: new Float64Array(128 * 128).fill(NaN),
+    };
+  }
+  return _asciiTextMetrics;
+}
+
+function asciiTextGlyphWidth(metrics, code) {
+  let width = metrics.widths[code];
+  if (width !== width) {
+    width = measureTextGlyphMetricsWithFont(String.fromCharCode(code), metrics.font).width;
+    metrics.widths[code] = width;
+  }
+  return width;
+}
+
+function asciiTextPairSpacing(metrics, previous, next) {
+  if (previous <= 32 || next <= 32) return 0;
+  const key = (previous << 7) | next;
+  let spacing = metrics.pairs[key];
+  if (spacing !== spacing) {
+    spacing = textGlyphPairSpacing(String.fromCharCode(previous), String.fromCharCode(next), metrics.font);
+    metrics.pairs[key] = spacing;
+  }
+  return spacing;
+}
+
+function getAsciiPrefixWidths(value) {
+  const metrics = getAsciiTextMetrics();
+  const pw = new Float64Array(value.length + 1);
+  let boundarySpacing = null;
+  let width = 0;
+  let previous = 0;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code === 9) {
+      width = textWidthAfterTab(width);
+      previous = 0;
+    } else {
+      const spacing = asciiTextPairSpacing(metrics, previous, code);
+      if (spacing) {
+        width += spacing;
+        pw[index] = width;
+        if (!boundarySpacing) boundarySpacing = new Float64Array(value.length + 1);
+        boundarySpacing[index] = spacing;
+      }
+      width += asciiTextGlyphWidth(metrics, code);
+      previous = code;
+    }
+    pw[index + 1] = width;
+  }
+  if (boundarySpacing) pw.boundarySpacing = boundarySpacing;
+  return pw;
+}
+
 function clearTextObjectLayoutRuntime(obj, options) {
   if (!obj) return;
   obj._layoutCache = obj._layoutCacheContent = null;
@@ -467,6 +533,7 @@ function cloneTextObjectRuntimeCaches(source, target, preserveDrawPlans = true) 
 
 const clearTextLayoutCaches = (options = {}) => {
   clearTextRasterCache();
+  if (typeof clearTextGpuCache === 'function') clearTextGpuCache();
   _prefixCache.clear();
   if (options.measurements) clearMeasuredTextWidthCache();
   if (options.objectLayout !== false) {
@@ -481,6 +548,12 @@ function getPrefixWidths(text) {
     _prefixCache.delete(value);
     _prefixCache.set(value, hit);
     return hit;
+  }
+  if (/^[\x20-\x7e\t]*$/.test(value)) {
+    const widths = getAsciiPrefixWidths(value);
+    _prefixCache.set(value, widths);
+    trimMapCache(_prefixCache, TEXT_PREFIX_CACHE_MAX_ENTRIES);
+    return widths;
   }
   const pw = new Float64Array(value.length + 1);
   let boundarySpacing = null;
@@ -844,8 +917,34 @@ function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, 
   }
 }
 
+function findAsciiTabWrapEndByWidth(content, start, end, maxW, metrics) {
+  let width = 0;
+  let previous = 0;
+  let index = start;
+  while (index < end) {
+    const code = content.charCodeAt(index);
+    let nextWidth = width;
+    if (code === 9) {
+      nextWidth = textWidthAfterTab(width);
+    } else {
+      nextWidth += asciiTextPairSpacing(metrics, previous, code);
+      nextWidth += asciiTextGlyphWidth(metrics, code);
+    }
+    // Every row consumes at least one character even when its first tab or
+    // glyph is wider than the box, matching the general wrapping path.
+    if (nextWidth > maxW) return index === start ? index + 1 : index;
+    width = nextWidth;
+    previous = code === 9 ? 0 : code;
+    index++;
+  }
+  return end;
+}
+
 function wrapTextParagraph(obj, content, paraStart, paraEnd, maxW, pushLine, collectPrefixWidths = true) {
   const paragraphHasTab = textRangeIncludes(content, paraStart, paraEnd);
+  const asciiTabMetrics = paragraphHasTab && /^[\x20-\x7e\t]*$/.test(content.slice(paraStart, paraEnd))
+    ? getAsciiTextMetrics()
+    : null;
   const paragraphPrefixWidths = getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd);
   const boundaryAt = (index, forward = false) => paraStart + textGraphemeOffset(paragraphPrefixWidths, index - paraStart, forward);
   const rangeWidth = (start, end) => paragraphHasTab
@@ -867,7 +966,11 @@ function wrapTextParagraph(obj, content, paraStart, paraEnd, maxW, pushLine, col
   }
   let lineStart = paraStart;
   while (lineStart < paraEnd) {
-    let lineEnd = findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW, boundaryAt);
+    // Tab stops restart at each visual row. Scanning that row once avoids the
+    // repeated substring-prefix construction used by binary width searches.
+    let lineEnd = asciiTabMetrics
+      ? findAsciiTabWrapEndByWidth(content, lineStart, paraEnd, maxW, asciiTabMetrics)
+      : findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW, boundaryAt);
     let nextStart = lineEnd;
     let caretEnd = lineEnd;
     if (lineEnd < paraEnd) {
@@ -1453,8 +1556,22 @@ function getTextLayout(obj) {
   setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
   const lines = wrapped.lines;
   const layout = new Array(lines.length);
+  const cachedLines = obj._textViewportLayoutLineCacheContent === content &&
+    obj._textViewportLayoutLineCacheW === obj.w &&
+    typeof obj._textViewportLayoutLineCache?.get === 'function'
+      ? obj._textViewportLayoutLineCache
+      : null;
   for (let i = 0; i < lines.length; i++) {
-    layout[i] = layoutLineFromWrappedLine(obj, lines[i], i);
+    const cached = cachedLines?.get(i);
+    if (cached) {
+      // Entering the full editor layout must retain the visible row's render
+      // resource identity. Its content and wrapping already match this cache.
+      cached.y = obj.y + TEXT_PAD + i * LINE_H;
+      cached.textY = cached.y + TEXT_BASELINE_Y_OFFSET;
+      layout[i] = cached;
+    } else {
+      layout[i] = layoutLineFromWrappedLine(obj, lines[i], i);
+    }
   }
   obj._layoutCache = layout;
   return obj._layoutCache;
@@ -1737,6 +1854,42 @@ function prepareTextLayoutForDraw(layout) {
   }
   return prepared;
 }
+
+// The atlas and GPU buffers are runtime resources, never part of text objects,
+// clipboard data, or history snapshots. The line renderer remains available for
+// unsupported browsers, fonts, context state, and legacy non-ASCII content.
+var _textGpuRenderer = null;
+
+function getTextGpuRenderer() {
+  if (!_textGpuRenderer && typeof BoardfishTextGpu !== 'undefined') {
+    _textGpuRenderer = BoardfishTextGpu.createTextGpuRenderer({
+      fontSize: FONT_SIZE,
+      onReady: () => {
+        if (typeof scheduleRender === 'function') scheduleRender(true);
+      },
+    });
+  }
+  return _textGpuRenderer;
+}
+
+function clearTextGpuCache() {
+  _textGpuRenderer?.clear();
+}
+
+function drawTextLayoutGpu(context, layout, obj) {
+  // Browsers canonicalize Canvas2D.font (for example, dropping "normal 400").
+  // Compare against the browser's canonical value used by our measurement path.
+  if ((context.font !== FONT && context.font !== _measureCtx.font) || !layout.length) return null;
+  const fontSet = typeof document !== 'undefined' ? document.fonts : null;
+  if (!fontSet || fontSet.status !== 'loaded' || !fontSet.check(FONT, 'Boardfish')) return null;
+  return getTextGpuRenderer()?.draw(context, layout, obj, { pad: TEXT_PAD }) || null;
+}
+
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
+function getTextGpuStats() {
+  return _textGpuRenderer?.getStats() || { ready: false, bytes: 0, entries: 0 };
+}
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function textDrawPlanRasterBounds(plan, font) {
   if (plan.rasterBounds?.font === font) return plan.rasterBounds.bounds;

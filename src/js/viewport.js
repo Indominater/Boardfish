@@ -411,7 +411,8 @@ function drawEditingTextOverlay(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const textDrawStart = collectDebug ? performance.now() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  for (const line of layout) {
+  const gpuText = typeof drawTextLayoutGpu === 'function' && drawTextLayoutGpu(context, layout, obj);
+  if (!gpuText) for (const line of layout) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
     } else {
@@ -424,6 +425,7 @@ function drawEditingTextOverlay(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDebug) {
     stats.editTextDrawMs = performance.now() - textDrawStart;
+    if (gpuText) stats.editDrawnTextLines = layout.length;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
@@ -782,6 +784,7 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   canvasTextColor,
   currentViewportWorldRect: viewportWorldRect,
   drawTextLineRange,
+  drawTextLayoutGpu,
   getTextLayoutForViewport,
   objectIntersectsRect,
   selectImageSourceForDraw,

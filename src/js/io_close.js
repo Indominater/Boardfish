@@ -525,6 +525,10 @@ async function hydrateTextDrawCachesForOpen(
     try { await fontSet.ready; } catch (_) {}
   }
 
+  // ASCII rendering uses one shared font texture. Warming a raster for every
+  // line would build resources the GPU path never uses, at every zoom density.
+  const gpuRenderer = typeof getTextGpuRenderer === 'function' ? getTextGpuRenderer() : null;
+  const gpuReady = gpuRenderer?.isReady?.() === true;
   const warmupTarget = createOpenTextWarmupTarget();
   beginTextRasterFrame();
   let textObjects = 0;
@@ -539,9 +543,11 @@ async function hydrateTextDrawCachesForOpen(
     chars += content.length;
     const layout = getTextLayout(obj);
     for (const line of layout) {
-      prepareTextLineForDraw(line);
       textLines++;
-      if (warmOpenTextLineForDraw(warmupTarget, obj, line)) warmedLines++;
+      if (!(gpuReady && /^[\x20-\x7e\t]*$/.test(line.text))) {
+        prepareTextLineForDraw(line);
+        if (warmOpenTextLineForDraw(warmupTarget, obj, line)) warmedLines++;
+      }
       if (performance.now() - batchStartedAt >= 8) {
         await new Promise((resolve) => setTimeout(resolve, 0));
         batchStartedAt = performance.now();

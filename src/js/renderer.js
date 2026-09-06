@@ -74,6 +74,9 @@
       textRasterCacheMisses: 0,
       textRasterizedDrawCalls: 0,
       textRasterDrawCalls: 0,
+      textGpuObjects: 0,
+      textGpuBatches: 0,
+      textGpuUploadedBytes: 0,
       textLineDrawMs: 0,
       maxTextLineDrawMs: 0,
       slowTextLineDrawCount: 0,
@@ -409,7 +412,9 @@
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         if (obj.type === 'text') {
           const layout = getTextLayoutForDraw(obj, viewportRect);
-          for (const line of layout) deps.drawTextLineRange(context, line, obj);
+          if (!deps.drawTextLayoutGpu?.(context, layout, obj)) {
+            for (const line of layout) deps.drawTextLineRange(context, line, obj);
+          }
           return;
         }
         if (obj.type !== 'image') return;
@@ -439,6 +444,19 @@
           counters.textCharCount = (counters.textCharCount || 0) + chars;
           counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
           counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
+        }
+        const gpu = deps.drawTextLayoutGpu?.(context, layout, obj);
+        if (gpu) {
+          if (counters) {
+            counters.textGpuObjects = (counters.textGpuObjects || 0) + 1;
+            counters.textGpuBatches = (counters.textGpuBatches || 0) + (gpu.batches || 0);
+            counters.textGpuUploadedBytes = (counters.textGpuUploadedBytes || 0) + (gpu.uploadedBytes || 0);
+            counters.textDrawCalls = (counters.textDrawCalls || 0) + (gpu.drawCalls || 0);
+            counters.textLines = (counters.textLines || 0) + totalLayoutLines;
+            counters.drawnTextLines = (counters.drawnTextLines || 0) + layout.length;
+            counters.culledTextLines = (counters.culledTextLines || 0) + Math.max(0, totalLayoutLines - layout.length);
+          }
+          return true;
         }
         let directlyDrawn = false;
         let drawnLineCount = 0;
