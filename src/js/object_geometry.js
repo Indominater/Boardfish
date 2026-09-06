@@ -8,6 +8,10 @@
       for (let i = objectsList.length - 1; i >= 0; i--) {
         const obj = objectsList[i];
         if (obj.type !== 'image') {
+          if (obj.type === 'text' && root.BoardfishTextPanels) {
+            if (root.BoardfishTextPanels.containsPoint(obj, point.x, point.y)) return obj;
+            continue;
+          }
           if (point.x >= obj.x && point.x <= obj.x + obj.w && point.y >= obj.y && point.y <= obj.y + obj.h) return obj;
           continue;
         }

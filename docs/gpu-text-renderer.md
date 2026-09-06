@@ -6,6 +6,11 @@ text, selection, and carets in the same ordered canvas. Canvas2D remains the
 compatibility backend when WebGL2 initialization fails. Existing non-ASCII text
 remains stored and displayed through the compatible text raster path.
 
+Textboxes now also use GPU squircle panels matching the context menu, with
+conservative overlap handling that preserves exposed shadows. See
+[text panels and overlap rendering](text-panels.md) for implementation and
+measurements.
+
 ## Representation and sharpness
 
 Each ink glyph occupies 12 bytes of instance data: local x, local y, and ASCII

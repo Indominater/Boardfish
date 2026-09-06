@@ -1,0 +1,126 @@
+{
+  "before": {
+    "objects": [
+      {
+        "id": "obj-1",
+        "x": 80,
+        "y": 80,
+        "w": 375,
+        "h": 80,
+        "content": "A panel behind another panel\nThe corners and shadows remain visible."
+      },
+      {
+        "id": "obj-2",
+        "x": 180,
+        "y": 160,
+        "w": 384,
+        "h": 80,
+        "content": "Sharp ASCII text\nShared menu colors and squircle corners."
+      },
+      {
+        "id": "obj-3",
+        "x": 520,
+        "y": 325,
+        "w": 200,
+        "h": 56,
+        "content": "Editing stays sharp."
+      }
+    ],
+    "stats": {
+      "frames": 4,
+      "drawCalls": 16,
+      "textDrawCalls": 6,
+      "imageDrawCalls": 0,
+      "panelDrawCalls": 6,
+      "panelKernelUploads": 1,
+      "rectangleDrawCalls": 4,
+      "glyphsDrawn": 250,
+      "bufferUploads": 3,
+      "bufferUploadBytes": 1500,
+      "imageUploads": 0,
+      "imageUploadBytes": 0,
+      "imageEvictions": 0,
+      "atlasUploads": 2,
+      "fallbackRasterizations": 0,
+      "contextLosses": 0,
+      "frameDrawCalls": 7,
+      "frameBufferUploads": 0,
+      "frameGlyphsDrawn": 125,
+      "fontReady": true,
+      "lost": false,
+      "frame": 4,
+      "bufferBytes": 1500,
+      "imageBytes": 0,
+      "fallbackBytes": 0,
+      "chunkCount": 3,
+      "imageCount": 0,
+      "textureCount": 0,
+      "panelKernelCount": 1,
+      "panelKernelBytes": 65536,
+      "atlasBytes": 7932544
+    },
+    "color": "rgb(251, 251, 254)"
+  },
+  "editing": {
+    "editingId": "obj-3",
+    "content": "Editing stays sharp. More ASCII 0123456789.\nA second line.",
+    "selection": [
+      0,
+      7
+    ],
+    "stats": {
+      "frames": 8,
+      "drawCalls": 48,
+      "textDrawCalls": 18,
+      "imageDrawCalls": 0,
+      "panelDrawCalls": 18,
+      "panelKernelUploads": 1,
+      "rectangleDrawCalls": 12,
+      "glyphsDrawn": 802,
+      "bufferUploads": 6,
+      "bufferUploadBytes": 2772,
+      "imageUploads": 0,
+      "imageUploadBytes": 0,
+      "imageEvictions": 0,
+      "atlasUploads": 2,
+      "fallbackRasterizations": 0,
+      "contextLosses": 0,
+      "frameDrawCalls": 8,
+      "frameBufferUploads": 1,
+      "frameGlyphsDrawn": 157,
+      "fontReady": true,
+      "lost": false,
+      "frame": 8,
+      "bufferBytes": 1884,
+      "imageBytes": 0,
+      "fallbackBytes": 0,
+      "chunkCount": 3,
+      "imageCount": 0,
+      "textureCount": 0,
+      "panelKernelCount": 1,
+      "panelKernelBytes": 65536,
+      "atlasBytes": 7932544
+    }
+  },
+  "light": {
+    "color": "rgb(251, 251, 254)",
+    "style": {
+      "radius": 16,
+      "borderWidth": 1,
+      "fill": "rgb(66, 65, 77)",
+      "border": "rgb(112, 112, 122)",
+      "text": "rgb(251, 251, 254)",
+      "shadowColor": "rgba(0, 0, 0, 0.1)",
+      "shadowBlur": 24,
+      "shadowOffsetX": 0,
+      "shadowOffsetY": 8,
+      "outlineColor": "rgba(0, 0, 0, 0.3)",
+      "outlineWidth": 1,
+      "padding": 16,
+      "fontSize": 16
+    },
+    "content": "Editing stays sharp. More ASCII 0123456789.\nA second line.",
+    "editingId": null
+  },
+  "errors": []
+}

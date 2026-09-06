@@ -381,6 +381,7 @@
 
   function createBoardRenderer(deps) {
     const getTextLayoutForDraw = deps.getTextLayoutForViewport || deps.getTextLayout;
+    const panelStyle = () => deps.textPanelStyle?.() || root.BoardfishTextPanels?.getStyle();
     const gpuTextOptions = {
       fontSize: deps.fontSize || 16,
       padding: deps.textPad ?? 16,
@@ -410,7 +411,19 @@
       , viewportRect = null
       , view = null
       , imageSourceResolver = null
+      , visibility = null
     ) {
+      if (obj.type === 'text') {
+        const style = panelStyle();
+        if (style) {
+          if (!visibility?.bodyHidden || !visibility?.shadowHidden) {
+            const phase = visibility?.bodyHidden ? 'shadow' : visibility?.shadowHidden ? 'body' : 'all';
+            root.BoardfishTextPanels?.draw(context, obj, style, { phase });
+          }
+          context.fillStyle = style.text;
+        }
+        if (visibility?.textHidden) return true;
+      }
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         if (obj.type === 'text') {
           const layout = getTextLayoutForDraw(obj, viewportRect);
@@ -569,22 +582,37 @@
       , onlyText = false
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
+      const scene = deps.objects(), style = panelStyle();
+      // Editing is painted last by the viewport. Include that opaque panel in
+      // the visibility plan even though this pass omits its actual submission.
+      const editing = skipId && deps.editingObject?.();
+      const planningScene = editing && !onlyText ? [...scene.filter(obj => obj.id !== skipId), editing] : scene;
+      const visibility = style && root.BoardfishPanelVisibility
+        ? root.BoardfishPanelVisibility.createPlan(planningScene, viewportRect, style, {
+          zoom: view.zoom, dpr: view.dpr, onlyText, skipId: editing && !onlyText ? null : skipId,
+        }) : null;
+      const intersects = obj => obj.type === 'text' && style && root.BoardfishTextPanels
+        ? root.BoardfishTextPanels.intersectsViewport(obj, viewportRect, style)
+        : deps.objectIntersectsRect(obj, viewportRect);
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        for (const obj of deps.objects()) {
+        for (const obj of scene) {
           if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
-          if (!deps.objectIntersectsRect(obj, viewportRect)) continue;
-          drawSingleObj(context, obj, viewportRect, view, imageSourceResolver);
+          const exposed = visibility?.get(obj);
+          if (!intersects(obj) || exposed?.hidden) continue;
+          drawSingleObj(context, obj, viewportRect, view, imageSourceResolver, exposed);
         }
         return;
       } else {
       const cullingEnabled = deps.viewportCullingEnabled();
       let drawnImages = 0;
       let drawnText = 0;
-      for (const obj of deps.objects()) {
+      for (const obj of scene) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
         if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
-        if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect)) {
+        const exposed = visibility?.get(obj);
+        if ((cullingEnabled && !intersects(obj)) || exposed?.hidden) {
           countCulledObject(obj, counters);
+          if (counters && exposed?.hidden) counters.occludedObjects = (counters.occludedObjects || 0) + 1;
           continue;
         }
         if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
@@ -625,7 +653,7 @@
           imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
-          drawn = drawSingleObj(context, obj, counters, viewportRect, view, imageSourceResolver);
+          drawn = drawSingleObj(context, obj, counters, viewportRect, view, imageSourceResolver, exposed);
         } finally {
           if (counters && typeof performance !== 'undefined') {
             recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, deps);

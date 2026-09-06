@@ -167,6 +167,122 @@ test('images, rectangles, and text preserve submission order and image textures 
   assert.deepEqual(f.context.getTransform(), { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, is2D: true });
 });
 
+test('squircle backgrounds preserve image, shadow, border, glyph, and overlay painter order', async () => {
+  const f=fixture();await f.context.ready;
+  const obj={...object(),w:320,h:80},image={width:100,height:50};
+  f.context.drawImage(image,0,0);
+  f.context.drawTextPanel(obj);
+  f.context.drawTextLayout([line('ASCII',0,obj)],obj);
+  f.context.fillRect(4,5,6,7);
+  const draws=f.calls.filter(call=>call.name==='drawArrays'||call.name==='drawArraysInstanced');
+  assert.deepEqual(draws.map(call=>call.name),['drawArrays','drawArrays','drawArraysInstanced','drawArrays']);
+  assert.deepEqual(callsNamed(f,'uniform1i').filter(call=>call.args[0]==='phase').map(call=>call.args[1]),[2]);
+  assert.deepEqual(callsNamed(f,'uniform4fv').find(call=>call.args[0]==='fillColor').args[1],[66/255,65/255,77/255,1]);
+  assert.deepEqual(callsNamed(f,'uniform4fv').find(call=>call.args[0]==='shadowColor').args[1],[0,0,0,.1]);
+  assert.equal(f.context.getStats().panelDrawCalls,1);
+  assert.equal(f.context.getStats().imageUploads,1);
+});
+
+test('shared panel kernels and geometry require no uploads across sizes, panning, zooming, or far world origins', async () => {
+  const f=fixture();await f.context.ready;
+  const obj={...object(),w:320,h:80};
+  f.context.drawTextPanel(obj);
+  const initial=f.context.getStats(),uploads=callsNamed(f,'texImage2D').length;
+  for(const scale of [.01,.7,1,2,100]) {
+    f.context.setTransform(scale,0,0,scale,-scale*1e10,scale*1e10);
+    f.context.drawTextPanel({...obj,x:1e10+.125,y:-1e10+.25,w:500,h:240});
+    const matrix=callsNamed(f,'uniformMatrix3fv').at(-1).args[2];
+    const edges=callsNamed(f,'uniform4f').filter(call=>call.args[0]==='bounds').at(-1).args.slice(1);
+    assert.ok(Math.abs(matrix[6]+matrix[0]*edges[0]-.125*scale)<.0001);
+    assert.ok(Math.abs(matrix[7]+matrix[4]*edges[1]-.25*scale)<.0001);
+  }
+  assert.equal(callsNamed(f,'texImage2D').length,uploads);
+  assert.equal(f.context.getStats().panelKernelUploads,1);
+  assert.equal(f.context.getStats().panelKernelBytes,128*128*4);
+  assert.equal(f.context.getStats().bufferUploads,initial.bufferUploads);
+  assert.equal(f.rasterDraws.length,0);
+  const bounds=callsNamed(f,'uniform4f').filter(call=>call.args[0]==='rect').at(-1).args.slice(1);
+  assert.ok(bounds.every((value,index)=>Math.abs(value-[-4.02,-3.02,8.04,6.04][index])<1e-9));
+});
+
+test('very tall panel bottoms retain small-box edge precision and bounded vertex coordinates', async () => {
+  const f=fixture();await f.context.ready;
+  const capture=()=>({
+    matrix:callsNamed(f,'uniformMatrix3fv').at(-1).args[2].map(Math.fround),
+    edges:callsNamed(f,'uniform4f').filter(call=>call.args[0]==='bounds').at(-1).args.slice(1).map(Math.fround),
+    rect:callsNamed(f,'uniform4f').filter(call=>call.args[0]==='rect').at(-1).args.slice(1).map(Math.fround),
+  });
+  for(const zoom of [.697,.713,1.31]) {
+    const bottom=480.3125;
+    f.context.setTransform(zoom,0,0,zoom,20.125,bottom-2400000.375*zoom);
+    f.context.drawTextPanel({...object(),x:0,y:.125,w:320,h:2400000.25});
+    const tall=capture();
+    f.context.setTransform(zoom,0,0,zoom,20.125,bottom-2000.375*zoom);
+    f.context.drawTextPanel({...object(),x:0,y:.125,w:320,h:2000.25});
+    const small=capture();
+    // Both top edges are far outside this viewport. The visible bottom, side
+    // edges, clipped quad, and camera-relative transform must survive Float32.
+    assert.deepEqual(tall.matrix,small.matrix);
+    assert.deepEqual([tall.edges[0],...tall.edges.slice(2)],[small.edges[0],...small.edges.slice(2)]);
+    assert.deepEqual(tall.rect,small.rect);
+    assert.ok(tall.rect.every(value=>Math.abs(value)<2000));
+  }
+  const before=f.context.getStats().panelDrawCalls;
+  f.context.setTransform(0,0,0,1,0,0);f.context.drawTextPanel({...object(),w:320,h:80});
+  assert.equal(f.context.getStats().panelDrawCalls,before);
+});
+
+test('panel phases let occlusion retain exposed shadows without redrawing hidden bodies or glyphs', async () => {
+  const f=fixture();await f.context.ready;const obj={...object(),w:200,h:56};
+  f.context.drawTextPanel(obj,undefined,{phase:'body'});
+  assert.equal(f.context.getStats().panelKernelUploads,0);
+  assert.equal(f.context.getStats().panelDrawCalls,1);
+  f.context.drawTextPanel(obj,undefined,{phase:'shadow'});
+  assert.equal(f.context.getStats().panelKernelUploads,1);
+  assert.equal(f.context.getStats().panelDrawCalls,2);
+  assert.equal(f.context.getStats().glyphsDrawn,0);
+  assert.deepEqual(callsNamed(f,'uniform1i').filter(call=>call.args[0]==='phase').map(call=>call.args[1]),[0,1]);
+});
+
+test('panel shadow resources are bounded, survive board resets, and rebuild after context restoration', async () => {
+  const f=fixture();await f.context.ready;const obj={...object(),w:200,h:80};
+  for(const radius of [4,8,12,16,20,24])f.context.drawTextPanel(obj,{radius});
+  assert.equal(f.context.getStats().panelKernelCount,4);
+  assert.equal(f.context.getStats().panelKernelBytes,4*128*128*4);
+  assert.equal(f.context.getStats().panelKernelUploads,6);
+  const uploads=f.context.getStats().panelKernelUploads;
+  f.context.resetResources();f.context.drawTextPanel(obj,{radius:24});
+  assert.equal(f.context.getStats().panelKernelUploads,uploads);
+  f.events.get('webglcontextlost')({preventDefault(){}});
+  assert.equal(f.context.getStats().panelKernelBytes,0);
+  const draws=f.context.getStats().drawCalls;
+  f.context.drawTextPanel(obj);assert.equal(f.context.getStats().drawCalls,draws);
+  f.events.get('webglcontextrestored')();await f.context.ready;
+  f.context.drawTextPanel(obj);assert.equal(f.context.getStats().panelKernelUploads,uploads+1);
+  assert.equal(f.context.getStats().panelKernelCount,1);
+  f.context.dispose();assert.equal(f.context.getStats().panelKernelBytes,0);
+  assert.equal(callsNamed(f,'deleteProgram').length,3);
+});
+
+test('shared corner shadow samples agree with an independent area integration of the squircle cutout', async () => {
+  const f=fixture();await f.context.ready;
+  f.context.drawTextPanel({...object(),w:200,h:80});
+  const pixels=callsNamed(f,'texImage2D').at(-1).args.at(-1);
+  assert.ok(pixels instanceof Uint8Array);
+  const radius=16,sigma=12,steps=256,cell=radius/steps;
+  for(const [ix,iy] of [[52,52],[68,40],[40,68]]) {
+    const px=-48+112*ix/127,py=-48+112*iy/127;
+    let expected=0;
+    for(let y=0;y<steps;y++)for(let x=0;x<steps;x++) {
+      const cx=(x+.5)*cell,cy=(y+.5)*cell;
+      if(((radius-cx)/radius)**4+((radius-cy)/radius)**4<=1)continue;
+      expected+=Math.exp(-((px-cx)**2+(py-cy)**2)/(2*sigma*sigma))*cell*cell/(2*Math.PI*sigma*sigma);
+    }
+    const index=(iy*128+ix)*4,actual=(pixels[index]*256+pixels[index+1])/65535;
+    assert.ok(Math.abs(actual-expected)<.00008,`coverage ${actual} versus ${expected}`);
+  }
+});
+
 test('large images are tiled at native resolution with filtering gutters and a bounded cache', async () => {
   const f = fixture({ maxTextureSize: 256, maxImageBytes: 300000 });await f.context.ready;
   const image = { width: 600, height: 300 };

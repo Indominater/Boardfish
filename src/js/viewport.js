@@ -380,6 +380,12 @@ function drawEditingTextOverlay(
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
+  if (typeof BoardfishTextPanels !== 'undefined') {
+    const style = BoardfishTextPanels.getStyle();
+    if (!BoardfishTextPanels.intersectsViewport(obj, viewportRect, style)) return;
+    BoardfishTextPanels.draw(context, obj, style);
+    context.fillStyle = style.text;
+  }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const stats = collectDebug ? {
     editLayoutMs: 0,
@@ -503,7 +509,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   if (editingId) {
-    const useEditOffscreenCache = !ctx.isBoardfishGpuContext && !bypassEditOffscreenCache;
+    const useEditOffscreenCache = !ctx.isBoardfishGpuContext && typeof BoardfishTextPanels === 'undefined' && !bypassEditOffscreenCache;
     if (useEditOffscreenCache && _offscreenDirty) {
       _rebuildOffscreen(dpr, viewportRect);
     }
@@ -791,6 +797,7 @@ const TEXT_DRAW_WARMUP_TARGET_BOARD = 'board';
 
 const boardRenderer = BoardfishRenderer.createBoardRenderer({
   objects: () => objects,
+  editingObject: () => objectsMap.get(editingId),
   imageStore: () => imageStore,
   imageBitmapCache: () => imageBitmapCache,
   viewportCullingEnabled: () => viewportCullingEnabled,
