@@ -85,101 +85,6 @@
       // linear data and use their separate shader above.
       result=textured?texture(image,uv)*color.a:vec4(color.rgb*color.a,color.a);
     }`;
-  const PANEL_FRAGMENT = `#version 300 es
-    precision highp float;
-    uniform vec4 bounds;
-    uniform float radius;
-    uniform float borderWidth;
-    uniform vec4 fillColor;
-    uniform vec4 borderColor;
-    uniform vec4 shadowColor;
-    uniform vec4 outlineColor;
-    uniform vec4 shadow;
-    uniform vec4 kernelBounds;
-    uniform sampler2D cornerKernel;
-    uniform int phase;
-    in vec2 uv;
-    out vec4 result;
-    float shape(vec2 p,vec4 edges,float r) {
-      // Edges are relative to the nearby camera origin. Avoid subtracting half
-      // of a potentially multi-million-row height merely to recover a border.
-      vec2 q=max(edges.xy-p,p-edges.zw)+r;
-      vec2 v=max(q,vec2(0.));
-      float d=min(max(q.x,q.y),0.)+sqrt(sqrt(dot(v*v,v*v)))-r;
-      return clamp(.5-d/max(fwidth(d),1e-5),0.,1.);
-    }
-    vec4 premultiply(vec4 c,float coverage) { float a=c.a*coverage;return vec4(c.rgb*a,a); }
-    vec4 over(vec4 a,vec4 b) { return a+b*(1.-a.a); }
-    vec2 gaussianCdf(vec2 x) {
-      // Abramowitz-Stegun 7.1.26, maximum error below 1.5e-7.
-      vec2 a=abs(x)*.7071067811865476,t=1./(1.+.3275911*a);
-      vec2 erf=1.-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-.284496736)*t+.254829592)*t*exp(-a*a);
-      return .5+.5*sign(x)*erf;
-    }
-    float cutout(vec2 p) {
-      vec2 t=(p-kernelBounds.x)/kernelBounds.y;
-      if(any(lessThan(t,vec2(0.)))||any(greaterThan(t,vec2(1.))))return 0.;
-      // Decode after filtering so bilinear interpolation stays linear in coverage.
-      return dot(textureLod(cornerKernel,t*kernelBounds.z+kernelBounds.w,0.).rg,vec2(256./257.,1./257.));
-    }
-    void main() {
-      float outer=shape(uv,bounds,radius);
-      float inner=shape(uv,bounds+vec4(vec2(borderWidth),vec2(-borderWidth)),max(0.,radius-borderWidth));
-      vec4 body=premultiply(fillColor,inner)+premultiply(borderColor,max(0.,outer-inner));
-      if(phase==0) {result=body;return;}
-      // Evaluate derivatives before the spatially varying early exit. Ordinary
-      // opaque interiors need no Gaussian integration or corner texture samples.
-      float outline=shape(uv,bounds+vec4(vec2(-shadow.w),vec2(shadow.w)),radius+shadow.w);
-      vec2 p=uv-shadow.xy;
-      float hardShadow=shadow.z<=0.?shape(p,bounds,radius):0.;
-      if(body.a>=1.) {
-        if(phase==1)discard;
-        result=body;return;
-      }
-      float blurred;
-      if(shadow.z>0.) {
-        vec2 start=p-bounds.xy,end=bounds.zw-p;
-        vec2 integral=gaussianCdf(end/shadow.z)-gaussianCdf(-start/shadow.z);
-        blurred=max(0.,integral.x*integral.y-cutout(start)-cutout(vec2(end.x,start.y))
-          -cutout(vec2(start.x,end.y))-cutout(end));
-      } else blurred=hardShadow;
-      vec4 backdrop=over(premultiply(outlineColor,outline),premultiply(shadowColor,blurred));
-      result=phase==1?backdrop:over(body,backdrop);
-    }`;
-
-  const PANEL_STYLE = Object.freeze({ radius:16,borderWidth:1,fill:'#42414d',border:'#70707a',
-    shadowColor:'rgba(0,0,0,.1)',shadowBlur:24,shadowOffsetX:0,shadowOffsetY:8,
-    outlineColor:'rgba(0,0,0,.3)',outlineWidth:1 });
-  const PANEL_KERNEL_SIZE = 128;
-  const PANEL_KERNEL_LIMIT = 4;
-  function gaussianCdf(x) {
-    const a=Math.abs(x)*Math.SQRT1_2,t=1/(1+.3275911*a);
-    const erf=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-.284496736)*t+.254829592)*t*Math.exp(-a*a);
-    return .5+.5*Math.sign(x)*erf;
-  }
-  function panelKernel(radius,sigma) {
-    // Blur only the small pieces cut from a rectangle by its four corners.
-    // Separable quadrature prepares this shared, size-independent lookup once.
-    const size=PANEL_KERNEL_SIZE,samples=64,min=-4*sigma,span=radius+8*sigma;
-    const horizontal=new Float64Array(size*samples),vertical=new Float64Array(size*samples);
-    for(let sample=0;sample<samples;sample++) {
-      const x=radius*(sample+.5)/samples;
-      const height=radius>0?radius*(1-Math.pow(1-Math.pow(1-x/radius,4),.25)):0;
-      for(let i=0;i<size;i++) {
-        const p=min+span*i/(size-1),z=(p-x)/sigma;
-        horizontal[i*samples+sample]=Math.exp(-z*z/2)/(sigma*Math.sqrt(2*Math.PI))*radius/samples;
-        vertical[i*samples+sample]=gaussianCdf((height-p)/sigma)-gaussianCdf(-p/sigma);
-      }
-    }
-    const pixels=new Uint8Array(size*size*4);
-    for(let y=0;y<size;y++)for(let x=0;x<size;x++) {
-      let value=0;
-      for(let sample=0;sample<samples;sample++)value+=horizontal[x*samples+sample]*vertical[y*samples+sample];
-      const encoded=Math.round(Math.max(0,Math.min(1,value))*65535),index=(y*size+x)*4;
-      pixels[index]=encoded>>8;pixels[index+1]=encoded&255;pixels[index+3]=255;
-    }
-    return {pixels,bounds:[min,span,(size-1)/size,.5/size]};
-  }
 
   function multiply(a, b) {
     return [a[0]*b[0]+a[2]*b[1],a[1]*b[0]+a[3]*b[1],
@@ -213,8 +118,7 @@
     const immutableCanvases = new WeakSet();
     const asciiPrefixes = new WeakMap();
     let anonymousId = 0, current = state(), stack = [], path = [];
-    let textProgram, quadProgram, panelProgram, textVao, quadVao;
-    const panelKernels=new Map();
+    let textProgram, quadProgram, textVao, quadVao;
     let fontResources = [];
     let lost = false, disposed = false, fontReady = false, generation = 0;
     let frame = 0, bufferBytes = 0, imageBytes = 0, fallbackBytes = 0;
@@ -224,7 +128,7 @@
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     const tileSize = Math.min(2048, maxTextureSize - 2);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const stats = { frames:0, drawCalls:0, textDrawCalls:0, imageDrawCalls:0,panelDrawCalls:0,panelKernelUploads:0,
+    const stats = { frames:0, drawCalls:0, textDrawCalls:0, imageDrawCalls:0,
       rectangleDrawCalls:0, glyphsDrawn:0, bufferUploads:0, bufferUploadBytes:0,
       imageUploads:0, imageUploadBytes:0, imageEvictions:0, atlasUploads:0, fallbackRasterizations:0, contextLosses:0,
       frameDrawCalls:0, frameBufferUploads:0, frameGlyphsDrawn:0 };
@@ -262,8 +166,6 @@
     function initialize() {
       textProgram=program(VERTEX,FRAGMENT,['transform','viewport','origin','fontSize','glyphs','atlas','unitRange','color','deviceEm']);
       quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','rect','sourceRect','image','color','textured']);
-      panelProgram=program(QUAD_VERTEX,PANEL_FRAGMENT,['transform','viewport','rect','sourceRect','bounds','radius','borderWidth',
-        'fillColor','borderColor','shadowColor','outlineColor','shadow','kernelBounds','cornerKernel','phase']);
       textVao=gl.createVertexArray(); quadVao=gl.createVertexArray();
       gl.disable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.disable(gl.DITHER);
       gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
@@ -329,9 +231,6 @@
         if(hex.length===3||hex.length===4)hex=Array.from(hex,c=>c+c).join('');
         if(hex.length===6||hex.length===8)color=[parseInt(hex.slice(0,2),16)/255,parseInt(hex.slice(2,4),16)/255,parseInt(hex.slice(4,6),16)/255,hex.length===8?parseInt(hex.slice(6,8),16)/255:1];
       }
-      if(!color&&(match=/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(key))) {
-        color=[...match.slice(1,4).map(value=>Math.max(0,Math.min(255,Number(value)))/255),match[4]===undefined?1:Math.max(0,Math.min(1,Number(match[4])))];
-      }
       if(!color) {
         if(!colorContext) { const c=makeCanvas();c.width=c.height=1;colorContext=c.getContext('2d',{willReadFrequently:true}); }
         colorContext.clearRect(0,0,1,1);colorContext.fillStyle=key;colorContext.fillRect(0,0,1,1);
@@ -341,10 +240,10 @@
       colorCache.set(key,color);return color;
     }
     function color() { const c=rgba(current.fillStyle);return [c[0],c[1],c[2],c[3]*current.globalAlpha]; }
-    function setup(value,originX=0,originY=0,deviceMatrix) {
+    function setup(value,originX=0,originY=0) {
       gl.useProgram(value.value);
       gl.viewport(0,0,canvas.width,canvas.height);
-      gl.uniformMatrix3fv(value.locations.transform,false,matrix3(deviceMatrix||multiply(current.matrix,[1,0,0,1,originX,originY])));
+      gl.uniformMatrix3fv(value.locations.transform,false,matrix3(multiply(current.matrix,[1,0,0,1,originX,originY])));
       gl.uniform2f(value.locations.viewport,canvas.width,canvas.height);
       if(current.globalCompositeOperation==='copy')gl.disable(gl.BLEND);else gl.enable(gl.BLEND);
     }
@@ -362,79 +261,6 @@
         gl.uniform1i(quadProgram.locations.image,0);
       }
       gl.drawArrays(gl.TRIANGLE_STRIP,0,4);/* BOARDFISH_DEV_DIAGNOSTICS_START */ drew(texture?'imageDrawCalls':'rectangleDrawCalls'); /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
-    function shadowKernel(radius,sigma) {
-      const key=`${radius}:${sigma}`;
-      let resource=panelKernels.get(key);
-      if(resource) { panelKernels.delete(key);panelKernels.set(key,resource);return resource; }
-      while(panelKernels.size>=PANEL_KERNEL_LIMIT) {
-        const [oldKey,oldResource]=panelKernels.entries().next().value;
-        gl.deleteTexture(oldResource.texture);panelKernels.delete(oldKey);
-      }
-      const data=panelKernel(radius,sigma),texture=gl.createTexture();
-      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);textureParameters(gl.LINEAR);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);
-      gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL,gl.NONE);
-      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,PANEL_KERNEL_SIZE,PANEL_KERNEL_SIZE,0,gl.RGBA,gl.UNSIGNED_BYTE,data.pixels);
-      resource={texture,bounds:data.bounds};panelKernels.set(key,resource);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.panelKernelUploads++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return resource;
-    }
-    function drawTextPanel(obj,style=PANEL_STYLE,settings={}) {
-      if(lost||disposed||!obj)return;
-      const {x,y,w,h}=obj;
-      if(![x,y,w,h].every(Number.isFinite)||w<=0||h<=0)return;
-      const get=(key)=>Number.isFinite(style[key])?Math.max(0,style[key]):PANEL_STYLE[key];
-      const radius=Math.min(get('radius'),w*.5,h*.5),borderWidth=Math.min(get('borderWidth'),w*.5,h*.5);
-      const sigma=get('shadowBlur')*.5,outlineWidth=get('outlineWidth');
-      const offsetX=Number.isFinite(style.shadowOffsetX)?style.shadowOffsetX:PANEL_STYLE.shadowOffsetX;
-      const offsetY=Number.isFinite(style.shadowOffsetY)?style.shadowOffsetY:PANEL_STYLE.shadowOffsetY;
-      const tint=key=>{const c=rgba(style[key]??PANEL_STYLE[key]);return [c[0],c[1],c[2],c[3]*current.globalAlpha];};
-      const shadowTint=tint('shadowColor'),outlineTint=tint('outlineColor');
-      const phase=settings.phase||'all',loc=panelProgram.locations;
-      // Clip and rebase panel geometry in CPU doubles before uploading floats.
-      // A far bottom edge of a very tall textbox then has the same precision as
-      // a nearby small box; neither vertices nor interpolated coordinates span
-      // the complete document height. The inverse AABB also covers rotation.
-      const matrix=multiply(current.matrix,[1,0,0,1,x,y]);
-      const determinant=matrix[0]*matrix[3]-matrix[1]*matrix[2];
-      if(!Number.isFinite(determinant)||determinant===0)return;
-      const centerX=canvas.width*.5-matrix[4],centerY=canvas.height*.5-matrix[5];
-      const localX=(matrix[3]*centerX-matrix[2]*centerY)/determinant;
-      const localY=(matrix[0]*centerY-matrix[1]*centerX)/determinant;
-      const halfX=(Math.abs(matrix[3])*(canvas.width*.5+2)+Math.abs(matrix[2])*(canvas.height*.5+2))/Math.abs(determinant);
-      const halfY=(Math.abs(matrix[0])*(canvas.height*.5+2)+Math.abs(matrix[1])*(canvas.width*.5+2))/Math.abs(determinant);
-      const leftLimit=localX-halfX,rightLimit=localX+halfX,topLimit=localY-halfY,bottomLimit=localY+halfY;
-      const originX=Math.max(0,Math.min(w,localX)),originY=Math.max(0,Math.min(h,localY));
-      matrix[4]+=matrix[0]*originX+matrix[2]*originY;matrix[5]+=matrix[1]*originX+matrix[3]*originY;
-      setup(panelProgram,0,0,matrix);gl.bindVertexArray(quadVao);
-      gl.uniform4f(loc.bounds,-originX,-originY,w-originX,h-originY);
-      gl.uniform1f(loc.radius,radius);gl.uniform1f(loc.borderWidth,borderWidth);
-      gl.uniform4fv(loc.fillColor,tint('fill'));gl.uniform4fv(loc.borderColor,tint('border'));
-      gl.uniform4fv(loc.shadowColor,shadowTint);gl.uniform4fv(loc.outlineColor,outlineTint);
-      gl.uniform4f(loc.shadow,offsetX,offsetY,sigma,outlineWidth);
-      const scale=Math.max(Math.hypot(current.matrix[0],current.matrix[1]),Math.hypot(current.matrix[2],current.matrix[3]),1e-6);
-      const aa=2/scale;
-      function draw(which,left,top,right,bottom) {
-        left=Math.max(left,leftLimit);top=Math.max(top,topLimit);
-        right=Math.min(right,rightLimit);bottom=Math.min(bottom,bottomLimit);
-        if(right<=left||bottom<=top)return;
-        left-=originX;top-=originY;right-=originX;bottom-=originY;
-        gl.uniform1i(loc.phase,which);
-        gl.uniform4f(loc.rect,left,top,right-left,bottom-top);
-        gl.uniform4fv(loc.sourceRect,[left,top,right-left,bottom-top]);
-        gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */ drew('panelDrawCalls'); /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
-      if(phase!=='body'&&(shadowTint[3]>0||outlineTint[3]>0)) {
-        if(sigma>0) {
-          const kernel=shadowKernel(radius,sigma);
-          gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,kernel.texture);
-          gl.uniform1i(loc.cornerKernel,0);gl.uniform4fv(loc.kernelBounds,kernel.bounds);
-        }
-        draw(phase==='shadow'?1:2,Math.min(-outlineWidth,offsetX-4*sigma)-aa,Math.min(-outlineWidth,offsetY-4*sigma)-aa,
-          w+Math.max(outlineWidth,offsetX+4*sigma)+aa,h+Math.max(outlineWidth,offsetY+4*sigma)+aa);
-      } else if(phase!=='shadow')draw(0,-aa,-aa,w+aa,h+aa);
     }
     function deleteChunk(key,chunk) {
       if(!lost)gl.deleteBuffer(chunk.buffer);
@@ -748,7 +574,7 @@
     }
     function lostContext(event) {
       event.preventDefault();lost=true;fontReady=false;generation++;/* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.contextLosses++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      chunks.clear();images.clear();textures.clear();panelKernels.clear();bufferBytes=imageBytes=0;
+      chunks.clear();images.clear();textures.clear();bufferBytes=imageBytes=0;
       try { options.onLost?.(); } catch(error) { report(error); }
     }
     function restoredContext() {
@@ -780,7 +606,7 @@
       beginPath(){path=[];},rect(x,y,w,h){path.push([x,y,w,h]);},fill:fillPath,
       drawImage,fillText,
       measureText(text){const ctx=measurement();configureMeasurement(ctx);return ctx.measureText(text);},
-      drawTextLayout,drawTextPanel,
+      drawTextLayout,
       prepareTextLayout(layout,obj,style){const result=prepare(layout,obj,style);trimResources();return result!==null;},
       beginFrame(objects){
         frame++;/* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.frames++;stats.frameDrawCalls=stats.frameBufferUploads=stats.frameGlyphsDrawn=0; /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -790,7 +616,7 @@
         }
       },
       endFrame(){trimResources();},clearTextCache,resetResources,
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */ getStats(){return {...stats,fontReady,lost,frame,bufferBytes,imageBytes,fallbackBytes,chunkCount:chunks.size,imageCount:images.size,textureCount:textures.size,panelKernelCount:panelKernels.size,panelKernelBytes:panelKernels.size*PANEL_KERNEL_SIZE*PANEL_KERNEL_SIZE*4,atlasBytes:fontResources.reduce((bytes,resource)=>bytes+(resource.ready?resource.font.width*resource.font.height*4+4096:0),0)};}, /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */ getStats(){return {...stats,fontReady,lost,frame,bufferBytes,imageBytes,fallbackBytes,chunkCount:chunks.size,imageCount:images.size,textureCount:textures.size,atlasBytes:fontResources.reduce((bytes,resource)=>bytes+(resource.ready?resource.font.width*resource.font.height*4+4096:0),0)};}, /* BOARDFISH_DEV_DIAGNOSTICS_END */
       dispose(){
         if(disposed)return;resetResources();disposed=true;fontReady=false;generation++;
         canvas.removeEventListener?.('webglcontextlost',lostContext);canvas.removeEventListener?.('webglcontextrestored',restoredContext);
@@ -798,11 +624,9 @@
           for(const resource of fontResources) {
             if(resource.atlasTexture)gl.deleteTexture(resource.atlasTexture);gl.deleteTexture(resource.glyphTexture);
           }
-          for(const resource of panelKernels.values())gl.deleteTexture(resource.texture);
-          if(textProgram)gl.deleteProgram(textProgram.value);if(quadProgram)gl.deleteProgram(quadProgram.value);if(panelProgram)gl.deleteProgram(panelProgram.value);
+          if(textProgram)gl.deleteProgram(textProgram.value);if(quadProgram)gl.deleteProgram(quadProgram.value);
           if(textVao)gl.deleteVertexArray(textVao);if(quadVao)gl.deleteVertexArray(quadVao);
         }
-        panelKernels.clear();
       },
     };
     for(const key of Object.keys(current))if(key!=='matrix')Object.defineProperty(context,key,{

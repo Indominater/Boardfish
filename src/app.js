@@ -127,9 +127,7 @@ function applyAppTheme(theme, {
   document.body.dataset.theme = appTheme;
   if (appThemeMeta) appThemeMeta.setAttribute('content', appTheme === 'dark' ? '#1c1b22' : '#eaeaed');
   _canvasBackgroundColor = appTheme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
-  _canvasTextColor = typeof BoardfishTextPanels !== 'undefined'
-    ? BoardfishTextPanels.refreshStyle().text
-    : appTheme === 'dark' ? '#fbfbfe' : '#15141A';
+  _canvasTextColor = appTheme === 'dark' ? '#fbfbfe' : '#15141A';
   if (previousTextColor !== _canvasTextColor && typeof clearTextRasterCache === 'function') {
     clearTextRasterCache();
   }
