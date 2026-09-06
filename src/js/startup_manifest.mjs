@@ -14,6 +14,7 @@ export const WEB_DEV_SCRIPTS = Object.freeze([
   'startup_debug.js',
   '../fonts/geist-ascii-msdf.js',
   '../fonts/geist-ascii-integral.js',
+  '../fonts/geist-ascii-coverage.js',
   'gpu_renderer.js',
   '../app.js',
   'geometry.js',

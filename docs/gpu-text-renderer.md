@@ -1,15 +1,14 @@
 # Retained GPU text renderer
 
 Boardfish now selects a WebGL2 renderer at startup. The renderer retains ASCII
-glyph instances, uses two precomputed MSDF font resources, and composites images,
+glyph instances, uses precomputed font resources, and composites images,
 text, selection, and carets in the same ordered canvas. Canvas2D remains the
 compatibility backend when WebGL2 initialization fails. Existing non-ASCII text
 remains stored and displayed through the compatible text raster path.
 
-Small text now also uses an immutable summed-area font atlas and a shared
-coverage mask. See [stable text at low zoom](text-minification.md) for the
-pixel-area filter, retained-row preparation improvements, memory costs, and the
-10%/12.5% pan measurements. The earlier measurements below describe the original
+Small text uses a shared prefiltered glyph scale-space atlas and bounded
+object-local coverage tiles. See [stable text at low zoom](text-minification.md) for the
+filter, retained-tile preparation, memory costs, and actual-board motion measurements. The earlier measurements below describe the original
 MSDF implementation; the current small-text behavior is documented there.
 
 ## Representation and sharpness
@@ -21,7 +20,7 @@ prefix positions, and measured baselines. New viewport arrays do not invalidate
 unchanged glyphs. Camera and object movement update transforms; zoom updates
 scale and resource bindings. None of these operations regenerate font pixels.
 
-The two atlases are loaded before the MSDF backend begins drawing text:
+The two MSDF atlases are loaded before the backend begins drawing text:
 
 | Resource | Pixels per em | Distance range | Used at |
 | --- | ---: | ---: | --- |
@@ -41,7 +40,7 @@ At 12 device pixels per em and above, the fragment shader reconstructs coverage
 from linear MSDF data. Below 32 it integrates four half-pixel samples, blending continuously into
 the single-sample path between 24 and 32. Sampling is bounded to the current
 glyph so samples cannot reach packed neighbors. Below 12, the
-[area-coverage path](text-minification.md#pixel-area-coverage) supplies minification
+[prefiltered coverage path](text-minification.md) supplies minification
 and blends into MSDF between eight and twelve pixels per em. This is grayscale
 antialiasing with unchanged glyph positions, not ClearType or OS font hinting.
 Text appearance is independent of whether navigation is active.
@@ -65,10 +64,12 @@ avoiding the loss of fractional positions when the board moves far from zero.
   undo/redo retains eligible resources and reconciles changed layouts.
 - Both startup manifests include the font metadata and renderer before app
   initialization. The production build copies the atlases and the service worker
-  caches both for offline use. Development counters are removed from release code.
+  caches all font resources for offline use. Development counters are removed from release code.
 
 Resource caches have explicit limits: 64 MiB of glyph buffers, 4,096 chunks,
-128 MiB of image textures, and 16 MiB of compatibility text rasters. Buffer
+128 MiB of image textures, 128 MiB of coverage tiles, and 16 MiB of compatibility
+text rasters. The shared coverage atlas adds 12 MiB of immutable texture data;
+tile-budget overflow uses one reusable 532,512-byte scratch target. Buffer
 allocation respects the aggregate budget before uploading. Requests exceeding
 the retained geometry budget use the compatibility path rather than omitting
 text. Images retain a power-of-two resolution pyramid selected from their device
@@ -76,12 +77,12 @@ pixel density, capped at native resolution. Each level uses tiles with sampling
 gutters, preserving cropping, flipping, rotation, and alpha blending. This avoids
 uploading native-resolution tiles for heavily minified images; see
 [the image regression analysis and measurements](gpu-image-renderer.md).
-Context restoration reconstructs both font resources and rebuilds scene resources
+Context restoration reconstructs the font resources and rebuilds scene resources
 from application data on the next draw.
 
 The layout engine remains authoritative for wrapping, custom pair spacing,
 tab stops, selection, and caret positions. This change does not add horizontal
-text culling, motion-dependent detail reduction, or work deferred until input
+layout changes, motion-dependent detail reduction, or work deferred until input
 stops. Newly visible or edited content is prepared and painted in its requested
 frame. Very large document layout and hidden-textarea synchronization remain
 separate CPU costs.

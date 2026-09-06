@@ -2,6 +2,9 @@
 
 (function initBoardRenderer(root) {
   const IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
+  // Include the wider neighboring scale layer when blending the tiny-text filter.
+  const TEXT_FILTER_RADIUS_DEVICE_PX = 4.25;
+  const TEXT_FILTER_MAX_DEVICE_EM = 12;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -387,6 +390,20 @@
       lineHeight: deps.lineHeight || 24,
     };
 
+    function textViewportRect(viewportRect, view = null) {
+      if (!viewportRect) return viewportRect;
+      const scale = Math.abs((view?.zoom ?? deps.zoom?.() ?? 1) * (view?.dpr ?? deps.dpr?.() ?? 1));
+      if (!(scale > 0) || !Number.isFinite(scale) || gpuTextOptions.fontSize * scale >= TEXT_FILTER_MAX_DEVICE_EM) return viewportRect;
+      // Tiny glyph reconstruction reaches beyond the logical line/object box.
+      // Include its complete physical-pixel footprint before either level of
+      // culling, while retaining the original wrapping and absolute row indices.
+      const padding = TEXT_FILTER_RADIUS_DEVICE_PX / scale;
+      return {
+        x1: viewportRect.x1 - padding, y1: viewportRect.y1 - padding,
+        x2: viewportRect.x2 + padding, y2: viewportRect.y2 + padding,
+      };
+    }
+
     function setWorldCanvasTransform(context, dpr = deps.dpr()) {
       const scale = deps.zoom() * dpr;
       context.setTransform(scale, 0, 0, scale, deps.panX() * dpr, deps.panY() * dpr);
@@ -413,7 +430,7 @@
     ) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         if (obj.type === 'text') {
-          const layout = getTextLayoutForDraw(obj, viewportRect);
+          const layout = getTextLayoutForDraw(obj, textViewportRect(viewportRect, view));
           if (context.drawTextLayout?.(layout, obj, gpuTextOptions)) return;
           for (const line of layout) deps.drawTextLineRange(context, line, obj);
           return;
@@ -432,7 +449,7 @@
       } else {
       if (obj.type === 'text') {
         const layoutStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
-        const layout = getTextLayoutForDraw(obj, viewportRect);
+        const layout = getTextLayoutForDraw(obj, textViewportRect(viewportRect, view));
         const totalLayoutLines = counters
           ? Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length)
           : 0;
@@ -569,10 +586,11 @@
       , onlyText = false
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
+      const textRect = textViewportRect(viewportRect, view);
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         for (const obj of deps.objects()) {
           if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
-          if (!deps.objectIntersectsRect(obj, viewportRect)) continue;
+          if (!deps.objectIntersectsRect(obj, obj.type === 'text' ? textRect : viewportRect)) continue;
           drawSingleObj(context, obj, viewportRect, view, imageSourceResolver);
         }
         return;
@@ -583,7 +601,7 @@
       for (const obj of deps.objects()) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
         if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
-        if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect)) {
+        if (cullingEnabled && !deps.objectIntersectsRect(obj, obj.type === 'text' ? textRect : viewportRect)) {
           countCulledObject(obj, counters);
           continue;
         }
@@ -642,6 +660,7 @@
       drawSingleObj,
       drawVisibleObjects,
       setWorldCanvasTransform,
+      textViewportRect,
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') renderer.createDrawCounters = createDrawCounters;
     return Object.freeze(renderer);

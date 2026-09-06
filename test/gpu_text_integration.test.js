@@ -77,6 +77,8 @@ test('GPU text overlay keeps selection behind glyphs and caret above glyphs', ()
     objectsMap: new Map([[obj.id, obj]]), editingId: obj.id,
     _editEl: { selectionStart: 1, selectionEnd: 4 }, _caretVisible: true,
     performance: { now: () => 0 }, TextSelDebug: { _logDraw() {} },
+    window: { devicePixelRatio: 2 },
+    boardRenderer: loadRenderer().createBoardRenderer({ fontSize: 16 }),
     getTextLayoutForViewport: () => layout,
     lineXAtOffset: (_line, owner, offset) => owner.x + 16 + offset * 8,
     lineCaretXAtOffset: (_line, owner, offset) => owner.x + 16 + offset * 8,
@@ -99,6 +101,11 @@ test('GPU text overlay keeps selection behind glyphs and caret above glyphs', ()
   const collapsed = scope.drawEditingTextOverlay(context, 1, viewport, true);
   assert.deepEqual(calls, ['glyphs', 'caret']);
   assert.equal(collapsed.editCaretDrawn, true);
+  scope.getTextLayoutForViewport = (_obj, rect) => {
+    assert.deepEqual(JSON.parse(JSON.stringify(rect)), { x1: -21.25, y1: -21.25, x2: 221.25, y2: 121.25 });
+    return layout;
+  };
+  scope.drawEditingTextOverlay(context, .1, viewport, true);
 });
 
 test('GPU editing redraws ordered scene objects inside one frame without an image-only offscreen composition', () => {

@@ -766,7 +766,7 @@ test('text edit overlay draws only visible layout lines', () => {
   assert.notEqual(end, -1);
   const overlaySource = viewportSource.slice(start, end);
 
-  assert.match(overlaySource, /const layout = getTextLayoutForViewport\(obj, viewportRect\);/);
+  assert.match(overlaySource, /const layout = getTextLayoutForViewport\(obj, boardRenderer\.textViewportRect\(viewportRect,/);
   assert.doesNotMatch(overlaySource, /visibleTextLayoutLines/);
   assert.match(overlaySource, /editVisibleLines/);
   assert.match(overlaySource, /editCulledLines/);
@@ -847,6 +847,8 @@ test('editing overlay draws the live selection and restores the caret when it co
     _caretVisible: true,
     performance: { now: () => 100 },
     TextSelDebug: { _logDraw() {} },
+    window: { devicePixelRatio: 1 },
+    boardRenderer: { textViewportRect: rect => rect },
     getTextLayoutForViewport: () => layout,
     lineXAtOffset: (_line, object, offset) => object.x + 16 + offset * 8,
     lineCaretXAtOffset: (_line, object, offset) => object.x + 16 + offset * 8,

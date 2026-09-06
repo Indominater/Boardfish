@@ -356,7 +356,7 @@
   }
 
   async function lifecycle() {
-    await prepare('lifecycle', { scale: 1, customObjects: [object('reused-id', 'Original ASCII text\nSecond retained line', 0, 0, 380)] });
+    await prepare('lifecycle', { customObjects: [object('reused-id', 'Original ASCII text\nSecond retained line', 0, 0, 380)] });
     const steps = [];
     function checkpoint(name) {
       current.prepared = prepareRows(objects, current.config);
@@ -517,7 +517,7 @@
       const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
       const timer = setTimeout(() => rejectReady(new Error('Timed out loading production GPU font atlas.')), 15000);
       contexts.gpu = BoardfishGpuRenderer.createContext(canvases.gpu, {
-        integralFont: { ...BoardfishAsciiIntegralFont, atlasURL: '../fonts/geist-ascii-integral.png' },
+        coverageFont: { ...BoardfishAsciiCoverageFont, atlasURL: '../fonts/geist-ascii-coverage.png' },
         font: {
           ...BoardfishAsciiFont, atlasURL: '../fonts/geist-ascii-msdf.png',
           ...(BoardfishAsciiFont.largeFont ? {

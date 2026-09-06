@@ -1439,6 +1439,41 @@ test('viewport text layout exactly matches inclusive visible-line boundaries', (
   }
 });
 
+test('tiny-text filter keeps neighboring edge rows stable while reusing cached layout during panning', () => {
+  const { context, measured } = loadTextLayout();
+  const api = context.__testTextLayout;
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'renderer.js'), 'utf8'), context);
+  const obj = {
+    id: 'filtered-boundary', type: 'text', x: 0, y: -500, w: 2000, h: 1,
+    data: { content: Array.from({ length: 6000 }, (_, index) => `line ${index} ${'word '.repeat(8)}`).join('\n') },
+  };
+  api.syncTextAutoHeight(obj);
+  const baseY = obj.y + context.TEXT_PAD;
+  const viewport = { x1: 0, x2: 100, y1: baseY + 101 * context.LINE_H + .25, y2: baseY + 102 * context.LINE_H - .25 };
+  const exact = api.getTextLayoutForViewport(obj, viewport);
+  assert.deepEqual(plain(exact.map(line => line.text.split(' ')[1])), ['101']);
+  const layouts = [];
+  const renderer = context.BoardfishRenderer.createBoardRenderer({
+    zoom: () => .1, dpr: () => 2, fontSize: 16,
+    getTextLayoutForViewport: api.getTextLayoutForViewport,
+  });
+  const gpu = { drawTextLayout(layout) { layouts.push(layout); return true; } };
+  renderer.drawSingleObj(gpu, obj, null, viewport);
+  const first = layouts[0];
+  assert.deepEqual(plain(first.map(line => line.text.split(' ')[1])), ['100', '101', '102']);
+  assert.deepEqual(plain(first.map(line => line.y)), [100, 101, 102].map(row => baseY + row * context.LINE_H));
+  const measurementCount = measured.length;
+  for (const offset of [.125, -.125, .25, 0]) {
+    renderer.drawSingleObj(gpu, obj, null, { ...viewport, y1: viewport.y1 + offset, y2: viewport.y2 + offset });
+    const current = layouts.at(-1);
+    assert.strictEqual(current, first);
+    assert.equal(current.totalLines, 6000);
+  }
+  assert.equal(measured.length, measurementCount);
+  assert.equal(api.hasObjectLayoutCache(obj), false);
+  assert.ok(api.viewportLineCacheSize(obj) < 10);
+});
+
 test('auto-height count cache also stores line index for viewport reuse', () => {
   const { context } = loadTextLayout({
     measureWidth(text) {

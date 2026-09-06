@@ -66,7 +66,10 @@ function fixture(options = {}) {
   };
   const errors = [];
   const context = createContext(canvas, {
-    font, integralFont, createCanvas, loadImage: () => ({ width: 128, height: 128 }),
+    font, integralFont, createCanvas, textTileCache: false, loadImage: url => {
+      const description = options.coverageFont?.atlasURL === url ? options.coverageFont : font;
+      return { width: description.width, height: description.height };
+    },
     onError: error => errors.push(error), ...options,
   });
   return { context, canvas, gl, calls, events, font, errors, rasterDraws, rasterSourcesAtDraw, rasterReadbacks };
@@ -80,6 +83,26 @@ function line(text, row, obj, prefix = null) {
 const object = () => ({ id: 'obj-1', type: 'text', x: 20, y: 30 });
 const callsNamed = (f, name) => f.calls.filter(call => call.name === name);
 const quadSize = f => callsNamed(f, 'uniform2f').filter(call => call.args[0] === 'size').at(-1).args.slice(1);
+
+function coverageDescription() {
+  return {
+    type: 'gaussian-coverage', atlasURL: 'coverage.png', width: 256, height: 96,
+    cellSize: 8, columns: 16, emExtent: 2, originX: -1.5, originY: -2.5,
+    layerColumns: 2, layerWidth: 128, layerHeight: 48, layers: 4,
+    minDeviceEm: 1.6, maxDeviceEm: 12, pixelPadding: 2.5, encoding: 'float16-rg',
+  };
+}
+
+function textureUploads(f) {
+  let unit = f.gl.TEXTURE0;
+  const textures = new Map(), uploads = [];
+  for (const { name, args } of f.calls) {
+    if (name === 'activeTexture') unit = args[0];
+    else if (name === 'bindTexture') textures.set(unit, args[1]);
+    else if (name === 'texImage2D') uploads.push({ texture: textures.get(unit), args });
+  }
+  return uploads;
+}
 
 // Reconstruct externally observable GL state at each submission. This catches
 // blend/framebuffer leaks into the next object as well as missing mask passes.
@@ -784,5 +807,355 @@ test('appending a visible row copies retained glyph positions without rereading 
   assert.deepEqual(reads, [0, 0, 0]);
   assert.equal(f.context.getStats().frameBufferUploads, 0);
   assert.equal(f.context.getStats().frameGlyphsDrawn, 2250);
+  f.context.dispose();
+});
+
+test('prefiltered coverage uploads immutable binary16 coverage from PNG red/green bytes with or without float extensions', async () => {
+  const coverageFont = coverageDescription();
+  const rasterPixels = new Uint8ClampedArray(coverageFont.width * coverageFont.height * 4);
+  for (let i = 0; i < rasterPixels.length / 4; i++) {
+    const bits = i % 0x3c01;
+    rasterPixels.set([bits >> 8, bits & 255, 131, 255], i * 4);
+  }
+  for (const extensions of [[], ['EXT_color_buffer_float', 'OES_texture_float_linear']]) {
+    const f = fixture({ coverageFont, extensions, rasterPixels });
+    assert.equal(await f.context.ready, true);
+    const uploads = textureUploads(f);
+    const atlas = uploads.find(upload => upload.args[2] === f.gl.R16F);
+    assert.ok(atlas);
+    assert.deepEqual(atlas.args.slice(3, 8), [256, 96, 0, f.gl.RED, f.gl.HALF_FLOAT]);
+    assert.ok(atlas.args[8] instanceof Uint16Array);
+    assert.equal(atlas.args[8].byteLength, coverageFont.width * coverageFont.height * 2);
+    for (const i of [0, 1, 255, 256, 1023, 15360, 24575]) assert.equal(atlas.args[8][i], i % 0x3c01);
+    assert.equal(uploads.some(upload => upload.args[2] === f.gl.R32F), false);
+    assert.equal(f.context.getStats().atlasUploads, 2);
+    assert.equal(f.context.getStats().atlasBytes, 128 * 128 * 4 + 4096 + coverageFont.width * coverageFont.height * 2);
+    assert.equal(f.rasterReadbacks.length, 1);
+    assert.equal(f.rasterSourcesAtDraw.length, 1);
+    const obj = object(), rows = [line('H|i.', 0, obj)];
+    f.context.setTransform(.1, 0, 0, .1, 50, 50);
+    f.context.drawTextLayout(rows, obj);
+    const glyph = renderStates(f).find(state => state.name === 'drawArraysInstanced');
+    assert.deepEqual(glyph.uniforms.coverageFiltered, [1]);
+    assert.deepEqual(glyph.uniforms.coverageColumns, [16]);
+    assert.deepEqual(glyph.uniforms.coverageTile, [8 / 256, 8 / 96, .5 / 256, .5 / 96]);
+    assert.deepEqual(glyph.uniforms.coverageOrigins, [0, 0, .5, 0]);
+    assert.deepEqual(glyph.uniforms.coverageMix, [0]);
+    for (const key of ['coverageTransformA', 'coverageTransformB']) assert.ok(glyph.uniforms[key].every(Number.isFinite));
+    const pad = coverageFont.pixelPadding / coverageFont.minDeviceEm;
+    const transform = glyph.uniforms.coverageTransformA;
+    assert.ok(Math.abs((coverageFont.originX - pad) * transform[0] + transform[2]) < 1e-12);
+    assert.ok(Math.abs((coverageFont.originX + coverageFont.emExtent + pad) * transform[0] + transform[2] - 8 / 256) < 1e-12);
+    assert.equal(f.rasterReadbacks.length, 1, 'the first draw must not decode another copy of the atlas');
+    f.context.dispose();
+    assert.equal(callsNamed(f, 'deleteTexture').filter(call => call.args[0] === atlas.texture).length, 1);
+  }
+});
+
+test('prefiltered glyph quads and mask bounds retain the full 3-pixel footprint across chunks and axis flips', async () => {
+  const f = fixture({ coverageFont: coverageDescription() });await f.context.ready;
+  const obj = object(), rows = [line('A', 0, obj), line('B', 64, obj)];
+  for (const transform of [[.1, 0, 0, .2, 300, 100], [-.1, 0, 0, -.2, 300, 500]]) {
+    const start = f.calls.length;
+    f.context.setTransform(...transform);
+    assert.equal(f.context.drawTextLayout(rows, obj), true);
+    const states = renderStates(f);
+    const glyphs = states.filter(state => state.name === 'drawArraysInstanced').slice(-2);
+    const clear = states.filter(state => state.name === 'clear').at(-1);
+    const [left, bottom, width, height] = clear.scissor;
+    const top = f.canvas.height - bottom - height;
+    assert.equal(callsNamed({ calls: f.calls.slice(start) }, 'clear').length, 1);
+    for (const glyph of glyphs) {
+      const [px, py] = glyph.uniforms.pixelPadding;
+      assert.equal(px * Math.abs(transform[0]) * 16, 3);
+      assert.equal(py * Math.abs(transform[3]) * 16, 3);
+      assert.equal(glyph.framebuffer, clear.framebuffer);
+      assert.deepEqual(glyph.blend, [f.gl.ONE, f.gl.ONE]);
+      const plane = f.font.glyphs[65].planeBounds;
+      const m = glyph.uniforms.transform;
+      const boundsX = [plane.left * 16, plane.right * 16].map(x => m[0] * x + m[6]);
+      const boundsY = [-plane.top * 16 + 16.392, -plane.bottom * 16 + 16.392].map(y => m[4] * y + m[7]);
+      assert.ok(left <= Math.min(...boundsX) - 3);
+      assert.ok(left + width >= Math.max(...boundsX) + 3);
+      assert.ok(top <= Math.min(...boundsY) - 3);
+      assert.ok(top + height >= Math.max(...boundsY) + 3);
+    }
+    const composite = states.filter(state => state.name === 'drawArrays').at(-1);
+    assert.equal(composite.framebuffer, null);
+    assert.deepEqual(composite.uniforms.size, [width, height]);
+    assert.deepEqual(composite.uniforms.transform.slice(6, 8), [left, top]);
+  }
+  f.context.dispose();
+});
+
+test('continuous coverage scale selection reuses atlas, mask, and glyph buffers through pan and reading-size transitions', async () => {
+  const coverageFont = coverageDescription();
+  const f = fixture({ coverageFont, withLargeFont: true });await f.context.ready;
+  const obj = object(), rows = [line('Thin iii and wide WWW', 0, obj)];
+  const boundaryZoom = coverageFont.minDeviceEm * (coverageFont.maxDeviceEm / coverageFont.minDeviceEm) ** (1 / 3) / 16;
+  const zooms = [.1, .10001, boundaryZoom - .00001, boundaryZoom, boundaryZoom + .00001, .49999, .5, .74999, .75, 1, 8, .1];
+  let atlasTexture;
+  for (const [index, zoom] of zooms.entries()) {
+    f.context.beginFrame([obj]);
+    f.context.setTransform(zoom, 0, 0, zoom, 5 + index * .137, 7 - index * .173);
+    assert.equal(f.context.drawTextLayout(rows, obj), true);
+    f.context.endFrame();
+    const glyph = renderStates(f).filter(state => state.name === 'drawArraysInstanced').at(-1);
+    assert.deepEqual(glyph.uniforms.deviceEm, [zoom * 16], 'the device scale must remain continuous across atlas layers');
+    assert.deepEqual(glyph.uniforms.areaFiltered, [zoom < .75 ? 1 : 0]);
+    if (zoom < .75) {
+      assert.ok(glyph.framebuffer);
+      const [x1, y1, x2, y2] = glyph.uniforms.coverageOrigins;
+      const layerAt = (x, y) => x * coverageFont.width / coverageFont.layerWidth + y * coverageFont.height / coverageFont.layerHeight * coverageFont.layerColumns;
+      const first = layerAt(x1, y1), second = layerAt(x2, y2);
+      const mix = glyph.uniforms.coverageMix[0];
+      assert.ok(mix >= 0 && mix < 1);
+      assert.equal(second, Math.min(coverageFont.layers - 1, first + 1));
+      const expected = Math.max(0, Math.min(3, 3 * Math.log(zoom * 16 / 1.6) / Math.log(12 / 1.6)));
+      assert.ok(Math.abs(first + mix - expected) < 1e-12, 'layer coordinates and blend weight must preserve continuous log scale');
+      for (const key of ['coverageTransformA', 'coverageTransformB']) assert.ok(glyph.uniforms[key].every(Number.isFinite));
+    } else {
+      assert.equal(glyph.framebuffer, null);
+      assert.deepEqual(glyph.uniforms.pixelPadding, [0, 0]);
+    }
+    assert.equal(f.context.getStats().frameBufferUploads, index === 0 ? 1 : 0);
+    assert.equal(f.context.getStats().atlasUploads, 3);
+    assert.equal(f.context.getStats().coverageTargetAllocations, 1);
+    assert.equal(f.rasterReadbacks.length, 1);
+    const atlas = textureUploads(f).filter(upload => upload.args[2] === f.gl.R16F && upload.args[8] instanceof Uint16Array);
+    assert.equal(atlas.length, 1);
+    if (index === 0) atlasTexture = atlas[0].texture;
+    assert.equal(atlas[0].texture, atlasTexture);
+  }
+  f.context.dispose();
+});
+
+test('coverage atlas survives board resets, regenerates after context loss, and releases live textures exactly once', async () => {
+  const coverageFont = coverageDescription();
+  const f = fixture({ coverageFont });await f.context.ready;
+  const obj = object(), rows = [line('AB', 0, obj)];
+  const coverageUploads = () => textureUploads(f).filter(upload => upload.args[2] === f.gl.R16F && upload.args[8] instanceof Uint16Array);
+  const original = coverageUploads()[0].texture;
+  const draw = () => {
+    f.context.setTransform(.1, 0, 0, .1, 0, 0);
+    assert.equal(f.context.drawTextLayout(rows, obj), true);
+  };
+  draw();
+  f.context.resetResources();
+  assert.equal(f.context.getStats().coverageBytes, 0);
+  assert.equal(callsNamed(f, 'deleteTexture').some(call => call.args[0] === original), false);
+  draw();
+  assert.equal(coverageUploads().length, 1);
+  f.events.get('webglcontextlost')({ preventDefault() {} });
+  assert.equal(f.context.fontReady, false);
+  assert.equal(f.context.getStats().coverageBytes, 0);
+  assert.equal(f.context.drawTextLayout(rows, obj), false);
+  f.events.get('webglcontextrestored')();
+  assert.equal(await f.context.ready, true);
+  const restored = coverageUploads()[1].texture;
+  assert.notEqual(restored, original);
+  assert.equal(coverageUploads().length, 2);
+  assert.equal(f.rasterReadbacks.length, 2);
+  draw();
+  const start = f.calls.length;
+  f.context.dispose();
+  const deletions = callsNamed({ calls: f.calls.slice(start) }, 'deleteTexture').map(call => call.args[0]);
+  assert.equal(deletions.filter(texture => texture === restored).length, 1);
+  assert.equal(new Set(deletions).size, deletions.length);
+  assert.equal(deletions.length, 4, 'release the live glyph metadata, MSDF atlas, coverage atlas, and mask');
+  assert.equal(f.events.size, 0);
+  f.context.dispose();
+  assert.equal(callsNamed({ calls: f.calls.slice(start) }, 'deleteTexture').length, deletions.length);
+});
+
+function cacheFixture(options = {}) {
+  const f = fixture({ coverageFont: coverageDescription(), textTileCache: true, extensions: ['EXT_color_buffer_float'], ...options });
+  f.canvas.width = f.canvas.height = 100;
+  const obj = { id: 'cached-text', type: 'text', x: 0, y: 0 };
+  const rows = Array.from({ length: 6 }, (_, index) => line('H'.repeat(200), index + 50, obj));
+  const draw = (layout = rows, panX = -100, live = [obj]) => {
+    f.context.beginFrame(live);f.context.setTransform(.1, 0, 0, .1, panX, -100);
+    assert.equal(f.context.drawTextLayout(layout, obj), true);f.context.endFrame();
+  };
+  return { ...f, obj, rows, draw };
+}
+
+test('warm coverage tiles pan and move with zero glyph submissions, uploads, or readbacks', async () => {
+  const f = cacheFixture();await f.context.ready;
+  f.draw();
+  const initial = f.context.getStats();
+  assert.equal(initial.textTileCount, 1);
+  assert.equal(initial.textTileRasterizations, 1);
+  assert.equal(initial.textTileBytes, 516 * 516 * 2);
+  assert.equal(initial.frameGlyphsDrawn, 1200);
+  for (const phase of [.125, .25, .5, .75, 1]) {
+    f.draw(f.rows, -100 + phase);
+    const stats = f.context.getStats();
+    assert.equal(stats.frameGlyphsDrawn, 0);
+    assert.equal(stats.frameBufferUploads, 0);
+    assert.equal(stats.textTileRasterizations, 1);
+    assert.equal(stats.textTileCount, 1);
+    assert.equal(stats.atlasUploads, initial.atlasUploads);
+    assert.equal(f.rasterReadbacks.length, 1);
+  }
+  f.obj.x += 500;f.draw(f.rows, -150);
+  assert.equal(f.context.getStats().frameGlyphsDrawn, 0);
+  const sample = renderStates(f).filter(state => state.uniforms?.coverageAccumulation?.[0] === 1 && state.name === 'drawArrays').at(-1);
+  assert.deepEqual(sample.uniforms.coverageTextureSize, [516, 516, 1 / 516, 1 / 516]);
+  assert.deepEqual(sample.uniforms.sourceRect, [2 / 516, 1 - 2 / 516, 512 / 516, -512 / 516]);
+  assert.deepEqual(sample.blend, [f.gl.ONE, f.gl.ONE]);
+  f.context.dispose();
+});
+
+test('partly populated coverage tiles append newly exposed rows and rebuild only when existing rows change', async () => {
+  const f = cacheFixture();await f.context.ready;f.draw();
+  const next = line('W'.repeat(200), 56, f.obj);
+  const clearCount = callsNamed(f, 'clear').length;
+  f.draw([next]);
+  assert.equal(f.context.getStats().textTileRasterizations, 2);
+  assert.equal(f.context.getStats().textTileAppends, 1);
+  assert.equal(f.context.getStats().textTileRebuilds, 1);
+  assert.equal(f.context.getStats().frameGlyphsDrawn, 200, 'only the newly exposed row should be submitted');
+  assert.equal(callsNamed(f, 'clear').length - clearCount, 1, 'clear the shared mask, but preserve the populated tile');
+  f.draw(f.rows);
+  assert.equal(f.context.getStats().frameGlyphsDrawn, 0);
+  const changed = line('I'.repeat(200), 52, f.obj);
+  f.draw([changed]);
+  assert.equal(f.context.getStats().textTileRasterizations, 3);
+  assert.equal(f.context.getStats().frameGlyphsDrawn, 1400);
+  assert.equal(f.context.getStats().textTileRebuilds, 2, 'changing a cached row requires rebuilding all retained rows');
+  f.draw([changed]);
+  assert.equal(f.context.getStats().frameGlyphsDrawn, 0);
+  f.obj.data = { content: 'new document contents' };
+  f.draw([changed]);
+  assert.equal(f.context.getStats().textTileCount, 1);
+  assert.equal(f.context.getStats().frameGlyphsDrawn, 200, 'unrequested rows from the old content version must not enter the new tile');
+  f.obj.w = 999;
+  f.draw([changed]);
+  assert.equal(f.context.getStats().textTileRasterizations, 5);
+  f.context.dispose();
+});
+
+test('frame-wide coverage tile budget preserves warm text and streams the same pixel pipeline for another textbox', async () => {
+  const bytes = 516 * 516 * 2;
+  const f = cacheFixture({ maxTextTileBytes: bytes });await f.context.ready;
+  const other = { ...f.obj, id: 'second-text' };
+  const otherRows = f.rows.map((entry, i) => line(entry.text, 50 + i, other));
+  for (let frame = 0; frame < 4; frame++) {
+    f.context.beginFrame([f.obj, other]);f.context.setTransform(.1, 0, 0, .1, -100, -100);
+    f.context.drawTextLayout(f.rows, f.obj);f.context.drawTextLayout(otherRows, other);f.context.endFrame();
+    const stats = f.context.getStats();
+    assert.equal(stats.textTileBytes, bytes);
+    assert.equal(stats.textTileCount, 1);
+    assert.equal(stats.textTileRasterizations, frame + 2);
+    assert.equal(stats.textTileScratchUses, frame + 1);
+    assert.equal(stats.textTileScratchBytes, bytes);
+    assert.equal(stats.textTileEvictions, 0);
+    assert.equal(stats.textTileBypasses, frame + 1);
+    assert.equal(stats.frameGlyphsDrawn, frame === 0 ? 2400 : 1200);
+    const glyph = renderStates(f).filter(state => state.name === 'drawArraysInstanced').at(-1);
+    assert.deepEqual(glyph.uniforms.derivativeScale, [2], 'budget pressure must render through the same supersampled field');
+  }
+  assert.equal(textureUploads(f).filter(upload => upload.args[2] === f.gl.R16F && upload.args[3] === 516).length, 2);
+  const pressured = renderStates(f).filter(state => state.name === 'drawArrays' && state.uniforms.coverageAccumulation?.[0] === 1).at(-1);
+  f.context.beginFrame([other]);
+  assert.equal(f.context.getStats().textTileBytes, 0, 'removed objects must release their tiles at frame start');
+  f.context.drawTextLayout(otherRows, other);
+  assert.equal(f.context.getStats().textTileCount, 1);
+  const retained = renderStates(f).filter(state => state.name === 'drawArrays' && state.uniforms.coverageAccumulation?.[0] === 1).at(-1);
+  for (const key of ['transform', 'size', 'sourceRect', 'coverageTextureSize', 'color']) assert.deepEqual(retained.uniforms[key], pressured.uniforms[key]);
+  f.context.dispose();
+});
+
+test('coverage tile LRU remains bounded as the camera visits new world tiles and portable rendering bypasses the cache', async () => {
+  const bytes = 516 * 516 * 2;
+  const f = cacheFixture({ maxTextTileBytes: bytes });await f.context.ready;
+  const wide = f.rows.map((entry, i) => line('H'.repeat(800), i + 50, f.obj));
+  for (const [index, pan] of [-100, -400, -100].entries()) {
+    f.draw(wide, pan);
+    assert.equal(f.context.getStats().textTileBytes, bytes);
+    assert.equal(f.context.getStats().textTileCount, 1);
+    assert.equal(f.context.getStats().textTileRasterizations, index + 1);
+    assert.equal(f.context.getStats().textTileEvictions, index);
+    assert.equal(f.context.getStats().textTileReuses, index);
+    assert.equal(textureUploads(f).filter(upload => upload.args[2] === f.gl.R16F && upload.args[3] === 516).length, 1, 'evicted slots reuse their texture/FBO allocation');
+  }
+  f.context.dispose();
+  for (const options of [{ extensions: [] }, { textTileCache: false }]) {
+    const portable = cacheFixture(options);await portable.context.ready;portable.draw();portable.draw();
+    assert.equal(portable.context.getStats().textTileBytes, 0);
+    assert.equal(portable.context.getStats().textTileRasterizations, 0);
+    assert.equal(portable.context.getStats().frameGlyphsDrawn, 1200);
+    portable.context.dispose();
+  }
+});
+
+test('zero retained tile budget preserves cubic reconstruction and layer weights using one reusable scratch tile', async () => {
+  const retained = cacheFixture(), streamed = cacheFixture({ maxTextTileBytes: 0 });
+  await Promise.all([retained.context.ready, streamed.context.ready]);
+  for (const zoom of [.1, .101, .11, .1]) {
+    const samples=[];
+    for (const f of [retained, streamed]) {
+      const start = f.calls.length;
+      f.context.beginFrame([f.obj]);f.context.setTransform(zoom, 0, 0, zoom, -100, -100);
+      f.context.drawTextLayout(f.rows, f.obj);f.context.endFrame();
+      samples.push(renderStates({ ...f, calls: f.calls.slice(start) }).filter(state => state.name === 'drawArrays' && state.uniforms.coverageAccumulation?.[0] === 1));
+    }
+    assert.equal(samples[0].length, samples[1].length);
+    for (let i = 0; i < samples[0].length; i++) {
+      for (const key of ['transform', 'size', 'sourceRect', 'coverageTextureSize', 'color']) assert.deepEqual(samples[0][i].uniforms[key], samples[1][i].uniforms[key]);
+    }
+    assert.equal(streamed.context.getStats().textTileBytes, 0);
+    assert.equal(streamed.context.getStats().textTileCount, 0);
+    assert.equal(streamed.context.getStats().textTileScratchBytes, 516 * 516 * 2);
+  }
+  const scratch = textureUploads(streamed).filter(upload => upload.args[2] === streamed.gl.R16F && upload.args[3] === 516);
+  assert.equal(scratch.length, 1, 'all tiles and levels must reuse one scratch allocation');
+  streamed.context.clearTextCache();
+  assert.equal(streamed.context.getStats().textTileScratchBytes, 0);
+  assert.equal(callsNamed(streamed, 'deleteTexture').filter(call => call.args[0] === scratch[0].texture).length, 1);
+  retained.context.dispose();streamed.context.dispose();
+});
+
+test('coverage tile reset, context restoration, and disposal release bounded framebuffer resources', async () => {
+  const f = cacheFixture();await f.context.ready;f.draw();
+  const uploads = () => textureUploads(f).filter(upload => upload.args[2] === f.gl.R16F && upload.args[3] === 516);
+  const first = uploads()[0].texture;
+  f.context.clearTextCache();
+  assert.equal(f.context.getStats().textTileCount, 0);
+  assert.equal(f.context.getStats().textTileBytes, 0);
+  assert.equal(callsNamed(f, 'deleteTexture').filter(call => call.args[0] === first).length, 1);
+  f.draw();
+  f.events.get('webglcontextlost')({ preventDefault() {} });
+  assert.equal(f.context.getStats().textTileBytes, 0);
+  f.events.get('webglcontextrestored')();await f.context.ready;f.draw();
+  const restored = uploads().at(-1).texture;
+  f.context.dispose();
+  assert.equal(f.context.getStats().textTileCount, 0);
+  assert.equal(f.context.getStats().textTileBytes, 0);
+  assert.equal(callsNamed(f, 'deleteTexture').filter(call => call.args[0] === restored).length, 1);
+  f.context.dispose();
+  assert.equal(callsNamed(f, 'deleteTexture').filter(call => call.args[0] === restored).length, 1);
+});
+
+test('coverage tiles keep fixed layer filtering and fade continuously into the direct reading renderer', async () => {
+  const f = cacheFixture();await f.context.ready;
+  const rows = [line('Reading', 0, f.obj)];
+  f.context.beginFrame([f.obj]);f.context.setTransform(11 / 16, 0, 0, 11 / 16, 30, 30);
+  f.context.drawTextLayout(rows, f.obj);
+  const glyphs = renderStates(f).filter(state => state.name === 'drawArraysInstanced');
+  const direct = glyphs.at(-1);
+  assert.deepEqual(direct.uniforms.derivativeScale, [1]);
+  assert.deepEqual(direct.uniforms.deviceEm, [11]);
+  assert.deepEqual(direct.uniforms.color, [1, 1, 1, .5]);
+  assert.ok(glyphs.slice(0, -1).every(state => state.uniforms.derivativeScale[0] === 2));
+  assert.ok(glyphs.slice(0, -1).every(state => state.uniforms.coverageMix[0] === 0));
+  const before = f.context.getStats().textTileDrawCalls;
+  f.context.beginFrame([f.obj]);f.context.setTransform(.75, 0, 0, .75, 30, 30);f.context.drawTextLayout(rows, f.obj);
+  const reading = renderStates(f).filter(state => state.name === 'drawArraysInstanced').at(-1);
+  assert.equal(reading.framebuffer, null);
+  assert.deepEqual(reading.uniforms.areaFiltered, [0]);
+  assert.deepEqual(reading.uniforms.pixelPadding, [0, 0]);
+  assert.equal(f.context.getStats().textTileDrawCalls, before);
   f.context.dispose();
 });

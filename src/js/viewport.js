@@ -383,7 +383,9 @@ function drawEditingTextOverlay(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const layoutStart = collectDebug ? performance.now() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const layout = getTextLayoutForViewport(obj, viewportRect);
+  const layout = getTextLayoutForViewport(obj, boardRenderer.textViewportRect(viewportRect, {
+    zoom: viewZoom, dpr: window.devicePixelRatio || 1,
+  }));
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDebug) {
     stats.editLayoutMs = performance.now() - layoutStart;

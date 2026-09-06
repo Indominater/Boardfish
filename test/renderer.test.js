@@ -44,6 +44,36 @@ test('text renderer uses the viewport-aware layout path', () => {
   assert.deepEqual(drawnLines, ['one', 'two']);
 });
 
+test('tiny text retains its physical filter footprint at all viewport edges without expanding image visibility', () => {
+  const api = loadRenderer();
+  const viewport = { x1: 0, y1: 0, x2: 100, y2: 100 };
+  for (const [zoom, dpr] of [[.1, 1], [.1, 2], [.5, 1], [.75, 1]]) {
+    const padding = 16 * zoom * dpr < 12 ? 4.25 / (zoom * dpr) : 0;
+    const objects = [
+      { id: 'left', x: -padding - 9.9, y: 40 },
+      { id: 'right', x: 100 + padding - .1, y: 40 },
+      { id: 'top', x: 40, y: -padding - 9.9 },
+      { id: 'bottom', x: 40, y: 100 + padding - .1 },
+      { id: 'outside', x: -padding - 10.1, y: 40 },
+    ].map(obj => ({ ...obj, type: 'text', w: 10, h: 10 }));
+    if (padding) objects.push({ id: 'image', type: 'image', x: -padding - 9.9, y: 40, w: 10, h: 10 });
+    const drawn = [], layouts = [];
+    const renderer = api.createBoardRenderer({
+      objects: () => objects, zoom: () => zoom, dpr: () => dpr,
+      viewportCullingEnabled: () => true,
+      objectIntersectsRect: (obj, rect) => obj.x <= rect.x2 && obj.x + obj.w >= rect.x1 && obj.y <= rect.y2 && obj.y + obj.h >= rect.y1,
+      getTextLayoutForViewport(_obj, rect) { layouts.push(rect); return [{ text: 'edge' }]; },
+    });
+    renderer.drawVisibleObjects({ drawTextLayout(_layout, obj) { drawn.push(obj.id); return true; } }, null, viewport);
+    assert.deepEqual(drawn, ['left', 'right', 'top', 'bottom']);
+    for (const rect of layouts) {
+      assert.equal(rect.x1, 0 - padding); assert.equal(rect.y1, 0 - padding);
+      assert.equal(rect.x2, 100 + padding); assert.equal(rect.y2, 100 + padding);
+      if (!padding) assert.strictEqual(rect, viewport);
+    }
+  }
+});
+
 test('text renderer separates retained blits from cold raster and direct draw work', () => {
   const api = loadRenderer();
   const counters = api.createDrawCounters();

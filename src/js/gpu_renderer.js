@@ -9,6 +9,10 @@
   const DEFAULT_CHUNK_LIMIT = 4096;
   const DEFAULT_IMAGE_BYTES = 128 * 1024 * 1024;
   const DEFAULT_FALLBACK_BYTES = 16 * 1024 * 1024;
+  const DEFAULT_TEXT_TILE_BYTES = 128 * 1024 * 1024;
+  const TEXT_TILE_SIZE = 512;
+  const TEXT_TILE_GUTTER = 2;
+  const TEXT_TILE_SUPERSAMPLE = 2;
   const ASCII = /^[\x20-\x7e\t]*$/;
   const ASCII_DOCUMENT = /^[\x09\x0a\x0d\x20-\x7e]*$/;
   const IDENTITY = [1, 0, 0, 1, 0, 0];
@@ -19,12 +23,28 @@
     uniform vec2 viewport;
     uniform float fontSize;
     uniform vec2 pixelPadding;
+    uniform vec2 clipX;
+    uniform bool coverageFiltered;
     uniform sampler2D glyphs;
+    uniform vec4 coverageTransformA;
+    uniform vec4 coverageTransformB;
+    uniform vec4 coverageTile;
+    uniform float coverageColumns;
+    uniform vec4 coverageOrigins;
+    out vec2 coverageUvA;
+    out vec2 coverageUvB;
+    flat out vec4 coverageBoundsA;
+    flat out vec4 coverageBoundsB;
     out vec2 uv;
     flat out vec4 glyphBounds;
     out vec2 glyphPosition;
     flat out int glyphCode;
     void main() {
+      // Reject retained offscreen columns before fetching font metadata. Large
+      // wrapped rows can be far wider than the viewport; geometry stays intact.
+      if(instance.x<clipX.x||instance.x>clipX.y) {
+        gl_Position=vec4(2.,2.,0.,1.);return;
+      }
       vec2 corner=vec2(gl_VertexID&1, (gl_VertexID>>1)&1);
       vec4 plane=texelFetch(glyphs,ivec2(int(instance.z),0),0);
       vec4 atlas=texelFetch(glyphs,ivec2(int(instance.z),1),0);
@@ -38,6 +58,17 @@
       glyphBounds=vec4(atlas.xy,atlas.xy+atlas.zw);
       glyphPosition=point;
       glyphCode=int(instance.z);
+      if(coverageFiltered) {
+      int index=glyphCode-32,columns=max(1,int(coverageColumns));
+      vec2 tile=vec2(index%columns,index/columns)*coverageTile.xy;
+      coverageUvA=point*coverageTransformA.xy+coverageTransformA.zw+tile;
+      coverageUvB=point*coverageTransformB.xy+coverageTransformB.zw+tile;
+      // Both atlas cells have a zero-coverage border. Clamp within each glyph
+      // before filtering so the wider neighboring scale cannot bleed letters.
+      coverageBoundsA=vec4(tile+coverageTile.zw,tile+coverageTile.xy-coverageTile.zw);
+      coverageBoundsB=coverageBoundsA+coverageOrigins.zwzw;
+      coverageBoundsA+=coverageOrigins.xyxy;
+      }
     }`;
   const FRAGMENT = `#version 300 es
     precision highp float;
@@ -45,11 +76,18 @@
     uniform vec2 unitRange;
     uniform vec4 color;
     uniform float deviceEm;
+    uniform float derivativeScale;
     uniform bool areaFiltered;
     uniform sampler2D integralAtlas;
     uniform bool integralFloat;
     uniform vec4 integralInfo;
     uniform vec3 integralGrid;
+    uniform bool coverageFiltered;
+    uniform float coverageMix;
+    in vec2 coverageUvA;
+    in vec2 coverageUvB;
+    flat in vec4 coverageBoundsA;
+    flat in vec4 coverageBoundsB;
     in vec2 uv;
     flat in vec4 glyphBounds;
     in vec2 glyphPosition;
@@ -71,21 +109,26 @@
       return mix(mix(dot(texelFetch(integralAtlas,p0,0).rgb,weights),dot(texelFetch(integralAtlas,ivec2(p1.x,p0.y),0).rgb,weights),f.x),
         mix(dot(texelFetch(integralAtlas,ivec2(p0.x,p1.y),0).rgb,weights),dot(texelFetch(integralAtlas,p1,0).rgb,weights),f.x),f.y);
     }
+    float scaleCoverage() {
+      float a=texture(integralAtlas,clamp(coverageUvA,coverageBoundsA.xy,coverageBoundsA.zw)).r;
+      float b=texture(integralAtlas,clamp(coverageUvB,coverageBoundsB.xy,coverageBoundsB.zw)).r;
+      return mix(a,b,coverageMix);
+    }
     float areaCoverage() {
-      vec2 footprint=abs(dFdx(glyphPosition))+abs(dFdy(glyphPosition));
+      vec2 footprint=(abs(dFdx(glyphPosition))+abs(dFdy(glyphPosition)))*derivativeScale;
       vec2 lo=glyphPosition-footprint*.5,hi=glyphPosition+footprint*.5;
       float sum=integral(hi)-integral(vec2(lo.x,hi.y))-integral(vec2(hi.x,lo.y))+integral(lo);
       return clamp(sum/max(footprint.x*footprint.y*integralGrid.x*integralGrid.x,1e-8),0.,1.);
     }
     void main() {
-      float area=areaFiltered?areaCoverage():0.;
+      float area=areaFiltered?(coverageFiltered?scaleCoverage():areaCoverage()):0.;
       if(areaFiltered&&deviceEm<=8.) {
         float a=area*color.a;
         result=vec4(color.rgb*a,a);
         return;
       }
-      vec2 dx=dFdx(uv),dy=dFdy(uv);
-      float range=max(.5*dot(unitRange,1./max(fwidth(uv),vec2(1e-8))),1.);
+      vec2 dx=dFdx(uv)*derivativeScale,dy=dFdy(uv)*derivativeScale;
+      float range=max(.5*dot(unitRange,1./max(fwidth(uv)*derivativeScale,vec2(1e-8))),1.);
       float a;
       if(deviceEm<32.) {
         // Fixed screen-space integration at reading sizes. This is applied on
@@ -119,12 +162,32 @@
     uniform vec4 color;
     uniform bool textured;
     uniform bool coverageMask;
+    uniform bool coverageAccumulation;
+    uniform vec4 coverageTextureSize;
     in vec2 uv;
     out vec4 result;
+    vec4 cubicWeights(float f) {
+      float g=1.-f;
+      return vec4(g*g*g,3.*f*f*f-6.*f*f+4.,-3.*f*f*f+3.*f*f+3.*f+1.,f*f*f)/6.;
+    }
+    float reconstructCoverage() {
+      // Positive cubic B-spline reconstruction needs only four bilinear reads.
+      // Linear reconstruction makes a subpixel row alternate in contrast as it
+      // crosses cached texel centers; this smooth kernel keeps that phase stable.
+      vec2 p=uv*coverageTextureSize.xy-.5,base=floor(p),f=fract(p);
+      vec4 x=cubicWeights(f.x),y=cubicWeights(f.y);
+      vec2 gx=vec2(x.x+x.y,x.z+x.w),gy=vec2(y.x+y.y,y.z+y.w);
+      vec2 sx=(base.x+vec2(-1.+x.y/gx.x,1.+x.w/gx.y)+.5)*coverageTextureSize.z;
+      vec2 sy=(base.y+vec2(-1.+y.y/gy.x,1.+y.w/gy.y)+.5)*coverageTextureSize.w;
+      return dot(vec2(texture(image,vec2(sx.x,sy.x)).r*gx.x+texture(image,vec2(sx.y,sy.x)).r*gx.y,
+        texture(image,vec2(sx.x,sy.y)).r*gx.x+texture(image,vec2(sx.y,sy.y)).r*gx.y),gy);
+    }
     void main() {
       // Browser image uploads are premultiplied; MSDF uploads are deliberately
       // linear data and use their separate shader above.
-      if(coverageMask) {
+      if(coverageAccumulation) {
+        result=vec4(reconstructCoverage()*color.a,0.,0.,0.);
+      } else if(coverageMask) {
         float a=clamp(texture(image,uv).r,0.,1.)*color.a;
         result=vec4(color.rgb*a,a);
       } else result=textured?texture(image,uv)*color.a:vec4(color.rgb*color.a,color.a);
@@ -153,12 +216,16 @@
     if (!gl) return null;
     const makeCanvas = options.createCanvas || (() => root.document.createElement('canvas'));
     const font = options.font;
-    const integralFont = options.integralFont || root.BoardfishAsciiIntegralFont;
+    const coverageFont = options.coverageFont || root.BoardfishAsciiCoverageFont;
+    const integralFont = options.integralFont || (!coverageFont && root.BoardfishAsciiIntegralFont);
     const bufferLimit = Math.max(INSTANCE_BYTES, options.maxBufferBytes || DEFAULT_BUFFER_BYTES);
     const chunkLimit = Math.max(1, Math.trunc(options.maxChunks || DEFAULT_CHUNK_LIMIT));
     const imageLimit = Math.max(4, options.maxImageBytes || DEFAULT_IMAGE_BYTES);
     const fallbackLimit = Math.max(4, options.maxFallbackBytes || DEFAULT_FALLBACK_BYTES);
+    const textTileLimit = Math.max(0, options.maxTextTileBytes ?? DEFAULT_TEXT_TILE_BYTES);
     const chunks = new Map(), images = new Map(), textures = new Map(), fallback = new Map();
+    const textTiles = new Map(), textOwners = new WeakMap();
+    const textTileFrameKeys = new Set();
     const anonymousIds = new WeakMap();
     const immutableCanvases = new WeakSet();
     const asciiPrefixes = new WeakMap();
@@ -167,9 +234,11 @@
     let textProgram, quadProgram, textVao, quadVao;
     let fontResources = [];
     let coverageTarget = null;
+    let textTileScratch = null;
     let floatCoverage = false, floatIntegral = false;
     let lost = false, disposed = false, fontReady = false, generation = 0;
     let bufferBytes = 0, imageBytes = 0, fallbackBytes = 0;
+    let textTileBytes = 0;
     let measurementCanvas, measurementContext, colorContext;
     let ready;
     const colorCache = new Map();
@@ -180,6 +249,7 @@
       rectangleDrawCalls:0, glyphsDrawn:0, bufferUploads:0, bufferUploadBytes:0,
       imageUploads:0, imageUploadBytes:0, imageEvictions:0, atlasUploads:0, fallbackRasterizations:0, contextLosses:0,
       areaTextDraws:0, coverageComposites:0, coverageTargetAllocations:0,
+      textTileHits:0, textTileMisses:0, textTileRasterizations:0, textTileAppends:0, textTileRebuilds:0, textTileDrawCalls:0, textTileEvictions:0, textTileReuses:0, textTileBypasses:0, textTileScratchUses:0,
       frameDrawCalls:0, frameBufferUploads:0, frameGlyphsDrawn:0 };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
@@ -215,13 +285,14 @@
     function initialize() {
       floatCoverage=!!gl.getExtension('EXT_color_buffer_float');
       floatIntegral=!!gl.getExtension('OES_texture_float_linear');
-      textProgram=program(VERTEX,FRAGMENT,['transform','viewport','fontSize','pixelPadding','glyphs','atlas','unitRange','color','deviceEm','areaFiltered','integralAtlas','integralFloat','integralInfo','integralGrid']);
-      quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','size','sourceRect','image','color','textured','coverageMask']);
+      textProgram=program(VERTEX,FRAGMENT,['transform','viewport','fontSize','pixelPadding','clipX','glyphs','atlas','unitRange','color','deviceEm','derivativeScale','areaFiltered','integralAtlas','integralFloat','integralInfo','integralGrid','coverageFiltered','coverageTransformA','coverageTransformB','coverageTile','coverageColumns','coverageOrigins','coverageMix']);
+      quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','size','sourceRect','image','color','textured','coverageMask','coverageAccumulation','coverageTextureSize']);
       textVao=gl.createVertexArray(); quadVao=gl.createVertexArray();
       gl.disable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.disable(gl.DITHER);
       gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
-      fontResources=[font,...(font.largeFont?[font.largeFont]:[]),...(integralFont?[integralFont]:[])].map(description=>{
+      fontResources=[font,...(font.largeFont?[font.largeFont]:[]),...(integralFont?[integralFont]:[]),...(coverageFont?[coverageFont]:[])].map(description=>{
+        if(description===coverageFont)return {font:description,coverage:true,glyphTexture:null,atlasTexture:null,ready:false};
         if(description===integralFont)return {font:description,integral:true,glyphTexture:null,atlasTexture:null,ready:false};
         const metadata = new Float32Array(128*2*4);
         for(let code=0;code<128;code++) {
@@ -257,7 +328,18 @@
           textureParameters(gl.LINEAR);
           gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);
           gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL,gl.NONE);
-          if(resource.integral&&floatIntegral) {
+          if(resource.coverage) {
+            // A shared immutable scale-space atlas: decode once, never during
+            // motion. R16F sampling/filtering is core WebGL2; only rendering
+            // into floating-point attachments requires an optional extension.
+            const source=makeCanvas();source.width=description.width;source.height=description.height;
+            const context=source.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
+            const pixels=context.getImageData(0,0,source.width,source.height).data;
+            const values=new Uint16Array(source.width*source.height);
+            for(let i=0;i<values.length;i++)values[i]=pixels[i*4]*256+pixels[i*4+1];
+            source.width=source.height=0;
+            gl.texImage2D(gl.TEXTURE_2D,0,gl.R16F,description.width,description.height,0,gl.RED,gl.HALF_FLOAT,values);
+          } else if(resource.integral&&floatIntegral) {
             // One small startup decode; pan and zoom never read back or upload.
             const source=makeCanvas();source.width=description.width;source.height=description.height;
             const context=source.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
@@ -316,6 +398,7 @@
       gl.uniform4fv(quadProgram.locations.color,tint);
       gl.uniform1i(quadProgram.locations.textured,texture?1:0);
       gl.uniform1i(quadProgram.locations.coverageMask,0);
+      gl.uniform1i(quadProgram.locations.coverageAccumulation,0);
       if(texture) {
         gl.uniform4fv(quadProgram.locations.sourceRect,uv);
         gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);
@@ -359,6 +442,8 @@
       }
     }
     function clearTextCache() {
+      releaseTextTileScratch();
+      for(const [key,tile] of textTiles)deleteTextTile(key,tile);
       for(const [key,chunk] of chunks)deleteChunk(key,chunk);
       for(const [key,entry] of fallback)deleteFallback(key,entry);
     }
@@ -402,6 +487,15 @@
       return {fontSize:Number(style.fontSize)||16,padding:Number.isFinite(style.padding)?style.padding:16,
         lineHeight:Number(style.lineHeight)||24,baselineOffset:Number.isFinite(style.baselineOffset)?style.baselineOffset:16};
     }
+    function textOwner(obj) {
+      let owner=textOwners.get(obj);
+      if(!owner) { owner={token:++anonymousId,version:0};textOwners.set(obj,owner); }
+      if(owner.content!==obj.data?.content||owner.width!==obj.w) {
+        owner.content=obj.data?.content;owner.width=obj.w;owner.version++;
+        for(const [key,tile] of textTiles)if(tile.owner===obj)deleteTextTile(key,tile);
+      }
+      return owner;
+    }
     function prepare(layout,obj,style) {
       if(!fontReady||lost||disposed||!Array.isArray(layout)||!obj)return null;
       const content=obj.data?.content;
@@ -414,7 +508,7 @@
         // other row in this textbox between raster and distance-field rendering.
         if(!checked.supported)return null;
       }
-      const settings=optionsFor(style),key=objectKey(obj),groups=new Map();
+      const settings=optionsFor(style),key=objectKey(obj),groups=new Map(),owner=textOwner(obj);
       for(const line of layout) {
         const text=String(line.text??'');
         if(!line.prefixWidths||typeof line.prefixWidths!=='object')return null;
@@ -440,7 +534,7 @@
             if(chunks.size<chunkLimit)break;
             if(!protectedChunks.has(candidate))deleteChunk(candidateKey,candidate);
           }
-          chunk={objectKey:key,index:group.index,rows:new Map(),buffer:gl.createBuffer(),bytes:0,offsets:new Map(),dirty:true};
+          chunk={objectKey:key,index:group.index,styleKey:`${settings.lineHeight}:${settings.baselineOffset}`,rows:new Map(),buffer:gl.createBuffer(),bytes:0,offsets:new Map(),dirty:true};
           chunks.set(chunkKey,chunk);
         }
         const changedRows=new Set();
@@ -462,6 +556,7 @@
             chunk.rows.set(row,{text:line.text,prefix:line.prefixWidths,baseline,glyphCount});
             changedRows.add(row);chunk.dirty=true;
           }
+          const entry=chunk.rows.get(row);entry.owner=obj;entry.version=owner.version;
         }
         if(chunk.dirty) {
           // Extremely wide legacy rows retain the compatible raster path rather
@@ -518,16 +613,275 @@
       }
       return prepared;
     }
+    function deleteTextTile(key,tile) {
+      if(!lost) { gl.deleteFramebuffer(tile.framebuffer);gl.deleteTexture(tile.texture); }
+      textTileBytes-=tile.bytes;textTiles.delete(key);textTileFrameKeys.delete(key);
+    }
+    function releaseTextTileScratch() {
+      if(!textTileScratch)return;
+      if(!lost) { gl.deleteFramebuffer(textTileScratch.framebuffer);gl.deleteTexture(textTileScratch.texture); }
+      textTileScratch=null;
+    }
+    function getTextTileScratch(size,bytes) {
+      if(textTileScratch)return textTileScratch;
+      const texture=gl.createTexture(),framebuffer=gl.createFramebuffer();
+      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);textureParameters(gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.R16F,size,size,0,gl.RED,gl.HALF_FLOAT,null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texture,0);
+      if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE) {
+        gl.deleteFramebuffer(framebuffer);gl.deleteTexture(texture);return null;
+      }
+      return textTileScratch={texture,framebuffer,bytes,dependencies:new Map()};
+    }
+    function restoreCoverageTarget(target,bounds,clear=false) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER,target.framebuffer);
+      gl.viewport(0,0,canvas.width,canvas.height);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(bounds[0],canvas.height-bounds[3],bounds[2]-bounds[0],bounds[3]-bounds[1]);
+      if(clear) { gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT); }
+    }
+    function drawCachedText(prepared,obj,settings,m,resource,target,bounds,deviceEm,weight=1) {
+      const edge=Math.min(TEXT_TILE_SIZE,maxTextureSize-TEXT_TILE_GUTTER*2);
+      const size=edge+TEXT_TILE_GUTTER*2,bytes=size*size*2;
+      if(edge<1)return false;
+      const owner=textOwners.get(obj),objectId=objectKey(obj);
+      const styleKey=`${settings.lineHeight}:${settings.baselineOffset}`;
+      // Include retained rows outside this frame's layout. A tile may have been
+      // populated only partly: newly exposed or changed row records invalidate
+      // it, while unchanged camera coordinates never invalidate its contents.
+      const rows=[];
+      for(const chunk of chunks.values())if(chunk.objectKey===objectId&&chunk.styleKey===styleKey) {
+        for(const [row,record] of chunk.rows)if(record.owner===obj&&record.version===owner.version)rows.push({row,record,chunk});
+      }
+      const description=resource.font,step=Math.log(description.maxDeviceEm/description.minDeviceEm)/(description.layers-1);
+      const lod=Math.max(0,Math.min(description.layers-1,Math.log(deviceEm/description.minDeviceEm)/step));
+      const first=Math.floor(lod),mix=lod-first;
+      const layers=[[first,1-mix]];if(mix>1e-12)layers.push([first+1,mix]);
+      const ox=m[0]*(obj.x+settings.padding)+m[4],oy=m[3]*(obj.y+settings.padding)+m[5];
+      const x1=(bounds[0]-ox)/m[0],x2=(bounds[2]-ox)/m[0];
+      const y1=(bounds[1]-oy)/m[3],y2=(bounds[3]-oy)/m[3];
+      const plans=[],protectedKeys=new Set();
+      for(const [layer,weight] of layers) {
+        const em=description.minDeviceEm*Math.exp(layer*step),scale=em/settings.fontSize*TEXT_TILE_SUPERSAMPLE;
+        const minX=Math.floor(Math.min(x1,x2)*scale/edge),maxX=Math.ceil(Math.max(x1,x2)*scale/edge)-1;
+        const minY=Math.floor(Math.min(y1,y2)*scale/edge),maxY=Math.ceil(Math.max(y1,y2)*scale/edge)-1;
+        const guard=settings.fontSize*2+3*settings.fontSize/em+TEXT_TILE_GUTTER/scale;
+        for(let ty=minY;ty<=maxY;ty++)for(let tx=minX;tx<=maxX;tx++) {
+          const left=tx*edge/scale,top=ty*edge/scale,right=(tx+1)*edge/scale,bottom=(ty+1)*edge/scale;
+          const dependencies=rows.filter(({row,record})=> {
+            const baseline=row*settings.lineHeight+record.baseline;
+            return baseline+guard>=top&&baseline-guard<=bottom&&
+              (record.prefix[record.text.length]||0)+guard>=left&&(record.prefix[0]||0)-guard<=right;
+          });
+          if(!dependencies.length)continue;
+          const key=`${owner.token}:${owner.version}:${settings.fontSize}:${settings.padding}:${styleKey}:${layer}:${tx}:${ty}`;
+          plans.push({key,layer,weight,em,scale,tx,ty,left,top,dependencies});protectedKeys.add(key);
+        }
+      }
+      // Memory pressure affects retention only, never the pixel pipeline. Keep
+      // this frame's warm tiles and stream additional tiles through one scratch
+      // texture with the identical reconstruction and layer blending.
+      const frameKeys=new Set([...textTileFrameKeys,...protectedKeys]);
+      const retain=frameKeys.size*bytes<=textTileLimit;
+      if(!retain) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileBypasses++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
+      function prepareTileSampling() {
+        restoreCoverageTarget(target,bounds);
+        setup(quadProgram);gl.bindVertexArray(quadVao);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);
+        gl.uniform1i(quadProgram.locations.coverageAccumulation,1);
+        gl.uniform4fv(quadProgram.locations.coverageTextureSize,[size,size,1/size,1/size]);
+        gl.uniform1i(quadProgram.locations.coverageMask,0);gl.uniform1i(quadProgram.locations.textured,1);
+        gl.uniform1i(quadProgram.locations.image,0);
+        gl.uniform4fv(quadProgram.locations.sourceRect,[TEXT_TILE_GUTTER/size,1-TEXT_TILE_GUTTER/size,edge/size,-edge/size]);
+      }
+      function sampleTile(plan) {
+        gl.uniformMatrix3fv(quadProgram.locations.transform,false,matrix3(m,obj.x+settings.padding+plan.left,obj.y+settings.padding+plan.top));
+        gl.uniform2f(quadProgram.locations.size,edge/plan.scale,edge/plan.scale);
+        gl.uniform4fv(quadProgram.locations.color,[1,1,1,plan.weight*weight]);
+        gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,plan.tile.texture);
+        gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileDrawCalls++;drew('textDrawCalls'); /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
+      let pendingTile=null;
+      try {
+        // Allocate before the first streamed composite so an unsupported
+        // scratch framebuffer cannot leave half a textbox in the shared mask.
+        const scratch=!retain&&plans.some(plan=>!textTiles.has(plan.key))?getTextTileScratch(size,bytes):null;
+        if(!retain&&plans.some(plan=>!textTiles.has(plan.key))&&!scratch)return false;
+        if(!retain)restoreCoverageTarget(target,bounds,true);
+        for(const plan of plans) {
+          let tile=textTiles.get(plan.key);
+          const valid=tile&&plan.dependencies.every(({row,record})=>tile.dependencies.get(row)===record);
+          if(valid) {
+            textTiles.delete(plan.key);textTiles.set(plan.key,tile);
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileHits++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          } else {
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileMisses++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+            // Panning discovers additional rows in an otherwise unchanged
+            // tile. Coverage is additive: append only those rows instead of
+            // rerendering hundreds of thousands of already cached glyphs.
+            const append=tile&&!plan.dependencies.some(({row,record})=>tile.dependencies.has(row)&&tile.dependencies.get(row)!==record);
+            const updates=append?plan.dependencies.filter(({row})=>!tile.dependencies.has(row)):plan.dependencies;
+            if(!tile&&!retain) {
+              tile=scratch;
+              /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileScratchUses++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+            }
+            if(!tile) {
+              for(const [key,candidate] of textTiles) {
+                if(textTileBytes+bytes<=textTileLimit)break;
+                if(frameKeys.has(key))continue;
+                if(!tile&&candidate.bytes===bytes) {
+                  // Every tile has the same immutable allocation. Reassign an
+                  // evicted slot instead of stalling on texture/FBO allocation
+                  // as the camera visits new parts of a large board.
+                  tile=candidate;tile.owner=obj;tile.dependencies.clear();
+                  textTiles.delete(key);textTileFrameKeys.delete(key);textTileBytes-=candidate.bytes;
+                  /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileReuses++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+                } else deleteTextTile(key,candidate);
+                /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileEvictions++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+              }
+              if(textTileBytes+bytes>textTileLimit)return false;
+              if(!tile) {
+                const texture=gl.createTexture(),framebuffer=gl.createFramebuffer();
+                gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);textureParameters(gl.LINEAR);
+                gl.texImage2D(gl.TEXTURE_2D,0,gl.R16F,size,size,0,gl.RED,gl.HALF_FLOAT,null);
+                gl.bindFramebuffer(gl.FRAMEBUFFER,framebuffer);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texture,0);
+                if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE) {
+                  gl.deleteFramebuffer(framebuffer);gl.deleteTexture(texture);return false;
+                }
+                tile={owner:obj,texture,framebuffer,bytes,dependencies:new Map()};
+              }
+              textTiles.set(plan.key,tile);textTileBytes+=bytes;
+            }
+            pendingTile=plan.key;
+            gl.bindFramebuffer(gl.FRAMEBUFFER,tile.framebuffer);gl.disable(gl.SCISSOR_TEST);
+            if(!append) { gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT); }
+            const groups=new Map();
+            for(const entry of updates) {
+              let group=groups.get(entry.chunk);
+              if(!group) { group=[];groups.set(entry.chunk,group); }
+              group.push(entry);
+            }
+            const tilePrepared=[];
+            for(const [chunk,entries] of groups) {
+              entries.sort((a,b)=>a.row-b.row);
+              const ranges=[];
+              for(const {row} of entries) {
+                const offset=chunk.offsets.get(row),last=ranges.at(-1);
+                if(last&&last.start+last.count===offset.start)last.count+=offset.count;
+                else ranges.push({...offset});
+              }
+              tilePrepared.push({chunk,settings,group:{first:entries[0].row,last:entries.at(-1).row},ranges});
+            }
+            const matrix=[plan.scale,0,0,plan.scale,TEXT_TILE_GUTTER-plan.tx*edge,TEXT_TILE_GUTTER-plan.ty*edge];
+            drawPreparedText(tilePrepared,{x:-settings.padding,y:-settings.padding},settings,matrix,resource,tile,size,size,plan.em,TEXT_TILE_SUPERSAMPLE,plan.layer);
+            if(!append)tile.dependencies.clear();
+            for(const {row,record} of updates)tile.dependencies.set(row,record);
+            pendingTile=null;
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileRasterizations++;if(append)stats.textTileAppends++;else stats.textTileRebuilds++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          }
+          plan.tile=tile;
+          if(!retain) {
+            prepareTileSampling();sampleTile(plan);
+            if(tile===scratch)tile.dependencies.clear();
+          }
+        }
+        if(retain) {
+          restoreCoverageTarget(target,bounds,true);prepareTileSampling();
+          for(const plan of plans)sampleTile(plan);
+        }
+        for(const key of protectedKeys)if(textTiles.has(key))textTileFrameKeys.add(key);
+        return true;
+      } catch(error) {
+        if(pendingTile&&textTiles.has(pendingTile))deleteTextTile(pendingTile,textTiles.get(pendingTile));
+        report(error);return false;
+      }
+    }
+    function drawPreparedText(prepared,obj,settings,m,integralResource,target,width=canvas.width,height=canvas.height,deviceEm=settings.fontSize*Math.max(Math.hypot(m[0],m[1]),Math.hypot(m[2],m[3])),samplingScale=1,coverageLayer=null,weight=1) {
+      setup(textProgram);gl.bindVertexArray(textVao);
+      gl.viewport(0,0,width,height);gl.uniform2f(textProgram.locations.viewport,width,height);
+      gl.uniform1f(textProgram.locations.derivativeScale,samplingScale);
+      if(target) { gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE); }
+      gl.uniform1i(textProgram.locations.atlas,0);gl.uniform1i(textProgram.locations.glyphs,1);
+      gl.uniform4fv(textProgram.locations.color,target?[1,1,1,weight]:color());
+      gl.uniform1i(textProgram.locations.areaFiltered,target?1:0);
+      // The lower neighboring log layer has up to 15% wider support.
+      const filterPadding=integralResource?.coverage?3:.5;
+      gl.uniform1i(textProgram.locations.coverageFiltered,target&&integralResource?.coverage?1:0);
+      gl.uniform2f(textProgram.locations.pixelPadding,
+        target ? filterPadding*samplingScale/(Math.abs(m[0])*settings.fontSize) : 0,
+        target ? filterPadding*samplingScale/(Math.abs(m[3])*settings.fontSize) : 0);
+      if(target) {
+        const description=integralResource.font;
+        gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,integralResource.atlasTexture);
+        gl.uniform1i(textProgram.locations.integralAtlas,2);
+        gl.uniform1i(textProgram.locations.integralFloat,floatIntegral?1:0);
+        if(!integralResource.coverage) {
+          gl.uniform4fv(textProgram.locations.integralInfo,[description.width,description.height,description.cellSize,description.columns]);
+          gl.uniform3f(textProgram.locations.integralGrid,description.emSize,description.originX,description.originY);
+        }
+        if(integralResource.coverage) {
+          const {width,height,cellSize,columns,layers,layerColumns,layerWidth,layerHeight,minDeviceEm,maxDeviceEm,originX,originY,emExtent,pixelPadding}=description;
+          const layerLogSpacing=Math.log(maxDeviceEm/minDeviceEm)/(layers-1);
+          const lod=coverageLayer??Math.max(0,Math.min(layers-1,Math.log(deviceEm/minDeviceEm)/layerLogSpacing));
+          const first=Math.floor(lod),second=coverageLayer??Math.min(layers-1,first+1),origins=[];
+          for(const [layer,uniform] of [[first,'coverageTransformA'],[second,'coverageTransformB']]) {
+            const pad=pixelPadding/(minDeviceEm*Math.exp(layer*layerLogSpacing));
+            const scale=cellSize/(emExtent+2*pad);
+            const x=(layer%layerColumns)*layerWidth,y=Math.floor(layer/layerColumns)*layerHeight;
+            origins.push(x/width,y/height);
+            gl.uniform4fv(textProgram.locations[uniform],[scale/width,scale/height,(x-(originX-pad)*scale)/width,(y-(originY-pad)*scale)/height]);
+          }
+          gl.uniform4fv(textProgram.locations.coverageOrigins,origins);
+          gl.uniform4fv(textProgram.locations.coverageTile,[cellSize/width,cellSize/height,.5/width,.5/height]);
+          gl.uniform1f(textProgram.locations.coverageColumns,columns);
+          gl.uniform1f(textProgram.locations.coverageMix,lod-first);
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.areaTextDraws++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
+      if(m[1]===0&&m[2]===0&&m[0]) {
+        const origin=m[0]*(obj.x+settings.padding)+m[4];
+        const left=-origin/m[0],right=(width-origin)/m[0];
+        const guard=settings.fontSize*2+filterPadding*samplingScale/Math.abs(m[0]);
+        gl.uniform2f(textProgram.locations.clipX,Math.min(left,right)-guard,Math.max(left,right)+guard);
+      } else gl.uniform2f(textProgram.locations.clipX,-1e30,1e30);
+      gl.enableVertexAttribArray(0);gl.vertexAttribDivisor(0,1);
+      for(const {chunk,group,settings,ranges} of prepared) {
+        const first=chunk.offsets.get(group.first),last=chunk.offsets.get(group.last);
+        const spans=ranges||[{start:first.start,count:last.start+last.count-first.start}];
+        // Both detail levels are uploaded before first use. Changing scale only
+        // selects immutable resources; it never rerasterizes or uploads glyphs.
+        const resource=deviceEm>=128&&font.largeFont?fontResources[1]:fontResources[0];
+        const description=resource.font;
+        gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,resource.atlasTexture);
+        gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,resource.glyphTexture);
+        gl.uniform2f(textProgram.locations.unitRange,description.distanceRange/description.width,description.distanceRange/description.height);
+        gl.uniform1f(textProgram.locations.fontSize,settings.fontSize);
+        gl.uniform1f(textProgram.locations.deviceEm,deviceEm);
+        const x=obj.x+settings.padding,y=obj.y+settings.padding+chunk.index*ROWS_PER_CHUNK*settings.lineHeight;
+        gl.uniformMatrix3fv(textProgram.locations.transform,false,matrix3(m,x,y));
+        gl.bindBuffer(gl.ARRAY_BUFFER,chunk.buffer);
+        for(const {start,count} of spans)if(count) {
+          gl.vertexAttribPointer(0,3,gl.FLOAT,false,INSTANCE_BYTES,start*INSTANCE_BYTES);
+          gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,count);
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.glyphsDrawn+=count;stats.frameGlyphsDrawn+=count;drew('textDrawCalls'); /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        }
+      }
+    }
     function drawTextLayout(layout,obj,style) {
       const prepared=prepare(layout,obj,style);if(!prepared)return false;
       if(!prepared.length)return true;
       const settings=prepared[0].settings,m=current.matrix;
       const deviceEm=settings.fontSize*Math.max(Math.hypot(m[0],m[1]),Math.hypot(m[2],m[3]));
-      const integralResource=fontResources.find(resource=>resource.integral);
+      const integralResource=fontResources.find(resource=>resource.coverage)||fontResources.find(resource=>resource.integral);
       // Board text is axis aligned. A rotated/sheared transform keeps MSDF:
       // a rectangular integral is not an exact rotated pixel footprint.
       const areaFiltered=!!(integralResource?.ready&&deviceEm<12&&m[1]===0&&m[2]===0&&m[0]&&m[3]);
       const target=areaFiltered?getCoverageTarget():null;
+      const cacheEligible=target&&integralResource.coverage&&floatCoverage&&options.textTileCache!==false&&Math.abs(Math.abs(m[0])-Math.abs(m[3]))<1e-10;
       let bounds;
       if(target) {
         let left=Infinity,right=-Infinity,top=Infinity,bottom=-Infinity;
@@ -543,50 +897,21 @@
           left=Math.min(left,a,b);right=Math.max(right,a,b);
           top=Math.min(top,c,d);bottom=Math.max(bottom,c,d);
         }
-        bounds=[Math.max(0,Math.floor(left-1)),Math.max(0,Math.floor(top-1)),Math.min(canvas.width,Math.ceil(right+1)),Math.min(canvas.height,Math.ceil(bottom+1))];
+        bounds=[Math.max(0,Math.floor(left-5)),Math.max(0,Math.floor(top-5)),Math.min(canvas.width,Math.ceil(right+5)),Math.min(canvas.height,Math.ceil(bottom+5))];
         if(!(bounds[2]>bounds[0]&&bounds[3]>bounds[1]))return true;
         gl.bindFramebuffer(gl.FRAMEBUFFER,target.framebuffer);
         gl.enable(gl.SCISSOR_TEST);
         gl.scissor(bounds[0],canvas.height-bounds[3],bounds[2]-bounds[0],bounds[3]-bounds[1]);
-        gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+        if(!cacheEligible) { gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT); }
       }
-      setup(textProgram);gl.bindVertexArray(textVao);
-      if(target) { gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE); }
-      gl.uniform1i(textProgram.locations.atlas,0);gl.uniform1i(textProgram.locations.glyphs,1);
-      gl.uniform4fv(textProgram.locations.color,target?[1,1,1,1]:color());
-      gl.uniform1i(textProgram.locations.areaFiltered,target?1:0);
-      gl.uniform2f(textProgram.locations.pixelPadding,
-        target ? .5/(Math.abs(m[0])*settings.fontSize) : 0,
-        target ? .5/(Math.abs(m[3])*settings.fontSize) : 0);
-      if(target) {
-        const description=integralResource.font;
-        gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,integralResource.atlasTexture);
-        gl.uniform1i(textProgram.locations.integralAtlas,2);
-        gl.uniform1i(textProgram.locations.integralFloat,floatIntegral?1:0);
-        gl.uniform4fv(textProgram.locations.integralInfo,[description.width,description.height,description.cellSize,description.columns]);
-        gl.uniform3f(textProgram.locations.integralGrid,description.emSize,description.originX,description.originY);
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.areaTextDraws++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
-      gl.enableVertexAttribArray(0);gl.vertexAttribDivisor(0,1);
-      for(const {chunk,group,settings} of prepared) {
-        const first=chunk.offsets.get(group.first),last=chunk.offsets.get(group.last);
-        const count=last.start+last.count-first.start;if(!count)continue;
-        const deviceEm=settings.fontSize*Math.max(Math.hypot(current.matrix[0],current.matrix[1]),Math.hypot(current.matrix[2],current.matrix[3]));
-        // Both detail levels are uploaded before first use. Changing scale only
-        // selects immutable resources; it never rerasterizes or uploads glyphs.
-        const resource=deviceEm>=128&&font.largeFont?fontResources[1]:fontResources[0];
-        const description=resource.font;
-        gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,resource.atlasTexture);
-        gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,resource.glyphTexture);
-        gl.uniform2f(textProgram.locations.unitRange,description.distanceRange/description.width,description.distanceRange/description.height);
-        gl.uniform1f(textProgram.locations.fontSize,settings.fontSize);
-        gl.uniform1f(textProgram.locations.deviceEm,deviceEm);
-        const x=obj.x+settings.padding,y=obj.y+settings.padding+chunk.index*ROWS_PER_CHUNK*settings.lineHeight;
-        gl.uniformMatrix3fv(textProgram.locations.transform,false,matrix3(current.matrix,x,y));
-        gl.bindBuffer(gl.ARRAY_BUFFER,chunk.buffer);
-        gl.vertexAttribPointer(0,3,gl.FLOAT,false,INSTANCE_BYTES,first.start*INSTANCE_BYTES);
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,count);
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.glyphsDrawn+=count;stats.frameGlyphsDrawn+=count;drew('textDrawCalls'); /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      const transition=Math.max(0,Math.min(1,(deviceEm-10)/2));
+      const cacheWeight=1-transition*transition*(3-2*transition);
+      const cached=cacheEligible&&drawCachedText(prepared,obj,settings,m,integralResource,target,bounds,deviceEm,cacheWeight);
+      if(!cached) {
+        if(cacheEligible)restoreCoverageTarget(target,bounds,true);
+        drawPreparedText(prepared,obj,settings,m,integralResource,target);
+      } else if(cacheWeight<1) {
+        drawPreparedText(prepared,obj,settings,m,integralResource,target,canvas.width,canvas.height,deviceEm,1,null,1-cacheWeight);
       }
       if(target) {
         gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.disable(gl.SCISSOR_TEST);
@@ -598,6 +923,7 @@
         gl.uniform2f(quadProgram.locations.size,bounds[2]-bounds[0],bounds[3]-bounds[1]);
         gl.uniform4fv(quadProgram.locations.color,color());
         gl.uniform1i(quadProgram.locations.coverageMask,1);
+        gl.uniform1i(quadProgram.locations.coverageAccumulation,0);
         gl.uniform1i(quadProgram.locations.textured,1);
         gl.uniform4fv(quadProgram.locations.sourceRect,[bounds[0]/canvas.width,1-bounds[1]/canvas.height,(bounds[2]-bounds[0])/canvas.width,-(bounds[3]-bounds[1])/canvas.height]);
         gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,target.texture);
@@ -757,6 +1083,7 @@
     function lostContext(event) {
       event.preventDefault();lost=true;fontReady=false;generation++;/* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.contextLosses++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
       chunks.clear();images.clear();textures.clear();bufferBytes=imageBytes=0;
+      textTiles.clear();textTileFrameKeys.clear();textTileBytes=0;textTileScratch=null;
       coverageTarget=null;
       try { options.onLost?.(); } catch(error) { report(error); }
     }
@@ -792,14 +1119,17 @@
       drawTextLayout,
       prepareTextLayout(layout,obj,style){const result=prepare(layout,obj,style);trimResources();return result!==null;},
       beginFrame(objects){
+        textTileFrameKeys.clear();
         /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.frames++;stats.frameDrawCalls=stats.frameBufferUploads=stats.frameGlyphsDrawn=0; /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if(objects) {
           const live=new Set();for(const obj of objects)if(obj?.type==='text')live.add(objectKey(obj));
           for(const [key,chunk] of chunks)if(!live.has(chunk.objectKey))deleteChunk(key,chunk);
+          const owners=new Set(objects);
+          for(const [key,tile] of textTiles)if(!owners.has(tile.owner))deleteTextTile(key,tile);
         }
       },
       endFrame(){trimResources();},clearTextCache,resetResources,
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */ getStats(){return {...stats,fontReady,lost,frame:stats.frames,bufferBytes,imageBytes,fallbackBytes,floatCoverage,floatIntegral,coverageBytes:coverageTarget?coverageTarget.width*coverageTarget.height*(floatCoverage?2:1):0,chunkCount:chunks.size,imageCount:images.size,textureCount:textures.size,atlasBytes:fontResources.reduce((bytes,resource)=>bytes+(resource.ready?resource.font.width*resource.font.height*4+(resource.glyphTexture?4096:0):0),0)};}, /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */ getStats(){return {...stats,fontReady,lost,frame:stats.frames,bufferBytes,imageBytes,fallbackBytes,floatCoverage,floatIntegral,textTileBytes,textTileCount:textTiles.size,textTileScratchBytes:textTileScratch?.bytes||0,coverageBytes:coverageTarget?coverageTarget.width*coverageTarget.height*(floatCoverage?2:1):0,chunkCount:chunks.size,imageCount:images.size,textureCount:textures.size,atlasBytes:fontResources.reduce((bytes,resource)=>bytes+(resource.ready?resource.font.width*resource.font.height*(resource.coverage?2:4)+(resource.glyphTexture?4096:0):0),0)};}, /* BOARDFISH_DEV_DIAGNOSTICS_END */
       dispose(){
         if(disposed)return;resetResources();disposed=true;fontReady=false;generation++;
         canvas.removeEventListener?.('webglcontextlost',lostContext);canvas.removeEventListener?.('webglcontextrestored',restoredContext);

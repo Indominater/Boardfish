@@ -1,6 +1,6 @@
 'use strict';
 
-const BOARDFISH_CACHE_VERSION = 'v6';
+const BOARDFISH_CACHE_VERSION = 'v7';
 const BOARDFISH_CACHE_NAMESPACE =
   `boardfish-pwa-${encodeURIComponent(self.registration.scope)}::`;
 const BOARDFISH_CACHE = `${BOARDFISH_CACHE_NAMESPACE}${BOARDFISH_CACHE_VERSION}`;
@@ -16,6 +16,7 @@ const BOARDFISH_APP_SHELL = [
   './fonts/geist-ascii-msdf.png',
   './fonts/geist-ascii-large-msdf.png',
   './fonts/geist-ascii-integral.png',
+  './fonts/geist-ascii-coverage.png',
   /* BOARDFISH_BUILD_ASSETS */
 ];
 const BOARDFISH_APP_SHELL_URLS = new Set();
@@ -32,7 +33,7 @@ function isAppShellUrl(url) {
 }
 
 function isCacheFirstAssetUrl(url) {
-  return isBoardfishBundleUrl(url) || /\/(?:fonts\/(?:Geist\.woff2|geist-ascii-(?:(?:large-)?msdf|integral)\.png)|boardfish-icon(?:-192)?\.png)$/.test(url.pathname);
+  return isBoardfishBundleUrl(url) || /\/(?:fonts\/(?:Geist\.woff2|geist-ascii-(?:(?:large-)?msdf|integral|coverage)\.png)|boardfish-icon(?:-192)?\.png)$/.test(url.pathname);
 }
 
 function shouldCacheRequest(request, url) {

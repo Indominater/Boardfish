@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boardfish real-board text motion</title>
+  <style>
+    @font-face { font-family: 'Geist Sans'; src: url('/fonts/Geist.woff2') format('woff2'); font-weight: 300 700; font-display: block; }
+    :root { color-scheme: dark; font: 14px 'Geist Sans', system-ui, sans-serif; background: #17171b; color: #ededf2; }
+    body { max-width: 1000px; margin: auto; padding: 18px; }
+    h1 { margin: 0 0 8px; font-size: 22px; } p, li { line-height: 1.45; color: #c5c5ce; }
+    .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; background: #25252b; padding: 10px; border-radius: 6px; }
+    label { display: inline-flex; align-items: center; gap: 6px; }
+    select, button { font: inherit; color: inherit; background: #303038; border: 1px solid #555561; border-radius: 4px; padding: 6px; }
+    button { cursor: pointer; } button:disabled { opacity: .5; cursor: progress; }
+    input[type=range] { width: 120px; }
+    #status { min-height: 22px; } .scroll { overflow-x: auto; }
+    #panels { display: grid; grid-template-columns: repeat(2, 400px); gap: 16px; width: max-content; }
+    figure { margin: 0; } figcaption { margin-bottom: 7px; font-weight: 600; }
+    canvas { display: block; width: 400px; height: 256px; outline: 1px solid #484850; }
+    a { display: inline-block; color: #b7b7ff; margin: 8px 10px 0 0; }
+    pre { padding: 12px; background: #222228; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; max-height: 380px; overflow-y: auto; }
+    details { margin-top: 14px; } table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+    th, td { border-bottom: 1px solid #44444d; padding: 7px; text-align: right; } th:first-child, td:first-child { text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Real-board text motion</h1>
+  <p id="fixture">Loading the actual textboxes from boardTest.bf…</p>
+  <div class="controls">
+    <label>DPR <select id="dpr" disabled><option>1</option><option>2</option></select></label>
+    <label title="Reloads the benchmark; affects only the current renderer"><input id="text-cache" type="checkbox" checked disabled>Cache current text</label>
+    <label>Zoom <select id="zoom" disabled><option value="0.1" selected>10%</option><option value="0.125">12.5%</option><option value="0.15">15%</option><option value="0.2">20%</option><option value="0.25">25%</option><option value="0.5">50%</option><option value="1">100%</option></select></label>
+    <label>Y phase <input id="phase-position" type="range" min="0" max="32" step="1" value="0" disabled><output id="phase-label">0/32 px</output></label>
+    <button id="phases" disabled>Measure phases</button><button id="performance" disabled>Measure pan</button>
+    <button id="run-all" disabled>Run all</button><button id="animate" disabled>Animate pan / zoom</button>
+  </div>
+  <p id="status" role="status">Loading the font and renderers…</p>
+  <div class="scroll"><div id="panels">
+    <figure><figcaption id="before-caption">Previous integral renderer</figcaption><canvas id="before" aria-label="Previous text renderer"></canvas><a id="before-png" download>Native PNG</a></figure>
+    <figure><figcaption>Current text renderer</figcaption><canvas id="after" aria-label="Current text renderer"></canvas><a id="after-png" download>Native PNG</a></figure>
+  </div></div>
+  <div id="summary"></div>
+  <a id="json-download" download="board-motion.json" hidden>Download results JSON</a>
+  <details><summary>Method and limits</summary><ul>
+    <li>This page fetches the exact locally extracted board JSON at <code>/__fixture/board.json</code>. Only its text objects are rendered; content and world geometry are unchanged. Images are excluded from this text-renderer comparison.</li>
+    <li>32 subpixel phases span 31/32 of one physical pixel on each axis inside the largest dense textbox, obj-545. Pixel readback crops a 24 CSS-pixel inset. Every phase preserves its row-mean brightness signal in JSON. At zooms where textbox edges enter the crop, measurements include the edges and are labeled accordingly.</li>
+    <li>Row contrast measures the RMS variation of horizontal mean brightness across image rows. Its variation over pan phases detects broad coherent striping missed by integrated ink totals. Adjacent-frame and second temporal difference RMS also include legitimate translation and 8-bit readback quantization; they are comparative diagnostics, not a proof of zero flicker.</li>
+    <li>Alias-band analysis uses the actual 24-world-pixel line pitch. A least-squares fit separates DC, a slow brightness trend, the legitimate line harmonics, and the first harmonic above the physical-pixel Nyquist limit. Per-phase spatial fits are marked unidentifiable when an alias coincides with a legitimate harmonic. A joint space/phase fit additionally distinguishes their temporal phase rotation during vertical panning. Both use orthogonalized least squares to limit finite-window leakage from the dominant line pattern. These fits estimate coherent periodic alias energy; nonperiodic content, other higher harmonics, and quantization remain in the residual.</li>
+    <li>Performance visits each real textbox with live object culling and getTextLayoutForViewport on each frame. Four alternating 60-frame blocks provide 120 measured frames per renderer. CPU submission includes culling, layout, and rendering; rAF timing includes scheduling. GPU execution is measured separately with EXT_disjoint_timer_query_webgl2 where supported, using asynchronous polling without waits or fences; unavailable, unresolved, or disjoint results are reported explicitly. Readback and PNG capture occur outside timed blocks.</li>
+    <li>Run all covers app-supported zooms 10%, 12.5%, 15%, 20%, 25%, 50%, and 100% at DPR 1 and 2. Native before/after PNGs save through the local evidence endpoint after measurements.</li>
+    <li>Add <code>?baseline=1</code> when the fixture server supplies the baseline <code>gpu-motion-before.js</code> route. Without it both panels use the current renderer and comparison is labeled unavailable. Optional <code>?budget=0</code> forces the cache-pressure path. <code>?portable=1</code> disables optional floating-point extensions on both panels for a matched portable-path comparison. Optional <code>?cache=0</code> sets <code>textTileCache: false</code> only on the current renderer; the cache checkbox reloads this setting.</li>
+  </ul></details>
+  <details><summary>Results JSON</summary><pre id="json">No run yet.</pre></details>
+  <script>
+    var objects = [], editingId = null;
+    var TextSelDebug = { _logHit: function () {} };
+    function scheduleRender() {} function markDirty() {} function invalidateOffscreen() {}
+  </script>
+  <script src="/js/text_raster.js"></script>
+  <script src="/js/text_layout.js"></script>
+  <script src="/fonts/geist-ascii-msdf.js"></script>
+  <script src="/fonts/geist-ascii-integral.js"></script>
+  <script>
+    if (new URLSearchParams(location.search).get('baseline') === '1') document.write('<script src="gpu-motion-before.js"><\/script>');
+  </script>
+  <script>if (window.BoardfishGpuRenderer) window.BoardfishGpuRendererBefore = window.BoardfishGpuRenderer;</script>
+  <script src="/fonts/geist-ascii-coverage.js"></script>
+  <script src="/js/gpu_renderer.js"></script>
+  <script src="board-motion-benchmark.js"></script>
+</body>
+</html>
