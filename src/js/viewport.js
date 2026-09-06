@@ -411,7 +411,10 @@ function drawEditingTextOverlay(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const textDrawStart = collectDebug ? performance.now() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  for (const line of layout) {
+  const gpuDrawn = context.drawTextLayout?.(layout, obj, {
+    fontSize: FONT_SIZE, padding: TEXT_PAD, lineHeight: LINE_H,
+  });
+  if (!gpuDrawn) for (const line of layout) {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
     } else {
@@ -424,6 +427,7 @@ function drawEditingTextOverlay(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDebug) {
     stats.editTextDrawMs = performance.now() - textDrawStart;
+    if (gpuDrawn) stats.editDrawnTextLines = layout.length;
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
@@ -463,6 +467,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
   // Keep canvas pixels in the same CSS coordinate space as DOM selections.
   if (typeof beginTextRasterFrame === 'function') beginTextRasterFrame();
   syncBoardCanvasBackingStore();
+  ctx.beginFrame?.(objects);
   const hasOpenPreviewFallback = hasOpenInitialImagePreviews();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;
@@ -484,7 +489,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   if (editingId) {
-    const useEditOffscreenCache = !bypassEditOffscreenCache;
+    const useEditOffscreenCache = !ctx.isBoardfishGpuContext && !bypassEditOffscreenCache;
     if (useEditOffscreenCache && _offscreenDirty) {
       _rebuildOffscreen(dpr, viewportRect);
     }
@@ -581,6 +586,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
   }
+  ctx.endFrame?.();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDrawDebug) {
     ViewportDebug.count('croppedImages', counters.croppedImages);
@@ -611,6 +617,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
       totalMeasuredMs: performance.now() - drawStart,
       ...drawPhases,
       ...counters,
+      ...(ctx.getStats ? { gpu: ctx.getStats() } : {}),
     };
     _lastDrawBoardMeta = drawMeta;
     if (hasOpenPreviewFallback && typeof OpenDebug.recordPreviewFallbackDraw === 'function') {
@@ -778,6 +785,8 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   panY: () => panY,
   dpr: () => window.devicePixelRatio || 1,
   font: FONT,
+  fontSize: FONT_SIZE,
+  textPad: TEXT_PAD,
   lineHeight: LINE_H,
   canvasTextColor,
   currentViewportWorldRect: viewportWorldRect,

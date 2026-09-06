@@ -476,7 +476,11 @@ function createOpenTextWarmupTarget() {
     canvas.width = 1;
     canvas.height = 1;
     const context = canvas.getContext?.('2d') || null;
-    return context ? { canvas, context } : null;
+    if (!context) return null;
+    context.font = FONT;
+    configureTextCanvasContext(context);
+    context.textBaseline = 'alphabetic';
+    return { canvas, context };
   } catch (_) {
     return null;
   }
@@ -492,10 +496,6 @@ function warmOpenTextLineForDraw(target, obj, line) {
   const baseX = (Number(obj?.x) || 0) + TEXT_PAD;
   const textY = Number(line.textY) || 0;
   try {
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.font = FONT;
-    configureTextCanvasContext(context);
-    context.textBaseline = 'alphabetic';
     context.fillStyle = canvasTextColor();
     context.setTransform(
       deviceScale,
@@ -509,8 +509,6 @@ function warmOpenTextLineForDraw(target, obj, line) {
     return true;
   } catch (_) {
     return false;
-  } finally {
-    try { context.setTransform(1, 0, 0, 1, 0, 0); } catch (_) {}
   }
 }
 
@@ -525,7 +523,9 @@ async function hydrateTextDrawCachesForOpen(
     try { await fontSet.ready; } catch (_) {}
   }
 
-  const warmupTarget = createOpenTextWarmupTarget();
+  const gpuContext = typeof ctx !== 'undefined' && ctx?.isBoardfishGpuContext ? ctx : null;
+  if (gpuContext?.ready) await gpuContext.ready;
+  const warmupTarget = gpuContext ? null : createOpenTextWarmupTarget();
   beginTextRasterFrame();
   let textObjects = 0;
   let textLines = 0;
@@ -538,6 +538,17 @@ async function hydrateTextDrawCachesForOpen(
     const content = String(obj.data?.content ?? '');
     chars += content.length;
     const layout = getTextLayout(obj);
+    if (gpuContext?.prepareTextLayout?.(layout, obj, {
+      fontSize: FONT_SIZE, padding: TEXT_PAD, lineHeight: LINE_H,
+    })) {
+      textLines += layout.length;
+      warmedLines += layout.length;
+      if (performance.now() - batchStartedAt >= 8) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        batchStartedAt = performance.now();
+      }
+      continue;
+    }
     for (const line of layout) {
       prepareTextLineForDraw(line);
       textLines++;
@@ -554,7 +565,7 @@ async function hydrateTextDrawCachesForOpen(
     textLines,
     warmedLines,
     chars,
-    warmupAvailable: !!warmupTarget,
+    warmupAvailable: !!(warmupTarget || gpuContext),
     ms: performance.now() - startedAt,
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -991,6 +1002,7 @@ function applyBoardData(data
   if (editingId) exitEdit();
   BoardfishEditorState.clearSelection();
   clearTextLayoutCaches({ objectLayout: false });
+  if (typeof ctx !== 'undefined') ctx?.resetResources?.();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const replaceStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */

@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Regenerate the offline ASCII atlases from Boardfish's bundled Geist font.
+
+Build-time dependencies only: fonttools[woff]==4.59.1 and msdf-atlas-gen 1.4.0
+(msdfgen 1.13.0). See docs/ascii-font-atlas.md for the pinned generator build.
+"""
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import struct
+import subprocess
+import tempfile
+
+from fontTools.ttLib import TTFont
+from fontTools.varLib.instancer import instantiateVariableFont
+
+
+ROOT = Path(__file__).resolve().parents[1]
+FONT = ROOT / "src/fonts/Geist.woff2"
+OUTPUT = ROOT / "src/fonts"
+SOURCE_SHA256 = "5eb88b972cad22bd9937079e8e8c7fd9fae22dd8e621ea23c2e733bb3e8c2ee5"
+GENERATOR_COMMIT = "2ede254314a2512252a225fa6c975948d6af559a"
+MSDFGEN_COMMIT = "1874bcf7d9624ccc85b4bc9a85d78116f690f35b"
+ATLAS_CONFIGURATIONS = [
+    ("geist-ascii-msdf.png", 96, 32),
+    ("geist-ascii-large-msdf.png", 192, 4),
+]
+
+
+def rounded(value):
+    """Stable, compact precision well below a screen pixel at maximum zoom."""
+    if isinstance(value, float):
+        return round(value, 10)
+    if isinstance(value, dict):
+        return {key: rounded(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [rounded(item) for item in value]
+    return value
+
+
+def generate_atlas(generator, temporary, name, em_size, distance_range):
+    image_path = temporary / name
+    json_path = temporary / (name + ".json")
+    command = [
+        generator, "-font", str(temporary / "Geist-Regular.ttf"),
+        "-chars", "[32,126]", "-type", "msdf", "-format", "png",
+        "-size", str(em_size), "-pxrange", str(distance_range),
+        "-square4", "-yorigin", "bottom", "-pxalign", "off",
+        "-coloringstrategy", "inktrap", "-angle", "3", "-seed", "0",
+        "-errorcorrection", "auto-fast", "-nokerning", "-threads", "1",
+        "-imageout", str(image_path), "-json", str(json_path),
+    ]
+    subprocess.run(command, check=True)
+    generated = json.loads(json_path.read_text())
+    atlas = generated["atlas"]
+    glyphs = [None] * 128
+    for glyph in generated["glyphs"]:
+        code = glyph["unicode"]
+        if not 32 <= code <= 126 or glyphs[code] is not None:
+            raise SystemExit(f"Unexpected or duplicate ASCII character: {code}")
+        glyphs[code] = {key: value for key, value in glyph.items() if key != "unicode"}
+    assert all(glyphs[code] is not None for code in range(32, 127))
+    assert "atlasBounds" not in glyphs[32]
+    for code in range(33, 127):
+        glyph = glyphs[code]
+        bounds = glyph["atlasBounds"]
+        assert 0 <= bounds["left"] < bounds["right"] <= atlas["width"]
+        assert 0 <= bounds["bottom"] < bounds["top"] <= atlas["height"]
+        plane = glyph["planeBounds"]
+        for a, b in [("left", "right"), ("bottom", "top")]:
+            assert abs((plane[b] - plane[a]) * em_size - (bounds[b] - bounds[a])) < 1e-6
+    png = image_path.read_bytes()
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert struct.unpack(">II", png[16:24]) == (atlas["width"], atlas["height"])
+    data = rounded({
+        "type": "msdf", "atlasURL": "fonts/" + name,
+        "width": atlas["width"], "height": atlas["height"],
+        "emSize": em_size, "distanceRange": distance_range, "yOrigin": "bottom",
+        "sourceSHA256": SOURCE_SHA256, "generatorCommit": GENERATOR_COMMIT,
+        "msdfgenCommit": MSDFGEN_COMMIT, "metrics": generated["metrics"],
+        "glyphs": glyphs,
+    })
+    print(f"{name}: validated 94 drawable glyphs + space, {atlas['width']} x {atlas['height']}, {len(png):,} PNG bytes.")
+    return data
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--generator", default="msdf-atlas-gen")
+    args = parser.parse_args()
+    source_hash = hashlib.sha256(FONT.read_bytes()).hexdigest()
+    if source_hash != SOURCE_SHA256:
+        raise SystemExit("Geist.woff2 changed: review the font and update the pinned source hash first.")
+    version = subprocess.run([args.generator, "-help"], check=True, capture_output=True, text=True).stdout
+    if "v1.4.0 (with MSDFgen v1.13.0)" not in version:
+        raise SystemExit("Expected msdf-atlas-gen 1.4.0 with msdfgen 1.13.0.")
+
+    with tempfile.TemporaryDirectory(prefix="boardfish-font-atlas-") as directory:
+        temporary = Path(directory)
+        font = TTFont(FONT, recalcTimestamp=False)
+        font = instantiateVariableFont(font, {"wght": 400}, inplace=True)
+        font.flavor = None
+        font.save(temporary / "Geist-Regular.ttf")
+        atlases = [generate_atlas(args.generator, temporary, *configuration) for configuration in ATLAS_CONFIGURATIONS]
+        data, large_font = atlases
+        assert data["metrics"] == large_font["metrics"]
+        assert all(data["glyphs"][code]["advance"] == large_font["glyphs"][code]["advance"] for code in range(32, 127))
+        data["largeFont"] = large_font
+        header = (
+            "// Generated by scripts/generate-text-atlas.py; do not edit.\n"
+            "// Geist, SIL Open Font License 1.1; see geist-ascii-LICENSE.txt.\n"
+            "// Bounds use +y upward. Plane bounds are em relative to the alphabetic baseline;\n"
+            "// atlas bounds are pixels measured from the image bottom. RGB stores LINEAR distance data.\n"
+        )
+        (OUTPUT / "geist-ascii-msdf.js").write_text(header + "globalThis.BoardfishAsciiFont = " + json.dumps(data, separators=(",", ":")) + ";\n")
+        for name, _, _ in ATLAS_CONFIGURATIONS:
+            shutil.copyfile(temporary / name, OUTPUT / name)
+
+
+if __name__ == "__main__":
+    main()

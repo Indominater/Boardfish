@@ -1,5 +1,9 @@
 # Text rendering architecture
 
+The application now uses the retained GPU glyph renderer described in
+[gpu-text-renderer.md](gpu-text-renderer.md). The Canvas2D implementation below
+remains the compatibility backend and historical benchmark baseline.
+
 Boardfish stores plain text and implements its editor over Canvas2D. A textarea
 provides input and selection state; the canvas draws the visible text, selection,
 and caret. There is no rich-text document model to remove. The expensive recurring

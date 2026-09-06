@@ -1,0 +1,660 @@
+{
+  "study": "Production retained GPU text vs current retained Canvas2D lines",
+  "createdAt": "2026-09-06T08:49:01.891Z",
+  "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+  "actualDevicePixelRatio": 1.1100000143051147,
+  "config": {
+    "workload": "scale-quality",
+    "scale": 0.875,
+    "dpr": 2,
+    "widthCss": 400,
+    "heightCss": 256,
+    "offsetCss": 0.375
+  },
+  "font": "normal 400 16px 'Geist Sans', system-ui",
+  "baselineOffsetWorld": 16.392000198364258,
+  "preparation": {
+    "layoutAndPlansMs": 0.6,
+    "viewportWorld": {
+      "x1": -32,
+      "y1": -32,
+      "x2": 832,
+      "y2": 544
+    },
+    "totalObjects": 1,
+    "submittedObjects": 1,
+    "submittedLines": 12,
+    "submittedCharacters": 432,
+    "visibilityPolicy": "Fixed whole-object overlap and existing vertical layout rows selected at the largest world viewport; every horizontal character is submitted throughout each run."
+  },
+  "rendererInitialization": {
+    "readinessMs": 49.2,
+    "stats": {
+      "frames": 0,
+      "drawCalls": 0,
+      "textDrawCalls": 0,
+      "imageDrawCalls": 0,
+      "rectangleDrawCalls": 0,
+      "glyphsDrawn": 0,
+      "bufferUploads": 0,
+      "bufferUploadBytes": 0,
+      "imageUploads": 0,
+      "atlasUploads": 2,
+      "fallbackRasterizations": 0,
+      "contextLosses": 0,
+      "frameDrawCalls": 0,
+      "frameBufferUploads": 0,
+      "frameGlyphsDrawn": 0,
+      "fontReady": true,
+      "lost": false,
+      "frame": 0,
+      "bufferBytes": 0,
+      "imageBytes": 0,
+      "fallbackBytes": 0,
+      "chunkCount": 0,
+      "imageCount": 0,
+      "textureCount": 0,
+      "atlasBytes": 7932544
+    }
+  },
+  "cold": {
+    "retained": {
+      "firstDrawSubmissionMs": 0.4,
+      "before": {
+        "hits": 11,
+        "misses": 11,
+        "evictions": 0,
+        "fallbacks": 0,
+        "drawCalls": 22,
+        "rasterizedDrawCalls": 212,
+        "bytes": 0,
+        "entries": 0
+      },
+      "after": {
+        "hits": 11,
+        "misses": 12,
+        "evictions": 0,
+        "fallbacks": 0,
+        "drawCalls": 23,
+        "rasterizedDrawCalls": 213,
+        "bytes": 2808,
+        "entries": 1
+      },
+      "delta": {
+        "hits": 0,
+        "misses": 1,
+        "evictions": 0,
+        "fallbacks": 0,
+        "drawCalls": 1,
+        "rasterizedDrawCalls": 1,
+        "bytes": 2808,
+        "entries": 1
+      }
+    },
+    "gpu": {
+      "firstDrawSubmissionMs": 0.1,
+      "before": {
+        "frames": 2,
+        "drawCalls": 4,
+        "textDrawCalls": 2,
+        "imageDrawCalls": 0,
+        "rectangleDrawCalls": 2,
+        "glyphsDrawn": 620,
+        "bufferUploads": 1,
+        "bufferUploadBytes": 3720,
+        "imageUploads": 0,
+        "atlasUploads": 2,
+        "fallbackRasterizations": 0,
+        "contextLosses": 0,
+        "frameDrawCalls": 2,
+        "frameBufferUploads": 0,
+        "frameGlyphsDrawn": 310,
+        "fontReady": true,
+        "lost": false,
+        "frame": 2,
+        "bufferBytes": 0,
+        "imageBytes": 0,
+        "fallbackBytes": 0,
+        "chunkCount": 0,
+        "imageCount": 0,
+        "textureCount": 0,
+        "atlasBytes": 7932544
+      },
+      "after": {
+        "frames": 3,
+        "drawCalls": 6,
+        "textDrawCalls": 3,
+        "imageDrawCalls": 0,
+        "rectangleDrawCalls": 3,
+        "glyphsDrawn": 621,
+        "bufferUploads": 2,
+        "bufferUploadBytes": 3732,
+        "imageUploads": 0,
+        "atlasUploads": 2,
+        "fallbackRasterizations": 0,
+        "contextLosses": 0,
+        "frameDrawCalls": 2,
+        "frameBufferUploads": 1,
+        "frameGlyphsDrawn": 1,
+        "fontReady": true,
+        "lost": false,
+        "frame": 3,
+        "bufferBytes": 12,
+        "imageBytes": 0,
+        "fallbackBytes": 0,
+        "chunkCount": 1,
+        "imageCount": 0,
+        "textureCount": 0,
+        "atlasBytes": 7932544
+      },
+      "delta": {
+        "frames": 1,
+        "drawCalls": 2,
+        "textDrawCalls": 1,
+        "imageDrawCalls": 0,
+        "rectangleDrawCalls": 1,
+        "glyphsDrawn": 1,
+        "bufferUploads": 1,
+        "bufferUploadBytes": 12,
+        "imageUploads": 0,
+        "atlasUploads": 0,
+        "fallbackRasterizations": 0,
+        "contextLosses": 0,
+        "frameDrawCalls": 0,
+        "frameBufferUploads": 1,
+        "frameGlyphsDrawn": -309,
+        "frame": 1,
+        "bufferBytes": 12,
+        "imageBytes": 0,
+        "fallbackBytes": 0,
+        "chunkCount": 1,
+        "imageCount": 0,
+        "textureCount": 0,
+        "atlasBytes": 0
+      }
+    }
+  },
+  "gpuStats": {
+    "frames": 36,
+    "drawCalls": 72,
+    "textDrawCalls": 36,
+    "imageDrawCalls": 0,
+    "rectangleDrawCalls": 36,
+    "glyphsDrawn": 1689,
+    "bufferUploads": 4,
+    "bufferUploadBytes": 7896,
+    "imageUploads": 0,
+    "atlasUploads": 2,
+    "fallbackRasterizations": 0,
+    "contextLosses": 0,
+    "frameDrawCalls": 2,
+    "frameBufferUploads": 0,
+    "frameGlyphsDrawn": 346,
+    "fontReady": true,
+    "lost": false,
+    "frame": 36,
+    "bufferBytes": 4152,
+    "imageBytes": 0,
+    "fallbackBytes": 0,
+    "chunkCount": 1,
+    "imageCount": 0,
+    "textureCount": 0,
+    "atlasBytes": 7932544
+  },
+  "rendererEvents": [
+    {
+      "name": "ready",
+      "atMs": 49.2
+    }
+  ],
+  "currentRasterCache": {
+    "hits": 12,
+    "misses": 48,
+    "evictions": 0,
+    "fallbacks": 0,
+    "drawCalls": 60,
+    "rasterizedDrawCalls": 909,
+    "bytes": 1546672,
+    "entries": 37
+  },
+  "visibility": {
+    "hidden": false,
+    "visibilityState": "visible",
+    "canvases": {
+      "retained": {
+        "mounted": true,
+        "fullyInViewport": true,
+        "cssWidth": 400,
+        "cssHeight": 255.9966278076172,
+        "backingWidth": 800,
+        "backingHeight": 512
+      },
+      "gpu": {
+        "mounted": true,
+        "fullyInViewport": true,
+        "cssWidth": 400,
+        "cssHeight": 255.9966278076172,
+        "backingWidth": 800,
+        "backingHeight": 512
+      }
+    }
+  },
+  "limitations": [
+    "CPU submission and rAF pacing are not GPU execution or confirmed presentation times.",
+    "Both mounted panels must remain foreground and fully visible.",
+    "Native PNGs and coarse pixel probes do not replace visual small-text sharpness inspection.",
+    "GPU memory counters cover retained resources, not complete driver or browser allocations."
+  ],
+  "scaleAndPrecision": {
+    "checks": [
+      {
+        "scale": 0.01,
+        "deviceEm": 0.32,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 0,
+          "checksum": "63289dc5"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 0,
+          "checksum": "63289dc5"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 0.03,
+        "deviceEm": 0.96,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 0,
+          "checksum": "63289dc5"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 0,
+          "checksum": "63289dc5"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 0.1,
+        "deviceEm": 3.2,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 7,
+          "checksum": "9941f1ed"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 7,
+          "checksum": "9941f1ed"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 0.18,
+        "deviceEm": 5.76,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 12,
+          "checksum": "f3de7de7"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 12,
+          "checksum": "f3de7de7"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 0.25,
+        "deviceEm": 8,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 29,
+          "checksum": "28b794c1"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 29,
+          "checksum": "28b794c1"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 0.5,
+        "deviceEm": 16,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 58,
+          "checksum": "198f60cc"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 58,
+          "checksum": "198f60cc"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 1,
+        "deviceEm": 32,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 222,
+          "checksum": "d640b011"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 222,
+          "checksum": "d640b011"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 1.25,
+        "deviceEm": 40,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 313,
+          "checksum": "8b50c9cf"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 313,
+          "checksum": "8b50c9cf"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 1.75,
+        "deviceEm": 56,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 587,
+          "checksum": "135be7f7"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 587,
+          "checksum": "135be7f7"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 2,
+        "deviceEm": 64,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 752,
+          "checksum": "d0c2081d"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 752,
+          "checksum": "d0c2081d"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 4,
+        "deviceEm": 128,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 2703,
+          "checksum": "52f57bef"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 2703,
+          "checksum": "52f57bef"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 10,
+        "deviceEm": 320,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 16388,
+          "checksum": "52280b77"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 16388,
+          "checksum": "52280b77"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 25,
+        "deviceEm": 800,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 90977,
+          "checksum": "5d19ffb0"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 90977,
+          "checksum": "5d19ffb0"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      },
+      {
+        "scale": 100,
+        "deviceEm": 3200,
+        "originZero": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 209446,
+          "checksum": "d6ca54a3"
+        },
+        "originTenMillion": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 209446,
+          "checksum": "d6ca54a3"
+        },
+        "identicalPixels": true,
+        "cameraBufferUploads": 0,
+        "objectMoveBufferUploads": 0
+      }
+    ],
+    "layoutPreparationDelta": {
+      "frames": 1,
+      "drawCalls": 2,
+      "textDrawCalls": 1,
+      "imageDrawCalls": 0,
+      "rectangleDrawCalls": 1,
+      "glyphsDrawn": 1,
+      "bufferUploads": 1,
+      "bufferUploadBytes": 12,
+      "imageUploads": 0,
+      "atlasUploads": 0,
+      "fallbackRasterizations": 0,
+      "contextLosses": 0,
+      "frameDrawCalls": 0,
+      "frameBufferUploads": 1,
+      "frameGlyphsDrawn": 0,
+      "frame": 1,
+      "bufferBytes": 0,
+      "imageBytes": 0,
+      "fallbackBytes": 0,
+      "chunkCount": 0,
+      "imageCount": 0,
+      "textureCount": 0,
+      "atlasBytes": 0
+    },
+    "before": {
+      "frames": 5,
+      "drawCalls": 10,
+      "textDrawCalls": 5,
+      "imageDrawCalls": 0,
+      "rectangleDrawCalls": 5,
+      "glyphsDrawn": 623,
+      "bufferUploads": 3,
+      "bufferUploadBytes": 3744,
+      "imageUploads": 0,
+      "atlasUploads": 2,
+      "fallbackRasterizations": 0,
+      "contextLosses": 0,
+      "frameDrawCalls": 2,
+      "frameBufferUploads": 1,
+      "frameGlyphsDrawn": 1,
+      "fontReady": true,
+      "lost": false,
+      "frame": 5,
+      "bufferBytes": 12,
+      "imageBytes": 0,
+      "fallbackBytes": 0,
+      "chunkCount": 1,
+      "imageCount": 0,
+      "textureCount": 0,
+      "atlasBytes": 7932544
+    },
+    "after": {
+      "frames": 33,
+      "drawCalls": 66,
+      "textDrawCalls": 33,
+      "imageDrawCalls": 0,
+      "rectangleDrawCalls": 33,
+      "glyphsDrawn": 651,
+      "bufferUploads": 3,
+      "bufferUploadBytes": 3744,
+      "imageUploads": 0,
+      "atlasUploads": 2,
+      "fallbackRasterizations": 0,
+      "contextLosses": 0,
+      "frameDrawCalls": 2,
+      "frameBufferUploads": 0,
+      "frameGlyphsDrawn": 1,
+      "fontReady": true,
+      "lost": false,
+      "frame": 33,
+      "bufferBytes": 12,
+      "imageBytes": 0,
+      "fallbackBytes": 0,
+      "chunkCount": 1,
+      "imageCount": 0,
+      "textureCount": 0,
+      "atlasBytes": 7932544
+    },
+    "allPixelsIdentical": true,
+    "noGeometryUploads": true,
+    "fractionalTargetCss": [
+      200.375,
+      128.375
+    ],
+    "minimumScaleLegibilityRequired": false
+  },
+  "qualitySamples": [
+    {
+      "deviceEm": 16,
+      "scale": 0.5,
+      "pixelProbes": {
+        "retained": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 25488,
+          "checksum": "1a0747dc"
+        },
+        "gpu": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 17650,
+          "checksum": "cfd39c7c"
+        }
+      }
+    },
+    {
+      "deviceEm": 20,
+      "scale": 0.625,
+      "pixelProbes": {
+        "retained": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 33748,
+          "checksum": "35cecce7"
+        },
+        "gpu": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 24595,
+          "checksum": "9b9c74da"
+        }
+      }
+    },
+    {
+      "deviceEm": 28,
+      "scale": 0.875,
+      "pixelProbes": {
+        "retained": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 54444,
+          "checksum": "9a3c0a6f"
+        },
+        "gpu": {
+          "width": 800,
+          "height": 512,
+          "inkPixels": 39549,
+          "checksum": "789e5c0d"
+        }
+      }
+    }
+  ]
+}

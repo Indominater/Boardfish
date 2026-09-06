@@ -104,5 +104,8 @@ test('canvas text uses the same non-size font feature defaults', () => {
   const fillTextFiles = listFiles('src/js', (file) => file.endsWith('.js'))
     .filter((file) => readSource(file).includes('fillText('))
     .sort();
-  assert.deepEqual(fillTextFiles, ['src/js/text_layout.js', 'src/js/text_raster.js']);
+  assert.deepEqual(fillTextFiles, ['src/js/gpu_renderer.js', 'src/js/text_layout.js', 'src/js/text_raster.js']);
+  const gpuRenderer = readSource('src/js/gpu_renderer.js');
+  assert.match(gpuRenderer, /fontKerning:'none'/);
+  assert.match(gpuRenderer, /configureMeasurement\(context\)/);
 });

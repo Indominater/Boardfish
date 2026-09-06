@@ -466,6 +466,7 @@ function cloneTextObjectRuntimeCaches(source, target, preserveDrawPlans = true) 
 }
 
 const clearTextLayoutCaches = (options = {}) => {
+  if (typeof ctx !== 'undefined') ctx?.clearTextCache?.();
   clearTextRasterCache();
   _prefixCache.clear();
   if (options.measurements) clearMeasuredTextWidthCache();

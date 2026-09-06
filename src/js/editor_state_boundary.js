@@ -113,6 +113,7 @@
     objects = [];
     objectsMap.clear();
     clearTextLayoutCaches();
+    if (typeof ctx !== 'undefined') ctx?.resetResources?.();
     resetObjectCounters();
   }
 

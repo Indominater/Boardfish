@@ -1450,16 +1450,12 @@ function enterEdit(id, {
 	      replacement = textEditBeforeInputReplacement(oldValue, inputState, event);
 	      synthesizedStaleReplacement = !!replacement;
 	    }
-	    if (proxy._boardfishDomValueStale && replacement) {
-	      const replacementStart = Math.max(0, Math.min(replacement.start ?? 0, oldValue.length));
-	      const replacementEnd = Math.max(replacementStart, Math.min(replacement.end ?? replacementStart, oldValue.length));
+	    if (synthesizedStaleReplacement) {
 	      nextRawValue = normalizeTextContent(
-	        oldValue.slice(0, replacementStart) +
-	        String(replacement.insertedText ?? '') +
-	        oldValue.slice(replacementEnd)
+	        oldValue.slice(0, replacement.start) + replacement.insertedText + oldValue.slice(replacement.end)
 	      );
 	    } else {
-	      nextRawValue = proxy.value;
+	      nextRawValue = proxy._boardfishDomValueStale && replacement ? textEditProxyValue(proxy) : proxy.value;
 	      replacement = replacement || textEditInputReplacement(oldValue, nextRawValue, inputState, inputType);
 	    }
 	    logInputStep('replacement-ready', () => ({

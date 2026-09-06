@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boardfish production GPU text benchmark</title>
+  <style>
+    @font-face { font-family: 'Geist Sans'; src: url('../fonts/Geist.woff2') format('woff2'); font-weight: 300 700; font-display: block; }
+    :root { color-scheme: dark; font: 14px 'Geist Sans', system-ui, sans-serif; background: #17171b; color: #ededf2; }
+    body { max-width: 1000px; margin: auto; padding: 20px; }
+    h1 { font-size: 23px; margin: 0 0 10px; } p, li { line-height: 1.5; color: #c5c5ce; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px; background: #25252b; border-radius: 6px; }
+    label { display: inline-flex; gap: 7px; align-items: center; }
+    select, button { font: inherit; color: inherit; border: 1px solid #555561; border-radius: 4px; background: #303038; padding: 7px; }
+    button { cursor: pointer; } button:disabled { opacity: .5; cursor: progress; }
+    #status { min-height: 22px; white-space: pre-wrap; }
+    #panels { display: grid; grid-template-columns: repeat(2, 400px); gap: 16px; width: max-content; }
+    .scroll { overflow-x: auto; } figure { margin: 0; } figcaption { margin: 0 0 8px; font-weight: 600; }
+    canvas { display: block; width: 400px; height: 256px; outline: 1px solid #484850; }
+    a { display: inline-block; margin-top: 8px; color: #b7b7ff; }
+    pre { background: #222228; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+    details { margin: 14px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+    th, td { padding: 9px 7px; border-bottom: 1px solid #44444d; text-align: right; } th:first-child, td:first-child { text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Boardfish production GPU text benchmark</h1>
+  <p>The production renderer and bundled font atlas run against the current retained Canvas2D line renderer, using identical Boardfish layouts. Both mounted canvases stay at 400 × 256 CSS pixels.</p>
+  <div class="controls">
+    <label>DPR <select id="dpr"><option value="1" selected>1</option><option value="2">2</option></select></label>
+    <label>Zoom <select id="scale"><option value="0.01">1%</option><option value="0.1">10%</option><option value="0.25">25%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="2">200%</option><option value="4">400%</option><option value="10">1000%</option><option value="100">10000%</option></select></label>
+    <button id="reading" type="button" disabled>Reading comparison</button>
+    <button id="dense" type="button" disabled>Dense comparison</button>
+    <button id="zoom" type="button" disabled>Continuous zoom</button>
+    <button id="mixed" type="button" disabled>Mixed image order</button>
+    <button id="lifecycle" type="button" disabled>Lifecycle checks</button>
+    <button id="context" type="button" disabled>Context restoration</button>
+    <button id="precision" type="button" disabled>Scale and precision checks</button>
+  </div>
+  <p id="status" role="status">Loading font and production renderer…</p>
+  <div class="scroll"><div id="panels">
+    <figure><figcaption>Current retained Canvas2D lines</figcaption><canvas id="retained" aria-label="Current retained text"></canvas><a id="retained-png" download>Native-resolution PNG</a></figure>
+    <figure><figcaption>Production retained GPU glyphs</figcaption><canvas id="gpu" aria-label="Production GPU text"></canvas><a id="gpu-png" download>Native-resolution PNG</a></figure>
+  </div></div>
+  <div id="quality-samples"></div>
+  <div id="summary"></div>
+  <details><summary>Method and limits</summary><ul>
+    <li>Reading and dense comparisons rotate four blocks, alternating which path runs first. Each path receives 90 measured frames and 12 warmup frames. Only the measured panel redraws; the other panel stays mounted and static. Content and selected rows remain identical across paths and frames.</li>
+    <li>Continuous zoom visits 180 unique scales from 0.18 to 4.0 on each path, with fractional pan. It immediately redraws every frame at that scale. Its first-visit frames are measured without scale warmup. Layout selection is fixed at the largest world viewport so neither path adds horizontal culling or motion-dependent quality.</li>
+    <li>CPU submission and requestAnimationFrame intervals are distinct metrics. No GPU finish, fence, readback, screenshot, or timer query occurs inside timed frames. Frame intervals include browser scheduling; they are not GPU execution or confirmed presentation times.</li>
+    <li>Cold first-draw preparation, GPU resource statistics before/after runs, and numeric counter deltas are reported separately. Atlas download/decode/upload timing is retained from renderer initialization. Native PNGs and pixel probes run only outside timing.</li>
+    <li>Lifecycle checks exercise content replacement, wrapping width, movement, removal, reused IDs, and repeated static frames. Context restoration is an explicit separate action. Pixel checks verify nonblank text and known opaque image order; human inspection of the PNGs is still required for small-text quality.</li>
+    <li>Scale and precision checks visit 1% through 10000% immediately, with a glyph stem centered at extreme zoom. Moving both object coordinates to ten million world units and compensating the camera must preserve the same final pixels without geometry uploads. Native reading samples at 16, 20, and 28 device pixels per em are exported separately. The 1% sample has no legibility requirement.</li>
+    <li>Run with both panels fully visible in a foreground tab. DPR is an explicit backing-store setting; JSON also records the browser DPR. Use the native PNGs to inspect pixels without browser scaling.</li>
+  </ul></details>
+  <details open><summary>Results JSON</summary><pre id="json">No run yet.</pre></details>
+  <script>
+    var objects = [];
+    var editingId = null;
+    var TextSelDebug = { _logHit: function () {} };
+    function scheduleRender() {}
+    function markDirty() {}
+    function invalidateOffscreen() {}
+  </script>
+  <script src="../js/text_raster.js"></script>
+  <script src="../js/text_layout.js"></script>
+  <script src="../fonts/geist-ascii-msdf.js"></script>
+  <script src="../js/gpu_renderer.js"></script>
+  <script src="gpu-text-benchmark.js"></script>
+</body>
+</html>

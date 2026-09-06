@@ -381,6 +381,11 @@
 
   function createBoardRenderer(deps) {
     const getTextLayoutForDraw = deps.getTextLayoutForViewport || deps.getTextLayout;
+    const gpuTextOptions = {
+      fontSize: deps.fontSize || 16,
+      padding: deps.textPad ?? 16,
+      lineHeight: deps.lineHeight || 24,
+    };
 
     function setWorldCanvasTransform(context, dpr = deps.dpr()) {
       const scale = deps.zoom() * dpr;
@@ -409,6 +414,7 @@
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         if (obj.type === 'text') {
           const layout = getTextLayoutForDraw(obj, viewportRect);
+          if (context.drawTextLayout?.(layout, obj, gpuTextOptions)) return;
           for (const line of layout) deps.drawTextLineRange(context, line, obj);
           return;
         }
@@ -439,6 +445,17 @@
           counters.textCharCount = (counters.textCharCount || 0) + chars;
           counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
           counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
+        }
+        if (context.drawTextLayout?.(layout, obj, gpuTextOptions)) {
+          if (counters) {
+            const gpuAfter = context.getStats?.();
+            counters.textLines += totalLayoutLines;
+            counters.drawnTextLines += layout.length;
+            counters.culledTextLines += Math.max(0, totalLayoutLines - layout.length);
+            counters.textGpuObjects = (counters.textGpuObjects || 0) + 1;
+            if (gpuAfter) counters.gpu = gpuAfter;
+          }
+          return true;
         }
         let directlyDrawn = false;
         let drawnLineCount = 0;

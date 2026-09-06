@@ -502,7 +502,9 @@
     if (typeof DecompressionStream !== 'function') {
       throw new Error('this browser cannot read compressed .bf entries');
     }
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    const blob = isNativeBlobPart(bytes) ? bytes : new Blob([bytes instanceof Uint8Array ? bytes : await blobToBytes(bytes)]);
+    if (blob.size !== Number(entry.compressedSize)) throw new Error(`truncated Boardfish container entry ${entry.name}`);
+    const stream = blob.stream().pipeThrough(new DecompressionStream('deflate-raw'));
     const reader = stream.getReader();
     const chunks = [];
     let total = 0;
@@ -577,25 +579,13 @@
     return out;
   }
 
-  async function readZipEntry(bytes, entry, options = {}) {
+  async function readZipEntry(input, entry, options = {}) {
     assertZipEntryReadBudget(entry, options.maxBytes, options.tooLargeError);
-    const compressed = compressedEntryBytes(bytes, entry);
+    const compressed = isBlobLike(input)
+      ? await compressedEntryBlob(input, entry)
+      : compressedEntryBytes(input, entry);
     let out;
-    if (entry.method === ZIP_METHOD_STORED) out = compressed;
-    else if (entry.method === ZIP_METHOD_DEFLATED) out = await inflateRaw(compressed, entry, options);
-    else throw new Error(`unsupported .bf compression method ${entry.method} for ${entry.name}`);
-    return validateReadZipEntry(out, entry, options);
-  }
-
-  async function readZipEntryFromBlob(blob, entry, options = {}) {
-    assertZipEntryReadBudget(entry, options.maxBytes, options.tooLargeError);
-    const compressedBlob = await compressedEntryBlob(blob, entry);
-    const compressed = new Uint8Array(await compressedBlob.arrayBuffer());
-    if (compressed.length !== Number(entry.compressedSize)) {
-      throw new Error(`truncated Boardfish container entry ${entry.name}`);
-    }
-    let out;
-    if (entry.method === ZIP_METHOD_STORED) out = compressed;
+    if (entry.method === ZIP_METHOD_STORED) out = compressed instanceof Uint8Array ? compressed : await blobToBytes(compressed);
     else if (entry.method === ZIP_METHOD_DEFLATED) out = await inflateRaw(compressed, entry, options);
     else throw new Error(`unsupported .bf compression method ${entry.method} for ${entry.name}`);
     return validateReadZipEntry(out, entry, options);
@@ -1126,7 +1116,7 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const boardJsonBytes = await (randomAccessBlob ? readZipEntryFromBlob : readZipEntry)(
+    const boardJsonBytes = await readZipEntry(
       randomAccessBlob || containerBytes,
       boardEntry,
       {
@@ -1263,7 +1253,7 @@
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const imageReadStart = collectDiagnostics ? nowMs() : 0;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        bytes = await (randomAccessBlob ? readZipEntryFromBlob : readZipEntry)(
+        bytes = await readZipEntry(
           randomAccessBlob || containerBytes,
           imageEntry,
           {

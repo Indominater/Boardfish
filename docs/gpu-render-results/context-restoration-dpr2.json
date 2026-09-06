@@ -1,0 +1,286 @@
+{
+  "study": "Production retained GPU text vs current retained Canvas2D lines",
+  "createdAt": "2026-09-06T08:50:18.955Z",
+  "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+  "actualDevicePixelRatio": 1.1100000143051147,
+  "config": {
+    "workload": "context",
+    "scale": 1,
+    "dpr": 2,
+    "widthCss": 400,
+    "heightCss": 256,
+    "offsetCss": 0.375
+  },
+  "font": "normal 400 16px 'Geist Sans', system-ui",
+  "baselineOffsetWorld": 16.392000198364258,
+  "preparation": {
+    "layoutAndPlansMs": 1.6,
+    "viewportWorld": {
+      "x1": -16,
+      "y1": -16,
+      "x2": 416,
+      "y2": 272
+    },
+    "totalObjects": 1,
+    "submittedObjects": 1,
+    "submittedLines": 11,
+    "submittedCharacters": 391,
+    "visibilityPolicy": "Fixed whole-object overlap and existing vertical layout rows selected at the largest world viewport; every horizontal character is submitted throughout each run."
+  },
+  "rendererInitialization": {
+    "readinessMs": 49.2,
+    "stats": {
+      "frames": 0,
+      "drawCalls": 0,
+      "textDrawCalls": 0,
+      "imageDrawCalls": 0,
+      "rectangleDrawCalls": 0,
+      "glyphsDrawn": 0,
+      "bufferUploads": 0,
+      "bufferUploadBytes": 0,
+      "imageUploads": 0,
+      "atlasUploads": 2,
+      "fallbackRasterizations": 0,
+      "contextLosses": 0,
+      "frameDrawCalls": 0,
+      "frameBufferUploads": 0,
+      "frameGlyphsDrawn": 0,
+      "fontReady": true,
+      "lost": false,
+      "frame": 0,
+      "bufferBytes": 0,
+      "imageBytes": 0,
+      "fallbackBytes": 0,
+      "chunkCount": 0,
+      "imageCount": 0,
+      "textureCount": 0,
+      "atlasBytes": 7932544
+    }
+  },
+  "cold": {
+    "retained": {
+      "firstDrawSubmissionMs": 2.4,
+      "before": {
+        "hits": 20,
+        "misses": 53,
+        "evictions": 0,
+        "fallbacks": 0,
+        "drawCalls": 73,
+        "rasterizedDrawCalls": 951,
+        "bytes": 0,
+        "entries": 0
+      },
+      "after": {
+        "hits": 20,
+        "misses": 64,
+        "evictions": 0,
+        "fallbacks": 0,
+        "drawCalls": 84,
+        "rasterizedDrawCalls": 1163,
+        "bytes": 755604,
+        "entries": 11
+      },
+      "delta": {
+        "hits": 0,
+        "misses": 11,
+        "evictions": 0,
+        "fallbacks": 0,
+        "drawCalls": 11,
+        "rasterizedDrawCalls": 212,
+        "bytes": 755604,
+        "entries": 11
+      }
+    },
+    "gpu": {
+      "firstDrawSubmissionMs": 0.2,
+      "before": {
+        "frames": 50,
+        "drawCalls": 155,
+        "textDrawCalls": 53,
+        "imageDrawCalls": 52,
+        "rectangleDrawCalls": 50,
+        "glyphsDrawn": 2175,
+        "bufferUploads": 10,
+        "bufferUploadBytes": 10716,
+        "imageUploads": 22,
+        "atlasUploads": 2,
+        "fallbackRasterizations": 9,
+        "contextLosses": 0,
+        "frameDrawCalls": 2,
+        "frameBufferUploads": 0,
+        "frameGlyphsDrawn": 29,
+        "fontReady": true,
+        "lost": false,
+        "frame": 50,
+        "bufferBytes": 0,
+        "imageBytes": 0,
+        "fallbackBytes": 0,
+        "chunkCount": 0,
+        "imageCount": 0,
+        "textureCount": 0,
+        "atlasBytes": 7932544
+      },
+      "after": {
+        "frames": 51,
+        "drawCalls": 157,
+        "textDrawCalls": 54,
+        "imageDrawCalls": 52,
+        "rectangleDrawCalls": 51,
+        "glyphsDrawn": 2485,
+        "bufferUploads": 11,
+        "bufferUploadBytes": 14436,
+        "imageUploads": 22,
+        "atlasUploads": 2,
+        "fallbackRasterizations": 9,
+        "contextLosses": 0,
+        "frameDrawCalls": 2,
+        "frameBufferUploads": 1,
+        "frameGlyphsDrawn": 310,
+        "fontReady": true,
+        "lost": false,
+        "frame": 51,
+        "bufferBytes": 3720,
+        "imageBytes": 0,
+        "fallbackBytes": 0,
+        "chunkCount": 1,
+        "imageCount": 0,
+        "textureCount": 0,
+        "atlasBytes": 7932544
+      },
+      "delta": {
+        "frames": 1,
+        "drawCalls": 2,
+        "textDrawCalls": 1,
+        "imageDrawCalls": 0,
+        "rectangleDrawCalls": 1,
+        "glyphsDrawn": 310,
+        "bufferUploads": 1,
+        "bufferUploadBytes": 3720,
+        "imageUploads": 0,
+        "atlasUploads": 0,
+        "fallbackRasterizations": 0,
+        "contextLosses": 0,
+        "frameDrawCalls": 0,
+        "frameBufferUploads": 1,
+        "frameGlyphsDrawn": 281,
+        "frame": 1,
+        "bufferBytes": 3720,
+        "imageBytes": 0,
+        "fallbackBytes": 0,
+        "chunkCount": 1,
+        "imageCount": 0,
+        "textureCount": 0,
+        "atlasBytes": 0
+      }
+    }
+  },
+  "gpuStats": {
+    "frames": 54,
+    "drawCalls": 163,
+    "textDrawCalls": 57,
+    "imageDrawCalls": 52,
+    "rectangleDrawCalls": 54,
+    "glyphsDrawn": 3415,
+    "bufferUploads": 12,
+    "bufferUploadBytes": 18156,
+    "imageUploads": 22,
+    "atlasUploads": 4,
+    "fallbackRasterizations": 9,
+    "contextLosses": 1,
+    "frameDrawCalls": 2,
+    "frameBufferUploads": 1,
+    "frameGlyphsDrawn": 310,
+    "fontReady": true,
+    "lost": false,
+    "frame": 54,
+    "bufferBytes": 3720,
+    "imageBytes": 0,
+    "fallbackBytes": 0,
+    "chunkCount": 1,
+    "imageCount": 0,
+    "textureCount": 0,
+    "atlasBytes": 7932544
+  },
+  "rendererEvents": [
+    {
+      "name": "ready",
+      "atMs": 49.2
+    },
+    {
+      "name": "lost",
+      "atMs": 217860.6
+    },
+    {
+      "name": "ready",
+      "atMs": 217899.6
+    }
+  ],
+  "currentRasterCache": {
+    "hits": 31,
+    "misses": 64,
+    "evictions": 0,
+    "fallbacks": 0,
+    "drawCalls": 95,
+    "rasterizedDrawCalls": 1163,
+    "bytes": 755604,
+    "entries": 11
+  },
+  "visibility": {
+    "hidden": false,
+    "visibilityState": "visible",
+    "canvases": {
+      "retained": {
+        "mounted": true,
+        "fullyInViewport": true,
+        "cssWidth": 400,
+        "cssHeight": 255.9966278076172,
+        "backingWidth": 800,
+        "backingHeight": 512
+      },
+      "gpu": {
+        "mounted": true,
+        "fullyInViewport": true,
+        "cssWidth": 400,
+        "cssHeight": 255.9966278076172,
+        "backingWidth": 800,
+        "backingHeight": 512
+      }
+    }
+  },
+  "limitations": [
+    "CPU submission and rAF pacing are not GPU execution or confirmed presentation times.",
+    "Both mounted panels must remain foreground and fully visible.",
+    "Native PNGs and coarse pixel probes do not replace visual small-text sharpness inspection.",
+    "GPU memory counters cover retained resources, not complete driver or browser allocations."
+  ],
+  "contextRestoration": {
+    "before": {
+      "width": 800,
+      "height": 512,
+      "inkPixels": 42232,
+      "checksum": "7f31cc65"
+    },
+    "after": {
+      "width": 800,
+      "height": 512,
+      "inkPixels": 42232,
+      "checksum": "7f31cc65"
+    },
+    "restoredTextVisible": true,
+    "pixelsIdentical": true
+  },
+  "pixelProbes": {
+    "retained": {
+      "width": 800,
+      "height": 512,
+      "inkPixels": 61394,
+      "checksum": "7a843b8"
+    },
+    "gpu": {
+      "width": 800,
+      "height": 512,
+      "inkPixels": 42232,
+      "checksum": "7f31cc65"
+    }
+  }
+}

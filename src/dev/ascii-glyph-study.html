@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boardfish ASCII glyph study</title>
+  <style>
+    @font-face { font-family: 'Geist Sans'; src: url('../fonts/Geist.woff2') format('woff2'); font-weight: 300 700; font-display: block; }
+    :root { color-scheme: dark; font: 14px 'Geist Sans', system-ui, sans-serif; background: #17171b; color: #ededf2; }
+    body { max-width: 1280px; margin: auto; padding: 20px; }
+    h1 { font-size: 23px; margin: 0 0 10px; } p, li { line-height: 1.5; color: #c5c5ce; }
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 14px; background: #25252b; border-radius: 6px; }
+    label { display: inline-flex; gap: 7px; align-items: center; }
+    select, button, input { font: inherit; color: inherit; border: 1px solid #555561; border-radius: 4px; background: #303038; padding: 7px; }
+    input { width: 76px; } button { cursor: pointer; } button:disabled { opacity: .5; cursor: progress; }
+    #run { background: #44449a; } #status { min-height: 22px; white-space: pre-wrap; }
+    #panels { display: grid; grid-template-columns: repeat(3, 400px); gap: 12px; width: max-content; }
+    .scroll { overflow-x: auto; } figure { margin: 0; } figcaption { margin: 0 0 8px; font-weight: 600; }
+    canvas { display: block; width: 400px; height: 256px; background: #1e1e24; outline: 1px solid #484850; }
+    .description { min-height: 42px; font-size: 12px; margin-top: 8px; }
+    pre { background: #222228; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+    details { margin: 14px 0; } code { font-size: 12px; } a { color: #b7b7ff; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+    th, td { padding: 9px 7px; border-bottom: 1px solid #44444d; text-align: right; } th:first-child, td:first-child { text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Boardfish ASCII glyph study</h1>
+  <p>Isolated diagnostic using the actual Boardfish font, layout, draw plans, and current line raster cache. The GPU prototype retains glyph instances and draws one instanced batch. All three paths submit the same fixed rows, without horizontal culling or delayed painting.</p>
+  <div class="controls">
+    <label>Zoom <select id="scale"><option value="0.25">25%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="2">200%</option></select></label>
+    <label>DPR <select id="dpr"><option value="1" selected>1</option><option value="2">2</option></select></label>
+    <label>Workload <select id="workload"><option value="reading" selected>ASCII reading sample</option><option value="dense">24 large textboxes</option></select></label>
+    <label>Origin (CSS px) <input id="offset" type="number" value="0.375" min="-8" max="8" step="0.125"></label>
+    <button id="preview" type="button" disabled>Update preview</button>
+    <button id="run" type="button" disabled>Run comparison</button>
+  </div>
+  <p id="status" role="status">Loading Geist and initializing the study…</p>
+  <div class="scroll"><div id="panels">
+    <figure><figcaption>Direct Canvas2D plan</figcaption><canvas id="direct" aria-label="Direct text"></canvas><p class="description">Actual prepared fillText runs at exact glyph positions.</p><a id="direct-png" download>Native-resolution PNG</a></figure>
+    <figure><figcaption>Current line rasters</figcaption><canvas id="retained" aria-label="Current retained text"></canvas><p class="description">Actual Boardfish cached line bitmaps and smoothing.</p><a id="retained-png" download>Native-resolution PNG</a></figure>
+    <figure><figcaption>GPU ASCII coverage atlas</figcaption><canvas id="gpu" aria-label="GPU glyph text"></canvas><p class="description">16 phase variants per glyph, device-aligned quads, NEAREST samples.</p><a id="gpu-png" download>Native-resolution PNG</a></figure>
+  </div></div>
+  <p>Canvases stay at 400 × 256 CSS pixels; no CSS rescaling is applied. DPR is an explicit test setting, and the JSON records the actual browser DPR. Compare at matching DPR for a physical-pixel sharpness judgment. PNG links export backing-store pixels from static previews, outside timed frames.</p>
+  <div id="summary"></div>
+  <details open><summary>Method and limitations</summary><ul>
+    <li>Three rotated rounds use direct → retained → GPU, GPU → direct → retained, and retained → GPU → direct. Each block has six warmup frames and 30 measured frames. The same repeating fractional pan sequence is used in every block. Only the active path changes during a block; the other mounted canvases remain static.</li>
+    <li>CPU draw submission time excludes preparation. The interval to the next requestAnimationFrame includes browser scheduling and rendering pressure, and is not a GPU timer or confirmed presentation timestamp. No pixel readback, bitmap transfer, GPU finish, or fence occurs in timed frames.</li>
+    <li>Cold atlas generation, upload submission, upload-plus-finish, instance preparation, and current raster preparation are reported separately. The cold GPU finish is outside frame measurements; it drains prior commands on that context. Memory reports resource dimensions, not complete browser or driver allocation.</li>
+    <li>The atlas uses Canvas2D white glyph alpha at exact requested density, with 4 × 4 quarter-pixel phase variants. Glyph baselines are rounded independently to the nearest quarter of a device pixel in the shader. This changes positions by up to 0.125 device pixel per axis. It is grayscale coverage, not ClearType; no gamma correction or font hinting beyond the browser's source rasterizer is added.</li>
+    <li>This is a reading-size prototype, with immediate atlas rebuilds on density changes. It does not solve arbitrary continuous zoom, large zoom, image/text stacking, context-loss recovery, editing, or a full GPU board compositor. It does not establish a production speedup or a universal sharpness improvement.</li>
+    <li>Objects are selected once by intersection with the viewport plus a 16 CSS-pixel margin for the fixed pan path. Selected objects use the existing vertical layout range, with every character of each selected row retained horizontally. Objects and rows stay identical across every path and frame. GPU instances use individual characters. Existing direct plans sometimes group verified pairs, which may still differ from individual glyph rasterization under some browser/scale conditions.</li>
+    <li>Run in the foreground with all three panels visible. JSON records visibility and viewport intersection; offscreen or background runs are not equivalent. There is no automated pixel-error or sharpness score.</li>
+  </ul></details>
+  <details open><summary>Results JSON</summary><pre id="json">No run yet.</pre></details>
+  <script>
+    var objects = [];
+    var editingId = null;
+    var TextSelDebug = { _logHit: function () {} };
+    function scheduleRender() {}
+    function markDirty() {}
+  </script>
+  <script src="../js/text_raster.js"></script>
+  <script src="../js/text_layout.js"></script>
+  <script src="ascii-glyph-study.js"></script>
+</body>
+</html>
