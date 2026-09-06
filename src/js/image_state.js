@@ -135,6 +135,19 @@ const bitmapSourceFromImageSource = async (source) => {
   }
   if (source && typeof Blob !== 'undefined' && source instanceof Blob) return source;
   if (typeof source === 'string' && source && typeof fetch === 'function') {
+    const isSafeImageUrl = (url) => {
+      if (url.startsWith('data:') || url.startsWith('blob:')) return true;
+      try {
+        const parsed = new URL(url, typeof location !== 'undefined' ? location.href : undefined);
+        const sameOrigin = typeof location === 'undefined' || parsed.origin === location.origin;
+        return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && sameOrigin;
+      } catch {
+        return false;
+      }
+    };
+    if (!isSafeImageUrl(source)) {
+      throw new Error('image fetch blocked: unsupported or unsafe URL');
+    }
     const response = await fetch(source);
     if (!response.ok && !source.startsWith('data:') && !source.startsWith('blob:')) {
       throw new Error(`image fetch failed: ${response.status}`);
