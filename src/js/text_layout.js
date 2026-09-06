@@ -20,6 +20,23 @@ const TEXT_DRAW_BATCHABLE_ASCII_RE = /^[A-EG-Za-eg-z0-9]$/;
 var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
 var _textDrawBatchingEngineVerified = null;
 var _textDrawBatchingVerifiedFonts = new Set();
+var _textRasterCache = null;
+
+function clearTextRasterCache() {
+  _textRasterCache?.clear();
+}
+
+function beginTextRasterFrame() {
+  if (typeof BoardfishTextRaster === 'undefined') return;
+  _textRasterCache ??= BoardfishTextRaster.createTextRasterCache();
+  _textRasterCache.beginFrame();
+}
+
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
+function getTextRasterCacheStats() {
+  return _textRasterCache?.getStats() || { bytes: 0, entries: 0 };
+}
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function normalizeTextContent(value) {
   const text = String(value ?? '');
@@ -320,6 +337,8 @@ function measureTextGlyphMetricsWithFont(text, font = FONT) {
     width,
     left: Number.isFinite(measuredLeft) ? measuredLeft : 0,
     right: Number.isFinite(measuredRight) ? measuredRight : width,
+    ascent: Number.isFinite(metrics?.actualBoundingBoxAscent) ? metrics.actualBoundingBoxAscent : FONT_SIZE,
+    descent: Number.isFinite(metrics?.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : LINE_H - FONT_SIZE,
     hasInkBounds: hasLeft && hasRight && Number.isFinite(measuredLeft) && Number.isFinite(measuredRight),
   };
   _glyphMetricsCache.set(key, result);
@@ -447,6 +466,7 @@ function cloneTextObjectRuntimeCaches(source, target, preserveDrawPlans = true) 
 }
 
 const clearTextLayoutCaches = (options = {}) => {
+  clearTextRasterCache();
   _prefixCache.clear();
   if (options.measurements) clearMeasuredTextWidthCache();
   if (options.objectLayout !== false) {
@@ -1700,6 +1720,9 @@ function prepareTextLineForDraw(line) {
   const text = String(line.text ?? '');
   if (!line._textDrawPlanCache) {
     line._textDrawPlanCache = createTextDrawPlan(line, text, 0, text.length);
+    // ASCII uses retained pixels. Existing boards can still display other scripts
+    // through the original direct path without modifying their stored content.
+    line._textDrawPlanCache.rasterEligible = /^[\x20-\x7e\t]*$/.test(text);
   }
   return line._textDrawPlanCache;
 }
@@ -1713,6 +1736,23 @@ function prepareTextLayoutForDraw(layout) {
     prepared++;
   }
   return prepared;
+}
+
+function textDrawPlanRasterBounds(plan, font) {
+  if (plan.rasterBounds?.font === font) return plan.rasterBounds.bounds;
+  let left = Infinity, right = -Infinity, ascent = 0, descent = 0;
+  for (const draw of plan) {
+    const metrics = measureTextGlyphMetricsWithFont(draw.text, font);
+    draw.inkLeft = draw.x - metrics.left;
+    draw.inkRight = draw.x + metrics.right;
+    left = Math.min(left, draw.inkLeft);
+    right = Math.max(right, draw.inkRight);
+    ascent = Math.max(ascent, metrics.ascent);
+    descent = Math.max(descent, metrics.descent);
+  }
+  const bounds = { left, right, ascent, descent };
+  plan.rasterBounds = { font, bounds };
+  return bounds;
 }
 
 const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
@@ -1732,12 +1772,30 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
       : createTextDrawPlan(line, text, start, end);
   }
   const baseX = lineBaseX(obj);
-  for (const draw of plan) {
-    context.fillText(draw.text, baseX + draw.x, line.textY);
+  let raster = null;
+  if (cacheable && plan.length && plan.rasterEligible &&
+      typeof BoardfishTextRaster !== 'undefined' &&
+      typeof context.getTransform === 'function' && typeof context.drawImage === 'function') {
+    _textRasterCache ??= BoardfishTextRaster.createTextRasterCache();
+    raster = _textRasterCache.draw(context, plan, baseX, line.textY, textDrawPlanRasterBounds(plan, context.font));
+  }
+  if (!raster) {
+    for (const draw of plan) {
+      context.fillText(draw.text, baseX + draw.x, line.textY);
+    }
   }
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') return null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  return options.collectStats === false ? null : cloneTextDrawStats(plan.stats, cacheHit);
+  if (options.collectStats === false) return null;
+  const stats = cloneTextDrawStats(plan.stats, cacheHit);
+  if (raster) {
+    stats.drawCalls = raster.drawCalls;
+    stats.rasterDrawCalls = raster.drawCalls;
+    stats.rasterCacheHits = raster.cacheHit ? 1 : 0;
+    stats.rasterCacheMisses = raster.cacheHit ? 0 : 1;
+    stats.rasterizedDrawCalls = raster.rasterizedDrawCalls;
+  }
+  return stats;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 

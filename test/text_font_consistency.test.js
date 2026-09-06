@@ -104,5 +104,5 @@ test('canvas text uses the same non-size font feature defaults', () => {
   const fillTextFiles = listFiles('src/js', (file) => file.endsWith('.js'))
     .filter((file) => readSource(file).includes('fillText('))
     .sort();
-  assert.deepEqual(fillTextFiles, ['src/js/text_layout.js']);
+  assert.deepEqual(fillTextFiles, ['src/js/text_layout.js', 'src/js/text_raster.js']);
 });

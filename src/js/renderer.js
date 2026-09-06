@@ -70,6 +70,10 @@
       textSkippedSpaces: 0,
       textPlanCacheHits: 0,
       textPlanCacheMisses: 0,
+      textRasterCacheHits: 0,
+      textRasterCacheMisses: 0,
+      textRasterizedDrawCalls: 0,
+      textRasterDrawCalls: 0,
       textLineDrawMs: 0,
       maxTextLineDrawMs: 0,
       slowTextLineDrawCount: 0,
@@ -219,6 +223,10 @@
     add('textSkippedSpaces', 'skippedSpaces');
     add('textPlanCacheHits', 'planCacheHits');
     add('textPlanCacheMisses', 'planCacheMisses');
+    add('textRasterCacheHits', 'rasterCacheHits');
+    add('textRasterCacheMisses', 'rasterCacheMisses');
+    add('textRasterizedDrawCalls', 'rasterizedDrawCalls');
+    add('textRasterDrawCalls', 'rasterDrawCalls');
     counters.maxTextDrawUnitsPerLine = Math.max(
       counters.maxTextDrawUnitsPerLine || 0,
       Number(stats.drawUnits) || 0,
@@ -260,6 +268,10 @@
       skippedTabs: Number(stats?.skippedTabs) || 0,
       planCacheHits: Number(stats?.planCacheHits) || 0,
       planCacheMisses: Number(stats?.planCacheMisses) || 0,
+      rasterCacheHits: Number(stats?.rasterCacheHits) || 0,
+      rasterCacheMisses: Number(stats?.rasterCacheMisses) || 0,
+      rasterizedDrawCalls: Number(stats?.rasterizedDrawCalls) || 0,
+      rasterDrawCalls: Number(stats?.rasterDrawCalls) || 0,
       y: Number.isFinite(Number(line?.y)) ? roundDebugMs(Number(line.y)) : '',
       textY: Number.isFinite(Number(line?.textY)) ? roundDebugMs(Number(line.textY)) : '',
       lineHeightDevicePx: roundDebugMs((Number(deps?.lineHeight) || 0) * deviceScale),
@@ -309,6 +321,10 @@
       row.textSkippedSpaces = drawCounterValue(counters, 'textSkippedSpaces') - before.textSkippedSpaces;
       row.textPlanCacheHits = drawCounterValue(counters, 'textPlanCacheHits') - before.textPlanCacheHits;
       row.textPlanCacheMisses = drawCounterValue(counters, 'textPlanCacheMisses') - before.textPlanCacheMisses;
+      row.textRasterCacheHits = drawCounterValue(counters, 'textRasterCacheHits') - before.textRasterCacheHits;
+      row.textRasterCacheMisses = drawCounterValue(counters, 'textRasterCacheMisses') - before.textRasterCacheMisses;
+      row.textRasterizedDrawCalls = drawCounterValue(counters, 'textRasterizedDrawCalls') - before.textRasterizedDrawCalls;
+      row.textRasterDrawCalls = drawCounterValue(counters, 'textRasterDrawCalls') - before.textRasterDrawCalls;
       row.textLineDrawMs = roundDebugMs(drawCounterValue(counters, 'textLineDrawMs') - before.textLineDrawMs);
       row.slowTextLineDrawCount = drawCounterValue(counters, 'slowTextLineDrawCount') - before.slowTextLineDrawCount;
       row.textDirectDraws = drawCounterValue(counters, 'textDirectDraws') - before.textDirectDraws;
@@ -424,7 +440,7 @@
           counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
           counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
         }
-        if (counters) counters.textDirectDraws = (counters.textDirectDraws || 0) + 1;
+        let directlyDrawn = false;
         let drawnLineCount = 0;
         let layoutLineIndex = -1;
         for (const line of layout) {
@@ -439,12 +455,16 @@
             line.text?.length ?? 0,
             counters ? TEXT_DRAW_STATS_ENABLED : TEXT_DRAW_STATS_DISABLED,
           );
-          if (counters && drawStats) addTextDrawStats(counters, drawStats);
+          if (counters && drawStats) {
+            addTextDrawStats(counters, drawStats);
+            directlyDrawn ||= (Number(drawStats.drawCalls) || 0) > (Number(drawStats.rasterDrawCalls) || 0);
+          }
           if (counters && typeof performance !== 'undefined') {
             recordTextLineDraw(counters, obj, line, layoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
           }
         }
         if (counters) {
+          if (directlyDrawn) counters.textDirectDraws = (counters.textDirectDraws || 0) + 1;
           const culledLineCount = Math.max(0, totalLayoutLines - drawnLineCount);
           counters.textLines = (counters.textLines || 0) + totalLayoutLines;
           counters.drawnTextLines = (counters.drawnTextLines || 0) + drawnLineCount;
@@ -575,6 +595,10 @@
           textSkippedSpaces: drawCounterValue(counters, 'textSkippedSpaces'),
           textPlanCacheHits: drawCounterValue(counters, 'textPlanCacheHits'),
           textPlanCacheMisses: drawCounterValue(counters, 'textPlanCacheMisses'),
+          textRasterCacheHits: drawCounterValue(counters, 'textRasterCacheHits'),
+          textRasterCacheMisses: drawCounterValue(counters, 'textRasterCacheMisses'),
+          textRasterizedDrawCalls: drawCounterValue(counters, 'textRasterizedDrawCalls'),
+          textRasterDrawCalls: drawCounterValue(counters, 'textRasterDrawCalls'),
           textLineDrawMs: drawCounterValue(counters, 'textLineDrawMs'),
           slowTextLineDrawCount: drawCounterValue(counters, 'slowTextLineDrawCount'),
           textDirectDraws: drawCounterValue(counters, 'textDirectDraws'),

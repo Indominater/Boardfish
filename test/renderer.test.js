@@ -44,6 +44,21 @@ test('text renderer uses the viewport-aware layout path', () => {
   assert.deepEqual(drawnLines, ['one', 'two']);
 });
 
+test('text renderer separates retained blits from cold raster and direct draw work', () => {
+  const api = loadRenderer();
+  const counters = api.createDrawCounters();
+  const renderer = api.createBoardRenderer({
+    getTextLayout: () => [{ text: 'retained ASCII' }],
+    drawTextLineRange: () => ({ drawCalls: 1, rasterDrawCalls: 1, rasterCacheMisses: 1, rasterizedDrawCalls: 12 }),
+  });
+  renderer.drawSingleObj({}, { type: 'text', data: { content: 'retained ASCII' } }, counters);
+  assert.equal(counters.textDrawCalls, 1);
+  assert.equal(counters.textRasterDrawCalls, 1);
+  assert.equal(counters.textRasterCacheMisses, 1);
+  assert.equal(counters.textRasterizedDrawCalls, 12);
+  assert.equal(counters.textDirectDraws, 0);
+});
+
 test('image renderer crops untransformed images to the visible viewport', () => {
   const BoardfishRenderer = loadRenderer();
   const drawImageCalls = [];
@@ -606,6 +621,7 @@ test('text renderer keeps direct text rendering', () => {
         chars: line.text.length,
         drawnChars: line.text.length,
         drawUnits: line.text.length,
+        drawCalls: line.text.length,
         runs: 1,
       };
     },

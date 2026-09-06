@@ -471,8 +471,10 @@ function createOpenTextWarmupTarget() {
   if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
   try {
     const canvas = document.createElement('canvas');
-    canvas.width = 2048;
-    canvas.height = 512;
+    // drawTextLineRange retains the actual line surfaces; this canvas only
+    // supplies the draw context and does not need a throwaway page of pixels.
+    canvas.width = 1;
+    canvas.height = 1;
     const context = canvas.getContext?.('2d') || null;
     return context ? { canvas, context } : null;
   } catch (_) {
@@ -485,13 +487,14 @@ function warmOpenTextLineForDraw(target, obj, line) {
   const context = target.context;
   const dpr = typeof window !== 'undefined' ? (Number(window.devicePixelRatio) || 1) : 1;
   const viewZoom = typeof zoom !== 'undefined' ? (Number(zoom) || 1) : 1;
-  const deviceScale = Math.max(0.25, Math.min(4, viewZoom * dpr));
+  const deviceScale = viewZoom * dpr;
   const margin = 12;
   const baseX = (Number(obj?.x) || 0) + TEXT_PAD;
   const textY = Number(line.textY) || 0;
   try {
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.font = FONT;
+    configureTextCanvasContext(context);
     context.textBaseline = 'alphabetic';
     context.fillStyle = canvasTextColor();
     context.setTransform(
@@ -523,6 +526,7 @@ async function hydrateTextDrawCachesForOpen(
   }
 
   const warmupTarget = createOpenTextWarmupTarget();
+  beginTextRasterFrame();
   let textObjects = 0;
   let textLines = 0;
   let warmedLines = 0;

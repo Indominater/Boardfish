@@ -461,6 +461,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
     return;
   }
   // Keep canvas pixels in the same CSS coordinate space as DOM selections.
+  if (typeof beginTextRasterFrame === 'function') beginTextRasterFrame();
   syncBoardCanvasBackingStore();
   const hasOpenPreviewFallback = hasOpenInitialImagePreviews();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

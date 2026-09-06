@@ -102,11 +102,15 @@ function applyAppTheme(theme, {
 } = {}) {
   const nextTheme = normalizeAppTheme(theme);
   const changed = appTheme !== nextTheme;
+  const previousTextColor = _canvasTextColor;
   appTheme = nextTheme;
   document.body.dataset.theme = appTheme;
   if (appThemeMeta) appThemeMeta.setAttribute('content', appTheme === 'dark' ? '#1c1b22' : '#eaeaed');
   _canvasBackgroundColor = appTheme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
   _canvasTextColor = appTheme === 'dark' ? '#fbfbfe' : '#15141A';
+  if (previousTextColor !== _canvasTextColor && typeof clearTextRasterCache === 'function') {
+    clearTextRasterCache();
+  }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
