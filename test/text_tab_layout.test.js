@@ -34,7 +34,6 @@ function loadTextLayout() {
     objects: [],
     editingId: null,
     TextSelDebug: { _logHit() {} },
-    invalidateOffscreen() {},
     scheduleRender() {},
     syncAllTextAutoHeights() {},
   };

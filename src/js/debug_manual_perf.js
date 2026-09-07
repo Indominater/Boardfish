@@ -1396,7 +1396,6 @@ var ManualPerfDebug = (() => {
       maxEditLayoutMs: draw.maxEditLayoutMs ?? '',
       historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
       historyMaxFocusMs: historySummary.maxFocusMs ?? '',
-      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
     };
   }
 
@@ -1628,9 +1627,6 @@ var ManualPerfDebug = (() => {
       autoHeightForceSync: step.autoHeightForceSync,
       autoHeightForceReason: step.autoHeightForceReason,
       restoredMinLinesReset: step.restoredMinLinesReset,
-      restoredPreviousMinLines: step.restoredPreviousMinLines,
-      restoredPreservedMinLines: step.restoredPreservedMinLines,
-      restoredNextMinLines: step.restoredNextMinLines,
       pendingSizeSyncBeforeAutoHeight: step.pendingSizeSyncBeforeAutoHeight,
       pendingSizeSync: step.pendingSizeSync,
       inputStateObjectHeight: step.inputStateObjectHeight,
@@ -1837,14 +1833,8 @@ var ManualPerfDebug = (() => {
       historyMaxOuterRestoreMs: historySummary.maxOuterRestoreMs ?? '',
       historyMaxFlushMs: historySummary.maxFlushMs ?? '',
       historyMaxCloneObjectsMs: historySummary.maxCloneObjectsMs ?? '',
-      historyHydratedTextRuntimeCaches: historySummary.hydratedTextRuntimeCaches ?? '',
-      historyHydratedTextLayoutCaches: historySummary.hydratedTextLayoutCaches ?? '',
       historyMaxReplaceBoardObjectsMs: historySummary.maxReplaceBoardObjectsMs ?? '',
       historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
-      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
-      historyMaxProxyValueDiffMs: historySummary.maxProxyValueDiffMs ?? '',
-      historyMaxProxyValueMutationMs: historySummary.maxProxyValueMutationMs ?? '',
-      historyMaxProxyValueAssignMs: historySummary.maxProxyValueAssignMs ?? '',
       historyMaxSetSelectionRangeMs: historySummary.maxSetSelectionRangeMs ?? '',
       historyMaxFocusMs: historySummary.maxFocusMs ?? '',
     };

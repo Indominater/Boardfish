@@ -57,7 +57,7 @@ function addText(wx, wy, content = '', options = {}) {
   }
   logStep('trim-done', () => objectCommandTextStats(content));
   const data = { content };
-  const textBytes = BoardfishWebLimits.textByteLength(content);
+  const textBytes = content.length;
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
   logStep('content-limit-done', { textBytes, accepted });
   if (!accepted) return;
@@ -93,8 +93,7 @@ function addText(wx, wy, content = '', options = {}) {
   logStep('add-object-done', { objectId: obj.id, objectCountAfter: objects.length });
   selectObject(obj.id);
   logStep('render-scheduled', { objectId: obj.id });
-  const shouldEnterEdit = !content || options?.editAfterCreate === true;
-  if (!shouldEnterEdit || options?.enterEditHistory === false) {
+  if (content) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const historyStartedAt = dbg && objectCommandDebugNow();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -103,17 +102,9 @@ function addText(wx, wy, content = '', options = {}) {
       objectId: obj.id,
       historyMs: Math.round((objectCommandDebugNow() - historyStartedAt) * 100) / 100,
     }));
-  }
-  if (shouldEnterEdit) {
-    const enterEditOptions = content
-      ? { history: options?.enterEditHistory !== false, placeInitialCaret: true }
-      : {};
-    enterEdit(obj.id, enterEditOptions);
-    logStep('enter-edit-done', {
-      objectId: obj.id,
-      editAfterCreate: !!content,
-      enterEditHistory: enterEditOptions.history ?? true,
-    });
+  } else {
+    enterEdit(obj.id);
+    logStep('enter-edit-done', { objectId: obj.id });
   }
   logStep('end', { objectId: obj.id, objectCountAfter: objects.length });
 }
@@ -236,7 +227,6 @@ async function newBoard() {
   BoardfishEditorState.resetBoardObjectState();
   OpenDebug.step(dbg, 'exitEdit', {});
   clearJsClipboard();
-  invalidateOffscreen();
   OpenDebug.step(dbg, 'clearState', {});
   currentFilePath = null;
   currentFileRef = null;
@@ -266,7 +256,7 @@ function duplicateSelected(anchorPoint = null) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
     selectedObjects.push(obj);
-    if (obj?.type === 'text') additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
+    if (obj?.type === 'text') additionalTextBytes += String(obj.data?.content || '').length;
     minX = Math.min(minX, obj.x);
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x + obj.w);

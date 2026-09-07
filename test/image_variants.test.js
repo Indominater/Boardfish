@@ -50,7 +50,6 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
     imageBitmapCache: {},
     objects: [],
     viewportWorldRect() { return null; },
-    invalidateOffscreen() {},
     scheduleRender() {},
     queueVisibleImageHydration() {},
   };

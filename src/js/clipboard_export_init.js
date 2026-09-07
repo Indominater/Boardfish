@@ -159,40 +159,24 @@ const createWebSourcePngClipboardBlob = (obj, source
   if (!obj || imageNeedsRendering(obj)) return null;
   if (typeof Blob === 'undefined') return null;
   const container = globalThis.BoardfishWebBoardContainer;
-  if (!container?.bytesForImageSource) return null;
+  if (!container?.blobForImageSource) return null;
   if (webSourceClipboardMime(source) !== 'image/png') return null;
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const startedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   try {
-    const sourceBlob = container.blobForImageSource?.(source);
-    if (sourceBlob) {
-      const blob = sourceBlob.type === 'image/png'
-        ? sourceBlob
-        : sourceBlob.slice(0, sourceBlob.size, 'image/png');
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectClipboardDiagnostics) {
-        ClipDebug.step(dbg, 'copy:web-source-png-blob', {
-          imgKey: obj?.data?.imgKey || '',
-          sourceKind: webSourceClipboardKind(source),
-          sourceBytes: blob.size,
-          blobSize: blob.size,
-          ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return blob;
-    }
-    const bytes = container.bytesForImageSource(source);
-    if (!bytes) return null;
-    const blob = new Blob([bytes], { type: 'image/png' });
+    const sourceBlob = container.blobForImageSource(source);
+    if (!sourceBlob) return null;
+    const blob = sourceBlob.type === 'image/png'
+      ? sourceBlob
+      : sourceBlob.slice(0, sourceBlob.size, 'image/png');
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectClipboardDiagnostics) {
       ClipDebug.step(dbg, 'copy:web-source-png-blob', {
         imgKey: obj?.data?.imgKey || '',
         sourceKind: webSourceClipboardKind(source),
-        sourceBytes: bytes.byteLength ?? bytes.length ?? blob.size,
+        sourceBytes: blob.size,
         blobSize: blob.size,
         ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
       });
@@ -674,7 +658,6 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         const trimStart = collectClipboardDiagnostics ? clipboardNow() : 0;
         const contentLimitStart = trimStart;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        let retainedCount = 0;
         for (const obj of clones) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const trimmed =
@@ -683,16 +666,12 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (collectClipboardDiagnostics && trimmed) trimmedTextObjects++;
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          if (obj?.type === 'text' && !obj.data?.content) continue;
-          clones[retainedCount++] = obj;
           if (obj?.type === 'text') {
-            additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
+            additionalTextBytes += obj.data.content.length;
           }
           minX = Math.min(minX, obj.x); minY = Math.min(minY, obj.y);
           maxX = Math.max(maxX, obj.x + obj.w); maxY = Math.max(maxY, obj.y + obj.h);
         }
-        clones.length = retainedCount;
-        if (!clones.length) return;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (collectClipboardDiagnostics) {
           ClipDebug.step(dbg, 'paste:text-trim-done', {

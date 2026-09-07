@@ -45,8 +45,6 @@
       erroredImages: 0,
       croppedImages: 0,
       scaledImages: 0,
-      openPreviewImages: 0,
-      dynamicOpenPreviewRequests: 0,
       scaledFallbackFull: 0,
       activeInputFullFallbackImages: 0,
       scaledVariantPendingImages: 0,
@@ -95,7 +93,6 @@
       imageContextWarmDraws: 0,
       scaledImageContextFirstDraws: 0,
       fullScaleImageContextFirstDraws: 0,
-      openPreviewImageContextFirstDraws: 0,
       slowDrawObjects: [],
       slowTextLineDraws: [],
     };
@@ -299,9 +296,6 @@
       if (selected?.scale === 1 && selected?.targetScale === 1) {
         counters.fullScaleImageContextFirstDraws = (counters.fullScaleImageContextFirstDraws || 0) + 1;
       }
-      if (selected?.openPreview) {
-        counters.openPreviewImageContextFirstDraws = (counters.openPreviewImageContextFirstDraws || 0) + 1;
-      }
     } else {
       counters.imageContextWarmDraws = (counters.imageContextWarmDraws || 0) + 1;
     }
@@ -365,8 +359,6 @@
       row.drawDeviceH = deps ? Math.round(row.objectH * Math.max(Number(deps.zoom?.()) || 0, 0) * Math.max(Number(deps.dpr?.()) || 1, 1) * 100) / 100 : '';
       row.cropped = drawCounterValue(counters, 'croppedImages') > before.croppedImages;
       row.scaled = drawCounterValue(counters, 'scaledImages') > before.scaledImages;
-      row.openPreview = drawCounterValue(counters, 'openPreviewImages') > before.openPreviewImages;
-      row.dynamicOpenPreviewRequest = drawCounterValue(counters, 'dynamicOpenPreviewRequests') > before.dynamicOpenPreviewRequests;
       row.fullScale = drawCounterValue(counters, 'fullScaleImages') > before.fullScaleImages;
       row.selectedScale = scaledDelta > 0
         ? Math.round((drawCounterValue(counters, 'scaledImageScaleTotal') - before.scaledImageScaleTotal) / scaledDelta * 1000) / 1000
@@ -591,7 +583,6 @@
             counters.scaledImages = (counters.scaledImages || 0) + 1;
             counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
             counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
-            if (selected?.openPreview) counters.openPreviewImages = (counters.openPreviewImages || 0) + 1;
           } else if (selected?.targetScale < 1) {
             counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
             if (selected?.activeInputFullFallback) {
@@ -667,14 +658,13 @@
       , viewportRect = deps.currentViewportWorldRect()
       , imageSourceResolver = null
       , skipId = null
-      , onlyText = false
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
       const textRect = textViewportRect(viewportRect, view);
       const objects=deps.objects(),regions=visibleObjectRegions(objects,viewportRect,skipId,canClip(context));
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         for (const obj of objects) {
-          if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
+          if (obj.id === skipId) continue;
           if (!deps.objectIntersectsRect(obj, obj.type === 'text' ? textRect : viewportRect)) continue;
           const visible=regions.get(obj);
           if(visible)drawRegions(context,visible,rect=>drawSingleObj(context,obj
@@ -691,7 +681,7 @@
       let drawnText = 0;
       for (const obj of objects) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
+        if (obj.id === skipId) continue;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, obj.type === 'text' ? textRect : viewportRect)) {
           countCulledObject(obj, counters);
           continue;
@@ -712,8 +702,6 @@
           culledTextLines: drawCounterValue(counters, 'culledTextLines'),
           croppedImages: drawCounterValue(counters, 'croppedImages'),
           scaledImages: drawCounterValue(counters, 'scaledImages'),
-          openPreviewImages: drawCounterValue(counters, 'openPreviewImages'),
-          dynamicOpenPreviewRequests: drawCounterValue(counters, 'dynamicOpenPreviewRequests'),
           fullScaleImages: drawCounterValue(counters, 'fullScaleImages'),
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
           activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
@@ -760,7 +748,6 @@
       setWorldCanvasTransform,
       textViewportRect,
       drawTextBackground,
-      opaqueTextBackgrounds:opaqueText,
       withTextObjectClip(context,obj,draw) { return opaqueText?withRectClip(context,objectRect(obj),draw):draw(); },
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') renderer.createDrawCounters = createDrawCounters;

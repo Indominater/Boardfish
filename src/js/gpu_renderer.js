@@ -402,10 +402,10 @@
       colorCache.set(key,color);return color;
     }
     function color() { const c=rgba(current.fillStyle);return [c[0],c[1],c[2],c[3]*current.globalAlpha]; }
-    function setup(value) {
+    function setup(value,width=canvas.width,height=canvas.height) {
       gl.useProgram(value.value);
-      gl.viewport(0,0,canvas.width,canvas.height);
-      gl.uniform2f(value.locations.viewport,canvas.width,canvas.height);
+      gl.viewport(0,0,width,height);
+      gl.uniform2f(value.locations.viewport,width,height);
       if(current.globalCompositeOperation==='copy')gl.disable(gl.BLEND);else gl.enable(gl.BLEND);
     }
     function applyClip() {
@@ -734,7 +734,7 @@
       while(lo<hi) { const mid=(lo+hi)>>>1;if(rows[mid].baseline<baseline||(after&&rows[mid].baseline===baseline))lo=mid+1;else hi=mid; }
       return lo;
     }
-    function drawCachedText(prepared,obj,settings,m,resource,target,bounds,deviceEm,weight=1) {
+    function drawCachedText(obj,settings,m,resource,target,bounds,deviceEm,weight=1) {
       const edge=Math.min(TEXT_TILE_SIZE,maxTextureSize-TEXT_TILE_GUTTER*2);
       const size=edge+TEXT_TILE_GUTTER*2,bytes=size*size*2;
       if(edge<1)return false;
@@ -893,8 +893,7 @@
       }
     }
     function drawPreparedText(prepared,obj,settings,m,integralResource,target,width=canvas.width,height=canvas.height,deviceEm=settings.fontSize*Math.max(Math.hypot(m[0],m[1]),Math.hypot(m[2],m[3])),samplingScale=1,coverageLayer=null,weight=1) {
-      setup(textProgram);gl.bindVertexArray(textVao);
-      gl.viewport(0,0,width,height);gl.uniform2f(textProgram.locations.viewport,width,height);
+      setup(textProgram,width,height);gl.bindVertexArray(textVao);
       gl.uniform1f(textProgram.locations.derivativeScale,samplingScale);
       if(target) { gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE); }
       gl.uniform1i(textProgram.locations.atlas,0);gl.uniform1i(textProgram.locations.glyphs,1);
@@ -1024,7 +1023,7 @@
       } else applyClip();
       const transition=Math.max(0,Math.min(1,(deviceEm-10)/2));
       const cacheWeight=1-transition*transition*(3-2*transition);
-      const cached=cacheEligible&&drawCachedText(prepared,obj,settings,m,integralResource,target,bounds,deviceEm,cacheWeight);
+      const cached=cacheEligible&&drawCachedText(obj,settings,m,integralResource,target,bounds,deviceEm,cacheWeight);
       if(!cached) {
         if(cacheEligible)restoreCoverageTarget(target,bounds,true);
         drawPreparedText(prepared,obj,settings,m,integralResource,target);

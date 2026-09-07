@@ -279,7 +279,7 @@ test('image renderer overdraws image edges by one device pixel at the current vi
   });
 
   renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters(),
-    { x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, undefined,
+    { x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined,
     { zoom: 2, dpr: 2, panX: 0, panY: 0 });
 
   assert.deepEqual(drawImageCalls, [[source, 9.75, 19.75, 40.5, 30.5]]);
@@ -412,63 +412,6 @@ test('viewport navigation keeps culling and uses the canonical image draw path',
   assert.deepEqual(drawSmoothingEnabled, [true]);
   assert.equal(context.imageSmoothingEnabled, true);
   assert.equal(counters.culledImages, 1);
-});
-
-test('renderer can draw only text while drawing visible objects', () => {
-  const BoardfishRenderer = loadRenderer();
-  const drawImageCalls = [];
-  const drawnText = [];
-  const source = {
-    width: 20,
-    height: 20,
-  };
-  const context = {
-    drawImage(...args) {
-      drawImageCalls.push(args);
-    },
-    fillText(text) {
-      drawnText.push(text);
-    },
-    setTransform() {},
-    translate() {},
-    rotate() {},
-    scale() {},
-    save() {},
-    restore() {},
-  };
-  const image = { id: 'img-1', type: 'image', x: 0, y: 0, w: 20, h: 20, data: { imgKey: 'img-1' } };
-  const text = { id: 'text-1', type: 'text', x: 0, y: 0, w: 20, h: 20 };
-  const renderer = BoardfishRenderer.createBoardRenderer({
-    canvasTextColor: () => '#fff',
-    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 30, y2: 30 }),
-    dpr: () => 1,
-    drawTextLineRange(_context, line) {
-      drawnText.push(line.text);
-    },
-    getTextLayout: () => [{ text: 'drawn', y: 0 }],
-    imageBitmapCache: () => ({ 'img-1': source }),
-    imageStore: () => ({ 'img-1': 'source' }),
-    lineHeight: 24,
-    objectIntersectsRect: () => true,
-    objects: () => [image, text],
-    panX: () => 0,
-    panY: () => 0,
-    selectImageSourceForDraw: () => ({ source, scale: 1, targetScale: 1 }),
-    setCanvasImageQuality: () => {},
-    textBaselineYOffset: () => 0,
-    textPad: 4,
-    viewportCullingEnabled: () => true,
-    zoom: () => 1,
-  });
-
-  const result = renderer.drawVisibleObjects(
-    context, BoardfishRenderer.createDrawCounters(), undefined, undefined, undefined, true,
-  );
-
-  assert.equal(result.drawnImages, 0);
-  assert.equal(result.drawnText, 1);
-  assert.deepEqual(drawImageCalls, []);
-  assert.deepEqual(drawnText, ['drawn']);
 });
 
 test('renderer skips the editing object while drawing visible objects', () => {
@@ -744,7 +687,7 @@ test('text renderer keeps direct text rendering', () => {
   });
 
   renderer.drawVisibleObjects(context, counters,
-    { x1: 0, y1: 0, x2: 300, y2: 160 }, undefined, undefined, undefined,
+    { x1: 0, y1: 0, x2: 300, y2: 160 }, undefined, undefined,
     { zoom: 1, panX: 0, panY: 0, dpr: 2 });
 
   assert.deepEqual(drawnLines, ['cached one', 'cached two']);

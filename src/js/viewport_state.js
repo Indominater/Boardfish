@@ -39,10 +39,6 @@
     return applyViewportState(nextPanX, nextPanY, normalizedZoom);
   }
 
-  function setPan(nextPanX, nextPanY) {
-    return applyViewportState(nextPanX, nextPanY, zoom);
-  }
-
   function setZoomPan(nextZoom, nextPanX, nextPanY) {
     return applyViewportState(nextPanX, nextPanY, nextZoom);
   }
@@ -50,7 +46,6 @@
   const api = Object.freeze({
     panBy,
     reset,
-    setPan,
     setViewport,
     setZoomPan,
     zoomAroundClient,

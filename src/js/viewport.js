@@ -1,6 +1,6 @@
 // ─── Viewport ─────────────────────────────────────────────────────────────────
 var panX = 0, panY = 0, zoom = 1;
-var drawSingleObj, setWorldCanvasTransform, drawVisibleObjects;
+var setWorldCanvasTransform, drawVisibleObjects;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var createDrawCounters;
 const VIEWPORT_TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
@@ -170,37 +170,6 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
   return 'shown';
 }
 syncIslandZoomDisplay('init');
-// ─── Offscreen buffer ─────────────────────────────────────────────────────────
-var _offscreen = document.createElement('canvas');
-var _offCtx    = _offscreen.getContext('2d');
-var _offscreenDirty = true;
-function invalidateOffscreen() {
-  _offscreenDirty = true;
-}
-
-function _rebuildOffscreen(dpr, viewportRect) {
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length });
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-  if (_offscreen.width !== boardCanvas.width) _offscreen.width = boardCanvas.width;
-  if (_offscreen.height !== boardCanvas.height) _offscreen.height = boardCanvas.height;
-  _offCtx.resetTransform();
-  fillBoardBackground(_offCtx, _offscreen.width, _offscreen.height);
-  setWorldCanvasTransform(_offCtx, dpr);
-  const view = { zoom, dpr };
-  for (const obj of objects) {
-    if (obj.type === 'text') continue;
-    if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) continue;
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') drawSingleObj(_offCtx, obj, null, viewportRect, view);
-    else drawSingleObj(_offCtx, obj, viewportRect, view);
-  }
-  _offscreenDirty = false;
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  ViewportDebug.end(dbg);
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-}
-
 // ─── History delta tracking ───────────────────────────────────────────────────
 var _dirtyIds = new Set();
 function markDirty(obj) {
@@ -234,7 +203,6 @@ function syncBoardCanvasBackingStore(write = true) {
   if (!write) return true;
   if (boardCanvas.width !== width) boardCanvas.width = width;
   if (boardCanvas.height !== height) boardCanvas.height = height;
-  invalidateOffscreen();
   return true;
 }
 
@@ -461,11 +429,11 @@ function drawEditingTextOverlayContent(
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
-function drawBoard(bypassEditOffscreenCache = false) {
+function drawBoard() {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectViewportDebug = ViewportDebug.isEnabled();
   const dbg = collectViewportDebug
-    ? ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId, offscreenDirty: _offscreenDirty, bypassEditOffscreenCache })
+    ? ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId })
     : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (_boardOpening) {
@@ -493,61 +461,29 @@ function drawBoard(bypassEditOffscreenCache = false) {
   const viewportRect = viewportWorldRect(0);
 
   if (editingId) {
-    const useEditOffscreenCache = !boardRenderer.opaqueTextBackgrounds && !ctx.isBoardfishGpuContext && !bypassEditOffscreenCache;
-    if (useEditOffscreenCache && _offscreenDirty) {
-      _rebuildOffscreen(dpr, viewportRect);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const setupStart = collectDrawDebug ? performance.now() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    ctx.resetTransform();
+    fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
+    setWorldCanvasTransform(ctx, dpr);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectDrawDebug) {
+      drawPhases.backgroundSetupMs = performance.now() - setupStart;
     }
-    if (useEditOffscreenCache) {
-      // Blit the cached background/image layer, then draw text directly so its
-      // antialiasing is identical to the normal canvas path.
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const blitStart = collectDrawDebug ? performance.now() : 0;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      ctx.resetTransform();
-      ctx.drawImage(_offscreen, 0, 0);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDrawDebug) {
-        drawPhases.offscreenBlitMs = performance.now() - blitStart;
-      }
-      const textStart = collectDrawDebug ? performance.now() : 0;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      setWorldCanvasTransform(ctx, dpr);
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        drawVisibleObjects(ctx, viewportRect, null, editingId, true);
-      } else {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const drawn = drawVisibleObjects(ctx, counters, viewportRect, null, editingId, true);
-        if (collectDrawDebug) {
-          drawPhases.offscreenTextDrawMs = performance.now() - textStart;
-          drawnText += drawn.drawnText;
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
+    const objectsStart = collectDrawDebug ? performance.now() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+      drawVisibleObjects(ctx, viewportRect, null, editingId);
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const setupStart = collectDrawDebug ? performance.now() : 0;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      ctx.resetTransform();
-      fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
-      setWorldCanvasTransform(ctx, dpr);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const drawn = drawVisibleObjects(ctx, counters, viewportRect, null, editingId);
       if (collectDrawDebug) {
-        drawPhases.backgroundSetupMs = performance.now() - setupStart;
+        drawPhases.objectLoopMs = performance.now() - objectsStart;
+        drawnImages += drawn.drawnImages;
+        drawnText += drawn.drawnText;
       }
-      const objectsStart = collectDrawDebug ? performance.now() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        drawVisibleObjects(ctx, viewportRect, null, editingId);
-      } else {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const drawn = drawVisibleObjects(ctx, counters, viewportRect, null, editingId);
-        if (collectDrawDebug) {
-          drawPhases.objectLoopMs = performance.now() - objectsStart;
-          drawnImages += drawn.drawnImages;
-          drawnText += drawn.drawnText;
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
     }
 
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -614,9 +550,6 @@ function drawBoard(bypassEditOffscreenCache = false) {
       viewportW: viewportRect.x2 - viewportRect.x1,
       viewportH: viewportRect.y2 - viewportRect.y1,
       editing: !!editingId,
-      offscreenDirty: !!_offscreenDirty,
-      bypassEditOffscreenCache,
-      openPreviewFallback: false,
       objectCount: objects.length,
       totalMeasuredMs: performance.now() - drawStart,
       ...drawPhases,
@@ -651,15 +584,11 @@ function applyTransform(
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
-  if (editingId) invalidateOffscreen();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const transformStart = collectTransformDebug ? performance.now() : 0;
   const drawStart = collectTransformDebug ? performance.now() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  // Viewport transforms already require a direct redraw at the new pan/zoom.
-  // Rebuilding the edit cache here would render the static scene twice in the
-  // same frame; leave it dirty for the next non-navigation edit render.
-  drawBoard(true);
+  drawBoard();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const drawMs = collectTransformDebug ? performance.now() - drawStart : 0;
   if (collectTransformDebug) {
@@ -793,7 +722,7 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   objectIntersectsRect,
   selectImageSourceForDraw,
 });
-({ drawSingleObj, setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
+({ setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
 if (typeof BOARDFISH_PRODUCTION === 'undefined') createDrawCounters = boardRenderer.createDrawCounters;
 
 const BoardObjectGeometry = BoardfishObjectGeometry.createObjectGeometry({

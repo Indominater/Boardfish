@@ -425,31 +425,28 @@ async function hydrateImageKeysWithLimit(keys
   const t0 = performance.now();
   let hydrated = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  let anyHydrated = false;
   await mapWithConcurrency(keys, concurrency, async (key) => {
     try {
-      if (await hydrateImageForDisplay(key
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const displayReady =
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      await hydrateImageForDisplay(key
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         , dbg
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      )) {
-        anyHydrated = true;
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        hydrated++;
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
+      );
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (displayReady) hydrated++;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
     } catch (err) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       OpenDebug.step(dbg, `${label}:error`, { imgKey: key, error: String(err) });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
   }, false);
-  if (anyHydrated) invalidateOffscreen();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0, ...getOpenImageRuntimeDebugMetrics(dbg) });
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') return hydrated;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return anyHydrated;
 }
 
 function createOpenTextWarmupTarget() {
@@ -648,7 +645,6 @@ async function finishOpenedBoard(
       bitmapImages: drawBreakdown?.bitmapImages ?? '',
       elementImages: drawBreakdown?.elementImages ?? '',
       scaledImages: drawBreakdown?.scaledImages ?? '',
-      openPreviewImages: drawBreakdown?.openPreviewImages ?? '',
       scaledFallbackFull: drawBreakdown?.scaledFallbackFull ?? '',
       scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',
       croppedImages: drawBreakdown?.croppedImages ?? '',
@@ -730,7 +726,6 @@ function applyBoardData(data
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'replaceBoardObjects', { ms: performance.now() - replaceStart, objectCount: objects.length });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  invalidateOffscreen();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'apply-state', { ms: performance.now() - stateStart, objectCount: objects.length });
 

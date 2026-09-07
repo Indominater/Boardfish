@@ -108,10 +108,9 @@ test('web export keeps data URL image extensions lossless', () => {
   assert.equal(globalThis.BoardfishExportUtils.guessImageExtFromDataUrl('data:image/gif;base64,AQ=='), 'gif');
 });
 
-test('web image export downloads each file when zip support is unavailable', async () => {
+test('web image export downloads one ZIP archive containing the original image bytes', async () => {
   const previous = {
     BoardfishImageStore: globalThis.BoardfishImageStore,
-    BoardfishWebBoardContainer: globalThis.BoardfishWebBoardContainer,
     ExportDebug: globalThis.ExportDebug,
     document: globalThis.document,
     imageNeedsRendering: globalThis.imageNeedsRendering,
@@ -125,10 +124,6 @@ test('web image export downloads each file when zip support is unavailable', asy
   const objectUrls = [];
 
   globalThis.BoardfishImageStore = { getSource: () => source };
-  globalThis.BoardfishWebBoardContainer = {
-    ...previous.BoardfishWebBoardContainer,
-    createZipBlob: undefined,
-  };
   globalThis.ExportDebug = {
     recordEventLoopYield() {},
     recordResolve() {},
@@ -177,10 +172,31 @@ test('web image export downloads each file when zip support is unavailable', asy
       null,
     );
 
-    assert.equal(result.method, 'download');
+    assert.equal(result.method, 'zip');
     assert.equal(result.downloadedCount, 2);
-    assert.equal(downloads.length, 2);
-    assert.equal(objectUrls.length, 2);
+    assert.equal(downloads.length, 1);
+    assert.match(downloads[0].download, /^images_[0-9a-f]{6}\.zip$/);
+    assert.equal(objectUrls.length, 1);
+    assert.equal(objectUrls[0].blob.type, 'application/zip');
+    const bytes = new Uint8Array(await objectUrls[0].blob.arrayBuffer());
+    const view = new DataView(bytes.buffer);
+    const names = new Set();
+    let offset = 0;
+    for (let i = 0; i < 2; i++) {
+      assert.equal(view.getUint32(offset, true), 0x04034b50);
+      assert.equal(view.getUint16(offset + 8, true), 0, 'Image entries retain their original bytes');
+      const size = view.getUint32(offset + 18, true);
+      const nameLength = view.getUint16(offset + 26, true);
+      const extraLength = view.getUint16(offset + 28, true);
+      const name = new TextDecoder().decode(bytes.subarray(offset + 30, offset + 30 + nameLength));
+      assert.match(name, /^image_[0-9a-f]{6}\.png$/);
+      names.add(name);
+      const dataStart = offset + 30 + nameLength + extraLength;
+      assert.deepEqual(bytes.slice(dataStart, dataStart + size), new Uint8Array([1, 2, 3]));
+      offset = dataStart + size;
+    }
+    assert.equal(names.size, 2);
+    assert.equal(view.getUint32(offset, true), 0x02014b50, 'Both images precede the ZIP directory');
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete globalThis[key];

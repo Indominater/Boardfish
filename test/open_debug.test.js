@@ -57,6 +57,38 @@ test('developer open diagnostics tune the shared runtime hydration concurrency',
   assert.match(messages.at(-1), /hydration concurrency set to 8/);
 });
 
+test('open reports measure the current all-content hydration stage', () => {
+  let now = 0;
+  const context = {
+    DEBUG_TOOLS_ENABLED: true,
+    console: { debug() {}, info() {}, table() {} },
+    exposeDebug() {},
+    performance: { now: () => now },
+  };
+  vm.createContext(context);
+  for (const file of ['runtime_utils.js', 'debug_core.js', 'debug_open.js']) {
+    vm.runInContext(readSource(`src/js/${file}`), context, { filename: file });
+  }
+  const debug = context.OpenDebug;
+  debug.enable();
+  const run = debug.start('openBoard');
+  debug.step(run, 'read-board-shape', { objectCount: 5, imageCount: 4 });
+  now = 120;
+  debug.step(run, 'hydrate-all:end', { count: 4, hydrated: 4, ms: 120 });
+  debug.step(run, 'hydrate-initial-policy', { mode: 'all-before-interaction', pendingImages: 0 });
+  now = 130;
+  debug.step(run, 'initial-applyTransform', { ms: 10, drawnImages: 4 });
+  debug.end(run);
+
+  for (const report of [debug.report(), debug.optimizationReport()]) {
+    assert.equal(report.summary.mode, 'all-before-interaction');
+    assert.equal(report.summary.initialHydrationMs, 120);
+    assert.equal(report.summary.initialHydratedImages, 4);
+    assert.equal(report.summary.pendingAfterInitial, 0);
+  }
+  assert.ok(debug.phaseSummary().some(row => row.step === 'hydrate-all:end'));
+});
+
 test('open-board debugger covers the slow open phases developers need to inspect', () => {
   const openDebug = readSource('src/js/debug_open.js');
   const openIo = readSource('src/js/io_close.js');
@@ -72,7 +104,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'imageStoreSummary',
     'hydrationCandidates',
     'slowImages',
-    'openPreviewBreakdown',
     'hydrationBreakdown',
     'cacheImageBreakdown',
     'setHydrationConcurrency',
@@ -80,9 +111,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'beginInitialRenderDebug',
     'endInitialRenderDebug',
     'isInitialRenderDebugActive',
-    'recordPreviewFallbackDraw',
-    'recordPreviewHeldRender',
-    'recordDynamicPreview',
     'report',
   ]) {
     assert.match(openDebug, new RegExp(`\\b${method}\\b`), `OpenDebug is missing ${method}`);
@@ -127,7 +155,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(viewport, /OpenDebug\.isInitialRenderDebugActive\?\.\(\) === true/);
   assert.match(openIo, /drawBoardTotalMs: drawBreakdown\?\.totalMeasuredMs/);
   assert.match(openDebug, /initialDrawMs: initialRender\?\.meta\?\.drawMs/);
-  assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
   assert.match(openDebug, /decodeQueueWaitMaxMs/);
   assert.match(openDebug, /bitmapDecodeMaxMs/);
   assert.match(openDebug, /rustBoardJsonReadMs/);
@@ -164,7 +191,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'cache-image:decode-queue:queued',
     'cache-image:decode-queue:start',
     'cache-image:createImageBitmap',
-    'cache-image:previewBitmap',
     'cache-image:schedule-render',
     'cache-image:done',
   ]) {

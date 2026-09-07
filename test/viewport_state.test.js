@@ -11,10 +11,10 @@ const root = path.join(__dirname, '..');
 test('viewport panning accepts large offsets in every direction', () => {
   const zoom = 2;
 
-  const towardTopLeft = applyViewportState({ zoom }, 'setPan', 100000, 100000);
+  const towardTopLeft = applyViewportState({ zoom }, 'setViewport', { panX: 100000, panY: 100000 });
   assert.deepEqual(towardTopLeft, { panX: 100000, panY: 100000, zoom });
 
-  const towardBottomRight = applyViewportState({ zoom }, 'setPan', -100000, -100000);
+  const towardBottomRight = applyViewportState({ zoom }, 'setViewport', { panX: -100000, panY: -100000 });
   assert.deepEqual(towardBottomRight, { panX: -100000, panY: -100000, zoom });
 });
 
@@ -53,13 +53,13 @@ function applyViewportState(options, method, ...args) {
   return { ...context.viewportSnapshot() };
 }
 
-test('wheel and drag state methods share the same unrestricted pan path', () => {
+test('relative and absolute viewport updates share the same unrestricted pan path', () => {
   const context = loadViewportStateHarness();
 
   assert.equal(context.BoardfishViewportState.panBy(100000, -100000), true);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: 100000, panY: -100000, zoom: 1 });
 
-  assert.equal(context.BoardfishViewportState.setPan(-100000, 100000), true);
+  assert.equal(context.BoardfishViewportState.setViewport({ panX: -100000, panY: 100000 }), true);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: -100000, panY: 100000, zoom: 1 });
 });
 
@@ -108,7 +108,7 @@ test('viewport rendering uses one native-quality branch on every platform', () =
 
   assert.doesNotMatch(viewportSource, /BoardfishViewportPreview|viewportTransformPreview|touch-pinch-preview/);
   assert.doesNotMatch(styles, /viewport-transform-preview/);
-  assert.match(viewportSource, /function applyTransform\([\s\S]*drawBoard\(true\)/);
+  assert.match(viewportSource, /function applyTransform\([\s\S]*drawBoard\(\)/);
   assert.match(viewportSource, /function scheduleTransform\([\s\S]*lastViewportInputAt = now;[\s\S]*scheduleFrame/);
   assert.doesNotMatch(viewportSource, /scheduleViewportInputSettleRender|restoreBoardCanvasQualityIfSettled/);
   assert.doesNotMatch(viewportSource, /isViewportInputActive: isActiveViewportInput/);

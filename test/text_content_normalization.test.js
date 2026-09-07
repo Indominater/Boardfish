@@ -52,21 +52,27 @@ test('opening and saving legacy text through the board container uses the same A
   assert.deepEqual(new Uint8Array(await fixture.blob.arrayBuffer()), bytesBefore);
 });
 
-test('the object-state boundary normalizes new text and invalidates geometry only when content changes', () => {
-  const updates = [];
+test('state insertion and replacement preserve objects normalized at board ingress', () => {
+  const canonical = BoardSchema.normalizeBoardData({ objects: [
+    { id: 'mixed', type: 'text', h: 80, data: { content: 'A😀\rB' } },
+    { id: 'plain', type: 'text', h: 20, data: { content: 'AB' } },
+  ] }).objects;
+  const [mixed, plain] = canonical;
+  assert.equal(mixed.data.content, 'A\nB');
+  const layout = mixed._layoutCache = [];
   const scope = {
-    objects: [], objectsMap: new Map(), normalizeTextContent,
-    clearTextObjectLayoutRuntime(obj) { updates.push(['clear', obj.id]); },
-    syncTextAutoHeight(obj) { updates.push(['height', obj.id]); obj.h = 80; },
+    objects: [], objectsMap: new Map(),
+    normalizeTextContent() { assert.fail('canonical text does not need normalization'); },
+    syncAllTextAutoHeights() { assert.fail('history dimensions must be preserved'); },
   };
   vm.createContext(scope);
   vm.runInContext(fs.readFileSync(require.resolve('../src/js/editor_state_boundary.js'), 'utf8'), scope);
-  const mixed = { id: 'mixed', type: 'text', h: 10, data: { content: 'A😀\rB' } };
-  const plain = { id: 'plain', type: 'text', h: 20, data: { content: 'AB' } };
-  scope.BoardfishEditorState.addObject(mixed);
-  scope.BoardfishEditorState.addObject(plain);
-  assert.equal(mixed.data.content, 'A\nB');
-  assert.equal(mixed.h, 80);
-  assert.equal(plain.h, 20);
-  assert.deepEqual(updates, [['clear', 'mixed'], ['height', 'mixed']]);
+  assert.equal(scope.BoardfishEditorState.addObject(mixed), mixed);
+  assert.equal(scope.objectsMap.get(mixed.id), mixed);
+  scope.BoardfishEditorState.replaceBoardObjects([plain, mixed], { syncTextHeights: false });
+  assert.deepEqual(scope.objects, [plain, mixed]);
+  assert.equal(scope.objectsMap.get(plain.id), plain);
+  assert.equal(scope.objectsMap.get(mixed.id), mixed);
+  assert.equal(mixed._layoutCache, layout);
+  assert.deepEqual(canonical.map(({ h }) => h), [80, 20]);
 });

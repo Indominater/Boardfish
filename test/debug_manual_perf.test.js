@@ -58,12 +58,6 @@ test('text edit perf debugger is passive event recording only', () => {
   assert.match(source, /clientX: event\?\.clientX/);
   assert.match(source, /shortcut: textEditShortcutFromEvent\(event\)/);
   assert.match(source, /historyTextUndoRedoReport/);
-  assert.match(source, /historyMaxProxyValueSetMs/);
-  assert.match(source, /historyMaxProxyValueDiffMs/);
-  assert.match(source, /historyMaxProxyValueMutationMs/);
-  assert.match(source, /historyMaxProxyValueAssignMs/);
-  assert.match(source, /historyHydratedTextRuntimeCaches/);
-  assert.match(source, /historyHydratedTextLayoutCaches/);
   assert.match(source, /domValueLength/);
   assert.match(source, /domValueStale/);
   assert.match(source, /maxLogicalSetMs/);

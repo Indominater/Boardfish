@@ -39,7 +39,7 @@ function load() {
     },
     navigator: { userAgent: 'Chrome/140.0.0.0' },
     objects: [], TextSelDebug: { _logHit() {} },
-    scheduleRender() {}, markDirty() {}, invalidateOffscreen() {},
+    scheduleRender() {}, markDirty() {},
   };
   vm.createContext(scope);
   for (const file of ['text_raster.js', 'text_layout.js']) {

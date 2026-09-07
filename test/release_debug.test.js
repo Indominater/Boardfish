@@ -287,6 +287,12 @@ test('web release preview keeps content-revision dirty tracking used by board co
 });
 
 test('web release preview ships minified PWA assets', () => {
+  buildAndReadWebPreviewBundle();
+  const fontAssets = fs.readdirSync(path.join(root, 'dist-web', 'fonts'));
+  assert.ok(fontAssets.includes('Geist.woff2'));
+  assert.ok(fontAssets.includes('geist-ascii-LICENSE.txt'));
+  assert.ok(fontAssets.includes('geist-ascii-coverage.png'));
+  assert.ok(fontAssets.every(name => !name.endsWith('.js')), 'font metadata is already in the runtime bundle');
   const manifestSource = readSource('src/js/startup_manifest.mjs');
   const buildSource = readSource('scripts/build-runtime-assets.mjs');
   const serverSource = readSource('scripts/serve-web.mjs');

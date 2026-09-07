@@ -87,7 +87,6 @@ function drawableBitmapWarmupKind(meta = {}) {
   const kind = String(meta.kind || '');
   if (kind === 'full-image') return 'fullImage';
   if (kind === 'scaled-variant') return 'scaledVariant';
-  if (kind === 'open-preview') return 'openPreview';
   return 'other';
 }
 
@@ -103,7 +102,7 @@ function drawableBitmapWarmupTargetSize(source, meta = {}) {
   const sourceH = source?.height || source?.naturalHeight || 0;
   if (!(sourceW > 0 && sourceH > 0)) return { sourceW, sourceH, width: 1, height: 1 };
   const kind = drawableBitmapWarmupKind(meta);
-  const maxEdge = kind === 'scaledVariant' || kind === 'openPreview' ? 512 : kind === 'fullImage' ? 256 : 1;
+  const maxEdge = kind === 'scaledVariant' ? 512 : kind === 'fullImage' ? 256 : 1;
   const scale = Math.min(1, maxEdge / Math.max(sourceW, sourceH));
   return {
     sourceW,
@@ -190,15 +189,15 @@ function warmDrawableBitmapForDrawNow(source, meta = {}) {
   }
 }
 
-function runDrawableBitmapWarmupQueue(force = false, budgetMs = 4, maxItems = 4) {
-  if (!force && isActiveViewportInput()) {
+function runDrawableBitmapWarmupQueue() {
+  if (isActiveViewportInput()) {
     scheduleDrawableBitmapWarmupQueue();
     return;
   }
   const start = performance.now();
   let count = 0;
   for (const [source, meta] of drawableBitmapWarmupQueue) {
-    if (count >= maxItems || (count > 0 && performance.now() - start >= budgetMs)) break;
+    if (count >= 4 || (count > 0 && performance.now() - start >= 4)) break;
     drawableBitmapWarmupQueue.delete(source);
     warmDrawableBitmapForDrawNow(source, meta);
     count++;
@@ -220,7 +219,7 @@ function scheduleDrawableBitmapWarmupQueue() {
   }
 }
 
-function scheduleDrawableBitmapWarmup(source, meta = {}, immediate = false, budgetMs = 4, maxItems = 1) {
+function scheduleDrawableBitmapWarmup(source, meta = {}) {
   if (!isImageVariantDrawableSource(source)) return false;
   if (drawableBitmapWarmupReady.has(source) || drawableBitmapWarmupQueue.has(source)) {
     return false;
@@ -230,8 +229,7 @@ function scheduleDrawableBitmapWarmup(source, meta = {}, immediate = false, budg
     drawableBitmapWarmupQueuedCount++;
     countDrawableBitmapWarmupKind(drawableBitmapWarmupQueuedByKind, meta);
   }
-  if (immediate === true) runDrawableBitmapWarmupQueue(true, budgetMs, maxItems);
-  else scheduleDrawableBitmapWarmupQueue();
+  scheduleDrawableBitmapWarmupQueue();
   return true;
 }
 
@@ -349,7 +347,6 @@ function scheduleScaledVariantReadyRender(
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   if (typeof BOARDFISH_PRODUCTION === 'undefined' && countReadyVariant) imageScaledVariantRenderCount++;
-  invalidateOffscreen();
   if (imageScaledVariantRenderTimer) return;
   const inputIdleMs = performance.now() - lastViewportInputAt;
   imageScaledVariantRenderTimer = setTimeout(() => {
@@ -758,7 +755,6 @@ function setViewportPerfMode(modeKey) {
   viewportCullingEnabled = !!mode.culling;
   viewportImageScalingEnabled = VIEWPORT_IMAGE_SCALING_SUPPORTED && !!mode.scaling;
   if (!viewportImageScalingEnabled) clearScaledImageVariants();
-  invalidateOffscreen();
   scheduleRender(true, null, `viewport-perf-mode-${modeKey}`);
   const out = viewportPerfModeSummary(modeKey);
   console.info(`[Boardfish viewport] mode ${modeKey}: ${mode.label}`);

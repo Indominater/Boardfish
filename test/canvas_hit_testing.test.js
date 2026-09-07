@@ -773,7 +773,7 @@ test('text edit overlay draws only visible layout lines', () => {
   assert.match(overlaySource, /for \(const line of layout\)[\s\S]*drawTextLineRange\(context, line, obj/);
 });
 
-test('entering text edit invalidates the offscreen cache before proxy setup', () => {
+test('entering text edit sets the editing object before proxy setup', () => {
   const textEditorSource = readSource('src/js/text_editor.js');
   const start = textEditorSource.indexOf('function enterEdit');
   const end = textEditorSource.indexOf('function exitEdit', start);
@@ -781,47 +781,11 @@ test('entering text edit invalidates the offscreen cache before proxy setup', ()
   assert.notEqual(end, -1);
   const enterSource = textEditorSource.slice(start, end);
   const editingIndex = enterSource.indexOf('editingId = id;');
-  const invalidateIndex = enterSource.indexOf('invalidateOffscreen();', editingIndex);
   const proxyIndex = enterSource.indexOf("document.createElement('textarea')");
 
   assert.ok(editingIndex >= 0, 'enterEdit must set editingId');
-  assert.ok(invalidateIndex > editingIndex, 'enterEdit must invalidate after editingId changes');
-  assert.ok(proxyIndex > invalidateIndex, 'offscreen invalidation must happen before proxy setup can focus or render');
+  assert.ok(proxyIndex > editingIndex, 'enterEdit must set editingId before proxy setup can focus or render');
   assert.match(enterSource, /scheduleRender\(true, true\)/, 'enterEdit must schedule its own render');
-});
-
-test('opaque text editing keeps scene order direct while legacy Canvas2D rendering can cache static images', () => {
-  const viewportSource = readSource('src/js/viewport.js');
-  const rebuildStart = viewportSource.indexOf('function _rebuildOffscreen');
-  const rebuildEnd = viewportSource.indexOf('// ─── History delta tracking', rebuildStart);
-  assert.notEqual(rebuildStart, -1);
-  assert.notEqual(rebuildEnd, -1);
-  const rebuildSource = viewportSource.slice(rebuildStart, rebuildEnd);
-
-  assert.match(rebuildSource, /setWorldCanvasTransform\(_offCtx, dpr\);/);
-  assert.match(rebuildSource, /if \(obj\.type === 'text'\) continue;/);
-  assert.doesNotMatch(rebuildSource, /editingId|cacheKind|_offscreenCacheKind/);
-  assert.doesNotMatch(viewportSource, /shouldUseEditOffscreenCache|editOffscreenCacheKind|setEditOffscreenCacheKind/);
-
-  const drawStart = viewportSource.indexOf('function drawBoard');
-  const drawEnd = viewportSource.indexOf('function applyTransform', drawStart);
-  assert.notEqual(drawStart, -1);
-  assert.notEqual(drawEnd, -1);
-  const drawSource = viewportSource.slice(drawStart, drawEnd);
-
-  assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
-  assert.match(drawSource, /const useEditOffscreenCache = !boardRenderer\.opaqueTextBackgrounds && !ctx\.isBoardfishGpuContext && !bypassEditOffscreenCache;/);
-  assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
-  assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, null, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, null, editingId, true\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, null, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, null, editingId\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect\);/);
-
-  const transformStart = viewportSource.indexOf('function applyTransform');
-  const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
-  const transformSource = viewportSource.slice(transformStart, transformEnd);
-  assert.match(transformSource, /drawBoard\(true\);/);
-  assert.doesNotMatch(transformSource, /_rebuildOffscreen\(/);
 });
 
 test('editing overlay draws the live selection and restores the caret when it collapses', () => {

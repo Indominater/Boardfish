@@ -117,7 +117,6 @@ function loadNavigationHarness() {
     pushHistory(reason, dirty) { if (dirty) context.dirty.push(...dirty); context.histories.push(reason); },
     pushEditHistoryIfChanged() { return false; },
     scheduleRender(board, overlay, reason) { context.renders.push({ board, overlay, reason }); },
-    invalidateOffscreen() {},
     setInterval() { return 5; },
     clearInterval() {},
     clearTimeout() {},

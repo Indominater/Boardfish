@@ -191,7 +191,7 @@ var MENU_COMMANDS = {
   },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
   'obj-btn-flip': () => { flipSelectedImages(); },
-  'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
+  'obj-btn-rotate': () => { rotateSelectedImages(); },
   'obj-btn-save-image': () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); },
   'obj-btn-save-images': () => { closeObjCtxMenu('command:save-images'); showInputShield({ keepSelectionOverlay: true }); saveSelectedImages(); },
   'text-btn-copy': () => { closeTextCtxMenu('command:copy'); copyTextEditSelection(); },

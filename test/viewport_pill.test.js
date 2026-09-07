@@ -87,7 +87,7 @@ function createElement(id = 'el') {
 
 function loadViewportPillHarness() {
   const source = fs.readFileSync(path.join(root, 'src', 'js', 'viewport.js'), 'utf8');
-  const prefixEnd = source.indexOf('var _offscreen = document.createElement');
+  const prefixEnd = source.indexOf('// ─── History delta tracking');
   assert.ok(prefixEnd > 0, 'viewport pill bootstrap section is missing');
   const openingShield = createElement('opening-shield');
   openingShield.classList.add('active', 'opening-freeze');
@@ -213,15 +213,11 @@ function loadViewportCanvasSizeHarness({
     boardCanvas,
     backingWrites,
     fallbackReads,
-    invalidations: 0,
     renders: [],
     observedTargets: [],
     resizeObserverInstances: 0,
     visualViewportListeners: [],
     windowResizeListeners: [],
-    invalidateOffscreen() {
-      context.invalidations++;
-    },
     scheduleRender(board, overlay) {
       context.renders.push({ board, overlay });
     },
@@ -388,7 +384,6 @@ test('canvas resize keeps visible pixels until the render frame syncs the backin
   assert.equal(context.boardCanvas.width, 3320);
   assert.equal(context.boardCanvas.height, 2060);
   assert.deepEqual(context.backingWrites, { width: 0, height: 0 });
-  assert.equal(context.invalidations, 0);
   assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
   assert.deepEqual(context.fallbackReads, { clientWidth: 0, clientHeight: 0, innerWidth: 0, innerHeight: 0 });
 
@@ -396,10 +391,8 @@ test('canvas resize keeps visible pixels until the render frame syncs the backin
   assert.equal(context.boardCanvas.width, 3320);
   assert.equal(context.boardCanvas.height, 2160);
   assert.deepEqual(context.backingWrites, { width: 0, height: 1 });
-  assert.equal(context.invalidations, 1);
 
   assert.equal(context.resizeCanvas(), false);
-  assert.equal(context.invalidations, 1);
   assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
 });
 
@@ -442,13 +435,11 @@ test('canvas size tracking observes the rendered surface exactly once', () => {
   context.resizeObserverCallback([{ contentRect: context.surfaceRect }]);
   assert.equal(context.boardCanvas.height, 2060);
   assert.deepEqual(context.backingWrites, { width: 0, height: 0 });
-  assert.equal(context.invalidations, 0);
   assert.deepEqual(context.renders, [{ board: true, overlay: undefined }]);
 
   assert.equal(context.syncBoardCanvasBackingStore(), true);
   assert.equal(context.boardCanvas.height, 2160);
   assert.deepEqual(context.backingWrites, { width: 0, height: 1 });
-  assert.equal(context.invalidations, 1);
 });
 
 test('window resize preserves observed CSS size while refreshing DPR backing dimensions', () => {
@@ -492,14 +483,12 @@ test('keyboard-style resize bursts apply only the latest backing-store height', 
   assert.equal(context.boardCanvas.width, 780);
   assert.equal(context.boardCanvas.height, 1000);
   assert.deepEqual(context.backingWrites, { width: 0, height: 0 });
-  assert.equal(context.invalidations, 0);
   assert.equal(context.renders.length, 3);
 
   assert.equal(context.syncBoardCanvasBackingStore(), true);
   assert.equal(context.boardCanvas.width, 780);
   assert.equal(context.boardCanvas.height, 1688);
   assert.deepEqual(context.backingWrites, { width: 0, height: 1 });
-  assert.equal(context.invalidations, 1);
 });
 
 test('viewport culling follows the observed board surface while keyboard geometry settles', () => {

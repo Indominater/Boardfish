@@ -3,7 +3,6 @@
 var OpenDebug = (() => {
   const MAX_EVENTS = 5000;
   let initialRenderDebugDepth = 0;
-  let latestOpenContext = null;
 
   function sanitize(value) {
     return sanitizeDebugMeta(value, { redactPattern: /dataUrl|src|base64|imageStore/i, roundNumbers: true });
@@ -18,12 +17,11 @@ var OpenDebug = (() => {
 
   function enable(options = {}) {
     core.enable(options);
-    if (core.enabled) console.info('Boardfish open debugger enabled. Use finishDebug({ open: ["optimizationReport", "report", "phaseSummary", "openPreviewBreakdown", "hydrationSummary", "hydrationBreakdown", "cacheImageBreakdown", "imageStoreSummary", "imageStoreSample", "dump"] }) to collect results.');
+    if (core.enabled) console.info('Boardfish open debugger enabled. Use finishDebug({ open: ["optimizationReport", "report", "phaseSummary", "hydrationSummary", "hydrationBreakdown", "cacheImageBreakdown", "imageStoreSummary", "imageStoreSample", "dump"] }) to collect results.');
   }
 
   function disable() {
     core.disable();
-    latestOpenContext = null;
     initialRenderDebugDepth = 0;
     if (DEBUG_TOOLS_ENABLED) console.info('Boardfish open debugger disabled.');
   }
@@ -35,11 +33,7 @@ var OpenDebug = (() => {
     return concurrency;
   }
 
-  function start(op, meta = {}) {
-    const ctx = core.start(op, meta);
-    if (ctx && /^open/.test(op || '')) latestOpenContext = ctx;
-    return ctx;
-  }
+  const start = core.start;
   const step = core.step;
   const end = core.end;
 
@@ -56,24 +50,6 @@ var OpenDebug = (() => {
 
   function isInitialRenderDebugActive() {
     return core.enabled && initialRenderDebugDepth > 0;
-  }
-
-  function recordPreviewFallbackDraw(meta = {}) {
-    const ctx = latestOpenContext || start('open-runtime-preview', { source: 'open-preview-fallback-draw' });
-    if (!ctx) return;
-    step(ctx, 'open-preview-fallback-draw', meta);
-  }
-
-  function recordPreviewHeldRender(meta = {}) {
-    const ctx = latestOpenContext || start('open-runtime-preview', { source: 'open-preview-render-held' });
-    if (!ctx) return;
-    step(ctx, 'open-preview-render-held', meta);
-  }
-
-  function recordDynamicPreview(meta = {}) {
-    const ctx = latestOpenContext || start('open-runtime-preview', { source: 'open-preview-dynamic' });
-    if (!ctx) return;
-    step(ctx, 'open-preview-dynamic', meta);
   }
 
   async function wrap(ctx, command, call, meta = {}) {
@@ -135,17 +111,10 @@ var OpenDebug = (() => {
     const interesting = new Set([
       'read-board-debug',
       'apply-state',
-      'open-preview-visible:start',
-      'open-preview-visible:end',
-      'open-preview-release',
-      'open-preview-fallback-draw',
-      'open-preview-render-held',
-      'open-preview-dynamic',
-      'hydrate-visible:bitmap-settle',
+      'hydrate-all:end',
+      'hydrate-text-draw-caches',
+      'settle-open-image-draw-caches',
       'hydrate-initial-policy',
-      'prewarm-visible-scaled-variants',
-      'hydrate-visible:end',
-      'hydrate-background:done',
       'initial-applyTransform',
       'end',
     ]);
@@ -166,26 +135,6 @@ var OpenDebug = (() => {
       ready: e.meta?.ready ?? '',
       hydrated: e.meta?.hydrated ?? '',
       remaining: e.meta?.remaining ?? '',
-      visibleBitmapsReady: e.meta?.visibleBitmapsReady ?? e.meta?.after ?? '',
-      visibleBitmapsFailed: e.meta?.visibleBitmapsFailed ?? e.meta?.failed ?? '',
-      visibleBitmapsMissing: e.meta?.visibleBitmapsMissing ?? e.meta?.missing ?? '',
-      openPreviewBuilt: e.step === 'open-preview-visible:end' ? e.meta?.built ?? '' : e.meta?.previewBuilt ?? '',
-      openPreviewReady: e.step === 'open-preview-visible:end' ? e.meta?.ready ?? '' : e.meta?.previewReady ?? '',
-      openPreviewPendingReady: e.step === 'open-preview-visible:end' ? e.meta?.pendingReady ?? '' : e.meta?.previewPendingReady ?? '',
-      openPreviewMB: e.step === 'open-preview-visible:end' ? e.meta?.mb ?? '' : e.meta?.previewMB ?? '',
-      openPreviewMaxMs: e.step === 'open-preview-visible:end' ? e.meta?.maxMs ?? '' : e.meta?.previewMaxMs ?? '',
-      openPreviewMaxKey: e.step === 'open-preview-visible:end' ? e.meta?.maxKey ?? '' : e.meta?.previewMaxKey ?? '',
-      openPreviewPending: e.step === 'open-preview-release' ? e.meta?.pending ?? '' : '',
-      openPreviewReleased: e.step === 'open-preview-release' ? e.meta?.released ?? '' : '',
-      openPreviewRemaining: e.step === 'open-preview-release' ? e.meta?.remaining ?? '' : '',
-      openPreviewHeldSource: e.step === 'open-preview-render-held' ? e.meta?.source ?? '' : '',
-      openPreviewHeldPendingReadyVariants: e.step === 'open-preview-render-held' ? e.meta?.pendingReadyVariants ?? '' : '',
-      openPreviewDynamicReady: e.step === 'open-preview-dynamic' ? e.meta?.ready ?? '' : '',
-      openPreviewDynamicSkipped: e.step === 'open-preview-dynamic' ? e.meta?.skipped ?? '' : '',
-      openPreviewDynamicKey: e.step === 'open-preview-dynamic' ? e.meta?.imgKey ?? '' : '',
-      scaledPrewarmBuilt: e.step === 'prewarm-visible-scaled-variants' ? e.meta?.built ?? '' : '',
-      scaledPrewarmReady: e.step === 'prewarm-visible-scaled-variants' ? e.meta?.alreadyReady ?? '' : '',
-      scaledPrewarmCandidates: e.step === 'prewarm-visible-scaled-variants' ? e.meta?.candidates ?? '' : '',
       rustTotalMs: e.meta?.rust?.total_ms ?? '',
       rustImageReadMs: e.meta?.rust?.image_read_ms ?? '',
       rustImageReadMaxMs: e.meta?.rust?.image_read_max_ms ?? '',
@@ -210,7 +159,7 @@ var OpenDebug = (() => {
       hydrated: last?.meta?.hydrated ?? '',
       remaining: last?.meta?.remaining ?? '',
       error: last?.meta?.error || '',
-      hydrationMode: 'visible-first',
+      hydrationMode: 'all-before-interaction',
       hydrationConcurrency: getOpenHydrationConcurrency(),
     }];
     console.table(rows);
@@ -230,7 +179,7 @@ var OpenDebug = (() => {
       maxImageMs: Math.round(max('ms') * 100) / 100,
       maxFetchMs: Math.round(max('fetchMs') * 100) / 100,
       concurrency: getOpenHydrationConcurrency(),
-      mode: 'visible-first',
+      mode: 'all-before-interaction',
     };
     console.table([out]);
     return out;
@@ -246,9 +195,7 @@ var OpenDebug = (() => {
         totalMs: 0,
         queueWaitMs: 0,
         bitmapMs: 0,
-        previewMs: 0,
         renderScheduleMs: 0,
-        renderSkipped: '',
         bitmapReady: '',
         bitmapFailed: '',
         error: '',
@@ -263,11 +210,8 @@ var OpenDebug = (() => {
         row.queueWaitMs = meta.queueWaitMs ?? row.queueWaitMs;
       } else if (event.step === 'cache-image:createImageBitmap') {
         row.bitmapMs = meta.ms ?? row.bitmapMs;
-      } else if (event.step === 'cache-image:previewBitmap') {
-        row.previewMs = meta.ms ?? row.previewMs;
       } else if (event.step === 'cache-image:schedule-render') {
         row.renderScheduleMs = meta.ms ?? row.renderScheduleMs;
-        row.renderSkipped = meta.skipped || row.renderSkipped;
       } else if (event.step.endsWith(':error')) {
         row.error = meta.error || row.error;
       }
@@ -291,9 +235,7 @@ var OpenDebug = (() => {
         cacheTotalMs: e.meta?.cacheTotalMs ?? '',
         cacheQueueWaitMs: e.meta?.cacheQueueWaitMs ?? '',
         cacheBitmapMs: e.meta?.cacheBitmapMs ?? '',
-        cachePreviewMs: e.meta?.cachePreviewMs ?? '',
         cacheRenderScheduleMs: e.meta?.cacheRenderScheduleMs ?? '',
-        cacheRenderSkipped: e.meta?.cacheRenderSkipped ?? '',
         source: e.meta?.source ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
         displayReady: e.meta?.displayReady ?? '',
@@ -321,14 +263,9 @@ var OpenDebug = (() => {
         released: e.meta?.released ?? '',
         remaining: e.meta?.remaining ?? '',
         pendingImages: e.meta?.pendingImages ?? '',
-        visibleBitmapsReady: e.meta?.visibleBitmapsReady ?? e.meta?.after ?? '',
-        visibleBitmapsFailed: e.meta?.visibleBitmapsFailed ?? e.meta?.failed ?? '',
-        visibleBitmapsMissing: e.meta?.visibleBitmapsMissing ?? e.meta?.missing ?? '',
-        visibleBitmapSettleMs: e.meta?.visibleBitmapSettleMs ?? '',
         manifestRefs: e.meta?.manifestRefs ?? '',
         dataUrlRefs: e.meta?.dataUrlRefs ?? '',
         deferredInitialCacheImages: e.meta?.deferredInitialCacheImages ?? '',
-        visibleFirstOpen: e.meta?.visibleFirstOpen ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
         readyStage: e.meta?.cacheReadyStage ?? '',
         imgKey: e.meta?.imgKey || e.meta?.key || '',
@@ -342,8 +279,6 @@ var OpenDebug = (() => {
         drawnText: e.meta?.drawnText ?? '',
         visibleObjects: e.meta?.visibleObjects ?? '',
         missingImages: e.meta?.missingImages ?? '',
-        openPreviewFallback: e.meta?.openPreviewFallback ?? '',
-        openPreviewImages: e.meta?.openPreviewImages ?? '',
         bitmapImages: e.meta?.bitmapImages ?? '',
         elementImages: e.meta?.elementImages ?? '',
         scaledImages: e.meta?.scaledImages ?? '',
@@ -351,13 +286,6 @@ var OpenDebug = (() => {
         culledImages: e.meta?.culledImages ?? '',
         queueWaitMs: e.meta?.queueWaitMs ?? '',
         bitmapMs: e.meta?.bitmapMs ?? '',
-        previewMs: e.meta?.previewMs ?? '',
-        previewReady: e.meta?.previewReady ?? '',
-        previewPendingReady: e.meta?.previewPendingReady ?? '',
-        previewBuilt: e.meta?.previewBuilt ?? '',
-        previewMB: e.meta?.previewMB ?? e.meta?.mb ?? '',
-        previewMaxMs: e.meta?.previewMaxMs ?? e.meta?.maxMs ?? '',
-        previewMaxKey: e.meta?.previewMaxKey ?? e.meta?.maxKey ?? '',
         skipped: e.meta?.skipped ?? '',
         reason: e.meta?.reason || '',
         error: e.meta?.error || '',
@@ -411,31 +339,6 @@ var OpenDebug = (() => {
     return rows;
   }
 
-  function openPreviewBreakdown(limit = 24) {
-    const maxRows = Math.max(1, Math.min(200, Math.floor(Number(limit) || 24)));
-    const rows = latestOpenEvents();
-    const preview = [...rows].reverse().find(e => e.step === 'open-preview-visible:end');
-    const sourceRows = Array.isArray(preview?.meta?.slowResults)
-      ? preview.meta.slowResults
-      : Array.isArray(preview?.meta?.results)
-        ? preview.meta.results
-        : [];
-    const out = sourceRows
-      .map((row) => ({
-        imgKey: row?.key || '',
-        ms: row?.ms ?? '',
-        width: row?.width ?? '',
-        height: row?.height ?? '',
-        ready: row?.ready ?? '',
-        skipped: row?.skipped || '',
-        error: row?.error || '',
-      }))
-      .sort((a, b) => numberValue(b.ms) - numberValue(a.ms))
-      .slice(0, maxRows);
-    console.table(out);
-    return out;
-  }
-
   function latestOpenEvents() {
     const starts = events.filter(e => e.step === 'start' && /^open/.test(e.op || ''));
     const lastStart = starts[starts.length - 1];
@@ -462,53 +365,6 @@ var OpenDebug = (() => {
       .reduce((max, event) => Math.max(max, numberValue(event.meta?.[field])), 0));
   }
 
-  function openPreviewRuntimeStats(rows) {
-    const fallbackRows = rows.filter(e => e.step === 'open-preview-fallback-draw');
-    const heldRenderRows = rows.filter(e => e.step === 'open-preview-render-held');
-	    const dynamicRows = rows.filter(e => e.step === 'open-preview-dynamic');
-	    const dynamicQueuedRows = dynamicRows.filter(e => e.meta?.queued === true);
-	    const dynamicCompletionRows = dynamicRows.filter(e => e.meta?.queued !== true);
-    const releaseRows = rows.filter(e => e.step === 'open-preview-release');
-    const scheduleRows = rows.filter(e => e.step === 'cache-image:schedule-render');
-    const heldScheduleRows = scheduleRows.filter(e => e.meta?.skipped === 'open-preview-held');
-    const firstFallback = fallbackRows[0] || null;
-    const lastFallback = fallbackRows[fallbackRows.length - 1] || null;
-    const lastRelease = releaseRows[releaseRows.length - 1] || null;
-    const maxFallbackMissing = fallbackRows.reduce((max, event) => Math.max(max, numberValue(event.meta?.missingImages)), 0);
-    const maxFallbackDrawMs = fallbackRows.reduce((max, event) => Math.max(max, numberValue(event.meta?.totalMeasuredMs)), 0);
-    return {
-      openPreviewFallbackDrawCount: fallbackRows.length,
-      openPreviewFallbackMaxDrawMs: fallbackRows.length ? roundMs(maxFallbackDrawMs) : '',
-      openPreviewFallbackMissingMax: fallbackRows.length ? maxFallbackMissing : '',
-      openPreviewFallbackFirstImages: firstFallback?.meta?.openPreviewImages ?? '',
-      openPreviewFallbackLastImages: lastFallback?.meta?.openPreviewImages ?? '',
-      openPreviewFallbackFirstMissing: firstFallback?.meta?.missingImages ?? '',
-      openPreviewFallbackLastMissing: lastFallback?.meta?.missingImages ?? '',
-      openPreviewFallbackLastSource: lastFallback?.meta?.source || '',
-      openPreviewReleaseCount: releaseRows.length,
-      openPreviewReleaseReady: lastRelease?.meta?.ready ?? '',
-      openPreviewReleasePending: lastRelease?.meta?.pending ?? '',
-      openPreviewReleaseFailed: lastRelease?.meta?.failed ?? '',
-      openPreviewReleaseReleased: lastRelease?.meta?.released ?? '',
-	      openPreviewReleaseRemaining: lastRelease?.meta?.remaining ?? '',
-	      openPreviewHeldRenderSkips: heldScheduleRows.length,
-	      openPreviewHeldVariantRenderSkips: heldRenderRows.filter(e => e.meta?.source === 'image-scale-variant').length,
-	      openPreviewHeldRenderCount: heldRenderRows.length,
-	      openPreviewDynamicRequests: dynamicQueuedRows.length || dynamicRows.length,
-	      openPreviewDynamicCompletions: dynamicCompletionRows.length,
-	      openPreviewDynamicReady: dynamicCompletionRows.filter(e => e.meta?.ready === true).length,
-	      openPreviewDynamicSkipped: dynamicCompletionRows.filter(e => e.meta?.skipped).length,
-	      openPreviewDynamicConcurrency: dynamicRows.reduce((max, event) => Math.max(max, numberValue(event.meta?.concurrency)), 0) || '',
-	      openPreviewDynamicMaxActive: dynamicRows.reduce((max, event) => Math.max(max, numberValue(event.meta?.active)), 0) || '',
-	      openPreviewDynamicMaxQueued: dynamicRows.reduce((max, event) => Math.max(max, numberValue(event.meta?.queuedCount)), 0) || '',
-	      openPreviewDynamicMaxQueuedMs: dynamicCompletionRows.reduce((max, event) => Math.max(max, numberValue(event.meta?.waitMs ?? event.meta?.queuedMs)), 0) || '',
-	      openPreviewDynamicMaxBuildMs: dynamicCompletionRows.reduce((max, event) => Math.max(max, numberValue(event.meta?.buildMs ?? event.meta?.ms)), 0) || '',
-	      openPreviewDynamicMaxTotalMs: dynamicCompletionRows.reduce((max, event) => Math.max(max, numberValue(event.meta?.totalMs ?? event.meta?.ms)), 0) || '',
-	      openPreviewRenderScheduleEvents: scheduleRows.length,
-      openPreviewRenderScheduleNonHeld: scheduleRows.length - heldScheduleRows.length,
-    };
-  }
-
   function optimizationReport(options = {}) {
     const limit = Math.max(1, Math.min(200, Math.floor(Number(options.limit) || 40)));
     const rows = latestOpenEvents();
@@ -524,28 +380,16 @@ var OpenDebug = (() => {
     const restoreViewport = findStep('restore-counters-viewport');
     const historyReset = findStep('reset-boardHistory-markSaved');
     const initialPolicy = findStep('hydrate-initial-policy');
-    const visibleHydrate = findStep('hydrate-visible:end');
-    const bitmapSettle = findStep('hydrate-visible:bitmap-settle');
+    const hydrationEnd = findStep('hydrate-all:end');
     const initialRender = findStep('initial-applyTransform');
-    const openPreview = findStep('open-preview-visible:end');
-    const scaledPrewarm = findStep('prewarm-visible-scaled-variants');
     const shieldRemoved = findStep('opening-shield:removed');
-    const backgroundDone = findLastStep('hydrate-background:done');
     const endEvent = findLastStep('end');
-    const hydrationEnd = visibleHydrate;
-    const previewFirstPaintReady = visibleHydrate?.meta?.skipped === 'open-preview-ready' ||
-      (
-        numberValue(openPreview?.meta?.ready) > 0 &&
-        numberValue(openPreview?.meta?.ready) >= numberValue(openPreview?.meta?.selected || openPreview?.meta?.count)
-      ) ||
-      numberValue(initialRender?.meta?.openPreviewImages) > 0;
     const decodeQueueStarts = rows.filter(e => e.step === 'cache-image:decode-queue:start');
     const cacheDoneRows = rows.filter(e => e.step === 'cache-image:done');
     const bitmapRows = rows.filter(e => e.step === 'cache-image:createImageBitmap');
     const cacheErrors = rows.filter(e => /cache-image:.*:error$/.test(e.step || ''));
-    const previewStats = openPreviewRuntimeStats(rows);
     const summaryRow = {
-      mode: initialPolicy?.meta?.mode || 'visible-first',
+      mode: initialPolicy?.meta?.mode || 'all-before-interaction',
       objectCount: shape?.meta?.objectCount ?? endEvent?.meta?.objectCount ?? '',
       imageCount: shape?.meta?.imageCount ?? endEvent?.meta?.imageCount ?? '',
       imageObjectCount: shape?.meta?.imageObjectCount ?? '',
@@ -582,38 +426,8 @@ var OpenDebug = (() => {
       restoreViewportMs: restoreViewport?.meta?.ms ?? '',
       historyResetMs: historyReset?.meta?.ms ?? '',
       initialHydrationMs: hydrationEnd?.meta?.ms ?? '',
-      initialHydrationSkipped: hydrationEnd?.meta?.skipped ?? '',
       initialHydratedImages: hydrationEnd?.meta?.hydrated ?? '',
-      initialHydrationPreviewReady: hydrationEnd?.meta?.previewReady ?? '',
-      initialHydrationPreviewPendingReady: hydrationEnd?.meta?.previewPendingReady ?? '',
-      initialHydrationPreviewBuilt: hydrationEnd?.meta?.previewBuilt ?? '',
-      initialHydrationPreviewMB: hydrationEnd?.meta?.previewMB ?? '',
-      initialHydrationPreviewMaxMs: hydrationEnd?.meta?.previewMaxMs ?? '',
-      initialHydrationPreviewMaxKey: hydrationEnd?.meta?.previewMaxKey ?? '',
-      openPreviewMs: openPreview?.meta?.ms ?? '',
-      openPreviewSelected: openPreview?.meta?.selected ?? '',
-      openPreviewReady: openPreview?.meta?.ready ?? '',
-      openPreviewPendingReady: openPreview?.meta?.pendingReady ?? '',
-      openPreviewBuilt: openPreview?.meta?.built ?? '',
-      openPreviewFailed: openPreview?.meta?.failed ?? '',
-      openPreviewSkipped: openPreview?.meta?.skipped ?? '',
-      openPreviewMB: openPreview?.meta?.mb ?? '',
-      openPreviewMaxMs: openPreview?.meta?.maxMs ?? '',
-      openPreviewMaxKey: openPreview?.meta?.maxKey ?? '',
-      openPreviewMaxWidth: openPreview?.meta?.maxWidth ?? '',
-      openPreviewMaxHeight: openPreview?.meta?.maxHeight ?? '',
-      openPreviewConcurrency: openPreview?.meta?.concurrency ?? '',
-      ...previewStats,
-      visibleBitmapSettleMs: bitmapSettle?.meta?.ms ?? '',
-      visibleBitmapsReady: bitmapSettle?.meta?.after ?? '',
-      visibleBitmapsFailed: bitmapSettle?.meta?.failed ?? '',
       pendingAfterInitial: initialPolicy?.meta?.pendingImages ?? '',
-      scaledPrewarmMs: scaledPrewarm?.meta?.ms ?? '',
-      scaledPrewarmSkipped: scaledPrewarm?.meta?.skipped ?? '',
-      scaledPrewarmCandidates: scaledPrewarm?.meta?.candidates ?? '',
-      scaledPrewarmBuilt: scaledPrewarm?.meta?.built ?? '',
-      scaledPrewarmReady: scaledPrewarm?.meta?.alreadyReady ?? '',
-      scaledPrewarmMB: scaledPrewarm?.meta?.mb ?? '',
       initialRenderMs: initialRender?.meta?.ms ?? '',
       initialDrawMs: initialRender?.meta?.drawMs ?? '',
       initialDrawBoardMs: initialRender?.meta?.drawBoardTotalMs ?? '',
@@ -622,7 +436,6 @@ var OpenDebug = (() => {
       initialVisibleObjects: initialRender?.meta?.visibleObjects ?? '',
       initialDrawnImages: initialRender?.meta?.drawnImages ?? '',
       initialDrawnText: initialRender?.meta?.drawnText ?? '',
-      initialOpenPreviewImages: initialRender?.meta?.openPreviewImages ?? '',
       initialBitmapImages: initialRender?.meta?.bitmapImages ?? '',
       initialElementImages: initialRender?.meta?.elementImages ?? '',
       initialScaledImages: initialRender?.meta?.scaledImages ?? '',
@@ -637,9 +450,6 @@ var OpenDebug = (() => {
       imageCacheTotalMs: sumMeta(cacheDoneRows, 'ms'),
       imageCacheMaxMs: maxMeta(cacheDoneRows, 'ms'),
       imageCacheErrors: cacheErrors.length,
-      backgroundHydrationMs: backgroundDone?.meta?.ms ?? '',
-      backgroundHydratedImages: backgroundDone?.meta?.hydrated ?? '',
-      backgroundRemainingImages: backgroundDone?.meta?.remaining ?? '',
       deferredInitialCacheImages: cacheStartAll?.meta?.deferredInitialCacheImages ?? '',
       timeToOpenEndMs: endEvent?.total ?? '',
     };
@@ -647,21 +457,16 @@ var OpenDebug = (() => {
       { phase: 'read board', ms: numberValue(summaryRow.readInvokeMs), detail: 'file read + container decode' },
       { phase: 'rust image read', ms: numberValue(summaryRow.rustImageReadMs), detail: 'image extraction from board file' },
       { phase: 'apply state', ms: numberValue(summaryRow.applyStateMs), detail: 'replace objects and editor state' },
-      { phase: 'open preview build', ms: numberValue(summaryRow.openPreviewMs), detail: 'visible preview bitmap build for first draw' },
       {
         phase: 'initial hydration',
-        ms: previewFirstPaintReady ? 0 : numberValue(summaryRow.initialHydrationMs),
-        detail: 'visible/all image display hydration',
+        ms: numberValue(summaryRow.initialHydrationMs),
+        detail: 'image display hydration before interaction',
       },
-      { phase: 'scaled variant prewarm', ms: numberValue(summaryRow.scaledPrewarmMs), detail: 'visible low-resolution image variant build' },
-      { phase: 'visible bitmap settle', ms: numberValue(summaryRow.visibleBitmapSettleMs), detail: 'wait for first visible bitmaps' },
       { phase: 'initial render', ms: numberValue(summaryRow.initialRenderMs), detail: 'applyTransform wrapper' },
       { phase: 'initial draw board', ms: numberValue(summaryRow.initialDrawBoardMs || summaryRow.initialDrawMs), detail: 'canvas draw' },
-      { phase: 'background image decode queue wait max', ms: numberValue(summaryRow.decodeQueueWaitMaxMs), detail: 'slowest queued image decode start', background: true },
-      { phase: 'background bitmap decode max', ms: numberValue(summaryRow.bitmapDecodeMaxMs), detail: 'slowest createImageBitmap', background: true },
-    ].filter(row => row.ms > 0).sort((a, b) => (
-      a.background === b.background ? b.ms - a.ms : (a.background ? 1 : -1)
-    ));
+      { phase: 'image decode queue wait max', ms: numberValue(summaryRow.decodeQueueWaitMaxMs), detail: 'slowest queued image decode start' },
+      { phase: 'bitmap decode max', ms: numberValue(summaryRow.bitmapDecodeMaxMs), detail: 'slowest createImageBitmap' },
+    ].filter(row => row.ms > 0).sort((a, b) => b.ms - a.ms);
     const findings = [];
     const top = candidateRows[0];
     if (top) findings.push(`Largest measured critical opening cost: ${top.phase} (${roundMs(top.ms)}ms, ${top.detail}).`);
@@ -669,42 +474,10 @@ var OpenDebug = (() => {
       findings.push(`File picker/user selection took ${roundMs(summaryRow.filePickerMs)}ms and is separated from appCriticalPathMs (${roundMs(summaryRow.appCriticalPathMs)}ms).`);
     }
     if (numberValue(summaryRow.rustImageReadMs) > 100) findings.push('Board file image extraction is material; compare smaller/compressed images or lazy extraction.');
-    if (previewFirstPaintReady) {
-      findings.push(`Opening previews covered the first draw (${summaryRow.openPreviewReady || summaryRow.initialOpenPreviewImages}/${summaryRow.openPreviewSelected || summaryRow.initialDrawnImages} previews, ${roundMs(summaryRow.openPreviewMs)}ms, ${summaryRow.openPreviewMB || summaryRow.initialHydrationPreviewMB || 0}MB); full bitmap hydration is background work.`);
-    } else if (numberValue(summaryRow.openPreviewMs) > 100) {
-      findings.push('Opening preview build is material but did not fully cover first draw; inspect openPreviewBreakdown for skipped or failed keys.');
-    }
-    if (numberValue(summaryRow.openPreviewFallbackDrawCount) > 0) {
-      if (numberValue(summaryRow.openPreviewFallbackMissingMax) > 0) {
-        findings.push(`Preview fallback draws reported missing images (max ${summaryRow.openPreviewFallbackMissingMax}); this can cause visible blanking while full bitmaps hydrate.`);
-      } else {
-        findings.push(`Preview fallback stayed populated across ${summaryRow.openPreviewFallbackDrawCount} draw(s); no missing-image blanking was recorded.`);
-      }
-      if (numberValue(summaryRow.openPreviewFallbackDrawCount) > 5 && numberValue(summaryRow.openPreviewHeldRenderSkips) === 0) {
-        findings.push('Preview fallback redrew repeatedly while waiting for final release; image-ready renders were not held in this capture.');
-      }
-    }
-    if (numberValue(summaryRow.openPreviewHeldRenderSkips) > 0) {
-      findings.push(`${summaryRow.openPreviewHeldRenderSkips} image-ready redraw(s) were held while opening previews were active.`);
-    }
-    if (numberValue(summaryRow.openPreviewHeldVariantRenderSkips) > 0) {
-      findings.push(`${summaryRow.openPreviewHeldVariantRenderSkips} scaled-variant redraw(s) were held while opening previews were active.`);
-    }
-    if (numberValue(summaryRow.openPreviewReleaseCount) > 0) {
-      if (numberValue(summaryRow.openPreviewReleaseRemaining) === 0 && numberValue(summaryRow.openPreviewReleaseReleased) > 0) {
-        findings.push(`Opening previews were released together after full visible bitmaps were ready (${summaryRow.openPreviewReleaseReleased} released).`);
-      } else if (numberValue(summaryRow.openPreviewReleasePending) > 0) {
-        findings.push(`Opening previews were still holding release at capture time (${summaryRow.openPreviewReleasePending} pending).`);
-      }
-    }
-    if (numberValue(summaryRow.visibleBitmapSettleMs) > 100) findings.push('Initial open waits on visible bitmap readiness; inspect slowImages/cacheImageBreakdown for the visible image keys.');
-    if (numberValue(summaryRow.decodeQueueWaitMaxMs) > 50) findings.push(previewFirstPaintReady ? 'Post-open image decode queue wait is visible during background hydration; tune only if after-open readiness matters.' : 'Image decode queue wait is visible; tune open hydration concurrency only after checking bitmap decode time.');
-    if (numberValue(summaryRow.bitmapDecodeMaxMs) > 100) findings.push(previewFirstPaintReady ? 'At least one background bitmap decode is slow; inspect the largest images if full-board readiness matters.' : 'At least one bitmap decode is slow; inspect the largest images and their dimensions.');
+    if (numberValue(summaryRow.decodeQueueWaitMaxMs) > 50) findings.push('Image decode queue wait is visible; tune open hydration concurrency only after checking bitmap decode time.');
+    if (numberValue(summaryRow.bitmapDecodeMaxMs) > 100) findings.push('At least one bitmap decode is slow; inspect the largest images and their dimensions.');
     if (numberValue(summaryRow.initialObjectLoopMs) > 50) findings.push('First draw spends significant time in the object loop; inspect object counts, visible counts, and culling.');
     if (numberValue(summaryRow.initialScaledFallbackFull) || numberValue(summaryRow.initialScaledVariantPendingImages)) findings.push('Scaled image variants were missing during first draw; prewarm timing may be worth testing.');
-    if (numberValue(summaryRow.scaledPrewarmBuilt) > 0 && numberValue(summaryRow.initialScaledFallbackFull) === 0) findings.push('Initial scaled variant prewarm covered the first draw.');
-    if (summaryRow.scaledPrewarmSkipped === 'open-preview-ready') findings.push('Scaled variant prewarm was skipped because opening previews were ready for first draw.');
-    if (numberValue(summaryRow.backgroundRemainingImages) > 0) findings.push('Background hydration did not finish by capture end; wait longer before finishDebug if full-board readiness matters.');
     if (!findings.length) findings.push('No measured opening phase clearly dominates this capture.');
     const timeline = rows
       .filter(e => e.step !== 'cache-image:source' && e.step !== 'cache-image:set-src')
@@ -722,15 +495,7 @@ var OpenDebug = (() => {
         ready: e.meta?.ready ?? '',
         built: e.meta?.built ?? '',
         skipped: e.meta?.skipped ?? '',
-        openPreviewFallback: e.meta?.openPreviewFallback ?? '',
-        openPreviewImages: e.meta?.openPreviewImages ?? '',
         missingImages: e.meta?.missingImages ?? '',
-        previewReady: e.meta?.previewReady ?? '',
-        previewPendingReady: e.meta?.previewPendingReady ?? '',
-        previewBuilt: e.meta?.previewBuilt ?? '',
-        previewMB: e.meta?.previewMB ?? e.meta?.mb ?? '',
-        previewMaxMs: e.meta?.previewMaxMs ?? e.meta?.maxMs ?? '',
-        previewMaxKey: e.meta?.previewMaxKey ?? e.meta?.maxKey ?? '',
         imgKey: e.meta?.imgKey || e.meta?.key || '',
         error: e.meta?.error || '',
       }));
@@ -740,9 +505,7 @@ var OpenDebug = (() => {
         totalMs: e.meta?.ms ?? '',
         queueWaitMs: e.meta?.queueWaitMs ?? '',
         bitmapMs: e.meta?.bitmapMs ?? '',
-        previewMs: e.meta?.previewMs ?? '',
         renderScheduleMs: e.meta?.renderScheduleMs ?? '',
-        renderSkipped: e.meta?.cacheRenderSkipped ?? '',
         bitmapReady: e.meta?.bitmapReady ?? '',
         bitmapFailed: e.meta?.bitmapFailed ?? '',
       }))
@@ -768,12 +531,8 @@ var OpenDebug = (() => {
     const findStep = (step) => rows.find(e => e.step === step) || null;
     const findLastStep = (step) => [...rows].reverse().find(e => e.step === step) || null;
     const initialPolicy = findStep('hydrate-initial-policy');
-    const visibleHydrate = findStep('hydrate-visible:end');
-    const bitmapSettle = findStep('hydrate-visible:bitmap-settle');
-    const backgroundDone = findLastStep('hydrate-background:done');
+    const hydrationEnd = findStep('hydrate-all:end');
     const initialRender = findStep('initial-applyTransform');
-    const openPreview = findStep('open-preview-visible:end');
-    const scaledPrewarm = findStep('prewarm-visible-scaled-variants');
     const endEvent = findLastStep('end');
     const fileDialog = rows.find(e => e.step === 'invoke:ok' && /web_open_file_dialog/.test(e.meta?.command || '')) ||
       null;
@@ -785,16 +544,8 @@ var OpenDebug = (() => {
     const applyState = findStep('apply-state');
     const cacheStartAll = findStep('cacheImage:start-all');
     const openingShieldRemoved = findStep('opening-shield:removed');
-    const hydrationEnd = visibleHydrate;
-    const previewFirstPaintReady = visibleHydrate?.meta?.skipped === 'open-preview-ready' ||
-      (
-        numberValue(openPreview?.meta?.ready) > 0 &&
-        numberValue(openPreview?.meta?.ready) >= numberValue(openPreview?.meta?.selected || openPreview?.meta?.count)
-      ) ||
-      numberValue(initialRender?.meta?.openPreviewImages) > 0;
-    const previewStats = openPreviewRuntimeStats(rows);
     const summaryRow = {
-      mode: initialPolicy?.meta?.mode || 'visible-first',
+      mode: initialPolicy?.meta?.mode || 'all-before-interaction',
       objectCount: shape?.meta?.objectCount ?? endEvent?.meta?.objectCount ?? '',
       imageCount: shape?.meta?.imageCount ?? endEvent?.meta?.imageCount ?? '',
       filePickerMs: fileDialog?.meta?.ms ?? fileDialog?.dt ?? '',
@@ -812,25 +563,7 @@ var OpenDebug = (() => {
       cacheStartAllMs: cacheStartAll?.meta?.ms ?? '',
       deferredInitialCacheImages: cacheStartAll?.meta?.deferredInitialCacheImages ?? '',
       initialHydrationMs: hydrationEnd?.meta?.ms ?? '',
-      initialHydrationSkipped: hydrationEnd?.meta?.skipped ?? '',
       initialHydratedImages: hydrationEnd?.meta?.hydrated ?? '',
-      openPreviewMs: openPreview?.meta?.ms ?? '',
-      openPreviewSelected: openPreview?.meta?.selected ?? '',
-      openPreviewReady: openPreview?.meta?.ready ?? '',
-      openPreviewBuilt: openPreview?.meta?.built ?? '',
-      openPreviewMB: openPreview?.meta?.mb ?? '',
-      openPreviewMaxMs: openPreview?.meta?.maxMs ?? '',
-      openPreviewMaxKey: openPreview?.meta?.maxKey ?? '',
-      ...previewStats,
-      visibleBitmapSettleMs: bitmapSettle?.meta?.ms ?? '',
-      scaledPrewarmMs: scaledPrewarm?.meta?.ms ?? '',
-      scaledPrewarmSkipped: scaledPrewarm?.meta?.skipped ?? '',
-      scaledPrewarmBuilt: scaledPrewarm?.meta?.built ?? '',
-      scaledPrewarmCandidates: scaledPrewarm?.meta?.candidates ?? '',
-      visibleBitmapsBeforeSettle: bitmapSettle?.meta?.before ?? '',
-      visibleBitmapsAfterSettle: bitmapSettle?.meta?.after ?? '',
-      visibleBitmapsFailedAfterSettle: bitmapSettle?.meta?.failed ?? '',
-      visibleBitmapsMissingAfterSettle: bitmapSettle?.meta?.missing ?? '',
       pendingAfterInitial: initialPolicy?.meta?.pendingImages ?? '',
       initialRenderMs: initialRender?.meta?.ms ?? '',
       initialTransformMeasuredMs: initialRender?.meta?.totalMeasuredMs ?? '',
@@ -839,7 +572,6 @@ var OpenDebug = (() => {
       initialDrawBoardMs: initialRender?.meta?.drawBoardTotalMs ?? '',
       initialObjectLoopMs: initialRender?.meta?.objectLoopMs ?? '',
       initialDrawnImages: initialRender?.meta?.drawnImages ?? '',
-      initialOpenPreviewImages: initialRender?.meta?.openPreviewImages ?? '',
       initialBitmapImages: initialRender?.meta?.bitmapImages ?? '',
       initialElementImages: initialRender?.meta?.elementImages ?? '',
       initialScaledImages: initialRender?.meta?.scaledImages ?? '',
@@ -848,9 +580,6 @@ var OpenDebug = (() => {
       timeToInitialRenderMs: initialRender?.total ?? '',
       shieldRemoveMs: openingShieldRemoved?.meta?.ms ?? '',
       timeToOpenEndMs: endEvent?.total ?? '',
-      backgroundHydrationMs: backgroundDone?.meta?.ms ?? '',
-      backgroundHydratedImages: backgroundDone?.meta?.hydrated ?? '',
-      backgroundRemainingImages: backgroundDone?.meta?.remaining ?? '',
     };
     const findings = [];
     if (Number(summaryRow.rustImageReadMs) > Number(summaryRow.initialHydrationMs || 0)) {
@@ -858,25 +587,6 @@ var OpenDebug = (() => {
     }
     if (numberValue(summaryRow.filePickerMs) > 250) {
       findings.push(`File picker/user selection took ${roundMs(summaryRow.filePickerMs)}ms and is separated from appCriticalPathMs (${roundMs(summaryRow.appCriticalPathMs)}ms).`);
-    }
-    if (previewFirstPaintReady) {
-      findings.push(`Opening previews covered the first draw (${summaryRow.openPreviewReady || summaryRow.initialOpenPreviewImages}/${summaryRow.openPreviewSelected || summaryRow.initialDrawnImages} previews, ${roundMs(summaryRow.openPreviewMs)}ms).`);
-    } else if (Number(summaryRow.openPreviewMs) > 100) {
-      findings.push('Opening preview build is material but did not fully cover first draw.');
-    }
-    if (numberValue(summaryRow.openPreviewFallbackMissingMax) > 0) {
-      findings.push(`Preview fallback draws reported missing images (max ${summaryRow.openPreviewFallbackMissingMax}).`);
-    } else if (numberValue(summaryRow.openPreviewFallbackDrawCount) > 0) {
-      findings.push(`Preview fallback stayed populated across ${summaryRow.openPreviewFallbackDrawCount} draw(s).`);
-    }
-    if (numberValue(summaryRow.openPreviewHeldRenderSkips) > 0) {
-      findings.push(`${summaryRow.openPreviewHeldRenderSkips} image-ready redraw(s) were held while opening previews were active.`);
-    }
-    if (numberValue(summaryRow.openPreviewHeldVariantRenderSkips) > 0) {
-      findings.push(`${summaryRow.openPreviewHeldVariantRenderSkips} scaled-variant redraw(s) were held while opening previews were active.`);
-    }
-    if (numberValue(summaryRow.openPreviewReleaseRemaining) === 0 && numberValue(summaryRow.openPreviewReleaseReleased) > 0) {
-      findings.push(`Opening previews were released together after full visible bitmaps were ready (${summaryRow.openPreviewReleaseReleased} released).`);
     }
     if (Number(summaryRow.initialRenderMs) > 50) {
       if (Number(summaryRow.initialDrawMs) > 50 || Number(summaryRow.initialDrawBoardMs) > 50) {
@@ -893,7 +603,6 @@ var OpenDebug = (() => {
 
   function reset() {
     core.reset();
-    latestOpenContext = null;
     initialRenderDebugDepth = 0;
   }
 
@@ -920,15 +629,11 @@ var OpenDebug = (() => {
     stepSummary,
     imageStoreSummary,
     imageStoreSample,
-      hydrationCandidates,
-      slowImages,
-      openPreviewBreakdown,
-      optimizationReport,
-      recordPreviewFallbackDraw,
-      recordPreviewHeldRender,
-      recordDynamicPreview,
-      report,
-      reset,
+    hydrationCandidates,
+    slowImages,
+    optimizationReport,
+    report,
+    reset,
     get enabled() { return core.enabled; },
     get hydrationConcurrency() { return getOpenHydrationConcurrency(); },
     get events() { return events.slice(); },

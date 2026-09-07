@@ -80,8 +80,6 @@ const DIAGNOSTIC_CALLS = Object.freeze([
   'clipboardElapsedMs',
   'webSourceClipboardKind',
   'isHistoryDebugEnabled',
-  'isDebugApiEnabled',
-  'shouldPrepareImagePreviewDebug',
   'isDebugApiEnabledForStep',
   'isOpenDebugActive',
   'isPillDebugActive',
@@ -134,7 +132,11 @@ async function resetDir(dir) {
 async function copyStaticAssets(outDir) {
   await copyFile(path.join(srcRoot, 'styles.css'), path.join(outDir, 'styles.css'));
   await copyFile(path.join(srcRoot, 'boardfish-icon.png'), path.join(outDir, 'boardfish-icon.png'));
-  await cp(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'), { recursive: true, dereference: true });
+  await cp(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'), {
+    recursive: true,
+    dereference: true,
+    filter: (source) => path.extname(source) !== '.js',
+  });
   await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
   await copyFile(path.join(srcRoot, 'boardfish-icon-192.png'), path.join(outDir, 'boardfish-icon-192.png'));
 }

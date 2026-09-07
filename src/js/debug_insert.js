@@ -33,7 +33,7 @@ var InsertDebug = (() => {
         dt: e.dt,
         source: e.meta?.source || '',
         fileCount: e.meta?.fileCount ?? '',
-        readyCount: e.meta?.readyCount ?? e.meta?.count ?? '',
+        readyCount: e.meta?.count ?? '',
         fileName: e.meta?.fileName || '',
         fileSize: e.meta?.fileSize ?? '',
         fileType: e.meta?.fileType || '',
@@ -110,7 +110,6 @@ var InsertDebug = (() => {
           cacheQueueWaitMs: ready?.meta?.cacheQueueWaitMs ?? '',
           cacheBitmapMs: ready?.meta?.cacheBitmapMs ?? '',
           bitmapReady: ready?.meta?.bitmapReady ?? '',
-          resolveOnLoad: cacheQueued?.meta?.resolveOnLoad ?? '',
           sourceKind: webRef?.meta?.sourceKind || cacheQueued?.meta?.sourceKind || end.meta?.sourceKind || '',
           width: webRef?.meta?.width ?? '',
           height: webRef?.meta?.height ?? '',
@@ -150,10 +149,8 @@ var InsertDebug = (() => {
     const concurrencyStep = findStep('bulk:start');
     const maxReadMs = readEnds.reduce((n, e) => Math.max(n, Number(e.dt) || 0), 0);
     const maxRead = readEnds.find(e => (Number(e.dt) || 0) === maxReadMs);
-    const readyStart = findStep('ready:wait-start');
-    const readyEnd = findStep('ready:wait-end');
     const bulkEnd = findStep('bulk:end');
-    const registerMs = readyStart ? readyStart.total : (bulkEnd ? bulkEnd.total : last.total);
+    const registerMs = bulkEnd ? bulkEnd.total : last.total;
     const out = {
       source: last.meta?.source || '',
       added: last.meta?.added ?? imageEnds.filter(e => e.meta?.added).length,
@@ -167,8 +164,6 @@ var InsertDebug = (() => {
       maxReadMs: round(maxReadMs),
       maxReadFile: maxRead?.meta?.fileName || '',
       registerMs,
-      readyWaitMs: readyStart && readyEnd ? round(readyEnd.total - readyStart.total) : 0,
-      readyCount: readyStart?.meta?.readyCount ?? '',
       historyAdded: bulkEnd?.meta?.historyAdded ?? '',
       errors: imageEnds.filter(e => e.meta?.error).length,
     };

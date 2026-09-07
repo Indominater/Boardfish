@@ -121,10 +121,6 @@ const bitmapSourceFromImageSource = async (source) => {
     const container = globalThis.BoardfishWebBoardContainer;
     const blob = container?.blobForImageSource?.(source);
     if (blob) return blob;
-    const bytes = container?.bytesForImageSource?.(source);
-    if (bytes && typeof Blob !== 'undefined') {
-      return new Blob([bytes], { type: source.mime || 'image/png' });
-    }
   }
   if (source && typeof Blob !== 'undefined' && source instanceof Blob) return source;
   if (typeof source === 'string' && source && typeof fetch === 'function') {
@@ -156,7 +152,6 @@ const BULK_IMAGE_READY_RENDER_INTERVAL_MS = 450;
 
 function scheduleImageReadyRender() {
   if (_boardOpening) return;
-  invalidateOffscreen();
   const now = performance.now();
   const intervalMs = _bulkImageInsertDepth > 0 ? BULK_IMAGE_READY_RENDER_INTERVAL_MS : IMAGE_READY_RENDER_INTERVAL_MS;
   if (now - _imageReadyLastRender <= intervalMs) return;
@@ -261,28 +256,6 @@ function processImageDecodeQueue() {
   }
 }
 
-/* BOARDFISH_DEV_DIAGNOSTICS_START */
-const isDebugApiEnabled = (api) => {
-  return !!(api && (api.enabled === true || api.isEnabled?.() === true));
-};
-
-const shouldPrepareImagePreviewDebug = (dbg = null) => {
-  return isDebugApiEnabled(ViewportDebug) || (!!dbg && isDebugApiEnabled(OpenDebug));
-};
-
-function ensureImagePreviewBitmap(key, dbg = null) {
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    const t0 = performance.now();
-    // Placeholder hook for future lower-resolution previews. The timing is kept
-    // separate from ImageBitmap creation so readiness reports show the true stage.
-    ViewportDebug.count('imagePreviewPrepared');
-    const ms = performance.now() - t0;
-    ViewportDebug.max('maxImagePreviewMs', ms);
-    if (dbg) ViewportDebug.step(dbg, 'previewBitmap', { key, ms, skipped: true });
-  }
-}
-/* BOARDFISH_DEV_DIAGNOSTICS_END */
-
 function cacheImage(key, src
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
@@ -298,9 +271,7 @@ function cacheImage(key, src
     cacheTotalMs: 0,
     cacheQueueWaitMs: 0,
     cacheBitmapMs: 0,
-    cachePreviewMs: 0,
     cacheRenderScheduleMs: 0,
-    cacheRenderSkipped: '',
     cacheReadyStage: '',
   };
   const srcInfo = imageSourceDebugInfo(src);
@@ -445,27 +416,6 @@ function cacheImage(key, src
     }
 
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (shouldPrepareImagePreviewDebug(dbg) && imageBitmapCache[key]) {
-      const previewStart = performance.now();
-      try {
-        ensureImagePreviewBitmap(key, dbg);
-        const previewMs = performance.now() - previewStart;
-        cacheMetrics.cachePreviewMs = previewMs;
-        ViewportDebug.max('maxImagePreviewMs', previewMs);
-        ViewportDebug.step(vpDbg, 'previewBitmap', { ms: previewMs });
-        OpenDebug.step(dbg, 'cache-image:previewBitmap', { imgKey: key, ms: previewMs, ok: true });
-      } catch (err) {
-        const previewMs = performance.now() - previewStart;
-        cacheMetrics.cachePreviewMs = previewMs;
-        ViewportDebug.count('imagePreviewFailures');
-        ViewportDebug.max('maxImagePreviewMs', previewMs);
-        ViewportDebug.step(vpDbg, 'previewBitmap:error', { ms: previewMs, error: String(err) });
-        OpenDebug.step(dbg, 'cache-image:previewBitmap:error', { imgKey: key, ms: previewMs, error: String(err) });
-      }
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const renderScheduleStart = performance.now();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     scheduleImageReadyRender();
@@ -476,7 +426,6 @@ function cacheImage(key, src
     OpenDebug.step(dbg, 'cache-image:schedule-render', {
       imgKey: key,
       ms: cacheMetrics.cacheRenderScheduleMs,
-      skipped: cacheMetrics.cacheRenderSkipped,
     });
     ViewportDebug.end(vpDbg, {
       key,
@@ -489,9 +438,7 @@ function cacheImage(key, src
       ms: cacheMetrics.cacheTotalMs,
       queueWaitMs: cacheMetrics.cacheQueueWaitMs,
       bitmapMs: cacheMetrics.cacheBitmapMs,
-      previewMs: cacheMetrics.cachePreviewMs,
       renderScheduleMs: cacheMetrics.cacheRenderScheduleMs,
-      cacheRenderSkipped: cacheMetrics.cacheRenderSkipped,
       bitmapReady: !!imageBitmapCache[key],
       bitmapFailed: imageBitmapFailed.has(key),
       bitmapOnly: true,

@@ -298,22 +298,6 @@ test('drawable bitmap warmup queue reuses one insertion-ordered map', () => {
   assert.doesNotMatch(imageVariants, /var drawableBitmapWarmupQueued =/);
 });
 
-test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing size', () => {
-  const viewport = readSource('src/js/viewport.js');
-  const start = viewport.indexOf('function _rebuildOffscreen(dpr, viewportRect)');
-  const end = viewport.indexOf('\nfunction', start + 1);
-  const source = viewport.slice(start, end > start ? end : undefined);
-
-  assert.notEqual(start, -1);
-  assert.doesNotMatch(source, /bitmapPromises/);
-  assert.doesNotMatch(source, /ensure-bitmaps/);
-  assert.doesNotMatch(source, /scheduleRender/);
-  assert.match(source, /if \(_offscreen\.width !== boardCanvas\.width\) _offscreen\.width = boardCanvas\.width;/);
-  assert.match(source, /if \(_offscreen\.height !== boardCanvas\.height\) _offscreen\.height = boardCanvas\.height;/);
-  assert.match(source, /_offscreenDirty = false;/);
-  assert.doesNotMatch(viewport, /_offscreen(?:Rebuilding|Version)/);
-});
-
 test('viewport transforms do not schedule an unbounded automatic text prewarm', () => {
   const viewport = readSource('src/js/viewport.js');
   const start = viewport.indexOf('function applyTransform');

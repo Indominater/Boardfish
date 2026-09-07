@@ -100,7 +100,6 @@ function storeAppTheme() {
 }
 
 function repaintBoardForThemeChange() {
-  if (typeof invalidateOffscreen === 'function') invalidateOffscreen();
   if (typeof scheduleRender === 'function') {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {

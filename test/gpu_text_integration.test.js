@@ -120,19 +120,17 @@ for(const gpu of [false,true])test(`opaque text editing preserves ordered scene 
     isBoardfishGpuContext: gpu,
     beginFrame(current) { assert.strictEqual(current, objects); calls.push('begin'); },
     endFrame() { calls.push('end'); }, resetTransform() {},
-    drawImage() { assert.fail('GPU editing must not flatten the image-only cache above or below all text'); },
+    drawImage() { assert.fail('Editing must preserve the ordered scene composition'); },
   };
   const scope = {
-    ctx: context, objects, editingId: 'editing', _boardOpening: false, _offscreenDirty: true,
-    boardRenderer:{opaqueTextBackgrounds:true},
+    ctx: context, objects, editingId: 'editing', _boardOpening: false,
     ViewportDebug: { isEnabled: () => false }, OpenDebug: {},
     window: { devicePixelRatio: 2 }, boardCanvas: { width: 400, height: 256 }, zoom: 1,
     syncBoardCanvasBackingStore() {},
     viewportWorldRect: () => ({ x1: 0, y1: 0, x2: 200, y2: 128 }),
-    _rebuildOffscreen() { assert.fail('GPU scene resources already retain images'); },
     fillBoardBackground() { calls.push('background'); }, setWorldCanvasTransform() {},
-    drawVisibleObjects(_context, _counters, _viewport, _resolver, omitted, onlyText) {
-      assert.equal(omitted, 'editing'); assert.equal(onlyText, undefined);
+    drawVisibleObjects(_context, _counters, _viewport, _resolver, omitted) {
+      assert.equal(omitted, 'editing');
       calls.push('scene text', 'scene image'); return { drawnText: 1, drawnImages: 1 };
     },
     drawEditingTextOverlay() { calls.push('editing overlay'); },

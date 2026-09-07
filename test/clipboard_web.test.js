@@ -254,6 +254,7 @@ function loadClipboardPasteObjectsHarness() {
     selections: [],
     synced: [],
     textBytes: [],
+    contentLimits: [],
   };
   const context = {
     console,
@@ -296,7 +297,7 @@ function loadClipboardPasteObjectsHarness() {
     },
     BoardfishWebLimits: {
       canAddObjects() { return true; },
-      canAcceptAdditionalContentBytes() { return true; },
+      canAcceptAdditionalContentBytes(bytes, count) { calls.contentLimits.push({ bytes, count }); return true; },
       imageSourceByteLength() { return 0; },
       textByteLength(text) {
         calls.textBytes.push(String(text ?? ''));
@@ -977,7 +978,7 @@ test('pasting Boardfish text objects strips whitespace-only edge lines from the 
   assert.equal(context.calls.added[0].h, 56);
   assert.equal(context.calls.added[0].x + context.calls.added[0].w / 2, 300);
   assert.equal(context.calls.added[0].y + context.calls.added[0].h / 2, 200);
-  assert.deepEqual(context.calls.textBytes, ['first line\nsecond line']);
+  assert.deepEqual(context.calls.contentLimits, [{ bytes: new TextEncoder().encode(context.calls.added[0].data.content).length, count: 1 }]);
   assert.equal(sourceTextObject.data.content, '   \n\t\nfirst line\nsecond line\n   \n\t');
   assert.deepEqual(context.calls.histories, ['paste-objects']);
   assert.deepEqual(context.calls.editCalls, []);

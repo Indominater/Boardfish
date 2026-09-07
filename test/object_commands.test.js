@@ -20,6 +20,7 @@ function loadDuplicateHarness() {
     histories: [],
     renders: [],
     selections: [],
+    contentLimits: [],
   };
   const context = {
     console,
@@ -31,8 +32,7 @@ function loadDuplicateHarness() {
     window: { innerWidth: 1000, innerHeight: 800 },
     BoardfishWebLimits: {
       canAddObjects() { return true; },
-      canAcceptAdditionalContentBytes() { return true; },
-      textByteLength(text) { return String(text ?? '').length; },
+      canAcceptAdditionalContentBytes(bytes, count) { calls.contentLimits.push({ bytes, count }); return true; },
     },
     BoardfishEditorState: {
       addObject(obj) {
@@ -74,6 +74,7 @@ test('duplicateSelected centers the duplicated group on the supplied point', () 
   context.duplicateSelected({ x: 100, y: 200 });
 
   assert.equal(context.calls.added.length, 2);
+  assert.deepEqual(context.calls.contentLimits, [{ bytes: new TextEncoder().encode('text').length, count: 2 }]);
   const minX = Math.min(...context.calls.added.map((obj) => obj.x));
   const minY = Math.min(...context.calls.added.map((obj) => obj.y));
   const maxX = Math.max(...context.calls.added.map((obj) => obj.x + obj.w));

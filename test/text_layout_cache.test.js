@@ -58,7 +58,6 @@ function loadTextLayout({
     TextSelDebug: {
       _logHit() {},
     },
-    invalidateOffscreen() {},
     scheduleRender() {},
     syncAllTextAutoHeights() {},
   };
@@ -1909,13 +1908,11 @@ for (const withoutSegmenter of [false, true]) {
     for (const grapheme of ['😀', 'a\u0301', '👨‍👩‍👧‍👦', '🇨🇦', '👍🏽', '1\uFE0F\u20E3']) {
       const obj = textRegressionObject(context, `${grapheme}x`, 100);
       const [line] = api.getTextLayout(obj);
-      for (const nearest of [false, true]) {
-        for (let x = 0; x <= line.prefixWidths.at(-1); x += 0.1) {
-          const offset = api.lineHitOffsetForX(line, context.TEXT_PAD + x, obj, nearest);
-          assert.ok([0, grapheme.length, grapheme.length + 1].includes(offset), `${JSON.stringify(grapheme)} hit offset ${offset}`);
-        }
-        assert.equal(api.lineHitOffsetForX(line, context.TEXT_PAD + grapheme.length * 0.75, obj, nearest), grapheme.length);
+      for (let x = 0; x <= line.prefixWidths.at(-1); x += 0.1) {
+        const offset = api.lineHitOffsetForX(line, context.TEXT_PAD + x, obj);
+        assert.ok([0, grapheme.length, grapheme.length + 1].includes(offset), `${JSON.stringify(grapheme)} hit offset ${offset}`);
       }
+      assert.equal(api.lineHitOffsetForX(line, context.TEXT_PAD + grapheme.length * 0.75, obj), grapheme.length);
     }
   });
 

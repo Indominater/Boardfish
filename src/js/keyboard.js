@@ -144,7 +144,7 @@ document.addEventListener('keydown', (e) => {
     if (!canTransformSelectedImagesFromKeyboard()) return;
     consumeShortcutEvent(e);
     runShortcutCommand('rotate-image', () => {
-      rotateSelectedImages('cw');
+      rotateSelectedImages();
     });
     return;
   }

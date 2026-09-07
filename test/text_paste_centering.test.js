@@ -52,11 +52,8 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
     TEXT_PAD: DEFAULT_TEXT_BOX_PAD,
     BoardfishWebLimits: {
       canAddObjects() { return true; },
-      canAcceptAdditionalContentBytes() { return true; },
-      textByteLength(text) {
-        context.textByteLengthCalls++;
-        return String(text ?? '').length;
-      },
+      textByteLength(text) { return new TextEncoder().encode(String(text ?? '')).length; },
+      canAcceptAdditionalContentBytes(bytes, count) { context.contentLimits.push({ bytes, count }); return true; },
     },
     BoardfishEditorState: {
       addObject(obj) {
@@ -102,9 +99,8 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
       context.editedIds.push(id);
       if (options.history !== false) context.pushHistory('text-edit-enter');
     },
-    invalidateOffscreen() {},
     syncAllTextAutoHeights() {},
-    textByteLengthCalls: 0,
+    contentLimits: [],
   };
   vm.createContext(context);
   vm.runInContext(`${textLayoutSource}syncTextAutoHeight = testSyncTextAutoHeight;\n${source}\nglobalThis.addText = addText;\n`, context, {
@@ -182,7 +178,7 @@ test('addText can center a text box after auto-height is synced', () => {
   assert.equal(obj.h, 184);
   assert.deepEqual(context.histories, ['add-text']);
   assert.deepEqual(context.editedIds, []);
-  assert.equal(context.textByteLengthCalls, 1);
+  assert.deepEqual(context.contentLimits, [{ bytes: new TextEncoder().encode(context.added[0].data.content).length, count: 1 }]);
 });
 
 test('addText keeps top-left placement by default', () => {
@@ -204,7 +200,7 @@ test('addText retains full text diagnostics for an active debug capture', () => 
 
   context.addText(24, 48, 'first\nsecond', { debug: {} });
 
-  assert.equal(context.textByteLengthCalls, 5);
+  assert.deepEqual(context.contentLimits, context.added.map((obj) => ({ bytes: new TextEncoder().encode(obj.data.content).length, count: 1 })));
   assert.equal(context.debugSteps[0].step, 'addText:start');
   assert.equal(context.debugSteps[0].meta.textLineCount, 2);
 });
@@ -295,6 +291,7 @@ test('new textbox content is normalized even when marked prepared', () => {
     const context = loadAddTextHarness();
     context.addText(24, 48, 'A😀B\r\nCéD\tE', { contentPrepared });
     assert.equal(context.added[0].data.content, 'AB\nCD\tE');
+    assert.deepEqual(context.contentLimits, [{ bytes: new TextEncoder().encode('AB\nCD\tE').length, count: 1 }]);
   }
 });
 
@@ -318,7 +315,7 @@ test('discarded-only supplied content is a no-op even when no object capacity re
     assert.equal(context.added.length, 0);
     assert.equal(context.histories.length, 0);
     assert.equal(context.editedIds.length, 0);
-    assert.equal(context.textByteLengthCalls, 0);
+    assert.deepEqual(context.contentLimits, []);
   }
 });
 

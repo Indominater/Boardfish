@@ -11,7 +11,6 @@ function beginBulkImageInsert() {
 function finishBulkImageInsert() {
   if (_bulkImageInsertDepth > 0) _bulkImageInsertDepth--;
   if (_bulkImageInsertDepth === 0 && _bulkImageInsertAdded > 0) {
-    invalidateOffscreen();
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, 'bulk-image-insert');
     else scheduleRender(true, true);
     pushHistory('bulk-image-insert');

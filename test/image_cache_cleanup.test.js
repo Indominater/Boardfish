@@ -68,7 +68,6 @@ function loadImageState(createImageBitmap) {
       rafs.push(cb);
       return rafs.length;
     },
-    invalidateOffscreen() {},
     scheduleRender() {},
     scheduleVisibleImageWorkAfterIdle() {},
     _bulkImageInsertDepth: 0,
@@ -105,22 +104,19 @@ function loadImageState(createImageBitmap) {
 test('image readiness throttles board frames and skips work during board opening', () => {
   const { context } = loadImageState(() => Promise.resolve({ close() {} }));
   const renders = [];
-  let invalidations = 0;
   let now = 1000;
   context.performance.now = () => now;
-  context.invalidateOffscreen = () => { invalidations++; };
   context.scheduleRender = (...args) => { renders.push(args); };
 
   context.scheduleImageReadyRender();
   now = 1050;
   context.scheduleImageReadyRender();
 
-  assert.equal(invalidations, 2);
   assert.deepEqual(renders, [[true, null, 'image-bitmap-ready']]);
 
   context._boardOpening = true;
   context.scheduleImageReadyRender();
-  assert.deepEqual([invalidations, renders.length], [2, 1]);
+  assert.equal(renders.length, 1);
 });
 
 test('Blob-backed web refs decode directly without a display URL', async () => {

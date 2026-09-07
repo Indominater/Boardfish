@@ -427,7 +427,6 @@ function restoreSnapshot(s, editStateOverride) {
   const replaceStart = performance.now();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   BoardfishEditorState.replaceBoardObjects(clonedSnapshotObjects, {
-    normalizeText: false,
     syncTextHeights: false,
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -443,11 +442,6 @@ function restoreSnapshot(s, editStateOverride) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   HistoryDebug.step(dbg, 'rebuild-caches', { objectCount: objectsMap.size });
   HistoryDebug.step(dbg, 'preserve-text-heights');
-  const invalidateStart = performance.now();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  invalidateOffscreen();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  HistoryDebug.step(dbg, 'invalidate-offscreen', { invalidateOffscreenMs: performance.now() - invalidateStart });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (editingId && !selectedIds.has(editingId)) exitEdit();
   const obj = editState?.id ? objectsMap.get(editState.id) : null;

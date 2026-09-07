@@ -57,7 +57,6 @@ function loadTextEditorIntegrationHelpers() {
     _caretVisible: false,
     shouldCommitTextEditInputImmediately() { return false; },
     flushEditHistoryCheckpoint() { return false; },
-    invalidateOffscreen() {},
     markDirty(obj) { context.dirty.push(obj.id); },
     pushHistory(reason) { context.histories.push(reason); },
     scheduleRender(board, overlay, reason) { context.renders.push({ board, overlay, reason }); },
@@ -229,7 +228,6 @@ function loadExitEditHarness() {
     pushEditHistoryIfChanged(id) { context.editHistoryPushes.push(id); return false; },
     pushHistory(reason) { context.histories.push(reason); },
     scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
-    invalidateOffscreen() {},
   };
   context.BoardfishBoardTypes = require('../src/js/board_types.js');
   vm.createContext(context);
@@ -358,7 +356,6 @@ function loadLiveTextEditResizeHarness() {
     pushHistory(reason, dirty) { if (dirty) context.dirty.push(...dirty); context.histories.push(reason); },
     pushEditHistoryIfChanged() { return false; },
     scheduleRender(board, overlay, reason) { context.renders.push({ board, overlay, reason }); },
-    invalidateOffscreen() {},
     setInterval() { return 5; },
     clearInterval() {},
     setTimeout(callback) { context.timeoutCallbacks.push(callback); return context.timeoutCallbacks.length; },
