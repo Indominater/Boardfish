@@ -379,7 +379,7 @@ const pasteTextIntoEditSelection = async () => {
   const pendingBoardfishPaste = (
     hasBoardfishTextPayload &&
     typeof pasteBoardfishTextSelectionIntoEditSelection === 'function'
-  ) ? pasteBoardfishTextSelectionIntoEditSelection({ immediateHistory: true }) : null;
+  ) ? pasteBoardfishTextSelectionIntoEditSelection() : null;
   const pendingExternalText = (
     !hasBoardfishTextPayload || (
       typeof _jsClipboardWebMaybeStale !== 'undefined' &&
