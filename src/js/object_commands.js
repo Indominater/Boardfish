@@ -52,6 +52,7 @@ function addText(wx, wy, content = '', options = {}) {
   }
   if (!options.contentPrepared) content = textForTextObjectPaste(content);
   logStep('trim-done', () => objectCommandTextStats(content));
+  if (!BoardfishWebLimits.canAcceptAdditionalTextCharacters(BoardfishWebLimits.textCharacterCount(content))) return;
   const data = { content };
   const textBytes = BoardfishWebLimits.textByteLength(content);
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
@@ -255,18 +256,24 @@ function duplicateSelected(anchorPoint = null) {
   if (!selectedIds.size || editingId || !BoardfishWebLimits.canAddObjects(selectedIds.size)) return;
   const selectedObjects = [];
   let additionalTextBytes = 0;
+  let additionalTextCharacters = 0;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
     selectedObjects.push(obj);
-    if (obj?.type === 'text') additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
+    if (obj?.type === 'text') {
+      const content = String(obj.data?.content || '');
+      additionalTextBytes += BoardfishWebLimits.textByteLength(content);
+      additionalTextCharacters += BoardfishWebLimits.textCharacterCount(content);
+    }
     minX = Math.min(minX, obj.x);
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x + obj.w);
     maxY = Math.max(maxY, obj.y + obj.h);
   }
   if (!selectedObjects.length) return;
+  if (!BoardfishWebLimits.canAcceptAdditionalTextCharacters(additionalTextCharacters)) return;
   if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
   const center = (
     anchorPoint &&

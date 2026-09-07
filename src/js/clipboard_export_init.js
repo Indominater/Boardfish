@@ -654,6 +654,13 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       if (jsClipboard.type === 'objects') {
         const sourceObjects = jsClipboard.objects || [];
         if (!sourceObjects.length || !BoardfishWebLimits.canAddObjects(sourceObjects.length)) return;
+        let additionalTextCharacters = 0;
+        for (const obj of sourceObjects) {
+          if (obj?.type === 'text') {
+            additionalTextCharacters += BoardfishWebLimits.textCharacterCount(textForTextObjectPaste(obj.data?.content));
+          }
+        }
+        if (!BoardfishWebLimits.canAcceptAdditionalTextCharacters(additionalTextCharacters)) return;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const imageCount = collectClipboardDiagnostics && ClipDebug.enabled
           ? sourceObjects.reduce((count, obj) => count + (obj?.type === 'image' ? 1 : 0), 0)

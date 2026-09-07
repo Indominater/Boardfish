@@ -8,6 +8,88 @@ const path = require('node:path');
 require('../src/js/web_board_container.js');
 const WebLimits = require('../src/js/board_limits.js');
 
+function withBoardObjects(objects, fn) {
+  const previousObjects = globalThis.objects;
+  globalThis.objects = objects;
+  try {
+    return fn();
+  } finally {
+    if (previousObjects === undefined) delete globalThis.objects;
+    else globalThis.objects = previousObjects;
+  }
+}
+
+test('board text totals count spaces, tabs, newlines, and Unicode code points across textboxes', () => {
+  assert.equal(WebLimits.textCharacterCount('A \t\n😀é'), 6);
+  assert.equal(WebLimits.textCharacterCount('e\u0301'), 2);
+  withBoardObjects([
+    { type: 'text', data: { content: 'a b\tc\n' } },
+    { type: 'image', data: { content: 'not textbox text' } },
+    { type: 'text', data: { content: '😀é' } },
+  ], () => assert.equal(WebLimits.currentTextCharacters(), 8));
+});
+
+test('additional text is accepted at the total character limit and rejected atomically above it', () => {
+  const objects = [
+    { type: 'text', data: { content: 'a'.repeat(12000) } },
+    { type: 'text', data: { content: ' '.repeat(12999) } },
+  ];
+  withBoardObjects(objects, () => {
+    assert.equal(WebLimits.canAcceptAdditionalTextCharacters(1, { notifyUser: false }), true);
+    assert.equal(WebLimits.canAcceptAdditionalTextCharacters(2, { notifyUser: false }), false);
+    assert.equal(WebLimits.currentTextCharacters(), 24999);
+  });
+});
+
+test('textbox replacements free their previous characters without changing other textboxes', () => {
+  const obj = { type: 'text', data: { content: 'a'.repeat(12500) } };
+  const other = { type: 'text', data: { content: 'b'.repeat(12500) } };
+  withBoardObjects([obj, other], () => {
+    assert.equal(WebLimits.canReplaceText(obj, '😀'.repeat(12500), { notifyUser: false }), true);
+    assert.equal(WebLimits.canReplaceText(obj, '😀'.repeat(12501), { notifyUser: false }), false);
+    assert.equal(WebLimits.canReplaceText(obj, '', { notifyUser: false }), true);
+    assert.equal(WebLimits.canReplaceText({ type: 'text', data: { content: 'a' } }, 'a', { notifyUser: false }), false);
+    assert.equal(obj.data.content, 'a'.repeat(12500));
+    assert.equal(other.data.content, 'b'.repeat(12500));
+  });
+});
+
+test('character rejection uses the same notification format and duration as object rejection', () => {
+  const calls = [];
+  const previousShowIslandMsg = globalThis.showIslandMsg;
+  const previousLongMessage = globalThis.long_message;
+  globalThis.showIslandMsg = (message, duration) => calls.push({ message, duration });
+  globalThis.long_message = 5200;
+  try {
+    withBoardObjects(Array.from({ length: 100 }, () => ({ type: 'text', data: { content: 'a'.repeat(250) } })), () => {
+      assert.equal(WebLimits.canAddObjects(1), false);
+      assert.equal(WebLimits.canAcceptAdditionalTextCharacters(1), false);
+    });
+  } finally {
+    if (previousShowIslandMsg === undefined) delete globalThis.showIslandMsg;
+    else globalThis.showIslandMsg = previousShowIslandMsg;
+    if (previousLongMessage === undefined) delete globalThis.long_message;
+    else globalThis.long_message = previousLongMessage;
+  }
+  assert.deepEqual(calls, [
+    { message: 'Boardfish is limited to 100 objects', duration: 5200 },
+    { message: 'Boardfish is limited to 25,000 characters', duration: 5200 },
+  ]);
+});
+
+test('board payload validation rejects excessive text with the short character limit message', () => {
+  assert.equal(WebLimits.validateBoardPayload({ textCharacters: 25000 }), true);
+  assert.throws(
+    () => WebLimits.validateBoardPayload({ textCharacters: 25001 }),
+    (err) => {
+      assert.equal(err.boardfishLimit, true);
+      assert.equal(err.message, 'This board has 25001 characters; Boardfish is limited to 25,000 characters.');
+      assert.equal(err.boardfishUserMessage, 'Boardfish is limited to 25,000 characters');
+      return true;
+    },
+  );
+});
+
 test('web board payload limits reject too many objects', () => {
   assert.throws(
     () => WebLimits.validateBoardPayload({ objectCount: WebLimits.LIMITS.maxObjects + 1 }),

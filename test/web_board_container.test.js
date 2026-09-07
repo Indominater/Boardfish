@@ -223,6 +223,7 @@ test('container creation validates the one exact UTF-8 board serialization befor
       validateBoardPayload(next) {
         validations.push({
           objectCount: next.objectCount,
+          textCharacters: next.textCharacters,
           boardJsonBytes: next.boardJsonBytes,
           imageBytes: next.imageBytes,
         });
@@ -233,15 +234,58 @@ test('container creation validates the one exact UTF-8 board serialization befor
   assert.equal(validations.length, 2);
   assert.deepEqual(validations[0], {
     objectCount: 2,
+    textCharacters: 12,
     boardJsonBytes: payload.boardJsonBytes,
     imageBytes: 0,
   });
   assert.deepEqual(validations[1], {
     objectCount: 2,
+    textCharacters: 12,
     boardJsonBytes: payload.boardJsonBytes,
     imageBytes: 4,
   });
   assert.equal(payload.boardJsonBytes, new TextEncoder().encode(JSON.stringify(board)).length);
+});
+
+test('container creation rejects excessive combined text before reading image sources', async () => {
+  const limits = require('../src/js/board_limits.js');
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: { 'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' } },
+    objects: [
+      { id: 'text-1', type: 'text', data: { content: 'a'.repeat(12500) } },
+      { id: 'text-2', type: 'text', data: { content: '\t'.repeat(12501) } },
+    ],
+  };
+  await assert.rejects(
+    () => WebContainer.createBoardContainerBlob(board, {}, { validateBoardPayload: limits.validateBoardPayload }),
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Boardfish is limited to 25,000 characters',
+  );
+});
+
+test('container reading rejects excessive text immediately after parsing board JSON', async () => {
+  const limits = require('../src/js/board_limits.js');
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: { 'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' } },
+    objects: [{ id: 'text-1', type: 'text', data: { content: 'a'.repeat(25001) } }],
+  };
+  const payload = await WebContainer.createBoardContainerBlob(board, { 'img-1': new Uint8Array([1, 2, 3]) });
+  const validations = [];
+  await assert.rejects(
+    () => WebContainer.readBoardContainer(payload.blob, {
+      validateBoardPayload(next) {
+        validations.push(next);
+        limits.validateBoardPayload(next);
+      },
+    }),
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Boardfish is limited to 25,000 characters',
+  );
+  assert.equal(validations.length, 2);
+  assert.equal(validations[1].textCharacters, 25001);
+  assert.equal(validations[1].imageBytes, 0);
 });
 
 test('oversized board JSON is rejected before any image Blob is read', async () => {

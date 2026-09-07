@@ -101,7 +101,7 @@ test('omits unsupported transient board data from board data', () => {
 });
 
 test('strips runtime text layout caches from saved board data', () => {
-  const content = Array.from({ length: 3000 }, (_, index) => `word${index}`).join(' ');
+  const content = Array.from({ length: 2800 }, (_, index) => `word${index}`).join(' ');
   const runtimeTextObject = {
     id: 'text-1',
     type: 'text',

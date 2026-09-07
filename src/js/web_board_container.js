@@ -37,6 +37,12 @@
     return textDecoder().decode(bytes);
   }
 
+  function boardTextCharacters(board) {
+    const limits = root.BoardfishWebLimits ||
+      (typeof require === 'function' ? require('./board_limits.js') : null);
+    return limits.currentTextCharacters(board?.objects || []);
+  }
+
   function unsupportedContainerError() {
     return new Error('unsupported Boardfish file; expected container .bf');
   }
@@ -945,6 +951,7 @@
     const validateBoardPayload = typeof options.validateBoardPayload === 'function'
       ? options.validateBoardPayload
       : null;
+    const textCharacters = validateBoardPayload ? boardTextCharacters(board) : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     let validationMs = 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -954,6 +961,7 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       validateBoardPayload({
         objectCount: board?.objects?.length || 0,
+        textCharacters,
         boardJsonBytes: boardBytes.length,
         imageBytes: 0,
       });
@@ -1014,6 +1022,7 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       validateBoardPayload({
         objectCount: board?.objects?.length || 0,
+        textCharacters,
         boardJsonBytes: boardBytes.length,
         imageBytes,
         imageEntries,
@@ -1142,10 +1151,11 @@
     const boardJsonParseMs = collectDiagnostics ? nowMs() - phaseStart : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const objectCount = board?.objects?.length || 0;
+    const textCharacters = validateBoardPayload ? boardTextCharacters(board) : 0;
     const lazyImageRefs = options.lazyImageRefs === true;
     const verifyImageCrc = options.verifyImageCrc !== false;
     if (validateBoardPayload) {
-      validateBoardPayload({ objectCount, boardJsonBytes: boardJsonBytes.length, imageBytes: 0 });
+      validateBoardPayload({ objectCount, textCharacters, boardJsonBytes: boardJsonBytes.length, imageBytes: 0 });
     }
     const nextSources = {};
     let imageBytes = 0;
@@ -1209,6 +1219,7 @@
       if (validateBoardPayload) {
         validateBoardPayload({
           objectCount,
+          textCharacters,
           boardJsonBytes: boardJsonBytes.length,
           imageBytes: imageBytes + advertisedImageBytes,
         });

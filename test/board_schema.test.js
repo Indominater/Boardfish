@@ -14,6 +14,35 @@ function imageObject(id, imgKey, z = 1) {
   return { id, type: 'image', x: 0, y: 0, w: 10, h: 10, z, data: { imgKey } };
 }
 
+function textObject(id, content) {
+  return { id, type: 'text', x: 0, y: 0, w: 100, h: 60, z: 1, data: { content } };
+}
+
+test('accepts boards at the object and total text character limits', () => {
+  const board = BoardSchema.normalizeBoardData({
+    objects: Array.from({ length: 100 }, (_, index) => textObject(`text-${index}`, '😀'.repeat(250))),
+  });
+  assert.equal(board.objects.length, 100);
+});
+
+test('rejects boards above the object limit before pruning empty textboxes', () => {
+  assert.throws(
+    () => BoardSchema.normalizeBoardData({
+      objects: Array.from({ length: 101 }, (_, index) => textObject(`text-${index}`, '')),
+    }),
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Boardfish is limited to 100 objects',
+  );
+});
+
+test('rejects excessive combined textbox characters, including whitespace before pruning', () => {
+  assert.throws(
+    () => BoardSchema.normalizeBoardData({
+      objects: [textObject('text-1', 'a'.repeat(12500)), textObject('text-2', '\t'.repeat(12501))],
+    }),
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Boardfish is limited to 25,000 characters',
+  );
+});
+
 test('normalizes valid board data from shared v3 fixture', () => {
   const board = BoardSchema.normalizeBoardData(readFixture('valid_v3_board.json'));
 

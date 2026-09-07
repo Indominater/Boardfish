@@ -30,6 +30,7 @@ function loadTextEditorHelpers() {
 function loadTextEditorIntegrationHelpers() {
   const context = {
     console,
+    BoardfishWebLimits: { canReplaceText() { return true; } },
     document: {
       createElement() {
         return {
@@ -155,6 +156,7 @@ function loadExitEditHarness() {
   };
   const context = {
     console,
+    BoardfishWebLimits: { canReplaceText() { return true; } },
     objects: [obj],
     obj,
     objectsMap: new Map([[obj.id, obj]]),
@@ -273,6 +275,7 @@ function loadLiveTextEditResizeHarness() {
   });
   const context = {
     console,
+    BoardfishWebLimits: { canReplaceText() { return true; } },
     objects: [obj],
     obj,
     objectsMap: new Map([[obj.id, obj]]),
@@ -1534,4 +1537,125 @@ test('exiting unchanged existing text keeps cached layout and skips size history
   assert.deepEqual(context.histories, []);
   assert.deepEqual(context.editHistoryPushes, ['text-1']);
   assert.deepEqual(context.renders, [{ board: true, overlay: true }]);
+});
+
+function loadLimitedTextEditor(content = 'abc', otherContent = 'x'.repeat(24990)) {
+  const context = loadLiveTextEditResizeHarness();
+  context.obj.data.content = content;
+  const other = { id: 'other', type: 'text', data: { content: otherContent } };
+  context.objects.push(other);
+  context.objectsMap.set(other.id, other);
+  const notifications = [];
+  const limitsContext = { objects: context.objects, showIslandMsg: (message, duration) => notifications.push({ message, duration }), long_message: 4500 };
+  vm.createContext(limitsContext);
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/js/board_limits.js'), 'utf8'), limitsContext);
+  context.BoardfishWebLimits = limitsContext.BoardfishWebLimits;
+  context.notifications = notifications;
+  context.enterEdit(context.obj.id, { history: false });
+  context.proxy.setSelectionRange(content.length, content.length);
+  context.historyStarts = [];
+  context.beginTextEditHistoryAction = (...args) => context.historyStarts.push(args);
+  context.dirty = [];
+  context.renders = [];
+  vm.runInContext('globalThis.replacePayload = replaceTextEditSelectionWithPayload;', context);
+  return context;
+}
+
+test('external native paste exceeding the board character limit is entirely blocked', () => {
+  const context = loadLimitedTextEditor();
+  context.BoardfishClipboardIO = { readClipboardTextFromEvent: () => '12345678' };
+  const event = { type: 'paste', clipboardData: {}, prevented: false, preventDefault() { this.prevented = true; } };
+  context.proxy.dispatchEvent(event);
+  assert.equal(event.prevented, true);
+  assert.equal(context.obj.data.content, 'abc');
+  assert.equal(context.proxy.value, 'abc');
+  assert.equal(context.proxy.selectionStart, 3);
+  assert.deepEqual(context.historyStarts, []);
+  assert.deepEqual(context.dirty, []);
+  assert.deepEqual(context.notifications, [{ message: 'Boardfish is limited to 25,000 characters', duration: 4500 }]);
+});
+
+test('paste counts spaces and tabs and accepts exactly 25000 characters across textboxes', () => {
+  const context = loadLimitedTextEditor();
+  assert.equal(context.replacePayload(context.obj.id, context.proxy, { text: '12 \t567' }), true);
+  assert.equal(context.obj.data.content, 'abc12 \t567');
+  assert.equal(context.BoardfishWebLimits.currentTextCharacters(), 25000);
+  assert.deepEqual(context.notifications, []);
+  const options = {};
+  assert.equal(context.replacePayload(context.obj.id, context.proxy, { text: 'x' }, options), false);
+  assert.equal(options.limitRejected, true);
+  assert.equal(context.obj.data.content, 'abc12 \t567');
+});
+
+test('replacing selected text at capacity counts the removed characters before accepting a paste', () => {
+  const context = loadLimitedTextEditor('abcdefghij');
+  context.proxy.setSelectionRange(2, 5, 'backward');
+  assert.equal(context.replacePayload(context.obj.id, context.proxy, { text: 'X \t' }), true);
+  assert.equal(context.obj.data.content, 'abX \tfghij');
+  assert.equal(context.BoardfishWebLimits.currentTextCharacters(), 25000);
+  context.proxy.setSelectionRange(2, 5, 'backward');
+  const starts = context.historyStarts.length;
+  assert.equal(context.replacePayload(context.obj.id, context.proxy, { text: 'toolong' }), false);
+  assert.equal(context.obj.data.content, 'abX \tfghij');
+  assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd, context.proxy.selectionDirection], [2, 5, 'backward']);
+  assert.equal(context.historyStarts.length, starts);
+});
+
+test('typing, tabs and line breaks cannot increase a board beyond its character limit', () => {
+  const context = loadLimitedTextEditor('abcdefghij');
+  for (const text of [' ', '\t', 'X']) {
+    const before = makeBeforeInputEvent('insertText', text);
+    context.proxy.dispatchEvent(before);
+    assert.equal(before.prevented, true);
+  }
+  context.proxy.dispatchEvent(makeKeyEvent('Tab'));
+  context.proxy.dispatchEvent(makeKeyEvent('Enter'));
+  assert.equal(context.obj.data.content, 'abcdefghij');
+  assert.equal(context.proxy.value, 'abcdefghij');
+  assert.deepEqual(context.historyStarts, []);
+  assert.deepEqual(context.dirty, []);
+});
+
+test('uncancellable input is restored atomically without changing the board', () => {
+  const context = loadLimitedTextEditor('abcdefghij');
+  context.proxy.setSelectionRange(2, 4, 'forward');
+  context.proxy.dispatchEvent({ ...makeBeforeInputEvent('insertFromDrop', 'TOOLONG'), cancelable: false });
+  context.proxy.value = 'abTOOLONGefghij';
+  context.proxy.setSelectionRange(9, 9);
+  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromDrop' });
+  assert.equal(context.obj.data.content, 'abcdefghij');
+  assert.equal(context.proxy.value, 'abcdefghij');
+  assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd], [2, 4]);
+  assert.deepEqual(context.dirty, []);
+  assert.equal(context.notifications.length, 1);
+});
+
+test('context-menu paste rejects over-limit replacement before changing selection or history', () => {
+  const context = loadLimitedTextEditor('abcdefghij');
+  context.proxy.setSelectionRange(2, 4, 'backward');
+  context.getTextEditSelectionState = () => ({ start: 2, end: 4, direction: 'backward', hasSelection: true });
+  const source = fs.readFileSync(path.join(root, 'src/js/context_menu.js'), 'utf8');
+  vm.runInContext(source.slice(source.indexOf('const replaceTextEditSelection ='), source.indexOf('const copyTextEditSelection =')) +
+    '\nglobalThis.menuReplace = replaceTextEditSelection;', context);
+  assert.equal(context.menuReplace('TOOLONG', { immediateHistory: true, inputType: 'insertFromPaste' }), false);
+  assert.equal(context.obj.data.content, 'abcdefghij');
+  assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd, context.proxy.selectionDirection], [2, 4, 'backward']);
+  assert.deepEqual(context.historyStarts, []);
+  assert.equal(context.notifications.length, 1);
+});
+
+test('verified native internal paste is cancelled at the limit without trying external fallback', () => {
+  const context = loadLimitedTextEditor('abcdefghij');
+  context.jsClipboard = { type: 'text-selection', text: 'TOOLONG' };
+  context.getJsClipboardWebToken = () => 'same-token';
+  context.BoardfishClipboardIO = {
+    readClipboardTextFromEvent: () => 'TOOLONG',
+    readBoardfishClipboardTokenFromEvent: () => 'same-token',
+  };
+  const event = { type: 'paste', clipboardData: {}, prevented: false, preventDefault() { this.prevented = true; } };
+  context.proxy.dispatchEvent(event);
+  assert.equal(event.prevented, true);
+  assert.equal(context.obj.data.content, 'abcdefghij');
+  assert.deepEqual(context.historyStarts, []);
+  assert.equal(context.notifications.length, 1);
 });

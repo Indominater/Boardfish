@@ -886,3 +886,15 @@ test('reset zoom clears selected and edited objects before zooming', () => {
   assert.equal(context.debugEnd.objectId, image.id);
   assert.equal(context.debugEnd.objectType, 'image');
 });
+
+test('context-menu paste does not use an external fallback after a character-limit rejection', async () => {
+  const context = loadTextEditPasteHarness();
+  context.currentBoardfishTextSelectionClipboardPayload = () => ({ type: 'text-selection', text: 'over limit' });
+  context.pasteBoardfishTextSelectionIntoEditSelection = async (options) => {
+    options.limitRejected = true;
+    return false;
+  };
+  await context.pasteTextIntoEditSelection();
+  assert.deepEqual(context.calls.replacements, []);
+  assert.deepEqual(context.calls.clipboardReadActivations, []);
+});

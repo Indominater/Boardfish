@@ -55,6 +55,7 @@ function loadNavigationHarness() {
   });
   const context = {
     console,
+    BoardfishWebLimits: { canReplaceText() { return true; } },
     objects: [obj],
     obj,
     objectsMap: new Map([[obj.id, obj]]),

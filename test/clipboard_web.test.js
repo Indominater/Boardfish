@@ -243,7 +243,7 @@ function loadClipboardExportHarness(options = {}) {
   return context;
 }
 
-function loadClipboardPasteObjectsHarness() {
+function loadClipboardPasteObjectsHarness({ realLimits = false } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/clipboard_export_init.js'), 'utf8');
   const sourceTextObject = {
     id: 'text-source',
@@ -263,6 +263,7 @@ function loadClipboardPasteObjectsHarness() {
     selections: [],
     synced: [],
     textBytes: [],
+    messages: [],
   };
   const context = {
     console,
@@ -310,6 +311,8 @@ function loadClipboardPasteObjectsHarness() {
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
+      canAcceptAdditionalTextCharacters() { return true; },
+      textCharacterCount(text) { return Array.from(String(text ?? '')).length; },
       imageSourceByteLength() { return 0; },
       textByteLength(text) {
         calls.textBytes.push(String(text ?? ''));
@@ -353,6 +356,15 @@ function loadClipboardPasteObjectsHarness() {
       return first <= last ? lines.slice(first, last + 1).join('\n') : '';
     },
   };
+  if (realLimits) {
+    const limitsContext = vm.createContext({
+      objects: context.objects,
+      TextEncoder,
+      showIslandMsg(message, duration) { calls.messages.push({ message, duration }); },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'src/js/board_limits.js'), 'utf8'), limitsContext);
+    context.BoardfishWebLimits = limitsContext.BoardfishWebLimits;
+  }
   vm.createContext(context);
   vm.runInContext(`${source}\nglobalThis.pasteAtPos = pasteAtPos;\n`, context, {
     filename: 'clipboard_export_init.js',
@@ -965,4 +977,43 @@ test('object-limit rejection happens before pasted text trimming and measurement
   await context.pasteAtPos(300, 200);
   assert.equal(context.calls.clones, 0);
   assert.deepEqual([context.calls.synced, context.calls.textBytes, context.calls.added, context.calls.histories], [[], [], [], ['browser-token-read']]);
+});
+
+test('mixed object paste rejects the whole clipboard before cloning when combined text exceeds 25,000', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness({ realLimits: true });
+  context.objects.push({ id: 'existing', type: 'text', data: { content: 'x'.repeat(24996) } });
+  sourceTextObject.data.content = 'ab';
+  context.jsClipboard.objects.push(
+    { ...sourceTextObject, id: 'second-text', data: { content: ' \t😀x' } },
+    { id: 'image-source', type: 'image', x: 0, y: 0, w: 10, h: 10, data: { imgKey: 'image' } },
+  );
+
+  await context.pasteAtPos(300, 200);
+
+  assert.equal(context.objects.length, 1);
+  assert.equal(context.calls.clones, 0);
+  assert.equal(context.zCounter, 1);
+  assert.equal(context._pasteInProgress, false);
+  assert.deepEqual(context.calls.added, []);
+  assert.deepEqual(context.calls.histories, []);
+  assert.deepEqual(context.calls.selections, []);
+  assert.deepEqual(context.calls.synced, []);
+  assert.equal(context.calls.messages.length, 1);
+  assert.match(context.calls.messages[0].message, /25,000/);
+  assert.equal(context.calls.messages[0].duration, 4500);
+});
+
+test('object paste counts normalized content and accepts exactly 25,000 characters', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness({ realLimits: true });
+  context.objects.push({ id: 'existing', type: 'text', data: { content: 'x'.repeat(24996) } });
+  sourceTextObject.data.content = '\r\n  \r\n \t😀x\r\n\t';
+
+  await context.pasteAtPos(300, 200);
+
+  assert.equal(context.calls.added.length, 1);
+  assert.equal(context.calls.added[0].data.content, ' \t😀x');
+  assert.equal(context.BoardfishWebLimits.currentTextCharacters(), 25000);
+  assert.equal(sourceTextObject.data.content, '\r\n  \r\n \t😀x\r\n\t');
+  assert.deepEqual(context.calls.messages, []);
+  assert.deepEqual(context.calls.histories, ['paste-objects']);
 });

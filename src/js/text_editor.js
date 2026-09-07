@@ -995,6 +995,11 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
+const canApplyTextEditReplacement = (obj, value, start, end, text) => {
+  const nextValue = value.slice(0, start) + text + value.slice(end);
+  return BoardfishWebLimits.canReplaceText(obj, nextValue);
+};
+
 const editableTextPayload = (payload = {}) => ({
   text: textForTextObjectPaste(payload.text || ''),
 });
@@ -1031,6 +1036,10 @@ const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) 
   const inputType = options.inputType || 'insertFromPaste';
   const currentProxyValue = textEditProxyValue(proxy);
   if (proxy._boardfishDomValueStale || proxy.value !== currentProxyValue) return false;
+  if (!canApplyTextEditReplacement(obj, currentProxyValue, selection.start, selection.end, editablePayload.text)) {
+    options.event.preventDefault();
+    return { rejected: true };
+  }
   const inputState = {
     ...selection,
     value: currentProxyValue,
@@ -1075,6 +1084,10 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
   const inputType = options.inputType || 'insertFromPaste';
   const currentProxyValue = textEditProxyValue(proxy);
   if (proxy._boardfishDomValueStale || proxy.value !== currentProxyValue) return false;
+  if (!canApplyTextEditReplacement(obj, currentProxyValue, selection.start, selection.end, pastedText)) {
+    options.event.preventDefault();
+    return { rejected: true };
+  }
   const inputState = {
     ...selection,
     value: currentProxyValue,
@@ -1157,6 +1170,10 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   const replacementRange = selection.hasSelection
     ? textEditVisibleSelectionReplacementRange(obj.data?.content, selection)
     : selection;
+  if (!canApplyTextEditReplacement(obj, currentProxyValue, replacementRange.start, replacementRange.end, text)) {
+    options.limitRejected = true;
+    return false;
+  }
   const inputType = options.inputType || 'insertFromPaste';
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-replacement-range-ready', {
@@ -1253,7 +1270,9 @@ const pasteBoardfishTextSelectionIntoEditSelection = async (options = {}) => {
   pasteOptions.debug = dbg;
   pasteOptions.source = 'jsClipboard-text-selection';
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return replaceTextEditSelectionWithPayload(id, proxy, payload, pasteOptions);
+  const pasted = replaceTextEditSelectionWithPayload(id, proxy, payload, pasteOptions);
+  options.limitRejected = pasteOptions.limitRejected === true;
+  return pasted;
 };
 
 function enterEdit(id, {
@@ -1372,6 +1391,12 @@ function enterEdit(id, {
     const selection = textEditSelectionState(proxy);
     const currentProxyValue = textEditProxyValue(proxy);
     const nativeReplacement = textEditBeforeInputReplacement(currentProxyValue, selection, event);
+    if (event.cancelable !== false && nativeReplacement && !canApplyTextEditReplacement(obj, currentProxyValue,
+      nativeReplacement.start, nativeReplacement.end, nativeReplacement.insertedText)) {
+      event.preventDefault();
+      pendingInputState = null;
+      return;
+    }
     pendingInputState = {
       ...selection,
       value: currentProxyValue,
@@ -1480,6 +1505,13 @@ function enterEdit(id, {
       ...textEditorSizeDebugStats(obj, oldValue, 'replacementOld'),
       ...textEditorTextStats(replacement.insertedText),
     }));
+    if (!BoardfishWebLimits.canReplaceText(obj, nextRawValue)) {
+      proxy.value = oldValue;
+      setTextEditProxyLogicalValue(proxy, oldValue);
+      proxy.setSelectionRange(inputState.start ?? replacement.start,
+        inputState.end ?? replacement.end, inputState.direction || 'none');
+      return;
+    }
 	    obj.data.content = nextRawValue;
 	    markDirty(obj);
 	    logInputStep('motion-dirty-done');
@@ -1724,6 +1756,7 @@ function enterEdit(id, {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') nativePasteOptions.debug = dbg;
       const nativePaste = tryNativeBoardfishTextSelectionPaste(id, proxy, candidate, nativePasteOptions);
       if (nativePaste) {
+        if (nativePaste.rejected) return;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         logPasteStep('paste:text-edit-native-textarea-allowed', {
           source: 'jsClipboard-text-selection',
@@ -1757,6 +1790,7 @@ function enterEdit(id, {
       }
       const nativeExternalPaste = tryNativeExternalTextPaste(id, proxy, fallbackText, nativeExternalOptions);
       if (nativeExternalPaste) {
+        if (nativeExternalPaste.rejected) return;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         logPasteStep('paste:text-edit-native-event-text-allowed', {
           source: candidate ? 'fallback-event-text' : 'event-text',
@@ -1814,7 +1848,7 @@ function enterEdit(id, {
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') pasteOptions.debug = dbg;
     pasteBoardfishTextSelectionIntoEditSelection(pasteOptions).then((pasted) => {
-      if (pasted || !fallbackText) {
+      if (pasted || pasteOptions.limitRejected || !fallbackText) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         dbgApi?.end?.(dbg, {
           path: pasted ? 'jsClipboard-text-selection' : 'jsClipboard-empty',
@@ -1920,6 +1954,7 @@ function enterEdit(id, {
         if (wakeCaret) scheduleRender(true, false);
         return;
       }
+      if (!BoardfishWebLimits.canReplaceText(obj, indentResult.value)) return;
       const inputType = e.shiftKey ? 'deleteContentBackward' : 'insertText';
       pendingInputState = {
         ...selection,
@@ -1939,6 +1974,7 @@ function enterEdit(id, {
       const currentProxyValue = textEditProxyValue(proxy);
       const selection = textEditSelectionState(proxy);
       const lineBreakResult = applyTextEditLineBreakIndent(currentProxyValue, selection);
+      if (!BoardfishWebLimits.canReplaceText(obj, lineBreakResult.value)) return;
       const inputType = 'insertLineBreak';
       pendingInputState = {
         ...selection,

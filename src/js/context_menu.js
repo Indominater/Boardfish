@@ -248,6 +248,8 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
     : normalizedText;
   if (inputTypeValue.includes('paste') && !replacementText) return false;
   const oldValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
+  if (!BoardfishWebLimits.canReplaceText(objectsMap.get(editingId),
+    oldValue.slice(0, selection.start) + replacementText + oldValue.slice(selection.end))) return false;
   const replacementState = {
     ...selection,
     value: oldValue,
@@ -381,17 +383,18 @@ const pasteTextIntoEditSelection = async () => {
     typeof currentBoardfishTextSelectionClipboardPayload === 'function' &&
     !!currentBoardfishTextSelectionClipboardPayload()
   );
+  const pasteOptions = { immediateHistory: true };
   const pendingBoardfishPaste = (
     hasBoardfishTextPayload &&
     typeof pasteBoardfishTextSelectionIntoEditSelection === 'function'
-  ) ? pasteBoardfishTextSelectionIntoEditSelection({ immediateHistory: true }) : null;
+  ) ? pasteBoardfishTextSelectionIntoEditSelection(pasteOptions) : null;
   const pendingExternalText = (
     !hasBoardfishTextPayload || (
       typeof _jsClipboardWebMaybeStale !== 'undefined' &&
       _jsClipboardWebMaybeStale
     )
   ) ? readTextClipboardForEditMenu() : null;
-  if (pendingBoardfishPaste && await pendingBoardfishPaste) {
+  if (pendingBoardfishPaste && (await pendingBoardfishPaste || pasteOptions.limitRejected)) {
     focusTextEditProxy();
     return;
   }
