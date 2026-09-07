@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { normalizeTextContent } = require('../src/js/board_types.js');
 
 const root = path.join(__dirname, '..');
 
@@ -330,8 +331,9 @@ function loadClipboardPasteObjectsHarness() {
       obj.h = 56;
       return true;
     },
+    normalizeTextContent: require('../src/js/board_types.js').normalizeTextContent,
     textForTextObjectPaste(value) {
-      const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
+      const lines = normalizeTextContent(value).split('\n');
       let first = 0;
       let last = lines.length - 1;
       while (first <= last && !/\S/.test(lines[first])) first++;
@@ -345,6 +347,66 @@ function loadClipboardPasteObjectsHarness() {
   });
   return { context, sourceTextObject };
 }
+
+test('internal object paste normalizes text and skips discarded-only objects before centering', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness();
+  sourceTextObject.data.content = 'A😀B\r\nCéD\tE';
+  const removed = { ...sourceTextObject, id: 'empty', x: 9000, y: 9000, data: { content: '😀é中文' } };
+  context.jsClipboard.objects.push(removed);
+  await context.pasteAtPos(400, 300);
+  assert.equal(context.calls.added.length, 1);
+  const pasted = context.calls.added[0];
+  assert.equal(pasted.data.content, 'AB\nCD\tE');
+  assert.equal(pasted.x + pasted.w / 2, 400);
+  assert.equal(pasted.y + pasted.h / 2, 300);
+  assert.equal(sourceTextObject.data.content, 'A😀B\r\nCéD\tE');
+});
+
+test('internal paste containing only discarded characters leaves objects, selection and history untouched', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness();
+  sourceTextObject.data.content = '😀é中文';
+  await context.pasteAtPos(400, 300);
+  assert.deepEqual(context.calls.added, []);
+  assert.deepEqual(context.calls.selections, []);
+  assert.deepEqual(context.calls.histories, []);
+  assert.equal(context._pasteInProgress, false);
+});
+
+test('internal paste capacity counts only objects with supported content', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness();
+  const capacityChecks = [];
+  const byteChecks = [];
+  sourceTextObject.data.content = 'A😀B';
+  context.jsClipboard.objects.push({ ...sourceTextObject, id: 'discarded', data: { content: '😀é\t\n' } });
+  context.BoardfishWebLimits.canAddObjects = (count) => {
+    capacityChecks.push(count);
+    return count <= 1;
+  };
+  context.BoardfishWebLimits.canAcceptAdditionalContentBytes = (bytes, count) => {
+    byteChecks.push({ bytes, count });
+    return true;
+  };
+  await context.pasteAtPos(400, 300);
+  assert.deepEqual(capacityChecks, [1]);
+  assert.deepEqual(byteChecks, [{ bytes: 2, count: 1 }]);
+  assert.equal(context.calls.added.length, 1);
+  assert.equal(context.calls.added[0].data.content, 'AB');
+  assert.deepEqual(context.calls.histories, ['paste-objects']);
+});
+
+test('discarded-only internal paste at capacity is a no-op before capacity feedback or layout allocation', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness();
+  sourceTextObject.data.content = '😀é中文\t\n';
+  let capacityChecks = 0;
+  context.BoardfishWebLimits.canAddObjects = () => { capacityChecks++; return false; };
+  await context.pasteAtPos(400, 300);
+  assert.equal(capacityChecks, 0);
+  assert.equal(context.calls.clones, 0);
+  assert.deepEqual(context.calls.synced, []);
+  assert.deepEqual(context.calls.added, []);
+  assert.deepEqual(context.calls.selections, []);
+  assert.deepEqual(context.calls.histories, []);
+});
 
 function loadTextEditCopyHarness(value, options = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/context_menu.js'), 'utf8');
@@ -928,4 +990,5 @@ test('object-limit rejection happens before pasted text trimming and measurement
   await context.pasteAtPos(300, 200);
   assert.equal(context.calls.clones, 0);
   assert.deepEqual([context.calls.synced, context.calls.textBytes, context.calls.added, context.calls.histories], [[], [], [], ['browser-token-read']]);
+  assert.deepEqual(context.calls.selections, []);
 });

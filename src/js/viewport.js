@@ -359,6 +359,17 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
 }
 
 function drawEditingTextOverlay(
+  context,viewZoom=zoom,viewportRect=viewportWorldRect(0),
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */ collectDebug=false, /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  const draw=()=> {
+    if(typeof BOARDFISH_PRODUCTION!=='undefined')return drawEditingTextOverlayContent(context,viewZoom,viewportRect);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */ return drawEditingTextOverlayContent(context,viewZoom,viewportRect,collectDebug); /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  };
+  return boardRenderer.withTextObjectClip?boardRenderer.withTextObjectClip(context,objectsMap.get(editingId),draw):draw();
+}
+
+function drawEditingTextOverlayContent(
   context,
   viewZoom = zoom,
   viewportRect = viewportWorldRect(0),
@@ -397,6 +408,7 @@ function drawEditingTextOverlay(
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const selectionStart = collectDebug ? performance.now() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  boardRenderer.drawTextBackground?.(context,obj);
   const selection = selStart === selEnd ? null : drawTextSelectionHighlight(context, obj, layout, selStart, selEnd);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDebug) {
@@ -481,7 +493,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
   const viewportRect = viewportWorldRect(0);
 
   if (editingId) {
-    const useEditOffscreenCache = !ctx.isBoardfishGpuContext && !bypassEditOffscreenCache;
+    const useEditOffscreenCache = !boardRenderer.opaqueTextBackgrounds && !ctx.isBoardfishGpuContext && !bypassEditOffscreenCache;
     if (useEditOffscreenCache && _offscreenDirty) {
       _rebuildOffscreen(dpr, viewportRect);
     }
@@ -774,6 +786,7 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   textPad: TEXT_PAD,
   lineHeight: LINE_H,
   canvasTextColor,
+  canvasBackgroundColor: () => _canvasBackgroundColor,
   currentViewportWorldRect: viewportWorldRect,
   drawTextLineRange,
   getTextLayoutForViewport,

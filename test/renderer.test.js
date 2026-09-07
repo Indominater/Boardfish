@@ -22,6 +22,76 @@ function loadRenderer(overrides = {}) {
   };
 }
 
+function opaqueScene(objects,production=false) {
+  const drawn=[],backgrounds=[],clips=[],stack=[];let theme='#1c1b22',clip=null;
+  const context={fillStyle:'#fbfbfe',globalAlpha:1,
+    save(){stack.push({clip,fillStyle:this.fillStyle,globalAlpha:this.globalAlpha});},
+    restore(){const old=stack.pop();clip=old.clip;this.fillStyle=old.fillStyle;this.globalAlpha=old.globalAlpha;},
+    clipRect(x,y,w,h){clip={x1:x,y1:y,x2:x+w,y2:y+h};clips.push(clip);},
+    fillRect(...rect){backgrounds.push({rect,color:this.fillStyle,alpha:this.globalAlpha});},
+    drawTextLayout(layout,obj){drawn.push({obj,layout,clip,color:this.fillStyle});return true;},
+  };
+  const layouts=[];
+  const api=loadRenderer(production?{BOARDFISH_PRODUCTION:true}:{});
+  const renderer=api.createBoardRenderer({objects:()=>objects,zoom:()=>1,dpr:()=>1,viewportCullingEnabled:()=>true,
+    canvasBackgroundColor:()=>theme,canvasTextColor:()=>context.fillStyle,
+    objectIntersectsRect:(obj,r)=>obj.x<=r.x2&&obj.x+obj.w>=r.x1&&obj.y<=r.y2&&obj.y+obj.h>=r.y1,
+    getTextLayoutForViewport(obj,rect){layouts.push({obj,rect});return[{text:obj.data?.content||''}];},
+    imageBitmapCache:()=>({}),imageStore:()=>({}),selectImageSourceForDraw(){throw Error('occluded image source must not be requested');},
+  });
+  return {renderer,context,drawn,backgrounds,clips,layouts,setTheme(value){theme=value;}};
+}
+
+test('textbox backgrounds exactly match the object rectangle and live theme while preserving text state',()=>{
+  const obj={id:'text',type:'text',x:11.25,y:-7.5,w:120.75,h:96,data:{content:'Visible'}};
+  const f=opaqueScene([obj]);f.context.globalAlpha=.4;
+  f.renderer.drawSingleObj(f.context,obj);
+  f.setTheme('rgb(234, 234, 237)');f.renderer.drawSingleObj(f.context,obj);
+  assert.deepEqual(f.backgrounds,[
+    {rect:[11.25,-7.5,120.75,96],color:'#1c1b22',alpha:1},
+    {rect:[11.25,-7.5,120.75,96],color:'rgb(234, 234, 237)',alpha:1},
+  ]);
+  assert.equal(f.context.fillStyle,'#fbfbfe');assert.equal(f.context.globalAlpha,.4);
+  assert.ok(f.drawn.every(draw=>draw.color==='#fbfbfe'));
+});
+
+for(const production of [false,true])test(`opaque top textbox skips fully covered text layouts and images in ${production?'production':'development'}`,()=>{
+  const rect={x:0,y:0,w:100,h:100};
+  const objects=[{...rect,id:'image',type:'image',data:{imgKey:'hidden'}},{...rect,id:'lower',type:'text',data:{content:'hidden text'}},{...rect,id:'top',type:'text',data:{content:'top text'}}];
+  const f=opaqueScene(objects,production),counters=production?null:f.renderer.createDrawCounters();
+  f.renderer.drawVisibleObjects(f.context,counters,{x1:0,y1:0,x2:100,y2:100});
+  assert.deepEqual(f.layouts.map(entry=>entry.obj.id),['top']);
+  assert.deepEqual(f.drawn.map(entry=>entry.obj.id),['top']);
+  assert.equal(f.backgrounds.length,1);
+  if(counters){assert.equal(counters.occludedText,1);assert.equal(counters.occludedImages,1);assert.equal(counters.visibleObjects,1);}
+});
+
+test('partial textbox occlusion submits only a disjoint union of visible rectangles in source z-order',()=>{
+  const lower={id:'lower',type:'text',x:0,y:0,w:100,h:100,data:{content:'lower'}};
+  const top={id:'top',type:'text',x:30,y:20,w:40,h:60,data:{content:'top'}};
+  const f=opaqueScene([lower,top]),counters=f.renderer.createDrawCounters();
+  f.renderer.drawVisibleObjects(f.context,counters,{x1:0,y1:0,x2:100,y2:100});
+  const regions=f.layouts.filter(entry=>entry.obj===lower).map(entry=>entry.rect);
+  assert.equal(regions.length,4);
+  assert.equal(regions.reduce((sum,r)=>sum+(r.x2-r.x1)*(r.y2-r.y1),0),7600);
+  for(let i=0;i<regions.length;i++)for(let j=i+1;j<regions.length;j++) {
+    const a=regions[i],b=regions[j];assert.ok(Math.min(a.x2,b.x2)<=Math.max(a.x1,b.x1)||Math.min(a.y2,b.y2)<=Math.max(a.y1,b.y1));
+  }
+  assert.equal(f.drawn.at(-1).obj,top);assert.equal(counters.partiallyOccludedObjects,1);assert.equal(counters.visibleObjectRegions,4);
+});
+
+test('occlusion fragmentation is bounded and its conservative fallback never removes an uncovered point',()=>{
+  const lower={id:'lower',type:'text',x:0,y:0,w:1000,h:1000,data:{content:'lower'}};
+  const covers=Array.from({length:100},(_,i)=>({id:`cover-${i}`,type:'text',x:(i%10)*100+20,y:Math.floor(i/10)*100+20,w:40,h:40,data:{content:'cover'}}));
+  const f=opaqueScene([lower,...covers]);f.renderer.drawVisibleObjects(f.context,null,{x1:0,y1:0,x2:1000,y2:1000});
+  const regions=f.layouts.filter(entry=>entry.obj===lower).map(entry=>entry.rect);
+  assert.ok(regions.length>0&&regions.length<=32);
+  for(let y=5;y<1000;y+=25)for(let x=5;x<1000;x+=25) {
+    if(covers.some(obj=>x>=obj.x&&x<obj.x+obj.w&&y>=obj.y&&y<obj.y+obj.h))continue;
+    assert.ok(regions.some(r=>x>=r.x1&&x<r.x2&&y>=r.y1&&y<r.y2),`uncovered point ${x},${y} stays visible`);
+  }
+});
+
 test('text renderer uses the viewport-aware layout path', () => {
   const BoardfishRenderer = loadRenderer();
   const drawnLines = [];

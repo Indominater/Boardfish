@@ -2,8 +2,10 @@
 """Build immutable, continuously filtered ASCII glyph scale-space.
 
 The source is the same coverage reconstructed from the checked-in MSDF as the
-summed-area atlas. Each layer convolves that coverage with a physical-pixel box
-and a Gaussian before sampling. The PNG transports IEEE binary16 coverage in
+summed-area atlas. Each layer convolves that coverage with a physical-pixel box,
+a Gaussian, and the continuous half-pixel cubic B-spline reconstruction kernel.
+Fusing reconstruction here eliminates object-sized scale caches during zoom.
+The PNG transports IEEE binary16 coverage in
 its red and green bytes; upload those bits to one linearly filtered R16F texture.
 
 Dependencies: NumPy and Pillow. --check verifies byte-for-byte reproducibility.
@@ -46,6 +48,7 @@ MIN_DEVICE_EM = 1.6
 MAX_DEVICE_EM = 12.0
 SIGMA = 0.65
 PIXEL_PADDING = 2.5
+RECONSTRUCTION_SPACING = 0.5
 OUTPUT_IMAGE = ROOT / "src/fonts/geist-ascii-coverage.png"
 OUTPUT_METRICS = ROOT / "src/fonts/geist-ascii-coverage.js"
 
@@ -65,8 +68,21 @@ def layer_grid(device_em: float) -> tuple[float, float, float]:
     return ORIGIN_X - padding, ORIGIN_Y - padding, CELL_SIZE / (EM_EXTENT + 2 * padding)
 
 
-def convolution_weights(output_origin: float, input_origin: float, device_em: float, density: float) -> np.ndarray:
-    """Exactly integrate Gaussian * pixel-box over each constant source cell."""
+def cubic_bspline(values: np.ndarray) -> np.ndarray:
+    distance = np.abs(values)
+    return np.where(distance < 1, (4 - 6 * distance**2 + 3 * distance**3) / 6,
+                    np.where(distance < 2, (2 - distance)**3 / 6, 0))
+
+
+def convolution_weights(output_origin: float, input_origin: float, device_em: float, density: float,
+                        reconstruct: bool = True, quadrature_order: int = 8) -> np.ndarray:
+    """Integrate constant source cells against the combined continuous kernel.
+
+    Gaussian * pixel-box cell integrals are analytic. Gauss-Legendre quadrature
+    integrates their convolution with each polynomial piece of the cubic
+    B-spline. Its half-pixel spacing matches the former 2x cached field, without
+    introducing the cache's phase-dependent intermediate sampling grid.
+    """
     output = output_origin + (np.arange(CELL_SIZE) + 0.5) / density
     source = input_origin + (np.arange(SOURCE.CELLS) + 0.5) / SOURCE.EM_SIZE
     delta = output[:, None] - source[None, :]
@@ -74,8 +90,17 @@ def convolution_weights(output_origin: float, input_origin: float, device_em: fl
     half_box = 0.5 / device_em
     sigma = SIGMA / device_em
     h = lambda values: kernel_integral(values, sigma)
-    weights = (h(delta + half_cell + half_box) - h(delta - half_cell + half_box)
-               - h(delta + half_cell - half_box) + h(delta - half_cell - half_box)) / (2 * half_box)
+    def gaussian_box(shifted):
+        return (h(shifted + half_cell + half_box) - h(shifted - half_cell + half_box)
+                - h(shifted + half_cell - half_box) + h(shifted - half_cell - half_box)) / (2 * half_box)
+    if not reconstruct:
+        return np.maximum(gaussian_box(delta), 0)
+    nodes, factors = np.polynomial.legendre.leggauss(quadrature_order)
+    weights = np.zeros_like(delta)
+    for piece in (-2, -1, 0, 1):
+        position = piece + (nodes + 1) / 2
+        for offset, factor in zip(position, factors * cubic_bspline(position) / 2):
+            weights += factor * gaussian_box(delta - offset * RECONSTRUCTION_SPACING / device_em)
     return np.maximum(weights, 0)
 
 
@@ -140,12 +165,24 @@ def generate() -> tuple[bytes, bytes, dict]:
     atlas = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
     scales = np.geomspace(MIN_DEVICE_EM, MAX_DEVICE_EM, LAYERS)
     maximum_edge = 0.0
+    maximum_quadrature_error = 0.0
     for layer, device_em in enumerate(scales):
         origin_x, origin_y, density = layer_grid(device_em)
         wx = convolution_weights(origin_x, SOURCE.ORIGIN_X, device_em, density)
         wy = convolution_weights(origin_y, SOURCE.ORIGIN_Y, device_em, density)
+        transition = np.clip((device_em - 10) / 2, 0, 1)
+        reconstruction_weight = 1 - transition * transition * (3 - 2 * transition)
+        if reconstruction_weight < 1:
+            original_x = convolution_weights(origin_x, SOURCE.ORIGIN_X, device_em, density, reconstruct=False)
+            original_y = convolution_weights(origin_y, SOURCE.ORIGIN_Y, device_em, density, reconstruct=False)
+        if layer in (0, LAYERS - 1):
+            reference = convolution_weights(origin_x, SOURCE.ORIGIN_X, device_em, density, quadrature_order=12)
+            maximum_quadrature_error = max(maximum_quadrature_error, float(np.max(np.abs(wx - reference))))
         for index, coverage in enumerate(coverages):
             filtered = np.clip(wy @ (coverage.astype(np.float64) / 255) @ wx.T, 0, 1)
+            if reconstruction_weight < 1:
+                original = np.clip(original_y @ (coverage.astype(np.float64) / 255) @ original_x.T, 0, 1)
+                filtered = filtered * reconstruction_weight + original * (1 - reconstruction_weight)
             tile = filtered.astype(np.float16)
             # The geometric draw uses a finite 2.5-pixel guard around actual
             # glyph ink. Samples outside that guard would not be drawn. Bake
@@ -185,16 +222,24 @@ def generate() -> tuple[bytes, bytes, dict]:
             if not np.array_equal(decoded[y:y + CELL_SIZE, x:x + CELL_SIZE], tiles[layer, index]):
                 raise AssertionError("Half-float PNG transport changed coverage")
     verification = verify_tiles(tiles, coverages)
+    if maximum_quadrature_error > 1e-12:
+        raise AssertionError(f"Reconstruction quadrature error: {maximum_quadrature_error}")
+    verification["reconstructionQuadrature"] = {"nodesPerPiece": 8, "referenceNodesPerPiece": 12,
+                                                "maxWeightError": maximum_quadrature_error}
     encoded = io.BytesIO()
     Image.fromarray(atlas).save(encoded, format="PNG", compress_level=9)
+    atlas_bytes = encoded.getvalue()
+    atlas_hash = hashlib.sha256(atlas_bytes).hexdigest()
     description = {
-        "type": "gaussian-coverage", "atlasURL": "fonts/geist-ascii-coverage.png",
+        "type": "gaussian-coverage", "atlasURL": f"fonts/geist-ascii-coverage.png?v={atlas_hash[:12]}",
         "width": WIDTH, "height": HEIGHT, "emExtent": EM_EXTENT, "cellSize": CELL_SIZE,
         "columns": COLUMNS, "originX": ORIGIN_X, "originY": ORIGIN_Y,
         "adaptiveGrid": True,
         "layers": LAYERS, "layerColumns": LAYER_COLUMNS, "layerWidth": LAYER_WIDTH,
         "layerHeight": LAYER_HEIGHT, "minDeviceEm": MIN_DEVICE_EM, "maxDeviceEm": MAX_DEVICE_EM,
         "sigma": SIGMA, "pixelPadding": PIXEL_PADDING, "encoding": "float16-rg", "yOrigin": "top",
+        "reconstructionKernel": {"type": "cubic-bspline", "physicalPixelSpacing": RECONSTRUCTION_SPACING,
+                                 "fadeStartDeviceEm": 10, "fadeEndDeviceEm": 12},
         "sourceAtlasSHA256": hashlib.sha256(image_bytes).hexdigest(),
         "sourceMetricsSHA256": hashlib.sha256(metrics_bytes).hexdigest(),
     }
@@ -203,7 +248,7 @@ def generate() -> tuple[bytes, bytes, dict]:
                 "// Red/green transport high/low IEEE binary16 bytes; upload to R16F with HALF_FLOAT.\n"
                 "globalThis.BoardfishAsciiCoverageFont = "
                 + json.dumps(description, separators=(",", ":")) + ";\n").encode("utf-8")
-    return encoded.getvalue(), metadata, verification
+    return atlas_bytes, metadata, verification
 
 
 def main() -> None:

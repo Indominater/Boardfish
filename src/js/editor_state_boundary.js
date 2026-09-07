@@ -43,6 +43,15 @@
   }
 
   function addObject(obj) {
+    if (obj?.type === 'text') {
+      obj.data ??= {};
+      const content = normalizeTextContent(obj.data.content);
+      if (content !== obj.data.content) {
+        obj.data.content = content;
+        clearTextObjectLayoutRuntime(obj);
+        syncTextAutoHeight(obj);
+      }
+    }
     objects.push(obj);
     objectsMap.set(obj.id, obj);
     return obj;

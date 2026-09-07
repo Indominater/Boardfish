@@ -16,10 +16,13 @@ function loadTextLayout({
   userAgent = 'Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36',
   trackSegmenter = false,
   withoutSegmenter = false,
+  trackWrapping = false,
 } = {}) {
   const measured = [];
   const segmented = [];
+  const wrapping = { paragraphCharacters: [], prefixElements: [] };
   const context = {
+    BoardfishBoardTypes: require('../src/js/board_types.js'),
     document: {
       fonts: {
         status: fontStatus,
@@ -134,7 +137,23 @@ function loadTextLayout({
     context,
     { filename: 'text_layout_cache_test_hook.js' },
   );
-  return { context, measured, segmented };
+  if (trackWrapping) {
+    context.__wrapping = wrapping;
+    vm.runInContext(`
+      const originalWrapParagraph = wrapTextParagraph;
+      wrapTextParagraph = (...args) => {
+        __wrapping.paragraphCharacters.push(args[3] - args[2]);
+        return originalWrapParagraph(...args);
+      };
+      const originalPrefixSlice = textPrefixWidthsSlice;
+      textPrefixWidthsSlice = (...args) => {
+        const result = originalPrefixSlice(...args);
+        __wrapping.prefixElements.push(result.length);
+        return result;
+      };
+    `, context);
+  }
+  return { context, measured, segmented, wrapping };
 }
 
 test('ASCII spacing units bypass Intl.Segmenter without changing grapheme boundaries', () => {
@@ -1503,6 +1522,107 @@ test('auto-height count cache also stores line index for viewport reuse', () => 
   assert.equal(visible.totalLines, count);
   assert.equal(textLayout.hasObjectLayoutCache(obj), false);
   assert.ok(visible.length > 0);
+});
+
+test('zooming out through a huge paragraph materializes only newly exposed visual rows', () => {
+  const { context, wrapping, measured } = loadTextLayout({ trackWrapping: true });
+  const api = context.__testTextLayout;
+  const obj = { id: 'large-zoom-range', type: 'text', x: -20000, y: -4000,
+    w: 1000 + context.TEXT_PAD * 2, h: 1,
+    data: { content: 'alpha beta gamma delta '.repeat(22000) } };
+  api.syncTextAutoHeight(obj);
+  const rowCount = obj._textWrappedLineIndexCache.lineCount;
+  assert.ok(obj.data.content.length > 500000);
+  assert.ok(rowCount > 400);
+  assert.equal(obj._textWrappedLineIndexCache.visualRows.byteLength, rowCount * 20);
+  assert.equal(wrapping.prefixElements.length, 0, 'auto-height does not allocate visual-row prefix arrays');
+  wrapping.paragraphCharacters.length = 0;
+  const measuredBefore = measured.length;
+  let firstLayout;
+  for (let last = 202; last <= 230; last++) {
+    const layout = api.getTextLayoutForLineRange(obj, 200, last);
+    firstLayout ||= layout;
+    assert.strictEqual(layout[0], firstLayout[0], 'already materialized rows retain their identity');
+    assert.equal(layout.length, last - 199);
+    assert.equal(layout.totalLines, rowCount);
+  }
+  assert.deepEqual(wrapping.paragraphCharacters, [], 'new visual rows never rewrap their logical paragraph');
+  assert.equal(wrapping.prefixElements.length, 31, 'each newly exposed row allocates its prefix array once');
+  assert.ok(wrapping.prefixElements.reduce((sum, size) => sum + size, 0) < 32000);
+  assert.equal(measured.length, measuredBefore, 'paragraph glyph metrics are reused');
+  assert.equal(api.hasObjectLayoutCache(obj), false);
+  assert.equal(api.viewportLineCacheSize(obj), 31);
+  const expected = api.getTextLayout({ ...obj, data: obj.data, _layoutCache: null });
+  assert.deepEqual(plain(api.getTextLayoutForLineRange(obj, 200, 230)), plain(expected.slice(200, 231)));
+});
+
+test('a cold viewport builds its exact row index without allocating offscreen prefix arrays', () => {
+  const { context, wrapping } = loadTextLayout({ trackWrapping: true });
+  const api = context.__testTextLayout;
+  const obj = { id: 'cold-zoom-range', type: 'text', x: 0, y: 0,
+    w: 400 + context.TEXT_PAD * 2, h: 1, data: { content: 'alpha beta gamma '.repeat(8000) } };
+  const layout = api.getTextLayoutForLineRange(obj, 100, 103);
+  assert.equal(layout.length, 4);
+  assert.equal(wrapping.paragraphCharacters.length, 1);
+  assert.equal(wrapping.prefixElements.length, 4);
+  assert.ok(obj._textWrappedLineIndexCache.visualRows.length > 1000);
+});
+
+test('visual row ranges normalize endpoints before accessing a prepared typed index', () => {
+  const { context } = loadTextLayout();
+  const api = context.__testTextLayout;
+  const obj = { id: 'normalized-row-range', type: 'text', x: 0, y: 0,
+    w: 100 + context.TEXT_PAD * 2, h: 1, data: { content: 'zero\none\ntwo\nthree\nfour' } };
+  api.syncTextAutoHeight(obj);
+  const texts = (first, last) => plain(api.getTextLayoutForLineRange(obj, first, last).map(line => line.text));
+  assert.deepEqual(texts(-3, 1.9), ['zero', 'one']);
+  assert.deepEqual(texts(1.9, 3.8), ['one', 'two', 'three']);
+  assert.deepEqual(texts(3, 1), ['three']);
+  assert.deepEqual(texts(NaN, 0), ['zero']);
+  assert.deepEqual(texts(2, null), ['two', 'three', 'four']);
+  assert.deepEqual(texts(100, 110), []);
+});
+
+test('indexed visual rows preserve tab, grapheme, wrap, and caret positions across invalidations', () => {
+  const { context } = loadTextLayout();
+  const api = context.__testTextLayout;
+  const obj = { id: 'indexed-row-lifecycle', type: 'text', x: 70, y: -100,
+    w: 19 + context.TEXT_PAD * 2, h: 1,
+    data: { content: '  A\u0301👨‍👩‍👧‍👦 alpha\tbeta   gamma delta \n\n' + 'word A\u0301🎨 tail '.repeat(50) + '   ' } };
+  context.objects.push(obj);
+  const checkRows = () => {
+    api.syncTextAutoHeight(obj);
+    const expected = api.getTextLayout({ id: 'reference', type: 'text', x: obj.x, y: obj.y,
+      w: obj.w, h: obj.h, data: { content: obj.data.content } });
+    for (let first = 0; first < expected.length; first += 3) {
+      const actual = api.getTextLayoutForLineRange(obj, first, first + 2);
+      assert.deepEqual(plain(actual), plain(expected.slice(first, first + 3)));
+      for (const line of actual) {
+        for (const offset of line.prefixWidths.graphemeBoundaries || [0, line.text.length]) {
+          const expectedLine = expected.find(candidate => candidate.startIndex === line.startIndex && candidate.y === line.y);
+          assert.equal(api.lineCaretXAtOffset(line, obj, offset), api.lineCaretXAtOffset(expectedLine, obj, offset));
+        }
+      }
+    }
+  };
+  checkRows();
+  const firstIndex = obj._textWrappedLineIndexCache;
+  obj.w += 13;
+  checkRows();
+  assert.notStrictEqual(obj._textWrappedLineIndexCache, firstIndex);
+  obj.w -= 13;
+  checkRows();
+  assert.strictEqual(obj._textWrappedLineIndexCache, firstIndex, 'revisited width reuses the exact visual index');
+  obj.y += 400;
+  checkRows();
+  obj.data.content = 'new\tparagraph A\u0301\n' + obj.data.content.slice(10);
+  checkRows();
+  assert.notStrictEqual(obj._textWrappedLineIndexCache, firstIndex);
+  const editedIndex = obj._textWrappedLineIndexCache;
+  api.clearTextLayoutCaches({ measurements: true });
+  assert.equal(obj._textWrappedLineIndexCache, null);
+  checkRows();
+  assert.notStrictEqual(obj._textWrappedLineIndexCache, editedIndex);
 });
 
 test('auto-height reuses exact wrapped line index when resize revisits a width', () => {

@@ -1,0 +1,360 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-07T00:57:05.615116+00:00",
+  "baselineBundle": "assets/boardfish-web-preview.972732412ad0.min.js",
+  "baseline": {
+    "production": true,
+    "checks": {
+      "input": {
+        "pasteSize": {
+          "initialCharacters": 100000,
+          "finalCharacters": 200000,
+          "initialHeight": 2120,
+          "heightBeforeAnyEnter": 2120,
+          "expectedHeight": 4208,
+          "borderHeightCss": null,
+          "expectedBorderHeightCss": 212,
+          "pendingSizeSync": true,
+          "pass": false
+        },
+        "afterPaste": "keepA\nB\tC \u00e9\ud83d\ude00\u200bD\u0000",
+        "afterTyping": "\ud83c\udf1f\ud83e\udd70\u00e9A\nB\tC \u00e9\ud83d\ude00\u200bD\u0000X\ud83d\ude00Y",
+        "unsupportedPastePreservesSelection": false,
+        "unsupportedFallbackPreservesSelection": false,
+        "normalized": false,
+        "asciiOnly": false
+      },
+      "overlap": {
+        "fullOverlap": {
+          "maxChannelDifference": 88,
+          "changedChannels": 700583
+        },
+        "objectsInStack": 4,
+        "glyphWorkUnchanged": null,
+        "themes": [
+          {
+            "theme": "dark",
+            "actual": [
+              129,
+              128,
+              134,
+              255
+            ],
+            "expected": [
+              28,
+              27,
+              34,
+              255
+            ],
+            "pass": false
+          },
+          {
+            "theme": "light",
+            "actual": [
+              137,
+              137,
+              142,
+              255
+            ],
+            "expected": [
+              234,
+              234,
+              237,
+              255
+            ],
+            "pass": false
+          }
+        ],
+        "pass": false
+      }
+    }
+  },
+  "development": {
+    "production": false,
+    "bundle": null,
+    "environment": {
+      "dpr": 1.1100000143051147,
+      "canvasWidth": 1464,
+      "canvasHeight": 710
+    },
+    "checks": {
+      "input": {
+        "pasteSize": {
+          "initialCharacters": 100000,
+          "finalCharacters": 200000,
+          "initialHeight": 2120,
+          "heightBeforeAnyEnter": 4208,
+          "expectedHeight": 4208,
+          "borderHeightCss": 421.6216125488281,
+          "expectedBorderHeightCss": 420.8,
+          "pendingSizeSync": false,
+          "pass": true
+        },
+        "afterPaste": "keepA\nB\tC D",
+        "afterTyping": "keepA\nB\tC DXY",
+        "unsupportedPastePreservesSelection": true,
+        "unsupportedFallbackPreservesSelection": true,
+        "unsupportedCompositionPreservesSelection": true,
+        "normalized": true,
+        "asciiOnly": true,
+        "pass": true
+      },
+      "overlap": {
+        "fullOverlap": {
+          "maxChannelDifference": 0,
+          "changedChannels": 0
+        },
+        "objectsInStack": 4,
+        "singleGlyphs": 84314,
+        "stackedGlyphs": 84314,
+        "glyphWorkUnchanged": true,
+        "themes": [
+          {
+            "theme": "dark",
+            "actual": [
+              28,
+              27,
+              34,
+              255
+            ],
+            "editingActual": [
+              28,
+              27,
+              34,
+              255
+            ],
+            "expected": [
+              28,
+              27,
+              34,
+              255
+            ],
+            "pass": true
+          },
+          {
+            "theme": "light",
+            "actual": [
+              234,
+              234,
+              237,
+              255
+            ],
+            "editingActual": [
+              234,
+              234,
+              237,
+              255
+            ],
+            "expected": [
+              234,
+              234,
+              237,
+              255
+            ],
+            "pass": true
+          }
+        ],
+        "partialOverlaps": [
+          {
+            "theme": "dark",
+            "zoom": 0.1,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "dark",
+            "zoom": 0.1137,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "dark",
+            "zoom": 0.45,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "light",
+            "zoom": 0.1,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "light",
+            "zoom": 0.1137,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "light",
+            "zoom": 0.45,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          }
+        ],
+        "pass": true
+      }
+    }
+  },
+  "production": {
+    "production": true,
+    "bundle": "assets/boardfish-web-preview.c67c18acb71f.min.js",
+    "environment": {
+      "dpr": 1.1100000143051147,
+      "canvasWidth": 1464,
+      "canvasHeight": 710
+    },
+    "checks": {
+      "input": {
+        "pasteSize": {
+          "initialCharacters": 100000,
+          "finalCharacters": 200000,
+          "initialHeight": 2120,
+          "heightBeforeAnyEnter": 4208,
+          "expectedHeight": 4208,
+          "borderHeightCss": 421.6216125488281,
+          "expectedBorderHeightCss": 420.8,
+          "pendingSizeSync": false,
+          "pass": true
+        },
+        "afterPaste": "keepA\nB\tC D",
+        "afterTyping": "keepA\nB\tC DXY",
+        "unsupportedPastePreservesSelection": true,
+        "unsupportedFallbackPreservesSelection": true,
+        "unsupportedCompositionPreservesSelection": true,
+        "normalized": true,
+        "asciiOnly": true,
+        "pass": true
+      },
+      "overlap": {
+        "fullOverlap": {
+          "maxChannelDifference": 0,
+          "changedChannels": 0
+        },
+        "objectsInStack": 4,
+        "glyphWorkUnchanged": null,
+        "themes": [
+          {
+            "theme": "dark",
+            "actual": [
+              28,
+              27,
+              34,
+              255
+            ],
+            "editingActual": [
+              28,
+              27,
+              34,
+              255
+            ],
+            "expected": [
+              28,
+              27,
+              34,
+              255
+            ],
+            "pass": true
+          },
+          {
+            "theme": "light",
+            "actual": [
+              234,
+              234,
+              237,
+              255
+            ],
+            "editingActual": [
+              234,
+              234,
+              237,
+              255
+            ],
+            "expected": [
+              234,
+              234,
+              237,
+              255
+            ],
+            "pass": true
+          }
+        ],
+        "partialOverlaps": [
+          {
+            "theme": "dark",
+            "zoom": 0.1,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "dark",
+            "zoom": 0.1137,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "dark",
+            "zoom": 0.45,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "light",
+            "zoom": 0.1,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "light",
+            "zoom": 0.1137,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          },
+          {
+            "theme": "light",
+            "zoom": 0.45,
+            "maxChannelDifference": 0,
+            "changedChannels": 0,
+            "pass": true
+          }
+        ],
+        "pass": true
+      }
+    }
+  },
+  "verification": {
+    "testsPassed": 625,
+    "staticChecksPassed": 25,
+    "productionBuildPassed": true
+  },
+  "sourceHashes": {
+    "src/js/board_types.js": "4798c4db50e7ee903bbc074be513328f2222f895a8b84e9c07dbb7568c8661ac",
+    "src/js/board_schema.js": "c3c46e346434c866e3c74c140dd1a69c6f7d6229f0fa07816e0d3a62ff0b229f",
+    "src/js/clipboard_export_init.js": "ac8588bc13793ee1a78d145edc925665461c48aeb7e9a617039dfd1e4c519146",
+    "src/js/editor_state_boundary.js": "e71ba55e2615c00e1a589d419fc5d3bd3e5d4427fed9d90c7727d3bc58deff11",
+    "src/js/object_commands.js": "c9c4bff6a5566ad7ddbfa9f1af272471b9035d6bfeb7f7cf56f90dbb3d883b50",
+    "src/js/text_editor.js": "4ae7a44341a24ca8da43573ae79fcdf60e9b5f305b2a5be9b148748d4157e381",
+    "src/js/renderer.js": "1736b2e62b1d5356b7df22b1939607b56a3a4a52a300b7606ef5dd50ade5aea2",
+    "src/js/gpu_renderer.js": "06c87c027e9723bf1ccf5e85a1e13a0d0d5c36e418e7614da42612aa334ab91c",
+    "src/js/viewport.js": "5add5e9109fd36d01189f3f2d91773916bda37ef6c8660f3b221da4b0b0d5254",
+    "src/dev/textbox-behavior.js": "a98fc6bdabde66554f2e9ed709caa7c40400c17bdc7c13e608aa1f287609031a"
+  },
+  "notes": [
+    "Generated text only; no user document content is included.",
+    "The baseline outline CSS height was unavailable in the initial harness; model height and deferred-size flag reproduced the paste issue.",
+    "Partial-overlap reference images are composed by selecting foreground-only pixels inside the textbox rectangle and background-only pixels outside it. Shared pixel-center bounds include fractional pan positions.",
+    "Glyph counts measure submitted work in development; production strips these counters. No FPS claim is made.",
+    "Composition, paste, and typing checks dispatch synthetic browser events through the actual application handlers. Browser default textarea mutation is emulated when required."
+  ]
+}

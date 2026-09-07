@@ -1,7 +1,9 @@
 'use strict';
 
 (function boardMotionBenchmark() {
-  const WIDTH = 400, HEIGHT = 256, PHASES = 32, INSET = 24;
+  const parameters = new URLSearchParams(location.search);
+  const dimension = (name, fallback) => Math.max(128, Math.min(2048, Number(parameters.get(name)) || fallback));
+  const WIDTH = Math.round(dimension('width', 400)), HEIGHT = Math.round(dimension('height', 256)), PHASES = 32, INSET = 24;
   const MODES = ['before', 'after'], BACKGROUND = '#1e1e24', FOREGROUND = '#ededf2';
   const STYLE = { fontSize: FONT_SIZE, padding: TEXT_PAD, lineHeight: LINE_H, baselineOffset: TEXT_BASELINE_Y_OFFSET };
   const $ = id => document.getElementById(id);
@@ -11,7 +13,6 @@
   const rms = values => Math.sqrt(mean(values.map(value => value * value)));
   const canvases = Object.fromEntries(MODES.map(mode => [mode, $(mode)]));
   const contexts = {}, copies = {}, rendererEvents = [], scenes = {}, gpuTimers = {};
-  const parameters = new URLSearchParams(location.search);
   const baselineAvailable = typeof BoardfishGpuRendererBefore !== 'undefined';
   const portable = parameters.get('portable') === '1';
   const textTileCacheEnabled = parameters.get('cache') !== '0';
@@ -20,7 +21,7 @@
   let fixture = [], focus, busy = true, animated = false, generation = 0, result = null, downloadURL;
 
   function controls() {
-    for (const id of ['dpr', 'zoom', 'text-cache', 'phase-position', 'phases', 'performance', 'run-all']) $(id).disabled = busy || animated;
+    for (const id of ['dpr', 'zoom', 'text-cache', 'phase-position', 'phases', 'performance', 'zoom-performance', 'verify-pixels', 'run-all']) $(id).disabled = busy || animated;
     $('animate').disabled = busy;
     $('animate').textContent = animated ? 'Stop animation' : 'Animate pan / zoom';
   }
@@ -225,7 +226,20 @@
   function visibility() {
     return { hidden: document.hidden, devicePixelRatio, panels: Object.fromEntries(MODES.map(mode => {
       const rect = canvases[mode].getBoundingClientRect();
-      return [mode, { mounted: canvases[mode].isConnected, fullyVisible: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
+      const clip = { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+      for (let ancestor = canvases[mode].parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor), box = ancestor.getBoundingClientRect();
+        if (/^(auto|scroll|hidden|clip)$/.test(style.overflowX)) {
+          clip.left = Math.max(clip.left, box.left + ancestor.clientLeft);
+          clip.right = Math.min(clip.right, box.left + ancestor.clientLeft + ancestor.clientWidth);
+        }
+        if (/^(auto|scroll|hidden|clip)$/.test(style.overflowY)) {
+          clip.top = Math.max(clip.top, box.top + ancestor.clientTop);
+          clip.bottom = Math.min(clip.bottom, box.top + ancestor.clientTop + ancestor.clientHeight);
+        }
+      }
+      return [mode, { mounted: canvases[mode].isConnected, fullyVisible: rect.left >= clip.left && rect.top >= clip.top && rect.right <= clip.right && rect.bottom <= clip.bottom,
+        clippingRect: clip,
         cssWidth: rect.width, cssHeight: rect.height, backingWidth: canvases[mode].width, backingHeight: canvases[mode].height }];
     })) };
   }
@@ -335,6 +349,128 @@
     entry.visibilityAfter = visibility();
     return entry;
   }
+  async function zoomBlock(mode, config, blockIndex) {
+    const cacheState = blockIndex < 2 ? 'cold' : 'repeat';
+    if (cacheState === 'cold') contexts[mode].clearTextCache();
+    const timer = gpuTimers[mode], framesPerDirection = 120, samples = [], pending = [];
+    const initialResources = stats(mode);
+    let disjoint = false;
+    function collect() {
+      if (!timer.extension) return;
+      if (timer.gl.getParameter(timer.extension.GPU_DISJOINT_EXT)) disjoint = true;
+      for (const entry of pending) {
+        if (!entry.query || !timer.gl.getQueryParameter(entry.query, timer.gl.QUERY_RESULT_AVAILABLE)) continue;
+        const duration = timer.gl.getQueryParameter(entry.query, timer.gl.QUERY_RESULT);
+        samples[entry.index].gpuMs = disjoint ? null : round(duration / 1000000);
+        samples[entry.index].gpuStatus = disjoint ? 'disjoint' : 'available';
+        timer.gl.deleteQuery(entry.query); entry.query = null;
+      }
+    }
+    let previous = await frame();
+    for (let index = 0; index < framesPerDirection * 2; index++) {
+      const inward = index < framesPerDirection;
+      const position = (index % framesPerDirection) / (framesPerDirection - 1);
+      const zoom = .1 * 10 ** (inward ? position : 1 - position);
+      const currentConfig = { ...config, zoom }, before = stats(mode);
+      let query;
+      if (timer.extension) {
+        query = timer.gl.createQuery(); timer.gl.beginQuery(timer.extension.TIME_ELAPSED_EXT, query);
+      }
+      const started = performance.now();
+      const counts = draw(mode, currentConfig, focusCamera(currentConfig));
+      const cpuMs = performance.now() - started;
+      if (query) { timer.gl.endQuery(timer.extension.TIME_ELAPSED_EXT); pending.push({ index, query }); }
+      const after = stats(mode), resources = delta(before, after);
+      const sample = { index, direction: inward ? 'in' : 'out', zoom: round(zoom, 9), physicalEm: round(FONT_SIZE * zoom * config.dpr),
+        cpuMs: round(cpuMs), gpuMs: null, gpuStatus: query ? 'pending' : 'unavailable', ...counts,
+        glyphInstances: after.frameGlyphsDrawn, drawCalls: after.frameDrawCalls, bufferUploads: after.frameBufferUploads,
+        tileMisses: resources.textTileMisses, tileHits: resources.textTileHits, tileAppends: resources.textTileAppends,
+        tileRebuilds: resources.textTileRebuilds, tileRasterizations: resources.textTileRasterizations, tileReuses: resources.textTileReuses,
+        tileEvictions: resources.textTileEvictions, tileScratchUses: resources.textTileScratchUses,
+        tileBytes: after.textTileBytes, tileCount: after.textTileCount };
+      samples.push(sample);
+      const at = await frame(); sample.rafMs = round(at - previous); previous = at;
+      collect();
+      if (index % 30 === 29) $('status').textContent = `Real-board zoom: DPR ${config.dpr} · ${mode} · ${cacheState} · ${index + 1}/${framesPerDirection * 2} frames · block ${blockIndex + 1}/4`;
+    }
+    for (let retry = 0; pending.some(entry => entry.query) && retry < 8; retry++) { await frame(); collect(); }
+    for (const entry of pending) if (entry.query) {
+      timer.gl.deleteQuery(entry.query); samples[entry.index].gpuStatus = disjoint ? 'disjoint' : 'unresolved';
+    }
+    if (disjoint) for (const sample of samples) { sample.gpuMs = null; sample.gpuStatus = 'disjoint'; }
+    const gpu = samples.map(sample => sample.gpuMs).filter(Number.isFinite);
+    return { mode, blockIndex, cacheState, framesPerDirection, samples, cpuMs: summarize(samples.map(sample => sample.cpuMs)),
+      rafMs: summarize(samples.map(sample => sample.rafMs)), gpuMs: gpu.length ? summarize(gpu) : null,
+      gpuTimerAvailable: !!timer.extension, gpuDisjoint: disjoint, resources: delta(initialResources, stats(mode)), finalResources: stats(mode) };
+  }
+  async function zoomRun(config) {
+    configure(config);
+    // Keep text layout equally warm for both renderers; live viewport selection
+    // remains part of each measured submission. GPU text caches start empty.
+    const widest = { ...config, zoom: .1 }, camera = focusCamera(widest);
+    const viewport = { x1: -camera.x / widest.zoom, y1: -camera.y / widest.zoom,
+      x2: (WIDTH - camera.x) / widest.zoom, y2: (HEIGHT - camera.y) / widest.zoom };
+    for (const mode of MODES) for (const obj of scenes[mode]) getTextLayoutForViewport(obj, viewport);
+    const entry = { dpr: config.dpr, minZoom: .1, maxZoom: 1, focusId: focus.id, width: WIDTH, height: HEIGHT,
+      framesPerRenderer: 480, framesPerDirection: 120, anchor: 'Textbox center',
+      cachePolicy: 'Clear text caches before each renderer first pass; preserve caches for its repeated pass. Fonts and layouts remain loaded.',
+      visibility: visibility(), blocks: [] };
+    for (const [blockIndex, mode] of ['before', 'after', 'after', 'before'].entries()) entry.blocks.push(await zoomBlock(mode, config, blockIndex));
+    entry.modes = Object.fromEntries(MODES.map(mode => [mode, Object.fromEntries(entry.blocks.filter(block => block.mode === mode)
+      .map(block => [block.cacheState, { cpuMs: block.cpuMs, rafMs: block.rafMs, gpuMs: block.gpuMs, resources: block.resources }]))]));
+    entry.visibilityAfter = visibility();
+    return entry;
+  }
+  function comparePixels(before, after, config) {
+    if (before.width !== after.width || before.height !== after.height) throw new Error('Pixel comparison dimensions differ.');
+    const inset = INSET * config.dpr, empty = () => ({ pixels: 0, changedPixels: 0, max8bitDifference: 0, squaredError: 0 });
+    const regions = { all: empty(), interior: empty(), edges: empty() };
+    for (let y = 0; y < before.height; y++) for (let x = 0; x < before.width; x++) {
+      const region = x >= inset && x < before.width - inset && y >= inset && y < before.height - inset ? regions.interior : regions.edges;
+      const offset = (y * before.width + x) * 4;
+      let maximum = 0, squared = 0;
+      for (let channel = 0; channel < 4; channel++) {
+        const difference = before.data[offset + channel] - after.data[offset + channel];
+        maximum = Math.max(maximum, Math.abs(difference)); squared += difference * difference;
+      }
+      const changed = maximum > 0 ? 1 : 0;
+      region.pixels++; region.changedPixels += changed;
+      region.max8bitDifference = Math.max(region.max8bitDifference, maximum); region.squaredError += squared;
+      regions.all.pixels++; regions.all.changedPixels += changed;
+      regions.all.max8bitDifference = Math.max(regions.all.max8bitDifference, maximum); regions.all.squaredError += squared;
+    }
+    return Object.fromEntries(Object.entries(regions).map(([name, region]) => [name, { ...region,
+      rms8bitDifference: round(Math.sqrt(region.squaredError / Math.max(1, region.pixels * 4))),
+      changedPixelPercent: round(region.changedPixels / Math.max(1, region.pixels) * 100) }]));
+  }
+  async function pixelRun(config) {
+    const zooms = [.1, .125, .15, .2, .25, .3125, .35, .3749, .375, .5, .625, .7499, .75, 1];
+    for (const [zoomIndex, zoom] of zooms.entries()) {
+      const current = { ...config, zoom }; configure(current);
+      const entry = { ...current, width: WIDTH, height: HEIGHT, focusId: focus.id, physicalEm: round(FONT_SIZE * zoom * config.dpr),
+        insetCss: INSET, visibility: visibility(), samples: [], regions: null };
+      for (const anchor of ['center', 'bin-boundary-at-left']) for (const phasePhysicalPx of [-.75, -.25, .25, .75]) {
+        const camera = focusCamera(current, focus, phasePhysicalPx, phasePhysicalPx);
+        if (anchor === 'bin-boundary-at-left') camera.x = -(focus.x + TEXT_PAD + 1024) * zoom + phasePhysicalPx / config.dpr;
+        const counts = {}, images = {};
+        for (const mode of MODES) { counts[mode] = draw(mode, current, camera); images[mode] = readPixels(mode); }
+        const regions = comparePixels(images.before, images.after, current);
+        entry.samples.push({ anchor, phasePhysicalPx, camera, counts, regions });
+        if (!entry.regions) entry.regions = Object.fromEntries(Object.keys(regions).map(name => [name, { pixels: 0, changedPixels: 0, max8bitDifference: 0, squaredError: 0 }]));
+        for (const [name, sample] of Object.entries(regions)) {
+          const total = entry.regions[name]; total.pixels += sample.pixels; total.changedPixels += sample.changedPixels;
+          total.max8bitDifference = Math.max(total.max8bitDifference, sample.max8bitDifference); total.squaredError += sample.squaredError;
+        }
+      }
+      for (const region of Object.values(entry.regions)) {
+        region.rms8bitDifference = round(Math.sqrt(region.squaredError / Math.max(1, region.pixels * 4)));
+        region.changedPixelPercent = round(region.changedPixels / Math.max(1, region.pixels) * 100);
+      }
+      result.pixelComparisons.push(entry);
+      $('status').textContent = `Exact pixel comparison: DPR ${config.dpr} · ${zoom * 100}% · ${zoomIndex + 1}/${zooms.length} zooms`;
+      await frame();
+    }
+  }
   async function capture(config, saveEvidence = false) {
     const captures = [];
     for (const mode of MODES) {
@@ -374,9 +510,16 @@
     }).join('');
     const timingCell = mode => `${mode.cpuMs.p50} / ${mode.cpuMs.p95}${mode.gpuMs ? `<br>GPU ${mode.gpuMs.p50} / ${mode.gpuMs.p95}` : '<br>GPU unavailable'}`;
     const timings = result.performance.map(entry => `<tr><td>${entry.zoom * 100}% / DPR ${entry.dpr}</td><td>${timingCell(entry.modes.before)}</td><td>${timingCell(entry.modes.after)}</td></tr>`).join('');
+    const zoomTimings = result.zoomPerformance.flatMap(entry => ['cold', 'repeat'].map(state => `<tr><td>${entry.width}×${entry.height} / DPR ${entry.dpr} / ${state}</td><td>${timingCell(entry.modes.before[state])}</td><td>${timingCell(entry.modes.after[state])}</td></tr>`)).join('');
+    const pixelRows = result.pixelComparisons.map(entry => {
+      const cell = region => `${region.max8bitDifference} / ${region.rms8bitDifference} / ${region.changedPixels.toLocaleString()}`;
+      return `<tr><td>${round(entry.zoom * 100, 4)}% / DPR ${entry.dpr}</td><td>${cell(entry.regions.interior)}</td><td>${cell(entry.regions.edges)}</td></tr>`;
+    }).join('');
     $('summary').innerHTML = (aliasRows ? `<p>First coherent aliased line harmonic: fitted amplitude / mean ink, using space and pan phase. Lower indicates less alias energy.</p><table><tr><th>Configuration</th><th>Previous</th><th>Current</th></tr>${aliasRows}</table>` : '') +
       (phaseRows ? `<p>Y-pan row-contrast modulation, peak-to-peak / mean.</p><table><tr><th>Configuration</th><th>Previous</th><th>Current</th></tr>${phaseRows}</table>` : '') +
-      (timings ? `<p>Real-board CPU submission: p50 / p95 milliseconds.</p><table><tr><th>Configuration</th><th>Previous</th><th>Current</th></tr>${timings}</table>` : '');
+      (timings ? `<p>Real-board CPU submission: p50 / p95 milliseconds.</p><table><tr><th>Configuration</th><th>Previous</th><th>Current</th></tr>${timings}</table>` : '') +
+      (zoomTimings ? `<p>Continuous anchored 10%–100%–10% zoom: CPU and GPU p50 / p95 milliseconds. Cold and repeated passes are kept separate.</p><table><tr><th>Configuration</th><th>Previous</th><th>Current</th></tr>${zoomTimings}</table>` : '') +
+      (pixelRows ? `<p>Exact previous/current pixel comparison over eight views per zoom. Each cell reports maximum / RMS 8-bit channel difference / changed pixels. Zero is pixel-identical.</p><table><tr><th>Configuration</th><th>Interior</th><th>Edge strip</th></tr>${pixelRows}</table>` : '');
     try {
       const response = await fetch('/__evidence/board-motion.json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json });
       if (!response.ok) rendererEvents.push({ evidenceSaveStatus: response.status });
@@ -386,19 +529,23 @@
     if (busy || animated) return;
     busy = true; controls(); $('panels').scrollIntoView({ block: 'center', inline: 'nearest' });
     result = { benchmark: 'Boardfish actual boardTest.bf motion', at: new Date().toISOString(), userAgent: navigator.userAgent,
-      baselineAvailable, portable, textTileCacheEnabled, tileBudget, baselineDescription: baselineAvailable ? 'Snapshot in gpu-motion-before.js' : 'Unavailable: both panels use the current renderer',
+      baselineAvailable, baselineCoverageAvailable: typeof BoardfishAsciiCoverageFontBefore !== 'undefined', portable, textTileCacheEnabled, tileBudget, baselineDescription: baselineAvailable ? 'Snapshot in gpu-motion-before.js' : 'Unavailable: both panels use the current renderer',
       fixture: fixture.map(obj => ({ id: obj.id, x: obj.x, y: obj.y, w: obj.w, h: obj.h, characters: obj.data.content.length })),
       gpuTimerExtension: 'EXT_disjoint_timer_query_webgl2', gpuTimerAvailability: Object.fromEntries(MODES.map(mode => [mode, !!gpuTimers[mode].extension])),
-      rendererEvents, phaseSweeps: [], performance: [] };
+      width: WIDTH, height: HEIGHT, rendererEvents, phaseSweeps: [], performance: [], zoomPerformance: [], pixelComparisons: [] };
     const configurations = kind === 'all' ? [1, 2].flatMap(dpr => [.1, .125, .15, .2, .25, .5, 1].map(zoom => ({ dpr, zoom }))) : [settings()];
     try {
       for (const config of configurations) {
-        if (kind !== 'performance') result.phaseSweeps.push(await phaseSweep(config));
-        if (kind !== 'phases') result.performance.push(await performanceRun(config));
+        if (kind === 'pixels') await pixelRun(config);
+        else if (kind === 'zoom') result.zoomPerformance.push(await zoomRun(config));
+        else {
+          if (kind !== 'performance') result.phaseSweeps.push(await phaseSweep(config));
+          if (kind !== 'phases') result.performance.push(await performanceRun(config));
+        }
         await publish();
       }
-      await capture(configurations.at(-1), true); await publish();
-      $('status').textContent = `Complete: ${result.phaseSweeps.length} phase sweeps, ${result.performance.length} panning comparisons. JSON and native PNGs are ready.`;
+      configure(configurations.at(-1)); await capture(configurations.at(-1), true); await publish();
+      $('status').textContent = `Complete: ${result.phaseSweeps.length} phase sweeps, ${result.performance.length} panning comparisons, ${result.zoomPerformance.length} zoom comparisons, ${result.pixelComparisons.length} pixel configurations. JSON and native PNGs are ready.`;
     } catch (error) {
       result.error = String(error?.stack || error); await publish(); $('status').textContent = `Benchmark failed: ${error.message}`;
     } finally { busy = false; controls(); }
@@ -420,6 +567,9 @@
     }
   }
   async function initialize() {
+    document.documentElement.style.setProperty('--panel-width', `${WIDTH}px`);
+    document.documentElement.style.setProperty('--panel-height', `${HEIGHT}px`);
+    document.body.style.maxWidth = `${Math.max(1000, WIDTH * 2 + 16)}px`;
     const response = await fetch('/__fixture/board.json');
     if (!response.ok) throw new Error(`Actual board fixture unavailable (${response.status}). Start the local reproduction server.`);
     const data = await response.json(), allObjects = Array.isArray(data) ? data : data.objects || data.document?.objects || data.board?.objects;
@@ -432,7 +582,11 @@
     await document.fonts.load("normal 400 16px 'Geist Sans'"); await document.fonts.ready; refreshTextMetrics(); STYLE.baselineOffset = TEXT_BASELINE_Y_OFFSET;
     const font = { ...BoardfishAsciiFont, atlasURL: `/${BoardfishAsciiFont.atlasURL}` };
     if (font.largeFont) font.largeFont = { ...font.largeFont, atlasURL: `/${font.largeFont.atlasURL}` };
-    const coverageFont = typeof BoardfishAsciiCoverageFont === 'undefined' ? undefined : { ...BoardfishAsciiCoverageFont, atlasURL: '/fonts/geist-ascii-coverage.png' };
+    const coverageFont = typeof BoardfishAsciiCoverageFont === 'undefined' ? undefined : { ...BoardfishAsciiCoverageFont, atlasURL: new URL(BoardfishAsciiCoverageFont.atlasURL, `${location.origin}/`).href };
+    const beforeCoverageFont = typeof BoardfishAsciiCoverageFontBefore === 'undefined' ? undefined : { ...BoardfishAsciiCoverageFontBefore, atlasURL: '/dev/text-coverage-before.png' };
+    if (baselineAvailable && !beforeCoverageFont && BoardfishGpuRendererBefore.createContext.toString().includes('coverageFont')) {
+      throw new Error('The baseline renderer requires its original coverage-font metadata; refusing to substitute the current atlas.');
+    }
     const integralFont = typeof BoardfishAsciiIntegralFont === 'undefined' ? undefined : { ...BoardfishAsciiIntegralFont, atlasURL: '/fonts/geist-ascii-integral.png' };
     for (const mode of MODES) {
       const api = mode === 'before' && baselineAvailable ? BoardfishGpuRendererBefore : BoardfishGpuRenderer;
@@ -442,7 +596,7 @@
         const getExtension = gl.getExtension.bind(gl);
         gl.getExtension = name => /^(EXT_color_buffer_float|OES_texture_float_linear)$/.test(name) ? null : getExtension(name);
       }
-      contexts[mode] = api.createContext(canvases[mode], { font, integralFont:mode==='before'?integralFont:undefined, coverageFont,
+      contexts[mode] = api.createContext(canvases[mode], { font, integralFont:mode==='before'?integralFont:undefined, coverageFont:mode==='before'?beforeCoverageFont:coverageFont,
         ...(mode === 'after' ? { textTileCache: textTileCacheEnabled, maxTextTileBytes: tileBudget } : {}), onError: error => rendererEvents.push({ mode, error: String(error) }) });
       if (!contexts[mode] || !await contexts[mode].ready) throw new Error(`Could not initialize ${mode} renderer: ${JSON.stringify(rendererEvents)}`);
       const gl = canvases[mode].getContext('webgl2');
@@ -458,6 +612,8 @@
     const url = new URL(location.href); url.searchParams.set('cache', $('text-cache').checked ? '1' : '0'); location.href = url.href;
   });
   $('performance').addEventListener('click', () => run('performance'));
+  $('zoom-performance').addEventListener('click', () => run('zoom'));
+  $('verify-pixels').addEventListener('click', () => run('pixels'));
   $('run-all').addEventListener('click', () => run('all'));
   $('animate').addEventListener('click', () => animate().catch(error => { animated = false; controls(); $('status').textContent = String(error); }));
   for (const id of ['dpr', 'zoom']) $(id).addEventListener('change', () => { configure(settings()); capture(settings()); });

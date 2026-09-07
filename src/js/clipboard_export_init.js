@@ -635,7 +635,12 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     }
     if (jsClipboard) {
       if (jsClipboard.type === 'objects') {
-        const sourceObjects = jsClipboard.objects || [];
+        // Only a printable, non-space ASCII character can survive text paste
+        // normalization as nonempty content. Count those objects before the
+        // capacity check without cloning text or building any layouts.
+        const sourceObjects = (jsClipboard.objects || []).filter((obj) =>
+          obj?.type !== 'text' || /[\x21-\x7E]/.test(String(obj.data?.content ?? ''))
+        );
         if (!sourceObjects.length || !BoardfishWebLimits.canAddObjects(sourceObjects.length)) return;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const imageCount = collectClipboardDiagnostics && ClipDebug.enabled
@@ -669,6 +674,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         const trimStart = collectClipboardDiagnostics ? clipboardNow() : 0;
         const contentLimitStart = trimStart;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        let retainedCount = 0;
         for (const obj of clones) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const trimmed =
@@ -677,12 +683,16 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           if (collectClipboardDiagnostics && trimmed) trimmedTextObjects++;
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          if (obj?.type === 'text' && !obj.data?.content) continue;
+          clones[retainedCount++] = obj;
           if (obj?.type === 'text') {
             additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
           }
           minX = Math.min(minX, obj.x); minY = Math.min(minY, obj.y);
           maxX = Math.max(maxX, obj.x + obj.w); maxY = Math.max(maxY, obj.y + obj.h);
         }
+        clones.length = retainedCount;
+        if (!clones.length) return;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         if (collectClipboardDiagnostics) {
           ClipDebug.step(dbg, 'paste:text-trim-done', {
@@ -796,6 +806,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (/\S/.test(eventText)) {
       const text = textForExternalTextObjectPaste(eventText);
+      if (!text) return;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const objectCountBefore = collectClipboardDiagnostics ? objects.length : 0;
       const addStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;

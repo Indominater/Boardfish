@@ -1,5 +1,16 @@
 # Stable text during pan and zoom
 
+The default renderer now fuses the reconstruction filter into the shared glyph
+atlas and draws visible glyph spans directly. It no longer builds object-local
+coverage tiles during zoom. See [continuous zoom over large textboxes](text-zoom-performance.md)
+for the current architecture, layout fix, performance tradeoffs, and validation.
+Legacy coverage atlases without a baked reconstruction kernel still use the
+tile path described below.
+
+The following design and measurements record the preceding implementation at
+`2c11cd0`. They explain the anti-aliasing requirements and the origin of the
+kernel that the current atlas precomputes; their timings are historical.
+
 The small-text renderer uses a shared, prefiltered glyph atlas and bounded,
 object-local coverage tiles. It suppresses the coherent brightness bands produced
 by dense paragraphs while retaining the existing MSDF rendering at readable

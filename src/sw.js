@@ -1,6 +1,6 @@
 'use strict';
 
-const BOARDFISH_CACHE_VERSION = 'v7';
+const BOARDFISH_CACHE_VERSION = 'v8';
 const BOARDFISH_CACHE_NAMESPACE =
   `boardfish-pwa-${encodeURIComponent(self.registration.scope)}::`;
 const BOARDFISH_CACHE = `${BOARDFISH_CACHE_NAMESPACE}${BOARDFISH_CACHE_VERSION}`;
@@ -16,7 +16,7 @@ const BOARDFISH_APP_SHELL = [
   './fonts/geist-ascii-msdf.png',
   './fonts/geist-ascii-large-msdf.png',
   './fonts/geist-ascii-integral.png',
-  './fonts/geist-ascii-coverage.png',
+  './fonts/geist-ascii-coverage.png?v=a0bb8637d557',
   /* BOARDFISH_BUILD_ASSETS */
 ];
 const BOARDFISH_APP_SHELL_URLS = new Set();

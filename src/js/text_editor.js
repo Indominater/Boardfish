@@ -460,15 +460,31 @@ const textEditInputReplacement = (oldText = '', nextText = '', inputState = {}, 
   };
 };
 
+// Input events from autofill, dictation and some IMEs may omit beforeinput.
+// Recover the changed range from the values in that case: the DOM selection
+// already points after the edit and cannot describe the replaced selection.
+const textEditChangedRange = (oldText, nextText) => {
+  let start = 0;
+  const length = Math.min(oldText.length, nextText.length);
+  while (start < length && oldText.charCodeAt(start) === nextText.charCodeAt(start)) start++;
+  let end = oldText.length;
+  let nextEnd = nextText.length;
+  while (end > start && nextEnd > start && oldText.charCodeAt(end - 1) === nextText.charCodeAt(nextEnd - 1)) {
+    end--;
+    nextEnd--;
+  }
+  return { start, end, insertedText: nextText.slice(start, nextEnd) };
+};
+
 const textEditBeforeInputReplacement = (text = '', selection = {}, event = null) => {
   const start = Math.max(0, Math.min(selection.start ?? 0, text.length));
   const end = Math.max(start, Math.min(selection.end ?? start, text.length));
   const inputType = String(event?.inputType || '');
-  if (inputType === 'insertText' || inputType === 'insertCompositionText') {
-    return { start, end, insertedText: String(event?.data ?? '') };
-  }
   if (inputType === 'insertLineBreak' || inputType === 'insertParagraph') {
     return { start, end, insertedText: '\n' };
+  }
+  if (inputType.startsWith('insert') && typeof event?.data === 'string') {
+    return { start, end, insertedText: event.data };
   }
   if (inputType.startsWith('delete')) {
     if (start !== end) return { start, end, insertedText: '' };
@@ -966,7 +982,7 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
   const selection = options.selection || textEditSelectionState(proxy);
   if (selection.hasSelection) return false;
 
-  const rawPastedText = normalizeTextContent(text || '');
+  const rawPastedText = String(text || '');
   const pastedText = textForTextObjectPaste(rawPastedText);
   if (!pastedText) return false;
   if (pastedText !== rawPastedText) return false;
@@ -1234,6 +1250,66 @@ function enterEdit(id, {
 
   let pendingInputState = null;
   let pendingNativeNavigation = null;
+  let compositionState = null;
+  let completedComposition = null;
+  let compositionTailTimer = null;
+  const clearCompletedComposition = () => {
+    completedComposition = null;
+    if (compositionTailTimer !== null) clearTimeout(compositionTailTimer);
+    compositionTailTimer = null;
+  };
+  const restoreCompositionProxy = (value, selection) => {
+    proxy.value = value;
+    setTextEditProxyLogicalValue(proxy, value);
+    proxy.setSelectionRange(selection.start, selection.end, selection.direction || 'none');
+    if (selection.start === selection.end) setTextEditCaretIndex(obj, selection.start, null, true);
+    else clearTextEditCaretIndex(obj);
+    _textInputSelectionHistorySuppress = textEditSelectionState(proxy);
+  };
+  const isCompletedCompositionInput = (event) => completedComposition && (
+    event?.inputType === 'insertFromComposition' || event?.inputType === 'insertCompositionText' ||
+    (event?.inputType === 'insertText' && event.data === completedComposition.data)
+  );
+  proxy.addEventListener('compositionstart', () => {
+    clearCompletedComposition();
+    pendingInputState = null;
+    pendingNativeNavigation = null;
+    const selection = textEditSelectionState(proxy);
+    const value = textEditProxyValue(proxy);
+    syncTextEditProxyDomValue(proxy, value, selection);
+    compositionState = { ...selection, value, data: '' };
+  });
+  proxy.addEventListener('compositionupdate', (event) => {
+    if (compositionState && typeof event.data === 'string') compositionState.data = event.data;
+  });
+  proxy.addEventListener('compositionend', (event) => {
+    const state = compositionState;
+    if (!state) return;
+    compositionState = null;
+    pendingInputState = null;
+    if (_editEl !== proxy || editingId !== id) return;
+    const data = typeof event.data === 'string' ? event.data : state.data;
+    const insertedText = normalizeTextContent(data);
+    restoreCompositionProxy(state.value, state);
+    if (insertedText) {
+      const inputType = 'insertFromComposition';
+      pendingInputState = {
+        ...state,
+        inputType,
+        replacement: { start: state.start, end: state.end, insertedText },
+      };
+      beginTextEditHistoryAction(id, pendingInputState);
+      replaceTextEditProxyRange(proxy, insertedText, state.start, state.end, 'end');
+      dispatchTextEditInputEvent(proxy, inputType);
+    } else {
+      scheduleRender(true, false);
+    }
+    // WebKit and other input methods can send the final native input after
+    // compositionend. The transaction above already committed it. Repair a
+    // trailing native mutation without a second history entry or insertion.
+    completedComposition = { data, value: textEditProxyValue(proxy), ...textEditSelectionState(proxy) };
+    compositionTailTimer = setTimeout(clearCompletedComposition, 0);
+  });
   proxy._boardfishSetPendingInputState = (state) => { pendingInputState = state; };
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const recordInputSetupStep = (step, event, state = {}, extra = {}) => {
@@ -1263,6 +1339,17 @@ function enterEdit(id, {
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   proxy.addEventListener('beforeinput', (event) => {
+    if (compositionState) {
+      // Leave the native provisional range intact. Neither model updates nor
+      // ordinary proxy synchronization may run until this session finishes.
+      if (typeof event.data === 'string') compositionState.data = event.data;
+      return;
+    }
+    if (isCompletedCompositionInput(event)) {
+      if (event.cancelable !== false) event.preventDefault();
+      return;
+    }
+    clearCompletedComposition();
     resetTextEditNavigation(obj);
     pendingNativeNavigation = null;
     if (pendingInputState?.nativePasteHandled && event?.inputType === 'insertFromPaste') {
@@ -1280,6 +1367,25 @@ function enterEdit(id, {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       pendingInputState._debugSeq = nextTextEditInputDebugSeq();
     }
+    // Intercept changed insertions before the browser can replace a selection
+    // with unsupported characters. Non-cancelable IME events are repaired by
+    // the input handler using this same saved range.
+    if (nativeReplacement && String(event?.inputType || '').startsWith('insert')) {
+      const insertedText = normalizeTextContent(nativeReplacement.insertedText);
+      if (insertedText !== nativeReplacement.insertedText && event?.cancelable !== false) {
+        event.preventDefault();
+        if (!insertedText) {
+          pendingInputState = null;
+          syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
+          return;
+        }
+        pendingInputState.replacement = { ...nativeReplacement, insertedText };
+        beginTextEditHistoryAction(id, pendingInputState);
+        replaceTextEditProxyRange(proxy, insertedText, nativeReplacement.start, nativeReplacement.end, 'end');
+        dispatchTextEditInputEvent(proxy, pendingInputState.inputType);
+        return;
+      }
+    }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const domSyncBeforeNativeInput =
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1294,6 +1400,15 @@ function enterEdit(id, {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   });
 	  proxy.addEventListener('input', (event) => {
+      if (compositionState) {
+        if (typeof event.data === 'string') compositionState.data = event.data;
+        return;
+      }
+      if (isCompletedCompositionInput(event)) {
+        restoreCompositionProxy(completedComposition.value, completedComposition);
+        return;
+      }
+	    const hadPendingInput = !!pendingInputState;
 	    const inputState = pendingInputState || textEditSelectionState(proxy);
 	    const inputType = event?.inputType || inputState.inputType || '';
 	    /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1347,13 +1462,42 @@ function enterEdit(id, {
 	      synthesizedStaleReplacement = !!replacement;
 	    }
 	    if (synthesizedStaleReplacement) {
-	      nextRawValue = normalizeTextContent(
-	        oldValue.slice(0, replacement.start) + replacement.insertedText + oldValue.slice(replacement.end)
-	      );
+	      nextRawValue = oldValue.slice(0, replacement.start) + replacement.insertedText + oldValue.slice(replacement.end);
 	    } else {
 	      nextRawValue = proxy._boardfishDomValueStale && replacement ? textEditProxyValue(proxy) : proxy.value;
-	      replacement = replacement || textEditInputReplacement(oldValue, nextRawValue, inputState, inputType);
+	      replacement = replacement || (hadPendingInput
+          ? textEditInputReplacement(oldValue, nextRawValue, inputState, inputType)
+          : textEditChangedRange(oldValue, nextRawValue));
 	    }
+    const normalizedValue = normalizeTextContent(nextRawValue);
+    if (normalizedValue !== nextRawValue) {
+      // Native composition, drop and input-only paths can reach here with a
+      // value different from beforeinput.data. Use the actual DOM mutation.
+      if (oldValue.slice(0, replacement.start) + replacement.insertedText + oldValue.slice(replacement.end) !== nextRawValue) {
+        replacement = textEditChangedRange(oldValue, nextRawValue);
+      }
+      const insertedText = normalizeTextContent(replacement.insertedText);
+      const skippedInsertion = replacement.insertedText.length > 0 && insertedText.length === 0;
+      const selection = skippedInsertion
+        ? { start: replacement.start, end: replacement.end, direction: inputState.direction || 'none' }
+        : {
+            start: normalizeTextContent(nextRawValue.slice(0, proxy.selectionStart)).length,
+            end: normalizeTextContent(nextRawValue.slice(0, proxy.selectionEnd)).length,
+            direction: proxy.selectionDirection || 'none',
+          };
+      nextRawValue = skippedInsertion ? oldValue : normalizedValue;
+      proxy.value = nextRawValue;
+      setTextEditProxyLogicalValue(proxy, nextRawValue);
+      proxy.setSelectionRange(selection.start, selection.end, selection.direction);
+      if (skippedInsertion) {
+        if (selection.start === selection.end) setTextEditCaretIndex(obj, selection.start, null, true);
+        else clearTextEditCaretIndex(obj);
+        _textInputSelectionHistorySuppress = textEditSelectionState(proxy);
+        scheduleRender(true, false);
+        return;
+      }
+      replacement = { ...replacement, insertedText };
+    }
 	    logInputStep('replacement-ready', () => ({
 	      oldChars: oldValue.length,
 	      nextChars: nextRawValue.length,
@@ -1449,8 +1593,13 @@ function enterEdit(id, {
       removedChars > insertedChars;
     const layoutRemovedLines = layoutPatched && obj._lastTextLayoutLineDelta < 0;
     const insertsLineBreak = inputType === 'insertLineBreak' || inputType === 'insertParagraph';
+    // Bulk insertion needs exact bounds in the same frame as the new text.
+    // The wrapped-row index built here is reused by rendering; only ordinary
+    // single-character typing keeps the large-document deferred-size path.
+    const insertsBulkText = inputType === 'insertFromPaste' || inputType === 'insertFromDrop' ||
+      (String(inputType).startsWith('insert') && insertedChars > 1);
     const forceAutoHeight = layoutRemovedLines || deleteReducedLogicalLines ||
-      selectedDeleteShrankText || deleteShrankPendingEdit || insertsLineBreak;
+      selectedDeleteShrankText || deleteShrankPendingEdit || insertsLineBreak || insertsBulkText;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const autoHeightForceReason = layoutRemovedLines
       ? 'layout-line-removal'
@@ -1460,7 +1609,7 @@ function enterEdit(id, {
           ? 'selected-delete'
           : (deleteShrankPendingEdit
             ? 'pending-size-delete'
-            : (insertsLineBreak ? 'line-break-insert' : ''))));
+            : (insertsLineBreak ? 'line-break-insert' : (insertsBulkText ? 'bulk-text-insert' : '')))));
     const autoHeightDebugBefore = shouldLogInput
       ? {
           size: textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight'),
@@ -1749,6 +1898,8 @@ function enterEdit(id, {
   });
   proxy.addEventListener('blur', flushEditHistoryCheckpoint);
   proxy.addEventListener('keydown', (e) => {
+    if (compositionState || e.isComposing) return;
+    clearCompletedComposition();
     const wakeCaret = !_caretVisible;
     _caretVisible = true;
     pendingNativeNavigation = null;
@@ -2078,6 +2229,7 @@ function enterEdit(id, {
   let _prevSelStart = -1, _prevSelEnd = -1;
   _selChangeListener = () => {
     if (document.activeElement !== proxy) return;
+    if (compositionState) return;
     let s = proxy.selectionStart, e = proxy.selectionEnd;
     const suppressed = _textInputSelectionHistorySuppress;
     if (typeof suppressed?.hasSelection === 'boolean' && suppressed.start === s && suppressed.end === e) {

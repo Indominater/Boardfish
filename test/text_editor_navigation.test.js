@@ -122,6 +122,7 @@ function loadNavigationHarness() {
     clearInterval() {},
     clearTimeout() {},
   };
+  context.BoardfishBoardTypes = require('../src/js/board_types.js');
   vm.createContext(context);
   vm.runInContext(
     fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') +

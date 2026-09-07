@@ -8,6 +8,7 @@ const vm = require('node:vm');
 
 function loadTextLayout() {
   const context = {
+    BoardfishBoardTypes: require('../src/js/board_types.js'),
     console,
     navigator: { userAgent: 'Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36' },
     document: {

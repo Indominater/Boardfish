@@ -517,7 +517,7 @@
       const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
       const timer = setTimeout(() => rejectReady(new Error('Timed out loading production GPU font atlas.')), 15000);
       contexts.gpu = BoardfishGpuRenderer.createContext(canvases.gpu, {
-        coverageFont: { ...BoardfishAsciiCoverageFont, atlasURL: '../fonts/geist-ascii-coverage.png' },
+        coverageFont: { ...BoardfishAsciiCoverageFont, atlasURL: `../${BoardfishAsciiCoverageFont.atlasURL}` },
         font: {
           ...BoardfishAsciiFont, atlasURL: '../fonts/geist-ascii-msdf.png',
           ...(BoardfishAsciiFont.largeFont ? {

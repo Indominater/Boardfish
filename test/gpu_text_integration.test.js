@@ -78,7 +78,7 @@ test('GPU text overlay keeps selection behind glyphs and caret above glyphs', ()
     _editEl: { selectionStart: 1, selectionEnd: 4 }, _caretVisible: true,
     performance: { now: () => 0 }, TextSelDebug: { _logDraw() {} },
     window: { devicePixelRatio: 2 },
-    boardRenderer: loadRenderer().createBoardRenderer({ fontSize: 16 }),
+    boardRenderer: loadRenderer().createBoardRenderer({ fontSize: 16,canvasBackgroundColor:()=> '#1c1b22' }),
     getTextLayoutForViewport: () => layout,
     lineXAtOffset: (_line, owner, offset) => owner.x + 16 + offset * 8,
     lineCaretXAtOffset: (_line, owner, offset) => owner.x + 16 + offset * 8,
@@ -86,8 +86,12 @@ test('GPU text overlay keeps selection behind glyphs and caret above glyphs', ()
   };
   vm.createContext(scope); vm.runInContext(overlay, scope);
   const context = {
-    save() {}, restore() {}, beginPath() {},
-    rect() { calls.push('selection'); }, fill() {}, fillRect() { calls.push('caret'); },
+    fillStyle:'#fbfbfe',globalAlpha:1,
+    save() {}, restore() {}, beginPath() {},clipRect(...rect){assert.deepEqual(rect,[10,20,180,80]);},
+    rect() { calls.push('selection'); }, fill() {}, fillRect(_x,_y,w,h) {
+      if(w===180&&h===80){assert.equal(this.fillStyle,'#1c1b22');assert.equal(this.globalAlpha,1);calls.push('background');}
+      else calls.push('caret');
+    },
     drawTextLayout(lines, owner, options) {
       assert.strictEqual(lines, layout); assert.strictEqual(owner, obj);
       assert.equal(options.fontSize, 16); calls.push('glyphs'); return true;
@@ -95,11 +99,11 @@ test('GPU text overlay keeps selection behind glyphs and caret above glyphs', ()
   };
   const viewport = { x1: 0, y1: 0, x2: 200, y2: 100 };
   const selected = scope.drawEditingTextOverlay(context, 1, viewport, true);
-  assert.deepEqual(calls, ['selection', 'glyphs']);
+  assert.deepEqual(calls, ['background', 'selection', 'glyphs']);
   assert.equal(selected.editDrawnTextLines, 1); assert.equal(selected.editCaretDrawn, false);
   calls.length = 0; scope._editEl.selectionStart = 3; scope._editEl.selectionEnd = 3;
   const collapsed = scope.drawEditingTextOverlay(context, 1, viewport, true);
-  assert.deepEqual(calls, ['glyphs', 'caret']);
+  assert.deepEqual(calls, ['background', 'glyphs', 'caret']);
   assert.equal(collapsed.editCaretDrawn, true);
   scope.getTextLayoutForViewport = (_obj, rect) => {
     assert.deepEqual(JSON.parse(JSON.stringify(rect)), { x1: -21.25, y1: -21.25, x2: 221.25, y2: 121.25 });
@@ -108,18 +112,19 @@ test('GPU text overlay keeps selection behind glyphs and caret above glyphs', ()
   scope.drawEditingTextOverlay(context, .1, viewport, true);
 });
 
-test('GPU editing redraws ordered scene objects inside one frame without an image-only offscreen composition', () => {
+for(const gpu of [false,true])test(`opaque text editing preserves ordered scene composition with ${gpu?'GPU':'Canvas2D'} rendering`, () => {
   const source = read('src/js/viewport.js');
   const drawBoard = source.slice(source.indexOf('function drawBoard'), source.indexOf('function applyTransform'));
   const calls = [], objects = [{ id: 'a', type: 'text' }, { id: 'b', type: 'image' }, { id: 'editing', type: 'text' }];
   const context = {
-    isBoardfishGpuContext: true,
+    isBoardfishGpuContext: gpu,
     beginFrame(current) { assert.strictEqual(current, objects); calls.push('begin'); },
     endFrame() { calls.push('end'); }, resetTransform() {},
     drawImage() { assert.fail('GPU editing must not flatten the image-only cache above or below all text'); },
   };
   const scope = {
     ctx: context, objects, editingId: 'editing', _boardOpening: false, _offscreenDirty: true,
+    boardRenderer:{opaqueTextBackgrounds:true},
     ViewportDebug: { isEnabled: () => false }, OpenDebug: {},
     window: { devicePixelRatio: 2 }, boardCanvas: { width: 400, height: 256 }, zoom: 1,
     syncBoardCanvasBackingStore() {},
@@ -194,8 +199,9 @@ test('dev and production load the bundled ASCII font and GPU backend before clai
   const scope = { self: { registration: { scope: 'https://example.test/board/' }, location: { href: 'https://example.test/board/sw.js' } }, caches: { open() {} }, URL };
   vm.createContext(scope);
   vm.runInContext(serviceWorker.slice(0, serviceWorker.indexOf('function matchCurrentCache')), scope);
-  for (const name of ['geist-ascii-msdf.png', 'geist-ascii-large-msdf.png']) {
-    const atlasUrl = new URL(`https://example.test/board/fonts/${name}`);
+  vm.runInContext(read('src/fonts/geist-ascii-coverage.js'),scope);
+  for (const atlas of ['fonts/geist-ascii-msdf.png', 'fonts/geist-ascii-large-msdf.png',scope.BoardfishAsciiCoverageFont.atlasURL]) {
+    const atlasUrl = new URL(atlas,'https://example.test/board/');
     assert.equal(scope.isAppShellUrl(atlasUrl), true);
     assert.equal(scope.isCacheFirstAssetUrl(atlasUrl), true);
     assert.equal(scope.shouldCacheRequest({ mode: 'cors' }, atlasUrl), true);

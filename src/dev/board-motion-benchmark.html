@@ -15,9 +15,9 @@
     button { cursor: pointer; } button:disabled { opacity: .5; cursor: progress; }
     input[type=range] { width: 120px; }
     #status { min-height: 22px; } .scroll { overflow-x: auto; }
-    #panels { display: grid; grid-template-columns: repeat(2, 400px); gap: 16px; width: max-content; }
+    #panels { display: grid; grid-template-columns: repeat(2, var(--panel-width, 400px)); gap: 16px; width: max-content; }
     figure { margin: 0; } figcaption { margin-bottom: 7px; font-weight: 600; }
-    canvas { display: block; width: 400px; height: 256px; outline: 1px solid #484850; }
+    canvas { display: block; width: var(--panel-width, 400px); height: var(--panel-height, 256px); outline: 1px solid #484850; }
     a { display: inline-block; color: #b7b7ff; margin: 8px 10px 0 0; }
     pre { padding: 12px; background: #222228; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; max-height: 380px; overflow-y: auto; }
     details { margin-top: 14px; } table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -30,14 +30,14 @@
   <div class="controls">
     <label>DPR <select id="dpr" disabled><option>1</option><option>2</option></select></label>
     <label title="Reloads the benchmark; affects only the current renderer"><input id="text-cache" type="checkbox" checked disabled>Cache current text</label>
-    <label>Zoom <select id="zoom" disabled><option value="0.1" selected>10%</option><option value="0.125">12.5%</option><option value="0.15">15%</option><option value="0.2">20%</option><option value="0.25">25%</option><option value="0.5">50%</option><option value="1">100%</option></select></label>
+    <label>Zoom <select id="zoom" disabled><option value="0.1" selected>10%</option><option value="0.125">12.5%</option><option value="0.15">15%</option><option value="0.2">20%</option><option value="0.25">25%</option><option value="0.3125">31.25%</option><option value="0.5">50%</option><option value="0.625">62.5%</option><option value="1">100%</option></select></label>
     <label>Y phase <input id="phase-position" type="range" min="0" max="32" step="1" value="0" disabled><output id="phase-label">0/32 px</output></label>
-    <button id="phases" disabled>Measure phases</button><button id="performance" disabled>Measure pan</button>
+    <button id="phases" disabled>Measure phases</button><button id="performance" disabled>Measure pan</button><button id="zoom-performance" disabled>Measure zoom</button><button id="verify-pixels" disabled>Verify pixels</button>
     <button id="run-all" disabled>Run all</button><button id="animate" disabled>Animate pan / zoom</button>
   </div>
   <p id="status" role="status">Loading the font and renderers…</p>
   <div class="scroll"><div id="panels">
-    <figure><figcaption id="before-caption">Previous integral renderer</figcaption><canvas id="before" aria-label="Previous text renderer"></canvas><a id="before-png" download>Native PNG</a></figure>
+    <figure><figcaption id="before-caption">Previous renderer</figcaption><canvas id="before" aria-label="Previous text renderer"></canvas><a id="before-png" download>Native PNG</a></figure>
     <figure><figcaption>Current text renderer</figcaption><canvas id="after" aria-label="Current text renderer"></canvas><a id="after-png" download>Native PNG</a></figure>
   </div></div>
   <div id="summary"></div>
@@ -49,6 +49,8 @@
     <li>Alias-band analysis uses the actual 24-world-pixel line pitch. A least-squares fit separates DC, a slow brightness trend, the legitimate line harmonics, and the first harmonic above the physical-pixel Nyquist limit. Per-phase spatial fits are marked unidentifiable when an alias coincides with a legitimate harmonic. A joint space/phase fit additionally distinguishes their temporal phase rotation during vertical panning. Both use orthogonalized least squares to limit finite-window leakage from the dominant line pattern. These fits estimate coherent periodic alias energy; nonperiodic content, other higher harmonics, and quantization remain in the residual.</li>
     <li>Performance visits each real textbox with live object culling and getTextLayoutForViewport on each frame. Four alternating 60-frame blocks provide 120 measured frames per renderer. CPU submission includes culling, layout, and rendering; rAF timing includes scheduling. GPU execution is measured separately with EXT_disjoint_timer_query_webgl2 where supported, using asynchronous polling without waits or fences; unavailable, unresolved, or disjoint results are reported explicitly. Readback and PNG capture occur outside timed blocks.</li>
     <li>Run all covers app-supported zooms 10%, 12.5%, 15%, 20%, 25%, 50%, and 100% at DPR 1 and 2. Native before/after PNGs save through the local evidence endpoint after measurements.</li>
+    <li>Measure zoom holds the center of the largest textbox fixed while zooming logarithmically from 10% to 100% and back, 120 frames in each direction. Its four blocks use previous/current/current/previous order. The first pass clears each renderer's text cache; the repeated pass preserves it. Fonts and text layout are loaded before measurement. Every frame records CPU time, independent GPU time, zoom, visible text, glyph submissions, and tile activity. Use <code>?width=1200&amp;height=800</code> for a full-size backing workload; the default phase panels remain 400 by 256 CSS pixels.</li>
+    <li>Verify pixels compares exact RGBA readbacks outside timing at 14 zooms, including both sides of the 12-physical-pixel filter cutoff for DPR 1 and 2. Each zoom has four diagonal pan phases around the textbox center and four around a viewport edge aligned with the content's x = 1024 world-pixel bin boundary. Results separate the 24 CSS-pixel edge strip from the interior, reporting differing pixels, largest 8-bit channel difference, and RMS channel difference. JSON contains all 112 comparisons; PNG links show the final selected reference view.</li>
     <li>Add <code>?baseline=1</code> when the fixture server supplies the baseline <code>gpu-motion-before.js</code> route. Without it both panels use the current renderer and comparison is labeled unavailable. Optional <code>?budget=0</code> forces the cache-pressure path. <code>?portable=1</code> disables optional floating-point extensions on both panels for a matched portable-path comparison. Optional <code>?cache=0</code> sets <code>textTileCache: false</code> only on the current renderer; the cache checkbox reloads this setting.</li>
   </ul></details>
   <details><summary>Results JSON</summary><pre id="json">No run yet.</pre></details>
@@ -58,11 +60,15 @@
     function scheduleRender() {} function markDirty() {} function invalidateOffscreen() {}
   </script>
   <script src="/js/text_raster.js"></script>
+  <script src="/js/board_types.js"></script>
   <script src="/js/text_layout.js"></script>
   <script src="/fonts/geist-ascii-msdf.js"></script>
   <script src="/fonts/geist-ascii-integral.js"></script>
   <script>
-    if (new URLSearchParams(location.search).get('baseline') === '1') document.write('<script src="gpu-motion-before.js"><\/script>');
+    if (new URLSearchParams(location.search).get('baseline') === '1') {
+      document.write('<script src="/dev/text-coverage-before.js"><\/script>');
+      document.write('<script src="gpu-motion-before.js"><\/script>');
+    }
   </script>
   <script>if (window.BoardfishGpuRenderer) window.BoardfishGpuRendererBefore = window.BoardfishGpuRenderer;</script>
   <script src="/fonts/geist-ascii-coverage.js"></script>

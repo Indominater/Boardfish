@@ -17,6 +17,7 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/object_commands.js'), 'utf8');
   let idCounter = 1;
   const context = {
+    BoardfishBoardTypes: require('../src/js/board_types.js'),
     console,
     TextEncoder,
     document: {
@@ -112,7 +113,7 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
   return context;
 }
 
-function loadPasteHarness({ browserText = '', normalizeExternalText = (value) => value } = {}) {
+function loadPasteHarness({ browserText = '', normalizeExternalText = require('../src/js/board_types.js').normalizeTextContent } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/clipboard_export_init.js'), 'utf8');
   const calls = { addText: [] };
   const context = {
@@ -287,4 +288,47 @@ test('outside clipboard text is normalized before creating a text box', async ()
   });
 
   assert.equal(context.calls.addText[0].content, 'wrapped prose continues here');
+});
+
+test('new textbox content is normalized even when marked prepared', () => {
+  for (const contentPrepared of [false, true]) {
+    const context = loadAddTextHarness();
+    context.addText(24, 48, 'A😀B\r\nCéD\tE', { contentPrepared });
+    assert.equal(context.added[0].data.content, 'AB\nCD\tE');
+  }
+});
+
+test('discarded-only supplied content never creates an empty textbox', () => {
+  for (const contentPrepared of [false, true]) {
+    const context = loadAddTextHarness();
+    context.addText(24, 48, '😀é中文\u200B', { contentPrepared });
+    assert.equal(context.added.length, 0);
+    assert.equal(context.histories.length, 0);
+    assert.equal(context.editedIds.length, 0);
+  }
+});
+
+test('discarded-only supplied content is a no-op even when no object capacity remains', () => {
+  for (const contentPrepared of [false, true]) {
+    const context = loadAddTextHarness();
+    let capacityChecks = 0;
+    context.BoardfishWebLimits.canAddObjects = () => { capacityChecks++; return false; };
+    context.addText(24, 48, '😀é中文\u200B', { contentPrepared });
+    assert.equal(capacityChecks, 0);
+    assert.equal(context.added.length, 0);
+    assert.equal(context.histories.length, 0);
+    assert.equal(context.editedIds.length, 0);
+    assert.equal(context.textByteLengthCalls, 0);
+  }
+});
+
+test('event and browser paste skip content that contains no supported characters', async () => {
+  for (const viaEvent of [false, true]) {
+    const context = loadPasteHarness({ browserText: '😀é中文\u200B' });
+    await context.pasteAtPos(640, 360, viaEvent ? {
+      getData(type) { return type === 'text/plain' ? '😀é中文\u200B' : ''; },
+    } : null);
+    assert.deepEqual(context.calls.addText, []);
+    assert.equal(context._pasteInProgress, false);
+  }
 });

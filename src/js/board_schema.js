@@ -11,6 +11,7 @@
     isBoardObjectType,
     isObject,
     isSupportedBoardVersion,
+    normalizeTextContent,
   } = BoardTypes;
 
   function normalizeViewport(viewport = {}) {
@@ -41,7 +42,7 @@
       data: {},
     };
     if (obj.type === OBJECT_TYPES.TEXT) {
-      normalized.data.content = typeof data.content === 'string' ? data.content : '';
+      normalized.data.content = normalizeTextContent(typeof data.content === 'string' ? data.content : '');
     } else {
       if (typeof data.imgKey !== 'string' || !data.imgKey) {
         throw new Error(`image object ${obj.id} is missing imgKey`);

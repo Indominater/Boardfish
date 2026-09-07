@@ -39,8 +39,7 @@ function getTextRasterCacheStats() {
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function normalizeTextContent(value) {
-  const text = String(value ?? '');
-  return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text;
+  return BoardfishBoardTypes.normalizeTextContent(value);
 }
 
 const trimWhitespaceOnlyEdgeLines = (value) => {
@@ -177,6 +176,7 @@ const TEXT_PARAGRAPH_PREFIX_CACHE_MAX_ENTRIES = 4096;
 const TEXT_WRAPPED_WIDTH_CACHE_MAX_ENTRIES = 12;
 const TEXT_VIEWPORT_LAYOUT_RANGE_CACHE_MAX_ENTRIES = 48;
 const TEXT_VIEWPORT_LAYOUT_LINE_CACHE_MAX_ENTRIES = 8192;
+const TEXT_WRAPPED_VISUAL_ROW_STRIDE = 5;
 const TEXT_EXACT_PREFIX_MAX_CHARS = 384;
 var _mwCache = new Map();
 var _glyphMetricsCache = new Map();
@@ -596,7 +596,7 @@ function getCachedTextWrappedLineIndex(obj, text) {
   return null;
 }
 
-function setCachedTextWrappedLineIndex(obj, text, entries, lineCount) {
+function setCachedTextWrappedLineIndex(obj, text, entries, lineCount, visualRows = null) {
   if (!obj || obj.type !== 'text' || !Array.isArray(entries)) return;
   const count = Math.max(1, Math.trunc(Number(lineCount)) || 1);
   obj._textWrappedLineIndexCacheContent = text;
@@ -604,6 +604,7 @@ function setCachedTextWrappedLineIndex(obj, text, entries, lineCount) {
   const cache = {
     lineCount: count,
     entries,
+    visualRows,
   };
   obj._textWrappedLineIndexCache = cache;
   setCachedTextWrappedLineCount(obj, text, count);
@@ -624,7 +625,7 @@ function ensureCachedTextWrappedLineIndex(obj, content) {
   const cached = getCachedTextWrappedLineIndex(obj, content);
   if (cached) return cached;
   const wrapped = buildWrappedLines(obj, { collect: false, collectLineIndex: true });
-  setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
+  setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount, wrapped.visualRows);
   return getCachedTextWrappedLineIndex(obj, content);
 }
 
@@ -829,7 +830,7 @@ function wrapTextParagraph(obj, content, paraStart, paraEnd, maxW, pushLine, col
     ? measureTextRangeW(content, start, end)
     : textPrefixRangeWidth(paragraphPrefixWidths, start - paraStart, end - paraStart);
   const pushParagraphLine = (start, end, nextStart = end, caretEnd = end) => {
-    const prefixWidths = collectPrefixWidths && !paragraphHasTab
+    const prefixWidths = (typeof collectPrefixWidths === 'function' ? collectPrefixWidths() : collectPrefixWidths) && !paragraphHasTab
       ? textPrefixWidthsSlice(paragraphPrefixWidths, start - paraStart, end - paraStart)
       : null;
     pushLine(start, end, nextStart, caretEnd, prefixWidths);
@@ -894,9 +895,14 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
   const maxW = obj.w - TEXT_PAD * 2;
   const result = [];
   const lineIndex = collectLineIndex ? [] : null;
+  // Twenty bytes per wrapped row retain exact wrapping/caret endpoints without
+  // retaining a second copy of its text or prefix widths. A new viewport can
+  // then materialize only its missing rows, even inside one huge paragraph.
+  const visualRows = collectLineIndex ? [] : null;
   let visualLineIndex = 0;
 
   const pushLine = (start, end, nextStart = end, caretEnd = end, logicalLineIndex = 0, prefixWidths = null) => {
+    if (visualRows) visualRows.push(start, end, nextStart, caretEnd, logicalLineIndex);
     if (lineIndex) {
       let entry = lineIndex[lineIndex.length - 1];
       if (!entry || entry.logicalLineIndex !== logicalLineIndex) {
@@ -942,15 +948,18 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
       wrapTextParagraph(obj, content, paraStart, paraEnd, maxW,
         (start, end, nextStart, caretEnd, prefixWidths) => {
           pushLine(start, end, nextStart, caretEnd, logicalLineIndex, prefixWidths);
-        }, collectLines);
+        }, () => collectLines && visualLineIndex >= firstLineIndex && visualLineIndex <= lastLineIndex);
     }
+
+    if (lineIndex) lineIndex[lineIndex.length - 1].hasTab = content.slice(paraStart, paraEnd).includes('\t');
 
     if (newlineAt === -1) break;
     paraStart = newlineAt + 1;
     logicalLineIndex++;
   }
 
-  return { lines: result, lineCount: Math.max(1, knownLineCount || visualLineIndex), lineIndex };
+  return { lines: result, lineCount: Math.max(1, knownLineCount || visualLineIndex), lineIndex,
+    visualRows: visualRows ? new Uint32Array(visualRows) : null };
 }
 
 function getWrappedLineCount(obj, text) {
@@ -961,7 +970,7 @@ function getWrappedLineCount(obj, text) {
     return Math.max(1, Math.trunc(Number(cachedCount)) || 1);
   }
   const wrapped = buildWrappedLines(obj, { collect: false, collectLineIndex: true });
-  setCachedTextWrappedLineIndex(obj, text, wrapped.lineIndex || [], wrapped.lineCount);
+  setCachedTextWrappedLineIndex(obj, text, wrapped.lineIndex || [], wrapped.lineCount, wrapped.visualRows);
   return wrapped.lineCount;
 }
 
@@ -1387,6 +1396,27 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, first, last, li
     return setCachedTextViewportLayoutRange(obj, content, first, last, [], totalLines);
   }
   const actualLast = Math.min(last, totalLines - 1);
+  const visualRows = lineIndexCache.visualRows;
+  if (visualRows?.length === totalLines * TEXT_WRAPPED_VISUAL_ROW_STRIDE) {
+    const layout = [];
+    for (let row = first; row <= actualLast; row++) {
+      const at = row * TEXT_WRAPPED_VISUAL_ROW_STRIDE;
+      const startIndex = visualRows[at], endIndex = visualRows[at + 1];
+      const logicalLineIndex = visualRows[at + 4];
+      const paragraph = lineIndexCache.entries[logicalLineIndex];
+      const paragraphWidths = paragraph.hasTab ? null : getTextObjectParagraphPrefixWidthsForNormalizedContent(
+        obj, content, paragraph.startIndex, paragraph.endIndex,
+      );
+      layout.push(layoutLineFromWrappedLine(obj, {
+        text: content.slice(startIndex, endIndex),
+        startIndex, endIndex, nextStartIndex: visualRows[at + 2], caretEndIndex: visualRows[at + 3], logicalLineIndex,
+        prefixWidths: paragraphWidths ? textPrefixWidthsSlice(
+          paragraphWidths, startIndex - paragraph.startIndex, endIndex - paragraph.startIndex,
+        ) : null,
+      }, row));
+    }
+    return setCachedTextViewportLayoutRange(obj, content, first, last, layout, totalLines);
+  }
   const firstEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, first);
   const lastEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, actualLast);
   const wrappedSourceLines = wrapTextLogicalLineRange(obj, firstEntry.entry.logicalLineIndex, lastEntry.entry.logicalLineIndex, {
@@ -1426,7 +1456,7 @@ function getTextLayout(obj) {
   obj._layoutCacheW = obj.w;
   obj._layoutCacheY = obj.y;
   const wrapped = buildWrappedLines(obj, { collectLineIndex: true }, content);
-  setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
+  setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount, wrapped.visualRows);
   const lines = wrapped.lines;
   const layout = new Array(lines.length);
   for (let i = 0; i < lines.length; i++) {
@@ -1437,6 +1467,8 @@ function getTextLayout(obj) {
 }
 
 function getTextLayoutForLineRange(obj, first = 0, last = first) {
+  first = Math.max(0, Math.trunc(Number(first)) || 0);
+  last = last == null ? Infinity : Math.max(first, Math.trunc(Number(last)) || first);
   const content = obj.data.content;
   const cachedRangeLayout = getCachedTextViewportLayoutRange(obj, content, first, last);
   if (cachedRangeLayout) return cachedRangeLayout;
@@ -1464,7 +1496,7 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
       collectLineIndex: knownLineCount == null,
     });
     if (wrapped.lineIndex) {
-      setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
+      setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount, wrapped.visualRows);
     } else {
       setCachedTextWrappedLineCount(obj, content, wrapped.lineCount);
     }

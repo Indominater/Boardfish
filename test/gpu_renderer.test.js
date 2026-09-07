@@ -127,6 +127,18 @@ function renderStates(f) {
   return states;
 }
 
+function submittedGlyphSpans(f) {
+  const buffers=new Map(),draws=[];let buffer,offset=0,clip=[-Infinity,Infinity];
+  for(const {name,args} of f.calls) {
+    if(name==='bindBuffer'&&args[0]===f.gl.ARRAY_BUFFER)buffer=args[1];
+    else if(name==='bufferData'&&args[0]===f.gl.ARRAY_BUFFER)buffers.set(buffer,args[1]);
+    else if(name==='vertexAttribPointer'&&args[0]===0)offset=args[5]/4;
+    else if(name==='uniform2f'&&args[0]==='clipX')clip=args.slice(1).map(Math.fround);
+    else if(name==='drawArraysInstanced')draws.push({clip,data:buffers.get(buffer).subarray(offset,offset+args[3]*3)});
+  }
+  return draws;
+}
+
 test('font initialization resolves failure, and shader failure is a clean nullable factory result', async () => {
   const failed = fixture({ loadImage: () => Promise.reject(new Error('missing atlas')) });
   assert.equal(await failed.context.ready, false);
@@ -794,11 +806,16 @@ test('appending a visible row copies retained glyph positions without rereading 
   // Old rows may reread their two outer bounds, but no individual glyph widths.
   assert.ok(reads[0] <= 2 && reads[1] <= 2, `retained row width reads: ${reads.slice(0, 2)}`);
   assert.ok(reads[2] >= 250);
-  assert.deepEqual(expanded.subarray(0, original.length), original);
+  const retained=[] , appended=[];
+  for(let i=0;i<expanded.length;i+=3) {
+    (expanded[i+2]==='J'.charCodeAt(0)?appended:retained).push(...expanded.subarray(i,i+3));
+  }
+  assert.deepEqual(retained,Array.from(original), 'old glyph positions survive spatial reordering byte for byte');
   assert.equal(expanded.length, 2250 * 3);
-  assert.equal(expanded[original.length], 0);
-  assert.ok(Math.abs(expanded[original.length + 1] - (2 * 24 + 16.392)) < .00001);
-  assert.equal(expanded.at(-1), 'J'.charCodeAt(0));
+  assert.equal(appended.length,250*3);
+  assert.equal(appended[0], 0);
+  assert.ok(Math.abs(appended[1] - (2 * 24 + 16.392)) < .00001);
+  assert.equal(appended.at(-1), 'J'.charCodeAt(0));
   assert.equal(f.context.getStats().bufferUploads, 2);
   assert.equal(f.context.getStats().bufferBytes, 2250 * 12);
   reads.fill(0);
@@ -806,7 +823,58 @@ test('appending a visible row copies retained glyph positions without rereading 
   assert.equal(f.context.drawTextLayout(rows, obj), true);
   assert.deepEqual(reads, [0, 0, 0]);
   assert.equal(f.context.getStats().frameBufferUploads, 0);
-  assert.equal(f.context.getStats().frameGlyphsDrawn, 2250);
+  assert.equal(f.context.getStats().frameGlyphsDrawn, 384, 'submit only the first retained x bin for the narrow viewport');
+  f.context.dispose();
+});
+
+test('wide retained rows submit spatial batches while preserving every glyph accepted by the original shader clip', async () => {
+  const f=fixture();await f.context.ready;f.canvas.width=512;
+  const obj=object(),rows=Array.from({length:48},(_,row)=>line('AB C\tD'.repeat(300),row,obj));
+  assert.equal(f.context.prepareTextLayout(rows,obj),true);
+  const upload=callsNamed(f,'bufferData').at(-1).args[1],bytes=f.context.getStats().bufferBytes;
+  const order=(a,b)=>a[1]-b[1]||a[0]-b[0]||a[2]-b[2];
+  for(const [scale,pan] of [[1,-5500],[1,-1059.99999],[1,-1060.00001],[-1,6500],[.15,-800]]) {
+    const beforeDraws=submittedGlyphSpans(f).length;
+    f.context.beginFrame([obj]);f.context.setTransform(scale,0,0,scale,pan,0);
+    assert.equal(f.context.drawTextLayout(rows,obj),true);
+    const draws=submittedGlyphSpans(f).slice(beforeDraws),actual=[],expected=[];
+    assert.ok(draws.length>0&&draws.length<=2,'spatial batches must not become one draw per row');
+    const clip=draws[0].clip;
+    for(const {data} of draws)for(let i=0;i<data.length;i+=3)if(data[i]>=clip[0]&&data[i]<=clip[1])actual.push(Array.from(data.subarray(i,i+3)));
+    for(let i=0;i<upload.length;i+=3)if(upload[i]>=clip[0]&&upload[i]<=clip[1])expected.push(Array.from(upload.subarray(i,i+3)));
+    assert.deepEqual(actual.sort(order),expected.sort(order),'bin boundaries, axis flips, and camera motion must neither omit nor duplicate accepted glyphs');
+    assert.equal(f.context.getStats().frameBufferUploads,0);
+    assert.equal(f.context.getStats().bufferBytes,bytes,'spatial batches share the existing bounded VBO');
+    if(scale===1)assert.ok(f.context.getStats().frameGlyphsDrawn<upload.length/3/4,'a narrow viewport must avoid submitting most offscreen columns');
+  }
+  f.context.dispose();
+});
+
+test('wide cached tiles append only exposed row spans after spatial geometry is repacked', async () => {
+  const f=cacheFixture();await f.context.ready;
+  const rows=f.rows.map((entry,index)=>line('H'.repeat(1000),index+50,f.obj));
+  f.draw(rows,-350);
+  const cold=f.context.getStats();
+  assert.equal(cold.textTileRasterizations,1);
+  assert.ok(cold.frameGlyphsDrawn<6000*.6,'a cold tile must avoid the unneeded width of long rows');
+  assert.ok(cold.frameDrawCalls<10,'tile submission stays batched');
+  const next=line('W'.repeat(1000),56,f.obj);
+  f.draw([next],-350);
+  const appended=f.context.getStats();
+  assert.equal(appended.textTileAppends,1);
+  assert.ok(appended.frameGlyphsDrawn>0&&appended.frameGlyphsDrawn<600,'append only the new row’s intersecting spatial batches');
+  const lastDraw=submittedGlyphSpans(f).at(-1);
+  for(let i=2;i<lastDraw.data.length;i+=3)assert.equal(lastDraw.data[i],'W'.charCodeAt(0));
+  f.draw(rows,-350);
+  assert.equal(f.context.getStats().frameGlyphsDrawn,0);
+  const changed=line('I'.repeat(1000),52,f.obj);
+  f.draw([changed],-350);
+  assert.equal(f.context.getStats().textTileRebuilds,2);
+  assert.equal(f.context.getStats().bufferBytes,7000*12);
+  f.context.clearTextCache();
+  assert.equal(f.context.getStats().bufferBytes,0);
+  f.draw([changed],-350);
+  assert.equal(f.context.getStats().bufferBytes,1000*12,'cleared indexes cannot retain previous geometry or rows');
   f.context.dispose();
 });
 
@@ -902,6 +970,7 @@ test('continuous coverage scale selection reuses atlas, mask, and glyph buffers 
     f.context.endFrame();
     const glyph = renderStates(f).filter(state => state.name === 'drawArraysInstanced').at(-1);
     assert.deepEqual(glyph.uniforms.deviceEm, [zoom * 16], 'the device scale must remain continuous across atlas layers');
+    assert.deepEqual(glyph.uniforms.fusedReconstruction,[0],'legacy atlas callers retain their original MSDF integration');
     assert.deepEqual(glyph.uniforms.areaFiltered, [zoom < .75 ? 1 : 0]);
     if (zoom < .75) {
       assert.ok(glyph.framebuffer);
@@ -927,6 +996,78 @@ test('continuous coverage scale selection reuses atlas, mask, and glyph buffers 
     if (index === 0) atlasTexture = atlas[0].texture;
     assert.equal(atlas[0].texture, atlasTexture);
   }
+  f.context.dispose();
+});
+
+test('fused reconstruction atlas keeps continuous zoom in one direct glyph pass without object coverage tile work', async () => {
+  const coverageFont={...coverageDescription(),reconstructionKernel:{type:'cubic-bspline',physicalPixelSpacing:.5,fadeStartDeviceEm:10,fadeEndDeviceEm:12}};
+  const f=fixture({coverageFont,textTileCache:true,extensions:['EXT_color_buffer_float']});await f.context.ready;
+  const obj=object(),rows=Array.from({length:32},(_,row)=>line('H'.repeat(1500),row,obj));
+  for(const [index,scale] of [.1,.101,.125,.15,.2,.25,.3125,.375,.5,.500001,.625,.6875,.74999,.75,1,.1].entries()) {
+    f.context.beginFrame([obj]);f.context.setTransform(scale,0,0,scale,-700,0);
+    assert.equal(f.context.drawTextLayout(rows,obj),true);
+    const stats=f.context.getStats();
+    assert.equal(stats.frameBufferUploads,index===0?1:0);
+    assert.equal(stats.atlasUploads,2);
+    assert.equal(stats.textTileRasterizations,0,'crossing scale layers must never rerasterize object textures');
+    assert.equal(stats.textTileBytes,0);assert.equal(stats.textTileCount,0);assert.equal(stats.textTileScratchBytes,0);
+    assert.ok(stats.frameGlyphsDrawn<=48000,'each retained glyph is submitted at most once per frame');
+    const glyph=renderStates(f).filter(state=>state.name==='drawArraysInstanced').at(-1);
+    assert.deepEqual(glyph.uniforms.derivativeScale,[1]);
+    assert.deepEqual(glyph.uniforms.deviceEm,[scale*16]);
+    assert.deepEqual(glyph.uniforms.fusedReconstruction,[scale*16<12?1:0],'fused reconstruction is confined to minification and its transition');
+  }
+  assert.equal(textureUploads(f).filter(upload=>upload.args[2]===f.gl.R16F&&upload.args[3]===516).length,0);
+  f.context.dispose();
+});
+
+test('GPU rectangular clips share fractional pixel boundaries and constrain masks, glyph batches, and restored drawing',async()=>{
+  const f=fixture({coverageFont:{...coverageDescription(),reconstructionKernel:{type:'cubic-bspline'}},extensions:['EXT_color_buffer_float']});await f.context.ready;
+  const obj=object(),rows=Array.from({length:20},(_,row)=>line('H'.repeat(1500),row,obj));
+  for(const scale of [.1,.101,.625,1]) {
+    f.context.setTransform(scale,0,0,scale,.137,.219);f.context.save();
+    f.context.clipRect(100,100,333,222);
+    const expected=[Math.ceil(100*scale+.137-.5),Math.ceil(100*scale+.219-.5),Math.ceil(433*scale+.137-.5),Math.ceil(322*scale+.219-.5)];
+    f.context.fillRect(0,0,1000,1000);
+    let draw=renderStates(f).at(-1);
+    assert.deepEqual(draw.scissor,[expected[0],600-expected[3],expected[2]-expected[0],expected[3]-expected[1]]);
+    assert.ok(draw.enabled.has(f.gl.SCISSOR_TEST));
+    f.context.drawTextLayout(rows,obj);
+    const text=renderStates(f).filter(state=>state.name==='drawArraysInstanced').at(-1);
+    assert.ok(text.scissor[0]>=expected[0]);assert.ok(text.scissor[0]+text.scissor[2]<=expected[2]);
+    assert.ok(text.scissor[1]>=600-expected[3]);assert.ok(text.scissor[1]+text.scissor[3]<=600-expected[1]);
+    const wholeViewportLeft=-(scale*(obj.x+16)+.137)/scale-32-3/scale;
+    assert.ok(text.uniforms.clipX[0]>wholeViewportLeft+90,'the visible rectangle narrows glyph rejection before submission');
+    f.context.restore();f.context.fillRect(0,0,20,20);
+    draw=renderStates(f).at(-1);assert.equal(draw.enabled.has(f.gl.SCISSOR_TEST),false,'object clipping cannot leak into the next primitive');
+  }
+  // Adjacent disjoint world regions partition exactly the same pixel interval.
+  f.context.setTransform(.137,0,0,.137,.499,.001);
+  const scans=[];
+  for(const [left,right] of [[10,111.25],[111.25,300]]) {
+    f.context.save();f.context.clipRect(left,0,right-left,100);f.context.fillRect(0,0,1000,1000);scans.push(renderStates(f).at(-1).scissor);f.context.restore();
+  }
+  assert.equal(scans[0][0]+scans[0][2],scans[1][0],'fractional shared boundaries neither overlap nor leave a one-pixel gap');
+  f.context.dispose();
+});
+
+test('opaque scene occlusion reduces real GPU glyph submissions and never prepares a fully hidden textbox',async()=>{
+  const fs=require('node:fs'),vm=require('node:vm'),scope={};vm.runInNewContext(fs.readFileSync(require.resolve('../src/js/renderer.js'),'utf8'),scope);
+  const f=fixture({coverageFont:{...coverageDescription(),reconstructionKernel:{type:'cubic-bspline'}},extensions:['EXT_color_buffer_float']});await f.context.ready;
+  const lower={id:'lower',type:'text',x:0,y:0,w:12000,h:1536,data:{content:'large'}},top={id:'top',type:'text',x:0,y:0,w:6000,h:1536,data:{content:'cover'}};
+  const rows=Array.from({length:64},(_,row)=>line('H'.repeat(1500),row,lower)),topRows=[line('Cover',0,top)];let objects=[lower],lowerLayouts=0;
+  const renderer=scope.BoardfishRenderer.createBoardRenderer({objects:()=>objects,zoom:()=>.1,dpr:()=>1,viewportCullingEnabled:()=>true,
+    canvasBackgroundColor:()=> '#1c1b22',objectIntersectsRect:()=>true,
+    getTextLayoutForViewport(obj,rect){if(obj===lower)lowerLayouts++;return(obj===lower?rows:topRows).filter(row=>row.y+24>=rect.y1&&row.y<=rect.y2);},
+  });
+  const draw=()=>{f.context.beginFrame(objects);f.context.setTransform(.1,0,0,.1,0,0);renderer.drawVisibleObjects(f.context,null,{x1:0,y1:0,x2:8000,y2:6000});return f.context.getStats();};
+  const baseline=draw().frameGlyphsDrawn;
+  objects=[lower,top];const partial=draw();
+  assert.ok(partial.frameGlyphsDrawn<baseline*.5,'covered columns do not keep consuming glyph vertex/fragment work');
+  top.w=12000;const before=lowerLayouts,covered=draw();
+  assert.equal(lowerLayouts,before,'fully hidden text must not request layout');
+  assert.equal(covered.frameGlyphsDrawn,5,'only the top textbox submits glyphs');
+  assert.equal(covered.textTileBytes,0,'occlusion retains the fused zoom renderer');
   f.context.dispose();
 });
 

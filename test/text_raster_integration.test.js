@@ -27,6 +27,7 @@ function load() {
     };
   }
   const scope = {
+    BoardfishBoardTypes: require('../src/js/board_types.js'),
     document: {
       fonts: { status: 'loaded', check: () => true },
       createElement() {

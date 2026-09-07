@@ -790,7 +790,7 @@ test('entering text edit invalidates the offscreen cache before proxy setup', ()
   assert.match(enterSource, /scheduleRender\(true, true\)/, 'enterEdit must schedule its own render');
 });
 
-test('text edit mode caches static images only for the Canvas2D fallback and keeps GPU scene order direct', () => {
+test('opaque text editing keeps scene order direct while legacy Canvas2D rendering can cache static images', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const rebuildStart = viewportSource.indexOf('function _rebuildOffscreen');
   const rebuildEnd = viewportSource.indexOf('// ─── History delta tracking', rebuildStart);
@@ -810,7 +810,7 @@ test('text edit mode caches static images only for the Canvas2D fallback and kee
   const drawSource = viewportSource.slice(drawStart, drawEnd);
 
   assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
-  assert.match(drawSource, /const useEditOffscreenCache = !ctx\.isBoardfishGpuContext && !bypassEditOffscreenCache;/);
+  assert.match(drawSource, /const useEditOffscreenCache = !boardRenderer\.opaqueTextBackgrounds && !ctx\.isBoardfishGpuContext && !bypassEditOffscreenCache;/);
   assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
   assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
   assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, null, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, null, editingId, true\);/);

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boardfish text layout zoom benchmark</title>
+  <style>
+    @font-face { font-family: 'Geist Sans'; src: url('/fonts/Geist.woff2') format('woff2'); font-weight: 300 700; font-display: block; }
+    :root { color-scheme: dark; font: 14px 'Geist Sans', system-ui, sans-serif; background: #17171b; color: #ededf2; }
+    body { max-width: 900px; margin: auto; padding: 24px; }
+    h1 { font-size: 24px; margin-top: 0; } p, li { line-height: 1.5; }
+    button { font: inherit; padding: 10px 16px; cursor: pointer; }
+    button:disabled { cursor: progress; opacity: .6; }
+    pre { background: #25252b; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+    #status { min-height: 24px; } #summary { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <h1>Text layout during zoom</h1>
+  <p id="fixture">Loading the original board fixture and Geist font…</p>
+  <button id="run" disabled>Measure layout expansion</button>
+  <p id="status" role="status">Loading…</p>
+  <pre id="summary">No run yet.</pre>
+  <details><summary>Method</summary><ul>
+    <li>The fixture server supplies the unmodified text and geometry of obj-545 from boardTest.bf. The page uses the actual Geist font and the production text layout functions. No GPU rendering is involved.</li>
+    <li>Each run creates a fresh object and clears measurement caches. Auto-height preparation constructs the exact wrapping index; its time and work are reported separately.</li>
+    <li>80 animation frames request visual rows 100–104, then extend the end by one row each frame. This isolates the progressively exposed rows encountered while zooming out through a partially populated textbox.</li>
+    <li>Light wrappers count paragraph characters passed to the wrapping function and bytes returned by the prefix-slice function. Timed layout calls include these wrappers equally in both versions. Animation frame intervals include browser scheduling and are reported separately from layout CPU time.</li>
+    <li>A full layout generated after timing verifies every requested row’s text, offsets, prefix widths, caret boundaries, and position. Its SHA-256 checksum is included for comparison between separate baseline and current pages.</li>
+    <li>Add <code>?baseline=1</code> to load the fixture server’s previous text layout source. Results save to the local evidence endpoint after timing.</li>
+  </ul></details>
+  <details><summary>Results JSON</summary><pre id="json">No run yet.</pre></details>
+  <script src="/js/board_types.js"></script>
+  <script>
+    var objects = [], editingId = null;
+    var TextSelDebug = { _logHit: function () {} };
+    function scheduleRender() {} function markDirty() {} function invalidateOffscreen() {}
+  </script>
+  <script src="/js/text_raster.js"></script>
+  <script>
+    document.write('<script src="' + (new URLSearchParams(location.search).get('baseline') === '1'
+      ? '/dev/text-layout-before.js' : '/js/text_layout.js') + '"><\/script>');
+  </script>
+  <script src="/dev/text-layout-zoom-benchmark.js"></script>
+</body>
+</html>

@@ -4,6 +4,7 @@
   // Geometry is retained in object-local coordinates. Camera changes only update
   // uniforms; the distance field and every glyph instance remain unchanged.
   const ROWS_PER_CHUNK = 64;
+  const GLYPH_BIN_WIDTH = 1024;
   const INSTANCE_BYTES = 12;
   const DEFAULT_BUFFER_BYTES = 64 * 1024 * 1024;
   const DEFAULT_CHUNK_LIMIT = 4096;
@@ -83,6 +84,7 @@
     uniform vec4 integralInfo;
     uniform vec3 integralGrid;
     uniform bool coverageFiltered;
+    uniform bool fusedReconstruction;
     uniform float coverageMix;
     in vec2 coverageUvA;
     in vec2 coverageUvB;
@@ -96,6 +98,10 @@
     float median3(vec3 v) { return max(min(v.r,v.g),min(max(v.r,v.g),v.b)); }
     float coverage(vec2 p,float range) {
       return clamp((median3(texture(atlas,clamp(p,glyphBounds.xy,glyphBounds.zw)).rgb)-.5)*range+.5,0.,1.);
+    }
+    float integratedCoverage(vec2 p,vec2 x,vec2 y,float range) {
+      return (coverage(p-x-y,range)+coverage(p+x-y,range)+
+        coverage(p-x+y,range)+coverage(p+x+y,range))*.25;
     }
     float integral(vec2 p) {
       int index=glyphCode-32,columns=int(integralInfo.w);
@@ -124,6 +130,9 @@
       float area=areaFiltered?(coverageFiltered?scaleCoverage():areaCoverage()):0.;
       if(areaFiltered&&deviceEm<=8.) {
         float a=area*color.a;
+        // The finite atlas guard includes transparent texels. They add exactly
+        // zero to the shared mask, so skip their framebuffer blend entirely.
+        if(a==0.)discard;
         result=vec4(color.rgb*a,a);
         return;
       }
@@ -135,8 +144,16 @@
         // every frame, including motion, and never rebuilds or swaps the atlas.
         vec2 x=dx*.25,y=dy*.25;
         float subRange=range*2.;
-        float integrated=(coverage(uv-x-y,subRange)+coverage(uv+x-y,subRange)+
-           coverage(uv-x+y,subRange)+coverage(uv+x+y,subRange))*.25;
+        float integrated;
+        if(fusedReconstruction&&deviceEm>8.&&deviceEm<12.) {
+          // The former cached field also reconstructed its MSDF contribution.
+          // Preserve that positive filter while fading into reading-size text.
+          float reconstructionWeight=1.-smoothstep(10.,12.,deviceEm);
+          float spread=sqrt(reconstructionWeight/12.);
+          vec2 rx=dx*spread,ry=dy*spread;
+          integrated=(integratedCoverage(uv-rx-ry,x,y,subRange)+integratedCoverage(uv+rx-ry,x,y,subRange)+
+            integratedCoverage(uv-rx+ry,x,y,subRange)+integratedCoverage(uv+rx+ry,x,y,subRange))*.25;
+        } else integrated=integratedCoverage(uv,x,y,subRange);
         a=mix(integrated,coverage(uv,range),smoothstep(24.,32.,deviceEm));
       } else a=coverage(uv,range);
       if(areaFiltered)a=mix(area,a,smoothstep(8.,12.,deviceEm));
@@ -200,7 +217,7 @@
   }
   function matrix3(m,x,y) { return [m[0],m[1],0,m[2],m[3],0,m[0]*x+m[2]*y+m[4],m[1]*x+m[3]*y+m[5],1]; }
   function state() {
-    return { matrix: IDENTITY, fillStyle:'#000000', globalAlpha:1,
+    return { matrix: IDENTITY, clip:null, fillStyle:'#000000', globalAlpha:1,
       globalCompositeOperation:'source-over', imageSmoothingEnabled:true,
       imageSmoothingQuality:'high', font:'16px sans-serif', textBaseline:'alphabetic',
       textAlign:'left', direction:'ltr', fontKerning:'none', letterSpacing:'0px',
@@ -224,7 +241,7 @@
     const fallbackLimit = Math.max(4, options.maxFallbackBytes || DEFAULT_FALLBACK_BYTES);
     const textTileLimit = Math.max(0, options.maxTextTileBytes ?? DEFAULT_TEXT_TILE_BYTES);
     const chunks = new Map(), images = new Map(), textures = new Map(), fallback = new Map();
-    const textTiles = new Map(), textOwners = new WeakMap();
+    const textTiles = new Map(), textOwners = new WeakMap(), textChunks = new Map();
     const textTileFrameKeys = new Set();
     const anonymousIds = new WeakMap();
     const immutableCanvases = new WeakSet();
@@ -239,6 +256,8 @@
     let lost = false, disposed = false, fontReady = false, generation = 0;
     let bufferBytes = 0, imageBytes = 0, fallbackBytes = 0;
     let textTileBytes = 0;
+    let textRowsRevision = 0;
+    let textRowIndexId = 0;
     let measurementCanvas, measurementContext, colorContext;
     let ready;
     const colorCache = new Map();
@@ -285,7 +304,7 @@
     function initialize() {
       floatCoverage=!!gl.getExtension('EXT_color_buffer_float');
       floatIntegral=!!gl.getExtension('OES_texture_float_linear');
-      textProgram=program(VERTEX,FRAGMENT,['transform','viewport','fontSize','pixelPadding','clipX','glyphs','atlas','unitRange','color','deviceEm','derivativeScale','areaFiltered','integralAtlas','integralFloat','integralInfo','integralGrid','coverageFiltered','coverageTransformA','coverageTransformB','coverageTile','coverageColumns','coverageOrigins','coverageMix']);
+      textProgram=program(VERTEX,FRAGMENT,['transform','viewport','fontSize','pixelPadding','clipX','glyphs','atlas','unitRange','color','deviceEm','derivativeScale','areaFiltered','integralAtlas','integralFloat','integralInfo','integralGrid','coverageFiltered','fusedReconstruction','coverageTransformA','coverageTransformB','coverageTile','coverageColumns','coverageOrigins','coverageMix']);
       quadProgram=program(QUAD_VERTEX,QUAD_FRAGMENT,['transform','viewport','size','sourceRect','image','color','textured','coverageMask','coverageAccumulation','coverageTextureSize']);
       textVao=gl.createVertexArray(); quadVao=gl.createVertexArray();
       gl.disable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);gl.disable(gl.DITHER);
@@ -389,10 +408,26 @@
       gl.uniform2f(value.locations.viewport,canvas.width,canvas.height);
       if(current.globalCompositeOperation==='copy')gl.disable(gl.BLEND);else gl.enable(gl.BLEND);
     }
+    function applyClip() {
+      const clip=current.clip;
+      if(!clip) { gl.disable(gl.SCISSOR_TEST);return; }
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(clip[0],canvas.height-clip[3],Math.max(0,clip[2]-clip[0]),Math.max(0,clip[3]-clip[1]));
+    }
+    function clipRect(x,y,w,h) {
+      const m=current.matrix,points=[[x,y],[x+w,y],[x,y+h],[x+w,y+h]].map(([px,py])=>[m[0]*px+m[2]*py+m[4],m[1]*px+m[3]*py+m[5]]);
+      // Match pixel-center coverage of axis-aligned quads. Shared boundaries
+      // use the same rounding, so disjoint visible regions cannot leave seams
+      // or draw a fractional edge pixel twice during subpixel camera motion.
+      const clip=[Math.max(0,Math.ceil(Math.min(...points.map(p=>p[0]))-.5)),Math.max(0,Math.ceil(Math.min(...points.map(p=>p[1]))-.5)),
+        Math.min(canvas.width,Math.ceil(Math.max(...points.map(p=>p[0]))-.5)),Math.min(canvas.height,Math.ceil(Math.max(...points.map(p=>p[1]))-.5))];
+      if(current.clip) { clip[0]=Math.max(clip[0],current.clip[0]);clip[1]=Math.max(clip[1],current.clip[1]);clip[2]=Math.min(clip[2],current.clip[2]);clip[3]=Math.min(clip[3],current.clip[3]); }
+      current.clip=clip;
+    }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ function drew(kind) { stats.drawCalls++;stats.frameDrawCalls++;stats[kind]++; } /* BOARDFISH_DEV_DIAGNOSTICS_END */
     function quad(x,y,w,h,texture,uv,tint=color()) {
       if(lost||disposed||!w||!h)return;
-      setup(quadProgram);gl.bindVertexArray(quadVao);
+      setup(quadProgram);applyClip();gl.bindVertexArray(quadVao);
       gl.uniformMatrix3fv(quadProgram.locations.transform,false,matrix3(current.matrix,x,y));
       gl.uniform2f(quadProgram.locations.size,w,h);
       gl.uniform4fv(quadProgram.locations.color,tint);
@@ -410,6 +445,10 @@
     function deleteChunk(key,chunk) {
       if(!lost)gl.deleteBuffer(chunk.buffer);
       bufferBytes-=chunk.bytes;chunks.delete(key);
+      const owned=textChunks.get(chunk.objectKey);
+      owned?.delete(chunk);if(!owned?.size)textChunks.delete(chunk.objectKey);
+      for(const record of chunk.rows.values())textOwners.get(record.owner)?.rowIndexes.clear();
+      textRowsRevision++;
     }
     function deleteTexture(record) {
       if(!lost)gl.deleteTexture(record.texture);
@@ -489,9 +528,9 @@
     }
     function textOwner(obj) {
       let owner=textOwners.get(obj);
-      if(!owner) { owner={token:++anonymousId,version:0};textOwners.set(obj,owner); }
+      if(!owner) { owner={token:++anonymousId,version:0,rowIndexes:new Map()};textOwners.set(obj,owner); }
       if(owner.content!==obj.data?.content||owner.width!==obj.w) {
-        owner.content=obj.data?.content;owner.width=obj.w;owner.version++;
+        owner.content=obj.data?.content;owner.width=obj.w;owner.version++;owner.rowIndexes.clear();textRowsRevision++;
         for(const [key,tile] of textTiles)if(tile.owner===obj)deleteTextTile(key,tile);
       }
       return owner;
@@ -536,6 +575,8 @@
           }
           chunk={objectKey:key,index:group.index,styleKey:`${settings.lineHeight}:${settings.baselineOffset}`,rows:new Map(),buffer:gl.createBuffer(),bytes:0,offsets:new Map(),dirty:true};
           chunks.set(chunkKey,chunk);
+          let owned=textChunks.get(key);if(!owned) { owned=new Set();textChunks.set(key,owned); }
+          owned.add(chunk);
         }
         const changedRows=new Set();
         let count=chunk.bytes/INSTANCE_BYTES;
@@ -556,7 +597,11 @@
             chunk.rows.set(row,{text:line.text,prefix:line.prefixWidths,baseline,glyphCount});
             changedRows.add(row);chunk.dirty=true;
           }
-          const entry=chunk.rows.get(row);entry.owner=obj;entry.version=owner.version;
+          const entry=chunk.rows.get(row);
+          if(entry.owner!==obj||entry.version!==owner.version) {
+            textOwners.get(entry.owner)?.rowIndexes.clear();owner.rowIndexes.clear();textRowsRevision++;
+          }
+          entry.owner=obj;entry.version=owner.version;
         }
         if(chunk.dirty) {
           // Extremely wide legacy rows retain the compatible raster path rather
@@ -576,28 +621,57 @@
             // native code instead of decoding every retained glyph again.
             // The limit is checked above before creating this temporary
             // replacement; retained CPU bytes match the bounded GPU bytes.
-            const data=new Float32Array(count*3),offsets=new Map();let offset=0;
+            const data=new Float32Array(count*3),offsets=new Map(),bins=new Map();let offset=0;
             chunk.left=Infinity;chunk.right=-Infinity;chunk.baselineMin=Infinity;chunk.baselineMax=-Infinity;
+            const addPiece=(bin,piece)=> {
+              let pieces=bins.get(bin);if(!pieces) { pieces=[];bins.set(bin,pieces); }
+              pieces.push(piece);
+            };
             for(const row of Array.from(chunk.rows.keys()).sort((a,b)=>a-b)) {
-              const entry=chunk.rows.get(row),start=offset/3,previous=chunk.offsets.get(row);
+              const entry=chunk.rows.get(row),previous=chunk.offsets.get(row);
               chunk.left=Math.min(chunk.left,entry.prefix[0]||0);
               chunk.right=Math.max(chunk.right,entry.prefix[entry.text.length]||0);
               chunk.baselineMin=Math.min(chunk.baselineMin,entry.baseline);
               chunk.baselineMax=Math.max(chunk.baselineMax,entry.baseline);
+              offsets.set(row,{count:entry.glyphCount,segments:[]});
               if(chunk.data&&previous&&!changedRows.has(row)) {
-                data.set(chunk.data.subarray(previous.start*3,(previous.start+previous.count)*3),offset);
-                offset+=previous.count*3;
-              } else for(let i=0;i<entry.text.length;i++) {
-                const code=entry.text.charCodeAt(i);if(code<=32)continue;
-                data[offset++]=entry.prefix[i];
-                data[offset++]=(row-group.index*ROWS_PER_CHUNK)*settings.lineHeight+entry.baseline;
-                data[offset++]=code;
+                for(const segment of previous.segments)addPiece(segment.bin,{row,source:segment});
+              } else {
+                let piece=null;
+                for(let i=0;i<entry.text.length;i++)if(entry.text.charCodeAt(i)>32) {
+                  // Match the stored float coordinate when a glyph falls just
+                  // beside a bin boundary. Bins only cull whole batches; the
+                  // shader retains its exact guarded per-glyph clipping.
+                  const bin=Math.floor(Math.fround(entry.prefix[i])/GLYPH_BIN_WIDTH);
+                  if(!piece||piece.bin!==bin) {
+                    piece={row,entry,bin,from:i,to:i+1,count:0};addPiece(bin,piece);
+                  }
+                  piece.to=i+1;piece.count++;
+                }
               }
-              offsets.set(row,{start,count:offset/3-start});
+            }
+            const spatialBins=[];
+            for(const bin of Array.from(bins.keys()).sort((a,b)=>a-b)) {
+              const rows=[],start=offset/3;
+              for(const piece of bins.get(bin)) {
+                const begin=offset/3;
+                if(piece.source) {
+                  const source=piece.source;
+                  data.set(chunk.data.subarray(source.start*3,(source.start+source.count)*3),offset);offset+=source.count*3;
+                } else for(let i=piece.from;i<piece.to;i++) {
+                  const code=piece.entry.text.charCodeAt(i);if(code<=32)continue;
+                  data[offset++]=piece.entry.prefix[i];
+                  data[offset++]=(piece.row-group.index*ROWS_PER_CHUNK)*settings.lineHeight+piece.entry.baseline;
+                  data[offset++]=code;
+                }
+                const segment={bin,row:piece.row,start:begin,count:offset/3-begin};
+                offsets.get(piece.row).segments.push(segment);rows.push(segment);
+              }
+              spatialBins.push({index:bin,start,count:offset/3-start,rows,first:rows[0].row,last:rows.at(-1).row});
             }
             gl.bindBuffer(gl.ARRAY_BUFFER,chunk.buffer);gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
             bufferBytes+=data.byteLength-chunk.bytes;chunk.bytes=data.byteLength;
-            chunk.data=data;chunk.offsets=offsets;chunk.dirty=false;
+            chunk.data=data;chunk.offsets=offsets;chunk.bins=spatialBins;chunk.dirty=false;textRowsRevision++;
             /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.bufferUploads++;stats.frameBufferUploads++;stats.bufferUploadBytes+=data.byteLength; /* BOARDFISH_DEV_DIAGNOSTICS_END */
           } catch(_) {
             // Changed row metadata must never outlive a failed replacement.
@@ -641,19 +715,35 @@
       gl.scissor(bounds[0],canvas.height-bounds[3],bounds[2]-bounds[0],bounds[3]-bounds[1]);
       if(clear) { gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT); }
     }
+    function textRowIndex(obj,settings) {
+      const owner=textOwners.get(obj),styleKey=`${settings.lineHeight}:${settings.baselineOffset}`;
+      let index=owner.rowIndexes.get(styleKey);
+      if(index?.revision===textRowsRevision)return index;
+      const rows=[];
+      for(const chunk of textChunks.get(objectKey(obj))||[])if(chunk.styleKey===styleKey) {
+        for(const [row,record] of chunk.rows)if(record.owner===obj&&record.version===owner.version) {
+          rows.push({row,record,chunk,baseline:row*settings.lineHeight+record.baseline,
+            left:record.prefix[0]||0,right:record.prefix[record.text.length]||0});
+        }
+      }
+      rows.sort((a,b)=>a.baseline-b.baseline);
+      index={id:++textRowIndexId,revision:textRowsRevision,rows};owner.rowIndexes.set(styleKey,index);return index;
+    }
+    function firstTextRowAt(rows,baseline,after=false) {
+      let lo=0,hi=rows.length;
+      while(lo<hi) { const mid=(lo+hi)>>>1;if(rows[mid].baseline<baseline||(after&&rows[mid].baseline===baseline))lo=mid+1;else hi=mid; }
+      return lo;
+    }
     function drawCachedText(prepared,obj,settings,m,resource,target,bounds,deviceEm,weight=1) {
       const edge=Math.min(TEXT_TILE_SIZE,maxTextureSize-TEXT_TILE_GUTTER*2);
       const size=edge+TEXT_TILE_GUTTER*2,bytes=size*size*2;
       if(edge<1)return false;
-      const owner=textOwners.get(obj),objectId=objectKey(obj);
+      const owner=textOwners.get(obj);
       const styleKey=`${settings.lineHeight}:${settings.baselineOffset}`;
       // Include retained rows outside this frame's layout. A tile may have been
       // populated only partly: newly exposed or changed row records invalidate
       // it, while unchanged camera coordinates never invalidate its contents.
-      const rows=[];
-      for(const chunk of chunks.values())if(chunk.objectKey===objectId&&chunk.styleKey===styleKey) {
-        for(const [row,record] of chunk.rows)if(record.owner===obj&&record.version===owner.version)rows.push({row,record,chunk});
-      }
+      const rowIndex=textRowIndex(obj,settings),rows=rowIndex.rows;
       const description=resource.font,step=Math.log(description.maxDeviceEm/description.minDeviceEm)/(description.layers-1);
       const lod=Math.max(0,Math.min(description.layers-1,Math.log(deviceEm/description.minDeviceEm)/step));
       const first=Math.floor(lod),mix=lod-first;
@@ -667,16 +757,22 @@
         const minX=Math.floor(Math.min(x1,x2)*scale/edge),maxX=Math.ceil(Math.max(x1,x2)*scale/edge)-1;
         const minY=Math.floor(Math.min(y1,y2)*scale/edge),maxY=Math.ceil(Math.max(y1,y2)*scale/edge)-1;
         const guard=settings.fontSize*2+3*settings.fontSize/em+TEXT_TILE_GUTTER/scale;
-        for(let ty=minY;ty<=maxY;ty++)for(let tx=minX;tx<=maxX;tx++) {
-          const left=tx*edge/scale,top=ty*edge/scale,right=(tx+1)*edge/scale,bottom=(ty+1)*edge/scale;
-          const dependencies=rows.filter(({row,record})=> {
-            const baseline=row*settings.lineHeight+record.baseline;
-            return baseline+guard>=top&&baseline-guard<=bottom&&
-              (record.prefix[record.text.length]||0)+guard>=left&&(record.prefix[0]||0)-guard<=right;
-          });
-          if(!dependencies.length)continue;
-          const key=`${owner.token}:${owner.version}:${settings.fontSize}:${settings.padding}:${styleKey}:${layer}:${tx}:${ty}`;
-          plans.push({key,layer,weight,em,scale,tx,ty,left,top,dependencies});protectedKeys.add(key);
+        for(let ty=minY;ty<=maxY;ty++) {
+          const top=ty*edge/scale,bottom=(ty+1)*edge/scale;
+          const from=firstTextRowAt(rows,top-guard),to=firstTextRowAt(rows,bottom+guard,true);
+          if(from===to)continue;
+          for(let tx=minX;tx<=maxX;tx++) {
+            const left=tx*edge/scale,right=(tx+1)*edge/scale;
+            const key=`${owner.token}:${owner.version}:${settings.fontSize}:${settings.padding}:${styleKey}:${layer}:${tx}:${ty}`;
+            const tile=textTiles.get(key);
+            let dependencies=null;
+            if(tile?.rowIndexId!==rowIndex.id) {
+              dependencies=[];
+              for(let i=from;i<to;i++)if(rows[i].right+guard>=left&&rows[i].left-guard<=right)dependencies.push(rows[i]);
+              if(!dependencies.length)continue;
+            }
+            plans.push({key,layer,weight,em,scale,tx,ty,left,top,dependencies});protectedKeys.add(key);
+          }
         }
       }
       // Memory pressure affects retention only, never the pixel pipeline. Keep
@@ -713,8 +809,9 @@
         if(!retain)restoreCoverageTarget(target,bounds,true);
         for(const plan of plans) {
           let tile=textTiles.get(plan.key);
-          const valid=tile&&plan.dependencies.every(({row,record})=>tile.dependencies.get(row)===record);
+          const valid=tile&&(tile.rowIndexId===rowIndex.id||plan.dependencies.every(({row,record})=>tile.dependencies.get(row)===record));
           if(valid) {
+            tile.rowIndexId=rowIndex.id;
             textTiles.delete(plan.key);textTiles.set(plan.key,tile);
             /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileHits++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
           } else {
@@ -768,18 +865,13 @@
             const tilePrepared=[];
             for(const [chunk,entries] of groups) {
               entries.sort((a,b)=>a.row-b.row);
-              const ranges=[];
-              for(const {row} of entries) {
-                const offset=chunk.offsets.get(row),last=ranges.at(-1);
-                if(last&&last.start+last.count===offset.start)last.count+=offset.count;
-                else ranges.push({...offset});
-              }
-              tilePrepared.push({chunk,settings,group:{first:entries[0].row,last:entries.at(-1).row},ranges});
+              tilePrepared.push({chunk,settings,group:{first:entries[0].row,last:entries.at(-1).row},rows:new Set(entries.map(entry=>entry.row))});
             }
             const matrix=[plan.scale,0,0,plan.scale,TEXT_TILE_GUTTER-plan.tx*edge,TEXT_TILE_GUTTER-plan.ty*edge];
             drawPreparedText(tilePrepared,{x:-settings.padding,y:-settings.padding},settings,matrix,resource,tile,size,size,plan.em,TEXT_TILE_SUPERSAMPLE,plan.layer);
             if(!append)tile.dependencies.clear();
             for(const {row,record} of updates)tile.dependencies.set(row,record);
+            tile.rowIndexId=rowIndex.id;
             pendingTile=null;
             /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.textTileRasterizations++;if(append)stats.textTileAppends++;else stats.textTileRebuilds++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
           }
@@ -811,6 +903,7 @@
       // The lower neighboring log layer has up to 15% wider support.
       const filterPadding=integralResource?.coverage?3:.5;
       gl.uniform1i(textProgram.locations.coverageFiltered,target&&integralResource?.coverage?1:0);
+      gl.uniform1i(textProgram.locations.fusedReconstruction,target&&integralResource?.font.reconstructionKernel?1:0);
       gl.uniform2f(textProgram.locations.pixelPadding,
         target ? filterPadding*samplingScale/(Math.abs(m[0])*settings.fontSize) : 0,
         target ? filterPadding*samplingScale/(Math.abs(m[3])*settings.fontSize) : 0);
@@ -842,16 +935,36 @@
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.areaTextDraws++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
+      let firstBin=-Infinity,lastBin=Infinity;
       if(m[1]===0&&m[2]===0&&m[0]) {
         const origin=m[0]*(obj.x+settings.padding)+m[4];
-        const left=-origin/m[0],right=(width-origin)/m[0];
+        const clip=samplingScale===1?current.clip:null;
+        const left=((clip?.[0]??0)-origin)/m[0],right=((clip?.[2]??width)-origin)/m[0];
         const guard=settings.fontSize*2+filterPadding*samplingScale/Math.abs(m[0]);
-        gl.uniform2f(textProgram.locations.clipX,Math.min(left,right)-guard,Math.max(left,right)+guard);
+        const clipLeft=Math.min(left,right)-guard,clipRight=Math.max(left,right)+guard;
+        gl.uniform2f(textProgram.locations.clipX,clipLeft,clipRight);
+        // Instance x coordinates and uniforms are float32 on the GPU. Round
+        // outward so CPU bin rejection never removes a vertex the shader keeps.
+        firstBin=Math.floor(Math.min(clipLeft,Math.fround(clipLeft))/GLYPH_BIN_WIDTH);
+        lastBin=Math.floor(Math.max(clipRight,Math.fround(clipRight))/GLYPH_BIN_WIDTH);
       } else gl.uniform2f(textProgram.locations.clipX,-1e30,1e30);
       gl.enableVertexAttribArray(0);gl.vertexAttribDivisor(0,1);
-      for(const {chunk,group,settings,ranges} of prepared) {
-        const first=chunk.offsets.get(group.first),last=chunk.offsets.get(group.last);
-        const spans=ranges||[{start:first.start,count:last.start+last.count-first.start}];
+      for(const {chunk,group,settings,rows} of prepared) {
+        const spans=[];
+        const addSpan=span=> {
+          const last=spans.at(-1);
+          if(last&&last.start+last.count===span.start)last.count+=span.count;
+          else spans.push({start:span.start,count:span.count});
+        };
+        // One retained VBO is ordered by fixed x bins, then by row. A clipped
+        // tile needs only a few contiguous spans per chunk, instead of issuing
+        // one draw per row or repeatedly processing the entire textbox width.
+        for(const bin of chunk.bins) {
+          if(bin.index<firstBin||bin.index>lastBin)continue;
+          if(!rows&&group.first<=bin.first&&group.last>=bin.last)addSpan(bin);
+          else for(const span of bin.rows)if(span.row>=group.first&&span.row<=group.last&&(!rows||rows.has(span.row)))addSpan(span);
+        }
+        if(!spans.length)continue;
         // Both detail levels are uploaded before first use. Changing scale only
         // selects immutable resources; it never rerasterizes or uploads glyphs.
         const resource=deviceEm>=128&&font.largeFont?fontResources[1]:fontResources[0];
@@ -872,6 +985,7 @@
       }
     }
     function drawTextLayout(layout,obj,style) {
+      if(current.clip&&!(current.clip[2]>current.clip[0]&&current.clip[3]>current.clip[1]))return true;
       const prepared=prepare(layout,obj,style);if(!prepared)return false;
       if(!prepared.length)return true;
       const settings=prepared[0].settings,m=current.matrix;
@@ -881,7 +995,10 @@
       // a rectangular integral is not an exact rotated pixel footprint.
       const areaFiltered=!!(integralResource?.ready&&deviceEm<12&&m[1]===0&&m[2]===0&&m[0]&&m[3]);
       const target=areaFiltered?getCoverageTarget():null;
-      const cacheEligible=target&&integralResource.coverage&&floatCoverage&&options.textTileCache!==false&&Math.abs(Math.abs(m[0])-Math.abs(m[3]))<1e-10;
+      // New atlases include the continuous reconstruction kernel offline. They
+      // retain the same minification filter with one direct glyph pass, without
+      // rebuilding object-sized coverage textures as the zoom crosses layers.
+      const cacheEligible=target&&integralResource.coverage&&!integralResource.font.reconstructionKernel&&floatCoverage&&options.textTileCache!==false&&Math.abs(Math.abs(m[0])-Math.abs(m[3]))<1e-10;
       let bounds;
       if(target) {
         let left=Infinity,right=-Infinity,top=Infinity,bottom=-Infinity;
@@ -898,12 +1015,13 @@
           top=Math.min(top,c,d);bottom=Math.max(bottom,c,d);
         }
         bounds=[Math.max(0,Math.floor(left-5)),Math.max(0,Math.floor(top-5)),Math.min(canvas.width,Math.ceil(right+5)),Math.min(canvas.height,Math.ceil(bottom+5))];
+        if(current.clip) { bounds[0]=Math.max(bounds[0],current.clip[0]);bounds[1]=Math.max(bounds[1],current.clip[1]);bounds[2]=Math.min(bounds[2],current.clip[2]);bounds[3]=Math.min(bounds[3],current.clip[3]); }
         if(!(bounds[2]>bounds[0]&&bounds[3]>bounds[1]))return true;
         gl.bindFramebuffer(gl.FRAMEBUFFER,target.framebuffer);
         gl.enable(gl.SCISSOR_TEST);
         gl.scissor(bounds[0],canvas.height-bounds[3],bounds[2]-bounds[0],bounds[3]-bounds[1]);
         if(!cacheEligible) { gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT); }
-      }
+      } else applyClip();
       const transition=Math.max(0,Math.min(1,(deviceEm-10)/2));
       const cacheWeight=1-transition*transition*(3-2*transition);
       const cached=cacheEligible&&drawCachedText(prepared,obj,settings,m,integralResource,target,bounds,deviceEm,cacheWeight);
@@ -914,7 +1032,7 @@
         drawPreparedText(prepared,obj,settings,m,integralResource,target,canvas.width,canvas.height,deviceEm,1,null,1-cacheWeight);
       }
       if(target) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.disable(gl.SCISSOR_TEST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,null);applyClip();
         gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
         // Accumulate coverage before source-over. Independently source-overing
         // glyphs would lose ink whenever adjacent letters share a tiny pixel.
@@ -1082,6 +1200,8 @@
     }
     function lostContext(event) {
       event.preventDefault();lost=true;fontReady=false;generation++;/* BOARDFISH_DEV_DIAGNOSTICS_START */ stats.contextLosses++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      for(const chunk of chunks.values())for(const record of chunk.rows.values())textOwners.get(record.owner)?.rowIndexes.clear();
+      textChunks.clear();textRowsRevision++;
       chunks.clear();images.clear();textures.clear();bufferBytes=imageBytes=0;
       textTiles.clear();textTileFrameKeys.clear();textTileBytes=0;textTileScratch=null;
       coverageTarget=null;
@@ -1097,6 +1217,7 @@
       get fontReady(){return fontReady;},get ready(){return ready;},
       save(){stack.push({...current});},
       restore(){if(stack.length)current=stack.pop();},
+      clipRect,
       setTransform(...values){
         if(values.length===1&&typeof values[0]==='object') {const m=values[0];current.matrix=[m.a??m.m11??1,m.b??m.m12??0,m.c??m.m21??0,m.d??m.m22??1,m.e??m.m41??0,m.f??m.m42??0];}
         else if(values.length===6&&values.every(Number.isFinite))current.matrix=values;

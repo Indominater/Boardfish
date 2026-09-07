@@ -260,7 +260,7 @@
         const getExtension = gl.getExtension.bind(gl);
         gl.getExtension = name => /^(EXT_color_buffer_float|OES_texture_float_linear)$/.test(name) ? null : getExtension(name);
       }
-      contexts[mode] = api.createContext(canvases[mode], { font, integralFont: mode === 'before' ? integralFont : undefined, coverageFont: { ...BoardfishAsciiCoverageFont, atlasURL: '/fonts/geist-ascii-coverage.png' }, onError: error => rendererEvents.push({ mode, error: String(error) }) });
+      contexts[mode] = api.createContext(canvases[mode], { font, integralFont: mode === 'before' ? integralFont : undefined, coverageFont: { ...BoardfishAsciiCoverageFont, atlasURL: `/${BoardfishAsciiCoverageFont.atlasURL}` }, onError: error => rendererEvents.push({ mode, error: String(error) }) });
       if (!contexts[mode] || !await contexts[mode].ready) throw new Error(`Could not initialize ${mode} GPU renderer.`);
     }
     if (!baselineAvailable) $('before-caption').textContent = 'Current renderer (previous unavailable)';

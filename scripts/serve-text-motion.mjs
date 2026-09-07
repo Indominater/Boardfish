@@ -23,8 +23,14 @@ const { readBoardContainer } = require('../src/js/web_board_container.js');
 const { board } = await readBoardContainer(await openAsBlob(boardPath), { lazyImageRefs: true, verifyImageCrc: false });
 const fixture = JSON.stringify({ objects: board.objects, viewport: board.viewport });
 const baseline = execFileSync('git', ['show', `${values.baseline}:src/js/gpu_renderer.js`], { cwd: repo, maxBuffer: 2 * 1024 * 1024 });
+const baselineLayout = execFileSync('git', ['show', `${values.baseline}:src/js/text_layout.js`], { cwd: repo, maxBuffer: 2 * 1024 * 1024 });
+let baselineCoverage = '', baselineCoverageImage = null;
+try {
+  baselineCoverage = execFileSync('git', ['show', `${values.baseline}:src/fonts/geist-ascii-coverage.js`], { cwd: repo, maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).toString().replace('globalThis.BoardfishAsciiCoverageFont =', 'globalThis.BoardfishAsciiCoverageFontBefore =');
+  baselineCoverageImage = execFileSync('git', ['show', `${values.baseline}:src/fonts/geist-ascii-coverage.png`], { cwd: repo, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+} catch { baselineCoverage = ''; } // Older integral-only revisions have no coverage atlas.
 const mime = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.html': 'text/html', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
-const evidenceNames = new Set(['board-motion.json', 'board-motion-before.png', 'board-motion-after.png', 'board-full.json', 'board-full.png']);
+const evidenceNames = new Set(['board-motion.json', 'board-motion-before.png', 'board-motion-after.png', 'board-full.json', 'board-full.png', 'board-layout-zoom.json', 'textbox-behavior.json']);
 if (evidence) await mkdir(evidence, { recursive: true });
 
 const fixtureControls = `<div style="position:fixed;z-index:99999;top:60px;left:10px;background:#333;color:white;padding:8px">
@@ -84,6 +90,16 @@ http.createServer(async (req, res) => {
     }
     if (url.pathname === '/dev/gpu-motion-before.js') {
       res.setHeader('Content-Type', mime['.js']); res.end(baseline); return;
+    }
+    if (url.pathname === '/dev/text-layout-before.js') {
+      res.setHeader('Content-Type', mime['.js']); res.end(baselineLayout); return;
+    }
+    if (url.pathname === '/dev/text-coverage-before.js') {
+      res.setHeader('Content-Type', mime['.js']); res.end(baselineCoverage); return;
+    }
+    if (url.pathname === '/dev/text-coverage-before.png') {
+      if (!baselineCoverageImage) { res.writeHead(404).end(); return; }
+      res.setHeader('Content-Type', mime['.png']); res.end(baselineCoverageImage); return;
     }
     if (url.pathname === '/actual-board.html' || url.pathname === '/production-board.html') {
       res.setHeader('Content-Type', mime['.html']);

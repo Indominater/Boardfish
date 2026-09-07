@@ -55,6 +55,10 @@
       scaledImageTargetScaleTotal: 0,
       culledImages: 0,
       culledText: 0,
+      occludedText: 0,
+      occludedImages: 0,
+      partiallyOccludedObjects: 0,
+      visibleObjectRegions: 0,
       textLines: 0,
       drawnTextLines: 0,
       culledTextLines: 0,
@@ -389,6 +393,73 @@
       padding: deps.textPad ?? 16,
       lineHeight: deps.lineHeight || 24,
     };
+    const opaqueText = typeof deps.canvasBackgroundColor === 'function';
+    const canClip = context => !!(context.save&&context.restore&&(context.clipRect||(context.clip&&context.beginPath&&context.rect)));
+    const objectRect = obj => obj && [obj.x,obj.y,obj.w,obj.h].every(Number.isFinite) && obj.w>0 && obj.h>0
+      ? {x1:obj.x,y1:obj.y,x2:obj.x+obj.w,y2:obj.y+obj.h} : null;
+    const intersect = (a,b) => {
+      const rect={x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1),x2:Math.min(a.x2,b.x2),y2:Math.min(a.y2,b.y2)};
+      return rect.x2>rect.x1&&rect.y2>rect.y1?rect:null;
+    };
+    function withRectClip(context,rect,draw) {
+      if(!rect||!canClip(context))return draw();
+      context.save();
+      try {
+        if(context.clipRect)context.clipRect(rect.x1,rect.y1,rect.x2-rect.x1,rect.y2-rect.y1);
+        else { context.beginPath();context.rect(rect.x1,rect.y1,rect.x2-rect.x1,rect.y2-rect.y1);context.clip(); }
+        return draw();
+      } finally { context.restore(); }
+    }
+    function drawRegions(context,rects,draw) {
+      if(!rects.length)return false;
+      if(context.clipRect||rects.length===1) {
+        let drawn=false;for(const rect of rects)drawn=withRectClip(context,rect,()=>draw(rect))||drawn;return drawn;
+      }
+      // Native Canvas clips the union once. Separate antialiased clip masks
+      // along adjoining fragments could otherwise soften their shared edge.
+      context.save();
+      try {
+        context.beginPath();for(const rect of rects)context.rect(rect.x1,rect.y1,rect.x2-rect.x1,rect.y2-rect.y1);context.clip();
+        return draw({x1:Math.min(...rects.map(r=>r.x1)),y1:Math.min(...rects.map(r=>r.y1)),x2:Math.max(...rects.map(r=>r.x2)),y2:Math.max(...rects.map(r=>r.y2))});
+      } finally { context.restore(); }
+    }
+    function drawTextBackground(context,obj) {
+      if(!opaqueText||!objectRect(obj)||!context.fillRect)return;
+      const fill=context.fillStyle,alpha=context.globalAlpha;
+      context.fillStyle=deps.canvasBackgroundColor();context.globalAlpha=1;
+      context.fillRect(obj.x,obj.y,obj.w,obj.h);
+      context.fillStyle=fill;context.globalAlpha=alpha;
+    }
+    function visibleObjectRegions(objects,viewport,skipId,canClip) {
+      const result=new Map();if(!opaqueText||!viewport)return result;
+      const covers=[];
+      const edited=objects.find(obj=>obj.id===skipId&&obj.type==='text');
+      const editedRect=objectRect(edited);if(editedRect) { const rect=intersect(editedRect,viewport);if(rect)covers.push(rect); }
+      for(let i=objects.length-1;i>=0;i--) {
+        const obj=objects[i];if(obj.id===skipId)continue;
+        const bounds=objectRect(obj),base=bounds&&intersect(bounds,viewport);if(!base)continue;
+        let regions=[base],changed=false;
+        for(const cover of covers) {
+          const next=[];let cut=false;
+          for(const rect of regions) {
+            const overlap=intersect(rect,cover);
+            if(!overlap) { next.push(rect);continue; }
+            cut=true;
+            if(rect.y1<overlap.y1)next.push({x1:rect.x1,y1:rect.y1,x2:rect.x2,y2:overlap.y1});
+            if(overlap.y2<rect.y2)next.push({x1:rect.x1,y1:overlap.y2,x2:rect.x2,y2:rect.y2});
+            if(rect.x1<overlap.x1)next.push({x1:rect.x1,y1:overlap.y1,x2:overlap.x1,y2:overlap.y2});
+            if(overlap.x2<rect.x2)next.push({x1:overlap.x2,y1:overlap.y1,x2:rect.x2,y2:overlap.y2});
+          }
+          // Bound pathological overlap fragmentation. Retaining earlier cuts
+          // draws extra pixels safely; later opaque backgrounds still cover them.
+          if(next.length>32)break;
+          regions=next;changed||=cut;if(!regions.length)break;
+        }
+        if(changed&&(!regions.length||canClip))result.set(obj,regions);
+        if(obj.type==='text'&&covers.length<128)covers.push(base);
+      }
+      return result;
+    }
 
     function textViewportRect(viewportRect, view = null) {
       if (!viewportRect) return viewportRect;
@@ -420,7 +491,7 @@
       }
     }
 
-    function drawSingleObj(context, obj
+    function drawObjectContent(context, obj
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , counters = null
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -576,6 +647,19 @@
       }
     }
 
+    function drawSingleObj(context,obj
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */ ,counters=null /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      ,viewportRect=null,view=null,imageSourceResolver=null
+    ) {
+      const draw=()=> {
+        if(obj.type==='text')drawTextBackground(context,obj);
+        return drawObjectContent(context,obj
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */ ,counters /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          ,viewportRect,view,imageSourceResolver);
+      };
+      return opaqueText&&obj.type==='text'?withRectClip(context,objectRect(obj),draw):draw();
+    }
+
     function drawVisibleObjects(context
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , counters
@@ -587,24 +671,37 @@
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
       const textRect = textViewportRect(viewportRect, view);
+      const objects=deps.objects(),regions=visibleObjectRegions(objects,viewportRect,skipId,canClip(context));
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        for (const obj of deps.objects()) {
+        for (const obj of objects) {
           if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
           if (!deps.objectIntersectsRect(obj, obj.type === 'text' ? textRect : viewportRect)) continue;
-          drawSingleObj(context, obj, viewportRect, view, imageSourceResolver);
+          const visible=regions.get(obj);
+          if(visible)drawRegions(context,visible,rect=>drawSingleObj(context,obj
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */ ,null /* BOARDFISH_DEV_DIAGNOSTICS_END */
+            ,rect,view,imageSourceResolver));
+          else drawSingleObj(context, obj
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */ ,null /* BOARDFISH_DEV_DIAGNOSTICS_END */
+            ,viewportRect, view, imageSourceResolver);
         }
         return;
       } else {
       const cullingEnabled = deps.viewportCullingEnabled();
       let drawnImages = 0;
       let drawnText = 0;
-      for (const obj of deps.objects()) {
+      for (const obj of objects) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
         if ((onlyText && obj.type !== 'text') || obj.id === skipId) continue;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, obj.type === 'text' ? textRect : viewportRect)) {
           countCulledObject(obj, counters);
           continue;
         }
+        const visible=regions.get(obj);
+        if(visible&&!visible.length) {
+          if(counters) { const key=obj.type==='text'?'occludedText':'occludedImages';counters[key]=(counters[key]||0)+1; }
+          continue;
+        }
+        if(visible&&counters) { counters.partiallyOccludedObjects=(counters.partiallyOccludedObjects||0)+1;counters.visibleObjectRegions=(counters.visibleObjectRegions||0)+visible.length; }
         if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
         let drawn = false;
         const objectDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
@@ -643,7 +740,8 @@
           imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
-          drawn = drawSingleObj(context, obj, counters, viewportRect, view, imageSourceResolver);
+          if(visible)drawn=drawRegions(context,visible,rect=>drawSingleObj(context,obj,counters,rect,view,imageSourceResolver));
+          else drawn = drawSingleObj(context, obj, counters, viewportRect, view, imageSourceResolver);
         } finally {
           if (counters && typeof performance !== 'undefined') {
             recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, deps);
@@ -661,6 +759,9 @@
       drawVisibleObjects,
       setWorldCanvasTransform,
       textViewportRect,
+      drawTextBackground,
+      opaqueTextBackgrounds:opaqueText,
+      withTextObjectClip(context,obj,draw) { return opaqueText?withRectClip(context,objectRect(obj),draw):draw(); },
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') renderer.createDrawCounters = createDrawCounters;
     return Object.freeze(renderer);

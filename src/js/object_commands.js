@@ -46,11 +46,15 @@ function addText(wx, wy, content = '', options = {}) {
     ...objectCommandTextStats(content),
   }));
 
+  const suppliedContent = String(content ?? '');
+  content = options.contentPrepared ? normalizeTextContent(suppliedContent) : textForTextObjectPaste(suppliedContent);
+  // An explicit empty textbox can enter editing; a paste containing only
+  // discarded characters should have no effect on the board.
+  if (suppliedContent && !content) return;
   if (!BoardfishWebLimits.canAddObjects(1)) {
     logStep('object-limit-denied');
     return;
   }
-  if (!options.contentPrepared) content = textForTextObjectPaste(content);
   logStep('trim-done', () => objectCommandTextStats(content));
   const data = { content };
   const textBytes = BoardfishWebLimits.textByteLength(content);

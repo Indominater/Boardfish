@@ -63,7 +63,8 @@ function halfFloat(bits) {
   return sign * (exponent ? (1 + fraction / 1024) * 2 ** (exponent - 15) : fraction * 2 ** -24);
 }
 
-const image = decodeRgbPng(read(`src/${description.atlasURL}`));
+const imageBytes = read(`src/${description.atlasURL.split('?')[0]}`);
+const image = decodeRgbPng(imageBytes);
 const integralImage = decodeRgbPng(read(`src/${integralDescription.atlasURL}`));
 const halfValues = Float32Array.from({ length: 15361 }, (_, bits) => halfFloat(bits));
 const size = description.cellSize;
@@ -194,6 +195,9 @@ test('coverage metadata and image participate in startup and offline loading', a
   };
   vm.runInNewContext(read('src/sw.js').toString(), worker);
   const asset = new URL(description.atlasURL, 'https://boardfish.test/board/');
+  assert.equal(asset.searchParams.get('v'),createHash('sha256').update(imageBytes).digest('hex').slice(0,12),'new metadata cannot select an old controller’s unversioned atlas response');
   assert.equal(worker.isAppShellUrl(asset), true);
   assert.equal(worker.isCacheFirstAssetUrl(asset), true);
+  const previousAsset = new URL(asset);previousAsset.search='';
+  assert.equal(worker.isAppShellUrl(previousAsset),false,'precache the exact content-versioned image URL');
 });

@@ -37,6 +37,14 @@
     return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
   }
 
+  // Textboxes use one plain ASCII representation regardless of their input
+  // source. Preserve indentation/newlines; discard unsupported characters
+  // rather than transliterating them or introducing fallback font glyphs.
+  function normalizeTextContent(value) {
+    const text = String(value ?? '');
+    return text.replace(/\r\n?|[^\x09\x0A\x0D\x20-\x7E]+/g, (match) => match[0] === '\r' ? '\n' : '');
+  }
+
   function imageRefKind(src) {
     if (typeof src === 'string') return src.startsWith('data:') ? IMAGE_REF_KINDS.DATA_URL : IMAGE_REF_KINDS.STRING;
     if (isObject(src) && (src.path || src.mime || src.ext)) return IMAGE_REF_KINDS.MANIFEST;
@@ -78,6 +86,7 @@
     isSupportedBoardVersion,
     mimeForExt,
     normalizeImageExt,
+    normalizeTextContent,
   });
 
   root.BoardfishBoardTypes = api;
