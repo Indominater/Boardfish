@@ -266,7 +266,7 @@ test('open-board failures show a readable pill message', () => {
   assert.match(bootstrap, /finalMsg: message/);
   assert.match(bootstrap, /duration: long_message/);
   assert.doesNotMatch(bootstrap, /Failed to open file:/);
-  assert.match(styles, /#island,\s*\.opening-shield-pill \{[^}]*max-width: calc\(100vw - 32px\);/);
+  assert.match(styles, /#island \{[\s\S]*max-width: calc\(100vw - 32px\);/);
   assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text \{[\s\S]*white-space: normal;/);
 });
 

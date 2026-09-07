@@ -30,9 +30,8 @@
   --firefox-menu-shadow:
     0 8px 24px rgba(0,0,0,0.1),
     0 0 0 1px rgba(0,0,0,0.3);
-  --ui-corner-shape: squircle;
   --ui-radius: 25px;
-  --pill-radius: 16px;
+  --pill-radius: 999px;
   --menu-shell-radius: var(--ui-radius);
   --menu-shell-padding: 8px;
   --menu-item-height: 32px;
@@ -68,17 +67,6 @@ body[data-theme="dark"] {
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-
-/* Keep beta corners on controls and status pills, with round menu shells. */
-.ctx-item,
-.ctx-action-item,
-.ctx-action-item::before,
-#island,
-#isl-zoom,
-.opening-shield-pill,
-.opening-shield-pill-text {
-  corner-shape: var(--ui-corner-shape);
-}
 
 button {
   outline: none;
@@ -419,26 +407,20 @@ body {
 }
 
 /* ── Island ── */
-#island,
-.opening-shield-pill {
-  /* Center in layout so a fractional translation cannot soften the borders. */
-  left: 0;
-  right: 0;
-  width: fit-content;
-  margin-inline: auto;
+#island {
   position: fixed;
   bottom: max(5%, calc(var(--safe-area-bottom) + 12px));
+  left: 50%;
+  translate: -50% 0;
   display: none;
   align-items: center;
-  border-radius: var(--pill-radius);
-  max-width: calc(100vw - 32px);
-}
-#island {
   z-index: 9000;
   pointer-events: auto;
   cursor: pointer;
   overscroll-behavior: none;
   touch-action: none;
+  border-radius: var(--pill-radius);
+  max-width: calc(100vw - 32px);
 }
 
 #island[data-mode="message"] {
@@ -447,8 +429,16 @@ body {
 }
 
 .opening-shield-pill {
+  position: fixed;
+  bottom: max(5%, calc(var(--safe-area-bottom) + 12px));
+  left: 50%;
+  translate: -50% 0;
+  display: none;
+  align-items: center;
   z-index: 100000;
   pointer-events: none;
+  border-radius: var(--pill-radius);
+  max-width: calc(100vw - 32px);
 }
 
 #island *,
