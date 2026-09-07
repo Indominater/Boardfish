@@ -9,28 +9,8 @@ function requireAppElement(id) {
 
 var canvas      = requireAppElement('canvas');
 var boardCanvas = requireAppElement('board-canvas');
-var ctx = null;
-if (typeof BoardfishGpuRenderer !== 'undefined' && typeof BoardfishAsciiFont !== 'undefined') {
-  try {
-    ctx = BoardfishGpuRenderer.createContext(boardCanvas, {
-      font: BoardfishAsciiFont,
-      onReady() {
-        if (typeof scheduleRender === 'function') scheduleRender(true);
-      },
-    });
-  } catch (_) {}
-}
-if (!ctx) {
-  ctx = boardCanvas.getContext('2d');
-  // A failed GL initialization may already have claimed the original canvas.
-  if (!ctx) {
-    const replacement = boardCanvas.cloneNode(false);
-    boardCanvas.replaceWith(replacement);
-    boardCanvas = replacement;
-    ctx = boardCanvas.getContext('2d');
-  }
-}
-if (!ctx) throw new Error('board canvas rendering context is unavailable');
+var ctx         = boardCanvas.getContext('2d');
+if (!ctx) throw new Error('board canvas 2D context is unavailable');
 var ctxMenu     = requireAppElement('ctx-menu');
 var ctxActions  = requireAppElement('ctx-actions');
 var darkModeMenuBtn = requireAppElement('ctx-btn-dark-mode');
@@ -100,6 +80,7 @@ function storeAppTheme() {
 }
 
 function repaintBoardForThemeChange() {
+  if (typeof invalidateOffscreen === 'function') invalidateOffscreen();
   if (typeof scheduleRender === 'function') {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
@@ -121,15 +102,11 @@ function applyAppTheme(theme, {
 } = {}) {
   const nextTheme = normalizeAppTheme(theme);
   const changed = appTheme !== nextTheme;
-  const previousTextColor = _canvasTextColor;
   appTheme = nextTheme;
   document.body.dataset.theme = appTheme;
   if (appThemeMeta) appThemeMeta.setAttribute('content', appTheme === 'dark' ? '#1c1b22' : '#eaeaed');
   _canvasBackgroundColor = appTheme === 'dark' ? '#1c1b22' : 'rgb(234, 234, 237)';
   _canvasTextColor = appTheme === 'dark' ? '#fbfbfe' : '#15141A';
-  if (previousTextColor !== _canvasTextColor && typeof clearTextRasterCache === 'function') {
-    clearTextRasterCache();
-  }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStartupStep('body-theme-applied', StartupDebug.sample('body-theme-applied'));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */

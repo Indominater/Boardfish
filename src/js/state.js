@@ -12,14 +12,14 @@ var _bulkImageInsertAdded = 0;
 var _imageReadyLastRender = 0;
 
 function newId() {
-  let id;
+  let id = '';
   do {
     id = 'obj-' + (idCounter++);
   } while (objectsMap.has(id));
   return id;
 }
 
-function cloneObject(obj, runtimeTextCache = false, preserveDrawPlans = true) {
+function cloneObject(obj, runtimeTextCache = false) {
   HistoryDebug.count('cloneObjectCalls');
   let data = obj.type === 'image' ? { ...obj.data } : null;
   if (!data) {
@@ -37,7 +37,7 @@ function cloneObject(obj, runtimeTextCache = false, preserveDrawPlans = true) {
     data,
   };
   if (runtimeTextCache && cloned.type === 'text') {
-    cloneTextObjectRuntimeCaches(obj, cloned, preserveDrawPlans);
+    cloneTextObjectRuntimeCaches(obj, cloned);
   }
   return cloned;
 }
@@ -70,13 +70,14 @@ function bringObjectToFront(obj) {
 }
 
 function sendSelectedToBack() {
-  if (!selectedIds.size || selectedIds.size === objectsMap.size) return;
+  if (!selectedIds.size) return;
   BoardfishEditorState.commitMutation('send-selected-to-back', () => {
     const reordered = new Array(objects.length);
     let selectedCount = 0, restIndex = selectedIds.size;
     for (const o of objects) {
       reordered[selectedIds.has(o.id) ? selectedCount++ : restIndex++] = o;
     }
+    if (!selectedCount || selectedCount === objects.length) return false;
     objects = reordered;
     return true;
   });
@@ -100,14 +101,14 @@ function flipSelectedImages() {
       didFlip = true;
     }
     return didFlip;
-  });
+  }, { invalidate: true });
   ClipDebug.step(dbg, 'toggle-flags', { imageCount, flipped });
   if (!flipped) { ClipDebug.end(dbg, { skipped: true }); return; }
   ClipDebug.end(dbg, { historyIndex });
 }
 
-function rotateSelectedImages() {
-  BoardfishEditorState.commitMutation('rotate-image-cw', () => {
+function rotateSelectedImages(dir) {
+  BoardfishEditorState.commitMutation(`rotate-image-${dir}`, () => {
     let rotated = false;
     for (const id of selectedIds) {
       const obj = objectsMap.get(id);
@@ -115,7 +116,7 @@ function rotateSelectedImages() {
       const transform = obj.data;
       const current = transform.rotation;
       const oddFlip = transform.flipX !== transform.flipY;
-      const delta = oddFlip ? 270 : 90;
+      const delta = (dir === 'cw') !== oddFlip ? 90 : 270;
       obj.data.rotation = (current + delta) % 360;
       const cx = obj.x + obj.w / 2;
       const cy = obj.y + obj.h / 2;
@@ -129,7 +130,7 @@ function rotateSelectedImages() {
       rotated = true;
     }
     return rotated;
-  });
+  }, { invalidate: true });
 }
 
 function isMultiSelected() {

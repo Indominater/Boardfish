@@ -1,7 +1,7 @@
 'use strict';
 
 (function initWebBoardContainer(root) {
-  const { mimeForExt, normalizeImageExt } = root.BoardfishBoardTypes ||
+  const { extForMime, mimeForExt, normalizeImageExt } = root.BoardfishBoardTypes ||
     (typeof require === 'function' ? require('./board_types.js') : null);
   const ZIP_LOCAL_FILE_HEADER = 0x04034b50;
   const ZIP_CENTRAL_DIRECTORY = 0x02014b50;
@@ -19,12 +19,22 @@
   const imageSourceCrcCache = new WeakMap();
   const imageSourceArchiveIdentityCache = new WeakMap();
 
+  function textEncoder() {
+    if (!utf8TextEncoder) utf8TextEncoder = new TextEncoder();
+    return utf8TextEncoder;
+  }
+
+  function textDecoder() {
+    if (!utf8TextDecoder) utf8TextDecoder = new TextDecoder();
+    return utf8TextDecoder;
+  }
+
   function utf8Encode(text) {
-    return (utf8TextEncoder ||= new TextEncoder()).encode(String(text));
+    return textEncoder().encode(String(text));
   }
 
   function utf8Decode(bytes) {
-    return (utf8TextDecoder ||= new TextDecoder()).decode(bytes);
+    return textDecoder().decode(bytes);
   }
 
   function unsupportedContainerError() {
@@ -361,6 +371,7 @@
       entryCount,
       centralSize,
       centralOffset,
+      eocdOffset: absoluteEocdOffset,
     };
   }
 
@@ -491,9 +502,7 @@
     if (typeof DecompressionStream !== 'function') {
       throw new Error('this browser cannot read compressed .bf entries');
     }
-    const blob = isNativeBlobPart(bytes) ? bytes : new Blob([bytes instanceof Uint8Array ? bytes : await blobToBytes(bytes)]);
-    if (blob.size !== Number(entry.compressedSize)) throw new Error(`truncated Boardfish container entry ${entry.name}`);
-    const stream = blob.stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
     const reader = stream.getReader();
     const chunks = [];
     let total = 0;
@@ -568,13 +577,25 @@
     return out;
   }
 
-  async function readZipEntry(input, entry, options = {}) {
+  async function readZipEntry(bytes, entry, options = {}) {
     assertZipEntryReadBudget(entry, options.maxBytes, options.tooLargeError);
-    const compressed = isBlobLike(input)
-      ? await compressedEntryBlob(input, entry)
-      : compressedEntryBytes(input, entry);
+    const compressed = compressedEntryBytes(bytes, entry);
     let out;
-    if (entry.method === ZIP_METHOD_STORED) out = compressed instanceof Uint8Array ? compressed : await blobToBytes(compressed);
+    if (entry.method === ZIP_METHOD_STORED) out = compressed;
+    else if (entry.method === ZIP_METHOD_DEFLATED) out = await inflateRaw(compressed, entry, options);
+    else throw new Error(`unsupported .bf compression method ${entry.method} for ${entry.name}`);
+    return validateReadZipEntry(out, entry, options);
+  }
+
+  async function readZipEntryFromBlob(blob, entry, options = {}) {
+    assertZipEntryReadBudget(entry, options.maxBytes, options.tooLargeError);
+    const compressedBlob = await compressedEntryBlob(blob, entry);
+    const compressed = new Uint8Array(await compressedBlob.arrayBuffer());
+    if (compressed.length !== Number(entry.compressedSize)) {
+      throw new Error(`truncated Boardfish container entry ${entry.name}`);
+    }
+    let out;
+    if (entry.method === ZIP_METHOD_STORED) out = compressed;
     else if (entry.method === ZIP_METHOD_DEFLATED) out = await inflateRaw(compressed, entry, options);
     else throw new Error(`unsupported .bf compression method ${entry.method} for ${entry.name}`);
     return validateReadZipEntry(out, entry, options);
@@ -672,7 +693,7 @@
       const sourceBlob = source.__blob;
       const cachedCrc = cachedImageSourceCrc(source, sourceBlob.size);
       const mime = source.mime || 'image/png';
-      let stableBlob;
+      let stableBlob = null;
       if (typeof root.Response === 'function' && typeof sourceBlob?.stream === 'function') {
         stableBlob = await new root.Response(sourceBlob.stream(), {
           headers: { 'Content-Type': mime || 'image/png' },
@@ -803,7 +824,11 @@
   }
 
   function bytesForImageSource(source) {
-    if (isWebImageRef(source)) return bytesForWebImageRef(source);
+    if (isWebImageRef(source)) {
+      const bytes = bytesForWebImageRef(source);
+      if (bytes) return bytes;
+      return null;
+    }
     if (typeof source === 'string') return dataUrlToBytes(source);
     if (source instanceof Uint8Array) return source;
     if (source instanceof ArrayBuffer) return new Uint8Array(source);
@@ -1043,17 +1068,17 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
     const startedAt = collectDiagnostics ? nowMs() : 0;
-    let phaseStart;
+    let phaseStart = startedAt;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const randomAccessBlob = isBlobLike(input) ? input : null;
     let containerBytes = null;
-    let entries;
+    let entries = null;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     let readMs = 0;
-    let zipOpenMs;
+    let zipOpenMs = 0;
     let zipTailBytes = 0;
     let centralDirectoryBytes = 0;
-    let containerFileBytes;
+    let containerFileBytes = 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (randomAccessBlob) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1101,7 +1126,7 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const boardJsonBytes = await readZipEntry(
+    const boardJsonBytes = await (randomAccessBlob ? readZipEntryFromBlob : readZipEntry)(
       randomAccessBlob || containerBytes,
       boardEntry,
       {
@@ -1238,7 +1263,7 @@
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const imageReadStart = collectDiagnostics ? nowMs() : 0;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        bytes = await readZipEntry(
+        bytes = await (randomAccessBlob ? readZipEntryFromBlob : readZipEntry)(
           randomAccessBlob || containerBytes,
           imageEntry,
           {

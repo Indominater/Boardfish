@@ -17,29 +17,13 @@ const TEXT_DRAW_BATCH_MAX_UNITS = 2;
 // rendering in Chromium. Keep fallback fonts, other engines, f/F ligatures,
 // the contextual "tt" alternate, punctuation, and complex scripts exact.
 const TEXT_DRAW_BATCHABLE_ASCII_RE = /^[A-EG-Za-eg-z0-9]$/;
-var TEXT_BASELINE_Y_OFFSET;
+var TEXT_BASELINE_Y_OFFSET = FONT_SIZE;
 var _textDrawBatchingEngineVerified = null;
 var _textDrawBatchingVerifiedFonts = new Set();
-var _textRasterCache = null;
-
-function clearTextRasterCache() {
-  _textRasterCache?.clear();
-}
-
-function beginTextRasterFrame() {
-  if (typeof BoardfishTextRaster === 'undefined') return;
-  _textRasterCache ??= BoardfishTextRaster.createTextRasterCache();
-  _textRasterCache.beginFrame();
-}
-
-/* BOARDFISH_DEV_DIAGNOSTICS_START */
-function getTextRasterCacheStats() {
-  return _textRasterCache?.getStats() || { bytes: 0, entries: 0 };
-}
-/* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function normalizeTextContent(value) {
-  return BoardfishBoardTypes.normalizeTextContent(value);
+  const text = String(value ?? '');
+  return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text;
 }
 
 const trimWhitespaceOnlyEdgeLines = (value) => {
@@ -165,8 +149,10 @@ function configureTextCanvasContext(context) {
   try { context.direction = 'ltr'; } catch (_) {}
 }
 
-var _measureCtx = document.createElement('canvas').getContext('2d');
+var _measureCanvas = document.createElement('canvas');
+var _measureCtx = _measureCanvas.getContext('2d');
 configureTextCanvasContext(_measureCtx);
+_measureCtx.font = FONT;
 refreshTextMetrics();
 const TEXT_MEASURE_CACHE_MAX_ENTRIES = 4096;
 const TEXT_PREFIX_CACHE_MAX_ENTRIES = 2048;
@@ -176,7 +162,6 @@ const TEXT_PARAGRAPH_PREFIX_CACHE_MAX_ENTRIES = 4096;
 const TEXT_WRAPPED_WIDTH_CACHE_MAX_ENTRIES = 12;
 const TEXT_VIEWPORT_LAYOUT_RANGE_CACHE_MAX_ENTRIES = 48;
 const TEXT_VIEWPORT_LAYOUT_LINE_CACHE_MAX_ENTRIES = 8192;
-const TEXT_WRAPPED_VISUAL_ROW_STRIDE = 5;
 const TEXT_EXACT_PREFIX_MAX_CHARS = 384;
 var _mwCache = new Map();
 var _glyphMetricsCache = new Map();
@@ -189,7 +174,14 @@ function forEachTextSpacingUnit(text, callback, start = 0, end = null) {
   if (from >= to) return;
   const hasGraphemeSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function';
 
-  if (!/[^\x00-\x7F]/.test(text.slice(from, to))) {
+  let asciiOnly = true;
+  for (let index = from; index < to; index++) {
+    if (text.charCodeAt(index) > 0x7F) {
+      asciiOnly = false;
+      break;
+    }
+  }
+  if (asciiOnly) {
     let index = from;
     while (index < to) {
       // Intl.Segmenter treats CRLF as one grapheme; the code-point fallback
@@ -221,27 +213,8 @@ function forEachTextSpacingUnit(text, callback, start = 0, end = null) {
   let index = from;
   while (index < to) {
     const codePoint = text.codePointAt(index);
-    let next = Math.min(to, index + (codePoint > 0xFFFF ? 2 : 1));
-    // Keep common extended graphemes intact even in engines without Segmenter.
-    // In particular, never expose surrogate, accent, emoji modifier, flag or
-    // joined-emoji interiors as wrapping or caret boundaries.
-    if (codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF && next < to) {
-      const second = text.codePointAt(next);
-      if (second >= 0x1F1E6 && second <= 0x1F1FF) next = Math.min(to, next + 2);
-    }
-    while (next < to) {
-      const following = text.codePointAt(next);
-      const size = following > 0xFFFF ? 2 : 1;
-      if (/\p{Grapheme_Extend}/u.test(String.fromCodePoint(following)) ||
-          (following >= 0x1F3FB && following <= 0x1F3FF)) {
-        next = Math.min(to, next + size);
-      } else if (following === 0x200D && next + 1 < to) {
-        const joined = text.codePointAt(next + 1);
-        next = Math.min(to, next + 1 + (joined > 0xFFFF ? 2 : 1));
-      } else {
-        break;
-      }
-    }
+    const size = codePoint > 0xFFFF ? 2 : 1;
+    const next = Math.min(to, index + size);
     callback(text.slice(index, next), index, next);
     index = next;
   }
@@ -270,6 +243,13 @@ const textWidthAfterTab = (currentWidth) => {
   const tabStop = (_textTabStopWidth ??= measureRawTextW('        ')) > 0 ? _textTabStopWidth : FONT_SIZE * 4;
   return (Math.floor(currentWidth / tabStop) + 1) * tabStop;
 };
+
+function measureTextW(text) {
+  const value = String(text ?? '');
+  if (!value.includes('\t')) return measureRawTextW(value);
+  const widths = getPrefixWidths(value);
+  return widths[widths.length - 1] || 0;
+}
 
 function refreshTextMetrics() {
   _measureCtx.font = FONT;
@@ -328,8 +308,6 @@ function measureTextGlyphMetricsWithFont(text, font = FONT) {
     width,
     left: Number.isFinite(measuredLeft) ? measuredLeft : 0,
     right: Number.isFinite(measuredRight) ? measuredRight : width,
-    ascent: Number.isFinite(metrics?.actualBoundingBoxAscent) ? metrics.actualBoundingBoxAscent : FONT_SIZE,
-    descent: Number.isFinite(metrics?.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : LINE_H - FONT_SIZE,
     hasInkBounds: hasLeft && hasRight && Number.isFinite(measuredLeft) && Number.isFinite(measuredRight),
   };
   _glyphMetricsCache.set(key, result);
@@ -398,7 +376,13 @@ function clearTextObjectLayoutRuntime(obj, options) {
 
 const cloneTextLayoutRuntimeLine = ({ _textDrawPlanCache, ...clone }) => clone;
 
-function cloneTextObjectRuntimeCaches(source, target, preserveDrawPlans = true) {
+const cloneTextLayoutRuntimeLines = (lines = []) => {
+  const out = new Array(lines.length);
+  for (let i = 0; i < lines.length; i++) out[i] = cloneTextLayoutRuntimeLine(lines[i]);
+  return out;
+};
+
+function cloneTextObjectRuntimeCaches(source, target) {
   if (!source || !target || source.type !== 'text' || target.type !== 'text') return target;
   const content = target.data.content;
   if (
@@ -444,9 +428,7 @@ function cloneTextObjectRuntimeCaches(source, target, preserveDrawPlans = true) 
     source._layoutCacheContent === content &&
     source._layoutCacheW === target.w
   ) {
-    target._layoutCache = source._layoutCache.map(
-      preserveDrawPlans ? (line) => ({ ...line }) : cloneTextLayoutRuntimeLine,
-    );
+    target._layoutCache = cloneTextLayoutRuntimeLines(source._layoutCache);
     target._layoutCacheContent = source._layoutCacheContent;
     target._layoutCacheW = source._layoutCacheW;
     target._layoutCacheY = target.y;
@@ -457,8 +439,6 @@ function cloneTextObjectRuntimeCaches(source, target, preserveDrawPlans = true) 
 }
 
 const clearTextLayoutCaches = (options = {}) => {
-  if (typeof ctx !== 'undefined') ctx?.clearTextCache?.();
-  clearTextRasterCache();
   _prefixCache.clear();
   if (options.measurements) clearMeasuredTextWidthCache();
   if (options.objectLayout !== false) {
@@ -475,8 +455,6 @@ function getPrefixWidths(text) {
     return hit;
   }
   const pw = new Float64Array(value.length + 1);
-  let boundarySpacing = null;
-  let graphemeBoundaries = null;
   let width = 0;
   let k = 0;
   let previousUnit = null;
@@ -485,7 +463,6 @@ function getPrefixWidths(text) {
       width = textWidthAfterTab(width);
       pw[k + 1] = width;
       k++;
-      if (graphemeBoundaries) graphemeBoundaries.push(k);
       previousUnit = null;
       continue;
     }
@@ -496,23 +473,19 @@ function getPrefixWidths(text) {
       if (spacing) {
         width += spacing;
         pw[unitStart] = width;
-        if (!boundarySpacing) boundarySpacing = new Float64Array(value.length + 1);
-        boundarySpacing[unitStart] = spacing;
       }
       width += measureRawTextW(unit);
       for (let pos = unitStart + 1; pos <= unitEnd; pos++) pw[pos] = width;
-      if (!graphemeBoundaries && unitEnd - unitStart > 1) {
-        graphemeBoundaries = Array.from({ length: unitStart + 1 }, (_, index) => index);
-      }
-      if (graphemeBoundaries) graphemeBoundaries.push(unitEnd);
       previousUnit = unit;
     }, runStart, k);
   }
-  if (boundarySpacing) pw.boundarySpacing = boundarySpacing;
-  if (graphemeBoundaries) pw.graphemeBoundaries = graphemeBoundaries;
   _prefixCache.set(value, pw);
   trimMapCache(_prefixCache, TEXT_PREFIX_CACHE_MAX_ENTRIES);
   return pw;
+}
+
+function getTextRangePrefixWidths(text) {
+  return getPrefixWidths(String(text ?? ''));
 }
 
 function getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, text, start, end) {
@@ -596,7 +569,7 @@ function getCachedTextWrappedLineIndex(obj, text) {
   return null;
 }
 
-function setCachedTextWrappedLineIndex(obj, text, entries, lineCount, visualRows = null) {
+function setCachedTextWrappedLineIndex(obj, text, entries, lineCount) {
   if (!obj || obj.type !== 'text' || !Array.isArray(entries)) return;
   const count = Math.max(1, Math.trunc(Number(lineCount)) || 1);
   obj._textWrappedLineIndexCacheContent = text;
@@ -604,7 +577,6 @@ function setCachedTextWrappedLineIndex(obj, text, entries, lineCount, visualRows
   const cache = {
     lineCount: count,
     entries,
-    visualRows,
   };
   obj._textWrappedLineIndexCache = cache;
   setCachedTextWrappedLineCount(obj, text, count);
@@ -625,8 +597,22 @@ function ensureCachedTextWrappedLineIndex(obj, content) {
   const cached = getCachedTextWrappedLineIndex(obj, content);
   if (cached) return cached;
   const wrapped = buildWrappedLines(obj, { collect: false, collectLineIndex: true });
-  setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount, wrapped.visualRows);
+  setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
   return getCachedTextWrappedLineIndex(obj, content);
+}
+
+function textWrappedLineIndexEntryForVisual(cache, visualLineIndex) {
+  const entries = cache.entries;
+  const lineCount = Math.max(1, Math.trunc(Number(cache.lineCount)) || 1);
+  const target = Math.max(0, Math.min(Math.trunc(Number(visualLineIndex)) || 0, lineCount - 1));
+  let lo = 0;
+  let hi = entries.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi + 1) / 2);
+    if ((entries[mid]?.visualStart || 0) <= target) lo = mid;
+    else hi = mid - 1;
+  }
+  return { entry: entries[lo], index: lo };
 }
 
 function prewarmTextObjectLayoutRuntimeCaches(obj, options = {}) {
@@ -703,44 +689,16 @@ function textPrefixWidthsSlice(prefixWidths, from, to) {
   const out = new Float64Array(end - start + 1);
   const base = source[start] || 0;
   for (let index = start; index <= end; index++) out[index - start] = Math.max(0, (source[index] || 0) - base);
-  // Prefix positions point to glyph starts, including the gap before that
-  // glyph. The final position must exclude the next, unrendered glyph's gap.
-  out[end - start] = textPrefixRangeWidth(source, start, end);
-  if (source.graphemeBoundaries) {
-    const first = textGraphemeBoundaryIndex(source, start);
-    const last = textGraphemeBoundaryIndex(source, end);
-    out.graphemeBoundaries = source.graphemeBoundaries.slice(first, last + 1).map((offset) => offset - start);
-  }
   return out;
 }
 
-function textPrefixRangeWidth(prefixWidths, start, end) {
-  if (end <= start) return 0;
-  return Math.max(0, prefixWidths[end] - (prefixWidths.boundarySpacing?.[end] || 0) - prefixWidths[start]);
+function textRangeIncludes(text, start, end, character = '\t') {
+  const index = text.indexOf(character, start);
+  return index !== -1 && index < end;
 }
 
-function textGraphemeBoundaryIndex(prefixWidths, offset) {
-  const boundaries = prefixWidths.graphemeBoundaries;
-  if (!boundaries) return offset;
-  let lo = 0, hi = boundaries.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (boundaries[mid] < offset) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
-
-function textGraphemeOffset(prefixWidths, offset, forward = false) {
-  const bounded = Math.max(0, Math.min(offset, prefixWidths.length - 1));
-  const boundaries = prefixWidths.graphemeBoundaries;
-  if (!boundaries) return bounded;
-  const index = textGraphemeBoundaryIndex(prefixWidths, bounded);
-  return boundaries[!forward && boundaries[index] > bounded ? Math.max(0, index - 1) : index];
-}
-
-const findTextWrapEndByWidth = (rangeWidth, start, end, maxW, boundaryAt = (index) => index) => {
-  let lo = boundaryAt(start + 1, true);
+const findTextWrapEndByWidth = (rangeWidth, start, end, maxW) => {
+  let lo = start + 1;
   let hi = end;
   if (rangeWidth(start, lo) > maxW) return lo;
   while (lo < hi) {
@@ -748,7 +706,7 @@ const findTextWrapEndByWidth = (rangeWidth, start, end, maxW, boundaryAt = (inde
     if (rangeWidth(start, mid) <= maxW) lo = mid;
     else hi = mid - 1;
   }
-  return boundaryAt(lo);
+  return lo;
 };
 
 const nextNonSpaceIndex = (content, start, end) => {
@@ -757,31 +715,29 @@ const nextNonSpaceIndex = (content, start, end) => {
   return index;
 };
 
-function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, pushLine, boundaryAt) {
+function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, pushLine) {
   let lineStart = paraStart;
-  let wordEnd = paraStart;
   while (lineStart < paraEnd) {
-    const previousLineStart = lineStart;
     let cursor = lineStart;
     let bestEnd = lineStart;
-    let bestNext;
+    let bestNext = lineStart;
 
     while (cursor < paraEnd) {
       const wordStart = nextNonSpaceIndex(content, cursor, paraEnd);
       if (wordStart >= paraEnd) {
-        const lineEnd = findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW, boundaryAt);
-        pushLine(lineStart, lineEnd, paraEnd, paraEnd);
+        const lineEnd = findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW);
+        pushLine(lineStart, Math.max(lineStart + 1, lineEnd), paraEnd, paraEnd);
         lineStart = paraEnd;
         break;
       }
 
-      wordEnd = Math.max(wordEnd, wordStart + 1);
+      let wordEnd = wordStart + 1;
       while (wordEnd < paraEnd && content[wordEnd] !== ' ') wordEnd++;
       if (rangeWidth(lineStart, wordEnd) <= maxW) {
         bestEnd = wordEnd;
         const afterSpaces = nextNonSpaceIndex(content, wordEnd, paraEnd);
         if (wordEnd < paraEnd && afterSpaces >= paraEnd) {
-          bestEnd = findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW, boundaryAt);
+          bestEnd = findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW);
           bestNext = paraEnd;
           cursor = paraEnd;
           continue;
@@ -792,7 +748,8 @@ function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, 
       }
 
       if (bestEnd > lineStart) break;
-      const end = findTextWrapEndByWidth(rangeWidth, lineStart, wordEnd, maxW, boundaryAt);
+      const lineEnd = findTextWrapEndByWidth(rangeWidth, lineStart, wordEnd, maxW);
+      const end = Math.max(lineStart + 1, lineEnd);
       const nextStart = end < paraEnd && content[end] === ' '
         ? nextNonSpaceIndex(content, end, paraEnd)
         : end;
@@ -801,63 +758,15 @@ function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, 
       break;
     }
 
-    // A long word or trailing spaces already emitted this row above.
-    if (lineStart !== previousLineStart) continue;
-    pushLine(lineStart, bestEnd, bestNext, bestNext);
-    lineStart = bestNext;
-  }
-}
-
-function wrapTextParagraph(obj, content, paraStart, paraEnd, maxW, pushLine, collectPrefixWidths = true) {
-  const paragraphHasTab = content.slice(paraStart, paraEnd).includes('\t');
-  const paragraphPrefixWidths = getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd);
-  const boundaryAt = (index, forward = false) => paraStart + textGraphemeOffset(paragraphPrefixWidths, index - paraStart, forward);
-  const rangeWidth = (start, end) => paragraphHasTab
-    ? measureTextRangeW(content, start, end)
-    : textPrefixRangeWidth(paragraphPrefixWidths, start - paraStart, end - paraStart);
-  const pushParagraphLine = (start, end, nextStart = end, caretEnd = end) => {
-    const prefixWidths = (typeof collectPrefixWidths === 'function' ? collectPrefixWidths() : collectPrefixWidths) && !paragraphHasTab
-      ? textPrefixWidthsSlice(paragraphPrefixWidths, start - paraStart, end - paraStart)
-      : null;
-    pushLine(start, end, nextStart, caretEnd, prefixWidths);
-  };
-  if (rangeWidth(paraStart, paraEnd) <= maxW) {
-    pushParagraphLine(paraStart, paraEnd, paraEnd, paraEnd);
-    return;
-  }
-  if (!paragraphHasTab && paraEnd - paraStart > TEXT_EXACT_PREFIX_MAX_CHARS) {
-    wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, pushParagraphLine, boundaryAt);
-    return;
-  }
-  let lineStart = paraStart;
-  while (lineStart < paraEnd) {
-    let lineEnd = findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW, boundaryAt);
-    let nextStart = lineEnd;
-    let caretEnd = lineEnd;
-    if (lineEnd < paraEnd) {
-      // First check the fitted endpoint: it may already be a complete word.
-      let breakAt = isTextWordSeparator(content[lineEnd]) ? lineEnd : -1;
-      if (breakAt < 0) {
-        for (let index = lineEnd; index > lineStart; index--) {
-          if (isTextWordSeparator(content[index - 1])) {
-            breakAt = index - 1;
-            break;
-          }
-        }
-      }
-      while (breakAt > lineStart && isTextWordSeparator(content[breakAt - 1])) breakAt--;
-      if (breakAt > lineStart) {
-        nextStart = breakAt;
-        while (nextStart < paraEnd && isTextWordSeparator(content[nextStart])) nextStart++;
-        if (nextStart < paraEnd) lineEnd = breakAt;
-        caretEnd = nextStart;
-      } else if (isTextWordSeparator(content[nextStart])) {
-        while (nextStart < paraEnd && isTextWordSeparator(content[nextStart])) nextStart++;
-        caretEnd = nextStart;
-      }
+    if (lineStart >= paraEnd) continue;
+    if (bestEnd > lineStart) {
+      pushLine(lineStart, bestEnd, bestNext, bestNext);
+      lineStart = bestNext;
+    } else {
+      const lineEnd = Math.min(lineStart + 1, paraEnd);
+      pushLine(lineStart, lineEnd, lineEnd, lineEnd);
+      lineStart = lineEnd;
     }
-    pushParagraphLine(lineStart, lineEnd, nextStart, caretEnd);
-    lineStart = nextStart;
   }
 }
 
@@ -881,26 +790,24 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
   const maxW = obj.w - TEXT_PAD * 2;
   const result = [];
   const lineIndex = collectLineIndex ? [] : null;
-  // Twenty bytes per wrapped row retain exact wrapping/caret endpoints without
-  // retaining a second copy of its text or prefix widths. A new viewport can
-  // then materialize only its missing rows, even inside one huge paragraph.
-  const visualRows = collectLineIndex ? [] : null;
   let visualLineIndex = 0;
 
   const pushLine = (start, end, nextStart = end, caretEnd = end, logicalLineIndex = 0, prefixWidths = null) => {
-    if (visualRows) visualRows.push(start, end, nextStart, caretEnd, logicalLineIndex);
     if (lineIndex) {
       let entry = lineIndex[lineIndex.length - 1];
       if (!entry || entry.logicalLineIndex !== logicalLineIndex) {
         entry = {
           logicalLineIndex,
           startIndex: start,
-          endIndex: Math.max(end, nextStart, caretEnd),
+          endIndex: end,
+          visualStart: visualLineIndex,
+          visualEnd: visualLineIndex,
         };
         lineIndex.push(entry);
       } else {
         entry.startIndex = Math.min(entry.startIndex, start);
-        entry.endIndex = Math.max(entry.endIndex, end, nextStart, caretEnd);
+        entry.endIndex = Math.max(entry.endIndex, end);
+        entry.visualEnd = visualLineIndex;
       }
     }
     if (collectLines && visualLineIndex >= firstLineIndex && visualLineIndex <= lastLineIndex) {
@@ -928,21 +835,90 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
     if (paraStart === paraEnd) {
       pushLine(paraStart, paraStart, paraStart, paraStart, logicalLineIndex);
     } else {
-      wrapTextParagraph(obj, content, paraStart, paraEnd, maxW,
-        (start, end, nextStart, caretEnd, prefixWidths) => {
-          pushLine(start, end, nextStart, caretEnd, logicalLineIndex, prefixWidths);
-        }, () => collectLines && visualLineIndex >= firstLineIndex && visualLineIndex <= lastLineIndex);
-    }
+      const paragraphHasTab = textRangeIncludes(content, paraStart, paraEnd);
+      const paragraphPrefixWidths = paragraphHasTab
+        ? null
+        : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd);
+      const paragraphRangeWidth = (start, end) => {
+        if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end);
+        const from = Math.max(0, Math.min(start - paraStart, paragraphPrefixWidths.length - 1));
+        const to = Math.max(from, Math.min(end - paraStart, paragraphPrefixWidths.length - 1));
+        return Math.max(0, paragraphPrefixWidths[to] - paragraphPrefixWidths[from]);
+      };
+      const pushParagraphLine = (start, end, nextStart = end, caretEnd = end) => {
+        const prefixWidths = collectLines && paragraphPrefixWidths
+          ? textPrefixWidthsSlice(paragraphPrefixWidths, start - paraStart, end - paraStart)
+          : null;
+        pushLine(start, end, nextStart, caretEnd, logicalLineIndex, prefixWidths);
+      };
+      if (paragraphRangeWidth(paraStart, paraEnd) <= maxW) {
+        pushParagraphLine(paraStart, paraEnd, paraEnd, paraEnd);
+        if (newlineAt === -1) break;
+        paraStart = newlineAt + 1;
+        logicalLineIndex++;
+        continue;
+      }
+      if (!paragraphHasTab && paraEnd - paraStart > TEXT_EXACT_PREFIX_MAX_CHARS) {
+        wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, paragraphRangeWidth, pushParagraphLine);
+        if (newlineAt === -1) break;
+        paraStart = newlineAt + 1;
+        logicalLineIndex++;
+        continue;
+      }
+      let lineStart = paraStart;
+      while (lineStart < paraEnd) {
+        let lo = lineStart + 1;
+        let hi = paraEnd;
+        if (paragraphRangeWidth(lineStart, lo) > maxW) {
+          pushParagraphLine(lineStart, lo, lo, lo);
+          lineStart = lo;
+          continue;
+        }
+        while (lo < hi) {
+          const mid = Math.ceil((lo + hi + 1) / 2);
+          if (paragraphRangeWidth(lineStart, mid) <= maxW) lo = mid;
+          else hi = mid - 1;
+        }
 
-    if (lineIndex) lineIndex[lineIndex.length - 1].hasTab = content.slice(paraStart, paraEnd).includes('\t');
+        let lineEnd = lo;
+        let nextStart = lineEnd;
+        let caretEnd = lineEnd;
+        if (lineEnd < paraEnd) {
+          let breakAt = -1;
+          for (let i = lineEnd; i > lineStart; i--) {
+            if (isTextWordSeparator(content[i - 1])) {
+              breakAt = i - 1;
+              break;
+            }
+          }
+          if (breakAt > lineStart) {
+            nextStart = breakAt;
+            while (nextStart < paraEnd && isTextWordSeparator(content[nextStart])) nextStart++;
+            if (nextStart < paraEnd) {
+              lineEnd = breakAt;
+            }
+            caretEnd = nextStart;
+          } else if (isTextWordSeparator(content[nextStart])) {
+            while (nextStart < paraEnd && isTextWordSeparator(content[nextStart])) nextStart++;
+            caretEnd = nextStart;
+          }
+        }
+
+        if (lineEnd <= lineStart) {
+          lineEnd = Math.min(lineStart + 1, paraEnd);
+          nextStart = lineEnd;
+        }
+        pushParagraphLine(lineStart, lineEnd, nextStart, caretEnd);
+      lineStart = nextStart;
+      }
+    }
 
     if (newlineAt === -1) break;
     paraStart = newlineAt + 1;
     logicalLineIndex++;
   }
 
-  return { lines: result, lineCount: Math.max(1, knownLineCount || visualLineIndex), lineIndex,
-    visualRows: visualRows ? new Uint32Array(visualRows) : null };
+  return { lines: result, lineCount: Math.max(1, knownLineCount || visualLineIndex), lineIndex };
 }
 
 function getWrappedLineCount(obj, text) {
@@ -953,7 +929,7 @@ function getWrappedLineCount(obj, text) {
     return Math.max(1, Math.trunc(Number(cachedCount)) || 1);
   }
   const wrapped = buildWrappedLines(obj, { collect: false, collectLineIndex: true });
-  setCachedTextWrappedLineIndex(obj, text, wrapped.lineIndex || [], wrapped.lineCount, wrapped.visualRows);
+  setCachedTextWrappedLineIndex(obj, text, wrapped.lineIndex || [], wrapped.lineCount);
   return wrapped.lineCount;
 }
 
@@ -979,9 +955,13 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
   const firstLine = Math.max(0, Math.trunc(Number(startLine)) || 0);
   const lastLine = Math.max(firstLine, Math.trunc(Number(endLine)) || firstLine);
   const maxW = obj.w - TEXT_PAD * 2;
+  const lineIndexEntries = Array.isArray(options.lineIndexEntries) ? options.lineIndexEntries : null;
   let nextParaStart = Math.max(0, Math.min(Math.trunc(Number(options.startIndex)) || 0, content.length));
+  let visualLineOffset = 0;
   const result = [];
   const pushLine = (start, end, nextStart = end, caretEnd = end, logicalLineIndex = 0, prefixWidths = null) => {
+    const visualStart = lineIndexEntries?.[logicalLineIndex]?.visualStart;
+    const visualOffset = visualLineOffset++;
     result.push({
       text: content.slice(start, end),
       startIndex: start,
@@ -989,24 +969,96 @@ function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
       caretEndIndex: caretEnd,
       nextStartIndex: nextStart,
       logicalLineIndex,
+      ...(Number.isFinite(visualStart) ? { visualLineIndex: visualStart + visualOffset } : {}),
       ...(prefixWidths ? { prefixWidths } : {}),
     });
   };
 
   for (let logicalLineIndex = firstLine; logicalLineIndex <= lastLine; logicalLineIndex++) {
-    const paraStart = nextParaStart;
-    const newlineAt = content.indexOf('\n', paraStart);
-    const paraEnd = newlineAt === -1 ? content.length : newlineAt;
+    visualLineOffset = 0;
+    const indexedLine = lineIndexEntries?.[logicalLineIndex] || null;
+    const paraStart = indexedLine
+      ? Math.max(0, Math.min(Math.trunc(Number(indexedLine.startIndex)) || 0, content.length))
+      : nextParaStart;
+    const newlineAt = indexedLine ? -1 : content.indexOf('\n', paraStart);
+    const paraEnd = indexedLine
+      ? Math.max(paraStart, Math.min(Math.trunc(Number(indexedLine.endIndex)) || paraStart, content.length))
+      : (newlineAt === -1 ? content.length : newlineAt);
     nextParaStart = Math.min(paraEnd + 1, content.length);
     if (paraStart === paraEnd) {
       pushLine(paraStart, paraStart, paraStart, paraStart, logicalLineIndex);
       continue;
     }
 
-    wrapTextParagraph(obj, content, paraStart, paraEnd, maxW,
-      (start, end, nextStart, caretEnd, prefixWidths) => {
-        pushLine(start, end, nextStart, caretEnd, logicalLineIndex, prefixWidths);
-      });
+    const paragraphHasTab = textRangeIncludes(content, paraStart, paraEnd);
+    const paragraphPrefixWidths = paragraphHasTab
+      ? null
+      : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd);
+    const paragraphRangeWidth = (start, end) => {
+      if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end);
+      const from = Math.max(0, Math.min(start - paraStart, paragraphPrefixWidths.length - 1));
+      const to = Math.max(from, Math.min(end - paraStart, paragraphPrefixWidths.length - 1));
+      return Math.max(0, paragraphPrefixWidths[to] - paragraphPrefixWidths[from]);
+    };
+    const pushParagraphLine = (start, end, nextStart = end, caretEnd = end) => {
+      const prefixWidths = paragraphPrefixWidths
+        ? textPrefixWidthsSlice(paragraphPrefixWidths, start - paraStart, end - paraStart)
+        : null;
+      pushLine(start, end, nextStart, caretEnd, logicalLineIndex, prefixWidths);
+    };
+    if (paragraphRangeWidth(paraStart, paraEnd) <= maxW) {
+      pushParagraphLine(paraStart, paraEnd, paraEnd, paraEnd);
+      continue;
+    }
+    if (!paragraphHasTab && paraEnd - paraStart > TEXT_EXACT_PREFIX_MAX_CHARS) {
+      wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, paragraphRangeWidth, pushParagraphLine);
+      continue;
+    }
+
+    let lineStart = paraStart;
+    while (lineStart < paraEnd) {
+      let lo = lineStart + 1;
+      let hi = paraEnd;
+      if (paragraphRangeWidth(lineStart, lo) > maxW) {
+        pushParagraphLine(lineStart, lo, lo, lo);
+        lineStart = lo;
+        continue;
+      }
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi + 1) / 2);
+        if (paragraphRangeWidth(lineStart, mid) <= maxW) lo = mid;
+        else hi = mid - 1;
+      }
+
+      let lineEnd = lo;
+      let nextStart = lineEnd;
+      let caretEnd = lineEnd;
+      if (lineEnd < paraEnd) {
+        let breakAt = -1;
+        for (let i = lineEnd; i > lineStart; i--) {
+          if (isTextWordSeparator(content[i - 1])) {
+            breakAt = i - 1;
+            break;
+          }
+        }
+        if (breakAt > lineStart) {
+          nextStart = breakAt;
+          while (nextStart < paraEnd && isTextWordSeparator(content[nextStart])) nextStart++;
+          if (nextStart < paraEnd) lineEnd = breakAt;
+          caretEnd = nextStart;
+        } else if (isTextWordSeparator(content[nextStart])) {
+          while (nextStart < paraEnd && isTextWordSeparator(content[nextStart])) nextStart++;
+          caretEnd = nextStart;
+        }
+      }
+
+      if (lineEnd <= lineStart) {
+        lineEnd = Math.min(lineStart + 1, paraEnd);
+        nextStart = lineEnd;
+      }
+      pushParagraphLine(lineStart, lineEnd, nextStart, caretEnd);
+      lineStart = nextStart;
+    }
   }
 
   return result;
@@ -1053,7 +1105,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   const debug = collectDiagnostics ? {
     ok: false,
     reason: '',
-    oldLayoutLines: obj._layoutCache.length,
+    oldLayoutLines: Array.isArray(obj._layoutCache) ? obj._layoutCache.length : 0,
   } : null;
   const fail = (reason) => {
     if (collectDiagnostics) {
@@ -1168,6 +1220,7 @@ function getTextAutoHeight(obj, minLines = 1) {
 }
 
 const isTextWordSeparator = (ch) => ch === ' ' || ch === '\t';
+const isTextWordOrLineSeparator = (ch) => isTextWordSeparator(ch) || ch === '\n';
 
 const textNewlineCount = (value, start = 0, end = Infinity) => {
   const text = String(value ?? '');
@@ -1245,9 +1298,14 @@ function getTextMinLines(obj) {
 }
 
 function syncAllTextAutoHeights() {
+  let changed = false;
   for (const obj of objects) {
-    if (syncTextAutoHeight(obj)) markDirty(obj);
+    if (syncTextAutoHeight(obj)) {
+      markDirty(obj);
+      changed = true;
+    }
   }
+  return changed;
 }
 
 function syncTextLayoutLinePositions(obj, layout, first = 0) {
@@ -1363,23 +1421,24 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, first, last, li
     return setCachedTextViewportLayoutRange(obj, content, first, last, [], totalLines);
   }
   const actualLast = Math.min(last, totalLines - 1);
-  const visualRows = lineIndexCache.visualRows;
+  const firstEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, first);
+  const lastEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, actualLast);
+  const wrappedSourceLines = wrapTextLogicalLineRange(obj, firstEntry.entry.logicalLineIndex, lastEntry.entry.logicalLineIndex, {
+    lineIndexEntries: lineIndexCache.entries,
+  });
   const layout = [];
-  for (let row = first; row <= actualLast; row++) {
-    const at = row * TEXT_WRAPPED_VISUAL_ROW_STRIDE;
-    const startIndex = visualRows[at], endIndex = visualRows[at + 1];
-    const logicalLineIndex = visualRows[at + 4];
-    const paragraph = lineIndexCache.entries[logicalLineIndex];
-    const paragraphWidths = paragraph.hasTab ? null : getTextObjectParagraphPrefixWidthsForNormalizedContent(
-      obj, content, paragraph.startIndex, paragraph.endIndex,
-    );
-    layout.push(layoutLineFromWrappedLine(obj, {
-      text: content.slice(startIndex, endIndex),
-      startIndex, endIndex, nextStartIndex: visualRows[at + 2], caretEndIndex: visualRows[at + 3], logicalLineIndex,
-      prefixWidths: paragraphWidths ? textPrefixWidthsSlice(
-        paragraphWidths, startIndex - paragraph.startIndex, endIndex - paragraph.startIndex,
-      ) : null,
-    }, row));
+  for (const line of wrappedSourceLines) {
+    if (
+      Number.isFinite(line?.visualLineIndex) &&
+      line.visualLineIndex >= first &&
+      line.visualLineIndex <= actualLast
+    ) {
+      layout.push(layoutLineFromWrappedLine(
+        obj,
+        line,
+        line.visualLineIndex,
+      ));
+    }
   }
   return setCachedTextViewportLayoutRange(obj, content, first, last, layout, totalLines);
 }
@@ -1401,7 +1460,7 @@ function getTextLayout(obj) {
   obj._layoutCacheW = obj.w;
   obj._layoutCacheY = obj.y;
   const wrapped = buildWrappedLines(obj, { collectLineIndex: true }, content);
-  setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount, wrapped.visualRows);
+  setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
   const lines = wrapped.lines;
   const layout = new Array(lines.length);
   for (let i = 0; i < lines.length; i++) {
@@ -1412,8 +1471,6 @@ function getTextLayout(obj) {
 }
 
 function getTextLayoutForLineRange(obj, first = 0, last = first) {
-  first = Math.max(0, Math.trunc(Number(first)) || 0);
-  last = last == null ? Infinity : Math.max(first, Math.trunc(Number(last)) || first);
   const content = obj.data.content;
   const cachedRangeLayout = getCachedTextViewportLayoutRange(obj, content, first, last);
   if (cachedRangeLayout) return cachedRangeLayout;
@@ -1441,7 +1498,7 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
       collectLineIndex: knownLineCount == null,
     });
     if (wrapped.lineIndex) {
-      setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount, wrapped.visualRows);
+      setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
     } else {
       setCachedTextWrappedLineCount(obj, content, wrapped.lineCount);
     }
@@ -1496,24 +1553,22 @@ function lineXAtOffset(line, obj, offset) {
   return lineBaseX(obj) + line.prefixWidths[Math.max(0, Math.min(offset, line.text.length))];
 }
 
-function lineHitOffsetForX(line, wx, obj) {
+function lineHitOffsetForX(line, wx, obj, nearest = false) {
   const textLength = line.text.length;
   const pw = line.prefixWidths;
-  const boundaries = pw.graphemeBoundaries;
-  const offsetAt = (index) => boundaries ? boundaries[index] : index;
   const target = wx - lineBaseX(obj);
-  let lo = 0, hi = boundaries ? boundaries.length - 1 : textLength;
+  let lo = 0, hi = textLength;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    const x = pw[offsetAt(mid)];
-    if (x < target) lo = mid + 1;
+    if (nearest ? pw[mid] < target : target >= pw[mid] + (pw[mid + 1] - pw[mid]) / 2) lo = mid + 1;
     else hi = mid;
   }
+  if (!nearest) return lo;
   const left = Math.max(0, lo - 1);
-  let offset = Math.abs(target - pw[offsetAt(left)]) <= Math.abs(target - pw[offsetAt(lo)]) ? left : lo;
-  const x = pw[offsetAt(offset)];
-  while (offset > 0 && Math.abs(pw[offsetAt(offset - 1)] - x) <= 1e-7) offset--;
-  return offsetAt(offset);
+  let offset = Math.abs(target - pw[left]) <= Math.abs(target - pw[lo]) ? left : lo;
+  const x = pw[offset];
+  while (offset > 0 && Math.abs(pw[offset - 1] - x) <= 1e-7) offset--;
+  return offset;
 }
 
 function lineCaretXAtOffset(line, obj, offset) {
@@ -1524,20 +1579,15 @@ function lineCaretXAtOffset(line, obj, offset) {
     ? Math.max(lineStart, Math.min(Math.trunc(Number(line.caretEndIndex)) || lineStart, content.length))
     : lineStart + text.length;
   const maxOffset = Math.max(text.length, caretEnd - lineStart);
-  const requestedOffset = Math.max(0, Math.min(Math.trunc(Number(offset)) || 0, maxOffset));
-  const clamped = requestedOffset < text.length
-    ? textGraphemeOffset(line.prefixWidths, requestedOffset, true)
-    : requestedOffset;
+  const clamped = Math.max(0, Math.min(Math.trunc(Number(offset)) || 0, maxOffset));
   const baseX = lineBaseX(obj);
   const logicalX = baseX + (clamped <= text.length
     ? line.prefixWidths[clamped]
     : getPrefixWidths(content.slice(lineStart, lineStart + clamped))[clamped] || 0);
   if (clamped <= 0 || clamped >= text.length) return logicalX;
 
-  const previousStart = textGraphemeOffset(line.prefixWidths, clamped - 1);
-  const nextEnd = textGraphemeOffset(line.prefixWidths, clamped + 1, true);
-  const previousChar = text.slice(previousStart, clamped);
-  const nextChar = text.slice(clamped, nextEnd);
+  const previousChar = text[clamped - 1];
+  const nextChar = text[clamped];
   if (!previousChar || !nextChar) return logicalX;
   if (/\s/.test(previousChar) || /\s/.test(nextChar)) return logicalX;
 
@@ -1552,7 +1602,7 @@ function lineCaretXAtOffset(line, obj, offset) {
     return logicalX;
   }
 
-  const previousInkRight = baseX + line.prefixWidths[previousStart] + previousMetrics.right;
+  const previousInkRight = baseX + line.prefixWidths[clamped - 1] + previousMetrics.right;
   const nextInkLeft = logicalX - nextMetrics.left;
   if (!Number.isFinite(previousInkRight) || !Number.isFinite(nextInkLeft)) return logicalX;
   return (previousInkRight + nextInkLeft) / 2;
@@ -1561,6 +1611,7 @@ function lineCaretXAtOffset(line, obj, offset) {
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 function createTextDrawStats() {
   return {
+    chars: 0,
     drawnChars: 0,
     drawUnits: 0,
     drawCalls: 0,
@@ -1602,7 +1653,7 @@ function isTextDrawBatchingFontReady(font) {
 
 function createTextDrawPlan(line, text, start, end) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let stats;
+  let stats = null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     stats = createTextDrawStats();
@@ -1670,28 +1721,19 @@ function prepareTextLineForDraw(line) {
   const text = String(line.text ?? '');
   if (!line._textDrawPlanCache) {
     line._textDrawPlanCache = createTextDrawPlan(line, text, 0, text.length);
-    // ASCII uses retained pixels. Existing boards can still display other scripts
-    // through the original direct path without modifying their stored content.
-    line._textDrawPlanCache.rasterEligible = /^[\x20-\x7e\t]*$/.test(text);
   }
   return line._textDrawPlanCache;
 }
 
-function textDrawPlanRasterBounds(plan, font) {
-  if (plan.rasterBounds?.font === font) return plan.rasterBounds.bounds;
-  let left = Infinity, right = -Infinity, ascent = 0, descent = 0;
-  for (const draw of plan) {
-    const metrics = measureTextGlyphMetricsWithFont(draw.text, font);
-    draw.inkLeft = draw.x - metrics.left;
-    draw.inkRight = draw.x + metrics.right;
-    left = Math.min(left, draw.inkLeft);
-    right = Math.max(right, draw.inkRight);
-    ascent = Math.max(ascent, metrics.ascent);
-    descent = Math.max(descent, metrics.descent);
+function prepareTextLayoutForDraw(layout) {
+  if (!Array.isArray(layout)) return 0;
+  let prepared = 0;
+  for (const line of layout) {
+    if (!line) continue;
+    prepareTextLineForDraw(line);
+    prepared++;
   }
-  const bounds = { left, right, ascent, descent };
-  plan.rasterBounds = { font, bounds };
-  return bounds;
+  return prepared;
 }
 
 const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
@@ -1711,34 +1753,16 @@ const drawTextLineRange = (context, line, obj, start = 0, end = line.text.length
       : createTextDrawPlan(line, text, start, end);
   }
   const baseX = lineBaseX(obj);
-  let raster = null;
-  if (cacheable && plan.length && plan.rasterEligible &&
-      typeof BoardfishTextRaster !== 'undefined' &&
-      typeof context.getTransform === 'function' && typeof context.drawImage === 'function') {
-    _textRasterCache ??= BoardfishTextRaster.createTextRasterCache();
-    raster = _textRasterCache.draw(context, plan, baseX, line.textY, textDrawPlanRasterBounds(plan, context.font));
-  }
-  if (!raster) {
-    for (const draw of plan) {
-      context.fillText(draw.text, baseX + draw.x, line.textY);
-    }
+  for (const draw of plan) {
+    context.fillText(draw.text, baseX + draw.x, line.textY);
   }
   if (typeof BOARDFISH_PRODUCTION !== 'undefined') return null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (options.collectStats === false) return null;
-  const stats = cloneTextDrawStats(plan.stats, cacheHit);
-  if (raster) {
-    stats.drawCalls = raster.drawCalls;
-    stats.rasterDrawCalls = raster.drawCalls;
-    stats.rasterCacheHits = raster.cacheHit ? 1 : 0;
-    stats.rasterCacheMisses = raster.cacheHit ? 0 : 1;
-    stats.rasterizedDrawCalls = raster.rasterizedDrawCalls;
-  }
-  return stats;
+  return options.collectStats === false ? null : cloneTextDrawStats(plan.stats, cacheHit);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
-function layoutHitTestCaret(layout, wx, wy, obj) {
+function layoutHitTestCaret(layout, wx, wy, obj, legacyScalar = false) {
   if (!layout.length) return { index: 0 };
   let lo = 0;
   let hi = layout.length - 1;
@@ -1750,7 +1774,7 @@ function layoutHitTestCaret(layout, wx, wy, obj) {
   const line = layout[lo];
   if (!line.text.length) return { index: line.startIndex, lineStartIndex: line.startIndex };
   const pw = line.prefixWidths;
-  const offset = lineHitOffsetForX(line, wx, obj);
+  const offset = lineHitOffsetForX(line, wx, obj, !legacyScalar);
   const hitIndex = line.startIndex + offset;
   TextSelDebug._logHit(wx, wy, obj, line, hitIndex, pw);
   return { index: hitIndex, lineStartIndex: line.startIndex };

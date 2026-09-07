@@ -22,6 +22,14 @@ function withoutDeveloperDiagnostics(source) {
   );
 }
 
+function waitForOpenRenderFrameSource() {
+  const source = readSource('src/js/io_close.js');
+  const start = source.indexOf('const waitForOpenRenderFrame =');
+  const end = source.indexOf('\nfunction queueVisibleImageHydration', start);
+  assert.ok(start >= 0 && end > start, 'waitForOpenRenderFrame source is missing');
+  return source.slice(start, end);
+}
+
 test('developer open diagnostics tune the shared runtime hydration concurrency', () => {
   const messages = [];
   let exposed = null;
@@ -57,36 +65,48 @@ test('developer open diagnostics tune the shared runtime hydration concurrency',
   assert.match(messages.at(-1), /hydration concurrency set to 8/);
 });
 
-test('open reports measure the current all-content hydration stage', () => {
-  let now = 0;
+test('open render frame wait clears timeout after RAF settles', async () => {
+  const activeTimers = new Set();
+  const steps = [];
+  let nextTimerId = 0;
   const context = {
-    DEBUG_TOOLS_ENABLED: true,
-    console: { debug() {}, info() {}, table() {} },
-    exposeDebug() {},
-    performance: { now: () => now },
+    clearTimeout(id) {
+      activeTimers.delete(id);
+    },
+    OpenDebug: {
+      step(_dbg, phase, detail) {
+        steps.push({ phase, detail });
+      },
+    },
+    performance: {
+      now() {
+        return 100;
+      },
+    },
+    requestAnimationFrame(callback) {
+      callback();
+    },
+    setTimeout() {
+      nextTimerId++;
+      activeTimers.add(nextTimerId);
+      return nextTimerId;
+    },
   };
   vm.createContext(context);
-  for (const file of ['runtime_utils.js', 'debug_core.js', 'debug_open.js']) {
-    vm.runInContext(readSource(`src/js/${file}`), context, { filename: file });
-  }
-  const debug = context.OpenDebug;
-  debug.enable();
-  const run = debug.start('openBoard');
-  debug.step(run, 'read-board-shape', { objectCount: 5, imageCount: 4 });
-  now = 120;
-  debug.step(run, 'hydrate-all:end', { count: 4, hydrated: 4, ms: 120 });
-  debug.step(run, 'hydrate-initial-policy', { mode: 'all-before-interaction', pendingImages: 0 });
-  now = 130;
-  debug.step(run, 'initial-applyTransform', { ms: 10, drawnImages: 4 });
-  debug.end(run);
+  vm.runInContext(
+    `${waitForOpenRenderFrameSource()}\n` +
+      'globalThis.waitForOpenRenderFrame = waitForOpenRenderFrame;\n',
+    context,
+    { filename: 'io_close_wait_frame.js' },
+  );
 
-  for (const report of [debug.report(), debug.optimizationReport()]) {
-    assert.equal(report.summary.mode, 'all-before-interaction');
-    assert.equal(report.summary.initialHydrationMs, 120);
-    assert.equal(report.summary.initialHydratedImages, 4);
-    assert.equal(report.summary.pendingAfterInitial, 0);
-  }
-  assert.ok(debug.phaseSummary().some(row => row.step === 'hydrate-all:end'));
+  await context.waitForOpenRenderFrame(null, 'test-render');
+
+  assert.equal(activeTimers.size, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(steps)), [{
+    phase: 'open-render-frame:settled',
+    detail: { reason: 'test-render', source: 'raf', ms: 0 },
+  }]);
 });
 
 test('open-board debugger covers the slow open phases developers need to inspect', () => {
@@ -104,6 +124,7 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'imageStoreSummary',
     'hydrationCandidates',
     'slowImages',
+    'openPreviewBreakdown',
     'hydrationBreakdown',
     'cacheImageBreakdown',
     'setHydrationConcurrency',
@@ -111,6 +132,9 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'beginInitialRenderDebug',
     'endInitialRenderDebug',
     'isInitialRenderDebugActive',
+    'recordPreviewFallbackDraw',
+    'recordPreviewHeldRender',
+    'recordDynamicPreview',
     'report',
   ]) {
     assert.match(openDebug, new RegExp(`\\b${method}\\b`), `OpenDebug is missing ${method}`);
@@ -155,6 +179,7 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(viewport, /OpenDebug\.isInitialRenderDebugActive\?\.\(\) === true/);
   assert.match(openIo, /drawBoardTotalMs: drawBreakdown\?\.totalMeasuredMs/);
   assert.match(openDebug, /initialDrawMs: initialRender\?\.meta\?\.drawMs/);
+  assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
   assert.match(openDebug, /decodeQueueWaitMaxMs/);
   assert.match(openDebug, /bitmapDecodeMaxMs/);
   assert.match(openDebug, /rustBoardJsonReadMs/);
@@ -191,6 +216,7 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'cache-image:decode-queue:queued',
     'cache-image:decode-queue:start',
     'cache-image:createImageBitmap',
+    'cache-image:previewBitmap',
     'cache-image:schedule-render',
     'cache-image:done',
   ]) {

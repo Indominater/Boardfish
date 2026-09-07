@@ -2,9 +2,6 @@
 
 (function initBoardRenderer(root) {
   const IMAGE_EDGE_OVERDRAW_DEVICE_PX = 1;
-  // Include the wider neighboring scale layer when blending the tiny-text filter.
-  const TEXT_FILTER_RADIUS_DEVICE_PX = 4.25;
-  const TEXT_FILTER_MAX_DEVICE_EM = 12;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -45,18 +42,26 @@
       erroredImages: 0,
       croppedImages: 0,
       scaledImages: 0,
+      openPreviewImages: 0,
+      dynamicOpenPreviewRequests: 0,
       scaledFallbackFull: 0,
       activeInputFullFallbackImages: 0,
       scaledVariantPendingImages: 0,
+      motionObjects: 0,
+      motionImages: 0,
+      motionText: 0,
+      motionTranslatedObjects: 0,
+      motionScaledObjects: 0,
+      lowLatencyImageDraws: 0,
+      motionScaledImages: 0,
+      motionFullScaleImages: 0,
+      motionFullFallbackImages: 0,
+      motionActiveInputFullFallbackImages: 0,
       fullScaleImages: 0,
       scaledImageScaleTotal: 0,
       scaledImageTargetScaleTotal: 0,
       culledImages: 0,
       culledText: 0,
-      occludedText: 0,
-      occludedImages: 0,
-      partiallyOccludedObjects: 0,
-      visibleObjectRegions: 0,
       textLines: 0,
       drawnTextLines: 0,
       culledTextLines: 0,
@@ -75,10 +80,6 @@
       textSkippedSpaces: 0,
       textPlanCacheHits: 0,
       textPlanCacheMisses: 0,
-      textRasterCacheHits: 0,
-      textRasterCacheMisses: 0,
-      textRasterizedDrawCalls: 0,
-      textRasterDrawCalls: 0,
       textLineDrawMs: 0,
       maxTextLineDrawMs: 0,
       slowTextLineDrawCount: 0,
@@ -93,11 +94,45 @@
       imageContextWarmDraws: 0,
       scaledImageContextFirstDraws: 0,
       fullScaleImageContextFirstDraws: 0,
+      openPreviewImageContextFirstDraws: 0,
       slowDrawObjects: [],
       slowTextLineDraws: [],
     };
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
+
+  function applyObjectMotion(context, obj, rect, motion
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , counters = null
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ) {
+    const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
+    const pivotX = obj.x + obj.w * scaleOriginX;
+    const pivotY = obj.y + obj.h * scaleOriginY;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (counters) {
+      counters.motionObjects = (counters.motionObjects || 0) + 1;
+      if (obj.type === 'image') counters.motionImages = (counters.motionImages || 0) + 1;
+      else if (obj.type === 'text') counters.motionText = (counters.motionText || 0) + 1;
+      if (translateX || translateY) counters.motionTranslatedObjects = (counters.motionTranslatedObjects || 0) + 1;
+      if (scaleX !== 1 || scaleY !== 1) counters.motionScaledObjects = (counters.motionScaledObjects || 0) + 1;
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    context.save();
+    if (scaleX !== 1 || scaleY !== 1) {
+      context.transform(scaleX, 0, 0, scaleY,
+        translateX + pivotX * (1 - scaleX), translateY + pivotY * (1 - scaleY));
+    } else if (translateX || translateY) context.translate(translateX, translateY);
+    if (!rect) return rect;
+    // Text layout and image crops are chosen before the canvas motion transform,
+    // so map the visible destination back into the object's source coordinates.
+    return {
+      x1: pivotX + (rect.x1 - translateX - pivotX) / scaleX,
+      y1: pivotY + (rect.y1 - translateY - pivotY) / scaleY,
+      x2: pivotX + (rect.x2 - translateX - pivotX) / scaleX,
+      y2: pivotY + (rect.y2 - translateY - pivotY) / scaleY,
+    };
+  }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   function countCulledObject(obj, counters = null) {
@@ -174,11 +209,12 @@
     return false;
   }
 
-  function drawImageObj(context, obj, img, view, viewportRect, lowLatency) {
+  function drawImageObj(context, obj, img, view, viewportRect, lowLatency, motion) {
     if (!lowLatency) {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     }
     context.imageSmoothingEnabled = false;
+    if (motion) return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     try {
       return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
     } finally {
@@ -227,10 +263,6 @@
     add('textSkippedSpaces', 'skippedSpaces');
     add('textPlanCacheHits', 'planCacheHits');
     add('textPlanCacheMisses', 'planCacheMisses');
-    add('textRasterCacheHits', 'rasterCacheHits');
-    add('textRasterCacheMisses', 'rasterCacheMisses');
-    add('textRasterizedDrawCalls', 'rasterizedDrawCalls');
-    add('textRasterDrawCalls', 'rasterDrawCalls');
     counters.maxTextDrawUnitsPerLine = Math.max(
       counters.maxTextDrawUnitsPerLine || 0,
       Number(stats.drawUnits) || 0,
@@ -272,10 +304,6 @@
       skippedTabs: Number(stats?.skippedTabs) || 0,
       planCacheHits: Number(stats?.planCacheHits) || 0,
       planCacheMisses: Number(stats?.planCacheMisses) || 0,
-      rasterCacheHits: Number(stats?.rasterCacheHits) || 0,
-      rasterCacheMisses: Number(stats?.rasterCacheMisses) || 0,
-      rasterizedDrawCalls: Number(stats?.rasterizedDrawCalls) || 0,
-      rasterDrawCalls: Number(stats?.rasterDrawCalls) || 0,
       y: Number.isFinite(Number(line?.y)) ? roundDebugMs(Number(line.y)) : '',
       textY: Number.isFinite(Number(line?.textY)) ? roundDebugMs(Number(line.textY)) : '',
       lineHeightDevicePx: roundDebugMs((Number(deps?.lineHeight) || 0) * deviceScale),
@@ -296,18 +324,22 @@
       if (selected?.scale === 1 && selected?.targetScale === 1) {
         counters.fullScaleImageContextFirstDraws = (counters.fullScaleImageContextFirstDraws || 0) + 1;
       }
+      if (selected?.openPreview) {
+        counters.openPreviewImageContextFirstDraws = (counters.openPreviewImageContextFirstDraws || 0) + 1;
+      }
     } else {
       counters.imageContextWarmDraws = (counters.imageContextWarmDraws || 0) + 1;
     }
   }
 
-  function recordSlowDrawObject(counters, obj, ms, before, drawn, deps = null) {
+  function recordSlowDrawObject(counters, obj, ms, before, drawn, motion = null, deps = null) {
     if (!counters || !obj || !Number.isFinite(ms) || ms <= 0) return;
     const row = {
       id: obj.id || '',
       type: obj.type || '',
       ms: Math.round(ms * 100) / 100,
       drawn: !!drawn,
+      motion: !!motion,
     };
     if (obj.type === 'text') {
       row.chars = String(obj.data?.content || '').length;
@@ -322,10 +354,6 @@
       row.textSkippedSpaces = drawCounterValue(counters, 'textSkippedSpaces') - before.textSkippedSpaces;
       row.textPlanCacheHits = drawCounterValue(counters, 'textPlanCacheHits') - before.textPlanCacheHits;
       row.textPlanCacheMisses = drawCounterValue(counters, 'textPlanCacheMisses') - before.textPlanCacheMisses;
-      row.textRasterCacheHits = drawCounterValue(counters, 'textRasterCacheHits') - before.textRasterCacheHits;
-      row.textRasterCacheMisses = drawCounterValue(counters, 'textRasterCacheMisses') - before.textRasterCacheMisses;
-      row.textRasterizedDrawCalls = drawCounterValue(counters, 'textRasterizedDrawCalls') - before.textRasterizedDrawCalls;
-      row.textRasterDrawCalls = drawCounterValue(counters, 'textRasterDrawCalls') - before.textRasterDrawCalls;
       row.textLineDrawMs = roundDebugMs(drawCounterValue(counters, 'textLineDrawMs') - before.textLineDrawMs);
       row.slowTextLineDrawCount = drawCounterValue(counters, 'slowTextLineDrawCount') - before.slowTextLineDrawCount;
       row.textDirectDraws = drawCounterValue(counters, 'textDirectDraws') - before.textDirectDraws;
@@ -359,6 +387,8 @@
       row.drawDeviceH = deps ? Math.round(row.objectH * Math.max(Number(deps.zoom?.()) || 0, 0) * Math.max(Number(deps.dpr?.()) || 1, 1) * 100) / 100 : '';
       row.cropped = drawCounterValue(counters, 'croppedImages') > before.croppedImages;
       row.scaled = drawCounterValue(counters, 'scaledImages') > before.scaledImages;
+      row.openPreview = drawCounterValue(counters, 'openPreviewImages') > before.openPreviewImages;
+      row.dynamicOpenPreviewRequest = drawCounterValue(counters, 'dynamicOpenPreviewRequests') > before.dynamicOpenPreviewRequests;
       row.fullScale = drawCounterValue(counters, 'fullScaleImages') > before.fullScaleImages;
       row.selectedScale = scaledDelta > 0
         ? Math.round((drawCounterValue(counters, 'scaledImageScaleTotal') - before.scaledImageScaleTotal) / scaledDelta * 1000) / 1000
@@ -369,6 +399,11 @@
       row.fallbackFull = drawCounterValue(counters, 'scaledFallbackFull') > before.scaledFallbackFull;
       row.activeInputFullFallback = drawCounterValue(counters, 'activeInputFullFallbackImages') > before.activeInputFullFallbackImages;
       row.scaledVariantPending = drawCounterValue(counters, 'scaledVariantPendingImages') > before.scaledVariantPendingImages;
+      row.lowLatencyImageDraw = drawCounterValue(counters, 'lowLatencyImageDraws') > before.lowLatencyImageDraws;
+      row.motionScaledImage = drawCounterValue(counters, 'motionScaledImages') > before.motionScaledImages;
+      row.motionFullScaleImage = drawCounterValue(counters, 'motionFullScaleImages') > before.motionFullScaleImages;
+      row.motionFullFallbackImage = drawCounterValue(counters, 'motionFullFallbackImages') > before.motionFullFallbackImages;
+      row.motionActiveInputFullFallback = drawCounterValue(counters, 'motionActiveInputFullFallbackImages') > before.motionActiveInputFullFallbackImages;
       row.firstSourceDraw = drawCounterValue(counters, 'imageSourceFirstDraws') > before.imageSourceFirstDraws;
       row.firstContextDraw = drawCounterValue(counters, 'imageContextFirstDraws') > before.imageContextFirstDraws;
       row.warmSourceDraw = drawCounterValue(counters, 'imageSourceWarmDraws') > before.imageSourceWarmDraws;
@@ -380,92 +415,6 @@
 
   function createBoardRenderer(deps) {
     const getTextLayoutForDraw = deps.getTextLayoutForViewport || deps.getTextLayout;
-    const gpuTextOptions = {
-      fontSize: deps.fontSize || 16,
-      padding: deps.textPad ?? 16,
-      lineHeight: deps.lineHeight || 24,
-    };
-    const opaqueText = typeof deps.canvasBackgroundColor === 'function';
-    const canClip = context => !!(context.save&&context.restore&&(context.clipRect||(context.clip&&context.beginPath&&context.rect)));
-    const objectRect = obj => obj && [obj.x,obj.y,obj.w,obj.h].every(Number.isFinite) && obj.w>0 && obj.h>0
-      ? {x1:obj.x,y1:obj.y,x2:obj.x+obj.w,y2:obj.y+obj.h} : null;
-    const intersect = (a,b) => {
-      const rect={x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1),x2:Math.min(a.x2,b.x2),y2:Math.min(a.y2,b.y2)};
-      return rect.x2>rect.x1&&rect.y2>rect.y1?rect:null;
-    };
-    function withRectClip(context,rect,draw) {
-      if(!rect||!canClip(context))return draw();
-      context.save();
-      try {
-        if(context.clipRect)context.clipRect(rect.x1,rect.y1,rect.x2-rect.x1,rect.y2-rect.y1);
-        else { context.beginPath();context.rect(rect.x1,rect.y1,rect.x2-rect.x1,rect.y2-rect.y1);context.clip(); }
-        return draw();
-      } finally { context.restore(); }
-    }
-    function drawRegions(context,rects,draw) {
-      if(!rects.length)return false;
-      if(context.clipRect||rects.length===1) {
-        let drawn=false;for(const rect of rects)drawn=withRectClip(context,rect,()=>draw(rect))||drawn;return drawn;
-      }
-      // Native Canvas clips the union once. Separate antialiased clip masks
-      // along adjoining fragments could otherwise soften their shared edge.
-      context.save();
-      try {
-        context.beginPath();for(const rect of rects)context.rect(rect.x1,rect.y1,rect.x2-rect.x1,rect.y2-rect.y1);context.clip();
-        return draw({x1:Math.min(...rects.map(r=>r.x1)),y1:Math.min(...rects.map(r=>r.y1)),x2:Math.max(...rects.map(r=>r.x2)),y2:Math.max(...rects.map(r=>r.y2))});
-      } finally { context.restore(); }
-    }
-    function drawTextBackground(context,obj) {
-      if(!opaqueText||!objectRect(obj)||!context.fillRect)return;
-      const fill=context.fillStyle,alpha=context.globalAlpha;
-      context.fillStyle=deps.canvasBackgroundColor();context.globalAlpha=1;
-      context.fillRect(obj.x,obj.y,obj.w,obj.h);
-      context.fillStyle=fill;context.globalAlpha=alpha;
-    }
-    function visibleObjectRegions(objects,viewport,skipId,canClip) {
-      const result=new Map();if(!opaqueText||!viewport)return result;
-      const covers=[];
-      const edited=objects.find(obj=>obj.id===skipId&&obj.type==='text');
-      const editedRect=objectRect(edited);if(editedRect) { const rect=intersect(editedRect,viewport);if(rect)covers.push(rect); }
-      for(let i=objects.length-1;i>=0;i--) {
-        const obj=objects[i];if(obj.id===skipId)continue;
-        const bounds=objectRect(obj),base=bounds&&intersect(bounds,viewport);if(!base)continue;
-        let regions=[base],changed=false;
-        for(const cover of covers) {
-          const next=[];let cut=false;
-          for(const rect of regions) {
-            const overlap=intersect(rect,cover);
-            if(!overlap) { next.push(rect);continue; }
-            cut=true;
-            if(rect.y1<overlap.y1)next.push({x1:rect.x1,y1:rect.y1,x2:rect.x2,y2:overlap.y1});
-            if(overlap.y2<rect.y2)next.push({x1:rect.x1,y1:overlap.y2,x2:rect.x2,y2:rect.y2});
-            if(rect.x1<overlap.x1)next.push({x1:rect.x1,y1:overlap.y1,x2:overlap.x1,y2:overlap.y2});
-            if(overlap.x2<rect.x2)next.push({x1:overlap.x2,y1:overlap.y1,x2:rect.x2,y2:overlap.y2});
-          }
-          // Bound pathological overlap fragmentation. Retaining earlier cuts
-          // draws extra pixels safely; later opaque backgrounds still cover them.
-          if(next.length>32)break;
-          regions=next;changed||=cut;if(!regions.length)break;
-        }
-        if(changed&&(!regions.length||canClip))result.set(obj,regions);
-        if(obj.type==='text'&&covers.length<128)covers.push(base);
-      }
-      return result;
-    }
-
-    function textViewportRect(viewportRect, view = null) {
-      if (!viewportRect) return viewportRect;
-      const scale = Math.abs((view?.zoom ?? deps.zoom?.() ?? 1) * (view?.dpr ?? deps.dpr?.() ?? 1));
-      if (!(scale > 0) || !Number.isFinite(scale) || gpuTextOptions.fontSize * scale >= TEXT_FILTER_MAX_DEVICE_EM) return viewportRect;
-      // Tiny glyph reconstruction reaches beyond the logical line/object box.
-      // Include its complete physical-pixel footprint before either level of
-      // culling, while retaining the original wrapping and absolute row indices.
-      const padding = TEXT_FILTER_RADIUS_DEVICE_PX / scale;
-      return {
-        x1: viewportRect.x1 - padding, y1: viewportRect.y1 - padding,
-        x2: viewportRect.x2 + padding, y2: viewportRect.y2 + padding,
-      };
-    }
 
     function setWorldCanvasTransform(context, dpr = deps.dpr()) {
       const scale = deps.zoom() * dpr;
@@ -483,36 +432,37 @@
       }
     }
 
-    function drawObjectContent(context, obj
+    function drawSingleObj(context, obj
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , counters = null
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , viewportRect = null
       , view = null
       , imageSourceResolver = null
+      , motion = null
     ) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         if (obj.type === 'text') {
-          const layout = getTextLayoutForDraw(obj, textViewportRect(viewportRect, view));
-          if (context.drawTextLayout?.(layout, obj, gpuTextOptions)) return;
+          const layout = getTextLayoutForDraw(obj, viewportRect);
           for (const line of layout) deps.drawTextLineRange(context, line, obj);
           return;
         }
         if (obj.type !== 'image') return;
 
         const key = obj.data.imgKey;
+        const lowLatencyImageMotion = !!motion;
         const selected = imageSourceResolver
-          ? imageSourceResolver(key, obj, view)
-          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view);
+          ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
+          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
         const img = selected?.source || selected || null;
         if (!(img?.width > 0)) return;
         try {
-          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true);
+          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
         } catch (_) {}
       } else {
       if (obj.type === 'text') {
         const layoutStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
-        const layout = getTextLayoutForDraw(obj, textViewportRect(viewportRect, view));
+        const layout = getTextLayoutForDraw(obj, viewportRect);
         const totalLayoutLines = counters
           ? Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length)
           : 0;
@@ -526,18 +476,7 @@
           counters.largestTextChars = Math.max(counters.largestTextChars || 0, chars);
           counters.largestTextLayoutLines = Math.max(counters.largestTextLayoutLines || 0, totalLayoutLines);
         }
-        if (context.drawTextLayout?.(layout, obj, gpuTextOptions)) {
-          if (counters) {
-            const gpuAfter = context.getStats?.();
-            counters.textLines += totalLayoutLines;
-            counters.drawnTextLines += layout.length;
-            counters.culledTextLines += Math.max(0, totalLayoutLines - layout.length);
-            counters.textGpuObjects = (counters.textGpuObjects || 0) + 1;
-            if (gpuAfter) counters.gpu = gpuAfter;
-          }
-          return true;
-        }
-        let directlyDrawn = false;
+        if (counters) counters.textDirectDraws = (counters.textDirectDraws || 0) + 1;
         let drawnLineCount = 0;
         let layoutLineIndex = -1;
         for (const line of layout) {
@@ -552,16 +491,12 @@
             line.text?.length ?? 0,
             counters ? TEXT_DRAW_STATS_ENABLED : TEXT_DRAW_STATS_DISABLED,
           );
-          if (counters && drawStats) {
-            addTextDrawStats(counters, drawStats);
-            directlyDrawn ||= (Number(drawStats.drawCalls) || 0) > (Number(drawStats.rasterDrawCalls) || 0);
-          }
+          if (counters && drawStats) addTextDrawStats(counters, drawStats);
           if (counters && typeof performance !== 'undefined') {
             recordTextLineDraw(counters, obj, line, layoutLineIndex, drawStats, performance.now() - lineDrawStart, deps);
           }
         }
         if (counters) {
-          if (directlyDrawn) counters.textDirectDraws = (counters.textDirectDraws || 0) + 1;
           const culledLineCount = Math.max(0, totalLayoutLines - drawnLineCount);
           counters.textLines = (counters.textLines || 0) + totalLayoutLines;
           counters.drawnTextLines = (counters.drawnTextLines || 0) + drawnLineCount;
@@ -573,9 +508,10 @@
 
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
+      const lowLatencyImageMotion = !!motion;
       const selected = imageSourceResolver
-        ? imageSourceResolver(key, obj, view, counters)
-        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view) : null;
+        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
+        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
       const img = selected?.source || selected || null;
       if (img?.width > 0) {
         if (counters) {
@@ -583,14 +519,20 @@
             counters.scaledImages = (counters.scaledImages || 0) + 1;
             counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
             counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
+            if (selected?.openPreview) counters.openPreviewImages = (counters.openPreviewImages || 0) + 1;
+            if (motion) counters.motionScaledImages = (counters.motionScaledImages || 0) + 1;
           } else if (selected?.targetScale < 1) {
             counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
+            if (motion) counters.motionFullFallbackImages = (counters.motionFullFallbackImages || 0) + 1;
             if (selected?.activeInputFullFallback) {
               counters.activeInputFullFallbackImages = (counters.activeInputFullFallbackImages || 0) + 1;
+              if (motion) counters.motionActiveInputFullFallbackImages = (counters.motionActiveInputFullFallbackImages || 0) + 1;
             }
           } else if (selected?.scale === 1 && selected?.targetScale === 1) {
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
+            if (motion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
           }
+          if (lowLatencyImageMotion) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
           if (bitmap || selected?.scale < 1) counters.bitmapImages++;
           else {
             counters.elementImages++;
@@ -598,7 +540,7 @@
           }
         }
         try {
-          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true);
+          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
           if (cropped === null) return false;
           if (counters) {
             recordImageDrawWarmStats(
@@ -638,61 +580,50 @@
       }
     }
 
-    function drawSingleObj(context,obj
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */ ,counters=null /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      ,viewportRect=null,view=null,imageSourceResolver=null
-    ) {
-      const draw=()=> {
-        if(obj.type==='text')drawTextBackground(context,obj);
-        return drawObjectContent(context,obj
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */ ,counters /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          ,viewportRect,view,imageSourceResolver);
-      };
-      return opaqueText&&obj.type==='text'?withRectClip(context,objectRect(obj),draw):draw();
-    }
-
     function drawVisibleObjects(context
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , counters
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , viewportRect = deps.currentViewportWorldRect()
+      , skipIds
       , imageSourceResolver = null
       , skipId = null
+      , onlyText = false
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
-      const textRect = textViewportRect(viewportRect, view);
-      const objects=deps.objects(),regions=visibleObjectRegions(objects,viewportRect,skipId,canClip(context));
+      const objectMotionForDraw =
+        deps.hasObjectMotionsForDraw?.() === false ? null : deps.objectMotionForDraw;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        for (const obj of objects) {
-          if (obj.id === skipId) continue;
-          if (!deps.objectIntersectsRect(obj, obj.type === 'text' ? textRect : viewportRect)) continue;
-          const visible=regions.get(obj);
-          if(visible)drawRegions(context,visible,rect=>drawSingleObj(context,obj
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */ ,null /* BOARDFISH_DEV_DIAGNOSTICS_END */
-            ,rect,view,imageSourceResolver));
-          else drawSingleObj(context, obj
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */ ,null /* BOARDFISH_DEV_DIAGNOSTICS_END */
-            ,viewportRect, view, imageSourceResolver);
+        for (const obj of deps.objects()) {
+          if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
+          const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
+          if (!motion && !deps.objectIntersectsRect(obj, viewportRect)) continue;
+          const objectViewportRect = motion
+            ? applyObjectMotion(context, obj, viewportRect, motion)
+            : viewportRect;
+          try {
+            drawSingleObj(context, obj, objectViewportRect, view, imageSourceResolver, motion);
+          } finally {
+            if (motion) context.restore();
+          }
         }
         return;
       } else {
       const cullingEnabled = deps.viewportCullingEnabled();
       let drawnImages = 0;
       let drawnText = 0;
-      for (const obj of objects) {
+      for (const obj of deps.objects()) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if (obj.id === skipId) continue;
-        if (cullingEnabled && !deps.objectIntersectsRect(obj, obj.type === 'text' ? textRect : viewportRect)) {
+        if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
+        const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
+        if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
           countCulledObject(obj, counters);
           continue;
         }
-        const visible=regions.get(obj);
-        if(visible&&!visible.length) {
-          if(counters) { const key=obj.type==='text'?'occludedText':'occludedImages';counters[key]=(counters[key]||0)+1; }
-          continue;
-        }
-        if(visible&&counters) { counters.partiallyOccludedObjects=(counters.partiallyOccludedObjects||0)+1;counters.visibleObjectRegions=(counters.visibleObjectRegions||0)+visible.length; }
         if (counters) counters.visibleObjects = (counters.visibleObjects || 0) + 1;
+        const objectViewportRect = motion
+          ? applyObjectMotion(context, obj, viewportRect, motion, counters)
+          : viewportRect;
         let drawn = false;
         const objectDrawStart = counters && typeof performance !== 'undefined' ? performance.now() : 0;
         const before = counters ? {
@@ -702,10 +633,22 @@
           culledTextLines: drawCounterValue(counters, 'culledTextLines'),
           croppedImages: drawCounterValue(counters, 'croppedImages'),
           scaledImages: drawCounterValue(counters, 'scaledImages'),
+          openPreviewImages: drawCounterValue(counters, 'openPreviewImages'),
+          dynamicOpenPreviewRequests: drawCounterValue(counters, 'dynamicOpenPreviewRequests'),
           fullScaleImages: drawCounterValue(counters, 'fullScaleImages'),
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
           activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
           scaledVariantPendingImages: drawCounterValue(counters, 'scaledVariantPendingImages'),
+          motionObjects: drawCounterValue(counters, 'motionObjects'),
+          motionImages: drawCounterValue(counters, 'motionImages'),
+          motionText: drawCounterValue(counters, 'motionText'),
+          motionTranslatedObjects: drawCounterValue(counters, 'motionTranslatedObjects'),
+          motionScaledObjects: drawCounterValue(counters, 'motionScaledObjects'),
+          lowLatencyImageDraws: drawCounterValue(counters, 'lowLatencyImageDraws'),
+          motionScaledImages: drawCounterValue(counters, 'motionScaledImages'),
+          motionFullScaleImages: drawCounterValue(counters, 'motionFullScaleImages'),
+          motionFullFallbackImages: drawCounterValue(counters, 'motionFullFallbackImages'),
+          motionActiveInputFullFallbackImages: drawCounterValue(counters, 'motionActiveInputFullFallbackImages'),
           scaledImageScaleTotal: drawCounterValue(counters, 'scaledImageScaleTotal'),
           scaledImageTargetScaleTotal: drawCounterValue(counters, 'scaledImageTargetScaleTotal'),
           textDrawUnits: drawCounterValue(counters, 'textDrawUnits'),
@@ -715,10 +658,6 @@
           textSkippedSpaces: drawCounterValue(counters, 'textSkippedSpaces'),
           textPlanCacheHits: drawCounterValue(counters, 'textPlanCacheHits'),
           textPlanCacheMisses: drawCounterValue(counters, 'textPlanCacheMisses'),
-          textRasterCacheHits: drawCounterValue(counters, 'textRasterCacheHits'),
-          textRasterCacheMisses: drawCounterValue(counters, 'textRasterCacheMisses'),
-          textRasterizedDrawCalls: drawCounterValue(counters, 'textRasterizedDrawCalls'),
-          textRasterDrawCalls: drawCounterValue(counters, 'textRasterDrawCalls'),
           textLineDrawMs: drawCounterValue(counters, 'textLineDrawMs'),
           slowTextLineDrawCount: drawCounterValue(counters, 'slowTextLineDrawCount'),
           textDirectDraws: drawCounterValue(counters, 'textDirectDraws'),
@@ -728,11 +667,11 @@
           imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
-          if(visible)drawn=drawRegions(context,visible,rect=>drawSingleObj(context,obj,counters,rect,view,imageSourceResolver));
-          else drawn = drawSingleObj(context, obj, counters, viewportRect, view, imageSourceResolver);
+          drawn = drawSingleObj(context, obj, counters, objectViewportRect, view, imageSourceResolver, motion);
         } finally {
+          if (motion) context.restore();
           if (counters && typeof performance !== 'undefined') {
-            recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, deps);
+            recordSlowDrawObject(counters, obj, performance.now() - objectDrawStart, before, drawn, motion, deps);
           }
         }
         if (obj.type === 'image' && drawn) drawnImages++;
@@ -746,9 +685,6 @@
       drawSingleObj,
       drawVisibleObjects,
       setWorldCanvasTransform,
-      textViewportRect,
-      drawTextBackground,
-      withTextObjectClip(context,obj,draw) { return opaqueText?withRectClip(context,objectRect(obj),draw):draw(); },
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') renderer.createDrawCounters = createDrawCounters;
     return Object.freeze(renderer);

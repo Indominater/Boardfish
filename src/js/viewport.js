@@ -1,6 +1,6 @@
 // ─── Viewport ─────────────────────────────────────────────────────────────────
 var panX = 0, panY = 0, zoom = 1;
-var setWorldCanvasTransform, drawVisibleObjects;
+var drawSingleObj, setWorldCanvasTransform, drawVisibleObjects;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 var createDrawCounters;
 const VIEWPORT_TEXT_DRAW_STATS_DISABLED = Object.freeze({ collectStats: false });
@@ -11,7 +11,14 @@ var long_message = 3 * short_message;
 var _islMsgActive = false;
 var _islMsgTimer = null;
 var _islMsgToken = 0;
-var _islandSyncedZoom;
+var _islandSyncedZoom = NaN;
+
+const formatZoomPercent = (value = zoom) => {
+  const pct = Math.max(0, (Number.isFinite(value) ? value : 1) * 100);
+  if (pct >= 10) return `${Math.round(pct)}%`;
+  if (pct >= 1) return `${(Math.round(pct * 10) / 10).toFixed(1)}%`;
+  return `${Math.max(0.1, Math.round(pct * 10) / 10)}%`;
+};
 
 const isOpeningFreezeActive = () => {
   return !!openingShield?.classList.contains('active') && openingShield.classList.contains('opening-freeze');
@@ -65,7 +72,7 @@ function setIslandVisible(visible) {
 const syncIslandZoomDisplay = (reason = 'zoom-sync') => {
   if (_islMsgActive) return;
   _islandSyncedZoom = zoom;
-  const zoomText = `${Math.round(zoom * 100)}%`;
+  const zoomText = formatZoomPercent();
   if (island.dataset.mode === 'zoom' && islZoom.textContent === zoomText && island.classList.contains('visible')) return;
   if (islZoom.textContent !== zoomText) islZoom.textContent = zoomText;
   if (island.dataset.mode !== 'zoom') island.dataset.mode = 'zoom';
@@ -157,19 +164,52 @@ function showIslandMsg(msg, duration = 0, onRestore = null) {
     _islMsgTimer = setTimeout(() => {
       if (token !== _islMsgToken) return;
       _islMsgTimer = null;
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const hideReason =
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      hideIsland('message-timeout');
-      if (onRestore) onRestore();
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      PillDebug.log('showIslandMsg:onHide', { msg, hideReason });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        hideIsland('message-timeout');
+        if (onRestore) onRestore();
+      } else {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        const hideReason = hideIsland('message-timeout');
+        if (onRestore) onRestore();
+        PillDebug.log('showIslandMsg:onHide', { msg, hideReason });
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
     }, duration);
   }
   return 'shown';
 }
 syncIslandZoomDisplay('init');
+// ─── Offscreen buffer ─────────────────────────────────────────────────────────
+var _offscreen = document.createElement('canvas');
+var _offCtx    = _offscreen.getContext('2d');
+var _offscreenDirty = true;
+function invalidateOffscreen() {
+  _offscreenDirty = true;
+}
+
+function _rebuildOffscreen(dpr, viewportRect) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const dbg = ViewportDebug.start('offscreenRebuild', { objectCount: objects.length });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+
+  if (_offscreen.width !== boardCanvas.width) _offscreen.width = boardCanvas.width;
+  if (_offscreen.height !== boardCanvas.height) _offscreen.height = boardCanvas.height;
+  _offCtx.resetTransform();
+  fillBoardBackground(_offCtx, _offscreen.width, _offscreen.height);
+  setWorldCanvasTransform(_offCtx, dpr);
+  const view = { zoom, dpr };
+  for (const obj of objects) {
+    if (obj.type === 'text') continue;
+    if (viewportCullingEnabled && !objectIntersectsRect(obj, viewportRect)) continue;
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') drawSingleObj(_offCtx, obj, null, viewportRect, view);
+    else drawSingleObj(_offCtx, obj, viewportRect, view);
+  }
+  _offscreenDirty = false;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  ViewportDebug.end(dbg);
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+}
+
 // ─── History delta tracking ───────────────────────────────────────────────────
 var _dirtyIds = new Set();
 function markDirty(obj) {
@@ -203,6 +243,7 @@ function syncBoardCanvasBackingStore(write = true) {
   if (!write) return true;
   if (boardCanvas.width !== width) boardCanvas.width = width;
   if (boardCanvas.height !== height) boardCanvas.height = height;
+  invalidateOffscreen();
   return true;
 }
 
@@ -227,10 +268,15 @@ function startCanvasSizeTracking() {
   window.addEventListener?.('resize', resizeCanvas);
 }
 
-function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd) {
-  let selectedLines = 0;
+const collectTextSelectionRuns = (obj, layout, selStart, selEnd) => {
+  const runs = [];
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let scannedLines = 0;
+  let selectedLines = 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   for (const line of layout) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */ scannedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -238,38 +284,33 @@ function drawTextSelectionHighlight(context, obj, layout, selStart, selEnd) {
     if (ls >= selEnd) break;
     const o0 = Math.max(0, selStart - ls), o1 = Math.min(line.text.length, selEnd - ls);
     if (o0 >= o1) continue;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */ selectedLines++; /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const x1 = lineXAtOffset(line, obj, o0);
     const x2 = lineXAtOffset(line, obj, o1);
-    if (!selectedLines) {
-      context.save();
-      context.fillStyle = 'rgba(10, 132, 255, 0.3)';
-      context.beginPath();
-    }
-    selectedLines++;
-    context.rect(x1, line.y, x2 - x1, LINE_H);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    TextSelDebug._logDraw(line, selStart, selEnd, x1, x2);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    const run = { line, x1, x2, y: line.y, height: LINE_H, startOffset: o0, endOffset: o1 };
+    runs.push(run);
+    if (x1 < left) left = x1;
+    if (line.y < top) top = line.y;
+    if (x2 > right) right = x2;
+    if (line.y + LINE_H > bottom) bottom = line.y + LINE_H;
   }
-  if (!selectedLines) return null;
-  context.fill();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  TextSelDebug._logSelectionDraw?.({
-    objectId: obj?.id || '',
-    selStart,
-    selEnd,
-    selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)),
-    selectionRuns: selectedLines,
-    selectionRects: selectedLines,
-    scannedLines,
-    selectedLines,
-  });
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  context.restore();
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  return { scannedLines, selectedLines };
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-}
+  if (!runs.length) return null;
+  return {
+    runs,
+    bounds: { left, top, right, bottom },
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */ metrics: { scannedLines, selectedLines, selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)) }, /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  };
+};
+
+const applyTextSelectionMotionTransform = (context, bounds, motion) => {
+  const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
+  if (scaleX !== 1 || scaleY !== 1) {
+    const scalePivotX = bounds.left + (bounds.right - bounds.left) * scaleOriginX;
+    const scalePivotY = bounds.top + (bounds.bottom - bounds.top) * scaleOriginY;
+    context.transform(scaleX, 0, 0, scaleY,
+      translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
+  } else if (translateX || translateY) context.translate(translateX, translateY);
+};
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
@@ -279,6 +320,131 @@ const textLayoutLineIntersectsViewport = (line, viewportRect = null) => {
   return y + LINE_H >= viewportRect.y1 && y <= viewportRect.y2;
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
+
+const drawTextLayoutStatic = (context, obj, layout, selectionGap = null, stats = null) => {
+  if (!selectionGap) {
+    for (const line of layout) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
+      } else {
+        drawTextLineRange(context, line, obj);
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (stats) {
+        stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    return;
+  }
+  const selStart = Math.min(selectionGap.start, selectionGap.end);
+  const selEnd = Math.max(selectionGap.start, selectionGap.end);
+  for (const line of layout) {
+    const ls = line.startIndex, textEnd = ls + line.text.length;
+    const h0 = Math.max(selStart, ls), h1 = Math.min(selEnd, textEnd);
+    if (h0 >= h1) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
+      } else {
+        drawTextLineRange(context, line, obj);
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (stats) {
+        stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      continue;
+    }
+    const o0 = h0 - ls, o1 = h1 - ls;
+    const hasBefore = o0 > 0;
+    const hasAfter = o1 < line.text.length;
+    if (hasBefore) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        drawTextLineRange(context, line, obj, 0, o0, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
+      } else {
+        drawTextLineRange(context, line, obj, 0, o0);
+      }
+    }
+    if (hasAfter) {
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        drawTextLineRange(context, line, obj, o1, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
+      } else {
+        drawTextLineRange(context, line, obj, o1);
+      }
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (stats && (hasBefore || hasAfter)) {
+      stats.editDrawnTextLines = (stats.editDrawnTextLines || 0) + 1;
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  }
+};
+
+function drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, motion) {
+  context.save();
+  if (motion) applyTextSelectionMotionTransform(context, selection.bounds, motion);
+  context.fillStyle = 'rgba(10, 132, 255, 0.3)';
+  context.beginPath();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  for (const run of selection.runs) {
+    TextSelDebug._logDraw(run.line, selStart, selEnd, run.x1, run.x2);
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  for (const run of selection.runs) {
+    context.rect(run.x1, run.y, run.x2 - run.x1, run.height);
+  }
+  context.fill();
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  TextSelDebug._logSelectionDraw?.({
+    objectId: obj?.id || '',
+    selStart,
+    selEnd,
+    selectedChars: Math.abs((selEnd ?? 0) - (selStart ?? 0)),
+    selectionRuns: selection.runs.length,
+    selectionRects: selection.runs.length,
+    ...(selection.metrics || {}),
+  });
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  context.restore();
+}
+
+const drawTextSelectionContentJello = (context, obj, selection, motion) => {
+  context.save();
+  applyTextSelectionMotionTransform(context, selection.bounds, motion);
+  for (const run of selection.runs) {
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      drawTextLineRange(
+        context,
+        run.line,
+        obj,
+        run.startOffset,
+        run.endOffset,
+        VIEWPORT_TEXT_DRAW_STATS_DISABLED,
+      );
+    } else {
+      drawTextLineRange(context, run.line, obj, run.startOffset, run.endOffset);
+    }
+  }
+  context.restore();
+};
+
+const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom = zoom, motions = null) => {
+  if (!motions?.size) return;
+  for (const [id, spec] of motions) {
+    if (id === editingId) continue;
+    const obj = objectsMap.get(id);
+    if (!obj || obj.type !== 'text') continue;
+    if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
+    const layout = getTextLayout(obj);
+    const motion = BoardfishMotion.textSelectionMotionForDraw(id, spec, viewZoom);
+    if (!motion) continue;
+    const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
+    if (!selection) continue;
+    drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion);
+    drawTextLayoutStatic(context, obj, layout, { start: spec.start, end: spec.end });
+    drawTextSelectionContentJello(context, obj, selection, motion);
+  }
+};
 
 function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
   let caretLine = null;
@@ -308,39 +474,15 @@ function drawCaret(context, obj, layout, selStart, viewZoom = zoom) {
   const contentRight = Math.max(contentLeft, obj.x + obj.w - TEXT_PAD);
   const maxCaretX = Math.max(contentLeft, contentRight - caretWidth);
   const caretX = Math.max(contentLeft, Math.min(cx - caretWidth / 2, maxCaretX));
-  const transform = context.getTransform?.();
-  if (transform?.a > 0 && transform.b === 0 && transform.c === 0) {
-    // Match border rasterization: use whole device pixels, even while panning
-    // or zooming. Keep the text layout and its logical caret positions intact.
-    const scale = transform.a;
-    // Canvas2D may expose a float32-rounded transform scale.
-    const deviceWidth = caretWidth * scale;
-    const pixelWidth = Math.max(1, Math.floor(deviceWidth + deviceWidth * 1e-6));
-    const pixelLeft = Math.round(contentLeft * scale + transform.e);
-    const pixelRight = Math.max(pixelLeft, Math.round(contentRight * scale + transform.e) - pixelWidth);
-    const pixelX = Math.max(pixelLeft, Math.min(Math.round(caretX * scale + transform.e), pixelRight));
-    context.fillRect((pixelX - transform.e) / scale, cy, pixelWidth / scale, caretHeight);
-  } else {
-    context.fillRect(caretX, cy, caretWidth, caretHeight);
-  }
+  context.fillRect(caretX, cy, caretWidth, caretHeight);
   return true;
 }
 
 function drawEditingTextOverlay(
-  context,viewZoom=zoom,viewportRect=viewportWorldRect(0),
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */ collectDebug=false, /* BOARDFISH_DEV_DIAGNOSTICS_END */
-) {
-  const draw=()=> {
-    if(typeof BOARDFISH_PRODUCTION!=='undefined')return drawEditingTextOverlayContent(context,viewZoom,viewportRect);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */ return drawEditingTextOverlayContent(context,viewZoom,viewportRect,collectDebug); /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  };
-  return boardRenderer.withTextObjectClip?boardRenderer.withTextObjectClip(context,objectsMap.get(editingId),draw):draw();
-}
-
-function drawEditingTextOverlayContent(
   context,
   viewZoom = zoom,
   viewportRect = viewportWorldRect(0),
+  textSelectionMotions = null,
   /* BOARDFISH_DEV_DIAGNOSTICS_START */ collectDebug = false, /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   const obj = objectsMap.get(editingId);
@@ -350,90 +492,125 @@ function drawEditingTextOverlayContent(
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
+  const copiedSelectionSpec = textSelectionMotions?.get(obj.id) || null;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const stats = collectDebug ? {
+    editLayoutMs: 0,
+    editSelectionMs: 0,
+    editTextDrawMs: 0,
     editCaretMs: 0,
+    editLayoutLines: 0,
+    editVisibleLines: 0,
+    editCulledLines: 0,
     editDrawnTextLines: 0,
+    editSelectionRuns: 0,
     editCaretDrawn: false,
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const selStart = _editEl ? _editEl.selectionStart : 0;
-  const selEnd = _editEl ? _editEl.selectionEnd : 0;
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const layoutStart = collectDebug ? performance.now() : 0;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const layout = getTextLayoutForViewport(obj, boardRenderer.textViewportRect(viewportRect, {
-    zoom: viewZoom, dpr: window.devicePixelRatio || 1,
-  }));
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (collectDebug) {
-    stats.editLayoutMs = performance.now() - layoutStart;
-    stats.editLayoutLines = Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length);
-    stats.editVisibleLines = layout.length;
-    stats.editCulledLines = Math.max(0, stats.editLayoutLines - layout.length);
+  const motion = BoardfishMotion.objectMotionForDraw(obj, viewZoom);
+  if (motion) {
+    context.save();
+    const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
+    if (scaleX !== 1 || scaleY !== 1) {
+      const scalePivotX = obj.x + obj.w * scaleOriginX;
+      const scalePivotY = obj.y + obj.h * scaleOriginY;
+      context.transform(scaleX, 0, 0, scaleY,
+        translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
+    } else if (translateX || translateY) context.translate(translateX, translateY);
   }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const selectionStart = collectDebug ? performance.now() : 0;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  boardRenderer.drawTextBackground?.(context,obj);
-  const selection = selStart === selEnd ? null : drawTextSelectionHighlight(context, obj, layout, selStart, selEnd);
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (collectDebug) {
-    stats.editSelectionMs = performance.now() - selectionStart;
-    stats.editSelectionRuns = selection?.selectedLines || 0;
-    stats.editSelectedChars = Math.abs((selEnd ?? 0) - (selStart ?? 0));
-    stats.editSelectionLines = selection?.selectedLines || 0;
-    stats.editSelectionVisibleLines = selection?.scannedLines || 0;
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const textDrawStart = collectDebug ? performance.now() : 0;
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const gpuDrawn = context.drawTextLayout?.(layout, obj, {
-    fontSize: FONT_SIZE, padding: TEXT_PAD, lineHeight: LINE_H,
-  });
-  if (!gpuDrawn) for (const line of layout) {
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      drawTextLineRange(context, line, obj, 0, line.text.length, VIEWPORT_TEXT_DRAW_STATS_DISABLED);
-    } else {
-      drawTextLineRange(context, line, obj);
-    }
+  try {
+    const liveSelStart = _editEl ? _editEl.selectionStart : 0;
+    const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;
+    const liveMatchesCopied = copiedSelectionSpec &&
+      liveSelStart === copiedSelectionSpec.start &&
+      liveSelEnd === copiedSelectionSpec.end;
+    const useCopiedSelectionMotion = copiedSelectionSpec && (liveSelStart === liveSelEnd || liveMatchesCopied);
+    const copiedMotion = useCopiedSelectionMotion
+      ? BoardfishMotion.textSelectionMotionForDraw(obj.id, copiedSelectionSpec, viewZoom)
+      : null;
+    if (copiedSelectionSpec && !copiedMotion) BoardfishMotion.cancelTextSelectionMotion(obj.id);
+    const selStart = copiedMotion ? copiedSelectionSpec.start : liveSelStart;
+    const selEnd   = copiedMotion ? copiedSelectionSpec.end   : liveSelEnd;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (stats) stats.editDrawnTextLines++;
+    const layoutStart = collectDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (collectDebug) {
-    stats.editTextDrawMs = performance.now() - textDrawStart;
-    if (gpuDrawn) stats.editDrawnTextLines = layout.length;
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-  if (selStart === selEnd && _caretVisible) {
+    const layout = getTextLayoutForViewport(obj, viewportRect);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const caretStart = collectDebug ? performance.now() : 0;
-    const drawn = drawCaret(context, obj, layout, selStart, viewZoom);
     if (collectDebug) {
-      stats.editCaretMs = performance.now() - caretStart;
-      stats.editCaretDrawn = !!drawn;
+      stats.editLayoutMs = performance.now() - layoutStart;
+      stats.editLayoutLines = Math.max(layout.length, Math.trunc(Number(layout.totalLines)) || layout.length);
+      stats.editVisibleLines = layout.length;
+      stats.editCulledLines = Math.max(0, stats.editLayoutLines - layout.length);
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      drawCaret(context, obj, layout, selStart, viewZoom);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const selectionStart = collectDebug ? performance.now() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    const selection = selStart === selEnd ? null : collectTextSelectionRuns(obj, layout, selStart, selEnd);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectDebug) {
+      stats.editSelectionMs = performance.now() - selectionStart;
+      stats.editSelectionRuns = selection?.runs?.length || 0;
+      stats.editSelectedChars = Math.abs((selEnd ?? 0) - (selStart ?? 0));
+      stats.editSelectionLines = selection?.metrics?.selectedLines || 0;
+      stats.editSelectionVisibleLines = selection?.metrics?.scannedLines || 0;
     }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+
+    if (selection) drawTextSelectionHighlight(context, obj, selStart, selEnd, selection, copiedMotion);
+
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    const textDrawStart = collectDebug ? performance.now() : 0;
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      drawTextLayoutStatic(
+        context,
+        obj,
+        layout,
+        copiedMotion ? { start: selStart, end: selEnd } : null,
+        stats,
+      );
+    } else {
+      drawTextLayoutStatic(
+        context,
+        obj,
+        layout,
+        copiedMotion ? { start: selStart, end: selEnd } : null,
+      );
+    }
+    if (selection && copiedMotion) drawTextSelectionContentJello(context, obj, selection, copiedMotion);
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    if (collectDebug) {
+      stats.editTextDrawMs = performance.now() - textDrawStart;
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+
+    if (selStart === selEnd && _caretVisible) {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const caretStart = collectDebug ? performance.now() : 0;
+      const drawn = drawCaret(context, obj, layout, selStart, viewZoom);
+      if (collectDebug) {
+        stats.editCaretMs = performance.now() - caretStart;
+        stats.editCaretDrawn = !!drawn;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        drawCaret(context, obj, layout, selStart, viewZoom);
+      }
+    }
+  } finally {
+    if (motion) context.restore();
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   return stats;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
-function drawBoard() {
+function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectViewportDebug = ViewportDebug.isEnabled();
   const dbg = collectViewportDebug
-    ? ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId })
+    ? ViewportDebug.start('drawBoard', { source: _activeRenderSource, objectCount: objects.length, editing: !!editingId, offscreenDirty: _offscreenDirty, bypassEditOffscreenCache })
     : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (_boardOpening) {
@@ -445,12 +622,12 @@ function drawBoard() {
     return;
   }
   // Keep canvas pixels in the same CSS coordinate space as DOM selections.
-  if (typeof beginTextRasterFrame === 'function') beginTextRasterFrame();
   syncBoardCanvasBackingStore();
-  ctx.beginFrame?.(objects);
+  const hasOpenPreviewFallback = hasOpenInitialImagePreviews();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const collectOpenInitialRenderDebug = OpenDebug.isInitialRenderDebugActive?.() === true;
-  const collectDrawDebug = collectViewportDebug || collectOpenInitialRenderDebug;
+  const collectOpenPreviewFallbackDebug = OpenDebug.enabled === true && hasOpenPreviewFallback;
+  const collectDrawDebug = collectViewportDebug || collectOpenInitialRenderDebug || collectOpenPreviewFallbackDebug;
   const drawStart = collectDrawDebug ? performance.now() : 0;
   const drawPhases = collectDrawDebug ? {} : null;
   const counters = collectDrawDebug ? createDrawCounters() : null;
@@ -459,41 +636,81 @@ function drawBoard() {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = viewportWorldRect(0);
+  const textSelectionMotions = BoardfishMotion.textSelectionJelloSpecsForDraw();
+  let openInitialImageSourceResolver = hasOpenPreviewFallback ? resolveOpenInitialImageSourceForDraw : null;
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  if (!openInitialImageSourceResolver && collectOpenInitialRenderDebug) {
+    openInitialImageSourceResolver = resolveOpenInitialImageSourceForDraw;
+  }
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   if (editingId) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const setupStart = collectDrawDebug ? performance.now() : 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    ctx.resetTransform();
-    fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
-    setWorldCanvasTransform(ctx, dpr);
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDrawDebug) {
-      drawPhases.backgroundSetupMs = performance.now() - setupStart;
+    const useEditOffscreenCache = !bypassEditOffscreenCache;
+    if (useEditOffscreenCache && _offscreenDirty) {
+      _rebuildOffscreen(dpr, viewportRect);
     }
-    const objectsStart = collectDrawDebug ? performance.now() : 0;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      drawVisibleObjects(ctx, viewportRect, null, editingId);
+    if (useEditOffscreenCache) {
+      // Blit the cached background/image layer, then draw text directly so its
+      // antialiasing is identical to the normal canvas path.
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      const blitStart = collectDrawDebug ? performance.now() : 0;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      ctx.resetTransform();
+      ctx.drawImage(_offscreen, 0, 0);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDrawDebug) {
+        drawPhases.offscreenBlitMs = performance.now() - blitStart;
+      }
+      const textStart = collectDrawDebug ? performance.now() : 0;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      setWorldCanvasTransform(ctx, dpr);
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true);
+      } else {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true);
+        if (collectDrawDebug) {
+          drawPhases.offscreenTextDrawMs = performance.now() - textStart;
+          drawnText += drawn.drawnText;
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const drawn = drawVisibleObjects(ctx, counters, viewportRect, null, editingId);
-      if (collectDrawDebug) {
-        drawPhases.objectLoopMs = performance.now() - objectsStart;
-        drawnImages += drawn.drawnImages;
-        drawnText += drawn.drawnText;
-      }
+      const setupStart = collectDrawDebug ? performance.now() : 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      ctx.resetTransform();
+      fillBoardBackground(ctx, boardCanvas.width, boardCanvas.height);
+      setWorldCanvasTransform(ctx, dpr);
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      if (collectDrawDebug) {
+        drawPhases.backgroundSetupMs = performance.now() - setupStart;
+      }
+      const objectsStart = collectDrawDebug ? performance.now() : 0;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId);
+      } else {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId);
+        if (collectDrawDebug) {
+          drawPhases.objectLoopMs = performance.now() - objectsStart;
+          drawnImages += drawn.drawnImages;
+          drawnText += drawn.drawnText;
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
     }
 
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const editStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionMotions);
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      drawEditingTextOverlay(ctx, zoom, viewportRect);
+      drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionMotions);
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const editStats = drawEditingTextOverlay(ctx, zoom, viewportRect, collectDrawDebug);
+      const editStats = drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionMotions, collectDrawDebug);
       if (collectDrawDebug) {
         drawPhases.editingOverlayMs = performance.now() - editStart;
         if (editStats) Object.assign(drawPhases, editStats);
@@ -514,10 +731,10 @@ function drawBoard() {
     const objectsStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-      drawVisibleObjects(ctx, viewportRect);
+      drawVisibleObjects(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver);
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const drawn = drawVisibleObjects(ctx, counters, viewportRect);
+      const drawn = drawVisibleObjects(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver);
       if (collectDrawDebug) {
         drawPhases.objectLoopMs = performance.now() - objectsStart;
         drawnImages = drawn.drawnImages;
@@ -525,8 +742,8 @@ function drawBoard() {
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
+    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionMotions);
   }
-  ctx.endFrame?.();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDrawDebug) {
     ViewportDebug.count('croppedImages', counters.croppedImages);
@@ -550,13 +767,18 @@ function drawBoard() {
       viewportW: viewportRect.x2 - viewportRect.x1,
       viewportH: viewportRect.y2 - viewportRect.y1,
       editing: !!editingId,
+      offscreenDirty: !!_offscreenDirty,
+      bypassEditOffscreenCache,
+      openPreviewFallback: !!hasOpenPreviewFallback,
       objectCount: objects.length,
       totalMeasuredMs: performance.now() - drawStart,
       ...drawPhases,
       ...counters,
-      ...(ctx.getStats ? { gpu: ctx.getStats() } : {}),
     };
     _lastDrawBoardMeta = drawMeta;
+    if (hasOpenPreviewFallback && typeof OpenDebug.recordPreviewFallbackDraw === 'function') {
+      OpenDebug.recordPreviewFallbackDraw(drawMeta);
+    }
     if (collectViewportDebug) ViewportDebug.end(dbg, drawMeta);
   } else {
     _lastDrawBoardMeta = null;
@@ -584,11 +806,15 @@ function applyTransform(
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return;
   }
+  if (editingId) invalidateOffscreen();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const transformStart = collectTransformDebug ? performance.now() : 0;
   const drawStart = collectTransformDebug ? performance.now() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  drawBoard();
+  // Viewport transforms already require a direct redraw at the new pan/zoom.
+  // Rebuilding the edit cache here would render the static scene twice in the
+  // same frame; leave it dirty for the next non-navigation edit render.
+  drawBoard(true);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const drawMs = collectTransformDebug ? performance.now() - drawStart : 0;
   if (collectTransformDebug) {
@@ -617,7 +843,11 @@ function applyTransform(
   // prewarm rescanned up to 100 large text objects in one unbounded main-thread
   // callback, which could delay the next gesture. Keep prewarm available to the
   // explicit performance debugger, but do not run it after navigation.
-  scheduleVisibleImageWorkAfterIdle();
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    scheduleVisibleImageWorkAfterIdle(_activeRenderSource || 'transform');
+  } else {
+    scheduleVisibleImageWorkAfterIdle();
+  }
   if (_islandSyncedZoom !== zoom) syncIslandZoomDisplay(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     _activeRenderSource || 'transform'
@@ -680,7 +910,7 @@ var _needTransform = false;
 var _needBoardRender = false;
 var _needOverlayRender = false;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
-var _frameScheduledAt;
+var _frameScheduledAt = 0;
 var _frameSources = [];
 var _activeRenderSource = 'direct';
 var _lastDrawBoardMeta = null;
@@ -711,18 +941,17 @@ const boardRenderer = BoardfishRenderer.createBoardRenderer({
   panY: () => panY,
   dpr: () => window.devicePixelRatio || 1,
   font: FONT,
-  fontSize: FONT_SIZE,
-  textPad: TEXT_PAD,
   lineHeight: LINE_H,
   canvasTextColor,
-  canvasBackgroundColor: () => _canvasBackgroundColor,
   currentViewportWorldRect: viewportWorldRect,
   drawTextLineRange,
   getTextLayoutForViewport,
   objectIntersectsRect,
+  hasObjectMotionsForDraw: BoardfishMotion.hasObjectMotionsForDraw,
+  objectMotionForDraw: BoardfishMotion.objectMotionForDraw,
   selectImageSourceForDraw,
 });
-({ setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
+({ drawSingleObj, setWorldCanvasTransform, drawVisibleObjects } = boardRenderer);
 if (typeof BOARDFISH_PRODUCTION === 'undefined') createDrawCounters = boardRenderer.createDrawCounters;
 
 const BoardObjectGeometry = BoardfishObjectGeometry.createObjectGeometry({
@@ -740,6 +969,16 @@ function withRenderSource(source, fn) {
     _activeRenderSource = prev;
   }
 }
+/* BOARDFISH_DEV_DIAGNOSTICS_END */
+
+var finishMotionViewportRenderFrame = BoardfishMotion.afterViewportRenderFrame;
+/* BOARDFISH_DEV_DIAGNOSTICS_START */
+finishMotionViewportRenderFrame = (source, meta = {}) => {
+  BoardfishMotion.afterViewportRenderFrame({
+    source: source || _activeRenderSource || 'render',
+    ...meta,
+  });
+};
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -906,7 +1145,7 @@ function warmTextLayoutDrawLines(obj, layout, options = {}) {
   let warmedLines = 0;
   let drawUnits = 0;
   let maxLineMs = 0;
-  let restoreMs;
+  let restoreMs = 0;
   let errors = 0;
 
   try {
@@ -1414,12 +1653,14 @@ function scheduleFrame(
     if (doTransform) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         applyTransform();
+        finishMotionViewportRenderFrame();
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         ViewportDebug.count('transformFrames');
         const transformStart = collectDebug ? performance.now() : 0;
         withRenderSource(sourceLabel || 'transform', () => applyTransform(frameDbg));
         if (collectDebug) ViewportDebug.step(frameDbg, 'applyTransformCall', { ms: performance.now() - transformStart });
+        finishMotionViewportRenderFrame(sourceLabel || 'transform', { doTransform, doBoard: true, doOverlay: true });
         if (collectDebug) ViewportDebug.frameEnd(frameDbg, { doTransform, doBoard, doOverlay, sources: sourceLabel });
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
@@ -1448,6 +1689,15 @@ function scheduleFrame(
         ViewportDebug.step(frameDbg, 'updateSelectionOverlay', { ms: performance.now() - overlayStart });
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    if (doBoard) {
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        finishMotionViewportRenderFrame();
+      } else {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        finishMotionViewportRenderFrame(sourceLabel || 'board', { doTransform, doBoard, doOverlay });
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDebug) {

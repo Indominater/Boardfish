@@ -46,33 +46,27 @@ function addText(wx, wy, content = '', options = {}) {
     ...objectCommandTextStats(content),
   }));
 
-  const suppliedContent = String(content ?? '');
-  content = options.contentPrepared ? normalizeTextContent(suppliedContent) : textForTextObjectPaste(suppliedContent);
-  // An explicit empty textbox can enter editing; a paste containing only
-  // discarded characters should have no effect on the board.
-  if (suppliedContent && !content) return;
   if (!BoardfishWebLimits.canAddObjects(1)) {
     logStep('object-limit-denied');
     return;
   }
+  if (!options.contentPrepared) content = textForTextObjectPaste(content);
   logStep('trim-done', () => objectCommandTextStats(content));
   const data = { content };
-  const textBytes = content.length;
+  const textBytes = BoardfishWebLimits.textByteLength(content);
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
   logStep('content-limit-done', { textBytes, accepted });
   if (!accepted) return;
   const h = LINE_H + TEXT_PAD * 2;
-  let w;
+  let w = content ? 200 : h * 6;
   if (content) {
+    const lines = content.split('\n');
+    const charW = 9.2, pad = 8;
     let maxLineLen = 1;
-    for (let start = 0; start < content.length && maxLineLen < 75;) {
-      const end = content.indexOf('\n', start);
-      maxLineLen = Math.max(maxLineLen, (end < 0 ? content.length : end) - start);
-      start = end < 0 ? content.length : end + 1;
+    for (const line of lines) {
+      if (line.length > maxLineLen) maxLineLen = line.length;
     }
-    w = Math.min(Math.max(Math.round(maxLineLen * 9.2 + 16), 120), 700);
-  } else {
-    w = h * 6;
+    w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
   }
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
   logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content) }));
@@ -93,7 +87,8 @@ function addText(wx, wy, content = '', options = {}) {
   logStep('add-object-done', { objectId: obj.id, objectCountAfter: objects.length });
   selectObject(obj.id);
   logStep('render-scheduled', { objectId: obj.id });
-  if (content) {
+  const shouldEnterEdit = !content || options?.editAfterCreate === true;
+  if (!shouldEnterEdit || options?.enterEditHistory === false) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const historyStartedAt = dbg && objectCommandDebugNow();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -102,9 +97,17 @@ function addText(wx, wy, content = '', options = {}) {
       objectId: obj.id,
       historyMs: Math.round((objectCommandDebugNow() - historyStartedAt) * 100) / 100,
     }));
-  } else {
-    enterEdit(obj.id);
-    logStep('enter-edit-done', { objectId: obj.id });
+  }
+  if (shouldEnterEdit) {
+    const enterEditOptions = content
+      ? { history: options?.enterEditHistory !== false, placeInitialCaret: true }
+      : {};
+    enterEdit(obj.id, enterEditOptions);
+    logStep('enter-edit-done', {
+      objectId: obj.id,
+      editAfterCreate: !!content,
+      enterEditHistory: enterEditOptions.history ?? true,
+    });
   }
   logStep('end', { objectId: obj.id, objectCountAfter: objects.length });
 }
@@ -227,11 +230,12 @@ async function newBoard() {
   BoardfishEditorState.resetBoardObjectState();
   OpenDebug.step(dbg, 'exitEdit', {});
   clearJsClipboard();
+  invalidateOffscreen();
   OpenDebug.step(dbg, 'clearState', {});
   currentFilePath = null;
   currentFileRef = null;
   BoardfishViewportState.reset();
-  clearImageStore();
+  clearImageStore(true);
   OpenDebug.step(dbg, 'clearImageStore', {});
   snapshot();
   markSaved();
@@ -256,7 +260,7 @@ function duplicateSelected(anchorPoint = null) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
     selectedObjects.push(obj);
-    if (obj?.type === 'text') additionalTextBytes += String(obj.data?.content || '').length;
+    if (obj?.type === 'text') additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
     minX = Math.min(minX, obj.x);
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x + obj.w);

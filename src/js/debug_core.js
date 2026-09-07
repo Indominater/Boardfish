@@ -99,6 +99,7 @@
   }
 
   root.createDebugRecorder = createDebugRecorder;
+  root.mapWithConcurrency = mapWithConcurrency;
   root.round2 = round2;
   root.sanitizeDebugMeta = sanitizeDebugMeta;
 })(typeof window !== 'undefined' ? window : globalThis);

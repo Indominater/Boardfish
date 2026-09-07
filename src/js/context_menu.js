@@ -191,7 +191,7 @@ var MENU_COMMANDS = {
   },
   'obj-btn-move-to-back': () => { closeObjCtxMenu('command:move-to-back'); sendSelectedToBack(); },
   'obj-btn-flip': () => { flipSelectedImages(); },
-  'obj-btn-rotate': () => { rotateSelectedImages(); },
+  'obj-btn-rotate': () => { rotateSelectedImages('cw'); },
   'obj-btn-save-image': () => { closeObjCtxMenu('command:save-image'); saveSelectedImage(); },
   'obj-btn-save-images': () => { closeObjCtxMenu('command:save-images'); showInputShield({ keepSelectionOverlay: true }); saveSelectedImages(); },
   'text-btn-copy': () => { closeTextCtxMenu('command:copy'); copyTextEditSelection(); },
@@ -242,9 +242,10 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   const selection = getTextEditSelectionState();
   if (!selection || !_editEl) return false;
   const inputTypeValue = String(inputType || '').toLowerCase();
+  const normalizedText = normalizeTextContent(text);
   const replacementText = inputTypeValue.includes('paste') && typeof textForTextObjectPaste === 'function'
-    ? textForTextObjectPaste(text)
-    : normalizeTextContent(text);
+    ? textForTextObjectPaste(normalizedText)
+    : normalizedText;
   if (inputTypeValue.includes('paste') && !replacementText) return false;
   const oldValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
   const replacementState = {
@@ -357,9 +358,13 @@ const copyTextEditSelection = async () => {
   }
   const value = _editEl && typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl?.value ?? '');
   const selectedText = selection?.hasSelection && _editEl ? value.slice(selection.start, selection.end) : '';
-  await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
+  const feedback = selectedText ? { id: editingId, ...selection } : null;
+  const copied = await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
     allowEmpty: !!selectedText,
   });
+  if (copied && feedback && editingId === feedback.id && _editEl) {
+    globalThis.BoardfishMotion?.applyCopyFeedback?.({ textSelection: feedback });
+  }
   focusTextEditProxy();
 };
 
@@ -379,7 +384,7 @@ const pasteTextIntoEditSelection = async () => {
   const pendingBoardfishPaste = (
     hasBoardfishTextPayload &&
     typeof pasteBoardfishTextSelectionIntoEditSelection === 'function'
-  ) ? pasteBoardfishTextSelectionIntoEditSelection() : null;
+  ) ? pasteBoardfishTextSelectionIntoEditSelection({ immediateHistory: true }) : null;
   const pendingExternalText = (
     !hasBoardfishTextPayload || (
       typeof _jsClipboardWebMaybeStale !== 'undefined' &&

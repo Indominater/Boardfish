@@ -3,7 +3,7 @@
 (function initBoardDocument(root) {
   const BoardTypes = root.BoardfishBoardTypes ||
     (typeof require === 'function' ? require('./board_types.js') : null);
-  const { mimeForExt, normalizeImageExt } = BoardTypes;
+  const { extForMime, mimeForExt, normalizeImageExt } = BoardTypes;
 
   function defaultImageRefKind(src) {
     return BoardTypes.imageRefKind(src);

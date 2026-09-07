@@ -177,11 +177,11 @@ function handleViewportWheel(e) {
       if (collectDebug) {
         const { panXBefore, panYBefore, zoomBefore } = beforeMeta;
         const handlerMs = canvasInputDebugRound(canvasInputNow() - handlerStart);
-        const zoomDeltaPct = ((zoom / zoomBefore) - 1) * 100;
+        const zoomDeltaPct = zoomBefore ? ((zoom / zoomBefore) - 1) * 100 : 0;
         const panDeltaX = panX - panXBefore;
         const panDeltaY = panY - panYBefore;
-        const focusWorldX = (e.clientX - panXBefore) / zoomBefore;
-        const focusWorldY = (e.clientY - panYBefore) / zoomBefore;
+        const focusWorldX = (e.clientX - panXBefore) / Math.max(zoomBefore || 1, 0.0001);
+        const focusWorldY = (e.clientY - panYBefore) / Math.max(zoomBefore || 1, 0.0001);
         ViewportDebug.recordPanZoom?.('wheel-zoom', {
           mode: 'zoom',
           source: 'wheel-zoom',
@@ -277,8 +277,8 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 // ─── Pan (spacebar + left click) ─────────────────────────────────────────────
 var _spaceDown = false,
   _rubberBandSelectionCleanup = null,
-  hideRubberBandSelectionVisual,
-  cancelRubberBandSelection;
+  hideRubberBandSelectionVisual = null,
+  cancelRubberBandSelection = null;
 
 document.addEventListener('keyup', (e) => {
   if (e.code !== 'Space') return;
@@ -437,7 +437,7 @@ function startMousePan(e) {
 function createSelectionDragSession(startClientX, startClientY) {
   const grpItems = dragItemsForSelection();
   if (!grpItems.length) return null;
-  const dragZoom = zoom;
+  const dragZoom = Math.max(0.0001, zoom);
   let grpMoved = false;
   let finished = false;
   function applyGrpDrag(dx, dy) {

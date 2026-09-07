@@ -28,7 +28,7 @@
     const active = new Map();
     let mode = 'idle';
     let holdTimer = null;
-    let pinchX, pinchY, pinchDistance;
+    let pinchX, pinchY, pinchDistance = 0;
 
     const call = (name, payload) => {
       if (typeof options[name] === 'function') options[name](payload);
@@ -76,7 +76,7 @@
     }
 
     function emitPinch(point) {
-      if (mode !== 'pinch' || active.size < 2) return false;
+      if (mode !== 'pinch' || active.size < 2 || !pinchDistance) return false;
       const geometry = twoPointerGeometry(active.values());
       geometry.startCenterX = pinchX;
       geometry.startCenterY = pinchY;
@@ -120,7 +120,9 @@
       active.set(pointerId, stored);
       if (active.size === 1) {
         mode = 'pending';
+        pinchDistance = 0;
         startHold(stored);
+        call('onPressStart', gesturePayload(stored));
       } else {
         startPinch(event);
       }
@@ -202,12 +204,14 @@
         remaining.previousX = remaining.x;
         remaining.previousY = remaining.y;
         mode = 'pan';
+        pinchDistance = 0;
         call('onPanStart', gesturePayload(remaining, { resumedFromPinch: true }));
         return true;
       }
 
       if (active.size === 0) {
         mode = 'idle';
+        pinchDistance = 0;
         call('onGestureEnd', gesturePayload(current, { cancelled, finishedMode }));
       }
       return true;
@@ -220,6 +224,7 @@
       clearHoldTimer();
       active.clear();
       mode = 'idle';
+      pinchDistance = 0;
       if (finishedMode === 'pinch') {
         call('onPinchEnd', gesturePayload(point, { cancelled: true, reason }));
       }
@@ -308,16 +313,18 @@
     target.dispatchEvent(makeTouchMouseEvent('mousedown', point, 0, 1));
     target.dispatchEvent(makeTouchMouseEvent('mouseup', point, 0, 0));
     if (editingId && _editEl) {
-      focusTextEditProxyNow(_editEl
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        , typeof objectsMap?.get === 'function' ? objectsMap.get(editingId) : null,
-        'touch-tap-focus', {
+        const obj = typeof objectsMap?.get === 'function' ? objectsMap.get(editingId) : null;
+        focusTextEditProxyNow(_editEl, obj, 'touch-tap-focus', {
           phase: 'touch-tap',
           clientX: point.x,
           clientY: point.y,
-        }
+        });
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      );
+      } else {
+        focusTextEditProxyNow(_editEl);
+      }
     }
   }
 
@@ -366,7 +373,7 @@
     if (!boardNavigationAllowed()) return;
     const start = touchPinchStartViewport;
     if (!start) return;
-    const nextZoom = BoardfishBoardTypes.clampZoom(start.zoom * gesture.scale, start.zoom);
+    const nextZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, start.zoom * gesture.scale));
     const scale = nextZoom / start.zoom;
     const changed = BoardfishViewportState.setZoomPan(
       nextZoom,

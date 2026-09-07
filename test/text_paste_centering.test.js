@@ -17,7 +17,6 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/object_commands.js'), 'utf8');
   let idCounter = 1;
   const context = {
-    BoardfishBoardTypes: require('../src/js/board_types.js'),
     console,
     TextEncoder,
     document: {
@@ -50,10 +49,14 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
     zCounter: 1,
     LINE_H: DEFAULT_TEXT_BOX_LINE_H,
     TEXT_PAD: DEFAULT_TEXT_BOX_PAD,
+    NEW_TEXT_EDIT_MIN_LINES: DEFAULT_TEXT_BOX_MIN_LINES,
     BoardfishWebLimits: {
       canAddObjects() { return true; },
-      textByteLength(text) { return new TextEncoder().encode(String(text ?? '')).length; },
-      canAcceptAdditionalContentBytes(bytes, count) { context.contentLimits.push({ bytes, count }); return true; },
+      canAcceptAdditionalContentBytes() { return true; },
+      textByteLength(text) {
+        context.textByteLengthCalls++;
+        return String(text ?? '').length;
+      },
     },
     BoardfishEditorState: {
       addObject(obj) {
@@ -99,8 +102,9 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
       context.editedIds.push(id);
       if (options.history !== false) context.pushHistory('text-edit-enter');
     },
+    invalidateOffscreen() {},
     syncAllTextAutoHeights() {},
-    contentLimits: [],
+    textByteLengthCalls: 0,
   };
   vm.createContext(context);
   vm.runInContext(`${textLayoutSource}syncTextAutoHeight = testSyncTextAutoHeight;\n${source}\nglobalThis.addText = addText;\n`, context, {
@@ -109,7 +113,7 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
   return context;
 }
 
-function loadPasteHarness({ browserText = '', normalizeExternalText = require('../src/js/board_types.js').normalizeTextContent } = {}) {
+function loadPasteHarness({ browserText = '', normalizeExternalText = (value) => value } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/clipboard_export_init.js'), 'utf8');
   const calls = { addText: [] };
   const context = {
@@ -178,7 +182,7 @@ test('addText can center a text box after auto-height is synced', () => {
   assert.equal(obj.h, 184);
   assert.deepEqual(context.histories, ['add-text']);
   assert.deepEqual(context.editedIds, []);
-  assert.deepEqual(context.contentLimits, [{ bytes: new TextEncoder().encode(context.added[0].data.content).length, count: 1 }]);
+  assert.equal(context.textByteLengthCalls, 1);
 });
 
 test('addText keeps top-left placement by default', () => {
@@ -200,7 +204,7 @@ test('addText retains full text diagnostics for an active debug capture', () => 
 
   context.addText(24, 48, 'first\nsecond', { debug: {} });
 
-  assert.deepEqual(context.contentLimits, context.added.map((obj) => ({ bytes: new TextEncoder().encode(obj.data.content).length, count: 1 })));
+  assert.equal(context.textByteLengthCalls, 5);
   assert.equal(context.debugSteps[0].step, 'addText:start');
   assert.equal(context.debugSteps[0].meta.textLineCount, 2);
 });
@@ -284,48 +288,4 @@ test('outside clipboard text is normalized before creating a text box', async ()
   });
 
   assert.equal(context.calls.addText[0].content, 'wrapped prose continues here');
-});
-
-test('new textbox content is normalized even when marked prepared', () => {
-  for (const contentPrepared of [false, true]) {
-    const context = loadAddTextHarness();
-    context.addText(24, 48, 'A😀B\r\nCéD\tE', { contentPrepared });
-    assert.equal(context.added[0].data.content, 'AB\nCD\tE');
-    assert.deepEqual(context.contentLimits, [{ bytes: new TextEncoder().encode('AB\nCD\tE').length, count: 1 }]);
-  }
-});
-
-test('discarded-only supplied content never creates an empty textbox', () => {
-  for (const contentPrepared of [false, true]) {
-    const context = loadAddTextHarness();
-    context.addText(24, 48, '😀é中文\u200B', { contentPrepared });
-    assert.equal(context.added.length, 0);
-    assert.equal(context.histories.length, 0);
-    assert.equal(context.editedIds.length, 0);
-  }
-});
-
-test('discarded-only supplied content is a no-op even when no object capacity remains', () => {
-  for (const contentPrepared of [false, true]) {
-    const context = loadAddTextHarness();
-    let capacityChecks = 0;
-    context.BoardfishWebLimits.canAddObjects = () => { capacityChecks++; return false; };
-    context.addText(24, 48, '😀é中文\u200B', { contentPrepared });
-    assert.equal(capacityChecks, 0);
-    assert.equal(context.added.length, 0);
-    assert.equal(context.histories.length, 0);
-    assert.equal(context.editedIds.length, 0);
-    assert.deepEqual(context.contentLimits, []);
-  }
-});
-
-test('event and browser paste skip content that contains no supported characters', async () => {
-  for (const viaEvent of [false, true]) {
-    const context = loadPasteHarness({ browserText: '😀é中文\u200B' });
-    await context.pasteAtPos(640, 360, viaEvent ? {
-      getData(type) { return type === 'text/plain' ? '😀é中文\u200B' : ''; },
-    } : null);
-    assert.deepEqual(context.calls.addText, []);
-    assert.equal(context._pasteInProgress, false);
-  }
 });

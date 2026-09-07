@@ -13,7 +13,10 @@
     MISSING: 'missing',
     STRING: 'string',
   });
-  const MIN_ZOOM = 0.1, MAX_ZOOM = 10;
+  const VIEWPORT_LIMITS = Object.freeze({
+    MIN_ZOOM: 0.01,
+    MAX_ZOOM: 100,
+  });
 
   function isObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -34,15 +37,7 @@
 
   function clampZoom(value, fallback = 1) {
     const zoom = finiteNumber(value, fallback);
-    return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
-  }
-
-  // Textboxes use one plain ASCII representation regardless of their input
-  // source. Preserve indentation/newlines; discard unsupported characters
-  // rather than transliterating them or introducing fallback font glyphs.
-  function normalizeTextContent(value) {
-    const text = String(value ?? '');
-    return text.replace(/\r\n?|[^\x09\x0A\x0D\x20-\x7E]+/g, (match) => match[0] === '\r' ? '\n' : '');
+    return Math.max(VIEWPORT_LIMITS.MIN_ZOOM, Math.min(VIEWPORT_LIMITS.MAX_ZOOM, zoom));
   }
 
   function imageRefKind(src) {
@@ -86,7 +81,6 @@
     isSupportedBoardVersion,
     mimeForExt,
     normalizeImageExt,
-    normalizeTextContent,
   });
 
   root.BoardfishBoardTypes = api;

@@ -16,7 +16,6 @@ const DEFAULT_TEXT_BOX_WIDTH = DEFAULT_TEXT_BOX_HEIGHT * 6;
 
 function loadTextEditorHelpers() {
   const context = { console };
-  context.BoardfishBoardTypes = require('../src/js/board_types.js');
   vm.createContext(context);
   vm.runInContext(
     fs.readFileSync(path.join(root, 'src/js/text_editor.js'), 'utf8') +
@@ -54,15 +53,19 @@ function loadTextEditorIntegrationHelpers() {
     dirty: [],
     histories: [],
     renders: [],
+    animations: [],
     _caretVisible: false,
+    BoardfishMotion: {
+      applyCopyFeedback(payload) { context.animations.push(payload); },
+    },
     shouldCommitTextEditInputImmediately() { return false; },
-    flushEditHistoryCheckpoint() { return false; },
+    flushEditHistoryCheckpoint() { context.flushedHistory = true; return false; },
+    invalidateOffscreen() {},
     markDirty(obj) { context.dirty.push(obj.id); },
     pushHistory(reason) { context.histories.push(reason); },
     scheduleRender(board, overlay, reason) { context.renders.push({ board, overlay, reason }); },
     syncAllTextAutoHeights() {},
   };
-  context.BoardfishBoardTypes = require('../src/js/board_types.js');
   vm.createContext(context);
   vm.runInContext(
     fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') +
@@ -71,12 +74,11 @@ function loadTextEditorIntegrationHelpers() {
       'globalThis.createTextSelectionClipboardPayload = createTextSelectionClipboardPayload;\n' +
       'globalThis.textSelectionPayloadFromBoardfishClipboardValue = textSelectionPayloadFromBoardfishClipboardValue;\n' +
       'globalThis.syncFreshTextEditWidth = syncFreshTextEditWidth;\n' +
-      'globalThis.textEditorSizeDebugStats = textEditorSizeDebugStats;\n' +
       'globalThis.textEditInputReplacement = textEditInputReplacement;\n' +
       'globalThis.textEditBlankLineDeleteRange = textEditBlankLineDeleteRange;\n' +
       'globalThis.textNewlineCount = textNewlineCount;\n' +
       'globalThis.replaceTextEditProxyRange = replaceTextEditProxyRange;\n' +
-      'globalThis.tryNativeExternalTextPaste = tryNativeExternalTextPaste;\n',
+      'globalThis.tryNativeBoardfishTextSelectionPaste = tryNativeBoardfishTextSelectionPaste;\n',
     context,
     { filename: 'text_editor_integration_helpers.js' },
   );
@@ -114,7 +116,6 @@ function loadTextClipboardFreshnessHarness({ maybeStale = false } = {}) {
     textEditorClipStep() {},
   };
 
-  context.BoardfishBoardTypes = require('../src/js/board_types.js');
   vm.createContext(context);
   vm.runInContext(
     `${source.slice(start, end)}\n` +
@@ -137,29 +138,6 @@ test('text newline count handles bounded long ranges', () => {
   const context = loadTextEditorIntegrationHelpers();
   const longText = `${'x'.repeat(80)}\nsecond\nthird`;
   assert.equal(context.textNewlineCount(longText, 0, longText.length - 1), 2);
-});
-
-test('text size diagnostics reuse numeric width caches after resizing back', () => {
-  const context = loadTextEditorIntegrationHelpers();
-  const content = 'Text wrapped across three lines';
-  const obj = {
-    id: 'text-cache', type: 'text', w: 240,
-    h: 3 * TEST_LINE_H + TEST_TEXT_PAD * 2,
-    data: { content },
-  };
-  context.setCachedTextWrappedLineIndex(obj, content, [{ text: content }], 3);
-  obj.w = 480;
-  context.setCachedTextWrappedLineIndex(obj, content, [{ text: content }], 1);
-  obj.w = 240;
-
-  const stats = context.textEditorSizeDebugStats(obj);
-  assert.equal(stats.cachedLines, 3);
-  assert.equal(stats.cachedLineSource, 'wrapped-width-cache');
-  assert.equal(stats.expectedCachedHeight, obj.h);
-  assert.equal(stats.heightDeltaFromCached, 0);
-
-  obj.data.content = 'Changed content';
-  assert.equal(context.textEditorSizeDebugStats(obj).cachedLines, '');
 });
 
 function loadExitEditHarness() {
@@ -191,6 +169,7 @@ function loadExitEditHarness() {
     dirty: [],
     histories: [],
     editHistoryPushes: [],
+    animations: [],
     renders: [],
     clearedIntervals: [],
     clearedTimeouts: [],
@@ -216,8 +195,11 @@ function loadExitEditHarness() {
     },
     window: {
       getSelection() {
-        return { removeAllRanges() {} };
+        return { removeAllRanges() { context.removedRanges = true; } };
       },
+    },
+    BoardfishMotion: {
+      applyCopyFeedback(payload) { context.animations.push(payload); },
     },
     BoardfishEditorState: {
       removeObjectsById() {},
@@ -228,8 +210,8 @@ function loadExitEditHarness() {
     pushEditHistoryIfChanged(id) { context.editHistoryPushes.push(id); return false; },
     pushHistory(reason) { context.histories.push(reason); },
     scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
+    invalidateOffscreen() { context.invalidated = true; },
   };
-  context.BoardfishBoardTypes = require('../src/js/board_types.js');
   vm.createContext(context);
   vm.runInContext(
     fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') +
@@ -306,10 +288,8 @@ function loadLiveTextEditResizeHarness() {
     dirty: [],
     histories: [],
     renders: [],
+    animations: [],
     flushes: 0,
-    inputHistoryStarts: [],
-    inputHistoryRecords: [],
-    timeoutCallbacks: [],
     TextSelDebug: { _logSelection() {}, _logHit() {}, _logDraw() {} },
     document: {
       activeElement: null,
@@ -345,28 +325,25 @@ function loadLiveTextEditResizeHarness() {
     window: {
       getSelection() { return { removeAllRanges() {} }; },
     },
+    BoardfishMotion: {
+      applyCopyFeedback(payload) { context.animations.push(payload); },
+    },
     BoardfishEditorState: {
       removeObjectsById() {},
     },
-    beginTextEditHistoryAction(id, state) { context.inputHistoryStarts.push({ id, state }); },
+    beginTextEditHistoryAction() {},
     shouldCommitTextEditInputImmediately() { return false; },
-    recordTextEditInputHistory(id, inputType, hasSelection) { context.inputHistoryRecords.push({ id, inputType, hasSelection }); },
+    recordTextEditInputHistory() {},
     flushEditHistoryCheckpoint() { context.flushes++; return false; },
     markDirty(obj) { context.dirty.push(obj.id); },
     pushHistory(reason, dirty) { if (dirty) context.dirty.push(...dirty); context.histories.push(reason); },
     pushEditHistoryIfChanged() { return false; },
     scheduleRender(board, overlay, reason) { context.renders.push({ board, overlay, reason }); },
+    invalidateOffscreen() {},
     setInterval() { return 5; },
     clearInterval() {},
-    setTimeout(callback) { context.timeoutCallbacks.push(callback); return context.timeoutCallbacks.length; },
-    clearTimeout(id) { context.timeoutCallbacks[id - 1] = null; },
-    flushTimeouts() {
-      const callbacks = context.timeoutCallbacks;
-      context.timeoutCallbacks = [];
-      for (const callback of callbacks) callback?.();
-    },
+    clearTimeout() {},
   };
-  context.BoardfishBoardTypes = require('../src/js/board_types.js');
   vm.createContext(context);
   vm.runInContext(
     fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') +
@@ -426,224 +403,7 @@ function typeNativeText(proxy, text) {
   return before;
 }
 
-test('typing normalizes mixed input and maps the caret before the next ASCII character', () => {
-  const context = loadLiveTextEditResizeHarness();
-  context.obj.data.content = 'hello';
-  context.enterEdit(context.obj.id, { history: false });
-  context.proxy.setSelectionRange(1, 4, 'forward');
-
-  const before = typeNativeText(context.proxy, 'Aé🙂\tB\r\nC\u0000\u007f');
-
-  assert.equal(before.prevented, true);
-  assert.equal(context.obj.data.content, 'hA\tB\nCo');
-  assert.equal(context.proxy.value, context.obj.data.content);
-  assert.equal(context.proxy.selectionStart, 6);
-  assert.equal(context.proxy.selectionEnd, 6);
-  typeNativeText(context.proxy, 'X');
-  assert.equal(context.obj.data.content, 'hA\tB\nCXo');
-  assert.equal(context.proxy.selectionStart, 7);
-});
-
-test('unsupported typed characters leave the selected text and dirty state intact', () => {
-  const context = loadLiveTextEditResizeHarness();
-  context.obj.data.content = 'keep this';
-  context.enterEdit(context.obj.id, { history: false });
-  context.proxy.setSelectionRange(0, 4, 'backward');
-  context.dirty = [];
-
-  const before = typeNativeText(context.proxy, 'é🙂\u00a0\u0000');
-
-  assert.equal(before.prevented, true);
-  assert.equal(context.obj.data.content, 'keep this');
-  assert.equal(context.proxy.value, 'keep this');
-  assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd, context.proxy.selectionDirection], [0, 4, 'backward']);
-  assert.deepEqual(context.dirty, []);
-});
-
-test('standalone non-cancelable composition input filters characters without session events', () => {
-  for (const [inserted, expected, selection] of [
-    ['Aé🙂\tB', 'A\tB this', [3, 3]],
-    ['é🙂', 'keep this', [0, 4]],
-  ]) {
-    const context = loadLiveTextEditResizeHarness();
-    context.obj.data.content = 'keep this';
-    context.enterEdit(context.obj.id, { history: false });
-    context.proxy.setSelectionRange(0, 4, 'forward');
-    const before = { ...makeBeforeInputEvent('insertCompositionText', inserted), cancelable: false, isComposing: true };
-    context.proxy.dispatchEvent(before);
-    assert.equal(before.prevented, false);
-    context.proxy.setRangeText(inserted, 0, 4, 'end');
-    context.proxy.dispatchEvent({ type: 'input', inputType: 'insertCompositionText', data: inserted, isComposing: true });
-
-    assert.equal(context.obj.data.content, expected);
-    assert.equal(context.proxy.value, expected);
-    assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd], selection);
-  }
-});
-
-function updateNativeComposition(context, text, start, end) {
-  context.proxy.setSelectionRange(start, end);
-  context.proxy.dispatchEvent({
-    ...makeBeforeInputEvent('insertCompositionText', text), cancelable: false, isComposing: true,
-  });
-  context.proxy.setRangeText(text, start, end, 'end');
-  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertCompositionText', data: text, isComposing: true });
-}
-
-test('a filtered final composition restores the original selection instead of committing provisional ASCII', () => {
-  const context = loadLiveTextEditResizeHarness();
-  context.obj.data.content = 'keep this';
-  context.enterEdit(context.obj.id, { history: false });
-  context.proxy.setSelectionRange(0, 4, 'backward');
-  context.dirty = [];
-  context.proxy.dispatchEvent({ type: 'compositionstart', data: '' });
-
-  updateNativeComposition(context, 'e', 0, 4);
-  assert.equal(context.proxy.value, 'e this');
-  assert.equal(context.obj.data.content, 'keep this');
-  updateNativeComposition(context, 'é', 0, 1);
-  assert.equal(context.proxy.value, 'é this');
-  assert.equal(context.obj.data.content, 'keep this');
-  context.proxy.dispatchEvent({ type: 'compositionend', data: 'é' });
-
-  assert.equal(context.obj.data.content, 'keep this');
-  assert.equal(context.proxy.value, 'keep this');
-  assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd, context.proxy.selectionDirection], [0, 4, 'backward']);
-  assert.deepEqual(context.dirty, []);
-  assert.deepEqual(context.inputHistoryStarts, []);
-  assert.deepEqual(context.inputHistoryRecords, []);
-});
-
-test('canceling a composition restores selected text even after provisional ASCII input', () => {
-  const context = loadLiveTextEditResizeHarness();
-  context.obj.data.content = 'one keep two';
-  context.enterEdit(context.obj.id, { history: false });
-  context.proxy.setSelectionRange(4, 8, 'forward');
-  context.dirty = [];
-  context.proxy.dispatchEvent({ type: 'compositionstart', data: '' });
-  updateNativeComposition(context, 'temp', 4, 8);
-  context.proxy.dispatchEvent({ type: 'compositionend', data: '' });
-
-  assert.equal(context.obj.data.content, 'one keep two');
-  assert.equal(context.proxy.value, 'one keep two');
-  assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd], [4, 8]);
-  assert.deepEqual(context.dirty, []);
-  assert.deepEqual(context.inputHistoryRecords, []);
-});
-
-test('composition commits normalized final ASCII once and ignores a trailing native commit', () => {
-  for (const [finalText, inputType, sendBeforeInput] of [
-    ['abc', 'insertFromComposition', true],
-    ['Aé🙂\tB', 'insertText', true],
-    ['abc', 'insertText', false],
-  ]) {
-    const context = loadLiveTextEditResizeHarness();
-    context.obj.data.content = 'keep this';
-    context.enterEdit(context.obj.id, { history: false });
-    context.proxy.setSelectionRange(0, 4, 'forward');
-    context.dirty = [];
-    context.proxy.dispatchEvent({ type: 'compositionstart', data: '' });
-    updateNativeComposition(context, 'a', 0, 4);
-    updateNativeComposition(context, finalText, 0, 1);
-    assert.equal(context.obj.data.content, 'keep this');
-    context.proxy.dispatchEvent({ type: 'compositionend', data: finalText });
-    const normalized = context.BoardfishBoardTypes.normalizeTextContent(finalText);
-    const expected = `${normalized} this`;
-    assert.equal(context.obj.data.content, expected);
-    assert.equal(context.inputHistoryRecords.length, 1);
-    assert.equal(context.inputHistoryStarts.length, 1);
-    assert.equal(context.inputHistoryStarts[0].state.value, 'keep this');
-    assert.deepEqual([context.inputHistoryStarts[0].state.start, context.inputHistoryStarts[0].state.end], [0, 4]);
-
-    // Some engines dispatch a non-cancelable terminal input after end. Model
-    // and undo state must stay at the already committed, normalized result.
-    if (sendBeforeInput) {
-      context.proxy.dispatchEvent({ ...makeBeforeInputEvent(inputType, finalText), cancelable: false });
-    }
-    context.proxy.setRangeText(finalText, normalized.length, normalized.length, 'end');
-    context.proxy.dispatchEvent({ type: 'input', inputType, data: finalText, isComposing: false });
-    assert.equal(context.obj.data.content, expected);
-    assert.equal(context.proxy.value, expected);
-    assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd], [normalized.length, normalized.length]);
-    assert.equal(context.inputHistoryRecords.length, 1);
-    assert.equal(context.dirty.length, 1);
-  }
-});
-
-test('composition terminal guard expires before the next identical virtual-keyboard input', () => {
-  const context = loadLiveTextEditResizeHarness();
-  context.obj.data.content = '';
-  context.enterEdit(context.obj.id, { history: false });
-  context.proxy.dispatchEvent({ type: 'compositionstart', data: '' });
-  updateNativeComposition(context, 'a', 0, 0);
-  context.proxy.dispatchEvent({ type: 'compositionend', data: 'a' });
-  context.flushTimeouts();
-
-  typeNativeText(context.proxy, 'a');
-
-  assert.equal(context.obj.data.content, 'aa');
-  assert.equal(context.proxy.selectionStart, 2);
-  assert.equal(context.inputHistoryRecords.length, 2);
-});
-
-test('input without beforeinput derives the replaced range and normalizes selection offsets', () => {
-  for (const [inserted, expected, selection] of [
-    ['Aé🙂B', 'one AB three', [6, 6]],
-    ['é🙂', 'one two three', [4, 7]],
-  ]) {
-    const context = loadLiveTextEditResizeHarness();
-    context.obj.data.content = 'one two three';
-    context.enterEdit(context.obj.id, { history: false });
-    context.proxy.setRangeText(inserted, 4, 7, 'end');
-    context.proxy.dispatchEvent({ type: 'input', inputType: 'insertReplacementText', data: inserted });
-
-    assert.equal(context.obj.data.content, expected);
-    assert.equal(context.proxy.value, expected);
-    assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd], selection);
-  }
-});
-
-test('unsupported input after a deferred proxy restore cannot remove logical selected text', () => {
-  const context = loadLiveTextEditResizeHarness();
-  context.obj.data.content = 'keep removed';
-  context.enterEdit(context.obj.id, { history: false });
-  context.obj.data.content = 'keep';
-  context.setTextEditProxyLogicalValue(context.proxy, 'keep', false);
-  context.proxy.setSelectionRange(0, 4, 'forward');
-
-  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertText', data: '🙂' });
-
-  assert.equal(context.obj.data.content, 'keep');
-  assert.equal(context.proxy.value, 'keep');
-  assert.equal(context.proxy._boardfishDomValueStale, false);
-  assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd], [0, 4]);
-});
-
-test('external paste uses the same ASCII normalization as typing and rejects an unsupported-only payload', () => {
-  for (const [pasted, selected, expected, selection] of [
-    ['Aé🙂B\r\n\tC', false, 'one AB\n\tCtwo', [9, 9]],
-    ['é🙂\u00a0', true, 'one two', [4, 7]],
-  ]) {
-    const context = loadLiveTextEditResizeHarness();
-    context.obj.data.content = 'one two';
-    context.BoardfishClipboardIO = { readClipboardTextFromEvent: () => pasted };
-    context.enterEdit(context.obj.id, { history: false });
-    context.proxy.setSelectionRange(4, selected ? 7 : 4, 'forward');
-    const paste = {
-      type: 'paste', clipboardData: {}, defaultPrevented: false,
-      preventDefault() { this.defaultPrevented = true; },
-      stopPropagation() {},
-    };
-    context.proxy.dispatchEvent(paste);
-
-    assert.equal(paste.defaultPrevented, true);
-    assert.equal(context.obj.data.content, expected);
-    assert.equal(context.proxy.value, expected);
-    assert.deepEqual([context.proxy.selectionStart, context.proxy.selectionEnd], selection);
-  }
-});
-
-test('cmd+x copies highlighted text before deleting it', () => {
+test('cmd+x copies highlighted text without copy feedback before deleting it', async () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   const copiedTexts = [];
@@ -656,6 +416,9 @@ test('cmd+x copies highlighted text before deleting it', () => {
       return Promise.resolve({});
     },
   };
+  context.BoardfishMotion.cancelTextSelectionMotion = (id) => {
+    cutOperations.push(['cancel', id]);
+  };
 
   context.enterEdit(obj.id, { history: false });
   context.proxy.setSelectionRange(6, 10, 'forward');
@@ -664,24 +427,28 @@ test('cmd+x copies highlighted text before deleting it', () => {
   context.proxy.dispatchEvent(copy);
   assert.equal(copy.prevented, true);
   assert.deepEqual(copiedTexts, ['beta']);
-  assert.equal(context.proxy.value, 'alpha beta gamma');
-  assert.equal(context.proxy.selectionStart, 6);
-  assert.equal(context.proxy.selectionEnd, 10);
+  assert.equal(context.animations.length, 0);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(context.animations.length, 1);
+  assert.equal(context.animations[0].textSelection.id, obj.id);
 
+  context.animations.length = 0;
   cutOperations.length = 0;
   const cut = makeKeyEvent('x', { metaKey: true });
   context.proxy.dispatchEvent(cut);
 
   assert.equal(cut.prevented, true);
   assert.deepEqual(copiedTexts, ['beta', 'beta']);
-  assert.deepEqual(cutOperations, [['copy', 'beta']]);
+  assert.deepEqual(context.animations, []);
+  assert.deepEqual(cutOperations, [['cancel', obj.id], ['copy', 'beta']]);
   assert.equal(context.proxy.value, 'alpha  gamma');
   assert.equal(context.proxy.selectionStart, 6);
   assert.equal(context.proxy.selectionEnd, 6);
   assert.equal(obj.data.content, 'alpha  gamma');
 });
 
-test('cmd+right while editing moves to the current canvas line end', () => {
+test('cmd+arrow while editing is left to native caret navigation', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   obj.data = { content: 'one\ntwo\nthree' };
@@ -690,15 +457,17 @@ test('cmd+right while editing moves to the current canvas line end', () => {
   context.dirty.length = 0;
   context.histories.length = 0;
   context.renders.length = 0;
+  context.animations.length = 0;
   context.proxy.setSelectionRange(5, 5, 'none');
   const key = makeKeyEvent('ArrowRight', { metaKey: true });
   context.proxy.dispatchEvent(key);
 
-  assert.equal(key.prevented, true);
-  assert.equal(context.proxy.selectionStart, 7);
-  assert.equal(context.proxy.selectionEnd, 7);
+  assert.equal(key.prevented, false);
+  assert.equal(context.proxy.selectionStart, 5);
+  assert.equal(context.proxy.selectionEnd, 5);
   assert.deepEqual(context.dirty, []);
   assert.deepEqual(context.histories, []);
+  assert.deepEqual(context.animations, []);
 });
 
 test('option+arrow moves to word boundaries after typing inside a word', () => {
@@ -838,7 +607,7 @@ test('small proxy replacement starts from logical text when DOM value is stale',
 
 test('verified Boardfish text selection paste can use native textarea insertion', () => {
   const context = loadTextEditorIntegrationHelpers();
-  const { tryNativeExternalTextPaste } = context;
+  const { tryNativeBoardfishTextSelectionPaste } = context;
   const obj = {
     id: 'text-1',
     type: 'text',
@@ -866,7 +635,10 @@ test('verified Boardfish text selection paste can use native textarea insertion'
     },
   };
 
-  const result = tryNativeExternalTextPaste(obj.id, proxy, 'PASTE', {
+  const result = tryNativeBoardfishTextSelectionPaste(obj.id, proxy, {
+    type: 'text-selection',
+    text: 'PASTE',
+  }, {
     event: { clipboardData: {} },
     selection: { start: 6, end: 6, direction: 'none', hasSelection: false },
     fallbackText: 'PASTE',
@@ -879,7 +651,7 @@ test('verified Boardfish text selection paste can use native textarea insertion'
   assert.equal(pendingState.replacement.start, 6);
   assert.equal(pendingState.replacement.end, 6);
   assert.equal(pendingState.replacement.insertedText, 'PASTE');
-  assert.equal(pendingState.nativePasteEndMeta.path, 'event-text-native');
+  assert.equal(pendingState.nativePasteEndMeta.path, 'jsClipboard-text-selection-native');
   assert.equal(historyAction.id, obj.id);
 });
 
@@ -935,7 +707,7 @@ test('native Boardfish paste keeps pending state through beforeinput', () => {
 
   assert.equal(obj.data.content, 'hello Boardfish text');
   assert.ok(clipEvents.some((event) => event.step === 'text-edit-input:end'));
-  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'event-text-native'));
+  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'jsClipboard-text-selection-native'));
   assert.equal(clipEvents.some((event) => event.step === 'paste:text-edit-range-text-set'), false);
 });
 
@@ -990,8 +762,9 @@ test('external paste with stale Boardfish clipboard can use native textarea inse
   context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste', data: 'outside text' });
 
   assert.equal(obj.data.content, 'hello outside text');
+  assert.ok(clipEvents.some((event) => event.step === 'paste:text-edit-native-textarea-skipped'));
   assert.ok(clipEvents.some((event) => event.step === 'paste:text-edit-native-event-text-allowed'));
-  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'event-text-native'));
+  assert.ok(clipEvents.some((event) => event.step === 'end' && event.meta?.path === 'fallback-event-text-native'));
   assert.equal(clipEvents.some((event) => event.step === 'paste:text-edit-range-text-set'), false);
 });
 
@@ -1145,38 +918,6 @@ test('shift tab outdents selected text edit lines', () => {
   assert.equal(result.end, 13);
 });
 
-test('indentation updates preserve every cached logical line and its indices', () => {
-  const cases = [
-    { value: ' a\n b\n c', start: 3, end: 3, outdent: true, expected: ' a\nb\n c' },
-    { value: '    a\n\tb\n  c\nkeep', start: 0, end: 12, outdent: true, expected: 'a\nb\nc\nkeep' },
-    { value: 'a\nb\nc\nkeep', start: 1, end: 5, outdent: false, expected: '\ta\n\tb\n\tc\nkeep' },
-  ];
-  const summarize = (layout) => Array.from(layout, (line) => ({
-    text: line.text,
-    start: line.startIndex,
-    end: line.endIndex,
-    caretEnd: line.caretEndIndex,
-    logicalLine: line.logicalLineIndex,
-  }));
-  for (const scenario of cases) {
-    const context = loadLiveTextEditResizeHarness();
-    context.obj.data.content = scenario.value;
-    context.enterEdit(context.obj.id, { history: false });
-    context.getTextLayout(context.obj);
-    context.proxy.setSelectionRange(scenario.start, scenario.end);
-
-    context.proxy.dispatchEvent(makeKeyEvent('Tab', { shiftKey: scenario.outdent }));
-
-    assert.equal(context.obj.data.content, scenario.expected);
-    const fresh = {
-      id: 'fresh-layout', type: 'text', x: context.obj.x, y: context.obj.y,
-      w: context.obj.w, h: context.obj.h, data: { content: scenario.expected },
-    };
-    assert.deepEqual(summarize(context.getTextLayout(context.obj)), summarize(context.getTextLayout(fresh)));
-    assert.equal(context.obj.h, scenario.expected.split('\n').length * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  }
-});
-
 test('line indentation treats only LF as a line boundary', () => {
   const { applyTextEditLineIndent } = loadTextEditorHelpers();
   const value = 'alpha\u2028beta\ngamma\u2029delta';
@@ -1218,28 +959,6 @@ test('enter preserves mixed tab and space indentation', () => {
   });
 
   assert.equal(result.value, '\t  save rgba\n\t  ');
-});
-
-test('enter within leading whitespace preserves the moved text indentation', () => {
-  for (const [value, start, expected, caret] of [
-    ['    foo', 0, '\n    foo', 1],
-    ['    foo', 2, '  \n    foo', 5],
-    ['\t  foo', 0, '\n\t  foo', 1],
-    ['\t  foo', 1, '\t\n\t  foo', 3],
-  ]) {
-    const context = loadLiveTextEditResizeHarness();
-    context.obj.data.content = value;
-    context.enterEdit(context.obj.id, { history: false });
-    context.getTextLayout(context.obj);
-    context.proxy.setSelectionRange(start, start);
-
-    context.proxy.dispatchEvent(makeKeyEvent('Enter'));
-
-    assert.equal(context.obj.data.content, expected);
-    assert.equal(context.proxy.selectionStart, caret);
-    assert.equal(context.proxy.selectionEnd, caret);
-    assert.deepEqual(Array.from(context.getTextLayout(context.obj), (line) => line.text), expected.split('\n'));
-  }
 });
 
 test('enter replaces selected text using the first selected line indentation', () => {
@@ -1463,20 +1182,19 @@ test('enter expands a large existing text box immediately', () => {
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
 
-test('pasting another 100k characters expands an existing textbox and its outline immediately', () => {
+test('large existing text edit defers auto-height until exit', () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
-  const largeText = 'word '.repeat(20000);
+  const largeText = `${'word '.repeat(4100)}tail`;
   obj.data = { content: largeText };
   obj.w = 800;
-  obj.h = context.getTextLayout(obj).length * TEST_LINE_H + TEST_TEXT_PAD * 2;
-  const initialHeight = obj.h;
+  obj.h = 160;
 
   context.enterEdit(obj.id, { history: false });
   context.renders = [];
   context.dirty = [];
 
-  const insertedText = 'more '.repeat(20000);
+  const insertedText = ' pasted';
   const nextValue = largeText + insertedText;
   context.proxy._boardfishSetPendingInputState({
     start: largeText.length,
@@ -1492,30 +1210,13 @@ test('pasting another 100k characters expands an existing textbox and its outlin
   context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
 
   assert.equal(obj.data.content, nextValue);
-  assert.ok(obj.h > initialHeight);
-  assert.equal(obj.h, context.getTextLayout(obj).length * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
-  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
-
-  const pastedHeight = obj.h;
-  context.exitEdit();
-  assert.equal(obj.h, pastedHeight);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
-});
-
-test('ordinary single-character typing retains the large-text deferred sizing path', () => {
-  const context = loadLiveTextEditResizeHarness();
-  const { obj } = context;
-  obj.data.content = 'word '.repeat(5000);
-  context.enterEdit(obj.id, { history: false });
-  context.proxy.setSelectionRange(obj.data.content.length, obj.data.content.length);
-  const height = obj.h;
-
-  typeNativeText(context.proxy, 'X');
-
-  assert.equal(obj.h, height);
+  assert.equal(obj.h, 160);
   assert.equal(obj._textEditPendingSizeSync, true);
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: false, reason: undefined });
+
+  context.exitEdit();
+  assert.notEqual(obj.h, 160);
+  assert.equal(obj._textEditPendingSizeSync, undefined);
 });
 
 test('large pasted text shrinks after a cached line-removing delete', () => {
@@ -1545,8 +1246,8 @@ test('large pasted text shrinks after a cached line-removing delete', () => {
   context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
 
   assert.equal(obj.data.content, pastedValue);
-  assert.equal(obj.h, 51 * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
+  assert.equal(obj.h, 50 * TEST_LINE_H + TEST_TEXT_PAD * 2);
+  assert.equal(obj._textEditPendingSizeSync, true);
 
   context.getTextLayout(obj);
   const nextValue = pastedValue.split('\n').slice(0, 10).join('\n');
@@ -1597,8 +1298,8 @@ test('large pasted text shrinks after line-removing delete before layout cache e
   context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
 
   assert.equal(obj.data.content, pastedValue);
-  assert.equal(obj.h, 51 * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
+  assert.equal(obj.h, 50 * TEST_LINE_H + TEST_TEXT_PAD * 2);
+  assert.equal(obj._textEditPendingSizeSync, true);
   delete obj._layoutCache;
   delete obj._layoutCacheContent;
   delete obj._layoutCacheW;
@@ -1803,6 +1504,7 @@ test('exiting unchanged existing text keeps cached layout and skips size history
     _layoutCache: cachedLayout,
     _layoutCacheContent: 'Hi',
     _layoutCacheW: context.obj.w,
+    _layoutCacheScriptKey: '[]',
     _layoutCacheY: context.obj.y,
   });
   context._editHistoryLastContent = 'Hi';

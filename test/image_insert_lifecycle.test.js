@@ -126,6 +126,10 @@ function loadEditorStateBoundaryHarness() {
     normalizeTextContent(value) {
       return String(value || '');
     },
+    rebuildObjectsMap() {
+      context.objectsMap.clear();
+      for (const obj of context.objects) context.objectsMap.set(obj.id, obj);
+    },
     syncAllTextAutoHeights() {},
     updateInputShieldVisual() {},
   };
@@ -223,7 +227,7 @@ test('decoded image insertion owns its size cap after image layout removal', asy
   assert.equal('BoardfishImageLayout' in context, false);
 });
 
-test('editor selection changes reuse the existing selection set', () => {
+test('editor selection changes do not allocate motion snapshots', () => {
   const context = loadEditorStateBoundaryHarness();
   let allocations = 0;
   context.Set = class CountingSet extends Set {

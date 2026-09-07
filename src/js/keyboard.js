@@ -16,10 +16,11 @@ function isEditableTextShortcutTarget(target) {
   return !type || EDITABLE_INPUT_TYPES.has(type);
 }
 
-const hasSelectedImagesForKeyboardAction = () => {
+const hasSelectedImagesForKeyboardAction = (minimum = 1) => {
   if (!selectedIds?.size || !objectsMap?.get) return false;
+  let count = 0;
   for (const id of selectedIds) {
-    if (objectsMap.get(id)?.type === 'image') return true;
+    if (objectsMap.get(id)?.type === 'image' && ++count >= minimum) return true;
   }
   return false;
 };
@@ -136,6 +137,7 @@ document.addEventListener('keydown', (e) => {
     if (!editingId) {
       consumeShortcutEvent(e);
       runShortcutCommand('copy', copySelected);
+      return;
     }
     return;
   }
@@ -144,7 +146,7 @@ document.addEventListener('keydown', (e) => {
     if (!canTransformSelectedImagesFromKeyboard()) return;
     consumeShortcutEvent(e);
     runShortcutCommand('rotate-image', () => {
-      rotateSelectedImages();
+      rotateSelectedImages('cw');
     });
     return;
   }

@@ -3,10 +3,14 @@ var ClipDebug = (() => {
 
   const MAX_EVENTS = 2000;
 
+  function sanitize(value) {
+    return sanitizeDebugMeta(value);
+  }
+
   const core = createDebugRecorder({
     maxEvents: MAX_EVENTS,
     label: '[Boardfish clipboard]',
-    sanitize: sanitizeDebugMeta,
+    sanitize,
   });
   const events = core._events;
 
@@ -120,6 +124,9 @@ var ClipDebug = (() => {
       autoHeightForceSync: e.meta?.autoHeightForceSync ?? '',
       autoHeightForceReason: e.meta?.autoHeightForceReason || '',
       restoredMinLinesReset: e.meta?.restoredMinLinesReset ?? '',
+      restoredPreviousMinLines: e.meta?.restoredPreviousMinLines ?? '',
+      restoredPreservedMinLines: e.meta?.restoredPreservedMinLines ?? '',
+      restoredNextMinLines: e.meta?.restoredNextMinLines ?? '',
       pendingSizeSyncBeforeAutoHeight: e.meta?.pendingSizeSyncBeforeAutoHeight ?? '',
       pendingSizeSync: e.meta?.pendingSizeSync ?? '',
       inputStateObjectHeight: e.meta?.inputStateObjectHeight ?? '',
@@ -431,14 +438,16 @@ var ClipDebug = (() => {
     const pathDetected = webInsertEnd
       ? end?.meta?.path || 'web-paste-blob'
       : blobEvent
-        ? 'event-or-browser-blob'
+      ? 'event-or-browser-blob'
+      : stepNames.has('browser-clipboard-read:start')
+        ? 'browser-read'
         : stepNames.has('event-clipboard:inspect')
           ? 'paste-event'
           : 'unknown';
     const checkpoints = [
       ['pasteStarted', true],
       ['eventInspected', stepNames.has('event-clipboard:inspect') || !pasteStart.meta?.clipboardData],
-      ['imagePayloadFound', !!blobEvent || !!webInsertEnd],
+      ['imagePayloadFound', !!blobEvent || !!webInsertEnd || pathDetected === 'browser-read'],
       ['imagePayloadRead', !!blobEvent || !!webInsertEnd || pathDetected !== 'unknown'],
       ['objectAddStarted', !!addObject],
       ['pasteEndedAdded', end?.meta?.added === true || objectDelta > 0],
@@ -489,6 +498,7 @@ var ClipDebug = (() => {
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
     const cloneDone = latest('paste:clone-done');
     const trimDone = latest('paste:text-trim-done');
+    const objectLimitDone = latest('paste:object-limit-done');
     const contentLimitDone = latest('paste:content-limit-done');
     const historyStart = latest('paste:boardHistory-start');
     const historyDone = latest('paste:boardHistory-done');
@@ -511,6 +521,8 @@ var ClipDebug = (() => {
       cloneMs: cloneDone?.meta?.ms ?? '',
       trimMs: trimDone?.meta?.ms ?? '',
       trimmedTextObjects: trimDone?.meta?.trimmedTextObjects ?? '',
+      objectLimitMs: objectLimitDone?.meta?.ms ?? '',
+      objectLimitAccepted: objectLimitDone?.meta?.accepted ?? '',
       contentLimitMs: contentLimitDone?.meta?.ms ?? '',
       contentLimitAccepted: contentLimitDone?.meta?.accepted ?? '',
       additionalTextBytes: contentLimitDone?.meta?.additionalTextBytes ?? '',
@@ -555,6 +567,7 @@ var ClipDebug = (() => {
     const summarizePasteRun = (start) => {
       const runEvents = events.filter(e => e.id === start.id && e.op === start.op);
       const runLatest = (stepName) => [...runEvents].reverse().find(e => e.step === stepName);
+      const nativeAllowed = runLatest('paste:text-edit-native-textarea-allowed');
       const end = runLatest('end');
       const last = end || runEvents[runEvents.length - 1] || start;
       const inputEndForRun = runLatest('text-edit-input:end');
@@ -563,13 +576,15 @@ var ClipDebug = (() => {
       const inputMs = Number(inputEndForRun?.meta?.totalMs ?? inputEndForRun?.dt) || 0;
       const textareaMs = Number(rangeTextForRun?.meta?.textareaMutationMs ?? rangeTextForRun?.meta?.setRangeTextMs) || 0;
       let runVerdict = 'no >32ms paste/input stall captured';
-      if (inputMs > 32 || Number(dispatchForRun?.meta?.dispatchMs || 0) > 32) runVerdict = 'input handler slow';
+      if (nativeAllowed && !end) runVerdict = 'native paste allowed; waiting for input/end capture';
+      else if (inputMs > 32 || Number(dispatchForRun?.meta?.dispatchMs || 0) > 32) runVerdict = 'input handler slow';
       else if (textareaMs > 32) runVerdict = `textarea ${rangeTextForRun?.meta?.textareaMutationMethod || 'mutation'} slow`;
       return {
         id: start.id,
-        path: end?.meta?.path || '',
+        path: end?.meta?.path || (nativeAllowed ? 'jsClipboard-text-selection-native' : ''),
         pasted: end?.meta?.pasted ?? '',
         totalMs: end?.total ?? last?.total ?? '',
+        nativeAllowed: !!nativeAllowed,
         inputCaptured: !!inputEndForRun,
         fallbackTextChars: runLatest('paste:text-edit-event-read-done')?.meta?.fallbackTextChars ?? '',
         candidateTextLen: runLatest('paste:text-edit-event-read-done')?.meta?.candidateTextLen ?? '',
@@ -877,7 +892,9 @@ var HistoryDebug = (() => {
     maxCloneObjectsMs: 0,
   };
 
-  const round = round2;
+  function round(value) {
+    return round2(value);
+  }
 
   function sanitize(value) {
     return sanitizeDebugMeta(value, { redactPattern: null, roundNumbers: true });
@@ -946,6 +963,9 @@ var HistoryDebug = (() => {
       runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
       runtimeTextLineContentChars: e.meta?.runtimeTextLineContentChars ?? '',
       restoreCloneMs: e.meta?.cloneObjectsMs ?? '',
+      hydrateCandidates: e.meta?.candidates ?? '',
+      hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
+      hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
       replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
       enterEditMs: e.meta?.enterEditMs ?? '',
       renderScheduleMs: e.meta?.renderScheduleMs ?? '',
@@ -985,14 +1005,17 @@ var HistoryDebug = (() => {
         e.step === 'cloneObjects' ||
         e.step === 'clone-dirty-objects' ||
         e.step === 'clone-snapshot-objects' ||
+        e.step === 'hydrate-live-text-caches' ||
         e.step === 'replace-board-objects' ||
         e.step === 'restore-selection' ||
         e.step === 'renderAll-scheduled' ||
+        e.step === 'motion-replay' ||
         e.step === 'enter-edit-restored' ||
         e.step === 'restore-edit-caret' ||
         e.step === 'flush-edit-history' ||
         e.step === 'restore-done'
-      ) && (
+      ))
+      .filter(e => (
         Number(e.meta?.textCharCount || 0) ||
         Number(e.meta?.largestTextChars || 0) ||
         Number(e.meta?.runtimeTextLayoutLines || 0) ||
@@ -1027,14 +1050,29 @@ var HistoryDebug = (() => {
         selectionStart: e.meta?.selectionStart ?? '',
         selectionEnd: e.meta?.selectionEnd ?? '',
         cloneObjectsMs: e.meta?.cloneObjectsMs ?? '',
+        hydrateCandidates: e.meta?.candidates ?? '',
+        hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
+        hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
         replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
         enterEditMs: e.meta?.enterEditMs ?? '',
         reusedEditProxy: e.meta?.reusedEditProxy ?? '',
+        proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
+        proxyValueChanged: e.meta?.proxyValueChanged ?? '',
+        proxyValueSetMethod: e.meta?.proxyValueSetMethod ?? '',
         proxyDomSyncedForSelection: e.meta?.proxyDomSyncedForSelection ?? '',
         proxyDomSyncReason: e.meta?.proxyDomSyncReason ?? '',
         proxyDomSyncMs: e.meta?.proxyDomSyncMs ?? '',
         proxyDomCharsBeforeSelection: e.meta?.proxyDomCharsBeforeSelection ?? '',
         proxyDomCharsAfterSelection: e.meta?.proxyDomCharsAfterSelection ?? '',
+        proxyValueDiffMs: e.meta?.proxyValueDiffMs ?? '',
+        proxyValueMutationMs: e.meta?.proxyValueMutationMs ?? '',
+        proxyValueAssignMs: e.meta?.proxyValueAssignMs ?? '',
+        proxyValueInsertedChars: e.meta?.proxyValueInsertedChars ?? '',
+        proxyValueRemovedChars: e.meta?.proxyValueRemovedChars ?? '',
+        proxyValuePatchStart: e.meta?.proxyValuePatchStart ?? '',
+        proxyValuePatchEnd: e.meta?.proxyValuePatchEnd ?? '',
+        proxyValuePatchPrefixChars: e.meta?.proxyValuePatchPrefixChars ?? '',
+        proxyValuePatchSuffixChars: e.meta?.proxyValuePatchSuffixChars ?? '',
         setSelectionRangeMs: e.meta?.setSelectionRangeMs ?? '',
         focusMs: e.meta?.focusMs ?? '',
         focusSkipped: e.meta?.focusSkipped ?? '',
@@ -1102,16 +1140,32 @@ var HistoryDebug = (() => {
         runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
         runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
         cloneObjectsMs: e.meta?.cloneObjectsMs ?? '',
+        hydrateCandidates: e.meta?.candidates ?? '',
+        hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
+        hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
         replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
         setSelectionMs: e.meta?.setSelectionMs ?? '',
         renderScheduleMs: e.meta?.renderScheduleMs ?? '',
+        motionReplayMs: e.meta?.motionReplayMs ?? '',
         enterEditMs: e.meta?.enterEditMs ?? '',
         reusedEditProxy: e.meta?.reusedEditProxy ?? '',
+        proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
+        proxyValueChanged: e.meta?.proxyValueChanged ?? '',
+        proxyValueSetMethod: e.meta?.proxyValueSetMethod ?? '',
         proxyDomSyncedForSelection: e.meta?.proxyDomSyncedForSelection ?? '',
         proxyDomSyncReason: e.meta?.proxyDomSyncReason ?? '',
         proxyDomSyncMs: e.meta?.proxyDomSyncMs ?? '',
         proxyDomCharsBeforeSelection: e.meta?.proxyDomCharsBeforeSelection ?? '',
         proxyDomCharsAfterSelection: e.meta?.proxyDomCharsAfterSelection ?? '',
+        proxyValueDiffMs: e.meta?.proxyValueDiffMs ?? '',
+        proxyValueMutationMs: e.meta?.proxyValueMutationMs ?? '',
+        proxyValueAssignMs: e.meta?.proxyValueAssignMs ?? '',
+        proxyValueInsertedChars: e.meta?.proxyValueInsertedChars ?? '',
+        proxyValueRemovedChars: e.meta?.proxyValueRemovedChars ?? '',
+        proxyValuePatchStart: e.meta?.proxyValuePatchStart ?? '',
+        proxyValuePatchEnd: e.meta?.proxyValuePatchEnd ?? '',
+        proxyValuePatchPrefixChars: e.meta?.proxyValuePatchPrefixChars ?? '',
+        proxyValuePatchSuffixChars: e.meta?.proxyValuePatchSuffixChars ?? '',
         setSelectionRangeMs: e.meta?.setSelectionRangeMs ?? '',
         focusMs: e.meta?.focusMs ?? '',
         focusSkipped: e.meta?.focusSkipped ?? '',
@@ -1120,6 +1174,7 @@ var HistoryDebug = (() => {
         historyIndex: e.meta?.historyIndex ?? '',
       }));
     const max = (field) => rows.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
+    const sum = (field) => rows.reduce((value, row) => value + (Number(row[field]) || 0), 0);
     const endRows = rows.filter(row => row.step === 'end');
     const restoreEnds = endRows.filter(row => row.op === 'restoreSnapshot');
     const summaryOut = {
@@ -1131,11 +1186,19 @@ var HistoryDebug = (() => {
       maxOuterRestoreMs: max('restoreMs'),
       maxFlushMs: max('flushMs'),
       maxCloneObjectsMs: max('cloneObjectsMs'),
+      maxHydrateCandidates: max('hydrateCandidates'),
+      hydratedTextRuntimeCaches: sum('hydratedTextRuntimeCaches'),
+      hydratedTextLayoutCaches: sum('hydratedTextLayoutCaches'),
       maxReplaceBoardObjectsMs: max('replaceBoardObjectsMs'),
       maxEnterEditMs: max('enterEditMs'),
+      maxProxyValueSetMs: max('proxyValueSetMs'),
+      maxProxyValueDiffMs: max('proxyValueDiffMs'),
+      maxProxyValueMutationMs: max('proxyValueMutationMs'),
+      maxProxyValueAssignMs: max('proxyValueAssignMs'),
       maxSetSelectionRangeMs: max('setSelectionRangeMs'),
       maxFocusMs: max('focusMs'),
       maxRenderScheduleMs: max('renderScheduleMs'),
+      maxMotionReplayMs: max('motionReplayMs'),
       maxTextCharCount: max('textCharCount'),
       maxLargestTextChars: max('largestTextChars'),
       maxRuntimeTextLayoutLines: max('runtimeTextLayoutLines'),
@@ -1233,6 +1296,11 @@ var ViewportDebug = (() => {
     panZoomPanEvents: 0,
     panZoomZoomEvents: 0,
     panZoomBlockedEvents: 0,
+    motionEvents: 0,
+    motionJiggleStarts: 0,
+    motionJiggleProgressSamples: 0,
+    motionRafTicks: 0,
+    motionRenderSchedules: 0,
     frameScheduleEvents: 0,
     maxFrameScheduleSources: 0,
     maxPanDistancePx: 0,
@@ -1249,16 +1317,19 @@ var ViewportDebug = (() => {
     imageDecodes: 0,
     imageBitmaps: 0,
     imageBitmapFailures: 0,
+    imagePreviewPrepared: 0,
+    imagePreviewFailures: 0,
     imageDrawMissing: 0,
     imageDrawFallback: 0,
     imageDrawErrors: 0,
     croppedImages: 0,
     maxImageAddMs: 0,
     maxImageBitmapMs: 0,
+    maxImagePreviewMs: 0,
   };
   let lastRafAt = 0;
   let eventLoopTimer = null;
-  let eventLoopLastTick;
+  let eventLoopLastTick = 0;
   let longTaskObserver = null;
   let rawInputMonitorActive = false;
   const EVENT_LOOP_INTERVAL_MS = 50;
@@ -1323,6 +1394,7 @@ var ViewportDebug = (() => {
     if (!eventLoopTimer) return;
     clearInterval(eventLoopTimer);
     eventLoopTimer = null;
+    eventLoopLastTick = 0;
   }
 
   function startLongTaskObserver() {
@@ -1545,6 +1617,24 @@ var ViewportDebug = (() => {
     });
   }
 
+  function recordMotion(stepName, meta = {}) {
+    if (!enabled) return;
+    const payload = sanitize({
+      ...viewportStateMeta(),
+      ...meta,
+    });
+    stats.motionEvents++;
+    if (stepName === 'jiggle-start') stats.motionJiggleStarts++;
+    if (stepName === 'jiggle-progress') stats.motionJiggleProgressSamples++;
+    if (stepName === 'raf-fired') stats.motionRafTicks++;
+    if (stepName === 'render-scheduled') stats.motionRenderSchedules++;
+    push({
+      op: 'motion',
+      step: stepName,
+      meta: payload,
+    });
+  }
+
   function onRawInputCapture(event) {
     if (!enabled) return;
     try {
@@ -1578,7 +1668,7 @@ var ViewportDebug = (() => {
     startRawInputMonitor(options);
 
     if (options.verbose === true) setVerbose(true);
-    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["panZoomReport", "report", "summary", "frameSummary", "panZoomSummary", "panZoomTimeline", "wheelSummary", "drawSummary", "slowFrames", "eventLoopTimeline", "rawInputTimeline", "imageHealth", "dump"] }) to collect results.');
+    console.info('Boardfish viewport debugger enabled. Use finishDebug({ viewport: ["jiggleReport", "panZoomReport", "report", "summary", "frameSummary", "motionSummary", "motionTimeline", "panZoomSummary", "panZoomTimeline", "wheelSummary", "drawSummary", "slowFrames", "eventLoopTimeline", "rawInputTimeline", "imageHealth", "dump"] }) to collect results.');
   }
 
   function disable() {
@@ -1728,6 +1818,11 @@ var ViewportDebug = (() => {
       { metric: 'panZoomPanEvents', value: stats.panZoomPanEvents },
       { metric: 'panZoomZoomEvents', value: stats.panZoomZoomEvents },
       { metric: 'panZoomBlockedEvents', value: stats.panZoomBlockedEvents },
+      { metric: 'motionEvents', value: stats.motionEvents },
+      { metric: 'motionJiggleStarts', value: stats.motionJiggleStarts },
+      { metric: 'motionJiggleProgressSamples', value: stats.motionJiggleProgressSamples },
+      { metric: 'motionRafTicks', value: stats.motionRafTicks },
+      { metric: 'motionRenderSchedules', value: stats.motionRenderSchedules },
       { metric: 'frameScheduleEvents', value: stats.frameScheduleEvents },
       { metric: 'maxFrameScheduleSources', value: stats.maxFrameScheduleSources },
       { metric: 'maxPanDistancePx', value: Math.round(stats.maxPanDistancePx * 100) / 100 },
@@ -1742,12 +1837,15 @@ var ViewportDebug = (() => {
       { metric: 'imageDecodes', value: stats.imageDecodes },
       { metric: 'imageBitmaps', value: stats.imageBitmaps },
       { metric: 'imageBitmapFailures', value: stats.imageBitmapFailures },
+      { metric: 'imagePreviewPrepared', value: stats.imagePreviewPrepared },
+      { metric: 'imagePreviewFailures', value: stats.imagePreviewFailures },
       { metric: 'imageDrawMissing', value: stats.imageDrawMissing },
       { metric: 'imageDrawFallback', value: stats.imageDrawFallback },
       { metric: 'imageDrawErrors', value: stats.imageDrawErrors },
       { metric: 'croppedImages', value: stats.croppedImages },
       { metric: 'maxImageAddMs', value: Math.round(stats.maxImageAddMs * 100) / 100 },
       { metric: 'maxImageBitmapMs', value: Math.round(stats.maxImageBitmapMs * 100) / 100 },
+      { metric: 'maxImagePreviewMs', value: Math.round(stats.maxImagePreviewMs * 100) / 100 },
     ];
     console.table(rows);
     return rows;
@@ -2061,10 +2159,6 @@ var ViewportDebug = (() => {
           textRuns: e.meta?.textRuns ?? '',
           textPlanCacheHits: e.meta?.textPlanCacheHits ?? '',
           textPlanCacheMisses: e.meta?.textPlanCacheMisses ?? '',
-          textRasterCacheHits: e.meta?.textRasterCacheHits ?? '',
-          textRasterCacheMisses: e.meta?.textRasterCacheMisses ?? '',
-          textRasterizedDrawCalls: e.meta?.textRasterizedDrawCalls ?? '',
-          textRasterDrawCalls: e.meta?.textRasterDrawCalls ?? '',
           textLineDrawMs: e.meta?.textLineDrawMs ?? '',
           maxTextLineDrawMs: e.meta?.maxTextLineDrawMs ?? '',
           slowTextLineDrawCount: e.meta?.slowTextLineDrawCount ?? '',
@@ -2074,6 +2168,8 @@ var ViewportDebug = (() => {
           culledImages: e.meta?.culledImages ?? '',
           culledText: e.meta?.culledText ?? '',
           scaledImages: e.meta?.scaledImages ?? '',
+          openPreviewImages: e.meta?.openPreviewImages ?? '',
+          dynamicOpenPreviewRequests: e.meta?.dynamicOpenPreviewRequests ?? '',
           scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
           activeInputFullFallbackImages: e.meta?.activeInputFullFallbackImages ?? '',
           scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
@@ -2109,14 +2205,27 @@ var ViewportDebug = (() => {
         drawMs: e.steps?.drawBoard?.ms ?? e.steps?.drawBoard?.meta?.totalMeasuredMs ?? 0,
         objectLoopMs: e.steps?.drawBoard?.meta?.objectLoopMs ?? 0,
         croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? 0,
+        openPreviewImages: e.steps?.drawBoard?.meta?.openPreviewImages ?? 0,
+        dynamicOpenPreviewRequests: e.steps?.drawBoard?.meta?.dynamicOpenPreviewRequests ?? 0,
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? 0,
         activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? 0,
+        motionObjects: e.steps?.drawBoard?.meta?.motionObjects ?? 0,
+        motionImages: e.steps?.drawBoard?.meta?.motionImages ?? 0,
+        motionText: e.steps?.drawBoard?.meta?.motionText ?? 0,
+        motionTranslatedObjects: e.steps?.drawBoard?.meta?.motionTranslatedObjects ?? 0,
+        motionScaledObjects: e.steps?.drawBoard?.meta?.motionScaledObjects ?? 0,
+        lowLatencyImageDraws: e.steps?.drawBoard?.meta?.lowLatencyImageDraws ?? 0,
+        motionScaledImages: e.steps?.drawBoard?.meta?.motionScaledImages ?? 0,
+        motionFullScaleImages: e.steps?.drawBoard?.meta?.motionFullScaleImages ?? 0,
+        motionFullFallbackImages: e.steps?.drawBoard?.meta?.motionFullFallbackImages ?? 0,
+        motionActiveInputFullFallbackImages: e.steps?.drawBoard?.meta?.motionActiveInputFullFallbackImages ?? 0,
         imageSourceFirstDraws: e.steps?.drawBoard?.meta?.imageSourceFirstDraws ?? 0,
         imageSourceWarmDraws: e.steps?.drawBoard?.meta?.imageSourceWarmDraws ?? 0,
         imageContextFirstDraws: e.steps?.drawBoard?.meta?.imageContextFirstDraws ?? 0,
         imageContextWarmDraws: e.steps?.drawBoard?.meta?.imageContextWarmDraws ?? 0,
         scaledImageContextFirstDraws: e.steps?.drawBoard?.meta?.scaledImageContextFirstDraws ?? 0,
         fullScaleImageContextFirstDraws: e.steps?.drawBoard?.meta?.fullScaleImageContextFirstDraws ?? 0,
+        openPreviewImageContextFirstDraws: e.steps?.drawBoard?.meta?.openPreviewImageContextFirstDraws ?? 0,
         drawnTextLines: e.steps?.drawBoard?.meta?.drawnTextLines ?? 0,
         culledTextLines: e.steps?.drawBoard?.meta?.culledTextLines ?? 0,
         textDrawUnits: e.steps?.drawBoard?.meta?.textDrawUnits ?? 0,
@@ -2126,10 +2235,6 @@ var ViewportDebug = (() => {
         textSkippedSpaces: e.steps?.drawBoard?.meta?.textSkippedSpaces ?? 0,
         textPlanCacheHits: e.steps?.drawBoard?.meta?.textPlanCacheHits ?? 0,
         textPlanCacheMisses: e.steps?.drawBoard?.meta?.textPlanCacheMisses ?? 0,
-        textRasterCacheHits: e.steps?.drawBoard?.meta?.textRasterCacheHits ?? 0,
-        textRasterCacheMisses: e.steps?.drawBoard?.meta?.textRasterCacheMisses ?? 0,
-        textRasterizedDrawCalls: e.steps?.drawBoard?.meta?.textRasterizedDrawCalls ?? 0,
-        textRasterDrawCalls: e.steps?.drawBoard?.meta?.textRasterDrawCalls ?? 0,
         textLineDrawMs: e.steps?.drawBoard?.meta?.textLineDrawMs ?? 0,
         maxTextLineDrawMs: e.steps?.drawBoard?.meta?.maxTextLineDrawMs ?? 0,
         slowTextLineDrawCount: e.steps?.drawBoard?.meta?.slowTextLineDrawCount ?? 0,
@@ -2188,10 +2293,34 @@ var ViewportDebug = (() => {
       maxScaledImages: max('scaledImages'),
       avgFullScaleImages: draws.length ? Math.round(sum('fullScaleImages') / draws.length * 100) / 100 : 0,
       maxFullScaleImages: max('fullScaleImages'),
+      avgOpenPreviewImages: draws.length ? Math.round(sum('openPreviewImages') / draws.length * 100) / 100 : 0,
+      maxOpenPreviewImages: max('openPreviewImages'),
+      avgDynamicOpenPreviewRequests: draws.length ? Math.round(sum('dynamicOpenPreviewRequests') / draws.length * 100) / 100 : 0,
+      maxDynamicOpenPreviewRequests: Math.max(max('dynamicOpenPreviewRequests'), slowMax('dynamicOpenPreviewRequests')),
       avgScaledFallbackFull: draws.length ? Math.round(sum('scaledFallbackFull') / draws.length * 100) / 100 : 0,
       maxScaledFallbackFull: Math.max(max('scaledFallbackFull'), slowMax('scaledFallbackFull')),
       avgActiveInputFullFallbackImages: draws.length ? Math.round(sum('activeInputFullFallbackImages') / draws.length * 100) / 100 : 0,
       maxActiveInputFullFallbackImages: Math.max(max('activeInputFullFallbackImages'), slowMax('activeInputFullFallbackImages')),
+      avgMotionObjects: draws.length ? Math.round(sum('motionObjects') / draws.length * 100) / 100 : 0,
+      maxMotionObjects: Math.max(max('motionObjects'), slowMax('motionObjects')),
+      avgMotionImages: draws.length ? Math.round(sum('motionImages') / draws.length * 100) / 100 : 0,
+      maxMotionImages: Math.max(max('motionImages'), slowMax('motionImages')),
+      avgMotionText: draws.length ? Math.round(sum('motionText') / draws.length * 100) / 100 : 0,
+      maxMotionText: Math.max(max('motionText'), slowMax('motionText')),
+      avgMotionTranslatedObjects: draws.length ? Math.round(sum('motionTranslatedObjects') / draws.length * 100) / 100 : 0,
+      maxMotionTranslatedObjects: Math.max(max('motionTranslatedObjects'), slowMax('motionTranslatedObjects')),
+      avgMotionScaledObjects: draws.length ? Math.round(sum('motionScaledObjects') / draws.length * 100) / 100 : 0,
+      maxMotionScaledObjects: Math.max(max('motionScaledObjects'), slowMax('motionScaledObjects')),
+      avgLowLatencyImageDraws: draws.length ? Math.round(sum('lowLatencyImageDraws') / draws.length * 100) / 100 : 0,
+      maxLowLatencyImageDraws: Math.max(max('lowLatencyImageDraws'), slowMax('lowLatencyImageDraws')),
+      avgMotionScaledImages: draws.length ? Math.round(sum('motionScaledImages') / draws.length * 100) / 100 : 0,
+      maxMotionScaledImages: Math.max(max('motionScaledImages'), slowMax('motionScaledImages')),
+      avgMotionFullScaleImages: draws.length ? Math.round(sum('motionFullScaleImages') / draws.length * 100) / 100 : 0,
+      maxMotionFullScaleImages: Math.max(max('motionFullScaleImages'), slowMax('motionFullScaleImages')),
+      avgMotionFullFallbackImages: draws.length ? Math.round(sum('motionFullFallbackImages') / draws.length * 100) / 100 : 0,
+      maxMotionFullFallbackImages: Math.max(max('motionFullFallbackImages'), slowMax('motionFullFallbackImages')),
+      avgMotionActiveInputFullFallbackImages: draws.length ? Math.round(sum('motionActiveInputFullFallbackImages') / draws.length * 100) / 100 : 0,
+      maxMotionActiveInputFullFallbackImages: Math.max(max('motionActiveInputFullFallbackImages'), slowMax('motionActiveInputFullFallbackImages')),
       avgScaledVariantPendingImages: draws.length ? Math.round(sum('scaledVariantPendingImages') / draws.length * 100) / 100 : 0,
       maxScaledVariantPendingImages: max('scaledVariantPendingImages'),
       avgScaledImageScale: sum('scaledImages') ? Math.round(sum('scaledImageScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
@@ -2208,10 +2337,13 @@ var ViewportDebug = (() => {
       maxScaledImageContextFirstDraws: Math.max(max('scaledImageContextFirstDraws'), slowMax('scaledImageContextFirstDraws')),
       avgFullScaleImageContextFirstDraws: draws.length ? Math.round(sum('fullScaleImageContextFirstDraws') / draws.length * 100) / 100 : 0,
       maxFullScaleImageContextFirstDraws: Math.max(max('fullScaleImageContextFirstDraws'), slowMax('fullScaleImageContextFirstDraws')),
+      avgOpenPreviewImageContextFirstDraws: draws.length ? Math.round(sum('openPreviewImageContextFirstDraws') / draws.length * 100) / 100 : 0,
+      maxOpenPreviewImageContextFirstDraws: Math.max(max('openPreviewImageContextFirstDraws'), slowMax('openPreviewImageContextFirstDraws')),
       avgMissingImages: draws.length ? Math.round(sum('missingImages') / draws.length * 100) / 100 : 0,
       maxMissingImages: max('missingImages'),
       avgErroredImages: draws.length ? Math.round(sum('erroredImages') / draws.length * 100) / 100 : 0,
       avgCroppedImages: draws.length ? Math.round(sum('croppedImages') / draws.length * 100) / 100 : 0,
+      maxRetainedSlowOpenPreviewImages: slowMax('openPreviewImages'),
       maxRetainedSlowCroppedImages: slowMax('croppedImages'),
       avgDrawnText: draws.length ? Math.round(sum('drawnText') / draws.length * 100) / 100 : 0,
       avgCulledText: draws.length ? Math.round(sum('culledText') / draws.length * 100) / 100 : 0,
@@ -2243,14 +2375,6 @@ var ViewportDebug = (() => {
       maxTextPlanCacheHits: Math.max(max('textPlanCacheHits'), slowMax('textPlanCacheHits')),
       avgTextPlanCacheMisses: draws.length ? Math.round(sum('textPlanCacheMisses') / draws.length * 100) / 100 : 0,
       maxTextPlanCacheMisses: Math.max(max('textPlanCacheMisses'), slowMax('textPlanCacheMisses')),
-      avgTextRasterCacheHits: draws.length ? Math.round(sum('textRasterCacheHits') / draws.length * 100) / 100 : 0,
-      maxTextRasterCacheHits: Math.max(max('textRasterCacheHits'), slowMax('textRasterCacheHits')),
-      avgTextRasterCacheMisses: draws.length ? Math.round(sum('textRasterCacheMisses') / draws.length * 100) / 100 : 0,
-      maxTextRasterCacheMisses: Math.max(max('textRasterCacheMisses'), slowMax('textRasterCacheMisses')),
-      avgTextRasterizedDrawCalls: draws.length ? Math.round(sum('textRasterizedDrawCalls') / draws.length * 100) / 100 : 0,
-      maxTextRasterizedDrawCalls: Math.max(max('textRasterizedDrawCalls'), slowMax('textRasterizedDrawCalls')),
-      avgTextRasterDrawCalls: draws.length ? Math.round(sum('textRasterDrawCalls') / draws.length * 100) / 100 : 0,
-      maxTextRasterDrawCalls: Math.max(max('textRasterDrawCalls'), slowMax('textRasterDrawCalls')),
       avgTextLineDrawMs: draws.length ? Math.round(sum('textLineDrawMs') / draws.length * 100) / 100 : 0,
       maxTextLineDrawMs: Math.round(Math.max(max('maxTextLineDrawMs'), slowMax('maxTextLineDrawMs')) * 100) / 100,
       maxSlowTextLineDrawCount: Math.max(max('slowTextLineDrawCount'), slowMax('slowTextLineDrawCount')),
@@ -2392,6 +2516,8 @@ var ViewportDebug = (() => {
       drawWarmupFullImageWarmed: drawableBitmapWarmupWarmedByKind.fullImage || 0,
       drawWarmupScaledVariantQueued: drawableBitmapWarmupQueuedByKind.scaledVariant || 0,
       drawWarmupScaledVariantWarmed: drawableBitmapWarmupWarmedByKind.scaledVariant || 0,
+      drawWarmupOpenPreviewQueued: drawableBitmapWarmupQueuedByKind.openPreview || 0,
+      drawWarmupOpenPreviewWarmed: drawableBitmapWarmupWarmedByKind.openPreview || 0,
       levels: IMAGE_SCALE_LEVELS.join(','),
       supported: VIEWPORT_IMAGE_SCALING_SUPPORTED,
       enabled: viewportImageScalingEnabled,
@@ -2498,10 +2624,6 @@ var ViewportDebug = (() => {
         textSkippedSpaces: e.steps?.drawBoard?.meta?.textSkippedSpaces ?? '',
         textPlanCacheHits: e.steps?.drawBoard?.meta?.textPlanCacheHits ?? '',
         textPlanCacheMisses: e.steps?.drawBoard?.meta?.textPlanCacheMisses ?? '',
-        textRasterCacheHits: e.steps?.drawBoard?.meta?.textRasterCacheHits ?? '',
-        textRasterCacheMisses: e.steps?.drawBoard?.meta?.textRasterCacheMisses ?? '',
-        textRasterizedDrawCalls: e.steps?.drawBoard?.meta?.textRasterizedDrawCalls ?? '',
-        textRasterDrawCalls: e.steps?.drawBoard?.meta?.textRasterDrawCalls ?? '',
         textLineDrawMs: e.steps?.drawBoard?.meta?.textLineDrawMs ?? '',
         maxTextLineDrawMs: e.steps?.drawBoard?.meta?.maxTextLineDrawMs ?? '',
         slowTextLineDrawCount: e.steps?.drawBoard?.meta?.slowTextLineDrawCount ?? '',
@@ -2524,14 +2646,27 @@ var ViewportDebug = (() => {
         bitmapImages: e.steps?.drawBoard?.meta?.bitmapImages ?? '',
         elementImages: e.steps?.drawBoard?.meta?.elementImages ?? '',
         scaledImages: e.steps?.drawBoard?.meta?.scaledImages ?? '',
+        openPreviewImages: e.steps?.drawBoard?.meta?.openPreviewImages ?? '',
+        dynamicOpenPreviewRequests: e.steps?.drawBoard?.meta?.dynamicOpenPreviewRequests ?? '',
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? '',
         activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? '',
+        motionObjects: e.steps?.drawBoard?.meta?.motionObjects ?? '',
+        motionImages: e.steps?.drawBoard?.meta?.motionImages ?? '',
+        motionText: e.steps?.drawBoard?.meta?.motionText ?? '',
+        motionTranslatedObjects: e.steps?.drawBoard?.meta?.motionTranslatedObjects ?? '',
+        motionScaledObjects: e.steps?.drawBoard?.meta?.motionScaledObjects ?? '',
+        lowLatencyImageDraws: e.steps?.drawBoard?.meta?.lowLatencyImageDraws ?? '',
+        motionScaledImages: e.steps?.drawBoard?.meta?.motionScaledImages ?? '',
+        motionFullScaleImages: e.steps?.drawBoard?.meta?.motionFullScaleImages ?? '',
+        motionFullFallbackImages: e.steps?.drawBoard?.meta?.motionFullFallbackImages ?? '',
+        motionActiveInputFullFallbackImages: e.steps?.drawBoard?.meta?.motionActiveInputFullFallbackImages ?? '',
         imageSourceFirstDraws: e.steps?.drawBoard?.meta?.imageSourceFirstDraws ?? '',
         imageSourceWarmDraws: e.steps?.drawBoard?.meta?.imageSourceWarmDraws ?? '',
         imageContextFirstDraws: e.steps?.drawBoard?.meta?.imageContextFirstDraws ?? '',
         imageContextWarmDraws: e.steps?.drawBoard?.meta?.imageContextWarmDraws ?? '',
         scaledImageContextFirstDraws: e.steps?.drawBoard?.meta?.scaledImageContextFirstDraws ?? '',
         fullScaleImageContextFirstDraws: e.steps?.drawBoard?.meta?.fullScaleImageContextFirstDraws ?? '',
+        openPreviewImageContextFirstDraws: e.steps?.drawBoard?.meta?.openPreviewImageContextFirstDraws ?? '',
         scaledVariantPendingImages: e.steps?.drawBoard?.meta?.scaledVariantPendingImages ?? '',
         fullScaleImages: e.steps?.drawBoard?.meta?.fullScaleImages ?? '',
         missingImages: e.steps?.drawBoard?.meta?.missingImages ?? '',
@@ -2672,6 +2807,258 @@ var ViewportDebug = (() => {
     return rows;
   }
 
+  function sourceIncludesMotion(value) {
+    return String(value || '').split(',').map(item => item.trim()).includes('motion') ||
+      String(value || '').includes('motion');
+  }
+
+  function motionRows() {
+    return events
+      .filter(e => e.op === 'motion')
+      .map(e => ({ at: e.at, step: e.step, ...(e.meta || {}) }));
+  }
+
+  function motionFrameRows() {
+    const starts = new Map();
+    for (const e of events) {
+      if (e.op === 'frame' && e.step === 'start') starts.set(e.id, { at: e.at, ...(e.meta || {}) });
+    }
+    return events
+      .filter(e => e.op === 'frame' && e.step === 'end')
+      .map(e => {
+        const startMeta = starts.get(e.id) || {};
+        const source = e.meta?.sources || startMeta.inputSource || '';
+        return {
+          id: e.id,
+          at: e.at,
+          source,
+          queueMs: startMeta.queueMs ?? '',
+          inputAgeMs: startMeta.inputAgeMs ?? '',
+          rafGap: startMeta.rafGap ?? '',
+          frameMs: e.meta?.frameMs ?? '',
+          doTransform: e.meta?.doTransform ?? '',
+          doBoard: e.meta?.doBoard ?? '',
+          doOverlay: e.meta?.doOverlay ?? '',
+          slow: e.meta?.slow ?? '',
+        };
+      })
+      .filter(row => sourceIncludesMotion(row.source));
+  }
+
+  function motionDrawRows() {
+    return events
+      .filter(e => e.op === 'drawBoard' && e.step === 'end' && !e.meta?.skipped && sourceIncludesMotion(e.meta?.source))
+      .map(e => ({
+        at: e.at,
+        drawMs: e.meta?.totalMeasuredMs ?? e.total ?? '',
+        objectLoopMs: e.meta?.objectLoopMs ?? '',
+        drawnImages: e.meta?.drawnImages ?? '',
+        drawnText: e.meta?.drawnText ?? '',
+        motionObjects: e.meta?.motionObjects ?? '',
+        motionImages: e.meta?.motionImages ?? '',
+        motionText: e.meta?.motionText ?? '',
+        motionTranslatedObjects: e.meta?.motionTranslatedObjects ?? '',
+        motionScaledObjects: e.meta?.motionScaledObjects ?? '',
+        lowLatencyImageDraws: e.meta?.lowLatencyImageDraws ?? '',
+        motionScaledImages: e.meta?.motionScaledImages ?? '',
+        motionFullScaleImages: e.meta?.motionFullScaleImages ?? '',
+        motionFullFallbackImages: e.meta?.motionFullFallbackImages ?? '',
+        motionActiveInputFullFallbackImages: e.meta?.motionActiveInputFullFallbackImages ?? '',
+        scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
+        activeInputFullFallbackImages: e.meta?.activeInputFullFallbackImages ?? '',
+        scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
+        croppedImages: e.meta?.croppedImages ?? '',
+        imageSourceFirstDraws: e.meta?.imageSourceFirstDraws ?? '',
+        imageSourceWarmDraws: e.meta?.imageSourceWarmDraws ?? '',
+        imageContextFirstDraws: e.meta?.imageContextFirstDraws ?? '',
+        imageContextWarmDraws: e.meta?.imageContextWarmDraws ?? '',
+        slowDrawObjects: (e.meta?.slowDrawObjects || []).map(row => ({ ...row })),
+      }));
+  }
+
+  function motionSummary() {
+    const rows = motionRows();
+    const starts = rows.filter(row => row.step === 'jiggle-start' || row.step === 'jello-start');
+    const jiggleStarts = rows.filter(row => row.step === 'jiggle-start');
+    const progress = rows.filter(row => row.step === 'jiggle-progress' || row.step === 'jello-progress');
+    const rafFired = rows.filter(row => row.step === 'raf-fired');
+    const renderScheduled = rows.filter(row => row.step === 'render-scheduled');
+    const frames = motionFrameRows();
+    const draws = motionDrawRows();
+    const progressGaps = [];
+    const lastProgressById = new Map();
+    for (const row of progress) {
+      const key = `${row.id || ''}:${row.objectType || ''}`;
+      const previousAt = lastProgressById.get(key);
+      if (previousAt != null) progressGaps.push(row.at - previousAt);
+      lastProgressById.set(key, row.at);
+    }
+    const firstProgressLatencies = [];
+    for (const start of starts) {
+      const match = progress.find(row => row.at >= start.at && row.id === start.id && row.objectType === start.objectType);
+      if (match) firstProgressLatencies.push(match.at - start.at);
+    }
+    const sumValues = (items, field) => items.reduce((value, row) => value + (Number(row[field]) || 0), 0);
+    const maxValue = (items, field) => items.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
+    const sumList = (items) => items.reduce((value, item) => value + (Number(item) || 0), 0);
+    const maxList = (items) => items.reduce((value, item) => Math.max(value, Number(item) || 0), 0);
+    const out = {
+      motionEvents: rows.length,
+      starts: starts.length,
+      jiggleStarts: jiggleStarts.length,
+      imageJiggleStarts: jiggleStarts.filter(row => row.objectType === 'image').length,
+      textJiggleStarts: jiggleStarts.filter(row => row.objectType === 'text').length,
+      textSelectionJiggleStarts: jiggleStarts.filter(row => row.objectType === 'text-selection').length,
+      progressSamples: progress.length,
+      rafTicks: rafFired.length,
+      renderSchedules: renderScheduled.length,
+      motionFrames: frames.length,
+      slowMotionFramesOver16ms: frames.filter(row => row.slow || Number(row.frameMs) > 16.7).length,
+      motionDraws: draws.length,
+      avgMotionFrameMs: frames.length ? round(sumValues(frames, 'frameMs') / frames.length) : 0,
+      maxMotionFrameMs: round(maxValue(frames, 'frameMs')),
+      avgMotionRafGapMs: frames.length ? round(sumValues(frames, 'rafGap') / frames.length) : 0,
+      maxMotionRafGapMs: round(maxValue(frames, 'rafGap')),
+      avgMotionQueueMs: frames.length ? round(sumValues(frames, 'queueMs') / frames.length) : 0,
+      maxMotionQueueMs: round(maxValue(frames, 'queueMs')),
+      avgProgressGapMs: progressGaps.length ? round(sumList(progressGaps) / progressGaps.length) : 0,
+      maxProgressGapMs: round(maxList(progressGaps)),
+      progressGapsOver16ms: progressGaps.filter(gap => gap > 16.7).length,
+      progressGapsOver32ms: progressGaps.filter(gap => gap > 32).length,
+      avgFirstProgressLatencyMs: firstProgressLatencies.length ? round(sumList(firstProgressLatencies) / firstProgressLatencies.length) : 0,
+      maxFirstProgressLatencyMs: round(maxList(firstProgressLatencies)),
+      avgMotionDrawMs: draws.length ? round(sumValues(draws, 'drawMs') / draws.length) : 0,
+      maxMotionDrawMs: round(maxValue(draws, 'drawMs')),
+      avgMotionObjectLoopMs: draws.length ? round(sumValues(draws, 'objectLoopMs') / draws.length) : 0,
+      maxMotionObjectLoopMs: round(maxValue(draws, 'objectLoopMs')),
+      maxMotionImages: maxValue(draws, 'motionImages'),
+      maxLowLatencyImageDraws: maxValue(draws, 'lowLatencyImageDraws'),
+      maxMotionScaledImages: maxValue(draws, 'motionScaledImages'),
+      maxMotionFullScaleImages: maxValue(draws, 'motionFullScaleImages'),
+      maxMotionFullFallbackImages: maxValue(draws, 'motionFullFallbackImages'),
+      maxMotionActiveInputFullFallbackImages: maxValue(draws, 'motionActiveInputFullFallbackImages'),
+      maxScaledVariantPendingImages: maxValue(draws, 'scaledVariantPendingImages'),
+      firstAt: rows[0]?.at ?? '',
+      lastAt: rows[rows.length - 1]?.at ?? '',
+      durationMs: rows.length > 1 ? round(rows[rows.length - 1].at - rows[0].at) : 0,
+    };
+    console.table([out]);
+    return out;
+  }
+
+  function motionTimeline(options = {}) {
+    const opts = options && typeof options === 'object' ? options : { limit: options };
+    const limit = Math.max(1, Number(opts.limit) || 240);
+    const motionEvents = motionRows();
+    if (!motionEvents.length) {
+      console.table([]);
+      return [];
+    }
+    const firstAt = motionEvents[0]?.at ?? -Infinity;
+    const lastAt = motionEvents[motionEvents.length - 1]?.at ?? Infinity;
+    const windowStart = Number.isFinite(Number(opts.beforeMs)) ? firstAt - Number(opts.beforeMs) : firstAt;
+    const windowEnd = Number.isFinite(Number(opts.afterMs)) ? lastAt + Number(opts.afterMs) : lastAt + 80;
+    const timeline = [];
+    for (const row of motionEvents) {
+      timeline.push({
+        at: row.at,
+        kind: 'motion',
+        step: row.step,
+        id: row.id || '',
+        objectType: row.objectType || '',
+        action: row.action || '',
+        t: row.t ?? '',
+        translateX: row.translateX ?? '',
+        translateY: row.translateY ?? '',
+        scaleX: row.scaleX ?? '',
+        scaleY: row.scaleY ?? '',
+        opacity: row.opacity ?? '',
+        waitMs: row.waitMs ?? '',
+        duration: row.duration ?? '',
+        jelloObjectMotions: row.jelloObjectMotions ?? '',
+        textSelectionJelloMotions: row.textSelectionJelloMotions ?? '',
+      });
+    }
+    for (const e of events) {
+      if (e.at < windowStart || e.at > windowEnd) continue;
+      if (e.op === 'frameSchedule' && (sourceIncludesMotion(e.meta?.source) || sourceIncludesMotion(e.meta?.inputSource))) {
+        timeline.push({
+          at: e.at,
+          kind: 'frameSchedule',
+          step: e.step,
+          source: e.meta?.source || '',
+          pendingSources: e.meta?.pendingSources ?? '',
+          rafPending: e.meta?.rafPending ?? '',
+          needBoardRender: e.meta?.needBoardRender ?? '',
+          needOverlayRender: e.meta?.needOverlayRender ?? '',
+        });
+      } else if (e.op === 'frame' && e.step === 'end' && sourceIncludesMotion(e.meta?.sources)) {
+        timeline.push({
+          at: e.at,
+          kind: 'frame',
+          step: 'end',
+          source: e.meta?.sources || '',
+          frameMs: e.meta?.frameMs ?? '',
+          doBoard: e.meta?.doBoard ?? '',
+          doOverlay: e.meta?.doOverlay ?? '',
+          slow: e.meta?.slow ?? '',
+        });
+      } else if (e.op === 'drawBoard' && e.step === 'end' && sourceIncludesMotion(e.meta?.source)) {
+        timeline.push({
+          at: e.at,
+          kind: 'drawBoard',
+          step: 'end',
+          source: e.meta?.source || '',
+          drawMs: e.meta?.totalMeasuredMs ?? e.total ?? '',
+          objectLoopMs: e.meta?.objectLoopMs ?? '',
+          motionImages: e.meta?.motionImages ?? '',
+          lowLatencyImageDraws: e.meta?.lowLatencyImageDraws ?? '',
+          motionScaledImages: e.meta?.motionScaledImages ?? '',
+          motionFullFallbackImages: e.meta?.motionFullFallbackImages ?? '',
+          motionActiveInputFullFallbackImages: e.meta?.motionActiveInputFullFallbackImages ?? '',
+          scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
+        });
+      } else if (e.op === 'eventLoop' || e.op === 'longTask') {
+        timeline.push({
+          at: e.at,
+          kind: e.op,
+          step: e.step,
+          gapMs: e.meta?.gapMs ?? '',
+          overMs: e.meta?.overMs ?? '',
+          durationMs: e.meta?.duration ?? '',
+        });
+      }
+    }
+    timeline.sort((a, b) => a.at - b.at);
+    const rows = timeline.slice(-limit).map((row, index, list) => ({
+      ...row,
+      timelineGapMs: index ? round(row.at - list[index - 1].at) : '',
+    }));
+    console.table(rows);
+    return rows;
+  }
+
+  function jiggleReport(options = {}) {
+    const opts = options && typeof options === 'object' ? options : { limit: options };
+    const out = {
+      motionSummary: motionSummary(),
+      motionTimeline: motionTimeline({
+        limit: opts.timelineLimit ?? opts.limit ?? 400,
+        beforeMs: opts.beforeMs,
+        afterMs: opts.afterMs,
+      }),
+      frameSummary: frameSummary(),
+      drawSummary: drawSummary(),
+      slowFrames: slowFrames(opts.slowFrames ?? opts.limit ?? 80),
+      imageScaleCache: imageScaleCacheSummary({ table: opts.cacheTable === true }),
+      eventLoopTimeline: eventLoopTimeline(opts.eventLoopLimit ?? opts.limit ?? 160),
+      rawInputTimeline: rawInputTimeline(opts.rawInputLimit ?? opts.limit ?? 160),
+    };
+    if (opts.details === true) out.slowFrameDetails = slowFrameDetails(opts.detailLimit ?? 8);
+    if (opts.log !== false) console.log(out);
+    return out;
+  }
+
   function panZoomReport(options = {}) {
     const opts = options && typeof options === 'object' ? options : { limit: options };
     const out = {
@@ -2764,7 +3151,9 @@ var ViewportDebug = (() => {
     frameEnd,
     recordPanZoom,
     recordFrameSchedule,
+    recordMotion,
     report,
+    jiggleReport,
     panZoomReport,
     summary,
     frameSummary,
@@ -2785,6 +3174,8 @@ var ViewportDebug = (() => {
     frameScheduleTimeline,
     recordRawInput,
     recordShieldBlock,
+    motionSummary,
+    motionTimeline,
     panZoomSummary,
     panZoomTimeline,
     wheelSummary,

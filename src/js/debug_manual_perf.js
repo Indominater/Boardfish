@@ -273,7 +273,10 @@ var ManualPerfDebug = (() => {
       ? options.prewarmScaledImages
       : {};
     const scaledImagePrewarm = options.prewarmScaledImages && typeof prewarmVisibleScaledImageVariants === 'function'
-      ? prewarmVisibleScaledImageVariants(scaledImagePrewarmOptions)
+      ? prewarmVisibleScaledImageVariants({
+          reason: 'perf-begin',
+          ...scaledImagePrewarmOptions,
+        })
       : null;
     const textLayoutPrewarmOptions = options.prewarmTextLayout && typeof options.prewarmTextLayout === 'object'
       ? options.prewarmTextLayout
@@ -523,6 +526,14 @@ var ManualPerfDebug = (() => {
     };
   }
 
+  function panningHeadline(viewportReport = {}) {
+    return viewportNavigationHeadline(viewportReport);
+  }
+
+  function zoomingHeadline(viewportReport = {}) {
+    return viewportNavigationHeadline(viewportReport);
+  }
+
   function panningReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
       console.warn('[Boardfish perf] Debug tools are disabled in this build.');
@@ -541,7 +552,7 @@ var ManualPerfDebug = (() => {
       viewport,
       markers: markers.slice(),
     };
-    out.headline = viewportNavigationHeadline(viewport);
+    out.headline = panningHeadline(viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -605,7 +616,7 @@ var ManualPerfDebug = (() => {
     out.deltaY = deltaY;
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.testPoint = point;
-    out.headline = viewportNavigationHeadline(out.viewport);
+    out.headline = panningHeadline(out.viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -638,7 +649,7 @@ var ManualPerfDebug = (() => {
       viewport,
       markers: markers.slice(),
     };
-    out.headline = viewportNavigationHeadline(viewport);
+    out.headline = zoomingHeadline(viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -744,7 +755,7 @@ var ManualPerfDebug = (() => {
     out.deltaY = deltaY;
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.testPoint = point;
-    out.headline = viewportNavigationHeadline(out.viewport);
+    out.headline = zoomingHeadline(out.viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -822,7 +833,7 @@ var ManualPerfDebug = (() => {
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.start = start;
     out.end = end;
-    out.headline = viewportNavigationHeadline(out.viewport);
+    out.headline = panningHeadline(out.viewport);
     lastReport = out;
     lastJson = JSON.stringify(out, null, 2);
     if (options.log !== false) {
@@ -894,7 +905,7 @@ var ManualPerfDebug = (() => {
     const widthCached = widthCache &&
       obj._textWrappedLineIndexWidthCacheContent === text &&
       typeof widthCache.get === 'function'
-      ? widthCache.get(obj.w)
+      ? widthCache.get(String(obj.w))
       : null;
     if (widthCached && Array.isArray(widthCached.entries) && Number.isFinite(widthCached.lineCount)) {
       return {
@@ -1144,7 +1155,7 @@ var ManualPerfDebug = (() => {
     const now = performance.now();
     const entry = sanitizePerfMeta({
       at: round(now),
-      sinceStartMs: now - textResizeSession.startedAtMs,
+      sinceStartMs: textResizeSession ? now - textResizeSession.startedAtMs : '',
       gapMs: textResizeLastEventAt ? now - textResizeLastEventAt : '',
       step,
       ...meta,
@@ -1396,6 +1407,7 @@ var ManualPerfDebug = (() => {
       maxEditLayoutMs: draw.maxEditLayoutMs ?? '',
       historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
       historyMaxFocusMs: historySummary.maxFocusMs ?? '',
+      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
     };
   }
 
@@ -1627,6 +1639,9 @@ var ManualPerfDebug = (() => {
       autoHeightForceSync: step.autoHeightForceSync,
       autoHeightForceReason: step.autoHeightForceReason,
       restoredMinLinesReset: step.restoredMinLinesReset,
+      restoredPreviousMinLines: step.restoredPreviousMinLines,
+      restoredPreservedMinLines: step.restoredPreservedMinLines,
+      restoredNextMinLines: step.restoredNextMinLines,
       pendingSizeSyncBeforeAutoHeight: step.pendingSizeSyncBeforeAutoHeight,
       pendingSizeSync: step.pendingSizeSync,
       inputStateObjectHeight: step.inputStateObjectHeight,
@@ -1833,8 +1848,14 @@ var ManualPerfDebug = (() => {
       historyMaxOuterRestoreMs: historySummary.maxOuterRestoreMs ?? '',
       historyMaxFlushMs: historySummary.maxFlushMs ?? '',
       historyMaxCloneObjectsMs: historySummary.maxCloneObjectsMs ?? '',
+      historyHydratedTextRuntimeCaches: historySummary.hydratedTextRuntimeCaches ?? '',
+      historyHydratedTextLayoutCaches: historySummary.hydratedTextLayoutCaches ?? '',
       historyMaxReplaceBoardObjectsMs: historySummary.maxReplaceBoardObjectsMs ?? '',
       historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
+      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
+      historyMaxProxyValueDiffMs: historySummary.maxProxyValueDiffMs ?? '',
+      historyMaxProxyValueMutationMs: historySummary.maxProxyValueMutationMs ?? '',
+      historyMaxProxyValueAssignMs: historySummary.maxProxyValueAssignMs ?? '',
       historyMaxSetSelectionRangeMs: historySummary.maxSetSelectionRangeMs ?? '',
       historyMaxFocusMs: historySummary.maxFocusMs ?? '',
     };
@@ -2317,10 +2338,10 @@ var ManualPerfDebug = (() => {
       return texts.slice().sort((a, b) => (
         normalizeTextContent(b?.data?.content || '').length -
         normalizeTextContent(a?.data?.content || '').length
-      ))[0];
+      ))[0] || null;
     }
     const index = Math.max(0, Math.min(texts.length - 1, Math.trunc(Number(options.objectIndex) || 0)));
-    return texts[index];
+    return texts[index] || null;
   }
 
   function textIndexAtLine(content, targetLine) {

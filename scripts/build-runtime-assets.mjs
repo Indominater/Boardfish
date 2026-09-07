@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile, copyFile, cp } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile, copyFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -16,19 +16,24 @@ const readableProductionAudit = process.env.BOARDFISH_BUILD_READABLE === '1';
 const DEV_DIAGNOSTICS_START = '/* BOARDFISH_DEV_DIAGNOSTICS_START */';
 const DEV_DIAGNOSTICS_END = '/* BOARDFISH_DEV_DIAGNOSTICS_END */';
 const DIAGNOSTIC_APIS = Object.freeze([
+  'StartupDebug',
   'ClipDebug',
   'HistoryDebug',
   'ViewportDebug',
+  'SaveDebug',
   'OpenDebug',
   'ExportDebug',
   'InsertDebug',
   'TextSelDebug',
   'PillDebug',
   'MenuDebug',
+  'ManualPerfDebug',
 ]);
 const DIAGNOSTIC_CALLS = Object.freeze([
+  'logStartupStep',
   'logStep',
   'logInputStep',
+  'logPasteStep',
   'textEditorDebugLog',
   'textEditorDebugNow',
   'textEditorDebugRound',
@@ -39,22 +44,72 @@ const DIAGNOSTIC_CALLS = Object.freeze([
   'textEditorSizeDebugStats',
   'textEditorProxySizeDebugStats',
   'textEditorTextStats',
+  'textEditorClipStep',
+  'textEditorClipboardLog',
+  'textEditorPerfDebugApi',
+  'textEditorClipDebugApi',
+  'shouldTraceTextEditorInput',
   'recordTextEditorInputPerfStep',
   'recordInputSetupStep',
   'nextTextEditInputDebugSeq',
+  'selectionInputPerfDebugApi',
+  'selectionResizeDebugNow',
+  'selectionResizeDebugRound',
+  'selectionResizeEventMeta',
+  'selectionResizeTextObjectStats',
+  'recordSelectionTextResizeStep',
   'canvasInputDebugRound',
   'canvasInputNow',
+  'canvasInputEventDebugMeta',
   'canvasInputViewportDebugSnapshot',
+  'canvasInputWheelDebugMeta',
   'canvasInputTextDebugLog',
   'logClickEditStep',
+  'historyDebugRound',
+  'logTextEditHistoryDebug',
   'objectCommandDebugNow',
   'objectCommandTextStats',
   'imageFileDebugName',
   'imageSourceDebugInfo',
+  'textClipboardStats',
+  'clipboardTextStats',
+  'clipboardTextMetricsForObjects',
+  'clipboardIoNow',
+  'clipboardIoElapsedMs',
+  'clipboardNow',
+  'clipboardElapsedMs',
+  'webSourceClipboardKind',
+  'recordMotionDebug',
+  'isHistoryDebugEnabled',
+  'isDebugApiEnabled',
+  'shouldPrepareImagePreviewDebug',
+  'isDebugApiEnabledForStep',
+  'isOpenDebugActive',
+  'isPillDebugActive',
+  'shouldCollectOpenBoardMetrics',
+  'getBoardSaveDebugMetrics',
+  'getBoardOpenDebugMetrics',
+  'getOpenImageRuntimeDebugMetrics',
+  'getImageStoreOpenDebugSampleIfEnabled',
+  'scheduleSaveFrameProbe',
+  'scheduleOpenFrameProbe',
+  'registerDebugCommand',
 ]);
 const PRODUCTION_FALSE_DIAGNOSTIC_FLAGS = Object.freeze([
   'collectDiagnostics',
   'collectDebug',
+  'collectPanDebug',
+  'collectDrawDebug',
+  'collectViewportDebug',
+  'collectOpenInitialRenderDebug',
+  'collectOpenPreviewFallbackDebug',
+  'collectTransformDebug',
+  'collectInitialRenderDebug',
+  'collectMotionDebug',
+  'collectClipboardDiagnostics',
+  'collectClipboardIoDiagnostics',
+  'perfTraceInput',
+  'shouldLogInput',
 ]);
 
 const variants = {
@@ -79,14 +134,24 @@ async function resetDir(dir) {
   await mkdir(resolved, { recursive: true });
 }
 
+async function copyDir(from, to) {
+  await mkdir(to, { recursive: true });
+  for (const entry of await readdir(from)) {
+    const source = path.join(from, entry);
+    const target = path.join(to, entry);
+    const info = await stat(source);
+    if (info.isDirectory()) {
+      await copyDir(source, target);
+    } else {
+      await copyFile(source, target);
+    }
+  }
+}
+
 async function copyStaticAssets(outDir) {
   await copyFile(path.join(srcRoot, 'styles.css'), path.join(outDir, 'styles.css'));
   await copyFile(path.join(srcRoot, 'boardfish-icon.png'), path.join(outDir, 'boardfish-icon.png'));
-  await cp(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'), {
-    recursive: true,
-    dereference: true,
-    filter: (source) => path.extname(source) !== '.js',
-  });
+  await copyDir(path.join(srcRoot, 'fonts'), path.join(outDir, 'fonts'));
   await copyFile(path.join(srcRoot, 'manifest.webmanifest'), path.join(outDir, 'manifest.webmanifest'));
   await copyFile(path.join(srcRoot, 'boardfish-icon-192.png'), path.join(outDir, 'boardfish-icon-192.png'));
 }
@@ -119,11 +184,14 @@ function normalizeQualifiedDiagnosticApis(source) {
 }
 
 function inlineProductionDiagnosticFlags(source) {
-  const flags = PRODUCTION_FALSE_DIAGNOSTIC_FLAGS.map(escapeRegExp).join('|');
-  return source.replace(
-    new RegExp(`\\b(?:const|let|var)\\s+(?:${flags})\\s*=\\s*[^;]+;`, 'g'),
-    '',
-  );
+  let next = source;
+  for (const flag of PRODUCTION_FALSE_DIAGNOSTIC_FLAGS) {
+    next = next.replace(
+      new RegExp(`\\b(?:const|let|var)\\s+${escapeRegExp(flag)}\\s*=\\s*[^;]+;`, 'g'),
+      '',
+    );
+  }
+  return next;
 }
 
 function stripMarkedDeveloperDiagnostics(source) {
@@ -161,6 +229,7 @@ async function compileProductionBundle(source) {
     DEBUG_TOOLS_ENABLED: 'false',
     module: 'undefined', require: 'undefined',
     console: RUNTIME_CONSOLE_SENTINEL,
+    'OpenDebug.hydrationConcurrency': 'openHydrationConcurrency',
   };
   for (const flag of PRODUCTION_FALSE_DIAGNOSTIC_FLAGS) define[flag] = 'false';
   for (const api of DIAGNOSTIC_APIS) {

@@ -39,8 +39,11 @@ function jsSourceFiles() {
   ];
 }
 
-async function manifestScripts(name) {
-  return (await import('../src/js/startup_manifest.mjs'))[name];
+function manifestScripts(name) {
+  const source = readSource('src/js/startup_manifest.mjs');
+  const match = source.match(new RegExp(`export const ${name} = Object\\.freeze\\(\\[([\\s\\S]*?)\\]\\);`));
+  assert.ok(match, `${name} is missing`);
+  return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
 }
 
 test('repository no longer contains the removed app shell', () => {
@@ -72,15 +75,15 @@ test('package scripts and dependencies are web-only', () => {
   assert.doesNotMatch(lock, new RegExp(bridgeWord, 'i'));
 });
 
-test('startup manifest exposes only web variants', async () => {
+test('startup manifest exposes only web variants', () => {
   const manifest = readSource('src/js/startup_manifest.mjs');
-  const webDev = await manifestScripts('WEB_DEV_SCRIPTS');
-  const webPreview = await manifestScripts('WEB_PREVIEW_SCRIPTS');
+  const webDev = manifestScripts('WEB_DEV_SCRIPTS');
+  const webPreview = manifestScripts('WEB_PREVIEW_SCRIPTS');
 
   assert.doesNotMatch(manifest, /VARIANT_SCRIPTS/);
   assert.doesNotMatch(manifest, new RegExp(shellWord.toUpperCase()));
   assert.equal(webDev[0], 'web_env.js');
-  assert.ok(webDev.includes('web_runtime.js'));
+  assert.ok(webDev.includes('web_runtime.js') && [webDev, webPreview].every(files => files.indexOf('motion.js') >= 0 && files.indexOf('motion.js') < Math.min(files.indexOf('viewport.js'), files.indexOf('selection_input.js'))));
   assert.ok(webDev.includes('runtime_utils.js'));
   assert.ok(webDev.includes('startup_debug.js'));
   assert.ok(webPreview.includes('runtime_utils.js'));
@@ -183,9 +186,15 @@ test('clipboard and debug tooling use browser clipboard paths', () => {
   assert.doesNotMatch(startupDebug, /writeDebugLogFile/);
 });
 
-test('browser find stays native', () => {
+test('motion API is specialized to copy feedback and browser find stays native', () => {
+  const motion = readSource('src/js/motion.js');
   const keyboard = readSource('src/js/keyboard.js');
 
+  assert.match(motion, /const applyCopyFeedback =/);
+  assert.doesNotMatch(motion, /applyActionAnimation|COPY_JIGGLE_ACTIONS/);
+  assert.doesNotMatch(motion, /browser-find-shortcut/);
+  assert.doesNotMatch(motion, /appWindow/);
+  assert.doesNotMatch(motion, new RegExp('app-' + 'window'));
   assert.match(keyboard, /isShortcutKey\(e, 'f'\).*isShortcutKey\(e, 'g'\).*e\.key === 'F3'/);
   assert.doesNotMatch(keyboard, /browser-find-shortcut/);
 });
@@ -296,6 +305,22 @@ test('drawable bitmap warmup queue reuses one insertion-ordered map', () => {
   assert.match(imageVariants, /var drawableBitmapWarmupQueue = new Map\(\);/);
   assert.match(imageVariants, /for \(const \[source, meta\] of drawableBitmapWarmupQueue\)/);
   assert.doesNotMatch(imageVariants, /var drawableBitmapWarmupQueued =/);
+});
+
+test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing size', () => {
+  const viewport = readSource('src/js/viewport.js');
+  const start = viewport.indexOf('function _rebuildOffscreen(dpr, viewportRect)');
+  const end = viewport.indexOf('\nfunction', start + 1);
+  const source = viewport.slice(start, end > start ? end : undefined);
+
+  assert.notEqual(start, -1);
+  assert.doesNotMatch(source, /bitmapPromises/);
+  assert.doesNotMatch(source, /ensure-bitmaps/);
+  assert.doesNotMatch(source, /scheduleRender/);
+  assert.match(source, /if \(_offscreen\.width !== boardCanvas\.width\) _offscreen\.width = boardCanvas\.width;/);
+  assert.match(source, /if \(_offscreen\.height !== boardCanvas\.height\) _offscreen\.height = boardCanvas\.height;/);
+  assert.match(source, /_offscreenDirty = false;/);
+  assert.doesNotMatch(viewport, /_offscreen(?:Rebuilding|Version)/);
 });
 
 test('viewport transforms do not schedule an unbounded automatic text prewarm', () => {

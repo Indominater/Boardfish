@@ -50,8 +50,11 @@ function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
     imageBitmapCache: {},
     objects: [],
     viewportWorldRect() { return null; },
+    invalidateOffscreen() {},
     scheduleRender() {},
     queueVisibleImageHydration() {},
+    hasOpenInitialImagePreviews() { return false; },
+    releaseReadyOpenInitialImagePreviewsForOpen() { return { pending: 1 }; },
   };
   if (supportsCreateImageBitmap) {
     context.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
@@ -398,6 +401,29 @@ test('active low-zoom navigation preserves full-size fallback while scaled varia
   assert.equal(context.imageScaledVariantActiveInputFullFallbackCount, 1);
 });
 
+test('explicit active image draw preserves full-size fallback while scaled variant is pending', () => {
+  const context = loadImageVariantsForPlatform(false);
+  context.performance.now = () => 1000;
+  context.lastViewportInputAt = 0;
+  const fullSource = { width: 4000, height: 4000 };
+
+  const selected = context.selectImageSourceForDraw(
+    'img-1',
+    { w: 500, h: 500 },
+    fullSource,
+    { zoom: 0.1, dpr: 1 },
+    true,
+  );
+
+  assert.equal(selected.source, fullSource);
+  assert.equal(selected.scale, 1);
+  assert.equal(selected.targetScale, 0.25);
+  assert.equal(selected.scaledVariantPending, true);
+  assert.equal(selected.activeInputFullFallback, true);
+  assert.equal(context.isScaledImageVariantPending('img-1', 0.25), true);
+  assert.equal(context.imageScaledVariantActiveInputFullFallbackCount, 1);
+});
+
 test('active low-zoom navigation prioritizes visible pending scaled variants', () => {
   const context = loadImageVariantsForPlatform(false);
   const fullSource = { width: 4000, height: 4000 };
@@ -503,8 +529,7 @@ test('active navigation can keep a nearly large enough 0.25x variant instead of 
   context.performance.now = () => 1000;
   context.lastViewportInputAt = 990;
 
-  context.queueScaledImageVariantForReadyImage('img-1', fullSource);
-  await context.settleOpenImageDrawCaches();
+  await context.buildScaledImageVariantNow('img-1', fullSource, 0.25, false, true);
 
   const active = context.selectImageSourceForDraw(
     'img-1',
@@ -590,6 +615,40 @@ test('idle low-zoom drawing preserves full-size fallback until scaled variants a
   assert.equal(selected.targetScale, 0.25);
   assert.equal(selected.scaledVariantPending, undefined);
   assert.equal(context.isScaledImageVariantPending('img-1', 0.25), true);
+});
+
+test('open prewarm builds visible scaled variants before first render', async () => {
+  const context = loadImageVariantsForPlatform(false);
+  const resizeOptions = [];
+  context.zoom = 0.2;
+  context.window.devicePixelRatio = 2;
+  context._boardOpening = true;
+  context.viewportWorldRect = () => ({ x1: -10, y1: -10, x2: 1000, y2: 1000 });
+  context.objectIntersectsRect = (obj, rect) => (
+    obj.x < rect.x2 && obj.x + obj.w > rect.x1 &&
+    obj.y < rect.y2 && obj.y + obj.h > rect.y1
+  );
+  context.createImageBitmap = async (_source, options = {}) => {
+    resizeOptions.push(options);
+    return { width: options.resizeWidth || 1, height: options.resizeHeight || 1, close() {} };
+  };
+  context.imageBitmapCache['img-1'] = { width: 4000, height: 4000, close() {} };
+  context.imageBitmapCache['img-2'] = { width: 4000, height: 4000, close() {} };
+  context.objects = [
+    { id: 'obj-1', type: 'image', x: 0, y: 0, w: 500, h: 500, data: { imgKey: 'img-1' } },
+    { id: 'obj-2', type: 'image', x: 5000, y: 5000, w: 500, h: 500, data: { imgKey: 'img-2' } },
+  ];
+
+  const result = await context.prewarmVisibleScaledImageVariantsForOpen(2);
+
+  assert.equal(result.candidates, 1);
+  assert.equal(result.built, 1);
+  assert.equal(result.noSource, 0);
+  assert.equal(context.hasScaledImageVariant('img-1', 0.25), true);
+  assert.equal(context.hasScaledImageVariant('img-2', 0.25), false);
+  assert.equal(resizeOptions[0].resizeWidth, 1000);
+  assert.equal(resizeOptions[0].resizeHeight, 1000);
+  assert.equal(resizeOptions[0].resizeQuality, 'high');
 });
 
 test('visible image idle work shares one timer and waits for the latest input', () => {
@@ -681,6 +740,121 @@ test('scaled variant ready render defers when input starts before timer fire', (
   assert.deepEqual(renders, [[true, null, 'image-scale-variant-batch-1']]);
 });
 
+test('scaled variant ready render is held while opening previews are active', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const renders = [];
+  const heldRenders = [];
+  let invalidated = 0;
+  const timers = [];
+  context._frameRaf = false;
+  context._needTransform = false;
+  context._needBoardRender = false;
+  context.invalidateOffscreen = () => { invalidated++; };
+  context.scheduleRender = (...args) => { renders.push(args); };
+  context.setTimeout = (callback) => {
+    timers.push(callback);
+    return timers.length;
+  };
+  context.OpenDebug = {
+    recordPreviewHeldRender(meta) {
+      heldRenders.push(meta);
+    },
+  };
+  context.hasOpenInitialImagePreviews = () => true;
+
+  context.scheduleScaledVariantReadyRender();
+
+  assert.equal(invalidated, 1);
+  assert.equal(renders.length, 0);
+  assert.equal(timers.length, 0);
+  assert.equal(context.imageScaledVariantRenderCount, 1);
+  assert.equal(heldRenders.length, 1);
+  assert.equal(heldRenders[0].source, 'image-scale-variant');
+  assert.equal(heldRenders[0].pendingReadyVariants, 1);
+
+  context.hasOpenInitialImagePreviews = () => false;
+  context.performance.now = () => 1000;
+  context.scheduleScaledVariantReadyRender(false);
+  assert.equal(timers.length, 1);
+  timers[0]();
+
+  assert.deepEqual(renders, [[true, null, 'image-scale-variant-batch-1']]);
+  assert.equal(context.imageScaledVariantRenderCount, 0);
+});
+
+test('a ready scaled variant redraws immediately when its preview releases independently', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const renders = [];
+  const heldRenders = [];
+  let invalidated = 0;
+  context.invalidateOffscreen = () => { invalidated++; };
+  context.scheduleRender = (...args) => { renders.push(args); };
+  context.OpenDebug = {
+    step() {},
+    recordPreviewHeldRender(meta) {
+      heldRenders.push(meta);
+    },
+  };
+  context.hasOpenInitialImagePreviews = () => true;
+  context.releaseReadyOpenInitialImagePreviewsForOpen = () => ({
+    total: 2,
+    ready: 1,
+    pending: 1,
+    failed: 0,
+    stale: 0,
+    released: 1,
+    remaining: 1,
+  });
+
+  context.scheduleScaledVariantReadyRender();
+
+  assert.equal(invalidated, 1);
+  assert.deepEqual(renders, [[true, null, 'open-preview-scaled-variant-release-1']]);
+  assert.equal(heldRenders.length, 0);
+  assert.equal(context.imageScaledVariantRenderCount, 0);
+});
+
+test('failed open previews do not hold scaled variant ready renders', () => {
+  const context = loadImageVariantsForPlatform(false);
+  const renders = [];
+  const heldRenders = [];
+  const timers = [];
+  context._frameRaf = false;
+  context._needTransform = false;
+  context._needBoardRender = false;
+  context.lastViewportInputAt = 0;
+  context.performance.now = () => 1000;
+  context.scheduleRender = (...args) => { renders.push(args); };
+  context.setTimeout = (callback) => {
+    timers.push(callback);
+    return timers.length;
+  };
+  context.OpenDebug = {
+    step() {},
+    recordPreviewHeldRender(meta) {
+      heldRenders.push(meta);
+    },
+  };
+  context.hasOpenInitialImagePreviews = () => true;
+  context.releaseReadyOpenInitialImagePreviewsForOpen = () => ({
+    total: 1,
+    ready: 0,
+    pending: 0,
+    failed: 1,
+    stale: 0,
+    released: 0,
+    remaining: 1,
+  });
+
+  context.scheduleScaledVariantReadyRender();
+
+  assert.equal(heldRenders.length, 0);
+  assert.equal(timers.length, 1);
+  timers[0]();
+  assert.deepEqual(renders, [[true, null, 'image-scale-variant-batch-1']]);
+  assert.equal(context.imageScaledVariantRenderCount, 0);
+});
+
 test('scaled image variants stay disabled when createImageBitmap is unavailable', () => {
   const context = loadImageVariantsForPlatform(false, false);
 
@@ -758,6 +932,7 @@ test('scaled image variant skips do not create empty cache groups', () => {
   );
   assert.equal(tooLarge.queued, false);
   assert.equal(tooLarge.skipped, 'memory-limit');
+  assert.equal(context.hasScaledImageVariantFailure('img-too-large', 0.25), true);
   assert.equal(context.imageScaledVariantSourceReadyQueuedCount, 0);
   assert.equal(context.imageScaledBitmapCache.has('img-too-large'), false);
   assert.equal(context.isScaledImageVariantPending('img-too-large', 0.25), false);

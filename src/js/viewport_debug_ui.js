@@ -9,7 +9,9 @@ var PillDebug = (() => {
   const t0 = performance.now();
   let longTaskObserver = null;
 
-  const round = round2;
+  function round(value) {
+    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
+  }
 
   function snapshot() {
     const style = getComputedStyle(islZoom);
@@ -37,6 +39,10 @@ var PillDebug = (() => {
     if (events.length > MAX_EVENTS) events.shift();
     if (verbose) console.debug('[pill]', entry);
     return entry;
+  }
+
+  function log(event, data = {}) {
+    return push(event, data);
   }
 
   function enable() {
@@ -143,7 +149,7 @@ var PillDebug = (() => {
     }
   }
 
-  return { enable, disable, setVerbose, reset, dump, summary, timeline, diagnose, log: push, get enabled() { return enabled; } };
+  return { enable, disable, setVerbose, reset, dump, summary, timeline, diagnose, log, get enabled() { return enabled; } };
 })();
 exposeDebug({ pill: PillDebug });
 
@@ -155,7 +161,9 @@ var MenuDebug = (() => {
   let nextId = 1;
   const events = [];
 
-  const round = round2;
+  function round(value) {
+    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
+  }
 
   function elementLabel(el) {
     if (!el) return '';
@@ -248,6 +256,8 @@ var MenuDebug = (() => {
     return rows;
   }
 
+  function log(event, data = {}) { return push(event, data); }
+
   function logDomEvent(label, event) {
     lastPointerEvent = event;
     push(label, {
@@ -270,7 +280,7 @@ var MenuDebug = (() => {
     events: eventsCopy,
     last,
     summary,
-    log: push,
+    log,
     logDomEvent,
     get enabled() { return enabled; },
   };

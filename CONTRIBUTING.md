@@ -17,7 +17,7 @@ Use the bug report issue template and include:
 
 - Boardfish version
 - Operating system and version
-- Browser and version
+- Installer used, such as `.dmg`, `.exe`, `.msi`, or source build
 - Steps to reproduce
 - Screenshot, screen recording, or a small `.bf` file when useful
 
@@ -40,16 +40,17 @@ If you want to inspect or run Boardfish locally for personal evaluation,
 prerequisites are:
 
 - Node.js 18+
+- Rust
 
 Run the app locally:
 
 ```bash
 npm install
-npm run web:dev
+npm run tauri dev
 ```
 
-Build the production web app:
+Build a release installer:
 
 ```bash
-npm run web:build
+npm run tauri build
 ```

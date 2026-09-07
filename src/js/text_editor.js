@@ -155,7 +155,7 @@ const textEditorSizeDebugStats = (obj, content = null, prefix = '') => {
   const widthCached = widthCache &&
     obj._textWrappedLineIndexWidthCacheContent === text &&
     typeof widthCache.get === 'function'
-    ? widthCache.get(obj.w)
+    ? widthCache.get(String(obj.w))
     : null;
   const widthCacheValid = widthCached &&
     Array.isArray(widthCached.entries) &&
@@ -251,12 +251,20 @@ function textEditWordBoundary(value, index, direction) {
   const moveRight = direction === 'right' || Number(direction) > 0;
 
   if (textEditWordSegmenter) {
-    const segments = textEditWordSegmenter.segment(text);
-    let part = segments.containing(moveRight ? position : position - 1);
-    while (part && !part.isWordLike) {
-      part = segments.containing(moveRight ? part.index + part.segment.length : part.index - 1);
+    let previousWordStart = 0;
+    for (const part of textEditWordSegmenter.segment(text)) {
+      if (!part.isWordLike) continue;
+      const start = part.index;
+      const end = start + part.segment.length;
+      if (moveRight) {
+        if (end > position) return end;
+        continue;
+      }
+      if (start >= position) break;
+      previousWordStart = start;
+      if (end >= position) break;
     }
-    return part ? part.index + (moveRight ? part.segment.length : 0) : moveRight ? text.length : 0;
+    return moveRight ? text.length : previousWordStart;
   }
 
   const isWordChar = (char) => /[A-Za-z0-9_]/.test(char || '');
@@ -317,7 +325,7 @@ function setTextEditProxySelectionRange(proxy, start, end = start, direction = '
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const syncResult = shouldSyncDom
     ? syncTextEditProxyDomValue(proxy, text, { start: from, end: to, direction })
-    : { synced: false, reason: 'selection-fits-dom' };
+    : { synced: false, reason: shouldSyncDom ? 'sync-skipped' : 'selection-fits-dom' };
   if (!syncResult.synced) proxy.setSelectionRange(from, to, direction);
   return {
     set: true,
@@ -348,7 +356,16 @@ const textEditLineStartAt = (value, index) => {
   const text = String(value ?? '');
   const clamped = Math.max(0, Math.min(index ?? 0, text.length));
   if (clamped <= 0) return 0;
-  return text.lastIndexOf('\n', clamped - 1) + 1;
+  const newlineAt = text.lastIndexOf('\n', clamped - 1);
+  return newlineAt === -1 ? 0 : newlineAt + 1;
+};
+
+const textEditLineIndentAt = (value, index) => {
+  const text = String(value ?? '');
+  const lineStart = textEditLineStartAt(text, index);
+  let end = lineStart;
+  while (end < text.length && (text[end] === ' ' || text[end] === '\t')) end++;
+  return text.slice(lineStart, end);
 };
 
 const applyTextEditLineIndent = (value, selection, outdent = false) => {
@@ -384,9 +401,14 @@ const applyTextEditLineIndent = (value, selection, outdent = false) => {
       return prefix;
     });
   } else {
-    nextSelectedText = TEXT_EDIT_INDENT + selectedText.split('\n').join('\n' + TEXT_EDIT_INDENT);
     if (selectionState.start >= firstLineStart) nextStart += TEXT_EDIT_INDENT.length;
-    if (selectionState.end >= firstLineStart) nextEnd += nextSelectedText.length - selectedText.length;
+    if (selectionState.end >= firstLineStart) nextEnd += TEXT_EDIT_INDENT.length;
+    nextSelectedText = TEXT_EDIT_INDENT + selectedText.replace(/\n/g, (_, offset) => {
+      const lineStart = firstLineStart + offset + 1;
+      if (selectionState.start >= lineStart) nextStart += TEXT_EDIT_INDENT.length;
+      if (selectionState.end >= lineStart) nextEnd += TEXT_EDIT_INDENT.length;
+      return `\n${TEXT_EDIT_INDENT}`;
+    });
   }
   if (nextSelectedText === selectedText) return { ...selectionState, value: text, changed: false };
 
@@ -396,11 +418,6 @@ const applyTextEditLineIndent = (value, selection, outdent = false) => {
     end: nextEnd,
     direction: selectionState.direction,
     changed: true,
-    replacement: {
-      start: firstLineStart,
-      end: blockEnd,
-      insertedText: nextSelectedText,
-    },
   };
 };
 
@@ -409,14 +426,11 @@ const applyTextEditLineBreakIndent = (value, selection) => {
   const selectionState = {
     start: Math.max(0, Math.min(selection?.start ?? 0, text.length)),
     end: Math.max(0, Math.min(selection?.end ?? selection?.start ?? 0, text.length)),
+    direction: selection?.direction || 'none',
   };
   const start = Math.min(selectionState.start, selectionState.end);
   const end = Math.max(selectionState.start, selectionState.end);
-  // Indentation after the caret is already retained in the unchanged suffix.
-  const lineStart = textEditLineStartAt(text, start);
-  let indentEnd = lineStart;
-  while (indentEnd < start && (text[indentEnd] === ' ' || text[indentEnd] === '\t')) indentEnd++;
-  const insert = '\n' + text.slice(lineStart, indentEnd);
+  const insert = '\n' + textEditLineIndentAt(text, start);
   const nextValue = text.slice(0, start) + insert + text.slice(end);
   const nextCaret = start + insert.length;
   return {
@@ -460,31 +474,15 @@ const textEditInputReplacement = (oldText = '', nextText = '', inputState = {}, 
   };
 };
 
-// Input events from autofill, dictation and some IMEs may omit beforeinput.
-// Recover the changed range from the values in that case: the DOM selection
-// already points after the edit and cannot describe the replaced selection.
-const textEditChangedRange = (oldText, nextText) => {
-  let start = 0;
-  const length = Math.min(oldText.length, nextText.length);
-  while (start < length && oldText.charCodeAt(start) === nextText.charCodeAt(start)) start++;
-  let end = oldText.length;
-  let nextEnd = nextText.length;
-  while (end > start && nextEnd > start && oldText.charCodeAt(end - 1) === nextText.charCodeAt(nextEnd - 1)) {
-    end--;
-    nextEnd--;
-  }
-  return { start, end, insertedText: nextText.slice(start, nextEnd) };
-};
-
 const textEditBeforeInputReplacement = (text = '', selection = {}, event = null) => {
   const start = Math.max(0, Math.min(selection.start ?? 0, text.length));
   const end = Math.max(start, Math.min(selection.end ?? start, text.length));
   const inputType = String(event?.inputType || '');
+  if (inputType === 'insertText' || inputType === 'insertCompositionText') {
+    return { start, end, insertedText: String(event?.data ?? '') };
+  }
   if (inputType === 'insertLineBreak' || inputType === 'insertParagraph') {
     return { start, end, insertedText: '\n' };
-  }
-  if (inputType.startsWith('insert') && typeof event?.data === 'string') {
-    return { start, end, insertedText: event.data };
   }
   if (inputType.startsWith('delete')) {
     if (start !== end) return { start, end, insertedText: '' };
@@ -514,7 +512,7 @@ const textEditBlankLineDeleteRange = (text = '', index, keyOrInputType = '') => 
 };
 
 const dispatchTextEditInputEvent = (proxy, inputType) => {
-  let event;
+  let event = null;
   try {
     event = typeof InputEvent === 'function'
       ? new InputEvent('input', { bubbles: true, inputType })
@@ -534,6 +532,7 @@ const syncFreshTextEditWidth = (obj) => {
   const width = getTextRenderedContentWidth(obj);
   if (!Number.isFinite(width) || width <= obj.w) return false;
   obj.w = width;
+  clearTextObjectLayoutRuntime(obj);
   return true;
 };
 
@@ -544,9 +543,15 @@ const exactTextEditLineCountForHeight = (height) => {
   return Math.abs(lines - rounded) < 1e-6 ? Math.max(1, rounded) : 0;
 };
 
+const textEditMinLinesForSession = (obj, preserveSize = false) => {
+  if (!obj || obj.type !== 'text' || !preserveSize) return 1;
+  const currentLines = exactTextEditLineCountForHeight(obj.h);
+  return currentLines > 1 ? currentLines : 1;
+};
+
 const setTextEditMinLinesForSession = (obj, preserveSize = false) => {
   if (!obj || obj.type !== 'text') return 1;
-  const minLines = (preserveSize && exactTextEditLineCountForHeight(obj.h)) || 1;
+  const minLines = textEditMinLinesForSession(obj, preserveSize);
   obj._editMinLines = minLines;
   if (preserveSize && minLines > 1) {
     obj._textEditPreservedMinLines = minLines;
@@ -563,15 +568,8 @@ const resetTextEditPreservedMinLines = (obj) => {
   return true;
 };
 
-const resetTextEditNavigation = (obj) => {
+const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false) => {
   if (!obj) return;
-  delete obj._textEditPreferredX;
-  delete obj._textEditNavigationSelection;
-};
-
-const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false, preserveNavigation = false) => {
-  if (!obj) return;
-  if (!preserveNavigation) resetTextEditNavigation(obj);
   const length = (obj.data?.content || '').length;
   const nextIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), length));
   if (obj._textEditCaretIndex !== nextIndex || clearLineStartIndex) {
@@ -585,56 +583,8 @@ const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStart
 
 const clearTextEditCaretIndex = (obj) => {
   if (!obj) return;
-  resetTextEditNavigation(obj);
   delete obj._textEditCaretIndex;
   delete obj._textEditCaretLineStartIndex;
-};
-
-// A soft wrap has two visual positions for the same text index. Keep the row
-// selected by a click/navigation, or choose the side approached by an arrow.
-const textEditCaretLineAtIndex = (obj, layout, index, affinity = null) => {
-  if (!layout.length) return -1;
-  let lo = 0, hi = layout.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    const line = layout[mid];
-    const end = line.caretEndIndex ?? line.endIndex ?? (line.startIndex + line.text.length);
-    if (index <= end) hi = mid;
-    else lo = mid + 1;
-  }
-  const preferred = affinity == null && obj?._textEditCaretIndex === index
-    ? obj._textEditCaretLineStartIndex : null;
-  let result = lo;
-  // Crossing consumed wrap whitespace reaches the next row's beginning. A
-  // hard word wrap, in contrast, still has a caret at the preceding row's end.
-  const line = layout[lo];
-  const visibleEnd = line.endIndex ?? (line.startIndex + line.text.length);
-  if (index > visibleEnd && layout[lo + 1]?.startIndex === index) result = lo + 1;
-  for (let i = lo; i < layout.length && layout[i].startIndex <= index; i++) {
-    if (layout[i].startIndex === preferred) return i;
-    if (affinity === 'forward') result = i;
-  }
-  return result;
-};
-
-const rememberTextEditNavigationSelection = (obj, proxy, index, lineStartIndex) => {
-  setTextEditCaretIndex(obj, index, lineStartIndex, true, true);
-  obj._textEditNavigationSelection = {
-    start: proxy.selectionStart,
-    end: proxy.selectionEnd,
-    direction: proxy.selectionDirection || 'none',
-  };
-};
-
-const applyTextEditNavigationSelection = (obj, proxy, selection, index, lineStartIndex, extend) => {
-  const anchor = selection.direction === 'backward' ? selection.end : selection.start;
-  if (extend) {
-    setTextEditProxySelectionRange(proxy, Math.min(anchor, index), Math.max(anchor, index),
-      index < anchor ? 'backward' : 'forward');
-  } else {
-    setTextEditProxySelectionRange(proxy, index, index, 'none');
-  }
-  rememberTextEditNavigationSelection(obj, proxy, index, lineStartIndex);
 };
 
 const textEditVisibleSelectionReplacementRange = (content, selection = {}) => {
@@ -675,6 +625,7 @@ const copyTextEditSelectionFromProxy = async (
   id,
   proxy,
   selection = textEditSelectionState(proxy),
+  options = {},
 ) => {
   if (!selection?.hasSelection || !proxy) return false;
   const sourceValue = textEditProxyValue(proxy);
@@ -735,6 +686,7 @@ const copyTextEditSelectionFromProxy = async (
     logStep('copy:text-selection-clear-jsClipboard', textStats);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   }
+  const shouldAnimateCopy = options.animateCopy !== false && editingId === id && _editEl === proxy;
   const meta = {};
   if (typeof getJsClipboardWebToken === 'function') {
     const webToken = getJsClipboardWebToken();
@@ -748,22 +700,38 @@ const copyTextEditSelectionFromProxy = async (
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   let writePromise;
-  writePromise = BoardfishClipboardIO.copyTextToClipboard(clipboardText,
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    dbg,
+    const clipboardOptions = { ...meta, ...textStats };
+    writePromise = BoardfishClipboardIO.copyTextToClipboard(clipboardText, dbg, clipboardOptions);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    typeof BOARDFISH_PRODUCTION === 'undefined' ? { ...meta, ...textStats } : meta,
-  );
+  } else {
+    writePromise = BoardfishClipboardIO.copyTextToClipboard(clipboardText, meta);
+  }
   writePromise
     .then((result) => {
       if (result?.boardfishTokenWritten && meta.boardfishToken) {
         if (typeof markJsClipboardWebTokenWritten === 'function') {
-          markJsClipboardWebTokenWritten(meta.boardfishToken
+          if (typeof BOARDFISH_PRODUCTION === 'undefined') {
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            , dbg
+            markJsClipboardWebTokenWritten(meta.boardfishToken, dbg);
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          );
+          } else {
+            markJsClipboardWebTokenWritten(meta.boardfishToken);
+          }
         }
+      }
+      // A large text write can occupy the main thread; start jiggle only once it settles.
+      if (shouldAnimateCopy && editingId === id && _editEl === proxy) {
+        globalThis.BoardfishMotion?.applyCopyFeedback?.({
+          textSelection: {
+            id,
+            ...selection,
+          },
+        });
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        logStep('copy:text-selection-feedback-done', textStats);
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logStep('copy:web-text-clipboard-write-end', {
@@ -884,10 +852,11 @@ const readBoardfishTextClipboardPayloadForPaste = async (event = null
   return currentBoardfishTextSelectionClipboardPayload();
 };
 
-const replaceTextEditProxyRange = (proxy, inserted, start, end, selectionMode = 'end', deferDomValue = false) => {
+const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end', deferDomValue = false) => {
   const value = textEditProxyValue(proxy);
   const from = Math.max(0, Math.min(Math.trunc(Number(start)) || 0, value.length));
   const to = Math.max(from, Math.min(Math.trunc(Number(end)) || from, value.length));
+  const inserted = normalizeTextContent(text);
   const nextLength = value.length + inserted.length - (to - from);
   const largeValue = value.length + inserted.length > TEXT_EDIT_DIRECT_TEXTAREA_REPLACE_CHARS;
   deferDomValue = deferDomValue && nextLength > TEXT_EDIT_DEFER_DOM_REPLACE_CHARS;
@@ -954,9 +923,14 @@ const replaceTextEditProxyRange = (proxy, inserted, start, end, selectionMode = 
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const rangeTextStartedAt = textEditorDebugNow();
-  const domSyncResult =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  syncTextEditProxyDomValue(proxy, value);
+  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+    syncTextEditProxyDomValue(proxy, value);
+  } else {
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    var domSyncResult = syncTextEditProxyDomValue(proxy, value);
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  }
   proxy.setRangeText(inserted, from, to, selectionMode);
   setTextEditProxyLogicalValue(proxy, proxy.value);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -975,6 +949,71 @@ const replaceTextEditProxyRange = (proxy, inserted, start, end, selectionMode = 
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
+const editableTextPayload = (payload = {}) => ({
+  text: textForTextObjectPaste(payload.text || ''),
+});
+
+const synchronousBoardfishClipboardTokenFromPasteEvent = (event) => {
+  if (
+    !event?.clipboardData ||
+    typeof BoardfishClipboardIO === 'undefined' ||
+    typeof BoardfishClipboardIO.readBoardfishClipboardTokenFromEvent !== 'function'
+  ) {
+    return '';
+  }
+  return BoardfishClipboardIO.readBoardfishClipboardTokenFromEvent(event.clipboardData);
+};
+
+const boardfishPasteEventMatchesCurrentTextSelectionClipboard = (event) => {
+  const eventToken = synchronousBoardfishClipboardTokenFromPasteEvent(event);
+  const currentToken = typeof getJsClipboardWebToken === 'function' ? getJsClipboardWebToken() : '';
+  return !!eventToken && !!currentToken && eventToken === currentToken;
+};
+
+const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) => {
+  if (!proxy || !payload || !options.event) return false;
+  const obj = objectsMap.get(id);
+  if (!obj) return false;
+  const selection = options.selection || textEditSelectionState(proxy);
+  if (selection.hasSelection) return false;
+  if (!boardfishPasteEventMatchesCurrentTextSelectionClipboard(options.event)) return false;
+
+  const fallbackText = normalizeTextContent(options.fallbackText || '');
+  const editablePayload = editableTextPayload(payload);
+  if (!editablePayload.text || fallbackText !== editablePayload.text) return false;
+
+  const inputType = options.inputType || 'insertFromPaste';
+  const currentProxyValue = textEditProxyValue(proxy);
+  if (proxy._boardfishDomValueStale || proxy.value !== currentProxyValue) return false;
+  const inputState = {
+    ...selection,
+    value: currentProxyValue,
+    inputType,
+    replacement: {
+      start: selection.start,
+      end: selection.end,
+      insertedText: editablePayload.text,
+    },
+    nativePasteHandled: true,
+  };
+  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+    inputState.debug = options.debug || null;
+    inputState.nativePasteEndMeta = {
+      path: 'jsClipboard-text-selection-native',
+      pasted: true,
+      textObjectCount: 1,
+      textCharCount: editablePayload.text.length,
+      largestTextChars: editablePayload.text.length,
+      ...textEditorTextStats(editablePayload.text),
+    };
+  }
+  beginTextEditHistoryAction(id, inputState);
+  proxy?._boardfishSetPendingInputState?.(inputState);
+  return {
+    text: editablePayload.text,
+  };
+};
+
 const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
   if (!proxy || !options.event) return false;
   const obj = objectsMap.get(id);
@@ -982,7 +1021,7 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
   const selection = options.selection || textEditSelectionState(proxy);
   if (selection.hasSelection) return false;
 
-  const rawPastedText = String(text || '');
+  const rawPastedText = normalizeTextContent(text || '');
   const pastedText = textForTextObjectPaste(rawPastedText);
   if (!pastedText) return false;
   if (pastedText !== rawPastedText) return false;
@@ -1050,7 +1089,8 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
     ...textEditorTextStats(payload.text),
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const text = textForTextObjectPaste(payload.text || '');
+  const editablePayload = editableTextPayload(payload);
+  const text = editablePayload.text;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-editable-payload-done', textEditorTextStats(text));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1159,6 +1199,7 @@ const pasteBoardfishTextSelectionIntoEditSelection = async (options = {}) => {
   textEditorClipStep(dbg, 'paste:text-selection-js-payload-ready', textEditorTextStats(payload.text));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const pasteOptions = {
+    immediateHistory: options.immediateHistory,
     selection: options.selection,
     inputType: 'insertFromPaste',
   };
@@ -1184,6 +1225,7 @@ function enterEdit(id, {
   const obj = objectsMap.get(id);
   if (!obj) return;
   editingId = id;
+  invalidateOffscreen();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let stepStart = textEditorDebugNow();
   const logStep = (label, meta = {}) => {
@@ -1248,67 +1290,6 @@ function enterEdit(id, {
   });
 
   let pendingInputState = null;
-  let pendingNativeNavigation = null;
-  let compositionState = null;
-  let completedComposition = null;
-  let compositionTailTimer = null;
-  const clearCompletedComposition = () => {
-    completedComposition = null;
-    if (compositionTailTimer !== null) clearTimeout(compositionTailTimer);
-    compositionTailTimer = null;
-  };
-  const restoreCompositionProxy = (value, selection) => {
-    proxy.value = value;
-    setTextEditProxyLogicalValue(proxy, value);
-    proxy.setSelectionRange(selection.start, selection.end, selection.direction || 'none');
-    if (selection.start === selection.end) setTextEditCaretIndex(obj, selection.start, null, true);
-    else clearTextEditCaretIndex(obj);
-    _textInputSelectionHistorySuppress = textEditSelectionState(proxy);
-  };
-  const isCompletedCompositionInput = (event) => completedComposition && (
-    event?.inputType === 'insertFromComposition' || event?.inputType === 'insertCompositionText' ||
-    (event?.inputType === 'insertText' && event.data === completedComposition.data)
-  );
-  proxy.addEventListener('compositionstart', () => {
-    clearCompletedComposition();
-    pendingInputState = null;
-    pendingNativeNavigation = null;
-    const selection = textEditSelectionState(proxy);
-    const value = textEditProxyValue(proxy);
-    syncTextEditProxyDomValue(proxy, value, selection);
-    compositionState = { ...selection, value, data: '' };
-  });
-  proxy.addEventListener('compositionupdate', (event) => {
-    if (compositionState && typeof event.data === 'string') compositionState.data = event.data;
-  });
-  proxy.addEventListener('compositionend', (event) => {
-    const state = compositionState;
-    if (!state) return;
-    compositionState = null;
-    pendingInputState = null;
-    if (_editEl !== proxy || editingId !== id) return;
-    const data = typeof event.data === 'string' ? event.data : state.data;
-    const insertedText = normalizeTextContent(data);
-    restoreCompositionProxy(state.value, state);
-    if (insertedText) {
-      const inputType = 'insertFromComposition';
-      pendingInputState = {
-        ...state,
-        inputType,
-        replacement: { start: state.start, end: state.end, insertedText },
-      };
-      beginTextEditHistoryAction(id, pendingInputState);
-      replaceTextEditProxyRange(proxy, insertedText, state.start, state.end, 'end');
-      dispatchTextEditInputEvent(proxy, inputType);
-    } else {
-      scheduleRender(true, false);
-    }
-    // WebKit and other input methods can send the final native input after
-    // compositionend. The transaction above already committed it. Repair a
-    // trailing native mutation without a second history entry or insertion.
-    completedComposition = { data, value: textEditProxyValue(proxy), ...textEditSelectionState(proxy) };
-    compositionTailTimer = setTimeout(clearCompletedComposition, 0);
-  });
   proxy._boardfishSetPendingInputState = (state) => { pendingInputState = state; };
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const recordInputSetupStep = (step, event, state = {}, extra = {}) => {
@@ -1338,19 +1319,6 @@ function enterEdit(id, {
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   proxy.addEventListener('beforeinput', (event) => {
-    if (compositionState) {
-      // Leave the native provisional range intact. Neither model updates nor
-      // ordinary proxy synchronization may run until this session finishes.
-      if (typeof event.data === 'string') compositionState.data = event.data;
-      return;
-    }
-    if (isCompletedCompositionInput(event)) {
-      if (event.cancelable !== false) event.preventDefault();
-      return;
-    }
-    clearCompletedComposition();
-    resetTextEditNavigation(obj);
-    pendingNativeNavigation = null;
     if (pendingInputState?.nativePasteHandled && event?.inputType === 'insertFromPaste') {
       return;
     }
@@ -1366,29 +1334,17 @@ function enterEdit(id, {
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       pendingInputState._debugSeq = nextTextEditInputDebugSeq();
     }
-    // Intercept changed insertions before the browser can replace a selection
-    // with unsupported characters. Non-cancelable IME events are repaired by
-    // the input handler using this same saved range.
-    if (nativeReplacement && String(event?.inputType || '').startsWith('insert')) {
-      const insertedText = normalizeTextContent(nativeReplacement.insertedText);
-      if (insertedText !== nativeReplacement.insertedText && event?.cancelable !== false) {
-        event.preventDefault();
-        if (!insertedText) {
-          pendingInputState = null;
-          syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
-          return;
-        }
-        pendingInputState.replacement = { ...nativeReplacement, insertedText };
-        beginTextEditHistoryAction(id, pendingInputState);
-        replaceTextEditProxyRange(proxy, insertedText, nativeReplacement.start, nativeReplacement.end, 'end');
-        dispatchTextEditInputEvent(proxy, pendingInputState.inputType);
-        return;
-      }
-    }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const domSyncBeforeNativeInput =
+    let domSyncBeforeNativeInput = null;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
+    if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+      syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
+    } else {
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      domSyncBeforeNativeInput = syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
+      if (domSyncBeforeNativeInput.synced) pendingInputState.domSyncedBeforeNativeInput = true;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
     beginTextEditHistoryAction(id, pendingInputState);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     recordInputSetupStep('beforeinput-state-ready', event, pendingInputState, {
@@ -1399,15 +1355,6 @@ function enterEdit(id, {
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   });
 	  proxy.addEventListener('input', (event) => {
-      if (compositionState) {
-        if (typeof event.data === 'string') compositionState.data = event.data;
-        return;
-      }
-      if (isCompletedCompositionInput(event)) {
-        restoreCompositionProxy(completedComposition.value, completedComposition);
-        return;
-      }
-	    const hadPendingInput = !!pendingInputState;
 	    const inputState = pendingInputState || textEditSelectionState(proxy);
 	    const inputType = event?.inputType || inputState.inputType || '';
 	    /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1455,48 +1402,23 @@ function enterEdit(id, {
 	    const oldValue = inputState.value ?? obj.data.content ?? '';
 	    let replacement = inputState.replacement || null;
 	    let synthesizedStaleReplacement = false;
-	    let nextRawValue;
+	    let nextRawValue = '';
 	    if (proxy._boardfishDomValueStale && !replacement) {
 	      replacement = textEditBeforeInputReplacement(oldValue, inputState, event);
 	      synthesizedStaleReplacement = !!replacement;
 	    }
-	    if (synthesizedStaleReplacement) {
-	      nextRawValue = oldValue.slice(0, replacement.start) + replacement.insertedText + oldValue.slice(replacement.end);
+	    if (proxy._boardfishDomValueStale && replacement) {
+	      const replacementStart = Math.max(0, Math.min(replacement.start ?? 0, oldValue.length));
+	      const replacementEnd = Math.max(replacementStart, Math.min(replacement.end ?? replacementStart, oldValue.length));
+	      nextRawValue = normalizeTextContent(
+	        oldValue.slice(0, replacementStart) +
+	        String(replacement.insertedText ?? '') +
+	        oldValue.slice(replacementEnd)
+	      );
 	    } else {
-	      nextRawValue = proxy._boardfishDomValueStale && replacement ? textEditProxyValue(proxy) : proxy.value;
-	      replacement = replacement || (hadPendingInput
-          ? textEditInputReplacement(oldValue, nextRawValue, inputState, inputType)
-          : textEditChangedRange(oldValue, nextRawValue));
+	      nextRawValue = proxy.value;
+	      replacement = replacement || textEditInputReplacement(oldValue, nextRawValue, inputState, inputType);
 	    }
-    const normalizedValue = normalizeTextContent(nextRawValue);
-    if (normalizedValue !== nextRawValue) {
-      // Native composition, drop and input-only paths can reach here with a
-      // value different from beforeinput.data. Use the actual DOM mutation.
-      if (oldValue.slice(0, replacement.start) + replacement.insertedText + oldValue.slice(replacement.end) !== nextRawValue) {
-        replacement = textEditChangedRange(oldValue, nextRawValue);
-      }
-      const insertedText = normalizeTextContent(replacement.insertedText);
-      const skippedInsertion = replacement.insertedText.length > 0 && insertedText.length === 0;
-      const selection = skippedInsertion
-        ? { start: replacement.start, end: replacement.end, direction: inputState.direction || 'none' }
-        : {
-            start: normalizeTextContent(nextRawValue.slice(0, proxy.selectionStart)).length,
-            end: normalizeTextContent(nextRawValue.slice(0, proxy.selectionEnd)).length,
-            direction: proxy.selectionDirection || 'none',
-          };
-      nextRawValue = skippedInsertion ? oldValue : normalizedValue;
-      proxy.value = nextRawValue;
-      setTextEditProxyLogicalValue(proxy, nextRawValue);
-      proxy.setSelectionRange(selection.start, selection.end, selection.direction);
-      if (skippedInsertion) {
-        if (selection.start === selection.end) setTextEditCaretIndex(obj, selection.start, null, true);
-        else clearTextEditCaretIndex(obj);
-        _textInputSelectionHistorySuppress = textEditSelectionState(proxy);
-        scheduleRender(true, false);
-        return;
-      }
-      replacement = { ...replacement, insertedText };
-    }
 	    logInputStep('replacement-ready', () => ({
 	      oldChars: oldValue.length,
 	      nextChars: nextRawValue.length,
@@ -1513,7 +1435,7 @@ function enterEdit(id, {
     }));
 	    obj.data.content = nextRawValue;
 	    markDirty(obj);
-	    logInputStep('content-dirty-done');
+	    logInputStep('motion-dirty-done');
 	    if (proxy._boardfishDomValueStale) {
 	      if (synthesizedStaleReplacement) {
 	        const caret = Math.max(0, Math.min(
@@ -1585,20 +1507,15 @@ function enterEdit(id, {
     const removedChars = replacementEnd - replacementStart;
     const insertedChars = insertedText.length;
     const deletesContent = String(inputType || '').startsWith('delete');
-    const deleteReducedLogicalLines = deletesContent && oldValue.slice(replacementStart, replacementEnd).includes('\n');
+    const deleteReducedLogicalLines = deletesContent && textRangeIncludes(oldValue, replacementStart, replacementEnd, '\n');
     const selectedDeleteShrankText = deletesContent && !!inputState.hasSelection && removedChars > insertedChars;
     const deleteShrankPendingEdit = pendingSizeSyncBeforeAutoHeight &&
       deletesContent &&
       removedChars > insertedChars;
     const layoutRemovedLines = layoutPatched && obj._lastTextLayoutLineDelta < 0;
     const insertsLineBreak = inputType === 'insertLineBreak' || inputType === 'insertParagraph';
-    // Bulk insertion needs exact bounds in the same frame as the new text.
-    // The wrapped-row index built here is reused by rendering; only ordinary
-    // single-character typing keeps the large-document deferred-size path.
-    const insertsBulkText = inputType === 'insertFromPaste' || inputType === 'insertFromDrop' ||
-      (String(inputType).startsWith('insert') && insertedChars > 1);
     const forceAutoHeight = layoutRemovedLines || deleteReducedLogicalLines ||
-      selectedDeleteShrankText || deleteShrankPendingEdit || insertsLineBreak || insertsBulkText;
+      selectedDeleteShrankText || deleteShrankPendingEdit || insertsLineBreak;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const autoHeightForceReason = layoutRemovedLines
       ? 'layout-line-removal'
@@ -1608,7 +1525,7 @@ function enterEdit(id, {
           ? 'selected-delete'
           : (deleteShrankPendingEdit
             ? 'pending-size-delete'
-            : (insertsLineBreak ? 'line-break-insert' : (insertsBulkText ? 'bulk-text-insert' : '')))));
+            : (insertsLineBreak ? 'line-break-insert' : ''))));
     const autoHeightDebugBefore = shouldLogInput
       ? {
           size: textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight'),
@@ -1650,9 +1567,11 @@ function enterEdit(id, {
     }));
     _textInputSelectionHistorySuppress = textEditSelectionState(proxy);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const historyPushed =
+    const historyPushed = recordTextEditInputHistory(id, inputType, !!inputState.hasSelection);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    recordTextEditInputHistory(id, inputType, !!inputState.hasSelection);
+    if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+      recordTextEditInputHistory(id, inputType, !!inputState.hasSelection);
+    }
     logInputStep('history-recorded', {
       historyPushed,
       hadSelection: !!inputState.hasSelection,
@@ -1715,40 +1634,10 @@ function enterEdit(id, {
       pasteStepStartedAt = now;
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    const candidate = currentBoardfishTextSelectionClipboardPayload();
     const fallbackText = typeof BoardfishClipboardIO !== 'undefined'
       ? BoardfishClipboardIO.readClipboardTextFromEvent?.(event.clipboardData) || ''
       : '';
-    const selection = eventSelection;
-    if (fallbackText) {
-      const nativeExternalOptions = {
-        event,
-        selection,
-        inputType: 'insertFromPaste',
-      };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        nativeExternalOptions.debug = dbg;
-      }
-      const nativeExternalPaste = tryNativeExternalTextPaste(id, proxy, fallbackText, nativeExternalOptions);
-      if (nativeExternalPaste) {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        logPasteStep('paste:text-edit-native-event-text-allowed', {
-          source: 'event-text',
-          textLen: nativeExternalPaste.text.length,
-          ...textEditorTextStats(nativeExternalPaste.text),
-          ...textEditorSelectionDebugStats(selection, proxy.value),
-        });
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        return;
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      logPasteStep('paste:text-edit-native-event-text-skipped', {
-        source: 'event-text',
-        fallbackTextChars: fallbackText.length,
-        selectedChars: selection.end - selection.start,
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    }
-    const candidate = currentBoardfishTextSelectionClipboardPayload();
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     logPasteStep('paste:text-edit-event-read-done', {
       ...textEditorEventDebugStats(event),
@@ -1772,6 +1661,68 @@ function enterEdit(id, {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return;
     }
+    const selection = eventSelection;
+    if (candidate) {
+      const nativePasteOptions = {
+        event,
+        selection,
+        fallbackText,
+        inputType: 'insertFromPaste',
+      };
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') nativePasteOptions.debug = dbg;
+      const nativePaste = tryNativeBoardfishTextSelectionPaste(id, proxy, candidate, nativePasteOptions);
+      if (nativePaste) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        logPasteStep('paste:text-edit-native-textarea-allowed', {
+          source: 'jsClipboard-text-selection',
+          textLen: nativePaste.text.length,
+          ...textEditorTextStats(nativePaste.text),
+          ...textEditorSelectionDebugStats(selection, proxy.value),
+        });
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        return;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      logPasteStep('paste:text-edit-native-textarea-skipped', {
+        source: 'jsClipboard-text-selection',
+        hasToken: !!synchronousBoardfishClipboardTokenFromPasteEvent(event),
+        tokenMatches: boardfishPasteEventMatchesCurrentTextSelectionClipboard(event),
+        selectedChars: selection.end - selection.start,
+        fallbackTextChars: fallbackText.length,
+        candidateTextLen: candidate?.text?.length ?? '',
+      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
+    if (fallbackText) {
+      const nativeExternalOptions = {
+        event,
+        selection,
+        inputType: 'insertFromPaste',
+      };
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        nativeExternalOptions.debug = dbg;
+        nativeExternalOptions.path = candidate ? 'fallback-event-text-native' : 'event-text-native';
+      }
+      const nativeExternalPaste = tryNativeExternalTextPaste(id, proxy, fallbackText, nativeExternalOptions);
+      if (nativeExternalPaste) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        logPasteStep('paste:text-edit-native-event-text-allowed', {
+          source: candidate ? 'fallback-event-text' : 'event-text',
+          textLen: nativeExternalPaste.text.length,
+          ...textEditorTextStats(nativeExternalPaste.text),
+          ...textEditorSelectionDebugStats(selection, proxy.value),
+        });
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        return;
+      }
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      logPasteStep('paste:text-edit-native-event-text-skipped', {
+        source: candidate ? 'fallback-event-text' : 'event-text',
+        fallbackTextChars: fallbackText.length,
+        selectedChars: selection.end - selection.start,
+      });
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    }
     event.preventDefault();
     if (!candidate) {
       const replaceOptions = { selection, inputType: 'insertFromPaste' };
@@ -1780,12 +1731,9 @@ function enterEdit(id, {
         replaceOptions.source = 'event-text';
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const pasted =
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      replaceTextEditSelectionWithPayload(id, proxy, {
+      const pasted = replaceTextEditSelectionWithPayload(id, proxy, {
         text: fallbackText,
       }, replaceOptions);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       dbgApi?.end?.(dbg, {
         path: 'event-text',
         pasted,
@@ -1798,6 +1746,11 @@ function enterEdit(id, {
         ...textEditorTextStats(fallbackText),
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        replaceTextEditSelectionWithPayload(id, proxy, {
+          text: fallbackText,
+        }, replaceOptions);
+      }
       return;
     }
     const pasteOptions = {
@@ -1805,6 +1758,7 @@ function enterEdit(id, {
       proxy,
       event,
       selection,
+      immediateHistory: false,
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') pasteOptions.debug = dbg;
     pasteBoardfishTextSelectionIntoEditSelection(pasteOptions).then((pasted) => {
@@ -1833,12 +1787,9 @@ function enterEdit(id, {
         fallbackOptions.source = 'fallback-event-text';
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const fallbackPasted =
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      replaceTextEditSelectionWithPayload(id, proxy, {
+      const fallbackPasted = replaceTextEditSelectionWithPayload(id, proxy, {
         text: fallbackText,
       }, fallbackOptions);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       dbgApi?.end?.(dbg, {
         path: 'fallback-event-text',
         pasted: fallbackPasted,
@@ -1851,6 +1802,11 @@ function enterEdit(id, {
         ...textEditorTextStats(fallbackText),
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        replaceTextEditSelectionWithPayload(id, proxy, {
+          text: fallbackText,
+        }, fallbackOptions);
+      }
     }).catch((err) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logPasteStep('paste:text-edit-js-payload-error', { error: String(err) });
@@ -1874,12 +1830,9 @@ function enterEdit(id, {
         fallbackOptions.source = 'error-fallback-event-text';
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const fallbackPasted =
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      replaceTextEditSelectionWithPayload(id, proxy, {
+      const fallbackPasted = replaceTextEditSelectionWithPayload(id, proxy, {
         text: fallbackText,
       }, fallbackOptions);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
       dbgApi?.end?.(dbg, {
         path: 'error-fallback-event-text',
         error: String(err),
@@ -1893,18 +1846,17 @@ function enterEdit(id, {
         ...textEditorTextStats(fallbackText),
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+        replaceTextEditSelectionWithPayload(id, proxy, {
+          text: fallbackText,
+        }, fallbackOptions);
+      }
     });
   });
   proxy.addEventListener('blur', flushEditHistoryCheckpoint);
   proxy.addEventListener('keydown', (e) => {
-    if (compositionState || e.isComposing) return;
-    clearCompletedComposition();
     const wakeCaret = !_caretVisible;
     _caretVisible = true;
-    pendingNativeNavigation = null;
-    if (!['ArrowUp', 'ArrowDown', 'Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) {
-      resetTextEditNavigation(obj);
-    }
 
     if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
@@ -1920,7 +1872,6 @@ function enterEdit(id, {
         ...selection,
         value: currentProxyValue,
         inputType,
-        replacement: indentResult.replacement,
       };
       beginTextEditHistoryAction(id, pendingInputState);
       proxy.value = indentResult.value;
@@ -1958,7 +1909,8 @@ function enterEdit(id, {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'x' && proxy.selectionStart !== proxy.selectionEnd) {
       e.preventDefault();
       const selection = textEditSelectionState(proxy);
-      copyTextEditSelectionFromProxy(id, proxy, selection);
+      globalThis.BoardfishMotion?.cancelTextSelectionMotion?.(id);
+      copyTextEditSelectionFromProxy(id, proxy, selection, { animateCopy: false });
       const deletion = selection;
       const inputType = 'deleteByCut';
       pendingInputState = {
@@ -1998,19 +1950,39 @@ function enterEdit(id, {
       syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
       const moveRight = e.key === 'ArrowRight';
       let reference = moveRight ? selection.end : selection.start;
+      let anchor = reference;
       if (e.shiftKey) {
         const backward = selection.direction === 'backward';
         reference = backward ? selection.start : selection.end;
+        anchor = backward ? selection.end : selection.start;
       }
       const nextPosition = textEditWordBoundary(
         currentProxyValue,
         reference,
         moveRight ? 'right' : 'left',
       );
-      const layout = getTextLayout(obj);
-      const lineIndex = textEditCaretLineAtIndex(obj, layout, nextPosition, moveRight ? 'backward' : 'forward');
-      applyTextEditNavigationSelection(obj, proxy, selection, nextPosition,
-        layout[lineIndex]?.startIndex, e.shiftKey);
+      if (e.shiftKey) {
+        const start = Math.min(anchor, nextPosition);
+        const end = Math.max(anchor, nextPosition);
+        setTextEditProxySelectionRange(
+          proxy,
+          start,
+          end,
+          nextPosition < anchor ? 'backward' : 'forward',
+          currentProxyValue,
+        );
+        if (start === end) setTextEditCaretIndex(obj, start);
+        else clearTextEditCaretIndex(obj);
+      } else {
+        setTextEditProxySelectionRange(
+          proxy,
+          nextPosition,
+          nextPosition,
+          'none',
+          currentProxyValue,
+        );
+        setTextEditCaretIndex(obj, nextPosition);
+      }
       scheduleRender(true, false);
       return;
     }
@@ -2020,7 +1992,7 @@ function enterEdit(id, {
       const deleteKeyStartedAt = textEditorDebugNow();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const selection = textEditSelectionState(proxy);
-      let deletion;
+      let deletion = null;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       let deleteRangeMs = 0;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -2090,15 +2062,17 @@ function enterEdit(id, {
         });
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const mutationStartedAt = textEditorDebugNow();
-        const mutationResult =
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        replaceTextEditProxyRange(
+        const mutationResult = replaceTextEditProxyRange(
           proxy, replacement.insertedText, replacement.start, replacement.end, 'start', true,
         );
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const textareaMutationMs = textEditorDebugRound(textEditorDebugNow() - mutationStartedAt);
         const logicalProxyValue = textEditProxyValue(proxy);
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
+          replaceTextEditProxyRange(
+            proxy, replacement.insertedText, replacement.start, replacement.end, 'start', true,
+          );
+        }
         recordTextEditorInputPerfStep('keydown-delete-textarea-mutated', {
           seq: deleteDebugSeq,
           inputType,
@@ -2152,74 +2126,67 @@ function enterEdit(id, {
       });
     }
 
-    // Command arrows use the canvas rows, since the hidden textarea is unwrapped.
-    if (e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing &&
-        ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-      e.preventDefault();
-      flushEditHistoryCheckpoint();
-      resetTextEditNavigation(obj);
-      const selection = textEditSelectionState(proxy);
-      const layout = getTextLayout(obj);
-      const towardStart = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
-      const reference = e.shiftKey
-        ? (selection.direction === 'backward' ? selection.start : selection.end)
-        : (towardStart ? selection.start : selection.end);
-      const lineIndex = textEditCaretLineAtIndex(obj, layout, reference);
-      const line = layout[lineIndex];
-      let position, lineStart;
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        position = towardStart ? 0 : textEditProxyValue(proxy).length;
-        lineStart = (towardStart ? layout[0] : layout[layout.length - 1])?.startIndex;
-      } else {
-        position = towardStart ? (line?.startIndex ?? 0)
-          : (line?.caretEndIndex ?? line?.endIndex ?? ((line?.startIndex ?? 0) + (line?.text.length ?? 0)));
-        lineStart = line?.startIndex;
-      }
-      applyTextEditNavigationSelection(obj, proxy, selection, position, lineStart, e.shiftKey);
-      scheduleRender(true, false);
-      return;
-    }
-
-    // Navigate canvas rows and retain the requested column through short lines.
-    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.isComposing) {
+    // The 1px-wide proxy treats all content as a single column, so the browser's
+    // own up/down logic navigates char-by-char instead of line-by-line. Intercept
+    // and compute line navigation from the canvas layout instead.
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
       flushEditHistoryCheckpoint();
       const layout = getTextLayout(obj);
       if (!layout.length) { scheduleRender(true, false); return; }
-      const selection = textEditSelectionState(proxy);
+
       const isUp = e.key === 'ArrowUp';
-      const refPos = e.shiftKey
-        ? (selection.direction === 'backward' ? selection.start : selection.end)
-        : (isUp ? selection.start : selection.end);
-      const refLineIdx = textEditCaretLineAtIndex(obj, layout, refPos);
-      const refLine = layout[refLineIdx];
-      const caretX = obj._textEditPreferredX ?? lineCaretXAtOffset(refLine, obj,
-        Math.max(0, Math.min(refPos - refLine.startIndex, refLine.text.length)));
-      const targetIdx = isUp ? refLineIdx - 1 : refLineIdx + 1;
-      let hit;
-      if (targetIdx < 0) {
-        hit = { index: 0, lineStartIndex: layout[0].startIndex };
-      } else if (targetIdx >= layout.length) {
-        hit = { index: textEditProxyValue(proxy).length, lineStartIndex: layout[layout.length - 1].startIndex };
+
+      // Which end of the selection to navigate from
+      let refPos;
+      if (e.shiftKey) {
+        const d = proxy.selectionDirection;
+        refPos = d === 'backward' ? proxy.selectionStart : proxy.selectionEnd;
       } else {
-        hit = layoutHitTestCaret([layout[targetIdx]], caretX, layout[targetIdx].y, obj);
+        refPos = isUp ? proxy.selectionStart : proxy.selectionEnd;
       }
-      applyTextEditNavigationSelection(obj, proxy, selection, hit.index, hit.lineStartIndex, e.shiftKey);
-      obj._textEditPreferredX = caretX;
+
+      // Find the line containing refPos
+      let lo = 0, hi = layout.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1, ln = layout[mid];
+        if (refPos <= (ln.caretEndIndex ?? ln.endIndex ?? (ln.startIndex + ln.text.length))) hi = mid; else lo = mid + 1;
+      }
+      const refLineIdx = lo;
+      const refLine = layout[refLineIdx];
+
+      // Caret world-x in the reference line
+      const off = Math.min(refPos - refLine.startIndex, refLine.text.length);
+      const caretX = lineCaretXAtOffset(refLine, obj, off);
+
+      // Find nearest position in the target line
+      const targetIdx = isUp ? refLineIdx - 1 : refLineIdx + 1;
+      let newPos;
+      if (targetIdx < 0) {
+        newPos = 0;
+      } else if (targetIdx >= layout.length) {
+        newPos = textEditProxyValue(proxy).length;
+      } else {
+        newPos = layoutHitTestCaret([layout[targetIdx]], caretX, layout[targetIdx].y, obj, true).index;
+      }
+
+      if (e.shiftKey) {
+        const d = proxy.selectionDirection;
+        const anchorPos = d === 'backward' ? proxy.selectionEnd : proxy.selectionStart;
+        setTextEditProxySelectionRange(
+          proxy,
+          Math.min(anchorPos, newPos), Math.max(anchorPos, newPos),
+          anchorPos <= newPos ? 'forward' : 'backward'
+        );
+      } else {
+        setTextEditProxySelectionRange(proxy, newPos, newPos, 'none');
+      }
+
       scheduleRender(true, false);
       return;
     }
 
-    if (textEditNavigationKeys.has(e.key)) {
-      flushEditHistoryCheckpoint();
-      const selection = textEditSelectionState(proxy);
-      // Native navigation must see the latest text even when a large edit left
-      // the textarea value deferred; otherwise it can enter deleted positions.
-      syncTextEditProxyDomValue(proxy, textEditProxyValue(proxy), selection);
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        pendingNativeNavigation = { ...selection, key: e.key };
-      }
-    }
+    if (textEditNavigationKeys.has(e.key)) flushEditHistoryCheckpoint();
     if (wakeCaret) scheduleRender(true, false);
   });
 
@@ -2228,7 +2195,6 @@ function enterEdit(id, {
   let _prevSelStart = -1, _prevSelEnd = -1;
   _selChangeListener = () => {
     if (document.activeElement !== proxy) return;
-    if (compositionState) return;
     let s = proxy.selectionStart, e = proxy.selectionEnd;
     const suppressed = _textInputSelectionHistorySuppress;
     if (typeof suppressed?.hasSelection === 'boolean' && suppressed.start === s && suppressed.end === e) {
@@ -2244,31 +2210,12 @@ function enterEdit(id, {
     TextSelDebug._logSelection('selectionchange', proxy);
     _caretVisible = true;
     if (currentObj) {
-      const direction = proxy.selectionDirection || 'none';
-      const navigation = currentObj._textEditNavigationSelection;
-      const nativeNavigation = pendingNativeNavigation;
-      if (nativeNavigation && (s !== nativeNavigation.start || e !== nativeNavigation.end ||
-          direction !== nativeNavigation.direction)) {
-        const index = direction === 'backward' ? s : e;
-        const layout = getTextLayout(currentObj);
-        const lineIndex = textEditCaretLineAtIndex(currentObj, layout, index,
-          nativeNavigation.key === 'ArrowLeft' ? 'forward' : 'backward');
-        rememberTextEditNavigationSelection(currentObj, proxy, index, layout[lineIndex]?.startIndex);
-        pendingNativeNavigation = null;
-      } else if (!navigation || navigation.start !== s || navigation.end !== e || navigation.direction !== direction) {
-        if (s === e) setTextEditCaretIndex(currentObj, s);
-        else clearTextEditCaretIndex(currentObj);
-      }
+      if (s === e) setTextEditCaretIndex(currentObj, s);
+      else clearTextEditCaretIndex(currentObj);
     }
     scheduleRender(true, false);
   };
   document.addEventListener('selectionchange', _selChangeListener);
-  proxy.addEventListener('keyup', (event) => {
-    if (pendingNativeNavigation?.key !== event.key) return;
-    // A browser may dispatch keyup before the queued selectionchange event.
-    _selChangeListener();
-    pendingNativeNavigation = null;
-  });
   logStep('enter-selection-listener-ready');
 
   _caretVisible = true;
@@ -2322,9 +2269,10 @@ function exitEdit() {
   const exitStart = textEditorDebugNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const id = editingId;
-  const proxy = _editEl;
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const objAtStart = objectsMap.get(id);
+  const proxy = _editEl;
+  const proxyLogicalValue = textEditProxyValue(proxy);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let stepStart = exitStart;
   const logStep = (label, obj = objAtStart, meta = {}) => {
     const t = textEditorDebugNow();
@@ -2340,7 +2288,7 @@ function exitEdit() {
     phase: 'exit',
     ms: 0,
     totalMs: 0,
-    proxyChars: textEditProxyValue(proxy).length,
+    proxyChars: proxyLogicalValue.length,
     domProxyChars: typeof proxy?.value === 'string' ? proxy.value.length : '',
     domValueStale: !!proxy?._boardfishDomValueStale,
     selectionStart: proxy?.selectionStart ?? '',

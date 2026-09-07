@@ -31,7 +31,7 @@
     0 8px 24px rgba(0,0,0,0.1),
     0 0 0 1px rgba(0,0,0,0.3);
   --ui-corner-shape: squircle;
-  --ui-radius: 16px;
+  --ui-radius: 25px;
   --pill-radius: 16px;
   --menu-shell-radius: var(--ui-radius);
   --menu-shell-padding: 8px;
@@ -67,14 +67,16 @@ body[data-theme="dark"] {
   --canvas-bg: var(--canvas-bg-dark);
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  corner-shape: var(--ui-corner-shape);
-}
-*::before,
-*::after {
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Keep beta corners on controls and status pills, with round menu shells. */
+.ctx-item,
+.ctx-action-item,
+.ctx-action-item::before,
+#island,
+#isl-zoom,
+.opening-shield-pill,
+.opening-shield-pill-text {
   corner-shape: var(--ui-corner-shape);
 }
 
@@ -159,20 +161,14 @@ body {
   top: 0; left: 0;
   display: none;
   border: 0;
+  box-shadow: inset 0 0 0 1px var(--text-edit-outline);
   pointer-events: none;
   z-index: 99998;
 }
 #sel-overlay.visible { display: block; }
-#sel-overlay:not(.multi)::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  /* Snap the stroke width without shifting the resize handles with a border. */
-  border: 1px solid var(--text-edit-outline);
-  pointer-events: none;
-}
 #sel-overlay.multi {
   border: 1px dashed var(--text-edit-outline);
+  box-shadow: none;
 }
 #sel-overlay.editing {
   border: 0;
@@ -210,7 +206,7 @@ body {
 #multi-sel-overlay.visible { display: block; }
 .multi-sel-box {
   position: absolute;
-  border: 1px solid var(--selection-outline);
+  box-shadow: inset 0 0 0 1px var(--selection-outline);
   pointer-events: none;
 }
 

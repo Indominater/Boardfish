@@ -174,6 +174,7 @@ function loadHistoryHarness() {
       proxy._boardfishDomValueStale = !domSynced;
     },
     flushEditHistoryCheckpoint() { return false; },
+    invalidateOffscreen() {},
     markDirty(id) {
       context._dirtyIds.add(id);
     },
@@ -336,7 +337,7 @@ test('clipboard token changes trigger pruning and keep current clipboard image k
   assert.deepEqual(context.imagePruneCalls, [['img-old'], ['img-new']]);
 });
 
-test('history restores image flips on undo and redo', () => {
+test('history entries and restores omit inert motion metadata', () => {
   const context = loadHistoryHarness();
   setBoard(context, [
     { id: 'image-1', type: 'image', x: 0, y: 0, w: 100, h: 100, z: 1, data: { imgKey: 'img-1', flipX: false } },
@@ -347,13 +348,16 @@ test('history restores image flips on undo and redo', () => {
   context.markDirty('image-1');
   context.pushHistory('flip-image-x');
 
+  assert.equal('motion' in context.boardHistory[0], false);
+  assert.equal('motion' in context.boardHistory[1], false);
+
   context.undo();
   assert.equal(context.objectsMap.get('image-1').data.flipX, false);
   context.redo();
   assert.equal(context.objectsMap.get('image-1').data.flipX, true);
 });
 
-test('undo clears transient dirty ids before rendering restored state', () => {
+test('undo clears transient dirty ids before rebuilding caches', () => {
   const context = loadHistoryHarness();
   setBoard(context, [historyImage('img-1')]);
   context.snapshot();
@@ -361,7 +365,7 @@ test('undo clears transient dirty ids before rendering restored state', () => {
   context.objectsMap.get('img-1').x = 20;
   context.markDirty('img-1');
   context.pushHistory('move-image');
-  context.renderAll = () => { throw new Error('restore failed'); };
+  context.invalidateOffscreen = () => { throw new Error('restore failed'); };
 
   assert.throws(() => context.undo(), /restore failed/);
   assert.equal(context.boardHistory[context.historyIndex].revision, savedRevision);
@@ -681,6 +685,7 @@ test('undoing and redoing text edits preserve restored text box dimensions', () 
   assert.equal(liveProxy.focused, false);
   assert.equal(liveProxy.setRangeTextCalls.length, 0);
   assert.equal(context.enterEditCalls.length, 0);
+  assert.equal(context.replaceBoardObjectsOptions.at(-1).normalizeText, false);
   assert.equal(context.replaceBoardObjectsOptions.at(-1).syncTextHeights, false);
 
   context.redo();
@@ -698,6 +703,7 @@ test('undoing and redoing text edits preserve restored text box dimensions', () 
   assert.equal(liveProxy.focused, false);
   assert.equal(liveProxy.setRangeTextCalls.length, 0);
   assert.equal(context.enterEditCalls.length, 0);
+  assert.equal(context.replaceBoardObjectsOptions.at(-1).normalizeText, false);
   assert.equal(context.replaceBoardObjectsOptions.at(-1).syncTextHeights, false);
 });
 
@@ -748,6 +754,7 @@ test('undoing and redoing text edits restore active text runtime layout caches',
   assert.equal(liveProxy.setRangeTextCalls.length, 0);
   assert.equal(restored._layoutCacheContent, 'before');
   assert.equal(restored._layoutCache[0].text, 'cached-before');
+  assert.equal(context.replaceBoardObjectsOptions.at(-1).normalizeText, false);
   assert.equal('preserveTextRuntimeCaches' in context.replaceBoardObjectsOptions.at(-1), false);
 
   context.redo();
@@ -763,6 +770,7 @@ test('undoing and redoing text edits restore active text runtime layout caches',
   assert.equal(liveProxy.setRangeTextCalls.length, 0);
   assert.equal(restored._layoutCacheContent, 'after');
   assert.equal(restored._layoutCache[0].text, 'cached-after');
+  assert.equal(context.replaceBoardObjectsOptions.at(-1).normalizeText, false);
   assert.equal('preserveTextRuntimeCaches' in context.replaceBoardObjectsOptions.at(-1), false);
 });
 

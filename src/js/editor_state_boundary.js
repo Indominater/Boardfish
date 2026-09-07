@@ -42,7 +42,6 @@
     return selectedIds.size;
   }
 
-  // State mutations accept canonical objects normalized by their input paths.
   function addObject(obj) {
     objects.push(obj);
     objectsMap.set(obj.id, obj);
@@ -93,12 +92,16 @@
   }
 
   function replaceBoardObjects(nextObjects = [], {
+    normalizeText = true,
     syncTextHeights = true,
   } = {}) {
     objects = Array.isArray(nextObjects) ? nextObjects : [];
     objectsMap.clear();
     for (const obj of objects) {
       objectsMap.set(obj.id, obj);
+      if (!normalizeText || obj?.type !== 'text') continue;
+      if (!obj.data) obj.data = {};
+      obj.data.content = normalizeTextContent(obj.data?.content);
     }
     if (syncTextHeights) syncAllTextAutoHeights();
     return objects;
@@ -110,7 +113,6 @@
     objects = [];
     objectsMap.clear();
     clearTextLayoutCaches();
-    if (typeof ctx !== 'undefined') ctx?.resetResources?.();
     resetObjectCounters();
   }
 
@@ -119,9 +121,10 @@
     updateInputShieldVisual();
   }
 
-  function commitMutation(reason, mutate) {
+  function commitMutation(reason, mutate, options = {}) {
     const result = mutate();
     if (!result) return result;
+    if (options.invalidate) invalidateOffscreen();
     if (typeof BOARDFISH_PRODUCTION === 'undefined') scheduleRender(true, true, reason || 'mutation');
     else scheduleRender(true, true);
     pushHistory(reason);

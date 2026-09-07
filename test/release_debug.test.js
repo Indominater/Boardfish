@@ -111,8 +111,11 @@ function readJson(relativePath) {
   return JSON.parse(readSource(relativePath));
 }
 
-async function manifestScripts(name) {
-  return (await import('../src/js/startup_manifest.mjs'))[name];
+function manifestScripts(name) {
+  const source = readSource('src/js/startup_manifest.mjs');
+  const match = source.match(new RegExp(`export const ${name} = Object\\.freeze\\(\\[([\\s\\S]*?)\\]\\);`));
+  assert.ok(match, `${name} is missing`);
+  return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
 }
 
 let builtWebPreviewBundle = null;
@@ -214,9 +217,9 @@ test('release sources do not contain enabled debugger switches', () => {
   }
 });
 
-test('web manifests preserve developer diagnostics and exclude them from release', async () => {
-  const webDevScripts = await manifestScripts('WEB_DEV_SCRIPTS');
-  const webPreviewScripts = await manifestScripts('WEB_PREVIEW_SCRIPTS');
+test('web manifests preserve developer diagnostics and exclude them from release', () => {
+  const webDevScripts = manifestScripts('WEB_DEV_SCRIPTS');
+  const webPreviewScripts = manifestScripts('WEB_PREVIEW_SCRIPTS');
   const diagnosticScripts = webDevScripts.filter((script) => WEB_DEV_DIAGNOSTIC_SCRIPTS.includes(script));
 
   assert.equal(webDevScripts[0], 'web_env.js', 'developer mode bootstrap must load before diagnostics');
@@ -287,12 +290,6 @@ test('web release preview keeps content-revision dirty tracking used by board co
 });
 
 test('web release preview ships minified PWA assets', () => {
-  buildAndReadWebPreviewBundle();
-  const fontAssets = fs.readdirSync(path.join(root, 'dist-web', 'fonts'));
-  assert.ok(fontAssets.includes('Geist.woff2'));
-  assert.ok(fontAssets.includes('geist-ascii-LICENSE.txt'));
-  assert.ok(fontAssets.includes('geist-ascii-coverage.png'));
-  assert.ok(fontAssets.every(name => !name.endsWith('.js')), 'font metadata is already in the runtime bundle');
   const manifestSource = readSource('src/js/startup_manifest.mjs');
   const buildSource = readSource('scripts/build-runtime-assets.mjs');
   const serverSource = readSource('scripts/serve-web.mjs');

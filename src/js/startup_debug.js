@@ -33,7 +33,9 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
   let lastResult = null;
   let lastJson = '';
 
-  const round = round2;
+  function round(value) {
+    return typeof value === 'number' ? Math.round(value * 100) / 100 : value;
+  }
 
   function colorToRgb(value) {
     const probe = document.createElement('span');
@@ -105,12 +107,14 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
   }
 
   function record(step, detail = {}) {
+    if (!DEBUG_TOOLS_ENABLED) return null;
     const entry = { t: round(performance.now() - t0), step, ...detail };
     events.push(entry);
     return entry;
   }
 
   function sample(label = 'sample') {
+    if (!DEBUG_TOOLS_ENABLED) return null;
     const entry = currentColors(label);
     samples.push(entry);
     return entry;
@@ -607,6 +611,7 @@ const BoardfishDebugConsole = (() => {
       return value;
     }
     if (type === 'bigint') return value.toString();
+    if (type === 'undefined') return { type: 'undefined' };
     if (type === 'function') return `[Function ${value.name || 'anonymous'}]`;
     if (depth > 8) return '[MaxDepth]';
     if (seen.has(value)) return '[Circular]';
