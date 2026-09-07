@@ -251,20 +251,12 @@ function textEditWordBoundary(value, index, direction) {
   const moveRight = direction === 'right' || Number(direction) > 0;
 
   if (textEditWordSegmenter) {
-    let previousWordStart = 0;
-    for (const part of textEditWordSegmenter.segment(text)) {
-      if (!part.isWordLike) continue;
-      const start = part.index;
-      const end = start + part.segment.length;
-      if (moveRight) {
-        if (end > position) return end;
-        continue;
-      }
-      if (start >= position) break;
-      previousWordStart = start;
-      if (end >= position) break;
+    const segments = textEditWordSegmenter.segment(text);
+    let part = segments.containing(moveRight ? position : position - 1);
+    while (part && !part.isWordLike) {
+      part = segments.containing(moveRight ? part.index + part.segment.length : part.index - 1);
     }
-    return moveRight ? text.length : previousWordStart;
+    return part ? part.index + (moveRight ? part.segment.length : 0) : moveRight ? text.length : 0;
   }
 
   const isWordChar = (char) => /[A-Za-z0-9_]/.test(char || '');
@@ -568,8 +560,14 @@ const resetTextEditPreservedMinLines = (obj) => {
   return true;
 };
 
-const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false) => {
+const resetTextEditNavigation = (obj) => {
   if (!obj) return;
+  delete obj._textEditNavigationSelection;
+};
+
+const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false, preserveNavigation = false) => {
+  if (!obj) return;
+  if (!preserveNavigation) resetTextEditNavigation(obj);
   const length = (obj.data?.content || '').length;
   const nextIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), length));
   if (obj._textEditCaretIndex !== nextIndex || clearLineStartIndex) {
@@ -583,8 +581,56 @@ const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStart
 
 const clearTextEditCaretIndex = (obj) => {
   if (!obj) return;
+  resetTextEditNavigation(obj);
   delete obj._textEditCaretIndex;
   delete obj._textEditCaretLineStartIndex;
+};
+
+// A soft wrap has two visual positions for the same text index. Keep the row
+// selected by a click/navigation, or choose the side approached by an arrow.
+const textEditCaretLineAtIndex = (obj, layout, index, affinity = null) => {
+  if (!layout.length) return -1;
+  let lo = 0, hi = layout.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const line = layout[mid];
+    const end = line.caretEndIndex ?? line.endIndex ?? (line.startIndex + line.text.length);
+    if (index <= end) hi = mid;
+    else lo = mid + 1;
+  }
+  const preferred = affinity == null && obj?._textEditCaretIndex === index
+    ? obj._textEditCaretLineStartIndex : null;
+  let result = lo;
+  // Crossing consumed wrap whitespace reaches the next row's beginning. A
+  // hard word wrap, in contrast, still has a caret at the preceding row's end.
+  const line = layout[lo];
+  const visibleEnd = line.endIndex ?? (line.startIndex + line.text.length);
+  if (index > visibleEnd && layout[lo + 1]?.startIndex === index) result = lo + 1;
+  for (let i = lo; i < layout.length && layout[i].startIndex <= index; i++) {
+    if (layout[i].startIndex === preferred) return i;
+    if (affinity === 'forward') result = i;
+  }
+  return result;
+};
+
+const rememberTextEditNavigationSelection = (obj, proxy, index, lineStartIndex) => {
+  setTextEditCaretIndex(obj, index, lineStartIndex, true, true);
+  obj._textEditNavigationSelection = {
+    start: proxy.selectionStart,
+    end: proxy.selectionEnd,
+    direction: proxy.selectionDirection || 'none',
+  };
+};
+
+const applyTextEditNavigationSelection = (obj, proxy, selection, index, lineStartIndex, extend) => {
+  const anchor = selection.direction === 'backward' ? selection.end : selection.start;
+  if (extend) {
+    setTextEditProxySelectionRange(proxy, Math.min(anchor, index), Math.max(anchor, index),
+      index < anchor ? 'backward' : 'forward');
+  } else {
+    setTextEditProxySelectionRange(proxy, index, index, 'none');
+  }
+  rememberTextEditNavigationSelection(obj, proxy, index, lineStartIndex);
 };
 
 const textEditVisibleSelectionReplacementRange = (content, selection = {}) => {
@@ -1319,6 +1365,7 @@ function enterEdit(id, {
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   proxy.addEventListener('beforeinput', (event) => {
+    resetTextEditNavigation(obj);
     if (pendingInputState?.nativePasteHandled && event?.inputType === 'insertFromPaste') {
       return;
     }
@@ -1514,8 +1561,13 @@ function enterEdit(id, {
       removedChars > insertedChars;
     const layoutRemovedLines = layoutPatched && obj._lastTextLayoutLineDelta < 0;
     const insertsLineBreak = inputType === 'insertLineBreak' || inputType === 'insertParagraph';
+    // Bulk insertion needs exact bounds in the same frame as the new text.
+    // The wrapped-row index built here is reused by rendering; only ordinary
+    // single-character typing keeps the large-document deferred-size path.
+    const insertsBulkText = inputType === 'insertFromPaste' || inputType === 'insertFromDrop' ||
+      (String(inputType).startsWith('insert') && insertedChars > 1);
     const forceAutoHeight = layoutRemovedLines || deleteReducedLogicalLines ||
-      selectedDeleteShrankText || deleteShrankPendingEdit || insertsLineBreak;
+      selectedDeleteShrankText || deleteShrankPendingEdit || insertsLineBreak || insertsBulkText;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const autoHeightForceReason = layoutRemovedLines
       ? 'layout-line-removal'
@@ -1525,7 +1577,7 @@ function enterEdit(id, {
           ? 'selected-delete'
           : (deleteShrankPendingEdit
             ? 'pending-size-delete'
-            : (insertsLineBreak ? 'line-break-insert' : ''))));
+            : (insertsLineBreak ? 'line-break-insert' : (insertsBulkText ? 'bulk-text-insert' : '')))));
     const autoHeightDebugBefore = shouldLogInput
       ? {
           size: textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight'),
@@ -1855,6 +1907,7 @@ function enterEdit(id, {
   });
   proxy.addEventListener('blur', flushEditHistoryCheckpoint);
   proxy.addEventListener('keydown', (e) => {
+    resetTextEditNavigation(obj);
     const wakeCaret = !_caretVisible;
     _caretVisible = true;
 
@@ -1950,39 +2003,19 @@ function enterEdit(id, {
       syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
       const moveRight = e.key === 'ArrowRight';
       let reference = moveRight ? selection.end : selection.start;
-      let anchor = reference;
       if (e.shiftKey) {
         const backward = selection.direction === 'backward';
         reference = backward ? selection.start : selection.end;
-        anchor = backward ? selection.end : selection.start;
       }
       const nextPosition = textEditWordBoundary(
         currentProxyValue,
         reference,
         moveRight ? 'right' : 'left',
       );
-      if (e.shiftKey) {
-        const start = Math.min(anchor, nextPosition);
-        const end = Math.max(anchor, nextPosition);
-        setTextEditProxySelectionRange(
-          proxy,
-          start,
-          end,
-          nextPosition < anchor ? 'backward' : 'forward',
-          currentProxyValue,
-        );
-        if (start === end) setTextEditCaretIndex(obj, start);
-        else clearTextEditCaretIndex(obj);
-      } else {
-        setTextEditProxySelectionRange(
-          proxy,
-          nextPosition,
-          nextPosition,
-          'none',
-          currentProxyValue,
-        );
-        setTextEditCaretIndex(obj, nextPosition);
-      }
+      const layout = getTextLayout(obj);
+      const lineIndex = textEditCaretLineAtIndex(obj, layout, nextPosition, moveRight ? 'backward' : 'forward');
+      applyTextEditNavigationSelection(obj, proxy, selection, nextPosition,
+        layout[lineIndex]?.startIndex, e.shiftKey);
       scheduleRender(true, false);
       return;
     }
@@ -2210,8 +2243,12 @@ function enterEdit(id, {
     TextSelDebug._logSelection('selectionchange', proxy);
     _caretVisible = true;
     if (currentObj) {
-      if (s === e) setTextEditCaretIndex(currentObj, s);
-      else clearTextEditCaretIndex(currentObj);
+      const navigation = currentObj._textEditNavigationSelection;
+      const direction = proxy.selectionDirection || 'none';
+      if (!navigation || navigation.start !== s || navigation.end !== e || navigation.direction !== direction) {
+        if (s === e) setTextEditCaretIndex(currentObj, s);
+        else clearTextEditCaretIndex(currentObj);
+      }
     }
     scheduleRender(true, false);
   };
