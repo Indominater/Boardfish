@@ -15,9 +15,9 @@ var _islandSyncedZoom = NaN;
 
 const formatZoomPercent = (value = zoom) => {
   const pct = Math.max(0, (Number.isFinite(value) ? value : 1) * 100);
-  if (pct >= 10) return `${Math.round(pct)}%`;
-  if (pct >= 1) return `${(Math.round(pct * 10) / 10).toFixed(1)}%`;
-  return `${Math.max(0.1, Math.round(pct * 10) / 10)}%`;
+  const roundedPct = Math.round(pct * 10) / 10;
+  if (roundedPct >= 10) return `${Math.round(pct)}%`;
+  return `${Math.max(0.1, roundedPct).toFixed(1)}%`;
 };
 
 const isOpeningFreezeActive = () => {
