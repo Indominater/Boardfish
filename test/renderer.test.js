@@ -1670,3 +1670,83 @@ test('selection copy feedback resolves every selected object', () => {
   assert.ok(context.BoardfishMotion.objectMotionForDraw(image));
   assert.ok(context.BoardfishMotion.objectMotionForDraw(text));
 });
+
+function loadCopyDeselectFrame({ emptySelection = false } = {}) {
+  const { context, setTime, renderCalls } = loadMotion();
+  const lines = [{ text: 'copied text', startIndex: 0, endIndex: 11, y: 0 }];
+  const obj = { id: 'copied-text', type: 'text', x: 0, y: 0, w: 200, h: 56, data: { content: lines[0].text } };
+  const draws = [];
+  Object.assign(context, {
+    editingId: null,
+    objectsMap: new Map([[obj.id, obj]]),
+    viewportCullingEnabled: true,
+    VIEWPORT_TEXT_DRAW_STATS_DISABLED: { collectStats: false },
+    getTextLayout: () => lines,
+    objectIntersectsRect: () => true,
+    drawTextLineRange(_ctx, line, _obj, start = 0, end = line.text.length) {
+      draws.push(line.text.slice(start, end));
+    },
+    collectTextSelectionRuns: () => emptySelection ? null : { runs: [] },
+    drawTextSelectionHighlight() {},
+    drawTextSelectionContentJello() {},
+  });
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src/js/viewport.js'), 'utf8');
+  vm.runInContext(
+    source.slice(source.indexOf('const drawTextLayoutStatic ='), source.indexOf('function drawTextSelectionHighlight(')) +
+    source.slice(source.indexOf('const drawTextSelectionJelloOverlays ='), source.indexOf('function drawCaret(')) +
+    '\nglobalThis.drawCopiedOverlay = drawTextSelectionJelloOverlays;', context);
+  const renderer = loadRenderer().createBoardRenderer({
+    objects: () => [obj],
+    viewportCullingEnabled: () => true,
+    zoom: () => 1,
+    dpr: () => 1,
+    objectIntersectsRect: () => true,
+    hasObjectMotionsForDraw: context.BoardfishMotion.hasObjectMotionsForDraw,
+    objectMotionForDraw: context.BoardfishMotion.objectMotionForDraw,
+    getTextLayoutForViewport: () => lines,
+    drawTextLineRange: context.drawTextLineRange,
+  });
+  const rect = { x1: 0, y1: 0, x2: 300, y2: 100 };
+  return { context, obj, draws, setTime, renderCalls, drawNormal(specs) {
+    renderer.drawVisibleObjects({}, null, rect, specs);
+  }, drawOverlay(specs) {
+    context.drawCopiedOverlay({}, rect, 1, specs);
+  } };
+}
+
+for (const range of [{ start: 0, end: 11 }, { start: 2, end: 6 }]) {
+  test(`copied text remains visible after deselection when animation expires mid-frame (${range.start}:${range.end})`, () => {
+    const frame = loadCopyDeselectFrame();
+    const motion = frame.context.BoardfishMotion;
+    motion.applyCopyFeedback({ textSelection: { id: frame.obj.id, ...range, hasSelection: true } });
+    frame.setTime(499);
+    const specs = motion.textSelectionJelloSpecsForDraw();
+    frame.drawNormal(specs);
+    assert.deepEqual(frame.draws, [], 'normal pass reserves the textbox for the copy overlay');
+    // Other board drawing takes the clock past the 500ms animation deadline.
+    frame.setTime(501);
+    frame.drawOverlay(specs);
+    assert.deepEqual(frame.draws, ['copied text'], 'the terminal frame must paint the whole textbox');
+    const pendingRenders = frame.renderCalls.length;
+    motion.afterViewportRenderFrame();
+    assert.equal(frame.renderCalls.length, pendingRenders, 'no later animation frame will repair missing pixels');
+  });
+}
+
+test('copy overlay still draws its textbox when the selected range has no visible glyphs', () => {
+  const frame = loadCopyDeselectFrame({ emptySelection: true });
+  frame.context.BoardfishMotion.applyCopyFeedback({ textSelection: { id: frame.obj.id, start: 2, end: 6, hasSelection: true } });
+  frame.setTime(100);
+  const specs = frame.context.BoardfishMotion.textSelectionJelloSpecsForDraw();
+  frame.drawNormal(specs);
+  frame.drawOverlay(specs);
+  assert.deepEqual(frame.draws, ['copied text']);
+});
+
+test('whole-textbox copy returns to static drawing when its object animation expires', () => {
+  const frame = loadCopyDeselectFrame();
+  frame.context.BoardfishMotion.applyCopyFeedback({ objects: [frame.obj] });
+  frame.setTime(501);
+  frame.drawNormal(frame.context.BoardfishMotion.textSelectionJelloSpecsForDraw());
+  assert.deepEqual(frame.draws, ['copied text']);
+});

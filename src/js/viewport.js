@@ -437,9 +437,13 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom =
     if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
     const motion = BoardfishMotion.textSelectionMotionForDraw(id, spec, viewZoom);
-    if (!motion) continue;
-    const selection = collectTextSelectionRuns(obj, layout, spec.start, spec.end);
-    if (!selection) continue;
+    const selection = motion ? collectTextSelectionRuns(obj, layout, spec.start, spec.end) : null;
+    if (!selection) {
+      // The normal pass already skipped this textbox. The animation may expire
+      // during this frame, so paint its resting text before the final frame ends.
+      drawTextLayoutStatic(context, obj, layout);
+      continue;
+    }
     drawTextSelectionHighlight(context, obj, spec.start, spec.end, selection, motion);
     drawTextLayoutStatic(context, obj, layout, { start: spec.start, end: spec.end });
     drawTextSelectionContentJello(context, obj, selection, motion);
