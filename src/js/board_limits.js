@@ -70,11 +70,12 @@
     return count;
   }
 
-  function currentTextCharacters(objects = root.objects) {
+  function currentTextCharacters(objects = root.objects, excludedObject = null) {
     if (!Array.isArray(objects)) return 0;
     let count = 0;
     for (const obj of objects) {
-      if (obj?.type === 'text' && typeof obj.data?.content === 'string') {
+      if (obj === excludedObject) excludedObject = null;
+      else if (obj?.type === 'text' && typeof obj.data?.content === 'string') {
         count += textCharacterCount(obj.data.content);
       }
     }
@@ -88,10 +89,7 @@
   }
 
   function canReplaceText(obj, nextText, options = {}) {
-    const previousCount = Array.isArray(root.objects) && root.objects.includes(obj) && obj?.type === 'text'
-      ? textCharacterCount(obj.data?.content)
-      : 0;
-    const nextCount = currentTextCharacters() - previousCount + textCharacterCount(nextText);
+    const nextCount = currentTextCharacters(root.objects, obj) + textCharacterCount(nextText);
     if (nextCount <= LIMITS.maxTextCharacters) return true;
     return rejectLimit(textCharacterLimitMessage(), options);
   }

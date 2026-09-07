@@ -42,8 +42,6 @@
       erroredImages: 0,
       croppedImages: 0,
       scaledImages: 0,
-      openPreviewImages: 0,
-      dynamicOpenPreviewRequests: 0,
       scaledFallbackFull: 0,
       activeInputFullFallbackImages: 0,
       scaledVariantPendingImages: 0,
@@ -52,7 +50,6 @@
       motionText: 0,
       motionTranslatedObjects: 0,
       motionScaledObjects: 0,
-      lowLatencyImageDraws: 0,
       motionScaledImages: 0,
       motionFullScaleImages: 0,
       motionFullFallbackImages: 0,
@@ -94,7 +91,6 @@
       imageContextWarmDraws: 0,
       scaledImageContextFirstDraws: 0,
       fullScaleImageContextFirstDraws: 0,
-      openPreviewImageContextFirstDraws: 0,
       slowDrawObjects: [],
       slowTextLineDraws: [],
     };
@@ -142,7 +138,7 @@
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  function drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect) {
+  function drawImageObj(context, obj, img, view, viewportRect) {
     const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (view.zoom * view.dpr);
     const transform = obj.data;
     if (transform.flipX || transform.flipY || transform.rotation) {
@@ -207,19 +203,6 @@
       obj.h + edgeOverdraw * 2,
     );
     return false;
-  }
-
-  function drawImageObj(context, obj, img, view, viewportRect, lowLatency, motion) {
-    if (!lowLatency) {
-      return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
-    }
-    context.imageSmoothingEnabled = false;
-    if (motion) return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
-    try {
-      return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
-    } finally {
-      context.imageSmoothingEnabled = true;
-    }
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -324,9 +307,6 @@
       if (selected?.scale === 1 && selected?.targetScale === 1) {
         counters.fullScaleImageContextFirstDraws = (counters.fullScaleImageContextFirstDraws || 0) + 1;
       }
-      if (selected?.openPreview) {
-        counters.openPreviewImageContextFirstDraws = (counters.openPreviewImageContextFirstDraws || 0) + 1;
-      }
     } else {
       counters.imageContextWarmDraws = (counters.imageContextWarmDraws || 0) + 1;
     }
@@ -387,8 +367,6 @@
       row.drawDeviceH = deps ? Math.round(row.objectH * Math.max(Number(deps.zoom?.()) || 0, 0) * Math.max(Number(deps.dpr?.()) || 1, 1) * 100) / 100 : '';
       row.cropped = drawCounterValue(counters, 'croppedImages') > before.croppedImages;
       row.scaled = drawCounterValue(counters, 'scaledImages') > before.scaledImages;
-      row.openPreview = drawCounterValue(counters, 'openPreviewImages') > before.openPreviewImages;
-      row.dynamicOpenPreviewRequest = drawCounterValue(counters, 'dynamicOpenPreviewRequests') > before.dynamicOpenPreviewRequests;
       row.fullScale = drawCounterValue(counters, 'fullScaleImages') > before.fullScaleImages;
       row.selectedScale = scaledDelta > 0
         ? Math.round((drawCounterValue(counters, 'scaledImageScaleTotal') - before.scaledImageScaleTotal) / scaledDelta * 1000) / 1000
@@ -399,7 +377,6 @@
       row.fallbackFull = drawCounterValue(counters, 'scaledFallbackFull') > before.scaledFallbackFull;
       row.activeInputFullFallback = drawCounterValue(counters, 'activeInputFullFallbackImages') > before.activeInputFullFallbackImages;
       row.scaledVariantPending = drawCounterValue(counters, 'scaledVariantPendingImages') > before.scaledVariantPendingImages;
-      row.lowLatencyImageDraw = drawCounterValue(counters, 'lowLatencyImageDraws') > before.lowLatencyImageDraws;
       row.motionScaledImage = drawCounterValue(counters, 'motionScaledImages') > before.motionScaledImages;
       row.motionFullScaleImage = drawCounterValue(counters, 'motionFullScaleImages') > before.motionFullScaleImages;
       row.motionFullFallbackImage = drawCounterValue(counters, 'motionFullFallbackImages') > before.motionFullFallbackImages;
@@ -438,7 +415,6 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , viewportRect = null
       , view = null
-      , imageSourceResolver = null
       , motion = null
     ) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
@@ -450,14 +426,11 @@
         if (obj.type !== 'image') return;
 
         const key = obj.data.imgKey;
-        const lowLatencyImageMotion = !!motion;
-        const selected = imageSourceResolver
-          ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
-          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
+        const selected = deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, !!motion);
         const img = selected?.source || selected || null;
         if (!(img?.width > 0)) return;
         try {
-          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
+          drawImageObj(context, obj, img, view, viewportRect);
         } catch (_) {}
       } else {
       if (obj.type === 'text') {
@@ -508,10 +481,7 @@
 
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
-      const lowLatencyImageMotion = !!motion;
-      const selected = imageSourceResolver
-        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
-        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
+      const selected = bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, !!motion) : null;
       const img = selected?.source || selected || null;
       if (img?.width > 0) {
         if (counters) {
@@ -519,7 +489,6 @@
             counters.scaledImages = (counters.scaledImages || 0) + 1;
             counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
             counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
-            if (selected?.openPreview) counters.openPreviewImages = (counters.openPreviewImages || 0) + 1;
             if (motion) counters.motionScaledImages = (counters.motionScaledImages || 0) + 1;
           } else if (selected?.targetScale < 1) {
             counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
@@ -532,7 +501,6 @@
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
             if (motion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
           }
-          if (lowLatencyImageMotion) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
           if (bitmap || selected?.scale < 1) counters.bitmapImages++;
           else {
             counters.elementImages++;
@@ -540,7 +508,7 @@
           }
         }
         try {
-          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
+          const cropped = drawImageObj(context, obj, img, view, viewportRect);
           if (cropped === null) return false;
           if (counters) {
             recordImageDrawWarmStats(
@@ -570,7 +538,6 @@
         counters.lastMissingKey = key;
         counters.lastMissingId = obj.id;
         counters.lastMissingReason = selected?.scaledVariantPending ? 'scaled-variant-pending-active-input'
-          : imageSourceResolver ? 'resolved-source-pending'
           : !key ? 'missing-key'
           : !deps.imageStore()[key] ? 'missing-store'
             : !bitmap ? 'missing-bitmap'
@@ -586,7 +553,6 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , viewportRect = deps.currentViewportWorldRect()
       , skipIds
-      , imageSourceResolver = null
       , skipId = null
       , onlyText = false
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
@@ -602,7 +568,7 @@
             ? applyObjectMotion(context, obj, viewportRect, motion)
             : viewportRect;
           try {
-            drawSingleObj(context, obj, objectViewportRect, view, imageSourceResolver, motion);
+            drawSingleObj(context, obj, objectViewportRect, view, motion);
           } finally {
             if (motion) context.restore();
           }
@@ -633,8 +599,6 @@
           culledTextLines: drawCounterValue(counters, 'culledTextLines'),
           croppedImages: drawCounterValue(counters, 'croppedImages'),
           scaledImages: drawCounterValue(counters, 'scaledImages'),
-          openPreviewImages: drawCounterValue(counters, 'openPreviewImages'),
-          dynamicOpenPreviewRequests: drawCounterValue(counters, 'dynamicOpenPreviewRequests'),
           fullScaleImages: drawCounterValue(counters, 'fullScaleImages'),
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
           activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
@@ -644,7 +608,6 @@
           motionText: drawCounterValue(counters, 'motionText'),
           motionTranslatedObjects: drawCounterValue(counters, 'motionTranslatedObjects'),
           motionScaledObjects: drawCounterValue(counters, 'motionScaledObjects'),
-          lowLatencyImageDraws: drawCounterValue(counters, 'lowLatencyImageDraws'),
           motionScaledImages: drawCounterValue(counters, 'motionScaledImages'),
           motionFullScaleImages: drawCounterValue(counters, 'motionFullScaleImages'),
           motionFullFallbackImages: drawCounterValue(counters, 'motionFullFallbackImages'),
@@ -667,7 +630,7 @@
           imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
-          drawn = drawSingleObj(context, obj, counters, objectViewportRect, view, imageSourceResolver, motion);
+          drawn = drawSingleObj(context, obj, counters, objectViewportRect, view, motion);
         } finally {
           if (motion) context.restore();
           if (counters && typeof performance !== 'undefined') {

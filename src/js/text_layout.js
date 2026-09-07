@@ -819,7 +819,7 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
         nextStartIndex: nextStart,
         logicalLineIndex,
         ...(rangeLimited ? { visualLineIndex } : {}),
-        ...(prefixWidths ? { prefixWidths } : {}),
+        ...(prefixWidths ? { prefixWidths: textPrefixWidthsSlice(prefixWidths, start - paraStart, end - paraStart) } : {}),
       });
     }
     visualLineIndex++;
@@ -845,12 +845,8 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
         const to = Math.max(from, Math.min(end - paraStart, paragraphPrefixWidths.length - 1));
         return Math.max(0, paragraphPrefixWidths[to] - paragraphPrefixWidths[from]);
       };
-      const pushParagraphLine = (start, end, nextStart = end, caretEnd = end) => {
-        const prefixWidths = collectLines && paragraphPrefixWidths
-          ? textPrefixWidthsSlice(paragraphPrefixWidths, start - paraStart, end - paraStart)
-          : null;
-        pushLine(start, end, nextStart, caretEnd, logicalLineIndex, prefixWidths);
-      };
+      const pushParagraphLine = (start, end, nextStart = end, caretEnd = end) =>
+        pushLine(start, end, nextStart, caretEnd, logicalLineIndex, paragraphPrefixWidths);
       if (paragraphRangeWidth(paraStart, paraEnd) <= maxW) {
         pushParagraphLine(paraStart, paraEnd, paraEnd, paraEnd);
         if (newlineAt === -1) break;

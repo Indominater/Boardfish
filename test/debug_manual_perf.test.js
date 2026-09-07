@@ -253,9 +253,7 @@ test('jiggle debugger captures motion smoothness and animated image latency evid
   assert.match(viewportSource, /motionJiggleStarts/);
   assert.match(viewportSource, /maxFirstProgressLatencyMs/);
   assert.match(viewportSource, /progressGapsOver32ms/);
-  assert.match(viewportSource, /maxLowLatencyImageDraws/);
   assert.match(viewportSource, /motionActiveInputFullFallbackImages/);
-  assert.match(viewportSource, /lowLatencyImageDraws/);
   assert.match(viewportSource, /recordMotion,/);
   assert.match(viewportSource, /jiggleReport,/);
   assert.match(viewportSource, /motionSummary,/);
@@ -266,11 +264,9 @@ test('jiggle debugger captures motion smoothness and animated image latency evid
   assert.match(motionSource, /recordMotionDebug\('render-scheduled'/);
   assert.match(motionSource, /recordMotionDebug\('jiggle-progress'/);
 
-  assert.match(rendererSource, /lowLatencyImageDraws/);
   assert.match(rendererSource, /motionScaledImages/);
   assert.match(rendererSource, /motionFullFallbackImages/);
-  assert.match(rendererSource, /imageSourceResolver\(key, obj, view, counters, lowLatencyImageMotion\)/);
-  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, bitmap, view, lowLatencyImageMotion\)/);
+  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, bitmap, view, !!motion\)/);
   assert.doesNotMatch(rendererSource, /view\?\.activeInput/);
 });
 

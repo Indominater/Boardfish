@@ -124,7 +124,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'imageStoreSummary',
     'hydrationCandidates',
     'slowImages',
-    'openPreviewBreakdown',
     'hydrationBreakdown',
     'cacheImageBreakdown',
     'setHydrationConcurrency',
@@ -132,9 +131,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'beginInitialRenderDebug',
     'endInitialRenderDebug',
     'isInitialRenderDebugActive',
-    'recordPreviewFallbackDraw',
-    'recordPreviewHeldRender',
-    'recordDynamicPreview',
     'report',
   ]) {
     assert.match(openDebug, new RegExp(`\\b${method}\\b`), `OpenDebug is missing ${method}`);
@@ -179,7 +175,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(viewport, /OpenDebug\.isInitialRenderDebugActive\?\.\(\) === true/);
   assert.match(openIo, /drawBoardTotalMs: drawBreakdown\?\.totalMeasuredMs/);
   assert.match(openDebug, /initialDrawMs: initialRender\?\.meta\?\.drawMs/);
-  assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
   assert.match(openDebug, /decodeQueueWaitMaxMs/);
   assert.match(openDebug, /bitmapDecodeMaxMs/);
   assert.match(openDebug, /rustBoardJsonReadMs/);

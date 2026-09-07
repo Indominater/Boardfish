@@ -9,8 +9,10 @@ const vm = require('node:vm');
 function loadRenderer(overrides = {}) {
   const context = { console, ...overrides };
   vm.createContext(context);
+  let source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'renderer.js'), 'utf8');
+  if (overrides.BOARDFISH_PRODUCTION) source = source.replace(/\/\* BOARDFISH_DEV_DIAGNOSTICS_START \*\/[\s\S]*?\/\* BOARDFISH_DEV_DIAGNOSTICS_END \*\//g, '');
   vm.runInContext(
-    fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'renderer.js'), 'utf8'),
+    source,
     context,
     { filename: 'renderer.js' },
   );
@@ -219,13 +221,38 @@ test('image renderer overdraws image edges by one device pixel at the current vi
   });
 
   renderer.drawVisibleObjects(context, BoardfishRenderer.createDrawCounters(),
-    { x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, undefined, undefined,
+    { x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, undefined,
     { zoom: 2, dpr: 2, panX: 0, panY: 0 });
 
   assert.deepEqual(drawImageCalls, [[source, 9.75, 19.75, 40.5, 30.5]]);
 });
 
-test('image renderer keeps active full fallback visible with temporary disabled smoothing', () => {
+test('development and production image draws never toggle smoothing for motion or fallback', () => {
+  for (const production of [false, true]) for (const mode of ['idle', 'motion', 'fallback']) {
+    const api = loadRenderer(production ? { BOARDFISH_PRODUCTION: true } : {});
+    const source = { width: 200, height: 100 };
+    const obj = { type: 'image', x: 0, y: 0, w: 100, h: 50, data: { imgKey: 'img' } };
+    const writes = [], draws = [];
+    let smoothing = true;
+    const context = {
+      get imageSmoothingEnabled() { return smoothing; },
+      set imageSmoothingEnabled(value) { writes.push(value); smoothing = value; },
+      drawImage() { draws.push(smoothing); },
+    };
+    const renderer = api.createBoardRenderer({
+      imageBitmapCache: () => ({ img: source }),
+      selectImageSourceForDraw: () => ({ source, activeInputFullFallback: mode === 'fallback' }),
+    });
+    const view = { zoom: 1, dpr: 1 };
+    const motion = mode === 'motion' ? { translateX: 1 } : null;
+    if (production) renderer.drawSingleObj(context, obj, null, view, motion);
+    else renderer.drawSingleObj(context, obj, null, null, view, motion);
+    assert.deepEqual(draws, [true], `${production ? 'production' : 'development'} ${mode}`);
+    assert.deepEqual(writes, []);
+  }
+});
+
+test('image renderer keeps smoothing enabled for active full fallback', () => {
   const BoardfishRenderer = loadRenderer();
   const drawQualities = [];
   const drawSmoothingEnabled = [];
@@ -275,7 +302,7 @@ test('image renderer keeps active full fallback visible with temporary disabled 
   const result = renderer.drawVisibleObjects(context, counters);
 
   assert.equal(result.drawnImages, 1);
-  assert.deepEqual(drawSmoothingEnabled, [false]);
+  assert.deepEqual(drawSmoothingEnabled, [true]);
   assert.equal(context.imageSmoothingEnabled, true);
   assert.deepEqual(drawQualities, ['high']);
   assert.equal(context.imageSmoothingQuality, 'high');
@@ -351,12 +378,11 @@ test('viewport navigation keeps culling and uses the canonical image draw path',
   assert.equal(selectCalls[0].view.activeInput, undefined);
   assert.deepEqual(drawSmoothingEnabled, [true]);
   assert.equal(context.imageSmoothingEnabled, true);
-  assert.equal(counters.lowLatencyImageDraws, 0);
   assert.equal(counters.motionImages, 0);
   assert.equal(counters.culledImages, 1);
 });
 
-test('animated image motion bypasses static culling and uses low-latency variant selection', () => {
+test('animated image motion keeps smoothing and prioritizes variant selection', () => {
   const BoardfishRenderer = loadRenderer();
   const drawSmoothingEnabled = [];
   const drawQualities = [];
@@ -411,14 +437,13 @@ test('animated image motion bypasses static culling and uses low-latency variant
 
   assert.equal(result.drawnImages, 1);
   assert.deepEqual(plain(selectCalls.map((call) => call.activeInput)), [true]);
-  assert.deepEqual(drawSmoothingEnabled, [false]);
+  assert.deepEqual(drawSmoothingEnabled, [true]);
   assert.equal(context.imageSmoothingEnabled, true);
   assert.deepEqual(drawQualities, ['high']);
   assert.equal(context.imageSmoothingQuality, 'high');
   assert.equal(counters.motionObjects, 1);
   assert.equal(counters.motionImages, 1);
   assert.equal(counters.motionTranslatedObjects, 1);
-  assert.equal(counters.lowLatencyImageDraws, 1);
   assert.equal(counters.motionFullScaleImages, 1);
 });
 
@@ -600,7 +625,7 @@ test('renderer can draw only text while drawing visible objects', () => {
   });
 
   const result = renderer.drawVisibleObjects(
-    context, BoardfishRenderer.createDrawCounters(), undefined, undefined, undefined, undefined, true,
+    context, BoardfishRenderer.createDrawCounters(), undefined, undefined, undefined, true,
   );
 
   assert.equal(result.drawnImages, 0);
@@ -881,7 +906,7 @@ test('text renderer keeps direct text rendering', () => {
   });
 
   renderer.drawVisibleObjects(context, counters,
-    { x1: 0, y1: 0, x2: 300, y2: 160 }, undefined, undefined, undefined, undefined,
+    { x1: 0, y1: 0, x2: 300, y2: 160 }, undefined, undefined, undefined,
     { zoom: 1, panX: 0, panY: 0, dpr: 2 });
 
   assert.deepEqual(drawnLines, ['cached one', 'cached two']);
