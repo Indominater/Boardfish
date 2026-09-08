@@ -383,7 +383,6 @@
         board,
         rawImageStore,
         {
-          materializeBytes: false,
           validateBoardPayload,
         },
       );

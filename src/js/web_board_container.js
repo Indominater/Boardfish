@@ -201,7 +201,7 @@
     return bytes;
   }
 
-  async function createZipBlob(entries, options = {}) {
+  async function createZipBlob(entries) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -269,20 +269,15 @@
     const eocd = endOfCentralDirectory(normalized.length, centralSize, centralOffset);
     const byteLength = offset + centralSize + eocd.length;
     const blob = new Blob(localParts.concat(centralParts, eocd), { type: 'application/octet-stream' });
-    const keepBytesBelow = Number(options.keepBytesBelow) || 8 * 1024 * 1024;
-    const materializeBytes = options.materializeBytes !== false;
-    const isSmallPayload = byteLength <= keepBytesBelow;
-    const bytes = materializeBytes && isSmallPayload ? new Uint8Array(await blob.arrayBuffer()) : null;
     const result = {
       blob,
-      bytes,
       byteLength,
       crcs: normalized.map((entry) => entry.crc),
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) {
       Object.assign(result, {
-        mode: bytes ? 'blob-parts+materialized-small' : 'blob-parts',
+        mode: 'blob-parts',
         crcMs,
         crcComputedBytes,
         crcComputedEntries,
@@ -1025,7 +1020,7 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const zip = await createZipBlob(zipEntries, options);
+    const zip = await createZipBlob(zipEntries);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const zipMs = collectDiagnostics ? nowMs() - phaseStart : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1036,7 +1031,6 @@
     }
     const result = {
       blob: zip.blob,
-      bytes: zip.bytes,
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) {

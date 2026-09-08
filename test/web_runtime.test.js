@@ -161,7 +161,6 @@ test('web save validates during the single container build and reports its actua
       events.push('create-container');
       assert.equal(board.objects.length, 1);
       assert.equal(imageStore['img-1'], 'source');
-      assert.equal(options.materializeBytes, false);
       options.validateBoardPayload({ objectCount: 1, boardJsonBytes: 120, imageBytes: 0 });
       options.validateBoardPayload({ objectCount: 1, boardJsonBytes: 120, imageBytes: 4 });
       return {

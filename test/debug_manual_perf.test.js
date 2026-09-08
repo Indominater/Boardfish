@@ -43,7 +43,6 @@ test('text edit perf debugger is passive event recording only', () => {
   assert.match(source, /heightDeltaFromCached/);
   assert.match(source, /cachedLineSource/);
   assert.match(source, /proxyScrollHeight/);
-  assert.match(source, /autoHeightForceReason/);
   assert.match(source, /restoredMinLinesReset/);
   assert.match(source, /textUndoRedoReport/);
   assert.match(source, /const textEditInputSteps = \[\]/);

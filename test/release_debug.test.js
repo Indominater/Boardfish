@@ -46,7 +46,6 @@ const RELEASE_FORBIDDEN_DIAGNOSTIC_MARKERS = Object.freeze([
   'web-export:pill-start',
   'selection-drag-move-hit',
   'canvas-mousedown-route',
-  'blob-parts+materialized-small',
   'copy:web-text-clipboard-write-end',
   'dom-current',
   'keydown-delete-replacement-ready',

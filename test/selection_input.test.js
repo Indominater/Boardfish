@@ -912,10 +912,9 @@ test('large text resize records live cache-keyed auto-height debug evidence', ()
   const flush = debugEvents.find((event) => event.step === 'flush');
 
   assert.equal(applyEnd.meta.renderBoard, true);
-  assert.equal(applyEnd.meta.pendingSizeSync, false);
   assert.equal(applyEnd.meta.autoHeightReason, 'resize');
   assert.equal(applyEnd.meta.layoutInvalidationMethod, 'cache-keyed');
-  assert.equal(flush.meta.pendingSizeSync, false);
+  assert.ok(flush);
 });
 
 test('save flushes a pending text edit checkpoint into the saved baseline', () => {

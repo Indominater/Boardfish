@@ -1181,7 +1181,6 @@ test('enter expands a large existing text box immediately', () => {
   assert.equal(key.prevented, true);
   assert.equal(obj.data.content, `${largeText}\n`);
   assert.equal(obj.h, 2 * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
 
@@ -1216,83 +1215,52 @@ test('pasting another 100k characters expands an existing textbox and its outlin
   assert.equal(obj.data.content, nextValue);
   assert.ok(obj.h > initialHeight);
   assert.equal(obj.h, context.getTextLayout(obj).length * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 
   const pastedHeight = obj.h;
   context.exitEdit();
   assert.equal(obj.h, pastedHeight);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
 });
 
-test('ordinary single-character typing retains the large-text deferred sizing path', () => {
-  const context = loadLiveTextEditResizeHarness();
-  const { obj } = context;
-  obj.data.content = 'word '.repeat(5000);
-  context.enterEdit(obj.id, { history: false });
-  context.proxy.setSelectionRange(obj.data.content.length, obj.data.content.length);
-  const height = obj.h;
+test('typing and pasting update exact bounds across text sizes and layout cache states', () => {
+  for (const size of [100, 19999, 20000, 20001, 100000]) {
+    for (const cache of ['full', 'viewport', 'cold']) {
+      for (const inputType of ['insertText', 'insertFromPaste']) {
+        const context = loadLiveTextEditResizeHarness();
+        const { obj } = context;
+        obj.data.content = `${'x'.repeat(size - 75)}\n${'x'.repeat(74)}`;
+        obj.w = TEST_TEXT_PAD * 2 + 740;
+        obj.h = context.getTextLayout(obj).length * TEST_LINE_H + TEST_TEXT_PAD * 2;
+        const oldHeight = obj.h;
+        if (cache !== 'full') {
+          vm.runInContext('clearTextObjectLayoutRuntime(obj)', context);
+          if (cache === 'viewport') {
+            vm.runInContext('getTextLayoutForViewport(obj, { y1: 0, y2: 480 })', context);
+          }
+        }
+        context.enterEdit(obj.id, { history: false });
+        context.proxy.setSelectionRange(size, size);
+        const before = makeBeforeInputEvent(inputType, 'X');
+        context.proxy.dispatchEvent(before);
+        context.proxy.setRangeText('X', size, size, 'end');
+        context.proxy.dispatchEvent({ type: 'input', inputType, data: 'X' });
 
-  typeNativeText(context.proxy, 'X');
-
-  assert.equal(obj.h, height);
-  assert.equal(obj._textEditPendingSizeSync, true);
-  assert.deepEqual(context.renders.at(-1), { board: true, overlay: false, reason: undefined });
+        const label = `${inputType}, ${size} characters, ${cache} cache`;
+        assert.equal(obj.h, oldHeight + TEST_LINE_H, label);
+        assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined }, label);
+        if (cache !== 'full') {
+          assert.equal(obj._layoutCache, null, label);
+          assert.equal(obj._textWrappedLineIndexCacheContent, obj.data.content, label);
+        }
+        const height = obj.h;
+        context.exitEdit();
+        assert.equal(obj.h, height, label);
+      }
+    }
+  }
 });
 
-test('large pasted text shrinks after a cached line-removing delete', () => {
-  const context = loadLiveTextEditResizeHarness();
-  const { obj } = context;
-  const line = 'x'.repeat(3000);
-  const initialValue = Array.from({ length: 50 }, () => line).join('\n');
-  obj.data = { content: initialValue };
-  obj.w = 1_000_000;
-  obj.h = 50 * TEST_LINE_H + TEST_TEXT_PAD * 2;
-
-  context.enterEdit(obj.id, { history: false });
-
-  const pastedText = `\n${line}`;
-  const pastedValue = initialValue + pastedText;
-  context.proxy._boardfishSetPendingInputState({
-    start: initialValue.length,
-    end: initialValue.length,
-    direction: 'none',
-    hasSelection: false,
-    value: initialValue,
-    inputType: 'insertFromPaste',
-    replacement: { start: initialValue.length, end: initialValue.length, insertedText: pastedText },
-  });
-  context.proxy.value = pastedValue;
-  context.proxy.setSelectionRange(pastedValue.length, pastedValue.length, 'none');
-  context.proxy.dispatchEvent({ type: 'input', inputType: 'insertFromPaste' });
-
-  assert.equal(obj.data.content, pastedValue);
-  assert.equal(obj.h, 51 * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
-
-  context.getTextLayout(obj);
-  const nextValue = pastedValue.split('\n').slice(0, 10).join('\n');
-  context.proxy._boardfishSetPendingInputState({
-    start: nextValue.length,
-    end: pastedValue.length,
-    direction: 'forward',
-    hasSelection: true,
-    value: pastedValue,
-    inputType: 'deleteContentBackward',
-    replacement: { start: nextValue.length, end: pastedValue.length, insertedText: '' },
-  });
-  context.proxy.value = nextValue;
-  context.proxy.setSelectionRange(nextValue.length, nextValue.length, 'none');
-  context.proxy.dispatchEvent({ type: 'input', inputType: 'deleteContentBackward' });
-
-  assert.equal(obj.data.content, nextValue);
-  assert.equal(obj.data.content.length >= 20000, true);
-  assert.equal(obj.h, 10 * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
-  assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
-});
-
-test('large pasted text shrinks after line-removing delete before layout cache exists', () => {
+for (const cached of [true, false]) test(`pasted text shrinks after deletion with ${cached ? 'cached' : 'uncached'} layout`, () => {
   const context = loadLiveTextEditResizeHarness();
   const { obj } = context;
   const line = 'x'.repeat(3000);
@@ -1320,10 +1288,9 @@ test('large pasted text shrinks after line-removing delete before layout cache e
 
   assert.equal(obj.data.content, pastedValue);
   assert.equal(obj.h, 51 * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
-  delete obj._layoutCache;
-  delete obj._layoutCacheContent;
-  delete obj._layoutCacheW;
+
+  if (cached) context.getTextLayout(obj);
+  else vm.runInContext('clearTextObjectLayoutRuntime(obj)', context);
 
   const nextValue = pastedValue.split('\n').slice(0, 10).join('\n');
   context.proxy._boardfishSetPendingInputState({
@@ -1342,7 +1309,6 @@ test('large pasted text shrinks after line-removing delete before layout cache e
   assert.equal(obj.data.content, nextValue);
   assert.equal(obj.data.content.length >= 20000, true);
   assert.equal(obj.h, 10 * TEST_LINE_H + TEST_TEXT_PAD * 2);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
 
@@ -1358,7 +1324,6 @@ test('undo-restored large pasted text shrinks on the next selected delete', () =
   context.enterEdit(obj.id, { history: false });
   obj._editMinLines = 51;
   obj._textEditPreservedMinLines = 51;
-  delete obj._textEditPendingSizeSync;
   delete obj._layoutCache;
   delete obj._layoutCacheContent;
   delete obj._layoutCacheW;
@@ -1382,7 +1347,6 @@ test('undo-restored large pasted text shrinks on the next selected delete', () =
   assert.equal(obj.h, 10 * TEST_LINE_H + TEST_TEXT_PAD * 2);
   assert.equal(obj._editMinLines, 1);
   assert.equal(obj._textEditPreservedMinLines, undefined);
-  assert.equal(obj._textEditPendingSizeSync, undefined);
   assert.deepEqual(context.renders.at(-1), { board: true, overlay: true, reason: undefined });
 });
 

@@ -162,7 +162,6 @@ const TEXT_PARAGRAPH_PREFIX_CACHE_MAX_ENTRIES = 4096;
 const TEXT_WRAPPED_WIDTH_CACHE_MAX_ENTRIES = 12;
 const TEXT_VIEWPORT_LAYOUT_RANGE_CACHE_MAX_ENTRIES = 48;
 const TEXT_VIEWPORT_LAYOUT_LINE_CACHE_MAX_ENTRIES = 8192;
-const TEXT_EXACT_PREFIX_MAX_CHARS = 384;
 var _mwCache = new Map();
 var _glyphMetricsCache = new Map();
 var _glyphPairSpacingCache = new Map();
@@ -679,79 +678,6 @@ function textPrefixWidthsSlice(prefixWidths, from, to) {
   return out;
 }
 
-const findTextWrapEndByWidth = (rangeWidth, start, end, maxW) => {
-  let lo = start + 1;
-  let hi = end;
-  if (rangeWidth(start, lo) > maxW) return lo;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi + 1) / 2);
-    if (rangeWidth(start, mid) <= maxW) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo;
-};
-
-const nextNonSpaceIndex = (content, start, end) => {
-  let index = start;
-  while (index < end && content[index] === ' ') index++;
-  return index;
-};
-
-function wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, rangeWidth, pushLine) {
-  let lineStart = paraStart;
-  while (lineStart < paraEnd) {
-    let cursor = lineStart;
-    let bestEnd = lineStart;
-    let bestNext = lineStart;
-
-    while (cursor < paraEnd) {
-      const wordStart = nextNonSpaceIndex(content, cursor, paraEnd);
-      if (wordStart >= paraEnd) {
-        const lineEnd = findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW);
-        pushLine(lineStart, Math.max(lineStart + 1, lineEnd), paraEnd, paraEnd);
-        lineStart = paraEnd;
-        break;
-      }
-
-      let wordEnd = wordStart + 1;
-      while (wordEnd < paraEnd && content[wordEnd] !== ' ') wordEnd++;
-      if (rangeWidth(lineStart, wordEnd) <= maxW) {
-        bestEnd = wordEnd;
-        const afterSpaces = nextNonSpaceIndex(content, wordEnd, paraEnd);
-        if (wordEnd < paraEnd && afterSpaces >= paraEnd) {
-          bestEnd = findTextWrapEndByWidth(rangeWidth, lineStart, paraEnd, maxW);
-          bestNext = paraEnd;
-          cursor = paraEnd;
-          continue;
-        }
-        bestNext = afterSpaces;
-        cursor = bestNext;
-        continue;
-      }
-
-      if (bestEnd > lineStart) break;
-      const lineEnd = findTextWrapEndByWidth(rangeWidth, lineStart, wordEnd, maxW);
-      const end = Math.max(lineStart + 1, lineEnd);
-      const nextStart = end < paraEnd && content[end] === ' '
-        ? nextNonSpaceIndex(content, end, paraEnd)
-        : end;
-      pushLine(lineStart, end, nextStart, nextStart);
-      lineStart = nextStart;
-      break;
-    }
-
-    if (lineStart >= paraEnd) continue;
-    if (bestEnd > lineStart) {
-      pushLine(lineStart, bestEnd, bestNext, bestNext);
-      lineStart = bestNext;
-    } else {
-      const lineEnd = Math.min(lineStart + 1, paraEnd);
-      pushLine(lineStart, lineEnd, lineEnd, lineEnd);
-      lineStart = lineEnd;
-    }
-  }
-}
-
 function clearTextMeasurementCaches() {
   refreshTextMetrics();
   clearTextLayoutCaches({ measurements: true });
@@ -783,13 +709,14 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
         entry = {
           logicalLineIndex,
           startIndex: start,
-          endIndex: end,
+          // Indexed paragraph bounds include separator spaces consumed by wrapping.
+          endIndex: caretEnd,
           visualStart: visualLineIndex,
         };
         lineIndex.push(entry);
       } else {
         entry.startIndex = Math.min(entry.startIndex, start);
-        entry.endIndex = Math.max(entry.endIndex, end);
+        entry.endIndex = Math.max(entry.endIndex, caretEnd);
       }
     }
     if (collectLines && visualLineIndex >= firstLineIndex && visualLineIndex <= lastLineIndex) {
@@ -828,21 +755,13 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
         : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd);
       const paragraphRangeWidth = (start, end) => {
         if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end);
-        const from = Math.max(0, Math.min(start - paraStart, paragraphPrefixWidths.length - 1));
-        const to = Math.max(from, Math.min(end - paraStart, paragraphPrefixWidths.length - 1));
-        return Math.max(0, paragraphPrefixWidths[to] - paragraphPrefixWidths[from]);
+        // Wrapping only probes ordered indices inside this paragraph.
+        return paragraphPrefixWidths[end - paraStart] - paragraphPrefixWidths[start - paraStart];
       };
       const pushParagraphLine = (start, end, nextStart = end, caretEnd = end) =>
         pushLine(start, end, nextStart, caretEnd, logicalLineIndex, paragraphPrefixWidths);
       if (paragraphRangeWidth(paraStart, paraEnd) <= maxW) {
         pushParagraphLine(paraStart, paraEnd, paraEnd, paraEnd);
-        if (newlineAt === -1) break;
-        paraStart = newlineAt + 1;
-        logicalLineIndex++;
-        continue;
-      }
-      if (!paragraphHasTab && paraEnd - paraStart > TEXT_EXACT_PREFIX_MAX_CHARS) {
-        wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, paragraphRangeWidth, pushParagraphLine);
         if (newlineAt === -1) break;
         paraStart = newlineAt + 1;
         logicalLineIndex++;
@@ -868,10 +787,14 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
         let caretEnd = lineEnd;
         if (lineEnd < paraEnd) {
           let breakAt = -1;
-          for (let i = lineEnd; i > lineStart; i--) {
-            if (isTextWordSeparator(content[i - 1])) {
-              breakAt = i - 1;
-              break;
+          // A word ending exactly at the width limit already fits. Only
+          // retreat to an earlier separator when the limit splits a word.
+          if (!isTextWordSeparator(content[lineEnd])) {
+            for (let i = lineEnd; i > lineStart; i--) {
+              if (isTextWordSeparator(content[i - 1])) {
+                breakAt = i - 1;
+                break;
+              }
             }
           }
           if (breakAt > lineStart) {
@@ -892,7 +815,7 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
           nextStart = lineEnd;
         }
         pushParagraphLine(lineStart, lineEnd, nextStart, caretEnd);
-      lineStart = nextStart;
+        lineStart = nextStart;
       }
     }
 
@@ -1031,7 +954,6 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
 
   const removedLayoutCount = oldSplice.end - oldSplice.start;
   const layoutLineDelta = insertedLayout.length - removedLayoutCount;
-  obj._lastTextLayoutLineDelta = layoutLineDelta;
 
   const yChanged = obj._layoutCacheY !== obj.y;
   if (yChanged) for (let i = 0; i < oldSplice.start; i++) {

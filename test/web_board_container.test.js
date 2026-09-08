@@ -75,8 +75,25 @@ test('ZIP CRC work yields on one-MiB budgets', async (t) => {
   globalThis.scheduler = { yield: () => { yields++; return Promise.resolve(); } };
   t.after(() => { delete globalThis.scheduler; });
   const bytes = new Uint8Array(5 * 1024 * 1024);
-  const countYields = async (data) => { yields = 0; await WebContainer.createZipBlob([{ name: 'payload.bin', data }], { materializeBytes: false }); return yields; };
+  const countYields = async (data) => { yields = 0; await WebContainer.createZipBlob([{ name: 'payload.bin', data }]); return yields; };
   assert.deepEqual([await countYields(bytes), await countYields(new Blob([bytes]))], [5, 5]);
+});
+
+test('ZIP creation returns a Blob without reading archive bytes back into memory', async (t) => {
+  const NativeBlob = globalThis.Blob;
+  globalThis.Blob = class extends NativeBlob {
+    arrayBuffer() { throw new Error('archive bytes must remain in the Blob'); }
+  };
+  t.after(() => { globalThis.Blob = NativeBlob; });
+
+  for (const byteLength of [1, 9 * 1024 * 1024]) {
+    const payload = await WebContainer.createZipBlob([
+      { name: 'payload.bin', data: new Uint8Array(byteLength) },
+    ]);
+    assert.ok(payload.blob instanceof NativeBlob);
+    assert.equal(payload.blob.size, payload.byteLength);
+    assert.ok(payload.byteLength > byteLength);
+  }
 });
 
 function createDeflatedZipWithAdvertisedSize(name, data, advertisedSize) {
@@ -152,7 +169,8 @@ test('writes and reads Boardfish .bf containers in browser format', async () => 
   assert.equal(payload.imageCount, 1);
   assert.equal(payload.crcComputedEntries, 2);
   assert.equal(payload.crcReusedEntries, 0);
-  assert.ok(payload.bytes[0] === 0x50 && payload.bytes[1] === 0x4b);
+  const bytes = new Uint8Array(await payload.blob.arrayBuffer());
+  assert.ok(bytes[0] === 0x50 && bytes[1] === 0x4b);
 
   const result = await WebContainer.readBoardContainer(payload.blob);
   assert.equal(result.board.version, 3);
@@ -505,9 +523,7 @@ test('volatile File-backed image refs detach once before repeated saves', async 
   });
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const saved = await WebContainer.createBoardContainerBlob(board, opened.board.imageStore, {
-      materializeBytes: false,
-    });
+    const saved = await WebContainer.createBoardContainerBlob(board, opened.board.imageStore);
     const reopened = await WebContainer.readBoardContainer(saved.blob, {
       lazyImageRefs: true,
       verifyImageCrc: true,
@@ -569,7 +585,7 @@ test('volatile File-backed image refs recover only from a matching fresh snapsho
 test('ZIP32 writer rejects fields that would otherwise be silently truncated', async () => {
   const entry = { name: 'x'.repeat(0x10000), data: new Uint8Array([1]) };
   await assert.rejects(
-    () => WebContainer.createZipBlob([entry], { materializeBytes: false }),
+    () => WebContainer.createZipBlob([entry]),
     /ZIP entry name is too long/,
   );
 });
@@ -588,7 +604,7 @@ test('Uint8Array lazy opens retain synchronous byte-backed compatibility', async
   const imageStore = { 'img-1': 'data:image/png;base64,AQIDBA==' };
   const payload = await WebContainer.createBoardContainerBlob(board, imageStore);
 
-  const opened = await WebContainer.readBoardContainer(payload.bytes, {
+  const opened = await WebContainer.readBoardContainer(new Uint8Array(await payload.blob.arrayBuffer()), {
     lazyImageRefs: true,
     verifyImageCrc: false,
   });
@@ -663,7 +679,7 @@ test('board json CRC mismatch fails open', async () => {
     imageStore: {},
     objects: [],
   }, {});
-  const corrupt = new Uint8Array(payload.bytes);
+  const corrupt = new Uint8Array(await payload.blob.arrayBuffer());
   corrupt[storedZipEntryDataOffset(corrupt, 'board.json')] ^= 0xff;
 
   await assert.rejects(
@@ -686,7 +702,7 @@ test('image CRC mismatch is reported as a warning while preserving recoverable d
   const payload = await WebContainer.createBoardContainerBlob(board, {
     'img-1': 'data:image/png;base64,AQIDBA==',
   });
-  const corrupt = new Uint8Array(payload.bytes);
+  const corrupt = new Uint8Array(await payload.blob.arrayBuffer());
   corrupt[storedZipEntryDataOffset(corrupt, 'images/img-1.png')] ^= 0xff;
 
   const result = await WebContainer.readBoardContainer(corrupt);
@@ -715,7 +731,7 @@ test('Blob lazy refs preserve default image CRC warning behavior', async () => {
   const payload = await WebContainer.createBoardContainerBlob(board, {
     'img-1': 'data:image/png;base64,AQIDBA==',
   });
-  const corrupt = new Uint8Array(payload.bytes);
+  const corrupt = new Uint8Array(await payload.blob.arrayBuffer());
   corrupt[storedZipEntryDataOffset(corrupt, 'images/img-1.png')] ^= 0xff;
 
   const result = await WebContainer.readBoardContainer(new Blob([corrupt]), {
@@ -742,7 +758,7 @@ test('Blob random-access reads reject invalid local entry offsets and truncated 
   const payload = await WebContainer.createBoardContainerBlob(board, {
     'img-1': 'data:image/png;base64,AQIDBA==',
   });
-  const badOffset = new Uint8Array(payload.bytes);
+  const badOffset = new Uint8Array(await payload.blob.arrayBuffer());
   const badOffsetView = new DataView(badOffset.buffer, badOffset.byteOffset, badOffset.byteLength);
   const imageCentralOffset = centralDirectoryEntryOffset(badOffset, 'images/img-1.png');
   badOffsetView.setUint32(imageCentralOffset + 42, badOffset.length - 10, true);
@@ -755,7 +771,7 @@ test('Blob random-access reads reject invalid local entry offsets and truncated 
     /invalid Boardfish container local entry images\/img-1\.png/,
   );
 
-  const truncatedData = new Uint8Array(payload.bytes);
+  const truncatedData = new Uint8Array(await payload.blob.arrayBuffer());
   const truncatedView = new DataView(truncatedData.buffer, truncatedData.byteOffset, truncatedData.byteLength);
   const truncatedCentralOffset = centralDirectoryEntryOffset(truncatedData, 'images/img-1.png');
   truncatedView.setUint32(truncatedCentralOffset + 20, truncatedData.length, true);
@@ -784,7 +800,7 @@ test('Blob lazy reads reject inconsistent stored entry sizes before creating ref
   const payload = await WebContainer.createBoardContainerBlob(board, {
     'img-1': 'data:image/png;base64,AQIDBA==',
   });
-  const corrupt = new Uint8Array(payload.bytes);
+  const corrupt = new Uint8Array(await payload.blob.arrayBuffer());
   const view = new DataView(corrupt.buffer, corrupt.byteOffset, corrupt.byteLength);
   const imageCentralOffset = centralDirectoryEntryOffset(corrupt, 'images/img-1.png');
   view.setUint32(imageCentralOffset + 24, 5, true);
@@ -805,12 +821,13 @@ test('EOCD signatures inside a valid ZIP comment are ignored', async () => {
     imageStore: {},
     objects: [],
   }, {});
+  const bytes = new Uint8Array(await payload.blob.arrayBuffer());
   const comment = new Uint8Array(30);
   comment.set([0x50, 0x4b, 0x05, 0x06], 0);
-  const commented = new Uint8Array(payload.bytes.length + comment.length);
-  commented.set(payload.bytes);
-  commented.set(comment, payload.bytes.length);
-  const eocdOffset = payload.bytes.length - 22;
+  const commented = new Uint8Array(bytes.length + comment.length);
+  commented.set(bytes);
+  commented.set(comment, bytes.length);
+  const eocdOffset = bytes.length - 22;
   new DataView(commented.buffer).setUint16(eocdOffset + 20, comment.length, true);
 
   const result = await WebContainer.readBoardContainer(new Blob([commented]));
@@ -836,7 +853,8 @@ test('saved image paths are canonicalized instead of preserving hostile manifest
   });
 
   assert.equal(payload.imageEntries[0].path, 'images/img-1.png');
-  assert.doesNotThrow(() => storedZipEntryDataOffset(payload.bytes, 'images/img-1.png'));
+  const bytes = new Uint8Array(await payload.blob.arrayBuffer());
+  assert.doesNotThrow(() => storedZipEntryDataOffset(bytes, 'images/img-1.png'));
 });
 
 test('deflated entries abort when decompressed bytes exceed advertised size', async (t) => {

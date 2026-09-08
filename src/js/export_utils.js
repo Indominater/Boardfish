@@ -366,7 +366,7 @@
       zipStart = performance.now();
       ExportDebug.step(dbg, 'web-export:zip-start', { entryCount: downloads.length });
     }
-    const zip = await root.BoardfishWebBoardContainer.createZipBlob(downloads, { materializeBytes: false });
+    const zip = await root.BoardfishWebBoardContainer.createZipBlob(downloads);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       const zipMs = performance.now() - zipStart;
       ExportDebug.step(dbg, 'web-export:zip-done', { entryCount: downloads.length, bytes: zip.byteLength, ms: zipMs });

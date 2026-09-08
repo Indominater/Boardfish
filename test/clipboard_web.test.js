@@ -483,6 +483,36 @@ test('web js clipboard without a browser marker is invalidated after leaving the
   }), false);
 });
 
+test('clipboard image base64 fallback preserves bytes across chunk boundaries', async () => {
+  let writtenParts;
+  const context = vm.createContext({
+    Blob,
+    btoa,
+    Buffer: undefined,
+    FileReader: undefined,
+    ClipboardItem: class {
+      constructor(parts) { this.parts = parts; }
+    },
+    navigator: {
+      clipboard: {
+        async write(items) { writtenParts = items[0].parts; },
+      },
+    },
+  });
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/js/clipboard_io.js'), 'utf8'), context);
+
+  for (const length of [32766, 32767, 32768, 32769, 65536]) {
+    const bytes = Uint8Array.from({ length }, (_, index) => index % 256);
+    await context.BoardfishClipboardIO.copyImageBlobToClipboard(
+      new Blob([bytes], { type: 'image/png' }), 'bf-image',
+    );
+    const html = await (await writtenParts['text/html']).text();
+    const base64 = /src="data:image\/png;base64,([^"]+)"/.exec(html)?.[1];
+    assert.ok(base64);
+    assert.ok(Buffer.from(base64, 'base64').equals(Buffer.from(bytes)), `${length} bytes round-trip`);
+  }
+});
+
 test('clipboard IO writes the same rich image representations on every reported platform', async () => {
   const previous = {
     BoardfishWebLimits: globalThis.BoardfishWebLimits,

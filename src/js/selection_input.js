@@ -618,7 +618,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             autoHeightChanged: autoHeightDebug?.autoHeightChanged ?? '',
             autoHeightReason: autoHeightDebug?.autoHeightReason ?? '',
             layoutInvalidationMethod: autoHeightDebug?.layoutInvalidationMethod ?? '',
-            pendingSizeSync: false,
             renderBoard: render,
             renderOverlay: render,
             scheduleRenderMs,
@@ -648,7 +647,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             recordSelectionTextResizeStep('flush', resizeDebugDragId, {
               objectId: obj.id,
               flushMs: selectionResizeDebugRound(selectionResizeDebugNow() - flushStartedAt),
-              pendingSizeSync: false,
               x: obj.x,
               y: obj.y,
               w: obj.w,
