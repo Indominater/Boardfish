@@ -434,7 +434,6 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom =
     if (id === editingId) continue;
     const obj = objectsMap.get(id);
     if (!obj || obj.type !== 'text') continue;
-    if (viewportCullingEnabled && viewportRect && !objectIntersectsRect(obj, viewportRect)) continue;
     const layout = getTextLayout(obj);
     const motion = BoardfishMotion.textSelectionMotionForDraw(id, spec, viewZoom);
     const selection = motion ? collectTextSelectionRuns(obj, layout, spec.start, spec.end) : null;
@@ -512,16 +511,7 @@ function drawEditingTextOverlay(
   } : null;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const motion = BoardfishMotion.objectMotionForDraw(obj, viewZoom);
-  if (motion) {
-    context.save();
-    const { scaleX = 1, scaleY = 1, scaleOriginX = 0.5, scaleOriginY = 0.5, translateX = 0, translateY = 0 } = motion;
-    if (scaleX !== 1 || scaleY !== 1) {
-      const scalePivotX = obj.x + obj.w * scaleOriginX;
-      const scalePivotY = obj.y + obj.h * scaleOriginY;
-      context.transform(scaleX, 0, 0, scaleY,
-        translateX + scalePivotX * (1 - scaleX), translateY + scalePivotY * (1 - scaleY));
-    } else if (translateX || translateY) context.translate(translateX, translateY);
-  }
+  if (motion) viewportRect = BoardfishRenderer.applyObjectMotion(context, obj, viewportRect, motion);
   try {
     const liveSelStart = _editEl ? _editEl.selectionStart : 0;
     const liveSelEnd   = _editEl ? _editEl.selectionEnd   : 0;

@@ -653,7 +653,7 @@
     return Object.freeze(renderer);
   }
 
-  const api = Object.freeze({ createBoardRenderer });
+  const api = Object.freeze({ createBoardRenderer, applyObjectMotion });
 
   root.BoardfishRenderer = api;
 })(typeof window !== 'undefined' ? window : globalThis);

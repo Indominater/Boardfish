@@ -376,11 +376,9 @@ function clearTextObjectLayoutRuntime(obj, options) {
 
 const cloneTextLayoutRuntimeLine = ({ _textDrawPlanCache, ...clone }) => clone;
 
-const cloneTextLayoutRuntimeLines = (lines = []) => {
-  const out = new Array(lines.length);
-  for (let i = 0; i < lines.length; i++) out[i] = cloneTextLayoutRuntimeLine(lines[i]);
-  return out;
-};
+const cloneTextLayoutRuntimeLines = (lines = []) => lines.map(line =>
+  '_textDrawPlanCache' in line ? cloneTextLayoutRuntimeLine(line) : { ...line }
+);
 
 function cloneTextObjectRuntimeCaches(source, target) {
   if (!source || !target || source.type !== 'text' || target.type !== 'text') return target;
