@@ -340,14 +340,14 @@ test('cmd+r rotates selected images when available', () => {
   ]);
 });
 
-test('cmd+f falls through to browser find when no image can flip', () => {
+test('find shortcuts preserve browser Find and consume Find Next when no image can flip', () => {
   const { calls, mainKeydown } = loadKeyboard();
-  const event = keyEvent({ key: 'f', code: 'KeyF', metaKey: true });
-
-  mainKeydown(event);
-
-  assert.equal(event.defaultPrevented, false);
-  assert.equal(event.propagationStopped, false);
+  for (const [key, consumed] of [['f', false], ['g', true], ['F3', true]]) {
+    const event = keyEvent({ key, metaKey: key !== 'F3' });
+    mainKeydown(event);
+    assert.equal(event.defaultPrevented, consumed, key);
+    assert.equal(event.propagationStopped, consumed, key);
+  }
   assert.deepEqual(calls, []);
 });
 

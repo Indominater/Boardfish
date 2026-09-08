@@ -21,28 +21,8 @@ var SaveDebug = (() => {
     if (DEBUG_TOOLS_ENABLED) console.info('Boardfish save debugger disabled.');
   }
 
-  async function wrap(ctx, command, call, meta = {}) {
-    if (!core.enabled) return call();
-    const t0 = performance.now();
-    core.step(ctx, 'invoke:start', { command, ...meta });
-    try {
-      const result = await call();
-      core.step(ctx, 'invoke:ok', { command, ms: performance.now() - t0, rust: result || null });
-      return result;
-    } catch (err) {
-      core.step(ctx, 'invoke:error', { command, ms: performance.now() - t0, error: String(err) });
-      throw err;
-    }
-  }
-
   function dump() {
-    const flat = core.events.map(({ meta, ...rest }) => {
-      if (!meta) return rest;
-      const { rust, ...other } = meta;
-      return rust && typeof rust === 'object'
-        ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) }
-        : { ...rest, ...other };
-    });
+    const flat = core.events.map(flattenDebugEvent);
     console.table(flat);
     return core.events;
   }
@@ -237,7 +217,7 @@ var SaveDebug = (() => {
     start: core.start,
     step: core.step,
     end: core.end,
-    wrap,
+    wrap: core.wrap,
     dump,
     summary,
     phaseSummary,

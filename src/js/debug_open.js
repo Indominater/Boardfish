@@ -12,6 +12,7 @@ var OpenDebug = (() => {
     maxEvents: MAX_EVENTS,
     label: '[Boardfish open]',
     sanitize,
+    invokeResult: (result) => result?.debug || result || null,
   });
   const events = core._events;
 
@@ -52,28 +53,8 @@ var OpenDebug = (() => {
     return core.enabled && initialRenderDebugDepth > 0;
   }
 
-  async function wrap(ctx, command, call, meta = {}) {
-    if (!core.enabled) return call();
-    const t0 = performance.now();
-    step(ctx, 'invoke:start', { command, ...meta });
-    try {
-      const result = await call();
-      step(ctx, 'invoke:ok', { command, ms: performance.now() - t0, rust: result?.debug || result || null });
-      return result;
-    } catch (err) {
-      step(ctx, 'invoke:error', { command, ms: performance.now() - t0, error: String(err) });
-      throw err;
-    }
-  }
-
   function dump() {
-    const flat = events.map(({ meta, ...rest }) => {
-      if (!meta) return rest;
-      const { rust, ...other } = meta;
-      return rust && typeof rust === 'object'
-        ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) }
-        : { ...rest, ...other };
-    });
+    const flat = events.map(flattenDebugEvent);
     console.table(flat);
     return events.slice();
   }
@@ -603,7 +584,7 @@ var OpenDebug = (() => {
     beginInitialRenderDebug,
     endInitialRenderDebug,
     isInitialRenderDebugActive,
-    wrap,
+    wrap: core.wrap,
     dump,
     summary,
     phaseSummary,

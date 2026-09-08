@@ -353,13 +353,11 @@ function scheduleScaledVariantReadyRender(
   imageScaledVariantRenderTimer = setTimeout(() => {
     imageScaledVariantRenderTimer = null;
     if (isActiveViewportInput()) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      scheduleScaledVariantReadyRender(
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        scheduleScaledVariantReadyRender(false);
+        false
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      } else {
-        scheduleScaledVariantReadyRender();
-      }
+      );
       return;
     }
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {

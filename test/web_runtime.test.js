@@ -196,7 +196,7 @@ test('web save validates during the single container build and reports its actua
   const board = { objects: [{ id: 'obj-1' }] };
 
   const result = await harness.context.BoardfishRuntime.saveBoard(
-    { kind: 'web-save-handle', handle, name: 'board.bf' },
+    { kind: 'web-file-handle', handle, name: 'board.bf' },
     board,
     { imageStore: rawImageStore },
   );
@@ -287,7 +287,7 @@ test('Save As skips volatile image detachment only for a confirmed distinct targ
       const sourceHandle = testCase.sourceHandle(targetHandle);
 
       const result = await harness.context.BoardfishRuntime.saveBoard(
-        { kind: 'web-save-handle', handle: targetHandle, name: 'copy.bf' },
+        { kind: 'web-file-handle', handle: targetHandle, name: 'copy.bf' },
         { objects: [] },
         {
           imageStore: {},
@@ -375,7 +375,7 @@ test('distinct-target save rebuilds once from a fresh source after write-time Bl
   };
 
   const result = await harness.context.BoardfishRuntime.saveBoard(
-    { kind: 'web-save-handle', handle: targetHandle, name: 'copy.bf' },
+    { kind: 'web-file-handle', handle: targetHandle, name: 'copy.bf' },
     board,
     {
       imageStore: rawImageStore,
@@ -543,7 +543,7 @@ test('a recoverable TypeError without volatile image candidates is not retried',
 
   await assert.rejects(
     () => harness.context.BoardfishRuntime.saveBoard(
-      { kind: 'web-save-handle', handle: targetHandle, name: 'copy.bf' },
+      { kind: 'web-file-handle', handle: targetHandle, name: 'copy.bf' },
       { objects: [] },
       {
         imageStore: {},
@@ -582,7 +582,7 @@ test('a stalled Save As entry comparison times out to conservative detachment', 
     },
   };
   const save = harness.context.BoardfishRuntime.saveBoard(
-    { kind: 'web-save-handle', handle: targetHandle, name: 'copy.bf' },
+    { kind: 'web-file-handle', handle: targetHandle, name: 'copy.bf' },
     { objects: [] },
     {
       imageStore: {},
@@ -636,7 +636,7 @@ test('same-handle saves detach File-backed images and remain readable across rep
       };
     },
   };
-  const ref = { kind: 'web-save-handle', handle, name: 'repeated-save.bf' };
+  const ref = { kind: 'web-file-handle', handle, name: 'repeated-save.bf' };
 
   for (let attempt = 0; attempt < 3; attempt++) {
     await harness.context.BoardfishRuntime.saveBoard(ref, board, { imageStore: rawImageStore });
@@ -696,7 +696,7 @@ test('failed writable streams abort without closing and allow the next save', as
       };
     },
   };
-  const ref = { kind: 'web-save-handle', handle, name: 'board.bf' };
+  const ref = { kind: 'web-file-handle', handle, name: 'board.bf' };
 
   await assert.rejects(
     () => harness.context.BoardfishRuntime.saveBoard(ref, { objects: [] }),
@@ -729,7 +729,7 @@ test('a stalled write times out, aborts, and retires the uncertain target', asyn
       };
     },
   };
-  const ref = { kind: 'web-save-handle', handle, name: 'stalled-board.bf' };
+  const ref = { kind: 'web-file-handle', handle, name: 'stalled-board.bf' };
   const save = harness.context.BoardfishRuntime.saveBoard(ref, { objects: [] });
   await new Promise(setImmediate);
   harness.runTimers();
@@ -747,11 +747,11 @@ test('download refs are not reusable save targets', () => {
     false,
   );
   assert.equal(
-    harness.context.BoardfishRuntime.canSaveToExistingTarget({ kind: 'web-save-handle', handle: {} }),
+    harness.context.BoardfishRuntime.canSaveToExistingTarget({ kind: 'web-file-handle', handle: {} }),
     true,
   );
   assert.equal(
-    harness.context.BoardfishRuntime.canSaveToExistingTarget({ kind: 'web-save-handle', handle: {}, unusable: true }),
+    harness.context.BoardfishRuntime.canSaveToExistingTarget({ kind: 'web-file-handle', handle: {}, unusable: true }),
     false,
   );
 });

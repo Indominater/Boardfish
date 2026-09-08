@@ -6,9 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadImageVariants(options = {}) {
+function loadImageVariants() {
   const context = {
-    IS_MAC: false,
     window: { devicePixelRatio: 1 },
     zoom: 1,
     console,
@@ -20,7 +19,6 @@ function loadImageVariants(options = {}) {
     performance: { now: () => 0 },
     mapWithConcurrency(items, _limit, worker) { return Promise.all(items.map(worker)); },
   };
-  if (options.navigator) context.navigator = options.navigator;
 
   vm.createContext(context);
   vm.runInContext('globalThis.window = globalThis; window.devicePixelRatio = 1;', context);
@@ -32,9 +30,8 @@ function loadImageVariants(options = {}) {
   return context;
 }
 
-function loadImageVariantsForPlatform(isMac, supportsCreateImageBitmap = true) {
+function loadImageVariantsWithBitmap(supportsCreateImageBitmap = true) {
   const context = {
-    IS_MAC: isMac,
     window: { devicePixelRatio: 1 },
     zoom: 1,
     console,
@@ -290,7 +287,7 @@ test('scaled bitmap draw warmup uses a bounded real-size sample', () => {
 });
 
 test('source-ready images queue the low zoom scaled variant before first draw', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const source = { width: 4000, height: 3000 };
 
   const result = context.queueScaledImageVariantForReadyImage('img-1', source);
@@ -306,7 +303,7 @@ test('source-ready images queue the low zoom scaled variant before first draw', 
 });
 
 test('source-ready preview priority promotes an already pending scaled replacement', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const source = { width: 4000, height: 3000 };
   context.queueScaledImageVariant('img-1', source, 0.25);
   assert.equal(context.imageScaledVariantQueue[0].priority, false);
@@ -323,14 +320,6 @@ test('scaled image variant cache stays bounded with web headroom cap', () => {
   const context = loadImageVariants();
 
   assert.equal(context.IMAGE_VARIANT_MEMORY_LIMIT, 1024 * 1024 * 1024);
-});
-
-test('scaled image variant cache uses the same budget on low-memory reported devices', () => {
-  const context = loadImageVariants({ navigator: { deviceMemory: 1 } });
-
-  assert.equal(context.IMAGE_VARIANT_MEMORY_LIMIT, 1024 * 1024 * 1024);
-  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'js', 'image_variants.js'), 'utf8');
-  assert.doesNotMatch(source, /deviceMemory|userAgent|\bAndroid\b/);
 });
 
 test('open image cache settle drains every scaled task and drawable warmup', async () => {
@@ -356,8 +345,8 @@ test('open image cache settle drains every scaled task and drawable warmup', asy
   assert.equal(result.pendingDrawableWarmups, 0);
 });
 
-test('scaled image variants are platform-independent when createImageBitmap is available', () => {
-  const context = loadImageVariantsForPlatform(true);
+test('scaled image variants enable resizing when createImageBitmap is available', () => {
+  const context = loadImageVariantsWithBitmap();
 
   assert.equal(context.VIEWPORT_IMAGE_SCALING_SUPPORTED, true);
   assert.equal(context.viewportImageScalingEnabled, true);
@@ -378,7 +367,7 @@ test('scaled image variants are platform-independent when createImageBitmap is a
 });
 
 test('active low-zoom navigation preserves full-size fallback while scaled variant is pending', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   context.performance.now = () => 1000;
   context.lastViewportInputAt = 990;
   const fullSource = { width: 4000, height: 4000 };
@@ -400,7 +389,7 @@ test('active low-zoom navigation preserves full-size fallback while scaled varia
 });
 
 test('explicit active image draw preserves full-size fallback while scaled variant is pending', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   context.performance.now = () => 1000;
   context.lastViewportInputAt = 0;
   const fullSource = { width: 4000, height: 4000 };
@@ -423,7 +412,7 @@ test('explicit active image draw preserves full-size fallback while scaled varia
 });
 
 test('active low-zoom navigation prioritizes visible pending scaled variants', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const fullSource = { width: 4000, height: 4000 };
   const pendingKeys = () => Array.from(context.imageScaledVariantQueue, (task) => task.key);
 
@@ -445,7 +434,7 @@ test('active low-zoom navigation prioritizes visible pending scaled variants', (
 });
 
 test('scaled variant queue defers background work until viewport input is idle', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const clock = installManualTimers(context);
   let now = 1000;
   let starts = 0;
@@ -467,7 +456,7 @@ test('scaled variant queue defers background work until viewport input is idle',
 });
 
 test('priority scaled variants start during input without pulling background work into the batch', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const clock = installManualTimers(context);
   const starts = [];
   context.performance.now = () => 1000;
@@ -496,7 +485,7 @@ test('priority scaled variants start during input without pulling background wor
 });
 
 test('promoting the sole pending scaled variant wakes its delayed queue timer', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const clock = installManualTimers(context);
   let starts = 0;
   context.performance.now = () => 1000;
@@ -522,7 +511,7 @@ test('promoting the sole pending scaled variant wakes its delayed queue timer', 
 });
 
 test('active navigation can keep a nearly large enough 0.25x variant instead of full-size draw', async () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const fullSource = { width: 1500, height: 2000 };
   context.performance.now = () => 1000;
   context.lastViewportInputAt = 990;
@@ -551,7 +540,7 @@ test('active navigation can keep a nearly large enough 0.25x variant instead of 
 });
 
 test('scaled variant queue starts a small concurrent batch per tick', async () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const timers = [];
   const resolvers = [];
   let activeBuilds = 0;
@@ -597,7 +586,7 @@ test('scaled variant queue starts a small concurrent batch per tick', async () =
 });
 
 test('idle low-zoom drawing preserves full-size fallback until scaled variants are ready', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   context.performance.now = () => 1000;
   context.lastViewportInputAt = 0;
   const fullSource = { width: 4000, height: 4000 };
@@ -617,7 +606,7 @@ test('idle low-zoom drawing preserves full-size fallback until scaled variants a
 });
 
 test('visible image idle work shares one timer and waits for the latest input', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const clock = installManualTimers(context);
   const hydrations = [];
   let now = 1000;
@@ -648,7 +637,7 @@ test('visible image idle work shares one timer and waits for the latest input', 
 });
 
 test('visible image idle work hydrates when scaled variants are unavailable', () => {
-  const context = loadImageVariantsForPlatform(false, false);
+  const context = loadImageVariantsWithBitmap(false);
   const clock = installManualTimers(context);
   const hydrations = [];
   context.performance.now = () => 180;
@@ -662,7 +651,7 @@ test('visible image idle work hydrates when scaled variants are unavailable', ()
 });
 
 test('scaled variant ready render uses input activity at timer fire after input settles', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const clock = installManualTimers(context);
   const renders = [];
   let now = 1000;
@@ -682,7 +671,7 @@ test('scaled variant ready render uses input activity at timer fire after input 
 });
 
 test('scaled variant ready render defers when input starts before timer fire', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const clock = installManualTimers(context);
   const renders = [];
   let now = 1000;
@@ -706,7 +695,7 @@ test('scaled variant ready render defers when input starts before timer fire', (
 });
 
 test('scaled image variants stay disabled when createImageBitmap is unavailable', () => {
-  const context = loadImageVariantsForPlatform(false, false);
+  const context = loadImageVariantsWithBitmap(false);
 
   assert.equal(context.VIEWPORT_IMAGE_SCALING_SUPPORTED, false);
   assert.equal(context.viewportImageScalingEnabled, false);
@@ -715,7 +704,7 @@ test('scaled image variants stay disabled when createImageBitmap is unavailable'
 });
 
 test('stale scaled image variant tasks skip resize work', async () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   let resizeCalls = 0;
   context.createImageBitmap = async () => {
     resizeCalls++;
@@ -736,7 +725,7 @@ test('stale scaled image variant tasks skip resize work', async () => {
 });
 
 test('clearing scaled variants for one key removes queued work for that key', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
 
   context.queueScaledImageVariant('img-1', { width: 100, height: 100 }, 0.25);
   context.queueScaledImageVariant('img-2', { width: 100, height: 100 }, 0.25);
@@ -751,7 +740,7 @@ test('clearing scaled variants for one key removes queued work for that key', ()
 });
 
 test('clearing the final queued scaled variant cancels its delayed timer', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
   const clock = installManualTimers(context);
   context.performance.now = () => 1000;
   context.lastViewportInputAt = 990;
@@ -768,7 +757,7 @@ test('clearing the final queued scaled variant cancels its delayed timer', () =>
 });
 
 test('scaled image variant skips do not create empty cache groups', () => {
-  const context = loadImageVariantsForPlatform(false);
+  const context = loadImageVariantsWithBitmap();
 
   const missing = context.queueScaledImageVariant('img-missing-size', { width: 0, height: 100 }, 0.25);
   assert.equal(missing.queued, false);

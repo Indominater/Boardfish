@@ -375,49 +375,33 @@ async function hydrateImageForDisplay(key
   if (BoardfishImageStore.hasDisplayImage(key) || !isOpenHydratableImageSource(source)) return false;
   const pendingReady = imageReadyPromises.get(key);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-  if (pendingReady) {
-    const t0 = performance.now();
-    const cacheMetrics = await pendingReady;
-    const displayReady = BoardfishImageStore.hasDisplayImage(key);
-    OpenDebug.step(dbg, 'hydrate-image', {
-      imgKey: key,
-      ms: performance.now() - t0,
-      fetchMs: 0,
-      readyMs: performance.now() - t0,
-      ...(cacheMetrics || {}),
-      dataUrlLen: 0,
-      source: 'pending-cache',
-      bitmapReady: !!imageBitmapCache[key],
-      displayReady,
-    });
-    return displayReady;
-  }
   const t0 = performance.now();
-  const readyStart = performance.now();
-  const cacheMetrics = await cacheImage(key, source, dbg);
-  const readyMs = performance.now() - readyStart;
+  const readyStart = pendingReady ? t0 : performance.now();
+  const cacheMetrics =
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  await (pendingReady || cacheImage(key, source
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , dbg
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  ));
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const readyMs = pendingReady ? null : performance.now() - readyStart;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const displayReady = BoardfishImageStore.hasDisplayImage(key);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'hydrate-image', {
     imgKey: key,
     ms: performance.now() - t0,
     fetchMs: 0,
-    readyMs,
+    readyMs: pendingReady ? performance.now() - t0 : readyMs,
     ...(cacheMetrics || {}),
-    dataUrlLen: typeof source === 'string' ? source.length : 0,
-    source: typeof source === 'string' ? 'data-url' : 'web-blob',
+    dataUrlLen: !pendingReady && typeof source === 'string' ? source.length : 0,
+    source: pendingReady ? 'pending-cache' : typeof source === 'string' ? 'data-url' : 'web-blob',
     bitmapReady: !!imageBitmapCache[key],
     displayReady,
   });
-  return displayReady;
-  }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  if (pendingReady) {
-    await pendingReady;
-    return BoardfishImageStore.hasDisplayImage(key);
-  }
-  await cacheImage(key, source);
-  return BoardfishImageStore.hasDisplayImage(key);
+  return displayReady;
 }
 
 async function hydrateImageKeysWithLimit(keys
@@ -793,33 +777,34 @@ function showSaveFailurePill() {
   showIslandMsg('Save failed', long_message);
 }
 
-const saveBoardAsImpl = async () => {
+const saveBoardImpl = async (saveAs = false) => {
+  let fileRef = !saveAs && BoardfishRuntime.canSaveToExistingTarget(currentFileRef) ? currentFileRef : null;
+  saveAs = !fileRef;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const dbg = SaveDebug.start('saveBoardAs', { currentFilePath, objectCount: objects.length });
+  const path = saveAs ? currentFilePath : BoardfishRuntime.describeFileRef(fileRef);
+  const dbg = SaveDebug.start(saveAs ? 'saveBoardAs' : 'saveBoard', saveAs
+    ? { currentFilePath, objectCount: objects.length }
+    : { path, objectCount: objects.length });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
   try {
-    const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
-    const chooseFile = () => BoardfishRuntime.saveFileDialog(defaultName);
-    let fileRef;
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      fileRef = await SaveDebug.wrap(
-        dbg,
-        'web_save_file_dialog',
-        chooseFile,
-        { defaultName },
-      );
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    } else {
-      fileRef = await chooseFile();
-    }
-    if (!fileRef) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      SaveDebug.end(dbg, { cancelled: true });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      releaseInputShield();
-      return false;
+    if (saveAs) {
+      const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
+      const chooseFile = () => BoardfishRuntime.saveFileDialog(defaultName);
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        fileRef = await SaveDebug.wrap(dbg, 'web_save_file_dialog', chooseFile, { defaultName });
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      } else {
+        fileRef = await chooseFile();
+      }
+      if (!fileRef) {
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        SaveDebug.end(dbg, { cancelled: true });
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+        releaseInputShield();
+        return false;
+      }
     }
     await runShieldedPillTask({
       releaseInputShield,
@@ -832,8 +817,10 @@ const saveBoardAsImpl = async () => {
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
           , { sourceFileRef: currentFileRef }
         );
-        currentFileRef = fileRef;
-        currentFilePath = BoardfishRuntime.describeFileRef(fileRef);
+        if (saveAs) {
+          currentFileRef = fileRef;
+          currentFilePath = BoardfishRuntime.describeFileRef(fileRef);
+        }
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         SaveDebug.step(dbg, 'markSaved:start');
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -844,7 +831,7 @@ const saveBoardAsImpl = async () => {
       },
     });
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    SaveDebug.end(dbg, { saved: true, path: currentFilePath });
+    SaveDebug.end(dbg, { saved: true, path: saveAs ? currentFilePath : path });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return true;
   } catch (err) {
@@ -863,55 +850,9 @@ function saveBoardAs() {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     'saveBoardAs',
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    saveBoardAsImpl,
+    () => saveBoardImpl(true),
   );
 }
-
-const saveBoardImpl = async () => {
-  const target = BoardfishRuntime.canSaveToExistingTarget(currentFileRef) ? currentFileRef : null;
-  if (target) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const path = BoardfishRuntime.describeFileRef(target);
-    const dbg = SaveDebug.start('saveBoard', { path, objectCount: objects.length });
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
-    try {
-      await runShieldedPillTask({
-        releaseInputShield,
-        startMessage: 'Saving',
-        successMessage: 'Saved',
-        task: async () => {
-          await invokeSaveBoard(target
-            /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            , dbg
-            /* BOARDFISH_DEV_DIAGNOSTICS_END */
-            , { sourceFileRef: currentFileRef }
-          );
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          SaveDebug.step(dbg, 'markSaved:start');
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          markSaved();
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          SaveDebug.step(dbg, 'markSaved:end');
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        },
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      SaveDebug.end(dbg, { saved: true, path });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return true;
-    } catch (err) {
-      releaseInputShield();
-      console.error('Save failed:', err);
-      showSaveFailurePill();
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      SaveDebug.end(dbg, { saved: false, error: String(err) });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return false;
-    }
-  }
-  return saveBoardAsImpl();
-};
 
 function saveBoard() {
   return runExclusiveBoardSave(

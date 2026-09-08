@@ -752,13 +752,11 @@ const copyTextEditSelectionFromProxy = async (
     .then((result) => {
       if (result?.boardfishTokenWritten && meta.boardfishToken) {
         if (typeof markJsClipboardWebTokenWritten === 'function') {
-          if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          markJsClipboardWebTokenWritten(meta.boardfishToken
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            markJsClipboardWebTokenWritten(meta.boardfishToken, dbg);
+            , dbg
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          } else {
-            markJsClipboardWebTokenWritten(meta.boardfishToken);
-          }
+          );
         }
       }
       // A large text write can occupy the main thread; start jiggle only once it settles.
@@ -1702,33 +1700,31 @@ function enterEdit(id, {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     event.preventDefault();
-    if (!candidate) {
+    const pasteEventText = (path, error) => {
       const replaceOptions = { selection, inputType: 'insertFromPaste' };
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         replaceOptions.debug = dbg;
-        replaceOptions.source = 'event-text';
+        replaceOptions.source = path;
       }
+      const pasted = replaceTextEditSelectionWithPayload(id, proxy, { text: fallbackText }, replaceOptions);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const pasted = replaceTextEditSelectionWithPayload(id, proxy, {
-        text: fallbackText,
-      }, replaceOptions);
+      const counted = pasted || path === 'event-text';
       dbgApi?.end?.(dbg, {
-        path: 'event-text',
+        path,
+        ...(path === 'error-fallback-event-text' ? { error: String(error) } : {}),
         pasted,
         objectId: id,
         proxyChars: proxy.value.length,
-        textObjectCount: 1,
-        textCharCount: fallbackText.length,
-        largestTextChars: fallbackText.length,
+        textObjectCount: counted ? 1 : 0,
+        textCharCount: counted ? fallbackText.length : 0,
+        largestTextChars: counted ? fallbackText.length : 0,
         ...textEditorObjectDebugStats(obj),
         ...textEditorTextStats(fallbackText),
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, replaceOptions);
-      }
+    };
+    if (!candidate) {
+      pasteEventText('event-text');
       return;
     }
     const pasteOptions = {
@@ -1758,32 +1754,7 @@ function enterEdit(id, {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logPasteStep('paste:text-edit-js-payload-fallback-event-text', textEditorTextStats(fallbackText));
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      const fallbackOptions = { selection, inputType: 'insertFromPaste' };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        fallbackOptions.debug = dbg;
-        fallbackOptions.source = 'fallback-event-text';
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const fallbackPasted = replaceTextEditSelectionWithPayload(id, proxy, {
-        text: fallbackText,
-      }, fallbackOptions);
-      dbgApi?.end?.(dbg, {
-        path: 'fallback-event-text',
-        pasted: fallbackPasted,
-        objectId: id,
-        proxyChars: proxy.value.length,
-        textObjectCount: fallbackPasted ? 1 : 0,
-        textCharCount: fallbackPasted ? fallbackText.length : 0,
-        largestTextChars: fallbackPasted ? fallbackText.length : 0,
-        ...textEditorObjectDebugStats(obj),
-        ...textEditorTextStats(fallbackText),
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, fallbackOptions);
-      }
+      pasteEventText('fallback-event-text');
     }).catch((err) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logPasteStep('paste:text-edit-js-payload-error', { error: String(err) });
@@ -1801,33 +1772,7 @@ function enterEdit(id, {
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         return;
       }
-      const fallbackOptions = { selection, inputType: 'insertFromPaste' };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        fallbackOptions.debug = dbg;
-        fallbackOptions.source = 'error-fallback-event-text';
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const fallbackPasted = replaceTextEditSelectionWithPayload(id, proxy, {
-        text: fallbackText,
-      }, fallbackOptions);
-      dbgApi?.end?.(dbg, {
-        path: 'error-fallback-event-text',
-        error: String(err),
-        pasted: fallbackPasted,
-        objectId: id,
-        proxyChars: proxy.value.length,
-        textObjectCount: fallbackPasted ? 1 : 0,
-        textCharCount: fallbackPasted ? fallbackText.length : 0,
-        largestTextChars: fallbackPasted ? fallbackText.length : 0,
-        ...textEditorObjectDebugStats(obj),
-        ...textEditorTextStats(fallbackText),
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, fallbackOptions);
-      }
+      pasteEventText('error-fallback-event-text', err);
     });
   });
   proxy.addEventListener('blur', flushEditHistoryCheckpoint);
@@ -1836,46 +1781,31 @@ function enterEdit(id, {
     const wakeCaret = !_caretVisible;
     _caretVisible = true;
 
-    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const isIndentKey = e.key === 'Tab';
+    if ((isIndentKey || (e.key === 'Enter' && !e.isComposing)) && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       const currentProxyValue = textEditProxyValue(proxy);
       const selection = textEditSelectionState(proxy);
-      const indentResult = applyTextEditLineIndent(currentProxyValue, selection, e.shiftKey);
-      if (!indentResult.changed) {
+      const result = isIndentKey
+        ? applyTextEditLineIndent(currentProxyValue, selection, e.shiftKey)
+        : applyTextEditLineBreakIndent(currentProxyValue, selection);
+      if (isIndentKey && !result.changed) {
         if (wakeCaret) scheduleRender(true, false);
         return;
       }
-      if (!BoardfishWebLimits.canReplaceText(obj, indentResult.value)) return;
-      const inputType = e.shiftKey ? 'deleteContentBackward' : 'insertText';
+      if (!BoardfishWebLimits.canReplaceText(obj, result.value)) return;
+      const inputType = isIndentKey
+        ? (e.shiftKey ? 'deleteContentBackward' : 'insertText')
+        : 'insertLineBreak';
       pendingInputState = {
         ...selection,
         value: currentProxyValue,
         inputType,
       };
       beginTextEditHistoryAction(id, pendingInputState);
-      proxy.value = indentResult.value;
-      setTextEditProxyLogicalValue(proxy, indentResult.value);
-      proxy.setSelectionRange(indentResult.start, indentResult.end, indentResult.direction);
-      dispatchTextEditInputEvent(proxy, inputType);
-      return;
-    }
-
-    if (e.key === 'Enter' && !e.isComposing && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      const currentProxyValue = textEditProxyValue(proxy);
-      const selection = textEditSelectionState(proxy);
-      const lineBreakResult = applyTextEditLineBreakIndent(currentProxyValue, selection);
-      if (!BoardfishWebLimits.canReplaceText(obj, lineBreakResult.value)) return;
-      const inputType = 'insertLineBreak';
-      pendingInputState = {
-        ...selection,
-        value: currentProxyValue,
-        inputType,
-      };
-      beginTextEditHistoryAction(id, pendingInputState);
-      proxy.value = lineBreakResult.value;
-      setTextEditProxyLogicalValue(proxy, lineBreakResult.value);
-      proxy.setSelectionRange(lineBreakResult.start, lineBreakResult.end, lineBreakResult.direction);
+      proxy.value = result.value;
+      setTextEditProxyLogicalValue(proxy, result.value);
+      proxy.setSelectionRange(result.start, result.end, result.direction);
       dispatchTextEditInputEvent(proxy, inputType);
       return;
     }

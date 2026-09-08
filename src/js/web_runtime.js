@@ -35,14 +35,6 @@
     };
   }
 
-  function webSaveHandleRef(handle) {
-    return {
-      kind: 'web-save-handle',
-      handle,
-      name: handle?.name || 'board.bf',
-    };
-  }
-
   function webDownloadRef(name) {
     return {
       kind: 'web-download',
@@ -63,11 +55,11 @@
 
   function canSaveToExistingTarget(ref) {
     if (!ref) return false;
-    return ref.unusable !== true && (ref.kind === 'web-file-handle' || ref.kind === 'web-save-handle');
+    return ref.unusable !== true && ref.kind === 'web-file-handle';
   }
 
   function persistentFileHandleFromRef(ref) {
-    if (ref?.kind !== 'web-file-handle' && ref?.kind !== 'web-save-handle') return null;
+    if (ref?.kind !== 'web-file-handle') return null;
     return ref.handle || null;
   }
 
@@ -239,7 +231,7 @@
           types: BOARD_FILE_TYPES,
           excludeAcceptAllOption: false,
         });
-        return handle ? webSaveHandleRef(handle) : null;
+        return handle ? webFileHandleRef(handle) : null;
       } catch (err) {
         if (isAbortError(err)) return null;
         throw err;
@@ -250,7 +242,7 @@
 
   async function fileFromRef(ref) {
     if (ref?.kind === 'web-file') return ref.file;
-    if (ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle') return ref.handle.getFile();
+    if (ref?.kind === 'web-file-handle') return ref.handle.getFile();
     if (ref instanceof File) return ref;
     throw new Error('unsupported web file reference');
   }
@@ -322,7 +314,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = name || 'board.bf';
+    link.download = name;
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
@@ -337,7 +329,7 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const rawImageStore = options.imageStore || root.imageStore || {};
     const validateBoardPayload = root.BoardfishWebLimits?.validateBoardPayload;
-    const writesExistingHandle = ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle';
+    const writesExistingHandle = ref?.kind === 'web-file-handle';
     const sourceTargetSameEntry = writesExistingHandle && Object.prototype.hasOwnProperty.call(options, 'sourceFileRef')
       ? await fileRefsAreSameEntry(ref, options.sourceFileRef)
       : null;
@@ -469,6 +461,7 @@
   const api = Object.freeze({
     canSaveToExistingTarget,
     describeFileRef,
+    downloadBlob,
     fileNameFromRef,
     fileRefFromFile: webFileRef,
     openFileDialog,

@@ -199,18 +199,8 @@ var MENU_COMMANDS = {
   'text-btn-delete': () => { closeTextCtxMenu('command:delete'); deleteTextEditSelection(); },
 };
 
-const getTextEditSelectionState = () => {
-  if (!editingId || !_editEl) return null;
-  const value = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
-  const start = Math.max(0, Math.min(_editEl.selectionStart ?? 0, value.length));
-  const end = Math.max(0, Math.min(_editEl.selectionEnd ?? start, value.length));
-  return {
-    start: Math.min(start, end),
-    end: Math.max(start, end),
-    direction: _editEl.selectionDirection || 'none',
-    hasSelection: start !== end,
-  };
-};
+const getTextEditSelectionState = () =>
+  editingId && _editEl ? textEditSelectionState(_editEl) : null;
 
 const focusTextEditProxy = () => focusTextEditProxyNow(_editEl);
 
@@ -234,7 +224,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
     ? textForTextObjectPaste(text)
     : normalizeTextContent(text);
   if (inputTypeValue.includes('paste') && !replacementText) return false;
-  const oldValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
+  const oldValue = textEditProxyValue(_editEl);
   if (!BoardfishWebLimits.canReplaceText(objectsMap.get(editingId),
     oldValue.slice(0, selection.start) + replacementText + oldValue.slice(selection.end))) return false;
   const replacementState = {
@@ -266,28 +256,11 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   const mutationStartedAt = collectDiagnostics ? debugNow() : 0;
   const mutationResult =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  typeof replaceTextEditProxyRange === 'function'
-    ? replaceTextEditProxyRange(
-      _editEl, replacementText, selection.start, selection.end, 'end', inputTypeValue.startsWith('delete'),
-    )
-    : (() => {
-      _editEl.setRangeText(replacementText, selection.start, selection.end, 'end');
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      return collectDiagnostics
-        ? {
-            method: 'setRangeText',
-            setRangeTextMs: '',
-            valueAssignMs: '',
-            valueBuildMs: '',
-            valueSetMs: '',
-            logicalSetMs: '',
-            selectionSetMs: '',
-          }
-        : null;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    })();
+  replaceTextEditProxyRange(
+    _editEl, replacementText, selection.start, selection.end, 'end', inputTypeValue.startsWith('delete'),
+  );
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const nextValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
+  const nextValue = textEditProxyValue(_editEl);
   if (collectDiagnostics && typeof recordTextEditorInputPerfStep === 'function') {
     const mutationMs = debugRound(debugNow() - mutationStartedAt);
     recordTextEditorInputPerfStep('menu-replace-textarea-mutated', {

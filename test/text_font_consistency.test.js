@@ -2,14 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readSource } = require('../test-support/source.js');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
 
 function listFiles(dir, predicate = () => true) {
   const fullDir = path.join(root, dir);

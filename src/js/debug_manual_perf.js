@@ -362,6 +362,18 @@ var ManualPerfDebug = (() => {
     };
   }
 
+  function storeReport(out) {
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+  }
+
+  function logReport(label, out) {
+    console.group(label);
+    console.table([out.headline]);
+    console.log(out);
+    console.groupEnd();
+  }
+
   function report(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
       console.warn('[Boardfish perf] Debug tools are disabled in this build.');
@@ -376,12 +388,8 @@ var ManualPerfDebug = (() => {
       markers: markers.slice(),
     };
     out.headline = headline(out);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
-    console.group('[Boardfish perf] manual viewport');
-    console.table([out.headline]);
-    console.log(out);
-    console.groupEnd();
+    storeReport(out);
+    logReport('[Boardfish perf] manual viewport', out);
     if (options.copy !== false) void copyLast();
     return out;
   }
@@ -429,13 +437,9 @@ var ManualPerfDebug = (() => {
       ...memory.headline,
       ...(out.memoryDelta || {}),
     };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] memory report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] memory report', out);
     }
     if (options.copy === true) void copyLast();
     return out;
@@ -470,13 +474,9 @@ var ManualPerfDebug = (() => {
       ...headline(out),
       ...(out.memoryDelta || {}),
     };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] current pan/zoom benchmark');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] current pan/zoom benchmark', out);
     }
     if (options.copy !== false) void copyLast();
     return out;
@@ -521,14 +521,6 @@ var ManualPerfDebug = (() => {
     };
   }
 
-  function panningHeadline(viewportReport = {}) {
-    return viewportNavigationHeadline(viewportReport);
-  }
-
-  function zoomingHeadline(viewportReport = {}) {
-    return viewportNavigationHeadline(viewportReport);
-  }
-
   function panningReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
       console.warn('[Boardfish perf] Debug tools are disabled in this build.');
@@ -547,14 +539,10 @@ var ManualPerfDebug = (() => {
       viewport,
       markers: markers.slice(),
     };
-    out.headline = panningHeadline(viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] viewport panning');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] viewport panning', out);
     }
     return out;
   }
@@ -611,14 +599,10 @@ var ManualPerfDebug = (() => {
     out.deltaY = deltaY;
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.testPoint = point;
-    out.headline = panningHeadline(out.viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(out.viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] synthetic wheel pan');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] synthetic wheel pan', out);
     }
     return out;
   }
@@ -644,14 +628,10 @@ var ManualPerfDebug = (() => {
       viewport,
       markers: markers.slice(),
     };
-    out.headline = zoomingHeadline(viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] viewport zoom');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] viewport zoom', out);
     }
     return out;
   }
@@ -709,13 +689,9 @@ var ManualPerfDebug = (() => {
       ...viewportNavigationHeadline(out.viewport),
       ...(out.memoryDelta || {}),
     };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] viewport pan/zoom optimization');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] viewport pan/zoom optimization', out);
     }
     if (options.copy === true) void copyLast();
     return out;
@@ -750,14 +726,10 @@ var ManualPerfDebug = (() => {
     out.deltaY = deltaY;
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.testPoint = point;
-    out.headline = zoomingHeadline(out.viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(out.viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] synthetic wheel zoom');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] synthetic wheel zoom', out);
     }
     return out;
   }
@@ -828,14 +800,10 @@ var ManualPerfDebug = (() => {
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.start = start;
     out.end = end;
-    out.headline = panningHeadline(out.viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(out.viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] synthetic mouse pan');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] synthetic mouse pan', out);
     }
     return out;
   }
@@ -1930,18 +1898,14 @@ var ManualPerfDebug = (() => {
       ],
     };
     out.headline = textEditHeadline(out);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.clear !== false) {
       textEditSession = null;
       textEditLastEventAt = 0;
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
-      console.group('[Boardfish perf] text edit passive report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] text edit passive report', out);
     }
     return out;
   }
@@ -2076,8 +2040,7 @@ var ManualPerfDebug = (() => {
       ],
     };
     out.headline = textResizeHeadline(out);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.clear !== false) {
       textResizeSession = null;
       textEditSession = null;
@@ -2086,10 +2049,7 @@ var ManualPerfDebug = (() => {
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
-      console.group('[Boardfish perf] text resize/input passive report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] text resize/input passive report', out);
     }
     return out;
   }
@@ -2757,8 +2717,7 @@ var ManualPerfDebug = (() => {
       ...largeTextPanningHeadline(out),
       ...(out.memoryDelta || {}),
     };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.clear !== false) {
       largeTextPanningSession = null;
       textEditSession = null;
@@ -2766,10 +2725,7 @@ var ManualPerfDebug = (() => {
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
-      console.group('[Boardfish perf] large text panning report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] large text panning report', out);
     }
     if (options.copy === true) void copyLast();
     return out;

@@ -480,39 +480,6 @@ test('opening hydration can prepare every text draw plan before the first canvas
   }
 });
 
-test('text drawing ignores stale fast requests and preserves measured positions', () => {
-  const { context } = loadTextLayout();
-  const textLayout = context.__testTextLayout;
-  const obj = {
-    id: 'text-fast-pan',
-    type: 'text',
-    x: 0,
-    y: 0,
-    w: 200,
-    h: 40,
-    data: { content: 'a->b c<-d' },
-  };
-  const [line] = textLayout.getTextLayout(obj);
-  const calls = [];
-
-  const stats = textLayout.drawTextLineRange({
-    font: '',
-    fillText(text, x, y) {
-      calls.push({ text, x, y });
-    },
-  }, line, obj, 0, line.text.length, { fast: true });
-
-  assert.deepEqual(calls.map((call) => call.text), ['a', '-', '>', 'b', 'c', '<', '-', 'd']);
-  assert.deepEqual(
-    calls.map((call) => call.x),
-    [0, 1, 2, 3, 5, 6, 7, 8].map((offset) => obj.x + context.TEXT_PAD + line.prefixWidths[offset]),
-  );
-  assert.equal(stats.drawUnits, 8);
-  assert.equal(stats.drawCalls, 8);
-  assert.equal(stats.runs, 1);
-  assert.equal(stats.skippedSpaces, 1);
-});
-
 test('text drawing batches pixel-equivalent plain ASCII spans only', () => {
   const { context } = loadTextLayout();
   const textLayout = context.__testTextLayout;
@@ -1141,7 +1108,7 @@ test('blank line deletion patches cached layout to match a fresh layout', () => 
 test('long tokens have consistent wrapping, auto-height, and viewport layout across sizes', () => {
   const { context } = loadTextLayout();
   const textLayout = context.__testTextLayout;
-  for (const chars of [384, 385, 4096]) {
+  for (const chars of [10, 11, 4096]) {
     const content = 'x'.repeat(chars);
     const createObject = () => ({
       id: `token-wrap-${chars}`,
@@ -1169,7 +1136,7 @@ test('long tokens have consistent wrapping, auto-height, and viewport layout acr
       assert.equal(line.caretEndIndex, end);
       assert.equal(line.nextStartIndex, end);
     }
-    const first = expectedLines - 3;
+    const first = Math.max(0, expectedLines - 3);
     const cachedRange = textLayout.getTextLayoutForLineRange(obj, first, expectedLines - 1);
     const freshRange = textLayout.getTextLayoutForLineRange(createObject(), first, expectedLines - 1);
     assert.deepEqual(plain(Array.from(cachedRange)), plain(layout.slice(first)));

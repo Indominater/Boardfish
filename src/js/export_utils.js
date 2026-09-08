@@ -154,47 +154,34 @@
   }
 
   async function imageSourceDownloadEntry(source, name) {
-    if (typeof isWebImageRef === 'function' && isWebImageRef(source) && root.BoardfishWebBoardContainer?.bytesForImageSource) {
-      try {
-        const data = source.__blob || await (typeof root.BoardfishWebBoardContainer.bytesForImageSourceAsync === 'function'
+    const webRef = typeof isWebImageRef === 'function' && isWebImageRef(source) && root.BoardfishWebBoardContainer?.bytesForImageSource;
+    try {
+      let data, ext, mime;
+      if (webRef) {
+        data = source.__blob || await (typeof root.BoardfishWebBoardContainer.bytesForImageSourceAsync === 'function'
           ? root.BoardfishWebBoardContainer.bytesForImageSourceAsync(source) : root.BoardfishWebBoardContainer.bytesForImageSource(source));
         if (!data) return null;
-        const ext = source.ext === 'jpeg' ? 'jpg' : (source.ext || 'png');
-        const entry = {
-          name: withImageExtension(name, ext),
-          data,
-          mime: source.mime || mimeForImageExt(ext),
-        };
-        if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-          entry.debug = {
-            phase: 'web-original',
-            rendered: false,
-            sourceKind: 'web-ref',
-            bytes: data.size ?? data.length,
-          };
-        }
-        return entry;
-      } catch (_) {}
-    }
-    if (typeof source === 'string' && source.startsWith('data:') && root.BoardfishWebBoardContainer?.dataUrlToBytes) {
-      const ext = guessImageExtFromDataUrl(source);
-      const data = root.BoardfishWebBoardContainer.dataUrlToBytes(source);
-      const entry = {
-        name: withImageExtension(name, ext),
-        data,
-        mime: dataUrlMime(source),
-      };
+        ext = source.ext === 'jpeg' ? 'jpg' : (source.ext || 'png');
+        mime = source.mime || mimeForImageExt(ext);
+      } else if (typeof source === 'string' && source.startsWith('data:') && root.BoardfishWebBoardContainer?.dataUrlToBytes) {
+        ext = guessImageExtFromDataUrl(source);
+        data = root.BoardfishWebBoardContainer.dataUrlToBytes(source);
+        mime = dataUrlMime(source);
+      } else return null;
+      const entry = { name: withImageExtension(name, ext), data, mime };
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         entry.debug = {
           phase: 'web-original',
           rendered: false,
-          sourceKind: 'data-url',
-          bytes: data.length,
+          sourceKind: webRef ? 'web-ref' : 'data-url',
+          bytes: data.size ?? data.length,
         };
       }
       return entry;
+    } catch (err) {
+      if (!webRef) throw err;
+      return null;
     }
-    return null;
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -317,72 +304,54 @@
 
     if (!downloads.length) return { downloadedCount: 0, skippedCount, method: 'none' };
 
-    if (downloads.length === 1) {
+    const single = downloads.length === 1;
+    let data, filename, mime, byteLength;
+    const method = target?.handle ? (single ? 'file-picker' : 'zip-file-picker') : (single ? 'download' : 'zip');
+    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: single ? 1 : 2, method });
+    }
+    if (single) {
       const item = downloads[0];
+      data = item.data;
+      filename = item.name;
+      mime = item.mime || 'image/png';
+      /* BOARDFISH_DEV_DIAGNOSTICS_START */
+      byteLength = data.size ?? data.length;
+      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    } else {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 1, method: target?.handle ? 'file-picker' : 'download' });
-      }
-      if (typeof options.onProgress === 'function') {
-        options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length });
+        await yieldToEventLoop(dbg, 'web-before-zip', { entryCount: downloads.length });
+      } else {
+        await delay(0);
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      let saveStart;
+      let zipStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') saveStart = performance.now();
-      await saveExportData(item.data, target, item.name, item.mime || 'image/png');
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        zipStart = performance.now();
+        ExportDebug.step(dbg, 'web-export:zip-start', { entryCount: downloads.length });
+      }
+      const zip = await root.BoardfishWebBoardContainer.createZipBlob(downloads);
+      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+        const zipMs = performance.now() - zipStart;
+        ExportDebug.step(dbg, 'web-export:zip-done', { entryCount: downloads.length, bytes: zip.byteLength, ms: zipMs });
         ExportDebug.recordSaveBatch?.({
           batchIndex: 1,
-          batchCount: 1,
+          batchCount: 2,
           batchSize: downloads.length,
           keyCount: downloads.length,
-          savedCount: downloads.length,
+          savedCount: 0,
           failedCount: 0,
           missingCount: 0,
-          bytesMB: Math.round((item.data.size ?? item.data.length) / 1024 / 1024 * 100) / 100,
-          ms: performance.now() - saveStart,
-          method: target?.handle ? 'file-picker' : 'download',
+          ms: zipMs,
+          method: 'zip-build',
         });
-        ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round((item.data.size ?? item.data.length) / 1024 / 1024 * 100) / 100 });
       }
-      if (typeof options.onProgress === 'function') {
-        options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length });
-      }
-      return { downloadedCount: downloads.length, skippedCount, method: target?.handle ? 'file-picker' : 'download' };
+      data = zip.blob;
+      filename = target?.filename || `images_${randomHex()}.zip`;
+      mime = 'application/zip';
+      byteLength = zip.byteLength;
     }
-
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      ExportDebug.recordSaveStart?.({ keyCount: downloads.length, batchSize: downloads.length, batchCount: 2, method: target?.handle ? 'zip-file-picker' : 'zip' });
-    }
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      await yieldToEventLoop(dbg, 'web-before-zip', { entryCount: downloads.length });
-    } else {
-      await delay(0);
-    }
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    let zipStart;
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      zipStart = performance.now();
-      ExportDebug.step(dbg, 'web-export:zip-start', { entryCount: downloads.length });
-    }
-    const zip = await root.BoardfishWebBoardContainer.createZipBlob(downloads);
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      const zipMs = performance.now() - zipStart;
-      ExportDebug.step(dbg, 'web-export:zip-done', { entryCount: downloads.length, bytes: zip.byteLength, ms: zipMs });
-      ExportDebug.recordSaveBatch?.({
-        batchIndex: 1,
-        batchCount: 2,
-        batchSize: downloads.length,
-        keyCount: downloads.length,
-        savedCount: 0,
-        failedCount: 0,
-        missingCount: 0,
-        ms: zipMs,
-        method: 'zip-build',
-      });
-    }
-    const filename = target?.filename || `images_${randomHex()}.zip`;
     if (typeof options.onProgress === 'function') {
       options.onProgress({ phase: 'save-start', preparedCount: downloads.length, totalCount: imageObjs.length });
     }
@@ -390,32 +359,32 @@
     let saveStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') saveStart = performance.now();
-    await saveExportData(zip.blob, target, filename, 'application/zip');
+    await saveExportData(data, target, filename, mime);
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+      const bytesMB = Math.round(byteLength / 1024 / 1024 * 100) / 100;
       ExportDebug.recordSaveBatch?.({
-        batchIndex: 2,
-        batchCount: 2,
+        batchIndex: single ? 1 : 2,
+        batchCount: single ? 1 : 2,
         batchSize: 1,
         keyCount: downloads.length,
         savedCount: downloads.length,
         failedCount: 0,
         missingCount: 0,
-        bytesMB: Math.round(zip.byteLength / 1024 / 1024 * 100) / 100,
+        bytesMB,
         ms: performance.now() - saveStart,
-        method: target?.handle ? 'zip-file-picker' : 'zip-download',
+        method: single || target?.handle ? method : 'zip-download',
       });
-      ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB: Math.round(zip.byteLength / 1024 / 1024 * 100) / 100 });
+      ExportDebug.recordSaveDone?.({ savedCount: downloads.length, failedCount: 0, missingCount: skippedCount, bytesMB });
     }
     if (typeof options.onProgress === 'function') {
       options.onProgress({ phase: 'save-progress', preparedCount: downloads.length, finishedCount: downloads.length, totalCount: imageObjs.length });
     }
-    return {
-      downloadedCount: downloads.length,
-      skippedCount,
-      method: target?.handle ? 'zip-file-picker' : 'zip',
-      filename,
-      bytes: zip.byteLength,
-    };
+    const result = { downloadedCount: downloads.length, skippedCount, method };
+    if (!single) {
+      result.filename = filename;
+      result.bytes = byteLength;
+    }
+    return result;
   }
 
   async function pickWebExportTarget(imageObjs, options = {}) {
@@ -634,7 +603,7 @@
       }
       return true;
     }
-    downloadBlob(data instanceof Blob && data.type === type ? data : new Blob([data], { type }), fallbackName);
+    root.BoardfishRuntime.downloadBlob(data instanceof Blob && data.type === type ? data : new Blob([data], { type }), fallbackName);
     return false;
   }
 
@@ -645,18 +614,6 @@
   function withImageExtension(name, ext) {
     const cleanExt = String(ext || 'png').replace(/^\./, '').toLowerCase() || 'png';
     return String(name || `image.${cleanExt}`).replace(/\.(png|jpe?g|webp|gif)$/i, '') + `.${cleanExt}`;
-  }
-
-  function downloadBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 
   function selectedImageObjects() {

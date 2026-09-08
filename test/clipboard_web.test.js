@@ -513,7 +513,7 @@ test('clipboard image base64 fallback preserves bytes across chunk boundaries', 
   }
 });
 
-test('clipboard IO writes the same rich image representations on every reported platform', async () => {
+test('clipboard IO preserves rich representations and supports direct-only clipboard items', async () => {
   const previous = {
     BoardfishWebLimits: globalThis.BoardfishWebLimits,
     ClipboardItem: globalThis.ClipboardItem,
@@ -534,8 +534,6 @@ test('clipboard IO writes the same rich image representations on every reported 
     Object.defineProperty(globalThis, 'navigator', {
       configurable: true,
       value: {
-        userAgent: '',
-        userAgentData: { platform: '' },
         clipboard: {
           async write(items) {
             writes.push(items[0]);
@@ -588,36 +586,13 @@ test('clipboard IO writes the same rich image representations on every reported 
     assert.match(imageHtml, /boardfish-clipboard:bf-image/);
     assert.match(imageHtml, /<img src="data:image\/png;base64,AQID" alt="">/);
 
-    globalThis.navigator.userAgentData.platform = 'Android';
-    let resolveAndroidImageBlob;
-    const pendingAndroidImageBlob = new Promise((resolve) => { resolveAndroidImageBlob = resolve; });
-    const androidCopyPromise = ClipboardIO.copyImageBlobToClipboard(
-      pendingAndroidImageBlob,
-      'bf-android-image',
-    );
+    const directBlob = new Blob([new Uint8Array([7, 8, 9])], { type: 'image/png' });
+    const directResult = await ClipboardIO.copyImageBlobToClipboard(directBlob, 'bf-direct-image');
     assert.equal(writes.length, 3);
     assert.deepEqual(Object.keys(writes[2].parts), ['image/png', 'text/html']);
-    assert.equal(typeof writes[2].parts['image/png']?.then, 'function');
-    assert.equal(typeof writes[2].parts['text/html']?.then, 'function');
-    resolveAndroidImageBlob(new Blob([new Uint8Array([4, 5, 6])], { type: 'image/png' }));
-    const androidResult = await androidCopyPromise;
-    assert.equal(androidResult.boardfishTokenWritten, true);
-    assert.match(await (await writes[2].parts['text/html']).text(), /boardfish-clipboard:bf-android-image/);
-
-    globalThis.navigator.userAgentData.platform = '';
-    globalThis.navigator.userAgent = 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36';
-    const androidUaBlob = new Blob([new Uint8Array([7, 8, 9])], { type: 'image/png' });
-    const androidUaResult = await ClipboardIO.copyImageBlobToClipboard(
-      androidUaBlob,
-      'bf-android-ua-image',
-    );
-    assert.equal(writes.length, 4);
-    assert.deepEqual(Object.keys(writes[3].parts), ['image/png', 'text/html']);
-    assert.equal(writes[3].parts['image/png'], androidUaBlob);
-    assert.equal(androidUaResult.boardfishTokenWritten, true);
-    assert.match(await (await writes[3].parts['text/html']).text(), /boardfish-clipboard:bf-android-ua-image/);
-
-    globalThis.navigator.userAgent = '';
+    assert.equal(writes[2].parts['image/png'], directBlob);
+    assert.equal(directResult.boardfishTokenWritten, true);
+    assert.match(await (await writes[2].parts['text/html']).text(), /boardfish-clipboard:bf-direct-image/);
     class DirectBlobOnlyClipboardItem {
       constructor(parts) {
         if (Object.values(parts).some((part) => typeof part?.then === 'function')) {
@@ -627,12 +602,12 @@ test('clipboard IO writes the same rich image representations on every reported 
       }
     }
     globalThis.ClipboardItem = DirectBlobOnlyClipboardItem;
-    const legacyBlob = new Blob([new Uint8Array([10, 11, 12])], { type: 'image/png' });
-    const legacyResult = await ClipboardIO.copyImageBlobToClipboard(legacyBlob, 'bf-legacy-image');
-    assert.equal(writes.length, 5);
-    assert.deepEqual(Object.keys(writes[4].parts), ['image/png']);
-    assert.equal(writes[4].parts['image/png'], legacyBlob);
-    assert.equal(legacyResult.boardfishTokenWritten, false);
+    const fallbackBlob = new Blob([new Uint8Array([10, 11, 12])], { type: 'image/png' });
+    const fallbackResult = await ClipboardIO.copyImageBlobToClipboard(fallbackBlob, 'bf-fallback-image');
+    assert.equal(writes.length, 4);
+    assert.deepEqual(Object.keys(writes[3].parts), ['image/png']);
+    assert.equal(writes[3].parts['image/png'], fallbackBlob);
+    assert.equal(fallbackResult.boardfishTokenWritten, false);
 
     const textResult = await ClipboardIO.copyTextToClipboard(
       'A&<\r\nB\rC\nD',
@@ -640,10 +615,10 @@ test('clipboard IO writes the same rich image representations on every reported 
       { boardfishToken: 'bf-rich-text' },
     );
     assert.equal(textResult.boardfishTokenWritten, true);
-    assert.equal(writes.length, 6);
-    assert.equal(await writes[5].parts['text/plain'].text(), 'A&<\r\nB\rC\nD');
+    assert.equal(writes.length, 5);
+    assert.equal(await writes[4].parts['text/plain'].text(), 'A&<\r\nB\rC\nD');
     assert.equal(
-      await writes[5].parts['text/html'].text(),
+      await writes[4].parts['text/html'].text(),
       '<!--boardfish-clipboard:bf-rich-text--><div>A&amp;&lt;<br>B<br>C<br>D</div>',
     );
   } finally {

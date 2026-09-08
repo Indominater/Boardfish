@@ -594,15 +594,15 @@ function startTextSelectionDrag(e, obj, wp) {
   );
   const clickIdx = clickHit.index;
   applyTextEditCaretHit(obj, el, clickHit);
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    focusTextEditProxyNow(el, obj, 'selection-drag-focus', {
+  focusTextEditProxyNow(el
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , obj, 'selection-drag-focus', {
       phase: 'selection-drag',
       clientX: e?.clientX ?? '',
       clientY: e?.clientY ?? '',
-    });
-  } else {
-    focusTextEditProxyNow(el);
-  }
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  );
   TextSelDebug._logSelection('mouse-down', el, obj);
   _caretVisible = true;
   scheduleRender(true, false);

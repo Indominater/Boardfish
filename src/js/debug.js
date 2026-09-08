@@ -3021,11 +3021,7 @@ var ViewportDebug = (() => {
   }
 
   function dump() {
-    const flat = events.map(({ meta, ...rest }) => {
-      if (!meta) return rest;
-      const { rust, ...other } = meta;
-      return rust && typeof rust === 'object' ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) } : { ...rest, ...other };
-    });
+    const flat = events.map(flattenDebugEvent);
     console.table(flat);
     return events.slice();
   }

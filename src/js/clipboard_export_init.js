@@ -810,45 +810,53 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
       ClipDebug.step(dbg, 'paste:event-text-read-done', clipboardTextStats(eventText));
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    if (/\S/.test(eventText)) {
-      const text = textForExternalTextObjectPaste(eventText);
+    const pastePlainText = (text, path) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       const objectCountBefore = collectClipboardDiagnostics ? objects.length : 0;
       const addStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
-      if (collectClipboardDiagnostics) {
-        ClipDebug.step(dbg, 'paste:plain-text-add-start', {
-          path: 'event-text',
-          objectCountBefore,
-          ...clipboardTextStats(text),
-        });
-      }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      addText(wx, wy, text,
+      if (text) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        dbg ? { anchor: 'center', contentPrepared: true, debug: dbg } :
+        if (collectClipboardDiagnostics) {
+          ClipDebug.step(dbg, 'paste:plain-text-add-start', {
+            path, objectCountBefore, ...clipboardTextStats(text),
+          });
+        }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        { anchor: 'center', contentPrepared: true }
-      );
+        addText(wx, wy, text,
+          /* BOARDFISH_DEV_DIAGNOSTICS_START */
+          dbg ? { anchor: 'center', contentPrepared: true, debug: dbg } :
+          /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          { anchor: 'center', contentPrepared: true }
+        );
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        if (collectClipboardDiagnostics) {
+          ClipDebug.step(dbg, 'paste:plain-text-add-done', {
+            path,
+            ms: clipboardElapsedMs(addStartedAt),
+            objectCountBefore,
+            objectCountAfter: objects.length,
+            objectDelta: objects.length - objectCountBefore,
+            ...clipboardTextStats(text),
+          });
+        }
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectClipboardDiagnostics) {
-        ClipDebug.step(dbg, 'paste:plain-text-add-done', {
-          path: 'event-text',
-          ms: clipboardElapsedMs(addStartedAt),
-          objectCountBefore,
-          objectCountAfter: objects.length,
-          objectDelta: objects.length - objectCountBefore,
-          ...clipboardTextStats(text),
-        });
         ClipDebug.end(dbg, {
-          path: 'event-text',
+          path,
           textLen: text.length,
-          textObjectCount: 1,
+          textObjectCount: text ? 1 : 0,
           textCharCount: text.length,
           largestTextChars: text.length,
           objectCountAfter: objects.length,
         });
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
+    };
+    if (/\S/.test(eventText)) {
+      pastePlainText(textForExternalTextObjectPaste(eventText), 'event-text');
       return;
     }
     const releaseInputShield = acquireInputShield();
@@ -892,50 +900,7 @@ async function pasteAtPos(wx, wy, clipboardData = null) {
         });
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      const text = textForExternalTextObjectPaste(browserText);
-      if (text) {
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const objectCountBefore = collectClipboardDiagnostics ? objects.length : 0;
-        const addStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
-        if (collectClipboardDiagnostics) {
-          ClipDebug.step(dbg, 'paste:plain-text-add-start', {
-            path: 'web-text',
-            objectCountBefore,
-            ...clipboardTextStats(text),
-          });
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        addText(wx, wy, text,
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          dbg ? { anchor: 'center', contentPrepared: true, debug: dbg } :
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          { anchor: 'center', contentPrepared: true }
-        );
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectClipboardDiagnostics) {
-          ClipDebug.step(dbg, 'paste:plain-text-add-done', {
-            path: 'web-text',
-            ms: clipboardElapsedMs(addStartedAt),
-            objectCountBefore,
-            objectCountAfter: objects.length,
-            objectDelta: objects.length - objectCountBefore,
-            ...clipboardTextStats(text),
-          });
-        }
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectClipboardDiagnostics) {
-        ClipDebug.end(dbg, {
-          path: 'web-text',
-          textLen: text?.length || 0,
-          textObjectCount: text ? 1 : 0,
-          textCharCount: text?.length || 0,
-          largestTextChars: text?.length || 0,
-          objectCountAfter: objects.length,
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      pastePlainText(textForExternalTextObjectPaste(browserText), 'web-text');
     } catch (err) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       if (collectClipboardDiagnostics) {

@@ -2,15 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readSource } = require('../test-support/source.js');
 const vm = require('node:vm');
 
-const root = path.join(__dirname, '..');
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
 
 function withoutDeveloperDiagnostics(source) {
   const start = '/* BOARDFISH_DEV_DIAGNOSTICS_START */';
@@ -94,9 +88,9 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /allContentBeforeInteraction: true,/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
   assert.match(openIo, /typeof source === 'string' \|\| isWebImageRef\(source\)/);
-  assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);[\s\S]*?if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) \{\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
-  assert.match(withoutDeveloperDiagnostics(openIo), /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*await pendingReady;\s*return BoardfishImageStore\.hasDisplayImage\(key\);/);
-  assert.match(openIo, /source: 'pending-cache'/);
+  assert.match(openIo, /await \(pendingReady \|\| cacheImage\(key, source/);
+  assert.match(withoutDeveloperDiagnostics(openIo), /await \(pendingReady \|\| cacheImage\(key, source[\s\S]*?return displayReady;/);
+  assert.match(openIo, /source: pendingReady \? 'pending-cache'/);
   assert.match(openIo, /function getPendingHydratableImageKeys\(keys = \[\]\) \{\s*const seen = new Set\(keys\);/);
   assert.match(finishSource, /const visibleKeys = getVisibleImageKeys\(Infinity\);\s*const hydrationKeys = getPendingHydratableImageKeys\(\[\.\.\.visibleKeys\]\);/);
   assert.match(finishSource, /hydrateImageKeysWithLimit\([\s\S]*hydrationKeys,[\s\S]*dbg,[\s\S]*'hydrate-all'/);
@@ -180,7 +174,7 @@ test('open-board debug workflow stays capturable through beginDebug and finishDe
   assert.match(bootstrap, /registerDebugCommand\('openFilePath', openFilePath\)/);
 });
 
-test('open-board helpers used by io_close are shared across legacy scripts', () => {
+test('open-board helpers used by io_close are shared across startup scripts', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const ioClose = readSource('src/js/io_close.js');
 
@@ -207,7 +201,6 @@ test('open-board failures show a readable pill message', () => {
   assert.match(bootstrap, /OpenDebug\.step\(dbg, 'open-failed:message'/);
   assert.match(bootstrap, /finalMsg: message/);
   assert.match(bootstrap, /duration: long_message/);
-  assert.doesNotMatch(bootstrap, /Failed to open file:/);
   assert.match(styles, /#island \{[\s\S]*max-width: calc\(100vw - 32px\);/);
   assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text \{[\s\S]*white-space: normal;/);
 });

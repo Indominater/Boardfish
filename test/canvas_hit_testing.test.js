@@ -2,15 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readSource } = require('../test-support/source.js');
 const vm = require('node:vm');
 
-const root = path.join(__dirname, '..');
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
 
 function cssBlocksForPrelude(source, prelude) {
   const blocks = [];
