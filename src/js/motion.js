@@ -192,7 +192,7 @@
       return;
     }
     const handoff = handoffAt(existing, startedAt);
-    const motion = { startedAt, groupSide, groupSize, cohortKey };
+    const motion = { startedAt, groupSide, groupSize, cohortKey, type: obj.type };
     if (handoff) motion.handoff = handoff;
     objectMotions.set(obj.id, motion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -294,7 +294,11 @@
   const getLastDrawnObjectMotion = (value) => lastDrawnObjectMotions.get(typeof value === 'string' ? value : value?.id) || null;
   const hasLastDrawnObjectMotions = () => lastDrawnObjectMotions.size > 0;
 
-  const hasObjectMotionsForDraw = () => objectMotions.size > 0;
+  const hasObjectMotionsForDraw = (type) => {
+    if (!type) return objectMotions.size > 0;
+    for (const motion of objectMotions.values()) if (motion.type === type) return true;
+    return false;
+  };
 
   const copySelection = () => noteObjects(root.selectedIds);
 

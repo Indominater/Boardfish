@@ -542,14 +542,14 @@
       , viewportRect = deps.currentViewportWorldRect()
       , skipIds
       , skipId = null
-      , onlyText = false
+      , objectType = null
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
       const objectMotionForDraw =
         deps.hasObjectMotionsForDraw?.() === false ? null : deps.objectMotionForDraw;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         for (const obj of deps.objects()) {
-          if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
+          if ((objectType && obj.type !== objectType) || obj.id === skipId || skipIds?.has(obj.id)) continue;
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
           if (!motion && !deps.objectIntersectsRect(obj, viewportRect)) continue;
           const objectViewportRect = motion
@@ -568,7 +568,7 @@
       let drawnText = 0;
       for (const obj of deps.objects()) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
+        if ((objectType && obj.type !== objectType) || obj.id === skipId || skipIds?.has(obj.id)) continue;
         const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
           countCulledObject(obj, counters);

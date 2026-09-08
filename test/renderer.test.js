@@ -578,61 +578,29 @@ test('animated image cropping inverse-maps translation and non-uniform scale', (
   });
 });
 
-test('renderer can draw only text while drawing visible objects', () => {
-  const BoardfishRenderer = loadRenderer();
-  const drawImageCalls = [];
-  const drawnText = [];
-  const source = {
-    width: 20,
-    height: 20,
-  };
-  const context = {
-    drawImage(...args) {
-      drawImageCalls.push(args);
-    },
-    fillText(text) {
-      drawnText.push(text);
-    },
-    setTransform() {},
-    translate() {},
-    rotate() {},
-    scale() {},
-    save() {},
-    restore() {},
-  };
-  const image = { id: 'img-1', type: 'image', x: 0, y: 0, w: 20, h: 20, data: { imgKey: 'img-1' } };
-  const text = { id: 'text-1', type: 'text', x: 0, y: 0, w: 20, h: 20 };
-  const renderer = BoardfishRenderer.createBoardRenderer({
-    canvasTextColor: () => '#fff',
-    currentViewportWorldRect: () => ({ x1: 0, y1: 0, x2: 30, y2: 30 }),
-    dpr: () => 1,
-    drawTextLineRange(_context, line) {
-      drawnText.push(line.text);
-    },
-    getTextLayout: () => [{ text: 'drawn', y: 0 }],
-    imageBitmapCache: () => ({ 'img-1': source }),
-    imageStore: () => ({ 'img-1': 'source' }),
-    lineHeight: 24,
-    objectIntersectsRect: () => true,
-    objects: () => [image, text],
-    panX: () => 0,
-    panY: () => 0,
-    selectImageSourceForDraw: () => ({ source, scale: 1, targetScale: 1 }),
-    setCanvasImageQuality: () => {},
-    textBaselineYOffset: () => 0,
-    textPad: 4,
-    viewportCullingEnabled: () => true,
-    zoom: () => 1,
-  });
-
-  const result = renderer.drawVisibleObjects(
-    context, BoardfishRenderer.createDrawCounters(), undefined, undefined, undefined, true,
-  );
-
-  assert.equal(result.drawnImages, 0);
-  assert.equal(result.drawnText, 1);
-  assert.deepEqual(drawImageCalls, []);
-  assert.deepEqual(drawnText, ['drawn']);
+test('renderer filters visible objects by type', () => {
+  for (const production of [false, true]) {
+    const calls = [], source = { width: 20, height: 20 };
+    const context = { drawImage() { calls.push('image'); } };
+    const objects = ['image', 'text'].map(type => ({
+      id: type, type, x: 0, y: 0, w: 20, h: 20, data: { imgKey: type },
+    }));
+    const renderer = loadRenderer(production ? { BOARDFISH_PRODUCTION: true } : {}).createBoardRenderer({
+      currentViewportWorldRect: () => ({ x1: -10, y1: -10, x2: 30, y2: 30 }),
+      dpr: () => 1, zoom: () => 1, viewportCullingEnabled: () => true,
+      objects: () => objects, objectIntersectsRect: () => true,
+      imageBitmapCache: () => ({ image: source }),
+      selectImageSourceForDraw: () => production ? source : { source },
+      getTextLayout: () => [{ text: 'drawn' }],
+      drawTextLineRange() { calls.push('text'); },
+    });
+    for (const type of ['image', 'text', null]) {
+      calls.length = 0;
+      if (production) renderer.drawVisibleObjects(context, undefined, undefined, null, type);
+      else renderer.drawVisibleObjects(context, null, undefined, undefined, null, type);
+      assert.deepEqual(calls, type ? [type] : ['image', 'text']);
+    }
+  }
 });
 
 test('renderer can skip arbitrary object ids while drawing visible objects', () => {
@@ -1194,6 +1162,67 @@ test('renderer applies motion scaling around the requested fractional object ori
     ['transform', 1.05, 0, 0, 1 / 1.05, originX * (1 - 1.05), originY * (1 - 1 / 1.05)],
   ]);
   assert.deepEqual(calls.at(-1), ['restore']);
+});
+
+test('editing preserves image jiggles and layer order while caching static images', () => {
+  for (const production of [false, true]) for (const type of ['image', 'text']) {
+    const overrides = production ? { BOARDFISH_PRODUCTION: true } : {};
+    const { context, setTime } = loadMotion(overrides);
+    const objects = ['text', 'image', 'editor'].map(id => ({
+      id, type: id === 'image' ? 'image' : 'text', x: 0, y: 0, w: 100, h: 100, data: { imgKey: id },
+    }));
+    const bitmap = { width: 100, height: 100 }, offscreen = { width: 800, height: 600 };
+    const calls = [];
+    let cacheBuilds = 0;
+    const canvas = {
+      save() {}, restore() {}, transform() {}, translate() {}, resetTransform() {}, setTransform() {},
+      drawImage(source) { calls.push(source === offscreen ? 'cached-image' : 'image'); },
+    };
+    Object.assign(context, {
+      objects, editingId: null, zoom: 1, _boardOpening: false, window: { devicePixelRatio: 1 },
+      ctx: canvas, _offscreen: offscreen, _offCtx: { ...canvas, drawImage() { cacheBuilds++; } },
+      _offscreenDirty: true, boardCanvas: { width: 800, height: 600 }, viewportCullingEnabled: true,
+      ViewportDebug: { isEnabled: () => false, start() {}, end() {} },
+      OpenDebug: { isInitialRenderDebugActive: () => false },
+      viewportWorldRect: () => ({ x1: -1000, y1: -1000, x2: 1000, y2: 1000 }),
+      objectIntersectsRect: () => true, syncBoardCanvasBackingStore() {},
+      fillBoardBackground() {}, drawTextSelectionJelloOverlays() {},
+      drawEditingTextOverlay() { calls.push('editor'); },
+    });
+    Object.assign(context, loadRenderer(overrides).createBoardRenderer({
+      objects: () => objects, zoom: () => 1, dpr: () => 1, viewportCullingEnabled: () => true,
+      panX: () => 0, panY: () => 0, canvasTextColor: () => '#111',
+      objectIntersectsRect: context.objectIntersectsRect,
+      hasObjectMotionsForDraw: context.BoardfishMotion.hasObjectMotionsForDraw,
+      objectMotionForDraw: context.BoardfishMotion.objectMotionForDraw,
+      imageBitmapCache: () => ({ image: bitmap }),
+      selectImageSourceForDraw: () => production ? bitmap : { source: bitmap },
+      getTextLayoutForViewport: () => [{ text: 'overlapping text' }],
+      drawTextLineRange(_ctx, _line, obj) { calls.push(obj.id); },
+    }));
+    let source = fs.readFileSync(path.join(__dirname, '..', 'src/js/viewport.js'), 'utf8')
+      .match(/function (?:_rebuildOffscreen|drawBoard)\([\s\S]*?\n\}/g).join('\n');
+    if (production) source = source.replace(/\/\* BOARDFISH_DEV_DIAGNOSTICS_START \*\/[\s\S]*?\/\* BOARDFISH_DEV_DIAGNOSTICS_END \*\//g, '');
+    vm.runInContext(source, context);
+    const draw = (time, bypass = false) => { calls.length = 0; setTime(time); context.drawBoard(bypass); };
+    context.BoardfishMotion.applyCopyFeedback({ objects: [objects.find(obj => obj.id === type)] });
+    draw(100);
+    assert.deepEqual(calls, ['text', 'image', 'editor']);
+    context.editingId = 'editor';
+    for (const time of [116, 132, 499]) {
+      const previous = context.BoardfishMotion.getLastDrawnObjectMotion('image');
+      draw(time);
+      assert.deepEqual(calls, [type === 'image' ? 'image' : 'cached-image', 'text', 'editor']);
+      if (type === 'image') assert.notEqual(context.BoardfishMotion.getLastDrawnObjectMotion('image')?.translateY, previous?.translateY);
+    }
+    for (const time of [500, 516]) {
+      draw(time);
+      assert.deepEqual(calls, ['cached-image', 'text', 'editor']);
+      assert.equal(cacheBuilds, 1);
+    }
+    draw(532, true);
+    assert.deepEqual(calls, ['image', 'text', 'editor']);
+  }
 });
 
 test('copy feedback stays inert for an empty payload and animates copied objects', () => {

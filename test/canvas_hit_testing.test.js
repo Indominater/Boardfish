@@ -700,42 +700,6 @@ test('entering text edit invalidates the offscreen cache before proxy setup', ()
   assert.match(enterSource, /scheduleRender\(true, true\)/, 'enterEdit must schedule its own render');
 });
 
-test('text edit mode always keeps text direct while caching static non-text layers', () => {
-  const viewportSource = readSource('src/js/viewport.js');
-  const rebuildStart = viewportSource.indexOf('function _rebuildOffscreen');
-  const rebuildEnd = viewportSource.indexOf('// ─── History delta tracking', rebuildStart);
-  assert.notEqual(rebuildStart, -1);
-  assert.notEqual(rebuildEnd, -1);
-  const rebuildSource = viewportSource.slice(rebuildStart, rebuildEnd);
-
-  assert.match(rebuildSource, /setWorldCanvasTransform\(_offCtx, dpr\);/);
-  assert.match(rebuildSource, /if \(obj\.type === 'text'\) continue;/);
-  assert.doesNotMatch(rebuildSource, /editingId|cacheKind|_offscreenCacheKind/);
-  assert.doesNotMatch(viewportSource, /shouldUseEditOffscreenCache|editOffscreenCacheKind|setEditOffscreenCacheKind/);
-
-  const drawStart = viewportSource.indexOf('function drawBoard');
-  const drawEnd = viewportSource.indexOf('function applyTransform', drawStart);
-  assert.notEqual(drawStart, -1);
-  assert.notEqual(drawEnd, -1);
-  const drawSource = viewportSource.slice(drawStart, drawEnd);
-
-  assert.match(drawSource, /const textSelectionMotions = BoardfishMotion\.beginDraw\(\);/);
-  assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
-  assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
-  assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
-  assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, editingId, true\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, editingId\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions\);/);
-  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, zoom, textSelectionMotions\);/);
-
-  const transformStart = viewportSource.indexOf('function applyTransform');
-  const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
-  const transformSource = viewportSource.slice(transformStart, transformEnd);
-  assert.match(transformSource, /drawBoard\(true\);/);
-  assert.doesNotMatch(transformSource, /_rebuildOffscreen\(/);
-});
-
 test('editing overlay keeps copied text selection highlighted while its jiggle is active', () => {
   const viewportSource = readSource('src/js/viewport.js');
   const start = viewportSource.indexOf('function drawEditingTextOverlay');
