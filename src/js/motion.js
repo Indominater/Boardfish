@@ -14,6 +14,7 @@
   const NORMALIZE_Y = 1.3800858435981482;
   const NORMALIZE_SHAPE = 1.6076214313650838;
   let motionRenderPending = false;
+  let drawTime = 0;
   let reducedMotionQuery;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   let motionRenderRequestedAt = 0;
@@ -249,11 +250,7 @@
 
   const textSelectionMotionForDraw = (id, motion, zoom = 1) => {
     if (!motion) return null;
-    const elapsed = now() - motion.startedAt;
-    if (elapsed >= DURATION_MS) {
-      textSelectionMotions.delete(id);
-      return null;
-    }
+    const elapsed = drawTime - motion.startedAt;
     const transform = transformAtElapsed(motion, elapsed, zoom);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-progress', { id, objectType: 'text-selection', t: clamp01(elapsed / DURATION_MS), ...transform });
@@ -263,12 +260,18 @@
 
   const cancelTextSelectionMotion = (id) => textSelectionMotions.delete(id);
 
-  const textSelectionJelloSpecsForDraw = () => {
-    if (!textSelectionMotions.size || prefersReducedMotion()) return null;
-    const cutoff = now();
-    for (const [id, motion] of textSelectionMotions) {
-      if (cutoff - motion.startedAt >= DURATION_MS) textSelectionMotions.delete(id);
+  const beginDraw = () => {
+    drawTime = now();
+    const reducedMotion = (objectMotions.size || textSelectionMotions.size) && prefersReducedMotion();
+    for (const motions of [objectMotions, textSelectionMotions]) {
+      for (const [id, motion] of motions) {
+        if (reducedMotion || drawTime - motion.startedAt >= DURATION_MS) {
+          motions.delete(id);
+          if (motions === objectMotions) lastDrawnObjectMotions.delete(id);
+        }
+      }
     }
+    if (!objectMotions.size) lastDrawnObjectMotions.clear();
     return textSelectionMotions.size ? textSelectionMotions : null;
   };
 
@@ -279,12 +282,7 @@
       lastDrawnObjectMotions.delete(obj.id);
       return null;
     }
-    const elapsed = now() - motion.startedAt;
-    if (elapsed >= DURATION_MS) {
-      objectMotions.delete(obj.id);
-      lastDrawnObjectMotions.delete(obj.id);
-      return null;
-    }
+    const elapsed = drawTime - motion.startedAt;
     const transform = transformAtElapsed(motion, elapsed, zoom);
     lastDrawnObjectMotions.set(obj.id, transform);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -296,24 +294,7 @@
   const getLastDrawnObjectMotion = (value) => lastDrawnObjectMotions.get(typeof value === 'string' ? value : value?.id) || null;
   const hasLastDrawnObjectMotions = () => lastDrawnObjectMotions.size > 0;
 
-  const hasObjectMotionsForDraw = () => {
-    if (!objectMotions.size) {
-      lastDrawnObjectMotions.clear();
-      return false;
-    }
-    if (prefersReducedMotion()) {
-      objectMotions.clear(); lastDrawnObjectMotions.clear();
-      return false;
-    }
-    const cutoff = now();
-    for (const [id, motion] of objectMotions) {
-      if (cutoff - motion.startedAt >= DURATION_MS) {
-        objectMotions.delete(id);
-        lastDrawnObjectMotions.delete(id);
-      }
-    }
-    return objectMotions.size > 0;
-  };
+  const hasObjectMotionsForDraw = () => objectMotions.size > 0;
 
   const copySelection = () => noteObjects(root.selectedIds);
 
@@ -338,7 +319,7 @@
     hasLastDrawnObjectMotions,
     hasObjectMotionsForDraw,
     objectMotionForDraw,
-    textSelectionJelloSpecsForDraw,
+    beginDraw,
     textSelectionMotionForDraw,
   });
 })();

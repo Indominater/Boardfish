@@ -438,8 +438,7 @@ const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom =
     const motion = BoardfishMotion.textSelectionMotionForDraw(id, spec, viewZoom);
     const selection = motion ? collectTextSelectionRuns(obj, layout, spec.start, spec.end) : null;
     if (!selection) {
-      // The normal pass already skipped this textbox. The animation may expire
-      // during this frame, so paint its resting text before the final frame ends.
+      // The normal pass skipped this textbox; an empty selection still needs its text.
       drawTextLayoutStatic(context, obj, layout);
       continue;
     }
@@ -628,7 +627,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const dpr = window.devicePixelRatio || 1;
   const viewportRect = viewportWorldRect(0);
-  const textSelectionMotions = BoardfishMotion.textSelectionJelloSpecsForDraw();
+  const textSelectionMotions = BoardfishMotion.beginDraw();
 
   if (editingId) {
     const useEditOffscreenCache = !bypassEditOffscreenCache;

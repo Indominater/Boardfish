@@ -52,8 +52,9 @@ function loadMotion(overrides = {}) {
     context,
     renderCalls,
     timers,
-    setTime(ms) {
+    setTime(ms, beginFrame = true) {
       currentTime = ms;
+      if (beginFrame) context.BoardfishMotion.beginDraw();
     },
   };
 }
@@ -1276,12 +1277,13 @@ test('motion cleanup preserves the last rendered transform until the next object
   const lastRendered = motion.objectMotionForDraw(image, 1);
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
 
-  setTime(700);
+  setTime(700, false);
   motion.afterViewportRenderFrame({ source: 'late-board-frame' });
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
   context._boardOpening = false; motion.afterViewportRenderFrame({ source: 'post-open-frame' });
   assert.equal(renderCalls.length, 2);
 
+  motion.beginDraw();
   assert.equal(motion.hasObjectMotionsForDraw(), false);
   assert.equal(motion.getLastDrawnObjectMotion(image), null);
 });
@@ -1296,10 +1298,11 @@ test('starting a new motion does not discard the transform still on screen', () 
   setTime(100);
   const lastRendered = motion.objectMotionForDraw(image, 1);
 
-  setTime(600);
+  setTime(600, false);
   assert.equal(motion.applyCopyFeedback({ objects: [image] }), true);
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), lastRendered);
 
+  motion.beginDraw();
   const nextRendered = motion.objectMotionForDraw(image, 1);
   assert.ok(nextRendered);
   assert.strictEqual(motion.getLastDrawnObjectMotion(image), nextRendered);
@@ -1314,7 +1317,7 @@ test('copy text selection jiggle uses fixed screen-distance translation independ
     textSelection: { id: 'text-1', start: 2, end: 9, hasSelection: true },
   }), true);
   setTime(100);
-  const shortSpec = motion.textSelectionJelloSpecsForDraw().get('text-1');
+  const shortSpec = motion.beginDraw().get('text-1');
   const shortAtZoom1 = motion.textSelectionMotionForDraw('text-1', shortSpec, 1);
   const shortAtZoom2 = motion.textSelectionMotionForDraw('text-1', shortSpec, 2);
   setTime(420);
@@ -1325,7 +1328,7 @@ test('copy text selection jiggle uses fixed screen-distance translation independ
     textSelection: { id: 'text-1', start: 2, end: 40, hasSelection: true },
   }), true);
   setTime(1100);
-  const longAtZoom1 = motion.textSelectionMotionForDraw('text-1', motion.textSelectionJelloSpecsForDraw().get('text-1'), 1);
+  const longAtZoom1 = motion.textSelectionMotionForDraw('text-1', motion.beginDraw().get('text-1'), 1);
 
   assert.notEqual(shortAtZoom1.translateX, 0);
   assert.notEqual(shortAtZoom1.translateY, 0);
@@ -1375,10 +1378,10 @@ test('grouped copy jiggle is geometry-ordered with shared vertical and mirrored 
     setTime(0);
     assert.equal(motion.applyCopyFeedback({ objects }), true);
     setTime(100);
-    return new Map(objects.map((obj) => [
-      obj.id,
-      plain(motion.objectMotionForDraw(obj, 1)),
-    ]));
+    return new Map(objects.map((obj, index) => {
+      setTime(100 + index * 8, false);
+      return [obj.id, plain(motion.objectMotionForDraw(obj, 1))];
+    }));
   };
 
   const forward = capture([left, right]);
@@ -1390,11 +1393,7 @@ test('grouped copy jiggle is geometry-ordered with shared vertical and mirrored 
   assert.deepEqual(forward.get(right.id), reversed.get(right.id));
   assert.notEqual(forwardLeft.translateX, 0);
   assertClose(forwardLeft.translateX, -forwardRight.translateX);
-  assert.ok(
-    Math.abs(forwardLeft.translateY - forwardRight.translateY) <=
-      Math.max(Math.abs(forwardLeft.translateY), Math.abs(forwardRight.translateY)) * 0.04,
-    'paired vertical motion diverged by more than the intended subtle asymmetry',
-  );
+  assert.equal(forwardLeft.translateY, forwardRight.translateY);
   assert.ok(Math.abs(forwardLeft.translateX) < Math.abs(forwardLeft.translateY));
 });
 
@@ -1639,7 +1638,7 @@ test('text selection copy feedback uses fixed translation and deformation', () =
   });
 
   setTime(100);
-  const motions = context.BoardfishMotion.textSelectionJelloSpecsForDraw();
+  const motions = context.BoardfishMotion.beginDraw();
   const motion = context.BoardfishMotion.textSelectionMotionForDraw('text-1', motions.get('text-1'));
 
   assert.notEqual(motion.translateX, 0);
@@ -1655,11 +1654,11 @@ test('text selection jello exposes active full-range draw specs', () => {
     textSelection: { id: 'text-1', start: 0, end: 17, hasSelection: true },
   });
 
-  const motions = context.BoardfishMotion.textSelectionJelloSpecsForDraw();
+  const motions = context.BoardfishMotion.beginDraw();
   assert.deepEqual(plain(motions.get('text-1')), { startedAt: 0, start: 0, end: 17, groupSide: 1, groupSize: 1 });
 
   setTime(500);
-  assert.equal(context.BoardfishMotion.textSelectionJelloSpecsForDraw(), null);
+  assert.equal(context.BoardfishMotion.beginDraw(), null);
 });
 
 test('text selection copy feedback can be cancelled before the selected text changes', () => {
@@ -1672,7 +1671,7 @@ test('text selection copy feedback can be cancelled before the selected text cha
   });
 
   assert.equal(context.BoardfishMotion.cancelTextSelectionMotion('text-1'), true);
-  const motions = context.BoardfishMotion.textSelectionJelloSpecsForDraw();
+  const motions = context.BoardfishMotion.beginDraw();
   assert.equal(context.BoardfishMotion.textSelectionMotionForDraw('text-1', motions.get('text-1')), null);
   assert.ok(context.BoardfishMotion.textSelectionMotionForDraw('text-2', motions.get('text-2')));
   assert.deepEqual([...motions.keys()], ['text-2']);
@@ -1711,9 +1710,11 @@ function loadCopyDeselectFrame({ emptySelection = false } = {}) {
     drawTextLineRange(_ctx, line, _obj, start = 0, end = line.text.length) {
       draws.push(line.text.slice(start, end));
     },
-    collectTextSelectionRuns: () => emptySelection ? null : { runs: [] },
+    collectTextSelectionRuns: (_obj, _layout, start, end) => emptySelection ? null : { runs: [], start, end },
     drawTextSelectionHighlight() {},
-    drawTextSelectionContentJello() {},
+    drawTextSelectionContentJello(_ctx, _obj, selection) {
+      draws.push(lines[0].text.slice(selection.start, selection.end));
+    },
   });
   const source = fs.readFileSync(path.join(__dirname, '..', 'src/js/viewport.js'), 'utf8');
   vm.runInContext(
@@ -1740,21 +1741,27 @@ function loadCopyDeselectFrame({ emptySelection = false } = {}) {
 }
 
 for (const range of [{ start: 0, end: 11 }, { start: 2, end: 6 }]) {
-  test(`copied text remains visible after deselection when animation expires mid-frame (${range.start}:${range.end})`, () => {
+  test(`copied text expires between complete draw frames after deselection (${range.start}:${range.end})`, () => {
     const frame = loadCopyDeselectFrame();
     const motion = frame.context.BoardfishMotion;
     motion.applyCopyFeedback({ textSelection: { id: frame.obj.id, ...range, hasSelection: true } });
     frame.setTime(499);
-    const specs = motion.textSelectionJelloSpecsForDraw();
+    const specs = motion.beginDraw();
     frame.drawNormal(specs);
     assert.deepEqual(frame.draws, [], 'normal pass reserves the textbox for the copy overlay');
     // Other board drawing takes the clock past the 500ms animation deadline.
-    frame.setTime(501);
+    frame.setTime(501, false);
+    assert.ok(motion.textSelectionMotionForDraw(frame.obj.id, specs.get(frame.obj.id)));
     frame.drawOverlay(specs);
-    assert.deepEqual(frame.draws, ['copied text'], 'the terminal frame must paint the whole textbox');
+    const text = frame.obj.data.content;
+    assert.deepEqual(frame.draws.splice(0), [text.slice(0, range.start), text.slice(range.end), text.slice(range.start, range.end)].filter(Boolean));
     const pendingRenders = frame.renderCalls.length;
     motion.afterViewportRenderFrame();
-    assert.equal(frame.renderCalls.length, pendingRenders, 'no later animation frame will repair missing pixels');
+    assert.equal(frame.renderCalls.length, pendingRenders + 1);
+    frame.setTime(501);
+    assert.equal(motion.beginDraw(), null);
+    frame.drawNormal(null);
+    assert.deepEqual(frame.draws, ['copied text']);
   });
 }
 
@@ -1762,7 +1769,7 @@ test('copy overlay still draws its textbox when the selected range has no visibl
   const frame = loadCopyDeselectFrame({ emptySelection: true });
   frame.context.BoardfishMotion.applyCopyFeedback({ textSelection: { id: frame.obj.id, start: 2, end: 6, hasSelection: true } });
   frame.setTime(100);
-  const specs = frame.context.BoardfishMotion.textSelectionJelloSpecsForDraw();
+  const specs = frame.context.BoardfishMotion.beginDraw();
   frame.drawNormal(specs);
   frame.drawOverlay(specs);
   assert.deepEqual(frame.draws, ['copied text']);
@@ -1772,6 +1779,6 @@ test('whole-textbox copy returns to static drawing when its object animation exp
   const frame = loadCopyDeselectFrame();
   frame.context.BoardfishMotion.applyCopyFeedback({ objects: [frame.obj] });
   frame.setTime(501);
-  frame.drawNormal(frame.context.BoardfishMotion.textSelectionJelloSpecsForDraw());
+  frame.drawNormal(frame.context.BoardfishMotion.beginDraw());
   assert.deepEqual(frame.draws, ['copied text']);
 });
