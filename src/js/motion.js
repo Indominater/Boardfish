@@ -88,7 +88,7 @@
     meta = {},
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   ) => {
-    if ((!motionRenderPending && !(objectMotions.size || textSelectionMotions.size)) || prefersReducedMotion()) return;
+    if (!motionRenderPending && !(objectMotions.size || textSelectionMotions.size)) return;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const wasPending = typeof BOARDFISH_PRODUCTION === 'undefined' && motionRenderPending;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
