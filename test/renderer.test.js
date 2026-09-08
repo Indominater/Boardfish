@@ -1397,40 +1397,25 @@ test('grouped copy jiggle is geometry-ordered with shared vertical and mirrored 
   assert.ok(Math.abs(forwardLeft.translateX) < Math.abs(forwardLeft.translateY));
 });
 
-test('single-image copy state does not desynchronize a later grouped copy jiggle', () => {
+test('regrouped copy jiggle preserves continuity and joins the fresh group after 180ms', () => {
   const left = { id: 'left', type: 'image', x: 20, y: 30, w: 80, h: 90 };
   const right = { id: 'right', type: 'image', x: 140, y: 30, w: 80, h: 90 };
-  const capture = (priorCopyAge) => {
+  for (const age of [32, 117]) {
     const { context, setTime } = loadMotion();
     const motion = context.BoardfishMotion;
-    context.objectsMap = new Map([[left.id, left], [right.id, right]]);
-    context.selectedIds = new Set([left.id, right.id]);
-    const groupStartedAt = priorCopyAge ?? 117;
-
-    if (priorCopyAge !== null) {
-      setTime(0);
-      assert.equal(motion.applyCopyFeedback({ objects: [left] }), true);
-      setTime(priorCopyAge);
-      assert.ok(motion.objectMotionForDraw(left, 1));
-    } else {
-      setTime(groupStartedAt);
+    motion.applyCopyFeedback({ objects: [left] });
+    setTime(age);
+    const before = plain(motion.objectMotionForDraw(left));
+    motion.applyCopyFeedback({ objects: [left, right] });
+    assert.deepEqual(plain(motion.objectMotionForDraw(left)), before);
+    const fresh = loadMotion();
+    fresh.setTime(age);
+    fresh.context.BoardfishMotion.applyCopyFeedback({ objects: [left, right] });
+    setTime(age + 180);
+    fresh.setTime(age + 180);
+    for (const obj of [left, right]) {
+      assert.deepEqual(plain(motion.objectMotionForDraw(obj)), plain(fresh.context.BoardfishMotion.objectMotionForDraw(obj)));
     }
-
-    assert.equal(motion.applyCopyFeedback({ selection: true }), true);
-    setTime(groupStartedAt + 100);
-    return {
-      left: plain(motion.objectMotionForDraw(left, 1)),
-      right: plain(motion.objectMotionForDraw(right, 1)),
-    };
-  };
-
-  const fresh = capture(null);
-  for (const priorCopyAge of [32, 117]) {
-    assert.deepEqual(
-      capture(priorCopyAge),
-      fresh,
-      `prior single copy at ${priorCopyAge}ms changed grouped motion`,
-    );
   }
 });
 

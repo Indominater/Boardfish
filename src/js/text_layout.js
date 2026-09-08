@@ -779,6 +779,8 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
   const collectLineIndex = options.collectLineIndex === true;
   const rangeLimited = firstLineIndex > 0 || Number.isFinite(lastLineIndex);
   const knownLineCount = Math.trunc(Number(options.knownLineCount)) || 0;
+  const lineIndexEntries = Array.isArray(options.lineIndexEntries) ? options.lineIndexEntries : null;
+  const lastLogicalLine = options.endLine ?? Infinity;
   const canStopAfterRange = collectLines && rangeLimited && knownLineCount > 0 && !collectLineIndex;
   const maxW = obj.w - TEXT_PAD * 2;
   const result = [];
@@ -818,11 +820,16 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
     visualLineIndex++;
   };
 
-  let paraStart = 0;
-  let logicalLineIndex = 0;
-  while (paraStart <= content.length) {
+  let paraStart = options.startIndex || 0;
+  let logicalLineIndex = options.startLine || 0;
+  while (paraStart <= content.length && logicalLineIndex <= lastLogicalLine) {
     if (canStopAfterRange && visualLineIndex > lastLineIndex) break;
-    const newlineAt = content.indexOf('\n', paraStart);
+    const indexedLine = lineIndexEntries?.[logicalLineIndex];
+    if (indexedLine) {
+      paraStart = indexedLine.startIndex;
+      visualLineIndex = indexedLine.visualStart;
+    }
+    const newlineAt = indexedLine ? indexedLine.endIndex : content.indexOf('\n', paraStart);
     const paraEnd = newlineAt === -1 ? content.length : newlineAt;
 
     if (paraStart === paraEnd) {
@@ -940,117 +947,13 @@ function textLayoutLogicalLineIndexAtContentIndex(layout, index, fallback = 0) {
 
 function wrapTextLogicalLineRange(obj, startLine, endLine, options = {}) {
   if (!obj || obj.type !== 'text') return [];
-  const content = obj.data.content;
   const firstLine = Math.max(0, Math.trunc(Number(startLine)) || 0);
-  const lastLine = Math.max(firstLine, Math.trunc(Number(endLine)) || firstLine);
-  const maxW = obj.w - TEXT_PAD * 2;
-  const lineIndexEntries = Array.isArray(options.lineIndexEntries) ? options.lineIndexEntries : null;
-  let nextParaStart = Math.max(0, Math.min(Math.trunc(Number(options.startIndex)) || 0, content.length));
-  let visualLineOffset = 0;
-  const result = [];
-  const pushLine = (start, end, nextStart = end, caretEnd = end, logicalLineIndex = 0, prefixWidths = null) => {
-    const visualStart = lineIndexEntries?.[logicalLineIndex]?.visualStart;
-    const visualOffset = visualLineOffset++;
-    result.push({
-      text: content.slice(start, end),
-      startIndex: start,
-      endIndex: end,
-      caretEndIndex: caretEnd,
-      nextStartIndex: nextStart,
-      logicalLineIndex,
-      ...(Number.isFinite(visualStart) ? { visualLineIndex: visualStart + visualOffset } : {}),
-      ...(prefixWidths ? { prefixWidths } : {}),
-    });
-  };
-
-  for (let logicalLineIndex = firstLine; logicalLineIndex <= lastLine; logicalLineIndex++) {
-    visualLineOffset = 0;
-    const indexedLine = lineIndexEntries?.[logicalLineIndex] || null;
-    const paraStart = indexedLine
-      ? Math.max(0, Math.min(Math.trunc(Number(indexedLine.startIndex)) || 0, content.length))
-      : nextParaStart;
-    const newlineAt = indexedLine ? -1 : content.indexOf('\n', paraStart);
-    const paraEnd = indexedLine
-      ? Math.max(paraStart, Math.min(Math.trunc(Number(indexedLine.endIndex)) || paraStart, content.length))
-      : (newlineAt === -1 ? content.length : newlineAt);
-    nextParaStart = Math.min(paraEnd + 1, content.length);
-    if (paraStart === paraEnd) {
-      pushLine(paraStart, paraStart, paraStart, paraStart, logicalLineIndex);
-      continue;
-    }
-
-    const paragraphHasTab = content.slice(paraStart, paraEnd).includes('\t');
-    const paragraphPrefixWidths = paragraphHasTab
-      ? null
-      : getTextObjectParagraphPrefixWidthsForNormalizedContent(obj, content, paraStart, paraEnd);
-    const paragraphRangeWidth = (start, end) => {
-      if (!paragraphPrefixWidths) return measureTextRangeW(content, start, end);
-      const from = Math.max(0, Math.min(start - paraStart, paragraphPrefixWidths.length - 1));
-      const to = Math.max(from, Math.min(end - paraStart, paragraphPrefixWidths.length - 1));
-      return Math.max(0, paragraphPrefixWidths[to] - paragraphPrefixWidths[from]);
-    };
-    const pushParagraphLine = (start, end, nextStart = end, caretEnd = end) => {
-      const prefixWidths = paragraphPrefixWidths
-        ? textPrefixWidthsSlice(paragraphPrefixWidths, start - paraStart, end - paraStart)
-        : null;
-      pushLine(start, end, nextStart, caretEnd, logicalLineIndex, prefixWidths);
-    };
-    if (paragraphRangeWidth(paraStart, paraEnd) <= maxW) {
-      pushParagraphLine(paraStart, paraEnd, paraEnd, paraEnd);
-      continue;
-    }
-    if (!paragraphHasTab && paraEnd - paraStart > TEXT_EXACT_PREFIX_MAX_CHARS) {
-      wrapPlainLargeParagraph(content, paraStart, paraEnd, maxW, paragraphRangeWidth, pushParagraphLine);
-      continue;
-    }
-
-    let lineStart = paraStart;
-    while (lineStart < paraEnd) {
-      let lo = lineStart + 1;
-      let hi = paraEnd;
-      if (paragraphRangeWidth(lineStart, lo) > maxW) {
-        pushParagraphLine(lineStart, lo, lo, lo);
-        lineStart = lo;
-        continue;
-      }
-      while (lo < hi) {
-        const mid = Math.ceil((lo + hi + 1) / 2);
-        if (paragraphRangeWidth(lineStart, mid) <= maxW) lo = mid;
-        else hi = mid - 1;
-      }
-
-      let lineEnd = lo;
-      let nextStart = lineEnd;
-      let caretEnd = lineEnd;
-      if (lineEnd < paraEnd) {
-        let breakAt = -1;
-        for (let i = lineEnd; i > lineStart; i--) {
-          if (isTextWordSeparator(content[i - 1])) {
-            breakAt = i - 1;
-            break;
-          }
-        }
-        if (breakAt > lineStart) {
-          nextStart = breakAt;
-          while (nextStart < paraEnd && isTextWordSeparator(content[nextStart])) nextStart++;
-          if (nextStart < paraEnd) lineEnd = breakAt;
-          caretEnd = nextStart;
-        } else if (isTextWordSeparator(content[nextStart])) {
-          while (nextStart < paraEnd && isTextWordSeparator(content[nextStart])) nextStart++;
-          caretEnd = nextStart;
-        }
-      }
-
-      if (lineEnd <= lineStart) {
-        lineEnd = Math.min(lineStart + 1, paraEnd);
-        nextStart = lineEnd;
-      }
-      pushParagraphLine(lineStart, lineEnd, nextStart, caretEnd);
-      lineStart = nextStart;
-    }
-  }
-
-  return result;
+  return buildWrappedLines(obj, {
+    ...options,
+    startLine: firstLine,
+    endLine: Math.max(firstLine, Math.trunc(Number(endLine)) || firstLine),
+    startIndex: Math.max(0, Math.min(Math.trunc(Number(options.startIndex)) || 0, obj.data.content.length)),
+  }).lines;
 }
 
 function textLayoutSpliceRangeForLogicalLines(layout, startLine, endLine) {
@@ -1414,21 +1317,10 @@ function buildTextViewportLayoutRangeFromLineIndex(obj, content, first, last, li
   const lastEntry = textWrappedLineIndexEntryForVisual(lineIndexCache, actualLast);
   const wrappedSourceLines = wrapTextLogicalLineRange(obj, firstEntry.entry.logicalLineIndex, lastEntry.entry.logicalLineIndex, {
     lineIndexEntries: lineIndexCache.entries,
+    firstLineIndex: first,
+    lastLineIndex: actualLast,
   });
-  const layout = [];
-  for (const line of wrappedSourceLines) {
-    if (
-      Number.isFinite(line?.visualLineIndex) &&
-      line.visualLineIndex >= first &&
-      line.visualLineIndex <= actualLast
-    ) {
-      layout.push(layoutLineFromWrappedLine(
-        obj,
-        line,
-        line.visualLineIndex,
-      ));
-    }
-  }
+  const layout = wrappedSourceLines.map(line => layoutLineFromWrappedLine(obj, line, line.visualLineIndex));
   return setCachedTextViewportLayoutRange(obj, content, first, last, layout, totalLines);
 }
 

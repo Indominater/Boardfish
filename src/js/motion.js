@@ -191,7 +191,7 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return;
     }
-    const handoff = sameCohort ? handoffAt(existing, startedAt) : null;
+    const handoff = handoffAt(existing, startedAt);
     const motion = { startedAt, groupSide, groupSize, cohortKey };
     if (handoff) motion.handoff = handoff;
     objectMotions.set(obj.id, motion);
