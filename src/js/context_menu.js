@@ -355,7 +355,7 @@ const pasteTextIntoEditSelection = async () => {
     typeof currentBoardfishTextSelectionClipboardPayload === 'function' &&
     !!currentBoardfishTextSelectionClipboardPayload()
   );
-  const pasteOptions = { immediateHistory: true };
+  const pasteOptions = {};
   const pendingBoardfishPaste = (
     hasBoardfishTextPayload &&
     typeof pasteBoardfishTextSelectionIntoEditSelection === 'function'

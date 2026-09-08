@@ -12,7 +12,7 @@
     "test": "node --test",
     "check:js-syntax": "node scripts/check-js-syntax.mjs",
     "check:static": "node --test test/static_refactor.test.js",
-    "check": "npm run check:js-syntax && npm test && npm run check:static"
+    "check": "npm run check:js-syntax && npm test"
   },
   "devDependencies": {
     "esbuild": "^0.25.12"

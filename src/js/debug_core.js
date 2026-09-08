@@ -24,12 +24,11 @@
     maxEvents = 300,
     label = 'Boardfish',
     sanitize = (value) => value,
-    verboseDefault = false,
     onEnable = null,
     onDisable = null,
   } = {}) {
     let enabled = false;
-    let verbose = verboseDefault;
+    let verbose = false;
     let nextOpId = 1;
     const events = [];
     const round = (value) => Math.round((value || 0) * 100) / 100;
@@ -91,7 +90,6 @@
       step,
       end,
       reset,
-      push,
       get enabled() { return enabled; },
       get events() { return events.slice(); },
       _events: events,

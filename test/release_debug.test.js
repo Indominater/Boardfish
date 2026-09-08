@@ -319,5 +319,5 @@ test('web release preview ships minified PWA assets', () => {
   assert.doesNotMatch(readmeSource, /\/Boardfish\/beta(?:\/|\b)/i);
   assert.equal(packageJson.scripts.web, 'npm run web:preview');
   assert.equal(packageJson.scripts.build, 'npm run web:build');
-  assert.equal(packageJson.scripts.check, 'npm run check:js-syntax && npm test && npm run check:static');
+  assert.equal(packageJson.scripts.check, 'npm run check:js-syntax && npm test');
 });

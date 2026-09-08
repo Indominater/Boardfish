@@ -317,7 +317,7 @@ function setTextEditProxySelectionRange(proxy, start, end = start, direction = '
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const syncResult = shouldSyncDom
     ? syncTextEditProxyDomValue(proxy, text, { start: from, end: to, direction })
-    : { synced: false, reason: shouldSyncDom ? 'sync-skipped' : 'selection-fits-dom' };
+    : { synced: false, reason: 'selection-fits-dom' };
   if (!syncResult.synced) proxy.setSelectionRange(from, to, direction);
   return {
     set: true,
@@ -1259,7 +1259,6 @@ const pasteBoardfishTextSelectionIntoEditSelection = async (options = {}) => {
   textEditorClipStep(dbg, 'paste:text-selection-js-payload-ready', textEditorTextStats(payload.text));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const pasteOptions = {
-    immediateHistory: options.immediateHistory,
     selection: options.selection,
     inputType: 'insertFromPaste',
   };
@@ -1841,7 +1840,6 @@ function enterEdit(id, {
       proxy,
       event,
       selection,
-      immediateHistory: false,
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') pasteOptions.debug = dbg;
     pasteBoardfishTextSelectionIntoEditSelection(pasteOptions).then((pasted) => {

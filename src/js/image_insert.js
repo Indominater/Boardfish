@@ -59,7 +59,7 @@ const rollbackImageInsertSource = (imgKey, source, hadPreviousSource = false, pr
     if (hadPreviousSource) {
       BoardfishImageStore.setSource(imgKey, previousSource);
     } else {
-      if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey, source);
+      if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey);
       delete imageStore[imgKey];
     }
     return true;

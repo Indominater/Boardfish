@@ -271,10 +271,7 @@ var ManualPerfDebug = (() => {
       ? options.prewarmScaledImages
       : {};
     const scaledImagePrewarm = options.prewarmScaledImages && typeof prewarmVisibleScaledImageVariants === 'function'
-      ? prewarmVisibleScaledImageVariants({
-          reason: 'perf-begin',
-          ...scaledImagePrewarmOptions,
-        })
+      ? prewarmVisibleScaledImageVariants(scaledImagePrewarmOptions)
       : null;
     const textLayoutPrewarmOptions = options.prewarmTextLayout && typeof options.prewarmTextLayout === 'object'
       ? options.prewarmTextLayout

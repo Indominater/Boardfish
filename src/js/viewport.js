@@ -963,20 +963,18 @@ function normalizeTextDrawWarmupTarget(value) {
 }
 
 function textDrawWarmupTarget(options = {}) {
-  const target = normalizeTextDrawWarmupTarget(options.drawWarmupTarget ?? options.target);
+  const target = normalizeTextDrawWarmupTarget(options.drawWarmupTarget);
   if (target === TEXT_DRAW_WARMUP_TARGET_BOARD) {
     return {
       target,
       ctx: typeof ctx !== 'undefined' ? ctx : null,
       canvas: typeof boardCanvas !== 'undefined' ? boardCanvas : null,
-      restore: options.drawWarmupRestore !== false,
     };
   }
   return {
     target: TEXT_DRAW_WARMUP_TARGET_OFFSCREEN,
     ctx: textDrawWarmupContext(),
     canvas: _textDrawWarmupCanvas,
-    restore: false,
   };
 }
 
@@ -1054,8 +1052,6 @@ function warmTextLayoutDrawLines(obj, layout, options = {}) {
       drawUnits: 0,
       totalMs: 0,
       maxLineMs: 0,
-      restoreMs: 0,
-      restored: false,
       errors: 0,
     };
   }
@@ -1068,8 +1064,6 @@ function warmTextLayoutDrawLines(obj, layout, options = {}) {
       drawUnits: 0,
       totalMs: 0,
       maxLineMs: 0,
-      restoreMs: 0,
-      restored: false,
       errors: 0,
     };
   }
@@ -1077,25 +1071,9 @@ function warmTextLayoutDrawLines(obj, layout, options = {}) {
   const viewDpr = Math.max(1, Number(options.dpr ?? window.devicePixelRatio) || 1);
   const deviceScale = viewZoom * viewDpr;
   const startedAt = performance.now();
-  const snapshot = target.restore ? createBoardTextDrawWarmupSnapshot(canvas) : null;
-  if (target.target === TEXT_DRAW_WARMUP_TARGET_BOARD && target.restore && !snapshot) {
-    return {
-      available: false,
-      skipped: 'board-warmup-snapshot-unavailable',
-      target: target.target,
-      warmedLines: 0,
-      drawUnits: 0,
-      totalMs: Math.round((performance.now() - startedAt) * 100) / 100,
-      maxLineMs: 0,
-      restoreMs: 0,
-      restored: false,
-      errors: 0,
-    };
-  }
   let warmedLines = 0;
   let drawUnits = 0;
   let maxLineMs = 0;
-  let restoreMs = 0;
   let errors = 0;
 
   try {
@@ -1138,7 +1116,6 @@ function warmTextLayoutDrawLines(obj, layout, options = {}) {
       }
     }
   } finally {
-    restoreMs = restoreBoardTextDrawWarmupSnapshot(ctx, canvas, snapshot);
     if (target.target === TEXT_DRAW_WARMUP_TARGET_BOARD && typeof ctx.restore === 'function') {
       try { ctx.restore(); } catch (_) {}
     }
@@ -1151,8 +1128,6 @@ function warmTextLayoutDrawLines(obj, layout, options = {}) {
     drawUnits,
     totalMs: Math.round((performance.now() - startedAt) * 100) / 100,
     maxLineMs: Math.round(maxLineMs * 100) / 100,
-    restoreMs: Math.round(restoreMs * 100) / 100,
-    restored: !!snapshot,
     errors,
   };
 }
@@ -1185,12 +1160,10 @@ function normalizeTextDrawWarmupZooms(options = {}) {
 
 function createTextDrawWarmupAggregate() {
   return {
-    available: true,
     warmedLines: 0,
     drawUnits: 0,
     totalMs: 0,
     maxLineMs: 0,
-    restoreMs: 0,
     errors: 0,
     zooms: [],
     targets: [],
@@ -1199,12 +1172,10 @@ function createTextDrawWarmupAggregate() {
 
 function addTextDrawWarmupAggregate(target, stats, warmupZoom) {
   if (!target || !stats) return;
-  target.available = target.available && stats.available !== false;
   target.warmedLines += Number(stats.warmedLines) || 0;
   target.drawUnits += Number(stats.drawUnits) || 0;
   target.totalMs += Number(stats.totalMs) || 0;
   target.maxLineMs = Math.max(target.maxLineMs, Number(stats.maxLineMs) || 0);
-  target.restoreMs += Number(stats.restoreMs) || 0;
   target.errors += Number(stats.errors) || 0;
   if ((Number(stats.warmedLines) || 0) > 0) {
     target.zooms.push(roundTextDrawWarmupZoom(warmupZoom));
@@ -1334,7 +1305,6 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
           zoom: warmupZoom,
           dpr: window.devicePixelRatio || 1,
           drawWarmupTarget,
-          drawWarmupRestore: false,
         });
         addTextDrawWarmupAggregate(drawWarmupStats, stats, warmupZoom);
         const usedLines = Number(stats?.warmedLines) || 0;
@@ -1346,7 +1316,6 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
       }
       drawWarmupStats.totalMs = Math.round(drawWarmupStats.totalMs * 100) / 100;
       drawWarmupStats.maxLineMs = Math.round(drawWarmupStats.maxLineMs * 100) / 100;
-      drawWarmupStats.restoreMs = Math.round(drawWarmupStats.restoreMs * 100) / 100;
       if (drawWarmupStats.warmedLines > 0) drawWarmupTextObjects++;
       drawWarmupLines += drawWarmupStats.warmedLines || 0;
       drawWarmupDrawUnits += drawWarmupStats.drawUnits || 0;
@@ -1382,7 +1351,6 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
       drawWarmupErrors: drawWarmupStats?.errors ?? '',
       drawWarmupZooms: drawWarmupStats?.zooms?.join(',') || '',
       drawWarmupTargets: drawWarmupStats?.targets?.join(',') || '',
-      drawWarmupRestoreMs: drawWarmupStats?.restoreMs ?? '',
       drawWarmupSource,
       wrappedLineIndexEntries: obj._textWrappedLineIndexCache?.entries?.length ?? '',
     });
@@ -1402,8 +1370,6 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
     if (i > 0) drawWarmupZoomsText += ',';
     drawWarmupZoomsText += roundTextDrawWarmupZoom(drawWarmupZooms[i]);
   }
-  let rowRestoreMs = 0;
-  for (const row of rows) rowRestoreMs += Number(row.drawWarmupRestoreMs) || 0;
   const rawTopObjectLimit = Math.max(0, Math.min(20, Number(options.limit ?? 8)));
   const topObjectLimit = Number.isFinite(rawTopObjectLimit) ? Math.trunc(rawTopObjectLimit) : 0;
   const topObjects = new Array(Math.min(topObjectLimit, rows.length));
@@ -1439,7 +1405,7 @@ function prewarmVisibleTextLayoutCaches(options = {}) {
     drawWarmupDrawUnits,
     drawWarmupTotalMs: Math.round(drawWarmupTotalMs * 100) / 100,
     drawWarmupMaxLineMs: Math.round(drawWarmupMaxLineMs * 100) / 100,
-    drawWarmupRestoreMs: Math.round((boardRestoreMs + rowRestoreMs) * 100) / 100,
+    drawWarmupRestoreMs: Math.round(boardRestoreMs * 100) / 100,
     drawWarmupErrors,
     totalMs: Math.round(totalMs * 100) / 100,
     avgObjectMs: warmedTextObjects ? Math.round((totalMs / warmedTextObjects) * 100) / 100 : 0,
