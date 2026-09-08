@@ -583,21 +583,15 @@
     return out;
   }
 
-  async function readZipEntry(bytes, entry, options = {}) {
+  async function readZipEntry(input, entry, options = {}) {
     assertZipEntryReadBudget(entry, options.maxBytes, options.tooLargeError);
-    const compressed = compressedEntryBytes(bytes, entry);
-    let out;
-    if (entry.method === ZIP_METHOD_STORED) out = compressed;
-    else if (entry.method === ZIP_METHOD_DEFLATED) out = await inflateRaw(compressed, entry, options);
-    else throw new Error(`unsupported .bf compression method ${entry.method} for ${entry.name}`);
-    return validateReadZipEntry(out, entry, options);
-  }
-
-  async function readZipEntryFromBlob(blob, entry, options = {}) {
-    assertZipEntryReadBudget(entry, options.maxBytes, options.tooLargeError);
-    const compressedBlob = await compressedEntryBlob(blob, entry);
-    const compressed = new Uint8Array(await compressedBlob.arrayBuffer());
-    if (compressed.length !== Number(entry.compressedSize)) {
+    let compressed = isBlobLike(input)
+      ? await compressedEntryBlob(input, entry)
+      : compressedEntryBytes(input, entry);
+    if (isBlobLike(compressed) && (entry.method === ZIP_METHOD_STORED || !isNativeBlobPart(compressed))) {
+      compressed = await blobToBytes(compressed);
+    }
+    if ((compressed.size ?? compressed.length) !== Number(entry.compressedSize)) {
       throw new Error(`truncated Boardfish container entry ${entry.name}`);
     }
     let out;
@@ -1135,7 +1129,7 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectDiagnostics) phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const boardJsonBytes = await (randomAccessBlob ? readZipEntryFromBlob : readZipEntry)(
+    const boardJsonBytes = await readZipEntry(
       randomAccessBlob || containerBytes,
       boardEntry,
       {
@@ -1274,7 +1268,7 @@
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         const imageReadStart = collectDiagnostics ? nowMs() : 0;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        bytes = await (randomAccessBlob ? readZipEntryFromBlob : readZipEntry)(
+        bytes = await readZipEntry(
           randomAccessBlob || containerBytes,
           imageEntry,
           {

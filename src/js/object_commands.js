@@ -59,15 +59,12 @@ function addText(wx, wy, content = '', options = {}) {
   logStep('content-limit-done', { textBytes, accepted });
   if (!accepted) return;
   const h = LINE_H + TEXT_PAD * 2;
-  let w = content ? 200 : h * 6;
-  if (content) {
-    const lines = content.split('\n');
-    const charW = 9.2, pad = 8;
-    let maxLineLen = 1;
-    for (const line of lines) {
-      if (line.length > maxLineLen) maxLineLen = line.length;
-    }
-    w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
+  let w = content ? 120 : h * 6;
+  for (let start = 0; start < content.length && w < 700;) {
+    let end = content.indexOf('\n', start);
+    if (end < 0) end = content.length;
+    w = Math.min(Math.max(Math.round((end - start) * 9.2 + 16), w), 700);
+    start = end + 1;
   }
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
   logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content) }));

@@ -401,5 +401,4 @@ test('addText sizes multiline text without spreading all lines into Math.max', (
   assert.ok(match, 'addText function body is missing');
 
   assert.doesNotMatch(match[0], /Math\.max\(\.\.\.lines\.map/);
-  assert.match(match[0], /let maxLineLen = 1;/);
 });
