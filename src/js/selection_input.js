@@ -298,7 +298,7 @@ function updateSelectionOverlay() {
         const motion = _multiSelMotions[_multiSelMotions.length] = BoardfishMotion.getLastDrawnObjectMotion(id);
         if (!motion) continue;
         translateX += motion.groupTranslateX ?? motion.translateX ?? 0;
-        translateY += motion.groupTranslateY ?? motion.translateY ?? 0;
+        translateY += motion.translateY ?? 0;
       }
       translateX /= selectedIds.size;
       translateY /= selectedIds.size;

@@ -124,9 +124,6 @@ var ClipDebug = (() => {
       autoHeightForceSync: e.meta?.autoHeightForceSync ?? '',
       autoHeightForceReason: e.meta?.autoHeightForceReason || '',
       restoredMinLinesReset: e.meta?.restoredMinLinesReset ?? '',
-      restoredPreviousMinLines: e.meta?.restoredPreviousMinLines ?? '',
-      restoredPreservedMinLines: e.meta?.restoredPreservedMinLines ?? '',
-      restoredNextMinLines: e.meta?.restoredNextMinLines ?? '',
       pendingSizeSyncBeforeAutoHeight: e.meta?.pendingSizeSyncBeforeAutoHeight ?? '',
       pendingSizeSync: e.meta?.pendingSizeSync ?? '',
       inputStateObjectHeight: e.meta?.inputStateObjectHeight ?? '',
@@ -439,15 +436,13 @@ var ClipDebug = (() => {
       ? end?.meta?.path || 'web-paste-blob'
       : blobEvent
       ? 'event-or-browser-blob'
-      : stepNames.has('browser-clipboard-read:start')
-        ? 'browser-read'
-        : stepNames.has('event-clipboard:inspect')
-          ? 'paste-event'
-          : 'unknown';
+      : stepNames.has('event-clipboard:inspect')
+        ? 'paste-event'
+        : 'unknown';
     const checkpoints = [
       ['pasteStarted', true],
       ['eventInspected', stepNames.has('event-clipboard:inspect') || !pasteStart.meta?.clipboardData],
-      ['imagePayloadFound', !!blobEvent || !!webInsertEnd || pathDetected === 'browser-read'],
+      ['imagePayloadFound', !!blobEvent || !!webInsertEnd],
       ['imagePayloadRead', !!blobEvent || !!webInsertEnd || pathDetected !== 'unknown'],
       ['objectAddStarted', !!addObject],
       ['pasteEndedAdded', end?.meta?.added === true || objectDelta > 0],
@@ -498,7 +493,6 @@ var ClipDebug = (() => {
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
     const cloneDone = latest('paste:clone-done');
     const trimDone = latest('paste:text-trim-done');
-    const objectLimitDone = latest('paste:object-limit-done');
     const contentLimitDone = latest('paste:content-limit-done');
     const historyStart = latest('paste:boardHistory-start');
     const historyDone = latest('paste:boardHistory-done');
@@ -521,8 +515,6 @@ var ClipDebug = (() => {
       cloneMs: cloneDone?.meta?.ms ?? '',
       trimMs: trimDone?.meta?.ms ?? '',
       trimmedTextObjects: trimDone?.meta?.trimmedTextObjects ?? '',
-      objectLimitMs: objectLimitDone?.meta?.ms ?? '',
-      objectLimitAccepted: objectLimitDone?.meta?.accepted ?? '',
       contentLimitMs: contentLimitDone?.meta?.ms ?? '',
       contentLimitAccepted: contentLimitDone?.meta?.accepted ?? '',
       additionalTextBytes: contentLimitDone?.meta?.additionalTextBytes ?? '',
@@ -963,9 +955,6 @@ var HistoryDebug = (() => {
       runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
       runtimeTextLineContentChars: e.meta?.runtimeTextLineContentChars ?? '',
       restoreCloneMs: e.meta?.cloneObjectsMs ?? '',
-      hydrateCandidates: e.meta?.candidates ?? '',
-      hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
-      hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
       replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
       enterEditMs: e.meta?.enterEditMs ?? '',
       renderScheduleMs: e.meta?.renderScheduleMs ?? '',
@@ -1005,11 +994,9 @@ var HistoryDebug = (() => {
         e.step === 'cloneObjects' ||
         e.step === 'clone-dirty-objects' ||
         e.step === 'clone-snapshot-objects' ||
-        e.step === 'hydrate-live-text-caches' ||
         e.step === 'replace-board-objects' ||
         e.step === 'restore-selection' ||
         e.step === 'renderAll-scheduled' ||
-        e.step === 'motion-replay' ||
         e.step === 'enter-edit-restored' ||
         e.step === 'restore-edit-caret' ||
         e.step === 'flush-edit-history' ||
@@ -1050,29 +1037,14 @@ var HistoryDebug = (() => {
         selectionStart: e.meta?.selectionStart ?? '',
         selectionEnd: e.meta?.selectionEnd ?? '',
         cloneObjectsMs: e.meta?.cloneObjectsMs ?? '',
-        hydrateCandidates: e.meta?.candidates ?? '',
-        hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
-        hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
         replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
         enterEditMs: e.meta?.enterEditMs ?? '',
         reusedEditProxy: e.meta?.reusedEditProxy ?? '',
-        proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
-        proxyValueChanged: e.meta?.proxyValueChanged ?? '',
-        proxyValueSetMethod: e.meta?.proxyValueSetMethod ?? '',
         proxyDomSyncedForSelection: e.meta?.proxyDomSyncedForSelection ?? '',
         proxyDomSyncReason: e.meta?.proxyDomSyncReason ?? '',
         proxyDomSyncMs: e.meta?.proxyDomSyncMs ?? '',
         proxyDomCharsBeforeSelection: e.meta?.proxyDomCharsBeforeSelection ?? '',
         proxyDomCharsAfterSelection: e.meta?.proxyDomCharsAfterSelection ?? '',
-        proxyValueDiffMs: e.meta?.proxyValueDiffMs ?? '',
-        proxyValueMutationMs: e.meta?.proxyValueMutationMs ?? '',
-        proxyValueAssignMs: e.meta?.proxyValueAssignMs ?? '',
-        proxyValueInsertedChars: e.meta?.proxyValueInsertedChars ?? '',
-        proxyValueRemovedChars: e.meta?.proxyValueRemovedChars ?? '',
-        proxyValuePatchStart: e.meta?.proxyValuePatchStart ?? '',
-        proxyValuePatchEnd: e.meta?.proxyValuePatchEnd ?? '',
-        proxyValuePatchPrefixChars: e.meta?.proxyValuePatchPrefixChars ?? '',
-        proxyValuePatchSuffixChars: e.meta?.proxyValuePatchSuffixChars ?? '',
         setSelectionRangeMs: e.meta?.setSelectionRangeMs ?? '',
         focusMs: e.meta?.focusMs ?? '',
         focusSkipped: e.meta?.focusSkipped ?? '',
@@ -1140,32 +1112,16 @@ var HistoryDebug = (() => {
         runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
         runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
         cloneObjectsMs: e.meta?.cloneObjectsMs ?? '',
-        hydrateCandidates: e.meta?.candidates ?? '',
-        hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
-        hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
         replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
         setSelectionMs: e.meta?.setSelectionMs ?? '',
         renderScheduleMs: e.meta?.renderScheduleMs ?? '',
-        motionReplayMs: e.meta?.motionReplayMs ?? '',
         enterEditMs: e.meta?.enterEditMs ?? '',
         reusedEditProxy: e.meta?.reusedEditProxy ?? '',
-        proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
-        proxyValueChanged: e.meta?.proxyValueChanged ?? '',
-        proxyValueSetMethod: e.meta?.proxyValueSetMethod ?? '',
         proxyDomSyncedForSelection: e.meta?.proxyDomSyncedForSelection ?? '',
         proxyDomSyncReason: e.meta?.proxyDomSyncReason ?? '',
         proxyDomSyncMs: e.meta?.proxyDomSyncMs ?? '',
         proxyDomCharsBeforeSelection: e.meta?.proxyDomCharsBeforeSelection ?? '',
         proxyDomCharsAfterSelection: e.meta?.proxyDomCharsAfterSelection ?? '',
-        proxyValueDiffMs: e.meta?.proxyValueDiffMs ?? '',
-        proxyValueMutationMs: e.meta?.proxyValueMutationMs ?? '',
-        proxyValueAssignMs: e.meta?.proxyValueAssignMs ?? '',
-        proxyValueInsertedChars: e.meta?.proxyValueInsertedChars ?? '',
-        proxyValueRemovedChars: e.meta?.proxyValueRemovedChars ?? '',
-        proxyValuePatchStart: e.meta?.proxyValuePatchStart ?? '',
-        proxyValuePatchEnd: e.meta?.proxyValuePatchEnd ?? '',
-        proxyValuePatchPrefixChars: e.meta?.proxyValuePatchPrefixChars ?? '',
-        proxyValuePatchSuffixChars: e.meta?.proxyValuePatchSuffixChars ?? '',
         setSelectionRangeMs: e.meta?.setSelectionRangeMs ?? '',
         focusMs: e.meta?.focusMs ?? '',
         focusSkipped: e.meta?.focusSkipped ?? '',
@@ -1174,7 +1130,6 @@ var HistoryDebug = (() => {
         historyIndex: e.meta?.historyIndex ?? '',
       }));
     const max = (field) => rows.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
-    const sum = (field) => rows.reduce((value, row) => value + (Number(row[field]) || 0), 0);
     const endRows = rows.filter(row => row.step === 'end');
     const restoreEnds = endRows.filter(row => row.op === 'restoreSnapshot');
     const summaryOut = {
@@ -1186,19 +1141,11 @@ var HistoryDebug = (() => {
       maxOuterRestoreMs: max('restoreMs'),
       maxFlushMs: max('flushMs'),
       maxCloneObjectsMs: max('cloneObjectsMs'),
-      maxHydrateCandidates: max('hydrateCandidates'),
-      hydratedTextRuntimeCaches: sum('hydratedTextRuntimeCaches'),
-      hydratedTextLayoutCaches: sum('hydratedTextLayoutCaches'),
       maxReplaceBoardObjectsMs: max('replaceBoardObjectsMs'),
       maxEnterEditMs: max('enterEditMs'),
-      maxProxyValueSetMs: max('proxyValueSetMs'),
-      maxProxyValueDiffMs: max('proxyValueDiffMs'),
-      maxProxyValueMutationMs: max('proxyValueMutationMs'),
-      maxProxyValueAssignMs: max('proxyValueAssignMs'),
       maxSetSelectionRangeMs: max('setSelectionRangeMs'),
       maxFocusMs: max('focusMs'),
       maxRenderScheduleMs: max('renderScheduleMs'),
-      maxMotionReplayMs: max('motionReplayMs'),
       maxTextCharCount: max('textCharCount'),
       maxLargestTextChars: max('largestTextChars'),
       maxRuntimeTextLayoutLines: max('runtimeTextLayoutLines'),
@@ -1317,15 +1264,11 @@ var ViewportDebug = (() => {
     imageDecodes: 0,
     imageBitmaps: 0,
     imageBitmapFailures: 0,
-    imagePreviewPrepared: 0,
-    imagePreviewFailures: 0,
     imageDrawMissing: 0,
-    imageDrawFallback: 0,
     imageDrawErrors: 0,
     croppedImages: 0,
     maxImageAddMs: 0,
     maxImageBitmapMs: 0,
-    maxImagePreviewMs: 0,
   };
   let lastRafAt = 0;
   let eventLoopTimer = null;
@@ -1837,15 +1780,11 @@ var ViewportDebug = (() => {
       { metric: 'imageDecodes', value: stats.imageDecodes },
       { metric: 'imageBitmaps', value: stats.imageBitmaps },
       { metric: 'imageBitmapFailures', value: stats.imageBitmapFailures },
-      { metric: 'imagePreviewPrepared', value: stats.imagePreviewPrepared },
-      { metric: 'imagePreviewFailures', value: stats.imagePreviewFailures },
       { metric: 'imageDrawMissing', value: stats.imageDrawMissing },
-      { metric: 'imageDrawFallback', value: stats.imageDrawFallback },
       { metric: 'imageDrawErrors', value: stats.imageDrawErrors },
       { metric: 'croppedImages', value: stats.croppedImages },
       { metric: 'maxImageAddMs', value: Math.round(stats.maxImageAddMs * 100) / 100 },
       { metric: 'maxImageBitmapMs', value: Math.round(stats.maxImageBitmapMs * 100) / 100 },
-      { metric: 'maxImagePreviewMs', value: Math.round(stats.maxImagePreviewMs * 100) / 100 },
     ];
     console.table(rows);
     return rows;
@@ -2282,7 +2221,6 @@ var ViewportDebug = (() => {
       avgCulledImages: draws.length ? Math.round(sum('culledImages') / draws.length * 100) / 100 : 0,
       maxCulledImages: max('culledImages'),
       avgBitmapImages: draws.length ? Math.round(sum('bitmapImages') / draws.length * 100) / 100 : 0,
-      avgElementImages: draws.length ? Math.round(sum('elementImages') / draws.length * 100) / 100 : 0,
       avgScaledImages: draws.length ? Math.round(sum('scaledImages') / draws.length * 100) / 100 : 0,
       maxScaledImages: max('scaledImages'),
       avgFullScaleImages: draws.length ? Math.round(sum('fullScaleImages') / draws.length * 100) / 100 : 0,
@@ -2411,7 +2349,6 @@ var ViewportDebug = (() => {
           h: Math.round(obj.h),
           sourceKind: typeof isWebImageRef === 'function' && isWebImageRef(src) ? 'web-ref' : typeof src,
           bytes: src?.bytes ?? '',
-          hasImg: !!bitmap,
           complete: !!(bitmap?.width && bitmap?.height),
           naturalW: bitmap?.width || 0,
           naturalH: bitmap?.height || 0,
@@ -2439,7 +2376,6 @@ var ViewportDebug = (() => {
       missingStore: counts['missing-store'] || 0,
       missingImageElement: counts['missing-image-element'] || 0,
       bitmapFailedNoFallback: counts['bitmap-failed-no-fallback'] || 0,
-      loadedNoBitmap: counts['loaded-no-bitmap'] || 0,
     };
     console.table([out]);
     return out;
@@ -2535,8 +2471,8 @@ var ViewportDebug = (() => {
             : viewportImageScalingEnabled;
           const targetScale = scalingActive && fullSource ? chooseImageScaleForDraw(obj, fullSource) : 1;
           if (targetScale < 1) {
-            const sourceW = fullSource?.width || fullSource?.naturalWidth || 0;
-            const sourceH = fullSource?.height || fullSource?.naturalHeight || 0;
+            const sourceW = fullSource?.width || 0;
+            const sourceH = fullSource?.height || 0;
             visibleScaledVariantMB += scaledVariantEstimatedBytes(sourceW, sourceH, targetScale) / 1024 / 1024;
             if (hasScaledImageVariant(key, targetScale)) visibleImagesWithScaledVariant++;
             else visibleImagesMissingScaledVariant++;
@@ -2627,7 +2563,6 @@ var ViewportDebug = (() => {
         editSelectionVisibleLines: e.steps?.drawBoard?.meta?.editSelectionVisibleLines ?? '',
         editCaretDrawn: e.steps?.drawBoard?.meta?.editCaretDrawn ?? '',
         bitmapImages: e.steps?.drawBoard?.meta?.bitmapImages ?? '',
-        elementImages: e.steps?.drawBoard?.meta?.elementImages ?? '',
         scaledImages: e.steps?.drawBoard?.meta?.scaledImages ?? '',
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? '',
         activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? '',
@@ -2856,9 +2791,8 @@ var ViewportDebug = (() => {
 
   function motionSummary() {
     const rows = motionRows();
-    const starts = rows.filter(row => row.step === 'jiggle-start' || row.step === 'jello-start');
     const jiggleStarts = rows.filter(row => row.step === 'jiggle-start');
-    const progress = rows.filter(row => row.step === 'jiggle-progress' || row.step === 'jello-progress');
+    const progress = rows.filter(row => row.step === 'jiggle-progress');
     const rafFired = rows.filter(row => row.step === 'raf-fired');
     const renderScheduled = rows.filter(row => row.step === 'render-scheduled');
     const frames = motionFrameRows();
@@ -2872,7 +2806,7 @@ var ViewportDebug = (() => {
       lastProgressById.set(key, row.at);
     }
     const firstProgressLatencies = [];
-    for (const start of starts) {
+    for (const start of jiggleStarts) {
       const match = progress.find(row => row.at >= start.at && row.id === start.id && row.objectType === start.objectType);
       if (match) firstProgressLatencies.push(match.at - start.at);
     }
@@ -2882,7 +2816,7 @@ var ViewportDebug = (() => {
     const maxList = (items) => items.reduce((value, item) => Math.max(value, Number(item) || 0), 0);
     const out = {
       motionEvents: rows.length,
-      starts: starts.length,
+      starts: jiggleStarts.length,
       jiggleStarts: jiggleStarts.length,
       imageJiggleStarts: jiggleStarts.filter(row => row.objectType === 'image').length,
       textJiggleStarts: jiggleStarts.filter(row => row.objectType === 'text').length,

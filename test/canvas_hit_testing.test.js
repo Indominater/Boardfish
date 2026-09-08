@@ -230,7 +230,7 @@ function loadTextEditMenuHarness() {
 function loadTextEditPasteHarness() {
   const source = readSource('src/js/context_menu.js');
   const readStart = source.indexOf('const readTextClipboardForEditMenu');
-  const readEnd = source.indexOf('const writeTextClipboardFromEditMenu', readStart);
+  const readEnd = source.indexOf('const replaceTextEditSelection', readStart);
   const pasteStart = source.indexOf('const pasteTextIntoEditSelection');
   const pasteEnd = source.indexOf('function menuCommandFromButton', pasteStart);
   assert.ok(readStart >= 0 && readEnd > readStart, 'text clipboard reader is missing');
@@ -727,7 +727,7 @@ test('text edit mode always keeps text direct while caching static non-text laye
   assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, editingId, true\);/);
   assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, editingId\);/);
   assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions\);/);
-  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, zoom, textSelectionMotions\);/);
+  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, zoom, textSelectionMotions\);/);
 
   const transformStart = viewportSource.indexOf('function applyTransform');
   const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);

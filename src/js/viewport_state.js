@@ -40,10 +40,6 @@ const ZOOM_MIN = 0.01, ZOOM_MAX = 100;
     return applyViewportState(nextPanX, nextPanY, normalizedZoom);
   }
 
-  function setPan(nextPanX, nextPanY) {
-    return applyViewportState(nextPanX, nextPanY, zoom);
-  }
-
   function setZoomPan(nextZoom, nextPanX, nextPanY) {
     return applyViewportState(nextPanX, nextPanY, nextZoom);
   }
@@ -51,7 +47,6 @@ const ZOOM_MIN = 0.01, ZOOM_MAX = 100;
   const api = Object.freeze({
     panBy,
     reset,
-    setPan,
     setViewport,
     setZoomPan,
     zoomAroundClient,

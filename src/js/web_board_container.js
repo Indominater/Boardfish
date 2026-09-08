@@ -1,7 +1,7 @@
 'use strict';
 
 (function initWebBoardContainer(root) {
-  const { extForMime, mimeForExt, normalizeImageExt } = root.BoardfishBoardTypes ||
+  const { mimeForExt, normalizeImageExt } = root.BoardfishBoardTypes ||
     (typeof require === 'function' ? require('./board_types.js') : null);
   const ZIP_LOCAL_FILE_HEADER = 0x04034b50;
   const ZIP_CENTRAL_DIRECTORY = 0x02014b50;
@@ -377,7 +377,6 @@
       entryCount,
       centralSize,
       centralOffset,
-      eocdOffset: absoluteEocdOffset,
     };
   }
 
@@ -499,8 +498,7 @@
     return Infinity;
   }
 
-  function throwEntryTooLarge(entry, actualBytes, options = {}) {
-    if (typeof options.tooLargeError === 'function') throw options.tooLargeError(actualBytes);
+  function throwEntryTooLarge(entry) {
     throw new Error(`Boardfish container entry ${entry.name} exceeds the board content limit`);
   }
 
@@ -521,7 +519,7 @@
         total += chunk.length;
         if (Number.isFinite(limit) && total > limit) {
           try { await reader.cancel(); } catch (_) {}
-          throwEntryTooLarge(entry, total, options);
+          throwEntryTooLarge(entry);
         }
         chunks.push(chunk);
       }
@@ -537,12 +535,11 @@
     return out;
   }
 
-  function assertZipEntryReadBudget(entry, maxBytes, tooLargeError = null) {
+  function assertZipEntryReadBudget(entry, maxBytes) {
     const limit = Number(maxBytes);
     if (!Number.isFinite(limit)) return;
     const advertisedSize = zipEntryContentBytes(entry);
     if (advertisedSize <= limit) return;
-    if (typeof tooLargeError === 'function') throw tooLargeError(advertisedSize);
     throw new Error(`Boardfish container entry ${entry?.name || ''} exceeds the board content limit`);
   }
 
@@ -557,7 +554,7 @@
   async function validateReadZipEntry(out, entry, options = {}) {
     const limit = Number(options.maxBytes);
     if (Number.isFinite(limit) && out.length > limit) {
-      throwEntryTooLarge(entry, out.length, options);
+      throwEntryTooLarge(entry);
     }
     if (Number(entry.uncompressedSize) !== out.length) {
       throw new Error(`invalid Boardfish container entry size ${entry.name}`);
@@ -584,7 +581,7 @@
   }
 
   async function readZipEntry(input, entry, options = {}) {
-    assertZipEntryReadBudget(entry, options.maxBytes, options.tooLargeError);
+    assertZipEntryReadBudget(entry, options.maxBytes);
     let compressed = isBlobLike(input)
       ? await compressedEntryBlob(input, entry)
       : compressedEntryBytes(input, entry);

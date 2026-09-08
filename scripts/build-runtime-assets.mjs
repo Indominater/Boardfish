@@ -81,8 +81,6 @@ const DIAGNOSTIC_CALLS = Object.freeze([
   'webSourceClipboardKind',
   'recordMotionDebug',
   'isHistoryDebugEnabled',
-  'isDebugApiEnabled',
-  'shouldPrepareImagePreviewDebug',
   'isDebugApiEnabledForStep',
   'isOpenDebugActive',
   'isPillDebugActive',
@@ -104,7 +102,6 @@ const PRODUCTION_FALSE_DIAGNOSTIC_FLAGS = Object.freeze([
   'collectOpenInitialRenderDebug',
   'collectTransformDebug',
   'collectInitialRenderDebug',
-  'collectMotionDebug',
   'collectClipboardDiagnostics',
   'collectClipboardIoDiagnostics',
   'perfTraceInput',
@@ -228,7 +225,6 @@ async function compileProductionBundle(source) {
     DEBUG_TOOLS_ENABLED: 'false',
     module: 'undefined', require: 'undefined',
     console: RUNTIME_CONSOLE_SENTINEL,
-    'OpenDebug.hydrationConcurrency': 'openHydrationConcurrency',
   };
   for (const flag of PRODUCTION_FALSE_DIAGNOSTIC_FLAGS) define[flag] = 'false';
   for (const api of DIAGNOSTIC_APIS) {

@@ -36,8 +36,6 @@
       testedObjects: 0,
       visibleObjects: 0,
       bitmapImages: 0,
-      elementImages: 0,
-      fallbackImages: 0,
       missingImages: 0,
       erroredImages: 0,
       croppedImages: 0,
@@ -495,11 +493,7 @@
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
             if (motion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
           }
-          if (bitmap || selected?.scale < 1) counters.bitmapImages++;
-          else {
-            counters.elementImages++;
-            counters.fallbackImages++;
-          }
+          counters.bitmapImages++;
         }
         try {
           const cropped = drawImageObj(context, obj, img, view, viewportRect);
@@ -597,11 +591,6 @@
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
           activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
           scaledVariantPendingImages: drawCounterValue(counters, 'scaledVariantPendingImages'),
-          motionObjects: drawCounterValue(counters, 'motionObjects'),
-          motionImages: drawCounterValue(counters, 'motionImages'),
-          motionText: drawCounterValue(counters, 'motionText'),
-          motionTranslatedObjects: drawCounterValue(counters, 'motionTranslatedObjects'),
-          motionScaledObjects: drawCounterValue(counters, 'motionScaledObjects'),
           motionScaledImages: drawCounterValue(counters, 'motionScaledImages'),
           motionFullScaleImages: drawCounterValue(counters, 'motionFullScaleImages'),
           motionFullFallbackImages: drawCounterValue(counters, 'motionFullFallbackImages'),

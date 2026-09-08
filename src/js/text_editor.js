@@ -586,9 +586,9 @@ const clearTextEditCaretIndex = (obj) => {
   delete obj._textEditCaretLineStartIndex;
 };
 
-// A soft wrap has two visual positions for the same text index. Keep the row
-// selected by a click/navigation, or choose the side approached by an arrow.
-const textEditCaretLineAtIndex = (obj, layout, index, affinity = null) => {
+// A soft wrap has two visual positions for the same text index. Choose the
+// side approached by an arrow.
+const textEditCaretLineAtIndex = (layout, index, affinity) => {
   if (!layout.length) return -1;
   let lo = 0, hi = layout.length - 1;
   while (lo < hi) {
@@ -598,8 +598,6 @@ const textEditCaretLineAtIndex = (obj, layout, index, affinity = null) => {
     if (index <= end) hi = mid;
     else lo = mid + 1;
   }
-  const preferred = affinity == null && obj?._textEditCaretIndex === index
-    ? obj._textEditCaretLineStartIndex : null;
   let result = lo;
   // Crossing consumed wrap whitespace reaches the next row's beginning. A
   // hard word wrap, in contrast, still has a caret at the preceding row's end.
@@ -607,7 +605,6 @@ const textEditCaretLineAtIndex = (obj, layout, index, affinity = null) => {
   const visibleEnd = line.endIndex ?? (line.startIndex + line.text.length);
   if (index > visibleEnd && layout[lo + 1]?.startIndex === index) result = lo + 1;
   for (let i = lo; i < layout.length && layout[i].startIndex <= index; i++) {
-    if (layout[i].startIndex === preferred) return i;
     if (affinity === 'forward') result = i;
   }
   return result;
@@ -2049,7 +2046,7 @@ function enterEdit(id, {
         moveRight ? 'right' : 'left',
       );
       const layout = getTextLayout(obj);
-      const lineIndex = textEditCaretLineAtIndex(obj, layout, nextPosition, moveRight ? 'backward' : 'forward');
+      const lineIndex = textEditCaretLineAtIndex(layout, nextPosition, moveRight ? 'backward' : 'forward');
       applyTextEditNavigationSelection(obj, proxy, selection, nextPosition,
         layout[lineIndex]?.startIndex, e.shiftKey);
       scheduleRender(true, false);

@@ -225,18 +225,6 @@ const readTextClipboardForEditMenu = async () => {
   return '';
 };
 
-const writeTextClipboardFromEditMenu = async (text, { allowEmpty = false } = {}) => {
-  if (!text && !allowEmpty) return false;
-  clearJsClipboard();
-  try {
-    await BoardfishClipboardIO.copyTextToClipboard(text);
-    return true;
-  } catch (err) {
-    MenuDebug.log('text-ctx-menu:clipboard-write-miss', { error: String(err) });
-    return false;
-  }
-};
-
 const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 'insertText' } = {}) => {
   const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
   const selection = getTextEditSelectionState();
@@ -348,23 +336,8 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
 
 const copyTextEditSelection = async () => {
   const selection = getTextEditSelectionState();
-  if (
-    selection?.hasSelection &&
-    _editEl &&
-    typeof copyTextEditSelectionFromProxy === 'function'
-  ) {
+  if (selection?.hasSelection && _editEl) {
     await copyTextEditSelectionFromProxy(editingId, _editEl, selection);
-    focusTextEditProxy();
-    return;
-  }
-  const value = _editEl && typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl?.value ?? '');
-  const selectedText = selection?.hasSelection && _editEl ? value.slice(selection.start, selection.end) : '';
-  const feedback = selectedText ? { id: editingId, ...selection } : null;
-  const copied = await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
-    allowEmpty: !!selectedText,
-  });
-  if (copied && feedback && editingId === feedback.id && _editEl) {
-    globalThis.BoardfishMotion?.applyCopyFeedback?.({ textSelection: feedback });
   }
   focusTextEditProxy();
 };

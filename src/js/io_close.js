@@ -547,34 +547,6 @@ async function hydrateTextDrawCachesForOpen(
   return result;
 }
 
-/* BOARDFISH_DEV_DIAGNOSTICS_START */
-async function hydrateImageBatchForOpen(keys, dbg = null, label = 'hydrate-batch') {
-  return hydrateImageKeysWithLimit(keys, dbg, label, getOpenHydrationConcurrency());
-}
-/* BOARDFISH_DEV_DIAGNOSTICS_END */
-
-/* BOARDFISH_DEV_DIAGNOSTICS_START */
-const waitForOpenRenderFrame = (dbg = null, reason = 'open-render-settle') => {
-  const t0 = performance.now();
-  return new Promise((resolve) => {
-    let settled = false;
-    let timeoutId = null;
-    const finish = (source = '') => {
-      if (settled) return;
-      settled = true;
-      if (timeoutId != null) clearTimeout(timeoutId);
-      OpenDebug.step(dbg, 'open-render-frame:settled', { reason, source, ms: performance.now() - t0 });
-      resolve();
-    };
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => finish('raf'));
-    }
-    timeoutId = setTimeout(() => finish('timeout'), 80);
-    if (settled) clearTimeout(timeoutId);
-  });
-};
-/* BOARDFISH_DEV_DIAGNOSTICS_END */
-
 function queueVisibleImageHydration(limit = 3
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   , dbg = null
@@ -692,7 +664,6 @@ async function finishOpenedBoard(
       culledImages: drawBreakdown?.culledImages ?? '',
       culledText: drawBreakdown?.culledText ?? '',
       bitmapImages: drawBreakdown?.bitmapImages ?? '',
-      elementImages: drawBreakdown?.elementImages ?? '',
       scaledImages: drawBreakdown?.scaledImages ?? '',
       scaledFallbackFull: drawBreakdown?.scaledFallbackFull ?? '',
       scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',

@@ -1721,7 +1721,7 @@ function loadCopyDeselectFrame({ emptySelection = false } = {}) {
   return { context, obj, draws, setTime, renderCalls, drawNormal(specs) {
     renderer.drawVisibleObjects({}, null, rect, specs);
   }, drawOverlay(specs) {
-    context.drawCopiedOverlay({}, rect, 1, specs);
+    context.drawCopiedOverlay({}, 1, specs);
   } };
 }
 

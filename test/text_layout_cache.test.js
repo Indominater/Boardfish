@@ -81,7 +81,8 @@ function loadTextLayout({
   );
   vm.runInContext(
     `globalThis.__testTextLayout = {
-      measureTextW,
+      measureRawTextW,
+      getPrefixWidths,
       textForExternalTextObjectPaste,
       getTextMinWidth,
       getTextLayout,
@@ -95,7 +96,6 @@ function loadTextLayout({
       clearTextLayoutCaches,
       clearTextObjectLayoutRuntime,
       prepareTextLineForDraw,
-      prepareTextLayoutForDraw,
       drawTextLineRange,
       lineCaretXAtOffset,
       lineXAtOffset,
@@ -298,16 +298,16 @@ test('text measurement cache evicts oldest entry without changing cache size', (
   const textLayout = context.__testTextLayout;
   const initialMeasures = measured.length;
 
-  assert.equal(textLayout.measureTextW('k0'), 2);
-  assert.equal(textLayout.measureTextW('k0'), 2);
+  assert.equal(textLayout.measureRawTextW('k0'), 2);
+  assert.equal(textLayout.measureRawTextW('k0'), 2);
   assert.equal(measured.length, initialMeasures + 2);
 
   for (let i = 1; i < textLayout.maxEntries; i++) {
-    textLayout.measureTextW(`k${i}`);
+    textLayout.measureRawTextW(`k${i}`);
   }
   assert.equal(textLayout.cache.size, textLayout.maxEntries);
 
-  textLayout.measureTextW('overflow');
+  textLayout.measureRawTextW('overflow');
 
   assert.equal(textLayout.cache.size, textLayout.maxEntries);
   assert.equal(textLayout.cache.has('k0'), false);
@@ -319,7 +319,7 @@ test('text measurement cache clears with other measurement caches', () => {
   const { context } = loadTextLayout();
   const textLayout = context.__testTextLayout;
 
-  textLayout.measureTextW('cached');
+  textLayout.measureRawTextW('cached');
   assert.equal(textLayout.cache.size, 1);
 
   textLayout.clearTextLayoutCaches({ measurements: true });
@@ -332,12 +332,12 @@ test('tab-stop width is reused until measurement caches clear', () => {
   const textLayout = context.__testTextLayout;
 
   assert.equal(textLayout.tabStopWidthCache, undefined);
-  textLayout.measureTextW('\t');
-  textLayout.measureTextW('a\t');
+  textLayout.getPrefixWidths('\t');
+  textLayout.getPrefixWidths('a\t');
   assert.equal(textLayout.tabStopWidthCache, 8);
   textLayout.clearTextLayoutCaches({ measurements: true });
   assert.equal(textLayout.tabStopWidthCache, undefined);
-  textLayout.measureTextW('\t');
+  textLayout.getPrefixWidths('\t');
   assert.equal(textLayout.tabStopWidthCache, 8);
 });
 
@@ -351,9 +351,9 @@ test('text measurement uses single-glyph advances for consistent spacing', () =>
   const textLayout = context.__testTextLayout;
   const initialMeasures = measured.length;
 
-  assert.equal(textLayout.measureTextW('YY'), 2);
-  assert.equal(textLayout.measureTextW('XY'), 2);
-  assert.equal(textLayout.measureTextW('XX'), 2);
+  assert.equal(textLayout.measureRawTextW('YY'), 2);
+  assert.equal(textLayout.measureRawTextW('XY'), 2);
+  assert.equal(textLayout.measureRawTextW('XX'), 2);
 
   assert.ok(!measured.slice(initialMeasures).includes('YY'));
   assert.ok(!measured.slice(initialMeasures).includes('XY'));
@@ -388,7 +388,7 @@ test('text layout adds a small advance when neighboring glyph ink would touch', 
   const [line] = textLayout.getTextLayout(obj);
   const calls = [];
 
-  assert.equal(textLayout.measureTextW('YY'), 20.5);
+  assert.equal(textLayout.measureRawTextW('YY'), 20.5);
   assert.equal(textLayout.lineXAtOffset(line, obj, 1), 26.5);
   assert.equal(textLayout.lineXAtOffset(line, obj, 2), 36.5);
 
@@ -470,11 +470,14 @@ test('opening hydration can prepare every text draw plan before the first canvas
   };
   const layout = textLayout.getTextLayout(obj);
 
-  assert.equal(textLayout.prepareTextLayoutForDraw(layout), 2);
+  assert.equal(layout.length, 2);
+  for (const line of layout) textLayout.prepareTextLineForDraw(line);
 
-  const stats = textLayout.drawTextLineRange({ fillText() {} }, layout[0], obj);
-  assert.equal(stats.planCacheHits, 1);
-  assert.equal(stats.planCacheMisses, 0);
+  for (const line of layout) {
+    const stats = textLayout.drawTextLineRange({ fillText() {} }, line, obj);
+    assert.equal(stats.planCacheHits, 1);
+    assert.equal(stats.planCacheMisses, 0);
+  }
 });
 
 test('text drawing ignores stale fast requests and preserves measured positions', () => {

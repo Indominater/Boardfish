@@ -302,7 +302,6 @@ function loadClipboardPasteObjectsHarness({ realLimits = false } = {}) {
       },
     },
     BoardfishImageStore: {
-      hasSource() { return true; },
       setSource() {},
     },
     BoardfishMotion: {
@@ -399,6 +398,8 @@ function loadTextEditCopyHarness(value, options = {}) {
     console,
     editingId: 'text-1',
     _editEl: editProxy,
+    objectsMap: new Map([['text-1', { id: 'text-1', type: 'text', data: { content: value } }]]),
+    setJsClipboard(clipboard) { calls.clipboard = clipboard; },
     calls,
     BoardfishClipboardIO: {
       copyTextToClipboard(text) {
@@ -437,6 +438,11 @@ function loadTextEditCopyHarness(value, options = {}) {
   };
 
   vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'src/js/text_editor.js'), 'utf8'),
+    context,
+    { filename: 'text_editor.js' },
+  );
   vm.runInContext(
     `${source.slice(start, end)}\n` +
       'globalThis.copyTextEditSelection = copyTextEditSelection;\n',
@@ -656,46 +662,26 @@ test('a failed text write does not start copy feedback', async () => {
   assert.deepEqual(context.calls.objectJello, []);
 });
 
-test('copying an ordinary object starts feedback after its in-app clipboard copy', () => {
-  const shape = {
-    id: 'shape-1',
-    type: 'rectangle',
-    x: 0,
-    y: 0,
-    w: 120,
-    h: 80,
-    z: 1,
-    data: {},
-  };
-  const context = loadClipboardExportHarness({ selectedObject: shape });
-
-  assert.equal(context.copySelected(), true);
-  assert.equal(context.calls.jsClipboards.length, 1);
-  assert.equal(context.calls.jsClipboards[0].type, 'objects');
-  assert.deepEqual([...context.calls.jsClipboards[0].objects].map((obj) => obj.id), ['shape-1']);
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['shape-1']]);
-});
-
 test('copying multiple objects jiggles after the browser clipboard marker settles', async () => {
   const first = {
-    id: 'shape-1',
-    type: 'rectangle',
+    id: 'text-1',
+    type: 'text',
     x: 0,
     y: 0,
     w: 120,
     h: 80,
     z: 1,
-    data: {},
+    data: { content: 'first' },
   };
   const second = {
-    id: 'shape-2',
-    type: 'ellipse',
+    id: 'text-2',
+    type: 'text',
     x: 160,
     y: 0,
     w: 120,
     h: 80,
     z: 2,
-    data: {},
+    data: { content: 'second' },
   };
   const context = loadClipboardExportHarness({
     selectedObjects: [first, second],
@@ -703,7 +689,7 @@ test('copying multiple objects jiggles after the browser clipboard marker settle
   });
 
   assert.equal(context.copySelected(), true);
-  assert.deepEqual([...context.calls.jsClipboards[0].objects].map((obj) => obj.id), ['shape-1', 'shape-2']);
+  assert.deepEqual([...context.calls.jsClipboards[0].objects].map((obj) => obj.id), ['text-1', 'text-2']);
   assert.deepEqual(context.calls.copiedTokens, ['web-token']);
   assert.equal(context.calls.pulses, 0);
 
@@ -925,6 +911,10 @@ test('copying highlighted text omits whitespace-only lines at selection edges', 
   await context.copyTextEditSelection();
 
   assert.deepEqual(context.calls.copiedTexts, ['  first line  \n second line\t ']);
+  assert.deepEqual({ ...context.calls.clipboard }, {
+    type: 'text-selection',
+    text: '  first line  \n second line\t ',
+  });
   assert.deepEqual(context.calls.jello, [{
     id: 'text-1',
     start: 0,

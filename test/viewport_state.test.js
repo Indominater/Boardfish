@@ -11,10 +11,10 @@ const root = path.join(__dirname, '..');
 test('viewport panning accepts large offsets in every direction', () => {
   const zoom = 2;
 
-  const towardTopLeft = applyViewportState({ zoom }, 'setPan', 100000, 100000);
+  const towardTopLeft = applyViewportState({ zoom }, 'setViewport', { panX: 100000, panY: 100000 });
   assert.deepEqual(towardTopLeft, { panX: 100000, panY: 100000, zoom });
 
-  const towardBottomRight = applyViewportState({ zoom }, 'setPan', -100000, -100000);
+  const towardBottomRight = applyViewportState({ zoom }, 'setViewport', { panX: -100000, panY: -100000 });
   assert.deepEqual(towardBottomRight, { panX: -100000, panY: -100000, zoom });
 });
 
@@ -59,7 +59,7 @@ test('wheel and drag state methods share the same unrestricted pan path', () => 
   assert.equal(context.BoardfishViewportState.panBy(100000, -100000), true);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: 100000, panY: -100000, zoom: 1 });
 
-  assert.equal(context.BoardfishViewportState.setPan(-100000, 100000), true);
+  assert.equal(context.BoardfishViewportState.setViewport({ panX: -100000, panY: 100000 }), true);
   assert.deepEqual({ ...context.viewportSnapshot() }, { panX: -100000, panY: 100000, zoom: 1 });
 });
 

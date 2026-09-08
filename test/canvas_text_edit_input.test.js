@@ -254,7 +254,7 @@ function loadRubberBandHarness() {
     },
     scheduleRender(board, overlay) { context.renders.push({ board, overlay }); },
     ViewportDebug: { isEnabled: () => false, start() { return {}; }, count() {}, end() {}, timing() {} },
-    BoardfishViewportState: { zoomAroundClient() {}, panBy() {}, setPan() {} },
+    BoardfishViewportState: { zoomAroundClient() {}, panBy() {} },
     scheduleTransform() {},
     createRafCommitter(apply) {
       let args = null;

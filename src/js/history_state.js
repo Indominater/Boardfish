@@ -42,7 +42,6 @@ function pruneImageCachesAfterHistoryChange(reason, historyEntriesDropped = fals
   const diagnosticReason = reason === undefined ? 'history-change' : reason;
   const imageResult = pruneImageCachesToKeys(retainedKeys);
   const removedImageCaches = (imageResult?.removedSources || 0) +
-    (imageResult?.removedAssetUrls || 0) +
     (imageResult?.removedBitmaps || 0) +
     (imageResult?.removedBitmapFailures || 0);
   if (removedImageCaches) {

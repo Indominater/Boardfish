@@ -576,14 +576,6 @@ const copySelected = (options = {}) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     );
   }
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (collectClipboardDiagnostics) {
-    ClipDebug.end(dbg, { path: 'object-jsClipboard', type: obj.type || '' });
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  // Non-text/image objects are copied synchronously into the in-app clipboard.
-  if (animateCopy) globalThis.BoardfishMotion?.applyCopyFeedback?.({ objects: [obj] });
-  return true;
 };
 
 const cutSelected = () => {

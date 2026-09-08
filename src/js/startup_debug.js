@@ -424,7 +424,6 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     settleFrames = 2,
     restore = true,
     copy = false,
-    mismatchThresholdMs = 16,
   } = {}) {
     const originalTheme = appTheme;
     const rows = [];
@@ -463,13 +462,12 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
       settleFrames,
       originalTheme,
       finalTheme: appTheme,
-      mismatchThresholdMs,
       mismatchCount: mismatches.length,
       allDomFramesMatched: rows.every((row) => row.domMatchesExpected),
       anyVisibleMismatchRisk: rows.some((row) => row.visibleMismatchRisk),
       verdict: mismatches.length
         ? 'inspect rows with dom mismatch or visibleMismatchRisk'
-        : 'all toggles matched within threshold',
+        : 'all toggles matched the expected theme',
     };
     const result = { summary, rows, events: events.slice(), samples: samples.slice() };
     console.table([summary]);
@@ -611,7 +609,6 @@ const BoardfishDebugConsole = (() => {
       return value;
     }
     if (type === 'bigint') return value.toString();
-    if (type === 'undefined') return { type: 'undefined' };
     if (type === 'function') return `[Function ${value.name || 'anonymous'}]`;
     if (depth > 8) return '[MaxDepth]';
     if (seen.has(value)) return '[Circular]';

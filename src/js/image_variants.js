@@ -189,15 +189,15 @@ function warmDrawableBitmapForDrawNow(source, meta = {}) {
   }
 }
 
-function runDrawableBitmapWarmupQueue(force = false, budgetMs = 4, maxItems = 4) {
-  if (!force && isActiveViewportInput()) {
+function runDrawableBitmapWarmupQueue() {
+  if (isActiveViewportInput()) {
     scheduleDrawableBitmapWarmupQueue();
     return;
   }
   const start = performance.now();
   let count = 0;
   for (const [source, meta] of drawableBitmapWarmupQueue) {
-    if (count >= maxItems || (count > 0 && performance.now() - start >= budgetMs)) break;
+    if (count >= 4 || (count > 0 && performance.now() - start >= 4)) break;
     drawableBitmapWarmupQueue.delete(source);
     warmDrawableBitmapForDrawNow(source, meta);
     count++;
@@ -219,7 +219,7 @@ function scheduleDrawableBitmapWarmupQueue() {
   }
 }
 
-function scheduleDrawableBitmapWarmup(source, meta = {}, immediate = false, budgetMs = 4, maxItems = 1) {
+function scheduleDrawableBitmapWarmup(source, meta = {}) {
   if (!isImageVariantDrawableSource(source)) return false;
   if (drawableBitmapWarmupReady.has(source) || drawableBitmapWarmupQueue.has(source)) {
     return false;
@@ -229,8 +229,7 @@ function scheduleDrawableBitmapWarmup(source, meta = {}, immediate = false, budg
     drawableBitmapWarmupQueuedCount++;
     countDrawableBitmapWarmupKind(drawableBitmapWarmupQueuedByKind, meta);
   }
-  if (immediate === true) runDrawableBitmapWarmupQueue(true, budgetMs, maxItems);
-  else scheduleDrawableBitmapWarmupQueue();
+  scheduleDrawableBitmapWarmupQueue();
   return true;
 }
 
@@ -551,7 +550,6 @@ function queueScaledImageVariant(key, source, scale, priority = false) {
     }
   };
   task.key = key;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') task.generation = generation;
   enqueueScaledVariantTask(task, priority);
   return typeof BOARDFISH_PRODUCTION === 'undefined'
     ? { key, scale, queued: true, priority: priority === true, estimatedBytes }
@@ -700,13 +698,7 @@ function prewarmVisibleScaledImageVariants(options = {}) {
   }
 }
 
-function scheduleVisibleImageWorkAfterIdle(
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  reason,
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  delayMs = IMAGE_VARIANT_INPUT_IDLE_MS
-) {
-  if (typeof BOARDFISH_PRODUCTION === 'undefined' && reason === undefined) reason = 'viewport-settled';
+function scheduleVisibleImageWorkAfterIdle(delayMs = IMAGE_VARIANT_INPUT_IDLE_MS) {
   if (_boardOpening) return;
   if (imageScaledVariantPrewarmTimer !== null) return;
   imageScaledVariantPrewarmTimer = setTimeout(() => {
@@ -714,21 +706,12 @@ function scheduleVisibleImageWorkAfterIdle(
     if (_boardOpening) return;
     const inputIdleMs = performance.now() - lastViewportInputAt;
     if (inputIdleMs < IMAGE_VARIANT_INPUT_IDLE_MS) {
-      scheduleVisibleImageWorkAfterIdle(
-        /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        reason,
-        /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs
-      );
+      scheduleVisibleImageWorkAfterIdle(IMAGE_VARIANT_INPUT_IDLE_MS - inputIdleMs);
       return;
     }
     queueVisibleImageHydration(1);
     if (!viewportImageScalingEnabled) return;
-    prewarmVisibleScaledImageVariants(
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      { reason }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    );
+    prewarmVisibleScaledImageVariants();
   }, Math.max(0, delayMs));
 }
 

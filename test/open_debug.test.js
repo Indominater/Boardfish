@@ -22,14 +22,6 @@ function withoutDeveloperDiagnostics(source) {
   );
 }
 
-function waitForOpenRenderFrameSource() {
-  const source = readSource('src/js/io_close.js');
-  const start = source.indexOf('const waitForOpenRenderFrame =');
-  const end = source.indexOf('\nfunction queueVisibleImageHydration', start);
-  assert.ok(start >= 0 && end > start, 'waitForOpenRenderFrame source is missing');
-  return source.slice(start, end);
-}
-
 test('developer open diagnostics tune the shared runtime hydration concurrency', () => {
   const messages = [];
   let exposed = null;
@@ -63,50 +55,6 @@ test('developer open diagnostics tune the shared runtime hydration concurrency',
   assert.equal(context.OpenDebug.setHydrationConcurrency(8), 8);
   assert.equal(exposed.open, context.OpenDebug);
   assert.match(messages.at(-1), /hydration concurrency set to 8/);
-});
-
-test('open render frame wait clears timeout after RAF settles', async () => {
-  const activeTimers = new Set();
-  const steps = [];
-  let nextTimerId = 0;
-  const context = {
-    clearTimeout(id) {
-      activeTimers.delete(id);
-    },
-    OpenDebug: {
-      step(_dbg, phase, detail) {
-        steps.push({ phase, detail });
-      },
-    },
-    performance: {
-      now() {
-        return 100;
-      },
-    },
-    requestAnimationFrame(callback) {
-      callback();
-    },
-    setTimeout() {
-      nextTimerId++;
-      activeTimers.add(nextTimerId);
-      return nextTimerId;
-    },
-  };
-  vm.createContext(context);
-  vm.runInContext(
-    `${waitForOpenRenderFrameSource()}\n` +
-      'globalThis.waitForOpenRenderFrame = waitForOpenRenderFrame;\n',
-    context,
-    { filename: 'io_close_wait_frame.js' },
-  );
-
-  await context.waitForOpenRenderFrame(null, 'test-render');
-
-  assert.equal(activeTimers.size, 0);
-  assert.deepEqual(JSON.parse(JSON.stringify(steps)), [{
-    phase: 'open-render-frame:settled',
-    detail: { reason: 'test-render', source: 'raf', ms: 0 },
-  }]);
 });
 
 test('open-board debugger covers the slow open phases developers need to inspect', () => {
@@ -211,7 +159,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'cache-image:decode-queue:queued',
     'cache-image:decode-queue:start',
     'cache-image:createImageBitmap',
-    'cache-image:previewBitmap',
     'cache-image:schedule-render',
     'cache-image:done',
   ]) {

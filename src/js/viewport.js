@@ -428,7 +428,7 @@ const drawTextSelectionContentJello = (context, obj, selection, motion) => {
   context.restore();
 };
 
-const drawTextSelectionJelloOverlays = (context, viewportRect = null, viewZoom = zoom, motions = null) => {
+const drawTextSelectionJelloOverlays = (context, viewZoom = zoom, motions = null) => {
   if (!motions?.size) return;
   for (const [id, spec] of motions) {
     if (id === editingId) continue;
@@ -690,7 +690,7 @@ function drawBoard(bypassEditOffscreenCache = false) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const editStart = collectDrawDebug ? performance.now() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionMotions);
+    drawTextSelectionJelloOverlays(ctx, zoom, textSelectionMotions);
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
       drawEditingTextOverlay(ctx, zoom, viewportRect, textSelectionMotions);
     } else {
@@ -727,13 +727,12 @@ function drawBoard(bypassEditOffscreenCache = false) {
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
-    drawTextSelectionJelloOverlays(ctx, viewportRect, zoom, textSelectionMotions);
+    drawTextSelectionJelloOverlays(ctx, zoom, textSelectionMotions);
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   if (collectDrawDebug) {
     ViewportDebug.count('croppedImages', counters.croppedImages);
     ViewportDebug.count('imageDrawMissing', counters.missingImages);
-    ViewportDebug.count('imageDrawFallback', counters.fallbackImages);
     ViewportDebug.count('imageDrawErrors', counters.erroredImages);
     const drawMeta = {
       source: _activeRenderSource,
@@ -824,11 +823,7 @@ function applyTransform(
   // prewarm rescanned up to 100 large text objects in one unbounded main-thread
   // callback, which could delay the next gesture. Keep prewarm available to the
   // explicit performance debugger, but do not run it after navigation.
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    scheduleVisibleImageWorkAfterIdle(_activeRenderSource || 'transform');
-  } else {
-    scheduleVisibleImageWorkAfterIdle();
-  }
+  scheduleVisibleImageWorkAfterIdle();
   if (_islandSyncedZoom !== zoom) syncIslandZoomDisplay(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     _activeRenderSource || 'transform'

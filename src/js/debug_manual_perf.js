@@ -94,8 +94,8 @@ var ManualPerfDebug = (() => {
   }
 
   function drawableRgbaBytes(source) {
-    const width = Number(source?.width || source?.naturalWidth || 0);
-    const height = Number(source?.height || source?.naturalHeight || 0);
+    const width = Number(source?.width || 0);
+    const height = Number(source?.height || 0);
     return width > 0 && height > 0 ? width * height * 4 : 0;
   }
 
@@ -132,8 +132,6 @@ var ManualPerfDebug = (() => {
         sourceMB: mb(sourceBytesForKey),
         bitmapMB: mb(bitmapBytesForKey),
         totalEstimateMB: mb(sourceBytesForKey + bitmapBytesForKey),
-        imageW: bitmap?.width || 0,
-        imageH: bitmap?.height || 0,
         bitmapW: bitmap?.width || 0,
         bitmapH: bitmap?.height || 0,
       });
@@ -1407,7 +1405,6 @@ var ManualPerfDebug = (() => {
       maxEditLayoutMs: draw.maxEditLayoutMs ?? '',
       historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
       historyMaxFocusMs: historySummary.maxFocusMs ?? '',
-      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
     };
   }
 
@@ -1639,9 +1636,6 @@ var ManualPerfDebug = (() => {
       autoHeightForceSync: step.autoHeightForceSync,
       autoHeightForceReason: step.autoHeightForceReason,
       restoredMinLinesReset: step.restoredMinLinesReset,
-      restoredPreviousMinLines: step.restoredPreviousMinLines,
-      restoredPreservedMinLines: step.restoredPreservedMinLines,
-      restoredNextMinLines: step.restoredNextMinLines,
       pendingSizeSyncBeforeAutoHeight: step.pendingSizeSyncBeforeAutoHeight,
       pendingSizeSync: step.pendingSizeSync,
       inputStateObjectHeight: step.inputStateObjectHeight,
@@ -1848,14 +1842,8 @@ var ManualPerfDebug = (() => {
       historyMaxOuterRestoreMs: historySummary.maxOuterRestoreMs ?? '',
       historyMaxFlushMs: historySummary.maxFlushMs ?? '',
       historyMaxCloneObjectsMs: historySummary.maxCloneObjectsMs ?? '',
-      historyHydratedTextRuntimeCaches: historySummary.hydratedTextRuntimeCaches ?? '',
-      historyHydratedTextLayoutCaches: historySummary.hydratedTextLayoutCaches ?? '',
       historyMaxReplaceBoardObjectsMs: historySummary.maxReplaceBoardObjectsMs ?? '',
       historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
-      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
-      historyMaxProxyValueDiffMs: historySummary.maxProxyValueDiffMs ?? '',
-      historyMaxProxyValueMutationMs: historySummary.maxProxyValueMutationMs ?? '',
-      historyMaxProxyValueAssignMs: historySummary.maxProxyValueAssignMs ?? '',
       historyMaxSetSelectionRangeMs: historySummary.maxSetSelectionRangeMs ?? '',
       historyMaxFocusMs: historySummary.maxFocusMs ?? '',
     };
