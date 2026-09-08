@@ -122,7 +122,6 @@
         mode = 'pending';
         pinchDistance = 0;
         startHold(stored);
-        call('onPressStart', gesturePayload(stored));
       } else {
         startPinch(event);
       }
@@ -189,7 +188,7 @@
 
       active.delete(current.pointerId);
       if (finishedMode === 'pinch') {
-        call('onPinchEnd', gesturePayload(current, { cancelled }));
+        call('onPinchEnd');
       }
 
       if (active.size >= 2) {
@@ -212,12 +211,12 @@
       if (active.size === 0) {
         mode = 'idle';
         pinchDistance = 0;
-        call('onGestureEnd', gesturePayload(current, { cancelled, finishedMode }));
+        call('onGestureEnd', gesturePayload(current));
       }
       return true;
     }
 
-    function cancel(reason = 'cancel') {
+    function cancel() {
       if (!active.size && mode === 'idle') return false;
       const finishedMode = mode;
       const point = active.values().next().value || null;
@@ -226,13 +225,9 @@
       mode = 'idle';
       pinchDistance = 0;
       if (finishedMode === 'pinch') {
-        call('onPinchEnd', gesturePayload(point, { cancelled: true, reason }));
+        call('onPinchEnd');
       }
-      call('onGestureEnd', gesturePayload(point, {
-        cancelled: true,
-        reason,
-        finishedMode,
-      }));
+      call('onGestureEnd', gesturePayload(point));
       return true;
     }
 
@@ -505,9 +500,9 @@
     canvas.addEventListener('lostpointercapture', onTouchPointerCancel, { passive: false });
   }
 
-  root.addEventListener?.('blur', () => controller.cancel('window-blur'));
-  root.addEventListener?.('pagehide', () => controller.cancel('pagehide'));
+  root.addEventListener?.('blur', () => controller.cancel());
+  root.addEventListener?.('pagehide', () => controller.cancel());
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden || document.visibilityState === 'hidden') controller.cancel('document-hidden');
+    if (document.hidden || document.visibilityState === 'hidden') controller.cancel();
   });
 })(typeof window !== 'undefined' ? window : globalThis);

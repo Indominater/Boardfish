@@ -430,7 +430,6 @@ const applyTextEditLineBreakIndent = (value, selection) => {
     start: nextCaret,
     end: nextCaret,
     direction: 'none',
-    changed: nextValue !== text,
   };
 };
 
@@ -1410,7 +1409,6 @@ function enterEdit(id, {
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       domSyncBeforeNativeInput = syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
-      if (domSyncBeforeNativeInput.synced) pendingInputState.domSyncedBeforeNativeInput = true;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     beginTextEditHistoryAction(id, pendingInputState);

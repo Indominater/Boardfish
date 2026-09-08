@@ -599,7 +599,7 @@ function textWrappedLineIndexEntryForVisual(cache, visualLineIndex) {
     if ((entries[mid]?.visualStart || 0) <= target) lo = mid;
     else hi = mid - 1;
   }
-  return { entry: entries[lo], index: lo };
+  return { entry: entries[lo] };
 }
 
 function prewarmTextObjectLayoutRuntimeCaches(obj, options = {}) {
@@ -785,13 +785,11 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
           startIndex: start,
           endIndex: end,
           visualStart: visualLineIndex,
-          visualEnd: visualLineIndex,
         };
         lineIndex.push(entry);
       } else {
         entry.startIndex = Math.min(entry.startIndex, start);
         entry.endIndex = Math.max(entry.endIndex, end);
-        entry.visualEnd = visualLineIndex;
       }
     }
     if (collectLines && visualLineIndex >= firstLineIndex && visualLineIndex <= lastLineIndex) {
@@ -984,7 +982,6 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const debug = collectDiagnostics ? {
-    ok: false,
     reason: '',
     oldLayoutLines: Array.isArray(obj._layoutCache) ? obj._layoutCache.length : 0,
   } : null;
@@ -1076,13 +1073,11 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   obj._layoutCacheY = obj.y;
 
   if (collectDiagnostics) {
-    debug.ok = true;
     debug.newLayoutLines = layout.length;
     debug.removedLayoutLines = removedLayoutCount;
     debug.insertedLayoutLines = insertedLayout.length;
     debug.layoutLineDelta = layoutLineDelta;
     debug.logicalLineDelta = logicalLineDelta;
-    debug.deltaChars = deltaChars;
     obj._lastTextLayoutPatchDebug = debug;
   }
   return true;
