@@ -153,10 +153,10 @@ test('image renderer crops untransformed images to the visible viewport', () => 
   assert.equal(counters.fullScaleImageContextFirstDraws, 1);
   assert.deepEqual(drawImageCalls, [[
     source,
-    20,
-    10,
-    120,
-    40,
+    11 * (200 / 102),
+    6 * (100 / 52),
+    60 * (200 / 102),
+    20 * (100 / 52),
     0,
     25,
     60,
@@ -571,7 +571,7 @@ test('animated image cropping inverse-maps translation and non-uniform scale', (
 
   assert.equal(drawImageCalls.length, 1);
   assert.strictEqual(drawImageCalls[0][0], source);
-  const expectedCrop = [170, 110, 50, 200, -30, -190, 50, 200];
+  const expectedCrop = [600 * 171 / 602, 600 * 111 / 602, 600 * 50 / 602, 600 * 200 / 602, -30, -190, 50, 200];
   drawImageCalls[0].slice(1).forEach((value, index) => {
     assertClose(value, expectedCrop[index]);
   });

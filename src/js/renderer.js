@@ -160,48 +160,42 @@
       return false;
     }
 
+    const x = obj.x - edgeOverdraw;
+    const y = obj.y - edgeOverdraw;
+    const w = obj.w + edgeOverdraw * 2;
+    const h = obj.h + edgeOverdraw * 2;
     if (viewportRect && obj.w > 0 && obj.h > 0) {
-      const objRight = obj.x + obj.w;
-      const objBottom = obj.y + obj.h;
-      const x1 = Math.max(obj.x, viewportRect.x1);
-      const y1 = Math.max(obj.y, viewportRect.y1);
+      const objRight = x + w;
+      const objBottom = y + h;
+      const x1 = Math.max(x, viewportRect.x1);
+      const y1 = Math.max(y, viewportRect.y1);
       const x2 = Math.min(objRight, viewportRect.x2);
       const y2 = Math.min(objBottom, viewportRect.y2);
       if (!(x2 > x1 && y2 > y1)) return null;
-      if (x1 !== obj.x || y1 !== obj.y || x2 !== objRight || y2 !== objBottom) {
+      if (x1 !== x || y1 !== y || x2 !== objRight || y2 !== objBottom) {
         const sourceWidth = img.width;
         const sourceHeight = img.height || img.naturalHeight;
         if (sourceHeight > 0) {
-          const sx = sourceWidth / obj.w;
-          const sy = sourceHeight / obj.h;
+          const sx = sourceWidth / w;
+          const sy = sourceHeight / h;
           const cropWidth = x2 - x1;
           const cropHeight = y2 - y1;
-          const left = x1 === obj.x ? edgeOverdraw : 0;
-          const top = y1 === obj.y ? edgeOverdraw : 0;
-          const right = x2 === objRight ? edgeOverdraw : 0;
-          const bottom = y2 === objBottom ? edgeOverdraw : 0;
           context.drawImage(
             img,
-            (x1 - obj.x) * sx,
-            (y1 - obj.y) * sy,
+            (x1 - x) * sx,
+            (y1 - y) * sy,
             cropWidth * sx,
             cropHeight * sy,
-            x1 - left,
-            y1 - top,
-            cropWidth + (left + right),
-            cropHeight + (top + bottom),
+            x1,
+            y1,
+            cropWidth,
+            cropHeight,
           );
           return true;
         }
       }
     }
-    context.drawImage(
-      img,
-      obj.x - edgeOverdraw,
-      obj.y - edgeOverdraw,
-      obj.w + edgeOverdraw * 2,
-      obj.h + edgeOverdraw * 2,
-    );
+    context.drawImage(img, x, y, w, h);
     return false;
   }
 
