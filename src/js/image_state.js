@@ -83,8 +83,7 @@ function renderImageToCanvas(obj, sourceImg = null) {
   tmp.width = sideways ? sourceH : sourceW;
   tmp.height = sideways ? sourceW : sourceH;
   const tctx = tmp.getContext('2d');
-  tctx.translate(tmp.width / 2, tmp.height / 2);
-  tctx.scale(transform.flipX ? -1 : 1, transform.flipY ? -1 : 1);
+  tctx.transform(transform.flipX ? -1 : 1, 0, 0, transform.flipY ? -1 : 1, tmp.width / 2, tmp.height / 2);
   if (transform.rotation) tctx.rotate((transform.rotation * Math.PI) / 180);
   tctx.drawImage(img, -sourceW / 2, -sourceH / 2, sourceW, sourceH);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */

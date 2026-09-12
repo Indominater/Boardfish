@@ -729,16 +729,14 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
         : entry.bitmap;
     }
     queueScaledImageVariant(key, fullSource, targetScale, activeInput);
-    if (activeInput && imageScaledBitmapPending.has(key)) {
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') imageScaledVariantActiveInputFullFallbackCount++;
-      return typeof BOARDFISH_PRODUCTION === 'undefined'
-        ? {
-            source: fullSource,
-            scale: 1,
-            targetScale,
-            activeInputFullFallback: true,
-          }
-        : { source: fullSource, activeInputFullFallback: true };
+    if (typeof BOARDFISH_PRODUCTION === 'undefined' && activeInput && imageScaledBitmapPending.has(key)) {
+      imageScaledVariantActiveInputFullFallbackCount++;
+      return {
+        source: fullSource,
+        scale: 1,
+        targetScale,
+        activeInputFullFallback: true,
+      };
     }
   }
   return typeof BOARDFISH_PRODUCTION === 'undefined'

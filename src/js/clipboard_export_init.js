@@ -367,9 +367,7 @@ const copySelected = (options = {}) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const payloadStartedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const clipboardText = typeof textObjectContentForClipboard === 'function'
-      ? textObjectContentForClipboard(obj)
-      : textForClipboard(obj.data.content);
+    const clipboardText = textForClipboard(obj.data.content);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const textStats = collectClipboardDiagnostics
       ? clipboardTextStats(clipboardText)

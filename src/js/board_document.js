@@ -135,7 +135,6 @@
   function getTextRuntimeMetrics(objectsList = []) {
     let runtimeTextCacheObjects = 0;
     let runtimeTextCacheLines = 0;
-    let runtimeTextCacheContentChars = 0;
     let runtimeTextCachePrefixEntries = 0;
     let runtimeTextPrivateFields = 0;
     for (const obj of objectsList || []) {
@@ -148,7 +147,6 @@
         runtimeTextCacheObjects++;
         runtimeTextCacheLines += obj._layoutCache.length;
         for (const line of obj._layoutCache) {
-          runtimeTextCacheContentChars += String(line?.content || '').length;
           runtimeTextCachePrefixEntries += Number(line?.prefixWidths?.length) || 0;
         }
       }
@@ -156,7 +154,6 @@
     return {
       runtimeTextCacheObjects,
       runtimeTextCacheLines,
-      runtimeTextCacheContentChars,
       runtimeTextCachePrefixEntries,
       runtimeTextPrivateFields,
     };

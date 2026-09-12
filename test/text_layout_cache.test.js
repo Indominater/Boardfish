@@ -1513,38 +1513,6 @@ test('auto-height reuses exact wrapped line index when resize revisits a width',
   assert.equal(textLayout.hasObjectLayoutCache(obj), false);
 });
 
-test('viewport layout still supports count-only auto-height cache without full line index', () => {
-  const { context } = loadTextLayout({
-    measureWidth(text) {
-      return String(text).length;
-    },
-  });
-  const textLayout = context.__testTextLayout;
-  const content = Array.from({ length: 90 }, (_, index) => `line ${index} alpha beta`).join('\n');
-  const obj = {
-    id: 'count-only-visible-layout-cache',
-    type: 'text',
-    x: 0,
-    y: -240,
-    w: 34 + context.TEXT_PAD * 2,
-    h: 90 * context.LINE_H + context.TEXT_PAD * 2,
-    data: { content },
-    _textWrappedLineCountCacheContent: content,
-    _textWrappedLineCountCacheW: 34 + context.TEXT_PAD * 2,
-    _textWrappedLineCountCacheValue: 90,
-  };
-
-  assert.equal(textLayout.wrappedLineIndexCacheSize(obj), 0);
-  assert.equal(textLayout.syncTextAutoHeight(obj), false);
-  assert.equal(textLayout.wrappedLineIndexCacheSize(obj), 0);
-  const visible = textLayout.getTextLayoutForViewport(obj, { y1: 0, y2: 120 });
-  assert.equal(visible.totalLines, 90);
-  assert.ok(visible.length > 0);
-  assert.equal(textLayout.wrappedLineIndexCacheSize(obj), 0);
-  assert.ok(textLayout.viewportLineCacheSize(obj) >= visible.length);
-  assert.equal(textLayout.hasObjectLayoutCache(obj), false);
-});
-
 test('runtime prewarm fills paragraph prefixes without full layout cache', () => {
   const { context, measured } = loadTextLayout({
     measureWidth(text) {

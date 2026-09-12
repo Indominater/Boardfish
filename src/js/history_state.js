@@ -160,7 +160,6 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
   let runtimeTextLayoutObjects = 0;
   let runtimeTextLayoutLines = 0;
   let runtimeTextLayoutPrefixEntries = 0;
-  let runtimeTextLineContentChars = 0;
   for (const obj of sourceObjects || []) {
     if (obj?.type !== 'text') continue;
     textObjectCount++;
@@ -179,7 +178,6 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
     runtimeTextLayoutLines += obj._layoutCache.length;
     for (const line of obj._layoutCache) {
       runtimeTextLayoutPrefixEntries += Number(line?.prefixWidths?.length) || 0;
-      runtimeTextLineContentChars += String(line?.content || '').length;
     }
   }
   return {
@@ -192,7 +190,6 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
     runtimeTextLayoutObjects,
     runtimeTextLayoutLines,
     runtimeTextLayoutPrefixEntries,
-    runtimeTextLineContentChars,
   };
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */

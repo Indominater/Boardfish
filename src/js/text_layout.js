@@ -691,10 +691,8 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
   const collectLines = options.collect !== false;
   const collectLineIndex = options.collectLineIndex === true;
   const rangeLimited = firstLineIndex > 0 || Number.isFinite(lastLineIndex);
-  const knownLineCount = Math.trunc(Number(options.knownLineCount)) || 0;
   const lineIndexEntries = Array.isArray(options.lineIndexEntries) ? options.lineIndexEntries : null;
   const lastLogicalLine = options.endLine ?? Infinity;
-  const canStopAfterRange = collectLines && rangeLimited && knownLineCount > 0 && !collectLineIndex;
   const maxW = obj.w - TEXT_PAD * 2;
   const result = [];
   const lineIndex = collectLineIndex ? [] : null;
@@ -735,7 +733,6 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
   let paraStart = options.startIndex || 0;
   let logicalLineIndex = options.startLine || 0;
   while (paraStart <= content.length && logicalLineIndex <= lastLogicalLine) {
-    if (canStopAfterRange && visualLineIndex > lastLineIndex) break;
     const indexedLine = lineIndexEntries?.[logicalLineIndex];
     if (indexedLine) {
       paraStart = indexedLine.startIndex;
@@ -822,7 +819,7 @@ function buildWrappedLines(obj, options = {}, content = obj.data.content) {
     logicalLineIndex++;
   }
 
-  return { lines: result, lineCount: Math.max(1, knownLineCount || visualLineIndex), lineIndex };
+  return { lines: result, lineCount: Math.max(1, visualLineIndex), lineIndex };
 }
 
 function getWrappedLineCount(obj, text) {
@@ -1268,18 +1265,12 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
 
   const lineIndexCache = getCachedTextWrappedLineIndex(obj, content);
   if (!lineIndexCache) {
-    const knownLineCount = getCachedTextWrappedLineCount(obj, content);
     const wrapped = buildWrappedLines(obj, {
       firstLineIndex: first,
       lastLineIndex: last,
-      knownLineCount,
-      collectLineIndex: knownLineCount == null,
+      collectLineIndex: true,
     });
-    if (wrapped.lineIndex) {
-      setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex || [], wrapped.lineCount);
-    } else {
-      setCachedTextWrappedLineCount(obj, content, wrapped.lineCount);
-    }
+    setCachedTextWrappedLineIndex(obj, content, wrapped.lineIndex, wrapped.lineCount);
     const layout = new Array(wrapped.lines.length);
     for (let i = 0; i < wrapped.lines.length; i++) {
       const line = wrapped.lines[i];
@@ -1352,7 +1343,7 @@ function lineHitOffsetForX(line, wx, obj, nearest = false) {
 function lineCaretXAtOffset(line, obj, offset) {
   const text = String(line?.text ?? '');
   const lineStart = Math.max(0, Math.trunc(Number(line?.startIndex)) || 0);
-  const content = String(obj?.data?.content ?? line?.content ?? text);
+  const content = String(obj?.data?.content ?? text);
   const caretEnd = Number.isFinite(line?.caretEndIndex)
     ? Math.max(lineStart, Math.min(Math.trunc(Number(line.caretEndIndex)) || lineStart, content.length))
     : lineStart + text.length;

@@ -34,7 +34,6 @@ function loadImageState(createImageBitmap) {
     String,
     Blob,
     performance: { now: () => ++now },
-    window: {},
     document: {
       createElement(name) {
         if (name !== 'canvas') return {};
@@ -54,11 +53,6 @@ function loadImageState(createImageBitmap) {
         };
       },
     },
-    Image: function Image() {
-      this.naturalWidth = 0;
-      this.naturalHeight = 0;
-      this.complete = false;
-    },
     clearTimeout() {},
     setTimeout(callback, ms = 0) {
       timers.push({ callback, ms });
@@ -74,8 +68,6 @@ function loadImageState(createImageBitmap) {
     _bulkImageInsertDepth: 0,
     _boardOpening: false,
     _imageReadyLastRender: 0,
-    SaveDebug: noopDebugApi(),
-    ExportDebug: noopDebugApi(),
     OpenDebug: noopDebugApi(),
     ViewportDebug: noopDebugApi(),
     ClipDebug: noopDebugApi(),
@@ -83,7 +75,6 @@ function loadImageState(createImageBitmap) {
     dropDrawableBitmapWarmup() {},
     scheduleDrawableBitmapWarmup() {},
     queueScaledImageVariantForReadyImage() {},
-    isViewportImageScalingActive() { return false; },
     createImageBitmap,
   };
 

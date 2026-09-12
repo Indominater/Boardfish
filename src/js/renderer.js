@@ -143,8 +143,8 @@
       const drawW = sideways ? obj.h : obj.w;
       const drawH = sideways ? obj.w : obj.h;
       context.save();
-      context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
-      context.scale(transform.flipX ? -1 : 1, transform.flipY ? -1 : 1);
+      context.transform(transform.flipX ? -1 : 1, 0, 0, transform.flipY ? -1 : 1,
+        obj.x + obj.w / 2, obj.y + obj.h / 2);
       if (transform.rotation) context.rotate((transform.rotation * Math.PI) / 180);
       context.drawImage(
         img,

@@ -115,7 +115,6 @@ test('strips runtime text layout caches from saved board data', () => {
       text: `line ${index}`,
       startIndex: index,
       endIndex: index + 1,
-      content,
       prefixWidths: [0, 10],
     })),
     _textEditCaretIndex: content.length,
@@ -145,7 +144,6 @@ test('strips runtime text layout caches from saved board data', () => {
   assert.equal(metrics.largestTextChars, content.length);
   assert.equal(metrics.runtimeTextCacheObjects, 1);
   assert.equal(metrics.runtimeTextCacheLines, 120);
-  assert.equal(metrics.runtimeTextCacheContentChars, content.length * 120);
   assert.equal(metrics.runtimeTextCachePrefixEntries, 240);
   assert.ok(metrics.runtimeTextPrivateFields >= 4);
 });
