@@ -60,19 +60,23 @@ function loadSaveHarness({ existing = true, outcome = 'saved' } = {}) {
     calls.writes.push(target);
     assert.equal(options.sourceFileRef, sourceRef);
     if (outcome === 'write-error') throw new Error('write failed');
+    if (outcome === 'limit-error') throw Object.assign(new Error('Board Limit: 500 MB'), {
+      boardfishLimit: true,
+      boardfishUserMessage: 'Board Limit: 500 MB',
+    });
   };
   return { context, calls, sourceRef, chosenRef };
 }
 
 test('save commands preserve file identity, dirty state and pill cleanup across outcomes', async () => {
   for (const mode of ['save', 'save-as', 'new-target']) {
-    const outcomes = mode === 'save' ? ['saved', 'write-error'] : ['saved', 'write-error', 'cancelled', 'picker-error'];
+    const outcomes = mode === 'save' ? ['saved', 'write-error', 'limit-error'] : ['saved', 'write-error', 'limit-error', 'cancelled', 'picker-error'];
     for (const outcome of outcomes) {
       const { context, calls, sourceRef, chosenRef } = loadSaveHarness({ existing: mode !== 'new-target', outcome });
       const pending = mode === 'save-as' ? context.saveBoardAs() : context.saveBoard();
       const picksTarget = mode !== 'save';
       const saved = outcome === 'saved';
-      const writes = saved || outcome === 'write-error';
+      const writes = saved || outcome === 'write-error' || outcome === 'limit-error';
       const target = picksTarget ? chosenRef : sourceRef;
       const label = `${mode}: ${outcome}`;
 
@@ -83,7 +87,7 @@ test('save commands preserve file identity, dirty state and pill cleanup across 
       assert.equal(context.isDirty(), !saved, label);
       assert.deepEqual(calls.writes, writes ? [target] : [], label);
       assert.deepEqual(calls.messages, outcome === 'cancelled' ? []
-        : [...(writes ? ['Saving'] : []), saved ? 'Saved' : 'Save failed'], label);
+        : [...(writes ? ['Saving'] : []), saved ? 'Saved' : outcome === 'limit-error' ? 'Board Limit: 500 MB' : 'Save Failed'], label);
       assert.equal(calls.shields, 1, label);
       assert.equal(calls.releases, 1, label);
     }

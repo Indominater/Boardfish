@@ -375,7 +375,7 @@ function runMenuCommand(button, source, commandEvent = null) {
     MenuDebug.log('menu:command:end', { command, source });
   } catch (err) {
     MenuDebug.log('menu:command:error', { command, source, error: String(err) });
-    console.error('[Boardfish menu] command failed:', command, err);
+    console.error('Menu Command Failed:', command, err);
   }
   return true;
 }

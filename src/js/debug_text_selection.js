@@ -702,11 +702,11 @@ var TextSelDebug = (() => {
 
   function selectionReport(options = {}) {
     if (typeof editingId === 'undefined' || !editingId) {
-      console.warn('[textSel] No text object being edited. Double-click a text object first.');
+      console.warn('[Text Selection] No Active Text. Double-Click A Text Object.');
       return null;
     }
     const obj = currentTextObject();
-    if (!obj) { console.warn('[textSel] Editing object not found.'); return null; }
+    if (!obj) { console.warn('[Text Selection] Text Object Unavailable'); return null; }
     const value = textValue(_editEl?.value ?? obj.data.content ?? '');
     const selStart = Math.max(0, Math.min(_editEl?.selectionStart ?? 0, value.length));
     const selEnd = Math.max(0, Math.min(_editEl?.selectionEnd ?? selStart, value.length));
@@ -757,7 +757,7 @@ var TextSelDebug = (() => {
 
   function selectAll() {
     if (typeof editingId === 'undefined' || !editingId || !_editEl) {
-      console.warn('[textSel] No text object being edited. Double-click a text object first.');
+      console.warn('[Text Selection] No Active Text. Double-Click A Text Object.');
       return null;
     }
     _editEl.focus({ preventScroll: true });

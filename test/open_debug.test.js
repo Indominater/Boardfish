@@ -185,24 +185,118 @@ test('open-board helpers used by io_close are shared across startup scripts', ()
   }
 });
 
+test('debug clipboard fallback reports a failed copy once and keeps both causes', async () => {
+  const source = readSource('src/js/startup_debug.js');
+  const start = source.indexOf('  async function copyDebugJson(');
+  const end = source.indexOf('  async function sampleFrames(', start);
+  assert.ok(start >= 0 && end > start);
+  for (const outcome of ['api-success', 'fallback-success', 'fallback-false', 'fallback-error']) {
+    const warnings = [];
+    const apiError = new Error('clipboard permission denied');
+    const selectionError = new Error('selection copy unavailable');
+    let removed = 0;
+    const context = {
+      lastJson: '',
+      storeResult(value) { context.lastJson = JSON.stringify(value); },
+      console: { log() {}, warn(...args) { warnings.push(args); } },
+      navigator: { clipboard: { async writeText() { if (outcome !== 'api-success') throw apiError; } } },
+      document: {
+        body: { appendChild() {} },
+        createElement() {
+          return { style: {}, setAttribute() {}, focus() {}, select() {}, setSelectionRange() {}, remove() { removed++; } };
+        },
+        execCommand() {
+          if (outcome === 'fallback-error') throw selectionError;
+          return outcome === 'fallback-success';
+        },
+      },
+    };
+    const copy = vm.runInNewContext(`${source.slice(start, end)}; copyDebugJson`, context);
+    const succeeded = outcome.endsWith('success');
+    assert.equal(await copy('Test JSON', { sample: 1 }), succeeded);
+    assert.equal(removed, Number(outcome !== 'api-success'));
+    assert.equal(warnings.length, Number(!succeeded));
+    if (!succeeded) {
+      assert.equal(warnings[0][0], 'Clipboard Write Failed: Test JSON');
+      assert.equal(warnings[0][1].clipboardApiError, apiError);
+      assert.equal(warnings[0][1].selectionError, outcome === 'fallback-error' ? selectionError : null);
+    }
+  }
+});
+
 test('open-board failures show a readable pill message', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const styles = readSource('src/styles.css');
-
-  assert.match(bootstrap, /function openFailureIslandMessage\(errorLabel, err\)/);
-  assert.match(bootstrap, /function openFailureUserDetail\(detail, err\)/);
-  assert.match(bootstrap, /Permission was not granted/);
-  assert.match(bootstrap, /Unsupported Boardfish file/);
-  assert.match(bootstrap, /Boardfish file is missing board data/);
-  assert.match(bootstrap, /Boardfish file is missing image data/);
-  assert.match(bootstrap, /Boardfish file is invalid/);
-  assert.match(bootstrap, /This browser cannot open compressed Boardfish files/);
-  assert.match(bootstrap, /one image is/);
+  const start = bootstrap.indexOf('  function openFailureIslandMessage(');
+  const end = bootstrap.indexOf('  finishFailedOpen =', start);
+  assert.ok(start >= 0 && end > start);
+  const format = vm.runInNewContext(`${bootstrap.slice(start, end)}; openFailureIslandMessage`);
+  for (const [error, expected] of [
+    [{ name: 'NotAllowedError' }, 'Open Failed: Permission Denied'],
+    [{ name: 'SecurityError' }, 'Open Failed: Permission Denied'],
+    [new Error('Permission Denied'), 'Open Failed: Permission Denied'],
+    [{ name: 'NotReadableError' }, 'Open Failed: File Unavailable'],
+    [{ name: 'NotFoundError' }, 'Open Failed: File Unavailable'],
+    [new Error('File Unavailable'), 'Open Failed: File Unavailable'],
+    [new Error('No File Selected'), 'Open Failed: File Unavailable'],
+    [new Error('Image Read Failed'), 'Open Failed: File Unavailable'],
+    [new Error('Unsupported Board Version: 99'), 'Open Failed: Unsupported File'],
+    [new Error('Unsupported File Format'), 'Open Failed: Unsupported File'],
+    [new Error('Unsupported Compression'), 'Open Failed: Unsupported File'],
+    [new Error('Unsupported ZIP Format'), 'Open Failed: Unsupported File'],
+    [new Error('Missing File Entry: board.json'), 'Open Failed: Invalid File'],
+    [new Error('Missing Image: img-1'), 'Open Failed: Invalid File'],
+    [new Error('Invalid Image Source: img-1'), 'Open Failed: Invalid File'],
+    [new Error('File Checksum Mismatch: board.json'), 'Open Failed: Invalid File'],
+    [new SyntaxError('unexpected browser detail'), 'Open Failed: Invalid File'],
+    [new Error('Invalid File Entry: permission-denied/unsupported.png'), 'Open Failed: Invalid File'],
+    [new Error('File Entry Too Large: board.json'), 'Open Failed: File Too Large'],
+    [{ boardfishLimit: true, boardfishUserMessage: 'Board Limit: 100 Objects' }, 'Board Limit: 100 Objects'],
+    [{ boardfishLimit: true }, 'Board Limit Exceeded'],
+    [new Error('unrecognized browser detail'), 'Open Failed'],
+    [null, 'Open Failed'],
+  ]) assert.equal(format(error), expected);
   assert.match(bootstrap, /OpenDebug\.step\(dbg, 'open-failed:message'/);
   assert.match(bootstrap, /finalMsg: message/);
   assert.match(bootstrap, /duration: long_message/);
   assert.match(styles, /#island \{[\s\S]*max-width: calc\(100vw - 32px\);/);
   assert.match(styles, /#isl-zoom \{[\s\S]*white-space: normal;/);
+});
+
+test('open failures retain diagnostic details and release the input shield in both builds', async () => {
+  for (const development of [false, true]) {
+    const messages = [], errors = [], debugCalls = [];
+    let releases = 0;
+    const error = new Error('Invalid File Entry: images/original.png');
+    const dbg = { id: 123 };
+    const context = {
+      document: {},
+      _boardOpening: false,
+      startCanvasSizeTracking() {}, resizeCanvas() {}, snapshot() {}, markSaved() {},
+      registerDebugCommand() {},
+      BoardfishRuntime: { describeFileRef() { return 'board.bf'; } },
+      beginOpeningFreeze() {}, startPillTask() {},
+      endOpeningFreeze() { releases++; },
+      async invokeReadBoard() { throw error; },
+      console: { error(...args) { errors.push(args); } },
+      OpenDebug: { step(value) { debugCalls.push(value); }, end(value) { debugCalls.push(value); } },
+      long_message: 4500,
+      finishPillTask({ beforeFinish, finalMsg, duration }) {
+        beforeFinish();
+        messages.push(finalMsg);
+        assert.equal(duration, 4500);
+      },
+    };
+    vm.createContext(context);
+    const source = readSource('src/js/app_bootstrap.js');
+    vm.runInContext(development ? source : withoutDeveloperDiagnostics(source), context);
+    await context.openBoardFromPath({}, ...(development ? [dbg] : []));
+    assert.deepEqual(messages, ['Open Failed: Invalid File']);
+    assert.equal(context._boardOpening, false);
+    assert.equal(releases, 1);
+    assert.deepEqual(errors, [['Open Failed:', error]]);
+    assert.deepEqual(debugCalls, development ? [dbg, dbg] : []);
+  }
 });
 
 test('open-board loading does not wait for pill status update before reading the file', () => {

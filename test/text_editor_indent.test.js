@@ -1403,7 +1403,7 @@ test('external native paste exceeding the board character limit is entirely bloc
   assert.equal(context.proxy.selectionStart, 3);
   assert.deepEqual(context.historyStarts, []);
   assert.deepEqual(context.dirty, []);
-  assert.deepEqual(context.notifications, [{ message: 'Boardfish is limited to 25,000 characters', duration: 4500 }]);
+  assert.deepEqual(context.notifications, [{ message: 'Board Limit: 25,000 Characters', duration: 4500 }]);
 });
 
 test('paste counts spaces and tabs and accepts exactly 25000 characters across textboxes', () => {

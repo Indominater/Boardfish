@@ -3,14 +3,14 @@
 // ─── Elements ─────────────────────────────────────────────────────────────────
 function requireAppElement(id) {
   const element = document.getElementById(id);
-  if (!element) throw new Error(`missing required DOM element #${id}`);
+  if (!element) throw new Error(`Missing Element: #${id}`);
   return element;
 }
 
 var canvas      = requireAppElement('canvas');
 var boardCanvas = requireAppElement('board-canvas');
 var ctx         = boardCanvas.getContext('2d');
-if (!ctx) throw new Error('board canvas 2D context is unavailable');
+if (!ctx) throw new Error('Canvas Unavailable');
 var ctxMenu     = requireAppElement('ctx-menu');
 var ctxActions  = requireAppElement('ctx-actions');
 var darkModeMenuBtn = requireAppElement('ctx-btn-dark-mode');

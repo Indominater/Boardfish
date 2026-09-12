@@ -44,14 +44,14 @@
   }
 
   function unsupportedContainerError() {
-    return new Error('unsupported Boardfish file; expected container .bf');
+    return new Error('Unsupported File Format');
   }
 
-  function invalidContainerError(message = 'invalid Boardfish container') {
-    return new Error(message);
+  function invalidContainerError(entryName = '') {
+    return new Error(entryName ? `Invalid File Entry: ${entryName}` : 'Invalid Board File');
   }
 
-  function ensureByteRange(bytes, offset, length, message = 'invalid Boardfish container') {
+  function ensureByteRange(bytes, offset, length, entryName = '') {
     const start = Number(offset);
     const size = Number(length);
     if (
@@ -61,7 +61,7 @@
       size < 0 ||
       start + size > bytes.length
     ) {
-      throw invalidContainerError(message);
+      throw invalidContainerError(entryName);
     }
   }
 
@@ -112,7 +112,7 @@
     for (let start = 0; start < blob.size; start += CRC_CHUNK_SIZE) {
       const end = Math.min(blob.size, start + CRC_CHUNK_SIZE);
       const chunk = new Uint8Array(await blob.slice(start, end).arrayBuffer());
-      if (chunk.length !== end - start) throw new Error('truncated image Blob during save');
+      if (chunk.length !== end - start) throw new Error('Image Read Failed');
       crc = crc32Update(crc, chunk, 0, chunk.length);
       await yieldToEventLoop();
     }
@@ -134,12 +134,12 @@
 
   function localFileHeader(entry, offset) {
     const name = utf8Encode(entry.name);
-    if (name.length > ZIP16_SENTINEL) throw new Error(`ZIP entry name is too long: ${entry.name}`);
+    if (name.length > ZIP16_SENTINEL) throw new Error(`ZIP Entry Name Too Long: ${entry.name}`);
     if (!Number.isSafeInteger(entry.byteLength) || entry.byteLength < 0 || entry.byteLength >= ZIP32_SENTINEL) {
-      throw new Error(`ZIP entry is too large: ${entry.name}`);
+      throw new Error(`ZIP Entry Too Large: ${entry.name}`);
     }
     if (!Number.isSafeInteger(offset) || offset < 0 || offset >= ZIP32_SENTINEL) {
-      throw new Error('Boardfish container is too large for ZIP32');
+      throw new Error('ZIP Size Limit Exceeded');
     }
     const { time, date } = dosDateTime(entry.date);
     const bytes = new Uint8Array(30 + name.length);
@@ -179,7 +179,7 @@
 
   function endOfCentralDirectory(entryCount, centralSize, centralOffset) {
     if (!Number.isSafeInteger(entryCount) || entryCount < 0 || entryCount >= ZIP16_SENTINEL) {
-      throw new Error('Boardfish container has too many ZIP entries');
+      throw new Error('ZIP Entry Limit Exceeded');
     }
     if (
       !Number.isSafeInteger(centralSize) ||
@@ -189,7 +189,7 @@
       centralSize >= ZIP32_SENTINEL ||
       centralOffset >= ZIP32_SENTINEL
     ) {
-      throw new Error('Boardfish container is too large for ZIP32');
+      throw new Error('ZIP Size Limit Exceeded');
     }
     const bytes = new Uint8Array(ZIP_EOCD_MIN_SIZE);
     const view = new DataView(bytes.buffer);
@@ -203,7 +203,7 @@
 
   async function createZipBlob(entries) {
     if (!Array.isArray(entries) || entries.length >= ZIP16_SENTINEL) {
-      throw new Error('Boardfish container has too many ZIP entries');
+      throw new Error('ZIP Entry Limit Exceeded');
     }
     const normalized = new Array(entries.length), defaultDate = new Date();
     for (let i = 0; i < entries.length; i++) {
@@ -286,7 +286,7 @@
     if (blob instanceof ArrayBuffer) return new Uint8Array(blob);
     if (ArrayBuffer.isView(blob)) return new Uint8Array(blob.buffer, blob.byteOffset, blob.byteLength);
     if (blob?.arrayBuffer) return new Uint8Array(await blob.arrayBuffer());
-    throw new Error('unsupported binary input');
+    throw unsupportedContainerError();
   }
 
   function isBlobLike(value) {
@@ -314,15 +314,15 @@
       to < from ||
       to > size
     ) {
-      throw invalidContainerError('invalid Boardfish container range');
+      throw invalidContainerError();
     }
     const slice = blob.slice(from, to);
     if (Number(slice?.size) !== to - from) {
-      throw invalidContainerError('truncated Boardfish container range');
+      throw invalidContainerError();
     }
     const bytes = await blobToBytes(slice);
     if (bytes.length !== to - from) {
-      throw invalidContainerError('truncated Boardfish container range');
+      throw invalidContainerError();
     }
     return bytes;
   }
@@ -349,17 +349,17 @@
     const centralSize = view.getUint32(eocdOffset + 12, true);
     const centralOffset = view.getUint32(eocdOffset + 16, true);
     if (diskNumber !== 0 || centralDisk !== 0 || diskEntryCount !== entryCount) {
-      throw invalidContainerError('multi-disk Boardfish containers are unsupported');
+      throw new Error('Unsupported ZIP Format');
     }
     if (entryCount === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
-      throw invalidContainerError('ZIP64 Boardfish containers are unsupported');
+      throw new Error('Unsupported ZIP Format');
     }
     const absoluteEocdOffset = baseOffset + eocdOffset;
     if (
       centralOffset + centralSize > containerSize ||
       centralOffset + centralSize > absoluteEocdOffset
     ) {
-      throw invalidContainerError('invalid Boardfish container directory');
+      throw invalidContainerError();
     }
     return {
       entryCount,
@@ -373,9 +373,9 @@
     const entries = new Map();
     let offset = 0;
     for (let i = 0; i < entryCount; i++) {
-      ensureByteRange(bytes, offset, 46, 'invalid Boardfish container entry');
+      ensureByteRange(bytes, offset, 46);
       if (view.getUint32(offset, true) !== ZIP_CENTRAL_DIRECTORY) {
-        throw invalidContainerError('invalid Boardfish container entry');
+        throw invalidContainerError();
       }
       const method = view.getUint16(offset + 10, true);
       const crc = view.getUint32(offset + 16, true);
@@ -386,12 +386,12 @@
       const commentLength = view.getUint16(offset + 32, true);
       const localOffset = view.getUint32(offset + 42, true);
       if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) {
-        throw invalidContainerError('ZIP64 Boardfish containers are unsupported');
+        throw new Error('Unsupported ZIP Format');
       }
       const nameStart = offset + 46;
       const nextOffset = nameStart + nameLength + extraLength + commentLength;
-      ensureByteRange(bytes, nameStart, nameLength, 'invalid Boardfish container entry name');
-      if (nextOffset > bytes.length) throw invalidContainerError('invalid Boardfish container entry');
+      ensureByteRange(bytes, nameStart, nameLength);
+      if (nextOffset > bytes.length) throw invalidContainerError();
       const name = utf8Decode(bytes.subarray(nameStart, nameStart + nameLength));
       entries.set(name, { name, method, crc, compressedSize, uncompressedSize, localOffset });
       offset = nextOffset;
@@ -427,16 +427,16 @@
 
   function compressedEntryBytes(bytes, entry) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    ensureByteRange(bytes, entry.localOffset, 30, `invalid Boardfish container local entry ${entry.name}`);
+    ensureByteRange(bytes, entry.localOffset, 30, entry.name);
     if (view.getUint32(entry.localOffset, true) !== ZIP_LOCAL_FILE_HEADER) {
-      throw new Error(`invalid Boardfish container local entry ${entry.name}`);
+      throw invalidContainerError(entry.name);
     }
     const nameLength = view.getUint16(entry.localOffset + 26, true);
     const extraLength = view.getUint16(entry.localOffset + 28, true);
     const dataStart = entry.localOffset + 30 + nameLength + extraLength;
     const dataEnd = dataStart + entry.compressedSize;
-    ensureByteRange(bytes, entry.localOffset + 30, nameLength + extraLength, `invalid Boardfish container local entry ${entry.name}`);
-    if (dataEnd > bytes.length) throw new Error(`truncated Boardfish container entry ${entry.name}`);
+    ensureByteRange(bytes, entry.localOffset + 30, nameLength + extraLength, entry.name);
+    if (dataEnd > bytes.length) throw invalidContainerError(entry.name);
     return bytes.subarray(dataStart, dataEnd);
   }
 
@@ -445,7 +445,7 @@
       entry?.method === ZIP_METHOD_STORED &&
       Number(entry.compressedSize) !== Number(entry.uncompressedSize)
     ) {
-      throw new Error(`invalid Boardfish container entry size ${entry?.name || ''}`);
+      throw invalidContainerError(entry?.name || '');
     }
   }
 
@@ -454,23 +454,23 @@
     const localOffset = Number(entry?.localOffset);
     assertStoredEntrySize(entry);
     if (!Number.isFinite(localOffset) || localOffset < 0 || localOffset + 30 > containerSize) {
-      throw new Error(`invalid Boardfish container local entry ${entry?.name || ''}`);
+      throw invalidContainerError(entry?.name || '');
     }
     const header = await blobRangeToBytes(blob, localOffset, localOffset + 30);
     const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
     if (view.getUint32(0, true) !== ZIP_LOCAL_FILE_HEADER) {
-      throw new Error(`invalid Boardfish container local entry ${entry.name}`);
+      throw invalidContainerError(entry.name);
     }
     const nameLength = view.getUint16(26, true);
     const extraLength = view.getUint16(28, true);
     const dataStart = localOffset + 30 + nameLength + extraLength;
     const dataEnd = dataStart + Number(entry.compressedSize || 0);
     if (dataStart < localOffset + 30 || dataEnd > containerSize) {
-      throw new Error(`truncated Boardfish container entry ${entry.name}`);
+      throw invalidContainerError(entry.name);
     }
     const out = blob.slice(dataStart, dataEnd, type || '');
     if (Number(out?.size) !== dataEnd - dataStart) {
-      throw new Error(`truncated Boardfish container entry ${entry.name}`);
+      throw invalidContainerError(entry.name);
     }
     return out;
   }
@@ -487,12 +487,12 @@
   }
 
   function throwEntryTooLarge(entry) {
-    throw new Error(`Boardfish container entry ${entry.name} exceeds the board content limit`);
+    throw new Error(`File Entry Too Large: ${entry.name}`);
   }
 
   async function inflateRaw(bytes, entry, options = {}) {
     if (typeof DecompressionStream !== 'function') {
-      throw new Error('this browser cannot read compressed .bf entries');
+      throw new Error('Unsupported Compression');
     }
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
     const reader = stream.getReader();
@@ -528,7 +528,7 @@
     if (!Number.isFinite(limit)) return;
     const advertisedSize = zipEntryContentBytes(entry);
     if (advertisedSize <= limit) return;
-    throw new Error(`Boardfish container entry ${entry?.name || ''} exceeds the board content limit`);
+    throw new Error(`File Entry Too Large: ${entry?.name || ''}`);
   }
 
   function zipEntryContentBytes(entry) {
@@ -545,7 +545,7 @@
       throwEntryTooLarge(entry);
     }
     if (Number(entry.uncompressedSize) !== out.length) {
-      throw new Error(`invalid Boardfish container entry size ${entry.name}`);
+      throw invalidContainerError(entry.name);
     }
     if (options.verifyCrc !== false && Number.isFinite(Number(entry.crc))) {
       const actualCrc = await crc32Async(out);
@@ -562,7 +562,7 @@
           if (action === 'continue') return out;
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        throw new Error(`Boardfish container CRC mismatch for ${entry.name}`);
+        throw new Error(`File Checksum Mismatch: ${entry.name}`);
       }
     }
     return out;
@@ -577,12 +577,12 @@
       compressed = await blobToBytes(compressed);
     }
     if ((compressed.size ?? compressed.length) !== Number(entry.compressedSize)) {
-      throw new Error(`truncated Boardfish container entry ${entry.name}`);
+      throw invalidContainerError(entry.name);
     }
     let out;
     if (entry.method === ZIP_METHOD_STORED) out = compressed;
     else if (entry.method === ZIP_METHOD_DEFLATED) out = await inflateRaw(compressed, entry, options);
-    else throw new Error(`unsupported .bf compression method ${entry.method} for ${entry.name}`);
+    else throw new Error(`Unsupported Compression: ${entry.method} (${entry.name})`);
     return validateReadZipEntry(out, entry, options);
   }
 
@@ -594,12 +594,12 @@
       return out;
     }
     if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(base64, 'base64'));
-    throw new Error('base64 decoding is unavailable');
+    throw new Error('Base64 Decoder Unavailable');
   }
 
   function dataUrlParts(dataUrl) {
     const match = /^data:([^;,]+);base64,(.*)$/i.exec(String(dataUrl || ''));
-    if (!match) throw new Error('expected image data URL');
+    if (!match) throw new Error('Invalid Image Data');
     return { mime: match[1].toLowerCase(), base64: match[2] };
   }
 
@@ -670,7 +670,7 @@
     const snapshot = typeof root.Response === 'function' && typeof blob.stream === 'function'
       ? await new root.Response(blob.stream(), { headers: { 'Content-Type': mime } }).blob()
       : new Blob([await blob.arrayBuffer()], { type: mime });
-    if (snapshot.size !== blob.size) throw new Error('truncated image Blob');
+    if (snapshot.size !== blob.size) throw new Error('Image Read Failed');
     return snapshot.type === mime ? snapshot : snapshot.slice(0, snapshot.size, mime);
   }
 
@@ -688,7 +688,7 @@
       const cachedCrc = cachedImageSourceCrc(source, sourceBlob.size);
       const stableBlob = await snapshotImageBlob(sourceBlob, source.mime || 'image/png');
       if (!replaceWebImageRefBlob(source, stableBlob, cachedCrc, { volatile: false })) {
-        throw new Error(`failed to stabilize image source ${key}`);
+        throw new Error(`Image Read Failed: ${key}`);
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       refreshed++;
@@ -748,7 +748,7 @@
     if (source.__bytes) return source.__bytes;
     if (source.__lazy?.containerBytes && source.__lazy?.entry) {
       if (source.__lazy.entry.method !== ZIP_METHOD_STORED) {
-        throw new Error(`lazy image entry ${source.path || source.__lazy.entry.name} uses unsupported compression`);
+        throw new Error(`Unsupported Image Compression: ${source.path || source.__lazy.entry.name}`);
       }
       return compressedEntryBytes(source.__lazy.containerBytes, source.__lazy.entry);
     }
@@ -793,7 +793,7 @@
       const fallbackEntry = entries.get(fallbackPath);
       if (fallbackEntry) return { path: fallbackPath, entry: fallbackEntry };
     }
-    throw new Error(`Boardfish file is missing ${path}`);
+    throw new Error(`Missing File Entry: ${path}`);
   }
 
   function mimeForImageSource(source, manifest = {}) {
@@ -813,7 +813,7 @@
     if (source instanceof Uint8Array) return source;
     if (source instanceof ArrayBuffer) return new Uint8Array(source);
     if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
-    throw new Error('web .bf save only supports browser image data URLs');
+    throw new Error('Unsupported Image Source');
   }
 
   function blobForImageSource(source) {
@@ -861,7 +861,7 @@
         persistedByteLength !== byteLength ||
         (resolved.entry.crc >>> 0) !== (expectedIdentity.crc >>> 0)
       ) {
-        throw new Error(`saved image source changed for ${key}`);
+        throw new Error(`Image Source Changed: ${key}`);
       }
       const blob = await compressedEntryBlob(
         containerBlob,
@@ -881,7 +881,7 @@
         null,
         { volatile: true },
       )) {
-        throw new Error('failed to recover saved image source');
+        throw new Error('Image Recovery Failed');
       }
       cacheImageSourceArchiveIdentity(
         replacement.source,
@@ -957,7 +957,7 @@
         : (isNativeBlobPart(source) ? source : null);
       const bytes = sourceBlob ? null : await bytesForImageSourceAsync(source);
       const data = sourceBlob || bytes;
-      if (!data) throw new Error(`web .bf save is missing image bytes for ${key}`);
+      if (!data) throw new Error(`Missing Image: ${key}`);
       const byteLength = sourceBlob ? Number(sourceBlob.size) : bytes.length;
       const entry = {
         key,
@@ -1082,7 +1082,7 @@
     const warnings = [];
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const boardEntry = entries.get('board.json');
-    if (!boardEntry) throw new Error('Boardfish file is missing board.json');
+    if (!boardEntry) throw new Error('Missing File Entry: board.json');
     const validateBoardPayload = typeof options.validateBoardPayload === 'function'
       ? options.validateBoardPayload
       : null;
@@ -1174,9 +1174,9 @@
     for (const key in imageStore) {
       if (!Object.prototype.hasOwnProperty.call(imageStore, key)) continue;
       const { path, entry: imageEntry, size: advertisedImageBytes, ext, mime } = records?.[recordIndex++] || resolve(key, imageStore[key]);
-      if (path.includes('\0')) throw new Error('Boardfish image entry path is invalid');
+      if (path.includes('\0')) throw new Error('Invalid Image Path');
       if (typeof mime !== 'string' || !/^image\/(?:png|jpe?g|webp|gif)$/.test(mime.toLowerCase())) {
-        throw new Error(`${path} has unsupported image metadata`);
+        throw new Error(`Unsupported Image Format: ${path}`);
       }
       if (validateBoardPayload) {
         validateBoardPayload({
@@ -1200,7 +1200,7 @@
         imageBytes += advertisedImageBytes;
         if (randomAccessBlob) {
           const untypedBlob = lazyStoredImageBlobs?.get(path);
-          if (!untypedBlob) throw new Error(`Boardfish file is missing ${path}`);
+          if (!untypedBlob) throw new Error(`Missing File Entry: ${path}`);
           imageBlob = untypedBlob.type === mime
             ? untypedBlob
             : untypedBlob.slice(0, untypedBlob.size, mime);

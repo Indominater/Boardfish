@@ -49,7 +49,6 @@ var finishFailedOpen;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     dbg,
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    errorLabel,
   ) {
     try {
       const fileLabel = BoardfishRuntime.describeFileRef(filePath);
@@ -79,51 +78,27 @@ var finishFailedOpen;
         dbg,
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         err,
-        errorLabel,
       );
     }
   };
 
-  function openFailureUserDetail(detail, err) {
-    if (err?.boardfishUserMessage) return err.boardfishUserMessage;
-    const raw = String(detail || '').replace(/^Error:\s*/, '').trim();
+  function openFailureIslandMessage(err) {
+    if (err?.boardfishLimit) return err.boardfishUserMessage || 'Board Limit Exceeded';
+    const raw = String(err?.message || err || '').replace(/^Error:\s*/i, '').trim();
     const name = String(err?.name || '');
-    if (/^(NotAllowedError|SecurityError)$/i.test(name) || /\b(permission|not allowed|denied)\b/i.test(raw)) {
-      return 'Permission was not granted';
+    let detail = '';
+    if (/^(NotAllowedError|SecurityError)$/i.test(name) || /^(permission|access denied|not allowed)\b/i.test(raw)) {
+      detail = 'Permission Denied';
+    } else if (/^(NotFoundError|NotReadableError)$/i.test(name) || /^(file unavailable|no file selected|(?:file|image) read failed|failed to fetch)\b/i.test(raw)) {
+      detail = 'File Unavailable';
+    } else if (name === 'NotSupportedError' || /^unsupported\b/i.test(raw)) {
+      detail = 'Unsupported File';
+    } else if (/^(file entry too large|ZIP size limit exceeded)\b/i.test(raw)) {
+      detail = 'File Too Large';
+    } else if (name === 'SyntaxError' || /^(invalid|truncated|missing|file checksum mismatch|image format mismatch|corrupt|expected image|base64)\b/i.test(raw)) {
+      detail = 'Invalid File';
     }
-    if (/^no Boardfish file selected$/i.test(raw)) return 'No Boardfish file selected';
-    if (/unsupported Boardfish file; expected container \.bf|unsupported binary input/i.test(raw)) {
-      return 'Unsupported Boardfish file';
-    }
-    if (/unsupported board version/i.test(raw)) return 'Unsupported Boardfish file version';
-    if (/unsupported board format/i.test(raw)) return 'Unsupported Boardfish file format';
-    if (/this browser cannot read compressed \.bf entries|unsupported \.bf compression method/i.test(raw)) {
-      return 'This browser cannot open compressed Boardfish files';
-    }
-    if (/Boardfish file is missing board\.json/i.test(raw)) return 'Boardfish file is missing board data';
-    if (/Boardfish file is missing .+|references missing image/i.test(raw)) return 'Boardfish file is missing image data';
-    if (
-      name === 'SyntaxError' ||
-      /invalid Boardfish container|truncated Boardfish container|CRC mismatch|expected image data URL|base64 (?:de|en)coding is unavailable|board data must be an object|imageStore must be an object|imageStore contains an empty key|imageStore\..+ must be a string or object|object \d+ is not an object|object \d+ has unsupported type|object \d+ is missing id|image object .+ is missing imgKey/i.test(raw)
-    ) {
-      return 'Boardfish file is invalid';
-    }
-    if (/unsupported web file reference/i.test(raw)) return 'Unable to read Boardfish file';
-    if (err?.boardfishLimit) {
-      return raw
-        .replace(/^(?:images\/)?[^/\\]+\.(?:png|jpe?g|webp|gif)\s+is\s+/i, 'one image is ')
-        .replace(/^.+[\\/]images[\\/][^/\\]+\.(?:png|jpe?g|webp|gif)\s+is\s+/i, 'one image is ')
-        .replace(/\.$/, '');
-    }
-    return raw.replace(/\.$/, '');
-  }
-
-  function openFailureIslandMessage(errorLabel, err) {
-    const prefix = String(errorLabel || 'Open failed:').replace(/:\s*$/, '').trim() || 'Open failed';
-    const detail = openFailureUserDetail(err?.message || err, err);
-    if (!detail) return prefix;
-    if (detail.toLowerCase().startsWith(prefix.toLowerCase())) return detail;
-    return `${prefix}: ${detail}`;
+    return detail ? `Open Failed: ${detail}` : 'Open Failed';
   }
 
   finishFailedOpen = function finishFailedOpen(
@@ -131,10 +106,9 @@ var finishFailedOpen;
     dbg,
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     err,
-    errorLabel,
   ) {
-    console.error(errorLabel, err);
-    const message = openFailureIslandMessage(errorLabel, err);
+    console.error('Open Failed:', err);
+    const message = openFailureIslandMessage(err);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     OpenDebug.step(dbg, 'open-failed:message', { message, limit: !!err?.boardfishLimit });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -153,7 +127,7 @@ var finishFailedOpen;
   async function openFilePath(filePath) {
     const dbg = OpenDebug.start('openFilePath', { path: BoardfishRuntime.describeFileRef(filePath), currentFilePath, objectCount: objects.length });
     if (!(await confirmDirtyBeforeOpen(dbg))) return;
-    await openBoardFromPath(filePath, dbg, 'Open failed:');
+    await openBoardFromPath(filePath, dbg);
   }
 
   // Console diagnostics must go through beginDebug()/finishDebug(). Register test

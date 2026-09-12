@@ -515,7 +515,7 @@ test('stale-source recovery rejects a fresh file whose image identity changed', 
       imageStore: rawImageStore,
       sourceFileRef: ref,
     }),
-    /saved image source changed for img-1/,
+    /Image Source Changed: img-1/,
   );
   assert.equal(writableCount, 0);
 });
@@ -734,7 +734,7 @@ test('a stalled write times out, aborts, and retires the uncertain target', asyn
   await new Promise(setImmediate);
   harness.runTimers();
 
-  await assert.rejects(() => save, /timed out while writing the board file/);
+  await assert.rejects(() => save, /Save Timed Out: Writing File/);
   assert.equal(aborts, 1);
   assert.equal(ref.unusable, true);
   assert.equal(harness.context.BoardfishRuntime.canSaveToExistingTarget(ref), false);

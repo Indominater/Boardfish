@@ -24,12 +24,11 @@
   }
 
   function normalizeObject(obj, index) {
-    if (!isObject(obj)) throw new Error(`object ${index} is not an object`);
-    if (!isBoardObjectType(obj.type)) {
-      throw new Error(`object ${index} has unsupported type`);
+    if (!isObject(obj) || !isBoardObjectType(obj.type)) {
+      throw new Error(`Invalid Object: ${index}`);
     }
     if (typeof obj.id !== 'string' || !obj.id) {
-      throw new Error(`object ${index} is missing id`);
+      throw new Error(`Missing Object ID: ${index}`);
     }
     const data = isObject(obj.data) ? obj.data : {};
     const normalized = {
@@ -46,7 +45,7 @@
       normalized.data.content = typeof data.content === 'string' ? data.content : '';
     } else {
       if (typeof data.imgKey !== 'string' || !data.imgKey) {
-        throw new Error(`image object ${obj.id} is missing imgKey`);
+        throw new Error(`Missing Image Reference: ${obj.id}`);
       }
       normalized.data.imgKey = data.imgKey;
       normalized.data.flipX = !!data.flipX;
@@ -57,12 +56,12 @@
   }
 
   function normalizeBoardData(data, skipImageValidation = false) {
-    if (!isObject(data)) throw new Error('board data must be an object');
+    if (!isObject(data)) throw new Error('Invalid Board Data');
     if (data.version != null && !isSupportedBoardVersion(data.version)) {
-      throw new Error(`unsupported board version ${data.version}`);
+      throw new Error(`Unsupported Board Version: ${data.version}`);
     }
     if (data.format != null && data.format !== BOARD_FORMAT) {
-      throw new Error(`unsupported board format ${data.format}`);
+      throw new Error(`Unsupported Board Format: ${data.format}`);
     }
     const sourceObjects = Array.isArray(data.objects) ? data.objects : [];
     BoardLimits.validateBoardPayload({
@@ -73,9 +72,9 @@
     if (!skipImageValidation) for (const key in sourceImageStore) {
       if (!Object.prototype.hasOwnProperty.call(sourceImageStore, key)) continue;
       const value = sourceImageStore[key];
-      if (!key) throw new Error('imageStore contains an empty key');
+      if (!key) throw new Error('Invalid Image Key');
       if (typeof value !== 'string' && !isObject(value)) {
-        throw new Error(`imageStore.${key} must be a string or object`);
+        throw new Error(`Invalid Image Source: ${key}`);
       }
     }
     const objects = [], imageStore = {};
@@ -85,7 +84,7 @@
       if (obj.type === OBJECT_TYPES.IMAGE) {
         const key = obj.data.imgKey;
         if (key === '__proto__' || !Object.prototype.hasOwnProperty.call(sourceImageStore, key)) {
-          throw new Error(`image object ${obj.id} references missing image ${obj.data.imgKey}`);
+          throw new Error(`Missing Image: ${obj.data.imgKey}`);
         }
         imageStore[key] = sourceImageStore[key];
       }

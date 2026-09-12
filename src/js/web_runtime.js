@@ -75,7 +75,7 @@
       try {
         return !!(await waitForFileOperation(
           () => handle.isSameEntry(otherHandle),
-          'comparing board files',
+          'Comparing Files',
           FILE_COMPARISON_TIMEOUT_MS,
         ));
       } catch (err) {
@@ -105,13 +105,13 @@
     }
     const freshFile = await waitForFileOperation(
       () => sourceHandle.getFile(),
-      'refreshing board image sources',
+      'Refreshing Images',
     );
     return recover(board, rawImageStore, freshFile);
   }
 
   function fileOperationTimeoutError(stage) {
-    const err = new Error(`board save timed out while ${stage}`);
+    const err = new Error(`Save Timed Out: ${stage}`);
     err.name = 'TimeoutError';
     err.boardfishSaveTargetUncertain = true;
     return err;
@@ -126,7 +126,7 @@
         // Some browser-provided errors are non-extensible; wrap them below.
       }
     }
-    const wrapped = new Error(err?.message || String(err || 'board save failed'));
+    const wrapped = new Error(err?.message || String(err || 'Save Failed'));
     wrapped.name = err?.name || 'Error';
     wrapped.cause = err;
     wrapped.boardfishSaveTargetUncertain = true;
@@ -244,15 +244,14 @@
     if (ref?.kind === 'web-file') return ref.file;
     if (ref?.kind === 'web-file-handle') return ref.handle.getFile();
     if (ref instanceof File) return ref;
-    throw new Error('unsupported web file reference');
+    throw new Error('File Unavailable');
   }
 
   async function readBoard(ref) {
     const file = await fileFromRef(ref);
-    if (!file) throw new Error('no Boardfish file selected');
+    if (!file) throw new Error('No File Selected');
     if (root.BoardfishWebLimits?.LIMITS && file.size > root.BoardfishWebLimits.LIMITS.maxBoardContentBytes + 10 * 1024 * 1024) {
       throw root.BoardfishWebLimits.limitError(
-        `This file is too large for Boardfish (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB).`,
         root.BoardfishWebLimits.boardContentLimitMessage()
       );
     }
@@ -269,37 +268,37 @@
     const options = { mode: 'readwrite' };
     const permission = await waitForFileOperation(
       () => handle.queryPermission(options),
-      'checking file permission',
+      'Checking Permission',
     );
     if (permission === 'granted') return true;
     return (await waitForFileOperation(
       () => handle.requestPermission(options),
-      'requesting file permission',
+      'Requesting Permission',
     )) === 'granted';
   }
 
   async function writeBlobToHandle(handle, blob) {
     if (!(await ensureReadWritePermission(handle))) {
-      throw new Error('write permission was not granted');
+      throw new Error('Permission Denied');
     }
     const timeoutMs = fileWriteTimeoutMs(blob);
     const writable = await waitForFileOperation(
       () => handle.createWritable(),
-      'opening the board file',
+      'Opening File',
     );
-    let stage = 'writing the board file';
+    let stage = 'Writing File';
     try {
       await waitForFileOperation(() => writable.write(blob), stage, timeoutMs);
-      stage = 'finishing the board file';
+      stage = 'Closing File';
       await waitForFileOperation(() => writable.close(), stage, timeoutMs);
     } catch (err) {
       let failure = err;
-      if (stage === 'finishing the board file') failure = markSaveTargetUncertain(failure);
+      if (stage === 'Closing File') failure = markSaveTargetUncertain(failure);
       if (typeof writable.abort === 'function') {
         try {
           await waitForFileOperation(
             () => writable.abort(failure),
-            'aborting the board save',
+            'Aborting Save',
             FILE_ABORT_TIMEOUT_MS,
           );
         } catch (_) {

@@ -109,7 +109,7 @@ function canvasToPngBlob(canvas) {
 async function readableImageSourceBlob(source) {
   const container = globalThis.BoardfishWebBoardContainer;
   const original = container.blobForImageSource(source);
-  if (!original?.size) throw new Error('image source is empty or missing');
+  if (!original?.size) throw new Error('Image Unavailable');
   const blob = await container.snapshotImageBlob(original);
   const header = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
   const startsWith = (bytes) => bytes.every((byte, i) => header[i] === byte);
@@ -119,7 +119,7 @@ async function readableImageSourceBlob(source) {
     : mime === 'image/gif' ? startsWith([71, 73, 70, 56])
     : mime === 'image/webp' && startsWith([82, 73, 70, 70])
       && header[8] === 87 && header[9] === 69 && header[10] === 66 && header[11] === 80;
-  if (!matchesMime) throw new Error('image bytes do not match their format');
+  if (!matchesMime) throw new Error('Image Format Mismatch');
   // Reading and decoding here catches stale file snapshots and corrupt payloads
   // before the browser consumes a download or promised clipboard payload.
   const bitmap = await createImageBitmapForSource(blob);
@@ -150,7 +150,7 @@ const bitmapSourceFromImageSource = async (source) => {
   if (typeof source === 'string' && source && typeof fetch === 'function') {
     const response = await fetch(source);
     if (!response.ok && !source.startsWith('data:') && !source.startsWith('blob:')) {
-      throw new Error(`image fetch failed: ${response.status}`);
+      throw new Error(`Image Read Failed: ${response.status}`);
     }
     return response.blob();
   }
@@ -158,7 +158,7 @@ const bitmapSourceFromImageSource = async (source) => {
 };
 
 const createImageBitmapForSource = async (source) => {
-  if (typeof createImageBitmap !== 'function') throw new Error('createImageBitmap unavailable');
+  if (typeof createImageBitmap !== 'function') throw new Error('Image Decoder Unavailable');
   const bitmapSource = await bitmapSourceFromImageSource(source);
   return createImageBitmap(bitmapSource);
 };

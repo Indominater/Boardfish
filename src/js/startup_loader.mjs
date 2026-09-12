@@ -4,7 +4,7 @@ export function loadLegacyScript(src) {
     script.src = src;
     script.async = false;
     script.onload = resolve;
-    script.onerror = () => reject(new Error(`failed to load ${src}`));
+    script.onerror = () => reject(new Error(`Script Load Failed: ${src}`));
     document.body.appendChild(script);
   });
 }

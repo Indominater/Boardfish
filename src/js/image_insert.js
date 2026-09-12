@@ -108,7 +108,7 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         const total = performance.now() - t0;
         ViewportDebug.max('maxImageAddMs', total);
-        ViewportDebug.end(dbg, { error: 'image bitmap failed', total });
+        ViewportDebug.end(dbg, { error: 'Image Decode Failed', total });
       }
       return null;
     }

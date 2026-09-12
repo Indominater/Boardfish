@@ -14,21 +14,21 @@
   }
 
   function objectLimitMessage() {
-    return `Boardfish is limited to ${LIMITS.maxObjects} objects`;
+    return `Board Limit: ${LIMITS.maxObjects} Objects`;
   }
 
   function textCharacterLimitMessage() {
-    return `Boardfish is limited to ${LIMITS.maxTextCharacters.toLocaleString('en-US')} characters`;
+    return `Board Limit: ${LIMITS.maxTextCharacters.toLocaleString('en-US')} Characters`;
   }
 
   function boardContentLimitMessage() {
-    return `Boardfish boards are limited to ${formatBytes(LIMITS.maxBoardContentBytes)}`;
+    return `Board Limit: ${formatBytes(LIMITS.maxBoardContentBytes)}`;
   }
 
-  function limitError(message, userMessage = '') {
+  function limitError(message) {
     const err = new Error(message);
     err.boardfishLimit = true;
-    if (userMessage) err.boardfishUserMessage = userMessage;
+    err.boardfishUserMessage = message;
     return err;
   }
 
@@ -54,14 +54,6 @@
     const nextCount = objectCount() + Math.max(0, Number(count) || 0);
     if (nextCount <= LIMITS.maxObjects) return true;
     return rejectLimit(objectLimitMessage(), options);
-  }
-
-  function assertObjectCountAllowed(count, label = 'board') {
-    if ((Number(count) || 0) <= LIMITS.maxObjects) return true;
-    throw limitError(
-      `This ${label} has ${count} objects; ${objectLimitMessage()}.`,
-      objectLimitMessage()
-    );
   }
 
   function textCharacterCount(text = '') {
@@ -92,14 +84,6 @@
     const nextCount = currentTextCharacters(root.objects, obj) + textCharacterCount(nextText);
     if (nextCount <= LIMITS.maxTextCharacters) return true;
     return rejectLimit(textCharacterLimitMessage(), options);
-  }
-
-  function assertTextCharacterCountAllowed(count, label = 'board') {
-    if ((Number(count) || 0) <= LIMITS.maxTextCharacters) return true;
-    throw limitError(
-      `This ${label} has ${count} characters; ${textCharacterLimitMessage()}.`,
-      textCharacterLimitMessage()
-    );
   }
 
   function dataUrlByteLength(dataUrl) {
@@ -162,8 +146,8 @@
   }
 
   function validateBoardPayload({ objectCount: nextObjectCount = 0, textCharacters = 0, boardJsonBytes = 0, imageBytes = null, imageEntries = [] } = {}) {
-    assertObjectCountAllowed(nextObjectCount, 'board');
-    assertTextCharacterCountAllowed(textCharacters, 'board');
+    if ((Number(nextObjectCount) || 0) > LIMITS.maxObjects) throw limitError(objectLimitMessage());
+    if ((Number(textCharacters) || 0) > LIMITS.maxTextCharacters) throw limitError(textCharacterLimitMessage());
     let totalImageBytes = Number(imageBytes);
     if (!Number.isFinite(totalImageBytes)) {
       totalImageBytes = 0;
@@ -174,10 +158,7 @@
     }
     const total = (Number(boardJsonBytes) || 0) + totalImageBytes;
     if (total > LIMITS.maxBoardContentBytes) {
-      throw limitError(
-        `This board is ${formatBytes(total)}; ${boardContentLimitMessage()}.`,
-        boardContentLimitMessage()
-      );
+      throw limitError(boardContentLimitMessage());
     }
     return true;
   }

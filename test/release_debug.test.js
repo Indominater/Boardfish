@@ -102,10 +102,10 @@ const RELEASE_FORBIDDEN_DIAGNOSTIC_METADATA = Object.freeze([
 ]);
 
 const RELEASE_OPERATIONAL_CONSOLE_MESSAGES = Object.freeze([
-  ['warn', '[Boardfish] service worker registration failed:'],
-  ['warn', '[export] save picker failed; falling back to browser download.'],
-  ['error', 'Save failed:'],
-  ['error', '[copy] clipboard.write FAILED:'],
+  ['warn', 'Offline Setup Failed:'],
+  ['warn', 'File Picker Failed; Using Browser Download'],
+  ['error', 'Save Failed:'],
+  ['error', 'Clipboard Write Failed:'],
 ]);
 
 let builtWebPreviewBundle = null;

@@ -30,7 +30,7 @@ test('rejects boards above the object limit before pruning empty textboxes', () 
     () => BoardSchema.normalizeBoardData({
       objects: Array.from({ length: 101 }, (_, index) => textObject(`text-${index}`, '')),
     }),
-    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Boardfish is limited to 100 objects',
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Board Limit: 100 Objects',
   );
 });
 
@@ -39,7 +39,7 @@ test('rejects excessive combined textbox characters, including whitespace before
     () => BoardSchema.normalizeBoardData({
       objects: [textObject('text-1', 'a'.repeat(12500)), textObject('text-2', '\t'.repeat(12501))],
     }),
-    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Boardfish is limited to 25,000 characters',
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Board Limit: 25,000 Characters',
   );
 });
 
@@ -123,7 +123,7 @@ test('rejects image objects with missing image sources', () => {
       imageStore: {},
       objects: [imageObject('obj-1', 'img-1')],
     }),
-    /references missing image/
+    /Missing Image: img-1/
   );
 });
 
@@ -131,7 +131,7 @@ test('rejects malformed unused image sources before pruning', () => {
   assert.throws(() => BoardSchema.normalizeBoardData({
     imageStore: { 'img-unused': 42 },
     objects: [],
-  }), /imageStore\.img-unused must be a string or object/);
+  }), /Invalid Image Source: img-unused/);
 });
 
 test('prunes unused sources and invisible empty text through round trips', () => {
@@ -150,6 +150,6 @@ test('prunes unused sources and invisible empty text through round trips', () =>
 });
 
 test('rejects unsupported versions and formats', () => {
-  assert.throws(() => BoardSchema.normalizeBoardData({ version: 99 }), /unsupported board version/);
-  assert.throws(() => BoardSchema.normalizeBoardData({ format: 'other' }), /unsupported board format/);
+  assert.throws(() => BoardSchema.normalizeBoardData({ version: 99 }), /Unsupported Board Version/);
+  assert.throws(() => BoardSchema.normalizeBoardData({ format: 'other' }), /Unsupported Board Format/);
 });

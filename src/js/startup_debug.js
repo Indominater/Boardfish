@@ -156,19 +156,18 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     ta.select();
     ta.setSelectionRange(0, ta.value.length);
     let copied = false;
+    let selectionError = null;
     try {
       copied = document.execCommand('copy');
     } catch (error) {
-      if (clipboardApiError) console.warn(`Clipboard API failed for ${label}.`, clipboardApiError);
-      console.warn(`Selection copy failed for ${label}.`, error);
+      selectionError = error;
     }
     ta.remove();
-    if (!copied && clipboardApiError) {
-      console.warn(`Clipboard API failed for ${label}.`, clipboardApiError);
+    if (copied) {
+      console.log(`Copied ${label} JSON to clipboard.`);
+    } else {
+      console.warn(`Clipboard Write Failed: ${label}`, { clipboardApiError, selectionError });
     }
-    console.log(copied
-      ? `Copied ${label} JSON to clipboard.`
-      : `Copy command returned false.`);
     return copied;
   }
 
@@ -297,7 +296,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     console.table(rows);
 
     storeResult(result);
-    if (copy) copyDebugJson('top band debug', result);
+    if (copy) copyDebugJson('Top Band Debug', result);
 
     return result;
   }
@@ -402,7 +401,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     if (mismatchRows.length) console.table(mismatchRows.slice(0, 80));
 
     storeResult(result);
-    if (copy) await copyDebugJson('top band toggle stress', result);
+    if (copy) await copyDebugJson('Top Band Toggle Stress', result);
 
     return result;
   }
@@ -474,7 +473,7 @@ var StartupDebug = DEBUG_TOOLS_ENABLED ? (() => {
     console.table(rows);
 
     storeResult(result);
-    if (copy) await copyDebugJson('theme toggle stress', result);
+    if (copy) await copyDebugJson('Theme Toggle Stress', result);
 
     return result;
   }
@@ -523,7 +522,7 @@ const BoardfishDebugConsole = (() => {
   }
 
   function guardMessage(path) {
-    return `[Boardfish debug] Direct console call "${path}" is disabled. Use beginDebug()/finishDebug() so logs, tables, and results are captured in one JSON file.`;
+    return `[Boardfish Debug] Use beginDebug()/finishDebug() To Capture "${path}".`;
   }
 
   function isAllowedCaller() {
@@ -574,7 +573,7 @@ const BoardfishDebugConsole = (() => {
   }
 
   function expose(tools) {
-    if (!initializingDebugConsole && !isAllowedCaller()) throw new Error('[Boardfish debug] exposeDebug() is internal. Use beginDebug()/finishDebug() from the console.');
+    if (!initializingDebugConsole && !isAllowedCaller()) throw new Error('[Boardfish Debug] exposeDebug() Is Internal. Use beginDebug()/finishDebug().');
     if (!DEBUG_TOOLS_ENABLED) {
       try {
         delete window.BoardfishDebug;
@@ -593,7 +592,7 @@ const BoardfishDebugConsole = (() => {
 
   function registerCommand(name, fn) {
     if (!DEBUG_TOOLS_ENABLED || typeof fn !== 'function') return;
-    if (!isAllowedCaller()) throw new Error('[Boardfish debug] registerDebugCommand() is for codebase-owned test actions. Use beginDebug()/finishDebug() from the console.');
+    if (!isAllowedCaller()) throw new Error('[Boardfish Debug] registerDebugCommand() Is Internal. Use beginDebug()/finishDebug().');
     commands[name] = fn;
   }
 
@@ -767,7 +766,7 @@ const BoardfishDebugConsole = (() => {
       if (namespaces[key]) normalizeNamespaceCalls(key, value, calls);
       else if (commands[key]) addCall(calls, key, argsFromValue(value));
       else if (key.includes('.')) addCall(calls, key, argsFromValue(value));
-      else throw new Error(`[Boardfish debug] Unknown debug target "${key}". Register it with registerDebugCommand() or exposeDebug().`);
+      else throw new Error(`[Boardfish Debug] Unknown Target: "${key}"`);
     }
     return { calls, options };
   }
@@ -778,7 +777,7 @@ const BoardfishDebugConsole = (() => {
     const parts = normalized.split('.');
     let current = namespaces[parts.shift()];
     for (const part of parts) current = current?.[part];
-    if (typeof current !== 'function') throw new Error(`[Boardfish debug] "${normalized}" is not a registered debug function.`);
+    if (typeof current !== 'function') throw new Error(`[Boardfish Debug] Unknown Target: "${normalized}"`);
     return current;
   }
 
@@ -798,7 +797,7 @@ const BoardfishDebugConsole = (() => {
         row.ok = true;
       } catch (error) {
         row.error = serializeDebugValue(error);
-        console.error(`[Boardfish debug] ${call.path} failed`, error);
+        console.error(`[Boardfish Debug] Command Failed: ${call.path}`, error);
       }
       row.ms = Math.round((performance.now() - startedAt) * 100) / 100;
       results.push(row);
@@ -849,7 +848,7 @@ const BoardfishDebugConsole = (() => {
 
   async function beginDebug(spec = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish debug] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     if (activeSession) {
@@ -879,7 +878,7 @@ const BoardfishDebugConsole = (() => {
 
   async function finishDebug(spec = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish debug] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     if (!activeSession) {

@@ -766,8 +766,8 @@ const runExclusiveBoardSave = (
 };
 runExclusiveBoardSave.inFlight = null;
 
-function showSaveFailurePill() {
-  showIslandMsg('Save failed', long_message);
+function showSaveFailurePill(err) {
+  showIslandMsg(err?.boardfishLimit && err.boardfishUserMessage || 'Save Failed', long_message);
 }
 
 const saveBoardImpl = async (saveAs = false) => {
@@ -829,8 +829,8 @@ const saveBoardImpl = async (saveAs = false) => {
     return true;
   } catch (err) {
     releaseInputShield();
-    console.error('Save failed:', err);
-    showSaveFailurePill();
+    console.error('Save Failed:', err);
+    showSaveFailurePill(err);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     SaveDebug.end(dbg, { saved: false, error: String(err) });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -862,11 +862,11 @@ async function openBoardFileRef(fileRef) {
   const path = BoardfishRuntime.describeFileRef(fileRef);
   const dbg = OpenDebug.start('openBoardFileRef', { path, currentFilePath, objectCount: objects.length });
   if (!(await confirmDirtyBeforeOpen(dbg))) return;
-  await openBoardFromPath(fileRef, dbg, 'Open failed:');
+  await openBoardFromPath(fileRef, dbg);
   return;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!(await confirmDirtyBeforeOpen())) return;
-  await openBoardFromPath(fileRef, 'Open failed:');
+  await openBoardFromPath(fileRef);
 }
 
 async function openBoard() {
@@ -896,10 +896,10 @@ async function openBoard() {
     }
     if (typeof BOARDFISH_PRODUCTION === 'undefined') {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      await openBoardFromPath(fileRef, dbg, 'Open failed:');
+      await openBoardFromPath(fileRef, dbg);
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     } else {
-      await openBoardFromPath(fileRef, 'Open failed:');
+      await openBoardFromPath(fileRef);
     }
   } catch (err) {
     finishFailedOpen(
@@ -907,7 +907,6 @@ async function openBoard() {
       dbg,
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       err,
-      'Open failed:',
     );
   }
 }

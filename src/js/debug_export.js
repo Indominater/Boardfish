@@ -317,7 +317,7 @@ var ExportDebug = (() => {
   function massiveReport() {
     const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
     if (!report) {
-      console.warn('[Boardfish export] No massive export report yet. Enable export debug, then run an export.');
+      console.warn('[Boardfish Export] No Report Available. Enable Export Debug And Run An Export.');
       return null;
     }
     const headline = {
@@ -379,7 +379,7 @@ var ExportDebug = (() => {
   function progressReport() {
     const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
     if (!report) {
-      console.warn('[Boardfish export] No progress report yet. Enable export debug, then run an export.');
+      console.warn('[Boardfish Export] No Report Available. Enable Export Debug And Run An Export.');
       return null;
     }
     const totalMs = Number(report.totalMs) || 0;
@@ -432,7 +432,7 @@ var ExportDebug = (() => {
   function smoothnessReport() {
     const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
     if (!report) {
-      console.warn('[Boardfish export] No smoothness report yet. Enable export debug, then run an export.');
+      console.warn('[Boardfish Export] No Report Available. Enable Export Debug And Run An Export.');
       return null;
     }
     const out = {

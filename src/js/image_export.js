@@ -46,7 +46,7 @@ async function saveSelectedImage() {
     if (busyPill) finishPillTask({ beforeFinish: releaseInputShield, busyPill });
     else releaseInputShield();
     ExportDebug.end(dbg, { saved: false, error: String(err) });
-    console.error('Save image failed:', err);
+    console.error('Export Failed:', err);
   }
 }
 
@@ -61,7 +61,6 @@ async function exportImageBatch({
   startMeta,
   skipMeta = null,
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  errorLabel,
 }) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = ExportDebug.start(op, startMeta);
@@ -130,7 +129,7 @@ async function exportImageBatch({
     stopTotalWatch?.({ error: String(err) });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     ExportDebug.end(dbg, { saved: false, imageCount: imageObjs.length, error: String(err) });
-    console.error(errorLabel, err);
+    console.error('Export Failed:', err);
   }
 }
 
@@ -140,7 +139,6 @@ async function saveSelectedImages() {
   return exportImageBatch({
     imageObjs: selectedObjs,
     skip: !multiSelection || selectedObjs.length < 1,
-    errorLabel: 'Save images failed:',
     ...(typeof BOARDFISH_PRODUCTION === 'undefined'
       ? {
           op: 'exportImages',

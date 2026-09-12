@@ -87,14 +87,14 @@ function startServer(nextPort, attemptsRemaining = explicitPort ? 1 : fallbackPo
   server.once('error', (error) => {
     if (error.code === 'EADDRINUSE' && !explicitPort && attemptsRemaining > 1) {
       const fallbackPort = nextPort + 1;
-      console.warn(`Port ${nextPort} is busy; trying ${fallbackPort}.`);
+      console.warn(`Port ${nextPort} In Use; Trying ${fallbackPort}`);
       startServer(fallbackPort, attemptsRemaining - 1);
       return;
     }
 
     if (error.code === 'EADDRINUSE') {
-      const hint = explicitPort ? ' Choose a different PORT value.' : ' Set PORT to choose another port.';
-      console.error(`Port ${nextPort} is already in use.${hint}`);
+      const hint = explicitPort ? ' Choose A Different PORT Value.' : ' Set PORT To Choose Another Port.';
+      console.error(`Port ${nextPort} In Use.${hint}`);
       process.exitCode = 1;
       return;
     }

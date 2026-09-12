@@ -194,7 +194,7 @@ test('image insertion rejects a short read before storing a source', async () =>
     type: 'image/png',
     size: 8,
     async arrayBuffer() { return new Uint8Array([1, 2]).buffer; },
-  }, 'img-short'), /truncated image Blob/);
+  }, 'img-short'), /Image Read Failed/);
   assert.equal(context.calls.length, 0);
 });
 

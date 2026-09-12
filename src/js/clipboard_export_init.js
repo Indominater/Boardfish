@@ -34,7 +34,7 @@ const writeWebClipboardTokenForJsClipboard = (
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     );
   } catch (err) {
-    console.error('[copy] web clipboard token write FAILED:', err);
+    console.error('Clipboard Write Failed:', err);
     return Promise.resolve({ boardfishTokenWritten: false });
   }
   return Promise.resolve(clipboardWrite)
@@ -47,7 +47,7 @@ const writeWebClipboardTokenForJsClipboard = (
       return result;
     })
     .catch((err) => {
-      console.error('[copy] web clipboard token write FAILED:', err);
+      console.error('Clipboard Write Failed:', err);
       return { boardfishTokenWritten: false };
     });
 };
@@ -326,7 +326,7 @@ const copySelected = (options = {}) => {
     if (animateCopy) {
       webClipboardWrite
         .then(() => globalThis.BoardfishMotion?.applyCopyFeedback?.({ selection: true }))
-        .catch((err) => console.error('[copy] copy feedback FAILED:', err));
+        .catch((err) => console.error('Copy Feedback Failed:', err));
     }
     return true;
   }
@@ -431,7 +431,7 @@ const copySelected = (options = {}) => {
           });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        console.error('[copy] writeText FAILED:', err);
+        console.error('Clipboard Write Failed:', err);
       })
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       .finally(() => {
@@ -501,7 +501,7 @@ const copySelected = (options = {}) => {
           });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
-        console.error('[copy] clipboard.write FAILED:', err);
+        console.error('Clipboard Write Failed:', err);
         return false;
       } finally {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -512,9 +512,9 @@ const copySelected = (options = {}) => {
     const storedSource = BoardfishImageStore.getSource(obj.data.imgKey);
     const renderedPngBlob = async () => {
       const canvas = renderImageToCanvas(cloned) || await renderStoredImageToCanvas(cloned, storedSource);
-      if (!canvas) throw new Error('image is not ready for clipboard copy');
+      if (!canvas) throw new Error('Image Unavailable');
       const blob = await canvasToPngBlob(canvas);
-      if (!blob) throw new Error('failed to create clipboard PNG');
+      if (!blob) throw new Error('Clipboard Image Creation Failed');
       return blob;
     };
     const sourcePngBlob = createWebSourcePngClipboardBlob(obj, storedSource
@@ -548,13 +548,13 @@ const cutSelected = () => {
   try {
     copyResult = copySelected({ animateCopy: false });
   } catch (err) {
-    console.error('[cut] copySelected FAILED:', err);
+    console.error('Cut Failed:', err);
     return false;
   }
   if (copyResult === false) return false;
   deleteSelected();
   if (copyResult && typeof copyResult.catch === 'function') {
-    copyResult.catch((err) => console.error('[cut] copySelected FAILED:', err));
+    copyResult.catch((err) => console.error('Cut Failed:', err));
   }
   return true;
 };

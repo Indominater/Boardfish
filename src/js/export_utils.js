@@ -402,7 +402,7 @@
       return handle ? { handle, filename } : { cancelled: true };
     } catch (err) {
       if (err?.name === 'AbortError') return { cancelled: true };
-      console.warn('[export] save picker failed; falling back to browser download.', err);
+      console.warn('File Picker Failed; Using Browser Download', err);
       return null;
     }
   }
@@ -414,7 +414,7 @@
       return handle ? { directoryHandle: handle, filename: '', method: 'directory-picker' } : { cancelled: true };
     } catch (err) {
       if (err?.name === 'AbortError') return { cancelled: true };
-      console.warn('[export] directory picker failed; falling back to file download.', err);
+      console.warn('Folder Picker Failed; Using Browser Download', err);
       return null;
     }
   }

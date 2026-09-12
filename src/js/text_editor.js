@@ -787,7 +787,7 @@ const copyTextEditSelectionFromProxy = async (
         ...textStats,
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      console.error('[copy] text selection clipboard write FAILED:', err);
+      console.error('Clipboard Write Failed:', err);
     });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   writePromise.finally(() => {
@@ -1759,7 +1759,7 @@ function enterEdit(id, {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logPasteStep('paste:text-edit-js-payload-error', { error: String(err) });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      console.error('[paste] Boardfish text selection paste FAILED:', err);
+      console.error('Paste Failed:', err);
       if (!fallbackText) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         dbgApi?.end?.(dbg, {

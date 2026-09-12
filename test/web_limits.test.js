@@ -72,8 +72,8 @@ test('character rejection uses the same notification format and duration as obje
     else globalThis.long_message = previousLongMessage;
   }
   assert.deepEqual(calls, [
-    { message: 'Boardfish is limited to 100 objects', duration: 5200 },
-    { message: 'Boardfish is limited to 25,000 characters', duration: 5200 },
+    { message: 'Board Limit: 100 Objects', duration: 5200 },
+    { message: 'Board Limit: 25,000 Characters', duration: 5200 },
   ]);
 });
 
@@ -83,8 +83,8 @@ test('board payload validation rejects excessive text with the short character l
     () => WebLimits.validateBoardPayload({ textCharacters: 25001 }),
     (err) => {
       assert.equal(err.boardfishLimit, true);
-      assert.equal(err.message, 'This board has 25001 characters; Boardfish is limited to 25,000 characters.');
-      assert.equal(err.boardfishUserMessage, 'Boardfish is limited to 25,000 characters');
+      assert.equal(err.message, 'Board Limit: 25,000 Characters');
+      assert.equal(err.boardfishUserMessage, 'Board Limit: 25,000 Characters');
       return true;
     },
   );
@@ -94,8 +94,8 @@ test('web board payload limits reject too many objects', () => {
   assert.throws(
     () => WebLimits.validateBoardPayload({ objectCount: WebLimits.LIMITS.maxObjects + 1 }),
     (err) => {
-      assert.equal(err.message, 'This board has 101 objects; Boardfish is limited to 100 objects.');
-      assert.equal(err.boardfishUserMessage, 'Boardfish is limited to 100 objects');
+      assert.equal(err.message, 'Board Limit: 100 Objects');
+      assert.equal(err.boardfishUserMessage, 'Board Limit: 100 Objects');
       return true;
     },
   );
@@ -177,8 +177,8 @@ test('web board content limit carries a short user-facing message', () => {
       imageEntries: [],
     }),
     (err) => {
-      assert.equal(err.message, 'This board is 500 MB; Boardfish boards are limited to 500 MB.');
-      assert.equal(err.boardfishUserMessage, 'Boardfish boards are limited to 500 MB');
+      assert.equal(err.message, 'Board Limit: 500 MB');
+      assert.equal(err.boardfishUserMessage, 'Board Limit: 500 MB');
       return true;
     },
   );
