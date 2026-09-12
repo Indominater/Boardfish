@@ -107,6 +107,27 @@ function canvasToPngBlob(canvas) {
   });
 }
 
+async function readableImageSourceBlob(source) {
+  const container = globalThis.BoardfishWebBoardContainer;
+  const original = container.blobForImageSource(source);
+  if (!original?.size) throw new Error('image source is empty or missing');
+  const blob = await container.snapshotImageBlob(original);
+  const header = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  const startsWith = (bytes) => bytes.every((byte, i) => header[i] === byte);
+  const mime = blob.type.toLowerCase();
+  const matchesMime = mime === 'image/png' ? startsWith([137, 80, 78, 71, 13, 10, 26, 10])
+    : mime === 'image/jpeg' || mime === 'image/jpg' ? startsWith([255, 216, 255])
+    : mime === 'image/gif' ? startsWith([71, 73, 70, 56])
+    : mime === 'image/webp' && startsWith([82, 73, 70, 70])
+      && header[8] === 87 && header[9] === 69 && header[10] === 66 && header[11] === 80;
+  if (!matchesMime) throw new Error('image bytes do not match their format');
+  // Reading and decoding here catches stale file snapshots and corrupt payloads
+  // before the browser consumes a download or promised clipboard payload.
+  const bitmap = await createImageBitmapForSource(blob);
+  bitmap.close?.();
+  return blob;
+}
+
 async function renderStoredImageToCanvas(obj, source = imageStore[obj?.data?.imgKey]) {
   if (!isWebImageRef(source) && (typeof source !== 'string' || !source)) return null;
   const bitmap = await createImageBitmapForSource(source).catch(() => null);

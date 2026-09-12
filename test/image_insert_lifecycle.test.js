@@ -19,6 +19,7 @@ function loadWebImageSourceHarness({ boardContainer = null } = {}) {
     Blob,
     File,
     BoardfishWebBoardContainer: boardContainer || {
+      snapshotImageBlob: WebContainer.snapshotImageBlob,
       createWebImageRef(options) {
         calls.push(options);
         return { web: true, ...options };
@@ -138,13 +139,10 @@ function loadEditorStateBoundaryHarness() {
   return context;
 }
 
-test('inserted image Blob is retained without materializing its bytes', async () => {
+test('inserted image Blob is snapshotted without changing its bytes', async () => {
   const context = loadWebImageSourceHarness();
   const bytes = new Uint8Array([0, 1, 127, 128, 254, 255]);
   const blob = new Blob([bytes], { type: 'image/jpeg' });
-  Object.defineProperty(blob, 'arrayBuffer', {
-    value() { throw new Error('insert should not materialize Blob bytes'); },
-  });
 
   const source = await context.createWebImageSourceFromBlob(blob, 'img-7');
   const options = context.calls[0];
@@ -154,7 +152,7 @@ test('inserted image Blob is retained without materializing its bytes', async ()
   assert.equal(options.mime, 'image/jpeg');
   assert.equal(options.ext, 'jpg');
   assert.equal(options.bytes, undefined);
-  assert.equal(options.blob, blob);
+  assert.notEqual(options.blob, blob);
   assert.equal(options.blob.type, 'image/jpeg');
   assert.deepEqual(
     new Uint8Array(await options.blob.slice().arrayBuffer()),
@@ -172,6 +170,36 @@ test('inserted File bytes detach from their potentially volatile source', async 
   assert.notEqual(stored, file);
   assert.equal(stored.type, 'image/png');
   assert.deepEqual(new Uint8Array(await stored.arrayBuffer()), bytes);
+});
+
+test('inserted images survive the backing Blob becoming unreadable', async () => {
+  const context = loadWebImageSourceHarness({ boardContainer: WebContainer });
+  const bytes = new Uint8Array([0, 128, 255, 13, 10]);
+  let readable = true;
+  const externalBlob = {
+    type: 'image/png',
+    size: bytes.length,
+    slice() { return this; },
+    async arrayBuffer() {
+      if (!readable) throw new Error('file snapshot is no longer readable');
+      return bytes.slice().buffer;
+    },
+  };
+  const source = await context.createWebImageSourceFromBlob(externalBlob, 'img-external');
+  readable = false;
+
+  assert.deepEqual(await WebContainer.bytesForImageSourceAsync(source), bytes);
+  assert.equal(source.__blobVolatile, false);
+});
+
+test('image insertion rejects a short read before storing a source', async () => {
+  const context = loadWebImageSourceHarness();
+  await assert.rejects(context.createWebImageSourceFromBlob({
+    type: 'image/png',
+    size: 8,
+    async arrayBuffer() { return new Uint8Array([1, 2]).buffer; },
+  }, 'img-short'), /truncated image Blob/);
+  assert.equal(context.calls.length, 0);
 });
 
 test('inserted immutable Blob sources reuse CRC without changing saved bytes', async () => {
@@ -192,7 +220,7 @@ test('inserted immutable Blob sources reuse CRC without changing saved bytes', a
   };
 
   assert.equal(source.__blob instanceof Blob, true);
-  assert.equal(source.__blob, blob);
+  assert.notEqual(source.__blob, blob);
   assert.equal(source.__bytes, undefined);
   const first = await WebContainer.createBoardContainerBlob(board, { 'img-9': source });
   const second = await WebContainer.createBoardContainerBlob(board, { 'img-9': source });

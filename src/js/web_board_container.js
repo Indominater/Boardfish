@@ -671,6 +671,16 @@
     return true;
   }
 
+  async function snapshotImageBlob(blob, mime = blob.type || 'image/png') {
+    // Wrapping or slicing a File keeps its backing storage. Read its contents
+    // before retaining or handing off a Blob that must survive changes on disk.
+    const snapshot = typeof root.Response === 'function' && typeof blob.stream === 'function'
+      ? await new root.Response(blob.stream(), { headers: { 'Content-Type': mime } }).blob()
+      : new Blob([await blob.arrayBuffer()], { type: mime });
+    if (snapshot.size !== blob.size) throw new Error('truncated image Blob');
+    return snapshot.type === mime ? snapshot : snapshot.slice(0, snapshot.size, mime);
+  }
+
   async function stabilizeVolatileImageRefs(board, rawImageStore = {}) {
     const imageStore = board?.imageStore || {};
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -684,19 +694,7 @@
       if (!source?.__blobVolatile || !isBlobLike(source.__blob)) continue;
       const sourceBlob = source.__blob;
       const cachedCrc = cachedImageSourceCrc(source, sourceBlob.size);
-      const mime = source.mime || 'image/png';
-      let stableBlob = null;
-      if (typeof root.Response === 'function' && typeof sourceBlob?.stream === 'function') {
-        stableBlob = await new root.Response(sourceBlob.stream(), {
-          headers: { 'Content-Type': mime || 'image/png' },
-        }).blob();
-      } else {
-        stableBlob = new Blob([await sourceBlob.arrayBuffer()], { type: mime || 'image/png' });
-      }
-      if (Number(stableBlob?.size) !== Number(sourceBlob?.size)) {
-        throw new Error('truncated image Blob while preparing board save');
-      }
-      if (stableBlob.type !== mime) stableBlob = stableBlob.slice(0, stableBlob.size, mime || 'image/png');
+      const stableBlob = await snapshotImageBlob(sourceBlob, source.mime || 'image/png');
       if (!replaceWebImageRefBlob(source, stableBlob, cachedCrc, { volatile: false })) {
         throw new Error(`failed to stabilize image source ${key}`);
       }
@@ -1370,6 +1368,7 @@
     isWebImageRef,
     readBoardContainer,
     recoverMatchingVolatileImageRefsFromContainer,
+    snapshotImageBlob,
     stabilizeVolatileImageRefs,
   });
 

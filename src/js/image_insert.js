@@ -36,16 +36,14 @@ if (typeof BOARDFISH_PRODUCTION === 'undefined') {
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const createWebImageSourceFromBlob = (file, imgKey) => {
+const createWebImageSourceFromBlob = async (file, imgKey) => {
   const ext = webImageExtForFile(file);
   const mime = file.type;
   return BoardfishWebBoardContainer.createWebImageRef({
     path: `images/${imgKey}.${ext}`,
     mime,
     ext,
-    blob: typeof File === 'function' && file instanceof File
-      ? new Blob([file], { type: mime })
-      : file,
+    blob: await BoardfishWebBoardContainer.snapshotImageBlob(file, mime),
   });
 };
 
@@ -301,17 +299,15 @@ async function insertImageFiles(files, x, y
         let fileName;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if (typeof BOARDFISH_PRODUCTION === 'undefined') fileName = imageFileDebugName(file);
-        const imageSource = createWebImageSourceFromBlob(file, imgKey);
+        const imageSource = await createWebImageSourceFromBlob(file, imgKey);
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-          const detachedFile = typeof File === 'function' && file instanceof File;
           InsertDebug.step(fileDbg, 'read:end', {
             source: insertOptions.source,
             fileName,
             fileSize: file.size,
             fileType: file.type,
             bytes: file.size,
-            readMode: detachedFile ? 'blob-copy' : 'blob-reference',
-            skipped: detachedFile ? '' : 'immutable-blob',
+            readMode: 'blob-snapshot',
           });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_START */

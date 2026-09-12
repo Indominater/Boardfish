@@ -135,7 +135,7 @@
       });
     }
     const entry = {
-      name: options.filename || `image_${index + 1}.png`,
+      name: withImageExtension(name, 'png'),
       data,
       mime: 'image/png',
     };
@@ -158,14 +158,12 @@
     try {
       let data, ext, mime;
       if (webRef) {
-        data = source.__blob || await (typeof root.BoardfishWebBoardContainer.bytesForImageSourceAsync === 'function'
-          ? root.BoardfishWebBoardContainer.bytesForImageSourceAsync(source) : root.BoardfishWebBoardContainer.bytesForImageSource(source));
-        if (!data) return null;
+        data = await readableImageSourceBlob(source);
         ext = source.ext === 'jpeg' ? 'jpg' : (source.ext || 'png');
         mime = source.mime || mimeForImageExt(ext);
       } else if (typeof source === 'string' && source.startsWith('data:') && root.BoardfishWebBoardContainer?.dataUrlToBytes) {
         ext = guessImageExtFromDataUrl(source);
-        data = root.BoardfishWebBoardContainer.dataUrlToBytes(source);
+        data = await readableImageSourceBlob(source);
         mime = dataUrlMime(source);
       } else return null;
       const entry = { name: withImageExtension(name, ext), data, mime };
@@ -178,8 +176,7 @@
         };
       }
       return entry;
-    } catch (err) {
-      if (!webRef) throw err;
+    } catch {
       return null;
     }
   }

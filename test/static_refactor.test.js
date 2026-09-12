@@ -60,7 +60,6 @@ test('image storage is web-ref and data-url based', () => {
   assert.match(types, /MANIFEST: 'manifest'/);
   assert.match(imageState, /blobForImageSource/);
   assert.match(imageInsert, /createWebImageSourceFromBlob\(file, imgKey\)/);
-  assert.match(imageInsert, /file instanceof File[\s\S]*new Blob\(\[file\]/);
   assert.doesNotMatch(imageInsert, /readAsArrayBuffer/);
   assert.match(imageInsert, /const WEB_IMAGE_INSERT_CONCURRENCY = 3;/);
   assert.match(boardContainer, /createWebImageRef/);

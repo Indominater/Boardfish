@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { loadReadableImageSourceBlob, pngBytes } = require('../test-support/image_output.js');
+const WebContainer = require('../src/js/web_board_container.js');
 
 const root = path.join(__dirname, '..');
 
@@ -201,6 +203,9 @@ function loadClipboardExportHarness(options = {}) {
     imageFileDebugName: (file, fallback = 'clipboard-image') => file?.name || `${fallback}.${file?.type === 'image/jpeg' ? 'jpg' : 'png'}`,
     async insertImageFiles(files, x, y, source) { calls.insertedImages.push({ files, x, y, source }); context.objects.push({}); },
     isWebImageRef: options.isWebImageRef || (() => false),
+    readableImageSourceBlob: options.readableImageSourceBlob || loadReadableImageSourceBlob({
+      container: { ...WebContainer, ...options.BoardfishWebBoardContainer },
+    }),
     normalizeTextContent(value) {
       return String(value ?? '').replace(/\r\n?/g, '\n');
     },
@@ -208,6 +213,7 @@ function loadClipboardExportHarness(options = {}) {
       calls.renderImageToCanvas++;
       return options.renderedCanvas || null;
     },
+    async renderStoredImageToCanvas() { return options.storedCanvas || null; },
     canvasToPngBlob() {
       calls.canvasToPngBlob++;
       if (options.deferCanvasToPngBlob) {
@@ -720,7 +726,6 @@ test('cutting a selected object copies without jiggle and deletes immediately', 
 });
 
 test('cutting a selected image keeps copy feedback disabled after the system write settles', async () => {
-  const pngBytes = new Uint8Array([137, 80, 78, 71]);
   const imageSource = { web: true, mime: 'image/png' };
   const imageObject = {
     id: 'image-cut',
@@ -755,7 +760,6 @@ test('cutting a selected image keeps copy feedback disabled after the system wri
 });
 
 test('copying an untransformed web PNG image writes source bytes without rendering', async () => {
-  const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const imageSource = {
     web: true,
     mime: 'image/png',
@@ -794,11 +798,12 @@ test('copying an untransformed web PNG image writes source bytes without renderi
   assert.equal(context.calls.canvasToPngBlob, 0);
   assert.equal(context.calls.copiedImages.length, 1);
   assert.equal(context.calls.copiedImages[0].token, 'web-token');
-  assert.equal(context.calls.copiedImages[0].blob.type, 'image/png');
-  assert.equal(context.calls.copiedImages[0].blob.size, pngBytes.length);
+  const copiedBlob = await context.calls.copiedImages[0].blob;
+  assert.equal(copiedBlob.type, 'image/png');
+  assert.equal(copiedBlob.size, pngBytes.length);
   assert.deepEqual(
-    new Uint8Array(await context.calls.copiedImages[0].blob.arrayBuffer()),
-    pngBytes,
+    new Uint8Array(await copiedBlob.arrayBuffer()),
+    new Uint8Array(pngBytes),
   );
   assert.deepEqual(context.calls.objectJello, []);
 
@@ -854,8 +859,53 @@ test('copying a transformed image starts the clipboard write before PNG encoding
   assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
 });
 
+test('copy recovers unreadable and mislabeled images, including duplicates, before clipboard consumption', async (t) => {
+  const unreadable = new Blob([pngBytes], { type: 'image/png' });
+  Object.defineProperty(unreadable, 'stream', { value() { throw new Error('file changed on disk'); } });
+  const sources = [
+    WebContainer.createWebImageRef({ mime: 'image/png', blob: unreadable }),
+    WebContainer.createWebImageRef({ mime: 'image/png', blob: new Blob(['not a PNG'], { type: 'image/png' }) }),
+    'data:image/png;base64,invalid%%%data',
+  ];
+  for (const [index, imageSource] of sources.entries()) {
+    await t.test(`source ${index + 1}`, async () => {
+      for (const id of ['image-original', 'image-duplicate']) {
+        const renderedBlob = new Blob([pngBytes], { type: 'image/png' });
+        const imageObject = { id, type: 'image', data: { imgKey: 'img-shared', rotation: 0, flipX: false } };
+        const context = loadClipboardExportHarness({
+          selectedObject: imageObject,
+          imageSource,
+          BoardfishWebBoardContainer: WebContainer,
+          isWebImageRef: WebContainer.isWebImageRef,
+          renderedCanvas: { width: 192, height: 192 },
+          renderedBlob,
+          deferCopyImage: true,
+        });
+
+        const copied = context.copySelected();
+        assert.equal(context.calls.copiedImages.length, 1, 'write starts inside the copy gesture');
+        assert.equal(await context.calls.copiedImages[0].blob, renderedBlob);
+        assert.equal(context.calls.renderImageToCanvas, 1);
+        assert.deepEqual(context.calls.objectJello, []);
+        context.calls.resolveNextCopiedImage();
+        assert.equal(await copied, true);
+        assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [[id]]);
+        assert.deepEqual(imageObject.data, { imgKey: 'img-shared', rotation: 0, flipX: false });
+      }
+    });
+  }
+});
+
+test('an unrecoverable image fails copy without success feedback', async () => {
+  const context = loadClipboardExportHarness({
+    selectedObject: { id: 'broken', type: 'image', data: { imgKey: 'missing' } },
+  });
+  context.console = { error() {} };
+  assert.equal(await context.copySelected(), false);
+  assert.deepEqual(context.calls.objectJello, []);
+});
+
 test('a rejected system image write does not start copy feedback', async () => {
-  const pngBytes = new Uint8Array([137, 80, 78, 71]);
   const imageSource = { web: true, mime: 'image/png' };
   const imageObject = {
     id: 'image-failed-copy',

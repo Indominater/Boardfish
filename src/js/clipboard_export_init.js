@@ -165,41 +165,20 @@ const createWebSourcePngClipboardBlob = (obj, source
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const startedAt = collectClipboardDiagnostics ? clipboardNow() : 0;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  try {
-    const sourceBlob = container.blobForImageSource?.(source);
-    if (sourceBlob) {
-      const blob = sourceBlob.type === 'image/png'
-        ? sourceBlob
-        : sourceBlob.slice(0, sourceBlob.size, 'image/png');
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectClipboardDiagnostics) {
-        ClipDebug.step(dbg, 'copy:web-source-png-blob', {
-          imgKey: obj?.data?.imgKey || '',
-          sourceKind: webSourceClipboardKind(source),
-          sourceBytes: blob.size,
-          blobSize: blob.size,
-          ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
-        });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return blob;
-    }
-    const bytes = container.bytesForImageSource(source);
-    if (!bytes) return null;
-    const blob = new Blob([bytes], { type: 'image/png' });
+  return readableImageSourceBlob(source).then((blob) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectClipboardDiagnostics) {
       ClipDebug.step(dbg, 'copy:web-source-png-blob', {
         imgKey: obj?.data?.imgKey || '',
         sourceKind: webSourceClipboardKind(source),
-        sourceBytes: bytes.byteLength ?? bytes.length ?? blob.size,
+        sourceBytes: blob.size,
         blobSize: blob.size,
         ms: Math.round((clipboardNow() - startedAt) * 100) / 100,
       });
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return blob;
-  } catch (err) {
+  }).catch((err) => {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     if (collectClipboardDiagnostics) {
       ClipDebug.step(dbg, 'copy:web-source-png-blob:error', {
@@ -210,7 +189,7 @@ const createWebSourcePngClipboardBlob = (obj, source
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return null;
-  }
+  });
 };
 
 async function pasteWebImageBlob(blob, wx, wy
@@ -533,44 +512,31 @@ const copySelected = (options = {}) => {
       }
     };
     const storedSource = BoardfishImageStore.getSource(obj.data.imgKey);
+    const renderedPngBlob = async () => {
+      const canvas = renderImageToCanvas(cloned) || await renderStoredImageToCanvas(cloned, storedSource);
+      if (!canvas) throw new Error('image is not ready for clipboard copy');
+      const blob = await canvasToPngBlob(canvas);
+      if (!blob) throw new Error('failed to create clipboard PNG');
+      return blob;
+    };
     const sourcePngBlob = createWebSourcePngClipboardBlob(obj, storedSource
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , dbg
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     );
     if (sourcePngBlob) {
-      return writeWebPngBlob(sourcePngBlob
+      return writeWebPngBlob(sourcePngBlob.then((blob) => blob || renderedPngBlob())
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         , 'image-web-source-png', {
           imgKey: obj.data.imgKey,
           sourceKind: webSourceClipboardKind(storedSource),
-          sourceBytes: sourcePngBlob.size,
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       );
     }
-    const canvas = renderImageToCanvas(obj);
-    if (!canvas) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectClipboardDiagnostics) {
-        ClipDebug.end(dbg, { path: 'image-rendered', skipped: 'image-not-ready' });
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return false;
-    }
-    let pngBlobPromise;
-    try {
-      pngBlobPromise = Promise.resolve(canvasToPngBlob(canvas)).then((blob) => {
-        if (!blob) throw new Error('failed to create clipboard PNG');
-        return blob;
-      });
-    } catch (err) {
-      console.error('[copy] clipboard.write FAILED:', err);
-      return false;
-    }
     // Pass the pending encode into ClipboardItem so clipboard.write starts in
     // the trusted copy gesture instead of after canvas.toBlob completes.
-    return writeWebPngBlob(pngBlobPromise
+    return writeWebPngBlob(renderedPngBlob()
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       , 'image-web-rendered'
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
