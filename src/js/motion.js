@@ -40,17 +40,14 @@
     Math.exp(-decay * timeSec) * Math.sin(omegaD * timeSec);
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let recordMotionDebug = null;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    recordMotionDebug = (stepName, meta = {}) => {
-      root.ViewportDebug?.recordMotion?.(stepName, {
-        jelloObjectMotions: objectMotions.size,
-        textSelectionJelloMotions: textSelectionMotions.size,
-        hasObjectMotions: !!(objectMotions.size || textSelectionMotions.size),
-        ...meta,
-      });
-    };
-  }
+  const recordMotionDebug = (stepName, meta = {}) => {
+    root.ViewportDebug?.recordMotion?.(stepName, {
+      jelloObjectMotions: objectMotions.size,
+      textSelectionJelloMotions: textSelectionMotions.size,
+      hasObjectMotions: !!(objectMotions.size || textSelectionMotions.size),
+      ...meta,
+    });
+  };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   const requestMotionFrame = () => {
@@ -90,7 +87,7 @@
   ) => {
     if (!motionRenderPending && !(objectMotions.size || textSelectionMotions.size)) return;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const wasPending = typeof BOARDFISH_PRODUCTION === 'undefined' && motionRenderPending;
+    const wasPending = motionRenderPending;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     motionRenderPending = false;
     const removed = root._boardOpening === true ? pruneFinishedMotions() : 0;
@@ -187,7 +184,7 @@
     const sameCohort = existing?.cohortKey === cohortKey;
     if (sameCohort && startedAt - existing.startedAt >= 0 && startedAt - existing.startedAt < RETRIGGER_MIN_INTERVAL_MS) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-coalesced', { id: obj.id, objectType: obj.type || '' });
+      recordMotionDebug('jiggle-coalesced', { id: obj.id, objectType: obj.type || '' });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return;
     }
@@ -196,7 +193,7 @@
     if (handoff) motion.handoff = handoff;
     objectMotions.set(obj.id, motion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-start', { id: obj.id, objectType: obj.type || '' });
+    recordMotionDebug('jiggle-start', { id: obj.id, objectType: obj.type || '' });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
   };
 
@@ -229,7 +226,7 @@
     const existing = textSelectionMotions.get(spec.id);
     if (existing && startedAt - existing.startedAt >= 0 && startedAt - existing.startedAt < RETRIGGER_MIN_INTERVAL_MS) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-coalesced', { id: spec.id, objectType: 'text-selection' });
+      recordMotionDebug('jiggle-coalesced', { id: spec.id, objectType: 'text-selection' });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       requestMotionFrame();
       return;
@@ -243,7 +240,7 @@
     if (handoff) motion.handoff = handoff;
     textSelectionMotions.set(spec.id, motion);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-start', { id: spec.id, objectType: 'text-selection', start, end });
+    recordMotionDebug('jiggle-start', { id: spec.id, objectType: 'text-selection', start, end });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     requestMotionFrame();
   };
@@ -253,7 +250,7 @@
     const elapsed = drawTime - motion.startedAt;
     const transform = transformAtElapsed(motion, elapsed, zoom);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-progress', { id, objectType: 'text-selection', t: clamp01(elapsed / DURATION_MS), ...transform });
+    recordMotionDebug('jiggle-progress', { id, objectType: 'text-selection', t: clamp01(elapsed / DURATION_MS), ...transform });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return transform;
   };
@@ -286,7 +283,7 @@
     const transform = transformAtElapsed(motion, elapsed, zoom);
     lastDrawnObjectMotions.set(obj.id, transform);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') recordMotionDebug('jiggle-progress', { id: obj.id, objectType: obj.type || '', t: clamp01(elapsed / DURATION_MS), ...transform });
+    recordMotionDebug('jiggle-progress', { id: obj.id, objectType: obj.type || '', t: clamp01(elapsed / DURATION_MS), ...transform });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return transform;
   };

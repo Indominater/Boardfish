@@ -28,12 +28,9 @@ const webImageExtForFile = (file) => (
 );
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
-let imageFileDebugName = null;
-if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-  imageFileDebugName = (file, fallback = 'clipboard-image') => (
-    file?.name || `${fallback}.${webImageExtForFile(file)}`
-  );
-}
+const imageFileDebugName = (file, fallback = 'clipboard-image') => (
+  file?.name || `${fallback}.${webImageExtForFile(file)}`
+);
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 const createWebImageSourceFromBlob = async (file, imgKey) => {

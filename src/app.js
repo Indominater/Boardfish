@@ -83,10 +83,8 @@ function repaintBoardForThemeChange() {
   if (typeof invalidateOffscreen === 'function') invalidateOffscreen();
   if (typeof scheduleRender === 'function') {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-      scheduleRender(true, false, 'theme-change');
-      return 'scheduled-board';
-    }
+    scheduleRender(true, false, 'theme-change');
+    return 'scheduled-board';
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     scheduleRender(true, false);
   }

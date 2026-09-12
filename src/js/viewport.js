@@ -862,7 +862,6 @@ const BoardObjectGeometry = BoardfishObjectGeometry.createObjectGeometry({
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 function withRenderSource(source, fn) {
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') return fn();
   const prev = _activeRenderSource;
   _activeRenderSource = source || prev;
   try {
@@ -947,8 +946,7 @@ function createBoardTextDrawWarmupSnapshot(canvas) {
 
 function restoreBoardTextDrawWarmupSnapshot(context, canvas, snapshot) {
   if (!context || !canvas || !snapshot) return 0;
-  let startedAt;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') startedAt = performance.now();
+  const startedAt = performance.now();
   try {
     context.setTransform(1, 0, 0, 1, 0, 0);
     try { context.globalAlpha = 1; } catch (_) {}
@@ -962,9 +960,7 @@ function restoreBoardTextDrawWarmupSnapshot(context, canvas, snapshot) {
       context.drawImage(snapshot, 0, 0);
     } catch (_) {}
   }
-  return typeof BOARDFISH_PRODUCTION === 'undefined'
-    ? performance.now() - startedAt
-    : 0;
+  return performance.now() - startedAt;
 }
 
 function textDrawWarmupLineWidth(line, obj) {

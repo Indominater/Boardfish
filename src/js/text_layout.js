@@ -899,15 +899,13 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
   if (!obj || obj.type !== 'text' || !Array.isArray(obj._layoutCache)) return false;
   const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const debug = collectDiagnostics ? {
+  const debug = {
     reason: '',
     oldLayoutLines: Array.isArray(obj._layoutCache) ? obj._layoutCache.length : 0,
-  } : null;
+  };
   const fail = (reason) => {
-    if (collectDiagnostics) {
-      debug.reason = reason;
-      obj._lastTextLayoutPatchDebug = debug;
-    }
+    debug.reason = reason;
+    obj._lastTextLayoutPatchDebug = debug;
     return false;
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */

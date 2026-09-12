@@ -245,15 +245,11 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   }
   _editEl?._boardfishSetPendingInputState?.(replacementState);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const debugNow = collectDiagnostics
-    ? (typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now())
-    : null;
-  const debugRound = collectDiagnostics
-    ? (typeof textEditorDebugRound === 'function'
-        ? textEditorDebugRound
-        : (value) => Math.round((Number(value) || 0) * 100) / 100)
-    : null;
-  const mutationStartedAt = collectDiagnostics ? debugNow() : 0;
+  const debugNow = typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now();
+  const debugRound = typeof textEditorDebugRound === 'function'
+    ? textEditorDebugRound
+    : (value) => Math.round((Number(value) || 0) * 100) / 100;
+  const mutationStartedAt = debugNow();
   const mutationResult =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   replaceTextEditProxyRange(
@@ -261,7 +257,7 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   );
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const nextValue = textEditProxyValue(_editEl);
-  if (collectDiagnostics && typeof recordTextEditorInputPerfStep === 'function') {
+  if (typeof recordTextEditorInputPerfStep === 'function') {
     const mutationMs = debugRound(debugNow() - mutationStartedAt);
     recordTextEditorInputPerfStep('menu-replace-textarea-mutated', {
       seq: replacementState._debugSeq ?? '',
@@ -290,11 +286,11 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _caretVisible = true;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const dispatchStartedAt = collectDiagnostics ? debugNow() : 0;
+  const dispatchStartedAt = debugNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _editEl.dispatchEvent(new Event('input', { bubbles: true }));
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (collectDiagnostics && typeof recordTextEditorInputPerfStep === 'function') {
+  if (typeof recordTextEditorInputPerfStep === 'function') {
     recordTextEditorInputPerfStep('menu-replace-input-dispatched', {
       seq: replacementState._debugSeq ?? '',
       inputType,

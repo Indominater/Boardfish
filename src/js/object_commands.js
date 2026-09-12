@@ -23,7 +23,7 @@ const objectCommandTextStats = (value) => {
 
 function addText(wx, wy, content = '', options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const dbg = typeof BOARDFISH_PRODUCTION === 'undefined' ? options?.debug || null : null;
+  const dbg = options?.debug || null;
   let stepStartedAt = dbg && objectCommandDebugNow();
   const addStartedAt = stepStartedAt;
   const logStep = (step, meta = {}) => {

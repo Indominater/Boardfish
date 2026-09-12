@@ -200,7 +200,7 @@ async function invokeSaveBoard(fileRef
   , options = {}
 ) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+  {
     const historyFlushed = typeof flushEditHistoryCheckpoint === 'function' && flushEditHistoryCheckpoint();
     const path = BoardfishRuntime.describeFileRef(fileRef);
     if (historyFlushed) SaveDebug.step(dbg, 'flush-edit-history', { path, historyIndex });
@@ -230,7 +230,7 @@ async function invokeReadBoard(fileRef
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+  {
     const path = BoardfishRuntime.describeFileRef(fileRef);
     const frameProbe = scheduleOpenFrameProbe(dbg, 'open-frame-probe');
     const result = await OpenDebug.wrap(dbg, 'web_read_board', () => BoardfishRuntime.readBoard(fileRef), { path });
@@ -334,7 +334,7 @@ function getVisibleImageKeys(limit = Infinity) {
   return keys;
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
-if (typeof BOARDFISH_PRODUCTION === 'undefined') getVisibleImageKeys.lastDebug = null;
+getVisibleImageKeys.lastDebug = null;
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 function getPendingHydratableImageKeys(keys = []) {
@@ -365,7 +365,7 @@ function getPendingHydratableImageKeys(keys = []) {
   return keys;
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
-if (typeof BOARDFISH_PRODUCTION === 'undefined') getPendingHydratableImageKeys.lastDebug = null;
+getPendingHydratableImageKeys.lastDebug = null;
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
 async function hydrateImageForDisplay(key
@@ -438,7 +438,7 @@ async function hydrateImageKeysWithLimit(keys
   if (anyHydrated) invalidateOffscreen();
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, `${label}:end`, { count: keys.length, hydrated, concurrency, ms: performance.now() - t0, ...getOpenImageRuntimeDebugMetrics(dbg) });
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') return hydrated;
+  return hydrated;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return anyHydrated;
 }
@@ -861,11 +861,9 @@ async function openBoardFileRef(fileRef) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const path = BoardfishRuntime.describeFileRef(fileRef);
   const dbg = OpenDebug.start('openBoardFileRef', { path, currentFilePath, objectCount: objects.length });
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    if (!(await confirmDirtyBeforeOpen(dbg))) return;
-    await openBoardFromPath(fileRef, dbg, 'Open failed:');
-    return;
-  }
+  if (!(await confirmDirtyBeforeOpen(dbg))) return;
+  await openBoardFromPath(fileRef, dbg, 'Open failed:');
+  return;
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (!(await confirmDirtyBeforeOpen())) return;
   await openBoardFromPath(fileRef, 'Open failed:');

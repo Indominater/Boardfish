@@ -47,17 +47,14 @@
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let yieldToEventLoop = null;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    yieldToEventLoop = async (dbg, phase, meta = {}) => {
-      const t0 = performance.now();
-      await delay(0);
-      const ms = performance.now() - t0;
-      ExportDebug.step(dbg, 'ui:event-loop-yield', { phase, ms, ...meta });
-      ExportDebug.recordEventLoopYield?.({ phase, ms, ...meta });
-      return ms;
-    };
-  }
+  const yieldToEventLoop = async (dbg, phase, meta = {}) => {
+    const t0 = performance.now();
+    await delay(0);
+    const ms = performance.now() - t0;
+    ExportDebug.step(dbg, 'ui:event-loop-yield', { phase, ms, ...meta });
+    ExportDebug.recordEventLoopYield?.({ phase, ms, ...meta });
+    return ms;
+  };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   function createProgressUpdater(totalCount, busyPill) {
@@ -182,32 +179,28 @@
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  let imageSourceKind = null;
-  let recordWebResolveEntry = null;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    imageSourceKind = (source) => {
-      if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return 'web-ref';
-      if (typeof source === 'string') return source.startsWith('data:') ? 'data-url' : 'string';
-      if (!source) return 'missing';
-      return typeof source;
-    };
-    recordWebResolveEntry = (obj, index, entry, ms, extra = {}) => {
-      ExportDebug.recordResolve?.({
-        index,
-        objectId: obj?.id || '',
-        imgKey: obj?.data?.imgKey || '',
-        key: entry?.name || '',
-        rendered: !!entry?.debug?.rendered,
-        fallbackRender: !!entry?.debug?.fallbackRender,
-        phase: entry?.debug?.phase || extra.phase || '',
-        sourceKind: entry?.debug?.sourceKind || imageSourceKind(BoardfishImageStore.getSource(obj?.data?.imgKey)),
-        bytesMB: entry?.debug?.bytes ? Math.round(entry.debug.bytes / 1024 / 1024 * 100) / 100 : '',
-        ms,
-        skipped: !entry,
-        error: extra.error || '',
-      });
-    };
-  }
+  const imageSourceKind = (source) => {
+    if (typeof isWebImageRef === 'function' && isWebImageRef(source)) return 'web-ref';
+    if (typeof source === 'string') return source.startsWith('data:') ? 'data-url' : 'string';
+    if (!source) return 'missing';
+    return typeof source;
+  };
+  const recordWebResolveEntry = (obj, index, entry, ms, extra = {}) => {
+    ExportDebug.recordResolve?.({
+      index,
+      objectId: obj?.id || '',
+      imgKey: obj?.data?.imgKey || '',
+      key: entry?.name || '',
+      rendered: !!entry?.debug?.rendered,
+      fallbackRender: !!entry?.debug?.fallbackRender,
+      phase: entry?.debug?.phase || extra.phase || '',
+      sourceKind: entry?.debug?.sourceKind || imageSourceKind(BoardfishImageStore.getSource(obj?.data?.imgKey)),
+      bytesMB: entry?.debug?.bytes ? Math.round(entry.debug.bytes / 1024 / 1024 * 100) / 100 : '',
+      ms,
+      skipped: !entry,
+      error: extra.error || '',
+    });
+  };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
   async function downloadImageObjects(imageObjs

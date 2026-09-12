@@ -65,9 +65,7 @@ async function exportImageBatch({
 }) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = ExportDebug.start(op, startMeta);
-  const stopTotalWatch = typeof BOARDFISH_PRODUCTION === 'undefined'
-    ? ExportDebug.watch(dbg, 'export-total', { mode }, 5000)
-    : null;
+  const stopTotalWatch = ExportDebug.watch(dbg, 'export-total', { mode }, 5000);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (skip) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */

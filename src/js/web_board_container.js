@@ -202,9 +202,6 @@
   }
 
   async function createZipBlob(entries) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (!Array.isArray(entries) || entries.length >= ZIP16_SENTINEL) {
       throw new Error('Boardfish container has too many ZIP entries');
     }
@@ -230,12 +227,12 @@
     let crcComputedEntries = 0;
     let crcReusedEntries = 0;
     let crcComputedBytes = 0;
-    const crcStart = collectDiagnostics ? nowMs() : 0;
+    const crcStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     for (const entry of normalized) {
       if (entry.crc !== null) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectDiagnostics) crcReusedEntries++;
+        crcReusedEntries++;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         continue;
       }
@@ -243,14 +240,12 @@
         ? await crc32BlobAsync(entry.data)
         : await crc32Async(entry.data, true);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        crcComputedEntries++;
-        crcComputedBytes += entry.byteLength;
-      }
+      crcComputedEntries++;
+      crcComputedBytes += entry.byteLength;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const crcMs = collectDiagnostics ? nowMs() - crcStart : 0;
+    const crcMs = nowMs() - crcStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
     const localParts = [];
@@ -275,15 +270,13 @@
       crcs: normalized.map((entry) => entry.crc),
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDiagnostics) {
-      Object.assign(result, {
-        mode: 'blob-parts',
-        crcMs,
-        crcComputedBytes,
-        crcComputedEntries,
-        crcReusedEntries,
-      });
-    }
+    Object.assign(result, {
+      mode: 'blob-parts',
+      crcMs,
+      crcComputedBytes,
+      crcComputedEntries,
+      crcReusedEntries,
+    });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return result;
   }
@@ -684,7 +677,6 @@
   async function stabilizeVolatileImageRefs(board, rawImageStore = {}) {
     const imageStore = board?.imageStore || {};
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
     let refreshed = 0;
     let bytes = 0;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -699,10 +691,8 @@
         throw new Error(`failed to stabilize image source ${key}`);
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        refreshed++;
-        bytes += stableBlob.size;
-      }
+      refreshed++;
+      bytes += stableBlob.size;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -846,9 +836,6 @@
   }
 
   async function recoverMatchingVolatileImageRefsFromContainer(board, rawImageStore = {}, containerInput) {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const containerBlob = isNativeBlobPart(containerInput?.blob) ? containerInput.blob : containerInput;
     if (!isNativeBlobPart(containerBlob)) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -902,10 +889,8 @@
         replacement.crc,
       );
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        refreshed++;
-        bytes += replacement.blob.size;
-      }
+      refreshed++;
+      bytes += replacement.blob.size;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -920,17 +905,16 @@
 
   async function createBoardContainerBlob(board, rawImageStore = {}, options = {}) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-    let phaseStart = collectDiagnostics ? nowMs() : 0;
+    let phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const boardJson = JSON.stringify(board);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const jsonStringifyMs = collectDiagnostics ? nowMs() - phaseStart : 0;
-    if (collectDiagnostics) phaseStart = nowMs();
+    const jsonStringifyMs = nowMs() - phaseStart;
+    phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const boardBytes = utf8Encode(boardJson);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const jsonEncodeMs = collectDiagnostics ? nowMs() - phaseStart : 0;
+    const jsonEncodeMs = nowMs() - phaseStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const validateBoardPayload = typeof options.validateBoardPayload === 'function'
       ? options.validateBoardPayload
@@ -941,7 +925,7 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (validateBoardPayload) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) phaseStart = nowMs();
+      phaseStart = nowMs();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       validateBoardPayload({
         objectCount: board?.objects?.length || 0,
@@ -950,11 +934,11 @@
         imageBytes: 0,
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) validationMs += nowMs() - phaseStart;
+      validationMs += nowMs() - phaseStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDiagnostics) phaseStart = nowMs();
+    phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const imageEntries = [];
     const zipEntries = [{ name: 'board.json', data: boardBytes }];
@@ -991,18 +975,16 @@
       imageBytes += byteLength;
       zipEntries.push({ name: entry.path, data, crc: entry.crc });
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        if (sourceBlob) blobImageBytes += byteLength;
-        else byteArrayImageBytes += byteLength;
-      }
+      if (sourceBlob) blobImageBytes += byteLength;
+      else byteArrayImageBytes += byteLength;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const imageEntriesMs = collectDiagnostics ? nowMs() - phaseStart : 0;
+    const imageEntriesMs = nowMs() - phaseStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (validateBoardPayload) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) phaseStart = nowMs();
+      phaseStart = nowMs();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       validateBoardPayload({
         objectCount: board?.objects?.length || 0,
@@ -1012,15 +994,15 @@
         imageEntries,
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) validationMs += nowMs() - phaseStart;
+      validationMs += nowMs() - phaseStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDiagnostics) phaseStart = nowMs();
+    phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const zip = await createZipBlob(zipEntries);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const zipMs = collectDiagnostics ? nowMs() - phaseStart : 0;
+    const zipMs = nowMs() - phaseStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     for (let i = 0; i < imageEntries.length; i++) {
       const entry = imageEntries[i];
@@ -1031,35 +1013,32 @@
       blob: zip.blob,
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDiagnostics) {
-      Object.assign(result, {
-        zipBytes: zip.byteLength,
-        zipMode: zip.mode,
-        boardJsonBytes: boardBytes.length,
-        imageBytes,
-        imageCount: imageEntries.length,
-        imageEntries,
-        jsonStringifyMs,
-        jsonEncodeMs,
-        imageEntriesMs,
-        validationMs,
-        zipMs,
-        crcMs: zip.crcMs,
-        crcComputedBytes: zip.crcComputedBytes,
-        crcComputedEntries: zip.crcComputedEntries,
-        crcReusedEntries: zip.crcReusedEntries,
-        blobImageBytes,
-        byteArrayImageBytes,
-      });
-    }
+    Object.assign(result, {
+      zipBytes: zip.byteLength,
+      zipMode: zip.mode,
+      boardJsonBytes: boardBytes.length,
+      imageBytes,
+      imageCount: imageEntries.length,
+      imageEntries,
+      jsonStringifyMs,
+      jsonEncodeMs,
+      imageEntriesMs,
+      validationMs,
+      zipMs,
+      crcMs: zip.crcMs,
+      crcComputedBytes: zip.crcComputedBytes,
+      crcComputedEntries: zip.crcComputedEntries,
+      crcReusedEntries: zip.crcReusedEntries,
+      blobImageBytes,
+      byteArrayImageBytes,
+    });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return result;
   }
 
   async function readBoardContainer(input, options = {}) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-    const startedAt = collectDiagnostics ? nowMs() : 0;
+    const startedAt = nowMs();
     let phaseStart = startedAt;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const randomAccessBlob = isBlobLike(input) ? input : null;
@@ -1075,28 +1054,28 @@
     if (randomAccessBlob) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       containerFileBytes = Number(randomAccessBlob.size) || 0;
-      if (collectDiagnostics) phaseStart = nowMs();
+      phaseStart = nowMs();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const directory = await parseCentralDirectoryFromBlob(randomAccessBlob);
       entries = directory.entries;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       zipTailBytes = directory.tailBytes;
       centralDirectoryBytes = directory.centralBytes;
-      if (collectDiagnostics) zipOpenMs = nowMs() - phaseStart;
+      zipOpenMs = nowMs() - phaseStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) phaseStart = nowMs();
+      phaseStart = nowMs();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       containerBytes = await blobToBytes(input);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) readMs = nowMs() - phaseStart;
+      readMs = nowMs() - phaseStart;
       containerFileBytes = containerBytes.length;
-      if (collectDiagnostics) phaseStart = nowMs();
+      phaseStart = nowMs();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       entries = parseCentralDirectory(containerBytes);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) zipOpenMs = nowMs() - phaseStart;
+      zipOpenMs = nowMs() - phaseStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1116,7 +1095,7 @@
       });
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDiagnostics) phaseStart = nowMs();
+    phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const boardJsonBytes = await readZipEntry(
       randomAccessBlob || containerBytes,
@@ -1126,12 +1105,12 @@
       },
     );
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const boardJsonReadMs = collectDiagnostics ? nowMs() - phaseStart : 0;
-    if (collectDiagnostics) phaseStart = nowMs();
+    const boardJsonReadMs = nowMs() - phaseStart;
+    phaseStart = nowMs();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const board = JSON.parse(utf8Decode(boardJsonBytes));
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const boardJsonParseMs = collectDiagnostics ? nowMs() - phaseStart : 0;
+    const boardJsonParseMs = nowMs() - phaseStart;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const objectCount = board?.objects?.length || 0;
     const textCharacters = validateBoardPayload ? boardTextCharacters(board) : 0;
@@ -1167,7 +1146,7 @@
 
     if (randomAccessBlob && lazyImageRefs) {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const headerStart = collectDiagnostics ? nowMs() : 0;
+      const headerStart = nowMs();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const tasks = [];
       const seen = new Set();
@@ -1189,7 +1168,7 @@
         }
       }));
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) imageHeaderReadMs = nowMs() - headerStart;
+      imageHeaderReadMs = nowMs() - headerStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     for (const key in imageStore) {
@@ -1228,17 +1207,15 @@
         }
         if (verifyImageCrc && Number.isFinite(Number(imageEntry.crc))) {
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          const crcStart = collectDiagnostics ? nowMs() : 0;
+          const crcStart = nowMs();
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
           const view = randomAccessBlob
             ? new Uint8Array(await imageBlob.arrayBuffer())
             : compressedEntryBytes(containerBytes, imageEntry);
           const actualCrc = await crc32Async(view);
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          if (collectDiagnostics) {
-            imageCrcMs += nowMs() - crcStart;
-            imageCrcCount++;
-          }
+          imageCrcMs += nowMs() - crcStart;
+          imageCrcCount++;
           /* BOARDFISH_DEV_DIAGNOSTICS_END */
           if ((imageEntry.crc >>> 0) !== actualCrc) {
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -1249,13 +1226,13 @@
               actual: actualCrc,
             };
             entryWarnings.push(warning);
-            if (collectDiagnostics) warnings.push(warning);
+            warnings.push(warning);
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
           }
         }
       } else {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        const imageReadStart = collectDiagnostics ? nowMs() : 0;
+        const imageReadStart = nowMs();
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         bytes = await readZipEntry(
           randomAccessBlob || containerBytes,
@@ -1265,7 +1242,7 @@
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
             onCrcMismatch(warning) {
               entryWarnings.push(warning);
-              if (collectDiagnostics) warnings.push(warning);
+              warnings.push(warning);
               return 'continue';
             },
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -1273,7 +1250,7 @@
           },
         );
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectDiagnostics) {
+        {
           const entryReadMs = nowMs() - imageReadStart;
           imageReadMs += entryReadMs;
           if (entryReadMs > imageReadMaxMs) {
@@ -1285,7 +1262,7 @@
         imageBytes += bytes.length;
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const imageRefStart = collectDiagnostics ? nowMs() : 0;
+      const imageRefStart = nowMs();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       nextSources[key] = canUseLazyRef
         ? (randomAccessBlob
@@ -1300,10 +1277,8 @@
             : createWebImageRef({ path, mime, ext, lazy: { containerBytes, entry: imageEntry } }))
         : createWebImageRef({ path, mime, ext, bytes });
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        if (canUseLazyRef) lazyImageRefCount++;
-        else eagerImageRefCount++;
-      }
+      if (canUseLazyRef) lazyImageRefCount++;
+      else eagerImageRefCount++;
       imageEntries.push({
         key,
         path,
@@ -1313,7 +1288,7 @@
         compressedSize: imageEntry.compressedSize,
         warnings: entryWarnings,
       });
-      if (collectDiagnostics) imageRefMs += nowMs() - imageRefStart;
+      imageRefMs += nowMs() - imageRefStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     containerBytes = null;
@@ -1322,36 +1297,34 @@
     const result = { board };
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     result.imageEntries = imageEntries;
-    if (collectDiagnostics) {
-      result.debug = {
-        format: 'container-web',
-        file_bytes: containerFileBytes,
-        board_json_bytes: boardJsonBytes.length,
-        image_count: imageEntries.length,
-        image_bytes: imageBytes,
-        total_content_bytes: boardJsonBytes.length + imageBytes,
-        total_ms: nowMs() - startedAt,
-        read_ms: readMs,
-        zip_open_ms: zipOpenMs,
-        read_mode: randomAccessBlob ? 'blob-random-access' : 'full-buffer',
-        random_access: !!randomAccessBlob,
-        zip_tail_bytes: zipTailBytes,
-        central_directory_bytes: centralDirectoryBytes,
-        zip_entry_count: entries.size,
-        board_json_read_ms: boardJsonReadMs,
-        board_json_parse_ms: boardJsonParseMs,
-        image_read_ms: imageReadMs,
-        image_read_max_ms: imageReadMaxMs,
-        image_read_max_key: imageReadMaxKey,
-        image_ref_ms: imageRefMs,
-        image_header_read_ms: imageHeaderReadMs,
-        image_crc_ms: imageCrcMs,
-        image_crc_count: imageCrcCount,
-        lazy_image_refs: lazyImageRefCount,
-        eager_image_refs: eagerImageRefCount,
-        warnings,
-      };
-    }
+    result.debug = {
+      format: 'container-web',
+      file_bytes: containerFileBytes,
+      board_json_bytes: boardJsonBytes.length,
+      image_count: imageEntries.length,
+      image_bytes: imageBytes,
+      total_content_bytes: boardJsonBytes.length + imageBytes,
+      total_ms: nowMs() - startedAt,
+      read_ms: readMs,
+      zip_open_ms: zipOpenMs,
+      read_mode: randomAccessBlob ? 'blob-random-access' : 'full-buffer',
+      random_access: !!randomAccessBlob,
+      zip_tail_bytes: zipTailBytes,
+      central_directory_bytes: centralDirectoryBytes,
+      zip_entry_count: entries.size,
+      board_json_read_ms: boardJsonReadMs,
+      board_json_parse_ms: boardJsonParseMs,
+      image_read_ms: imageReadMs,
+      image_read_max_ms: imageReadMaxMs,
+      image_read_max_key: imageReadMaxKey,
+      image_ref_ms: imageRefMs,
+      image_header_read_ms: imageHeaderReadMs,
+      image_crc_ms: imageCrcMs,
+      image_crc_count: imageCrcCount,
+      lazy_image_refs: lazyImageRefCount,
+      eager_image_refs: eagerImageRefCount,
+      warnings,
+    };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     return result;
   }
