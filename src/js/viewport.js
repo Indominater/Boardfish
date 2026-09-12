@@ -20,47 +20,9 @@ const formatZoomPercent = (value = zoom) => {
   return `${Math.max(0.1, roundedPct).toFixed(1)}%`;
 };
 
-const isOpeningFreezeActive = () => {
-  return !!openingShield?.classList.contains('active') && openingShield.classList.contains('opening-freeze');
-};
-
-const getOpeningShieldPill = () => {
-  const pill = openingShield?.querySelector?.('.opening-shield-pill') || null;
-  return pill?.parentNode === openingShield ? pill : null;
-};
-
-const hideOpeningShieldPill = () => {
-  getOpeningShieldPill()?.remove();
-};
-
-const ensureOpeningShieldPill = () => {
-  if (!isOpeningFreezeActive()) {
-    hideOpeningShieldPill();
-    return null;
-  }
-  const existing = getOpeningShieldPill();
-  if (existing) return existing;
-  const pill = document.createElement('div');
-  pill.className = 'opening-shield-pill';
-  pill.setAttribute('aria-hidden', 'true');
-  const text = document.createElement('span');
-  text.className = 'opening-shield-pill-text';
-  pill.appendChild(text);
-  openingShield.appendChild(pill);
-  return pill;
-};
-
-const syncOpeningShieldPill = (text = islZoom.textContent) => {
-  const pill = ensureOpeningShieldPill();
-  if (!pill) return;
-  pill.firstElementChild.textContent = text;
-  pill.classList.toggle('visible', !!text);
-};
-
 const setPillMessageText = (text) => {
   const nextText = text == null ? '' : String(text);
   islZoom.textContent = nextText;
-  syncOpeningShieldPill(nextText);
 };
 
 function setIslandVisible(visible) {
@@ -93,7 +55,6 @@ function hideIsland(reason = 'hide') {
   clearTimeout(_islMsgTimer);
   _islMsgTimer = null;
   _islMsgActive = false;
-  hideOpeningShieldPill();
   syncIslandZoomDisplay(reason);
   PillDebug.log('hideIsland', { reason });
   return reason;

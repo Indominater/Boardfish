@@ -583,11 +583,13 @@ function queueScaledImageVariantForReadyImage(key, source, priority = false) {
 }
 
 async function settleOpenImageDrawCaches(concurrency = IMAGE_VARIANT_QUEUE_CONCURRENCY) {
+  const collectDebug = typeof BOARDFISH_PRODUCTION === 'undefined';
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const startedAt = performance.now();
+  let scaledTasks = 0, drawableWarmups = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
   concurrency = Math.max(1, Math.min(8, Math.floor(Number(concurrency) || IMAGE_VARIANT_QUEUE_CONCURRENCY)));
-  let scaledTasks = 0;
-  let drawableWarmups = 0;
 
   // Source hydration queues the shared 0.25x variant for every bitmap. Drain
   // that same queue before input is enabled so no device starts zooming while
@@ -600,7 +602,7 @@ async function settleOpenImageDrawCaches(concurrency = IMAGE_VARIANT_QUEUE_CONCU
   while (imageScaledVariantQueue.length) {
     cancelScheduledScaledVariantQueue();
     const tasks = imageScaledVariantQueue.splice(0);
-    scaledTasks += tasks.length;
+    if (collectDebug) scaledTasks += tasks.length;
     await mapWithConcurrency(tasks, concurrency, (task) => task(), false);
     while (imageScaledVariantQueueActive > 0) {
       await yieldToBrowser();
@@ -616,7 +618,7 @@ async function settleOpenImageDrawCaches(concurrency = IMAGE_VARIANT_QUEUE_CONCU
   for (const [source, meta] of drawableBitmapWarmupQueue) {
     drawableBitmapWarmupQueue.delete(source);
     warmDrawableBitmapForDrawNow(source, meta);
-    drawableWarmups++;
+    if (collectDebug) drawableWarmups++;
     batchCount++;
     if (batchCount >= 8 || performance.now() - batchStartedAt >= 8) {
       await yieldToBrowser();
@@ -625,6 +627,7 @@ async function settleOpenImageDrawCaches(concurrency = IMAGE_VARIANT_QUEUE_CONCU
     }
   }
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   return {
     scaledTasks,
     drawableWarmups,
@@ -632,6 +635,7 @@ async function settleOpenImageDrawCaches(concurrency = IMAGE_VARIANT_QUEUE_CONCU
     pendingDrawableWarmups: drawableBitmapWarmupQueue.size,
     ms: performance.now() - startedAt,
   };
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
 function hasScaledImageVariant(key, scale) {

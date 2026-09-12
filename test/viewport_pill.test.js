@@ -10,7 +10,6 @@ const root = path.join(__dirname, '..');
 
 function createElement(id = 'el') {
   const attrs = new Map();
-  const children = [];
   const classes = new Set();
   let textContentValue = '';
   let textContentWrites = 0;
@@ -18,8 +17,6 @@ function createElement(id = 'el') {
     id,
     dataset: {},
     style: {},
-    parentNode: null,
-    children,
     get textContent() {
       return textContentValue;
     },
@@ -30,30 +27,11 @@ function createElement(id = 'el') {
     textContentWriteCount() {
       return textContentWrites;
     },
-    appendChild(child) {
-      child.parentNode = el;
-      children.push(child);
-      return child;
-    },
-    remove() {
-      if (!el.parentNode) return;
-      const siblings = el.parentNode.children || [];
-      const index = siblings.indexOf(el);
-      if (index >= 0) siblings.splice(index, 1);
-      el.parentNode = null;
-    },
-    querySelector(selector) {
-      if (selector !== '.opening-shield-pill') return null;
-      return children.find((child) => child.classList.contains('opening-shield-pill')) || null;
-    },
     setAttribute(name, value) {
       attrs.set(name, String(value));
     },
     getAttribute(name) {
       return attrs.has(name) ? attrs.get(name) : null;
-    },
-    get firstElementChild() {
-      return children[0] || null;
     },
   };
   el.classList = {
@@ -73,15 +51,6 @@ function createElement(id = 'el') {
       return next;
     },
   };
-  Object.defineProperty(el, 'className', {
-    get() {
-      return [...classes].join(' ');
-    },
-    set(value) {
-      classes.clear();
-      for (const name of String(value).split(/\s+/).filter(Boolean)) classes.add(name);
-    },
-  });
   return el;
 }
 
@@ -89,16 +58,10 @@ function loadViewportPillHarness() {
   const source = fs.readFileSync(path.join(root, 'src', 'js', 'viewport.js'), 'utf8');
   const prefixEnd = source.indexOf('var _offscreen = document.createElement');
   assert.ok(prefixEnd > 0, 'viewport pill bootstrap section is missing');
-  const openingShield = createElement('opening-shield');
-  openingShield.classList.add('active', 'opening-freeze');
   const island = createElement('island');
   const islZoom = createElement('isl-zoom');
   const context = {
     console,
-    document: {
-      createElement: () => createElement(),
-    },
-    openingShield,
     island,
     islZoom,
     clearTimeout() {},
@@ -270,7 +233,7 @@ function loadViewportCanvasSizeHarness({
   return context;
 }
 
-test('opening shield pill text mirrors the zoom pill visual motion surface', () => {
+test('status and zoom pill preserve their shared visual motion surface', () => {
   const styles = fs.readFileSync(path.join(root, 'src', 'styles.css'), 'utf8');
 
   assert.match(styles, /--pill-radius:\s*999px;/);
@@ -278,21 +241,21 @@ test('opening shield pill text mirrors the zoom pill visual motion surface', () 
   assert.match(styles, /--pill-text-line-height:\s*18px;/);
   assert.match(styles, /--pill-text-min-width:\s*44px;/);
   assert.match(styles, /--pill-text-max-width:\s*min\(680px, calc\(100vw - 56px\)\);/);
-  for (const selector of ['#island', '.opening-shield-pill', '#isl-zoom,\n.opening-shield-pill-text']) {
+  for (const selector of ['#island', '#isl-zoom']) {
     const start = styles.lastIndexOf(`\n${selector} {`);
     assert.notEqual(start, -1, `${selector} style block is missing`);
     const end = styles.indexOf('\n}', start);
     assert.notEqual(end, -1, `${selector} style block is unterminated`);
     const block = styles.slice(start, end);
     assert.match(block, /border-radius: var\(--pill-radius\);/);
-    if (selector === '#island' || selector === '.opening-shield-pill') continue;
+    if (selector === '#island') continue;
     assert.match(block, /line-height: var\(--pill-text-line-height\);/);
     assert.match(block, /min-width: var\(--pill-text-min-width\);/);
     assert.match(block, /max-width: var\(--pill-text-max-width\);/);
     assert.match(block, /transform: var\(--ui-highlight-nudge-transform\);/);
     assert.match(block, /transition:\s*[\s\S]*background-color var\(--smooth-slide-duration\) var\(--smooth-slide-ease\),[\s\S]*color var\(--smooth-slide-duration\) var\(--smooth-slide-ease\),[\s\S]*transform var\(--smooth-slide-duration\) var\(--smooth-slide-ease\);/);
   }
-  assert.match(styles, /\.opening-shield-pill-text\s*\{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);/);
+  assert.match(styles, /#island\[data-mode="message"\] #isl-zoom\s*\{[\s\S]*--ui-highlight-nudge-transform: translateX\(0\);/);
 });
 
 test('pill messages update without redundant text writes', () => {
@@ -317,9 +280,8 @@ test('busy pill progress updates in place', () => {
 
   context.updatePillTask(busyPill, '1/2');
 
-  const openingPill = context.openingShield.querySelector('.opening-shield-pill');
-  assert.equal(openingPill.firstElementChild.textContent, '1/2');
-  assert.equal(openingPill.classList.contains('visible'), true);
+  assert.equal(context.islZoom.textContent, '1/2');
+  assert.equal(context.island.classList.contains('visible'), true);
 });
 
 test('zoom pill sync skips unchanged text writes', () => {

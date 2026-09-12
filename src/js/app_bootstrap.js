@@ -56,13 +56,11 @@ var finishFailedOpen;
       _boardOpening = true;
       beginOpeningFreeze();
       startPillTask({ message: 'Opening' });
-      let data;
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        data = await invokeReadBoard(filePath, dbg);
-      } else
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      data = await invokeReadBoard(filePath);
+      const data = await invokeReadBoard(filePath
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        , dbg
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      );
       applyBoardData(data
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
         , dbg
@@ -70,11 +68,11 @@ var finishFailedOpen;
       );
       currentFileRef = filePath;
       currentFilePath = fileLabel;
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') await finishOpenedBoard(dbg, data);
-      else
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      await finishOpenedBoard();
+      await finishOpenedBoard(
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        dbg, data
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      );
     } catch (err) {
       finishFailedOpen(
         /* BOARDFISH_DEV_DIAGNOSTICS_START */

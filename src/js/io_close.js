@@ -82,10 +82,12 @@ const beginOpeningFreeze = () => {
   openingShield.style.background = _canvasBackgroundColor;
   openingShield.classList.add('opening-freeze', 'active');
   appendOpeningFreezeBoard();
+  openingShield.appendChild(island);
 };
 
 const endOpeningFreeze = () => {
   if (!openingShield) return;
+  document.body.appendChild(island);
   canvas.prepend(boardCanvas);
   boardCanvas.removeAttribute('style');
   openingShield.classList.remove('active', 'opening-freeze');
@@ -487,28 +489,29 @@ async function hydrateTextDrawCachesForOpen(
   dbg = null
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 ) {
+  const collectDebug = typeof BOARDFISH_PRODUCTION === 'undefined';
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const startedAt = performance.now();
+  let textObjects = 0, textLines = 0, warmedLines = 0, chars = 0;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const fontSet = typeof document !== 'undefined' ? document.fonts : null;
   if (fontSet?.ready) {
     try { await fontSet.ready; } catch (_) {}
   }
 
   const warmupTarget = createOpenTextWarmupTarget();
-  let textObjects = 0;
-  let textLines = 0;
-  let warmedLines = 0;
-  let chars = 0;
   let batchStartedAt = performance.now();
   for (const obj of objects) {
     if (obj?.type !== 'text') continue;
-    textObjects++;
-    const content = String(obj.data?.content ?? '');
-    chars += content.length;
+    if (collectDebug) {
+      textObjects++;
+      chars += String(obj.data?.content ?? '').length;
+    }
     const layout = getTextLayout(obj);
     for (const line of layout) {
       prepareTextLineForDraw(line);
-      textLines++;
-      if (warmOpenTextLineForDraw(warmupTarget, obj, line)) warmedLines++;
+      if (collectDebug) textLines++;
+      if (warmOpenTextLineForDraw(warmupTarget, obj, line) && collectDebug) warmedLines++;
       if (performance.now() - batchStartedAt >= 8) {
         await new Promise((resolve) => setTimeout(resolve, 0));
         batchStartedAt = performance.now();
@@ -516,6 +519,7 @@ async function hydrateTextDrawCachesForOpen(
     }
   }
 
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const result = {
     textObjects,
     textLines,
@@ -524,10 +528,9 @@ async function hydrateTextDrawCachesForOpen(
     warmupAvailable: !!warmupTarget,
     ms: performance.now() - startedAt,
   };
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
   OpenDebug.step(dbg, 'hydrate-text-draw-caches', result);
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
   return result;
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
 }
 
 function queueVisibleImageHydration(limit = 3
@@ -566,22 +569,14 @@ async function finishOpenedBoard(
     ...debugMeta,
   });
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  let imageHydrationPromise;
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+  const imageHydrationPromise = hydrateImageKeysWithLimit(
+    hydrationKeys,
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    imageHydrationPromise = hydrateImageKeysWithLimit(
-      hydrationKeys,
-      dbg,
-      'hydrate-all',
-      getOpenHydrationConcurrency(),
-    );
+    dbg,
+    'hydrate-all',
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  } else {
-    imageHydrationPromise = hydrateImageKeysWithLimit(
-      hydrationKeys,
-      getOpenHydrationConcurrency(),
-    );
-  }
+    getOpenHydrationConcurrency(),
+  );
   const textHydrationPromise = hydrateTextDrawCachesForOpen(
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     dbg

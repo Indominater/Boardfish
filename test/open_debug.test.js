@@ -202,29 +202,31 @@ test('open-board failures show a readable pill message', () => {
   assert.match(bootstrap, /finalMsg: message/);
   assert.match(bootstrap, /duration: long_message/);
   assert.match(styles, /#island \{[\s\S]*max-width: calc\(100vw - 32px\);/);
-  assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text \{[\s\S]*white-space: normal;/);
+  assert.match(styles, /#isl-zoom \{[\s\S]*white-space: normal;/);
 });
 
 test('open-board loading does not wait for pill status update before reading the file', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const productionBootstrap = withoutDeveloperDiagnostics(bootstrap);
+  const developmentBootstrap = bootstrap.replace(/\/\* BOARDFISH_DEV_DIAGNOSTICS_(?:START|END) \*\//g, '');
 
-  assert.match(bootstrap, /startPillTask\(\{ message: 'Opening' \}\);[\s\S]*?data = await invokeReadBoard\(filePath, dbg\);/);
-  assert.match(productionBootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*let data;\s*data = await invokeReadBoard\(filePath\);/);
+  assert.match(developmentBootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard\(filePath\s*, dbg\s*\);/);
+  assert.match(productionBootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard\(filePath\s*\);/);
   assert.doesNotMatch(bootstrap, /await startPillTask\(\{ message: 'Opening' \}\)/);
 });
 
 test('open-board file target updates as soon as board data is applied', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const productionBootstrap = withoutDeveloperDiagnostics(bootstrap);
+  const developmentBootstrap = bootstrap.replace(/\/\* BOARDFISH_DEV_DIAGNOSTICS_(?:START|END) \*\//g, '');
 
   assert.match(
-    bootstrap,
-    /applyBoardData\(data[\s\S]*?, dbg[\s\S]*?\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;[\s\S]*?await finishOpenedBoard\(dbg, data\);/,
+    developmentBootstrap,
+    /applyBoardData\(data\s*, dbg\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*await finishOpenedBoard\(\s*dbg, data\s*\);/,
   );
   assert.match(
     productionBootstrap,
-    /applyBoardData\(data\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*await finishOpenedBoard\(\);/,
+    /applyBoardData\(data\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*await finishOpenedBoard\(\s*\);/,
   );
 });
 

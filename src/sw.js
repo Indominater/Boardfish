@@ -6,7 +6,6 @@ const BOARDFISH_CACHE_NAMESPACE =
 const BOARDFISH_CACHE = `${BOARDFISH_CACHE_NAMESPACE}${BOARDFISH_CACHE_VERSION}`;
 const currentCache = caches.open(BOARDFISH_CACHE);
 const BOARDFISH_APP_SHELL = [
-  './',
   './index.html',
   './styles.css',
   './manifest.webmanifest',
