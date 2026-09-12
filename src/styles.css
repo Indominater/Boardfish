@@ -1,7 +1,7 @@
 @font-face {
   font-family: 'Geist Sans';
   font-style: normal;
-  font-weight: 300 700;
+  font-weight: 400;
   font-display: swap;
   src: url('fonts/Geist.woff2') format('woff2');
 }
@@ -315,21 +315,12 @@ body {
   transform: var(--ui-highlight-nudge-transform);
   transition: transform var(--smooth-slide-duration) var(--smooth-slide-ease);
 }
-.ctx-action-item::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: var(--menu-item-radius);
-  background: transparent;
-  pointer-events: none;
-  z-index: 0;
-}
-.ctx-action-item:focus-visible::before { background: var(--firefox-menu-hover-bg); }
+.ctx-action-item:focus-visible { background: var(--firefox-menu-hover-bg); }
 @media (hover: hover) and (pointer: fine) {
-  .ctx-action-item:hover::before { background: var(--firefox-menu-hover-bg); }
+  .ctx-action-item:hover { background: var(--firefox-menu-hover-bg); }
 }
-.ctx-action-item.hotspot-active::before,
-.ctx-action-item[aria-pressed="true"]::before { background: var(--menu-active-bg); }
+.ctx-action-item.hotspot-active,
+.ctx-action-item[aria-pressed="true"] { background: var(--menu-active-bg); }
 .ctx-action-icon svg {
   position: relative;
   z-index: 1;

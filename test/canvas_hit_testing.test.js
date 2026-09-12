@@ -426,7 +426,7 @@ test('keyboard focus mirrors menu hover styling without focusing the zoom pill',
   assert.doesNotMatch(styles, /\.ctx-action-item:focus,\s*\.ctx-action-item:focus-visible\s*\{\s*outline: none;\s*\}/);
   assert.match(styles, /:where\(\.ctx-item:focus-visible,\s*\.ctx-action-item:focus-visible\)\s*\{\s*--ui-highlight-nudge-transform: translateX\(var\(--highlight-nudge-x\)\);\s*\}/);
   assert.match(styles, /\.ctx-item:focus-visible\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
-  assert.match(styles, /\.ctx-action-item:focus-visible::before\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
+  assert.match(styles, /\.ctx-action-item:focus-visible\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
   assert.match(styles, /#dlg-discard:focus-visible\s*\{\s*background: var\(--danger-hover-bg\);\s*\}/);
   assert.doesNotMatch(styles, /#island:focus-visible #isl-zoom/);
 });
@@ -441,7 +441,7 @@ test('hover effects are limited to hover-capable fine pointers', () => {
   assert.equal(occurrences(gatedHoverStyles, /:hover/g), occurrences(styles, /:hover/g));
   assert.doesNotMatch(styles, /hotspot-hover/);
   assert.match(gatedHoverStyles, /\.ctx-item:hover/);
-  assert.match(gatedHoverStyles, /\.ctx-action-item:hover::before/);
+  assert.match(gatedHoverStyles, /\.ctx-action-item:hover/);
   assert.match(gatedHoverStyles, /#island:hover #isl-zoom/);
   assert.match(gatedHoverStyles, /#dlg-discard:hover/);
   assert.match(styles, /\.ctx-item\.menu-pressed\s*\{\s*background: var\(--menu-active-bg\);/);
@@ -459,8 +459,8 @@ test('context actions use native hover and explicit pressed state', () => {
   assert.match(source, /function clearCtxActionHotspotState\(\) \{[\s\S]*classList\.remove\('hotspot-active'\);[\s\S]*\}/);
   assert.match(source, /addEventListener\('pointerup', clearCtxActionHotspotState\)/);
   assert.match(source, /addEventListener\('pointerleave', clearCtxActionHotspotState\)/);
-  assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.ctx-action-item:hover::before/);
-  assert.match(styles, /\.ctx-action-item\.hotspot-active::before/);
+  assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.ctx-action-item:hover/);
+  assert.match(styles, /\.ctx-action-item\.hotspot-active/);
 });
 
 test('menu rows clear explicit pressed state on release, cancellation, and close', () => {

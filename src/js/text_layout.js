@@ -173,14 +173,7 @@ function forEachTextSpacingUnit(text, callback, start = 0, end = null) {
   if (from >= to) return;
   const hasGraphemeSegmenter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function';
 
-  let asciiOnly = true;
-  for (let index = from; index < to; index++) {
-    if (text.charCodeAt(index) > 0x7F) {
-      asciiOnly = false;
-      break;
-    }
-  }
-  if (asciiOnly) {
+  if (!/[^\x00-\x7F]/.test(text.slice(from, to))) {
     let index = from;
     while (index < to) {
       // Intl.Segmenter treats CRLF as one grapheme; the code-point fallback
