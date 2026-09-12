@@ -382,7 +382,6 @@ test('active low-zoom navigation preserves full-size fallback while scaled varia
   assert.equal(selected.source, fullSource);
   assert.equal(selected.scale, 1);
   assert.equal(selected.targetScale, 0.25);
-  assert.equal(selected.scaledVariantPending, true);
   assert.equal(selected.activeInputFullFallback, true);
   assert.equal(context.isScaledImageVariantPending('img-1', 0.25), true);
   assert.equal(context.imageScaledVariantActiveInputFullFallbackCount, 1);
@@ -405,7 +404,6 @@ test('explicit active image draw preserves full-size fallback while scaled varia
   assert.equal(selected.source, fullSource);
   assert.equal(selected.scale, 1);
   assert.equal(selected.targetScale, 0.25);
-  assert.equal(selected.scaledVariantPending, true);
   assert.equal(selected.activeInputFullFallback, true);
   assert.equal(context.isScaledImageVariantPending('img-1', 0.25), true);
   assert.equal(context.imageScaledVariantActiveInputFullFallbackCount, 1);
@@ -601,7 +599,6 @@ test('idle low-zoom drawing preserves full-size fallback until scaled variants a
   assert.equal(selected.source, fullSource);
   assert.equal(selected.scale, 1);
   assert.equal(selected.targetScale, 0.25);
-  assert.equal(selected.scaledVariantPending, undefined);
   assert.equal(context.isScaledImageVariantPending('img-1', 0.25), true);
 });
 
@@ -815,11 +812,7 @@ test('low-zoom active navigation records visible full-size fallbacks until scale
   assert.match(source, /IMAGE_VARIANT_ACTIVE_OVERSCALE_LIMIT/);
   assert.match(source, /chooseImageScaleForDraw\(obj, fullSource, view, activeInput\)/);
   assert.match(source, /if \(targetScale < 1\) \{[\s\S]*queueScaledImageVariant\(key, fullSource, targetScale, activeInput\);/);
-  assert.match(source, /scaledVariantPending: true/);
   assert.match(source, /activeInputFullFallback: true/);
   assert.doesNotMatch(source, /source: null/);
-  assert.match(rendererSource, /scaledVariantPending = drawCounterValue/);
   assert.match(rendererSource, /activeInputFullFallbackImages/);
-  assert.match(rendererSource, /scaled-variant-pending-active-input/);
-  assert.match(rendererSource, /scaledVariantPendingImages/);
 });

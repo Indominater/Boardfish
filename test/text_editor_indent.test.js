@@ -1357,7 +1357,6 @@ test('exiting unchanged existing text keeps cached layout and skips size history
     _layoutCache: cachedLayout,
     _layoutCacheContent: 'Hi',
     _layoutCacheW: context.obj.w,
-    _layoutCacheScriptKey: '[]',
     _layoutCacheY: context.obj.y,
   });
   context._editHistoryLastContent = 'Hi';

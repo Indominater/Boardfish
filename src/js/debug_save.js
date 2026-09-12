@@ -86,7 +86,7 @@ var SaveDebug = (() => {
       .filter(e => (
         e.step === 'boardData' ||
         e.step.startsWith('save-frame-probe') ||
-        (e.step === 'invoke:ok' && /save_board|web_save_board/.test(e.meta?.command || '')) ||
+        (e.step === 'invoke:ok' && /web_save_board/.test(e.meta?.command || '')) ||
         e.step === 'markSaved:end' ||
         e.step === 'end' ||
         e.step === 'invoke:error'
@@ -157,7 +157,7 @@ var SaveDebug = (() => {
     }
     const find = (step) => run.find(e => e.step === step);
     const findPrefix = (prefix) => run.find(e => e.step?.startsWith(prefix));
-    const invokeOk = run.find(e => e.step === 'invoke:ok' && /save_board|web_save_board/.test(e.meta?.command || ''));
+    const invokeOk = run.find(e => e.step === 'invoke:ok' && /web_save_board/.test(e.meta?.command || ''));
     const frame = find('save-frame-probe');
     const pendingFrame = find('save-frame-probe:pending');
     const end = find('end') || run[run.length - 1];

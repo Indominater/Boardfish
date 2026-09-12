@@ -543,9 +543,6 @@ test('text edit caret honors visual line preference at wrapped line start', () =
     lineCaretXAtOffset(line, obj, offset) {
       return obj.x + context.TEXT_PAD + offset * 10;
     },
-    lineEndX(line, obj) {
-      return obj.x + context.TEXT_PAD + line.text.length * 10;
-    },
   };
   vm.createContext(context);
   vm.runInContext(
@@ -595,9 +592,6 @@ test('text edit caret passes consumed soft-wrap space offsets to layout', () => 
       seenOffsets.push(offset);
       return obj.x + context.TEXT_PAD + offset * 10;
     },
-    lineEndX(line, obj) {
-      return obj.x + context.TEXT_PAD + line.text.length * 10;
-    },
   };
   vm.createContext(context);
   vm.runInContext(
@@ -635,9 +629,6 @@ test('text edit caret stays inside content bounds at low zoom', () => {
     canvasTextColor: () => '#111',
     lineCaretXAtOffset(line, obj, offset) {
       return obj.x + context.TEXT_PAD + offset * 10;
-    },
-    lineEndX(line, obj) {
-      return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
   };
   vm.createContext(context);

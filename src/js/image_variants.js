@@ -736,7 +736,6 @@ function selectImageSourceForDraw(key, obj, fullSource, view = { zoom, dpr: wind
             source: fullSource,
             scale: 1,
             targetScale,
-            scaledVariantPending: true,
             activeInputFullFallback: true,
           }
         : { source: fullSource, activeInputFullFallback: true };

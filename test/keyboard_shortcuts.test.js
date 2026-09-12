@@ -44,7 +44,6 @@ function loadKeyboard(overrides = {}) {
     window: {
       innerWidth: 1000,
       innerHeight: 800,
-      getSelection: () => ({ isCollapsed: true, toString: () => '' }),
     },
     selectedIds: new Set(),
     objectsMap: new Map(),

@@ -42,7 +42,6 @@
       scaledImages: 0,
       scaledFallbackFull: 0,
       activeInputFullFallbackImages: 0,
-      scaledVariantPendingImages: 0,
       motionObjects: 0,
       motionImages: 0,
       motionText: 0,
@@ -368,7 +367,6 @@
         : row.fullScale ? 1 : '';
       row.fallbackFull = drawCounterValue(counters, 'scaledFallbackFull') > before.scaledFallbackFull;
       row.activeInputFullFallback = drawCounterValue(counters, 'activeInputFullFallbackImages') > before.activeInputFullFallbackImages;
-      row.scaledVariantPending = drawCounterValue(counters, 'scaledVariantPendingImages') > before.scaledVariantPendingImages;
       row.motionScaledImage = drawCounterValue(counters, 'motionScaledImages') > before.motionScaledImages;
       row.motionFullScaleImage = drawCounterValue(counters, 'motionFullScaleImages') > before.motionFullScaleImages;
       row.motionFullFallbackImage = drawCounterValue(counters, 'motionFullFallbackImages') > before.motionFullFallbackImages;
@@ -521,12 +519,10 @@
       }
 
       if (counters) {
-        if (selected?.scaledVariantPending) counters.scaledVariantPendingImages = (counters.scaledVariantPendingImages || 0) + 1;
-        else counters.missingImages++;
+        counters.missingImages++;
         counters.lastMissingKey = key;
         counters.lastMissingId = obj.id;
-        counters.lastMissingReason = selected?.scaledVariantPending ? 'scaled-variant-pending-active-input'
-          : !key ? 'missing-key'
+        counters.lastMissingReason = !key ? 'missing-key'
           : !deps.imageStore()[key] ? 'missing-store'
             : !bitmap ? 'missing-bitmap'
               : 'unknown';
@@ -590,7 +586,6 @@
           fullScaleImages: drawCounterValue(counters, 'fullScaleImages'),
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
           activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
-          scaledVariantPendingImages: drawCounterValue(counters, 'scaledVariantPendingImages'),
           motionScaledImages: drawCounterValue(counters, 'motionScaledImages'),
           motionFullScaleImages: drawCounterValue(counters, 'motionFullScaleImages'),
           motionFullFallbackImages: drawCounterValue(counters, 'motionFullFallbackImages'),

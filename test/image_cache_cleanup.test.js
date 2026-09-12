@@ -84,7 +84,6 @@ function loadImageState(createImageBitmap) {
     scheduleDrawableBitmapWarmup() {},
     queueScaledImageVariantForReadyImage() {},
     isViewportImageScalingActive() { return false; },
-    setCanvasImageQuality() {},
     createImageBitmap,
   };
 

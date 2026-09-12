@@ -588,7 +588,6 @@ var ClipDebug = (() => {
     const inputStart = first('text-edit-input:start');
     const inputEnd = latest('text-edit-input:end');
     const renderScheduled = latest('text-edit-input:render-scheduled');
-    const autoHeight = latest('text-edit-input:auto-height-done');
     const layoutPatch = latest('text-edit-input:layout-patched') || latest('text-edit-input:layout-invalidated');
     const history = latest('text-edit-input:history-recorded');
     const replacement = latest('text-edit-input:replacement-ready');
@@ -2100,7 +2099,6 @@ var ViewportDebug = (() => {
           scaledImages: e.meta?.scaledImages ?? '',
           scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
           activeInputFullFallbackImages: e.meta?.activeInputFullFallbackImages ?? '',
-          scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
           fullScaleImages: e.meta?.fullScaleImages ?? '',
           zoom: e.meta?.zoom ?? '',
         });
@@ -2238,8 +2236,6 @@ var ViewportDebug = (() => {
       maxMotionFullFallbackImages: Math.max(max('motionFullFallbackImages'), slowMax('motionFullFallbackImages')),
       avgMotionActiveInputFullFallbackImages: draws.length ? Math.round(sum('motionActiveInputFullFallbackImages') / draws.length * 100) / 100 : 0,
       maxMotionActiveInputFullFallbackImages: Math.max(max('motionActiveInputFullFallbackImages'), slowMax('motionActiveInputFullFallbackImages')),
-      avgScaledVariantPendingImages: draws.length ? Math.round(sum('scaledVariantPendingImages') / draws.length * 100) / 100 : 0,
-      maxScaledVariantPendingImages: max('scaledVariantPendingImages'),
       avgScaledImageScale: sum('scaledImages') ? Math.round(sum('scaledImageScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgTargetImageScale: sum('scaledImages') ? Math.round(sum('scaledImageTargetScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgImageSourceFirstDraws: draws.length ? Math.round(sum('imageSourceFirstDraws') / draws.length * 100) / 100 : 0,
@@ -2572,7 +2568,6 @@ var ViewportDebug = (() => {
         imageContextWarmDraws: e.steps?.drawBoard?.meta?.imageContextWarmDraws ?? '',
         scaledImageContextFirstDraws: e.steps?.drawBoard?.meta?.scaledImageContextFirstDraws ?? '',
         fullScaleImageContextFirstDraws: e.steps?.drawBoard?.meta?.fullScaleImageContextFirstDraws ?? '',
-        scaledVariantPendingImages: e.steps?.drawBoard?.meta?.scaledVariantPendingImages ?? '',
         fullScaleImages: e.steps?.drawBoard?.meta?.fullScaleImages ?? '',
         missingImages: e.steps?.drawBoard?.meta?.missingImages ?? '',
         croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? '',
@@ -2770,7 +2765,6 @@ var ViewportDebug = (() => {
         motionActiveInputFullFallbackImages: e.meta?.motionActiveInputFullFallbackImages ?? '',
         scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
         activeInputFullFallbackImages: e.meta?.activeInputFullFallbackImages ?? '',
-        scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
         croppedImages: e.meta?.croppedImages ?? '',
         imageSourceFirstDraws: e.meta?.imageSourceFirstDraws ?? '',
         imageSourceWarmDraws: e.meta?.imageSourceWarmDraws ?? '',
@@ -2839,7 +2833,6 @@ var ViewportDebug = (() => {
       maxMotionFullScaleImages: maxValue(draws, 'motionFullScaleImages'),
       maxMotionFullFallbackImages: maxValue(draws, 'motionFullFallbackImages'),
       maxMotionActiveInputFullFallbackImages: maxValue(draws, 'motionActiveInputFullFallbackImages'),
-      maxScaledVariantPendingImages: maxValue(draws, 'scaledVariantPendingImages'),
       firstAt: rows[0]?.at ?? '',
       lastAt: rows[rows.length - 1]?.at ?? '',
       durationMs: rows.length > 1 ? round(rows[rows.length - 1].at - rows[0].at) : 0,
@@ -2917,7 +2910,6 @@ var ViewportDebug = (() => {
           motionScaledImages: e.meta?.motionScaledImages ?? '',
           motionFullFallbackImages: e.meta?.motionFullFallbackImages ?? '',
           motionActiveInputFullFallbackImages: e.meta?.motionActiveInputFullFallbackImages ?? '',
-          scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
         });
       } else if (e.op === 'eventLoop' || e.op === 'longTask') {
         timeline.push({

@@ -113,9 +113,7 @@ var OpenDebug = (() => {
       textCharCount: e.meta?.textCharCount ?? '',
       count: e.meta?.count ?? '',
       selected: e.meta?.selected ?? '',
-      ready: e.meta?.ready ?? '',
       hydrated: e.meta?.hydrated ?? '',
-      remaining: e.meta?.remaining ?? '',
       rustTotalMs: e.meta?.rust?.total_ms ?? '',
       rustImageReadMs: e.meta?.rust?.image_read_ms ?? '',
       rustImageReadMaxMs: e.meta?.rust?.image_read_max_ms ?? '',
@@ -138,7 +136,6 @@ var OpenDebug = (() => {
       imageCount: last?.meta?.imageCount ?? last?.meta?.imageObjectCount ?? '',
       objectCount: last?.meta?.objectCount ?? '',
       hydrated: last?.meta?.hydrated ?? '',
-      remaining: last?.meta?.remaining ?? '',
       error: last?.meta?.error || '',
       hydrationMode: 'all-before-interaction',
       hydrationConcurrency: getOpenHydrationConcurrency(),
@@ -155,10 +152,8 @@ var OpenDebug = (() => {
       imageCount: rows.length,
       totalDataUrlMB: Math.round(sum('dataUrlLen') / 1024 / 1024 * 100) / 100,
       totalImageHydrateMs: Math.round(sum('ms') * 100) / 100,
-      totalFetchMs: Math.round(sum('fetchMs') * 100) / 100,
       totalBitmapMs: Math.round(sum('cacheBitmapMs') * 100) / 100,
       maxImageMs: Math.round(max('ms') * 100) / 100,
-      maxFetchMs: Math.round(max('fetchMs') * 100) / 100,
       concurrency: getOpenHydrationConcurrency(),
       mode: 'all-before-interaction',
     };
@@ -210,7 +205,6 @@ var OpenDebug = (() => {
       .map(e => ({
         imgKey: e.meta?.imgKey || '',
         totalMs: e.meta?.ms ?? '',
-        fetchMs: e.meta?.fetchMs ?? '',
         readyMs: e.meta?.readyMs ?? '',
         cacheReadyStage: e.meta?.cacheReadyStage ?? '',
         cacheTotalMs: e.meta?.cacheTotalMs ?? '',
@@ -237,12 +231,7 @@ var OpenDebug = (() => {
         command: e.meta?.command || '',
         count: e.meta?.count ?? '',
         selected: e.meta?.selected ?? '',
-        ready: e.meta?.ready ?? '',
-        built: e.meta?.built ?? '',
-        failed: e.meta?.failed ?? '',
         hydrated: e.meta?.hydrated ?? '',
-        released: e.meta?.released ?? '',
-        remaining: e.meta?.remaining ?? '',
         pendingImages: e.meta?.pendingImages ?? '',
         manifestRefs: e.meta?.manifestRefs ?? '',
         dataUrlRefs: e.meta?.dataUrlRefs ?? '',
@@ -306,7 +295,6 @@ var OpenDebug = (() => {
       .map(e => ({
         imgKey: e.meta?.imgKey || '',
         totalMs: e.meta?.ms ?? '',
-        fetchMs: e.meta?.fetchMs ?? '',
         cacheReadyStage: e.meta?.cacheReadyStage ?? '',
         bitmapMs: e.meta?.cacheBitmapMs ?? '',
         dataUrlLen: e.meta?.dataUrlLen ?? '',
@@ -418,7 +406,6 @@ var OpenDebug = (() => {
       initialBitmapImages: initialRender?.meta?.bitmapImages ?? '',
       initialScaledImages: initialRender?.meta?.scaledImages ?? '',
       initialScaledFallbackFull: initialRender?.meta?.scaledFallbackFull ?? '',
-      initialScaledVariantPendingImages: initialRender?.meta?.scaledVariantPendingImages ?? '',
       decodeCount: bitmapRows.length,
       decodeQueueStarts: decodeQueueStarts.length,
       decodeQueueWaitTotalMs: sumMeta(rows, 'cache-image:decode-queue:start', 'queueWaitMs'),
@@ -450,7 +437,7 @@ var OpenDebug = (() => {
     if (numberValue(summaryRow.decodeQueueWaitMaxMs) > 50) findings.push('Image decode queue wait is visible; tune open hydration concurrency only after checking bitmap decode time.');
     if (numberValue(summaryRow.bitmapDecodeMaxMs) > 100) findings.push('At least one bitmap decode is slow; inspect the largest images and their dimensions.');
     if (numberValue(summaryRow.initialObjectLoopMs) > 50) findings.push('First draw spends significant time in the object loop; inspect object counts, visible counts, and culling.');
-    if (numberValue(summaryRow.initialScaledFallbackFull) || numberValue(summaryRow.initialScaledVariantPendingImages)) findings.push('Scaled image variants were missing during first draw; prewarm timing may be worth testing.');
+    if (numberValue(summaryRow.initialScaledFallbackFull)) findings.push('Scaled image variants were missing during first draw; prewarm timing may be worth testing.');
     if (!findings.length) findings.push('No measured opening phase clearly dominates this capture.');
     const timeline = rows
       .filter(e => e.step !== 'cache-image:source' && e.step !== 'cache-image:set-src')
@@ -461,12 +448,8 @@ var OpenDebug = (() => {
         ms: e.meta?.ms ?? e.meta?.queueWaitMs ?? '',
         count: e.meta?.count ?? '',
         hydrated: e.meta?.hydrated ?? '',
-        pending: e.meta?.pendingImages ?? e.meta?.pending ?? '',
-        released: e.meta?.released ?? '',
-        remaining: e.meta?.remaining ?? '',
+        pending: e.meta?.pendingImages ?? '',
         selected: e.meta?.selected ?? '',
-        ready: e.meta?.ready ?? '',
-        built: e.meta?.built ?? '',
         skipped: e.meta?.skipped ?? '',
         missingImages: e.meta?.missingImages ?? '',
         imgKey: e.meta?.imgKey || e.meta?.key || '',

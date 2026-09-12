@@ -392,7 +392,6 @@ async function hydrateImageForDisplay(key
   OpenDebug.step(dbg, 'hydrate-image', {
     imgKey: key,
     ms: performance.now() - t0,
-    fetchMs: 0,
     readyMs: pendingReady ? performance.now() - t0 : readyMs,
     ...(cacheMetrics || {}),
     dataUrlLen: !pendingReady && typeof source === 'string' ? source.length : 0,
@@ -650,7 +649,6 @@ async function finishOpenedBoard(
       bitmapImages: drawBreakdown?.bitmapImages ?? '',
       scaledImages: drawBreakdown?.scaledImages ?? '',
       scaledFallbackFull: drawBreakdown?.scaledFallbackFull ?? '',
-      scaledVariantPendingImages: drawBreakdown?.scaledVariantPendingImages ?? '',
       croppedImages: drawBreakdown?.croppedImages ?? '',
     });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
