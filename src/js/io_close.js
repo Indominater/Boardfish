@@ -79,7 +79,7 @@ const appendOpeningFreezeBoard = () => {
 const beginOpeningFreeze = () => {
   if (!openingShield || boardCanvas.parentNode === openingShield) return;
   openingShield.replaceChildren();
-  openingShield.style.background = canvas ? getComputedStyle(canvas).backgroundColor : '';
+  openingShield.style.background = _canvasBackgroundColor;
   openingShield.classList.add('opening-freeze', 'active');
   appendOpeningFreezeBoard();
 };

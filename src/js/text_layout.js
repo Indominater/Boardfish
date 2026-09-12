@@ -668,13 +668,11 @@ function measureTextRangeW(text, start, end) {
   return widths[widths.length - 1] || 0;
 }
 
-function textPrefixWidthsSlice(prefixWidths, from, to) {
-  const source = prefixWidths;
-  const start = Math.max(0, Math.min(Math.trunc(Number(from)) || 0, Math.max(0, (source?.length || 1) - 1)));
-  const end = Math.max(start, Math.min(Math.trunc(Number(to)) || start, Math.max(0, (source?.length || 1) - 1)));
+function textPrefixWidthsSlice(source, start, end) {
+  if (start === 0 && end === source.length - 1) return source;
   const out = new Float64Array(end - start + 1);
-  const base = source[start] || 0;
-  for (let index = start; index <= end; index++) out[index - start] = Math.max(0, (source[index] || 0) - base);
+  const base = source[start];
+  for (let index = start; index <= end; index++) out[index - start] = Math.max(0, source[index] - base);
   return out;
 }
 
@@ -983,10 +981,7 @@ function patchTextObjectLayoutAfterInput(obj, options = {}) {
         layout[from + insertCount + i] = layout[suffixStart + i];
       }
     } else if (insertCount < removedLayoutCount) {
-      for (let i = 0; i < suffixLength; i++) {
-        layout[from + insertCount + i] = layout[suffixStart + i];
-      }
-      layout.length = newLength;
+      layout.splice(from, removedLayoutCount - insertCount);
     }
     for (let i = 0; i < insertCount; i++) layout[from + i] = insertedLayout[i];
   }
@@ -1267,11 +1262,8 @@ function getTextLayoutForLineRange(obj, first = 0, last = first) {
     obj._layoutCacheContent === content &&
     obj._layoutCacheW === obj.w
   ) {
-    if (obj._layoutCacheY !== obj.y) {
-      syncTextLayoutLinePositions(obj, obj._layoutCache);
-      obj._layoutCacheY = obj.y;
-    }
-    return setTextLayoutTotalLines(obj._layoutCache.slice(first, last + 1), obj._layoutCache.length);
+    const layout = getTextLayout(obj);
+    return setCachedTextViewportLayoutRange(obj, content, first, last, layout.slice(first, last + 1), layout.length);
   }
 
   const lineIndexCache = getCachedTextWrappedLineIndex(obj, content);
