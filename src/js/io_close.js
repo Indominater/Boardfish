@@ -782,7 +782,7 @@ const saveBoardImpl = async (saveAs = false) => {
   const releaseInputShield = acquireInputShield({ visual: false, keepSelectionOverlay: true });
   try {
     if (saveAs) {
-      const defaultName = BoardfishRuntime.fileNameFromRef(currentFileRef || currentFilePath, 'board.bf');
+      const defaultName = `${BoardfishExportUtils.randomHex()}.bf`;
       const chooseFile = () => BoardfishRuntime.saveFileDialog(defaultName);
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
