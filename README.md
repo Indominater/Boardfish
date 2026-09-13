@@ -1,6 +1,6 @@
 # Boardfish
 
-Link: [https://indominater.github.io/Boardfish/](https://indominater.github.io/Boardfish/)
+Link (Chromium Browser recommended): [https://indominater.github.io/Boardfish/](https://indominater.github.io/Boardfish/)
 
 Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in the browser and provides a lightweight environment for visual research, moodboarding, and snippets.
 
