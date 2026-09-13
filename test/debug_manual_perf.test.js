@@ -2,14 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readSource } = require('../test-support/source.js');
 
-const root = path.join(__dirname, '..');
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
 
 function functionSource(source, name) {
   const start = source.indexOf(`function ${name}`);
@@ -34,12 +28,6 @@ test('text edit perf debugger is passive event recording only', () => {
   assert.match(source, /clientX: event\?\.clientX/);
   assert.match(source, /shortcut: textEditShortcutFromEvent\(event\)/);
   assert.match(source, /historyTextUndoRedoReport/);
-  assert.match(source, /historyMaxProxyValueSetMs/);
-  assert.match(source, /historyMaxProxyValueDiffMs/);
-  assert.match(source, /historyMaxProxyValueMutationMs/);
-  assert.match(source, /historyMaxProxyValueAssignMs/);
-  assert.match(source, /historyHydratedTextRuntimeCaches/);
-  assert.match(source, /historyHydratedTextLayoutCaches/);
   assert.match(source, /domValueLength/);
   assert.match(source, /domValueStale/);
   assert.match(source, /maxLogicalSetMs/);
@@ -49,7 +37,6 @@ test('text edit perf debugger is passive event recording only', () => {
   assert.match(source, /heightDeltaFromCached/);
   assert.match(source, /cachedLineSource/);
   assert.match(source, /proxyScrollHeight/);
-  assert.match(source, /autoHeightForceReason/);
   assert.match(source, /restoredMinLinesReset/);
   assert.match(source, /textUndoRedoReport/);
   assert.match(source, /const textEditInputSteps = \[\]/);
@@ -253,9 +240,7 @@ test('jiggle debugger captures motion smoothness and animated image latency evid
   assert.match(viewportSource, /motionJiggleStarts/);
   assert.match(viewportSource, /maxFirstProgressLatencyMs/);
   assert.match(viewportSource, /progressGapsOver32ms/);
-  assert.match(viewportSource, /maxLowLatencyImageDraws/);
   assert.match(viewportSource, /motionActiveInputFullFallbackImages/);
-  assert.match(viewportSource, /lowLatencyImageDraws/);
   assert.match(viewportSource, /recordMotion,/);
   assert.match(viewportSource, /jiggleReport,/);
   assert.match(viewportSource, /motionSummary,/);
@@ -266,11 +251,9 @@ test('jiggle debugger captures motion smoothness and animated image latency evid
   assert.match(motionSource, /recordMotionDebug\('render-scheduled'/);
   assert.match(motionSource, /recordMotionDebug\('jiggle-progress'/);
 
-  assert.match(rendererSource, /lowLatencyImageDraws/);
   assert.match(rendererSource, /motionScaledImages/);
   assert.match(rendererSource, /motionFullFallbackImages/);
-  assert.match(rendererSource, /imageSourceResolver\(key, obj, view, counters, lowLatencyImageMotion\)/);
-  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, bitmap, view, lowLatencyImageMotion\)/);
+  assert.match(rendererSource, /selectImageSourceForDraw\(key, obj, bitmap, view, !!motion\)/);
   assert.doesNotMatch(rendererSource, /view\?\.activeInput/);
 });
 
@@ -284,9 +267,6 @@ test('text selection debugger includes focused enter and exit edit timings', () 
   assert.doesNotMatch(source, /EmptyTextCleanup/);
   assert.match(source, /maxHitTestMs/);
   assert.match(source, /maxCaretApplyMs/);
-  assert.match(source, /maxScheduledDelayMs/);
-  assert.match(source, /focusScheduled/);
-  assert.match(source, /scheduledDelayMs/);
   assert.match(source, /proxyWrap/);
   assert.match(source, /proxySpellcheck/);
   assert.match(source, /proxyAriaHidden/);

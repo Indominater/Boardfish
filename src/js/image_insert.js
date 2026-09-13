@@ -28,24 +28,19 @@ const webImageExtForFile = (file) => (
 );
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
-let imageFileDebugName = null;
-if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-  imageFileDebugName = (file, fallback = 'clipboard-image') => (
-    file?.name || `${fallback}.${webImageExtForFile(file)}`
-  );
-}
+const imageFileDebugName = (file, fallback = 'clipboard-image') => (
+  file?.name || `${fallback}.${webImageExtForFile(file)}`
+);
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const createWebImageSourceFromBlob = (file, imgKey) => {
+const createWebImageSourceFromBlob = async (file, imgKey) => {
   const ext = webImageExtForFile(file);
   const mime = file.type;
   return BoardfishWebBoardContainer.createWebImageRef({
     path: `images/${imgKey}.${ext}`,
     mime,
     ext,
-    blob: typeof File === 'function' && file instanceof File
-      ? new Blob([file], { type: mime })
-      : file,
+    blob: await BoardfishWebBoardContainer.snapshotImageBlob(file, mime),
   });
 };
 
@@ -59,7 +54,7 @@ const rollbackImageInsertSource = (imgKey, source, hadPreviousSource = false, pr
     if (hadPreviousSource) {
       BoardfishImageStore.setSource(imgKey, previousSource);
     } else {
-      if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey, source);
+      if (typeof removeImageRuntimeCachesForKey === 'function') removeImageRuntimeCachesForKey(imgKey);
       delete imageStore[imgKey];
     }
     return true;
@@ -113,7 +108,7 @@ async function addImage(src, cx, cy, imgKey, options = {}) {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         const total = performance.now() - t0;
         ViewportDebug.max('maxImageAddMs', total);
-        ViewportDebug.end(dbg, { error: 'image bitmap failed', total });
+        ViewportDebug.end(dbg, { error: 'Image Decode Failed', total });
       }
       return null;
     }
@@ -301,17 +296,15 @@ async function insertImageFiles(files, x, y
         let fileName;
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         if (typeof BOARDFISH_PRODUCTION === 'undefined') fileName = imageFileDebugName(file);
-        const imageSource = createWebImageSourceFromBlob(file, imgKey);
+        const imageSource = await createWebImageSourceFromBlob(file, imgKey);
         if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-          const detachedFile = typeof File === 'function' && file instanceof File;
           InsertDebug.step(fileDbg, 'read:end', {
             source: insertOptions.source,
             fileName,
             fileSize: file.size,
             fileType: file.type,
             bytes: file.size,
-            readMode: detachedFile ? 'blob-copy' : 'blob-reference',
-            skipped: detachedFile ? '' : 'immutable-blob',
+            readMode: 'blob-snapshot',
           });
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_START */

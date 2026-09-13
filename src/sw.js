@@ -6,7 +6,6 @@ const BOARDFISH_CACHE_NAMESPACE =
 const BOARDFISH_CACHE = `${BOARDFISH_CACHE_NAMESPACE}${BOARDFISH_CACHE_VERSION}`;
 const currentCache = caches.open(BOARDFISH_CACHE);
 const BOARDFISH_APP_SHELL = [
-  './',
   './index.html',
   './styles.css',
   './manifest.webmanifest',
@@ -103,7 +102,7 @@ self.addEventListener('fetch', (event) => {
     } else {
       const update = fetchAndCacheRequest(event, request, url).catch(() => null);
       event.waitUntil(update);
-      event.respondWith(cached.then(async (hit) => hit || await update || Promise.reject(new TypeError('Boardfish cache-first asset fetch failed'))));
+      event.respondWith(cached.then(async (hit) => hit || await update || Promise.reject(new TypeError('Cached Asset Load Failed'))));
     }
     return;
   }

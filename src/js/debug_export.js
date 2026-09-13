@@ -317,7 +317,7 @@ var ExportDebug = (() => {
   function massiveReport() {
     const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
     if (!report) {
-      console.warn('[Boardfish export] No massive export report yet. Enable export debug, then run an export.');
+      console.warn('[Boardfish Export] No Report Available. Enable Export Debug And Run An Export.');
       return null;
     }
     const headline = {
@@ -379,7 +379,7 @@ var ExportDebug = (() => {
   function progressReport() {
     const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
     if (!report) {
-      console.warn('[Boardfish export] No progress report yet. Enable export debug, then run an export.');
+      console.warn('[Boardfish Export] No Report Available. Enable Export Debug And Run An Export.');
       return null;
     }
     const totalMs = Number(report.totalMs) || 0;
@@ -432,7 +432,7 @@ var ExportDebug = (() => {
   function smoothnessReport() {
     const report = massive ? JSON.parse(JSON.stringify(massive)) : null;
     if (!report) {
-      console.warn('[Boardfish export] No smoothness report yet. Enable export debug, then run an export.');
+      console.warn('[Boardfish Export] No Report Available. Enable Export Debug And Run An Export.');
       return null;
     }
     const out = {
@@ -547,28 +547,16 @@ var ExportDebug = (() => {
 
   function slowImageReport() {
     const renderRows = events
-      .filter(e => e.step === 'render:done' || e.step === 'web-export:rendered-blob')
+      .filter(e => e.step === 'web-export:rendered-blob')
       .map(e => ({
         id: e.id,
         op: e.op,
         step: e.step,
         imgKey: e.meta?.imgKey ?? '',
-        objectId: e.meta?.objectId ?? '',
-        flipX: e.meta?.flipX ?? '',
-        flipY: e.meta?.flipY ?? '',
-        rotation: e.meta?.rotation ?? '',
-        sourceKind: e.meta?.sourceKind ?? '',
-        sourceMs: e.meta?.sourceMs ?? '',
-        loadMs: e.meta?.loadMs ?? '',
-        drawMs: e.meta?.drawMs ?? '',
-        encodeMs: e.meta?.encodeMs ?? '',
-        totalRenderMs: e.meta?.totalRenderMs ?? e.meta?.ms ?? e.dt ?? '',
+        totalRenderMs: e.dt ?? '',
         width: e.meta?.width ?? '',
         height: e.meta?.height ?? '',
-        megapixels: e.meta?.megapixels ?? '',
-        dataUrlMB: e.meta?.dataUrlMB ?? (e.meta?.bytes ? Math.round(e.meta.bytes / 1024 / 1024 * 100) / 100 : ''),
-        ok: e.meta?.hasDataUrl ?? e.meta?.ok ?? '',
-        error: e.meta?.error || '',
+        dataUrlMB: e.meta?.bytes ? Math.round(e.meta.bytes / 1024 / 1024 * 100) / 100 : '',
       }))
       .sort((a, b) => Number(b.totalRenderMs || 0) - Number(a.totalRenderMs || 0));
 
@@ -586,7 +574,6 @@ var ExportDebug = (() => {
       renderCount: renderRows.length,
       slowestRenderMs: renderRows[0]?.totalRenderMs ?? '',
       renderMsTotal: Math.round(renderRows.reduce((n, r) => n + (Number(r.totalRenderMs) || 0), 0) * 100) / 100,
-      encodeMsTotal: Math.round(renderRows.reduce((n, r) => n + (Number(r.encodeMs) || 0), 0) * 100) / 100,
       saveMsTotal: Math.round(saveRows.reduce((n, r) => n + (Number(r.ms) || 0), 0) * 100) / 100,
     };
 

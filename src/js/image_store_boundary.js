@@ -5,10 +5,6 @@
     return imageStore[key];
   }
 
-  function hasSource(key) {
-    return !!imageStore[key];
-  }
-
   function setSource(key, source) {
     if (!key) return false;
     const hadSource = Object.hasOwn(imageStore, key);
@@ -28,7 +24,6 @@
   root.BoardfishImageStore = Object.freeze({
     getSource,
     hasDisplayImage,
-    hasSource,
     setSource,
   });
 })(typeof window !== 'undefined' ? window : globalThis);

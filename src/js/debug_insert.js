@@ -45,7 +45,6 @@ var InsertDebug = (() => {
         dt: e.dt,
         source: e.meta?.source || '',
         fileCount: e.meta?.fileCount ?? '',
-        readyCount: e.meta?.readyCount ?? e.meta?.count ?? '',
         fileName: e.meta?.fileName || '',
         fileSize: e.meta?.fileSize ?? '',
         fileType: e.meta?.fileType || '',
@@ -53,13 +52,6 @@ var InsertDebug = (() => {
         readMode: e.meta?.readMode || '',
         sourceKind: e.meta?.sourceKind || '',
         imgKey: e.meta?.imgKey || '',
-        width: e.meta?.width ?? '',
-        height: e.meta?.height ?? '',
-        cacheReadyStage: e.meta?.cacheReadyStage || '',
-        cacheTotalMs: e.meta?.cacheTotalMs ?? '',
-        cacheQueueWaitMs: e.meta?.cacheQueueWaitMs ?? '',
-        cacheBitmapMs: e.meta?.cacheBitmapMs ?? '',
-        bitmapReady: e.meta?.bitmapReady ?? '',
         concurrency: e.meta?.concurrency ?? '',
         acceptedFileCount: e.meta?.acceptedFileCount ?? '',
         added: e.meta?.added ?? '',
@@ -105,7 +97,6 @@ var InsertDebug = (() => {
         const start = run.find(e => e.step === 'start');
         const readEnd = lastStep(run, 'read:end');
         const objectAdd = lastStep(run, 'object:add');
-        const ready = lastStep(run, 'ready');
         const cacheQueued = lastStep(run, 'cache:queued');
         const webRef = lastStep(run, 'web-ref:create');
         return {
@@ -116,16 +107,7 @@ var InsertDebug = (() => {
           readMs: readEnd?.dt ?? '',
           readMode: readEnd?.meta?.readMode || '',
           objectAtMs: objectAdd?.total ?? '',
-          readyAtMs: ready?.total ?? '',
-          readyStage: ready?.meta?.cacheReadyStage || '',
-          cacheTotalMs: ready?.meta?.cacheTotalMs ?? '',
-          cacheQueueWaitMs: ready?.meta?.cacheQueueWaitMs ?? '',
-          cacheBitmapMs: ready?.meta?.cacheBitmapMs ?? '',
-          bitmapReady: ready?.meta?.bitmapReady ?? '',
-          resolveOnLoad: cacheQueued?.meta?.resolveOnLoad ?? '',
           sourceKind: webRef?.meta?.sourceKind || cacheQueued?.meta?.sourceKind || end.meta?.sourceKind || '',
-          width: webRef?.meta?.width ?? '',
-          height: webRef?.meta?.height ?? '',
           bytes: webRef?.meta?.bytes ?? end.meta?.bytes ?? end.meta?.fileSize ?? '',
           added: end.meta?.added ?? '',
           error: end.meta?.error || '',
@@ -158,14 +140,11 @@ var InsertDebug = (() => {
     const imageEnds = events().filter(e => e.op === 'insertImage' && e.step === 'end' && e.meta?.source === last.meta?.source);
     const readEnds = events().filter(e => e.op === 'insertImage' && e.step === 'read:end' && e.meta?.source === last.meta?.source);
     const objectAdd = start ? firstStepAfter(start.at, 'object:add') : null;
-    const displayReady = start ? firstStepAfter(start.at, 'ready') : null;
     const concurrencyStep = findStep('bulk:start');
     const maxReadMs = readEnds.reduce((n, e) => Math.max(n, Number(e.dt) || 0), 0);
     const maxRead = readEnds.find(e => (Number(e.dt) || 0) === maxReadMs);
-    const readyStart = findStep('ready:wait-start');
-    const readyEnd = findStep('ready:wait-end');
     const bulkEnd = findStep('bulk:end');
-    const registerMs = readyStart ? readyStart.total : (bulkEnd ? bulkEnd.total : last.total);
+    const registerMs = bulkEnd ? bulkEnd.total : last.total;
     const out = {
       source: last.meta?.source || '',
       added: last.meta?.added ?? imageEnds.filter(e => e.meta?.added).length,
@@ -174,13 +153,10 @@ var InsertDebug = (() => {
       totalMs: last.total ?? '',
       concurrency: concurrencyStep?.meta?.concurrency ?? '',
       timeToFirstObjectMs: start && objectAdd ? round(objectAdd.at - start.at) : '',
-      timeToFirstDisplayMs: start && displayReady ? round(displayReady.at - start.at) : '',
       readMsTotal: round(sumStepMs(last.meta?.source, 'read:end')),
       maxReadMs: round(maxReadMs),
       maxReadFile: maxRead?.meta?.fileName || '',
       registerMs,
-      readyWaitMs: readyStart && readyEnd ? round(readyEnd.total - readyStart.total) : 0,
-      readyCount: readyStart?.meta?.readyCount ?? '',
       historyAdded: bulkEnd?.meta?.historyAdded ?? '',
       errors: imageEnds.filter(e => e.meta?.error).length,
     };

@@ -2,15 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readSource } = require('../test-support/source.js');
 const vm = require('node:vm');
 
-const root = path.join(__dirname, '..');
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
 
 function withoutDeveloperDiagnostics(source) {
   const start = '/* BOARDFISH_DEV_DIAGNOSTICS_START */';
@@ -20,14 +14,6 @@ function withoutDeveloperDiagnostics(source) {
     /\/\* BOARDFISH_DEV_DIAGNOSTICS_START \*\/[\s\S]*?\/\* BOARDFISH_DEV_DIAGNOSTICS_END \*\//g,
     '',
   );
-}
-
-function waitForOpenRenderFrameSource() {
-  const source = readSource('src/js/io_close.js');
-  const start = source.indexOf('const waitForOpenRenderFrame =');
-  const end = source.indexOf('\nfunction queueVisibleImageHydration', start);
-  assert.ok(start >= 0 && end > start, 'waitForOpenRenderFrame source is missing');
-  return source.slice(start, end);
 }
 
 test('developer open diagnostics tune the shared runtime hydration concurrency', () => {
@@ -65,50 +51,6 @@ test('developer open diagnostics tune the shared runtime hydration concurrency',
   assert.match(messages.at(-1), /hydration concurrency set to 8/);
 });
 
-test('open render frame wait clears timeout after RAF settles', async () => {
-  const activeTimers = new Set();
-  const steps = [];
-  let nextTimerId = 0;
-  const context = {
-    clearTimeout(id) {
-      activeTimers.delete(id);
-    },
-    OpenDebug: {
-      step(_dbg, phase, detail) {
-        steps.push({ phase, detail });
-      },
-    },
-    performance: {
-      now() {
-        return 100;
-      },
-    },
-    requestAnimationFrame(callback) {
-      callback();
-    },
-    setTimeout() {
-      nextTimerId++;
-      activeTimers.add(nextTimerId);
-      return nextTimerId;
-    },
-  };
-  vm.createContext(context);
-  vm.runInContext(
-    `${waitForOpenRenderFrameSource()}\n` +
-      'globalThis.waitForOpenRenderFrame = waitForOpenRenderFrame;\n',
-    context,
-    { filename: 'io_close_wait_frame.js' },
-  );
-
-  await context.waitForOpenRenderFrame(null, 'test-render');
-
-  assert.equal(activeTimers.size, 0);
-  assert.deepEqual(JSON.parse(JSON.stringify(steps)), [{
-    phase: 'open-render-frame:settled',
-    detail: { reason: 'test-render', source: 'raf', ms: 0 },
-  }]);
-});
-
 test('open-board debugger covers the slow open phases developers need to inspect', () => {
   const openDebug = readSource('src/js/debug_open.js');
   const openIo = readSource('src/js/io_close.js');
@@ -124,7 +66,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'imageStoreSummary',
     'hydrationCandidates',
     'slowImages',
-    'openPreviewBreakdown',
     'hydrationBreakdown',
     'cacheImageBreakdown',
     'setHydrationConcurrency',
@@ -132,9 +73,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'beginInitialRenderDebug',
     'endInitialRenderDebug',
     'isInitialRenderDebugActive',
-    'recordPreviewFallbackDraw',
-    'recordPreviewHeldRender',
-    'recordDynamicPreview',
     'report',
   ]) {
     assert.match(openDebug, new RegExp(`\\b${method}\\b`), `OpenDebug is missing ${method}`);
@@ -150,9 +88,9 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(openIo, /allContentBeforeInteraction: true,/);
   assert.match(openIo, /const isOpenHydratableImageSource = \(source\) => \{/);
   assert.match(openIo, /typeof source === 'string' \|\| isWebImageRef\(source\)/);
-  assert.match(openIo, /const pendingReady = imageReadyPromises\.get\(key\);[\s\S]*?if \(typeof BOARDFISH_PRODUCTION === 'undefined'\) \{\s*if \(pendingReady\) \{\s*const t0 = performance\.now\(\);\s*const cacheMetrics = await pendingReady;/);
-  assert.match(withoutDeveloperDiagnostics(openIo), /const pendingReady = imageReadyPromises\.get\(key\);\s*if \(pendingReady\) \{\s*await pendingReady;\s*return BoardfishImageStore\.hasDisplayImage\(key\);/);
-  assert.match(openIo, /source: 'pending-cache'/);
+  assert.match(openIo, /await \(pendingReady \|\| cacheImage\(key, source/);
+  assert.match(withoutDeveloperDiagnostics(openIo), /await \(pendingReady \|\| cacheImage\(key, source[\s\S]*?return displayReady;/);
+  assert.match(openIo, /source: pendingReady \? 'pending-cache'/);
   assert.match(openIo, /function getPendingHydratableImageKeys\(keys = \[\]\) \{\s*const seen = new Set\(keys\);/);
   assert.match(finishSource, /const visibleKeys = getVisibleImageKeys\(Infinity\);\s*const hydrationKeys = getPendingHydratableImageKeys\(\[\.\.\.visibleKeys\]\);/);
   assert.match(finishSource, /hydrateImageKeysWithLimit\([\s\S]*hydrationKeys,[\s\S]*dbg,[\s\S]*'hydrate-all'/);
@@ -179,7 +117,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
   assert.match(viewport, /OpenDebug\.isInitialRenderDebugActive\?\.\(\) === true/);
   assert.match(openIo, /drawBoardTotalMs: drawBreakdown\?\.totalMeasuredMs/);
   assert.match(openDebug, /initialDrawMs: initialRender\?\.meta\?\.drawMs/);
-  assert.match(openIo, /openPreviewImages: drawBreakdown\?\.openPreviewImages/);
   assert.match(openDebug, /decodeQueueWaitMaxMs/);
   assert.match(openDebug, /bitmapDecodeMaxMs/);
   assert.match(openDebug, /rustBoardJsonReadMs/);
@@ -216,7 +153,6 @@ test('open-board debugger covers the slow open phases developers need to inspect
     'cache-image:decode-queue:queued',
     'cache-image:decode-queue:start',
     'cache-image:createImageBitmap',
-    'cache-image:previewBitmap',
     'cache-image:schedule-render',
     'cache-image:done',
   ]) {
@@ -238,7 +174,7 @@ test('open-board debug workflow stays capturable through beginDebug and finishDe
   assert.match(bootstrap, /registerDebugCommand\('openFilePath', openFilePath\)/);
 });
 
-test('open-board helpers used by io_close are shared across legacy scripts', () => {
+test('open-board helpers used by io_close are shared across startup scripts', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const ioClose = readSource('src/js/io_close.js');
 
@@ -249,47 +185,142 @@ test('open-board helpers used by io_close are shared across legacy scripts', () 
   }
 });
 
+test('debug clipboard fallback reports a failed copy once and keeps both causes', async () => {
+  const source = readSource('src/js/startup_debug.js');
+  const start = source.indexOf('  async function copyDebugJson(');
+  const end = source.indexOf('  async function sampleFrames(', start);
+  assert.ok(start >= 0 && end > start);
+  for (const outcome of ['api-success', 'fallback-success', 'fallback-false', 'fallback-error']) {
+    const warnings = [];
+    const apiError = new Error('clipboard permission denied');
+    const selectionError = new Error('selection copy unavailable');
+    let removed = 0;
+    const context = {
+      lastJson: '',
+      storeResult(value) { context.lastJson = JSON.stringify(value); },
+      console: { log() {}, warn(...args) { warnings.push(args); } },
+      navigator: { clipboard: { async writeText() { if (outcome !== 'api-success') throw apiError; } } },
+      document: {
+        body: { appendChild() {} },
+        createElement() {
+          return { style: {}, setAttribute() {}, focus() {}, select() {}, setSelectionRange() {}, remove() { removed++; } };
+        },
+        execCommand() {
+          if (outcome === 'fallback-error') throw selectionError;
+          return outcome === 'fallback-success';
+        },
+      },
+    };
+    const copy = vm.runInNewContext(`${source.slice(start, end)}; copyDebugJson`, context);
+    const succeeded = outcome.endsWith('success');
+    assert.equal(await copy('Test JSON', { sample: 1 }), succeeded);
+    assert.equal(removed, Number(outcome !== 'api-success'));
+    assert.equal(warnings.length, Number(!succeeded));
+    if (!succeeded) {
+      assert.equal(warnings[0][0], 'Clipboard Write Failed: Test JSON');
+      assert.equal(warnings[0][1].clipboardApiError, apiError);
+      assert.equal(warnings[0][1].selectionError, outcome === 'fallback-error' ? selectionError : null);
+    }
+  }
+});
+
 test('open-board failures show a readable pill message', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const styles = readSource('src/styles.css');
-
-  assert.match(bootstrap, /function openFailureIslandMessage\(errorLabel, err\)/);
-  assert.match(bootstrap, /function openFailureUserDetail\(detail, err\)/);
-  assert.match(bootstrap, /Permission was not granted/);
-  assert.match(bootstrap, /Unsupported Boardfish file/);
-  assert.match(bootstrap, /Boardfish file is missing board data/);
-  assert.match(bootstrap, /Boardfish file is missing image data/);
-  assert.match(bootstrap, /Boardfish file is invalid/);
-  assert.match(bootstrap, /This browser cannot open compressed Boardfish files/);
-  assert.match(bootstrap, /one image is/);
+  const start = bootstrap.indexOf('  function openFailureIslandMessage(');
+  const end = bootstrap.indexOf('  finishFailedOpen =', start);
+  assert.ok(start >= 0 && end > start);
+  const format = vm.runInNewContext(`${bootstrap.slice(start, end)}; openFailureIslandMessage`);
+  for (const [error, expected] of [
+    [{ name: 'NotAllowedError' }, 'Open Failed: Permission Denied'],
+    [{ name: 'SecurityError' }, 'Open Failed: Permission Denied'],
+    [new Error('Permission Denied'), 'Open Failed: Permission Denied'],
+    [{ name: 'NotReadableError' }, 'Open Failed: File Unavailable'],
+    [{ name: 'NotFoundError' }, 'Open Failed: File Unavailable'],
+    [new Error('File Unavailable'), 'Open Failed: File Unavailable'],
+    [new Error('No File Selected'), 'Open Failed: File Unavailable'],
+    [new Error('Image Read Failed'), 'Open Failed: File Unavailable'],
+    [new Error('Unsupported Board Version: 99'), 'Open Failed: Unsupported File'],
+    [new Error('Unsupported File Format'), 'Open Failed: Unsupported File'],
+    [new Error('Unsupported Compression'), 'Open Failed: Unsupported File'],
+    [new Error('Unsupported ZIP Format'), 'Open Failed: Unsupported File'],
+    [new Error('Missing File Entry: board.json'), 'Open Failed: Invalid File'],
+    [new Error('Missing Image: img-1'), 'Open Failed: Invalid File'],
+    [new Error('Invalid Image Source: img-1'), 'Open Failed: Invalid File'],
+    [new Error('File Checksum Mismatch: board.json'), 'Open Failed: Invalid File'],
+    [new SyntaxError('unexpected browser detail'), 'Open Failed: Invalid File'],
+    [new Error('Invalid File Entry: permission-denied/unsupported.png'), 'Open Failed: Invalid File'],
+    [new Error('File Entry Too Large: board.json'), 'Open Failed: File Too Large'],
+    [{ boardfishLimit: true, boardfishUserMessage: 'Board Limit: 100 Objects' }, 'Board Limit: 100 Objects'],
+    [{ boardfishLimit: true }, 'Board Limit Exceeded'],
+    [new Error('unrecognized browser detail'), 'Open Failed'],
+    [null, 'Open Failed'],
+  ]) assert.equal(format(error), expected);
   assert.match(bootstrap, /OpenDebug\.step\(dbg, 'open-failed:message'/);
   assert.match(bootstrap, /finalMsg: message/);
   assert.match(bootstrap, /duration: long_message/);
-  assert.doesNotMatch(bootstrap, /Failed to open file:/);
   assert.match(styles, /#island \{[\s\S]*max-width: calc\(100vw - 32px\);/);
-  assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text \{[\s\S]*white-space: normal;/);
+  assert.match(styles, /#isl-zoom \{[\s\S]*white-space: normal;/);
+});
+
+test('open failures retain diagnostic details and release the input shield in both builds', async () => {
+  for (const development of [false, true]) {
+    const messages = [], errors = [], debugCalls = [];
+    let releases = 0;
+    const error = new Error('Invalid File Entry: images/original.png');
+    const dbg = { id: 123 };
+    const context = {
+      document: {},
+      _boardOpening: false,
+      startCanvasSizeTracking() {}, resizeCanvas() {}, snapshot() {}, markSaved() {},
+      registerDebugCommand() {},
+      BoardfishRuntime: { describeFileRef() { return 'board.bf'; } },
+      beginOpeningFreeze() {}, startPillTask() {},
+      endOpeningFreeze() { releases++; },
+      async invokeReadBoard() { throw error; },
+      console: { error(...args) { errors.push(args); } },
+      OpenDebug: { step(value) { debugCalls.push(value); }, end(value) { debugCalls.push(value); } },
+      long_message: 4500,
+      finishPillTask({ beforeFinish, finalMsg, duration }) {
+        beforeFinish();
+        messages.push(finalMsg);
+        assert.equal(duration, 4500);
+      },
+    };
+    vm.createContext(context);
+    const source = readSource('src/js/app_bootstrap.js');
+    vm.runInContext(development ? source : withoutDeveloperDiagnostics(source), context);
+    await context.openBoardFromPath({}, ...(development ? [dbg] : []));
+    assert.deepEqual(messages, ['Open Failed: Invalid File']);
+    assert.equal(context._boardOpening, false);
+    assert.equal(releases, 1);
+    assert.deepEqual(errors, [['Open Failed:', error]]);
+    assert.deepEqual(debugCalls, development ? [dbg, dbg] : []);
+  }
 });
 
 test('open-board loading does not wait for pill status update before reading the file', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const productionBootstrap = withoutDeveloperDiagnostics(bootstrap);
+  const developmentBootstrap = bootstrap.replace(/\/\* BOARDFISH_DEV_DIAGNOSTICS_(?:START|END) \*\//g, '');
 
-  assert.match(bootstrap, /startPillTask\(\{ message: 'Opening' \}\);[\s\S]*?data = await invokeReadBoard\(filePath, dbg\);/);
-  assert.match(productionBootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*let data;\s*data = await invokeReadBoard\(filePath\);/);
+  assert.match(developmentBootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard\(filePath\s*, dbg\s*\);/);
+  assert.match(productionBootstrap, /startPillTask\(\{ message: 'Opening' \}\);\s*const data = await invokeReadBoard\(filePath\s*\);/);
   assert.doesNotMatch(bootstrap, /await startPillTask\(\{ message: 'Opening' \}\)/);
 });
 
 test('open-board file target updates as soon as board data is applied', () => {
   const bootstrap = readSource('src/js/app_bootstrap.js');
   const productionBootstrap = withoutDeveloperDiagnostics(bootstrap);
+  const developmentBootstrap = bootstrap.replace(/\/\* BOARDFISH_DEV_DIAGNOSTICS_(?:START|END) \*\//g, '');
 
   assert.match(
-    bootstrap,
-    /applyBoardData\(data[\s\S]*?, dbg[\s\S]*?\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;[\s\S]*?await finishOpenedBoard\(dbg, data\);/,
+    developmentBootstrap,
+    /applyBoardData\(data\s*, dbg\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*await finishOpenedBoard\(\s*dbg, data\s*\);/,
   );
   assert.match(
     productionBootstrap,
-    /applyBoardData\(data\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*await finishOpenedBoard\(\);/,
+    /applyBoardData\(data\s*\);\s*currentFileRef = filePath;\s*currentFilePath = fileLabel;\s*await finishOpenedBoard\(\s*\);/,
   );
 });
 

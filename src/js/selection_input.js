@@ -292,25 +292,22 @@ function updateSelectionOverlay() {
     if (selectedIds.size === 1) {
       bounds = selectionOverlayObjectBounds(firstSelectedObj) || resting;
     } else {
-      let translateX = 0, translateY = 0, motionCount = 0;
+      let translateX = 0, translateY = 0;
       _multiSelMotions.length = 0;
       for (const id of selectedIds) {
         const motion = _multiSelMotions[_multiSelMotions.length] = BoardfishMotion.getLastDrawnObjectMotion(id);
         if (!motion) continue;
         translateX += motion.groupTranslateX ?? motion.translateX ?? 0;
-        translateY += motion.groupTranslateY ?? motion.translateY ?? 0;
-        motionCount++;
+        translateY += motion.translateY ?? 0;
       }
-      if (motionCount) {
-        translateX /= motionCount;
-        translateY /= motionCount;
-        bounds = {
-          x1: resting.x1 + translateX,
-          y1: resting.y1 + translateY,
-          x2: resting.x2 + translateX,
-          y2: resting.y2 + translateY,
-        };
-      }
+      translateX /= selectedIds.size;
+      translateY /= selectedIds.size;
+      bounds = {
+        x1: resting.x1 + translateX,
+        y1: resting.y1 + translateY,
+        x2: resting.x2 + translateX,
+        y2: resting.y2 + translateY,
+      };
     }
   }
   if (!bounds) {
@@ -621,7 +618,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             autoHeightChanged: autoHeightDebug?.autoHeightChanged ?? '',
             autoHeightReason: autoHeightDebug?.autoHeightReason ?? '',
             layoutInvalidationMethod: autoHeightDebug?.layoutInvalidationMethod ?? '',
-            pendingSizeSync: false,
             renderBoard: render,
             renderOverlay: render,
             scheduleRenderMs,
@@ -651,7 +647,6 @@ const beginSelectionHandleDrag = function beginSelectionHandleDrag(handle, e) {
             recordSelectionTextResizeStep('flush', resizeDebugDragId, {
               objectId: obj.id,
               flushMs: selectionResizeDebugRound(selectionResizeDebugNow() - flushStartedAt),
-              pendingSizeSync: false,
               x: obj.x,
               y: obj.y,
               w: obj.w,

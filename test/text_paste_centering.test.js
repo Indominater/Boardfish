@@ -12,7 +12,7 @@ const DEFAULT_TEXT_BOX_LINE_H = 24;
 const DEFAULT_TEXT_BOX_PAD = 16;
 const DEFAULT_TEXT_BOX_HEIGHT = DEFAULT_TEXT_BOX_MIN_LINES * DEFAULT_TEXT_BOX_LINE_H + DEFAULT_TEXT_BOX_PAD * 2;
 
-function loadAddTextHarness({ syncedHeight = null } = {}) {
+function loadAddTextHarness({ syncedHeight = null, realLimits = false } = {}) {
   const textLayoutSource = fs.readFileSync(path.join(root, 'src/js/text_layout.js'), 'utf8') + '\n';
   const source = fs.readFileSync(path.join(root, 'src/js/object_commands.js'), 'utf8');
   let idCounter = 1;
@@ -43,16 +43,18 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
     editCalls: [],
     editedIds: [],
     histories: [],
+    messages: [],
     objects: [],
     renders: [],
     selectedIds: [],
     zCounter: 1,
     LINE_H: DEFAULT_TEXT_BOX_LINE_H,
     TEXT_PAD: DEFAULT_TEXT_BOX_PAD,
-    NEW_TEXT_EDIT_MIN_LINES: DEFAULT_TEXT_BOX_MIN_LINES,
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
+      canAcceptAdditionalTextCharacters() { return true; },
+      textCharacterCount(text) { return Array.from(String(text ?? '')).length; },
       textByteLength(text) {
         context.textByteLengthCalls++;
         return String(text ?? '').length;
@@ -61,6 +63,7 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
     BoardfishEditorState: {
       addObject(obj) {
         context.added.push(obj);
+        context.objects.push(obj);
         return obj;
       },
     },
@@ -106,6 +109,15 @@ function loadAddTextHarness({ syncedHeight = null } = {}) {
     syncAllTextAutoHeights() {},
     textByteLengthCalls: 0,
   };
+  if (realLimits) {
+    const limitsContext = vm.createContext({
+      objects: context.objects,
+      TextEncoder,
+      showIslandMsg(message, duration) { context.messages.push({ message, duration }); },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'src/js/board_limits.js'), 'utf8'), limitsContext);
+    context.BoardfishWebLimits = limitsContext.BoardfishWebLimits;
+  }
   vm.createContext(context);
   vm.runInContext(`${textLayoutSource}syncTextAutoHeight = testSyncTextAutoHeight;\n${source}\nglobalThis.addText = addText;\n`, context, {
     filename: 'object_commands.js',
@@ -233,6 +245,45 @@ test('addText with pasted content stays in select mode by default', () => {
   context.addText(24, 48, 'pasted text');
 
   assert.deepEqual(context.editCalls, []);
+});
+
+test('addText rejects the entire paste using the existing board error notification', () => {
+  const context = loadAddTextHarness({ realLimits: true });
+  context.objects.push({ id: 'existing', type: 'text', data: { content: 'x'.repeat(24998) } });
+
+  context.addText(24, 48, 'x \t');
+
+  assert.equal(context.objects.length, 1);
+  assert.equal(context.zCounter, 1);
+  assert.deepEqual(context.added, []);
+  assert.deepEqual(context.editCalls, []);
+  assert.deepEqual(context.histories, []);
+  assert.deepEqual(context.selectedIds, []);
+  assert.equal(context.messages.length, 1);
+  assert.match(context.messages[0].message, /25,000/);
+  assert.equal(context.messages[0].duration, 4500);
+});
+
+test('addText accepts the exact character limit after paste normalization', () => {
+  const context = loadAddTextHarness({ realLimits: true });
+  context.objects.push({ id: 'existing', type: 'text', data: { content: 'x'.repeat(24996) } });
+
+  context.addText(24, 48, '\r\n\t\r\nx \t😀\r\n\t');
+
+  assert.equal(context.added[0].data.content, 'x \t😀');
+  assert.equal(context.BoardfishWebLimits.currentTextCharacters(), 25000);
+  assert.deepEqual(context.messages, []);
+});
+
+test('addText counts prepared external paste content without changing it', () => {
+  const context = loadAddTextHarness({ realLimits: true });
+  context.objects.push({ id: 'existing', type: 'text', data: { content: 'x'.repeat(24996) } });
+
+  context.addText(24, 48, ' \t😀x', { contentPrepared: true });
+
+  assert.equal(context.added[0].data.content, ' \t😀x');
+  assert.equal(context.BoardfishWebLimits.currentTextCharacters(), 25000);
+  assert.deepEqual(context.messages, []);
 });
 
 test('outside clipboard text is pasted at the same center point as canvas objects', async () => {

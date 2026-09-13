@@ -20,7 +20,7 @@
 
   root.addEventListener?.('load', () => {
     root.navigator.serviceWorker.register('./sw.js').catch((error) => {
-      console.warn('[Boardfish] service worker registration failed:', error);
+      console.warn('Offline Setup Failed:', error);
     });
   });
 }(globalThis));

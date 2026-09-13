@@ -263,7 +263,6 @@ const historyImage = (key) => ({ id: key, type: 'image', x: 0, y: 0, w: 100, h: 
 function attachTextRuntimeCache(obj, content, label = content) {
   obj._layoutCache = [{
     text: label,
-    content: label,
     startIndex: 0,
     endIndex: String(content).length,
     prefixWidths: [0, 10],

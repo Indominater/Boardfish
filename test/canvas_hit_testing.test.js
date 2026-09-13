@@ -2,15 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const { readSource } = require('../test-support/source.js');
 const vm = require('node:vm');
 
-const root = path.join(__dirname, '..');
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
 
 function cssBlocksForPrelude(source, prelude) {
   const blocks = [];
@@ -230,7 +224,7 @@ function loadTextEditMenuHarness() {
 function loadTextEditPasteHarness() {
   const source = readSource('src/js/context_menu.js');
   const readStart = source.indexOf('const readTextClipboardForEditMenu');
-  const readEnd = source.indexOf('const writeTextClipboardFromEditMenu', readStart);
+  const readEnd = source.indexOf('const replaceTextEditSelection', readStart);
   const pasteStart = source.indexOf('const pasteTextIntoEditSelection');
   const pasteEnd = source.indexOf('function menuCommandFromButton', pasteStart);
   assert.ok(readStart >= 0 && readEnd > readStart, 'text clipboard reader is missing');
@@ -432,7 +426,7 @@ test('keyboard focus mirrors menu hover styling without focusing the zoom pill',
   assert.doesNotMatch(styles, /\.ctx-action-item:focus,\s*\.ctx-action-item:focus-visible\s*\{\s*outline: none;\s*\}/);
   assert.match(styles, /:where\(\.ctx-item:focus-visible,\s*\.ctx-action-item:focus-visible\)\s*\{\s*--ui-highlight-nudge-transform: translateX\(var\(--highlight-nudge-x\)\);\s*\}/);
   assert.match(styles, /\.ctx-item:focus-visible\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
-  assert.match(styles, /\.ctx-action-item:focus-visible::before\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
+  assert.match(styles, /\.ctx-action-item:focus-visible\s*\{\s*background: var\(--firefox-menu-hover-bg\);\s*\}/);
   assert.match(styles, /#dlg-discard:focus-visible\s*\{\s*background: var\(--danger-hover-bg\);\s*\}/);
   assert.doesNotMatch(styles, /#island:focus-visible #isl-zoom/);
 });
@@ -447,7 +441,7 @@ test('hover effects are limited to hover-capable fine pointers', () => {
   assert.equal(occurrences(gatedHoverStyles, /:hover/g), occurrences(styles, /:hover/g));
   assert.doesNotMatch(styles, /hotspot-hover/);
   assert.match(gatedHoverStyles, /\.ctx-item:hover/);
-  assert.match(gatedHoverStyles, /\.ctx-action-item:hover::before/);
+  assert.match(gatedHoverStyles, /\.ctx-action-item:hover/);
   assert.match(gatedHoverStyles, /#island:hover #isl-zoom/);
   assert.match(gatedHoverStyles, /#dlg-discard:hover/);
   assert.match(styles, /\.ctx-item\.menu-pressed\s*\{\s*background: var\(--menu-active-bg\);/);
@@ -465,8 +459,8 @@ test('context actions use native hover and explicit pressed state', () => {
   assert.match(source, /function clearCtxActionHotspotState\(\) \{[\s\S]*classList\.remove\('hotspot-active'\);[\s\S]*\}/);
   assert.match(source, /addEventListener\('pointerup', clearCtxActionHotspotState\)/);
   assert.match(source, /addEventListener\('pointerleave', clearCtxActionHotspotState\)/);
-  assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.ctx-action-item:hover::before/);
-  assert.match(styles, /\.ctx-action-item\.hotspot-active::before/);
+  assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\) \{\s*\.ctx-action-item:hover/);
+  assert.match(styles, /\.ctx-action-item\.hotspot-active/);
 });
 
 test('menu rows clear explicit pressed state on release, cancellation, and close', () => {
@@ -499,7 +493,7 @@ test('coarse pointers reuse the desktop context menu and island visual scale', (
   assert.match(styles, /#ctx-actions\s*\{[\s\S]*width: calc\(var\(--menu-item-height\) \+ \(var\(--menu-shell-padding\) \* 2\) \+ 2px\);[\s\S]*\}/);
   assert.match(styles, /\.ctx-action-item\s*\{[\s\S]*width: var\(--menu-item-height\);[\s\S]*height: var\(--menu-item-height\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
   assert.match(styles, /\.ctx-item\s*\{[\s\S]*height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
-  assert.match(styles, /#isl-zoom,\s*\.opening-shield-pill-text\s*\{[\s\S]*min-height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
+  assert.match(styles, /#isl-zoom\s*\{[\s\S]*min-height: var\(--menu-item-height\);[\s\S]*padding: var\(--menu-item-padding\);[\s\S]*font: var\(--text-font-style\) var\(--regular_text\) var\(--menu-item-font-size\) var\(--text-font-family\);[\s\S]*\}/);
 });
 
 test('destructive dialog action uses shared danger color tokens', () => {
@@ -548,9 +542,6 @@ test('text edit caret honors visual line preference at wrapped line start', () =
     canvasTextColor: () => '#111',
     lineCaretXAtOffset(line, obj, offset) {
       return obj.x + context.TEXT_PAD + offset * 10;
-    },
-    lineEndX(line, obj) {
-      return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
   };
   vm.createContext(context);
@@ -601,9 +592,6 @@ test('text edit caret passes consumed soft-wrap space offsets to layout', () => 
       seenOffsets.push(offset);
       return obj.x + context.TEXT_PAD + offset * 10;
     },
-    lineEndX(line, obj) {
-      return obj.x + context.TEXT_PAD + line.text.length * 10;
-    },
   };
   vm.createContext(context);
   vm.runInContext(
@@ -641,9 +629,6 @@ test('text edit caret stays inside content bounds at low zoom', () => {
     canvasTextColor: () => '#111',
     lineCaretXAtOffset(line, obj, offset) {
       return obj.x + context.TEXT_PAD + offset * 10;
-    },
-    lineEndX(line, obj) {
-      return obj.x + context.TEXT_PAD + line.text.length * 10;
     },
   };
   vm.createContext(context);
@@ -698,42 +683,6 @@ test('entering text edit invalidates the offscreen cache before proxy setup', ()
   assert.ok(invalidateIndex > editingIndex, 'enterEdit must invalidate after editingId changes');
   assert.ok(proxyIndex > invalidateIndex, 'offscreen invalidation must happen before proxy setup can focus or render');
   assert.match(enterSource, /scheduleRender\(true, true\)/, 'enterEdit must schedule its own render');
-});
-
-test('text edit mode always keeps text direct while caching static non-text layers', () => {
-  const viewportSource = readSource('src/js/viewport.js');
-  const rebuildStart = viewportSource.indexOf('function _rebuildOffscreen');
-  const rebuildEnd = viewportSource.indexOf('// ─── History delta tracking', rebuildStart);
-  assert.notEqual(rebuildStart, -1);
-  assert.notEqual(rebuildEnd, -1);
-  const rebuildSource = viewportSource.slice(rebuildStart, rebuildEnd);
-
-  assert.match(rebuildSource, /setWorldCanvasTransform\(_offCtx, dpr\);/);
-  assert.match(rebuildSource, /if \(obj\.type === 'text'\) continue;/);
-  assert.doesNotMatch(rebuildSource, /editingId|cacheKind|_offscreenCacheKind/);
-  assert.doesNotMatch(viewportSource, /shouldUseEditOffscreenCache|editOffscreenCacheKind|setEditOffscreenCacheKind/);
-
-  const drawStart = viewportSource.indexOf('function drawBoard');
-  const drawEnd = viewportSource.indexOf('function applyTransform', drawStart);
-  assert.notEqual(drawStart, -1);
-  assert.notEqual(drawEnd, -1);
-  const drawSource = viewportSource.slice(drawStart, drawEnd);
-
-  assert.match(drawSource, /const textSelectionMotions = BoardfishMotion\.textSelectionJelloSpecsForDraw\(\);/);
-  assert.match(drawSource, /function drawBoard\(bypassEditOffscreenCache = false\)/);
-  assert.match(drawSource, /const useEditOffscreenCache = !bypassEditOffscreenCache;/);
-  assert.match(drawSource, /if \(useEditOffscreenCache && _offscreenDirty\) \{\s*_rebuildOffscreen\(dpr, viewportRect\);\s*\}/);
-  assert.match(drawSource, /if \(useEditOffscreenCache\)[\s\S]*ctx\.drawImage\(_offscreen, 0, 0\);/);
-  assert.match(drawSource, /ctx\.drawImage\(_offscreen, 0, 0\);[\s\S]*drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId, true\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver, editingId\);/);
-  assert.match(drawSource, /drawVisibleObjects\(ctx, viewportRect, textSelectionMotions, openInitialImageSourceResolver\);[\s\S]*drawVisibleObjects\(ctx, counters, viewportRect, textSelectionMotions, openInitialImageSourceResolver\);/);
-  assert.match(drawSource, /drawTextSelectionJelloOverlays\(ctx, viewportRect, zoom, textSelectionMotions\);/);
-
-  const transformStart = viewportSource.indexOf('function applyTransform');
-  const transformEnd = viewportSource.indexOf('function getLastApplyTransformMeta', transformStart);
-  const transformSource = viewportSource.slice(transformStart, transformEnd);
-  assert.match(transformSource, /drawBoard\(true\);/);
-  assert.doesNotMatch(transformSource, /_rebuildOffscreen\(/);
 });
 
 test('editing overlay keeps copied text selection highlighted while its jiggle is active', () => {
@@ -885,4 +834,16 @@ test('reset zoom clears selected and edited objects before zooming', () => {
   assert.deepEqual(context.transforms, ['reset-zoom']);
   assert.equal(context.debugEnd.objectId, image.id);
   assert.equal(context.debugEnd.objectType, 'image');
+});
+
+test('context-menu paste does not use an external fallback after a character-limit rejection', async () => {
+  const context = loadTextEditPasteHarness();
+  context.currentBoardfishTextSelectionClipboardPayload = () => ({ type: 'text-selection', text: 'over limit' });
+  context.pasteBoardfishTextSelectionIntoEditSelection = async (options) => {
+    options.limitRejected = true;
+    return false;
+  };
+  await context.pasteTextIntoEditSelection();
+  assert.deepEqual(context.calls.replacements, []);
+  assert.deepEqual(context.calls.clipboardReadActivations, []);
 });

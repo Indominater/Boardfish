@@ -36,23 +36,17 @@
       testedObjects: 0,
       visibleObjects: 0,
       bitmapImages: 0,
-      elementImages: 0,
-      fallbackImages: 0,
       missingImages: 0,
       erroredImages: 0,
       croppedImages: 0,
       scaledImages: 0,
-      openPreviewImages: 0,
-      dynamicOpenPreviewRequests: 0,
       scaledFallbackFull: 0,
       activeInputFullFallbackImages: 0,
-      scaledVariantPendingImages: 0,
       motionObjects: 0,
       motionImages: 0,
       motionText: 0,
       motionTranslatedObjects: 0,
       motionScaledObjects: 0,
-      lowLatencyImageDraws: 0,
       motionScaledImages: 0,
       motionFullScaleImages: 0,
       motionFullFallbackImages: 0,
@@ -94,7 +88,6 @@
       imageContextWarmDraws: 0,
       scaledImageContextFirstDraws: 0,
       fullScaleImageContextFirstDraws: 0,
-      openPreviewImageContextFirstDraws: 0,
       slowDrawObjects: [],
       slowTextLineDraws: [],
     };
@@ -142,7 +135,7 @@
   }
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-  function drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect) {
+  function drawImageObj(context, obj, img, view, viewportRect) {
     const edgeOverdraw = IMAGE_EDGE_OVERDRAW_DEVICE_PX / (view.zoom * view.dpr);
     const transform = obj.data;
     if (transform.flipX || transform.flipY || transform.rotation) {
@@ -150,8 +143,8 @@
       const drawW = sideways ? obj.h : obj.w;
       const drawH = sideways ? obj.w : obj.h;
       context.save();
-      context.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
-      context.scale(transform.flipX ? -1 : 1, transform.flipY ? -1 : 1);
+      context.transform(transform.flipX ? -1 : 1, 0, 0, transform.flipY ? -1 : 1,
+        obj.x + obj.w / 2, obj.y + obj.h / 2);
       if (transform.rotation) context.rotate((transform.rotation * Math.PI) / 180);
       context.drawImage(
         img,
@@ -164,62 +157,43 @@
       return false;
     }
 
+    const x = obj.x - edgeOverdraw;
+    const y = obj.y - edgeOverdraw;
+    const w = obj.w + edgeOverdraw * 2;
+    const h = obj.h + edgeOverdraw * 2;
     if (viewportRect && obj.w > 0 && obj.h > 0) {
-      const objRight = obj.x + obj.w;
-      const objBottom = obj.y + obj.h;
-      const x1 = Math.max(obj.x, viewportRect.x1);
-      const y1 = Math.max(obj.y, viewportRect.y1);
+      const objRight = x + w;
+      const objBottom = y + h;
+      const x1 = Math.max(x, viewportRect.x1);
+      const y1 = Math.max(y, viewportRect.y1);
       const x2 = Math.min(objRight, viewportRect.x2);
       const y2 = Math.min(objBottom, viewportRect.y2);
       if (!(x2 > x1 && y2 > y1)) return null;
-      if (x1 !== obj.x || y1 !== obj.y || x2 !== objRight || y2 !== objBottom) {
+      if (x1 !== x || y1 !== y || x2 !== objRight || y2 !== objBottom) {
         const sourceWidth = img.width;
         const sourceHeight = img.height || img.naturalHeight;
         if (sourceHeight > 0) {
-          const sx = sourceWidth / obj.w;
-          const sy = sourceHeight / obj.h;
+          const sx = sourceWidth / w;
+          const sy = sourceHeight / h;
           const cropWidth = x2 - x1;
           const cropHeight = y2 - y1;
-          const left = x1 === obj.x ? edgeOverdraw : 0;
-          const top = y1 === obj.y ? edgeOverdraw : 0;
-          const right = x2 === objRight ? edgeOverdraw : 0;
-          const bottom = y2 === objBottom ? edgeOverdraw : 0;
           context.drawImage(
             img,
-            (x1 - obj.x) * sx,
-            (y1 - obj.y) * sy,
+            (x1 - x) * sx,
+            (y1 - y) * sy,
             cropWidth * sx,
             cropHeight * sy,
-            x1 - left,
-            y1 - top,
-            cropWidth + (left + right),
-            cropHeight + (top + bottom),
+            x1,
+            y1,
+            cropWidth,
+            cropHeight,
           );
           return true;
         }
       }
     }
-    context.drawImage(
-      img,
-      obj.x - edgeOverdraw,
-      obj.y - edgeOverdraw,
-      obj.w + edgeOverdraw * 2,
-      obj.h + edgeOverdraw * 2,
-    );
+    context.drawImage(img, x, y, w, h);
     return false;
-  }
-
-  function drawImageObj(context, obj, img, view, viewportRect, lowLatency, motion) {
-    if (!lowLatency) {
-      return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
-    }
-    context.imageSmoothingEnabled = false;
-    if (motion) return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
-    try {
-      return drawImageObjWithCurrentQuality(context, obj, img, view, viewportRect);
-    } finally {
-      context.imageSmoothingEnabled = true;
-    }
   }
 
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -324,9 +298,6 @@
       if (selected?.scale === 1 && selected?.targetScale === 1) {
         counters.fullScaleImageContextFirstDraws = (counters.fullScaleImageContextFirstDraws || 0) + 1;
       }
-      if (selected?.openPreview) {
-        counters.openPreviewImageContextFirstDraws = (counters.openPreviewImageContextFirstDraws || 0) + 1;
-      }
     } else {
       counters.imageContextWarmDraws = (counters.imageContextWarmDraws || 0) + 1;
     }
@@ -387,8 +358,6 @@
       row.drawDeviceH = deps ? Math.round(row.objectH * Math.max(Number(deps.zoom?.()) || 0, 0) * Math.max(Number(deps.dpr?.()) || 1, 1) * 100) / 100 : '';
       row.cropped = drawCounterValue(counters, 'croppedImages') > before.croppedImages;
       row.scaled = drawCounterValue(counters, 'scaledImages') > before.scaledImages;
-      row.openPreview = drawCounterValue(counters, 'openPreviewImages') > before.openPreviewImages;
-      row.dynamicOpenPreviewRequest = drawCounterValue(counters, 'dynamicOpenPreviewRequests') > before.dynamicOpenPreviewRequests;
       row.fullScale = drawCounterValue(counters, 'fullScaleImages') > before.fullScaleImages;
       row.selectedScale = scaledDelta > 0
         ? Math.round((drawCounterValue(counters, 'scaledImageScaleTotal') - before.scaledImageScaleTotal) / scaledDelta * 1000) / 1000
@@ -398,8 +367,6 @@
         : row.fullScale ? 1 : '';
       row.fallbackFull = drawCounterValue(counters, 'scaledFallbackFull') > before.scaledFallbackFull;
       row.activeInputFullFallback = drawCounterValue(counters, 'activeInputFullFallbackImages') > before.activeInputFullFallbackImages;
-      row.scaledVariantPending = drawCounterValue(counters, 'scaledVariantPendingImages') > before.scaledVariantPendingImages;
-      row.lowLatencyImageDraw = drawCounterValue(counters, 'lowLatencyImageDraws') > before.lowLatencyImageDraws;
       row.motionScaledImage = drawCounterValue(counters, 'motionScaledImages') > before.motionScaledImages;
       row.motionFullScaleImage = drawCounterValue(counters, 'motionFullScaleImages') > before.motionFullScaleImages;
       row.motionFullFallbackImage = drawCounterValue(counters, 'motionFullFallbackImages') > before.motionFullFallbackImages;
@@ -438,7 +405,6 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , viewportRect = null
       , view = null
-      , imageSourceResolver = null
       , motion = null
     ) {
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
@@ -450,14 +416,11 @@
         if (obj.type !== 'image') return;
 
         const key = obj.data.imgKey;
-        const lowLatencyImageMotion = !!motion;
-        const selected = imageSourceResolver
-          ? imageSourceResolver(key, obj, view, lowLatencyImageMotion)
-          : deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, lowLatencyImageMotion);
+        const selected = deps.selectImageSourceForDraw(key, obj, deps.imageBitmapCache()[key], view, !!motion);
         const img = selected?.source || selected || null;
         if (!(img?.width > 0)) return;
         try {
-          drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
+          drawImageObj(context, obj, img, view, viewportRect);
         } catch (_) {}
       } else {
       if (obj.type === 'text') {
@@ -508,10 +471,7 @@
 
       const key = obj.data.imgKey;
       const bitmap = deps.imageBitmapCache()[key];
-      const lowLatencyImageMotion = !!motion;
-      const selected = imageSourceResolver
-        ? imageSourceResolver(key, obj, view, counters, lowLatencyImageMotion)
-        : bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, lowLatencyImageMotion) : null;
+      const selected = bitmap ? deps.selectImageSourceForDraw(key, obj, bitmap, view, !!motion) : null;
       const img = selected?.source || selected || null;
       if (img?.width > 0) {
         if (counters) {
@@ -519,7 +479,6 @@
             counters.scaledImages = (counters.scaledImages || 0) + 1;
             counters.scaledImageScaleTotal = (counters.scaledImageScaleTotal || 0) + selected.scale;
             counters.scaledImageTargetScaleTotal = (counters.scaledImageTargetScaleTotal || 0) + selected.targetScale;
-            if (selected?.openPreview) counters.openPreviewImages = (counters.openPreviewImages || 0) + 1;
             if (motion) counters.motionScaledImages = (counters.motionScaledImages || 0) + 1;
           } else if (selected?.targetScale < 1) {
             counters.scaledFallbackFull = (counters.scaledFallbackFull || 0) + 1;
@@ -532,15 +491,10 @@
             counters.fullScaleImages = (counters.fullScaleImages || 0) + 1;
             if (motion) counters.motionFullScaleImages = (counters.motionFullScaleImages || 0) + 1;
           }
-          if (lowLatencyImageMotion) counters.lowLatencyImageDraws = (counters.lowLatencyImageDraws || 0) + 1;
-          if (bitmap || selected?.scale < 1) counters.bitmapImages++;
-          else {
-            counters.elementImages++;
-            counters.fallbackImages++;
-          }
+          counters.bitmapImages++;
         }
         try {
-          const cropped = drawImageObj(context, obj, img, view, viewportRect, selected?.activeInputFullFallback === true || lowLatencyImageMotion, motion);
+          const cropped = drawImageObj(context, obj, img, view, viewportRect);
           if (cropped === null) return false;
           if (counters) {
             recordImageDrawWarmStats(
@@ -565,13 +519,10 @@
       }
 
       if (counters) {
-        if (selected?.scaledVariantPending) counters.scaledVariantPendingImages = (counters.scaledVariantPendingImages || 0) + 1;
-        else counters.missingImages++;
+        counters.missingImages++;
         counters.lastMissingKey = key;
         counters.lastMissingId = obj.id;
-        counters.lastMissingReason = selected?.scaledVariantPending ? 'scaled-variant-pending-active-input'
-          : imageSourceResolver ? 'resolved-source-pending'
-          : !key ? 'missing-key'
+        counters.lastMissingReason = !key ? 'missing-key'
           : !deps.imageStore()[key] ? 'missing-store'
             : !bitmap ? 'missing-bitmap'
               : 'unknown';
@@ -586,23 +537,22 @@
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       , viewportRect = deps.currentViewportWorldRect()
       , skipIds
-      , imageSourceResolver = null
       , skipId = null
-      , onlyText = false
+      , objectType = null
       , view = { zoom: deps.zoom(), dpr: deps.dpr() }
     ) {
       const objectMotionForDraw =
         deps.hasObjectMotionsForDraw?.() === false ? null : deps.objectMotionForDraw;
       if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
         for (const obj of deps.objects()) {
-          if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
+          if ((objectType && obj.type !== objectType) || obj.id === skipId || skipIds?.has(obj.id)) continue;
           const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
           if (!motion && !deps.objectIntersectsRect(obj, viewportRect)) continue;
           const objectViewportRect = motion
             ? applyObjectMotion(context, obj, viewportRect, motion)
             : viewportRect;
           try {
-            drawSingleObj(context, obj, objectViewportRect, view, imageSourceResolver, motion);
+            drawSingleObj(context, obj, objectViewportRect, view, motion);
           } finally {
             if (motion) context.restore();
           }
@@ -614,7 +564,7 @@
       let drawnText = 0;
       for (const obj of deps.objects()) {
         if (counters) counters.testedObjects = (counters.testedObjects || 0) + 1;
-        if ((onlyText && obj.type !== 'text') || obj.id === skipId || skipIds?.has(obj.id)) continue;
+        if ((objectType && obj.type !== objectType) || obj.id === skipId || skipIds?.has(obj.id)) continue;
         const motion = objectMotionForDraw ? objectMotionForDraw(obj, view.zoom) : null;
         if (cullingEnabled && !deps.objectIntersectsRect(obj, viewportRect) && !motion) {
           countCulledObject(obj, counters);
@@ -633,18 +583,9 @@
           culledTextLines: drawCounterValue(counters, 'culledTextLines'),
           croppedImages: drawCounterValue(counters, 'croppedImages'),
           scaledImages: drawCounterValue(counters, 'scaledImages'),
-          openPreviewImages: drawCounterValue(counters, 'openPreviewImages'),
-          dynamicOpenPreviewRequests: drawCounterValue(counters, 'dynamicOpenPreviewRequests'),
           fullScaleImages: drawCounterValue(counters, 'fullScaleImages'),
           scaledFallbackFull: drawCounterValue(counters, 'scaledFallbackFull'),
           activeInputFullFallbackImages: drawCounterValue(counters, 'activeInputFullFallbackImages'),
-          scaledVariantPendingImages: drawCounterValue(counters, 'scaledVariantPendingImages'),
-          motionObjects: drawCounterValue(counters, 'motionObjects'),
-          motionImages: drawCounterValue(counters, 'motionImages'),
-          motionText: drawCounterValue(counters, 'motionText'),
-          motionTranslatedObjects: drawCounterValue(counters, 'motionTranslatedObjects'),
-          motionScaledObjects: drawCounterValue(counters, 'motionScaledObjects'),
-          lowLatencyImageDraws: drawCounterValue(counters, 'lowLatencyImageDraws'),
           motionScaledImages: drawCounterValue(counters, 'motionScaledImages'),
           motionFullScaleImages: drawCounterValue(counters, 'motionFullScaleImages'),
           motionFullFallbackImages: drawCounterValue(counters, 'motionFullFallbackImages'),
@@ -667,7 +608,7 @@
           imageContextWarmDraws: drawCounterValue(counters, 'imageContextWarmDraws'),
         } : null;
         try {
-          drawn = drawSingleObj(context, obj, counters, objectViewportRect, view, imageSourceResolver, motion);
+          drawn = drawSingleObj(context, obj, counters, objectViewportRect, view, motion);
         } finally {
           if (motion) context.restore();
           if (counters && typeof performance !== 'undefined') {
@@ -690,7 +631,7 @@
     return Object.freeze(renderer);
   }
 
-  const api = Object.freeze({ createBoardRenderer });
+  const api = Object.freeze({ createBoardRenderer, applyObjectMotion });
 
   root.BoardfishRenderer = api;
 })(typeof window !== 'undefined' ? window : globalThis);

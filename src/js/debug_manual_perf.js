@@ -94,8 +94,8 @@ var ManualPerfDebug = (() => {
   }
 
   function drawableRgbaBytes(source) {
-    const width = Number(source?.width || source?.naturalWidth || 0);
-    const height = Number(source?.height || source?.naturalHeight || 0);
+    const width = Number(source?.width || 0);
+    const height = Number(source?.height || 0);
     return width > 0 && height > 0 ? width * height * 4 : 0;
   }
 
@@ -132,8 +132,6 @@ var ManualPerfDebug = (() => {
         sourceMB: mb(sourceBytesForKey),
         bitmapMB: mb(bitmapBytesForKey),
         totalEstimateMB: mb(sourceBytesForKey + bitmapBytesForKey),
-        imageW: bitmap?.width || 0,
-        imageH: bitmap?.height || 0,
         bitmapW: bitmap?.width || 0,
         bitmapH: bitmap?.height || 0,
       });
@@ -167,7 +165,7 @@ var ManualPerfDebug = (() => {
 
   function jsHeapSnapshot() {
     const memory = performance?.memory;
-    if (!memory) return { available: false, reason: 'performance.memory unavailable in this runtime' };
+    if (!memory) return { available: false, reason: 'Memory Metrics Unavailable' };
     return {
       available: true,
       usedJSHeapMB: mb(memory.usedJSHeapSize),
@@ -259,7 +257,7 @@ var ManualPerfDebug = (() => {
 
   async function begin(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     BoardfishDebug.viewport.enable({
@@ -273,10 +271,7 @@ var ManualPerfDebug = (() => {
       ? options.prewarmScaledImages
       : {};
     const scaledImagePrewarm = options.prewarmScaledImages && typeof prewarmVisibleScaledImageVariants === 'function'
-      ? prewarmVisibleScaledImageVariants({
-          reason: 'perf-begin',
-          ...scaledImagePrewarmOptions,
-        })
+      ? prewarmVisibleScaledImageVariants(scaledImagePrewarmOptions)
       : null;
     const textLayoutPrewarmOptions = options.prewarmTextLayout && typeof options.prewarmTextLayout === 'object'
       ? options.prewarmTextLayout
@@ -328,7 +323,7 @@ var ManualPerfDebug = (() => {
 
   function state() {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     return {
@@ -367,9 +362,21 @@ var ManualPerfDebug = (() => {
     };
   }
 
+  function storeReport(out) {
+    lastReport = out;
+    lastJson = JSON.stringify(out, null, 2);
+  }
+
+  function logReport(label, out) {
+    console.group(label);
+    console.table([out.headline]);
+    console.log(out);
+    console.groupEnd();
+  }
+
   function report(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     const out = {
@@ -381,19 +388,15 @@ var ManualPerfDebug = (() => {
       markers: markers.slice(),
     };
     out.headline = headline(out);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
-    console.group('[Boardfish perf] manual viewport');
-    console.table([out.headline]);
-    console.log(out);
-    console.groupEnd();
+    storeReport(out);
+    logReport('[Boardfish perf] manual viewport', out);
     if (options.copy !== false) void copyLast();
     return out;
   }
 
   function json() {
     if (!lastReport) {
-      console.warn('[Boardfish perf] No report yet. Run finishDebug({ perf: ["report"] }) first.');
+      console.warn('[Boardfish Perf] No Report Available. Run finishDebug({ perf: ["report"] }).');
       return '';
     }
     lastJson = JSON.stringify(lastReport, null, 2);
@@ -403,7 +406,7 @@ var ManualPerfDebug = (() => {
 
   async function copyLast() {
     if (!lastReport) {
-      console.warn('[Boardfish perf] No report yet. Run finishDebug({ perf: ["report"] }) first.');
+      console.warn('[Boardfish Perf] No Report Available. Run finishDebug({ perf: ["report"] }).');
       return false;
     }
     const text = json();
@@ -412,14 +415,14 @@ var ManualPerfDebug = (() => {
       console.info(`[Boardfish perf] Copied ${text.length} chars to clipboard.`);
       return true;
     } catch (err) {
-      console.warn('[Boardfish perf] Clipboard copy failed. JSON was printed above and finishDebug() will include perf.lastJson.', err);
+      console.warn('[Boardfish Perf] Clipboard Write Failed. JSON Is In perf.lastJson.', err);
       return text;
     }
   }
 
   async function memoryReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     const memory = await memorySnapshot(options.label || 'memory-report', options);
@@ -434,13 +437,9 @@ var ManualPerfDebug = (() => {
       ...memory.headline,
       ...(out.memoryDelta || {}),
     };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] memory report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] memory report', out);
     }
     if (options.copy === true) void copyLast();
     return out;
@@ -448,7 +447,7 @@ var ManualPerfDebug = (() => {
 
   async function benchmarkReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     const memoryEnd = await memorySnapshot('finish', { ...options, table: false });
@@ -475,13 +474,9 @@ var ManualPerfDebug = (() => {
       ...headline(out),
       ...(out.memoryDelta || {}),
     };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] current pan/zoom benchmark');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] current pan/zoom benchmark', out);
     }
     if (options.copy !== false) void copyLast();
     return out;
@@ -526,17 +521,9 @@ var ManualPerfDebug = (() => {
     };
   }
 
-  function panningHeadline(viewportReport = {}) {
-    return viewportNavigationHeadline(viewportReport);
-  }
-
-  function zoomingHeadline(viewportReport = {}) {
-    return viewportNavigationHeadline(viewportReport);
-  }
-
   function panningReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     const viewport = BoardfishDebug.viewport.report({
@@ -552,14 +539,10 @@ var ManualPerfDebug = (() => {
       viewport,
       markers: markers.slice(),
     };
-    out.headline = panningHeadline(viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] viewport panning');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] viewport panning', out);
     }
     return out;
   }
@@ -591,7 +574,7 @@ var ManualPerfDebug = (() => {
 
   async function wheelPanTest(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     BoardfishDebug.viewport.enable({ verbose: false });
@@ -616,21 +599,17 @@ var ManualPerfDebug = (() => {
     out.deltaY = deltaY;
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.testPoint = point;
-    out.headline = panningHeadline(out.viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(out.viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] synthetic wheel pan');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] synthetic wheel pan', out);
     }
     return out;
   }
 
   function zoomReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     const viewport = BoardfishDebug.viewport.report({
@@ -649,21 +628,17 @@ var ManualPerfDebug = (() => {
       viewport,
       markers: markers.slice(),
     };
-    out.headline = zoomingHeadline(viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] viewport zoom');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] viewport zoom', out);
     }
     return out;
   }
 
   async function panZoomReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     const memoryEnd = options.memory === false ? null : await memorySnapshot('pan-zoom-finish', { ...options, table: false });
@@ -714,13 +689,9 @@ var ManualPerfDebug = (() => {
       ...viewportNavigationHeadline(out.viewport),
       ...(out.memoryDelta || {}),
     };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] viewport pan/zoom optimization');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] viewport pan/zoom optimization', out);
     }
     if (options.copy === true) void copyLast();
     return out;
@@ -728,7 +699,7 @@ var ManualPerfDebug = (() => {
 
   async function wheelZoomTest(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     BoardfishDebug.viewport.enable({ verbose: false });
@@ -755,14 +726,10 @@ var ManualPerfDebug = (() => {
     out.deltaY = deltaY;
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.testPoint = point;
-    out.headline = zoomingHeadline(out.viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(out.viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] synthetic wheel zoom');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] synthetic wheel zoom', out);
     }
     return out;
   }
@@ -793,7 +760,7 @@ var ManualPerfDebug = (() => {
 
   async function mousePanTest(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     BoardfishDebug.viewport.enable({ verbose: false });
@@ -833,14 +800,10 @@ var ManualPerfDebug = (() => {
     out.elapsedMs = Math.round((performance.now() - startedAt) * 100) / 100;
     out.start = start;
     out.end = end;
-    out.headline = panningHeadline(out.viewport);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    out.headline = viewportNavigationHeadline(out.viewport);
+    storeReport(out);
     if (options.log !== false) {
-      console.group('[Boardfish perf] synthetic mouse pan');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] synthetic mouse pan', out);
     }
     return out;
   }
@@ -1017,7 +980,6 @@ var ManualPerfDebug = (() => {
       objectW: obj?.w ?? '',
       objectH: obj?.h ?? '',
       editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
-      pendingSizeSync: !!obj?._textEditPendingSizeSync,
       ...textEditSizeSnapshot(obj, content),
       ...textEditProxySizeSnapshot(_editEl),
       layoutCachePresent: !!obj?._layoutCache,
@@ -1068,7 +1030,6 @@ var ManualPerfDebug = (() => {
       objectW: obj?.w ?? '',
       objectH: obj?.h ?? '',
       editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
-      pendingSizeSync: !!obj?._textEditPendingSizeSync,
       ...textEditSizeSnapshot(
         obj,
         typeof _editEl?._boardfishLogicalValue === 'string'
@@ -1138,7 +1099,6 @@ var ManualPerfDebug = (() => {
       wrappedLineIndexCacheEntries: obj?._textWrappedLineIndexCache?.entries?.length ?? '',
       wrappedLineIndexCacheLines: obj?._textWrappedLineIndexCache?.lineCount ?? '',
       wrappedLineIndexWidthCacheSize: obj?._textWrappedLineIndexWidthCache?.size ?? '',
-      pendingSizeSync: !!obj?._textEditPendingSizeSync,
       zoom: typeof zoom !== 'undefined' ? zoom : '',
       panX: typeof panX !== 'undefined' ? panX : '',
       panY: typeof panY !== 'undefined' ? panY : '',
@@ -1330,7 +1290,6 @@ var ManualPerfDebug = (() => {
       autoHeightChanged: event.autoHeightChanged,
       autoHeightReason: event.autoHeightReason,
       layoutInvalidationMethod: event.layoutInvalidationMethod,
-      pendingSizeSync: event.pendingSizeSync,
       renderBoard: event.renderBoard,
       renderOverlay: event.renderOverlay,
       scheduleRenderMs: event.scheduleRenderMs,
@@ -1407,7 +1366,6 @@ var ManualPerfDebug = (() => {
       maxEditLayoutMs: draw.maxEditLayoutMs ?? '',
       historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
       historyMaxFocusMs: historySummary.maxFocusMs ?? '',
-      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
     };
   }
 
@@ -1635,15 +1593,7 @@ var ManualPerfDebug = (() => {
       layoutPatchLineDelta: step.layoutPatchLineDelta,
       layoutPatchLogicalLineDelta: step.layoutPatchLogicalLineDelta,
       layoutPatchReason: step.layoutPatchReason,
-      autoHeightDeferred: step.autoHeightDeferred,
-      autoHeightForceSync: step.autoHeightForceSync,
-      autoHeightForceReason: step.autoHeightForceReason,
       restoredMinLinesReset: step.restoredMinLinesReset,
-      restoredPreviousMinLines: step.restoredPreviousMinLines,
-      restoredPreservedMinLines: step.restoredPreservedMinLines,
-      restoredNextMinLines: step.restoredNextMinLines,
-      pendingSizeSyncBeforeAutoHeight: step.pendingSizeSyncBeforeAutoHeight,
-      pendingSizeSync: step.pendingSizeSync,
       inputStateObjectHeight: step.inputStateObjectHeight,
       inputStateLogicalLines: step.inputStateLogicalLines,
       inputStateCachedLines: step.inputStateCachedLines,
@@ -1737,7 +1687,6 @@ var ManualPerfDebug = (() => {
       proxyScrollHeight: event.proxyScrollHeight,
       proxyClientHeight: event.proxyClientHeight,
       editStartChars: event.editStartChars,
-      pendingSizeSync: event.pendingSizeSync,
       layoutCachePresent: event.layoutCachePresent,
       layoutCacheLines: event.layoutCacheLines,
       historyLength: event.historyLength,
@@ -1768,7 +1717,7 @@ var ManualPerfDebug = (() => {
   function historyTextUndoRedoReport(options = {}) {
     const historyApi = BoardfishDebug.history;
     if (!historyApi?.textUndoRedoReport) {
-      return { available: false, reason: 'history text undo/redo report unavailable' };
+      return { available: false, reason: 'History Report Unavailable' };
     }
     return {
       available: true,
@@ -1821,7 +1770,6 @@ var ManualPerfDebug = (() => {
       contentLengthEnd: report.endSnapshot?.contentLength ?? '',
       maxObjectContentLength: eventSummary.maxObjectContentLength ?? '',
       editStartChars: report.startSnapshot?.editStartChars ?? '',
-      pendingSizeSyncEnd: report.endSnapshot?.pendingSizeSync ?? '',
       objectHeightEnd: report.endSnapshot?.objectH ?? '',
       expectedLogicalHeightEnd: report.endSnapshot?.expectedLogicalHeight ?? '',
       expectedCachedHeightEnd: report.endSnapshot?.expectedCachedHeight ?? '',
@@ -1848,14 +1796,8 @@ var ManualPerfDebug = (() => {
       historyMaxOuterRestoreMs: historySummary.maxOuterRestoreMs ?? '',
       historyMaxFlushMs: historySummary.maxFlushMs ?? '',
       historyMaxCloneObjectsMs: historySummary.maxCloneObjectsMs ?? '',
-      historyHydratedTextRuntimeCaches: historySummary.hydratedTextRuntimeCaches ?? '',
-      historyHydratedTextLayoutCaches: historySummary.hydratedTextLayoutCaches ?? '',
       historyMaxReplaceBoardObjectsMs: historySummary.maxReplaceBoardObjectsMs ?? '',
       historyMaxEnterEditMs: historySummary.maxEnterEditMs ?? '',
-      historyMaxProxyValueSetMs: historySummary.maxProxyValueSetMs ?? '',
-      historyMaxProxyValueDiffMs: historySummary.maxProxyValueDiffMs ?? '',
-      historyMaxProxyValueMutationMs: historySummary.maxProxyValueMutationMs ?? '',
-      historyMaxProxyValueAssignMs: historySummary.maxProxyValueAssignMs ?? '',
       historyMaxSetSelectionRangeMs: historySummary.maxSetSelectionRangeMs ?? '',
       historyMaxFocusMs: historySummary.maxFocusMs ?? '',
     };
@@ -1863,7 +1805,7 @@ var ManualPerfDebug = (() => {
 
   function textEditBegin(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     setTextEditMathListeners(false);
@@ -1929,7 +1871,7 @@ var ManualPerfDebug = (() => {
 
   function textEditReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     if (options.stop !== false) setTextEditMathListeners(false);
@@ -1956,25 +1898,21 @@ var ManualPerfDebug = (() => {
       ],
     };
     out.headline = textEditHeadline(out);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.clear !== false) {
       textEditSession = null;
       textEditLastEventAt = 0;
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
-      console.group('[Boardfish perf] text edit passive report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] text edit passive report', out);
     }
     return out;
   }
 
   function textResizeBegin(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     setTextEditMathListeners(false);
@@ -2069,7 +2007,7 @@ var ManualPerfDebug = (() => {
 
   function textResizeReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     if (options.stop !== false) setTextEditMathListeners(false);
@@ -2102,8 +2040,7 @@ var ManualPerfDebug = (() => {
       ],
     };
     out.headline = textResizeHeadline(out);
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.clear !== false) {
       textResizeSession = null;
       textEditSession = null;
@@ -2112,10 +2049,7 @@ var ManualPerfDebug = (() => {
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
-      console.group('[Boardfish perf] text resize/input passive report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] text resize/input passive report', out);
     }
     return out;
   }
@@ -2196,7 +2130,7 @@ var ManualPerfDebug = (() => {
 
   function measureTextLayoutPass(options = {}) {
     if (typeof getTextLayout !== 'function') {
-      return { available: false, reason: 'getTextLayout unavailable' };
+      return { available: false, reason: 'Text Layout Unavailable' };
     }
     if (options.clearLayout === true && typeof clearTextLayoutCaches === 'function') {
       clearTextLayoutCaches({
@@ -2552,7 +2486,7 @@ var ManualPerfDebug = (() => {
 
   async function largeTextPanningBegin(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     setTextEditMathListeners(false);
@@ -2562,7 +2496,7 @@ var ManualPerfDebug = (() => {
       ? applyLargeTextPanningState(mode, options)
       : currentLargeTextPanningState(mode, options);
     if (state?.skipped) {
-      console.warn(`[Boardfish perf] Large text panning state skipped: ${state.reason}`);
+      console.warn(`[Boardfish Perf] Text Pan Test Skipped: ${state.reason}`);
       return state;
     }
 
@@ -2662,7 +2596,7 @@ var ManualPerfDebug = (() => {
 
   function largeTextSelectionDebugReport(options = {}) {
     if (options.textSelection === false) return { available: false, reason: 'disabled' };
-    if (typeof TextSelDebug === 'undefined') return { available: false, reason: 'TextSelDebug unavailable' };
+    if (typeof TextSelDebug === 'undefined') return { available: false, reason: 'Text Selection Debug Unavailable' };
     const out = {
       available: true,
       performanceSummary: TextSelDebug.performanceSummary?.() || null,
@@ -2726,7 +2660,7 @@ var ManualPerfDebug = (() => {
 
   async function largeTextPanningReport(options = {}) {
     if (!DEBUG_TOOLS_ENABLED) {
-      console.warn('[Boardfish perf] Debug tools are disabled in this build.');
+      console.warn('[Boardfish Debug] Debug Tools Disabled');
       return null;
     }
     if (options.stop !== false) setTextEditMathListeners(false);
@@ -2783,8 +2717,7 @@ var ManualPerfDebug = (() => {
       ...largeTextPanningHeadline(out),
       ...(out.memoryDelta || {}),
     };
-    lastReport = out;
-    lastJson = JSON.stringify(out, null, 2);
+    storeReport(out);
     if (options.clear !== false) {
       largeTextPanningSession = null;
       textEditSession = null;
@@ -2792,10 +2725,7 @@ var ManualPerfDebug = (() => {
       textEditInputStepLastAt = 0;
     }
     if (options.log !== false) {
-      console.group('[Boardfish perf] large text panning report');
-      console.table([out.headline]);
-      console.log(out);
-      console.groupEnd();
+      logReport('[Boardfish perf] large text panning report', out);
     }
     if (options.copy === true) void copyLast();
     return out;

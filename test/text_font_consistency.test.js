@@ -2,14 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readSource } = require('../test-support/source.js');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
 
 function listFiles(dir, predicate = () => true) {
   const fullDir = path.join(root, dir);
@@ -56,7 +53,7 @@ test('DOM text uses the shared app font rendering defaults', () => {
 
   const fontWeightDeclarations = [...css.matchAll(/font-weight:\s*([^;]+);/g)]
     .map((match) => match[1].trim());
-  assert.deepEqual(fontWeightDeclarations, ['300 700']);
+  assert.deepEqual(fontWeightDeclarations, ['400']);
   assert.equal(
     [...css.matchAll(/font:\s*var\(--text-font-style\)\s+var\(--regular_text\)\s+var\(--menu-item-font-size\)\s+var\(--text-font-family\);/g)].length,
     5

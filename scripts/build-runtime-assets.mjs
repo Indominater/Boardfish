@@ -16,24 +16,19 @@ const readableProductionAudit = process.env.BOARDFISH_BUILD_READABLE === '1';
 const DEV_DIAGNOSTICS_START = '/* BOARDFISH_DEV_DIAGNOSTICS_START */';
 const DEV_DIAGNOSTICS_END = '/* BOARDFISH_DEV_DIAGNOSTICS_END */';
 const DIAGNOSTIC_APIS = Object.freeze([
-  'StartupDebug',
   'ClipDebug',
   'HistoryDebug',
   'ViewportDebug',
-  'SaveDebug',
   'OpenDebug',
   'ExportDebug',
   'InsertDebug',
   'TextSelDebug',
   'PillDebug',
   'MenuDebug',
-  'ManualPerfDebug',
 ]);
 const DIAGNOSTIC_CALLS = Object.freeze([
-  'logStartupStep',
   'logStep',
   'logInputStep',
-  'logPasteStep',
   'textEditorDebugLog',
   'textEditorDebugNow',
   'textEditorDebugRound',
@@ -44,72 +39,22 @@ const DIAGNOSTIC_CALLS = Object.freeze([
   'textEditorSizeDebugStats',
   'textEditorProxySizeDebugStats',
   'textEditorTextStats',
-  'textEditorClipStep',
-  'textEditorClipboardLog',
-  'textEditorPerfDebugApi',
-  'textEditorClipDebugApi',
-  'shouldTraceTextEditorInput',
   'recordTextEditorInputPerfStep',
   'recordInputSetupStep',
   'nextTextEditInputDebugSeq',
-  'selectionInputPerfDebugApi',
-  'selectionResizeDebugNow',
-  'selectionResizeDebugRound',
-  'selectionResizeEventMeta',
-  'selectionResizeTextObjectStats',
-  'recordSelectionTextResizeStep',
   'canvasInputDebugRound',
   'canvasInputNow',
-  'canvasInputEventDebugMeta',
   'canvasInputViewportDebugSnapshot',
-  'canvasInputWheelDebugMeta',
   'canvasInputTextDebugLog',
   'logClickEditStep',
-  'historyDebugRound',
-  'logTextEditHistoryDebug',
   'objectCommandDebugNow',
   'objectCommandTextStats',
   'imageFileDebugName',
   'imageSourceDebugInfo',
-  'textClipboardStats',
-  'clipboardTextStats',
-  'clipboardTextMetricsForObjects',
-  'clipboardIoNow',
-  'clipboardIoElapsedMs',
-  'clipboardNow',
-  'clipboardElapsedMs',
-  'webSourceClipboardKind',
-  'recordMotionDebug',
-  'isHistoryDebugEnabled',
-  'isDebugApiEnabled',
-  'shouldPrepareImagePreviewDebug',
-  'isDebugApiEnabledForStep',
-  'isOpenDebugActive',
-  'isPillDebugActive',
-  'shouldCollectOpenBoardMetrics',
-  'getBoardSaveDebugMetrics',
-  'getBoardOpenDebugMetrics',
-  'getOpenImageRuntimeDebugMetrics',
-  'getImageStoreOpenDebugSampleIfEnabled',
-  'scheduleSaveFrameProbe',
-  'scheduleOpenFrameProbe',
-  'registerDebugCommand',
 ]);
 const PRODUCTION_FALSE_DIAGNOSTIC_FLAGS = Object.freeze([
   'collectDiagnostics',
   'collectDebug',
-  'collectPanDebug',
-  'collectDrawDebug',
-  'collectViewportDebug',
-  'collectOpenInitialRenderDebug',
-  'collectOpenPreviewFallbackDebug',
-  'collectTransformDebug',
-  'collectInitialRenderDebug',
-  'collectMotionDebug',
-  'collectClipboardDiagnostics',
-  'collectClipboardIoDiagnostics',
-  'perfTraceInput',
-  'shouldLogInput',
 ]);
 
 const variants = {
@@ -123,7 +68,7 @@ const variants = {
 function assertInsideWorkspace(target) {
   const resolved = path.resolve(target);
   if (!resolved.startsWith(root + path.sep)) {
-    throw new Error(`refusing to write outside workspace: ${resolved}`);
+    throw new Error(`Invalid Build Output Path: ${resolved}`);
   }
   return resolved;
 }
@@ -197,7 +142,7 @@ function inlineProductionDiagnosticFlags(source) {
 function stripMarkedDeveloperDiagnostics(source) {
   const starts = source.split(DEV_DIAGNOSTICS_START).length - 1;
   const ends = source.split(DEV_DIAGNOSTICS_END).length - 1;
-  if (starts !== ends) throw new Error('unbalanced developer diagnostic build markers');
+  if (starts !== ends) throw new Error('Unbalanced Diagnostic Markers');
   const block = new RegExp(
     `${escapeRegExp(DEV_DIAGNOSTICS_START)}[\\s\\S]*?${escapeRegExp(DEV_DIAGNOSTICS_END)}`,
     'g',
@@ -218,10 +163,10 @@ function aliasNamedDiagnosticCalls(source) {
 
 async function compileProductionBundle(source) {
   if (source.includes(RUNTIME_CONSOLE_SENTINEL)) {
-    throw new Error('production console sentinel collides with runtime source');
+    throw new Error('Build Sentinel Conflict');
   }
   if (source.includes(DROP_DIAGNOSTIC_SENTINEL)) {
-    throw new Error('production diagnostic sentinel collides with runtime source');
+    throw new Error('Build Sentinel Conflict');
   }
 
   const define = {
@@ -229,7 +174,6 @@ async function compileProductionBundle(source) {
     DEBUG_TOOLS_ENABLED: 'false',
     module: 'undefined', require: 'undefined',
     console: RUNTIME_CONSOLE_SENTINEL,
-    'OpenDebug.hydrationConcurrency': 'openHydrationConcurrency',
   };
   for (const flag of PRODUCTION_FALSE_DIAGNOSTIC_FLAGS) define[flag] = 'false';
   for (const api of DIAGNOSTIC_APIS) {
@@ -266,7 +210,7 @@ async function compileProductionBundle(source) {
     treeShaking: true,
   });
   if (restored.code.includes(RUNTIME_CONSOLE_SENTINEL)) {
-    throw new Error('production console sentinel was not restored');
+    throw new Error('Build Sentinel Restore Failed');
   }
   return restored;
 }
@@ -323,7 +267,7 @@ const names = requested.length ? requested : ['web-preview'];
 for (const name of names) {
   const config = variants[name];
   if (!config) {
-    console.error(`Unknown build variant "${name}". Expected one of: ${Object.keys(variants).join(', ')}`);
+    console.error(`Unknown Build Variant: "${name}". Options: ${Object.keys(variants).join(', ')}`);
     process.exit(1);
   }
   await buildBundle(name, config);

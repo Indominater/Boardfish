@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readSource, readJson } = require('../test-support/source.js');
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -46,7 +47,6 @@ const RELEASE_FORBIDDEN_DIAGNOSTIC_MARKERS = Object.freeze([
   'web-export:pill-start',
   'selection-drag-move-hit',
   'canvas-mousedown-route',
-  'blob-parts+materialized-small',
   'copy:web-text-clipboard-write-end',
   'dom-current',
   'keydown-delete-replacement-ready',
@@ -74,6 +74,7 @@ const RELEASE_FORBIDDEN_DIAGNOSTIC_METADATA = Object.freeze([
   'domSyncedBeforeNativeInput',
   'drawCalls',
   'drawUnits',
+  'drawableWarmups',
   'enterEditMs',
   'imageEntriesMs',
   'keydownDeleteSetupMs',
@@ -81,42 +82,31 @@ const RELEASE_FORBIDDEN_DIAGNOSTIC_METADATA = Object.freeze([
   'jsonStringifyMs',
   'layoutMs',
   'mutationStartedAt',
+  'pendingDrawableWarmups',
+  'pendingScaledVariants',
   'planCacheHits',
   'planCacheMisses',
   'renderScheduleMs',
   'replacementBuildMs',
   'scheduledDelayMs',
+  'scaledTasks',
   'scriptRuns',
   'skippedSpaces',
   'skippedTabs',
   'textareaMutationMs',
   'validationMs',
+  'warmupAvailable',
   'worldPointMs',
   'zipMs',
   'zipMode',
 ]);
 
 const RELEASE_OPERATIONAL_CONSOLE_MESSAGES = Object.freeze([
-  ['warn', '[Boardfish] service worker registration failed:'],
-  ['warn', '[export] save picker failed; falling back to browser download.'],
-  ['error', 'Save failed:'],
-  ['error', '[copy] clipboard.write FAILED:'],
+  ['warn', 'Offline Setup Failed:'],
+  ['warn', 'File Picker Failed; Using Browser Download'],
+  ['error', 'Save Failed:'],
+  ['error', 'Clipboard Write Failed:'],
 ]);
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
-
-function readJson(relativePath) {
-  return JSON.parse(readSource(relativePath));
-}
-
-function manifestScripts(name) {
-  const source = readSource('src/js/startup_manifest.mjs');
-  const match = source.match(new RegExp(`export const ${name} = Object\\.freeze\\(\\[([\\s\\S]*?)\\]\\);`));
-  assert.ok(match, `${name} is missing`);
-  return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
-}
 
 let builtWebPreviewBundle = null;
 let builtReadableWebPreviewBundle = null;
@@ -186,7 +176,6 @@ test('web debug tools are controlled by the web dev flag', () => {
   const webEnvSource = readSource('src/js/web_env.js');
   const serverSource = readSource('scripts/serve-web.mjs');
 
-  assert.doesNotMatch(startupDebugSource, /AGENTS: Flip only this flag/);
   assert.doesNotMatch(startupDebugSource, /\bconst DEBUG_TOOLS_ENABLED = (true|false);/);
   assert.match(startupDebugSource, /\bconst DEBUG_TOOLS_ENABLED = globalThis\.__BOARDFISH_DEBUG_TOOLS_ENABLED__ === true;/);
   assert.match(startupDebugSource, /var StartupDebug = DEBUG_TOOLS_ENABLED \?/);
@@ -195,11 +184,9 @@ test('web debug tools are controlled by the web dev flag', () => {
     webDevSource,
     /import \{ loadScripts \} from '.\/startup_loader\.mjs';[\s\S]*await loadScripts\(WEB_DEV_SCRIPTS\);/,
   );
-  assert.doesNotMatch(webDevSource, /webEnvScript|remainingScripts|setDefaultDebugFlag/);
   assert.match(webEnvSource, /'__BOARDFISH_DEBUG_TOOLS_ENABLED__'/);
   assert.match(webEnvSource, /value: false/);
   assert.match(serverSource, /'__BOARDFISH_DEBUG_TOOLS_ENABLED__'/);
-  assert.doesNotMatch(`${webDevSource}\n${webEnvSource}\n${serverSource}`, /__BOARDFISH_WEB_DEV_MODE__/);
 });
 
 test('release sources do not contain enabled debugger switches', () => {
@@ -217,9 +204,8 @@ test('release sources do not contain enabled debugger switches', () => {
   }
 });
 
-test('web manifests preserve developer diagnostics and exclude them from release', () => {
-  const webDevScripts = manifestScripts('WEB_DEV_SCRIPTS');
-  const webPreviewScripts = manifestScripts('WEB_PREVIEW_SCRIPTS');
+test('web manifests preserve developer diagnostics and exclude them from release', async () => {
+  const { WEB_DEV_SCRIPTS: webDevScripts, WEB_PREVIEW_SCRIPTS: webPreviewScripts } = await import('../src/js/startup_manifest.mjs');
   const diagnosticScripts = webDevScripts.filter((script) => WEB_DEV_DIAGNOSTIC_SCRIPTS.includes(script));
 
   assert.equal(webDevScripts[0], 'web_env.js', 'developer mode bootstrap must load before diagnostics');
@@ -229,7 +215,17 @@ test('web manifests preserve developer diagnostics and exclude them from release
     assert.equal(fs.existsSync(path.join(root, 'src/js', script)), true, `${script} is missing`);
     assert.equal(webPreviewScripts.includes(script), false, `${script} ships in the release manifest`);
   }
-  assert.equal(webPreviewScripts.includes('runtime_debug_noop.js'), false);
+  for (const scripts of [webDevScripts, webPreviewScripts]) {
+    for (const [dependency, consumer] of [
+      ['web_runtime.js', 'export_utils.js'],
+      ['text_editor.js', 'context_menu.js'],
+      ['motion.js', 'viewport.js'],
+      ['motion.js', 'selection_input.js'],
+    ]) {
+      assert.ok(scripts.indexOf(dependency) >= 0 && scripts.indexOf(dependency) < scripts.indexOf(consumer),
+        `${dependency} must load before ${consumer}`);
+    }
+  }
   assert.deepEqual(
     webDevScripts.filter((script) => !WEB_DEV_DIAGNOSTIC_SCRIPTS.includes(script)),
     webPreviewScripts,
@@ -290,21 +286,14 @@ test('web release preview keeps content-revision dirty tracking used by board co
 });
 
 test('web release preview ships minified PWA assets', () => {
-  const manifestSource = readSource('src/js/startup_manifest.mjs');
   const buildSource = readSource('scripts/build-runtime-assets.mjs');
   const serverSource = readSource('scripts/serve-web.mjs');
   const workflowSource = readSource('.github/workflows/web.yml');
   const readmeSource = readSource('README.md');
   const packageJson = readJson('package.json');
 
-  assert.doesNotMatch(manifestSource, /WEB_PREVIEW_SCRIPTS[\s\S]*'runtime_debug_noop\.js'/);
-  assert.doesNotMatch(
-    manifestSource.match(/export const WEB_PREVIEW_SCRIPTS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1] || '',
-    /'debug(?:_|\.|')|'startup_debug\.js'|'viewport_debug_ui\.js'/,
-  );
   assert.match(buildSource, /'web-preview'[\s\S]*scripts: WEB_PREVIEW_SCRIPTS,[\s\S]*bundle: 'assets\/boardfish-web-preview\.min\.js'/);
   assert.match(buildSource, /const bundle = cacheBustedBundlePath\(config\.bundle, result\.code\);/);
-  assert.doesNotMatch(buildSource, /cacheBust:/);
   assert.match(buildSource, /copyFile\(path\.join\(srcRoot, 'manifest\.webmanifest'\)/);
   assert.match(buildSource, /writeServiceWorker\(config\.outDir, \[bundle\]\)/);
   assert.match(serverSource, /devMode \? 'src' : 'dist-web'/);
@@ -319,5 +308,5 @@ test('web release preview ships minified PWA assets', () => {
   assert.doesNotMatch(readmeSource, /\/Boardfish\/beta(?:\/|\b)/i);
   assert.equal(packageJson.scripts.web, 'npm run web:preview');
   assert.equal(packageJson.scripts.build, 'npm run web:build');
-  assert.equal(packageJson.scripts.check, 'npm run check:js-syntax && npm test && npm run check:static');
+  assert.equal(packageJson.scripts.check, 'npm run check:js-syntax && npm test');
 });

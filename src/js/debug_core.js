@@ -20,16 +20,24 @@
     return out;
   }
 
+  function flattenDebugEvent({ meta, ...rest }) {
+    if (!meta) return rest;
+    const { rust, ...other } = meta;
+    return rust && typeof rust === 'object'
+      ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) }
+      : { ...rest, ...other };
+  }
+
   function createDebugRecorder({
     maxEvents = 300,
     label = 'Boardfish',
     sanitize = (value) => value,
-    verboseDefault = false,
+    invokeResult = (result) => result || null,
     onEnable = null,
     onDisable = null,
   } = {}) {
     let enabled = false;
-    let verbose = verboseDefault;
+    let verbose = false;
     let nextOpId = 1;
     const events = [];
     const round = (value) => Math.round((value || 0) * 100) / 100;
@@ -78,6 +86,20 @@
       step(ctx, 'end', meta);
     }
 
+    async function wrap(ctx, command, call, meta = {}) {
+      if (!enabled) return call();
+      const t0 = performance.now();
+      step(ctx, 'invoke:start', { command, ...meta });
+      try {
+        const result = await call();
+        step(ctx, 'invoke:ok', { command, ms: performance.now() - t0, rust: invokeResult(result) });
+        return result;
+      } catch (err) {
+        step(ctx, 'invoke:error', { command, ms: performance.now() - t0, error: String(err) });
+        throw err;
+      }
+    }
+
     function reset() {
       events.length = 0;
       nextOpId = 1;
@@ -91,15 +113,15 @@
       step,
       end,
       reset,
-      push,
+      wrap,
       get enabled() { return enabled; },
       get events() { return events.slice(); },
       _events: events,
     };
   }
 
+  root.flattenDebugEvent = flattenDebugEvent;
   root.createDebugRecorder = createDebugRecorder;
-  root.mapWithConcurrency = mapWithConcurrency;
   root.round2 = round2;
   root.sanitizeDebugMeta = sanitizeDebugMeta;
 })(typeof window !== 'undefined' ? window : globalThis);

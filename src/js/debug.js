@@ -120,15 +120,7 @@ var ClipDebug = (() => {
       textareaMutationMethod: e.meta?.textareaMutationMethod || '',
       dispatchMs: e.meta?.dispatchMs ?? '',
       heightChanged: e.meta?.heightChanged ?? '',
-      autoHeightDeferred: e.meta?.autoHeightDeferred ?? '',
-      autoHeightForceSync: e.meta?.autoHeightForceSync ?? '',
-      autoHeightForceReason: e.meta?.autoHeightForceReason || '',
       restoredMinLinesReset: e.meta?.restoredMinLinesReset ?? '',
-      restoredPreviousMinLines: e.meta?.restoredPreviousMinLines ?? '',
-      restoredPreservedMinLines: e.meta?.restoredPreservedMinLines ?? '',
-      restoredNextMinLines: e.meta?.restoredNextMinLines ?? '',
-      pendingSizeSyncBeforeAutoHeight: e.meta?.pendingSizeSyncBeforeAutoHeight ?? '',
-      pendingSizeSync: e.meta?.pendingSizeSync ?? '',
       inputStateObjectHeight: e.meta?.inputStateObjectHeight ?? '',
       inputStateLogicalLines: e.meta?.inputStateLogicalLines ?? '',
       inputStateCachedLines: e.meta?.inputStateCachedLines ?? '',
@@ -439,15 +431,13 @@ var ClipDebug = (() => {
       ? end?.meta?.path || 'web-paste-blob'
       : blobEvent
       ? 'event-or-browser-blob'
-      : stepNames.has('browser-clipboard-read:start')
-        ? 'browser-read'
-        : stepNames.has('event-clipboard:inspect')
-          ? 'paste-event'
-          : 'unknown';
+      : stepNames.has('event-clipboard:inspect')
+        ? 'paste-event'
+        : 'unknown';
     const checkpoints = [
       ['pasteStarted', true],
       ['eventInspected', stepNames.has('event-clipboard:inspect') || !pasteStart.meta?.clipboardData],
-      ['imagePayloadFound', !!blobEvent || !!webInsertEnd || pathDetected === 'browser-read'],
+      ['imagePayloadFound', !!blobEvent || !!webInsertEnd],
       ['imagePayloadRead', !!blobEvent || !!webInsertEnd || pathDetected !== 'unknown'],
       ['objectAddStarted', !!addObject],
       ['pasteEndedAdded', end?.meta?.added === true || objectDelta > 0],
@@ -498,7 +488,6 @@ var ClipDebug = (() => {
     const webInsertEnd = latest('web-paste-event:insert-end') || latest('web-paste-browser:insert-end');
     const cloneDone = latest('paste:clone-done');
     const trimDone = latest('paste:text-trim-done');
-    const objectLimitDone = latest('paste:object-limit-done');
     const contentLimitDone = latest('paste:content-limit-done');
     const historyStart = latest('paste:boardHistory-start');
     const historyDone = latest('paste:boardHistory-done');
@@ -521,8 +510,6 @@ var ClipDebug = (() => {
       cloneMs: cloneDone?.meta?.ms ?? '',
       trimMs: trimDone?.meta?.ms ?? '',
       trimmedTextObjects: trimDone?.meta?.trimmedTextObjects ?? '',
-      objectLimitMs: objectLimitDone?.meta?.ms ?? '',
-      objectLimitAccepted: objectLimitDone?.meta?.accepted ?? '',
       contentLimitMs: contentLimitDone?.meta?.ms ?? '',
       contentLimitAccepted: contentLimitDone?.meta?.accepted ?? '',
       additionalTextBytes: contentLimitDone?.meta?.additionalTextBytes ?? '',
@@ -601,7 +588,6 @@ var ClipDebug = (() => {
     const inputStart = first('text-edit-input:start');
     const inputEnd = latest('text-edit-input:end');
     const renderScheduled = latest('text-edit-input:render-scheduled');
-    const autoHeight = latest('text-edit-input:auto-height-done');
     const layoutPatch = latest('text-edit-input:layout-patched') || latest('text-edit-input:layout-invalidated');
     const history = latest('text-edit-input:history-recorded');
     const replacement = latest('text-edit-input:replacement-ready');
@@ -720,8 +706,6 @@ var ClipDebug = (() => {
       textBytes: latestMetaValue(['textBytes']),
       textLineCount: latestMetaValue(['textLineCount']),
       largestLineChars: latestMetaValue(['largestLineChars']),
-      autoHeightDeferred: autoHeight?.meta?.autoHeightDeferred ?? '',
-      pendingSizeSync: autoHeight?.meta?.pendingSizeSync ?? pasteEnd?.meta?.pendingSizeSync ?? '',
       layoutPatched: layoutPatch?.meta?.layoutPatched ?? '',
       layoutPatchMs: layoutPatch?.dt ?? '',
       layoutPatchLineDelta: layoutPatch?.meta?.layoutPatchLineDelta ?? '',
@@ -798,8 +782,6 @@ var ClipDebug = (() => {
       lastPasteDispatchMs: latestMetaValue(paste.run, ['dispatchMs']),
       lastPasteInputEventAgeMs: latestMetaValue(paste.run, ['eventAgeMs']),
       lastPasteInputHandlerMs: latestMetaValue(paste.run, ['totalMs']),
-      lastPasteAutoHeightDeferred: latestMetaValue(paste.run, ['autoHeightDeferred']),
-      lastPastePendingSizeSync: latestMetaValue(paste.run, ['pendingSizeSync']),
       lastPasteInputEndAtMs: stepTotal(paste.run, 'text-edit-input:end'),
       lastPasteAutoHeightAtMs: stepTotal(paste.run, 'text-edit-input:auto-height-done') || stepTotal(paste.run, 'addText:auto-height-done'),
       lastPasteHistoryAtMs: stepTotal(paste.run, 'text-edit-input:history-recorded') || stepTotal(paste.run, 'paste:boardHistory-done') || stepTotal(paste.run, 'addText:history-pushed'),
@@ -961,11 +943,7 @@ var HistoryDebug = (() => {
       runtimeTextLayoutObjects: e.meta?.runtimeTextLayoutObjects ?? '',
       runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
       runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
-      runtimeTextLineContentChars: e.meta?.runtimeTextLineContentChars ?? '',
       restoreCloneMs: e.meta?.cloneObjectsMs ?? '',
-      hydrateCandidates: e.meta?.candidates ?? '',
-      hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
-      hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
       replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
       enterEditMs: e.meta?.enterEditMs ?? '',
       renderScheduleMs: e.meta?.renderScheduleMs ?? '',
@@ -1005,11 +983,9 @@ var HistoryDebug = (() => {
         e.step === 'cloneObjects' ||
         e.step === 'clone-dirty-objects' ||
         e.step === 'clone-snapshot-objects' ||
-        e.step === 'hydrate-live-text-caches' ||
         e.step === 'replace-board-objects' ||
         e.step === 'restore-selection' ||
         e.step === 'renderAll-scheduled' ||
-        e.step === 'motion-replay' ||
         e.step === 'enter-edit-restored' ||
         e.step === 'restore-edit-caret' ||
         e.step === 'flush-edit-history' ||
@@ -1041,7 +1017,6 @@ var HistoryDebug = (() => {
         runtimeTextLayoutObjects: e.meta?.runtimeTextLayoutObjects ?? '',
         runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
         runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
-        runtimeTextLineContentChars: e.meta?.runtimeTextLineContentChars ?? '',
         actionReason: e.meta?.actionReason ?? '',
         targetReason: e.meta?.targetReason ?? '',
         sourceReason: e.meta?.sourceReason ?? '',
@@ -1050,29 +1025,14 @@ var HistoryDebug = (() => {
         selectionStart: e.meta?.selectionStart ?? '',
         selectionEnd: e.meta?.selectionEnd ?? '',
         cloneObjectsMs: e.meta?.cloneObjectsMs ?? '',
-        hydrateCandidates: e.meta?.candidates ?? '',
-        hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
-        hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
         replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
         enterEditMs: e.meta?.enterEditMs ?? '',
         reusedEditProxy: e.meta?.reusedEditProxy ?? '',
-        proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
-        proxyValueChanged: e.meta?.proxyValueChanged ?? '',
-        proxyValueSetMethod: e.meta?.proxyValueSetMethod ?? '',
         proxyDomSyncedForSelection: e.meta?.proxyDomSyncedForSelection ?? '',
         proxyDomSyncReason: e.meta?.proxyDomSyncReason ?? '',
         proxyDomSyncMs: e.meta?.proxyDomSyncMs ?? '',
         proxyDomCharsBeforeSelection: e.meta?.proxyDomCharsBeforeSelection ?? '',
         proxyDomCharsAfterSelection: e.meta?.proxyDomCharsAfterSelection ?? '',
-        proxyValueDiffMs: e.meta?.proxyValueDiffMs ?? '',
-        proxyValueMutationMs: e.meta?.proxyValueMutationMs ?? '',
-        proxyValueAssignMs: e.meta?.proxyValueAssignMs ?? '',
-        proxyValueInsertedChars: e.meta?.proxyValueInsertedChars ?? '',
-        proxyValueRemovedChars: e.meta?.proxyValueRemovedChars ?? '',
-        proxyValuePatchStart: e.meta?.proxyValuePatchStart ?? '',
-        proxyValuePatchEnd: e.meta?.proxyValuePatchEnd ?? '',
-        proxyValuePatchPrefixChars: e.meta?.proxyValuePatchPrefixChars ?? '',
-        proxyValuePatchSuffixChars: e.meta?.proxyValuePatchSuffixChars ?? '',
         setSelectionRangeMs: e.meta?.setSelectionRangeMs ?? '',
         focusMs: e.meta?.focusMs ?? '',
         focusSkipped: e.meta?.focusSkipped ?? '',
@@ -1140,32 +1100,16 @@ var HistoryDebug = (() => {
         runtimeTextLayoutLines: e.meta?.runtimeTextLayoutLines ?? '',
         runtimeTextLayoutPrefixEntries: e.meta?.runtimeTextLayoutPrefixEntries ?? '',
         cloneObjectsMs: e.meta?.cloneObjectsMs ?? '',
-        hydrateCandidates: e.meta?.candidates ?? '',
-        hydratedTextRuntimeCaches: e.meta?.hydrated ?? '',
-        hydratedTextLayoutCaches: e.meta?.layoutCaches ?? '',
         replaceBoardObjectsMs: e.meta?.replaceBoardObjectsMs ?? '',
         setSelectionMs: e.meta?.setSelectionMs ?? '',
         renderScheduleMs: e.meta?.renderScheduleMs ?? '',
-        motionReplayMs: e.meta?.motionReplayMs ?? '',
         enterEditMs: e.meta?.enterEditMs ?? '',
         reusedEditProxy: e.meta?.reusedEditProxy ?? '',
-        proxyValueSetMs: e.meta?.proxyValueSetMs ?? '',
-        proxyValueChanged: e.meta?.proxyValueChanged ?? '',
-        proxyValueSetMethod: e.meta?.proxyValueSetMethod ?? '',
         proxyDomSyncedForSelection: e.meta?.proxyDomSyncedForSelection ?? '',
         proxyDomSyncReason: e.meta?.proxyDomSyncReason ?? '',
         proxyDomSyncMs: e.meta?.proxyDomSyncMs ?? '',
         proxyDomCharsBeforeSelection: e.meta?.proxyDomCharsBeforeSelection ?? '',
         proxyDomCharsAfterSelection: e.meta?.proxyDomCharsAfterSelection ?? '',
-        proxyValueDiffMs: e.meta?.proxyValueDiffMs ?? '',
-        proxyValueMutationMs: e.meta?.proxyValueMutationMs ?? '',
-        proxyValueAssignMs: e.meta?.proxyValueAssignMs ?? '',
-        proxyValueInsertedChars: e.meta?.proxyValueInsertedChars ?? '',
-        proxyValueRemovedChars: e.meta?.proxyValueRemovedChars ?? '',
-        proxyValuePatchStart: e.meta?.proxyValuePatchStart ?? '',
-        proxyValuePatchEnd: e.meta?.proxyValuePatchEnd ?? '',
-        proxyValuePatchPrefixChars: e.meta?.proxyValuePatchPrefixChars ?? '',
-        proxyValuePatchSuffixChars: e.meta?.proxyValuePatchSuffixChars ?? '',
         setSelectionRangeMs: e.meta?.setSelectionRangeMs ?? '',
         focusMs: e.meta?.focusMs ?? '',
         focusSkipped: e.meta?.focusSkipped ?? '',
@@ -1174,7 +1118,6 @@ var HistoryDebug = (() => {
         historyIndex: e.meta?.historyIndex ?? '',
       }));
     const max = (field) => rows.reduce((value, row) => Math.max(value, Number(row[field]) || 0), 0);
-    const sum = (field) => rows.reduce((value, row) => value + (Number(row[field]) || 0), 0);
     const endRows = rows.filter(row => row.step === 'end');
     const restoreEnds = endRows.filter(row => row.op === 'restoreSnapshot');
     const summaryOut = {
@@ -1186,19 +1129,11 @@ var HistoryDebug = (() => {
       maxOuterRestoreMs: max('restoreMs'),
       maxFlushMs: max('flushMs'),
       maxCloneObjectsMs: max('cloneObjectsMs'),
-      maxHydrateCandidates: max('hydrateCandidates'),
-      hydratedTextRuntimeCaches: sum('hydratedTextRuntimeCaches'),
-      hydratedTextLayoutCaches: sum('hydratedTextLayoutCaches'),
       maxReplaceBoardObjectsMs: max('replaceBoardObjectsMs'),
       maxEnterEditMs: max('enterEditMs'),
-      maxProxyValueSetMs: max('proxyValueSetMs'),
-      maxProxyValueDiffMs: max('proxyValueDiffMs'),
-      maxProxyValueMutationMs: max('proxyValueMutationMs'),
-      maxProxyValueAssignMs: max('proxyValueAssignMs'),
       maxSetSelectionRangeMs: max('setSelectionRangeMs'),
       maxFocusMs: max('focusMs'),
       maxRenderScheduleMs: max('renderScheduleMs'),
-      maxMotionReplayMs: max('motionReplayMs'),
       maxTextCharCount: max('textCharCount'),
       maxLargestTextChars: max('largestTextChars'),
       maxRuntimeTextLayoutLines: max('runtimeTextLayoutLines'),
@@ -1317,15 +1252,11 @@ var ViewportDebug = (() => {
     imageDecodes: 0,
     imageBitmaps: 0,
     imageBitmapFailures: 0,
-    imagePreviewPrepared: 0,
-    imagePreviewFailures: 0,
     imageDrawMissing: 0,
-    imageDrawFallback: 0,
     imageDrawErrors: 0,
     croppedImages: 0,
     maxImageAddMs: 0,
     maxImageBitmapMs: 0,
-    maxImagePreviewMs: 0,
   };
   let lastRafAt = 0;
   let eventLoopTimer = null;
@@ -1837,15 +1768,11 @@ var ViewportDebug = (() => {
       { metric: 'imageDecodes', value: stats.imageDecodes },
       { metric: 'imageBitmaps', value: stats.imageBitmaps },
       { metric: 'imageBitmapFailures', value: stats.imageBitmapFailures },
-      { metric: 'imagePreviewPrepared', value: stats.imagePreviewPrepared },
-      { metric: 'imagePreviewFailures', value: stats.imagePreviewFailures },
       { metric: 'imageDrawMissing', value: stats.imageDrawMissing },
-      { metric: 'imageDrawFallback', value: stats.imageDrawFallback },
       { metric: 'imageDrawErrors', value: stats.imageDrawErrors },
       { metric: 'croppedImages', value: stats.croppedImages },
       { metric: 'maxImageAddMs', value: Math.round(stats.maxImageAddMs * 100) / 100 },
       { metric: 'maxImageBitmapMs', value: Math.round(stats.maxImageBitmapMs * 100) / 100 },
-      { metric: 'maxImagePreviewMs', value: Math.round(stats.maxImagePreviewMs * 100) / 100 },
     ];
     console.table(rows);
     return rows;
@@ -2168,11 +2095,8 @@ var ViewportDebug = (() => {
           culledImages: e.meta?.culledImages ?? '',
           culledText: e.meta?.culledText ?? '',
           scaledImages: e.meta?.scaledImages ?? '',
-          openPreviewImages: e.meta?.openPreviewImages ?? '',
-          dynamicOpenPreviewRequests: e.meta?.dynamicOpenPreviewRequests ?? '',
           scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
           activeInputFullFallbackImages: e.meta?.activeInputFullFallbackImages ?? '',
-          scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
           fullScaleImages: e.meta?.fullScaleImages ?? '',
           zoom: e.meta?.zoom ?? '',
         });
@@ -2205,8 +2129,6 @@ var ViewportDebug = (() => {
         drawMs: e.steps?.drawBoard?.ms ?? e.steps?.drawBoard?.meta?.totalMeasuredMs ?? 0,
         objectLoopMs: e.steps?.drawBoard?.meta?.objectLoopMs ?? 0,
         croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? 0,
-        openPreviewImages: e.steps?.drawBoard?.meta?.openPreviewImages ?? 0,
-        dynamicOpenPreviewRequests: e.steps?.drawBoard?.meta?.dynamicOpenPreviewRequests ?? 0,
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? 0,
         activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? 0,
         motionObjects: e.steps?.drawBoard?.meta?.motionObjects ?? 0,
@@ -2214,7 +2136,6 @@ var ViewportDebug = (() => {
         motionText: e.steps?.drawBoard?.meta?.motionText ?? 0,
         motionTranslatedObjects: e.steps?.drawBoard?.meta?.motionTranslatedObjects ?? 0,
         motionScaledObjects: e.steps?.drawBoard?.meta?.motionScaledObjects ?? 0,
-        lowLatencyImageDraws: e.steps?.drawBoard?.meta?.lowLatencyImageDraws ?? 0,
         motionScaledImages: e.steps?.drawBoard?.meta?.motionScaledImages ?? 0,
         motionFullScaleImages: e.steps?.drawBoard?.meta?.motionFullScaleImages ?? 0,
         motionFullFallbackImages: e.steps?.drawBoard?.meta?.motionFullFallbackImages ?? 0,
@@ -2225,7 +2146,6 @@ var ViewportDebug = (() => {
         imageContextWarmDraws: e.steps?.drawBoard?.meta?.imageContextWarmDraws ?? 0,
         scaledImageContextFirstDraws: e.steps?.drawBoard?.meta?.scaledImageContextFirstDraws ?? 0,
         fullScaleImageContextFirstDraws: e.steps?.drawBoard?.meta?.fullScaleImageContextFirstDraws ?? 0,
-        openPreviewImageContextFirstDraws: e.steps?.drawBoard?.meta?.openPreviewImageContextFirstDraws ?? 0,
         drawnTextLines: e.steps?.drawBoard?.meta?.drawnTextLines ?? 0,
         culledTextLines: e.steps?.drawBoard?.meta?.culledTextLines ?? 0,
         textDrawUnits: e.steps?.drawBoard?.meta?.textDrawUnits ?? 0,
@@ -2288,15 +2208,10 @@ var ViewportDebug = (() => {
       avgCulledImages: draws.length ? Math.round(sum('culledImages') / draws.length * 100) / 100 : 0,
       maxCulledImages: max('culledImages'),
       avgBitmapImages: draws.length ? Math.round(sum('bitmapImages') / draws.length * 100) / 100 : 0,
-      avgElementImages: draws.length ? Math.round(sum('elementImages') / draws.length * 100) / 100 : 0,
       avgScaledImages: draws.length ? Math.round(sum('scaledImages') / draws.length * 100) / 100 : 0,
       maxScaledImages: max('scaledImages'),
       avgFullScaleImages: draws.length ? Math.round(sum('fullScaleImages') / draws.length * 100) / 100 : 0,
       maxFullScaleImages: max('fullScaleImages'),
-      avgOpenPreviewImages: draws.length ? Math.round(sum('openPreviewImages') / draws.length * 100) / 100 : 0,
-      maxOpenPreviewImages: max('openPreviewImages'),
-      avgDynamicOpenPreviewRequests: draws.length ? Math.round(sum('dynamicOpenPreviewRequests') / draws.length * 100) / 100 : 0,
-      maxDynamicOpenPreviewRequests: Math.max(max('dynamicOpenPreviewRequests'), slowMax('dynamicOpenPreviewRequests')),
       avgScaledFallbackFull: draws.length ? Math.round(sum('scaledFallbackFull') / draws.length * 100) / 100 : 0,
       maxScaledFallbackFull: Math.max(max('scaledFallbackFull'), slowMax('scaledFallbackFull')),
       avgActiveInputFullFallbackImages: draws.length ? Math.round(sum('activeInputFullFallbackImages') / draws.length * 100) / 100 : 0,
@@ -2311,8 +2226,6 @@ var ViewportDebug = (() => {
       maxMotionTranslatedObjects: Math.max(max('motionTranslatedObjects'), slowMax('motionTranslatedObjects')),
       avgMotionScaledObjects: draws.length ? Math.round(sum('motionScaledObjects') / draws.length * 100) / 100 : 0,
       maxMotionScaledObjects: Math.max(max('motionScaledObjects'), slowMax('motionScaledObjects')),
-      avgLowLatencyImageDraws: draws.length ? Math.round(sum('lowLatencyImageDraws') / draws.length * 100) / 100 : 0,
-      maxLowLatencyImageDraws: Math.max(max('lowLatencyImageDraws'), slowMax('lowLatencyImageDraws')),
       avgMotionScaledImages: draws.length ? Math.round(sum('motionScaledImages') / draws.length * 100) / 100 : 0,
       maxMotionScaledImages: Math.max(max('motionScaledImages'), slowMax('motionScaledImages')),
       avgMotionFullScaleImages: draws.length ? Math.round(sum('motionFullScaleImages') / draws.length * 100) / 100 : 0,
@@ -2321,8 +2234,6 @@ var ViewportDebug = (() => {
       maxMotionFullFallbackImages: Math.max(max('motionFullFallbackImages'), slowMax('motionFullFallbackImages')),
       avgMotionActiveInputFullFallbackImages: draws.length ? Math.round(sum('motionActiveInputFullFallbackImages') / draws.length * 100) / 100 : 0,
       maxMotionActiveInputFullFallbackImages: Math.max(max('motionActiveInputFullFallbackImages'), slowMax('motionActiveInputFullFallbackImages')),
-      avgScaledVariantPendingImages: draws.length ? Math.round(sum('scaledVariantPendingImages') / draws.length * 100) / 100 : 0,
-      maxScaledVariantPendingImages: max('scaledVariantPendingImages'),
       avgScaledImageScale: sum('scaledImages') ? Math.round(sum('scaledImageScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgTargetImageScale: sum('scaledImages') ? Math.round(sum('scaledImageTargetScaleTotal') / sum('scaledImages') * 1000) / 1000 : 1,
       avgImageSourceFirstDraws: draws.length ? Math.round(sum('imageSourceFirstDraws') / draws.length * 100) / 100 : 0,
@@ -2337,13 +2248,10 @@ var ViewportDebug = (() => {
       maxScaledImageContextFirstDraws: Math.max(max('scaledImageContextFirstDraws'), slowMax('scaledImageContextFirstDraws')),
       avgFullScaleImageContextFirstDraws: draws.length ? Math.round(sum('fullScaleImageContextFirstDraws') / draws.length * 100) / 100 : 0,
       maxFullScaleImageContextFirstDraws: Math.max(max('fullScaleImageContextFirstDraws'), slowMax('fullScaleImageContextFirstDraws')),
-      avgOpenPreviewImageContextFirstDraws: draws.length ? Math.round(sum('openPreviewImageContextFirstDraws') / draws.length * 100) / 100 : 0,
-      maxOpenPreviewImageContextFirstDraws: Math.max(max('openPreviewImageContextFirstDraws'), slowMax('openPreviewImageContextFirstDraws')),
       avgMissingImages: draws.length ? Math.round(sum('missingImages') / draws.length * 100) / 100 : 0,
       maxMissingImages: max('missingImages'),
       avgErroredImages: draws.length ? Math.round(sum('erroredImages') / draws.length * 100) / 100 : 0,
       avgCroppedImages: draws.length ? Math.round(sum('croppedImages') / draws.length * 100) / 100 : 0,
-      maxRetainedSlowOpenPreviewImages: slowMax('openPreviewImages'),
       maxRetainedSlowCroppedImages: slowMax('croppedImages'),
       avgDrawnText: draws.length ? Math.round(sum('drawnText') / draws.length * 100) / 100 : 0,
       avgCulledText: draws.length ? Math.round(sum('culledText') / draws.length * 100) / 100 : 0,
@@ -2426,7 +2334,6 @@ var ViewportDebug = (() => {
           h: Math.round(obj.h),
           sourceKind: typeof isWebImageRef === 'function' && isWebImageRef(src) ? 'web-ref' : typeof src,
           bytes: src?.bytes ?? '',
-          hasImg: !!bitmap,
           complete: !!(bitmap?.width && bitmap?.height),
           naturalW: bitmap?.width || 0,
           naturalH: bitmap?.height || 0,
@@ -2454,7 +2361,6 @@ var ViewportDebug = (() => {
       missingStore: counts['missing-store'] || 0,
       missingImageElement: counts['missing-image-element'] || 0,
       bitmapFailedNoFallback: counts['bitmap-failed-no-fallback'] || 0,
-      loadedNoBitmap: counts['loaded-no-bitmap'] || 0,
     };
     console.table([out]);
     return out;
@@ -2502,7 +2408,6 @@ var ViewportDebug = (() => {
       sourceReadyQueued: imageScaledVariantSourceReadyQueuedCount,
       sourceReadyReady: imageScaledVariantSourceReadyReadyCount,
       sourceReadyNoSource: imageScaledVariantSourceReadyNoSourceCount,
-      sourceReadyFullScale: imageScaledVariantSourceReadyFullScaleCount,
       drawWarmupQueued: drawableBitmapWarmupQueuedCount,
       drawWarmupPending: drawableBitmapWarmupQueue.size,
 	      drawWarmupWarmed: drawableBitmapWarmupWarmedCount,
@@ -2516,8 +2421,6 @@ var ViewportDebug = (() => {
       drawWarmupFullImageWarmed: drawableBitmapWarmupWarmedByKind.fullImage || 0,
       drawWarmupScaledVariantQueued: drawableBitmapWarmupQueuedByKind.scaledVariant || 0,
       drawWarmupScaledVariantWarmed: drawableBitmapWarmupWarmedByKind.scaledVariant || 0,
-      drawWarmupOpenPreviewQueued: drawableBitmapWarmupQueuedByKind.openPreview || 0,
-      drawWarmupOpenPreviewWarmed: drawableBitmapWarmupWarmedByKind.openPreview || 0,
       levels: IMAGE_SCALE_LEVELS.join(','),
       supported: VIEWPORT_IMAGE_SCALING_SUPPORTED,
       enabled: viewportImageScalingEnabled,
@@ -2552,8 +2455,8 @@ var ViewportDebug = (() => {
             : viewportImageScalingEnabled;
           const targetScale = scalingActive && fullSource ? chooseImageScaleForDraw(obj, fullSource) : 1;
           if (targetScale < 1) {
-            const sourceW = fullSource?.width || fullSource?.naturalWidth || 0;
-            const sourceH = fullSource?.height || fullSource?.naturalHeight || 0;
+            const sourceW = fullSource?.width || 0;
+            const sourceH = fullSource?.height || 0;
             visibleScaledVariantMB += scaledVariantEstimatedBytes(sourceW, sourceH, targetScale) / 1024 / 1024;
             if (hasScaledImageVariant(key, targetScale)) visibleImagesWithScaledVariant++;
             else visibleImagesMissingScaledVariant++;
@@ -2644,10 +2547,7 @@ var ViewportDebug = (() => {
         editSelectionVisibleLines: e.steps?.drawBoard?.meta?.editSelectionVisibleLines ?? '',
         editCaretDrawn: e.steps?.drawBoard?.meta?.editCaretDrawn ?? '',
         bitmapImages: e.steps?.drawBoard?.meta?.bitmapImages ?? '',
-        elementImages: e.steps?.drawBoard?.meta?.elementImages ?? '',
         scaledImages: e.steps?.drawBoard?.meta?.scaledImages ?? '',
-        openPreviewImages: e.steps?.drawBoard?.meta?.openPreviewImages ?? '',
-        dynamicOpenPreviewRequests: e.steps?.drawBoard?.meta?.dynamicOpenPreviewRequests ?? '',
         scaledFallbackFull: e.steps?.drawBoard?.meta?.scaledFallbackFull ?? '',
         activeInputFullFallbackImages: e.steps?.drawBoard?.meta?.activeInputFullFallbackImages ?? '',
         motionObjects: e.steps?.drawBoard?.meta?.motionObjects ?? '',
@@ -2655,7 +2555,6 @@ var ViewportDebug = (() => {
         motionText: e.steps?.drawBoard?.meta?.motionText ?? '',
         motionTranslatedObjects: e.steps?.drawBoard?.meta?.motionTranslatedObjects ?? '',
         motionScaledObjects: e.steps?.drawBoard?.meta?.motionScaledObjects ?? '',
-        lowLatencyImageDraws: e.steps?.drawBoard?.meta?.lowLatencyImageDraws ?? '',
         motionScaledImages: e.steps?.drawBoard?.meta?.motionScaledImages ?? '',
         motionFullScaleImages: e.steps?.drawBoard?.meta?.motionFullScaleImages ?? '',
         motionFullFallbackImages: e.steps?.drawBoard?.meta?.motionFullFallbackImages ?? '',
@@ -2666,8 +2565,6 @@ var ViewportDebug = (() => {
         imageContextWarmDraws: e.steps?.drawBoard?.meta?.imageContextWarmDraws ?? '',
         scaledImageContextFirstDraws: e.steps?.drawBoard?.meta?.scaledImageContextFirstDraws ?? '',
         fullScaleImageContextFirstDraws: e.steps?.drawBoard?.meta?.fullScaleImageContextFirstDraws ?? '',
-        openPreviewImageContextFirstDraws: e.steps?.drawBoard?.meta?.openPreviewImageContextFirstDraws ?? '',
-        scaledVariantPendingImages: e.steps?.drawBoard?.meta?.scaledVariantPendingImages ?? '',
         fullScaleImages: e.steps?.drawBoard?.meta?.fullScaleImages ?? '',
         missingImages: e.steps?.drawBoard?.meta?.missingImages ?? '',
         croppedImages: e.steps?.drawBoard?.meta?.croppedImages ?? '',
@@ -2859,14 +2756,12 @@ var ViewportDebug = (() => {
         motionText: e.meta?.motionText ?? '',
         motionTranslatedObjects: e.meta?.motionTranslatedObjects ?? '',
         motionScaledObjects: e.meta?.motionScaledObjects ?? '',
-        lowLatencyImageDraws: e.meta?.lowLatencyImageDraws ?? '',
         motionScaledImages: e.meta?.motionScaledImages ?? '',
         motionFullScaleImages: e.meta?.motionFullScaleImages ?? '',
         motionFullFallbackImages: e.meta?.motionFullFallbackImages ?? '',
         motionActiveInputFullFallbackImages: e.meta?.motionActiveInputFullFallbackImages ?? '',
         scaledFallbackFull: e.meta?.scaledFallbackFull ?? '',
         activeInputFullFallbackImages: e.meta?.activeInputFullFallbackImages ?? '',
-        scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
         croppedImages: e.meta?.croppedImages ?? '',
         imageSourceFirstDraws: e.meta?.imageSourceFirstDraws ?? '',
         imageSourceWarmDraws: e.meta?.imageSourceWarmDraws ?? '',
@@ -2878,9 +2773,8 @@ var ViewportDebug = (() => {
 
   function motionSummary() {
     const rows = motionRows();
-    const starts = rows.filter(row => row.step === 'jiggle-start' || row.step === 'jello-start');
     const jiggleStarts = rows.filter(row => row.step === 'jiggle-start');
-    const progress = rows.filter(row => row.step === 'jiggle-progress' || row.step === 'jello-progress');
+    const progress = rows.filter(row => row.step === 'jiggle-progress');
     const rafFired = rows.filter(row => row.step === 'raf-fired');
     const renderScheduled = rows.filter(row => row.step === 'render-scheduled');
     const frames = motionFrameRows();
@@ -2894,7 +2788,7 @@ var ViewportDebug = (() => {
       lastProgressById.set(key, row.at);
     }
     const firstProgressLatencies = [];
-    for (const start of starts) {
+    for (const start of jiggleStarts) {
       const match = progress.find(row => row.at >= start.at && row.id === start.id && row.objectType === start.objectType);
       if (match) firstProgressLatencies.push(match.at - start.at);
     }
@@ -2904,7 +2798,7 @@ var ViewportDebug = (() => {
     const maxList = (items) => items.reduce((value, item) => Math.max(value, Number(item) || 0), 0);
     const out = {
       motionEvents: rows.length,
-      starts: starts.length,
+      starts: jiggleStarts.length,
       jiggleStarts: jiggleStarts.length,
       imageJiggleStarts: jiggleStarts.filter(row => row.objectType === 'image').length,
       textJiggleStarts: jiggleStarts.filter(row => row.objectType === 'text').length,
@@ -2932,12 +2826,10 @@ var ViewportDebug = (() => {
       avgMotionObjectLoopMs: draws.length ? round(sumValues(draws, 'objectLoopMs') / draws.length) : 0,
       maxMotionObjectLoopMs: round(maxValue(draws, 'objectLoopMs')),
       maxMotionImages: maxValue(draws, 'motionImages'),
-      maxLowLatencyImageDraws: maxValue(draws, 'lowLatencyImageDraws'),
       maxMotionScaledImages: maxValue(draws, 'motionScaledImages'),
       maxMotionFullScaleImages: maxValue(draws, 'motionFullScaleImages'),
       maxMotionFullFallbackImages: maxValue(draws, 'motionFullFallbackImages'),
       maxMotionActiveInputFullFallbackImages: maxValue(draws, 'motionActiveInputFullFallbackImages'),
-      maxScaledVariantPendingImages: maxValue(draws, 'scaledVariantPendingImages'),
       firstAt: rows[0]?.at ?? '',
       lastAt: rows[rows.length - 1]?.at ?? '',
       durationMs: rows.length > 1 ? round(rows[rows.length - 1].at - rows[0].at) : 0,
@@ -3012,11 +2904,9 @@ var ViewportDebug = (() => {
           drawMs: e.meta?.totalMeasuredMs ?? e.total ?? '',
           objectLoopMs: e.meta?.objectLoopMs ?? '',
           motionImages: e.meta?.motionImages ?? '',
-          lowLatencyImageDraws: e.meta?.lowLatencyImageDraws ?? '',
           motionScaledImages: e.meta?.motionScaledImages ?? '',
           motionFullFallbackImages: e.meta?.motionFullFallbackImages ?? '',
           motionActiveInputFullFallbackImages: e.meta?.motionActiveInputFullFallbackImages ?? '',
-          scaledVariantPendingImages: e.meta?.scaledVariantPendingImages ?? '',
         });
       } else if (e.op === 'eventLoop' || e.op === 'longTask') {
         timeline.push({
@@ -3120,11 +3010,7 @@ var ViewportDebug = (() => {
   }
 
   function dump() {
-    const flat = events.map(({ meta, ...rest }) => {
-      if (!meta) return rest;
-      const { rust, ...other } = meta;
-      return rust && typeof rust === 'object' ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) } : { ...rest, ...other };
-    });
+    const flat = events.map(flattenDebugEvent);
     console.table(flat);
     return events.slice();
   }

@@ -21,28 +21,8 @@ var SaveDebug = (() => {
     if (DEBUG_TOOLS_ENABLED) console.info('Boardfish save debugger disabled.');
   }
 
-  async function wrap(ctx, command, call, meta = {}) {
-    if (!core.enabled) return call();
-    const t0 = performance.now();
-    core.step(ctx, 'invoke:start', { command, ...meta });
-    try {
-      const result = await call();
-      core.step(ctx, 'invoke:ok', { command, ms: performance.now() - t0, rust: result || null });
-      return result;
-    } catch (err) {
-      core.step(ctx, 'invoke:error', { command, ms: performance.now() - t0, error: String(err) });
-      throw err;
-    }
-  }
-
   function dump() {
-    const flat = core.events.map(({ meta, ...rest }) => {
-      if (!meta) return rest;
-      const { rust, ...other } = meta;
-      return rust && typeof rust === 'object'
-        ? { ...rest, ...other, ...Object.fromEntries(Object.entries(rust).map(([k, v]) => ['rust_' + k, v])) }
-        : { ...rest, ...other };
-    });
+    const flat = core.events.map(flattenDebugEvent);
     console.table(flat);
     return core.events;
   }
@@ -63,7 +43,6 @@ var SaveDebug = (() => {
       largestTextChars: e.meta?.largestTextChars ?? '',
       runtimeTextCacheObjects: e.meta?.runtimeTextCacheObjects ?? '',
       runtimeTextCacheLines: e.meta?.runtimeTextCacheLines ?? '',
-      runtimeTextCacheContentChars: e.meta?.runtimeTextCacheContentChars ?? '',
       runtimeTextCachePrefixEntries: e.meta?.runtimeTextCachePrefixEntries ?? '',
       runtimeTextPrivateFields: e.meta?.runtimeTextPrivateFields ?? '',
       imageStoreBytes: e.meta?.imageStoreBytes ?? '',
@@ -106,7 +85,7 @@ var SaveDebug = (() => {
       .filter(e => (
         e.step === 'boardData' ||
         e.step.startsWith('save-frame-probe') ||
-        (e.step === 'invoke:ok' && /save_board|web_save_board/.test(e.meta?.command || '')) ||
+        (e.step === 'invoke:ok' && /web_save_board/.test(e.meta?.command || '')) ||
         e.step === 'markSaved:end' ||
         e.step === 'end' ||
         e.step === 'invoke:error'
@@ -124,7 +103,6 @@ var SaveDebug = (() => {
         largestTextChars: e.meta?.largestTextChars ?? '',
         runtimeTextCacheObjects: e.meta?.runtimeTextCacheObjects ?? '',
         runtimeTextCacheLines: e.meta?.runtimeTextCacheLines ?? '',
-        runtimeTextCacheContentChars: e.meta?.runtimeTextCacheContentChars ?? '',
         runtimeTextCachePrefixEntries: e.meta?.runtimeTextCachePrefixEntries ?? '',
         runtimeTextPrivateFields: e.meta?.runtimeTextPrivateFields ?? '',
         imageStoreBytes: e.meta?.imageStoreBytes ?? '',
@@ -177,7 +155,7 @@ var SaveDebug = (() => {
     }
     const find = (step) => run.find(e => e.step === step);
     const findPrefix = (prefix) => run.find(e => e.step?.startsWith(prefix));
-    const invokeOk = run.find(e => e.step === 'invoke:ok' && /save_board|web_save_board/.test(e.meta?.command || ''));
+    const invokeOk = run.find(e => e.step === 'invoke:ok' && /web_save_board/.test(e.meta?.command || ''));
     const frame = find('save-frame-probe');
     const pendingFrame = find('save-frame-probe:pending');
     const end = find('end') || run[run.length - 1];
@@ -217,7 +195,6 @@ var SaveDebug = (() => {
       largestTextChars: find('boardData')?.meta?.largestTextChars ?? '',
       runtimeTextCacheObjects: find('boardData')?.meta?.runtimeTextCacheObjects ?? '',
       runtimeTextCacheLines: find('boardData')?.meta?.runtimeTextCacheLines ?? '',
-      runtimeTextCacheContentChars: find('boardData')?.meta?.runtimeTextCacheContentChars ?? '',
       runtimeTextCachePrefixEntries: find('boardData')?.meta?.runtimeTextCachePrefixEntries ?? '',
       runtimeTextPrivateFields: find('boardData')?.meta?.runtimeTextPrivateFields ?? '',
       frameProbeQueueMs: frame?.meta?.queueMs ?? '',
@@ -237,7 +214,7 @@ var SaveDebug = (() => {
     start: core.start,
     step: core.step,
     end: core.end,
-    wrap,
+    wrap: core.wrap,
     dump,
     summary,
     phaseSummary,

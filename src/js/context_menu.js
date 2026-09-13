@@ -199,18 +199,8 @@ var MENU_COMMANDS = {
   'text-btn-delete': () => { closeTextCtxMenu('command:delete'); deleteTextEditSelection(); },
 };
 
-const getTextEditSelectionState = () => {
-  if (!editingId || !_editEl) return null;
-  const value = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
-  const start = Math.max(0, Math.min(_editEl.selectionStart ?? 0, value.length));
-  const end = Math.max(0, Math.min(_editEl.selectionEnd ?? start, value.length));
-  return {
-    start: Math.min(start, end),
-    end: Math.max(start, end),
-    direction: _editEl.selectionDirection || 'none',
-    hasSelection: start !== end,
-  };
-};
+const getTextEditSelectionState = () =>
+  editingId && _editEl ? textEditSelectionState(_editEl) : null;
 
 const focusTextEditProxy = () => focusTextEditProxyNow(_editEl);
 
@@ -225,29 +215,18 @@ const readTextClipboardForEditMenu = async () => {
   return '';
 };
 
-const writeTextClipboardFromEditMenu = async (text, { allowEmpty = false } = {}) => {
-  if (!text && !allowEmpty) return false;
-  clearJsClipboard();
-  try {
-    await BoardfishClipboardIO.copyTextToClipboard(text);
-    return true;
-  } catch (err) {
-    MenuDebug.log('text-ctx-menu:clipboard-write-miss', { error: String(err) });
-    return false;
-  }
-};
-
 const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 'insertText' } = {}) => {
   const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
   const selection = getTextEditSelectionState();
   if (!selection || !_editEl) return false;
   const inputTypeValue = String(inputType || '').toLowerCase();
-  const normalizedText = normalizeTextContent(text);
   const replacementText = inputTypeValue.includes('paste') && typeof textForTextObjectPaste === 'function'
-    ? textForTextObjectPaste(normalizedText)
-    : normalizedText;
+    ? textForTextObjectPaste(text)
+    : normalizeTextContent(text);
   if (inputTypeValue.includes('paste') && !replacementText) return false;
-  const oldValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
+  const oldValue = textEditProxyValue(_editEl);
+  if (!BoardfishWebLimits.canReplaceText(objectsMap.get(editingId),
+    oldValue.slice(0, selection.start) + replacementText + oldValue.slice(selection.end))) return false;
   const replacementState = {
     ...selection,
     value: oldValue,
@@ -266,40 +245,19 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   }
   _editEl?._boardfishSetPendingInputState?.(replacementState);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const debugNow = collectDiagnostics
-    ? (typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now())
-    : null;
-  const debugRound = collectDiagnostics
-    ? (typeof textEditorDebugRound === 'function'
-        ? textEditorDebugRound
-        : (value) => Math.round((Number(value) || 0) * 100) / 100)
-    : null;
-  const mutationStartedAt = collectDiagnostics ? debugNow() : 0;
+  const debugNow = typeof textEditorDebugNow === 'function' ? textEditorDebugNow : () => Date.now();
+  const debugRound = typeof textEditorDebugRound === 'function'
+    ? textEditorDebugRound
+    : (value) => Math.round((Number(value) || 0) * 100) / 100;
+  const mutationStartedAt = debugNow();
   const mutationResult =
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  typeof replaceTextEditProxyRange === 'function'
-    ? replaceTextEditProxyRange(
-      _editEl, replacementText, selection.start, selection.end, 'end', inputTypeValue.startsWith('delete'),
-    )
-    : (() => {
-      _editEl.setRangeText(replacementText, selection.start, selection.end, 'end');
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      return collectDiagnostics
-        ? {
-            method: 'setRangeText',
-            setRangeTextMs: '',
-            valueAssignMs: '',
-            valueBuildMs: '',
-            valueSetMs: '',
-            logicalSetMs: '',
-            selectionSetMs: '',
-          }
-        : null;
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    })();
+  replaceTextEditProxyRange(
+    _editEl, replacementText, selection.start, selection.end, 'end', inputTypeValue.startsWith('delete'),
+  );
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const nextValue = typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl.value ?? '');
-  if (collectDiagnostics && typeof recordTextEditorInputPerfStep === 'function') {
+  const nextValue = textEditProxyValue(_editEl);
+  if (typeof recordTextEditorInputPerfStep === 'function') {
     const mutationMs = debugRound(debugNow() - mutationStartedAt);
     recordTextEditorInputPerfStep('menu-replace-textarea-mutated', {
       seq: replacementState._debugSeq ?? '',
@@ -328,11 +286,11 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _caretVisible = true;
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const dispatchStartedAt = collectDiagnostics ? debugNow() : 0;
+  const dispatchStartedAt = debugNow();
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   _editEl.dispatchEvent(new Event('input', { bubbles: true }));
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  if (collectDiagnostics && typeof recordTextEditorInputPerfStep === 'function') {
+  if (typeof recordTextEditorInputPerfStep === 'function') {
     recordTextEditorInputPerfStep('menu-replace-input-dispatched', {
       seq: replacementState._debugSeq ?? '',
       inputType,
@@ -347,23 +305,8 @@ const replaceTextEditSelection = (text, { immediateHistory = false, inputType = 
 
 const copyTextEditSelection = async () => {
   const selection = getTextEditSelectionState();
-  if (
-    selection?.hasSelection &&
-    _editEl &&
-    typeof copyTextEditSelectionFromProxy === 'function'
-  ) {
+  if (selection?.hasSelection && _editEl) {
     await copyTextEditSelectionFromProxy(editingId, _editEl, selection);
-    focusTextEditProxy();
-    return;
-  }
-  const value = _editEl && typeof textEditProxyValue === 'function' ? textEditProxyValue(_editEl) : String(_editEl?.value ?? '');
-  const selectedText = selection?.hasSelection && _editEl ? value.slice(selection.start, selection.end) : '';
-  const feedback = selectedText ? { id: editingId, ...selection } : null;
-  const copied = await writeTextClipboardFromEditMenu(textSelectionForClipboard(selectedText), {
-    allowEmpty: !!selectedText,
-  });
-  if (copied && feedback && editingId === feedback.id && _editEl) {
-    globalThis.BoardfishMotion?.applyCopyFeedback?.({ textSelection: feedback });
   }
   focusTextEditProxy();
 };
@@ -381,17 +324,18 @@ const pasteTextIntoEditSelection = async () => {
     typeof currentBoardfishTextSelectionClipboardPayload === 'function' &&
     !!currentBoardfishTextSelectionClipboardPayload()
   );
+  const pasteOptions = {};
   const pendingBoardfishPaste = (
     hasBoardfishTextPayload &&
     typeof pasteBoardfishTextSelectionIntoEditSelection === 'function'
-  ) ? pasteBoardfishTextSelectionIntoEditSelection({ immediateHistory: true }) : null;
+  ) ? pasteBoardfishTextSelectionIntoEditSelection(pasteOptions) : null;
   const pendingExternalText = (
     !hasBoardfishTextPayload || (
       typeof _jsClipboardWebMaybeStale !== 'undefined' &&
       _jsClipboardWebMaybeStale
     )
   ) ? readTextClipboardForEditMenu() : null;
-  if (pendingBoardfishPaste && await pendingBoardfishPaste) {
+  if (pendingBoardfishPaste && (await pendingBoardfishPaste || pasteOptions.limitRejected)) {
     focusTextEditProxy();
     return;
   }
@@ -431,7 +375,7 @@ function runMenuCommand(button, source, commandEvent = null) {
     MenuDebug.log('menu:command:end', { command, source });
   } catch (err) {
     MenuDebug.log('menu:command:error', { command, source, error: String(err) });
-    console.error('[Boardfish menu] command failed:', command, err);
+    console.error('Menu Command Failed:', command, err);
   }
   return true;
 }

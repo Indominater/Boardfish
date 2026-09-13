@@ -23,7 +23,7 @@ const objectCommandTextStats = (value) => {
 
 function addText(wx, wy, content = '', options = {}) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const dbg = typeof BOARDFISH_PRODUCTION === 'undefined' ? options?.debug || null : null;
+  const dbg = options?.debug || null;
   let stepStartedAt = dbg && objectCommandDebugNow();
   const addStartedAt = stepStartedAt;
   const logStep = (step, meta = {}) => {
@@ -52,21 +52,19 @@ function addText(wx, wy, content = '', options = {}) {
   }
   if (!options.contentPrepared) content = textForTextObjectPaste(content);
   logStep('trim-done', () => objectCommandTextStats(content));
+  if (!BoardfishWebLimits.canAcceptAdditionalTextCharacters(BoardfishWebLimits.textCharacterCount(content))) return;
   const data = { content };
   const textBytes = BoardfishWebLimits.textByteLength(content);
   const accepted = BoardfishWebLimits.canAcceptAdditionalContentBytes(textBytes, 1);
   logStep('content-limit-done', { textBytes, accepted });
   if (!accepted) return;
   const h = LINE_H + TEXT_PAD * 2;
-  let w = content ? 200 : h * 6;
-  if (content) {
-    const lines = content.split('\n');
-    const charW = 9.2, pad = 8;
-    let maxLineLen = 1;
-    for (const line of lines) {
-      if (line.length > maxLineLen) maxLineLen = line.length;
-    }
-    w = Math.min(Math.max(Math.round(maxLineLen * charW + pad * 2), 120), 700);
+  let w = content ? 120 : h * 6;
+  for (let start = 0; start < content.length && w < 700;) {
+    let end = content.indexOf('\n', start);
+    if (end < 0) end = content.length;
+    w = Math.min(Math.max(Math.round((end - start) * 9.2 + 16), w), 700);
+    start = end + 1;
   }
   const obj = { id: newId(), type: 'text', x: wx, y: wy, w, h, z: ++zCounter, data };
   logStep('size-estimate-done', () => ({ w, h, ...objectCommandTextStats(content) }));
@@ -255,18 +253,24 @@ function duplicateSelected(anchorPoint = null) {
   if (!selectedIds.size || editingId || !BoardfishWebLimits.canAddObjects(selectedIds.size)) return;
   const selectedObjects = [];
   let additionalTextBytes = 0;
+  let additionalTextCharacters = 0;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const id of selectedIds) {
     const obj = objectsMap.get(id);
     if (!obj) continue;
     selectedObjects.push(obj);
-    if (obj?.type === 'text') additionalTextBytes += BoardfishWebLimits.textByteLength(String(obj.data?.content || ''));
+    if (obj?.type === 'text') {
+      const content = String(obj.data?.content || '');
+      additionalTextBytes += BoardfishWebLimits.textByteLength(content);
+      additionalTextCharacters += BoardfishWebLimits.textCharacterCount(content);
+    }
     minX = Math.min(minX, obj.x);
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x + obj.w);
     maxY = Math.max(maxY, obj.y + obj.h);
   }
   if (!selectedObjects.length) return;
+  if (!BoardfishWebLimits.canAcceptAdditionalTextCharacters(additionalTextCharacters)) return;
   if (!BoardfishWebLimits.canAcceptAdditionalContentBytes(additionalTextBytes, selectedObjects.length)) return;
   const center = (
     anchorPoint &&

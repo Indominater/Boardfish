@@ -46,7 +46,7 @@ async function saveSelectedImage() {
     if (busyPill) finishPillTask({ beforeFinish: releaseInputShield, busyPill });
     else releaseInputShield();
     ExportDebug.end(dbg, { saved: false, error: String(err) });
-    console.error('Save image failed:', err);
+    console.error('Export Failed:', err);
   }
 }
 
@@ -61,14 +61,10 @@ async function exportImageBatch({
   startMeta,
   skipMeta = null,
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  errorLabel,
-  clearSelectionAfter = false,
 }) {
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const dbg = ExportDebug.start(op, startMeta);
-  const stopTotalWatch = typeof BOARDFISH_PRODUCTION === 'undefined'
-    ? ExportDebug.watch(dbg, 'export-total', { mode }, 5000)
-    : null;
+  const stopTotalWatch = ExportDebug.watch(dbg, 'export-total', { mode }, 5000);
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   if (skip) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -117,7 +113,7 @@ async function exportImageBatch({
     ExportDebug.end(dbg, { saved, imageCount: imageObjs.length, ...downloadResult });
     if (downloadedCount > 0) {
       finishPillTask({
-        beforeFinish: () => BoardfishExportUtils.finishImageExportInputShield(clearSelectionAfter && imageObjs.length),
+        beforeFinish: hideInputShield,
         busyPill,
         finalMsg: downloadedCount === 1 ? '1 Image Exported' : `${downloadedCount} Images Exported`,
       });
@@ -133,7 +129,7 @@ async function exportImageBatch({
     stopTotalWatch?.({ error: String(err) });
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     ExportDebug.end(dbg, { saved: false, imageCount: imageObjs.length, error: String(err) });
-    console.error(errorLabel, err);
+    console.error('Export Failed:', err);
   }
 }
 
@@ -143,7 +139,6 @@ async function saveSelectedImages() {
   return exportImageBatch({
     imageObjs: selectedObjs,
     skip: !multiSelection || selectedObjs.length < 1,
-    errorLabel: 'Save images failed:',
     ...(typeof BOARDFISH_PRODUCTION === 'undefined'
       ? {
           op: 'exportImages',

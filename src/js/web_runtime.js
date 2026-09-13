@@ -35,14 +35,6 @@
     };
   }
 
-  function webSaveHandleRef(handle) {
-    return {
-      kind: 'web-save-handle',
-      handle,
-      name: handle?.name || 'board.bf',
-    };
-  }
-
   function webDownloadRef(name) {
     return {
       kind: 'web-download',
@@ -63,11 +55,11 @@
 
   function canSaveToExistingTarget(ref) {
     if (!ref) return false;
-    return ref.unusable !== true && (ref.kind === 'web-file-handle' || ref.kind === 'web-save-handle');
+    return ref.unusable !== true && ref.kind === 'web-file-handle';
   }
 
   function persistentFileHandleFromRef(ref) {
-    if (ref?.kind !== 'web-file-handle' && ref?.kind !== 'web-save-handle') return null;
+    if (ref?.kind !== 'web-file-handle') return null;
     return ref.handle || null;
   }
 
@@ -83,7 +75,7 @@
       try {
         return !!(await waitForFileOperation(
           () => handle.isSameEntry(otherHandle),
-          'comparing board files',
+          'Comparing Files',
           FILE_COMPARISON_TIMEOUT_MS,
         ));
       } catch (err) {
@@ -113,13 +105,13 @@
     }
     const freshFile = await waitForFileOperation(
       () => sourceHandle.getFile(),
-      'refreshing board image sources',
+      'Refreshing Images',
     );
     return recover(board, rawImageStore, freshFile);
   }
 
   function fileOperationTimeoutError(stage) {
-    const err = new Error(`board save timed out while ${stage}`);
+    const err = new Error(`Save Timed Out: ${stage}`);
     err.name = 'TimeoutError';
     err.boardfishSaveTargetUncertain = true;
     return err;
@@ -134,7 +126,7 @@
         // Some browser-provided errors are non-extensible; wrap them below.
       }
     }
-    const wrapped = new Error(err?.message || String(err || 'board save failed'));
+    const wrapped = new Error(err?.message || String(err || 'Save Failed'));
     wrapped.name = err?.name || 'Error';
     wrapped.cause = err;
     wrapped.boardfishSaveTargetUncertain = true;
@@ -239,7 +231,7 @@
           types: BOARD_FILE_TYPES,
           excludeAcceptAllOption: false,
         });
-        return handle ? webSaveHandleRef(handle) : null;
+        return handle ? webFileHandleRef(handle) : null;
       } catch (err) {
         if (isAbortError(err)) return null;
         throw err;
@@ -250,17 +242,16 @@
 
   async function fileFromRef(ref) {
     if (ref?.kind === 'web-file') return ref.file;
-    if (ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle') return ref.handle.getFile();
+    if (ref?.kind === 'web-file-handle') return ref.handle.getFile();
     if (ref instanceof File) return ref;
-    throw new Error('unsupported web file reference');
+    throw new Error('File Unavailable');
   }
 
   async function readBoard(ref) {
     const file = await fileFromRef(ref);
-    if (!file) throw new Error('no Boardfish file selected');
+    if (!file) throw new Error('No File Selected');
     if (root.BoardfishWebLimits?.LIMITS && file.size > root.BoardfishWebLimits.LIMITS.maxBoardContentBytes + 10 * 1024 * 1024) {
       throw root.BoardfishWebLimits.limitError(
-        `This file is too large for Boardfish (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB).`,
         root.BoardfishWebLimits.boardContentLimitMessage()
       );
     }
@@ -277,37 +268,37 @@
     const options = { mode: 'readwrite' };
     const permission = await waitForFileOperation(
       () => handle.queryPermission(options),
-      'checking file permission',
+      'Checking Permission',
     );
     if (permission === 'granted') return true;
     return (await waitForFileOperation(
       () => handle.requestPermission(options),
-      'requesting file permission',
+      'Requesting Permission',
     )) === 'granted';
   }
 
   async function writeBlobToHandle(handle, blob) {
     if (!(await ensureReadWritePermission(handle))) {
-      throw new Error('write permission was not granted');
+      throw new Error('Permission Denied');
     }
     const timeoutMs = fileWriteTimeoutMs(blob);
     const writable = await waitForFileOperation(
       () => handle.createWritable(),
-      'opening the board file',
+      'Opening File',
     );
-    let stage = 'writing the board file';
+    let stage = 'Writing File';
     try {
       await waitForFileOperation(() => writable.write(blob), stage, timeoutMs);
-      stage = 'finishing the board file';
+      stage = 'Closing File';
       await waitForFileOperation(() => writable.close(), stage, timeoutMs);
     } catch (err) {
       let failure = err;
-      if (stage === 'finishing the board file') failure = markSaveTargetUncertain(failure);
+      if (stage === 'Closing File') failure = markSaveTargetUncertain(failure);
       if (typeof writable.abort === 'function') {
         try {
           await waitForFileOperation(
             () => writable.abort(failure),
-            'aborting the board save',
+            'Aborting Save',
             FILE_ABORT_TIMEOUT_MS,
           );
         } catch (_) {
@@ -322,7 +313,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = name || 'board.bf';
+    link.download = name;
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
@@ -332,12 +323,11 @@
 
   async function saveBoard(ref, board, options = {}) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const collectDiagnostics = typeof BOARDFISH_PRODUCTION === 'undefined';
-    const totalStart = collectDiagnostics ? performance.now() : 0;
+    const totalStart = performance.now();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const rawImageStore = options.imageStore || root.imageStore || {};
     const validateBoardPayload = root.BoardfishWebLimits?.validateBoardPayload;
-    const writesExistingHandle = ref?.kind === 'web-file-handle' || ref?.kind === 'web-save-handle';
+    const writesExistingHandle = ref?.kind === 'web-file-handle';
     const sourceTargetSameEntry = writesExistingHandle && Object.prototype.hasOwnProperty.call(options, 'sourceFileRef')
       ? await fileRefsAreSameEntry(ref, options.sourceFileRef)
       : null;
@@ -354,48 +344,45 @@
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const preparePayload = async () => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const stabilizeStart = collectDiagnostics ? performance.now() : 0;
+      const stabilizeStart = performance.now();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       if (writesExistingHandle && sourceTargetSameEntry !== false && typeof stabilizeImageSources === 'function') {
         const stabilized = await stabilizeImageSources(board, rawImageStore);
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectDiagnostics) {
-          imageSourceRefreshMs += performance.now() - stabilizeStart;
-          imageSourceRefreshCount += Number(stabilized?.refreshed || 0);
-          imageSourceRefreshBytes += Number(stabilized?.bytes || 0);
-          imageSourceRefreshSkipped = stabilized?.skipped || '';
-          if (imageSourceRefreshBacking === 'fresh-file-retry') {
-            imageSourceRefreshBacking = 'fresh-file-retry+detached-memory';
-          } else {
-            imageSourceRefreshBacking = imageSourceRefreshCount ? 'detached-memory' : 'already-stable';
-          }
+        imageSourceRefreshMs += performance.now() - stabilizeStart;
+        imageSourceRefreshCount += Number(stabilized?.refreshed || 0);
+        imageSourceRefreshBytes += Number(stabilized?.bytes || 0);
+        imageSourceRefreshSkipped = stabilized?.skipped || '';
+        if (imageSourceRefreshBacking === 'fresh-file-retry') {
+          imageSourceRefreshBacking = 'fresh-file-retry+detached-memory';
+        } else {
+          imageSourceRefreshBacking = imageSourceRefreshCount ? 'detached-memory' : 'already-stable';
         }
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       } else if (writesExistingHandle && sourceTargetSameEntry === false) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
-        if (collectDiagnostics) imageSourceRefreshSkipped = 'distinct-target';
+        imageSourceRefreshSkipped = 'distinct-target';
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const createStart = collectDiagnostics ? performance.now() : 0;
+      const createStart = performance.now();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       const created = await root.BoardfishWebBoardContainer.createBoardContainerBlob(
         board,
         rawImageStore,
         {
-          materializeBytes: false,
           validateBoardPayload,
         },
       );
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) serializeMs += performance.now() - createStart;
+      serializeMs += performance.now() - createStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       return created;
     };
 
     const writePayload = async (payload) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const writeStart = collectDiagnostics ? performance.now() : 0;
+      const writeStart = performance.now();
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       if (writesExistingHandle) {
         try {
@@ -408,7 +395,7 @@
         downloadBlob(payload.blob, fileNameFromRef(ref, 'board.bf'));
       }
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) writeMs += performance.now() - writeStart;
+      writeMs += performance.now() - writeStart;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     };
 
@@ -425,18 +412,16 @@
       );
       if (recovered !== true && Number(recovered?.refreshed || 0) <= 0) throw err;
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      if (collectDiagnostics) {
-        imageSourceRefreshCount += Number(recovered?.refreshed || 0);
-        imageSourceRefreshBytes += Number(recovered?.bytes || 0);
-        imageSourceRefreshBacking = 'fresh-file-retry';
-        imageSourceRefreshError = String(err);
-      }
+      imageSourceRefreshCount += Number(recovered?.refreshed || 0);
+      imageSourceRefreshBytes += Number(recovered?.bytes || 0);
+      imageSourceRefreshBacking = 'fresh-file-retry';
+      imageSourceRefreshError = String(err);
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
       payload = await preparePayload();
       await writePayload(payload);
     }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    if (collectDiagnostics) return {
+    return {
       format: 'container-web',
       json_bytes: payload.boardJsonBytes,
       image_bytes: payload.imageBytes,
@@ -470,6 +455,7 @@
   const api = Object.freeze({
     canSaveToExistingTarget,
     describeFileRef,
+    downloadBlob,
     fileNameFromRef,
     fileRefFromFile: webFileRef,
     openFileDialog,

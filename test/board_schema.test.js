@@ -14,6 +14,35 @@ function imageObject(id, imgKey, z = 1) {
   return { id, type: 'image', x: 0, y: 0, w: 10, h: 10, z, data: { imgKey } };
 }
 
+function textObject(id, content) {
+  return { id, type: 'text', x: 0, y: 0, w: 100, h: 60, z: 1, data: { content } };
+}
+
+test('accepts boards at the object and total text character limits', () => {
+  const board = BoardSchema.normalizeBoardData({
+    objects: Array.from({ length: 100 }, (_, index) => textObject(`text-${index}`, '😀'.repeat(250))),
+  });
+  assert.equal(board.objects.length, 100);
+});
+
+test('rejects boards above the object limit before pruning empty textboxes', () => {
+  assert.throws(
+    () => BoardSchema.normalizeBoardData({
+      objects: Array.from({ length: 101 }, (_, index) => textObject(`text-${index}`, '')),
+    }),
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Board Limit: 100 Objects',
+  );
+});
+
+test('rejects excessive combined textbox characters, including whitespace before pruning', () => {
+  assert.throws(
+    () => BoardSchema.normalizeBoardData({
+      objects: [textObject('text-1', 'a'.repeat(12500)), textObject('text-2', '\t'.repeat(12501))],
+    }),
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Board Limit: 25,000 Characters',
+  );
+});
+
 test('normalizes valid board data from shared v3 fixture', () => {
   const board = BoardSchema.normalizeBoardData(readFixture('valid_v3_board.json'));
 
@@ -94,7 +123,7 @@ test('rejects image objects with missing image sources', () => {
       imageStore: {},
       objects: [imageObject('obj-1', 'img-1')],
     }),
-    /references missing image/
+    /Missing Image: img-1/
   );
 });
 
@@ -102,7 +131,7 @@ test('rejects malformed unused image sources before pruning', () => {
   assert.throws(() => BoardSchema.normalizeBoardData({
     imageStore: { 'img-unused': 42 },
     objects: [],
-  }), /imageStore\.img-unused must be a string or object/);
+  }), /Invalid Image Source: img-unused/);
 });
 
 test('prunes unused sources and invisible empty text through round trips', () => {
@@ -121,6 +150,6 @@ test('prunes unused sources and invisible empty text through round trips', () =>
 });
 
 test('rejects unsupported versions and formats', () => {
-  assert.throws(() => BoardSchema.normalizeBoardData({ version: 99 }), /unsupported board version/);
-  assert.throws(() => BoardSchema.normalizeBoardData({ format: 'other' }), /unsupported board format/);
+  assert.throws(() => BoardSchema.normalizeBoardData({ version: 99 }), /Unsupported Board Version/);
+  assert.throws(() => BoardSchema.normalizeBoardData({ format: 'other' }), /Unsupported Board Format/);
 });

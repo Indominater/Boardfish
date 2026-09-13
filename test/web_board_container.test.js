@@ -75,8 +75,25 @@ test('ZIP CRC work yields on one-MiB budgets', async (t) => {
   globalThis.scheduler = { yield: () => { yields++; return Promise.resolve(); } };
   t.after(() => { delete globalThis.scheduler; });
   const bytes = new Uint8Array(5 * 1024 * 1024);
-  const countYields = async (data) => { yields = 0; await WebContainer.createZipBlob([{ name: 'payload.bin', data }], { materializeBytes: false }); return yields; };
+  const countYields = async (data) => { yields = 0; await WebContainer.createZipBlob([{ name: 'payload.bin', data }]); return yields; };
   assert.deepEqual([await countYields(bytes), await countYields(new Blob([bytes]))], [5, 5]);
+});
+
+test('ZIP creation returns a Blob without reading archive bytes back into memory', async (t) => {
+  const NativeBlob = globalThis.Blob;
+  globalThis.Blob = class extends NativeBlob {
+    arrayBuffer() { throw new Error('archive bytes must remain in the Blob'); }
+  };
+  t.after(() => { globalThis.Blob = NativeBlob; });
+
+  for (const byteLength of [1, 9 * 1024 * 1024]) {
+    const payload = await WebContainer.createZipBlob([
+      { name: 'payload.bin', data: new Uint8Array(byteLength) },
+    ]);
+    assert.ok(payload.blob instanceof NativeBlob);
+    assert.equal(payload.blob.size, payload.byteLength);
+    assert.ok(payload.byteLength > byteLength);
+  }
 });
 
 function createDeflatedZipWithAdvertisedSize(name, data, advertisedSize) {
@@ -152,7 +169,8 @@ test('writes and reads Boardfish .bf containers in browser format', async () => 
   assert.equal(payload.imageCount, 1);
   assert.equal(payload.crcComputedEntries, 2);
   assert.equal(payload.crcReusedEntries, 0);
-  assert.ok(payload.bytes[0] === 0x50 && payload.bytes[1] === 0x4b);
+  const bytes = new Uint8Array(await payload.blob.arrayBuffer());
+  assert.ok(bytes[0] === 0x50 && bytes[1] === 0x4b);
 
   const result = await WebContainer.readBoardContainer(payload.blob);
   assert.equal(result.board.version, 3);
@@ -198,7 +216,7 @@ test('read rejects unsupported image metadata during entry derivation', async ()
 
   await assert.rejects(
     () => WebContainer.readBoardContainer(payload.blob),
-    /unsupported image metadata/,
+    /Unsupported Image Format/,
   );
 });
 
@@ -223,6 +241,7 @@ test('container creation validates the one exact UTF-8 board serialization befor
       validateBoardPayload(next) {
         validations.push({
           objectCount: next.objectCount,
+          textCharacters: next.textCharacters,
           boardJsonBytes: next.boardJsonBytes,
           imageBytes: next.imageBytes,
         });
@@ -233,15 +252,58 @@ test('container creation validates the one exact UTF-8 board serialization befor
   assert.equal(validations.length, 2);
   assert.deepEqual(validations[0], {
     objectCount: 2,
+    textCharacters: 12,
     boardJsonBytes: payload.boardJsonBytes,
     imageBytes: 0,
   });
   assert.deepEqual(validations[1], {
     objectCount: 2,
+    textCharacters: 12,
     boardJsonBytes: payload.boardJsonBytes,
     imageBytes: 4,
   });
   assert.equal(payload.boardJsonBytes, new TextEncoder().encode(JSON.stringify(board)).length);
+});
+
+test('container creation rejects excessive combined text before reading image sources', async () => {
+  const limits = require('../src/js/board_limits.js');
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: { 'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' } },
+    objects: [
+      { id: 'text-1', type: 'text', data: { content: 'a'.repeat(12500) } },
+      { id: 'text-2', type: 'text', data: { content: '\t'.repeat(12501) } },
+    ],
+  };
+  await assert.rejects(
+    () => WebContainer.createBoardContainerBlob(board, {}, { validateBoardPayload: limits.validateBoardPayload }),
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Board Limit: 25,000 Characters',
+  );
+});
+
+test('container reading rejects excessive text immediately after parsing board JSON', async () => {
+  const limits = require('../src/js/board_limits.js');
+  const board = {
+    version: 3,
+    format: 'boardfish-container',
+    imageStore: { 'img-1': { path: 'images/img-1.png', mime: 'image/png', ext: 'png' } },
+    objects: [{ id: 'text-1', type: 'text', data: { content: 'a'.repeat(25001) } }],
+  };
+  const payload = await WebContainer.createBoardContainerBlob(board, { 'img-1': new Uint8Array([1, 2, 3]) });
+  const validations = [];
+  await assert.rejects(
+    () => WebContainer.readBoardContainer(payload.blob, {
+      validateBoardPayload(next) {
+        validations.push(next);
+        limits.validateBoardPayload(next);
+      },
+    }),
+    (err) => err.boardfishLimit === true && err.boardfishUserMessage === 'Board Limit: 25,000 Characters',
+  );
+  assert.equal(validations.length, 2);
+  assert.equal(validations[1].textCharacters, 25001);
+  assert.equal(validations[1].imageBytes, 0);
 });
 
 test('oversized board JSON is rejected before any image Blob is read', async () => {
@@ -461,9 +523,7 @@ test('volatile File-backed image refs detach once before repeated saves', async 
   });
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const saved = await WebContainer.createBoardContainerBlob(board, opened.board.imageStore, {
-      materializeBytes: false,
-    });
+    const saved = await WebContainer.createBoardContainerBlob(board, opened.board.imageStore);
     const reopened = await WebContainer.readBoardContainer(saved.blob, {
       lazyImageRefs: true,
       verifyImageCrc: true,
@@ -516,7 +576,7 @@ test('volatile File-backed image refs recover only from a matching fresh snapsho
       opened.board.imageStore,
       changed.blob,
     ),
-    /saved image source changed for img-1/,
+    /Image Source Changed: img-1/,
   );
   assert.equal(source.__blob, recoveredBlob);
   assert.deepEqual(await WebContainer.bytesForImageSourceAsync(source), imageBytes);
@@ -525,8 +585,8 @@ test('volatile File-backed image refs recover only from a matching fresh snapsho
 test('ZIP32 writer rejects fields that would otherwise be silently truncated', async () => {
   const entry = { name: 'x'.repeat(0x10000), data: new Uint8Array([1]) };
   await assert.rejects(
-    () => WebContainer.createZipBlob([entry], { materializeBytes: false }),
-    /ZIP entry name is too long/,
+    () => WebContainer.createZipBlob([entry]),
+    /ZIP Entry Name Too Long/,
   );
 });
 
@@ -544,7 +604,7 @@ test('Uint8Array lazy opens retain synchronous byte-backed compatibility', async
   const imageStore = { 'img-1': 'data:image/png;base64,AQIDBA==' };
   const payload = await WebContainer.createBoardContainerBlob(board, imageStore);
 
-  const opened = await WebContainer.readBoardContainer(payload.bytes, {
+  const opened = await WebContainer.readBoardContainer(new Uint8Array(await payload.blob.arrayBuffer()), {
     lazyImageRefs: true,
     verifyImageCrc: false,
   });
@@ -608,7 +668,7 @@ test('creates byte-backed web image refs for inserted files', async () => {
 test('rejects tiny malformed containers without raw DataView range errors', async () => {
   await assert.rejects(
     () => WebContainer.readBoardContainer(new Uint8Array([0x50, 0x4b])),
-    /unsupported Boardfish file/,
+    /Unsupported File Format/,
   );
 });
 
@@ -619,12 +679,12 @@ test('board json CRC mismatch fails open', async () => {
     imageStore: {},
     objects: [],
   }, {});
-  const corrupt = new Uint8Array(payload.bytes);
+  const corrupt = new Uint8Array(await payload.blob.arrayBuffer());
   corrupt[storedZipEntryDataOffset(corrupt, 'board.json')] ^= 0xff;
 
   await assert.rejects(
     () => WebContainer.readBoardContainer(corrupt),
-    /CRC mismatch for board\.json/,
+    /File Checksum Mismatch: board\.json/,
   );
 });
 
@@ -642,7 +702,7 @@ test('image CRC mismatch is reported as a warning while preserving recoverable d
   const payload = await WebContainer.createBoardContainerBlob(board, {
     'img-1': 'data:image/png;base64,AQIDBA==',
   });
-  const corrupt = new Uint8Array(payload.bytes);
+  const corrupt = new Uint8Array(await payload.blob.arrayBuffer());
   corrupt[storedZipEntryDataOffset(corrupt, 'images/img-1.png')] ^= 0xff;
 
   const result = await WebContainer.readBoardContainer(corrupt);
@@ -671,7 +731,7 @@ test('Blob lazy refs preserve default image CRC warning behavior', async () => {
   const payload = await WebContainer.createBoardContainerBlob(board, {
     'img-1': 'data:image/png;base64,AQIDBA==',
   });
-  const corrupt = new Uint8Array(payload.bytes);
+  const corrupt = new Uint8Array(await payload.blob.arrayBuffer());
   corrupt[storedZipEntryDataOffset(corrupt, 'images/img-1.png')] ^= 0xff;
 
   const result = await WebContainer.readBoardContainer(new Blob([corrupt]), {
@@ -698,7 +758,7 @@ test('Blob random-access reads reject invalid local entry offsets and truncated 
   const payload = await WebContainer.createBoardContainerBlob(board, {
     'img-1': 'data:image/png;base64,AQIDBA==',
   });
-  const badOffset = new Uint8Array(payload.bytes);
+  const badOffset = new Uint8Array(await payload.blob.arrayBuffer());
   const badOffsetView = new DataView(badOffset.buffer, badOffset.byteOffset, badOffset.byteLength);
   const imageCentralOffset = centralDirectoryEntryOffset(badOffset, 'images/img-1.png');
   badOffsetView.setUint32(imageCentralOffset + 42, badOffset.length - 10, true);
@@ -708,10 +768,10 @@ test('Blob random-access reads reject invalid local entry offsets and truncated 
       lazyImageRefs: true,
       verifyImageCrc: false,
     }),
-    /invalid Boardfish container local entry images\/img-1\.png/,
+    /Invalid File Entry: images\/img-1\.png/,
   );
 
-  const truncatedData = new Uint8Array(payload.bytes);
+  const truncatedData = new Uint8Array(await payload.blob.arrayBuffer());
   const truncatedView = new DataView(truncatedData.buffer, truncatedData.byteOffset, truncatedData.byteLength);
   const truncatedCentralOffset = centralDirectoryEntryOffset(truncatedData, 'images/img-1.png');
   truncatedView.setUint32(truncatedCentralOffset + 20, truncatedData.length, true);
@@ -722,7 +782,7 @@ test('Blob random-access reads reject invalid local entry offsets and truncated 
       lazyImageRefs: true,
       verifyImageCrc: false,
     }),
-    /truncated Boardfish container entry images\/img-1\.png/,
+    /Invalid File Entry: images\/img-1\.png/,
   );
 });
 
@@ -740,7 +800,7 @@ test('Blob lazy reads reject inconsistent stored entry sizes before creating ref
   const payload = await WebContainer.createBoardContainerBlob(board, {
     'img-1': 'data:image/png;base64,AQIDBA==',
   });
-  const corrupt = new Uint8Array(payload.bytes);
+  const corrupt = new Uint8Array(await payload.blob.arrayBuffer());
   const view = new DataView(corrupt.buffer, corrupt.byteOffset, corrupt.byteLength);
   const imageCentralOffset = centralDirectoryEntryOffset(corrupt, 'images/img-1.png');
   view.setUint32(imageCentralOffset + 24, 5, true);
@@ -750,7 +810,7 @@ test('Blob lazy reads reject inconsistent stored entry sizes before creating ref
       lazyImageRefs: true,
       verifyImageCrc: false,
     }),
-    /invalid Boardfish container entry size images\/img-1\.png/,
+    /Invalid File Entry: images\/img-1\.png/,
   );
 });
 
@@ -761,12 +821,13 @@ test('EOCD signatures inside a valid ZIP comment are ignored', async () => {
     imageStore: {},
     objects: [],
   }, {});
+  const bytes = new Uint8Array(await payload.blob.arrayBuffer());
   const comment = new Uint8Array(30);
   comment.set([0x50, 0x4b, 0x05, 0x06], 0);
-  const commented = new Uint8Array(payload.bytes.length + comment.length);
-  commented.set(payload.bytes);
-  commented.set(comment, payload.bytes.length);
-  const eocdOffset = payload.bytes.length - 22;
+  const commented = new Uint8Array(bytes.length + comment.length);
+  commented.set(bytes);
+  commented.set(comment, bytes.length);
+  const eocdOffset = bytes.length - 22;
   new DataView(commented.buffer).setUint16(eocdOffset + 20, comment.length, true);
 
   const result = await WebContainer.readBoardContainer(new Blob([commented]));
@@ -792,7 +853,8 @@ test('saved image paths are canonicalized instead of preserving hostile manifest
   });
 
   assert.equal(payload.imageEntries[0].path, 'images/img-1.png');
-  assert.doesNotThrow(() => storedZipEntryDataOffset(payload.bytes, 'images/img-1.png'));
+  const bytes = new Uint8Array(await payload.blob.arrayBuffer());
+  assert.doesNotThrow(() => storedZipEntryDataOffset(bytes, 'images/img-1.png'));
 });
 
 test('deflated entries abort when decompressed bytes exceed advertised size', async (t) => {
@@ -807,10 +869,10 @@ test('deflated entries abort when decompressed bytes exceed advertised size', as
 
   await assert.rejects(
     () => WebContainer.readBoardContainer(zip),
-    /exceeds the board content limit|invalid Boardfish container entry size/,
+    /File Entry Too Large|Invalid File Entry/,
   );
   await assert.rejects(
     () => WebContainer.readBoardContainer(new Blob([zip])),
-    /exceeds the board content limit|invalid Boardfish container entry size/,
+    /File Entry Too Large|Invalid File Entry/,
   );
 });

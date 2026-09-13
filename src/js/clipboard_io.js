@@ -35,7 +35,7 @@
       return await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(reader.error || new Error('failed to read image blob'));
+        reader.onerror = () => reject(reader.error || new Error('Image Read Failed'));
         reader.readAsDataURL(blob);
       });
     }
@@ -45,7 +45,8 @@
       return `data:${blob.type || 'image/png'};base64,${Buffer.from(bytes).toString('base64')}`;
     }
     if (typeof btoa !== 'function') return '';
-    const chunkSize = 0x8000;
+    // Complete base64 groups need three bytes, so only the final chunk may add padding.
+    const chunkSize = 0x7ffe;
     let base64 = '';
     for (let offset = 0; offset < bytes.length; offset += chunkSize) {
       let binary = '';
@@ -330,7 +331,7 @@
     const blobPromise = directBlob
       ? Promise.resolve(directBlob)
       : Promise.resolve(blobOrPromise).then((blob) => {
-        if (!blob) throw new Error('failed to create clipboard PNG');
+        if (!blob) throw new Error('Clipboard Image Creation Failed');
         return blob;
       });
     const imagePart = directBlob || blobPromise;

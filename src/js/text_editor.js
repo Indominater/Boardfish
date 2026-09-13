@@ -113,7 +113,6 @@ const textEditorObjectDebugStats = (obj) => ({
   editStartChars: typeof obj?._editStartContent === 'string' ? obj._editStartContent.length : '',
   editMinLines: obj?._editMinLines ?? '',
   preservedMinLines: obj?._textEditPreservedMinLines ?? '',
-  pendingSizeSync: !!obj?._textEditPendingSizeSync,
   layoutCachePresent: !!obj?._layoutCache,
   layoutCacheLines: Array.isArray(obj?._layoutCache) ? obj._layoutCache.length : '',
 });
@@ -225,9 +224,8 @@ const recordTextEditorInputPerfStep = (step, meta = {}) => {
 };
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
 
-const TEXT_EDIT_DEFER_AUTO_HEIGHT_CHARS = 20000;
-const TEXT_EDIT_DIRECT_TEXTAREA_REPLACE_CHARS = 20000;
-const TEXT_EDIT_DEFER_DOM_REPLACE_CHARS = 20000;
+// This selects the textarea mutation backend, not text layout or sizing behavior.
+const TEXT_EDIT_DOM_REPLACE_CHARS = 20000;
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
 let textEditInputDebugSeq = 0;
 const nextTextEditInputDebugSeq = () => ++textEditInputDebugSeq;
@@ -251,20 +249,12 @@ function textEditWordBoundary(value, index, direction) {
   const moveRight = direction === 'right' || Number(direction) > 0;
 
   if (textEditWordSegmenter) {
-    let previousWordStart = 0;
-    for (const part of textEditWordSegmenter.segment(text)) {
-      if (!part.isWordLike) continue;
-      const start = part.index;
-      const end = start + part.segment.length;
-      if (moveRight) {
-        if (end > position) return end;
-        continue;
-      }
-      if (start >= position) break;
-      previousWordStart = start;
-      if (end >= position) break;
+    const segments = textEditWordSegmenter.segment(text);
+    let part = segments.containing(moveRight ? position : position - 1);
+    while (part && !part.isWordLike) {
+      part = segments.containing(moveRight ? part.index + part.segment.length : part.index - 1);
     }
-    return moveRight ? text.length : previousWordStart;
+    return part ? part.index + (moveRight ? part.segment.length : 0) : moveRight ? text.length : 0;
   }
 
   const isWordChar = (char) => /[A-Za-z0-9_]/.test(char || '');
@@ -325,7 +315,7 @@ function setTextEditProxySelectionRange(proxy, start, end = start, direction = '
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const syncResult = shouldSyncDom
     ? syncTextEditProxyDomValue(proxy, text, { start: from, end: to, direction })
-    : { synced: false, reason: shouldSyncDom ? 'sync-skipped' : 'selection-fits-dom' };
+    : { synced: false, reason: 'selection-fits-dom' };
   if (!syncResult.synced) proxy.setSelectionRange(from, to, direction);
   return {
     set: true,
@@ -438,7 +428,6 @@ const applyTextEditLineBreakIndent = (value, selection) => {
     start: nextCaret,
     end: nextCaret,
     direction: 'none',
-    changed: nextValue !== text,
   };
 };
 
@@ -568,8 +557,14 @@ const resetTextEditPreservedMinLines = (obj) => {
   return true;
 };
 
-const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false) => {
+const resetTextEditNavigation = (obj) => {
   if (!obj) return;
+  delete obj._textEditNavigationSelection;
+};
+
+const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStartIndex = false, preserveNavigation = false) => {
+  if (!obj) return;
+  if (!preserveNavigation) resetTextEditNavigation(obj);
   const length = (obj.data?.content || '').length;
   const nextIndex = Math.max(0, Math.min(Math.trunc(index ?? 0), length));
   if (obj._textEditCaretIndex !== nextIndex || clearLineStartIndex) {
@@ -583,8 +578,53 @@ const setTextEditCaretIndex = (obj, index, lineStartIndex = null, clearLineStart
 
 const clearTextEditCaretIndex = (obj) => {
   if (!obj) return;
+  resetTextEditNavigation(obj);
   delete obj._textEditCaretIndex;
   delete obj._textEditCaretLineStartIndex;
+};
+
+// A soft wrap has two visual positions for the same text index. Choose the
+// side approached by an arrow.
+const textEditCaretLineAtIndex = (layout, index, affinity) => {
+  if (!layout.length) return -1;
+  let lo = 0, hi = layout.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const line = layout[mid];
+    const end = line.caretEndIndex ?? line.endIndex ?? (line.startIndex + line.text.length);
+    if (index <= end) hi = mid;
+    else lo = mid + 1;
+  }
+  let result = lo;
+  // Crossing consumed wrap whitespace reaches the next row's beginning. A
+  // hard word wrap, in contrast, still has a caret at the preceding row's end.
+  const line = layout[lo];
+  const visibleEnd = line.endIndex ?? (line.startIndex + line.text.length);
+  if (index > visibleEnd && layout[lo + 1]?.startIndex === index) result = lo + 1;
+  for (let i = lo; i < layout.length && layout[i].startIndex <= index; i++) {
+    if (affinity === 'forward') result = i;
+  }
+  return result;
+};
+
+const rememberTextEditNavigationSelection = (obj, proxy, index, lineStartIndex) => {
+  setTextEditCaretIndex(obj, index, lineStartIndex, true, true);
+  obj._textEditNavigationSelection = {
+    start: proxy.selectionStart,
+    end: proxy.selectionEnd,
+    direction: proxy.selectionDirection || 'none',
+  };
+};
+
+const applyTextEditNavigationSelection = (obj, proxy, selection, index, lineStartIndex, extend) => {
+  const anchor = selection.direction === 'backward' ? selection.end : selection.start;
+  if (extend) {
+    setTextEditProxySelectionRange(proxy, Math.min(anchor, index), Math.max(anchor, index),
+      index < anchor ? 'backward' : 'forward');
+  } else {
+    setTextEditProxySelectionRange(proxy, index, index, 'none');
+  }
+  rememberTextEditNavigationSelection(obj, proxy, index, lineStartIndex);
 };
 
 const textEditVisibleSelectionReplacementRange = (content, selection = {}) => {
@@ -712,13 +752,11 @@ const copyTextEditSelectionFromProxy = async (
     .then((result) => {
       if (result?.boardfishTokenWritten && meta.boardfishToken) {
         if (typeof markJsClipboardWebTokenWritten === 'function') {
-          if (typeof BOARDFISH_PRODUCTION === 'undefined') {
+          markJsClipboardWebTokenWritten(meta.boardfishToken
             /* BOARDFISH_DEV_DIAGNOSTICS_START */
-            markJsClipboardWebTokenWritten(meta.boardfishToken, dbg);
+            , dbg
             /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          } else {
-            markJsClipboardWebTokenWritten(meta.boardfishToken);
-          }
+          );
         }
       }
       // A large text write can occupy the main thread; start jiggle only once it settles.
@@ -749,7 +787,7 @@ const copyTextEditSelectionFromProxy = async (
         ...textStats,
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      console.error('[copy] text selection clipboard write FAILED:', err);
+      console.error('Clipboard Write Failed:', err);
     });
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   writePromise.finally(() => {
@@ -858,8 +896,8 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
   const to = Math.max(from, Math.min(Math.trunc(Number(end)) || from, value.length));
   const inserted = normalizeTextContent(text);
   const nextLength = value.length + inserted.length - (to - from);
-  const largeValue = value.length + inserted.length > TEXT_EDIT_DIRECT_TEXTAREA_REPLACE_CHARS;
-  deferDomValue = deferDomValue && nextLength > TEXT_EDIT_DEFER_DOM_REPLACE_CHARS;
+  const largeValue = value.length + inserted.length > TEXT_EDIT_DOM_REPLACE_CHARS;
+  deferDomValue = deferDomValue && nextLength > TEXT_EDIT_DOM_REPLACE_CHARS;
   if (largeValue) {
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const buildStartedAt = textEditorDebugNow();
@@ -869,53 +907,27 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
     const valueBuildMs = textEditorDebugRound(textEditorDebugNow() - buildStartedAt);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     const caret = selectionMode === 'start' ? from : from + inserted.length;
-    if (deferDomValue) {
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const logicalStartedAt = textEditorDebugNow();
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      setTextEditProxyLogicalValue(proxy, nextValue, false);
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const logicalSetMs = textEditorDebugRound(textEditorDebugNow() - logicalStartedAt);
-      const selectionStartedAt = textEditorDebugNow();
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      proxy.setSelectionRange(caret, caret, 'none');
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const selectionSetMs = textEditorDebugRound(textEditorDebugNow() - selectionStartedAt);
-      const ms = textEditorDebugRound(valueBuildMs + logicalSetMs + selectionSetMs);
-      return {
-        method: 'logical',
-        textareaMutationMs: ms,
-        setRangeTextMs: '',
-        valueAssignMs: '',
-        valueBuildMs,
-        valueSetMs: '',
-        logicalSetMs,
-        selectionSetMs,
-      };
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      return;
-    }
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const assignStartedAt = textEditorDebugNow();
+    const stateStartedAt = textEditorDebugNow();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    proxy.value = nextValue;
-    setTextEditProxyLogicalValue(proxy, nextValue);
+    if (!deferDomValue) proxy.value = nextValue;
+    setTextEditProxyLogicalValue(proxy, nextValue, !deferDomValue);
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const valueSetMs = textEditorDebugRound(textEditorDebugNow() - assignStartedAt);
+    const stateSetMs = textEditorDebugRound(textEditorDebugNow() - stateStartedAt);
     const selectionStartedAt = textEditorDebugNow();
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     proxy.setSelectionRange(caret, caret, 'none');
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const selectionSetMs = textEditorDebugRound(textEditorDebugNow() - selectionStartedAt);
-    const ms = textEditorDebugRound(valueBuildMs + valueSetMs + selectionSetMs);
+    const ms = textEditorDebugRound(valueBuildMs + stateSetMs + selectionSetMs);
     return {
-      method: 'value',
+      method: deferDomValue ? 'logical' : 'value',
       textareaMutationMs: ms,
       setRangeTextMs: '',
-      valueAssignMs: ms,
+      valueAssignMs: deferDomValue ? '' : ms,
       valueBuildMs,
-      valueSetMs,
-      logicalSetMs: '',
+      valueSetMs: deferDomValue ? '' : stateSetMs,
+      logicalSetMs: deferDomValue ? stateSetMs : '',
       selectionSetMs,
     };
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -949,6 +961,11 @@ const replaceTextEditProxyRange = (proxy, text, start, end, selectionMode = 'end
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
 };
 
+const canApplyTextEditReplacement = (obj, value, start, end, text) => {
+  const nextValue = value.slice(0, start) + text + value.slice(end);
+  return BoardfishWebLimits.canReplaceText(obj, nextValue);
+};
+
 const editableTextPayload = (payload = {}) => ({
   text: textForTextObjectPaste(payload.text || ''),
 });
@@ -970,65 +987,22 @@ const boardfishPasteEventMatchesCurrentTextSelectionClipboard = (event) => {
   return !!eventToken && !!currentToken && eventToken === currentToken;
 };
 
-const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) => {
-  if (!proxy || !payload || !options.event) return false;
-  const obj = objectsMap.get(id);
-  if (!obj) return false;
-  const selection = options.selection || textEditSelectionState(proxy);
-  if (selection.hasSelection) return false;
-  if (!boardfishPasteEventMatchesCurrentTextSelectionClipboard(options.event)) return false;
-
-  const fallbackText = normalizeTextContent(options.fallbackText || '');
-  const editablePayload = editableTextPayload(payload);
-  if (!editablePayload.text || fallbackText !== editablePayload.text) return false;
-
-  const inputType = options.inputType || 'insertFromPaste';
-  const currentProxyValue = textEditProxyValue(proxy);
-  if (proxy._boardfishDomValueStale || proxy.value !== currentProxyValue) return false;
-  const inputState = {
-    ...selection,
-    value: currentProxyValue,
-    inputType,
-    replacement: {
-      start: selection.start,
-      end: selection.end,
-      insertedText: editablePayload.text,
-    },
-    nativePasteHandled: true,
-  };
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    inputState.debug = options.debug || null;
-    inputState.nativePasteEndMeta = {
-      path: 'jsClipboard-text-selection-native',
-      pasted: true,
-      textObjectCount: 1,
-      textCharCount: editablePayload.text.length,
-      largestTextChars: editablePayload.text.length,
-      ...textEditorTextStats(editablePayload.text),
-    };
-  }
-  beginTextEditHistoryAction(id, inputState);
-  proxy?._boardfishSetPendingInputState?.(inputState);
-  return {
-    text: editablePayload.text,
-  };
-};
-
-const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
+const tryNativeTextEditPaste = (id, proxy, readText, options = {}) => {
   if (!proxy || !options.event) return false;
   const obj = objectsMap.get(id);
   if (!obj) return false;
   const selection = options.selection || textEditSelectionState(proxy);
   if (selection.hasSelection) return false;
 
-  const rawPastedText = normalizeTextContent(text || '');
-  const pastedText = textForTextObjectPaste(rawPastedText);
-  if (!pastedText) return false;
-  if (pastedText !== rawPastedText) return false;
-
   const inputType = options.inputType || 'insertFromPaste';
   const currentProxyValue = textEditProxyValue(proxy);
   if (proxy._boardfishDomValueStale || proxy.value !== currentProxyValue) return false;
+  const text = readText();
+  if (!text) return false;
+  if (!canApplyTextEditReplacement(obj, currentProxyValue, selection.start, selection.end, text)) {
+    options.event.preventDefault();
+    return { rejected: true };
+  }
   const inputState = {
     ...selection,
     value: currentProxyValue,
@@ -1036,7 +1010,7 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
     replacement: {
       start: selection.start,
       end: selection.end,
-      insertedText: pastedText,
+      insertedText: text,
     },
     nativePasteHandled: true,
   };
@@ -1046,17 +1020,34 @@ const tryNativeExternalTextPaste = (id, proxy, text, options = {}) => {
       path: options.path || 'event-text-native',
       pasted: true,
       textObjectCount: 1,
-      textCharCount: pastedText.length,
-      largestTextChars: pastedText.length,
-      ...textEditorTextStats(pastedText),
+      textCharCount: text.length,
+      largestTextChars: text.length,
+      ...textEditorTextStats(text),
     };
   }
   beginTextEditHistoryAction(id, inputState);
   proxy?._boardfishSetPendingInputState?.(inputState);
   return {
-    text: pastedText,
+    text,
   };
 };
+
+const tryNativeBoardfishTextSelectionPaste = (id, proxy, payload, options = {}) =>
+  tryNativeTextEditPaste(id, proxy, () => {
+    if (!payload || !boardfishPasteEventMatchesCurrentTextSelectionClipboard(options.event)) return '';
+    const text = editableTextPayload(payload).text;
+    return normalizeTextContent(options.fallbackText || '') === text ? text : '';
+  }, {
+    ...options,
+    path: 'jsClipboard-text-selection-native',
+  });
+
+const tryNativeExternalTextPaste = (id, proxy, text, options = {}) =>
+  tryNativeTextEditPaste(id, proxy, () => {
+    const rawPastedText = normalizeTextContent(text || '');
+    const pastedText = textForTextObjectPaste(rawPastedText);
+    return pastedText === rawPastedText ? pastedText : '';
+  }, options);
 
 const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) => {
   if (!proxy || !payload) return false;
@@ -1111,6 +1102,10 @@ const replaceTextEditSelectionWithPayload = (id, proxy, payload, options = {}) =
   const replacementRange = selection.hasSelection
     ? textEditVisibleSelectionReplacementRange(obj.data?.content, selection)
     : selection;
+  if (!canApplyTextEditReplacement(obj, currentProxyValue, replacementRange.start, replacementRange.end, text)) {
+    options.limitRejected = true;
+    return false;
+  }
   const inputType = options.inputType || 'insertFromPaste';
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   logStep('paste:text-edit-replacement-range-ready', {
@@ -1199,7 +1194,6 @@ const pasteBoardfishTextSelectionIntoEditSelection = async (options = {}) => {
   textEditorClipStep(dbg, 'paste:text-selection-js-payload-ready', textEditorTextStats(payload.text));
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   const pasteOptions = {
-    immediateHistory: options.immediateHistory,
     selection: options.selection,
     inputType: 'insertFromPaste',
   };
@@ -1207,7 +1201,9 @@ const pasteBoardfishTextSelectionIntoEditSelection = async (options = {}) => {
   pasteOptions.debug = dbg;
   pasteOptions.source = 'jsClipboard-text-selection';
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  return replaceTextEditSelectionWithPayload(id, proxy, payload, pasteOptions);
+  const pasted = replaceTextEditSelectionWithPayload(id, proxy, payload, pasteOptions);
+  options.limitRejected = pasteOptions.limitRejected === true;
+  return pasted;
 };
 
 function enterEdit(id, {
@@ -1319,12 +1315,19 @@ function enterEdit(id, {
   };
   /* BOARDFISH_DEV_DIAGNOSTICS_END */
   proxy.addEventListener('beforeinput', (event) => {
+    resetTextEditNavigation(obj);
     if (pendingInputState?.nativePasteHandled && event?.inputType === 'insertFromPaste') {
       return;
     }
     const selection = textEditSelectionState(proxy);
     const currentProxyValue = textEditProxyValue(proxy);
     const nativeReplacement = textEditBeforeInputReplacement(currentProxyValue, selection, event);
+    if (event.cancelable !== false && nativeReplacement && !canApplyTextEditReplacement(obj, currentProxyValue,
+      nativeReplacement.start, nativeReplacement.end, nativeReplacement.insertedText)) {
+      event.preventDefault();
+      pendingInputState = null;
+      return;
+    }
     pendingInputState = {
       ...selection,
       value: currentProxyValue,
@@ -1342,7 +1345,6 @@ function enterEdit(id, {
     } else {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       domSyncBeforeNativeInput = syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
-      if (domSyncBeforeNativeInput.synced) pendingInputState.domSyncedBeforeNativeInput = true;
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     beginTextEditHistoryAction(id, pendingInputState);
@@ -1433,6 +1435,13 @@ function enterEdit(id, {
       ...textEditorSizeDebugStats(obj, oldValue, 'replacementOld'),
       ...textEditorTextStats(replacement.insertedText),
     }));
+    if (!BoardfishWebLimits.canReplaceText(obj, nextRawValue)) {
+      proxy.value = oldValue;
+      setTextEditProxyLogicalValue(proxy, oldValue);
+      proxy.setSelectionRange(inputState.start ?? replacement.start,
+        inputState.end ?? replacement.end, inputState.direction || 'none');
+      return;
+    }
 	    obj.data.content = nextRawValue;
 	    markDirty(obj);
 	    logInputStep('motion-dirty-done');
@@ -1500,32 +1509,12 @@ function enterEdit(id, {
     const restoredMinLinesReset = resetTextEditPreservedMinLines(obj);
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     if (typeof BOARDFISH_PRODUCTION !== 'undefined') resetTextEditPreservedMinLines(obj);
-    const pendingSizeSyncBeforeAutoHeight = !!obj._textEditPendingSizeSync;
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const replacementStart = Math.max(0, Math.min(replacement.start ?? 0, oldValue.length));
     const replacementEnd = Math.max(replacementStart, Math.min(replacement.end ?? replacementStart, oldValue.length));
     const insertedText = String(replacement.insertedText || '');
     const removedChars = replacementEnd - replacementStart;
     const insertedChars = insertedText.length;
-    const deletesContent = String(inputType || '').startsWith('delete');
-    const deleteReducedLogicalLines = deletesContent && textRangeIncludes(oldValue, replacementStart, replacementEnd, '\n');
-    const selectedDeleteShrankText = deletesContent && !!inputState.hasSelection && removedChars > insertedChars;
-    const deleteShrankPendingEdit = pendingSizeSyncBeforeAutoHeight &&
-      deletesContent &&
-      removedChars > insertedChars;
-    const layoutRemovedLines = layoutPatched && obj._lastTextLayoutLineDelta < 0;
-    const insertsLineBreak = inputType === 'insertLineBreak' || inputType === 'insertParagraph';
-    const forceAutoHeight = layoutRemovedLines || deleteReducedLogicalLines ||
-      selectedDeleteShrankText || deleteShrankPendingEdit || insertsLineBreak;
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const autoHeightForceReason = layoutRemovedLines
-      ? 'layout-line-removal'
-      : (deleteReducedLogicalLines
-        ? 'logical-line-delete'
-        : (selectedDeleteShrankText
-          ? 'selected-delete'
-          : (deleteShrankPendingEdit
-            ? 'pending-size-delete'
-            : (insertsLineBreak ? 'line-break-insert' : ''))));
     const autoHeightDebugBefore = shouldLogInput
       ? {
           size: textEditorSizeDebugStats(obj, obj.data.content, 'beforeAutoHeight'),
@@ -1533,27 +1522,12 @@ function enterEdit(id, {
         }
       : null;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    let heightChanged;
-    if (
-      !forceAutoHeight &&
-      obj?.type === 'text' &&
-      String(obj._editStartContent ?? '') !== '' &&
-      String(obj.data?.content || '').length >= TEXT_EDIT_DEFER_AUTO_HEIGHT_CHARS
-    ) {
-      obj._textEditPendingSizeSync = true;
-      heightChanged = false;
-    } else {
-      delete obj._textEditPendingSizeSync;
-      heightChanged = syncTextAutoHeight(obj, getTextMinLines(obj));
-    }
+    // The exact line count reuses the patched layout or builds the wrapped-row
+    // index that rendering needs, keeping bounds current for every edit.
+    const heightChanged = syncTextAutoHeight(obj, getTextMinLines(obj));
     logInputStep('auto-height-done', () => ({
       heightChanged,
-      autoHeightDeferred: !!obj._textEditPendingSizeSync,
-      autoHeightForceSync: forceAutoHeight,
-      autoHeightForceReason,
       restoredMinLinesReset: !!restoredMinLinesReset,
-      pendingSizeSyncBeforeAutoHeight,
-      pendingSizeSync: !!obj._textEditPendingSizeSync,
       width: obj.w,
       height: obj.h,
       ...autoHeightDebugBefore?.size,
@@ -1672,6 +1646,7 @@ function enterEdit(id, {
       if (typeof BOARDFISH_PRODUCTION === 'undefined') nativePasteOptions.debug = dbg;
       const nativePaste = tryNativeBoardfishTextSelectionPaste(id, proxy, candidate, nativePasteOptions);
       if (nativePaste) {
+        if (nativePaste.rejected) return;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         logPasteStep('paste:text-edit-native-textarea-allowed', {
           source: 'jsClipboard-text-selection',
@@ -1705,6 +1680,7 @@ function enterEdit(id, {
       }
       const nativeExternalPaste = tryNativeExternalTextPaste(id, proxy, fallbackText, nativeExternalOptions);
       if (nativeExternalPaste) {
+        if (nativeExternalPaste.rejected) return;
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         logPasteStep('paste:text-edit-native-event-text-allowed', {
           source: candidate ? 'fallback-event-text' : 'event-text',
@@ -1724,33 +1700,31 @@ function enterEdit(id, {
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
     }
     event.preventDefault();
-    if (!candidate) {
+    const pasteEventText = (path, error) => {
       const replaceOptions = { selection, inputType: 'insertFromPaste' };
       if (typeof BOARDFISH_PRODUCTION === 'undefined') {
         replaceOptions.debug = dbg;
-        replaceOptions.source = 'event-text';
+        replaceOptions.source = path;
       }
+      const pasted = replaceTextEditSelectionWithPayload(id, proxy, { text: fallbackText }, replaceOptions);
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const pasted = replaceTextEditSelectionWithPayload(id, proxy, {
-        text: fallbackText,
-      }, replaceOptions);
+      const counted = pasted || path === 'event-text';
       dbgApi?.end?.(dbg, {
-        path: 'event-text',
+        path,
+        ...(path === 'error-fallback-event-text' ? { error: String(error) } : {}),
         pasted,
         objectId: id,
         proxyChars: proxy.value.length,
-        textObjectCount: 1,
-        textCharCount: fallbackText.length,
-        largestTextChars: fallbackText.length,
+        textObjectCount: counted ? 1 : 0,
+        textCharCount: counted ? fallbackText.length : 0,
+        largestTextChars: counted ? fallbackText.length : 0,
         ...textEditorObjectDebugStats(obj),
         ...textEditorTextStats(fallbackText),
       });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, replaceOptions);
-      }
+    };
+    if (!candidate) {
+      pasteEventText('event-text');
       return;
     }
     const pasteOptions = {
@@ -1758,11 +1732,10 @@ function enterEdit(id, {
       proxy,
       event,
       selection,
-      immediateHistory: false,
     };
     if (typeof BOARDFISH_PRODUCTION === 'undefined') pasteOptions.debug = dbg;
     pasteBoardfishTextSelectionIntoEditSelection(pasteOptions).then((pasted) => {
-      if (pasted || !fallbackText) {
+      if (pasted || pasteOptions.limitRejected || !fallbackText) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         dbgApi?.end?.(dbg, {
           path: pasted ? 'jsClipboard-text-selection' : 'jsClipboard-empty',
@@ -1781,37 +1754,12 @@ function enterEdit(id, {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logPasteStep('paste:text-edit-js-payload-fallback-event-text', textEditorTextStats(fallbackText));
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      const fallbackOptions = { selection, inputType: 'insertFromPaste' };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        fallbackOptions.debug = dbg;
-        fallbackOptions.source = 'fallback-event-text';
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const fallbackPasted = replaceTextEditSelectionWithPayload(id, proxy, {
-        text: fallbackText,
-      }, fallbackOptions);
-      dbgApi?.end?.(dbg, {
-        path: 'fallback-event-text',
-        pasted: fallbackPasted,
-        objectId: id,
-        proxyChars: proxy.value.length,
-        textObjectCount: fallbackPasted ? 1 : 0,
-        textCharCount: fallbackPasted ? fallbackText.length : 0,
-        largestTextChars: fallbackPasted ? fallbackText.length : 0,
-        ...textEditorObjectDebugStats(obj),
-        ...textEditorTextStats(fallbackText),
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, fallbackOptions);
-      }
+      pasteEventText('fallback-event-text');
     }).catch((err) => {
       /* BOARDFISH_DEV_DIAGNOSTICS_START */
       logPasteStep('paste:text-edit-js-payload-error', { error: String(err) });
       /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      console.error('[paste] Boardfish text selection paste FAILED:', err);
+      console.error('Paste Failed:', err);
       if (!fallbackText) {
         /* BOARDFISH_DEV_DIAGNOSTICS_START */
         dbgApi?.end?.(dbg, {
@@ -1824,78 +1772,40 @@ function enterEdit(id, {
         /* BOARDFISH_DEV_DIAGNOSTICS_END */
         return;
       }
-      const fallbackOptions = { selection, inputType: 'insertFromPaste' };
-      if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-        fallbackOptions.debug = dbg;
-        fallbackOptions.source = 'error-fallback-event-text';
-      }
-      /* BOARDFISH_DEV_DIAGNOSTICS_START */
-      const fallbackPasted = replaceTextEditSelectionWithPayload(id, proxy, {
-        text: fallbackText,
-      }, fallbackOptions);
-      dbgApi?.end?.(dbg, {
-        path: 'error-fallback-event-text',
-        error: String(err),
-        pasted: fallbackPasted,
-        objectId: id,
-        proxyChars: proxy.value.length,
-        textObjectCount: fallbackPasted ? 1 : 0,
-        textCharCount: fallbackPasted ? fallbackText.length : 0,
-        largestTextChars: fallbackPasted ? fallbackText.length : 0,
-        ...textEditorObjectDebugStats(obj),
-        ...textEditorTextStats(fallbackText),
-      });
-      /* BOARDFISH_DEV_DIAGNOSTICS_END */
-      if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-        replaceTextEditSelectionWithPayload(id, proxy, {
-          text: fallbackText,
-        }, fallbackOptions);
-      }
+      pasteEventText('error-fallback-event-text', err);
     });
   });
   proxy.addEventListener('blur', flushEditHistoryCheckpoint);
   proxy.addEventListener('keydown', (e) => {
+    resetTextEditNavigation(obj);
     const wakeCaret = !_caretVisible;
     _caretVisible = true;
 
-    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const isIndentKey = e.key === 'Tab';
+    if ((isIndentKey || (e.key === 'Enter' && !e.isComposing)) && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       const currentProxyValue = textEditProxyValue(proxy);
       const selection = textEditSelectionState(proxy);
-      const indentResult = applyTextEditLineIndent(currentProxyValue, selection, e.shiftKey);
-      if (!indentResult.changed) {
+      const result = isIndentKey
+        ? applyTextEditLineIndent(currentProxyValue, selection, e.shiftKey)
+        : applyTextEditLineBreakIndent(currentProxyValue, selection);
+      if (isIndentKey && !result.changed) {
         if (wakeCaret) scheduleRender(true, false);
         return;
       }
-      const inputType = e.shiftKey ? 'deleteContentBackward' : 'insertText';
+      if (!BoardfishWebLimits.canReplaceText(obj, result.value)) return;
+      const inputType = isIndentKey
+        ? (e.shiftKey ? 'deleteContentBackward' : 'insertText')
+        : 'insertLineBreak';
       pendingInputState = {
         ...selection,
         value: currentProxyValue,
         inputType,
       };
       beginTextEditHistoryAction(id, pendingInputState);
-      proxy.value = indentResult.value;
-      setTextEditProxyLogicalValue(proxy, indentResult.value);
-      proxy.setSelectionRange(indentResult.start, indentResult.end, indentResult.direction);
-      dispatchTextEditInputEvent(proxy, inputType);
-      return;
-    }
-
-    if (e.key === 'Enter' && !e.isComposing && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      const currentProxyValue = textEditProxyValue(proxy);
-      const selection = textEditSelectionState(proxy);
-      const lineBreakResult = applyTextEditLineBreakIndent(currentProxyValue, selection);
-      const inputType = 'insertLineBreak';
-      pendingInputState = {
-        ...selection,
-        value: currentProxyValue,
-        inputType,
-      };
-      beginTextEditHistoryAction(id, pendingInputState);
-      proxy.value = lineBreakResult.value;
-      setTextEditProxyLogicalValue(proxy, lineBreakResult.value);
-      proxy.setSelectionRange(lineBreakResult.start, lineBreakResult.end, lineBreakResult.direction);
+      proxy.value = result.value;
+      setTextEditProxyLogicalValue(proxy, result.value);
+      proxy.setSelectionRange(result.start, result.end, result.direction);
       dispatchTextEditInputEvent(proxy, inputType);
       return;
     }
@@ -1950,39 +1860,19 @@ function enterEdit(id, {
       syncTextEditProxyDomValue(proxy, currentProxyValue, selection);
       const moveRight = e.key === 'ArrowRight';
       let reference = moveRight ? selection.end : selection.start;
-      let anchor = reference;
       if (e.shiftKey) {
         const backward = selection.direction === 'backward';
         reference = backward ? selection.start : selection.end;
-        anchor = backward ? selection.end : selection.start;
       }
       const nextPosition = textEditWordBoundary(
         currentProxyValue,
         reference,
         moveRight ? 'right' : 'left',
       );
-      if (e.shiftKey) {
-        const start = Math.min(anchor, nextPosition);
-        const end = Math.max(anchor, nextPosition);
-        setTextEditProxySelectionRange(
-          proxy,
-          start,
-          end,
-          nextPosition < anchor ? 'backward' : 'forward',
-          currentProxyValue,
-        );
-        if (start === end) setTextEditCaretIndex(obj, start);
-        else clearTextEditCaretIndex(obj);
-      } else {
-        setTextEditProxySelectionRange(
-          proxy,
-          nextPosition,
-          nextPosition,
-          'none',
-          currentProxyValue,
-        );
-        setTextEditCaretIndex(obj, nextPosition);
-      }
+      const layout = getTextLayout(obj);
+      const lineIndex = textEditCaretLineAtIndex(layout, nextPosition, moveRight ? 'backward' : 'forward');
+      applyTextEditNavigationSelection(obj, proxy, selection, nextPosition,
+        layout[lineIndex]?.startIndex, e.shiftKey);
       scheduleRender(true, false);
       return;
     }
@@ -2210,8 +2100,12 @@ function enterEdit(id, {
     TextSelDebug._logSelection('selectionchange', proxy);
     _caretVisible = true;
     if (currentObj) {
-      if (s === e) setTextEditCaretIndex(currentObj, s);
-      else clearTextEditCaretIndex(currentObj);
+      const navigation = currentObj._textEditNavigationSelection;
+      const direction = proxy.selectionDirection || 'none';
+      if (!navigation || navigation.start !== s || navigation.end !== e || navigation.direction !== direction) {
+        if (s === e) setTextEditCaretIndex(currentObj, s);
+        else clearTextEditCaretIndex(currentObj);
+      }
     }
     scheduleRender(true, false);
   };
@@ -2339,7 +2233,6 @@ function exitEdit() {
       BoardfishEditorState.removeObjectsById([id]);
       delete obj._editStartContent;
       delete obj._editMinLines;
-      delete obj._textEditPendingSizeSync;
       clearTextEditCaretIndex(obj);
       _editHistoryLastContent = null;
       _editHistoryActionStartState = null;
@@ -2363,16 +2256,15 @@ function exitEdit() {
       return;
     }
     const contentChanged = obj.data.content !== _editHistoryLastContent;
-    const pendingSizeSync = !!obj._textEditPendingSizeSync;
     const startedEmpty = obj._editStartContent === '';
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const editMinLines = obj._editMinLines || 1;
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const needsExitSizeSync = contentChanged || pendingSizeSync || startedEmpty;
+    const needsExitSizeSync = contentChanged || startedEmpty;
     /* BOARDFISH_DEV_DIAGNOSTICS_START */
     const sizeSyncReason = contentChanged
       ? 'content-changed'
-      : (pendingSizeSync ? 'pending-size-sync' : (startedEmpty ? 'started-empty' : 'unchanged'));
+      : (startedEmpty ? 'started-empty' : 'unchanged');
     /* BOARDFISH_DEV_DIAGNOSTICS_END */
     let widthChanged = false;
     let heightChanged = false;
@@ -2406,7 +2298,6 @@ function exitEdit() {
         widthChanged,
         heightChanged,
         contentChanged,
-        pendingSizeSync,
         needsExitSizeSync,
         sizeSyncReason,
         startedEmpty,
@@ -2417,7 +2308,6 @@ function exitEdit() {
         widthChanged,
         heightChanged,
         contentChanged,
-        pendingSizeSync,
         needsExitSizeSync,
         sizeSyncReason,
         startedEmpty,
@@ -2443,7 +2333,6 @@ function exitEdit() {
     }
     delete obj._editStartContent;
     delete obj._editMinLines;
-    delete obj._textEditPendingSizeSync;
     clearTextEditCaretIndex(obj);
     logStep('exit-history-cleanup', obj, {
       editHistoryMs,

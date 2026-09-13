@@ -30,29 +30,11 @@ function retainedImageKeysForCurrentAndHistory() {
   return keys;
 }
 
-function pruneImageCachesAfterHistoryChange(reason, historyEntriesDropped = false) {
+function pruneImageCachesAfterHistoryChange(historyEntriesDropped = false) {
   if (!historyEntriesDropped && _historyImageCacheClipboardToken === _jsClipboardToken) return;
   _historyImageCacheClipboardToken = _jsClipboardToken;
   const retainedKeys = retainedImageKeysForCurrentAndHistory();
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    pruneImageCachesToKeys(retainedKeys);
-    return;
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const diagnosticReason = reason === undefined ? 'history-change' : reason;
-  const imageResult = pruneImageCachesToKeys(retainedKeys);
-  const removedImageCaches = (imageResult?.removedSources || 0) +
-    (imageResult?.removedAssetUrls || 0) +
-    (imageResult?.removedBitmaps || 0) +
-    (imageResult?.removedBitmapFailures || 0);
-  if (removedImageCaches) {
-    HistoryDebug.step(null, 'image-cache-prune', {
-      reason: diagnosticReason,
-      ...(imageResult || {}),
-      retained: retainedKeys.size,
-    });
-  }
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  pruneImageCachesToKeys(retainedKeys);
 }
 
 /* BOARDFISH_DEV_DIAGNOSTICS_START */
@@ -178,7 +160,6 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
   let runtimeTextLayoutObjects = 0;
   let runtimeTextLayoutLines = 0;
   let runtimeTextLayoutPrefixEntries = 0;
-  let runtimeTextLineContentChars = 0;
   for (const obj of sourceObjects || []) {
     if (obj?.type !== 'text') continue;
     textObjectCount++;
@@ -197,7 +178,6 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
     runtimeTextLayoutLines += obj._layoutCache.length;
     for (const line of obj._layoutCache) {
       runtimeTextLayoutPrefixEntries += Number(line?.prefixWidths?.length) || 0;
-      runtimeTextLineContentChars += String(line?.content || '').length;
     }
   }
   return {
@@ -210,7 +190,6 @@ function getHistoryTextDebugMetrics(sourceObjects = objects) {
     runtimeTextLayoutObjects,
     runtimeTextLayoutLines,
     runtimeTextLayoutPrefixEntries,
-    runtimeTextLineContentChars,
   };
 }
 /* BOARDFISH_DEV_DIAGNOSTICS_END */
@@ -322,13 +301,7 @@ function pushHistory(reason = '', dirty = null, beforeEditState = null) {
   });
   historyIndex++;
   historyEntriesDropped = trimHistory() || historyEntriesDropped;
-  if (typeof BOARDFISH_PRODUCTION !== 'undefined') {
-    pruneImageCachesAfterHistoryChange(undefined, historyEntriesDropped);
-  } else {
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    pruneImageCachesAfterHistoryChange(reason || 'pushHistory', historyEntriesDropped);
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  }
+  pruneImageCachesAfterHistoryChange(historyEntriesDropped);
   /* BOARDFISH_DEV_DIAGNOSTICS_START */
   const ms = performance.now() - t0;
   HistoryDebug.max('maxPushHistoryMs', ms);

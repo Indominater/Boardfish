@@ -562,34 +562,47 @@ function applyTextEditCaretHit(obj, proxy, hit) {
   setTextEditCaretIndex(obj, index, hit.lineStartIndex);
 }
 
+function textCaretHitAtWorldPoint(obj, point, preferFull = false
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  , source
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+) {
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const layoutStart = canvasInputNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  const visible = preferFull && obj._layoutCache
+    ? getTextLayout(obj)
+    : getTextLayoutForViewport(obj, { y1: point.y, y2: point.y });
+  const layout = visible.length ? visible : getTextLayout(obj);
+  TextSelDebug._logLayout?.(source + '-layout', obj, layout, canvasInputNow() - layoutStart);
+  /* BOARDFISH_DEV_DIAGNOSTICS_START */
+  const hitStart = canvasInputNow();
+  /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  const hit = layoutHitTestCaret(layout, point.x, point.y, obj);
+  TextSelDebug._logHitTiming?.(source + '-hit', obj, hit, canvasInputNow() - hitStart, { wx: point.x, wy: point.y });
+  return hit;
+}
+
 function startTextSelectionDrag(e, obj, wp) {
   flushEditHistoryCheckpoint();
   const el = _editEl;
   TextSelDebug._logPointer?.('selection-drag-start', e, { objectId: obj?.id || '', wx: wp.x, wy: wp.y });
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const layoutStart = canvasInputNow();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const layout = getTextLayout(obj);
-  TextSelDebug._logLayout?.('selection-drag-start-layout', obj, layout, canvasInputNow() - layoutStart);
-  /* BOARDFISH_DEV_DIAGNOSTICS_START */
-  const clickHitStart = canvasInputNow();
-  /* BOARDFISH_DEV_DIAGNOSTICS_END */
-  const clickHit = layoutHitTestCaret(layout, wp.x, wp.y, obj);
-  TextSelDebug._logHitTiming?.('selection-drag-start-hit', obj, clickHit, canvasInputNow() - clickHitStart, {
-    wx: wp.x,
-    wy: wp.y,
-  });
+  const clickHit = textCaretHitAtWorldPoint(obj, wp, true
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , 'selection-drag-start'
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  );
   const clickIdx = clickHit.index;
   applyTextEditCaretHit(obj, el, clickHit);
-  if (typeof BOARDFISH_PRODUCTION === 'undefined') {
-    focusTextEditProxyNow(el, obj, 'selection-drag-focus', {
+  focusTextEditProxyNow(el
+    /* BOARDFISH_DEV_DIAGNOSTICS_START */
+    , obj, 'selection-drag-focus', {
       phase: 'selection-drag',
       clientX: e?.clientX ?? '',
       clientY: e?.clientY ?? '',
-    });
-  } else {
-    focusTextEditProxyNow(el);
-  }
+    }
+    /* BOARDFISH_DEV_DIAGNOSTICS_END */
+  );
   TextSelDebug._logSelection('mouse-down', el, obj);
   _caretVisible = true;
   scheduleRender(true, false);
@@ -597,14 +610,13 @@ function startTextSelectionDrag(e, obj, wp) {
     if (_editEl !== el) return;
     const wp2 = toWorld(ev.clientX, ev.clientY);
     TextSelDebug._logPointer?.('selection-drag-move', ev, { objectId: obj?.id || '', wx: wp2.x, wy: wp2.y });
-    /* BOARDFISH_DEV_DIAGNOSTICS_START */
-    const hitStart = canvasInputNow();
-    /* BOARDFISH_DEV_DIAGNOSTICS_END */
-    const endHit = layoutHitTestCaret(obj._layoutCache || layout, wp2.x, wp2.y, obj);
-    TextSelDebug._logHitTiming?.('selection-drag-move-hit', obj, endHit, canvasInputNow() - hitStart, {
-      wx: wp2.x,
-      wy: wp2.y,
-    });
+    const endHit = obj._layoutCache
+      ? layoutHitTestCaret(obj._layoutCache, wp2.x, wp2.y, obj)
+      : textCaretHitAtWorldPoint(obj, wp2, false
+        /* BOARDFISH_DEV_DIAGNOSTICS_START */
+        , 'selection-drag-move'
+        /* BOARDFISH_DEV_DIAGNOSTICS_END */
+      );
     const endIdx = endHit.index;
     const start = Math.min(clickIdx, endIdx);
     const end = Math.max(clickIdx, endIdx);
@@ -693,24 +705,11 @@ function startObjectDrag(e, obj) {
             wy: upPoint.y,
             worldPointMs: canvasInputDebugRound(canvasInputNow() - worldStart),
           });
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          const layoutStart = canvasInputNow();
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          const layout = getTextLayoutForViewport(obj, { y1: upPoint.y, y2: upPoint.y });
-          logClickEditStep('click-to-edit-layout', {
-            layoutMs: canvasInputDebugRound(canvasInputNow() - layoutStart),
-            layoutLines: Array.isArray(layout) ? layout.length : '',
-            layoutCached: Array.isArray(obj?._layoutCache),
-          });
-          /* BOARDFISH_DEV_DIAGNOSTICS_START */
-          const hitStart = canvasInputNow();
-          /* BOARDFISH_DEV_DIAGNOSTICS_END */
-          const clickHit = layoutHitTestCaret(layout.length ? layout : getTextLayout(obj), upPoint.x, upPoint.y, obj);
-          logClickEditStep('click-to-edit-hit', {
-            hitMs: canvasInputDebugRound(canvasInputNow() - hitStart),
-            returnedIdx: clickHit?.index ?? '',
-            lineStartIndex: clickHit?.lineStartIndex ?? '',
-          });
+          const clickHit = textCaretHitAtWorldPoint(obj, upPoint, false
+            /* BOARDFISH_DEV_DIAGNOSTICS_START */
+            , 'click-to-edit'
+            /* BOARDFISH_DEV_DIAGNOSTICS_END */
+          );
           /* BOARDFISH_DEV_DIAGNOSTICS_START */
           const caretStart = canvasInputNow();
           /* BOARDFISH_DEV_DIAGNOSTICS_END */

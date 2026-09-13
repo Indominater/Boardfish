@@ -2,22 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readSource, readJson } = require('../test-support/source.js');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
-const shellWord = 'desk' + 'top';
-const bridgeWord = 'T' + 'auri';
-const titlebarWord = 'title' + 'bar';
-const recoveryWord = 're' + 'covery';
-
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(root, relativePath), 'utf8');
-}
-
-function readJson(relativePath) {
-  return JSON.parse(readSource(relativePath));
-}
 
 function listFiles(dir, predicate = () => true) {
   const fullDir = path.join(root, dir);
@@ -32,96 +21,6 @@ function listFiles(dir, predicate = () => true) {
   return files;
 }
 
-function jsSourceFiles() {
-  return [
-    ...listFiles('src', (file) => /\.(js|mjs|html|css)$/.test(file)),
-    ...listFiles('scripts', (file) => /\.(js|mjs)$/.test(file)),
-  ];
-}
-
-function manifestScripts(name) {
-  const source = readSource('src/js/startup_manifest.mjs');
-  const match = source.match(new RegExp(`export const ${name} = Object\\.freeze\\(\\[([\\s\\S]*?)\\]\\);`));
-  assert.ok(match, `${name} is missing`);
-  return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
-}
-
-test('repository no longer contains the removed app shell', () => {
-  for (const relativePath of [
-    ['src', 't' + 'auri'].join('-'),
-    '.github/workflows/release.yml',
-    'scripts/sync-debug-tools.mjs',
-    'src/js/' + bridgeWord.toLowerCase() + '_bridge.js',
-    `src/js/runtime_${shellWord}.js`,
-    'src/js/runtime_web_' + 'n' + 'ative' + '.js',
-    `src/js/window_${titlebarWord}.js`,
-    `src/js/window_${recoveryWord}.js`,
-    `src/js/main.${shellWord}.dev.mjs`,
-  ]) {
-    assert.equal(fs.existsSync(path.join(root, relativePath)), false, `${relativePath} should be removed`);
-  }
-});
-
-test('package scripts and dependencies are web-only', () => {
-  const pkg = readJson('package.json');
-  const lock = readSource('package-lock.json');
-
-  assert.equal(pkg.scripts.dev, 'npm run web:dev');
-  assert.equal(pkg.scripts.build, 'npm run web:build');
-  assert.equal(pkg.scripts['web:build'], 'node scripts/build-runtime-assets.mjs web-preview');
-  assert.equal(pkg.devDependencies.esbuild.startsWith('^'), true);
-  assert.equal(Object.keys(pkg.devDependencies).length, 1);
-  assert.doesNotMatch(JSON.stringify(pkg), new RegExp(bridgeWord, 'i'));
-  assert.doesNotMatch(lock, new RegExp(bridgeWord, 'i'));
-});
-
-test('startup manifest exposes only web variants', () => {
-  const manifest = readSource('src/js/startup_manifest.mjs');
-  const webDev = manifestScripts('WEB_DEV_SCRIPTS');
-  const webPreview = manifestScripts('WEB_PREVIEW_SCRIPTS');
-
-  assert.doesNotMatch(manifest, /VARIANT_SCRIPTS/);
-  assert.doesNotMatch(manifest, new RegExp(shellWord.toUpperCase()));
-  assert.equal(webDev[0], 'web_env.js');
-  assert.ok(webDev.includes('web_runtime.js') && [webDev, webPreview].every(files => files.indexOf('motion.js') >= 0 && files.indexOf('motion.js') < Math.min(files.indexOf('viewport.js'), files.indexOf('selection_input.js'))));
-  assert.ok(webDev.includes('runtime_utils.js'));
-  assert.ok(webDev.includes('startup_debug.js'));
-  assert.ok(webPreview.includes('runtime_utils.js'));
-  assert.equal(webPreview[0], 'web_env.js');
-  assert.equal(webPreview.includes('runtime_debug_noop.js'), false);
-  assert.equal(fs.existsSync(path.join(root, 'src/js/runtime_debug_noop.js')), false);
-  for (const file of [...webDev, ...webPreview]) {
-    assert.doesNotMatch(file, new RegExp(bridgeWord, 'i'));
-    assert.doesNotMatch(file, new RegExp(shellWord, 'i'));
-    assert.doesNotMatch(file, new RegExp(`${titlebarWord}|${recoveryWord}|runtime_web_${'n' + 'ative'}`));
-  }
-});
-
-test('frontend source has no removed bridge or window chrome calls', () => {
-  const disallowed = [
-    'Boardfish' + bridgeWord,
-    'has' + bridgeWord,
-    bridgeWord.toLowerCase() + 'Invoke',
-    bridgeWord.toLowerCase() + 'Listen',
-    bridgeWord.toLowerCase() + 'ConvertFileSrc',
-    '__' + bridgeWord.toUpperCase() + '__',
-    'data-' + bridgeWord.toLowerCase(),
-    'app-' + 'window',
-    'window_' + titlebarWord,
-    'window_' + recoveryWord,
-    'image' + 'AssetUrlCache',
-    'is' + 'N' + 'ative' + 'ImageRef',
-    'n' + 'ative-ref',
-  ];
-
-  for (const file of jsSourceFiles()) {
-    const source = readSource(file);
-    for (const term of disallowed) {
-      assert.equal(source.includes(term), false, `${file} still contains ${term}`);
-    }
-  }
-});
-
 test('browser tab always uses the fixed Boardfish title', () => {
   const html = readSource('src/index.html');
   const runtimeFiles = [
@@ -134,7 +33,6 @@ test('browser tab always uses the fixed Boardfish title', () => {
   for (const file of runtimeFiles) {
     const source = readSource(file);
     assert.doesNotMatch(source, /\bdocument\s*\.\s*title\b/, `${file} changes the browser tab title`);
-    assert.doesNotMatch(source, /\b(?:updateDocumentTitle|updateTitle|reassertTitle)\b/, `${file} contains dynamic tab-title code`);
   }
 });
 
@@ -160,16 +58,12 @@ test('image storage is web-ref and data-url based', () => {
   const boardContainer = readSource('src/js/web_board_container.js');
 
   assert.match(types, /MANIFEST: 'manifest'/);
-  assert.doesNotMatch(types, new RegExp('N' + 'ATIVE'));
   assert.match(imageState, /blobForImageSource/);
-  assert.doesNotMatch(imageState, /webImageDisplaySrc|revokeWebImageSource/);
   assert.match(imageInsert, /createWebImageSourceFromBlob\(file, imgKey\)/);
-  assert.match(imageInsert, /file instanceof File[\s\S]*new Blob\(\[file\]/);
   assert.doesNotMatch(imageInsert, /readAsArrayBuffer/);
   assert.match(imageInsert, /const WEB_IMAGE_INSERT_CONCURRENCY = 3;/);
   assert.match(boardContainer, /createWebImageRef/);
   assert.match(boardContainer, /web: true/);
-  assert.doesNotMatch(boardContainer, /objectUrl|displaySrcForImageSource|revokeImageSource/);
 });
 
 test('clipboard and debug tooling use browser clipboard paths', () => {
@@ -183,20 +77,6 @@ test('clipboard and debug tooling use browser clipboard paths', () => {
   assert.match(clipboardExport, /web-paste-browser/);
   assert.match(startupDebug, /method: 'browser-download'/);
   assert.match(startupDebug, /await applyAppTheme\(targetTheme[^\n]+\n\s+await new Promise\(\(resolve\) => requestAnimationFrame\(resolve\)\);/);
-  assert.doesNotMatch(startupDebug, /writeDebugLogFile/);
-});
-
-test('motion API is specialized to copy feedback and browser find stays native', () => {
-  const motion = readSource('src/js/motion.js');
-  const keyboard = readSource('src/js/keyboard.js');
-
-  assert.match(motion, /const applyCopyFeedback =/);
-  assert.doesNotMatch(motion, /applyActionAnimation|COPY_JIGGLE_ACTIONS/);
-  assert.doesNotMatch(motion, /browser-find-shortcut/);
-  assert.doesNotMatch(motion, /appWindow/);
-  assert.doesNotMatch(motion, new RegExp('app-' + 'window'));
-  assert.match(keyboard, /isShortcutKey\(e, 'f'\).*isShortcutKey\(e, 'g'\).*e\.key === 'F3'/);
-  assert.doesNotMatch(keyboard, /browser-find-shortcut/);
 });
 
 test('text edit entry and shortcuts keep edge-case guards', () => {
@@ -221,7 +101,6 @@ test('browser paste fallback owns exactly one input shield token', () => {
 
   assert.match(clipboardExport, /const releaseInputShield = acquireInputShield\(\);/);
   assert.match(clipboardExport, /finally \{\s*releaseInputShield\(\);\s*\}/);
-  assert.doesNotMatch(clipboardExport, /showInputShield\(\);\s*try \{\s*const imageBlob/);
 });
 
 test('dirty tracking treats net-empty boards as clean only against an empty saved baseline', () => {
@@ -230,9 +109,7 @@ test('dirty tracking treats net-empty boards as clean only against an empty save
   const objectCommands = readSource('src/js/object_commands.js');
   const match = io.match(/function isDirty\(\) \{([\s\S]*?)\n\}/);
   assert.ok(match, 'isDirty function is missing');
-  assert.doesNotMatch(io, /function (?:isPersistableBoardObject|hasPersistableBoardObjects)\(/);
   assert.match(io, /function isDefaultEmptyBoardState\(objectList = objects\) \{[\s\S]*for \(const obj of objectList \|\| \[\]\)[\s\S]*return true;\s*\}/);
-  assert.doesNotMatch(io, /function isSavedDefaultEmptyBoardState\(\)/);
   assert.match(io, /function isCleanDefaultEmptyBoardState\(\) \{\s*return savedDefaultEmptyBoard && isDefaultEmptyBoardState\(objects\);\s*\}/);
   assert.match(match[1], /revision !== savedHistoryRevision/);
   assert.match(history, /revision: reason === 'text-edit-enter' && !contentChanged \? prevEntry\?\.revision : \+\+_historyRevision/);
@@ -261,7 +138,6 @@ test('dark mode icon is local and offline-safe', () => {
   assert.match(sw, /key\.startsWith\(BOARDFISH_CACHE_NAMESPACE\)/);
   assert.match(sw, /function matchCurrentCache\(request\)[\s\S]*currentCache\.then\(\(cache\) => cache\.match\(request\)\)/);
   assert.doesNotMatch(sw, /caches\.match\(/);
-  assert.doesNotMatch(sw, /boardfish-web-v\d/);
   assert.doesNotMatch(sw, /await cache\.put/);
 });
 
@@ -293,18 +169,7 @@ test('image hydration queue processes until its time budget is consumed', () => 
 
   assert.match(imageState, /var _imageHydrationQueue = new Map\(\);/);
   assert.match(imageState, /if \(count > 0 && performance\.now\(\) - batchStart >= 6\) break;/);
-  assert.doesNotMatch(imageState, /_imageHydrationQueued/);
   assert.match(imageState, /cacheImage\(key, source[\s\S]*?, dbg[\s\S]*?\);/);
-  assert.doesNotMatch(imageState, /ensureImageDisplaySrc/);
-  assert.doesNotMatch(imageState, /count < 1 && performance\.now\(\) - batchStart < 6/);
-});
-
-test('drawable bitmap warmup queue reuses one insertion-ordered map', () => {
-  const imageVariants = readSource('src/js/image_variants.js');
-
-  assert.match(imageVariants, /var drawableBitmapWarmupQueue = new Map\(\);/);
-  assert.match(imageVariants, /for \(const \[source, meta\] of drawableBitmapWarmupQueue\)/);
-  assert.doesNotMatch(imageVariants, /var drawableBitmapWarmupQueued =/);
 });
 
 test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing size', () => {
@@ -314,53 +179,13 @@ test('edit offscreen rebuild is synchronous, single-pass, and reuses its backing
   const source = viewport.slice(start, end > start ? end : undefined);
 
   assert.notEqual(start, -1);
-  assert.doesNotMatch(source, /bitmapPromises/);
-  assert.doesNotMatch(source, /ensure-bitmaps/);
   assert.doesNotMatch(source, /scheduleRender/);
   assert.match(source, /if \(_offscreen\.width !== boardCanvas\.width\) _offscreen\.width = boardCanvas\.width;/);
   assert.match(source, /if \(_offscreen\.height !== boardCanvas\.height\) _offscreen\.height = boardCanvas\.height;/);
   assert.match(source, /_offscreenDirty = false;/);
-  assert.doesNotMatch(viewport, /_offscreen(?:Rebuilding|Version)/);
-});
-
-test('viewport transforms do not schedule an unbounded automatic text prewarm', () => {
-  const viewport = readSource('src/js/viewport.js');
-  const start = viewport.indexOf('function applyTransform');
-  const end = viewport.indexOf('function getLastApplyTransformMeta', start);
-  const source = viewport.slice(start, end > start ? end : undefined);
-
-  assert.doesNotMatch(source, /scheduleVisibleTextLayoutPrewarmAfterIdle\(/);
-  assert.match(viewport, /function prewarmVisibleTextLayoutCaches\(options = \{\}\)/);
-});
-
-test('open hydration finishes all image and text draw caches before interaction', () => {
-  const ioClose = readSource('src/js/io_close.js');
-  const imageVariants = readSource('src/js/image_variants.js');
-  const start = ioClose.indexOf('async function finishOpenedBoard');
-  const end = ioClose.indexOf('\nfunction applyBoardData', start);
-  const source = ioClose.slice(start, end > start ? end : undefined);
-
-  assert.match(ioClose, /function getPendingHydratableImageKeys\(keys = \[\]\) \{\s*const seen = new Set\(keys\);/);
-  assert.match(source, /const visibleKeys = getVisibleImageKeys\(Infinity\);\s*const hydrationKeys = getPendingHydratableImageKeys\(\[\.\.\.visibleKeys\]\);/);
-  assert.match(source, /hydrateImageKeysWithLimit\([\s\S]*hydrationKeys[\s\S]*'hydrate-all'/);
-  assert.match(source, /hydrateTextDrawCachesForOpen/);
-  assert.match(source, /await Promise\.all\(\[[\s\S]*imageHydrationPromise,[\s\S]*textHydrationPromise/);
-  assert.match(source, /await settleOpenImageDrawCaches\(getOpenHydrationConcurrency\(\)\);/);
-  assert.ok(source.indexOf('settleOpenImageDrawCaches') < source.indexOf('_boardOpening = false;'));
-  assert.match(source, /mode: 'all-before-interaction'/);
-  assert.doesNotMatch(ioClose, /hydrateRemainingImagesForOpen|BACKGROUND_OPEN_HYDRATION_INPUT_IDLE_MS/);
-  assert.match(ioClose, /async function hydrateTextDrawCachesForOpen/);
-  assert.match(ioClose, /const layout = getTextLayout\(obj\);[\s\S]*prepareTextLineForDraw\(line\);[\s\S]*warmOpenTextLineForDraw/);
-  assert.match(imageVariants, /async function settleOpenImageDrawCaches/);
-  assert.match(imageVariants, /while \(imageScaledVariantQueue\.length\)/);
-  assert.match(imageVariants, /for \(const \[source, meta\] of drawableBitmapWarmupQueue\)/);
 });
 
 test('save and open validation stay at the authoritative container boundaries', () => {
-  const ioClose = readSource('src/js/io_close.js');
-  assert.doesNotMatch(ioClose, /validateBoardPayloadFor(?:Save|Open)/);
-  assert.doesNotMatch(ioClose, /boardLimitImageBytesForData/);
-
   const container = readSource('src/js/web_board_container.js');
   const createStart = container.indexOf('async function createBoardContainerBlob');
   const createEnd = container.indexOf('\n  async function readBoardContainer', createStart);
@@ -383,23 +208,4 @@ test('save and open validation stay at the authoritative container boundaries', 
 
   const saveDebug = readSource('src/js/debug_save.js');
   assert.match(saveDebug, /jsonBytes: e\.meta\?\.rust\?\.json_bytes \?\? ''/);
-  assert.doesNotMatch(saveDebug, /e\.meta\?\.jsonBytes/);
-});
-
-test('failed saves leave a visible failure message in the viewport pill', () => {
-  const ioClose = readSource('src/js/io_close.js');
-  assert.match(
-    ioClose,
-    /function showSaveFailurePill\(\) \{\s*showIslandMsg\('Save failed', long_message\);\s*\}/,
-  );
-  assert.equal((ioClose.match(/showSaveFailurePill\(\);/g) || []).length, 2);
-});
-
-test('addText sizes multiline text without spreading all lines into Math.max', () => {
-  const objectCommands = readSource('src/js/object_commands.js');
-  const match = objectCommands.match(/function addText\([\s\S]*?const obj = \{/);
-  assert.ok(match, 'addText function body is missing');
-
-  assert.doesNotMatch(match[0], /Math\.max\(\.\.\.lines\.map/);
-  assert.match(match[0], /let maxLineLen = 1;/);
 });

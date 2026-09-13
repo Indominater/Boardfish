@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { loadReadableImageSourceBlob, pngBytes } = require('../test-support/image_output.js');
+const WebContainer = require('../src/js/web_board_container.js');
 
 const root = path.join(__dirname, '..');
 
@@ -201,6 +203,9 @@ function loadClipboardExportHarness(options = {}) {
     imageFileDebugName: (file, fallback = 'clipboard-image') => file?.name || `${fallback}.${file?.type === 'image/jpeg' ? 'jpg' : 'png'}`,
     async insertImageFiles(files, x, y, source) { calls.insertedImages.push({ files, x, y, source }); context.objects.push({}); },
     isWebImageRef: options.isWebImageRef || (() => false),
+    readableImageSourceBlob: options.readableImageSourceBlob || loadReadableImageSourceBlob({
+      container: { ...WebContainer, ...options.BoardfishWebBoardContainer },
+    }),
     normalizeTextContent(value) {
       return String(value ?? '').replace(/\r\n?/g, '\n');
     },
@@ -208,6 +213,7 @@ function loadClipboardExportHarness(options = {}) {
       calls.renderImageToCanvas++;
       return options.renderedCanvas || null;
     },
+    async renderStoredImageToCanvas() { return options.storedCanvas || null; },
     canvasToPngBlob() {
       calls.canvasToPngBlob++;
       if (options.deferCanvasToPngBlob) {
@@ -243,7 +249,7 @@ function loadClipboardExportHarness(options = {}) {
   return context;
 }
 
-function loadClipboardPasteObjectsHarness() {
+function loadClipboardPasteObjectsHarness({ realLimits = false } = {}) {
   const source = fs.readFileSync(path.join(root, 'src/js/clipboard_export_init.js'), 'utf8');
   const sourceTextObject = {
     id: 'text-source',
@@ -263,6 +269,7 @@ function loadClipboardPasteObjectsHarness() {
     selections: [],
     synced: [],
     textBytes: [],
+    messages: [],
   };
   const context = {
     console,
@@ -301,7 +308,6 @@ function loadClipboardPasteObjectsHarness() {
       },
     },
     BoardfishImageStore: {
-      hasSource() { return true; },
       setSource() {},
     },
     BoardfishMotion: {
@@ -310,6 +316,8 @@ function loadClipboardPasteObjectsHarness() {
     BoardfishWebLimits: {
       canAddObjects() { return true; },
       canAcceptAdditionalContentBytes() { return true; },
+      canAcceptAdditionalTextCharacters() { return true; },
+      textCharacterCount(text) { return Array.from(String(text ?? '')).length; },
       imageSourceByteLength() { return 0; },
       textByteLength(text) {
         calls.textBytes.push(String(text ?? ''));
@@ -353,6 +361,15 @@ function loadClipboardPasteObjectsHarness() {
       return first <= last ? lines.slice(first, last + 1).join('\n') : '';
     },
   };
+  if (realLimits) {
+    const limitsContext = vm.createContext({
+      objects: context.objects,
+      TextEncoder,
+      showIslandMsg(message, duration) { calls.messages.push({ message, duration }); },
+    });
+    vm.runInContext(fs.readFileSync(path.join(root, 'src/js/board_limits.js'), 'utf8'), limitsContext);
+    context.BoardfishWebLimits = limitsContext.BoardfishWebLimits;
+  }
   vm.createContext(context);
   vm.runInContext(`${source}\nglobalThis.pasteAtPos = pasteAtPos;\n`, context, {
     filename: 'clipboard_export_init.js',
@@ -387,6 +404,8 @@ function loadTextEditCopyHarness(value, options = {}) {
     console,
     editingId: 'text-1',
     _editEl: editProxy,
+    objectsMap: new Map([['text-1', { id: 'text-1', type: 'text', data: { content: value } }]]),
+    setJsClipboard(clipboard) { calls.clipboard = clipboard; },
     calls,
     BoardfishClipboardIO: {
       copyTextToClipboard(text) {
@@ -425,6 +444,11 @@ function loadTextEditCopyHarness(value, options = {}) {
   };
 
   vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(root, 'src/js/text_editor.js'), 'utf8'),
+    context,
+    { filename: 'text_editor.js' },
+  );
   vm.runInContext(
     `${source.slice(start, end)}\n` +
       'globalThis.copyTextEditSelection = copyTextEditSelection;\n',
@@ -465,7 +489,37 @@ test('web js clipboard without a browser marker is invalidated after leaving the
   }), false);
 });
 
-test('clipboard IO writes the same rich image representations on every reported platform', async () => {
+test('clipboard image base64 fallback preserves bytes across chunk boundaries', async () => {
+  let writtenParts;
+  const context = vm.createContext({
+    Blob,
+    btoa,
+    Buffer: undefined,
+    FileReader: undefined,
+    ClipboardItem: class {
+      constructor(parts) { this.parts = parts; }
+    },
+    navigator: {
+      clipboard: {
+        async write(items) { writtenParts = items[0].parts; },
+      },
+    },
+  });
+  vm.runInContext(fs.readFileSync(path.join(root, 'src/js/clipboard_io.js'), 'utf8'), context);
+
+  for (const length of [32766, 32767, 32768, 32769, 65536]) {
+    const bytes = Uint8Array.from({ length }, (_, index) => index % 256);
+    await context.BoardfishClipboardIO.copyImageBlobToClipboard(
+      new Blob([bytes], { type: 'image/png' }), 'bf-image',
+    );
+    const html = await (await writtenParts['text/html']).text();
+    const base64 = /src="data:image\/png;base64,([^"]+)"/.exec(html)?.[1];
+    assert.ok(base64);
+    assert.ok(Buffer.from(base64, 'base64').equals(Buffer.from(bytes)), `${length} bytes round-trip`);
+  }
+});
+
+test('clipboard IO preserves rich representations and supports direct-only clipboard items', async () => {
   const previous = {
     BoardfishWebLimits: globalThis.BoardfishWebLimits,
     ClipboardItem: globalThis.ClipboardItem,
@@ -486,8 +540,6 @@ test('clipboard IO writes the same rich image representations on every reported 
     Object.defineProperty(globalThis, 'navigator', {
       configurable: true,
       value: {
-        userAgent: '',
-        userAgentData: { platform: '' },
         clipboard: {
           async write(items) {
             writes.push(items[0]);
@@ -540,36 +592,13 @@ test('clipboard IO writes the same rich image representations on every reported 
     assert.match(imageHtml, /boardfish-clipboard:bf-image/);
     assert.match(imageHtml, /<img src="data:image\/png;base64,AQID" alt="">/);
 
-    globalThis.navigator.userAgentData.platform = 'Android';
-    let resolveAndroidImageBlob;
-    const pendingAndroidImageBlob = new Promise((resolve) => { resolveAndroidImageBlob = resolve; });
-    const androidCopyPromise = ClipboardIO.copyImageBlobToClipboard(
-      pendingAndroidImageBlob,
-      'bf-android-image',
-    );
+    const directBlob = new Blob([new Uint8Array([7, 8, 9])], { type: 'image/png' });
+    const directResult = await ClipboardIO.copyImageBlobToClipboard(directBlob, 'bf-direct-image');
     assert.equal(writes.length, 3);
     assert.deepEqual(Object.keys(writes[2].parts), ['image/png', 'text/html']);
-    assert.equal(typeof writes[2].parts['image/png']?.then, 'function');
-    assert.equal(typeof writes[2].parts['text/html']?.then, 'function');
-    resolveAndroidImageBlob(new Blob([new Uint8Array([4, 5, 6])], { type: 'image/png' }));
-    const androidResult = await androidCopyPromise;
-    assert.equal(androidResult.boardfishTokenWritten, true);
-    assert.match(await (await writes[2].parts['text/html']).text(), /boardfish-clipboard:bf-android-image/);
-
-    globalThis.navigator.userAgentData.platform = '';
-    globalThis.navigator.userAgent = 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36';
-    const androidUaBlob = new Blob([new Uint8Array([7, 8, 9])], { type: 'image/png' });
-    const androidUaResult = await ClipboardIO.copyImageBlobToClipboard(
-      androidUaBlob,
-      'bf-android-ua-image',
-    );
-    assert.equal(writes.length, 4);
-    assert.deepEqual(Object.keys(writes[3].parts), ['image/png', 'text/html']);
-    assert.equal(writes[3].parts['image/png'], androidUaBlob);
-    assert.equal(androidUaResult.boardfishTokenWritten, true);
-    assert.match(await (await writes[3].parts['text/html']).text(), /boardfish-clipboard:bf-android-ua-image/);
-
-    globalThis.navigator.userAgent = '';
+    assert.equal(writes[2].parts['image/png'], directBlob);
+    assert.equal(directResult.boardfishTokenWritten, true);
+    assert.match(await (await writes[2].parts['text/html']).text(), /boardfish-clipboard:bf-direct-image/);
     class DirectBlobOnlyClipboardItem {
       constructor(parts) {
         if (Object.values(parts).some((part) => typeof part?.then === 'function')) {
@@ -579,12 +608,12 @@ test('clipboard IO writes the same rich image representations on every reported 
       }
     }
     globalThis.ClipboardItem = DirectBlobOnlyClipboardItem;
-    const legacyBlob = new Blob([new Uint8Array([10, 11, 12])], { type: 'image/png' });
-    const legacyResult = await ClipboardIO.copyImageBlobToClipboard(legacyBlob, 'bf-legacy-image');
-    assert.equal(writes.length, 5);
-    assert.deepEqual(Object.keys(writes[4].parts), ['image/png']);
-    assert.equal(writes[4].parts['image/png'], legacyBlob);
-    assert.equal(legacyResult.boardfishTokenWritten, false);
+    const fallbackBlob = new Blob([new Uint8Array([10, 11, 12])], { type: 'image/png' });
+    const fallbackResult = await ClipboardIO.copyImageBlobToClipboard(fallbackBlob, 'bf-fallback-image');
+    assert.equal(writes.length, 4);
+    assert.deepEqual(Object.keys(writes[3].parts), ['image/png']);
+    assert.equal(writes[3].parts['image/png'], fallbackBlob);
+    assert.equal(fallbackResult.boardfishTokenWritten, false);
 
     const textResult = await ClipboardIO.copyTextToClipboard(
       'A&<\r\nB\rC\nD',
@@ -592,10 +621,10 @@ test('clipboard IO writes the same rich image representations on every reported 
       { boardfishToken: 'bf-rich-text' },
     );
     assert.equal(textResult.boardfishTokenWritten, true);
-    assert.equal(writes.length, 6);
-    assert.equal(await writes[5].parts['text/plain'].text(), 'A&<\r\nB\rC\nD');
+    assert.equal(writes.length, 5);
+    assert.equal(await writes[4].parts['text/plain'].text(), 'A&<\r\nB\rC\nD');
     assert.equal(
-      await writes[5].parts['text/html'].text(),
+      await writes[4].parts['text/html'].text(),
       '<!--boardfish-clipboard:bf-rich-text--><div>A&amp;&lt;<br>B<br>C<br>D</div>',
     );
   } finally {
@@ -644,46 +673,26 @@ test('a failed text write does not start copy feedback', async () => {
   assert.deepEqual(context.calls.objectJello, []);
 });
 
-test('copying an ordinary object starts feedback after its in-app clipboard copy', () => {
-  const shape = {
-    id: 'shape-1',
-    type: 'rectangle',
-    x: 0,
-    y: 0,
-    w: 120,
-    h: 80,
-    z: 1,
-    data: {},
-  };
-  const context = loadClipboardExportHarness({ selectedObject: shape });
-
-  assert.equal(context.copySelected(), true);
-  assert.equal(context.calls.jsClipboards.length, 1);
-  assert.equal(context.calls.jsClipboards[0].type, 'objects');
-  assert.deepEqual([...context.calls.jsClipboards[0].objects].map((obj) => obj.id), ['shape-1']);
-  assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['shape-1']]);
-});
-
 test('copying multiple objects jiggles after the browser clipboard marker settles', async () => {
   const first = {
-    id: 'shape-1',
-    type: 'rectangle',
+    id: 'text-1',
+    type: 'text',
     x: 0,
     y: 0,
     w: 120,
     h: 80,
     z: 1,
-    data: {},
+    data: { content: 'first' },
   };
   const second = {
-    id: 'shape-2',
-    type: 'ellipse',
+    id: 'text-2',
+    type: 'text',
     x: 160,
     y: 0,
     w: 120,
     h: 80,
     z: 2,
-    data: {},
+    data: { content: 'second' },
   };
   const context = loadClipboardExportHarness({
     selectedObjects: [first, second],
@@ -691,7 +700,7 @@ test('copying multiple objects jiggles after the browser clipboard marker settle
   });
 
   assert.equal(context.copySelected(), true);
-  assert.deepEqual([...context.calls.jsClipboards[0].objects].map((obj) => obj.id), ['shape-1', 'shape-2']);
+  assert.deepEqual([...context.calls.jsClipboards[0].objects].map((obj) => obj.id), ['text-1', 'text-2']);
   assert.deepEqual(context.calls.copiedTokens, ['web-token']);
   assert.equal(context.calls.pulses, 0);
 
@@ -717,7 +726,6 @@ test('cutting a selected object copies without jiggle and deletes immediately', 
 });
 
 test('cutting a selected image keeps copy feedback disabled after the system write settles', async () => {
-  const pngBytes = new Uint8Array([137, 80, 78, 71]);
   const imageSource = { web: true, mime: 'image/png' };
   const imageObject = {
     id: 'image-cut',
@@ -752,7 +760,6 @@ test('cutting a selected image keeps copy feedback disabled after the system wri
 });
 
 test('copying an untransformed web PNG image writes source bytes without rendering', async () => {
-  const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const imageSource = {
     web: true,
     mime: 'image/png',
@@ -791,11 +798,12 @@ test('copying an untransformed web PNG image writes source bytes without renderi
   assert.equal(context.calls.canvasToPngBlob, 0);
   assert.equal(context.calls.copiedImages.length, 1);
   assert.equal(context.calls.copiedImages[0].token, 'web-token');
-  assert.equal(context.calls.copiedImages[0].blob.type, 'image/png');
-  assert.equal(context.calls.copiedImages[0].blob.size, pngBytes.length);
+  const copiedBlob = await context.calls.copiedImages[0].blob;
+  assert.equal(copiedBlob.type, 'image/png');
+  assert.equal(copiedBlob.size, pngBytes.length);
   assert.deepEqual(
-    new Uint8Array(await context.calls.copiedImages[0].blob.arrayBuffer()),
-    pngBytes,
+    new Uint8Array(await copiedBlob.arrayBuffer()),
+    new Uint8Array(pngBytes),
   );
   assert.deepEqual(context.calls.objectJello, []);
 
@@ -851,8 +859,53 @@ test('copying a transformed image starts the clipboard write before PNG encoding
   assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [['image-transformed']]);
 });
 
+test('copy recovers unreadable and mislabeled images, including duplicates, before clipboard consumption', async (t) => {
+  const unreadable = new Blob([pngBytes], { type: 'image/png' });
+  Object.defineProperty(unreadable, 'stream', { value() { throw new Error('file changed on disk'); } });
+  const sources = [
+    WebContainer.createWebImageRef({ mime: 'image/png', blob: unreadable }),
+    WebContainer.createWebImageRef({ mime: 'image/png', blob: new Blob(['not a PNG'], { type: 'image/png' }) }),
+    'data:image/png;base64,invalid%%%data',
+  ];
+  for (const [index, imageSource] of sources.entries()) {
+    await t.test(`source ${index + 1}`, async () => {
+      for (const id of ['image-original', 'image-duplicate']) {
+        const renderedBlob = new Blob([pngBytes], { type: 'image/png' });
+        const imageObject = { id, type: 'image', data: { imgKey: 'img-shared', rotation: 0, flipX: false } };
+        const context = loadClipboardExportHarness({
+          selectedObject: imageObject,
+          imageSource,
+          BoardfishWebBoardContainer: WebContainer,
+          isWebImageRef: WebContainer.isWebImageRef,
+          renderedCanvas: { width: 192, height: 192 },
+          renderedBlob,
+          deferCopyImage: true,
+        });
+
+        const copied = context.copySelected();
+        assert.equal(context.calls.copiedImages.length, 1, 'write starts inside the copy gesture');
+        assert.equal(await context.calls.copiedImages[0].blob, renderedBlob);
+        assert.equal(context.calls.renderImageToCanvas, 1);
+        assert.deepEqual(context.calls.objectJello, []);
+        context.calls.resolveNextCopiedImage();
+        assert.equal(await copied, true);
+        assert.deepEqual(context.calls.objectJello.map((ids) => [...ids]), [[id]]);
+        assert.deepEqual(imageObject.data, { imgKey: 'img-shared', rotation: 0, flipX: false });
+      }
+    });
+  }
+});
+
+test('an unrecoverable image fails copy without success feedback', async () => {
+  const context = loadClipboardExportHarness({
+    selectedObject: { id: 'broken', type: 'image', data: { imgKey: 'missing' } },
+  });
+  context.console = { error() {} };
+  assert.equal(await context.copySelected(), false);
+  assert.deepEqual(context.calls.objectJello, []);
+});
+
 test('a rejected system image write does not start copy feedback', async () => {
-  const pngBytes = new Uint8Array([137, 80, 78, 71]);
   const imageSource = { web: true, mime: 'image/png' };
   const imageObject = {
     id: 'image-failed-copy',
@@ -913,6 +966,10 @@ test('copying highlighted text omits whitespace-only lines at selection edges', 
   await context.copyTextEditSelection();
 
   assert.deepEqual(context.calls.copiedTexts, ['  first line  \n second line\t ']);
+  assert.deepEqual({ ...context.calls.clipboard }, {
+    type: 'text-selection',
+    text: '  first line  \n second line\t ',
+  });
   assert.deepEqual(context.calls.jello, [{
     id: 'text-1',
     start: 0,
@@ -965,4 +1022,43 @@ test('object-limit rejection happens before pasted text trimming and measurement
   await context.pasteAtPos(300, 200);
   assert.equal(context.calls.clones, 0);
   assert.deepEqual([context.calls.synced, context.calls.textBytes, context.calls.added, context.calls.histories], [[], [], [], ['browser-token-read']]);
+});
+
+test('mixed object paste rejects the whole clipboard before cloning when combined text exceeds 25,000', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness({ realLimits: true });
+  context.objects.push({ id: 'existing', type: 'text', data: { content: 'x'.repeat(24996) } });
+  sourceTextObject.data.content = 'ab';
+  context.jsClipboard.objects.push(
+    { ...sourceTextObject, id: 'second-text', data: { content: ' \t😀x' } },
+    { id: 'image-source', type: 'image', x: 0, y: 0, w: 10, h: 10, data: { imgKey: 'image' } },
+  );
+
+  await context.pasteAtPos(300, 200);
+
+  assert.equal(context.objects.length, 1);
+  assert.equal(context.calls.clones, 0);
+  assert.equal(context.zCounter, 1);
+  assert.equal(context._pasteInProgress, false);
+  assert.deepEqual(context.calls.added, []);
+  assert.deepEqual(context.calls.histories, []);
+  assert.deepEqual(context.calls.selections, []);
+  assert.deepEqual(context.calls.synced, []);
+  assert.equal(context.calls.messages.length, 1);
+  assert.match(context.calls.messages[0].message, /25,000/);
+  assert.equal(context.calls.messages[0].duration, 4500);
+});
+
+test('object paste counts normalized content and accepts exactly 25,000 characters', async () => {
+  const { context, sourceTextObject } = loadClipboardPasteObjectsHarness({ realLimits: true });
+  context.objects.push({ id: 'existing', type: 'text', data: { content: 'x'.repeat(24996) } });
+  sourceTextObject.data.content = '\r\n  \r\n \t😀x\r\n\t';
+
+  await context.pasteAtPos(300, 200);
+
+  assert.equal(context.calls.added.length, 1);
+  assert.equal(context.calls.added[0].data.content, ' \t😀x');
+  assert.equal(context.BoardfishWebLimits.currentTextCharacters(), 25000);
+  assert.equal(sourceTextObject.data.content, '\r\n  \r\n \t😀x\r\n\t');
+  assert.deepEqual(context.calls.messages, []);
+  assert.deepEqual(context.calls.histories, ['paste-objects']);
 });
