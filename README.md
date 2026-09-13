@@ -1,6 +1,6 @@
 # Boardfish
 
-[https://ninjafishy.github.io/Boardfish/](https://ninjafishy.github.io/Boardfish/)
+Link (Chromium browser recommended): [ninjafishy.github.io/Boardfish/](https://ninjafishy.github.io/Boardfish/)
 
 Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in the browser and provides a lightweight environment for visual research, moodboarding, and snippets.
 
@@ -15,8 +15,6 @@ Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in th
 - Export one image, selected images, or all images
 - Losslessly copy images back to your clipboard
 - Save everything locally as a portable .bf file
-
-Each board supports up to 100 objects and 25,000 characters across all textboxes, including spaces and tabs. A paste that would exceed either limit is rejected in full.
 
 ## Keyboard Shortcuts
 
@@ -34,20 +32,19 @@ Each board supports up to 100 objects and 25,000 characters across all textboxes
 | Copy | Cmd+C | Ctrl+C |
 | Cut | Cmd+X | Ctrl+X |
 | Paste | Cmd+V | Ctrl+V |
-| Duplicate selected | Cmd+D | Ctrl+D |
-| Move selected to back | Cmd+[ | Ctrl+[ |
-| Flip selected image(s) | Cmd+F | Ctrl+F |
-| Rotate selected image(s) | Cmd+R | Ctrl+R |
-| Export selected image(s) | Cmd+E | Ctrl+E |
+| Duplicate | Cmd+D | Ctrl+D |
+| Move to back | Cmd+[ | Ctrl+[ |
+| Flip image(s) | Cmd+F | Ctrl+F |
+| Rotate image(s) | Cmd+R | Ctrl+R |
+| Export image(s) | Cmd+E | Ctrl+E |
 | Undo | Cmd+Z | Ctrl+Z |
 | Redo | Cmd+Shift+Z / Cmd+Y | Ctrl+Shift+Z / Ctrl+Y |
-| Delete selected | Backspace / Delete | Backspace / Delete |
+| Delete | Backspace / Delete | Backspace / Delete |
 | Edit text | Double-click | Double-click |
-| Pan canvas | Space + drag | Space + drag |
-| Pan with wheel / trackpad | Scroll | Scroll |
-| Zoom around cursor | Cmd+scroll | Ctrl+scroll |
-| Reset zoom to nearest object | Cmd+0 | Ctrl+0 |
-| Deselect / exit edit / close menus | Esc | Esc |
+| Pan | Space + drag | Space + drag |
+| Zoom | Cmd+scroll | Ctrl+scroll |
+| Reset zoom | Cmd+0 | Ctrl+0 |
+| Deselect / exit | Esc | Esc |
 
 ## Building from Source
 

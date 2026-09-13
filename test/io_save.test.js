@@ -20,6 +20,7 @@ function loadSaveHarness({ existing = true, outcome = 'saved' } = {}) {
     document: { getElementById() { return { addEventListener() {} }; } },
     window: { addEventListener() {} },
     unsavedDialog: { addEventListener() {} },
+    BoardfishExportUtils: { randomHex: () => '3ca6d7' },
     startPillTask({ message }) { calls.messages.push(message); },
     finishPillTask({ beforeFinish, finalMsg }) {
       beforeFinish();
@@ -33,7 +34,8 @@ function loadSaveHarness({ existing = true, outcome = 'saved' } = {}) {
       canSaveToExistingTarget(ref) { return ref?.kind === 'web-file-handle'; },
       describeFileRef(ref) { return ref.name; },
       fileNameFromRef(ref, fallback) { return ref?.name || fallback; },
-      async saveFileDialog() {
+      async saveFileDialog(defaultName) {
+        assert.equal(defaultName, '3ca6d7.bf');
         calls.pickers++;
         if (outcome === 'picker-error') throw new Error('picker failed');
         return outcome === 'cancelled' ? null : chosenRef;
