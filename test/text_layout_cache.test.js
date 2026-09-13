@@ -736,9 +736,9 @@ test('caret range stays on the current line for trailing overflow spaces', () =>
     type: 'text',
     x: 0,
     y: 0,
-    w: 'indominater'.length + context.TEXT_PAD * 2,
+    w: 'placeholder'.length + context.TEXT_PAD * 2,
     h: 40,
-    data: { content: 'indominater    \nhi' },
+    data: { content: 'placeholder    \nhi' },
   };
 
   const lines = textLayout.getTextLayout(obj).map((line) => ({
@@ -750,7 +750,7 @@ test('caret range stays on the current line for trailing overflow spaces', () =>
   }));
 
   assert.deepEqual(plain(lines), [
-    { text: 'indominater', startIndex: 0, endIndex: 11, caretEndIndex: 15, nextStartIndex: 15 },
+    { text: 'placeholder', startIndex: 0, endIndex: 11, caretEndIndex: 15, nextStartIndex: 15 },
     { text: 'hi', startIndex: 16, endIndex: 18, caretEndIndex: 18, nextStartIndex: 18 },
   ]);
 });
