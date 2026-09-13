@@ -16,8 +16,6 @@ Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in th
 - Losslessly copy images back to your clipboard
 - Save everything locally as a portable .bf file
 
-Each board supports up to 100 objects and 25,000 characters across all textboxes, including spaces and tabs. A paste that would exceed either limit is rejected in full.
-
 ## Keyboard Shortcuts
 
 | Action | Mac | Windows |
