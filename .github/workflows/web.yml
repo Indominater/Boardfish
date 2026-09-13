@@ -63,8 +63,11 @@ jobs:
       - name: Checkout legacy source
         uses: actions/checkout@v4
         with:
-          ref: legacy-2026-08-27
+          ref: 0ad7d6acb3b73a3afa3878d6b1196822638667ee
           path: legacy-source
+
+      - name: Update legacy repository link
+        run: sed -i -E 's#https://github.com/[^/" ]+/Boardfish#https://github.com/${{ github.repository }}#g' legacy-source/src/index.html
 
       - uses: actions/setup-node@v4
         with:

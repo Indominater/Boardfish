@@ -1,6 +1,6 @@
 # Boardfish
 
-[https://indominater.github.io/Boardfish/](https://indominater.github.io/Boardfish/)
+[https://ninjafishy.github.io/Boardfish/](https://ninjafishy.github.io/Boardfish/)
 
 Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in the browser and provides a lightweight environment for visual research, moodboarding, and snippets.
 
@@ -52,7 +52,7 @@ Each board supports up to 100 objects and 25,000 characters across all textboxes
 ## Building from Source
 
 ```bash
-git clone https://github.com/Indominater/Boardfish.git
+git clone https://github.com/Ninjafishy/Boardfish.git
 cd Boardfish
 npm install
 npm run web:dev
