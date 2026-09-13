@@ -44,7 +44,7 @@ Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in th
 | Pan | Space + drag | Space + drag |
 | Zoom | Cmd+scroll | Ctrl+scroll |
 | Reset zoom | Cmd+0 | Ctrl+0 |
-| Deselect / exit edit / close menus | Esc | Esc |
+| Deselect / exit | Esc | Esc |
 
 ## Building from Source
 
