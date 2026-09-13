@@ -1,6 +1,6 @@
 # Boardfish
 
-Link (Chromium browser recommended): [https://ninjafishy.github.io/Boardfish/](https://ninjafishy.github.io/Boardfish/)
+Link (Chromium browser recommended): [ninjafishy.github.io/Boardfish/](https://ninjafishy.github.io/Boardfish/)
 
 Boardfish is a fast, lossless infinite canvas for visual ideation. It runs in the browser and provides a lightweight environment for visual research, moodboarding, and snippets.
 
